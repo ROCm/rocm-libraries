@@ -1599,4 +1599,86 @@ namespace
         for(auto l : {layK64, layOut})
             hipblasLtMatrixLayoutDestroy(l);
     }
+
+    // hipblaslt_ext::GroupedGemm::algoGetHeuristic with a requested count above what the
+    // grouped library ranks makes the heuristic top the list up from a GEMM-type-only search
+    // of every library with the same transposes. That search must neither return nor fail on
+    // solutions of other data types, such as StreamK cluster-multicast F8 Origami kernels,
+    // whose workspace query throws for grouped GEMM.
+    void checkHeuristicTopUp(hipblasOperation_t opA)
+    {
+        constexpr int     kRequested = 64;
+        constexpr int64_t kM[] = {512, 1024}, kN[] = {512, 256}, kK[] = {256, 768};
+
+        hipblasLtHandle_t handle = nullptr;
+        ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+        void* a    = nullptr;
+        void* b    = nullptr;
+        void* d[2] = {nullptr, nullptr};
+        ScopeExit cleanup{[&] {
+            for(void* ptr : {a, b, d[0], d[1]})
+                static_cast<void>(hipFree(ptr));
+            hipblasLtDestroy(handle);
+        }};
+        size_t maxAB = 0;
+        for(int g = 0; g < 2; ++g)
+        {
+            maxAB = std::max<size_t>(maxAB, std::max(kM[g] * kK[g], kK[g] * kN[g]));
+            ASSERT_EQ(hipMalloc(&d[g], kM[g] * kN[g] * sizeof(uint16_t)), hipSuccess);
+        }
+        ASSERT_EQ(hipMalloc(&a, maxAB * sizeof(uint16_t)), hipSuccess);
+        ASSERT_EQ(hipMalloc(&b, maxAB * sizeof(uint16_t)), hipSuccess);
+
+        hipblaslt_ext::GroupedGemm gemm(handle,
+                                        opA,
+                                        HIPBLAS_OP_N,
+                                        HIP_R_16F,
+                                        HIP_R_16F,
+                                        HIP_R_16F,
+                                        HIP_R_16F,
+                                        HIPBLAS_COMPUTE_32F);
+        const float                              alpha = 1.0f, beta = 0.0f;
+        std::vector<int64_t>                     m, n, k, batch;
+        std::vector<hipblaslt_ext::GemmEpilogue> epilogue(2);
+        std::vector<hipblaslt_ext::GemmInputs>   inputs(2);
+        for(int g = 0; g < 2; ++g)
+        {
+            m.push_back(kM[g]);
+            n.push_back(kN[g]);
+            k.push_back(kK[g]);
+            batch.push_back(1);
+            inputs[g].setA(a);
+            inputs[g].setB(b);
+            inputs[g].setC(d[g]);
+            inputs[g].setD(d[g]);
+            inputs[g].setAlpha(&alpha);
+            inputs[g].setBeta(&beta);
+        }
+        ASSERT_EQ(gemm.setProblem(m, n, k, batch, epilogue, inputs), HIPBLAS_STATUS_SUCCESS);
+
+        hipblaslt_ext::GemmPreference pref;
+        pref.setMaxWorkspaceBytes(kWorkspace);
+        std::vector<hipblasLtMatmulHeuristicResult_t> heuristic;
+        ASSERT_EQ(gemm.algoGetHeuristic(kRequested, pref, heuristic), HIPBLAS_STATUS_SUCCESS);
+        if(heuristic.empty())
+            GTEST_SKIP() << "No grouped fp16 solution for this layout in the loaded library";
+        EXPECT_LE(heuristic.size(), static_cast<size_t>(kRequested));
+
+        gemm.setMaxWorkspaceBytes(kWorkspace);
+        for(auto& result : heuristic)
+        {
+            size_t ws = 0;
+            EXPECT_EQ(gemm.isAlgoSupported(result.algo, ws), HIPBLAS_STATUS_SUCCESS);
+        }
+    }
+
+    TEST(GroupedGemmExt, smoke_Fp16NNHeuristicTopUp)
+    {
+        checkHeuristicTopUp(HIPBLAS_OP_N);
+    }
+
+    TEST(GroupedGemmExt, smoke_Fp16TNHeuristicTopUp)
+    {
+        checkHeuristicTopUp(HIPBLAS_OP_T);
+    }
 } // namespace

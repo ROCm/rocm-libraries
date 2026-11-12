@@ -7801,6 +7801,16 @@ extern "C" HIPBLASLT_EXPORT int rocblaslt_testing_last_get_all_search_type_for_t
     return g_lastGetAllSearchType.load(std::memory_order_relaxed);
 }
 
+// A grouped GEMM may only use solutions of its own GEMM type (data types,
+// transposes, grouped flag). The find-all searches do not evaluate the
+// problem-type rows of the library, so drop solutions of any other type.
+static void keepGemmTypeOf(std::set<std::shared_ptr<TensileLite::ContractionSolution>>& solutions,
+                           TensileLite::ContractionProblemGemm const&                   problem)
+{
+    for(auto it = solutions.begin(); it != solutions.end();)
+        it = TensileLite::isGemmTypeSame(**it, problem) ? std::next(it) : solutions.erase(it);
+}
+
 template <typename MyProblem>
 rocblaslt_status getAllSolutions(MyProblem&                                      prob,
                                  rocblaslt_handle                                handle,
@@ -7838,6 +7848,7 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
     else if constexpr(std::is_same<MyProblem, TensileLite::ContractionProblemGroupedGemm>::value)
     {
         solutions = library->findAllSolutionsGroupedGemm(prob.gemms, *hardware, searchType);
+        keepGemmTypeOf(solutions, prob.gemms[0]);
     }
     log_api(__func__, "Found hardware solutions: ", solutions.size());
 
@@ -7853,6 +7864,7 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
                                        TensileLite::ContractionProblemGroupedGemm>::value)
         {
             solutions = library->findAllSolutionsGroupedGemm(prob.gemms, *hardware, searchType);
+            keepGemmTypeOf(solutions, prob.gemms[0]);
         }
     }
 
