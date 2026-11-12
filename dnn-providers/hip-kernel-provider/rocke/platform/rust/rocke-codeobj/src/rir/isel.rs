@@ -1987,7 +1987,9 @@ impl<'a> Isel<'a> {
                 let x = self.w(op.operands[0])?;
                 let dst = self.vgpr(1);
                 self.valu(opc, [r(dst)], [x], 0);
-                self.set(res.unwrap(), Val::W(r(dst)));
+                // A uniform conversion's result is an SGPR (`analysis::classify`).
+                let out = if op.kind == SitofpF32 && self.uni(res.unwrap()) { self.to_s(r(dst)) } else { r(dst) };
+                self.set(res.unwrap(), Val::W(out));
             }
             Tanh => return Err(unsupported("math.tanh survived the optimizer")),
             Fdot2 => self.fdot2_op(op)?,
@@ -7258,7 +7260,7 @@ mod convmem_tests {
         let body = r#"    %p : i32 = tile.pin_sgpr ( %n )
     %q : i32 = tile.pin_sgpr ( %tid )
     %s : i32 = arith.add ( %p, %q )
-    %f : f32 = arith.sitofp_f32 ( %s )
+    %f : f32 = arith.bitcast ( %s ) { target = s:"f32" }
     memref.global_store_typed ( %Y, %tid, %f ) { align = i:4, elem_type = s:"f32" }
 "#;
         assert_eq!(count(&insts(&kernel(params, body)), Opc::VReadfirstlaneB32), 1);
@@ -7880,5 +7882,39 @@ mod dword_quad_tests {
         let (off, on) = (listing(""), listing(", u16_zext = b:true"));
         assert!(off.contains("ds_read_u16") && and16(&off), "{off}");
         assert!(on.contains("ds_read_u16") && !and16(&on), "{on}");
+    }
+
+    /// A one-wave kernel storing 1.0 at `tid` after `body` (selected for both targets).
+    fn returning(body: &str) -> String {
+        format!(
+            "ckdsl.ir v1\nkernel @early {{\n  attrs {{ max_workgroup_size = i:64 }}\n  params {{\n    %Y : ptr<f32,global>\n    %n : i32\n    %ub : i32\n  }}\n  \
+             region @entry {{\n    %tid : i32 = gpu.thread_id (  ) {{ axis = s:\"x\" }}\n    %bid : i32 = gpu.block_id (  ) {{ axis = s:\"x\" }}\n    \
+             %c0 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:0 }}\n    %c1 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:1 }}\n    \
+             %one : f32 = arith.constant (  ) {{ ity = s:\"f32\", value = f:1.0 }}\n{body}    \
+             memref.global_store_typed ( %Y, %tid, %one ) {{ align = i:4, elem_type = s:\"f32\" }}\n    cf.return (  )\n  }}\n}}\n"
+        )
+    }
+
+    fn listings(text: &str) -> Vec<String> {
+        [Target::Gfx1151, Target::Gfx950]
+            .into_iter()
+            .map(|t| super::super::compile_any_target(text, t).unwrap_or_else(|e| panic!("{t:?}: {e}\n{text}")).listing())
+            .collect()
+    }
+
+    fn count(listing: &str, mnemonic: &str) -> usize {
+        listing.lines().filter(|l| l.trim_start().starts_with(mnemonic)).count()
+    }
+
+    /// `arith.sitofp_f32` of a uniform value is uniform (read back into an SGPR), so what is computed from it
+    /// (here a loop bound and a return condition: the `floor(log2(n))` idiom) stays scalar.
+    #[test]
+    fn uniform_int_to_float_conversion_is_uniform() {
+        let body = "    %f : f32 = arith.sitofp_f32 ( %n )\n    %b : i32 = arith.bitcast ( %f ) { target = s:\"i32\" }\n    \
+                    %e : i32 = arith.lshr ( %b, %c1 )\n    %c : i1 = arith.cmp ( %e, %ub ) { pred = s:\"ge\" }\n    scf.if ( %c )\n      region @then {\n        cf.return (  )\n      }\n";
+        for l in listings(&returning(body)) {
+            assert_eq!((count(&l, "s_cbranch_execnz"), count(&l, "s_and_not1") + count(&l, "s_andn2"), count(&l, "s_endpgm")), (0, 0, 2), "{l}");
+            assert!(count(&l, "v_readfirstlane") >= 1, "{l}");
+        }
     }
 }
