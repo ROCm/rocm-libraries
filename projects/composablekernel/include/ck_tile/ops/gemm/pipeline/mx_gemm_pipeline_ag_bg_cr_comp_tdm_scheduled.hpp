@@ -231,15 +231,18 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         return nullptr;
     }
 
-    template <typename ADramWindow, typename BDramWindow>
+    template <typename ADramWindow,
+              typename BDramWindow,
+              typename AScaleDramWindow,
+              typename BScaleDramWindow>
     struct PipelineImpl
     {
-        // A's and B's DRAM windows of the tile, the scales as bytes, and the problem from the
-        // windows' views.
+        // A's and B's data and K-major scale DRAM windows of the tile, and the problem from the
+        // data windows' views.
         ADramWindow a_dram;
         BDramWindow b_dram;
-        const uint8_t* a_scales;
-        const uint8_t* b_scales;
+        AScaleDramWindow a_scale_dram;
+        BScaleDramWindow b_scale_dram;
         index_t M;
         index_t N;
         index_t K;
@@ -255,7 +258,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         index_t cluster_wx = 0;
         index_t cluster_wy = 0;
         CK_TILE_LDS_ADDR uint8_t* smem;
-        uint32_t smem_addr;
         index_t packed_k;
         index_t k_atoms;
         uint16_t a_mask = 0;
@@ -275,16 +277,15 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         index_t b_scale_stride;
         BlockGemm block_gemm;
 
-        template <typename AScaleDram, typename BScaleDram>
         CK_TILE_DEVICE PipelineImpl(const ADramWindow& a_dram_,
                                     const BDramWindow& b_dram_,
-                                    const AScaleDram& a_scale_dram,
-                                    const BScaleDram& b_scale_dram,
+                                    const AScaleDramWindow& a_scale_dram_,
+                                    const BScaleDramWindow& b_scale_dram_,
                                     CK_TILE_LDS_ADDR uint8_t* smem_)
             : a_dram(a_dram_),
               b_dram(b_dram_),
-              a_scales(Bytes(a_scale_dram)),
-              b_scales(Bytes(b_scale_dram)),
+              a_scale_dram(a_scale_dram_),
+              b_scale_dram(b_scale_dram_),
               M(Lengths(a_dram_)[number<0>{}]),
               N(Lengths(b_dram_)[number<0>{}]),
               K(Lengths(a_dram_)[number<1>{}]),
@@ -297,7 +298,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
               block_m(a_dram_.get_window_origin()[number<0>{}]),
               block_n(b_dram_.get_window_origin()[number<0>{}]),
               smem(smem_),
-              smem_addr(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(smem_))),
               packed_k(integer_divide_nonnegative<kKPerByte>(K)),
               // The last K step is partial (and its scales zero-padded) only with a K tail.
               k_atoms(integer_divide_nonnegative<mx_tdm_scheduled::kAtomK>(
@@ -344,6 +344,8 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
 
         template <bool IsA>
         using DramWindowType = std::conditional_t<IsA, ADramWindow, BDramWindow>;
+        template <bool IsA>
+        using ScaleDramWindowType = std::conditional_t<IsA, AScaleDramWindow, BScaleDramWindow>;
 
         template <bool IsA>
         CK_TILE_DEVICE const auto& DramWindow() const
@@ -405,46 +407,48 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             return make_tile_window(view, make_tuple(number<box_rows>{}, number<kTileK>{}), {0, 0});
         }
 
-        // ---------------------------------------------------------------- TdmLoader
-
-        /// Rows from row0 to the end of the operand; in a partial last tile a component can start
-        /// past the end and then gets 0.
         template <bool IsA>
-        CK_TILE_DEVICE index_t RowsLeft(index_t row0) const
+        CK_TILE_DEVICE const auto& ScaleDramWindow() const
         {
-            const index_t extent = IsA ? M : N;
-            const index_t left   = extent - row0;
-            constexpr bool edge  = IsA ? Traits::kEdgeM : Traits::kEdgeN;
-            if constexpr(!edge)
-                return left;
+            if constexpr(IsA)
+                return a_scale_dram;
             else
-                return row0 < extent ? left : 0;
+                return b_scale_dram;
         }
 
-        /// The groups of a rank-2 byte load through CK's descriptor: dim0 x dim1 tensor of
-        /// row_stride-byte rows (dim-1 stride 1, as CK Tile programs rank 2) into a box0 x box1
-        /// tile at LDS byte address `lds`. `lds` goes in as an integer, not an LDS pointer: a
-        /// flat cast of one would add an aperture and null check.
-        CK_TILE_DEVICE static TDMGroups Groups(const void* global,
-                                               uint32_t lds,
-                                               uint32_t dim0,
-                                               uint32_t dim1,
-                                               uint16_t box0,
-                                               uint16_t box1,
-                                               uint32_t row_stride,
-                                               const TDMConfig& config)
+        /// Component `component` of A's or B's K-major scales as a TDM load window: the tile's K
+        /// steps by the component's rows, one box of MakeDramTdmTileDistribution.
+        template <bool IsA>
+        CK_TILE_DEVICE auto ScaleDramComponentWindow(index_t component) const
         {
-            const uint32_t dims[2]    = {dim0, dim1};
-            const uint64_t strides[2] = {row_stride, 1};
-            const uint16_t box[2]     = {box0, box1};
-            return TDMDescriptor<uint8_t, 2>(global,
-                                             reinterpret_cast<void*>(static_cast<uintptr_t>(lds)),
-                                             dims,
-                                             strides,
-                                             box,
-                                             config)
-                .getGroups();
+            constexpr MxTdmScheduledOperand L =
+                Policy::template GetLdsOperand<Problem, IsA, true>();
+            constexpr auto dstr =
+                Policy::template MakeDramTdmTileDistribution<Problem, IsA, true>();
+            const auto& dram = ScaleDramWindow<IsA>();
+            return make_tile_window(dram.get_bottom_tensor_view(),
+                                    make_tuple(number<kKSteps>{}, number<L.rows>{}),
+                                    {dram.get_window_origin()[number<0>{}],
+                                     dram.get_window_origin()[number<1>{}] + component * L.rows},
+                                    dstr);
         }
+
+        /// Where component `component` of A's or B's scales lands in buffer 0: an LDS window over
+        /// the policy's TDM layout of the scales, starting at the component.
+        template <bool IsA>
+        CK_TILE_DEVICE auto LdsScaleComponentWindow(index_t component) const
+        {
+            using DataType = remove_cvref_t<typename ScaleDramWindowType<IsA>::DataType>;
+            constexpr MxTdmScheduledOperand L =
+                Policy::template GetLdsOperand<Problem, IsA, true>();
+            constexpr auto desc = Policy::template MakeLdsScaleTdmBlockDescriptor<Problem, IsA>();
+            const auto view     = make_tensor_view<address_space_enum::lds>(
+                reinterpret_cast<CK_TILE_LDS_ADDR DataType*>(smem + L.base + component * L.stride),
+                desc);
+            return make_tile_window(view, make_tuple(number<kKSteps>{}, number<L.rows>{}), {0, 0});
+        }
+
+        // ---------------------------------------------------------------- TdmLoader
 
         /// The TDMConfig of A's or B's data or scales: its LDS padding and cluster multicast mask.
         template <bool IsA, bool IsScale>
@@ -492,29 +496,13 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             return dram_window.make_tdm_groups(config, LdsComponentWindow<IsA>(component));
         }
 
-        /// K-major scales [K / 128][MN][4]: one row per K step, 4 B per MN row.
+        /// The groups of A's or B's component scale load into buffer 0, from the component's
+        /// K-major scale window into its LDS window.
         template <bool IsA>
         CK_TILE_DEVICE TDMGroups ScaleDescriptor(index_t component) const
         {
-            constexpr MxTdmScheduledOperand L =
-                Policy::template GetLdsOperand<Problem, IsA, true>();
-            constexpr bool edge      = IsA ? Traits::kEdgeM : Traits::kEdgeN;
-            const index_t block      = IsA ? block_m : block_n;
-            const index_t extent     = IsA ? M : N;
-            const uint8_t* base      = IsA ? a_scales : b_scales;
-            const index_t row_stride = extent * 4;
-            const index_t mn0        = block + component * L.rows;
-            const index_t col0       = mn0 * 4;
-            const index_t bytes_left = edge ? RowsLeft<IsA>(mn0) * 4 : row_stride - col0;
-
-            return Groups(base + col0,
-                          smem_addr + static_cast<uint32_t>(L.base + component * L.stride),
-                          static_cast<uint32_t>(bytes_left),
-                          static_cast<uint32_t>(k_atoms),
-                          L.rows * 4,
-                          kKSteps,
-                          static_cast<uint32_t>(row_stride),
-                          Config<IsA, true>());
+            return ScaleDramComponentWindow<IsA>(component).make_tdm_groups(
+                Config<IsA, true>(), LdsScaleComponentWindow<IsA>(component));
         }
 
         /// Both descriptors for tile 0, buffer 0, of this wave's loads; every word uniform. Even
@@ -643,7 +631,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                             mn0 * 4 + integer_modulo_nonnegative<lines_per_row>(index) * line;
                         const index_t element =
                             LastInside<clamp>(row * row_bytes + offset, k_atoms * row_bytes);
-                        return (is_a ? a_scales : b_scales) + static_cast<uint32_t>(element);
+                        return Bytes(ScaleDramWindow<is_a>()) + static_cast<uint32_t>(element);
                     }
                 };
 
@@ -1019,9 +1007,11 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                       "comp_tdm_scheduled runs single A and B tensors");
         CBlockTile c_block_tile;
 #if defined(__gfx125__)
-        using ADramWindow = remove_cvref_t<decltype(a_dram_block_window_tmp[number<0>{}])>;
-        using BDramWindow = remove_cvref_t<decltype(b_dram_block_window_tmp[number<0>{}])>;
-        PipelineImpl<ADramWindow, BDramWindow> impl(
+        using ADramWindow      = remove_cvref_t<decltype(a_dram_block_window_tmp[number<0>{}])>;
+        using BDramWindow      = remove_cvref_t<decltype(b_dram_block_window_tmp[number<0>{}])>;
+        using AScaleDramWindow = remove_cvref_t<decltype(scale_a_window[number<0>{}])>;
+        using BScaleDramWindow = remove_cvref_t<decltype(scale_b_window[number<0>{}])>;
+        PipelineImpl<ADramWindow, BDramWindow, AScaleDramWindow, BScaleDramWindow> impl(
             a_dram_block_window_tmp[number<0>{}],
             b_dram_block_window_tmp[number<0>{}],
             scale_a_window[number<0>{}],

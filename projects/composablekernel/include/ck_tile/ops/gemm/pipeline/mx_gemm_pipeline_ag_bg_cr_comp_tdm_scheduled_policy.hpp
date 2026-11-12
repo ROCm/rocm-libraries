@@ -405,20 +405,22 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
 
     /// The DRAM distribution of one TDM component load of A or B: one box of the component's
     /// rows (an iterate-mode block of them) by the K tile, the same for every wave; a wave's
-    /// component is its window's origin.
-    template <typename Problem, bool IsA>
+    /// component is its window's origin. With IsScale, of A's or B's K-major scales: the tile's
+    /// K steps by the component's rows.
+    template <typename Problem, bool IsA, bool IsScale = false>
     CK_TILE_HOST_DEVICE static constexpr auto MakeDramTdmTileDistribution()
     {
-        constexpr MxTdmScheduledOperand op = GetLdsOperand<Problem, IsA>();
+        constexpr MxTdmScheduledOperand op = GetLdsOperand<Problem, IsA, IsScale>();
         constexpr index_t box_rows         = op.iterate_rows > 0 ? op.iterate_rows : op.rows;
+        constexpr index_t len0             = IsScale ? GetKSteps<Problem>() : box_rows;
+        constexpr index_t len1             = IsScale ? op.rows : GetSpec<Problem>().tile_k;
         return make_static_tile_distribution(
-            tile_distribution_encoding<
-                sequence<mx_tdm_scheduled::kWaves>,
-                tuple<sequence<box_rows>, sequence<GetSpec<Problem>().tile_k>>,
-                tuple<sequence<0>>,
-                tuple<sequence<0>>,
-                sequence<1, 2>,
-                sequence<0, 0>>{},
+            tile_distribution_encoding<sequence<mx_tdm_scheduled::kWaves>,
+                                       tuple<sequence<len0>, sequence<len1>>,
+                                       tuple<sequence<0>>,
+                                       tuple<sequence<0>>,
+                                       sequence<1, 2>,
+                                       sequence<0, 0>>{},
             bool_constant<true>{});
     }
 
@@ -600,10 +602,11 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
         return true;
     }
 
-    /// A's or B's E8M0 scales in LDS as words, top dimensions (K step, wave * atom + lane row,
-    /// repeat): step-major runs of a component's rows, padded per block.
+    /// A's or B's E8M0 scales in LDS as the TDM loads write them, over [K step, tile row] in
+    /// 4-byte packs: component c's op.rows rows of every step start op.stride bytes after
+    /// component c - 1's, each step's rows follow the last step's, padded per block.
     template <typename Problem, bool IsA>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeLdsScaleDescriptor()
+    CK_TILE_HOST_DEVICE static constexpr auto MakeLdsScaleTdmBlockDescriptor()
     {
         constexpr MxTdmScheduledSpec s     = GetSpec<Problem>();
         constexpr MxTdmScheduledOperand op = GetLdsOperand<Problem, IsA, true>();
@@ -637,14 +640,26 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
                        make_unmerge_transform(make_tuple(number<steps>{}, number<op.rows>{}))),
             make_tuple(sequence<0>{}, sequence<1>{}),
             make_tuple(sequence<1>{}, sequence<0, 2>{}));
-        constexpr auto by_row = transform_tensor_descriptor(
+        return transform_tensor_descriptor(
             by_step,
             make_tuple(make_pass_through_transform(number<steps>{}),
                        make_merge_transform(make_tuple(number<comps>{}, number<op.rows>{}))),
             make_tuple(sequence<0>{}, sequence<1, 2>{}),
             make_tuple(sequence<0>{}, sequence<1>{}));
+    }
+
+    /// A's or B's E8M0 scales in LDS as words, top dimensions (K step, wave * atom + lane row,
+    /// repeat): MakeLdsScaleTdmBlockDescriptor with the tile row split per repeat.
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeLdsScaleDescriptor()
+    {
+        constexpr MxTdmScheduledSpec s = GetSpec<Problem>();
+        constexpr index_t warps        = IsA ? s.warp_m : s.warp_n;
+        constexpr index_t atom         = IsA ? s.atom_m() : s.atom_n();
+        constexpr index_t repeats      = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
+        constexpr index_t steps        = GetKSteps<Problem>();
         return transform_tensor_descriptor(
-            by_row,
+            MakeLdsScaleTdmBlockDescriptor<Problem, IsA>(),
             make_tuple(
                 make_pass_through_transform(number<steps>{}),
                 make_unmerge_transform(make_tuple(number<warps * atom>{}, number<repeats>{}))),

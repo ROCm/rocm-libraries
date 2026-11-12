@@ -1036,8 +1036,9 @@ struct MxGemmKernel
             number<NumBTensor>{});
     }
 
-    /// K-major scales, [ceil(K / 128)][MN] int32 packs, as the (MN, packs) view of the tile at
-    /// block_idx: one pack holds the four E8M0 scales of 128 K.
+    /// K-major scales, [ceil(K / 128)][MN] int32 packs, as the (packs, MN) view of the tile at
+    /// block_idx: one pack holds the four E8M0 scales of 128 K. MN is the contiguous dimension,
+    /// last, as the TDM loads the view.
     template <index_t TileMN, std::size_t NumTensor>
     CK_TILE_DEVICE static auto
     MakeKMajorScaleBlockWindow(const std::array<ScalePtrType, NumTensor>& scale_ptr,
@@ -1046,15 +1047,15 @@ struct MxGemmKernel
                                const index_t block_idx)
     {
         const auto desc =
-            make_naive_tensor_descriptor(make_tuple(mn, GetScalePacksK(K)), make_tuple(1, mn));
+            make_naive_tensor_descriptor(make_tuple(GetScalePacksK(K), mn), make_tuple(mn, 1));
         return generate_tuple(
             [&](auto i) {
                 return make_tile_window(
                     make_tensor_view<address_space_enum::global>(scale_ptr[i], desc),
                     make_tuple(
-                        number<TileMN>{},
-                        number<TilePartitioner::KPerBlock / (BlockScaleSize * KXdlPackEff)>{}),
-                    {block_idx, 0});
+                        number<TilePartitioner::KPerBlock / (BlockScaleSize * KXdlPackEff)>{},
+                        number<TileMN>{}),
+                    {0, block_idx});
             },
             number<static_cast<index_t>(NumTensor)>{});
     }
