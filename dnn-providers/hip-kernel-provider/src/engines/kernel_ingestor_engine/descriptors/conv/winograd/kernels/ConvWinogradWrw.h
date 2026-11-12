@@ -190,7 +190,98 @@ __device__ inline long long k5wOffset(int img, int ch, int channels, int h, int 
 // multipass input transform: NCHW tile-fast, NHWC channel-fast through LDS) and writes rows of
 // tiles; tiles from T to L are written as zeros. X: the (r+2)^2 x patch; else the r x r dy tile.
 
-template <class T, class Op, int R, int LAYOUT, bool X>
+/// Ceiling of log2 of the largest growth of a transform's 2-D output over its input (the
+/// product of the largest absolute row sums): x (B^T d B) 4, 100, 225; dy (A g A^T) 4, 225, 3969.
+template <int R, bool X>
+struct K5WrwGrowth
+{
+    static constexpr int LOG2 = R == 2 ? 2 : R == 4 ? (X ? 7 : 8) : (X ? 8 : 12);
+};
+
+/// The power-of-two scale of a channel's x or dy values for fp16 operands: the transformed
+/// values stay below 2^14 (2^15 short of fp16's range end); 1 for an all-zero or non-finite
+/// channel.
+template <int R, bool X>
+__device__ inline float k5wScaleFor(float amax)
+{
+    const unsigned bits = __float_as_uint(amax);
+    const int biased = static_cast<int>((bits >> 23) & 0xffu);
+    if(amax == 0.0f || biased == 0xff)
+        return 1.0f;
+    // amax < 2^top.
+    const int top = biased == 0 ? -126 : biased - 126;
+    int e = 14 - K5WrwGrowth<R, X>::LOG2 - top;
+    e = e < -100 ? -100 : e > 100 ? 100 : e;
+    return __uint_as_float(static_cast<unsigned>(e + 127) << 23);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Scaled fp16 operands: the per-channel absolute maxima of x and dy over the whole batch, in two
+// fixed-order passes (no atomics): per (channel, pixel chunk) into amax, then per channel over
+// the chunks into its scale. blockIdx.z: 0 x (C channels), 1 dy (K channels).
+
+template <class T, int LAYOUT>
+__device__ void k5wAbsMax(const K5WrwArgs& a)
+{
+    const bool x = blockIdx.z == 0;
+    const int channels = x ? a.c : a.k;
+    const long long hw
+        = x ? static_cast<long long>(a.hi) * a.wi : static_cast<long long>(a.ho) * a.wo;
+    const long long pixels = static_cast<long long>(a.n) * hw;
+    const long long per = (pixels + a.chunks - 1) / a.chunks;
+    const int chunk = blockIdx.y;
+    const long long p0 = chunk * per, p1 = p0 + per < pixels ? p0 + per : pixels;
+    const T* src = static_cast<const T*>(x ? a.x : a.dy);
+    __shared__ float red[256];
+    const int tid = threadIdx.x;
+    float m = 0.0f;
+    int ch;
+    if constexpr(LAYOUT == K5_NHWC)
+    {
+        // 64 channels x 4 pixel lanes.
+        ch = blockIdx.x * 64 + tid % 64;
+        if(ch < channels)
+            for(long long q = p0 + tid / 64; q < p1; q += 4)
+                m = fmaxf(m, fabsf(K5Elem<T>::load(src[q * channels + ch])));
+    }
+    else
+    {
+        // One channel, 256 pixel lanes.
+        ch = blockIdx.x;
+        if(ch < channels)
+            for(long long q = p0 + tid; q < p1; q += 256)
+            {
+                const long long img = q / hw, at = q % hw;
+                m = fmaxf(m, fabsf(K5Elem<T>::load(src[(img * channels + ch) * hw + at])));
+            }
+    }
+    red[tid] = m;
+    __syncthreads();
+    const int lanes = LAYOUT == K5_NHWC ? 4 : 256, stride = LAYOUT == K5_NHWC ? 64 : 1;
+    if(LAYOUT == K5_NHWC ? tid < 64 : tid == 0)
+    {
+        float r = red[tid];
+        for(int l = 1; l < lanes; ++l)
+            r = fmaxf(r, red[tid + l * stride]);
+        if(ch < channels)
+            a.amax[static_cast<long long>(chunk) * (a.c + a.k) + (x ? 0 : a.c) + ch] = r;
+    }
+}
+
+template <int R>
+__device__ void k5wScale(const K5WrwArgs& a)
+{
+    const int i = blockIdx.x * blockDim.x + threadIdx.x;
+    const int total = a.c + a.k;
+    if(i >= total)
+        return;
+    float m = 0.0f;
+    for(int chunk = 0; chunk < a.chunks; ++chunk)
+        m = fmaxf(m, a.amax[static_cast<long long>(chunk) * total + i]);
+    a.scale[i] = i < a.c ? k5wScaleFor<R, true>(m) : k5wScaleFor<R, false>(m);
+}
+
+template <class T, class Op, int R, int LAYOUT, bool X, bool SCALED = false>
 __device__ void k5wTransform(const K5WrwArgs& a)
 {
     constexpr int A = R + 2, P = A * A, N = X ? A : R;
@@ -215,6 +306,7 @@ __device__ void k5wTransform(const K5WrwArgs& a)
         const int channels = X ? a.c : a.k, ch = g * cg + c;
         const int hs = X ? a.hi : a.ho, ws = X ? a.wi : a.wo;
         const int h0 = tr * R - (X ? a.ph : 0), w0 = tc * R - (X ? a.pw : 0);
+        const float sc = SCALED ? a.scale[(X ? 0 : a.c) + ch] : 1.0f;
         float e[N * N];
 #pragma unroll
         for(int i = 0; i < N; ++i)
@@ -225,7 +317,9 @@ __device__ void k5wTransform(const K5WrwArgs& a)
                 const int h = h0 + i, w = w0 + j;
                 e[i * N + j]
                     = h >= 0 && h < hs && w >= 0 && w < ws
-                          ? K5Elem<T>::load(src[k5wOffset<LAYOUT>(img, ch, channels, h, w, hs, ws)])
+                          ? sc
+                                * K5Elem<T>::load(
+                                    src[k5wOffset<LAYOUT>(img, ch, channels, h, w, hs, ws)])
                           : 0.0f;
             }
         }
@@ -395,7 +489,9 @@ __device__ void k5wGemm(const K5WrwArgs& a)
 
     if constexpr(__is_same(Atom, K5WrwFma))
     {
-        static_assert(__is_same(Op, float), "K5 wrw FMA: fp32 operands");
+        // fp32 operands: FMA, 4 tiles per LDS read; fp16: v_dot2_f32_f16 on tile pairs, 8 per read.
+        constexpr bool DOT2 = __is_same(Op, _Float16);
+        static_assert(__is_same(Op, float) || DOT2, "K5 wrw FMA: fp32 or fp16 operands");
         constexpr int NX = BN / TN, NY = BM / TM;
         static_assert(NX * NY == THREADS, "K5 wrw FMA: thread tile");
         const int tx = tid % NX, ty = tid / NX;
@@ -415,23 +511,56 @@ __device__ void k5wGemm(const K5WrwArgs& a)
             if(t0 + BK < tEnd)
                 load(t0 + BK);
 #pragma unroll
-            for(int kk = 0; kk < BK; kk += 4)
+            for(int kk = 0; kk < BK; kk += E)
             {
-                typedef float f4 __attribute__((ext_vector_type(4)));
-                f4 av[TM], bv[TN];
+                // Read as the stash wrote (16-byte unsigned units), then reinterpret each dword.
+                // (Components taken by name: subscripting the loaded vectors with the unrolled
+                // index miscompiled to the first component.)
+                unsigned av[TM][4], bv[TN][4];
 #pragma unroll
                 for(int i = 0; i < TM; ++i)
-                    av[i] = *reinterpret_cast<const f4*>(&As[(ty + i * NY) * LDK + kk]);
+                {
+                    const k5wu4 u = *reinterpret_cast<const k5wu4*>(&As[(ty + i * NY) * LDK + kk]);
+                    av[i][0] = u.x;
+                    av[i][1] = u.y;
+                    av[i][2] = u.z;
+                    av[i][3] = u.w;
+                }
 #pragma unroll
                 for(int j = 0; j < TN; ++j)
-                    bv[j] = *reinterpret_cast<const f4*>(&Bs[(tx + j * NX) * LDK + kk]);
+                {
+                    const k5wu4 u = *reinterpret_cast<const k5wu4*>(&Bs[(tx + j * NX) * LDK + kk]);
+                    bv[j][0] = u.x;
+                    bv[j][1] = u.y;
+                    bv[j][2] = u.z;
+                    bv[j][3] = u.w;
+                }
+                if constexpr(DOT2)
+                {
+                    typedef _Float16 h2 __attribute__((ext_vector_type(2)));
 #pragma unroll
-                for(int q = 0; q < 4; ++q)
+                    for(int q = 0; q < 4; ++q)
 #pragma unroll
-                    for(int i = 0; i < TM; ++i)
+                        for(int i = 0; i < TM; ++i)
 #pragma unroll
-                        for(int j = 0; j < TN; ++j)
-                            acc[i][j] = __builtin_fmaf(av[i][q], bv[j][q], acc[i][j]);
+                            for(int j = 0; j < TN; ++j)
+                                acc[i][j] = __builtin_amdgcn_fdot2(__builtin_bit_cast(h2, av[i][q]),
+                                                                   __builtin_bit_cast(h2, bv[j][q]),
+                                                                   acc[i][j],
+                                                                   false);
+                }
+                else
+                {
+#pragma unroll
+                    for(int q = 0; q < 4; ++q)
+#pragma unroll
+                        for(int i = 0; i < TM; ++i)
+#pragma unroll
+                            for(int j = 0; j < TN; ++j)
+                                acc[i][j] = __builtin_fmaf(__builtin_bit_cast(float, av[i][q]),
+                                                           __builtin_bit_cast(float, bv[j][q]),
+                                                           acc[i][j]);
+                }
             }
         }
 #pragma unroll
@@ -531,7 +660,7 @@ __device__ inline bool k5wTapLive(int u, int pad, int extentIn, int extentOut)
     return u - pad + extentOut - 1 >= 0 && u - pad < extentIn;
 }
 
-template <class T, int R>
+template <class T, int R, bool SCALED = false>
 __device__ void k5wOutput(const K5WrwArgs& a)
 {
     constexpr int A = R + 2, P = A * A;
@@ -555,6 +684,14 @@ __device__ void k5wOutput(const K5WrwArgs& a)
         for(int sp = 1; sp < a.splits; ++sp)
             s += part[sp * splitStride + p * ps];
         m[p] = s;
+    }
+    if constexpr(SCALED)
+    {
+        // Undo the operands' powers of two (exact).
+        const float inv = (1.0f / a.scale[g * cg + c]) * (1.0f / a.scale[a.c + gk]);
+#pragma unroll
+        for(int p = 0; p < P; ++p)
+            m[p] *= inv;
     }
     float tmp[3 * A], o[9];
 #pragma unroll

@@ -476,7 +476,7 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
                                      || config.variant == Variant::SREG
                                      || config.variant == Variant::COOP;
         if((config.variant != Variant::WREG && config.bins != 0)
-           || (!registerVariant && config.f16Math)
+           || (!registerVariant && config.variant != Variant::WRW && config.f16Math)
            || (config.variant != Variant::COOP && config.variant != Variant::FUSED
                && config.pf != 0))
         {
@@ -492,9 +492,10 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
             const bool atom = config.arch == "gfx9" || config.arch == "gfx950"
                               || config.arch == "gfx11" || config.arch == "gfx12";
             const int bm = config.gemmBm, bn = config.gemmBn, bk = config.gemmBk;
-            if((config.m != 2 && config.m != 4 && config.m != 6) || config.bk != 0 || config.bt != 0
-               || config.ccv != 0 || (!fma && !atom) || bm < 1 || bn < 1 || bk < 4 || 64 % bk != 0
-               || config.tm < 1 || config.tn < 1 || bm % config.tm != 0 || bn % config.tn != 0)
+            if((config.m != 2 && config.m != 4 && config.m != 6) || config.llcPlan || config.bk != 0
+               || config.bt != 0 || config.ccv != 0 || (!fma && !atom) || bm < 1 || bn < 1 || bk < 4
+               || 64 % bk != 0 || config.tm < 1 || config.tn < 1 || bm % config.tm != 0
+               || bn % config.tn != 0)
             {
                 return std::nullopt;
             }
@@ -502,7 +503,7 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
             {
                 // A thread owns tm x tn outputs; whole waves, at most 1024 threads.
                 const int threads = (bm / config.tm) * (bn / config.tn);
-                if(config.waves != 0 || threads < 64 || threads > 1024 || threads % 64 != 0)
+                if(config.waves != 0 || threads > 1024 || threads % 64 != 0)
                 {
                     return std::nullopt;
                 }
@@ -679,14 +680,13 @@ std::optional<Plan> planWrw(const WinogradProblem& problem,
     const bool bf16 = problem.base.dataType == data_objects::DataType::BFLOAT16;
     const auto arch = hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName);
     Plan plan;
-    // 16-bit operands only for F(3,2): F(3,4) / F(3,6) run on fp32 operands (FMA, or CDNA's fp32
-    // MFMA for every I/O dtype).
-    const bool fp32Operands = fma || fp32 || config.m >= 4;
-    plan.operandBytes = fp32Operands ? 4 : problem.elementBytes;
+    // The GEMM operands: fp16 scaled per channel by powers of two (f16math, bf16 graphs); else the
+    // I/O type for F(3,2) on matrix cores; else fp32 (FMA, fp32 graphs, and F(3,4) / F(3,6), whose
+    // transforms 16-bit operands round past the dtype's bound).
+    plan.wrwOpt = config.f16Math ? 2 : fma || fp32 || config.m >= 4 ? 0 : 1;
+    plan.operandBytes = plan.wrwOpt == 0 ? 4 : 2;
     plan.wrwAtom = fma                      ? 0
-                   : config.arch == "gfx9"  ? (fp32Operands               ? 6
-                                               : bf16 && arch == "gfx908" ? 2
-                                                                          : 1)
+                   : config.arch == "gfx9"  ? (plan.wrwOpt == 1 && bf16 && arch == "gfx908" ? 2 : 1)
                    : config.arch == "gfx11" ? 3
                    : config.arch == "gfx12" ? 4
                                             : 5;
@@ -744,17 +744,6 @@ std::optional<Plan> planWrw(const WinogradProblem& problem,
     const size_t cap = workspaceLimit();
     const auto splitsFor
         = [&](long long tiles) { return std::clamp<long long>(wantSplits, 1, padded(tiles) / 64); };
-    // The LLC plan: U, V and the partials of a slice within three quarters of an RDNA device's
-    // last-level cache, so the GEMM reads what the transforms just wrote from the cache.
-    const size_t llc = config.llcPlan ? llcBytes(device.gcnArchName) / 4 * 3 : 0;
-    if(config.llcPlan && llc == 0)
-    {
-        return std::nullopt;
-    }
-    const auto inCache = [&](long long images) {
-        const long long tiles = images * perImage;
-        return operandBytes(tiles) + splitsFor(tiles) * partPerSplit <= static_cast<long long>(llc);
-    };
     const auto fits = [&](long long images) {
         const long long tiles = images * perImage;
         const long long bytes = static_cast<long long>(offset) + operandBytes(tiles)
@@ -769,14 +758,9 @@ std::optional<Plan> planWrw(const WinogradProblem& problem,
         return std::nullopt;
     }
     long long slice = n;
-    while(slice > 1 && (!fits(slice) || (config.llcPlan && !inCache(slice))))
+    while(slice > 1 && !fits(slice))
     {
         slice = std::min(slice - 1, slice * 7 / 8);
-    }
-    // The LLC plan is only a distinct config where it slices, and only where a slice fits.
-    if(config.llcPlan && (slice >= n || !inCache(slice)))
-    {
-        return std::nullopt;
     }
     const long long tiles = slice * perImage;
     if(tiles + 64 > INT_LIMIT || std::max(bm, bn) * padded(tiles) * ob > INT_LIMIT)
@@ -808,6 +792,18 @@ std::optional<Plan> planWrw(const WinogradProblem& problem,
     plan.partOffset = offset;
     plan.partBytes = static_cast<size_t>(splits * partPerSplit);
     offset = alignUp(offset + plan.partBytes);
+    // Scaled operands: per-channel maxima over a fixed number of pixel chunks, then the scales.
+    const long long chunks = plan.wrwOpt == 2 ? 64 : 0;
+    plan.wrw.chunks = static_cast<int>(chunks);
+    if(chunks > 0)
+    {
+        plan.amaxOffset = offset;
+        plan.amaxBytes = static_cast<size_t>(chunks * (w.c + w.k) * 4);
+        offset = alignUp(offset + plan.amaxBytes);
+        plan.scaleOffset = offset;
+        plan.scaleBytes = static_cast<size_t>((w.c + w.k) * 4LL);
+        offset = alignUp(offset + plan.scaleBytes);
+    }
     plan.workspaceBytes = offset;
 
     const auto grid = [](unsigned int(&blocks)[3], long long x, long long y, long long z) {
@@ -829,6 +825,16 @@ std::optional<Plan> planWrw(const WinogradProblem& problem,
        || !grid(plan.outputBlocks, divUp(groups * kg * cg, 256), 1, 1))
     {
         return std::nullopt;
+    }
+    if(chunks > 0)
+    {
+        // k5wAbsMax: NHWC blocks of 64 channels, NCHW one channel each; z: x, dy.
+        const long long channels = std::max<long long>(w.c, w.k);
+        if(!grid(plan.maxBlocks, layout == Layout::NHWC ? divUp(channels, 64) : channels, chunks, 2)
+           || !grid(plan.scaleBlocks, divUp(w.c + w.k, 256LL), 1, 1))
+        {
+            return std::nullopt;
+        }
     }
     return plan;
 }
@@ -1250,18 +1256,17 @@ std::optional<Resolved> resolve(const MatchContext& context, const KernelDefinit
     }
     const bool fp32 = problem->base.dataType == data_objects::DataType::FLOAT;
     const bool bf16 = problem->base.dataType == data_objects::DataType::BFLOAT16;
-    if((config->variant == Variant::WRW) != (*direction == ConvDirection::BACKWARD_WEIGHTS))
-    {
-        return std::nullopt;
-    }
     if(config->variant == Variant::WRW)
     {
         // Backward weights: F(3,2), F(3,4) and F(3,6) for every dtype. 16-bit operands round the
         // larger tiles' transforms past the dtype's Winograd bound, so those run on fp32 operands
         // (FMA, or CDNA's fp32 MFMA); the 16-bit-only atoms (WMMA, gfx950's 16x16x32) serve F(3,2)
         // of 16-bit graphs only.
+        // Scaled fp16 operands (f16math) are for bf16 graphs: they hold F(3,4) / F(3,6) well
+        // inside bf16's bound, not fp16's or fp32's.
         const bool sixteenBitAtom = config->arch != "any" && config->arch != "gfx9";
-        if(sixteenBitAtom && (fp32 || config->m != 2))
+        if((config->f16Math && !bf16)
+           || (sixteenBitAtom && (fp32 || (config->m != 2 && !config->f16Math))))
         {
             return std::nullopt;
         }
@@ -1459,6 +1464,7 @@ public:
         if(wrw)
         {
             options.add("CONV_WINO_WRW_ATOM", std::to_string(plan.wrwAtom));
+            options.add("CONV_WINO_WRW_OPT", std::to_string(plan.wrwOpt));
         }
 
         const auto build = [&](std::string_view entryPoint,
@@ -1529,6 +1535,14 @@ public:
                 build("ConvWinogradWrwX", signatureOf<K5WrwArgs>(), 256, plan.inputBlocks));
             kernels.push_back(
                 build("ConvWinogradWrwOut", signatureOf<K5WrwArgs>(), 256, plan.outputBlocks));
+            if(plan.wrwOpt == 2)
+            {
+                // 4 per-channel maxima, 5 scales.
+                kernels.push_back(
+                    build("ConvWinogradWrwMax", signatureOf<K5WrwArgs>(), 256, plan.maxBlocks));
+                kernels.push_back(
+                    build("ConvWinogradWrwScale", signatureOf<K5WrwArgs>(), 256, plan.scaleBlocks));
+            }
             break;
         default:
             break;
@@ -1610,6 +1624,18 @@ public:
             args.v = base + plan.vOffset;
             args.part = reinterpret_cast<float*>(base + plan.partOffset);
             const long long n = problem.wrw.n;
+            if(plan.wrwOpt == 2)
+            {
+                // The scales come from the whole batch, so every slice shares them.
+                args.amax = reinterpret_cast<float*>(base + plan.amaxOffset);
+                args.scale = reinterpret_cast<float*>(base + plan.scaleOffset);
+                K5WrwArgs whole = args;
+                whole.n = static_cast<int>(n);
+                whole.x = xs;
+                whole.dy = dys;
+                dispatch.kernelForStream(4, stream).launch(stream, whole);
+                dispatch.kernelForStream(5, stream).launch(stream, whole);
+            }
             const long long eb = problem.elementBytes;
             const long long xImage = static_cast<long long>(args.c) * args.hi * args.wi;
             const long long dyImage = static_cast<long long>(args.k) * args.ho * args.wo;

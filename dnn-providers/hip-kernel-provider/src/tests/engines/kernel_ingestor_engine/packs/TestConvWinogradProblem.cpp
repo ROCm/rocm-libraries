@@ -1413,7 +1413,53 @@ TEST(TestConvWinogradWrwKernelMatch, LargerTilesRunOnFp32Operands)
     EXPECT_EQ(plan(f2, DataType::HALF)->operandBytes, 2);
     EXPECT_EQ(plan(f2, DataType::HALF)->wrwAtom, 1);
     EXPECT_EQ(plan(f4, DataType::HALF)->operandBytes, 4);
-    EXPECT_EQ(plan(f4, DataType::HALF)->wrwAtom, 6);
+    EXPECT_EQ(plan(f4, DataType::HALF)->wrwOpt, 0);
+    EXPECT_EQ(plan(f4, DataType::HALF)->wrwAtom, 1);
+}
+
+TEST(TestConvWinogradWrwKernelMatch, ScaledHalfOperandsOnlyForBFloat16)
+{
+    // f16math: fp16 operands scaled per channel, for bf16 graphs (any tile, any atom family).
+    for(const int64_t r : {2, 4, 6})
+    {
+        SCOPED_TRACE(r);
+        auto fma = wrwFma();
+        fma.m = r;
+        fma.f16math = 1;
+        EXPECT_TRUE(admitsWrw(fma, "gfx906", baseShape(), "BFLOAT16"));
+        EXPECT_FALSE(admitsWrw(fma, "gfx906", baseShape(), "HALF"));
+        EXPECT_FALSE(admitsWrw(fma, "gfx906", baseShape(), "FLOAT"));
+        auto wmma = wrwAtom("gfx12");
+        wmma.m = r;
+        wmma.f16math = 1;
+        EXPECT_TRUE(admitsWrw(wmma, "gfx1201", baseShape(), "BFLOAT16"));
+        EXPECT_FALSE(admitsWrw(wmma, "gfx1201", baseShape(), "HALF"));
+    }
+    auto shape = baseShape();
+    shape.dataType = DataType::BFLOAT16;
+    auto properties = testDeviceProperties();
+    properties.gcnArchName = "gfx90a";
+    properties.multiProcessorCount = 64;
+    const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::BACKWARD_WEIGHTS)),
+                               properties);
+    const auto problem = parseWinogradProblem(fixture.context(), ConvDirection::BACKWARD_WEIGHTS);
+    ASSERT_TRUE(problem.has_value());
+    auto mfma = wrwAtom("gfx9");
+    mfma.m = 6;
+    mfma.f16math = 1;
+    const auto plan = conv_winograd::planFor(
+        *problem, *conv_winograd::configOf(wrwKernelOf(mfma, "BFLOAT16")), properties);
+    ASSERT_TRUE(plan.has_value());
+    // fp16 operands on the f16 MFMA, plus the per-channel maxima (64 chunks) and scales.
+    EXPECT_EQ(plan->wrwOpt, 2);
+    EXPECT_EQ(plan->operandBytes, 2);
+    EXPECT_EQ(plan->wrwAtom, 1);
+    EXPECT_EQ(plan->wrw.chunks, 64);
+    EXPECT_EQ(plan->amaxBytes, size_t{64 * (4 + 6) * 4});
+    EXPECT_EQ(plan->scaleBytes, size_t{(4 + 6) * 4});
+    EXPECT_EQ(plan->maxBlocks[0], 6u);
+    EXPECT_EQ(plan->maxBlocks[1], 64u);
+    EXPECT_EQ(plan->maxBlocks[2], 2u);
 }
 
 TEST(TestConvWinogradWrwKernelMatch, DirectionAndVariantMustAgree)
@@ -1457,21 +1503,29 @@ TEST(TestConvWinogradWrwKernelMatch, RefusesEachInconsistentField)
     };
     fma("TileThree", [](ConfigFields& f) { f.m = 3; });
     fma("TileEight", [](ConfigFields& f) { f.m = 8; });
+    fma("LlcPlan", [](ConfigFields& f) { f.llc = 1; });
     fma("LlcPlanTwo", [](ConfigFields& f) { f.llc = 2; });
     fma("FusedKBlock", [](ConfigFields& f) { f.bk = 64; });
     fma("FusedTileBlock", [](ConfigFields& f) { f.bt = 32; });
     fma("FusedChunk", [](ConfigFields& f) { f.ccv = 4; });
     fma("Bins", [](ConfigFields& f) { f.bins = 4; });
-    fma("F16Math", [](ConfigFields& f) { f.f16math = 1; });
+    fma("F16MathTwo", [](ConfigFields& f) { f.f16math = 2; });
     fma("Prefetch", [](ConfigFields& f) { f.pf = 1; });
-    fma("UnknownArch", [](ConfigFields& f) { f.arch = "gfx10"; });
+
     fma("UnknownLayout", [](ConfigFields& f) { f.layout = "NCDHW"; });
     fma("NoOutChannelBlock", [](ConfigFields& f) { f.gemmBm = 0; });
     fma("NoInChannelBlock", [](ConfigFields& f) { f.gemmBn = 0; });
     fma("TileStepNotDividing64", [](ConfigFields& f) { f.gemmBk = 24; });
     fma("TileStepUnderFour", [](ConfigFields& f) { f.gemmBk = 2; });
-    fma("ThreadRowsNotDividing", [](ConfigFields& f) { f.tm = 3; });
-    fma("ThreadColumnsNotDividing", [](ConfigFields& f) { f.tn = 3; });
+    // 96 / 11 rows (or columns) of threads: whole waves, but 96 is not a multiple of 11.
+    fma("ThreadRowsNotDividing", [](ConfigFields& f) {
+        f.gemmBm = 96;
+        f.tm = 11;
+    });
+    fma("ThreadColumnsNotDividing", [](ConfigFields& f) {
+        f.gemmBn = 96;
+        f.tn = 11;
+    });
     fma("FmaWithWaves", [](ConfigFields& f) { f.waves = 4; });
     fma("FmaUnderOneWave", [](ConfigFields& f) {
         f.tm = f.tn = 8;
@@ -1487,8 +1541,26 @@ TEST(TestConvWinogradWrwKernelMatch, RefusesEachInconsistentField)
         f.gemmBk = 32;
         f.tm = f.tn = 16;
     });
+    // An arch no atom family has (fp16, F(3,2): no other gate applies).
+    atom("UnknownArch", "gfx10", "gfx1030", "HALF", [](ConfigFields&) {});
     atom("AtomWavesWrong", "gfx9", "gfx942", "HALF", [](ConfigFields& f) { f.waves = 2; });
-    atom("AtomRowsNotWhole", "gfx9", "gfx942", "HALF", [](ConfigFields& f) { f.gemmBm = 48; });
+    // 48 rows (columns) of 2 atoms per wave: one wave along them, consistently counted.
+    atom("AtomRowsNotWhole", "gfx9", "gfx942", "HALF", [](ConfigFields& f) {
+        f.gemmBm = 48;
+        f.waves = 2;
+    });
+    atom("AtomColumnsNotWhole", "gfx9", "gfx942", "HALF", [](ConfigFields& f) {
+        f.gemmBn = 48;
+        f.waves = 2;
+    });
+    atom("AtomNoOutChannelBlock", "gfx9", "gfx942", "HALF", [](ConfigFields& f) {
+        f.gemmBm = 0;
+        f.waves = 0;
+    });
+    atom("AtomNoInChannelBlock", "gfx9", "gfx942", "HALF", [](ConfigFields& f) {
+        f.gemmBn = 0;
+        f.waves = 0;
+    });
     atom("AtomTileStepUnderKa", "gfx9", "gfx942", "HALF", [](ConfigFields& f) { f.gemmBk = 8; });
     atom("Gfx950TileStepUnder32", "gfx950", "gfx950", "HALF", [](ConfigFields& f) {
         f.gemmBk = 16;
@@ -1593,28 +1665,6 @@ TEST(TestConvWinogradWrwPlan, SlicesTheBatchUnderTheWorkspaceLimit)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tiny(
         "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_WORKSPACE_MB", "1");
     EXPECT_FALSE(wrwPlan(shape, wrwFma()).has_value());
-}
-
-TEST(TestConvWinogradWrwPlan, TheLlcPlanSlicesIntoTheCacheOnlyWhereItSlices)
-{
-    auto shape = baseShape();
-    shape.n = 64;
-    shape.c = 64;
-    shape.k = 64;
-    shape.input = {32, 32};
-    auto llc = wrwFma();
-    llc.llc = 1;
-    // No last-level cache entry (CDNA): nothing to fit.
-    EXPECT_FALSE(wrwPlan(shape, llc, 64, "gfx942").has_value());
-    // 64 MiB (gfx1201) holds this problem's 128 MiB of U and V only in slices.
-    const auto sliced = wrwPlan(shape, llc, 64, "gfx1201");
-    ASSERT_TRUE(sliced.has_value());
-    EXPECT_GT(sliced->slices, 1);
-    EXPECT_LE(sliced->uBytes + sliced->vBytes + sliced->partBytes, size_t{48} << 20);
-    // A problem that fits whole: the plan would not slice.
-    auto small = shape;
-    small.n = 2;
-    EXPECT_FALSE(wrwPlan(small, llc, 64, "gfx1201").has_value());
 }
 
 TEST(TestConvWinogradWrwPlan, StagesMixedLayoutsToChannelsFirst)

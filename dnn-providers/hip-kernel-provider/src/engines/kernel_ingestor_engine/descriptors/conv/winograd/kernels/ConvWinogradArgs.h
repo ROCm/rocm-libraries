@@ -73,6 +73,11 @@ struct K5WrwArgs
     void* u; // workspace: transformed dy, [g][p][K/G][ldt]
     void* v; // workspace: transformed x, [g][p][C/G][ldt]
     float* part; // workspace: fp32 GEMM partials, [split][g][p][K/G][C/G]
+    // Scaled fp16 operands (bf16 graphs): per-channel powers of two, x's C then dy's K (scale), and
+    // the absmax pre-pass's partial maxima, [chunk][C + K] (amax).
+    float* scale;
+    float* amax;
+    int chunks; // pre-pass: pixel chunks per channel
     int n, groups;
     int c, k; // channels over all groups
     int hi, wi, ho, wo;

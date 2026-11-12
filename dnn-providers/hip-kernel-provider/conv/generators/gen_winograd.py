@@ -265,18 +265,18 @@ CATALOG = {
 # Winograd position: (out channels, in channels, tiles per step) and tm x tn = the FMA thread tile
 # ("any": fp32 operands, every arch and dtype) or a wave's 16x16 atoms (MFMA "gfx9" for every
 # dtype; "gfx950" 16x16x32 and WMMA "gfx11" / "gfx12" for 16-bit).
-def wrw(arch, tiles, rs=(2, 4, 6), plan="none"):
+def wrw(arch, tiles, rs=(2, 4, 6), f16math=0):
     return [
         C(
             "wrw",
             r,
             lay,
             arch=arch,
-            plan=plan,
             gemm=(bm, bn, bk),
             tm=tm,
             tn=tn,
             waves=0 if arch == "any" else (bm // (16 * tm)) * (bn // (16 * tn)),
+            f16math=f16math,
         )
         for r in rs
         for lay in ("NCHW", "NHWC")
@@ -284,8 +284,19 @@ def wrw(arch, tiles, rs=(2, 4, 6), plan="none"):
     ]
 
 
-WRW_FMA = [(128, 128, 16, 8, 8), (64, 64, 16, 4, 4)]
-WRW_ATOM = [(128, 128, 32, 4, 4), (64, 64, 32, 2, 2)]
+WRW_FMA = [
+    (128, 128, 16, 8, 8),
+    (64, 64, 16, 4, 4),
+    (128, 64, 16, 8, 4),
+    (64, 128, 16, 4, 8),
+    (128, 128, 8, 8, 8),
+]
+WRW_ATOM = [
+    (128, 128, 32, 4, 4),
+    (64, 64, 32, 2, 2),
+    (128, 128, 64, 4, 4),
+    (128, 64, 32, 4, 2),
+]
 # 16-bit operands only for F(3,2) (they round F(3,4) / F(3,6) past the dtype's Winograd bound): the
 # 16-bit-only atoms (gfx950 16x16x32, WMMA) serve F(3,2); CDNA "gfx9" configs run F(3,4) / F(3,6) on
 # fp32 operands through the fp32 MFMA, as FMA configs do everywhere.
@@ -295,25 +306,25 @@ WRW_MATRIX16 = (
     + wrw("gfx11", WRW_ATOM, (2,))
     + wrw("gfx12", WRW_ATOM, (2,))
 )
-WRW_LLC16 = (
-    wrw("gfx11", WRW_ATOM, (2,), "llc")
-    + wrw("gfx12", WRW_ATOM, (2,), "llc")
-    + wrw("any", WRW_FMA, plan="llc")
+# bf16 graphs: F(3,4) / F(3,6) on fp16 operands scaled per channel by powers of two (f16math 1),
+# well inside bf16's bound: fp16 matrix cores, and v_dot2_f32_f16 for FMA (tile steps of 16+).
+WRW_SCALED16 = (
+    wrw("gfx9", WRW_ATOM, (4, 6), 1)
+    + wrw("gfx950", WRW_ATOM, (4, 6), 1)
+    + wrw("gfx11", WRW_ATOM, (4, 6), 1)
+    + wrw("gfx12", WRW_ATOM, (4, 6), 1)
+    + wrw("any", [t for t in WRW_FMA if t[2] >= 16], (4, 6), 1)
 )
 WRW_CATALOG = {
-    # The LLC-fit plan (RDNA, a slice's U / V / partials inside the last-level cache): an extra
-    # config of the FMA and WMMA blocks, admitted only where it slices.
-    "FLOAT": wrw("gfx9", WRW_ATOM)
-    + wrw("any", WRW_FMA)
-    + wrw("any", WRW_FMA, plan="llc"),
-    "HALF": WRW_MATRIX16 + wrw("any", WRW_FMA) + WRW_LLC16,
-    "BFLOAT16": WRW_MATRIX16 + wrw("any", WRW_FMA) + WRW_LLC16,
+    "FLOAT": wrw("gfx9", WRW_ATOM) + wrw("any", WRW_FMA),
+    "HALF": WRW_MATRIX16 + wrw("any", WRW_FMA),
+    "BFLOAT16": WRW_MATRIX16 + wrw("any", WRW_FMA) + WRW_SCALED16,
 }
 
 
 def label(c):
     if c["variant"] == "wrw":
-        return f"wrw.f3x{c['m']}.{c['layout'].lower()}.{c['arch']}.{c['gemm_bm']}x{c['gemm_bn']}x{c['gemm_bk']}t{c['tm']}{c['tn']}{'.llc' if c['llc'] else ''}"
+        return f"wrw.f3x{c['m']}.{c['layout'].lower()}.{c['arch']}.{c['gemm_bm']}x{c['gemm_bn']}x{c['gemm_bk']}t{c['tm']}{c['tn']}{'.h' if c['f16math'] else ''}"
     if c["variant"] == "multipass":
         return f"multipass.f{c['m']}.{c['layout'].lower()}.g{c['gemm_bm']}x{c['gemm_bn']}x{c['gemm_bk']}.{'llc' if c['llc'] else 'none'}"
     if c["variant"] == "fused":

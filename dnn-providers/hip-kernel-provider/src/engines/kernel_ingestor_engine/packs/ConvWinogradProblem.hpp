@@ -150,7 +150,13 @@ struct Plan
     size_t partOffset = 0, partBytes = 0;
     int operandBytes = 0;
     int wrwAtom = 0;
+    /// CONV_WINO_WRW_OPT: 0 fp32 operands, 1 the I/O type, 2 fp16 scaled per channel (bf16).
+    int wrwOpt = 0;
     unsigned int gemmThreads = 256;
+    /// Scaled fp16 operands: the per-channel scales, the pre-pass's partial maxima and its grids.
+    size_t scaleOffset = 0, scaleBytes = 0, amaxOffset = 0, amaxBytes = 0;
+    unsigned int maxBlocks[3] = {1, 1, 1};
+    unsigned int scaleBlocks[3] = {1, 1, 1};
 };
 
 /// Workspace limit the batch slicing keeps the multipass buffers under (the engine's own
