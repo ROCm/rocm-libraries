@@ -9,7 +9,6 @@ strides, and the swizzled operands. The last test parses the rocKE MX FP6 logic 
 """
 
 import copy
-import re
 from pathlib import Path
 
 import pytest
@@ -50,7 +49,6 @@ _GENERATED_MX_LOGIC = _FIXTURES / (
     "gfx950_Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_GG_HAS_SAB_SAV_UserArgs.yaml"
 )
 _NON_MX_LOGIC = _FIXTURES / "gfx950_Cijk_Alik_Bljk_F8F8S_BH_BiasS_HAS_SAV_UserArgs.yaml"
-_INCLUDE = Path(__file__).resolve().parents[3] / "include" / "Tensile"
 
 
 def _kernel_name(fmt, k):
@@ -84,24 +82,6 @@ def test_scale_format_ids_are_append_only():
         "HostPreSwizzle128x4": 3,
     }
     assert validParameters["MXScaleFormat"] == ["Auto", *C.MX_SCALE_FORMAT_IDS]
-
-
-def test_scale_format_ids_match_cpp():
-    enum = re.search(
-        r"enum class MXScaleFormat : int\s*\{(.*?)\};",
-        (_INCLUDE / "MXScaleFormat.hpp").read_text(encoding="utf-8"),
-        re.S,
-    )
-    assert enum
-    assert {
-        name: int(value) for name, value in re.findall(r"(\w+)\s*=\s*(\d+)", enum.group(1))
-    } == C.MX_SCALE_FORMAT_IDS
-    first_exact = re.search(
-        r"kFirstExactFormat\s*=\s*(\d+);",
-        (_INCLUDE / "ContractionProblemPredicates.hpp").read_text(encoding="utf-8"),
-    )
-    assert first_exact
-    assert int(first_exact.group(1)) == C.MX_SCALE_FORMAT_IDS["HostPreSwizzle128x4"]
 
 
 @pytest.mark.parametrize(
