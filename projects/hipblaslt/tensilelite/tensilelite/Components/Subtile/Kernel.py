@@ -78,6 +78,7 @@ from .SubtileGeometry import (
   WMMA_32x16_W32_CD_16V,
   WMMA_SCALE_32x16_W32_MX32_A,
   WMMA_SCALE_32x16_W32_MX32_B,
+  WMMA_SCALE_32x16_W32_MX32_B_PAIR,
   TileGeometry,
   ABInputGeometry,
   ABGRGeometry,
@@ -378,8 +379,7 @@ MXSA_B8 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B8, loadWidth=16), lr=MXSc
 MXSB_B8 = MXScaleTilePair(gr=MXScaleGRGeometry(**_MXS_B8, loadWidth=16), lr=MXScaleLRGeometry(**_MXS_B8, loadWidth=4))
 
 # gfx1250 wave32 32x16x128 FP4 scale tiles (mxBlock=32): one scale VGPR
-# per A or B MMA tile.  matrix_b_scale selects a matrix scale row, not a
-# neighboring N tile, so B tiles must not share a VGPR.
+# per A or B MMA tile (B pairs share one under MXSBTilePair, below).
 _MXS_B4_W32_A = dict(scaleLayout=WMMA_SCALE_32x16_W32_MX32_A, instK=128, bpe=1, supportedTypes=('fp4',))
 _MXS_B4_W32_B = dict(scaleLayout=WMMA_SCALE_32x16_W32_MX32_B, instK=128, bpe=1, supportedTypes=('fp4',))
 MXSA_B4_W32_M32 = MXScaleTilePair(
@@ -388,6 +388,13 @@ MXSA_B4_W32_M32 = MXScaleTilePair(
 MXSB_B4_W32_N16 = MXScaleTilePair(
     gr=MXScaleGRGeometry(**_MXS_B4_W32_B, loadWidth=16),
     lr=MXScaleLRGeometry(**_MXS_B4_W32_B, loadWidth=4, subtileShape=(1, 1)))
+# MXSBTilePair: with the lane-major TDM scale chunks, one ds_read_b32 at an
+# N-tile pair's chunk puts the odd tile's scales in lanes 16-31, which
+# matrix_b_scale:1 selects, so the pair shares one VGPR and one load.
+_MXS_B4_W32_B_PAIR = dict(_MXS_B4_W32_B, scaleLayout=WMMA_SCALE_32x16_W32_MX32_B_PAIR)
+MXSB_B4_W32_N16_PAIR = MXScaleTilePair(
+    gr=MXScaleGRGeometry(**_MXS_B4_W32_B_PAIR, loadWidth=16),
+    lr=MXScaleLRGeometry(**_MXS_B4_W32_B_PAIR, loadWidth=4, subtileShape=(2, 1)))
 
 # C/D output: 128-bit store = 4 f32 elements along N
 CD_F32 = CDTile_1x1(mmaLayout=MFMA_16x16_1B_4N_4V, bpe=4, supportedTypes=('f32',), storeShape=LoadShape(m=1, k=4))
@@ -405,7 +412,9 @@ def selectMXScaleGeometry(kernel: dict, tc: str) -> MXScaleTilePair:
   dtype = kernel["ProblemType"][f"DataType{data_tc}"]
   wave32 = kernel.get("WavefrontSize", 64) == 32
   if dtype.isFloat4() and wave32 and kernel.get("MatrixInstM", 16) == 32:
-    return MXSA_B4_W32_M32 if tc == 'MXSA' else MXSB_B4_W32_N16
+    if tc == 'MXSA':
+      return MXSA_B4_W32_M32
+    return MXSB_B4_W32_N16_PAIR if kernel.get("MXSBTilePair") else MXSB_B4_W32_N16
   if dtype.is6bitFloat() or dtype.isFloat4():
     return MXSA_B4 if tc == 'MXSA' else MXSB_B4
   if dtype.is8bitFloat():

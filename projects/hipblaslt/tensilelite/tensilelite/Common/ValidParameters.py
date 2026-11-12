@@ -461,6 +461,10 @@ validParameters = { # we need to make sure this matches develop
     # cluster signal) resolved at codegen, entered by a single WaveIdx dispatch, instead
     # of one shared body that tests WaveIdx for every duty each iteration. Off by default.
     "TDMWaveRoleBodies": [0, 1],
+    # gfx1250 MXF4 32x16x128: N-adjacent B tile pairs share one scale VGPR and one ds_read
+    # (odd tile in lanes 16-31, selected by matrix_b_scale:1). Halves the B scale local
+    # reads and VGPRs. Requires TDMSingleIssuer's lane-major scale layout. Off by default.
+    "MXSBTilePair": [0, 1],
     # TDM multicast across a ClusterDim cluster. 1 (default) = peers share tiles via
     # multicast loads; 0 = every WG fetches its own tiles and the cluster (and its
     # ClusterBarrier) only keeps the WGs in step for GL1/GL2 reuse.

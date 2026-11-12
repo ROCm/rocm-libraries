@@ -603,6 +603,7 @@ defaultBenchmarkCommonParameters = [
     {"LDSSegmentInterleave": [0]},
     {"TDMSingleIssuer": [0]},
     {"TDMWaveRoleBodies": [0]},
+    {"MXSBTilePair": [0]},
     {"ClusterMulticast": [1]},
     {"LRLookaheadB": [1]},
     {"LDSSegmentBRotate": [0]},

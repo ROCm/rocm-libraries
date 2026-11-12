@@ -217,6 +217,9 @@ MFMA_SCALE_16x16_1B_MX32_8V = MMAScaleLayout(instM=16, blocks=1, vgprs=0.25, mxB
 #      only 2B/lane are populated by one 16x128 scale tile.
 WMMA_SCALE_32x16_W32_MX32_A = MMAScaleLayout(instM=32, blocks=1, vgprs=1.0, mxBlock=32, waveSize=32)
 WMMA_SCALE_32x16_W32_MX32_B = MMAScaleLayout(instM=16, blocks=1, vgprs=1.0, mxBlock=32, waveSize=32)
+#   B tile pair (MXSBTilePair): an N-adjacent tile pair shares one VGPR, lanes
+#      0-15 = even tile, 16-31 = odd tile, picked by matrix_b_scale (row select).
+WMMA_SCALE_32x16_W32_MX32_B_PAIR = MMAScaleLayout(instM=16, blocks=1, vgprs=0.5, mxBlock=32, waveSize=32)
 
 
 ################################################################################
