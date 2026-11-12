@@ -47,7 +47,7 @@
 
 #if CONV_K3_LOOP == 5
 #define CONV_K3_THREADS 512
-#elif CONV_K3_LOOP == 3 || CONV_K3_LOOP == 4
+#elif CONV_K3_LOOP == 3 || CONV_K3_LOOP == 4 || (CONV_K3_LOOP == 8 && CONV_K3_TK > 0)
 #define CONV_K3_THREADS ((CONV_K3_BK / CONV_K3_TK) * (CONV_K3_BC / CONV_K3_TC))
 #else
 #define CONV_K3_THREADS (CONV_K3_WK * CONV_K3_WC * CONV_K3_ATOM::WAVE)
@@ -167,6 +167,20 @@ extern "C" __global__ void __launch_bounds__(CONV_K3_THREADS) ConvWrw(K3Args a)
               CONV_K3_VEC,
               CONV_K3_XCD,
               1>(a);
+#elif CONV_K3_LOOP == 8 && CONV_K3_TK > 0
+    // The generic loop's FMA form: TK x TC channels a thread, no matrix atom.
+    k3WrwGeneric<CONV_K3_T,
+                 K3FmaGeneric<CONV_K3_TK, CONV_K3_TC>,
+                 CONV_K3_LAYOUT,
+                 CONV_K3_BK,
+                 CONV_K3_BC,
+                 CONV_K3_BQ,
+                 CONV_K3_FR,
+                 1,
+                 1,
+                 CONV_K3_VEC,
+                 CONV_K3_DW,
+                 0>(a);
 #elif CONV_K3_LOOP == 8
     // Generic taps: CONV_K3_FR is the taps a block; filter, stride and dilation are runtime.
     k3WrwGeneric<CONV_K3_T,

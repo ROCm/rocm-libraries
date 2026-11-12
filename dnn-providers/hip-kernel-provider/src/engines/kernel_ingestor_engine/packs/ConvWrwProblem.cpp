@@ -45,6 +45,9 @@ constexpr int64_t CHUNK_MARGIN = 512;
 /// The generic loop declines filters of at most this many taps dilated at least this far.
 constexpr int64_t GENERIC_SPARSE_MAX_TAPS = 9;
 constexpr int64_t GENERIC_SPARSE_MIN_DILATION = 6;
+/// The generic FMA form declines fewer input channels a group, or this width stride and past.
+constexpr int64_t GENERIC_FMA_MIN_CHANNELS = 8;
+constexpr int64_t GENERIC_FMA_MAX_STRIDE = 4;
 /// The reduce: 256 threads, 64 four-channel quads of dw per block.
 constexpr int64_t REDUCE_QUADS_PER_BLOCK = 64;
 /// The most splits the row reduce takes (measured on gfx942: rows win at 1 and 2 splits, tie
@@ -331,7 +334,10 @@ int64_t loadPassesOf(const WrwConfig& config, int elementBytes, int64_t wave)
         // k3WrwGeneric's loads a thread holds: channels-first, a position's bk and fr bc channel
         // rows over threads / bq rows a pass; channels-last, units of vec channels at kw
         // positions (one 32-bit LDS word), kw loads each.
-        const int64_t threads = config.wk * config.wc * wave;
+        // (The FMA form: tk x tc channels a thread.)
+        const int64_t threads = config.tk > 0 && config.tc > 0
+                                    ? (config.bk / config.tk) * (config.bc / config.tc)
+                                    : config.wk * config.wc * wave;
         if(threads < 1 || config.bq < 1 || vec < 1 || threads % config.bq != 0)
         {
             return std::numeric_limits<int64_t>::max();
@@ -477,27 +483,34 @@ std::optional<bool>
     int64_t sw = 0;
     int64_t dw = 0;
     int64_t fr = -1;
-    if(!readInt(atomId) || atomId < 0 || atomId >= static_cast<int64_t>(ATOMS.size()) - 1
+    if(!readInt(atomId) || atomId < 0 || atomId >= static_cast<int64_t>(ATOMS.size())
        || at >= key.size())
     {
         return std::nullopt;
     }
-    // Lower case r, p, c: the block-based buffer (pb) forms of R, P, C.
+    // Lower case r, p, c: the block-based buffer (pb) forms of R, P, C. F, S, Q: the FMA loops
+    // (the "fma" atom alone): output rows of vectors, of scalar units, the FMA ring.
     const char letter = key[at++];
     const bool blockBuffers = letter == 'r' || letter == 'p' || letter == 'c';
     const char kind = blockBuffers ? static_cast<char>(letter - 'a' + 'A') : letter;
-    const bool ring = kind == 'P' || kind == 'U' || kind == 'G' || kind == 'D';
-    if((kind != 'R' && kind != 'C' && !ring) || !readInt(layout) || layout < 0 || layout > 2
-       || !readDotInt(s) || !readDotInt(sw) || !readDotInt(dw) || !readDotInt(fr)
-       || at != key.size() || s < 1 || sw < 1 || dw < 1 || (ring ? fr < 1 : fr != 0))
+    const bool fmaKind = kind == 'F' || kind == 'S' || kind == 'Q';
+    const bool ring = kind == 'P' || kind == 'U' || kind == 'G' || kind == 'D' || kind == 'Q';
+    const bool fmaAtom = atomId == static_cast<int64_t>(ATOMS.size()) - 1;
+    if((kind != 'R' && kind != 'C' && kind != 'F' && kind != 'S' && !ring) || fmaKind != fmaAtom
+       || !readInt(layout) || layout < 0 || layout > 2 || !readDotInt(s) || !readDotInt(sw)
+       || !readDotInt(dw) || !readDotInt(fr) || at != key.size() || s < 1 || sw < 1 || dw < 1
+       || (ring ? fr < 1 : fr != 0))
     {
         return std::nullopt;
     }
     const std::string_view atom = ATOMS[static_cast<size_t>(atomId)];
     const auto& a = problem.base.args;
     const bool gfx950 = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName) == "gfx950";
+    const auto element = conv_igemm::dataElement(problem.base.dataType);
+    // The FMA loops take fp32 everywhere and 16-bit only where no matrix atom takes it.
     if(!conv_igemm::atomRunsOn(atom, gcnArchName)
-       || conv_igemm::atomElement(atom) != conv_igemm::dataElement(problem.base.dataType)
+       || (fmaAtom ? element != "f32" && runsMatrixAtomFor(element, gcnArchName)
+                   : conv_igemm::atomElement(atom) != element)
        || ((kind == 'G' || kind == 'D' || layout == LAYOUT_CHANNELS_LAST_TR) && !gfx950))
     {
         return false;
@@ -506,10 +519,16 @@ std::optional<bool>
     const int64_t kg = a.k / a.groups;
     const int64_t cg = a.c / a.groups;
     if((layout == LAYOUT_CHANNELS_FIRST ? !problem.channelsFirst : !problem.channelsLast)
-       || (layout != LAYOUT_CHANNELS_FIRST
+       || (layout != LAYOUT_CHANNELS_FIRST && kind != 'S'
            && ((kind != 'U' && kg % vec != 0) || (kind != 'C' && cg % vec != 0)))
        || problem.largeImage != blockBuffers || s != a.filter[2] || sw != a.stride[2]
        || dw != a.dilation[2])
+    {
+        return false;
+    }
+    // The FMA loops' vectors: channels-first rows of x and dy whole vectors.
+    if((kind == 'F' || kind == 'Q') && layout == LAYOUT_CHANNELS_FIRST
+       && (a.inSpatial[2] % vec != 0 || a.outSpatial[2] % vec != 0))
     {
         return false;
     }
@@ -532,6 +551,7 @@ std::optional<bool>
         // Or height phases (unit height dilation): ceil(filter height / sh) rows each.
         return wholeHeight || (a.dilation[1] == 1 && fr == divUp(a.filter[1], a.stride[1]));
     case 'G':
+    case 'Q':
         return wholeHeight;
     case 'D':
         return wholeHeight && (a.dilation[1] == 1 || a.filter[1] == 1);
@@ -654,11 +674,13 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         return std::nullopt;
     }
-    const bool fma = config.loop == LOOP_RING_FMA || config.loop == LOOP_ROWS_FMA;
+    const bool generic = config.loop == LOOP_GENERIC;
+    // The generic loop's FMA form: the "fma" atom (thread tiles tk x tc).
+    const bool genericFma = generic && info->wave == 0;
+    const bool fma = config.loop == LOOP_RING_FMA || config.loop == LOOP_ROWS_FMA || genericFma;
     const bool direct = config.loop == LOOP_DIRECT;
     const bool smallc = config.loop == LOOP_ROWS_SMALLC;
     const bool packed = config.loop == LOOP_ROWS_PACKED;
-    const bool generic = config.loop == LOOP_GENERIC;
     const bool rows
         = config.loop == LOOP_ROWS || config.loop == LOOP_ROWS_FMA || smallc || packed || generic;
     if(fma != (info->wave == 0))
@@ -669,8 +691,10 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     const auto element = conv_igemm::dataElement(problem.base.dataType);
     // The FMA loops take fp32 everywhere, and 16-bit (accumulating in fp32) only where no
     // matrix atom takes it (gfx906, gfx900): elsewhere they would only add slow candidates.
+    // The generic FMA form only where no matrix atom takes the element (fp32 on RDNA): the
+    // matrix generic configs serve the rest.
     if(!conv_igemm::atomRunsOn(config.atom, arch)
-       || (fma ? element != "f32" && runsMatrixAtomFor(element, arch)
+       || (fma ? (element != "f32" || genericFma) && runsMatrixAtomFor(element, arch)
                : conv_igemm::atomElement(config.atom) != element))
     {
         return std::nullopt;
@@ -834,6 +858,13 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         {
             return std::nullopt;
         }
+        // The FMA form leaves stems (few input channels a group: the channel tile mostly
+        // empty) and patchify-class width strides (no reuse between a chunk's taps) to BLAS,
+        // which won both on gfx1201 (AlexNet 11x11 s4 c3, ViT 4x4 s4 c3, wav2vec k10 s5).
+        if(genericFma && (cg < GENERIC_FMA_MIN_CHANNELS || a.stride[2] >= GENERIC_FMA_MAX_STRIDE))
+        {
+            return std::nullopt;
+        }
     }
     // Every other loop: the filter width, its stride and dilation are compile-time.
     else if(config.s != a.filter[2] || config.sw != a.stride[2] || config.dw != a.dilation[2]
@@ -929,7 +960,8 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         return std::nullopt;
     }
-    if(fma && cf && (a.inSpatial[2] % config.vec != 0 || a.outSpatial[2] % config.vec != 0))
+    if(fma && !generic && cf
+       && (a.inSpatial[2] % config.vec != 0 || a.outSpatial[2] % config.vec != 0))
     {
         return std::nullopt;
     }

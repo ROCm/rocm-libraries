@@ -810,6 +810,37 @@ TEST(TestConvWrwCatalog, KnobsTellApartEveryConfigOfAGraph)
     }
 }
 
+TEST(TestConvWrwCatalog, EveryGenericSpecKeyParses)
+{
+    // A malformed key declines its generic config everywhere: the generator's keys must all be
+    // the host's grammar.
+    auto shape = conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1});
+    shape.dataType = DataType::FLOAT;
+    const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::BACKWARD_WEIGHTS)));
+    const auto problem = conv_wrw::parseWrwProblem(fixture.context());
+    ASSERT_TRUE(problem.has_value());
+    int keys = 0;
+    for(const auto& kernel : catalog())
+    {
+        if(kernel.getIntMetadata("loop") != conv_wrw::LOOP_GENERIC)
+        {
+            continue;
+        }
+        SCOPED_TRACE(kernel.name);
+        const std::string spec(kernel.getStringMetadata("spec"));
+        size_t from = 0;
+        while(from < spec.size())
+        {
+            const size_t to = std::min(spec.find(';', from), spec.size());
+            const auto key = spec.substr(from, to - from);
+            EXPECT_TRUE(conv_wrw::specServes(*problem, key, "gfx1201").has_value()) << key;
+            ++keys;
+            from = to + 1;
+        }
+    }
+    EXPECT_GT(keys, 0);
+}
+
 TEST(TestConvWrwCatalog, AtomIdsNameTheirAtomsAndEveryConfigFitsItsArchitectures)
 {
     static constexpr std::array<const char*, 7> ARCHS{
