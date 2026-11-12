@@ -52,6 +52,7 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/relaunch_compare_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/host_memory_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/w4a16_layout_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/fp6_tile128x4_args_gtest.cpp
 )
 
 if(NOT WIN32)

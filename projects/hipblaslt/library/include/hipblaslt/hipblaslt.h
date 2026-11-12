@@ -544,8 +544,9 @@ typedef enum {
    * and ``o = 64*((c%256)/16) + 16*kg + c%16``, the tile starts at byte
    * ``(ct*(rows/128) + rt)*24576``; byte ``j`` of the group's 24 is at ``16*o + j`` for ``j < 16`` and
    * at ``16384 + 8*o + (j - 16)`` otherwise. The number of columns (rows) has to be a multiple of
-   * 256 (128). Requires ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT``. Set on A, with B in this
-   * order or in ``HIPBLASLT_ORDER_COL``.
+   * 256 (128), and the leading dimension has to equal the number of rows. Requires
+   * ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT``. Set on A, with B in this order or in
+   * ``HIPBLASLT_ORDER_COL``.
    */
   HIPBLASLT_ORDER_COL256_R128_EXT = 104
 } hipblasLtOrder_t;
