@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <string>
 #include <vector>
 
 #include "common/GemmCall.hpp"
@@ -16,7 +17,11 @@ namespace hipblaslt_plugin
 class RocblasGemmPlan : public IPlan
 {
 public:
-    explicit RocblasGemmPlan(std::vector<GemmCall> calls);
+    /// Throws when rocBLAS would round a narrow result more than once on @p gcnArchName (by
+    /// default the current device's): a reduction it splits into a non-fp32 output
+    /// (rocblasRoundsReductionChunks), or bf16 products it rounds in a GEMV kernel
+    /// (rocblasGemvRoundsBf16Products).
+    explicit RocblasGemmPlan(std::vector<GemmCall> calls, const std::string& gcnArchName = {});
 
     size_t getWorkspaceSize(const HipdnnEnginePluginHandle& handle) const override;
 

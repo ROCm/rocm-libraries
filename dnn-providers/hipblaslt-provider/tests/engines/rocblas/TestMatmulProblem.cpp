@@ -322,4 +322,68 @@ TEST(TestMatmulProblem, RocblasChunkedReductionsIntoNarrowOutputsAreFlagged)
     EXPECT_TRUE(rocblasRoundsReductionChunks(half));
 }
 
+TEST(TestMatmulProblem, RocblasBf16GemvRuleFollowsRocblasRouting)
+{
+    namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+    // A depthwise convolution's GEMM: m = 1 over 128 groups, 3 taps, a transposed.
+    GemmCall call;
+    call.m = 1;
+    call.n = 4096;
+    call.k = 3;
+    call.batchCount = 128;
+    call.transposeA = true;
+    for(auto* operand : {&call.a, &call.b, &call.d})
+    {
+        operand->dataType = data_objects::DataType::BFLOAT16;
+    }
+    call.a.leadingDimension = 3;
+    call.b.leadingDimension = 384;
+    call.d.leadingDimension = 128;
+    // gfx11 runs it as rocblas_gemvtsm_kernel; gfx12 and gfx94x/950 never take the GEMV path.
+    EXPECT_TRUE(rocblasGemvRoundsBf16Products(call, "gfx1100"));
+    EXPECT_TRUE(rocblasGemvRoundsBf16Products(call, "gfx1151:xnack-"));
+    EXPECT_FALSE(rocblasGemvRoundsBf16Products(call, "gfx1201"));
+    EXPECT_FALSE(rocblasGemvRoundsBf16Products(call, "gfx950"));
+    EXPECT_FALSE(rocblasGemvRoundsBf16Products(call, "gfx942"));
+    // gfx90a's bf16 rules send m = 1 with b not transposed to Tensile.
+    EXPECT_FALSE(rocblasGemvRoundsBf16Products(call, "gfx90a"));
+
+    // fp16 products stay fp32.
+    GemmCall half = call;
+    half.a.dataType = half.b.dataType = half.d.dataType = data_objects::DataType::HALF;
+    EXPECT_FALSE(rocblasGemvRoundsBf16Products(half, "gfx1100"));
+    // The small-m kernel only: more than 64 reduction rows, 8 batch entries or fewer, or a
+    // GEMV that is not transposed (b transposed for m = 1) run other kernels.
+    GemmCall longK = call;
+    longK.k = 65;
+    EXPECT_FALSE(rocblasGemvRoundsBf16Products(longK, "gfx1100"));
+    longK.k = 64;
+    EXPECT_TRUE(rocblasGemvRoundsBf16Products(longK, "gfx1100"));
+    GemmCall fewBatches = call;
+    fewBatches.batchCount = 8;
+    EXPECT_FALSE(rocblasGemvRoundsBf16Products(fewBatches, "gfx1100"));
+    GemmCall bTransposed = call;
+    bTransposed.transposeB = true;
+    EXPECT_FALSE(rocblasGemvRoundsBf16Products(bTransposed, "gfx1100"));
+    // Neither m nor n is 1: Tensile.
+    GemmCall wide = call;
+    wide.m = 2;
+    EXPECT_FALSE(rocblasGemvRoundsBf16Products(wide, "gfx1100"));
+
+    // n = 1, a and b transposed, a short x stride: the GEMV path on gfx90a too.
+    GemmCall column = call;
+    column.m = 4096;
+    column.n = 1;
+    column.transposeB = true;
+    column.b.leadingDimension = 8;
+    EXPECT_TRUE(rocblasGemvRoundsBf16Products(column, "gfx90a"));
+    EXPECT_TRUE(rocblasGemvRoundsBf16Products(column, "gfx1100"));
+    column.b.leadingDimension = 9;
+    EXPECT_FALSE(rocblasGemvRoundsBf16Products(column, "gfx90a"));
+    // n = 1 with a transposed and b not: Tensile on gfx90a, the GEMV on gfx11.
+    column.transposeB = false;
+    EXPECT_FALSE(rocblasGemvRoundsBf16Products(column, "gfx90a"));
+    EXPECT_TRUE(rocblasGemvRoundsBf16Products(column, "gfx1100"));
+}
+
 } // namespace

@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 #include "common/GemmCall.hpp"
@@ -76,5 +77,19 @@ constexpr int64_t ROCBLAS_REDUCTION_BYTES = std::numeric_limits<int32_t>::max();
  * decline such a call (hipBLASLt does not split k).
  */
 bool rocblasRoundsReductionChunks(const GemmCall& call);
+
+/**
+ * @brief Whether rocBLAS on @p gcnArchName would run @p call as its small-m transposed GEMV
+ *        kernel (rocblas_gemvtsm_kernel) with bf16 inputs.
+ *
+ * rocBLAS runs a GEMM whose m or n is 1 as a GEMV on gfx906/908/90a, gfx10 and gfx11 (on gfx11
+ * always, elsewhere by per-type rules), and a transposed GEMV of at most 64 reduction rows over
+ * more than 8 batch entries as rocblas_gemvtsm_kernel. That kernel multiplies its fp32 x by the
+ * bf16 matrix through rocblas_bfloat16's operator*(float, rocblas_bfloat16), which rounds every
+ * product to bf16 before the fp32 sum: a grouped convolution with one output channel per group
+ * (K/G = 1) in bf16 is off by up to a bf16 step of each product. The rocBLAS plans decline such
+ * a call; fp16 is unaffected (its products stay fp32), and so is every other GEMV kernel.
+ */
+bool rocblasGemvRoundsBf16Products(const GemmCall& call, std::string_view gcnArchName);
 
 } // namespace hipblaslt_plugin

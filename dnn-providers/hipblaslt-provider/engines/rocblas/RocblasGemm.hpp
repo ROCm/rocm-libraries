@@ -3,12 +3,17 @@
 
 #pragma once
 
+#include <string>
+
 #include <rocblas/rocblas.h>
 
 #include "common/GemmCall.hpp"
 
 namespace hipblaslt_plugin::rocblas_backend
 {
+
+/// The current device's gcnArchName (e.g. "gfx1100:xnack-"), read once per device.
+std::string currentGcnArchName();
 
 /// rocBLAS's name for an element type this provider's GEMMs use.
 rocblas_datatype rocblasDataType(hipdnn_flatbuffers_sdk::data_objects::DataType dataType);

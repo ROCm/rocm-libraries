@@ -7,6 +7,7 @@
 #include <array>
 #include <cstdint>
 #include <limits>
+#include <string_view>
 #include <utility>
 
 namespace hipblaslt_plugin
@@ -256,6 +257,44 @@ bool rocblasRoundsReductionChunks(const GemmCall& call)
     const int64_t chunk
         = strideBytes > 0 ? std::max(int64_t{1}, ROCBLAS_REDUCTION_BYTES / strideBytes) : call.k;
     return call.k > chunk;
+}
+
+bool rocblasGemvRoundsBf16Products(const GemmCall& call, std::string_view gcnArchName)
+{
+    if(call.a.dataType != data_objects::DataType::BFLOAT16 || call.k == 0
+       || (call.m != 1 && call.n != 1))
+    {
+        return false;
+    }
+    // rocblas_use_gemv_in_gemm: gfx11 takes every GEMV-shaped GEMM but a 1 x 1 output;
+    // gfx906/908/90a and gfx10 apply the bf16 rules.
+    const auto arch = gcnArchName.substr(0, gcnArchName.find(':'));
+    const bool gfx11 = arch.rfind("gfx11", 0) == 0;
+    const bool gfx10 = arch.rfind("gfx10", 0) == 0;
+    const bool cdnaGemv = arch == "gfx906" || arch == "gfx908" || arch == "gfx90a";
+    const bool nn = !call.transposeA && !call.transposeB;
+    const bool nt = !call.transposeA && call.transposeB;
+    const bool tn = call.transposeA && !call.transposeB;
+    bool gemv = false;
+    if(gfx11 && !(call.m == 1 && call.n == 1))
+    {
+        gemv = true;
+    }
+    else if(gfx11 || gfx10 || cdnaGemv)
+    {
+        gemv = !((call.n == 1 && (nn || tn))
+                 || (call.n == 1 && nt && (arch == "gfx908" || arch == "gfx90a"))
+                 || (call.n == 1 && call.b.leadingDimension > 8) || (call.m == 1 && (nn || tn)));
+    }
+    if(!gemv)
+    {
+        return false;
+    }
+    // rocblas_gemv_in_gemm_launcher: n == 1 runs a GEMV transposed like a; m == 1 one
+    // transposed when b is not. A transposed GEMV of k <= 64 rows over more than 8 batch
+    // entries is rocblas_gemvtsm_kernel.
+    const bool transposedGemv = call.n == 1 ? call.transposeA : !call.transposeB;
+    return transposedGemv && call.k <= 64 && call.batchCount > 8;
 }
 
 std::vector<GemmCall> fitLibraryLimits(std::vector<GemmCall> calls)

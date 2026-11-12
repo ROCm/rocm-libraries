@@ -3,7 +3,11 @@
 
 #include "engines/rocblas/RocblasGemm.hpp"
 
+#include <map>
+#include <mutex>
 #include <string>
+
+#include <hip/hip_runtime_api.h>
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
@@ -11,6 +15,31 @@ namespace hipblaslt_plugin::rocblas_backend
 {
 
 namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+
+std::string currentGcnArchName()
+{
+    static std::mutex s_mutex;
+    static std::map<int, std::string> s_names;
+    int device = 0;
+    if(hipGetDevice(&device) != hipSuccess)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                       "hipGetDevice failed");
+    }
+    const std::lock_guard<std::mutex> lock(s_mutex);
+    auto found = s_names.find(device);
+    if(found == s_names.end())
+    {
+        hipDeviceProp_t properties{};
+        if(hipGetDeviceProperties(&properties, device) != hipSuccess)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                           "hipGetDeviceProperties failed");
+        }
+        found = s_names.emplace(device, properties.gcnArchName).first;
+    }
+    return found->second;
+}
 
 rocblas_datatype rocblasDataType(data_objects::DataType dataType)
 {

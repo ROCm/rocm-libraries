@@ -32,6 +32,7 @@
 #include "engines/hipblaslt/HipblasltGemmPlan.hpp"
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
+#include "engines/rocblas/RocblasGemm.hpp"
 #include "engines/rocblas/RocblasGemmPlan.hpp"
 #endif
 
@@ -510,6 +511,24 @@ void runCase(ConvCase convCase,
         // The plan the builder formed: under the same workspace cap (images or bands).
         auto calls = convGemmCalls(*problem, cap, layout, splitReduction);
         ASSERT_TRUE(calls.has_value()) << "the formulation declined the convolution";
+#ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
+        if(backend == Backend::ROCBLAS)
+        {
+            // rocBLAS declines only a call it would round more than once on this device.
+            const auto arch = rocblas_backend::currentGcnArchName();
+            bool roundsTwice = false;
+            for(const auto& stage : calls->stages)
+            {
+                for(const auto& call : fitLibraryLimits(stage.calls))
+                {
+                    roundsTwice = roundsTwice || rocblasRoundsReductionChunks(call)
+                                  || rocblasGemvRoundsBf16Products(call, arch);
+                }
+            }
+            ASSERT_TRUE(roundsTwice) << "rocBLAS declined a call it can run";
+            GTEST_SKIP() << "rocBLAS would round a narrow result more than once on " << arch;
+        }
+#endif
         ASSERT_EQ(backend, Backend::HIPBLASLT) << "only hipBLASLt declines a formulated GEMM";
         bool threw = false;
         for(auto& stage : calls->stages)
@@ -1118,7 +1137,7 @@ TEST(TestConvGemmRocblasLimits, DeclinesAReductionRocblasWouldRoundBetweenChunks
                 {
                     try
                     {
-                        static_cast<void>(RocblasGemmPlan(stage.calls));
+                        static_cast<void>(RocblasGemmPlan(stage.calls, "gfx950"));
                     }
                     catch(const std::exception&)
                     {
@@ -1132,7 +1151,7 @@ TEST(TestConvGemmRocblasLimits, DeclinesAReductionRocblasWouldRoundBetweenChunks
                 {
                     for(const auto& stage : calls->stages)
                     {
-                        for(const auto& call : RocblasGemmPlan(stage.calls).calls())
+                        for(const auto& call : RocblasGemmPlan(stage.calls, "gfx950").calls())
                         {
                             if(call.d.dataType == conv_data_objects::DataType::FLOAT)
                             {
@@ -1147,6 +1166,50 @@ TEST(TestConvGemmRocblasLimits, DeclinesAReductionRocblasWouldRoundBetweenChunks
                     }
                 }
             }
+        }
+    }
+}
+
+/// A bf16 depthwise 1-D convolution, channels-last (one output channel per group): its GEMM is
+/// m = 1 over 128 groups with a 3-tap reduction, which rocBLAS on gfx11 runs as
+/// rocblas_gemvtsm_kernel, rounding each product to bf16. The rocBLAS plan declines it there
+/// and keeps it on gfx12 / CDNA and in fp16. Host-only: nothing runs.
+TEST(TestConvGemmRocblasLimits, DeclinesABf16GemvRocblasRoundsPerProduct)
+{
+    ConvGemmShape shape = channelsLast({});
+    shape.n = 4;
+    shape.c = shape.k = shape.groups = 128;
+    shape.input = {1024};
+    shape.filter = {3};
+    shape.prePadding = shape.postPadding = {1};
+    shape.stride = {1};
+    shape.dilation = {1};
+    for(const auto dataType :
+        {conv_data_objects::DataType::BFLOAT16, conv_data_objects::DataType::HALF})
+    {
+        shape.dataType = dataType;
+        const ConvGemmGraph graph(shape, ConvDirection::FORWARD);
+        const auto problem = parseConvProblem(graph.graph(), ConvDirection::FORWARD);
+        ASSERT_TRUE(problem.has_value());
+        const auto calls = convGemmCalls(*problem);
+        ASSERT_TRUE(calls.has_value());
+        for(const auto* arch : {"gfx1100", "gfx1151", "gfx1201", "gfx950", "gfx942"})
+        {
+            const bool expectDecline = dataType == conv_data_objects::DataType::BFLOAT16
+                                       && std::string(arch).rfind("gfx11", 0) == 0;
+            bool declined = false;
+            for(const auto& stage : calls->stages)
+            {
+                try
+                {
+                    static_cast<void>(RocblasGemmPlan(stage.calls, arch));
+                }
+                catch(const std::exception&)
+                {
+                    declined = true;
+                }
+            }
+            EXPECT_EQ(declined, expectDecline) << arch << " " << static_cast<int>(dataType);
         }
     }
 }
