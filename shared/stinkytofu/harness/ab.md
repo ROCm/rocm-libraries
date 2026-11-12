@@ -1,9 +1,13 @@
 # The A/B flow (StinkyTofu)
 
-Read this when you verify a change. The goal is performance: does a change make a kernel faster,
-slower, or leave it the same? StinkyTofu is compiler-like, so the same input gives the same asm. If the
-asm is identical, performance is identical and no GPU run is needed. TensileLite loads the rocisa
-binding that embeds StinkyTofu, so TensileLite generates the asm that is compared.
+Read this when you verify a change that produces asm. **Use this flow only when the experiment produces
+asm.** If the change is about an API, a backend, or anything else that does not produce asm, this flow
+does not fit. Use the component's normal tests, and tell the developer that the A/B does not apply.
+
+The goal is performance: does a change make a kernel faster, slower, or leave it the same? StinkyTofu is
+compiler-like, so the same input gives the same asm. If the asm is identical, performance is identical
+and no GPU run is needed. TensileLite loads the rocisa binding that embeds StinkyTofu, so TensileLite
+generates the asm that is compared.
 
 ## Two phases
 

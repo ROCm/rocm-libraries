@@ -1,7 +1,7 @@
 # Agent harness for hipBLASLt and TensileLite
 
-Guidance for an AI agent that verifies a hipBLASLt or TensileLite change. This file is read on every
-task, so it stays small. Everything else is read only when needed (see "Read when").
+Guidance for an AI agent working on hipBLASLt or TensileLite. The rules below apply to every task. The A/B
+flow applies only to changes that produce asm. Everything else is read only when needed ("Read when").
 
 ## Scope and precedence
 
@@ -16,7 +16,7 @@ task, so it stays small. Everything else is read only when needed (see "Read whe
 
 | Read | When |
 | --- | --- |
-| [`ab.md`](ab.md) | you verify a change: the A/B flow, the pattern check, the final check |
+| [`ab.md`](ab.md) | you verify a change that produces asm (kernel codegen, scheduling): the A/B flow |
 | [`compare.md`](../../../shared/stinkytofu/harness/compare.md) | you run tier 1: how to compare asm, which configs to run |
 | [`state.md`](../../../shared/stinkytofu/harness/state.md) | `progress.md` exists, or you write results |
 | [`clone.md`](../../../shared/stinkytofu/harness/clone.md) | `git fetch` fails or prints an error, or the clone is sparse or partial |
@@ -34,8 +34,8 @@ task, so it stays small. Everything else is read only when needed (see "Read whe
    (pre-merge gate) does the matching overlap check.
    - If `progress.md` exists, read it before starting, to see where earlier work stopped (`state.md`).
 2. **Outward actions need the developer.** Push, open, edit, or comment on a PR, or post to a tracker,
-   only when the developer says so. Showing the exact text first is already a root `AGENTS.md` rule.
-   Outside contributors use a GitHub issue. AMD staff use JIRA or a GitHub issue.
+   only when the developer says so. Outside contributors use a GitHub issue. AMD staff use JIRA or a
+   GitHub issue.
 3. **Respect other users of shared machines.** If a tool refuses or reports that a resource is held,
    read its message and stop. Do not retry in a loop or look for a way around it. To stop a process,
    send SIGTERM, wait, and only then SIGKILL.

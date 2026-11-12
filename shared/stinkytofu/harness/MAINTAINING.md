@@ -7,7 +7,7 @@ Read this only when you are asked to change the harness. Agents verifying a chan
 | File | Read when | Budget |
 | --- | --- | --- |
 | `HARNESS.md` (router, one per project) | every task | 4.5 KB |
-| `ab.md` | verifying a change | 5 KB |
+| `ab.md` | verifying a change that produces asm | 5 KB |
 | `compare.md` | running tier 1 | 5 KB |
 | `state.md` | `progress.md` exists, or writing results | 5 KB |
 | `clone.md` | `git fetch` fails, or the clone is sparse or partial | 5 KB |
