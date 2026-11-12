@@ -525,8 +525,11 @@ BenchmarkProblems:
         - StreamK: [3]
         - PrefetchAcrossPersistent: [1]
         - StaggerU: [0]
-        - StreamKForceDPOnly: [0, 1]
-        - TDMStoreInst: [0, 2, 3]
+        - Groups:
+          - - StreamKForceDPOnly: [1]
+              TDMStoreInst: [0, 2, 3]
+            - StreamKForceDPOnly: [0]
+              TDMStoreInst: [0]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
