@@ -16,11 +16,12 @@
 
 #include "engines/kernel_ingestor_engine/packs/ConvDgradAotGeometry.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/Gfx1250ConvDgradTestVectors.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/Gfx942ConvDgradTestVectors.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/Gfx950ConvDgradTestVectors.hpp"
 
 /// @file ConvDgradTestCatalog.hpp
-/// The generated catalogs of Gfx950ConvDgradTestVectors.hpp and
-/// Gfx1250ConvDgradTestVectors.hpp, decoded for the dgrad AOT engine tests: each
+/// The generated catalogs of Gfx950ConvDgradTestVectors.hpp, Gfx942ConvDgradTestVectors.hpp
+/// and Gfx1250ConvDgradTestVectors.hpp, decoded for the dgrad AOT engine tests: each
 /// instance's KMD metadata as name -> int or string (KMD defaults applied), read through
 /// dgrad::parseAotInstance as the native pack of its engine reads a descriptor.
 namespace hip_kernel_provider::kernel_ingestor_engine::dgrad_test_catalog
@@ -136,7 +137,15 @@ inline const std::vector<Entry>& catalog(const std::string& dtype,
                                                 gfx1250_dgrad_test_vectors::DEFAULT_FIELDS,
                                                 gfx1250_dgrad_test_vectors::STRING_FIELDS,
                                                 dgrad::GFX1250);
-    return (target.arch == dgrad::GFX1250.arch ? s_gfx1250 : s_gfx950).at(dtype);
+    static const auto s_gfx942 = decodeCatalog(gfx942_dgrad_test_vectors::catalogInstances(),
+                                               gfx942_dgrad_test_vectors::DEFAULT_FIELDS,
+                                               gfx942_dgrad_test_vectors::STRING_FIELDS,
+                                               dgrad::GFX942);
+    if(target.arch == dgrad::GFX1250.arch)
+    {
+        return s_gfx1250.at(dtype);
+    }
+    return (target.arch == dgrad::GFX942.arch ? s_gfx942 : s_gfx950).at(dtype);
 }
 
 /// The first catalog instance of @p dtype of @p target's engine @p pick accepts.
