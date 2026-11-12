@@ -668,11 +668,14 @@ __device__ __attribute__((always_inline)) void k5CoopConvA(const K5Args& a)
         frag ufr[4][MT];
         auto loadU = [&](int ch, int b) __attribute__((always_inline))
         {
+            // uWave is wave-uniform (row is); readfirstlane says so. With PF 1 it is set under a
+            // branch the compiler cannot prove uniform, and a per-lane scalar offset turns every
+            // U load into a waterfall loop.
+            const unsigned uw = __builtin_amdgcn_readfirstlane(uWave);
 #pragma unroll
             for(int m = 0; m < MT; ++m)
             {
-                const unsigned so
-                    = uWave + b * binBytes + static_cast<unsigned>(m * nChU + ch) * UNIT;
+                const unsigned so = uw + b * binBytes + static_cast<unsigned>(m * nChU + ch) * UNIT;
                 ufr[b][m] = W::loadA(rU, uLane, so);
             }
         };
