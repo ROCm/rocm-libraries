@@ -16,10 +16,11 @@ under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the rocKE bundles below, plus
 | `rocKE/gfx1151_wmma_attention_decode/` | `hipkernel:Gfx1151WmmaAttentionDecode` | `packs/Gfx1151WmmaAttentionNative.cpp` |
 | `rocKE/gfx950_conv_dgrad_aot/` | `hipkernel:Gfx950ConvDgradAot` | `packs/ConvDgradAotNative.cpp` |
 | `rocKE/gfx1250_conv_dgrad_aot/` | `hipkernel:Gfx1250ConvDgradAot` | `packs/ConvDgradAotNative.cpp` (shared with gfx950) |
+| `rocKE/gfx942_conv_dgrad_aot/` | `hipkernel:Gfx942ConvDgradAot` | `packs/ConvDgradAotNative.cpp` (shared with gfx950) |
 
 The `gfx950_attention_dense`, `gfx950_attention_unified_2d`, `gfx950_attention_unified_3d`,
-`gfx942_attention_unified_3d`, `gfx942_attention_dense`, `gfx950_conv_dgrad_aot` and
-`gfx1250_conv_dgrad_aot` KDPs are stored in DVC (see [Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below)
+`gfx942_attention_unified_3d`, `gfx942_attention_dense`, `gfx950_conv_dgrad_aot`,
+`gfx1250_conv_dgrad_aot` and `gfx942_conv_dgrad_aot` KDPs are stored in DVC (see [Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below)
 and declare gfx950, gfx942 or gfx1250 only; `gfx1151_wmma_attention` and `gfx1151_wmma_attention_decode` KDPs are in
 git and declare the gfx11 and gfx12 RDNA targets. Each bundle packs for a build that has
 rocKE enabled (`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/` folder in the
