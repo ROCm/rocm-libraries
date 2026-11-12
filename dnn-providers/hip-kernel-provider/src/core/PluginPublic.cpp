@@ -63,17 +63,18 @@ extern "C" HIPDNN_PLUGIN_EXPORT void hipdnnEnginePluginResetKpackModuleCacheForT
     hip_kernel_provider::kernel_ingestor_engine::resetIngestorModuleCachesForTesting();
 }
 
-/// Lowers the per-image byte limit hipkernel:Gfx950ConvDgradAot's batch chunker slices
-/// at, inside this loaded plugin, so a small batch exercises the chunked-launch device
+/// Lowers the per-image byte limit the dgrad AOT engines' batch chunker
+/// (hipkernel:Gfx950ConvDgradAot and hipkernel:Gfx1250ConvDgradAot share it) slices at,
+/// inside this loaded plugin, so a small batch exercises the chunked-launch device
 /// path without needing a multi-GiB image. FOR TESTS ONLY, for the same reason as
 /// hipdnnEnginePluginResetKpackModuleCacheForTesting above: the limit lives in a
-/// function-local static (Gfx950ConvDgradGeometry.hpp::batchChunkByteLimitForTesting()),
+/// function-local static (ConvDgradAotGeometry.hpp::batchChunkByteLimitForTesting()),
 /// and a test in another TU holds its own copy of that static unless it reaches through
 /// this exported symbol into the plugin's own.
 extern "C" HIPDNN_PLUGIN_EXPORT void
-    hipdnnEnginePluginSetGfx950ConvDgradAotBatchChunkByteLimitForTesting(int64_t limit)
+    hipdnnEnginePluginSetConvDgradAotBatchChunkByteLimitForTesting(int64_t limit)
 {
-    hip_kernel_provider::kernel_ingestor_engine::setGfx950ConvDgradAotBatchChunkByteLimitForTesting(
+    hip_kernel_provider::kernel_ingestor_engine::setConvDgradAotBatchChunkByteLimitForTesting(
         limit);
 }
 
@@ -81,9 +82,8 @@ extern "C" HIPDNN_PLUGIN_EXPORT void
 /// loaded plugin, one per batch slice, so a test can tell a sliced launch from a whole
 /// one. FOR TESTS ONLY, exported for the same reason as the hooks above.
 extern "C" HIPDNN_PLUGIN_EXPORT int64_t
-    hipdnnEnginePluginGfx950ConvDgradAotImplicitLaunchCountForTesting()
+    hipdnnEnginePluginConvDgradAotImplicitLaunchCountForTesting()
 {
-    return hip_kernel_provider::kernel_ingestor_engine::
-        gfx950ConvDgradAotImplicitLaunchCountForTesting();
+    return hip_kernel_provider::kernel_ingestor_engine::convDgradAotImplicitLaunchCountForTesting();
 }
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR
