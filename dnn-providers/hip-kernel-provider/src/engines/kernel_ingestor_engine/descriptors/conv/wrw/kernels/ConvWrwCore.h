@@ -192,7 +192,9 @@ __device__ inline T k3Elem(const Raw& v, int e)
 template <int N>
 __device__ inline void k3WaitLoads()
 {
-#if defined(__gfx1200__) || defined(__gfx1201__)
+    // An ISA-encoding split, so the whole major family: every gfx12 target (gfx12-generic
+    // included) has s_wait_loadcnt and no s_waitcnt vmcnt.
+#if defined(__GFX12__)
     asm volatile("s_wait_loadcnt %0" ::"n"(N) : "memory");
 #else
     asm volatile("s_waitcnt vmcnt(%0)" ::"n"(N) : "memory");

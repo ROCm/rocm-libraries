@@ -282,6 +282,7 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvIgemm.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvIgemmArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvIgemmCore.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm/kernels/ConvArchFamily.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm_nchw/kernels/ConvIgemmNchw.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm_nchw/kernels/ConvIgemmNchwArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/igemm_nchw/kernels/ConvIgemmNchwCore.h"
@@ -329,6 +330,7 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         kernels/ConvIgemm.cpp
         ConvIgemmArgs.h
         ConvIgemmCore.h
+        ConvArchFamily.h
         kernels/ConvIgemmNchw.cpp
         ConvIgemmNchwArgs.h
         ConvIgemmNchwCore.h

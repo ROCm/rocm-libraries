@@ -26,17 +26,10 @@
 #else
 #define K1_HAS_MFMA_BF16_1K 0
 #endif
-#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) \
-    || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)
-#define K1_HAS_WMMA11 1
-#else
-#define K1_HAS_WMMA11 0
-#endif
-#if defined(__gfx1200__) || defined(__gfx1201__)
-#define K1_HAS_WMMA12 1
-#else
-#define K1_HAS_WMMA12 0
-#endif
+// RDNA families, not chip lists, so a gfx11-generic / gfx12-generic build keeps its WMMA atoms.
+#include "ConvArchFamily.h"
+#define K1_HAS_WMMA11 HKP_ARCH_GFX11
+#define K1_HAS_WMMA12 HKP_ARCH_GFX12
 
 typedef _Float16 k1_half;
 typedef unsigned short k1_bf16; // bf16 bits
@@ -140,9 +133,7 @@ struct K1Raw<2>
 #ifndef K1_BUFFER
 #define K1_BUFFER 1
 #endif
-#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) \
-    || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)                      \
-    || defined(__gfx1200__) || defined(__gfx1201__)
+#if HKP_ARCH_GFX11 || HKP_ARCH_GFX12
 #define K1_RSRC_FLAGS 0x31004000
 #elif defined(__gfx1010__) || defined(__gfx1030__) || defined(__gfx1031__) || defined(__gfx1032__)
 #define K1_RSRC_FLAGS 0x31014000
