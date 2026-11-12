@@ -56,6 +56,7 @@ pub mod minmax;
 pub mod minmax3;
 pub mod model;
 pub mod pack;
+pub mod pack_coalesce;
 pub mod peep;
 pub mod q38;
 pub mod relief;
@@ -118,6 +119,7 @@ pub fn prepare(f: &mut MFunc) {
     if !crate::rir::debug_flag("nopack") {
         pack::run(f);
     }
+    pack_coalesce::run(f);
     masks::reuse(f);
     // rust-compiler-v2 lever `sgb`: `tile.sched_group_barrier` pipelines order the blocks that have them.
     if f.lever_anywhere("sgb") {
