@@ -527,6 +527,17 @@ TEST(TestConvDepthwiseMfmaLaunch, BackwardDataRunsTheReflectedForwardForm)
     EXPECT_FALSE(reflected->flip);
 }
 
+TEST(TestConvDepthwiseMfmaComputeType, ServesCudnnsComputeTypesPerElementType)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        expectCudnnComputeTypes(
+            baseShape(), {DataType::HALF, DataType::BFLOAT16}, [direction](const ConvShape& s) {
+                return graphAccepts(s, direction);
+            });
+    }
+}
+
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR && HIPDNN_ENGINE_CONV

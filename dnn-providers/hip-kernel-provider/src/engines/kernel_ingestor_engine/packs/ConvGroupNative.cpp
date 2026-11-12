@@ -16,6 +16,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelDispatchHandler.hpp>
@@ -416,7 +417,9 @@ std::optional<GroupProblem> channelsFirstInPlace(const GroupProblem& problem)
 std::optional<GroupWrwProblem> parseGroupWrwProblem(const MatchContext& context)
 {
     auto wrw = conv_wrw::parseWrwProblem(context);
-    if(!wrw.has_value())
+    // The K4 wrw kernels read x and dy in place, both packed channels-first or both packed
+    // channels-last; parseWrwProblem also serves other strides (K3's generic tier).
+    if(!wrw.has_value() || !(wrw->channelsFirst || wrw->channelsLast))
     {
         return std::nullopt;
     }
@@ -554,6 +557,42 @@ std::optional<GroupWrwLaunch>
     return launch;
 }
 
+GroupSplit groupSplitOf(const GroupProblem& problem)
+{
+    const auto& in = problem.phases.front().args;
+    const auto inElems = static_cast<int64_t>(in.n) * in.c * in.di * in.hi * in.wi;
+    const size_t first = problem.phases.front().expandOffset;
+    const size_t expandBytes
+        = expandedElements(problem) * static_cast<size_t>(problem.igemm.elementBytes);
+    const auto filterElems
+        = static_cast<int64_t>((problem.phases.back().expandOffset + expandBytes - first)
+                               / static_cast<size_t>(problem.igemm.elementBytes));
+    conv_tf32::SplitTensor x;
+    x.inner = inElems;
+    x.cg = 1;
+    x.pattern = conv_tf32::PATTERN_A;
+    conv_tf32::SplitTensor w;
+    w.inner = filterElems;
+    w.cg = 1;
+    w.pattern = conv_tf32::PATTERN_B;
+    x.outer = w.outer = 1;
+    GroupSplit split;
+    split.plan = conv_tf32::splitPlanFor(x, w);
+    split.offset = alignUp(problem.workspaceBytes);
+    split.workspaceBytes = split.offset + split.plan.bytes;
+    return split;
+}
+
+bool threeBf16Pays(const GroupProblem& problem, std::string_view gcnArchName)
+{
+    // Wide groups only: small groups multiply the block-diagonal expansion 16 / cg times over,
+    // and measured 0.3-0.8x of exact on gfx950 and gfx1201.
+    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
+    return problem.nbi > 0
+           && (arch == "gfx90a" || arch == "gfx942" || arch == "gfx950"
+               || arch.rfind("gfx11", 0) == 0 || arch.rfind("gfx12", 0) == 0);
+}
+
 } // namespace conv_group
 
 namespace
@@ -678,6 +717,8 @@ struct Tile
     /// planner's target workgroups a dispatch unit (1 to 16). 0 for the other directions'
     /// configs.
     int64_t bpu = 0;
+    /// 1: the three-bf16 form (TF32 permission) of a bf16 matrix-core config, for fp32 graphs.
+    int64_t math = 0;
 };
 
 /// The 16x16 atoms the wrw kernel runs (its chunks flatten the tile's positions, so the k-step
@@ -726,6 +767,16 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel, ConvDirection directi
     tile.nbo = kernel.getIntMetadata("nbo");
     const int64_t tw = kernel.getIntMetadata("tw");
     tile.bpu = kernel.getIntMetadata("bpu");
+    tile.math = kernel.getIntMetadata("math");
+    // Three-bf16: a bf16 wide-group config, forward or backward data, not phase-fused.
+    if(tile.math < 0 || tile.math > 1
+       || (tile.math == 1
+           && (tile.fma || tile.pf != 0 || tile.nbi == 0
+               || direction == ConvDirection::BACKWARD_WEIGHTS
+               || conv_igemm::atomElement(tile.atom) != "bf16")))
+    {
+        return std::nullopt;
+    }
     if(direction == ConvDirection::BACKWARD_WEIGHTS)
     {
         // A split target of at most 16 workgroups a unit, no other direction's knobs (the
@@ -924,14 +975,23 @@ bool kernelMatches(const MatchContext& context,
         return wrwFor(context, kernel, *tile).has_value();
     }
     const auto problem = problemFor(context, *direction, *tile);
+    // Three-bf16 (math 1): a bf16 atom for an fp32 graph, under TF32 permission only.
+    const bool x3 = tile->math == 1;
     if(!problem.has_value()
        || kernel.getStringMetadata("dtype")
               != data_objects::EnumNameDataType(problem->igemm.base.dataType)
        || !conv_igemm::atomRunsOn(tile->atom, context.deviceProperties.gcnArchName)
-       || (!tile->fma
+       || (!tile->fma && !x3
            && conv_igemm::atomElement(tile->atom)
                   != conv_igemm::dataElement(problem->igemm.base.dataType))
        || tile->info.tf32)
+    {
+        return false;
+    }
+    if(x3
+       && (problem->igemm.base.dataType != data_objects::DataType::FLOAT
+           || !conv_igemm::tf32Permitted()
+           || !conv_group::threeBf16Pays(*problem, context.deviceProperties.gcnArchName)))
     {
         return false;
     }
@@ -955,7 +1015,9 @@ bool kernelMatches(const MatchContext& context,
     // The LDS the kernel takes: its compile-time filter and gather stride (backward data's
     // stride phases gather at unit stride over the taps a phase reaches); the phase-fused kernel
     // adds its output tile.
-    const int bytes = problem->igemm.elementBytes;
+    // Three-bf16 stages bf16 and writes fp32.
+    const int bytes = x3 ? 2 : problem->igemm.elementBytes;
+    const int outBytes = x3 ? 4 : bytes;
     const auto th = static_cast<int>(tile->th), tw = static_cast<int>(tile->tw);
     // Wide groups stage nbi blocks of a group's channels (cb's role).
     const auto cb = static_cast<int>(tile->nbi != 0 ? tile->nbi : tile->cb);
@@ -975,9 +1037,11 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    // A wide channels-first config parks its output tile in the halo.
-    if(tile->nbi != 0 && tile->cf != 0 && tile->pf == 0
-       && static_cast<long long>(th) * 16 * tile->nbo * (tw + 1) * bytes > lds)
+    // A channels-first config parks its output tile in the halo.
+    if(tile->cf != 0 && tile->pf == 0
+       && static_cast<long long>(th) * 16 * (tile->nbi != 0 ? tile->nbo : tile->cb) * (tw + 1)
+                  * outBytes
+              > lds)
     {
         return false;
     }
@@ -1018,14 +1082,34 @@ public:
                       std::array<std::optional<IngestorKernelCode>, 2> copies,
                       GroupProblem problem,
                       std::vector<conv_group::GroupLaunch> launches,
-                      std::vector<unsigned int> blocks)
+                      std::vector<unsigned int> blocks,
+                      std::optional<IngestorKernelCode> split,
+                      conv_group::GroupSplit splitPlan)
         : _conv(std::move(conv))
         , _expand(std::move(expand))
         , _copies(std::move(copies))
         , _problem(std::move(problem))
         , _launches(std::move(launches))
         , _blocks(std::move(blocks))
+        , _split(std::move(split))
+        , _splitPlan(splitPlan)
     {
+    }
+
+    /// Three-bf16: the split kernel (nullopt otherwise) and its plan.
+    bool split() const
+    {
+        return _split.has_value();
+    }
+
+    compilation::IRunnableKernel& splitForStream(hipStream_t stream) const
+    {
+        return _split->kernelForStream(stream);
+    }
+
+    const conv_group::GroupSplit& splitPlan() const
+    {
+        return _splitPlan;
     }
 
     /// The kernel's launches and each one's workgroups.
@@ -1072,6 +1156,8 @@ private:
     GroupProblem _problem;
     std::vector<conv_group::GroupLaunch> _launches;
     std::vector<unsigned int> _blocks;
+    std::optional<IngestorKernelCode> _split;
+    conv_group::GroupSplit _splitPlan;
 };
 
 /// Backward weights: the kernel (partials) and the reduce (dw).
@@ -1149,7 +1235,12 @@ public:
             return wrw.has_value() ? wrw->second.workspaceBytes : 0;
         }
         const auto problem = problemFor(context, *direction, *tile);
-        return problem.has_value() ? problem->workspaceBytes : 0;
+        if(!problem.has_value())
+        {
+            return 0;
+        }
+        return tile->math == 1 ? conv_group::groupSplitOf(*problem).workspaceBytes
+                               : problem->workspaceBytes;
     }
 
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
@@ -1200,7 +1291,20 @@ public:
         }
 
         compilation::KernelCompileOptions options(context.deviceProperties.gcnArchName);
-        options.add("CONV_GROUP_T", elementTypeFor(problem->igemm.base.dataType));
+        // Three-bf16: the bf16 kernel over three parts writing fp32, plus the split. The staging
+        // and the filter expansion stay fp32 (their element size is a runtime argument).
+        const bool x3 = tile->math == 1;
+        if(x3)
+        {
+            options.add("CONV_GROUP_T", std::string("unsigned short"));
+            options.add("CONV_GROUP_TO", std::string("float"));
+            options.add("CONV_GROUP_P", std::string("3"));
+            options.add(std::string(conv_tf32::SPLIT_DEFINE), std::string("1"));
+        }
+        else
+        {
+            options.add("CONV_GROUP_T", elementTypeFor(problem->igemm.base.dataType));
+        }
         if(tile->fma)
         {
             options.add("CONV_GROUP_FMA", std::string("1"));
@@ -1294,12 +1398,21 @@ public:
             copy.setGridSize(static_cast<unsigned int>(grid), 1, 1);
             copies[i].emplace(std::move(copy));
         }
+        std::optional<IngestorKernelCode> split;
+        conv_group::GroupSplit splitPlan;
+        if(x3)
+        {
+            splitPlan = conv_group::groupSplitOf(*problem);
+            split = splitKernelCode(context, kernel, options, splitPlan);
+        }
         return std::make_unique<PreparedConvGroup>(std::move(conv),
                                                    std::move(expand),
                                                    std::move(copies),
                                                    *problem,
                                                    *launches,
-                                                   std::move(blocks));
+                                                   std::move(blocks),
+                                                   std::move(split),
+                                                   splitPlan);
     }
 
     void launch(const Handle& handle,
@@ -1374,12 +1487,35 @@ public:
             expand.dst = base + phase.expandOffset;
             dispatch.expandForStream(stream).launch(stream, expand);
         }
+        // Three-bf16: the kernel's input and every phase's expanded filter split into parts.
+        const void* in = forward ? operand[0] : operand[1];
+        const size_t firstExpand = problem.phases.front().expandOffset;
+        char* splitFilter = nullptr;
+        if(dispatch.split())
+        {
+            const auto& plan = dispatch.splitPlan();
+            const auto split
+                = conv_tf32::splitArgsFor(plan.plan, in, base + firstExpand, base + plan.offset);
+            dispatch.splitForStream(stream).launch(stream, split);
+            in = split.t[0].dst;
+            splitFilter = reinterpret_cast<char*>(split.t[1].dst);
+        }
         for(size_t i = 0; i < dispatch.launches().size(); ++i)
         {
             const auto& launch = dispatch.launches()[i];
             K4Args args = launch.args;
-            args.in = forward ? operand[0] : operand[1];
+            args.in = in;
             args.w = base + problem.phases[launch.phase].expandOffset;
+            if(splitFilter != nullptr)
+            {
+                // The phase's filter at its fp32 element offset, in bf16 parts.
+                const auto& plan = dispatch.splitPlan().plan;
+                const size_t element = (problem.phases[launch.phase].expandOffset - firstExpand)
+                                       / static_cast<size_t>(igemm.elementBytes);
+                args.w = splitFilter + element * 2;
+                args.xps = plan.a.inner;
+                args.wpt = plan.b.inner;
+            }
             args.out = forward ? operand[1] : operand[0];
             auto& conv = dispatch.convForStream(stream);
             conv.setGridSize(dispatch.blocks()[i], 1, 1);
@@ -1484,6 +1620,25 @@ private:
             = hipdnn_plugin_sdk::findDeviceBuffer(problem.dwUid, deviceBuffers, numDeviceBuffers)
                   .ptr;
         dispatch.reduceForStream(stream).launch(stream, reduce);
+    }
+
+    /// The three-bf16 split kernel of @p kernel's module (same options) for @p plan.
+    IngestorKernelCode splitKernelCode(const MatchContext& context,
+                                       const KernelDefinition& kernel,
+                                       const compilation::KernelCompileOptions& options,
+                                       const conv_group::GroupSplit& plan) const
+    {
+        KernelDefinition splitKernel = kernel;
+        splitKernel.source.entryPoint = std::string(conv_tf32::SPLIT_ENTRY_POINT);
+        auto split = buildIngestorKernelCode(_kernelCompiler,
+                                             _kpackLoader,
+                                             context,
+                                             splitKernel,
+                                             options,
+                                             signatureOf<K1Split3Args>());
+        split.setBlockSize(COPY_BLOCK, 1, 1);
+        split.setGridSize(plan.plan.grid, 1, 1);
+        return split;
     }
 
     static constexpr long long MAX_GRID_BLOCKS = std::numeric_limits<int>::max();

@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 #include "compilation/KpackModuleCache.hpp"
 
@@ -94,6 +95,70 @@ TEST(TestKpackArchSelection, AGenericEntryServesAMemberDevice)
     const std::string* other = selectKpackArchiveArch(arches, "gfx942");
     ASSERT_NE(other, nullptr);
     EXPECT_EQ(*other, "gfx942");
+}
+
+// The opt-out: exact entries are still chosen, generic ones never.
+TEST(TestKpackArchSelection, AnExplicitEntryIsChosenWithGenericEntriesRefused)
+{
+    const std::vector<std::string> arches{"gfx11-generic", "gfx1151"};
+
+    const std::string* selected = selectKpackArchiveArch(arches, "gfx1151:xnack-", false);
+
+    ASSERT_NE(selected, nullptr);
+    EXPECT_EQ(*selected, "gfx1151");
+}
+
+TEST(TestKpackArchSelection, AGenericEntryIsChosenWhenAllowed)
+{
+    const std::vector<std::string> arches{"gfx1100", "gfx11-generic"};
+
+    const std::string* selected = selectKpackArchiveArch(arches, "gfx1101", true);
+
+    ASSERT_NE(selected, nullptr);
+    EXPECT_EQ(*selected, "gfx11-generic");
+}
+
+TEST(TestKpackArchSelection, AGenericEntryIsRefusedWhenDisabled)
+{
+    const std::vector<std::string> arches{"gfx1100", "gfx11-generic", "gfx12-generic"};
+
+    EXPECT_EQ(selectKpackArchiveArch(arches, "gfx1101", false), nullptr);
+    EXPECT_EQ(selectKpackArchiveArch(arches, "gfx1201", false), nullptr);
+    // Not a generic refusal for the exact entry.
+    ASSERT_NE(selectKpackArchiveArch(arches, "gfx1100", false), nullptr);
+}
+
+TEST(TestKpackArchSelection, TheEnvironmentVariableRefusesGenericEntries)
+{
+    const std::vector<std::string> arches{"gfx1100", "gfx11-generic"};
+
+    {
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter unset(
+            DISABLE_GENERIC_CODE_OBJECTS_ENV);
+        EXPECT_FALSE(genericCodeObjectsDisabled());
+        const std::string* selected = selectKpackArchiveArch(arches, "gfx1151");
+        ASSERT_NE(selected, nullptr);
+        EXPECT_EQ(*selected, "gfx11-generic");
+    }
+    for(const char* on : {"1", "true", "ON", " yes "})
+    {
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter disable(
+            DISABLE_GENERIC_CODE_OBJECTS_ENV, on);
+        SCOPED_TRACE(on);
+        EXPECT_TRUE(genericCodeObjectsDisabled());
+        EXPECT_EQ(selectKpackArchiveArch(arches, "gfx1151"), nullptr);
+        const std::string* exact = selectKpackArchiveArch(arches, "gfx1100");
+        ASSERT_NE(exact, nullptr);
+        EXPECT_EQ(*exact, "gfx1100");
+    }
+    for(const char* off : {"0", "false", ""})
+    {
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter keep(
+            DISABLE_GENERIC_CODE_OBJECTS_ENV, off);
+        SCOPED_TRACE(off);
+        EXPECT_FALSE(genericCodeObjectsDisabled());
+        EXPECT_NE(selectKpackArchiveArch(arches, "gfx1151"), nullptr);
+    }
 }
 
 } // namespace

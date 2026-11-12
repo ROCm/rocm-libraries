@@ -97,3 +97,26 @@ struct ConvIgemmTransposeArgs
     int elementBytes;
     int padding0;
 };
+
+/// Three-bf16 operand split along a channel axis (TF32 pre-pass of the engines that run an fp32
+/// graph as a bf16 problem with a tripled reduction): a packed fp32 tensor viewed as
+/// [outer][groups][cg][inner] becomes bf16 [outer][groups][3 cg][inner], channel block `part`
+/// (0, 1, 2) of each group holding by 2 bits of `pattern` the high part (0), the low part (1) or
+/// the high part with infinities zeroed (2: the block that meets the other operand's low part).
+struct K1Split3Tensor
+{
+    const float* src;
+    unsigned short* dst;
+    long long outer;
+    long long inner;
+    int groups;
+    int cg;
+    int pattern;
+    int padding0;
+};
+
+/// The two operands one launch splits (an absent one: src null).
+struct K1Split3Args
+{
+    K1Split3Tensor t[2];
+};

@@ -37,6 +37,10 @@ struct K4Args
     int fph[2];
     int fpw[2];
     long long wps;
+    // Three-bf16 (CONV_GROUP_P 3): the element stride between the input's and the expanded
+    // filter's three parts (hi | hi' | lo and hi | lo | hi'); unused otherwise.
+    long long xps;
+    long long wpt;
 };
 
 /// The filter expansion: w16[block][tap][n][k] for taps (v, q, u) < (tc, rc, sc) from the

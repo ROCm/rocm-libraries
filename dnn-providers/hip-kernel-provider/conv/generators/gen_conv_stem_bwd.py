@@ -2,7 +2,11 @@
 # Each config is admitted on correctness alone (its atom on the device and taking the graph's
 # dtype, its layout dy's, its strides and window the problem's, its GEMM columns at least the
 # channels times the phases, its LDS within the device's); autotune (UHD later) ranks them.
-#   python3 gen_conv_stem_bwd.py <descriptors/conv/stem_bwd>
+#   python3 gen_conv_stem_bwd.py <descriptors/conv/stem_bwd> [--universe]
+#
+# build() enumerates the config space (the universe). The catalog ships the configs listed in
+# conv_stem_bwd_kept.txt beside this script; --universe writes every config instead, the input
+# of a per-config bench that re-selects the list (the list's header says how).
 #
 # The window of one axis: offset floor((s - 1 + p) / s), extent offset - ceil((p - f + 1) / s) + 1
 # (ConvStemBwdProblem.cpp windowOf). GEOMETRIES lists the (stride, extent) pairs the catalog
@@ -12,7 +16,11 @@
 import json, pathlib, sys, uuid
 
 out = pathlib.Path(sys.argv[1])
+UNIVERSE = sys.argv[2:] == ["--universe"]
+if sys.argv[2:] not in ([], ["--universe"]):
+    sys.exit("usage: gen_conv_stem_bwd.py <dir> [--universe]")
 out.mkdir(parents=True, exist_ok=True)
+KEPT_FILE = pathlib.Path(__file__).with_name("conv_stem_bwd_kept.txt")
 NS_UUID = uuid.UUID("8f0c6a52-1d3e-4b7a-9c25-e4f1a0b3d7c9")
 U = lambda name: str(uuid.uuid5(NS_UUID, "conv_stem_bwd." + name))
 
@@ -291,20 +299,24 @@ def emit(catalog):
     tuples = set()
     for stale in out.glob("conv_stem_bwd*.kdp.json"):
         stale.unlink()
+    kept = None if UNIVERSE else read_kept()
+    if kept is not None:
+        universe = {config_name(d, c) for d, cfgs in catalog.items() for c in cfgs}
+        stale = sorted(kept - universe)
+        if stale:
+            sys.exit(
+                f"{KEPT_FILE.name} lists configs the generator no longer makes: {stale[:5]}"
+            )
     for dtype, cfgs in catalog.items():
-        dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
+        dt = DT[dtype]
         packs = {}
+        if kept is not None:
+            cfgs = [c for c in cfgs if config_name(dtype, c) in kept]
         for i, c in enumerate(cfgs):
             fam = family_of(c["atom"])
             fam = "fma906" if fam == "fma" and dtype != "FLOAT" else fam
             pack = packs.setdefault(fam, [])
-            lay = ["nchw", "nhwc"][c["layout"]]
-            name = (
-                f"conv_stem_bwd.{dt}.{c['atom']}.{lay}.v{c['vec']}.s{c['sh']}x{c['sw']}"
-                f".w{c['u']}x{c['v']}.nb{c['nb']}.kc{c['kc']}.t{c['th']}f{c['fm']}"
-                + (f".d{c['ft']}" if c["ft"] else "")
-                + (f".sd{c['sd']}" if c["sd"] else "")
-            )
+            name = config_name(dtype, c)
             key = (dtype,) + tuple(c[f] for f in INTS)
             assert key not in tuples, name
             tuples.add(key)
@@ -343,6 +355,30 @@ def emit(catalog):
     return total
 
 
+DT = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}
+
+
+def config_name(dtype, c):
+    lay = ["nchw", "nhwc"][c["layout"]]
+    return (
+        f"conv_stem_bwd.{DT[dtype]}.{c['atom']}.{lay}.v{c['vec']}.s{c['sh']}x{c['sw']}"
+        f".w{c['u']}x{c['v']}.nb{c['nb']}.kc{c['kc']}.t{c['th']}f{c['fm']}"
+        + (f".d{c['ft']}" if c["ft"] else "")
+        + (f".sd{c['sd']}" if c["sd"] else "")
+    )
+
+
+def read_kept():
+    """The shipped configs' names: one per line of conv_stem_bwd_kept.txt; # starts a comment."""
+    names = set()
+    for line in KEPT_FILE.read_text().splitlines():
+        name = line.split("#", 1)[0].strip()
+        if name:
+            assert name not in names, f"{name} listed twice"
+            names.add(name)
+    return names
+
+
 def family_of(atom):
     if atom == "fma":
         return "fma"
@@ -358,6 +394,10 @@ def family_of(atom):
 
 if __name__ == "__main__":
     cat = build()
-    print(emit(cat), "kernel configs")
+    print(
+        emit(cat),
+        "kernel configs",
+        "(the universe)" if UNIVERSE else f"(of {KEPT_FILE.name})",
+    )
     for dtype, cfgs in cat.items():
-        print(" ", dtype, len(cfgs))
+        print("  universe", dtype, len(cfgs))

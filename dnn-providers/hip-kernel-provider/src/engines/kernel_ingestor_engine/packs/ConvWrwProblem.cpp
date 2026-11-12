@@ -666,6 +666,56 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
                                       const WrwConfig& config,
                                       const hipdnn_plugin_sdk::ingestor::DeviceProperties& device)
 {
+    if(config.math != 0)
+    {
+        // Three-bf16: the bf16 config on 3N images of split x and dy (x hi dy hi + x hi dy lo +
+        // x lo dy hi), partials and reduce as ever (the reduce writes fp32 dw). TF32 permission
+        // only, fp32 graphs only; the direct dw store would write bf16, so dws 0. The split
+        // copies x and dy whole, images outermost, so both must be packed (channels-first or
+        // channels-last); not the generic tier (loop 8) or the block-based buffer forms (pb).
+        if(config.math != 1 || problem.base.dataType != data_objects::DataType::FLOAT
+           || !conv_igemm::tf32Permitted() || conv_igemm::atomElement(config.atom) != "bf16"
+           || config.dws != 0 || config.loop == LOOP_GENERIC || config.pb != 0
+           || !(problem.channelsFirst || problem.channelsLast)
+           || problem.base.args.n * 3 > INT_LIMIT || !threeBf16Pays(problem, device.gcnArchName))
+        {
+            return std::nullopt;
+        }
+        WrwProblem split = problem;
+        split.base.dataType = data_objects::DataType::BFLOAT16;
+        split.elementBytes = 2;
+        split.base.args.n = problem.base.args.n * 3;
+        WrwConfig plain = config;
+        plain.math = 0;
+        auto launch = wrwLaunchFor(split, plain, device);
+        if(!launch.has_value())
+        {
+            return std::nullopt;
+        }
+        const auto& a = problem.base.args;
+        const auto xElems = pack_features::checkedProduct(
+            {a.n, a.c, a.inSpatial[0], a.inSpatial[1], a.inSpatial[2]});
+        const auto yElems = pack_features::checkedProduct(
+            {a.n, a.k, a.outSpatial[0], a.outSpatial[1], a.outSpatial[2]});
+        if(!xElems.has_value() || !yElems.has_value())
+        {
+            return std::nullopt;
+        }
+        // xs (3 x xElems bf16), ys (3 x yElems bf16), each from a 256-byte boundary.
+        const auto align = [](int64_t bytes) { return (bytes + 255) / 256 * 256; };
+        const int64_t xsBytes = align(*xElems * 3 * 2);
+        const int64_t splitBytes = xsBytes + align(*yElems * 3 * 2);
+        launch->split = true;
+        launch->splitYOffset = static_cast<size_t>(xsBytes);
+        launch->splitBytes = static_cast<size_t>(splitBytes);
+        launch->splitArgs.xElems = *xElems;
+        launch->splitArgs.yElems = *yElems;
+        launch->splitGrid = static_cast<unsigned int>(
+            std::min<int64_t>(divUp(std::max(*xElems, *yElems), 256), int64_t{1} << 16));
+        launch->workspaceBytes += static_cast<size_t>(splitBytes);
+        return launch;
+    }
+
     // The atom: known, its id, on this device, taking the graph's element type. "fma" is the
     // FMA ring's, which takes fp32 only (16-bit runs on the matrix cores everywhere).
     const auto atomId = atomIdOf(config.atom);
@@ -1209,6 +1259,25 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     return launch;
 }
 
+bool threeBf16Pays(const WrwProblem& problem, std::string_view gcnArchName)
+{
+    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
+    const auto& a = problem.base.args;
+    const int64_t cg = a.c / a.groups;
+    const int64_t kg = a.k / a.groups;
+    const int64_t taps = problem.taps;
+    if(arch == "gfx942" || arch == "gfx950")
+    {
+        const bool unitStride = a.stride[0] == 1 && a.stride[1] == 1 && a.stride[2] == 1;
+        return unitStride && taps >= 9 && cg >= 128 && kg >= 64;
+    }
+    if(arch.rfind("gfx11", 0) == 0 || arch.rfind("gfx12", 0) == 0)
+    {
+        return cg <= 4 || (cg >= 256 && taps >= 9);
+    }
+    return false;
+}
+
 std::vector<std::pair<std::string, std::string>> compileDefinesFor(data_objects::DataType dataType,
                                                                    const WrwConfig& config,
                                                                    std::string_view kernelType)
@@ -1228,7 +1297,16 @@ std::vector<std::pair<std::string, std::string>> compileDefinesFor(data_objects:
     default:
         throw std::invalid_argument("conv_wrw: unsupported element type");
     }
-    std::vector<std::pair<std::string, std::string>> defines{{"CONV_K3_T", element}};
+    // Three-bf16: the bf16 kernel, ConvWrwSplit (CONV_K3_MATH), and fp32 dw from the reduces
+    // (CONV_K3_TO). Defined only then, so no other config's code changes.
+    const bool split = config.math == 1 && dataType == data_objects::DataType::FLOAT;
+    std::vector<std::pair<std::string, std::string>> defines{
+        {"CONV_K3_T", split ? std::string("unsigned short") : element}};
+    if(split)
+    {
+        defines.emplace_back("CONV_K3_TO", "float");
+        defines.emplace_back("CONV_K3_MATH", "1");
+    }
     if(!kernelType.empty())
     {
         defines.emplace_back("CONV_K3_ATOM", std::string(kernelType));

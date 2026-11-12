@@ -46,6 +46,7 @@ struct ConvGemmShape
     int64_t imagePadding = 0;
     conv_data_objects::DataType dataType = conv_data_objects::DataType::FLOAT;
     conv_data_objects::ConvMode mode = conv_data_objects::ConvMode::CROSS_CORRELATION;
+    conv_data_objects::DataType computeType = conv_data_objects::DataType::FLOAT;
 
     std::vector<int64_t> output() const
     {
@@ -177,8 +178,7 @@ inline flatbuffers::FlatBufferBuilder buildConvGemmGraph(const ConvGemmShape& sh
     }
 
     std::vector<flatbuffers::Offset<conv_data_objects::Node>> nodes{
-        conv_data_objects::CreateNodeDirect(
-            builder, "conv", conv_data_objects::DataType::FLOAT, type, attributes)};
+        conv_data_objects::CreateNodeDirect(builder, "conv", shape.computeType, type, attributes)};
     builder.Finish(conv_data_objects::CreateGraphDirect(builder,
                                                         "conv_gemm_test",
                                                         conv_data_objects::DataType::UNSET,

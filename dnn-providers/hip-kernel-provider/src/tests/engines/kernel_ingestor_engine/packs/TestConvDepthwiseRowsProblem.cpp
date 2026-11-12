@@ -637,6 +637,19 @@ TEST(TestConvDepthwiseRowsLaunch, ReflectsTheFilterPerForm)
     EXPECT_TRUE(reflected->flip);
 }
 
+TEST(TestConvDepthwiseRowsComputeType, ServesCudnnsComputeTypesPerElementType)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    const auto pack = packFor(ConvDirection::FORWARD);
+    expectCudnnComputeTypes(dilated2d(),
+                            {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16},
+                            [&pack](const ConvShape& s) {
+                                const GraphFixture fixture(
+                                    buildGraph(specFor(s, ConvDirection::FORWARD)));
+                                return matchesGraph(pack, fixture.context()).has_value();
+                            });
+}
+
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR && HIPDNN_ENGINE_CONV

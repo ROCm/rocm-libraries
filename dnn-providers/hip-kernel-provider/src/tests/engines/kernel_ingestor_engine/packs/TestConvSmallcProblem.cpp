@@ -552,6 +552,13 @@ TEST(TestConvSmallcPlan, TilesGridAndFormattedWeights)
     EXPECT_EQ(plan->weightBytes, static_cast<size_t>(64 * 176 * 2));
 }
 
+TEST(TestConvSmallcComputeType, ServesCudnnsComputeTypesPerElementType)
+{
+    expectCudnnComputeTypes(stemShape(),
+                            {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16},
+                            [](const ConvShape& s) { return graphAccepts(s); });
+}
+
 } // namespace
 
 #endif
