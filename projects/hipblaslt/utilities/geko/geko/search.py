@@ -312,8 +312,9 @@ def run(
 
     def _res_row_to_gemm_key(row) -> tuple:
         # GEMM_FIELDS and GEMM_LOG_FIELDS share the same field order (only
-        # m/n/k vs M/N/K differ in name case), so this is comparable to
-        # _config_to_gemm_key()'s output for the same GEMM.
+        # m/n/k vs M/N/K differ in name case; enforced by an assert in
+        # constants.py), so this is comparable to _config_to_gemm_key()'s
+        # output for the same GEMM.
         key = [row[c] for c in GEMM_FIELDS]
         index = GEMM_FIELDS.index("compute_type")
         key[index] = _normalize_compute_type(key[index])
