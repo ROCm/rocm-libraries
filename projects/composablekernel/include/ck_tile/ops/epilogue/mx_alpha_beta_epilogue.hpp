@@ -69,6 +69,11 @@ struct MxAlphaBetaEpilogue
     /// columns past N (inside the next row) need the windows' checks.
     static constexpr bool kCheckBounds =
         Pipeline::kPadN || (Pipeline::LargeTensors && Pipeline::kPadM);
+    /// Static Y moves offset each access from the thread's first one, whose coordinate alone is
+    /// checked: only right while the accesses move in M alone (one vector holds the thread's
+    /// N repeat) and rows past M are dropped by the buffer.
+    static constexpr bool kStaticMoveYs = (!Pipeline::kPadN || kStoreWidth == Pipeline::kRn) &&
+                                          !(Pipeline::LargeTensors && Pipeline::kPadM);
 
     static_assert(
         kStoreWidth >= 1 && kStoreWidth <= kSpec.max_store_width() &&
@@ -188,7 +193,8 @@ struct MxAlphaBetaEpilogue
                 out.get_thread_buffer().template set_as<OVec>(number<at_group / kStoreWidth>{},
                                                               bit_cast<OVec>(Pack(part)));
             });
-            out_window.store(out, i_access, bool_constant<kCheckBounds>{}, bool_constant<true>{});
+            out_window.store(
+                out, i_access, bool_constant<kCheckBounds>{}, bool_constant<kStaticMoveYs>{});
         });
     }
 
@@ -235,7 +241,7 @@ struct MxAlphaBetaEpilogue
                 d,
                 [&](auto i_access) {
                     c_window.load(
-                        c, i_access, bool_constant<kCheckBounds>{}, bool_constant<true>{});
+                        c, i_access, bool_constant<kCheckBounds>{}, bool_constant<kStaticMoveYs>{});
                 },
                 [&](float v, auto at) {
                     return finish(a * v + b * type_convert<float>(c.get_thread_buffer()[at]));
