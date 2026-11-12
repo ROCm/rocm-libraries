@@ -111,7 +111,7 @@ jobs:
 
   linux_code_coverage_build_and_test:
     name: Linux::CodeCoverage::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
-    needs: [linux_build_and_test]
+    needs: [setup, linux_build_and_test]
     # Run once linux_build_and_test finishes regardless of pass/fail (tests can
     # fail), but skip if that job was skipped or the run was cancelled.
     if: ${{ !cancelled() && needs.linux_build_and_test.result != 'skipped' }}
@@ -128,6 +128,9 @@ jobs:
       # instrumented build is blocked/unsupported stay excluded without edits here.
       projects_to_test: "rocm_libraries_all"
       test_type: "standard"
+      # Build the rocm-libraries commit under test instead of TheRock's pinned
+      # submodule (an empty value makes fetch_sources.py clone the pin).
+      external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       # Cross-repo call: pin the reusable workflow's own repo/ref so its
       # checkout finds TheRock scripts (defaults to the caller otherwise).
       repository: ROCm/TheRock
