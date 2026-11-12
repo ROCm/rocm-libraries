@@ -708,6 +708,21 @@ void runWrwCase(const WrwCase& wrwCase)
         handler.launch(
             handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
         ASSERT_EQ(hipStreamSynchronize(handle.getStream()), hipSuccess);
+        // Deterministic: a second run over a re-poisoned workspace gives the same bits.
+        const size_t dwBytes = static_cast<size_t>(w.elementCount()) * sizeof(T);
+        std::vector<unsigned char> first(dwBytes), second(dwBytes);
+        ASSERT_EQ(hipMemcpy(first.data(), w.rawDeviceData(), dwBytes, hipMemcpyDeviceToHost),
+                  hipSuccess);
+        if(workspace != nullptr)
+        {
+            ASSERT_EQ(hipMemset(workspace, 0x5a, workspaceBytes), hipSuccess);
+        }
+        handler.launch(
+            handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
+        ASSERT_EQ(hipStreamSynchronize(handle.getStream()), hipSuccess);
+        ASSERT_EQ(hipMemcpy(second.data(), w.rawDeviceData(), dwBytes, hipMemcpyDeviceToHost),
+                  hipSuccess);
+        EXPECT_TRUE(first == second) << "two runs differ";
         if(workspace != nullptr)
         {
             ASSERT_EQ(hipFree(workspace), hipSuccess);
