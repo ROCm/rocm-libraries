@@ -513,8 +513,13 @@ TEST(HipcubDeviceMerge, MergeLargeSizeIterators)
             = test_utils::counting_iterator<key_type>(key_type{static_cast<key_type>(size1)});
 
         // The output is copied back and checked in chunks to keep host memory usage low.
+        // Host and device memory are shared on APUs, so each buffer is allocated right
+        // after its check so that the next check sees it as used.
         const size_t chunk_size = std::min(output_size, size_t{1} << 24);
         MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, 2 * chunk_size)
+        std::vector<key_type> keys_output(chunk_size);
+        std::vector<key_type> expected(chunk_size);
+
         MEMCHECK_OR_BREAK_ALLOC_DEVICE(key_type, output_size)
         key_type* d_keys_output;
         HIP_CHECK(
@@ -562,8 +567,6 @@ TEST(HipcubDeviceMerge, MergeLargeSizeIterators)
         HIP_CHECK(hipDeviceSynchronize());
 
         // Check if keys_output values are as expected
-        std::vector<key_type> keys_output(chunk_size);
-        std::vector<key_type> expected(chunk_size);
         for(size_t offset = 0; offset < output_size; offset += chunk_size)
         {
             SCOPED_TRACE(testing::Message() << "with chunk offset = " << offset);
