@@ -1314,8 +1314,10 @@ bool admitsWrw(const ConfigFields& fields,
            && matchesKernel(PACK_WRW, fixture.context(), wrwKernelOf(fields, dtype), *bound);
 }
 
-TEST(TestConvWinogradWrwKernelMatch, FmaRunsEverywhereForEveryDtypeAndBothTiles)
+TEST(TestConvWinogradWrwKernelMatch, FmaRunsEverywhereWithinEachDtypesErrorBand)
 {
+    // fp32 operands on every arch; fp32 graphs stop at F(3,4) (F(3,6) measured past MIOpen's
+    // Winograd summation error).
     for(const auto* arch : {"gfx906", "gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1201"})
     {
         for(const auto* dtype : {"FLOAT", "HALF", "BFLOAT16"})
@@ -1325,7 +1327,9 @@ TEST(TestConvWinogradWrwKernelMatch, FmaRunsEverywhereForEveryDtypeAndBothTiles)
                 auto f = wrwFma();
                 f.m = r;
                 SCOPED_TRACE(std::string(arch) + " " + dtype + " r" + std::to_string(r));
-                EXPECT_TRUE(admitsWrw(f, arch, baseShape(), dtype));
+                // (baseShape's K is 84: fp32 F(3,4) needs 512.)
+                EXPECT_EQ(admitsWrw(f, arch, baseShape(), dtype),
+                          r == 2 || std::string(dtype) != "FLOAT");
             }
         }
     }
@@ -1343,23 +1347,44 @@ TEST(TestConvWinogradWrwKernelMatch, ReadsItsOwnLayoutAndStagesOthersToNchw)
     EXPECT_FALSE(admitsWrw(wrwFma(), "gfx942", channelsLast));
 }
 
+TEST(TestConvWinogradWrwKernelMatch, Fp32FourByThreeFromFiveHundredTwelveProducts)
+{
+    // fp32 F(3,4)'s summation error is inside the band from K = N x Ho x Wo = 512 on.
+    auto f4 = wrwFma();
+    f4.m = 4;
+    auto shape = baseShape(); // n 2, 7 x 6: K 84
+    EXPECT_FALSE(admitsWrw(f4, "gfx942", shape, "FLOAT"));
+    EXPECT_TRUE(admitsWrw(f4, "gfx942", shape, "HALF"));
+    EXPECT_TRUE(admitsWrw(wrwFma(), "gfx942", shape, "FLOAT"));
+    shape.input = {16, 16}; // K 512
+    EXPECT_TRUE(admitsWrw(f4, "gfx942", shape, "FLOAT"));
+    shape.input = {16, 15}; // K 480
+    EXPECT_FALSE(admitsWrw(f4, "gfx942", shape, "FLOAT"));
+}
+
 TEST(TestConvWinogradWrwKernelMatch, MatrixCoreAtomsOnlyOnTheirFamilies)
 {
-    // MFMA 16x16 (gfx908 and later CDNA): every dtype (fp32 through the f32 MFMA; bf16 on
-    // gfx908 through its half-rate atom).
-    for(const auto* dtype : {"FLOAT", "HALF", "BFLOAT16"})
+    // MFMA 16x16 (gfx908 and later CDNA): F(3,2) on fp32 and fp16 operands; bf16 graphs only
+    // on fp32 operands (F(3,4) / F(3,6)).
+    auto bf16Tile = wrwAtom("gfx9");
+    bf16Tile.m = 4;
+    for(const auto* device : {"gfx908", "gfx950"})
     {
-        EXPECT_TRUE(admitsWrw(wrwAtom("gfx9"), "gfx908", baseShape(), dtype));
-        EXPECT_TRUE(admitsWrw(wrwAtom("gfx9"), "gfx950", baseShape(), dtype));
+        EXPECT_TRUE(admitsWrw(wrwAtom("gfx9"), device, baseShape(), "FLOAT"));
+        EXPECT_TRUE(admitsWrw(wrwAtom("gfx9"), device, baseShape(), "HALF"));
+        EXPECT_FALSE(admitsWrw(wrwAtom("gfx9"), device, baseShape(), "BFLOAT16"));
+        EXPECT_TRUE(admitsWrw(bf16Tile, device, baseShape(), "BFLOAT16"));
     }
     EXPECT_FALSE(admitsWrw(wrwAtom("gfx9"), "gfx906"));
     EXPECT_FALSE(admitsWrw(wrwAtom("gfx9"), "gfx1201"));
-    // gfx950's 16x16x32: gfx950 only, 16-bit only.
+    // gfx950's 16x16x32: gfx950 only, fp16 only.
     EXPECT_TRUE(admitsWrw(wrwAtom("gfx950"), "gfx950", baseShape(), "HALF"));
     EXPECT_FALSE(admitsWrw(wrwAtom("gfx950"), "gfx942", baseShape(), "HALF"));
     EXPECT_FALSE(admitsWrw(wrwAtom("gfx950"), "gfx950", baseShape(), "FLOAT"));
-    // WMMA: its family, 16-bit only.
-    EXPECT_TRUE(admitsWrw(wrwAtom("gfx11"), "gfx1100", baseShape(), "BFLOAT16"));
+    EXPECT_FALSE(admitsWrw(wrwAtom("gfx950"), "gfx950", baseShape(), "BFLOAT16"));
+    // WMMA: its family, fp16 only.
+    EXPECT_TRUE(admitsWrw(wrwAtom("gfx11"), "gfx1100", baseShape(), "HALF"));
+    EXPECT_FALSE(admitsWrw(wrwAtom("gfx11"), "gfx1100", baseShape(), "BFLOAT16"));
     EXPECT_TRUE(admitsWrw(wrwAtom("gfx12"), "gfx1201", baseShape(), "HALF"));
     EXPECT_FALSE(admitsWrw(wrwAtom("gfx11"), "gfx1201", baseShape(), "HALF"));
     EXPECT_FALSE(admitsWrw(wrwAtom("gfx12"), "gfx1201", baseShape(), "FLOAT"));
@@ -1376,7 +1401,9 @@ TEST(TestConvWinogradWrwKernelMatch, LargerTilesRunOnFp32Operands)
         mfma.m = r;
         EXPECT_TRUE(admitsWrw(fma, "gfx942", baseShape(), "BFLOAT16"));
         // CDNA's fp32 MFMA on fp32 operands, for every dtype.
-        EXPECT_TRUE(admitsWrw(mfma, "gfx942", baseShape(), "FLOAT"));
+        auto bigger = baseShape();
+        bigger.input = {16, 16};
+        EXPECT_EQ(admitsWrw(mfma, "gfx942", bigger, "FLOAT"), r == 4);
         EXPECT_TRUE(admitsWrw(mfma, "gfx942", baseShape(), "BFLOAT16"));
         EXPECT_TRUE(admitsWrw(mfma, "gfx908", baseShape(), "HALF"));
         // The 16-bit-only atoms: F(3,2) only.
@@ -1417,49 +1444,36 @@ TEST(TestConvWinogradWrwKernelMatch, LargerTilesRunOnFp32Operands)
     EXPECT_EQ(plan(f4, DataType::HALF)->wrwAtom, 1);
 }
 
-TEST(TestConvWinogradWrwKernelMatch, ScaledHalfOperandsOnlyForBFloat16)
+TEST(TestConvWinogradWrwKernelMatch, HalfOperandFmaOnlyForHalfGraphsThreeByTwo)
 {
-    // f16math: fp16 operands scaled per channel, for bf16 graphs (any tile, any atom family).
-    for(const int64_t r : {2, 4, 6})
-    {
-        SCOPED_TRACE(r);
-        auto fma = wrwFma();
-        fma.m = r;
-        fma.f16math = 1;
-        EXPECT_TRUE(admitsWrw(fma, "gfx906", baseShape(), "BFLOAT16"));
-        EXPECT_FALSE(admitsWrw(fma, "gfx906", baseShape(), "HALF"));
-        EXPECT_FALSE(admitsWrw(fma, "gfx906", baseShape(), "FLOAT"));
-        auto wmma = wrwAtom("gfx12");
-        wmma.m = r;
-        wmma.f16math = 1;
-        EXPECT_TRUE(admitsWrw(wmma, "gfx1201", baseShape(), "BFLOAT16"));
-        EXPECT_FALSE(admitsWrw(wmma, "gfx1201", baseShape(), "HALF"));
-    }
+    // f16math: the FMA path on fp16 operands (v_dot2_f32_f16), for fp16 graphs' F(3,2) only.
+    auto dot2 = wrwFma();
+    dot2.f16math = 1;
+    EXPECT_TRUE(admitsWrw(dot2, "gfx906", baseShape(), "HALF"));
+    EXPECT_TRUE(admitsWrw(dot2, "gfx1201", baseShape(), "HALF"));
+    EXPECT_FALSE(admitsWrw(dot2, "gfx906", baseShape(), "BFLOAT16"));
+    EXPECT_FALSE(admitsWrw(dot2, "gfx906", baseShape(), "FLOAT"));
+    auto larger = dot2;
+    larger.m = 4;
+    EXPECT_FALSE(admitsWrw(larger, "gfx906", baseShape(), "HALF"));
+    auto atom = wrwAtom("gfx9");
+    atom.f16math = 1;
+    EXPECT_FALSE(admitsWrw(atom, "gfx942", baseShape(), "HALF"));
     auto shape = baseShape();
-    shape.dataType = DataType::BFLOAT16;
+    shape.dataType = DataType::HALF;
     auto properties = testDeviceProperties();
-    properties.gcnArchName = "gfx90a";
-    properties.multiProcessorCount = 64;
+    properties.gcnArchName = "gfx906";
+    properties.multiProcessorCount = 60;
     const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::BACKWARD_WEIGHTS)),
                                properties);
     const auto problem = parseWinogradProblem(fixture.context(), ConvDirection::BACKWARD_WEIGHTS);
     ASSERT_TRUE(problem.has_value());
-    auto mfma = wrwAtom("gfx9");
-    mfma.m = 6;
-    mfma.f16math = 1;
     const auto plan = conv_winograd::planFor(
-        *problem, *conv_winograd::configOf(wrwKernelOf(mfma, "BFLOAT16")), properties);
+        *problem, *conv_winograd::configOf(wrwKernelOf(dot2, "HALF")), properties);
     ASSERT_TRUE(plan.has_value());
-    // fp16 operands on the f16 MFMA, plus the per-channel maxima (64 chunks) and scales.
-    EXPECT_EQ(plan->wrwOpt, 2);
+    EXPECT_EQ(plan->wrwOpt, 1);
     EXPECT_EQ(plan->operandBytes, 2);
-    EXPECT_EQ(plan->wrwAtom, 1);
-    EXPECT_EQ(plan->wrw.chunks, 64);
-    EXPECT_EQ(plan->amaxBytes, size_t{64 * (4 + 6) * 4});
-    EXPECT_EQ(plan->scaleBytes, size_t{(4 + 6) * 4});
-    EXPECT_EQ(plan->maxBlocks[0], 6u);
-    EXPECT_EQ(plan->maxBlocks[1], 64u);
-    EXPECT_EQ(plan->maxBlocks[2], 2u);
+    EXPECT_EQ(plan->wrwAtom, 0);
 }
 
 TEST(TestConvWinogradWrwKernelMatch, DirectionAndVariantMustAgree)

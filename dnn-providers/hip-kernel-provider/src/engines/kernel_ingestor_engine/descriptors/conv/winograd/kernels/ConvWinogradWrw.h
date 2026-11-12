@@ -7,7 +7,8 @@
 // dw[k][c][u][v] = sum over (n, h, w) of dy[n][k][h][w] * x[n][c][h + u - ph][w + v - pw]: per
 // output channel pair the 3x3 dW is one output tile of a correlation whose "filter" is an r x r
 // tile of dy and whose "data" is the (r+2) x (r+2) x patch under it. By the transposition
-// duality of F(r,3) and F(3,r) the matrices are F(r,3)'s (K5Wino<r>; F(6,3) with Lavin's points
+// duality of F(r,3) and F(3,r) the matrices are F(r,3)'s (K5Wino<2>; F(4,3) on points 0, 1, -1, 1/2,
+// -2 for accuracy, below; F(6,3) with Lavin's points
 // 0, +-1, +-2, +-1/2 here):
 //   x patch  -> B^T d B            (F(r,3)'s data transform; tiles step r over dy's extent)
 //   dy tile  -> A g A^T            (A = the transpose of F(r,3)'s output transform A^T)
@@ -39,6 +40,25 @@ struct K5WrwX
     __device__ static void bt(const float* d, int ds, float* o, int os)
     {
         K5Wino<R>::bt(d, ds, o, os);
+    }
+};
+
+// F(4,3) on points 0, 1, -1, 1/2, -2, infinity (not the forward's Lavin set 0, +-1, +-2): the
+// wrw F(3,4) built on it measured about 3.7x less fp32 summation error (dynamic-tolerance c 1.4
+// against 5.2 in the fp32 simulation, ~/scratch/ww/points.py).
+template <>
+struct K5WrwX<4>
+{
+    __device__ static void bt(const float* d, int ds, float* o, int os)
+    {
+        const float d0 = d[0], d1 = d[ds], d2 = d[2 * ds], d3 = d[3 * ds], d4 = d[4 * ds],
+                    d5 = d[5 * ds];
+        o[0] = d0 - 1.5f * d1 - 2.0f * d2 + 1.5f * d3 + d4;
+        o[os] = 0.5f * d2 - d1 + 2.5f * d3 + d4;
+        o[2 * os] = d1 - 2.5f * d2 + 0.5f * d3 + d4;
+        o[3 * os] = 2.0f * (d3 - d1) - d2 + d4;
+        o[4 * os] = 0.5f * (d1 - d3) - d2 + d4;
+        o[5 * os] = d1 - 1.5f * d2 - 2.0f * d3 + 1.5f * d4 + d5;
     }
 };
 
@@ -86,14 +106,14 @@ struct K5WrwDy<4>
 {
     __device__ static void a(const float* g, int gs, float* o, int os)
     {
+        // Points 0, 1, -1, 1/2, -2, infinity (as K5WrwX<4>).
         const float g0 = g[0], g1 = g[gs], g2 = g[2 * gs], g3 = g[3 * gs];
         const float e = g0 + g2, od = g1 + g3;
-        const float e4 = g0 + 4.0f * g2, od8 = 2.0f * g1 + 8.0f * g3;
         o[0] = g0;
         o[os] = e + od;
         o[2 * os] = e - od;
-        o[3 * os] = e4 + od8;
-        o[4 * os] = e4 - od8;
+        o[3 * os] = g0 + 0.5f * g1 + 0.25f * g2 + 0.125f * g3;
+        o[4 * os] = g0 - 2.0f * g1 + 4.0f * g2 - 8.0f * g3;
         o[5 * os] = g3;
     }
 };
@@ -144,10 +164,11 @@ struct K5WrwOut<4>
     {
         const float m0 = m[0], m1 = m[ms], m2 = m[2 * ms], m3 = m[3 * ms], m4 = m[4 * ms],
                     m5 = m[5 * ms];
-        const float s12 = m1 + m2, d12 = m1 - m2, s34 = m3 + m4, d34 = m3 - m4;
-        o[0] = 0.25f * m0 - (1.0f / 6.0f) * s12 + (1.0f / 24.0f) * s34;
-        o[os] = (1.0f / 12.0f) * d34 - (1.0f / 6.0f) * d12;
-        o[2 * os] = (1.0f / 6.0f) * (s34 - s12) + m5;
+        // Points 0, 1, -1, 1/2, -2, infinity (as K5WrwX<4>).
+        const float s12 = m1 + m2, d12 = m1 - m2;
+        o[0] = m0 + (1.0f / 3.0f) * d12 - (16.0f / 15.0f) * m3 + (1.0f / 15.0f) * m4;
+        o[os] = (1.0f / 3.0f) * s12 - (8.0f / 15.0f) * m3 - (2.0f / 15.0f) * m4;
+        o[2 * os] = (1.0f / 3.0f) * d12 - (4.0f / 15.0f) * m3 + (4.0f / 15.0f) * m4 + m5;
     }
 };
 
@@ -190,98 +211,7 @@ __device__ inline long long k5wOffset(int img, int ch, int channels, int h, int 
 // multipass input transform: NCHW tile-fast, NHWC channel-fast through LDS) and writes rows of
 // tiles; tiles from T to L are written as zeros. X: the (r+2)^2 x patch; else the r x r dy tile.
 
-/// Ceiling of log2 of the largest growth of a transform's 2-D output over its input (the
-/// product of the largest absolute row sums): x (B^T d B) 4, 100, 225; dy (A g A^T) 4, 225, 3969.
-template <int R, bool X>
-struct K5WrwGrowth
-{
-    static constexpr int LOG2 = R == 2 ? 2 : R == 4 ? (X ? 7 : 8) : (X ? 8 : 12);
-};
-
-/// The power-of-two scale of a channel's x or dy values for fp16 operands: the transformed
-/// values stay below 2^14 (2^15 short of fp16's range end); 1 for an all-zero or non-finite
-/// channel.
-template <int R, bool X>
-__device__ inline float k5wScaleFor(float amax)
-{
-    const unsigned bits = __float_as_uint(amax);
-    const int biased = static_cast<int>((bits >> 23) & 0xffu);
-    if(amax == 0.0f || biased == 0xff)
-        return 1.0f;
-    // amax < 2^top.
-    const int top = biased == 0 ? -126 : biased - 126;
-    int e = 14 - K5WrwGrowth<R, X>::LOG2 - top;
-    e = e < -100 ? -100 : e > 100 ? 100 : e;
-    return __uint_as_float(static_cast<unsigned>(e + 127) << 23);
-}
-
-// ---------------------------------------------------------------------------------------------
-// Scaled fp16 operands: the per-channel absolute maxima of x and dy over the whole batch, in two
-// fixed-order passes (no atomics): per (channel, pixel chunk) into amax, then per channel over
-// the chunks into its scale. blockIdx.z: 0 x (C channels), 1 dy (K channels).
-
-template <class T, int LAYOUT>
-__device__ void k5wAbsMax(const K5WrwArgs& a)
-{
-    const bool x = blockIdx.z == 0;
-    const int channels = x ? a.c : a.k;
-    const long long hw
-        = x ? static_cast<long long>(a.hi) * a.wi : static_cast<long long>(a.ho) * a.wo;
-    const long long pixels = static_cast<long long>(a.n) * hw;
-    const long long per = (pixels + a.chunks - 1) / a.chunks;
-    const int chunk = blockIdx.y;
-    const long long p0 = chunk * per, p1 = p0 + per < pixels ? p0 + per : pixels;
-    const T* src = static_cast<const T*>(x ? a.x : a.dy);
-    __shared__ float red[256];
-    const int tid = threadIdx.x;
-    float m = 0.0f;
-    int ch;
-    if constexpr(LAYOUT == K5_NHWC)
-    {
-        // 64 channels x 4 pixel lanes.
-        ch = blockIdx.x * 64 + tid % 64;
-        if(ch < channels)
-            for(long long q = p0 + tid / 64; q < p1; q += 4)
-                m = fmaxf(m, fabsf(K5Elem<T>::load(src[q * channels + ch])));
-    }
-    else
-    {
-        // One channel, 256 pixel lanes.
-        ch = blockIdx.x;
-        if(ch < channels)
-            for(long long q = p0 + tid; q < p1; q += 256)
-            {
-                const long long img = q / hw, at = q % hw;
-                m = fmaxf(m, fabsf(K5Elem<T>::load(src[(img * channels + ch) * hw + at])));
-            }
-    }
-    red[tid] = m;
-    __syncthreads();
-    const int lanes = LAYOUT == K5_NHWC ? 4 : 256, stride = LAYOUT == K5_NHWC ? 64 : 1;
-    if(LAYOUT == K5_NHWC ? tid < 64 : tid == 0)
-    {
-        float r = red[tid];
-        for(int l = 1; l < lanes; ++l)
-            r = fmaxf(r, red[tid + l * stride]);
-        if(ch < channels)
-            a.amax[static_cast<long long>(chunk) * (a.c + a.k) + (x ? 0 : a.c) + ch] = r;
-    }
-}
-
-template <int R>
-__device__ void k5wScale(const K5WrwArgs& a)
-{
-    const int i = blockIdx.x * blockDim.x + threadIdx.x;
-    const int total = a.c + a.k;
-    if(i >= total)
-        return;
-    float m = 0.0f;
-    for(int chunk = 0; chunk < a.chunks; ++chunk)
-        m = fmaxf(m, a.amax[static_cast<long long>(chunk) * total + i]);
-    a.scale[i] = i < a.c ? k5wScaleFor<R, true>(m) : k5wScaleFor<R, false>(m);
-}
-
-template <class T, class Op, int R, int LAYOUT, bool X, bool SCALED = false>
+template <class T, class Op, int R, int LAYOUT, bool X>
 __device__ void k5wTransform(const K5WrwArgs& a)
 {
     constexpr int A = R + 2, P = A * A, N = X ? A : R;
@@ -306,7 +236,6 @@ __device__ void k5wTransform(const K5WrwArgs& a)
         const int channels = X ? a.c : a.k, ch = g * cg + c;
         const int hs = X ? a.hi : a.ho, ws = X ? a.wi : a.wo;
         const int h0 = tr * R - (X ? a.ph : 0), w0 = tc * R - (X ? a.pw : 0);
-        const float sc = SCALED ? a.scale[(X ? 0 : a.c) + ch] : 1.0f;
         float e[N * N];
 #pragma unroll
         for(int i = 0; i < N; ++i)
@@ -317,9 +246,7 @@ __device__ void k5wTransform(const K5WrwArgs& a)
                 const int h = h0 + i, w = w0 + j;
                 e[i * N + j]
                     = h >= 0 && h < hs && w >= 0 && w < ws
-                          ? sc
-                                * K5Elem<T>::load(
-                                    src[k5wOffset<LAYOUT>(img, ch, channels, h, w, hs, ws)])
+                          ? K5Elem<T>::load(src[k5wOffset<LAYOUT>(img, ch, channels, h, w, hs, ws)])
                           : 0.0f;
             }
         }
@@ -660,7 +587,7 @@ __device__ inline bool k5wTapLive(int u, int pad, int extentIn, int extentOut)
     return u - pad + extentOut - 1 >= 0 && u - pad < extentIn;
 }
 
-template <class T, int R, bool SCALED = false>
+template <class T, int R>
 __device__ void k5wOutput(const K5WrwArgs& a)
 {
     constexpr int A = R + 2, P = A * A;
@@ -684,14 +611,6 @@ __device__ void k5wOutput(const K5WrwArgs& a)
         for(int sp = 1; sp < a.splits; ++sp)
             s += part[sp * splitStride + p * ps];
         m[p] = s;
-    }
-    if constexpr(SCALED)
-    {
-        // Undo the operands' powers of two (exact).
-        const float inv = (1.0f / a.scale[g * cg + c]) * (1.0f / a.scale[a.c + gk]);
-#pragma unroll
-        for(int p = 0; p < P; ++p)
-            m[p] *= inv;
     }
     float tmp[3 * A], o[9];
 #pragma unroll

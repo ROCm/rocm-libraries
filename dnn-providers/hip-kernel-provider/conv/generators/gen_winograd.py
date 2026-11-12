@@ -263,8 +263,11 @@ CATALOG = {
 
 # Backward weights, F(3,r) (m = r: 2, 4 or 6), x and dy read in either packed layout. The GEMM per
 # Winograd position: (out channels, in channels, tiles per step) and tm x tn = the FMA thread tile
-# ("any": fp32 operands, every arch and dtype) or a wave's 16x16 atoms (MFMA "gfx9" for every
-# dtype; "gfx950" 16x16x32 and WMMA "gfx11" / "gfx12" for 16-bit).
+# ("any": fp32 operands; f16math 1: fp16 operands through v_dot2_f32_f16) or a wave's 16x16 atoms
+# (MFMA "gfx9": fp32 or fp16; "gfx950" 16x16x32 and WMMA "gfx11" / "gfx12": fp16).
+# Each dtype's configs stay inside its error band against an fp64 reference (the dynamic-tolerance
+# model): fp16 operands only for fp16 graphs' F(3,2); bf16 graphs on fp32 operands only; fp32
+# graphs F(3,2) and F(3,4) (the latter admitted from 512 products per dW element on).
 def wrw(arch, tiles, rs=(2, 4, 6), f16math=0):
     return [
         C(
@@ -297,28 +300,18 @@ WRW_ATOM = [
     (128, 128, 64, 4, 4),
     (128, 64, 32, 4, 2),
 ]
-# 16-bit operands only for F(3,2) (they round F(3,4) / F(3,6) past the dtype's Winograd bound): the
-# 16-bit-only atoms (gfx950 16x16x32, WMMA) serve F(3,2); CDNA "gfx9" configs run F(3,4) / F(3,6) on
-# fp32 operands through the fp32 MFMA, as FMA configs do everywhere.
-WRW_MATRIX16 = (
-    wrw("gfx9", WRW_ATOM)
+WRW_CATALOG = {
+    "FLOAT": wrw("gfx9", WRW_ATOM, (2, 4)) + wrw("any", WRW_FMA, (2, 4)),
+    # fp16: F(3,2) on fp16 operands (matrix cores; FMA through v_dot2 for tile steps of 16+), and
+    # F(3,4) / F(3,6) on fp32 operands (CDNA fp32 MFMA, FMA).
+    "HALF": wrw("gfx9", WRW_ATOM)
     + wrw("gfx950", WRW_ATOM, (2,))
     + wrw("gfx11", WRW_ATOM, (2,))
     + wrw("gfx12", WRW_ATOM, (2,))
-)
-# bf16 graphs: F(3,4) / F(3,6) on fp16 operands scaled per channel by powers of two (f16math 1),
-# well inside bf16's bound: fp16 matrix cores, and v_dot2_f32_f16 for FMA (tile steps of 16+).
-WRW_SCALED16 = (
-    wrw("gfx9", WRW_ATOM, (4, 6), 1)
-    + wrw("gfx950", WRW_ATOM, (4, 6), 1)
-    + wrw("gfx11", WRW_ATOM, (4, 6), 1)
-    + wrw("gfx12", WRW_ATOM, (4, 6), 1)
-    + wrw("any", [t for t in WRW_FMA if t[2] >= 16], (4, 6), 1)
-)
-WRW_CATALOG = {
-    "FLOAT": wrw("gfx9", WRW_ATOM) + wrw("any", WRW_FMA),
-    "HALF": WRW_MATRIX16 + wrw("any", WRW_FMA),
-    "BFLOAT16": WRW_MATRIX16 + wrw("any", WRW_FMA) + WRW_SCALED16,
+    + wrw("any", WRW_FMA)
+    + wrw("any", [t for t in WRW_FMA if t[2] >= 16], (2,), 1),
+    # bf16: fp32 operands (CDNA fp32 MFMA for F(3,4) / F(3,6), FMA for every tile).
+    "BFLOAT16": wrw("gfx9", WRW_ATOM, (4, 6)) + wrw("any", WRW_FMA),
 }
 
 

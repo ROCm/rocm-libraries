@@ -48,9 +48,9 @@
  * each dtype and tile: fp32 1e-5 (F(2,3)) and 5e-5 (F(4,3)), fp16 2e-3, bf16 1.6e-2.
  *
  * Backward weights (F(3,2), F(3,4), F(3,6)) runs every admitted wrw config on the stride-1 cases
- * plus batch-sliced and split-heavy ones; a dW element's scale is the largest sum of |products|
- * over the 3x3 taps of its (out, in) channel pair (the Winograd tile it shares rounding with),
- * with fp32 bounds 1e-5 (F(3,2)) and 5e-5 (F(3,4), F(3,6)).
+ * plus batch-sliced and split-heavy ones, graded with the dynamic-tolerance model against a
+ * double-accumulated reference: fp16 up to 12 eps sigma, bf16 the same absolute level (fp16
+ * Winograd's), fp32 the base summation allowance (c 4).
  */
 namespace
 {
@@ -628,18 +628,11 @@ void runWrwCase(const WrwCase& wrwCase)
     x.fillTensorWithRandomValues(-1.0f, 1.0f, SEED);
     y.fillTensorWithRandomValues(-1.0f, 1.0f, SEED + 1);
 
-    // The cross-correlation dW (reflected for true convolution) and its sums of |products|.
+    // The cross-correlation dW (reflected for true convolution), accumulated in double.
     Tensor<float> correlation(spec.w.dims, spec.w.strides);
     Tensor<float> reference(spec.w.dims, spec.w.strides);
-    Tensor<float> magnitude(spec.w.dims, spec.w.strides);
-    Tensor<T> absX(x.dims(), x.strides());
-    Tensor<T> absY(y.dims(), y.strides());
-    absoluteValues(x, absX);
-    absoluteValues(y, absY);
     CpuFpReferenceConvolution::wgrad<T, float, T, double>(
         x, correlation, y, shape.stride, shape.dilation, shape.prePadding, shape.postPadding);
-    CpuFpReferenceConvolution::wgrad<T, float, T, double>(
-        absX, magnitude, absY, shape.stride, shape.dilation, shape.prePadding, shape.postPadding);
     if(shape.mode == ConvMode::CONVOLUTION)
     {
         reflectFilter(correlation, reference);
@@ -653,15 +646,33 @@ void runWrwCase(const WrwCase& wrwCase)
         });
         reference.markHostModified();
     }
-    // Per (out, in) channel pair: the largest tap magnitude.
-    const auto& wDims = w.dims();
-    std::vector<float> pairScale(static_cast<size_t>(wDims[0] * wDims[1]), 0.0f);
-    forEachIndex(wDims, [&](const std::vector<int64_t>& index) {
-        auto& scale = pairScale[static_cast<size_t>(index[0] * wDims[1] + index[1])];
-        scale = std::max(scale,
-                         static_cast<const float*>(
-                             magnitude.rawHostData())[offsetOf(index, magnitude.strides())]);
-    });
+    // The dynamic-tolerance model's band (dnn-providers/integration-tests docs/tolerances.md):
+    // K products per dW element, sigma = sqrt(K mean(x^2) mean(dy^2)); output rounding 2 eps |ref|,
+    // summation order c sqrt(K) u32 (sigma (+ |ref| for fp32)), intermediates lambda eps sigma.
+    // fp16: lambda 12 (the model's half value); bf16: the same absolute level, fp16 Winograd's
+    // (12 fp16 eps = 1.5 bf16 eps); fp32: the base model's c 4 (the shipped tiles measured at most
+    // 2.31).
+    const auto meanSquare = [](Tensor<T>& tensor) {
+        double sum = 0.0;
+        size_t count = 0;
+        const auto* data = static_cast<const T*>(tensor.rawHostData());
+        forEachIndex(tensor.dims(), [&](const std::vector<int64_t>& index) {
+            const auto v
+                = static_cast<double>(static_cast<float>(data[offsetOf(index, tensor.strides())]));
+            sum += v * v;
+            ++count;
+        });
+        return sum / static_cast<double>(count);
+    };
+    const double reductions = static_cast<double>(spec.y.dims[0] * spec.y.dims[2] * spec.y.dims[3]);
+    const double sigma = std::sqrt(reductions * meanSquare(x) * meanSquare(y));
+    constexpr bool FP32 = std::is_same_v<T, float>;
+    const double eps = FP32
+                           ? std::ldexp(1.0, -23)
+                           : (std::is_same_v<T, Half> ? std::ldexp(1.0, -10) : std::ldexp(1.0, -7));
+    const double lambda = std::is_same_v<T, Half> ? 12.0 : (FP32 ? 0.0 : 1.5);
+    const double summation = (FP32 ? 4.0 : 1.0) * std::sqrt(reductions) * std::ldexp(1.0, -24);
+    const double minNormal = std::is_same_v<T, Half> ? std::ldexp(1.0, -14) : std::ldexp(1.0, -126);
 
     const auto& handler = dispatchHandler(pack);
     int ran = 0;
@@ -702,18 +713,15 @@ void runWrwCase(const WrwCase& wrwCase)
         }
         w.markDeviceModified();
 
-        const float relative = kernel.getIntMetadata("m") >= 4 && std::is_same_v<T, float>
-                                   ? 5e-5f
-                                   : winogradBound<T>(2);
         const auto* actual = static_cast<const T*>(w.rawHostData());
         const auto* expected = static_cast<const float*>(reference.rawHostData());
         int64_t mismatches = 0;
-        forEachIndex(wDims, [&](const std::vector<int64_t>& index) {
-            const float got = static_cast<float>(actual[offsetOf(index, w.strides())]);
-            const float want = expected[offsetOf(index, reference.strides())];
-            const float tolerance
-                = relative * pairScale[static_cast<size_t>(index[0] * wDims[1] + index[1])]
-                  + 2.0f * storageEpsilon<T>() * std::fabs(want) + 1e-6f;
+        forEachIndex(w.dims(), [&](const std::vector<int64_t>& index) {
+            const auto got
+                = static_cast<double>(static_cast<float>(actual[offsetOf(index, w.strides())]));
+            const auto want = static_cast<double>(expected[offsetOf(index, reference.strides())]);
+            const double tolerance = (2.0 * eps + (FP32 ? summation : 0.0)) * std::fabs(want)
+                                     + (summation + lambda * eps) * sigma + minNormal;
             if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
             {
                 ADD_FAILURE() << "at linear index " << offsetOf(index, w.strides()) << ": got "

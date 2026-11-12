@@ -203,10 +203,9 @@ extern "C" __global__ void __launch_bounds__((CONV_WINO_COOP_CFG::THREADS))
 #elif CONV_WINO_VARIANT == 6
 
 // Backward weights, F(3,r) with r = CONV_WINO_M (2, 4 or 6), layout CONV_WINO_LAYOUT (x and dy).
-// CONV_WINO_WRW_OPT, the GEMM operands: 0 fp32, 1 the I/O type (16-bit F(3,2)), 2 fp16 scaled per
-// channel by powers of two (bf16 graphs). CONV_WINO_WRW_ATOM: 0 FMA (fp32, or v_dot2_f32_f16 on
-// fp16 operands), 1 MFMA 16x16 (f32, f16, bf16 1k), 2 MFMA 16x16x8 bf16 (gfx908), 3 WMMA gfx11,
-// 4 WMMA gfx12, 5 MFMA 16x16x32 (gfx950, 16-bit). GEMM block CONV_WINO_GEMM_BM (out channels) x
+// CONV_WINO_WRW_OPT, the GEMM operands: 0 fp32, 1 the I/O type (fp16 graphs' F(3,2)).
+// CONV_WINO_WRW_ATOM: 0 FMA (fp32, or v_dot2_f32_f16 on fp16 operands), 1 MFMA 16x16 (f32, f16),
+// 3 WMMA gfx11, 4 WMMA gfx12, 5 MFMA 16x16x32 (gfx950, f16). GEMM block CONV_WINO_GEMM_BM (out channels) x
 // _BN (in channels) x _BK (tiles); CONV_WINO_TM x _TN: the FMA thread tile, or a wave's atoms
 // along M and N.
 
@@ -215,12 +214,9 @@ extern "C" __global__ void __launch_bounds__((CONV_WINO_COOP_CFG::THREADS))
 
 #if CONV_WINO_WRW_OPT == 0
 #define CONV_WINO_WRW_OP float
-#elif CONV_WINO_WRW_OPT == 1
-#define CONV_WINO_WRW_OP CONV_WINO_T
 #else
-#define CONV_WINO_WRW_OP _Float16
+#define CONV_WINO_WRW_OP CONV_WINO_T
 #endif
-#define CONV_WINO_WRW_SCALED (CONV_WINO_WRW_OPT == 2)
 
 #if CONV_WINO_WRW_ATOM == 0
 #define CONV_WINO_WRW_A K5WrwFma
@@ -232,8 +228,6 @@ extern "C" __global__ void __launch_bounds__((CONV_WINO_COOP_CFG::THREADS))
     K1If<__is_same(CONV_WINO_WRW_OP, float), \
          K1AtomMfmaF32,                      \
          K1If<__is_same(CONV_WINO_WRW_OP, _Float16), K1AtomMfmaF16, K1AtomMfmaBf16>::type>::type
-#elif CONV_WINO_WRW_ATOM == 2
-#define CONV_WINO_WRW_A K1AtomMfmaBf16Gfx908
 #elif CONV_WINO_WRW_ATOM == 3
 #define CONV_WINO_WRW_A \
     K1If<__is_same(CONV_WINO_WRW_OP, _Float16), K1AtomWmma11F16, K1AtomWmma11Bf16>::type
@@ -249,34 +243,14 @@ extern "C" __global__ void __launch_bounds__((CONV_WINO_COOP_CFG::THREADS))
      * (CONV_WINO_GEMM_BN / (CONV_WINO_WRW_A::DIM * CONV_WINO_TN)) * CONV_WINO_WRW_A::WAVE)
 #endif
 
-extern "C" __global__ void __launch_bounds__(256) ConvWinogradWrwMax(K5WrwArgs a)
-{
-    k5wAbsMax<CONV_WINO_T, CONV_WINO_LAYOUT>(a);
-}
-
-extern "C" __global__ void __launch_bounds__(256) ConvWinogradWrwScale(K5WrwArgs a)
-{
-    k5wScale<CONV_WINO_M>(a);
-}
-
 extern "C" __global__ void __launch_bounds__(256) ConvWinogradWrwX(K5WrwArgs a)
 {
-    k5wTransform<CONV_WINO_T,
-                 CONV_WINO_WRW_OP,
-                 CONV_WINO_M,
-                 CONV_WINO_LAYOUT,
-                 true,
-                 CONV_WINO_WRW_SCALED>(a);
+    k5wTransform<CONV_WINO_T, CONV_WINO_WRW_OP, CONV_WINO_M, CONV_WINO_LAYOUT, true>(a);
 }
 
 extern "C" __global__ void __launch_bounds__(256) ConvWinogradWrwDy(K5WrwArgs a)
 {
-    k5wTransform<CONV_WINO_T,
-                 CONV_WINO_WRW_OP,
-                 CONV_WINO_M,
-                 CONV_WINO_LAYOUT,
-                 false,
-                 CONV_WINO_WRW_SCALED>(a);
+    k5wTransform<CONV_WINO_T, CONV_WINO_WRW_OP, CONV_WINO_M, CONV_WINO_LAYOUT, false>(a);
 }
 
 extern "C" __global__ void __launch_bounds__(CONV_WINO_WRW_THREADS) ConvWinogradWrwGemm(K5WrwArgs a)
@@ -294,7 +268,7 @@ extern "C" __global__ void __launch_bounds__(CONV_WINO_WRW_THREADS) ConvWinograd
 
 extern "C" __global__ void __launch_bounds__(256) ConvWinogradWrwOut(K5WrwArgs a)
 {
-    k5wOutput<CONV_WINO_T, CONV_WINO_M, CONV_WINO_WRW_SCALED>(a);
+    k5wOutput<CONV_WINO_T, CONV_WINO_M>(a);
 }
 
 #endif
