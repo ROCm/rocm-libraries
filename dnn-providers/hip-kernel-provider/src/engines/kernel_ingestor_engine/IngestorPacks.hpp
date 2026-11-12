@@ -157,17 +157,13 @@ struct EngineOrderRule
 /// two engines serving the same graph would otherwise depend on the hash.
 ///
 /// Each pair is a dense-attention engine and the paged unified-attention 2D engine of the same
-/// arch. Both accept a dense BSHD SDPA graph of head size 64 or 128 whenever seqlen_q equals
-/// seqlen_kv (a top-left and a bottom-right causal mask coincide there), and gfx950's dense
-/// engine also serves an unmasked or top-left graph at seqlen_q < seqlen_kv, which gfx950's 2D
-/// engine accepts too. The dense engine is the one built for the dense layout: the 2D engine
-/// serves it as a paged cache, through an identity block table it stages in the plan's
-/// workspace and copies to the device on every launch. On gfx942 the dense engine is also the
-/// faster of the two on every shared shape the ground truth holds; gfx950's order is the same
-/// structural preference, not a measured one.
-inline constexpr std::array<EngineOrderRule, 2> ENGINE_ORDER_RULES{{
+/// arch that accept some of the same graphs; the preferred engine comes first. On gfx942 both
+/// accept a dense BSHD SDPA graph of head size 64 or 128 whenever seqlen_q equals seqlen_kv (a
+/// top-left and a bottom-right causal mask coincide there), and the dense engine was measured
+/// faster on every shared shape of the ground truth. A pair is listed only once its order is
+/// measured.
+inline constexpr std::array<EngineOrderRule, 1> ENGINE_ORDER_RULES{{
     {GFX942_ATTENTION_DENSE_ENGINE_NAME, GFX942_ATTENTION_UNIFIED_2D_ENGINE_NAME},
-    {GFX950_ATTENTION_DENSE_ENGINE_NAME, GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME},
 }};
 
 /// @see packs/Gfx1151WmmaAttentionNative.cpp, which serves both engines

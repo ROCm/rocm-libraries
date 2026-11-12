@@ -1772,20 +1772,6 @@ std::ptrdiff_t position(const std::vector<int64_t>& ids, int64_t id)
 
 } // namespace
 
-TEST(TestDenseAttentionOrder, NamesBothDenseAttentionPairs)
-{
-    // The gfx942 and gfx950 dense engine each ahead of its own arch's Unified2D.
-    ASSERT_EQ(ENGINE_ORDER_RULES.size(), 2u);
-    EXPECT_EQ(ENGINE_ORDER_RULES[0].preferred,
-              hip_kernel_provider::kernel_ingestor_engine::GFX942_ATTENTION_DENSE_ENGINE_NAME);
-    EXPECT_EQ(ENGINE_ORDER_RULES[0].other,
-              hip_kernel_provider::kernel_ingestor_engine::GFX942_ATTENTION_UNIFIED_2D_ENGINE_NAME);
-    EXPECT_EQ(ENGINE_ORDER_RULES[1].preferred,
-              hip_kernel_provider::kernel_ingestor_engine::GFX950_ATTENTION_DENSE_ENGINE_NAME);
-    EXPECT_EQ(ENGINE_ORDER_RULES[1].other,
-              hip_kernel_provider::kernel_ingestor_engine::GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME);
-}
-
 TEST(TestDenseAttentionOrder, PreferredEngineComesBeforeTheOtherInEveryArrangement)
 {
     for(const auto& rule : ENGINE_ORDER_RULES)
@@ -1834,6 +1820,20 @@ TEST(TestDenseAttentionOrder, LeavesAnOrderThatNeedsNoChangeAlone)
             EXPECT_EQ(ids, original);
         }
     }
+}
+
+// Names the gfx942 engines directly, not through the table, so emptying or editing the table
+// cannot pass: the gfx942 Dense engine must be listed ahead of Unified2D.
+TEST(TestDenseAttentionOrder, Gfx942DenseComesBeforeUnified2D)
+{
+    namespace engines = hip_kernel_provider::kernel_ingestor_engine;
+    const auto dense
+        = hipdnn_data_sdk::utilities::engineNameToId(engines::GFX942_ATTENTION_DENSE_ENGINE_NAME);
+    const auto unified = hipdnn_data_sdk::utilities::engineNameToId(
+        engines::GFX942_ATTENTION_UNIFIED_2D_ENGINE_NAME);
+    std::vector<int64_t> ids{0x41, unified, 0x42, dense};
+    applyEngineOrderRules(ids);
+    EXPECT_LT(position(ids, dense), position(ids, unified));
 }
 
 TEST(TestDenseAttentionOrder, AppliesEveryRuleToOneList)
