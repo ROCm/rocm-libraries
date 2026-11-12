@@ -1343,12 +1343,7 @@ def getAiterTestsCmds(String arch = "") {
     def cmds = [
         // Pre-compile FlyDSL MoE AOT cache before the tests.
         "cd /home/jenkins/workspace/aiter && AITER_AOT_IMPORT=1 HIP_VISIBLE_DEVICES=-1 python3 aiter/aot/flydsl/moe.py",
-    ]
-    // mxfp4_moe.py requires gfx950 and must not run on gfx942
-    if (arch != "gfx942") {
-        cmds << "cd /home/jenkins/workspace/aiter && AITER_AOT_IMPORT=1 HIP_VISIBLE_DEVICES=-1 python3 aiter/aot/flydsl/mxfp4_moe.py"
-    }
-    cmds += [
+        "cd /home/jenkins/workspace/aiter && AITER_AOT_IMPORT=1 HIP_VISIBLE_DEVICES=-1 python3 aiter/aot/flydsl/mxfp4_moe.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_gemm_a8w8.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_gemm_a8w8_blockscale.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_mha.py",
@@ -1359,9 +1354,12 @@ def getAiterTestsCmds(String arch = "") {
         "python3 /home/jenkins/workspace/aiter/op_tests/test_moe_blockscale.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_moe_ep.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_moe_sorting.py",
-        "python3 /home/jenkins/workspace/aiter/op_tests/test_moe_sorting_mxfp4.py",
         "python3 /home/jenkins/workspace/aiter/op_tests/test_moe_tkw1.py"
     ]
+    // test_moe_sorting_mxfp4.py requires gfx950 and must not run on gfx942
+    if (arch != "gfx942") {
+        cmds << "python3 /home/jenkins/workspace/aiter/op_tests/test_moe_sorting_mxfp4.py"
+    }
     return cmds
 }
 def getFaTestsCmds() {
