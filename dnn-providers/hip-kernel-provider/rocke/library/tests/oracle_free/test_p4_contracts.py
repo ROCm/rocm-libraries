@@ -48,6 +48,7 @@ from ._p4_analytical import (
     F32_SMALLEST_SUBNORMAL,
     LOG2E_F32,
     MASKED_SCORE,
+    P4_ASSUMPTION_STATEMENTS,
     P4_ASSUMPTIONS,
     P4_CALIBRATION,
     P4_EPILOGUE_ARTIFACTS,
@@ -801,9 +802,7 @@ def test_ir_contract_rejects_an_unmodeled_reciprocal_intrinsic() -> None:
 # ---------------------------------------------------------------------------
 
 _BLOCK_LABEL = re.compile(r"^([-\w.]+):\s*$")
-_LOOP_PHI = re.compile(
-    r"^phi i32 \[ (\S+), %[-\w.]+ \], \[ (%[-\w.]+), %([-\w.]+) \]$"
-)
+_LOOP_PHI = re.compile(r"^phi i32 \[ (\S+), %[-\w.]+ \], \[ (%[-\w.]+), %([-\w.]+) \]$")
 _INT_BINARY = re.compile(
     r"^(add|sub|mul|sdiv|srem)(?: nsw| nuw| exact)* i32 (\S+), (\S+)$"
 )
@@ -2968,7 +2967,6 @@ def test_exposed_atoms_hold_at_most_one_nonzero_product(case: P4Case) -> None:
             assert per_atom.max() <= 1 and per_atom.sum(axis=-1).max() <= 1
 
 
-
 # ---------------------------------------------------------------------------
 # Mutation separation (T5, DT4, invariant I5).
 # ---------------------------------------------------------------------------
@@ -3743,18 +3741,41 @@ def test_calibration_entry_has_no_numeric_width() -> None:
         _p4_entry("fp16", ulp_budget=1)
 
 
-def test_calibration_requires_the_epilogue_assumption_version() -> None:
-    """Tier B is sound under A-E, A-MFMA and A-F (FP16 epilogue rounding);
-    an entry ratified without A-F v1, or under another version, is refused."""
-    assert P4_ASSUMPTIONS == ("A-E v1", "A-MFMA v1", "A-F v1")
+def test_calibration_requires_every_assumption_version() -> None:
+    """Tier B is sound under six named assumptions, each an antecedent of the
+    soundness theorem. An entry that omits one, lists another version of one,
+    or lists them in another order is refused."""
+    assert P4_ASSUMPTIONS == (
+        "A-E v1",
+        "A-MFMA v1",
+        "A-QK v1",
+        "A-DIV v1",
+        "A-F v1",
+        "A-MODE v1",
+    )
+    assert len(P4_ASSUMPTION_STATEMENTS) == len(P4_ASSUMPTIONS)
+    for version, statement in zip(P4_ASSUMPTIONS, P4_ASSUMPTION_STATEMENTS):
+        assert statement.startswith(f"{version}: ")
     assert EPILOGUE_ASSUMPTION.startswith("A-F v1:")
-    for assumptions in (
-        ("A-E v1", "A-MFMA v1"),
-        ("A-E v1", "A-MFMA v1", "A-F v2"),
-        ("A-F v1", "A-E v1", "A-MFMA v1"),
-    ):
+    _p4_entry("fp16", assumptions=P4_ASSUMPTIONS)
+    refused = [
+        P4_ASSUMPTIONS[:index] + P4_ASSUMPTIONS[index + 1 :]
+        for index in range(len(P4_ASSUMPTIONS))
+    ]
+    refused += [
+        P4_ASSUMPTIONS[:index]
+        + (version.replace(" v1", " v2"),)
+        + P4_ASSUMPTIONS[index + 1 :]
+        for index, version in enumerate(P4_ASSUMPTIONS)
+    ]
+    refused.append(tuple(reversed(P4_ASSUMPTIONS)))
+    # The entry as ratified before A-QK, A-DIV and A-MODE were named.
+    refused.append(("A-E v1", "A-MFMA v1", "A-F v1"))
+    for assumptions in refused:
         with pytest.raises(ValueError, match="assumptions"):
             _p4_entry("fp16", assumptions=assumptions)
+    for entry in P4_CALIBRATION.values():
+        assert entry.assumptions == P4_ASSUMPTIONS
 
 
 def test_observations_never_change_the_enclosures() -> None:
