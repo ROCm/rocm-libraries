@@ -2954,13 +2954,17 @@ TEST_CASE("GEMM: gfx1250 L2 domains follow the part's XCD count", "[gemm][gfx125
   for (auto [xcd, domains, per_domain] :
        {std::tuple<size_t, size_t, size_t>{8, 2, 4}, {6, 2, 3}, {4, 1, 4}, {3, 1, 3}, {1, 1, 1}}) {
     INFO(xcd << " XCDs");
-    const auto hw = part(xcd, 4 << 20);
+    const auto hw = part(xcd, 96ull << 20);
     REQUIRE(hw.num_l2_domains() == domains);
     REQUIRE(hw.xcd_per_l2_domain() == per_domain);
-    // The reported 4 MiB is a placeholder; the measured per-AID capacity applies.
-    REQUIRE(hw.l2_domain_capacity() == (96ull << 20));
+    REQUIRE(hw.l2_domain_capacity() == hw.L2_capacity);
   }
-  REQUIRE(part(8, 512ull << 20).l2_domain_capacity() == (256ull << 20));
+  // From the architecture table, HIP's reported 4 MiB is a placeholder: one AID's L2 holds the
+  // measured 96 MiB.  A larger reported total is split over the AIDs.
+  REQUIRE(gfx1250_hardware().L2_capacity == (96ull << 20));
+  REQUIRE(origami::hardware_t::get_hardware_for_arch(
+              origami::hardware_t::architecture_t::gfx1250, 256, 327680, 512 * 1024, 512 << 20, 2400000)
+              .L2_capacity == (256ull << 20));
 }
 
 TEST_CASE("GEMM: gfx1250 DRAM occupancy curve scales with the part's CUs", "[gemm][gfx1250]") {

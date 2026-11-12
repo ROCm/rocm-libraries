@@ -40,9 +40,10 @@ std::vector<prediction_result_t> select_topk_configs(const problem_t& problem,
 // WGMXCC remap, and the chunked, K-Coherent and StaggerU remaps are untested there, so all of them
 // stay off (WGMXCC 1, chunk 0, split-K 0).  WGM is the positive slab width whose first wave puts
 // the fewest estimated A/B DRAM bytes on one L2 domain, priced with the same footprint proxy and
-// hit-rate model as compute_memory_latency_cdna5 (gemm::l2_domain_footprint,
-// gemm::l2_domain_hit_rates); ties keep WGM 1.  The footprint is an approximation, so WGM 1
-// stays unless another width is estimated to be strictly cheaper.
+// hit-rate model as compute_memory_latency_cdna5 (gemm::estimate_l2_hit_cdna5, which reads
+// context.wgm.wgm; the selector sets it per candidate); ties keep WGM 1.
+// The footprint is an approximation, so WGM 1 stays unless another width is estimated to be
+// strictly cheaper.
 // Cache hints and tensor-DMA are not read: every operand is priced as temporal.
 // ClusterAIDMapping (TensileLite's kernel-side choice of which AID / L2 domain computes which
 // output tile) is not modeled and its host / Origami plumbing was removed: tiles follow the
@@ -51,23 +52,28 @@ std::vector<prediction_result_t> select_topk_configs(const problem_t& problem,
 static workgroup_mapping_t select_workgroup_mapping_gfx1250(const problem_t& problem,
                                                             const hardware_t& hardware,
                                                             const config_t& config) {
-  const gemm::context_t context(problem, hardware, config);
-  const size_t splits              = std::max<size_t>(context.splitting_factor, 1);
-  const size_t batch               = std::max<size_t>(problem.batch, 1);
-  const dim4_t grid                = {splits, context.grid_m, context.grid_n, batch};
-  const size_t wave                = std::min(grid.total(), std::max<size_t>(context.n_cu, 1));
-  const double l2_cap              = static_cast<double>(hardware.l2_domain_capacity());
+  // predict_workgroup_mapping on gfx1250 runs this selector for a StreamK auto mapping, and the
+  // context constructor calls it.  The context therefore gets a config with a fixed mapping (which
+  // predict_workgroup_mapping returns as is, no nested pick); nothing else of the context reads
+  // config.workgroup_mapping or the presence of TensileLite params, and context.wgm is
+  // overwritten per candidate below.
+  config_t context_config = config;
+  context_config.workgroup_mapping = 1;
+  if (!context_config.has_tensile_params()) context_config.tensile();
+  gemm::context_t context(problem, hardware, context_config);
+  const size_t grid_n              = std::max<size_t>(context.grid_n, 1);
   const operand_traffic_t& traffic = context.traffic;
 
   workgroup_mapping_t best{0, 0, 1, 1};
   double best_bytes = std::numeric_limits<double>::max();
   for (int wgm : {1, 2, 4, 8, 16, 32, 64}) {
     // Once the previous slab already spanned every column, wider slabs map the same tiles.
-    if (wgm > 1 && static_cast<size_t>(wgm / 2) >= grid.n) break;
-    const gemm::l2_hit_rates_ab_t hit = gemm::l2_domain_hit_rates(
-        gemm::l2_domain_footprint(hardware, grid, wgm, wave), traffic, l2_cap);
-    const double bytes = (1.0 - hit.a) * traffic.a_iter_bytes * traffic.a_cl_share +
-                         (1.0 - hit.b) * traffic.b_iter_bytes * traffic.b_cl_share;
+    if (wgm > 1 && static_cast<size_t>(wgm / 2) >= grid_n) break;
+    context.wgm.wgm = wgm;
+    const gemm::cache_hit_rates_t hit =
+        gemm::estimate_l2_hit_cdna5(problem, hardware, config, context);
+    const double bytes = (1.0 - std::get<0>(hit)) * traffic.a_iter_bytes * traffic.a_cl_share +
+                         (1.0 - std::get<1>(hit)) * traffic.b_iter_bytes * traffic.b_cl_share;
     if (bytes < best_bytes * (1.0 - 1e-9)) {
       best_bytes = bytes;
       best.wgm   = wgm;

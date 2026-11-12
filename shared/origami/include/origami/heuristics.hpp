@@ -120,6 +120,18 @@ struct heuristic_defaults_t {
   static constexpr double GFX1250_TH_HIGH         = 5.73;
   static constexpr double GFX1250_TH_SPEEDUP_LOW  = 1.117;
   static constexpr double GFX1250_TH_SPEEDUP_HIGH = 0.896;
+  /// WGPs of the part hardware_t::mem_bw_per_wg_coefficients was fit on; compute_mem_bw_from_
+  /// occupancy rescales the active CU count by this over the part's N_CU.
+  static constexpr double GFX1250_BW_FIT_WGPS = 256.0;
+  /// Sustained DRAM read bandwidth (B/ns) the GFX1250_STORE_* rates were measured at; the store
+  /// model scales them by the part's DRAM peak over this.
+  static constexpr double GFX1250_STORE_REF_DRAM_BW = 17130.0;
+  /// Load-to-use latency of a DRAM access (single-wave pointer chase), ns.
+  static constexpr double GFX1250_DRAM_LATENCY_NS = 180.0;
+  /// Load-to-use latency of an L2 hit, ns.
+  static constexpr double GFX1250_L2_LATENCY_NS = 125.0;
+  /// Dependent LDS read latency in cycles the matrix pipe must cover.
+  static constexpr double GFX1250_LDS_READ_LATENCY = 70.0;
 };
 
 /**

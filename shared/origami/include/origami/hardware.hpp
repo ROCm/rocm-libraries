@@ -135,7 +135,6 @@ class ORIGAMI_EXPORT hardware_t {
     double mem_clock_ratio;          ///< Memory clock ratio relative to compute clock
     size_t simds_per_cu;   ///< SIMD units per Compute Unit (CDNA: 4 SIMD16, RDNA3/4: 2 SIMD32)
     size_t l1_capacity;    ///< L1 data cache capacity per CU in bytes (shared across all SIMDs)
-
     constexpr architecture_constants(double mem1_perf_ratio,
                                      double mem2_perf_ratio,
                                      double mem3_perf_ratio,
@@ -327,18 +326,17 @@ class ORIGAMI_EXPORT hardware_t {
         // AMD Radeon 820M iGPU
         return {0.240, NO_MALL_AVAILABLE, 0.066, 2, std::make_tuple(0, 0.19, 0), 1.5, 2, 32 * 1024};
       case architecture_t::gfx1250: {
-        // Peak tensor-DMA read bandwidth: L2 41.9 TB/s, sustained DRAM g::dram_peak_bw.  The
-        // quadratic is the fraction of the DRAM peak reached vs active WGPs (fit on
-        // g::bw_fit_wgps, rescaled to the part's N_CU by compute_mem_bw_from_occupancy).  mem3
-        // is scaled by memory/engine clock, and mem_clock_ratio is engine/memory clock.
-        using g                      = gfx1250_constants;
-        const double dram_peak_tbps  = g::dram_peak_bw / 1000.0;
+        // Measured at a 2.4 GHz engine clock and 1.9 GHz memory clock.  Peak tensor-DMA read
+        // bandwidth: L2 41.93 TB/s, sustained DRAM 17.13 TB/s.  The quadratic is the fraction
+        // of the DRAM peak reached vs active WGPs (fit on 256 WGPs, rescaled to the part's N_CU
+        // by compute_mem_bw_from_occupancy).  mem3 is the DRAM peak scaled by memory/engine
+        // clock, and mem_clock_ratio is engine/memory clock.
         auto c                       = get_gfx950_arch_constants(std::nullopt);
         c.mem1_perf_ratio            = 41.93;
         c.mem2_perf_ratio            = NO_MALL_AVAILABLE;
-        c.mem3_perf_ratio            = dram_peak_tbps * g::memory_clock_ghz / g::engine_clock_ghz;
+        c.mem3_perf_ratio            = 17.13 * 1.9 / 2.4;
         c.mem_bw_per_wg_coefficients = std::make_tuple(-1.81e-5, 8.43e-3, -1.42e-3);
-        c.mem_clock_ratio            = g::engine_clock_ghz / g::memory_clock_ghz;
+        c.mem_clock_ratio            = 2.4 / 1.9;
         c.simds_per_cu               = 4;
         c.l1_capacity                = 0;  // tensor-DMA loads bypass L1
         return c;
@@ -814,7 +812,7 @@ class ORIGAMI_EXPORT hardware_t {
   double mem2_perf_ratio;  ///< L2 cache performance ratio (microbenchmarked)
   double mem3_perf_ratio;  ///< MALL/HBM performance ratio (microbenchmarked)
 
-  size_t L2_capacity;   ///< Capacity of L2 cache in bytes
+  size_t L2_capacity;   ///< Capacity of one L2 cache (one XCD's on CDNA, one AID's on gfx1250) in bytes
   size_t l1_capacity;   ///< Capacity of L1 data cache per CU in bytes (shared across all SIMDs in a CU)
   size_t CU_per_L2;     ///< Compute units per L2 cache domain (derived: N_CU / NUM_XCD)
 
@@ -1119,63 +1117,35 @@ class ORIGAMI_EXPORT hardware_t {
   /// architecture keeps the CDNA model.
   bool is_cdna5() const { return arch == architecture_t::gfx1250; }
 
-  /// Measured gfx1250 hardware facts, read only where is_cdna5().  Model-fit constants live in
-  /// heuristic_defaults_t (GFX1250_*).
-  struct gfx1250_constants {
-    /// Engine and memory clocks the bandwidths below were measured at, GHz.
-    static constexpr double engine_clock_ghz = 2.4;
-    static constexpr double memory_clock_ghz = 1.9;
-    /// Sustained DRAM read bandwidth, B/ns.
-    static constexpr double dram_peak_bw = 17130.0;
-    /// WGPs of the part mem_bw_per_wg_coefficients was fit on.
-    static constexpr double bw_fit_wgps = 256.0;
-    /// Most XCDs that share one L2 (one AID).
-    static constexpr size_t max_xcd_per_aid = 4;
-    /// Working set one AID's L2 keeps at L2 latency, bytes (HIP reports a 4 MiB placeholder).
-    static constexpr size_t l2_aid_capacity = 96ull << 20;
-  };
-
-  /// Number of L2 domains: on gfx1250 one per AID of up to max_xcd_per_aid XCDs, assuming a part
-  /// with fewer XCDs spreads them evenly over as few AIDs as hold them.
+  /// Number of L2 domains: on gfx1250 one per AID of up to 4 XCDs, assuming a part with fewer
+  /// XCDs spreads them evenly over as few AIDs as hold them; one per XCD on every other
+  /// architecture.
   size_t num_l2_domains() const {
-    if (is_cdna5()) {
-      const size_t per_aid = gfx1250_constants::max_xcd_per_aid;
-      return std::max<size_t>((NUM_XCD + per_aid - 1) / per_aid, 1);
-    }
-    return NUM_XCD >= 1 ? NUM_XCD : 1;
+    // gfx1250: the XCDs of an AID share one L2.
+    constexpr size_t GFX1250_MAX_XCD_PER_L2 = 4;
+    const size_t per_l2 = is_cdna5() ? GFX1250_MAX_XCD_PER_L2 : 1;
+    return std::max<size_t>((NUM_XCD + per_l2 - 1) / per_l2, 1);
   }
 
-  /// XCDs that share one L2: the XCDs of an AID on gfx1250 (the last domain may hold fewer),
-  /// otherwise one.
+  /// XCDs that share one L2 (the last domain may hold fewer).
   size_t xcd_per_l2_domain() const {
-    if (!is_cdna5()) return 1;
     const size_t domains = num_l2_domains();
     return std::max<size_t>((NUM_XCD + domains - 1) / domains, 1);
   }
 
   /// XCD that runs the workgroup (or whole cluster) with dispatch id `id`.  Dispatch is
-  /// round-robin over the XCDs; on gfx1250 id 0 lands on the last XCD (XCC 7 on all GPUs
-  /// measured), so id i runs on XCD (i + NUM_XCD - 1) % NUM_XCD.
+  /// round-robin over the XCDs, starting at XCD 0, or at the last XCD on gfx1250, so id i runs
+  /// on XCD (i + NUM_XCD - 1) % NUM_XCD there.
   size_t dispatch_xcd(size_t id) const {
+    // Current behaviour: on gfx1250 dispatch id 0 lands on the last XCD (XCC 7 on all GPUs
+    // measured).  To be fixed later with ClusterAIDRemapping.
+    constexpr bool GFX1250_DISPATCH_STARTS_AT_LAST_XCD = true;
     const size_t n = NUM_XCD > 0 ? NUM_XCD : 1;
-    return is_cdna5() ? (id + n - 1) % n : id % n;
+    return (is_cdna5() && GFX1250_DISPATCH_STARTS_AT_LAST_XCD) ? (id + n - 1) % n : id % n;
   }
 
-  /// Effective capacity of one L2 domain in bytes.  On gfx1250 the reported L2 split over the
-  /// domains, but at least the measured per-AID capacity, since HIP reports a placeholder.
-  size_t l2_domain_capacity() const {
-    if (!is_cdna5()) return L2_capacity;
-    return std::max<size_t>(L2_capacity / num_l2_domains(), gfx1250_constants::l2_aid_capacity);
-  }
-
-  /// Load-to-use latency of a DRAM access (single-wave pointer chase), 0 if unmodeled.
-  double dram_latency_ns() const { return is_cdna5() ? 180.0 : 0.0; }
-
-  /// Load-to-use latency of an L2 hit, 0 if unmodeled.
-  double l2_latency_ns() const { return is_cdna5() ? 125.0 : 0.0; }
-
-  /// Dependent LDS read latency in cycles the matrix pipe must cover, 0 if unmodeled.
-  double lds_read_latency() const { return is_cdna5() ? 70.0 : 0.0; }
+  /// Capacity of one L2 domain in bytes (L2_capacity is one L2's, on every architecture).
+  size_t l2_domain_capacity() const { return L2_capacity; }
 
   /**
    * @brief Check if hardware supports native TF32 matrix instructions.
