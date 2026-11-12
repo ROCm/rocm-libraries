@@ -82,6 +82,14 @@ def test_accepts_output_types(dest, hpa):
   assert tdmStoreRejectReason(_state(DestDataType=DataType(dest), HighPrecisionAccumulate=hpa)) is None
 
 
+@pytest.mark.parametrize("dest", ["d", "c"])
+def test_accepts_eight_byte_d_from_accumulators_of_its_type(dest):
+  """fp64 D from fp64 and complex float D from complex float accumulators, which the block stages as 8-byte elements
+  from their register pairs."""
+  assert tdmStoreRejectReason(_state(DestDataType=DataType(dest), ComputeDataType=DataType(dest),
+                                    HighPrecisionAccumulate=False)) is None
+
+
 def test_accepts_int8_d_from_int32_accumulators():
   """int8 D from int32 accumulators, which the block stages as 1-byte elements."""
   assert tdmStoreRejectReason(_state(DestDataType=DataType("i8"), ComputeDataType=DataType("i"))) is None
@@ -141,8 +149,8 @@ def test_disabled_is_not_validated():
   assert tdmStoreRejectReason(_state(TDMStoreInst=0, ISA=(9, 5, 0), GlobalSplitU=4)) is None
 
 
-_OUTPUT = "TDMStoreInst supports fp32 D, int32 and int8 D from int32 accumulators, and bf16, fp16, fp8 and bf8 D " \
-  "converted from fp32 accumulators"
+_OUTPUT = "TDMStoreInst supports fp32 D, fp64 and complex float D from accumulators of their type, int32 and int8 D " \
+  "from int32 accumulators, and bf16, fp16, fp8 and bf8 D converted from fp32 accumulators"
 _ATOMIC_SK = "TDMStoreInst does not support atomic StreamK"
 _SIDE_EFFECTS = \
   "TDMStoreInst does not support per-element epilogue side effects beyond C and D (E, Gradient, gate residual, AmaxD)"
@@ -155,6 +163,8 @@ _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
   ({"ComputeDataType": DataType("h")}, _OUTPUT),
   ({"DestDataType": DataType("i")}, _OUTPUT),
   ({"DestDataType": DataType("i8")}, _OUTPUT),
+  ({"DestDataType": DataType("d")}, _OUTPUT),
+  ({"DestDataType": DataType("c")}, _OUTPUT),
   ({"BufferStore": False}, "TDMStoreInst requires BufferStore"),
   ({"GlobalSplitU": 2}, "TDMStoreInst requires GlobalSplitU=1 or -1"),
   (dict(_STREAMK, StreamKAtomic=1), _ATOMIC_SK),
@@ -624,6 +634,50 @@ def test_one_byte_d_stages_with_ds_store_b8_at_vw1(gp_gfx1250, gfx1250_iim, asse
   assert "tensor_store_from_lds" in asm
   for tag, op in (("stage D element", "ds_store_b8"), ("load C element", "ds_load_u8")):
     assert {line.split()[0] for line in asm.splitlines() if tag in line} == {op}, tag
+
+
+def _fp64_params(**overrides):
+  """An fp64 VALU kernel shaped like those of develop's f64_gfx1250.yaml: ThreadTile 4x4 over one wave."""
+  from tensilelite.Common.Architectures import gfxToIsa
+  params = {
+    "ProblemType": {"OperationType": "GEMM", "DataType": "D", "DestDataType": "D", "ComputeDataType": "D",
+                    "HighPrecisionAccumulate": False, "TransposeA": True, "TransposeB": False, "UseBeta": True,
+                    "Batched": True},
+    "ISA": gfxToIsa("gfx1250"), "KernelLanguage": "Assembly", "WavefrontSize": 32, "MatrixInstruction": [],
+    "EnableMatrixInstruction": False, "ThreadTile": [4, 4], "WorkGroup": [8, 4, 1], "DepthU": 16,
+    "PrefetchGlobalRead": 2, "PrefetchLocalRead": 1, "ScheduleIterAlg": 4, "StaggerU": 0, "GlobalSplitU": 1,
+    "GlobalSplitUAlgorithm": "MultipleBuffer", "TDMInst": 0, "GlobalReadVectorWidthA": 1, "GlobalReadVectorWidthB": 1,
+    "StoreVectorWidth": -1, "StoreRemapVectorWidth": 0, "WorkGroupMapping": 1, "TransposeLDS": -1, "LdsPadA": -1,
+    "LdsPadB": -1, "1LDSBuffer": 0, "StreamK": 0, "StreamKForceDPOnly": 0,
+  }
+  params.update(overrides)
+  return params
+
+
+_COMPLEX = {"DataType": "C", "MacDataTypeA": "C", "MacDataTypeB": "C", "DestDataType": "C", "ComputeDataType": "C",
+            "HighPrecisionAccumulate": False}
+
+
+@pytest.mark.parametrize("kind", ["fp64", "complex"])
+@pytest.mark.parametrize("level", _LEVELS)
+def test_eight_byte_d_stages_two_registers_per_element(gp_gfx1250, gfx1250_iim, assembler, capsys, level, kind):
+  """fp64 D on a VALU kernel and complex float D on a WMMA kernel: at store vector width 1 every D element is one
+  ds_store_b64 of its register pair, ValuC + 2*sumIdx as addStore stores it, into a staged tile of 8 bytes per
+  element, and with beta != 0 every C element is read back with one ds_load_b64."""
+  if kind == "fp64":
+    sol, asm = emit_asm(gfx1250_iim, assembler, _fp64_params(TDMStoreInst=level, StoreVectorWidth=1))
+  else:
+    sol, asm = _emit_asm(gfx1250_iim, assembler, mi=[16, 16, 4, 1, 1, 2, 2, 2, 2], TDMStoreInst=level, DepthU=16,
+                         StoreVectorWidth=1, ProblemType=_COMPLEX)
+  assert sol.get("Valid"), capsys.readouterr().out
+  assert tdmStoreLdsBytes(sol) == sol["MacroTile0"] * sol["MacroTile1"] * 8
+  assert "tensor_store_from_lds" in asm
+  for tag, op in (("stage D element", "ds_store_b64"), ("load C element", "ds_load_b64")):
+    assert {line.split()[0] for line in asm.splitlines() if tag in line} == {op}, tag
+  staged = [line for line in asm.splitlines() if "stage D element" in line]
+  pairs = [re.search(r"v\[vgprValuC\+(\d+):vgprValuC\+(\d+)\+1\]", line) for line in staged]
+  assert pairs and all(p for p in pairs), staged[:3]
+  assert all(p.group(1) == p.group(2) and int(p.group(1)) % 2 == 0 for p in pairs), staged[:3]
 
 
 @pytest.mark.parametrize("algorithm, aga", _GSU_ALGORITHMS)
