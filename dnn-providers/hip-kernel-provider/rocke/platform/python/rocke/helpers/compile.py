@@ -131,13 +131,16 @@ _CODE_OBJECT_BACKEND_REQUEST = "_rocke_code_object_backend"
 # - ``DIRECT_DEFAULT_LEVERS``: levers the direct backend turns on for every
 #   kernel (D0.6; rust-track INTEGRATION.md 5 items 1-2): ``acqfence`` (an
 #   acquire-only fence lowers as LLVM's: wait + ``buffer_inv``, no L2
-#   write-back) and ``bufoffany`` (LLVM's buffer offset split).
+#   write-back), ``bufoffany`` (LLVM's buffer offset split) and ``fmax3``
+#   (a ``v_max_f32`` / ``v_min_f32`` chain becomes ``v_max3_f32`` /
+#   ``v_min3_f32``, as LLVM combines ``fmaxnum`` chains: the attention softmax
+#   row maxima; 1.2% faster on dense attention, MI355X).
 #   ``ROCKE_DIRECT_DEFAULT_LEVERS`` replaces the set (``""``: none, the plain
 #   direct object).
 DIRECT_LEVERS_ATTR = "direct_levers"
 DIRECT_SCOPES_ATTR = "direct_scopes"
 SCOPE_OP_ATTR = "rocke.scope"
-DIRECT_DEFAULT_LEVERS = ("acqfence", "bufoffany")
+DIRECT_DEFAULT_LEVERS = ("acqfence", "bufoffany", "fmax3")
 _DIRECT_DEFAULTS_ENV = "ROCKE_DIRECT_DEFAULT_LEVERS"
 
 
