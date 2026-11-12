@@ -868,7 +868,7 @@ impl Checker<'_> {
             GlobalAtomicAdd => {
                 arity(1, 3)?;
                 let value = types[2];
-                let packed = *value == Type::Vec(Scalar::F16, 2);
+                let packed = matches!(value, Type::Vec(Scalar::F16 | Scalar::BF16, 2));
                 if !matches!(types[0], Type::Ptr(_)) || !index(types[1]) || !(matches!(value, Type::Scalar(_)) || packed) || res != Some(value) {
                     return Err(mismatch());
                 }

@@ -3163,6 +3163,9 @@ impl<'a> Isel<'a> {
         };
         let (release, acquire) = match op.str_attr("ordering").unwrap_or("monotonic") {
             "monotonic" => (false, false),
+            Scalar::BF16 if self.t.target == Target::Gfx950 && *self.k.ty(value) == Type::Vec(Scalar::BF16, 2) => {
+                crate::target::gfx9::conv_ops::pk_add_bf16()
+            }
             "release" => (true, false),
             "acquire" => (false, true),
             "acq_rel" | "seq_cst" => (true, true),

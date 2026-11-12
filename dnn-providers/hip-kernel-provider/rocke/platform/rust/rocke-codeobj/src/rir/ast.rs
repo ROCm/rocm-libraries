@@ -685,6 +685,8 @@ impl OpKind {
             "tile.sync_lds_only" => OpKind::SyncLdsOnly,
             "tile.smem_addr_of" => OpKind::SmemAddrOf,
             "tile.smem_ptr_add" => OpKind::SmemPtrAdd,
+            // `(ptr<bf16>, index, vec<bf16x2>)`: the same with `global_atomic_pk_add_bf16`.
+            "memref.global_atomic_add_pk_bf16" => OpKind::GlobalAtomicAdd,
             // rustgemm: `_imm` adds an instruction offset (0..4095 bytes) to the global and the LDS address.
             "tile.async_buffer_load_lds_addr" | "tile.async_buffer_load_lds" | "tile.async_buffer_load_lds_imm" => OpKind::BufferLoadLds,
             "tile.global_load_lds" => OpKind::GlobalLoadLds,
