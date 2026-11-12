@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 include_guard(GLOBAL)
+include("${CMAKE_CURRENT_LIST_DIR}/../../../cmake/HkpSourceDigest.cmake")
 
 # ============================================================================
 # hkp_asm_sdpa_fwd_revision(<out-revision> <engine-dir> [CONFIGURE_DEPENDS])
@@ -74,27 +75,8 @@ function(hkp_asm_sdpa_fwd_revision _out_revision _engine_dir)
     endforeach()
     list(APPEND _inputs ${_kernels})
 
-    # Sorted and keyed by relative path: GLOB order is filesystem order, and the same
-    # kernel name exists under both MI300/ and MI308/.
-    list(SORT _inputs)
-    set(_digest "")
-    foreach(_input IN LISTS _inputs)
-        file(RELATIVE_PATH _name "${_engine_dir}" "${_input}")
-        if(_input MATCHES "\\.co$")
-            # A code object is bytes; git never converts it.
-            file(SHA256 "${_input}" _one)
-        else()
-            # Hash text as LF so CRLF and LF checkouts of one commit agree. file(READ)
-            # drops CR only on Windows; the REPLACE covers CRLF files on Linux.
-            file(READ "${_input}" _text)
-            string(REPLACE "\r\n" "\n" _text "${_text}")
-            string(SHA256 _one "${_text}")
-        endif()
-        string(APPEND _digest "${_name}:${_one}\n")
-    endforeach()
-    string(SHA256 _revision "${_digest}")
-    string(SUBSTRING "${_revision}" 0 16 _revision)
-
+    # Keyed by relative path: the same kernel name exists under both MI300/ and MI308/.
+    hkp_source_digest(_revision "${_engine_dir}" ${_inputs})
     set(${_out_revision} "${_revision}" PARENT_SCOPE)
     if(_arg_CONFIGURE_DEPENDS)
         # The calling directory's property: a function runs in its caller's directory.
