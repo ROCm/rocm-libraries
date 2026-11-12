@@ -8,8 +8,9 @@ Three consumers share the math here (``natural_lse_from_log2_stats``):
 * the gfx942 / gfx950 dense prefill kernels: ``lse_store`` emits the optional
   LSE store, ``dense_row_has_key`` / ``zero_keyless_row`` the empty-row output
   masking, ``validate_dense_lse`` is the host-side contract for the
-  caller-owned LSE buffer, and ``validate_varlen_keys`` the host check for a packed
-  varlen launch without LSE;
+  caller-owned LSE buffer, and ``validate_dense_varlen_offsets`` the host check
+  every packed varlen launch runs on its offsets (inside ``validate_dense_lse``
+  with LSE, in the launcher without);
 * the unified split-KV reduce and the unified tiled 2D epilogues (gfx942 /
   gfx950): the same IR helpers emit their LSE store, ``lse_row_has_mass`` the
   ``!(l == 0)`` row test, and ``validate_unified_lse`` is their host-side buffer
@@ -52,7 +53,7 @@ they accept.  Nothing is allocated (no LDS, no scratch).
 
 from __future__ import annotations
 
-from typing import Callable, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 from rocke.core.ir import I16, I32, I64, IRBuilder, Value, VectorType
 from rocke.helpers.attention_fwd_ext import RowEpilogue, natural_lse_from_log2_stats
@@ -69,7 +70,7 @@ __all__ = [
     "make_mfma_lse_epilogue",
     "make_wmma_lse_epilogue",
     "validate_dense_lse",
-    "validate_varlen_keys",
+    "validate_dense_varlen_offsets",
     "zero_keyless_row",
 ]
 
@@ -197,6 +198,7 @@ def validate_dense_lse(
     block_tables=None,
     kv_lens=None,
     sinks=None,
+    additive_bias=None,
 ):
     """Validate only the new output contract; disabled callers keep their path."""
     if not spec.emit_lse:
@@ -225,6 +227,7 @@ def validate_dense_lse(
             "block_tables": block_tables,
             "kv_lens": kv_lens,
             "sinks": sinks,
+            "additive_bias": additive_bias,
         },
     )
 
@@ -244,75 +247,86 @@ def validate_dense_lse(
             raise ValueError(f"{name} must be contiguous")
     if q.shape[0] != out.shape[0] or k.shape[0] != v.shape[0]:
         raise ValueError("packed output/value extents must match query/key extents")
-    for name, tensor, extent, tile, maximum, allow_empty in (
-        ("cu_seqlens_q", cu_seqlens_q, q.shape[0], spec.block_m, spec.seqlen_q, True),
-        (
-            "cu_seqlens_kv",
-            cu_seqlens_kv,
-            k.shape[0],
-            spec.block_n,
-            spec.seqlen_kv,
-            False,
-        ),
+    validate_dense_varlen_offsets(
+        spec,
+        cu_seqlens_q,
+        cu_seqlens_kv,
+        q_tokens=q.shape[0],
+        kv_tokens=k.shape[0],
+        device=q.device,
+    )
+
+
+def validate_dense_varlen_offsets(
+    spec: Any,
+    cu_seqlens_q: Any,
+    cu_seqlens_kv: Any,
+    *,
+    q_tokens: int,
+    kv_tokens: int,
+    device: Any,
+) -> None:
+    """Check packed varlen offsets against ``spec``: on ``device`` (the launch's Q
+    device; the kernel dereferences them), int32 [batch+1], spanning the packed
+    tensors, each length monotone, tile-aligned and within the spec maxima. Reads
+    the offsets to host: a device sync. Malformed offsets raise ``ValueError``.
+
+    The packed dense body has no per-sequence load-tail handling, and the paths
+    that read per-sequence state (LSE, the additive bias) index it by in-sequence
+    position. Two valid inputs are beyond it (implementation shortcuts, not hardware
+    limits):
+
+    * a sequence with queries and no keys. The prologue always scores KV tile 0,
+      which for an empty sequence is the next sequence's keys (and, for the last
+      one, K/V past the packed tensor). Without LSE this raises
+      ``NotImplementedError`` (``NOT_YET_IMPLEMENTED``); with LSE it stays the
+      ``ValueError`` that path has always raised;
+    * with a sliding window and neither LSE nor an additive bias, a sequence whose
+      last query rows see no key (``q_len - kv_len >= window``): only the LSE and
+      bias epilogues zero such a row; the plain one stores the mean of V. This
+      raises ``NotImplementedError``.
+
+    A slot with no queries may have no keys, in every path: its workgroups return
+    on the query-block bound before they load K/V or write a row."""
+    lengths = []
+    for name, tensor, extent, tile, maximum in (
+        ("cu_seqlens_q", cu_seqlens_q, q_tokens, spec.block_m, spec.seqlen_q),
+        ("cu_seqlens_kv", cu_seqlens_kv, kv_tokens, spec.block_n, spec.seqlen_kv),
     ):
+        if tensor.device != device:
+            raise ValueError(
+                f"{name} must be on the same device as q, got "
+                f"{tensor.device} vs {device}"
+            )
         if str(tensor.dtype) != "torch.int32" or tuple(tensor.shape) != (
             spec.batch + 1,
         ):
             raise ValueError(f"{name} must be int32 [batch+1]")
         if not tensor.is_contiguous():
             raise ValueError(f"{name} must be contiguous")
-        # The existing packed body has no per-sequence load-tail handling.
-        # This enabled-path content check synchronizes device offsets to host.
         offsets = tensor.tolist()
         if offsets[0] != 0 or offsets[-1] != extent:
             raise ValueError(f"{name} endpoints must span its packed tensor")
-        for start, stop in zip(offsets, offsets[1:]):
-            length = stop - start
+        lengths.append([stop - start for start, stop in zip(offsets, offsets[1:])])
+        for length in lengths[-1]:
             if length < 0 or length > maximum or length % tile:
                 raise ValueError(
                     f"{name} lengths must be monotone, tile-aligned, and within spec"
                 )
-            if not allow_empty and length == 0:
-                raise ValueError("LSE-enabled packed KV sequences must be nonempty")
 
-
-def validate_varlen_keys(spec, cu_seqlens_q, cu_seqlens_kv):
-    """Host check for a packed varlen launch WITHOUT the LSE output.
-
-    The packed body zeroes no keyless row without LSE and has no empty-KV path, so
-    reject what would come out wrong instead of returning it: a sequence that has
-    queries but a KV length of 0, and, with a sliding window, a sequence whose last
-    query rows see no key (``q_len - kv_len >= window``). A slot with no queries exits
-    before touching KV, so it may have no keys. Both rejections are implementation
-    shortcuts of the packed body, not hardware limits, so they raise
-    ``NotImplementedError`` with a NOT_YET_IMPLEMENTED detail; malformed offsets raise
-    ``ValueError``. The offsets must be int32 (the kernel reads them as such).
-    Tile alignment and the spec maxima are not checked here; with LSE,
-    :func:`validate_dense_lse` checks them. The spec has no sinks with varlen.
-    Synchronizes both offset tensors to host.
-    """
-    for name, tensor in (
-        ("cu_seqlens_q", cu_seqlens_q),
-        ("cu_seqlens_kv", cu_seqlens_kv),
-    ):
-        if str(tensor.dtype) != "torch.int32":
-            raise ValueError(f"{name} must be int32, got {tensor.dtype}")
-    q_off = cu_seqlens_q.tolist()
-    kv_off = cu_seqlens_kv.tolist()
-    if len(q_off) != spec.batch + 1 or len(kv_off) != spec.batch + 1:
-        raise ValueError(
-            "cu_seqlens_q and cu_seqlens_kv must each have batch+1 entries"
-        )
     window = spec.sliding_window
-    q_lens = [stop - start for start, stop in zip(q_off, q_off[1:])]
-    kv_lens = [stop - start for start, stop in zip(kv_off, kv_off[1:])]
-    for i, (q_len, kv_len) in enumerate(zip(q_lens, kv_lens)):
-        if q_len > 0 and kv_len <= 0:
+    check_window = (
+        window and not spec.emit_lse and not getattr(spec, "use_additive_bias", False)
+    )
+    for i, (q_len, kv_len) in enumerate(zip(*lengths)):
+        if q_len and not kv_len:
+            if spec.emit_lse:
+                raise ValueError("LSE-enabled packed KV sequences must be nonempty")
             raise NotImplementedError(
                 f"NOT_YET_IMPLEMENTED: packed KV sequence {i} must be nonempty "
-                "without LSE"
+                f"when it has queries (q_len={q_len})"
             )
-        if window and q_len - kv_len >= window:
+        if check_window and q_len - kv_len >= window:
             raise NotImplementedError(
                 f"NOT_YET_IMPLEMENTED: sequence {i}: sliding_window={window} over "
                 f"q_len={q_len}, kv_len={kv_len} leaves query rows with no key; "

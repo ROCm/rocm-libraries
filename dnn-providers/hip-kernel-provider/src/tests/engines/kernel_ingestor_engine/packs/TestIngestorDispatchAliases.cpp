@@ -65,6 +65,16 @@ TEST(TestIngestorDispatchAliases, ASupersededContractKeepsItsOwnHandler)
                            << " resolves to the current contract's handler";
 }
 
+// The catalog's handler saves a bias plan under v3, and a plan may be saved only under a
+// name registered to the handler that saves it, so v3 resolves to the current handler.
+TEST(TestIngestorDispatchAliases, TheBiasContractIsServedByTheCurrentHandler)
+{
+    registerNativeIngestorSymbols();
+
+    expectOneHandler("hipkernel.gfx950_attention_dense.dispatch",
+                     GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3);
+}
+
 // gfx942 has one contract. Its versioned name resolves to the handler of the unversioned
 // one, so a plan saved through the catalog's handler names that same handler, and it has
 // no version it never defined.

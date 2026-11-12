@@ -836,7 +836,7 @@ There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 |---|---|
 | `configs/scale_add.yaml` | Single-pack engine, like the shipped `conv_fwd`: one pack, one operation, its `graph_match` both admits the node type and validates shape |
 | `configs/binary_ops.yaml` | Multi-pack engine, like the shipped `pointwise`: one pack per operation sharing one KMD/UED/UHD/UDD, each naming its own operation-scoped UMD via `discriminator` |
-| `configs/gfx950_attention_dense.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionDense` descriptors: 840 rocKE kernels in the `variants` form, a builder lowered by `hkp_pack` at build time |
+| `configs/gfx950_attention_dense.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionDense` descriptors: 972 rocKE kernels (840 plus 132 additive-bias) in the `variants` form, a builder lowered by `hkp_pack` at build time |
 | `configs/gfx950_attention_dense.engine.yaml` | That engine's manifest: the registry space the selection is drawn from, its `reduction:` classification, ground-truth graph template and `launch_surface:` audit |
 | `configs/gfx950_attention_unified_2d.yaml` | The authored selection for the shipped `hipkernel:Gfx950AttentionUnified2D` descriptors: rocKE prefill kernels per head/dtype/mask cell, served through a host-derived identity paged-KV block table. Kernel and geometry counts: the bundle README, `rocKE/gfx950_attention_unified_2d/README.md` |
 | `configs/gfx950_attention_unified_2d.engine.yaml` | That engine's manifest: the `unified_tuning` geometries, the batch capacity (`enumerate.fixed.batch` -> the spec's `num_seqs`, which bounds the sequences one launch resolves at `2^ceil(log2(num_seqs+1)) - 1`), `mask_type` as the KMD's mask field, and the `engine.slug` override |
@@ -1022,8 +1022,20 @@ enumerate:
   sweep_level: production         # the registry sweep level
   space: slice | full             # full: every sweep spec sharing the cell's feature fields
   free_fields: [block_m, block_n] # slice only: fields that may differ from select_spec
-  spec_fields: [dtype, head_size] # slice only: spec fields the KDP carries
-  max_kernels: 840                # slice only: more is an error
+  feature_fields:                 # optional: boolean spec fields a cell turns on; declared here
+                                  # only, and applied to every `also` section too
+    use_additive_bias:            # must be a metadata field, in every section's spec_fields (if
+                                  # set) and in reduction.fields.feature (with a reduction
+                                  # block: an empty or absent list names no feature), and not
+                                  # in free_fields
+      name_token: _addb           # inserted after the template's last slot: ..._bn64_addb.gfx950
+      free_fields: [block_m]      # optional, slice only: narrows the cell's free_fields (a subset)
+      select: {block_m: 128}      # optional, slice only: keep only these values of the fields the
+                                  # cell sweeps; the cell's default is the kept spec equal to the
+                                  # registry default elsewhere. Two features' selects must agree
+  spec_fields: [dtype, head_size, use_additive_bias]  # slice only: spec fields the KDP carries
+  max_kernels: 972                # slice only: more is an error. Every space refuses two
+                                  # kernels with one name
   # The two keys below serve a rule-driven candidate (attention_dense is not one); see
   # configs/gfx942_attention_unified_3d.engine.yaml and the text below.
   # selector_fields: [batch, seqlen_k, kv_block_size]  # optional: cell fields that only steer select_spec
@@ -1040,7 +1052,7 @@ launches:                         # optional: copied onto every kernel's kernel_
 
 reduction:                        # copied into the selection; read by tools/variant_reduce.py
   fields:
-    feature: [dtype, head_size]   # spec/metadata fields that define a cell
+    feature: [dtype, head_size, use_additive_bias]   # spec/metadata fields that define a cell
     performance:                  # tuning knobs, in priority order
       - {name: block_m, divides: seqlen_q}   # applicable when seqlen_q % block_m == 0; the target must be a kmd_fields name
       - {name: exp_per_pv_step, unset_resolves_by: resolved_exp_per_pv_step}  # resolves a None knob
@@ -1059,7 +1071,9 @@ ground_truth:                     # optional; read by tools/ground_truth.py grap
 ```
 
 Each cell's request is `Request(**fixed, **pin, **cell)`; a declined cell exits 2. Metadata
-fields and name slots the spec lacks are read from the request. A field sits in at most
+fields and name slots the spec lacks are read from the request. `--shapes` keys a shape by
+its cell fields; one the shape omits takes the request class's default (a shape with no
+`use_attn_bias` is a bias-off shape, not a GAP). A field sits in at most
 one `reduction.fields` list; in `space: full`, a varying field in none is held at its
 registry default with a WARN. `reduction:` never reaches a descriptor; a selection's arm
 or flat kernel may carry `default: true`, the variant its cell always keeps. An optional

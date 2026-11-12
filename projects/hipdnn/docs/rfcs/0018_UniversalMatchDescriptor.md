@@ -493,7 +493,7 @@ engine's `KernelIngestorStateManager` caches its catalog on `CatalogKey` (`Match
 graph id and the device id. The key has no descriptor-inventory generation. The gfx942
 `attention_dense` figures in this section (2,710 kernels and the figures derived from them) are
 design estimates; no gfx942 `attention_dense` descriptors ship. The shipped attention catalogs are
-`hipkernel:Gfx950AttentionDense` (840 kernels) and `hipkernel:Gfx1151WmmaAttention`.
+`hipkernel:Gfx950AttentionDense` (972 kernels) and `hipkernel:Gfx1151WmmaAttention`.
 
 Both halves are authored as text and compiled once into in-memory structures. The pattern's
 compilation, and the root-opcode index that prunes engines before any pattern runs, belong to the

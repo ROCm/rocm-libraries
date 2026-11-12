@@ -35,6 +35,9 @@ struct AttentionDenseTestArch
     bool completesGridOrder;
     /// gfx942 binds a stats output and ships an emit_lse form; gfx950 does neither.
     bool bindsStats;
+    /// gfx950 serves an additive bias (attn_mask) with its use_additive_bias kernels, a
+    /// field a completed record carries (a record without it reads as 0); gfx942 serves none.
+    bool servesBias;
     std::string_view kernelMatchSymbol;
     /// The head of every decline line the graph match logs.
     std::string_view engineName;
@@ -49,6 +52,7 @@ inline constexpr AttentionDenseTestArch GFX942_ATTENTION_DENSE{
     "attention_dense.bf16_d128_c1_swa0_bm256_bn64_lds_row_pad8_pv_priority0.gfx942",
     true,
     true,
+    false,
     "hipkernel.gfx942_attention_dense.kernel_match",
     "hipkernel:Gfx942AttentionDense"};
 
@@ -61,6 +65,7 @@ inline constexpr AttentionDenseTestArch GFX950_ATTENTION_DENSE{
     "attention_dense.bf16_d128_hq4_kv4_c1_bm256_bn64.gfx950",
     false,
     false,
+    true,
     "hipkernel.gfx950_attention_dense.kernel_match",
     "hipkernel:Gfx950AttentionDense"};
 
@@ -81,6 +86,11 @@ inline hipdnn_plugin_sdk::ingestor::MetadataValues completedAttentionDenseMetada
         {std::string("block_m"), blockM},
         {std::string("block_n"), blockN},
     };
+    if(arch.servesBias)
+    {
+        // A plain record, which the KMD default completes to 0.
+        metadata[std::string("use_additive_bias")] = int64_t{0};
+    }
     if(arch.completesGridOrder)
     {
         metadata[std::string("persistent")] = int64_t{0};

@@ -41,22 +41,32 @@ inline constexpr std::string_view GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
 
 /// Contract v2: the same values, and the launch also passes num_query_heads and
 /// num_kv_heads (10 kernel arguments), for kernels that read the head counts at runtime.
-/// New plans are saved under it.
+/// New plans without a bias are saved under it.
 inline constexpr std::string_view GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2
     = "hipkernel.gfx950_attention_dense.dispatch.v2";
 
-/// The values of the `hipkernel.gfx950_attention_dense.dispatch.v1` and `.v2` contracts,
-/// which share one value set (attention_dense::launchValues): the sixteen both arches save.
+/// Contract v3: the v2 values plus the bias uid and its batch, query-head and query-row
+/// element strides (attention_dense::BIAS_*_VALUE); the launch passes the v2 arguments, then
+/// additive_bias_ptr and the three strides (14 kernel arguments). New plans with an additive
+/// bias are saved under it. The handler of v2 also serves it.
+inline constexpr std::string_view GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3
+    = "hipkernel.gfx950_attention_dense.dispatch.v3";
+
+/// The values of the `hipkernel.gfx950_attention_dense.dispatch.v1`, `.v2` and `.v3`
+/// contracts. v1 and v2 share one value set (attention_dense::launchValues): the sixteen both
+/// arches save. v3 adds the four bias values, which this writes exactly when the binding has
+/// a bias.
 hipdnn_plugin_sdk::ingestor::MetadataValues gfx950AttentionDenseLaunchValues(
     const AttentionDenseBinding& binding, const AttentionDenseProblem& problem, int64_t blockM);
 
 /// Everything a gfx950 dense-attention launch is computed from.
 using Gfx950AttentionDenseLaunchInputs = AttentionDenseLaunchInputs;
 
-/// Reads the values of the `hipkernel.gfx950_attention_dense.dispatch.v1` or `.v2`
-/// contract (one value set; the versions differ only in the kernel arguments the launch
-/// passes). `block_m` must be 128 or 256, the two gfx950 builds. For every other rule, and
-/// the one gfx950 exception to them, see attention_dense::readLaunchInputs.
+/// Reads the values of the `hipkernel.gfx950_attention_dense.dispatch.v1`, `.v2` or `.v3`
+/// contract (v1 and v2 share one value set and differ only in the kernel arguments the
+/// launch passes; v3 adds the bias values). `block_m` must be 128 or 256, the two gfx950
+/// builds. For every other rule, and the one gfx950 exception to them, see
+/// attention_dense::readLaunchInputs.
 ///
 /// @throws HipdnnPluginException with a load refusal when the dispatch name is neither
 ///         contract, or when a value is missing, extra, of another type or out of range.

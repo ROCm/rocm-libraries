@@ -5,6 +5,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -53,6 +54,15 @@ namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 /// The stats uid of a graph that binds no stats (LSE) output.
 inline constexpr int64_t ATTENTION_DENSE_NO_STATS = -1;
 
+/// An additive bias the graph carries (its attn_mask): its uid and the element strides of
+/// its batch, query-head and query-row axes. The key axis is unit stride, and an axis of
+/// extent 1 broadcasts through stride 0.
+struct AttentionDenseBias
+{
+    int64_t uid = 0;
+    std::array<int32_t, 3> strides{0, 0, 0};
+};
+
 /// The tensor uids and derived scalars a matched dense-attention graph binds.
 struct AttentionDenseBinding
 {
@@ -66,6 +76,9 @@ struct AttentionDenseBinding
     /// The stats output the kernel writes the LSE to, or ATTENTION_DENSE_NO_STATS. Only an
     /// arch that serves stats (AttentionDenseArch::servesStats) ever binds one.
     int64_t stats = ATTENTION_DENSE_NO_STATS;
+    /// The additive bias the kernel adds to the scaled scores. Only an arch that serves a
+    /// bias (AttentionDenseArch::servesBias) ever binds one.
+    std::optional<AttentionDenseBias> bias = std::nullopt;
 };
 
 /// The graph facts the matcher and prepare() both need, derived once from the tensors by
@@ -115,6 +128,12 @@ inline constexpr std::string_view STATS_UID_VALUE = "stats.uid";
 inline constexpr std::string_view GRID_ORDER_VALUE = "grid_order";
 inline constexpr std::string_view PERSIST_DECODE_VALUE = "persist_decode";
 inline constexpr std::string_view NUM_PERSISTENT_VALUE = "num_persistent";
+/// The additive bias's uid and its batch, query-head and query-row element strides, saved
+/// only by an arch that serves a bias and only for a plan that has one (its bias contract).
+inline constexpr std::string_view BIAS_UID_VALUE = "bias.uid";
+inline constexpr std::string_view BIAS_STRIDE_BATCH_VALUE = "bias.stride_batch";
+inline constexpr std::string_view BIAS_STRIDE_HEAD_VALUE = "bias.stride_head";
+inline constexpr std::string_view BIAS_STRIDE_QUERY_VALUE = "bias.stride_query";
 
 /// The one stride layout the kernels support. prepare() refuses every other layout.
 inline constexpr std::string_view BSHD_LAYOUT = "bshd";
@@ -125,7 +144,10 @@ enum class AttentionDenseAbi
     /// q, k, v, o, scale, batch, seqlen_q, seqlen_kv: kernels that bake the head counts.
     BAKED_HEAD_COUNTS,
     /// The same, then num_query_heads and num_kv_heads: kernels that read them at runtime.
-    RUNTIME_HEAD_COUNTS
+    RUNTIME_HEAD_COUNTS,
+    /// RUNTIME_HEAD_COUNTS, then additive_bias_ptr and the bias's batch, query-head and
+    /// query-row element strides (last, after any lse_ptr): kernels that add a bias.
+    RUNTIME_HEAD_COUNTS_WITH_BIAS
 };
 
 /// A versioned dispatch name, under which a plan's launch values are saved, and the kernel
@@ -153,6 +175,14 @@ struct AttentionDenseTokens
     /// The stats output's uid, or ATTENTION_DENSE_NO_STATS. Bound only by an arch that
     /// serves stats; empty for one that does not.
     std::string_view stats;
+    /// 1 when the graph carries an additive bias (attn_mask), else 0. Bound only by an arch
+    /// that serves a bias; empty for one that does not. The four tokens below are bound only
+    /// when it is 1.
+    std::string_view bias;
+    std::string_view biasUid;
+    std::string_view biasStrideBatch;
+    std::string_view biasStrideHead;
+    std::string_view biasStrideQuery;
 };
 
 /// The grid and block a variant must launch with.
@@ -213,15 +243,36 @@ struct AttentionDenseArch
     std::optional<AttentionDenseGrid> (*candidateGrid)(
         const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel)
         = nullptr;
+    /// Whether a candidate adds the additive bias, which also appends four kernel arguments
+    /// (see AttentionDenseAbi::RUNTIME_HEAD_COUNTS_WITH_BIAS), read from a KMD field only
+    /// that arch's manifest declares; nullopt for a record without a valid value, which
+    /// kernelMatches declines. nullptr for an arch whose catalog has no bias kernel: its
+    /// graph match declines an attn_mask under the cause 'attn_mask', binds no bias token,
+    /// and its launch values carry no bias.
+    std::optional<bool> (*candidateAddsBias)(
+        const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel)
+        = nullptr;
     /// The contract the engine's catalog dispatches through and new plans are saved under.
     AttentionDenseContract currentContract;
     /// A superseded contract whose plans still restore, or an empty symbol for none. It
     /// shares currentContract's launch values and differs only in its kernel arguments.
     AttentionDenseContract legacyContract;
+    /// The contract a plan with an additive bias is saved under, for an arch that serves one.
+    /// Its values are currentContract's plus the bias values, and it launches
+    /// AttentionDenseAbi::RUNTIME_HEAD_COUNTS_WITH_BIAS. The current handler serves both
+    /// contracts, since a plan may only be saved under a name registered to the handler that
+    /// saves it: a graph without a bias saves under currentContract, one with a bias under
+    /// this one. The legacy handler has no bias form.
+    AttentionDenseContract biasContract;
 
     bool servesSlidingWindow() const
     {
         return windowReachesKeys != nullptr;
+    }
+
+    bool servesBias() const
+    {
+        return candidateAddsBias != nullptr;
     }
 
     bool servesStats() const
@@ -300,8 +351,9 @@ std::unique_ptr<hipdnn_plugin_sdk::ingestor::IKernelDispatchHandler<Handle>>
                         const AttentionDenseContract& contract);
 
 /// The launch values @p arch saves, one value set for every contract of the arch: the
-/// sixteen both engines save, `stats.uid` where the arch serves stats, and `grid_order`,
-/// `persist_decode` and `num_persistent` where it serves grids past qb_minor.
+/// sixteen both engines save, `stats.uid` where the arch serves stats, `grid_order`,
+/// `persist_decode` and `num_persistent` where it serves grids past qb_minor, and the
+/// `bias.*` values for a binding that has a bias.
 hipdnn_plugin_sdk::ingestor::MetadataValues launchValues(const AttentionDenseBinding& binding,
                                                          const AttentionDenseProblem& problem,
                                                          int64_t blockM,
@@ -311,8 +363,8 @@ hipdnn_plugin_sdk::ingestor::MetadataValues launchValues(const AttentionDenseBin
 /**
  * @brief Reads @p arch's launch values back into the launch state.
  *
- * The dispatch name must be the arch's current or legacy contract; anything else, including
- * the unversioned name, is refused against the current one. `batch`, `seqlen_q`,
+ * The dispatch name must be the arch's current, legacy or (where served) bias contract;
+ * anything else, including the unversioned name, is refused against the current one. `batch`, `seqlen_q`,
  * `seqlen_kv`, the head counts and `head_size` must be in [1, INT32_MAX]; the kernel takes
  * the first three as 32-bit integers. `block_m` must be one the arch's geometry accepts;
  * block_n is not saved, so the arch's full tile rule is not re-run. `scale` must convert to
@@ -336,6 +388,11 @@ hipdnn_plugin_sdk::ingestor::MetadataValues launchValues(const AttentionDenseBin
  * gridIllegality). The restore selects the kernel's argument list from the saved stats uid
  * and grid before this reader runs, so its signature check, which this reader does not
  * see, refuses a kernel whose LSE output or grid disagrees with the plan.
+ *
+ * An arch that serves a bias also reads, under its bias contract (and only there), the
+ * bias's `bias.uid` and its three strides, each in [0, MAX_BIAS_INDEX]; the largest bias
+ * element the saved shape reaches must be at most MAX_BIAS_INDEX, the same bounds the graph
+ * match puts on a graph's attn_mask.
  *
  * @throws HipdnnPluginException with a load refusal when the dispatch name is neither
  *         contract, or when a value is missing, extra, of another type or out of range.

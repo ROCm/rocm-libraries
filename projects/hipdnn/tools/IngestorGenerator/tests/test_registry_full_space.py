@@ -47,6 +47,10 @@ def manifest() -> dict:
         pytest.skip(f"rocKE library not in this checkout: {_ROCKE_LIBRARY}")
     re_.bind_provider(manifest.get("provider_root"))
     manifest["enumerate"]["space"] = "full"
+    # A feature's free_fields and select narrow a slice only; space: full refuses them.
+    for entry in manifest["enumerate"].get("feature_fields", {}).values():
+        entry.pop("free_fields", None)
+        entry.pop("select", None)
     manifest["enumerate"]["cells"] = [
         {
             "fields": ["hdim_q", "hdim_v", "nhead_q", "nhead_k"],

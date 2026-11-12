@@ -216,6 +216,14 @@ class AttentionRequest(OperatorRequest):
         # without each site re-normalizing (and disagreeing about how).
         # ``object.__setattr__`` because the dataclass is frozen.
         object.__setattr__(self, "arch", canonical_arch(self.arch))
+        # Exact type, checked here because requests key caches: 1 == True and
+        # hashes alike, so a later check can be skipped by a cache hit, and
+        # bool("false") would enable the bias the caller turned off.
+        if type(self.use_attn_bias) is not bool:
+            raise ValueError(
+                "use_attn_bias must be a bool, got "
+                f"{type(self.use_attn_bias).__name__}"
+            )
 
     def normalized(self) -> dict:
         d = asdict(self)
