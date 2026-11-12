@@ -284,7 +284,7 @@ class KernelConfig
             (pipeline_type == Pipeline::CompV4 || pipeline_type == Pipeline::PreShuffleV2 ||
              pipeline_type == Pipeline::PreShuffleTDM || pipeline_type == Pipeline::CompTDMV1 ||
              pipeline_type == Pipeline::CompTDMV2 || pipeline_type == Pipeline::CompAsync ||
-             pipeline_type == Pipeline::CompTDMPC);
+             pipeline_type == Pipeline::CompTDMPC || pipeline_type == Pipeline::CompTDMRA);
         key.algorithm.persistent      = false;
         key.algorithm.preshuffle      = preshuffle;
         key.algorithm.transpose_c     = false;
