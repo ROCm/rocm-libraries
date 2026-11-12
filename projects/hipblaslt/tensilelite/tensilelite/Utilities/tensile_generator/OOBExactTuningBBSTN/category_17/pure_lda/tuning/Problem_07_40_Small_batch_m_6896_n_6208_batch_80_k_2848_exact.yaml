@@ -1,0 +1,136 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported yet
+GlobalParameters:
+  NumElementsToValidate: 0
+  KernelTime: True
+  BoundsCheck: 0
+  PrintSolutionRejectionReason: True
+  PrintWinnersOnly: True
+  ValidationMaxToPrint: 4      # maximum number of mismatches to print
+  ValidationPrintValids: False # print matches too
+  Architecture: gfx1250
+  RotatingBufferSize: 384
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  # DataInitTypeBias: 0
+  # DataInitTypeA: 1
+  # DataInitTypeB: 2
+  # DataInitTypeScaleAlphaVec: 1
+  # PrintTensorA: 1
+  # PrintTensorB: 1
+  # PrintTensorC: 0
+  # PrintTensorD: 1
+  # PrintTensorRef: 1
+  # GenerateSourcesAndExit: True
+  KeepBuildTmp: False
+  NumWarmups: 1
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  NumBenchmarks: 1
+BenchmarkProblems:
+  #######################################
+  # TN - standard
+  #######################################
+  -
+    - # ProblemType
+      # epilogue stripped: no bias / activation / scaleAlphaVec -> UseBias=0, UseScaleAlphaVec=0, Activation=False, ActivationType=none
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      ActivationType: none
+      ActivationComputeDataType: s
+      SupportUserArgs: True
+      UseBias: 0
+      UseScaleAlphaVec: 0
+    - # Problem 7/40 - Small batch - m=6896, n=6208, batch=80, k=2848
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # a fork value / MI tile is removed only if its best kernel is >20% slower than the problem best (Nx = best kernel with that value / best overall).
+        # Removed MI tiles are kept below as commented-out lines; removed values are listed in "# pruned <Param>: ..." comments; "no kernel built" = rejected/not generated.
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]  # MT256x256
+          - [16, 16, 32, 1, 1, 4, 15, 4, 1]  # MT256x240
+          # - [16, 16, 32, 1, 1, 8, 7, 2, 2]  # MT256x224  pruned
+          # - [16, 16, 32, 1, 1, 4, 13, 4, 1]  # MT256x208  pruned
+          # - [16, 16, 32, 1, 1, 7, 8, 2, 2]  # MT224x256  pruned: best kernel 1.30x of problem best
+          # - [16, 16, 32, 1, 1, 7, 7, 2, 2]  # MT224x224  pruned: best kernel 1.30x of problem best
+          # - [16, 16, 32, 1, 1, 6, 5, 2, 2]  # MT192x160  pruned: best kernel 1.43x of problem best
+          # - [16, 16, 32, 1, 1, 3, 5, 2, 2]  # MT96x160  pruned: best kernel 1.88x of problem best
+          # - [16, 16, 32, 1, 1, 3, 5, 2, 1]  # MT96x80  pruned: best kernel 2.13x of problem best
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [0]
+        - PrefetchGL2: [0]
+        # pruned PrefetchGL2: 1
+        # pruned PrefetchGL2: 2
+        - HalfPLR: [1, 2]
+        # pruned HalfPLR: 0
+        # DepthU inferred per problem from K scale.
+        # K<=32: DU32; K<=256: 32/64/128; K<=1024: 64/128; else 64/128/256
+        # (512/1024 never won in any previous run).
+        - DepthU: [128]
+        # pruned DepthU: 64
+        # pruned DepthU: 256 [best kernel 1.89x of problem best]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TransposeLDS: [-1]
+        - SourceSwap: [true]
+        # pruned SourceSwap: false [best kernel 1.27x of problem best]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsBlockSizePerPadMetadata: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - 1LDSBuffer: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [False]
+        - LDSTrInst: [True]
+        - TDMInst: [3]
+        - TDMPlusLdsBuf: [0]  # triple LDS buffer is forced to 0 in Solution.py; -1/1 were no-op duplicates
+        - ScheduleGROverBarrier: [0, 1]
+        # pruned ScheduleGROverBarrier: -1 [auto, duplicate of 0/1]
+        - LDSSegmentInterleave: [0]
+        # pruned LDSSegmentInterleave: 1
+        # CD candidates from the batch-aware time model (A/B multicast vs round-up cost); [1,1] always kept.
+        # NOTE: known incorrect results observed with CD2_2, CD4_4 on shapes: [224, 128, 98666, 96].
+        - ClusterDim: [[1, 1]]
+        # pruned ClusterDim: 2_2
+        # pruned ClusterDim: 1_4
+        # pruned ClusterDim: 4_1
+        # NOTE: known incorrect results observed with SK3 on shapes: [336, 144, 2108, 7776], [208, 2256, 2367, 192], [48, 720, 3028, 208].
+        - StreamK: [0]
+        # pruned StreamK: 3
+        - ActivationFuncCall: [False, True]
+        - TemporalHintA: [0, 2]
+        - TemporalHintB: [0, 2]
+        - WorkGroupMapping: [1, 8]
+        # pruned WorkGroupMapping: 16
+        - StaggerU: [0, 32]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # ldd = ldc = 6912 (M = 6896), lda = ldb = 2944 (K = 2848)
+          # Exact = [m, n, batch, k, ldd, ldc, lda, ldb]
+          - Exact: [6896, 6208, 80, 2848, 6912, 6912, 2944, 2944]
+
+LibraryLogic:
+  ScheduleName: gfx1250
+  ArchitectureName: gfx1250
+  LibraryType: Equality

@@ -1,0 +1,410 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported yet
+GlobalParameters:
+  NumElementsToValidate: 0
+  KernelTime: True
+  BoundsCheck: 0
+  PrintSolutionRejectionReason: True
+  PrintWinnersOnly: True
+  ValidationMaxToPrint: 4      # maximum number of mismatches to print
+  ValidationPrintValids: False # print matches too
+  Architecture: gfx1250
+  RotatingBufferSize: 384
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  # DataInitTypeBias: 0
+  # DataInitTypeA: 1
+  # DataInitTypeB: 2
+  # DataInitTypeScaleAlphaVec: 1
+  # PrintTensorA: 1
+  # PrintTensorB: 1
+  # PrintTensorC: 0
+  # PrintTensorD: 1
+  # PrintTensorRef: 1
+  # GenerateSourcesAndExit: True
+  KeepBuildTmp: False
+  NumWarmups: 1
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  NumBenchmarks: 1
+BenchmarkProblems:
+  #######################################
+  # TN - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: True
+      ActivationType: hipblaslt_all
+      ActivationComputeDataType: s
+      SupportUserArgs: True
+      UseBias: 1
+      UseScaleAlphaVec: 1
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # a fork value / MI tile is removed only if its best kernel is >20% slower than the problem best (Nx = best kernel with that value / best overall).
+        # Removed MI tiles are kept below as commented-out lines; removed values are listed in "# pruned <Param>: ..." comments; "no kernel built" = rejected/not generated.
+        - MatrixInstruction:
+          # Per-problem MI set is generated independently per shape.
+          # Ranked by a batch-aware time model (grid = tiles_m*tiles_n*batch,
+          # padding waste, tile traffic); best tiles + smaller-tile hedges.
+          # MIWaveGroup=[1,1] is excluded (TDM swap requires NumWaves>1).
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]  # MT256x256
+          # - [16, 16, 32, 1, 1, 15, 4, 1, 4]  # MT240x256  pruned
+          - [16, 16, 32, 1, 1, 7, 8, 2, 2]  # MT224x256
+          - [16, 16, 32, 1, 1, 8, 7, 2, 2]  # MT256x224
+          - [16, 16, 32, 1, 1, 7, 7, 2, 2]  # MT224x224
+          # - [16, 16, 32, 1, 1, 13, 4, 1, 4]  # MT208x256  pruned
+          # - [16, 16, 32, 1, 1, 11, 3, 1, 4]  # MT176x192  pruned
+          # - [16, 16, 32, 1, 1, 4, 4, 2, 2]  # MT128x128  pruned: best kernel 1.23x of problem best (> 20% slower)
+          # - [16, 16, 32, 1, 1, 4, 4, 1, 2]  # MT64x128  pruned: best kernel 1.37x of problem best (> 20% slower)
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [0]
+        - PrefetchGL2: [0, 1, 2]  # review section 4: biggest single-param speedup (1.05-1.42x) for bandwidth-bound sizes in cat14/15; not forked before
+        - HalfPLR: [0, 1, 2]  # review section 4: OOB winner was HPLR2, never independently verified against the default (0)
+        # DepthU inferred per problem from K scale.
+        # K<=32: DU32; K<=256: 32/64/128; K<=1024: 64/128; else 64/128/256
+        # (512/1024 never won in any previous run).
+        - DepthU: [64, 128]
+        # pruned DepthU: 256 [best kernel 1.28x of problem best]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TransposeLDS: [-1]
+        - SourceSwap: [false, true]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsBlockSizePerPadMetadata: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - 1LDSBuffer: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [False]
+        - LDSTrInst: [True]
+        - TDMInst: [3]
+        - TDMPlusLdsBuf: [0]  # triple LDS buffer is forced to 0 in Solution.py; -1/1 were no-op duplicates
+        - ScheduleGROverBarrier: [0, 1]
+        # pruned ScheduleGROverBarrier: -1 [auto, duplicate of 0/1]
+        - LDSSegmentInterleave: [0, 1]
+        # CD candidates from the batch-aware time model (A/B multicast vs round-up cost); [1,1] always kept.
+        # NOTE: known incorrect results observed with CD2_2, CD4_4 on shapes: [224, 128, 98666, 96].
+        - ClusterDim: [[2, 2]]
+        # NOTE: known incorrect results observed with SK3 on shapes: [336, 144, 2108, 7776], [208, 2256, 2367, 192], [48, 720, 3028, 208].
+        - StreamK: [0, 3]
+        - WorkGroupMapping: [1, 8, 16]  # review section 4: cat13 winners use WGM16/32; esp. helps Small batch (small batch_count, large M*N)
+        - StaggerU: [0, 32]  # review section 4: cat14 exp2 fork; thin/elongated sizes often favor SU0
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4704, 3440, 102, 7040]
+        - BiasTypeArgs: [s]
+        - ActivationArgs:
+          - [Enum: none]
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # a fork value / MI tile is removed only if its best kernel is >20% slower than the problem best (Nx = best kernel with that value / best overall).
+        # Removed MI tiles are kept below as commented-out lines; removed values are listed in "# pruned <Param>: ..." comments; "no kernel built" = rejected/not generated.
+        - MatrixInstruction:
+          # Per-problem MI set is generated independently per shape.
+          # Ranked by a batch-aware time model (grid = tiles_m*tiles_n*batch,
+          # padding waste, tile traffic); best tiles + smaller-tile hedges.
+          # MIWaveGroup=[1,1] is excluded (TDM swap requires NumWaves>1).
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]  # MT256x256
+          # - [16, 16, 32, 1, 1, 15, 4, 1, 4]  # MT240x256  pruned
+          - [16, 16, 32, 1, 1, 7, 8, 2, 2]  # MT224x256
+          - [16, 16, 32, 1, 1, 8, 7, 2, 2]  # MT256x224
+          - [16, 16, 32, 1, 1, 7, 7, 2, 2]  # MT224x224
+          # - [16, 16, 32, 1, 1, 13, 4, 1, 4]  # MT208x256  pruned
+          # - [16, 16, 32, 1, 1, 11, 3, 1, 4]  # MT176x192  pruned
+          # - [16, 16, 32, 1, 1, 4, 4, 2, 2]  # MT128x128  pruned: best kernel 1.23x of problem best (> 20% slower)
+          # - [16, 16, 32, 1, 1, 4, 4, 1, 2]  # MT64x128  pruned: best kernel 1.37x of problem best (> 20% slower)
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [0]
+        - PrefetchGL2: [0, 1, 2]  # review section 4: biggest single-param speedup (1.05-1.42x) for bandwidth-bound sizes in cat14/15; not forked before
+        - HalfPLR: [0, 1, 2]  # review section 4: OOB winner was HPLR2, never independently verified against the default (0)
+        # DepthU inferred per problem from K scale.
+        # K<=32: DU32; K<=256: 32/64/128; K<=1024: 64/128; else 64/128/256
+        # (512/1024 never won in any previous run).
+        - DepthU: [64, 128]
+        # pruned DepthU: 256 [best kernel 1.28x of problem best]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TransposeLDS: [-1]
+        - SourceSwap: [false, true]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsBlockSizePerPadMetadata: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - 1LDSBuffer: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [False]
+        - LDSTrInst: [True]
+        - TDMInst: [3]
+        - TDMPlusLdsBuf: [0]  # triple LDS buffer is forced to 0 in Solution.py; -1/1 were no-op duplicates
+        - ScheduleGROverBarrier: [0, 1]
+        # pruned ScheduleGROverBarrier: -1 [auto, duplicate of 0/1]
+        - LDSSegmentInterleave: [0, 1]
+        # CD candidates from the batch-aware time model (A/B multicast vs round-up cost); [1,1] always kept.
+        # NOTE: known incorrect results observed with CD2_2, CD4_4 on shapes: [224, 128, 98666, 96].
+        - ClusterDim: [[1, 4]]
+        # NOTE: known incorrect results observed with SK3 on shapes: [336, 144, 2108, 7776], [208, 2256, 2367, 192], [48, 720, 3028, 208].
+        - StreamK: [0, 3]
+        - WorkGroupMapping: [1, 8, 16]  # review section 4: cat13 winners use WGM16/32; esp. helps Small batch (small batch_count, large M*N)
+        - StaggerU: [0, 32]  # review section 4: cat14 exp2 fork; thin/elongated sizes often favor SU0
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4704, 3440, 102, 7040]
+        - BiasTypeArgs: [s]
+        - ActivationArgs:
+          - [Enum: none]
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # a fork value / MI tile is removed only if its best kernel is >20% slower than the problem best (Nx = best kernel with that value / best overall).
+        # Removed MI tiles are kept below as commented-out lines; removed values are listed in "# pruned <Param>: ..." comments; "no kernel built" = rejected/not generated.
+        - MatrixInstruction:
+          # Per-problem MI set is generated independently per shape.
+          # Ranked by a batch-aware time model (grid = tiles_m*tiles_n*batch,
+          # padding waste, tile traffic); best tiles + smaller-tile hedges.
+          # MIWaveGroup=[1,1] is excluded (TDM swap requires NumWaves>1).
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]  # MT256x256
+          # - [16, 16, 32, 1, 1, 15, 4, 1, 4]  # MT240x256  pruned
+          - [16, 16, 32, 1, 1, 7, 8, 2, 2]  # MT224x256
+          - [16, 16, 32, 1, 1, 8, 7, 2, 2]  # MT256x224
+          - [16, 16, 32, 1, 1, 7, 7, 2, 2]  # MT224x224
+          - [16, 16, 32, 1, 1, 13, 4, 1, 4]  # MT208x256
+          # - [16, 16, 32, 1, 1, 11, 3, 1, 4]  # MT176x192  pruned
+          # - [16, 16, 32, 1, 1, 4, 4, 2, 2]  # MT128x128  pruned: best kernel 1.23x of problem best (> 20% slower)
+          # - [16, 16, 32, 1, 1, 4, 4, 1, 2]  # MT64x128  pruned: best kernel 1.37x of problem best (> 20% slower)
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [0]
+        - PrefetchGL2: [0, 1, 2]  # review section 4: biggest single-param speedup (1.05-1.42x) for bandwidth-bound sizes in cat14/15; not forked before
+        - HalfPLR: [0, 1, 2]  # review section 4: OOB winner was HPLR2, never independently verified against the default (0)
+        # DepthU inferred per problem from K scale.
+        # K<=32: DU32; K<=256: 32/64/128; K<=1024: 64/128; else 64/128/256
+        # (512/1024 never won in any previous run).
+        - DepthU: [64, 128]
+        # pruned DepthU: 256 [best kernel 1.28x of problem best]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TransposeLDS: [-1]
+        - SourceSwap: [false, true]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsBlockSizePerPadMetadata: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - 1LDSBuffer: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [False]
+        - LDSTrInst: [True]
+        - TDMInst: [3]
+        - TDMPlusLdsBuf: [0]  # triple LDS buffer is forced to 0 in Solution.py; -1/1 were no-op duplicates
+        - ScheduleGROverBarrier: [0, 1]
+        # pruned ScheduleGROverBarrier: -1 [auto, duplicate of 0/1]
+        - LDSSegmentInterleave: [0, 1]
+        # CD candidates from the batch-aware time model (A/B multicast vs round-up cost); [1,1] always kept.
+        # NOTE: known incorrect results observed with CD2_2, CD4_4 on shapes: [224, 128, 98666, 96].
+        - ClusterDim: [[1, 1]]
+        # NOTE: known incorrect results observed with SK3 on shapes: [336, 144, 2108, 7776], [208, 2256, 2367, 192], [48, 720, 3028, 208].
+        - StreamK: [0, 3]
+        - WorkGroupMapping: [1, 8, 16]  # review section 4: cat13 winners use WGM16/32; esp. helps Small batch (small batch_count, large M*N)
+        - StaggerU: [0, 32]  # review section 4: cat14 exp2 fork; thin/elongated sizes often favor SU0
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4704, 3440, 102, 7040]
+        - BiasTypeArgs: [s]
+        - ActivationArgs:
+          - [Enum: none]
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # a fork value / MI tile is removed only if its best kernel is >20% slower than the problem best (Nx = best kernel with that value / best overall).
+        # Removed MI tiles are kept below as commented-out lines; removed values are listed in "# pruned <Param>: ..." comments; "no kernel built" = rejected/not generated.
+        - MatrixInstruction:
+          # Per-problem MI set is generated independently per shape.
+          # Ranked by a batch-aware time model (grid = tiles_m*tiles_n*batch,
+          # padding waste, tile traffic); best tiles + smaller-tile hedges.
+          # MIWaveGroup=[1,1] is excluded (TDM swap requires NumWaves>1).
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]  # MT256x256
+          # - [16, 16, 32, 1, 1, 15, 4, 1, 4]  # MT240x256  pruned
+          - [16, 16, 32, 1, 1, 7, 8, 2, 2]  # MT224x256
+          # - [16, 16, 32, 1, 1, 8, 7, 2, 2]  # MT256x224  pruned
+          # - [16, 16, 32, 1, 1, 7, 7, 2, 2]  # MT224x224  pruned
+          # - [16, 16, 32, 1, 1, 13, 4, 1, 4]  # MT208x256  pruned
+          # - [16, 16, 32, 1, 1, 11, 3, 1, 4]  # MT176x192  pruned
+          # - [16, 16, 32, 1, 1, 4, 4, 2, 2]  # MT128x128  pruned: best kernel 1.23x of problem best (> 20% slower)
+          # - [16, 16, 32, 1, 1, 4, 4, 1, 2]  # MT64x128  pruned: best kernel 1.37x of problem best (> 20% slower)
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [0]
+        - PrefetchGL2: [0, 1, 2]  # review section 4: biggest single-param speedup (1.05-1.42x) for bandwidth-bound sizes in cat14/15; not forked before
+        - HalfPLR: [0, 1, 2]  # review section 4: OOB winner was HPLR2, never independently verified against the default (0)
+        # DepthU inferred per problem from K scale.
+        # K<=32: DU32; K<=256: 32/64/128; K<=1024: 64/128; else 64/128/256
+        # (512/1024 never won in any previous run).
+        - DepthU: [64, 128]
+        # pruned DepthU: 256 [best kernel 1.28x of problem best]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TransposeLDS: [-1]
+        - SourceSwap: [false, true]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsBlockSizePerPadMetadata: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - 1LDSBuffer: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [False]
+        - LDSTrInst: [True]
+        - TDMInst: [3]
+        - TDMPlusLdsBuf: [0]  # triple LDS buffer is forced to 0 in Solution.py; -1/1 were no-op duplicates
+        - ScheduleGROverBarrier: [0, 1]
+        # pruned ScheduleGROverBarrier: -1 [auto, duplicate of 0/1]
+        - LDSSegmentInterleave: [0, 1]
+        # CD candidates from the batch-aware time model (A/B multicast vs round-up cost); [1,1] always kept.
+        # NOTE: known incorrect results observed with CD2_2, CD4_4 on shapes: [224, 128, 98666, 96].
+        - ClusterDim: [[4, 1]]
+        # NOTE: known incorrect results observed with SK3 on shapes: [336, 144, 2108, 7776], [208, 2256, 2367, 192], [48, 720, 3028, 208].
+        - StreamK: [0, 3]
+        - WorkGroupMapping: [1, 8, 16]  # review section 4: cat13 winners use WGM16/32; esp. helps Small batch (small batch_count, large M*N)
+        - StaggerU: [0, 32]  # review section 4: cat14 exp2 fork; thin/elongated sizes often favor SU0
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4704, 3440, 102, 7040]
+        - BiasTypeArgs: [s]
+        - ActivationArgs:
+          - [Enum: none]
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # a fork value / MI tile is removed only if its best kernel is >20% slower than the problem best (Nx = best kernel with that value / best overall).
+        # Removed MI tiles are kept below as commented-out lines; removed values are listed in "# pruned <Param>: ..." comments; "no kernel built" = rejected/not generated.
+        - MatrixInstruction:
+          # Per-problem MI set is generated independently per shape.
+          # Ranked by a batch-aware time model (grid = tiles_m*tiles_n*batch,
+          # padding waste, tile traffic); best tiles + smaller-tile hedges.
+          # MIWaveGroup=[1,1] is excluded (TDM swap requires NumWaves>1).
+          - [16, 16, 32, 1, 1, 8, 8, 2, 2]  # MT256x256
+          # - [16, 16, 32, 1, 1, 15, 4, 1, 4]  # MT240x256  pruned
+          - [16, 16, 32, 1, 1, 7, 8, 2, 2]  # MT224x256
+          # - [16, 16, 32, 1, 1, 8, 7, 2, 2]  # MT256x224  pruned
+          - [16, 16, 32, 1, 1, 7, 7, 2, 2]  # MT224x224
+          # - [16, 16, 32, 1, 1, 13, 4, 1, 4]  # MT208x256  pruned
+          # - [16, 16, 32, 1, 1, 11, 3, 1, 4]  # MT176x192  pruned
+          # - [16, 16, 32, 1, 1, 4, 4, 2, 2]  # MT128x128  pruned: best kernel 1.23x of problem best (> 20% slower)
+          # - [16, 16, 32, 1, 1, 4, 4, 1, 2]  # MT64x128  pruned: best kernel 1.37x of problem best (> 20% slower)
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [0]
+        - PrefetchGL2: [0, 1, 2]  # review section 4: biggest single-param speedup (1.05-1.42x) for bandwidth-bound sizes in cat14/15; not forked before
+        - HalfPLR: [0, 1, 2]  # review section 4: OOB winner was HPLR2, never independently verified against the default (0)
+        # DepthU inferred per problem from K scale.
+        # K<=32: DU32; K<=256: 32/64/128; K<=1024: 64/128; else 64/128/256
+        # (512/1024 never won in any previous run).
+        - DepthU: [64, 128]
+        # pruned DepthU: 256 [best kernel 1.28x of problem best]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TransposeLDS: [-1]
+        - SourceSwap: [false, true]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsBlockSizePerPadMetadata: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - 1LDSBuffer: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [False]
+        - LDSTrInst: [True]
+        - TDMInst: [3]
+        - TDMPlusLdsBuf: [0]  # triple LDS buffer is forced to 0 in Solution.py; -1/1 were no-op duplicates
+        - ScheduleGROverBarrier: [0, 1]
+        # pruned ScheduleGROverBarrier: -1 [auto, duplicate of 0/1]
+        - LDSSegmentInterleave: [0, 1]
+        # CD candidates from the batch-aware time model (A/B multicast vs round-up cost); [1,1] always kept.
+        # NOTE: known incorrect results observed with CD2_2, CD4_4 on shapes: [224, 128, 98666, 96].
+        - ClusterDim: [[2, 1]]
+        # NOTE: known incorrect results observed with SK3 on shapes: [336, 144, 2108, 7776], [208, 2256, 2367, 192], [48, 720, 3028, 208].
+        - StreamK: [0, 3]
+        - WorkGroupMapping: [1, 8, 16]  # review section 4: cat13 winners use WGM16/32; esp. helps Small batch (small batch_count, large M*N)
+        - StaggerU: [0, 32]  # review section 4: cat14 exp2 fork; thin/elongated sizes often favor SU0
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4704, 3440, 102, 7040]
+        - BiasTypeArgs: [s]
+        - ActivationArgs:
+          - [Enum: none]
+
+LibraryLogic:
+  ScheduleName: gfx1250
+  ArchitectureName: gfx1250
+  LibraryType: Equality

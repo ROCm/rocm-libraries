@@ -1,0 +1,413 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported yet
+GlobalParameters:
+  NumElementsToValidate: 0
+  KernelTime: True
+  BoundsCheck: 0
+  PrintSolutionRejectionReason: True
+  PrintWinnersOnly: True
+  ValidationMaxToPrint: 4      # maximum number of mismatches to print
+  ValidationPrintValids: False # print matches too
+  Architecture: gfx1250
+  RotatingBufferSize: 384
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  # DataInitTypeBias: 0
+  # DataInitTypeA: 1
+  # DataInitTypeB: 2
+  # DataInitTypeScaleAlphaVec: 1
+  # PrintTensorA: 1
+  # PrintTensorB: 1
+  # PrintTensorC: 0
+  # PrintTensorD: 1
+  # PrintTensorRef: 1
+  # GenerateSourcesAndExit: True
+  KeepBuildTmp: False
+  NumWarmups: 2
+  EnqueuesPerSync: 2
+  SyncsPerBenchmark: 1
+  NumBenchmarks: 1
+BenchmarkProblems:
+  #######################################
+  # TN - standard
+  #######################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: True
+      ActivationType: hipblaslt_all
+      ActivationComputeDataType: s
+      SupportUserArgs: True
+      UseBias: 1
+      UseScaleAlphaVec: 1
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # a fork value / MI tile is removed only if its best kernel is >20% slower than the problem best (Nx = best kernel with that value / best overall).
+        # Removed MI tiles are kept below as commented-out lines; removed values are listed in "# pruned <Param>: ..." comments; "no kernel built" = rejected/not generated.
+        - MatrixInstruction:
+          # - [16, 16, 32, 1, 1, 4, 2, 1, 2]  # MT64x64  pruned
+          # - [16, 16, 32, 1, 1, 8, 2, 1, 2]  # MT128x64  pruned
+          # - [16, 16, 32, 1, 1, 4, 4, 1, 2]  # MT64x128  pruned
+          - [16, 16, 32, 1, 1, 8, 4, 1, 2]  # MT128x128
+          # - [16, 16, 32, 1, 1, 4, 4, 2, 2]  # MT128x128  pruned
+          # - [16, 16, 32, 1, 1, 8, 6, 1, 2]  # MT128x192  pruned
+          # - [16, 16, 32, 1, 1, 6, 4, 2, 2]  # MT192x128  pruned
+          - [16, 16, 32, 1, 1, 8, 4, 1, 4]  # MT128x256
+          - [16, 16, 32, 1, 1, 8, 4, 2, 2]  # MT256x128
+          # - [16, 16, 32, 1, 1, 6, 6, 2, 2]  # MT192x192  pruned
+          # - [16, 16, 32, 1, 1, 8, 6, 2, 2]  # MT256x192  pruned
+          # - [16, 16, 32, 1, 1, 8, 8, 2, 2]  # MT256x256  pruned
+          # - [16, 16, 32, 1, 1, 7, 8, 2, 2]  # MT224x256  pruned: best kernel 1.54x of problem best
+          # - [16, 16, 32, 1, 1, 15, 4, 1, 4]  # MT240x256  pruned: best kernel 1.73x of problem best
+          # - [16, 16, 32, 1, 1, 13, 4, 1, 4]  # MT208x256  pruned: best kernel 1.79x of problem best
+          # - [16, 16, 32, 1, 1, 7, 7, 2, 2]  # MT224x224  pruned: best kernel 1.65x of problem best
+          # - [16, 16, 32, 1, 1, 11, 4, 1, 4]  # MT176x256  pruned: best kernel 1.42x of problem best
+          # - [16, 16, 32, 1, 1, 7, 4, 2, 2]  # MT224x128  pruned: best kernel 1.26x of problem best
+          # - [16, 16, 32, 1, 1, 7, 2, 1, 4]  # MT112x128  pruned
+          # - [16, 16, 32, 1, 1, 7, 2, 1, 2]  # MT112x64  pruned
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [0]
+        - PrefetchGL2: [0]
+        # pruned PrefetchGL2: 1
+        # pruned PrefetchGL2: 2
+        - HalfPLR: [0]
+        # pruned HalfPLR: 1 [no kernel built in benchmark]
+        # pruned HalfPLR: 2 [no kernel built in benchmark]
+        # DepthU inferred per problem from K scale.
+        # K<=32: DU32; K<=256: 32/64/128; K<=1024: 64/128; else 64/128/256
+        # (512/1024 never won in any previous run).
+        - DepthU: [32]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TransposeLDS: [-1]
+        - SourceSwap: [false, true]
+        - AdaptiveGemm: [0, 1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsBlockSizePerPadMetadata: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - 1LDSBuffer: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [False]
+        - LDSTrInst: [True]
+        - TDMInst: [3]
+        - TDMPlusLdsBuf: [0]  # triple LDS buffer is forced to 0 in Solution.py; -1/1 were no-op duplicates
+        - ScheduleGROverBarrier: [0, 1]
+        # pruned ScheduleGROverBarrier: -1 [auto, duplicate of 0/1]
+        - LDSSegmentInterleave: [0]
+        # pruned LDSSegmentInterleave: 1
+        # CD candidates from the batch-aware time model (A/B multicast vs round-up cost); [1,1] always kept.
+        # NOTE: known incorrect results observed with CD2_2, CD4_4 on shapes: [224, 128, 98666, 96].
+        - ClusterDim: [[1, 1]]
+        # pruned ClusterDim: 1_2
+        # pruned ClusterDim: 2_1
+        # NOTE: known incorrect results observed with SK3 on shapes: [336, 144, 2108, 7776], [208, 2256, 2367, 192], [48, 720, 3028, 208].
+        - TileProcessingStrategy: [None, DataParallel, StreamK]
+        - WorkAssignment: [StaticGrid]
+        - PrefetchAcrossPersistent: [0, 1]
+        - ReuseAcrossPersistent: [0]
+        - NonTemporalD: [0, 1, 2, 3]
+        - WorkGroupMapping: [1, 8, 16]
+        - StaggerU: [0]
+        # pruned StaggerU: 32
+        # pruned StaggerU: 64
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4928, 6656, 40, 16]
+        - BiasTypeArgs: [s]
+        - ActivationArgs:
+          - [Enum: none]
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # a fork value / MI tile is removed only if its best kernel is >20% slower than the problem best (Nx = best kernel with that value / best overall).
+        # Removed MI tiles are kept below as commented-out lines; removed values are listed in "# pruned <Param>: ..." comments; "no kernel built" = rejected/not generated.
+        - MatrixInstruction:
+          # - [16, 16, 32, 1, 1, 4, 2, 1, 2]  # MT64x64  pruned
+          # - [16, 16, 32, 1, 1, 8, 2, 1, 2]  # MT128x64  pruned
+          # - [16, 16, 32, 1, 1, 4, 4, 1, 2]  # MT64x128  pruned
+          # - [16, 16, 32, 1, 1, 8, 4, 1, 2]  # MT128x128  pruned
+          # - [16, 16, 32, 1, 1, 4, 4, 2, 2]  # MT128x128  pruned
+          # - [16, 16, 32, 1, 1, 8, 6, 1, 2]  # MT128x192  pruned
+          # - [16, 16, 32, 1, 1, 6, 4, 2, 2]  # MT192x128  pruned
+          - [16, 16, 32, 1, 1, 8, 4, 1, 4]  # MT128x256
+          # - [16, 16, 32, 1, 1, 8, 4, 2, 2]  # MT256x128  pruned
+          # - [16, 16, 32, 1, 1, 6, 6, 2, 2]  # MT192x192  pruned
+          # - [16, 16, 32, 1, 1, 8, 6, 2, 2]  # MT256x192  pruned
+          # - [16, 16, 32, 1, 1, 8, 8, 2, 2]  # MT256x256  pruned
+          # - [16, 16, 32, 1, 1, 7, 8, 2, 2]  # MT224x256  pruned: best kernel 1.54x of problem best
+          # - [16, 16, 32, 1, 1, 15, 4, 1, 4]  # MT240x256  pruned: best kernel 1.73x of problem best
+          # - [16, 16, 32, 1, 1, 13, 4, 1, 4]  # MT208x256  pruned: best kernel 1.79x of problem best
+          # - [16, 16, 32, 1, 1, 7, 7, 2, 2]  # MT224x224  pruned: best kernel 1.65x of problem best
+          # - [16, 16, 32, 1, 1, 11, 4, 1, 4]  # MT176x256  pruned: best kernel 1.42x of problem best
+          # - [16, 16, 32, 1, 1, 7, 4, 2, 2]  # MT224x128  pruned: best kernel 1.26x of problem best
+          # - [16, 16, 32, 1, 1, 7, 2, 1, 4]  # MT112x128  pruned
+          # - [16, 16, 32, 1, 1, 7, 2, 1, 2]  # MT112x64  pruned
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [0]
+        - PrefetchGL2: [0]
+        # pruned PrefetchGL2: 1
+        # pruned PrefetchGL2: 2
+        - HalfPLR: [0]
+        # pruned HalfPLR: 1 [no kernel built in benchmark]
+        # pruned HalfPLR: 2 [no kernel built in benchmark]
+        # DepthU inferred per problem from K scale.
+        # K<=32: DU32; K<=256: 32/64/128; K<=1024: 64/128; else 64/128/256
+        # (512/1024 never won in any previous run).
+        - DepthU: [32]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TransposeLDS: [-1]
+        - SourceSwap: [false, true]
+        - AdaptiveGemm: [0, 1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsBlockSizePerPadMetadata: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - 1LDSBuffer: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [False]
+        - LDSTrInst: [True]
+        - TDMInst: [3]
+        - TDMPlusLdsBuf: [0]  # triple LDS buffer is forced to 0 in Solution.py; -1/1 were no-op duplicates
+        - ScheduleGROverBarrier: [0, 1]
+        # pruned ScheduleGROverBarrier: -1 [auto, duplicate of 0/1]
+        - LDSSegmentInterleave: [0]
+        # pruned LDSSegmentInterleave: 1
+        # CD candidates from the batch-aware time model (A/B multicast vs round-up cost); [1,1] always kept.
+        # NOTE: known incorrect results observed with CD2_2, CD4_4 on shapes: [224, 128, 98666, 96].
+        - ClusterDim: [[1, 4]]
+        # NOTE: known incorrect results observed with SK3 on shapes: [336, 144, 2108, 7776], [208, 2256, 2367, 192], [48, 720, 3028, 208].
+        - TileProcessingStrategy: [None, DataParallel, StreamK]
+        - WorkAssignment: [StaticGrid]
+        - PrefetchAcrossPersistent: [0, 1]
+        - ReuseAcrossPersistent: [0]
+        - NonTemporalD: [0, 1, 2, 3]
+        - WorkGroupMapping: [1, 8, 16]
+        - StaggerU: [0]
+        # pruned StaggerU: 32
+        # pruned StaggerU: 64
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4928, 6656, 40, 16]
+        - BiasTypeArgs: [s]
+        - ActivationArgs:
+          - [Enum: none]
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # a fork value / MI tile is removed only if its best kernel is >20% slower than the problem best (Nx = best kernel with that value / best overall).
+        # Removed MI tiles are kept below as commented-out lines; removed values are listed in "# pruned <Param>: ..." comments; "no kernel built" = rejected/not generated.
+        - MatrixInstruction:
+          # - [16, 16, 32, 1, 1, 4, 2, 1, 2]  # MT64x64  pruned
+          # - [16, 16, 32, 1, 1, 8, 2, 1, 2]  # MT128x64  pruned
+          # - [16, 16, 32, 1, 1, 4, 4, 1, 2]  # MT64x128  pruned
+          # - [16, 16, 32, 1, 1, 8, 4, 1, 2]  # MT128x128  pruned
+          # - [16, 16, 32, 1, 1, 4, 4, 2, 2]  # MT128x128  pruned
+          # - [16, 16, 32, 1, 1, 8, 6, 1, 2]  # MT128x192  pruned
+          # - [16, 16, 32, 1, 1, 6, 4, 2, 2]  # MT192x128  pruned
+          - [16, 16, 32, 1, 1, 8, 4, 1, 4]  # MT128x256
+          - [16, 16, 32, 1, 1, 8, 4, 2, 2]  # MT256x128
+          # - [16, 16, 32, 1, 1, 6, 6, 2, 2]  # MT192x192  pruned
+          # - [16, 16, 32, 1, 1, 8, 6, 2, 2]  # MT256x192  pruned
+          # - [16, 16, 32, 1, 1, 8, 8, 2, 2]  # MT256x256  pruned
+          # - [16, 16, 32, 1, 1, 7, 8, 2, 2]  # MT224x256  pruned: best kernel 1.54x of problem best
+          # - [16, 16, 32, 1, 1, 15, 4, 1, 4]  # MT240x256  pruned: best kernel 1.73x of problem best
+          # - [16, 16, 32, 1, 1, 13, 4, 1, 4]  # MT208x256  pruned: best kernel 1.79x of problem best
+          # - [16, 16, 32, 1, 1, 7, 7, 2, 2]  # MT224x224  pruned: best kernel 1.65x of problem best
+          # - [16, 16, 32, 1, 1, 11, 4, 1, 4]  # MT176x256  pruned: best kernel 1.42x of problem best
+          # - [16, 16, 32, 1, 1, 7, 4, 2, 2]  # MT224x128  pruned: best kernel 1.26x of problem best
+          # - [16, 16, 32, 1, 1, 7, 2, 1, 4]  # MT112x128  pruned
+          # - [16, 16, 32, 1, 1, 7, 2, 1, 2]  # MT112x64  pruned
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [0]
+        - PrefetchGL2: [0]
+        # pruned PrefetchGL2: 1
+        # pruned PrefetchGL2: 2
+        - HalfPLR: [0]
+        # pruned HalfPLR: 1 [no kernel built in benchmark]
+        # pruned HalfPLR: 2 [no kernel built in benchmark]
+        # DepthU inferred per problem from K scale.
+        # K<=32: DU32; K<=256: 32/64/128; K<=1024: 64/128; else 64/128/256
+        # (512/1024 never won in any previous run).
+        - DepthU: [32]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TransposeLDS: [-1]
+        - SourceSwap: [false, true]
+        - AdaptiveGemm: [0, 1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsBlockSizePerPadMetadata: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - 1LDSBuffer: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [False]
+        - LDSTrInst: [True]
+        - TDMInst: [3]
+        - TDMPlusLdsBuf: [0]  # triple LDS buffer is forced to 0 in Solution.py; -1/1 were no-op duplicates
+        - ScheduleGROverBarrier: [0, 1]
+        # pruned ScheduleGROverBarrier: -1 [auto, duplicate of 0/1]
+        - LDSSegmentInterleave: [0]
+        # pruned LDSSegmentInterleave: 1
+        # CD candidates from the batch-aware time model (A/B multicast vs round-up cost); [1,1] always kept.
+        # NOTE: known incorrect results observed with CD2_2, CD4_4 on shapes: [224, 128, 98666, 96].
+        - ClusterDim: [[2, 2]]
+        # NOTE: known incorrect results observed with SK3 on shapes: [336, 144, 2108, 7776], [208, 2256, 2367, 192], [48, 720, 3028, 208].
+        - TileProcessingStrategy: [None, DataParallel, StreamK]
+        - WorkAssignment: [StaticGrid]
+        - PrefetchAcrossPersistent: [0, 1]
+        - ReuseAcrossPersistent: [0]
+        - NonTemporalD: [0, 1, 2, 3]
+        - WorkGroupMapping: [1, 8, 16]
+        - StaggerU: [0]
+        # pruned StaggerU: 32
+        # pruned StaggerU: 64
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4928, 6656, 40, 16]
+        - BiasTypeArgs: [s]
+        - ActivationArgs:
+          - [Enum: none]
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # a fork value / MI tile is removed only if its best kernel is >20% slower than the problem best (Nx = best kernel with that value / best overall).
+        # Removed MI tiles are kept below as commented-out lines; removed values are listed in "# pruned <Param>: ..." comments; "no kernel built" = rejected/not generated.
+        - MatrixInstruction:
+          # - [16, 16, 32, 1, 1, 4, 2, 1, 2]  # MT64x64  pruned
+          # - [16, 16, 32, 1, 1, 8, 2, 1, 2]  # MT128x64  pruned
+          # - [16, 16, 32, 1, 1, 4, 4, 1, 2]  # MT64x128  pruned
+          # - [16, 16, 32, 1, 1, 8, 4, 1, 2]  # MT128x128  pruned
+          # - [16, 16, 32, 1, 1, 4, 4, 2, 2]  # MT128x128  pruned
+          # - [16, 16, 32, 1, 1, 8, 6, 1, 2]  # MT128x192  pruned
+          # - [16, 16, 32, 1, 1, 6, 4, 2, 2]  # MT192x128  pruned
+          - [16, 16, 32, 1, 1, 8, 4, 1, 4]  # MT128x256
+          # - [16, 16, 32, 1, 1, 8, 4, 2, 2]  # MT256x128  pruned
+          # - [16, 16, 32, 1, 1, 6, 6, 2, 2]  # MT192x192  pruned
+          # - [16, 16, 32, 1, 1, 8, 6, 2, 2]  # MT256x192  pruned
+          # - [16, 16, 32, 1, 1, 8, 8, 2, 2]  # MT256x256  pruned
+          # - [16, 16, 32, 1, 1, 7, 8, 2, 2]  # MT224x256  pruned: best kernel 1.54x of problem best
+          # - [16, 16, 32, 1, 1, 15, 4, 1, 4]  # MT240x256  pruned: best kernel 1.73x of problem best
+          # - [16, 16, 32, 1, 1, 13, 4, 1, 4]  # MT208x256  pruned: best kernel 1.79x of problem best
+          # - [16, 16, 32, 1, 1, 7, 7, 2, 2]  # MT224x224  pruned: best kernel 1.65x of problem best
+          # - [16, 16, 32, 1, 1, 11, 4, 1, 4]  # MT176x256  pruned: best kernel 1.42x of problem best
+          # - [16, 16, 32, 1, 1, 7, 4, 2, 2]  # MT224x128  pruned: best kernel 1.26x of problem best
+          # - [16, 16, 32, 1, 1, 7, 2, 1, 4]  # MT112x128  pruned
+          # - [16, 16, 32, 1, 1, 7, 2, 1, 2]  # MT112x64  pruned
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [0]
+        - PrefetchGL2: [0]
+        # pruned PrefetchGL2: 1
+        # pruned PrefetchGL2: 2
+        - HalfPLR: [0]
+        # pruned HalfPLR: 1 [no kernel built in benchmark]
+        # pruned HalfPLR: 2 [no kernel built in benchmark]
+        # DepthU inferred per problem from K scale.
+        # K<=32: DU32; K<=256: 32/64/128; K<=1024: 64/128; else 64/128/256
+        # (512/1024 never won in any previous run).
+        - DepthU: [32]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TransposeLDS: [-1]
+        - SourceSwap: [false, true]
+        - AdaptiveGemm: [0, 1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsBlockSizePerPadMetadata: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsPadMetadata: [-1]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - 1LDSBuffer: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [False]
+        - LDSTrInst: [True]
+        - TDMInst: [3]
+        - TDMPlusLdsBuf: [0]  # triple LDS buffer is forced to 0 in Solution.py; -1/1 were no-op duplicates
+        - ScheduleGROverBarrier: [0, 1]
+        # pruned ScheduleGROverBarrier: -1 [auto, duplicate of 0/1]
+        - LDSSegmentInterleave: [0]
+        # pruned LDSSegmentInterleave: 1
+        # CD candidates from the batch-aware time model (A/B multicast vs round-up cost); [1,1] always kept.
+        # NOTE: known incorrect results observed with CD2_2, CD4_4 on shapes: [224, 128, 98666, 96].
+        - ClusterDim: [[4, 1]]
+        # NOTE: known incorrect results observed with SK3 on shapes: [336, 144, 2108, 7776], [208, 2256, 2367, 192], [48, 720, 3028, 208].
+        - TileProcessingStrategy: [None, DataParallel, StreamK]
+        - WorkAssignment: [StaticGrid]
+        - PrefetchAcrossPersistent: [0, 1]
+        - ReuseAcrossPersistent: [0]
+        - NonTemporalD: [0, 1, 2, 3]
+        - WorkGroupMapping: [1, 8, 16]
+        - StaggerU: [0]
+        # pruned StaggerU: 32
+        # pruned StaggerU: 64
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4928, 6656, 40, 16]
+        - BiasTypeArgs: [s]
+        - ActivationArgs:
+          - [Enum: none]
+
+LibraryLogic:
+  ScheduleName: gfx1250
+  ArchitectureName: gfx1250
+  LibraryType: Equality
