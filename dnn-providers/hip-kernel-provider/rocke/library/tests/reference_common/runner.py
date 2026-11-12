@@ -25,6 +25,7 @@ def run_worker(
     library: Path | None,
     work: Path,
     module: str,
+    timeout: float = 300,
 ) -> tuple[list[np.ndarray], dict]:
     work.mkdir(parents=True, exist_ok=False)
     request = dict(request, platform_root=str(platform.resolve()))
@@ -45,7 +46,13 @@ def run_worker(
     )
     session = _ACTIVE.get()
     if session is not None:
-        session.execute(request["mode"], work / "request.json", env, module=module)
+        session.execute(
+            request["mode"],
+            work / "request.json",
+            env,
+            module=module,
+            timeout=timeout,
+        )
     else:
         completed = subprocess.run(
             [
@@ -60,10 +67,11 @@ def run_worker(
                 str(work),
             ],
             cwd=work,
+            check=False,
             env=env,
             capture_output=True,
             text=True,
-            timeout=300,
+            timeout=timeout,
         )
         if completed.returncode:
             raise RuntimeError(

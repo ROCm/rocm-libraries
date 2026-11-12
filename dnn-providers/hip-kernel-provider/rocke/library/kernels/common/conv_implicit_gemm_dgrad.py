@@ -66,7 +66,7 @@ from rocke.helpers.atoms import MfmaAtom, mfma_atom
 from rocke.helpers.epilogues import CShuffleEpilogue, DirectEpilogue
 from rocke.helpers.geometry import WarpGrid
 from rocke.helpers.grid import chiplet_transform_chunked_runtime
-from rocke.helpers.layouts import ConvKOuterFragmentReader, LdsLayout
+from rocke.helpers.layouts import LdsLayout
 from rocke.helpers.loads import CoalescedTileLoader
 from rocke.helpers.magic_division import (
     calculate_magic_numbers,
@@ -85,6 +85,7 @@ from rocke.helpers.transforms import (
     unmerge_magic_dynamic,
 )
 from kernels.common.conv_abi import conv_arg_names
+from kernels.common._conv_layouts import ConvKOuterFragmentReader
 from kernels.common._conv_implicit_gemm_common import (
     ConvAccumulatorEpilogue,
     ConvDataSpec,
@@ -2678,7 +2679,9 @@ def _build_tilde_dgrad(
     # Materialised only on the K-outer path: emitting these unconditionally
     # would add IR ops to every existing config and move every dgrad golden.
     if spec.lds_k_outer:
-        _tr_reader = ConvKOuterFragmentReader(wave_size=spec.wave_size).bind(b, lane)
+        _tr_reader = ConvKOuterFragmentReader(wave_size=spec.wave_size, arch=arch).bind(
+            b, lane
+        )
 
     def _tr_frag(smem: Value, mn_base: Value, k_base: Value, mn_atom: int, n: int):
         """One MMA operand fragment from a K-outer tile via transpose reads.

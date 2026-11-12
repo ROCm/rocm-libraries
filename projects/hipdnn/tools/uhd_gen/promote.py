@@ -67,8 +67,6 @@ _ADAPTERS = (
 )
 #: A model `hash`: the SHA-256 of the file it names, as UhdParser and the adapters spell it.
 _SHA256 = re.compile(r"[0-9a-f]{64}")
-#: Roles whose arch key binds a list of UHDs, one per ranking metric (RFC 0019 §3.1).
-_METRIC_ROLES = ("sort_kernel_catalog", ROLE)
 
 
 class PromoteError(ValueError):
@@ -1048,9 +1046,13 @@ def _score_metric(document: dict) -> str | None:
     return score.get("metric") if isinstance(score, dict) else None
 
 
-def _role_value(value, role: str, where: str) -> list[str]:
-    """The UHD ids one arch key binds: one id, or for a metric-keyed role a list of them."""
-    if role in _METRIC_ROLES and isinstance(value, list):
+def _role_value(value, where: str) -> list[str]:
+    """The UHD ids one arch key binds: a list (RFC 0019 §3.1); a bare id is a one-element list.
+
+    The scoring roles hold one UHD per ranking metric; the candidate generators
+    (`predict_applicable_kernels`) are a list for the JIT spaces that will consume them.
+    """
+    if isinstance(value, list):
         if not value:
             raise PromoteError(
                 f"{where}: an empty list binds nothing; omit the architecture instead"
@@ -1073,14 +1075,13 @@ def _rebind(
     """The arch key's value once `identity` is bound, and the ids it displaces.
 
     `holder` is the UED, or the slot of a slotted engine, whose `role` map is edited.
-    A metric-keyed role holds one UHD per metric, and the metric lives only in each UHD, so
-    every bound UHD must be installed in this tree to be classified.
+    A role holds one UHD per metric (a metric-less model replaces the metric-less one), and the
+    metric lives only in each UHD, so every bound UHD must be installed in this tree to be
+    classified.
     """
     where = f"{role}.{arch}"
     value = holder.get(role, {}).get(arch)
-    current = [] if value is None else _role_value(value, role, where)
-    if role not in _METRIC_ROLES:
-        return identity, current
+    current = [] if value is None else _role_value(value, where)
 
     def same_metric(ref: str) -> bool:
         if ref == identity:
@@ -1129,7 +1130,7 @@ def _role_references(path: Path, document: dict):
             for arch, value in entries.items():
                 if arch != "default" and not _ARCH.fullmatch(arch):
                     raise PromoteError(f"{where}: invalid architecture {arch!r}")
-                for identity in _role_value(value, role, f"{where}.{arch}"):
+                for identity in _role_value(value, f"{where}.{arch}"):
                     yield path, _role_key(role, slot), arch, identity, slot
 
 
