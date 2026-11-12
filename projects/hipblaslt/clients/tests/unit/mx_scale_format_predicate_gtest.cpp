@@ -1,9 +1,9 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Host-only tests of the TensileLite MXScaleFormat predicate, which keeps solutions
-// for a host scale layout that selection must tell apart (format 3 and later) away
-// from every other MX solution.
+// Host-only tests of the TensileLite MXScaleFormatEquals predicate, which keeps
+// solutions for a host scale layout that selection must tell apart (format 3 and
+// later) away from every other MX solution.
 
 #include <Tensile/ContractionProblemPredicates.hpp>
 #include <Tensile/ContractionProblem_Detail.hpp>
@@ -44,13 +44,13 @@ namespace
 // other; format 3 matches only format 3.
 TEST(HostUnitMXScaleFormatPredicate, smoke_OnlyTheExactFormatsArePinned)
 {
-    using TensileLite::Predicates::Contraction::MXScaleFormat;
+    using TensileLite::Predicates::Contraction::MXScaleFormatEquals;
     for(int sol = 0; sol <= 3; ++sol)
     {
         for(int prob = 0; prob <= 3; ++prob)
         {
             bool const expected = (sol < 3 && prob < 3) || sol == prob;
-            EXPECT_EQ(MXScaleFormat(sol)(problemWithScaleFormat(prob)), expected)
+            EXPECT_EQ(MXScaleFormatEquals(sol)(problemWithScaleFormat(prob)), expected)
                 << "solution format " << sol << ", problem format " << prob;
         }
     }

@@ -110,21 +110,21 @@ def test_assert_alpha_value_is_a_valid_parameter():
 )
 def test_every_mx_solution_carries_its_scale_format(fmt, expected, assembler, gfx950_iim):
     # A 128x4 problem stays off an ordinary MX kernel only because that kernel carries
-    # an MXScaleFormat predicate below 3.
+    # an MXScaleFormatEquals predicate below 3.
     struct = copy.deepcopy(_first_solution(_GENERATED_MX_LOGIC, assembler, gfx950_iim))
     if fmt is not None:
         struct["MXScaleFormat"] = fmt
     else:
         expected = C.mxScaleFormatId(struct)
     solution = C.Solution.FromSolutionStruct(struct, False, False, False, assembler, gfx950_iim)
-    assert _predicates(solution, "MXScaleFormat") == [expected]
+    assert _predicates(solution, "MXScaleFormatEquals") == [expected]
     assert expected < 3
 
 
 def test_non_mx_solutions_carry_no_scale_format(assembler, gfx950_iim):
     struct = _first_solution(_NON_MX_LOGIC, assembler, gfx950_iim)
     solution = C.Solution.FromSolutionStruct(struct, False, False, False, assembler, gfx950_iim)
-    assert _predicates(solution, "MXScaleFormat") == []
+    assert _predicates(solution, "MXScaleFormatEquals") == []
 
 
 @pytest.mark.parametrize("fmt, valid", [(None, True), ("HostPreSwizzle128x4", False)])
