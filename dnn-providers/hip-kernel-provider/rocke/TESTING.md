@@ -555,21 +555,23 @@ budget. A marker alone is insufficient because pytest imports modules and
 materializes parameters before marker deselection. Existing violations remain
 migration debt in G9.
 
-Resource-bound validation lives outside the `test_*.py` pattern and has three
-owners: an explicit component `run_all.py` stage, a separately named installed
-CTest with timeout/resource policy, and a provider category at its cumulative
-tier. Such a gate pins its case manifest, fails on zero selected work, checks
-external prerequisites once, and rejects selection filters unless the caller
-explicitly requests a partial diagnostic run. The developer runner stops before
-resource-bound stages after a fast-stage failure by default; `--keep-going` is
-an explicit request to gather additional failures.
+Resource-bound validation lives outside the `test_*.py` pattern. Its target
+ownership model has three parts: an explicit component `run_all.py` stage, a
+separately named installed CTest with timeout/resource policy, and a provider
+category at its cumulative tier. Such a gate pins its case manifest, fails on
+zero selected work, checks external prerequisites once, and rejects selection
+filters unless the caller explicitly requests a partial diagnostic run. The
+developer runner stops before resource-bound stages after a fast-stage failure
+by default; `--keep-going` is an explicit request to gather additional failures.
 
 The counted backward synchronization split is the reference implementation:
-fast validator/model/mutation contracts remain in unit discovery; the exhaustive
-IR/LDS matrix and pinned representative compile/final-ISA/resource subset are
-comprehensive-tier gates. Structural enrollment can return to standard after the
-hipkernelprovider standard shards regain clear outer-timeout margin. The compiler
-gate preserves the existing resource-table qualification:
+fast validator/model/mutation contracts remain in source discovery; the
+exhaustive IR/LDS matrix and pinned representative compile/final-ISA/resource
+subset are explicit source-runner stages and registered installed CTests. The
+new CTests and fast counted/resource files are deliberately not enrolled in a
+provider CI tier while the standard shards have no runtime headroom. Enrollment
+is follow-up work after capacity is available. The compiler gate preserves the
+existing resource-table qualification:
 LLVM 22 with the reference ROCm 7.2 comgr. Its register thresholds and final-ISA
 expectations are calibrated to that toolchain; LLVM 23 and LLVM 24 remain valid
 emission/parity profiles but are not qualified by this code-object resource gate.
@@ -582,8 +584,8 @@ CTest names and scopes live in the
 lane affordable by collecting once, selecting files that own non-GPU,
 non-`exhaustive`, non-`worker_integration`, non-`compiler_integration` items,
 and running each selected file
-in a fresh process. Real process-lifecycle contracts have their own standard-tier
-CTest (and remain available in explicit `--exhaustive` source runs). Host
+in a fresh process. Real process-lifecycle contracts have their own registered,
+manual CTest (and remain available in explicit `--exhaustive` source runs). Host
 runs use at most eight workers, further capped by process affinity and cgroup
 quota; GPU-inclusive runs default to one. Fresh-process exit releases
 module-local kernel/IR caches. The affordable lane has a five-minute default
@@ -606,8 +608,9 @@ verdict. An unavailable optional compiler gate reports `INCOMPLETE` with a zero
 exit status for local iteration, not plain `GREEN`.
 [`tools/run_checks.py`](tools/run_checks.py) coordinates its existing platform,
 parity, pytest, and numeric checks, but does not enroll these new explicit
-library gates. Run the library runner directly for their combined source verdict;
-the separately registered CTests own installed CI enrollment.
+library gates. Run the library runner directly for their combined source verdict.
+The separately registered CTests support exact-name installed replay; provider
+tier enrollment is deferred until CI has runtime capacity.
 
 **The tree/gating reality (a second axis, orthogonal to the two questions).**
 The developer pytest step collects `platform/tests`. The installed platform

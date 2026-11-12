@@ -250,18 +250,6 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             assert environment_for(tests, "rocke_library_sdpa_pytest") == {
                 "PYTHONPATH": f"{test_ctest_rel}tests/library"
             }
-            attention_cpu = next(
-                test
-                for test in tests
-                if test["name"] == "rocke_library_attention_cpu_pytest"
-            )
-            attention_command = attention_cpu["command"]
-            marker_at = attention_command.index("not compiler_integration")
-            assert attention_command[marker_at - 1] == "-m"
-            assert any(
-                path.endswith("test_attention_bwd_resources.py")
-                for path in attention_command
-            )
         else:
             # A platform-only tree enrols no library suite.
             assert not [

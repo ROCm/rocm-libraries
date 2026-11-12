@@ -269,11 +269,11 @@ CTests. Legacy violations remain tracked as TESTING.md gap G9.
 
 | CTest entry | Scope | Tier / resources |
 |---|---|---|
-| `rocke_library_attention_cpu_pytest` | Fast counted-sync contracts alongside the existing attention host units | quick and higher |
-| `rocke_library_runner_contract_pytest` | Affordable-lane selection, resource defaults, and gate verdict policy | quick and higher; pure policy contracts |
-| `rocke_library_worker_integration_pytest` | Real file-worker subprocess, timeout, signal, package-identity, and process-ownership lifecycle | standard and higher; host process integration |
-| `rocke_library_counted_structural_gate` | Exhaustive counted-wait IR model, LDS hazards, step equivalence, lowering and mirror-edge refusal coverage | comprehensive and full; host-only structural gate, pending standard-shard capacity |
-| `rocke_library_counted_compiler_gate` | Pinned representative compile/final-ISA/resource subset and canonical full-barrier twins on the LLVM 22/reference-comgr toolchain | comprehensive and full; compiler preflight required |
+| `rocke_library_attention_cpu_pytest` | Existing attention host units; new counted/resource contracts remain source-only until CI enrollment has capacity | quick and higher |
+| `rocke_library_runner_contract_pytest` | Affordable-lane selection, resource defaults, and gate verdict policy | registered for exact-name/manual replay; provider tier enrollment deferred for CI capacity |
+| `rocke_library_worker_integration_pytest` | Real file-worker subprocess, timeout, signal, package-identity, and process-ownership lifecycle | registered for exact-name/manual replay; provider tier enrollment deferred for CI capacity |
+| `rocke_library_counted_structural_gate` | Exhaustive counted-wait IR model, LDS hazards, step equivalence, lowering and mirror-edge refusal coverage | registered for exact-name/manual replay; provider tier enrollment deferred for CI capacity |
+| `rocke_library_counted_compiler_gate` | Pinned representative compile/final-ISA/resource subset and canonical full-barrier twins on the LLVM 22/reference-comgr toolchain | registered for exact-name/manual replay; provider tier enrollment deferred for CI capacity |
 
 The compiler gate preserves the resource table's existing qualification contract:
 LLVM 22 with the reference ROCm 7.2 comgr. LLVM 23 and LLVM 24 are emission/parity
