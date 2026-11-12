@@ -1,0 +1,67 @@
+// pyright settings for ALL rocke Python.
+// ADVISORY ONLY: run by static_analysis_checks.py (next to this file) as a
+// NON-BLOCKING pre-push hook (repo-root .pre-commit-config.yaml). Findings are
+// reported, never enforced.
+// Kept out of a rocke-level pyproject.toml: pytest would adopt that file as its
+// rootdir when tools/run_checks.py runs pytest from rocke/.
+//
+// pyright reads every path below relative to THIS directory (tools/static_analysis),
+// so rocke/ itself is "../..". Run it through the wrapper, or point pyright here:
+//   pyright --project tools/static_analysis/pyrightconfig.json
+//
+// No `include` or `exclude` here on purpose: the wrapper lists the tracked files
+// with `git ls-files` and gives that list to pyright on stdin, which replaces
+// `include`. A hand-kept `exclude` would also filter that list, and could drop
+// tracked source. Without a file list pyright uses its own defaults: everything
+// under this directory except hidden directories, node_modules and virtualenvs.
+// Those defaults also drop listed files under a hidden directory or node_modules.
+{
+  "pythonVersion": "3.10",
+  "typeCheckingMode": "basic",
+  // Kernel builders bind names inside spec-flag-gated branches (`if PV_FP8_MFMA:`)
+  // that are consistent at runtime but opaque to flow analysis -- 67 false
+  // positives in library/kernels/gfx942/attention_tiled_2d.py alone.
+  "reportPossiblyUnboundVariable": "none",
+  // torch is optional (AGENTS.md) and absent from the hook env.
+  "reportMissingImports": "warning",
+  // Import roots per tree, mirroring how the code runs. Every tree sees `rocke`
+  // (from source, no editable install needed) and the library packages
+  // (kernels, builders, dispatch): tools/run_checks.py puts both on PYTHONPATH,
+  // and platform lowers library kernels through lazy imports (core/backend.py).
+  // platform/tools and platform/tests/instances are dirs that tests and drivers
+  // add to sys.path at runtime, which pyright cannot follow. Only platform/tests
+  // gets platform's parity `_emit_common`: library/tests/parity has its own.
+  // First matching root wins, so platform/tests precedes platform. The "tools"
+  // root is rocke/tools, this directory's parent.
+  "executionEnvironments": [
+    {
+      "root": "../../library",
+      "extraPaths": [
+        "../../platform/python",
+        "../../platform/tools",
+        "../../platform/tests/instances"
+      ]
+    },
+    {
+      "root": "../../platform/tests",
+      "extraPaths": [
+        "../../platform/python",
+        "../../library",
+        "../../platform/tools",
+        "../../platform/tests/instances",
+        "../../platform/tests/instances/parity"
+      ]
+    },
+    {
+      "root": "../../platform",
+      "extraPaths": [
+        "../../platform/python",
+        "../../library",
+        "../../platform/tools",
+        "../../platform/tests/instances"
+      ]
+    },
+    { "root": "..", "extraPaths": ["../../platform/python", "../../library"] },
+    { "root": "../../cmake", "extraPaths": ["../../platform/python", "../../library"] }
+  ]
+}

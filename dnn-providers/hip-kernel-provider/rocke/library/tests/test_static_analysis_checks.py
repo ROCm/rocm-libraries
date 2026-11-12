@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""CPU-only tests for ``rocke/tools/advisory_checks.py``.
+"""CPU-only tests for ``rocke/tools/static_analysis/static_analysis_checks.py``.
 
 That script is the non-blocking pre-push wrapper around pyright, radon and vulture.
 These tests pin down its contract: it covers ALL rocke Python (the tracked files
@@ -28,14 +28,15 @@ from pathlib import Path
 import pytest
 
 _ROCKE = Path(__file__).resolve().parents[2]  # tests -> library -> rocke
-_SCRIPT = _ROCKE / "tools" / "advisory_checks.py"
+_SCRIPT = _ROCKE / "tools" / "static_analysis" / "static_analysis_checks.py"
+_PYRIGHT_CONFIG = _SCRIPT.with_name("pyrightconfig.json")
 
 
 @pytest.fixture(scope="module")
 def adv():
     if not _SCRIPT.is_file():
         pytest.skip("rocke/tools is not part of this layout")
-    spec = importlib.util.spec_from_file_location("advisory_checks", _SCRIPT)
+    spec = importlib.util.spec_from_file_location("static_analysis_checks", _SCRIPT)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -191,12 +192,33 @@ def test_file_list_ignores_an_index_file_a_hook_exports(adv, git_rocke, monkeypa
     assert adv._all_files() == [git_rocke / "library" / "kernel.py"]
 
 
+@pytest.mark.parametrize("name", ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"])
+def test_git_starts_without_the_repository_variables_a_hook_exports(
+    adv, git_rocke, monkeypatch, name
+):
+    # Whether one of these changes what `git ls-files` prints depends on the git
+    # version and on which others are set with it (GIT_WORK_TREE alone changes
+    # nothing visible), so the contract is checked at its boundary: none of them
+    # reaches the git process.
+    monkeypatch.setenv(name, str(git_rocke / "elsewhere"))
+    seen = {}
+    run = subprocess.run
+
+    def spy(cmd, **kwargs):
+        seen["env"] = kwargs["env"]
+        return run(cmd, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", spy)
+    adv._all_files()
+    assert name not in seen["env"]
+
+
 def test_a_failing_git_is_advisory(adv, require_git, monkeypatch, tmp_path, capsys):
     # Not a repository: the whole-tree file list cannot be built, and that must be
     # reported, never raised. The ceiling stops git finding a repository above tmp.
     monkeypatch.setattr(adv, "ROCKE", tmp_path)
     monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
-    monkeypatch.setattr(sys, "argv", ["advisory_checks.py", "radon"])
+    monkeypatch.setattr(sys, "argv", ["static_analysis_checks.py", "radon"])
     assert adv.main() == 0
     out = capsys.readouterr().out
     assert "radon: crashed (RuntimeError: git ls-files failed" in out
@@ -209,7 +231,7 @@ def test_an_unencodable_message_cannot_fail_a_push(adv, monkeypatch):
     raw = io.BytesIO()
     stream = io.TextIOWrapper(raw, encoding="cp1252", errors="strict")
     monkeypatch.setattr(sys, "stdout", stream)
-    monkeypatch.setattr(sys, "argv", ["advisory_checks.py", "radon"])
+    monkeypatch.setattr(sys, "argv", ["static_analysis_checks.py", "radon"])
 
     def broken_listing():
         raise RuntimeError("git ls-files failed: C:/Users/\u0141ukasz")
@@ -228,7 +250,7 @@ def test_requested_files_are_limited_to_python_inside_rocke(adv, tmp_path):
         str(adv.ROCKE / "AGENTS.md"),  # inside rocke, but not python
         str(adv.ROCKE / "no_such_file.py"),  # does not exist
         # python inside rocke, spelled via "..": kept, as its resolved path
-        str(adv.ROCKE / "library" / ".." / "tools" / _SCRIPT.name),
+        str(adv.ROCKE / "library" / ".." / "tools" / "static_analysis" / _SCRIPT.name),
     ]
     assert adv._rocke_files(requested) == [_SCRIPT]
 
@@ -236,13 +258,12 @@ def test_requested_files_are_limited_to_python_inside_rocke(adv, tmp_path):
 @pytest.fixture
 def pyright_config():
     # The real rocke's config, even in a test that points `adv.ROCKE` elsewhere.
-    config = _ROCKE / "pyrightconfig.json"
-    if not config.is_file():
+    if not _PYRIGHT_CONFIG.is_file():
         pytest.skip("pyrightconfig.json is not part of this layout")
     # pyright accepts // comments in its config; json does not.
     text = "\n".join(
         line
-        for line in config.read_text().splitlines()
+        for line in _PYRIGHT_CONFIG.read_text().splitlines()
         if not line.lstrip().startswith("//")
     )
     return json.loads(text)
@@ -253,6 +274,18 @@ def test_pyright_config_keeps_no_file_list_of_its_own(pyright_config):
     # `include`. An `exclude` would still filter it, and could drop tracked source.
     assert "include" not in pyright_config
     assert "exclude" not in pyright_config
+
+
+def test_pyright_config_paths_exist_relative_to_the_config(pyright_config):
+    # pyright reads every `root` and `extraPaths` entry relative to the config file's
+    # own directory, so moving the file silently breaks the import roots unless the
+    # paths move with it.
+    base = _PYRIGHT_CONFIG.parent
+    for env in pyright_config["executionEnvironments"]:
+        for rel in [env["root"], *env.get("extraPaths", [])]:
+            assert (
+                base / rel
+            ).is_dir(), f"{rel} (relative to {base}) is not a directory"
 
 
 def test_pyright_whole_run_checks_what_git_tracks(
@@ -266,25 +299,31 @@ def test_pyright_whole_run_checks_what_git_tracks(
             "library/source.py": bad,
             "library/venv_probe.py": bad,
             "library/build/real.py": bad,  # tracked, so source despite its directory
+            # An import that only resolves through the config's import roots.
+            "platform/python/rocke/__init__.py": "VALUE = 1\n",
+            "library/kernels/uses_rocke.py": "import rocke\n",
+            # ...and one that only resolves with rocke/ itself on the import path.
+            "library/uses_root.py": "import library.source\n",
         },
     )
-    (git_rocke / "pyrightconfig.json").write_text(
-        json.dumps(pyright_config), encoding="utf-8"
-    )
+    config = git_rocke / adv.PYRIGHT_CONFIG
+    config.parent.mkdir(parents=True)
+    config.write_text(json.dumps(pyright_config), encoding="utf-8")
     for artifact in (".venv-gfx942", "venv-test", "node_modules"):
         stale = git_rocke / "library" / artifact / "stale.py"
         stale.parent.mkdir()
         stale.write_text(bad, encoding="utf-8")  # on disk, never `git add`ed
-    adv.run_pyright(adv._all_files(), whole=True)
+    adv.run_pyright(adv._all_files())
     out = capsys.readouterr().out
     for name in ("source.py", "venv_probe.py", "real.py"):
         assert f"{name}:1: error:" in out, out
     assert "stale.py" not in out, out
     assert "pyright: 3 error(s), 0 warning(s)" in out, out
+    assert "reportMissingImports" not in out, out  # `import rocke` resolved
 
 
 def test_pyright_gets_its_file_names_on_stdin(adv, monkeypatch):
-    # All of rocke is ~1,650 names (~86,000 characters) as arguments, past
+    # All of rocke is ~1,900 names (~98,000 characters) as arguments, past
     # Windows' 32,767-character command-line limit; on stdin the command line
     # stays the same length however many files there are.
     seen = {}
@@ -295,6 +334,7 @@ def test_pyright_gets_its_file_names_on_stdin(adv, monkeypatch):
             cwd=kwargs.get("cwd"),
             stdin=kwargs.get("input"),
             encoding=kwargs.get("encoding"),
+            env=kwargs.get("env"),
         )
         report = {
             "generalDiagnostics": [],
@@ -304,11 +344,19 @@ def test_pyright_gets_its_file_names_on_stdin(adv, monkeypatch):
 
     monkeypatch.setattr(subprocess, "run", fake_run)
     files = [adv.ROCKE / "library" / f"kernel_{i:04d}.py" for i in range(3000)]
-    adv.run_pyright(files[:1], whole=True)
+    adv.run_pyright(files[:1])
     command_for_one_file = seen["cmd"]
-    adv.run_pyright(files, whole=True)
+    adv.run_pyright(files)
     assert seen["cmd"] == command_for_one_file  # same command line for any file count
     assert seen["cmd"][-1] == "-"  # pyright reads its file list from stdin
+    # The config sits in tools/static_analysis/, not at the project's cwd; losing it
+    # would silently drop every import root.
+    project = seen["cmd"][seen["cmd"].index("--project") + 1]
+    assert project == str(
+        adv.ROCKE / "tools" / "static_analysis" / "pyrightconfig.json"
+    )
+    # rocke/ stays an import root now that the config is not in it.
+    assert seen["env"]["PYTHONPATH"].split(os.pathsep)[0] == str(adv.ROCKE)
     assert seen["cwd"] == adv.ROCKE
     # Node reads the names and writes the JSON as UTF-8; text=True would use the
     # locale's code page (cp1252 on Windows) and mangle a non-ASCII name.
@@ -317,6 +365,25 @@ def test_pyright_gets_its_file_names_on_stdin(adv, monkeypatch):
     lines = seen["stdin"].splitlines()
     assert lines[0] == str(Path("library", "kernel_0000.py"))
     assert len(lines) == 3000
+
+
+def test_pyright_keeps_the_callers_pythonpath_after_rocke(adv, monkeypatch):
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        seen["env"] = kwargs["env"]
+        report = {
+            "generalDiagnostics": [],
+            "summary": {"errorCount": 0, "warningCount": 0},
+        }
+        return subprocess.CompletedProcess(cmd, 0, json.dumps(report), "")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setenv("PYTHONPATH", "/caller/path")
+    adv.run_pyright([adv.ROCKE / "library" / "kernel.py"])
+    assert seen["env"]["PYTHONPATH"] == os.pathsep.join(
+        [str(adv.ROCKE), "/caller/path"]
+    )
 
 
 def test_pyright_reports_ranged_and_rangeless_diagnostics(adv, monkeypatch, capsys):
@@ -340,7 +407,7 @@ def test_pyright_reports_ranged_and_rangeless_diagnostics(adv, monkeypatch, caps
             cmd, 1, json.dumps(report), ""
         ),
     )
-    adv.run_pyright([_SCRIPT], whole=False)
+    adv.run_pyright([_SCRIPT])
     out = capsys.readouterr().out
     assert f"{adv._show(_SCRIPT)}: warning: No range (warning)" in out
     assert f"{adv._show(_SCRIPT)}:7: error: First line (reportArgumentType)" in out
@@ -358,7 +425,9 @@ def test_pyright_non_json_failure_is_advisory(adv, monkeypatch, capsys):
             cmd, 1, "startup failed\n", "No module named pyright\n"
         ),
     )
-    monkeypatch.setattr(sys, "argv", ["advisory_checks.py", "pyright", str(_SCRIPT)])
+    monkeypatch.setattr(
+        sys, "argv", ["static_analysis_checks.py", "pyright", str(_SCRIPT)]
+    )
     assert adv.main() == 0
     out = capsys.readouterr().out
     assert "startup failed\nNo module named pyright\n" in out
@@ -372,6 +441,8 @@ def _hook_repo(tmp_path, tool):
     these tests run what a contributor would run. Returns ``(repo, hook)``.
     """
     pytest.importorskip("pre_commit")
+    if shutil.which("bash") is None:
+        pytest.skip("the hook entry is a bash snippet")
     import yaml
 
     config_path = _ROCKE.parents[2] / ".pre-commit-config.yaml"
@@ -387,7 +458,10 @@ def _hook_repo(tmp_path, tool):
     )
     repo = tmp_path / "repo"
     repo.mkdir()
-    script = Path("dnn-providers/hip-kernel-provider/rocke/tools/advisory_checks.py")
+    script = Path(
+        "dnn-providers/hip-kernel-provider/rocke/tools/static_analysis"
+        "/static_analysis_checks.py"
+    )
     (repo / script).parent.mkdir(parents=True)
     shutil.copyfile(_SCRIPT, repo / script)
     (repo / ".pre-commit-config.yaml").write_text(
@@ -471,8 +545,8 @@ def test_hook_runs_a_usable_python_or_skips_but_never_fails(
 ):
     # pre-commit fails a system hook whose program is absent, before the wrapper
     # could skip anything; the hook entry is a bash snippet that does the skipping.
-    if os.name == "nt" or shutil.which("bash") is None:
-        pytest.skip("builds a PATH of symlinks and needs bash")
+    if os.name == "nt":
+        pytest.skip("builds a PATH of symlinks")
     repo, hook = _hook_repo(tmp_path, tool)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -503,10 +577,15 @@ def test_hook_runs_a_usable_python_or_skips_but_never_fails(
     env.pop("VIRTUAL_ENV", None)
     returncode, out = _run_hook(repo, hook, env)
     assert returncode == 0, out
+    skip_note = f"rocKE advisory ({tool}): no Python 3.10+ on PATH; skipped."
     if ran:
         assert f"[advisory, non-blocking] {tool} on" in out
+        # `exec` hands the hook over to the wrapper. Without it the snippet runs on
+        # after the wrapper: it would try the next python, then claim it skipped.
+        assert out.count("[advisory, non-blocking]") == 1, out
+        assert skip_note not in out, out
     else:
-        assert f"rocKE advisory ({tool}): no Python 3.10+ on PATH; skipped." in out
+        assert skip_note in out
         assert "[advisory, non-blocking]" not in out
         assert "not found" not in out  # the probe's own errors stay hidden
 
@@ -522,11 +601,13 @@ def test_hook_runs_a_usable_python_or_skips_but_never_fails(
     ids=["exception", "sys-exit", "not-installed"],
 )
 def test_a_broken_tool_never_fails_a_push(adv, monkeypatch, capsys, failure, reported):
-    def runner(files, whole):
+    def runner(files):
         raise failure
 
     monkeypatch.setitem(adv.RUNNERS, "vulture", runner)
-    monkeypatch.setattr(sys, "argv", ["advisory_checks.py", "vulture", str(_SCRIPT)])
+    monkeypatch.setattr(
+        sys, "argv", ["static_analysis_checks.py", "vulture", str(_SCRIPT)]
+    )
     assert adv.main() == 0
     assert reported in capsys.readouterr().out
 
@@ -535,8 +616,10 @@ def test_nothing_runs_when_no_file_is_in_rocke(adv, monkeypatch, tmp_path):
     outside = tmp_path / "outside.py"
     outside.write_text("x = 1\n", encoding="utf-8")
     calls = []
-    monkeypatch.setitem(adv.RUNNERS, "radon", lambda files, whole: calls.append(files))
-    monkeypatch.setattr(sys, "argv", ["advisory_checks.py", "radon", str(outside)])
+    monkeypatch.setitem(adv.RUNNERS, "radon", lambda files: calls.append(files))
+    monkeypatch.setattr(
+        sys, "argv", ["static_analysis_checks.py", "radon", str(outside)]
+    )
     assert adv.main() == 0
     assert calls == []
 
@@ -566,7 +649,7 @@ def mini_rocke(git_rocke):
 
 
 def test_vulture_counts_uses_across_trees_and_tests(adv, mini_rocke, capsys):
-    adv.run_vulture(adv._all_files(), whole=True)
+    adv.run_vulture(adv._all_files())
     out = capsys.readouterr().out
     # cross_tree_helper is used from another tree and build() only from a test:
     # neither is dead. Nothing is reported from inside the tests.
@@ -582,7 +665,7 @@ def test_vulture_untracked_files_cannot_hide_unused_code(adv, mini_rocke, capsys
     stale = mini_rocke / "library" / "build" / "lib" / "stale.py"
     stale.parent.mkdir(parents=True)
     stale.write_text("orphan_in_library()\norphan_in_platform()\n", encoding="utf-8")
-    adv.run_vulture(adv._all_files(), whole=True)
+    adv.run_vulture(adv._all_files())
     out = capsys.readouterr().out
     assert "orphan_in_library" in out
     assert "orphan_in_platform" in out
@@ -594,7 +677,7 @@ def test_vulture_scans_a_requested_file_git_does_not_track_yet(adv, mini_rocke, 
     # the scan it would print "0 finding(s)" for code that has some.
     new = mini_rocke / "library" / "new_kernel.py"
     new.write_text("def orphan_in_new_file():\n    return 5\n", encoding="utf-8")
-    adv.run_vulture(adv._rocke_files([str(new)]), whole=False)
+    adv.run_vulture(adv._rocke_files([str(new)]))
     out = capsys.readouterr().out
     assert re.findall(r"unused \w+ '(\w+)'", out) == ["orphan_in_new_file"]
 
@@ -606,7 +689,7 @@ def test_vulture_reports_only_the_requested_files(adv, mini_rocke, monkeypatch, 
     monkeypatch.chdir(mini_rocke / "library")
     helpers = str(Path("..", "platform", "helpers.py"))
     test_file = str(Path("tests", "test_kernel.py"))
-    adv.run_vulture(adv._rocke_files([helpers, test_file]), whole=False)
+    adv.run_vulture(adv._rocke_files([helpers, test_file]))
     out = capsys.readouterr().out
     assert re.findall(r"unused \w+ '(\w+)'", out) == ["orphan_in_platform"]
     # Located relative to the cwd, with its line, so an editor can jump to it.
@@ -615,8 +698,8 @@ def test_vulture_reports_only_the_requested_files(adv, mini_rocke, monkeypatch, 
 
 
 def test_vulture_scan_launches_only_git(adv, mini_rocke, monkeypatch, capsys):
-    # The real tree is ~1,650 files; as arguments to a child process their names
-    # make a command line of over 86,000 characters, past Windows' 32,767 limit.
+    # The real tree is ~1,900 files; as arguments to a child process their names
+    # make a command line of over 98,000 characters, past Windows' 32,767 limit.
     # Only `git ls-files` (a fixed, short command line) may run.
     popen = subprocess.Popen
 
@@ -626,14 +709,16 @@ def test_vulture_scan_launches_only_git(adv, mini_rocke, monkeypatch, capsys):
         return popen(cmd, *args, **kwargs)
 
     monkeypatch.setattr(subprocess, "Popen", only_git)
-    adv.run_vulture(adv._all_files(), whole=True)
+    adv.run_vulture(adv._all_files())
     # The scan really ran: a launch whose error was swallowed reports nothing.
     assert "vulture: 2 finding(s)" in capsys.readouterr().out
 
 
 def test_a_missing_vulture_is_reported_not_silently_empty(adv, monkeypatch, capsys):
     monkeypatch.setitem(sys.modules, "vulture", None)  # `import vulture` fails
-    monkeypatch.setattr(sys, "argv", ["advisory_checks.py", "vulture", str(_SCRIPT)])
+    monkeypatch.setattr(
+        sys, "argv", ["static_analysis_checks.py", "vulture", str(_SCRIPT)]
+    )
     assert adv.main() == 0
     out = capsys.readouterr().out
     assert "not installed" in out
@@ -664,7 +749,7 @@ def test_radon_report_lists_a_complex_function(adv, tmp_path, capsys):
     branches = "".join(f"    if a == {i}:\n        a += 1\n" for i in range(12))
     sample = tmp_path / "sample.py"
     sample.write_text(f"def busy(a):\n{branches}    return a\n", encoding="utf-8")
-    adv.run_radon([sample], whole=False)
+    adv.run_radon([sample])
     out = capsys.readouterr().out
     assert "Most complex functions" in out
     # 12 branches + 1 = complexity 13, rank C.
@@ -675,7 +760,7 @@ def test_radon_report_is_quiet_for_simple_code(adv, tmp_path, capsys):
     pytest.importorskip("radon")
     sample = tmp_path / "simple.py"
     sample.write_text("def f(a):\n    return a\n", encoding="utf-8")
-    adv.run_radon([sample], whole=False)
+    adv.run_radon([sample])
     out = capsys.readouterr().out
     assert "avg CC 1.0 (A)" in out
     assert "Most complex functions" not in out
