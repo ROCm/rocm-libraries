@@ -26,7 +26,23 @@
 
 #pragma once
 
+#include "utility.hpp"
 #include <exception>
+#include <new>
+
+// Report the message of a caught exception through the error logger
+// (HIPBLASLT_LOG_LEVEL >= 1). Logging must never throw out of the caller's
+// catch block, so any failure to log is dropped.
+inline void log_exception_message(const std::exception& e) noexcept
+{
+    try
+    {
+        log_error("exception_to_hipblas_status", "exception", e.what());
+    }
+    catch(...)
+    {
+    }
+}
 
 // Convert the current C++ exception to hiblasStatus_t
 // This allows extern "C" functions to return this function in a catch(...)
@@ -43,9 +59,15 @@ catch(const hipblasStatus_t& status)
 {
     return status;
 }
-catch(const std::bad_alloc&)
+catch(const std::bad_alloc& ex)
 {
+    log_exception_message(ex);
     return HIPBLAS_STATUS_ALLOC_FAILED;
+}
+catch(const std::exception& ex)
+{
+    log_exception_message(ex);
+    return HIPBLAS_STATUS_INTERNAL_ERROR;
 }
 catch(...)
 {
