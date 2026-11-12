@@ -15,6 +15,8 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/EngineOrdering.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
@@ -284,6 +286,21 @@ TEST_F(TestAttentionGeneralBwdPacks, EveryLaunchRecordsTheAbiTheHandlerMarshals)
                 << name;
         }
     }
+}
+
+// Where both engines serve a graph (gfx942), ASM SDPA is faster, and this engine adds no
+// Config rule: it relies on the static order ranking ASM first, with no engine-prediction
+// model that could score it above ASM.
+TEST_F(TestAttentionGeneralBwdPacks, AsmSdpaRanksAheadOfThisEngine)
+{
+    using namespace hipdnn_data_sdk::utilities;
+    const int64_t generalBwd = engineNameToId(ATTENTION_GENERAL_BWD_ENGINE_NAME);
+    std::vector<int64_t> ids{generalBwd, ASM_SDPA_ENGINE_ID};
+    sortEngineIds(ids);
+    EXPECT_EQ(ids, (std::vector<int64_t>{ASM_SDPA_ENGINE_ID, generalBwd}));
+
+    EXPECT_TRUE(_set->engine.predictEngine.empty());
+    EXPECT_TRUE(_set->enginePredictionsByMetric.empty());
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

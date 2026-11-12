@@ -603,6 +603,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 EveryKernelIsOneCatalogRowAndEveryRowShips
                 EveryLaunchIsTheSymbolThePlanNames
                 EveryLaunchRecordsTheAbiTheHandlerMarshals
+                AsmSdpaRanksAheadOfThisEngine
         )
     else()
         message(STATUS

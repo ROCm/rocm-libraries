@@ -327,6 +327,17 @@ std::vector<DeclineCase> declineCases()
         {"LOWERING_VirtualOutput",
          [] { return graphWith({}, [](json& g) { tensorOf(g, DQ_UID)["virtual"] = true; }); },
          "LOWERING"},
+        {"LOWERING_OneByteScaleConstant",
+         [] {
+             return graphWith({}, [](json& g) {
+                 auto scale = tensorJson(11, "scale", "fp8_e4m3", {1, 1, 1, 1}, {1, 1, 1, 1});
+                 scale["value"] = 0x38;
+                 scale["value_type"] = "Float8Value";
+                 addTensor(g, std::move(scale));
+                 inputs(g)["scale_tensor_uid"] = 11;
+             });
+         },
+         "LOWERING"},
         {"LOWERING_UnconsumedRaggedTensor",
          [] {
              return graphWith({}, [](json& g) {

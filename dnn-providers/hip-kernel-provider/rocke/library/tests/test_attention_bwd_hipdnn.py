@@ -331,6 +331,9 @@ _LOWERING_MUTATIONS = {
         scale_tensor_uid=77
     ),
     "non_bool_flag": lambda g: g["nodes"][0]["parameters"].update(alibi_mask=1),
+    "inputs_not_a_map": lambda g: g["nodes"][0].update(inputs=[]),
+    "tensors_not_a_list": lambda g: g.update(tensors={}),
+    "bool_uid": lambda g: g["tensors"][0].update(uid=True),
 }
 
 
@@ -630,6 +633,19 @@ def test_scale_tensor_with_a_stored_value_is_a_baked_scale():
     req = _lower(g)
     assert req.scale == 0.5 and not req.scale_is_device_tensor
     assert _verdict(g)[0] == "OK"
+
+
+@pytest.mark.parametrize("dtype", ["fp8_e4m3", "int8", "uint8"])
+def test_scale_constant_of_a_one_byte_dtype_is_a_lowering_error(dtype):
+    g = _with_tensor(
+        _dense_graph(),
+        "inputs",
+        "scale_tensor_uid",
+        _tensor(
+            30, "attn_scale", *_SCALAR, dtype, value=0x38, value_type="Float8Value"
+        ),
+    )
+    assert _verdict(g)[0] == LOWERING
 
 
 def test_no_scale_is_hipdnn_unit_scale_and_round_trips():

@@ -537,6 +537,8 @@ def bundle_graphs(skipped: Counter) -> list[tuple[str, dict]]:
             skipped["bundle_not_single_backward"] += 1
             continue
         out.append((f"bundle:{p.relative_to(BUNDLES).as_posix()}", g))
+    if not out:
+        raise AssertionError(f"no SdpaBackward graph under {BUNDLES}")
     return out
 
 

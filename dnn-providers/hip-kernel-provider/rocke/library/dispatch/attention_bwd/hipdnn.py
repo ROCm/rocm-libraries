@@ -46,6 +46,8 @@ from rocke.numeric.sdpa_reference import resolve_hipdnn_band
 from kernels.common.attention_bwd import STATIC_SCALES, attn_bwd_params
 from kernels.common.attention_bwd_aux import attn_bwd_aux_rows_per_cta
 from kernels.common.attention_bwd_plan import (
+    _KV_SIDE,
+    _Q_SIDE,
     SHIPPED_DECLARED_GROUPS,
     AttnBwdPlan,
     AttnBwdPolicy,
@@ -55,6 +57,7 @@ from kernels.common.attention_bwd_plan import (
     attn_bwd_table_key,
     shipped_policy,
 )
+from kernels.common.attention_bwd_plan import _TENSORS as _DATA
 
 from ..sdpa.hipdnn import HIPDNN_DTYPES
 from .routing import ARCH_TUNING, arch_tuned_policy
@@ -101,9 +104,8 @@ _REQUIRED = (
     ("dk", "outputs", "dk_tensor_uid"),
     ("dv", "outputs", "dv_tensor_uid"),
 )
-_DATA = ("q", "k", "v", "o", "do", "dq", "dk", "dv")
-_Q_SIDE = ("q", "o", "do", "dq")
-_KV_SIDE = ("k", "v", "dk", "dv")
+# hipDNN's tensor alignment when a graph declares none.
+DEFAULT_ALIGNMENT = 16
 _OPTIONAL_INPUTS = (
     "scale_tensor_uid",
     "attn_mask_tensor_uid",
@@ -232,7 +234,7 @@ def _dtype_name(entry: Mapping) -> str:
 
 
 def _alignment(entry: Mapping, uid: int) -> int:
-    v = entry.get("alignment", 16)
+    v = entry.get("alignment", DEFAULT_ALIGNMENT)
     if not _is_int(v):
         raise HipdnnLoweringError(f"tensor uid {uid} alignment {v!r} is not an int")
     v = int(v)
@@ -479,6 +481,19 @@ def _ragged_fields(b, offsets, ent, uids, table) -> dict:
     }
 
 
+_ONE_BYTE_DTYPES = frozenset(
+    (
+        "uint8",
+        "int8",
+        "fp8_e4m3",
+        "fp8_e5m2",
+        "fp8_e4m3_fnuz",
+        "fp8_e5m2_fnuz",
+        "fp8_e8m0",
+    )
+)
+
+
 def _scale_fields(inputs, params, entry_of) -> dict:
     uid = _uid(inputs, "scale_tensor_uid")
     if uid is not None:
@@ -488,6 +503,10 @@ def _scale_fields(inputs, params, entry_of) -> dict:
             return {"scale_is_device_tensor": True}
         if not isinstance(value, (int, float)) or isinstance(value, bool):
             raise HipdnnLoweringError(f"scale tensor value {value!r} is not a number")
+        dtype = str(e.get("data_type")).lower()
+        if dtype in _ONE_BYTE_DTYPES or e.get("value_type") == "Float8Value":
+            # hipDNN stores a 1-byte constant as its encoded byte, not its value.
+            raise HipdnnLoweringError(f"scale tensor of 1-byte dtype {dtype!r}")
         return {"scale": float(value)}
     value = params.get("attn_scale_value")
     if value is None:

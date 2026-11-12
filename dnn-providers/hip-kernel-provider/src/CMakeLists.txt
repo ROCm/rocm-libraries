@@ -707,16 +707,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             endif()
             file(WRITE "${_toml}" "${_toml_text}")
 
-            # The per-arch file the shard's categorized entries are appended to; the
-            # registrations above may already have created it.
-            get_property(_shard_ctest GLOBAL PROPERTY HKP_CENSUS_EXTERNAL_TEST_FILE_${_arch})
-            if(NOT _shard_ctest)
-                set(_shard_ctest
-                    "${CMAKE_CURRENT_BINARY_DIR}/census_external_${_arch}_CTestTestfile.cmake")
-                file(WRITE "${_shard_ctest}" "")
-                set_property(GLOBAL PROPERTY
-                             HKP_CENSUS_EXTERNAL_TEST_FILE_${_arch} "${_shard_ctest}")
-            endif()
+            _hkp_census_external_test_file(_shard_ctest ${_arch})
             hkp_reserve_census_shard(_shard_dest ${_arch} FILES "${_toml}")
 
             set(_category_args "")

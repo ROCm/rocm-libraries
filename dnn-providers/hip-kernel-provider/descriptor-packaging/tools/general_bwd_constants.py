@@ -183,9 +183,8 @@ def constants_header() -> str:
         ("int64_t", "OVERLAP_BUDGET", _int(P._OVERLAP_BUDGET)),
         ("int64_t", "HEAD_DIM_256", _int(HEAD_DIM_256)),
         ("int64_t", "LSE_MIN_ALIGNMENT", _int(H._LSE_MIN_ALIGNMENT)),
-        ("int64_t", "DEFAULT_ALIGNMENT", "16"),
+        ("int64_t", "DEFAULT_ALIGNMENT", _int(H.DEFAULT_ALIGNMENT)),
         ("int64_t", "WORKLIST_HEADER_WORDS", _int(WL_HEADER_WORDS)),
-        ("int64_t", "AUX_MIN_BLOCK_THREADS", "64"),
         ("bool", "MIRROR_PAIRING_BUILT", _bool(P.MIRROR_PAIRING_BUILT)),
     ]
     for t, n, v in scalars:

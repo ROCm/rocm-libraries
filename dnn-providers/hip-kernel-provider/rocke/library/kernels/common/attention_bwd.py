@@ -2341,13 +2341,7 @@ def _emit_main(
     is a recorded resource-gate failure (``RESOURCE_REFUSED``) for tests of
     the emitted IR's structure; every other rule still applies.
     """
-    s = validate_attn_bwd_spec(spec, arch, main_kernel_refusals=main_kernel_refusals)
-    missing = _not_built(s)
-    if missing:
-        raise NotImplementedError(
-            "the layout-general attention backward main kernel is not built for "
-            + ", ".join(missing)
-        )
+    s = _main_checks(spec, arch, main_kernel_refusals=main_kernel_refusals)
     facts = attn_bwd_arch_facts(arch)
     geom = BwdTileGeometry.from_spec(s, arch)
     plan = lds_plan(s, arch)
@@ -3458,15 +3452,27 @@ def _store_dkv_quads(b, s, a, slab, quads, *, k0, seq_kv, io) -> None:
             slab.store_vec(k, col0, b.select(row_live, v, zero))
 
 
+def _main_checks(spec: AttnBwdSpec, arch: str, *, main_kernel_refusals: bool = True):
+    """The main builder's checks, before any IR: the validator's rules
+    (``ValueError``) and the not-built knob values (``NotImplementedError``);
+    the resolved spec."""
+    s = validate_attn_bwd_spec(spec, arch, main_kernel_refusals=main_kernel_refusals)
+    missing = _not_built(s)
+    if missing:
+        raise NotImplementedError(
+            "the layout-general attention backward main kernel is not built for "
+            + ", ".join(missing)
+        )
+    return s
+
+
 def supports_attn_bwd_main(spec: AttnBwdSpec, *, arch: str) -> tuple[bool, str]:
     """``(ok, reason)``: whether :func:`build_attn_bwd_main` builds ``spec``
-    on ``arch`` (the validator's rules and the not-built knob values)."""
+    on ``arch``."""
     try:
-        missing = _not_built(validate_attn_bwd_spec(spec, arch))
-    except ValueError as exc:
+        _main_checks(spec, arch)
+    except (ValueError, NotImplementedError) as exc:
         return False, str(exc)
-    if missing:
-        return False, "not built for " + ", ".join(missing)
     return True, ""
 
 

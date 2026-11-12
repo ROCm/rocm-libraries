@@ -29,6 +29,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
+#include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "engines/kernel_ingestor_engine/packs/AttentionGeneralBwdConstants.generated.hpp"
 #include "engines/kernel_ingestor_engine/packs/SdpaGraphMatch.hpp"
 
@@ -464,15 +465,6 @@ struct Request
         return strides[index(operand)];
     }
 
-    double resolvedScale() const
-    {
-        if(scale.has_value())
-        {
-            return *scale;
-        }
-        return dQk > 0 ? 1.0 / std::sqrt(static_cast<double>(dQk)) : 1.0;
-    }
-
     /// (left, right, bottom_right) in rocKE's units (left: the FlashAttention window).
     std::tuple<int64_t, int64_t, bool> resolvedBand() const
     {
@@ -536,16 +528,6 @@ struct Request
         return isThd() && maxTotalQ.has_value() && maxTotalKv.has_value();
     }
 
-    /// Workspace rows (rows_q, rows_kv) of a request that passed the request checks.
-    std::pair<int64_t, int64_t> rows() const
-    {
-        if(wsByToken())
-        {
-            return {*maxTotalQ, *maxTotalKv};
-        }
-        return {b * sQ, b * sKv};
-    }
-
     std::pair<checks::Wide, checks::Wide> wideRows() const
     {
         if(wsByToken())
@@ -598,23 +580,6 @@ struct Request
             return 1;
         }
         return everyUsedStrideDivisibleBy(8) ? 8 : 1;
-    }
-
-    /// Widest access (4, 2 or 1 elements) a stage_vec = 1 request allows.
-    int64_t narrowWidth() const
-    {
-        for(const int64_t width : {int64_t{4}, int64_t{2}})
-        {
-            if(tensorAlignment < 2 * width)
-            {
-                continue;
-            }
-            if(everyUsedStrideDivisibleBy(width))
-            {
-                return width;
-            }
-        }
-        return 1;
     }
 
     bool hasZeroExtent() const
@@ -867,6 +832,23 @@ inline int64_t guaranteedAlignment(int64_t declared)
     return declared < 1 ? declared : declared & -declared;
 }
 
+inline bool isOneByte(data_objects::DataType dtype)
+{
+    switch(dtype)
+    {
+    case data_objects::DataType::UINT8:
+    case data_objects::DataType::INT8:
+    case data_objects::DataType::FP8_E4M3:
+    case data_objects::DataType::FP8_E5M2:
+    case data_objects::DataType::FP8_E8M0:
+    case data_objects::DataType::FP8_E4M3_FNUZ:
+    case data_objects::DataType::FP8_E5M2_FNUZ:
+        return true;
+    default:
+        return false;
+    }
+}
+
 /// A scalar tensor's stored value as a number; nullopt for a non-numeric (bool) value.
 inline std::optional<double> numericValue(const data_objects::TensorAttributes& tensor)
 {
@@ -903,33 +885,27 @@ struct Band
 inline std::variant<Band, std::string>
     resolveHipdnnBand(const data_objects::SdpaBackwardAttributes& node)
 {
-    if(node.causal_mask() && node.causal_mask_bottom_right())
-    {
-        return std::string("causal_mask and causal_mask_bottom_right are mutually exclusive "
-                           "but both are set");
-    }
     const auto alignment = node.diagonal_alignment();
     if(alignment != data_objects::DiagonalAlignment::TOP_LEFT
        && alignment != data_objects::DiagonalAlignment::BOTTOM_RIGHT)
     {
         return std::string("unknown diagonal_alignment");
     }
+    asm_sdpa_engine::plan_utils::DiagonalBand diagonal{};
+    try
+    {
+        diagonal = asm_sdpa_engine::plan_utils::resolveDiagonalBand(node);
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+    {
+        return std::string(e.what());
+    }
+    // resolveDiagonalBand returns the FlashAttention window (L - 1); this band keeps
+    // hipDNN's units.
     Band band;
-    band.bottomRight = alignment == data_objects::DiagonalAlignment::BOTTOM_RIGHT;
-    band.left = node.left_bound().has_value() ? node.left_bound().value() : -1;
-    band.right = node.right_bound().has_value() ? node.right_bound().value() : -1;
-    if(band.left == 0 || band.left < -1 || band.right < -1)
-    {
-        std::ostringstream detail;
-        detail << "left_bound must be -1 (unbounded) or >= 1 and right_bound >= -1, got "
-               << "left_bound=" << band.left << ", right_bound=" << band.right;
-        return detail.str();
-    }
-    if(node.causal_mask() || node.causal_mask_bottom_right())
-    {
-        band.right = band.right >= 0 ? band.right : 0;
-        band.bottomRight = band.bottomRight || node.causal_mask_bottom_right();
-    }
+    band.bottomRight = diagonal.alignment == data_objects::DiagonalAlignment::BOTTOM_RIGHT;
+    band.left = diagonal.leftBound < 0 ? -1 : diagonal.leftBound + 1;
+    band.right = diagonal.rightBound;
     return band;
 }
 
@@ -1251,6 +1227,12 @@ inline std::variant<Lowered, Decline> lowerGraph(const MatchContext& context, in
            || scaleTensor->value_type() == data_objects::TensorValue::NONE)
         {
             req.scaleIsDeviceTensor = true;
+        }
+        else if(lowering::isOneByte(scaleTensor->data_type())
+                || scaleTensor->value_type() == data_objects::TensorValue::Float8Value)
+        {
+            // hipDNN stores a 1-byte constant as its encoded byte, not its value.
+            return fail("scale tensor of a 1-byte dtype");
         }
         else
         {

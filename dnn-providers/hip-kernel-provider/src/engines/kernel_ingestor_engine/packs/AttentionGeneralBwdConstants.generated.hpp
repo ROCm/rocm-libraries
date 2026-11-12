@@ -117,7 +117,6 @@ inline constexpr int64_t HEAD_DIM_256 = 256;
 inline constexpr int64_t LSE_MIN_ALIGNMENT = 4;
 inline constexpr int64_t DEFAULT_ALIGNMENT = 16;
 inline constexpr int64_t WORKLIST_HEADER_WORDS = 2;
-inline constexpr int64_t AUX_MIN_BLOCK_THREADS = 64;
 inline constexpr bool MIRROR_PAIRING_BUILT = true;
 inline constexpr std::array<int64_t, 3> BWD_HEAD_SIZES = {{
     32,

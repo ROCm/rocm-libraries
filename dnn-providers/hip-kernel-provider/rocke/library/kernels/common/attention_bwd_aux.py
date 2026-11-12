@@ -609,13 +609,26 @@ def _worklist_role(b, a, threads: int) -> None:
         worklist_store_count(b, a["WORKLIST"], outer.results[0])
 
 
+def _prep_checks(spec: AttnBwdAuxSpec, arch: str) -> int:
+    """The prep builder's checks, before any IR; its rows per CTA."""
+    _check_arch(arch)
+    _check_vec8(spec, "prep")
+    return attn_bwd_aux_rows_per_cta(spec, arch=arch)
+
+
+def _convert_checks(spec: AttnBwdAuxSpec, arch: str) -> int:
+    """The convert and reduce builders' checks, before any IR; their rows per CTA."""
+    _check_arch(arch)
+    if spec.worklist:
+        raise ValueError("worklist=True applies to the prep kernel only")
+    return attn_bwd_aux_rows_per_cta(spec, arch=arch)
+
+
 def supports_attn_bwd_prep(spec: AttnBwdAuxSpec, *, arch: str) -> tuple[bool, str]:
     """``(ok, reason)``: whether :func:`build_attn_bwd_prep` builds ``spec``
-    on ``arch`` (the builder's own checks, before any IR)."""
+    on ``arch``."""
     try:
-        _check_arch(arch)
-        _check_vec8(spec, "prep")
-        attn_bwd_aux_rows_per_cta(spec, arch=arch)
+        _prep_checks(spec, arch)
     except ValueError as exc:
         return False, str(exc)
     return True, ""
@@ -623,12 +636,9 @@ def supports_attn_bwd_prep(spec: AttnBwdAuxSpec, *, arch: str) -> tuple[bool, st
 
 def supports_attn_bwd_convert(spec: AttnBwdAuxSpec, *, arch: str) -> tuple[bool, str]:
     """``(ok, reason)``: whether :func:`build_attn_bwd_convert` builds ``spec``
-    on ``arch`` (the builder's own checks, before any IR)."""
+    on ``arch``."""
     try:
-        _check_arch(arch)
-        if spec.worklist:
-            raise ValueError("worklist=True applies to the prep kernel only")
-        attn_bwd_aux_rows_per_cta(spec, arch=arch)
+        _convert_checks(spec, arch)
     except ValueError as exc:
         return False, str(exc)
     return True, ""
@@ -637,9 +647,7 @@ def supports_attn_bwd_convert(spec: AttnBwdAuxSpec, *, arch: str) -> tuple[bool,
 def build_attn_bwd_prep(spec: AttnBwdAuxSpec, *, arch: str) -> KernelDef:
     """q-side stats (lse2, Dsum) and dQ-workspace zero, plus the kv-zero role
     and, with ``spec.worklist``, the work-list role."""
-    _check_arch(arch)
-    _check_vec8(spec, "prep")
-    rows = attn_bwd_aux_rows_per_cta(spec, arch=arch)
+    rows = _prep_checks(spec, arch)
     b = IRBuilder(spec.kernel_name("prep"))
     b.fence_barriers = BWD_BARRIER_FENCE
     a = _declare(b, "prep", spec)
@@ -704,10 +712,7 @@ def build_attn_bwd_reduce(spec: AttnBwdAuxSpec, *, arch: str) -> KernelDef:
 
 
 def _build_convert(spec: AttnBwdAuxSpec, arch: str, stage: str) -> KernelDef:
-    _check_arch(arch)
-    if spec.worklist:
-        raise ValueError("worklist=True applies to the prep kernel only")
-    rows = attn_bwd_aux_rows_per_cta(spec, arch=arch)
+    rows = _convert_checks(spec, arch)
     b = IRBuilder(spec.kernel_name(stage))
     b.fence_barriers = BWD_BARRIER_FENCE
     a = _declare(b, stage, spec)

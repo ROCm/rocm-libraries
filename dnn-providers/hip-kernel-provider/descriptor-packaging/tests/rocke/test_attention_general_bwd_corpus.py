@@ -111,6 +111,7 @@ def test_constants_headers_are_current(rocke_sources):
 
 
 def test_gpu_cases_header_is_current(rocke_sources):
+    _require_artifacts()
     sys.path.insert(0, str(TOOLS))
     try:
         from general_bwd_constants import find_clang_format
@@ -205,6 +206,16 @@ def _bundle():
     return ued, slots, kdps
 
 
+def _require_artifacts():
+    """Skips when the bundle's DVC output (its KDPs) is not pulled
+    (descriptors/README.md: a build without a `dvc pull` still runs its tests)."""
+    if not any((BUNDLE / "artifacts").glob("*.kdp.json")):
+        pytest.skip(
+            f"{BUNDLE.name} KDPs not pulled; run: "
+            f"dvc pull -r ingestor {BUNDLE / 'artifacts.dvc'}"
+        )
+
+
 def _launch_sources(kernel):
     return kernel.get("sources") or {"": kernel["kernel_source"]}
 
@@ -238,6 +249,7 @@ def test_launch_surface_profile_checks():
 
 
 def test_bundle_shape():
+    _require_artifacts()
     ued, slots, kdps = _bundle()
     assert ued["version"] == "1.1" and ued["name"] == "hipkernel:AttentionGeneralBwd"
     assert ued["sdk_version"] == "1.4.0" and ued["shared_workspace"] == "ws.bytes"
@@ -306,6 +318,7 @@ def _symbol(spec, builder):
 @pytest.fixture(scope="module")
 def hydrated(rocke_sources):
     """``{pack: [(kernel, {launch: (spec, builder)})]}`` of the committed bundle."""
+    _require_artifacts()
     _rocke_path()
     os.environ.setdefault("ROCKE_BACKEND", "python")
     _ued, _slots, kdps = _bundle()
