@@ -382,72 +382,25 @@ void CheckBwd(miopen::Handle& handle, Data& d)
     test::CompareTensor<float>(d.dBias, d.dBias_ref, kTol);
 }
 
-struct BatchStats
-{
-    std::vector<double> mean;
-    std::vector<double> variance; // biased, as the kernels use
-};
-
-// The true per-channel stats of an NCHW input.
-BatchStats ComputeBatchStats(const tensor<float>& input)
-{
-    const auto& lens    = input.desc.GetLengths();
-    const std::size_t n = lens[0];
-    const std::size_t c = lens[1];
-    std::size_t spatial = 1;
-    for(std::size_t i = 2; i < lens.size(); ++i)
-        spatial *= lens[i];
-    const double count = static_cast<double>(n * spatial);
-
-    BatchStats stats{std::vector<double>(c), std::vector<double>(c)};
-    for(std::size_t ci = 0; ci < c; ++ci)
-    {
-        double sum = 0.0;
-        for(std::size_t ni = 0; ni < n; ++ni)
-            for(std::size_t i = 0; i < spatial; ++i)
-                sum += input.data[(ni * c + ci) * spatial + i];
-        const double mean = sum / count;
-
-        double sq = 0.0;
-        for(std::size_t ni = 0; ni < n; ++ni)
-        {
-            for(std::size_t i = 0; i < spatial; ++i)
-            {
-                const double diff = input.data[(ni * c + ci) * spatial + i] - mean;
-                sq += diff * diff;
-            }
-        }
-
-        stats.mean[ci]     = mean;
-        stats.variance[ci] = sq / count;
-    }
-    return stats;
-}
-
 // Backward without saved stats recomputes them from x. The CPU reference reads
 // only savedMean and savedInvVar, so give it the true stats of the input.
 void FillTrueStats(BwdData& d, double eps)
 {
-    const BatchStats stats = ComputeBatchStats(d.input);
-    for(std::size_t ci = 0; ci < stats.mean.size(); ++ci)
-    {
-        d.savedMean.data[ci]   = static_cast<float>(stats.mean[ci]);
-        d.savedInvVar.data[ci] = static_cast<float>(1.0 / std::sqrt(stats.variance[ci] + eps));
-    }
+    tensor<float> y{d.input.desc};
+    tensor<float> none;
+    batchNormSpatialHostFwdTrain(
+        d.input, y, d.bnScale, d.bnBias, eps, 0.0, d.savedMean, d.savedInvVar, none, none);
 }
 
 // MIOpen silently runs training when the estimated stats are null, so the output
-// is x normalized with its own batch stats: the inference reference given those
-// stats as its estimates.
+// is x normalized with its own batch stats: the training reference's output.
 void CheckInferWithoutEstimates(miopen::Handle& handle, InferData& d)
 {
-    const BatchStats stats = ComputeBatchStats(d.input);
-    for(std::size_t ci = 0; ci < stats.mean.size(); ++ci)
-    {
-        d.estMean.data[ci]     = static_cast<float>(stats.mean[ci]);
-        d.estVariance.data[ci] = static_cast<float>(stats.variance[ci]);
-    }
-    CheckInfer(handle, d);
+    d.output.data = handle.Read<float>(d.out_dev, d.output.data.size());
+    tensor<float> none;
+    batchNormSpatialHostFwdTrain(
+        d.input, d.out_ref, d.scale, d.shift, d.epsilon, 0.0, none, none, none, none);
+    test::CompareTensor<float>(d.output, d.out_ref, kTol);
 }
 
 // The test data seeds each tensor from its lengths, so dy holds the same values as
