@@ -17,6 +17,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <regex>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -48,6 +49,16 @@
 #ifdef __linux__
 #include <sys/resource.h>
 #include <unistd.h>
+#endif
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
 #endif
 
 /**
@@ -7442,5 +7453,111 @@ TEST(TestDescriptorLoader, DirectoryLinksAreNotFollowed)
 }
 
 #endif // __linux__
+
+#ifdef _WIN32
+
+namespace
+{
+
+/// Removes the \\?\ tree on scope exit; the error_code overload keeps cleanup from throwing.
+struct RemoveTreeOnExit
+{
+    std::filesystem::path path;
+
+    ~RemoveTreeOnExit()
+    {
+        std::error_code failed;
+        std::filesystem::remove_all(path, failed);
+    }
+};
+
+std::string levelFilename(int level)
+{
+    return "level_" + std::to_string(level) + ".ued.json";
+}
+
+} // namespace
+
+// The test executable gets its manifest from the build's long-path manifest post-pass.
+TEST(TestDescriptorLoader, ExecutableIsLongPathAware)
+{
+    // 24 is RT_MANIFEST; the RT_MANIFEST macro is narrow or wide by the UNICODE setting.
+    const HRSRC resource = FindResourceW(nullptr, MAKEINTRESOURCEW(1), MAKEINTRESOURCEW(24));
+    ASSERT_NE(resource, nullptr);
+    const HGLOBAL loaded = LoadResource(nullptr, resource);
+    ASSERT_NE(loaded, nullptr);
+    const void* bytes = LockResource(loaded);
+    ASSERT_NE(bytes, nullptr);
+    const DWORD size = SizeofResource(nullptr, resource);
+    ASSERT_GT(size, 0u);
+
+    const std::string manifest(static_cast<const char*>(bytes), size);
+    EXPECT_TRUE(std::regex_search(manifest, std::regex(R"(longPathAware[^>]*>\s*true\s*<)")))
+        << manifest;
+}
+
+// Unlike the data SDK test (data_sdk/tests/utilities/TestPlatformUtils.cpp), which uses
+// \\?\ paths and needs no policy, this test exercises the plain-path policy on purpose:
+// the walk is handed an ordinary root and must reach descriptors beyond MAX_PATH.
+TEST(TestDescriptorLoader, WalkReachesDescriptorsBeyondMaxPath)
+{
+    DWORD longPathsEnabled = 0;
+    DWORD valueSize = sizeof(longPathsEnabled);
+    const LONG status = RegGetValueW(HKEY_LOCAL_MACHINE,
+                                     L"SYSTEM\\CurrentControlSet\\Control\\FileSystem",
+                                     L"LongPathsEnabled",
+                                     RRF_RT_REG_DWORD,
+                                     nullptr,
+                                     &longPathsEnabled,
+                                     &valueSize);
+    if(status != ERROR_SUCCESS || longPathsEnabled != 1)
+    {
+        GTEST_SKIP() << "HKLM\\SYSTEM\\CurrentControlSet\\Control\\FileSystem "
+                        "LongPathsEnabled is not 1; plain paths beyond MAX_PATH are unavailable";
+    }
+
+    std::filesystem::path plainRoot = std::filesystem::temp_directory_path();
+    plainRoot /= L"hipdnn_walk_" + std::to_wstring(GetCurrentProcessId());
+    const std::wstring verbatimPrefix = L"\\\\?\\";
+    const RemoveTreeOnExit cleanup{std::filesystem::path(verbatimPrefix + plainRoot.wstring())};
+
+    // The \\?\ prefix builds the tree regardless of policy; the walk below gets the plain root.
+    std::wstring directory = cleanup.path.wstring();
+    const std::wstring segment(120, L'p');
+    std::error_code failed;
+    std::filesystem::create_directories(std::filesystem::path(directory), failed);
+    ASSERT_FALSE(failed) << failed.message();
+    int levels = 0;
+    do
+    {
+        std::ofstream(std::filesystem::path(directory) / levelFilename(levels)).close();
+        ++levels;
+        directory += L'\\';
+        directory += segment;
+        std::filesystem::create_directory(std::filesystem::path(directory), failed);
+        ASSERT_FALSE(failed) << failed.message();
+    } while(directory.size() - verbatimPrefix.size() < static_cast<size_t>(MAX_PATH) + 64);
+    std::ofstream(std::filesystem::path(directory) / levelFilename(levels)).close();
+    ++levels;
+    ASSERT_GT(directory.size() - verbatimPrefix.size(), static_cast<size_t>(MAX_PATH));
+
+    std::vector<std::pair<std::filesystem::path, const detail::FileType*>> files;
+    detail::collectDescriptorFiles(plainRoot, files);
+
+    std::set<std::string> names;
+    for(const auto& file : files)
+    {
+        names.insert(file.first.filename().string());
+    }
+    std::set<std::string> expected;
+    for(int i = 0; i < levels; ++i)
+    {
+        expected.insert(levelFilename(i));
+    }
+    EXPECT_EQ(files.size(), static_cast<size_t>(levels));
+    EXPECT_EQ(names, expected);
+}
+
+#endif // _WIN32
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR
