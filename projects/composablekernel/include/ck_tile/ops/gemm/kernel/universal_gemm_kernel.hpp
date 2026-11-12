@@ -703,14 +703,15 @@ struct UniversalGemmKernel
 
     CK_TILE_HOST static bool IsSupportedArgument(const KernelArgs& kargs)
     {
-        if constexpr(!std::is_void_v<barrier_pipeline>)
+        // Named-barrier pipelines and TDM pipelines alike compile only an inert fallback on
+        // other targets, so a non-gfx125 device must be rejected here, not left to return zeros.
+        if constexpr(!std::is_void_v<barrier_pipeline> || kIsTdmPipeline)
         {
-            // Other targets compile only the pipeline's inert fallback.
             if(!is_gfx125_supported())
             {
                 if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                 {
-                    CK_TILE_ERROR("Hardware named barriers require gfx1250!");
+                    CK_TILE_ERROR("TDM / named-barrier pipelines require gfx1250!");
                 }
                 return false;
             }
