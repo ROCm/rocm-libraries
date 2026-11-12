@@ -34,6 +34,7 @@
     } while(0)
 #endif
 
+#include <exception>
 #include <iterator>
 #include <memory>
 #include <optional>
@@ -44,6 +45,12 @@
 
 namespace rocRoller
 {
+    namespace GeneratorDetail
+    {
+        // Keep exception handling and its temporaries out of frequently inlined state checks.
+        __attribute__((noinline)) void RethrowException(std::exception_ptr& exception);
+    }
+
     enum class GeneratorState
     {
         /// Does not have a value.  Will have to resume the coroutine in order to obtain a value.
