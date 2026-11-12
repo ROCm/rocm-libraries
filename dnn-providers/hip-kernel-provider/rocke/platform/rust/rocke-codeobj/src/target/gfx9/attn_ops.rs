@@ -6,6 +6,13 @@
 //!
 //! * `vector.and (vec<i32xN>, vec<i32xN>)`: `v_and_b32` per dword (a splat
 //!   operand stays a scalar), as the vector arithmetic.
+//! * `vector.lshr (vec<i32xN>, vec<i32xN>)`: `v_lshrrev_b32` per dword, the
+//!   amount first; a splat operand stays a scalar.
+//! * `tile.writelane (value, lane, passthrough)`: a copy of `passthrough`
+//!   with `v_writelane_b32` writing the uniform value (an SGPR or an inline
+//!   constant) into a constant lane; any other lane is refused.
+//! * `tile.byte_perm (a, b) {sel}`: `v_perm_b32` with the selector in an SGPR
+//!   (gfx9's VOP3 takes no literal).
 //! * A compare of two i8 values: each widened to 32 bits, sign-extended for
 //!   the signed predicates and zero-extended for `eq`, `ne` and `ult` (the
 //!   i8 is one byte of a word whose other bytes hold anything), then the
@@ -35,6 +42,52 @@ mod tests {
                     memref.global_store_vN ( %X, %i, %a ) { align = i:8, elem_type = s:\"i32\", vec = i:2 }\n";
         let listing = rir::compile_any_target(&kernel(params, body), Target::Gfx950).unwrap_or_else(|e| panic!("{e}")).listing();
         assert_eq!(listing.matches("v_and_b32").count(), 2, "{listing}");
+    }
+
+    #[test]
+    fn vector_lshr_is_one_reversed_shift_per_dword() {
+        let params = "    %X : ptr<i32,global>\n    %m : i32\n";
+        let body = "    %c2 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:2 }\n    %i : i32 = arith.mul ( %tid, %c2 )\n    \
+                    %x : vec<i32x2> = memref.global_load_vN ( %X, %i ) { align = i:8, elem_type = s:\"i32\", vec = i:2 }\n    \
+                    %s : vec<i32x2> = vector.splat ( %m ) { vec = i:2 }\n    %a : vec<i32x2> = vector.lshr ( %x, %s )\n    \
+                    memref.global_store_vN ( %X, %i, %a ) { align = i:8, elem_type = s:\"i32\", vec = i:2 }\n";
+        let listing = rir::compile_any_target(&kernel(params, body), Target::Gfx950).unwrap_or_else(|e| panic!("{e}")).listing();
+        assert_eq!(listing.matches("v_lshrrev_b32").count(), 2, "{listing}");
+    }
+
+    #[test]
+    fn byte_perm_is_one_v_perm_b32_with_its_selector_in_an_sgpr() {
+        let params = "    %X : ptr<i32,global>\n";
+        let body = "    %a : i32 = memref.global_load_typed ( %X, %tid ) { align = i:4, elem_type = s:\"i32\" }\n    \
+                    %c1 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:1 }\n    %i : i32 = arith.add ( %tid, %c1 )\n    \
+                    %b : i32 = memref.global_load_typed ( %X, %i ) { align = i:4, elem_type = s:\"i32\" }\n    \
+                    %p : i32 = tile.byte_perm ( %a, %b ) { sel = i:117834498 }\n    \
+                    memref.global_store_typed ( %X, %tid, %p ) { align = i:4, elem_type = s:\"i32\" }\n";
+        let listing = rir::compile_any_target(&kernel(params, body), Target::Gfx950).unwrap_or_else(|e| panic!("{e}")).listing();
+        assert_eq!(listing.matches("v_perm_b32").count(), 1, "{listing}");
+        assert!(listing.contains("0x7060302") || listing.contains("117506818"), "{listing}");
+    }
+
+    #[test]
+    fn writelane_writes_a_constant_lane_of_a_copy() {
+        let params = "    %X : ptr<i32,global>\n    %m : i32\n";
+        let write = |value: &str, lane: i64| {
+            format!(
+                "    %x : i32 = memref.global_load_typed ( %X, %tid ) {{ align = i:4, elem_type = s:\"i32\" }}\n    \
+                 %c7 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:7 }}\n    \
+                 %l : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:{lane} }}\n    \
+                 %w : i32 = tile.writelane ( {value}, %l, %x )\n    \
+                 memref.global_store_typed ( %X, %tid, %w ) {{ align = i:4, elem_type = s:\"i32\" }}\n"
+            )
+        };
+        for value in ["%m", "%c7"] {
+            let listing = rir::compile_any_target(&kernel(params, &write(value, 5)), Target::Gfx950).unwrap_or_else(|e| panic!("{value}: {e}")).listing();
+            assert_eq!(listing.matches("v_writelane_b32").count(), 1, "{listing}");
+            assert!(listing.contains(", 5"), "{listing}");
+        }
+        // A lane that is not a constant is refused, not miscompiled.
+        let dynamic = write("%m", 5).replace("%l : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:5 }", "%l : i32 = arith.add ( %tid, %c7 )");
+        assert!(rir::compile_any_target(&kernel(params, &dynamic), Target::Gfx950).is_err());
     }
 
     /// `x <pred> -2` for an i8 `x` loaded from memory: the bytes 0x7f and 0x80

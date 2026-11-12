@@ -1640,6 +1640,13 @@ impl<'a> Isel<'a> {
                 self.set(op.results[1], Val::W(r(y)));
             }
             ReadLane => self.readlane(op)?,
+            WriteLane => self.writelane(op)?,
+            BytePerm => {
+                let (a, b) = (self.w(op.operands[0])?, self.w(op.operands[1])?);
+                let sel = Opnd::Imm(op.int_attr("sel").unwrap_or(0) as u32);
+                let out = self.v3(Opc::VPermB32, a, b, sel, 0);
+                self.set(op.results[0], Val::W(out));
+            }
             CvtFp8ToF32 | CvtBf8ToF32 | CvtPkF32Fp8 | CvtPkF32Bf8 | CvtF32ToFp8 | CvtF32ToBf8 | CvtPkFp8F32 | CvtPkBf8F32 => {
                 use crate::target::gfx9::fp8::{self, Cvt};
                 if self.t.target == Target::Gfx1151 {
@@ -1996,7 +2003,7 @@ impl<'a> Isel<'a> {
                 let (lo, hi) = self.d(op.operands[0])?;
                 self.set(res.unwrap(), Val::D(lo, hi));
             }
-            VecAdd | VecSub | VecMul | VecFma | VecAnd => self.vec_arith(op)?,
+            VecAdd | VecSub | VecMul | VecFma | VecAnd | VecLshr => self.vec_arith(op)?,
             VecSplat => self.splat_op(op)?,
             VecBitcast => {
                 let t = self.same_class_tuple(op.operands[0])?;
@@ -2816,6 +2823,7 @@ impl<'a> Isel<'a> {
             OpKind::VecSub | OpKind::Fsub => OpKind::Fsub,
             OpKind::VecMul | OpKind::Fmul => OpKind::Fmul,
             OpKind::VecAnd => OpKind::And,
+            OpKind::VecLshr => OpKind::Lshr,
             _ => OpKind::Fma,
         };
         let mut srcs = Vec::with_capacity(3);
@@ -2847,6 +2855,12 @@ impl<'a> Isel<'a> {
             let d = [r(sub(dst, i, 1))];
             if let Some(opc) = opc {
                 self.valu(opc, d, &x[..], 0);
+                continue;
+            }
+            // `v_lshrrev_b32` shifts its src1 (a VGPR) by its src0.
+            if kind == OpKind::Lshr {
+                let value = if self.is_v(x[0]) { x[0] } else { self.to_v(x[0]) };
+                self.valu(Opc::VLshrrevB32, d, [x[1], value], 0);
                 continue;
             }
             // VOP2 wants the VGPR in src1.
@@ -5047,6 +5061,30 @@ impl<'a> Isel<'a> {
         };
         let dst = self.sreg(1);
         self.emit(MInst::new(Opc::VReadlaneB32, [r(dst)], [x, lane]));
+        self.set(op.results[0], Val::W(r(dst)));
+        Ok(())
+    }
+
+    /// `tile.writelane (value, lane, passthrough)`: a copy of `passthrough` that
+    /// `v_writelane_b32` then updates in place. Its source 0 is an SGPR or an
+    /// inline constant and its lane a constant (one SGPR at most).
+    fn writelane(&mut self, op: &Op) -> Result<(), CompileError> {
+        let Opnd::Imm(lane) = self.w(op.operands[1])? else {
+            return Err(unsupported("tile.writelane with a lane that is not a constant"));
+        };
+        let value = match self.w(op.operands[0])? {
+            Opnd::Imm(k) if (-16..=64).contains(&(k as i32)) => Opnd::Imm(k),
+            o if self.is_v(o) => self.to_s(o),
+            o => {
+                let s = self.sreg(1);
+                self.copy(s, o);
+                r(s)
+            }
+        };
+        let old = self.w(op.operands[2])?;
+        let dst = self.vgpr(1);
+        self.copy(dst, old);
+        self.emit(MInst::new(Opc::VWritelaneB32, [r(dst)], [value, Opnd::Imm(lane & 63), r(dst)]));
         self.set(op.results[0], Val::W(r(dst)));
         Ok(())
     }

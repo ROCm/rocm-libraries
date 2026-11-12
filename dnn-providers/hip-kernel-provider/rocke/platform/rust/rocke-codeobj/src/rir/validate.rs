@@ -776,7 +776,7 @@ impl Checker<'_> {
                     return Err(mismatch());
                 }
             }
-            VecAnd => {
+            VecAnd | VecLshr => {
                 if !matches!(same(2)?, Type::Vec(Scalar::I32, _)) {
                     return Err(mismatch());
                 }
@@ -979,6 +979,19 @@ impl Checker<'_> {
             ReadLane => {
                 arity(1, 2)?;
                 if !matches!(types[0], Type::Scalar(Scalar::I32 | Scalar::F32)) || *types[1] != i32t || res != Some(types[0]) {
+                    return Err(mismatch());
+                }
+            }
+            BytePerm => {
+                arity(1, 2)?;
+                if *types[0] != i32t || *types[1] != i32t || res != Some(&i32t) || !matches!(self.int(op, "sel")?, Some(0..=0xffff_ffff)) {
+                    return Err(mismatch());
+                }
+            }
+            // `llvm.amdgcn.writelane` of an i32 or f32: (value, lane, passthrough).
+            WriteLane => {
+                arity(1, 3)?;
+                if !matches!(types[0], Type::Scalar(Scalar::I32 | Scalar::F32)) || *types[1] != i32t || *types[2] != *types[0] || res != Some(types[0]) {
                     return Err(mismatch());
                 }
             }

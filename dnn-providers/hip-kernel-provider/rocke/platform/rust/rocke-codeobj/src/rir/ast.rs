@@ -432,6 +432,8 @@ pub enum OpKind {
     Permlane32Swap,
     /// `tile.readlane (v: i32|f32, lane: i32)`: lane `lane`'s `v`, uniform.
     ReadLane,
+    /// `tile.writelane (value, lane, passthrough)`: `passthrough` with `lane` replaced by the uniform `value`.
+    WriteLane,
     /// `arith.cvt_fp8_to_f32 (fp8e4m3) -> f32` and its bf8e5m2 twin (gfx950).
     CvtFp8ToF32,
     CvtBf8ToF32,
@@ -447,6 +449,10 @@ pub enum OpKind {
     CvtPkBf8F32,
     /// `vector.and (a, b: vec<i32xN>)`: element-wise and.
     VecAnd,
+    /// `vector.lshr (a, b: vec<i32xN>)`: element-wise logical shift right of `a` by `b`.
+    VecLshr,
+    /// `tile.byte_perm (a, b) {sel}`: `v_perm_b32`, the bytes of `{a, b}` that `sel` names.
+    BytePerm,
     /// `tile.s_wait_asynccnt {n}`: gfx1250's wait on its asynchronous LDS
     /// copies; a target without that counter has none to wait for.
     WaitAsyncCnt,
@@ -692,6 +698,7 @@ impl OpKind {
             "tile.ds_read_tr_b8" => OpKind::DsReadTr8,
             "tile.permlane32_swap" => OpKind::Permlane32Swap,
             "tile.readlane" => OpKind::ReadLane,
+            "tile.writelane" => OpKind::WriteLane,
             "arith.cvt_fp8_to_f32" => OpKind::CvtFp8ToF32,
             "arith.cvt_bf8_to_f32" => OpKind::CvtBf8ToF32,
             "arith.cvt_pk_f32_fp8x4" => OpKind::CvtPkF32Fp8,
@@ -701,6 +708,8 @@ impl OpKind {
             "arith.cvt_pk_fp8_f32x4" => OpKind::CvtPkFp8F32,
             "arith.cvt_pk_bf8_f32x4" => OpKind::CvtPkBf8F32,
             "vector.and" => OpKind::VecAnd,
+            "vector.lshr" => OpKind::VecLshr,
+            "tile.byte_perm" => OpKind::BytePerm,
             "tile.s_wait_asynccnt" => OpKind::WaitAsyncCnt,
             "memref.global_flag_wait_eq" => OpKind::FlagWaitEq,
             "memref.global_flag_store" => OpKind::FlagStore,
@@ -802,6 +811,7 @@ impl OpKind {
                 | OpKind::LdsReadTr
                 | OpKind::Permlane32Swap
                 | OpKind::ReadLane
+                | OpKind::WriteLane
                 | OpKind::WaitAsyncCnt
                 | OpKind::FlagWaitEq
                 | OpKind::FlagStore
@@ -858,6 +868,7 @@ impl OpKind {
                     | OpKind::LdsReadTr
                     | OpKind::Permlane32Swap
                     | OpKind::ReadLane
+                    | OpKind::WriteLane
                     | OpKind::BufferLoadCp
                     | OpKind::Permlane16Swap
                     | OpKind::DppOp
