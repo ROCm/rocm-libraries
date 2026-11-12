@@ -1689,6 +1689,49 @@ TEST(TestConvFpropOutputToleranceFloat, EngineCoefficientReplacesTheBaseOne)
     EXPECT_NEAR(wider.atol - base.atol, 5.0 * perUnit * 4.0, 1e-15);
 }
 
+// The rounding points of a graph widen the atol of a float output as they do a half one's:
+// slope * eps_p * magnitude each, added to the summation-order term. K = 144, c = 4 and the output
+// scale 2 give sigma = 8; the points are written out here, not taken from the library.
+TEST(TestConvFpropOutputToleranceFloat, RoundingPointsWidenTheAtolOnly)
+{
+    ConvFpropErrorScale s;
+    s.accumulationLength = 144;
+    s.inputMeanSquare = 1.0 / 3.0;
+    s.weightMeanSquare = 1.0 / 3.0;
+    s.outputScale = 2.0;
+    const auto without = calculateConvFpropOutputTolerance<float>(s);
+    s.roundingPoints = {{std::ldexp(1.0, -7), 8.0, 3.0}, {std::ldexp(1.0, -10), 5.0, 1.0}};
+    const auto with = calculateConvFpropOutputTolerance<float>(s);
+
+    const double sumTerm = 4.0 * 12.0 * std::ldexp(1.0, -24);
+    EXPECT_NEAR(without.atol, sumTerm * 8.0 + std::ldexp(1.0, -126), 1e-15);
+    EXPECT_NEAR(with.atol - without.atol,
+                std::ldexp(1.0, -7) * 8.0 * 3.0 + std::ldexp(1.0, -10) * 5.0,
+                1e-12);
+    EXPECT_DOUBLE_EQ(with.rtol, without.rtol);
+}
+
+// The fused multiplies' scale multiplies sigma, and with it the atol of a float output (and not
+// its rtol).
+TEST(TestConvFpropOutputToleranceFloat, OutputScaleScalesTheAtolOnly)
+{
+    ConvFpropErrorScale s;
+    s.accumulationLength = 144;
+    s.inputMeanSquare = 1.0 / 3.0;
+    s.weightMeanSquare = 1.0 / 3.0;
+    const auto plain = calculateConvFpropOutputTolerance<float>(s);
+    s.outputScale = 0.5;
+    const auto halved = calculateConvFpropOutputTolerance<float>(s);
+    s.outputScale = -3.0;
+    const auto negative = calculateConvFpropOutputTolerance<float>(s);
+
+    const double minNormal = std::ldexp(1.0, -126);
+    EXPECT_NEAR(halved.atol - minNormal, 0.5 * (plain.atol - minNormal), 1e-15);
+    EXPECT_NEAR(negative.atol - minNormal, 3.0 * (plain.atol - minNormal), 1e-15);
+    EXPECT_DOUBLE_EQ(halved.rtol, plain.rtol);
+    EXPECT_DOUBLE_EQ(negative.rtol, plain.rtol);
+}
+
 // A float output has no lambda term: atol is the summation-order term and nothing else.
 TEST(TestConvFpropOutputToleranceFloat, HasNoPartialResultTerm)
 {
