@@ -531,7 +531,7 @@ TEST(TestConvIgemmCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its knob tuple: within one direction and
     // dtype (what one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 18> KNOBS{"atom",
+    static constexpr std::array<const char*, 19> KNOBS{"atom",
                                                        "math",
                                                        "bm",
                                                        "bn",
@@ -548,7 +548,8 @@ TEST(TestConvIgemmCatalog, KnobsTellApartEveryConfigOfAGraph)
                                                        "cf",
                                                        "swz",
                                                        "dma",
-                                                       "fuse"};
+                                                       "fuse",
+                                                       "large"};
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         std::vector<std::string> tuples;
@@ -1051,7 +1052,7 @@ TEST(TestConvIgemmCatalog, ChannelsFirstOutputConfigsServeOnlyChannelsFirstOutpu
                    || kernel.getStringMetadata("atom") != "mfma32_f16"
                    || kernel.getIntMetadata("xcd") != 0 || kernel.getIntMetadata("halo") != 0
                    || kernel.getIntMetadata("wdirect") != 0 || kernel.getIntMetadata("pack") != 0
-                   || kernel.getIntMetadata("fuse") != 0
+                   || kernel.getIntMetadata("fuse") != 0 || kernel.getIntMetadata("large") != 0
                    || !conv_igemm::blockOrderServes(kernel.getIntMetadata("bm"),
                                                     kernel.getIntMetadata("bn"),
                                                     0,
