@@ -262,6 +262,7 @@ def _bind_and_configure(_C: Any, config: Config, backend: str) -> State:
         raise BootstrapError("a hipdnn_vllm runtime exists before plugin configuration")
     _C.configure_plugins(plan.mode, list(plan.paths))
     _C.set_plan_cache_size(config.plan_cache_size)
+    _C.custom_op_set_enabled(config.op_enabled("custom_op"))
 
     # Create the handle now and log its cost: provider initialization runs
     # inside the one backend call, so the time covers all loaded providers.
