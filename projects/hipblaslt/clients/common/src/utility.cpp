@@ -31,6 +31,7 @@
 #endif
 
 #include "../../../library/src/amd_detail/rocblaslt/src/include/rocblaslt_adaptive_sm_count.hpp"
+#include "client_process.hpp"
 #include "d_vector.hpp"
 #include "utility.hpp"
 #include <atomic>
@@ -280,23 +281,6 @@ hipblaslt_local_handle::hipblaslt_local_handle()
     auto status = hipblasLtCreate(&m_handle);
     if(status != HIPBLAS_STATUS_SUCCESS)
         throw std::runtime_error(hipblas_status_to_string(status));
-
-#ifdef GOOGLE_TEST
-    if(t_set_stream_callback)
-    {
-        (*t_set_stream_callback)(m_handle);
-        t_set_stream_callback.reset();
-    }
-#endif
-}
-
-static void portable_setenv(const char* name, const char* value)
-{
-#ifdef _WIN32
-    _putenv_s(name, value);
-#else
-    setenv(name, value, /*overwrite=*/true);
-#endif
 }
 
 hipblaslt_local_handle::hipblaslt_local_handle(const Arguments& arg)
@@ -308,8 +292,9 @@ hipblaslt_local_handle::hipblaslt_local_handle(const Arguments& arg)
         if(sol_selec_env)
             m_sol_selec_saved_status = std::string(sol_selec_env);
         m_sol_selec_env_set = true;
-        portable_setenv("TENSILE_SOLUTION_SELECTION_METHOD",
-                        std::to_string(arg.tensile_solution_selection_method).c_str());
+        hipblaslt_clients::setEnv("TENSILE_SOLUTION_SELECTION_METHOD",
+                                  std::to_string(arg.tensile_solution_selection_method).c_str(),
+                                  1);
     }
     // memory guard control, with multi-threading should not change values across threads
     d_vector_set_pad_length(arg.pad);
@@ -319,7 +304,8 @@ hipblaslt_local_handle::~hipblaslt_local_handle()
 {
     if(m_sol_selec_env_set)
     {
-        portable_setenv("TENSILE_SOLUTION_SELECTION_METHOD", m_sol_selec_saved_status.c_str());
+        hipblaslt_clients::setEnv(
+            "TENSILE_SOLUTION_SELECTION_METHOD", m_sol_selec_saved_status.c_str(), 1);
     }
     hipblasLtDestroy(m_handle);
 }

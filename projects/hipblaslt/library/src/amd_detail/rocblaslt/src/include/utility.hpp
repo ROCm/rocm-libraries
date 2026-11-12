@@ -129,18 +129,6 @@ std::string rocblaslt_matrix_layout_to_string(rocblaslt_matrix_layout mat);
 
 std::string rocblaslt_matmul_desc_to_string(rocblaslt_matmul_desc matmul_desc);
 
-// Return the leftmost significant bit position
-#if defined(rocblaslt_ILP64)
-static inline rocblaslt_int rocblaslt_clz(rocblaslt_int n)
-{
-    return 64 - __builtin_clzll(n);
-}
-#else
-static inline rocblaslt_int rocblaslt_clz(rocblaslt_int n)
-{
-    return 32 - __builtin_clz(n);
-}
-#endif
 std::ostream* get_logger_os();
 uint32_t      get_logger_layer_mode();
 

@@ -606,42 +606,7 @@ namespace
     // Memory preflight (AIHPBLAS-5352)
     // ----------------------------------------------------------------------------
 
-    // Sets an environment variable for one scope, and then restores the value the run started
-    // with, which a CI lane may have set for every test.
-    class ScopedVariable
-    {
-    public:
-        ScopedVariable(const char* name, const char* value)
-            : m_name(name)
-        {
-            if(const char* old = std::getenv(name))
-                m_saved = old;
-            set(value);
-        }
-        ~ScopedVariable()
-        {
-            set(m_saved ? m_saved->c_str() : nullptr);
-        }
-        ScopedVariable(const ScopedVariable&)            = delete;
-        ScopedVariable& operator=(const ScopedVariable&) = delete;
-
-    private:
-        // nullptr unsets the variable.
-        void set(const char* value) const
-        {
-#ifdef _WIN32
-            _putenv_s(m_name, value ? value : "");
-#else
-            if(value)
-                setenv(m_name, value, 1);
-            else
-                unsetenv(m_name);
-#endif
-        }
-
-        const char*                m_name;
-        std::optional<std::string> m_saved;
-    };
+    using test_env::ScopedEnv;
 
     // An M x N x K NN GEMM, in and out of the same type, that the CPU reference checks with
     // unit_check.
@@ -673,8 +638,8 @@ namespace
     {
         // The case needs about 384 MiB of host memory. Under a 64 MiB budget the preflight must
         // stop it before any allocation, and under HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP it fails.
-        ScopedVariable limit("HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT", "64M");
-        ScopedVariable fail("HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP", "1");
+        ScopedEnv limit("HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT", "64M");
+        ScopedEnv fail("HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP", "1");
         EXPECT_FATAL_FAILURE(run_short_unit_check_case(), MEMORY_SHORTAGE_STRING "this case needs");
     }
 
@@ -703,8 +668,8 @@ namespace
     {
         // matmul_batch_offset cases have their own test function; it needs the same preflight.
         // This one needs about 14 MiB of host memory.
-        ScopedVariable limit("HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT", "1M");
-        ScopedVariable fail("HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP", "1");
+        ScopedEnv limit("HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT", "1M");
+        ScopedEnv fail("HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP", "1");
         EXPECT_FATAL_FAILURE(run_short_batch_offset_case(),
                              MEMORY_SHORTAGE_STRING "this case needs");
     }
@@ -712,7 +677,7 @@ namespace
     // Runs one case with the estimate check on and returns what it measured.
     MemoryEstimateMeasurement measure_estimate(const Arguments& arg)
     {
-        ScopedVariable check("HIPBLASLT_TEST_CHECK_MEMORY_ESTIMATE", "1");
+        ScopedEnv check("HIPBLASLT_TEST_CHECK_MEMORY_ESTIMATE", "1");
         last_memory_estimate_measurement() = {};
         testing_matmul(arg);
         return last_memory_estimate_measurement();
@@ -756,14 +721,14 @@ namespace
         // The check resets the kernel's peak, which GNU time and getrusage report too. The peak
         // printed at the end of the run still includes memory touched before the reset.
         const size_t   pinned = size_t(1) << 30;
-        ScopedVariable no_limit("HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT", nullptr);
+        ScopedEnv      no_limit("HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT", nullptr);
         {
             HipHostBuffer touched(HIP_R_8I, pinned);
             ASSERT_EQ(touched.memcheck(), hipSuccess);
         }
         auto before = peak_resident_bytes();
         ASSERT_GE(before.value_or(0), pinned);
-        ScopedVariable check("HIPBLASLT_TEST_CHECK_MEMORY_ESTIMATE", "1");
+        ScopedEnv check("HIPBLASLT_TEST_CHECK_MEMORY_ESTIMATE", "1");
         for(int i = 0; i < 2; i++) // the first check in a process measures nothing
             MemoryEstimateCheck{MemoryEstimateCheck::kMinBytes};
         ASSERT_TRUE(last_memory_estimate_measurement().measured)

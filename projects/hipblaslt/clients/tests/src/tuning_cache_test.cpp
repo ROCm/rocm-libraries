@@ -13,6 +13,7 @@
 // The tuning variables are read on first use and each file is loaded once per
 // process, so each case starts from hipblaslt_tuning_reset_for_test().
 
+#include "client_process.hpp"
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
@@ -35,26 +36,9 @@
 #include <utility>
 #include <vector>
 
-#ifdef WIN32
-#include <process.h>
-#else
-#include <unistd.h>
-#endif
-
 extern "C" void   hipblaslt_tuning_reset_for_test();
 extern "C" int    hipblaslt_tuning_last_launch_for_test();
 extern "C" size_t hipblaslt_tuning_stats_for_test(uint64_t* values, size_t count);
-
-#ifdef WIN32
-static int setenv(const char* name, const char* value, int overwrite)
-{
-    return _putenv_s(name, value);
-}
-static int unsetenv(const char* name)
-{
-    return _putenv_s(name, "");
-}
-#endif
 
 namespace
 {
@@ -75,11 +59,7 @@ namespace
     std::string tempTuningPath(const char* stem)
     {
         std::ostringstream oss;
-#ifdef WIN32
-        const auto pid = _getpid();
-#else
-        const auto pid = getpid();
-#endif
+        const auto         pid = hipblaslt_clients::processId();
         oss << ::testing::TempDir() << "hipblaslt_" << stem << "_" << static_cast<long long>(pid)
             << ".tuning";
         return oss.str();
@@ -710,7 +690,7 @@ namespace
             // Solutions are read with no file in play, so a user's own tuning
             // settings cannot decide what the cases below take as the default.
             for(const char* name : kTuningVariables)
-                unsetenv(name);
+                hipblaslt_clients::unsetEnv(name);
             hipblaslt_tuning_reset_for_test();
 
             m_path
@@ -727,9 +707,9 @@ namespace
             for(const auto& [name, value] : m_savedEnv)
             {
                 if(value)
-                    setenv(name.c_str(), value->c_str(), 1);
+                    hipblaslt_clients::setEnv(name.c_str(), value->c_str(), 1);
                 else
-                    unsetenv(name.c_str());
+                    hipblaslt_clients::unsetEnv(name.c_str());
             }
             hipblaslt_tuning_reset_for_test();
         }
@@ -737,18 +717,18 @@ namespace
         /** Point the override variable at the file just written, starting clean. */
         void useTuningFile()
         {
-            setenv("HIPBLASLT_TUNING_OVERRIDE_FILE", m_path.c_str(), 1);
+            hipblaslt_clients::setEnv("HIPBLASLT_TUNING_OVERRIDE_FILE", m_path.c_str(), 1);
             hipblaslt_tuning_reset_for_test();
         }
 
         /** Cache mode on a path, which may be empty, starting clean. */
         void useCache(const std::string& path)
         {
-            setenv("HIPBLASLT_TUNING_MODE", "cache", 1);
+            hipblaslt_clients::setEnv("HIPBLASLT_TUNING_MODE", "cache", 1);
             if(path.empty())
-                unsetenv("HIPBLASLT_TUNING_CACHE_PATH");
+                hipblaslt_clients::unsetEnv("HIPBLASLT_TUNING_CACHE_PATH");
             else
-                setenv("HIPBLASLT_TUNING_CACHE_PATH", path.c_str(), 1);
+                hipblaslt_clients::setEnv("HIPBLASLT_TUNING_CACHE_PATH", path.c_str(), 1);
             hipblaslt_tuning_reset_for_test();
         }
 
@@ -1079,7 +1059,7 @@ namespace
 
         ASSERT_TRUE(writeTuningFile(
             m_path, m_stamp, {{m_identities[1].index, m_identities[1].kernelName}}));
-        setenv("HIPBLASLT_TUNING_OVERRIDE_FILE", m_path.c_str(), 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_TUNING_OVERRIDE_FILE", m_path.c_str(), 1);
         useCache("");
 
         int selected = -1;
@@ -1097,7 +1077,7 @@ namespace
 
         ASSERT_TRUE(writeTuningFile(
             m_path, m_stamp, {{m_identities[1].index, m_identities[1].kernelName}}));
-        setenv("HIPBLASLT_TUNING_OVERRIDE_FILE", m_path.c_str(), 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_TUNING_OVERRIDE_FILE", m_path.c_str(), 1);
         useCache(m_path + ".absent");
 
         int selected = -1;
@@ -1360,7 +1340,7 @@ namespace
                   std::string::npos)
             << loaded;
 
-        setenv("HIPBLASLT_TUNING_OVERRIDE_FILE", m_path.c_str(), 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_TUNING_OVERRIDE_FILE", m_path.c_str(), 1);
         useCache(m_path + ".absent");
 
         std::string missing;
@@ -1455,16 +1435,16 @@ namespace
         {
             const char* value = getenv(name);
             savedEnv.emplace_back(name, value ? std::optional<std::string>(value) : std::nullopt);
-            unsetenv(name);
+            hipblaslt_clients::unsetEnv(name);
         }
-        setenv("HIPBLASLT_LOG_LEVEL", "4", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_LOG_LEVEL", "4", 1);
 
         GTEST_FLAG_SET(death_test_style, "threadsafe");
         EXPECT_EXIT(
             {
-                unsetenv("HIPBLASLT_TUNING_MODE");
-                unsetenv("HIPBLASLT_TUNING_CACHE_PATH");
-                unsetenv("HIPBLASLT_TUNING_OVERRIDE_FILE");
+                hipblaslt_clients::unsetEnv("HIPBLASLT_TUNING_MODE");
+                hipblaslt_clients::unsetEnv("HIPBLASLT_TUNING_CACHE_PATH");
+                hipblaslt_clients::unsetEnv("HIPBLASLT_TUNING_OVERRIDE_FILE");
                 hipblaslt_tuning_reset_for_test();
                 const auto identities = candidateIdentities(8);
                 if(identities.empty())
@@ -1473,8 +1453,8 @@ namespace
                 if(!writeTuningFile(
                        path, buildStamp(), {{identities[0].index, identities[0].kernelName}}))
                     std::exit(3);
-                setenv("HIPBLASLT_TUNING_MODE", "cache", 1);
-                setenv("HIPBLASLT_TUNING_CACHE_PATH", path.c_str(), 1);
+                hipblaslt_clients::setEnv("HIPBLASLT_TUNING_MODE", "cache", 1);
+                hipblaslt_clients::setEnv("HIPBLASLT_TUNING_CACHE_PATH", path.c_str(), 1);
                 hipblaslt_tuning_reset_for_test();
                 bool        ok = true;
                 std::string first;
@@ -1515,9 +1495,9 @@ namespace
         for(const auto& [name, value] : savedEnv)
         {
             if(value)
-                setenv(name.c_str(), value->c_str(), 1);
+                hipblaslt_clients::setEnv(name.c_str(), value->c_str(), 1);
             else
-                unsetenv(name.c_str());
+                hipblaslt_clients::unsetEnv(name.c_str());
         }
     }
 

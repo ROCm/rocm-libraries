@@ -33,6 +33,7 @@
 // SCAN_FROM/SCAN_UNTIL window). Public-API only -- works in every build
 // flavor regardless of CODE_COVERAGE.
 
+#include "client_process.hpp"
 #include "hipblaslt_test.hpp"
 
 #include <hipblaslt/hipblaslt-ext.hpp>
@@ -50,30 +51,6 @@
 #include <string>
 #include <vector>
 
-// MSVC CRT lacks POSIX setenv/unsetenv. Mirror the existing _putenv_s shim
-// pattern from shared/origami/tests/include/common.hpp:37 and
-// projects/hipblaslt/clients/common/src/utility.cpp:299 so existing
-// setenv/unsetenv call sites below stay portable. _putenv_s with an empty
-// value removes the variable on Windows, matching POSIX unsetenv semantics
-// (return-value shape differs -- POSIX is 0/-1, _putenv_s is 0/errno_t --
-// but no caller here inspects the return). The !defined() guards keep us
-// safe if a future Windows toolchain ever exposes the POSIX names. This
-// header must not be included from non-test TUs.
-#ifdef _WIN32
-#if !defined(setenv)
-inline int setenv(const char* name, const char* value, int /*overwrite*/)
-{
-    return _putenv_s(name, value);
-}
-#endif
-#if !defined(unsetenv)
-inline int unsetenv(const char* name)
-{
-    return _putenv_s(name, "");
-}
-#endif
-#endif
-
 inline void testing_aux_check_numerics_gemm(const Arguments& arg)
 {
     (void)arg;
@@ -85,11 +62,11 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
     std::lock_guard<std::mutex> env_lock(env_mutex);
 
     auto reset_env = []() {
-        unsetenv("HIPBLASLT_CHECK_NUMERICS");
-        unsetenv("HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY");
-        unsetenv("HIPBLASLT_CHECK_NUMERICS_SCAN_FROM");
-        unsetenv("HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL");
-        unsetenv("HIPBLASLT_CHECK_NUMERICS_STOP_ON_FIRST");
+        hipblaslt_clients::unsetEnv("HIPBLASLT_CHECK_NUMERICS");
+        hipblaslt_clients::unsetEnv("HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY");
+        hipblaslt_clients::unsetEnv("HIPBLASLT_CHECK_NUMERICS_SCAN_FROM");
+        hipblaslt_clients::unsetEnv("HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL");
+        hipblaslt_clients::unsetEnv("HIPBLASLT_CHECK_NUMERICS_STOP_ON_FIRST");
     };
 
     // Sentinel for "no NaN injection" -- the loop is 1-indexed so call_ids
@@ -228,14 +205,14 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
 
     // Default sampling (every call), inject NaN at #5, expect 5.
     reset_env();
-    setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+    hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
     run_scenario(/*total=*/8, /*inject_at=*/5, &reported);
     EXPECT_EQ(reported, 5u);
 
     // First-call boundary (inject at #1) -- catches off-by-one in the call
     // counter where 0-indexed internal state would mis-report 0 or 2.
     reset_env();
-    setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+    hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
     run_scenario(/*total=*/4, /*inject_at=*/1, &reported);
     EXPECT_EQ(reported, 1u);
 
@@ -245,56 +222,56 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
     // overwrites it -- documented "miss" case in the sample. Catches a
     // regression that flips the modulus check (e.g. `% N == 1`).
     reset_env();
-    setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
-    setenv("HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY", "5", 1);
+    hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+    hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY", "5", 1);
     run_scenario(/*total=*/12, /*inject_at=*/7, &reported);
     EXPECT_EQ(reported, 0u);
 
     // SCAN_EVERY=5, inject at #10 (sampled) -- expect 10.
     reset_env();
-    setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
-    setenv("HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY", "5", 1);
+    hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+    hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY", "5", 1);
     run_scenario(/*total=*/12, /*inject_at=*/10, &reported);
     EXPECT_EQ(reported, 10u);
 
     // SCAN_FROM=10, SCAN_UNTIL=15: lower-bound inclusivity (#10) -- catches
     // a `<` vs `<=` regression on the FROM bound.
     reset_env();
-    setenv("HIPBLASLT_CHECK_NUMERICS", "2", 1);
-    setenv("HIPBLASLT_CHECK_NUMERICS_SCAN_FROM", "10", 1);
-    setenv("HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL", "15", 1);
+    hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS", "2", 1);
+    hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS_SCAN_FROM", "10", 1);
+    hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL", "15", 1);
     run_scenario(/*total=*/15, /*inject_at=*/10, &reported);
     EXPECT_EQ(reported, 10u);
 
     // Same window: interior (#12), expect 12.
     reset_env();
-    setenv("HIPBLASLT_CHECK_NUMERICS", "2", 1);
-    setenv("HIPBLASLT_CHECK_NUMERICS_SCAN_FROM", "10", 1);
-    setenv("HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL", "15", 1);
+    hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS", "2", 1);
+    hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS_SCAN_FROM", "10", 1);
+    hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL", "15", 1);
     run_scenario(/*total=*/15, /*inject_at=*/12, &reported);
     EXPECT_EQ(reported, 12u);
 
     // Same window: upper-bound inclusivity (#15) -- catches a `<` vs `<=`
     // regression on the UNTIL bound.
     reset_env();
-    setenv("HIPBLASLT_CHECK_NUMERICS", "2", 1);
-    setenv("HIPBLASLT_CHECK_NUMERICS_SCAN_FROM", "10", 1);
-    setenv("HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL", "15", 1);
+    hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS", "2", 1);
+    hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS_SCAN_FROM", "10", 1);
+    hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL", "15", 1);
     run_scenario(/*total=*/15, /*inject_at=*/15, &reported);
     EXPECT_EQ(reported, 15u);
 
     // Same window: outside (#2) -- expect 0.
     reset_env();
-    setenv("HIPBLASLT_CHECK_NUMERICS", "2", 1);
-    setenv("HIPBLASLT_CHECK_NUMERICS_SCAN_FROM", "10", 1);
-    setenv("HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL", "15", 1);
+    hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS", "2", 1);
+    hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS_SCAN_FROM", "10", 1);
+    hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS_SCAN_UNTIL", "15", 1);
     run_scenario(/*total=*/15, /*inject_at=*/2, &reported);
     EXPECT_EQ(reported, 0u);
 
     // Clean run (no injection) -- catches a regression where the scanner
     // spuriously flags clean GEMMs.
     reset_env();
-    setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+    hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
     run_scenario(/*total=*/6, /*inject_at=*/kNoInjection, &reported);
     EXPECT_EQ(reported, 0u);
 
@@ -349,8 +326,8 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
     //      short_circuit suppresses the second log).
     {
         reset_env();
-        setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
-        setenv("HIPBLASLT_CHECK_NUMERICS_STOP_ON_FIRST", "1", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS_STOP_ON_FIRST", "1", 1);
 
         std::string captured_log;
         {
@@ -391,9 +368,9 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
     // scan_every into the log line and the sticky drain still reports 4.
     {
         reset_env();
-        setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
-        setenv("HIPBLASLT_CHECK_NUMERICS_STOP_ON_FIRST", "1", 1);
-        setenv("HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY", "2", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS_STOP_ON_FIRST", "1", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS_SCAN_EVERY", "2", 1);
 
         std::string captured_log;
         {
@@ -612,7 +589,7 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
     };
 
     reset_env();
-    setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+    hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
     run_pointer_array_scenario(/*nan_batch=*/2,
                                /*d_offset=*/0,
                                /*prefix_nan=*/false,
@@ -621,7 +598,7 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
     EXPECT_EQ(reported, 1u) << "NaN in the last pointer-array batch must be reported";
 
     reset_env();
-    setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+    hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
     run_pointer_array_scenario(kNoNanBatch,
                                /*d_offset=*/0,
                                /*prefix_nan=*/false,
@@ -637,13 +614,13 @@ inline void testing_aux_check_numerics_gemm(const Arguments& arg)
     {
         SCOPED_TRACE(use_cpp ? "extension API" : "C API");
         reset_env();
-        setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
         run_pointer_array_scenario(
             /*nan_batch=*/2, kDOffset, /*prefix_nan=*/false, use_cpp, &reported);
         EXPECT_EQ(reported, 1u) << "NaN in offset pointer-array output must be reported";
 
         reset_env();
-        setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
+        hipblaslt_clients::setEnv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
         run_pointer_array_scenario(
             kNoNanBatch, kDOffset, /*prefix_nan=*/true, use_cpp, &reported);
         EXPECT_EQ(reported, 0u) << "NaNs before offset pointer-array output must be ignored";

@@ -36,8 +36,6 @@
  */
 
 #pragma once
-#ifndef HIPBLASLT_CHECK_SYNCHRONIZER_HPP
-#define HIPBLASLT_CHECK_SYNCHRONIZER_HPP
 
 #include "handle.h"
 #include "rocblaslt-types.h"
@@ -162,5 +160,3 @@ inline void hipblaslt_check_synchronizer_scan(rocblaslt_handle handle,
         label, "Synchronizer", handle->Synchronizer, gsuCount);
     hipblaslt_check_synchronizer_detail::scan_region(label, "StreamKFlags", streamKFlags, skCount);
 }
-
-#endif // HIPBLASLT_CHECK_SYNCHRONIZER_HPP

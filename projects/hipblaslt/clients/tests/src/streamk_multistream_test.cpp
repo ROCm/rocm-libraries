@@ -29,6 +29,7 @@
 // the flag-synchronised remainder path, since a pass would be meaningless
 // otherwise.
 
+#include "client_process.hpp"
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
@@ -74,24 +75,6 @@ namespace
     constexpr char kLaunchSummaryBit[]    = "0x200000";
     constexpr char kLaunchSummaryMarker[] = "TensileLite::StreamK LAUNCH SUMMARY";
 
-    void setEnv(const char* name, const char* value)
-    {
-#ifdef _WIN32
-        _putenv_s(name, value);
-#else
-        setenv(name, value, 1);
-#endif
-    }
-
-    void unsetEnv(const char* name)
-    {
-#ifdef _WIN32
-        _putenv_s(name, "");
-#else
-        unsetenv(name);
-#endif
-    }
-
     // Turns on the Stream-K launch summary and captures std::cerr for its
     // lifetime, restoring both on the way out.
     class LaunchSummaryCapture
@@ -102,16 +85,16 @@ namespace
             , m_prior(m_hadPrior ? std::getenv("TENSILE_DB") : "")
             , m_savedCerr(std::cerr.rdbuf(m_captured.rdbuf()))
         {
-            setEnv("TENSILE_DB", kLaunchSummaryBit);
+            hipblaslt_clients::setEnv("TENSILE_DB", kLaunchSummaryBit, 1);
             hipblaslt_debug_reload();
         }
 
         ~LaunchSummaryCapture()
         {
             if(m_hadPrior)
-                setEnv("TENSILE_DB", m_prior.c_str());
+                hipblaslt_clients::setEnv("TENSILE_DB", m_prior.c_str(), 1);
             else
-                unsetEnv("TENSILE_DB");
+                hipblaslt_clients::unsetEnv("TENSILE_DB");
             hipblaslt_debug_reload();
             std::cerr.rdbuf(m_savedCerr);
         }
