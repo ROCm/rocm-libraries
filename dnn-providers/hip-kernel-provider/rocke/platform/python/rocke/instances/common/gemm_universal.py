@@ -2424,6 +2424,36 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 )
         warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * t.warp_tile_m))
         warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
+
+        def _mx_kk_scales(kk):
+            """Per-lane scale words of k-atom ``kk``: (A per M-repeat, B per N-repeat)."""
+            if _os_mx.environ.get("ROCKE_EXP_MX_SWZ") == "1" and not _mx_dsc:
+                # Swizzled scales (host pre-permutes each warp block of 16*R rows:
+                # logical row 16*r + l sits at slot R*l + r), so a lane's R repeat
+                # words are contiguous: R/4 ds_load_b128 instead of R ds_load_b32.
+                def _words(smem, mn_off, reps):
+                    base = b.add(mn_off, b.mul(_mx_lane16, b.const_i32(reps)))
+                    row = b.add(_mx_row0, b.const_i32(kk))
+                    words = []
+                    for q in range(reps // 4):
+                        v = _emit_smem_load(b, smem, row, b.add(base, b.const_i32(4 * q)), 4, I32)
+                        words += [b.vec_extract(v, i) for i in range(4)]
+                    return words
+
+                if mfmas_m % 4 or mfmas_n % 4:
+                    raise ValueError("ROCKE_EXP_MX_SWZ needs 4 | repeats")
+                return _words(AS_smem, warp_m_off, mfmas_m), _words(BS_smem, warp_n_off, mfmas_n)
+            return (
+                [
+                    _mx_scale(AS_smem, kk, b.add(warp_m_off, b.const_i32(mi * t.warp_tile_m)))
+                    for mi in range(mfmas_m)
+                ],
+                [
+                    _mx_scale(BS_smem, kk, b.add(warp_n_off, b.const_i32(ni * t.warp_tile_n)))
+                    for ni in range(mfmas_n)
+                ],
+            )
+
         # The ring/ping-pong slot this K-tile was filled into. The load side
         # already offsets its LDS destination by the parity; without the same
         # shift here every WMMA reads slot 0 while the mover is filling another,
@@ -2455,16 +2485,21 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     r = b.add(warp_m_off, b.const_i32(i * t.warp_tile_m + a_par_row_static))
                     if a_par_row_v is not None:
                         r = b.add(r, a_par_row_v)
-                    return _emit_frag_smem_load(A_src, a_row_in_atom, a_k_in_atom, r, kb, a_per_lane)
+                    return _emit_frag_smem_load(A_src, a_row_in_atom, a_k_in_atom, r, kb, a_per_lane, _chunk)
+                if kind == "sc":  # MX: both operands' scale words of k-atom kk
+                    return _mx_kk_scales(kk)
                 r = b.add(warp_n_off, b.const_i32(i * t.warp_tile_n + b_par_row_static))
                 if b_par_row_v is not None:
                     r = b.add(r, b_par_row_v)
-                return _emit_frag_smem_load(B_src, b_col_in_atom, b_k_in_atom, r, kb, b_per_lane)
+                return _emit_frag_smem_load(B_src, b_col_in_atom, b_k_in_atom, r, kb, b_per_lane, _chunk)
 
             mmas = [(kk, mi, ni) for kk in range(k_atoms) for mi in range(mfmas_m) for ni in range(mfmas_n)]
             order, seen = [], set()
             for j, (kk, mi, ni) in enumerate(mmas):
-                for key in (("a", kk, mi), ("b", kk, ni)):
+                keys = (("a", kk, mi), ("b", kk, ni))
+                if _mx:  # a k-atom's scale words go out with its first fragments
+                    keys = (("sc", kk, 0),) + keys
+                for key in keys:
                     if key not in seen:
                         seen.add(key)
                         order.append((j, key))
@@ -2479,7 +2514,13 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     after_last_reads()
                     sig_done = True
                 flat = mi * mfmas_n + ni
-                new_accs[flat] = _emit_mma(b, op, frags[("a", kk, mi)], frags[("b", kk, ni)], new_accs[flat])
+                if _mx:
+                    sa_w, sb_w = frags[("sc", kk, 0)]
+                    new_accs[flat] = b.mma(
+                        _mx_op.op_id, frags[("a", kk, mi)], frags[("b", kk, ni)], new_accs[flat], sa_w[mi], sb_w[ni]
+                    )
+                else:
+                    new_accs[flat] = _emit_mma(b, op, frags[("a", kk, mi)], frags[("b", kk, ni)], new_accs[flat])
                 if not refill_done and sig_done and j >= refill_after:
                     after_first_row()
                     refill_done = True
@@ -2524,32 +2565,8 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         _chunk,
                     )
                 )
-            if _mx and _os_mx.environ.get("ROCKE_EXP_MX_SWZ") == "1" and not _mx_dsc:
-                # Swizzled scales (host pre-permutes each warp block of 16*R rows:
-                # logical row 16*r + l sits at slot R*l + r), so a lane's R repeat
-                # words are contiguous: R/4 ds_load_b128 instead of R ds_load_b32.
-                def _mx_words(smem, mn_off, reps):
-                    base = b.add(mn_off, b.mul(_mx_lane16, b.const_i32(reps)))
-                    row = b.add(_mx_row0, b.const_i32(kk))
-                    words = []
-                    for q in range(reps // 4):
-                        v = _emit_smem_load(b, smem, row, b.add(base, b.const_i32(4 * q)), 4, I32)
-                        words += [b.vec_extract(v, i) for i in range(4)]
-                    return words
-
-                if mfmas_m % 4 or mfmas_n % 4:
-                    raise ValueError("ROCKE_EXP_MX_SWZ needs 4 | repeats")
-                a_sc = _mx_words(AS_smem, warp_m_off, mfmas_m)
-                b_sc = _mx_words(BS_smem, warp_n_off, mfmas_n)
-            elif _mx:
-                a_sc = [
-                    _mx_scale(AS_smem, kk, b.add(warp_m_off, b.const_i32(mi * t.warp_tile_m)))
-                    for mi in range(mfmas_m)
-                ]
-                b_sc = [
-                    _mx_scale(BS_smem, kk, b.add(warp_n_off, b.const_i32(ni * t.warp_tile_n)))
-                    for ni in range(mfmas_n)
-                ]
+            if _mx:
+                a_sc, b_sc = _mx_kk_scales(kk)
             if after_last_reads is not None and kk == k_atoms - 1:
                 after_last_reads()
             flat = 0
