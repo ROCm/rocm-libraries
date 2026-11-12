@@ -95,7 +95,7 @@ class _Writer(PersistentKernelState):
 def _kernel(assignment="StaticGrid"):
     return {"TileProcessingStrategy": "DataParallel" if assignment == "StaticGrid" else "StreamK",
             "WorkAssignment": assignment, "ClusterDim": [1, 1], "SpaceFillingAlgo": [],
-            "WavefrontSize": 64, "PrefetchGlobalRead": 0, "ReuseAcrossPersistent": 0,
+            "NumThreads": 64, "WavefrontSize": 64, "PrefetchGlobalRead": 0, "ReuseAcrossPersistent": 0,
             "enableTDMA": False, "enableTDMB": False, "HalfPLR": False,
             "ProblemType": {"NumIndicesC": 3, "NumIndicesFree": 2}}
 
