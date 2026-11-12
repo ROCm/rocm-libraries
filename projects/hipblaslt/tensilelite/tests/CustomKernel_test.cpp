@@ -24,8 +24,10 @@
  *
  *******************************************************************************/
 
+#include <algorithm>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -34,6 +36,8 @@
 
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
+#include <Tensile/hip/HipHardware.hpp>
+#include <origami/hardware.hpp>
 #ifndef TENSILE_YAML
 #include <Tensile/msgpack/MessagePack.hpp>
 #endif
@@ -567,43 +571,173 @@ TEST(CustomKernelTest, ComputeUnitsHonorTheCuBudget)
 
 namespace
 {
-    // A rocRoller Stream-K probe kernel that reads its grid and its data-parallel
-    // tile count, on the 1024^3 dummy problem with square macrotiles.
-    KernelInvocation rocRollerStreamKLaunch(uint32_t tile)
+    ContractionProblemGemm rocRollerStreamKProblem(size_t m, size_t n)
     {
-        ContractionSolution solution;
-        configureProbeKernel(solution, {CustomArgType::uint32, CustomArgSemantic::RR_SKNumWGs});
-        solution.customKernel.args.push_back(
-            {CustomArgType::uint32, CustomArgSemantic::RR_SKNumDPTiles});
-        solution.customKernel.macrotile = TensileLite::dim3(tile, tile, 128);
-        solution.customKernel.grid      = {
-            CustomGridSize::RocRollerStreamKGrid, CustomGridSize::One, CustomGridSize::One};
-
-        auto              problem = dummyProblem();
-        ContractionInputs inputs;
-        StreamKSettings   sk;
-        return solution.generateCustomCall<false>(problem, inputs, probeDevice(), sk);
+        auto problem = ContractionProblemGemm::GEMM(false,
+                                                    false,
+                                                    m,
+                                                    n,
+                                                    1024,
+                                                    std::max<size_t>(m, 1),
+                                                    1024,
+                                                    std::max<size_t>(m, 1),
+                                                    1.0,
+                                                    false,
+                                                    1);
+        problem.setComputeInputTypeA(rocisa::DataType::Float);
+        problem.setComputeInputTypeB(rocisa::DataType::Float);
+        return problem;
     }
+
+    // A rocRoller Stream-K probe kernel with square macrotiles. With no
+    // occupancy recorded its grid is the CU count, capped by smCountTarget.
+    // With readsKernargs it also reads its grid and data-parallel tile count;
+    // without, it only launches on the grid and binds its partials.
+    struct RocRollerStreamKProbe
+    {
+        ContractionSolution    solution;
+        ContractionProblemGemm problem;
+
+        RocRollerStreamKProbe(uint32_t tile,
+                              int      smCountTarget,
+                              bool     readsKernargs = true,
+                              size_t   m             = 1024,
+                              size_t   n             = 1024)
+            : problem(rocRollerStreamKProblem(m, n))
+        {
+            if(readsKernargs)
+            {
+                configureProbeKernel(solution,
+                                     {CustomArgType::uint32, CustomArgSemantic::RR_SKNumWGs});
+                solution.customKernel.args.push_back(
+                    {CustomArgType::uint32, CustomArgSemantic::RR_SKNumDPTiles});
+            }
+            else
+                configureProbeKernel(
+                    solution, {CustomArgType::address, CustomArgSemantic::RR_SKAddressPartials});
+            solution.customKernel.macrotile = TensileLite::dim3(tile, tile, 128);
+            solution.customKernel.grid
+                = {CustomGridSize::RocRollerStreamKGrid, CustomGridSize::One, CustomGridSize::One};
+            problem.setParams().setSmCountTarget(smCountTarget);
+        }
+
+        KernelInvocation launch() const
+        {
+            ContractionInputs inputs;
+            StreamKSettings   sk;
+            return solution.generateCustomCall<false>(problem, inputs, probeDevice(), sk);
+        }
+
+        bool refused() const
+        {
+            return solution.rocRollerStreamKHasDataParallelTiles(problem, probeDevice());
+        }
+    };
 }
 
 // The launch grid and the numWGs kernarg are one value, and a rocRoller Stream-K
-// kernel does not launch where its grid would leave data-parallel tiles.
+// kernel launches exactly where its grid leaves no data-parallel tiles: up to
+// but not including two tiles per workgroup. Selection refuses the same points.
 TEST(CustomKernelTest, RocRollerStreamKLaunchRefusesDataParallelTiles)
 {
-    // No occupancy is recorded, so the grid is the CU count.
     constexpr uint32_t cus = TensileLite::testing::_SPX_CU;
 
-    // 64 tiles of 128x128: fewer than the grid, so all of them are Stream-K.
-    auto const fits = rocRollerStreamKLaunch(128);
-    EXPECT_EQ(fits.numWorkGroups.x, cus);
-    ASSERT_EQ(fits.args.size(), 2 * sizeof(uint32_t));
-    uint32_t args[2] = {};
-    std::memcpy(args, fits.args.data(), sizeof(args));
-    EXPECT_EQ(args[0], cus);
-    EXPECT_EQ(args[1], 0u);
+    // 1024x1024 in 128x128 tiles is 64 tiles.
+    struct Case
+    {
+        int  grid;
+        bool launches;
+    };
+    for(Case c : {Case{0, true}, // 64 tiles < 256 workgroups
+                  Case{64, true}, // tiles == grid
+                  Case{48, true}, // grid < tiles < 2 * grid
+                  Case{33, true}, // just below 2 * grid
+                  Case{32, false}, // tiles == 2 * grid
+                  Case{8, false}})
+    {
+        uint32_t const        grid = c.grid == 0 ? cus : static_cast<uint32_t>(c.grid);
+        RocRollerStreamKProbe probe(128, c.grid);
+        EXPECT_EQ(probe.refused(), !c.launches) << "grid " << grid;
+        if(!c.launches)
+        {
+            EXPECT_THROW(probe.launch(), std::runtime_error) << "grid " << grid;
+            continue;
+        }
+        auto const fits = probe.launch();
+        EXPECT_EQ(fits.numWorkGroups.x, grid);
+        ASSERT_EQ(fits.args.size(), 2 * sizeof(uint32_t));
+        uint32_t args[2] = {};
+        std::memcpy(args, fits.args.data(), sizeof(args));
+        EXPECT_EQ(args[0], grid);
+        EXPECT_EQ(args[1], 0u) << "grid " << grid;
+    }
 
-    // 4096 tiles of 16x16: two or more per workgroup.
-    EXPECT_THROW(rocRollerStreamKLaunch(16), std::runtime_error);
+    // 4096 tiles of 16x16 on the full grid: 16 per workgroup.
+    EXPECT_THROW(RocRollerStreamKProbe(16, 0).launch(), std::runtime_error);
+}
+
+// The refusal hangs off the grid, not off the kernargs: a kernel that only
+// launches on rocRoller's grid is refused at the same point.
+TEST(CustomKernelTest, RocRollerStreamKGridAloneIsEnoughToRefuse)
+{
+    EXPECT_NO_THROW(RocRollerStreamKProbe(128, 33, false).launch());
+    RocRollerStreamKProbe const tooSmall(128, 32, false);
+    EXPECT_TRUE(tooSmall.refused());
+    EXPECT_THROW(tooSmall.launch(), std::runtime_error);
+}
+
+// An empty problem has no tiles, on which origami divides by zero: the grid
+// falls back to the CU budget without reaching it, and nothing is refused.
+TEST(CustomKernelTest, RocRollerStreamKEmptyProblemLaunches)
+{
+    hip::HipAMDGPU device;
+    device.processor          = AMDGPU::Processor::gfx950;
+    device.computeUnitCount   = TensileLite::testing::_SPX_CU;
+    device.analyticalHardware = std::make_shared<origami::hardware_t>(
+        origami::hardware_t::get_hardware_for_arch(origami::hardware_t::architecture_t::gfx950,
+                                                   TensileLite::testing::_SPX_CU,
+                                                   163840,
+                                                   262144,
+                                                   4 * 1024 * 1024,
+                                                   2100000));
+
+    for(auto [m, n] : {std::pair<size_t, size_t>{0, 1024}, {1024, 0}, {0, 0}})
+    {
+        RocRollerStreamKProbe probe(128, 16, true, m, n);
+        probe.solution.customKernel.occupancy = 2;
+        EXPECT_FALSE(probe.solution.rocRollerStreamKHasDataParallelTiles(probe.problem, device))
+            << m << "x" << n;
+        ContractionInputs inputs;
+        StreamKSettings   sk;
+        auto const        launch
+            = probe.solution.generateCustomCall<false>(probe.problem, inputs, device, sk);
+        EXPECT_EQ(launch.numWorkGroups.x, 16u) << m << "x" << n;
+    }
+}
+
+// Only rocRoller Stream-K kernels are refused, and only they resolve its grid.
+TEST(CustomKernelTest, OnlyRocRollerStreamKKernelsUseItsGrid)
+{
+    ContractionSolution plain;
+    configureProbeKernel(plain, {CustomArgType::uint32, CustomArgSemantic::SplitK});
+    EXPECT_FALSE(plain.usesRocRollerStreamK());
+
+    // 4096 tiles of 16x16 would be refused on any Stream-K grid.
+    plain.customKernel.macrotile = TensileLite::dim3(16, 16, 128);
+    EXPECT_FALSE(plain.rocRollerStreamKHasDataParallelTiles(dummyProblem(), probeDevice()));
+
+    ContractionSolution kernargOnly;
+    configureProbeKernel(kernargOnly, {CustomArgType::uint32, CustomArgSemantic::RR_SKNumWGs});
+    EXPECT_TRUE(kernargOnly.usesRocRollerStreamK());
+
+    ContractionSolution workspaceOnly;
+    configureProbeKernel(workspaceOnly, {CustomArgType::uint32, CustomArgSemantic::SplitK});
+    workspaceOnly.customKernel.workspaceType = CustomWorkspaceType::RocRollerStreamK;
+    EXPECT_TRUE(workspaceOnly.usesRocRollerStreamK());
+
+    // A Tensile-generated kernel is never launched on rocRoller's grid.
+    workspaceOnly.customKernel.generated = true;
+    EXPECT_FALSE(workspaceOnly.usesRocRollerStreamK());
 }
 
 namespace

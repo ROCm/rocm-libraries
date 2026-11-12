@@ -3144,9 +3144,45 @@ namespace TensileLite
             throw std::runtime_error(
                 concatenate("Solution ", kernelName, " has uninitialized customKernel metadata"));
 
-        // Resolved once: the launch geometry and the numWGs kernarg are the same
-        // value by construction, and so is the workspace sized from it.
-        const uint32_t rrSKGrid = rocRollerStreamKGrid(problem, hardware);
+        // Resolved once, and only for a kernel that reads it: the launch geometry
+        // and the numWGs kernarg are the same value by construction, and so is
+        // the workspace sized from it.
+        std::optional<uint32_t> rrSKGridValue;
+
+        auto rrSKGrid = [&]() -> uint32_t {
+            if(!rrSKGridValue)
+            {
+                if(problem.problemSizes().size() < 3)
+                    throw std::runtime_error(
+                        "rocRoller Stream-K launches need M, N and K problem sizes");
+                uint32_t grid = rocRollerStreamKGrid(problem, hardware);
+                if(TensileLite::rocRollerStreamKHasDataParallelTiles(
+                       static_cast<int64_t>(problem.problemSizes()[0]),
+                       static_cast<int64_t>(problem.problemSizes()[1]),
+                       static_cast<int64_t>(
+                           problem.problemSizes()[problem.problemSizes().size() - 1]),
+                       customKernel.macrotile.x,
+                       customKernel.macrotile.y,
+                       customKernel.macrotile.z,
+                       grid))
+                    throw std::runtime_error(concatenate("rocRoller Stream-K kernel ",
+                                                         customKernel.name,
+                                                         " cannot run data-parallel tiles: grid ",
+                                                         grid,
+                                                         " is too small for problem ",
+                                                         problem.problemSizes()[0],
+                                                         "x",
+                                                         problem.problemSizes()[1],
+                                                         " with macrotile ",
+                                                         customKernel.macrotile.x,
+                                                         "x",
+                                                         customKernel.macrotile.y));
+                rrSKGridValue = grid;
+            }
+            return *rrSKGridValue;
+        };
+        if(usesRocRollerStreamK())
+            rrSKGrid();
 
         dim3 tiles;
         calculateTiles(tiles, problem);
@@ -3276,7 +3312,7 @@ namespace TensileLite
                     dim = static_cast<size_t>(computeUnits);
                     break;
                 case CustomGridSize::RocRollerStreamKGrid:
-                    dim = static_cast<size_t>(rrSKGrid);
+                    dim = static_cast<size_t>(rrSKGrid());
                     break;
                 default:
                     throw std::runtime_error(concatenate("Invalid CustomGridSize value: ", static_cast<int>(size)));
@@ -3462,30 +3498,11 @@ namespace TensileLite
                 skKernargs = evaluateRocRollerStreamKKernargs(
                     static_cast<int64_t>(problem.problemSizes()[0]),
                     static_cast<int64_t>(problem.problemSizes()[1]),
-                    static_cast<int64_t>(
-                        problem.problemSizes()[problem.problemSizes().size() - 1]),
+                    static_cast<int64_t>(problem.problemSizes()[problem.problemSizes().size() - 1]),
                     customKernel.macrotile.x,
                     customKernel.macrotile.y,
                     customKernel.macrotile.z,
-                    rrSKGrid);
-                // rocRoller's data-parallel tile loop steps by the unrolled K-loop
-                // counter, so a launch with data-parallel tiles hangs or computes
-                // wrong results. They appear once the grid is at most half the tile
-                // count; refuse the launch rather than run it.
-                if(skKernargs->numDPTiles != 0)
-                    throw std::runtime_error(concatenate(
-                        "rocRoller Stream-K kernel ",
-                        customKernel.name,
-                        " cannot run data-parallel tiles: grid ",
-                        rrSKGrid,
-                        " is too small for problem ",
-                        problem.problemSizes()[0],
-                        "x",
-                        problem.problemSizes()[1],
-                        " with macrotile ",
-                        customKernel.macrotile.x,
-                        "x",
-                        customKernel.macrotile.y));
+                    rrSKGrid());
             }
             return *skKernargs;
         };
@@ -6854,6 +6871,52 @@ namespace TensileLite
         return !customKernel.name.empty() && !customKernel.generated;
     }
 
+    bool ContractionSolution::usesRocRollerStreamK() const
+    {
+        if(!handwrittenCustomKernel())
+            return false;
+        if(customKernel.grid.x == CustomGridSize::RocRollerStreamKGrid
+           || customKernel.grid.y == CustomGridSize::RocRollerStreamKGrid
+           || customKernel.grid.z == CustomGridSize::RocRollerStreamKGrid
+           || customKernel.workspaceType == CustomWorkspaceType::RocRollerStreamK)
+            return true;
+        for(auto const& arg : customKernel.args)
+        {
+            switch(arg.semantic)
+            {
+            case CustomArgSemantic::RR_SKNumTilesN:
+            case CustomArgSemantic::RR_SKNumWGs:
+            case CustomArgSemantic::RR_SKNumSKTiles:
+            case CustomArgSemantic::RR_SKNumSKTilesPerWG:
+            case CustomArgSemantic::RR_SKNumDPTiles:
+            case CustomArgSemantic::RR_SKNumDPTilesPerWG:
+            case CustomArgSemantic::RR_SKMagicMultipleIters:
+            case CustomArgSemantic::RR_SKMagicShiftsIters:
+            case CustomArgSemantic::RR_SKMagicMultipleNumTilesN:
+            case CustomArgSemantic::RR_SKMagicShiftsNumTilesN:
+                return true;
+            default:
+                break;
+            }
+        }
+        return false;
+    }
+
+    bool ContractionSolution::rocRollerStreamKHasDataParallelTiles(Problem const&  problem,
+                                                                   Hardware const& hardware) const
+    {
+        if(!usesRocRollerStreamK() || problem.problemSizes().size() < 3)
+            return false;
+        return TensileLite::rocRollerStreamKHasDataParallelTiles(
+            static_cast<int64_t>(problem.problemSizes()[0]),
+            static_cast<int64_t>(problem.problemSizes()[1]),
+            static_cast<int64_t>(problem.problemSizes()[problem.problemSizes().size() - 1]),
+            customKernel.macrotile.x,
+            customKernel.macrotile.y,
+            customKernel.macrotile.z,
+            rocRollerStreamKGrid(problem, hardware));
+    }
+
     StreamKSettings ContractionSolution::resolveClusteredStreamKSettings(
         Problem const& problem, Hardware const& hardware) const
     {
@@ -7101,6 +7164,11 @@ namespace TensileLite
             k *= problem.boundSize(i);
         for(size_t i = 0; i < problem.batchIndices().size(); ++i)
             batch *= problem.batchSize(i);
+
+        // origami divides by the tile count, so an empty problem would raise
+        // SIGFPE rather than an exception.
+        if(m == 0 || n == 0 || batch == 0)
+            return clampedCuCount();
 
         // rocRoller reads the element widths off its kernel's own A/B types;
         // for the kernel selected to serve this problem those are the problem's

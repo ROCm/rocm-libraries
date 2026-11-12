@@ -1674,6 +1674,18 @@ namespace TensileLite
         // the two apart when sizeMapping alone cannot (tensile_host.cpp).
         bool handwrittenCustomKernel() const;
 
+        // True for a hand-written custom kernel launched on rocRoller's Stream-K
+        // grid: one whose grid or workspace is RocRollerStreamK, or that reads
+        // an RR_SK kernarg derived from that grid.
+        bool usesRocRollerStreamK() const;
+
+        // True when this solution is a rocRoller Stream-K kernel and the launch
+        // for problem would run data-parallel tiles, which the kernel cannot do
+        // (see rocRollerStreamKHasDataParallelTiles in RocRollerStreamKKernargs.hpp).
+        // The launch throws in that case; selection must refuse the solution.
+        bool rocRollerStreamKHasDataParallelTiles(Problem const&  problem,
+                                                  Hardware const& hardware) const;
+
     private:
         void validateStreamKClusterDescriptor() const;
 
@@ -1708,7 +1720,8 @@ namespace TensileLite
         //  * customKernel.occupancy == 0 (not recorded by the logic file) means
         //    the grid cannot be reproduced at all, so this falls back to the CU
         //    count honouring smCountTarget and persistentMaxCUs, clamped to
-        //    StreamKFlagElements.
+        //    StreamKFlagElements. So does an empty problem (M, N or batch 0),
+        //    on which origami divides by the zero tile count.
         //  * the result is clamped to StreamKFlagElements, which the flag region
         //    requires. Measured over 76464 points that satisfy the ranker's own
         //    Stream-K gate the clamp never fires and the grid never exceeds 256,

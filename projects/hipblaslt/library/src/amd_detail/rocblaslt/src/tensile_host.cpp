@@ -8318,6 +8318,13 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle        handle,
             log_error(__func__, "Solution is not supported");
             return rocblaslt_status_invalid_value;
         }
+        if(solution->rocRollerStreamKHasDataParallelTiles(tensile_prob, *hardware))
+        {
+            log_error(__func__,
+                      "rocRoller Stream-K solution would run data-parallel tiles for this "
+                      "problem; not supported");
+            return rocblaslt_status_invalid_value;
+        }
         *workspaceSizeInBytes = solution->requiredWorkspaceSize(tensile_prob, *hardware);
     }
     else if constexpr(std::is_same<MyProblem, TensileLite::ContractionProblemGroupedGemm>::value)

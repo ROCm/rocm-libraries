@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <stdexcept>
 
 #include <gtest/gtest.h>
@@ -112,4 +113,58 @@ TEST(RocRollerStreamKKernargs, RejectsZeroMacroTileOrGrid)
                  std::runtime_error);
     EXPECT_THROW(evaluateRocRollerStreamKKernargs(4096, 4096, 8192, 16, 16, 0, 224),
                  std::runtime_error);
+}
+
+// Data-parallel tiles appear at two tiles per workgroup, not at one.
+TEST(RocRollerStreamKKernargs, DataParallelTilesStartAtTwoTilesPerWorkgroup)
+{
+    constexpr uint64_t grid = 224;
+    EXPECT_FALSE(rocRollerStreamKHasDataParallelTiles(grid - 1, 8, grid));
+    EXPECT_FALSE(rocRollerStreamKHasDataParallelTiles(grid, 8, grid));
+    EXPECT_FALSE(rocRollerStreamKHasDataParallelTiles(grid + 1, 8, grid));
+    EXPECT_FALSE(rocRollerStreamKHasDataParallelTiles(2 * grid - 1, 8, grid));
+    EXPECT_TRUE(rocRollerStreamKHasDataParallelTiles(2 * grid, 8, grid));
+    // No K iteration, no data-parallel work; no grid, no launch to refuse.
+    EXPECT_FALSE(rocRollerStreamKHasDataParallelTiles(4 * grid, 0, grid));
+    EXPECT_FALSE(rocRollerStreamKHasDataParallelTiles(4 * grid, 8, 0));
+}
+
+// The predicate agrees with the kernargs the launch writes at each boundary.
+TEST(RocRollerStreamKKernargs, DataParallelPredicateMatchesTheKernargs)
+{
+    // 16x16 tiles of 256x256 = 256 tiles; K = 1024 is 8 iterations.
+    for(uint32_t grid : {255u, 256u, 200u, 129u, 128u, 64u})
+    {
+        auto const k = evaluateRocRollerStreamKKernargs(256, 256, 1024, 16, 16, 128, grid);
+        EXPECT_EQ(rocRollerStreamKHasDataParallelTiles(256, 256, 1024, 16, 16, 128, grid),
+                  k.numDPTilesPerWG != 0)
+            << "grid " << grid;
+    }
+}
+
+TEST(RocRollerStreamKKernargs, EmptyProblemHasNoDataParallelTiles)
+{
+    EXPECT_FALSE(rocRollerStreamKHasDataParallelTiles(0, 4096, 8192, 16, 16, 128, 1));
+    EXPECT_FALSE(rocRollerStreamKHasDataParallelTiles(4096, 0, 8192, 16, 16, 128, 1));
+    EXPECT_FALSE(rocRollerStreamKHasDataParallelTiles(4096, 4096, 0, 16, 16, 128, 1));
+    EXPECT_FALSE(rocRollerStreamKHasDataParallelTiles(4096, 4096, 64, 16, 16, 128, 1));
+    EXPECT_FALSE(rocRollerStreamKHasDataParallelTiles(4096, 4096, 8192, 0, 16, 128, 1));
+}
+
+// A tile count past 2^32 wraps in the uint32 kernargs; the predicate still
+// sees it.
+TEST(RocRollerStreamKKernargs, DataParallelPredicateSeesTileCountsPastUint32)
+{
+    // 65536 x 65536 tiles = 2^32, which the kernargs wrap to 0.
+    constexpr int64_t side = int64_t{1} << 20;
+    auto const        k    = evaluateRocRollerStreamKKernargs(side, side, 1024, 16, 16, 128, 256);
+    EXPECT_EQ(k.numDPTilesPerWG, 0u);
+    EXPECT_TRUE(rocRollerStreamKHasDataParallelTiles(side, side, 1024, 16, 16, 128, 256));
+
+    // 2^32 + 65536 tiles wrap to 65536, one per workgroup of a 65536 grid.
+    EXPECT_TRUE(rocRollerStreamKHasDataParallelTiles(side + 16, side, 1024, 16, 16, 128, 65536));
+
+    // A tile product past 2^64 saturates rather than wrapping.
+    constexpr int64_t huge = std::numeric_limits<int64_t>::max();
+    EXPECT_TRUE(rocRollerStreamKHasDataParallelTiles(huge, huge, 1024, 1, 1, 128, 2048));
 }
