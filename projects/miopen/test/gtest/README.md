@@ -24,10 +24,11 @@ reachable through public entry points makes the comparison meaningless.
 Two consequences of that being the only entry path, both easy to "fix" in the wrong
 direction:
 
-- **Shim-surface tests stay out of `test_categories.yaml` on purpose.** The categorized
-  smoke/standard/full entries turn those patterns into a `--gtest_filter`, so a matching
-  pattern would register a third run of tests the parity entries already run twice. Absence
-  from that file is the design, not a gap.
+- **Shim-surface tests stay out of the `test_categories.yaml` tiers on purpose.** The
+  categorized smoke/standard/full entries turn those patterns into a `--gtest_filter`, so a
+  matching pattern would register a third run of tests the parity entries already run twice.
+  The quick tier's `Smoke/*` would match the `Smoke` instantiations of shim tests, so it
+  excludes `*HipdnnShim*`; add the same exclude to any tier that gains a pattern that broad.
 - **Excluding a shim-surface test means narrowing the parity filter,** not calling
   `add_gtest_negative_filter`. That function feeds the shard filter, which the parity entries
   do not use, so disabling a shim test through it looks like it worked and changes nothing.
