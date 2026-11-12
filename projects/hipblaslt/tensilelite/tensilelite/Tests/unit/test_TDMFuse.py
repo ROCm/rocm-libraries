@@ -1303,28 +1303,30 @@ def test_solution_accepts_both_scales_on_two_waves(_gp_gfx1250, gfx1250_iim, ass
     assert TF.tdmStashedMembers(sol._state) == ("MXSB",)
 
 
-def _tdmConfig(fuse, numWaves, mxA, mxB, halfPLR=0):
-    """_oneSidedConfig's problem and fork with any MX state."""
+def _tdmConfig(fuse, numWaves, mxA, mxB, halfPLR=0, hints=()):
+    """_oneSidedConfig's problem and fork with any MX state, plus (key, value) cache-hint keys."""
     config = _oneSidedConfig(fuse, "MXSA", numWaves)
     problemType = config["BenchmarkProblems"][0][0]
     problemType["MXBlockA"], problemType["MXBlockB"] = mxA, mxB
     if halfPLR:
         config["BenchmarkProblems"][0][1]["ForkParameters"].append({"HalfPLR": [halfPLR]})
+    config["BenchmarkProblems"][0][1]["ForkParameters"].extend({key: [value]} for key, value in hints)
     return config
 
 
 @pytest.fixture(scope="module")
 def tdmKernel(gfx1250_iim, tmp_path_factory):
-    """Derive and emit one kernel per (TDMFuse, NumWaves, MXBlockA, MXBlockB), on first use."""
+    """Derive and emit one kernel per (TDMFuse, NumWaves, MXBlockA, MXBlockB, HalfPLR, hint keys),
+    on first use."""
     from config_harness import derive_states, emit_kernels_from_config
 
     root = tmp_path_factory.mktemp("tdm_fuse_cells")
     kernels = {}
 
-    def emit(fuse, numWaves, mxA, mxB, halfPLR=0):
-        cell = (fuse, numWaves, mxA, mxB, halfPLR)
+    def emit(fuse, numWaves, mxA, mxB, halfPLR=0, hints=()):
+        cell = (fuse, numWaves, mxA, mxB, halfPLR, tuple(hints))
         if cell not in kernels:
-            path = root / ("tdmfuse%d_w%d_a%d_b%d_hplr%d.yaml" % cell)
+            path = root / ("tdmfuse%d_w%d_a%d_b%d_hplr%d_%d.yaml" % (cell[:5] + (len(kernels),)))
             path.write_text(yaml.safe_dump(_tdmConfig(*cell)))
             states = derive_states(path, arch="gfx1250", limit_solutions=1)
             assert len(states) == 1, "%s derives no solution" % (cell,)
@@ -1504,6 +1506,35 @@ def test_two_waves_issue_mxsb_through_mxsas_set_after_it(tdmKernel, fuse, owner,
     assert firstOwner < min(switched), "MXSA (the shared set's load) must issue before MXSB's"
     assert not [ops for _, ops in k.instructions
                 if ops and ops[0] == "s[sgprtdmABIncs]" and any("GlobalReadIncsMXSB" in op for op in ops)]
+
+
+# NonTemporal 2, TemporalHint 1 and NonVolatile 1 load as scope:SCOPE_DEV, th:TH_LOAD_NT and nv.
+_STASH_HINTS = {"NonTemporal": 2, "TemporalHint": 1, "NonVolatile": 1}
+_STASH_FIELDS = ("nv", "scope:SCOPE_DEV", "th:TH_LOAD_NT")
+_LOAD_FIELD = re.compile(r"\b(?:th|scope):\w+|\bnv\b")
+
+
+def _loadFields(k, at):
+    """The th/scope/nv fields of the tensor_load_to_lds at instructions[at], sorted."""
+    return tuple(sorted(_LOAD_FIELD.findall(" ".join(k.instructions[at][1]).rpartition("]")[2])))
+
+
+@pytest.mark.parametrize("fuse, owner, other", [(2, "A", "B"), (3, "B", "A")])
+def test_two_waves_mxsb_stash_load_carries_its_sets_hints(tdmKernel, fuse, owner, other):
+    """MXSB's own load through its stash carries the th/scope/nv of the set it rides, as the set's
+    load does (tdmLoadModifiers); its NULL load and the other tensor's load carry none. Without
+    hints no load carries any."""
+    hints = tuple((key + tc, value) for tc in (owner, "MXSA", "MXSB") for key, value in _STASH_HINTS.items())
+    for cell, fields in (((), ()), (hints, _STASH_FIELDS)):
+        k = _AsmKernel(tdmKernel(fuse, 2, 32, 32, hints=cell)[1])
+        nulls = {at for name, at in k.labels.items() if name.startswith("label_TDMStashedMXSBNull")}
+        seen = {}
+        for at, group0, _ in _tdmLoads(k, 0, len(k.instructions)):
+            tc = re.match(r"s\[sgprtdm(\w+?)Group0:", group0).group(1)
+            seen.setdefault(tc + (" NULL" if at in nulls else ""), set()).add(_loadFields(k, at))
+        assert seen == {owner: {fields}, "MXSB": {fields}, "MXSB NULL": {()}, other: {()}}, (cell, seen)
+
+
 @pytest.mark.parametrize("fuse, owner", [(2, "A"), (3, "B")])
 def test_two_waves_advance_mxsas_set_and_mxsbs_stash(tdmKernel, fuse, owner):
     """Each main-loop iteration advances MXSA's global address in the set and MXSB's in its stash."""
@@ -2955,6 +2986,18 @@ def test_solution_rejects_adaptive_ntab_on_a_shared_ab_set(
     assert _AGNTAB_RULE in out, out
     _, pairedOut = _derive(gfx1250_iim, assembler, capsys, TDMFuse=1, AdaptiveGemmNTAB=1)
     assert _AGNTAB_RULE not in pairedOut
+
+
+@pytest.mark.parametrize("fuse, owner", [(2, "A"), (3, "B")])
+def test_stashed_mxsb_load_carries_the_fields_the_check_expects(fuse, owner):
+    """Two waves with both scales stash MXSB, which issues its own load with its set's fields
+    (tdmLoadModifiers): the check passes MXSB's keys that match them and lists the others."""
+    state = _hintState(fuse, numWaves=2, **{key + tc: value for tc in (owner, "MXSA", "MXSB")
+                                            for key, value in _STASH_HINTS.items()})
+    assert TF.tdmStashedMembers(state) == ("MXSB",)
+    assert _issued(state, "MXSB") == _issued(state, owner) == (DEV, TemporalHint.TH_NT, NonVolatile.NV)
+    assert tdmIgnoredHints(state, HINT_CAPS) == []
+    assert tdmIgnoredHints(dict(state, TemporalHintMXSB=0), HINT_CAPS) == [("TemporalHintMXSB", 0, 1)]
 
 
 from tensilelite.Components.NonTemporal import tdmAbsentHints
