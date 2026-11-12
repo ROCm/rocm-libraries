@@ -28,19 +28,41 @@ class TestPointwisePlan : public ::testing::Test
 {
 };
 
-namespace
-{
 template <DataType InputDataType, DataType OutputDataType>
-void executePlanUnaryIdentityPreservesValues()
+struct IdentitySignature
 {
+    static constexpr DataType INPUT_DATA_TYPE = InputDataType;
+    static constexpr DataType OUTPUT_DATA_TYPE = OutputDataType;
     using InputType = DataTypeToNative<InputDataType>;
     using OutputType = DataTypeToNative<OutputDataType>;
+};
+
+using IdentitySignatures
+    = ::testing::Types<IdentitySignature<DataType::FLOAT, DataType::FLOAT>,
+                       IdentitySignature<DataType::HALF, DataType::HALF>,
+                       IdentitySignature<DataType::BFLOAT16, DataType::BFLOAT16>,
+                       IdentitySignature<DataType::FLOAT, DataType::HALF>,
+                       IdentitySignature<DataType::FLOAT, DataType::BFLOAT16>>;
+
+template <typename Signature>
+class TestPointwiseIdentityPlan : public ::testing::Test
+{
+};
+
+TYPED_TEST_SUITE(TestPointwiseIdentityPlan, IdentitySignatures, );
+
+TYPED_TEST(TestPointwiseIdentityPlan, ExecutePlanUnaryIdentityPreservesValues)
+{
+    using InputType = typename TypeParam::InputType;
+    using OutputType = typename TypeParam::OutputType;
+    constexpr auto INPUT_DATA_TYPE = TypeParam::INPUT_DATA_TYPE;
+    constexpr auto OUTPUT_DATA_TYPE = TypeParam::OUTPUT_DATA_TYPE;
     auto [graph, tensorBundle, variantPack]
         = buildPointwiseUnaryGraph({1, 3, 2, 2},
                                    {1, 3, 2, 2},
-                                   InputDataType,
+                                   INPUT_DATA_TYPE,
                                    DataType::FLOAT,
-                                   OutputDataType,
+                                   OUTPUT_DATA_TYPE,
                                    hipdnn_frontend::PointwiseMode::IDENTITY);
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
@@ -63,32 +85,6 @@ void executePlanUnaryIdentityPreservesValues()
     {
         EXPECT_EQ(static_cast<float>(output[i]), expected[i]) << "element " << i;
     }
-}
-}
-
-TEST_F(TestPointwisePlan, ExecutePlanUnaryIdentityFloatToFloat)
-{
-    executePlanUnaryIdentityPreservesValues<DataType::FLOAT, DataType::FLOAT>();
-}
-
-TEST_F(TestPointwisePlan, ExecutePlanUnaryIdentityHalfToHalf)
-{
-    executePlanUnaryIdentityPreservesValues<DataType::HALF, DataType::HALF>();
-}
-
-TEST_F(TestPointwisePlan, ExecutePlanUnaryIdentityBfloat16ToBfloat16)
-{
-    executePlanUnaryIdentityPreservesValues<DataType::BFLOAT16, DataType::BFLOAT16>();
-}
-
-TEST_F(TestPointwisePlan, ExecutePlanUnaryIdentityFloatToHalf)
-{
-    executePlanUnaryIdentityPreservesValues<DataType::FLOAT, DataType::HALF>();
-}
-
-TEST_F(TestPointwisePlan, ExecutePlanUnaryIdentityFloatToBfloat16)
-{
-    executePlanUnaryIdentityPreservesValues<DataType::FLOAT, DataType::BFLOAT16>();
 }
 
 TEST_F(TestPointwisePlan, ExecutePlanUnaryReluFwd)
