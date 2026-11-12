@@ -197,8 +197,9 @@ endif()
 # bound against the compiled code object, the tiled C++ entries' head-count
 # and arch refusals, the dense segment-combine launch ABI, the drift guard
 # that pins the shared dense spec's C++ mirror to the Python, the
-# oracle-free uniform-probability checker and subject contracts, and the
-# backward-test memo bound in tests/conftest.py.
+# oracle-free uniform-probability checker and subject contracts, the gfx942
+# dense golden IR hashes (pure text lowering, a few seconds), the dense
+# varlen-keys host checks, and the backward-test memo bound in tests/conftest.py.
 # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
 # correctly from the installed tree.
 set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
@@ -207,8 +208,12 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_gfx1250_attention_operand_roles.py"
     "tests/library/tests/test_gfx1151_fmha_operand_roles.py"
     "tests/library/tests/test_attention_dense_decode.py"
+    "tests/library/tests/test_attention_dense_gfx942_golden.py"
     "tests/library/tests/test_attention_dense_gfx950_lds.py"
     "tests/library/tests/test_attention_dense_spec_vectors.py"
+    "tests/library/tests/test_attention_dense_gfx942_golden.py"
+    "tests/library/tests/test_attention_dense_varlen_keys.py"
+    "tests/library/tests/test_attention_dense_varlen_keys.py"
     "tests/library/tests/test_attention_scalar_cache_key.py"
     "tests/library/tests/test_attention_spec_predicate_parity.py"
     "tests/library/tests/test_attention_tiled_2d_mask_type.py"
