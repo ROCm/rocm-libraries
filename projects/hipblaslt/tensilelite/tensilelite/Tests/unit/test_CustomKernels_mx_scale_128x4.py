@@ -5,7 +5,7 @@
 
 Checks the predicates that keep a custom kernel on 128x4-shuffled scales away from
 every problem it cannot run: the scale format, alpha == 1, the fixed size and
-strides, and the swizzled operands. The last test parses the rocKE MX FP6 logic files.
+strides, and the swizzled operands. The last tests parse the rocKE MX FP6 logic files.
 """
 
 import copy
@@ -24,21 +24,22 @@ from tensilelite.SolutionStructs.Validators.MXScaleFormat import validateHostPre
 
 pytestmark = pytest.mark.unit
 
-_LOGIC_FILES = [
-    (
-        f"gfx950/gfx950_id75a3/Equality/gfx950_Cijk_Alik_Bljk_{types}_MXAE8B32_MXBE8B32_STA_STB_H"
-        "_UserArgs.yaml",
-        fmt,
-    )
+# The same entries for MI355X (0x75a3) and, in the base directory, MI350X (0x75a0).
+_CHIP_DIRS = {"75a3": "gfx950/gfx950_id75a3/Equality", "75a0": "gfx950/gfx950/Equality"}
+_TILED_B_FILES = [
+    (f"gfx950_Cijk_Alik_Bljk_{types}_MXAE8B32_MXBE8B32_STA_STB_H_UserArgs.yaml", fmt)
     for types, fmt in (("F6BS", "e2m3"), ("B6BS", "e3m2"))
+]
+_LOGIC_FILES = [
+    pytest.param(f"{_CHIP_DIRS[chip]}/{name}", fmt, chip, id=f"{fmt}-{chip}")
+    for chip in _CHIP_DIRS
+    for name, fmt in _TILED_B_FILES
 ]
 # Each kernel runs 12 * L + 8 K tiles of 128: L iterations of a 12-tile main loop and a
 # fixed 8-tile tail. Only these K have a kernel (L = 42 and L = 85).
 _KS = (65536, 131584)
 # B in HIPBLASLT_ORDER_COL: one E2M3 kernel that runs 24 * L + 8 K tiles, L = 21.
-_CANONICAL_B_LOGIC = (
-    "gfx950/gfx950_id75a3/Equality/gfx950_Cijk_Alik_Bljk_F6BS_MXAE8B32_MXBE8B32_STA_H_UserArgs.yaml"
-)
+_CANONICAL_B_FILE = "gfx950_Cijk_Alik_Bljk_F6BS_MXAE8B32_MXBE8B32_STA_H_UserArgs.yaml"
 _CANONICAL_B_KERNEL = (
     "rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3"
     "_4096x4096x65536_c0c1_Acanonical_k21f5fa872a"
@@ -206,9 +207,20 @@ def test_custom_kernel_config_keeps_host_pre_swizzle_128x4(tmp_path):
 
 
 @needs_logic_corpus
-@pytest.mark.parametrize("rel, fmt", _LOGIC_FILES, ids=("e2m3", "e3m2"))
-def test_logic_file_predicates(rel, fmt, assembler, gfx950_iim):
+@pytest.mark.parametrize("name", [name for name, _ in _TILED_B_FILES] + [_CANONICAL_B_FILE])
+def test_logic_files_match_across_chips(name):
+    """The 0x75a0 file is the 0x75a3 file with only its device changed."""
+    mi355 = require_logic_file(f"{_CHIP_DIRS['75a3']}/{name}").read_text()
+    mi350 = require_logic_file(f"{_CHIP_DIRS['75a0']}/{name}").read_text()
+    assert mi355.count("DeviceNames: [Device 75a3]") == 1
+    assert mi350 == mi355.replace("DeviceNames: [Device 75a3]", "DeviceNames: [Device 75a0]")
+
+
+@needs_logic_corpus
+@pytest.mark.parametrize("rel, fmt, chip", _LOGIC_FILES)
+def test_logic_file_predicates(rel, fmt, chip, assembler, gfx950_iim):
     logic = require_logic_file(rel)
+    assert L.readYAML(str(logic))["DeviceNames"] == [f"Device {chip}"]
     library = L.parseLibraryLogicFile(str(logic), assembler, False, False, False, gfx950_iim, False)
     assert len(library.solutions) == len(_KS)
     rows = {tuple(key): index for key, (index, _) in library.exactLogic}
@@ -239,8 +251,10 @@ def test_logic_file_predicates(rel, fmt, assembler, gfx950_iim):
 
 
 @needs_logic_corpus
-def test_canonical_b_logic_file_predicates(assembler, gfx950_iim):
-    logic = require_logic_file(_CANONICAL_B_LOGIC)
+@pytest.mark.parametrize("chip", _CHIP_DIRS)
+def test_canonical_b_logic_file_predicates(chip, assembler, gfx950_iim):
+    logic = require_logic_file(f"{_CHIP_DIRS[chip]}/{_CANONICAL_B_FILE}")
+    assert L.readYAML(str(logic))["DeviceNames"] == [f"Device {chip}"]
     library = L.parseLibraryLogicFile(str(logic), assembler, False, False, False, gfx950_iim, False)
     assert len(library.solutions) == 1
     rows = {tuple(key): index for key, (index, _) in library.exactLogic}

@@ -221,7 +221,7 @@ The solutions for this scale mode are rocKE GEMM kernels, which add these restri
 *  ``B`` must be equal to ``1``.
 *  Epilogues are not supported.
 *  ``alpha`` must be equal to ``1``, and ``beta`` must be equal to ``0``.
-*  Solutions exist only for gfx950 devices with PCI chip ID ``0x75a3``, at ``m = n = 4096`` with
+*  Solutions are registered for gfx950 PCI chip IDs ``0x75a0`` and ``0x75a3``, at ``m = n = 4096`` with
    ``K = 65536`` or ``K = 131584``. With ``B`` in ``HIPBLASLT_ORDER_COL``, they exist only for
    ``HIP_R_6F_E2M3`` at ``K = 65536``.
 *  ``hipblasLtMatmulAlgoGetHeuristic`` does not return these solutions, because it does not assume
