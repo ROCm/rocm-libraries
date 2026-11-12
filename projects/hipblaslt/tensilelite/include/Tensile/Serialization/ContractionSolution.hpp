@@ -147,6 +147,8 @@ namespace TensileLite
                 iot::mapOptional(io, "packSummationDims", s.packSummationDims, 0);
                 iot::mapOptional(io, "magicDivAlg", s.magicDivAlg);
                 iot::mapOptional(io, "streamKAtomic", s.streamKAtomic);
+                iot::mapOptional(io, "streamKFixupTreeReduction", s.streamKFixupTreeReduction);
+                iot::mapOptional(io, "spaceFillingAlgo", s.spaceFillingAlgo);
                 bool hasStrategy = !iot::outputting(io) && iot::hasKey(io, "tileProcessingStrategy");
                 bool hasAssignment = !iot::outputting(io) && iot::hasKey(io, "workAssignment");
                 std::string strategy = iot::outputting(io) ? toString(s.tileProcessingStrategy) : "None";

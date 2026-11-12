@@ -343,6 +343,10 @@ std::map<std::string, int> initArchCaps(const IsaVersion& v, GfxArchID archID) {
     rv["EnableXnackReplay"] = checkInList(v, {{12, 5, 0}});
     rv["DefaultScopeIsCULocal"] = checkInList(v, {{12, 5, 0}});
 
+    // Set for the ISA version, which gfx1250-strict shares; TensileLite's ARCH_CAP_OVERRIDES
+    // clears it for gfx1250-strict.
+    rv["HasF16Accumulation"] = checkInList(v, {{12, 5, 0}});
+
     rv["LDSBankCount"] = 64;
     rv["LDSBankWidth"] = 4;
 

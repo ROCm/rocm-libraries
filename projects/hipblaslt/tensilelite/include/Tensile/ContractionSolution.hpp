@@ -43,6 +43,7 @@
 #include <Tensile/CachingLibrary.hpp>
 #include <Tensile/ContractionProblem_fwd.hpp>
 #include <Tensile/DataTypes.hpp>
+#include <Tensile/LaunchSummationOrder.hpp>
 #include <Tensile/MXScaleFormat.hpp>
 #include <Tensile/Predicates.hpp>
 #include <Tensile/Task.hpp>
@@ -480,6 +481,9 @@ namespace TensileLite
                 throw std::runtime_error(std::string(toString(tileProcessingStrategy)) + " supports WorkAssignment=StaticGrid only");
         }
         int    streamKAtomic              = 0;
+        int    streamKFixupTreeReduction  = 0;
+        //! SpaceFillingAlgo levels, 4 bits each, with the level count in bits 28-31
+        int    spaceFillingAlgo           = 0;
         int    prefetchAcrossPersistent   = 0;
         int    persistentKernel           = 0;
         bool   persistentKernelAlongBatch = false;
@@ -1620,6 +1624,16 @@ namespace TensileLite
                                                                   uint32_t        skgrid,
                                                                   int32_t         autoWGM) const;
         uint32_t calculateAutoGSU(Problem const& problem, Hardware const* hardware) const;
+
+        using LaunchSummationOrder = TensileLite::LaunchSummationOrder;
+        LaunchSummationOrder launchSummationOrder(Problem const& problem, Hardware const& hardware) const;
+
+        //! Half compute without HighPrecisionAccumulate on F8 or F4 compute inputs: f16 accumulation, whose workspace
+        //! holds f16. The kernel widens F4 operands to F8; the problem type refuses BF8 and the fnuz types for it.
+        static bool isF16Accumulation(rocisa::DataType computeType,
+                                      bool             highPrecisionAccumulate,
+                                      rocisa::DataType computeInputTypeA,
+                                      rocisa::DataType computeInputTypeB);
 
         double calculateDimensionM(Problem const&  problem) const;
         double calculateDimensionN(Problem const&  problem) const;

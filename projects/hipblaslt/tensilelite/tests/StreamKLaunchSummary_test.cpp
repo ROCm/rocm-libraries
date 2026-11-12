@@ -301,6 +301,113 @@ TEST(StreamKLaunchSummaryTest, SnapshotMatchesHelpersForDynamicPartialTiles)
     EXPECT_EQ(d.numQueues, 8u) << "gfx950 bakes 8 per-XCD work queues (NUM_XCD)";
 }
 
+// The f16-accumulation reference re-derives a dynamic StreamK launch's split from
+// launchSummationOrder(); it must be the split the work-queue packer sends, with the default split
+// and with the skTiles / skSplit overrides.
+TEST(StreamKLaunchSummaryTest, LaunchSummationOrderDynamicMatchesPackedQueue)
+{
+    using Order = ContractionSolution::LaunchSummationOrder;
+    for(auto const [skTiles, skSplit] : {std::pair{-1, -1}, std::pair{32, 3}, std::pair{5, 4}})
+    {
+        SCOPED_TRACE(::testing::Message() << "skTiles=" << skTiles << " skSplit=" << skSplit);
+        AnalyticalEnv       env;
+        ContractionSolution solution;
+        initStreamKSolution(solution, 4);
+        solution.kernelName                      = "generated_streamk_argument_contract";
+        solution.customKernel.name               = solution.kernelName;
+        solution.customKernel.generated          = true;
+        solution.customKernel.macrotile.x        = solution.sizeMapping.macroTile.x;
+        solution.customKernel.macrotile.y        = solution.sizeMapping.macroTile.y;
+        solution.sizeMapping.globalSplitU        = 0;
+        solution.sizeMapping.globalAccumulation  = 0;
+        solution.sizeMapping.workGroupMapping    = 1;
+        solution.sizeMapping.workGroupMappingXCC = 1;
+        solution.internalArgsSupport.version     = 3;
+        solution.internalArgsSupport.persistentLoopArgsVersion = 0;
+        solution.internalArgsSupport.useUniversalArgs          = true;
+
+        // 1056 tiles of eight K iterations on 64 workgroups.
+        auto problem = makeGemmProblem(4096, 4224, 512);
+        problem.setAlphaType(rocisa::DataType::Float);
+        problem.setBetaType(rocisa::DataType::Float);
+        problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+        env.device.persistentFixedGrid = 64;
+        env.device.skTiles             = skTiles;
+        env.device.skSplit             = skSplit;
+
+        auto launch = solution.resolvePersistentSettings(problem, env.device);
+        ASSERT_EQ(launch.effectiveWorkAssignment, WorkAssignment::DynamicWorkQueue);
+        std::array<uint32_t, 4> workspace{}, flags{};
+        ContractionInputs       inputs;
+        inputs.alpha        = 1.0f;
+        inputs.beta         = 0.0f;
+        inputs.ws           = workspace.data();
+        inputs.Synchronizer = flags.data();
+        auto const call
+            = solution.generateSingleCall<true>(problem, inputs, env.device, launch, GSUSettings{});
+        auto packed = [&](char const* name) {
+            auto     field = KernelArguments::const_iterator(call.args, name);
+            uint32_t value = 0;
+            if(field != call.args.end() && (*field).second == sizeof(value))
+                std::memcpy(&value, (*field).first, sizeof(value));
+            else
+                ADD_FAILURE() << "no 32-bit argument " << name;
+            return value;
+        };
+        auto matchesQueue = [&](Order const& order) {
+            return order.persistent == Order::Persistent::StreamKDynamic
+                   && order.itersPerTile == packed("ItersPerTile") && order.grid == packed("SKGrid")
+                   && order.skTiles == packed("SKTiles") && order.skSplit == packed("SKSplit")
+                   && order.skItersPerWI == packed("SKItersPerWI")
+                   && order.tiles - order.skTiles + order.skTiles * order.skSplit
+                          == packed("TotalItems");
+        };
+        auto const order = solution.launchSummationOrder(problem, env.device);
+        EXPECT_TRUE(matchesQueue(order));
+        // The comparison rejects an order that splits the tiles differently from the launch.
+        for(auto field : {&Order::skTiles, &Order::skSplit, &Order::skItersPerWI})
+        {
+            auto wrong = order;
+            wrong.*field += 1;
+            EXPECT_FALSE(matchesQueue(wrong));
+        }
+        auto wrong       = order;
+        wrong.persistent = Order::Persistent::StreamK;
+        EXPECT_FALSE(matchesQueue(wrong));
+    }
+}
+
+// The kernel walks the space-filling curve iff SpaceFillingAlgo is non-empty; the logic packs its
+// length into bits 28 and up of spaceFillingAlgo. The reference's order must follow that, not UseSFC.
+TEST(StreamKLaunchSummaryTest, LaunchSummationOrderSpaceFillingFollowsSpaceFillingAlgo)
+{
+    // UseSFC with an empty SpaceFillingAlgo, and two levels as the logic packs them.
+    for(auto const [algo, expected] : {std::pair{0, false}, std::pair{1 | 2 << 4 | 2 << 28, true}})
+    {
+        SCOPED_TRACE(::testing::Message() << "spaceFillingAlgo=0x" << std::hex << algo);
+        AnalyticalEnv       env;
+        ContractionSolution solution;
+        initStreamKSolution(solution, 3);
+        solution.customKernel.macrotile.x             = solution.sizeMapping.macroTile.x;
+        solution.customKernel.macrotile.y             = solution.sizeMapping.macroTile.y;
+        solution.sizeMapping.globalSplitU             = 0;
+        solution.sizeMapping.globalAccumulation       = 0;
+        solution.sizeMapping.workGroupMapping         = 1;
+        solution.sizeMapping.workGroupMappingXCC      = 1;
+        solution.sizeMapping.spaceFillingAlgo         = algo;
+        solution.internalArgsSupport.version          = 3;
+        solution.internalArgsSupport.useUniversalArgs = true;
+        solution.internalArgsSupport.useSFC           = true;
+
+        auto problem = makeGemmProblem(4096, 4224, 512);
+        problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+        env.device.persistentFixedGrid = 64;
+        auto const order               = solution.launchSummationOrder(problem, env.device);
+        ASSERT_NE(order.persistent, ContractionSolution::LaunchSummationOrder::Persistent::None);
+        EXPECT_EQ(order.spaceFilling, expected);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // SK5 resolves to the dynamic (SK4) sub-path when the API mode is ON, with tree
 // reduction; SK5 OFF stays static (SK3) with no work-queue.
