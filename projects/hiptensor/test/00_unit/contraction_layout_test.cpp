@@ -58,6 +58,9 @@ namespace
 
     constexpr Layout kLayouts[] = {{false, false}, {false, true}, {true, false}, {true, true}};
 
+    // The layout every contraction kernel supports: modes in their natural order, col-major.
+    constexpr Layout kCanonical{false, false};
+
     // Part of a gtest name, e.g. "nat_col".
     std::string tag(Layout l)
     {
@@ -347,12 +350,18 @@ namespace
         return r;
     }
 
-    // Runs the contraction and compares D with the reference. Skips when the device has
-    // no kernel for it.
-    void expectCorrect(hiptensorHandle_t h, ModeMap const& ext, Contraction const& p)
+    // Runs the contraction and compares D with the reference.
+    // A refused layout is a failure. The test skips only when the canonical layout is
+    // refused with the same status: then the device has no kernel for the contraction.
+    void expectCorrect(hiptensorHandle_t  h,
+                       ModeMap const&     ext,
+                       Contraction const& p,
+                       Contraction const& canonical)
     {
         auto r = run(h, p);
-        if(r.status == HIPTENSOR_STATUS_ARCH_MISMATCH || r.status == HIPTENSOR_STATUS_NOT_SUPPORTED)
+        if((r.status == HIPTENSOR_STATUS_ARCH_MISMATCH
+            || r.status == HIPTENSOR_STATUS_NOT_SUPPORTED)
+           && run(h, canonical).status == r.status)
         {
             GTEST_SKIP() << "no kernel for this contraction on this device";
         }
@@ -418,13 +427,15 @@ TEST_P(ContractionLayoutTest, Scale)
 {
     auto const [la, lb, ld, unitMode] = GetParam();
     auto const ext                    = extents(unitMode);
-    expectCorrect(mHandle,
-                  ext,
-                  {.alpha = 1.5f,
-                   .beta  = 0.f,
-                   .a     = makeInput({M0, M1, K0, K1}, ext, la, 1),
-                   .b     = makeInput({N0, K0, K1}, ext, lb, 2),
-                   .d     = makeTensor({M0, M1, N0}, ext, ld)});
+    auto const contraction            = [&](Layout a, Layout b, Layout d) {
+        return Contraction{.alpha = 1.5f,
+                                      .beta  = 0.f,
+                                      .a     = makeInput({M0, M1, K0, K1}, ext, a, 1),
+                                      .b     = makeInput({N0, K0, K1}, ext, b, 2),
+                                      .d     = makeTensor({M0, M1, N0}, ext, d)};
+    };
+    expectCorrect(
+        mHandle, ext, contraction(la, lb, ld), contraction(kCanonical, kCanonical, kCanonical));
 }
 
 // C is laid out like D.
@@ -432,30 +443,32 @@ TEST_P(ContractionLayoutTest, Bilinear)
 {
     auto const [la, lb, ld, unitMode] = GetParam();
     auto const ext                    = extents(unitMode);
-    expectCorrect(mHandle,
-                  ext,
-                  {.alpha = 1.5f,
-                   .beta  = 0.5f,
-                   .a     = makeInput({M0, M1, K0, K1}, ext, la, 1),
-                   .b     = makeInput({N0, K0, K1}, ext, lb, 2),
-                   .c     = makeInput({M0, M1, N0}, ext, ld, 3),
-                   .d     = makeTensor({M0, M1, N0}, ext, ld)});
+    auto const contraction            = [&](Layout a, Layout b, Layout d) {
+        return Contraction{.alpha = 1.5f,
+                                      .beta  = 0.5f,
+                                      .a     = makeInput({M0, M1, K0, K1}, ext, a, 1),
+                                      .b     = makeInput({N0, K0, K1}, ext, b, 2),
+                                      .c     = makeInput({M0, M1, N0}, ext, d, 3),
+                                      .d     = makeTensor({M0, M1, N0}, ext, d)};
+    };
+    expectCorrect(
+        mHandle, ext, contraction(la, lb, ld), contraction(kCanonical, kCanonical, kCanonical));
 }
 
 // C laid out differently from D: develop reads C with D's strides.
 TEST_P(ContractionCLayoutTest, Bilinear)
 {
     auto const [lc, unitMode] = GetParam();
-    auto const   ext          = extents(unitMode);
-    Layout const canonical{false, false};
-    expectCorrect(mHandle,
-                  ext,
-                  {.alpha = 1.5f,
-                   .beta  = 0.5f,
-                   .a     = makeInput({M0, M1, K0, K1}, ext, canonical, 1),
-                   .b     = makeInput({N0, K0, K1}, ext, canonical, 2),
-                   .c     = makeInput({M0, M1, N0}, ext, lc, 3),
-                   .d     = makeTensor({M0, M1, N0}, ext, canonical)});
+    auto const ext            = extents(unitMode);
+    auto const contraction    = [&](Layout c) {
+        return Contraction{.alpha = 1.5f,
+                              .beta  = 0.5f,
+                              .a     = makeInput({M0, M1, K0, K1}, ext, kCanonical, 1),
+                              .b     = makeInput({N0, K0, K1}, ext, kCanonical, 2),
+                              .c     = makeInput({M0, M1, N0}, ext, c, 3),
+                              .d     = makeTensor({M0, M1, N0}, ext, kCanonical)};
+    };
+    expectCorrect(mHandle, ext, contraction(lc), contraction(kCanonical));
 }
 
 INSTANTIATE_TEST_SUITE_P(Layouts,
