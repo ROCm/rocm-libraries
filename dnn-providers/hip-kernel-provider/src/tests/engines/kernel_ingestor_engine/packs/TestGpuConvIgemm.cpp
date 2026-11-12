@@ -1296,6 +1296,20 @@ TEST(TestConvIgemmCatalog, BufferSpanIsWholeImagesFromTheBlocksFirstImage)
     }
 }
 
+TEST(TestConvIgemmComputeType, ServesCudnnsComputeTypesPerElementType)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        expectCudnnComputeTypes(
+            dense(16, 24, {7, 6}, {3, 3}, {1, 1}, true),
+            {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16},
+            [direction](const ConvShape& s) {
+                const GraphFixture fixture(buildGraph(specFor(s, direction)));
+                return conv_igemm::parseIgemmProblem(fixture.context(), direction).has_value();
+            });
+    }
+}
+
 } // namespace
 
 #endif

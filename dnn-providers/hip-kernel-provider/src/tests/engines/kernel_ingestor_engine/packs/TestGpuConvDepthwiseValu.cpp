@@ -1250,6 +1250,17 @@ TEST(TestConvDepthwiseValuWrwHankel, RefusesOneFieldAtATime)
     }
 }
 
+TEST(TestConvDepthwiseValuWrwComputeType, ServesCudnnsComputeTypesPerElementType)
+{
+    expectCudnnComputeTypes(depthwise(37, {13, 11}, {3, 3}, {1, 1}, true),
+                            {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16},
+                            [](const ConvShape& s) {
+                                const GraphFixture fixture(
+                                    buildGraph(specFor(s, ConvDirection::BACKWARD_WEIGHTS)));
+                                return matchesGraph(wrwPack(), fixture.context()).has_value();
+                            });
+}
+
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR && HIPDNN_ENGINE_CONV

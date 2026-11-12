@@ -17,6 +17,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 
+#include "engines/kernel_ingestor_engine/packs/ConvComputeType.hpp"
 #include "engines/kernel_ingestor_engine/packs/DeviceUnits.hpp"
 #include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
 
@@ -323,15 +324,6 @@ std::optional<ConvNaiveProblem> parseConvNaiveProblem(const MatchContext& contex
         return std::nullopt;
     }
 
-    // The kernel accumulates in f32: at least the precision any of these asks for.
-    const auto computeType = context.graph.getNodeWrapper(0).computeDataType();
-    if(computeType != data_objects::DataType::UNSET && computeType != data_objects::DataType::FLOAT
-       && computeType != data_objects::DataType::HALF
-       && computeType != data_objects::DataType::BFLOAT16)
-    {
-        return std::nullopt;
-    }
-
     // Both modes are served: convolution reflects the filter, cross-correlation does not.
     if(fields->mode != data_objects::ConvMode::CROSS_CORRELATION
        && fields->mode != data_objects::ConvMode::CONVOLUTION)
@@ -356,6 +348,12 @@ std::optional<ConvNaiveProblem> parseConvNaiveProblem(const MatchContext& contex
 
     // One element type for all three; mixed precision is another kernel.
     if(x->dataType != w->dataType || x->dataType != y->dataType)
+    {
+        return std::nullopt;
+    }
+
+    // cuDNN's compute types for the element type; the kernel accumulates in f32.
+    if(!convServesComputeType(context.graph.getNodeWrapper(0).computeDataType(), x->dataType))
     {
         return std::nullopt;
     }

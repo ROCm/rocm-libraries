@@ -88,7 +88,8 @@ A stand-alone Matmul through `rocblas_gemm_strided_batched_ex`, with no fused op
 > backend.
 
 Single-node convolution graphs, forward, backward data and backward weights:
-- Data types: FP32, FP16, BF16, the same for all three tensors; compute type unset, FP32, FP16 or BF16, accumulated in FP32
+- Data types: FP32, FP16, BF16, the same for all three tensors; compute type unset or FP32,
+  or FP16 for FP16 tensors (cuDNN's set), accumulated in FP32
 - 1-D, 2-D and 3-D (rank 3 to 5), any x and y strides, groups (including depthwise), padding (including asymmetric), stride,
   dilation, cross-correlation and true convolution
 

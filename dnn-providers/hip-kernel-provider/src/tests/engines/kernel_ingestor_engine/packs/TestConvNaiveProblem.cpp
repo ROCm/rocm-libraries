@@ -394,6 +394,18 @@ TEST(TestConvNaiveDirection, RefusesAGraphOfAnotherDirection)
     }
 }
 
+TEST(TestConvNaiveComputeType, ServesCudnnsComputeTypesPerElementType)
+{
+    for(const auto direction : ALL_DIRECTIONS)
+    {
+        expectCudnnComputeTypes(ConvShape{},
+                                {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16},
+                                [direction](const ConvShape& shape) {
+                                    return parse(specFor(shape, direction)).has_value();
+                                });
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Workload gate
 // ---------------------------------------------------------------------------
