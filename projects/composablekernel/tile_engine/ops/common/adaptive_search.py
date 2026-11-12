@@ -86,6 +86,10 @@ MEASUREMENT_POLICIES = ("full",)
 MODEL_STRATEGIES = ("tpe", "gp", "coupled_tpe")
 PRIOR_STRATEGIES = (*MODEL_STRATEGIES, "portfolio")  # the strategies that read a prior
 NO_WARM_STRATEGIES = ("random", "exhaustive")  # the strategies that ignore warm starts
+# The settings of strategy tpe alone: (setting, strategy option, default).
+TPE_OPTIONS = (("tpe_candidate_pool", "candidate_pool", "sampled"),
+               ("tpe_n_startup", "n_startup", None),
+               ("tpe_gamma_schedule", "gamma_schedule", "linear"))
 EXIT_OK, EXIT_FAIL, EXIT_USAGE, EXIT_INTERRUPTED = 0, 1, 2, 130
 OUTPUT_FILES = ("run.json", "trials.jsonl", "winners.json", "summary.json")
 _DISPATCHER_PY = Path(__file__).resolve().parents[3] / "dispatcher" / "python"
@@ -253,6 +257,8 @@ class WarmStartSettings:
     ranked_csv: Optional[str] = None
     top_k: int = 5
     use_prior: bool = False
+    history_file: Optional[str] = None  # see ``read_history``
+    history_top_k: int = 5
 
 
 @dataclass(frozen=True)
@@ -312,6 +318,8 @@ class SearchSettings:
     portfolio_members: Optional[tuple] = None
     build_aware: Optional[BuildAwareSettings] = None
     tpe_candidate_pool: str = "sampled"
+    tpe_n_startup: Optional[int] = None  # None: the strategy's own (10)
+    tpe_gamma_schedule: str = "linear"
 
     @classmethod
     def from_json(cls, source) -> "SearchSettings":
@@ -337,8 +345,15 @@ class SearchSettings:
                         want=f"one of {names}")
         tpe_pool = _get(data, w, "tpe_candidate_pool", str, "sampled",
                         lambda v: v in ("sampled", "listed"), "sampled or listed")
-        if "tpe_candidate_pool" in data and strategy != "tpe":
-            raise SettingsError(f"{w}.tpe_candidate_pool requires strategy=tpe")
+        tpe_startup = _get(data, w, "tpe_n_startup", int, None, _positive, ">= 1")
+        tpe_schedule = _get(data, w, "tpe_gamma_schedule", str, "linear",
+                            lambda v: v in ("linear", "sqrt"), "linear or sqrt")
+        for name, _, _ in TPE_OPTIONS:
+            if name in data and strategy != "tpe":
+                raise SettingsError(f"{w}.{name} requires strategy=tpe")
+        if tpe_schedule != "linear" and tpe_pool != "listed":
+            raise SettingsError(
+                f"{w}.tpe_gamma_schedule={tpe_schedule!r} requires tpe_candidate_pool=listed")
         trials = _get(data, w, "trials_per_problem", int, ok=_positive, want=">= 1")
         warm = None
         if "warm_start" in data:
@@ -349,21 +364,34 @@ class SearchSettings:
                 ranked_csv=_get_file(wd, ww, "ranked_csv", base),
                 top_k=_get(wd, ww, "top_k", int, 5, _positive, ">= 1"),
                 use_prior=_get(wd, ww, "use_prior", bool, False),
+                history_file=_get_file(wd, ww, "history_file", base),
+                history_top_k=_get(wd, ww, "history_top_k", int, 5, _positive, ">= 1"),
             )
-            if warm.pairs_file is None and warm.ranked_csv is None:
-                raise SettingsError(f"{ww}: expected pairs_file and/or ranked_csv")
+            if not (warm.pairs_file or warm.ranked_csv or warm.history_file):
+                raise SettingsError(
+                    f"{ww}: expected pairs_file and/or ranked_csv and/or history_file")
+            if "history_top_k" in wd and warm.history_file is None:
+                raise SettingsError(f"{ww}.history_top_k requires history_file")
             if warm.use_prior != (warm.ranked_csv is not None):
                 raise SettingsError(
                     f"{ww}: ranked_csv is read only as a prior: give both "
                     "ranked_csv and use_prior=true, or neither"
                 )
-            if warm.pairs_file is not None and strategy in NO_WARM_STRATEGIES:
-                raise SettingsError(f"{ww}.pairs_file: strategy {strategy!r} ignores it")
+            for name in ("pairs_file", "history_file"):
+                if getattr(warm, name) is not None and strategy in NO_WARM_STRATEGIES:
+                    raise SettingsError(f"{ww}.{name}: strategy {strategy!r} ignores it")
             if warm.use_prior and strategy not in PRIOR_STRATEGIES:
                 raise SettingsError(
                     f"{ww}.use_prior: only {PRIOR_STRATEGIES} read a prior, "
                     f"strategy is {strategy!r}"
                 )
+            if (tpe_startup is not None and warm.pairs_file is not None
+                    and tpe_startup <= warm.top_k):
+                # A startup of warm pairs alone kept the model near them. The
+                # history start points are not counted: they come on top.
+                raise SettingsError(
+                    f"{w}.tpe_n_startup={tpe_startup}: expected > warm_start.top_k "
+                    f"({warm.top_k}), or the warm pairs alone can fill the startup")
         cd, cw = data.get("confirm", {}), w + ".confirm"
         _check_keys(cd, [f for f in ConfirmSettings.__dataclass_fields__], cw)
         confirm = ConfirmSettings(
@@ -425,6 +453,8 @@ class SearchSettings:
             portfolio_members=members,
             build_aware=build_aware,
             tpe_candidate_pool=tpe_pool,
+            tpe_n_startup=tpe_startup,
+            tpe_gamma_schedule=tpe_schedule,
             measurement_policy=_get(
                 data, w, "measurement_policy", str, "full",
                 lambda v: v in MEASUREMENT_POLICIES, f"one of {MEASUREMENT_POLICIES}",
@@ -452,8 +482,9 @@ class SearchSettings:
             del d["build_aware"]
         else:
             d["build_aware"] = vars(self.build_aware).copy()
-        if self.tpe_candidate_pool == "sampled":
-            del d["tpe_candidate_pool"]
+        for name, _, default in TPE_OPTIONS:
+            if d[name] == default:
+                del d[name]
         d["host_cache"] = {k: v for k, v in vars(self.host_cache).items()
                            if v is not None}
         for name in ("deadline_s", "build_timeout_s"):
@@ -465,6 +496,8 @@ class SearchSettings:
             d["warm_start"] = {
                 k: v for k, v in vars(self.warm_start).items() if v is not None
             }
+            if self.warm_start.history_file is None:
+                del d["warm_start"]["history_top_k"]
         return d
 
     def problem_seed(self, index: int) -> int:
@@ -704,6 +737,78 @@ def _load_warm(path, loader, what: str, loader_name: str):
         raise SettingsError(f"warm_start.{what}: {e}") from None
 
 
+def read_history(path) -> Dict[str, Dict[str, float]]:
+    """``{problem: {kernel name: lowest verified discovery latency, ms}}`` of
+    a ``warm_start.history_file``: JSON lines, of which only the ``result``
+    events with status ``ok`` are read (``problem``, ``kernel``,
+    ``latency_ms``). The ``trials.jsonl`` files of earlier runs, concatenated,
+    are such a file. A line that cannot be read rejects the file by number."""
+    out: Dict[str, Dict[str, float]] = {}
+    with open(path, encoding="utf-8-sig") as f:
+        for number, line in enumerate(f, 1):
+            try:
+                e = json.loads(line) if line.strip() else None
+                if (isinstance(e, dict) and e.get("event") == "result"
+                        and e.get("status") == "ok" and valid_latency(e.get("latency_ms"))
+                        and isinstance(e.get("problem"), str)
+                        and isinstance(e.get("kernel"), str)):
+                    row, name = out.setdefault(e["problem"], {}), e["kernel"]
+                    row[name] = min(e["latency_ms"], row.get(name, math.inf))
+            except (ValueError, OverflowError) as error:  # not JSON, a number too large
+                raise ValueError(
+                    f"{path} line {number}: {getattr(error, 'msg', error)}") from None
+    if not out:
+        raise ValueError(f"no verified result event in {path}")
+    return out
+
+
+def history_start_points(history: Mapping, eligible, k: int, chosen=()) -> List[str]:
+    """At most ``k`` of the ``eligible`` kernel names to try first, from what
+    other problems measured (``history``: ``{problem: {kernel name: latency
+    ms}}``). A layered greedy portfolio: each pick is the kernel that lowers
+    most the mean, over the history's problems, of the lowest log latency
+    ratio to the problem's best among ``chosen`` (the warm starts) and the
+    picks. A kernel earns credit only where it was measured (elsewhere it
+    counts as the problem's worst) and only measured kernels are picked. Once
+    no kernel improves the cover, a new layer starts without the kernels
+    taken so far, which yields the runner-ups. Ties: lower mean ratio, then
+    name."""
+    names = set(eligible)
+    logs = [{n: math.log(v) for n, v in lat.items() if n in names and valid_latency(v)}
+            for lat in history.values()]
+    spans = [(z, min(z.values()), max(z.values())) for z in logs if z]
+    worst = [hi - lo for _, lo, hi in spans]
+    loss = {n: [z.get(n, hi) - lo for z, lo, hi in spans]
+            for n in sorted(set().union(*logs))}
+    mean = {n: sum(z) / len(z) for n, z in loss.items()}
+
+    def lower(cover, n):
+        return [min(c, z) for c, z in zip(cover, loss[n])]
+
+    cover, fresh = worst, True
+    for n in chosen:
+        if n in loss:
+            cover, fresh = lower(cover, n), False
+    left = [n for n in loss if n not in chosen]
+    picks: List[str] = []
+    while left and len(picks) < k:
+        gain = {n: sum(c - z for c, z in zip(cover, lower(cover, n))) / len(cover)
+                for n in left}
+        best = max(gain.values())
+        if best > 1e-12:
+            pick = min((n for n in left if gain[n] >= best - 1e-12),
+                       key=lambda n: (mean[n], n))
+            cover, fresh = lower(cover, pick), False
+        elif fresh:  # nothing improves an empty cover: the rest tie, by name
+            pick = left[0]
+        else:
+            cover, fresh = worst, True
+            continue
+        picks.append(pick)
+        left.remove(pick)
+    return picks
+
+
 class _Problem:
     """Per-problem search state."""
 
@@ -718,6 +823,7 @@ class _Problem:
         self.strategy_name = ""
         self.seed = 0
         self.warm: List[str] = []
+        self.history_start: List[str] = []
         self.prior_entries = 0
         self.build_preference = None
         self.requeue: list = []  # trials to re-admit (unattempted once)
@@ -750,9 +856,10 @@ class SearchCoordinator:
     ``pair_loader(path) -> {problem: [names] | "*"}`` reads
     ``warm_start.pairs_file`` (the GEMM driver passes its ``load_pair_list``),
     ``prior_loader(path) -> {problem: {kernel name: predicted latency ms}}``
-    reads ``warm_start.ranked_csv``. ``log``, if given, gets one progress line
-    per round and per build (the driver passes print). Invalid options raise
-    ``SettingsError`` here, before any work.
+    reads ``warm_start.ranked_csv``; ``warm_start.history_file`` is in the
+    coordinator's own format (``read_history``). ``log``, if given, gets one
+    progress line per round and per build (the driver passes print). Invalid
+    options raise ``SettingsError`` here, before any work.
 
     Rounds: each active problem in turn (the first one rotates) re-admits its
     re-queued trials, then asks its strategy for at most ``batch_per_problem``
@@ -802,6 +909,8 @@ class SearchCoordinator:
             raise SettingsError("portfolio_members requires the default strategy factory")
         if strategy_factory is not None and settings.tpe_candidate_pool != "sampled":
             raise SettingsError("tpe_candidate_pool requires the default strategy factory")
+        if strategy_factory is not None and settings.tpe_n_startup is not None:
+            raise SettingsError("tpe_n_startup requires the default strategy factory")
         self.strategy_factory = strategy_factory
         self.writer = RunWriter(out_dir)
         self.writer.check_fresh()
@@ -814,6 +923,9 @@ class SearchCoordinator:
         if warm is not None and warm.use_prior:
             self.ranked = _load_warm(warm.ranked_csv, prior_loader, "ranked_csv",
                                      "prior_loader")
+        self.history: Mapping = {}
+        if warm is not None and warm.history_file is not None:
+            self.history = _load_warm(warm.history_file, read_history, "history_file", "")
         self.ledger = None
         self.registry = ArtifactRegistry()
         self.problems: List[_Problem] = []
@@ -952,8 +1064,9 @@ class SearchCoordinator:
                 options = ({"members": s.portfolio_members}
                            if p.strategy_name == "portfolio" and s.portfolio_members
                            else None)
-                if p.strategy_name == "tpe" and s.tpe_candidate_pool != "sampled":
-                    options = {"candidate_pool": s.tpe_candidate_pool}
+                if p.strategy_name == "tpe":  # its non-default options only
+                    options = {option: getattr(s, name) for name, option, default
+                               in TPE_OPTIONS if getattr(s, name) != default} or None
                 p.strategy = _default_factory(
                     p.strategy_name, p.space, p.seed, warm, prior, options=options)
             if s.build_aware is not None and p.strategy_name != "exhaustive":
@@ -973,7 +1086,8 @@ class SearchCoordinator:
             "warm_start_sha256": {
                 path: sha256_file(path)
                 for path in (() if s.warm_start is None else
-                             (s.warm_start.pairs_file, s.warm_start.ranked_csv))
+                             (s.warm_start.pairs_file, s.warm_start.ranked_csv,
+                              s.warm_start.history_file))
                 if path is not None
             },
             "ck_search": {
@@ -989,6 +1103,7 @@ class SearchCoordinator:
                     "strategy": p.strategy_name or None,
                     "seed": p.seed,
                     "warm_start": p.warm,
+                    "history_start": p.history_start,
                     "prior_entries": p.prior_entries,
                     "note": p.finished or (
                         "exhaustive: fewer eligible candidates than trials_per_problem"
@@ -1010,7 +1125,9 @@ class SearchCoordinator:
         self.writer.write_json("run.json", self._run_json)
 
     def _warm_records(self, p: _Problem):
-        """The first ``top_k`` listed names that are eligible, in listed order."""
+        """The history start points (``history_start_points`` over the other
+        problems of ``warm_start.history_file``), then the first ``top_k``
+        listed names that are eligible, in listed order."""
         names = self.warm_pairs.get(p.key, ())
         if names == "*":
             names = [c.kernel_name for c in p.cands]
@@ -1019,7 +1136,11 @@ class SearchCoordinator:
         if picks:
             picks = picks[: self.settings.warm_start.top_k]
         p.warm = [c.kernel_name for c in picks]
-        return tuple(dict(c.record) for c in picks)
+        if self.history:
+            p.history_start = history_start_points(
+                {q: lat for q, lat in self.history.items() if q != p.key}, by_name,
+                self.settings.warm_start.history_top_k, p.warm)
+        return tuple(dict(by_name[n].record) for n in p.history_start + p.warm)
 
     def _prior(self, p: _Problem):
         pred = self.ranked.get(p.key, {})

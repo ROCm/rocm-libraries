@@ -47,9 +47,10 @@ def test_scores_every_unseen_member_and_registers_the_selected_trial():
     assert len(search.history) == 5
 
 
-def test_resume_matches_continuous_search_after_acquisition_and_pending_trials():
+@pytest.mark.parametrize("schedule", [{}, {"gamma_schedule": "sqrt"}])
+def test_resume_matches_continuous_search_after_acquisition_and_pending_trials(schedule):
     s = space()
-    options = {"candidate_pool": "listed", "n_startup": 2}
+    options = {"candidate_pool": "listed", "n_startup": 2, **schedule}
     search = make_strategy("tpe", s, seed=13, options=options)
     settle(search, search.ask(2))
     settle(search, search.ask(4))
@@ -80,10 +81,14 @@ def test_prior_is_applied_to_the_full_candidate_pool():
     assert s.decode(search.ask(1)[0].genome)["x"] == 95
 
 
-def test_explicit_sampled_mode_preserves_default_trials_and_rng():
+@pytest.mark.parametrize("default, explicit", [
+    (None, {"candidate_pool": "sampled"}),
+    ({"candidate_pool": "listed"}, {"candidate_pool": "listed", "gamma_schedule": "linear"}),
+])
+def test_explicit_defaults_preserve_trials_and_rng(default, explicit):
     s = space()
-    a = make_strategy("tpe", s, seed=4)
-    b = make_strategy("tpe", s, seed=4, options={"candidate_pool": "sampled"})
+    a = make_strategy("tpe", s, seed=4, options=default)
+    b = make_strategy("tpe", s, seed=4, options=explicit)
     for _ in range(8):
         ta, tb = a.ask(3), b.ask(3)
         assert ta == tb
@@ -99,6 +104,27 @@ def test_listed_mode_has_the_same_startup_as_sampled_tpe():
     ta, tb = a.ask(10), b.ask(10)
     assert [t.genome for t in ta] == [t.genome for t in tb]
     assert a.rng.getstate() == b.rng.getstate()
+
+
+def good_set_sizes(schedule):
+    """The size of TPE's good set at each proposal, from 2 to 17 observations."""
+    search = make_strategy("tpe", space(), seed=1,
+                           options={"candidate_pool": "listed", "n_startup": 2, **schedule})
+    settle(search, search.ask(2))
+    sizes, density = [], search._density
+    search._density = lambda genomes: sizes.append(len(genomes)) or density(genomes)
+    for _ in range(16):
+        settle(search, search.ask(1))
+    assert search.gamma == 0.25  # the schedule leaves the configured gamma
+    return sizes[::2]  # each proposal fits the good density, then the bad one
+
+
+def test_sqrt_schedule_sizes_the_good_set_and_linear_is_the_default():
+    # ceil(sqrt(n)), with one observation left on the bad side at n = 2.
+    assert good_set_sizes({"gamma_schedule": "sqrt"}) == [
+        1, 2, 2, 3, 3, 3, 3, 3, 4, 4, 4, 4, 4, 4, 4, 5]
+    assert good_set_sizes({}) == good_set_sizes({"gamma_schedule": "linear"}) == [
+        1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5]  # ceil(0.25 * n)
 
 
 def test_exhaustion_and_failed_trials_do_not_repeat():
@@ -123,6 +149,7 @@ def test_exhaustion_and_failed_trials_do_not_repeat():
 @pytest.mark.parametrize("options, message", [
     ({"candidate_pool": "invalid"}, "sampled or listed"),
     ({"candidate_pool": "listed", "n_candidates": 4}, "omit n_candidates"),
+    ({"candidate_pool": "listed", "gamma_schedule": "log"}, "linear or sqrt"),
 ])
 def test_invalid_pool_options_are_rejected(options, message):
     with pytest.raises(ValueError, match=message):

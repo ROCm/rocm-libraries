@@ -46,6 +46,11 @@ from gemm_search import read_ranked_csv  # noqa: E402
     ({"strategy": "gp", "tpe_candidate_pool": "listed"}, "requires strategy=tpe"),
     ({"strategy": "tpe", "tpe_candidate_pool": "invalid"}, "sampled or listed"),
     ({"strategy": "tpe", "tpe_candidate_pool": True}, "expected type str"),
+    ({"strategy": "gp", "tpe_n_startup": 8}, "tpe_n_startup requires strategy=tpe"),
+    ({"strategy": "tpe", "tpe_n_startup": 0}, ">= 1"),
+    ({"strategy": "tpe", "tpe_gamma_schedule": "sqrt"}, "requires tpe_candidate_pool=listed"),
+    ({"strategy": "tpe", "tpe_candidate_pool": "listed", "tpe_gamma_schedule": "log"},
+     "linear or sqrt"),
 ])
 def test_experimental_settings_fail_explicitly(extra, message):
     with pytest.raises(AS.SettingsError, match=message):
@@ -56,7 +61,8 @@ def test_opt_in_settings_round_trip_and_defaults_stay_disabled():
     plain = settings().to_json()
     assert "build_aware" not in plain and "portfolio_members" not in plain
     assert plain["confirm"] == {"finalists": 2, "fresh_calls": 3}
-    assert "tpe_candidate_pool" not in plain
+    assert plain.keys().isdisjoint(
+        {"tpe_candidate_pool", "tpe_n_startup", "tpe_gamma_schedule"})
     new = settings(
         strategy="portfolio", portfolio_members=["hill", "gp", "de", "tpe"],
         build_aware={"rank_fraction": 0.25, "explore_probability": 0.4},
@@ -302,6 +308,15 @@ def test_portfolio_members_and_build_context_reach_real_policies(tmp_path):
     assert set(meta["phase_s"]) == {"ask", "build_missing", "measure_pairs", "confirm"}
 
 
+def history_file(path, results):
+    """``results`` {problem: {kernel: ms}} as the result events of a trials.jsonl."""
+    path.write_text("".join(
+        json.dumps({"event": "result", "status": "ok", "problem": p, "kernel": k,
+                    "latency_ms": v}) + "\n"
+        for p, row in results.items() for k, v in row.items()))
+    return str(path)
+
+
 @pytest.fixture
 def comparison(tmp_path):
     problems = {"128x128x128": list("ABCDEFGHIJKL"), "256x256x256": list("ABCDEFGHIJKL")}
@@ -312,8 +327,10 @@ def comparison(tmp_path):
         f"{p},{i+1},{k},{12-i}\n" for p in problems for i, k in enumerate(problems[p])))
     baseline = settings(strategy="tpe", trials_per_problem=12,
                         warm_start={"pairs_file": str(warm), "top_k": 2})
+    history = history_file(tmp_path / "history.jsonl",
+                           {p: {"J": 3.0, "L": 1.0, "K": 2.0} for p in problems})
     manifest = compare.prepare(baseline.to_json(), ranked, diverse,
-                               tmp_path / "comparison", [0])
+                               tmp_path / "comparison", [0], history)
 
     class Adapter(DeviceAdapter):
         def context(self):
@@ -346,14 +363,42 @@ def test_comparison_runs_all_independent_and_combined_arms(comparison):
         changed = {k for k in set(baseline) | set(by_arm[arm]["settings"])
                    if baseline.get(k) != by_arm[arm]["settings"].get(k)}
         assert changed == {field}
+    listed = by_arm["listed_tpe"]["settings"]
+    small = {"tpe_n_startup": 8, "tpe_gamma_schedule": "sqrt"}
+    history = {"history_file": str(comparison.parent.parent / "history.jsonl"),
+               "history_top_k": 5}
+    for arm, control, tpe, warm in (
+            ("listed_tpe_small_budget", "listed_tpe", small, {}),
+            ("transfer_listed", "listed_tpe", {}, history),
+            ("transfer_listed_small_budget", "transfer_listed", small, history)):
+        assert compare.ARMS[arm][0] == control
+        assert by_arm[arm]["settings"] == {
+            **listed, **tpe, "warm_start": {**listed["warm_start"], **warm}}
+        meta = strict(Path(by_arm[arm]["output_dir"]) / "run.json")
+        assert (history["history_file"] in meta["warm_start_sha256"]) == bool(warm)
+        # The other problem's fastest kernels first, then the warm pairs.
+        assert all(p["history_start"] == (["L", "K", "J"] if warm else [])
+                   and p["warm_start"] == ["A", "B"] for p in meta["problems"].values())
     output = io.StringIO()
     assert compare.summarize(comparison, output) == 0
     rows = list(csv.DictReader(io.StringIO(output.getvalue())))
-    assert len(rows) == 11
+    assert len(rows) == 14
     assert all(r["status"] == "complete" and r["paired_winners"] == "2" for r in rows)
     assert all(float(r["control_relative_quality"]) == 1 for r in rows)
+    assert all(r["control_arm"] == compare.ARMS[r["arm"]][0] for r in rows)
+    assert all(r["history_problems"] == ("2" if r["arm"].startswith("transfer_") else "0")
+               for r in rows)
+    assert strict(comparison)["left_out"] == {}
     assert next(r for r in rows if r["arm"] == "race")["control_arm"] == "confirmation_control"
     assert next(r for r in rows if r["arm"] == "portfolio_tpe")["control_arm"] == "portfolio_control"
+    plain = compare.prepare(
+        baseline, by_arm["broad_prior"]["settings"]["warm_start"]["ranked_csv"],
+        by_arm["diverse_warm"]["settings"]["warm_start"]["pairs_file"],
+        comparison.parent.parent / "plain", [0])
+    assert {c["arm"] for c in strict(plain)["runs"]} == {
+        a for a in compare.ARMS if not a.startswith("transfer_")}
+    assert strict(plain)["left_out"] == dict.fromkeys(
+        ("transfer_listed", "transfer_listed_small_budget"), "no --history")
     combined = strict(Path(by_arm["combined"]["output_dir"]) / "run.json")
     assert all(p["prior_entries"] == 12 and p["warm_start"] == ["A", "L"]
                for p in combined["problems"].values())
@@ -379,6 +424,155 @@ def test_listed_tpe_cannot_be_silently_ignored_by_custom_factory(tmp_path):
         AS.SearchCoordinator(FakeAdapter({"P1": list("ABCDEFGHIJKL")}),
                              settings(strategy="tpe", tpe_candidate_pool="listed"),
                              tmp_path / "run", strategy_factory=lambda *args: None)
+
+
+@pytest.mark.parametrize("history, eligible, k, chosen, expected", [
+    ({}, "ABC", 5, (), []),
+    ({"S1": {"X": 1.0}}, "ABC", 5, (), []),  # nothing eligible was measured
+    # One problem: its kernels best first, never an unmeasured one (D).
+    ({"S1": {"C": 3.0, "A": 1.0, "B": 2.0}}, "ABCD", 5, (), ["A", "B", "C"]),
+    ({"S1": {"C": 3.0, "A": 1.0, "B": 2.0}}, "ABCD", 2, (), ["A", "B"]),
+    # An ineligible kernel (X) is not picked.
+    ({"S1": {"X": 0.1, "A": 1.0, "B": 2.0}}, "AB", 5, (), ["A", "B"]),
+    # Only a finite positive number is a measurement.
+    ({"S1": {"A": 0, "B": math.inf, "C": 2.0, "D": None, "E": True}}, "ABCDE", 5, (), ["C"]),
+    # No credit where unmeasured: B (near-best on S1, best on S2) comes
+    # before A (best on S1, not measured on S2).
+    ({"S1": {"A": 1.0, "B": 1.05, "Z": 3.0}, "S2": {"B": 1.0, "Z": 3.0}}, "ABZ", 3, (),
+     ["B", "A", "Z"]),
+    ({"S1": {"B": 1.0, "A": 1.0, "C": 2.0}}, "ABC", 3, (), ["A", "B", "C"]),  # tie: by name
+    # X covers both problems best. With S1 covered by the warm start P, Y
+    # (best on S2) comes first instead; P itself is not returned.
+    ({"S1": {"P": 1.0, "X": 1.1, "Y": 5.0}, "S2": {"Y": 1.0, "X": 1.2, "P": 4.0}}, "PXY", 5,
+     (), ["X", "Y", "P"]),
+    ({"S1": {"P": 1.0, "X": 1.1, "Y": 5.0}, "S2": {"Y": 1.0, "X": 1.2, "P": 4.0}}, "PXY", 5,
+     ("P",), ["Y", "X"]),
+    # X and Y gain the same on S2: the lower mean ratio (Y) decides, not the name.
+    ({"S1": {"P": 1.0, "Y": 1.5, "X": 3.0}, "S2": {"X": 1.0, "Y": 1.0, "P": 4.0}}, "PXY", 5,
+     ("P",), ["Y", "X"]),
+    ({"S1": {"A": 1.0, "B": 2.0, "C": 3.0}}, "ABC", 5, ("A",), ["B", "C"]),  # runner-ups
+])
+def test_history_start_points_are_a_measured_only_greedy_portfolio(
+        history, eligible, k, chosen, expected):
+    assert AS.history_start_points(history, eligible, k, chosen) == expected
+
+
+def test_read_history_keeps_the_lowest_verified_discovery_latency(tmp_path):
+    result = {"event": "result", "status": "ok", "problem": "P1", "kernel": "A"}
+    lines = [
+        {**result, "latency_ms": 2.0}, {**result, "latency_ms": 1.5},
+        {**result, "latency_ms": 3.0},
+        {**result, "kernel": "B", "status": "run_error", "latency_ms": 1.0},
+        {**result, "kernel": "C", "latency_ms": 0},
+        {**result, "kernel": "D", "event": "confirm", "latency_ms": 1.0},
+        {**result, "problem": "P2", "kernel": "B", "latency_ms": 4},
+        {**result, "problem": None, "latency_ms": 1.0}, {**result, "kernel": 7, "latency_ms": 1.0},
+        ["not", "an", "event"],
+    ]
+    path = tmp_path / "history.jsonl"
+    text = "\ufeff" + "\n\n".join(json.dumps(line) for line in lines) + "\n"
+    path.write_text(text, encoding="utf-8")
+    assert AS.read_history(path) == {"P1": {"A": 1.5}, "P2": {"B": 4}}
+    # An interrupted writer's last line, or a number no float holds.
+    for bad, message in [(json.dumps(lines[0])[:30], "line 20: Expecting value"),
+                         (json.dumps(lines[0])[:-4] + "1" + "0" * 400 + "}", "line 20: int too")]:
+        path.write_text(text + bad, encoding="utf-8")
+        with pytest.raises(ValueError, match=message):
+            AS.read_history(path)
+
+
+def test_history_and_startup_settings_rules(tmp_path):
+    picks = tmp_path / "picks.json"
+    picks.write_text("{}")
+    pairs, tpe = {"pairs_file": str(picks)}, {"strategy": "tpe"}
+    hist = {"history_file": history_file(tmp_path / "history.jsonl", {"P1": {"A": 1.0}})}
+    for extra, message in [
+        ({**tpe, "tpe_n_startup": 5, "warm_start": pairs}, r"> warm_start.top_k \(5\)"),
+        ({**tpe, "tpe_n_startup": 2, "warm_start": {**pairs, **hist, "top_k": 2}},
+         r"> warm_start.top_k \(2\)"),
+        ({"warm_start": hist}, "history_file: strategy 'random' ignores it"),
+        ({**tpe, "warm_start": {**pairs, "history_top_k": 3}}, "requires history_file"),
+        ({**tpe, "warm_start": {**hist, "history_top_k": 0}}, ">= 1"),
+        ({**tpe, "warm_start": {"history_file": "absent.jsonl"}}, "no such file"),
+    ]:
+        with pytest.raises(AS.SettingsError, match=message):
+            settings(**extra)
+    # Only warm pairs count against the startup, history start points do not.
+    new = settings(**tpe, tpe_candidate_pool="listed", tpe_n_startup=3,
+                   tpe_gamma_schedule="sqrt", warm_start={**pairs, **hist, "top_k": 2})
+    assert new.warm_start.history_top_k == 5
+    assert AS.SearchSettings.from_json(new.to_json()) == new
+    assert settings(**tpe, tpe_n_startup=3, warm_start=hist).tpe_n_startup == 3
+    assert "history_top_k" not in settings(**tpe, warm_start=pairs).to_json()["warm_start"]
+    adapter = FakeAdapter({"P1": ABCD})
+    with pytest.raises(AS.SettingsError, match="tpe_n_startup requires the default"):
+        AS.SearchCoordinator(adapter, settings(**tpe, tpe_n_startup=8), tmp_path / "run",
+                             strategy_factory=lambda *args: None)
+    for text, message in [("{", "warm_start.history_file: "),
+                          ('{"event": "trial"}\n', "no verified result event")]:
+        Path(hist["history_file"]).write_text(text)
+        with pytest.raises(AS.SettingsError, match=message):
+            AS.SearchCoordinator(adapter, settings(**tpe, warm_start=hist), tmp_path / "run")
+
+
+def test_history_start_points_run_first_and_are_recorded(tmp_path):
+    kernels = list("ABCDEFGHIJKL")
+    # An earlier run on P1 is the history: K, C and F are its fastest kernels.
+    lat = {("P1", k): 10.0 + i for i, k in enumerate(kernels)}
+    lat.update({("P1", "K"): 1.0, ("P1", "C"): 2.0, ("P1", "F"): 3.0})
+    earlier = AS.SearchCoordinator(
+        FakeAdapter({"P1": kernels}, lat=lat),
+        settings(strategy="exhaustive", trials_per_problem=12), tmp_path / "earlier")
+    assert earlier.run().exit_code == 0
+    history, picks = tmp_path / "earlier" / "trials.jsonl", tmp_path / "picks.json"
+    picks.write_text(json.dumps({p: ["A", "B"] for p in ("P1", "P2")}))
+    warm = {"pairs_file": str(picks), "top_k": 2, "history_file": str(history),
+            "history_top_k": 2}
+    # K is not eligible for P2; P1 finds only itself in the history.
+    problems = {"P2": [k for k in kernels if k != "K"], "P1": kernels}
+    calls = []
+    run(tmp_path, FakeAdapter(problems), {}, calls=calls, pair_loader=json_pairs,
+        strategy="hill", warm_start=warm)
+    assert [c["warm"] for c in calls] == [
+        [rec("C"), rec("F"), rec("A"), rec("B")], [rec("A"), rec("B")]]
+    meta = strict(tmp_path / "out" / "run.json")
+    assert [meta["problems"][p]["history_start"] for p in problems] == [["C", "F"], []]
+    assert [meta["problems"][p]["warm_start"] for p in problems] == [["A", "B"]] * 2
+    assert meta["warm_start_sha256"][str(history)] == hashlib.sha256(
+        history.read_bytes()).hexdigest()
+    # The real small-budget listed TPE measures them first, as trials.
+    adapter = FakeAdapter(problems)
+    co = AS.SearchCoordinator(
+        adapter, settings(strategy="tpe", tpe_candidate_pool="listed", tpe_n_startup=8,
+                          tpe_gamma_schedule="sqrt", trials_per_problem=10,
+                          batch_per_problem=4, warm_start=warm),
+        tmp_path / "real", pair_loader=json_pairs)
+    assert co.run().exit_code == 0
+    assert [r.kernel_name for r in adapter.measured if r.problem_key == "P2"][:4] == [
+        "C", "F", "A", "B"]
+    assert co.ledger.trials == {"P2": 10, "P1": 10}
+    tpe = co.problems[0].strategy
+    assert (tpe.name, tpe.n_startup, tpe.gamma_schedule) == ("tpe_listed", 8, "sqrt")
+    assert len(tpe.history) == 10
+
+
+@pytest.mark.parametrize("unused, message", [
+    (False, "warm/prior inputs changed"),
+    (True, "the history gave no problem a start point"),
+])
+def test_comparison_rejects_a_changed_or_unused_history(comparison, unused, message):
+    case = next(c for c in strict(comparison)["runs"]
+                if c["arm"] == "transfer_listed_small_budget")
+    path = Path(case["output_dir"]) / "run.json"
+    meta = strict(path)
+    if unused:  # as when the history holds only the compared problems themselves
+        for problem in meta["problems"].values():
+            problem["history_start"] = []
+    else:
+        meta["warm_start_sha256"][case["settings"]["warm_start"]["history_file"]] = "another"
+    path.write_text(json.dumps(meta))
+    with pytest.raises(ValueError, match=message):
+        compare.summarize(comparison, io.StringIO())
 
 
 def test_comparison_reports_missing_and_failed_runs_without_quality_bias(comparison):
@@ -460,7 +654,7 @@ def test_comparison_retains_real_setup_failed_arms_and_controls(comparison, arm,
     output = io.StringIO()
     assert compare.summarize(comparison, output) == 1
     rows = {r["arm"]: r for r in csv.DictReader(io.StringIO(output.getvalue()))}
-    assert len(rows) == 11
+    assert len(rows) == 14
     assert rows[arm]["status"] == "setup_failed"
     assert rows[arm]["exit_code"] == str(expected_exit)
     assert expected_error in rows[arm]["error"]
@@ -525,3 +719,26 @@ def test_comparison_refuses_invalid_baseline_and_existing_output(tmp_path):
     with pytest.raises(FileExistsError):
         compare.prepare(base, warm, warm, tmp_path, [0])
     assert not (tmp_path / "configs").exists()
+    history = history_file(tmp_path / "history.jsonl", {"P2": {"A": 1.0}})
+    for extra in ({"tpe_n_startup": 8},
+                  {"warm_start": {"pairs_file": str(warm), "history_file": history}}):
+        tuned = settings(**{"strategy": "tpe", "warm_start": {"pairs_file": str(warm)}, **extra})
+        with pytest.raises(AS.SettingsError, match="baseline must"):
+            compare.prepare(tuned.to_json(), warm, warm, tmp_path / "new", [0])
+    Path(history).write_text('{"event": "trial"}\n')
+    with pytest.raises(ValueError, match="no verified result event"):
+        compare.prepare(base, warm, warm, tmp_path / "new", [0], history)
+    assert not (tmp_path / "new").exists()
+
+
+@pytest.mark.parametrize("top_k, small_budget", [(7, True), (8, False), (10, False)])
+def test_comparison_leaves_out_the_arms_a_baseline_cannot_take(tmp_path, top_k, small_budget):
+    warm = tmp_path / "warm.json"
+    warm.write_text("{}")
+    base = settings(strategy="tpe", warm_start={"pairs_file": str(warm), "top_k": top_k})
+    history = history_file(tmp_path / "history.jsonl", {"P2": {"A": 1.0}})
+    manifest = strict(compare.prepare(base.to_json(), warm, warm, tmp_path / "new", [0], history))
+    arms = {c["arm"] for c in manifest["runs"]}
+    assert arms == {a for a in compare.ARMS if small_budget or "small_budget" not in a}
+    assert set(manifest["left_out"]) == set(compare.ARMS) - arms
+    assert all("warm_start.top_k" in why for why in manifest["left_out"].values())

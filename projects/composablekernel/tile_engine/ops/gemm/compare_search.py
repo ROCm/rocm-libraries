@@ -19,12 +19,17 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "common"))
-from adaptive_search import SearchSettings, SettingsError, sha256_file, valid_latency  # noqa: E402
+from adaptive_search import (SearchSettings, SettingsError, read_history,  # noqa: E402
+                             sha256_file, valid_latency)
 
 # Each arm names its control and the settings patches it applies, in order.
 ARMS = {
     "baseline": ("baseline", ()),
     "listed_tpe": ("baseline", ("listed_tpe",)),
+    "listed_tpe_small_budget": ("listed_tpe", ("listed_tpe", "small_budget")),
+    "transfer_listed": ("listed_tpe", ("listed_tpe", "history")),
+    "transfer_listed_small_budget": (
+        "transfer_listed", ("listed_tpe", "history", "small_budget")),
     "coupled_tpe": ("baseline", ("coupled_tpe",)),
     "broad_prior": ("baseline", ("prior",)),
     "diverse_warm": ("baseline", ("warm",)),
@@ -38,12 +43,16 @@ ARMS = {
 }
 
 
-def prepare(baseline, ranked_csv, diverse_pairs, output, seeds):
+def prepare(baseline, ranked_csv, diverse_pairs, output, seeds, history=None):
+    """``history`` (a ``warm_start.history_file``) adds the ``transfer_*`` arms.
+    The manifest's ``left_out`` names the arms this baseline cannot take."""
     baseline = SearchSettings.from_json(baseline)
     if (baseline.strategy != "tpe" or baseline.build_aware is not None
             or baseline.portfolio_members is not None or baseline.confirm.mode != "fixed"
             or baseline.warm_start is None or baseline.warm_start.pairs_file is None
-            or baseline.warm_start.use_prior or baseline.tpe_candidate_pool != "sampled"):
+            or baseline.warm_start.use_prior or baseline.tpe_candidate_pool != "sampled"
+            or baseline.tpe_n_startup is not None
+            or baseline.warm_start.history_file is not None):
         raise SettingsError("baseline must be fixed-confirmation TPE with warm pairs, "
                             "no prior, and no experimental controls")
     if not seeds or len(set(seeds)) != len(seeds):
@@ -51,8 +60,13 @@ def prepare(baseline, ranked_csv, diverse_pairs, output, seeds):
     ranked_csv, diverse_pairs = Path(ranked_csv).resolve(), Path(diverse_pairs).resolve()
     if not ranked_csv.is_file() or not diverse_pairs.is_file():
         raise SettingsError("ranked CSV and diverse pairs must be existing files")
+    history = history and Path(history).resolve()
+    if history:
+        read_history(history)  # an unusable history fails here, not in its arms
     patches = {
         "listed_tpe": {"tpe_candidate_pool": "listed"},
+        "small_budget": {"tpe_n_startup": 8, "tpe_gamma_schedule": "sqrt"},
+        "history": {"warm_start": {"history_file": str(history)}},
         "coupled_tpe": {"strategy": "coupled_tpe"},
         "prior": {"warm_start": {"ranked_csv": str(ranked_csv), "use_prior": True}},
         "warm": {"warm_start": {"pairs_file": str(diverse_pairs)}},
@@ -62,11 +76,19 @@ def prepare(baseline, ranked_csv, diverse_pairs, output, seeds):
         "portfolio": {"strategy": "portfolio"},
         "tpe_member": {"portfolio_members": ["hill", "gp", "de", "tpe"]},
     }
+    absent = {}  # patch: why this baseline cannot take it
+    if history is None:
+        absent["history"] = "no --history"
+    if baseline.warm_start.top_k >= patches["small_budget"]["tpe_n_startup"]:
+        absent["small_budget"] = "its tpe_n_startup must exceed the baseline's warm_start.top_k"
+    left_out = {arm: absent[patch] for arm in ARMS for patch in ARMS[arm][1] if patch in absent}
     output = Path(output).resolve()
     planned = []
     for seed in seeds:
         cases = []
         for arm in ARMS:
+            if arm in left_out:
+                continue
             data = copy.deepcopy(baseline.to_json())
             data["seed"] = seed
             for patch in ARMS[arm][1]:
@@ -84,7 +106,8 @@ def prepare(baseline, ranked_csv, diverse_pairs, output, seeds):
                 "settings": validated,
                 "warm_start_sha256": {
                     validated["warm_start"][key]: sha256_file(validated["warm_start"][key])
-                    for key in ("pairs_file", "ranked_csv") if key in validated["warm_start"]
+                    for key in ("pairs_file", "ranked_csv", "history_file")
+                    if key in validated["warm_start"]
                 },
             })
         random.Random(seed).shuffle(cases)
@@ -95,7 +118,8 @@ def prepare(baseline, ranked_csv, diverse_pairs, output, seeds):
     for case in planned:
         Path(case["config"]).write_text(json.dumps(case["settings"], indent=2) + "\n")
     manifest = output / "manifest.json"
-    manifest.write_text(json.dumps({"schema_version": 1, "runs": planned}, indent=2) + "\n")
+    manifest.write_text(json.dumps(
+        {"schema_version": 1, "left_out": left_out, "runs": planned}, indent=2) + "\n")
     return manifest
 
 
@@ -125,6 +149,9 @@ def _read_run(case):
         for p in meta["problems"].values()
     ):
         raise ValueError(f"{directory}: the prior does not cover every eligible candidate")
+    if case["settings"]["warm_start"].get("history_file") and not any(
+            p["history_start"] for p in meta["problems"].values()):
+        raise ValueError(f"{directory}: the history gave no problem a start point")
     for winner in summary["winners"].values():
         if not valid_latency(winner["median_ms"]):
             raise ValueError(f"{directory}: invalid confirmed latency")
@@ -162,8 +189,8 @@ def summarize(manifest, stream):
     cases = json.loads(Path(manifest).read_text())["runs"]
     runs = {(c["arm"], c["seed"]): _read_run(c) for c in cases}
     fields = ("arm", "seed", "control_arm", "status", "exit_code", "error", "winners", "problems",
-              "exhaustive_problems", "paired_winners", "same_winners", "control_relative_quality",
-              "builds", "measurements", "confirmation_calls",
+              "exhaustive_problems", "history_problems", "paired_winners", "same_winners",
+              "control_relative_quality", "builds", "measurements", "confirmation_calls",
               "wall_s", "ask_s", "build_s", "measure_s", "confirm_s", "ck_commit")
     writer = csv.DictWriter(stream, fieldnames=fields)
     writer.writeheader()
@@ -193,6 +220,8 @@ def summarize(manifest, stream):
                        wall_s=summary["wall_s"],
                        exhaustive_problems=sum(p["strategy"] == "exhaustive"
                                                for p in meta["problems"].values()),
+                       history_problems=sum(bool(p["history_start"])
+                                            for p in meta["problems"].values()),
                        ck_commit=meta["context"].get("sources", {}).get("ck_commit", ""))
             for label, key in (("ask", "ask"), ("build", "build_missing"),
                                ("measure", "measure_pairs"), ("confirm", "confirm")):
@@ -219,10 +248,12 @@ def summarize(manifest, stream):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
-    prep = commands.add_parser("prepare", help="Write eleven paired ablations per seed")
+    prep = commands.add_parser("prepare", help="Write the paired ablations of each seed")
     prep.add_argument("--baseline", required=True)
     prep.add_argument("--ranked-csv", required=True, help="Full eligible-domain predictor CSV")
     prep.add_argument("--diverse-pairs", required=True)
+    prep.add_argument("--history", help="trials.jsonl of earlier runs on other problems "
+                      "(concatenated); omitted: no transfer_* arms")
     prep.add_argument("--output", required=True, help="New comparison directory")
     prep.add_argument("--seeds", nargs="+", type=int, default=[0, 1, 2, 3, 4])
     report = commands.add_parser("summarize", help="Write per-run CSV to stdout")
@@ -231,7 +262,7 @@ def main(argv=None):
     try:
         if args.command == "prepare":
             print(prepare(args.baseline, args.ranked_csv, args.diverse_pairs,
-                          args.output, args.seeds))
+                          args.output, args.seeds, args.history))
             return 0
         return summarize(args.manifest, sys.stdout)
     except (OSError, ValueError, KeyError) as e:
