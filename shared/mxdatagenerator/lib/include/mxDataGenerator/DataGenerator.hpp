@@ -2139,10 +2139,11 @@ namespace DGen
                     "DataGenerator::generate_data_maf2_0: the buffer size must be a multiple of "
                     "the contiguous dimension");
 
-            const int  trials     = 2 * mode.n + 1;
-            const auto scaleForK  = (mode.normalScale || mode.unitScaleNormalData)
-                                        ? std::vector<uint8_t>{}
-                                        : maf2_0ScaleBytes<DTYPE>(mode.n, mode.center);
+            // n is only validated, and only used, by the binomial scales.
+            const bool binomial = !mode.normalScale && !mode.unitScaleNormalData;
+            const int  trials   = binomial ? 2 * mode.n + 1 : 0;
+            const auto scaleForK
+                = binomial ? maf2_0ScaleBytes<DTYPE>(mode.n, mode.center) : std::vector<uint8_t>{};
             const auto scales     = sortedFiniteScales<DTYPE>();
             const auto block_size = m_options.blockScaling;
             const auto numBlocks  = numScaleBlocks(block_size);

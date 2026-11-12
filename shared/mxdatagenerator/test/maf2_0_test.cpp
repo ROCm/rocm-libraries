@@ -175,6 +175,24 @@ namespace
                      std::invalid_argument);
     }
 
+    // n only matters for the binomial scales; the normal-scale and unit-scale modes ignore it,
+    // even a value that would overflow 2 * n + 1.
+    TEST(Maf2_0Mode, InactiveNIsIgnored)
+    {
+        for(const bool unitScale : {false, true})
+        {
+            DataGeneratorOptions opts;
+            Maf2_0               mode;
+            mode.n                   = std::numeric_limits<int>::max();
+            mode.normalScale         = !unitScale;
+            mode.unitScaleNormalData = unitScale;
+            opts.initMode            = DataInitMode(mode);
+            opts.blockScaling        = 32;
+            EXPECT_NO_THROW(DataGenerator<ocp_e2m1_mxfp4>().generate({64}, {1}, opts))
+                << "unitScale " << unitScale;
+        }
+    }
+
     // Leading dimension 7 is not a multiple of rows 6, so the 35-element buffer is not a whole
     // number of scale-block runs; the tail would stay unwritten, so the layout is rejected.
     TEST(Maf2_0Mode, PartialRowLayoutThrows)
