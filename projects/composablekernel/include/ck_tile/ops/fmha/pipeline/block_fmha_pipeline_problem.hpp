@@ -7,6 +7,7 @@
 #include "ck_tile/ops/fmha/block/block_attention_kvcache_layout_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_rotary_embedding.hpp"
+#include "ck_tile/ops/fmha/pipeline/tile_fmha_traits.hpp"
 
 namespace ck_tile {
 
@@ -190,6 +191,8 @@ struct BlockFmhaPipelineProblem
     // plain false.
     static constexpr bool kDoFp8StaticQuant = detail::GetDoFp8StaticQuantOrDefault<Traits>();
     static constexpr bool kIsPagedKV        = detail::GetIsPagedKVOrDefault<Traits>();
+    // Only TileFmhaMergeHeadsTraits sets it; other traits leave it false.
+    static constexpr bool kMergeNumHeadGroupsSeqLenQ = kTraitsMergeNumHeadGroupsSeqLenQ<Traits>;
 };
 
 template <typename QDataType_,

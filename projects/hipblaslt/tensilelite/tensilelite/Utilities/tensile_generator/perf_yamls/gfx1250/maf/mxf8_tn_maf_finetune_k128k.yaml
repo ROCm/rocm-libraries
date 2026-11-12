@@ -75,6 +75,7 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - StaggerU: [0]
         - ScheduleIterAlg: [4]
+        - StinkyTofuRegisterAllocation: ["3,classes=s"]
         - PrefetchLocalRead: [1]
         - PrefetchGlobalRead: [2]
         - StoreRemapVectorWidth: [0]
