@@ -155,6 +155,9 @@ are ready.
 
 Build and run the StinkyTofu ctest suite.
 
+For a refactor, also prove that the generated assembly is identical (rule 6). How to do that is in
+[`harness/ab.md`](../../../../harness/ab.md).
+
 Read the related docs:
 
 - [`docs/developer/dag-wait-and-prefetch-placement.md`](../../../../docs/developer/dag-wait-and-prefetch-placement.md)
