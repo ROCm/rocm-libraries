@@ -1,0 +1,1211 @@
+# OOB BBS TN exact tuning, category 2, M=3760 N=1168 K=2176 (fused GEMM: Bias + ScaleAlphaVec, activation none, ActivationFuncCall true; lda=ldb=K, ldc=ldd=M): full candidate search, 92 solutions; group 1 = previous public winner, group 2 = logic_1109a kernel.
+# EnqueuesPerSync 400 / NumWarmups 160 / NumBenchmarks 5.
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  SleepPercent: 0
+  EnqueuesPerSync: 400
+  NumWarmups: 160
+  KernelTime: true
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeD: 3
+  DataInitTypeScaleAlphaVec: 3
+  DataInitSeed: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: false
+  PreciseKernelTime: false
+  Device: 0
+  SkipSlowSolutionRatio: 0.0
+  KeepBuildTmp: false
+  RotatingBufferSize: 384
+  UseEffLike: false
+  SyncsPerBenchmark: 1
+  NumBenchmarks: 5
+  CpuThreads: 32
+  PrintSolutionRejectionReason: true
+BenchmarkProblems:
+- - OperationType: GEMM
+    DataType: B
+    DestDataType: B
+    ComputeDataType: S
+    HighPrecisionAccumulate: true
+    TransposeA: true
+    TransposeB: false
+    UseBeta: true
+    Batched: true
+    UseBias: 1
+    Activation: true
+    ActivationType: hipblaslt_all
+    UseScaleAlphaVec: 1
+    BiasDataTypeList: [s, B]
+  - InitialSolutionParameters: null
+    BenchmarkCommonParameters:
+    - KernelLanguage: [Assembly]
+    ForkParameters:
+    - DirectToLdsMetadata: [0]
+    - DtlPlusLdsBuf: [0]
+    - ExpandPointerSwap: [false]
+    - GlobalReadVectorWidthA: [1]
+    - GlobalReadVectorWidthB: [1]
+    - GlobalSplitUWorkGroupMappingRoundRobin: [true]
+    - InitCIterWmma: [1]
+    - LdsBlockSizePerPadMXSA: [0]
+    - LdsBlockSizePerPadMXSB: [0]
+    - LdsBlockSizePerPadMetadata: [0]
+    - LdsPadMXSA: [0]
+    - LdsPadMXSB: [0]
+    - LocalReadVectorWidthA: [8]
+    - LocalReadVectorWidthB: [8]
+    - MXLoadInst: [TDM]
+    - MXScaleFormat: [InMemorySwizzle]
+    - MaxLDS: [327680]
+    - MbskPrefetchMethod: [0]
+    - MinGRIncPerMfma: [1]
+    - PrefetchGL2: [2]
+    - PrefetchGlobalRead: [2]
+    - ScheduleGROverBarrier: [0]
+    - ScheduleIterAlg: [4]
+    - StaggerU: [0]
+    - StaggerUStride: [0]
+    - SuppressNoLoadLoop: [true]
+    - TDMInst: [3]
+    - ThreadTile:
+      - [1, 1]
+    - TransposeLDS: [1]
+    - UseCustomMainLoopSchedule: [0]
+    - WavefrontSize: [32]
+    - TileProcessingStrategy: [None]
+    - GlobalSplitU: [1]
+    - GlobalSplitUAlgorithm: [MultipleBuffer]
+    - VectorWidthA: [4]
+    - VectorWidthB: [1]
+    - LdsBlockSizePerPadA: [1024]
+    - LdsBlockSizePerPadB: [256]
+    - LdsPadA: [8]
+    - LdsPadB: [8]
+    - TDMIterateMode: [0]
+    - MIArchVgpr: [true]
+    - AdaptiveGemm: [1]
+    - LDSSegmentBRotate: [0]
+    - ActivationFuncCall: [true]
+    - Groups:
+      - - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 2]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: false
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: false
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: false
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: false
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: false
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 2]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: false
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 2]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: false
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 2]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: false
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 2]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 2]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 2]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 2]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: false
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: false
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: false
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: false
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: false
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: false
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: false
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: false
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: false
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: false
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: false
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: false
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 1
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 2]
+          PrefetchLocalRead: 2
+        - ClusterLocalRead: 1
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 2]
+          PrefetchLocalRead: 2
+        - ClusterLocalRead: 1
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 2
+        - ClusterLocalRead: 1
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 2
+        - ClusterLocalRead: 1
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 2
+        - ClusterLocalRead: 1
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 2
+        - ClusterLocalRead: 1
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 2
+        - ClusterLocalRead: 1
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 2
+        - ClusterLocalRead: 1
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 2
+        - ClusterLocalRead: 1
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 2
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 2]
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 2]
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 1
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 2]
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 1
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 2]
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 1
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 1
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 1
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 1
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 1
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 1
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 1
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 1
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 4]
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 1
+          CompactLoopStore: false
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 2]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: false
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 1
+          CompactLoopStore: false
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 2]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 1
+          CompactLoopStore: false
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: false
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 1
+          CompactLoopStore: false
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: false
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: false
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          CompactLoopStore: false
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [4, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [1, 1]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 1
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [2, 2]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [1, 1]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 2]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [4, 2]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [1, 1]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 2]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [4, 2]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [1, 1]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 2]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [4, 2]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [1, 1]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [2, 2]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 0
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          ClusterDim: [4, 2]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [1, 1]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          HalfPLR: 1
+          SourceSwap: true
+          StoreVectorWidth: 4
+          LDSSegmentInterleave: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 4, 5, 2, 2]
+          WorkGroup: [32, 4, 1]
+          DepthU: 128
+          ClusterDim: [2, 2]
+          PrefetchLocalRead: 1
+    BenchmarkJoinParameters: null
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [3760, 1168, 1, 2176, 3760, 3760, 2176, 2176]
+    - BiasTypeArgs: [s]
+    - ActivationArgs:
+      - - Enum: none
+LibraryLogic:
+  ScheduleName: gfx1250
+  DeviceNames: [Device 73f0]
+  ArchitectureName: gfx1250
+  LibraryType: Equality
