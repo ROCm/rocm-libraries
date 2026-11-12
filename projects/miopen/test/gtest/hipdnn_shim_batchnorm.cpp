@@ -1385,6 +1385,157 @@ TEST(GPU_HipdnnShimBNTuning_FP32, PerActivationIgnoresPolicy)
     }
 }
 
+// Whether MIOpen searched during the call, from the "Search Started" line that
+// MIOPEN_WARN_SEARCH raises to a warning.
+bool Searched(const hs::CallResult& result)
+{
+    return result.logged.find("Search Started:") != std::string::npos;
+}
+
+// Used only by NonePolicyDoesNotSearch.
+const BN2DTestCase& NoSearchCase()
+{
+    static const BN2DTestCase no_search_case{
+        3, 5, 7, 13, miopen::batchnorm::Direction::ForwardTraining, true, true};
+    return no_search_case;
+}
+
+// Under None MIOpen loads a perf-db record or runs the default config, and never
+// searches, so the hipDNN path must not search either. Both perf dbs are off and
+// MIOPEN_FIND_ENFORCE is empty, which MIOpen reads as no enforcement, so the policy
+// alone decides.
+TEST(GPU_HipdnnShimBNTuning_FP32, NonePolicyDoesNotSearch)
+{
+    auto&& handle = get_handle();
+    const ScopedHandleTuningPolicy policy(handle, miopenTuningPolicyNone);
+    const ScopedFindEnforce find_enforce("");
+    const ScopedEnvironment<bool> warn_search(MIOPEN_WARN_SEARCH, true);
+    const ScopedEnvironment<bool> no_user_db(MIOPEN_DEBUG_DISABLE_USER_DB, true);
+    const ScopedEnvironment<bool> no_system_db(MIOPEN_DEBUG_DISABLE_SYSTEM_DB, true);
+
+    {
+        SCOPED_TRACE("train");
+        TrainData d;
+        const auto result = TrainUnderPolicy(handle, d, miopenBNSpatial, NoSearchCase());
+        if(ExpectServed("none_policy_train", result))
+        {
+            EXPECT_FALSE(Searched(result)) << result.logged;
+            CheckTrain(handle, d, true, false);
+        }
+    }
+    {
+        SCOPED_TRACE("bwd");
+        BwdData d;
+        const auto result = BwdUnderPolicy(handle, d, miopenBNSpatial, NoSearchCase());
+        if(ExpectServed("none_policy_bwd", result))
+        {
+            EXPECT_FALSE(Searched(result)) << result.logged;
+            CheckBwd(handle, d);
+        }
+    }
+}
+
+// Used only by FindEnforceUnderNonePolicyMatchesMiopen.
+const BN2DTestCase& FindEnforceCase()
+{
+    static const BN2DTestCase find_enforce_case{
+        3, 5, 7, 15, miopen::batchnorm::Direction::ForwardTraining, true, true};
+    return find_enforce_case;
+}
+
+struct FindEnforceStep
+{
+    const char* value;
+    bool searches;
+    // Whether MIOpen logs that it removed a perf-db record; unset where that depends
+    // on what an earlier run left behind.
+    std::optional<bool> removes;
+};
+
+void ExpectFindEnforceOutcome(const std::string& case_name,
+                              const hs::CallResult& result,
+                              const FindEnforceStep& step)
+{
+    const bool searched = Searched(result);
+    ::testing::Test::RecordProperty("parity_searched_" + case_name, searched ? "true" : "false");
+    EXPECT_EQ(searched, step.searches) << result.logged;
+    if(step.removes)
+    {
+        const bool removed = result.logged.find("Perf Db: record removed:") != std::string::npos;
+        ::testing::Test::RecordProperty("parity_removed_" + case_name, removed ? "true" : "false");
+        EXPECT_EQ(removed, *step.removes) << result.logged;
+    }
+}
+
+// MIOPEN_FIND_ENFORCE takes over from a None handle, and the hipDNN path must follow
+// it as MIOpen does: in whether a call searches, and in what it leaves in the user
+// perf db. The steps run in order and see each other only through that db, since
+// each gets a handle of its own and so cannot reuse an invoker or plan an earlier
+// step cached:
+//
+//   DB_CLEAN          removes any record an earlier run left
+//   SEARCH            finds no record, so searches and stores one
+//   SEARCH            loads that record instead of searching
+//   SEARCH_DB_UPDATE  searches even though there is a record
+//   NONE, DB_UPDATE   load the record, no search
+//   DB_CLEAN          removes the record
+//   SEARCH            searches again, so the record really went
+//   DB_CLEAN          removes it, so the next run starts the same way
+//
+// The user db is on and the system db off. MIOpen opens each perf db once per
+// process, and if an earlier test opened the user db while it was off, its records
+// stay in memory, which the steps cannot tell apart from the file.
+TEST(GPU_HipdnnShimBNTuning_FP32, FindEnforceUnderNonePolicyMatchesMiopen)
+{
+    const ScopedEnvironment<bool> warn_search(MIOPEN_WARN_SEARCH, true);
+    const ScopedEnvironment<bool> user_db(MIOPEN_DEBUG_DISABLE_USER_DB, false);
+    const ScopedEnvironment<bool> no_system_db(MIOPEN_DEBUG_DISABLE_SYSTEM_DB, true);
+
+    const std::vector<FindEnforceStep> steps = {
+        {"DB_CLEAN", false, std::nullopt},
+        {"SEARCH", true, false},
+        {"SEARCH", false, false},
+        {"SEARCH_DB_UPDATE", true, false},
+        {"NONE", false, false},
+        {"DB_UPDATE", false, false},
+        {"DB_CLEAN", false, true},
+        {"SEARCH", true, false},
+        {"DB_CLEAN", false, true},
+    };
+
+    for(std::size_t i = 0; i < steps.size(); ++i)
+    {
+        const auto& step = steps[i];
+        const auto name  = "find_enforce_" + std::to_string(i) + "_" + step.value;
+        SCOPED_TRACE(name);
+        const ScopedFindEnforce find_enforce(step.value);
+
+        hs::Owned<miopenHandle_t, miopenDestroy> owned_handle;
+        ASSERT_EQ(miopenCreateWithStream(&owned_handle.handle, get_handle().GetStream()),
+                  miopenStatusSuccess);
+        auto&& handle = miopen::deref(owned_handle.handle);
+
+        {
+            TrainData d;
+            const auto result = TrainUnderPolicy(handle, d, miopenBNSpatial, FindEnforceCase());
+            if(ExpectServed(name + "_train", result))
+            {
+                ExpectFindEnforceOutcome(name + "_train", result, step);
+                CheckTrain(handle, d, true, false);
+            }
+        }
+        {
+            BwdData d;
+            const auto result = BwdUnderPolicy(handle, d, miopenBNSpatial, FindEnforceCase());
+            if(ExpectServed(name + "_bwd", result))
+            {
+                ExpectFindEnforceOutcome(name + "_bwd", result, step);
+                CheckBwd(handle, d);
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Gaps: MIOpen serves these, the hipDNN path declines them
 
