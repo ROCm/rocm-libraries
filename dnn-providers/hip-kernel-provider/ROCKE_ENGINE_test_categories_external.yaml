@@ -21,9 +21,11 @@
 # Most tests carry no Full*/Standard*/Comprehensive* variant, so every tier
 # runs the same coverage. The arch-domain reproducibility gate is intentionally
 # standard-tier: it probes the external LLVM toolchain across the full
-# intrinsic/architecture matrix and does not belong in quick or FFM. It is
-# registered in both build-tree and installed-artifact CTest, so developers and
-# provider CI execute the same logical gate against their respective package data.
+# intrinsic/architecture matrix and does not belong in quick or FFM. The
+# compiler-option reproducibility gate joins it: it re-measures which -mllvm
+# options the loaded compiler accepts. Both are registered in build-tree and
+# installed-artifact CTest, so developers and provider CI execute the same
+# logical gates against their respective package data.
 #
 # The pinned GPU reference entries are regex patterns, unlike most
 # entries here: rocke/platform/CMakeLists.txt registers
@@ -110,6 +112,7 @@ test_categories:
       - "rocke_golden_static"
       - "rocke_differential_golden_ll"
       - "rocke_differential_golden_canonical"
+      - "rocke_oracle_free_pytest"
       - "rocke_library_conv_pytest"
       - "rocke_library_conv_ir_pytest"
       - "rocke_library_conv_tf32_pytest"
@@ -193,6 +196,7 @@ test_categories:
       - "rocke_golden_static"
       - "rocke_differential_golden_ll"
       - "rocke_differential_golden_canonical"
+      - "rocke_oracle_free_pytest"
       - "rocke_library_conv_pytest"
       - "rocke_library_conv_ir_pytest"
       - "rocke_library_conv_tf32_pytest"
@@ -224,6 +228,7 @@ test_categories:
     test_patterns:
       - "rocke_arch_domain_reproducibility"
       - "rocke_library_attention_cache_key_sweep_pytest"
+      - "rocke_compiler_options_reproducibility"
     labels:
       - "host"
       - "toolchain"
