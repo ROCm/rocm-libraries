@@ -37,6 +37,43 @@ def test_install_binds_the_actual_cmake_client_output(tmp_path):
     assert tasks._built_client_path(tmp_path / "build") == expected
 
 
+@pytest.mark.parametrize(
+    ("platform", "name"),
+    [("linux", "tensilelite-client"), ("win32", "tensilelite-client.exe")],
+)
+def test_client_path_task_reports_build_output(tmp_path, monkeypatch, capsys, platform, name):
+    import _tensilelite_client_binding as binding
+
+    monkeypatch.setattr(binding, "sys", SimpleNamespace(platform=platform))
+    build_dir = tmp_path / "build with spaces"
+    tasks.client_path.body(None, build_dir=str(build_dir))
+    assert capsys.readouterr().out == str(build_dir / "tensilelite" / "client" / name) + "\n"
+
+
+def test_client_path_command_does_not_import_the_generator(tmp_path):
+    script = """
+import importlib.abc
+import sys
+from invoke import Program
+
+class NoGenerator(importlib.abc.MetaPathFinder):
+    def find_spec(self, fullname, path=None, target=None):
+        if fullname == "tensilelite" or fullname.startswith("tensilelite."):
+            raise ImportError("client-path must work before the generator is installed")
+
+sys.meta_path.insert(0, NoGenerator())
+Program().run(argv=["invoke", "client-path", "--build-dir", sys.argv[1]])
+"""
+    build_dir = tmp_path / "build with spaces"
+    result = subprocess.run(
+        [sys.executable, "-c", script, str(build_dir)],
+        cwd=_SOURCE_ROOT, capture_output=True, text=True,
+    )
+    executable = "tensilelite-client.exe" if sys.platform == "win32" else "tensilelite-client"
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == str(build_dir / "tensilelite" / "client" / executable) + "\n"
+
+
 def test_rocisa_install_uses_the_invoking_python_and_selected_rocm(
     tmp_path, monkeypatch
 ):

@@ -24,8 +24,15 @@ from urllib.parse import unquote, urlparse
 import warnings
 
 
-_CLIENT_EXECUTABLE = "tensilelite-client.exe" if sys.platform == "win32" else "tensilelite-client"
-"""Installed console-script filename for the TensileLite client."""
+def client_executable_name(platform: str | None = None) -> str:
+    """Filename used by both CMake's client output and installed client lookup."""
+    platform = sys.platform if platform is None else platform
+    return "tensilelite-client.exe" if platform == "win32" else "tensilelite-client"
+
+
+def built_client_path(build_dir: str | os.PathLike[str], platform: str | None = None) -> Path:
+    """Absolute client output path for a TensileLite CMake build directory."""
+    return Path(build_dir).resolve() / "tensilelite" / "client" / client_executable_name(platform)
 
 
 class ClientBindingError(RuntimeError):
@@ -147,7 +154,7 @@ def default_client_candidate(
 ) -> ClientCandidate:
     """Find tensilelite-client in the selected executable search paths."""
     for directory in executable_search_paths:
-        candidate = directory / _CLIENT_EXECUTABLE
+        candidate = directory / client_executable_name()
         if candidate.is_file():
             return ClientCandidate(candidate, source)
     raise ClientBindingError(
