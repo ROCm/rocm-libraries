@@ -544,7 +544,8 @@ inline bool isJsonWhitespace(char c)
 // pass, without a DOM. Returns nullopt when the scan does not accept the shape: the
 // text is not one complete object, or "cases" is missing, is not an array, occurs more
 // than once, or holds an element that is not an object. The scan compares raw key
-// bytes, so an escaped spelling of "cases" also gives nullopt.
+// bytes, so it also gives nullopt when a string at the top level of the object holds an
+// escape.
 inline std::optional<size_t> countSweepCasesWithoutParsing(std::string_view json)
 {
     constexpr int OBJECT_DEPTH = 1;
@@ -563,6 +564,7 @@ inline std::optional<size_t> countSweepCasesWithoutParsing(std::string_view json
     int depth = 0;
     bool inString = false;
     bool escaped = false;
+    bool stringHasEscape = false;
     size_t stringStart = 0;
     bool lastStringIsCasesKey = false;
     bool expectCasesArray = false;
@@ -584,12 +586,17 @@ inline std::optional<size_t> countSweepCasesWithoutParsing(std::string_view json
             else if(c == '\\')
             {
                 escaped = true;
+                stringHasEscape = true;
             }
             else if(c == '"')
             {
                 inString = false;
                 if(depth == OBJECT_DEPTH)
                 {
+                    if(stringHasEscape)
+                    {
+                        return std::nullopt;
+                    }
                     lastStringIsCasesKey
                         = json.substr(stringStart, position - stringStart) == "cases";
                 }
@@ -664,6 +671,7 @@ inline std::optional<size_t> countSweepCasesWithoutParsing(std::string_view json
             break;
         case '"':
             inString = true;
+            stringHasEscape = false;
             stringStart = position + 1;
             break;
         default:

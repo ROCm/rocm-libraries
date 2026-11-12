@@ -160,6 +160,16 @@ std::vector<std::string> enumeratedFilters()
             }
         }
     }
+    for(const auto& first : tinyPatterns)
+    {
+        for(const auto& second : tinyPatterns)
+        {
+            for(const auto& third : tinyPatterns)
+            {
+                filters.push_back(first + "-" + second + "-" + third);
+            }
+        }
+    }
     return filters;
 }
 

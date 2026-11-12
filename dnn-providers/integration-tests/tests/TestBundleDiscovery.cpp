@@ -1394,7 +1394,7 @@ TEST_F(TestBundleDiscoveryFixture, SweepCaseScanEqualsTheParsedIdCount)
         "{ \"cases\" : [ ] }\n",
         R"json({"template":"graph.template.json","cases":[{"id":"a"},{"id":"b"},{"id":"c"}]})json",
         R"json({
-  "note": "{[}],\"\\",
+  "note": ["{[}],\"\\"],
   "cases": [
     {"id": "a{", "values": {"tensors": [{"uid": 0, "dims": [1, 2]}, {"uid": 1}]}},
     {"id": "b]\"", "values": {"x": {"y": {}}}},
@@ -1421,21 +1421,25 @@ TEST_F(TestBundleDiscoveryFixture, SweepCaseScanEqualsTheParsedIdCount)
 
 TEST_F(TestBundleDiscoveryFixture, SweepCaseScanFallsBackOnShapesItDoesNotAccept)
 {
-    const std::vector<std::string> manifests{R"json([])json",
-                                             R"json({})json",
-                                             R"json({"other":[{"id":"a"}]})json",
-                                             R"json({"cases":{}})json",
-                                             R"json({"cases":"a"})json",
-                                             R"json({"cases":[1]})json",
-                                             R"json({"cases":["a"]})json",
-                                             R"json({"cases":[[]]})json",
-                                             R"json({"cases":[{"id":"a"}],"cases":[]})json",
-                                             R"json({"cases":1,"cases":[{"id":"a"}]})json",
-                                             R"json({"cases":[{"id":"a"})json",
-                                             R"json({"cases":[{"id":"a}]})json",
-                                             R"json({"cases":[]} {})json",
-                                             R"json({"ca\u0073es":[{"id":"a"}]})json",
-                                             ""};
+    const std::vector<std::string> manifests{
+        R"json([])json",
+        R"json({})json",
+        R"json({"other":[{"id":"a"}]})json",
+        R"json({"cases":{}})json",
+        R"json({"cases":"a"})json",
+        R"json({"cases":[1]})json",
+        R"json({"cases":["a"]})json",
+        R"json({"cases":[[]]})json",
+        R"json({"cases":[{"id":"a"}],"cases":[]})json",
+        R"json({"cases":1,"cases":[{"id":"a"}]})json",
+        R"json({"cases":[{"id":"a"})json",
+        R"json({"cases":[{"id":"a}]})json",
+        R"json({"cases":[]} {})json",
+        R"json({"ca\u0073es":[{"id":"a"}]})json",
+        R"json({"cases":[{"id":"a"}],"c\u0061ses":[{"id":"a"},{"id":"b"}]})json",
+        R"json({"c\u0061ses":[{"id":"a"},{"id":"b"}],"cases":[{"id":"a"}]})json",
+        R"json({"note":"a\"b","cases":[{"id":"a"}]})json",
+        ""};
 
     size_t throwingManifests = 0;
     for(size_t index = 0; index < manifests.size(); ++index)
