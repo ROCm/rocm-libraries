@@ -184,17 +184,81 @@ inline rocblaslt_status validateDeviceScalarAlphaType(const rocblaslt_matmul_des
     return rocblaslt_status_continue;
 }
 
+inline bool isFp6Datatype(hipDataType datatype)
+{
+    return datatype == static_cast<hipDataType>(HIP_R_6F_E2M3)
+           || datatype == static_cast<hipDataType>(HIP_R_6F_E3M2);
+}
+
 inline bool isValidOrderForDatatype(hipDataType datatype, hipblasLtOrder_t order)
 {
     if((datatype == HIP_R_16F && order != HIPBLASLT_ORDER_COL16_4R8)
        || (datatype == HIP_R_16BF && order != HIPBLASLT_ORDER_COL16_4R8)
        || (datatype == HIP_R_8F_E4M3 && order != HIPBLASLT_ORDER_COL16_4R16)
        || (datatype == HIP_R_8F_E4M3_FNUZ && order != HIPBLASLT_ORDER_COL16_4R16)
-       || (datatype == HIP_R_4F_E2M1 && order != HIPBLASLT_ORDER_COL16_4R32))
+       || (datatype == HIP_R_4F_E2M1 && order != HIPBLASLT_ORDER_COL16_4R32)
+       || (isFp6Datatype(datatype) && order != HIPBLASLT_ORDER_COL256_R128_EXT))
     {
         return false;
     }
     return true;
+}
+
+/// HIPBLASLT_ORDER_COL256_R128_EXT and HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT
+/// describe one input layout: accepted only together, on both A and B of an FP6 TN GEMM,
+/// except that B may keep HIPBLASLT_ORDER_COL.
+/// Shared by rocblaslt_matmul_valid_args and the ext and grouped setProblem paths.
+/// Returns rocblaslt_status_continue if the problem uses neither or uses them validly.
+inline rocblaslt_status
+    validateFp6Tile128x4Args(hipDataType                                typeA,
+                             hipDataType                                typeB,
+                             hipblasOperation_t                         opA,
+                             hipblasOperation_t                         opB,
+                             hipblasLtOrder_t                           orderA,
+                             hipblasLtOrder_t                           orderB,
+                             RocblasltContractionProblem::ScalingFormat scaleAType,
+                             RocblasltContractionProblem::ScalingFormat scaleBType)
+{
+    constexpr auto kScale = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT;
+    const bool     tiledA = orderA == HIPBLASLT_ORDER_COL256_R128_EXT;
+    const bool     tiledB = orderB == HIPBLASLT_ORDER_COL256_R128_EXT;
+    const bool     scaleA = scaleAType == kScale;
+    const bool     scaleB = scaleBType == kScale;
+    if(!tiledA && !tiledB && !scaleA && !scaleB)
+        return rocblaslt_status_continue;
+    if(!(tiledA && (tiledB || orderB == HIPBLASLT_ORDER_COL) && scaleA && scaleB))
+    {
+        log_error(__func__,
+                  "HIPBLASLT_ORDER_COL256_R128_EXT and "
+                  "HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT must be set together on "
+                  "both A and B, except that B may use HIPBLASLT_ORDER_COL; got orderA=",
+                  static_cast<int>(orderA),
+                  " orderB=",
+                  static_cast<int>(orderB),
+                  " scaleAType=",
+                  rocblaslt_scaling_format_to_string(scaleAType),
+                  " scaleBType=",
+                  rocblaslt_scaling_format_to_string(scaleBType));
+        return rocblaslt_status_invalid_value;
+    }
+    if(!isFp6Datatype(typeA) || !isFp6Datatype(typeB))
+    {
+        log_error(__func__,
+                  "HIPBLASLT_ORDER_COL256_R128_EXT requires HIP_R_6F_E2M3 or HIP_R_6F_E3M2 A and "
+                  "B; got a_type=",
+                  static_cast<int>(typeA),
+                  " b_type=",
+                  static_cast<int>(typeB));
+        return rocblaslt_status_invalid_value;
+    }
+    if(opA != HIPBLAS_OP_T || opB != HIPBLAS_OP_N)
+    {
+        log_error(__func__,
+                  "HIPBLASLT_ORDER_COL256_R128_EXT requires opA = HIPBLAS_OP_T and opB = "
+                  "HIPBLAS_OP_N");
+        return rocblaslt_status_invalid_value;
+    }
+    return rocblaslt_status_continue;
 }
 
 /*******************************************************************************
@@ -226,6 +290,17 @@ inline rocblaslt_status validateMatmulSwizzleArgs(const rocblaslt_matmul_desc   
         log_error(__func__, "Error: Invalid Order for hipDataType B.");
         return rocblaslt_status_invalid_value;
     }
+
+    if(auto status = validateFp6Tile128x4Args(a_type,
+                                              b_type,
+                                              matmul_descr->op_A,
+                                              matmul_descr->op_B,
+                                              matA->order,
+                                              matB->order,
+                                              matmul_descr->scaleAType,
+                                              matmul_descr->scaleBType);
+       status != rocblaslt_status_continue)
+        return status;
 
     if(swizzleA && matA->ld != matA->m)
         log_hints(__func__,
