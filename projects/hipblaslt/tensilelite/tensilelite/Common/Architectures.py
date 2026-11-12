@@ -181,6 +181,8 @@ ARCH_CAP_OVERRIDES = {
         },
         "archCaps": {
             "HasTDMMulticast": False,
+            # May use non-coherent (MTYPE NC) mappings.
+            "MTypeNC": True,
             # RequiresXCntForVolatileVMEM is deliberately absent: gfx1250-strict
             # still needs the XNACK-replay xcnt drain, so it inherits the probed True.
         },
