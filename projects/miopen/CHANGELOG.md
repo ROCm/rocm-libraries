@@ -8,8 +8,8 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ### Resolved Issues
 * [Reduce] Fixed `miopenReduceTensor` returning inf, NaN or imprecise results above 1024 reduced
   elements per output when the compute type is wider than the input type (for example FP16 `AVG`
-  with FP32 compute). The workspace size now follows the compute type: allocate with the size
-  `miopenGetReductionWorkspaceSize` returns.
+  with FP32 compute). The workspace size now follows the compute type: allocate the workspace with the
+  size that `miopenGetReductionWorkspaceSize` returns.
 * [Reduce] `miopenReduceTensor` now applies `alpha` and `beta` in the compute type in every
   reduction; they were converted to the input and output type first (a fractional INT8 `alpha` or
   `beta` became 0). The blend with the prior output is made in the compute type and rounded once.
