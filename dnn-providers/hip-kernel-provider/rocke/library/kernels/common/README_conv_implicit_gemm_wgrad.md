@@ -56,6 +56,16 @@ two-stage path.
 
 ## Changelog
 
+### Register-prefetch K loop (`prefetch_global_regs`, MFMA)
+
+The plain synchronous K loop waited for each tile's global reads before its
+MFMAs and never had the next tile in flight. `prefetch_global_regs=True` keeps tile
+k+1's reads in VGPRs under tile k's MFMAs and writes them to LDS at the top of
+the next iteration, behind LDS-only barriers. Mirrored in the C++ engine;
+rejected with `async_dma`, `unroll_k`, `prefetch_addr`, stream-K and on WMMA,
+and when a tile needs more than 32 global loads per thread per operand (the
+carried-value limit both engines share).
+
 ### Async K loop on WMMA (gfx1250)
 
 The WMMA K loop was single-buffered with no overlap: load, barrier, WMMA,
@@ -98,7 +108,7 @@ dW rows, and the extra memory transactions outweigh the halved atomic count.
   Both engines admit WMMA split-K only where the arch catalog sets
   `memory.has_global_float_atomic_add`, and only inside the WMMA wgrad subset
   (`default` or `cshuffle` epilogue, 16x16x16 or 16x16x32 atom).
-- Degree (`WgradSplitPolicy` in `rocke/helpers/split_k.py`): the smaller of a
+- Degree (`WgradSplitPolicy` in `kernels/common/conv_split_k.py`): the smaller of a
   CTA-fill term and a slice-depth term, under a per-dtype cap. Each packed
   16-bit atomic rounds the running sum in dW, so with same-sign partials the
   error grows with the degree, up to about `degree * 2**-8` for bf16 (7
@@ -205,9 +215,9 @@ parameters are required.
 through the packed atomic or the two-stage f32 workspace, is chosen by
 `kernels.common.conv_split_k.resolve_conv_split_k` -- the one resolver the
 dispatcher, the builders and the benchmark share. On arches with a fitted
-split-K cost model (`rocke.helpers.split_k_planner`) it picks the cheapest
+split-K cost model (`kernels.conv.split_k_planner`) it picks the cheapest
 (degree, reduction) under that model; elsewhere it uses the CK formula
-(`select_split_k_wgrad`: `floor((waves_per_cu × num_cus) / base_grid)`,
+(`select_split_k_wgrad`, in the same module: `floor((waves_per_cu × num_cus) / base_grid)`,
 clamped to `[1, wg_K]`). On an arch with a `WgradSplitPolicy` (gfx1250), that
 fallback uses the policy instead; see "Split-K on gfx1250 (WMMA)" below. The
 resolver's `override` argument forces it (the benchmark sets it from

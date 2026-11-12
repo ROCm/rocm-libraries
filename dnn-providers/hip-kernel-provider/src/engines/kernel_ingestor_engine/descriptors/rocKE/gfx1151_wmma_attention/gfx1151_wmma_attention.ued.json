@@ -13,5 +13,8 @@
   "knobs": [
     "head_size",
     "head_size_v"
+    ],
+  "behavior_notes": [
+    "supports_graph_capture"
   ]
 }

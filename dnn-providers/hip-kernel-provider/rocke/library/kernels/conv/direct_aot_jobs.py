@@ -31,6 +31,8 @@ from kernels.conv.direct_variants import (
     DIRECT_FWD_GSTREAM_WMMA as _FWD_GSTREAM,
     DIRECT_FWD_TAPOUTER_WMMA as _FWD_TAPOUTER,
     DIRECT_FWD_SMALLC_WMMA as _FWD_SMALLC,
+    DIRECT_FWD_SMALLC_MFMA as _FWD_SMALLC_MFMA,
+    DIRECT_FWD_SMALLK_MFMA as _FWD_SMALLK_MFMA,
     DIRECT_FWD_SMALLK_WMMA as _FWD_SMALLK,
     DIRECT_FWD_WMMA as _FWD_WMMA,
     DIRECT_GROUPED_HALO as _GROUPED_HALO,
@@ -1155,6 +1157,63 @@ FWD_SMALLC_KNOBS = (
     (2, 8, 2, 2, 8, 32, 4, 1),
     (2, 8, 2, 4, 8, 64, 2, 1),
 )
+# fwd_smallc_mfma (gfx950): (waves_k, waves_p, tiles_k, tiles_p, out_h, out_w,
+# tiles_per_block, prefetch); the best few per stem of a tuning sweep.
+FWD_SMALLC_MFMA_KNOBS = (
+    (1, 4, 1, 4, 4, 64, 1, False),
+    (1, 4, 1, 4, 8, 32, 1, False),
+    (1, 4, 1, 4, 8, 32, 4, False),
+    (1, 4, 1, 4, 8, 32, 4, True),
+    (1, 4, 1, 4, 16, 16, 1, False),
+    (1, 4, 2, 2, 1, 128, 1, False),
+    (1, 4, 2, 2, 4, 32, 1, False),
+    (1, 4, 2, 2, 4, 32, 4, True),
+    (1, 4, 2, 2, 4, 32, 8, True),
+    (1, 4, 2, 2, 8, 16, 1, False),
+    (1, 4, 2, 4, 2, 128, 1, False),
+    (1, 4, 2, 4, 2, 128, 4, True),
+    (1, 4, 2, 4, 2, 128, 8, True),
+    (1, 4, 2, 4, 4, 64, 1, False),
+    (1, 4, 2, 4, 4, 64, 4, True),
+    (1, 4, 2, 4, 8, 32, 1, False),
+    (1, 4, 2, 4, 8, 32, 4, False),
+    (1, 4, 2, 4, 8, 32, 4, True),
+    (1, 4, 2, 4, 16, 16, 1, False),
+    (1, 4, 2, 4, 16, 16, 4, True),
+    (1, 4, 4, 1, 8, 8, 8, True),
+    (1, 4, 4, 2, 2, 64, 4, True),
+    (1, 4, 4, 2, 2, 64, 8, False),
+    (1, 4, 4, 4, 4, 64, 1, False),
+    (1, 4, 4, 4, 4, 64, 4, True),
+    (1, 4, 4, 4, 4, 64, 8, True),
+    (1, 4, 4, 4, 8, 32, 4, True),
+    (1, 4, 4, 4, 8, 32, 8, True),
+    (1, 4, 4, 4, 16, 16, 8, True),
+    (1, 8, 4, 2, 8, 32, 4, True),
+    (2, 2, 2, 2, 1, 64, 1, False),
+    (2, 2, 2, 2, 2, 32, 1, False),
+    (2, 2, 2, 2, 2, 32, 4, True),
+    (2, 2, 2, 2, 4, 16, 1, False),
+    (2, 2, 2, 2, 4, 16, 4, True),
+    (2, 2, 2, 2, 8, 8, 1, False),
+    (2, 4, 2, 2, 2, 64, 1, False),
+)
+# fwd_smallk_mfma (gfx950): (waves, out_h, out_w); a first grid of 4 / 8 waves
+# over 8..32-pixel square-ish output tiles and full-width 1-row strips.
+FWD_SMALLK_MFMA_KNOBS = tuple(
+    (w, oh, ow)
+    for w in (4, 8)
+    for oh, ow in (
+        (8, 8),
+        (8, 16),
+        (16, 16),
+        (16, 32),
+        (32, 32),
+        (4, 64),
+        (1, 128),
+        (2, 128),
+    )
+)
 # fwd_smallk_wmma: (waves_c, waves_p, tiles_c, tiles_p, out_h, out_w, ck,
 # stages, prefetch); prefetch builds with the iterative-ilp scheduler.
 FWD_SMALLK_KNOBS = (
@@ -1762,6 +1821,34 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
         tuple(
             DirectCaps(KH=k, PAD=pad, stride=st, cpg=c, kpg=0)
             for k, pad, st, c in FWD_SMALLC_STEMS
+        ),
+    ),
+    # Its wave64 MFMA port (gfx950): the same stems, but only those whose
+    # flattened (r, s, c) reduction fits the resident weight fragments (at most
+    # 5 MFMA steps: 7x7x3); the 14x14 / 16x16 patchify stems stay on implicit
+    # GEMM.
+    _FWD_SMALLC_MFMA: (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=st, cpg=c, kpg=0)
+            for k, pad, st, c in FWD_SMALLC_STEMS
+            if k * k * c <= 5 * 32
+        ),
+    ),
+    # Its wave64 MFMA port (gfx950): the same layers.
+    _FWD_SMALLK_MFMA: (
+        "fwd",
+        tuple(
+            DirectCaps(
+                KH=kh,
+                kw=0 if kw == kh else kw,
+                PAD=pad,
+                pad_w=-1 if pw == pad else pw,
+                stride=st,
+                cpg=0,
+                kpg=kk,
+            )
+            for kh, kw, pad, pw, st, kk in FWD_SMALLK_LAYERS
         ),
     ),
     _FWD_SMALLK: (
@@ -2386,6 +2473,28 @@ def _knob_grid(
             DW_FWD_WMMA_PREFETCH,
         ):
             yield dict(block_waves=waves, block_h=bh, w_fold=fold, prefetch_rows=pf)
+    elif variant == _FWD_SMALLK_MFMA:
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 64:
+            return
+        for waves, oh, ow in FWD_SMALLK_MFMA_KNOBS:
+            yield dict(waves=waves, out_h=oh, out_w=ow)
+    elif variant == _FWD_SMALLC_MFMA:
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 64:
+            return
+        for wk, wp, tk, tp, oh, ow, tb, pf in FWD_SMALLC_MFMA_KNOBS:
+            knobs = dict(
+                waves_k=wk, waves_p=wp, tiles_k=tk, tiles_p=tp, out_h=oh, out_w=ow
+            )
+            if tb > 1:
+                knobs["tiles_per_block"] = tb
+            if pf:
+                # The next tile's window loads in flight over this one's work.
+                knobs["prefetch"] = True
+            yield knobs
     elif variant in (_FWD_SMALLC, _FWD_SMALLK):
         from rocke.core.arch import ArchTarget
 
@@ -2880,7 +2989,7 @@ def probe_problem(
     """
     from kernels.common.conv_direct_grouped import DirectConvProblem
 
-    if variant in (_FWD_SMALLC, _FWD_SMALLK):
+    if variant in (_FWD_SMALLC, _FWD_SMALLK, _FWD_SMALLC_MFMA, _FWD_SMALLK_MFMA):
         # Ungrouped, the small channel count baked; 128 of the runtime one
         # (a multiple of every channel block and chunk) on a 64x64 image.
         return DirectConvProblem(

@@ -2,7 +2,7 @@
   "version": "1.0",
   "id": "35ec9de9-6a96-4e8d-a369-b6fd9f14060c",
   "name": "hipkernel:Gfx950ConvDgradAot",
-  "sdk_version": "1.0.0",
+  "sdk_version": "1.3.0",
   "graph_match": {
     "native": "hipkernel.gfx950_conv_dgrad_aot.graph_match"
   },
