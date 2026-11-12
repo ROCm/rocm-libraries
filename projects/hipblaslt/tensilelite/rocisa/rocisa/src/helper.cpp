@@ -262,14 +262,13 @@ std::string nullDevicePath()
 #include <algorithm>
 #include <cerrno>
 #include <climits>
+#include <cstdio>
 #include <cstring>
+#include <cxxabi.h>
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#ifdef __GNUG__
-#include <cxxabi.h>
-#endif
 
 namespace
 {
