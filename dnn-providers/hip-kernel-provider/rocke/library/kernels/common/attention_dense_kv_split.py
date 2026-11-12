@@ -60,7 +60,7 @@ def kv_split_admits(spec) -> bool:
         or spec.sliding_window
         or spec.use_sinks
         or spec.emit_lse
-        # gfx950 only: the gfx942 spec has no additive bias.
+        # The gfx950 and gfx942 dense specs carry the field; the base spec does not.
         or getattr(spec, "use_additive_bias", False)
         or spec.ragged
         or spec.varlen

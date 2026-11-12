@@ -694,22 +694,3 @@ def test_the_binding_hands_attn_bias_to_the_runner(monkeypatch):
     assert calls[0]["additive_bias"] is bias and calls[0]["spec"].use_additive_bias
     assert calls[1]["additive_bias"] is override
     assert "additive_bias" not in calls[2]
-
-
-def test_the_gfx942_binding_refuses_attn_bias():
-    from dispatch.attention.bindings import bind_dense_attention_torch
-
-    req = _request(arch="gfx942", use_attn_bias=False)
-    ts = SimpleNamespace(
-        kernel_spec=SimpleNamespace(head_size=128),
-        launch_grid=lambda: (1, 1, 1),
-        launch_block=lambda: (256, 1, 1),
-    )
-    binding = bind_dense_attention_torch(
-        req, ts, {"q": 0, "k": 0, "v": 0, "out": 0, "attn_bias": object()}
-    )
-    with pytest.raises(
-        NotImplementedError,
-        match=r"gfx942 dense runner does not accept tensors\['attn_bias'\]",
-    ):
-        binding.launch()

@@ -229,6 +229,12 @@ order the hipDNN catalog ships.
 C++ engine for byte-identity; it needs the `rocke_engine` binding, which the CI
 lanes do not build, so run it locally with `ROCKE_CPP_STRICT=1`.
 
+The gfx942 `attention_dense` kernel (default and persistent grids) takes
+`use_additive_bias` through the same helper, and is likewise not a gap: no C++
+builder mirror by design. Its bias-on harness cases are pinned in the same golden
+(`attention_dense/gfx942/bias_*`) and lowered through the C++ engine by the same
+parity test.
+
 Bias validation is not shared everywhere yet. The host checks of a bias launch
 (`check_additive_bias_tensor`, `check_additive_bias_reach`) serve the unified
 and dense runners, but the gfx1151 dispatch binding (`dispatch/attention/bindings.py`)

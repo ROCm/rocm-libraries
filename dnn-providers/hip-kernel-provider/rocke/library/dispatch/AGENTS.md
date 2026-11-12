@@ -210,6 +210,17 @@ an otherwise invalid configuration can become valid before later knobs
 are considered. Only `lazy_rescale` is untunable on gfx942, because the
 kernel body does not read it.
 
+gfx942 dense also takes the additive bias (`use_attn_bias`, fp32 only) on both
+grids. The two spec fields it adds, `use_additive_bias` and `use_bias_x4` (the
+bias load width, which the kernel's policy resolves), are
+`DENSE_ARCH_PROBLEM_FIELDS`: sweeps never vary them and they stay out of the
+defaults fingerprint, so every `gfx942_dense` `tuning_id` is the one stored before
+they existed. Dispatch adds no eligibility rule beyond the fp32 refusal; the
+factory only keeps the KV-segment split off a bias request's bottom-right chunk
+(the kernel refuses the combination), and the walk reaches only specs the kernel
+accepts, so a bias request is never offered the K double-buffer or V
+register-prefetch pipeline.
+
 Two performance levers are **independent opt-ins** for supported BF16 D128
 causal attention (`sliding_window=0`, no sinks), with or without
 `causal_diag_split`: `lds_num_buffers=2` enables **K LDS double buffering

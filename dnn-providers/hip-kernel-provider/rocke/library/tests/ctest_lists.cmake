@@ -184,9 +184,9 @@ else()
          "  TIMEOUT 600)\n")
 endif()
 
-# Library attention CPU tests (no GPU required): the gfx950 dense additive-bias
-# host contract, gfx950 LDS budget model, dense block-order decodes, spec-wrapper
-# parity gate, the 3D decode split rule and K/V cache policy, the scalar
+# Library attention CPU tests (no GPU required): the gfx950 and gfx942 dense
+# additive-bias host contracts, gfx950 LDS budget model, dense block-order decodes,
+# spec-wrapper parity gate, the 3D decode split rule and K/V cache policy, the scalar
 # fallback's cache key and block-table stride kernarg, the unified attention
 # running-max carry and keyless guards on the emitted IR, the tiled 2D LSE
 # store on the emitted IR, the
@@ -209,6 +209,7 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_bwd_body.py"
     "tests/library/tests/test_gfx1250_attention_operand_roles.py"
     "tests/library/tests/test_gfx1151_fmha_operand_roles.py"
+    "tests/library/tests/test_attention_dense_bias_gfx942.py"
     "tests/library/tests/test_attention_dense_bias_gfx950.py"
     "tests/library/tests/test_attention_dense_decode.py"
     "tests/library/tests/test_attention_dense_gfx942_golden.py"
@@ -459,13 +460,14 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT 1800)\n")
 
-# gfx950 additive-bias numeric lane (unified and dense kernels). Its own entry
-# (selected by name, like the one above) so its runtime does not eat into that
-# entry's timeout. Both files drive the torch runners and skip without torch;
-# the dense kernel's torch-free subset (test_attention_dense_bias_gfx950_gpu.py)
-# runs in rocke_library_gpu_pytest below.
+# Additive-bias numeric lane (the gfx950 unified and dense kernels, the gfx942 dense
+# kernel). Its own entry (selected by name, like the one above) so its runtime does
+# not eat into that entry's timeout. All files drive the torch runners and skip
+# without torch, each also off its own arch; the dense kernels' torch-free subsets
+# (test_attention_dense_bias_gfx950_gpu.py and test_attention_dense_bias_gfx942_gpu.py)
+# run in rocke_library_gpu_pytest below.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_library_attention_bias_gpu_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_additive_bias_gfx950_numeric.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_dense_bias_gfx950_numeric.py\" -v -rs)\n")
+       "add_test(rocke_library_attention_bias_gpu_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_additive_bias_gfx950_numeric.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_dense_bias_gfx950_numeric.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_dense_bias_gfx942_numeric.py\" -v -rs)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_bias_gpu_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
@@ -475,8 +477,9 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # Library GPU numeric suites: convolution, attention, KDA, and GDN. The gfx950
 # dense numeric and extended-parity attention tests run only in
 # rocke_library_attention_gpu_pytest above, not again here; the exception is
-# the dense additive-bias torch-free subset (test_attention_dense_bias_gfx950_gpu.py),
-# which runs here because this lane has no torch.
+# the dense additive-bias torch-free subsets (test_attention_dense_bias_gfx950_gpu.py
+# and test_attention_dense_bias_gfx942_gpu.py), which run here because this lane
+# has no torch.
 # Select files rather than the "gpu" pytest marker because several runtime
 # tests lack that marker. Their dependency and architecture checks report
 # skips when the required torch installation or GPU is unavailable; the
@@ -510,6 +513,7 @@ set(_ROCKE_LIBRARY_GPU_TEST_RELPATHS
     "tests/library/tests/test_conv_direct_nongrouped_tf32.py::TestNongroupedF32Gpu::test_one_binary_serves_every_shape"
     "tests/library/tests/test_attention_dense_gfx942_numeric.py"
     "tests/library/tests/test_attention_scalar_block_table_numeric.py"
+    "tests/library/tests/test_attention_dense_bias_gfx942_gpu.py"
     "tests/library/tests/test_attention_dense_bias_gfx950_gpu.py"
     "tests/library/tests/test_attention_unified_lse_numeric.py"
     "tests/library/tests/test_fmha_mfma_free_stride_numeric.py"

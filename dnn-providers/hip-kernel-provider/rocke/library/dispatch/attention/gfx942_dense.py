@@ -137,9 +137,11 @@ def tuned_base_spec(req: AttentionRequest):
 
     The gfx942 twin of ``gfx950_dense._base_spec``. The persistent grid turns on
     at D128, and non-tile-multiple self-attention lengths take the on-chip
-    ragged path. A chunked bottom-right request whose work items fill their last
-    wave poorly splits each item's KV range across CTAs, where the kernel admits
-    the split.
+    ragged path. ``req.use_attn_bias`` turns on the kernel's additive bias (fp32
+    only), which the persistent grid serves too. A chunked bottom-right request
+    whose work items fill their last wave poorly splits each item's KV range across
+    CTAs, where the kernel admits the split (never with a bias: the segment store
+    returns before the bias epilogue).
     ``waves_per_eu`` comes from the kernel's own per-config policy
     (``_tuned_waves_per_eu``): any value the kernel bakes into its
     ``kernel_name`` must be resolved by the kernel's policy, or the name tag and
@@ -164,7 +166,8 @@ def tuned_base_spec(req: AttentionRequest):
         _DENSE_BLOCK_N,
         persistent=head_size == 128,
     )
-    if spec.causal_bottom_right:
+    # Not with a bias: the segment store returns before the bias epilogue.
+    if spec.causal_bottom_right and not spec.use_additive_bias:
         from kernels.common.attention_dense_kv_split import (
             max_kv_segments_for_extent,
         )
@@ -255,6 +258,12 @@ def _make_spec(
         _tuned_waves_per_eu,
     )
 
+    # ``use_attn_bias`` is a bool: AttentionRequest refuses anything else.
+    if req.use_attn_bias and req.attn_bias_dtype.strip().lower() != "f32":
+        raise ValueError(
+            "gfx942 dense: the additive bias must be fp32, got "
+            f"attn_bias_dtype={req.attn_bias_dtype!r}"
+        )
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
     head_size = int(req.hdim_q)
     dtype = req.dtype.lower()
@@ -301,6 +310,7 @@ def _make_spec(
         causal_bottom_right=bottom_right,
         causal_diag_split=diag_split,
         window_wave_skip=window_wave_skip,
+        use_additive_bias=req.use_attn_bias,
     )
 
 
@@ -337,10 +347,18 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         base_spec=tuned_base_spec,
         supports=_supports,
         # Dense: causal (top-left or bottom-right), sliding-window and sinks (alone
-        # or combined), optional LSE output. Head size stays out: D64/D128 coverage
-        # is ``supports_attention_dense``'s call.
+        # or combined), optional LSE output and fp32 additive bias (both grids; see
+        # ``tuned_base_spec``). Head size stays out: D64/D128 coverage is
+        # ``supports_attention_dense``'s call.
         features=frozenset(
-            {"causal", "causal_bottom_right", "sliding_window", "sinks", "lse"}
+            {
+                "causal",
+                "causal_bottom_right",
+                "sliding_window",
+                "sinks",
+                "lse",
+                "attn_bias",
+            }
         ),
         # tuned_base_spec picks these from the dtype, head size, work count and window.
         recorded=frozenset(

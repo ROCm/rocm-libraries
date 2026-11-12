@@ -88,8 +88,8 @@ named follow-up, now as upside rather than as a fix for a deficit.
 
 ## Scope
 
-gfx942 only · forward-inference prefill · dense causal or full, optional SWA and sinks
-(no paging / bias)
+gfx942 only · forward-inference prefill · dense causal or full, optional SWA, sinks,
+LSE and fp32 additive bias (no paging)
 · bf16 + fp16 · head dims **D64 & D128** · MHA + GQA incl. non-power-of-2 (40/8, 28/4)
 · default **and** persistent grids. D256 is out of scope — it is served by its own
 wide-atom candidates.
@@ -130,6 +130,69 @@ carries no LSE stores. The LSE buffer must not
 overlap any input or the output; supplying it with the flag off is an error. The
 dispatcher exposes it as `AttentionRequest(emit_lse=True)` pinned to `gfx942_dense`,
 with the buffer passed as `tensors["lse"]` to `bind_torch`; hipDNN does not yet.
+
+### Optional additive bias through the direct runner
+
+An additive bias (hipDNN's `attn_mask`, PyTorch's float `attn_mask`) is added to the
+scaled scores before the mask: `softmax(QK * scale + bias)`. It is a compile-time
+opt-in on the gfx942 dense spec, `use_additive_bias=True`, served by both grids (the
+default and the persistent one). The kernel name gains `addb`, and the kernel gains
+four trailing params (the bias pointer and its three strides).
+
+```python
+spec = Gfx942AttentionDenseSpec(
+    batch=2, seqlen_q=512, seqlen_kv=512,
+    num_query_heads=32, num_kv_heads=8, head_size=128,
+    causal=True, dtype="bf16", use_additive_bias=True,
+)
+# One bias row per (batch, query head, query): [B, Hq, Sq, Skv]. Any leading axis may
+# be 1 to broadcast, e.g. a [1, 1, 1, 512] key-padding row shared by every query.
+bias = torch.zeros((2, 32, 512, 512), dtype=torch.float32, device=q.device)
+run_attention_dense_torch(
+    spec=spec, q=q, k=k, v=v, out=out, additive_bias=bias, scale=128**-0.5,
+)
+```
+
+- **Layout.** fp32 `[B|1, Hq|1, Sq|1, Skv]`, on q's device, indexed by the query head
+  (not the KV head). The key axis must be full length at unit stride; the other strides
+  are free (a padded row pitch works), and an extent-1 axis broadcasts through stride 0.
+- **Size.** The kernel indexes the bias in i32: a launch whose largest element index
+  reaches 2**31 (8 GiB of fp32) raises `NotImplementedError`; broadcast an axis or split
+  the launch. Strides that reach past the tensor's storage raise `ValueError`.
+- **Masking values.** `-inf` masks a key. A row with no unmasked key writes zero output
+  and `LSE=-inf` (`LSE=sink` with a finite sink), as the hipDNN reference does for a row
+  of `-inf` scores; that includes the rows a sliding window leaves without a key, whatever
+  their bias. A finite bias is an ordinary score, except that one below -2**97 (about
+  -1.6e29) is raised to that, which keeps it above the kernel's own mask sentinel. A row
+  whose visible keys are all below it (e.g. `finfo(float32).min` padding) therefore gets
+  the uniform softmax over them, as the reference and PyTorch give it (O = mean(V) over
+  the keys the mask leaves), with an `LSE` of about -2**97 where theirs is about the bias
+  itself; biases that differ below -2**97 are not told apart. A NaN bias on a visible key
+  makes its row NaN (O and `LSE`), as in the reference; a NaN on a key the mask removes is
+  ignored. A bias above about 2.3e38 overflows to a NaN row.
+- **Composes with** every mask the kernel serves (none, top-left and bottom-right
+  causal, sliding window), sinks and LSE, fp16/bf16, D64/D128, and both grids.
+- **Refused** by `supports_attention_dense`: the KV-segment split (`kv_segments > 1`;
+  its segment store skips the bias epilogue), the opt-in K double-buffer / V
+  register-prefetch pipeline (`lds_num_buffers=2`, `v_reg_prefetch=True`; the bias
+  load queues behind the next tile's loads, and the prefetch variant keeps V in
+  registers across it) and paged K/V. As without a bias, varlen and ragged specs are
+  refused too: every row and key a bias kernel visits is inside the bias, which is why
+  its loads need no mask.
+- **Load width.** `use_bias_x4` picks how the bias is read: `True` reads four keys per
+  16-byte load (element-aligned only; one pointer per KV tile, the offsets folded into
+  the load immediates), `False` one key per load, and `None` (default) asks the policy
+  (`_use_bias_x4`). The policy picks the 4-wide loads for bf16 D64 only, where scalar
+  loads spill to scratch inside the KV loop under that config's 128-VGPR cap; every
+  other config keeps scalar loads until a device measurement says otherwise (neither
+  form spills on D128 with the floored bias term). Both add the same scores bit for bit. The kernel name tags an
+  explicit value only when it differs from the policy (`bx41` / `bx40` after `addb`),
+  so a policy change alters the code under an unchanged `_addb` symbol.
+
+Through the dispatcher, set `use_attn_bias=True` (fp32 only: `attn_bias_dtype="f32"`)
+on an `AttentionRequest` pinned to `gfx942_dense` (a `layout="dense"` request routes
+there too) and pass the bias as `tensors["attn_bias"]`. The factory keeps the KV-segment
+split off a bias request. hipDNN does not serve the bias on gfx942 yet.
 
 ## Why a separate kernel (not an arch branch in the gfx950 file)
 
