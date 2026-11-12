@@ -1026,6 +1026,25 @@ struct K1Tiles
     // sub-tap's, packTaps taps on per iteration; packChan is its channel within the tap.
     int curIt, endIt, curC, curQs, curQr, curQt;
     int packTaps, packSub, packChan;
+    // PACK 2: unsigned magic division by cgroup, taps[2] and taps[1] (uniform, set in init), so a
+    // k-step's carry through the taps is a few multiplies, not a per-thread subtract loop.
+    unsigned cgMul, cgSh, sMul, sSh, rMul, rSh;
+    __device__ static void magicOf(int d, unsigned& mul, unsigned& sh)
+    {
+        unsigned s = 0;
+        while((1u << s) < static_cast<unsigned>(d))
+            ++s;
+        sh = s;
+        mul = static_cast<unsigned>(((static_cast<unsigned long long>((1ull << s) - d)) << 32)
+                                        / static_cast<unsigned long long>(d)
+                                    + 1);
+    }
+    /// n / d for 0 <= n < 2^31 (mul, sh from magicOf(d)).
+    __device__ static int magicDiv(int n, unsigned mul, unsigned sh)
+    {
+        return static_cast<int>((__umulhi(static_cast<unsigned>(n), mul) + static_cast<unsigned>(n))
+                                >> sh);
+    }
     long long tapStride;
     long long aBase[A_PASSES];
     int aD[A_PASSES], aH[A_PASSES], aW[A_PASSES];
@@ -1148,6 +1167,9 @@ struct K1Tiles
         else if constexpr(PACK == 2)
         {
             cChunks = 1;
+            magicOf(gather.cgroup, cgMul, cgSh);
+            magicOf(gather.taps[2], sMul, sSh);
+            magicOf(gather.taps[1], rMul, rSh);
         }
 #if K1_BUFFER
         bRsrc = k1Rsrc(
@@ -1208,20 +1230,16 @@ struct K1Tiles
         if constexpr(PACK == 2)
         {
             // BK channels on, carried through the taps (several when cgroup < BK).
-            packChan += BK;
-            while(packChan >= gather.cgroup)
-            {
-                packChan -= gather.cgroup;
-                if(++curQs == gather.taps[2])
-                {
-                    curQs = 0;
-                    if(++curQr == gather.taps[1])
-                    {
-                        curQr = 0;
-                        ++curQt;
-                    }
-                }
-            }
+            const int t = packChan + BK;
+            const int adv = magicDiv(t, cgMul, cgSh);
+            packChan = t - adv * gather.cgroup;
+            const int s = curQs + adv;
+            const int sCarry = magicDiv(s, sMul, sSh);
+            curQs = s - sCarry * gather.taps[2];
+            const int r = curQr + sCarry;
+            const int rCarry = magicDiv(r, rMul, rSh);
+            curQr = r - rCarry * gather.taps[1];
+            curQt += rCarry;
         }
         else if constexpr(PACK != 0)
         {
@@ -1743,6 +1761,21 @@ __device__ inline void k1DmaBarrier()
     asm volatile("s_waitcnt vmcnt(%0) lgkmcnt(0)\n\ts_barrier" ::"n"(N) : "memory");
 }
 
+// LDS hand-off barrier of the matrix-core kernel: its waves exchange data through LDS only. On
+// gfx12, __syncthreads() fences every address space at workgroup scope and so adds a global_inv
+// (L0 invalidate) after each barrier, two per k-step; fences on the local address space suffice.
+// Other families keep __syncthreads() (its code there is what this would emit, or close to it).
+__device__ inline void k1LdsBarrier()
+{
+#if HKP_ARCH_GFX12
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
+    __builtin_amdgcn_s_barrier();
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+#else
+    __syncthreads();
+#endif
+}
+
 // Matrix-core kernel. Block: WM x WN waves, tile BM x BN, k-step BK, STAGES LDS buffers (2: the
 // next tile is stored while the current one is multiplied, one barrier per k-step). Grid: (m
 // tiles, n tiles, groups [x phases for backward data] [x splits]). XCD 1: XCD-contiguous block
@@ -2065,10 +2098,10 @@ __device__ void k1ConvMma(const K1Args& a)
         {
             const int qEnd = (end - ch * nT) < nT ? end - ch * nT : nT;
             const bool nextChunk = (ch + 1) * nT < end;
-            __syncthreads();
+            k1LdsBarrier();
             halo.template store<S, Tiles>(As, LD, APL);
             tiles.storeB(Bs, LD, BN * LD);
-            __syncthreads();
+            k1LdsBarrier();
             if(nextChunk)
             {
                 halo.load((ch + 1) * BK);
@@ -2112,9 +2145,9 @@ __device__ void k1ConvMma(const K1Args& a)
                 multiply(As, Bs);
                 if(q + 1 < qEnd)
                 {
-                    __syncthreads();
+                    k1LdsBarrier();
                     tiles.storeB(Bs, LD, BN * LD);
-                    __syncthreads();
+                    k1LdsBarrier();
                 }
                 qt = nt;
                 qr = nr;
@@ -2181,7 +2214,7 @@ __device__ void k1ConvMma(const K1Args& a)
             }
             for(int it = 0; it < iters; ++it)
             {
-                __syncthreads();
+                k1LdsBarrier();
                 tiles.load();
                 const S* cur = tile + (it & 1) * STAGE_S;
                 multiply(cur, cur + PLANES * BM * LD);
@@ -2195,9 +2228,9 @@ __device__ void k1ConvMma(const K1Args& a)
         {
             for(int it = 0; it < iters; ++it)
             {
-                __syncthreads();
+                k1LdsBarrier();
                 store(tile);
-                __syncthreads();
+                k1LdsBarrier();
                 tiles.load();
                 multiply(tile, tile + PLANES * BM * LD);
             }
@@ -2237,7 +2270,7 @@ __device__ void k1ConvMma(const K1Args& a)
         // wave's column-major LDS strip, then runs of VEC rows (consecutive positions of one
         // channel) to global; single elements where a run is not contiguous in the output (an
         // image boundary, a stride phase) or past the last row.
-        __syncthreads();
+        k1LdsBarrier();
         T* strip = lds + wave * DIM * OLDC;
         constexpr int RUNS = CFR / VEC;
         K1CfWalk walk;
@@ -2298,7 +2331,7 @@ __device__ void k1ConvMma(const K1Args& a)
 
     // Epilogue: per DIM-row slab, accumulators to the wave's LDS strip, then rows of VEC columns
     // to global (single columns past the last full vector).
-    __syncthreads();
+    k1LdsBarrier();
     T* strip = lds + wave * DIM * OLD;
     constexpr int ROW_VECS = WTN / VEC;
 #pragma unroll
