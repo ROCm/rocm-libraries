@@ -44,7 +44,9 @@ more than one section keeps the first section's default as its one ``default: tr
 floor. A section may also set ``spec_overrides``, spec fields replaced on every spec it
 yields (e.g. an output the registry never selects, such as ``emit_lse``), and its own
 ``kernel_name_template``, so its kernels are new names beside the other sections'; its
-default is the ``default: true`` floor of its own (cell, overrides) group. A ``space: full``
+default is the ``default: true`` floor of its own (cell, overrides) group, where a pinned
+``reduction.fields`` performance or ignored field (a production stack) is no part of the
+group: it changes how a kernel runs, not what it serves. A ``space: full``
 section projects its own varying performance knobs; the catalog's projected knobs are the
 union over sections, in ``reduction.fields.performance`` order.
 
@@ -794,10 +796,21 @@ class Registry:
             )
         return _overridden(spec, self.spec_overrides, cell)
 
-    def overrides_key(self) -> tuple:
+    def overrides_key(self, tuning=()) -> tuple:
         """What, beside the cell, groups this section's kernels for the
-        ``default: true`` floor."""
-        return tuple(sorted(self.spec_overrides.items()))
+        ``default: true`` floor: its ``spec_overrides`` other than the ``tuning`` fields
+        (``reduction.fields`` performance and ignored). A pinned tuning field (a
+        production stack, the wave occupancy) moves how a kernel runs, not which graphs
+        it serves, so the cell's one floor already covers it; any other override (an
+        LSE output) makes kernels that serve graphs the first section's do not, which
+        need a floor of their own."""
+        return tuple(
+            sorted(
+                (name, value)
+                for name, value in self.spec_overrides.items()
+                if name not in tuning
+            )
+        )
 
     def provenance(self, cell: dict, spec) -> dict:
         """The supplying pin's ``spec_id`` and, when the registry names the kernel,
@@ -1322,7 +1335,8 @@ def enumerate_space(manifest: dict, registry: Registry | None = None) -> Enumera
         # keyed by all its items, the keyed attributes `cell_spaces` adds included;
         # a section's own `spec_overrides` group keeps its floor apart from another
         # section's, since their kernels differ.
-        group = section.overrides_key()
+        tuning = {*classification.performance, *classification.ignored}
+        group = section.overrides_key(tuning)
         extra = [
             (cell, ks, is_default and (tuple(cell.items()), group) not in floors)
             for cell, ks, is_default in extra

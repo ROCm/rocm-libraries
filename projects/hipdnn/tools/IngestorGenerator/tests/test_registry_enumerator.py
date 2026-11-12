@@ -1426,11 +1426,17 @@ def test_one_rule_admits_a_pinned_performance_field_and_a_feature_axis(
     pinned_feature = copy.deepcopy(manifest["enumerate"])
     pinned_feature["spec_overrides"] = {"tile_n": 128}
     manifest["enumerate"]["also"] = [pinned_performance, pinned_feature]
+    kernels = _kernels(manifest)
     tiles = [
         (k["kernel_source"]["spec"]["tile_m"], k["kernel_source"]["spec"]["tile_n"])
-        for k in _kernels(manifest)
+        for k in kernels
     ]
     assert tiles == [(64, 64)] * 4 + [(128, 64)] * 4 + [(64, 128)] * 4
+    # The pinned performance field changes how a kernel runs, not what it serves, so the
+    # cell's one floor covers it; the feature override serves other graphs, so it has its own.
+    assert [bool(k.get("default")) for k in kernels] == (
+        [True] * 4 + [False] * 4 + [True] * 4
+    )
 
 
 def test_hold_fields_naming_a_field_the_spec_lacks_is_exit_2(

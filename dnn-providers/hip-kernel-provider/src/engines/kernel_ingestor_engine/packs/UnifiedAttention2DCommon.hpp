@@ -204,8 +204,8 @@ inline std::optional<BoundTokens> graphMatches(const MatchContext& context,
         return std::nullopt;
     }
 
-    const auto matched = matchAttributes(
-        context, *operands->attributes, problem, arch.engineName, *arch.traits);
+    const auto matched
+        = matchAttributes(context, *operands->attributes, problem, arch.engineName, *arch.traits);
     if(!matched.has_value())
     {
         return std::nullopt;
@@ -337,8 +337,7 @@ bool kernelMatches(const MatchContext& context,
 
     // Only an LSE-on kernel serves a graph that asks for stats, and only such a graph: the
     // LSE store is baked in, with its trailing lse_ptr.
-    const auto stats
-        = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, arch.graph.tokens.stats);
+    const auto stats = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, arch.graph.tokens.stats);
     if(!stats.has_value() || candidate->emitLse != (*stats != NO_STATS))
     {
         return false;
