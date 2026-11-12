@@ -509,9 +509,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         // UsePreparedBase: *prepared is this stage's access-0 LDS address, formed by the
         // caller before the WMMA stream (V for the V stages, the next K tile for the last
         // stage). Every read of the stage is then a constant offset of that one register, so
-        // no fresh VALU address write sits between a WMMA and the reads that follow it.
-        static_assert(!UsePreparedBase || !Mode::SelectedPolicy::kLeadFirstLoad,
-                      "prepared PV bases are wired for the WMMA-first placement only");
+        // no fresh VALU address write sits between a WMMA and the reads that follow it; with
+        // kLeadFirstLoad the prelude's access 0 reads from it too.
         using SelectedSchedule = typename Mode::SelectedPolicy::Schedule;
         using Executor         = FmhaTdmSchedPlacementExecutor<SelectedSchedule, Mode>;
         using Kind             = FmhaTdmSchedLoadKind;
@@ -529,7 +528,10 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
         {
             SelectedSchedule::template RunPvReadPrelude<Mode, Stage>([&](auto event) {
                 static_assert(decltype(event)::value == 0);
-                if constexpr(Stage == 0)
+                if constexpr(Stage == 0 && UsePreparedBase)
+                    FmhaTdmAffineVRead::Load<0, kVPhysicalStride>(
+                        next_b_block_tensor, b_lds_window, *prepared);
+                else if constexpr(Stage == 0)
                 {
                     prepared_v1 = FmhaTdmPreparedKRead::Prepare<1>(b_lds_window);
                     __builtin_amdgcn_sched_barrier(0);
@@ -537,7 +539,10 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
                 }
                 else
                 {
-                    affine_k0 = FmhaTdmPreparedKRead::Prepare<0>(b_lds_window);
+                    if constexpr(UsePreparedBase)
+                        affine_k0 = *prepared;
+                    else
+                        affine_k0 = FmhaTdmPreparedKRead::Prepare<0>(b_lds_window);
                     FmhaTdmAffineKRead::Load<Stage, 0, kKPhysicalStride>(
                         next_b_block_tensor, b_lds_window, affine_k0);
                 }
