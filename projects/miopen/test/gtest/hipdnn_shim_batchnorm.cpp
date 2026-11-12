@@ -4,17 +4,17 @@
 // Shim-surface tests for the forwarded batchnorm entry points. The derived
 // suites reuse the bn.hpp fixtures, which reach compute only through the public
 // miopenBatchNorm* API and check against the fusionHost.hpp CPU reference. The
-// plain tests cover what those fixtures cannot reach: epsilon and momentum in
-// the plan key, running stats updated in place, null save and running pointers,
-// inference without estimated stats, per-activation mode, clipped activations,
-// backward without saved stats, and the calls the hipDNN path declines while
-// MIOpen serves them. Most of those record whether the call was served, so the
-// parity harness can pin the expected divergences. The plan-key, in-place and V2
-// activation tests require the call to be served. The rest record the status,
-// for problems both modes must fail the same way: alpha/beta other than 1/0,
-// tensors MIOpen rejects as BadParm, and problems no MIOpen solver takes. The
-// declined-problem test runs only with forwarding on, and checks the reason the
-// hipDNN path gives for problems it does not forward.
+// plain tests cover what those fixtures cannot reach: epsilon, momentum, saved
+// stats and graph kind in the plan key, running stats updated in place, null
+// save and running pointers, inference without estimated stats, per-activation
+// mode, clipped activations, backward without saved stats, and the calls the
+// hipDNN path declines while MIOpen serves them. Most of those record whether
+// the call was served, so the parity harness can pin the expected divergences.
+// The plan-key, in-place and V2 activation tests require the call to be served.
+// The rest record the status, for problems both modes must fail the same way:
+// alpha/beta other than 1/0, tensors MIOpen rejects as BadParm, and problems no
+// MIOpen solver takes. The declined-problem test runs only with forwarding on,
+// and checks the reason the hipDNN path gives for problems it does not forward.
 //
 // Not covered, because MIOpen itself has no defined behavior to compare with:
 // null alpha/beta pointers (MIOpen dereferences them), null dscale/dbias on
@@ -920,6 +920,32 @@ TEST(GPU_HipdnnShimBNPlanKey_FP32, SavedStatsSelectTheirOwnPlan)
         d.epsilon = kProviderEpsilon;
         ASSERT_EQ(BwdV1(handle, d, true), miopenStatusSuccess);
         CheckBwd(handle, d);
+    }
+}
+
+// Training without running stats and inference with estimates bind the same six
+// tensors at the same epsilon, so only the graph kind tells their plans apart. An
+// inference call that reused the training plan would normalize x with its own
+// batch stats, not the estimates, which the test data draws at random.
+TEST(GPU_HipdnnShimBNPlanKey_FP32, GraphKindSelectsItsOwnPlan)
+{
+    auto&& handle = get_handle();
+
+    {
+        SCOPED_TRACE("training without running stats");
+        TrainData d;
+        SetUpTrain(d);
+        d.epsilon = kProviderEpsilon;
+        ASSERT_EQ(TrainV2(handle, d, {true, true, false, false}), miopenStatusSuccess);
+        CheckTrain(handle, d, true, false);
+    }
+    {
+        SCOPED_TRACE("inference with estimates");
+        InferData d;
+        SetUpInfer(d);
+        d.epsilon = kProviderEpsilon;
+        ASSERT_EQ(InferV1(handle, d, true), miopenStatusSuccess);
+        CheckInfer(handle, d);
     }
 }
 
