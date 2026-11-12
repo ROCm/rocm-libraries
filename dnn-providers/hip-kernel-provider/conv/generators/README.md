@@ -24,6 +24,8 @@ python3 gen_igemm.py ../../src/engines/kernel_ingestor_engine/descriptors/conv/i
 
 The naive engines (`descriptors/conv/naive`, 9 configs) are maintained by hand.
 
+`gen_conv_stem_bwd.py` enumerates a config space and ships only the configs listed in `conv_stem_bwd_kept.txt`, chosen by a per-config bench (the file's header says how). `python3 gen_conv_stem_bwd.py <dir> --universe` writes the whole space, the input for re-selecting the list.
+
 Rules the generators follow, which the engine packs and tests rely on:
 - **Ids are stable.** Every id is a `uuid5` of the config's content, so regenerating doesn't churn the files.
 - **Configs are told apart only by integer knobs.** Candidate enumeration and the winner cache distinguish configs only by their integer knob fields. A config field that changes the compiled kernel must therefore be an int knob. The engines' catalog tests fail if two configs share a knob tuple, and some generators also assert it.

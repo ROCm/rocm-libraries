@@ -25,7 +25,7 @@ No single engine is meant to win everywhere. Each one targets a regime, and most
 | `CONV_WRW` (K3) | Backward weights. Several loops: row ring, output rows (any stride), height-stride phased ring, gfx950 direct (hipconv `direct_wgrad` class), small-C rows for stems, and FMA rows for exact fp32 on RDNA. At one split, configs with `dws` 1 write dw directly with no reduce. A generic tier (`loop` 8) covers the filter widths, strides and dilations no specialized config has, and x/dy in any strides (see "Two tiers" below). | wrw | MFMA, WMMA, FMA | 4755 |
 | `CONV_GROUP_FWD/BWD` (K4) | Small-group grouped conv (2 ≤ C/g ≤ 16, ResNeXt and RegNet): one 16x16 MMA serves 16/(C/g) groups through a block-diagonal filter. Wide groups (17 ≤ C/g ≤ 64) pad each group to 16-channel blocks. K1's `fuse` knob is its implicit-GEMM alternative. | fwd (s1, s2), bwd-data (s1; s2 by phases) | MFMA, WMMA; fp32 by FMA on RDNA | 2042 |
 | `CONV_GROUP_WRW` (K4) | Backward weights for small groups (2 ≤ C/g ≤ 16): the same block-diagonal 16x16 MMA, dy positions of a th x tw tile flattened into the atom's k-steps (any plane width), x and dy read in place; deterministic split reduce. Groups of 24 and 32 (`nbi` 2, MFMA only) as dense per-group block products. K3 (`CONV_WRW`) is its implicit-GEMM alternative; groups past 32 channels stay with K3. | wrw (any stride on rows and columns per config: s1, s2; any depth stride) | MFMA, WMMA; fp32 also by FMA (all archs, the only fp32 path on RDNA) | 3132 |
-| `CONV_STEM_BWD` | Bwd-data for stems with C ≤ 4 (7x7 s2, 3x3 s2, patchify) | bwd-data | MFMA, WMMA, FMA | 3186 |
+| `CONV_STEM_BWD` | Bwd-data for stems with C ≤ 4 (7x7 s2, 3x3 s2, patchify) | bwd-data | MFMA, WMMA, FMA | 1174 |
 | `CONV_SMALLC_FWD` | Forward stems with C ≤ 4 | fwd | MFMA, WMMA, FMA | 606 |
 | `CONV_DEPTHWISE_MFMA_FWD/BWD` | Depthwise on matrix cores (gfx950 hipconv class), NHWC and NCHW | fwd, bwd-data (s1); fwd (s2) | gfx908-gfx950 | 640 |
 | `CONV_DEPTHWISE_ROWS_FWD/BWD` | Depthwise by channel rows: 1-D/vocoder depthwise, dilated, strided ConvTranspose1d | fwd, bwd-data | all (VALU) | 222 |
@@ -34,7 +34,7 @@ No single engine is meant to win everywhere. Each one targets a regime, and most
 | `CONV_NAIVE_FWD/BWD/WRW` | Correctness floor: serves every graph | all | all | 9 |
 | `ROCBLAS_CONV_ENGINE`, `HIPBLASLT_CONV_ENGINE` (hipblaslt-provider) | Explicit GEMM (im2col/col2im) | all | all | BLAS-internal |
 
-The config counts are the full catalog. A graph admits only the configs whose gates accept it. For example, K7 admits about 28-50 per graph and `CONV_STEM_BWD` about 8-24.
+The config counts are the full catalog. A graph admits only the configs whose gates accept it. For example, K7 admits about 28-50 per graph and `CONV_STEM_BWD` about 4-8 (at most 20).
 
 ### Two tiers
 
