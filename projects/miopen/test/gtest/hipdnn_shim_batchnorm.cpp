@@ -1204,18 +1204,23 @@ TEST(GPU_HipdnnShimBNClippedActivation_FP32, MatchesCpuReference)
     }
 }
 
+// The training it runs must keep the caller's epsilon. The default one is 1e-5,
+// so a second case uses an epsilon large next to the variance.
 TEST(GPU_HipdnnShimBNInferWithoutEstimates_FP32, RunsTraining)
 {
     auto&& handle = get_handle();
 
-    InferData d;
-    SetUpInfer(d);
-    const auto result = hs::CaptureCall([&] { return InferV1(handle, d, false); });
-    ExpectServed("infer_no_estimates", result);
-    if(result.status != miopenStatusSuccess)
-        return;
-
-    CheckInferWithoutEstimates(handle, d);
+    for(const auto& [name, epsilon] : {std::pair<std::string, double>{"infer_no_estimates", 1e-5},
+                                       {"infer_no_estimates_large_epsilon", 0.5}})
+    {
+        SCOPED_TRACE(name);
+        InferData d;
+        SetUpInfer(d);
+        d.epsilon         = epsilon;
+        const auto result = hs::CaptureCall([&] { return InferV1(handle, d, false); });
+        if(ExpectServed(name, result))
+            CheckInferWithoutEstimates(handle, d);
+    }
 }
 
 // The provider recomputes the stats itself only for plain backward at an epsilon
