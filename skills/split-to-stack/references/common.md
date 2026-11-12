@@ -70,6 +70,7 @@ The product is a restructure plan and a stack of branches, delivered quickly. It
 ## Subagent protocol
 
 - Read only the inputs listed in your task; write only your own output files; return `DONE <file>` or `BLOCKED <file>`.
+- Batch independent reads: read several files, or several `git show` paths, in one command, or issue several tool calls in one turn, instead of one per turn.
 - Every markdown output file has the headings `## Inputs` (file paths and SHAs it was based on), `## Result`, and `## Blocked`.
 - Ownership: each file in the run directory has one writer (`files.md`). The Builder may edit the plan files during the Phase 8 fix loop, and the orchestrator writes `run.md` and `commits.md` (it copies what other agents report, for example the generated sets from `inventory.md` and `$L` from `linear.md`).
 - When you stop with `## Blocked` in the middle of an operation in `$WT`, record the exact state: HEAD SHA, the operation in progress, conflicted files, and the commits you made so far (by SHA).
