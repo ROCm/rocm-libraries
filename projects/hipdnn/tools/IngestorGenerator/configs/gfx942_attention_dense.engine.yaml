@@ -387,11 +387,12 @@ launch_surface:
       block_m / GFX942_ROWS_PER_WAVE(32) * GFX942_WAVE_LANES(64) threads.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDenseGeometry.cpp
 
-  # The tile rules, the window translation, the sliding-window zero-trip guard and the
-  # empty-row rule are restated by hand from the rocKE Python. The LDS budget is not
-  # restated. Matching and dispatch are shared with gfx950 (AttentionDenseNative.cpp);
-  # Gfx942AttentionDenseNative.cpp binds them to the gfx942 tile, geometry, window, stats
-  # (LSE) and launch-grid hooks.
+  # The tile rules and the window translation are restated by hand from the rocKE Python.
+  # The sliding-window zero-trip guard and the empty-row rule are this engine's own policy,
+  # not restated Python (windowLeavesRowsWithoutKeys in AttentionDenseNative.cpp says why).
+  # The LDS budget is not restated. Matching and dispatch are shared with gfx950
+  # (AttentionDenseNative.cpp); Gfx942AttentionDenseNative.cpp binds them to the gfx942
+  # tile, geometry, window, stats (LSE) and launch-grid hooks.
   - name: matcher
     python_source: kernels/gfx942/attention_dense.py:supports_attention_dense
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionDenseNative.cpp

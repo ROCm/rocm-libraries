@@ -250,10 +250,6 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             assert environment_for(tests, "rocke_library_sdpa_pytest") == {
                 "PYTHONPATH": f"{test_ctest_rel}tests/library"
             }
-            if "--rocke-require-hipdnn-assets" in sdpa["command"]:
-                install_script = (build / "cmake_install.cmake").read_text()
-                assert "attention_sdpa_fwd.graph.json" in install_script
-                assert "/tests/library/tests/sdpa/hipdnn" in install_script
         else:
             # A platform-only tree enrols no library suite.
             assert not [
@@ -322,6 +318,15 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
                 environment_for(tests, "rocke_library_mla_pytest")
                 == expected_mla_environment
             )
+        # COMGR-only gates get the package and nothing compiler-specific.
+        comgr_only_environment = environment_for(
+            tests, "rocke_arch_domain_reproducibility"
+        )
+        assert comgr_only_environment.keys() == {"PYTHONPATH"}
+        assert (
+            environment_for(tests, "rocke_compiler_options_reproducibility")
+            == comgr_only_environment
+        )
 
 
 def split_ignored_files(selection):

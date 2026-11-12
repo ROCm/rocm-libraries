@@ -57,6 +57,7 @@ lives with them. `pooling.py` is a platform instance documented in `instances/sm
 | `conv_direct_dgrad_wmma.py` | `DirectDgradWmmaSpec` (gfx1250 dgrad) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_fwd_wmma.py` | `DirectFwdWmmaSpec` (gfx1250 forward) | `library/kernels/conv/docs/convolution.md` |
 | `conv_fwd_small_wmma.py` | `FwdSmallcWmmaSpec`, `FwdSmallkWmmaSpec` (gfx1250 forward, tiny C / K) | `library/kernels/conv/docs/convolution.md` |
+| `conv_fwd_small_mfma.py` | `FwdSmallcMfmaSpec`, `FwdSmallkMfmaSpec` (gfx950 forward, tiny C / K) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_dw_fwd_wmma.py` | `DwFwdWmmaSpec` (gfx1250 Toeplitz WMMA depthwise forward) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_fwd_gstream_wmma.py` | `FwdGstreamWmmaSpec` (gfx1250 small-group forward) | `library/kernels/conv/docs/convolution.md` |
 | `conv_direct_fwd_tapouter_wmma.py` | `DirectFwdTapOuterSpec` (gfx1250 forward of large dilations) | `library/kernels/conv/docs/convolution.md` |
@@ -253,6 +254,7 @@ From `helpers/README.md`:
 | conv_direct_dgrad_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, `ds_read_tr16_b128` |
 | conv_direct_fwd_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, split barriers, `permlane16` |
 | conv_fwd_small_wmma (smallc / smallk) | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds` |
+| conv_fwd_small_mfma (smallc / smallk) | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), buffer loads with sentinel offsets |
 | conv_direct_dw_fwd_wmma | - | - | - | - | - | yes | - | the windowed depthwise Toeplitz builder of `conv_direct_grouped` (wave32 `fwd` form): `emit_direct_params` (AOT kernargs), buffer loads / stores with sentinel offsets |
 | conv_direct_fwd_gstream_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` halo ring, `s_setprio` |
 | conv_direct_fwd_tapouter_wmma | - | - | - | - | - | yes | - | `emit_direct_params` (AOT kernargs), TDM `tensor_load_to_lds` / `tensor_store_from_lds`, `s_setprio` |

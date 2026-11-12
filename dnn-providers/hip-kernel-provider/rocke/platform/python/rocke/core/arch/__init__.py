@@ -32,6 +32,8 @@ from .target import (  # noqa: F401
     generic_arch_from_target_id,
     known_arches,
     listed_arch_for,
+    parse_target_id,
+    processor_from_target_id,
     target_id_from_isa,
     validate_arch,
 )
@@ -61,6 +63,8 @@ __all__ = [
     "known_arches",
     "listed_arch_for",
     "normalize_dtype",
+    "parse_target_id",
+    "processor_from_target_id",
     "target_id_from_isa",
     "validate_arch",
 ]
