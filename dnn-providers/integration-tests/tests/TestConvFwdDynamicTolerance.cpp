@@ -9,6 +9,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
+#include <set>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -59,6 +60,17 @@ enum class Mul
     TWO_SCALES, ///< MUL(y, scale), then MUL(that, bias): two scales
 };
 
+// Nodes that read a tensor twice, tensors that meet again, or a third operand; each ends in the
+// graph's output through a relu or directly.
+enum class Wiring
+{
+    NONE,
+    MUL_THEN_ADD_Y, ///< ADD(last, y) after a multiply: y is read by two nodes whose results meet
+    ADD_Y_TWICE, ///< ADD(y, y)
+    SELECT_IN2_PRODUCED, ///< z = ADD(y, bias); BINARY_SELECT(bias, bias, z): in_2 is produced
+    SELECT_IN2_INPUT, ///< z = ADD(y, bias); BINARY_SELECT(z, bias, bias): in_2 is a graph input
+};
+
 struct GraphSpec
 {
     std::vector<int64_t> wDims = {32, 8, 3, 3};
@@ -86,6 +98,7 @@ struct GraphSpec
     bool branchFirst = false; ///< with branch: that add is listed before the multiply
     bool reverseNodes = false; ///< the nodes are listed from the last to the first
     bool cycle = false; ///< two more nodes, each reading the other's result
+    Wiring wiring = Wiring::NONE; ///< more nodes, after the multiply
 };
 
 // x [2, 16, 8, 8], w as given, y [2, 32, 6, 6]; scale [1, 3, 1, 1].
@@ -176,7 +189,8 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
                                   int64_t in0,
                                   flatbuffers::Optional<int64_t> in1,
                                   int64_t out,
-                                  std::optional<DataType> compute = std::nullopt) {
+                                  std::optional<DataType> compute = std::nullopt,
+                                  flatbuffers::Optional<int64_t> in2 = flatbuffers::nullopt) {
         const auto pointwise = CreatePointwiseAttributes(b,
                                                          mode,
                                                          flatbuffers::nullopt,
@@ -185,7 +199,7 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
                                                          flatbuffers::nullopt,
                                                          in0,
                                                          in1,
-                                                         flatbuffers::nullopt,
+                                                         in2,
                                                          out);
         nodes.push_back(CreateNodeDirect(b,
                                          "pointwise",
@@ -255,6 +269,36 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& b, const GraphSpec& 
     {
         addPointwise(PointwiseMode::ADD, CYCLE_A_UID, BIAS_UID, CYCLE_B_UID);
         addPointwise(PointwiseMode::ADD, CYCLE_B_UID, BIAS_UID, CYCLE_A_UID);
+    }
+    switch(spec.wiring)
+    {
+    case Wiring::NONE:
+        break;
+    case Wiring::MUL_THEN_ADD_Y:
+        addPointwise(PointwiseMode::ADD, last, Y_UID, ADD_OUT_UID);
+        addPointwise(PointwiseMode::RELU_FWD, ADD_OUT_UID, flatbuffers::nullopt, OUT_UID);
+        break;
+    case Wiring::ADD_Y_TWICE:
+        addPointwise(PointwiseMode::ADD, Y_UID, Y_UID, ADD_OUT_UID);
+        addPointwise(PointwiseMode::RELU_FWD, ADD_OUT_UID, flatbuffers::nullopt, OUT_UID);
+        break;
+    case Wiring::SELECT_IN2_PRODUCED:
+        addPointwise(PointwiseMode::ADD, Y_UID, BIAS_UID, ADD_OUT_UID);
+        addPointwise(PointwiseMode::BINARY_SELECT,
+                     BIAS_UID,
+                     BIAS_UID,
+                     MUL_OUT_UID,
+                     std::nullopt,
+                     ADD_OUT_UID);
+        addPointwise(PointwiseMode::RELU_FWD, MUL_OUT_UID, flatbuffers::nullopt, OUT_UID);
+        break;
+    case Wiring::SELECT_IN2_INPUT:
+        addPointwise(PointwiseMode::ADD, Y_UID, BIAS_UID, ADD_OUT_UID);
+        addPointwise(
+            PointwiseMode::BINARY_SELECT, ADD_OUT_UID, BIAS_UID, OUT_UID, std::nullopt, BIAS_UID);
+        break;
+    default:
+        break;
     }
     if(spec.withBias)
     {
@@ -812,6 +856,226 @@ TEST(TestConvFwdDynamicTolerance, OperandWithoutStatisticsOnlyMattersToThePoints
     EXPECT_TRUE(errorScale(pointBeforeTheAdd, in).has_value());
 }
 
+// ── Slopes and magnitudes of the walk ───────────────────────────────────────
+
+namespace
+{
+
+void expectPoint(const hipdnn_test_sdk::utilities::conv::RoundingPoint& point,
+                 double epsilon,
+                 double magnitude,
+                 double slope)
+{
+    EXPECT_DOUBLE_EQ(point.epsilon, epsilon);
+    EXPECT_NEAR(point.magnitude, magnitude, 1e-12 * std::max(magnitude, 1.0));
+    EXPECT_NEAR(point.slope, slope, 1e-12 * std::max(slope, 1.0));
+}
+
+// The root mean square of the scale the default inputs give: -3, 1, 2.
+const double SCALE_RMS = std::sqrt(14.0 / 3.0);
+
+} // namespace
+
+// y is read by MUL(y, s) and by the ADD that follows it, and the two results meet again: an error
+// in y travels both paths and the contributions add, 3 + 1 = 4, where the largest of the readers'
+// slopes would give 3. The values add the same way: 3 sigma from the multiply and sigma from the
+// other path make 4 sigma at the add, not sqrt(10) sigma.
+TEST(TestConvFwdDynamicTolerance, TensorReadByTwoNodesWhoseResultsMeetAgainHasTheSumOfTheirSlopes)
+{
+    for(const bool reverseNodes : {false, true})
+    {
+        GraphSpec spec;
+        spec.mul = Mul::SCALE_SECOND;
+        spec.wiring = Wiring::MUL_THEN_ADD_Y;
+        spec.convOutputType = DataType::BFLOAT16;
+        spec.intermediateType = DataType::BFLOAT16;
+        spec.reverseNodes = reverseNodes;
+        SCOPED_TRACE(reverseNodes ? "reversed" : "listed in order");
+        const auto scale = errorScale(spec);
+        ASSERT_TRUE(scale.has_value());
+        // y, the multiply's result and the add's result, in the order of their uids
+        ASSERT_EQ(scale->roundingPoints.size(), 3u);
+        expectPoint(scale->roundingPoints[0], BFLOAT16_EPS, SIGMA, 4.0);
+        expectPoint(scale->roundingPoints[1], BFLOAT16_EPS, 3.0 * SIGMA, 1.0);
+        expectPoint(scale->roundingPoints[2], BFLOAT16_EPS, 4.0 * SIGMA, 1.0);
+    }
+}
+
+// A node that reads a tensor in both of its operands counts it twice: ADD(y, y) doubles an error
+// in y and the value, where independent operands would give sqrt(2).
+TEST(TestConvFwdDynamicTolerance, NodeThatReadsATensorTwiceCountsItTwice)
+{
+    GraphSpec spec;
+    spec.wiring = Wiring::ADD_Y_TWICE;
+    spec.convOutputType = DataType::BFLOAT16;
+    spec.intermediateType = DataType::BFLOAT16;
+    const auto scale = errorScale(spec);
+    ASSERT_TRUE(scale.has_value());
+    ASSERT_EQ(scale->roundingPoints.size(), 2u);
+    expectPoint(scale->roundingPoints[0], BFLOAT16_EPS, SIGMA, 2.0);
+    expectPoint(scale->roundingPoints[1], BFLOAT16_EPS, 2.0 * SIGMA, 1.0);
+}
+
+// A convolution result that a multiply reads as its second operand is read all the same: stored
+// in bfloat16 it is a point, and the multiply's scale is its slope.
+TEST(TestConvFwdDynamicTolerance, ConvolutionResultReadOnlyAsTheSecondOperandIsRead)
+{
+    GraphSpec spec;
+    spec.mul = Mul::SCALE_FIRST;
+    spec.convOutputType = DataType::BFLOAT16;
+    const auto scale = errorScale(spec);
+    ASSERT_TRUE(scale.has_value());
+    ASSERT_EQ(scale->roundingPoints.size(), 1u);
+    expectPoint(scale->roundingPoints[0], BFLOAT16_EPS, SIGMA, 3.0);
+}
+
+// Two multiplies computing in bfloat16. An error in a scale reaches the output multiplied by the
+// size of the result it scales and by the scales after it: the first multiply's scale by the
+// second scale (the bias, 0.0099) times sigma, the second multiply's scale (the bias again) by
+// the size of the first result, 3 sigma, as the output has slope 1.
+TEST(TestConvFwdDynamicTolerance, ScalesOfSeveralMultipliesAreRoundedWithTheSlopeAfterThem)
+{
+    GraphSpec spec;
+    spec.mul = Mul::TWO_SCALES;
+    spec.pointwiseCompute = DataType::BFLOAT16;
+    const auto scale = errorScale(spec);
+    ASSERT_TRUE(scale.has_value());
+    const double second = BIAS_RMS;
+    const auto& points = scale->roundingPoints;
+    ASSERT_EQ(points.size(), 6u);
+    expectPoint(points[0], BFLOAT16_EPS, SIGMA, 3.0 * second); // y into the first multiply
+    expectPoint(points[1], BFLOAT16_EPS, SCALE_RMS, second * SIGMA); // the first scale
+    expectPoint(points[2], BFLOAT16_EPS, 3.0 * SIGMA, second); // the first result
+    expectPoint(points[3], BFLOAT16_EPS, 3.0 * SIGMA, second); // that result into the second
+    expectPoint(points[4], BFLOAT16_EPS, BIAS_RMS, 3.0 * SIGMA); // the second scale
+    expectPoint(points[5], BFLOAT16_EPS, 3.0 * SIGMA * second, 1.0); // the second result
+}
+
+// y goes to a multiply (slope 3) and to an add that is a second output (slope 1), both computing
+// in bfloat16: each node's rounding of y is the same error in the same tensor, so both points
+// take the slope of the tensor, the largest of the two, not the slope of the node's own path.
+TEST(TestConvFwdDynamicTolerance, EveryReaderOfATensorRoundsItWithTheSlopeOfTheTensor)
+{
+    GraphSpec spec;
+    spec.mul = Mul::SCALE_SECOND;
+    spec.branch = true;
+    spec.pointwiseCompute = DataType::BFLOAT16;
+    const auto scale = errorScale(spec);
+    ASSERT_TRUE(scale.has_value());
+    const auto& points = scale->roundingPoints;
+    ASSERT_EQ(points.size(), 6u);
+    expectPoint(points[0], BFLOAT16_EPS, SIGMA, 3.0); // y into the multiply
+    expectPoint(points[1], BFLOAT16_EPS, SCALE_RMS, SIGMA); // the scale
+    expectPoint(points[2], BFLOAT16_EPS, 3.0 * SIGMA, 1.0); // the multiply's result
+    expectPoint(points[3], BFLOAT16_EPS, SIGMA, 3.0); // y into the add
+    expectPoint(points[4], BFLOAT16_EPS, BIAS_RMS, 1.0); // the bias
+    expectPoint(points[5], BFLOAT16_EPS, std::sqrt(SIGMA * SIGMA + BIAS_RMS * BIAS_RMS), 1.0);
+}
+
+// A graph input of a type the model does not know, read by a node computing below float, leaves
+// the graph outside it: the node would convert and round it, and nothing says by how much.
+TEST(TestConvFwdDynamicTolerance, GraphInputOfAnUnknownTypeIntoANodeComputingBelowFloatIsNotModeled)
+{
+    GraphSpec known;
+    known.withBias = true;
+    known.addCompute = DataType::BFLOAT16;
+    EXPECT_TRUE(errorScale(known).has_value());
+    for(const auto type : {DataType::UNSET, DataType::INT32, DataType::UINT8})
+    {
+        GraphSpec spec = known;
+        spec.biasType = type;
+        EXPECT_FALSE(errorScale(spec).has_value()) << EnumNameDataType(type);
+    }
+}
+
+// A third operand is read like the other two. z = ADD(y, bias) is stored in bfloat16 and read only
+// as the in_2 of BINARY_SELECT(bias, bias, z), whose result is stored in bfloat16 and read by a
+// relu: z is a point (it is read, though only as in_2) at sqrt(sigma^2 + bias^2), and the result
+// one at sqrt(z^2 + 2 bias^2), in whichever order the nodes are listed.
+TEST(TestConvFwdDynamicTolerance, ThirdOperandIsReadForConsumptionAndMagnitude)
+{
+    for(const bool reverseNodes : {false, true})
+    {
+        GraphSpec spec;
+        spec.wiring = Wiring::SELECT_IN2_PRODUCED;
+        spec.intermediateType = DataType::BFLOAT16;
+        spec.reverseNodes = reverseNodes;
+        SCOPED_TRACE(reverseNodes ? "reversed" : "listed in order");
+        const auto scale = errorScale(spec);
+        ASSERT_TRUE(scale.has_value());
+        // the select's result, then z, in the order of their uids
+        ASSERT_EQ(scale->roundingPoints.size(), 2u);
+        expectPoint(scale->roundingPoints[0],
+                    BFLOAT16_EPS,
+                    std::sqrt(SIGMA * SIGMA + 3.0 * BIAS_RMS * BIAS_RMS),
+                    1.0);
+        expectPoint(scale->roundingPoints[1],
+                    BFLOAT16_EPS,
+                    std::sqrt(SIGMA * SIGMA + BIAS_RMS * BIAS_RMS),
+                    1.0);
+    }
+}
+
+// The third operand of a node computing below float is converted and rounded like the others when
+// it is a graph input stored in another type: BINARY_SELECT(z, bias, bias) in bfloat16 over a
+// half bias has a point at each of the two bias operands.
+TEST(TestConvFwdDynamicTolerance, ThirdOperandThatIsAGraphInputIsRoundedLikeTheOthers)
+{
+    GraphSpec spec;
+    spec.wiring = Wiring::SELECT_IN2_INPUT;
+    spec.pointwiseCompute = DataType::BFLOAT16;
+    const auto scale = errorScale(spec);
+    ASSERT_TRUE(scale.has_value());
+    const double z = std::sqrt(SIGMA * SIGMA + BIAS_RMS * BIAS_RMS);
+    const auto& points = scale->roundingPoints;
+    // the add: y, bias, its result; the select: z, bias, bias (in_2), its result
+    ASSERT_EQ(points.size(), 7u);
+    expectPoint(points[0], BFLOAT16_EPS, SIGMA, 1.0);
+    expectPoint(points[1], BFLOAT16_EPS, BIAS_RMS, 1.0);
+    expectPoint(points[2], BFLOAT16_EPS, z, 1.0);
+    expectPoint(points[3], BFLOAT16_EPS, z, 1.0);
+    expectPoint(points[4], BFLOAT16_EPS, BIAS_RMS, 1.0);
+    expectPoint(points[5], BFLOAT16_EPS, BIAS_RMS, 1.0);
+    expectPoint(points[6], BFLOAT16_EPS, std::sqrt(SIGMA * SIGMA + 3.0 * BIAS_RMS * BIAS_RMS), 1.0);
+}
+
+// The statistics of an input are looked up when a multiply or a rounding point needs them, and
+// not before: a float graph with a bias never asks for the bias (a golden blob would be scanned
+// on the host for nothing), a point after the add does, and a point before it does not.
+TEST(TestConvFwdDynamicTolerance, InputsAreLookedUpOnlyWhenSomethingNeedsThem)
+{
+    const auto lookedUp = [](const GraphSpec& spec) {
+        std::set<int64_t> asked;
+        const auto inputs = defaultInputs(spec);
+        const auto lookup = [&](int64_t uid) {
+            asked.insert(uid);
+            return inputs.lookup()(uid);
+        };
+        flatbuffers::FlatBufferBuilder b;
+        EXPECT_TRUE(tol::convFwdErrorScale(buildGraph(b, spec), lookup).has_value());
+        return asked;
+    };
+    const std::set<int64_t> convolutionInputs = {X_UID, W_UID};
+
+    GraphSpec floatOnly;
+    floatOnly.withBias = true;
+    floatOnly.withRelu = true;
+    EXPECT_EQ(lookedUp(floatOnly), convolutionInputs);
+
+    GraphSpec pointAfterTheAdd = floatOnly;
+    pointAfterTheAdd.intermediateType = DataType::BFLOAT16;
+    EXPECT_EQ(lookedUp(pointAfterTheAdd), (std::set<int64_t>{X_UID, W_UID, BIAS_UID}));
+
+    GraphSpec pointBeforeTheAdd;
+    pointBeforeTheAdd.withBias = true;
+    pointBeforeTheAdd.convOutputType = DataType::BFLOAT16;
+    EXPECT_EQ(lookedUp(pointBeforeTheAdd), convolutionInputs);
+
+    GraphSpec multiply;
+    multiply.mul = Mul::SCALE_SECOND;
+    EXPECT_EQ(lookedUp(multiply), (std::set<int64_t>{X_UID, W_UID, SCALE_UID}));
+}
+
 // ── Fused pointwise nodes ───────────────────────────────────────────────────
 
 // The scale cycles through -3, 1, 2: its largest magnitude (3) differs from its root mean
@@ -947,7 +1211,8 @@ TEST(TestConvFwdDynamicTolerance, SeveralFusedMultipliesScaleByTheProduct)
 // ── Output dispatch ─────────────────────────────────────────────────────────
 
 // The three types differ in atol (half carries the lambda term, bfloat16 and float do not) and in
-// rtol (2^-9, 2^-6 and about 2^-22), so a swap of the dispatch shows in the values.
+// rtol (2^-9, 2^-6 and, at K = 144 and c = 4, 13 * 2^-22: 2^-22 and the summation-order term), so
+// a swap of the dispatch shows in the values.
 TEST(TestConvFwdDynamicTolerance, OutputTypeSelectsItsOwnTolerance)
 {
     hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale scale;
