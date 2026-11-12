@@ -439,10 +439,13 @@ inline std::optional<UnifiedAttention3DWorkspaceLayout>
 
     int64_t rows = 0;
     int64_t outputElements = 0;
+    // The bound is on the largest offset, ``outputElements - 1``, not the element
+    // count: a scratch of exactly 2^31 elements reaches exactly INT32_MAX and still
+    // addresses. Every factor is positive above, so the subtraction cannot underflow.
     if(__builtin_mul_overflow(batch, seqLenQ, &rows)
        || __builtin_mul_overflow(rows, numQueryHeads, &rows)
        || __builtin_mul_overflow(rows, numSegments, &rows)
-       || __builtin_mul_overflow(rows, headSize, &outputElements) || outputElements > INT32_MAX)
+       || __builtin_mul_overflow(rows, headSize, &outputElements) || outputElements - 1 > INT32_MAX)
     {
         return std::nullopt;
     }

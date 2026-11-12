@@ -125,21 +125,26 @@ TEST(TestGfx942AttentionUnified3dGeometry, TileOverrideTable)
 }
 
 // The kernels index segm_output [B, Hq, nseg, D], segm_max/expsum [B, Hq, nseg] and Q/O
-// [B, Hq, D] with i32 element offsets: each must hold at most 2^31 - 1 elements.
+// [B, Hq, D] with i32 element offsets, so each must have a largest offset below 2^31.
+// A tensor of N elements reaches offset N - 1, so exactly 2^31 elements is the largest
+// that still addresses: the boundary is on the offset, not the count. This matches
+// `_check_3d_workspace_addr_width` on the Python launch path, so a shape is not served
+// by one route and refused by the other.
 // segm_output is the largest of the three (nseg >= 1, D >= 1), so it is the one that binds.
 TEST(TestGfx942AttentionUnified3dGeometry, IndicesFitInt32AtTheExactBoundary)
 {
-    constexpr int64_t LAST_OK = (int64_t{1} << 31) - 1;
-    // Every extent is exactly 2^31 - 1 elements, then exactly 2^31.
+    constexpr int64_t LAST_OK = int64_t{1} << 31;
+    // Every extent is exactly 2^31 elements (offset 2^31 - 1, INT32_MAX), then one more.
     EXPECT_TRUE(gfx942Unified3dIndicesFitInt32(LAST_OK, 1, 1, 1));
     EXPECT_FALSE(gfx942Unified3dIndicesFitInt32(LAST_OK + 1, 1, 1, 1));
 
-    // segm_output: 16384 * 32 * 16 * 256 = 2^31; one batch row fewer is 2^31 - 2^17.
-    EXPECT_TRUE(gfx942Unified3dIndicesFitInt32(16383, 32, 16, 256));
-    EXPECT_FALSE(gfx942Unified3dIndicesFitInt32(16384, 32, 16, 256));
+    // segm_output: 16384 * 32 * 16 * 256 = 2^31 exactly, so it fits; one batch row more
+    // is 2^31 + 2^17 and does not.
+    EXPECT_TRUE(gfx942Unified3dIndicesFitInt32(16384, 32, 16, 256));
+    EXPECT_FALSE(gfx942Unified3dIndicesFitInt32(16385, 32, 16, 256));
 
     // The reachable default-path case: D256 Hq128 at B 4097 with 16 segments is
-    // 2,148,007,936 elements; 8 segments halve it.
+    // 2,148,007,936 elements, past 2^31 even on the offset bound; 8 segments halve it.
     EXPECT_FALSE(gfx942Unified3dIndicesFitInt32(4097, 128, 16, 256));
     EXPECT_TRUE(gfx942Unified3dIndicesFitInt32(4097, 128, 8, 256));
 }

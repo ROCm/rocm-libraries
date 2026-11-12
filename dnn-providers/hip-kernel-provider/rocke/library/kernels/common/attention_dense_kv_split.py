@@ -27,8 +27,9 @@ MAX_KV_SEGMENTS = 64
 
 
 def segment_extent(batch, seqlen_q, num_query_heads, head_size, segments) -> int:
-    """Element count of ``segm_output``: the largest index the segment store and
-    the combine kernel compute in signed 32-bit arithmetic."""
+    """Element count of ``segm_output``. The largest index the segment store and
+    the combine kernel compute in signed 32-bit arithmetic is one less than this,
+    so an extent of exactly ``INT32_LIMIT`` still addresses."""
     return (
         int(batch)
         * int(seqlen_q)
@@ -41,11 +42,12 @@ def segment_extent(batch, seqlen_q, num_query_heads, head_size, segments) -> int
 def max_kv_segments_for_extent(
     batch, seqlen_q, num_query_heads, head_size, max_segments=MAX_KV_SEGMENTS
 ) -> int:
-    """Largest power of two ``S <= max_segments`` whose workspace extent stays below
-    the 32-bit addressing limit (at least 1)."""
+    """Largest power of two ``S <= max_segments`` whose workspace's largest index
+    stays below the 32-bit addressing limit (at least 1)."""
     s = 1
     while s * 2 <= max_segments and (
-        segment_extent(batch, seqlen_q, num_query_heads, head_size, s * 2) < INT32_LIMIT
+        segment_extent(batch, seqlen_q, num_query_heads, head_size, s * 2) - 1
+        < INT32_LIMIT
     ):
         s *= 2
     return s
@@ -79,10 +81,12 @@ def check_kv_segments(spec) -> tuple[bool, str]:
     extent = segment_extent(
         spec.batch, spec.seqlen_q, spec.num_query_heads, spec.head_size, s
     )
-    if s > 1 and extent >= INT32_LIMIT:
+    # ``extent - 1`` is the largest index formed, so an extent of exactly
+    # ``INT32_LIMIT`` still addresses.
+    if s > 1 and extent - 1 >= INT32_LIMIT:
         return False, (
-            f"kv_segments={s} workspace extent is {extent} elements, at or past the "
-            f"32-bit addressing limit ({INT32_LIMIT})"
+            f"kv_segments={s} workspace extent is {extent} elements, whose largest "
+            f"index {extent - 1} is past the 32-bit addressing limit ({INT32_LIMIT})"
         )
     return True, ""
 
