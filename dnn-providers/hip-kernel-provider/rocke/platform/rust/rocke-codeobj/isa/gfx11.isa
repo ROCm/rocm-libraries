@@ -48,6 +48,7 @@ mod OPSEL_DST bit=7
 mod SADDR bit=8
 mod MIX_F16_0 bit=9
 mod GLC bit=12
+mod DMA_MANUAL bit=24
 
 [modset]
 # Modifier sets an instruction may accept (`m=`), by M_ bit.
