@@ -36,6 +36,14 @@ function(ck_tile_restrict_archs target regex)
     set_property(TARGET ${target} PROPERTY HIP_ARCHITECTURES ${_archs})
 endfunction()
 
+# Configure-only regression: no HIP compiler or GPU is required.
+add_test(
+    NAME test_ck_tile_dtype_configuration
+    COMMAND ${CMAKE_COMMAND} -E env "CMAKE_COMMAND=${CMAKE_COMMAND}"
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_dtype_configuration.py -v
+)
+set_tests_properties(test_ck_tile_dtype_configuration PROPERTIES LABELS "SMOKE_TEST")
+
 add_subdirectory(image_to_column)
 add_subdirectory(gemm)
 add_subdirectory(gemm_persistent_async_input)
