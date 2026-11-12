@@ -412,32 +412,40 @@ class TestWmmaSpec(unittest.TestCase):
                 4 * chunks * (p.KH * kwp + p.KH + kwp) + 4 * rows,
             )
 
-    def test_forward_mode_is_wave64_only(self):
-        """``fwd`` (the rotated-filter forward pass, any ``out_stride`` or
-        group size) is a wave64 MFMA mode: the Toeplitz builder loads the
-        grouped form's dense A row as one K chunk per lane, which the wave32
-        WMMA's two K chunks per lane do not fit, and the depthwise forward is
-        validated only at wave64. So the spec is rejected at wave32. The C++
-        mirror rejects the same specs (parity configs 71, 72 of
-        conv_direct_dgrad_ext_emit)."""
+    def test_forward_mode_at_wave32_is_depthwise_stride1_only(self):
+        """At wave32 ``fwd`` runs the depthwise forward at stride 1 (the
+        kernel of the gfx1250 depthwise forward). The grouped form stays a
+        wave64 MFMA mode (its dense A row is one K chunk per lane, which the
+        WMMA's two K chunks per lane do not fit), and so does ``out_stride=2``.
+        The C++ mirror gives the same verdicts (parity configs 71, 72 of
+        conv_direct_dgrad_ext_emit; conv_direct_dw_dgrad_host)."""
+        ok, why = is_valid_depthwise_dgrad_win_spec(
+            self._wmma(_problem(2, 14, 14, 64, 3, 3, 1, "fp16"), block_h=14, fwd=True),
+            arch="gfx1250",
+        )
+        self.assertTrue(ok, why)
         cases = (
-            (_problem(2, 14, 14, 64, 3, 3, 1, "fp16"), {}),
-            (_problem(2, 14, 14, 64, 3, 3, 1, "bf16"), {"out_stride": 2}),
+            (
+                _problem(2, 14, 14, 64, 3, 3, 1, "bf16"),
+                {"out_stride": 2},
+                "fwd at wave_size=32 needs out_stride=1 (got 2)",
+            ),
             (
                 DirectConvProblem(
                     N=2, H=13, W=21, groups=10, cpg=8, kpg=8, KH=3, KW=3, PAD=1
                 ),
                 {},
+                "the grouped fwd form needs the wave64 MFMA (got wave_size=32)",
             ),
         )
-        for problem, extra in cases:
+        for problem, extra, text in cases:
             knobs = dict(block_h=14 if problem.cpg == 1 else 8, fwd=True, **extra)
             with self.subTest(cpg=problem.cpg, **extra):
                 ok, why = is_valid_depthwise_dgrad_win_spec(
                     self._wmma(problem, **knobs), arch="gfx1250"
                 )
                 self.assertFalse(ok)
-                self.assertIn("fwd needs the wave64 MFMA form", why)
+                self.assertEqual(why, text)
                 # The same knobs at wave64 are the valid gfx950 forward form.
                 ok, why = is_valid_depthwise_dgrad_win_spec(
                     self._wmma(problem, wave_size=64, **knobs), arch="gfx950"
