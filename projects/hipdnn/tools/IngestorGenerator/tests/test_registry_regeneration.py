@@ -879,6 +879,12 @@ def test_g7_catches_a_missing_accessor_and_a_disagreeing_value(
 _UNIFIED_2D = "hipkernel:Gfx942AttentionUnified2D"
 
 
+@pytest.mark.parametrize(
+    "manifest_path",
+    [_ROOT / "configs" / "gfx942_attention_unified_2d.engine.yaml"],
+    indirect=True,
+    ids=lambda p: p.name,
+)
 def test_g9_each_production_kernel_is_rockes_own_prefill_spec(
     manifest, registry_config
 ):
@@ -886,9 +892,9 @@ def test_g9_each_production_kernel_is_rockes_own_prefill_spec(
     `_tiled_spec_from_problem` builds for a long prefill of their (dtype, head size, GQA
     ratio), field for field, so a rocKE default or builder change that moves the production
     spec fails here instead of leaving the catalog on a stale stack. Every (dtype, head size,
-    ratio) cell has one. Not a comparison of cold selection: the sweep ranks them."""
-    if manifest["engine"]["name"] != _UNIFIED_2D:
-        pytest.skip("only the gfx942 unified 2D manifest enumerates production stacks")
+    ratio) cell has one. Not a comparison of cold selection: the sweep ranks them. Only the
+    gfx942 unified 2D manifest enumerates production stacks, so it is the one case."""
+    assert manifest["engine"]["name"] == _UNIFIED_2D
     enumerator.bind_provider(manifest.get("provider_root"))
     from kernels.common.attention_unified import (
         UnifiedAttentionProblem,
