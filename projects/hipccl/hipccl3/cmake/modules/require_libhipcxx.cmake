@@ -29,8 +29,14 @@
 # Usage:
 #   hipccl_require_libhipcxx(<minimum_version>)
 function(hipccl_require_libhipcxx MINIMUM_VERSION)
+    # In hipCCL super builds, this target may already be available. In such
+    # cases find_package(...) will not work. Instead, pretend we've already
+    # found libhipcxx.
     if(TARGET libhipcxx::libhipcxx)
         message(STATUS "Reusing already-configured libhipcxx::libhipcxx target (required: >= ${MINIMUM_VERSION})")
+        # Consumers gate on libhipcxx_FOUND (see hipcub/hipcub/CMakeLists.txt),
+        # so set it to the parent scope.
+        set(libhipcxx_FOUND TRUE PARENT_SCOPE)
         return()
     endif()
 
@@ -49,5 +55,10 @@ function(hipccl_require_libhipcxx MINIMUM_VERSION)
         )
     else()
         message(STATUS "Found libhipcxx ${libhipcxx_VERSION} (required: >= ${MINIMUM_VERSION})")
+        # find_package() inside a function only sets libhipcxx_FOUND in the
+        # function's local scope.
+        # 
+        # This is similar to the earlier 'TARGET libhipcxx::libhipcxx' check.
+        set(libhipcxx_FOUND TRUE PARENT_SCOPE)
     endif()
 endfunction()
