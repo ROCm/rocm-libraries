@@ -192,6 +192,9 @@ namespace TensileLite
                                         // BufferLoadOffsetLimitCheck_Beta reads only beta == 0.
                                         lhs.beta() == 0.0,
                                         rhs.beta() == 0.0,
+                                        // AlphaValue reads it.
+                                        lhs.alphaRestriction(),
+                                        rhs.alphaRestriction(),
                                         lhs.getParams().gsu(),
                                         rhs.getParams().gsu(),
                                         lhs.getParams().fallbackStatus(),
@@ -265,6 +268,7 @@ namespace std
                                           problem.getParams().activationEnum(),
                                           problem.amaxd().dataType(),
                                           problem.beta() == 0.0,
+                                          problem.alphaRestriction(),
                                           problem.getParams().gsu(),
                                           problem.getParams().fallbackStatus(),
                                           problem.scaleBlockSizeA(),
