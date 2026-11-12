@@ -71,9 +71,15 @@ def _run(config: str, output_dir: str, artifact_dir: str, tensile_args: list[str
     extract_artifact(tarball, output_dir)
     args = [config, output_dir, "--use-cache", *tensile_args]
     with open(config) as source:
-        schedules = yaml.safe_load(source).get("TestParameters", {}).get("streamk_schedules", [])
+        settings = yaml.safe_load(source).get("TestParameters", {})
+        schedules = settings.get("streamk_schedules", [])
     if not schedules:
         tensilelite.Tensile(args)
+        if "mx_uso" in settings:
+            from tensilelite.ClientWriter import getClientExecutablePath
+            from mx_uso_helpers import run_mx_uso_checks
+
+            run_mx_uso_checks(output_dir, getClientExecutablePath(), settings["mx_uso"])
         return
     for index, schedule in enumerate(schedules):
         mode = schedule["reduction"]

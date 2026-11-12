@@ -1,0 +1,89 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# AIHPBLAS-5495 / PR #15108: InMemorySwizzle bypasses the HostPreSwizzle
+# DepthU/block restrictions. Long K must reach partial reductions; the runner
+# checks the resolved launch and bitwise equality of repeated effective rows.
+TestParameters:
+  mx_uso: {grid: 64, expected_solutions: 8}
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940,
+    skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011,
+    skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102,
+    skip-gfx1200, skip-gfx1201, skip-gfx1250-strict]
+GlobalParameters:
+  Architecture: gfx1250
+  LibraryFormat: msgpack
+  UniformSummationOrder: 1
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  KernelTime: false
+  CpuThreads: 8
+  DataInitSeed: 2026
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  PrintLevel: 1
+  PrintSolutionRejectionReason: true
+  ForceGenerateKernel: true
+  ExitOnFails: 1
+  MaxWorkspaceSize: 134217728
+BenchmarkProblems:
+  - - &fp8 {OperationType: GEMM, DataType: F8, DestDataType: s,
+      ComputeDataType: s, HighPrecisionAccumulate: true, TransposeA: true,
+      TransposeB: false, UseBeta: true, Batched: true, SupportUserArgs: true,
+      MXBlockA: 32, MXBlockB: 32}
+    - BenchmarkCommonParameters: &kernel
+        - KernelLanguage: [Assembly]
+        - MatrixInstruction: [[16, 16, 128, 1, 1, 4, 4, 2, 2]]
+        - DepthU: [256]
+        - TileProcessingStrategy: [StreamK]
+        - WorkAssignment: [StaticGrid]
+        - TDMInst: [3]
+        - MXScaleFormat: [InMemorySwizzle]
+        - MXLoadInst: [TDM]
+        - WavefrontSize: [32]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [0]
+        - StaggerU: [0]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ForceDisableShadowInit: [true]
+        - ScheduleIterAlg: [0]
+        - 1LDSBuffer: [0]
+        - ExpandPointerSwap: [false]
+        - StoreRemapVectorWidth: [0]
+        - LDSTrInst: [false]
+      ForkParameters:
+        - DepthU: [128, 256]
+      BenchmarkFinalParameters: &problems
+        - ProblemSizes:
+            - Exact: [512, 256, 1, 8192]
+            - Exact: [520, 264, 1, 8832]
+  - - {<<: *fp8, DataType: F4}
+    - BenchmarkCommonParameters: *kernel
+      ForkParameters:
+        - DepthU: [128, 256]
+      BenchmarkFinalParameters: *problems
+  - - {<<: *fp8, MXBlockA: 16, MXBlockB: 16}
+    - BenchmarkCommonParameters: *kernel
+      ForkParameters:
+        - DepthU: [256]
+      BenchmarkFinalParameters: *problems
+  - - {<<: *fp8, DataType: F4, MXBlockA: 16, MXBlockB: 16}
+    - BenchmarkCommonParameters: *kernel
+      ForkParameters:
+        - DepthU: [256]
+      BenchmarkFinalParameters: *problems
+  - - {<<: *fp8, MXBlockA: 128, MXBlockB: 128}
+    - BenchmarkCommonParameters: *kernel
+      ForkParameters:
+        - DepthU: [256]
+      BenchmarkFinalParameters: *problems
+  - - {<<: *fp8, DataType: F4, MXBlockA: 128, MXBlockB: 128}
+    - BenchmarkCommonParameters: *kernel
+      ForkParameters:
+        - DepthU: [256]
+      BenchmarkFinalParameters: *problems

@@ -2141,6 +2141,52 @@ namespace
         }
     }
 
+    struct MXEnvelopeCase
+    {
+        const char* name;
+        size_t      depthU;
+        int         matrixInstK;
+        int         blockA;
+        int         blockB;
+    };
+
+    class RowUniformityMXInMemorySwizzle_pre_checkin
+        : public ::testing::TestWithParam<MXEnvelopeCase>
+    {
+    };
+
+    TEST_P(RowUniformityMXInMemorySwizzle_pre_checkin, BypassesHostPreSwizzleGeometry)
+    {
+        const auto hardware                        = probeHardware();
+        const auto c                               = GetParam();
+        auto       solution                        = probeSolution();
+        solution->sizeMapping.depthU               = c.depthU;
+        solution->sizeMapping.matrixInstruction[2] = c.matrixInstK;
+        solution->problemType.mxBlockA             = c.blockA;
+        solution->problemType.mxBlockB             = c.blockB;
+
+        // Each case violates exactly one HostPreSwizzle restriction. Checking
+        // both formats distinguishes bypassing the restriction from passing it.
+        solution->problemType.mxScaleFormat = 1;
+        ASSERT_FALSE(admitsUniformSummationOrder(*solution, hardware));
+        solution->problemType.mxScaleFormat = 2;
+        EXPECT_TRUE(admitsUniformSummationOrder(*solution, hardware));
+    }
+
+    INSTANTIATE_TEST_SUITE_P(
+        RowUniformity,
+        RowUniformityMXInMemorySwizzle_pre_checkin,
+        // DepthU 128 now uses whole scale epochs for format 1; 192 still
+        // violates its cut quantum. This is a host-only geometry probe.
+        ::testing::Values(MXEnvelopeCase{"DepthU192", 192, 128, 32, 32},
+                          // A host eligibility probe, not a supported gfx1250 instruction.
+                          MXEnvelopeCase{"MatrixInstK64", 256, 64, 32, 32},
+                          MXEnvelopeCase{"BlockA128", 256, 128, 128, 32},
+                          MXEnvelopeCase{"BlockB128", 256, 128, 32, 128}),
+        [](const ::testing::TestParamInfo<MXEnvelopeCase>& info) {
+            return std::string(info.param.name);
+        });
+
     TEST(RowUniformityStreamKRejection_pre_checkin, MXMatrixInstKEnvelope)
     {
         const auto hardware                       = probeHardware();
