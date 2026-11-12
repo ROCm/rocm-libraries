@@ -139,10 +139,10 @@ using unified_attention::isWellFormedOperand;
 using unified_attention::MaskType;
 using unified_attention::problemFor;
 using unified_attention::sdpaNode;
+using unified_attention::SdpaShape;
 using unified_attention::stringMetadata;
 using unified_attention::supportedDataTypeName;
 using unified_attention::UnifiedAttentionBinding;
-using unified_attention::UnifiedAttentionProblem;
 
 // ---------------------------------------------------------------------------
 // Decline logging
@@ -592,7 +592,7 @@ class PreparedGfx942AttentionUnified2D : public PreparedDispatch
 public:
     PreparedGfx942AttentionUnified2D(IngestorKernelCode code,
                                      UnifiedAttentionBinding binding,
-                                     UnifiedAttentionProblem problem,
+                                     SdpaShape problem,
                                      Gfx942Unified2DWorkspaceLayout layout,
                                      std::vector<unsigned char> workspaceImage,
                                      int64_t slidingWindow)
@@ -615,7 +615,7 @@ public:
         return _binding;
     }
 
-    const UnifiedAttentionProblem& problem() const
+    const SdpaShape& problem() const
     {
         return _problem;
     }
@@ -639,7 +639,7 @@ public:
 private:
     IngestorKernelCode _code;
     UnifiedAttentionBinding _binding;
-    UnifiedAttentionProblem _problem;
+    SdpaShape _problem;
     Gfx942Unified2DWorkspaceLayout _layout;
     std::vector<unsigned char> _workspaceImage;
     int64_t _slidingWindow = 0;
@@ -647,8 +647,7 @@ private:
 
 /// The graph's problem, read from the bound Q and K uids. A null tensor means a bound uid
 /// names no tensor: refused by name, since everything after indexes dims.
-UnifiedAttentionProblem boundProblem(const MatchContext& context,
-                                     const UnifiedAttentionBinding& binding)
+SdpaShape boundProblem(const MatchContext& context, const UnifiedAttentionBinding& binding)
 {
     const auto* q = findTensor(context, binding.q);
     const auto* k = findTensor(context, binding.k);
@@ -680,7 +679,7 @@ AttentionUnified2DCandidate requireCandidate(const KernelDefinition& kernel)
 
 /// The layout for @p candidate over @p problem, or a refusal that says which rule failed.
 Gfx942Unified2DWorkspaceLayout requireLayout(const AttentionUnified2DCandidate& candidate,
-                                             const UnifiedAttentionProblem& problem,
+                                             const SdpaShape& problem,
                                              const KernelDefinition& kernel)
 {
     const std::string name = toString(kernel.kernelId);
@@ -700,7 +699,7 @@ Gfx942Unified2DWorkspaceLayout requireLayout(const AttentionUnified2DCandidate& 
 /// The candidate's GQA ratio against the graph's, or a refusal: the grid and the kernel's
 /// row-to-head map both come from the ratio, and the binary bakes it.
 void requireRatio(const AttentionUnified2DCandidate& candidate,
-                  const UnifiedAttentionProblem& problem,
+                  const SdpaShape& problem,
                   const KernelDefinition& kernel)
 {
     if(problem.numKvHeads <= 0 || problem.numQueryHeads % problem.numKvHeads != 0

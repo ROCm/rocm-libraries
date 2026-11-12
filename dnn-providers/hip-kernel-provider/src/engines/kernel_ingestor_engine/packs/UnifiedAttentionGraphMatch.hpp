@@ -62,8 +62,8 @@ using sdpa_graph::HEAD_SIZE_AXIS;
 using sdpa_graph::isWellFormedOperand;
 using sdpa_graph::problemFor;
 using sdpa_graph::sdpaNode;
+using sdpa_graph::SdpaShape;
 using sdpa_graph::SEQ_AXIS;
-using sdpa_graph::UnifiedAttentionProblem;
 
 /// Why @p tensor is not one the kernels can address: they read Q and write O as
 /// `[total_q, Hq, D]` rows and read K/V as a paged cache `[blocks, block_size, Hkv, D]`,
@@ -197,7 +197,7 @@ inline std::optional<std::string> stringMetadata(const KernelDefinition& kernel,
 struct MatchedOperands
 {
     const data_objects::SdpaAttributes* attributes = nullptr;
-    UnifiedAttentionProblem problem;
+    SdpaShape problem;
 };
 
 /**
@@ -344,7 +344,7 @@ struct MatchedAttributes
  */
 inline std::optional<MatchedAttributes>
     matchAttributes(const data_objects::SdpaAttributes& attributes,
-                    const UnifiedAttentionProblem& problem,
+                    const SdpaShape& problem,
                     std::string_view engine,
                     const UnifiedAttentionArchTraits& traits)
 {

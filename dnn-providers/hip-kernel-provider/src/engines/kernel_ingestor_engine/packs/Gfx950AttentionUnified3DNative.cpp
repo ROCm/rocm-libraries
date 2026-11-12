@@ -129,10 +129,10 @@ using unified_attention::isWellFormedOperand;
 using unified_attention::MaskType;
 using unified_attention::problemFor;
 using unified_attention::sdpaNode;
+using unified_attention::SdpaShape;
 using unified_attention::stringMetadata;
 using unified_attention::supportedDataTypeName;
 using unified_attention::UnifiedAttentionBinding;
-using unified_attention::UnifiedAttentionProblem;
 
 // ---------------------------------------------------------------------------
 // Decline logging
@@ -512,7 +512,7 @@ public:
     PreparedGfx950AttentionUnified3D(IngestorKernelCode segment,
                                      IngestorKernelCode reduce,
                                      UnifiedAttentionBinding binding,
-                                     UnifiedAttentionProblem problem,
+                                     SdpaShape problem,
                                      Gfx950Unified3DWorkspaceLayout layout,
                                      std::vector<unsigned char> workspaceImage,
                                      int64_t slidingWindow)
@@ -541,7 +541,7 @@ public:
         return _binding;
     }
 
-    const UnifiedAttentionProblem& problem() const
+    const SdpaShape& problem() const
     {
         return _problem;
     }
@@ -566,7 +566,7 @@ private:
     IngestorKernelCode _segment;
     IngestorKernelCode _reduce;
     UnifiedAttentionBinding _binding;
-    UnifiedAttentionProblem _problem;
+    SdpaShape _problem;
     Gfx950Unified3DWorkspaceLayout _layout;
     std::vector<unsigned char> _workspaceImage;
     int64_t _slidingWindow = 0;
@@ -574,8 +574,7 @@ private:
 
 /// The graph's problem, read from the bound Q and K uids. A null tensor means a bound uid
 /// names no tensor: refused by name, since everything after indexes dims.
-UnifiedAttentionProblem boundProblem(const MatchContext& context,
-                                     const UnifiedAttentionBinding& binding)
+SdpaShape boundProblem(const MatchContext& context, const UnifiedAttentionBinding& binding)
 {
     const auto* q = findTensor(context, binding.q);
     const auto* k = findTensor(context, binding.k);
@@ -607,7 +606,7 @@ AttentionUnified3DCandidate requireCandidate(const KernelDefinition& kernel)
 
 /// The layout for @p candidate over @p problem, or a refusal that says which rule failed.
 Gfx950Unified3DWorkspaceLayout requireLayout(const AttentionUnified3DCandidate& candidate,
-                                             const UnifiedAttentionProblem& problem,
+                                             const SdpaShape& problem,
                                              const KernelDefinition& kernel)
 {
     if(problem.seqLenQ != 1)
