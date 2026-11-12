@@ -3723,6 +3723,13 @@ struct TensileDataGemm
 
     // Recent launch-time re-selections of an adaptive heuristic algo.
     AdaptiveReselectionMemo adaptiveReselections;
+
+#ifndef HIPBLASLT_USE_ROCROLLER
+    // The RocblasltContractionProblem this object was last created or set
+    // from. useRocRoller() and the rocRoller-off selector read it; the Tensile
+    // problem above does not carry everything they need.
+    std::optional<RocblasltContractionProblem> rocProblem;
+#endif
 };
 
 struct TensileDataGroupedGemm
@@ -5719,6 +5726,16 @@ size_t tuningCandidatesForTest(const RocblasltContractionProblem& prob,
     return found->size();
 }
 
+#ifndef HIPBLASLT_USE_ROCROLLER
+// useRocRoller() for the object API. False when the object holds no
+// RocblasltContractionProblem.
+static bool gemmDataUsesRocRoller(rocblaslt_handle                        handle,
+                                  const std::shared_ptr<TensileDataGemm>& data)
+{
+    return data && data->rocProblem && useRocRoller(handle, *data->rocProblem);
+}
+#endif
+
 static bool readsStreamKFlags(const TensileLite::ContractionSolution& solution)
 {
     // A handwritten rocRoller Stream-K custom kernel has sizeMapping.isStreamK()
@@ -6645,6 +6662,9 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
             updateTensileData(problem, *data);
             data->inputs         = GetTensileInputs(problem);
             data->enableEpilogue = problem.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
+#ifndef HIPBLASLT_USE_ROCROLLER
+            data->rocProblem = problem;
+#endif
             if(cacheTuningKey)
                 data->tuningKey = RocblasltContractionProblem2ProblemOverride(problem);
         }
@@ -6655,6 +6675,9 @@ rocblaslt_status gemmCreate(RocblasltContractionProblem const& problem,
             data.inputs         = GetTensileInputs(problem);
             data.enableEpilogue = problem.epilogue == ROCBLASLT_EPILOGUE_DEFAULT ? false : true;
             data.mxScaleNeed = rocblaslt_mx_scale_need_for(problem.scaleAType, problem.scaleBType);
+#ifndef HIPBLASLT_USE_ROCROLLER
+            data.rocProblem = problem;
+#endif
             if(cacheTuningKey)
                 data.tuningKey = RocblasltContractionProblem2ProblemOverride(problem);
 
@@ -7785,6 +7808,34 @@ static rocblaslt_status
     return rocblaslt_status_success;
 }
 
+#ifndef HIPBLASLT_USE_ROCROLLER
+// getRocRollerSelectedSolutions for the object API, which selects with the
+// workspace budget it is given rather than the one it was created with.
+static rocblaslt_status rocRollerSelectedSolutionsVector(
+    rocblaslt_handle                                handle,
+    RocblasltContractionProblem                     prob,
+    int                                             requestedAlgoCount,
+    size_t                                          maxWorkSpaceBytes,
+    std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults)
+{
+    heuristicResults.clear();
+    if(requestedAlgoCount <= 0)
+        return rocblaslt_status_success;
+
+    prob.workspaceSize = maxWorkSpaceBytes;
+    std::vector<rocblaslt_matmul_heuristic_result> results(requestedAlgoCount);
+    int                                            returnAlgoCount = 0;
+    const rocblaslt_status                         status          = getRocRollerSelectedSolutions(
+        handle, prob, requestedAlgoCount, results.data(), maxWorkSpaceBytes, &returnAlgoCount);
+    if(status != rocblaslt_status_success)
+        return status;
+
+    results.resize(std::clamp(returnAlgoCount, 0, requestedAlgoCount));
+    heuristicResults = std::move(results);
+    return rocblaslt_status_success;
+}
+#endif
+
 rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   rocblaslt_handle                   handle,
                                   std::shared_ptr<void>              gemmData,
@@ -8091,12 +8142,20 @@ rocblaslt_status getAllSolutions(std::shared_ptr<void>                          
     if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM)
     {
         std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
-        status                                = getAllSolutions(data->problem,
-                                                                handle,
-                                                                heuristicResults,
-                                                                maxWorkSpaceBytes,
-                                                                data->mxScaleNeed,
-                                                                searchType);
+#ifndef HIPBLASLT_USE_ROCROLLER
+        if(gemmDataUsesRocRoller(handle, data))
+        {
+            RocblasltContractionProblem prob = *data->rocProblem;
+            prob.workspaceSize               = maxWorkSpaceBytes;
+            return getAllSolutions(prob, handle, heuristicResults, maxWorkSpaceBytes, searchType);
+        }
+#endif
+        status = getAllSolutions(data->problem,
+                                 handle,
+                                 heuristicResults,
+                                 maxWorkSpaceBytes,
+                                 data->mxScaleNeed,
+                                 searchType);
     }
     else if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM)
     {
@@ -8684,6 +8743,11 @@ rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
     if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM)
     {
         std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
+#ifndef HIPBLASLT_USE_ROCROLLER
+        if(gemmDataUsesRocRoller(handle, data))
+            return rocRollerSelectedSolutionsVector(
+                handle, *data->rocProblem, requestedAlgoCount, workspaceBytes, heuristicResults);
+#endif
         data->problem.setWorkspaceSize(workspaceBytes);
         bool ruledOut  = false;
         auto solutions = getSolutions(data->inputs,
