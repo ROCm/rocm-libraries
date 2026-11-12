@@ -43,21 +43,6 @@ namespace ingestor = hipdnn_plugin_sdk::ingestor;
 constexpr std::size_t SEGMENT_ARGUMENTS = 22;
 constexpr std::size_t REDUCE_ARGUMENTS = 6;
 
-std::optional<int64_t> integerField(const ingestor::KernelDescriptor& kernel, const char* field)
-{
-    const auto it = kernel.metadata.find(field);
-    if(it == kernel.metadata.end())
-    {
-        return std::nullopt;
-    }
-    const auto* value = std::get_if<int64_t>(&it->second);
-    if(value == nullptr)
-    {
-        return std::nullopt;
-    }
-    return *value;
-}
-
 TEST(TestGfx950AttentionUnified3DCatalogTiles, EveryShippedKernelsGeometryIsOneTheEngineLaunches)
 {
     const auto& set = loadedSet(GFX950_ATTENTION_UNIFIED_3D_ENGINE_NAME);

@@ -18,6 +18,7 @@
 
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified2DGeometry.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified3dGeometry.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
@@ -28,13 +29,20 @@
  * The engine launches a loaded kernel only when its candidateFor() accepts the record's
  * geometry through isSupportedGfx942Unified2DGeometry(); a kernel it declines ships but is
  * never selected. The engine's scorer ranks each head size's default geometry first, which
- * means something only while every cell ships that geometry. And the gfx942 kernel computes
- * the bottom-right causal band only. This suite reads the kernels through the descriptor
- * loader and holds the catalog to all three.
+ * means something only while every cell ships that geometry. The gfx942 kernel computes
+ * the bottom-right causal band only. And graph_match serves only the GQA groups the catalog
+ * ships (GFX942_UNIFIED_2D_SHIPPED_RATIOS). This suite reads the kernels through the descriptor
+ * loader and holds the catalog to all four.
+ *
+ * TestGfx942AttentionUnified2DDecodeHandoff checks the decode boundary between the two gfx942
+ * unified engines: Unified2D declines every decode graph whose GQA group Unified3d ships and
+ * leaves it to Unified3d, so every such cell the 2D catalog ships must have a Unified3d kernel
+ * with the same head_size, ratio and dtype.
  *
  * Hand-written, not generated: it belongs to the census binary beside the generated
  * TestGfx942AttentionUnified2DPacks, and is registered with its own
- * hkp_register_census_tests() call in src/tests/CMakeLists.txt.
+ * hkp_register_census_tests() calls in src/tests/CMakeLists.txt (the hand-off suite only when
+ * both engines ship).
  */
 namespace
 {
@@ -42,39 +50,6 @@ namespace
 using namespace hip_kernel_provider::kernel_ingestor_engine;
 using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
 namespace ingestor = hipdnn_plugin_sdk::ingestor;
-
-/// A kernel's integer metadata field, or nullopt when it is absent or another type: the cases
-/// candidateFor() declines.
-std::optional<int64_t> integerField(const ingestor::KernelDescriptor& kernel, const char* field)
-{
-    const auto it = kernel.metadata.find(field);
-    if(it == kernel.metadata.end())
-    {
-        return std::nullopt;
-    }
-    const auto* value = std::get_if<int64_t>(&it->second);
-    if(value == nullptr)
-    {
-        return std::nullopt;
-    }
-    return *value;
-}
-
-/// A kernel's string metadata field, or nullopt when it is absent or another type.
-std::optional<std::string> stringField(const ingestor::KernelDescriptor& kernel, const char* field)
-{
-    const auto it = kernel.metadata.find(field);
-    if(it == kernel.metadata.end())
-    {
-        return std::nullopt;
-    }
-    const auto* value = std::get_if<std::string>(&it->second);
-    if(value == nullptr)
-    {
-        return std::nullopt;
-    }
-    return *value;
-}
 
 TEST(TestGfx942AttentionUnified2DCatalogTiles, EveryShippedKernelsGeometryIsOneTheEngineLaunches)
 {
@@ -249,6 +224,68 @@ TEST(TestGfx942AttentionUnified2DCatalogTiles, TheShippedGqaRatioListIsTheCatalo
     const std::set<int64_t> listed(GFX942_UNIFIED_2D_SHIPPED_RATIOS.begin(),
                                    GFX942_UNIFIED_2D_SHIPPED_RATIOS.end());
     EXPECT_EQ(shipped, listed);
+}
+
+/// The cell a decode graph is served in: (head_size, num_queries_per_kv, dtype).
+using HeadCell = std::tuple<int64_t, int64_t, std::string>;
+
+/// A kernel's cell, or nullopt when it does not carry all three fields.
+std::optional<HeadCell> headCell(const ingestor::KernelDescriptor& kernel)
+{
+    const auto headSize = integerField(kernel, "head_size");
+    const auto ratio = integerField(kernel, "num_queries_per_kv");
+    const auto dtype = stringField(kernel, "dtype");
+    if(!headSize || !ratio || !dtype)
+    {
+        return std::nullopt;
+    }
+    return HeadCell{*headSize, *ratio, *dtype};
+}
+
+/// The decode boundary between the two gfx942 unified engines: Unified2D declines every decode
+/// graph whose GQA group the Unified3d catalog ships (gfx942Unified3dServesGqaRatio: 1, 2, 4, 8
+/// and 16) and leaves it to Unified3d, so every such cell the 2D catalog ships must have a
+/// Unified3d kernel with the same head_size, ratio and dtype. A reduction that dropped the 3D
+/// cell would otherwise leave those decode graphs with no unified engine at all.
+TEST(TestGfx942AttentionUnified2DDecodeHandoff, EveryDecodeCellHandedToUnified3dHasAUnified3dKernel)
+{
+    std::set<HeadCell> unified3dCells;
+    for(const auto& pack : loadedSet(GFX942_ATTENTION_UNIFIED_3D_ENGINE_NAME).packs)
+    {
+        for(const auto& kernel : pack.kernels)
+        {
+            const auto cell = headCell(kernel);
+            ASSERT_TRUE(cell.has_value())
+                << "Unified3d kernel '" << kernel.name << "' does not carry its cell";
+            unified3dCells.insert(*cell);
+        }
+    }
+    ASSERT_FALSE(unified3dCells.empty()) << "the Unified3d set holds no kernels";
+
+    std::set<HeadCell> handedOff;
+    for(const auto& pack : loadedSet(GFX942_ATTENTION_UNIFIED_2D_ENGINE_NAME).packs)
+    {
+        for(const auto& kernel : pack.kernels)
+        {
+            const auto cell = headCell(kernel);
+            ASSERT_TRUE(cell.has_value())
+                << "Unified2D kernel '" << kernel.name << "' does not carry its cell";
+            // The same rule Unified2D's graph match applies before declining decode.
+            if(!gfx942Unified3dServesGqaRatio(std::get<1>(*cell)))
+            {
+                continue;
+            }
+            handedOff.insert(*cell);
+            const auto& [headSize, ratio, dtype] = *cell;
+            EXPECT_EQ(unified3dCells.count(*cell), 1U)
+                << "Unified2D declines decode for head_size " << headSize << ", a GQA group of "
+                << ratio << ", " << dtype << " (kernel '" << kernel.name
+                << "') and hands it to Unified3d, which ships no kernel for that cell";
+        }
+    }
+    // Every group the 2D catalog ships is one Unified3d serves, so every cell is handed off:
+    // none handed off means the rule or a catalog changed.
+    EXPECT_FALSE(handedOff.empty()) << "no Unified2D cell is handed to Unified3d at decode";
 }
 
 } // namespace

@@ -50,39 +50,6 @@ using namespace hip_kernel_provider::kernel_ingestor_engine;
 using namespace hip_kernel_provider::kernel_ingestor_engine::testing;
 namespace ingestor = hipdnn_plugin_sdk::ingestor;
 
-/// A kernel's integer metadata field, or nullopt when it is absent or another type: the cases
-/// candidateFor() declines.
-std::optional<int64_t> integerField(const ingestor::KernelDescriptor& kernel, const char* field)
-{
-    const auto it = kernel.metadata.find(field);
-    if(it == kernel.metadata.end())
-    {
-        return std::nullopt;
-    }
-    const auto* value = std::get_if<int64_t>(&it->second);
-    if(value == nullptr)
-    {
-        return std::nullopt;
-    }
-    return *value;
-}
-
-/// A kernel's string metadata field, or nullopt when it is absent or another type.
-std::optional<std::string> stringField(const ingestor::KernelDescriptor& kernel, const char* field)
-{
-    const auto it = kernel.metadata.find(field);
-    if(it == kernel.metadata.end())
-    {
-        return std::nullopt;
-    }
-    const auto* value = std::get_if<std::string>(&it->second);
-    if(value == nullptr)
-    {
-        return std::nullopt;
-    }
-    return *value;
-}
-
 /// (head_size, num_query_heads, num_kv_heads, dtype): the cell a decode graph is served in.
 using HeadCell = std::tuple<int64_t, int64_t, int64_t, std::string>;
 

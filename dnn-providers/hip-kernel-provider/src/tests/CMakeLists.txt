@@ -574,6 +574,19 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         )
     endif()
 
+    # The same boundary on gfx942: Unified2D hands decode at every GQA group Unified3d ships to
+    # Unified3d, so with both engines shipped each such 2D cell must have a 3D kernel.
+    if(_hkp_gfx942_attention_unified_2d AND _hkp_gfx942_attention_unified_3d)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx942
+            SUITES TestGfx942AttentionUnified2DDecodeHandoff
+            EXPECTED_CASES
+                EveryDecodeCellHandedToUnified3dHasAUnified3dKernel
+        )
+    endif()
+
     # One generic kernel set per RDNA family ships in every RDNA3/3.5 and RDNA4 shard,
     # as two engines: the prefill objects and the split-KV decode objects (the wide-Q
     # prefill and D256 decode geometries differ per family). The census checks each wired
