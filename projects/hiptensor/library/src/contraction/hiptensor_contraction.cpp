@@ -103,6 +103,39 @@ static bool isPacked(std::vector<std::size_t> const& lengths,
     return lastPosition + 1 == hiptensor::elementsFromLengths(lengths);
 }
 
+// The complex path sizes its buffers by the number of elements and doesn't
+// use the added tensor's own layout. So every tensor must be packed, and
+// the added tensor (C, or D of a trinary contraction) must be laid out like
+// the result. Returns what's wrong, or nullptr when the layouts are
+// supported or the contraction isn't complex.
+static char const* complexLayoutProblem(hiptensorComputeDescriptor_t descCompute,
+                                        std::initializer_list<hiptensorTensorDescriptor_t> tensors,
+                                        hiptensorTensorDescriptor_t descAdded,
+                                        std::vector<int32_t> const& modeAdded,
+                                        hiptensorTensorDescriptor_t descResult,
+                                        std::vector<int32_t> const& modeResult)
+{
+    if(descCompute != HIPTENSOR_COMPUTE_DESC_C32F && descCompute != HIPTENSOR_COMPUTE_DESC_C64F)
+    {
+        return nullptr;
+    }
+    for(auto desc : tensors)
+    {
+        if(!isPacked(hiptensor::getTensorLengths(desc), hiptensor::getTensorStrides(desc)))
+        {
+            return "Complex contraction needs packed tensors";
+        }
+    }
+    if(!matchesPerMode(hiptensor::getTensorStrides(descAdded),
+                       modeAdded,
+                       hiptensor::getTensorStrides(descResult),
+                       modeResult))
+    {
+        return "Complex contraction needs the added tensor laid out like the result";
+    }
+    return nullptr;
+}
+
 // Convert between vectors of void ptrs stored in opaque API objects
 // to vectors of ContractionSolution ptrs with simple cast.
 inline auto toContractionSolutionVec(std::vector<void*> const& v)
@@ -289,28 +322,10 @@ hiptensorStatus_t hiptensorCreateContraction(const hiptensorHandle_t            
         return HIPTENSOR_STATUS_INVALID_VALUE;
     }
 
-    // The complex path sizes its buffers by the number of elements and does not
-    // use C's own layout, so it needs packed tensors and a C laid out like D.
-    bool isComplex
-        = descCompute == HIPTENSOR_COMPUTE_DESC_C32F || descCompute == HIPTENSOR_COMPUTE_DESC_C64F;
-
-    if(isComplex
-       && (!isPacked(hiptensor::getTensorLengths(descA), hiptensor::getTensorStrides(descA))
-           || !isPacked(hiptensor::getTensorLengths(descB), hiptensor::getTensorStrides(descB))
-           || !isPacked(hiptensor::getTensorLengths(descC), hiptensor::getTensorStrides(descC))
-           || !isPacked(hiptensor::getTensorLengths(descD), hiptensor::getTensorStrides(descD))))
+    if(char const* problem = complexLayoutProblem(
+           descCompute, {descA, descB, descC, descD}, descC, modeCV, descD, modeDV))
     {
-        snprintf(msg, sizeof(msg), "Complex contraction needs packed tensors");
-        logger->logError("hiptensorCreateContraction", msg);
-        return HIPTENSOR_STATUS_NOT_SUPPORTED;
-    }
-
-    if(isComplex
-       && !matchesPerMode(
-           hiptensor::getTensorStrides(descC), modeCV, hiptensor::getTensorStrides(descD), modeDV))
-    {
-        snprintf(msg, sizeof(msg), "Complex contraction needs C laid out like D");
-        logger->logError("hiptensorCreateContraction", msg);
+        logger->logError("hiptensorCreateContraction", problem);
         return HIPTENSOR_STATUS_NOT_SUPPORTED;
     }
 
@@ -1128,6 +1143,13 @@ hiptensorStatus_t hiptensorCreateContractionTrinary(
         snprintf(msg, sizeof(msg), "Each mode must have the same extent in D and E");
         logger->logError("hiptensorCreateContractionTrinary", msg);
         return HIPTENSOR_STATUS_INVALID_VALUE;
+    }
+
+    if(char const* problem = complexLayoutProblem(
+           descCompute, {descA, descB, descC, descD, descE}, descD, modeDV, descE, modeEV))
+    {
+        logger->logError("hiptensorCreateContractionTrinary", problem);
+        return HIPTENSOR_STATUS_NOT_SUPPORTED;
     }
 
     *desc = new hiptensorOperationDescriptor();
