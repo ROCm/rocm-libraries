@@ -950,6 +950,9 @@ archs     = ["gfx90a"]   # optional; omit to match every arch
 platforms = ["windows"]                             # optional; omit to match both
 filters   = ["*_SdpaFwd_Default.*_128_bfp16_*"]
 reason    = "no applicable kernel for this shape on this arch"
+
+[conv_fwd_tolerance.float]
+summation_order = 9.0   # optional; replaces the base coefficient of float conv-fwd outputs
 ```
 
 | Table | Rules |
@@ -958,6 +961,7 @@ reason    = "no applicable kernel for this shape on this arch"
 | `[[tolerance_overrides]]` | `filters`, `atol` and `rtol` are all required. **Later entries win** when several match. |
 | `[[validator_overrides]]` | Applies when a `filters` glob matches the test **and** a `tensors` glob matches the output tensor's label (its name, or `uid=N` when unnamed). `validator` is `allclose`, `allclose_matching_infinities` or `rms`. `rms_threshold` is required and positive for `rms`, and forbidden for the other two. **Later entries win.** Allclose is the default everywhere. Only this table changes it. Use it for outputs where per-element comparison is the wrong question, not to get more tolerance. See the validators below. |
 | `[[test_skips]]` | `filters` and `reason` are required. **The first matching entry wins** — this is the opposite order from the two tables above. `archs` is a substring match against the raw `gcnArchName` (so `gfx11` covers `gfx1100` and `gfx1151`). `platforms` is `linux` / `windows`. The skip message is `[arch <current gcnArchName>] <reason>`. |
+| `[conv_fwd_tolerance.float]` | One key, `summation_order`: a finite positive number that replaces the base coefficient (4) of the summation-order terms of the dynamic tolerance of a float convolution-forward output. No other output type and no other key load. A matching `[[tolerance_overrides]]` entry still replaces the dynamic tolerance whole. Read by bundle tests only. See [Tolerances](tolerances.md#float-outputs). |
 
 `filters` are globs that match the full GTest name. This is the same string that
 `--gtest_filter` matches, but the syntax is not `--gtest_filter` syntax: `:` does
@@ -993,7 +997,10 @@ Neither validator is defined for integer outputs. If a glob selects an integer
 output, that tensor fails with a message that names the glob. Narrow the glob to
 float outputs.
 
-The TOML applies to bundle and C++ graph tests alike. It never applies to
+The TOML applies to bundle and C++ graph tests alike, except `[conv_fwd_tolerance.float]`,
+which only bundle tests read: the C++ graph harness does not grade with the dynamic
+tolerance. A top-level key other than the five tables above is a load error, so a
+misspelt section name does not go unnoticed. The TOML never applies to
 `hipdnn_golden_data_tests`. The config of an engine describes how far that engine
 is allowed to drift. It cannot skip or loosen a check on our own golden data. The
 full schema is in `src/harness/TestSettings.hpp`.

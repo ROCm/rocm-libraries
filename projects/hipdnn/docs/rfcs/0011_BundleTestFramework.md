@@ -75,7 +75,7 @@ The framework builds on infrastructure that other tests also use.
 - **Tolerance machinery.**
   - *Per-operation compile-time defaults* (atol/rtol constants per operation + datatype) in `TestTolerances.hpp`.
   - *Per-engine TOML overrides* with glob matching (`[[tolerance_overrides]]`), plus per-tensor validator selection (`[[validator_overrides]]`).
-  - *Dynamic Higham-style error bounds* -- functions exist for the major operations, but the bundle harnesses do not use them.
+  - *Dynamic Higham-style error bounds* -- functions exist for the major operations; the bundle harness uses one, for half, bfloat16 and float convolution-forward output.
 - **A Python generation framework** that writes bundles. The generators in the tree use PyTorch as the reference source.
 - **DVC**, which the repo uses for large binary assets.
 
@@ -103,7 +103,7 @@ The functional changes are described in the relevant Detailed Design subsections
 | [`src/harness/tolerance/ToleranceResolver.hpp`](../../../../dnn-providers/integration-tests/src/harness/tolerance/ToleranceResolver.hpp) | Computes the per-operation default tolerance for each output tensor; the engine harness replaces it for half, bfloat16 and float convolution-forward outputs ([`ConvFwdDynamicTolerance.hpp`](../../../../dnn-providers/integration-tests/src/harness/tolerance/ConvFwdDynamicTolerance.hpp)) |
 | [`LoadGraphAndTensors.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp) | `tensorFromFileAndAttributes()` reads one `.bin` file ([Data Integrity #1](#data-integrity)) |
 | [`TestTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/TestTolerances.hpp) | Per-operation default tolerances |
-| [`TestSettings.hpp`](../../../../dnn-providers/integration-tests/src/harness/TestSettings.hpp), engine `.toml` files | `[[tolerance_overrides]]` and `[[validator_overrides]]` for engine output |
+| [`TestSettings.hpp`](../../../../dnn-providers/integration-tests/src/harness/TestSettings.hpp), engine `.toml` files | `[[tolerance_overrides]]`, `[[validator_overrides]]` and `[conv_fwd_tolerance.float]` (the coefficient of the float convolution-forward dynamic tolerance, bundle harness only) for engine output |
 | [`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerances.hpp) | The per-operation default, computed from graph properties: in use for half, bfloat16 and float convolution forward (engine output only), future for the rest |
 | [`reference-data-scripts/`](../../../../dnn-providers/integration-tests/reference-data-scripts/) | Golden data generators and `verify_golden_bundles.py` |
 | [`migration-scripts/`](../../../../dnn-providers/integration-tests/migration-scripts/) | `import_graph.py` and the capture pipeline that place bundles in the tree |
@@ -690,7 +690,7 @@ Tolerance for engine output is determined by a **three-level priority chain**. T
 
 If a TOML override matches, it wins. Otherwise the bundle's `meta.json` tolerance applies. If the bundle has no tolerance metadata, the per-operation default applies. Without level 2, the harness takes the per-operation default from [`ToleranceResolver.hpp`](../../../../dnn-providers/integration-tests/src/harness/tolerance/ToleranceResolver.hpp) and then applies a matching TOML override. The exception is the engine output of a half, bfloat16 or float convolution-forward graph that accumulates in float, whose default is the dynamic tolerance of [`ConvFwdDynamicTolerance.hpp`](../../../../dnn-providers/integration-tests/src/harness/tolerance/ConvFwdDynamicTolerance.hpp); the golden-data-versus-reference check keeps the fixed default.
 
-Each engine's config (e.g., [`MIOPEN_ENGINE.toml`](../../../../dnn-providers/miopen-provider/config/MIOPEN_ENGINE.toml)) can declare `[[tolerance_overrides]]` entries with glob-pattern filters and atol/rtol values. A `[[validator_overrides]]` entry selects a different validator for one output tensor, matched by tensor name. TOML overrides apply only to engine output. `hipdnn_golden_data_tests` uses the per-operation default only, so an engine config can never loosen the check on the golden data.
+Each engine's config (e.g., [`MIOPEN_ENGINE.toml`](../../../../dnn-providers/miopen-provider/config/MIOPEN_ENGINE.toml)) can declare `[[tolerance_overrides]]` entries with glob-pattern filters and atol/rtol values. A `[[validator_overrides]]` entry selects a different validator for one output tensor, matched by tensor name. A `[conv_fwd_tolerance.float]` table sets the coefficient of the float convolution-forward dynamic tolerance (read by the bundle harness only). TOML overrides apply only to engine output. `hipdnn_golden_data_tests` uses the per-operation default only, so an engine config can never loosen the check on the golden data.
 
 ##### Bundle tolerance (level 2)
 
@@ -733,7 +733,7 @@ The per-operation default is the safety net. It starts simple and gets smarter:
 
 - **Fixed tolerances**: The harness reads the operation type of each node and the output data type from the graph and uses them as a lookup key into [`TestTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/TestTolerances.hpp), which defines compile-time constants per operation and data type (e.g., batchnorm inference fp32 = `2e-4`, conv fwd fp32 = `1e-5`). For a graph with several nodes, it takes the loosest per-node value. An unknown operation gets `1e-3`. The same value is used for atol and rtol. The graph does not compute tolerances — it provides the key, the lookup table provides the value.
 
-- **Dynamic tolerances**: [`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerances.hpp) replaces fixed lookup values with tolerances computed from graph properties (operation, data type, tensor dimensions) and the input tensors. Each one needs validation against measured engine error before it replaces a fixed value (see [Future Work](#future-work)). The first in use grades half and bfloat16 convolution-forward outputs; its model and calibration are in the integration-test [Tolerances](../../../../dnn-providers/integration-tests/docs/tolerances.md) document.
+- **Dynamic tolerances**: [`DynamicTolerances.hpp`](../../test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerances.hpp) replaces fixed lookup values with tolerances computed from graph properties (operation, data type, tensor dimensions) and the input tensors. Each one needs validation against measured engine error before it replaces a fixed value (see [Future Work](#future-work)). The first in use grades half, bfloat16 and float convolution-forward outputs; its model and calibration are in the integration-test [Tolerances](../../../../dnn-providers/integration-tests/docs/tolerances.md) document.
 
 This evolution changes *how* the default is computed -- it does not change the three-level chain.
 
