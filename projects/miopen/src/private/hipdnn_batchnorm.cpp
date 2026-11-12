@@ -285,12 +285,14 @@ bool FindEnforceOverridesSearch()
 // so inference with the estimates skips this check and per-activation runs as
 // under None. Inference without them runs training, so it gets this check.
 // MIOPEN_FIND_ENFORCE is process-wide, so it reaches the provider's handle too,
-// but the two sides rank it differently against Search. MIOpen lets a handle
+// but the two sides rank it differently against Search. Both this check and the
+// provider read the variable on every call, while MIOpen keeps its first read, so
+// a value changed after that read is followed here but not by MIOpen. MIOpen lets a handle
 // policy other than None win over the variable. The provider sets None whenever
 // the variable is set, so there the variable wins. They agree unless the handle
 // is Search and the variable asks for an action Search does not include, so that
 // case is declined; under DB_CLEAN the forwarded call would drop the perf-db entry
-// that MIOpen would tune.
+// that MIOpen would use, or tune and store.
 miopenStatus_t CheckTuningPolicy(miopenHandle_t handle, BnProblem& problem)
 {
     miopenTuningPolicy_t policy = miopenTuningPolicyNone;

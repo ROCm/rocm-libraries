@@ -29,7 +29,9 @@ namespace hipdnn {
 // - miopenStatusBadParm when a descriptor does not match x. Like MIOpen, the
 //   wrapper compares the rank of y (or dy), scale, bias and the statistics with
 //   x, but not the rank of dx.
-// - miopenStatusBadParm for non-default alpha or beta on inference and backward.
+// - miopenStatusBadParm for non-default alpha or beta on backward, and on
+//   inference with both estimates. Inference without them runs training, so it
+//   returns training's status.
 // - miopenStatusUnknownError for non-default alpha or beta on training.
 // - miopenStatusBadParm when x has fewer than 3 dimensions.
 // - miopenStatusUnknownError when x has 3 or more than 5 dimensions. MIOpen's
@@ -77,17 +79,25 @@ namespace hipdnn {
 //   and can only set None, or Search through its benchmarking knob. Inference
 //   with the estimates has no tunable solver, and neither has per-activation
 //   mode, so for them the policy does not matter.
+// - The same calls under miopenTuningPolicySearch while MIOPEN_FIND_ENFORCE asks
+//   for DB_UPDATE, SEARCH_DB_UPDATE or DB_CLEAN. MIOpen lets the Search policy
+//   win over the variable, and the provider lets the variable win over Search.
+// - Under miopenTuningPolicySearch, a problem for which no hipDNN engine has the
+//   benchmarking knob. Any other engine would run the problem untuned.
 // To take one entry point off the hipDNN path, use MIOPEN_DISABLE_HIPDNN_FOR.
 //
-// The wrapper also returns miopenStatusBadParm for a null alpha or beta, a null
-// dscale or dbias, and a null bias on spatial backward with an activation.
-// MIOpen would dereference these and crash, so there is no MIOpen behavior to
-// match.
+// The wrapper also returns miopenStatusBadParm for a null alpha or beta
+// (including alphaParamDiff and betaParamDiff on backward), a null dscale or
+// dbias, and a null bias on spatial backward with an activation. MIOpen would
+// dereference these and crash, so there is no MIOpen behavior to match. A
+// bn_mode other than miopenBNSpatial or miopenBNPerActivation returns
+// miopenStatusUnsupportedOp.
 //
 // Some entry points have no separate previous and next running statistics.
 // They update the statistics in place, so the wrapper binds the same buffer to
-// both. That is safe for one execution. Nothing on this path executes a graph
-// twice.
+// both. Under miopenTuningPolicySearch the provider's search re-runs the kernel
+// on that buffer, so the update is applied more than once, as when MIOpen serves
+// the call.
 miopenStatus_t
 BatchNormalizationForwardTraining(miopenHandle_t handle,
                                   miopenBatchNormMode_t bn_mode,
