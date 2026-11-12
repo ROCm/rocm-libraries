@@ -1952,6 +1952,16 @@ impl<'a> Isel<'a> {
             DppXor | QuadPerm | MovDpp8 => {
                 let (opc, ctrl) = match op.kind {
                     DppXor => match op.int_attr("xor_mask") {
+                        // As `rocke.core.ir.dpp_xor_ctrl`: a mask outside the register-only set is the kernel's error.
+                        Some(mask @ 1..=15) if self.t.target == Target::Gfx950 && !matches!(mask, 1 | 2 | 3 | 7 | 8 | 15) => {
+                            return Err(CompileError::new(
+                                "ROCKE_DIRECT_INVALID",
+                                format!(
+                                    "tile.dpp_xor: xor_mask {mask} has no register-only DPP encoding on gfx950 (no row_xmask); \
+                                     masks 1, 2, 3, 7, 8 and 15 do. Use warp_shuffle_xor (ds_swizzle) for this mask"
+                                ),
+                            ));
+                        }
                         Some(mask @ 1..=15) if self.t.target == Target::Gfx950 => match isel_hooks::xor_shuffle(mask as u32) {
                             isel_hooks::XorShuffle::QuadPerm(ctrl) => (Opc::VMovB32Dpp, dpp16_ctrl(ctrl, true)),
                             isel_hooks::XorShuffle::Swizzle(offset) => (Opc::DsSwizzleB32, offset),
