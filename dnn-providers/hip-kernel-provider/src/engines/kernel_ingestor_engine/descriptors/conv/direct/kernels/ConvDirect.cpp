@@ -45,6 +45,21 @@ extern "C" __global__ void __launch_bounds__(CONV_DIRECT_BLOCK) ConvDirect(K2Arg
               CONV_DIRECT_VEC,
               CONV_DIRECT_RING,
               CONV_DIRECT_PIPE>(a);
+#elif CONV_DIRECT_ROWS && CONV_DIRECT_KD > 1
+    k2ConvRows3d<CONV_DIRECT_T,
+                 CONV_DIRECT_ATOM,
+                 CONV_DIRECT_R,
+                 CONV_DIRECT_S,
+                 CONV_DIRECT_PW,
+                 CONV_DIRECT_FN,
+                 CONV_DIRECT_WP,
+                 CONV_DIRECT_WQ,
+                 CONV_DIRECT_WK,
+                 CONV_DIRECT_BC,
+                 CONV_DIRECT_PP,
+                 CONV_DIRECT_EPI,
+                 CONV_DIRECT_TO,
+                 CONV_DIRECT_KD>(a);
 #elif CONV_DIRECT_ROWS
     k2ConvRows<CONV_DIRECT_T,
                CONV_DIRECT_ATOM,
@@ -58,8 +73,7 @@ extern "C" __global__ void __launch_bounds__(CONV_DIRECT_BLOCK) ConvDirect(K2Arg
                CONV_DIRECT_BC,
                CONV_DIRECT_PP,
                CONV_DIRECT_EPI,
-               CONV_DIRECT_TO,
-               CONV_DIRECT_KD>(a);
+               CONV_DIRECT_TO>(a);
 #else
     k2ConvMma<CONV_DIRECT_T,
               CONV_DIRECT_ATOM,

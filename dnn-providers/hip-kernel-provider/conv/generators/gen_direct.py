@@ -203,8 +203,10 @@ for dt in ("HALF", "BFLOAT16"):
             RW(f"mfma16_{e}", F33, 8, 4, 2, 2, 2, 16, 8, pp=1, epi=0),
             RW(f"mfma16_{e}", F33, 4, 4, 2, 1, 2, 32, 8),
             RW(f"mfma16_{e}", F33, 8, 2, 2, 2, 2, 16, 8),
-            RW(f"mfma16_{e}", F333, 8, 4, 2, 2, 2, 16, 8, pp=1, epi=0),
-            RW(f"mfma16_{e}", F333, 4, 4, 2, 1, 2, 32, 8),
+            # 3x3x3: the 96-wide ping-pong tile won Wan VAE's 96-channel layers (1.07-1.14x over
+            # the halo tile), pw4 fn4 its 384-channel 3x62x106 (1.08x); 192+ wide stay on K2.
+            RW(f"mfma16_{e}", F333, 8, 3, 2, 2, 2, 16, 8, pp=1, epi=0),
+            RW(f"mfma16_{e}", F333, 4, 4, 2, 2, 2, 16, 8, pp=1, epi=0),
         ],
     )
     # gfx942
@@ -240,8 +242,10 @@ for dt in ("HALF", "BFLOAT16"):
             RW(f"mfma16x32_{e}", F77, 8, 2, 2, 2, 2, 32, 8),
             RW(f"mfma16x32_{e}", F17, 8, 4, 2, 2, 2, 32, 8),
             RW(f"mfma16x32_{e}", F71, 8, 2, 2, 2, 2, 32, 8),
-            RW(f"mfma16x32_{e}", F333, 8, 4, 2, 2, 2, 64, 8),
+            # 3x3x3 (Wan VAE, nnunet bf16): 1.03-1.79x over the halo tile, fwd and bwd.
+            RW(f"mfma16x32_{e}", F333, 8, 2, 2, 3, 2, 32, 8),
             RW(f"mfma16x32_{e}", F333, 8, 2, 2, 2, 2, 64, 8),
+            RW(f"mfma16x32_{e}", F333, 8, 4, 2, 2, 2, 64, 8),
         ],
     )
     add(
@@ -404,6 +408,10 @@ add(
     [
         RW("mfma16_f32", F33, 8, 2, 2, 2, 2, 8, 4, epi=0),
         RW("mfma16_f32", F33, 8, 2, 2, 2, 2, 8, 4, pp=1, epi=0),
+        # 3x3x3 fp32 (Wan VAE, nnunet): 1.29-1.79x over every fp32 halo-tile config on gfx90a;
+        # fn 1 for 32-channel outputs.
+        RW("mfma16_f32", F333, 8, 2, 2, 2, 2, 8, 4, pp=1, epi=0),
+        RW("mfma16_f32", F333, 8, 1, 2, 2, 2, 8, 4, epi=0),
     ],
 )
 # 32-wide K blocks (4 x 1 waves): K = 32 layers (nnunet 3-D) waste half a 64-wide block.

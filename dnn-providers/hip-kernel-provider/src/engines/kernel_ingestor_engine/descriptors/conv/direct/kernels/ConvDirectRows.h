@@ -299,10 +299,461 @@ template <class T,
           int BC,
           int PP,
           int EPI,
-          class TO = T,
-          int KD = 1>
+          class TO = T>
 __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
 {
+    constexpr int WAVE = 64;
+    constexpr int DIM = 16;
+    constexpr int KA = Atom::KA, KPL = Atom::KPL;
+    constexpr int BP = WP * PW, BQ = WQ * DIM, BN = WK * FN * DIM;
+    constexpr int NW = WP * WQ * WK;
+    constexpr int HH = BP + R - 1, HW = BQ + S - 1;
+    constexpr int GE = 16 / static_cast<int>(sizeof(T)); // elements per granule
+    constexpr int G = BC / GE; // granules per pixel per chunk
+    constexpr int ROWG = HW * G;
+    constexpr int NG = HH * ROWG; // granules per stage
+    constexpr int KK = BC / KA;
+    constexpr int NQ = S * KK; // steps per chunk
+    constexpr int NR = PW + R - 1; // input fragments per step
+    constexpr int FB = KPL * static_cast<int>(sizeof(T)); // fragment bytes per lane
+    constexpr int FRAG = WAVE * FB; // bytes per weight fragment
+    static_assert(Atom::WAVE == WAVE && Atom::DIM == DIM, "16x16 MFMA atoms only");
+    static_assert(BC % GE == 0 && BC % KA == 0 && G >= 1 && (G & (G - 1)) == 0, "chunk");
+    static_assert(WAVE % G == 0 && G <= 8, "DMA lane map");
+    static_assert(PP == 0 || (PP == 1 && WK == 2), "ping-pong needs two channel halves");
+    constexpr int XPI = WAVE / G; // columns per DMA instruction
+    constexpr int XG = (HW + XPI - 1) / XPI; // instructions per halo row
+    constexpr int NI = HH * XG; // instructions per stage
+    constexpr int IPW = (NI + NW - 1) / NW; // per wave (the last one only for some waves)
+    // DMA per step over steps 0..NQ-2 (step 0 alone when a chunk is one step).
+    constexpr int DSTEPS = NQ > 1 ? NQ - 1 : 1;
+    constexpr int DPS = (IPW + DSTEPS - 1) / DSTEPS;
+    typedef typename K1Raw<16>::type Raw16;
+    typedef typename K1Raw<FB>::type RawF;
+    typedef typename Atom::frag Frag;
+
+    __shared__ Raw16 st0[NG];
+    __shared__ Raw16 st1[NG];
+
+    const int tid = threadIdx.x;
+    const int wave = __builtin_amdgcn_readfirstlane(tid / WAVE);
+    const int wq = wave % WQ, wp = (wave / WQ) % WP, wk = wave / (WQ * WP);
+    // Lane-derived values are recomputed from an opaque lane id where they are used, so the
+    // compiler does not hoist dozens of per-step invariants into live registers.
+    auto olane = [&]() __attribute__((always_inline))
+    {
+        // Unsigned and masked: the compiler then knows the lane is in [0, WAVE) and keeps the
+        // divisions and remainders below as shifts and masks (a signed remainder is six VALU).
+        unsigned l = static_cast<unsigned>(tid);
+        asm volatile("" : "+v"(l));
+        return static_cast<int>(l & (WAVE - 1));
+    };
+
+    // Tile walk: XCD x of K1_XCDS holds blocks b = x mod X (dispatch is round-robin) and owns a
+    // share of the logical tiles proportional to its block count; its blocks take them
+    // round-robin, so concurrent blocks of one XCD work on neighbouring tiles (shared L2).
+    const int kBlocks = (a.k + BN - 1) / BN;
+    const long long total = static_cast<long long>(a.tilesW) * a.tilesH * a.n * kBlocks;
+    const int gsz = static_cast<int>(gridDim.x);
+    const int xcd = static_cast<int>(blockIdx.x) % K1_XCDS;
+    const int local = static_cast<int>(blockIdx.x) / K1_XCDS;
+    auto cum = [&](int x) { return x * (gsz / K1_XCDS) + (x < gsz % K1_XCDS ? x : gsz % K1_XCDS); };
+    const int bpx = cum(xcd + 1) - cum(xcd);
+    const int tEnd = static_cast<int>(total * cum(xcd + 1) / gsz);
+    const int tFirst = static_cast<int>(total * cum(xcd) / gsz) + local;
+
+    struct Tile
+    {
+        int kb, oh0, ow0, img;
+    };
+    auto decode = [&](int t) __attribute__((always_inline))
+    {
+        Tile c;
+        c.kb = t % kBlocks;
+        t /= kBlocks;
+        const int tq = t % a.tilesW;
+        t /= a.tilesW;
+        const int tp = t % a.tilesH;
+        c.img = t / a.tilesH;
+        c.oh0 = tp * BP;
+        c.ow0 = tq * BQ;
+        return c;
+    };
+    const long long imgElems = static_cast<long long>(a.hi) * a.wi * a.c;
+    const long long imgBytes = imgElems * static_cast<long long>(sizeof(T));
+
+    // This wave's DMA instructions [i0, i1) of chunk cc of tile tc into stage st. Lane l takes
+    // column x = XPI xg + l / G and slot l % G, so its granule g = (l % G - x) mod G is the same
+    // for every instruction. Out-of-image pixels and channels past c read as zero.
+#if K2R_DMA16
+    auto dma
+        = [&](Raw16 * st, const Tile& tc, int cc, int i0, int i1) __attribute__((always_inline))
+    {
+        const T* xi = static_cast<const T*>(a.x) + tc.img * imgElems;
+        const __amdgpu_buffer_rsrc_t xr = k1Rsrc(xi, imgBytes);
+        const int cbytes = cc * BC * static_cast<int>(sizeof(T));
+        const int ln = olane();
+        const int lx = ln / G;
+        const int gofs = static_cast<int>(static_cast<unsigned>(ln % G - lx) & (G - 1)) * GE;
+        const int iwl = tc.ow0 - a.pw + lx;
+        const bool cok = gofs < a.c - cc * BC;
+        int wv = wave;
+        asm volatile("" : "+s"(wv)); // per-call scalar decode, not hoisted
+#pragma unroll
+        for(int it = 0; it < IPW; ++it)
+        {
+            if(it < i0 || it >= i1)
+                continue;
+            const int i = it * NW + wv; // wave-uniform
+            if(i >= NI)
+                continue;
+            const int h = i / XG, xg = i - h * XG;
+            const int ih = tc.oh0 - a.ph + h;
+            const int iw = iwl + xg * XPI;
+            const bool ok = (static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi))
+                            & (static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi)) & cok;
+            const unsigned off = ok ? static_cast<unsigned>(((ih * a.wi + iw) * a.c + gofs)
+                                                            * static_cast<int>(sizeof(T)))
+                                    : K1_OUT_OF_RANGE;
+            if(HW % XPI == 0 || xg * XPI + lx < HW)
+                __builtin_amdgcn_raw_ptr_buffer_load_lds(
+                    xr,
+                    (__attribute__((address_space(3))) void*)(st + h * ROWG + xg * WAVE),
+                    16,
+                    off,
+                    cbytes,
+                    0,
+                    0);
+        }
+    };
+#else
+    // Dword DMA: sub-instruction j of run (h, xg) fills granules 16 j .. 16 j + 15 of the run,
+    // lane l granule 16 j + l / 4 (column x = that / G, slot that % G) and its dword l % 4. The
+    // fetch address is the rotation's inverse, as above, plus the dword.
+    auto dma
+        = [&](Raw16 * st, const Tile& tc, int cc, int i0, int i1) __attribute__((always_inline))
+    {
+        constexpr int SUB = K2R_DMA_SUB;
+        constexpr int SPAN = WAVE / SUB; // granules per instruction
+        const T* xi = static_cast<const T*>(a.x) + tc.img * imgElems;
+        const __amdgpu_buffer_rsrc_t xr = k1Rsrc(xi, imgBytes);
+        const int cbytes = cc * BC * static_cast<int>(sizeof(T));
+        const int ln = olane();
+        const int dword = (ln % SUB) * (4 / static_cast<int>(sizeof(T)));
+        int wv = wave;
+        asm volatile("" : "+s"(wv)); // per-call scalar decode, not hoisted
+#pragma unroll
+        for(int it = 0; it < IPW; ++it)
+        {
+            if(it < i0 || it >= i1)
+                continue;
+            const int i = it * NW + wv; // wave-uniform
+            if(i >= NI)
+                continue;
+            const int h = i / XG, xg = i - h * XG;
+            const int ih = tc.oh0 - a.ph + h;
+#pragma unroll
+            for(int j = 0; j < SUB; ++j)
+            {
+                const int q = j * SPAN + ln / SUB; // granule within the run
+                const int lx = q / G;
+                const int gran = static_cast<int>(static_cast<unsigned>(q % G - lx) & (G - 1));
+                const bool cok = gran * GE < a.c - cc * BC;
+                const int iw = tc.ow0 - a.pw + xg * XPI + lx;
+                const bool ok = (static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi))
+                                & (static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi)) & cok;
+                const unsigned off
+                    = ok ? static_cast<unsigned>(((ih * a.wi + iw) * a.c + gran * GE + dword)
+                                                 * static_cast<int>(sizeof(T)))
+                         : K1_OUT_OF_RANGE;
+                if(HW % XPI == 0 || xg * XPI + lx < HW)
+                    __builtin_amdgcn_raw_ptr_buffer_load_lds(
+                        xr,
+                        (__attribute__((address_space(3))) void*)(st + h * ROWG + xg * WAVE
+                                                                  + j * SPAN),
+                        4,
+                        off,
+                        cbytes,
+                        0,
+                        0);
+            }
+        }
+    };
+#endif
+
+    // Weights (k2rFormatWeights): this wave's run of FN fragments for (kc, s, r) is contiguous.
+    const __amdgpu_buffer_rsrc_t wr = k1Rsrc(
+        a.w, static_cast<long long>(a.ca) * a.kpad * KA * R * S * static_cast<int>(sizeof(T)));
+    auto loadW = [&](Frag(&w)[FN], int r, int nb, int cc, int qq) __attribute__((always_inline))
+    {
+        const unsigned wl = static_cast<unsigned>(olane() * FB);
+        const int so
+            = ((((nb / (FN * DIM)) * a.ca + cc * KK + qq % KK) * S + qq / KK) * R + r) * FN * FRAG;
+#pragma unroll
+        for(int j = 0; j < FN; ++j)
+            w[j] = __builtin_bit_cast(Frag, k2rBufferLoad<RawF>(wr, wl + j * FRAG, so));
+    };
+
+    typename Atom::acc acc[PW][FN];
+    const int nCh = (a.c + BC - 1) / BC;
+
+    // One chunk cc of the current tile from stage CUR; prefetches (dmaTile, dmaCc) into the other
+    // stage when pf.
+    auto chunk = [&](auto CUR, int nb, int cc, const Tile& dmaTile, int dmaCc, bool pf)
+        __attribute__((always_inline))
+    {
+        constexpr int cs = decltype(CUR)::value;
+        const Raw16* cur = cs ? st1 : st0;
+        Raw16* nxt = cs ? st0 : st1;
+        k2StaticFor<0, NQ>([&](auto Q) __attribute__((always_inline)) {
+            constexpr int q = decltype(Q)::value;
+            constexpr int s = q / KK, kk = (q % KK) * KA;
+            // Memory phase: weights first (in-order vmcnt), then the DMA, then
+            // the input fragments.
+            Frag wfr[R][FN];
+#pragma unroll
+            for(int r = 0; r < R; ++r)
+                loadW(wfr[r], r, nb, cc, q);
+            if constexpr(q < DSTEPS)
+            {
+                if(pf)
+                    dma(nxt, dmaTile, dmaCc, q * DPS, (q + 1) * DPS);
+            }
+            Frag xin[NR];
+            {
+                const int l = olane();
+                const int x = wq * DIM + l % DIM + s;
+                const int ch = kk + Atom::template kBase<KPL>(l);
+                const int slot = x * G + ((ch / GE + x) % G);
+                const T* base = reinterpret_cast<const T*>(cur) + slot * GE + ch % GE;
+#pragma unroll
+                for(int rr = 0; rr < NR; ++rr)
+                    xin[rr] = __builtin_bit_cast(
+                        Frag, *reinterpret_cast<const RawF*>(base + (wp * PW + rr) * ROWG * GE));
+            }
+            if constexpr(q == NQ - 1)
+                __builtin_amdgcn_s_waitcnt(K2R_VMCNT0);
+            else if constexpr(PP == 1)
+            {
+                // Weights landed; this step's DMA (issued after them) may stay
+                // in flight. Count what every wave issues (a wave with one more
+                // waits a little longer).
+                constexpr int i0 = q * DPS;
+                constexpr int i1 = (q + 1) * DPS < IPW ? (q + 1) * DPS : IPW;
+                constexpr int full = NI / NW;
+                constexpr int dmin = i1 <= full ? i1 - i0 : (i0 < full ? full - i0 : 0);
+                // K2R_DMA_SUB instructions per issue slot; vmcnt holds at most 63.
+                constexpr int dmi = (dmin > 0 ? dmin : 0) * K2R_DMA_SUB;
+                constexpr int dm = dmi < 63 ? dmi : 63;
+                if(pf)
+                    __builtin_amdgcn_s_waitcnt(0x0F70 | (dm & 0xF) | ((dm >> 4) << 14));
+                else
+                    __builtin_amdgcn_s_waitcnt(K2R_VMCNT0);
+            }
+            if constexpr(PP == 1)
+            {
+                __builtin_amdgcn_s_waitcnt(K2R_LGKMCNT0);
+                k2rBarrier();
+                __builtin_amdgcn_s_setprio(1);
+            }
+            __builtin_amdgcn_sched_barrier(0);
+#pragma unroll
+            for(int r = 0; r < R; ++r)
+#pragma unroll
+                for(int j = 0; j < FN; ++j)
+#pragma unroll
+                    for(int p = 0; p < PW; ++p)
+                        acc[p][j] = Atom::mma(wfr[r][j], xin[p + r], acc[p][j]);
+            __builtin_amdgcn_sched_barrier(0);
+            if constexpr(PP == 1)
+            {
+                __builtin_amdgcn_s_setprio(0);
+                k2rBarrier();
+            }
+        });
+        if constexpr(PP == 0)
+            k2rBarrier();
+    };
+
+    // Direct epilogue: the lane holds channels n .. n + 3 of column ow for each row p.
+    auto store = [&](const Tile& tc, int nb) __attribute__((always_inline))
+    {
+        TO* y = static_cast<TO*>(a.y);
+        const int l = olane();
+        const int ow = tc.ow0 + wq * DIM + l % DIM;
+        const bool vec = (a.k & 3) == 0;
+#pragma unroll
+        for(int p = 0; p < PW; ++p)
+        {
+            const int oh = tc.oh0 + wp * PW + p;
+            if(oh >= a.ho || ow >= a.wo)
+                continue;
+            TO* yp = y + ((static_cast<long long>(tc.img) * a.ho + oh) * a.wo + ow) * a.k;
+#pragma unroll
+            for(int j = 0; j < FN; ++j)
+            {
+                const int n = nb + j * DIM + (l / DIM) * 4;
+                if(vec && n + 3 < a.k)
+                {
+                    typedef TO v4 __attribute__((ext_vector_type(4)));
+                    *reinterpret_cast<v4*>(yp + n) = k2rPack4<TO>(acc[p][j]);
+                }
+                else
+                {
+#pragma unroll
+                    for(int i = 0; i < 4; ++i)
+                        if(n + i < a.k)
+                            yp[n + i] = K1Elem<TO>::store(acc[p][j][i]);
+                }
+            }
+        }
+    };
+
+    // Staged epilogue (EPI 1): each wave transposes its tile through a private slot of the stage
+    // the last chunk consumed. A write instruction's 16-lane pass (one 4-channel group, pixels
+    // x = 0..15) must hit 16 distinct 8-byte slots of a 128-byte bank row: granule gi of pixel x
+    // sits at gi ^ key(x), key(x) = (x / XR) mod GP with XR = 8 / GP pixels per bank row, and the
+    // pixels x >= 8 swap the two 8-byte halves of each granule (the reader swaps them back).
+    // Granule-only keying left 8 slots for 16 lanes: a two-way conflict on every write. A barrier
+    // after it keeps the next tile's DMA out of the slots.
+    constexpr int GP = FN * DIM * static_cast<int>(sizeof(TO)) / 16; // granules per pixel
+    constexpr bool STAGED = EPI == 1 && sizeof(TO) == 2 && PP == 0 && (GP & (GP - 1)) == 0
+                            && GP <= 8 && WAVE / GP <= DIM && DIM * GP * NW <= NG;
+    auto storeStaged = [&](Raw16 * slotBase, const Tile& tc, int nb) __attribute__((always_inline))
+    {
+        constexpr int XR = GP < 8 ? 8 / GP : 1;
+        Raw16* slot = slotBase + wave * DIM * GP;
+        TO* y = static_cast<TO*>(a.y);
+        const int l = olane();
+        const int x = l % DIM, g = l / DIM;
+        const int px = l / GP, c8 = l % GP; // reader: pixel, granule
+        constexpr int PPI = WAVE / GP; // pixels per store instruction
+#pragma unroll
+        for(int p = 0; p < PW; ++p)
+        {
+            const int oh = tc.oh0 + wp * PW + p;
+#pragma unroll
+            for(int j = 0; j < FN; ++j)
+            {
+                typedef TO v4 __attribute__((ext_vector_type(4)));
+                const v4 o = k2rPack4<TO>(acc[p][j]);
+                const int gi = (j * DIM + g * 4) * static_cast<int>(sizeof(TO)) / 16;
+                const int half = ((g * 4 * static_cast<int>(sizeof(TO))) % 16) ^ ((x >> 3) * 8);
+                *reinterpret_cast<v4*>(
+                    reinterpret_cast<char*>(slot + x * GP + (gi ^ ((x / XR) & (GP - 1)))) + half)
+                    = o;
+            }
+#pragma unroll
+            for(int k = 0; k < DIM / PPI; ++k)
+            {
+                const int xx = px + k * PPI;
+                Raw16 v = slot[xx * GP + (c8 ^ ((xx / XR) & (GP - 1)))];
+                if((xx >> 3) & 1)
+                    v = __builtin_shufflevector(v, v, 2, 3, 0, 1);
+                const int ow = tc.ow0 + wq * DIM + xx;
+                const int n = nb + c8 * (16 / static_cast<int>(sizeof(TO)));
+                if(oh < a.ho && ow < a.wo && n < a.k)
+                    *reinterpret_cast<Raw16*>(
+                        y + ((static_cast<long long>(tc.img) * a.ho + oh) * a.wo + ow) * a.k + n)
+                        = v;
+            }
+        }
+    };
+
+    // The block's chunks as one stream over its tiles, two per iteration (stage 0, then stage
+    // 1), so the chunk body exists twice whatever the parity of the chunk count. A tile's last
+    // chunk prefetches the first chunk of the block's next tile, then the epilogue writes it.
+    if(tFirst >= tEnd)
+        return;
+    Tile tc = decode(tFirst);
+    int t = tFirst, cc = 0;
+    int nb = tc.kb * BN + wk * FN * DIM;
+    auto zero = [&]() __attribute__((always_inline))
+    {
+#pragma unroll
+        for(int p = 0; p < PW; ++p)
+#pragma unroll
+            for(int j = 0; j < FN; ++j)
+                acc[p][j] = typename Atom::acc{};
+    };
+    zero();
+    dma(st0, tc, 0, 0, IPW);
+    __builtin_amdgcn_s_waitcnt(K2R_VMCNT0);
+    k2rBarrier();
+    if constexpr(PP == 1)
+    {
+        if(wk == 1)
+            k2rBarrier();
+    }
+    // One chunk from stage SG; returns false when the block has no chunk left.
+    auto step = [&](auto SG) __attribute__((always_inline))
+    {
+        constexpr int sc = decltype(SG)::value;
+        const bool last = cc + 1 >= nCh;
+        const bool hasNext = t + bpx < tEnd;
+        // The chunk to prefetch: the next of this tile, or the first of the next tile.
+        Tile dt = tc;
+        if(last && hasNext)
+            dt = decode(t + bpx);
+        chunk(SG, nb, cc, dt, last ? 0 : cc + 1, !last || hasNext);
+        if(!last)
+        {
+            ++cc;
+            return true;
+        }
+        if constexpr(STAGED)
+        {
+            // 16-byte stores need whole granules of output channels. The chunk just read
+            // stage sc and its end barrier passed, so that stage is free.
+            if((a.k & (16 / static_cast<int>(sizeof(TO)) - 1)) == 0)
+            {
+                storeStaged(sc ? st1 : st0, tc, nb);
+                k2rBarrier();
+            }
+            else
+                store(tc, nb);
+        }
+        else
+            store(tc, nb);
+        if(!hasNext)
+            return false;
+        t += bpx;
+        tc = dt;
+        cc = 0;
+        nb = tc.kb * BN + wk * FN * DIM;
+        zero();
+        return true;
+    };
+    while(step(K2Int<0>{}) && step(K2Int<1>{}))
+    {
+    }
+    if constexpr(PP == 1)
+    {
+        if(wk == 0)
+            k2rBarrier();
+    }
+}
+
+// The 3-D form (KD > 1): the 2-D kernel above plus the plane walk (a tile is one output plane; its
+// chunks run over the depth taps whose input plane lies in the image). A separate function, so
+// the 2-D kernel's code is unchanged by it.
+template <class T,
+          class Atom,
+          int R,
+          int S,
+          int PW,
+          int FN,
+          int WP,
+          int WQ,
+          int WK,
+          int BC,
+          int PP,
+          int EPI,
+          class TO,
+          int KD>
+__device__ __attribute__((always_inline)) void k2ConvRows3d(const K2Args& a)
+{
+    static_assert(KD > 1, "k2ConvRows3d is the 3-D form; 2-D configs run k2ConvRows");
     constexpr int WAVE = 64;
     constexpr int DIM = 16;
     constexpr int KA = Atom::KA, KPL = Atom::KPL;
