@@ -1424,6 +1424,12 @@ __device__ K3_LOOP_INLINE void k3WrwRows(const K3Args& a)
 // Channels-last (LAYOUT 1): units of VEC contiguous channels at one position, scattered into
 // the channel rows. Two LDS buffers, one barrier per step. Admitted only where no specialized
 // config is (the host's two-tier rule).
+template <class Atom, class T>
+__device__ inline typename Atom::frag k3FragAtRt(const T* p, int off); // below
+
+// WX > 0 (channels-last, unit width stride): the block's TB taps are consecutive width taps of
+// one filter row, and one x window of BQ + WX positions per channel serves all of them, tap t
+// read at offset t x dw (the host keeps (TB - 1) dw within WX).
 template <class T,
           class Atom,
           int LAYOUT,
@@ -1434,6 +1440,7 @@ template <class T,
           int WK,
           int WC,
           int VEC,
+          int WX = 0,
           int XCD = 0>
 __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
 {
@@ -1449,10 +1456,14 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
     static_assert(BK % ROWS == 0 && BC % ROWS == 0, "K3 generic: whole channel rows a pass");
     constexpr int SKEW = 16 / static_cast<int>(sizeof(T));
     constexpr int LD = BQ + SKEW;
-    constexpr int A_ELEMS = BK * LD, B_ELEMS = TB * BC * LD;
+    constexpr bool WIN = WX > 0;
+    static_assert(!WIN || (LAYOUT != 0 && WX % 8 == 0), "K3 generic window: channels-last");
+    constexpr int WPOS = BQ + WX; // window positions
+    constexpr int LDW = k3WinPitch(WPOS, static_cast<int>(sizeof(T)));
+    constexpr int A_ELEMS = BK * LD, B_ELEMS = WIN ? BC * LDW : TB * BC * LD;
     constexpr int BUF = A_ELEMS + B_ELEMS;
     constexpr int A_PASSES = BK / ROWS, B_PASSES = TB * BC / ROWS;
-    static_assert(k3LdsBytes(8, 0, sizeof(T), BK, BC, BQ, TB, 1, 1, 1, WK, WC, 0, 0, 1, 0, 0)
+    static_assert(k3LdsBytes(8, 0, sizeof(T), BK, BC, BQ, TB, 1, 1, WX, WK, WC, 0, 0, 1, 0, 0)
                       == 2 * BUF * static_cast<long long>(sizeof(T)),
                   "K3 LDS arithmetic (ConvWrwGeom.h)");
     typedef typename K1Raw<sizeof(T)>::type RawE;
@@ -1469,9 +1480,14 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
     const int k0 = (bx % kTiles) * BK;
     const int c0 = (bx / kTiles) * BC;
     const int taps = a.ft * a.fr * a.fs;
-    const int tapGroups = (taps + TB - 1) / TB;
+    // Window: groups of TB width taps within each filter row; else TB consecutive taps.
+    const int sGroups = WIN ? (a.fs + TB - 1) / TB : 1;
+    const int tapGroups = WIN ? a.ft * a.fr * sGroups : (taps + TB - 1) / TB;
     const int g = by / tapGroups;
-    const int tap0 = (by % tapGroups) * TB;
+    const int group = by % tapGroups;
+    const int rowTap = WIN ? (group / sGroups) * a.fs : 0;
+    const int tap0 = WIN ? rowTap + (group % sGroups) * TB : group * TB;
+    const int tapLimit = WIN ? rowTap + a.fs : taps;
     const long long begin = bz * a.stepsPerSplit;
     const long long end = begin + a.stepsPerSplit < a.steps ? begin + a.stepsPerSplit : a.steps;
 
@@ -1484,7 +1500,7 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
         const int tap = tap0 + t;
         const int s = tap % a.fs, rt = tap / a.fs;
         const int r = rt % a.fr, ft = rt / a.fr;
-        tapOk[t] = tap < taps;
+        tapOk[t] = tap < tapLimit;
         tapD[t] = ft * a.dd - a.pd;
         tapH[t] = r * a.dh - a.ph;
         tapW[t] = s * a.dw - a.pw;
@@ -1508,7 +1524,8 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
     constexpr bool CL = LAYOUT != 0;
     constexpr int KW = CL ? 4 / static_cast<int>(sizeof(T)) : 1;
     constexpr int KVN = BK / VEC, CVN = BC / VEC;
-    constexpr int A_UNITS = KVN * (BQ / KW), B_UNITS = TB * CVN * (BQ / KW);
+    constexpr int A_UNITS = KVN * (BQ / KW);
+    constexpr int B_UNITS = WIN ? CVN * (WPOS / KW) : TB * CVN * (BQ / KW);
     constexpr int AU = (A_UNITS + THREADS - 1) / THREADS, BU = (B_UNITS + THREADS - 1) / THREADS;
     static_assert(!CL || (BK % VEC == 0 && BC % VEC == 0 && BQ % KW == 0),
                   "K3 generic: whole channel vectors and position words");
@@ -1579,6 +1596,27 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
             for(int p = 0; p < BU; ++p)
             {
                 const int u = tid + p * THREADS;
+                if constexpr(WIN)
+                {
+                    // The window: positions chunk BQ + q, read at the first tap's offsets (unit
+                    // width stride); every tap of the block reads within it.
+                    const int cv = u % CVN, qg = u / CVN;
+                    const int c = c0 + cv * VEC;
+                    const int id = od * a.sd + tapD[0], ih = oh * a.sh + tapH[0];
+                    const bool rowOk = live && u < B_UNITS && c < cg && id >= 0 && id < a.di
+                                       && ih >= 0 && ih < a.hi;
+#pragma unroll
+                    for(int w = 0; w < KW; ++w)
+                    {
+                        const int iw = chunk * BQ + qg * KW + w + tapW[0];
+                        const bool ok = rowOk && iw >= 0 && iw < a.wi;
+                        const long long off = (g * cg + c) * xs1 + id * xs2 + ih * xs3 + iw * xs4;
+                        k3Load(rb[p * KW + w],
+                               xr,
+                               ok ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
+                    }
+                    continue;
+                }
                 const int cv = u % CVN, rest = u / CVN;
                 const int qg = rest % (BQ / KW), t = rest / (BQ / KW);
                 bool tok;
@@ -1649,6 +1687,15 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
                 const int u = tid + p * THREADS;
                 if(B_UNITS % THREADS != 0 && u >= B_UNITS)
                     continue;
+                if constexpr(WIN)
+                {
+                    const int cv = u % CVN, qg = u / CVN;
+#pragma unroll
+                    for(int e = 0; e < VEC; ++e)
+                        *reinterpret_cast<unsigned*>(Bs + (cv * VEC + e) * LDW + qg * KW)
+                            = wordOf(&rb[p * KW], e);
+                    continue;
+                }
                 const int cv = u % CVN, rest = u / CVN;
                 const int qg = rest % (BQ / KW), t = rest / (BQ / KW);
 #pragma unroll
@@ -1714,15 +1761,39 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
             for(int x = 0; x < FK; ++x)
                 dyf[0][kk][x] = k3FragAt<Atom, T, 0>(As + (wk * WTK + lane % DIM) * LD + kb
                                                      + x * DIM * LD + kk * KA);
-        k3ForEach<TB>([&](auto tc) {
-            constexpr int t = decltype(tc)::value;
-            typedef typename Atom::acc AccRow[1][FK][FC];
-            k3Multiply<Atom, T, 1, 1, 1, 1, FK, FC, BC, LD, KK>(
-                *reinterpret_cast<AccRow*>(&acc[t]),
-                dyf,
-                Bs + t * BC * LD + (wc * WTC + lane % DIM) * LD + kb,
-                0);
-        });
+        if constexpr(WIN)
+        {
+            // Tap t reads the window t dw positions on (a block-uniform runtime offset).
+            const T* bRow = Bs + (wc * WTC + lane % DIM) * LDW + kb;
+            k3ForEach<TB>([&](auto tc) {
+                constexpr int t = decltype(tc)::value;
+                if(tapOk[t])
+                {
+                    const int off = t * a.dw;
+#pragma unroll
+                    for(int kk = 0; kk < KK; ++kk)
+#pragma unroll
+                        for(int y = 0; y < FC; ++y)
+                        {
+                            const typename Atom::frag bf
+                                = k3FragAtRt<Atom, T>(bRow + y * DIM * LDW + kk * KA, off);
+#pragma unroll
+                            for(int x = 0; x < FK; ++x)
+                                acc[t][x][y] = Atom::mma(dyf[0][kk][x], bf, acc[t][x][y]);
+                        }
+                }
+            });
+        }
+        else
+            k3ForEach<TB>([&](auto tc) {
+                constexpr int t = decltype(tc)::value;
+                typedef typename Atom::acc AccRow[1][FK][FC];
+                k3Multiply<Atom, T, 1, 1, 1, 1, FK, FC, BC, LD, KK>(
+                    *reinterpret_cast<AccRow*>(&acc[t]),
+                    dyf,
+                    Bs + t * BC * LD + (wc * WTC + lane % DIM) * LD + kb,
+                    0);
+            });
         waitLoads();
         if(step + 1 < end)
         {
@@ -1734,7 +1805,7 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
     }
     // The taps' sums: acc[t] holds tap tap0 + t, written as filter rows of one tap (S = 1).
     k3StorePartials<T, Atom, TB, 1, FK, FC, WTK, WTC>(
-        a, acc, g, tap0, taps, k0, c0, wk, wc, lane, bz);
+        a, acc, g, tap0, taps, k0, c0, wk, wc, lane, bz, 1, tapLimit);
 }
 
 /// KPL consecutive elements of an LDS row starting OFF elements past p, OFF a per-lane runtime

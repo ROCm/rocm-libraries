@@ -329,7 +329,10 @@ DirectPlan directPlanFor(int64_t tiles,
  * most 64 passes.
  *
  * Loop 8 (generic taps, the coverage tier): a matrix atom; the filter, strides and dilations
- * runtime (s, sw, dw 0), fr the taps a block (>= 1); layout 1 exactly for problems with
+ * runtime (s, sw 0), fr the taps a block (>= 1); dw 0 (per-tap gathers) or the extra positions
+ * of a shared width window (layout 1, a multiple of 8, unit width stride, (min(fr, filter
+ * width) - 1) x width dilation within dw; fr width taps of one filter row a block, so
+ * ft fr ceil(fs / fr) grid rows a group); layout 1 exactly for problems with
  * vectorChannels, layout 0 for the rest (any strides, read element by element); bq dividing the
  * block's threads, bk and bc whole channel rows a pass; align, ns, wq and pb 0; at most 64
  * loads a thread in flight; not for filters of at most 9 taps dilated 6 or more on a filter

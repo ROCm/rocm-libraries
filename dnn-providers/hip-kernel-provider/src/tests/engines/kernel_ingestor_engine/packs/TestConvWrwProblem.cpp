@@ -914,6 +914,33 @@ ConfigFields genericGfx950Fields()
     return f;
 }
 
+/// The generic loop's shared width window: 8 positions past the chunk (channel vectors).
+ConfigFields genericWindowFields()
+{
+    auto f = genericClFields();
+    f.dw = 8;
+    return f;
+}
+
+/// channelsLastShape at width stride 2.
+ConvShape channelsLastStride2Shape()
+{
+    auto shape = baseShape();
+    shape.channelsLast = true;
+    shape.stride = {1, 2};
+    return shape;
+}
+
+/// channelsLastShape at width dilation 5 (3x3: the taps span 10 positions past the first).
+ConvShape channelsLastDilation5Shape()
+{
+    auto shape = baseShape();
+    shape.channelsLast = true;
+    shape.dilation = {1, 5};
+    shape.prePadding = shape.postPadding = {1, 5};
+    return shape;
+}
+
 /// x rows padded to 16 columns (12 used): strided, no packed layout.
 ConvGraphSpec rowPaddedSpec(const ConvShape& shape)
 {
@@ -1030,6 +1057,33 @@ std::vector<ConfigRefusal> configRefusals()
              f.spec = "4R0.5.1.1.0";
              return f;
          }},
+        // The shared window: channel vectors, whole 16-byte units, unit width stride, the
+        // block's width taps within it; never negative.
+        {"GenericWindowNegative",
+         [](ConfigFields& f) { f.dw = -8; },
+         genericWindowFields,
+         "gfx942",
+         channelsLastShape},
+        {"GenericWindowOnElements", [](ConfigFields& f) { f.dw = 8; }, genericFields},
+        {"GenericWindowNotWholeUnits",
+         [](ConfigFields& f) { f.dw = 4; },
+         genericWindowFields,
+         "gfx942",
+         channelsLastShape},
+        {"GenericWindowWidthStride",
+         [](ConfigFields& f) { f.dw = 8; },
+         genericClFields,
+         "gfx942",
+         channelsLastStride2Shape},
+        {"GenericWindowNarrowerThanTheTaps",
+         [](ConfigFields& f) { f.dw = 8; },
+         [] {
+             auto f = genericWindowFields();
+             f.dw = 16;
+             return f;
+         },
+         "gfx942",
+         channelsLastDilation5Shape},
         // Block-based buffers only where the image is past the 32-bit buffer range; 0 or 1.
         {"PbOnASmallImage", [](ConfigFields& f) { f.pb = 1; }},
         {"PbTwo", [](ConfigFields& f) { f.pb = 2; }},
@@ -2581,6 +2635,30 @@ TEST(TestConvWrwKernelMatch, TheGenericLoopLeavesWidelyDilatedSmallFiltersToBlas
     EXPECT_FALSE(admits(genericFields(), "gfx942", dilated({1, 9}, {1, 6})));
 }
 
+TEST(TestConvWrwLaunch, TheGenericWindowGroupsWidthTapsPerFilterRow)
+{
+    // 3x3 at 2 taps a block: per filter row ceil(3 / 2) groups, 3 rows (the gathers: 5).
+    auto f = genericWindowFields();
+    f.fr = 2;
+    const auto window = launchOf(f, channelsLastShape());
+    ASSERT_TRUE(window.has_value());
+    EXPECT_EQ(window->gridY, 3u * 2u);
+    auto gathers = genericClFields();
+    gathers.fr = 2;
+    const auto perTap = launchOf(gathers, channelsLastShape());
+    ASSERT_TRUE(perTap.has_value());
+    EXPECT_EQ(perTap->gridY, 5u);
+    // The window covers the taps a block holds: 3 taps a block on a 2-wide filter dilated 8
+    // reach 8 past the first, within a window of 8 (2 x 8 = 16 would not be). 5 x 2 = 10 taps,
+    // past the ASPP-class gate.
+    auto narrow = baseShape();
+    narrow.channelsLast = true;
+    narrow.filter = {5, 2};
+    narrow.dilation = {1, 8};
+    narrow.prePadding = narrow.postPadding = {2, 4};
+    EXPECT_TRUE(admits(genericWindowFields(), "gfx942", narrow));
+}
+
 TEST(TestConvWrwKernelMatch, TheGenericLoopTakesEveryArchsMatrixAtom)
 {
     auto gfx1201 = genericClFields();
@@ -2784,6 +2862,8 @@ TEST(TestConvWrwLoadPasses, TheGenericLoopCountsItsLoads)
     fp32.vec = 4;
     fp32.bq = 16;
     EXPECT_EQ(conv_wrw::loadPassesOf(configOf(fp32), 4, 64), 1 + 3);
+    // The shared window: dy as above; x 8 vectors by 20 words of the 40-position window.
+    EXPECT_EQ(conv_wrw::loadPassesOf(configOf(genericWindowFields()), 2, 64), (1 + 1) * 2);
     // bq not dividing the block.
     auto odd = genericFields();
     odd.bq = 48;
@@ -2794,6 +2874,13 @@ TEST(TestConvWrwLds, MirrorsTheKernelsArithmetic)
 {
     // Generic taps: two buffers of 64 dy and 3 x 64 x rows of 32 + 8 positions.
     EXPECT_EQ(conv_wrw::ldsBytesOf(configOf(genericFields()), 2), 2 * (64 + 3 * 64) * 40 * 2);
+    // Shared window: one x row of 32 + 8 positions per channel, pitched to 56 (7 16-byte units,
+    // odd); 48 positions (6 units, even) would be bumped too.
+    EXPECT_EQ(conv_wrw::ldsBytesOf(configOf(genericWindowFields()), 2),
+              2 * (64 * 40 + 64 * 56) * 2);
+    auto wide = genericWindowFields();
+    wide.dw = 16; // 48 + 8 = 56: already odd
+    EXPECT_EQ(conv_wrw::ldsBytesOf(configOf(wide), 2), 2 * (64 * 40 + 64 * 56) * 2);
     // Ring, channels-first fp16, 64 x 64 x 32, 3 taps: window 34 = 5 vectors of 8, LDA 40,
     // LDB ceil(42 / 8) x 8 + 8 = 56; two buffers of 64 x 40 + 64 x 56.
     auto ring = configOf(ConfigFields{});

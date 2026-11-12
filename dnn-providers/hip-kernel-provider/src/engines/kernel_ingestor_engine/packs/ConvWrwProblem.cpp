@@ -354,9 +354,11 @@ int64_t loadPassesOf(const WrwConfig& config, int elementBytes, int64_t wave)
         }
         const int64_t kw = 4 / elementBytes;
         const int64_t words = divUp(config.bq, kw);
-        return (divUp(divUp(config.bk, vec) * words, threads)
-                + divUp(config.fr * divUp(config.bc, vec) * words, threads))
-               * kw;
+        // dw > 0: one window of bq + dw positions for every tap.
+        const int64_t xUnits = config.dw > 0
+                                   ? divUp(config.bc, vec) * divUp(config.bq + config.dw, kw)
+                                   : config.fr * divUp(config.bc, vec) * words;
+        return (divUp(divUp(config.bk, vec) * words, threads) + divUp(xUnits, threads)) * kw;
     }
     if(config.loop == LOOP_DIRECT)
     {
@@ -778,9 +780,17 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         // Runtime geometry (s, sw, dw 0), fr taps a block; a position per thread (bq dividing
         // the block) and whole channel rows a pass. (Channel vectors and 32-bit position words
         // follow from whole fragments and atom steps.)
-        if(config.s != 0 || config.sw != 0 || config.dw != 0 || config.fr < 1
-           || threads % config.bq != 0 || config.bk % (threads / config.bq) != 0
-           || config.bc % (threads / config.bq) != 0)
+        // (A negative dw is declined with the LDS: ldsBytesOf takes no negative field.)
+        if(config.s != 0 || config.sw != 0 || config.fr < 1 || threads % config.bq != 0
+           || config.bk % (threads / config.bq) != 0 || config.bc % (threads / config.bq) != 0)
+        {
+            return std::nullopt;
+        }
+        // dw > 0, the shared width window of bq + dw positions: channel vectors, whole 16-byte
+        // units of extra positions, unit width stride, and the block's width taps within it.
+        if(config.dw > 0
+           && (!cl || config.dw % 8 != 0 || a.stride[2] != 1
+               || (std::min<int64_t>(config.fr, a.filter[2]) - 1) * a.dilation[2] > config.dw))
         {
             return std::nullopt;
         }
@@ -1009,9 +1019,11 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         const int64_t frows = a.filter[0] * a.filter[1];
         // A phased ring runs one grid row per height phase; its tracks walk the dy rows.
         gridY = a.groups
-                * (generic ? divUp(problem.taps, config.fr)
-                   : rows  ? divUp(frows, config.fr)
-                           : a.filter[0] * (phased ? a.stride[1] : 1));
+                * (generic && config.dw > 0
+                       ? a.filter[0] * a.filter[1] * divUp(a.filter[2], config.fr)
+                   : generic ? divUp(problem.taps, config.fr)
+                   : rows    ? divUp(frows, config.fr)
+                             : a.filter[0] * (phased ? a.stride[1] : 1));
         // Packed rows: a plane's chunks are its groups of packRows rows.
         chunks = packed ? divUp(a.outSpatial[1], packRows) : divUp(a.outSpatial[2], config.bq);
         trackLen = phased ? a.outSpatial[1] + config.fr - 1
