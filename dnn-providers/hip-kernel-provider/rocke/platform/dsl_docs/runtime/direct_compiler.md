@@ -387,6 +387,7 @@ gfx950 only:
 | `nobankspill` | Spills without putting the accumulators in AGPRs first, and tries no schedule that fits with them there. |
 | `nobankfits` | Before spilling, tries no candidate schedule that fits with the accumulators in AGPRs; the accumulators beside spill slots stay. |
 | `nobankwide` | Tries no wider window with the accumulators in AGPRs. |
+| `nosmemsink` | Leaves the compare-and-select pairs that read a scalar load's result where selection put them (lever `smemsink`). |
 | `nomasks64` | Evaluates a uniform compare at each lane-mask reader. |
 | `nolatency` | Weighs no wider window with SGPRs in VGPR lanes for a latency-bound kernel without MFMAs. |
 | `nounrollcost` | Unrolls automatically and keeps unrolled code by the shared rules only. |

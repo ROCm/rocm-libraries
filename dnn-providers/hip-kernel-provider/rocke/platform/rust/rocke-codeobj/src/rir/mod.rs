@@ -155,6 +155,8 @@ pub(crate) fn debug_flag(name: &str) -> bool {
 /// - `widewin`: a gfx950 kernel without MFMAs also tries scheduling windows of 128, 256 and 512 places, widest first, and
 ///   takes the widest whose schedule keeps the occupancy of load sinking alone: more loads in flight per wave (the
 ///   split-KV attention reduce kernels, whose launches are too small for other waves to hide the loads' latency).
+/// - `smemsink`: the scalar compare-and-select pairs that read a scalar load's result move below the loads that follow
+///   (`target::gfx9::smem_sink`): a block table's entries are then loaded together, not one memory round trip apart.
 /// - `devfn`: every leading `inreg` parameter is preloaded, past the 14 user SGPRs (`opt::kernarg_preload`): the
 ///   build is disassembled into a device function (`dsv41_mono/direct_fn.py`), never launched.
 /// - `litshare`: one register per literal and block before scheduling
@@ -192,7 +194,7 @@ pub const LEVERS: &[&str] = &[
     "dsfold", "dshoist", "dsrebase", "fmac", "fmax3", "fp6pass", "i16vec", "ldsalias", "ldsduos", "ldsgroup", "ldspairs",
     "ldspairsfar", "ldsquads", "licm", "litreuse", "litshare", "loadfirst", "loadorder", "loopalign", "m0cse",
     "m0fill", "m0share", "masksall", "minmax", "minmax3", "nofence", "nopause", "novmfence", "packfar",
-    "scalesep", "selxor", "sgb", "smemfree", "soffshare", "soffsharek", "sreassoc", "storewait", "subadd",
+    "scalesep", "selxor", "sgb", "smemfree", "smemsink", "soffshare", "soffsharek", "sreassoc", "storewait", "subadd",
     "u16zext", "vmemfirst", "vmlat100", "vmlat60", "wgfence", "widewin", "wpecap", "xorcmp",
 ];
 
