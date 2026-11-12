@@ -12,10 +12,11 @@
 #
 # A test that is in library/tests but in no list here does not run in CI.
 
-# Oracle-free uniform-probability launches of the shipped dense kernels. Only
-# the GPU module runs here; its CPU contracts run in the attention CPU lane.
+# Oracle-free launches of the shipped dense kernels: the uniform-probability
+# gate and the key-permutation relation. Only the GPU modules run here; their
+# CPU contracts run in the attention CPU lane.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_oracle_free_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_analytical_dense.py\" -v -rs)\n")
+       "add_test(rocke_oracle_free_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_analytical_dense.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_permutation_dense.py\" -v -rs)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_oracle_free_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;gpu\\;quick\"\n"
@@ -237,7 +238,8 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_fmha_mfma_free_stride.py"
     "tests/library/tests/test_sdpa_free_stride_layouts.py"
     "tests/library/tests/test_bwd_memo_bound.py"
-    "tests/library/tests/oracle_free/test_contracts.py")
+    "tests/library/tests/oracle_free/test_contracts.py"
+    "tests/library/tests/oracle_free/test_permutation_contracts.py")
 set(_ROCKE_LIBRARY_ATTENTION_CPU_TESTS "")
 foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
   string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS
