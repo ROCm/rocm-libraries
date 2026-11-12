@@ -559,13 +559,20 @@ __device__ inline typename Atom::frag k1FiniteFrag(typename Atom::frag f)
     }
     else
     {
+        // On whole dwords (two bf16 each): a per-element 16-bit select was miscompiled on gfx12
+        // (fragments rebuilt from the wrong halves).
+        constexpr int N = Atom::KPL / 2;
+        typedef unsigned W __attribute__((ext_vector_type(N)));
+        W w = __builtin_bit_cast(W, f);
 #pragma unroll
-        for(int i = 0; i < Atom::KPL; ++i)
+        for(int i = 0; i < N; ++i)
         {
-            f[i] = __builtin_bit_cast(typename Atom::elem,
-                                      k1BfFinite(__builtin_bit_cast(unsigned short, f[i])));
+            const unsigned v = w[i];
+            const unsigned low = (v & 0x7fffu) == 0x7f80u ? 0x0000ffffu : 0u;
+            const unsigned high = (v & 0x7fff0000u) == 0x7f800000u ? 0xffff0000u : 0u;
+            w[i] = v & ~(low | high);
         }
-        return f;
+        return __builtin_bit_cast(typename Atom::frag, w);
     }
 }
 
