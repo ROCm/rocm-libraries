@@ -17,7 +17,7 @@
 //   CONV_FFT_T    element type of the tensors: float, _Float16, or unsigned short (bf16 bits)
 //   CONV_FFT_TH   transform rows (1 for a 1-D transform), CONV_FFT_TW transform columns
 //   CONV_FFT_PB   tiles (or filters) a transform block
-//   CONV_FFT_TB   threads of a transform block
+//   CONV_FFT_TB   threads of a transform block (at least one a row pair: PB TH / 2, or PB / 2)
 //   CONV_FFT_GN   output channels of a product block tile (16, 32 or 64; 256 threads)
 
 #include "ConvFftCore.h"
@@ -38,7 +38,7 @@ extern "C" __global__ void __launch_bounds__(CONV_FFT_TB) ConvFftFilter(ConvFftA
 
 extern "C" __global__ void __launch_bounds__(256) ConvFftProduct(ConvFftArgs a)
 {
-    fftProduct<CONV_FFT_GN>(a, CONV_FFT_TH * (CONV_FFT_TW / 2 + 1));
+    fftProduct<CONV_FFT_GN>(a);
 }
 
 extern "C" __global__ void __launch_bounds__(CONV_FFT_TB) ConvFftOutput(ConvFftArgs a)

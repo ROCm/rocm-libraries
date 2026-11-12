@@ -84,7 +84,8 @@ struct Config
 
 /// The config @p kernel describes, or nullopt for one the kernels cannot compile: th 1 or a power
 /// of two 8..64, tw a power of two 8..64, pb >= 1 (even for th 1) with pb x bins x 8 bytes of LDS
-/// within 32 KiB, tb a multiple of 64 up to 256, gn 16, 32 or 64.
+/// within 64 KiB, tb a multiple of 64 up to 256 and at least one thread a row pair, gn 16, 32 or
+/// 64.
 std::optional<Config> configOf(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel);
 
 /// Upper bound of the workspace a plan asks for; tiles are processed in chunks below it.

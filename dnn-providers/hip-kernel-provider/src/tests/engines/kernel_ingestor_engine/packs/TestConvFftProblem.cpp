@@ -304,7 +304,11 @@ TEST(TestConvFftKernel, OneDeclinePerMalformedConfigField)
     EXPECT_TRUE(declines([](Fields& f) { f.tw = 128; })); // above 64
     EXPECT_TRUE(declines([](Fields& f) { f.tw = 1; }));
     EXPECT_TRUE(declines([](Fields& f) { f.pb = 0; }));
-    EXPECT_TRUE(declines([](Fields& f) { f.pb = 8; })); // 8 x 544 bins exceed the LDS
+    EXPECT_TRUE(declines([](Fields& f) {
+        f.pb = 16; // 16 x 544 bins exceed the LDS
+        f.tb = 256;
+    }));
+    EXPECT_TRUE(declines([](Fields& f) { f.pb = 8; })); // 128 row pairs, 64 threads
     EXPECT_TRUE(declines([](Fields& f) {
         f.th = 1;
         f.tw = 64;

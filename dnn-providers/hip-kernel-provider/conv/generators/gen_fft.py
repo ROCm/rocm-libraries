@@ -24,27 +24,23 @@ STRINGS = ["direction", "dtype"]
 
 # Transform sizes: 2-D square tiles for square filters up to 63 taps of span, 1-D rows for
 # 1-D (and 1 x s) filters. Larger tiles amortise a larger filter; smaller ones waste less on
-# small images.
-TILES = [(16, 16), (32, 32), (64, 64), (1, 32), (1, 64)]
+# small images. Per tile, transform blocks of pb tiles (more tiles a block: longer contiguous
+# runs of the spectra, more LDS) and tb threads (at least one a row pair).
+TILES = {
+    (16, 16): [8, 16],
+    (32, 32): [2, 4, 8],
+    (64, 64): [1, 2],
+    (1, 32): [64, 128],
+    (1, 64): [32, 64],
+}
 # Product tiles: 64 x 64 for wide channel counts, 256 tiles x 16 channels for narrow ones.
 GNS = [64, 16]
-LDS_BUDGET = 16 * 1024
 
 
-def block_of(th, tw):
-    """Tiles a transform block (spectra within the LDS budget; even for 1-D, which pairs tiles)
-    and its threads (enough for the row pairs and the columns, 64 to 256)."""
-    bins = th * (tw // 2 + 1)
-    pb = 1
-    while pb * 2 * bins * 8 <= LDS_BUDGET and pb < 64:
-        pb *= 2
-    if th == 1:
-        pb = max(pb, 2)
+def threads_of(th, tw, pb):
+    """Threads of a transform block: one a row pair (pb th / 2, or pb / 2 for rows), 64 to 256."""
     pairs = pb // 2 if th == 1 else pb * th // 2
-    cols = 0 if th == 1 else pb * (tw // 2 + 1)
-    need = max(pairs, cols)
-    tb = min(256, max(64, (need + 63) // 64 * 64))
-    return pb, tb
+    return min(256, max(64, (pairs + 63) // 64 * 64))
 
 
 kmd, umd, udd = U("kmd"), U("umd"), U("udd")
@@ -95,35 +91,34 @@ for direction in ("fwd", "bwd", "wrw"):
     kernels = []
     i = 0
     for dtype in ("FLOAT", "HALF", "BFLOAT16"):
-        for th, tw in TILES:
-            pb, tb = block_of(th, tw)
-            for gn in GNS:
-                name = (
-                    f"conv_fft.{direction}.{dt[dtype]}.t{th}x{tw}.pb{pb}.tb{tb}.g{gn}"
-                )
-                kernels.append(
-                    {
-                        "version": "1.0",
-                        "id": U(name),
-                        "name": name,
-                        "kernel_source": {
-                            "kind": "embedded_source",
-                            "source_file": "kernels/ConvFft.cpp",
-                            "entry_point": "ConvFftData",
-                        },
-                        "metadata": {
-                            "direction": direction.upper(),
-                            "dtype": dtype,
-                            "th": th,
-                            "tw": tw,
-                            "pb": pb,
-                            "tb": tb,
-                            "gn": gn,
-                        },
-                        "priority": 1000 - i,
-                    }
-                )
-                i += 1
+        for (th, tw), pbs in TILES.items():
+            for pb in pbs:
+                tb = threads_of(th, tw, pb)
+                for gn in GNS:
+                    name = f"conv_fft.{direction}.{dt[dtype]}.t{th}x{tw}.pb{pb}.tb{tb}.g{gn}"
+                    kernels.append(
+                        {
+                            "version": "1.0",
+                            "id": U(name),
+                            "name": name,
+                            "kernel_source": {
+                                "kind": "embedded_source",
+                                "source_file": "kernels/ConvFft.cpp",
+                                "entry_point": "ConvFftData",
+                            },
+                            "metadata": {
+                                "direction": direction.upper(),
+                                "dtype": dtype,
+                                "th": th,
+                                "tw": tw,
+                                "pb": pb,
+                                "tb": tb,
+                                "gn": gn,
+                            },
+                            "priority": 1000 - i,
+                        }
+                    )
+                    i += 1
     write(
         f"conv_fft_{direction}.kdp.json",
         {

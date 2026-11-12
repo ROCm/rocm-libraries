@@ -29,6 +29,8 @@ constexpr int64_t INT_LIMIT = std::numeric_limits<int>::max();
 /// Global work-items of one launch (grid x threads) stay below 2^32.
 constexpr int64_t WORK_ITEM_LIMIT = (int64_t{1} << 32) - 1;
 constexpr size_t ALIGN = 256;
+/// LDS a block may declare on every target (64 KiB; gfx950 has 160).
+constexpr int64_t LDS_LIMIT_BYTES = 64 * 1024;
 
 bool fitsInt(long long value)
 {
@@ -150,11 +152,13 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     {
         return std::nullopt;
     }
-    if(static_cast<int64_t>(config.pb) * config.bins() * 8 > 32 * 1024)
+    if(static_cast<int64_t>(config.pb) * config.bins() * 8 > LDS_LIMIT_BYTES)
     {
         return std::nullopt;
     }
-    if(config.tb < 64 || config.tb > 256 || config.tb % 64 != 0)
+    // One thread a row pair: a pass reads every row before any thread writes over it.
+    const int pairs = config.th == 1 ? config.pb / 2 : config.pb * config.th / 2;
+    if(config.tb < 64 || config.tb > 256 || config.tb % 64 != 0 || config.tb < pairs)
     {
         return std::nullopt;
     }
@@ -214,6 +218,11 @@ namespace
 /// The depthwise path's workspace and grids (planFor's tail for one-channel groups).
 std::optional<Plan> depthwisePlan(Plan plan, bool wrw, int64_t computeUnits)
 {
+    // The backward-weights kernel holds the x and the dy spectra of its tiles at once.
+    if(wrw && 2 * static_cast<int64_t>(plan.config.pb) * plan.bins * 8 > LDS_LIMIT_BYTES)
+    {
+        return std::nullopt;
+    }
     auto& a = plan.args;
     const int64_t groups = a.groups;
     const int64_t bins = plan.bins;
