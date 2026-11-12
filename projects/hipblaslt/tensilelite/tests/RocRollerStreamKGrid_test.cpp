@@ -558,6 +558,10 @@ TEST(RocRollerStreamKGrid, DecompositionCoversEveryTile)
                     EXPECT_GE(uint64_t(k.numSKTilesPerWG) * grid, k.numSKTiles) << what;
                     EXPECT_EQ(uint64_t(k.numDPTilesPerWG) * grid, k.numDPTiles) << what;
                     EXPECT_EQ(k.numDPTiles != 0, tiles >= 2 * uint64_t(grid)) << what;
+                    EXPECT_EQ(rocRollerStreamKHasDataParallelTiles(
+                                  size.m, size.n, size.k, mt.m, mt.n, mt.k, grid),
+                              k.numDPTilesPerWG != 0)
+                        << what;
 
                     withDataParallel += k.numDPTiles != 0;
                     ++checked;
