@@ -445,6 +445,13 @@ rocke_kernel_def_t* rocke_build_unified_attention_2d_tiled_scalar(
         rocke_attn2d_c32_dist_reset();
         rocke_gfx942_attn2d_reset_softmax_scratch();
 
+        /* A gfx942 build checks the spec the way the Python gfx942 spec's
+         * __post_init__ does when it is constructed. The gfx950 fast-KV builder
+         * reuses this one for a gfx950 spec, which carries its own rules. */
+        if(rocke__arch_in_narrow_set((arch != NULL) ? arch : "gfx942")
+           && !rocke_attention_tiled_2d_spec_validate(b, spec))
+            return NULL;
+
         /* Prologue port: arch/dtype gate, narrow-atom select, config derivation,
          * kernel + params, grid / seq-idx / Q-block geometry, LDS layout +
          * smem_alloc, SSA constants, KV-loop bounds + the online-softmax iter-arg
@@ -620,6 +627,8 @@ static rocke_status_t
             s->use_fast_paged_kv_desc ? "fastkvdesc" : "",
             s->use_early_v_schedule ? "earlyv" : "",
             s->use_q_direct_global ? "qdir" : "",
+            s->use_v_hbm_direct ? "vhbm" : "",
+            s->use_k_hbm_direct ? "khbm" : "",
             s->use_qk_pv_sched_group_barrier ? "qsgb" : "",
             kvcp_buf,
             s->use_global_load_lds_k ? "gldlds" : "",
