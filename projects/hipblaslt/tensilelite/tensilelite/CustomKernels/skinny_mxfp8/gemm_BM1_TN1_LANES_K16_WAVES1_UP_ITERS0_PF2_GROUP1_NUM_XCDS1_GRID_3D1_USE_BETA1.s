@@ -1,3 +1,15 @@
+// Generated out of tree, then hand-edited: the m/n/k kernarg names in the HSA metadata became m_size/n_size/k_size and
+// the custom.config block was appended (AddCustomConfig). No instruction was edited; an earlier s_nop 11 to 13 edit
+// was reverted so the kernels match the generator output.
+// Constraints (custom.config keys): AssertSizeEqual (batch 1), AssertSizeGreaterThan (m > 4, n and K non-empty),
+// AssertSizeLessThan (n < 5, m and K <= 2^20), AssertSummationElementMultiple (K % 32 == 0), AssertStrideAEqual,
+// AssertStrideBEqual, AssertStrideCEqual, AssertStrideDEqual (unit strides), AssertStrideAMultiple,
+// AssertStrideBMultiple, AssertTensorBytesLessThan (tensors < 2^31 bytes), AssertMXScalesPreSwizzled. No bias,
+// activation or scale-alpha vector.
+// Rule: n < 5 and m > 4, so m is the wide extent: one workgroup per tile and no grid guard.
+// Invariant: SRD num_records is built from the tensor extent in this file and must never be enlarged (for example to
+// 0x7fffffff): loads past K in the prologue and tail are safe only because soffset is range-checked against it.
+// This kernel has no 0x80000000 row sentinel. Formulas: README.md.
 .amdgcn_target "amdgcn-amd-amdhsa--gfx950"
 .amdhsa_code_object_version 4
 .text
@@ -1944,6 +1956,7 @@ custom.config:
   MIWaveTile: [1, 1]
   AssertSummationElementMultiple: 32
   AssertTensorBytesLessThan: 2147483648
+  AssertMXScalesPreSwizzled: true
   AssertSizeEqual: { 2: 1 }
   AssertSizeGreaterThan: { 0: 4, 1: 0, 3: 0 }
   AssertSizeLessThan: { 0: 1048577, 1: 5, 3: 1048577 }

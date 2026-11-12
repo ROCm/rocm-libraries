@@ -1,3 +1,14 @@
+// Generated out of tree, then hand-edited: the m/n/k kernarg names in the HSA metadata became m_size/n_size/k_size and
+// the custom.config block was appended (AddCustomConfig). No instruction was edited; an earlier s_nop 11 to 13 edit
+// was reverted so the kernels match the generator output.
+// Constraints (custom.config keys): AssertSizeEqual (batch 1), AssertSizeGreaterThan and AssertSizeLessThan (m, n and K
+// in [1, 2^20]), AssertSummationElementMultiple (K % 32 == 0), AssertStrideAEqual, AssertStrideBEqual,
+// AssertStrideCEqual, AssertStrideDEqual (unit strides), AssertStrideAMultiple, AssertStrideBMultiple,
+// AssertTensorBytesLessThan (tensors < 2^31 bytes), AssertMXScalesPreSwizzled. No bias, activation or scale-alpha.
+// Rule: AssertAnySizeLessThan, min(m, n) <= 4.
+// Invariant: SRD num_records is built from the tensor extent in this file and must never be enlarged (for example to
+// 0x7fffffff): loads past K in the prologue and tail are safe only because soffset is range-checked against it.
+// The 0x80000000 offset for out-of-range A and B rows must stay outside the A and B buffers. Formulas: README.md.
 .amdgcn_target "amdgcn-amd-amdhsa--gfx950"
 .amdhsa_code_object_version 4
 .text
@@ -1509,7 +1520,7 @@ s_nop 1
 v_mfma_scale_f32_16x16x128_f8f6f4 v[12:15], v[34:41], v[42:49], v[12:15], v26, v27 op_sel:[0,0,0] op_sel_hi:[0,0,0] cbsz:0 blgp:0
 v_mfma_scale_f32_16x16x128_f8f6f4 v[12:15], v[50:57], v[58:65], v[12:15], v26, v27 op_sel:[0,0,0] op_sel_hi:[1,1,0] cbsz:0 blgp:0
 label_tail_skip_16:
-s_nop 13
+s_nop 11
 s_cmp_eq_u32 s42, 0
 s_cbranch_scc1 label_wave_zero_33
 ds_write_b128 v11, v[12:15] offset:0
@@ -1767,6 +1778,7 @@ custom.config:
   AssertSummationElementMultiple: 32
   AssertTensorBytesLessThan: 2147483648
   AssertAnySizeLessThan: { 0: 5, 1: 5 }
+  AssertMXScalesPreSwizzled: true
   AssertSizeEqual: { 2: 1 }
   AssertSizeGreaterThan: { 0: 0, 1: 0, 3: 0 }
   AssertSizeLessThan: { 0: 1048577, 1: 1048577, 3: 1048577 }

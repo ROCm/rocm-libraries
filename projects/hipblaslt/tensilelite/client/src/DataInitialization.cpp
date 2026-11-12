@@ -1619,7 +1619,7 @@ namespace TensileLite
                         std::shared_ptr<void> ptr;
                         if(m_rotatingBuffer)
                         {
-                            auto mem = m_rm->getRotatingMemory();
+                            auto const& mem = m_rm->getRotatingMemory();
                             if(tensorIdx <= ContractionProblemGemm::TENSOR::METADATA)
                                 ptr = mem[0][tensorIdx].data;
                             else
@@ -3778,8 +3778,8 @@ namespace TensileLite
                 }
                 else
                 {
-                    auto    mem    = m_rm->getRotatingMemory();
-                    int64_t offset = 0;
+                    auto const& mem    = m_rm->getRotatingMemory();
+                    int64_t     offset = 0;
                     for(size_t i = 0; i < rotatingNum; i++)
                     {
                         ContractionInputs newInputs = *castInputs;
@@ -3853,7 +3853,7 @@ namespace TensileLite
                     ContractionGroupedInputs newInputs;
                     newInputs.ws = castInputs->ws;
                     std::vector<size_t> offsets(ContractionProblemGemm::TENSOR::METADATA, 0);
-                    auto                mem = m_rm->getRotatingMemory();
+                    auto const&         mem = m_rm->getRotatingMemory();
                     for(size_t i = 0; i < castInputs->grouped.size(); i++)
                     {
                         auto&             problem        = groupedProblem->gemms[i];

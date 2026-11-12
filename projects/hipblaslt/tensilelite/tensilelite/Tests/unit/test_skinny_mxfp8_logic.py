@@ -12,7 +12,9 @@ each build and would flag duplicate keys outside this shard.
 """
 
 import copy
-from dataclasses import dataclass
+import itertools
+import math
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import pytest
@@ -54,6 +56,7 @@ class Problem:
     b: Tensor
     c: Tensor
     d: Tensor
+    mx_scales_packed: bool = False  # the custom-kernel packed flag of either operand
 
 
 def make_problem(m, n, batch, k, ldd, ldc, lda, ldb):
@@ -103,6 +106,8 @@ def evaluate(predicate, problem):
         return problem.sizes[index] > value
     if tag == "SizeLessThan":
         return problem.sizes[index] < value
+    if tag == "MXScalesPreSwizzled":
+        return not problem.mx_scales_packed
     if tag == "BoundSizeMultiple":
         # Index -1 is the last summation index, which is K.
         return problem.sizes[3] % value == 0
@@ -122,6 +127,11 @@ def failing(predicates, problem):
 
 
 SKINNY_KERNEL_DIR = Path(tensilelite.__file__).parent / "CustomKernels" / "skinny_mxfp8"
+SKINNY_KERNELS = sorted(path.stem for path in SKINNY_KERNEL_DIR.glob("*.s"))
+
+
+def assert_items(mapping):
+    return {key: value for key, value in mapping.items() if key.startswith("Assert")}
 
 
 @pytest.fixture(scope="module")
@@ -148,10 +158,13 @@ def entries(shard):
     return result
 
 
+def _config(solution):
+    return readCustomKernelConfig(solution["CustomKernel"]["name"])
+
+
 def _effective_predicates(solution):
     # custom.config wins at load and a logic file can only add predicates, so both apply.
-    config = readCustomKernelConfig(solution["CustomKernel"]["name"])
-    return emitted_predicates(solution) + emitted_predicates(config)
+    return emitted_predicates(solution) + emitted_predicates(_config(solution))
 
 
 @needs_logic_corpus
@@ -224,6 +237,35 @@ def test_shard_wins_every_key_it_shares_with_an_equality_file_of_its_library(sha
         )
 
 
+# The ProblemType fields that make a logic file the skinny shard's MXFP8 TN problem type.
+_MXFP8_TN_KEYS = (
+    "DataTypeA",
+    "DataTypeB",
+    "DestDataType",
+    "TransposeA",
+    "TransposeB",
+    "DataTypeMXSA",
+    "MXBlockA",
+    "MXBlockB",
+)
+
+
+@needs_logic_corpus
+def test_no_chip_specific_logic_shadows_the_skinny_shard(shard, shard_path):
+    # The shard is a fallback row (Device 75a0); an exact-chip row that returns a solution wins over it.
+    wanted = [shard["ProblemType"].get(key) for key in _MXFP8_TN_KEYS]
+    shadowing = []
+    for path in sorted(shard_path.parents[2].glob("gfx950_id*/*/*.yaml")):
+        with open(path) as f:  # Read only the header: the Solutions list is megabytes.
+            header = yaml.safe_load("".join(itertools.takewhile(lambda line: not line.startswith("Solutions:"), f)))
+        if [header["ProblemType"].get(key) for key in _MXFP8_TN_KEYS] == wanted:
+            shadowing.append(path.name)
+    assert not shadowing, (
+        f"{shadowing} hold logic for the skinny shard's MXFP8 TN problem type: an exact-chip row wins over the "
+        "Device 75a0 fallback row, so the skinny kernels would stop applying on that chip id."
+    )
+
+
 @needs_logic_corpus
 def test_skinny_solutions_reject_problems_with_both_extents_above_4(shard):
     # make_problem arguments: m, n, batch, k, ldd, ldc, lda, ldb.
@@ -235,6 +277,35 @@ def test_skinny_solutions_reject_problems_with_both_extents_above_4(shard):
         predicates = _effective_predicates(solution)
         for problem in both_wide:
             assert failing(predicates, problem), (solution["CustomKernel"]["name"], problem.sizes)
+
+
+@pytest.mark.parametrize("name", SKINNY_KERNELS)
+def test_custom_config_rejects_packed_mx_scales(name):
+    # The kernels read the pre-swizzled scale layout only; hipBLASLt flags every other format as packed.
+    # Checked on the config alone so the predicate stays guarded if the shard copy is dropped.
+    predicates = emitted_predicates(readCustomKernelConfig(name))
+    plain = make_problem(4096, 1, 1, 4096, 4096, 4096, 4096, 4096)
+    assert not failing(predicates, plain)
+    assert {p.tag for p in failing(predicates, replace(plain, mx_scales_packed=True))} == {"MXScalesPreSwizzled"}
+
+
+@needs_logic_corpus
+@pytest.mark.parametrize("name", SKINNY_KERNELS)
+def test_shard_matches_custom_config(shard, name):
+    # The host launches from custom.config, but the shard copies still feed the predicates and sizeMapping.
+    solution = next(s for s in shard["Solutions"] if s["CustomKernel"]["name"] == name)
+    config = readCustomKernelConfig(name)
+    descriptor = config["CustomKernel"]
+    threads = math.prod(descriptor["threads"])
+    mt0, mt1, depth = descriptor["macrotile"]
+    assert assert_items(solution) == assert_items(config)
+    assert solution["CustomKernel"]["threads"] == descriptor["threads"]
+    assert solution["NumThreads"] == threads
+    assert math.prod(solution["WorkGroup"]) == threads
+    assert solution["MIWaveTile"] == config["MIWaveTile"]
+    assert solution["MatrixInstruction"] == config["MatrixInstruction"]
+    assert solution["CustomKernel"]["macrotile"] == descriptor["macrotile"]
+    assert (solution["MacroTile0"], solution["MacroTile1"], solution["DepthU"]) == (mt0, mt1, depth)
 
 
 def test_stride_multiples_are_not_swappable():
@@ -251,9 +322,8 @@ def test_stride_multiples_are_not_swappable():
 
 @needs_logic_corpus
 def test_shard_solutions_are_exactly_the_shipped_skinny_kernels(shard):
-    shipped = {path.stem for path in SKINNY_KERNEL_DIR.glob("*.s")}
-    assert shipped
-    assert {solution["CustomKernel"]["name"] for solution in shard["Solutions"]} == shipped
+    assert SKINNY_KERNELS
+    assert {solution["CustomKernel"]["name"] for solution in shard["Solutions"]} == set(SKINNY_KERNELS)
 
 
 def _problem_type_predicates(problem_type):

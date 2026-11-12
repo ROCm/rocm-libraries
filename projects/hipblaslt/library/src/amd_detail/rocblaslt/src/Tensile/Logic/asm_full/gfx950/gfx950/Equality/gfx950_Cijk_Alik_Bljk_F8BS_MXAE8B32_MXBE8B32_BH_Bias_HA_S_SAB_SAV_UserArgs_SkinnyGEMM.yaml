@@ -287,6 +287,8 @@ Solutions:
 - SolutionIndex: 0
   KernelNameMin: gemm_BM16_TN1_LANES_K64_WAVES2_UP_ITERS0_PF4_GROUP1_NUM_XCDS8_GRID_3D0_USE_BETA1_MFMA1_LDS1
   SolutionNameMin: gemm_BM16_TN1_LANES_K64_WAVES2_UP_ITERS0_PF4_GROUP1_NUM_XCDS8_GRID_3D0_USE_BETA1_MFMA1_LDS1
+  AssertAnySizeLessThan: {0: 5, 1: 5}
+  AssertMXScalesPreSwizzled: true
   AssertSizeEqual: {2: 1}
   AssertSizeGreaterThan: {0: 0, 1: 0, 3: 0}
   AssertSizeLessThan: {0: 1048577, 1: 1048577, 3: 1048577}
@@ -349,7 +351,7 @@ Solutions:
   MIInputPerThreadMXSA: 1
   MIInputPerThreadMXSB: 1
   MIInputPerThreadMetadata: 32
-  MIWaveGroup: [1, 1]
+  MIWaveGroup: [1, 2]
   MIWaveTile: [1, 1]
   MXScaleFormat: HostPreSwizzle
   MacroTile0: 16
@@ -372,7 +374,7 @@ Solutions:
   ThreadTile1: 0
   Valid: true
   WavefrontSize: 64
-  WorkGroup: [16, 4, 1]
+  WorkGroup: [16, 8, 1]
   _GlobalAccumulation: MultipleBuffer
   _PersistentLoop: false
   _WorkspaceSizePerElemBias: 0
@@ -380,6 +382,8 @@ Solutions:
 - SolutionIndex: 1
   KernelNameMin: gemm_BM16_TN2_LANES_K64_WAVES1_UP_ITERS0_PF3_GROUP8_NUM_XCDS1_GRID_3D0_USE_BETA1_MFMA1_LDS1
   SolutionNameMin: gemm_BM16_TN2_LANES_K64_WAVES1_UP_ITERS0_PF3_GROUP8_NUM_XCDS1_GRID_3D0_USE_BETA1_MFMA1_LDS1
+  AssertAnySizeLessThan: {0: 5, 1: 5}
+  AssertMXScalesPreSwizzled: true
   AssertSizeEqual: {2: 1}
   AssertSizeGreaterThan: {0: 0, 1: 0, 3: 0}
   AssertSizeLessThan: {0: 1048577, 1: 1048577, 3: 1048577}
@@ -443,7 +447,7 @@ Solutions:
   MIInputPerThreadMXSB: 1
   MIInputPerThreadMetadata: 32
   MIWaveGroup: [1, 1]
-  MIWaveTile: [1, 1]
+  MIWaveTile: [2, 2]
   MXScaleFormat: HostPreSwizzle
   MacroTile0: 32
   MacroTile1: 32
@@ -473,6 +477,7 @@ Solutions:
 - SolutionIndex: 2
   KernelNameMin: gemm_BM1_TN1_LANES_K16_WAVES1_UP_ITERS0_PF2_GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA1
   SolutionNameMin: gemm_BM1_TN1_LANES_K16_WAVES1_UP_ITERS0_PF2_GROUP1_NUM_XCDS1_GRID_3D1_USE_BETA1
+  AssertMXScalesPreSwizzled: true
   AssertSizeEqual: {2: 1}
   AssertSizeGreaterThan: {0: 4, 1: 0, 3: 0}
   AssertSizeLessThan: {0: 1048577, 1: 5, 3: 1048577}
@@ -566,6 +571,8 @@ Solutions:
 - SolutionIndex: 3
   KernelNameMin: gemm_BM16_TN2_LANES_K64_WAVES1_UP_ITERS0_PF4_GROUP1_NUM_XCDS8_GRID_3D0_USE_BETA1_MFMA1_LDS1
   SolutionNameMin: gemm_BM16_TN2_LANES_K64_WAVES1_UP_ITERS0_PF4_GROUP1_NUM_XCDS8_GRID_3D0_USE_BETA1_MFMA1_LDS1
+  AssertAnySizeLessThan: {0: 5, 1: 5}
+  AssertMXScalesPreSwizzled: true
   AssertSizeEqual: {2: 1}
   AssertSizeGreaterThan: {0: 0, 1: 0, 3: 0}
   AssertSizeLessThan: {0: 1048577, 1: 1048577, 3: 1048577}
@@ -629,7 +636,7 @@ Solutions:
   MIInputPerThreadMXSB: 1
   MIInputPerThreadMetadata: 32
   MIWaveGroup: [1, 1]
-  MIWaveTile: [1, 1]
+  MIWaveTile: [2, 2]
   MXScaleFormat: HostPreSwizzle
   MacroTile0: 32
   MacroTile1: 32
@@ -659,6 +666,8 @@ Solutions:
 - SolutionIndex: 4
   KernelNameMin: gemm_BM16_TN2_LANES_K64_WAVES1_UP_ITERS0_PF4_GROUP8_NUM_XCDS1_GRID_3D0_USE_BETA1_MFMA1_LDS1
   SolutionNameMin: gemm_BM16_TN2_LANES_K64_WAVES1_UP_ITERS0_PF4_GROUP8_NUM_XCDS1_GRID_3D0_USE_BETA1_MFMA1_LDS1
+  AssertAnySizeLessThan: {0: 5, 1: 5}
+  AssertMXScalesPreSwizzled: true
   AssertSizeEqual: {2: 1}
   AssertSizeGreaterThan: {0: 0, 1: 0, 3: 0}
   AssertSizeLessThan: {0: 1048577, 1: 1048577, 3: 1048577}
@@ -722,7 +731,7 @@ Solutions:
   MIInputPerThreadMXSB: 1
   MIInputPerThreadMetadata: 32
   MIWaveGroup: [1, 1]
-  MIWaveTile: [1, 1]
+  MIWaveTile: [2, 2]
   MXScaleFormat: HostPreSwizzle
   MacroTile0: 32
   MacroTile1: 32

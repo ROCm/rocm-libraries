@@ -110,13 +110,16 @@ set to false make that solution reject bias, activation and scale-alpha-vector p
 
 ### Optional `CustomKernel` keys and predicates
 
-- Predicates: `AssertStrideAMultiple` and `AssertStrideBMultiple`
-  (`{index: value}`, stride in elements), `AssertTensorBytesLessThan` (every non-empty A, B, C and D
-  must have `totalAllocatedBytes()` below the value, for kernels whose 32-bit buffer sizes or out-of-range
-  offsets would overflow), and `AssertAnySizeLessThan` (`{index: value}`, an `Or` of C++ `SizeLessThan`
-  predicates: at least one listed size is below its value).
-  `custom.config` wins for every key it declares: a logic file can only add predicates the config does not
-  declare, which narrows what the solution accepts.
+- Predicates (each is a `custom.config` key; `custom.config` wins for every key it declares, and a logic file can
+  only add predicates the config does not declare, which narrows what the solution accepts):
+  - `AssertStrideAMultiple`, `AssertStrideBMultiple`: `{index: value}`, stride in elements.
+  - `AssertTensorBytesLessThan`: every non-empty A, B, C and D must have `totalAllocatedBytes()` below the value, for
+    kernels whose 32-bit buffer sizes or out-of-range offsets would overflow.
+  - `AssertAnySizeLessThan`: `{index: value}`, an `Or` of C++ `SizeLessThan` predicates; at least one listed size is
+    below its value.
+  - `AssertMXScalesPreSwizzled`: `true`, the problem's MX scales are not flagged packed by the caller. For kernels
+    that read only the pre-swizzled layout. hipBLASLt flags every scale format except `Block_32_UE8M0_32_8_EXT` as
+    packed; the TensileLite client leaves the flags false.
 - ProblemType restriction: when `custom.config` `Features` sets `SupportsBias`, `SupportsActivation` or
   `SupportsScaleAlpha` to false, that solution gets its own `ProblemType` copy with `UseBias` 0, activation
   off (`ActivationType` none) or `UseScaleAlphaVec` 0 respectively, so it rejects bias, activation and

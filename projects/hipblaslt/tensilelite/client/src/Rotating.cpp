@@ -66,6 +66,8 @@ namespace TensileLite
             maxNumRotate = std::max(maxNumRotate, num);
         }
 
+        // Not capped by maxRotatingBufferNum, which is unknown when GPU inputs are allocated;
+        // prepareRotatingGPUOutput only uses the slots it needs.
         m_rotatingMemory.resize(maxNumRotate);
         for(size_t i = 0; i < m_rotatingMemory.size(); i++)
         {
@@ -146,7 +148,7 @@ namespace TensileLite
         }
     }
 
-    std::vector<std::vector<RotatingMemoryUnit>> RotatingMemory::getRotatingMemory() const
+    std::vector<std::vector<RotatingMemoryUnit>> const& RotatingMemory::getRotatingMemory() const
     {
         return m_rotatingMemory;
     }
