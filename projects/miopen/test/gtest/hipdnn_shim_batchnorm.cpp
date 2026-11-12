@@ -1414,6 +1414,29 @@ hs::CallResult InferUnderPolicy(miopen::Handle& handle,
     return hs::CaptureCall([&] { return InferV1(handle, d, with_estimates); });
 }
 
+// The environment the search-observing tests run under: MIOPEN_WARN_SEARCH raises
+// MIOpen's "Search Started" line to a warning, and the perf dbs are off, because a
+// record found there, from an earlier run or another test, is loaded in place of a
+// search. Pass user_db to keep the user db on.
+struct SearchLogScope
+{
+    explicit SearchLogScope(bool user_db = false)
+        : no_user_db(MIOPEN_DEBUG_DISABLE_USER_DB, !user_db)
+    {
+    }
+
+    const ScopedEnvironment<bool> warn_search{MIOPEN_WARN_SEARCH, true};
+    const ScopedEnvironment<bool> no_user_db;
+    const ScopedEnvironment<bool> no_system_db{MIOPEN_DEBUG_DISABLE_SYSTEM_DB, true};
+};
+
+// Whether MIOpen searched during the call, from the "Search Started" line that
+// MIOPEN_WARN_SEARCH raises to a warning.
+bool Searched(const hs::CallResult& result)
+{
+    return result.logged.find("Search Started:") != std::string::npos;
+}
+
 // MIOpen tunes the spatial training and backward solvers when the handle asks for
 // Search. The provider runs on a handle of its own, so the shim carries Search
 // over as the plan's benchmarking knob, under which the provider sets Search on
@@ -1427,9 +1450,7 @@ TEST(GPU_HipdnnShimBNTuning_FP32, SearchPolicyIsServed)
 {
     auto&& handle = get_handle();
     const ScopedHandleTuningPolicy policy(handle, miopenTuningPolicySearch);
-    const ScopedEnvironment<bool> warn_search(MIOPEN_WARN_SEARCH, true);
-    const ScopedEnvironment<bool> no_user_db(MIOPEN_DEBUG_DISABLE_USER_DB, true);
-    const ScopedEnvironment<bool> no_system_db(MIOPEN_DEBUG_DISABLE_SYSTEM_DB, true);
+    const SearchLogScope search_log;
 
     {
         SCOPED_TRACE("train");
@@ -1437,7 +1458,7 @@ TEST(GPU_HipdnnShimBNTuning_FP32, SearchPolicyIsServed)
         const auto result = TrainUnderPolicy(handle, d, miopenBNSpatial, SearchCase());
         if(ExpectServed("tuning_policy_train", result))
         {
-            EXPECT_NE(result.logged.find("Search Started:"), std::string::npos) << result.logged;
+            EXPECT_TRUE(Searched(result)) << result.logged;
             CheckTrain(handle, d, true, false);
         }
     }
@@ -1447,7 +1468,7 @@ TEST(GPU_HipdnnShimBNTuning_FP32, SearchPolicyIsServed)
         const auto result = BwdUnderPolicy(handle, d, miopenBNSpatial, SearchCase());
         if(ExpectServed("tuning_policy_bwd", result))
         {
-            EXPECT_NE(result.logged.find("Search Started:"), std::string::npos) << result.logged;
+            EXPECT_TRUE(Searched(result)) << result.logged;
             CheckBwd(handle, d);
         }
     }
@@ -1484,13 +1505,6 @@ TEST(GPU_HipdnnShimBNTuning_FP32, PerActivationIgnoresPolicy)
     }
 }
 
-// Whether MIOpen searched during the call, from the "Search Started" line that
-// MIOPEN_WARN_SEARCH raises to a warning.
-bool Searched(const hs::CallResult& result)
-{
-    return result.logged.find("Search Started:") != std::string::npos;
-}
-
 // Used only by NonePolicyDoesNotSearch.
 const BN2DTestCase& NoSearchCase()
 {
@@ -1508,9 +1522,7 @@ TEST(GPU_HipdnnShimBNTuning_FP32, NonePolicyDoesNotSearch)
     auto&& handle = get_handle();
     const ScopedHandleTuningPolicy policy(handle, miopenTuningPolicyNone);
     const ScopedFindEnforce find_enforce("");
-    const ScopedEnvironment<bool> warn_search(MIOPEN_WARN_SEARCH, true);
-    const ScopedEnvironment<bool> no_user_db(MIOPEN_DEBUG_DISABLE_USER_DB, true);
-    const ScopedEnvironment<bool> no_system_db(MIOPEN_DEBUG_DISABLE_SYSTEM_DB, true);
+    const SearchLogScope search_log;
 
     {
         SCOPED_TRACE("train");
@@ -1586,9 +1598,7 @@ void ExpectFindEnforceOutcome(const std::string& case_name,
 // stay in memory, which the steps cannot tell apart from the file.
 TEST(GPU_HipdnnShimBNTuning_FP32, FindEnforceUnderNonePolicyMatchesMiopen)
 {
-    const ScopedEnvironment<bool> warn_search(MIOPEN_WARN_SEARCH, true);
-    const ScopedEnvironment<bool> user_db(MIOPEN_DEBUG_DISABLE_USER_DB, false);
-    const ScopedEnvironment<bool> no_system_db(MIOPEN_DEBUG_DISABLE_SYSTEM_DB, true);
+    const SearchLogScope search_log(true);
 
     const std::vector<FindEnforceStep> steps = {
         {"DB_CLEAN", false, std::nullopt},
@@ -1642,9 +1652,7 @@ TEST(GPU_HipdnnShimBNTuning_FP32, FindEnforceUnderNonePolicyMatchesMiopen)
 // plan, and both perf dbs are off, so neither can load a record.
 TEST(GPU_HipdnnShimBNTuning_FP32, SearchPolicyUnderFindEnforceSearchIsServed)
 {
-    const ScopedEnvironment<bool> warn_search(MIOPEN_WARN_SEARCH, true);
-    const ScopedEnvironment<bool> no_user_db(MIOPEN_DEBUG_DISABLE_USER_DB, true);
-    const ScopedEnvironment<bool> no_system_db(MIOPEN_DEBUG_DISABLE_SYSTEM_DB, true);
+    const SearchLogScope search_log;
 
     for(const char* value : {"SEARCH", "3"})
     {
