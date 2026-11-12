@@ -219,6 +219,12 @@ namespace TensileLite
                 return "TrigIndAbsCos";
             case InitMode::UniformLowPrecision:
                 return "UniformLowPrecision";
+            case InitMode::Maf1_0:
+                return "Maf1_0";
+            case InitMode::Maf2_0:
+                return "Maf2_0";
+            case InitMode::Maf2_0UnitScale:
+                return "Maf2_0UnitScale";
 
             case InitMode::Count:
                 break;
@@ -292,6 +298,12 @@ namespace TensileLite
                 mode = InitMode::TrigIndAbsCos;
             else if(strValue == ToString(InitMode::UniformLowPrecision))
                 mode = InitMode::UniformLowPrecision;
+            else if(strValue == ToString(InitMode::Maf1_0))
+                mode = InitMode::Maf1_0;
+            else if(strValue == ToString(InitMode::Maf2_0))
+                mode = InitMode::Maf2_0;
+            else if(strValue == ToString(InitMode::Maf2_0UnitScale))
+                mode = InitMode::Maf2_0UnitScale;
             else if(std::all_of(strValue.begin(), strValue.end(), isdigit))
             {
                 int value = atoi(strValue.c_str());
@@ -1437,7 +1449,11 @@ namespace TensileLite
                     if(!m_problemDependentData)
                     {
 
-                        initArray(p.first, it.init, pUnit.cpuInput.valid.get(), pUnit.maxElements);
+                        initArray(p.first,
+                                  it.init,
+                                  pUnit.cpuInput.valid.get(),
+                                  pUnit.maxElements,
+                                  &it - m_vdata.data());
                         HIP_CHECK_EXC(
                             hipMemcpy(pUnit.gpuInput.valid.get(),
                                       pUnit.cpuInput.valid.get(),
@@ -1794,7 +1810,8 @@ namespace TensileLite
                                           m_vdata[i].init,
                                           (void*)((int8_t*)p.second.cpuInput.valid.get()
                                                   + gemmInitOffset),
-                                          tensors[i]);
+                                          tensors[i],
+                                          i);
                                 // FIXME: Should we init unused part to 0?
                                 if((problem.gemms[j].sparse() == 1
                                     && i == ContractionProblemGemm::TENSOR::A)
@@ -1905,7 +1922,8 @@ namespace TensileLite
                             initArray(p.first,
                                       m_vdata[i].init,
                                       p.second.cpuInput.valid.get(),
-                                      tensors[i]);
+                                      tensors[i],
+                                      i);
                             if((problem.sparse() == 1 && i == ContractionProblemGemm::TENSOR::A)
                                || (problem.sparse() == 2 && i == ContractionProblemGemm::TENSOR::B))
                             {
@@ -2014,6 +2032,18 @@ namespace TensileLite
             // exponent range.
             case InitMode::UniformLowPrecision:
                 return "uniform_low_precision";
+            // MAF1.0 block-scaled data (mxDataGenerator Maf1_0): every block scale 0.5, data
+            // codes = sin (A) / cos (B) of the logical index, rounded at unit scale.
+            case InitMode::Maf1_0:
+                return "maf1_0";
+            // Maf2_0 block-scaled data (mxDataGenerator Maf2_0): E8M0 binomial power-of-two
+            // scales, FP4 with E4M3/E5M3 scales N(0.34375, 0.08); data uniform over the finite
+            // encodings.
+            case InitMode::Maf2_0:
+                return "maf2_0";
+            // MAF2.0 X=1 rows (MX FP8, FP4): unit block scales, N(0,1) data.
+            case InitMode::Maf2_0UnitScale:
+                return "maf2_0_unit_scale";
             // Free / Count have no mxDataGenerator analogue; throw rather than
             // silently fall through to an unrelated distribution.
             case InitMode::Free:
@@ -2026,7 +2056,8 @@ namespace TensileLite
                   "InitMode (Zero, One, Two, NegOne, Max, DenormMin, DenormMax, "
                   "NaN, Inf, BadInput, BadOutput, Identity, SerialIdx/Dim0/Dim1, "
                   "Trig{Sin,Cos,AbsSin,AbsCos}[Ind], Random, RandomNarrow, "
-                  "RandomNegPosLimited, UniformLowPrecision) "
+                  "RandomNegPosLimited, UniformLowPrecision, Maf1_0, Maf2_0, "
+                  "Maf2_0UnitScale) "
                   "or add a mapping in initModeToMXMethod.");
         }
 
@@ -2099,7 +2130,8 @@ namespace TensileLite
                         initArray(p.first,
                                   m_vdata[i].init,
                                   p.second.cpuInput.valid.get(),
-                                  tensors[i]);
+                                  tensors[i],
+                                  i);
                     }
                 }
             };
@@ -2167,6 +2199,22 @@ namespace TensileLite
                       bool                    isMatrixA,
                       MXScaleLayout           swizzleLayout,
                       bool*                   preswizzledFlag) {
+                  // Maf1_0 and Maf2_0 MX data come from mxDataGenerator; Maf2_0UnitScale is the
+                  // FP8 and FP4 plan.
+                  auto const dataInit = m_vdata[dataTensorEnum].init;
+                  if(dataInit == InitMode::Maf1_0 && abFromInitArray)
+                      throw std::runtime_error(
+                          "Maf1_0 block-scaled (MX) data needs mx-data-generator=1");
+                  if((dataInit == InitMode::Maf2_0 || dataInit == InitMode::Maf2_0UnitScale)
+                     && abFromInitArray)
+                      throw std::runtime_error(
+                          "Maf2_0 block-scaled (MX) data needs mx-data-generator=1");
+                  if(dataInit == InitMode::Maf2_0UnitScale
+                     && dataDesc.dataType() != rocisa::DataType::Float4
+                     && dataDesc.dataType() != rocisa::DataType::Float8
+                     && dataDesc.dataType() != rocisa::DataType::BFloat8)
+                      throw std::runtime_error("Maf2_0UnitScale applies to block-scaled Float8, "
+                                               "BFloat8 and Float4 data only; use Maf2_0");
                   if(abFromInitArray && dataDesc.dataType() != rocisa::DataType::Float8
                      && dataDesc.dataType() != rocisa::DataType::BFloat8
                      && dataDesc.dataType() != rocisa::DataType::Float4)
@@ -2180,6 +2228,17 @@ namespace TensileLite
                   size_t const batchCount = dataDesc.sizes().size() > 2 ? dataDesc.sizes()[2] : 1;
 
                   bool const kIsRows = (isMatrixA && transposed) || (!isMatrixA && !transposed);
+
+                  // maf2_0 seeds each matrix and batch apart, as hipBLASLt does: abc + 3 * batch.
+                  // maf1_0 takes sin (A) or cos (B) and the batch's index offset from it. A
+                  // zero batch stride broadcasts one matrix, so every batch regenerates batch 0
+                  // and the shared data matches each batch's scales and the reference.
+                  bool const broadcastBatch
+                      = dataDesc.sizes().size() > 2 && dataDesc.strides()[2] == 0;
+                  auto maf2_0SeedIndex = [isMatrixA, broadcastBatch](size_t b) {
+                      return static_cast<uint32_t>((isMatrixA ? 0 : 1)
+                                                   + 3 * (broadcastBatch ? 0 : b));
+                  };
 
                   auto& pristineData = m_vdata[dataTensorEnum].pristine[dataDesc.dataType()];
                   auto& pristineScale = m_vdata[scaleTensorEnum].pristine[scaleEltType];
@@ -2353,7 +2412,8 @@ namespace TensileLite
                                           initModeToMXMethod(dataInitMode),
                                           -1.0f,
                                           1.0f,
-                                          initModeToMXMethod(scaleInitMode));
+                                          initModeToMXMethod(scaleInitMode),
+                                          maf2_0SeedIndex(b));
                           // Collapse the free dimension before restriding: restride
                           // fixes K-block padding, which is the orthogonal axis.
                           if(mxBlockFree > 1)
@@ -2671,7 +2731,12 @@ namespace TensileLite
                                 initModeToMXMethod(m_vdata[dataTensorEnum].init),
                                 -1.0f,
                                 1.0f,
-                                initModeToMXMethod(m_vdata[scaleTensorEnum].init));
+                                initModeToMXMethod(m_vdata[scaleTensorEnum].init),
+                                // abc + 3 * batch, as initOneMXSide passes: maf2_0 seeds A, B
+                                // and each batch apart; maf1_0 takes sin/cos and the offset.
+                                // A zero batch stride (broadcast) regenerates batch 0.
+                                static_cast<uint32_t>((isMatrixA ? 0 : 1)
+                                                      + 3 * (batchStrideBytes == 0 ? 0 : b)));
             }
         }
 #else  // HIPBLASLT_ENABLE_MXDATAGENERATOR
