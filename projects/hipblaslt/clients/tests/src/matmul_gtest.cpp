@@ -29,11 +29,15 @@
 #include "scoped_env.hpp"
 #include "testing_matmul.hpp"
 #include "testing_matmul_batch_offset.hpp"
+#include <algorithm>
 #include <cctype>
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include <gtest/gtest-spi.h>
 
@@ -163,6 +167,108 @@ namespace
             return hipblaslt_bench_options::verification_failures() - before;
         }
     };
+
+    TEST(BenchVerify, smoke_BiasGradientNormLength)
+    {
+        struct Case
+        {
+            hipblaslt_bias_source source;
+            int64_t               m, n;
+            size_t                length;
+        };
+        for(const auto& test : {Case{hipblaslt_bias_source::b, 2, 5, 5},
+                                Case{hipblaslt_bias_source::b, 5, 2, 2},
+                                Case{hipblaslt_bias_source::a, 2, 5, 2},
+                                Case{hipblaslt_bias_source::d, 2, 5, 2}})
+        {
+            SCOPED_TRACE(::testing::Message()
+                         << "source=" << int(test.source) << " M=" << test.m << " N=" << test.n);
+            BenchVerifyD d(test.m, test.n, 1, HIPBLASLT_BATCH_MODE_STRIDED);
+            Arguments    arg{};
+            arg.init();
+            arg.unit_check        = 0;
+            arg.norm_check        = 1;
+            arg.allclose_check    = 0;
+            arg.norm_check_assert = true;
+            arg.gradient          = true;
+            arg.bias_vector       = true;
+            arg.bias_source       = test.source;
+            arg.a_type = arg.b_type = HIP_R_32F;
+            arg.compute_type        = HIPBLAS_COMPUTE_32F;
+
+            // M > N must fail deterministically if the check reads M values. Reserve that
+            // space explicitly and put mismatched sentinels beyond the logical bias vector.
+            const size_t                 capacity = std::max(test.m, test.n);
+            std::vector<HipHostBuffer>   gold, result, unused;
+            std::vector<HipDeviceBuffer> device, no_device;
+            gold.emplace_back(HIP_R_32F, capacity);
+            result.emplace_back(HIP_R_32F, capacity);
+            device.emplace_back(HIP_R_32F, capacity);
+            for(size_t i = 0; i < capacity; ++i)
+            {
+                gold[0].as<float>()[i]   = 1.0f;
+                result[0].as<float>()[i] = i < test.length ? 1.0f : 1000.0f;
+            }
+
+            for(bool corrupt : {false, true})
+            {
+                SCOPED_TRACE(corrupt);
+                // For M < N, the last value is beyond the prefix that an M-value check sees.
+                result[0].as<float>()[test.length - 1] = corrupt ? 2.0f : 1.0f;
+                ASSERT_EQ(synchronize(device[0], result[0]), hipSuccess);
+                std::vector<double> tol{0};
+                double              norm_error = 0, atol = 0, rtol = 0, max_ulp = 0, avg_ulp = 0;
+                ::testing::TestPartResultArray failures;
+                {
+                    ::testing::ScopedFakeTestPartResultReporter reporter(
+                        ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD,
+                        &failures);
+                    check(nullptr,
+                          arg,
+                          1,
+                          {test.m},
+                          {test.n},
+                          {test.m},
+                          {test.m},
+                          {test.m * test.n},
+                          {test.m * test.n},
+                          {1},
+                          {test.length},
+                          d.gold,
+                          d.result,
+                          no_device,
+                          unused,
+                          unused,
+                          no_device,
+                          unused,
+                          unused,
+                          no_device,
+                          gold,
+                          result,
+                          device,
+                          tol,
+                          norm_error,
+                          atol,
+                          rtol,
+                          max_ulp,
+                          avg_ulp,
+                          HIP_R_32F,
+                          HIP_R_32F,
+                          HIP_R_32F,
+                          HIP_R_32F);
+                }
+                EXPECT_EQ(failures.size(), corrupt ? 1 : 0);
+                if(corrupt)
+                {
+                    if(failures.size() == 1)
+                        EXPECT_TRUE(failures.GetTestPartResult(0).fatally_failed());
+                    EXPECT_GT(norm_error, 0.1);
+                }
+                else
+                    EXPECT_EQ(norm_error, 0);
+            }
+        }
+    }
 
     // ROCM-32137: one wrong element in the last batch fails both checks.
     TEST(BenchVerify, smoke_WrongLaterBatchCountsBothChecks)
