@@ -9,7 +9,7 @@ benchmark client, `tensilelite-client`.
 | Version | Built by | Meaning |
 | --- | --- | --- |
 | `5.0.0+g<commit>` | `pip install <path>`, tox, `invoke install`, standalone CMake | A development build of that rocm-libraries commit. It makes no ROCm claim. |
-| `5.0.0+g<commit>.dirty` | The same, from a checkout with uncommitted changes | As above; the exact changes are recorded in a digest in `_build_info.py`. |
+| `5.0.0+g<commit>.dirty` | The same, from a checkout with uncommitted changes | As above; `_build_info.py` fingerprints tracked contents and untracked metadata. |
 | `5.0.0+rocm<identity>` | TheRock release, release-candidate and nightly builds | Released as part of that ROCm build. |
 | `5.0.0+devrocm<identity>` | TheRock CI and development builds | Built in that TheRock development build. |
 
@@ -17,6 +17,14 @@ benchmark client, `tensilelite-client`.
 written to logic and configuration files and must remain equal. The commit is
 always recorded in the installed package (`tensilelite/_build_info.py`), also
 for `+rocm`/`+devrocm` wheels.
+
+The dirty fingerprint covers the whole rocm-libraries repository. Tracked changes
+include contents; nonignored untracked entries include only path, file type, size
+and integer `lstat().st_mtime_ns`, without reading contents or following links.
+Python supports this timestamp field on Linux and Windows, but filesystem
+precision varies. Same-metadata untracked edits can collide, and copies can have
+different dirty identities. This is a build-pairing check, not a byte-level
+attestation. See [decision 3](docs/PackagingIdentityPlan.md#decision-3--how-the-sha-is-obtained-stamped-and-compared-decided).
 
 ## ROCm installations
 
