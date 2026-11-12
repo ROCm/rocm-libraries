@@ -8,13 +8,31 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <gtest/gtest.h>
 
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 
+#include "engines/kernel_ingestor_engine/packs/AttentionDenseCommon.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseLaunchValues.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseLaunchValues.hpp"
+
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
+
+/// An arch's launch-values writer, restated with one signature: gfx942's takes a launch
+/// grid after the tile, which these cases leave at its default (the qb_minor grid).
+using AttentionDenseLaunchValuesWriter
+    = hipdnn_plugin_sdk::ingestor::MetadataValues (*)(const AttentionDenseBinding&,
+                                                      const AttentionDenseProblem&,
+                                                      int64_t blockM);
+
+inline hipdnn_plugin_sdk::ingestor::MetadataValues gfx942LaunchValues(
+    const AttentionDenseBinding& binding, const AttentionDenseProblem& problem, int64_t blockM)
+{
+    return gfx942AttentionDenseLaunchValues(binding, problem, blockM);
+}
 
 /// What a gfx942 or gfx950 dense attention test needs to know about its engine. The pack
 /// is shared, so a case written against one of these runs unchanged on either arch.
@@ -35,12 +53,19 @@ struct AttentionDenseTestArch
     bool completesGridOrder;
     /// gfx942 binds a stats output and ships an emit_lse form; gfx950 does neither.
     bool bindsStats;
-    /// gfx950 serves an additive bias (attn_mask) with its use_additive_bias kernels, a
-    /// field a completed record carries (a record without it reads as 0); gfx942 serves none.
+    /// Both arches serve an additive bias (attn_mask) with their use_additive_bias kernels,
+    /// a field a completed record carries (a record without it reads as 0). A case on the
+    /// bias is instantiated only for the arches that serve one (biasServingArches()).
     bool servesBias;
     std::string_view kernelMatchSymbol;
     /// The head of every decline line the graph match logs.
     std::string_view engineName;
+    /// The versioned dispatch names a plan is saved under, restated rather than shared with
+    /// the pack: without a bias, and with one (empty for an arch that serves none).
+    std::string_view plainContractSymbol;
+    std::string_view biasContractSymbol;
+    /// The arch's writer of the launch values a save stores.
+    AttentionDenseLaunchValuesWriter launchValues;
 };
 
 inline constexpr AttentionDenseTestArch GFX942_ATTENTION_DENSE{
@@ -52,9 +77,12 @@ inline constexpr AttentionDenseTestArch GFX942_ATTENTION_DENSE{
     "attention_dense.bf16_d128_c1_swa0_bm256_bn64_lds_row_pad8_pv_priority0.gfx942",
     true,
     true,
-    false,
+    true,
     "hipkernel.gfx942_attention_dense.kernel_match",
-    "hipkernel:Gfx942AttentionDense"};
+    "hipkernel:Gfx942AttentionDense",
+    "hipkernel.gfx942_attention_dense.dispatch.v1",
+    "hipkernel.gfx942_attention_dense.dispatch.v2",
+    &gfx942LaunchValues};
 
 inline constexpr AttentionDenseTestArch GFX950_ATTENTION_DENSE{
     "Gfx950",
@@ -67,7 +95,24 @@ inline constexpr AttentionDenseTestArch GFX950_ATTENTION_DENSE{
     false,
     true,
     "hipkernel.gfx950_attention_dense.kernel_match",
-    "hipkernel:Gfx950AttentionDense"};
+    "hipkernel:Gfx950AttentionDense",
+    "hipkernel.gfx950_attention_dense.dispatch.v2",
+    "hipkernel.gfx950_attention_dense.dispatch.v3",
+    &gfx950AttentionDenseLaunchValues};
+
+/// The arches a case on the additive bias runs on: those that serve one.
+inline std::vector<const AttentionDenseTestArch*> biasServingArches()
+{
+    std::vector<const AttentionDenseTestArch*> arches;
+    for(const auto* arch : {&GFX942_ATTENTION_DENSE, &GFX950_ATTENTION_DENSE})
+    {
+        if(arch->servesBias)
+        {
+            arches.push_back(arch);
+        }
+    }
+    return arches;
+}
 
 inline std::string
     attentionDenseArchName(const ::testing::TestParamInfo<const AttentionDenseTestArch*>& info)

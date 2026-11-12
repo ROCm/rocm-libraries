@@ -349,6 +349,14 @@ std::optional<std::string>
     stringMetadata(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
                    std::string_view field);
 
+/// Whether the candidate adds a bias (which also appends four kernel arguments), or nullopt
+/// for a malformed record: the descriptor hook of an arch that serves a bias
+/// (AttentionDenseArch::candidateAddsBias). An absent use_additive_bias is the KMD default
+/// 0; a field holding another type or a value other than 0/1 is malformed and declines,
+/// rather than reading as a plain kernel. Total: never throws.
+std::optional<bool>
+    candidateAdditiveBias(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel);
+
 /// The launch shape of @p launch, for AttentionDensePersistent.hpp's grid functions.
 AttentionDenseGridShape gridShape(const AttentionDenseLaunchInputs& launch);
 

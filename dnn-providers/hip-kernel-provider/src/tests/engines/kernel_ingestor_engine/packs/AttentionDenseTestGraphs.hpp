@@ -261,7 +261,7 @@ struct GraphSpec
 
 /// The base graph with an fp32 bias of @p dims, packed unless @p strides is given: a tensor
 /// beside Q, K, V and O (the first of `unnamedTensors`) that the node names as its attn_mask.
-/// Only gfx950 serves one.
+/// Only an arch that serves a bias (AttentionDenseTestArch::servesBias) matches one.
 inline GraphSpec withBias(std::vector<int64_t> dims,
                           const std::optional<std::vector<int64_t>>& strides = {})
 {
@@ -682,11 +682,10 @@ inline std::vector<KernelArgument> pythonLseAbi()
     return signature;
 }
 
-/// The use_additive_bias form (gfx950 only): the ten arguments, then the four
-/// kernels/common/_attention_additive_bias.py appends.
-inline std::vector<KernelArgument> pythonBiasAbi()
+/// @p signature with the four arguments kernels/common/_attention_additive_bias.py appends
+/// to a use_additive_bias kernel, last.
+inline std::vector<KernelArgument> withBiasTail(std::vector<KernelArgument> signature)
 {
-    auto signature = pythonAbi();
     signature.push_back(KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "additive_bias_ptr"});
     for(const char* name :
         {"additive_bias_batch_stride", "additive_bias_head_stride", "additive_bias_sq_stride"})
@@ -694,6 +693,19 @@ inline std::vector<KernelArgument> pythonBiasAbi()
         signature.push_back(KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, name});
     }
     return signature;
+}
+
+/// The use_additive_bias form: the ten arguments, then the four of the bias tail.
+inline std::vector<KernelArgument> pythonBiasAbi()
+{
+    return withBiasTail(pythonAbi());
+}
+
+/// The emit_lse form of a bias kernel (gfx942): the ten arguments, lse_ptr, then the bias
+/// tail, which comes after everything else.
+inline std::vector<KernelArgument> pythonLseBiasAbi()
+{
+    return withBiasTail(pythonLseAbi());
 }
 
 /// A KPACK descriptor for @p arch's engine recording @p signature, carrying the completed

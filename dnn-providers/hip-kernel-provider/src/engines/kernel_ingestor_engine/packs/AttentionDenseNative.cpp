@@ -59,8 +59,9 @@
  * Every KMD field read here is one both engine manifests declare, except kv_segments,
  * which only gfx942's declares (KV_SEGMENTS_FIELD). The optional features an arch opts into
  * through its descriptor, the LSE (stats) output, the launch grids and the additive bias,
- * are matched, saved and launched here; the KMD field that says whether a candidate has
- * one stays in that engine's own file.
+ * are matched, saved and launched here. The KMD field that says whether a candidate has an
+ * LSE output or a grid stays in that engine's own file; the additive bias's, which both
+ * manifests declare, is read here by candidateAdditiveBias().
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::attention_dense
 {
@@ -89,6 +90,9 @@ constexpr std::string_view BLOCK_N_FIELD = "block_n";
 // does not and every gfx950 variant is built at 1, so an absent field reads as 1, the one
 // value served.
 constexpr std::string_view KV_SEGMENTS_FIELD = "kv_segments";
+// 1 for a kernel that adds an fp32 bias. Both KMDs declare it with the default 0, which
+// completes a record without it.
+constexpr std::string_view USE_ADDITIVE_BIAS_FIELD = "use_additive_bias";
 
 /// The largest bias stride and bias element index a launch may use: the kernel takes each
 /// stride as an int32_t and addresses the bias with 32-bit element offsets. rocKE states the
@@ -1041,6 +1045,21 @@ std::optional<std::string> stringMetadata(const KernelDefinition& kernel, std::s
     return *value;
 }
 
+std::optional<bool> candidateAdditiveBias(const KernelDefinition& kernel)
+{
+    const auto it = kernel.metadata.find(std::string(USE_ADDITIVE_BIAS_FIELD));
+    if(it == kernel.metadata.end())
+    {
+        return false;
+    }
+    const auto* value = std::get_if<int64_t>(&it->second);
+    if(value == nullptr || (*value != 0 && *value != 1))
+    {
+        return std::nullopt;
+    }
+    return *value == 1;
+}
+
 AttentionDenseGridShape gridShape(const AttentionDenseLaunchInputs& launch)
 {
     AttentionDenseGridShape shape;
@@ -1276,8 +1295,8 @@ AttentionDenseGrid savedGridSelector(const SavedLaunchInputs& inputs)
 /// RUNTIME_HEAD_COUNTS is the form every plain kernel in both catalogs takes; BAKED_HEAD_COUNTS
 /// is the 8-argument form of kernels built before the head counts became runtime arguments;
 /// RUNTIME_HEAD_COUNTS_WITH_BIAS is RUNTIME_HEAD_COUNTS plus the bias pointer and its three
-/// strides, appended after everything else (gfx950 only: 14 arguments). A
-/// kernel on the persistent grid (gfx942 only) takes a `<d>_magic`, `<d>_shift` i32 pair per
+/// strides, appended after everything else, lse_ptr included (14 arguments on a plain
+/// grid kernel). A kernel on the persistent grid (gfx942 only) takes a `<d>_magic`, `<d>_shift` i32 pair per
 /// fast-division divisor of its decode after the shape (runtime_kernarg_fields), 14 or 16
 /// arguments; a non-persistent order takes none. An emit_lse kernel (gfx942 only) takes one
 /// more argument, lse_ptr, last. use_sinks=False everywhere, so there is no sink_ptr slot.
@@ -1682,7 +1701,7 @@ public:
         // reads them after seqlen_kv, a persistent one then takes its fast-division pairs,
         // one that writes LSE takes lse_ptr, and one that adds a bias takes the bias pointer
         // and its three strides last. Only gfx950 has a BAKED_HEAD_COUNTS contract, and it
-        // binds no stats output and launches no persistent grid; only gfx950 adds a bias.
+        // binds no stats output and launches no persistent grid.
         std::array<void*, 4> pointers{q.ptr, k.ptr, v.ptr, o.ptr};
         float scale = binding.scale;
         std::array<int32_t, 5> shape{static_cast<int32_t>(p.batch),
