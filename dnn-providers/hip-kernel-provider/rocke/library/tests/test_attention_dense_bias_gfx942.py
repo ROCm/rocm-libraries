@@ -18,6 +18,8 @@ Run by the CPU lane (``rocke_library_attention_cpu_pytest``).
 
 from __future__ import annotations
 
+import dataclasses
+import itertools
 import re
 import struct
 from dataclasses import replace
@@ -73,6 +75,9 @@ _MODES = {
     "d64_fp16": {"head_size": 64, "dtype": "fp16"},
     "d64_bf16": {"head_size": 64},
     "d64_bf16_persistent": {"head_size": 64, **_PERSISTENT},
+    # fp16 D128 without a mask at the 256-row tile: the load-width policy's former
+    # scalar group (_use_bias_x4), now 4-wide like every other body.
+    "d128_fp16_full": {"dtype": "fp16", "causal": False},
     "window": {"sliding_window": WINDOW},
     "window_persistent": {"sliding_window": WINDOW, **_PERSISTENT},
     # The narrow-window geometry the dispatch factory ships at D128.
@@ -199,10 +204,18 @@ def test_bias_is_in_the_name_and_the_cache_key(mode):
     )
 
 
-@pytest.mark.parametrize(
-    "mode",
-    ["default", "persistent", "d64_fp16", "d64_bf16", "d64_bf16_persistent", "lse"],
-)
+_LOAD_WIDTH_MODES = [
+    "default",
+    "persistent",
+    "d64_fp16",
+    "d64_bf16",
+    "d64_bf16_persistent",
+    "lse",
+    "d128_fp16_full",
+]
+
+
+@pytest.mark.parametrize("mode", _LOAD_WIDTH_MODES)
 def test_the_load_width_is_in_the_name_and_the_cache_key(mode):
     """4-wide and scalar bias loads are different kernels: they must not share a
     launcher-cache slot or a symbol. ``None`` resolves through the policy, so it is
@@ -293,10 +306,7 @@ def test_use_bias_x4_needs_the_bias(value):
     assert replace(_BASE, use_bias_x4=None).resolved_use_bias_x4() is False
 
 
-@pytest.mark.parametrize(
-    "mode",
-    ["default", "persistent", "d64_fp16", "d64_bf16", "d64_bf16_persistent", "lse"],
-)
+@pytest.mark.parametrize("mode", _LOAD_WIDTH_MODES)
 def test_use_bias_x4_resolves_through_the_policy(mode):
     spec = _bias(_MODES[mode])
     assert spec.use_bias_x4 is None
@@ -305,22 +315,59 @@ def test_use_bias_x4_resolves_through_the_policy(mode):
     assert replace(spec, use_bias_x4=False).resolved_use_bias_x4() is False
 
 
-@pytest.mark.parametrize(
-    "mode, wide",
-    [
-        ("default", False),
-        ("persistent", False),
-        ("d64_fp16", False),
-        ("d64_bf16", True),
-        ("d64_bf16_persistent", True),
-        ("lse", False),
-    ],
+_POLICY_AXES = dict(
+    dtype=("bf16", "fp16"),
+    head_size=(64, 128),
+    block_m=(128, 256),
+    block_n=(32, 64),
+    causal=(True, False),
+    emit_lse=(False, True),
 )
-def test_the_bias_load_width_policy_is_wide_for_bf16_d64_only(mode, wide):
-    """The shipped verdict itself (the test above only compares the field with the
-    policy function it calls). Changing a verdict is a policy edit: update this table
-    and re-bless both goldens in the same change (see ``_use_bias_x4``)."""
-    assert _use_bias_x4(_bias(_MODES[mode])) is wide
+
+
+def _policy_grid():
+    """Every combination of the fields the load-width policy may read (and the grid
+    it runs on), as bias specs."""
+    names = list(_POLICY_AXES)
+    for values in itertools.product(*_POLICY_AXES.values()):
+        for grid in ({}, _PERSISTENT):
+            yield _bias(grid, **dict(zip(names, values)))
+
+
+def test_the_load_width_policy_is_4_wide_for_every_bias_body():
+    """No carve-out: the 4-wide form on either grid and whatever the rest of the spec
+    says (the grid includes the groups the policy once kept scalar: fp16 at the 256-row
+    tile without a mask at D128 or with a causal mask and LSE at D64, and bf16 D64
+    without a mask at the 32-key tile). The explicit scalar form stays reachable and is
+    a different body under its own tagged name, so both bodies stay pinned."""
+    n = 0
+    for spec in _policy_grid():
+        assert _use_bias_x4(spec) is True, spec
+        assert spec.resolved_use_bias_x4() is True, spec
+        scalar = replace(spec, use_bias_x4=False)
+        assert scalar.resolved_use_bias_x4() is False, spec
+        assert scalar.kernel_name() == spec.kernel_name() + "_bx40", spec
+        assert replace(spec, use_bias_x4=True).kernel_name() == spec.kernel_name()
+        n += 1
+    assert n == 2 * 2**6  # every combination of the axes, on both grids
+
+
+def test_the_load_width_policy_is_one_verdict_per_cache_key():
+    """The kernel name and the launcher cache see only the cache key. A verdict that
+    differed between two specs sharing one would put two bodies under one symbol and
+    one launcher slot (the policy must read compile-time fields the key carries)."""
+    verdicts = {}
+    for spec in _policy_grid():
+        for scale in (1, 3):
+            moved = replace(
+                spec,
+                **{f: scale * getattr(spec, f) for f in spec.runtime_param_fields},
+            )
+            key = attention_dense_cache_key(moved, arch="gfx942")
+            assert verdicts.setdefault(key, _use_bias_x4(moved)) == _use_bias_x4(
+                moved
+            ), moved.kernel_name()
+    assert len(verdicts) > 1
 
 
 # --------------------------------------------------------------------------- #
@@ -964,12 +1011,11 @@ def _dense_spec(req, **knobs):
 
 def test_the_candidate_builds_a_bias_spec():
     spec = _dense_spec(_request())
-    assert spec.use_additive_bias and spec.persistent  # D128: persistent by default
+    assert spec.use_additive_bias
     # The bias is the request's, not a default the plain spec inherits.
     plain = _dense_spec(_request(use_attn_bias=False))
     assert not plain.use_additive_bias and plain.use_bias_x4 is None
     assert spec.use_bias_x4 is None  # the kernel's policy decides, not dispatch
-    assert _dense_spec(_request(hdim_q=64, hdim_v=64)).persistent is False
 
 
 # Requests the bias must reach the kernel for: head size x dtype x mask x features,
@@ -1007,15 +1053,204 @@ def test_a_bias_request_resolves_to_a_spec_the_kernel_serves(
     ok, why = supports_attention_dense(spec, arch="gfx942")
     assert ok, why
     assert spec.kv_segments == 1
-    # The persistent default is the bias-off one: D128 on the persistent grid, except
-    # the narrow-window geometry, which is a non-persistent one-CTA-per-block grid.
-    narrow = mask == "window"
-    assert spec.persistent == (d == 128 and not narrow)
-    # Dispatch pins the configuration it would without the bias, except where that one
-    # splits the KV range (a chunk with nothing else on: see the test below).
+    # The bias geometry (see the tests below) is the non-persistent grid. Any other
+    # bias request keeps the configuration it would without the bias: persistent at
+    # D128 except the narrow-window geometry, which is a one-CTA-per-block grid.
+    in_scope = (
+        mask in ("none", "top_left")
+        and not sinks
+        and not (mask == "top_left" and (dtype, d) == ("fp16", 64))
+    )
+    assert spec.persistent == (d == 128 and mask != "window" and not in_scope)
+    # The configuration is the bias-off one except where that splits the KV range (a
+    # chunk with nothing else on: see the test after the geometry tests).
     plain = _dense_spec(replace(req, use_attn_bias=False))
-    if plain.kv_segments == 1:
+    if not in_scope and plain.kv_segments == 1:
         assert replace(spec, use_additive_bias=False) == plain
+
+
+# --------------------------------------------------------------------------- #
+# The bias geometry: what the factory builds for a bias request
+# --------------------------------------------------------------------------- #
+
+_PLAIN_BAND_KW = {
+    "none": {"mask_type": 0},
+    "top_left": {"mask_type": 1},
+    # A bottom-right band over equal lengths is the top-left one.
+    "bottom_right_square": {"mask_type": 2},
+}
+
+
+# One cell of the plain bands keeps the default geometry: fp16 at D64 under a causal band
+# (a top-left or a bottom-right one over equal lengths), LSE on or off.
+def _keeps_the_default(dtype, d, mask):
+    return (dtype, d) == ("fp16", 64) and mask != "none"
+
+
+@pytest.mark.parametrize("lse", [False, True], ids=["no-lse", "lse"])
+@pytest.mark.parametrize(
+    "dtype, d, mask",
+    [
+        (dtype, d, mask)
+        for dtype in ("bf16", "fp16")
+        for d in (64, 128)
+        for mask in _PLAIN_BAND_KW
+        if not _keeps_the_default(dtype, d, mask)
+    ],
+)
+def test_a_bias_request_takes_the_measured_geometry(dtype, d, mask, lse):
+    """128-row query blocks on the one-CTA-per-block grid, a 32-key tile at D128 and a
+    64-key one at D64, the decode order that follows the mask, and the waves-per-eu of
+    the other configs for bf16 D64; the name and the emitted attribute agree on it."""
+    from kernels.gfx942.attention_dense import _tuned_waves_per_eu
+
+    req = _request(
+        dtype=dtype, hdim_q=d, hdim_v=d, emit_lse=lse, **_PLAIN_BAND_KW[mask]
+    )
+    spec = _dense_spec(req)
+    causal = mask != "none"
+    assert (spec.block_m, spec.block_n) == (128, 32 if d == 128 else 64)
+    assert not spec.persistent and spec.kv_segments == 1
+    assert spec.nonpersist_decode == ("bt_hkv_minor" if causal else "qb_minor")
+    # The kernel's own occupancy policy, except bf16 D64, which takes the other
+    # configs' value (the kernel's is 4: the bias geometry measured ahead at 2).
+    assert _tuned_waves_per_eu(64, "bf16") == 4
+    expected_wpe = 2 if (d, dtype) == (64, "bf16") else _tuned_waves_per_eu(d, dtype)
+    assert spec.waves_per_eu == expected_wpe == spec.resolved_waves_per_eu()
+    assert spec.use_bias_x4 is None and spec.resolved_use_bias_x4()
+    assert supports_attention_dense(spec, arch="gfx942")[0]
+    name = spec.kernel_name()
+    assert f"_wpe{expected_wpe}_" in name
+    assert ("npbthkvmin" in name) == causal
+    kernel = build_attention_dense(spec, arch="gfx942")
+    assert kernel.attrs["waves_per_eu"] == expected_wpe
+
+
+# Bias requests outside the geometry's scope, each out of it for one reason.
+_OUT_OF_SCOPE = {
+    "sinks": {"use_sinks": True},
+    "narrow_window": {"sliding_window": WINDOW},
+    "wide_window": {"sliding_window": 512, "seqlen_q": 1024, "seqlen_k": 1024},
+    "bottom_right_chunk": {"mask_type": 2, "seqlen_q": 256, "seqlen_k": 1024},
+    "unequal_lengths": {"mask_type": 1, "seqlen_q": 512, "seqlen_k": 1024},
+}
+
+
+def _assert_the_default_geometry(req):
+    spec = _dense_spec(req)
+    plain = _dense_spec(replace(req, use_attn_bias=False))
+    assert spec.nonpersist_decode == "auto"
+    # The plain request splits the KV range for a short bottom-right chunk (the
+    # factory keeps that off a bias: see the test below); everything else is the same.
+    ignore = {"persistent", "kv_segments"} if plain.kv_segments > 1 else set()
+    fields = {f.name for f in dataclasses.fields(spec)} - ignore
+    assert {f: getattr(spec, f) for f in fields} == {
+        f: getattr(replace(plain, use_additive_bias=True), f) for f in fields
+    }
+
+
+@pytest.mark.parametrize("lse", [False, True], ids=["no-lse", "lse"])
+@pytest.mark.parametrize("why", list(_OUT_OF_SCOPE))
+@pytest.mark.parametrize("d", [64, 128])
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+def test_the_other_bias_requests_keep_the_default_geometry(dtype, d, why, lse):
+    _assert_the_default_geometry(
+        _request(dtype=dtype, hdim_q=d, hdim_v=d, emit_lse=lse, **_OUT_OF_SCOPE[why])
+    )
+
+
+@pytest.mark.parametrize("lse", [False, True], ids=["no-lse", "lse"])
+@pytest.mark.parametrize("mask", ["top_left", "bottom_right_square"])
+def test_fp16_d64_under_a_causal_band_keeps_the_default_geometry(mask, lse):
+    """The one in-scope-looking cell the geometry is not built for (it measured slower
+    on one compiler generation): a bias request there is the bias-off default plus the
+    bias, whichever causal spelling and with or without LSE. The same cell without a
+    mask, and bf16 at D64, do take the geometry (the test above)."""
+    _assert_the_default_geometry(
+        _request(
+            dtype="fp16", hdim_q=64, hdim_v=64, emit_lse=lse, **_PLAIN_BAND_KW[mask]
+        )
+    )
+    for neighbour in (
+        dict(dtype="fp16", mask_type=0),
+        dict(dtype="bf16", mask_type=_PLAIN_BAND_KW[mask]["mask_type"]),
+    ):
+        spec = _dense_spec(_request(hdim_q=64, hdim_v=64, emit_lse=lse, **neighbour))
+        assert spec.block_m == 128 and spec.nonpersist_decode != "auto"
+
+
+@pytest.mark.parametrize("mask", list(_PLAIN_BAND_KW))
+@pytest.mark.parametrize("d", [64, 128])
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+def test_the_bias_off_requests_keep_the_default_geometry(dtype, d, mask):
+    """The geometry belongs to the bias: the same request without it is the default
+    spec (persistent at D128, a 64-key tile, the kernel's occupancy policy, the
+    decode order left to the spec)."""
+    from kernels.gfx942.attention_dense import _tuned_waves_per_eu
+
+    spec = _dense_spec(
+        _request(
+            dtype=dtype,
+            hdim_q=d,
+            hdim_v=d,
+            use_attn_bias=False,
+            **_PLAIN_BAND_KW[mask],
+        )
+    )
+    assert spec.persistent == (d == 128)
+    assert spec.block_n == 64
+    assert spec.nonpersist_decode == "auto"
+    assert spec.waves_per_eu == _tuned_waves_per_eu(d, dtype)
+
+
+def test_the_bias_geometry_reads_request_fields_only():
+    """The same spec for any CU count, batch, head count or length: the decision is a
+    function of the request's band, head size, dtype and bias, so one binary serves
+    every shape and the choice does not depend on the host."""
+    fields = ("block_m", "block_n", "persistent", "nonpersist_decode", "waves_per_eu")
+
+    def geometry(**kw):
+        spec = _dense_spec(_request(hdim_q=64, hdim_v=64, **kw))
+        return tuple(getattr(spec, f) for f in fields)
+
+    shapes = [
+        dict(batch=1, nhead_q=8, nhead_k=8, seqlen_q=512, seqlen_k=512),
+        dict(batch=1, nhead_q=64, nhead_k=8, seqlen_q=8192, seqlen_k=8192),
+        dict(batch=16, nhead_q=32, nhead_k=32, seqlen_q=4096, seqlen_k=4096),
+        dict(batch=4, nhead_q=40, nhead_k=8, seqlen_q=1152, seqlen_k=1152),
+    ]
+    seen = {
+        geometry(num_cus=cus, **shape)
+        for cus in (0, 1, 152, 228, 304)
+        for shape in shapes
+    }
+    assert len(seen) == 1
+
+
+def _factory_spec(req):
+    """The default spec the factory builds for ``req``, refused or not (the tuning
+    API only returns specs the kernel serves)."""
+    from dispatch.attention.gfx942_dense import tuned_base_spec
+
+    return tuned_base_spec(req)
+
+
+def test_the_bias_geometry_serves_lengths_the_default_tile_cannot():
+    """A length that is a multiple of 128 but not of 256 is a whole number of tiles
+    for the bias geometry; the default 256-row tile would leave a partial one."""
+    long = dict(batch=8, nhead_q=64, nhead_k=8, seqlen_q=1152, seqlen_k=1152)
+    spec = _dense_spec(_request(**long))
+    assert not spec.ragged
+    assert supports_attention_dense(spec, arch="gfx942")[0]
+    plain = _factory_spec(_request(use_attn_bias=False, **long))
+    assert plain.ragged and not supports_attention_dense(plain, arch="gfx942")[0]
+
+
+@pytest.mark.parametrize("d", [64, 128])
+def test_a_ragged_bias_request_is_still_refused(d):
+    spec = _factory_spec(_request(hdim_q=d, hdim_v=d, seqlen_q=600, seqlen_k=600))
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert spec.ragged and not ok and "whole tiles" in why
 
 
 @pytest.mark.parametrize("d", [64, 128])
@@ -1068,7 +1303,8 @@ def test_the_bias_fields_are_not_tuning_knobs():
     """``use_additive_bias`` is the request's and ``use_bias_x4`` the kernel policy's:
     no sweep varies them and no pin sets them, and (being in the problem-field set)
     neither enters the defaults fingerprint, so every gfx942 dense tuning id is the one
-    stored before they existed, and a bias request's id is its plain twin's."""
+    stored before they existed, and the id of a bias request that keeps the default
+    geometry (here: with sinks) is its plain twin's."""
     from dispatch.attention import attention_candidates, attention_tuning_spec
     from dispatch.attention.axes import DENSE_ARCH_PROBLEM_FIELDS, tuning_axes
     from dispatch.attention.dense_rules import _dense_defaults
@@ -1090,11 +1326,79 @@ def test_the_bias_fields_are_not_tuning_knobs():
     ids = {}
     for use_bias in (True, False):
         req = _request(
-            algorithm=dense.algorithm, spec_id=dense.spec_id, use_attn_bias=use_bias
+            algorithm=dense.algorithm,
+            spec_id=dense.spec_id,
+            use_attn_bias=use_bias,
+            use_sinks=True,
         )
         with walk.sweep_level("production"):
             ids[use_bias] = {s.tuning_id for s in dense.sweep_space(req)}
     assert ids[True] and ids[True] <= ids[False]
+
+
+def test_the_bias_geometry_records_its_decode_order():
+    """The geometry picks the decode order from the mask, so the order is a recorded
+    knob: the same knobs name the same configuration on a masked and an unmasked
+    request, and a pinned id replays. Every base that leaves the order to the spec's
+    own policy records nothing, so its ids are the ones stored before."""
+    from dispatch.attention import attention_candidates, attention_tuning_spec
+    from rocke.dispatch.tuning import walk
+
+    masked, unmasked = _request(mask_type=1), _request(mask_type=0)
+    a = attention_tuning_spec(
+        masked,
+        "gfx942_dense",
+        knobs={"pv_priority": 1, "nonpersist_decode": "qb_minor"},
+    )
+    b = attention_tuning_spec(unmasked, "gfx942_dense", knobs={"pv_priority": 1})
+    assert dict(b.knobs)["nonpersist_decode"] == "qb_minor"
+    assert dict(a.knobs) == dict(b.knobs) and a.tuning_id == b.tuning_id
+    assert a.kernel_spec.nonpersist_decode == "qb_minor"
+    for req, spec in ((masked, a), (unmasked, b)):
+        replayed = attention_tuning_spec(
+            req, "gfx942_dense", tuning_id=spec.tuning_id, knobs=dict(spec.knobs)
+        )
+        assert replayed.tuning_id == spec.tuning_id
+        default = attention_tuning_spec(req, "gfx942_dense")
+        assert (
+            attention_tuning_spec(
+                req, "gfx942_dense", tuning_id=default.tuning_id
+            ).kernel_spec
+            == default.kernel_spec
+        )
+
+    # The axis stays reachable from the pinned base.
+    (dense,) = [c for c in attention_candidates() if c.spec_id == "gfx942_dense"]
+    req = replace(masked, algorithm=dense.algorithm, spec_id=dense.spec_id)
+    with walk.sweep_level("production"):
+        orders = {
+            s.kernel_spec.nonpersist_decode
+            for s in dense.sweep_space(req)
+            if not s.kernel_spec.persistent
+        }
+    assert {"bt_hkv_minor", "qb_minor"} <= orders
+
+    for left_to_the_spec in (
+        _request(use_attn_bias=False),
+        _request(use_sinks=True),
+        _request(sliding_window=WINDOW),
+    ):
+        knobs = dict(attention_tuning_spec(left_to_the_spec, "gfx942_dense").knobs)
+        assert "nonpersist_decode" not in knobs
+
+    # The ingestor's grids pin their order for every problem (the qb_minor one serves a
+    # bias but keeps its order, the AOT ones never serve one), so their ids stay the
+    # ones stored before.
+    for spec_id in (
+        "gfx942_dense_qbminor",
+        "gfx942_dense_persist_aot",
+        "gfx942_dense_btminor_aot",
+        "gfx942_dense_hqswz_aot",
+    ):
+        knobs = dict(
+            attention_tuning_spec(_request(use_attn_bias=False), spec_id).knobs
+        )
+        assert "nonpersist_decode" not in knobs, spec_id
 
 
 def test_the_ingestor_grid_serves_a_bias_and_the_aot_grids_refuse_it():

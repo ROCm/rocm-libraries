@@ -20,9 +20,9 @@ K-double-buffer (``lds_num_buffers=2``) and V-register-prefetch
 (``v_reg_prefetch=True``) knobs are pinned individually and together on supported
 persistent grids (including LSE); no shipped default reaches the new pipeline paths.
 The ``bias_*`` cases pin the additive-bias bodies (both grids, LSE, sinks, windows, the
-diagonal split, D64, the 4-wide loads and, for bf16 D64 whose policy takes them, the
-scalar loads forced); every other case is a bias-off kernel, so they also pin that the
-bias code emits nothing with the bias off.
+diagonal split, D64, the bias geometry the dispatch factory builds, and both load
+widths: each pinned explicitly where the policy picks the other); every other case is a
+bias-off kernel, so they also pin that the bias code emits nothing with the bias off.
 
 Both D64 K-LDS layouts are pinned so drift on either is caught:
   * ``default_d64_*``  -- specs built DIRECTLY with ``lds_k_group_pad=0``: the UNPADDED
@@ -140,6 +140,7 @@ def _cases():
             sliding_window=over.get("sliding_window", 0),
             use_sinks=over.get("use_sinks", False),
             emit_lse=over.get("emit_lse", False),
+            use_attn_bias=over.get("use_attn_bias", False),
         )
         return lambda: build_attention_dense(
             attention_tuning_spec(req, "gfx942_dense").kernel_spec, arch=_ARCH
@@ -431,10 +432,11 @@ def _cases():
         # --- additive bias (the same set as the platform harness's gfx942 bias rows,
         #     here at the library base shape): one bias add per tile ahead of the mask on
         #     both grids, the epilogue's live-row test with and without LSE and with
-        #     sinks, the window loop prunes, the diagonal split, D64, and the 4-wide
-        #     loads. bf16 D64 resolves to the 4-wide loads (see ``_use_bias_x4``), so its
-        #     ``use_bias_x4=False`` rows keep the scalar body pinned. The cases above pin
-        #     that none of it emits IR with the bias off. ---
+        #     sinks, the window loop prunes, the diagonal split, D64, the geometry the
+        #     dispatch factory builds for a bias, and both load widths. The policy
+        #     (``_use_bias_x4``) picks the 4-wide loads for every bias body, so the
+        #     ``use_bias_x4=False`` rows keep the scalar body pinned.
+        #     The cases above pin that none of it emits IR with the bias off. ---
         "attention_dense_gfx942/bias_d128_bf16_causal": mk_gfx942(
             use_additive_bias=True
         ),
@@ -513,6 +515,78 @@ def _cases():
             head_size=64,
             persistent=True,
             num_persistent=304,
+        ),
+        "attention_dense_gfx942/bias_scalar_d128_bf16_causal": mk_gfx942(
+            use_additive_bias=True, use_bias_x4=False
+        ),
+        "attention_dense_gfx942/bias_scalar_persist_d128_bf16_causal": mk_gfx942(
+            use_additive_bias=True,
+            use_bias_x4=False,
+            persistent=True,
+            num_persistent=304,
+        ),
+        # fp16 D128, 256-row tile, no mask: the one-time scalar group, now 4-wide.
+        "attention_dense_gfx942/bias_d128_fp16_full": mk_gfx942(
+            use_additive_bias=True, dtype="fp16", causal=False
+        ),
+        # --- the bias geometry (128-row blocks on the one-CTA-per-block grid, 32-key
+        #     tile at D128 and 64-key tile at D64, the decode order following the
+        #     mask), spelled out so the body stays pinned whatever dispatch does ---
+        "attention_dense_gfx942/bias_geom_d128_bf16_causal": mk_gfx942(
+            use_additive_bias=True,
+            block_m=128,
+            block_n=32,
+            nonpersist_decode="bt_hkv_minor",
+        ),
+        "attention_dense_gfx942/bias_geom_lse_d128_bf16_causal": mk_gfx942(
+            use_additive_bias=True,
+            emit_lse=True,
+            block_m=128,
+            block_n=32,
+            nonpersist_decode="bt_hkv_minor",
+        ),
+        "attention_dense_gfx942/bias_geom_d128_fp16_full": mk_gfx942(
+            use_additive_bias=True,
+            dtype="fp16",
+            causal=False,
+            block_m=128,
+            block_n=32,
+            nonpersist_decode="qb_minor",
+        ),
+        "attention_dense_gfx942/bias_geom_d64_bf16_full": mk_gfx942(
+            use_additive_bias=True,
+            head_size=64,
+            causal=False,
+            block_m=128,
+            nonpersist_decode="qb_minor",
+        ),
+        "attention_dense_gfx942/bias_geom_lse_d64_bf16_causal": mk_gfx942(
+            use_additive_bias=True,
+            head_size=64,
+            emit_lse=True,
+            block_m=128,
+            nonpersist_decode="bt_hkv_minor",
+        ),
+        # --- the same through the dispatch factory: these track the SHIPPED bias
+        #     geometry (and, for bf16 D64, its waves-per-eu) ---
+        "attention_dense_gfx942/dispatch_bias_d128_bf16_causal": mk_dispatch(
+            use_attn_bias=True
+        ),
+        "attention_dense_gfx942/dispatch_bias_lse_d128_fp16_full": mk_dispatch(
+            use_attn_bias=True, dtype="fp16", causal=False, emit_lse=True
+        ),
+        "attention_dense_gfx942/dispatch_bias_d64_bf16_full": mk_dispatch(
+            use_attn_bias=True, head_size=64, causal=False
+        ),
+        "attention_dense_gfx942/dispatch_bias_lse_d64_bf16_causal": mk_dispatch(
+            use_attn_bias=True, head_size=64, emit_lse=True
+        ),
+        # fp16 D64 under a causal band keeps the default geometry (the one measured
+        # cell the bias geometry is not built for). At this small shape the default
+        # also takes 128-row blocks, so the body equals the bias geometry's here; the
+        # choice itself is pinned by test_attention_dense_bias_gfx942.py.
+        "attention_dense_gfx942/dispatch_bias_d64_fp16_causal": mk_dispatch(
+            use_attn_bias=True, head_size=64, dtype="fp16"
         ),
     }
 

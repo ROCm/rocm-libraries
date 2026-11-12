@@ -1968,13 +1968,16 @@ def cases():
             },
         ),
         # --- additive bias: one bias add per tile ahead of the mask, on the default
-        # and the persistent grid (scalar loads; the policy picks the 4-wide ones for
-        # bf16 D64 only); the epilogue's live-row test with and without LSE (sinks
-        # with LSE keep m = sink for a row whose keys are all -inf); a sliding
-        # window on the persistent grid and under wave skip; the diagonal split, whose
-        # unmasked tiles still take the bias; D64 fp16 without a mask; bf16 D64 with
-        # the policy's loads and with scalar ones forced; and the 4-wide loads at D128.
-        # The rows above pin that none of this emits IR when the bias is off.
+        # and the persistent grid (the policy picks the 4-wide loads except in three
+        # groups, fp16 D128 without a mask at the 256-row tile among them); the
+        # epilogue's live-row test with and without LSE (sinks with LSE keep m = sink
+        # for a row whose keys are all -inf); a sliding window on the persistent grid
+        # and under wave skip; the diagonal split, whose unmasked tiles still take the
+        # bias; D64 fp16 without a mask; bf16 D64 with the policy's loads and with
+        # scalar ones forced; the 4-wide loads and the scalar ones at D128 on both
+        # grids; and the geometry the dispatch factory builds for a bias (128-row
+        # blocks, a 32-key tile at D128 and 64-key at D64, the decode order following
+        # the mask). The rows above pin that none of this emits IR when the bias is off.
         ("bias_causal_sq512", {"use_additive_bias": True}),
         ("bias_persist_causal_sq512", {**_persist942, "use_additive_bias": True}),
         (
@@ -2028,6 +2031,65 @@ def cases():
             {"use_additive_bias": True, "use_sinks": True, "emit_lse": True},
         ),
         ("bias_x4_sq512", {"use_additive_bias": True, "use_bias_x4": True}),
+        ("bias_scalar_sq512", {"use_additive_bias": True, "use_bias_x4": False}),
+        (
+            "bias_persist_scalar_sq512",
+            {**_persist942, "use_additive_bias": True, "use_bias_x4": False},
+        ),
+        (
+            "bias_d128_fp16_no_mask_sq512",
+            {"use_additive_bias": True, "dtype": "fp16", "causal": False},
+        ),
+        (
+            "bias_geom_d128_causal_sq512",
+            {
+                "use_additive_bias": True,
+                "block_m": 128,
+                "block_n": 32,
+                "nonpersist_decode": "bt_hkv_minor",
+            },
+        ),
+        (
+            "bias_geom_lse_d128_causal_sq512",
+            {
+                "use_additive_bias": True,
+                "emit_lse": True,
+                "block_m": 128,
+                "block_n": 32,
+                "nonpersist_decode": "bt_hkv_minor",
+            },
+        ),
+        (
+            "bias_geom_d128_fp16_no_mask_sq512",
+            {
+                "use_additive_bias": True,
+                "dtype": "fp16",
+                "causal": False,
+                "block_m": 128,
+                "block_n": 32,
+                "nonpersist_decode": "qb_minor",
+            },
+        ),
+        (
+            "bias_geom_d64_bf16_no_mask_sq512",
+            {
+                "use_additive_bias": True,
+                "head_size": 64,
+                "causal": False,
+                "block_m": 128,
+                "nonpersist_decode": "qb_minor",
+            },
+        ),
+        (
+            "bias_geom_lse_d64_bf16_causal_sq512",
+            {
+                "use_additive_bias": True,
+                "head_size": 64,
+                "emit_lse": True,
+                "block_m": 128,
+                "nonpersist_decode": "bt_hkv_minor",
+            },
+        ),
     ):
         add(
             "attention_dense",

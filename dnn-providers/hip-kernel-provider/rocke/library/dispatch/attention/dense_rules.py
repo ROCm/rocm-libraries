@@ -72,6 +72,20 @@ def _gfx942_dense_inert_knobs(spec) -> dict:
     }
 
 
+def _gfx942_order_per_problem(spec) -> bool:
+    """Whether the base sets its grid's decode order from the problem (the bias
+    geometry follows the mask), not from the spec's own policy: the order is then a
+    recorded field and stays an axis, with the grid kind and the KV split."""
+    return bool(spec.use_additive_bias) and spec.nonpersist_decode != "auto"
+
+
+def _gfx942_order_pinned(spec) -> bool:
+    """Whether the base pins its decode order for every problem (the ingestor's
+    grids, which never carry a bias): the order, the grid kind and the KV split are
+    then not axes of its space."""
+    return spec.nonpersist_decode != "auto" and not spec.use_additive_bias
+
+
 @dataclass(frozen=True)
 class _DenseTuningArch:
     """What the shared dense walk needs to know about one arch's dense body.
@@ -136,8 +150,8 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
         # offers launches the same kind of grid as its default (block_m stays a
         # knob and sizes it).
         scope={
-            "persistent": lambda s: s.nonpersist_decode == "auto",
-            "nonpersist_decode": lambda s: s.nonpersist_decode == "auto",
+            "persistent": lambda s: not _gfx942_order_pinned(s),
+            "nonpersist_decode": lambda s: not _gfx942_order_pinned(s),
             # A base that pins its persistent decode (the ingestor's persistent
             # grid) pins the CTA count with it: the decode's legality was checked
             # at that count, and the launch passes exactly that many CTAs.
@@ -154,7 +168,7 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
                 bool(s.causal) and int(s.sliding_window) == 0
             ),
             "kv_segments": lambda s: (
-                kv_split_admits(s) and s.nonpersist_decode == "auto"
+                kv_split_admits(s) and not _gfx942_order_pinned(s)
             ),
             "window_wave_skip": lambda s: bool(s.causal) and int(s.sliding_window) > 0,
         },
@@ -374,7 +388,8 @@ class DenseSpace(WavesPerEuSpace):
     def recorded(self, base):
         # A moving bottom-right diagonal on the default grid resolves its query
         # tile and KV-segment count per problem (the short-chunk rule), so both
-        # are recorded there. Every other base keeps its key unchanged.
+        # are recorded there, and the gfx942 bias geometry records its decode order
+        # (below). Every other base keeps its key unchanged.
         moving = getattr(base, "causal_bottom_right", False) and int(
             base.seqlen_q
         ) != int(base.seqlen_kv)
@@ -384,6 +399,12 @@ class DenseSpace(WavesPerEuSpace):
             fields = fields | {"causal_diag_split"}
         if moving and not base.persistent:
             fields = fields | {"block_m", "kv_segments"}
+        if self.arch == "gfx942" and _gfx942_order_per_problem(base):
+            # The bias geometry picks the grid's decode order from the mask, so the
+            # order is resolved per problem like the tile it goes with. A base that
+            # leaves it to the spec's own policy resolves nothing here, and neither
+            # does one that pins it: the ingestor's grids keep their key as it was.
+            fields = fields | {"nonpersist_decode"}
         return fields
 
     def axes(self, base):

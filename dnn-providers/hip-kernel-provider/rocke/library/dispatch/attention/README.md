@@ -345,9 +345,13 @@ Selection pins a spec the same way for dense and unified:
   (`gfx942_dense_qbminor`); the persistent `*_aot` grids do not declare
   `attn_bias`. The tuned candidate serves it on the default and the persistent
   grid alike: the factory never turns on the KV-segment split for a bias request, and the kernel refuses the K
-  double-buffer / V register-prefetch pipeline. gfx942's bias load width
-  (`use_bias_x4`) is a problem field too: the kernel's policy resolves it, and no
-  tuning id names it. The caller passes the `[B|1, Hq|1, Sq|1, Skv]` bias to
+  double-buffer / V register-prefetch pipeline. A bias request over equal lengths with
+  a full or causal band, no sliding window and no sinks is built on a measured
+  geometry (128-row query blocks on the non-persistent grid, a 32-key tile at D128 and
+  a 64-key tile at D64), except fp16 at D64 under a causal band; the other bias
+  requests keep the default one. gfx942's bias load width (`use_bias_x4`) is a
+  problem field too: the kernel's policy resolves it (4-wide for every bias body), and
+  no tuning id names it. The caller passes the `[B|1, Hq|1, Sq|1, Skv]` bias to
   `bind_torch` as `tensors["attn_bias"]`; the dense runner derives its strides
   (0 on a broadcast axis) and refuses a malformed one. One concept, one name per
   layer: hipDNN's `attn_mask` tensor is the request's `use_attn_bias` /

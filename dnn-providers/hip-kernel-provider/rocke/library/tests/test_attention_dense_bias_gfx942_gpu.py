@@ -103,10 +103,12 @@ def _spec(
     sinks=False,
     lse=False,
     x4=None,
+    tile=None,
 ):
     """The shipped bias spec for the request, from the dispatch factory. ``persistent``
-    picks the grid as a knob on that spec (None: the factory's own choice); ``x4``
-    forces the bias load form (None: the kernel's policy)."""
+    picks the grid and ``tile`` the ``(block_m, block_n)`` tile as knobs on that spec
+    (None: the factory's own choice); ``x4`` forces the bias load form (None: the
+    kernel's policy)."""
     req = AttentionRequest(
         batch=batch,
         nhead_q=hq,
@@ -124,11 +126,15 @@ def _spec(
         use_attn_bias=True,
     )
     knobs = {} if persistent is None else {"persistent": persistent}
+    if tile is not None:
+        knobs.update(block_m=tile[0], block_n=tile[1])
     spec = tuning_spec_with_knobs(req, "gfx942_dense", knobs).kernel_spec
     assert spec.use_additive_bias
     assert spec.kv_segments == 1 and not spec.ragged
     if persistent is not None:
         assert spec.persistent is persistent
+    if tile is not None:
+        assert (spec.block_m, spec.block_n) == tile
     return spec if x4 is None else replace(spec, use_bias_x4=x4)
 
 
@@ -295,6 +301,35 @@ def test_dtype_x_head_size(dtype, d, hq, hkv, mask, persistent):
         dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, mask=mask, persistent=persistent
     )
     q, k, v, bias = make_inputs(dtype, d, hq, hkv, batch, sq, skv, (batch, hq, 1, skv))
+    scale = 1.0 / math.sqrt(d)
+    out, _ = _launch(spec, q, k, v, bias, scale)
+    ref, _ = reference(q, k, v, scale, bias, mask)
+    assert max_abs(out, ref) < tolerance(dtype)
+
+
+@pytest.mark.parametrize("mask", ["none", "top_left"])
+@pytest.mark.parametrize(
+    "dtype, d", [("bf16", 128), ("fp16", 64)], ids=["bf16-d128", "fp16-d64"]
+)
+def test_the_default_geometry_tile_serves_the_bias(dtype, d, mask, persistent):
+    """The 256-row tile of the bias-off default geometry on both grids. The factory
+    builds the 128-row tile for these requests, but a pin or a sweep can still ask for
+    this one, and the persistent grid at D128 is where it used to be the default."""
+    hq, hkv, batch = 8, 2, 2
+    sq, skv = extents(mask)
+    spec = _spec(
+        dtype,
+        d,
+        hq,
+        hkv,
+        batch=batch,
+        sq=sq,
+        skv=skv,
+        mask=mask,
+        persistent=persistent,
+        tile=(256, 64),
+    )
+    q, k, v, bias = make_inputs(dtype, d, hq, hkv, batch, sq, skv, (batch, hq, sq, skv))
     scale = 1.0 / math.sqrt(d)
     out, _ = _launch(spec, q, k, v, bias, scale)
     ref, _ = reference(q, k, v, scale, bias, mask)
