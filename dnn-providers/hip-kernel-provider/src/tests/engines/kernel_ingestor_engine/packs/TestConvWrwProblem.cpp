@@ -308,15 +308,18 @@ std::vector<RefusalCase> refusalCases()
              shape.stride = {1, int64_t{1} << 20};
              reshape(s, shape);
          }},
-        {"DyImageBeyondOffsets",
+        // An image past the buffer range is served only when each channel plane fits it (block-
+        // based buffers): here one dy plane of 2^30 fp16 elements (2^31 bytes) from an x plane
+        // of 2^29 padded by 2^28 on each side.
+        {"DyChannelPlaneBeyondOffsets",
          [](ConvGraphSpec& s) {
              auto shape = baseShape();
              shape.n = 1;
              shape.c = 8;
-             shape.k = int64_t{1} << 27;
-             shape.input = {1, 8}; // dy 2^27 x 8 fp16: 2^31 bytes
+             shape.k = 8;
+             shape.input = {1, int64_t{1} << 29};
              shape.filter = {1, 1};
-             shape.prePadding = shape.postPadding = {0, 0};
+             shape.prePadding = shape.postPadding = {0, int64_t{1} << 28};
              reshape(s, shape);
          }},
     };
@@ -414,7 +417,7 @@ struct ConfigFields
     int64_t atomId = 4;
     int64_t loop = 1, layout = 0;
     int64_t bk = 64, bc = 64, bq = 32, fr = 3, s = 3, sw = 1, dw = 1, wk = 2, wc = 2, vec = 8;
-    int64_t tk = 0, tc = 0, xcd = 0, align = 0, ns = 0, bpu = 2, wq = 0, dws = 1;
+    int64_t tk = 0, tc = 0, xcd = 0, align = 0, ns = 0, bpu = 2, wq = 0, dws = 1, pb = 0;
 };
 
 /// The base config as the output-rows loop.
@@ -507,7 +510,8 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
                        {"ns", f.ns},
                        {"bpu", f.bpu},
                        {"wq", f.wq},
-                       {"dws", f.dws}};
+                       {"dws", f.dws},
+                       {"pb", f.pb}};
     return kernel;
 }
 
@@ -536,6 +540,7 @@ WrwConfig configOf(const ConfigFields& f)
     c.bpu = f.bpu;
     c.wq = f.wq;
     c.dws = f.dws;
+    c.pb = f.pb;
     return c;
 }
 
@@ -785,6 +790,9 @@ std::vector<ConfigRefusal> configRefusals()
              f.atomId = 12;
          }},
         {"LoopUnknown", [](ConfigFields& f) { f.loop = 8; }},
+        // Block-based buffers only where the image is past the 32-bit buffer range; 0 or 1.
+        {"PbOnASmallImage", [](ConfigFields& f) { f.pb = 1; }},
+        {"PbTwo", [](ConfigFields& f) { f.pb = 2; }},
         // Packed rows: bq dividing the block (256 threads; 48 is whole atom steps and
         // vectors), and two virtual rows of wo + 2 = 14 columns within bq.
         {"PackedBqNotDividingTheBlock", [](ConfigFields& f) { f.bq = 48; }, packedFields},
@@ -1107,6 +1115,66 @@ TEST(TestConvWrwKernelMatch, TheBaseConfigsServeTheBaseProblem)
     EXPECT_TRUE(admits(trFields(), "gfx950", channelsLastShape()));
     EXPECT_TRUE(admits(fmaFields(), "gfx1100", floatShape()));
     EXPECT_TRUE(admits(directFields(), "gfx950", channelsLastShape()));
+}
+
+TEST(TestConvWrwKernelMatch, BlockBuffersServeImagesPastTheBufferRangeOnly)
+{
+    // 64 channels of 4100 x 4200 fp16: one x image of 2.2 GB, 32 channel planes 1.1 GB.
+    auto large = baseShape();
+    large.c = 64;
+    large.k = 32;
+    large.input = {4100, 4200};
+    large.prePadding = large.postPadding = {0, 0};
+    large.stride = {2, 2};
+    auto f = rowsFields();
+    f.sw = 2;
+    f.fr = 1; // one filter row a block: the 64-channel tile below fits the LDS
+    f.bc = 32;
+    f.wc = 1;
+    EXPECT_FALSE(admits(f, "gfx942", large)); // the image is past the range
+    f.pb = 1;
+    EXPECT_TRUE(admits(f, "gfx942", large));
+    f.bc = 64; // 64 channel planes: 2.2 GB
+    f.wc = 2;
+    EXPECT_FALSE(admits(f, "gfx942", large));
+    // Each channel plane within the range, and channels-first only.
+    auto cl = large;
+    cl.channelsLast = true;
+    f.bc = 32;
+    f.wc = 1;
+    f.layout = 1;
+    EXPECT_FALSE(admits(f, "gfx942", cl));
+    f.layout = 0;
+    auto plane = large;
+    plane.c = 2;
+    plane.input = {33000, 33000}; // one 2.2 GB channel plane
+    EXPECT_FALSE(admits(f, "gfx942", plane));
+    // The K3Tiles loops only: packed rows (loop 7) stage their own units. 72 channels of
+    // 1100000 x 14 (2.2 GB, wo 14), 32 x 32 tiles whose planes fit.
+    auto narrow14 = baseShape();
+    narrow14.c = 72;
+    narrow14.input = {1100000, 14};
+    auto p = packedFields();
+    p.bk = p.bc = 32;
+    p.wk = p.wc = 1;
+    EXPECT_FALSE(admits(p, "gfx942", narrow14));
+    p.pb = 1;
+    EXPECT_FALSE(admits(p, "gfx942", narrow14));
+    p.loop = 0; // the same tile on the output rows
+    p.fr = 3;
+    EXPECT_TRUE(admits(p, "gfx942", narrow14));
+    // The dy window: 64 channels of 1100000 x 16 rows (2.25 GB) past it, 32 within.
+    auto narrow = baseShape();
+    narrow.c = 64;
+    narrow.input = {1100000, 16};
+    auto rows = rowsFields();
+    rows.bc = 32;
+    rows.wc = 1;
+    rows.pb = 1;
+    EXPECT_FALSE(admits(rows, "gfx942", narrow)); // 64 dy channel planes: 2.25 GB
+    rows.bk = 32;
+    rows.wk = 1;
+    EXPECT_TRUE(admits(rows, "gfx942", narrow));
 }
 
 TEST(TestConvWrwKernelMatch, PackedRowsServeNarrowChannelsFirstOutputsOnly)
@@ -2244,6 +2312,13 @@ TEST(TestConvWrwDefines, EveryFieldIsADefine)
     EXPECT_EQ(fma[0], (std::pair<std::string, std::string>{"CONV_K3_T", "float"}));
     EXPECT_EQ(fma[1], (std::pair<std::string, std::string>{"CONV_K3_LOOP", "3"}));
     EXPECT_EQ(fma[12], (std::pair<std::string, std::string>{"CONV_K3_TK", "4"}));
+    // Block-based buffers: CONV_K3_PB is defined only when set.
+    auto pb = rowsFields();
+    pb.pb = 1;
+    const auto blocks
+        = conv_wrw::compileDefinesFor(DataType::HALF, configOf(pb), "K1AtomMfma32F16");
+    ASSERT_EQ(blocks.size(), 22u);
+    EXPECT_EQ(blocks[21], (std::pair<std::string, std::string>{"CONV_K3_PB", "1"}));
     EXPECT_THROW(static_cast<void>(conv_wrw::compileDefinesFor(DataType::DOUBLE, configOf(f), "")),
                  std::invalid_argument);
 }

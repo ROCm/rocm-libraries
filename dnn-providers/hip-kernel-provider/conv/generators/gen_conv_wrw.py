@@ -106,6 +106,7 @@ INTS = [
     "bpu",
     "wq",
     "dws",
+    "pb",
 ]
 STRINGS = ["direction", "dtype", "atom"]
 FIELDS = STRINGS + INTS
@@ -504,6 +505,15 @@ EXTRA_TILES = {
     # Channels-last 1x1 on the output rows, measured (bf16) on gfx1201 and gfx1101: the wide
     # tile for most maps, the 64 x 128 one for sdxl c960 k320 192^2.
     ("wmma", ("1x1clr0",)): [(128, 128, 4, 2, 32), (64, 128, 2, 4, 32)],
+    # 5x5x5 3-D (N1 c16-c64, 128^3-132^3), measured on gfx950 and gfx1201 (fp32 / bf16).
+    ("mfma32x16", ("5x5s2r1",)): [(64, 64, 2, 2, 32)],
+    ("mfma32_f16", ("5x5s2r1",)): [(64, 64, 2, 2, 32)],
+    ("mfma32_bf16", ("5x5s2r1",)): [(64, 64, 2, 2, 32)],
+    ("mfma32_f32", ("5x5s2r1",)): [(64, 64, 2, 2, 16)],
+    ("mfma16_f32", ("5x5s2r1", "5x5f")): [(32, 32, 2, 2, 32)],
+    ("wmma", ("5x5s2r1",)): [(64, 32, 4, 2, 32)],
+    ("fma", ("5x5s2r1",)): [(64, 64, 4, 4, 32)],
+    ("fma", ("5x5rf",)): [(64, 64, 4, 4, 32), (32, 64, 4, 4, 32)],
     # gfx942 and gfx90a (the 32 x 32 atom): the fastest tile per stride on both.
     ("mfma32_", ("3x3pk",)): [(128, 64, 4, 2, 64)],
     ("mfma32_", ("3x3s2pk",)): [(64, 64, 2, 2, 64)],
@@ -584,7 +594,15 @@ FILTERS = [
     ("3x3g32", 3, 1, 1, 3, 1, [], [0], [CF]),
     # Channels-last pointwise on RDNA's output rows (diffusion VAE / UNet 1x1; EXTRA_TILES).
     ("1x1clr0", 1, 1, 1, 1, 0, [], [0], [CL]),
+    # 5-wide filters (3-D 5x5x5 volumes, AIPYTORCH-1356; EXTRA_TILES): stride 2 on the output
+    # rows (every dtype), fp32 on the 16 x 16 fp32 ring (5x5f) and the FMA rows (5x5rf).
+    ("5x5s2r1", 5, 2, 1, 1, 0, [], [0], [CF]),
+    ("5x5f", 5, 1, 1, 5, 1, [], [0], [CF]),
+    ("5x5rf", 5, 1, 1, 1, 0, [], [0], [CF]),
 ]
+# fp32-only rows; and the rows with no gfx906 (FMA) configs.
+FLOAT_ONLY = {"5x5f", "5x5rf"}
+NO_FMA906 = FLOAT_ONLY | {"5x5s2r1"}
 # Rows measured on the 16-bit matrix atoms only: no fp32 or FMA (gfx906) configs.
 MATRIX16_ONLY = {
     "7x1",
@@ -634,7 +652,7 @@ FAMILIES = [
         1,
         [CF, CL],
         [],
-        {"3x3", "3x3d2", "1x1", "1x7", "1x11", "3x3s2r1", "2x2s2r1"},
+        {"3x3", "3x3d2", "1x1", "1x7", "1x11", "3x3s2r1", "2x2s2r1", "5x5s2r1", "5x5f"},
     ),
     ({"BFLOAT16": "mfma32_bf16_908"}, CDNA16, 0, [CF, CL], [], BASE),
     ({"HALF": "wmma11_f16", "BFLOAT16": "wmma11_bf16"}, RDNA16, 0, [CF, CL], [], None),
@@ -676,7 +694,7 @@ def C(atom, loop, layout, tile, s, sw, dw, fr, vec, xcd, align, ns):
         bpu=0,
         wq=0,
     )
-    return dict(c, dws=dws_of(c))
+    return dict(c, dws=dws_of(c), pb=0)
 
 
 def D(atom, tile, s, dw, fr, ns):
@@ -705,6 +723,7 @@ def D(atom, tile, s, dw, fr, ns):
         bpu=1,
         wq=wq,
         dws=0,
+        pb=0,
     )
 
 
@@ -833,7 +852,11 @@ SMALLC_FILTERS = [
     ("7x7s2r1", 7, 2, 1),
     ("3x3s2", 3, 2, 3),
     ("3x3", 3, 1, 3),
+    ("5x5", 5, 1, 5),
 ]
+# 5x5 small-C rows (3-D 5x5x5 with 16 input channels, AIPYTORCH-1356): 16-bit, channels-first,
+# the tile measured best per atom family (gfx950: 32 x 4 at 64 positions; gfx1201: 64 x 8 at 32).
+SMALLC_5X5_TILES = {"mfma": [(32, 4, 2, 64)], "wmma": [(64, 8, 4, 32)]}
 
 
 def build_smallc():
@@ -844,6 +867,10 @@ def build_smallc():
             for tag, s, sw, fr in SMALLC_FILTERS:
                 for lay in (CF, CL):
                     tiles = SMALLC_TILES + (SMALLC_TILES_CL if lay == CL else [])
+                    if tag == "5x5":
+                        if dtype == "FLOAT" or lay != CF:
+                            continue
+                        tiles = SMALLC_5X5_TILES[atom[:4]]
                     for bk, bc, wk, bq in tiles:
                         c = C(
                             atom,
@@ -912,7 +939,7 @@ def build_fma906():
     for dtype in CATALOG906:
         vec = 16 // eb(dtype)
         for tag, s, sw, dw, fr, loop, idx, aligns, lays in FILTERS:
-            if tag in MATRIX16_ONLY:
+            if tag in MATRIX16_ONLY or tag in NO_FMA906:
                 continue
             # fp32 already has FMA32's tiles (and FMA_TILES) in the shared FMA pack.
             tiles = [] if dtype == "FLOAT" else FMA_TILES.get(tag, FMA32)
@@ -992,8 +1019,32 @@ def build_fmardna():
     return dropped
 
 
+# Block-based buffers (pb 1): channels-first images past the 32-bit buffer range (3-D
+# ConvTranspose3d / volumes of 64 channels at 257^3). A block's bc x channel planes must fit the
+# range, so the tiles take 32 (16-bit) or 16 (fp32) input channels. Measured on 257^3 3x3x3
+# stride 2 (gfx950 / gfx1201): (atom, loop, filter rows, tile).
+PB_CONFIGS = [
+    ({"HALF": "mfma32x16_f16", "BFLOAT16": "mfma32x16_bf16"}, 1, 3, (64, 32, 2, 1, 32)),
+    ({"FLOAT": "mfma16_f32"}, 1, 1, (32, 16, 2, 1, 64)),
+    ({"HALF": "wmma12_f16", "BFLOAT16": "wmma12_bf16"}, 0, 3, (64, 32, 4, 2, 32)),
+    ({"HALF": "wmma11_f16", "BFLOAT16": "wmma11_bf16"}, 0, 3, (64, 32, 4, 2, 32)),
+]
+
+
+def build_pb():
+    dropped = 0
+    for atoms, xcd, fr, tile in PB_CONFIGS:
+        for dtype, atom in atoms.items():
+            c = C(atom, 0, CF, tile, 3, 2, 1, fr, 16 // eb(dtype), xcd, 0, 0)
+            if valid(c, dtype):
+                CATALOG[dtype].extend(dict(x, pb=1) for x in with_bpu(c))
+            else:
+                dropped += 1
+    return dropped
+
+
 def build():
-    dropped = build_direct() + build_unaligned_k() + build_smallc()
+    dropped = build_direct() + build_unaligned_k() + build_smallc() + build_pb()
     for atoms, tiles, xcd, layouts, loop2, only in FAMILIES:
         for dtype, atom in atoms.items():
             vec = 16 // eb(dtype)
@@ -1001,6 +1052,8 @@ def build():
                 if only is not None and tag not in only:
                     continue
                 if tag in MATRIX16_ONLY and dtype == "FLOAT":
+                    continue
+                if tag in FLOAT_ONLY and dtype != "FLOAT":
                     continue
                 picked = (
                     tiles
@@ -1148,9 +1201,14 @@ def emit():
         packs = {}
         # The gfx906 and RDNA FMA configs follow the dtype's list, in their own packs that
         # list only those archs.
+        # The gfx906 list splits in two packs (fma906, fma906b) under the size cap.
+        half906 = (len(CATALOG906[dtype]) + 1) // 2
         tagged = (
             [(c, family_of(c)) for c in cfgs]
-            + [(c, "fma906") for c in CATALOG906[dtype]]
+            + [
+                (c, "fma906" if j < half906 else "fma906b")
+                for j, c in enumerate(CATALOG906[dtype])
+            ]
             + [(c, "fmardna") for c in CATALOGRDNA.get(dtype, [])]
         )
         for i, (c, fam) in enumerate(tagged):
@@ -1167,6 +1225,7 @@ def emit():
                 f"conv_wrw.{dt}.{c['atom']}.l{c['loop']}.{lay}.{c['bk']}x{c['bc']}x{c['bq']}"
                 f".{thr}.fr{c['fr']}s{c['s']}sw{c['sw']}dw{c['dw']}"
                 f".v{c['vec']}.x{c['xcd']}a{c['align']}n{c['ns']}b{c['bpu']}"
+                + (".pb" if c["pb"] else "")
             )
             pack.append(
                 {
@@ -1191,6 +1250,7 @@ def emit():
                     "name": f"hipkernel:conv_wrw_{dt}_{fam}",
                     "arch": {
                         "fma906": FMA906_ARCHS,
+                        "fma906b": FMA906_ARCHS,
                         "fmardna": FMARDNA_ARCHS,
                         "cdnapk": CDNA[:3],
                     }.get(fam, []),

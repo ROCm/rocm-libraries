@@ -131,6 +131,10 @@ struct WrwConfig
     /// 1: the epilogue also writes dw itself, used at one split into K T R S C or one tap
     /// (CONV_K3_DWS); 0: fp32 partials only, as compiled before the direct store. 0 for loop 5.
     int64_t dws = 0;
+    /// 1: block-based buffers (CONV_K3_PB): channels-first K3Tiles loops (0, 1, 6) whose x and
+    /// dy buffers start at the block's first channel, for images past the 32-bit buffer range;
+    /// admitted only there. 0 elsewhere.
+    int64_t pb = 0;
     /// The split planner's target blocks per dispatch unit (1, 2, 4 or 8; 1 for loop 5, whose
     /// persistent grid has one workgroup per unit; 8 for small FMA blocks): host-side only.
     int64_t bpu = 0;
@@ -152,6 +156,9 @@ struct WrwProblem
     bool filterChannelsLast = false;
     /// Filter taps (ft fr fs).
     int64_t taps = 0;
+    /// One image of x or of dy is past the 32-bit buffer range (channels-first only, each
+    /// channel plane within it): only block-based buffer configs (pb 1) serve it.
+    bool largeImage = false;
 };
 
 /**

@@ -178,13 +178,21 @@ std::optional<WrwProblem> parseWrwProblem(const hipdnn_plugin_sdk::ingestor::Mat
     {
         return std::nullopt;
     }
-    // One image of x and of dy is one 32-bit-addressed buffer.
+    // One image of x and of dy is one 32-bit-addressed buffer; or (channels-first, block-based
+    // buffers) each channel plane is, and a block's buffers span its channel planes.
     const auto xImage
         = pack_features::checkedProduct({a.c, a.inSpatial[0], a.inSpatial[1], a.inSpatial[2]});
     const auto yImage
         = pack_features::checkedProduct({a.k, a.outSpatial[0], a.outSpatial[1], a.outSpatial[2]});
-    if(!xImage.has_value() || !yImage.has_value() || *xImage > INT_LIMIT / elementBytes
-       || *yImage > INT_LIMIT / elementBytes)
+    if(!xImage.has_value() || !yImage.has_value())
+    {
+        return std::nullopt;
+    }
+    const bool largeImage
+        = *xImage > INT_LIMIT / elementBytes || *yImage > INT_LIMIT / elementBytes;
+    if(largeImage
+       && (!channelsFirst || *xImage / std::max<int64_t>(a.c, 1) > INT_LIMIT / elementBytes
+           || *yImage / std::max<int64_t>(a.k, 1) > INT_LIMIT / elementBytes))
     {
         return std::nullopt;
     }
@@ -194,6 +202,7 @@ std::optional<WrwProblem> parseWrwProblem(const hipdnn_plugin_sdk::ingestor::Mat
     problem.channelsLast = channelsLast;
     problem.filterChannelsLast = !filterChannelsFirst;
     problem.taps = *taps;
+    problem.largeImage = largeImage;
     problem.xUid = base->operands.x;
     problem.dyUid = base->operands.y;
     problem.dwUid = base->operands.w;
@@ -572,6 +581,27 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         return std::nullopt;
     }
+    // Block-based buffers: exactly the graphs whose image is past the 32-bit buffer range (the
+    // parse admits those channels-first only), on the K3Tiles loops, with a block's bk dy and
+    // bc x channel planes within it.
+    if(config.pb != 0 && config.pb != 1)
+    {
+        return std::nullopt;
+    }
+    if(problem.largeImage != (config.pb == 1))
+    {
+        return std::nullopt;
+    }
+    if(config.pb == 1)
+    {
+        const int64_t xPlane = a.inSpatial[0] * a.inSpatial[1] * a.inSpatial[2];
+        const int64_t yPlane = a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2];
+        if((config.loop != LOOP_ROWS && config.loop != LOOP_RING && config.loop != LOOP_ROWS_SMALLC)
+           || config.bc * xPlane > INT_LIMIT / eb || config.bk * yPlane > INT_LIMIT / eb)
+        {
+            return std::nullopt;
+        }
+    }
     if(direct)
     {
         threads = 8 * info->wave;
@@ -928,6 +958,11 @@ std::vector<std::pair<std::string, std::string>> compileDefinesFor(data_objects:
     for(const auto& [name, value] : fields)
     {
         defines.emplace_back(std::string("CONV_K3_") + name, std::to_string(value));
+    }
+    // Defined only when set, so every other config compiles as before.
+    if(config.pb != 0)
+    {
+        defines.emplace_back("CONV_K3_PB", std::to_string(config.pb));
     }
     return defines;
 }

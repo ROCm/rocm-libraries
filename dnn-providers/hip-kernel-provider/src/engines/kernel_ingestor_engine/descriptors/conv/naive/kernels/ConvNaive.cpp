@@ -205,19 +205,28 @@ extern "C" __global__ void ConvNaiveBwd(ConvNaiveArgs args)
     }
 }
 
+/// The backward-weights block: CONV_NAIVE_WRW_BLOCK threads share one dw element's reduction.
+#define CONV_NAIVE_WRW_BLOCK 256
+
 /// dw[k, c, f] = sum over n and every output position o of x[n, c', o * stride - pad + t * dil]
 /// times dy[n, k, o], where c' is c's channel within k's group and t is the tap that reads
-/// filter element f. One thread per dw element.
-extern "C" __global__ void ConvNaiveWrw(ConvNaiveArgs args)
+/// filter element f. One block per dw element: thread j sums the output positions (n, o) whose
+/// flat index is j modulo the block, then the block adds the threads' sums in a fixed tree, so
+/// the result is deterministic and a long reduction spreads over the block's lanes.
+extern "C" __global__ void __launch_bounds__(CONV_NAIVE_WRW_BLOCK) ConvNaiveWrw(ConvNaiveArgs args)
 {
     const auto* x = static_cast<const ElementType*>(args.x);
     auto* dw = static_cast<ElementType*>(args.w);
     const auto* dy = static_cast<const ElementType*>(args.y);
+    __shared__ float sums[CONV_NAIVE_WRW_BLOCK];
 
     const long long cPerGroup = args.c / args.groups;
     const long long kPerGroup = args.k / args.groups;
+    const long long positions
+        = args.n * args.outSpatial[0] * args.outSpatial[1] * args.outSpatial[2];
+    const int lane = static_cast<int>(threadIdx.x);
 
-    for(long long index = firstThread(); index < args.total; index += threadStride())
+    for(long long index = blockIdx.x; index < args.total; index += gridDim.x)
     {
         long long rest = index;
         const long long fw = rest % args.filter[2];
@@ -236,47 +245,50 @@ extern "C" __global__ void ConvNaiveWrw(ConvNaiveArgs args)
         const long long tw = filterIndex(args, 2, fw);
 
         float accumulator = 0.0f;
-        for(long long n = 0; n < args.n; ++n)
+        for(long long p = lane; p < positions; p += CONV_NAIVE_WRW_BLOCK)
         {
-            const long long xChannel = n * args.xStrides[0] + c * args.xStrides[1];
-            const long long dyChannel = n * args.yStrides[0] + k * args.yStrides[1];
-            for(long long od = 0; od < args.outSpatial[0]; ++od)
+            long long at = p;
+            const long long ow = at % args.outSpatial[2];
+            at /= args.outSpatial[2];
+            const long long oh = at % args.outSpatial[1];
+            at /= args.outSpatial[1];
+            const long long od = at % args.outSpatial[0];
+            const long long n = at / args.outSpatial[0];
+            const long long id = od * args.stride[0] - args.prePadding[0] + td * args.dilation[0];
+            const long long ih = oh * args.stride[1] - args.prePadding[1] + th * args.dilation[1];
+            const long long iw = ow * args.stride[2] - args.prePadding[2] + tw * args.dilation[2];
+            if(id < 0 || id >= args.inSpatial[0] || ih < 0 || ih >= args.inSpatial[1] || iw < 0
+               || iw >= args.inSpatial[2])
             {
-                const long long id
-                    = od * args.stride[0] - args.prePadding[0] + td * args.dilation[0];
-                if(id < 0 || id >= args.inSpatial[0])
-                {
-                    continue;
-                }
-                for(long long oh = 0; oh < args.outSpatial[1]; ++oh)
-                {
-                    const long long ih
-                        = oh * args.stride[1] - args.prePadding[1] + th * args.dilation[1];
-                    if(ih < 0 || ih >= args.inSpatial[1])
-                    {
-                        continue;
-                    }
-                    for(long long ow = 0; ow < args.outSpatial[2]; ++ow)
-                    {
-                        const long long iw
-                            = ow * args.stride[2] - args.prePadding[2] + tw * args.dilation[2];
-                        if(iw < 0 || iw >= args.inSpatial[2])
-                        {
-                            continue;
-                        }
-                        const long long xOffset = xChannel + id * args.xStrides[2]
-                                                  + ih * args.xStrides[3] + iw * args.xStrides[4];
-                        const long long dyOffset = dyChannel + od * args.yStrides[2]
-                                                   + oh * args.yStrides[3] + ow * args.yStrides[4];
-                        accumulator += load(x, xOffset) * load(dy, dyOffset);
-                    }
-                }
+                continue;
             }
+            const long long xOffset = n * args.xStrides[0] + c * args.xStrides[1]
+                                      + id * args.xStrides[2] + ih * args.xStrides[3]
+                                      + iw * args.xStrides[4];
+            const long long dyOffset = n * args.yStrides[0] + k * args.yStrides[1]
+                                       + od * args.yStrides[2] + oh * args.yStrides[3]
+                                       + ow * args.yStrides[4];
+            accumulator += load(x, xOffset) * load(dy, dyOffset);
         }
 
-        store(dw,
-              k * args.wStrides[0] + localChannel * args.wStrides[1] + fd * args.wStrides[2]
-                  + fh * args.wStrides[3] + fw * args.wStrides[4],
-              accumulator);
+        // The threads' sums in a fixed tree: lane j adds lane j + half at each level.
+        sums[lane] = accumulator;
+        __syncthreads();
+        for(int half = CONV_NAIVE_WRW_BLOCK / 2; half > 0; half /= 2)
+        {
+            if(lane < half)
+            {
+                sums[lane] += sums[lane + half];
+            }
+            __syncthreads();
+        }
+        if(lane == 0)
+        {
+            store(dw,
+                  k * args.wStrides[0] + localChannel * args.wStrides[1] + fd * args.wStrides[2]
+                      + fh * args.wStrides[3] + fw * args.wStrides[4],
+                  sums[0]);
+        }
+        __syncthreads(); // sums is reused by the block's next element
     }
 }
