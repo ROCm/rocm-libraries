@@ -32,6 +32,19 @@ use crate::error::CompileError;
 /// Marks a placeholder spill access (and the LDS address computation).
 const M_SPILL: u32 = 1 << 31;
 
+#[cfg(test)]
+thread_local! {
+    /// Tests: place every spill with `share_slots`.
+    static FORCE_SHARE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn force_share() -> bool {
+    #[cfg(test)]
+    return FORCE_SHARE.with(|c| c.get());
+    #[cfg(not(test))]
+    false
+}
+
 /// Where spill slots may go.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct SpillConfig {
@@ -1014,6 +1027,105 @@ impl Spiller {
         }
     }
 
+    /// The live range of each web's slots, in instruction positions of `f` (placeholder accesses only): from the
+    /// first access to the last. A web whose accesses all sit in one block that starts with a store is
+    /// iteration-local, so its range is exact even in a loop block; any other web may be live across a back edge,
+    /// and its range grows to the blocks of the loops it touches.
+    fn web_ranges(&self, f: &MFunc) -> Vec<(u32, u32)> {
+        let mut web_of = vec![u32::MAX; self.next_slot as usize];
+        for (w, web) in self.webs.iter().enumerate() {
+            for k in 0..web.size {
+                web_of[(web.slot + k) as usize] = w as u32;
+            }
+        }
+        let mut start = Vec::with_capacity(f.blocks.len() + 1);
+        let mut pos = 0u32;
+        for block in &f.blocks {
+            start.push(pos);
+            pos += block.insts.len() as u32;
+        }
+        start.push(pos);
+        // Per web: (first position, last position, first block, last block, a block other than the first, first access is a store).
+        let mut acc: Vec<Option<(u32, u32, usize, usize, bool, bool)>> = vec![None; self.webs.len()];
+        for (b, block) in f.blocks.iter().enumerate() {
+            for (i, inst) in block.insts.iter().enumerate() {
+                if inst.mods & M_SPILL == 0 || inst.op == Opc::VLshlrevB32 {
+                    continue;
+                }
+                let w = web_of[inst.imm as usize] as usize;
+                let at = start[b] + i as u32;
+                let store = inst.defs.is_empty();
+                acc[w] = Some(match acc[w] {
+                    None => (at, at, b, b, false, store),
+                    Some((lo, _, fb, _, multi, fs)) => (lo, at, fb, b, multi || b != fb, fs),
+                });
+            }
+        }
+        let depth = |b: usize| f.blocks[b].loop_depth;
+        acc.into_iter()
+            .map(|a| match a {
+                None => (0, 0),
+                Some((lo, hi, _, _, false, true)) => (lo, hi),
+                Some((_, _, fb, lb, _, _)) => {
+                    let (mut a, mut b) = (fb, lb);
+                    while depth(a) > 0 && a > 0 && depth(a - 1) > 0 {
+                        a -= 1;
+                    }
+                    while depth(b) > 0 && b + 1 < f.blocks.len() && depth(b + 1) > 0 {
+                        b += 1;
+                    }
+                    (start[a], start[b + 1])
+                }
+            })
+            .collect()
+    }
+
+    /// `finish`'s placement with webs whose live ranges are disjoint sharing slots: AGPR slots, then LDS slots,
+    /// then scratch, each web at the lowest slot where its range overlaps no other web's. Returns (placement,
+    /// AGPR slot of each dword slot, AGPR slots used, LDS slots used, scratch dwords used).
+    #[allow(clippy::type_complexity)]
+    fn share_slots(&self, f: &MFunc, order: &[usize]) -> (Vec<(bool, u32)>, Vec<Option<u32>>, u32, u32, u32) {
+        let ranges = self.web_ranges(f);
+        // A tier: the live ranges already placed at each of its slots.
+        let fit = |tier: &mut Vec<Vec<(u32, u32)>>, cap: u32, size: u32, (lo, hi): (u32, u32)| -> Option<u32> {
+            let free = |s: &Vec<(u32, u32)>| s.iter().all(|&(a, b)| hi < a || b < lo);
+            let mut at = 0u32;
+            while at + size <= cap {
+                match (0..size).find(|&k| tier.get((at + k) as usize).is_some_and(|s| !free(s))) {
+                    None => {
+                        if tier.len() < (at + size) as usize {
+                            tier.resize((at + size) as usize, Vec::new());
+                        }
+                        for k in 0..size {
+                            tier[(at + k) as usize].push((lo, hi));
+                        }
+                        return Some(at);
+                    }
+                    Some(k) => at += k + 1,
+                }
+            }
+            None
+        };
+        let lds_cap = if self.addr.is_some() { self.cfg.lds_slots } else { 0 };
+        let (mut agpr_t, mut lds_t, mut scratch_t) = (Vec::new(), Vec::new(), Vec::new());
+        let mut place: Vec<(bool, u32)> = vec![(false, 0); self.next_slot as usize];
+        let mut in_agpr: Vec<Option<u32>> = vec![None; self.next_slot as usize];
+        for &w in order {
+            let web = &self.webs[w];
+            let r = ranges[w];
+            if let Some(at) = fit(&mut agpr_t, self.cfg.agpr_slots, web.size, r) {
+                (0..web.size).for_each(|k| in_agpr[(web.slot + k) as usize] = Some(at + k));
+            } else if let Some(at) = fit(&mut lds_t, lds_cap, web.size, r) {
+                (0..web.size).for_each(|k| place[(web.slot + k) as usize] = (true, at + k));
+            } else {
+                // Past the offset range the caller refuses it.
+                let at = fit(&mut scratch_t, u32::MAX / 2, web.size, r).expect("scratch is unbounded");
+                (0..web.size).for_each(|k| place[(web.slot + k) as usize] = (false, at + k));
+            }
+        }
+        (place, in_agpr, agpr_t.len() as u32, lds_t.len() as u32, scratch_t.len() as u32)
+    }
+
     /// Finishes the allocated function: VGPR placeholders become LDS or
     /// scratch accesses (the most accessed webs take the LDS slots), and
     /// lane writes drop the liveness-only source.
@@ -1044,6 +1156,12 @@ impl Spiller {
             } else {
                 scratch += web.size;
             }
+        }
+        if scratch * 4 > 4096 || force_share() {
+            // One slot per web does not fit the scratch offset range: webs whose slots are never live at once
+            // share one (hottest webs still take AGPR, then LDS, slots first).
+            let shared = self.share_slots(f, &order);
+            (place, in_agpr, agprs, lds, scratch) = shared;
         }
         if scratch * 4 > 4096 {
             return Err(CompileError::new(
@@ -1347,6 +1465,32 @@ pub(super) mod tests {
         }
         // Every kind of spill took part.
         assert!(total.remat > 0 && total.lds_dwords > 0 && total.scratch_dwords > 0 && total.sgpr_dwords > 0, "{total:?}");
+    }
+
+    /// Webs whose slots are never live at once share them, and the code still computes the same values.
+    #[test]
+    fn shared_slots_compute_the_same_values() {
+        let (mut plain, mut shared) = (0, 0);
+        for (seed, nv, ns, lds_slots) in [(1, 60, 30, 0), (2, 80, 40, 8), (3, 120, 12, 64), (4, 40, 70, 4), (5, 90, 20, 0)] {
+            let f = random_kernel(seed, nv, ns);
+            let want = effects(&f, 3);
+            let limits = regalloc::Limits { vgprs: 24, sgprs: 20 };
+            let cfg = SpillConfig { lds_size: 256, wg_size: 32, lds_slots, agpr_slots: 0 };
+            let mut base = f.clone();
+            let a = regalloc::allocate_spilling(&mut base, limits, cfg).expect("allocates");
+            FORCE_SHARE.with(|c| c.set(true));
+            let mut g = f.clone();
+            let b = regalloc::allocate_spilling(&mut g, limits, cfg);
+            FORCE_SHARE.with(|c| c.set(false));
+            let b = b.expect("allocates");
+            assert!(b.spill.lds_dwords <= lds_slots, "{b:?}");
+            assert!(b.spill.scratch_dwords + b.spill.lds_dwords <= a.spill.scratch_dwords + a.spill.lds_dwords + 4, "{a:?} {b:?}");
+            assert_eq!(effects(&g, 3), want, "seed {seed}: {b:?}");
+            assert!(g.blocks.iter().flat_map(|b| &b.insts).all(|i| i.mods & M_SPILL == 0));
+            plain += a.spill.scratch_dwords + a.spill.lds_dwords;
+            shared += b.spill.scratch_dwords + b.spill.lds_dwords;
+        }
+        assert!(shared <= plain, "sharing needs more slots: {shared} vs {plain}");
     }
 
     /// gfx950: the hottest webs take AGPR slots before LDS and scratch, and

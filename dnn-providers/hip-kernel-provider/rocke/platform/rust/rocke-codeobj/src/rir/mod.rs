@@ -1568,16 +1568,25 @@ fn complete(
             pairs
         }
     };
+    let mut alloc = alloc;
+    // gfx950: a branch past the 16-bit word offset jumps through the first SGPR pair no instruction uses.
+    let spare = alloc.num_sgprs.next_multiple_of(2) as u16;
+    let (body, relaxed) = match target {
+        Target::Gfx1151 => (asm::assemble(&sel.func)?, false),
+        Target::Gfx950 => crate::target::gfx9::asm::assemble_relaxed(&sel.func, Some(spare))?,
+    };
+    if relaxed {
+        alloc.num_sgprs = spare as u32 + 2;
+    }
     let code = match target {
-        Target::Gfx1151 => asm::assemble(&sel.func)?,
         // Kernarg preload: the 256-byte entry that loads the preloaded
         // arguments for firmware that does not preload (which skips it).
         Target::Gfx950 if sel.preload > 0 => {
             let mut code = crate::target::gfx9::preload_entry(sel.preload)?;
-            code.extend(crate::target::gfx9::asm::assemble(&sel.func)?);
+            code.extend(body);
             code
         }
-        Target::Gfx950 => crate::target::gfx9::asm::assemble(&sel.func)?,
+        _ => body,
     };
     laps.lap("encode");
 
