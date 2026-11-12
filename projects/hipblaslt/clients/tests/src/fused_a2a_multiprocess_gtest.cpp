@@ -203,10 +203,10 @@ namespace hipblaslt_bench
         {
             const uint32_t slice = i % kRecvSlices;
             const bool     sliced
-                = hipblasLtFusedEpilogueSetAttribute(res.fused,
-                                                     HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS,
-                                                     res.recvPtrs[slice],
-                                                     arg.a2a_world * sizeof(res.recvPtrs[slice][0]))
+                = hipblasLtFusionSetAttribute(res.fused,
+                                              HIPBLASLT_FUSION_A2A_RECV_PTRS,
+                                              res.recvPtrs[slice],
+                                              arg.a2a_world * sizeof(res.recvPtrs[slice][0]))
                   == HIPBLAS_STATUS_SUCCESS;
 
             launch(int64_t(i));

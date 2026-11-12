@@ -138,81 +138,74 @@ namespace
     protected:
         void SetUp() override
         {
-            ASSERT_EQ(hipblasLtFusedEpilogueCreate(&fused), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtFusionCreate(&fused), HIPBLAS_STATUS_SUCCESS);
             ASSERT_NE(fused, nullptr);
         }
 
         void TearDown() override
         {
             if(fused)
-                EXPECT_EQ(hipblasLtFusedEpilogueDestroy(fused), HIPBLAS_STATUS_SUCCESS);
+                EXPECT_EQ(hipblasLtFusionDestroy(fused), HIPBLAS_STATUS_SUCCESS);
         }
 
         hipblasStatus_t addA2A()
         {
-            return hipblasLtFusedEpilogueAdd(fused, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX);
+            return hipblasLtFusionAddEpilogue(fused, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX);
         }
 
         hipblasStatus_t setExtent(int64_t am)
         {
-            return hipblasLtFusedEpilogueSetAttribute(
-                fused, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT, &am, sizeof(am));
+            return hipblasLtFusionSetAttribute(fused, HIPBLASLT_FUSION_A2A_EXTENT, &am, sizeof(am));
         }
 
         hipblasStatus_t setRecvPtrs(const std::vector<void*>& ptrs)
         {
-            return hipblasLtFusedEpilogueSetAttribute(fused,
-                                                      HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS,
-                                                      ptrs.data(),
-                                                      ptrs.size() * sizeof(void*));
+            return hipblasLtFusionSetAttribute(
+                fused, HIPBLASLT_FUSION_A2A_RECV_PTRS, ptrs.data(), ptrs.size() * sizeof(void*));
         }
 
         hipblasStatus_t setQueues(const std::vector<hipblasLtSdmaQueue_t>& queues)
         {
-            return hipblasLtFusedEpilogueSetAttribute(
-                fused,
-                HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES,
-                queues.data(),
-                queues.size() * sizeof(hipblasLtSdmaQueue_t));
+            return hipblasLtFusionSetAttribute(fused,
+                                               HIPBLASLT_FUSION_A2A_SDMA_QUEUES,
+                                               queues.data(),
+                                               queues.size() * sizeof(hipblasLtSdmaQueue_t));
         }
 
         hipblasStatus_t addPrologue()
         {
-            return hipblasLtFusedPrologueAdd(fused, HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX);
+            return hipblasLtFusionAddPrologue(fused, HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX);
         }
 
         hipblasStatus_t setPeerBPtrs(const std::vector<void*>& ptrs)
         {
-            return hipblasLtFusedEpilogueSetAttribute(
-                fused,
-                HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_PEER_B_PTRS,
-                ptrs.data(),
-                ptrs.size() * sizeof(void*));
+            return hipblasLtFusionSetAttribute(
+                fused, HIPBLASLT_FUSION_A2A_PEER_B_PTRS, ptrs.data(), ptrs.size() * sizeof(void*));
         }
 
         hipblasStatus_t setGatherBuffer(uintptr_t address)
         {
             void* buffer = reinterpret_cast<void*>(address);
-            return hipblasLtFusedEpilogueSetAttribute(
-                fused, HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_GATHER_BUFFER, &buffer, sizeof(buffer));
+            return hipblasLtFusionSetAttribute(
+                fused, HIPBLASLT_FUSION_A2A_GATHER_BUFFER, &buffer, sizeof(buffer));
         }
 
-        hipblasLtFusedEpilogueDescriptor_t fused = nullptr;
+        hipblasLtFusionDescriptor_t fused = nullptr;
     };
 
     TEST(FusedA2ALifecycle_pre_checkin, CreateRejectsNullOut)
     {
-        EXPECT_EQ(hipblasLtFusedEpilogueCreate(nullptr), HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(hipblasLtFusionCreate(nullptr), HIPBLAS_STATUS_INVALID_VALUE);
     }
 
     TEST(FusedA2ALifecycle_pre_checkin, DestroyAcceptsNull)
     {
-        EXPECT_EQ(hipblasLtFusedEpilogueDestroy(nullptr), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(hipblasLtFusionDestroy(nullptr), HIPBLAS_STATUS_SUCCESS);
     }
 
     TEST(FusedA2ALifecycle_pre_checkin, AddRejectsNullDescriptor)
     {
-        EXPECT_EQ(hipblasLtFusedEpilogueAdd(nullptr, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX),
+        EXPECT_EQ(hipblasLtFusionAddEpilogue(nullptr, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX),
                   HIPBLAS_STATUS_INVALID_VALUE);
     }
 
@@ -223,7 +216,7 @@ namespace
 
     TEST_F(FusedA2ABuilder_pre_checkin, AddRejectsUnrecognizedStage)
     {
-        EXPECT_EQ(hipblasLtFusedEpilogueAdd(fused, static_cast<hipblasLtFuseableEpilogue_t>(4242)),
+        EXPECT_EQ(hipblasLtFusionAddEpilogue(fused, static_cast<hipblasLtFuseableEpilogue_t>(4242)),
                   HIPBLAS_STATUS_INVALID_VALUE);
     }
 
@@ -238,22 +231,19 @@ namespace
     TEST_F(FusedA2ABuilder_pre_checkin, SetAttributeRejectsNullArguments)
     {
         const int64_t am = 512;
-        EXPECT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                      nullptr, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT, &am, sizeof(am)),
-                  HIPBLAS_STATUS_INVALID_VALUE);
-        EXPECT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                      fused, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT, nullptr, sizeof(am)),
-                  HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(
+            hipblasLtFusionSetAttribute(nullptr, HIPBLASLT_FUSION_A2A_EXTENT, &am, sizeof(am)),
+            HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(
+            hipblasLtFusionSetAttribute(fused, HIPBLASLT_FUSION_A2A_EXTENT, nullptr, sizeof(am)),
+            HIPBLAS_STATUS_INVALID_VALUE);
     }
 
     TEST_F(FusedA2ABuilder_pre_checkin, SetAttributeRejectsUnknownAttribute)
     {
         const int64_t value = 1;
-        EXPECT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                      fused,
-                      static_cast<hipblasLtFusedEpilogueAttribute_t>(9999),
-                      &value,
-                      sizeof(value)),
+        EXPECT_EQ(hipblasLtFusionSetAttribute(
+                      fused, static_cast<hipblasLtFusionAttribute_t>(9999), &value, sizeof(value)),
                   HIPBLAS_STATUS_INVALID_VALUE);
     }
 
@@ -264,29 +254,23 @@ namespace
         EXPECT_EQ(setExtent(-8), HIPBLAS_STATUS_INVALID_VALUE);
 
         const int32_t narrow = 512;
-        EXPECT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                      fused, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT, &narrow, sizeof(narrow)),
+        EXPECT_EQ(hipblasLtFusionSetAttribute(
+                      fused, HIPBLASLT_FUSION_A2A_EXTENT, &narrow, sizeof(narrow)),
                   HIPBLAS_STATUS_INVALID_VALUE);
     }
 
     TEST_F(FusedA2ABuilder_pre_checkin, CompletionModeAcceptsInKernelOnly)
     {
         hipblasLtA2ACompletionMode_t mode = HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL;
-        EXPECT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                      fused,
-                      HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_COMPLETION_MODE,
-                      &mode,
-                      sizeof(mode)),
+        EXPECT_EQ(hipblasLtFusionSetAttribute(
+                      fused, HIPBLASLT_FUSION_A2A_COMPLETION_MODE, &mode, sizeof(mode)),
                   HIPBLAS_STATUS_SUCCESS);
 
         // Value 1 is reserved for the deferred mode, which ships with the
         // primitive a caller would wait on and not before it.
         mode = static_cast<hipblasLtA2ACompletionMode_t>(1);
-        EXPECT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                      fused,
-                      HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_COMPLETION_MODE,
-                      &mode,
-                      sizeof(mode)),
+        EXPECT_EQ(hipblasLtFusionSetAttribute(
+                      fused, HIPBLASLT_FUSION_A2A_COMPLETION_MODE, &mode, sizeof(mode)),
                   HIPBLAS_STATUS_INVALID_VALUE);
     }
 
@@ -296,13 +280,10 @@ namespace
         EXPECT_EQ(setQueues({fakeQueue(0x2000)}), HIPBLAS_STATUS_SUCCESS);
 
         void* one = reinterpret_cast<void*>(0x1000);
-        EXPECT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                      fused, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS, &one, 0),
+        EXPECT_EQ(hipblasLtFusionSetAttribute(fused, HIPBLASLT_FUSION_A2A_RECV_PTRS, &one, 0),
                   HIPBLAS_STATUS_INVALID_VALUE);
-        EXPECT_EQ(hipblasLtFusedEpilogueSetAttribute(fused,
-                                                     HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS,
-                                                     &one,
-                                                     sizeof(void*) + 1),
+        EXPECT_EQ(hipblasLtFusionSetAttribute(
+                      fused, HIPBLASLT_FUSION_A2A_RECV_PTRS, &one, sizeof(void*) + 1),
                   HIPBLAS_STATUS_INVALID_VALUE);
     }
 
@@ -319,7 +300,7 @@ namespace
 
     TEST(FusedA2ALifecycle_pre_checkin, PrologueAddRejectsNullDescriptor)
     {
-        EXPECT_EQ(hipblasLtFusedPrologueAdd(nullptr, HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX),
+        EXPECT_EQ(hipblasLtFusionAddPrologue(nullptr, HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX),
                   HIPBLAS_STATUS_INVALID_VALUE);
     }
 
@@ -330,7 +311,7 @@ namespace
 
     TEST_F(FusedA2ABuilder_pre_checkin, PrologueAddRejectsUnrecognizedStage)
     {
-        EXPECT_EQ(hipblasLtFusedPrologueAdd(fused, static_cast<hipblasLtFuseablePrologue_t>(4242)),
+        EXPECT_EQ(hipblasLtFusionAddPrologue(fused, static_cast<hipblasLtFuseablePrologue_t>(4242)),
                   HIPBLAS_STATUS_INVALID_VALUE);
     }
 
@@ -352,18 +333,30 @@ namespace
         EXPECT_EQ(addA2A(), HIPBLAS_STATUS_INVALID_VALUE);
     }
 
+    TEST_F(FusedA2ABuilder_pre_checkin, StageValuesAreRejectedOnTheOtherSide)
+    {
+        static_assert(HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX >= 64);
+        EXPECT_EQ(hipblasLtFusionAddEpilogue(fused,
+                                             static_cast<hipblasLtFuseableEpilogue_t>(
+                                                 HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX)),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(hipblasLtFusionAddPrologue(fused,
+                                             static_cast<hipblasLtFuseablePrologue_t>(
+                                                 HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX)),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(addA2A(), HIPBLAS_STATUS_SUCCESS);
+    }
+
     TEST_F(FusedA2ABuilder_pre_checkin, PeerBPtrsAreSizedAndBoundedLikeTheOtherPerRankArrays)
     {
         EXPECT_EQ(setPeerBPtrs({reinterpret_cast<void*>(0x1000)}), HIPBLAS_STATUS_SUCCESS);
 
         void* one = reinterpret_cast<void*>(0x1000);
-        EXPECT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                      fused, HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_PEER_B_PTRS, &one, 0),
+        EXPECT_EQ(hipblasLtFusionSetAttribute(fused, HIPBLASLT_FUSION_A2A_PEER_B_PTRS, &one, 0),
                   HIPBLAS_STATUS_INVALID_VALUE);
-        EXPECT_EQ(
-            hipblasLtFusedEpilogueSetAttribute(
-                fused, HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_PEER_B_PTRS, &one, sizeof(void*) + 1),
-            HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(hipblasLtFusionSetAttribute(
+                      fused, HIPBLASLT_FUSION_A2A_PEER_B_PTRS, &one, sizeof(void*) + 1),
+                  HIPBLAS_STATUS_INVALID_VALUE);
 
         const std::vector<void*> tooMany(HIPBLASLT_DEVICE_COMM_MAX_WORLD + 1,
                                          reinterpret_cast<void*>(0x1000));
@@ -377,9 +370,9 @@ namespace
         EXPECT_EQ(setGatherBuffer(0x1040), HIPBLAS_STATUS_INVALID_VALUE);
 
         void* buffer = reinterpret_cast<void*>(0x1000);
-        EXPECT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                      fused, HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_GATHER_BUFFER, &buffer, 4),
-                  HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(
+            hipblasLtFusionSetAttribute(fused, HIPBLASLT_FUSION_A2A_GATHER_BUFFER, &buffer, 4),
+            HIPBLAS_STATUS_INVALID_VALUE);
     }
 
     /************************************************************************
@@ -394,15 +387,15 @@ namespace
         {
             ASSERT_EQ(hipblasLtMatmulDescCreate(&matmulDesc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
                       HIPBLAS_STATUS_SUCCESS);
-            ASSERT_EQ(hipblasLtFusedEpilogueCreate(&fused), HIPBLAS_STATUS_SUCCESS);
-            ASSERT_EQ(hipblasLtFusedEpilogueAdd(fused, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX),
+            ASSERT_EQ(hipblasLtFusionCreate(&fused), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtFusionAddEpilogue(fused, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX),
                       HIPBLAS_STATUS_SUCCESS);
         }
 
         void TearDown() override
         {
             if(fused)
-                EXPECT_EQ(hipblasLtFusedEpilogueDestroy(fused), HIPBLAS_STATUS_SUCCESS);
+                EXPECT_EQ(hipblasLtFusionDestroy(fused), HIPBLAS_STATUS_SUCCESS);
             if(matmulDesc)
                 EXPECT_EQ(hipblasLtMatmulDescDestroy(matmulDesc), HIPBLAS_STATUS_SUCCESS);
         }
@@ -411,22 +404,16 @@ namespace
         void completeForOneRank()
         {
             const int64_t am = 512;
-            ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                          fused, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT, &am, sizeof(am)),
-                      HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(
+                hipblasLtFusionSetAttribute(fused, HIPBLASLT_FUSION_A2A_EXTENT, &am, sizeof(am)),
+                HIPBLAS_STATUS_SUCCESS);
             void* recv = reinterpret_cast<void*>(0x1000);
-            ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                          fused,
-                          HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS,
-                          &recv,
-                          sizeof(recv)),
+            ASSERT_EQ(hipblasLtFusionSetAttribute(
+                          fused, HIPBLASLT_FUSION_A2A_RECV_PTRS, &recv, sizeof(recv)),
                       HIPBLAS_STATUS_SUCCESS);
             hipblasLtSdmaQueue_t queue = fakeQueue(0x2000);
-            ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                          fused,
-                          HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES,
-                          &queue,
-                          sizeof(queue)),
+            ASSERT_EQ(hipblasLtFusionSetAttribute(
+                          fused, HIPBLASLT_FUSION_A2A_SDMA_QUEUES, &queue, sizeof(queue)),
                       HIPBLAS_STATUS_SUCCESS);
         }
 
@@ -437,7 +424,7 @@ namespace
         }
 
         hipblasLtMatmulDesc_t              matmulDesc = nullptr;
-        hipblasLtFusedEpilogueDescriptor_t fused      = nullptr;
+        hipblasLtFusionDescriptor_t        fused      = nullptr;
     };
 
     TEST_F(FusedA2AAttach_pre_checkin, CompleteDescriptorAttaches)
@@ -451,7 +438,7 @@ namespace
         completeForOneRank();
         ASSERT_EQ(attach(), HIPBLAS_STATUS_SUCCESS);
 
-        hipblasLtFusedEpilogueDescriptor_t readBack = nullptr;
+        hipblasLtFusionDescriptor_t        readBack = nullptr;
         size_t                             written  = 0;
         EXPECT_EQ(hipblasLtMatmulDescGetAttribute(matmulDesc,
                                                   HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE,
@@ -466,11 +453,11 @@ namespace
     TEST(FusedA2APrologueAttach_pre_checkin, AttachedPrologueReadsBackAndDetaches)
     {
         hipblasLtMatmulDesc_t              matmulDesc = nullptr;
-        hipblasLtFusedEpilogueDescriptor_t prologue   = nullptr;
+        hipblasLtFusionDescriptor_t        prologue   = nullptr;
         ASSERT_EQ(hipblasLtMatmulDescCreate(&matmulDesc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
                   HIPBLAS_STATUS_SUCCESS);
-        ASSERT_EQ(hipblasLtFusedEpilogueCreate(&prologue), HIPBLAS_STATUS_SUCCESS);
-        ASSERT_EQ(hipblasLtFusedPrologueAdd(prologue, HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX),
+        ASSERT_EQ(hipblasLtFusionCreate(&prologue), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtFusionAddPrologue(prologue, HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX),
                   HIPBLAS_STATUS_SUCCESS);
 
         EXPECT_EQ(
@@ -478,7 +465,7 @@ namespace
                 matmulDesc, HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE, &prologue, sizeof(prologue)),
             HIPBLAS_STATUS_SUCCESS);
 
-        hipblasLtFusedEpilogueDescriptor_t readBack = nullptr;
+        hipblasLtFusionDescriptor_t        readBack = nullptr;
         size_t                             written  = 0;
         EXPECT_EQ(hipblasLtMatmulDescGetAttribute(matmulDesc,
                                                   HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE,
@@ -489,7 +476,7 @@ namespace
         EXPECT_EQ(written, sizeof(readBack));
         EXPECT_EQ(readBack, prologue);
 
-        hipblasLtFusedEpilogueDescriptor_t none = nullptr;
+        hipblasLtFusionDescriptor_t none = nullptr;
         EXPECT_EQ(hipblasLtMatmulDescSetAttribute(
                       matmulDesc, HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE, &none, sizeof(none)),
                   HIPBLAS_STATUS_SUCCESS);
@@ -501,7 +488,7 @@ namespace
                   HIPBLAS_STATUS_SUCCESS);
         EXPECT_EQ(readBack, nullptr);
 
-        EXPECT_EQ(hipblasLtFusedEpilogueDestroy(prologue), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(hipblasLtFusionDestroy(prologue), HIPBLAS_STATUS_SUCCESS);
         EXPECT_EQ(hipblasLtMatmulDescDestroy(matmulDesc), HIPBLAS_STATUS_SUCCESS);
     }
 
@@ -744,8 +731,8 @@ namespace
             ASSERT_EQ(hipblasLtMatmulDescCreate(&matmulDesc, HIPBLAS_COMPUTE_32F, HIP_R_32F),
                       HIPBLAS_STATUS_SUCCESS);
             ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
-            ASSERT_EQ(hipblasLtFusedEpilogueCreate(&fused), HIPBLAS_STATUS_SUCCESS);
-            ASSERT_EQ(hipblasLtFusedEpilogueAdd(fused, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX),
+            ASSERT_EQ(hipblasLtFusionCreate(&fused), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtFusionAddEpilogue(fused, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX),
                       HIPBLAS_STATUS_SUCCESS);
 
             ASSERT_EQ(hipblasLtMatrixLayoutCreate(&Adesc, HIP_R_16BF, kM, kK, kM),
@@ -760,7 +747,7 @@ namespace
                 if(layout)
                     EXPECT_EQ(hipblasLtMatrixLayoutDestroy(layout), HIPBLAS_STATUS_SUCCESS);
             if(fused)
-                EXPECT_EQ(hipblasLtFusedEpilogueDestroy(fused), HIPBLAS_STATUS_SUCCESS);
+                EXPECT_EQ(hipblasLtFusionDestroy(fused), HIPBLAS_STATUS_SUCCESS);
             if(pref)
                 EXPECT_EQ(hipblasLtMatmulPreferenceDestroy(pref), HIPBLAS_STATUS_SUCCESS);
             if(matmulDesc)
@@ -779,22 +766,16 @@ namespace
         // exactly one thing out of range.
         void completeAndAttach(int64_t am = 512)
         {
-            ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                          fused, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT, &am, sizeof(am)),
-                      HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(
+                hipblasLtFusionSetAttribute(fused, HIPBLASLT_FUSION_A2A_EXTENT, &am, sizeof(am)),
+                HIPBLAS_STATUS_SUCCESS);
             void* recv = reinterpret_cast<void*>(0x1000);
-            ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                          fused,
-                          HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS,
-                          &recv,
-                          sizeof(recv)),
+            ASSERT_EQ(hipblasLtFusionSetAttribute(
+                          fused, HIPBLASLT_FUSION_A2A_RECV_PTRS, &recv, sizeof(recv)),
                       HIPBLAS_STATUS_SUCCESS);
             hipblasLtSdmaQueue_t queue = fakeQueue(0x2000);
-            ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                          fused,
-                          HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES,
-                          &queue,
-                          sizeof(queue)),
+            ASSERT_EQ(hipblasLtFusionSetAttribute(
+                          fused, HIPBLASLT_FUSION_A2A_SDMA_QUEUES, &queue, sizeof(queue)),
                       HIPBLAS_STATUS_SUCCESS);
             ASSERT_EQ(hipblasLtMatmulDescSetAttribute(matmulDesc,
                                                       HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE,
@@ -823,7 +804,7 @@ namespace
 
         void detach()
         {
-            hipblasLtFusedEpilogueDescriptor_t none = nullptr;
+            hipblasLtFusionDescriptor_t none = nullptr;
             ASSERT_EQ(hipblasLtMatmulDescSetAttribute(
                           matmulDesc, HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE, &none, sizeof(none)),
                       HIPBLAS_STATUS_SUCCESS);
@@ -873,7 +854,7 @@ namespace
         hipblasLtHandle_t                  handle     = nullptr;
         hipblasLtMatmulDesc_t              matmulDesc = nullptr;
         hipblasLtMatmulPreference_t        pref       = nullptr;
-        hipblasLtFusedEpilogueDescriptor_t fused      = nullptr;
+        hipblasLtFusionDescriptor_t        fused      = nullptr;
         hipblasLtMatrixLayout_t            Adesc      = nullptr;
         hipblasLtMatrixLayout_t            Bdesc      = nullptr;
         hipblasLtMatrixLayout_t            Ddesc      = nullptr;
@@ -1142,8 +1123,8 @@ namespace
                   HIPBLAS_STATUS_SUCCESS);
 
         const uint32_t channel = 1;
-        ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                      fused, HIPBLASLT_FUSED_EPILOGUE_COMM_CHANNEL, &channel, sizeof(channel)),
+        ASSERT_EQ(hipblasLtFusionSetAttribute(
+                      fused, HIPBLASLT_FUSION_COMM_CHANNEL, &channel, sizeof(channel)),
                   HIPBLAS_STATUS_SUCCESS);
         EXPECT_EQ(hipblaslt_ext::matmulIsAlgoSupported(handle,
                                                        matmulDesc,
@@ -1172,9 +1153,9 @@ namespace
             GTEST_SKIP() << "no fused BF16 TN solution in the loaded library";
 
         void* recv[2] = {reinterpret_cast<void*>(0x1000), reinterpret_cast<void*>(0x1100)};
-        ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                      fused, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS, recv, sizeof(recv)),
-                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(
+            hipblasLtFusionSetAttribute(fused, HIPBLASLT_FUSION_A2A_RECV_PTRS, recv, sizeof(recv)),
+            HIPBLAS_STATUS_SUCCESS);
 
         const float alpha     = 1.f;
         const float beta      = 0.f;
@@ -1212,15 +1193,11 @@ namespace
         registerOneRank();
         void* recv = reinterpret_cast<void*>(0x1000);
         ASSERT_EQ(
-            hipblasLtFusedEpilogueSetAttribute(
-                fused, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS, &recv, sizeof(recv)),
+            hipblasLtFusionSetAttribute(fused, HIPBLASLT_FUSION_A2A_RECV_PTRS, &recv, sizeof(recv)),
             HIPBLAS_STATUS_SUCCESS);
         hipblasLtSdmaQueue_t queue = fakeQueue(0x2000);
-        ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                      fused,
-                      HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES,
-                      &queue,
-                      sizeof(queue)),
+        ASSERT_EQ(hipblasLtFusionSetAttribute(
+                      fused, HIPBLASLT_FUSION_A2A_SDMA_QUEUES, &queue, sizeof(queue)),
                   HIPBLAS_STATUS_SUCCESS);
         ASSERT_EQ(hipblasLtMatmulDescSetAttribute(matmulDesc,
                                                   HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE,
@@ -1241,8 +1218,7 @@ namespace
 
         void* recv = nullptr;
         ASSERT_EQ(
-            hipblasLtFusedEpilogueSetAttribute(
-                fused, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS, &recv, sizeof(recv)),
+            hipblasLtFusionSetAttribute(fused, HIPBLASLT_FUSION_A2A_RECV_PTRS, &recv, sizeof(recv)),
             HIPBLAS_STATUS_SUCCESS);
 
         EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
@@ -1256,11 +1232,8 @@ namespace
 
         hipblasLtSdmaQueue_t queue = fakeQueue(0x2000);
         queue.doorbell             = nullptr;
-        ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                      fused,
-                      HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES,
-                      &queue,
-                      sizeof(queue)),
+        ASSERT_EQ(hipblasLtFusionSetAttribute(
+                      fused, HIPBLASLT_FUSION_A2A_SDMA_QUEUES, &queue, sizeof(queue)),
                   HIPBLAS_STATUS_SUCCESS);
 
         EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
@@ -1308,8 +1281,8 @@ namespace
         makeD();
 
         const uint32_t channel = 1; // the communicator was registered with one
-        ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                      fused, HIPBLASLT_FUSED_EPILOGUE_COMM_CHANNEL, &channel, sizeof(channel)),
+        ASSERT_EQ(hipblasLtFusionSetAttribute(
+                      fused, HIPBLASLT_FUSION_COMM_CHANNEL, &channel, sizeof(channel)),
                   HIPBLAS_STATUS_SUCCESS);
 
         EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
@@ -1322,15 +1295,12 @@ namespace
         makeD();
 
         void* recv[2] = {reinterpret_cast<void*>(0x1000), reinterpret_cast<void*>(0x1100)};
-        ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                      fused, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS, recv, sizeof(recv)),
-                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(
+            hipblasLtFusionSetAttribute(fused, HIPBLASLT_FUSION_A2A_RECV_PTRS, recv, sizeof(recv)),
+            HIPBLAS_STATUS_SUCCESS);
         hipblasLtSdmaQueue_t queues[2] = {fakeQueue(0x2000), fakeQueue(0x3000)};
-        ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                      fused,
-                      HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES,
-                      queues,
-                      sizeof(queues)),
+        ASSERT_EQ(hipblasLtFusionSetAttribute(
+                      fused, HIPBLASLT_FUSION_A2A_SDMA_QUEUES, queues, sizeof(queues)),
                   HIPBLAS_STATUS_SUCCESS);
 
         EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
@@ -1345,9 +1315,9 @@ namespace
         makeD();
 
         void* recv[2] = {reinterpret_cast<void*>(0x1000), reinterpret_cast<void*>(0x1100)};
-        ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                      fused, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS, recv, sizeof(recv)),
-                  HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(
+            hipblasLtFusionSetAttribute(fused, HIPBLASLT_FUSION_A2A_RECV_PTRS, recv, sizeof(recv)),
+            HIPBLAS_STATUS_SUCCESS);
 
         EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
     }
@@ -1451,8 +1421,8 @@ namespace
                           matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(opA)),
                       HIPBLAS_STATUS_SUCCESS);
             ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
-            ASSERT_EQ(hipblasLtFusedEpilogueCreate(&prologue), HIPBLAS_STATUS_SUCCESS);
-            ASSERT_EQ(hipblasLtFusedPrologueAdd(prologue, HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX),
+            ASSERT_EQ(hipblasLtFusionCreate(&prologue), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtFusionAddPrologue(prologue, HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX),
                       HIPBLAS_STATUS_SUCCESS);
             ASSERT_EQ(hipblasLtMatrixLayoutCreate(&Adesc, HIP_R_16BF, kK, kM, kK),
                       HIPBLAS_STATUS_SUCCESS);
@@ -1465,9 +1435,9 @@ namespace
             for(hipblasLtMatrixLayout_t layout : {Adesc, Bdesc, Ddesc})
                 if(layout)
                     EXPECT_EQ(hipblasLtMatrixLayoutDestroy(layout), HIPBLAS_STATUS_SUCCESS);
-            for(hipblasLtFusedEpilogueDescriptor_t desc : {prologue, epilogue})
+            for(hipblasLtFusionDescriptor_t desc : {prologue, epilogue})
                 if(desc)
-                    EXPECT_EQ(hipblasLtFusedEpilogueDestroy(desc), HIPBLAS_STATUS_SUCCESS);
+                    EXPECT_EQ(hipblasLtFusionDestroy(desc), HIPBLAS_STATUS_SUCCESS);
             if(pref)
                 EXPECT_EQ(hipblasLtMatmulPreferenceDestroy(pref), HIPBLAS_STATUS_SUCCESS);
             if(matmulDesc)
@@ -1501,39 +1471,34 @@ namespace
 
         hipblasStatus_t setPeerBPtrs(const std::vector<void*>& ptrs)
         {
-            return hipblasLtFusedEpilogueSetAttribute(
-                prologue,
-                HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_PEER_B_PTRS,
-                ptrs.data(),
-                ptrs.size() * sizeof(void*));
+            return hipblasLtFusionSetAttribute(prologue,
+                                               HIPBLASLT_FUSION_A2A_PEER_B_PTRS,
+                                               ptrs.data(),
+                                               ptrs.size() * sizeof(void*));
         }
 
         hipblasStatus_t setGatherBuffer(void* buffer)
         {
-            return hipblasLtFusedEpilogueSetAttribute(
-                prologue,
-                HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_GATHER_BUFFER,
-                &buffer,
-                sizeof(buffer));
+            return hipblasLtFusionSetAttribute(
+                prologue, HIPBLASLT_FUSION_A2A_GATHER_BUFFER, &buffer, sizeof(buffer));
         }
 
         hipblasStatus_t setQueues(const std::vector<hipblasLtSdmaQueue_t>& queues)
         {
-            return hipblasLtFusedEpilogueSetAttribute(
-                prologue,
-                HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES,
-                queues.data(),
-                queues.size() * sizeof(hipblasLtSdmaQueue_t));
+            return hipblasLtFusionSetAttribute(prologue,
+                                               HIPBLASLT_FUSION_A2A_SDMA_QUEUES,
+                                               queues.data(),
+                                               queues.size() * sizeof(hipblasLtSdmaQueue_t));
         }
 
         hipblasStatus_t setExtent(int64_t extent)
         {
-            return hipblasLtFusedEpilogueSetAttribute(
-                prologue, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT, &extent, sizeof(extent));
+            return hipblasLtFusionSetAttribute(
+                prologue, HIPBLASLT_FUSION_A2A_EXTENT, &extent, sizeof(extent));
         }
 
-        hipblasStatus_t attach(hipblasLtMatmulDescAttributes_t    attr,
-                               hipblasLtFusedEpilogueDescriptor_t desc)
+        hipblasStatus_t attach(hipblasLtMatmulDescAttributes_t attr,
+                               hipblasLtFusionDescriptor_t     desc)
         {
             return hipblasLtMatmulDescSetAttribute(matmulDesc, attr, &desc, sizeof(desc));
         }
@@ -1552,25 +1517,21 @@ namespace
         // A complete epilogue all-to-all for a one-rank group.
         void makeEpilogue()
         {
-            ASSERT_EQ(hipblasLtFusedEpilogueCreate(&epilogue), HIPBLAS_STATUS_SUCCESS);
-            ASSERT_EQ(hipblasLtFusedEpilogueAdd(epilogue, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX),
+            ASSERT_EQ(hipblasLtFusionCreate(&epilogue), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtFusionAddEpilogue(epilogue, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX),
                       HIPBLAS_STATUS_SUCCESS);
             const int64_t am = kM;
-            ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                          epilogue, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT, &am, sizeof(am)),
-                      HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(
+                hipblasLtFusionSetAttribute(epilogue, HIPBLASLT_FUSION_A2A_EXTENT, &am, sizeof(am)),
+                HIPBLAS_STATUS_SUCCESS);
             void* recv = reinterpret_cast<void*>(0x1000);
-            ASSERT_EQ(
-                hipblasLtFusedEpilogueSetAttribute(
-                    epilogue, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS, &recv, sizeof(recv)),
-                HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtFusionSetAttribute(
+                          epilogue, HIPBLASLT_FUSION_A2A_RECV_PTRS, &recv, sizeof(recv)),
+                      HIPBLAS_STATUS_SUCCESS);
             hipblasLtSdmaQueue_t queue = fakeQueue(0x2000);
-            ASSERT_EQ(
-                hipblasLtFusedEpilogueSetAttribute(epilogue,
-                                                   HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES,
-                                                   &queue,
-                                                   sizeof(queue)),
-                HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(hipblasLtFusionSetAttribute(
+                          epilogue, HIPBLASLT_FUSION_A2A_SDMA_QUEUES, &queue, sizeof(queue)),
+                      HIPBLAS_STATUS_SUCCESS);
         }
 
         hipblasStatus_t heuristic(int* returned = nullptr)
@@ -1636,8 +1597,8 @@ namespace
         hipblasLtHandle_t                  handle     = nullptr;
         hipblasLtMatmulDesc_t              matmulDesc = nullptr;
         hipblasLtMatmulPreference_t        pref       = nullptr;
-        hipblasLtFusedEpilogueDescriptor_t prologue   = nullptr;
-        hipblasLtFusedEpilogueDescriptor_t epilogue   = nullptr;
+        hipblasLtFusionDescriptor_t        prologue   = nullptr;
+        hipblasLtFusionDescriptor_t        epilogue   = nullptr;
         hipblasLtMatrixLayout_t            Adesc      = nullptr;
         hipblasLtMatrixLayout_t            Bdesc      = nullptr;
         hipblasLtMatrixLayout_t            Ddesc      = nullptr;
@@ -1715,15 +1676,15 @@ namespace
         if(!firstAlgo(algo))
             GTEST_SKIP() << "no A2AGemm solution in the loaded library";
 
-        hipblasLtFusedEpilogueDescriptor_t noQueues = nullptr;
-        ASSERT_EQ(hipblasLtFusedEpilogueCreate(&noQueues), HIPBLAS_STATUS_SUCCESS);
-        ASSERT_EQ(hipblasLtFusedPrologueAdd(noQueues, HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX),
+        hipblasLtFusionDescriptor_t noQueues = nullptr;
+        ASSERT_EQ(hipblasLtFusionCreate(&noQueues), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtFusionAddPrologue(noQueues, HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX),
                   HIPBLAS_STATUS_SUCCESS);
         std::swap(prologue, noQueues);
         ASSERT_EQ(setPeerBPtrs({reinterpret_cast<void*>(0x100000)}), HIPBLAS_STATUS_SUCCESS);
         ASSERT_EQ(setGatherBuffer(reinterpret_cast<void*>(0x200000)), HIPBLAS_STATUS_SUCCESS);
         ASSERT_EQ(attach(HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE, prologue), HIPBLAS_STATUS_SUCCESS);
-        EXPECT_EQ(hipblasLtFusedEpilogueDestroy(noQueues), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(hipblasLtFusionDestroy(noQueues), HIPBLAS_STATUS_SUCCESS);
 
         EXPECT_EQ(isAlgoSupported(algo), HIPBLAS_STATUS_INVALID_VALUE);
     }
@@ -1770,8 +1731,8 @@ namespace
         registerOneRank();
         completeAndAttach();
         const uint32_t channel = 1;
-        ASSERT_EQ(hipblasLtFusedEpilogueSetAttribute(
-                      prologue, HIPBLASLT_FUSED_EPILOGUE_COMM_CHANNEL, &channel, sizeof(channel)),
+        ASSERT_EQ(hipblasLtFusionSetAttribute(
+                      prologue, HIPBLASLT_FUSION_COMM_CHANNEL, &channel, sizeof(channel)),
                   HIPBLAS_STATUS_SUCCESS);
         EXPECT_EQ(heuristic(), HIPBLAS_STATUS_INVALID_VALUE);
     }

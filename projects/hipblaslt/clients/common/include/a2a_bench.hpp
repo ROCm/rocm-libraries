@@ -83,7 +83,7 @@ namespace hipblaslt_bench
     {
         Collective                         collective = Collective::GemmA2A;
         hipblasLtHandle_t                  handle    = nullptr;
-        hipblasLtFusedEpilogueDescriptor_t fused     = nullptr;
+        hipblasLtFusionDescriptor_t        fused      = nullptr;
         hipblasLtMatmulDesc_t              mm        = nullptr;
         hipblasLtMatrixLayout_t            lay[4]    = {};
         hipblasLtMatmulPreference_t        pref      = nullptr;
@@ -137,7 +137,7 @@ namespace hipblaslt_bench
             if(plainMm != nullptr)
                 static_cast<void>(hipblasLtMatmulDescDestroy(plainMm));
             if(fused != nullptr)
-                static_cast<void>(hipblasLtFusedEpilogueDestroy(fused));
+                static_cast<void>(hipblasLtFusionDestroy(fused));
 
             static_cast<void>(hipFree(dA));
             static_cast<void>(hipFree(dB));
@@ -519,48 +519,36 @@ namespace hipblaslt_bench
                     return false;
         }
 
-        CHECK_LT_RC(hipblasLtFusedEpilogueCreate(&res.fused));
+        CHECK_LT_RC(hipblasLtFusionCreate(&res.fused));
         if(a2aGemm)
         {
             CHECK_LT_RC(
-                hipblasLtFusedPrologueAdd(res.fused, HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX));
-            CHECK_LT_RC(
-                hipblasLtFusedEpilogueSetAttribute(res.fused,
-                                                   HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_PEER_B_PTRS,
-                                                   res.peerB,
-                                                   arg.a2a_world * sizeof(res.peerB[0])));
-            CHECK_LT_RC(hipblasLtFusedEpilogueSetAttribute(
-                res.fused,
-                HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_GATHER_BUFFER,
-                &res.dGather,
-                sizeof(res.dGather)));
+                hipblasLtFusionAddPrologue(res.fused, HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX));
+            CHECK_LT_RC(hipblasLtFusionSetAttribute(res.fused,
+                                                    HIPBLASLT_FUSION_A2A_PEER_B_PTRS,
+                                                    res.peerB,
+                                                    arg.a2a_world * sizeof(res.peerB[0])));
+            CHECK_LT_RC(hipblasLtFusionSetAttribute(
+                res.fused, HIPBLASLT_FUSION_A2A_GATHER_BUFFER, &res.dGather, sizeof(res.dGather)));
         }
         else
         {
             CHECK_LT_RC(
-                hipblasLtFusedEpilogueAdd(res.fused, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX));
-            CHECK_LT_RC(
-                hipblasLtFusedEpilogueSetAttribute(res.fused,
-                                                   HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS,
-                                                   res.recvPtrs[0],
-                                                   arg.a2a_world * sizeof(res.recvPtrs[0][0])));
+                hipblasLtFusionAddEpilogue(res.fused, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX));
+            CHECK_LT_RC(hipblasLtFusionSetAttribute(res.fused,
+                                                    HIPBLASLT_FUSION_A2A_RECV_PTRS,
+                                                    res.recvPtrs[0],
+                                                    arg.a2a_world * sizeof(res.recvPtrs[0][0])));
         }
-        CHECK_LT_RC(
-            hipblasLtFusedEpilogueSetAttribute(res.fused,
-                                               HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES,
-                                               res.queues,
-                                               arg.a2a_world * sizeof(res.queues[0])));
-        CHECK_LT_RC(hipblasLtFusedEpilogueSetAttribute(
-            res.fused,
-            HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT,
-            &arg.a2a_extent,
-            sizeof(arg.a2a_extent)));
+        CHECK_LT_RC(hipblasLtFusionSetAttribute(res.fused,
+                                                HIPBLASLT_FUSION_A2A_SDMA_QUEUES,
+                                                res.queues,
+                                                arg.a2a_world * sizeof(res.queues[0])));
+        CHECK_LT_RC(hipblasLtFusionSetAttribute(
+            res.fused, HIPBLASLT_FUSION_A2A_EXTENT, &arg.a2a_extent, sizeof(arg.a2a_extent)));
         const hipblasLtA2ACompletionMode_t mode = HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL;
-        CHECK_LT_RC(hipblasLtFusedEpilogueSetAttribute(
-            res.fused,
-            HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_COMPLETION_MODE,
-            &mode,
-            sizeof(mode)));
+        CHECK_LT_RC(hipblasLtFusionSetAttribute(
+            res.fused, HIPBLASLT_FUSION_A2A_COMPLETION_MODE, &mode, sizeof(mode)));
 
         CHECK_LT_RC(hipblasLtMatrixLayoutCreate(
             &res.lay[0], HIP_R_16BF, arg.K[0], arg.M[0], arg.K[0]));
@@ -642,8 +630,8 @@ namespace hipblaslt_bench
             const float    alpha = 1.0f, beta = 0.0f;
             const uint32_t channel = launchCount++ % kCommChannels;
 
-            const hipblasStatus_t attrStatus = hipblasLtFusedEpilogueSetAttribute(
-                res.fused, HIPBLASLT_FUSED_EPILOGUE_COMM_CHANNEL, &channel, sizeof(channel));
+            const hipblasStatus_t attrStatus = hipblasLtFusionSetAttribute(
+                res.fused, HIPBLASLT_FUSION_COMM_CHANNEL, &channel, sizeof(channel));
             if(attrStatus != HIPBLAS_STATUS_SUCCESS)
             {
                 lastStatus = attrStatus;

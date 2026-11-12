@@ -113,7 +113,7 @@ typedef enum {
  *
  *  \details
  *  Unlike the flat ``hipblasLtEpilogue_t`` enum, these values name epilogue stages that are
- *  accumulated into a ``hipblasLtFusedEpilogueDescriptor_t`` via ``hipblasLtFusedEpilogueAdd``
+ *  accumulated into a ``hipblasLtFusionDescriptor_t`` via ``hipblasLtFusionAddEpilogue``
  *  and attached to a matmul descriptor through ``HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE``.
  *
  *  The fused epilogue API offers several families, each with its own composition rule. Values
@@ -121,9 +121,12 @@ typedef enum {
  *  stats, RMSNorm scale-apply, AMax, requant) and for the gated linear units, which compose
  *  by their own rules. All-to-all is the collective family: a single stage that does not
  *  compose with any other, so adding a companion stage is rejected at ``Add`` time.
+ *
+ *  Epilogue stages stay below ``64``; values from ``64`` belong to
+ *  ``hipblasLtFuseablePrologue_t``.
  */
 typedef enum {
-  HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX = 7, /**<Collective family: redistribute a leading run of D's free-0 (feature) positions across the ranks of the registered device communicator, from the GEMM's own store path. Single stage; not chainable. The ``PREFIX`` suffix names the dispatch criterion - the exported region is the positional run ``[0, AM)`` given by ``HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT``.*/
+  HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX = 7, /**<Collective family: redistribute a leading run of D's free-0 (feature) positions across the ranks of the registered device communicator, from the GEMM's own store path. Single stage; not chainable. The ``PREFIX`` suffix names the dispatch criterion - the exported region is the positional run ``[0, AM)`` given by ``HIPBLASLT_FUSION_A2A_EXTENT``.*/
 } hipblasLtFuseableEpilogue_t;
 
 /*! \ingroup types_module
@@ -131,31 +134,33 @@ typedef enum {
  *
  *  \details
  *  A prologue stage acts on an operand before the main loop. Its stages are accumulated into a
- *  ``hipblasLtFusedEpilogueDescriptor_t`` via ``hipblasLtFusedPrologueAdd`` and attached to a
+ *  ``hipblasLtFusionDescriptor_t`` via ``hipblasLtFusionAddPrologue`` and attached to a
  *  matmul descriptor through ``HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE``; the descriptor type, its
- *  attributes, and ``hipblasLtFusedEpilogueSetAttribute`` are shared with the fused epilogue. A
+ *  attributes, and ``hipblasLtFusionSetAttribute`` are shared with the fused epilogue. A
  *  descriptor holds the stages of one side only. All-to-all is a single stage that does not
  *  compose with any other.
+ *
+ *  Prologue stages start at ``64``, disjoint from ``hipblasLtFuseableEpilogue_t``.
  */
 typedef enum {
-  HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX = 0, /**<Collective: before the main loop, gather a leading run ``[0, AK)`` of B's K positions from the ranks of the registered device communicator, so that rank ``r`` multiplies A by the K run assembled from block ``r`` of every rank's B; see ``HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_PEER_B_PTRS`` for the layout. ``AK`` is K in this release. Single stage; not chainable.*/
+  HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX = 64, /**<Collective: before the main loop, gather a leading run ``[0, AK)`` of B's K positions from the ranks of the registered device communicator, so that rank ``r`` multiplies A by the K run assembled from block ``r`` of every rank's B; see ``HIPBLASLT_FUSION_A2A_PEER_B_PTRS`` for the layout. ``AK`` is K in this release. Single stage; not chainable.*/
 } hipblasLtFuseablePrologue_t;
 
 /*! \ingroup types_module
- *  \brief Attributes settable on a fused epilogue descriptor.
+ *  \brief Attributes settable on a fusion descriptor.
  *
  *  \details
  *  Values ``0``-``11`` are reserved for the chainable family's attributes.
  */
 typedef enum {
-  HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES = 12, /**<Required by a solution using the SDMA transport. Host array of ``world`` ``hipblasLtSdmaQueue_t`` entries; entry ``j`` is this device's copy-engine queue targeting rank ``j``, with ``j == rank`` the loopback queue. On gfx942 and gfx950 every other queue must be on an even xGMI SDMA engine in 2..14. On a prologue the entry ``j == rank`` is not used and may be all null, and without this attribute ``hipblasLtMatmulAlgoGetHeuristic`` returns no algorithm. The library copies the entries and never interprets the addresses, so the caller's array need not outlive the call - but the queues themselves must outlive the launch group. Data type: ``const hipblasLtSdmaQueue_t*``.*/
-  HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS = 13, /**<Required on an epilogue; not used on a prologue. Host array of ``world`` pointers in rank order; entry ``j`` is the address, in this process, of rank ``j``'s receive buffer. The buffer holds ``world * N * (AM / world)`` elements of D's type, laid out ``[source, token, feature]`` with feature contiguous and the unpadded ``N`` as the source stride. Data type: ``void* const*``.*/
-  HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT = 14, /**<Required. ``AM``, the number of leading free-0 (feature) positions of D that are redistributed; the per-rank shard is ``AM / world``. Must be positive and divide by ``world``. This participates in solution selection, so it has the same standing as M, N, and K: setting it after ``hipblasLtMatmulAlgoGetHeuristic`` invalidates the returned algo. On a prologue it is ``AK``, the number of leading K positions gathered: optional, defaulting to K, and it must equal K in this release. Data type: ``int64_t``.*/
-  HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_COMPLETION_MODE = 15, /**<Optional. How receive completion is established. ``HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL`` is the only accepted value in this release, and the default. Data type: ``hipblasLtA2ACompletionMode_t``.*/
-  HIPBLASLT_FUSED_EPILOGUE_COMM_CHANNEL = 16, /**<Optional, default ``0``. Which of the communicator's ``nChannels`` flag regions this operation uses. Concurrent operations need distinct channels and disjoint queue sets; those on different streams additionally need separate handles, since a ``hipblasLtHandle_t`` is not safe for concurrent use across multiple HIP streams. Reuse requires every rank's previous operation on the channel to have retired, which a stream sync does not establish; recv buffers carry the same requirement. Epilogue and prologue operations share the channels, so the reuse rule applies across both. Every rank of one launch group must pass the same channel, which the library cannot verify. Data type: ``uint32_t``.*/
-  HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_PEER_B_PTRS = 17, /**<Required on a prologue. Host array of ``world`` pointers in rank order; entry ``j`` is the address, in this process, of rank ``j``'s B. The entry ``j == rank`` is not used and may be null; this rank's B is the one passed to ``hipblasLtMatmul``. Each rank's B holds ``world * N * (K / world)`` elements of B's type laid out ``[destination, token, k]`` with k contiguous, described to the matmul as a ``K x N`` column-major B with ``ldb == K``: block ``d`` is the part rank ``d`` consumes. Every rank's B must be written and visible to its peers before any rank launches, and must not change until every rank's call has retired. Data type: ``void* const*``.*/
-  HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_GATHER_BUFFER = 18, /**<Required on a prologue. Device buffer of at least ``N * K`` elements of B's type that receives the blocks gathered from the other ranks. Its base must be 128-byte aligned and it must not overlap A, B, C, or D. Its contents after the call are undefined. Data type: ``void*``.*/
-} hipblasLtFusedEpilogueAttribute_t;
+  HIPBLASLT_FUSION_A2A_SDMA_QUEUES = 12, /**<Required by a solution using the SDMA transport. Host array of ``world`` ``hipblasLtSdmaQueue_t`` entries; entry ``j`` is this device's copy-engine queue targeting rank ``j``, with ``j == rank`` the loopback queue. On gfx942 and gfx950 every other queue must be on an even xGMI SDMA engine in 2..14. On a prologue the entry ``j == rank`` is not used and may be all null, and without this attribute ``hipblasLtMatmulAlgoGetHeuristic`` returns no algorithm. The library copies the entries and never interprets the addresses, so the caller's array need not outlive the call - but the queues themselves must outlive the launch group. Data type: ``const hipblasLtSdmaQueue_t*``.*/
+  HIPBLASLT_FUSION_A2A_RECV_PTRS = 13, /**<Required on an epilogue; not used on a prologue. Host array of ``world`` pointers in rank order; entry ``j`` is the address, in this process, of rank ``j``'s receive buffer. The buffer holds ``world * N * (AM / world)`` elements of D's type, laid out ``[source, token, feature]`` with feature contiguous and the unpadded ``N`` as the source stride. Data type: ``void* const*``.*/
+  HIPBLASLT_FUSION_A2A_EXTENT = 14, /**<Required. ``AM``, the number of leading free-0 (feature) positions of D that are redistributed; the per-rank shard is ``AM / world``. Must be positive and divide by ``world``. This participates in solution selection, so it has the same standing as M, N, and K: setting it after ``hipblasLtMatmulAlgoGetHeuristic`` invalidates the returned algo. On a prologue it is ``AK``, the number of leading K positions gathered: optional, defaulting to K, and it must equal K in this release. Data type: ``int64_t``.*/
+  HIPBLASLT_FUSION_A2A_COMPLETION_MODE = 15, /**<Optional. How receive completion is established. ``HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL`` is the only accepted value in this release, and the default. Data type: ``hipblasLtA2ACompletionMode_t``.*/
+  HIPBLASLT_FUSION_COMM_CHANNEL = 16, /**<Optional, default ``0``. Which of the communicator's ``nChannels`` flag regions this operation uses. Concurrent operations need distinct channels and disjoint queue sets; those on different streams additionally need separate handles, since a ``hipblasLtHandle_t`` is not safe for concurrent use across multiple HIP streams. Reuse requires every rank's previous operation on the channel to have retired, which a stream sync does not establish; recv buffers carry the same requirement. Epilogue and prologue operations share the channels, so the reuse rule applies across both. Every rank of one launch group must pass the same channel, which the library cannot verify. Data type: ``uint32_t``.*/
+  HIPBLASLT_FUSION_A2A_PEER_B_PTRS = 17, /**<Required on a prologue. Host array of ``world`` pointers in rank order; entry ``j`` is the address, in this process, of rank ``j``'s B. The entry ``j == rank`` is not used and may be null; this rank's B is the one passed to ``hipblasLtMatmul``. Each rank's B holds ``world * N * (K / world)`` elements of B's type laid out ``[destination, token, k]`` with k contiguous, described to the matmul as a ``K x N`` column-major B with ``ldb == K``: block ``d`` is the part rank ``d`` consumes. Every rank's B must be written and visible to its peers before any rank launches, and must not change until every rank's call has retired. Data type: ``void* const*``.*/
+  HIPBLASLT_FUSION_A2A_GATHER_BUFFER = 18, /**<Required on a prologue. Device buffer of at least ``N * K`` elements of B's type that receives the blocks gathered from the other ranks. Its base must be 128-byte aligned and it must not overlap A, B, C, or D. Its contents after the call are undefined. Data type: ``void*``.*/
+} hipblasLtFusionAttribute_t;
 
 /*! \ingroup types_module
  *  \brief How a fused all-to-all establishes receive completion.
@@ -191,21 +196,24 @@ typedef struct {
  *  \details
  *  Use the following functions to manipulate this handle:
  *
- *  \ref hipblasLtFusedEpilogueCreate(): To create one instance of the handle.
+ *  \ref hipblasLtFusionCreate(): To create one instance of the handle.
  *
- *  \ref hipblasLtFusedEpilogueAdd(): To select a fused epilogue stage.
+ *  \ref hipblasLtFusionAddEpilogue(): To select a fused epilogue stage.
  *
- *  \ref hipblasLtFusedPrologueAdd(): To select a fused prologue stage.
+ *  \ref hipblasLtFusionAddPrologue(): To select a fused prologue stage.
  *
- *  \ref hipblasLtFusedEpilogueSetAttribute(): To configure that stage's parameters.
+ *  \ref hipblasLtFusionSetAttribute(): To configure that stage's parameters.
  *
- *  \ref hipblasLtFusedEpilogueDestroy(): To destroy a previously created handle and release
+ *  \ref hipblasLtFusionDestroy(): To destroy a previously created handle and release
  *  the resources.
+ *
+ *  The side the descriptor is attached to, ``HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE`` or
+ *  ``HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE``, must match the side its stages were added to.
  *
  *  Every rank of one launch group passes the same matmul problem, algo, and descriptor
  *  attributes; only the per-rank array entries differ. The library cannot verify this.
  */
-typedef struct hipblasLtFusedEpilogueDescriptor* hipblasLtFusedEpilogueDescriptor_t;
+typedef struct hipblasLtFusionDescriptor* hipblasLtFusionDescriptor_t;
 
 /*! \ingroup types_module
  *  \brief Largest world size a device communicator supports.
@@ -477,11 +485,11 @@ typedef enum {
   HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT = 104,      /**<Select the hipBLASLt StreamK tile scheduling mode for kernels compiled with TileProcessingStrategy=StreamK and WorkAssignment=Hybrid. Provided as an ``_EXT`` attribute. Accepts values from ``hipblasLtStreamKTileSchedulingMode_t``: ``0`` (``OFF``, default) uses the SK3 static sub-path; when ``HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET`` is set to a positive value the library heuristic still runs per launch to pick SK4 when appropriate; ``1`` (``ON``) always requests the SK4 dynamic work-queue sub-path when the selected kernel supports it; ``2`` (``AUTO``) always lets the library's heuristic pick between static and dynamic per launch. Values outside ``{0, 1, 2}`` are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Data type: ``int32_t``. */
   HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT = 105, /**<Request a uniform summation order across the M dimension. Provided as an ``_EXT`` attribute. When enabled, hipBLASLt guarantees that if every row of matrix A is the identical vector, every row of the output matrix D is bitwise identical. This is uniformity across the M dimension within a single run; it is **not** run-to-run determinism. ``-1`` (default) inherits the handle-level request (``hipblasLtSetUniformSummationOrder``); ``0`` disables this GEMM; ``1`` enables this GEMM. Other values are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Enabling the mode restricts kernel selection and the launch configuration, so it can reduce performance, and hipblasLtMatmul() returns ``HIPBLAS_STATUS_INVALID_VALUE`` when no uniform-safe configuration exists for the resolved launch rather than silently producing a non-uniform result. Data type: ``int32_t``. */
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
-  HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE = 106,              /**<Attach a fused epilogue to this matmul. The value is a ``hipblasLtFusedEpilogueDescriptor_t`` built with ``hipblasLtFusedEpilogueCreate`` / ``...Add`` / ``...SetAttribute``. The descriptor is referenced, not copied, so it must outlive every matmul call that uses this matmul descriptor. Required parameters are validated when the matmul runs: ``hipblasLtMatmulAlgoGetHeuristic`` and ``hipblasLtMatmul`` reject a descriptor whose selected stages are incomplete. Set the value to NULL to detach. Data type: ``hipblasLtFusedEpilogueDescriptor_t``. */
+  HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE = 106,              /**<Attach a fused epilogue to this matmul. The value is a ``hipblasLtFusionDescriptor_t`` built with ``hipblasLtFusionCreate`` / ``hipblasLtFusionAddEpilogue`` / ``hipblasLtFusionSetAttribute``. The descriptor is referenced, not copied, so it must outlive every matmul call that uses this matmul descriptor. Required parameters are validated when the matmul runs: ``hipblasLtMatmulAlgoGetHeuristic`` and ``hipblasLtMatmul`` reject a descriptor whose selected stages are incomplete. Set the value to NULL to detach. Data type: ``hipblasLtFusionDescriptor_t``. */
 #endif
   HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT = 107, /**<Encoding of the int4 weights in matrix A. Provided as an ``_EXT`` attribute. Accepts values from ``hipblasLtInt4Encoding_t``, default ``HIPBLASLT_INT4_ENCODING_SIGNED_EXT``; others are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``. Only used when A is ``HIP_R_4I`` with a w4a16 ``VEC*_16BF``/``VEC*_16F`` scale mode. Data type: ``int32_t``. */
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
-  HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE = 108,              /**<Attach a fused prologue to this matmul. The value is a ``hipblasLtFusedEpilogueDescriptor_t`` whose stages were added with ``hipblasLtFusedPrologueAdd``. It is referenced, not copied, and validated, as for ``HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE``. A matmul runs at most one all-to-all, so ``hipblasLtMatmulAlgoGetHeuristic`` and ``hipblasLtMatmul`` reject a matmul with all-to-all stages attached through both attributes, and a descriptor attached through the attribute that does not match its stages. Set the value to NULL to detach. Data type: ``hipblasLtFusedEpilogueDescriptor_t``. */
+  HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE = 108,              /**<Attach a fused prologue to this matmul. The value is a ``hipblasLtFusionDescriptor_t`` whose stages were added with ``hipblasLtFusionAddPrologue``. It is referenced, not copied, and validated, as for ``HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE``. A matmul runs at most one all-to-all, so ``hipblasLtMatmulAlgoGetHeuristic`` and ``hipblasLtMatmul`` reject a matmul with all-to-all stages attached through both attributes, and a descriptor attached through the attribute that does not match its stages. Set the value to NULL to detach. Data type: ``hipblasLtFusionDescriptor_t``. */
 #endif
   HIPBLASLT_MATMUL_DESC_MAX,
 } hipblasLtMatmulDescAttributes_t;
@@ -902,7 +910,7 @@ hipblasStatus_t hipblasLtCheckNumericsDrain(hipblasLtHandle_t handle,
  *  \brief Register this handle's view of a device communicator.
  *
  *  \details
- *  A collective fused epilogue needs to know which rank it is, how many peers it has, and where
+ *  A collective fused epilogue or prologue needs to know which rank it is, how many peers it has, and where
  *  those peers' library-owned flag regions live. This call establishes all three: it allocates
  *  this device's flag state as \p nChannels independent regions and exchanges the peer addresses
  *  through \p allgather. That state is invisible to the caller and its lifetime follows the
@@ -928,7 +936,7 @@ hipblasStatus_t hipblasLtCheckNumericsDrain(hipblasLtHandle_t handle,
  *  @param[in]
  *  nChannels   number of independent flag regions to allocate, one per concurrent operation.
  *              Must be at least ``1``, and must agree across ranks. See
- *              ``HIPBLASLT_FUSED_EPILOGUE_COMM_CHANNEL``.
+ *              ``HIPBLASLT_FUSION_COMM_CHANNEL``.
  *  @param[in]
  *  allgather   caller-supplied allgather; must not be NULL.
  *  @param[in]
@@ -1208,14 +1216,13 @@ hipblasStatus_t hipblasLtMatmulDescGetAttribute(hipblasLtMatmulDesc_t           
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
 /*! \ingroup library_module
- *  \brief Create a fused epilogue descriptor.
+ *  \brief Create a fusion descriptor.
  *
  *  \details
- *  Creates an empty fused epilogue descriptor. Select a stage with
- *  ``hipblasLtFusedEpilogueAdd``, configure it with ``hipblasLtFusedEpilogueSetAttribute``, and
- *  attach it to a matmul descriptor through ``HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE``. The same
- *  descriptor carries a fused prologue instead when its stage is selected with
- *  ``hipblasLtFusedPrologueAdd`` and it is attached through ``HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE``.
+ *  Creates an empty fusion descriptor. Select a stage with ``hipblasLtFusionAddEpilogue`` or
+ *  ``hipblasLtFusionAddPrologue``, configure it with ``hipblasLtFusionSetAttribute``, and attach
+ *  it to a matmul descriptor through ``HIPBLASLT_MATMUL_DESC_FUSED_EPILOGUE`` or
+ *  ``HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE`` respectively.
  *
  *  @param[out]
  *  desc  receives the created descriptor.
@@ -1225,7 +1232,7 @@ hipblasStatus_t hipblasLtMatmulDescGetAttribute(hipblasLtMatmulDesc_t           
  *  \retval HIPBLAS_STATUS_ALLOC_FAILED  the descriptor could not be allocated.
  */
 HIPBLASLT_EXPORT
-hipblasStatus_t hipblasLtFusedEpilogueCreate(hipblasLtFusedEpilogueDescriptor_t* desc);
+hipblasStatus_t hipblasLtFusionCreate(hipblasLtFusionDescriptor_t* desc);
 
 /*! \ingroup library_module
  *  \brief Select a fused epilogue stage on a descriptor.
@@ -1249,14 +1256,14 @@ hipblasStatus_t hipblasLtFusedEpilogueCreate(hipblasLtFusedEpilogueDescriptor_t*
  *                                       holds prologue stages.
  */
 HIPBLASLT_EXPORT
-hipblasStatus_t hipblasLtFusedEpilogueAdd(hipblasLtFusedEpilogueDescriptor_t desc,
-                                          hipblasLtFuseableEpilogue_t        epilogue);
+hipblasStatus_t hipblasLtFusionAddEpilogue(hipblasLtFusionDescriptor_t desc,
+                                           hipblasLtFuseableEpilogue_t epilogue);
 
 /*! \ingroup library_module
  *  \brief Select a fused prologue stage on a descriptor.
  *
  *  \details
- *  Appends \p prologue to the descriptor's stages, as ``hipblasLtFusedEpilogueAdd`` does for an
+ *  Appends \p prologue to the descriptor's stages, as ``hipblasLtFusionAddEpilogue`` does for an
  *  epilogue stage. A descriptor carrying prologue stages is attached through
  *  ``HIPBLASLT_MATMUL_DESC_FUSED_PROLOGUE``. See \ref hipblasLtFuseablePrologue_t for the
  *  per-family rules.
@@ -1273,16 +1280,16 @@ hipblasStatus_t hipblasLtFusedEpilogueAdd(hipblasLtFusedEpilogueDescriptor_t des
  *                                       epilogue stages.
  */
 HIPBLASLT_EXPORT
-hipblasStatus_t hipblasLtFusedPrologueAdd(hipblasLtFusedEpilogueDescriptor_t desc,
-                                          hipblasLtFuseablePrologue_t        prologue);
+hipblasStatus_t hipblasLtFusionAddPrologue(hipblasLtFusionDescriptor_t desc,
+                                           hipblasLtFuseablePrologue_t prologue);
 
 /*! \ingroup library_module
- *  \brief Set a parameter of a fused epilogue stage.
+ *  \brief Set a parameter of a fused stage.
  *
  *  \details
  *  Stage parameters travel with the stage that consumes them, so they are set here rather than on
  *  the matmul descriptor. Which attributes apply, and which of them are required, follows from
- *  the stages added to \p desc; see \ref hipblasLtFusedEpilogueAttribute_t. An array-valued
+ *  the stages added to \p desc; see \ref hipblasLtFusionAttribute_t. An array-valued
  *  attribute takes the address of a host array together with the size of all of its elements,
  *  and the library copies the entries, so the caller's array need not outlive the call.
  *
@@ -1302,13 +1309,13 @@ hipblasStatus_t hipblasLtFusedPrologueAdd(hipblasLtFusedEpilogueDescriptor_t des
  *                                       value is outside the attribute's accepted range.
  */
 HIPBLASLT_EXPORT
-hipblasStatus_t hipblasLtFusedEpilogueSetAttribute(hipblasLtFusedEpilogueDescriptor_t desc,
-                                                   hipblasLtFusedEpilogueAttribute_t  attr,
-                                                   const void*                        buf,
-                                                   size_t                             sizeInBytes);
+hipblasStatus_t hipblasLtFusionSetAttribute(hipblasLtFusionDescriptor_t desc,
+                                            hipblasLtFusionAttribute_t  attr,
+                                            const void*                 buf,
+                                            size_t                      sizeInBytes);
 
 /*! \ingroup library_module
- *  \brief Destroy a fused epilogue descriptor.
+ *  \brief Destroy a fusion descriptor.
  *
  *  \details
  *  Releases the descriptor. Any matmul descriptor still referencing it must not be used
@@ -1321,7 +1328,7 @@ hipblasStatus_t hipblasLtFusedEpilogueSetAttribute(hipblasLtFusedEpilogueDescrip
  *  \retval HIPBLAS_STATUS_SUCCESS the descriptor was destroyed.
  */
 HIPBLASLT_EXPORT
-hipblasStatus_t hipblasLtFusedEpilogueDestroy(hipblasLtFusedEpilogueDescriptor_t desc);
+hipblasStatus_t hipblasLtFusionDestroy(hipblasLtFusionDescriptor_t desc);
 #endif
 
 /*! \ingroup library_module

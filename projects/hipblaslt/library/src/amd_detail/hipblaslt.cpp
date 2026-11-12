@@ -251,12 +251,12 @@ namespace
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
 /********************************************************************************
- * Fused epilogue descriptor.
+ * Fusion descriptor.
  *
  * Opaque to the caller. Its contents are read only here, in the C-API layer that
  * knows what the stages mean; rocBLASLt carries it as a forward-declared pointer.
  *******************************************************************************/
-struct hipblasLtFusedEpilogueDescriptor
+struct hipblasLtFusionDescriptor
 {
     std::vector<hipblasLtFuseableEpilogue_t> stages;
     std::vector<hipblasLtFuseablePrologue_t> prologue_stages;
@@ -278,8 +278,7 @@ struct hipblasLtFusedEpilogueDescriptor
 
 namespace
 {
-    bool fused_epilogue_has_stage(const hipblasLtFusedEpilogueDescriptor* d,
-                                  hipblasLtFuseableEpilogue_t             e)
+    bool fused_epilogue_has_stage(const hipblasLtFusionDescriptor* d, hipblasLtFuseableEpilogue_t e)
     {
         for(auto s : d->stages)
             if(s == e)
@@ -287,8 +286,7 @@ namespace
         return false;
     }
 
-    bool fused_prologue_has_stage(const hipblasLtFusedEpilogueDescriptor* d,
-                                  hipblasLtFuseablePrologue_t             p)
+    bool fused_prologue_has_stage(const hipblasLtFusionDescriptor* d, hipblasLtFuseablePrologue_t p)
     {
         for(auto s : d->prologue_stages)
             if(s == p)
@@ -321,8 +319,8 @@ namespace
     // something the API does not define, so it should learn that at the call that
     // expresses the mistake. Legalizing a combination later turns this into
     // success, which is the compatible direction.
-    bool fused_epilogue_stage_composes(const hipblasLtFusedEpilogueDescriptor* desc,
-                                       hipblasLtFuseableEpilogue_t             stage)
+    bool fused_epilogue_stage_composes(const hipblasLtFusionDescriptor* desc,
+                                       hipblasLtFuseableEpilogue_t      stage)
     {
         if(desc->stages.empty())
             return true;
@@ -334,7 +332,7 @@ namespace
     // Every stage present must have the parameters it cannot run without. World
     // size is not known here, so the per-rank arrays are checked for content but
     // not length; validate_fused_a2a_launch compares both against it.
-    hipblasStatus_t validate_fused_epilogue_contents(const hipblasLtFusedEpilogueDescriptor* desc)
+    hipblasStatus_t validate_fused_epilogue_contents(const hipblasLtFusionDescriptor* desc)
     {
         if(!fused_epilogue_has_stage(desc, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX))
             return HIPBLAS_STATUS_SUCCESS;
@@ -375,9 +373,9 @@ namespace
     // n_shard % MT0 == 0, MT1 < 2^14, MT0/MT1 in {128, 256}, data-parallel only,
     // and no split-K - are enforced by the kernel generator as solution
     // rejections, so they become "no usable algo" rather than a return code here.
-    hipblasStatus_t validate_fused_a2a_launch(rocblaslt_handle                        handle,
-                                              const hipblasLtFusedEpilogueDescriptor* desc,
-                                              rocblaslt_matrix_layout                 matD)
+    hipblasStatus_t validate_fused_a2a_launch(rocblaslt_handle                 handle,
+                                              const hipblasLtFusionDescriptor* desc,
+                                              rocblaslt_matrix_layout          matD)
     {
         if(handle == nullptr || matD == nullptr)
             return HIPBLAS_STATUS_INVALID_VALUE;
@@ -456,10 +454,10 @@ namespace
         return HIPBLAS_STATUS_SUCCESS;
     }
 
-    hipblasStatus_t validate_fused_prologue_launch(rocblaslt_handle                        handle,
-                                                   const hipblasLtFusedEpilogueDescriptor* desc,
-                                                   rocblaslt_matrix_layout                 matB,
-                                                   rocblaslt_matrix_layout                 matD)
+    hipblasStatus_t validate_fused_prologue_launch(rocblaslt_handle                 handle,
+                                                   const hipblasLtFusionDescriptor* desc,
+                                                   rocblaslt_matrix_layout          matB,
+                                                   rocblaslt_matrix_layout          matD)
     {
         if(handle == nullptr || matB == nullptr || matD == nullptr)
             return HIPBLAS_STATUS_INVALID_VALUE;
@@ -628,9 +626,9 @@ namespace
 
 // The pointers alias the descriptor's own storage; they stay valid only as long as
 // the descriptor does.
-bool rocblaslt_resolve_fused_epilogue(const hipblasLtFusedEpilogueDescriptor* epilogue,
-                                      const hipblasLtFusedEpilogueDescriptor* prologue,
-                                      RocblasltFusedEpilogueInfo&             out)
+bool rocblaslt_resolve_fused_epilogue(const hipblasLtFusionDescriptor* epilogue,
+                                      const hipblasLtFusionDescriptor* prologue,
+                                      RocblasltFusedEpilogueInfo&      out)
 {
     if(epilogue == nullptr && prologue == nullptr)
         return false;
@@ -646,8 +644,7 @@ bool rocblaslt_resolve_fused_epilogue(const hipblasLtFusedEpilogueDescriptor* ep
                : gemmA2A ? RocblasltFusedEpilogueInfo::Mode::GemmA2A
                          : RocblasltFusedEpilogueInfo::Mode::Disabled;
 
-    const hipblasLtFusedEpilogueDescriptor* desc
-        = a2aGemm || epilogue == nullptr ? prologue : epilogue;
+    const hipblasLtFusionDescriptor* desc = a2aGemm || epilogue == nullptr ? prologue : epilogue;
     out.a2aSdmaQueues     = desc->a2a_queues.empty() ? nullptr : desc->a2a_queues.data();
     out.a2aRecvPtrs       = desc->a2a_recv_ptrs.empty() ? nullptr : desc->a2a_recv_ptrs.data();
     out.a2aPeerBPtrs      = desc->a2a_peer_b_ptrs.empty() ? nullptr : desc->a2a_peer_b_ptrs.data();
@@ -1072,17 +1069,17 @@ catch(...)
 }
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
-hipblasStatus_t hipblasLtFusedEpilogueCreate(hipblasLtFusedEpilogueDescriptor_t* desc)
+hipblasStatus_t hipblasLtFusionCreate(hipblasLtFusionDescriptor_t* desc)
 try
 {
-    rocblaslt::Debug::Instance().markerStart("hipblasLtFusedEpilogueCreate");
+    rocblaslt::Debug::Instance().markerStart("hipblasLtFusionCreate");
     if(desc == nullptr)
     {
         rocblaslt::Debug::Instance().markerStop();
         return HIPBLAS_STATUS_INVALID_VALUE;
     }
 
-    *desc = new hipblasLtFusedEpilogueDescriptor();
+    *desc = new hipblasLtFusionDescriptor();
     rocblaslt::Debug::Instance().markerStop();
     return HIPBLAS_STATUS_SUCCESS;
 }
@@ -1091,11 +1088,11 @@ catch(...)
     return exception_to_hipblas_status();
 }
 
-hipblasStatus_t hipblasLtFusedEpilogueAdd(hipblasLtFusedEpilogueDescriptor_t desc,
-                                          hipblasLtFuseableEpilogue_t        epilogue)
+hipblasStatus_t hipblasLtFusionAddEpilogue(hipblasLtFusionDescriptor_t desc,
+                                           hipblasLtFuseableEpilogue_t epilogue)
 try
 {
-    rocblaslt::Debug::Instance().markerStart("hipblasLtFusedEpilogueAdd");
+    rocblaslt::Debug::Instance().markerStart("hipblasLtFusionAddEpilogue");
     hipblasStatus_t status = HIPBLAS_STATUS_SUCCESS;
 
     if(desc == nullptr || !fused_epilogue_stage_recognized(epilogue))
@@ -1121,11 +1118,11 @@ catch(...)
     return exception_to_hipblas_status();
 }
 
-hipblasStatus_t hipblasLtFusedPrologueAdd(hipblasLtFusedEpilogueDescriptor_t desc,
-                                          hipblasLtFuseablePrologue_t        prologue)
+hipblasStatus_t hipblasLtFusionAddPrologue(hipblasLtFusionDescriptor_t desc,
+                                           hipblasLtFuseablePrologue_t prologue)
 try
 {
-    rocblaslt::Debug::Instance().markerStart("hipblasLtFusedPrologueAdd");
+    rocblaslt::Debug::Instance().markerStart("hipblasLtFusionAddPrologue");
     hipblasStatus_t status = HIPBLAS_STATUS_SUCCESS;
 
     if(desc == nullptr || !fused_prologue_stage_recognized(prologue))
@@ -1150,13 +1147,13 @@ catch(...)
     return exception_to_hipblas_status();
 }
 
-hipblasStatus_t hipblasLtFusedEpilogueSetAttribute(hipblasLtFusedEpilogueDescriptor_t desc,
-                                                   hipblasLtFusedEpilogueAttribute_t  attr,
-                                                   const void*                        buf,
-                                                   size_t                             sizeInBytes)
+hipblasStatus_t hipblasLtFusionSetAttribute(hipblasLtFusionDescriptor_t desc,
+                                            hipblasLtFusionAttribute_t  attr,
+                                            const void*                 buf,
+                                            size_t                      sizeInBytes)
 try
 {
-    rocblaslt::Debug::Instance().markerStart("hipblasLtFusedEpilogueSetAttribute");
+    rocblaslt::Debug::Instance().markerStart("hipblasLtFusionSetAttribute");
     hipblasStatus_t status = HIPBLAS_STATUS_SUCCESS;
 
     if(desc == nullptr || buf == nullptr)
@@ -1167,7 +1164,7 @@ try
 
     switch(attr)
     {
-    case HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT:
+    case HIPBLASLT_FUSION_A2A_EXTENT:
     {
         if(sizeInBytes < sizeof(int64_t))
         {
@@ -1187,7 +1184,7 @@ try
         desc->a2a_extent_set = true;
         break;
     }
-    case HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_COMPLETION_MODE:
+    case HIPBLASLT_FUSION_A2A_COMPLETION_MODE:
     {
         if(sizeInBytes < sizeof(hipblasLtA2ACompletionMode_t))
         {
@@ -1206,7 +1203,7 @@ try
         desc->a2a_completion = mode;
         break;
     }
-    case HIPBLASLT_FUSED_EPILOGUE_COMM_CHANNEL:
+    case HIPBLASLT_FUSION_COMM_CHANNEL:
     {
         if(sizeInBytes < sizeof(uint32_t))
         {
@@ -1220,7 +1217,7 @@ try
         memcpy(&desc->comm_channel, buf, sizeof(desc->comm_channel));
         break;
     }
-    case HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS:
+    case HIPBLASLT_FUSION_A2A_RECV_PTRS:
     {
         if(sizeInBytes == 0 || sizeInBytes % sizeof(void*) != 0
            || sizeInBytes / sizeof(void*) > HIPBLASLT_DEVICE_COMM_MAX_WORLD)
@@ -1234,7 +1231,7 @@ try
         memcpy(desc->a2a_recv_ptrs.data(), buf, sizeInBytes);
         break;
     }
-    case HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES:
+    case HIPBLASLT_FUSION_A2A_SDMA_QUEUES:
     {
         if(sizeInBytes == 0 || sizeInBytes % sizeof(hipblasLtSdmaQueue_t) != 0
            || sizeInBytes / sizeof(hipblasLtSdmaQueue_t) > HIPBLASLT_DEVICE_COMM_MAX_WORLD)
@@ -1248,7 +1245,7 @@ try
         memcpy(desc->a2a_queues.data(), buf, sizeInBytes);
         break;
     }
-    case HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_PEER_B_PTRS:
+    case HIPBLASLT_FUSION_A2A_PEER_B_PTRS:
     {
         if(sizeInBytes == 0 || sizeInBytes % sizeof(void*) != 0
            || sizeInBytes / sizeof(void*) > HIPBLASLT_DEVICE_COMM_MAX_WORLD)
@@ -1262,7 +1259,7 @@ try
         memcpy(desc->a2a_peer_b_ptrs.data(), buf, sizeInBytes);
         break;
     }
-    case HIPBLASLT_FUSED_PROLOGUE_A2A_PREFIX_GATHER_BUFFER:
+    case HIPBLASLT_FUSION_A2A_GATHER_BUFFER:
     {
         if(sizeInBytes < sizeof(void*))
         {
@@ -1282,7 +1279,7 @@ try
         break;
     }
     default:
-        log_error(__func__, "invalid fused epilogue attribute", (int)attr);
+        log_error(__func__, "invalid fusion attribute", (int)attr);
         status = HIPBLAS_STATUS_INVALID_VALUE;
         break;
     }
@@ -1295,10 +1292,10 @@ catch(...)
     return exception_to_hipblas_status();
 }
 
-hipblasStatus_t hipblasLtFusedEpilogueDestroy(hipblasLtFusedEpilogueDescriptor_t desc)
+hipblasStatus_t hipblasLtFusionDestroy(hipblasLtFusionDescriptor_t desc)
 try
 {
-    rocblaslt::Debug::Instance().markerStart("hipblasLtFusedEpilogueDestroy");
+    rocblaslt::Debug::Instance().markerStart("hipblasLtFusionDestroy");
     delete desc;
     rocblaslt::Debug::Instance().markerStop();
     return HIPBLAS_STATUS_SUCCESS;

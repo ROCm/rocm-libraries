@@ -204,7 +204,7 @@ namespace
     // Releases the descriptors a rank builds, on every path out of runRank.
     struct MatmulHandles
     {
-        hipblasLtFusedEpilogueDescriptor_t fused  = nullptr;
+        hipblasLtFusionDescriptor_t        fused  = nullptr;
         hipblasLtMatrixLayout_t            lay[4] = {};
         hipblasLtMatmulDesc_t              mm     = nullptr;
         hipblasLtMatmulPreference_t        pref   = nullptr;
@@ -219,7 +219,7 @@ namespace
                 if(layout != nullptr)
                     hipblasLtMatrixLayoutDestroy(layout);
             if(fused != nullptr)
-                hipblasLtFusedEpilogueDestroy(fused);
+                hipblasLtFusionDestroy(fused);
         }
     };
 
@@ -348,24 +348,22 @@ namespace
         }
 
         auto& fused = handles.fused;
-        CHECK_LT(hipblasLtFusedEpilogueCreate(&fused));
-        CHECK_LT(hipblasLtFusedEpilogueAdd(fused, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX));
+        CHECK_LT(hipblasLtFusionCreate(&fused));
+        CHECK_LT(hipblasLtFusionAddEpilogue(fused, HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX));
 
         // Both attributes take the per-rank array itself, sized in whole entries.
-        CHECK_LT(hipblasLtFusedEpilogueSetAttribute(fused,
-                                                    HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES,
-                                                    self.queues,
-                                                    kWorld * sizeof(self.queues[0])));
-        CHECK_LT(hipblasLtFusedEpilogueSetAttribute(fused,
-                                                    HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS,
-                                                    self.recvPtrs,
-                                                    kWorld * sizeof(self.recvPtrs[0])));
+        CHECK_LT(hipblasLtFusionSetAttribute(
+            fused, HIPBLASLT_FUSION_A2A_SDMA_QUEUES, self.queues, kWorld * sizeof(self.queues[0])));
+        CHECK_LT(hipblasLtFusionSetAttribute(fused,
+                                             HIPBLASLT_FUSION_A2A_RECV_PTRS,
+                                             self.recvPtrs,
+                                             kWorld * sizeof(self.recvPtrs[0])));
         const int64_t extent = kExtent;
-        CHECK_LT(hipblasLtFusedEpilogueSetAttribute(
-            fused, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT, &extent, sizeof(extent)));
+        CHECK_LT(hipblasLtFusionSetAttribute(
+            fused, HIPBLASLT_FUSION_A2A_EXTENT, &extent, sizeof(extent)));
         const hipblasLtA2ACompletionMode_t mode = HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL;
-        CHECK_LT(hipblasLtFusedEpilogueSetAttribute(
-            fused, HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_COMPLETION_MODE, &mode, sizeof(mode)));
+        CHECK_LT(hipblasLtFusionSetAttribute(
+            fused, HIPBLASLT_FUSION_A2A_COMPLETION_MODE, &mode, sizeof(mode)));
 
         auto &layA = handles.lay[0], &layB = handles.lay[1];
         auto &layC = handles.lay[2], &layD = handles.lay[3];
@@ -408,11 +406,8 @@ namespace
         // Successive launches alternate the communicator's flag regions.
         auto launch = [&] {
             const uint32_t        channel = launchCount++ % kChannels;
-            const hipblasStatus_t channelStatus
-                = hipblasLtFusedEpilogueSetAttribute(fused,
-                                                     HIPBLASLT_FUSED_EPILOGUE_COMM_CHANNEL,
-                                                     &channel,
-                                                     sizeof(channel));
+            const hipblasStatus_t channelStatus = hipblasLtFusionSetAttribute(
+                fused, HIPBLASLT_FUSION_COMM_CHANNEL, &channel, sizeof(channel));
             if(channelStatus != HIPBLAS_STATUS_SUCCESS)
                 return channelStatus;
 
