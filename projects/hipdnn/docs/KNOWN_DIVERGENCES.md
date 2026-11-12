@@ -120,8 +120,9 @@ A `dropout_probability` of 0 is the graph without dropout, forward and backward:
 - `Graph::deserialize(data, enforce_precompiled)` without a handle.
 - `HIPDNN_COMPATIBILITY_CUDNN_FRONTEND` macro.
 - SDPA forward with a ragged Q over non-paged K/V validates with `seq_len_kv` alone (PyTorch's varlen `seqused_k`); the query lengths come from Q's ragged offset. cuDNN frontend v1.24.0 requires `seq_len_q` as well; cuDNN 9.25 spells the form `cu_seq_len_q` + `seq_len_kv`. See [SEM-028](./SdpaSemanticsRegister.md#sem-028-ragged-q-with-seq_len_kv-alone-non-paged-kv).
+- SDPA backward with FP32 Q, K, V, O, dO and gradients: served by the hip-kernel-provider's `hipkernel:flydsl_sdpa_bwd_split` engine. cuDNN documents its SDPA backward for FP16 and BF16 only. See [COVERAGE.md](../../../dnn-providers/hip-kernel-provider/flydsl/COVERAGE.md).
 
-Code that must also compile against NVIDIA cuDNN cannot use these.
+Code that must also compile or run against NVIDIA cuDNN cannot use these.
 
 ## Versions
 

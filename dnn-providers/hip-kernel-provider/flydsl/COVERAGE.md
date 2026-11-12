@@ -2315,8 +2315,8 @@ causal mask (MW-11); bottom-right causal alignment or a window with `Sq > Skv` a
 `padding_mask` (the matcher has no rule against it); head dims that are not a multiple of
 8 (DT-8); head dims above 256 up to 512 (cuDNN v1.24.0 rejects above 256 on SM9x);
 `s_q = s_kv = 1` (the matcher has no rule against it); f32
-data (DT-2, split engine; the v1.24.0 frontend has no data-type check, so whether cuDNN
-serves f32 is unverified). The declines of ALiBi, a bias with a top-left causal or window
+data (DT-2, split engine; cuDNN documents its SDPA backward for FP16 and BF16 only, see
+[KNOWN_DIVERGENCES.md](../../../projects/hipdnn/docs/KNOWN_DIVERGENCES.md#hipdnn-extensions)). The declines of ALiBi, a bias with a top-left causal or window
 mask, bias or dBias with `padding_mask`, ragged bias or dBias, a dropout mask tensor, a
 device scale tensor (SC-2) and a window with bottom-right alignment under `padding_mask`
 (MW-13) are graphs cuDNN serves. cuDNN rejects a bottom-right causal mask with a bias, so
