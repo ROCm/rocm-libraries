@@ -378,7 +378,10 @@ std::optional<StemBwdLaunch>
     // 3-D: z is (image, dx plane).
     const int64_t planes = config.ft != 0 ? a.inSpatial[0] : 1;
     const auto gridZ = pack_features::checkedProduct({a.n, planes});
-    if(gridX > INT_LIMIT || gridY > MAX_GRID_YZ || !gridZ.has_value() || *gridZ > MAX_GRID_YZ)
+    // One dispatch addresses at most 2^32 - 1 work items along x.
+    if(gridX > INT_LIMIT
+       || gridX * threads > static_cast<int64_t>(std::numeric_limits<uint32_t>::max())
+       || gridY > MAX_GRID_YZ || !gridZ.has_value() || *gridZ > MAX_GRID_YZ)
     {
         return std::nullopt;
     }
