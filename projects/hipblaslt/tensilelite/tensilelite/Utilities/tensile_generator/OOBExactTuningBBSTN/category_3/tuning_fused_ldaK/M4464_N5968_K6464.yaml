@@ -1,5 +1,9 @@
-# OOB BBS TN exact tuning, category 3, M=4464 N=5968 K=6464 (fused GEMM: Bias + ScaleAlphaVec, activation none, ActivationFuncCall true; lda=ldb=K, ldc=ldd=M): group 1 = winner, group 2 = previous logic kernel.
-# EnqueuesPerSync 400 / NumWarmups 160 / NumBenchmarks 5.
+# OOB BBS TN exact tuning, category 3, M=4464 N=5968 K=6464 (fused GEMM: Bias (f32) + ScaleAlphaVec, activation none, ActivationFuncCall true; lda=ldb=K=6464, ldc=ldd=M), gfx1250.
+# Full original candidate search for this size, merged from the fused lda=K retune sets: f_ (1 file), x_ (1 file) (x_ = supplement).
+# Candidates: 60 groups in (incl. 2 ruler(s)) -> 57 after exact de-dup. Per set in->kept (first occurrence wins): ruler 2->2; f 53->51; x 5->4.
+# All parameters are develop Tensile parameters.
+# Group 1 = current public winner (logic in this category), group 2 = previous logic kernel (logic_1109a).
+# EnqueuesPerSync 400 / NumWarmups 160 / NumBenchmarks 3 / RotatingBufferSize 384 / CSVMergeSameProblemID false.
 GlobalParameters:
   MinimumRequiredVersion: 5.0.0
   SleepPercent: 0
@@ -24,7 +28,7 @@ GlobalParameters:
   RotatingBufferSize: 384
   UseEffLike: false
   SyncsPerBenchmark: 1
-  NumBenchmarks: 5
+  NumBenchmarks: 3
   CpuThreads: 32
   PrintSolutionRejectionReason: true
 BenchmarkProblems:
@@ -46,7 +50,6 @@ BenchmarkProblems:
     BenchmarkCommonParameters:
     - KernelLanguage: [Assembly]
     ForkParameters:
-    - ClusterLocalRead: [0]
     - DirectToLdsMetadata: [0]
     - DtlPlusLdsBuf: [0]
     - ExpandPointerSwap: [false]
@@ -81,17 +84,18 @@ BenchmarkProblems:
     - TDMIterateMode: [0]
     - MIArchVgpr: [true]
     - AdaptiveGemm: [1]
-    - CompactLoopStore: [true]
     - LDSSegmentBRotate: [0]
     - ActivationFuncCall: [true]
-    - TileProcessingStrategy: [None]
-    - GlobalSplitU: [1]
-    - VectorWidthA: [2]
-    - VectorWidthB: [4]
-    - LdsBlockSizePerPadA: [512]
-    - LdsBlockSizePerPadB: [1024]
     - Groups:
-      - - MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+      - - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
           WorkGroup: [32, 1, 1]
           DepthU: 128
           StoreVectorWidth: 2
@@ -100,7 +104,16 @@ BenchmarkProblems:
           ClusterDim: [2, 2]
           ClusterAIDMapping: -2
           SourceSwap: true
-        - MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
           WorkGroup: [32, 1, 1]
           DepthU: 128
           StoreVectorWidth: 8
@@ -109,13 +122,1004 @@ BenchmarkProblems:
           ClusterDim: [1, 1]
           ClusterAIDMapping: -1
           SourceSwap: false
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [2, 2]
+          ClusterAIDMapping: -2
+          SourceSwap: false
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 1
+          ClusterDim: [2, 2]
+          ClusterAIDMapping: -2
+          SourceSwap: false
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 1
+          HalfPLR: 1
+          ClusterDim: [2, 2]
+          ClusterAIDMapping: -2
+          SourceSwap: false
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 2
+          ClusterDim: [2, 2]
+          ClusterAIDMapping: -2
+          SourceSwap: false
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 1
+          HalfPLR: 2
+          ClusterDim: [2, 2]
+          ClusterAIDMapping: -2
+          SourceSwap: false
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 2
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [2, 2]
+          ClusterAIDMapping: -2
+          SourceSwap: true
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 2
+          LDSSegmentInterleave: 0
+          HalfPLR: 1
+          ClusterDim: [2, 2]
+          ClusterAIDMapping: -2
+          SourceSwap: true
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 2
+          LDSSegmentInterleave: 1
+          HalfPLR: 1
+          ClusterDim: [2, 2]
+          ClusterAIDMapping: -2
+          SourceSwap: true
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 2
+          LDSSegmentInterleave: 0
+          HalfPLR: 2
+          ClusterDim: [2, 2]
+          ClusterAIDMapping: -2
+          SourceSwap: true
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: false
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 2
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [2, 2]
+          ClusterAIDMapping: -2
+          SourceSwap: true
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: false
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 2
+          LDSSegmentInterleave: 0
+          HalfPLR: 1
+          ClusterDim: [2, 2]
+          ClusterAIDMapping: -2
+          SourceSwap: true
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: false
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 2
+          LDSSegmentInterleave: 1
+          HalfPLR: 1
+          ClusterDim: [2, 2]
+          ClusterAIDMapping: -2
+          SourceSwap: true
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: false
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 2
+          LDSSegmentInterleave: 0
+          HalfPLR: 2
+          ClusterDim: [2, 2]
+          ClusterAIDMapping: -2
+          SourceSwap: true
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: false
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 2
+          LDSSegmentInterleave: 1
+          HalfPLR: 2
+          ClusterDim: [2, 2]
+          ClusterAIDMapping: -2
+          SourceSwap: true
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 1
+          HalfPLR: 0
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          SourceSwap: false
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 1
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          SourceSwap: false
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 1
+          HalfPLR: 1
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          SourceSwap: false
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 2
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          SourceSwap: false
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 1
+          HalfPLR: 2
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          SourceSwap: false
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 2
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          SourceSwap: true
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 2
+          LDSSegmentInterleave: 1
+          HalfPLR: 0
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          SourceSwap: true
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 2
+          LDSSegmentInterleave: 0
+          HalfPLR: 1
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          SourceSwap: true
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 2
+          LDSSegmentInterleave: 1
+          HalfPLR: 1
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          SourceSwap: true
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 2
+          LDSSegmentInterleave: 0
+          HalfPLR: 2
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          SourceSwap: true
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 2
+          LDSSegmentInterleave: 1
+          HalfPLR: 2
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          SourceSwap: true
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 1
+          VectorWidthB: 1
+          LdsBlockSizePerPadA: 256
+          LdsBlockSizePerPadB: 256
+          MatrixInstruction: [16, 16, 32, 1, 1, 5, 11, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [2, 4]
+          ClusterAIDMapping: -1
+          SourceSwap: false
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 1
+          VectorWidthB: 1
+          LdsBlockSizePerPadA: 256
+          LdsBlockSizePerPadB: 256
+          MatrixInstruction: [16, 16, 32, 1, 1, 5, 11, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [2, 4]
+          ClusterAIDMapping: -1
+          SourceSwap: true
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 1
+          VectorWidthB: 2
+          LdsBlockSizePerPadA: 256
+          LdsBlockSizePerPadB: 512
+          MatrixInstruction: [16, 16, 32, 1, 1, 9, 6, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [2, 4]
+          ClusterAIDMapping: -1
+          SourceSwap: false
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          VectorWidthA: 1
+          VectorWidthB: 2
+          LdsBlockSizePerPadA: 256
+          LdsBlockSizePerPadB: 512
+          MatrixInstruction: [16, 16, 32, 1, 1, 9, 6, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [2, 4]
+          ClusterAIDMapping: -1
+          SourceSwap: false
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          VectorWidthA: 1
+          VectorWidthB: 2
+          LdsBlockSizePerPadA: 256
+          LdsBlockSizePerPadB: 512
+          MatrixInstruction: [16, 16, 32, 1, 1, 9, 6, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 2
+          ClusterDim: [2, 4]
+          ClusterAIDMapping: -1
+          SourceSwap: false
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          VectorWidthA: 1
+          VectorWidthB: 2
+          LdsBlockSizePerPadA: 256
+          LdsBlockSizePerPadB: 512
+          MatrixInstruction: [16, 16, 32, 1, 1, 9, 6, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [2, 4]
+          ClusterAIDMapping: -1
+          SourceSwap: true
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          VectorWidthA: 1
+          VectorWidthB: 2
+          LdsBlockSizePerPadA: 256
+          LdsBlockSizePerPadB: 512
+          MatrixInstruction: [16, 16, 32, 1, 1, 9, 6, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 0
+          HalfPLR: 2
+          ClusterDim: [2, 4]
+          ClusterAIDMapping: -1
+          SourceSwap: true
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 1
+          VectorWidthB: 2
+          LdsBlockSizePerPadA: 256
+          LdsBlockSizePerPadB: 512
+          MatrixInstruction: [16, 16, 32, 1, 1, 9, 6, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [2, 4]
+          ClusterAIDMapping: -2
+          SourceSwap: false
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          VectorWidthA: 1
+          VectorWidthB: 2
+          LdsBlockSizePerPadA: 256
+          LdsBlockSizePerPadB: 512
+          MatrixInstruction: [16, 16, 32, 1, 1, 9, 6, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [2, 4]
+          ClusterAIDMapping: -2
+          SourceSwap: false
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          VectorWidthA: 1
+          VectorWidthB: 2
+          LdsBlockSizePerPadA: 256
+          LdsBlockSizePerPadB: 512
+          MatrixInstruction: [16, 16, 32, 1, 1, 9, 6, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 2
+          ClusterDim: [2, 4]
+          ClusterAIDMapping: -2
+          SourceSwap: false
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          VectorWidthA: 1
+          VectorWidthB: 2
+          LdsBlockSizePerPadA: 256
+          LdsBlockSizePerPadB: 512
+          MatrixInstruction: [16, 16, 32, 1, 1, 9, 6, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [2, 4]
+          ClusterAIDMapping: -2
+          SourceSwap: true
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          VectorWidthA: 1
+          VectorWidthB: 2
+          LdsBlockSizePerPadA: 256
+          LdsBlockSizePerPadB: 512
+          MatrixInstruction: [16, 16, 32, 1, 1, 9, 6, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 0
+          HalfPLR: 2
+          ClusterDim: [2, 4]
+          ClusterAIDMapping: -2
+          SourceSwap: true
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 1
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 1
+          VectorWidthB: 1
+          LdsBlockSizePerPadA: 256
+          LdsBlockSizePerPadB: 256
+          MatrixInstruction: [16, 16, 32, 1, 1, 5, 11, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [2, 4]
+          ClusterAIDMapping: -1
+          SourceSwap: false
+          PrefetchLocalRead: 2
+        - ClusterLocalRead: 1
+          CompactLoopStore: true
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          VectorWidthA: 1
+          VectorWidthB: 2
+          LdsBlockSizePerPadA: 256
+          LdsBlockSizePerPadB: 512
+          MatrixInstruction: [16, 16, 32, 1, 1, 9, 6, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [2, 4]
+          ClusterAIDMapping: -1
+          SourceSwap: false
+          PrefetchLocalRead: 2
+        - ClusterLocalRead: 1
+          CompactLoopStore: true
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          VectorWidthA: 1
+          VectorWidthB: 2
+          LdsBlockSizePerPadA: 256
+          LdsBlockSizePerPadB: 512
+          MatrixInstruction: [16, 16, 32, 1, 1, 9, 6, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [2, 4]
+          ClusterAIDMapping: -2
+          SourceSwap: false
+          PrefetchLocalRead: 2
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 1
+          VectorWidthB: 1
+          LdsBlockSizePerPadA: 256
+          LdsBlockSizePerPadB: 256
+          MatrixInstruction: [16, 16, 32, 1, 1, 5, 11, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [2, 4]
+          ClusterAIDMapping: -1
+          SourceSwap: false
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 1
+          CompactLoopStore: true
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 1
+          VectorWidthB: 1
+          LdsBlockSizePerPadA: 256
+          LdsBlockSizePerPadB: 256
+          MatrixInstruction: [16, 16, 32, 1, 1, 5, 11, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [2, 4]
+          ClusterAIDMapping: -1
+          SourceSwap: false
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          VectorWidthA: 1
+          VectorWidthB: 2
+          LdsBlockSizePerPadA: 256
+          LdsBlockSizePerPadB: 512
+          MatrixInstruction: [16, 16, 32, 1, 1, 9, 6, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [2, 4]
+          ClusterAIDMapping: -1
+          SourceSwap: false
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 1
+          CompactLoopStore: true
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          VectorWidthA: 1
+          VectorWidthB: 2
+          LdsBlockSizePerPadA: 256
+          LdsBlockSizePerPadB: 512
+          MatrixInstruction: [16, 16, 32, 1, 1, 9, 6, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [2, 4]
+          ClusterAIDMapping: -1
+          SourceSwap: false
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 0
+          CompactLoopStore: true
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          VectorWidthA: 1
+          VectorWidthB: 2
+          LdsBlockSizePerPadA: 256
+          LdsBlockSizePerPadB: 512
+          MatrixInstruction: [16, 16, 32, 1, 1, 9, 6, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [2, 4]
+          ClusterAIDMapping: -2
+          SourceSwap: false
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 1
+          CompactLoopStore: true
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          VectorWidthA: 1
+          VectorWidthB: 2
+          LdsBlockSizePerPadA: 256
+          LdsBlockSizePerPadB: 512
+          MatrixInstruction: [16, 16, 32, 1, 1, 9, 6, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [2, 4]
+          ClusterAIDMapping: -2
+          SourceSwap: false
+          PrefetchLocalRead: 3
+        - ClusterLocalRead: 0
+          CompactLoopStore: false
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          SourceSwap: false
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: false
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 2
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          SourceSwap: true
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: false
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 1
+          VectorWidthB: 1
+          LdsBlockSizePerPadA: 256
+          LdsBlockSizePerPadB: 256
+          MatrixInstruction: [16, 16, 32, 1, 1, 5, 11, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [2, 4]
+          ClusterAIDMapping: -1
+          SourceSwap: false
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: false
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 1
+          VectorWidthB: 1
+          LdsBlockSizePerPadA: 256
+          LdsBlockSizePerPadB: 256
+          MatrixInstruction: [16, 16, 32, 1, 1, 5, 11, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 1
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [2, 4]
+          ClusterAIDMapping: -1
+          SourceSwap: true
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: false
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 0
+          ClusterDim: [2, 2]
+          ClusterAIDMapping: -2
+          SourceSwap: false
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: false
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 1
+          ClusterDim: [2, 2]
+          ClusterAIDMapping: -2
+          SourceSwap: false
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: false
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 1
+          HalfPLR: 1
+          ClusterDim: [2, 2]
+          ClusterAIDMapping: -2
+          SourceSwap: false
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: false
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 0
+          HalfPLR: 2
+          ClusterDim: [2, 2]
+          ClusterAIDMapping: -2
+          SourceSwap: false
+          PrefetchLocalRead: 1
+        - ClusterLocalRead: 0
+          CompactLoopStore: false
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          VectorWidthA: 2
+          VectorWidthB: 4
+          LdsBlockSizePerPadA: 512
+          LdsBlockSizePerPadB: 1024
+          MatrixInstruction: [16, 16, 32, 1, 1, 14, 4, 1, 4]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          StoreVectorWidth: 8
+          LDSSegmentInterleave: 1
+          HalfPLR: 2
+          ClusterDim: [2, 2]
+          ClusterAIDMapping: -2
+          SourceSwap: false
+          PrefetchLocalRead: 1
     BenchmarkJoinParameters: null
     BenchmarkFinalParameters:
     - ProblemSizes:
       - Exact: [4464, 5968, 1, 6464, 4464, 4464, 6464, 6464]
     - BiasTypeArgs: [s]
     - ActivationArgs:
-      - - {Enum: none}
+      - - Enum: none
 LibraryLogic:
   ScheduleName: gfx1250
   DeviceNames: [Device 73f0]

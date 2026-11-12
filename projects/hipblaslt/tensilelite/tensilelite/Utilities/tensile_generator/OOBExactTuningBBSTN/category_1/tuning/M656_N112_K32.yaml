@@ -1,5 +1,10 @@
-# OOB BBS TN exact tuning, category 1, M=656 N=112 K=32 (pure GEMM, lda=ldb=128): group 1 = winner, group 2 = previous logic kernel.
-# EnqueuesPerSync 1000 / NumWarmups 300 / NumBenchmarks 5.
+# OOB BBS TN exact tuning, category 1, M=656 N=112 K=32 (pure GEMM, lda=ldb=128 = ceil(K/128)*128), gfx1250.
+# Full original candidate search for this size, merged from tune_1111/tune_1112 sets: p_ (1 file), s_ (1 file).
+# Candidates: 42 groups in (incl. 2 ruler(s)) -> 17 after exact de-dup and removing 8 StreamK (cat1 rule). Per set in->kept (first occurrence wins): ruler 2->2; p 18->9; s 22->6.
+# Removed parameters (not in develop Tensile): TDMStoreInst (TDMStoreInst1 x2, TDMStoreInst2 x4, TDMStoreInst3 x6 -> TDMSI0, duplicates of existing TDMSI0 arms dropped).
+# Group 1 = current public winner (logic in this category), group 2 = previous logic kernel (logic_1109a).
+# cat1: no StreamK candidates (Ray).
+# EnqueuesPerSync 1000 / NumWarmups 300 / NumBenchmarks 5 / RotatingBufferSize 384 / CSVMergeSameProblemID false.
 GlobalParameters:
   MinimumRequiredVersion: 5.0.0
   SleepPercent: 0
@@ -90,25 +95,194 @@ BenchmarkProblems:
     - AdaptiveGemm: [1]
     - LDSSegmentBRotate: [0]
     - ActivationFuncCall: [true]
-    - PrefetchGL2: [0]
-    - StoreRemapVectorWidth: [0]
-    - CompactLoopStore: [false]
-    - ClusterAIDMapping: [-1]
     - Groups:
-      - - MatrixInstruction: [16, 16, 32, 1, 1, 3, 1, 4, 1]
+      - - PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          CompactLoopStore: false
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 3, 1, 4, 1]
           WorkGroup: [32, 1, 1]
           DepthU: 32
           VectorWidthA: 1
           StoreVectorWidth: 1
           ClusterDim: [4, 2]
           SourceSwap: true
-        - MatrixInstruction: [16, 16, 32, 1, 1, 2, 1, 1, 1]
+        - PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          CompactLoopStore: false
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 2, 1, 1, 1]
           WorkGroup: [16, 2, 1]
           DepthU: 32
           VectorWidthA: 2
           StoreVectorWidth: -1
           ClusterDim: [2, 1]
           SourceSwap: false
+        - PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          CompactLoopStore: false
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 2, 1, 1, 1]
+          WorkGroup: [16, 2, 1]
+          DepthU: 32
+          VectorWidthA: 2
+          StoreVectorWidth: 2
+          ClusterDim: [2, 1]
+          SourceSwap: true
+        - PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 3, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthA: 1
+          StoreVectorWidth: 8
+          ClusterDim: [4, 4]
+          SourceSwap: false
+        - PrefetchGL2: 1
+          StoreRemapVectorWidth: -1
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 3, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthA: 1
+          StoreVectorWidth: 1
+          ClusterDim: [4, 4]
+          SourceSwap: true
+        - PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          CompactLoopStore: false
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 2, 1, 1, 1]
+          WorkGroup: [16, 2, 1]
+          DepthU: 32
+          VectorWidthA: 2
+          StoreVectorWidth: -1
+          ClusterDim: [1, 2]
+          SourceSwap: false
+        - PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          CompactLoopStore: false
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 2, 1, 1, 1]
+          WorkGroup: [16, 2, 1]
+          DepthU: 32
+          VectorWidthA: 2
+          StoreVectorWidth: 2
+          ClusterDim: [1, 2]
+          SourceSwap: true
+        - PrefetchGL2: 0
+          StoreRemapVectorWidth: -1
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 2, 1, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthA: 2
+          StoreVectorWidth: 2
+          ClusterDim: [2, 1]
+          SourceSwap: true
+        - PrefetchGL2: 1
+          StoreRemapVectorWidth: -1
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 2, 1, 2, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthA: 2
+          StoreVectorWidth: 2
+          ClusterDim: [2, 1]
+          SourceSwap: true
+        - PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 3, 1, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthA: 1
+          StoreVectorWidth: 8
+          ClusterDim: [4, 2]
+          SourceSwap: false
+        - PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 3, 1, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthA: 1
+          StoreVectorWidth: 8
+          ClusterDim: [4, 2]
+          SourceSwap: false
+        - PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          CompactLoopStore: false
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 2, 1, 1, 1]
+          WorkGroup: [16, 2, 1]
+          DepthU: 32
+          VectorWidthA: 2
+          StoreVectorWidth: 8
+          ClusterDim: [2, 1]
+          SourceSwap: false
+        - PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          CompactLoopStore: false
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 3, 1, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthA: 1
+          StoreVectorWidth: 8
+          ClusterDim: [4, 2]
+          SourceSwap: false
+        - PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 3, 1, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthA: 1
+          StoreVectorWidth: 1
+          ClusterDim: [4, 2]
+          SourceSwap: true
+        - PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          CompactLoopStore: false
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 3, 1, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthA: 1
+          StoreVectorWidth: 8
+          ClusterDim: [4, 2]
+          SourceSwap: false
+        - PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          CompactLoopStore: true
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 3, 1, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthA: 1
+          StoreVectorWidth: 1
+          ClusterDim: [4, 2]
+          SourceSwap: true
+        - PrefetchGL2: 0
+          StoreRemapVectorWidth: 0
+          CompactLoopStore: false
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 3, 1, 4, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 32
+          VectorWidthA: 1
+          StoreVectorWidth: 1
+          ClusterDim: [4, 2]
+          SourceSwap: true
     BenchmarkJoinParameters: null
     BenchmarkFinalParameters:
     - ProblemSizes:

@@ -1,12 +1,17 @@
 # OOB BBS TN exact tuning, category 1 (gfx1250, BF16 in/out, FP32 compute, TN)
 
 - `gfx1250_Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs.yaml`: ExactLogic for the 10 sizes below, 10 solutions.
-- `tuning/M<m>_N<n>_K<k>.yaml`: one Tensile tuning config per size. Group 1 = new winner, group 2 = previous logic kernel
-  (logic_1109a, for an A/B in the same client run). Pure GEMM, `Exact: [M, N, 1, K, M, M, LDA, LDB]` with LDA = LDB = ceil(K/128)*128,
+- `tuning/M<m>_N<n>_K<k>.yaml`: one Tensile tuning config per size with the full candidate search for that size
+  (all tuning rounds merged into one file, identical solutions removed; the header comment lists the merged sets and
+  the candidate count). Group 1 = new winner, group 2 = previous logic kernel (logic_1109a).
+  Category 1 candidates contain no StreamK; where the previous logic kernel is StreamK it is included only as a
+  comparison ruler in a separate second BenchmarkProblems section.
+  Pure GEMM, `Exact: [M, N, 1, K, M, M, LDA, LDB]` with LDA = LDB = ceil(K/128)*128,
   EnqueuesPerSync 1000 / NumWarmups 300 / NumBenchmarks 5, RotatingBufferSize 384.
-- `tuning_fused_ldaK/M<m>_N<n>_K<k>.yaml`: the same kernels per size as `tuning/`, as fused GEMM with unpadded
-  leading dimensions: Bias (f32) + ScaleAlphaVec, activation none, ActivationFuncCall true (the problem type of the
-  logic file), `Exact: [M, N, 1, K, M, M, K, K]` (LDA = LDB = K, LDC = LDD = M), same benchmark settings.
+- `tuning_fused_ldaK/M<m>_N<n>_K<k>.yaml`: the full candidate search of the fused retune for that size, same layout as
+  `tuning/`, as fused GEMM with unpadded leading dimensions: Bias (f32) + ScaleAlphaVec, activation none,
+  ActivationFuncCall true (the problem type of the logic file), `Exact: [M, N, 1, K, M, M, K, K]` (LDA = LDB = K,
+  LDC = LDD = M), EnqueuesPerSync 1000 / NumWarmups 300 / NumBenchmarks 5, RotatingBufferSize 384.
   The logic file serves both variants: its ExactLogic keys are [M, N, 1, K] only (no strides).
 
 ## Results (Tensile client, GPU0, pure GEMM, LDA/LDB padded, median of rounds 1+)

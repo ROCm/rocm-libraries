@@ -1,5 +1,9 @@
-# OOB BBS TN exact tuning, category 3, M=7008 N=5808 K=6288 (fused GEMM: Bias + ScaleAlphaVec, activation none, ActivationFuncCall true; lda=ldb=K, ldc=ldd=M): group 1 = winner, group 2 = previous logic kernel.
-# EnqueuesPerSync 400 / NumWarmups 160 / NumBenchmarks 5.
+# OOB BBS TN exact tuning, category 3, M=7008 N=5808 K=6288 (fused GEMM: Bias (f32) + ScaleAlphaVec, activation none, ActivationFuncCall true; lda=ldb=K=6288, ldc=ldd=M), gfx1250.
+# Full original candidate search for this size, merged from the fused lda=K retune sets: f_ (1 file), x_ (1 file) (x_ = supplement).
+# Candidates: 45 groups in (incl. 2 ruler(s)) -> 42 after exact de-dup. Per set in->kept (first occurrence wins): ruler 2->2; f 40->38; x 3->2.
+# All parameters are develop Tensile parameters.
+# Group 1 = current public winner (logic in this category), group 2 = previous logic kernel (logic_1109a).
+# EnqueuesPerSync 400 / NumWarmups 160 / NumBenchmarks 3 / RotatingBufferSize 384 / CSVMergeSameProblemID false.
 GlobalParameters:
   MinimumRequiredVersion: 5.0.0
   SleepPercent: 0
@@ -24,7 +28,7 @@ GlobalParameters:
   RotatingBufferSize: 384
   UseEffLike: false
   SyncsPerBenchmark: 1
-  NumBenchmarks: 5
+  NumBenchmarks: 3
   CpuThreads: 32
   PrintSolutionRejectionReason: true
 BenchmarkProblems:
@@ -90,35 +94,479 @@ BenchmarkProblems:
     - TDMIterateMode: [0]
     - MIArchVgpr: [true]
     - AdaptiveGemm: [1]
-    - CompactLoopStore: [true]
     - ActivationFuncCall: [true]
     - LDSSegmentInterleave: [0]
     - LDSSegmentBRotate: [0]
-    - SourceSwap: [true]
-    - StoreVectorWidth: [2]
-    - ClusterDim:
-      - [1, 1]
-    - ClusterAIDMapping: [-1]
     - Groups:
-      - - MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+      - - CompactLoopStore: true
+          SourceSwap: true
+          StoreVectorWidth: 2
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
           WorkGroup: [32, 1, 1]
           DepthU: 128
           TileProcessingStrategy: None
           GlobalSplitU: 1
           HalfPLR: 2
-        - MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+        - CompactLoopStore: true
+          SourceSwap: true
+          StoreVectorWidth: 2
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
           WorkGroup: [32, 1, 1]
           DepthU: 128
           TileProcessingStrategy: DataParallel
           GlobalSplitU: 0
           HalfPLR: 0
+        - CompactLoopStore: true
+          SourceSwap: false
+          StoreVectorWidth: 8
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          HalfPLR: 0
+        - CompactLoopStore: true
+          SourceSwap: false
+          StoreVectorWidth: 8
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          HalfPLR: 1
+        - CompactLoopStore: true
+          SourceSwap: false
+          StoreVectorWidth: 8
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          HalfPLR: 2
+        - CompactLoopStore: true
+          SourceSwap: true
+          StoreVectorWidth: 2
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          HalfPLR: 0
+        - CompactLoopStore: true
+          SourceSwap: true
+          StoreVectorWidth: 2
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          HalfPLR: 1
+        - CompactLoopStore: false
+          SourceSwap: true
+          StoreVectorWidth: 2
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          HalfPLR: 0
+        - CompactLoopStore: false
+          SourceSwap: true
+          StoreVectorWidth: 2
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          HalfPLR: 1
+        - CompactLoopStore: false
+          SourceSwap: true
+          StoreVectorWidth: 2
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          HalfPLR: 2
+        - CompactLoopStore: true
+          SourceSwap: false
+          StoreVectorWidth: 8
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          HalfPLR: 0
+        - CompactLoopStore: true
+          SourceSwap: false
+          StoreVectorWidth: 8
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          HalfPLR: 1
+        - CompactLoopStore: true
+          SourceSwap: false
+          StoreVectorWidth: 8
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          HalfPLR: 2
+        - CompactLoopStore: true
+          SourceSwap: true
+          StoreVectorWidth: 2
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          HalfPLR: 1
+        - CompactLoopStore: true
+          SourceSwap: true
+          StoreVectorWidth: 2
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          HalfPLR: 2
+        - CompactLoopStore: true
+          SourceSwap: true
+          StoreVectorWidth: 2
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          HalfPLR: 0
+        - CompactLoopStore: true
+          SourceSwap: false
+          StoreVectorWidth: 8
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          HalfPLR: 0
+        - CompactLoopStore: true
+          SourceSwap: false
+          StoreVectorWidth: 8
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          HalfPLR: 1
+        - CompactLoopStore: true
+          SourceSwap: false
+          StoreVectorWidth: 8
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          HalfPLR: 2
+        - CompactLoopStore: true
+          SourceSwap: true
+          StoreVectorWidth: 2
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          HalfPLR: 0
+        - CompactLoopStore: true
+          SourceSwap: true
+          StoreVectorWidth: 2
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          HalfPLR: 1
+        - CompactLoopStore: true
+          SourceSwap: true
+          StoreVectorWidth: 2
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          HalfPLR: 2
+        - CompactLoopStore: true
+          SourceSwap: true
+          StoreVectorWidth: 2
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          HalfPLR: 0
+        - CompactLoopStore: true
+          SourceSwap: false
+          StoreVectorWidth: 8
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: StreamK
+          GlobalSplitU: 0
+          HalfPLR: 0
+        - CompactLoopStore: true
+          SourceSwap: false
+          StoreVectorWidth: 8
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: StreamK
+          GlobalSplitU: 0
+          HalfPLR: 1
+        - CompactLoopStore: true
+          SourceSwap: false
+          StoreVectorWidth: 8
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: StreamK
+          GlobalSplitU: 0
+          HalfPLR: 2
+        - CompactLoopStore: true
+          SourceSwap: true
+          StoreVectorWidth: 2
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: StreamK
+          GlobalSplitU: 0
+          HalfPLR: 0
+        - CompactLoopStore: true
+          SourceSwap: true
+          StoreVectorWidth: 2
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: StreamK
+          GlobalSplitU: 0
+          HalfPLR: 1
+        - CompactLoopStore: true
+          SourceSwap: true
+          StoreVectorWidth: 2
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: StreamK
+          GlobalSplitU: 0
+          HalfPLR: 2
+        - CompactLoopStore: true
+          SourceSwap: false
+          StoreVectorWidth: 8
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: StreamK
+          GlobalSplitU: 0
+          HalfPLR: 0
+        - CompactLoopStore: true
+          SourceSwap: false
+          StoreVectorWidth: 8
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: StreamK
+          GlobalSplitU: 0
+          HalfPLR: 1
+        - CompactLoopStore: true
+          SourceSwap: false
+          StoreVectorWidth: 8
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: StreamK
+          GlobalSplitU: 0
+          HalfPLR: 2
+        - CompactLoopStore: true
+          SourceSwap: true
+          StoreVectorWidth: 2
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: StreamK
+          GlobalSplitU: 0
+          HalfPLR: 0
+        - CompactLoopStore: true
+          SourceSwap: true
+          StoreVectorWidth: 2
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: StreamK
+          GlobalSplitU: 0
+          HalfPLR: 1
+        - CompactLoopStore: true
+          SourceSwap: true
+          StoreVectorWidth: 2
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: StreamK
+          GlobalSplitU: 0
+          HalfPLR: 2
+        - CompactLoopStore: false
+          SourceSwap: true
+          StoreVectorWidth: 2
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          HalfPLR: 0
+        - CompactLoopStore: false
+          SourceSwap: false
+          StoreVectorWidth: 8
+          ClusterDim: [1, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: DataParallel
+          GlobalSplitU: 0
+          HalfPLR: 0
+        - CompactLoopStore: false
+          SourceSwap: true
+          StoreVectorWidth: 2
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          HalfPLR: 0
+        - CompactLoopStore: false
+          SourceSwap: false
+          StoreVectorWidth: 8
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -2
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          HalfPLR: 0
+        - CompactLoopStore: false
+          SourceSwap: false
+          StoreVectorWidth: 8
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          HalfPLR: 0
+        - CompactLoopStore: false
+          SourceSwap: false
+          StoreVectorWidth: 8
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          HalfPLR: 1
+        - CompactLoopStore: false
+          SourceSwap: false
+          StoreVectorWidth: 8
+          ClusterDim: [2, 1]
+          ClusterAIDMapping: -1
+          MatrixInstruction: [16, 16, 32, 1, 1, 10, 8, 2, 2]
+          WorkGroup: [32, 1, 1]
+          DepthU: 128
+          TileProcessingStrategy: None
+          GlobalSplitU: 1
+          HalfPLR: 2
     BenchmarkJoinParameters: null
     BenchmarkFinalParameters:
     - ProblemSizes:
       - Exact: [7008, 5808, 1, 6288, 7008, 7008, 6288, 6288]
     - BiasTypeArgs: [s]
     - ActivationArgs:
-      - - {Enum: none}
+      - - Enum: none
 LibraryLogic:
   ScheduleName: gfx1250
   DeviceNames: [Device 73f0]
