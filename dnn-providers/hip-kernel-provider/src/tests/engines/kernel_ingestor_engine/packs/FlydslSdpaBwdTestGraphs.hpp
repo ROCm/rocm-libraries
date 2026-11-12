@@ -5,6 +5,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -351,15 +352,16 @@ inline void addSeqLens(SdpaBwdGraph& graph)
 inline void addRagged(SdpaBwdGraph& graph, std::string_view name, int64_t multiplier = 1)
 {
     namespace uid = sdpa_bwd_uid;
-    const std::pair<std::string_view, int64_t> roles[] = {{"q", uid::RAGGED_OFFSET_Q},
-                                                          {"k", uid::RAGGED_OFFSET_K},
-                                                          {"v", uid::RAGGED_OFFSET_V},
-                                                          {"o", uid::RAGGED_OFFSET_O},
-                                                          {"do", uid::RAGGED_OFFSET_DO},
-                                                          {"dq", uid::RAGGED_OFFSET_DQ},
-                                                          {"dk", uid::RAGGED_OFFSET_DK},
-                                                          {"dv", uid::RAGGED_OFFSET_DV},
-                                                          {"stats", uid::RAGGED_OFFSET_STATS}};
+    const std::array<std::pair<std::string_view, int64_t>, 9> roles{
+        {{"q", uid::RAGGED_OFFSET_Q},
+         {"k", uid::RAGGED_OFFSET_K},
+         {"v", uid::RAGGED_OFFSET_V},
+         {"o", uid::RAGGED_OFFSET_O},
+         {"do", uid::RAGGED_OFFSET_DO},
+         {"dq", uid::RAGGED_OFFSET_DQ},
+         {"dk", uid::RAGGED_OFFSET_DK},
+         {"dv", uid::RAGGED_OFFSET_DV},
+         {"stats", uid::RAGGED_OFFSET_STATS}}};
     for(const auto& [role, id] : roles)
     {
         if(role != name)

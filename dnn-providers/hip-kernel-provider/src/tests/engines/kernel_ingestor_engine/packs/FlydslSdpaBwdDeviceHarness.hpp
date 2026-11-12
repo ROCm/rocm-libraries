@@ -666,15 +666,16 @@ inline SdpaBwdSpec specOf(const BwdCase& c)
     if(c.packed)
     {
         spec = spec.withEdit([=](SdpaBwdGraph& g) {
-            const std::pair<const char*, const TensorView*> operands[] = {{"q", &views.q},
-                                                                          {"k", &views.k},
-                                                                          {"v", &views.v},
-                                                                          {"o", &views.o},
-                                                                          {"do", &views.dO},
-                                                                          {"dq", &views.dq},
-                                                                          {"dk", &views.dk},
-                                                                          {"dv", &views.dv},
-                                                                          {"stats", &views.stats}};
+            const std::array<std::pair<const char*, const TensorView*>, 9> operands{
+                {{"q", &views.q},
+                 {"k", &views.k},
+                 {"v", &views.v},
+                 {"o", &views.o},
+                 {"do", &views.dO},
+                 {"dq", &views.dq},
+                 {"dk", &views.dk},
+                 {"dv", &views.dv},
+                 {"stats", &views.stats}}};
             for(const auto& [name, view] : operands)
             {
                 addRagged(g, name, view->strides[2]);
@@ -1376,7 +1377,11 @@ std::optional<size_t> firstBitwiseMismatch(const std::vector<V>& first,
     const size_t common = std::min(first.size(), launch.size());
     for(size_t i = 0; i < common; ++i)
     {
-        if(std::memcmp(&first[i], &launch[i], sizeof(V)) != 0)
+        std::array<unsigned char, sizeof(V)> firstBytes{};
+        std::array<unsigned char, sizeof(V)> launchBytes{};
+        std::memcpy(firstBytes.data(), &first[i], sizeof(V));
+        std::memcpy(launchBytes.data(), &launch[i], sizeof(V));
+        if(firstBytes != launchBytes)
         {
             return i;
         }
@@ -2112,6 +2117,7 @@ void expectPlanMatchesReference(const BwdCase& c,
             }
         }
         std::vector<std::vector<T>> first;
+        first.reserve(groups.size());
         for(const auto group : groups)
         {
             first.push_back(device[group]->template download<T>());

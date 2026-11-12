@@ -46,6 +46,7 @@ inline void
 
     // The packs that hold kernels: the engine's own, or each slot's.
     std::vector<const KernelDescriptorPack*> packs;
+    packs.reserve(set.packs.size());
     for(const auto& pack : set.packs)
     {
         packs.push_back(&pack);
