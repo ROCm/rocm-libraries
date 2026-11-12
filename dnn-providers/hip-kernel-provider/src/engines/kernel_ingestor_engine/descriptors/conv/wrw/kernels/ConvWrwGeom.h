@@ -117,6 +117,13 @@ constexpr long long k3LdsBytes(int loop,
                                int ns,
                                int wq = 0)
 {
+    if(loop == 8)
+    {
+        // Generic taps: two buffers of a bk-row dy chunk and fr (taps a block) bc-row x tiles,
+        // rows of bq positions padded by 16 bytes.
+        const long long ld = bq + 16 / eb;
+        return 2 * (static_cast<long long>(bk) + static_cast<long long>(fr) * bc) * ld * eb;
+    }
     if(loop == 5)
     {
         // ns ring slots of wq items' x and dy rows plus a drain round; the waves_q sum's

@@ -4,6 +4,8 @@
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_CONV)
 
 #include <functional>
+#include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -64,6 +66,10 @@ std::optional<conv_wrw::WrwProblem> parse(const ConvGraphSpec& spec)
     const GraphFixture fixture(buildGraph(spec));
     return parseWrwProblem(fixture.context());
 }
+
+// Defined with the config helpers below.
+ConvShape channelsLastShape();
+ConvGraphSpec rowPaddedSpec(const ConvShape& shape = baseShape());
 
 /// Strides of a K C T R S filter of @p dims stored K T R S C.
 std::vector<int64_t> filterChannelsLast(const std::vector<int64_t>& dims)
@@ -191,6 +197,108 @@ TEST(TestConvWrwForm, LayoutsAreReadFromTheStrides)
     EXPECT_TRUE(both->channelsLast);
 }
 
+TEST(TestConvWrwForm, AnyStridesParseForTheGenericLoop)
+{
+    // x channels-last under channels-first dy; x rows padded; dy channels padded: no packed
+    // layout, each image's span from its strides.
+    auto mixed = specOf(baseShape());
+    mixed.x.strides = packedStrides(mixed.x.dims, true);
+    auto rows = rowPaddedSpec();
+    auto channels = specOf(baseShape());
+    channels.y.strides = {41 * 120, 120, 12, 1}; // 40 channels in an image of 41
+    for(const auto& spec : {mixed, rows, channels})
+    {
+        const auto problem = parse(spec);
+        ASSERT_TRUE(problem.has_value());
+        EXPECT_FALSE(problem->channelsFirst);
+        EXPECT_FALSE(problem->channelsLast);
+        EXPECT_FALSE(problem->vectorChannels);
+    }
+    // Spans: packed, the image; padded rows, 23 x 160 + 9 x 16 + 11 + 1.
+    const auto packed = parse(specOf(baseShape()));
+    ASSERT_TRUE(packed.has_value());
+    EXPECT_EQ(packed->xSpan, 24 * 10 * 12);
+    EXPECT_EQ(packed->ySpan, 40 * 10 * 12);
+    const auto padded = parse(rows);
+    ASSERT_TRUE(padded.has_value());
+    EXPECT_EQ(padded->xSpan, 23 * 160 + 9 * 16 + 11 + 1);
+    EXPECT_EQ(padded->ySpan, 40 * 10 * 12);
+}
+
+TEST(TestConvWrwForm, ChannelVectorsNeedUnitChannelStridesAndWholeVectors)
+{
+    const auto vectors = [](const ConvGraphSpec& spec) {
+        const auto problem = parse(spec);
+        return problem.has_value() && problem->vectorChannels;
+    };
+    // Packed channels-last, 24 -> 40 channels (fp16 vectors of 8): yes; channels-first: no.
+    EXPECT_TRUE(vectors(specOf(channelsLastShape())));
+    EXPECT_FALSE(vectors(specOf(baseShape())));
+    // Channels per group not whole vectors: input 12, output 12, or groups of 12 of 24.
+    auto c12 = channelsLastShape();
+    c12.c = 12;
+    EXPECT_FALSE(vectors(specOf(c12)));
+    auto k12 = channelsLastShape();
+    k12.k = 12;
+    EXPECT_FALSE(vectors(specOf(k12)));
+    auto grouped = channelsLastShape();
+    grouped.groups = 2;
+    EXPECT_FALSE(vectors(specOf(grouped)));
+    // Per group: 12 of 24 input channels (32 output channels, 16 a group), or 12 of 24 output
+    // channels (32 input channels); every stride whole vectors.
+    auto groupC = channelsLastShape();
+    groupC.groups = 2;
+    groupC.k = 32;
+    EXPECT_FALSE(vectors(specOf(groupC)));
+    auto groupK = channelsLastShape();
+    groupK.groups = 2;
+    groupK.c = 32;
+    groupK.k = 24;
+    EXPECT_FALSE(vectors(specOf(groupK)));
+    groupK.k = 32;
+    EXPECT_TRUE(vectors(specOf(groupK)));
+    // Padded channels-last rows: positions 32 elements apart (whole vectors) yes, 28 apart
+    // (3.5 vectors) no; the padded image's batch stride likewise.
+    auto spec = specOf(channelsLastShape());
+    spec.x.strides = {10 * 12 * 32 + 4, 1, 12 * 32, 32};
+    EXPECT_FALSE(vectors(spec));
+    spec.x.strides = {10 * 12 * 32, 1, 12 * 32, 32};
+    EXPECT_TRUE(vectors(spec));
+    spec.x.strides = {10 * 12 * 28, 1, 12 * 28, 28};
+    EXPECT_FALSE(vectors(spec));
+    // dy's strides too.
+    spec = specOf(channelsLastShape());
+    spec.y.strides = {10 * 12 * 44, 1, 12 * 44, 44};
+    EXPECT_FALSE(vectors(spec));
+    spec.y.strides = {10 * 12 * 48, 1, 12 * 48, 48};
+    EXPECT_TRUE(vectors(spec));
+    // A unit channel stride on x only, or on dy only.
+    spec = specOf(baseShape());
+    spec.x.strides = packedStrides(spec.x.dims, true);
+    EXPECT_FALSE(vectors(spec));
+    spec = specOf(baseShape());
+    spec.y.strides = packedStrides(spec.y.dims, true);
+    EXPECT_FALSE(vectors(spec));
+    // Channels 2 apart, every other stride whole vectors: x, then dy.
+    spec = specOf(channelsLastShape());
+    spec.x.strides = {10 * 12 * 48, 2, 12 * 48, 48};
+    EXPECT_FALSE(vectors(spec));
+    spec = specOf(channelsLastShape());
+    spec.y.strides = {10 * 12 * 80, 2, 12 * 80, 80};
+    EXPECT_FALSE(vectors(spec));
+    // An axis of extent 1 carries any stride; fp32 vectors are 4 channels.
+    auto oneImage = channelsLastShape();
+    oneImage.n = 1;
+    spec = specOf(oneImage);
+    spec.x.strides[0] = 3;
+    EXPECT_TRUE(vectors(spec));
+    auto fp32 = channelsLastShape();
+    fp32.dataType = DataType::FLOAT;
+    fp32.c = 12;
+    fp32.k = 20;
+    EXPECT_TRUE(vectors(specOf(fp32)));
+}
+
 // ---------------------------------------------------------------------------
 // One refusal per gated graph field
 // ---------------------------------------------------------------------------
@@ -225,18 +333,24 @@ std::vector<RefusalCase> refusalCases()
         // Element type.
         {"Double",
          [](ConvGraphSpec& s) { s.x.dataType = s.w.dataType = s.y.dataType = DataType::DOUBLE; }},
-        // x and dy: the same packed layout.
-        {"XChannelsLastDyChannelsFirst",
-         [](ConvGraphSpec& s) { s.x.strides = packedStrides(s.x.dims, true); }},
-        {"DyChannelsLastXChannelsFirst",
-         [](ConvGraphSpec& s) { s.y.strides = packedStrides(s.y.dims, true); }},
-        {"XRowPadded",
+        // x and dy in no common packed layout (the generic loop's): one image's span through its
+        // strides within 2^31 bytes, without overflow.
+        {"StridedXSpanBeyondOffsets",
          [](ConvGraphSpec& s) {
-             s.x.strides = {24 * 10 * 16, 10 * 16, 16, 1}; // rows 16 apart, 12 used
+             s.x.strides = {24 * 10 * 16, 10 * 16, int64_t{1} << 27, 1}; // rows 2^28 bytes apart
          }},
-        {"DyChannelPadded",
+        {"StridedDySpanBeyondOffsets",
          [](ConvGraphSpec& s) {
-             s.y.strides = {41 * 120, 120, 12, 1}; // 40 channels in an image of 41
+             s.y.strides = {40 * 10 * 12, 1, int64_t{1} << 27, 40}; // rows 2^28 bytes apart
+         }},
+        {"StridedSpanOverflows",
+         [](ConvGraphSpec& s) {
+             s.x.strides = {24 * 10 * 16, int64_t{1} << 61, 16, 1}; // 23 x 2^61
+         }},
+        {"StridedSpanSumOverflows",
+         [](ConvGraphSpec& s) {
+             // 23 x 2^58 + 9 x 2^59: each axis within 64 bits, their sum past it.
+             s.x.strides = {24 * 10 * 16, int64_t{1} << 58, int64_t{1} << 59, 1};
          }},
         // dw: packed K C T R S or K T R S C.
         {"FilterTapsPadded",
@@ -418,6 +532,8 @@ struct ConfigFields
     int64_t loop = 1, layout = 0;
     int64_t bk = 64, bc = 64, bq = 32, fr = 3, s = 3, sw = 1, dw = 1, wk = 2, wc = 2, vec = 8;
     int64_t tk = 0, tc = 0, xcd = 0, align = 0, ns = 0, bpu = 2, wq = 0, dws = 1, pb = 0;
+    /// The generic loop's specialized classes (metadata of loop 8 only).
+    std::string spec;
 };
 
 /// The base config as the output-rows loop.
@@ -512,6 +628,10 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
                        {"wq", f.wq},
                        {"dws", f.dws},
                        {"pb", f.pb}};
+    if(f.loop == conv_wrw::LOOP_GENERIC)
+    {
+        kernel.metadata["spec"] = f.spec;
+    }
     return kernel;
 }
 
@@ -541,6 +661,7 @@ WrwConfig configOf(const ConfigFields& f)
     c.wq = f.wq;
     c.dws = f.dws;
     c.pb = f.pb;
+    c.spec = f.spec;
     return c;
 }
 
@@ -764,6 +885,44 @@ ConfigFields fmaChannelsLastFields()
     return f;
 }
 
+/// The generic loop (8) on gfx942's 32 x 32 fp16 atom, channels-first elements: 64 x 64 on 4
+/// waves, 3 taps a block, 32 positions a step (8 channel rows a pass); no specialized class.
+ConfigFields genericFields()
+{
+    ConfigFields f;
+    f.loop = 8;
+    f.s = 0;
+    f.sw = 0;
+    f.dw = 0;
+    return f;
+}
+
+/// The generic loop on channel vectors (channelsLastShape).
+ConfigFields genericClFields()
+{
+    auto f = genericFields();
+    f.layout = 1;
+    return f;
+}
+
+/// The generic loop's channel vectors on gfx950's 32 x 16 fp16 atom.
+ConfigFields genericGfx950Fields()
+{
+    auto f = genericClFields();
+    f.atom = "mfma32x16_f16";
+    f.atomId = 10;
+    return f;
+}
+
+/// x rows padded to 16 columns (12 used): strided, no packed layout.
+ConvGraphSpec rowPaddedSpec(const ConvShape& shape)
+{
+    auto spec = specOf(shape);
+    const int64_t h = shape.input[0];
+    spec.x.strides = {shape.c * h * 16, h * 16, 16, 1};
+    return spec;
+}
+
 std::vector<ConfigRefusal> configRefusals()
 {
     std::vector<ConfigRefusal> cases{
@@ -789,7 +948,88 @@ std::vector<ConfigRefusal> configRefusals()
              f.atom = "wmma11_f16";
              f.atomId = 12;
          }},
-        {"LoopUnknown", [](ConfigFields& f) { f.loop = 8; }},
+        {"LoopUnknown", [](ConfigFields& f) { f.loop = 9; }},
+        // The generic loop: runtime geometry, fr taps a block, a position per thread, whole
+        // channel rows a pass, its layout the problem's channel-vector form, at most 64 loads,
+        // and no specialized class serving the problem.
+        {"GenericCompileTimeWidth", [](ConfigFields& f) { f.s = 3; }, genericFields},
+        {"GenericCompileTimeStride", [](ConfigFields& f) { f.sw = 1; }, genericFields},
+        {"GenericCompileTimeDilation", [](ConfigFields& f) { f.dw = 1; }, genericFields},
+        {"GenericNoTaps", [](ConfigFields& f) { f.fr = 0; }, genericFields},
+        // More positions than threads: no channel row a pass.
+        {"GenericBqBeyondTheBlock", [](ConfigFields& f) { f.bq = 512; }, genericFields},
+        // 256 threads at bq 96: 2 rows a pass would divide bk and bc.
+        {"GenericBqNotDividingTheBlock",
+         [](ConfigFields& f) { f.bq = 96; },
+         [] {
+             auto f = genericFields();
+             f.fr = 1;
+             return f;
+         }},
+        // 512 threads at bq 8: 64 channel rows a pass.
+        {"GenericOutputChannelsNotWholeRows",
+         [](ConfigFields& f) { f.bk = 32; },
+         [] {
+             auto f = genericFields();
+             f.wk = 1;
+             f.wc = 8;
+             f.bk = 64;
+             f.bc = 256;
+             f.bq = 8;
+             return f;
+         }},
+        {"GenericInputChannelsNotWholeRows",
+         [](ConfigFields& f) { f.bc = 32; },
+         [] {
+             auto f = genericFields();
+             f.wk = 8;
+             f.wc = 1;
+             f.bk = 256;
+             f.bc = 64;
+             f.bq = 8;
+             return f;
+         }},
+        {"GenericElementsOnChannelVectors",
+         [](ConfigFields& f) { f.layout = 0; },
+         genericClFields,
+         "gfx942",
+         channelsLastShape},
+        {"GenericChannelVectorsOnElements", [](ConfigFields& f) { f.layout = 1; }, genericFields},
+        {"GenericTransposeLayout",
+         [](ConfigFields& f) { f.layout = 2; },
+         genericGfx950Fields,
+         "gfx950",
+         channelsLastShape},
+        {"GenericAlign", [](ConfigFields& f) { f.align = 1; }, genericFields},
+        {"GenericNs", [](ConfigFields& f) { f.ns = 2; }, genericFields},
+        {"GenericWq", [](ConfigFields& f) { f.wq = 1; }, genericFields},
+        {"GenericPb", [](ConfigFields& f) { f.pb = 1; }, genericFields},
+        // gfx950 (160 KiB of LDS), channels-first, 8 channel rows a pass: 64 / 8 + 7 x 64 / 8
+        // = 64 loads, then 72.
+        {"GenericLoadsBeyond64",
+         [](ConfigFields& f) { f.fr = 8; },
+         [] {
+             auto f = genericGfx950Fields();
+             f.layout = 0;
+             f.fr = 7;
+             return f;
+         },
+         "gfx950"},
+        // A class that does not serve the problem (5x5) admits; the 3x3 rows' class declines.
+        {"GenericWhereASpecializedClassServes",
+         [](ConfigFields& f) { f.spec += ";4R0.3.1.1.0"; },
+         [] {
+             auto f = genericFields();
+             f.spec = "4R0.5.1.1.0";
+             return f;
+         }},
+        {"GenericMalformedSpec",
+         [](ConfigFields& f) { f.spec += ";x"; },
+         [] {
+             auto f = genericFields();
+             f.spec = "4R0.5.1.1.0";
+             return f;
+         }},
         // Block-based buffers only where the image is past the 32-bit buffer range; 0 or 1.
         {"PbOnASmallImage", [](ConfigFields& f) { f.pb = 1; }},
         {"PbTwo", [](ConfigFields& f) { f.pb = 2; }},
@@ -2224,8 +2464,313 @@ TEST(TestConvWrwLaunch, PackedRowsStepOverRowGroupsOfAPlane)
     EXPECT_EQ(rows->args.segRows, 0);
 }
 
+TEST(TestConvWrwKernelMatch, TheGenericLoopServesStridedOperandsAlone)
+{
+    // Padded x rows: no specialized config (packed layouts only), the generic loop on elements.
+    const GraphFixture fixture(buildGraph(rowPaddedSpec()), deviceOf("gfx942"));
+    const auto bound = matchesGraph(PACK, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    const auto served = [&](const ConfigFields& f) {
+        return matchesKernel(PACK, fixture.context(), kernelOf(f, "HALF"), *bound);
+    };
+    EXPECT_TRUE(served(genericFields()));
+    EXPECT_FALSE(served(genericClFields()));
+    EXPECT_FALSE(served(ConfigFields{}));
+    EXPECT_FALSE(served(rowsFields()));
+    // The specialized classes never serve a strided problem.
+    auto withSpec = genericFields();
+    withSpec.spec = "4R0.3.1.1.0;4P0.3.1.1.3";
+    EXPECT_TRUE(served(withSpec));
+    // A generic kernel without its spec metadata is declined.
+    auto kernel = kernelOf(genericFields(), "HALF");
+    kernel.metadata.erase("spec");
+    EXPECT_FALSE(matchesKernel(PACK, fixture.context(), kernel, *bound));
+    // Elements take any channel count (no whole vectors), in either packed layout too.
+    auto odd = baseShape();
+    odd.c = 5;
+    odd.k = 7;
+    EXPECT_TRUE(admits(genericFields(), "gfx942", odd));
+    odd.channelsLast = true;
+    EXPECT_TRUE(admits(genericFields(), "gfx942", odd));
+    EXPECT_FALSE(admits(genericClFields(), "gfx942", odd));
+    // Images smaller than a vector (one channel of 5 positions).
+    auto tiny = baseShape();
+    tiny.c = 1;
+    tiny.k = 2;
+    tiny.input = {1, 5};
+    tiny.filter = {1, 3};
+    tiny.prePadding = tiny.postPadding = {0, 0};
+    EXPECT_FALSE(admits(rowsFields(), "gfx942", tiny));
+    EXPECT_TRUE(admits(genericFields(), "gfx942", tiny));
+}
+
+TEST(TestConvWrwLaunch, TheGenericLoopReadsTheGraphsStridesAndSpans)
+{
+    const auto problem = parse(rowPaddedSpec());
+    ASSERT_TRUE(problem.has_value());
+    const auto launch
+        = conv_wrw::wrwLaunchFor(*problem, configOf(genericFields()), deviceOf("gfx942"));
+    ASSERT_TRUE(launch.has_value());
+    const auto& a = launch->args;
+    // 40 / 64 x 24 / 64 tiles; 9 taps in groups of 3.
+    EXPECT_EQ(launch->gridX, 1u);
+    EXPECT_EQ(launch->gridY, 3u);
+    EXPECT_EQ(launch->block, 256u);
+    // x as given (the missing leading axis 0), dy packed; buffers span the strides.
+    EXPECT_EQ(a.xs[0], 24 * 10 * 16);
+    EXPECT_EQ(a.xs[1], 160);
+    EXPECT_EQ(a.xs[3], 16);
+    EXPECT_EQ(a.xs[4], 1);
+    EXPECT_EQ(a.ys[1], 120);
+    EXPECT_EQ(a.xImage, 23 * 160 + 9 * 16 + 11 + 1);
+    EXPECT_EQ(a.yImage, 40 * 10 * 12);
+    // Output rows of one 32-position chunk: steps n x ho x chunks, no tracks.
+    EXPECT_EQ(a.chunks, 1);
+    EXPECT_EQ(a.steps, 2 * 10);
+    EXPECT_EQ(a.trackLen, 0);
+    // dy rows padded to 16 columns: its span too.
+    auto dyPadded = specOf(baseShape());
+    dyPadded.y.strides = {40 * 10 * 16, 160, 16, 1};
+    const auto dyProblem = parse(dyPadded);
+    ASSERT_TRUE(dyProblem.has_value());
+    const auto dyLaunch
+        = conv_wrw::wrwLaunchFor(*dyProblem, configOf(genericFields()), deviceOf("gfx942"));
+    ASSERT_TRUE(dyLaunch.has_value());
+    EXPECT_EQ(dyLaunch->args.ys[3], 16);
+    EXPECT_EQ(dyLaunch->args.yImage, 39 * 160 + 9 * 16 + 11 + 1);
+    EXPECT_EQ(dyLaunch->args.xImage, 24 * 10 * 12);
+
+    // 3-D, groups: the grid rows are groups x ceil(taps / fr).
+    auto threeD = baseShape();
+    threeD.groups = 2;
+    threeD.c = 32;
+    threeD.k = 32;
+    threeD.input = {4, 6, 7};
+    threeD.filter = {1, 5, 5};
+    threeD.prePadding = threeD.postPadding = {0, 2, 2};
+    threeD.stride = {1, 1, 1};
+    threeD.dilation = {1, 1, 1};
+    auto f = genericFields();
+    f.fr = 4;
+    const auto grouped = launchOf(f, threeD);
+    ASSERT_TRUE(grouped.has_value());
+    EXPECT_EQ(grouped->gridY, 2u * 7u);
+    EXPECT_EQ(grouped->args.steps, 2 * 4 * 6);
+}
+
+TEST(TestConvWrwKernelMatch, TheGenericLoopTakesEveryArchsMatrixAtom)
+{
+    auto gfx1201 = genericClFields();
+    gfx1201.atom = "wmma12_f16";
+    gfx1201.atomId = 14;
+    gfx1201.wk = 4;
+    EXPECT_TRUE(admits(gfx1201, "gfx1201", channelsLastShape()));
+    EXPECT_FALSE(admits(gfx1201, "gfx942", channelsLastShape()));
+    EXPECT_TRUE(admits(genericGfx950Fields(), "gfx950", channelsLastShape()));
+    auto fp32 = genericFields();
+    fp32.atom = "mfma32_f32";
+    fp32.atomId = 7;
+    fp32.vec = 4;
+    fp32.bq = 16;
+    EXPECT_TRUE(admits(fp32, "gfx90a", floatShape()));
+    // The FMA "atom" has no generic loop.
+    auto fmaGeneric = fmaFields();
+    fmaGeneric.loop = 8;
+    fmaGeneric.s = fmaGeneric.sw = fmaGeneric.dw = 0;
+    EXPECT_FALSE(admits(fmaGeneric, "gfx942", floatShape()));
+}
+
+TEST(TestConvWrwSpec, KeysServeTheirClassOnly)
+{
+    struct Case
+    {
+        const char* key;
+        ConvShape shape;
+        const char* arch;
+        bool served;
+    };
+    const auto s2 = [] {
+        auto shape = baseShape();
+        shape.stride = {2, 2};
+        return shape;
+    }();
+    const auto dilatedH = [] {
+        auto shape = baseShape();
+        shape.dilation = {2, 1};
+        shape.prePadding = shape.postPadding = {2, 1};
+        return shape;
+    }();
+    const auto bf16 = [] {
+        auto shape = baseShape();
+        shape.dataType = DataType::BFLOAT16;
+        return shape;
+    }();
+    auto nhwcGfx950 = channelsLastShape();
+    const std::vector<Case> cases{
+        // Rows: any filter height and height stride.
+        {"4R0.3.1.1.0", baseShape(), "gfx942", true},
+        {"4R0.3.1.1.0", s2, "gfx942", false}, // width stride 2
+        {"4R0.3.2.1.0", s2, "gfx942", true},
+        {"4R0.3.1.1.0", heightStride2Shape(), "gfx942", true},
+        // The width class: filter width, stride, dilation.
+        {"4R0.5.1.1.0", baseShape(), "gfx942", false},
+        {"4R0.3.1.2.0", baseShape(), "gfx942", false},
+        // The atom: on the device, of the graph's element type.
+        {"10R0.3.1.1.0", baseShape(), "gfx942", false},
+        {"10R0.3.1.1.0", baseShape(), "gfx950", true},
+        {"5R0.3.1.1.0", baseShape(), "gfx942", false},
+        {"5R0.3.1.1.0", bf16, "gfx942", true},
+        // The layout: packed as the key's; channels-last whole vectors.
+        {"4R1.3.1.1.0", baseShape(), "gfx942", false},
+        {"4R1.3.1.1.0", channelsLastShape(), "gfx942", true},
+        {"4R0.3.1.1.0", channelsLastShape(), "gfx942", false},
+        {"4R1.3.1.1.0", unalignedKShape(), "gfx942", false},
+        {"10R2.3.1.1.0", nhwcGfx950, "gfx950", true},
+        {"4R2.3.1.1.0", channelsLastShape(), "gfx942", false},
+        // Small-C rows: at most 16 input channels a group, any count of them channels-last.
+        {"0C0.3.1.1.0", stemShape(), "gfx942", true},
+        {"0C0.3.1.1.0", baseShape(), "gfx942", false},
+        {"0C1.3.1.1.0",
+         [] {
+             auto shape = stemShape();
+             shape.channelsLast = true;
+             return shape;
+         }(),
+         "gfx942",
+         true},
+        // Rings: the filter height at height stride 1, or (loop 1) its phases.
+        {"4P0.3.1.1.3", baseShape(), "gfx942", true},
+        {"4P0.3.1.1.1", baseShape(), "gfx942", false},
+        {"4P0.3.1.1.2", heightStride2Shape(), "gfx942", true},
+        {"4P0.3.1.1.3", heightStride2Shape(), "gfx942", false},
+        {"4P0.3.1.1.2", dilatedH, "gfx942", false},
+        {"4P0.3.1.1.2",
+         [] {
+             auto shape = baseShape();
+             shape.stride = {2, 1};
+             shape.dilation = {2, 1};
+             shape.prePadding = shape.postPadding = {2, 1};
+             return shape;
+         }(),
+         "gfx942",
+         false}, // phases need unit height dilation
+        // The ring at align 2: channels-last output channels in any count.
+        {"4U1.3.1.1.3", unalignedKShape(), "gfx942", true},
+        {"4P1.3.1.1.3", unalignedKShape(), "gfx942", false},
+        {"4U1.3.1.1.3",
+         [] {
+             auto shape = unalignedKShape();
+             shape.c = 12;
+             return shape;
+         }(),
+         "gfx942",
+         false},
+        {"10G0.3.1.1.3", baseShape(), "gfx950", true},
+        {"10G0.3.1.1.3", baseShape(), "gfx942", false},
+        {"10G0.3.1.1.2", heightStride2Shape(), "gfx950", false},
+        {"4G0.3.1.1.3", baseShape(), "gfx942", false}, // an atom gfx942 runs: gfx950 only
+        {"0D2.3.1.1.3", channelsLastShape(), "gfx942", false},
+        {"0D1.3.1.1.3", channelsLastShape(), "gfx942", false},
+        {"0G1.3.1.1.3", channelsLastShape(), "gfx942", false},
+        // The direct loop: also unit height dilation (or one filter row).
+        {"8D2.3.1.1.3", nhwcGfx950, "gfx950", true},
+        {"8D2.3.1.1.3",
+         [] {
+             auto shape = channelsLastShape();
+             shape.dilation = {2, 1};
+             shape.prePadding = shape.postPadding = {2, 1};
+             return shape;
+         }(),
+         "gfx950",
+         false},
+        {"8D2.3.1.1.1",
+         [] {
+             auto shape = channelsLastShape();
+             shape.filter = {1, 3};
+             shape.dilation = {2, 1};
+             shape.prePadding = shape.postPadding = {0, 1};
+             return shape;
+         }(),
+         "gfx950",
+         true},
+        {"8D2.3.1.1.3", nhwcGfx950, "gfx942", false},
+    };
+    for(const auto& c : cases)
+    {
+        const auto problem = parse(specOf(c.shape));
+        ASSERT_TRUE(problem.has_value()) << c.key;
+        const auto served = conv_wrw::specServes(*problem, c.key, c.arch);
+        ASSERT_TRUE(served.has_value()) << c.key;
+        EXPECT_EQ(*served, c.served) << c.key << " on " << c.arch;
+    }
+    // Images past the buffer range: no key's class (block-based buffers serve them).
+    auto large = baseShape();
+    large.n = 1;
+    large.c = 8;
+    large.k = 8;
+    large.input = {1, int64_t{1} << 28}; // x 2^31 bytes
+    large.filter = {1, 3};
+    large.prePadding = large.postPadding = {0, 1};
+    const auto largeProblem = parse(specOf(large));
+    ASSERT_TRUE(largeProblem.has_value());
+    ASSERT_TRUE(largeProblem->largeImage);
+    const auto largeServed = conv_wrw::specServes(*largeProblem, "4R0.3.1.1.0", "gfx942");
+    ASSERT_TRUE(largeServed.has_value());
+    EXPECT_FALSE(*largeServed);
+}
+
+TEST(TestConvWrwSpec, MalformedKeysAreNotClasses)
+{
+    const auto problem = parse(specOf(baseShape()));
+    ASSERT_TRUE(problem.has_value());
+    for(const char* key : {"",
+                           "R0.3.1.1.0",
+                           "16R0.3.1.1.0", // fma
+                           "17R0.3.1.1.0",
+                           "-1R0.3.1.1.0",
+                           "4X0.3.1.1.0",
+                           "4R3.3.1.1.0",
+                           "4R.3.1.1.0",
+                           "4R0.3.1.1",
+                           "4R0.3.1.1.0.0",
+                           "4R0.3.1.1.0x",
+                           "4R0,3.1.1.0",
+                           "4R0.0.1.1.0",
+                           "4R0.3.0.1.0",
+                           "4R0.3.1.0.0",
+                           "4R0.3.1.1.1", // rows carry no height
+                           "4C0.3.1.1.1",
+                           "4P0.3.1.1.0", // rings do
+                           "4U1.3.1.1.0",
+                           "4G0.3.1.1.0",
+                           "4D0.3.1.1.0"})
+    {
+        EXPECT_FALSE(conv_wrw::specServes(*problem, key, "gfx942").has_value()) << key;
+    }
+}
+
+TEST(TestConvWrwLoadPasses, TheGenericLoopCountsItsLoads)
+{
+    // Channels-first: 8 channel rows a pass, 64 / 8 + 3 x 64 / 8.
+    EXPECT_EQ(conv_wrw::loadPassesOf(configOf(genericFields()), 2, 64), 8 + 24);
+    // Channel vectors: 16 words of 2 positions; dy 8 x 16 units, x 3 x 8 x 16 over 256
+    // threads, 2 loads a unit.
+    EXPECT_EQ(conv_wrw::loadPassesOf(configOf(genericClFields()), 2, 64), (1 + 2) * 2);
+    // fp32: one position a word.
+    auto fp32 = genericClFields();
+    fp32.vec = 4;
+    fp32.bq = 16;
+    EXPECT_EQ(conv_wrw::loadPassesOf(configOf(fp32), 4, 64), 1 + 3);
+    // bq not dividing the block.
+    auto odd = genericFields();
+    odd.bq = 48;
+    EXPECT_EQ(conv_wrw::loadPassesOf(configOf(odd), 2, 64), std::numeric_limits<int64_t>::max());
+}
+
 TEST(TestConvWrwLds, MirrorsTheKernelsArithmetic)
 {
+    // Generic taps: two buffers of 64 dy and 3 x 64 x rows of 32 + 8 positions.
+    EXPECT_EQ(conv_wrw::ldsBytesOf(configOf(genericFields()), 2), 2 * (64 + 3 * 64) * 40 * 2);
     // Ring, channels-first fp16, 64 x 64 x 32, 3 taps: window 34 = 5 vectors of 8, LDA 40,
     // LDB ceil(42 / 8) x 8 + 8 = 56; two buffers of 64 x 40 + 64 x 56.
     auto ring = configOf(ConfigFields{});
