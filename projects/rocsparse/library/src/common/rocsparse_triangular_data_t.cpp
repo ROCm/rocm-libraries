@@ -23,6 +23,7 @@
 
 #include "rocsparse_triangular_data_t.hpp"
 #include "rocsparse_control.hpp"
+#include "rocsparse_spmat_descr.hpp"
 #include "rocsparse_utility.hpp"
 
 void rocsparse::triangular_data_t::copy(const rocsparse::triangular_data_t* that,
@@ -190,4 +191,66 @@ rocsparse_indextype rocsparse::triangular_data_t::get_indextype_J() const
             return this->m_data[i]->get_row_map()->get_indextype();
     }
     return rocsparse_indextype_i32;
+}
+
+rocsparse::triangular_info_t* rocsparse::triangular_data_t::create(
+    rocsparse_handle                          handle,
+    rocsparse_operation                       operation,
+    rocsparse_const_spmat_descr               A,
+    rocsparse::idnvec_descr_t*                diag_indices,
+    rocsparse::transposed_sparsity_pattern_t* transposed_sparsity_pattern,
+    size_t                                    buffer_size,
+    void*                                     buffer)
+{
+    rocsparse::triangular_info_t* trm_info = new rocsparse::triangular_info_t();
+    this->attach_storage(trm_info, diag_indices, transposed_sparsity_pattern);
+
+    switch(A->format)
+    {
+    case rocsparse_format_ell:
+    {
+        THROW_IF_ROCSPARSE_ERROR(rocsparse::gellsv_analysis(
+            handle, operation, A, trm_info, this->m_pivot_info, buffer_size, buffer));
+        break;
+    }
+    case rocsparse_format_csr:
+    case rocsparse_format_bsr:
+    {
+        // The analysis of a BSR matrix only levels its block sparsity pattern.
+        THROW_IF_ROCSPARSE_ERROR(rocsparse::gtrm_analysis(handle,
+                                                          operation,
+                                                          A,
+                                                          trm_info,
+                                                          this->m_pivot_info,
+                                                          diag_indices,
+                                                          transposed_sparsity_pattern,
+                                                          buffer_size,
+                                                          buffer));
+        break;
+    }
+    default:
+    {
+        delete trm_info;
+        THROW_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+    }
+    }
+
+    return trm_info;
+}
+
+rocsparse_status rocsparse::triangular_data_t::recreate(
+    rocsparse_handle                          handle,
+    rocsparse_operation                       operation,
+    rocsparse_fill_mode                       fill_mode,
+    rocsparse_const_spmat_descr               A,
+    rocsparse::idnvec_descr_t*                diag_indices,
+    rocsparse::transposed_sparsity_pattern_t* transposed_sparsity_pattern,
+    size_t                                    buffer_size,
+    void*                                     buffer)
+{
+    const int index = this->storage_index(operation, fill_mode);
+    this->release(index);
+    this->m_data[index] = this->create(
+        handle, operation, A, diag_indices, transposed_sparsity_pattern, buffer_size, buffer);
+    return rocsparse_status_success;
 }

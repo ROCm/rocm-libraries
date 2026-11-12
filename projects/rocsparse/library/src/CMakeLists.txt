@@ -58,6 +58,7 @@ set(rocsparse_source
   src/common/rocsparse_roctx.cpp
   src/common/rocsparse_argdescr.cpp
   src/common/rocsparse_triangular_data_t.cpp
+  src/common/rocsparse_triangular_transpose.cpp
   src/common/rocsparse_message.cpp
   src/common/rocsparse_determine_indextype.cpp
   src/common/rocsparse_numeric_boost.cpp
