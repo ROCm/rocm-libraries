@@ -212,7 +212,8 @@ class SinkExact : public ::testing::TestWithParam<std::tuple<int, int, int, floa
 INSTANTIATE_TEST_SUITE_P(
     TestCkTileFmhaFwd,
     SinkExact,
-    ::testing::Combine(::testing::Values(64, 128),  // both fp8 qr_tdm head dims
+    // d64 / d128 / d256 dispatch to qr_tdm_fp8_sched, the other head dims to qr_tdm.
+    ::testing::Combine(::testing::Values(32, 64, 96, 128, 160, 256, 512),
                        ::testing::Values(128, 500), // multi-tile, and a non-multiple tail
                        ::testing::Values(63, 64),   // padded and exact query tiles
                        ::testing::Values(0.5f,      // sink above the zero-valued real logits
@@ -246,7 +247,7 @@ TEST_P(SinkExact, MatchesExactAttention)
 // LSE is unaffected -- it reports l, the unrounded row sum.
 TEST(SinkQuantizedMass, NonuniformRealScores)
 {
-    for(int hdim : {64, 128})
+    for(int hdim : {32, 64, 96, 128, 160, 256, 512})
     {
         for(float sink : {-4.f, -ck_tile::numeric<float>::infinity()})
         {
