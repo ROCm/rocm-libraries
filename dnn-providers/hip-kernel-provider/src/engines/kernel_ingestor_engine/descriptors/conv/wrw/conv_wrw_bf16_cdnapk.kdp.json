@@ -46,9 +46,10 @@
         "ns": 0,
         "bpu": 1,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "pb": 0
       },
-      "priority": 120
+      "priority": 108
     },
     {
       "version": "1.0",
@@ -83,9 +84,10 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "pb": 0
       },
-      "priority": 119
+      "priority": 107
     },
     {
       "version": "1.0",
@@ -120,9 +122,10 @@
         "ns": 0,
         "bpu": 1,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "pb": 0
       },
-      "priority": 118
+      "priority": 106
     },
     {
       "version": "1.0",
@@ -157,9 +160,10 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "pb": 0
       },
-      "priority": 117
+      "priority": 105
     }
   ]
 }

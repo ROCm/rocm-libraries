@@ -11,7 +11,9 @@
 //                    rows that are not a whole number of vectors); 5 direct (ConvWrwDirect.h:
 //                    gfx950, 16-bit, unit stride and height dilation, persistent grid); 6
 //                    small-C output rows (stems: (channel, tap) pairs on the N axis,
-//                    layout 0 or 1 staged into the same tiles, WC 1)
+//                    layout 0 or 1 staged into the same tiles, WC 1); 7 packed rows (several
+//                    narrow output rows a step); 8 generic taps (runtime filter, strides and
+//                    dilation; x and dy through their strides; FR taps a block, S SW DW 0)
 //   CONV_K3_ATOM     K1's matrix-core atom (ConvIgemmCore.h); loops 0 to 2
 //   CONV_K3_LAYOUT   0 channels-first (N C D H W); 1 channels-last (N D H W C) transposed into
 //                    LDS; 2 channels-last kept channels-last, LDS transpose reads (gfx950, 16-bit)
@@ -164,6 +166,19 @@ extern "C" __global__ void __launch_bounds__(CONV_K3_THREADS) ConvWrw(K3Args a)
               CONV_K3_VEC,
               CONV_K3_XCD,
               1>(a);
+#elif CONV_K3_LOOP == 8
+    // Generic taps: CONV_K3_FR is the taps a block; filter, stride and dilation are runtime.
+    k3WrwGeneric<CONV_K3_T,
+                 CONV_K3_ATOM,
+                 CONV_K3_LAYOUT,
+                 CONV_K3_BK,
+                 CONV_K3_BC,
+                 CONV_K3_BQ,
+                 CONV_K3_FR,
+                 CONV_K3_WK,
+                 CONV_K3_WC,
+                 CONV_K3_VEC,
+                 CONV_K3_XCD>(a);
 #else
     k3WrwRows<CONV_K3_T,
               CONV_K3_ATOM,

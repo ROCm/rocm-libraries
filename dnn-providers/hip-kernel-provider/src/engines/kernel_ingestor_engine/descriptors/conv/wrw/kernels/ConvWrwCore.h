@@ -43,6 +43,12 @@
 #ifndef CONV_K3_DWS
 #define CONV_K3_DWS 0
 #endif
+// CONV_K3_PB 1 (channels-first K3Tiles): the x and dy buffers start at the block's first
+// channel, not at the image, and span its bk (dy) or bc (x) channel planes, so an image may
+// exceed the 32-bit buffer range as long as a block's channel planes do not.
+#ifndef CONV_K3_PB
+#define CONV_K3_PB 0
+#endif
 // The loops are inlined into the kernel entry; with the direct store's second epilogue the
 // compiler may otherwise outline the larger ones into a called function.
 #if CONV_K3_DWS
@@ -403,11 +409,25 @@ struct K3Tiles
     int aOff[A_PASSES], aLds[A_PASSES], aPos[A_PASSES];
     int bOff[B_PASSES], bLds[B_PASSES], bPos[B_PASSES], bF[B_PASSES];
     unsigned aOk, bOk; // bit p: pass p in range
+    /// Block-based buffers (CONV_K3_PB): the dy and x elements before the block's first
+    /// channel within an image, and the elements its buffers span.
+    static constexpr bool PB = CONV_K3_PB != 0;
+    static_assert(!PB || LAYOUT == K3_NCHW, "K3 block-based buffers are channels-first");
+    long long yBase, xBase;
+    int yWin, xWin;
 
     __device__ void init(const K3Args& a, int tid, int g, int k0, int c0, int kg, int cg)
     {
         aOk = 0;
         bOk = 0;
+        if constexpr(PB)
+        {
+            yBase = static_cast<long long>(g * kg + k0) * a.ys[1];
+            xBase = static_cast<long long>(g * cg + c0) * a.xs[1];
+            const long long yLeft = a.yImage - yBase, xLeft = a.xImage - xBase;
+            yWin = static_cast<int>(yLeft < BK * a.ys[1] ? yLeft : BK * a.ys[1]);
+            xWin = static_cast<int>(xLeft < BC * a.xs[1] ? xLeft : BC * a.xs[1]);
+        }
 #pragma unroll
         for(int p = 0; p < A_PASSES; ++p)
         {
@@ -418,7 +438,7 @@ struct K3Tiles
                 const int row = u / (BQ / VEC), qv = u % (BQ / VEC);
                 k = k0 + row;
                 aPos[p] = qv * VEC;
-                aOff[p] = (g * kg + k) * static_cast<int>(a.ys[1]) + aPos[p];
+                aOff[p] = (PB ? row : g * kg + k) * static_cast<int>(a.ys[1]) + aPos[p];
                 aLds[p] = row * LDA + qv * VEC;
             }
             else if constexpr(TR)
@@ -453,7 +473,7 @@ struct K3Tiles
                 c = c0 + cl;
                 bF[p] = rowc / BC;
                 bPos[p] = v * VEC;
-                bOff[p] = (g * cg + c) * static_cast<int>(a.xs[1]) + bPos[p];
+                bOff[p] = (PB ? cl : g * cg + c) * static_cast<int>(a.xs[1]) + bPos[p];
                 bLds[p] = ((bF[p] * SW) * BC + cl) * LDB + v * (VEC / SW);
             }
             else if constexpr(TR)
@@ -525,10 +545,13 @@ struct K3Tiles
                          const int (&xRow)[FR])
     {
         Step& s = st[P];
-        const k3i4 yr = k3Rsrc4(static_cast<const T*>(a.dy) + n * a.yImage, a.yImage * sizeof(T));
-        const k3i4 xr = k3Rsrc4(static_cast<const T*>(a.x) + n * a.xImage, a.xImage * sizeof(T));
+        const k3i4 yr = k3Rsrc4(static_cast<const T*>(a.dy) + n * a.yImage + (PB ? yBase : 0),
+                                (PB ? yWin : a.yImage) * sizeof(T));
+        const k3i4 xr = k3Rsrc4(static_cast<const T*>(a.x) + n * a.xImage + (PB ? xBase : 0),
+                                (PB ? xWin : a.xImage) * sizeof(T));
         const int iw0 = q0 * SW - a.pw;
-        const int yElems = static_cast<int>(a.yImage), xElems = static_cast<int>(a.xImage);
+        const int yElems = PB ? yWin : static_cast<int>(a.yImage);
+        const int xElems = PB ? xWin : static_cast<int>(a.xImage);
         const int ys4 = static_cast<int>(a.ys[4]), xs4 = static_cast<int>(a.xs[4]);
         s.q0 = q0;
         s.yRow = yRow;
@@ -714,7 +737,8 @@ struct K3Tiles
     __device__ void storeEdge(const K3Args& a, T* As, T* Bs, int tid) const
     {
         const Step& s = st[P];
-        const int yElems = static_cast<int>(a.yImage), xElems = static_cast<int>(a.xImage);
+        const int yElems = PB ? yWin : static_cast<int>(a.yImage);
+        const int xElems = PB ? xWin : static_cast<int>(a.xImage);
         const int iw0 = s.q0 * SW - a.pw;
 #pragma unroll
         for(int p = 0; p < A_PASSES; ++p)
@@ -1387,6 +1411,330 @@ __device__ K3_LOOP_INLINE void k3WrwRows(const K3Args& a)
     }
     k3StorePartials<T, Atom, FR, S, FK, FC, WTK, WTC>(
         a, acc, g, fr0, frows, k0, c0, wk, wc, lane, bz);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Generic taps (loop 8), the coverage tier: every geometry field is a runtime argument (filter
+// extents, strides, dilations, padding) and x and dy are read through their element strides,
+// so one compiled config serves any filter and layout. A block owns a bk x bc channel tile and
+// TB consecutive taps of the flattened (t, r, s) filter; per step (an output row's BQ-position
+// chunk of one image) it stages the dy chunk once and, per tap, the x positions that tap reads
+// (a strided gather), and multiplies each tap's x tile against the dy chunk into its own
+// accumulators. Channels-first (LAYOUT 0): element units, a thread keeping one position.
+// Channels-last (LAYOUT 1): units of VEC contiguous channels at one position, scattered into
+// the channel rows. Two LDS buffers, one barrier per step. Admitted only where no specialized
+// config is (the host's two-tier rule).
+template <class T,
+          class Atom,
+          int LAYOUT,
+          int BK,
+          int BC,
+          int BQ,
+          int TB,
+          int WK,
+          int WC,
+          int VEC,
+          int XCD = 0>
+__device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
+{
+    constexpr int WAVE = Atom::WAVE;
+    constexpr int THREADS = WK * WC * WAVE;
+    constexpr int DIM = Atom::DIM, KA = Atom::KA, KPL = Atom::KPL;
+    constexpr int WTK = BK / WK, WTC = BC / WC;
+    constexpr int FK = WTK / DIM, FC = WTC / DIM;
+    constexpr int KK = BQ / KA;
+    static_assert(FK * DIM * WK == BK && FC * DIM * WC == BC && BQ % KA == 0, "K3 tile");
+    static_assert(THREADS % BQ == 0, "K3 generic: a thread keeps one position");
+    constexpr int ROWS = THREADS / BQ; // channel rows a pass covers
+    static_assert(BK % ROWS == 0 && BC % ROWS == 0, "K3 generic: whole channel rows a pass");
+    constexpr int SKEW = 16 / static_cast<int>(sizeof(T));
+    constexpr int LD = BQ + SKEW;
+    constexpr int A_ELEMS = BK * LD, B_ELEMS = TB * BC * LD;
+    constexpr int BUF = A_ELEMS + B_ELEMS;
+    constexpr int A_PASSES = BK / ROWS, B_PASSES = TB * BC / ROWS;
+    static_assert(k3LdsBytes(8, 0, sizeof(T), BK, BC, BQ, TB, 1, 1, 1, WK, WC, 0, 0, 1, 0, 0)
+                      == 2 * BUF * static_cast<long long>(sizeof(T)),
+                  "K3 LDS arithmetic (ConvWrwGeom.h)");
+    typedef typename K1Raw<sizeof(T)>::type RawE;
+
+    __shared__ __attribute__((aligned(16))) T lds[2 * BUF];
+
+    const int tid = threadIdx.x;
+    const int lane = tid % WAVE, wave = tid / WAVE;
+    const int wk = wave % WK, wc = wave / WK;
+    const int kg = a.k / a.groups, cg = a.c / a.groups;
+    unsigned bx, by, bz;
+    k3BlockIds<XCD>(bx, by, bz);
+    const int kTiles = (kg + BK - 1) / BK;
+    const int k0 = (bx % kTiles) * BK;
+    const int c0 = (bx / kTiles) * BC;
+    const int taps = a.ft * a.fr * a.fs;
+    const int tapGroups = (taps + TB - 1) / TB;
+    const int g = by / tapGroups;
+    const int tap0 = (by % tapGroups) * TB;
+    const long long begin = bz * a.stepsPerSplit;
+    const long long end = begin + a.stepsPerSplit < a.steps ? begin + a.stepsPerSplit : a.steps;
+
+    // The block's taps: depth, height and width offsets of the input position they read.
+    int tapD[TB], tapH[TB], tapW[TB];
+    bool tapOk[TB];
+#pragma unroll
+    for(int t = 0; t < TB; ++t)
+    {
+        const int tap = tap0 + t;
+        const int s = tap % a.fs, rt = tap / a.fs;
+        const int r = rt % a.fr, ft = rt / a.fr;
+        tapOk[t] = tap < taps;
+        tapD[t] = ft * a.dd - a.pd;
+        tapH[t] = r * a.dh - a.ph;
+        tapW[t] = s * a.dw - a.pw;
+    }
+
+    typename Atom::acc acc[TB][FK][FC];
+#pragma unroll
+    for(int t = 0; t < TB; ++t)
+#pragma unroll
+        for(int x = 0; x < FK; ++x)
+#pragma unroll
+            for(int y = 0; y < FC; ++y)
+                acc[t][x][y] = typename Atom::acc{};
+
+    // The thread's position in a chunk and first channel row; passes step ROWS rows.
+    const int j = tid % BQ, row0 = tid / BQ;
+    const long long ys0 = a.ys[0], ys1 = a.ys[1], ys2 = a.ys[2], ys3 = a.ys[3], ys4 = a.ys[4];
+    const long long xs0 = a.xs[0], xs1 = a.xs[1], xs2 = a.xs[2], xs3 = a.xs[3], xs4 = a.xs[4];
+    // Channels-last units: VEC channels at KW consecutive positions (a 32-bit LDS word of each
+    // channel row), the channel vector fastest.
+    constexpr bool CL = LAYOUT != 0;
+    constexpr int KW = CL ? 4 / static_cast<int>(sizeof(T)) : 1;
+    constexpr int KVN = BK / VEC, CVN = BC / VEC;
+    constexpr int A_UNITS = KVN * (BQ / KW), B_UNITS = TB * CVN * (BQ / KW);
+    constexpr int AU = (A_UNITS + THREADS - 1) / THREADS, BU = (B_UNITS + THREADS - 1) / THREADS;
+    static_assert(!CL || (BK % VEC == 0 && BC % VEC == 0 && BQ % KW == 0),
+                  "K3 generic: whole channel vectors and position words");
+    typedef typename K1If<CL, typename K1Raw<16>::type, RawE>::type Unit;
+    constexpr int NA = CL ? AU * KW : A_PASSES;
+    constexpr int NB = CL ? BU * KW : B_PASSES;
+    Unit ra[NA], rb[NB];
+    // Channel e's KW positions of units v[0..KW): one LDS word.
+    auto wordOf = [](const auto* v, int e) {
+        if constexpr(sizeof(T) == 4)
+            return static_cast<unsigned>(v[0][e]);
+        else
+        {
+            const int sh = 16 * (e % 2);
+            const unsigned lo = (static_cast<unsigned>(v[0][e / 2]) >> sh) & 0xffffu;
+            const unsigned hi = (static_cast<unsigned>(v[1][e / 2]) >> sh) & 0xffffu;
+            return lo | (hi << 16);
+        }
+    };
+    int n = 0, od = 0, oh = 0, chunk = 0;
+    if(begin < end)
+    {
+        const long long rowIndex = begin / a.chunks;
+        chunk = static_cast<int>(begin - rowIndex * a.chunks);
+        oh = static_cast<int>(rowIndex % a.ho);
+        const long long r2 = rowIndex / a.ho;
+        od = static_cast<int>(r2 % a.dout);
+        n = static_cast<int>(r2 / a.dout);
+    }
+    auto tapOf = [&](int t, bool& tok, int& dD, int& dH, int& dW) {
+        tok = false;
+        dD = dH = dW = 0;
+#pragma unroll
+        for(int tt = 0; tt < TB; ++tt)
+            if(tt == t)
+            {
+                tok = tapOk[tt];
+                dD = tapD[tt];
+                dH = tapH[tt];
+                dW = tapW[tt];
+            }
+    };
+    auto issue = [&](bool live) {
+        live = live && n < a.n;
+        // Image n's buffers: their batch strides bound them (32-bit offsets within).
+        const k3i4 yr = k3Rsrc4(static_cast<const T*>(a.dy) + n * ys0, a.yImage * sizeof(T));
+        const k3i4 xr = k3Rsrc4(static_cast<const T*>(a.x) + n * xs0, a.xImage * sizeof(T));
+        if constexpr(CL)
+        {
+#pragma unroll
+            for(int p = 0; p < AU; ++p)
+            {
+                const int u = tid + p * THREADS;
+                const int kv = u % KVN, qg = u / KVN;
+                const int k = k0 + kv * VEC;
+#pragma unroll
+                for(int w = 0; w < KW; ++w)
+                {
+                    const int ow = chunk * BQ + qg * KW + w;
+                    const bool ok = live && u < A_UNITS && ow < a.wo && k < kg;
+                    const long long off = (g * kg + k) * ys1 + od * ys2 + oh * ys3 + ow * ys4;
+                    k3Load(ra[p * KW + w],
+                           yr,
+                           ok ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
+                }
+            }
+#pragma unroll
+            for(int p = 0; p < BU; ++p)
+            {
+                const int u = tid + p * THREADS;
+                const int cv = u % CVN, rest = u / CVN;
+                const int qg = rest % (BQ / KW), t = rest / (BQ / KW);
+                bool tok;
+                int dD, dH, dW;
+                tapOf(t, tok, dD, dH, dW);
+                const int c = c0 + cv * VEC;
+                const int id = od * a.sd + dD, ih = oh * a.sh + dH;
+                const bool rowOk = live && u < B_UNITS && tok && c < cg && id >= 0 && id < a.di
+                                   && ih >= 0 && ih < a.hi;
+#pragma unroll
+                for(int w = 0; w < KW; ++w)
+                {
+                    const int ow = chunk * BQ + qg * KW + w;
+                    const int iw = ow * a.sw + dW;
+                    const bool ok = rowOk && ow < a.wo && iw >= 0 && iw < a.wi;
+                    const long long off = (g * cg + c) * xs1 + id * xs2 + ih * xs3 + iw * xs4;
+                    k3Load(rb[p * KW + w],
+                           xr,
+                           ok ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
+                }
+            }
+            return;
+        }
+        const int ow = chunk * BQ + j;
+        const bool qOk = live && ow < a.wo;
+        const long long yPos = od * ys2 + oh * ys3 + ow * ys4;
+#pragma unroll
+        for(int p = 0; p < A_PASSES; ++p)
+        {
+            const int k = k0 + row0 + p * ROWS;
+            const bool ok = qOk && k < kg;
+            const long long off = (g * kg + k) * ys1 + yPos;
+            k3Load(ra[p], yr, ok ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
+        }
+#pragma unroll
+        for(int p = 0; p < B_PASSES; ++p)
+        {
+            const int rowAll = row0 + p * ROWS;
+            const int t = rowAll / BC, c = c0 + rowAll % BC;
+            bool tok;
+            int dD, dH, dW;
+            tapOf(t, tok, dD, dH, dW);
+            const int id = od * a.sd + dD, ih = oh * a.sh + dH, iw = ow * a.sw + dW;
+            const bool ok = qOk && tok && c < cg && id >= 0 && id < a.di && ih >= 0 && ih < a.hi
+                            && iw >= 0 && iw < a.wi;
+            const long long off = (g * cg + c) * xs1 + id * xs2 + ih * xs3 + iw * xs4;
+            k3Load(rb[p], xr, ok ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
+        }
+    };
+    auto store = [&](T* As, T* Bs) {
+        if constexpr(CL)
+        {
+#pragma unroll
+            for(int p = 0; p < AU; ++p)
+            {
+                const int u = tid + p * THREADS;
+                if(A_UNITS % THREADS != 0 && u >= A_UNITS)
+                    continue;
+                const int kv = u % KVN, qg = u / KVN;
+#pragma unroll
+                for(int e = 0; e < VEC; ++e)
+                    *reinterpret_cast<unsigned*>(As + (kv * VEC + e) * LD + qg * KW)
+                        = wordOf(&ra[p * KW], e);
+            }
+#pragma unroll
+            for(int p = 0; p < BU; ++p)
+            {
+                const int u = tid + p * THREADS;
+                if(B_UNITS % THREADS != 0 && u >= B_UNITS)
+                    continue;
+                const int cv = u % CVN, rest = u / CVN;
+                const int qg = rest % (BQ / KW), t = rest / (BQ / KW);
+#pragma unroll
+                for(int e = 0; e < VEC; ++e)
+                    *reinterpret_cast<unsigned*>(Bs + (t * BC + cv * VEC + e) * LD + qg * KW)
+                        = wordOf(&rb[p * KW], e);
+            }
+        }
+        else
+        {
+#pragma unroll
+            for(int p = 0; p < A_PASSES; ++p)
+                As[(row0 + p * ROWS) * LD + j] = __builtin_bit_cast(T, ra[p]);
+#pragma unroll
+            for(int p = 0; p < B_PASSES; ++p)
+                Bs[(row0 + p * ROWS) * LD + j] = __builtin_bit_cast(T, rb[p]);
+        }
+    };
+    auto advance = [&]() {
+        if(++chunk == a.chunks)
+        {
+            chunk = 0;
+            if(++oh == a.ho)
+            {
+                oh = 0;
+                if(++od == a.dout)
+                {
+                    od = 0;
+                    ++n;
+                }
+            }
+        }
+    };
+    auto waitLoads = [&]() {
+        k3WaitLoads<0>();
+#pragma unroll
+        for(int i = 0; i < NA; ++i)
+            k3Pin(ra[i]);
+#pragma unroll
+        for(int i = 0; i < NB; ++i)
+            k3Pin(rb[i]);
+    };
+
+    if(begin < end)
+    {
+        issue(true);
+        waitLoads();
+        store(lds, lds + A_ELEMS);
+        __syncthreads();
+    }
+    const int kb = Atom::template kBase<KPL>(lane);
+    int buf = 0;
+    for(long long step = begin; step < end; ++step)
+    {
+        advance();
+        issue(step + 1 < end);
+        const T* As = lds + buf * BUF;
+        const T* Bs = As + A_ELEMS;
+        typename Atom::frag dyf[1][KK][FK];
+#pragma unroll
+        for(int kk = 0; kk < KK; ++kk)
+#pragma unroll
+            for(int x = 0; x < FK; ++x)
+                dyf[0][kk][x] = k3FragAt<Atom, T, 0>(As + (wk * WTK + lane % DIM) * LD + kb
+                                                     + x * DIM * LD + kk * KA);
+        k3ForEach<TB>([&](auto tc) {
+            constexpr int t = decltype(tc)::value;
+            typedef typename Atom::acc AccRow[1][FK][FC];
+            k3Multiply<Atom, T, 1, 1, 1, 1, FK, FC, BC, LD, KK>(
+                *reinterpret_cast<AccRow*>(&acc[t]),
+                dyf,
+                Bs + t * BC * LD + (wc * WTC + lane % DIM) * LD + kb,
+                0);
+        });
+        waitLoads();
+        if(step + 1 < end)
+        {
+            T* nA = lds + (buf ^ 1) * BUF;
+            store(nA, nA + A_ELEMS);
+        }
+        __syncthreads();
+        buf ^= 1;
+    }
+    // The taps' sums: acc[t] holds tap tap0 + t, written as filter rows of one tap (S = 1).
+    k3StorePartials<T, Atom, TB, 1, FK, FC, WTK, WTC>(
+        a, acc, g, tap0, taps, k0, c0, wk, wc, lane, bz);
 }
 
 /// KPL consecutive elements of an LDS row starting OFF elements past p, OFF a per-lane runtime

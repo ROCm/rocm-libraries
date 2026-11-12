@@ -293,6 +293,7 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/winograd/kernels/ConvWinogradWmmaReg.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/winograd/kernels/ConvWinogradSreg.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/winograd/kernels/ConvWinogradWmmaCoop.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/winograd/kernels/ConvWinogradWrw.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/direct/kernels/ConvDirect.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/direct/kernels/ConvDirectArgs.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/direct/kernels/ConvDirectCore.h"
@@ -339,6 +340,7 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ConvWinogradWmmaReg.h
         ConvWinogradSreg.h
         ConvWinogradWmmaCoop.h
+        ConvWinogradWrw.h
         kernels/ConvDirect.cpp
         ConvDirectArgs.h
         ConvDirectCore.h
