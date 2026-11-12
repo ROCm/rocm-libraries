@@ -5548,6 +5548,32 @@ class DirectConvWgradSpec:
     # decode to SGPRs. A win when those tables fit in SGPRs, a loss when they
     # spill back to VGPR lanes.
     uniform_wave: bool = False
+    # Small-K variant of small_c (wave32, stride 1): for layers whose kpg is
+    # the small side (the 3- or 4-channel output convolutions of the VAEs and
+    # UNets). By dW[k, r, s, c] = sum_p X[p, c] * dY[p - (r, s) + PAD, k], it
+    # is the small_c GEMM with X and dY swapped: X (cpg channels) takes dY's
+    # place as the 8-channel-vector operand, dY (kpg channels) is gathered
+    # as the im2col operand at padding KH - 1 - PAD, and the epilogue writes
+    # the GEMM's [c][(r', s', k)] element to dW[k][KH-1-r'][KW-1-s'][c]. X is
+    # read once instead of KH * KW times. The problem stays the real one: the
+    # kernargs, the scratch and its fold are small_c's.
+    small_k: bool = False
+
+    @property
+    def sc_cpg(self) -> int:
+        """Small-C GEMM: channels of the im2col operand (kpg with small_k)."""
+        return self.problem.kpg if self.small_k else self.problem.cpg
+
+    @property
+    def sc_kpg(self) -> int:
+        """Small-C GEMM M: channels of the vector operand (cpg with small_k)."""
+        return self.problem.cpg if self.small_k else self.problem.kpg
+
+    @property
+    def sc_pad(self) -> int:
+        """Small-C GEMM padding of the im2col operand (KH - 1 - PAD with small_k)."""
+        p = self.problem
+        return p.KH - 1 - p.PAD if self.small_k else p.PAD
 
     @property
     def block_k(self) -> int:
@@ -5556,7 +5582,7 @@ class DirectConvWgradSpec:
     @property
     def small_c_run(self) -> int:
         """Small-C: one filter row's (s, c) run, padded to the vec_x unit."""
-        run = self.problem.KW * self.problem.cpg
+        run = self.problem.KW * self.sc_cpg
         if self.vec_x:
             return (run + self.vec_x - 1) // self.vec_x * self.vec_x
         return run
@@ -5634,6 +5660,8 @@ class DirectConvWgradSpec:
             flags["ldsepi"] = True
         if self.small_c:
             flags["sc"] = True
+        if self.small_k:
+            flags["sk"] = True
         if self.sub_steps > 1:
             flags[f"ss{self.sub_steps}"] = True
         if self.vec_x:
@@ -5780,6 +5808,8 @@ def _wgrad_image_reason(spec: "DirectConvWgradSpec") -> str:
             f"(got sub_steps={spec.sub_steps}, vec_x={spec.vec_x}, "
             f"uniform_wave={bool(spec.uniform_wave)})"
         )
+    if spec.small_k:
+        return "small_k needs small_c=True"
     blocked = spec.wave_tiles_k > 1 or spec.wave_tiles_c > 1
     if not spec.image_per_block:
         if blocked:
@@ -5874,7 +5904,19 @@ def _wgrad_small_c_reason(spec: "DirectConvWgradSpec") -> str:
         return _WGRAD_WAVE32_MK_WHY.format(mfma_k=spec.mfma_k)
     if p.groups != 1:
         return f"small_c needs groups=1 (got {p.groups})"
-    if p.kpg % 8:
+    if spec.small_k:
+        if p.stride != 1:
+            return f"small_k swaps X and dY, which needs stride 1 (got {p.stride})"
+        if p.KH != p.KW or p.PAD_W != p.PAD:
+            return (
+                f"small_k needs a square filter and one padding "
+                f"(got {p.KH}x{p.KW}, PAD {p.PAD}, pad_w {p.PAD_W})"
+            )
+        if not 0 <= p.PAD <= p.KH - 1:
+            return f"small_k needs 0 <= PAD <= KH - 1 (got PAD {p.PAD}, KH {p.KH})"
+        if p.cpg % 8:
+            return f"small_k loads X as 8-channel vectors; cpg must be a multiple of 8 (got {p.cpg})"
+    elif p.kpg % 8:
         return f"small_c loads dY as 8-channel vectors; kpg must be a multiple of 8 (got {p.kpg})"
     if p.KH < 1 or p.KW < 1:
         return f"KH and KW must be >= 1 (got {p.KH}, {p.KW})"
@@ -6915,8 +6957,11 @@ def _build_direct_conv_wgrad_small_c(spec: DirectConvWgradSpec, arch: str) -> Ke
     folds into dW. The caller zeroes the scratch.
     """
     p = spec.problem
-    KH, KW, C, K = p.KH, p.KW, p.cpg, p.kpg
-    U, PAD = p.stride, p.PAD
+    # With small_k the GEMM runs on the swapped problem: C and K trade places
+    # and the im2col operand (dY) takes padding KH - 1 - PAD (see small_k).
+    SK = spec.small_k
+    KH, KW, C, K = p.KH, p.KW, spec.sc_cpg, spec.sc_kpg
+    U, PAD = p.stride, spec.sc_pad
     RSC = KH * KW * C
     RUN = KW * C
     RUNP = spec.small_c_run
@@ -6970,13 +7015,28 @@ def _build_direct_conv_wgrad_small_c(spec: DirectConvWgradSpec, arch: str) -> Ke
     c_NG = b.const_i32(NG)
     c_PART = b.const_i32(PART)
     c_PIX_STEP = b.const_i32(PIX_STEP)
-    c_H = params["p_Hi"]
-    c_W = params["p_Wi"]
-    c_Ho = params["p_Ho"]
-    c_Wo = params["p_Wo"]
     c_N = params["p_N"]
-    s_H = params["p_X_stride_hi"]
-    s_W = params["p_X_stride_wi"]
+    if SK:
+        # Swapped: the GEMM's im2col image is dY, its pixel range X's.
+        c_H, c_W = params["p_Ho"], params["p_Wo"]
+        c_Ho, c_Wo = params["p_Hi"], params["p_Wi"]
+        s_H, s_W = params["p_dY_stride_ho"], params["p_dY_stride_wo"]
+        s_N = params["p_dY_stride_n"]
+        v_N, v_H, v_W = (
+            params["p_X_stride_n"],
+            params["p_X_stride_hi"],
+            params["p_X_stride_wi"],
+        )
+    else:
+        c_H, c_W = params["p_Hi"], params["p_Wi"]
+        c_Ho, c_Wo = params["p_Ho"], params["p_Wo"]
+        s_H, s_W = params["p_X_stride_hi"], params["p_X_stride_wi"]
+        s_N = params["p_X_stride_n"]
+        v_N, v_H, v_W = (
+            params["p_dY_stride_n"],
+            params["p_dY_stride_ho"],
+            params["p_dY_stride_wo"],
+        )
 
     tid = b.thread_id_x()
     c_wave = b.const_i32(WAVE)
@@ -7004,6 +7064,8 @@ def _build_direct_conv_wgrad_small_c(spec: DirectConvWgradSpec, arch: str) -> Ke
     a_rsrc = b.buffer_rsrc(A, params["A_bytes"])
     b_rsrc = b.buffer_rsrc(Bp, params["B_bytes"])
     d_rsrc = b.buffer_rsrc(D, params["D_bytes"])
+    if SK:
+        a_rsrc, b_rsrc = b_rsrc, a_rsrc
 
     # ---- this block's steps: whole PIX_STEP runs of the flattened pixels.
     n_img_pix = b.mul(c_N, c_Ho)
@@ -7131,10 +7193,10 @@ def _build_direct_conv_wgrad_small_c(spec: DirectConvWgradSpec, arch: str) -> Ke
         ho = b.mod(t, c_Ho)
         n_i = b.div(t, c_Ho)
         out: List["Value"] = []
-        dy_n = b.mul(n_i, params["p_dY_stride_n"])
-        dy_h = b.mul(ho, params["p_dY_stride_ho"])
+        dy_n = b.mul(n_i, v_N)
+        dy_h = b.mul(ho, v_H)
         dy_nh = b.add(dy_n, dy_h)
-        dy_w = b.mul(wo, params["p_dY_stride_wo"])
+        dy_w = b.mul(wo, v_W)
         dy_base = b.add(dy_nh, dy_w)
         for j in range(DY_PASSES):
             ok = b.land(p_ok, dy_k_ok[j])
@@ -7148,7 +7210,7 @@ def _build_direct_conv_wgrad_small_c(spec: DirectConvWgradSpec, arch: str) -> Ke
         hb = b.sub(ho_u, c_PAD)
         wo_u = b.mul(wo, c_U)
         wb = b.sub(wo_u, c_PAD)
-        x_n = b.mul(n_i, params["p_X_stride_n"])
+        x_n = b.mul(n_i, s_N)
         x_h = b.mul(hb, s_H)
         x_nh = b.add(x_n, x_h)
         x_w = b.mul(wb, s_W)
@@ -7359,13 +7421,27 @@ def _build_direct_conv_wgrad_small_c(spec: DirectConvWgradSpec, arch: str) -> Ke
                 rr = b.div(n, c_RUNP)
                 rr_off = b.mul(rr, c_RUN)
                 n = b.add(rr_off, jj)
+            if SK:
+                # GEMM column (r', s', k) -> dW[k][KH-1-r'][KW-1-s'][c]: the
+                # k_off below then steps by one channel (c) instead of RSC.
+                rr = b.div(n, c_RUN)
+                jj = b.mod(n, c_RUN)
+                ss = b.div(jj, c_C)
+                kk = b.mod(jj, c_C)
+                c_tap_last = b.const_i32(KH * KW - 1)
+                rr_kw = b.mul(rr, b.const_i32(KW))
+                tap = b.add(rr_kw, ss)
+                tap = b.sub(c_tap_last, tap)
+                tap_off = b.mul(tap, c_K)
+                kk_off = b.mul(kk, b.const_i32(KH * KW * K))
+                n = b.add(kk_off, tap_off)
             acc = accs[tk * TN + tn]
             for slot in range(C_FRAG):
                 c_slot = b.const_i32(16 * tk + slot)
                 k = b.add(k_base, c_slot)
                 k_ok = b.cmp_lt(k, c_K)
                 ok = b.land(n_ok, k_ok)
-                k_off = b.mul(k, c_RSC)
+                k_off = k if SK else b.mul(k, c_RSC)
                 dw_off = b.add(k_off, n)
                 dw_off = b.add(dw_off, ws_shift)
                 byte = b.mul(dw_off, c4_bytes)
@@ -14611,6 +14687,7 @@ def direct_launch_geometry(spec) -> Tuple[Tuple[int, int, int], Tuple[int, int, 
         # derives n_q_blocks from p_Wo with the same ceilings as the spec.
         n_k_tiles = ceil_div(p.kpg, spec.block_k)
         if spec.small_c:
+            n_k_tiles = ceil_div(spec.sc_kpg, spec.block_k)
             # bx = k_tile * n_n_tiles + n_tile, by = pixel block.
             n_n_tiles = ceil_div(spec.small_c_n, spec.block_c)
             return (n_k_tiles * n_n_tiles, spec.row_blocks, 1), (

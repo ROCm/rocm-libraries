@@ -1424,6 +1424,20 @@ _SMALL_C_STEMS = (
 # latent-space input convolution of the latent diffusion UNets (4 latent
 # channels -> 320, and the 512-wide variant).
 _SMALL_C4_STEMS = ((3, 1, 1, (320, 512)),)
+# Narrow stride-2 3x3 layers of the small classifiers and detectors
+# ((filter, stride, padding, ((cpg, kpg), ...))): too few pixels and
+# channels to fill an implicit-GEMM grid, so the small_c GEMM (any channel
+# count a multiple of 8, the (s, c) runs loaded as 16 B vectors) serves them.
+_SMALL_C_NARROW = ((3, 2, 1, ((32, 32), (32, 128), (64, 64), (64, 128))),)
+WGRAD_SMALL_C_NARROW_ROW_BLOCKS = (8, 16, 32)
+# Small-K output convolutions (filter, padding, ((cpg, kpg), ...)), stride 1:
+# the 3-channel image outputs of the VAE decoders and super-resolution nets
+# and the 4-channel latent output of the diffusion UNets. They run the
+# small_c kernel on the swapped problem (direct_wgrad_small_k).
+_SMALL_K_OUTS = ((3, 1, ((64, 3), (128, 3), (320, 4))),)
+# Its configs: the small_c tiles (the GEMM is the same shape, with C = kpg),
+# split deeper over the pixels -- an output layer runs at full resolution.
+WGRAD_SMALL_K_ROW_BLOCKS = (512, 2048)
 # Depthwise wgrad filters (VALU kernel), stride 1 and 2.
 _DW_WGRAD_FILTERS = (3, 5, 7)
 # Dilated 3x3 rows of the non-grouped kernel: (PAD, stride, dil_h, dil_w). The
@@ -1873,6 +1887,21 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             DirectCaps(KH=k, PAD=pad, stride=s, cpg=4, kpg=kpg)
             for k, s, pad, kpgs in _SMALL_C4_STEMS
             for kpg in kpgs
+        )
+        + tuple(
+            DirectCaps(KH=k, PAD=pad, stride=s, cpg=cpg, kpg=kpg)
+            for k, s, pad, chans in _SMALL_C_NARROW
+            for cpg, kpg in chans
+        ),
+    ),
+    # Small-K output layers (groups == 1, kpg == 3 or 4), wave32 only:
+    # channel counts baked.
+    "direct_wgrad_small_k": (
+        "wgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=1, cpg=cpg, kpg=kpg)
+            for k, pad, chans in _SMALL_K_OUTS
+            for cpg, kpg in chans
         ),
     ),
     # Depthwise wgrad, VALU kernel (wave32): the channel count is runtime;
@@ -2708,8 +2737,32 @@ def _knob_grid(
 
         if ArchTarget.from_gfx(arch).wave_size != 32:
             return
+        narrow = caps is not None and caps.cpg >= 8
         for (wk, wc, tk, tc, vx, ss, wsr, uw), row_blocks in WGRAD_SMALL_C_CONFIGS:
+            if narrow:
+                # The narrow layers: few pixels, short pixel splits.
+                row_blocks = WGRAD_SMALL_C_NARROW_ROW_BLOCKS
+            elif caps is not None and caps.cpg not in (3, 4):
+                continue
             for rb in row_blocks:
+                yield dict(
+                    waves_k=wk,
+                    waves_c=wc,
+                    wave_tiles_k=tk,
+                    wave_tiles_c=tc,
+                    vec_x=vx,
+                    sub_steps=ss,
+                    ws_replicas=wsr,
+                    uniform_wave=uw,
+                    row_blocks=rb,
+                )
+    elif variant == "direct_wgrad_small_k":
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 32:
+            return
+        for (wk, wc, tk, tc, vx, ss, wsr, uw), _ in WGRAD_SMALL_C_CONFIGS:
+            for rb in WGRAD_SMALL_K_ROW_BLOCKS:
                 yield dict(
                     waves_k=wk,
                     waves_c=wc,
@@ -3289,7 +3342,7 @@ def probe_problem(
         # needs.
         groups = 64
         n_images = 8
-    elif variant == "direct_wgrad_small_c":
+    elif variant in ("direct_wgrad_small_c", "direct_wgrad_small_k"):
         groups = 1
     elif (caps.cpg, caps.kpg) in _DENSE_MFMA_DGRAD_CHANNELS:
         # Dense channel counts serve groups == 1: one group per block. Wider
