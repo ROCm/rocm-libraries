@@ -363,7 +363,9 @@ struct FmhaTdmSchedRowRange
 // row also issues its own reads and, in QK, has a KeepPending point after its RAW fence. The policy
 // implements both points: the operand registers of the WMMAs that a drain covers stay allocated
 // until it (QkKeptPairs; PvKeptRows for the PV WMMA emitter). No streaming output rescale.
-template <typename Geometry_, index_t QkGroup_ = 4, index_t PvGroup_ = 4>
+// Without QkTailReads the QK tail stage issues no reads and has no Drain or KeepPending point: the
+// caller reads PV stage 0's V after the stage's RAW fence (kFmhaTdmSchedQkTailReads).
+template <typename Geometry_, index_t QkGroup_ = 4, index_t PvGroup_ = 4, bool QkTailReads_ = true>
 struct FmhaTdmSchedGroupedDrainPlacement
 {
     using Geometry      = Geometry_;
@@ -379,6 +381,7 @@ struct FmhaTdmSchedGroupedDrainPlacement
     static constexpr index_t kPvWmmasPerStage = ReadPlacement::kPvWmmasPerStage;
     static constexpr index_t kQkGroup         = QkGroup_;
     static constexpr index_t kPvGroup         = PvGroup_;
+    static constexpr bool kQkTailReads        = QkTailReads_;
     static constexpr index_t kQkMIter         = Geometry::kQkMIter;
     static constexpr index_t kPvLastMRow      = kFmhaTdmSchedPvLastMRow<Geometry>;
     static_assert(kQkMIter == 1 || kQkMIter == 2);
@@ -440,15 +443,19 @@ struct FmhaTdmSchedGroupedDrainPlacement
     {
         emit_wmma(number<Stage>{}, number<Wmma>{});
         emit_fence(number<Stage>{}, number<Wmma>{}, At<Point::AfterWmma>{});
-        if constexpr(QkDrainRow(Wmma))
-            emit_fence(number<Stage>{}, number<Wmma>{}, At<Point::Drain>{});
-        if constexpr(kQkGroup > 1 && Wmma == kQkWmmasPerStage - 1)
-            emit_fence(number<Stage>{}, number<Wmma>{}, At<Point::KeepPending>{});
-        // The previous row's reads when it is a last-M row, then this row's own unless it is one.
-        if constexpr(Wmma % kQkMIter == 0 && Wmma > 0)
-            QkReads<Stage, Wmma - 1>(emit_read, emit_fence);
-        if constexpr(Wmma % kQkMIter != kQkMIter - 1 || Wmma == kQkWmmasPerStage - 1)
-            QkReads<Stage, Wmma>(emit_read, emit_fence);
+        if constexpr(kQkTailReads || Stage != kNumQkStages - 1)
+        {
+            if constexpr(QkDrainRow(Wmma))
+                emit_fence(number<Stage>{}, number<Wmma>{}, At<Point::Drain>{});
+            if constexpr(kQkGroup > 1 && Wmma == kQkWmmasPerStage - 1)
+                emit_fence(number<Stage>{}, number<Wmma>{}, At<Point::KeepPending>{});
+            // The previous row's reads when it is a last-M row, then this row's own unless it
+            // is one.
+            if constexpr(Wmma % kQkMIter == 0 && Wmma > 0)
+                QkReads<Stage, Wmma - 1>(emit_read, emit_fence);
+            if constexpr(Wmma % kQkMIter != kQkMIter - 1 || Wmma == kQkWmmasPerStage - 1)
+                QkReads<Stage, Wmma>(emit_read, emit_fence);
+        }
         emit_fence(number<Stage>{}, number<Wmma>{}, At<Point::AfterTokens>{});
     }
 
@@ -511,10 +518,17 @@ struct FmhaTdmSchedGroupedDrainPlacement
 // Whether a placement is the grouped-drain placement, whose points the policy implements.
 template <typename Placement>
 inline constexpr bool kIsFmhaTdmSchedGroupedDrain = false;
-template <typename Geometry, index_t QkGroup, index_t PvGroup>
-inline constexpr bool
-    kIsFmhaTdmSchedGroupedDrain<FmhaTdmSchedGroupedDrainPlacement<Geometry, QkGroup, PvGroup>> =
-        true;
+template <typename Geometry, index_t QkGroup, index_t PvGroup, bool QkTailReads>
+inline constexpr bool kIsFmhaTdmSchedGroupedDrain<
+    FmhaTdmSchedGroupedDrainPlacement<Geometry, QkGroup, PvGroup, QkTailReads>> = true;
+
+// Whether a placement's QK tail stage reads PV stage 0's V (all but the grouped-drain placement
+// without QkTailReads, whose caller reads it after the QK stage).
+template <typename Placement>
+inline constexpr bool kFmhaTdmSchedQkTailReads = true;
+template <typename Geometry, index_t QkGroup, index_t PvGroup, bool QkTailReads>
+inline constexpr bool kFmhaTdmSchedQkTailReads<
+    FmhaTdmSchedGroupedDrainPlacement<Geometry, QkGroup, PvGroup, QkTailReads>> = QkTailReads;
 
 // The tile schedule owns phase order. The context exposes only the concrete
 // work of one sequence-K tile; its large tensors stay in the pipeline scope.
@@ -593,7 +607,8 @@ struct FmhaTdmSchedSequentialTileSchedule
     CK_TILE_HOST_DEVICE static constexpr void RunQkReadPrelude(ReadEmitter&& emit_read)
     {
         if constexpr(Mode::SelectedPolicy::kLeadFirstLoad &&
-                     (Stage == 0 || Stage == kNumQkStages - 1))
+                     (Stage == 0 ||
+                      (Stage == kNumQkStages - 1 && kFmhaTdmSchedQkTailReads<LocalPlacement>)))
             emit_read(number<0>{});
     }
 
