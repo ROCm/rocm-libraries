@@ -171,6 +171,17 @@ struct FwdResult
 {
     std::vector<float> out;
     std::vector<float> lse;
+    // False if a store reached the NaN-filled O padding (see OLayout).
+    bool o_padding_intact = true;
+};
+
+// O buffer layout for LaunchBatch: row_pad extra elements per row and spare_rows extra rows per
+// head, both NaN-filled so stores outside the logical rows/columns are detected. out is always
+// returned compact as [batch][nhead][seqlen_q][hdim_v].
+struct OLayout
+{
+    int row_pad    = 0;
+    int spare_rows = 0;
 };
 
 // Guards against a comparison test passing vacuously because both kernels
@@ -323,26 +334,32 @@ FwdResult LaunchBatch(int batch,
                       bool shuffle,
                       MaskKind mask_kind,
                       int window,
-                      int sink)
+                      int sink,
+                      const OLayout& o_layout = {})
 {
     if(hdim != kHeadDim)
         throw std::invalid_argument("harness only supports hdim=128 (fixed tile geometry)");
     constexpr int hdim_v = kHeadDimV;
 
-    const auto q = make_input(batch, nhead, seqlen_q, kHeadDim, 0);
-    const auto k = make_input(batch, nhead, seqlen_k, kHeadDim, 1);
-    const auto v = make_input(batch, nhead, seqlen_k, hdim_v, 2);
-    std::vector<Data> o(static_cast<std::size_t>(batch) * nhead * seqlen_q * hdim_v,
-                        ck_tile::type_convert<Data>(0.0f));
+    const auto q          = make_input(batch, nhead, seqlen_q, kHeadDim, 0);
+    const auto k          = make_input(batch, nhead, seqlen_k, kHeadDim, 1);
+    const auto v          = make_input(batch, nhead, seqlen_k, hdim_v, 2);
+    const bool o_padded   = o_layout.row_pad != 0 || o_layout.spare_rows != 0;
+    const int o_row_elems = hdim_v + o_layout.row_pad;
+    const int o_head_rows = seqlen_q + o_layout.spare_rows;
+    std::vector<Data> o(
+        static_cast<std::size_t>(batch) * nhead * o_head_rows * o_row_elems,
+        ck_tile::type_convert<Data>(o_padded ? std::numeric_limits<float>::quiet_NaN() : 0.0f));
     std::vector<float> lse(static_cast<std::size_t>(batch) * nhead * seqlen_q, 0.0f);
 
     const float scale_s = 1.0f / std::sqrt(static_cast<float>(kHeadDim));
 
-    const ck_tile::index_t stride_q         = kHeadDim;
-    const ck_tile::index_t nhead_stride_q   = static_cast<ck_tile::index_t>(seqlen_q) * kHeadDim;
-    const ck_tile::index_t batch_stride_q   = static_cast<ck_tile::index_t>(nhead) * nhead_stride_q;
-    const ck_tile::index_t stride_o         = hdim_v;
-    const ck_tile::index_t nhead_stride_o   = static_cast<ck_tile::index_t>(seqlen_q) * hdim_v;
+    const ck_tile::index_t stride_q       = kHeadDim;
+    const ck_tile::index_t nhead_stride_q = static_cast<ck_tile::index_t>(seqlen_q) * kHeadDim;
+    const ck_tile::index_t batch_stride_q = static_cast<ck_tile::index_t>(nhead) * nhead_stride_q;
+    const ck_tile::index_t stride_o       = o_row_elems;
+    const ck_tile::index_t nhead_stride_o =
+        static_cast<ck_tile::index_t>(o_head_rows) * o_row_elems;
     const ck_tile::index_t batch_stride_o   = static_cast<ck_tile::index_t>(nhead) * nhead_stride_o;
     const ck_tile::index_t nhead_stride_lse = seqlen_q;
     const ck_tile::index_t batch_stride_lse = static_cast<ck_tile::index_t>(nhead) * seqlen_q;
@@ -554,7 +571,27 @@ FwdResult LaunchBatch(int batch,
         lb.Download(lse);
 
     FwdResult result;
-    result.out = Decode(o_result);
+    if(o_padded)
+    {
+        std::vector<Data> compact(static_cast<std::size_t>(batch) * nhead * seqlen_q * hdim_v);
+        for(int bh = 0; bh < batch * nhead; ++bh)
+            for(int r = 0; r < o_head_rows; ++r)
+                for(int c = 0; c < o_row_elems; ++c)
+                {
+                    const Data x =
+                        o_result[(static_cast<std::size_t>(bh) * o_head_rows + r) * o_row_elems +
+                                 c];
+                    if(r < seqlen_q && c < hdim_v)
+                        compact[(static_cast<std::size_t>(bh) * seqlen_q + r) * hdim_v + c] = x;
+                    else if(!std::isnan(ck_tile::type_convert<float>(x)))
+                        result.o_padding_intact = false;
+                }
+        result.out = Decode(compact);
+    }
+    else
+    {
+        result.out = Decode(o_result);
+    }
     if constexpr(Lse)
         result.lse = lse;
     return result;
@@ -1457,6 +1494,84 @@ TEST(QrTdmSchedPaged, LseMatchesDenseUnderCausalMask)
         for(size_t i = 0; i < dense.lse.size(); ++i)
             ASSERT_EQ(dense.lse[i], paged.lse[i]) << "lse elem " << i;
     }
+}
+
+// The O store must not write outside the logical rows: the last query tile is partial
+// (seqlen_q % kM0 != 0) and every head is followed by NaN-filled spare rows. Covers the async
+// LDS-to-global O store, which is taken for this aligned layout.
+TEST(QrTdmSchedPaged, OutputStoreStaysInsideLogicalRows)
+{
+    constexpr int batch = 2, nhead = 3, seqlen_k = 512, hdim = 128, page_block_size = 128;
+
+    for(const int seqlen_q : {100, 200, 256})
+    {
+        SCOPED_TRACE(seqlen_q);
+        const auto compact = LaunchBatch<true, true, false, false>(batch,
+                                                                   nhead,
+                                                                   seqlen_q,
+                                                                   seqlen_k,
+                                                                   hdim,
+                                                                   page_block_size,
+                                                                   /*shuffle=*/true,
+                                                                   MaskKind::Causal,
+                                                                   0,
+                                                                   0);
+        const auto guarded =
+            LaunchBatch<true, true, false, false>(batch,
+                                                  nhead,
+                                                  seqlen_q,
+                                                  seqlen_k,
+                                                  hdim,
+                                                  page_block_size,
+                                                  /*shuffle=*/true,
+                                                  MaskKind::Causal,
+                                                  0,
+                                                  0,
+                                                  OLayout{/*row_pad=*/0, /*spare_rows=*/128});
+        AssertNotAllZero(compact.out, "compact.out");
+        AssertAllFinite(guarded.out, "guarded.out");
+        ASSERT_TRUE(guarded.o_padding_intact) << "a store reached the spare O rows";
+        ASSERT_EQ(compact.out.size(), guarded.out.size());
+        for(std::size_t i = 0; i < compact.out.size(); ++i)
+            ASSERT_EQ(compact.out[i], guarded.out[i]) << "elem " << i;
+    }
+}
+
+// A row stride that is not a multiple of 16 bytes cannot use the async O store; the kernel
+// must fall back to the epilogue and still produce the same values without touching the pad.
+TEST(QrTdmSchedPaged, UnalignedOutputStrideMatchesAlignedLayout)
+{
+    constexpr int batch = 2, nhead = 2, seqlen_q = 200, seqlen_k = 512, hdim = 128;
+    constexpr int page_block_size = 128;
+
+    const auto aligned = LaunchBatch<true, false, false, false>(batch,
+                                                                nhead,
+                                                                seqlen_q,
+                                                                seqlen_k,
+                                                                hdim,
+                                                                page_block_size,
+                                                                /*shuffle=*/true,
+                                                                MaskKind::None,
+                                                                0,
+                                                                0);
+    const auto unaligned =
+        LaunchBatch<true, false, false, false>(batch,
+                                               nhead,
+                                               seqlen_q,
+                                               seqlen_k,
+                                               hdim,
+                                               page_block_size,
+                                               /*shuffle=*/true,
+                                               MaskKind::None,
+                                               0,
+                                               0,
+                                               OLayout{/*row_pad=*/4, /*spare_rows=*/128});
+    AssertNotAllZero(aligned.out, "aligned.out");
+    AssertAllFinite(unaligned.out, "unaligned.out");
+    ASSERT_TRUE(unaligned.o_padding_intact) << "a store reached the O row pad or spare rows";
+    ASSERT_EQ(aligned.out.size(), unaligned.out.size());
+    for(std::size_t i = 0; i < aligned.out.size(); ++i)
+        ASSERT_EQ(aligned.out[i], unaligned.out[i]) << "elem " << i;
 }
 
 // Additive rigor beyond the brief: confirm the dense baseline itself is

@@ -8,6 +8,7 @@
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/tdm_page_tracker.hpp"
 #include "ck_tile/ops/fmha/block/variants.hpp"
+#include "ck_tile/ops/fmha/detail/fmha_tdm_sched_output.hpp"
 
 #include <string>
 #include <type_traits>
@@ -103,6 +104,11 @@ struct FmhaFwdPagedKVKernel
         detail::pagedkv_kernel::uses_tdm_affine_dram_path_v<FmhaPipeline>;
     static constexpr bool kUsesFixedSegmentedLdsArena =
         detail::pagedkv_kernel::uses_fixed_segmented_lds_arena_v<FmhaPipeline>;
+    // O is staged in the K0 LDS slot and copied out with async LDS-to-global stores when the
+    // O layout allows it (see operator()); other layouts use EpiloguePipeline.
+    static constexpr bool kUseAsyncLdsOStore =
+        kUsesTdmAffineDramPath && kUsesFixedSegmentedLdsArena && sizeof(ODataType) == 2;
+    static constexpr index_t kAsyncOStoreBytes = 16;
 
     using AttentionVariant = ck_tile::remove_cvref_t<typename FmhaPipeline::AttentionVariant>;
     using FmhaMask         = ck_tile::remove_cvref_t<typename FmhaPipeline::FmhaMask>;
@@ -958,8 +964,8 @@ struct FmhaFwdPagedKVKernel
 
     CK_TILE_DEVICE void operator()(Kargs kargs) const
     {
-        // allocate LDS
-        __shared__ char smem_ptr[GetSmemSize()];
+        // allocate LDS; 16-byte aligned for the async O store
+        alignas(16) __shared__ char smem_ptr[GetSmemSize()];
 
         // divide problem
         const auto [i_tile_m, i_tile_n, i_nhead, i_batch] = GetTileIndex(kargs);
@@ -1613,6 +1619,34 @@ struct FmhaFwdPagedKVKernel
             make_tile_window(o_dram,
                              make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN1>{}),
                              {i_m0, i_n1});
+
+        if constexpr(kUseAsyncLdsOStore)
+        {
+            // The async store has no bounds check and uses 32-bit offsets from the tile base:
+            // it needs hdim_v == kN1, a 16-byte aligned tile, rows in whole 16-byte chunks and
+            // a tile span within 4 GiB. Other layouts keep the epilogue. Uniform per workgroup.
+            // Writes what Default2DEpilogue would (cast to ODataType, no scale); mirror any
+            // epilogue change here.
+            constexpr index_t kAsyncOStoreVec = kAsyncOStoreBytes / sizeof(ODataType);
+            ODataType* o_tile_ptr = o_ptr + static_cast<long_index_t>(i_m0) * kargs.stride_o + i_n1;
+            const uint64_t tile_span_bytes = (FmhaPipeline::kM0 - 1) *
+                                                 static_cast<uint64_t>(kargs.stride_o) *
+                                                 sizeof(ODataType) +
+                                             FmhaPipeline::kN1 * sizeof(ODataType);
+            if(kargs.hdim_v == FmhaPipeline::kN1 &&
+               reinterpret_cast<uintptr_t>(o_tile_ptr) % kAsyncOStoreBytes == 0 &&
+               kargs.stride_o >= 0 && kargs.stride_o % kAsyncOStoreVec == 0 &&
+               tile_span_bytes <= (uint64_t{1} << 32))
+            {
+                fmha_tdm_sched_store_o_tile_async_from_lds<FmhaPipeline, kAsyncOStoreBytes>(
+                    smem_ptr + FmhaPipeline::Policy::GetLdsOffsetK0(),
+                    o_tile_ptr,
+                    kargs.stride_o,
+                    kargs.seqlen_q - i_m0,
+                    o_acc_tile);
+                return;
+            }
+        }
 
         EpiloguePipeline{}(o_dram_window, o_acc_tile, nullptr);
     }
