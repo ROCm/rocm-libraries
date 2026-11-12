@@ -11,6 +11,7 @@ import pytest
 
 pytestmark = pytest.mark.unit
 import gzip
+import zlib
 import re
 import sys
 import os
@@ -385,6 +386,38 @@ class TestGzipLogs:
         assert timings
         assert all(timings[cat] == full_timings[cat][:len(timings[cat])] for cat in timings)
 
+    @pytest.mark.parametrize("with_prefix", [False, True])
+    def test_corrupt_deflate_warns_and_keeps_parsed_records(self, tmp_path, capsys, with_prefix):
+        corrupt = bytearray(gzip.compress(b"unused\n", mtime=0))
+        # The gzip header is 10 bytes; DEFLATE block type 3 is reserved and invalid.
+        corrupt[10] = (corrupt[10] & ~0x06) | 0x06
+        with pytest.raises(zlib.error):
+            gzip.decompress(corrupt)
+
+        prefix = b""
+        if with_prefix:
+            log = "TIMING_CONTEXT:M=64,N=64,K=64\n" + "TIMING:cpu_reference_gemm:20.0\n" * 1000
+            # Padding exceeds text read-ahead so all timing lines reach the parser
+            # before decompression encounters the following corrupt member.
+            prefix = gzip.compress((log + "\n" * 16384).encode(), mtime=0)
+        path = tmp_path / "corrupt.log.gz"
+        path.write_bytes(prefix + corrupt)
+
+        timings, problems = analyze_timing_file(str(path))
+
+        warning = capsys.readouterr().err
+        assert str(path) in warning
+        assert "ended early" in warning
+        assert "using the records read before that" in warning
+        if with_prefix:
+            assert dict(timings) == {"cpu_reference_gemm": [20.0] * 1000}
+            assert len(problems) == 1
+            assert problems[0].context == {"M": "64", "N": "64", "K": "64"}
+            assert problems[0].cpu_reference_gemm_ms == 20.0
+        else:
+            assert not timings
+            assert not problems
+
 
 class TestTimingTree:
     """timings_to_tree / tree_to_timings: the tiered dict of a run's results."""
@@ -583,4 +616,3 @@ class TestStagedHierarchy:
         _, top = self._tree(dict(self.RUN))
         assert {c.name for c in top["RUN: benchmark client"].children} >= {G_REFERENCE, G_LAUNCH}
         assert G_REFERENCE not in top        # nested under the stage, not next to it
-

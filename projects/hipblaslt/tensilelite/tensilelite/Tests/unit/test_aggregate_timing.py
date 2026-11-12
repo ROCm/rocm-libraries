@@ -80,6 +80,32 @@ def test_single_run_aggregate_equals_regular_report(tmp_path, capsys):
     assert _aggregate_report([a], capsys) == _report(timings, problems, capsys)
 
 
+@pytest.mark.parametrize("contributing_logs", [0, 1, 2])
+def test_main_explains_summed_runtime_and_excludes_empty_logs(
+    tmp_path, capsys, monkeypatch, contributing_logs
+):
+    empty = tmp_path / "empty.log"
+    empty.write_text("")
+    paths = [empty]
+    for index in range(contributing_logs):
+        path = tmp_path / f"run-{index}.log.gz"
+        with gzip.open(path, "wt") as f:
+            f.write("TIMING:python_benchmark_problems:1000.0\n")
+        paths.append(path)
+
+    expected_report = _aggregate_report(paths, capsys)
+    monkeypatch.setattr(sys, "argv", ["aggregate_timing.py", *map(str, paths)])
+    aggregate_timing.main()
+
+    captured = capsys.readouterr()
+    assert captured.out == (
+        f"Aggregated over {contributing_logs} contributing log files. "
+        "Totals and percentages refer to summed run durations, not elapsed job time.\n"
+        + expected_report
+    )
+    assert captured.err == f"warning: no timing data in {empty}\n"
+
+
 def test_add_trees_sums_count_and_total_per_node(tmp_path):
     a = tmp_path / "a.log"
     b = tmp_path / "b.log"

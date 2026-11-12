@@ -6,8 +6,9 @@ Aggregate the timing results of several runs into one overall report.
 
 Every log file passed in is analyzed with analyze_timing.py, turned into its tiered dict
 (``timings_to_tree``), and the dicts are summed node by node (count and total_ms). The summed tree
-is then printed with the same report as a single run, so the output has exactly the same layout as
-``analyze_timing.py <log>``.
+is then printed with the same report tables as ``analyze_timing.py <log>``. An aggregate-only banner
+states how many log files contributed timing data. ``TOTAL RUNTIME`` and ``% of Wall`` refer to
+summed run durations, not elapsed job time; parallel runs can sum to more than the job's duration.
 
 Usage:
     python scripts/aggregate_timing.py LOG [LOG ...]
@@ -67,6 +68,7 @@ def main():
 
     total = empty_tree()
     problem_timings = []
+    contributing_logs = 0
     for path in args.logfiles:
         timings, problems = analyze_timing_file(path)
         if not timings:
@@ -74,7 +76,10 @@ def main():
             continue
         add_trees(total, timings_to_tree(timings))
         problem_timings.extend(problems)
+        contributing_logs += 1
 
+    print(f"Aggregated over {contributing_logs} contributing log files. "
+          "Totals and percentages refer to summed run durations, not elapsed job time.")
     print_summary(tree_to_timings(total), problem_timings)
 
 

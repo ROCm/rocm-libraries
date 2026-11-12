@@ -32,6 +32,7 @@ add up to the wall clock time. The tree as the timers are nested in the code fol
 import argparse
 import gzip
 import sys
+import zlib
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import List, Dict, Optional, Tuple
@@ -730,7 +731,7 @@ def analyze_timing_file(filepath: str) -> Tuple[Dict[str, List[float]], List[Pro
                             current_problem.cpu_reference_gemm_ms = record.duration_ms
                         elif record.category == 'gpu_kernel_execution':
                             current_problem.gpu_kernel_execution_ms = record.duration_ms
-    except (EOFError, gzip.BadGzipFile) as err:
+    except (EOFError, gzip.BadGzipFile, zlib.error) as err:
         # A truncated or corrupt .gz log (e.g. a run that was killed): keep what was read.
         print(f"warning: {filepath} ended early ({err}); using the records read before that",
               file=sys.stderr)
