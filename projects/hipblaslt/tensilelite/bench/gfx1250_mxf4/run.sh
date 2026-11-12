@@ -29,6 +29,9 @@ PYTHON="${PYTHON:-python3}"
 # rocisa is built by `invoke build-client` but not pip-installed; import it from the build tree.
 ROCISA_BUILD="$TENSILELITE/build_tmp/tensilelite/rocisa"
 export PYTHONPATH="${TENSILELITE}:${ROCISA_BUILD}${PYTHONPATH:+:$PYTHONPATH}"
+# The stinkytofu adaptor (default rocisa backend on gfx1250) emits no s_set_vgpr_msb for
+# the subtile path's msb-relative operands; keep native rocisa unless overridden.
+export ROCISA_BACKEND="${ROCISA_BACKEND:-rocisa}"
 
 # tensilelite-client links libomp.so, which lives in the ROCm LLVM tree, not on the default path.
 ROCM_ROOT="${ROCM_PATH:-$(dirname "$(dirname "$(readlink -f "$(command -v rocprofv3 || echo /opt/rocm/bin/rocprofv3)")")")}"
