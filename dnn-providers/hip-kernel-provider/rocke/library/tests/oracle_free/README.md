@@ -6,6 +6,9 @@ every legal score equal, so the softmax row for query `q` is uniform over its
 legal key set `A(q)`. Each expected output follows from legal-key arithmetic
 alone, rounded correctly into the subject dtype.
 
+A second lane with structured logits, where Q and K reads matter, is described
+in [README_P4.md](README_P4.md).
+
 ## Exposures
 
 Each case runs `Sk / D + 1` launches on the same zero-Q, finite, nonconstant K:

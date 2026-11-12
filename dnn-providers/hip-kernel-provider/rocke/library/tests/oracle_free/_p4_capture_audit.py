@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Replayable audit of saved P4 GPU captures, coordinate by coordinate.
+"""Replayable audit of saved structured-logit GPU captures, coordinate by coordinate.
 
 The GPU lane writes the raw output bits of each quick case as
 ``<case_id>.npz`` (one array per exposure) when

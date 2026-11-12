@@ -1,9 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""CPU-only contracts for the structured-logit (P4) oracle-free check.
+"""CPU-only contracts for the structured-logit oracle-free check.
 
-The P4 prediction is derived from a pinned model of the dense kernel's
+The prediction is derived from a pinned model of the dense kernel's
 floating-point path: the score scale, the masked value, ``v_exp_f32``, the FP32
 denominator reduction, one cast of the probabilities, the PV MFMA, one
 ``fdiv 1.0, l`` reciprocal and one output cast. The IR contract here lowers
@@ -155,7 +155,7 @@ from ._p4_shared_subject import (
     run_dense_case,
 )
 
-_REDERIVE = "re-derive the P4 path model"
+_REDERIVE = "re-derive the path model"
 
 # LLVM spells FP32 constants as the hex of the equivalent double.
 _F32_LOG2E = "0x3FF7154760000000"
@@ -793,7 +793,7 @@ def test_ir_contract_rejects_an_unmodeled_reciprocal_intrinsic() -> None:
 # ---------------------------------------------------------------------------
 # Tile loop and mask predicate, evaluated from the IR.
 #
-# The masked-prefix topology (lemma T) is derived from two premises about the
+# The masked-prefix topology is derived from two premises about the
 # kernel: which KV tiles a query block visits, and which keys the mask keeps
 # (``q - W < k <= q``). Both are integer arithmetic in the lowered IR, so they
 # are evaluated here for every work item and lane of the quick shape instead of
@@ -1092,8 +1092,8 @@ def schedule_violations(ir: str, case: UniformCase) -> list[str]:
 
 @pytest.mark.parametrize("case", UNIFORM_QUICK_CASES, ids=lambda case: case.case_id)
 def test_ir_tile_loop_and_mask_are_the_modeled_ones(case: UniformCase) -> None:
-    """The premises of lemma T, read from the lowered IR: for every query row
-    the kernel visits exactly the modeled tiles, scores all 64 keys of each
+    """The premises of the tile classes, read from the lowered IR: for every
+    query row the kernel visits exactly the modeled tiles, scores all 64 keys of each
     and masks exactly the keys outside ``q - W < k <= q``. The resolved spec
     does not skip fully masked tiles per wave, which would drop their rescale."""
     assert not _resolve_tuning_spec(case).kernel_spec.window_wave_skip
@@ -1183,7 +1183,7 @@ def test_ir_schedule_contract_rejects_a_wrong_bound_or_window() -> None:
 # Affected AMDGPU LLVM revisions select ``fptrunc(fmul float)`` without
 # ``contract`` as ``v_fma_mix{lo,hi}_f16 R, o, 0`` (one rounding) at some sites
 # and as an FP32 multiply then ``v_cvt_f16_f32`` (two) at others; LLVM PR
-# #236759 makes the fold require ``contract``. The classifier follows each
+# #236759 proposes to make the fold require ``contract``. The classifier follows each
 # 16-bit half of the epilogue registers into the four-half output stores, so a
 # store element is "single", "double" or "unknown". FP32 FMAs are allowed only
 # inside the expansion of the one division ``fdiv 1.0, l``; that the expansion
@@ -1675,12 +1675,23 @@ def test_isa_classifier_does_not_guess_an_unknown_element() -> None:
     assert model.single_lanes is None
 
 
+def _toolchain_unavailable(reason: str):
+    """Skip the code-object contract for want of a tool, or fail where gfx942 is
+    required: that lane must not lose the only mechanical check of the compiled
+    code objects."""
+    if os.environ.get("ROCKE_REQUIRE_GFX942") == "1":
+        pytest.fail(reason)
+    pytest.skip(reason)
+
+
 def _disassemble(hsaco: bytes, directory) -> str:
     from rocke.tests.llc import find_llvm_tool
 
     objdump = find_llvm_tool("llvm-objdump")
     if objdump is None:
-        pytest.skip("llvm-objdump not found: the ISA contract needs a disassembler")
+        _toolchain_unavailable(
+            "llvm-objdump not found: the ISA contract needs a disassembler"
+        )
     path = directory / "kernel.hsaco"
     path.write_bytes(hsaco)
     completed = subprocess.run(
@@ -1700,12 +1711,14 @@ def test_quick_code_objects_fuse_only_the_fp16_epilogue(
       ``fadd(fmul(l, alpha), l_tile)`` is not fused.
     - Every ``v_fma_mix*`` is ``R * o + 0`` feeding an output store; BF16 has
       none. FP16 stores are classified element by element. No mix instruction
-      at all is the fixed compiler (LLVM PR #236759) and is accepted.
+      at all is a compiler that does not fold (what LLVM PR #236759 proposes)
+      and is accepted.
     - A named artifact (by HSACO digest) must show its recorded lanes.
     - A-MODE: the kernel descriptor starts every wave in round-to-nearest-even
       for FP32 and FP16, with FP16 denormals kept, and no instruction outside
       the division writes the MODE register. The FP32 denormal mode is
-      printed, not required: no verdict depends on it (lemma D).
+      printed, not required: every FP32 subnormal of the path is enclosed with
+      its flushed value, so no verdict depends on it.
     - A-MODE: every ``fptrunc float to bfloat`` of the BF16 kernel is the
       round-to-nearest-even integer sequence, and every pack of upper halves
       takes rounded values. A compiler with another sequence is not guessed."""
@@ -1715,12 +1728,13 @@ def test_quick_code_objects_fuse_only_the_fp16_epilogue(
     from rocke.helpers.compile import compile_kernel
 
     spec = _resolve_tuning_spec(case).kernel_spec
-    artifact = compile_kernel(
-        build_attention_dense(spec, arch="gfx942"),
-        arch="gfx942",
-        backend="python",
-        capture_ir_text=False,
-    )
+    kernel = build_attention_dense(spec, arch="gfx942")
+    try:
+        artifact = compile_kernel(
+            kernel, arch="gfx942", backend="python", capture_ir_text=False
+        )
+    except (ImportError, OSError, RuntimeError) as error:
+        _toolchain_unavailable(f"comgr toolchain unavailable: {error}")
     disassembly = _disassemble(artifact.hsaco, tmp_path)
     model = classify_epilogue_isa(disassembly)
     modes = kernel_descriptor_modes(artifact.hsaco, artifact.kernel_name)
@@ -1952,7 +1966,7 @@ def _single_rounded_fp16(o: np.float32, r: np.float32) -> int:
     return int(np.float16(np.float64(o) * np.float64(r)).view(np.uint16))
 
 
-# The Phase 4 capture: row 207, head 0, folded, background dimensions 16..63.
+# From a gfx942 capture: row 207, head 0, folded, background dimensions 16..63.
 _COUNTEREXAMPLE = {"o": 0x3A83E800, "r": 0x3E7BB1A4, "single": 0x0C0D, "double": 0x0C0E}
 
 
@@ -2055,7 +2069,7 @@ def test_epilogue_hull_rejects_negative_intervals() -> None:
                 cast_single_or_double_hull(accumulator, reciprocal, dtype)
 
 
-# DT9 / invariant I4: the v_exp_f32 candidate set from the documented bound.
+# The v_exp_f32 candidate set from the documented bound.
 
 
 def test_exp2_candidates_at_zero_admit_four_values() -> None:
@@ -2212,7 +2226,7 @@ def test_visited_tiles_follow_the_kernel_block_schedule() -> None:
 
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
 def test_target_rounding_geometry_is_exhaustive(dtype: str) -> None:
-    """DT1a: format-only rounding geometry over every positive finite value.
+    """Format-only rounding geometry over every positive finite value.
 
     Just inside each midpoint rounds to the near side; the midpoint itself
     rounds to the even pattern. Subnormals and binade edges are included."""
@@ -2235,7 +2249,7 @@ def _within(bits: np.ndarray, low: np.ndarray, high: np.ndarray) -> np.ndarray:
 
 @pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
 def test_tier_b_is_nonempty_and_reports_its_widths(case: P4Case) -> None:
-    """DT6 / I1: Tier B is nonempty everywhere. Its width is reported, not
+    """Tier B is nonempty everywhere. Its width is reported, not
     assumed: A-F lets an FP16 set reach a value either side of the IR's, so
     ``pytest -s`` prints the complete ``|B|`` histogram of each case."""
     histogram: Counter = Counter()
@@ -2249,7 +2263,7 @@ def test_tier_b_is_nonempty_and_reports_its_widths(case: P4Case) -> None:
 
 @pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
 def test_tier_b_lies_inside_tier_a(case: P4Case) -> None:
-    """DT1b / T3: every Tier B value is within 1 target ULP of the certified
+    """Tier A: every Tier B value is within 1 target ULP of the certified
     target at row-max coordinates, within 2 elsewhere, and exactly the target
     (+0) at structural zeros. Values are nonnegative, so bit distance is ULP
     distance."""
@@ -2279,7 +2293,7 @@ def _artifact_bits(artifact: str, double: np.ndarray, single: np.ndarray) -> np.
 
 @pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
 def test_emulated_paths_lie_inside_tier_b(case: P4Case) -> None:
-    """DT2 / I2: every emulation lands inside Tier B: the IR-exact path, each
+    """Every emulation lands inside Tier B: the IR-exact path, each
     named artifact's epilogue, single rounding at every FP16 site, and
     randomized-semantic members of the modeled path (summation tree, E
     candidate per call, MFMA rounding direction, epilogue rounding per FP16
@@ -2367,7 +2381,7 @@ def test_epilogue_artifacts_name_their_code_objects() -> None:
 
 
 def test_targets_are_certified_identically_at_50_and_70_digits() -> None:
-    """DT3: every distinct target of the quick matrix rounds the same at 50 and
+    """Every distinct target of the quick matrix rounds the same at 50 and
     70 digits, each with its midpoint margin."""
     classes = {
         (case.dtype, exponent, item)
@@ -2384,7 +2398,8 @@ def test_targets_are_certified_identically_at_50_and_70_digits() -> None:
 
 @pytest.mark.parametrize("base", UNIFORM_QUICK_CASES, ids=lambda base: base.case_id)
 def test_zero_logits_reproduce_the_uniform_targets(base: UniformCase) -> None:
-    """DT5: with every logit zero, P4's targets are P3's, and Tier B holds them."""
+    """With every logit zero the targets are the uniform lane's, and Tier B
+    holds them."""
     quick = next(case for case in P4_QUICK_CASES if case.base == base)
     zero = P4Case(base, "identity", (0,) * 4, (0,) * 4, block_m=quick.block_m)
     for exposure in P4_EXPOSURES:
@@ -2395,7 +2410,7 @@ def test_zero_logits_reproduce_the_uniform_targets(base: UniformCase) -> None:
 
 
 def test_fp16_head_scale_does_not_commute_with_the_cast() -> None:
-    """DT7: in the FP16 subnormal range ``q_T(2**h p) != 2**h q_T(p)`` for some
+    """In the FP16 subnormal range ``q_T(2**h p) != 2**h q_T(p)`` for some
     quick-matrix coordinate, so head predictions must not be shifted copies
     of head 0. One counterexample is kept here."""
     case = next(
@@ -2421,7 +2436,7 @@ def _decimal_exp(value: int) -> Decimal:
 
 
 def test_fp16_subnormal_threshold_for_one_distinguished_key() -> None:
-    """T1: with one distinguished key at c = -8 in a basis exposure, the first
+    """With one distinguished key at c = -8 in a basis exposure, the first
     row length whose stored value is FP16-subnormal is 7, 12, 23, 45 for head
     exponents 0..3 (not 6: at N = 6 the value is 6.71e-5 > 2**-14)."""
     tiny = _decimal_exp(-8)
@@ -2436,8 +2451,8 @@ def test_fp16_subnormal_threshold_for_one_distinguished_key() -> None:
 
 
 @pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
-def test_range_lemma_holds_on_the_quick_matrix(case: P4Case) -> None:
-    """DT8 / T1: every weight and rescale factor is either masked-small
+def test_weight_and_output_ranges_hold_on_the_quick_matrix(case: P4Case) -> None:
+    """Range result: every weight and rescale factor is either masked-small
     (at most 2**-149) or at least 2**-12; every nonstructural stored value is
     at least 2**-20; FP16-subnormal outputs occur only at c = -8
     distinguished coordinates."""
@@ -2466,7 +2481,7 @@ def test_range_lemma_holds_on_the_quick_matrix(case: P4Case) -> None:
 
 @pytest.mark.parametrize("family", sorted(P4_HEAD_SCALES))
 def test_head_scales_keep_their_committed_separation(family: str) -> None:
-    """DT10: every wrong single Q-head or K-head read moves some coordinate by
+    """Every wrong single Q-head or K-head read moves some coordinate by
     at least the committed margin in target ULPs, on both quick kernels."""
     q_scales, k_scales = P4_HEAD_SCALES[family]
     margin = head_scale_margin(P4_SEARCH_BASES, family, q_scales, k_scales)
@@ -2528,7 +2543,7 @@ def test_every_enclosure_endpoint_has_a_rank(case: P4Case) -> None:
 
 
 def test_irrational_targets_clear_both_rounding_boundaries() -> None:
-    """T0: an irrational target is certified against the two rounding
+    """An irrational target is certified against the two rounding
     boundaries adjacent to its bits, by more than ``10**-40`` at 50 digits.
     The boundaries are the midpoints to the two neighbors: twice as far above
     a power of two as below it, equidistant at the smallest normal (subnormals
@@ -2543,7 +2558,7 @@ def test_irrational_targets_clear_both_rounding_boundaries() -> None:
         assert below == (target_value(subnormal, dtype) + center) / 2
         assert above - center == center - below
         assert rounding_boundaries(0, dtype) == (None, target_value(1, dtype) / 2)
-    # The FP16 normal/subnormal rounding boundary of T1.
+    # The FP16 normal/subnormal rounding boundary.
     assert rounding_boundaries(0x0400, "fp16")[0] == (
         Fraction(1, 1 << 14) - Fraction(1, 1 << 25)
     )
@@ -2588,11 +2603,11 @@ _SCORE_EXPONENTS = {"periodic": ((2, 8), 0), "walsh": ((-4, 0), 6)}
 
 @pytest.mark.parametrize("family", sorted(P4_HEAD_SCALES))
 def test_score_exactness_ranges_of_the_committed_scales(family: str) -> None:
-    """X1 and X2: every Q and K entry is ``2**e`` with ``-2 <= e <= 6``; every
-    operand product is ``2**r`` with ``r`` in the family's range; every partial
-    sum ``z 2**r``, ``|z| <= 64``, of a Walsh score is zero or a normal FP32
-    number; every accumulator is ``2**rho`` with ``2 <= rho <= 8``; and its
-    product with each modeled score scale is exact."""
+    """Score exactness ranges: every Q and K entry is ``2**e`` with
+    ``-2 <= e <= 6``; every operand product is ``2**r`` with ``r`` in the
+    family's range; every partial sum ``z 2**r``, ``|z| <= 64``, of a Walsh
+    score is zero or a normal FP32 number; every accumulator is ``2**rho``
+    with ``2 <= rho <= 8``; and its product with each modeled score scale is exact."""
     q_scales, k_scales = P4_HEAD_SCALES[family]
     for value in (*q_scales, *k_scales):
         exponent = floor_log2(abs(value))
@@ -2639,7 +2654,8 @@ def test_score_exactness_ranges_of_the_committed_scales(family: str) -> None:
 
 @pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
 def test_pv_products_are_exact_and_in_range(case: P4Case) -> None:
-    """X3: a legal weight lies in ``[2**-12, 1 + 2**-23]`` and its PV product
+    """PV product range: a legal weight lies in ``[2**-12, 1 + 2**-23]`` and its
+    PV product
     ``q_T(p) 2**h`` in ``[2**-12, 2**3]``, a normal FP32 number. A masked
     weight gives the product ``+0``, or ``2**h`` in a fully masked leading
     tile, where the weight is ``E(0)`` and casts to one."""
@@ -2690,7 +2706,7 @@ _M1 = TileClass.MASKED_AFTER_LEGAL
 
 
 def _expected_tiles(case: P4Case, row: int) -> tuple[tuple[int, ...], tuple]:
-    """Lemma T: the visited tiles of ``row`` and their classes, written out for
+    """The visited tiles of ``row`` and their classes, written out for
     the two quick kernels (causal ``block_m = 128``; window 64, ``block_m = 64``)."""
     block = row // 64
     if case.mask == "causal":
@@ -2703,7 +2719,8 @@ def _expected_tiles(case: P4Case, row: int) -> tuple[tuple[int, ...], tuple]:
 
 @pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
 def test_tile_classes_match_the_masked_prefix_topology(case: P4Case) -> None:
-    """Lemma T over every row and exposure: at most one fully masked leading
+    """Masked-prefix topology over every row and exposure: at most one fully
+    masked leading
     tile, present exactly on rows 127, 191 and 255 of the window kernel; there
     every folded coordinate, and every coordinate of the basis exposure on
     that tile, selects one of its keys, and no other coordinate does."""
@@ -2715,14 +2732,15 @@ def test_tile_classes_match_the_masked_prefix_topology(case: P4Case) -> None:
         assert row_scope(case, row, None) is None
         prefix = masked_prefix(case, row)
         assert len(prefix) <= 1
-        if prefix:
-            prefix_rows.append(row)
+        if not prefix:
+            continue  # nothing to select: the count is zero by construction
+        prefix_rows.append(row)
         for exposure in P4_EXPOSURES:
             selected = {
                 prefix_selected_keys(case, exposure, row, dim)
                 for dim in range(case.base.head_dim)
             }
-            on_prefix = prefix and exposure in ("folded", f"basis@{64 * prefix[0]}")
+            on_prefix = exposure in ("folded", f"basis@{64 * prefix[0]}")
             assert selected == ({1} if on_prefix else {0}), (row, exposure)
     assert prefix_rows == ([127, 191, 255] if case.mask == "window" else [])
 
@@ -2781,8 +2799,9 @@ def test_tile_sum_refuses_a_normal_weight_in_a_masked_tile() -> None:
 @pytest.mark.parametrize(
     "case", [case for case in P4_QUICK_CASES if case.mask == "window"], ids=_quick_id
 )
-def test_masked_prefix_leaves_only_the_lemma_m_residue(case: P4Case) -> None:
-    """Lemma M, recomputed from the propagated endpoints on the three prefix
+def test_masked_prefix_leaves_only_a_subnormal_residue(case: P4Case) -> None:
+    """The masked-prefix residue, recomputed from the propagated endpoints on
+    the three prefix
     rows: (0) after the prefix ``l`` is the ``gamma_63`` sum of 64 ``E(0)``
     terms and a selecting coordinate holds ``2**h``; (1) the rescale by
     ``alpha`` in ``[0, 2**-149]`` leaves less than ``2**-142``, which the legal
@@ -2845,7 +2864,7 @@ def test_reciprocal_is_modeled_only_on_the_a_div_domain() -> None:
 
 @pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
 def test_denominators_stay_in_the_a_div_domain(case: P4Case) -> None:
-    """Lemma L: from the first legal tile on, every denominator of the correct
+    """From the first legal tile on, every denominator of the correct
     quick matrix lies in ``[1/2, 2**9)``, the domain of A-DIV, so the
     reciprocal is at most 2."""
     low, high = A_DIV_DOMAIN
@@ -2862,8 +2881,9 @@ def test_denominators_stay_in_the_a_div_domain(case: P4Case) -> None:
 def _underived_rows(case: P4Case, mutation: P4Mutation) -> dict[int, str]:
     """The sampled rows whose mutated enclosure is not derived, and why.
 
-    Excluding the last key leaves causal row 0 without a key, which lemma M
-    does not cover. A phantom logit-0 key added to a row whose only key has
+    Excluding the last key leaves causal row 0 without a key, which the
+    masked-prefix argument does not cover. A phantom logit-0 key added to a row
+    whose only key has
     logit -8 has weight ``e**8``, which takes the denominator out of the A-DIV
     domain."""
     if mutation is P4Mutation.EXCLUDE_LAST_KEY:
@@ -2878,7 +2898,8 @@ def _underived_rows(case: P4Case, mutation: P4Mutation) -> dict[int, str]:
 
 @pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
 def test_mutated_rows_outside_the_derivation_make_no_claim(case: P4Case) -> None:
-    """A mutated enclosure must establish lemma M and the A-DIV domain for its
+    """A mutated enclosure must establish the masked-prefix bound and the A-DIV
+    domain for its
     own recurrence. On the sampled rows every mutation does, except the two
     rows listed above: those raise instead of producing a set, and the
     separation and the mutated analysis leave them out."""
@@ -2909,7 +2930,7 @@ def test_mutated_rows_outside_the_derivation_make_no_claim(case: P4Case) -> None
         assert judged == case.base.nhead_q * case.base.head_dim
 
 
-def test_row_trace_fails_closed_outside_lemma_m() -> None:
+def test_row_trace_fails_closed_on_two_masked_leading_tiles() -> None:
     """The correct semantics are never filtered: a shape with two fully masked
     leading tiles has no enclosure until its residue bound is derived."""
     window = next(
@@ -2930,7 +2951,8 @@ def test_row_trace_fails_closed_outside_lemma_m() -> None:
 
 @pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
 def test_exposed_atoms_hold_at_most_one_nonzero_product(case: P4Case) -> None:
-    """Lemma P, premises P1 and P2, and the product counts of lemma B1.
+    """What reduces an MFMA call to one faithful addition, and what makes the
+    scores exact.
 
     PV: for every exposure, KV head and output dimension, V is nonzero at no
     more than one key of a tile (hence of each group of eight keys an MFMA
@@ -2968,7 +2990,7 @@ def test_exposed_atoms_hold_at_most_one_nonzero_product(case: P4Case) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Mutation separation (T5, DT4, invariant I5).
+# Mutation separation.
 # ---------------------------------------------------------------------------
 
 
@@ -3077,7 +3099,7 @@ def _dot_products(q: np.ndarray, k: np.ndarray) -> set[Fraction]:
 
 
 def test_score_products_are_exact_so_a_fused_score_is_unchanged() -> None:
-    """DT11: every QK dot product the correct kernel forms on the quick matrix
+    """Every QK dot product the correct kernel forms on the quick matrix
     is zero or a signed power of two, so its product with every modeled score
     scale is exact in FP32. Then ``fma(acc, qk_scale, -m)`` equals the IR's
     ``RN(RN(acc qk_scale) - m)`` for every row max ``m``: contracting the score
@@ -3118,11 +3140,12 @@ def test_score_products_are_exact_so_a_fused_score_is_unchanged() -> None:
 
 @pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
 def test_every_mutation_is_separated_or_classified(case: P4Case) -> None:
-    """DT4 / I5: every applicable mutation's Tier B is disjoint from the correct
+    """Every applicable mutation's Tier B is disjoint from the correct
     Tier B at some coordinate (``G(m) > 0``), or the cell is listed in
     ``P4_UNSEPARATED`` with its owner. ``G`` is taken over the sampled rows,
     a lower bound of the full gap; ``pytest -s`` prints each ``G`` and its
-    coordinate, including the P3-owned denominator and one-key boundary gaps."""
+    coordinate, including the denominator and one-key boundary gaps the uniform lane
+    also covers."""
     unexplained = []
     for mutation in applicable_mutations(case):
         separation = mutation_separation(case, mutation)
@@ -3135,7 +3158,7 @@ def test_every_mutation_is_separated_or_classified(case: P4Case) -> None:
 
 def test_unseparated_cells_are_proven_and_owned() -> None:
     """Each listed cell has a proven zero gap at every coordinate and, when it
-    names another P4 fixture as owner, that fixture separates the mutation on
+    names another fixture as owner, that fixture separates the mutation on
     the same kernel.
 
     For ``OMIT_RESCALE`` the zero is proven, not sampled: if every ``alpha``
@@ -3155,7 +3178,7 @@ def test_unseparated_cells_are_proven_and_owned() -> None:
                         assert Fraction(1) in step.alpha, (case_id, row, head)
         else:
             assert mutation_separation(case, mutation, rows=None).gap == 0
-        if label == "owned by another P4 fixture":
+        if label == "owned by another fixture":
             owners = [
                 other
                 for other in P4_QUICK_CASES
@@ -3174,7 +3197,7 @@ _MUTANT_ROWS = (0, 63, 64, 127, 128, 255)
 
 @pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
 def test_mutant_paths_lie_inside_their_tier_b(case: P4Case) -> None:
-    """I2 for the mutated semantics: a mutated kernel's IR-exact and
+    """Containment for the mutated semantics: a mutated kernel's IR-exact and
     randomized-semantic realizations (A-F epilogue choices included) lie in the
     mutated Tier B. Without this, a disjoint pair of enclosures would not imply
     that the mutant's output is rejected. A row whose mutated enclosure is not
@@ -3202,7 +3225,7 @@ def test_mutant_paths_lie_inside_their_tier_b(case: P4Case) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Analyzer policy and failure taxonomy (Phase 3).
+# Analyzer policy and failure taxonomy.
 # ---------------------------------------------------------------------------
 
 
@@ -3233,7 +3256,7 @@ def _with_bits(
 
 @pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
 def test_structural_zeros_have_tier_b_plus_zero(case: P4Case) -> None:
-    """I3 / T4: every structural coordinate (masked, no target) has Tier B
+    """Every structural coordinate (masked, no target) has Tier B
     ``{+0}``. The quick matrix has no trailing basis coordinate and no keyless
     row, so those sentinels cannot occur here."""
     for exposure in P4_EXPOSURES:
@@ -3390,7 +3413,7 @@ _UNPRODUCIBLE_LABELS = (P4Label.A_DIV, P4Label.A_QK)
     ids=lambda label: label.name,
 )
 def test_each_failure_label_is_produced_and_fails(label: P4Label) -> None:
-    """Policy: one synthetic coordinate per taxonomy label (§5) fails with that
+    """Policy: one synthetic coordinate per taxonomy label fails with that
     label and nothing else, starting from outputs that pass. One ULP outside an
     unambiguous Tier B fails as "path model"; the exact-zero sentinels (a
     nonzero masked coordinate, a negative value, NaN, the unwritten prefill)
@@ -3722,7 +3745,7 @@ def _p4_entry(dtype: str, **overrides) -> P4CalibrationEntry:
 
 
 def test_calibration_entry_has_no_numeric_width() -> None:
-    """I6 / D8: an entry names the policy, the assumption versions, the cases
+    """An entry names the policy, the assumption versions, the cases
     and the fingerprint; there is no field a measurement could widen."""
     assert [item.name for item in dataclasses.fields(P4CalibrationEntry)] == [
         "policy",
@@ -3779,7 +3802,7 @@ def test_calibration_requires_every_assumption_version() -> None:
 
 
 def test_observations_never_change_the_enclosures() -> None:
-    """I6: judging hostile outputs leaves Tier B and the exponential candidate
+    """Judging hostile outputs leaves Tier B and the exponential candidate
     sets exactly as derived, and the cached enclosures are read-only."""
     case = _LABEL_CASE
     before = {
@@ -3806,7 +3829,7 @@ def test_observations_never_change_the_enclosures() -> None:
 def test_calibration_scope_is_all_quick_cases_or_none() -> None:
     """No partial ratification: the calibrated case set is exactly the quick
     matrix, one entry per dtype holding that dtype's cases, with the same
-    dispatch fingerprint as the uniform (P3) entries."""
+    dispatch fingerprint as the uniform entries."""
     quick = {case.case_id for case in P4_QUICK_CASES}
     calibrated = {
         case_id for entry in P4_CALIBRATION.values() for case_id in entry.case_ids
@@ -3827,7 +3850,9 @@ def test_require_p4_calibration_fails_closed(case: P4Case) -> None:
     spec = UNIFORM_CALIBRATION[("gfx942", "attention_gfx942_dense", case.dtype)].spec
     key = ("gfx942", "attention_gfx942_dense", case.dtype)
     if key not in P4_CALIBRATION:
-        with pytest.raises(AssertionError, match="no P4 calibration") as raised:
+        with pytest.raises(
+            AssertionError, match="no structured-logit calibration"
+        ) as raised:
             require_p4_calibration("gfx942", "attention_gfx942_dense", case, spec)
         assert "ROCKE_ORACLE_FREE_CALIBRATION_OUT" in str(raised.value)
     table = {key: _p4_entry(case.dtype)}
@@ -3865,7 +3890,8 @@ def _dotted(node: ast.AST) -> str:
 
 
 def test_p4_gpu_lane_scope_and_gate() -> None:
-    """The P4 GPU lane runs exactly ``P4_QUICK_CASES``, gates once through the
+    """The structured-logit GPU lane runs exactly ``P4_QUICK_CASES``, gates once
+    through the
     require-aware ``current_device_arch_in(("gfx942",), ...)``, never skips
     otherwise, and ends in ``require_p4_calibration``."""
     tree = _p4_gpu_lane_tree()
@@ -3907,8 +3933,9 @@ def test_adapter_accepts_p4_cases_through_the_shape_protocol() -> None:
 
 @pytest.mark.parametrize("base", UNIFORM_QUICK_CASES, ids=lambda base: base.case_id)
 def test_p4_cases_resolve_to_the_uniform_dispatch_identity(base: UniformCase) -> None:
-    """P4 reuses the ratified P3 dispatch identity: every P4 case on a quick
-    shape resolves to the same candidate and fingerprint as its P3 case."""
+    """The structured-logit lane reuses the ratified uniform dispatch identity:
+    every case on a quick shape resolves to the same candidate and fingerprint
+    as the uniform case."""
     uniform = resolve_dense_subject(base)
     for case in (c for c in P4_QUICK_CASES if c.base == base):
         subject = resolve_dense_subject(case)
@@ -3958,7 +3985,7 @@ for case in p4.P4_QUICK_CASES:
     subject.resolve_dense_subject(case)
 loaded = sorted(name for name in sys.modules if name.split(".")[0] == "torch")
 assert not loaded, loaded
-print("torch-free P4 import and resolution ok")
+print("torch-free import and resolution ok")
 """
 
 
@@ -3975,4 +4002,4 @@ def test_p4_suite_imports_and_resolves_with_torch_blocked() -> None:
         check=False,
     )
     assert completed.returncode == 0, completed.stdout + completed.stderr
-    assert "torch-free P4 import and resolution ok" in completed.stdout
+    assert "torch-free import and resolution ok" in completed.stdout
