@@ -109,7 +109,9 @@ def validate_paged_launch(spec, k, v, block_tables, kv_lens, validate_paged: boo
     ``validate_paged`` the table contents are checked too (device->host copies; pass
     False on the hot path): every block id the kernel dereferences must be in
     ``[0, num_kv_blocks)``, and ``kv_lens[i]`` must equal ``seqlen_kv``, since the
-    kernel visits all ``seqlen_kv`` keys.
+    kernel visits all ``seqlen_kv`` keys. Without ``validate_paged`` nothing checks
+    either: the caller guarantees both, and a violation reads wrong pages without a
+    fault.
     """
     if type(validate_paged) is not bool:
         raise ValueError(

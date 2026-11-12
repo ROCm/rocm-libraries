@@ -80,8 +80,12 @@ def test_persistent_variants_decline_paged(spec_id):
         (dict(mask_type=0, sliding_window=0), "causal-only"),
         (dict(seqlen_q=1000, seqlen_k=1000, sliding_window=0), "whole KV tiles"),
         (dict(kv_block_size=8), "must be >= 16"),
+        (
+            dict(mask_type=2, seqlen_q=1024, sliding_window=0),
+            "causal_bottom_right is not supported with paged",
+        ),
     ],
-    ids=["multi_seq", "non_causal", "partial_kv_tile", "page_8"],
+    ids=["multi_seq", "non_causal", "partial_kv_tile", "page_8", "bottom_right"],
 )
 def test_paged_outside_the_cohort_is_refused(arch, spec_id, overrides, error):
     with pytest.raises(ValueError, match=error):

@@ -2281,15 +2281,17 @@ class TestDensePagedNumeric:
     @requires_gfx942_gpu
     @pytest.mark.gpu
     @pytest.mark.parametrize(
-        "sq,sk",
+        "sq,sk,window",
         [
-            pytest.param(512, 2048, id="top-left-512x2048"),
-            pytest.param(2048, 512, id="top-left-2048x512"),
+            pytest.param(512, 2048, 0, id="top-left-512x2048"),
+            pytest.param(2048, 512, 0, id="top-left-2048x512"),
+            pytest.param(1024, 512, 128, id="swa-empty-rows-1024x512"),
         ],
     )
-    def test_paged_cross_length_matches_dense(self, sq, sk):
-        """Top-left causal with ``seqlen_q != seqlen_kv``."""
-        self._check_paged("fp16", 16, sq, sk, 0, 128)
+    def test_paged_cross_length_matches_dense(self, sq, sk, window):
+        """Top-left causal with ``seqlen_q != seqlen_kv``, and rows whose window holds
+        no key."""
+        self._check_paged("fp16", 16, sq, sk, window, 128)
 
     @requires_gfx942_gpu
     @pytest.mark.gpu
@@ -2365,8 +2367,14 @@ class TestDensePagedNumeric:
         if window:
             keep &= ki > qi - window
         ref = _sdpa_reference(q, k, v, scale, attn_mask=keep)
-        max_abs = (ref - paged_out.float()).abs().max().item()
+        # A row whose window holds no key has no SDPA reference (NaN); its output
+        # must be zero.
+        live = keep.any(dim=1)
+        max_abs = (ref - paged_out.float())[:, live].abs().max().item()
         assert max_abs < _tolerance(dtype), f"{name}: max_abs={max_abs:.3e}"
+        if not live.all():
+            worst = paged_out.float()[:, ~live].abs().max().item()
+            assert worst == 0.0, f"{name}: {int((~live).sum())} keyless rows: {worst}"
 
 
 # All following cases are within the BF16 D128 causal BN64 persistent gate.

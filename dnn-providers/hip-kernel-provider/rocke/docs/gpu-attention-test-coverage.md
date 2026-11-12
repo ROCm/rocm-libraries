@@ -36,7 +36,7 @@ listed. Other GPU tests added after the inventory are not listed here.
 - [Full attention shape matrix](#full-attention-shape-matrix)
 - [Full recurrent shape matrix](#full-recurrent-shape-matrix)
 
-The matrices contain 196 attention and 109 recurrent configuration/shape rows.
+The matrices contain 197 attention and 109 recurrent configuration/shape rows.
 They describe source declarations, including cases that skip in the observed CI.
 
 Rows are not unique shapes or pytest pass counts. Binary-reuse tests have two
@@ -141,7 +141,7 @@ The historical source inventory below is unchanged by this new cohort.
 | Forced exp2 variants | BF16 D128 Hq16/Hkv4 B1/S512, default/persistent | The reference does not force fast and plain paths and compare them bitwise |
 | Paged D128 ring regression | FP16/BF16 × Hq/Hkv=(32,8)/(16,16) × S=512/1024/4096, B1 | Unified/paged builder and cache layout differ from dense SDPA |
 | Paged head-fold | BF16 D128, Hq32/Hkv8, `(S,W)=(2048,512),(8192,4096)` × page size16/32, B1 | No head-fold kernel, paging, long sequence, or clipped window in reference cohort |
-| Dense paged K/V | FP16/BF16 × D64/D128 × page size 16/32/64 × `(S,W)=(1024,256),(2048,1024),(1024,0)` (W=0: plain causal), B1 Hq16/Hkv4; FP16 D128 page size 16 top-left Sq/Sk=512/2048, 2048/512, and on gfx950 ragged S1088 and Sq1024/Sk512 W128 (empty rows); FP16 D128 S2048 W1024 page size 16 through dispatch | No reference case pages the cache |
+| Dense paged K/V | FP16/BF16 × D64/D128 × page size 16/32/64 × `(S,W)=(1024,256),(2048,1024),(1024,0)` (W=0: plain causal), B1 Hq16/Hkv4; FP16 D128 page size 16 top-left Sq/Sk=512/2048, 2048/512, Sq1024/Sk512 W128 (empty rows), and on gfx950 ragged S1088; FP16 D128 S2048 W1024 page size 16 through dispatch | No reference case pages the cache |
 | Paged i64 K/V addressing | BF16 D128 decode, page size 16: B8 Sk1024 Hq/Hkv=(32,8),(64,4) and B8 ragged Sk≤1000 with a block-table tail (`num_kv_blocks` overstated to force i64); B4 Sk1024 Hq/Hkv=(32,8) on a cache just over 2 GiB with pages straddling 2^31 bytes | No reference case pages the cache or uses i64 K/V addressing |
 | Seeds/distributions | One fixed normally distributed recipe per configuration in required suite | Multiple runs test repeatability, not additional input coverage |
 | Additional dense combinations | No BF16 full-mask case; no D64 full-mask case; not every dtype × grid × head-ratio combination | The selected rows are not a Cartesian-product sweep |
@@ -279,6 +279,7 @@ not executed GPU-kernel counts. All filenames below are relative to
 | [test_attention_dense_gfx942_numeric.py](../library/tests/test_attention_dense_gfx942_numeric.py) :: TestDensePagedNumeric.test_paged_matches_dense_bit_exact | gfx942 | bf16 | 1 | 1024 | 1024 | 16 | 4 | 64 | paged K/V, page size 64; plain causal; bit-exact vs contiguous; permuted pages, NaN unused pages | Missing |
 | [test_attention_dense_gfx942_numeric.py](../library/tests/test_attention_dense_gfx942_numeric.py) :: TestDensePagedNumeric.test_paged_cross_length_matches_dense | gfx942 | fp16 | 1 | 512 | 2048 | 16 | 4 | 128 | paged K/V, page size 16; top-left causal; bit-exact vs contiguous; permuted pages, NaN unused pages | Missing |
 | [test_attention_dense_gfx942_numeric.py](../library/tests/test_attention_dense_gfx942_numeric.py) :: TestDensePagedNumeric.test_paged_cross_length_matches_dense | gfx942 | fp16 | 1 | 2048 | 512 | 16 | 4 | 128 | paged K/V, page size 16; top-left causal; bit-exact vs contiguous; permuted pages, NaN unused pages | Missing |
+| [test_attention_dense_gfx942_numeric.py](../library/tests/test_attention_dense_gfx942_numeric.py) :: TestDensePagedNumeric.test_paged_cross_length_matches_dense | gfx942 | fp16 | 1 | 1024 | 512 | 16 | 4 | 128 | paged K/V, page size 16; top-left causal; window=128; empty rows; bit-exact vs contiguous; permuted pages, NaN unused pages | Missing |
 | [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: test_dense_numeric_vs_fp32_sdpa | gfx950 | fp16 | 1 | 512 | 512 | 16 | 4 | 128 | persistent=False; causal=True | Equivalent configuration (different inputs) |
 | [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: test_dense_numeric_vs_fp32_sdpa | gfx950 | fp16 | 1 | 512 | 512 | 16 | 4 | 128 | persistent=True; causal=True | Equivalent configuration (different inputs) |
 | [test_attention_dense_gfx950_numeric.py](../library/tests/test_attention_dense_gfx950_numeric.py) :: test_dense_numeric_vs_fp32_sdpa | gfx950 | bf16 | 1 | 512 | 512 | 16 | 4 | 128 | persistent=True; causal=True | Equivalent configuration (different inputs) |
