@@ -146,8 +146,8 @@ struct AttentionUnified2DCandidate
     bool useTransposedMaskLimit = false;
     bool useTransposedInvariantHoist = false;
     /// No LSE-on kernel ships on gfx942: graph_match declines a stats output, so every
-    /// candidate is judged against a graph that binds NO_STATS.
-    static constexpr bool emitLse = false;
+    /// candidate is judged against a graph that binds NO_STATS. Never set by candidateFor.
+    bool emitLse = false;
 };
 
 /**

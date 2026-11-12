@@ -561,7 +561,7 @@ TEST(TestGfx942AttentionUnified2DMatchers, DeclinesAWellFormedStatsOutputByName)
     EXPECT_FALSE(graphMatches(spec));
     EXPECT_EQ(loggedDeclineCause(spec), "stats");
 
-    GraphSpec sameWithoutStats;
+    const GraphSpec sameWithoutStats;
     EXPECT_TRUE(graphMatches(sameWithoutStats));
 }
 
