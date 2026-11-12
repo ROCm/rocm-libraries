@@ -23,6 +23,8 @@
  * THE SOFTWARE.
  *
  *******************************************************************************/
+#include <algorithm>
+#include <initializer_list>
 #include <set>
 #include <unordered_map>
 

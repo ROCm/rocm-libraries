@@ -27,6 +27,7 @@
 #pragma once
 
 #include <algorithm>
+#include <initializer_list>
 #include <numeric>
 
 #include "contraction_solution.hpp"
