@@ -4,7 +4,7 @@
 """Build the rocKE backward-data conv AOT instance lists a hipkernel dgrad pack ships.
 
 One tool for every dgrad engine of the rocKE adapter's ``TARGETS``, chosen by
-``--arch`` (gfx950 by default, or gfx1250). The catalog is rocKE's own registered
+``--arch`` (gfx950 by default, gfx942 or gfx1250). The catalog is rocKE's own registered
 instance list of the architecture
 (``dispatch/grouped_convolution_instances/<arch>_dgrad.json``,
 read with :func:`read_rocke_catalog`) -- rocKE is the only source of "what instances
@@ -19,8 +19,8 @@ or bf16.
 Every entry must also convert (``make_conv_dgrad_aot_config.py``); nothing is dropped
 silently.
 
-gfx950's MFMA direct pipelines (``direct_variants.DIRECT_MFMA_DGRAD``) launch weight-transform
-helper kernels the labels do not name: the transpose always, the reorganize (keyed on
+gfx950's and gfx942's MFMA direct pipelines (``direct_variants.DIRECT_MFMA_DGRAD``)
+launch weight-transform helper kernels the labels do not name: the transpose always, the reorganize (keyed on
 ``fold_k32``) when the entry splits K over waves or walks it at run time. The rocKE side
 decides which, in launch order, in ``direct_dgrad_weight_transforms()``; this tool asks it
 rather than restating the rule, so the runtime-channel pipeline's own helper variants come
@@ -35,6 +35,8 @@ per line, ordered by family (implicit GEMM, direct, helpers), then ``stable_hash
 
     ROCKE_LLVM_FLAVOR=llvm22 python tools/enumerate_conv_dgrad_aot_instances.py \\
         --rocke-root "$ROCKE" --output-dir configs
+    ROCKE_LLVM_FLAVOR=llvm22 python tools/enumerate_conv_dgrad_aot_instances.py \\
+        --arch gfx942 --rocke-root "$ROCKE" --output-dir configs
     ROCKE_LLVM_FLAVOR=llvm24 python tools/enumerate_conv_dgrad_aot_instances.py \\
         --arch gfx1250 --rocke-root "$ROCKE" --output-dir configs
 """
