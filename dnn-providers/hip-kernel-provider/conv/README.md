@@ -51,6 +51,29 @@ on correctness alone. There is no shape-to-config routing table: the catalog's d
   a problem when any two of in/wei/out share a type, and no optimized MIOpen solver takes one.
   Mixed-type convolution is unsupported here for now.
 
+## Lower-precision plans (testing only)
+
+Every engine above computes as precisely as the graph asks: fp32 accumulation and one final
+rounding. Plans that compute less precisely run only as separate engines behind temporary
+switches, because hipDNN cannot yet report a plan's numerical notes or let a caller exclude one
+(draft PR #15493). Leave the switches unset for normal selection.
+
+- **TF32:** `HIP_KERNEL_PROVIDER_CONV_TF32` (this provider's three-bf16 fp32 configs) and
+  `HIPBLASLT_PROVIDER_CONV_TF32` (`HIPBLASLT_CONV_TF32_ENGINE`, `ROCBLAS_CONV_TF32_ENGINE`).
+  cuDNN's note: `TENSOR_CORE`.
+- **Reduced-precision reduction:** `HIPDNN_CONV_ALLOW_REDUCED_PRECISION_REDUCTION=1` registers
+  `ROCBLAS_CONV_RPR_ENGINE` and `HIPBLASLT_CONV_RPR_ENGINE` (hipblaslt-provider). Their one
+  form: a 1x1, unit-stride, unpadded fp16 backward weights of several channels-first images as
+  one GEMM per image adding into the fp16 dw (MIOpen's `GemmWrw1x1_stride1`), so dw is rounded
+  once per image. It wins where the exact plans' fp32 partials are slow, mostly RDNA (gfx1100,
+  gfx1201). fp16 only; bf16 has no reduced form. With the switch unset no such engine is
+  registered or applicable. cuDNN's note: `REDUCED_PRECISION_REDUCTION`.
+
+These engines follow cuDNN's semantics, where the compute type is the least precision a plan
+must keep: they serve FLOAT and unset compute types, and HALF on fp16. Once per-engine notes
+land, each engine reports its note, is offered under those compute types as cuDNN offers it,
+and its switch is removed (`~/old-asic-hipdnn/compute-type/PLAN.md` holds the checklist).
+
 ## Layout
 
 | Piece | Path, relative to the provider root |
