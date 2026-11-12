@@ -5,8 +5,8 @@
 
 The SDPA graph template and the golden bundles live in the hipDNN part of the
 monorepo, outside rocke. An installed test tree carries a copy under ``hipdnn/``
-beside this module (``platform/CMakeLists.txt`` installs it when it configures
-from a monorepo checkout); a source checkout reads the monorepo. The tests that
+beside this module (the rocKE umbrella ``CMakeLists.txt`` installs it for an
+embedded build); a source checkout reads the monorepo. The tests that
 read them skip when neither exists, unless ``--rocke-require-hipdnn-assets`` is
 given (the installed CTest entry passes it whenever it installed the copy).
 """

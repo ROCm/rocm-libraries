@@ -278,10 +278,11 @@ dgrad: fused weights").
 The single-kernel direct dgrad forms are AOT cache variants
 (`library/kernels/conv/direct_aot_jobs.py`); each cached binary is a variant
 plus a knob dict, and `make_direct_spec` in
-`library/kernels/conv/direct_variants.py` builds its spec. They are not
-dispatched yet (the grouped-convolution dispatcher is being reworked
-separately); `benchmark_direct_conv --run-from-cache <cache> --direction
-dgrad --variants <variant> --verify` runs them on a shape.
+`library/kernels/conv/direct_variants.py` builds its spec. The grouped-convolution
+dispatcher serves them through its gfx950 backward-data instance list
+(`library/dispatch/grouped_convolution_instances/gfx950_dgrad.json`);
+`benchmark_direct_conv --run-from-cache <cache> --direction dgrad --variants
+<variant> --verify` runs one on a shape.
 
 | Cache variant | Kernel | Knob image | ABI |
 |---------------|--------|------------|-----|
@@ -746,11 +747,13 @@ are computed in-kernel from the `p_Wo` kernarg, with the same ceilings
 | cpg=16 (`fold_k32=True`)  | — | ✓ | — |
 | cpg=32 | ✓ | ✓ | — |
 | wgrad (`DirectConvWgradSpec`) | — | ✓ | — |
-| depthwise dgrad, windowed (`dot2`, `mfma` forms gfx950 only) | ✓ | ✓ | — |
+| depthwise dgrad, windowed (`dot2` and MFMA Toeplitz forms gfx950 only; the WMMA Toeplitz form gfx1250 only) | ✓ | ✓ | ✓ |
 | 4c / generic dgrad, fused weights (LDS-staged weights, `stage_rows`, `xcd_tiles` gfx950 only) | ✓ | ✓ | — |
 
-gfx1250 (WMMA/RDNA) is not supported by any direct-conv variant.  Use the
-implicit-GEMM kernel with `pipeline="wavelet"` on that target.
+On gfx1250 (wave32 WMMA) this family offers only the depthwise dgrad kernels (the
+windowed one and the row-streaming `DirectDepthwiseDgradStreamSpec`); the other
+gfx1250 direct forms are the WMMA kernels (`conv_direct_fwd_wmma`,
+`conv_direct_dgrad_wmma` and their siblings), next to implicit GEMM.
 
 The wgrad kernel is gfx950-only in both `mfma_k` modes: even `mfma_k = 16`,
 whose MFMA atom exists on gfx942, needs `ds_read_tr16_b64` for the LDS staging.
@@ -769,7 +772,8 @@ For a backward-weights pass on gfx942 use the implicit-GEMM wgrad kernel
 | `stride > 1` | Implicit-GEMM only |
 | `dilation > 1` | Implicit-GEMM; this family refuses it (`direct_nongrouped`, `direct_fwd_wmma`, `direct_fwd_tapouter_wmma` and `direct_dgrad_wmma` are the direct variants that compute one) |
 | Grouped with arbitrary `groups` | Implicit-GEMM |
-| gfx1250 target | Implicit-GEMM (`pipeline="wavelet"`) |
+| Backward-data, gfx1250 | The gfx1250 backward-data instance list (`library/dispatch/grouped_convolution_instances/gfx1250_dgrad.json`): WMMA direct kernels, depthwise dgrad and implicit GEMM (`mem` and `wavelet` pipelines) |
+| Other directions, gfx1250 | Implicit-GEMM, or the WMMA direct kernels where they apply |
 | Depthwise (`cpg = 1`, `stride = 1`) | Direct-conv depthwise |
 | Backward-data, gfx950 | Run the cached candidates ([Dgrad AOT cache variants](#dgrad-aot-cache-variants-gfx950)): windowed depthwise, 4c / fused generic direct, and implicit GEMM; keep the faster |
 | Backward-weights, gfx950, `cpg` and `kpg` ≥ 16, `stride = 1` | Direct-conv wgrad |

@@ -26,7 +26,7 @@ from functools import lru_cache
 
 from ..Common.Constants import MAX_FILENAME_LENGTH
 from ..Common.RequiredParameters import getRequiredParametersMin, getRequiredParametersFull
-from ..Common.Utilities import isMxf4SubtilePath, printWarning
+from ..Common.Utilities import isMxf4SubtilePath, plsinDataTypes, printWarning
 from ..Common.ValidParameters import parseStinkyTofuRegisterAllocation
 
 from .Problem import ProblemType
@@ -236,12 +236,28 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     if state.get("TileProcessingStrategy", "None") == "None":
       requiredParametersTemp.difference_update({"WorkAssignment", "PersistentXCCMapping", "WorkQueueStealing"})
 
+    # LDSTrStoreShuffle 0 emits byte-identical assembly to a kernel generated before the parameter
+    # existed, so encoding AS0 would rename every kernel in the library without changing one
+    # instruction. Omit it at 0 and let 1/2 carry the tag; absence therefore means 0, and the
+    # three values still map to three distinct names.
+    if not state.get("LDSTrStoreShuffle", 0):
+      requiredParametersTemp.discard("LDSTrStoreShuffle")
 
-    # PostLoopStoreInNll only ever applies on the MXF4 subtile path, where
-    # assignPostLoopStoreInNll auto-disables it for everything else. Naming it
-    # unconditionally would append PLSIN0 to every kernel in the library and change
-    # its name hash, so drop it where it cannot be set.
-    if not isMxf4SubtilePath(state):
+    # PostLoopStoreInNll changes codegen only when it is ON, and
+    # assignPostLoopStoreInNll resolves it independently of isMxf4SubtilePath -- an
+    # NT/NN/TT fp4 subtile kernel can carry it ON while isMxf4SubtilePath is False, and
+    # dropping it there gave the ON and OFF variants one name and one .s file. Naming it
+    # unconditionally would append PLSIN0 to every kernel in the library and change its
+    # name hash, so keep it only where the fused store can exist.
+    #
+    # The flag alone is not a safe test: Solution.__init__ pre-fills it from
+    # defaultSolution (True) before derivation, so a solution rejected ahead of
+    # assignPostLoopStoreInNll keeps a stale True it never earned. Re-test the two
+    # datatype/path conditions the gate itself requires, which no default can forge.
+    plsinReachable = (bool(state.get("PostLoopStoreInNll", False))
+                      and bool(state.get("UseSubtileImpl", False))
+                      and plsinDataTypes(state))
+    if not isMxf4SubtilePath(state) and not plsinReachable:
       requiredParametersTemp.discard("PostLoopStoreInNll")
 
     if ignoreInternalArgs:
