@@ -2668,8 +2668,6 @@ TEST_CASE("GEMM: tensor-DMA TemporalHint (1,1) scales by footprint", "[gemm][gfx
   one_wave.tensile().wave_group_n    = 1;
   auto subtile                       = tdm;
   subtile.subtile                    = true;
-  auto separate                      = tdm;
-  separate.tensile().tdm_separate_ab = true;
   auto ratio = [&](const origami::problem_t& p, const origami::config_t& c) {
     auto temporal          = c;
     temporal.cache_hints_a = 0;
@@ -2685,7 +2683,7 @@ TEST_CASE("GEMM: tensor-DMA TemporalHint (1,1) scales by footprint", "[gemm][gfx
   const auto below = make_problem(8192, 8192, 8192);
   const auto mid   = make_problem(8192, 8192, 16384);
   const auto above = make_problem(16384, 16384, 16384);
-  for (const auto& c : {tdm, one_wave, subtile, separate}) {
+  for (const auto& c : {tdm, one_wave, subtile}) {
     REQUIRE(ratio(small, c) == Approx(1.0));
     REQUIRE(ratio(below, c) == Approx(1.0 / 1.117));
     REQUIRE(ratio(mid, c) == Approx(1.0));
@@ -2912,7 +2910,7 @@ TEST_CASE("GEMM: gfx1250 tensor-DMA bandwidth follows the per-WGP DMA rate",
   };
 
   // Each WGP's DMA path moves a row per max(row bytes, 256 B) beat, so 256 B rows and larger
-  // tiles stream faster.  The tdm_bandwidth benchmark reached 16.0-16.4 TB/s from L2 for
+  // tiles stream faster.  Tensor loads on gfx1250 reached 16.0-16.4 TB/s from L2 for
   // 128 x 64 bf16 A + B tiles and 30.9-32.1 TB/s for 256 x 128.  The prefetch depth does not
   // change this rate: the load latency it leaves exposed is charged by the tile model.
   const double small = bandwidth(8, 128, 64);
@@ -2938,3 +2936,128 @@ TEST_CASE("GEMM: gfx1250 tensor-DMA bandwidth follows the per-WGP DMA rate",
           origami::gemm::compute_total_latency(problem950, gfx950, plain950));
 }
 
+TEST_CASE("GEMM: gfx1250 L2 domains follow the part's XCD count", "[gemm][gfx1250]") {
+  auto part = [](size_t num_xcd, size_t l2_capacity) {
+    return origami::hardware_t(origami::hardware_t::architecture_t::gfx1250,
+                               32 * num_xcd,
+                               327680,
+                               512 * 1024,
+                               num_xcd,
+                               1.0,
+                               1.0,
+                               1.0,
+                               l2_capacity,
+                               2.4,
+                               1,
+                               std::make_tuple(0.0, 0.016, 0.0));
+  };
+  for (auto [xcd, domains, per_domain] :
+       {std::tuple<size_t, size_t, size_t>{8, 2, 4}, {6, 2, 3}, {4, 1, 4}, {3, 1, 3}, {1, 1, 1}}) {
+    INFO(xcd << " XCDs");
+    const auto hw = part(xcd, 4 << 20);
+    REQUIRE(hw.num_l2_domains() == domains);
+    REQUIRE(hw.xcd_per_l2_domain() == per_domain);
+    // The reported 4 MiB is a placeholder; the measured per-AID capacity applies.
+    REQUIRE(hw.l2_domain_capacity() == (96ull << 20));
+  }
+  REQUIRE(part(8, 512ull << 20).l2_domain_capacity() == (256ull << 20));
+}
+
+TEST_CASE("GEMM: gfx1250 DRAM occupancy curve scales with the part's CUs", "[gemm][gfx1250]") {
+  auto part = [](size_t n_cu) {
+    return origami::hardware_t::get_hardware_for_arch(
+        origami::hardware_t::architecture_t::gfx1250, n_cu, 327680, 512 * 1024, 4 << 20, 2400000);
+  };
+  const auto full = part(256);
+  const auto p96  = part(96);
+  const auto p192 = part(192);
+  using origami::gemm::compute_mem_bw_from_occupancy;
+  REQUIRE(compute_mem_bw_from_occupancy(p96, 96) == compute_mem_bw_from_occupancy(full, 256));
+  REQUIRE(compute_mem_bw_from_occupancy(p96, 48) == compute_mem_bw_from_occupancy(full, 128));
+  REQUIRE(compute_mem_bw_from_occupancy(p192, 192) == compute_mem_bw_from_occupancy(full, 256));
+  REQUIRE(compute_mem_bw_from_occupancy(full, 256) > 0.95);
+  REQUIRE(compute_mem_bw_from_occupancy(p96, 97) == 1.0);
+}
+
+namespace {
+// The WGM ContractionSolution::calculateAutoWGM launches: a StreamK auto mapping (WGM 0,
+// WGMXCC -1) on a nonzero grid asks select_workgroup_mapping with the tile, the cache hints and
+// TDMInst; any other WGM 0 is ceil(sqrt(N_CU / NUM_XCD)), whatever the CU budget.
+int host_launch_wgm(const origami::problem_t& problem,
+                    const origami::hardware_t& hw,
+                    const origami::config_t& config,
+                    size_t grid) {
+  const auto& tp = config.tensile();
+  if (config.stream_k > 0 && config.workgroup_mapping == 0 && tp.workgroup_mapping_xcc == -1 &&
+      grid != 0) {
+    origami::config_t host;
+    host.mt                 = config.mt;
+    host.cache_hints_a      = config.cache_hints_a;
+    host.cache_hints_b      = config.cache_hints_b;
+    host.tensile().tdm_inst = tp.tdm_inst;
+    return origami::select_workgroup_mapping(problem, hw, host, grid).wgm;
+  }
+  if (config.workgroup_mapping != 0) return config.workgroup_mapping;
+  return static_cast<int>(std::ceil(std::sqrt(static_cast<double>(hw.N_CU / hw.NUM_XCD))));
+}
+}  // namespace
+
+TEST_CASE("GEMM: gfx1250 ranking prices the WGM the host launches", "[gemm][gfx1250][wgm]") {
+  const auto hw = gfx1250_hardware();
+  auto latency  = [&](const origami::problem_t& p, const origami::config_t& c) {
+    return origami::gemm::compute_total_latency(p, hw, c);
+  };
+  // The same config with its mapping fixed to `wgm`.
+  auto fixed = [](origami::config_t c, int wgm) {
+    c.tensile();
+    c.workgroup_mapping = wgm;
+    return c;
+  };
+
+  auto auto_sk                               = gfx1250_config(256, 256, 64, 3);
+  auto_sk.workgroup_mapping                  = 0;
+  auto_sk.tensile().workgroup_mapping_xcc    = -1;
+  auto_sk.stream_k                           = 3;
+  auto auto_th                               = auto_sk;
+  auto_th.cache_hints_a                      = 4;
+  auto_th.cache_hints_b                      = 4;
+  auto auto_tile                             = auto_sk;
+  auto_tile.mt                               = {128, 320, 64};
+  auto default_sk                            = auto_sk;  // StreamK, fixed WGMXCC: not auto
+  default_sk.tensile().workgroup_mapping_xcc = 1;
+  auto plain                                 = gfx1250_config(256, 256, 64, 0);  // not StreamK
+  plain.workgroup_mapping                    = 0;
+  plain.tensile().workgroup_mapping_xcc      = -1;
+
+  bool discriminates = false;
+  for (auto [m, n, k, b] : {std::tuple<size_t, size_t, size_t, size_t>{4096, 4096, 4096, 1},
+                            {36912, 62832, 4448, 1},
+                            {7040, 6912, 6256, 1},
+                            {12912, 36976, 64, 1},
+                            {2048, 2048, 1024, 8}}) {
+    for (size_t budget : {size_t{0}, size_t{96}}) {
+      auto p    = make_problem(m, n, k, origami::transpose_t::T, origami::transpose_t::N, b);
+      p.num_cus = budget;
+      for (const auto& c : {auto_sk, auto_th, auto_tile, default_sk, plain}) {
+        const size_t grid = origami::gemm::context_t(p, hw, c).num_wgs;
+        const int launch  = host_launch_wgm(p, hw, c, grid);
+        INFO(m << "x" << n << "x" << k << "x" << b << " budget " << budget << " mt " << c.mt.m
+               << "x" << c.mt.n << " launch WGM " << launch);
+        REQUIRE(latency(p, c) == latency(p, fixed(c, launch)));
+        if (latency(p, c) != latency(p, fixed(c, launch == 1 ? 2 : 1))) discriminates = true;
+      }
+      // Not auto: the whole-device default, not one capped by the CU budget.
+      REQUIRE(host_launch_wgm(p, hw, default_sk, 1) == 6);
+
+      // A config without TensileLite params takes the gfx1250 selector.
+      auto bare = make_config(256, 256, 64, 16, 16, 32, false, 1, 1, 0, 0, 3);
+      origami::config_t host;
+      host.mt                 = bare.mt;
+      host.tensile().tdm_inst = 0;
+      const size_t grid       = origami::gemm::context_t(p, hw, bare).num_wgs;
+      const int selected      = origami::select_workgroup_mapping(p, hw, host, grid).wgm;
+      REQUIRE(latency(p, bare) == latency(p, fixed(bare, selected)));
+    }
+  }
+  REQUIRE(discriminates);
+}

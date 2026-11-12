@@ -32,7 +32,6 @@ from . import Properties
 from .Common import state, state_key_ordering, IsaInfo
 from .Common.Architectures import gfxToIsa
 from .Common.DataType import DataType
-from .Components.TDMFuse import tdmSeparateABDescriptors
 from .Common.GlobalParameters import internalParameters
 from .SolutionStructs import Solution as OriginalSolution
 from .SolutionStructs.Problem import getBiasDataTypeListDefault, getGateResidualDataTypeListDefault
@@ -864,8 +863,6 @@ class SizeMapping:
                  'HalfPLR',
                  'PrefetchGL2',
                  'TDMInst',
-                 'TDMSeparateAB',
-                 'ClusterAIDMapping',
                  'Multicast'
                  ]
 
@@ -988,8 +985,6 @@ class SizeMapping:
                    HalfPLR                  = int(d.get('HalfPLR', 0)),
                    PrefetchGL2              = int(d.get('PrefetchGL2', 0)),
                    TDMInst                  = int(d.get('TDMInst', 0)),
-                   TDMSeparateAB            = tdmSeparateABDescriptors(d),
-                   ClusterAIDMapping        = int(d.get('ClusterAIDMapping', -1)),
                    Multicast                = int(bool(d.get('Multicast', False)))
                    )
     @classmethod

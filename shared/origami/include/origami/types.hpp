@@ -492,16 +492,6 @@ struct tensile_params_t {
   /// Cluster peers share A/B tiles by multicast (TensileLite Multicast).
   bool multicast = false;
 
-  /// TensileLite ClusterAIDMapping: -1 = off, -2 = AID read from hardware, 0..7 = start XCC.
-  int cluster_aid_mapping = -1;
-
-  /// A and B ride their own TDM descriptor sets on a multi-wave kernel (TensileLite TDMFuse 1-3).
-  bool tdm_separate_ab = false;
-
-  /// The kernel walks tiles from a persistent workgroup rank (TensileLite TileProcessingStrategy
-  /// DataParallel or StreamK). config_t::stream_k marks only the StreamK ones.
-  bool persistent = false;
-
   /// TensileLite AdaptiveGemm: edge-tile stores pick the widest vector width the remainder
   /// allows instead of the scalar edge path.
   int adaptive_gemm = 0;
@@ -527,9 +517,7 @@ struct tensile_params_t {
            lds_transpose_read_a == o.lds_transpose_read_a &&
            lds_transpose_read_b == o.lds_transpose_read_b && tdm_inst == o.tdm_inst &&
            prefetch_gl2 == o.prefetch_gl2 && prefetch_local_read == o.prefetch_local_read &&
-           half_plr == o.half_plr && multicast == o.multicast &&
-           cluster_aid_mapping == o.cluster_aid_mapping && tdm_separate_ab == o.tdm_separate_ab &&
-           persistent == o.persistent && adaptive_gemm == o.adaptive_gemm;
+           half_plr == o.half_plr && multicast == o.multicast && adaptive_gemm == o.adaptive_gemm;
   }
 
   std::size_t hash() const {
@@ -568,9 +556,6 @@ struct tensile_params_t {
                               prefetch_local_read,
                               half_plr,
                               multicast,
-                              cluster_aid_mapping,
-                              tdm_separate_ab,
-                              persistent,
                               adaptive_gemm);
   }
 };

@@ -100,9 +100,12 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
 
   // Per-operand DRAM traffic: pure function of the values set above; computed
   // once here and shared by the cache-hit and memory-latency models.
-  // gfx1250 reads DRAM in aligned 256 B blocks.
-  traffic = compute_operand_traffic(
-      problem, config, *this, hardware.is_cdna5() ? 256 : heuristic_defaults_t::DRAM_SECTOR_BYTES);
+  traffic =
+      compute_operand_traffic(problem,
+                              config,
+                              *this,
+                              hardware.is_cdna5() ? heuristic_defaults_t::GFX1250_DRAM_BLOCK_BYTES
+                                                  : heuristic_defaults_t::DRAM_SECTOR_BYTES);
 
   // Hardware-derived values
   active_cus           = cus;
@@ -566,10 +569,13 @@ bool check_lds_capacity(const hardware_t& hardware,
 
 // Compute limited achievable memory bandwidth based on active CUs
 double compute_mem_bw_from_occupancy(const hardware_t& hardware, size_t num_active_cus) {
-  const double CUs = static_cast<double>(num_active_cus);
-
   if (num_active_cus > hardware.N_CU) return 1.0;
 
+  // gfx1250's quadratic is in WGPs of the part it was fit on; other parts reach the same
+  // fraction of their peak at the same fraction of their CUs.
+  double CUs = static_cast<double>(num_active_cus);
+  if (hardware.is_cdna5() && hardware.N_CU > 0)
+    CUs = CUs * hardware_t::gfx1250_constants::bw_fit_wgps / static_cast<double>(hardware.N_CU);
   const double bw_limited = std::get<0>(hardware.mem_bw_per_wg_coefficients) * CUs * CUs +
                             std::get<1>(hardware.mem_bw_per_wg_coefficients) * CUs +
                             std::get<2>(hardware.mem_bw_per_wg_coefficients);
@@ -873,6 +879,86 @@ dim4_t count_unique_tiles_timestep(const dim4_t& grid,
   const size_t count = std::min(N_CU, total > start ? total - start : static_cast<size_t>(0));
 
   return count_unique_range(grid, wgm_mapping.wgm, start, count);
+}
+
+/* ---------------------------------------------------------------------------------------- */
+/* First-wave footprint on one L2 domain                                                    */
+/* ---------------------------------------------------------------------------------------- */
+// Share of a wave's keys (A rows or B columns of one K split and batch) that domain 0 requests,
+// when each key has n ids `stride` apart in each of `slabs` slabs `slab_ids` apart, at a random
+// phase of the dispatch cycle: domain 0 owns `on` consecutive XCDs of every `period`, and a key
+// is requested once one of its ids lands there.  The ids fall on at most period / gap phases,
+// gap = gcd of the period and the strides in use.
+static double domain_key_share(size_t n,
+                               size_t stride,
+                               size_t slabs,
+                               size_t slab_ids,
+                               size_t on,
+                               size_t period) {
+  if (on >= period || n == 0 || slabs == 0) return 1.0;
+  size_t gap = period;
+  if (n > 1) gap = std::gcd(gap, stride);
+  if (slabs > 1) gap = std::gcd(gap, slab_ids);
+  const size_t phases  = std::min(n * slabs, period / gap);
+  const size_t covered = on + (phases - 1) * std::min(gap, on);
+  return std::min(static_cast<double>(covered) / static_cast<double>(period), 1.0);
+}
+
+wave_footprint_t l2_domain_footprint(const hardware_t& hardware,
+                                     const dim4_t& grid,
+                                     int wgm,
+                                     size_t wave) {
+  wave_footprint_t fp;
+  if (wave == 0 || grid.k == 0 || grid.m == 0 || grid.n == 0 || grid.b == 0) return fp;
+  if (wgm == 0) wgm = 1;
+  // Dispatch rotates the XCDs, so domain 0 runs the ids whose residue lies in [first, first + on)
+  // (mod period), first = the first id that lands on XCD 0.
+  const size_t period = std::max<size_t>(hardware.NUM_XCD, 1);
+  const size_t on     = std::min(hardware.xcd_per_l2_domain(), period);
+  const size_t first  = (period - hardware.dispatch_xcd(0)) % period;
+  const size_t tail   = wave % period;
+  const size_t wrap   = first + on > period ? first + on - period : 0;
+  const size_t in_tail =
+      std::min(tail > first ? tail - first : 0, on - wrap) + std::min(tail, wrap);
+  fp.requests = static_cast<double>(wave / period * on + in_tail);
+  if (!(fp.requests > 0.0)) return fp;
+
+  // A slab row (an A row; a B column for column-major slabs) is `width` consecutive tiles in
+  // every slab the wave reaches, and a slab column one tile per slab row of a single slab;
+  // K splits interleave each tile's ids.
+  const bool col_major  = wgm < 0;
+  const dim4_t unique   = count_unique_range(grid, wgm, 0, wave);
+  const size_t g_rows   = col_major ? grid.n : grid.m;
+  const size_t g_cols   = col_major ? grid.m : grid.n;
+  const size_t width    = std::min<size_t>(std::abs(wgm), g_cols);
+  const size_t mn_tiles = math::safe_ceil_div(wave, grid.k);
+  const size_t slab_rows =
+      std::min(std::max<size_t>(math::safe_ceil_div(mn_tiles, width), 1), g_rows);
+  const size_t slabs =
+      std::min(math::safe_ceil_div(mn_tiles, g_rows * width), math::safe_ceil_div(g_cols, width));
+  const double row_share = domain_key_share(
+      std::min(width, mn_tiles), grid.k, slabs, g_rows * width * grid.k, on, period);
+  const double col_share = domain_key_share(slab_rows, width * grid.k, 1, 0, on, period);
+  const double planes    = static_cast<double>(unique.k * unique.b);
+  const double a_share   = col_major ? col_share : row_share;
+  const double b_share   = col_major ? row_share : col_share;
+  fp.a_unique            = std::min(planes * static_cast<double>(unique.m) * a_share, fp.requests);
+  fp.b_unique            = std::min(planes * static_cast<double>(unique.n) * b_share, fp.requests);
+  return fp;
+}
+
+l2_hit_rates_ab_t l2_domain_hit_rates(const wave_footprint_t& footprint,
+                                      const operand_traffic_t& traffic,
+                                      double l2_capacity) {
+  const double a_load = footprint.a_unique * traffic.a_iter_bytes;
+  const double b_load = footprint.b_unique * traffic.b_iter_bytes;
+  const double load   = a_load + b_load;
+  auto hit            = [&](double unique, double own, double other) {
+    if (!(footprint.requests > 0.0) || !(own > 0.0)) return 0.0;
+    const double residency = std::min(l2_capacity / (own + other * own / load), 1.0);
+    return residency * std::max(1.0 - unique / footprint.requests, 0.0);
+  };
+  return {hit(footprint.a_unique, a_load, b_load), hit(footprint.b_unique, b_load, a_load)};
 }
 
 /* ---------------------------------------------------------------------------------------- */
@@ -1512,9 +1598,36 @@ static double soft_min(double x, double y, double sharpness) {
   return lo * std::pow(1.0 + std::pow(lo / hi, sharpness), -1.0 / sharpness);
 }
 
+// WGM a gfx1250 launch without clusters walks tiles with, as
+// ContractionSolution::calculateAutoWGM picks it for a launch grid of `grid` workgroups: a
+// StreamK auto mapping (WGM 0, WGMXCC -1) on a nonzero grid takes select_workgroup_mapping
+// on the solution's tile and hints; any other WGM 0 takes ceil(sqrt(N_CU / NUM_XCD))
+// of the whole device, whatever the problem's CU budget.  A config without TensileLite params
+// declares no mapping and takes select_workgroup_mapping.
+static int launch_wgm_cdna5(const problem_t& problem,
+                            const hardware_t& hardware,
+                            const config_t& config,
+                            size_t grid) {
+  const tensile_params_t& tp = tparams(config);
+  const bool selected        = !config.has_tensile_params() ||
+                        (config.workgroup_mapping == 0 && tp.workgroup_mapping_xcc == -1 &&
+                         config.stream_k > 0 && grid != 0);
+  if (selected) {
+    config_t host;
+    host.mt                 = config.mt;
+    host.cache_hints_a      = config.cache_hints_a;
+    host.cache_hints_b      = config.cache_hints_b;
+    host.tensile().tdm_inst = tp.tdm_inst;
+    return select_workgroup_mapping(problem, hardware, host, grid).wgm;
+  }
+  if (config.workgroup_mapping != 0) return config.workgroup_mapping;
+  const size_t num_xcd = std::max<size_t>(hardware.NUM_XCD, 1);
+  return static_cast<int>(std::ceil(std::sqrt(static_cast<double>(hardware.N_CU / num_xcd))));
+}
+
 // gfx1250 A/B memory latency per K-iteration, in four steps:
 //   1. L2 hit rates of A and B (no MALL) from the tiles the launch's first wave places on one
-//      L2 domain (the four XCDs of an AID), against the domain's capacity.
+//      L2 domain (the XCDs of an AID), against the domain's capacity.
 //   2. L2 and DRAM read times: L2 bytes in 128 B lines per K-iteration, DRAM bytes in 256 B
 //      blocks, at the measured tensor-DMA (or per-lane) bandwidths.
 //   3. Multicast clusters cut the L2 request bytes.
@@ -1527,8 +1640,7 @@ static double compute_memory_latency_cdna5(const problem_t& problem,
                                            const context_t& context,
                                            double* l2_hit_rate,
                                            double* l2_cycles) {
-  const size_t num_xcd    = std::max<size_t>(hardware.NUM_XCD, 1);
-  const size_t per_domain = hardware.xcd_per_l2_domain();
+  using h                 = heuristic_defaults_t;
   const size_t n_cu       = std::max<size_t>(context.n_cu, 1);
   const size_t grid_m     = std::max<size_t>(context.grid_m, 1);
   const size_t grid_n     = std::max<size_t>(context.grid_n, 1);
@@ -1539,87 +1651,41 @@ static double compute_memory_latency_cdna5(const problem_t& problem,
   const bool multicast = cs * ck > 1 && (!config.has_tensile_params() || tparams(config).multicast);
   const bool tdm       = tparams(config).tdm_inst != 0;
 
-  // 1. L2 hit rates.  Workgroup i runs on XCD dispatch_xcd(i) (WGMXCC does not remap on
-  //    gfx1250) and WGM (the solution's, else the predicted one) orders the ids into slabs.  A
-  //    cluster c is dispatched whole onto XCD dispatch_xcd(c), two shader engines per XCD,
-  //    bypassing WGM; ClusterAIDMapping can hand each domain one contiguous part of the cluster
-  //    grid.  A load hits when another tile on the domain already brought that A row / B
-  //    column (same K split and batch).
-  std::vector<char> a_seen(grid_m * splits * batch, 0);
-  std::vector<char> b_seen(grid_n * splits * batch, 0);
-  double requests = 0.0, a_unique = 0.0, b_unique = 0.0;
-  auto touch = [](std::vector<char>& seen, size_t i, double& unique) {
-    if (!seen[i]) seen[i] = 1, unique += 1.0;
-  };
-  auto on_domain0 = [&](size_t id) { return hardware.dispatch_xcd(id) / per_domain == 0; };
+  // 1. L2 hit rates.  Workgroup i runs on XCD dispatch_xcd(i) and the launch's WGM
+  //    (launch_wgm_cdna5) orders the ids into slabs.  WGMXCC is not modeled: persistent
+  //    kernels reread their rank from the hardware id, so it has no effect there, but
+  //    non-persistent kernels apply it and are priced as if it were 1.  A cluster c is
+  //    dispatched whole onto XCD dispatch_xcd(c), two shader engines per XCD, bypassing WGM.
+  //    A load hits when another tile on the domain already brought that A row / B column (same
+  //    K split and batch); l2_domain_footprint estimates how many distinct ones there are.
+  wave_footprint_t footprint;
   if (cs * ck > 1) {
-    const size_t cx_n      = math::safe_ceil_div(grid_m, cs);
-    const size_t cy_n      = math::safe_ceil_div(grid_n, ck);
-    const size_t per_batch = cx_n * cy_n;
-    const size_t wave = std::min({per_batch * batch,
+    // Cluster ids walk the cluster grid M-first: one column-major slab spanning every cluster
+    // row, each cluster covering (on average) grid_m / cx_n rows and grid_n / cy_n columns.
+    const size_t cx_n = math::safe_ceil_div(grid_m, cs);
+    const size_t cy_n = math::safe_ceil_div(grid_n, ck);
+    const size_t wave = std::min({cx_n * cy_n * batch,
                                   clusters_per_wave(hardware, n_cu, cs * ck),
                                   std::max<size_t>(context.num_wgs / (cs * ck), 1)});
-    const int caid           = tparams(config).cluster_aid_mapping;
-    const size_t num_domains = std::max<size_t>(num_xcd / per_domain, 1);
-    const bool aid_remap     = caid != -1 && config.stream_k == 0 && (cs & (cs - 1)) == 0 &&
-                           (ck & (ck - 1)) == 0 && grid_m % cs == 0 && grid_n % ck == 0 &&
-                           per_batch % num_xcd == 0 && splits == 1 && (cy_n % 2 == 0 || cx_n % 2 == 0);
-    for (size_t c = 0; c < wave; ++c) {
-      if (!on_domain0(c)) continue;
-      const size_t b  = c / per_batch;
-      const size_t cl = c % per_batch;
-      size_t cx = cl % cx_n, cy = cl / cx_n;
-      if (aid_remap) {
-        // The kernel's own placement guess: read from the hardware (-2), else (c + start) % 8,
-        // which matches the dispatch for start = NUM_XCD - 1.
-        const size_t xcd = (caid == -2) ? hardware.dispatch_xcd(c)
-                                        : (cl + static_cast<size_t>(caid)) % num_xcd;
-        const size_t l   = (xcd / per_domain) * (per_batch / num_domains) +
-                         (cl / num_xcd) * per_domain + xcd % per_domain;
-        cx = (cy_n % 2 == 0) ? l % cx_n : l / cy_n;
-        cy = (cy_n % 2 == 0) ? l / cx_n : l % cy_n;
-      }
-      size_t rows = 0, cols = 0;
-      for (; rows < cs && cx * cs + rows < grid_m; ++rows) touch(a_seen, b * grid_m + cx * cs + rows, a_unique);
-      for (; cols < ck && cy * ck + cols < grid_n; ++cols) touch(b_seen, b * grid_n + cy * ck + cols, b_unique);
-      requests += static_cast<double>(rows * cols);
-    }
+    footprint =
+        l2_domain_footprint(hardware, {1, cx_n, cy_n, batch}, -static_cast<int>(cx_n), wave);
+    const double rows = static_cast<double>(grid_m) / static_cast<double>(cx_n);
+    const double cols = static_cast<double>(grid_n) / static_cast<double>(cy_n);
+    footprint.requests *= rows * cols;
+    footprint.a_unique *= rows;
+    footprint.b_unique *= cols;
   } else {
     const dim4_t grid = {splits, grid_m, grid_n, batch};
-    const size_t wave = std::min(grid.total(), n_cu);
-    int wgm           = config.has_tensile_params() ? config.workgroup_mapping : context.wgm.wgm;
-    // An auto mapping on gfx1250 ranks what ContractionSolution::calculateAutoWGM launches.
-    if (wgm == 0 && hardware.arch == hardware_t::architecture_t::gfx1250 &&
-        config.has_tensile_params() && tparams(config).workgroup_mapping_xcc == -1 &&
-        (config.stream_k > 0 || tparams(config).persistent)) {
-      config_t host;
-      host.mt                 = config.mt;
-      host.cache_hints_a      = config.cache_hints_a;
-      host.cache_hints_b      = config.cache_hints_b;
-      host.tensile().tdm_inst = tparams(config).tdm_inst;
-      wgm = select_workgroup_mapping(problem, hardware, host, context.num_wgs).wgm;
-    }
-    if (wgm == 0) wgm = static_cast<int>(std::ceil(std::sqrt(static_cast<double>(n_cu / num_xcd))));
-    for (size_t id = 0; id < wave; ++id) {
-      if (!on_domain0(id)) continue;
-      const dim4_t t = wgm_to_grid(grid, workgroup_mapping_t{0, 0, 0, wgm}, id);
-      touch(a_seen, (t.b * splits + t.k) * grid_m + t.m, a_unique);
-      touch(b_seen, (t.b * splits + t.k) * grid_n + t.n, b_unique);
-      requests += 1.0;
-    }
+    const int wgm     = launch_wgm_cdna5(problem, hardware, config, context.num_wgs);
+    footprint         = l2_domain_footprint(hardware, grid, wgm, std::min(grid.total(), n_cu));
   }
   const operand_traffic_t& traffic = context.traffic;
   const double l2_cap              = static_cast<double>(hardware.l2_domain_capacity());
-  const double a_load              = a_unique * traffic.a_iter_bytes;
-  const double b_load              = b_unique * traffic.b_iter_bytes;
-  const double load                = a_load + b_load;
-  auto hit = [&](double unique, double own, double other) {
-    if (!(requests > 0.0) || !(own > 0.0)) return 0.0;
-    const double residency = std::min(l2_cap / (own + other * own / load), 1.0);
-    return residency * std::max(1.0 - unique / requests, 0.0);
-  };
-  double H_a = hit(a_unique, a_load, b_load);
-  double H_b = hit(b_unique, b_load, a_load);
+  const double load =
+      footprint.a_unique * traffic.a_iter_bytes + footprint.b_unique * traffic.b_iter_bytes;
+  const l2_hit_rates_ab_t hits = l2_domain_hit_rates(footprint, traffic, l2_cap);
+  double H_a                   = hits.a;
+  double H_b                   = hits.b;
   // Per-lane batched loads re-request a tile from every wave that misses L1.
   if (problem.batch > 1 && !tdm && load < l2_cap) {
     const double boost   = (1.0 - load / l2_cap) * (1.0 - load / l2_cap);
@@ -1648,19 +1714,28 @@ static double compute_memory_latency_cdna5(const problem_t& problem,
   const double Ld_dram  = cus * ((1.0 - H_a) * traffic.a_iter_bytes * traffic.a_cl_share +
                                 (1.0 - H_b) * traffic.b_iter_bytes * traffic.b_cl_share);
 
-  // Tensor DMA (tdm_bandwidth microbenchmark): a row holds a WGP's DMA path for
-  // max(row bytes, beat) / rate (L2: 557 B/ns, 256 B beat; DRAM: 354 B/ns, 183 B beat), and
-  // the WGPs' rate meets the level's peak in a soft minimum (sharpness 3.30 / 9.72).  Per-lane
-  // loads: L2 scales with the active CUs, DRAM with the occupancy quadratic.
+  // Tensor DMA, measured with tensor loads on gfx1250: a row holds a WGP's DMA path for
+  // max(row bytes, the level's minimum) / its row rate, and the WGPs' rate meets the level's
+  // peak in a soft minimum.  Per-lane loads: L2 scales with the active CUs, DRAM with the
+  // occupancy quadratic.
   const double clk = hardware.compute_clock_ghz;
   double l2_bw     = hardware.mem1_perf_ratio * cus / static_cast<double>(hardware.N_CU);
   double dram_bw   = hardware.mem3_perf_ratio * context.mem_bw_limited;
   if (tdm && cus > 0.0) {
-    const double l2_ns   = (a_rows * std::max(a_row, 256.0) + b_rows * std::max(b_row, 256.0)) / 557.0;
-    const double dram_ns = (a_rows * std::max(a_row, 183.0) + b_rows * std::max(b_row, 183.0)) / 354.0;
-    l2_bw   = soft_min(cus * (a_l2_wg + b_l2_wg) / l2_ns, hardware.mem1_perf_ratio * clk, 3.30) / clk;
+    const double l2_ns = (a_rows * std::max(a_row, h::GFX1250_TDM_L2_ROW_BYTES) +
+                          b_rows * std::max(b_row, h::GFX1250_TDM_L2_ROW_BYTES)) /
+                         h::GFX1250_TDM_L2_ROW_RATE;
+    const double dram_ns = (a_rows * std::max(a_row, h::GFX1250_TDM_DRAM_ROW_BYTES) +
+                            b_rows * std::max(b_row, h::GFX1250_TDM_DRAM_ROW_BYTES)) /
+                           h::GFX1250_TDM_DRAM_ROW_RATE;
+    l2_bw = soft_min(cus * (a_l2_wg + b_l2_wg) / l2_ns,
+                     hardware.mem1_perf_ratio * clk,
+                     h::GFX1250_TDM_L2_SHARPNESS) /
+            clk;
     dram_bw = soft_min(cus * (traffic.a_iter_bytes + traffic.b_iter_bytes) / dram_ns,
-                       hardware.mem3_perf_ratio * clk, 9.72) / clk;
+                       hardware.mem3_perf_ratio * clk,
+                       h::GFX1250_TDM_DRAM_SHARPNESS) /
+              clk;
   }
 
   // 3. Multicast: a cluster requests each A tile once per cluster row and each B tile once per
@@ -1867,25 +1942,31 @@ double compute_epilogue_latency(const problem_t& problem,
   // modes, so a store only splits when it is wider than one buffer_store.
   const size_t natural_svw = max_isa_store_elems;
 
-  // Device write bandwidth: mem3 x the occupancy quadratic, or on gfx1250 the measured
-  // epilogue-store curve (store_bandwidth microbenchmark: a wave's store instruction of B bytes
-  // takes 14.31 ns + B / 29.2 B/ns, a WGP's waves share 216 B/ns, the device meets 20.95 TB/s
-  // with sharpness 2.17; rates as fractions of the 17.13 TB/s DRAM peak).  The K-split
-  // reduction reads its partials at the read bandwidth and writes D at the store one.
+  // Device write bandwidth: mem3 x the occupancy quadratic, or on gfx1250 the epilogue-store
+  // curve measured with plain stores: a wave's store instruction of B bytes takes a fixed time
+  // plus B at the wave's rate, a WGP's waves share the WGP's rate, and the device meets its
+  // store ceiling in a soft minimum.  The rates scale with mem3 as fractions of the measured
+  // DRAM peak.  The K-split reduction reads its partials at the read bandwidth and writes D at
+  // the store one.
   double store_bw           = hardware.mem3_perf_ratio * context.mem_bw_limited;
   const double reduce_bw    = hardware.mem3_perf_ratio * context.write_mem_bw_limited;
   double reduce_write_bw    = reduce_bw;
   if (hardware.is_cdna5() && hardware.mem3_perf_ratio > 0.0) {
+    using g                 = hardware_t::gfx1250_constants;
+    using h                 = heuristic_defaults_t;
     const double dram_peak  = hardware.mem3_perf_ratio * hardware.compute_clock_ghz;  // B/ns
     const double inst_bytes = static_cast<double>(WAVEFRONT_SIZE) *
                               static_cast<double>(std::min(requested_svw, natural_svw)) * d_bytes;
     const double wgp_rate =
-        1.0 / ((14.31 + inst_bytes / (29.2 / 17130.0 * dram_peak)) /
+        1.0 / ((h::GFX1250_STORE_INST_NS +
+                inst_bytes / (h::GFX1250_STORE_WAVE_BW / g::dram_peak_bw * dram_peak)) /
                    (static_cast<double>(wave_num_epi) * inst_bytes) +
-               1.0 / (216.0 / 17130.0 * dram_peak));
+               1.0 / (h::GFX1250_STORE_WGP_BW / g::dram_peak_bw * dram_peak));
     auto device_bw = [&](size_t writers) {
       const double w = static_cast<double>(std::max<size_t>(writers, 1));
-      return soft_min(w * wgp_rate, 20950.0 / 17130.0 * dram_peak, 2.17) /
+      return soft_min(w * wgp_rate,
+                      h::GFX1250_STORE_PEAK_BW / g::dram_peak_bw * dram_peak,
+                      h::GFX1250_STORE_SHARPNESS) /
              hardware.compute_clock_ghz;
     };
     store_bw        = device_bw(num_active_cus);
@@ -2446,14 +2527,18 @@ double compute_tile_latency(const problem_t& problem,
 
   // A multicast load completes only when every peer has issued it, so cluster peers advance in
   // lockstep through a cluster-barrier handshake at each in-loop tensor load, plus one before
-  // the first load.  The round trip is ~100 cycles for 8-16 peers (84 for 2), but the
-  // handshake runs behind the iteration's loads and MFMAs: only the part a short iteration
-  // cannot cover, 100 cycles less a tenth of the iteration, is exposed (fit to CD/1x1 pairs).
+  // the first load.  The handshake runs behind the iteration's loads and MFMAs: only the part
+  // of the round trip a short iteration cannot cover is exposed (fit to clustered kernels
+  // against their unclustered twins on gfx1250).
+  using h              = heuristic_defaults_t;
   const bool multicast = hardware.is_cdna5() && config.cluster_dim.m * config.cluster_dim.n > 1 &&
                          (!config.has_tensile_params() || tp.multicast);
   const double L_cluster_sync =
       (multicast && k_iters > 0)
-          ? (static_cast<double>(k_iters) + 1.0) * std::max(0.0, 100.0 - 0.1 * std::max(L_mem, L_compute))
+          ? (static_cast<double>(k_iters) + 1.0) *
+                std::max(
+                    0.0,
+                    h::L_BARRIER - h::GFX1250_CLUSTER_SYNC_HIDDEN * std::max(L_mem, L_compute))
           : 0.0;
 
   // With one LDS buffer the next iteration's tile can only be written once every wave has read
@@ -2573,7 +2658,8 @@ double compute_tile_latency(const problem_t& problem,
   // identical kernel, the most at few K-iterations; without an M remainder it changes nothing.
   const double adaptive_gemm_factor =
       (hardware.is_cdna5() && tp.adaptive_gemm != 0 && problem.size.m % config.mt.m != 0)
-          ? 1.0 - 0.11 / (1.0 + static_cast<double>(k_iters) / 128.0)
+          ? 1.0 - h::GFX1250_ADAPTIVE_GEMM_GAIN /
+                      (1.0 + static_cast<double>(k_iters) / h::GFX1250_ADAPTIVE_GEMM_K_ITERS)
           : 1.0;
   const double L_tile_total = (L_prologue + L_mainloop + L_epilogue + L_lsu_reduce) *
                               weight_tile_total * adaptive_gemm_factor;
@@ -2727,16 +2813,14 @@ double compute_parallel_reduction_latency(const problem_t& problem,
 
 // gfx1250 TemporalHint (1,1) on tensor-DMA A and B (every tensor_load_to_lds carries
 // th:TH_LOAD_NT; a shared A+B load drops a hint the two do not agree on, so (1,0) and (0,1) run
-// as (0,0)).  86 same-library (1,1)/(0,0) StreamK pairs on 46 BF16 TN shapes split by the
-// problem's A+B+D footprint against the total L2: (1,1) ran 1.117x faster (geomean, 27 of 32
-// pairs) from 0.78x to 2.76x, 0.999x up to 5.73x (no rule in between) and 0.896x above (0 of
-// 10).  No pair was smaller; below 0.75x the pool's (1,1) picks on OOB_200 ran 0.994x their
-// (0,0) copies (19 shapes), so the hint is neutral there.  The (1,1) win does not show in the L2
-// counters (5120^3 gains 1.5x on 1.4x the DRAM reads), so the factor scales the whole kernel time.
+// as (0,0)).  Measured on gfx1250 against otherwise identical (0,0) kernels, the effect depends
+// on the problem's A+B+D footprint over the total L2 (heuristic_defaults_t GFX1250_TH_* bands)
+// and does not show in the L2 counters, so the factor scales the whole kernel time.
 static double temporal_hint_factor(const problem_t& problem,
                                    const hardware_t& hardware,
                                    const config_t& config,
                                    const context_t& context) {
+  using h = heuristic_defaults_t;
   if (!hardware.is_cdna5() || (tparams(config).tdm_inst & 3) != 3 || config.cache_hints_a < 4 ||
       config.cache_hints_b < 4)
     return 1.0;
@@ -2746,9 +2830,9 @@ static double temporal_hint_factor(const problem_t& problem,
   const double footprint = static_cast<double>(std::max<size_t>(problem.batch, 1)) *
                            (m * k * context.a_bytes + n * k * context.b_bytes + m * n * context.d_bytes);
   const double l2 = static_cast<double>(hardware.num_l2_domains() * hardware.l2_domain_capacity());
-  if (footprint < 0.75 * l2) return 1.0;
-  if (footprint < 2.76 * l2) return 1.0 / 1.117;
-  if (footprint > 5.73 * l2) return 1.0 / 0.896;
+  if (footprint < h::GFX1250_TH_LOW * l2) return 1.0;
+  if (footprint < h::GFX1250_TH_MID * l2) return 1.0 / h::GFX1250_TH_SPEEDUP_LOW;
+  if (footprint > h::GFX1250_TH_HIGH * l2) return 1.0 / h::GFX1250_TH_SPEEDUP_HIGH;
   return 1.0;
 }
 

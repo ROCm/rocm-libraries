@@ -54,12 +54,7 @@ namespace TensileLite
     struct ProblemPredictionLibrary : public SolutionLibrary<MyProblem, MySolution>
     {
         std::vector<std::pair<int, std::shared_ptr<MySolution>>> solution_list;
-        /// One config per distinct effective Origami config; config.index is its position.
-        std::vector<origami::config_t> origami_config_list;
-        /// The solution_list positions each origami_config_list entry stands for, preferred
-        /// first. They tie exactly in the ranking, so Origami scores one config for all of them
-        /// and selection still falls through to the others when a predicate rejects one.
-        std::vector<std::vector<size_t>> config_solutions;
+        std::vector<origami::config_t>                           origami_config_list;
 
         static std::string Type()
         {
@@ -235,18 +230,11 @@ namespace TensileLite
 
                 for(const auto& r : prediction_result)
                 {
-                    if(r.config.index >= config_solutions.size())
+                    if(r.config.index >= solution_list.size())
                     {
                         continue;
                     }
-                    for(size_t member : config_solutions[r.config.index])
-                    {
-                        if(member >= solution_list.size())
-                            continue;
-                        considerSolution(solution_list[member].second);
-                        if(rv.size() == numSolutions)
-                            break;
-                    }
+                    considerSolution(solution_list[r.config.index].second);
                     if(rv.size() == numSolutions)
                     {
                         break;

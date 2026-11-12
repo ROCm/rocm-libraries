@@ -956,8 +956,16 @@ TEST_CASE("Origami: buffer load/store tie-break", "[origami]") {
       plain.push_back(first);
       plain.push_back(with_buffer_flags(false, false, 1));
       plain.push_back(with_buffer_flags(true, true, 2));
-      // A plain config runs the predicted WGM; give the Tensile ones the same so all three tie.
-      const int predicted_wgm = origami::gemm::context_t(problem, hardware, first).wgm.wgm;
+      // A plain config runs the predicted WGM (gfx1250: the selector's for its tile); give the
+      // Tensile ones the same so all three tie.
+      const origami::gemm::context_t first_context(problem, hardware, first);
+      int predicted_wgm = first_context.wgm.wgm;
+      if (hardware.is_cdna5()) {
+        origami::config_t host;
+        host.mt = first.mt;
+        predicted_wgm =
+            origami::select_workgroup_mapping(problem, hardware, host, first_context.num_wgs).wgm;
+      }
       for (size_t i = 1; i < plain.size(); ++i) plain[i].workgroup_mapping = predicted_wgm;
       auto skipped = origami::rank_configs(problem, hardware, plain);
       REQUIRE(skipped.size() == plain.size());

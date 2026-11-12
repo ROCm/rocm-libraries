@@ -2138,18 +2138,12 @@ namespace TensileLite
                         .d_dtype     = datatypeToAnalyticalDatatype(problem.d().dataType()),
                         .mi_dtype    = miDataType,
                     };
-                    // Origami ranks an auto mapping with this same call, on effective hints.
+                    // Origami ranks an auto mapping with this same call.
                     origami::config_t origami_config = {
                         .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
                                           static_cast<size_t>(sizeMapping.macroTile.y),
                                           static_cast<size_t>(sizeMapping.depthU)},
-                        .cache_hints_a = sizeMapping.effectiveCacheHintA(),
-                        .cache_hints_b = sizeMapping.effectiveCacheHintB(),
                     };
-                    // gfx1250 counts tensor-DMA operands as temporal, as Origami's ranking does.
-                    if(hipAMDGPU->analyticalHardware->arch
-                       == origami::hardware_t::architecture_t::gfx1250)
-                        origami_config.tensile().tdm_inst = sizeMapping.TDMInst;
 
                     origami::workgroup_mapping_t prediction_results
                         = origami::select_workgroup_mapping(origami_problem,
@@ -2278,8 +2272,6 @@ namespace TensileLite
                         .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
                                           static_cast<size_t>(sizeMapping.macroTile.y),
                                           static_cast<size_t>(sizeMapping.depthU)},
-                        .cache_hints_a = sizeMapping.cacheHintA(),
-                        .cache_hints_b = sizeMapping.cacheHintB(),
                     };
 
                     origami::staggerU_t prediction_results

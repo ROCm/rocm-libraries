@@ -294,6 +294,49 @@ ORIGAMI_EXPORT dim4_t count_unique_tiles_timestep(const dim4_t& grid,
                                    size_t N_CU,
                                    size_t timestep_id);
 
+/// A and B tiles the first launch wave requests on one L2 domain (see l2_domain_footprint).
+struct wave_footprint_t {
+  /// Workgroups of the wave that run on the domain.
+  double requests = 0.0;
+  /// Distinct A (K split, batch, row) and B (K split, batch, column) tiles among them.
+  double a_unique = 0.0;
+  double b_unique = 0.0;
+};
+
+/// L2 hit rates of A and B.
+struct l2_hit_rates_ab_t {
+  double a = 0.0;
+  double b = 0.0;
+};
+
+/**
+ * @brief Estimate the A and B tiles the first launch wave (ids [0, wave), WGMXCC off) requests
+ * on one L2 domain.
+ *
+ * An approximation, not a per-workgroup count: the wave's distinct rows and columns come from
+ * count_unique_range, and each is kept with the chance that one of its ids lands on the
+ * domain, which owns xcd_per_l2_domain consecutive XCDs of every NUM_XCD in the round-robin
+ * dispatch (dispatch_xcd), at a random phase of the cycle.  The domain's request count is exact.
+ *
+ * @param hardware Hardware characteristics (XCD count and L2 domains).
+ * @param grid Grid dimensions (k = K splits, m, n, b).
+ * @param wgm Slab width, negative for column-major slabs; 0 is priced as 1.
+ * @param wave Workgroups in the first wave.
+ */
+wave_footprint_t l2_domain_footprint(const hardware_t& hardware,
+                                     const dim4_t& grid,
+                                     int wgm,
+                                     size_t wave);
+
+/**
+ * @brief L2 hit rates of A and B for a wave footprint: the share of requests that find their
+ * tile already loaded (a tile another workgroup of the domain brought), times the share of the
+ * footprint the L2 domain keeps resident.
+ */
+l2_hit_rates_ab_t l2_domain_hit_rates(const wave_footprint_t& footprint,
+                                      const operand_traffic_t& traffic,
+                                      double l2_capacity);
+
 /**
  * @brief Compute the number of matrix instructions required to compute a single MT_MXMT_NXMT_K
  * tile.

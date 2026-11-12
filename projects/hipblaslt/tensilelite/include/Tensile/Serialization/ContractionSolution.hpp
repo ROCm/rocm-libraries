@@ -255,8 +255,6 @@ namespace TensileLite
                 iot::mapOptional(io, "HalfPLR", s.HalfPLR);
                 iot::mapOptional(io, "PrefetchGL2", s.PrefetchGL2);
                 iot::mapOptional(io, "TDMInst", s.TDMInst);
-                iot::mapOptional(io, "TDMSeparateAB", s.TDMSeparateAB);
-                iot::mapOptional(io, "ClusterAIDMapping", s.ClusterAIDMapping);
                 iot::mapOptional(io, "Multicast", s.Multicast);
             }
 

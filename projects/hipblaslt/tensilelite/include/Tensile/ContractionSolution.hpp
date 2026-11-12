@@ -533,26 +533,6 @@ namespace TensileLite
                                    : NonTemporalD;
         }
 
-        /// One tensor_load_to_lds moves both A and B: a multi-wave TDM kernel that is not
-        /// subtiled and does not give A and B their own descriptor sets. Its TH bits serve both
-        /// operands, and a TH the two do not agree on stays at the default (tdmCacheModifiers).
-        bool tdmLoadSharesTemporalHint() const
-        {
-            return hasTemporalHint && (TDMInst & 3) == 3 && waveNum > 1 && !useSubtileImpl
-                   && !TDMSeparateAB;
-        }
-        /// cacheHintA/B for the hint A/B loads actually carry (@see tdmLoadSharesTemporalHint).
-        int effectiveCacheHintA() const
-        {
-            return tdmLoadSharesTemporalHint() && temporalHintA != temporalHintB ? 0
-                                                                                 : cacheHintA();
-        }
-        /// @see effectiveCacheHintA
-        int effectiveCacheHintB() const
-        {
-            return tdmLoadSharesTemporalHint() && temporalHintA != temporalHintB ? 0
-                                                                                 : cacheHintB();
-        }
 
         /// AdaptiveGemm: edge-tile stores pick the widest vector width the remainder allows.
         int adaptiveGemm     = 0;
@@ -592,9 +572,6 @@ namespace TensileLite
         int HalfPLR           = 0;
         int PrefetchGL2       = 0;
         int TDMInst           = 0;
-        /// TDMFuse gives A and B their own TDM descriptor sets on a multi-wave kernel.
-        bool TDMSeparateAB     = false;
-        int  ClusterAIDMapping = -1;
         /// Cluster peers share A/B tiles by TDM multicast: 1 or 0, -1 if the library predates
         /// the key (@see clusterMulticast).
         int Multicast = -1;

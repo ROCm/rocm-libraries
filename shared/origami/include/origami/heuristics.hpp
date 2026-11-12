@@ -46,6 +46,8 @@ struct heuristic_defaults_t {
   static constexpr double WEIGHT_TILE_TOTAL    = 1.0;
   static constexpr size_t CACHE_LINE_BYTES       = 128;
   static constexpr size_t DRAM_SECTOR_BYTES      = 64;
+  // gfx1250: aligned block DRAM reads and L2 misses move.
+  static constexpr size_t GFX1250_DRAM_BLOCK_BYTES = 256;
   static constexpr size_t LDS_XFER_BYTES         = 128;
   static constexpr double KERNEL_LAUNCH_OVERHEAD = 4.5 * 2200.0;
   static constexpr double POSTGSU_KERNEL_LAUNCH_OVERHEAD = 1.6 * 2200.0;
@@ -83,6 +85,41 @@ struct heuristic_defaults_t {
   static constexpr size_t SUBMI_GEMV_K_MIN             = 256;
   static constexpr double EPILOGUE_OCC_SATURATION      = 2.0;
   static constexpr double SCALAR_STORE_EXPOSED_PENALTY = 4.0;
+
+  // gfx1250 (CDNA5) model fit constants, read only where hardware.is_cdna5().
+  /// Tensor-DMA row service rate of one WGP from L2, B/ns, and the minimum bytes a row costs.
+  static constexpr double GFX1250_TDM_L2_ROW_RATE  = 557.0;
+  static constexpr double GFX1250_TDM_L2_ROW_BYTES = 256.0;
+  /// Tensor-DMA row service rate of one WGP from DRAM, B/ns, and the minimum bytes a row costs.
+  static constexpr double GFX1250_TDM_DRAM_ROW_RATE  = 354.0;
+  static constexpr double GFX1250_TDM_DRAM_ROW_BYTES = 183.0;
+  /// Soft-minimum sharpness of the WGPs' tensor-DMA rate against the L2 / DRAM peak.
+  static constexpr double GFX1250_TDM_L2_SHARPNESS   = 3.30;
+  static constexpr double GFX1250_TDM_DRAM_SHARPNESS = 9.72;
+  /// Fixed time of one wave's epilogue store instruction, ns.
+  static constexpr double GFX1250_STORE_INST_NS = 14.31;
+  /// Store bandwidth of one wave's instruction stream, B/ns.
+  static constexpr double GFX1250_STORE_WAVE_BW = 29.2;
+  /// Store bandwidth one WGP's waves share, B/ns.
+  static constexpr double GFX1250_STORE_WGP_BW = 216.0;
+  /// Device store bandwidth ceiling, B/ns, and the soft-minimum sharpness it is met with.
+  static constexpr double GFX1250_STORE_PEAK_BW   = 20950.0;
+  static constexpr double GFX1250_STORE_SHARPNESS = 2.17;
+  /// Fraction of the iteration time that hides the cluster-barrier round trip (the round trip
+  /// itself is L_BARRIER cycles).
+  static constexpr double GFX1250_CLUSTER_SYNC_HIDDEN = 0.1;
+  /// AdaptiveGemm time saved with an M remainder at few K-iterations (fraction), and the
+  /// K-iterations at which the saving halves.
+  static constexpr double GFX1250_ADAPTIVE_GEMM_GAIN    = 0.11;
+  static constexpr double GFX1250_ADAPTIVE_GEMM_K_ITERS = 128.0;
+  /// TemporalHint (1,1) bands of the A+B+D footprint over the total L2 (ratios), and the
+  /// (0,0) over (1,1) time ratio in them: neutral below TH_LOW, TH_SPEEDUP_LOW up to TH_MID,
+  /// neutral up to TH_HIGH, TH_SPEEDUP_HIGH above.
+  static constexpr double GFX1250_TH_LOW          = 0.75;
+  static constexpr double GFX1250_TH_MID          = 2.76;
+  static constexpr double GFX1250_TH_HIGH         = 5.73;
+  static constexpr double GFX1250_TH_SPEEDUP_LOW  = 1.117;
+  static constexpr double GFX1250_TH_SPEEDUP_HIGH = 0.896;
 };
 
 /**
