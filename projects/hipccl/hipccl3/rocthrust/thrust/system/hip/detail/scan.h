@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,7 +37,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_HAS_HIP_COMPILER()
 
 #  include <thrust/system/hip/config.h>
 
@@ -292,7 +292,7 @@ THRUST_HOST_DEVICE OutputIt inclusive_scan_n(
     {
       return result = __scan::inclusive_scan(policy, first, result, num_items, init, scan_op);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static OutputIt
     seq(execution_policy<Derived>& policy, InputIt first, Size num_items, OutputIt result, T init, ScanOp scan_op)
     {
@@ -301,7 +301,7 @@ THRUST_HOST_DEVICE OutputIt inclusive_scan_n(
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   return workaround::par(policy, first, num_items, result, init, scan_op);
 #  else
   return workaround::seq(policy, first, num_items, result, init, scan_op);
@@ -320,7 +320,7 @@ THRUST_HOST_DEVICE OutputIt inclusive_scan_n(
     {
       return result = __scan::inclusive_scan(policy, first, result, num_items, scan_op);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static OutputIt
     seq(execution_policy<Derived>& policy, InputIt first, Size num_items, OutputIt result, ScanOp scan_op)
     {
@@ -329,7 +329,7 @@ THRUST_HOST_DEVICE OutputIt inclusive_scan_n(
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   return workaround::par(policy, first, num_items, result, scan_op);
 #  else
   return workaround::seq(policy, first, num_items, result, scan_op);
@@ -340,7 +340,7 @@ template <typename Derived, typename InputIt, typename OutputIt, typename ScanOp
 THRUST_HOST_DEVICE OutputIt inclusive_scan(
   thrust::hip_rocprim::execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, ScanOp scan_op)
 {
-  using diff_t           = typename thrust::iterator_traits<InputIt>::difference_type;
+  using diff_t           = thrust::detail::it_difference_t<InputIt>;
   diff_t const num_items = thrust::distance(first, last);
   return thrust::hip_rocprim::inclusive_scan_n(policy, first, num_items, result, scan_op);
 }
@@ -354,7 +354,7 @@ THRUST_HOST_DEVICE OutputIt inclusive_scan(
   T init,
   ScanOp scan_op)
 {
-  using diff_t           = typename thrust::iterator_traits<InputIt>::difference_type;
+  using diff_t           = thrust::detail::it_difference_t<InputIt>;
   diff_t const num_items = thrust::distance(first, last);
   return thrust::hip_rocprim::inclusive_scan_n(policy, first, num_items, result, init, scan_op);
 }
@@ -384,7 +384,7 @@ THRUST_HOST_DEVICE OutputIt exclusive_scan_n(
     {
       return result = __scan::exclusive_scan(policy, first, result, num_items, init, scan_op);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static OutputIt
     seq(execution_policy<Derived>& policy, InputIt first, Size num_items, OutputIt result, T init, ScanOp scan_op)
     {
@@ -393,7 +393,7 @@ THRUST_HOST_DEVICE OutputIt exclusive_scan_n(
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   return workaround::par(policy, first, num_items, result, init, scan_op);
 #  else
   return workaround::seq(policy, first, num_items, result, init, scan_op);
@@ -409,7 +409,7 @@ THRUST_HOST_DEVICE OutputIt exclusive_scan(
   T init,
   ScanOp scan_op)
 {
-  using diff_t           = typename thrust::iterator_traits<InputIt>::difference_type;
+  using diff_t           = thrust::detail::it_difference_t<InputIt>;
   diff_t const num_items = thrust::distance(first, last);
   return thrust::hip_rocprim::exclusive_scan_n(policy, first, num_items, result, init, scan_op);
 }
@@ -425,7 +425,7 @@ template <typename Derived, typename InputIt, typename OutputIt>
 THRUST_HOST_DEVICE OutputIt
 exclusive_scan(thrust::hip_rocprim::execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result)
 {
-  using init_type = typename thrust::iterator_traits<InputIt>::value_type;
+  using init_type = thrust::detail::it_value_t<InputIt>;
   return hip_rocprim::exclusive_scan(policy, first, last, result, init_type{});
 }
 
@@ -434,4 +434,4 @@ THRUST_NAMESPACE_END
 
 #  include <thrust/scan.h>
 
-#endif // THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#endif // THRUST_HAS_HIP_COMPILER()

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -112,3 +112,53 @@ INSTANTIATE_TEST_CASE_P(preconditioner,
                         parameterized_preconditioner,
                         testing::Combine(testing::ValuesIn(preconditioner_size),
                                          testing::ValuesIn(preconditioner_type)));
+
+int itilu0_history_size[] = {7, 50};
+
+class parameterized_itilu0_history : public parameterized_preconditioner
+{
+};
+
+GENERATE_P_TEST_CASES_DEVICE(parameterized_itilu0_history,
+                             testing_itilu0_convergence_history,
+                             convergence_history);
+
+INSTANTIATE_TEST_CASE_P(preconditioner,
+                        parameterized_itilu0_history,
+                        testing::Combine(testing::ValuesIn(itilu0_history_size),
+                                         testing::Values(std::string("ItILU0"))));
+
+typedef std::tuple<std::string, TriSolverAlg> repeated_move_tuple;
+
+std::string  repeated_move_solver[] = {"GS", "SGS", "ILU", "ILUT", "IC", "ItILU0", "LU"};
+TriSolverAlg repeated_move_alg[]    = {TriSolverAlg_Default, TriSolverAlg_Iterative};
+
+class parameterized_repeated_move : public testing::TestWithParam<repeated_move_tuple>
+{
+protected:
+    parameterized_repeated_move() {}
+    virtual ~parameterized_repeated_move() {}
+    virtual void SetUp() override {}
+    virtual void TearDown() {}
+};
+
+#define TEST_P_REPEATED_MOVE_CASE(type)                                                           \
+    set_device_rocalution(0);                                                                     \
+    init_rocalution();                                                                            \
+    testing_preconditioner_repeated_move<type>(std::get<0>(GetParam()), std::get<1>(GetParam())); \
+    stop_rocalution();
+
+TEST_P(parameterized_repeated_move, device_float)
+{
+    TEST_P_REPEATED_MOVE_CASE(float);
+}
+
+TEST_P(parameterized_repeated_move, device_double)
+{
+    TEST_P_REPEATED_MOVE_CASE(double);
+}
+
+INSTANTIATE_TEST_CASE_P(preconditioner,
+                        parameterized_repeated_move,
+                        testing::Combine(testing::ValuesIn(repeated_move_solver),
+                                         testing::ValuesIn(repeated_move_alg)));

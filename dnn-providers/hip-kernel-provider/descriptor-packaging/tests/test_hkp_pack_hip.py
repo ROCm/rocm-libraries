@@ -9,7 +9,7 @@ from hkp_pack.hip_compile import hip_variant_key as variant_key
 from hkp_pack.descriptors import load_flat_input, reachable_generic_ids
 from hkp_pack.errors import HkpPackError
 from hkp_pack.kernel_signature import kernel_signature
-from hkp_pack.pipeline import run_pipeline
+from pack_helpers import GENERIC_TARGETS, read_shipped, run_pipeline
 
 ARCHES = ["gfx942", "gfx950", "gfx90a"]
 
@@ -243,7 +243,8 @@ def test_symbol_in_round_tripped_blob(built, rocm_kpack_dir):
 
 
 def test_rewrite_kpack_form_and_provenance(built):
-    kdp = _read(built["out"] / "gfx942" / "pointwise.kdp.json")
+    path = built["out"] / "gfx942" / "pointwise.kdp.json"
+    kdp = read_shipped(path)
     ukd = kdp["kernelDescriptors"][0]
     ks = ukd["kernel_source"]
     assert ks["kind"] == "kpack"
@@ -447,7 +448,7 @@ def test_neg_kpack_source_missing_field(tmp_path, main_fixture, field):
     src = _copy_fixture(tmp_path, main_fixture)
     _author_kpack_source(src, drop=field)
     with pytest.raises(HkpPackError, match=f"missing required field '{field}'"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -456,7 +457,7 @@ def test_kpack_source_complete_is_accepted(tmp_path, main_fixture):
     # rejected for some reason of its own would read as the drop being caught.
     src = _copy_fixture(tmp_path, main_fixture)
     _author_kpack_source(src)
-    flat = load_flat_input(src)
+    flat = load_flat_input(src, GENERIC_TARGETS)
     kdp = next(d for d in flat.kdps() if d.path.name == "copy.kdp.json")
     assert kdp.doc["kernelDescriptors"][0]["kernel_source"]["kind"] == "kpack"
 
@@ -541,7 +542,7 @@ def test_cli2_empty_gpu_targets(tmp_path, main_fixture, hipcc, rocm_kpack_dir):
 # --- Unit: pruning reachability + wildcard ---------------------------------
 @pytest.mark.quick
 def test_wildcard_arch_matches(main_fixture):
-    flat = load_flat_input(main_fixture)
+    flat = load_flat_input(main_fixture, GENERIC_TARGETS)
     wild = next(k for k in flat.kdps() if k.id == "kdp-pointwise-wild")
     from hkp_pack.descriptors import arch_matches
 
@@ -694,7 +695,7 @@ def test_standalone_ukd_matches_inline_kpack_shape(built):
     # A standalone UKD's shipped kernel_source is kpack-form with the same
     # structure as an inline UKD's (library/toc_key/symbol/sha256/signature +
     # provenance).
-    ukd = _read(built["out"] / "gfx942" / _STANDALONE_UKD_FILE)
+    ukd = read_shipped(built["out"] / "gfx942" / _STANDALONE_UKD_FILE)
     ks = ukd["kernel_source"]
     assert set(
         ["kind", "library", "toc_key", "symbol", "sha256", "signature"]
@@ -767,19 +768,20 @@ def test_standalone_ukd_shared_by_two_kdps_stored_once(
     # and pointwise.kdp.json reference the same standalone id on gfx942.
     p = src / "copy.kdp.json"
     doc = _read(p)
+    doc["arch"] = ["gfx942", "gfx950"]
     doc["kernelDescriptors"].append(_STANDALONE_UKD_ID)
     p.write_text(json.dumps(doc), encoding="utf-8")
     # A second referencing KDP is a second CONSUMER: it resolves to its own engine
     # and KMD, so the UKD declares what it claims for that pair too. Every field of
-    # kmd-copy is matcher-only here -- a hip source compiles no specialization --
+    # the copy KMD is matcher-only here -- a hip source compiles no specialization --
     # but the claim is stated rather than inferred from silence.
     ukd_path = src / _STANDALONE_UKD_FILE
     ukd_doc = _read(ukd_path)
     consumers = ukd_doc["provenance"]["specialization_contract"]["consumers"]
     consumers.append(
         {
-            "engine_id": "ued-copy",
-            "kmd_id": "kmd-copy",
+            "engine_id": _read(src / "copy.ued.json")["id"],
+            "kmd_id": _read(src / "copy.kmd.json")["id"],
             "metadata_fields": [],
             "matcher_only_fields": ["block_size", "dtype"],
             "bindings": {},
@@ -808,6 +810,7 @@ def test_standalone_ukd_referenced_by_a_second_engine_without_declaring_it_fails
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / "copy.kdp.json"
     doc = _read(p)
+    doc["arch"] = ["gfx942", "gfx950"]
     doc["kernelDescriptors"].append(_STANDALONE_UKD_ID)
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="expected exactly one"):
@@ -817,15 +820,19 @@ def test_standalone_ukd_referenced_by_a_second_engine_without_declaring_it_fails
 def test_standalone_ukd_referenced_by_wildcard_kdp(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir
 ):
-    # A standalone UKD referenced by a wildcard KDP (arch []) ships in every shard.
     src = _copy_fixture(tmp_path, main_fixture)
+    wild_doc = _read(src / _STANDALONE_UKD_FILE)
+    wild_doc["id"] = "ukd-pointwise-add-f32-b128-wild"
+    del wild_doc["arch"]
+    wild_file = "pointwise_add_b128_wild.ukd.json"
+    (src / wild_file).write_text(json.dumps(wild_doc), encoding="utf-8")
     p = src / "pointwise_wild.kdp.json"
     doc = _read(p)
-    doc["kernelDescriptors"].append(_STANDALONE_UKD_ID)
+    doc["kernelDescriptors"].append(wild_doc["id"])
     p.write_text(json.dumps(doc), encoding="utf-8")
     _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942", "gfx90a"])
     for arch in ("gfx942", "gfx90a"):
-        assert (tmp_path / "out" / arch / _STANDALONE_UKD_FILE).exists(), arch
+        assert (tmp_path / "out" / arch / wild_file).exists(), arch
 
 
 @pytest.mark.quick
@@ -903,9 +910,10 @@ def test_ukd_arch_not_subset_of_kdp_hard_errors(
 def test_ukd_arch_subset_wildcard_combinations_accepted(
     tmp_path, main_fixture, hipcc, rocm_kpack_dir
 ):
-    # (a) UKD explicit subset of KDP explicit; (b) UKD wildcard + KDP explicit;
-    # (c) KDP wildcard + UKD explicit. Each loads without error and emits the
-    # standalone into the expected shard(s).
+    # (a) UKD explicit subset of KDP explicit; (c) KDP wildcard + UKD explicit.
+    # Each loads without error and emits the standalone into the expected shard(s).
+    # The legal wildcard-UKD shape is the inline UKD inheriting a concrete KDP's arch,
+    # covered by _ACCEPTED["inline_inheriting_a_concrete_kdp"].
     # (a) explicit subset: b128 -> [gfx942] under pointwise KDP [gfx942, gfx950].
     src_a = _copy_fixture(tmp_path / "a", main_fixture)
     p = src_a / _STANDALONE_UKD_FILE
@@ -915,12 +923,6 @@ def test_ukd_arch_subset_wildcard_combinations_accepted(
     _run(src_a, tmp_path / "a", hipcc, rocm_kpack_dir, arches=["gfx942", "gfx950"])
     assert (tmp_path / "a" / "out" / "gfx942" / _STANDALONE_UKD_FILE).exists()
     assert not (tmp_path / "a" / "out" / "gfx950" / _STANDALONE_UKD_FILE).exists()
-
-    # (b) UKD wildcard (unchanged fixture) under explicit KDP -> ships in both.
-    src_b = _copy_fixture(tmp_path / "b", main_fixture)
-    _run(src_b, tmp_path / "b", hipcc, rocm_kpack_dir, arches=["gfx942", "gfx950"])
-    assert (tmp_path / "b" / "out" / "gfx942" / _STANDALONE_UKD_FILE).exists()
-    assert (tmp_path / "b" / "out" / "gfx950" / _STANDALONE_UKD_FILE).exists()
 
     # (c) KDP wildcard + UKD explicit: reference b128 (arch [gfx942]) from the
     # wildcard KDP; it ships only in gfx942.
@@ -1020,7 +1022,7 @@ def test_neg_duplicate_standalone_ukd_ids(tmp_path, main_fixture):
     dup = _read(src / _STANDALONE_UKD_FILE)
     (src / "dup.ukd.json").write_text(json.dumps(dup), encoding="utf-8")
     with pytest.raises(HkpPackError, match="duplicate"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -1031,7 +1033,7 @@ def test_neg_duplicate_kdp_ids(tmp_path, main_fixture):
     doc["id"] = "kdp-pointwise"  # already the id of pointwise.kdp.json
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="duplicate"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -1039,10 +1041,12 @@ def test_neg_duplicate_generic_ids(tmp_path, main_fixture):
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / "copy.kmd.json"
     doc = _read(p)
-    doc["id"] = "kmd-pointwise"  # already the id of pointwise.kmd.json
+    # pointwise.kmd.json's id in another letter case: the loader parses both
+    # spellings to the same UUID.
+    doc["id"] = _read(src / "pointwise.kmd.json")["id"].upper()
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="duplicate"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -1052,10 +1056,10 @@ def test_neg_cross_type_id_reuse_rejected(tmp_path, main_fixture):
     src = _copy_fixture(tmp_path, main_fixture)
     p = src / "pointwise.ued.json"
     doc = _read(p)
-    doc["id"] = "kmd-pointwise"  # a KMD id, different type
+    doc["id"] = _read(src / "pointwise.kmd.json")["id"]  # a KMD id, different type
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="duplicate"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 # --- H. Version enforcement --------------------------
@@ -1067,7 +1071,7 @@ def test_neg_file_backed_missing_version(tmp_path, main_fixture):
     del doc["version"]
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="missing required field 'version'"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -1079,7 +1083,7 @@ def test_neg_malformed_version(tmp_path, main_fixture, bad):
     doc["version"] = bad
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="invalid version"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -1091,7 +1095,7 @@ def test_neg_inline_ukd_missing_version(tmp_path, main_fixture):
     del doc["kernelDescriptors"][0]["version"]
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="missing required field 'version'"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 # --- I. UED scoped name ------------------------------
@@ -1103,14 +1107,14 @@ def test_neg_ued_name_not_scoped(tmp_path, main_fixture):
     doc["name"] = "Pointwise engine"  # unscoped
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="scoped"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
 def test_scoped_ued_name_loads_clean(main_fixture):
     # The renamed fixture UED (test_fixture:pointwise) validates without error.
-    flat = load_flat_input(main_fixture)
-    ued = next(d for d in flat.by_type("ued") if d.id == "ued-pointwise")
+    flat = load_flat_input(main_fixture, GENERIC_TARGETS)
+    ued = next(d for d in flat.by_type("ued") if d.path.name == "pointwise.ued.json")
     assert ued.doc["name"] == "test_fixture:pointwise"
 
 
@@ -1134,7 +1138,9 @@ def test_authored_provenance_cannot_hijack(
     )
     p.write_text(json.dumps(doc), encoding="utf-8")
     _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942"])
-    prov = _read(tmp_path / "out" / "gfx942" / _STANDALONE_UKD_FILE)["provenance"]
+    prov = read_shipped(tmp_path / "out" / "gfx942" / _STANDALONE_UKD_FILE)[
+        "provenance"
+    ]
     assert prov["origin_kind"] == "hip"
     assert prov["source"] == "PointwiseAdd.cpp"
     assert prov["entry"] == "PointwiseAdd"
@@ -1151,7 +1157,7 @@ def test_non_object_provenance_is_refused_at_load(tmp_path, main_fixture):
     doc["provenance"] = "HIJACKED"
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="provenance must be an object"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 def _share_contract_onto_kdp(kdp_path):
@@ -1180,7 +1186,7 @@ def test_kdp_level_contract_is_inherited_and_ships(
     _run(src, tmp_path, hipcc, rocm_kpack_dir, arches=["gfx942"])
 
     out = tmp_path / "out" / "gfx942"
-    shipped = _read(out / "pointwise.kdp.json")
+    shipped = read_shipped(out / "pointwise.kdp.json")
     assert "specialization_contract" in shipped["provenance"]
     inline = [e for e in shipped["kernelDescriptors"] if isinstance(e, dict)]
     assert inline
@@ -1196,7 +1202,7 @@ def test_kdp_level_contract_is_inherited_and_ships(
 
     # The standalone UKD the same KDP references keeps its own: it is its own
     # file and no KDP speaks for it.
-    standalone = _read(out / _STANDALONE_UKD_FILE)
+    standalone = read_shipped(out / _STANDALONE_UKD_FILE)
     assert "specialization_contract" in standalone["provenance"]
 
 
@@ -1210,7 +1216,7 @@ def test_effective_spec_on_a_kdp_is_refused_at_load(tmp_path, main_fixture):
     doc["provenance"] = {"effective_spec": {"schema_version": 1}}
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="effective_spec is reserved"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 @pytest.mark.quick
@@ -1223,7 +1229,7 @@ def test_a_malformed_kdp_contract_is_refused_at_load(tmp_path, main_fixture):
     doc["provenance"] = {"specialization_contract": {"schema_version": 1}}
     p.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(HkpPackError, match="specialization_contract must be"):
-        load_flat_input(src)
+        load_flat_input(src, GENERIC_TARGETS)
 
 
 # --- K. Drop diagnostics + arch warning --------------
@@ -1235,7 +1241,7 @@ def test_orphan_standalone_ukd_warns(tmp_path, main_fixture):
     orphan["id"] = "ukd-orphan"
     (src / "orphan.ukd.json").write_text(json.dumps(orphan), encoding="utf-8")
     logs = []
-    load_flat_input(src, log=logs.append)
+    load_flat_input(src, GENERIC_TARGETS, log=logs.append)
     assert any("orphan.ukd.json" in m and "not referenced" in m for m in logs)
 
 

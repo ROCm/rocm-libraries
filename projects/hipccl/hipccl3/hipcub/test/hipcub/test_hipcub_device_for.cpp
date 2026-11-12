@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,6 @@
 
 // required hipcub headers
 #include <hipcub/device/device_for.hpp>
-#include <hipcub/iterator/counting_input_iterator.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -692,7 +691,7 @@ TEST(HipcubDeviceForTests, ForCountingIterator)
 
             // Device pointers
             unsigned int* d_count;
-            const auto    it = rocprim::counting_iterator<T>{0};
+            const auto    it = test_utils::counting_iterator<T>{0};
             // Allocate memory
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_count, sizeof(unsigned int)));
 
@@ -745,7 +744,7 @@ TEST(HipcubDeviceForTests, ForCopyCountingIterator)
 
             // Device pointers
             unsigned int* d_count;
-            const auto    it = rocprim::counting_iterator<T>{0};
+            const auto    it = test_utils::counting_iterator<T>{0};
 
             // Allocate memory
             HIP_CHECK(test_common_utils::hipMallocHelper(&d_count, sizeof(unsigned int)));
@@ -854,7 +853,7 @@ TEST(HipcubDeviceForTests, ForEachCopyNTempStore)
 }
 
 // ForEachInExtents only enables when the cccl mdspan extension is enabled
-#if(defined(__HIP_PLATFORM_NVIDIA__) && defined(__cccl_lib_mdspan)) || defined(__HIP_PLATFORM_AMD__)
+#if defined(__HIP_PLATFORM_NVIDIA__) || defined(__HIP_PLATFORM_AMD__)
 
 template<class TestParams1, class TestParams2>
 struct HipcubTestParamsMerge
@@ -897,19 +896,19 @@ struct HipcubDeviceForEachInExtentsTests : public ::testing::Test
 
 template<class IndexType>
 using HipcubDeviceForEachInExtentsParamGenerator
-    = ::testing::Types<DeviceForEachInExtentsParams<::hipcub::extents<IndexType>>,
-                       DeviceForEachInExtentsParams<::hipcub::extents<IndexType, 5>>,
-                       DeviceForEachInExtentsParams<::hipcub::extents<IndexType, 5, 3>>,
-                       DeviceForEachInExtentsParams<::hipcub::extents<IndexType, 5, 3, 4>>,
-                       DeviceForEachInExtentsParams<::hipcub::extents<IndexType, 2, 5, 3, 4>>>;
+    = ::testing::Types<DeviceForEachInExtentsParams<::test_utils::extents<IndexType>>,
+                       DeviceForEachInExtentsParams<::test_utils::extents<IndexType, 5>>,
+                       DeviceForEachInExtentsParams<::test_utils::extents<IndexType, 5, 3>>,
+                       DeviceForEachInExtentsParams<::test_utils::extents<IndexType, 5, 3, 4>>,
+                       DeviceForEachInExtentsParams<::test_utils::extents<IndexType, 2, 5, 3, 4>>>;
 
 using HipcubDeviceForEachInExtentsTestsParams = typename HipcubTestParamsMergeAll<
     HipcubDeviceForEachInExtentsParamGenerator<std::int16_t>,
-    HipcubDeviceForEachInExtentsParamGenerator<std::uint16_t>,
-    HipcubDeviceForEachInExtentsParamGenerator<std::int32_t>,
-    HipcubDeviceForEachInExtentsParamGenerator<std::uint32_t>,
-    HipcubDeviceForEachInExtentsParamGenerator<std::int64_t>,
-    HipcubDeviceForEachInExtentsParamGenerator<std::uint64_t>>::type;
+    HipcubDeviceForEachInExtentsParamGenerator<uint16_t>,
+    HipcubDeviceForEachInExtentsParamGenerator<int32_t>,
+    HipcubDeviceForEachInExtentsParamGenerator<uint32_t>,
+    HipcubDeviceForEachInExtentsParamGenerator<_HIPCUB_STD::int64_t>,
+    HipcubDeviceForEachInExtentsParamGenerator<uint64_t>>::type;
 
 template<int Rank = 0,
          typename T,
@@ -941,7 +940,8 @@ template<
 }
 
 template<typename T, typename IndexType, size_t... Extents>
-inline void fill_linear(std::vector<T>& vector, const ::hipcub::extents<IndexType, Extents...>& ext)
+inline void fill_linear(std::vector<T>&                                     vector,
+                        const ::test_utils::extents<IndexType, Extents...>& ext)
 {
     size_t pos = 0;
     fill_linear_impl(vector, ext, pos);
@@ -964,6 +964,22 @@ struct LinearStore
     }
 };
 
+template<typename item_t>
+struct ForEachInExtentsOp
+
+{
+    using op_data_t = item_t[3];
+    void* d_data;
+
+    __device__ __host__ __forceinline__
+    void  operator()(int idx, int x, int y, int z)
+    {
+        auto& i = static_cast<op_data_t*>(d_data)[idx];
+        // We use the "placement new" operator to copy the data from an initializer list.
+        new(&i) op_data_t{x, y, z};
+    }
+};
+
 TYPED_TEST_SUITE(HipcubDeviceForEachInExtentsTests, HipcubDeviceForEachInExtentsTestsParams);
 
 TEST(HipcubDeviceForEachInExtentsTests, ForEachInExtentsAPI)
@@ -974,8 +990,8 @@ TEST(HipcubDeviceForEachInExtentsTests, ForEachInExtentsAPI)
 
     using item_t                = int;
     using data_t                = std::array<item_t, 3>;
-    using extents_type          = hipcub::extents<item_t, 3, 2, 2>;
-    constexpr auto extents_size = hipcub::extents_size<extents_type>::value;
+    using extents_type          = test_utils::extents<item_t, 3, 2, 2>;
+    constexpr auto extents_size = test_utils::extents_size<extents_type>::value;
     constexpr auto memory_size  = extents_size * sizeof(data_t);
 
     constexpr extents_type ext{};
@@ -999,21 +1015,7 @@ TEST(HipcubDeviceForEachInExtentsTests, ForEachInExtentsAPI)
     HIP_CHECK(test_common_utils::hipMallocHelper(&d_input, memory_size));
     HIP_CHECK(hipMemset(d_input, 0, memory_size));
 
-    struct Op
-    {
-        using op_data_t = item_t[3];
-        void* d_data;
-
-        __device__ __host__ __forceinline__
-        void  operator()(int idx, int x, int y, int z)
-        {
-            auto& i = static_cast<op_data_t*>(d_data)[idx];
-            // We use the "placement new" operator to copy the data from an initializer list.
-            new(&i) op_data_t{x, y, z};
-        }
-    };
-
-    HIP_CHECK(hipcub::DeviceFor::ForEachInExtents(ext, Op{d_input}));
+    HIP_CHECK(hipcub::DeviceFor::ForEachInExtents(ext, ForEachInExtentsOp<item_t>{d_input}));
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -1033,7 +1035,7 @@ TYPED_TEST(HipcubDeviceForEachInExtentsTests, ForEachInExtentsStatic)
 
     using item_t                = index_type;
     using data_t                = std::array<item_t, extents_type::rank()>;
-    constexpr auto extents_size = hipcub::extents_size<extents_type>::value;
+    constexpr auto extents_size = test_utils::extents_size<extents_type>::value;
     constexpr auto memory_size  = extents_size * sizeof(data_t);
     constexpr auto rank         = extents_type::rank();
     using store_op_t            = LinearStore<index_type, rank>;
@@ -1065,16 +1067,16 @@ TYPED_TEST(HipcubDeviceForEachInExtentsTests, ForEachInExtentsStatic)
     HIP_CHECK(hipFree(d_input));
 }
 
-#endif // (defined(__HIP_PLATFORM_NVIDIA__) && defined(__cccl_lib_mdspan)) || defined(__HIP_PLATFORM_AMD__)
+#endif // defined(__HIP_PLATFORM_NVIDIA__) || defined(__HIP_PLATFORM_AMD__)
 
 template<class Params>
 class HipcubDeviceForBulkTests : public HipcubDeviceForTests<Params>
 {};
 
-using HipcubDeviceForBulkTestsParams = ::testing::Types<DeviceForParams<std::int32_t>,
-                                                        DeviceForParams<std::uint32_t>,
-                                                        DeviceForParams<std::int64_t>,
-                                                        DeviceForParams<std::uint64_t>>;
+using HipcubDeviceForBulkTestsParams = ::testing::Types<DeviceForParams<int32_t>,
+                                                        DeviceForParams<uint32_t>,
+                                                        DeviceForParams<_HIPCUB_STD::int64_t>,
+                                                        DeviceForParams<uint64_t>>;
 
 TYPED_TEST_SUITE(HipcubDeviceForBulkTests, HipcubDeviceForBulkTestsParams);
 
@@ -1087,7 +1089,7 @@ struct offset_count_device_t
     HIPCUB_DEVICE
     void operator()(OffsetT i)
     {
-        static_assert(std::is_same<T, OffsetT>::value, "T and OffsetT must be the same type");
+        static_assert(std::is_same_v<T, OffsetT>, "T and OffsetT must be the same type");
         atomicAdd(d_count + i, 1);
     }
 };

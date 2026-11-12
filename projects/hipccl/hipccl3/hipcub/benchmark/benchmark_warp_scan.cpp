@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -56,8 +56,8 @@ struct inclusive_scan
 
         using wscan_t = hipcub::WarpScan<T, WarpSize>;
         __shared__ typename wscan_t::TempStorage storage;
-        auto                                     scan_op = hipcub::Sum();
-#pragma nounroll
+        auto                                     scan_op = benchmark_utils::plus{};
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             wscan_t(storage).InclusiveScan(value, value, scan_op);
@@ -87,8 +87,8 @@ struct exclusive_scan
 
         using wscan_t = hipcub::WarpScan<T, WarpSize>;
         __shared__ typename wscan_t::TempStorage storage;
-        auto                                     scan_op = hipcub::Sum();
-#pragma nounroll
+        auto                                     scan_op = benchmark_utils::plus{};
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             wscan_t(storage).ExclusiveScan(value, value, init, scan_op);
@@ -122,7 +122,7 @@ struct broadcast
 
         using wscan_t = hipcub::WarpScan<T, WarpSize>;
         __shared__ typename wscan_t::TempStorage storage;
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < Trials; trial++)
         {
             value = wscan_t(storage).Broadcast(value, src_lane);

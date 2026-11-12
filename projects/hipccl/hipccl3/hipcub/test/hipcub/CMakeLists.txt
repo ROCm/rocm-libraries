@@ -29,14 +29,14 @@ function(get_hipcub_test_target TEST_SOURCES TEST_TARGET)
 endfunction()
 
 function(set_build_coverage TEST_TARGET)
-  if(BUILD_CODE_COVERAGE)
+  if(HIPCUB_ENABLE_COVERAGE)
     target_compile_options(${TEST_TARGET} PRIVATE
       -w
-      -fprofile-instr-generate
-      -fcoverage-mapping
+      "SHELL:-Xarch_host -fprofile-instr-generate"
+      "SHELL:-Xarch_host -fcoverage-mapping"
     )
     target_link_options(${TEST_TARGET} PRIVATE
-      -fprofile-instr-generate
+      "SHELL:-Xarch_host -fprofile-instr-generate"
     )
   endif()
 endfunction()
@@ -279,12 +279,10 @@ add_hipcub_test_parallel("hipcub.DeviceSegmentedRadixSort" test_hipcub_device_se
 add_hipcub_test("hipcub.DeviceSegmentedReduce" test_hipcub_device_segmented_reduce.cpp)
 add_hipcub_test_parallel("hipcub.DeviceSegmentedSort" test_hipcub_device_segmented_sort.cpp.in)
 add_hipcub_test("hipcub.DeviceSelect" test_hipcub_device_select.cpp)
-add_hipcub_test("hipcub.DeviceSpmv" test_hipcub_device_spmv.cpp)
 add_hipcub_test("hipcub.DeviceTransform" test_hipcub_device_transform.cpp)
 add_hipcub_test("hipcub.DevicePartition" test_hipcub_device_partition.cpp)
 add_hipcub_test("hipcub.Grid" test_hipcub_grid.cpp)
 add_hipcub_test("hipcub.UtilPtx" test_hipcub_util_ptx.cpp)
-add_hipcub_test("hipcub.UtilDevice" test_hipcub_util_device.cpp)
 add_hipcub_test("hipcub.Vector" test_hipcub_vector.cpp)
 add_hipcub_test("hipcub.WarpExchange" test_hipcub_warp_exchange.cpp)
 add_hipcub_test("hipcub.WarpLoad" test_hipcub_warp_load.cpp)

@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2022 NVIDIA Corporation
- *  Modifications Copyright© 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -34,11 +34,14 @@
 
 #include _THRUST_STD_INCLUDE(type_traits)
 
+#include <thrust/detail/libcxx_wrapper/std/__type_traits/conjunction.h>
+
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD && _THRUST_USE_ROCPRIM
-#  include <rocprim/type_traits.hpp>
+// #  include <rocprim/type_traits.hpp>
 #  include <rocprim/type_traits_functions.hpp>
 #endif // !_THRUST_HAS_DEVICE_SYSTEM_STD
 
+// TODO(libhipcxx): remove this namespace once libhipcxx gets ready
 namespace internal
 {
 
@@ -46,21 +49,18 @@ namespace internal
 
 using _THRUST_STD::is_arithmetic;
 using _THRUST_STD::is_integral;
+using _THRUST_STD::is_integral_v;
 using _THRUST_STD::make_unsigned;
 
 template <typename T>
 using make_unsigned_t = _THRUST_STD::make_unsigned_t<T>;
 
-template <typename Invokable, typename InputT, typename InitT = InputT>
-using accumulator_t = _THRUST_STD::__accumulator_t<Invokable, InputT, InitT>;
 template <typename T>
 using decay_t = _THRUST_STD::decay_t<T>;
 template <typename T>
 using remove_cvref = _THRUST_STD::remove_cvref<T>;
 template <typename T>
 using remove_cvref_t = _THRUST_STD::remove_cvref_t<T>;
-template <typename... Pred>
-using _And = _THRUST_STD::_And<Pred...>;
 
 #else // !_THRUST_HAS_DEVICE_SYSTEM_STD
 
@@ -69,17 +69,12 @@ using _And = _THRUST_STD::_And<Pred...>;
 // Keeping standard versions for now until compatibility is resolved.
 using ::std::is_arithmetic;
 using ::std::is_integral;
+using ::std::is_integral_v;
 using ::std::make_unsigned;
 
 template <typename T>
 using make_unsigned_t = typename ::std::make_unsigned<T>::type;
 
-template <typename Invokable, typename InputT, typename InitT = InputT>
-#if _THRUST_USE_ROCPRIM
-using accumulator_t = ::rocprim::accumulator_t<Invokable, InputT, InitT>;
-#else
-using accumulator_t = _THRUST_STD::decay_t<_THRUST_STD::invoke_result_t<Invokable, InitT, InputT>>;
-#endif
 template <typename T>
 // If we're not on Windows and we have libstdc++ >= 10, we can use the __decay_t
 // builtin to reduce compilation time.
@@ -92,24 +87,6 @@ template <typename T>
 using remove_cvref = ::std::remove_cv<::std::remove_reference_t<T>>;
 template <typename T>
 using remove_cvref_t = ::std::remove_cv_t<::std::remove_reference_t<T>>;
-
-namespace detail
-{
-template <typename...>
-using expand_to_true = ::std::true_type;
-template <typename... Pred>
-THRUST_HOST_DEVICE expand_to_true<::std::enable_if_t<Pred::value>...> and_helper(int);
-template <typename...>
-THRUST_HOST_DEVICE ::std::false_type and_helper(...);
-} // namespace detail
-
-template <typename... Pred>
-#  if defined(__CUDA__) && THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG && defined(__has_attribute) \
-    && __has_attribute(__nodebug__)
-using _And __attribute__((__nodebug__)) = decltype(detail::and_helper<Pred...>(0));
-#  else
-using _And = decltype(detail::and_helper<Pred...>(0));
-#  endif
 
 #endif // _THRUST_HAS_DEVICE_SYSTEM_STD
 
@@ -139,21 +116,6 @@ struct is_non_bool_integral<bool> : public false_type
 template <typename T>
 struct is_non_bool_arithmetic : public ::internal::is_arithmetic<T>
 {};
-
-template <typename T>
-struct is_unbounded_array : public thrust::detail::false_type
-{};
-template <typename T>
-struct is_unbounded_array<T[]> : public thrust::detail::true_type
-{};
-
-template <typename T>
-struct is_bounded_array : public thrust::detail::false_type
-{};
-template <typename T, _THRUST_STD::size_t N>
-struct is_bounded_array<T[N]> : public thrust::detail::true_type
-{};
-
 template <>
 struct is_non_bool_arithmetic<bool> : public false_type
 {};
@@ -189,12 +151,6 @@ struct identity_
 {
   using type = T;
 }; // end identity
-
-template <class Tp, bool>
-struct dependent_type
-{
-  using type = Tp;
-}; // end dependent_type
 
 template <bool, typename T>
 struct lazy_enable_if
@@ -237,14 +193,39 @@ struct larger_type
 template <class F, class... Us>
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 using invoke_result = _THRUST_STD::__invoke_of<F, Us...>;
-#elif _THRUST_USE_ROCPRIM // !_THRUST_HAS_DEVICE_SYSTEM_STD
+#else // TODO(libhipcxx): remove this path of code once libhipcxx gets ready
+#  if _THRUST_USE_ROCPRIM
 using invoke_result = ::rocprim::invoke_result<F, Us...>;
-#else
-using invoke_result = _THRUST_STD::invoke_result<F, Us...>;
+#  else
+using invoke_result = ::std::invoke_result<F, Us...>;
+#  endif
 #endif // _THRUST_HAS_DEVICE_SYSTEM_STD
 
 template <class F, class... Us>
 using invoke_result_t = typename invoke_result<F, Us...>::type;
+
+// [NON-CCCL PARITY BEGIN]
+template <typename T>
+struct is_unbounded_array : public thrust::detail::false_type
+{};
+template <typename T>
+struct is_unbounded_array<T[]> : public thrust::detail::true_type
+{};
+
+template <typename T>
+struct is_bounded_array : public thrust::detail::false_type
+{};
+template <typename T, _THRUST_STD::size_t N>
+struct is_bounded_array<T[N]> : public thrust::detail::true_type
+{};
+
+template <class Tp, bool>
+struct dependent_type
+{
+  using type = Tp;
+};
+// [NON-CCCL PARITY END]
+
 } // namespace detail
 
 using detail::false_type;
@@ -253,31 +234,35 @@ using detail::true_type;
 
 THRUST_NAMESPACE_END
 
+// TODO(libhipcxx): remove this namespace and replace ::internal::common_type_t
+// with _THRUST_STD::common_type_t in rocThrust once libhipcxx gets ready
 namespace internal
 {
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 
 template <typename... Tp>
-using promoted_numerical_type = _THRUST_STD::common_type<Tp...>;
+using common_type_t = _THRUST_STD::common_type_t<Tp...>;
 
 #else // !_THRUST_HAS_DEVICE_SYSTEM_STD
 
+namespace detail
+{
+
 template <typename T1, typename T2, typename Enable = void>
-struct promoted_numerical_type;
+struct common_type;
 
 template <typename T1, typename T2>
-struct promoted_numerical_type<
-  T1,
-  T2,
-  typename _THRUST_STD::enable_if<_And<typename _THRUST_STD::is_floating_point<T1>::type,
-                                       typename _THRUST_STD::is_floating_point<T2>::type>::value>::type>
+struct common_type<T1,
+                   T2,
+                   typename _THRUST_STD::enable_if<_And<typename _THRUST_STD::is_floating_point<T1>::type,
+                                                        typename _THRUST_STD::is_floating_point<T2>::type>::value>::type>
 {
-  using type = typename ::thrust::detail::larger_type<T1, T2>::type;
+  using type = typename THRUST_NS_QUALIFIER::detail::larger_type<T1, T2>::type;
 };
 
 template <typename T1, typename T2>
-struct promoted_numerical_type<
+struct common_type<
   T1,
   T2,
   typename _THRUST_STD::enable_if<
@@ -287,14 +272,18 @@ struct promoted_numerical_type<
 };
 
 template <typename T1, typename T2>
-struct promoted_numerical_type<
-  T1,
-  T2,
-  typename _THRUST_STD::enable_if<
-    _And<typename _THRUST_STD::is_floating_point<T1>::type, typename is_integral<T2>::type>::value>::type>
+struct common_type<T1,
+                   T2,
+                   typename _THRUST_STD::enable_if<_And<typename _THRUST_STD::is_floating_point<T1>::type,
+                                                        typename is_integral<T2>::type>::value>::type>
 {
   using type = T1;
 };
+
+} // namespace detail
+
+template <typename... Tp>
+using common_type_t = typename detail::common_type<Tp...>::type;
 
 #endif // _THRUST_HAS_DEVICE_SYSTEM_STD
 

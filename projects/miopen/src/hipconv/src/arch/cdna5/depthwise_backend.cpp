@@ -7,6 +7,7 @@ using hipconv::ConvKernelSpan;
 using hipconv::ConvParams;
 
 extern const ConvKernelSpan depthwise_1d_toeplitz_cdna5_kernels;
+extern const ConvKernelSpan depthwise_wgrad_hankel_cdna5_kernels;
 
 namespace
 {
@@ -20,8 +21,9 @@ bool is_applicable(const ConvParams& par)
     return par.dilation_h == 1 && par.dilation_w == 1;
 }
 
-constexpr std::array<const ConvKernelSpan*, 1> kernel_groups = {
+constexpr std::array<const ConvKernelSpan*, 2> kernel_groups = {
     &depthwise_1d_toeplitz_cdna5_kernels,
+    &depthwise_wgrad_hankel_cdna5_kernels,
 };
 
 } // namespace

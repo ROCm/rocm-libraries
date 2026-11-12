@@ -77,25 +77,31 @@ struct StubbedDeviceOp
     std::string GetTypeString() { return typeString; }
 };
 
+static std::vector<std::unique_ptr<StubbedDeviceOp>>
+MakeStubbedInstances(const std::vector<std::string>& names)
+{
+    std::vector<std::unique_ptr<StubbedDeviceOp>> ops;
+    ops.reserve(names.size());
+
+    std::transform(names.begin(), names.end(), std::back_inserter(ops), [&](auto& name) {
+        return std::make_unique<StubbedDeviceOp>(name);
+    });
+
+    return ops;
+}
+
+// IsCKArgsSupported keeps the first GetInstances() result per DeviceOpType, so a
+// stub's instance list must be fixed, as a CK instance factory's is.
 struct StubbedDeviceOps
 {
-    static std::vector<std::string> deviceOps;
-
     static std::vector<std::unique_ptr<StubbedDeviceOp>> GetInstances()
     {
-        std::vector<std::unique_ptr<StubbedDeviceOp>> ops;
-        ops.reserve(deviceOps.size());
-
-        std::transform(deviceOps.begin(),
-                       deviceOps.end(),
-                       std::back_inserter(ops),
-                       [&](auto& deviceOp) { return std::make_unique<StubbedDeviceOp>(deviceOp); });
-
-        return ops;
+        std::vector<std::string> names;
+        for(const auto& tc : GetTestCases())
+            names.push_back(tc.instanceToCheck);
+        return MakeStubbedInstances(names);
     }
 };
-
-std::vector<std::string> StubbedDeviceOps::deviceOps = {};
 
 struct StubbedCKArgs
 {
@@ -114,6 +120,75 @@ struct StubbedCKArgs
     }
 };
 
+// A DeviceOpType whose GetInstances() returns two instances that share one
+// GetTypeString(). The cache (CachedCKInstanceIndex) must resolve the kernel_id
+// to the first instance (lowest index), the same one FindConvPtrByID returns.
+// ordinal records insertion order so a test can tell which instance was picked.
+struct DuplicateTypeDeviceOp
+{
+    DuplicateTypeDeviceOp(const std::string& op, int order) : typeString(op), ordinal(order) {}
+
+    std::string typeString;
+    int ordinal;
+
+    std::string GetTypeString() { return typeString; }
+};
+
+struct DuplicateTypeDeviceOps
+{
+    static std::vector<std::unique_ptr<DuplicateTypeDeviceOp>> GetInstances()
+    {
+        std::vector<std::unique_ptr<DuplicateTypeDeviceOp>> ops;
+        ops.push_back(std::make_unique<DuplicateTypeDeviceOp>("duplicate_type", 0));
+        ops.push_back(std::make_unique<DuplicateTypeDeviceOp>("duplicate_type", 1));
+        return ops;
+    }
+};
+
+// Only the first-enumerated "duplicate_type" instance (ordinal 0) is supported, so
+// the validator returns true iff the cache resolved the id to the first instance.
+struct DuplicateTypeCKArgs
+{
+    DuplicateTypeCKArgs(const ProblemDescription& /*problem*/) {}
+
+    template <typename ConvPtr>
+    bool IsSupportedBy(const ConvPtr& conv_ptr) const
+    {
+        return conv_ptr->ordinal == 0;
+    }
+
+    template <typename ConvPtr>
+    bool IsSupportedBySplitK(const ConvPtr& conv_ptr, int) const
+    {
+        return conv_ptr->ordinal == 0;
+    }
+};
+
+// Counts how many times GetInstances() runs. The cache must enumerate once per
+// DeviceOpType for the whole process, so repeated validator calls add no calls.
+struct CountingDeviceOp
+{
+    CountingDeviceOp(const std::string& op) : typeString(op) {}
+
+    std::string typeString;
+
+    std::string GetTypeString() { return typeString; }
+};
+
+struct CountingDeviceOps
+{
+    static int instanceCalls;
+
+    static std::vector<std::unique_ptr<CountingDeviceOp>> GetInstances()
+    {
+        ++instanceCalls;
+        std::vector<std::unique_ptr<CountingDeviceOp>> ops;
+        ops.push_back(std::make_unique<CountingDeviceOp>("counting_kernel"));
+        return ops;
+    }
+};
+int CountingDeviceOps::instanceCalls = 0;
+
 template <typename CKArgsType, typename DeviceOpType>
 class CKArgParsingTest : public ::testing::TestWithParam<ParsingTestCase>
 {
@@ -121,10 +196,6 @@ protected:
     void TestParsing()
     {
         auto testCase = GetParam();
-
-        // Set up stubbed instances to match test
-        DeviceOpType::deviceOps.clear();
-        DeviceOpType::deviceOps.push_back(testCase.instanceToCheck);
 
         bool success;
         if(testCase.checkSplitK)
@@ -161,6 +232,49 @@ TEST_P(CPU_UnitTestImplicitGemmCKUtil_NONE, TestParsing)
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          CPU_UnitTestImplicitGemmCKUtil_NONE,
                          testing::ValuesIn(GetTestCases()));
+
+// Regression guard for the instance cache's first-index invariant. When a
+// DeviceOpType enumerates two instances with the same GetTypeString(), the cache
+// must resolve the kernel_id to the first instance -- the one FindConvPtrByID
+// returns -- because invoker construction and workspace sizing still call
+// FindConvPtrByID and the two must agree. Only the first "duplicate_type" instance
+// is supported here, so replacing the index's emplace with a last-index-wins
+// insert would select the unsupported second instance and flip this to false.
+TEST(CPU_UnitTestImplicitGemmCKUtilDuplicateType_NONE, FirstIndexWins)
+{
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    const bool success =
+        miopen::solver::IsCKArgsSupported<DuplicateTypeDeviceOps, DuplicateTypeCKArgs>(
+            ProblemDescription{}, "duplicate_type");
+    EXPECT_TRUE(success);
+#else
+    GTEST_SKIP();
+#endif
+}
+
+// GetInstances() must be enumerated once per DeviceOpType and cached: validation
+// of many (kernel, split_k) candidates, across the plain and split-k
+// IsCKArgsSupported overloads and IsCKSplitKSupported, must not re-enumerate.
+TEST(CPU_UnitTestImplicitGemmCKUtilInstanceCache_NONE, GetInstancesEnumeratedOnce)
+{
+#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+    CountingDeviceOps::instanceCalls = 0;
+    const ProblemDescription problem{};
+
+    miopen::solver::IsCKArgsSupported<CountingDeviceOps, StubbedCKArgs>(problem, "counting_kernel");
+    miopen::solver::IsCKArgsSupported<CountingDeviceOps, StubbedCKArgs, ProblemDescription, true>(
+        problem, "counting_kernel+1");
+    miopen::solver::IsCKSplitKSupported<CountingDeviceOps, StubbedCKArgs>(
+        problem, "counting_kernel", 1);
+    for(int i = 0; i < 5; ++i)
+        miopen::solver::IsCKArgsSupported<CountingDeviceOps, StubbedCKArgs>(problem,
+                                                                            "counting_kernel");
+
+    EXPECT_EQ(CountingDeviceOps::instanceCalls, 1);
+#else
+    GTEST_SKIP();
+#endif
+}
 
 // =============================================================================
 // Tests for IsCKSplitKSupportedGeneric
@@ -254,6 +368,28 @@ static std::vector<SplitKGenericTestCase> GetSplitKGenericTestCases()
 }
 
 /**
+ * @brief Fixed instance list for the split_k tests
+ *
+ * Holds every kernel the parameterized cases register, plus the kernels the
+ * direct tests use. "NonExistentKernel" has no supported split_k values and is
+ * left out, so it is never found.
+ */
+struct StubbedSplitKDeviceOps
+{
+    static std::vector<std::unique_ptr<StubbedDeviceOp>> GetInstances()
+    {
+        std::vector<std::string> names = {"SomeKernel", "TestKernel", "KernelA", "KernelB"};
+        for(const auto& tc : GetSplitKGenericTestCases())
+        {
+            if(!tc.supportedSplitKs.empty() &&
+               std::find(names.begin(), names.end(), tc.kernelId) == names.end())
+                names.push_back(tc.kernelId);
+        }
+        return MakeStubbedInstances(names);
+    }
+};
+
+/**
  * @brief Parameterized test fixture for IsCKSplitKSupportedGeneric
  */
 class CPU_SplitKGenericTest_NONE : public ::testing::TestWithParam<SplitKGenericTestCase>
@@ -262,14 +398,12 @@ protected:
     void SetUp() override
     {
         // Clear state before each test
-        StubbedDeviceOps::deviceOps.clear();
         StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel.clear();
     }
 
     void TearDown() override
     {
         // Clean up after each test
-        StubbedDeviceOps::deviceOps.clear();
         StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel.clear();
     }
 };
@@ -280,18 +414,16 @@ TEST_P(CPU_SplitKGenericTest_NONE, ValidatesSplitKSupport)
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     auto testCase = GetParam();
 
-    // Set up the stubbed device ops to include the kernel we're testing
     if(!testCase.supportedSplitKs.empty())
     {
-        StubbedDeviceOps::deviceOps.push_back(testCase.kernelId);
         StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel[testCase.kernelId] =
             testCase.supportedSplitKs;
     }
 
     // Test IsCKSplitKSupported (single data type version)
-    bool result =
-        miopen::solver::IsCKSplitKSupported<StubbedDeviceOps, StubbedCKArgsWithSplitKValidation>(
-            ProblemDescription{}, testCase.kernelId, testCase.splitK);
+    bool result = miopen::solver::IsCKSplitKSupported<StubbedSplitKDeviceOps,
+                                                      StubbedCKArgsWithSplitKValidation>(
+        ProblemDescription{}, testCase.kernelId, testCase.splitK);
 
     EXPECT_EQ(result, testCase.expectedResult)
         << "Failed for kernel: " << testCase.kernelId << " split_k: " << testCase.splitK;
@@ -310,28 +442,19 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 class CPU_SplitKGenericDirectTest_NONE : public ::testing::Test
 {
 protected:
-    void SetUp() override
-    {
-        StubbedDeviceOps::deviceOps.clear();
-        StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel.clear();
-    }
+    void SetUp() override { StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel.clear(); }
 
-    void TearDown() override
-    {
-        StubbedDeviceOps::deviceOps.clear();
-        StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel.clear();
-    }
+    void TearDown() override { StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel.clear(); }
 };
 
 TEST_F(CPU_SplitKGenericDirectTest_NONE, EmptyKernelIdReturnsNotSupported)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    StubbedDeviceOps::deviceOps.push_back("SomeKernel");
     StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel["SomeKernel"] = {1, 2, 4};
 
-    bool result =
-        miopen::solver::IsCKSplitKSupported<StubbedDeviceOps, StubbedCKArgsWithSplitKValidation>(
-            ProblemDescription{}, "", 1);
+    bool result = miopen::solver::IsCKSplitKSupported<StubbedSplitKDeviceOps,
+                                                      StubbedCKArgsWithSplitKValidation>(
+        ProblemDescription{}, "", 1);
 
     EXPECT_FALSE(result) << "Empty kernel_id should return false";
 #else
@@ -343,13 +466,12 @@ TEST_F(CPU_SplitKGenericDirectTest_NONE, ZeroSplitKValueHandledCorrectly)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
     const std::string kernelId = "TestKernel";
-    StubbedDeviceOps::deviceOps.push_back(kernelId);
     // Only support positive split_k values
     StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel[kernelId] = {1, 2, 4};
 
-    bool result =
-        miopen::solver::IsCKSplitKSupported<StubbedDeviceOps, StubbedCKArgsWithSplitKValidation>(
-            ProblemDescription{}, kernelId, 0);
+    bool result = miopen::solver::IsCKSplitKSupported<StubbedSplitKDeviceOps,
+                                                      StubbedCKArgsWithSplitKValidation>(
+        ProblemDescription{}, kernelId, 0);
 
     // split_k=0 is not in the supported set, so should return false
     EXPECT_FALSE(result) << "split_k=0 should not be supported";
@@ -361,13 +483,12 @@ TEST_F(CPU_SplitKGenericDirectTest_NONE, ZeroSplitKValueHandledCorrectly)
 TEST_F(CPU_SplitKGenericDirectTest_NONE, NegativeSplitKValueHandledCorrectly)
 {
 #if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-    const std::string kernelId = "TestKernel";
-    StubbedDeviceOps::deviceOps.push_back(kernelId);
+    const std::string kernelId                                           = "TestKernel";
     StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel[kernelId] = {1, 2, 4};
 
-    bool result =
-        miopen::solver::IsCKSplitKSupported<StubbedDeviceOps, StubbedCKArgsWithSplitKValidation>(
-            ProblemDescription{}, kernelId, -1);
+    bool result = miopen::solver::IsCKSplitKSupported<StubbedSplitKDeviceOps,
+                                                      StubbedCKArgsWithSplitKValidation>(
+        ProblemDescription{}, kernelId, -1);
 
     // split_k=-1 is not in the supported set, so should return false
     EXPECT_FALSE(result) << "Negative split_k should not be supported";
@@ -382,9 +503,6 @@ TEST_F(CPU_SplitKGenericDirectTest_NONE, MultipleKernelsWithDifferentSplitKSuppo
     const std::string kernel1 = "KernelA";
     const std::string kernel2 = "KernelB";
 
-    StubbedDeviceOps::deviceOps.push_back(kernel1);
-    StubbedDeviceOps::deviceOps.push_back(kernel2);
-
     // Kernel1 supports split_k = 1, 2, 4
     StubbedCKArgsWithSplitKValidation::supportedSplitKByKernel[kernel1] = {1, 2, 4};
     // Kernel2 supports split_k = 1, 8, 16
@@ -392,25 +510,25 @@ TEST_F(CPU_SplitKGenericDirectTest_NONE, MultipleKernelsWithDifferentSplitKSuppo
 
     // Test kernel1 with its supported values
     // Note: Use parentheses around function call to prevent macro from misinterpreting commas
-    bool k1_s2 =
-        miopen::solver::IsCKSplitKSupported<StubbedDeviceOps, StubbedCKArgsWithSplitKValidation>(
-            ProblemDescription{}, kernel1, 2);
+    bool k1_s2 = miopen::solver::IsCKSplitKSupported<StubbedSplitKDeviceOps,
+                                                     StubbedCKArgsWithSplitKValidation>(
+        ProblemDescription{}, kernel1, 2);
     EXPECT_TRUE(k1_s2);
 
-    bool k1_s8 =
-        miopen::solver::IsCKSplitKSupported<StubbedDeviceOps, StubbedCKArgsWithSplitKValidation>(
-            ProblemDescription{}, kernel1, 8);
+    bool k1_s8 = miopen::solver::IsCKSplitKSupported<StubbedSplitKDeviceOps,
+                                                     StubbedCKArgsWithSplitKValidation>(
+        ProblemDescription{}, kernel1, 8);
     EXPECT_FALSE(k1_s8);
 
     // Test kernel2 with its supported values
-    bool k2_s8 =
-        miopen::solver::IsCKSplitKSupported<StubbedDeviceOps, StubbedCKArgsWithSplitKValidation>(
-            ProblemDescription{}, kernel2, 8);
+    bool k2_s8 = miopen::solver::IsCKSplitKSupported<StubbedSplitKDeviceOps,
+                                                     StubbedCKArgsWithSplitKValidation>(
+        ProblemDescription{}, kernel2, 8);
     EXPECT_TRUE(k2_s8);
 
-    bool k2_s4 =
-        miopen::solver::IsCKSplitKSupported<StubbedDeviceOps, StubbedCKArgsWithSplitKValidation>(
-            ProblemDescription{}, kernel2, 4);
+    bool k2_s4 = miopen::solver::IsCKSplitKSupported<StubbedSplitKDeviceOps,
+                                                     StubbedCKArgsWithSplitKValidation>(
+        ProblemDescription{}, kernel2, 4);
     EXPECT_FALSE(k2_s4);
 #else
     GTEST_SKIP();
@@ -420,9 +538,13 @@ TEST_F(CPU_SplitKGenericDirectTest_NONE, MultipleKernelsWithDifferentSplitKSuppo
 } // namespace unit_implicitgemm_ck_util_test
 
 // ---------------------------------------------------------------------------
-// Regression: the gate keys on byte span, not element count, and applies to every
-// direction (previously backward-weights only). Shapes below are chosen so every
-// individual length/stride still fits int32 -- only the byte-span check can flag them.
+// Regression: RequiresLargeTensorCKInstance must force a large-tensor (int64) CK
+// instance for a grouped backward-weights problem whose flattened element count
+// exceeds INT_MAX even though every individual length/stride still fits int32.
+// Without the element-count gate the loader keeps such a problem eligible for a
+// fast int32-indexing instance whose flat element offset overflows, silently
+// returning wrong results. The gate is scoped to backward-weights: forward and
+// backward-data verify correctly on the int32 instances. Shape is synthetic.
 // ---------------------------------------------------------------------------
 namespace {
 
@@ -482,35 +604,6 @@ miopen::conv::ProblemDescription MakeElemCount3DConvProblem(miopen::conv::Direct
     return {y, weights, x, conv, dir};
 }
 
-// dtype-parameterized sibling of MakeElemCountConvProblem: fp32's larger byte-per-element
-// ratio lets a shape cross the byte-span boundary while its element count stays well
-// under INT_MAX, isolating the byte-span check from the element-count one.
-miopen::conv::ProblemDescription MakeByteSpanConvProblem(miopenDataType_t dtype,
-                                                         miopen::conv::Direction dir,
-                                                         std::size_t n,
-                                                         std::size_t c,
-                                                         std::size_t h,
-                                                         std::size_t w,
-                                                         std::size_t k)
-{
-    const miopen::TensorDescriptor x{dtype, miopenTensorNHWC, {n, c, h, w}};
-    const miopen::TensorDescriptor weights{dtype, miopenTensorNHWC, {k, c, 3, 3}};
-    const miopen::ConvolutionDescriptor conv{2,
-                                             miopenConvolution,
-                                             miopenPaddingDefault,
-                                             {1, 1}, // pads (SAME for 3x3)
-                                             {1, 1}, // strides
-                                             {1, 1}, // dilations
-                                             {0, 0}, // trans output pads
-                                             1,      // group count
-                                             1.0f};  // lowp quant
-    const miopen::TensorDescriptor y = conv.GetForwardOutputTensor(x, weights, dtype);
-
-    if(dir == miopen::conv::Direction::Forward)
-        return {x, weights, y, conv, dir};
-    return {y, weights, x, conv, dir};
-}
-
 } // namespace
 
 TEST(CPU_UnitTestImplicitGemmCKUtilLargeTensor_NONE, WrwElementCountOverflowGate)
@@ -518,21 +611,22 @@ TEST(CPU_UnitTestImplicitGemmCKUtilLargeTensor_NONE, WrwElementCountOverflowGate
     using miopen::conv::Direction;
     using miopen::solver::RequiresLargeTensorCKInstance;
 
-    // N*C*H*W = 256*1024*128*128 = 4.29e9 elements; fp16 byte span ~8.58 GB, over INT_MAX
-    // bytes despite every stride (max = H*W*C = 16.78M) fitting int32.
+    // N*C*H*W = 256*1024*128*128 = 4.29e9 > INT_MAX, yet every length and stride
+    // (max stride = H*W*C = 16.78M) fits int32, so AllTensorsDimsFitIntoInt() is true
+    // and only the element-count gate can flag it.
     constexpr std::size_t n = 256, c = 1024, hw = 128, k = 1024;
 
     EXPECT_TRUE(RequiresLargeTensorCKInstance(
         MakeElemCountConvProblem(Direction::BackwardWeights, n, c, hw, hw, k)))
-        << "grouped wrw with >INT_MAX byte span must require a large-tensor instance";
+        << "grouped wrw with >INT_MAX element count must require a large-tensor instance";
 
-    EXPECT_TRUE(RequiresLargeTensorCKInstance(
+    EXPECT_FALSE(RequiresLargeTensorCKInstance(
         MakeElemCountConvProblem(Direction::Forward, n, c, hw, hw, k)))
-        << "forward with >INT_MAX byte span must require a large-tensor instance";
+        << "forward must stay on the (faster) int32 instances";
 
-    EXPECT_TRUE(RequiresLargeTensorCKInstance(
+    EXPECT_FALSE(RequiresLargeTensorCKInstance(
         MakeElemCountConvProblem(Direction::BackwardData, n, c, hw, hw, k)))
-        << "backward-data with >INT_MAX byte span must require a large-tensor instance";
+        << "backward-data must stay on the (faster) int32 instances";
 
     // A small wrw problem (element count well within int32) stays on the int32 path.
     EXPECT_FALSE(RequiresLargeTensorCKInstance(
@@ -544,63 +638,25 @@ TEST(CPU_UnitTestImplicitGemmCKUtilLargeTensor_NONE, Wrw3DElementCountOverflowGa
     using miopen::conv::Direction;
     using miopen::solver::RequiresLargeTensorCKInstance;
 
-    // Mirrors WrwElementCountOverflowGate for the 3D (NDHWC) path: N*C*D*H*W =
-    // 256*512*32*32*32 = 4.29e9 elements, fp16 byte span ~8.58 GB, over INT_MAX bytes
-    // despite every stride (max = C*D*H*W = 16.78M) fitting int32.
+    // N*C*D*H*W = 256*512*32*32*32 = 4.29e9 > INT_MAX, yet every length and stride
+    // (max stride = C*D*H*W = 16.78M) fits int32, so AllTensorsDimsFitIntoInt() is true
+    // and only the element-count gate can flag it. Mirrors WrwElementCountOverflowGate
+    // for the 3D (NDHWC) grouped wrw path.
     constexpr std::size_t n = 256, c = 512, d = 32, hw = 32, k = 512;
 
     EXPECT_TRUE(RequiresLargeTensorCKInstance(
         MakeElemCount3DConvProblem(Direction::BackwardWeights, n, c, d, hw, hw, k)))
-        << "3D grouped wrw with >INT_MAX byte span must require a large-tensor instance";
+        << "3D grouped wrw with >INT_MAX element count must require a large-tensor instance";
 
-    EXPECT_TRUE(RequiresLargeTensorCKInstance(
+    EXPECT_FALSE(RequiresLargeTensorCKInstance(
         MakeElemCount3DConvProblem(Direction::Forward, n, c, d, hw, hw, k)))
-        << "3D forward with >INT_MAX byte span must require a large-tensor instance";
+        << "3D forward must stay on the (faster) int32 instances";
 
-    EXPECT_TRUE(RequiresLargeTensorCKInstance(
+    EXPECT_FALSE(RequiresLargeTensorCKInstance(
         MakeElemCount3DConvProblem(Direction::BackwardData, n, c, d, hw, hw, k)))
-        << "3D backward-data with >INT_MAX byte span must require a large-tensor instance";
+        << "3D backward-data must stay on the (faster) int32 instances";
 
     // A small 3D wrw problem (element count well within int32) stays on the int32 path.
     EXPECT_FALSE(RequiresLargeTensorCKInstance(
         MakeElemCount3DConvProblem(Direction::BackwardWeights, 1, 64, 8, 16, 16, 64)));
-}
-
-TEST(CPU_UnitTestImplicitGemmCKUtilLargeTensor_NONE, ByteSpanOverflowGate)
-{
-    using miopen::conv::Direction;
-    using miopen::solver::RequiresLargeTensorCKInstance;
-
-    // fp32, c=512, h=w=32, k=512, 3x3/pad1/stride1 (=> Ho=Wo=32, Y = {n,512,32,32}); element
-    // count stays under INT_MAX on both sides of the boundary below, so only the byte span
-    // (not GetElementSpace()) distinguishes them -- this is the case the original bug missed.
-    // X and Y have equal span here (k=c, Ho=h, Wo=w):
-    //   n=1024: elem = 536,870,912 (< INT_MAX); bytes = 2,147,483,648 (INT_MAX + 1) -> TRIGGER
-    //   n=1023: elem = 536,346,624 (< INT_MAX); bytes = 2,145,386,496 (< INT_MAX)   -> no trigger
-    constexpr std::size_t c = 512, hw = 32, k = 512;
-    constexpr std::size_t n_over  = 1024; // byte span 2,147,483,648 > INT_MAX
-    constexpr std::size_t n_under = 1023; // byte span 2,145,386,496 < INT_MAX
-
-    // Over the 2 GiB byte boundary: every direction must require a large-tensor instance.
-    EXPECT_TRUE(RequiresLargeTensorCKInstance(
-        MakeByteSpanConvProblem(miopenFloat, Direction::Forward, n_over, c, hw, hw, k)))
-        << "fwd: >INT_MAX byte span (element count still < INT_MAX) must require large-tensor";
-    EXPECT_TRUE(RequiresLargeTensorCKInstance(
-        MakeByteSpanConvProblem(miopenFloat, Direction::BackwardData, n_over, c, hw, hw, k)))
-        << "bwd-data: >INT_MAX byte span must require large-tensor";
-    EXPECT_TRUE(RequiresLargeTensorCKInstance(
-        MakeByteSpanConvProblem(miopenFloat, Direction::BackwardWeights, n_over, c, hw, hw, k)))
-        << "wrw: >INT_MAX byte span must require large-tensor";
-
-    // One N below the boundary: byte span < INT_MAX, element count < INT_MAX, all strides
-    // fit int32 -> every direction must stay on the int32 path.
-    EXPECT_FALSE(RequiresLargeTensorCKInstance(
-        MakeByteSpanConvProblem(miopenFloat, Direction::Forward, n_under, c, hw, hw, k)))
-        << "fwd: byte span just under INT_MAX must stay on the int32 instances";
-    EXPECT_FALSE(RequiresLargeTensorCKInstance(
-        MakeByteSpanConvProblem(miopenFloat, Direction::BackwardData, n_under, c, hw, hw, k)))
-        << "bwd-data: byte span just under INT_MAX must stay on the int32 instances";
-    EXPECT_FALSE(RequiresLargeTensorCKInstance(
-        MakeByteSpanConvProblem(miopenFloat, Direction::BackwardWeights, n_under, c, hw, hw, k)))
-        << "wrw: byte span just under INT_MAX must stay on the int32 instances";
 }

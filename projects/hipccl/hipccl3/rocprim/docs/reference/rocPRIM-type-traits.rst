@@ -72,6 +72,10 @@ Type traits wrappers
 .. doxygenstruct:: rocprim::is_compound
   :no-link:
 
+Note: For each of the above, rocPRIM also provides C++ 17 style utilities to access the boolean result directly.
+These utilities have the same name as the above wrappers, suffixed with "_v".
+For example, ``is_floating_point_v<T>`` is equivalent to ``is_floating_point<T>::value``.
+
 Types with predefined traits
 ============================
 

@@ -40,6 +40,7 @@
 #include "test_utils_data_generation.hpp"
 #include "test_utils_hipgraphs.hpp"
 #include "test_utils_memory_check.hpp"
+#include "test_utils_types.hpp"
 
 // required rocprim headers
 #include <rocprim/detail/various.hpp>
@@ -86,15 +87,15 @@ template<class KeyType,
          bool UseIndirectIterator = false,
          class Config             = ::rocprim::default_config,
          bool DisableWithValgrind = true>
-struct DeviceSortDisableWithValgrindParams : DeviceSortParams<KeyType,
-                                                              ValueType,
-                                                              CompareFunction,
-                                                              UseGraphs,
-                                                              UseIndirectIterator,
-                                                              Config,
-                                                              DisableWithValgrind>
-{
-};
+struct DeviceSortDisableWithValgrindParams
+    : DeviceSortParams<KeyType,
+                       ValueType,
+                       CompareFunction,
+                       UseGraphs,
+                       UseIndirectIterator,
+                       Config,
+                       DisableWithValgrind>
+{};
 
 // ---------------------------------------------------------
 // Test for reduce ops taking single input value
@@ -150,7 +151,54 @@ using RocprimDeviceSortTestsParams = ::testing::Types<
                      false,
                      rocprim::merge_sort_config<128, 64, 2, 128, 64, 2>>>;
 
-TYPED_TEST_SUITE(RocprimDeviceSortTests, RocprimDeviceSortTestsParams);
+struct RocprimDeviceSortTestsNameGenerator
+{
+    template<class T>
+    static std::string type_tag_or_custom()
+    {
+        if constexpr(std::is_same_v<T, common::custom_type_copyable<char, double, true>>)
+            return "CustomCopyableCharDouble";
+        else if constexpr(std::is_same_v<T, test_utils::custom_float_type>)
+            return "CustomFloatType";
+        else if constexpr(std::is_same_v<T, test_utils::custom_test_array_type<int, 4>>)
+            return "ArrayInt32x4";
+        else if constexpr(std::is_same_v<T, common::custom_huge_type<2048, float>>)
+            return "CustomHuge2048Float";
+        else
+            return type_tag<T>();
+    }
+
+    // A unique token per distinct config
+    template<class Config>
+    static std::string config_tag()
+    {
+        if constexpr(std::is_same_v<Config, ::rocprim::default_config>)
+            return "";
+        else if constexpr(std::is_same_v<Config,
+                                         ::rocprim::merge_sort_config<128, 64, 2, 128, 64, 2>>)
+            return "_CfgMs128";
+        else
+            static_assert(dependent_false<Config>::value,
+                          "config_tag: add a unique token for this config");
+    }
+
+    template<class Params>
+    static std::string GetName(int /*index*/)
+    {
+        std::string n = type_tag_or_custom<typename Params::key_type>() + "_"
+                        + type_tag_or_custom<typename Params::value_type>();
+        if constexpr(Params::use_graphs)
+            n += "_Graphs";
+        if constexpr(Params::use_indirect_iterator)
+            n += "_Indirect";
+        n += config_tag<typename Params::config>();
+        return n;
+    }
+};
+
+TYPED_TEST_SUITE(RocprimDeviceSortTests,
+                 RocprimDeviceSortTestsParams,
+                 RocprimDeviceSortTestsNameGenerator);
 
 // When running under Valgrind, we need to disable some larger-sized tests because they
 // either hang or are too slow. This function checks to see if both:
@@ -164,7 +212,7 @@ template<bool CompileTimeDisableWithValgrind = false>
 inline bool should_skip([[maybe_unused]] const bool rt_disable_with_valgrind = false)
 {
 #if HAS_VALGRIND_H
-    if (RUNNING_ON_VALGRIND && (CompileTimeDisableWithValgrind || rt_disable_with_valgrind))
+    if(RUNNING_ON_VALGRIND && (CompileTimeDisableWithValgrind || rt_disable_with_valgrind))
         return true;
 #endif
     return false;
@@ -172,7 +220,7 @@ inline bool should_skip([[maybe_unused]] const bool rt_disable_with_valgrind = f
 
 TYPED_TEST(RocprimDeviceSortTests, SortKey)
 {
-    if (should_skip<TestFixture::disable_with_valgrind>())
+    if(should_skip<TestFixture::disable_with_valgrind>())
         GTEST_SKIP() << "Skipping large test under Valgrind";
 
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -195,7 +243,8 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
 
     for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
-        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         for(size_t size : test_utils::get_sizes(seed_value))
@@ -288,6 +337,11 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
             HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
+            if(TestFixture::use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+            }
+
             // Copy output to host
             MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, size)
             const auto output = d_output.load();
@@ -306,7 +360,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKey)
 // This test also ensures that merge_sort is stable
 TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
 {
-    if (should_skip<TestFixture::disable_with_valgrind>())
+    if(should_skip<TestFixture::disable_with_valgrind>())
         GTEST_SKIP() << "Skipping large test under Valgrind";
 
     int device_id = test_common_utils::obtain_device_from_ctest();
@@ -324,10 +378,10 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
     rocprim::detail::target_arch arch;
     HIP_CHECK(rocprim::detail::host_target_arch(stream, arch));
 
-    // This test currently fails on gfx950 with key types of custom_type when BUILD_CODE_COVERAGE=ON.
+    // This test currently fails on gfx950 with key types of custom_type when ROCPRIM_ENABLE_COVERAGE=ON.
     // Temporarily skip these cases while we investigate.
-#if defined(CODE_COVERAGE)
-    if (common::is_custom_type<key_type>::value && arch == rocprim::detail::target_arch::gfx950)
+#if defined(ROCPRIM_ENABLE_COVERAGE)
+    if(common::is_custom_type<key_type>::value && arch == rocprim::detail::target_arch::gfx950)
     {
         std::cout << "Temporarily skipping custom_type test on gfx950." << std::endl;
         GTEST_SKIP();
@@ -344,7 +398,8 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
 
     for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
-        unsigned int seed_value = seed_index < random_seeds_count  ? rand() : seeds[seed_index - random_seeds_count];
+        unsigned int seed_value
+            = seed_index < random_seeds_count ? rand() : seeds[seed_index - random_seeds_count];
         SCOPED_TRACE(testing::Message() << "with seed = " << seed_value);
 
         for(size_t size : test_utils::get_sizes(seed_value))
@@ -411,7 +466,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
                              { return compare_op(a.first, b.first); });
 
             // These buffers are not needed anymore and can be freed
-            keys_input = std::vector<key_type>();
+            keys_input   = std::vector<key_type>();
             values_input = std::vector<value_type>();
 
             auto input_keys_it
@@ -474,6 +529,11 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             HIP_CHECK(hipGetLastError());
             HIP_CHECK(hipDeviceSynchronize());
 
+            if(TestFixture::use_graphs)
+            {
+                gHelper.cleanupGraphHelper();
+            }
+
             // Check if output values are as expected
             MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, expected.size())
             std::vector<key_type> expected_key(expected.size());
@@ -482,7 +542,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             std::vector<value_type> expected_value(expected.size());
             for(size_t i = 0; i < expected.size(); i++)
             {
-                expected_key[i] = expected[i].first;
+                expected_key[i]   = expected[i].first;
                 expected_value[i] = expected[i].second;
             }
             // This buffer is not needed anymore and can be freed
@@ -491,7 +551,7 @@ TYPED_TEST(RocprimDeviceSortTests, SortKeyValue)
             {
                 // Copy output to host.  This is scoped so keys_output is freed immediately.
                 MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, size)
-                const auto keys_output   = d_keys_output.load();
+                const auto keys_output = d_keys_output.load();
                 ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, expected_key));
             }
             {
@@ -544,7 +604,7 @@ TEST(RocprimDeviceSortTests, LargeIndices)
         hipError_t malloc_status = common::hipMallocHelper(&d_output, size * sizeof(*d_output));
         if(malloc_status == hipErrorOutOfMemory)
         {
-            (void) hipGetLastError(); // reset internally recorded HIP error
+            (void)hipGetLastError(); // reset internally recorded HIP error
             std::cout << "Out of memory. Skipping size = " << size << std::endl;
             break;
         }
@@ -574,7 +634,7 @@ TEST(RocprimDeviceSortTests, LargeIndices)
         malloc_status = common::hipMallocHelper(&d_temp_storage, temp_storage_size_bytes);
         if(malloc_status == hipErrorOutOfMemory)
         {
-            (void) hipGetLastError(); // reset internally recorded HIP error
+            (void)hipGetLastError(); // reset internally recorded HIP error
             std::cout << "Out of memory. Skipping size = " << size << std::endl;
             HIP_CHECK(hipFree(d_output));
             break;

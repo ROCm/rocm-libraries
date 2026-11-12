@@ -1,31 +1,36 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Guard: the spec builder must reach ``_resolve_attention_arch`` lazily.
+"""Guard: the spec builder selects on its ``arch`` ARGUMENT, not on the host.
 
-``builders.common.attention_spec_builder`` used to bind the resolver with
-``from kernels.common.attention_unified import _resolve_attention_arch``. A bound
-import freezes the reference at import time, so ``mock.patch.object(au,
+History. ``builders.common.attention_spec_builder`` used to bind the resolver
+with ``from kernels.common.attention_unified import _resolve_attention_arch``. A
+bound import freezes the reference at import time, so ``mock.patch.object(au,
 "_resolve_attention_arch", ...)`` -- which rebinds the attribute on the *module*
 -- never reached the builder. The builder then resolved the real device arch,
 and the gfx950-only spec overrides raised ``TypeError`` against a gfx942 spec
 class. The binding dates to #9057 and turned load-bearing in #9233.
 
-The rule is now: reach the resolver through the ``_kau`` module handle. Nothing
-in the language enforces that, so these tests do -- one statically, one through
-observable behaviour.
+That whole failure mode is now unreachable by construction: the spec builders
+take ``arch`` as a required parameter and never consult the resolver, so there
+is no reference left to freeze. This guard therefore asserts the *stronger*
+property that replaced it -- the explicit argument decides, and the host cannot
+influence the answer:
 
-Both tests are host-independent. The behavioural one pins *two* archs, because
-the resolver falls back to ``"gfx950"`` with no device and ``_tiled_2d_impl``
-maps every arch except gfx942/gfx1250 onto the gfx950 impl -- so a single pin
-can pass by coincidence on most hosts. Both builder entry points are covered:
-``_tiled_spec_from_problem`` and ``_tiled_3d_spec_from_problem`` each hold their
-own ``_kau._resolve_attention_arch()`` call site, and both were served by the
-same bound import before the fix.
+1. statically, the builder still must not bind the resolver's name; and
+2. behaviourally, ``build(problem, arch)`` picks the spec class for ``arch``
+   even while ``au._resolve_attention_arch`` is patched to report a DIFFERENT
+   arch. Under the old implicit builder the patched resolver would win and the
+   assertion would fail, so this is a strict tightening of the old test rather
+   than a weaker restatement of it.
+
+Both builder entry points are covered: ``_tiled_spec_from_problem`` and
+``_tiled_3d_spec_from_problem`` each used to hold their own
+``_kau._resolve_attention_arch()`` call site, and both were served by the same
+bound import before the fix.
 
 gfx1250 is deliberately NOT pinned: it needs its own problem shape (2D rejects
 ``block_size=16``, 3D rejects ``head_size=128``), so it would couple this guard
-to the evolving gfx1250 support matrix while adding no discriminating power --
-the gfx942 pin alone already fails on the unfixed builder.
+to the evolving gfx1250 support matrix while adding no discriminating power.
 """
 
 from __future__ import annotations
@@ -66,9 +71,15 @@ _PROBLEM_3D = UnifiedAttentionProblem(
 )
 
 _BOUND_IMPORT_TRAP = (
-    "attention_spec_builder must reach _resolve_attention_arch through its "
-    "attention_unified module handle -- a bound import freezes the reference at "
-    "import time and silently defeats mock.patch.object on the module"
+    "attention_spec_builder must not bind _resolve_attention_arch -- the spec "
+    "builders take arch explicitly, so any reference to the resolver is a "
+    "re-introduced host dependency"
+)
+
+_HOST_INDEPENDENCE_TRAP = (
+    "attention_spec_builder must select on its arch ARGUMENT -- reading the "
+    "host resolver instead makes the selected spec depend on the box the "
+    "dispatcher happens to run on, which AOT dispatch forbids"
 )
 
 
@@ -79,22 +90,28 @@ class TestArchResolverBinding(unittest.TestCase):
         # latter prints the builder's entire module dict on failure.
         self.assertFalse(hasattr(asb, "_resolve_attention_arch"), _BOUND_IMPORT_TRAP)
 
-    def test_patching_the_module_steers_the_builder(self):
-        """Behavioural form: the pin must reach the spec class the builder picks."""
+    def test_the_arch_argument_beats_the_host(self):
+        """Behavioural form: the argument decides, even against a hostile host.
+
+        Each case patches the module resolver to the *opposite* arch. A builder
+        that still consulted the host would return that arch's spec class and
+        fail here, so the patch is the discriminator -- not scenery.
+        """
         entries = (
             ("2d", asb._tiled_spec_from_problem, _PROBLEM),
             ("3d", asb._tiled_3d_spec_from_problem, _PROBLEM_3D),
         )
-        for arch in ("gfx942", "gfx950"):
+        for arch, host_arch in (("gfx942", "gfx950"), ("gfx950", "gfx942")):
             for label, build, problem in entries:
-                with self.subTest(arch=arch, entry=label):
+                with self.subTest(arch=arch, host=host_arch, entry=label):
                     with mock.patch.object(
-                        au, "_resolve_attention_arch", return_value=arch
+                        au, "_resolve_attention_arch", return_value=host_arch
                     ):
-                        spec = build(problem)
+                        spec = build(problem, arch)
                     self.assertTrue(
                         type(spec).__module__.startswith(f"kernels.{arch}."),
-                        f"{_BOUND_IMPORT_TRAP}; {label} pinned {arch} but got "
+                        f"{_HOST_INDEPENDENCE_TRAP}; {label} asked for {arch} "
+                        f"on a host reporting {host_arch} but got "
                         f"{type(spec).__module__}",
                     )
 

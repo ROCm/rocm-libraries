@@ -14,10 +14,24 @@ import tempfile
 from pathlib import Path
 
 
-#: An architecture token, not a family prefix. Every shipping gfx name carries
-#: at least three characters after `gfx` (gfx90a, gfx942, gfx1100), so `gfx9`
-#: is a family the caller must resolve before a sweep can claim it measured one.
-ARCH_TOKEN = r"gfx[0-9a-f]{3,}"
+#: The shape of a concrete architecture name: a lowercase processor id (`gfx942`)
+#: optionally followed by lowercase hyphen-separated words that name a distinct
+#: target (`gfx1250-strict`). Mirrors `hkp_selected_arches` in HkpPackaging.cmake and
+#: `gpu_short` in scripts/rock_dev_bootstrap.py, except that the processor id keeps
+#: the three-character floor: every shipping gfx name carries at least three characters
+#: after `gfx` (gfx90a, gfx942, gfx1100), so `gfx9` is a family stem the caller must
+#: resolve before a sweep can claim it measured one.
+ARCH_SHAPE = r"gfx[0-9a-f]{3,}(?:-[a-z]+)*"
+
+#: TheRock family names (`gfx950-dcgpu`, `gfx950-dcgpu-asan`, `gfx950-all`) and LLVM
+#: generic targets (`gfx11-generic`) have the shape above but name no one processor,
+#: so no device reports them.
+_FAMILY_WORD = re.compile(r"-(?:generic|all|dcgpu|dgpu|igpu)(?:-|$)")
+
+
+def is_arch_token(text: str) -> bool:
+    """Whether `text` is exactly one concrete architecture name."""
+    return re.fullmatch(ARCH_SHAPE, text) is not None and not _FAMILY_WORD.search(text)
 
 
 class ProbeUnavailable(Exception):
@@ -54,9 +68,13 @@ def device_info(arch: str, *, cwd=None, env=None) -> str:
             raise ValueError(
                 f"{tool} exited {result.returncode}: {result.stderr.strip()}"
             )
-        found = set(
-            re.findall(rf"(?<![A-Za-z0-9_]){ARCH_TOKEN}(?![A-Za-z0-9_])", result.stdout)
-        )
+        found = {
+            token
+            for token in re.findall(
+                rf"(?<![A-Za-z0-9_]){ARCH_SHAPE}(?![A-Za-z0-9_-])", result.stdout
+            )
+            if is_arch_token(token)
+        }
         if arch not in found:
             raise ValueError(
                 f"wanted {arch}, found: {', '.join(sorted(found)) or 'no GPU agents'}"
@@ -79,7 +97,7 @@ def main(argv=None) -> int:
         "--install", type=Path, help="Existing install prefix; installed mode only"
     )
     args = parser.parse_args(argv)
-    if not re.fullmatch(ARCH_TOKEN, args.arch):
+    if not is_arch_token(args.arch):
         parser.error("--arch must be an exact gfx architecture token")
     if args.mode == "early" and args.install is not None:
         parser.error("early mode rejects --install; installation is a later gate")

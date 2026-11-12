@@ -32,6 +32,13 @@
 #include "rocsparse-types.h"
 #include "rocsparse/rocsparse-export.h"
 
+#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
+
+#include "internal/auxiliary/rocsparse_dnmat_copy_data.h"
+#include "internal/auxiliary/rocsparse_dnmat_transpose.h"
+
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -1244,24 +1251,29 @@ rocsparse_status rocsparse_create_ell_descr(rocsparse_spmat_descr* descr,
  *  \p rocsparse_create_bell_descr creates a sparse blocked ELL matrix descriptor. It should be
  *  destroyed at the end using \p rocsparse_destroy_spmat_descr.
  *
- *  Currently the only routine that supports the Blocked ELL format is \ref rocsparse_spmm.
+ *  The routines that support the Blocked ELL format are \ref rocsparse_spmm,
+ *  \ref rocsparse_dense_to_sparse, and \ref rocsparse_spmat_scale.
  *
  *  @param[out]
  *  descr         the pointer to the sparse blocked ELL matrix descriptor.
  *  @param[in]
  *  rows          number of rows in the blocked ELL matrix.
  *  @param[in]
- *  cols          number of columns in the blocked ELL matrix
+ *  cols          number of columns in the blocked ELL matrix.
  *  @param[in]
  *  ell_block_dir \ref rocsparse_direction_row or \ref rocsparse_direction_column.
  *  @param[in]
  *  ell_block_dim block dimension of the sparse blocked ELL matrix.
  *  @param[in]
- *  ell_cols      column indices of the blocked ELL matrix. Must be an array of length \p rows*ell_width.
+ *  ell_cols      number of columns of the blocked ELL storage, that is, \p ell_block_dim times the
+ *                number of blocks stored per block row. Must be a multiple of \p ell_block_dim
+ *                and must not exceed \p cols.
  *  @param[in]
- *  ell_col_ind   column indices of the blocked ELL matrix. Must be an array of length \p rows*ell_width.
+ *  ell_col_ind   column indices of the blocked ELL matrix. Must be an array of length
+ *                \p mb*ell_cols/ell_block_dim,
+ *                where \p mb = (rows+ell_block_dim-1)/ell_block_dim.
  *  @param[in]
- *  ell_val       values of the blocked ELL matrix. Must be an array of length \p rows*ell_width.
+ *  ell_val       values of the blocked ELL matrix. Must be an array of length \p rows*ell_cols.
  *  @param[in]
  *  idx_type      \ref rocsparse_indextype_i32 or \ref rocsparse_indextype_i64.
  *  @param[in]
@@ -1271,9 +1283,9 @@ rocsparse_status rocsparse_create_ell_descr(rocsparse_spmat_descr* descr,
  *                \ref rocsparse_datatype_f32_c, or \ref rocsparse_datatype_f64_c.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
- *  \retval rocsparse_status_invalid_pointer if \p descr, \p ell_cols, \p ell_col_ind, or \p ell_val is invalid.
- *  \retval rocsparse_status_invalid_size if \p rows or \p cols is invalid.
- *  \retval rocsparse_status_invalid_value if \p idx_type, \p idx_base, or \p data_type is invalid.
+ *  \retval rocsparse_status_invalid_pointer if \p descr, \p ell_col_ind, or \p ell_val is invalid.
+ *  \retval rocsparse_status_invalid_size if \p rows, \p cols, \p ell_block_dim, or \p ell_cols is invalid.
+ *  \retval rocsparse_status_invalid_value if \p ell_block_dir, \p idx_type, \p idx_base, or \p data_type is invalid.
  */
 /**@{*/
 ROCSPARSE_EXPORT
@@ -1383,7 +1395,8 @@ rocsparse_status rocsparse_create_const_sell_descr(rocsparse_const_spmat_descr* 
  *  \p rocsparse_destroy_spmat_descr destroys a sparse matrix descriptor and releases all
  *  resources used by the descriptor.
  *
- *  Currently the only routine that supports the Blocked ELL format is \ref rocsparse_spmm.
+ *  The routines that support the Blocked ELL format are \ref rocsparse_spmm,
+ *  \ref rocsparse_dense_to_sparse, and \ref rocsparse_spmat_scale.
  *
  *  @param[in]
  *  descr   the matrix descriptor.
@@ -1484,6 +1497,82 @@ rocsparse_status rocsparse_create_extract_descr(rocsparse_extract_descr*    desc
 */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_destroy_extract_descr(rocsparse_extract_descr descr);
+
+#if defined(ROCSPARSE_WITH_SPSORT)
+/*! \ingroup aux_module
+*  \brief Sparse matrix SpSort routine descriptor creation.
+*
+*  \details
+*  \p rocsparse_spsort_descr_create creates the descriptor of the \ref rocsparse_spsort_buffer_size and
+*  \ref rocsparse_spsort routines.
+*
+*  @param[in]
+*  handle         the handle to the rocSPARSE library context.
+*  @param[out]
+*  p_spsort_descr pointer to the descriptor of the SpSort routine.
+*  @param[out]
+*  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+*
+*  \retval      rocsparse_status_success the operation completed successfully.
+*  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
+*  \retval      rocsparse_status_invalid_pointer \p p_spsort_descr pointer is invalid.
+*/
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spsort_descr_create(rocsparse_handle        handle,
+                                               rocsparse_spsort_descr* p_spsort_descr,
+                                               rocsparse_error*        p_error);
+
+/*! \ingroup aux_module
+*  \brief Destroy a sparse matrix SpSort descriptor.
+*
+*  \details
+*  \p rocsparse_spsort_descr_destroy destroys the descriptor of the \ref rocsparse_spsort_buffer_size and
+*  \ref rocsparse_spsort routines.
+*
+*  @param[in]
+*  handle         the handle to the rocSPARSE library context.
+*  @param[in]
+*  spsort_descr   descriptor of the SpSort routine.
+*  @param[out]
+*  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+*
+*  \retval      rocsparse_status_success the operation completed successfully.
+*  \retval      rocsparse_status_invalid_handle \p handle pointer is invalid.
+*/
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spsort_descr_destroy(rocsparse_handle       handle,
+                                                rocsparse_spsort_descr spsort_descr,
+                                                rocsparse_error*       p_error);
+
+/*! \ingroup aux_module
+ *  \brief Set the requested \ref rocsparse_spsort_input data in the SpSort descriptor.
+ *
+ *  @param[in]
+ *  handle      the pointer to the handle to the rocSPARSE library context.
+ *  @param[inout]
+ *  descr       the pointer to the SpSort descriptor.
+ *  @param[in]
+ *  input       one of the values from \ref rocsparse_spsort_input.
+ *  @param[in]
+ *  data        pointer to the input data, of the type listed for \p input in \ref rocsparse_spsort_input.
+ *  @param[in]
+ *  data_size_in_bytes   size in bytes of the input data, which must be the size of that type.
+ *  @param[out]
+ *  p_error        error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
+ *
+ *  \retval rocsparse_status_success the operation completed successfully.
+ *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
+ *  \retval rocsparse_status_invalid_value if \p input is invalid, or if the analysis stage has already been executed.
+ *  \retval rocsparse_status_invalid_size if \p data_size_in_bytes is invalid.
+ */
+ROCSPARSE_EXPORT
+rocsparse_status rocsparse_spsort_set_input(rocsparse_handle       handle,
+                                            rocsparse_spsort_descr descr,
+                                            rocsparse_spsort_input input,
+                                            const void*            data,
+                                            size_t                 data_size_in_bytes,
+                                            rocsparse_error*       p_error);
+#endif
 
 /*! \ingroup aux_module
 *  \brief Sparse matrix SpGEAM routine descriptor creation.
@@ -2128,8 +2217,8 @@ rocsparse_status rocsparse_spildlt0_descr_destroy(rocsparse_handle         handl
  *  -     \ref rocsparse_spildlt0_input_analysis_policy is \ref rocsparse_analysis_policy. It can only be set before applying any phase.
  *  -     \ref rocsparse_spildlt0_input_singularity_tolerance is a device/host double pointer. Its device mode is determined from the \ref rocsparse_handle.
  *  -     \ref rocsparse_spildlt0_input_boost_enable is an \p int32_t.
- *  -     \ref rocsparse_spildlt0_input_boost_value is a pointer to a scalar of value type A. Its device mode is determined from the \ref rocsparse_handle.
- *  -     \ref rocsparse_spildlt0_input_boost_tolerance is a double pointer. Its device mode is determined from the \ref rocsparse_handle.
+ *  -     \ref rocsparse_spildlt0_input_boost_value is a pointer to a scalar of value type A. Its device mode is determined from the \ref rocsparse_handle. With the numeric boost enabled, a pivot \f$D_i\f$ with \f$|D_i|\f$ at most the boost tolerance is replaced by the modulus of the boost value with the sign of \f$D_i\f$ (positive if \f$D_i = 0\f$), so the boost keeps the inertia of A. \f$D\f$ is real, so only the real part of a complex boost value is used.
+ *  -     \ref rocsparse_spildlt0_input_boost_tolerance is a pointer to a real tolerance: a \p double pointer, or a \p float pointer when \p input_size_in_bytes is \p sizeof(float). The type is taken from \p input_size_in_bytes only, so a complex tolerance is not supported and a \p rocsparse_float_complex pointer would be read as a \p double. Its device mode is determined from the \ref rocsparse_handle.
  *  -     \ref rocsparse_spildlt0_input_diag is an \b optional device pointer (void*) to a dense array in device memory of \p m * \p batch_count real-valued entries that receives a copy of the diagonal \f$D\f$ (\p m entries per batch, batch \p b at offset \p b * \p m).
  *        \f$D\f$ is always real, even for complex matrices, so for \p s and \p c variants this is \p float* and for \p d and \p z variants this is \p double*.
  *        It is optional: \f$D\f$ is always stored in-place on the (implicit unit) diagonal of the \f$L\f$ factor and can be read back from there after \ref rocsparse_spildlt0_stage_compute. If set, it must be set before calling \ref rocsparse_spildlt0 with stage \ref rocsparse_spildlt0_stage_compute.
@@ -2151,7 +2240,7 @@ rocsparse_status rocsparse_spildlt0_descr_destroy(rocsparse_handle         handl
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p data is invalid.
  *  \retval rocsparse_status_invalid_value if \p input is invalid.
- *  \retval rocsparse_status_invalid_size if \p data_size_in_bytes is invalid.
+ *  \retval rocsparse_status_invalid_size if \p input_size_in_bytes is invalid.
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_spildlt0_set_input(rocsparse_handle         handle,
@@ -2497,11 +2586,14 @@ rocsparse_status rocsparse_const_ell_get(rocsparse_const_spmat_descr descr,
  *  @param[out]
  *  ell_block_dim block dimension of the sparse blocked ELL matrix.
  *  @param[out]
- *  ell_cols      column indices of the blocked ELL matrix. Must be an array of length \p rows*ell_width.
+ *  ell_cols      number of columns of the blocked ELL storage, that is, \p ell_block_dim times the
+ *                number of blocks stored per block row.
  *  @param[out]
- *  ell_col_ind   column indices of the blocked ELL matrix. Must be an array of length \p rows*ell_width.
+ *  ell_col_ind   column indices of the blocked ELL matrix, an array of length
+ *                \p mb*ell_cols/ell_block_dim,
+ *                where \p mb = (rows+ell_block_dim-1)/ell_block_dim.
  *  @param[out]
- *  ell_val       values of the blocked ELL matrix. Must be an array of length \p rows*ell_width.
+ *  ell_val       values of the blocked ELL matrix, an array of length \p rows*ell_cols.
  *  @param[out]
  *  idx_type      \ref rocsparse_indextype_i32 or \ref rocsparse_indextype_i64.
  *  @param[out]
@@ -2511,9 +2603,8 @@ rocsparse_status rocsparse_const_ell_get(rocsparse_const_spmat_descr descr,
  *                \ref rocsparse_datatype_f32_c, or \ref rocsparse_datatype_f64_c.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
- *  \retval rocsparse_status_invalid_pointer if \p descr, \p ell_cols, \p ell_col_ind, or \p ell_val is invalid.
- *  \retval rocsparse_status_invalid_size if \p rows, \p cols, or \p ell_block_dim is invalid.
- *  \retval rocsparse_status_invalid_value if \p ell_block_dir, \p idx_type, \p idx_base, or \p data_type is invalid.
+ *  \retval rocsparse_status_invalid_pointer if \p descr or any output pointer is invalid.
+ *  \retval rocsparse_status_not_initialized if \p descr is not initialized.
  */
 /**@{*/
 ROCSPARSE_EXPORT
@@ -2809,12 +2900,15 @@ rocsparse_status rocsparse_bsr_set_pointers(rocsparse_spmat_descr descr,
  *  @param[inout]
  *  descr   the pointer to the sparse matrix descriptor.
  *  @param[in]
- *  bell_col_ind  column indices of the Blocked ELL matrix. Must be an array of length \p mb*ell_cols/ell_block_size.
+ *  bell_col_ind  column indices of the Blocked ELL matrix. Must be an array of length
+ *                \p mb*ell_cols/ell_block_dim, where \p mb = (rows+ell_block_dim-1)/ell_block_dim
+ *                and \p rows, \p ell_block_dim, and \p ell_cols are those of \p descr.
  *  @param[in]
- *  bell_val      values of the Blocked ELL matrix. Must be an array of length \p m*ell_cols.
+ *  bell_val      values of the Blocked ELL matrix. Must be an array of length \p rows*ell_cols.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr, \p bell_col_ind, or \p bell_val is invalid.
+ *  \retval rocsparse_status_not_initialized if \p descr is not initialized.
  */
 ROCSPARSE_EXPORT
 rocsparse_status
@@ -3194,7 +3288,6 @@ rocsparse_status rocsparse_create_const_dnvec_descr(rocsparse_const_dnvec_descr*
  *  \retval rocsparse_status_invalid_pointer if \p descr or \p const_values is invalid.
  *  \retval rocsparse_status_invalid_value if \p data_type or \p pointer_mode is invalid.
  */
-#ifdef ROCSPARSE_WITH_SPMAT_SCALE
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_dnvec_descr_create_scalar(rocsparse_handle       handle,
                                                      rocsparse_dnvec_descr* descr,
@@ -3203,7 +3296,6 @@ rocsparse_status rocsparse_dnvec_descr_create_scalar(rocsparse_handle       hand
                                                      const void*            const_values,
                                                      void*                  values,
                                                      rocsparse_error*       p_error);
-#endif
 
 /*! \ingroup aux_module
  *  \brief Destroy a dense vector descriptor.
@@ -3465,7 +3557,7 @@ rocsparse_status rocsparse_dnmat_get_strided_batch(rocsparse_const_dnmat_descr d
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
- *  \retval rocsparse_status_invalid_size if \p batch_count or \p batch_stride is invalid.
+ *  \retval rocsparse_status_invalid_size if \p batch_count is invalid.
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_dnmat_set_strided_batch(rocsparse_dnmat_descr descr,
@@ -3503,7 +3595,7 @@ rocsparse_status rocsparse_dnvec_get_strided_batch(rocsparse_const_dnvec_descr d
  *
  *  \retval rocsparse_status_success the operation completed successfully.
  *  \retval rocsparse_status_invalid_pointer if \p descr is invalid.
- *  \retval rocsparse_status_invalid_size if \p batch_count or \p batch_stride is invalid.
+ *  \retval rocsparse_status_invalid_size if \p batch_count is invalid.
  */
 ROCSPARSE_EXPORT
 rocsparse_status rocsparse_dnvec_set_strided_batch(rocsparse_dnvec_descr descr,

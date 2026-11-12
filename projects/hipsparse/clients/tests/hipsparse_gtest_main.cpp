@@ -320,19 +320,24 @@ int main(int argc, char** argv)
 
     // Validate and select the requested HIP device before any subsequent
     // hipSPARSE / HIP API call.
-    int device_count = query_device_property();
+    int        device_count = 0;
+    hipError_t query_status = query_device_property(&device_count, device_id);
+    if(query_status != hipSuccess)
+    {
+        return EXIT_FAILURE;
+    }
 
-    if(device_id < 0 || device_count <= device_id)
+    if(device_id < 0 || device_id >= device_count)
     {
         fprintf(stderr,
                 "Error: invalid device ID %d (detected %d device(s)). Will exit.\n",
                 device_id,
                 device_count);
-        return -1;
+        return EXIT_FAILURE;
     }
-    else
+    if(set_device(device_id) != hipSuccess)
     {
-        set_device(device_id);
+        return EXIT_FAILURE;
     }
 
     // Query the hipSPARSE version on the selected device.
@@ -390,7 +395,16 @@ int main(int argc, char** argv)
     int ret = RUN_ALL_TESTS();
 
     // Reset HIP device
-    (void)hipDeviceReset();
+    const hipError_t reset_status = hipDeviceReset();
+    if(reset_status != hipSuccess)
+    {
+        std::cerr << "hipDeviceReset failed: " << hipGetErrorString(reset_status) << " ("
+                  << reset_status << ")" << std::endl;
+        if(ret == 0)
+        {
+            ret = EXIT_FAILURE;
+        }
+    }
 
     return ret;
 }

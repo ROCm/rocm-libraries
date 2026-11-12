@@ -24,6 +24,21 @@ class TestEngineSpecDerivation:
         engine = make_engine(name="hipkernel:ConvFwd")
         assert engine.slug == "conv_fwd"
 
+    def test_a_trailing_digit_capital_pair_splits_without_an_override(self):
+        """The derivation splits before every capital, so `Unified2D` becomes
+        `unified2_d`: the case `engine.slug` exists for."""
+        engine = make_engine(name="hipkernel:Gfx950AttentionUnified2D")
+        assert engine.slug == "gfx950_attention_unified2_d"
+
+    def test_slug_override_replaces_the_derived_slug(self):
+        engine = make_engine(
+            name="hipkernel:Gfx950AttentionUnified2D",
+            slug_override="gfx950_attention_unified_2d",
+        )
+        assert engine.slug == "gfx950_attention_unified_2d"
+        # The C++ identifiers still derive from the local name, not the slug.
+        assert engine.pascal_name == "Gfx950AttentionUnified2D"
+
     def test_pascal_name_round_trips(self):
         engine = make_engine(name="hipkernel:ConvFwd")
         assert engine.pascal_name == "ConvFwd"
@@ -65,6 +80,61 @@ class TestIngestorConfigDerivation:
         config = make_minimal_config(engine=make_engine(name="hipkernel:ConvFwd"))
         assert config.native_symbol_namespace == "hipkernel.conv_fwd"
 
+    def test_native_symbols_from_names_another_engines_symbols(self):
+        config = make_minimal_config(
+            engine=make_engine(
+                name="hipkernel:ConvFwdSeed", native_symbols_from="hipkernel.conv_fwd"
+            )
+        )
+        assert config.native_symbol_namespace == "hipkernel.conv_fwd"
+        assert config.score_symbol == "hipkernel.conv_fwd.score"
+        assert config.dispatch_symbol == "hipkernel.conv_fwd.dispatch"
+        # Everything else stays the engine's own.
+        assert config.engine.slug == "conv_fwd_seed"
+        assert config.register_symbols_fn == "registerConvFwdSeedSymbols"
+
+    def test_native_symbols_follow_the_slug_override(self):
+        config = make_minimal_config(
+            engine=make_engine(
+                name="hipkernel:Gfx950AttentionUnified2D",
+                slug_override="gfx950_attention_unified_2d",
+            )
+        )
+        assert config.native_symbol_namespace == "hipkernel.gfx950_attention_unified_2d"
+        assert config.dispatch_symbol == (
+            "hipkernel.gfx950_attention_unified_2d.dispatch"
+        )
+
+    def test_a_hyphenated_slug_override_folds_to_underscores_in_symbols(self):
+        config = make_minimal_config(
+            engine=make_engine(name="hipkernel:AttnV2", slug_override="attn-v2")
+        )
+        assert config.engine.slug == "attn-v2"
+        assert config.native_symbol_namespace == "hipkernel.attn_v2"
+
+    @pytest.mark.parametrize("dims", ["2D", "3D"])
+    def test_a_borrower_names_a_slug_overridden_engines_namespace(self, dims):
+        """``native_symbols_from`` states the namespace whole, so a borrower of an
+        engine whose slug_override departs from its local name's naive snake_case
+        (``unified2_d``) names exactly what that engine registers."""
+        target = make_engine(
+            name=f"hipkernel:Gfx950AttentionUnified{dims}",
+            slug_override=f"gfx950_attention_unified_{dims.lower()}",
+        )
+        config = make_minimal_config(
+            engine=make_engine(
+                name=f"hipkernel:Gfx950AttentionUnified{dims}Seed",
+                native_symbols_from=target.own_native_symbol_namespace,
+            )
+        )
+        assert config.native_symbol_namespace == (
+            f"hipkernel.gfx950_attention_unified_{dims.lower()}"
+        )
+        assert config.native_symbol_namespace == target.own_native_symbol_namespace
+        assert config.engine.own_native_symbol_namespace == (
+            f"hipkernel.gfx950_attention_unified{dims[0]}_d_seed"
+        )
+
     def test_graph_match_symbol(self):
         config = make_minimal_config(engine=make_engine(name="hipkernel:ConvFwd"))
         assert config.graph_match_symbol == "hipkernel.conv_fwd.graph_match"
@@ -94,6 +164,15 @@ class TestIngestorConfigDerivation:
         config = make_minimal_config(engine=make_engine(name="hipkernel:ConvFwd"))
         assert config.dispatch_handler_class == "ConvFwdDispatchHandler"
 
+    def test_kdp_stem_uses_the_slug_override(self):
+        config = make_minimal_config(
+            engine=make_engine(
+                name="hipkernel:Gfx950AttentionUnified2D",
+                slug_override="gfx950_attention_unified_2d",
+            )
+        )
+        assert config.kdp_stem(config.packs[0]) == "gfx950_attention_unified_2d"
+
     def test_kdp_stem_single_pack_is_bare_slug(self):
         config = make_minimal_config(
             engine=make_engine(name="hipkernel:ConvFwd"), packs=[make_pack(name="main")]
@@ -118,6 +197,10 @@ class TestIngestorConfigDerivation:
     def test_device_fixture_arch_is_the_first_packs_first_arch(self):
         config = make_minimal_config(packs=[make_pack(arch=["gfx1201", "gfx1200"])])
         assert config.device_fixture_arch == "gfx1201"
+
+    def test_device_fixture_arch_of_a_generic_pack_is_its_first_member(self):
+        config = make_minimal_config(packs=[make_pack(arch=["gfx11-generic"])])
+        assert config.device_fixture_arch == "gfx1100"
 
     def test_device_fixture_arch_falls_back_when_no_pack_names_one(self):
         config = make_minimal_config(packs=[make_pack()])

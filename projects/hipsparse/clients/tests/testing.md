@@ -42,7 +42,10 @@ What a developer does between making a change and getting it merged.
 
 ```bash
 cd projects/hipsparse
-# -c → BUILD_CLIENTS_TESTS + samples + benchmarks; -d fetches dependencies (incl. googletest)
+# Test matrices (see step 2); in a sparse checkout, run `git sparse-checkout add .dvc` first
+dvc pull -R clients/matrices
+# -c → BUILD_CLIENTS_TESTS + samples + benchmarks; -d installs distro packages but not googletest
+# (install libgtest-dev or gtest-devel first)
 ./install.sh -dc
 # equivalently, modern CMake:
 cmake -B build -DHIPSPARSE_BUILD_TESTING=ON -DHIPSPARSE_ENABLE_HIP=ON
@@ -52,11 +55,15 @@ cmake --build build --parallel
 Presets are also available: `cmake --preset default:release`, `debug`, `coverage`, `asan`.
 Test binaries land in `build/<release|debug|release-debug>/clients/staging/`.
 
-**2. Provision the test matrices** (functional suites read `.bin` matrices): The build in step 1
-(`./install.sh -dc`) downloads and converts them automatically, so a separate step is not required.
+**2. Provision the test matrices** (functional suites read `.bin` matrices): The 19 SuiteSparse
+archives are stored with DVC in `clients/matrices/`, and the `dvc pull` in step 1 fetches them. The
+configure step converts them to `.bin`. Without the archives, configure stops with an error unless
+`-DALLOW_FETCH_DEPS=ON` is set, which downloads them from SuiteSparse instead. The scripts set it
+only for their matrix step: `install.sh` with `--matrices-dir` or `--matrices-dir-install`, and
+`rmake.py` with `--matrices-dir`.
 
-> **Note:** If you already have the matrices downloaded to a folder, pass `--matrices-dir <path_to_matrices>`
-> to the install script to reuse them and avoid re-downloading on a rebuild:
+> **Note:** If you already have the converted matrices in a folder, pass `--matrices-dir <path_to_matrices>`
+> to the install script to reuse them; missing ones are extracted from the pulled archives or downloaded:
 >
 > ```bash
 > ./install.sh -dc --matrices-dir <path_to_matrices>/hipsparse_matrices
@@ -177,9 +184,11 @@ at one tier — e.g., `./hipsparse-test --gtest_filter=*quick*csrmv*` should fin
 | CUDA version gate | n/a | 12.8 → `cuda/12.8/`; 13.x → `cuda/13/`; otherwise no test data is generated |
 | Jenkins lane | `precheckin.groovy` (`*checkin*`) | `precheckin-cuda.groovy` (`./install.sh -c --cuda`, filter `*checkin*csrmv*`) |
 
-**Test data / matrices:** `cmake/ClientMatrices.cmake` downloads **19 SuiteSparse** matrices (e.g.
-`scircuit`, `nos1`–`nos7`, `amazon0312`, `webbase-1M`) as `.bin` (mirror overridable via
-`HIPSPARSE_TEST_MIRROR`). Runtime resolution: installed data path `../share/hipsparse/test/` or the
+**Test data / matrices:** `cmake/ClientMatrices.cmake` converts **19 SuiteSparse** matrices (e.g.
+`scircuit`, `nos1`–`nos7`, `amazon0312`, `webbase-1M`) to `.bin`. The `.tar.gz` archives are stored
+with DVC in `clients/matrices/` (remote `sparse-matrices`; run
+`dvc pull -R projects/hipsparse/clients/matrices`). Only with `ALLOW_FETCH_DEPS=ON` are missing
+archives downloaded from SuiteSparse (mirror overridable via `HIPSPARSE_TEST_MIRROR`). Runtime resolution: installed data path `../share/hipsparse/test/` or the
 executable directory, and matrices via `--matrices-dir` or `HIPSPARSE_CLIENTS_MATRICES_DIR`.
 
 **What requires GPU hardware:** all numerical-correctness cases.

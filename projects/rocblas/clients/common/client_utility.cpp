@@ -35,6 +35,7 @@
 #include <stdexcept>
 #include <stdlib.h>
 #include <thread>
+#include <vector>
 
 #ifdef BUILD_WITH_HIPBLASLT
 #include <hipblaslt/hipblaslt-ext.hpp>
@@ -76,12 +77,51 @@ void rocblas_client_init()
 
 void rocblas_client_shutdown() {}
 
+template <typename SizeFn, typename CopyFn>
+static bool query_rocblas_string(SizeFn size_fn, CopyFn copy_fn, std::string& out, const char* what)
+{
+    size_t         size   = 0;
+    rocblas_status status = size_fn(&size);
+    if(status != rocblas_status_success || size < 1)
+    {
+        out.clear();
+        rocblas_cerr << "rocBLAS error: failed to query " << what << " size" << std::endl;
+        return false;
+    }
+
+    try
+    {
+        // size includes the terminating null. Allocate that many bytes so the
+        // copy cannot write past the string's character storage.
+        std::vector<char> buf(size, '\0');
+        status = copy_fn(buf.data(), buf.size());
+        if(status != rocblas_status_success || buf.back() != '\0')
+        {
+            out.clear();
+            rocblas_cerr << "rocBLAS error: failed to query " << what << std::endl;
+            return false;
+        }
+        out.assign(buf.data(), size - 1);
+    }
+    catch(const std::bad_alloc&)
+    {
+        out.clear();
+        rocblas_cerr << "rocBLAS error: failed to allocate " << what << " buffer" << std::endl;
+        return false;
+    }
+    catch(const std::length_error&)
+    {
+        out.clear();
+        rocblas_cerr << "rocBLAS error: " << what << " size is invalid" << std::endl;
+        return false;
+    }
+    return true;
+}
+
 void get_version_string(std::string& str)
 {
-    size_t size;
-    rocblas_get_version_string_size(&size);
-    str.resize(size - 1, '\0');
-    rocblas_get_version_string((char*)str.data(), size);
+    query_rocblas_string(
+        rocblas_get_version_string_size, rocblas_get_version_string, str, "version string");
 }
 
 void print_rocblas_version_string()
@@ -137,13 +177,10 @@ void print_rocblas_client_commit_hashes()
     rocblas_cout << "hipBLASLt: N/A, as rocBLAS was built without hipBLASLt" << std::endl;
 #endif
 
-    size_t size;
-    rocblas_get_commit_hash_string_size(&size);
-
-    std::string hash(size - 1, '\0');
-    rocblas_get_commit_hash_string((char*)hash.data(), size);
-
-    if(strcmp(rocblas_tensile_commit_hash[0], hash.data()))
+    std::string hash;
+    if(query_rocblas_string(
+           rocblas_get_commit_hash_string_size, rocblas_get_commit_hash_string, hash, "commit hash")
+       && strcmp(rocblas_tensile_commit_hash[0], hash.c_str()))
     {
         rocblas_cout
             << "rocBLAS warning: client rocblas commit differs from library rocblas commit: "
@@ -447,7 +484,10 @@ rocblas_local_handle::rocblas_local_handle(const Arguments& arg)
     {
         auto hipblaslt_env = getenv("ROCBLAS_USE_HIPBLASLT");
         if(hipblaslt_env)
+        {
             m_hipblaslt_saved_status = std::string(hipblaslt_env);
+            m_hipblaslt_env_existed  = true;
+        }
         m_hipblaslt_env_set = true;
         setenv("ROCBLAS_USE_HIPBLASLT", std::to_string(arg.use_hipblaslt).c_str(), true);
     }
@@ -456,7 +496,10 @@ rocblas_local_handle::rocblas_local_handle(const Arguments& arg)
     {
         auto stream_order_env = getenv("ROCBLAS_STREAM_ORDER_ALLOC");
         if(stream_order_env)
+        {
             m_stream_order_saved_status = std::string(stream_order_env);
+            m_stream_order_env_existed  = true;
+        }
         m_stream_order_env_set = true;
         setenv("ROCBLAS_STREAM_ORDER_ALLOC", "1", true);
     }
@@ -531,14 +574,20 @@ rocblas_local_handle::~rocblas_local_handle()
 
     if(m_hipblaslt_env_set)
     {
-        setenv("ROCBLAS_USE_HIPBLASLT", m_hipblaslt_saved_status.c_str(), true);
+        if(m_hipblaslt_env_existed)
+            setenv("ROCBLAS_USE_HIPBLASLT", m_hipblaslt_saved_status.c_str(), true);
+        else
+            unsetenv("ROCBLAS_USE_HIPBLASLT");
     }
 
-    rocblas_destroy_handle(m_handle);
+    PRINT_IF_ROCBLAS_ERROR(rocblas_destroy_handle(m_handle));
 
     if(m_stream_order_env_set)
     {
-        setenv("ROCBLAS_STREAM_ORDER_ALLOC", m_stream_order_saved_status.c_str(), true);
+        if(m_stream_order_env_existed)
+            setenv("ROCBLAS_STREAM_ORDER_ALLOC", m_stream_order_saved_status.c_str(), true);
+        else
+            unsetenv("ROCBLAS_STREAM_ORDER_ALLOC");
     }
 }
 

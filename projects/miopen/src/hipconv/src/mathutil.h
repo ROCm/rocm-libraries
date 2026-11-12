@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
 
 // builtin max is not constexpr, so we define our own. These are plain constexpr
@@ -86,4 +87,24 @@ inline constexpr SplitPow2 split_pow2(uint32_t n)
         ++k;
 #endif
     return {uint32_t(1) << k, n >> k};
+}
+
+// Let
+//
+// idx = \sum_{i=0}^{N-1} j[i] \prod_{k=i+1}^{N-1} shape[k]
+//
+// That is, idx is the canonical linear index of a tensor in row-major format.
+// This function returns the coordinate tuple j given a linear index idx.
+template <std::size_t N, typename T>
+constexpr auto linear_index_to_coord(T idx, std::array<T, N> const& shape) -> std::array<T, N>
+{
+    std::array<T, N> j;
+    for(std::size_t i = N - 1; i >= 1; --i)
+    {
+        T idx_div = idx / shape[i];
+        j[i]      = idx - idx_div * shape[i];
+        idx       = idx_div;
+    }
+    j[0] = idx;
+    return j;
 }

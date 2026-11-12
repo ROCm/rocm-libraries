@@ -17,43 +17,46 @@
 #pragma once
 
 #include <thrust/detail/config.h>
-#include <thrust/reverse.h>
+
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/iterator/iterator_traits.h>
-#include <thrust/system/detail/generic/select_system.h>
-#include <thrust/system/detail/generic/reverse.h>
+#include <thrust/reverse.h>
 #include <thrust/system/detail/adl/reverse.h>
+#include <thrust/system/detail/generic/reverse.h>
+#include <thrust/system/detail/generic/select_system.h>
 
 THRUST_NAMESPACE_BEGIN
 
-
 THRUST_EXEC_CHECK_DISABLE
-template<typename DerivedPolicy, typename BidirectionalIterator>
-THRUST_HOST_DEVICE
-  void reverse(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-               BidirectionalIterator first,
-               BidirectionalIterator last)
+template <typename DerivedPolicy, typename BidirectionalIterator>
+THRUST_HOST_DEVICE void reverse(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+                                BidirectionalIterator first,
+                                BidirectionalIterator last)
 {
   using thrust::system::detail::generic::reverse;
   return reverse(thrust::detail::derived_cast(thrust::detail::strip_const(exec)), first, last);
 } // end reverse()
 
-
 THRUST_EXEC_CHECK_DISABLE
-template<typename DerivedPolicy, typename BidirectionalIterator, typename OutputIterator>
-THRUST_HOST_DEVICE
-  OutputIterator reverse_copy(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                              BidirectionalIterator first,
-                              BidirectionalIterator last,
-                              OutputIterator result)
+template <typename DerivedPolicy, typename BidirectionalIterator, typename OutputIterator>
+THRUST_HOST_DEVICE OutputIterator reverse_copy(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  BidirectionalIterator first,
+  BidirectionalIterator last,
+  OutputIterator result)
 {
   using thrust::system::detail::generic::reverse_copy;
   return reverse_copy(thrust::detail::derived_cast(thrust::detail::strip_const(exec)), first, last, result);
 } // end reverse_copy()
 
-
-template<typename BidirectionalIterator>
-  void reverse(BidirectionalIterator first,
-               BidirectionalIterator last)
+template <typename BidirectionalIterator>
+void reverse(BidirectionalIterator first, BidirectionalIterator last)
 {
   using thrust::system::detail::generic::select_system;
 
@@ -64,12 +67,8 @@ template<typename BidirectionalIterator>
   return thrust::reverse(select_system(system), first, last);
 } // end reverse()
 
-
-template<typename BidirectionalIterator,
-         typename OutputIterator>
-  OutputIterator reverse_copy(BidirectionalIterator first,
-                              BidirectionalIterator last,
-                              OutputIterator result)
+template <typename BidirectionalIterator, typename OutputIterator>
+OutputIterator reverse_copy(BidirectionalIterator first, BidirectionalIterator last, OutputIterator result)
 {
   using thrust::system::detail::generic::select_system;
 
@@ -79,8 +78,7 @@ template<typename BidirectionalIterator,
   System1 system1;
   System2 system2;
 
-  return thrust::reverse_copy(select_system(system1,system2), first, last, result);
+  return thrust::reverse_copy(select_system(system1, system2), first, last, result);
 } // end reverse_copy()
-
 
 THRUST_NAMESPACE_END

@@ -10,11 +10,25 @@ subclasses in the owning kernel modules.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field, fields as _dataclass_fields
 from types import MappingProxyType
 
 from rocke.core.ir import BF16, F16
 from rocke.helpers.spec import kernel_name_join
+
+from kernels.common.attention_dense_decode import (
+    NONPERSIST_DECODES,
+    PERSIST_DECODES,
+    NonpersistBtHkvMinor,
+    NonpersistHqMinorSwz,
+    NonpersistQbMinor,
+    PersistBtHkvMinor,
+    PersistHkvMajor,
+    PersistHqMinorSwz,
+    PersistQbMajor,
+    balance_causal,
+)
 
 
 _DTYPE_IR = {"bf16": BF16, "fp16": F16}
@@ -28,12 +42,60 @@ DENSE_TILE_GEOMETRIES = MappingProxyType(
 )
 DEFAULT_DENSE_TILE_GEOMETRY = DENSE_TILE_GEOMETRIES["default"]
 
-_COMMON_PERSIST_DECODES = frozenset({"auto", "qb_major", "hkv_major"})
 
 # Signed 32-bit ceiling for tensor extents. See ``check_dense_spec_preflight``
 # check 4 for why the SIGNED bound binds even though the buffer-resource
 # num_records field is unsigned in hardware.
 INT32_LIMIT = 2**31
+
+# Softmax scales both dense kernels compute correctly: a chosen margin, not a hardware
+# limit. gfx950's reason and known limit are noted in its kernel module, above
+# _EMPTY_ROW_MAX_GRID. gfx942 multiplies each fp32 score by scale * log2(e) and masks
+# with -1e30, so a larger scale can push a visible score below the mask (the row max
+# goes to a masked key) or past FLT_MAX (NaN). The hipDNN packs check the same range
+# as 0x1p-64F / 0x1p4F (isSupportedScale, AttentionDenseNative.cpp); change them
+# together. test_attention_dense_scale.py pins both bounds.
+DENSE_MIN_SCALE = 2.0**-64
+DENSE_MAX_SCALE = 2.0**4
+
+
+def check_dense_scale(scale: float) -> None:
+    """Raise unless ``scale`` is in ``[DENSE_MIN_SCALE, DENSE_MAX_SCALE]``.
+
+    NaN and +-inf are invalid input (``ValueError``); a finite scale outside the
+    range, zero and negatives included, is a kernel limit (``NotImplementedError``).
+    Every dense runner calls this before it builds a kernel."""
+    if not math.isfinite(scale):
+        raise ValueError(f"scale must be finite, got {scale!r}")
+    if not DENSE_MIN_SCALE <= scale <= DENSE_MAX_SCALE:
+        raise NotImplementedError(
+            "NOT_YET_IMPLEMENTED: the dense attention kernels support a softmax "
+            f"scale in [2**-64, 2**4], got {scale!r}"
+        )
+
+
+def partial_tile_reason(spec: "AttentionDenseSpec") -> str:
+    """Say which sequence length leaves a partial tile on a ``ragged`` spec.
+
+    The dense base-spec factories set ``ragged`` for an ordinary graph whose
+    lengths are not tile multiples (Sq == Skv == 384 at block_m 256, say), so a
+    refusal that only says "ragged" reads as a varlen problem. This names the
+    length and the tile instead.
+    """
+    parts = []
+    if spec.seqlen_q % spec.block_m:
+        parts.append(
+            f"seqlen_q {spec.seqlen_q} is not a multiple of block_m {spec.block_m}"
+        )
+    if spec.seqlen_kv % spec.block_n:
+        parts.append(
+            f"seqlen_kv {spec.seqlen_kv} is not a multiple of block_n {spec.block_n}"
+        )
+    return "; ".join(parts) or (
+        f"ragged=True at seqlen_q {spec.seqlen_q} and seqlen_kv {spec.seqlen_kv}, "
+        f"which are already multiples of block_m {spec.block_m} and block_n "
+        f"{spec.block_n}"
+    )
 
 
 @dataclass(frozen=True)
@@ -75,10 +137,38 @@ class AttentionDenseSpec:
     use_sinks: bool = False
     # Appended for positional compatibility with existing concrete specs.
     causal_bottom_right: bool = field(default=False, kw_only=True)
+    # Block order of the non-persistent grid; ignored on the persistent one.
+    nonpersist_decode: str = field(default="auto", kw_only=True)
+    # XCDs the hardware round-robins workgroups over. A wrong value keeps results
+    # correct and only weakens the L2 locality of the XCD-aware block orders.
+    chiplet_num_xcds: int = field(default=8, kw_only=True)
 
-    def supported_persist_decodes(self) -> frozenset[str]:
-        """Decode values the concrete kernel type can actually emit."""
-        return _COMMON_PERSIST_DECODES
+    @classmethod
+    def supported_persist_decodes(cls) -> frozenset[str]:
+        """``persist_decode`` values the concrete kernel type can emit. The shared
+        spec accepts every known decode; each arch's spec lists its own."""
+        return frozenset({"auto", *PERSIST_DECODES})
+
+    @classmethod
+    def supported_nonpersist_decodes(cls) -> frozenset[str]:
+        """``nonpersist_decode`` values the concrete kernel type can emit; every
+        arch emits every grid decode."""
+        return frozenset({"auto", *NONPERSIST_DECODES})
+
+    def _supports_noncausal_window(self) -> bool:
+        """Whether this arch's body implements ``causal=False`` + ``sliding_window``
+        (a left-only band). Off here so an arch that has not implemented it rejects
+        the combination instead of silently dropping the window."""
+        return False
+
+    def _supports_noncausal_cross_length_ragged(self) -> bool:
+        """Whether this arch's ragged body handles ``seqlen_q != seqlen_kv`` without
+        a causal mask (cross-attention)."""
+        return False
+
+    def _band_name_parts(self) -> tuple[str, ...]:
+        """Name tokens for band options beyond causal / window (none in the base)."""
+        return ()
 
     def __post_init__(self) -> None:
         if self.dtype not in _DTYPE_IR:
@@ -111,16 +201,24 @@ class AttentionDenseSpec:
         if self.ragged:
             if self.seqlen_q <= 0 or self.seqlen_kv <= 0:
                 raise ValueError("ragged requires positive seqlen_q/seqlen_kv")
-            if self.seqlen_q != self.seqlen_kv and not self.causal_bottom_right:
+            if (
+                self.seqlen_q != self.seqlen_kv
+                and not self.causal
+                and not self._supports_noncausal_cross_length_ragged()
+            ):
                 raise ValueError(
                     "ragged is self-attention only (seqlen_q == seqlen_kv) unless "
-                    "causal_bottom_right is set, got "
+                    "causal (top-left or bottom-right) is set, got "
                     f"{self.seqlen_q} != {self.seqlen_kv}"
                 )
             if self.varlen:
                 raise ValueError("ragged is not supported with varlen")
             if self.sliding_window > 0:
-                raise ValueError("ragged is not supported with sliding_window")
+                raise ValueError(
+                    "sliding_window needs whole tiles: "
+                    f"{partial_tile_reason(self)} (the partial-tile path has no "
+                    "window mask)"
+                )
         else:
             if self.seqlen_q % self.block_m != 0:
                 raise ValueError(
@@ -138,20 +236,41 @@ class AttentionDenseSpec:
                 f"num_query_heads ({self.num_query_heads}) must be a positive "
                 f"multiple of num_kv_heads ({self.num_kv_heads})"
             )
-        if self.persistent and self.num_persistent <= 0:
-            raise ValueError(
-                f"num_persistent must be positive, got {self.num_persistent}"
-            )
+        # Both decode fields always hold a known value; only the grid in use
+        # checks its decode against the shape.
         if self.persist_decode not in self.supported_persist_decodes():
             raise ValueError(
                 f"persist_decode must be one of "
                 f"{sorted(self.supported_persist_decodes())}, "
                 f"got {self.persist_decode!r}"
             )
+        if self.nonpersist_decode not in self.supported_nonpersist_decodes():
+            raise ValueError(
+                f"nonpersist_decode must be one of "
+                f"{sorted(self.supported_nonpersist_decodes())}, "
+                f"got {self.nonpersist_decode!r}"
+            )
+        if self.chiplet_num_xcds <= 0:
+            raise ValueError(
+                f"chiplet_num_xcds must be positive, got {self.chiplet_num_xcds}"
+            )
+        if self.persistent:
+            if self.num_persistent <= 0:
+                raise ValueError(
+                    f"num_persistent must be positive, got {self.num_persistent}"
+                )
+            if self.persist_decode != "auto":
+                why = PERSIST_DECODES[self.persist_decode].check(self)
+                if why:
+                    raise ValueError(why)
+        elif self.nonpersist_decode != "auto":
+            why = NONPERSIST_DECODES[self.nonpersist_decode].check(self)
+            if why:
+                raise ValueError(why)
         if self.sliding_window < 0:
             raise ValueError(f"sliding_window must be >= 0, got {self.sliding_window}")
         if self.sliding_window > 0:
-            if not self.causal:
+            if not self.causal and not self._supports_noncausal_window():
                 raise ValueError("sliding_window>0 requires causal=True")
             if self.sliding_window % self.block_n:
                 raise ValueError(
@@ -233,16 +352,69 @@ class AttentionDenseSpec:
         return self.num_query_heads // self.num_kv_heads
 
     @property
+    def _aligned_causal(self) -> bool:
+        """Causal attention on the plain dense layout: where the auto block
+        orders were measured."""
+        moving_diagonal = self.causal_bottom_right and self.seqlen_q != self.seqlen_kv
+        return (
+            balance_causal(self)
+            and not moving_diagonal
+            and not self.ragged
+            and not self.varlen
+            and not self.paged
+        )
+
+    @property
     def resolved_persist_decode(self) -> str:
-        """Resolve the common auto policy to hkv-major or qb-major."""
+        """Resolve the persistent auto policy."""
         if self.persist_decode != "auto":
             return self.persist_decode
         gqa = self.num_queries_per_kv
         nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
+        work = nqb * self.num_query_heads * self.batch
+        if self._aligned_causal:
+            if self.interleave:
+                return PersistQbMajor.name  # the only decode interleave applies to
+            # Swizzled Head-first measured ahead of every other order on causal
+            # MHA with more than about 8 grid-stride rounds of work.
+            if (
+                gqa == 1
+                and PERSIST_DECODES[PersistHqMinorSwz.name].check(self) is None
+                and work > 8 * self.num_persistent
+            ):
+                return PersistHqMinorSwz.name
+            # Batch is the fastest digit and xcd = wi % num_xcds, so with fewer
+            # batches than XCDs the second digit still picks the XCD:
+            # bt_hkv_minor then gives each XCD one kv head. From there on the
+            # rule below measured ahead.
+            if self.batch < self.chiplet_num_xcds:
+                return PersistBtHkvMinor.name
         per_hkv = gqa * nqb * self.batch
         if gqa > 1 and per_hkv >= 2 * self.num_persistent:
-            return "hkv_major"
-        return "qb_major"
+            return PersistHkvMajor.name
+        return PersistQbMajor.name
+
+    @property
+    def resolved_nonpersist_decode(self) -> str:
+        """Resolve the non-persistent auto policy. The existing qb_minor grid
+        stays the best measured order without causal masking."""
+        if self.nonpersist_decode != "auto":
+            return self.nonpersist_decode
+        if not self._aligned_causal:
+            return NonpersistQbMinor.name
+        # Swizzled Head-first measured ahead of every other order, persistent
+        # or not, on causal MHA with enough query blocks per head and enough
+        # work per CU; it loses on GQA and on small problems.
+        nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
+        hq = self.num_query_heads
+        if (
+            hq == self.num_kv_heads
+            and hq % self.chiplet_num_xcds == 0
+            and nqb >= 16
+            and self.batch * hq * nqb >= 8192
+        ):
+            return NonpersistHqMinorSwz.name
+        return NonpersistBtHkvMinor.name
 
     @property
     def runtime_param_fields(self) -> tuple[str, ...]:
@@ -266,13 +438,53 @@ class AttentionDenseSpec:
         spec.kernel_name()`` then fires on the second one served from that slot.
         ``Gfx942AttentionDenseSpec`` is the live example: it appends ``_b{batch}``
         (batch sized its buffer-resource extents), so declaring ``batch`` here
-        obliged it to drop that token in the same change.
+        obliged it to drop that token in the same change -- and declaring the
+        head counts obliged it to drop ``hq``/``kv`` (via ``_head_name_parts``).
 
         Deriving the name FROM this tuple would make the two correct by
         construction. It does not today, which is the blocker for AOT packaging
         and per-batch specialization, where the symbol IS the identity.
         """
         return ()
+
+    @property
+    def runtime_shape(self) -> bool:
+        """Whether the body reads the problem shape only from its kernel params.
+        False here, matching the base contract that the whole shape is baked; each
+        arch spec that owns a runtime-shape body overrides it."""
+        return False
+
+    @property
+    def fastdiv_divisors(self) -> tuple[str, ...]:
+        """The runtime divisors the persistent work decode divides by on every
+        grid-stride iteration, in kernarg order. Empty off the runtime-shape
+        persistent grid (the non-persistent grid divides once per CTA).
+
+        Each one gets a host-computed magic multiplier and shift
+        (:func:`~kernels.common.attention_dense_decode.fastdiv_kernargs`), so the
+        in-loop divide stays a mul-hi, an add and a shift instead of the backend's
+        software integer division. Each decode class declares its own
+        (``PersistDecode.fastdiv_divisors``); a decode without the kv head as a digit
+        lists ``gqa`` for ``hkv = hq / gqa``.
+
+        A function of the resolved decode order only, never of the shape, so it is
+        fixed by the cache key: the key carries the resolved order on the persistent
+        grid (``attention_dense_cache_key``)."""
+        if not (self.persistent and self.runtime_shape):
+            return ()
+        return PERSIST_DECODES[self.resolved_persist_decode].fastdiv_divisors
+
+    @property
+    def runtime_kernarg_fields(self) -> tuple[str, ...]:
+        """The full runtime-kernarg ABI after ``scale``: :attr:`runtime_param_fields`,
+        then a ``<divisor>_magic`` / ``<divisor>_shift`` i32 pair per
+        :attr:`fastdiv_divisors` entry. The body's param declarations, the arch's
+        ``attention_dense_signature`` and ``attention_dense_runtime_args`` all read
+        this one tuple. The fast-division pairs are derived values, not spec fields,
+        so they play no part in the cache key."""
+        return self.runtime_param_fields + tuple(
+            f"{d}_{part}" for d in self.fastdiv_divisors for part in ("magic", "shift")
+        )
 
     def _layout_name_parts(self) -> tuple[str, ...]:
         return ()
@@ -283,18 +495,22 @@ class AttentionDenseSpec:
         overrides this to drop sq/sk from the symbol name."""
         return (f"sq{self.seqlen_q}", f"sk{self.seqlen_kv}")
 
+    def _head_name_parts(self) -> tuple[str, ...]:
+        """Name tokens for the baked head counts. A subclass whose kernel takes
+        the head counts as runtime params overrides this to drop hq/kv."""
+        return (f"hq{self.num_query_heads}", f"kv{self.num_kv_heads}")
+
     def _algorithm_name_parts(self) -> tuple[str, ...]:
         return ("lazyrs",) if self.lazy_rescale else ()
 
     def _persist_decode_name_part(self) -> str:
-        return "hkvmaj" if self.resolved_persist_decode == "hkv_major" else ""
+        return PERSIST_DECODES[self.resolved_persist_decode].tag
 
     def kernel_name(self) -> str:
         parts = [
             "rocke_attention_dense",
             f"d{self.head_size}",
-            f"hq{self.num_query_heads}",
-            f"kv{self.num_kv_heads}",
+            *self._head_name_parts(),
             f"bn{self.block_n}",
             self.dtype,
         ]
@@ -307,6 +523,7 @@ class AttentionDenseSpec:
         parts.append("causal" if self.causal else "full")
         if self.causal_bottom_right:
             parts.append("br")
+        parts.extend(self._band_name_parts())
         if self.ragged:
             parts.append("ragged")
         if self.sliding_window > 0:
@@ -325,6 +542,12 @@ class AttentionDenseSpec:
                 parts.append(decode)
             if self.interleave:
                 parts.append("intl")
+        else:
+            decode = NONPERSIST_DECODES[self.resolved_nonpersist_decode].tag
+            if decode:
+                parts.append(decode)
+        if self.chiplet_num_xcds != 8:
+            parts.append(f"xcd{self.chiplet_num_xcds}")
         return kernel_name_join(*parts)
 
 
@@ -344,14 +567,26 @@ def attention_dense_cache_key(spec: AttentionDenseSpec, *, arch: str) -> tuple:
     (``Gfx942AttentionDenseSpec`` is not ``Gfx950AttentionDenseSpec``) without
     stringly-typing it; if a stable on-disk identity is ever needed, that wants
     ``__qualname__`` or a digest instead.
+
+    The decode the body uses is keyed by its resolved order: ``persist_decode`` on
+    the persistent grid, ``nonpersist_decode`` on the default grid. ``"auto"``
+    resolves from the shape, and the order picks the work-decode body, so once the
+    shape leaves the key the raw ``"auto"`` would let two shapes that resolve
+    differently share one slot.
     """
     if not arch:
         raise ValueError("attention dense cache identity requires an explicit arch")
     skip = frozenset(spec.runtime_param_fields)
+
+    def _value(name: str):
+        if name == "persist_decode" and spec.persistent:
+            return spec.resolved_persist_decode
+        if name == "nonpersist_decode" and not spec.persistent:
+            return spec.resolved_nonpersist_decode
+        return getattr(spec, name)
+
     rest = tuple(
-        (f.name, getattr(spec, f.name))
-        for f in _dataclass_fields(spec)
-        if f.name not in skip
+        (f.name, _value(f.name)) for f in _dataclass_fields(spec) if f.name not in skip
     )
     return (arch, type(spec), rest)
 
@@ -390,6 +625,14 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
        The buffer-resource ``num_records`` field is unsigned in hardware, but it is
        emitted through ``const_i32`` (no range check) and the voffset feeding it is
        signed i32 arithmetic, so the signed bound is the binding one on both paths.
+
+       The UNIT differs per operand and is not cosmetic. K/V always go through a
+       buffer resource, so they are bounded in bytes. Q is bounded in bytes only
+       when ``ragged`` (the buffer-resource path, whose voffset is ``addr * 2``)
+       and in elements otherwise (``global_load_vN`` takes an element index). O is
+       element-addressed in every mode, despite ``_emit_o_store`` naming its
+       address argument ``q_row_byte``. Bounding ragged Q in elements lets a spec
+       between 2**30 and 2**31 elements through to a byte offset that overflows.
 
     Order matters between 2 and 4: a negative extent makes the products in 4
     vacuously true, so the sign check has to run first.
@@ -433,7 +676,17 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
             f"limit ({INT32_LIMIT} B)"
         )
     qo_elems = spec.batch * spec.seqlen_q * spec.num_query_heads * spec.head_size
-    if qo_elems >= INT32_LIMIT:
+    if spec.ragged:
+        # A ragged Q goes through a buffer resource whose num_records AND voffset
+        # are both i32 BYTES, so the ceiling is half the element count the
+        # element-offset paths get. O stays element-addressed even here.
+        qo_bytes = qo_elems * 2
+        if qo_bytes >= INT32_LIMIT:
+            return False, (
+                f"Q/O extent is {qo_bytes} B, at or past the 32-bit "
+                f"buffer-resource limit ({INT32_LIMIT} B)"
+            )
+    elif qo_elems >= INT32_LIMIT:
         return False, (
             f"Q/O extent is {qo_elems} elements, at or past the 32-bit addressing "
             f"limit ({INT32_LIMIT})"
@@ -444,8 +697,12 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
 __all__ = [
     "AttentionDenseSpec",
     "DEFAULT_DENSE_TILE_GEOMETRY",
+    "DENSE_MAX_SCALE",
+    "DENSE_MIN_SCALE",
     "DENSE_TILE_GEOMETRIES",
     "INT32_LIMIT",
     "attention_dense_cache_key",
+    "check_dense_scale",
     "check_dense_spec_preflight",
+    "partial_tile_reason",
 ]

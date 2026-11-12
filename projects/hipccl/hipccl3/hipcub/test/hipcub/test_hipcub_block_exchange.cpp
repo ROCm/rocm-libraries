@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -908,7 +908,7 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToStripedGuarded)
                 const size_t i0     = offset + ti * items_per_thread + ii;
                 const size_t i1     = offset + host_ranks[i0] % block_size * items_per_thread
                                   + host_ranks[i0] / block_size;
-                if(i1 >= 0 && i1 < size)
+                if(i1 < size)
                     host_expected[i1] = host_input[i0];
             }
         }
@@ -1025,7 +1025,7 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToStripedFlagged)
                 const size_t i0     = offset + ti * items_per_thread + ii;
                 const size_t i1     = offset + host_ranks[i0] % block_size * items_per_thread
                                   + host_ranks[i0] / block_size;
-                if(i1 >= 0 && i1 < size)
+                if(i1 < size)
                     host_expected[i1] = host_input[i0];
                 host_flags[i0]
                     = (ti == block_size - 1) && (ii == items_per_thread - 1) ? false : true;
@@ -1818,7 +1818,7 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToStripedGuardedNoOutputParam)
                 const size_t i0     = offset + ti * items_per_thread + ii;
                 const size_t i1     = offset + host_ranks[i0] % block_size * items_per_thread
                                   + host_ranks[i0] / block_size;
-                if(i1 >= 0 && i1 < size)
+                if(i1 < size)
                     host_expected[i1] = host_input[i0];
             }
         }
@@ -1930,7 +1930,7 @@ TYPED_TEST(HipcubBlockExchangeTests, ScatterToStripedFlaggedNoOutputParam)
                 const size_t i0     = offset + ti * items_per_thread + ii;
                 const size_t i1     = offset + host_ranks[i0] % block_size * items_per_thread
                                   + host_ranks[i0] / block_size;
-                if(i1 >= 0 && i1 < size)
+                if(i1 < size)
                     host_expected[i1] = host_input[i0];
                 host_flags[i0]
                     = (ti == block_size - 1) && (ii == items_per_thread - 1) ? false : true;

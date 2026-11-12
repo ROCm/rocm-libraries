@@ -12,7 +12,17 @@ import pytest
 
 import hipdnn_frontend as fe
 
+# On Windows, hipEventElapsedTime can return a negative value for a short span
+# (https://github.com/ROCm/rocm-systems/issues/12925), and elapsed_time() rejects it.
+# These tests only check the sign of an empty span, so they skip on Windows until the
+# runtime fix ships.
+_SKIP_ON_WINDOWS_ELAPSED_BUG = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="hipEventElapsedTime can be negative on Windows (ROCm/rocm-systems#12925)",
+)
 
+
+@_SKIP_ON_WINDOWS_ELAPSED_BUG
 @pytest.mark.gpu
 def test_hip_event_timing_smoke() -> None:
     if fe.hip_get_device_count() <= 0:
@@ -50,6 +60,7 @@ def test_elapsed_time_rejects_reversed_events() -> None:
         start.elapsed_time(stop)
 
 
+@_SKIP_ON_WINDOWS_ELAPSED_BUG
 @pytest.mark.gpu
 def test_stall_gate_orders_events() -> None:
     if fe.hip_get_device_count() <= 0:

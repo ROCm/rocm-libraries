@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,16 +37,16 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/system/hip/config.h>
 
-#  include <thrust/detail/minmax.h>
 #  include <thrust/distance.h>
 #  include <thrust/iterator/counting_iterator.h>
 #  include <thrust/iterator/transform_iterator.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
-
 #  if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#    include <thrust/detail/algorithm_wrapper.h>
+
 #    include <iterator>
 #  endif
 
@@ -86,7 +86,7 @@ struct functor
     // select the smallest index among true results
     if (thrust::get<0>(lhs) && thrust::get<0>(rhs))
     {
-      return TupleType(true, (thrust::min)(thrust::get<1>(lhs), thrust::get<1>(rhs)));
+      return TupleType(true, (_THRUST_STD::min)(thrust::get<1>(lhs), thrust::get<1>(rhs)));
     }
     else if (thrust::get<0>(lhs))
     {
@@ -103,7 +103,7 @@ template <class ValueType, class InputIt, class UnaryOp>
 struct transform_input_iterator_t
 {
   using self_t            = transform_input_iterator_t;
-  using difference_type   = typename iterator_traits<InputIt>::difference_type;
+  using difference_type   = thrust::detail::it_difference_t<InputIt>;
   using value_type        = ValueType;
   using pointer           = void;
   using reference         = value_type;
@@ -142,13 +142,13 @@ struct transform_input_iterator_t
 
   THRUST_HOST_DEVICE THRUST_FORCEINLINE reference operator*() const
   {
-    typename thrust::iterator_value<InputIt>::type x = *input;
+    thrust::detail::it_value_t<InputIt> x = *input;
     return op(x);
   }
 
   THRUST_HOST_DEVICE THRUST_FORCEINLINE reference operator*()
   {
-    typename thrust::iterator_value<InputIt>::type x = *input;
+    thrust::detail::it_value_t<InputIt> x = *input;
     return op(x);
   }
 
@@ -216,7 +216,7 @@ find_if_n(execution_policy<Derived>& policy, InputIt first, Size num_items, Pred
 
   // TODO incorporate sizeof(InputType) into interval_threshold and round to multiple of 32
   const Size interval_threshold = 1 << 20;
-  const Size interval_size      = (thrust::min)(interval_threshold, num_items);
+  const Size interval_size      = (_THRUST_STD::min)(interval_threshold, num_items);
 
   // FIXME(bgruber): we should also be able to use transform_iterator here, but it makes nvc++ hang. See:
   // https://github.com/NVIDIA/cccl/issues/3594. The problem does not occur with nvcc, so we could not add a test :/

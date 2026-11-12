@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,7 +37,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/system/hip/config.h>
 
 #  include <thrust/system/hip/detail/mismatch.h>
@@ -56,7 +56,7 @@ equal(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, InputI
 template <class Derived, class InputIt1, class InputIt2>
 bool THRUST_HOST_DEVICE equal(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, InputIt2 first2)
 {
-  using InputType1 = typename thrust::iterator_value<InputIt1>::type;
+  using InputType1 = thrust::detail::it_value_t<InputIt1>;
   return hip_rocprim::equal(policy, first1, last1, first2, equal_to<InputType1>());
 }
 

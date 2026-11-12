@@ -65,7 +65,7 @@ void testing_dnmat_descr_bad_arg(void)
         hipsparseCreateDnMat(&x, rows, cols, ld, nullptr, dataType, order),
         "Error: val_data is nullptr");
 
-    // hipsparseDestroyDnVec
+    // hipsparseDestroyDnMat
     verify_hipsparse_status_invalid_pointer(hipsparseDestroyDnMat(nullptr), "Error: x is nullptr");
 
     // Create valid descriptor
@@ -129,7 +129,7 @@ void testing_dnmat_descr_bad_arg(void)
                                             "Error: batch_stride is nullptr");
 
     // Destroy valid descriptor
-    verify_hipsparse_status_success(hipsparseDestroyDnVec(x), "Success");
+    verify_hipsparse_status_success(hipsparseDestroyDnMat(x), "Success");
 #endif
 }
 

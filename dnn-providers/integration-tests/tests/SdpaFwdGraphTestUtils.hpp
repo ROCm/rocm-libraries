@@ -10,6 +10,9 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
+#include <hipdnn_test_sdk/utilities/FloatOperandTestUtils.hpp>
+#include <nlohmann/json.hpp>
 
 namespace hipdnn_integration_tests::test_utils
 {
@@ -25,18 +28,30 @@ using hipdnn_data_sdk::utilities::generateStrides;
 // When `statsUid` is provided, a FLOAT log-sum-exp (LSE) output tensor is added with dims
 // [B, H, Sq, 1] (derived from `qDims`) and its uid is written into attrs.stats_tensor_uid,
 // exercising the LSE/stats output path. Defaults to no stats output for existing callers.
-inline flatbuffers::FlatBufferBuilder
-    createSdpaFwdGraph(int64_t qUid,
-                       int64_t kUid,
-                       int64_t vUid,
-                       int64_t oUid,
-                       const std::vector<int64_t>& qDims,
-                       const std::vector<int64_t>& kDims,
-                       const std::vector<int64_t>& vDims,
-                       const std::vector<int64_t>& oDims,
-                       hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-                       hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesT attrs = {},
-                       std::optional<int64_t> statsUid = std::nullopt)
+//
+// When `scale` is provided, a FLOAT scale operand tensor is added in the storage mode the spec
+// asks for and its uid is written into attrs.scale_tensor_uid. Defaults to no scale tensor.
+//
+// When `maskUid` is provided it is written into attrs.attn_mask_tensor_uid. When `maskDataType`
+// is also provided, a mask tensor with that dtype (including DataType::UNSET) and `maskDims` is
+// added under `maskUid`. A `maskUid` (or an attrs.attn_mask_tensor_uid) without a `maskDataType`
+// leaves the uid dangling, with no tensor behind it. Defaults to no mask.
+inline flatbuffers::FlatBufferBuilder createSdpaFwdGraph(
+    int64_t qUid,
+    int64_t kUid,
+    int64_t vUid,
+    int64_t oUid,
+    const std::vector<int64_t>& qDims,
+    const std::vector<int64_t>& kDims,
+    const std::vector<int64_t>& vDims,
+    const std::vector<int64_t>& oDims,
+    hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+    hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesT attrs = {},
+    std::optional<int64_t> statsUid = std::nullopt,
+    std::optional<hipdnn_test_sdk::utilities::FloatOperandSpec> scale = std::nullopt,
+    std::optional<int64_t> maskUid = std::nullopt,
+    const std::vector<int64_t>& maskDims = {},
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::DataType> maskDataType = std::nullopt)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -47,6 +62,14 @@ inline flatbuffers::FlatBufferBuilder
     if(statsUid.has_value())
     {
         attrs.stats_tensor_uid = statsUid;
+    }
+    if(scale.has_value())
+    {
+        attrs.scale_tensor_uid = scale->uid;
+    }
+    if(maskUid.has_value())
+    {
+        attrs.attn_mask_tensor_uid = maskUid;
     }
 
     flatbuffers::FlatBufferBuilder builder;
@@ -77,6 +100,19 @@ inline flatbuffers::FlatBufferBuilder
             builder, statsUid.value(), "Stats", DataType::FLOAT, &statsStrides, &statsDims));
     }
 
+    if(scale.has_value())
+    {
+        hipdnn_test_sdk::utilities::addFloatOperandTensor(builder, tensors, scale.value(), "Scale");
+    }
+
+    std::vector<int64_t> maskStrides;
+    if(maskUid.has_value() && maskDataType.has_value())
+    {
+        maskStrides = generateStrides(maskDims);
+        tensors.push_back(CreateTensorAttributesDirect(
+            builder, maskUid.value(), "Mask", maskDataType.value(), &maskStrides, &maskDims));
+    }
+
     auto sdpaAttrs = CreateSdpaAttributes(builder, &attrs);
 
     std::vector<flatbuffers::Offset<Node>> nodes;
@@ -91,6 +127,51 @@ inline flatbuffers::FlatBufferBuilder
 
     builder.Finish(graph);
     return builder;
+}
+
+// Uids of the SDPA forward graph of optionalSdpaFwdGraphJson(). The sink sorts first, so
+// without it every other input without a seed of its own gets a different seed.
+constexpr int64_t K_OPTIONAL_SDPA_SINK_UID = 0;
+constexpr int64_t K_OPTIONAL_SDPA_Q_UID = 1;
+constexpr int64_t K_OPTIONAL_SDPA_K_UID = 2;
+constexpr int64_t K_OPTIONAL_SDPA_V_UID = 3;
+constexpr int64_t K_OPTIONAL_SDPA_O_UID = 4;
+constexpr int64_t K_OPTIONAL_SDPA_STATS_UID = 5;
+
+// The JSON graph of one SDPA forward node with Q, K, V and O, plus a Stats output and a
+// sink input when asked for. The tensors are in the order Q, K, V, O, Stats, sink.
+inline nlohmann::json optionalSdpaFwdGraphJson(bool withStats, bool withSink)
+{
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesT attrs;
+    if(withSink)
+    {
+        attrs.sink_token_tensor_uid = K_OPTIONAL_SDPA_SINK_UID;
+    }
+    const auto builder = createSdpaFwdGraph(
+        K_OPTIONAL_SDPA_Q_UID,
+        K_OPTIONAL_SDPA_K_UID,
+        K_OPTIONAL_SDPA_V_UID,
+        K_OPTIONAL_SDPA_O_UID,
+        dims,
+        dims,
+        dims,
+        dims,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        attrs,
+        withStats ? std::optional<int64_t>(K_OPTIONAL_SDPA_STATS_UID) : std::nullopt);
+    nlohmann::json graph
+        = *hipdnn_flatbuffers_sdk::data_objects::GetGraph(builder.GetBufferPointer());
+    if(withSink)
+    {
+        auto sink = graph.at("tensors").at(0);
+        sink["uid"] = K_OPTIONAL_SDPA_SINK_UID;
+        sink["name"] = "Sink";
+        sink["dims"] = std::vector<int64_t>{1, 2, 1, 1};
+        sink["strides"] = std::vector<int64_t>{2, 1, 1, 1};
+        graph.at("tensors").push_back(std::move(sink));
+    }
+    return graph;
 }
 
 } // namespace hipdnn_integration_tests::test_utils

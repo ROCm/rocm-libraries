@@ -1,6 +1,6 @@
 /******************************************************************************
  * Copyright (c) 2016, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2019-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2019-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -37,7 +37,7 @@
 #  pragma system_header
 #endif // no system header
 
-#if THRUST_DEVICE_COMPILER == THRUST_DEVICE_COMPILER_HIP
+#if THRUST_HAS_HIP_COMPILER()
 
 #  include <thrust/system/hip/config.h>
 
@@ -73,8 +73,8 @@ THRUST_HIP_RUNTIME_FUNCTION pair<SelectedOutIt, RejectedOutIt> partition(
   RejectedOutIt rejected_result,
   Predicate predicate)
 {
-  using size_type  = typename iterator_traits<InputIt>::difference_type;
-  using value_type = typename iterator_traits<InputIt>::value_type;
+  using size_type  = thrust::detail::it_difference_t<InputIt>;
+  using value_type = thrust::detail::it_value_t<InputIt>;
   using namespace thrust::system::hip_rocprim::temp_storage;
 
   size_t temp_storage_bytes     = 0;
@@ -136,8 +136,8 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HIP_RUNTIME_FUNCTION partition(
   RejectedOutIt rejected_result,
   Predicate predicate)
 {
-  using size_type  = typename iterator_traits<InputIt>::difference_type;
-  using value_type = typename iterator_traits<InputIt>::value_type;
+  using size_type  = thrust::detail::it_difference_t<InputIt>;
+  using value_type = thrust::detail::it_value_t<InputIt>;
   using namespace thrust::system::hip_rocprim::temp_storage;
 
   size_t temp_storage_bytes = 0;
@@ -199,7 +199,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<SelectedOutIt, RejectedOutIt> partition_copy(
   RejectedOutIt rejected_result,
   Predicate predicate)
 {
-  using size_type = typename iterator_traits<InputIt>::difference_type;
+  using size_type = thrust::detail::it_difference_t<InputIt>;
   using namespace thrust::system::hip_rocprim::temp_storage;
 
   size_t temp_storage_bytes     = 0;
@@ -273,7 +273,7 @@ THRUST_HIP_RUNTIME_FUNCTION pair<SelectedOutIt, RejectedOutIt> partition_copy(
   RejectedOutIt rejected_result,
   Predicate predicate)
 {
-  using size_type = typename iterator_traits<InputIt>::difference_type;
+  using size_type = thrust::detail::it_difference_t<InputIt>;
   using namespace thrust::system::hip_rocprim::temp_storage;
 
   size_t temp_storage_bytes = 0;
@@ -348,7 +348,7 @@ inplace_partition(execution_policy<Derived>& policy, InputIt first, InputIt last
   }
 
   // Element type of the input iterator
-  using value_t         = typename iterator_traits<InputIt>::value_type;
+  using value_t         = thrust::detail::it_value_t<InputIt>;
   std::size_t num_items = static_cast<std::size_t>(thrust::distance(first, last));
 
   // Allocate temporary storage, which will serve as the input to the partition
@@ -374,7 +374,7 @@ THRUST_HIP_RUNTIME_FUNCTION InputIt inplace_partition(
   }
 
   // Element type of the input iterator
-  using value_t         = typename iterator_traits<InputIt>::value_type;
+  using value_t         = thrust::detail::it_value_t<InputIt>;
   std::size_t num_items = static_cast<std::size_t>(thrust::distance(first, last));
 
   // Allocate temporary storage, which will serve as the input to the partition
@@ -422,7 +422,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
       return detail::partition_copy(policy, first, last, stencil, selected_result, rejected_result, predicate);
     }
 
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static pair<SelectedOutIt, RejectedOutIt>
     seq(execution_policy<Derived>& policy,
         InputIt first,
@@ -437,7 +437,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   return workaround::par(policy, first, last, stencil, selected_result, rejected_result, predicate);
 #  else
   return workaround::seq(policy, first, last, stencil, selected_result, rejected_result, predicate);
@@ -468,7 +468,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
       return detail::partition_copy(policy, first, last, selected_result, rejected_result, predicate);
     }
 
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static pair<SelectedOutIt, RejectedOutIt>
     seq(execution_policy<Derived>& policy,
         InputIt first,
@@ -482,7 +482,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE partition_copy(
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   return workaround::par(policy, first, last, selected_result, rejected_result, predicate);
 #  else
   return workaround::seq(policy, first, last, selected_result, rejected_result, predicate);
@@ -514,7 +514,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE stable_partition_copy(
     {
       return detail::partition_copy(policy, first, last, stencil, selected_result, rejected_result, predicate);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static pair<SelectedOutIt, RejectedOutIt>
     seq(execution_policy<Derived>& policy,
         InputIt first,
@@ -529,7 +529,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE stable_partition_copy(
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   return workaround::par(policy, first, last, stencil, selected_result, rejected_result, predicate);
 #  else
   return workaround::seq(policy, first, last, stencil, selected_result, rejected_result, predicate);
@@ -560,7 +560,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE stable_partition_copy(
       return detail::partition_copy(policy, first, last, selected_result, rejected_result, predicate);
     }
 
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static pair<SelectedOutIt, RejectedOutIt>
     seq(execution_policy<Derived>& policy,
         InputIt first,
@@ -574,7 +574,7 @@ pair<SelectedOutIt, RejectedOutIt> THRUST_HOST_DEVICE stable_partition_copy(
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   return workaround::par(policy, first, last, selected_result, rejected_result, predicate);
 #  else
   return workaround::seq(policy, first, last, selected_result, rejected_result, predicate);
@@ -596,7 +596,7 @@ partition(execution_policy<Derived>& policy, Iterator first, Iterator last, Sten
     {
       return last = detail::inplace_partition(policy, first, last, stencil, predicate);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static Iterator
     seq(execution_policy<Derived>& policy, Iterator first, Iterator last, StencilIt stencil, Predicate predicate)
     {
@@ -604,7 +604,7 @@ partition(execution_policy<Derived>& policy, Iterator first, Iterator last, Sten
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   return workaround::par(policy, first, last, stencil, predicate);
 #  else
   return workaround::seq(policy, first, last, stencil, predicate);
@@ -624,7 +624,7 @@ partition(execution_policy<Derived>& policy, Iterator first, Iterator last, Pred
     {
       return last = detail::inplace_partition(policy, first, last, predicate);
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static Iterator
     seq(execution_policy<Derived>& policy, Iterator first, Iterator last, Predicate predicate)
     {
@@ -632,7 +632,7 @@ partition(execution_policy<Derived>& policy, Iterator first, Iterator last, Pred
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   return workaround::par(policy, first, last, predicate);
 #  else
   return workaround::seq(policy, first, last, predicate);
@@ -657,7 +657,7 @@ Iterator THRUST_HOST_DEVICE stable_partition(
       hip_rocprim::reverse(policy, ret, last);
       return ret;
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static Iterator
     seq(execution_policy<Derived>& policy, Iterator first, Iterator last, StencilIt stencil, Predicate predicate)
     {
@@ -665,7 +665,7 @@ Iterator THRUST_HOST_DEVICE stable_partition(
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   return workaround::par(policy, first, last, stencil, predicate);
 #  else
   return workaround::seq(policy, first, last, stencil, predicate);
@@ -690,7 +690,7 @@ stable_partition(execution_policy<Derived>& policy, Iterator first, Iterator las
       hip_rocprim::reverse(policy, ret, last);
       return ret;
     }
-#  if !__THRUST_HAS_HIPRT__
+#  if defined(__HIP_DEVICE_COMPILE__)
     THRUST_DEVICE static Iterator
     seq(execution_policy<Derived>& policy, Iterator first, Iterator last, Predicate predicate)
     {
@@ -698,7 +698,7 @@ stable_partition(execution_policy<Derived>& policy, Iterator first, Iterator las
     }
 #  endif
   };
-#  if __THRUST_HAS_HIPRT__
+#  if !defined(__HIP_DEVICE_COMPILE__)
   return workaround::par(policy, first, last, predicate);
 #  else
   return workaround::seq(policy, first, last, predicate);

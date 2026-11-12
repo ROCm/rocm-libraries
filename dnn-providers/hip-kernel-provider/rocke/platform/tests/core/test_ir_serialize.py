@@ -90,16 +90,18 @@ def _build_corpus():
 
     kernels["elementwise"] = build_elementwise(ElementwiseSpec(op="add"))
 
-    from kernels.common.conv_implicit_gemm import (
-        ConvProblem,
-        ImplicitGemmConvSpec,
-        build_implicit_gemm_conv,
+    # A padded, windowed NHWC kernel on buffer resources. The library's conv
+    # specimen round-trips in library/tests/test_conv_platform_regressions.py.
+    from rocke.instances.common.pooling import (
+        Pooling2DSpec,
+        PoolingProblem,
+        build_pooling2d,
     )
 
-    kernels["conv_implicit_gemm"] = build_implicit_gemm_conv(
-        ImplicitGemmConvSpec(
-            problem=ConvProblem(N=1, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1),
-            epilogue="cshuffle",
+    kernels["pooling2d"] = build_pooling2d(
+        Pooling2DSpec(
+            problem=PoolingProblem(N=1, H=14, W=14, C=64, Y=3, X=3, pH=1, pW=1),
+            vec=4,
         )
     )
 
@@ -130,8 +132,8 @@ class TestRoundTrip(unittest.TestCase):
         for name, k in self.corpus.items():
             with self.subTest(kernel=name):
                 k2 = parse(serialize(k))
-                ll1 = lower_kernel_to_llvm(k)
-                ll2 = lower_kernel_to_llvm(k2)
+                ll1 = lower_kernel_to_llvm(k, arch="gfx950")
+                ll2 = lower_kernel_to_llvm(k2, arch="gfx950")
                 self.assertEqual(
                     _sha(ll1), _sha(ll2), f"{name}: lowered LLVM sha differs"
                 )
@@ -203,7 +205,10 @@ class TestAttrEncoding(unittest.TestCase):
         s1 = serialize(k)
         k2 = parse(s1)
         self.assertEqual(s1, serialize(k2))
-        self.assertEqual(_sha(lower_kernel_to_llvm(k)), _sha(lower_kernel_to_llvm(k2)))
+        self.assertEqual(
+            _sha(lower_kernel_to_llvm(k, arch="gfx950")),
+            _sha(lower_kernel_to_llvm(k2, arch="gfx950")),
+        )
         # the original attr text survives the round-trip
         op = next(o for o in k2.body.ops if o.name == "tile.inline_asm")
         self.assertEqual(op.attrs["template"], 'v_mov_b32 $0, $1\n  ; note "x"')

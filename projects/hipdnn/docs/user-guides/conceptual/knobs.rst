@@ -71,13 +71,12 @@ Naming conventions
 
 Knobs follow a hierarchical naming scheme to avoid conflicts and improve organization: ``<namespace>.<category>.<knob_name>``.
 
-Global namespace (reserved):
+Global namespace (reserved). The standard global knobs are:
 
 .. code::
 
   global.benchmarking
   global.workspace_size_limit
-  global.deterministic
 
 Plugin-specific namespace:
 

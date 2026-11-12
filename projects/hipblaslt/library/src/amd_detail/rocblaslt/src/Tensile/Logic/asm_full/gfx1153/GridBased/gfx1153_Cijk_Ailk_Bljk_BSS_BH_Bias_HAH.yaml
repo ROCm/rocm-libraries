@@ -194,6 +194,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 0
     SolutionNameMin: Cijk_Ailk_Bljk_BSS_BH_Bias_HAH_MT32x32x64_MI16x16x16x1_SN_MIWT1_1_WG32_4_1
+    SolutionUID: 0uTnxFTLHjar
     SourceSwap: true
     StaggerU: 4
     StaggerUMapping: 1
@@ -371,6 +372,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 1
     SolutionNameMin: Cijk_Ailk_Bljk_BSS_BH_Bias_HAH_MT16x16x64_MI16x16x16x1_SN_MIWT1_1_WG16_2_1
+    SolutionUID: 0uTnxFTM28eO
     SourceSwap: true
     StaggerU: 4
     StaggerUMapping: 1
@@ -548,6 +550,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 2
     SolutionNameMin: Cijk_Ailk_Bljk_BSS_BH_Bias_HAH_MT32x16x64_MI16x16x16x1_SN_MIWT1_1_WG32_2_1
+    SolutionUID: 0uTnxFTLOdo1
     SourceSwap: true
     StaggerU: 4
     StaggerUMapping: 1
@@ -725,6 +728,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 3
     SolutionNameMin: Cijk_Ailk_Bljk_BSS_BH_Bias_HAH_MT16x32x64_MI16x16x16x1_SN_MIWT1_1_WG16_4_1
+    SolutionUID: 0uTnxFTMXtoi
     SourceSwap: true
     StaggerU: 4
     StaggerUMapping: 1

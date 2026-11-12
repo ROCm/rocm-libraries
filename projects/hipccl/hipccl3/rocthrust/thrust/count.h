@@ -22,6 +22,13 @@
 
 #include <thrust/detail/config.h>
 
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
 #include <thrust/detail/execution_policy.h>
 #include <thrust/iterator/iterator_traits.h>
 
@@ -82,7 +89,7 @@ THRUST_NAMESPACE_BEGIN
  *  \see https://en.cppreference.com/w/cpp/algorithm/count
  */
 template <typename DerivedPolicy, typename InputIterator, typename EqualityComparable>
-THRUST_HOST_DEVICE typename thrust::iterator_traits<InputIterator>::difference_type
+THRUST_HOST_DEVICE thrust::detail::it_difference_t<InputIterator>
 count(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
       InputIterator first,
       InputIterator last,
@@ -124,7 +131,7 @@ count(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
  *  \see https://en.cppreference.com/w/cpp/algorithm/count
  */
 template <typename InputIterator, typename EqualityComparable>
-typename thrust::iterator_traits<InputIterator>::difference_type
+thrust::detail::it_difference_t<InputIterator>
 count(InputIterator first, InputIterator last, const EqualityComparable& value);
 
 /*! \p count_if finds the number of elements in <tt>[first,last)</tt> for which
@@ -141,7 +148,7 @@ count(InputIterator first, InputIterator last, const EqualityComparable& value);
  *
  *  \tparam DerivedPolicy The name of the derived execution policy.
  *  \tparam InputIterator must be a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
- * Iterator</a> and \c InputIterator's \c value_type must be convertible to \c Predicate's \c argument_type. \tparam
+ * Iterator</a> and \c InputIterator's \c value_type must be convertible to \c Predicate's argument type. \tparam
  * Predicate must be a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
  *
  *  The following code snippet demonstrates how to use \p count to
@@ -154,7 +161,7 @@ count(InputIterator first, InputIterator last, const EqualityComparable& value);
  *  ...
  *  struct is_odd
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int &x)
  *    {
  *      return x & 1;
@@ -177,7 +184,7 @@ count(InputIterator first, InputIterator last, const EqualityComparable& value);
  *  \see https://en.cppreference.com/w/cpp/algorithm/count
  */
 template <typename DerivedPolicy, typename InputIterator, typename Predicate>
-THRUST_HOST_DEVICE typename thrust::iterator_traits<InputIterator>::difference_type
+THRUST_HOST_DEVICE thrust::detail::it_difference_t<InputIterator>
 count_if(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
          InputIterator first,
          InputIterator last,
@@ -193,7 +200,7 @@ count_if(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
  *  \return The number of elements where \p pred is \c true.
  *
  *  \tparam InputIterator must be a model of <a href="https://en.cppreference.com/w/cpp/iterator/input_iterator">Input
- * Iterator</a> and \c InputIterator's \c value_type must be convertible to \c Predicate's \c argument_type. \tparam
+ * Iterator</a> and \c InputIterator's \c value_type must be convertible to \c Predicate's argument type. \tparam
  * Predicate must be a model of <a href="https://en.cppreference.com/w/cpp/concepts/predicate">Predicate</a>.
  *
  *  The following code snippet demonstrates how to use \p count to
@@ -204,7 +211,7 @@ count_if(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
  *  ...
  *  struct is_odd
  *  {
- *    THRUST_HOST_DEVICE
+ *    __host__ __device__
  *    bool operator()(int &x)
  *    {
  *      return x & 1;
@@ -227,8 +234,7 @@ count_if(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
  *  \see https://en.cppreference.com/w/cpp/algorithm/count
  */
 template <typename InputIterator, typename Predicate>
-typename thrust::iterator_traits<InputIterator>::difference_type
-count_if(InputIterator first, InputIterator last, Predicate pred);
+thrust::detail::it_difference_t<InputIterator> count_if(InputIterator first, InputIterator last, Predicate pred);
 
 /*! \} // end counting
  *  \} // end reductions

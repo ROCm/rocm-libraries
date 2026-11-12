@@ -50,6 +50,7 @@
 #include <thrust/detail/config.h>
 
 #include <thrust/complex.h>
+#include <thrust/detail/complex/cexp.h>
 #include <thrust/detail/complex/math_private.h>
 
 THRUST_NAMESPACE_BEGIN
@@ -67,6 +68,7 @@ namespace complex
  * Exceptional values are noted in the comments within the source code.
  * These values and the return value were taken from n1124.pdf.
  */
+
 THRUST_HOST_DEVICE inline thrust::complex<double> ccosh(const thrust::complex<double>& z)
 {
   const double huge = 8.98846567431157953864652595395e+307; // 0x1p1023

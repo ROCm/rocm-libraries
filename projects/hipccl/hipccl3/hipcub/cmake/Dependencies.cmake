@@ -89,6 +89,10 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "Global flag to cause add_library() to crea
 
 foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
   set(USER_${SHARED_OPTION} ${${SHARED_OPTION}})
+  unset(USER_CACHED_${SHARED_OPTION})
+  if(DEFINED CACHE{${SHARED_OPTION}})
+    get_property(USER_CACHED_${SHARED_OPTION} CACHE ${SHARED_OPTION} PROPERTY VALUE)
+  endif()
   set(${SHARED_OPTION} OFF)
 endforeach()
 
@@ -404,7 +408,18 @@ if(USER_BUILD_TEST)
     add_library(GTest::GTest ALIAS gtest)
     add_library(GTest::Main ALIAS gtest_main)
   else()
-    find_package(GTest REQUIRED)
+    # NOTE(hipccl3): only look GTest up if we don't already have the target.
+    # Reaching this else() means GTest::GTest or GTest::gtest already exists -
+    # but it may have been created by a *sibling* project's FetchContent
+    # rather than by the find_package(GTest QUIET) above. In the unified
+    # hipCCL build rocPRIM is add_subdirectory()'d before hipCUB and fetches
+    # googletest, so by the time this runs the targets exist while GTest is
+    # not installed on the system at all - an unguarded
+    # find_package(GTest REQUIRED) here then fails the entire configure with
+    # -DBUILD_TEST=ON even though usable targets are already present.
+    if(NOT TARGET GTest::GTest)
+      find_package(GTest REQUIRED)
+    endif()
 
     if(TARGET GTest::gtest_main AND NOT TARGET GTest::Main)
       add_library(GTest::GTest ALIAS GTest::gtest)
@@ -415,7 +430,7 @@ endif(USER_BUILD_TEST)
 
 # CUB (only for CUDA platform)
 if(HIP_COMPILER STREQUAL "nvcc")
-  set(CCCL_MINIMUM_VERSION 2.8.2)
+  set(CCCL_MINIMUM_VERSION 3.0.0)
   if(NOT DOWNLOAD_CUB)
     find_package(CCCL ${CCCL_MINIMUM_VERSION} CONFIG)
   endif()
@@ -484,7 +499,6 @@ else()
         LOG_BUILD TRUE
         LOG_INSTALL TRUE
       )
-      override_cache_variable(BUILD_CODE_COVERAGE OFF BOOL)
       FetchContent_MakeAvailable(prim)
 
       if(NOT TARGET roc::rocprim)
@@ -494,13 +508,15 @@ else()
       if(NOT TARGET roc::rocprim_hip)
         add_library(roc::rocprim_hip ALIAS rocprim_hip)
       endif()
-      restore_cache_variable(BUILD_CODE_COVERAGE BOOL)
     endif()
   endif()
 endif()
 
 foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
   set(${SHARED_OPTION} ${USER_${SHARED_OPTION}})
+  if(DEFINED USER_CACHED_${SHARED_OPTION})
+    set_property(CACHE ${SHARED_OPTION} PROPERTY VALUE "${USER_CACHED_${SHARED_OPTION}}")
+  endif()
 endforeach()
 
 # Restore user global state

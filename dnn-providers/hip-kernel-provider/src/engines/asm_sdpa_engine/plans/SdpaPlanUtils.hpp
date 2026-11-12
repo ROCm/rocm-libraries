@@ -4,16 +4,24 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <exception>
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
 #include <initializer_list>
+#include <iomanip>
+#include <limits>
 #include <optional>
+#include <sstream>
 #include <string>
+#include <unordered_map>
 
 namespace asm_sdpa_engine
 {
@@ -55,35 +63,73 @@ enum class MaskType : int
     SLIDING_WINDOW = 3
 };
 
-// Classify the mask requested by an SDPA (forward or backward) attribute set.
+// The diagonal band an SDPA (forward or backward) attribute set requests, with
+// the deprecated causal_mask / causal_mask_bottom_right booleans merged in.
 //
-// Two sources can describe the mask: the modern left_bound / right_bound /
-// diagonal_alignment trio, and the deprecated causal_mask /
-// causal_mask_bottom_right booleans. When a deprecated boolean is set it takes
-// precedence and the modern trio is ignored; otherwise the trio is
-// authoritative. The two deprecated booleans are mutually exclusive, so setting
-// both throws HipdnnPluginException(INVALID_VALUE).
+// leftBound is in the kernels' (FlashAttention/AITER window_size_left)
+// convention: the number of keys kept left of the diagonal, -1 for unbounded.
+// The graph's left_bound is cuDNN's, which counts the diagonal key too, so
+// resolveDiagonalBand() stores left_bound - 1 (SdpaSemanticsRegister SEM-001).
+// rightBound means the same in both conventions.
+struct DiagonalBand
+{
+    int64_t leftBound;
+    int64_t rightBound;
+    hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment alignment;
+};
+
+// Replace each bound that already covers the whole sequence span with -1
+// (unbounded).
 //
-// Guaranteeing the two parameter sets agree belongs in the hipDNN frontend; this
-// helper only resolves which source wins for dispatch.
+// A bound that reaches the widest offset the band can span for this alignment
+// and these sequence lengths masks nothing on its side, so it becomes -1. That
+// is the same mask: computeMaskCoordinates() replaces -1 with exactly that
+// widest offset (seqLen - 1 on the matching axis). A covering window therefore
+// classifies as plain causal or no-mask. Bounds that survive are returned
+// unchanged as int64, so a kernel field filled from one must first confirm it
+// fits int32. Every survivor is strictly below a sequence length, so the
+// dimFitsI32() gate the plan builders apply to seqLenQ / seqLenKv is what makes
+// that narrowing safe.
 //
-// Absence-awareness: the generated flatbuffer accessors expose the causal_mask*
-// fields as plain bool defaulting to false, with no has_*() accessor.
-// "Explicitly false" and "unset" are therefore indistinguishable; a false bool
-// is treated as "not requested". left_bound / right_bound are
-// flatbuffers::Optional, but an unset bound is treated as unbounded (-1) to
-// match the canonical convention used across the SDPA path, so a partially
-// specified trio (e.g. only right_bound = 0) still derives a mask rather than
-// silently falling back to NO_MASK.
+// A sequence length of 0 or 1 gives a span <= 0, so a bound of 0 also becomes
+// -1 (e.g. top-left causal with seqLenKv == 1 is unmasked).
+//
+// Expects bounds >= -1 (resolveDiagonalBand() rejects the rest).
+inline DiagonalBand makeCoveringBoundsUnbound(DiagonalBand band, int64_t seqLenQ, int64_t seqLenKv)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
+    const bool bottomRight = band.alignment == DiagonalAlignment::BOTTOM_RIGHT;
+    const int64_t leftSpan = bottomRight ? seqLenKv - 1 : seqLenQ - 1;
+    const int64_t rightSpan = bottomRight ? seqLenQ - 1 : seqLenKv - 1;
+    const auto unboundIfCovering
+        = [](int64_t bound, int64_t span) { return (bound < 0 || bound >= span) ? -1 : bound; };
+    band.leftBound = unboundIfCovering(band.leftBound, leftSpan);
+    band.rightBound = unboundIfCovering(band.rightBound, rightSpan);
+    return band;
+}
+
+// Extract the requested diagonal band, merging the deprecated booleans the way
+// cuDNN's setters compose: a boolean acts as if its setter ran first (right
+// bound 0, plus BOTTOM_RIGHT alignment for causal_mask_bottom_right) and the
+// stored bounds and alignment are applied on top. An unset bound, or one equal
+// to -1, does not override the causal right bound. causal_mask keeps the stored
+// alignment; causal_mask_bottom_right always resolves to BOTTOM_RIGHT, because
+// TOP_LEFT is the schema default and indistinguishable from an unset alignment.
+//
+// The graph's left_bound follows cuDNN: left_bound = L keeps the L keys ending at
+// the diagonal, diagonal included. The returned band holds the FlashAttention
+// window_size_left the kernels take, L - 1 (see DiagonalBand).
+//
+// Setting both booleans, a bound below -1, or left_bound = 0 (hipDNN's band domain
+// excludes it, see SdpaSemanticsRegister SEM-005) throws HipdnnPluginException(INVALID_VALUE).
 template <typename SdpaAttrsT>
-MaskType getMaskType(const SdpaAttrsT& attrs)
+DiagonalBand resolveDiagonalBand(const SdpaAttrsT& attrs)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     const bool causalDeprecated = attrs.causal_mask();
     const bool bottomRightDeprecated = attrs.causal_mask_bottom_right();
 
-    // The two deprecated booleans are mutually exclusive.
     if(causalDeprecated && bottomRightDeprecated)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -92,31 +138,50 @@ MaskType getMaskType(const SdpaAttrsT& attrs)
             "but both are set");
     }
 
-    // Deprecated booleans take precedence: when either is set, defer to it and
-    // ignore the modern bounds trio.
-    if(causalDeprecated)
-    {
-        return MaskType::TOP_LEFT_CAUSAL;
-    }
-    if(bottomRightDeprecated)
-    {
-        return MaskType::BOTTOM_RIGHT_CAUSAL;
-    }
-
-    // No deprecated boolean set: the modern bounds trio is authoritative. An
-    // unset bound means unbounded, represented here as -1, so a partially
-    // specified trio still resolves to the mask it describes.
     const int64_t left = attrs.left_bound().has_value() ? attrs.left_bound().value() : -1;
     const int64_t right = attrs.right_bound().has_value() ? attrs.right_bound().value() : -1;
-    if(left == -1 && right == -1) // both unbounded
+
+    if(left < -1 || right < -1)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+            "SDPA: left_bound and right_bound must be >= -1 (got left_bound=" + std::to_string(left)
+                + ", right_bound=" + std::to_string(right) + ")");
+    }
+    if(left == 0)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
+            "SDPA: left_bound must be positive or -1 (unbounded)");
+    }
+    const int64_t kernelLeft = left > 0 ? left - 1 : -1;
+
+    if(!causalDeprecated && !bottomRightDeprecated)
+    {
+        return {kernelLeft, right, attrs.diagonal_alignment()};
+    }
+
+    return {kernelLeft,
+            right >= 0 ? right : 0,
+            bottomRightDeprecated ? DiagonalAlignment::BOTTOM_RIGHT : attrs.diagonal_alignment()};
+}
+
+// Classify a diagonal band (from resolveDiagonalBand(), typically passed through
+// makeCoveringBoundsUnbound() first).
+inline MaskType getMaskType(int64_t leftBound,
+                            int64_t rightBound,
+                            hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment alignment)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
+
+    if(leftBound == -1 && rightBound == -1) // both unbounded
     {
         return MaskType::NO_MASK;
     }
-    if(left == -1 && right == 0) // causal: attend up to the diagonal
+    if(leftBound == -1 && rightBound == 0) // causal: attend up to the diagonal
     {
-        return attrs.diagonal_alignment() == DiagonalAlignment::BOTTOM_RIGHT
-                   ? MaskType::BOTTOM_RIGHT_CAUSAL
-                   : MaskType::TOP_LEFT_CAUSAL;
+        return alignment == DiagonalAlignment::BOTTOM_RIGHT ? MaskType::BOTTOM_RIGHT_CAUSAL
+                                                            : MaskType::TOP_LEFT_CAUSAL;
     }
     return MaskType::SLIDING_WINDOW; // anything else is a sliding window
 }
@@ -125,8 +190,9 @@ MaskType getMaskType(const SdpaAttrsT& attrs)
 // Sliding-window mask coordinate transformation
 // =============================================================================
 //
-// Converts raw window sizes (left_bound, right_bound from the hipDNN graph)
-// into the precomputed mask coordinates (mask_y, mask_x) that the AITER ASM
+// Converts FlashAttention-convention window sizes (a DiagonalBand's bounds, not
+// the graph's cuDNN-semantics left_bound) into the precomputed mask coordinates
+// (mask_y, mask_x) that the AITER ASM
 // DQDKDV kernel expects in its argument struct.
 //
 // AITER reference: ck_tile_shim.h::compute_mask_coordinates()
@@ -148,25 +214,70 @@ inline std::pair<int32_t, int32_t> computeMaskCoordinates(
 }
 
 // =============================================================================
-// Byte-stride overflow primitive
+// Kernarg range primitives
 // =============================================================================
 //
+// Dimensions and strides reach the kernels through 32-bit fields: the kernarg
+// structs store them as uint32_t, the launch grid takes unsigned int, and the
+// kernel registries are keyed on int. A value that does not fit its field
+// truncates silently and the kernel then runs on a different shape than the
+// graph asked for, so the plan builders check every one of them in
+// isApplicable, ahead of the first narrowing cast. Each predicate logs the
+// offending field and returns false (rather than returning early) so a caller
+// can report every violation of a tensor in one pass.
+
+// For dimensions whose only 32-bit narrowing is the uint32_t kernarg field or
+// the unsigned grid dimension that carries them: batch and the head counts.
+inline bool dimFitsU32(const char* name, int64_t dim)
+{
+    constexpr auto K_U32_MAX_AS_I64 = static_cast<int64_t>(UINT32_MAX);
+    if(dim >= 0 && dim <= K_U32_MAX_AS_I64)
+    {
+        return true;
+    }
+    HIPDNN_PLUGIN_LOG_INFO("SDPA: dimension overflows its uint32_t kernarg field (field="
+                           << name << ", value=" << dim << ", max=" << K_U32_MAX_AS_I64 << ")");
+    return false;
+}
+
+// For dimensions that pass through a signed 32-bit value on the way to their
+// kernarg field: the head dims are cast to int for the kernel-registry lookup,
+// and the sequence lengths become int32 mask coordinates on the backward
+// window path (computeMaskCoordinates) and feed `(extent + ts - 1) / ts` grid
+// math evaluated in unsigned int, which is exact only while extent stays below
+// 2^31.
+inline bool dimFitsI32(const char* name, int64_t dim)
+{
+    constexpr auto K_I32_MAX_AS_I64 = static_cast<int64_t>(INT32_MAX);
+    if(dim >= 0 && dim <= K_I32_MAX_AS_I64)
+    {
+        return true;
+    }
+    HIPDNN_PLUGIN_LOG_INFO("SDPA: dimension overflows its int32 narrowing (field="
+                           << name << ", value=" << dim << ", max=" << K_I32_MAX_AS_I64 << ")");
+    return false;
+}
+
 // Returns true when `elements * elementBytes` fits in a uint32_t (the kernarg
 // stride field width) and `elements` is non-negative; logs the offending field
-// and returns false otherwise. The per-tensor wrappers that enumerate the
-// concrete stride fields live in the fwd / bwd plan builders, since the tensor
-// sets differ between passes.
+// and returns false otherwise. The comparison divides instead of multiplying,
+// so the product it rules out is never formed. `elementBytes` folds in any
+// constant factor the kernel applies on top of the element size (the backward
+// Ts field multiplies the K sequence stride by the tile size as well), and a
+// non-positive `elementBytes` is rejected rather than divided by. The
+// per-tensor wrappers that enumerate the concrete stride fields live in the fwd
+// / bwd plan builders, since the tensor sets differ between passes.
 inline bool byteStrideFitsU32(const char* name, int64_t elements, int64_t elementBytes)
 {
     constexpr auto K_U32_MAX_AS_I64 = static_cast<int64_t>(UINT32_MAX);
-    if(elements >= 0 && elements * elementBytes <= K_U32_MAX_AS_I64)
+    if(elements >= 0 && elementBytes > 0 && elements <= K_U32_MAX_AS_I64 / elementBytes)
     {
         return true;
     }
     HIPDNN_PLUGIN_LOG_INFO("SDPA: byte stride overflows uint32_t (field="
                            << name << ", elements=" << elements << ", elementBytes=" << elementBytes
-                           << ", scaled=" << elements * elementBytes << ", max=" << K_U32_MAX_AS_I64
-                           << ")");
+                           << ", max elements="
+                           << (elementBytes > 0 ? K_U32_MAX_AS_I64 / elementBytes : 0) << ")");
     return false;
 }
 
@@ -187,6 +298,166 @@ inline std::optional<std::string> tryGetDeviceString(hipStream_t stream, const c
         HIPDNN_PLUGIN_LOG_ERROR(logPrefix << e.what());
         return std::nullopt;
     }
+}
+
+// =============================================================================
+// Attention scale
+// =============================================================================
+
+// The attention scale the kernels apply when the graph has no scale tensor:
+// attn_scale_value, or 1.0 (no scaling, cuDNN's default) when it is unset.
+template <typename SdpaAttrsT>
+float attnScaleOrDefault(const SdpaAttrsT& attrs)
+{
+    return attrs.attn_scale_value().value_or(1.0f);
+}
+
+// False for an attention scale the kernels are known to mishandle: one that is
+// not a finite, positive, normal float (FLT_MIN <= scale <= FLT_MAX, so NaN
+// fails). cuDNN and hipDNN accept any scale value, so the engine must decline
+// these. Passing this check is necessary, not sufficient: large finite scales can
+// still fail (see below).
+//
+// The kernels write -inf into every masked score (causal and sliding-window masks,
+// and the padding past S_kv in the last K tile) and only then multiply the scores
+// by scale * log2(e). A scale of 0 turns those scores into NaN (-inf * 0), and a
+// negative scale turns them into +inf. The bf16 forward kernels also start the
+// running row max at max(-FLT_MAX, -FLT_MAX / (scale * log2(e))). That is positive
+// for a negative scale and +inf for -0.0, so even with no mask the exp2 inputs
+// overflow, or for -0.0 are NaN (-0 * +inf). 32-bit denormals are flushed, so a
+// subnormal scale acts as 0.
+//
+// Large scales are tracked by ALMIOPEN-3137, because the limit depends on the input. With
+// c = scale * log2(e), the forward computes each exp2 input as
+// fma(score, c, -(c * row max)), with the product rounded. For the row's max score
+// only the rounding residue is left, up to half an ulp of the product, so exp2 can
+// overflow or underflow once |c * row max of the raw scores| reaches 2^31. On
+// gfx942, scales of 1e37 and 1e38 gave NaN O this way with raw scores around 1e-3.
+// The backward subtracts a rounded LSE * log2(e) the same way; it was not tested
+// with such scales.
+//
+// The fp8 forward instead multiplies the scores by scale * log2(e) * q_descale *
+// k_descale, and starts the row max at max(-FLT_MAX, -FLT_MAX / (q_descale *
+// k_descale)). The descales live in device memory and are not checked, so a
+// descale product that is not positive, or small enough to flush that factor to
+// 0, fails like an unsupported scale.
+//
+// (From the gfx942 .co disassembly. The gfx950 bf16 forward kernels contain the
+// same sentinel, row max start and fma.)
+inline bool isSupportedAttnScale(float scale)
+{
+    return scale >= std::numeric_limits<float>::min() && scale <= std::numeric_limits<float>::max();
+}
+
+// Avoid an out-of-range double-to-float conversion. Infinities and finite values
+// outside the float range become infinities, which isSupportedAttnScale rejects.
+// Values within the range retain the usual rounding to the kernel's float type.
+inline float narrowAttnScale(double scale)
+{
+    if(std::isnan(scale))
+    {
+        return std::numeric_limits<float>::quiet_NaN();
+    }
+    if(scale > static_cast<double>(std::numeric_limits<float>::max()))
+    {
+        return std::numeric_limits<float>::infinity();
+    }
+    if(scale < -static_cast<double>(std::numeric_limits<float>::max()))
+    {
+        return -std::numeric_limits<float>::infinity();
+    }
+    return static_cast<float>(scale);
+}
+
+// An attention scale as text, for decline reasons and errors.
+inline std::string attnScaleToString(float scale)
+{
+    std::ostringstream text;
+    text << std::setprecision(std::numeric_limits<float>::max_digits10) << scale;
+    return text.str();
+}
+
+// The attention scale the kernels will receive, if it is known before execute:
+// attn_scale_value or its default when the graph has no scale tensor, or else the
+// value of a compile-time constant or runtime-with-default pass-by-value scale
+// tensor, which buildPlan bakes. Narrowed to the f32 kernarg, as execute narrows
+// it. std::nullopt for a pure runtime pass-by-value scale tensor, whose value
+// arrives at execute. Throws, as buildPlan would, when the scale tensor's value
+// cannot be read.
+template <typename SdpaAttrsT>
+std::optional<float> attnScaleBeforeExecute(
+    const SdpaAttrsT& attrs,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap)
+{
+    if(!attrs.scale_tensor_uid().has_value())
+    {
+        return attnScaleOrDefault(attrs);
+    }
+    const auto operand = hipdnn_plugin_sdk::makeScalarOperand(
+        tensorMap, attrs.scale_tensor_uid().value(), "attn_scale");
+    if(operand.isRuntimeUserSupplied)
+    {
+        return std::nullopt;
+    }
+    return narrowAttnScale(hipdnn_plugin_sdk::toDouble(operand.bakedDefault));
+}
+
+// Check a scale known before execute; pure runtime pass-by-value scales are
+// checked at execute instead. Share the policy and decline diagnostics between
+// the forward and backward applicability predicates.
+template <typename SdpaAttrsT>
+bool isAttnScaleApplicable(
+    const SdpaAttrsT& attrs,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
+    const char* logPrefix)
+{
+    std::optional<float> attnScale;
+    try
+    {
+        attnScale = attnScaleBeforeExecute(attrs, tensorMap);
+    }
+    catch(const std::exception& e)
+    {
+        HIPDNN_PLUGIN_LOG_INFO(std::string{logPrefix}
+                               + "scale tensor value cannot be read: " + e.what());
+        return false;
+    }
+    if(attnScale.has_value() && !isSupportedAttnScale(*attnScale))
+    {
+        HIPDNN_PLUGIN_LOG_INFO(
+            std::string{logPrefix}
+            + "attention scale must be a finite, positive, normal float (Actual value: "
+            + attnScaleToString(*attnScale) + ")");
+        return false;
+    }
+    return true;
+}
+
+// Resolves the attention scale into the f32 kernarg at execute. Throws
+// HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM) for a scale the kernels
+// mishandle (see isSupportedAttnScale), so call it before the first launch.
+// isApplicable declines every other such scale, so only a pure runtime
+// pass-by-value scale tensor can fail here.
+inline float resolveSupportedAttnScale(const hipdnn_plugin_sdk::ScalarOperand& attnScale,
+                                       const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                       uint32_t numDeviceBuffers,
+                                       const char* caller)
+{
+    const auto scale = narrowAttnScale(hipdnn_plugin_sdk::toDouble(
+        hipdnn_plugin_sdk::resolveScalarOperand(attnScale, deviceBuffers, numDeviceBuffers)));
+    if(!isSupportedAttnScale(scale))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            std::string(caller)
+                + ": attention scale must be a finite, positive, normal float (Actual value: "
+                + attnScaleToString(scale) + ")");
+    }
+    return scale;
 }
 
 } // namespace plan_utils

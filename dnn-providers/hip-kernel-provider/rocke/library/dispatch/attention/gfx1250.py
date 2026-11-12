@@ -181,5 +181,7 @@ def _make_wmma_fwd_candidate() -> KernelCandidate:
     return candidate
 
 
-def register(registry: CandidateRegistry) -> None:
-    registry.register(_make_wmma_fwd_candidate())
+def register(route: CandidateRegistry, execution: CandidateRegistry) -> None:
+    candidate = _make_wmma_fwd_candidate()
+    route.register(candidate)
+    execution.register(candidate)

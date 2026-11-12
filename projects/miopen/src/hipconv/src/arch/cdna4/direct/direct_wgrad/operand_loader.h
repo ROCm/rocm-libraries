@@ -18,9 +18,32 @@
 namespace hipconv::cdna4::direct_wgrad
 {
 
+// The type one LDS element holds: the operand's own, or the bf16 plane tf32 splits into.
+//
+// A tf32 operand reaches LDS as a (big, small) bf16 pair because ds_read_b64_tr_b16 is the only
+// transposing read cdna4 has and it is 16-bit. See the row loader.
+template <hipconv::DataType DT>
+using LdsType = ToSplitType<DT>;
+
+// Whether this operand is held as a split pair rather than one value.
+template <hipconv::DataType DT>
+constexpr bool is_split = DT == hipconv::DataType::tf32;
+
 template <hipconv::DataType DT>
 constexpr bunnies::fpfmt operand_fmt =
-    DT == hipconv::DataType::bf16 ? bunnies::fpfmt::e8m7 : bunnies::fpfmt::e5m10;
+    DT == hipconv::DataType::tf32   ? bunnies::fpfmt::e8m10_e8m7x2split
+    : DT == hipconv::DataType::bf16 ? bunnies::fpfmt::e8m7
+                                    : bunnies::fpfmt::e5m10;
+
+// The 16-bit format one plane of an operand is read at.
+//
+// A split operand's two planes are each read exactly as a bf16 operand would be -- same lane
+// map, same round count, same storage vector -- so the plane borrows bf16's matrix wholesale
+// and the split format never reaches the load side at all. On the 16-bit path a plane is the
+// whole operand and this is operand_fmt.
+template <hipconv::DataType DT>
+constexpr bunnies::fpfmt plane_fmt =
+    DT == hipconv::DataType::fp16 ? bunnies::fpfmt::e5m10 : bunnies::fpfmt::e8m7;
 
 // S contributes the A operand, C x Q; delta the B operand, Q x K.
 template <hipconv::DataType DT>
@@ -28,6 +51,12 @@ using mat_s = arch::matrix<operand_fmt<DT>, MFMA_M, MFMA_K, bunnies::use::A>;
 template <hipconv::DataType DT>
 using mat_delta = arch::matrix<operand_fmt<DT>, MFMA_K, MFMA_N, bunnies::use::B>;
 using mat_wgrad = arch::matrix<bunnies::fpfmt::e8m23, MFMA_M, MFMA_N, bunnies::use::Acc>;
+
+// The same two operands, one plane at a time.
+template <hipconv::DataType DT>
+using plane_s = arch::matrix<plane_fmt<DT>, MFMA_M, MFMA_K, bunnies::use::A>;
+template <hipconv::DataType DT>
+using plane_delta = arch::matrix<plane_fmt<DT>, MFMA_K, MFMA_N, bunnies::use::B>;
 
 // One wave's operand and accumulator tiles.
 template <Config cfg, hipconv::DataType DT>
@@ -59,15 +88,30 @@ __device__ void zero_tile(RegTile& tile)
 // image and the shift then moves within it, possibly into its halo; a pre-added shift would read
 // as the next image's column. `SRowLayout::ladder_pays` picks between this form and
 // `load_s_ladder`.
+//
+// A split operand reads both planes, which is the same read twice at a constant distance: the
+// two planes share one layout and one swizzle, so the small plane's address is the big one's
+// plus plane_stride, and that rides in the ds_read's own offset field.
 template <Config cfg, hipconv::DataType DT, typename Layout>
-__device__ void load_s(rt_s<cfg, DT>& tile, ToType<DT>* row_lds, int q_shift, int c_base)
+__device__ void load_s(rt_s<cfg, DT>& tile, LdsType<DT>* row_lds, int q_shift, int c_base)
 {
     // row is the lane's channel within the 16-row block, 4-aligned so the group divide is
     // exact; col is the Q index.
-    bunnies::load_tile<arch::ds_read_b64_tr_b16>(
-        tile, row_lds, [=](int mb, int /*nb*/, int row, int col) {
+    const auto offset = [=](int mb, int /*nb*/, int row, int col) {
         return Layout::elem_offset_shifted(col, q_shift, (c_base + mb * MFMA_M + row) / 4);
-    });
+    };
+
+    if constexpr(is_split<DT>)
+    {
+        using Inst = arch::ds_read_b64_tr_b16;
+        bunnies::load_tile<Inst, plane_s<DT>, /*Small=*/false>(tile, row_lds, offset);
+        bunnies::load_tile<Inst, plane_s<DT>, /*Small=*/true>(
+            tile, row_lds + Layout::plane_stride, offset);
+    }
+    else
+    {
+        bunnies::load_tile<arch::ds_read_b64_tr_b16>(tile, row_lds, offset);
+    }
 }
 
 // Load the kw shifted S tiles at once, as one ladder over the row.
@@ -91,41 +135,53 @@ __device__ void load_s(rt_s<cfg, DT>& tile, ToType<DT>* row_lds, int q_shift, in
 // matter of common subexpressions and does not depend on the order, but the schedule does, and
 // issuing a block's whole ladder before moving to the next block measured 1.27x slower on a config
 // with nothing to gain from the fold in the first place.
+//
+// A split operand runs the whole ladder twice, once per plane, the small plane's base being the
+// big one's plus plane_stride. The fold is a property of the swizzle, which both planes share,
+// so the second pass folds exactly as the first does.
 template <Config cfg, hipconv::DataType DT, typename Layout>
-__device__ void load_s_ladder(rt_s<cfg, DT> (&tiles)[cfg.kw], ToType<DT>* row_lds, int c_base)
+__device__ void load_s_ladder(rt_s<cfg, DT> (&tiles)[cfg.kw], LdsType<DT>* row_lds, int c_base)
 {
-    using Inst   = arch::ds_read_b64_tr_b16;
-    using Tile   = rt_s<cfg, DT>;
-    using Matrix = typename Tile::matrix;
-    using ld_t   = typename Inst::type;
+    using Inst  = arch::ds_read_b64_tr_b16;
+    using Tile  = rt_s<cfg, DT>;
+    using Plane = plane_s<DT>;
+    using ld_t  = typename Inst::type;
 
-    constexpr int bpi        = bunnies::bits_per_item(Matrix::fmt);
+    constexpr int bpi        = bunnies::bits_per_item(Plane::fmt);
     constexpr int per_round  = Inst::bits_per_load / bpi;
-    constexpr int num_rounds = Matrix::num_items / per_round;
+    constexpr int num_rounds = Plane::num_items / per_round;
 
     // Hoisted, so every displacement that folds is this address plus an immediate. row is the
     // lane's channel within the 16-row block and col the Q index, as in load_s.
-    const auto coord0 = Matrix::map(Inst::map(bunnies::lane_id(), 0, bpi));
+    const auto coord0 = Plane::map(Inst::map(bunnies::lane_id(), 0, bpi));
 
-    bunnies::static_unroll<cfg.kw>([&](auto shift) {
-        constexpr int s = decltype(shift)::value;
+    const auto ladder = [&]<bool Small>(LdsType<DT>* base) {
+        bunnies::static_unroll<cfg.kw>([&](auto shift) {
+            constexpr int s = decltype(shift)::value;
 #pragma unroll
-        for(int mb = 0; mb < Tile::row_blocks; ++mb)
-            bunnies::static_unroll<num_rounds>([&](auto rnd) {
-                constexpr int r     = decltype(rnd)::value;
-                constexpr int d     = r * Layout::cols_per_round + s;
-                constexpr int fixed = Layout::displacement(d);
+            for(int mb = 0; mb < Tile::row_blocks; ++mb)
+                bunnies::static_unroll<num_rounds>([&](auto rnd) {
+                    constexpr int r     = decltype(rnd)::value;
+                    constexpr int d     = r * Layout::cols_per_round + s;
+                    constexpr int fixed = Layout::displacement(d);
 
-                const int c4 = (c_base + mb * MFMA_M + coord0[0]) / 4;
-                int offset;
-                if constexpr(fixed != Layout::no_displacement)
-                    offset = Layout::elem_offset_shifted(coord0[1], 0, c4) + fixed;
-                else
-                    offset = Layout::elem_offset_shifted(coord0[1], d, c4);
-                Inst::load(row_lds + offset,
-                           reinterpret_cast<ld_t*>(&tiles[s].block(mb, 0).data) + r);
-            });
-    });
+                    const int c4 = (c_base + mb * MFMA_M + coord0[0]) / 4;
+                    int offset;
+                    if constexpr(fixed != Layout::no_displacement)
+                        offset = Layout::elem_offset_shifted(coord0[1], 0, c4) + fixed;
+                    else
+                        offset = Layout::elem_offset_shifted(coord0[1], d, c4);
+                    Inst::load(base + offset,
+                               reinterpret_cast<ld_t*>(
+                                   bunnies::block_storage<Small>(tiles[s].block(mb, 0))) +
+                                   r);
+                });
+        });
+    };
+
+    ladder.template operator()<false>(row_lds);
+    if constexpr(is_split<DT>)
+        ladder.template operator()<true>(row_lds + Layout::plane_stride);
 }
 
 // Load this wave's Q(32) x K slice of the delta row held in `row_lds`.
@@ -133,13 +189,24 @@ __device__ void load_s_ladder(rt_s<cfg, DT> (&tiles)[cfg.kw], ToType<DT>* row_ld
 // Delta is read at a single column offset, so there is no shift argument. k_base is the wave's
 // channel origin within the workgroup's K block.
 template <Config cfg, hipconv::DataType DT, typename Layout>
-__device__ void load_delta(rt_delta<cfg, DT>& tile, ToType<DT>* row_lds, int k_base)
+__device__ void load_delta(rt_delta<cfg, DT>& tile, LdsType<DT>* row_lds, int k_base)
 {
     // Mirror of load_s: row is the Q index and col the 4-aligned channel.
-    bunnies::load_tile<arch::ds_read_b64_tr_b16>(
-        tile, row_lds, [=](int /*mb*/, int nb, int row, int col) {
+    const auto offset = [=](int /*mb*/, int nb, int row, int col) {
         return Layout::elem_offset(row, (k_base + nb * MFMA_N + col) / 4);
-    });
+    };
+
+    if constexpr(is_split<DT>)
+    {
+        using Inst = arch::ds_read_b64_tr_b16;
+        bunnies::load_tile<Inst, plane_delta<DT>, /*Small=*/false>(tile, row_lds, offset);
+        bunnies::load_tile<Inst, plane_delta<DT>, /*Small=*/true>(
+            tile, row_lds + Layout::plane_stride, offset);
+    }
+    else
+    {
+        bunnies::load_tile<arch::ds_read_b64_tr_b16>(tile, row_lds, offset);
+    }
 }
 
 } // namespace hipconv::cdna4::direct_wgrad

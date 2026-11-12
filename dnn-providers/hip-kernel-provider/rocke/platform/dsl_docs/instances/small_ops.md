@@ -491,6 +491,36 @@ descriptor's `valid` predicate masks padded cells with the reduction's
 neutral element (`-inf` for max, `0` for sum / avg). One thread per
 output element.
 
+Source: `instances/common/pooling.py`.
+
+```python
+PoolOp = Literal["max", "avg", "sum"]   # Pooling2DSpec.op takes the string
+
+
+@dataclass(frozen=True)
+class PoolingProblem:
+    N: int; H: int; W: int; C: int   # NHWC input
+    Y: int; X: int        # pool window
+    sH: int = 1; sW: int = 1
+    pH: int = 0; pW: int = 0
+    dH: int = 1; dW: int = 1
+    # Ho / Wo / total_out are derived properties.
+```
+
+Algorithm:
+
+```text
+1. One thread per NHWC output element.
+2. Decompose flat output index into (n, ho, wo, c).
+3. Loop over pooling window (y, x).
+4. Compute input (hi, wi) via embed-style formulas.
+5. Mask out invalid (hi, wi).
+6. Reduce in f32: max / sum (for avg, divide by selected count or window count).
+7. Cast back to output dtype and store.
+```
+
+Grid: `ceil_div(total_output_elements, block_size)`.
+
 ## Permute (rank-N)
 
 File: `instances/permute_nd.py`. Matches CK Tile `06_permute`.
@@ -648,8 +678,8 @@ The MoE-sort kernels rely on three reusable helpers shared with the
 Quantisation-specific failure modes :
 
 - `eps` clamp on `amax` is missing: an all-zero row produces `+inf`
- for `1/yscale` and the `cvt_f32_to_<q>` saturates to the wrong
- sign on zero inputs.
+ for `1/yscale`, and the `cvt_f32_to_<q>` of the scaled zero
+ (NaN) is NaN: the fp8 / bf8 conversions do not saturate.
 - `quant_max` constant divergence vs CK Tile (`127.0f` for i8,
  `448.0f` for fp8e4m3, `57344.0f` for bf8e5m2). Use
  `helpers.quant.quant_max_abs(qdtype)` to stay aligned.
@@ -765,17 +795,16 @@ multiply post-MFMA, against the same spec surface.
 
 ## MX GEMM File: `instances/mx_gemm.py`. Matches CK Tile ``42_mx_gemm``. Uses the
 OCP MX-spec shared-exponent format: each 32-element mantissa block
-carries one 8-bit unbiased E8M0 scale.
+carries one 8-bit biased E8M0 scale (bias 127).
 
 Per-element math::
 
  A_real[i] = mantissa[i] * 2^(A_scale[i // 32] - 127)
 
-The kernel uses :func:`rocke.helpers.decode_mx_scale_e8m0` to turn
-the E8M0 byte into an f32 multiplier (with NaN / zero sentinel
-handling matching the AMDGPU MX MFMA hardware path) and
-:func:`rocke.helpers.apply_mx_scale` to apply the scale before the
-accumulate.
+The kernel scales each group's MFMA result with
+:func:`rocke.helpers.fma_with_mx_scale_pair` (see the MX GEMM section
+of ``instances/gemm.md`` for the scale contract, why the two scale
+exponents are added as integers, and why each update is exact).
 
 v1 ships fp8 and bf8 mantissa with ``group_k=32`` (the MX spec
 default); fp4 and fp6 mantissa variants land with the matching

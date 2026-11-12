@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -65,33 +65,6 @@ struct DevicePartition
     }
 
     template<typename InputIteratorT,
-             typename FlagIterator,
-             typename OutputIteratorT,
-             typename NumSelectedIteratorT,
-             typename NumItemsT>
-    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
-    static hipError_t Flagged(void*                d_temp_storage,
-                              size_t&              temp_storage_bytes,
-                              InputIteratorT       d_in,
-                              FlagIterator         d_flags,
-                              OutputIteratorT      d_out,
-                              NumSelectedIteratorT d_num_selected_out,
-                              NumItemsT            num_items,
-                              hipStream_t          stream,
-                              bool                 debug_synchronous)
-    {
-        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
-        return Flagged(d_temp_storage,
-                       temp_storage_bytes,
-                       d_in,
-                       d_flags,
-                       d_out,
-                       d_num_selected_out,
-                       num_items,
-                       stream);
-    }
-
-    template<typename InputIteratorT,
              typename OutputIteratorT,
              typename NumSelectedIteratorT,
              typename SelectOp,
@@ -117,33 +90,6 @@ struct DevicePartition
     }
 
     template<typename InputIteratorT,
-             typename OutputIteratorT,
-             typename NumSelectedIteratorT,
-             typename SelectOp,
-             typename NumItemsT>
-    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
-    static hipError_t If(void*                d_temp_storage,
-                         size_t&              temp_storage_bytes,
-                         InputIteratorT       d_in,
-                         OutputIteratorT      d_out,
-                         NumSelectedIteratorT d_num_selected_out,
-                         NumItemsT            num_items,
-                         SelectOp             select_op,
-                         hipStream_t          stream,
-                         bool                 debug_synchronous)
-    {
-        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
-        return If(d_temp_storage,
-                  temp_storage_bytes,
-                  d_in,
-                  d_out,
-                  d_num_selected_out,
-                  num_items,
-                  select_op,
-                  stream);
-    }
-
-    template<typename InputIteratorT,
              typename FirstOutputIteratorT,
              typename SecondOutputIteratorT,
              typename UnselectedOutputIteratorT,
@@ -153,7 +99,7 @@ struct DevicePartition
              typename NumItemsT>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t If(void*                     d_temp_storage,
-                         std::size_t&              temp_storage_bytes,
+                         size_t&                   temp_storage_bytes,
                          InputIteratorT            d_in,
                          FirstOutputIteratorT      d_first_part_out,
                          SecondOutputIteratorT     d_second_part_out,
@@ -175,42 +121,6 @@ struct DevicePartition
                                                                  select_first_part_op,
                                                                  select_second_part_op,
                                                                  stream));
-    }
-
-    template<typename InputIteratorT,
-             typename FirstOutputIteratorT,
-             typename SecondOutputIteratorT,
-             typename UnselectedOutputIteratorT,
-             typename NumSelectedIteratorT,
-             typename SelectFirstPartOp,
-             typename SelectSecondPartOp,
-             typename NumItemsT>
-    HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
-    static hipError_t If(void*                     d_temp_storage,
-                         std::size_t&              temp_storage_bytes,
-                         InputIteratorT            d_in,
-                         FirstOutputIteratorT      d_first_part_out,
-                         SecondOutputIteratorT     d_second_part_out,
-                         UnselectedOutputIteratorT d_unselected_out,
-                         NumSelectedIteratorT      d_num_selected_out,
-                         NumItemsT                 num_items,
-                         SelectFirstPartOp         select_first_part_op,
-                         SelectSecondPartOp        select_second_part_op,
-                         hipStream_t               stream,
-                         bool                      debug_synchronous)
-    {
-        HIPCUB_DETAIL_RUNTIME_LOG_DEBUG_SYNCHRONOUS();
-        return If(d_temp_storage,
-                  temp_storage_bytes,
-                  d_in,
-                  d_first_part_out,
-                  d_second_part_out,
-                  d_unselected_out,
-                  d_num_selected_out,
-                  num_items,
-                  select_first_part_op,
-                  select_second_part_op,
-                  stream);
     }
 };
 

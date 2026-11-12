@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,7 +27,6 @@
 #include "test_utils_types.hpp"
 
 #include <hipcub/device/device_copy.hpp>
-#include <hipcub/thread/thread_operators.hpp>
 
 #include <gtest/gtest-typed-test.h>
 #include <gtest/gtest.h>
@@ -268,12 +267,12 @@ TYPED_TEST(DeviceBatchCopyTests, SizeAndTypeVariation)
                                         h_buffer_num_elements.end(),
                                         0,
                                         src_offsets.begin(),
-                                        hipcub::Sum{});
+                                        test_utils::plus{});
         test_utils::host_exclusive_scan(h_buffer_num_elements.begin(),
                                         h_buffer_num_elements.end(),
                                         0,
                                         dst_offsets.begin(),
-                                        hipcub::Sum{});
+                                        test_utils::plus{});
     }
 
     // Generate the source and destination pointers.

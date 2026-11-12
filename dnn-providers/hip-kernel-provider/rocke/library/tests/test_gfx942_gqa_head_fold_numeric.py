@@ -61,12 +61,12 @@ def _gpu_ready():
         import torch
     except Exception:  # noqa: BLE001
         return False
-    if not torch.cuda.is_available():
+    # gcnArchName exists only on ROCm builds of torch.
+    if not torch.cuda.is_available() or torch.version.hip is None:
         return False
-    name = torch.cuda.get_device_name(0).lower()
-    # Substring match against the runtime device name; kept lowercase and generic
-    # so it accepts every gfx942 part this cohort can run on.
-    return "mi300" in name or "gfx942" in name
+    # Gate on ``gcnArchName`` (the ISA target), not the marketing name, which
+    # varies across gfx942 parts.
+    return "gfx942" in torch.cuda.get_device_properties(0).gcnArchName.lower()
 
 
 requires_gfx942_gpu = pytest.mark.skipif(
@@ -121,7 +121,7 @@ def test_numeric_cohort_routes_to_fold(gfx942, bs):
         p.dtype,
         p.block_size,
     ), "D128 SWA GQA-4:1 bf16 must be fold-eligible"
-    spec = au._tiled_spec_from_problem(p)
+    spec = au._tiled_spec_from_problem(p, "gfx942")
     ir = print_ir(build_gfx942_4warp_gqa(spec, arch="gfx942"))
     assert re.search(r"_4wgqa_fold\b", ir), "cohort must build the fold kernel"
 

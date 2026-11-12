@@ -98,8 +98,9 @@ for why that isn't just rocm-cmake's `rocm_install_symlink_subdir()`.
 hipCCL deliberately keeps **two independent version numbers**, and it is
 important not to collapse them into one:
 
-- **The hipCCL umbrella version** (`HIPCCL_VERSION`, currently a placeholder
-  `0.1.0`) versions the unified CPack package and `find_package(hipccl)`.
+- **The hipCCL umbrella version** (`HIPCCL_VERSION`: `3.0.0` in hipccl3 and
+  `2.8.0` in hipccl2, the CCCL major line each layout snapshots) versions the
+  unified CPack package and `find_package(hipccl)`.
 - **The component API versions** (`VERSION_STRING`, currently `4.7.0` in
   rocPRIM/hipCUB/rocThrust) version `find_package(rocprim)`,
   `find_package(hipcub)`, and `find_package(rocthrust)`, exactly as they
@@ -327,13 +328,13 @@ normally on their own.
   `projects/hipccl` layout selector yet (each of rocPRIM/hipCUB/rocThrust has
   its own convenience wrapper script today); unifying those is separate
   follow-up work.
-- **`HIPCCL_VERSION` is still the `0.1.0` placeholder.** Setting it to the
-  real CCCL-aligned value belongs with the CCCL 3.0 merge-forward work (see
-  [Versioning: umbrella vs components](#versioning-umbrella-vs-components)),
-  since claiming `3.0.0` before the components actually have CCCL 3.0
-  semantics would mislead downstream `#if CCCL_VERSION >= ...` checks. The
-  `#define CCCL_VERSION HIPCCL_VERSION` compatibility glue downstream
-  consumers have asked for should land at the same time.
+- **`HIPCCL_VERSION` is `3.0.0` (hipccl3) and `2.8.0` (hipccl2).** These
+  identify the CCCL major line each layout snapshots (hipCUB's
+  `HIPCUB_CCCL_VERSION_*` is `3.0.3` and `2.8.2` respectively); see
+  [Versioning: umbrella vs components](#versioning-umbrella-vs-components).
+  The `#define CCCL_VERSION HIPCCL_VERSION` compatibility glue downstream
+  consumers have asked for has **not** been added yet, so nothing should derive
+  `#if CCCL_VERSION >= ...` feature checks from `HIPCCL_VERSION` yet.
 - **AI-authorship/license-aggregation legal review is still pending** with
   AMD Legal/OSPO - see the license aggregation note above; this is the same
   category of open question.

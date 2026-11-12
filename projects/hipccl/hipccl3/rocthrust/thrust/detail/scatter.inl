@@ -18,79 +18,76 @@
 
 #include <thrust/detail/config.h>
 
-#include <thrust/scatter.h>
+#if defined(_CCCL_IMPLICIT_SYSTEM_HEADER_GCC)
+#  pragma GCC system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_CLANG)
+#  pragma clang system_header
+#elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
+#  pragma system_header
+#endif // no system header
+
 #include <thrust/iterator/iterator_traits.h>
-#include <thrust/system/detail/generic/select_system.h>
-#include <thrust/system/detail/generic/scatter.h>
+#include <thrust/scatter.h>
 #include <thrust/system/detail/adl/scatter.h>
+#include <thrust/system/detail/generic/scatter.h>
+#include <thrust/system/detail/generic/select_system.h>
 
 THRUST_NAMESPACE_BEGIN
 
-
 THRUST_EXEC_CHECK_DISABLE
-template<typename DerivedPolicy,
-         typename InputIterator1,
-         typename InputIterator2,
-         typename RandomAccessIterator>
-THRUST_HOST_DEVICE
-  void scatter(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-               InputIterator1 first,
-               InputIterator1 last,
-               InputIterator2 map,
-               RandomAccessIterator output)
+template <typename DerivedPolicy, typename InputIterator1, typename InputIterator2, typename RandomAccessIterator>
+THRUST_HOST_DEVICE void
+scatter(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+        InputIterator1 first,
+        InputIterator1 last,
+        InputIterator2 map,
+        RandomAccessIterator output)
 {
   using thrust::system::detail::generic::scatter;
   return scatter(thrust::detail::derived_cast(thrust::detail::strip_const(exec)), first, last, map, output);
 } // end scatter()
 
-
 THRUST_EXEC_CHECK_DISABLE
-template<typename DerivedPolicy,
-         typename InputIterator1,
-         typename InputIterator2,
-         typename InputIterator3,
-         typename RandomAccessIterator>
-THRUST_HOST_DEVICE
-  void scatter_if(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                  InputIterator1 first,
-                  InputIterator1 last,
-                  InputIterator2 map,
-                  InputIterator3 stencil,
-                  RandomAccessIterator output)
+template <typename DerivedPolicy,
+          typename InputIterator1,
+          typename InputIterator2,
+          typename InputIterator3,
+          typename RandomAccessIterator>
+THRUST_HOST_DEVICE void scatter_if(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator1 first,
+  InputIterator1 last,
+  InputIterator2 map,
+  InputIterator3 stencil,
+  RandomAccessIterator output)
 {
   using thrust::system::detail::generic::scatter_if;
   return scatter_if(thrust::detail::derived_cast(thrust::detail::strip_const(exec)), first, last, map, stencil, output);
 } // end scatter_if()
 
-
 THRUST_EXEC_CHECK_DISABLE
-template<typename DerivedPolicy,
-         typename InputIterator1,
-         typename InputIterator2,
-         typename InputIterator3,
-         typename RandomAccessIterator,
-         typename Predicate>
-THRUST_HOST_DEVICE
-  void scatter_if(const thrust::detail::execution_policy_base<DerivedPolicy> &exec,
-                  InputIterator1 first,
-                  InputIterator1 last,
-                  InputIterator2 map,
-                  InputIterator3 stencil,
-                  RandomAccessIterator output,
-                  Predicate pred)
+template <typename DerivedPolicy,
+          typename InputIterator1,
+          typename InputIterator2,
+          typename InputIterator3,
+          typename RandomAccessIterator,
+          typename Predicate>
+THRUST_HOST_DEVICE void scatter_if(
+  const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
+  InputIterator1 first,
+  InputIterator1 last,
+  InputIterator2 map,
+  InputIterator3 stencil,
+  RandomAccessIterator output,
+  Predicate pred)
 {
   using thrust::system::detail::generic::scatter_if;
-  return scatter_if(thrust::detail::derived_cast(thrust::detail::strip_const(exec)), first, last, map, stencil, output, pred);
+  return scatter_if(
+    thrust::detail::derived_cast(thrust::detail::strip_const(exec)), first, last, map, stencil, output, pred);
 } // end scatter_if()
 
-
-template<typename InputIterator1,
-         typename InputIterator2,
-         typename RandomAccessIterator>
-  void scatter(InputIterator1 first,
-               InputIterator1 last,
-               InputIterator2 map,
-               RandomAccessIterator output)
+template <typename InputIterator1, typename InputIterator2, typename RandomAccessIterator>
+void scatter(InputIterator1 first, InputIterator1 last, InputIterator2 map, RandomAccessIterator output)
 {
   using thrust::system::detail::generic::select_system;
 
@@ -102,19 +99,12 @@ template<typename InputIterator1,
   System2 system2;
   System3 system3;
 
-  return thrust::scatter(select_system(system1,system2,system3), first, last, map, output);
+  return thrust::scatter(select_system(system1, system2, system3), first, last, map, output);
 } // end scatter()
 
-
-template<typename InputIterator1,
-         typename InputIterator2,
-         typename InputIterator3,
-         typename RandomAccessIterator>
-  void scatter_if(InputIterator1 first,
-                  InputIterator1 last,
-                  InputIterator2 map,
-                  InputIterator3 stencil,
-                  RandomAccessIterator output)
+template <typename InputIterator1, typename InputIterator2, typename InputIterator3, typename RandomAccessIterator>
+void scatter_if(
+  InputIterator1 first, InputIterator1 last, InputIterator2 map, InputIterator3 stencil, RandomAccessIterator output)
 {
   using thrust::system::detail::generic::select_system;
 
@@ -128,21 +118,20 @@ template<typename InputIterator1,
   System3 system3;
   System4 system4;
 
-  return thrust::scatter_if(select_system(system1,system2,system3,system4), first, last, map, stencil, output);
+  return thrust::scatter_if(select_system(system1, system2, system3, system4), first, last, map, stencil, output);
 } // end scatter_if()
 
-
-template<typename InputIterator1,
-         typename InputIterator2,
-         typename InputIterator3,
-         typename RandomAccessIterator,
-         typename Predicate>
-  void scatter_if(InputIterator1 first,
-                  InputIterator1 last,
-                  InputIterator2 map,
-                  InputIterator3 stencil,
-                  RandomAccessIterator output,
-                  Predicate pred)
+template <typename InputIterator1,
+          typename InputIterator2,
+          typename InputIterator3,
+          typename RandomAccessIterator,
+          typename Predicate>
+void scatter_if(InputIterator1 first,
+                InputIterator1 last,
+                InputIterator2 map,
+                InputIterator3 stencil,
+                RandomAccessIterator output,
+                Predicate pred)
 {
   using thrust::system::detail::generic::select_system;
 
@@ -156,7 +145,7 @@ template<typename InputIterator1,
   System3 system3;
   System4 system4;
 
-  return thrust::scatter_if(select_system(system1,system2,system3,system4), first, last, map, stencil, output, pred);
+  return thrust::scatter_if(select_system(system1, system2, system3, system4), first, last, map, stencil, output, pred);
 } // end scatter_if()
 
 THRUST_NAMESPACE_END
