@@ -486,11 +486,12 @@ def test_emitted_paths_of_each_level(gp_gfx1250, gfx1250_iim, assembler, capsys,
     assert bool(drain) == (tdmInst == 3)
 
 
+@pytest.mark.parametrize("dest", ["B", "H"])
 @pytest.mark.parametrize("level", [0] + _LEVELS)
-def test_optnll_store_goes_through_the_tdm_block_at_level_3(gp_gfx1250, gfx1250_iim, assembler, capsys, level):
+def test_optnll_store_goes_through_the_tdm_block_at_level_3(gp_gfx1250, gfx1250_iim, assembler, capsys, level, dest):
   """The OptNLL store is an unmasked full-tile store of D, a NonEdge path without edge blocks, so level 3
   stores it through the TDM block whatever the alignment of the columns, and levels 0-2 keep buffer_store."""
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level)
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level, ProblemType=_dest(dest))
   assert sol.get("Valid"), capsys.readouterr().out
   optNLL = _stores(asm)[("OptNLL_MB", "0")]
   assert optNLL["then"] == [8] and not optNLL["nonEdge"]
@@ -532,6 +533,11 @@ def test_sourceswap_store_vector_width_2(gp_gfx1250, gfx1250_iim, assembler, cap
 _FP16 = {"DataType": "H", "MacDataTypeA": "H", "MacDataTypeB": "H", "DestDataType": "H"}
 
 
+def _dest(dest, **problemType):
+  """The ProblemType of bf16 ("B") or fp16 ("H") inputs and D, converted from fp32 accumulators."""
+  return dict(_FP16 if dest == "H" else {}, **problemType)
+
+
 def test_fp16_c_is_read_back_from_the_staged_tile(gp_gfx1250, gfx1250_iim, assembler, capsys):
   """fp16 C comes back from the staged tile in 16-byte vectors at StoreVectorWidth 8."""
   sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=2, ProblemType=_FP16)
@@ -554,6 +560,20 @@ def test_fp16_with_beta_at_store_vector_width_1(gp_gfx1250, gfx1250_iim, assembl
   assert {mnemonic for mnemonic, _, _ in loads} == {"ds_load_u16", "ds_load_u16_d16_hi"}
   for mnemonic, coord0, coord1 in loads:
     assert (mnemonic == "ds_load_u16_d16_hi") == (int(coord0) % 2 == 1), (mnemonic, coord0, coord1)
+
+
+@pytest.mark.parametrize("level", [1, 2, 3])
+def test_fp16_d_stages_each_element_from_its_own_register(gp_gfx1250, gfx1250_iim, assembler, capsys, level):
+  """fp16 D converted from fp32 accumulators at StoreVectorWidth 1: every element, odd or even, is in the low half
+  of its own VGPR, where the buffer_store path stores it from, so the TDM block stages each with one ds_store_b16
+  of a single register, none with the d16_hi store."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level, StoreVectorWidth=1, ProblemType=_FP16)
+  assert sol.get("Valid"), capsys.readouterr().out
+  staged = re.findall(r"^\s*(ds_store_\w+) v\S+, (v\S+) .*// stage D element \((\d+), (\d+)\)", _tdmBlock(asm, "0", 1),
+                      re.M)
+  assert staged and {mnemonic for mnemonic, _, _, _ in staged} == {"ds_store_b16"}
+  assert all(re.fullmatch(r"v\[vgprValuC\+\d+(-\d+)?\]", src) for _, src, _, _ in staged), staged[:2]
+  assert {int(coord0) % 2 for _, _, coord0, _ in staged} == {0, 1}
 
 
 @pytest.mark.parametrize("level", _LEVELS)
@@ -746,13 +766,14 @@ def test_sav_device_scalar_bit_is_along_m(gp_gfx1250, gfx1250_iim, assembler, ca
   assert sol["ProblemType"]["UseScaleAlphaVec"] == 5 and "tensor_store_from_lds " in asm
 
 
+@pytest.mark.parametrize("dest", ["B", "H"])
 @pytest.mark.parametrize("useBias, factorDims", [(2, {"1"}), (3, {"0", "1"})], ids=["along_n", "along_m_or_n"])
-def test_both_factor_dims_use_the_tdm_block(gp_gfx1250, gfx1250_iim, assembler, capsys, useBias, factorDims):
+def test_both_factor_dims_use_the_tdm_block(gp_gfx1250, gfx1250_iim, assembler, capsys, useBias, factorDims, dest):
   """Bias and ScaleAlphaVec along N (UseBias 2), or along M or N as the kernel argument picks (UseBias 3):
   generateBetaModules builds the store tree of each factor dim, and at level 3 each of them stores through
   the TDM block."""
   sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=3,
-                       ProblemType={"UseBias": useBias, "UseScaleAlphaVec": useBias})
+                       ProblemType=_dest(dest, UseBias=useBias, UseScaleAlphaVec=useBias))
   assert sol.get("Valid"), capsys.readouterr().out
   stored, factorDim = set(), None
   for line in asm.splitlines():
@@ -791,19 +812,21 @@ def test_mt1_not_a_multiple_of_the_waves(gp_gfx1250, gfx1250_iim, assembler, cap
     assert "column bound" not in even and "tensor_dim1 = SizeJ - first column" in even
 
 
-def test_scale_cd_scales_through_registers(gp_gfx1250, gfx1250_iim, assembler, capsys):
+@pytest.mark.parametrize("dest", ["B", "H"])
+def test_scale_cd_scales_through_registers(gp_gfx1250, gfx1250_iim, assembler, capsys, dest):
   """ScaleC and ScaleD are scalars the kernel loads from its arguments into SGPRs: the TDM block of a level-2
   kernel multiplies its elements by ScaleD, as the buffer_store path does."""
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=2, ProblemType={"UseScaleCD": True})
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=2, ProblemType=_dest(dest, UseScaleCD=True))
   assert sol.get("Valid"), capsys.readouterr().out
   assert "AddressScaleC" in asm and "AddressScaleD" in asm
   assert re.search(r"^\s*v_\w*mul\w* [^\n]*sgprScaleD", _tdmBlock(asm, "1", 8), re.M)
 
 
+@pytest.mark.parametrize("dest", ["B", "H"])
 @pytest.mark.parametrize("level", _LEVELS)
-def test_grouped_gemm_generates(gp_gfx1250, gfx1250_iim, assembler, capsys, level):
+def test_grouped_gemm_generates(gp_gfx1250, gfx1250_iim, assembler, capsys, level, dest):
   """GroupedGemm sets the sizes, strides and addresses of each group in the SGPRs the TDM descriptors read."""
-  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level, ProblemType={"GroupedGemm": True})
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level, ProblemType=_dest(dest, GroupedGemm=True))
   assert sol.get("Valid"), capsys.readouterr().out
   assert "tensor_store_from_lds " in asm
 
@@ -1089,16 +1112,17 @@ def test_solution_rejects_with_the_reason(gp_gfx1250, gfx1250_iim, assembler, ca
   assert "TDMStoreInst requires GlobalSplitU=1 or -1" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("dest", ["B", "H"])
 @pytest.mark.parametrize("sourceSwap", [False, True])
 @pytest.mark.parametrize("level", _LEVELS)
 def test_local_split_u_stages_each_element_after_the_lsu_offset(gp_gfx1250, gfx1250_iim, assembler, capsys, level,
-                                                                sourceSwap):
+                                                                sourceSwap, dest):
   """With LocalSplitU=2, shaped like the LSU=2 kernels of the gfx1250 bf16 TN logic, each thread stages
   the elements it owns after the LDS reduction where the LSU global write would store them: the LSU
   offset goes into coord0 (coord1 with SourceSwap) after the reduction, the TDM setup reads that VGPR
   with nothing in the block writing it first, and the staging stores address the tile from the setup."""
   sol, asm = _emit_asm(gfx1250_iim, assembler, [16, 16, 32, 1, 1, 4, 4, 1, 2], TDMStoreInst=level,
-                       SourceSwap=sourceSwap, WorkGroup=[16, 4, 2], DepthU=128)
+                       SourceSwap=sourceSwap, WorkGroup=[16, 4, 2], DepthU=128, ProblemType=_dest(dest))
   assert sol.get("Valid"), capsys.readouterr().out
   assert sol["LocalSplitU"] == 2 and sol["NumThreads"] == 128 and sol["StoreVectorWidth"] == 4
   operands = lambda line: [op.strip() for op in _code(line).partition(" ")[2].split(",")]
