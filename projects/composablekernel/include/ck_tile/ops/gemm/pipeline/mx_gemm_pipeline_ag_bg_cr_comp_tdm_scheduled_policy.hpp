@@ -382,12 +382,71 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
                           number<static_cast<index_t>(padding.pad_interval)>{});
     }
 
+    /// A's or B's data in LDS as the TDM loads write it, over [component, component row, K
+    /// word]: each component load fills op.rows tile rows from op.base + component * op.stride.
+    /// The offset is in 4-byte words from the operand's base.
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeLdsTdmBlockDescriptor()
+    {
+        constexpr MxTdmScheduledSpec s     = GetSpec<Problem>();
+        constexpr MxTdmScheduledOperand op = GetLdsOperand<Problem, IsA>();
+        constexpr index_t rows             = IsA ? s.warp_m * s.atom_m() * s.wave_repeat_m()
+                                                 : s.warp_n * s.atom_n() * s.wave_repeat_n();
+        constexpr index_t words            = GetLdsRowBytes<Problem>() / 4;
+        constexpr auto naive               = MakeLdsRunsDescriptor<Problem, IsA>();
+        constexpr index_t inner            = naive.get_lengths()[number<2>{}];
+        return transform_tensor_descriptor(
+            naive,
+            make_tuple(make_pass_through_transform(number<rows / op.rows>{}),
+                       make_merge_transform(make_tuple(number<op.rows / inner>{}, number<inner>{})),
+                       make_pass_through_transform(number<words>{})),
+            make_tuple(sequence<0>{}, sequence<1, 2>{}, sequence<3>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}));
+    }
+
     /// A's or B's data in LDS as a descriptor over [tile row in fragment order, K word]. Row t =
     /// (wave * repeats + r) * atom + l is tile row wave * atom * repeats + l * repeats + r (as
     /// MRow / NRow), so one WMMA fragment is atom consecutive rows; the offset, in 4-byte words,
     /// is mx_tdm_scheduled_row_offset's less the operand's base.
     template <typename Problem, bool IsA>
     CK_TILE_HOST_DEVICE static constexpr auto MakeLdsBlockDescriptor()
+    {
+        constexpr MxTdmScheduledSpec s     = GetSpec<Problem>();
+        constexpr MxTdmScheduledOperand op = GetLdsOperand<Problem, IsA>();
+        constexpr index_t row_bytes        = GetLdsRowBytes<Problem>();
+        constexpr index_t warps            = IsA ? s.warp_m : s.warp_n;
+        constexpr index_t atom             = IsA ? s.atom_m() : s.atom_n();
+        constexpr index_t repeats          = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
+        constexpr index_t rows             = warps * atom * repeats;
+        constexpr index_t words            = row_bytes / 4;
+        constexpr auto naive               = MakeLdsRunsDescriptor<Problem, IsA>();
+        constexpr index_t inner            = naive.get_lengths()[number<2>{}];
+        constexpr auto by_row              = transform_tensor_descriptor(
+            naive,
+            make_tuple(make_merge_transform(make_tuple(
+                           number<rows / op.rows>{}, number<op.rows / inner>{}, number<inner>{})),
+                       make_pass_through_transform(number<words>{})),
+            make_tuple(sequence<0, 1, 2>{}, sequence<3>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+        constexpr auto by_wave = transform_tensor_descriptor(
+            by_row,
+            make_tuple(make_unmerge_transform(
+                           make_tuple(number<warps>{}, number<atom>{}, number<repeats>{})),
+                       make_pass_through_transform(number<words>{})),
+            make_tuple(sequence<0>{}, sequence<1>{}),
+            make_tuple(sequence<0, 1, 2>{}, sequence<3>{}));
+        return transform_tensor_descriptor(
+            by_wave,
+            make_tuple(make_merge_transform(
+                           make_tuple(number<warps>{}, number<repeats>{}, number<atom>{})),
+                       make_pass_through_transform(number<words>{})),
+            make_tuple(sequence<0, 2, 1>{}, sequence<3>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+    }
+
+    /// A's or B's data in LDS as runs of rows, over [component, run, run row, K word].
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeLdsRunsDescriptor()
     {
         constexpr MxTdmScheduledSpec s     = GetSpec<Problem>();
         constexpr MxTdmScheduledOperand op = GetLdsOperand<Problem, IsA>();
@@ -414,37 +473,16 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
         static_assert(rows % op.rows == 0 && op.rows % inner == 0 && row_bytes % 4 == 0 &&
                           op.stride % 4 == 0 && outer_stride % 4 == 0 && row_stride % 4 == 0,
                       "comp_tdm_scheduled: the LDS layout is not a whole number of words per run");
-        constexpr auto naive  = make_naive_tensor_descriptor(make_tuple(number<rows / op.rows>{},
-                                                                       number<op.rows / inner>{},
-                                                                       number<inner>{},
-                                                                       number<words>{}),
-                                                            make_tuple(number<op.stride / 4>{},
-                                                                       number<outer_stride / 4>{},
-                                                                       number<row_stride / 4>{},
-                                                                       number<1>{}),
-                                                            number<4>{},
-                                                            number<1>{});
-        constexpr auto by_row = transform_tensor_descriptor(
-            naive,
-            make_tuple(make_merge_transform(make_tuple(
-                           number<rows / op.rows>{}, number<op.rows / inner>{}, number<inner>{})),
-                       make_pass_through_transform(number<words>{})),
-            make_tuple(sequence<0, 1, 2>{}, sequence<3>{}),
-            make_tuple(sequence<0>{}, sequence<1>{}));
-        constexpr auto by_wave = transform_tensor_descriptor(
-            by_row,
-            make_tuple(make_unmerge_transform(
-                           make_tuple(number<warps>{}, number<atom>{}, number<repeats>{})),
-                       make_pass_through_transform(number<words>{})),
-            make_tuple(sequence<0>{}, sequence<1>{}),
-            make_tuple(sequence<0, 1, 2>{}, sequence<3>{}));
-        return transform_tensor_descriptor(
-            by_wave,
-            make_tuple(make_merge_transform(
-                           make_tuple(number<warps>{}, number<repeats>{}, number<atom>{})),
-                       make_pass_through_transform(number<words>{})),
-            make_tuple(sequence<0, 2, 1>{}, sequence<3>{}),
-            make_tuple(sequence<0>{}, sequence<1>{}));
+        return make_naive_tensor_descriptor(make_tuple(number<rows / op.rows>{},
+                                                       number<op.rows / inner>{},
+                                                       number<inner>{},
+                                                       number<words>{}),
+                                            make_tuple(number<op.stride / 4>{},
+                                                       number<outer_stride / 4>{},
+                                                       number<row_stride / 4>{},
+                                                       number<1>{}),
+                                            number<4>{},
+                                            number<1>{});
     }
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeALdsBlockDescriptor()

@@ -231,11 +231,13 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         return nullptr;
     }
 
+    template <typename ADramWindow, typename BDramWindow>
     struct PipelineImpl
     {
-        // The operands as bytes and the problem, from the DRAM windows' views.
-        const uint8_t* a_data;
-        const uint8_t* b_data;
+        // A's and B's DRAM windows of the tile, the scales as bytes, and the problem from the
+        // windows' views.
+        ADramWindow a_dram;
+        BDramWindow b_dram;
         const uint8_t* a_scales;
         const uint8_t* b_scales;
         index_t M;
@@ -252,6 +254,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         index_t block_n;
         index_t cluster_wx = 0;
         index_t cluster_wy = 0;
+        CK_TILE_LDS_ADDR uint8_t* smem;
         uint32_t smem_addr;
         index_t packed_k;
         index_t k_atoms;
@@ -272,27 +275,28 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         index_t b_scale_stride;
         BlockGemm block_gemm;
 
-        template <typename ADram, typename BDram, typename AScaleDram, typename BScaleDram>
-        CK_TILE_DEVICE PipelineImpl(const ADram& a_dram,
-                                    const BDram& b_dram,
+        template <typename AScaleDram, typename BScaleDram>
+        CK_TILE_DEVICE PipelineImpl(const ADramWindow& a_dram_,
+                                    const BDramWindow& b_dram_,
                                     const AScaleDram& a_scale_dram,
                                     const BScaleDram& b_scale_dram,
                                     CK_TILE_LDS_ADDR uint8_t* smem_)
-            : a_data(Bytes(a_dram)),
-              b_data(Bytes(b_dram)),
+            : a_dram(a_dram_),
+              b_dram(b_dram_),
               a_scales(Bytes(a_scale_dram)),
               b_scales(Bytes(b_scale_dram)),
-              M(Lengths(a_dram)[number<0>{}]),
-              N(Lengths(b_dram)[number<0>{}]),
-              K(Lengths(a_dram)[number<1>{}]),
+              M(Lengths(a_dram_)[number<0>{}]),
+              N(Lengths(b_dram_)[number<0>{}]),
+              K(Lengths(a_dram_)[number<1>{}]),
               tid(get_thread_id()),
               lane(integer_modulo_nonnegative<mx_tdm_scheduled::kWave>(tid)),
               // Wave-uniform, so the TDM descriptors built from it stay scalar.
               wave(get_warp_id()),
               wave_m(integer_divide_nonnegative<kWarpN>(wave)),
               wave_n(integer_modulo_nonnegative<kWarpN>(wave)),
-              block_m(a_dram.get_window_origin()[number<0>{}]),
-              block_n(b_dram.get_window_origin()[number<0>{}]),
+              block_m(a_dram_.get_window_origin()[number<0>{}]),
+              block_n(b_dram_.get_window_origin()[number<0>{}]),
+              smem(smem_),
               smem_addr(static_cast<uint32_t>(reinterpret_cast<uintptr_t>(smem_))),
               packed_k(integer_divide_nonnegative<kKPerByte>(K)),
               // The last K step is partial (and its scales zero-padded) only with a K tail.
@@ -333,7 +337,58 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             return parity * kLdsBufferStride;
         }
 
+        /// The K origin of a load at k: past the end of K the last tile is issued again (so the
+        /// buffer holds data the GEMM never reads), where a clipped window load would write
+        /// zeros.
         CK_TILE_DEVICE index_t ClampK(index_t k) const { return k < K ? k : K - kTileK; }
+
+        template <bool IsA>
+        CK_TILE_DEVICE const auto& DramWindow() const
+        {
+            if constexpr(IsA)
+                return a_dram;
+            else
+                return b_dram;
+        }
+
+        /// Component `component` of A's or B's tile, L.rows rows of it, as a sub-window of the
+        /// operand's DRAM window.
+        template <bool IsA>
+        CK_TILE_DEVICE auto DramComponentWindow(index_t component) const
+        {
+            constexpr MxTdmScheduledOperand L = Policy::template GetLdsOperand<Problem, IsA>();
+            const auto& dram                  = DramWindow<IsA>();
+            const auto origin                 = dram.get_window_origin();
+            return make_tile_window(
+                dram.get_bottom_tensor_view(),
+                make_tuple(number<L.rows>{}, number<kTileK>{}),
+                {origin[number<0>{}] + component * L.rows, origin[number<1>{}]});
+        }
+
+        /// Where component `component` of A's or B's tile lands in buffer 0: an LDS window over
+        /// the policy's TDM layout of the operand.
+        template <bool IsA>
+        CK_TILE_DEVICE auto LdsComponentWindow(index_t component) const
+        {
+            constexpr MxTdmScheduledOperand L = Policy::template GetLdsOperand<Problem, IsA>();
+            constexpr auto desc = Policy::template MakeLdsTdmBlockDescriptor<Problem, IsA>();
+            const auto view     = make_tensor_view<address_space_enum::lds>(
+                reinterpret_cast<CK_TILE_LDS_ADDR uint32_t*>(smem + L.base), desc);
+            return make_tile_window(
+                view,
+                make_tuple(number<1>{}, number<L.rows>{}, number<kLdsRowBytes / 4>{}),
+                {component, 0, 0});
+        }
+
+        /// The LDS byte address of an LDS window's origin, as the integer TDM takes.
+        template <typename Window>
+        CK_TILE_DEVICE static uint32_t LdsAddress(const Window& window)
+        {
+            const auto& view = window.get_bottom_tensor_view();
+            return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
+                view.get_buffer_view().p_data_ +
+                view.get_tensor_descriptor().calculate_offset(window.get_window_origin())));
+        }
 
         // ---------------------------------------------------------------- TdmLoader
 
@@ -383,6 +438,10 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             return PipelineImplBase::template MakeTdmConfig<IsA, IsScale>(IsA ? a_mask : b_mask);
         }
 
+        /// The groups of A's or B's component load into buffer 0, from the component's DRAM
+        /// window into its LDS window. The rows left are clipped as tdm_load_to_lds clips them;
+        /// the address is the window origin's, in 64 bits with a wide operand (a tensor
+        /// descriptor offset is 32-bit).
         template <bool IsA>
         CK_TILE_DEVICE TDMGroups DataDescriptor(index_t component) const
         {
@@ -391,12 +450,12 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             constexpr bool wide               = IsA ? Traits::kWideA : Traits::kWideB;
             constexpr bool iterate            = L.iterate_rows > 0;
             constexpr index_t tile_rows       = iterate ? L.iterate_rows : L.rows;
-            const index_t block               = IsA ? block_m : block_n;
-            const uint8_t* base               = IsA ? a_data : b_data;
-            const index_t row0                = block + component * L.rows;
+            const auto dram_window            = DramComponentWindow<IsA>(component);
+            const index_t row0                = dram_window.get_window_origin()[number<0>{}];
+            const uint8_t* base               = Bytes(dram_window);
             const uint8_t* global =
                 wide ? base + static_cast<long_index_t>(row0) * packed_k : base + row0 * packed_k;
-            const index_t rows_left = RowsLeft<IsA>(row0);
+            const index_t rows_left = max(index_t{0}, Lengths(dram_window)[number<0>{}] - row0);
 
             TDMConfig config = Config<IsA, false>();
             if constexpr(iterate)
@@ -417,7 +476,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                                          static_cast<uint16_t>(iterations - 1)};
             }
             return Groups(global,
-                          smem_addr + static_cast<uint32_t>(L.base + component * L.stride),
+                          LdsAddress(LdsComponentWindow<IsA>(component)),
                           static_cast<uint32_t>(packed_k),
                           static_cast<uint32_t>(rows_left),
                           kLdsRowBytes,
@@ -451,13 +510,14 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                           Config<IsA, true>());
         }
 
-        /// Both descriptors for tile 0, buffer 0, selected by wave parity; every word uniform.
+        /// Both descriptors for tile 0, buffer 0, of this wave's loads; every word uniform. Even
+        /// waves issue B's loads and odd waves A's, each one component: wave / 2.
         CK_TILE_DEVICE void Hoist()
         {
-            const bool even         = integer_modulo_nonnegative<2>(wave) == 0;
+            const bool is_b_issuer  = integer_modulo_nonnegative<2>(wave) == 0;
             const index_t component = integer_divide_nonnegative<2>(wave);
             const auto select       = [&](const TDMGroups& b, const TDMGroups& a) {
-                return amd_wave_read_first_lane(even ? b : a);
+                return amd_wave_read_first_lane(is_b_issuer ? b : a);
             };
             data      = select(DataDescriptor<false>(component), DataDescriptor<true>(component));
             scale     = select(ScaleDescriptor<false>(component), ScaleDescriptor<true>(component));
@@ -465,7 +525,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             scale_lds = scale.g0.lds_addr;
             data_global  = data.g0.getGlobalAddr();
             scale_global = scale.g0.getGlobalAddr();
-            scale_stride = even ? N * 4 : M * 4;
+            scale_stride = is_b_issuer ? N * 4 : M * 4;
         }
 
         /// This wave's data and scale loads of the tile at k0 into buffer parity.
@@ -554,7 +614,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                             row0 + integer_divide_nonnegative<lines>(index), is_a ? M : N);
                         const index_t offset =
                             k_byte + integer_modulo_nonnegative<lines>(index) * line;
-                        const uint8_t* base = is_a ? a_data : b_data;
+                        const uint8_t* base = Bytes(DramWindow<is_a>());
                         if constexpr(wide)
                             return base + (static_cast<uint64_t>(static_cast<uint32_t>(row)) *
                                                static_cast<uint32_t>(packed_k) +
@@ -952,11 +1012,14 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                       "comp_tdm_scheduled runs single A and B tensors");
         CBlockTile c_block_tile;
 #if defined(__gfx125__)
-        PipelineImpl impl(a_dram_block_window_tmp[number<0>{}],
-                          b_dram_block_window_tmp[number<0>{}],
-                          scale_a_window[number<0>{}],
-                          scale_b_window[number<0>{}],
-                          c_style_pointer_cast<CK_TILE_LDS_ADDR uint8_t*>(p_smem));
+        using ADramWindow = remove_cvref_t<decltype(a_dram_block_window_tmp[number<0>{}])>;
+        using BDramWindow = remove_cvref_t<decltype(b_dram_block_window_tmp[number<0>{}])>;
+        PipelineImpl<ADramWindow, BDramWindow> impl(
+            a_dram_block_window_tmp[number<0>{}],
+            b_dram_block_window_tmp[number<0>{}],
+            scale_a_window[number<0>{}],
+            scale_b_window[number<0>{}],
+            c_style_pointer_cast<CK_TILE_LDS_ADDR uint8_t*>(p_smem));
         impl(c_block_tile.get_thread_buffer().template get_as<CVec>(), num_loop);
 #else
         ignore = a_dram_block_window_tmp;
