@@ -309,7 +309,7 @@ int rocke_i_buffer_access_bytes(
             err, err_cap, "%s: the element type must be a scalar, got %s", op_name, elem->name);
         return 0;
     }
-    /* Python _SCALE_ENCODING_SCALARS: whole bytes, but no value form in the IR
+    /* Python core.storage.SCALE_ENCODINGS: whole bytes, but no value form in the IR
      * (no LLVM or HIP type in either engine). */
     if(strcmp(elem->name, "e8m0") == 0 || strcmp(elem->name, "e5m3") == 0)
     {
@@ -498,6 +498,40 @@ const char* rocke_i_trap_op_error(const rocke_op_t* op, char* buf, size_t cap)
         return buf;
     }
     return NULL;
+}
+
+const char* rocke_i_gpu_check_failed_op_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    if(op->num_operands != 0 || op->num_results != 0 || op->num_regions != 0)
+    {
+        snprintf(buf, cap, "gpu_check_failed takes no operands, results or regions");
+        return buf;
+    }
+    return NULL;
+}
+
+const char* rocke_i_gpu_check_word_symbol(rocke_arena_t* arena, const char* kernel_name)
+{
+    return rocke_arena_printf(arena, "rocke_gpu_check_failed_%s", kernel_name ? kernel_name : "");
+}
+
+static bool rocke_i_region_checks_on_gpu(const rocke_region_t* region)
+{
+    for(int i = 0; region && i < region->num_ops; i++)
+    {
+        const rocke_op_t* op = region->ops[i];
+        if(op->opcode == ROCKE_OP_TILE_GPU_CHECK_FAILED)
+            return true;
+        for(int r = 0; r < op->num_regions; r++)
+            if(rocke_i_region_checks_on_gpu(op->regions[r]))
+                return true;
+    }
+    return false;
+}
+
+bool rocke_i_kernel_checks_on_gpu(const rocke_kernel_def_t* kernel)
+{
+    return kernel && rocke_i_region_checks_on_gpu(kernel->body);
 }
 
 /* Structural equality == Python frozen-dataclass __eq__: canonical name encodes
@@ -820,6 +854,67 @@ const char* rocke_i_loop_carried_descriptor_message(int index, char* buf, size_t
     return buf;
 }
 
+const char* rocke_i_reused_loop_name_message(const char* name, char* buf, size_t cap)
+{
+    snprintf(buf,
+             cap,
+             "scf.for: the name '%s' is already taken by an induction variable or carried value "
+             "of this loop or of a loop it is nested in; give it a name of its own",
+             name);
+    return buf;
+}
+
+int rocke_i_scf_for_value_names(const rocke_op_t* loop, const char** out)
+{
+    int count = 0;
+    const char* iv = rocke_attr_get_str(&loop->attrs, "iv");
+    if(iv)
+    {
+        if(out)
+            out[count] = iv;
+        ++count;
+    }
+    const rocke_attr_value_t* meta = rocke_attr_get(&loop->attrs, "iter_args");
+    if(!meta || meta->kind != ROCKE_ATTR_LIST)
+        return count;
+    for(int i = 0; i < meta->u.list.count; ++i)
+    {
+        const char* carried
+            = meta->u.list.items[i] ? rocke_attr_get_str(meta->u.list.items[i], "name") : NULL;
+        if(!carried)
+            continue;
+        if(out)
+            out[count] = carried;
+        ++count;
+    }
+    return count;
+}
+
+const char* rocke_i_first_reused_loop_name(const char* const* taken,
+                                           size_t n_taken,
+                                           const char* const* names,
+                                           size_t n_names)
+{
+    for(size_t i = 0; i < n_names; ++i)
+    {
+        for(size_t t = 0; t < n_taken; ++t)
+        {
+            if(strcmp(taken[t], names[i]) == 0)
+            {
+                return names[i];
+            }
+        }
+        for(size_t earlier = 0; earlier < i; ++earlier)
+        {
+            if(strcmp(names[earlier], names[i]) == 0)
+            {
+                return names[i];
+            }
+        }
+    }
+    return NULL;
+}
+
 const char* rocke_i_scf_for_carried_descriptor_error(const rocke_op_t* op, char* buf, size_t cap)
 {
     int i;
@@ -868,10 +963,88 @@ bool rocke_attr_get_bool(const rocke_attr_map_t* m, const char* key, bool dflt)
 
 bool rocke_scheduler_strategy_is_valid(const char* strategy)
 {
-    return strategy == NULL || strcmp(strategy, "max-ilp") == 0
-           || strcmp(strategy, "max-memory-clause") == 0 || strcmp(strategy, "iterative-ilp") == 0
-           || strcmp(strategy, "iterative-minreg") == 0
-           || strcmp(strategy, "iterative-maxocc") == 0;
+    if(strategy == NULL)
+        return true;
+    /* One of the ", "-separated names of ROCKE_SCHEDULER_STRATEGY_CHOICES. */
+    const size_t n = strlen(strategy);
+    const char* name = ROCKE_SCHEDULER_STRATEGY_CHOICES;
+    for(;;)
+    {
+        const char* sep = strstr(name, ", ");
+        const size_t len = sep != NULL ? (size_t)(sep - name) : strlen(name);
+        if(n > 0 && len == n && strncmp(name, strategy, n) == 0)
+            return true;
+        if(sep == NULL)
+            return false;
+        name = sep + 2;
+    }
+}
+
+size_t rocke_py_str_repr(const char* s, char* out, size_t cap)
+{
+    if(s == NULL)
+    {
+        /* Python repr(None). */
+        if(out != NULL && cap > 0)
+            snprintf(out, cap, "None");
+        return 4;
+    }
+    const char quote = (strchr(s, '\'') != NULL && strchr(s, '"') == NULL) ? '"' : '\'';
+    size_t pos = 0;
+    auto put = [&](char ch) {
+        if(out != NULL && pos + 1 < cap)
+            out[pos] = ch;
+        ++pos;
+    };
+    put(quote);
+    for(const unsigned char* p = (const unsigned char*)s; *p != '\0'; ++p)
+    {
+        const unsigned char ch = *p;
+        if(ch == (unsigned char)quote || ch == '\\')
+        {
+            put('\\');
+            put((char)ch);
+        }
+        else if(ch == '\t' || ch == '\n' || ch == '\r')
+        {
+            put('\\');
+            put(ch == '\t' ? 't' : ch == '\n' ? 'n' : 'r');
+        }
+        else if(ch < 0x20 || ch == 0x7f)
+        {
+            static const char hex[] = "0123456789abcdef";
+            put('\\');
+            put('x');
+            put(hex[ch >> 4]);
+            put(hex[ch & 0xf]);
+        }
+        else
+        {
+            put((char)ch);
+        }
+    }
+    put(quote);
+    if(out != NULL && cap > 0)
+        out[pos < cap ? pos : cap - 1] = '\0';
+    return pos;
+}
+
+bool rocke_scheduler_strategy_reason(const char* strategy, char* reason, size_t reason_cap)
+{
+    if(rocke_scheduler_strategy_is_valid(strategy))
+        return false;
+    if(reason != NULL && reason_cap > 0)
+    {
+        /* Written in place, so the text truncates as one snprintf would. */
+        size_t pos = (size_t)snprintf(reason, reason_cap, "unsupported scheduler_strategy ");
+        if(pos < reason_cap)
+            pos += rocke_py_str_repr(strategy, reason + pos, reason_cap - pos);
+        if(pos < reason_cap)
+            snprintf(reason + pos,
+                     reason_cap - pos,
+                     "; expected one of: " ROCKE_SCHEDULER_STRATEGY_CHOICES ", or None");
+    }
+    return true;
 }
 
 /* ============================ OPCODE TABLE ============================== */
@@ -1151,7 +1324,16 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "tile.global_ptr_offset",
 
     /* tile.* kernel abort */
-    "tile.trap"};
+    "tile.trap",
+
+    /* tile.* gpu_checked_value failure path */
+    "tile.gpu_check_failed",
+
+    /* tile.global_addr_of */
+    "tile.global_addr_of",
+
+    /* tile.* buffer f32 atomic add with a cache policy */
+    "tile.buffer_atomic_fadd_f32"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -1445,7 +1627,15 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* global_ptr_offset          */ true,
 
     /* tile.* kernel abort (effectful) */
-    /* trap                       */ false};
+    /* trap                       */ false,
+
+    /* tile.* gpu_checked_value failure path (effectful) */
+    /* gpu_check_failed           */ false,
+
+    /* tile.global_addr_of        */ true,
+
+    /* tile.* buffer f32 atomic add (effectful) */
+    /* buffer_atomic_fadd_f32     */ false};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {
@@ -1499,13 +1689,16 @@ bool rocke_op_is_pure(const rocke_op_t* op)
     return rocke_opcode_is_pure(op->opcode);
 }
 
-/* Python @property KernelDef.max_workgroup_size: attrs["max_workgroup_size"],
- * default 256. */
+/* Python @property KernelDef.max_workgroup_size: attrs["workgroup_size"] (the
+ * exact block size) when set, else attrs["max_workgroup_size"] (an upper bound),
+ * else 256. The verifier refuses a kernel that sets both. */
 int rocke_kernel_max_workgroup_size(const rocke_kernel_def_t* k)
 {
     int64_t v;
     if(!k)
         return 256;
+    if(rocke_attr_get_int(&k->attrs, "workgroup_size", &v))
+        return (int)v;
     if(rocke_attr_get_int(&k->attrs, "max_workgroup_size", &v))
         return (int)v;
     return 256;

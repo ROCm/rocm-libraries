@@ -28,10 +28,34 @@ import enum
 import os
 import sys
 from dataclasses import dataclass, field
+from math import gcd as _gcd
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .arch import target as _arch
-from .dtypes import dtype_info
+from .dtypes import UNSIGNED_INTEGER_DTYPES, dtype_info
+from .intexpr import IntExpr, relation_json
+from .param_facts import (
+    FACT_WORDS,
+    LOWER_WORDS,
+    UPPER_WORDS,
+    bound_text,
+    declaration_errors,
+    int_type_limits,
+    is_plain_int,
+    stored_int,
+    two_bounds_refusals,
+)
+from .storage import SCALE_ENCODINGS
+from .value_sources import (
+    ARITHMETIC,
+    ASSUME_RANGE_OP,
+    THREAD_ID_OP,
+    Sources,
+    first_unchecked_arithmetic,
+    loaded_directly,
+    sources_of,
+    value_text,
+)
 
 # ----------------------------- Types --------------------------------------
 
@@ -353,26 +377,141 @@ def _int_cmp_pred_error(pred: Any, operand_type: str) -> Optional[str]:
 
 
 # ``arith.assume_range`` integer attrs, in the order their type is checked.
-_ASSUME_RANGE_INT_ATTRS = ("multiple_of", "residue", "lo", "hi", "hi_plus")
+_ASSUME_RANGE_INT_ATTRS = ("multiple_of", "residue", "ge", "ge_plus", "lt", "lt_plus")
+# The ``by`` of a marker IRBuilder.gpu_checked_value writes: its facts are
+# checked on the GPU, and a false one fails the launch.
+GPU_CHECKED_VALUE_WRITER = "gpu_checked_value"
+# The writers a marker's ``by`` attr may name. Every marker states facts its
+# writer checked first; ``by`` names that writer, so a reader can tell which
+# check stands behind a fact.
+ASSUME_RANGE_WRITERS = (GPU_CHECKED_VALUE_WRITER,)
 
 
-def _assume_range_errors(attrs: Dict[str, Any], num_operands: int) -> List[str]:
-    """Every rule an ``arith.assume_range`` marker's attrs break, in order.
+def assume_range_bound_operands(op: Op) -> tuple[Value | None, Value | None]:
+    """The ``(ge, lt)`` operands of an ``arith.assume_range`` marker, ``None``
+    for an end the marker does not state as a Value.
 
-    The one home of the marker's attr rules: the builder raises the first
-    message and the verifier reports all of them. The C++ verifier emits the
-    same texts. ``num_operands`` is 2 when the end is a runtime value
-    (``hi_value``) and 1 otherwise.
+    The ends are ``ge + ge_plus <= v < lt + lt_plus``.
     """
+    return _marker_end_operands(op.attrs, op.operands)
+
+
+def _marker_end_operands(
+    attrs: dict[str, Any], operands: Sequence[Value]
+) -> tuple[Value | None, Value | None]:
+    """The one home of the marker's operand layout: the marked value, then the
+    ``ge`` operand when ``ge_plus`` is present, then the ``lt`` operand when one
+    operand is left."""
+    rest = list(operands[1:])
+    ge = rest.pop(0) if "ge_plus" in attrs and rest else None
+    lt = rest.pop(0) if rest else None
+    return ge, lt
+
+
+@dataclass(frozen=True)
+class MarkerEnd:
+    """One stated end of an ``arith.assume_range`` marker: ``bound + plus``,
+    where ``bound`` is an int or a Value (whose own stated facts give its
+    number)."""
+
+    bound: int | Value
+    plus: int = 0
+
+
+@dataclass(frozen=True)
+class MarkerFacts:
+    """What an ``arith.assume_range`` marker states about its value ``v``:
+    ``lower <= v`` and ``v < upper`` (``None`` for a side it does not state),
+    and ``v % multiple_of == residue``."""
+
+    lower: MarkerEnd | None
+    upper: MarkerEnd | None
+    multiple_of: int
+    residue: int
+
+    @property
+    def states_facts(self) -> bool:
+        """Whether the marker states a bound or a divisibility (a marker may
+        state neither)."""
+        return self.lower is not None or self.upper is not None or self.multiple_of > 1
+
+
+def marker_facts(op: Op) -> MarkerFacts:
+    """The facts an ``arith.assume_range`` marker states, read from its attrs
+    and its Value ends (:func:`assume_range_bound_operands`): the one decoder
+    of the marker's facts."""
+    attrs = op.attrs
+    ge_operand, lt_operand = assume_range_bound_operands(op)
+    lower: MarkerEnd | None = None
+    if ge_operand is not None:
+        lower = MarkerEnd(ge_operand, attrs.get("ge_plus", 0))
+    elif "ge" in attrs:
+        lower = MarkerEnd(attrs["ge"])
+    upper: MarkerEnd | None = None
+    if lt_operand is not None:
+        upper = MarkerEnd(lt_operand, attrs.get("lt_plus", 0))
+    elif "lt" in attrs:
+        upper = MarkerEnd(attrs["lt"])
+    return MarkerFacts(
+        lower, upper, attrs.get("multiple_of", 1), attrs.get("residue", 0)
+    )
+
+
+def has_stated_facts(value: Value) -> bool:
+    """Whether ``value`` has facts stated for it: it is a kernel parameter whose
+    declaration states one of ``FACT_WORDS``, or the result of a range marker
+    that states a bound or a divisibility (:attr:`MarkerFacts.states_facts`).
+
+    These are the Values ``rocke.core.facts.stated_facts_of`` reads facts from,
+    and so the Values a bound may be over: a ``gpu_checked_value`` bound and a
+    range marker's Value end in the IR range walk. Defined here, beside the
+    marker decoder; ``rocke.core.facts`` re-exports it as its public home.
+    """
+    if value.param is not None:
+        return any(word in value.param.attrs for word in FACT_WORDS)
+    op = value.op
+    return (
+        op is not None and op.name == ASSUME_RANGE_OP and marker_facts(op).states_facts
+    )
+
+
+def _assume_range_errors(attrs: dict[str, Any], operands: Sequence[Value]) -> list[str]:
+    """Every rule an ``arith.assume_range`` marker's attrs and Value ends break,
+    in order.
+
+    The one home of the marker's rules: the builder raises the first message
+    and the verifier reports all of them. The C++ engine's
+    ``rocke_assume_range_errors`` gives the same texts. ``operands`` are the
+    marked value and its Value ends: a ``ge`` operand (present exactly when
+    ``ge_plus`` is) and an ``lt`` operand (the operand left after it). Each
+    Value end has the marked value's type.
+    """
+    value_type = operands[0].type
+    end_type_errors = [
+        f"arith.assume_range: {word} operand type {end.type.name} != operand type "
+        f"{value_type.name}"
+        for word, end in zip(("ge", "lt"), _marker_end_operands(attrs, operands))
+        if end is not None and end.type != value_type
+    ]
     errors = [
         f"arith.assume_range: {key} must be an integer"
         for key in _ASSUME_RANGE_INT_ATTRS
         if key in attrs
         and (not isinstance(attrs[key], int) or isinstance(attrs[key], bool))
     ]
+    if "by" in attrs:
+        by = attrs["by"]
+        if not isinstance(by, str):
+            errors.append("arith.assume_range: by must be a string")
+        elif by not in ASSUME_RANGE_WRITERS:
+            errors.append(
+                f"arith.assume_range: by names no marker writer: '{by}' "
+                f"(one of: {', '.join(ASSUME_RANGE_WRITERS)})"
+            )
     if errors:
         # The value rules below compare these attrs as integers.
-        return errors
+        return end_type_errors + errors
+    errors = end_type_errors
     multiple_of = attrs.get("multiple_of", 1)
     residue = attrs.get("residue", 0)
     if multiple_of < 1:
@@ -383,18 +522,62 @@ def _assume_range_errors(attrs: Dict[str, Any], num_operands: int) -> List[str]:
         errors.append(
             f"arith.assume_range: residue must be in [0, {multiple_of}), got {residue}"
         )
-    has_hi_value = num_operands == 2
-    if "hi" in attrs and has_hi_value:
+    has_ge_operand = "ge_plus" in attrs
+    ends = len(operands) - 1
+    if has_ge_operand and ends < 1:
+        errors.append("arith.assume_range: ge_plus is given without a ge operand")
+    if ends > 1 and not has_ge_operand:
         errors.append(
-            "arith.assume_range: hi and hi_value are both given; state at most one end"
+            "arith.assume_range: two Value ends need ge_plus (the operands are the "
+            "value, the ge operand, then the lt operand)"
         )
-    if "hi_plus" in attrs and not has_hi_value:
-        errors.append("arith.assume_range: hi_plus is given without hi_value")
-    if "lo" in attrs and "hi" in attrs and attrs["lo"] >= attrs["hi"]:
+    if "ge" in attrs and has_ge_operand and ends >= 1:
         errors.append(
-            f"arith.assume_range: lo ({attrs['lo']}) must be below hi ({attrs['hi']})"
+            "arith.assume_range: ge is given both as an attr and as an operand; "
+            "state one lower end"
+        )
+    has_lt_operand = ends - (1 if has_ge_operand else 0) >= 1
+    if "lt" in attrs and has_lt_operand:
+        errors.append(
+            "arith.assume_range: lt is given both as an attr and as an operand; "
+            "state one upper end"
+        )
+    if "lt_plus" in attrs and not has_lt_operand:
+        errors.append("arith.assume_range: lt_plus is given without an lt operand")
+    if "ge" in attrs and "lt" in attrs and attrs["ge"] >= attrs["lt"]:
+        errors.append(
+            f"arith.assume_range: ge ({attrs['ge']}) must be below lt ({attrs['lt']})"
         )
     return errors
+
+
+def one_unsigned_compare_checks(end_least: int, end_most: int, t: Type) -> bool:
+    """Whether ``0 <= v < end`` is exactly ``v u< end`` for an i32 or i64 ``v``
+    and an ``end`` known to lie in ``[end_least, end_most]``.
+
+    The rule every emitted bound check follows: compare, and never form a
+    subtraction that can wrap (``v - lo`` overflows for a ``v`` far below
+    ``lo``). One unsigned compare decides both sides when ``end`` lies in
+    ``[0, 2^(bits-1))``: a negative ``v`` reads as at least ``2^(bits-1)``
+    unsigned, so it fails, and so does every ``v >= end``. Otherwise each side
+    takes its own signed compare. ``IRBuilder.gpu_checked_value`` and the
+    tiling layer's bound checks both ask this function.
+    """
+    if t not in (I32, I64):
+        raise ValueError(
+            f"one_unsigned_compare_checks failed - t={t.name}, expected i32 or i64"
+        )
+    # end_most < 2^(bits-1), i.e. end_most is at most the signed maximum.
+    return 0 <= end_least and end_most <= int_type_limits(t.name)[1]
+
+
+def param_fact_errors(params: Sequence[Param], index: int) -> list[str]:
+    """Every rule the declaration ``params[index]`` breaks, in order:
+    ``rocke.core.param_facts.declaration_errors``, told whether the declaration
+    has a pointer type."""
+    return declaration_errors(
+        params, index, is_pointer=isinstance(params[index].type, PtrType)
+    )
 
 
 def _check_unsigned_int_operands(op_name: str, a: "Value", b: "Value") -> None:
@@ -451,13 +634,10 @@ def _refuse_packed_only_value(op_name: str, t: "Type") -> None:
 # unsigned operand through _refuse_unsigned when they are built, and again
 # through _refuse_unsigned_operands when they are lowered. U4 is packed-only
 # (above), so only U8 values ever reach an op.
-_UNSIGNED_SCALARS = ("u4", "u8")
-
-
 def _is_unsigned(t: "Type") -> bool:
     """True when ``t``, or the element of a vector ``t``, is an unsigned integer."""
     elem = t.elem if isinstance(t, VectorType) else t
-    return elem.name in _UNSIGNED_SCALARS
+    return elem.name in UNSIGNED_INTEGER_DTYPES
 
 
 def _refuse_unsigned(op_name: str, t: "Type", instead: Optional[str] = None) -> None:
@@ -565,6 +745,14 @@ def _check_i32(op: str, field: str, value: int) -> int:
     return v
 
 
+# gfx12+ atomic cache-policy immediate (bits [2:0] th, [4:3] scope) for a
+# device-scope cascade add: th = TH_ATOMIC_CASCADE (4), scope = SCOPE_DEV (2).
+# The WGP and L2 caches accumulate the adds locally and write the sum back
+# once, which sheds most of the global RMW traffic of a cross-workgroup
+# reduction. The destination must be pre-zeroed.
+CPOL_ATOMIC_CASCADE_DEV = 4 | (2 << 3)
+
+
 def _check_cachepolicy(op: str, value: int) -> int:
     """Validate the gfx12+ five-bit cache-policy immediate."""
     v = int(value)
@@ -654,15 +842,67 @@ def hwreg(reg_id: int, offset: int = 0, size: int = 32) -> int:
     return reg_id | (offset << 6) | ((size - 1) << 11)
 
 
-def _mma_c_frag_len(op_id: str) -> int:
-    """Accumulator fragment length for ``op_id`` from the arch SSOT.
+# gfx1250 TDM LDS padding: the descriptor's ``pad_interval`` is 3 bits and
+# ``pad_amount`` 7 bits, both counted in dwords. Mirrored by
+# ROCKE_TDM_PAD_INTERVAL_MAX / ROCKE_TDM_PAD_AMOUNT_MAX in rocke/ir.h.
+TDM_PAD_INTERVAL_MAX = 7
+TDM_PAD_AMOUNT_MAX = 127
+
+
+def encode_tdm_padding(interval_bytes: int, pad_bytes: int) -> Tuple[int, int]:
+    """Encode an LDS row pad as :meth:`IRBuilder.tdm_descriptor_2d`'s
+    ``(pad_interval, pad_amount)``.
+
+    The mover inserts ``pad_bytes`` of gap into the LDS destination after every
+    ``interval_bytes`` of payload. Both are counted in dwords, and the interval
+    is a log2 biased by one:
+
+        ``pad_interval = log2(interval_bytes / 4) - 1``
+        ``pad_amount   = pad_bytes / 4 - 1``
+
+    Raises ``ValueError`` for a pad the fields cannot express. The error
+    messages are mirrored by ``rocke_encode_tdm_padding``.
+    """
+    interval_bytes = int(interval_bytes)
+    pad_bytes = int(pad_bytes)
+    if pad_bytes <= 0:
+        raise ValueError(
+            "encode_tdm_padding needs a positive pad; pass no pad_interval for an "
+            "unpadded tile"
+        )
+    if interval_bytes % 4 or pad_bytes % 4:
+        raise ValueError(
+            f"TDM padding is dword-granular, got interval={interval_bytes}B pad={pad_bytes}B"
+        )
+    interval_dwords = interval_bytes // 4
+    if interval_dwords < 2 or interval_dwords & (interval_dwords - 1):
+        raise ValueError(
+            f"TDM pad interval must be a power-of-two dword count >= 2, got {interval_dwords}"
+        )
+    pad_interval = interval_dwords.bit_length() - 2
+    pad_amount = pad_bytes // 4 - 1
+    if pad_interval > TDM_PAD_INTERVAL_MAX:
+        raise ValueError(
+            f"TDM pad_interval {pad_interval} exceeds {TDM_PAD_INTERVAL_MAX} "
+            f"(interval {interval_bytes}B too large)"
+        )
+    if pad_amount > TDM_PAD_AMOUNT_MAX:
+        raise ValueError(
+            f"TDM pad_amount {pad_amount} exceeds {TDM_PAD_AMOUNT_MAX} "
+            f"(pad {pad_bytes}B too large)"
+        )
+    return pad_interval, pad_amount
+
+
+def _mma_dst_frag_len(op_id: str) -> int:
+    """``dst`` fragment length for ``op_id`` from the arch SSOT.
 
     Resolved through ``core/arch/target._frag_info`` -- ``_MMA_FRAGMENT_INFO``,
     or for an emulated atom the physical atom it expands into; ir.py holds no
     private copy. Unknown op_ids (frag length 0) raise, matching the strictness
     callers relied on.
     """
-    frag_len = _arch._frag_info(op_id).c_frag_len
+    frag_len = _arch._frag_info(op_id).dst.frag_len
     if frag_len <= 0:
         known = {*_arch._MMA_FRAGMENT_INFO, *_arch._op_id_physical_op_id()}
         raise ValueError(
@@ -675,9 +915,8 @@ def _mma_dst_dtype(op_id: str) -> str:
     """The result dtype of ``op_id``, from the arch catalog.
 
     Sourced from ``core/arch/data/arch_specs.json`` via
-    ``target._op_id_dst_dtype``: the accumulator dtype, except for an atom
-    whose result dtype differs from it. Op_ids absent from the catalog return
-    fp32.
+    ``target._op_id_dst_dtype``. Op_ids absent from the catalog retain the
+    historical fp32 result default.
     """
     return _arch._op_id_dst_dtype().get(op_id, "fp32")
 
@@ -792,6 +1031,75 @@ def _loop_carried_descriptor_message(index: int) -> str:
     )
 
 
+def _reused_loop_name_message(name: str) -> str:
+    """The refusal for an ``scf.for`` induction variable or carried value named
+    ``name`` when that name is already taken.
+
+    A loop names its induction variable and carried values itself (they are not
+    builder-numbered), and the serialized IR refers to a value by its name. If a
+    nested loop reuses the name of a value of a loop it sits in, or one loop
+    gives two of its values the same name, a read of that name inside the inner
+    body is ambiguous: the C++ engine, which lowers the serialized IR, reads one
+    value where the Python engine reads the other, and the two engines emit
+    different kernels without an error.
+    """
+    return (
+        f"scf.for: the name '{name}' is already taken by an induction variable or "
+        "carried value of this loop or of a loop it is nested in; give it a name "
+        "of its own"
+    )
+
+
+def _first_reused_loop_name(taken: Sequence[str], names: Sequence[str]) -> str | None:
+    """The first of ``names`` that is already taken, or None when all are free.
+
+    ``names`` are the names an ``scf.for`` gives its induction variable and
+    carried values, in that order; ``taken`` are those of the loops it is
+    nested in. A name is taken when it is in ``taken`` or repeats an earlier
+    one of ``names``. The builder, the IR parser and the verifier all apply
+    this rule and refuse with :func:`_reused_loop_name_message`.
+    """
+    seen = set(taken)
+    for name in names:
+        if name in seen:
+            return name
+        seen.add(name)
+    return None
+
+
+def _scf_for_value_names(loop: Op) -> list[str]:
+    """The names the ``scf.for`` ``loop`` gives its induction variable and
+    carried values, in that order: the ``iv`` attr when it is a string, then the
+    ``name`` of each ``iter_args`` entry that has one.
+
+    A name is listed whether or not its type is recorded. The builder, the IR
+    parser and the verifier collect a loop's names with it.
+    """
+    names: list[str] = []
+    iv_name = loop.attrs.get("iv")
+    if isinstance(iv_name, str):
+        names.append(iv_name)
+    iter_args = loop.attrs.get("iter_args")
+    if isinstance(iter_args, list):
+        for entry in iter_args:
+            if isinstance(entry, dict) and isinstance(entry.get("name"), str):
+                names.append(entry["name"])
+    return names
+
+
+def _loop_with_body(region: Region, body: Region) -> Op | None:
+    """Return the ``scf.for`` of ``region`` whose body is ``body``, or None.
+
+    The loop is matched by its body, not by its place in ``region``: a loop
+    handle may be created and other ops emitted after it before its body is
+    entered, so the loop need not be the last op of ``region``.
+    """
+    for op in reversed(region.ops):
+        if op.name == "scf.for" and op.regions and op.regions[0] is body:
+            return op
+    return None
+
+
 def _scf_for_carried_descriptor_error(op: "Op") -> Optional[str]:
     """The refusal for the ``scf.for`` ``op`` when it carries a buffer
     descriptor, or None when it does not.
@@ -822,18 +1130,14 @@ def _scf_for_carried_descriptor_error(op: "Op") -> Optional[str]:
 # narrow forms are the ones that keep a byte-exact last element.
 _BUFFER_ACCESS_BYTES = (1, 2, 4, 8, 16)
 
-# MMA scale encodings: whole bytes, but no value form in the IR (neither engine
-# maps them to an LLVM or HIP type), so a buffer access cannot produce or take a
-# vector of them. Their bytes move as u8.
-_SCALE_ENCODING_SCALARS = ("e8m0", "e5m3")
-
 
 def _buffer_access_bytes(op_name: str, elem: Type, count: int) -> int:
     """The bytes one buffer access of ``count`` ``elem`` elements moves, or refuse it.
 
     The element is any scalar whose width is whole bytes and that has a value
-    form (not one of :data:`_SCALE_ENCODING_SCALARS`); ``count`` is an int and
-    ``count`` elements together must make one of :data:`_BUFFER_ACCESS_BYTES`.
+    form (not one of ``core.storage.SCALE_ENCODINGS``, the MMA scale encodings,
+    whose bytes move as u8); ``count`` is an int and ``count`` elements together
+    must make one of :data:`_BUFFER_ACCESS_BYTES`.
     The C++ builder (``rocke_i_buffer_access_bytes``, whose count is a C int)
     refuses with the same texts.
     """
@@ -841,7 +1145,7 @@ def _buffer_access_bytes(op_name: str, elem: Type, count: int) -> int:
         raise TypeError(
             f"{op_name}: the element type must be a scalar, got {elem.name}"
         )
-    if elem.name in _SCALE_ENCODING_SCALARS:
+    if elem.name in SCALE_ENCODINGS:
         raise TypeError(
             f"{op_name}: {elem.name} is an MMA scale encoding with no value form; "
             "move its bytes as u8"
@@ -980,6 +1284,83 @@ def _trap_op_error(op: "Op") -> Optional[str]:
     return None
 
 
+def gpu_check_word_symbol(kernel_name: str) -> str:
+    """The code-object symbol of ``kernel_name``'s GPU-check word.
+
+    A kernel that holds a ``gpu_checked_value`` defines this i32 global, zero
+    at load. A lane whose fact is false stores 1 to it and returns, so the
+    launch completes and the host reads the word to fail it (``rocke.runtime``).
+    Both lowerings emit it under this name, and the C++ engine
+    (``rocke_i_gpu_check_word_symbol``) spells it the same way.
+    """
+    return f"rocke_gpu_check_failed_{kernel_name}"
+
+
+# The op on a gpu_checked_value's failure path: a lane whose fact is false
+# stores to the kernel's GPU-check word and returns. The builder emits it, and
+# kernel_checks_on_gpu and the recipe launch plan look for it by this name.
+GPU_CHECK_FAILED_OP = "tile.gpu_check_failed"
+
+
+def kernel_checks_on_gpu(kernel: KernelDef) -> bool:
+    """Whether ``kernel`` holds a ``tile.gpu_check_failed`` op, so a false
+    ``gpu_checked_value`` fact stores to its GPU-check word.
+
+    This is the one test of whether a kernel checks a value on the GPU, and the
+    C++ engine's ``rocke_i_kernel_checks_on_gpu`` is its twin. It looks for the
+    failure op, not the range marker: optimization drops a marker whose result
+    nothing uses, while the failure path, which stores, stays.
+    """
+    return _region_checks_on_gpu(kernel.body.ops)
+
+
+def _region_checks_on_gpu(ops: list[Op]) -> bool:
+    return any(
+        op.name == GPU_CHECK_FAILED_OP
+        or any(_region_checks_on_gpu(region.ops) for region in op.regions)
+        for op in ops
+    )
+
+
+# Why a kernel holding a gpu_checked_value must not be launched from its code
+# object alone: nothing but rocke.runtime reads its GPU-check word, so a false
+# fact would go unseen. Every door that hands out a code object or a plan to
+# launch one refuses such a kernel with this text (ParameterContract's
+# code_object_refusal and the recipe launch plans), and the C++ engine's
+# recipe plan uses the same words (ROCKE_GPU_CHECK_UNREAD_REASON).
+GPU_CHECK_UNREAD_REASON = (
+    "only rocke's runtime reads this kernel's GPU-check word, so a false "
+    "gpu_checked_value fact would go unseen"
+)
+
+# Why a kernel whose parameters state facts must not be launched from its code
+# object alone or from a recipe launch plan: neither reads the facts, and only
+# KernelLauncher.from_artifact checks them. Every such door refuses the kernel
+# with this text (ParameterContract's code_object_refusal and the recipe launch
+# plans); the C++ engine's recipe plan uses the same words
+# (ROCKE_PARAM_FACTS_UNCHECKED_REASON).
+PARAM_FACTS_UNCHECKED_REASON = (
+    "parameters carry facts, which a launch from a code object or from a launch "
+    "plan does not check"
+)
+
+# What every door that refuses a kernel tells its caller to do instead
+# (ROCKE_LAUNCH_THROUGH_FROM_ARTIFACT in the C++ engine).
+LAUNCH_THROUGH_FROM_ARTIFACT = "launch it through KernelLauncher.from_artifact"
+
+
+def _gpu_check_failed_op_error(op: Op) -> str | None:
+    """The error for a built ``tile.gpu_check_failed`` op that is not bare, or
+    None (``rocke_i_gpu_check_failed_op_error`` in the C++ engine, same text).
+
+    The lowerings emit only the store to the kernel's check word and the end
+    of the wave, so an operand would be ignored and a result undefined.
+    """
+    if op.operands or op.results or op.regions:
+        return "gpu_check_failed takes no operands, results or regions"
+    return None
+
+
 # The two branches of an scf.if_else, in region order.
 _IF_ELSE_BRANCHES = ("then", "else")
 
@@ -1066,6 +1447,10 @@ class Value:
     name: str
     type: Type
     op: Optional["Op"] = None
+    # The declaration of a kernel parameter's Value (``IRBuilder.param``,
+    # ``ir_serialize.parse``); ``None`` for every other Value. Its facts are read
+    # through ``rocke.core.facts.stated_facts_of``.
+    param: Param | None = field(default=None, compare=False, repr=False)
 
     def __repr__(self) -> str:
         return self.name
@@ -1111,6 +1496,10 @@ class Param:
     name: str
     type: Type
     attrs: Dict[str, Any] = field(default_factory=dict)
+    # The kernel's parameters declared before this one, the only ones a
+    # relation in ``attrs`` may name. Set wherever a Param is declared
+    # (``IRBuilder.param``, ``ir_serialize.parse``).
+    declared_before: tuple[Param, ...] = field(default=(), compare=False, repr=False)
 
 
 @dataclass
@@ -1126,7 +1515,15 @@ class KernelDef:
         gets baked into the AMDGPU kernel attributes
         (`amdgpu-flat-work-group-size="64,N"`); launching with more
         than N threads/block triggers a HIP `unspecified launch
-        failure`. Defaults to 256 for legacy kernels."""
+        failure`.
+
+        A kernel states its block size in one of two attrs, never both (the
+        verifier refuses both): ``workgroup_size`` is the exact block size the
+        kernel must be launched with, and ``max_workgroup_size`` an upper bound
+        it may be launched below. Either one is the bound returned here, so the
+        two lower to the same bytes. Defaults to 256 for legacy kernels."""
+        if "workgroup_size" in self.attrs:
+            return int(self.attrs["workgroup_size"])
         return int(self.attrs.get("max_workgroup_size", 256))
 
     @property
@@ -1335,6 +1732,213 @@ def current_source_loc() -> Optional[str]:
     return join_loc(frames) if frames else None
 
 
+# ----------------------------- GPU checks ---------------------------------
+#
+# ``IRBuilder.gpu_checked_value``'s rules and messages. ``cpp/core/ir/gpu_check.cpp``
+# gives the same texts.
+
+
+def _declaration_text(param: Param) -> str:
+    """``param``'s declaration as the author writes it:
+    ``b.param("M", I32, ge=1, le=1048576)``."""
+    facts = "".join(
+        f", {word}={bound_text(param.attrs[word])}"
+        for word in FACT_WORDS
+        if word in param.attrs
+    )
+    return f'b.param("{param.name}", {param.type.name.upper()}{facts})'
+
+
+def _gpu_check_form(
+    value: Any, stated: dict[str, Any], multiple_of: Any
+) -> tuple[int | None, int | None]:
+    """Refuse a ``gpu_checked_value`` call that states no checkable fact.
+
+    Returns the inclusive ``(lower, upper)`` the int bounds give, ``None`` for
+    a side with no int bound.
+    """
+    if not isinstance(value, Value):
+        raise TypeError(f"gpu_checked_value: value is an IR Value, got {value!r}")
+    t = value.type
+    if t not in (I32, I64):
+        raise ValueError(
+            f"gpu_checked_value: the value is {t.name} -- a GPU check takes an i32 "
+            "or i64 value"
+        )
+    if not stated and multiple_of is None:
+        raise ValueError(
+            "gpu_checked_value: state at least one fact: ge, gt, le, lt or multiple_of"
+        )
+    refusals = two_bounds_refusals(stated)
+    if refusals:
+        raise ValueError(f"gpu_checked_value: {refusals[0]}")
+    tmin, tmax = int_type_limits(t.name)
+    if multiple_of is not None:
+        if not is_plain_int(multiple_of):
+            raise TypeError(
+                f"gpu_checked_value: multiple_of is an int, got {multiple_of!r}"
+            )
+        if multiple_of < 1:
+            raise ValueError(
+                f"gpu_checked_value: multiple_of must be >= 1, got {multiple_of}"
+            )
+        if multiple_of > tmax:
+            raise ValueError(
+                f"gpu_checked_value: multiple_of={multiple_of} is outside the range of {t.name}"
+            )
+    for word, bound in stated.items():
+        if isinstance(bound, IntExpr):
+            text = bound.text(
+                lambda leaf: value_text(leaf) if isinstance(leaf, Value) else repr(leaf)
+            )
+            raise ValueError(
+                f"gpu_checked_value: {word}={text} is a host expression -- on the GPU a "
+                "bound is an int or one Value; compute it with b.add / b.mul, where the "
+                "instruction can be seen"
+            )
+        if isinstance(bound, Value):
+            shown = value_text(bound)
+            if bound.type != t:
+                raise ValueError(
+                    f"gpu_checked_value: {word}={shown} is {bound.type.name} and the "
+                    f"value is {t.name} -- a bound has the value's type"
+                )
+            if not has_stated_facts(bound):
+                raise ValueError(
+                    f"gpu_checked_value: {word}={shown} has no stated facts -- a Value "
+                    "bound is a kernel parameter whose declaration states facts, or a "
+                    "Value gpu_checked_value returned"
+                )
+        elif is_plain_int(bound):
+            if not tmin <= bound <= tmax:
+                raise ValueError(
+                    f"gpu_checked_value: {word}={bound} is outside the range of {t.name}"
+                )
+        else:
+            raise TypeError(
+                f"gpu_checked_value: {word} is an int or a Value, got {bound!r}"
+            )
+    lower = upper = None
+    if is_plain_int(stated.get("ge")):
+        lower = stated["ge"]
+    elif is_plain_int(stated.get("gt")):
+        lower = stated["gt"] + 1
+    if is_plain_int(stated.get("le")):
+        upper = stated["le"]
+    elif is_plain_int(stated.get("lt")):
+        upper = stated["lt"] - 1
+    least = tmin if lower is None else lower
+    most = tmax if upper is None else upper
+    if least > most:
+        ints = [
+            f"{word}={bound}" for word, bound in stated.items() if is_plain_int(bound)
+        ]
+        verb = "leave" if len(ints) > 1 else "leaves"
+        raise ValueError(
+            f"gpu_checked_value: {' and '.join(ints)} {verb} no {t.name} value"
+        )
+    return lower, upper
+
+
+def _stated_call_text(stated: dict[str, Any], multiple_of: int | None) -> str:
+    """The words of a ``gpu_checked_value`` call, as ``le=4096, multiple_of=8``."""
+    words = [
+        f"{word}={value_text(bound) if isinstance(bound, Value) else bound}"
+        for word, bound in stated.items()
+    ]
+    if multiple_of is not None:
+        words.append(f"multiple_of={multiple_of}")
+    return ", ".join(words)
+
+
+def _gpu_check_host_visible_text(
+    value: Value,
+    sources: Sources,
+    stated: dict[str, Any],
+    multiple_of: int | None,
+    upper: int | None,
+) -> str:
+    """Why the host already checks ``value``, and where its facts belong."""
+    text = value_text(value)
+    if value.param is not None:
+        name = value.param.name
+        count = len(stated) + (multiple_of is not None)
+        fact = "facts" if count > 1 else "fact"
+        return (
+            f"gpu_checked_value: {name} is a kernel parameter. The host checks every "
+            "fact of a kernel parameter before each launch through "
+            "KernelLauncher.from_artifact and refuses the launch if one fails, so a GPU "
+            "check here would only repeat that check.\n"
+            f"Fix: state the {fact} where {name} is declared:\n"
+            f'    b.param("{name}", {value.type.name.upper()}, '
+            f"{_stated_call_text(stated, multiple_of)})\n"
+            f"{name} is declared today as: {_declaration_text(value.param)}"
+        )
+    if sources.thread_ids:
+        if (
+            value.op is not None
+            and value.op.name == THREAD_ID_OP
+            and value.op.attrs.get("axis") == "x"
+            and upper is not None
+        ):
+            return (
+                f"gpu_checked_value: {text} is bounded by the kernel's workgroup size, "
+                "which the host checks before each launch through "
+                "KernelLauncher.from_artifact.\n"
+                f'Fix: b.kernel.attrs["workgroup_size"] = {upper + 1}'
+            )
+        names = ", ".join(p.param.name for p in sources.params)
+        params = f" and kernel parameters ({names})" if names else ""
+        declarations = (
+            ", and the parameters' facts on their declarations" if names else ""
+        )
+        return (
+            f"gpu_checked_value: {text} is computed only from thread ids{params}, which "
+            "the host bounds before each launch through KernelLauncher.from_artifact.\n"
+            'Fix: state the workgroup size, b.kernel.attrs["workgroup_size"] = '
+            f"<threads per workgroup>{declarations}; the IR range walk derives the "
+            f"facts of {text} from them."
+        )
+    if not sources.params:
+        return (
+            f"gpu_checked_value: {text} is computed only from constants, so it is "
+            "known when the kernel is built -- there is nothing to check on the GPU"
+        )
+    names = ", ".join(p.param.name for p in sources.params)
+    declarations = ", ".join(
+        f'b.param("{p.param.name}", {p.type.name.upper()}, ...)' for p in sources.params
+    )
+    if len(sources.params) == 1:
+        fix = f"state the bound on the parameter: {declarations}"
+        source = "it"
+    else:
+        fix = f"state the bounds on the parameters: {declarations}"
+        source = "them"
+    return (
+        f"gpu_checked_value: {text} is computed only from kernel parameters ({names}), "
+        "which the host checks before each launch through KernelLauncher.from_artifact. "
+        f"Fix: {fix}. The IR range walk "
+        f"derives the facts of {text} from {source}."
+    )
+
+
+def _gpu_check_unchecked_text(op: Op, operand: Value) -> str:
+    """Why arithmetic on an unchecked loaded value comes too late to check."""
+    shown = value_text(operand)
+    origin = (
+        "is loaded from memory"
+        if loaded_directly(operand)
+        else "is computed from a value loaded from memory"
+    )
+    arithmetic = ARITHMETIC[op.name]
+    short = op.name.split(".", 1)[1]
+    return (
+        f"gpu_checked_value: {shown} {origin} and unchecked, and {short} uses it before "
+        f"this check ({arithmetic.hazard}). Fix: check {shown} with gpu_checked_value "
+        f"first, then {arithmetic.verb} the Values gpu_checked_value returned."
+    )
+
+
 # ----------------------------- Builder -----------------------------------
 
 # Values of the ``fence`` attr of tile.sync / tile.sync_lds_only /
@@ -1393,32 +1997,143 @@ class IRBuilder:
 
     # ----- params -----
 
-    def param(self, name: str, t: Type, **attrs: Any) -> Value:
-        """Declare a kernel parameter.
+    def param(
+        self,
+        name: str,
+        t: Type,
+        *,
+        ge: Any = None,
+        gt: Any = None,
+        le: Any = None,
+        lt: Any = None,
+        eq: Any = None,
+        multiple_of: int | None = None,
+        noalias: bool | None = None,
+        readonly: bool | None = None,
+        writeonly: bool | None = None,
+        nocapture: bool | None = None,
+        nonnull: bool | None = None,
+        align: int | None = None,
+        dereferenceable: int | None = None,
+        addr_space: str | None = None,
+    ) -> Value:
+        """Declare a kernel parameter, with the facts the GPU trusts.
 
-        Standard ``attrs`` recognised by the lowering:
+        Facts on an integer parameter (each optional). The GPU trusts them; a
+        launcher built by ``KernelLauncher.from_artifact`` checks them on the
+        host before each launch. No other launch path checks them: a
+        ``KernelLauncher`` built from code-object bytes and
+        ``launch_torch_kernel`` launch unchecked, and ``write_artifact``,
+        hkp_pack and the recipe launch plans refuse such a kernel.
 
-        * ``noalias`` (bool) — emit ``noalias`` on the LLVM kernel arg.
-        * ``readonly`` (bool) — emit ``readonly``.
-        * ``writeonly`` (bool) — emit ``writeonly``.
-        * ``align`` (int) — emit ``align N``.
-        * ``addr_space`` (str) — for ``PtrType`` params, override the
-          pointee address space:
+        * ``ge`` / ``gt`` -- value >= / > bound (at most one of the two).
+        * ``le`` / ``lt`` -- value <= / < bound (at most one of the two).
+        * ``eq`` -- value == bound, a baked length; excludes every other word.
+        * ``multiple_of`` -- value % n == 0, an int n >= 1.
 
-          * ``"global"`` (default) → ``ptr addrspace(1)``
-          * ``"constant"`` → ``ptr addrspace(4)`` (kernel-arg
-            constant memory; AMDGPU backend uses scalar
-            ``s_load_dwordxN`` instead of per-lane VMEM loads).
-            Used by descriptor tables (P17): grouped-GEMM
-            ``gemm_descs_const``, per-expert pointer arrays, etc.
+        A bound is an int, a parameter of this kernel declared earlier (its
+        Value), or ``sum_of`` / ``product_of`` / ``quotient_of`` /
+        ``difference_of`` (``rocke.core.intexpr``) over those. A relation sits
+        on the parameter declared last among its terms, so the declaration
+        order (the kernel's argument order) is never changed:
+        ``ldc = b.param("ldc", I32, ge=N)``. ``quotient_of`` needs its
+        divisor's stated lower bound to be at least 1 and its dividend's at
+        least 0. A side with no word has the type's limit; there is no hidden
+        default.
+
+        LLVM argument attributes on a pointer parameter, emitted by the
+        lowering and never checked, except ``align``, which the host also
+        checks:
+
+        * ``noalias``, ``readonly``, ``writeonly``, ``nonnull`` (bool);
+          ``nocapture`` (bool, emitted unless False).
+        * ``align`` (a power of two) -- ``align N``.
+        * ``dereferenceable`` (bytes) -- ``dereferenceable(N)``.
+        * ``addr_space`` (str) -- override the pointee address space:
+          ``"global"`` (default) -> ``ptr addrspace(1)``; ``"constant"`` ->
+          ``ptr addrspace(4)`` (kernel-arg constant memory; the AMDGPU backend
+          uses scalar ``s_load_dwordxN`` instead of per-lane VMEM loads), used
+          by descriptor tables: grouped-GEMM ``gemm_descs_const``, per-expert
+          pointer arrays, etc.
+
+        A misspelled word is a ``TypeError``; a fact the declaration cannot
+        state (a word on the wrong type, two lower bounds, a bound computed in
+        the kernel) is a ``ValueError``.
         """
         if name in self._param_values:
             raise ValueError(f"duplicate kernel parameter {name!r}")
         _refuse_packed_only_value("param", t)
-        v = Value(name=f"%{name}", type=t)
+        attrs: dict[str, Any] = {}
+        for word, bound in (("ge", ge), ("gt", gt), ("le", le), ("lt", lt), ("eq", eq)):
+            if bound is not None:
+                attrs[word] = self._stored_bound(name, word, bound)
+        if multiple_of is not None:
+            attrs["multiple_of"] = stored_int(name, "multiple_of", multiple_of)
+        for key, value in (
+            ("noalias", noalias),
+            ("readonly", readonly),
+            ("writeonly", writeonly),
+            ("nocapture", nocapture),
+            ("nonnull", nonnull),
+        ):
+            if value is not None:
+                attrs[key] = value
+        if align is not None:
+            attrs["align"] = stored_int(name, "align", align)
+        if dereferenceable is not None:
+            attrs["dereferenceable"] = stored_int(
+                name, "dereferenceable", dereferenceable
+            )
+        if addr_space is not None:
+            attrs["addr_space"] = addr_space
+        declared = Param(
+            name=name, type=t, attrs=attrs, declared_before=tuple(self._params)
+        )
+        errors = param_fact_errors([*self._params, declared], len(self._params))
+        if errors:
+            raise ValueError(errors[0])
+        v = Value(name=f"%{name}", type=t, param=declared)
         self._param_values[name] = v
-        self._params.append(Param(name=name, type=t, attrs=dict(attrs)))
+        self._params.append(declared)
         return v
+
+    def _stored_bound(self, name: str, word: str, bound: Any) -> Any:
+        """``bound`` in its stored form: an int, or a relation's canonical JSON."""
+        if isinstance(bound, (Value, IntExpr)):
+            subject = (
+                bound.text(lambda leaf: getattr(leaf, "name", repr(leaf)).lstrip("%"))
+                if isinstance(bound, IntExpr)
+                else f"{word}={bound.name.lstrip('%')}"
+            )
+            return relation_json(
+                bound.tree(lambda leaf: self._leaf_name(name, subject, leaf))
+                if isinstance(bound, IntExpr)
+                else {"param": self._leaf_name(name, subject, bound)}
+            )
+        return stored_int(name, word, bound, relations=True)
+
+    def _leaf_name(self, name: str, subject: str, leaf: Any) -> str:
+        """The parameter name a bound's leaf stands for; refuses any leaf the
+        host cannot evaluate."""
+        if not isinstance(leaf, Value):
+            raise TypeError(
+                f"param {name}: {subject} has the term {leaf!r} -- a term is an int, "
+                "a parameter of this kernel, or a nested sum_of / product_of / "
+                "quotient_of / difference_of"
+            )
+        shown = leaf.name.lstrip("%")
+        if leaf.param is None:
+            raise ValueError(
+                f"param {name}: {subject} uses {shown}, which is computed in the "
+                "kernel -- the host can only evaluate kernel parameters and ints"
+            )
+        if not any(leaf.param is p for p in self._params):
+            raise ValueError(
+                f"param {name}: {subject} uses {shown}, which is a parameter of "
+                "another kernel -- the host can only evaluate this kernel's "
+                "parameters and ints"
+            )
+        return leaf.param.name
 
     def get_param(self, name: str) -> Value:
         return self._param_values[name]
@@ -1696,20 +2411,24 @@ class IRBuilder:
         self,
         v: Value,
         *,
-        lo: Optional[int] = None,
-        hi: Optional[int] = None,
-        hi_value: Optional[Value] = None,
-        hi_plus: int = 0,
+        ge: int | Value | None = None,
+        ge_plus: int = 0,
+        lt: int | Value | None = None,
+        lt_plus: int = 0,
         multiple_of: int = 1,
         residue: int = 0,
+        by: str | None = None,
     ) -> Value:
         """Return ``v`` unchanged, marked with facts its caller has checked.
 
-        The marker records ``lo <= v``, ``v < hi`` (an int ``hi``, or
-        ``hi_value + hi_plus`` for an end only known at run time) and
-        ``v == residue (mod multiple_of)``. It emits no instruction: both
-        lowerings print ``v`` wherever the result is used. Its one reader is
-        the tiling layer's IR range walk, which trusts every marker.
+        The marker records ``ge <= v`` and ``v < lt``, each end an int or a
+        Value plus a constant (``ge + ge_plus``, ``lt + lt_plus``) for an end
+        only known at run time, and ``v == residue (mod multiple_of)``. ``by``
+        names the writer (``ASSUME_RANGE_WRITERS``) when the facts come from
+        one of the checks that name themselves. It emits no instruction: both
+        lowerings print ``v`` wherever the result is used. Its readers are
+        ``stated_facts_of`` and the tiling layer's IR range walk, which trust
+        every marker.
 
         Private on purpose: a fact stated here is never checked, so only
         callers that checked or proved it first may state it. Those callers
@@ -1717,31 +2436,176 @@ class IRBuilder:
         """
         if v.type not in (I32, I64):
             raise ValueError(f"_assume_range: v must be i32 or i64, got {v.type.name}")
-        if hi_value is not None and hi_value.type != v.type:
-            raise ValueError(
-                f"_assume_range: hi_value type {hi_value.type.name} != v type {v.type.name}"
-            )
         attrs: Dict[str, Any] = {"multiple_of": multiple_of, "residue": residue}
-        if lo is not None:
-            attrs["lo"] = lo
-        if hi is not None:
-            attrs["hi"] = hi
         operands = [v]
-        if hi_value is not None:
-            operands.append(hi_value)
-            attrs["hi_plus"] = hi_plus
-        elif hi_plus != 0:
-            attrs["hi_plus"] = hi_plus
-        errors = _assume_range_errors(attrs, len(operands))
+        for word, end, plus in (("ge", ge, ge_plus), ("lt", lt, lt_plus)):
+            if isinstance(end, Value):
+                operands.append(end)
+                attrs[f"{word}_plus"] = plus
+            else:
+                if end is not None:
+                    attrs[word] = end
+                if plus != 0:
+                    attrs[f"{word}_plus"] = plus
+        if by is not None:
+            attrs["by"] = by
+        errors = _assume_range_errors(attrs, operands)
         if errors:
             raise ValueError(errors[0])
         return self._op(
-            "arith.assume_range",
+            ASSUME_RANGE_OP,
             operands,
             [v.type],
             attrs=attrs,
             result_name_hint="range",
         ).result
+
+    def gpu_checked_value(
+        self,
+        value: Value,
+        *,
+        ge: Any = None,
+        gt: Any = None,
+        le: Any = None,
+        lt: Any = None,
+        multiple_of: int | None = None,
+    ) -> Value:
+        """Always emitted: no build mode drops it; a false fact fails the launch.
+
+        A lane whose value breaks a fact stops at the check, before anything
+        uses the value: it stores 1 to the kernel's GPU-check word
+        (:func:`gpu_check_word_symbol`) and returns from the kernel. A wave
+        whose lanes have all returned has ended and does not hold the others
+        at a barrier, so the launch completes, and ``rocke.runtime`` fails it:
+        its next wait on the stream reads the word and raises
+        ``GpuCheckFailed`` (``rocke.runtime.hip_module.GpuCheckLedger`` says
+        when the word is read and cleared). The process keeps the GPU.
+
+        **A false fact fails the launch, and every output of that launch is
+        undefined**: the lanes that go on can read what a returned lane never
+        wrote (LDS, a cross-lane read) and compute wrong values or addresses
+        from it, and a store made before the check is not undone.
+
+        **Check before any cross-workgroup protocol, in every wave that uses
+        the value.** A returned wave or workgroup never signals again, so a
+        kernel in which one waits on another's flag, semaphore or counter
+        (stream-K fix-up, a persistent queue) hangs if the one it waits on
+        returned; and a wave that only receives the value from one that
+        checked it does not stop.
+
+        Not checked: a wait outside the runtime (a torch synchronize, an
+        event) reads nothing until ``Runtime.check_gpu_checks``; a launch
+        outside ``rocke.runtime`` is never read, and its failure is silent.
+        The runtime refuses to queue the kernel on a stream that is being
+        captured into a graph (``GpuCheckCaptureRefused``): nothing reads the
+        word after a replay.
+
+        The check does not trap (:meth:`trap`): on Windows the trap handler
+        parks a trapped wave and the launch never returns.
+
+        So the check is a last line of defence for a value the host cannot
+        see, not a way to reject input; make bad input impossible upstream.
+
+        Returns ``value`` carrying the stated facts, for a value only the GPU
+        can see: one computed from a memory load or a block id, such as a
+        sequence start read from ``cu_seqlens``. The facts live only on the
+        returned Value (``rocke.core.facts.stated_facts_of`` reads them), so
+        pass that Value on, not ``value``::
+
+            start = b.gpu_checked_value(b.readfirstlane(b.global_load(cu, s, I32)), ge=0, le=T)
+
+        * ``ge`` / ``gt`` -- value >= / > bound (at most one of the two).
+        * ``le`` / ``lt`` -- value <= / < bound (at most one of the two).
+        * ``multiple_of`` -- value % n == 0, an int n >= 1.
+
+        At least one word is required, and exactly the stated sides are
+        checked. A bound is an int, or one Value of the value's type whose
+        facts are stated (a kernel parameter or a Value this method returned):
+        ``le=T`` gives the one home of a maximum and states the true fact.
+        ``sum_of`` / ``product_of`` / ``quotient_of`` / ``difference_of`` are
+        host expressions and are refused; compute a GPU bound with ``b.add`` /
+        ``b.mul``, where the instruction can be seen.
+
+        Emitted as a compare per stated side (one unsigned compare for
+        ``0 <= v < n``, see :func:`one_unsigned_compare_checks`), ``scf.if`` on
+        the failure holding ``tile.gpu_check_failed``, and a range marker
+        naming ``by="gpu_checked_value"``. A per-lane value is checked per
+        lane; a wave-uniform value (``readfirstlane``) stops its whole wave.
+
+        Refused, with the fix in the message:
+
+        * a value the host already checks: a kernel parameter or a value
+          computed only from parameters and constants (state the facts on the
+          declaration), or from thread ids (state ``workgroup_size``);
+        * a value an unchecked load reaches through an ``add``, ``sub``,
+          ``mul``, ``div`` or ``mod``: that arithmetic can wrap, become poison
+          or divide by zero before this check sees it. Check the loaded value
+          first, then compute with the Values this method returns. A load that
+          reaches the value only through conditions (a compare, a select's
+          condition) does not count.
+        """
+        stated = {
+            word: bound
+            for word, bound in (("ge", ge), ("gt", gt), ("le", le), ("lt", lt))
+            if bound is not None
+        }
+        lower, upper = _gpu_check_form(value, stated, multiple_of)
+        sources = sources_of(value)
+        if not sources.gpu_only:
+            raise ValueError(
+                _gpu_check_host_visible_text(value, sources, stated, multiple_of, upper)
+            )
+        unchecked = first_unchecked_arithmetic(value)
+        if unchecked is not None:
+            raise ValueError(_gpu_check_unchecked_text(*unchecked))
+        const = self.const_i64 if value.type == I64 else self.const_i32
+        type_max = int_type_limits(value.type.name)[1]
+        # _gpu_check_form refused two of a kind, so each side states at most one.
+        lower_word = next((w for w in LOWER_WORDS if w in stated), None)
+        upper_word = next((w for w in UPPER_WORDS if w in stated), None)
+        fails: list[Value] = []
+        if (
+            lower == 0
+            and upper is not None
+            and one_unsigned_compare_checks(upper + 1, upper + 1, value.type)
+        ):
+            fails.append(self.cmp_ult(const(upper), value))
+        else:
+            if lower_word is not None:
+                bound = stated[lower_word]
+                end = bound if isinstance(bound, Value) else const(bound)
+                compare = self.cmp_lt if lower_word == "ge" else self.cmp_le
+                fails.append(compare(value, end))
+            if upper_word is not None:
+                bound = stated[upper_word]
+                end = bound if isinstance(bound, Value) else const(bound)
+                compare = self.cmp_gt if upper_word == "le" else self.cmp_ge
+                fails.append(compare(value, end))
+        if multiple_of is not None and multiple_of > 1:
+            remainder = self.mod(value, const(multiple_of))
+            fails.append(self.cmp_ne(remainder, const(0)))
+        if fails:
+            fail = fails[0]
+            for other in fails[1:]:
+                fail = self.lor(fail, other)
+            with self.scf_if(fail):
+                self._op(GPU_CHECK_FAILED_OP)
+        lower_bound = stated.get(lower_word) if lower_word is not None else None
+        upper_bound = stated.get(upper_word) if upper_word is not None else None
+        return self._assume_range(
+            value,
+            ge=lower_bound if isinstance(lower_bound, Value) else lower,
+            ge_plus=1 if lower_word == "gt" and isinstance(lower_bound, Value) else 0,
+            # An upper end at the type's maximum states nothing.
+            lt=(
+                upper_bound
+                if isinstance(upper_bound, Value)
+                else (None if upper is None or upper == type_max else upper + 1)
+            ),
+            lt_plus=1 if upper_word == "le" and isinstance(upper_bound, Value) else 0,
+            multiple_of=1 if multiple_of is None else multiple_of,
+            by=GPU_CHECKED_VALUE_WRITER,
+        )
 
     def fcmp(self, pred: str, a: Value, b: Value) -> Value:
         if pred not in ("olt", "ole", "ogt", "oge", "oeq", "one", "ord", "uno"):
@@ -2434,8 +3298,9 @@ class IRBuilder:
     ) -> Value:
         """Packed-fp16 atomic add: two fp16 lanes per transaction.
 
-        Lowers to AMDGPU's ``llvm.amdgcn.global.atomic.fadd.v2f16``
-        intrinsic (gfx940+); returns the pre-add value. ``value``
+        Lowers to a generic ``atomicrmw fadd <2 x half>`` (agent scope)
+        with the AMDGPU memory-model metadata, which the backend selects as
+        ``global_atomic_pk_add_f16``; returns the pre-add value. ``value``
         must be a ``<2 x f16>`` vector and the pointer must reach
         into an fp16 buffer with an even element index.
         """
@@ -2568,7 +3433,7 @@ class IRBuilder:
         _refuse_packed_only_value("zero_vec", elem)
         if elem == F32:
             return self.zero_vec_f32(n)
-        if elem in (F16, BF16, F64, FP8E4M3, BF8E5M2, I8, I16, I32):
+        if elem in (F16, BF16, F64, FP8E4M3, BF8E5M2, I8, U8, I16, I32):
             return self._op(
                 "arith.constant_vec",
                 result_types=[VectorType(elem, n)],
@@ -3064,6 +3929,16 @@ class IRBuilder:
                 f"unsupported vector width for smem_store_vN of {elem_name}: {n} "
                 f"(allowed: {allowed_n})"
             )
+        # The natural alignment is n * elem_bytes, but that only holds if every
+        # address the store can land on is that aligned. An LDS tile advances by
+        # its innermost dimension per row, so a pad that makes that dimension a
+        # non-multiple of n -- lds_k_pad's whole purpose -- leaves alternate rows
+        # off the natural boundary. gcd bounds the claim to what every row start
+        # actually guarantees. Overstating alignment is undefined behaviour even
+        # where the hardware tolerates the access; understating it only affects
+        # instruction selection.
+        shape = getattr(smem.type, "shape", None)
+        align_elems = _gcd(n, int(shape[-1])) if shape else n
         self._op(
             "tile.smem_store_vN",
             [smem, *indices, value],
@@ -3071,7 +3946,7 @@ class IRBuilder:
                 "rank": len(indices),
                 "elem_type": elem_name,
                 "vec": n,
-                "align": n * elem_bytes,
+                "align": align_elems * elem_bytes,
             },
         )
 
@@ -3139,20 +4014,24 @@ class IRBuilder:
         """Target-neutral matrix-multiply-accumulate: ``D = A * B + C``.
 
         ``op`` is either an :class:`~rocke.core.arch.MmaOp` (preferred — its
-        ``op_id`` and ``c_frag_len`` drive the lowering) or a raw ``op_id``
+        ``op_id`` and ``dst`` fragment metadata drive the lowering) or a raw ``op_id``
         string. This emits a single ``tile.mma`` op carrying the ``op_id`` as an
         attribute; the LLVM lowering dispatches that ``op_id`` through the ISA
         backend (:meth:`rocke.core.isa.ISABackend.emit_mma`), which emits the
         matching MFMA call on CDNA or the WMMA call on RDNA. **One kernel body,
         two ISAs.**
 
-        The result vector type is ``<c_frag_len x D>``: the per-lane
-        accumulator length the atom produces, with D the instruction's result
-        dtype from the arch catalog (``dst_dtype``; the accumulator dtype for
-        every atom whose result is its accumulator). When ``op`` is an ``op_id``
-        string the frag length is resolved from the static MMA fragment table;
-        an emulated atom's op_id resolves through the physical atom it expands
-        into.
+        The result is a vector of the resolved destination length and element type.
+        For an ``MmaOp``, the element type is resolved from ``dst.dtype`` through
+        ``dtype_to_ir_type``; for a raw ``op_id``, it comes from the catalog's
+        destination dtype, with the historical FP32 default when no catalog entry
+        exists. This includes F64 for supported FP64 MFMA atoms. When ``op`` is a
+        raw ``op_id``, or its destination length is zero (unspecified), the length
+        is resolved from the static MMA fragment table. Supplied lengths must be
+        nonnegative integers, and destination dtypes must be recognized by
+        ``dtype_to_ir_type``. Lowering enforces the selected instruction's operand
+        and result types.
+
 
         The ISA-named helpers (:meth:`mfma_f32_16x16x16_f16`,
         :meth:`wmma_f32_16x16x16_f16`, …) are thin wrappers over this method,
@@ -3162,8 +4041,11 @@ class IRBuilder:
         ``*extra`` carries the additional operands the scaled MX atoms need
         (``a_scale``, ``b_scale``); ordinary atoms take exactly ``a, b, c``.
         ``attrs`` adds op attributes next to ``op_id``; the MX op uses it for
-        ``a_format`` and ``b_format``.
+        ``a_format`` and ``b_format``. The selected ``op_id`` is reserved and
+        cannot be supplied in ``attrs``.
         """
+        if attrs is not None and "op_id" in attrs:
+            raise ValueError("MMA attrs cannot contain the reserved op_id")
         op_id = op.op_id if hasattr(op, "op_id") else str(op)
         from .tf32 import tf32_mma_error
 
@@ -3174,15 +4056,29 @@ class IRBuilder:
         )
         if error:
             raise ValueError(error)
-        c_frag_len = (
-            op.c_frag_len
-            if hasattr(op, "c_frag_len") and op.c_frag_len
-            else _mma_c_frag_len(op_id)
-        )
-        # Result element type: the atom's own dst_dtype when ``op`` is an
-        # MmaOp, else the catalog's result dtype for the op_id.
-        dst_dtype = getattr(op, "dst_dtype", None) or _mma_dst_dtype(op_id)
-        dst_elem = dtype_to_ir_type(dst_dtype)
+        if hasattr(op, "dst"):
+            dst_frag_len = op.dst.frag_len
+            if type(dst_frag_len) is not int or dst_frag_len < 0:
+                raise ValueError(
+                    "MMA destination fragment length must be a nonnegative integer"
+                )
+            # Zero retains the historical unspecified-metadata fallback.
+            if dst_frag_len == 0:
+                dst_frag_len = _mma_dst_frag_len(op_id)
+            dst_dtype = op.dst.dtype
+            if not isinstance(dst_dtype, str):
+                raise ValueError("MMA destination dtype must name an IR scalar type")
+            try:
+                dst_elem = dtype_to_ir_type(dst_dtype)
+            except ValueError as exc:
+                raise ValueError(f"MMA destination dtype: {exc}") from exc
+        else:
+            dst_frag_len = _mma_dst_frag_len(op_id)
+            try:
+                dst_elem = dtype_to_ir_type(_mma_dst_dtype(op_id))
+            except ValueError as exc:
+                raise ValueError(f"MMA destination dtype: {exc}") from exc
+
         hint = (
             "mxacc"
             if _arch._op_id_family().get(op_id) in ("wmma_scaled", "mfma_scaled")
@@ -3191,7 +4087,7 @@ class IRBuilder:
         return self._op(
             "tile.mma",
             [a, b, c, *extra],
-            [VectorType(dst_elem, c_frag_len)],
+            [VectorType(dst_elem, dst_frag_len)],
             attrs={"op_id": op_id, **(attrs or {})},
             result_name_hint=hint,
         ).result
@@ -4824,6 +5720,19 @@ class IRBuilder:
             result_name_hint="lds_addr",
         ).result
 
+    def global_addr_of(self, ptr: Value, index: Value) -> Value:
+        """The i64 address of ``ptr[index]`` in global memory.
+
+        The TDM descriptor carries a raw 57-bit global address rather than a
+        pointer, so the element GEP has to be materialised as an integer.
+        """
+        return self._op(
+            "tile.global_addr_of",
+            [ptr, index],
+            [I64],
+            result_name_hint="gaddr",
+        ).result
+
     def smem_ptr_add(self, lds_addr: Value, byte_off: Value) -> Value:
         """Compute `lds_addr + byte_off` and return an i64 LDS address.
 
@@ -5384,14 +6293,17 @@ class IRBuilder:
     ) -> tuple[Value, Value, Value, Value, Value]:
         """Build the five D# groups for a rank-2 TDM tile transfer.
 
-        Dimension 0 is the contiguous one. ``tensor_dim0`` / ``tensor_dim1``
-        are the extents (in elements) left from ``global_ptr`` — the hardware
+        ``global_ptr`` is a global pointer, or the i64 address of one (as
+        ``global_addr_of`` returns, for an origin that may lie past the end of
+        the buffer). Dimension 0 is the contiguous one. ``tensor_dim0`` /
+        ``tensor_dim1`` are the extents (in elements) left from it -- the hardware
         clips the tile against them. ``row_stride`` is the element distance
         between consecutive dimension-1 rows. The tile is
         ``tile_dim1 x tile_dim0`` elements, packed row-major at ``lds_addr``
         (an i64 from ``smem_addr_of`` or an i32 LDS byte address) unless
         ``pad_interval`` is given, which enables LDS padding with the raw
-        ``pad_interval`` (0..7) and ``pad_amount`` (0..127) fields.
+        ``pad_interval`` (0..7) and ``pad_amount`` (0..127) fields;
+        :func:`encode_tdm_padding` derives them from a row pad in bytes.
         ``workgroup_mask`` selects the cluster workgroups that receive the
         tile (0 = only the issuing workgroup).
 
@@ -5401,12 +6313,13 @@ class IRBuilder:
         matches CK Tile's ``TDM_GROUP0`` / ``TDM_GROUP1``.
         """
         name = "tdm_descriptor_2d"
-        if (
-            not isinstance(global_ptr.type, PtrType)
-            or global_ptr.type.space != "global"
-        ):
+        is_global_ptr = (
+            isinstance(global_ptr.type, PtrType) and global_ptr.type.space == "global"
+        )
+        if not is_global_ptr and global_ptr.type is not I64:
             raise TypeError(
-                f"{name} global_ptr must be a global pointer, got {global_ptr.type}"
+                f"{name} global_ptr must be a global pointer or an i64 global "
+                f"address, got {global_ptr.type}"
             )
         if lds_addr.type is not I64 and lds_addr.type is not I32:
             raise TypeError(f"{name} lds_addr must be i64 or i32, got {lds_addr.type}")
@@ -5429,13 +6342,15 @@ class IRBuilder:
                 f"{name} workgroup_mask must be in 0..65535 (got {workgroup_mask})"
             )
         pad_enable = pad_interval is not None
-        if pad_enable and not 0 <= pad_interval <= 7:
+        if pad_enable and not 0 <= pad_interval <= TDM_PAD_INTERVAL_MAX:
             raise ValueError(
-                f"{name} pad_interval must be in 0..7 (got {pad_interval})"
+                f"{name} pad_interval must be in 0..{TDM_PAD_INTERVAL_MAX} "
+                f"(got {pad_interval})"
             )
-        if not 0 <= pad_amount <= 0x7F or (pad_amount and not pad_enable):
+        if not 0 <= pad_amount <= TDM_PAD_AMOUNT_MAX or (pad_amount and not pad_enable):
             raise ValueError(
-                f"{name} pad_amount must be in 0..127 and needs pad_interval (got {pad_amount})"
+                f"{name} pad_amount must be in 0..{TDM_PAD_AMOUNT_MAX} and needs "
+                f"pad_interval (got {pad_amount})"
             )
 
         def word(value: int) -> Value:
@@ -5445,7 +6360,7 @@ class IRBuilder:
         c16 = self.const_i32(16)
         # Group 0: count=1 | LDS byte address | global address lo | hi[24:0], type=2.
         lds32 = lds_addr if lds_addr.type is I32 else self.trunc(lds_addr, I32)
-        gaddr = self.global_ptr_to_i64(global_ptr)
+        gaddr = self.global_ptr_to_i64(global_ptr) if is_global_ptr else global_ptr
         g_hi = self.trunc(self.lshr(gaddr, self.const_i64(32)), I32)
         group0 = (
             self.const_i32(1),
@@ -5870,6 +6785,38 @@ class IRBuilder:
         _buffer_vector_bytes("buffer_store_vN", "value", value.type)
         self._op("tile.buffer_store_vN", [rsrc, voffset, soffset, value])
 
+    def buffer_atomic_fadd_f32(
+        self,
+        rsrc: Value,
+        voffset: Value,
+        soffset: Value,
+        value: Value,
+        *,
+        cachepolicy: int = 0,
+    ) -> None:
+        """f32 atomic add through a buffer resource (``raw_ptr_buffer_atomic_fadd``).
+
+        ``voffset`` / ``soffset`` are byte offsets. Callers must guard invalid
+        offsets (e.g. with ``scf_if``) instead of steering them out of range:
+        unlike a buffer load, which reads 0 there, a buffer atomic at the
+        out-of-range sentinel offset faults on gfx1250. ``cachepolicy`` is the raw
+        immediate the intrinsic takes -- on gfx12+ bits [2:0] are th and [4:3]
+        scope, e.g. :data:`CPOL_ATOMIC_CASCADE_DEV`. The returned pre-add value
+        is discarded, so the backend selects the no-return form.
+        """
+        # _check_cachepolicy coerces with int(); refuse what it would round.
+        if isinstance(cachepolicy, bool) or not isinstance(cachepolicy, int):
+            raise ValueError(
+                f"buffer_atomic_fadd_f32 cachepolicy must be an int, got {cachepolicy!r}"
+            )
+        self._op(
+            "tile.buffer_atomic_fadd_f32",
+            [rsrc, voffset, soffset, value],
+            attrs={
+                "cachepolicy": _check_cachepolicy("buffer_atomic_fadd_f32", cachepolicy)
+            },
+        )
+
     def zero_vec_f16(self, n: int) -> Value:
         """A `<n x half>` zero constant — the canonical "mask out OOB
         load" value, and the canonical "padding" value for direct
@@ -6214,6 +7161,7 @@ class IRBuilder:
     # ----- control flow -----
 
     def scf_for(self, lower: Value, upper: Value, step: Value, iv_name: str = "k0"):
+        self._refuse_taken_loop_names([f"%{iv_name}"])
         body = Region("body")
         iv = Value(name=f"%{iv_name}", type=lower.type)
         op = Op(
@@ -6252,11 +7200,16 @@ class IRBuilder:
         - False: preserve all barriers (for manually optimized kernels)
 
         No init may be a buffer descriptor (see
-        :func:`_loop_carried_descriptor_message`).
+        :func:`_loop_carried_descriptor_message`), and no name may be taken by
+        another value of this loop or of a loop it is nested in (see
+        :func:`_reused_loop_name_message`).
         """
         for index, (_, init) in enumerate(iter_args):
             if _is_buffer_descriptor(init):
                 raise ValueError(_loop_carried_descriptor_message(index))
+        self._refuse_taken_loop_names(
+            [f"%{iv_name}"] + [f"%{arg_name}" for arg_name, _ in iter_args]
+        )
         body = Region("body")
         iv = Value(name=f"%{iv_name}", type=lower.type)
         iter_vars: List[Value] = []
@@ -6303,20 +7256,35 @@ class IRBuilder:
                     raise ValueError(_loop_carried_descriptor_message(index))
         self._op("scf.yield", list(values), [], attrs={"num": len(values)})
 
-    def _current_region_is_loop_body(self) -> bool:
-        """True while the builder is emitting into an ``scf.for`` body.
+    def _refuse_taken_loop_names(self, names: Sequence[str]) -> None:
+        """Refuse the names a new ``scf.for`` gives its induction variable and
+        carried values (``names``, in that order) when one is already taken by
+        a value of a loop the builder is emitting inside, or by an earlier name
+        in ``names`` (see :func:`_first_reused_loop_name`)."""
+        reused = _first_reused_loop_name(self._enclosing_loop_value_names(), names)
+        if reused is not None:
+            raise ValueError(_reused_loop_name_message(reused))
 
-        The loop op is the last op of the region that encloses its body: it was
-        emitted there before its body was entered, and every op since went into
-        the body.
+    def _enclosing_loop_value_names(self) -> list[str]:
+        """The names of the induction variables and carried values of every
+        ``scf.for`` the builder is emitting inside, at any depth: each region
+        on the stack that is a loop's body (see :func:`_loop_with_body`) makes
+        that loop's values (see :func:`_scf_for_value_names`) visible from here.
         """
+        names: list[str] = []
+        for outer, inner in zip(self._region_stack, self._region_stack[1:]):
+            loop = _loop_with_body(outer, inner)
+            if loop is not None:
+                names.extend(_scf_for_value_names(loop))
+        return names
+
+    def _current_region_is_loop_body(self) -> bool:
+        """True while the builder is emitting into an ``scf.for`` body."""
         if len(self._region_stack) < 2:
             return False
-        enclosing = self._region_stack[-2].ops
-        if not enclosing or enclosing[-1].name != "scf.for":
-            return False
-        loop_regions = enclosing[-1].regions
-        return bool(loop_regions) and loop_regions[0] is self._region_stack[-1]
+        return (
+            _loop_with_body(self._region_stack[-2], self._region_stack[-1]) is not None
+        )
 
     def static_if(
         self,
@@ -6485,6 +7453,7 @@ PURE_OP_NAMES = {
     "tile.wave_ballot",
     "tile.sync_half_block",
     "tile.smem_addr_of",
+    "tile.global_addr_of",
     "tile.smem_ptr_add",
     "tile.global_ptr_to_i64",
     "tile.global_ptr_offset",

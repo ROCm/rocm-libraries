@@ -112,6 +112,11 @@ typedef struct rocke_coalesced_tile_loader
      * reads it). has_inner_dim distinguishes None (false) from a set value. */
     bool has_inner_dim;
     int inner_dim;
+    /* Python `elem_dtype: Type = F16`: the element type of both the buffer
+     * load (byte-offset scaling) and the smem store. NULL is the F16 default,
+     * so a zero-initialised or from_tile-built loader keeps the historical
+     * fp16 path; set it after from_tile for bf16 / f32 / i32 tiles. */
+    const rocke_type_t* elem_dtype;
 } rocke_coalesced_tile_loader_t;
 
 /* CoalescedTileLoader.choose_vec classmethod.
@@ -256,6 +261,26 @@ void rocke_coalesced_tile_loader_issue_slots(rocke_ir_builder_t* b,
                                              rocke_value_t* const* offsets,
                                              rocke_ctl_staged_t* staged);
 
+/* CoalescedTileLoader.load_async_to_lds() -- gfx1250 async variant of load().
+ *
+ * Same slot partition and descriptor contract as load() in vector_axis="col"
+ * mode, but each in-range chunk is one per-lane global_load_async_to_lds of
+ * load_vec 16-bit elements from `ptr` to smem_dst[row, col]. The copy has no
+ * buffer-resource range check, so the one the resource would make (byte offset
+ * below `num_bytes`, compared unsigned) is ANDed into the descriptor's valid; a
+ * chunk failing either is zero-filled with an ordinary LDS store of the
+ * destination tile's element type (f16 or bf16) instead. The caller drains
+ * the copies with s_wait_asynccnt (and the zero stores with an LDS barrier). */
+void rocke_coalesced_tile_loader_load_async_to_lds(rocke_ir_builder_t* b,
+                                                   const rocke_coalesced_tile_loader_t* self,
+                                                   rocke_value_t* tid,
+                                                   rocke_value_t* smem_dst,
+                                                   rocke_loads_descriptor_fn descriptor,
+                                                   void* descriptor_user,
+                                                   rocke_value_t* ptr,
+                                                   rocke_value_t* num_bytes,
+                                                   int coherency);
+
 /* ============================================================================
  * AsyncTileLoader / AsyncTileLoaderSlot
  * ========================================================================== */
@@ -278,6 +303,10 @@ typedef struct rocke_async_tile_loader
      * only c is stride-1 -- a chunk crossing one of those boundaries would fetch
      * the wrong elements silently. */
     int contig_cols;
+    /* Python `elem_dtype: Type = F16` (NULL = F16). It sets how many elements
+     * one dword chunk carries: elems_per_chunk = dwords * 4 / elem_bytes.
+     * Build a non-F16 loader with rocke_async_tile_loader_from_tile_typed. */
+    const rocke_type_t* elem_dtype;
 } rocke_async_tile_loader_t;
 
 /* Bound AsyncTileLoader (rocke.helpers.loads.AsyncTileLoaderSlot). */
@@ -310,7 +339,21 @@ rocke_status_t rocke_async_tile_loader_from_tile(int tile_rows,
                                                  int contig_cols, /* 0 => None */
                                                  rocke_async_tile_loader_t* out);
 
-/* AsyncTileLoader properties (pure int arithmetic). */
+/* AsyncTileLoader.from_tile with Python's `elem_dtype` argument (NULL = F16,
+ * which is rocke_async_tile_loader_from_tile). Each chunk carries
+ * dwords * 4 / elem_bytes elements; elem_dtype must be f16, bf16, f32 or i32
+ * (Python _ELEM_BYTES), else ROCKE_ERR_VALUE. */
+rocke_status_t rocke_async_tile_loader_from_tile_typed(int tile_rows,
+                                                       int tile_cols,
+                                                       int block_size,
+                                                       int wave_size,
+                                                       const rocke_type_t* elem_dtype,
+                                                       int max_dwords,
+                                                       int contig_cols, /* 0 => None */
+                                                       rocke_async_tile_loader_t* out);
+
+/* AsyncTileLoader properties (pure int arithmetic). halves_per_chunk is
+ * Python's elems_per_chunk (its historical name): dwords * 4 / elem_bytes. */
 int rocke_async_tile_loader_halves_per_chunk(const rocke_async_tile_loader_t* self);
 int rocke_async_tile_loader_bytes_per_chunk(const rocke_async_tile_loader_t* self);
 int rocke_async_tile_loader_chunks_per_row(const rocke_async_tile_loader_t* self);

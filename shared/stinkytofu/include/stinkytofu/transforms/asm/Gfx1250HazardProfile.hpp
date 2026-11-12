@@ -32,7 +32,7 @@ constexpr std::array kXcntDrainReasonNames = {"atomic",       "smem",           
 static_assert(kXcntDrainReasonNames.size() == static_cast<size_t>(XcntDrainReason::Count),
               "every XcntDrainReason needs a reported name");
 
-/// Hooks Gfx1250HazardPass calls while it inserts s_wait_xcnt drains.
+/// Hooks Gfx1250XnackHazardPass calls while it inserts s_wait_xcnt drains.
 /// makeXcntDrainProfile() picks the implementation: XcntDrainProfile to count
 /// and report, EmptyXcntDrainProfile to do nothing.
 class XcntDrainProfileBase {
@@ -123,7 +123,7 @@ class XcntDrainProfile final : public XcntDrainProfileBase {
 
    private:
     static void printCounts(const char* scope, const XcntDrainCounts& counts) {
-        constexpr const char* tag = "[Gfx1250HazardPass] ";
+        constexpr const char* tag = "[Gfx1250XnackHazardPass] ";
 
         std::cerr << tag << scope << "xcnt drains: total=" << counts.total
                   << ", loop+matrix=" << counts.loopMatrixSites << ", loop=" << counts.loopSites

@@ -40,111 +40,136 @@
 #include "utility.hpp"
 #include <cstddef>
 #include <hipsparselt/hipsparselt.h>
+#include <memory>
 #include <omp.h>
+#include <optional>
+#include <type_traits>
+#include <utility>
 
-template <typename T, typename Tb = T, typename To = T, hipsparseOrder_t order>
-void bias(int64_t m, int64_t n, int64_t ld, T* src, To* dest, Tb* bias)
+// Tiles smaller than this are processed serially. This is a floor rather than a
+// tuned crossover: the size at which distributing a tile starts to pay varies by
+// orders of magnitude with how expensive the callback is per element, so no single
+// value suits every epilogue. What it does rule out is the degenerate case, where
+// a tile is so small that standing up a thread team costs hundreds of times more
+// than simply walking it.
+static constexpr int64_t epilogue_omp_threshold = 4096;
+
+template <typename To, typename TAccum>
+inline To saturate_cast(TAccum val)
+{
+    if constexpr(std::is_same<int8_t, To>::value)
+    {
+        auto _val = std::nearbyint(static_cast<double>(val));
+        return static_cast<To>(_val > 127.0 ? 127.0 : _val < -128.0 ? -128.0 : _val);
+    }
+    else
+        return static_cast<To>(val);
+}
+
+// One element of the m x n D tile, handed to the callbacks below.
+//
+//   i, j  -- logical row and column, whatever the order
+//   o, k  -- strided and contiguous loop indices; pos(ld) turns them into an
+//            offset, which is o * ld + k for either order
+struct DElem
+{
+    int64_t i, j, o, k;
+
+    int64_t pos(int64_t ld) const
+    {
+        return o * ld + k;
+    }
+};
+
+// The epilogue references below all walk an m x n tile with leading dimension ld,
+// and they all walk it the same way, so the walk lives here rather than in each of
+// them. Two things matter about it: one parallel region covers the whole tile
+// rather than one per line, and the contiguous axis is innermost (rows for COL,
+// columns for ROW) so that each thread walks a contiguous span of memory.
+//
+// Keeping the traversal in one place is also what keeps the orders consistent. A
+// caller cannot pass the extents the wrong way round for its layout, because it no
+// longer passes extents in layout order at all -- it passes `order`.
+template <hipsparseOrder_t order, typename F>
+inline void for_each_d_elem(int64_t m, int64_t n, F&& f)
+{
+    constexpr bool col   = (order == HIPSPARSE_ORDER_COL);
+    const int64_t  n_out = col ? n : m; // strided axis, stepped by ld
+    const int64_t  n_in  = col ? m : n; // contiguous axis
+
+#pragma omp parallel for collapse(2) schedule(static) if(m * n > epilogue_omp_threshold)
+    for(int64_t o = 0; o < n_out; o++)
+        for(int64_t k = 0; k < n_in; k++)
+            f(DElem{col ? k : o, col ? o : k, o, k});
+}
+
+// Runtime-order entry point. The branch is taken once per call, so the loop body
+// still sees `order` as a compile-time constant.
+template <typename F>
+inline void for_each_d_elem(hipsparseOrder_t order, int64_t m, int64_t n, F&& f)
+{
+    if(order == HIPSPARSE_ORDER_COL)
+        for_each_d_elem<HIPSPARSE_ORDER_COL>(m, n, std::forward<F>(f));
+    else
+        for_each_d_elem<HIPSPARSE_ORDER_ROW>(m, n, std::forward<F>(f));
+}
+
+template <typename T, typename Tb = T, typename To = T>
+void bias(hipsparseOrder_t order, int64_t m, int64_t n, int64_t ld, T* src, To* dest, Tb* bias)
 {
     using TAccum = float;
 
-    auto saturate_i8 = [](TAccum val) {
-        auto _val = std::nearbyint(static_cast<double>(val));
-        _val      = _val > 127.f ? 127.f : _val < -128.f ? -128.f : _val;
-        return static_cast<To>(_val);
-    };
+    for_each_d_elem(order, m, n, [&](DElem e) {
+        const int64_t pos   = e.pos(ld);
+        const Tb      _bias = *(bias + e.i);
 
-    auto saturate_o = [](TAccum val) { return static_cast<To>(val); };
-
-    To (*saturate)(TAccum val);
-    saturate = std::is_same<int8_t, To>() ? saturate_i8 : saturate_o;
-
-    for(int64_t i = 0; i < m; i++)
-    {
-        Tb _bias = *(bias + i);
-#pragma omp parallel for
-        for(int64_t j = 0; j < n; j++)
-        {
-            int64_t pos;
-            if constexpr(order == HIPSPARSE_ORDER_COL)
-                pos = j * ld + i;
-            else
-                pos = i * ld + j;
-            TAccum src_Taccum;
-            if constexpr(std::is_same<T, TAccum>())
-                src_Taccum = *(src + pos);
-            else
-                src_Taccum = static_cast<TAccum>(*(src + pos));
-
-            *(dest + pos) = saturate(src_Taccum + static_cast<TAccum>(_bias));
-        }
-    }
+        *(dest + pos) = saturate_cast<To, TAccum>(static_cast<TAccum>(*(src + pos))
+                                                  + static_cast<TAccum>(_bias));
+    });
 }
 
 // gate_residual: D[i,j] = gate[i,j] * spmm_result[i,j] + gate[i,j]
-template <typename T, typename Tgate, typename To = T, hipsparseOrder_t order>
-void gate_residual(int64_t m, int64_t n, int64_t ld, int64_t ld_gate, T* src, To* dest, Tgate* gate)
+template <typename T, typename Tgate, typename To = T>
+void gate_residual(hipsparseOrder_t order,
+                   int64_t          m,
+                   int64_t          n,
+                   int64_t          ld,
+                   int64_t          ld_gate,
+                   T*               src,
+                   To*              dest,
+                   Tgate*           gate)
 {
     using TAccum = float;
 
-    auto saturate_i8 = [](TAccum val) {
-        auto _val = std::nearbyint(static_cast<double>(val));
-        _val      = _val > 127.f ? 127.f : _val < -128.f ? -128.f : _val;
-        return static_cast<To>(_val);
-    };
+    for_each_d_elem(order, m, n, [&](DElem e) {
+        const int64_t pos      = e.pos(ld);
+        const int64_t gate_pos = e.pos(ld_gate);
 
-    auto saturate_o = [](TAccum val) { return static_cast<To>(val); };
-
-    To (*saturate)(TAccum val);
-    saturate = std::is_same<int8_t, To>() ? saturate_i8 : saturate_o;
-
-    for(int64_t i = 0; i < m; i++)
-    {
-#pragma omp parallel for
-        for(int64_t j = 0; j < n; j++)
-        {
-            int64_t pos, gate_pos;
-            if constexpr(order == HIPSPARSE_ORDER_COL)
-            {
-                pos      = j * ld + i;
-                gate_pos = j * ld_gate + i;
-            }
-            else
-            {
-                pos      = i * ld + j;
-                gate_pos = i * ld_gate + j;
-            }
-
-            TAccum g      = static_cast<TAccum>(*(gate + gate_pos));
-            TAccum spmm   = static_cast<TAccum>(*(src + pos));
-            *(dest + pos) = saturate(g * spmm + g);
-        }
-    }
+        TAccum g      = static_cast<TAccum>(*(gate + gate_pos));
+        TAccum spmm   = static_cast<TAccum>(*(src + pos));
+        *(dest + pos) = saturate_cast<To, TAccum>(g * spmm + g);
+    });
 }
 
+// The activation map is purely elementwise -- the layout does not change the value
+// written to any position -- but the sweep still has to cover the positions D
+// actually occupies, so this takes `order` like the other two.
 template <typename Ti, typename To, typename Tact, typename F>
-void activation(int64_t m, int64_t n, int64_t ld, Ti* in, To* out, Tact arg1, Tact arg2, F& func)
+void activation(hipsparseOrder_t order,
+                int64_t          m,
+                int64_t          n,
+                int64_t          ld,
+                Ti*              in,
+                To*              out,
+                Tact             arg1,
+                Tact             arg2,
+                F&               func)
 {
-    auto saturate_i8 = [](Tact val) {
-        auto _val = std::nearbyint(static_cast<double>(val));
-        _val      = _val > 127.f ? 127.f : _val < -128.f ? -128.f : _val;
-        return static_cast<To>(_val);
-    };
-
-    auto saturate_o = [](Tact val) { return static_cast<To>(val); };
-
-    To (*saturate)(Tact val);
-    saturate = std::is_same<int8_t, To>() ? saturate_i8 : saturate_o;
-
-    for(int64_t i = 0; i < m; i++)
-    {
-#pragma omp parallel for
-        for(int64_t j = 0; j < n; j++)
-        {
-            auto pos     = j * ld + i;
-            auto in_Tact = static_cast<Tact>(*(in + pos));
-            *(out + pos) = saturate(func(in_Tact, arg1, arg2));
-        }
-    }
+    for_each_d_elem(order, m, n, [&](DElem e) {
+        const int64_t pos     = e.pos(ld);
+        auto          in_Tact = static_cast<Tact>(*(in + pos));
+        *(out + pos)          = saturate_cast<To, Tact>(func(in_Tact, arg1, arg2));
+    });
 }
 
 auto _relu = [](auto in, auto /*arg1*/, auto /*arg2*/) -> decltype(in) {
@@ -319,6 +344,8 @@ void testing_spmm(const Arguments& arg)
     hipsparselt_local_handle handle{arg};
     hipStream_t              stream;
     CHECK_HIP_ERROR(hipStreamCreate(&stream));
+    std::unique_ptr<std::remove_pointer_t<hipStream_t>, decltype(&hipStreamDestroy)>
+        stream_owner{stream, &hipStreamDestroy};
 
     hipsparseOrder_t orderA = char_to_hipsparselt_order(arg.orderA);
     hipsparseOrder_t orderB = char_to_hipsparselt_order(arg.orderB);
@@ -593,6 +620,8 @@ void testing_spmm(const Arguments& arg)
     device_vector<TGate> dGate(size_gate, 1, HMM);
     CHECK_DEVICE_ALLOCATION(dGate.memcheck());
     host_vector<TGate> hGate(size_gate);
+    // The matmul descriptor references the gate descriptor until the plan is initialized.
+    std::optional<hipsparselt_local_mat_descr> matGate;
     if(arg.gate_residual)
     {
         hipsparselt_init<TGate>(hGate,
@@ -603,20 +632,19 @@ void testing_spmm(const Arguments& arg)
                                 num_batches);
         CHECK_HIP_ERROR(dGate.transfer_from(hGate));
         // Create a mat descriptor for the gate using arg.gate_type
-        hipsparselt_local_mat_descr matGate(
-            hipsparselt_matrix_type_dense, handle, M, N, ldg, arg.gate_type, orderD);
+        matGate.emplace(hipsparselt_matrix_type_dense, handle, M, N, ldg, arg.gate_type, orderD);
         if(do_batched || do_strided_batched)
         {
             EXPECT_HIPSPARSE_STATUS(
                 hipsparseLtMatDescSetAttribute(
-                    handle, matGate, HIPSPARSELT_MAT_NUM_BATCHES, &num_batches, sizeof(int)),
+                    handle, *matGate, HIPSPARSELT_MAT_NUM_BATCHES, &num_batches, sizeof(int)),
                 HIPSPARSE_STATUS_SUCCESS);
         }
         if(do_strided_batched)
         {
             EXPECT_HIPSPARSE_STATUS(
                 hipsparseLtMatDescSetAttribute(
-                    handle, matGate, HIPSPARSELT_MAT_BATCH_STRIDE, &stride_gate, sizeof(int64_t)),
+                    handle, *matGate, HIPSPARSELT_MAT_BATCH_STRIDE, &stride_gate, sizeof(int64_t)),
                 HIPSPARSE_STATUS_SUCCESS);
         }
         void* _dGate = dGate;
@@ -631,7 +659,7 @@ void testing_spmm(const Arguments& arg)
             hipsparseLtMatmulDescSetAttribute(handle,
                                               matmul,
                                               HIPSPARSELT_MATMUL_GATE_RESIDUAL_DESC,
-                                              &matGate,
+                                              &*matGate,
                                               sizeof(hipsparseLtMatDescriptor_t*)),
             HIPSPARSE_STATUS_SUCCESS);
     }
@@ -955,14 +983,16 @@ void testing_spmm(const Arguments& arg)
                               : HIPSPARSE_OPERATION_NON_TRANSPOSE;
         }
 
-#define activation_act_param \
-    tM, tN, ldd, hD_gold_act + pos, hD_gold_act + pos, arg.activation_arg1, arg.activation_arg2
+#define activation_act_param                                                      \
+    orderD, M, N, ldd, hD_gold_act + pos, hD_gold_act + pos, arg.activation_arg1, \
+        arg.activation_arg2
 #define activation_param \
-    tM, tN, ldd, hD_gold_act + pos, hD_gold + pos, arg.activation_arg1, arg.activation_arg2
-#define bias_act_param M, N, ldd, hD_gold_act + pos, hD_gold_act + pos, hBias + bias_stride* i
-#define bias_param M, N, ldd, hD_gold_act + pos, hD_gold + pos, hBias + bias_stride* i
+    orderD, M, N, ldd, hD_gold_act + pos, hD_gold + pos, arg.activation_arg1, arg.activation_arg2
+#define bias_act_param \
+    orderD, M, N, ldd, hD_gold_act + pos, hD_gold_act + pos, hBias + bias_stride* i
+#define bias_param orderD, M, N, ldd, hD_gold_act + pos, hD_gold + pos, hBias + bias_stride* i
 #define gate_residual_param \
-    M, N, ldd, ldg, hD_gold_act + pos, hD_gold + pos, hGate.data() + stride_gate* i
+    orderD, M, N, ldd, ldg, hD_gold_act + pos, hD_gold + pos, hGate.data() + stride_gate* i
 
         for(int i = 0; i < num_batches; i++)
         {
@@ -994,19 +1024,9 @@ void testing_spmm(const Arguments& arg)
                 if(arg.bias_vector)
                 {
                     if(activation_on || arg.gate_residual)
-                    {
-                        if(orderD == HIPSPARSE_ORDER_COL)
-                            bias<Talpha, TBias, Talpha, HIPSPARSE_ORDER_COL>(bias_act_param);
-                        else
-                            bias<Talpha, TBias, Talpha, HIPSPARSE_ORDER_ROW>(bias_act_param);
-                    }
+                        bias<Talpha, TBias, Talpha>(bias_act_param);
                     else
-                    {
-                        if(orderD == HIPSPARSE_ORDER_COL)
-                            bias<Talpha, TBias, To, HIPSPARSE_ORDER_COL>(bias_param);
-                        else
-                            bias<Talpha, TBias, To, HIPSPARSE_ORDER_ROW>(bias_param);
-                    }
+                        bias<Talpha, TBias, To>(bias_param);
                 }
 
                 if(activation_on)
@@ -1072,12 +1092,7 @@ void testing_spmm(const Arguments& arg)
                 }
 
                 if(arg.gate_residual)
-                {
-                    if(orderD == HIPSPARSE_ORDER_COL)
-                        gate_residual<Talpha, TGate, To, HIPSPARSE_ORDER_COL>(gate_residual_param);
-                    else
-                        gate_residual<Talpha, TGate, To, HIPSPARSE_ORDER_ROW>(gate_residual_param);
-                }
+                    gate_residual<Talpha, TGate, To>(gate_residual_param);
             }
 
             else
@@ -1252,7 +1267,7 @@ void testing_spmm(const Arguments& arg)
                                                                ArgumentLogging::NA_value,
                                                                selected_config_id);
     }
-    CHECK_HIP_ERROR(hipStreamDestroy(stream));
+    CHECK_HIP_ERROR(hipStreamDestroy(stream_owner.release()));
 }
 
 template <typename Ti,
@@ -1283,6 +1298,9 @@ void testing_aux_plan_assign(const Arguments& arg)
     hipsparselt_local_handle handle{arg};
     hipStream_t              stream;
     CHECK_HIP_ERROR(hipStreamCreate(&stream));
+
+    std::unique_ptr<std::remove_pointer_t<hipStream_t>, decltype(&hipStreamDestroy)>
+        stream_owner{stream, &hipStreamDestroy};
 
     hipsparseOrder_t orderA = char_to_hipsparselt_order(arg.orderA);
     hipsparseOrder_t orderB = char_to_hipsparselt_order(arg.orderB);
@@ -1558,8 +1576,11 @@ void testing_aux_plan_assign(const Arguments& arg)
                       cpu_time_used = get_time_us_no_sync();
                   }
 
-#define activation_param \
-    M, N, ldd, hD_gold_act + pos, hD_gold + pos, activation_arg1, activation_arg2
+                  // COL is correct here: this test sizes D as ldd * N unconditionally,
+                  // i.e. it only ever exercises a column-major D.
+#define activation_param                                                               \
+    HIPSPARSE_ORDER_COL, M, N, ldd, hD_gold_act + pos, hD_gold + pos, activation_arg1, \
+        activation_arg2
                   for(int i = 0; i < num_batches; i++)
                   {
                       if(activation_on)
@@ -1691,7 +1712,7 @@ void testing_aux_plan_assign(const Arguments& arg)
         }
     }
 
-    CHECK_HIP_ERROR(hipStreamDestroy(stream));
+    CHECK_HIP_ERROR(hipStreamDestroy(stream_owner.release()));
 }
 
 template <typename Ti, typename To, typename Tc, typename TBias, typename TGate = Ti>
