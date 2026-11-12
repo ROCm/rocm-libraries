@@ -269,6 +269,15 @@ namespace
                      std::invalid_argument);
     }
 
+    // Strides that are not nested (9 < 5 * 2) cannot be decoded largest stride first: offset 14 =
+    // 5 + 9 is element (0, 1, 1, 0, 0), not padding. Such layouts are rejected.
+    TYPED_TEST(Maf1_0Test, NonNestedStridesThrow)
+    {
+        EXPECT_THROW(DataGenerator<TypeParam>().generate(
+                         {2, 2, 2, 2, 2}, {1, 5, 9, 12, 28}, maf1_0Options(2)),
+                     std::invalid_argument);
+    }
+
     // Size-1 dimensions sharing a stride with another dimension.
     TYPED_TEST(Maf1_0Test, SizeOneDimensions)
     {

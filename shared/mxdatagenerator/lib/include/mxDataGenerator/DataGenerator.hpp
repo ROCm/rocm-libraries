@@ -2027,6 +2027,20 @@ namespace DGen
                 throw std::invalid_argument(
                     "DataGenerator::generate_data_maf1_0: the buffer size must be a multiple of "
                     "the contiguous dimension");
+            // The offset decoder below peels coordinates off largest stride first, which only
+            // inverts nested layouts: each stride at least the span of the smaller dimensions
+            // (true for dense and padded-leading-dimension tensors). Sizes {2, 2, 2}, strides
+            // {1, 5, 9} are not (9 < 5 * 2): offset 14 = 5 + 9 would be mistaken for padding.
+            for(index_t d = 0, span = 1; d < n_size; d++)
+            {
+                if(size[d] == 1)
+                    continue;
+                if(stride[d] < span)
+                    throw std::invalid_argument(
+                        "DataGenerator::generate_data_maf1_0: each stride must be at least the "
+                        "span of the smaller-stride dimensions");
+                span = stride[d] * size[d];
+            }
 
             // Index stride of each sorted dimension; the dense default runs over the
             // caller's dimension order.
