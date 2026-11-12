@@ -1,0 +1,23 @@
+# Build directories
+build/
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+
+# IDE files
+.vscode/
+
+# Python cache directories
+__pycache__/
+*.py[cod]
+*$py.class
+
+python/mosaic.egg-info/
+
+.env
+.envrc
+
+.venv
+.venv-*

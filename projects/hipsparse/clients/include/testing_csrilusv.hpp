@@ -129,15 +129,17 @@ void testing_csrilusv(Arguments argus)
     // Host pointer mode
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
     pivot_status_1 = hipsparseXcsrilu02_zeroPivot(handle, info_M, &hposition_1);
+    CHECK_HIPSPARSE_ZERO_PIVOT(pivot_status_1, hposition_1);
 
     // device pointer mode
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
     pivot_status_2 = hipsparseXcsrilu02_zeroPivot(handle, info_M, d_position);
+    CHECK_HIP_ERROR(hipMemcpy(&hposition_2, d_position, sizeof(int), hipMemcpyDeviceToHost));
+    CHECK_HIPSPARSE_ZERO_PIVOT(pivot_status_2, hposition_2);
 
     // Copy output to CPU
     std::vector<T> iluresult(nnz);
     CHECK_HIP_ERROR(hipMemcpy(iluresult.data(), dval, sizeof(T) * nnz, hipMemcpyDeviceToHost));
-    CHECK_HIP_ERROR(hipMemcpy(&hposition_2, d_position, sizeof(int), hipMemcpyDeviceToHost));
 
     // Compute host reference csrilu0
     int position_gold = host_csrilu0(m,
@@ -154,15 +156,8 @@ void testing_csrilusv(Arguments argus)
     unit_check_general(1, 1, 1, &position_gold, &hposition_2);
 
     // If zero pivot was found, do not go further
-    if(hposition_1 != -1)
+    if(hposition_1 != -1 || hposition_2 != -1)
     {
-        verify_hipsparse_status_zero_pivot(pivot_status_1, "expected HIPSPARSE_STATUS_ZERO_PIVOT");
-        return;
-    }
-
-    if(hposition_2 != -1)
-    {
-        verify_hipsparse_status_zero_pivot(pivot_status_2, "expected HIPSPARSE_STATUS_ZERO_PIVOT");
         return;
     }
 
@@ -298,6 +293,7 @@ void testing_csrilusv(Arguments argus)
 
     // Check for zero pivot
     pivot_status_1 = hipsparseXcsrsv2_zeroPivot(handle, info_L, &hposition_1);
+    CHECK_HIPSPARSE_ZERO_PIVOT(pivot_status_1, hposition_1);
 
     // device pointer mode
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
@@ -318,10 +314,14 @@ void testing_csrilusv(Arguments argus)
 
     // Check for zero pivot
     pivot_status_2 = hipsparseXcsrsv2_zeroPivot(handle, info_L, d_position);
+    CHECK_HIP_ERROR(hipMemcpy(&hposition_2, d_position, sizeof(int), hipMemcpyDeviceToHost));
+    CHECK_HIPSPARSE_ZERO_PIVOT(pivot_status_2, hposition_2);
 
     // Host csrsv
+    int             device_id;
     hipDeviceProp_t prop{};
-    CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, 0));
+    CHECK_HIP_ERROR(hipGetDevice(&device_id));
+    CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, device_id));
 
     position_gold = csr_lsolve(HIPSPARSE_OPERATION_NON_TRANSPOSE,
                                m,
@@ -340,15 +340,8 @@ void testing_csrilusv(Arguments argus)
     unit_check_general(1, 1, 1, &position_gold, &hposition_2);
 
     // If zero pivot was found, do not go further
-    if(hposition_1 != -1)
+    if(hposition_1 != -1 || hposition_2 != -1)
     {
-        verify_hipsparse_status_zero_pivot(pivot_status_1, "expected HIPSPARSE_STATUS_ZERO_PIVOT");
-        return;
-    }
-
-    if(hposition_2 != -1)
-    {
-        verify_hipsparse_status_zero_pivot(pivot_status_2, "expected HIPSPARSE_STATUS_ZERO_PIVOT");
         return;
     }
 
@@ -389,6 +382,7 @@ void testing_csrilusv(Arguments argus)
 
     // Check for zero pivot
     pivot_status_1 = hipsparseXcsrsv2_zeroPivot(handle, info_U, &hposition_1);
+    CHECK_HIPSPARSE_ZERO_PIVOT(pivot_status_1, hposition_1);
 
     // device pointer mode
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
@@ -409,6 +403,8 @@ void testing_csrilusv(Arguments argus)
 
     // Check for zero pivot
     pivot_status_2 = hipsparseXcsrsv2_zeroPivot(handle, info_U, d_position);
+    CHECK_HIP_ERROR(hipMemcpy(&hposition_2, d_position, sizeof(int), hipMemcpyDeviceToHost));
+    CHECK_HIPSPARSE_ZERO_PIVOT(pivot_status_2, hposition_2);
 
     // Host csrsv
     position_gold = csr_usolve(HIPSPARSE_OPERATION_NON_TRANSPOSE,
@@ -428,15 +424,8 @@ void testing_csrilusv(Arguments argus)
     unit_check_general(1, 1, 1, &position_gold, &hposition_2);
 
     // If zero pivot was found, do not go further
-    if(hposition_1 != -1)
+    if(hposition_1 != -1 || hposition_2 != -1)
     {
-        verify_hipsparse_status_zero_pivot(pivot_status_1, "expected HIPSPARSE_STATUS_ZERO_PIVOT");
-        return;
-    }
-
-    if(hposition_2 != -1)
-    {
-        verify_hipsparse_status_zero_pivot(pivot_status_2, "expected HIPSPARSE_STATUS_ZERO_PIVOT");
         return;
     }
 

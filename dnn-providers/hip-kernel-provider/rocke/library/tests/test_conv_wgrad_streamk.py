@@ -8,7 +8,7 @@ validator gates and their agreement between ``validate()``,
 mode x reduction x arch x groups matrix, the AOT kernarg ABI and launch values
 (the partition block), the host-side launch plan (grid, workspace layout,
 determinism) against the C port, and byte-identical lowering between the two
-engines through the ``rocke_engine`` binding.
+engines through the ``rocke_library_engine`` binding.
 
 GPU numerics live in ``test_conv_wgrad_streamk_gpu.py``.
 """
@@ -65,11 +65,13 @@ def _spec(problem=_DENSE, *, dtype_d="fp16", edge=32, **kw) -> WgradConvSpec:
 
 
 def _engine():
-    """The ``rocke_engine`` binding, or skip the calling test."""
-    from rocke.core.backend import BackendError, _import_engine
+    """The ``rocke_library_engine`` binding, or skip the calling test."""
+    from rocke.core import BackendError, import_engine
+
+    from kernels.conv.engine_bridge import ENGINE_MODULE
 
     try:
-        return _import_engine()
+        return import_engine(ENGINE_MODULE)
     except BackendError as e:
         raise unittest.SkipTest(f"C++ engine not importable: {e}") from None
 
@@ -468,7 +470,7 @@ class TestStreamKHostPlan(unittest.TestCase):
 
     def test_cpp_default_pool_agrees(self):
         from kernels.common.conv_implicit_gemm_wgrad import wgrad_streamk_default_pool
-        from rocke.helpers.split_k import _ARCH_NUM_CUS
+        from rocke.helpers.split_k import ARCH_NUM_CUS
 
         from rocke.core.arch.target import known_arches
 
@@ -476,7 +478,7 @@ class TestStreamKHostPlan(unittest.TestCase):
         # Both directions: every arch of the Python CU table, and every arch
         # rocke knows of plus a few it does not -- a key only the C table has
         # would make the C pool differ from Python's 256-CU fallback there.
-        arches = {*_ARCH_NUM_CUS, *known_arches(), "gfx90a", "gfx908", "gfx1100"}
+        arches = {*ARCH_NUM_CUS, *known_arches(), "gfx90a", "gfx908", "gfx1100"}
         arches |= {"gfx1200", "gfx9999"}
         for arch in sorted(arches):
             for reduction in ("linear", "tree", "atomic", "workspace"):
@@ -715,7 +717,7 @@ class TestStreamKDualEngine(unittest.TestCase):
 
 
 class TestLoadWidthCapsDualEngine(unittest.TestCase):
-    """Explicit vector_size_a / vector_size_b through the ``rocke_engine`` binding.
+    """Explicit vector_size_a/b through the ``rocke_library_engine`` binding.
 
     The caps narrow the synchronous free-axis loads, so both engines must
     build the capped kernel and reject the same inadmissible caps.
