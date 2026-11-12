@@ -447,23 +447,10 @@ bool Untouched(miopen::Handle& handle, const miopen::Allocator::ManageDataPtr& d
     return std::all_of(values.begin(), values.end(), [](float v) { return std::isnan(v); });
 }
 
-// A served call or an expected decline. A decline must come from the hipDNN path
-// with the given reason; MIOpen serves every case these tests send it.
-bool RecordOutcome(const std::string& case_name, const hs::CallResult& result, const char* reason)
-{
-    const bool served = result.status == miopenStatusSuccess;
-    EXPECT_TRUE(served || result.status == miopenStatusUnsupportedOp)
-        << case_name << ": " << result.message;
-    if(!served)
-        hs::ExpectForwardedDecline(result, reason);
-    hs::RecordServed(case_name, served);
-    return served;
-}
-
 // A call both paths must serve.
 bool ExpectServed(const std::string& case_name, const hs::CallResult& result)
 {
-    const bool served = RecordOutcome(case_name, result, nullptr);
+    const bool served = hs::RecordGapOutcome(case_name, result);
     EXPECT_TRUE(served) << case_name << ": " << result.message;
     return served;
 }
@@ -969,7 +956,7 @@ TEST(GPU_HipdnnShimBNNullOutputs_FP32, StatusMatchesMiopen)
         const auto initial_run_mean = d.runMean.data;
 
         const auto result = hs::CaptureCall([&] { return TrainV2(handle, d, c.pointers); });
-        EXPECT_TRUE(RecordOutcome(c.name, result, nullptr));
+        ExpectServed(c.name, result);
         if(result.status != miopenStatusSuccess)
             continue;
 
@@ -1185,7 +1172,7 @@ TEST(GPU_HipdnnShimBNInferWithoutEstimates_FP32, RunsTraining)
     InferData d;
     SetUpInfer(d);
     const auto result = hs::CaptureCall([&] { return InferV1(handle, d, false); });
-    EXPECT_TRUE(RecordOutcome("infer_no_estimates", result, nullptr));
+    ExpectServed("infer_no_estimates", result);
     if(result.status != miopenStatusSuccess)
         return;
 
@@ -1583,13 +1570,14 @@ TEST(GPU_HipdnnShimBNGaps_FP32, DbUpdatePolicyIsDeclined)
     {
         SCOPED_TRACE("train");
         TrainData d;
-        if(RecordOutcome("tuning_policy_dbupdate_train", TrainUnderPolicy(handle, d), reason))
+        if(hs::RecordGapOutcome(
+               "tuning_policy_dbupdate_train", TrainUnderPolicy(handle, d), reason))
             CheckTrain(handle, d, true, false);
     }
     {
         SCOPED_TRACE("bwd");
         BwdData d;
-        if(RecordOutcome("tuning_policy_dbupdate_bwd", BwdUnderPolicy(handle, d), reason))
+        if(hs::RecordGapOutcome("tuning_policy_dbupdate_bwd", BwdUnderPolicy(handle, d), reason))
             CheckBwd(handle, d);
     }
     {
@@ -1597,7 +1585,7 @@ TEST(GPU_HipdnnShimBNGaps_FP32, DbUpdatePolicyIsDeclined)
         InferData d;
         d.SetUpImpl(TuningCase(), miopenBNSpatial, miopenTensorNCHW, false);
         const auto result = hs::CaptureCall([&] { return InferV1(handle, d, false); });
-        if(RecordOutcome("tuning_policy_dbupdate_infer", result, reason))
+        if(hs::RecordGapOutcome("tuning_policy_dbupdate_infer", result, reason))
             CheckInfer(handle, d);
     }
 }
@@ -1617,13 +1605,13 @@ TEST(GPU_HipdnnShimBNGaps_FP32, SearchPolicyUnderFindEnforceIsDeclined)
     {
         SCOPED_TRACE("train");
         TrainData d;
-        if(RecordOutcome("find_enforce_db_clean_train", TrainUnderPolicy(handle, d), reason))
+        if(hs::RecordGapOutcome("find_enforce_db_clean_train", TrainUnderPolicy(handle, d), reason))
             CheckTrain(handle, d, true, false);
     }
     {
         SCOPED_TRACE("bwd");
         BwdData d;
-        if(RecordOutcome("find_enforce_db_clean_bwd", BwdUnderPolicy(handle, d), reason))
+        if(hs::RecordGapOutcome("find_enforce_db_clean_bwd", BwdUnderPolicy(handle, d), reason))
             CheckBwd(handle, d);
     }
     {
@@ -1631,7 +1619,7 @@ TEST(GPU_HipdnnShimBNGaps_FP32, SearchPolicyUnderFindEnforceIsDeclined)
         InferData d;
         d.SetUpImpl(TuningCase(), miopenBNSpatial, miopenTensorNCHW, false);
         const auto result = hs::CaptureCall([&] { return InferV1(handle, d, false); });
-        if(RecordOutcome("find_enforce_db_clean_infer", result, reason))
+        if(hs::RecordGapOutcome("find_enforce_db_clean_infer", result, reason))
             CheckInfer(handle, d);
     }
 }
@@ -1652,10 +1640,7 @@ TEST(GPU_HipdnnShimBNAlphaBeta_FP32, StatusMatchesMiopen)
         SetUpTrain(d);
         d.alpha           = 2.0f;
         const auto result = hs::CaptureCall([&] { return TrainV1(handle, d); });
-        EXPECT_EQ(result.status, miopenStatusUnknownError) << result.message;
-        hs::RecordStatus("alpha_beta_train", result.status);
-        if(result.status != miopenStatusSuccess)
-            hs::ExpectForwardedDecline(result, reason);
+        hs::ExpectStatusParity("alpha_beta_train", result, miopenStatusUnknownError, reason);
     }
     {
         SCOPED_TRACE("infer");
@@ -1663,10 +1648,7 @@ TEST(GPU_HipdnnShimBNAlphaBeta_FP32, StatusMatchesMiopen)
         SetUpInfer(d);
         d.alpha           = 2.0f;
         const auto result = hs::CaptureCall([&] { return InferV1(handle, d, true); });
-        EXPECT_EQ(result.status, miopenStatusBadParm) << result.message;
-        hs::RecordStatus("alpha_beta_infer", result.status);
-        if(result.status != miopenStatusSuccess)
-            hs::ExpectForwardedDecline(result, reason);
+        hs::ExpectStatusParity("alpha_beta_infer", result, miopenStatusBadParm, reason);
     }
     {
         SCOPED_TRACE("bwd");
@@ -1674,10 +1656,7 @@ TEST(GPU_HipdnnShimBNAlphaBeta_FP32, StatusMatchesMiopen)
         SetUpBwd(d);
         d.alphaDataDiff   = 2.0f;
         const auto result = hs::CaptureCall([&] { return BwdV1(handle, d, true); });
-        EXPECT_EQ(result.status, miopenStatusBadParm) << result.message;
-        hs::RecordStatus("alpha_beta_bwd", result.status);
-        if(result.status != miopenStatusSuccess)
-            hs::ExpectForwardedDecline(result, reason);
+        hs::ExpectStatusParity("alpha_beta_bwd", result, miopenStatusBadParm, reason);
     }
 }
 
