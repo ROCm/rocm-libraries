@@ -33,8 +33,10 @@
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -65,8 +67,23 @@ namespace
         }
     }
 
+    // Captures hipblaslt_cerr for the life of the object, then restores it.
+    struct CaptureErrorStream
+    {
+        hipblaslt_internal_ostream saved = std::move(hipblaslt_cerr);
+        CaptureErrorStream()
+        {
+            hipblaslt_cerr = hipblaslt_internal_ostream{};
+        }
+        ~CaptureErrorStream()
+        {
+            hipblaslt_cerr = std::move(saved);
+        }
+    };
+
     // Runs the hipblaslt-bench -v checks of D (norm and allclose) through check() on host
-    // buffers of T (f32 or f16), M x N per batch, and counts the checks that failed.
+    // buffers of T (f32 or f16), M x N per batch, and counts the checks that failed. With
+    // auxiliary, D matches and E is checked against result instead.
     template <typename T = float>
     struct BenchVerifyD
     {
@@ -76,6 +93,7 @@ namespace
         hipblasLtBatchMode_t       mode;
         std::vector<HipHostBuffer> gold, result;
         double                     norm_error = 0, atol = 1, rtol = 1;
+        int64_t                    extra_failures = 0; // failed checks of E in the last run
 
         BenchVerifyD(int64_t m, int64_t n, int64_t batches, hipblasLtBatchMode_t mode)
             : m(m)
@@ -102,7 +120,7 @@ namespace
             return static_cast<T*>(buffers[0].buf())[batch * m * n + i];
         }
 
-        // output_type overrides the type check() is told D has, for a type it cannot compare.
+        // output_type overrides the type of the output under test, D or E.
         int64_t run(hipDataType input_type  = type,
                     hipDataType output_type = type,
                     bool        allclose    = true,
@@ -130,6 +148,7 @@ namespace
             std::vector<double>        tol{0};
             double                     max_ulp = 0, avg_ulp = 0;
             const int64_t              before = hipblaslt_bench_options::verification_failures();
+            const int64_t extra_before        = hipblaslt_bench_options::extra_check_failures();
             check(nullptr,
                   arg,
                   gemm_count,
@@ -159,11 +178,12 @@ namespace
                   rtol,
                   max_ulp,
                   avg_ulp,
-                  output_type,
+                  auxiliary ? type : output_type,
                   HIP_R_32F,
                   output_type,
                   HIP_R_32F,
                   mode);
+            extra_failures = hipblaslt_bench_options::extra_check_failures() - extra_before;
             return hipblaslt_bench_options::verification_failures() - before;
         }
     };
@@ -300,8 +320,22 @@ namespace
                 for(int64_t i = 0; i < 32; i++)
                     d.at(d.result, b, i) *= 1.000004f;
             EXPECT_EQ(d.run(HIP_R_32F, HIP_R_32F, true, true, auxiliary), 0);
+            EXPECT_EQ(d.extra_failures, 0);
             EXPECT_GT(d.norm_error, 1e-5);
         }
+    }
+
+    // A wrong E is reported by name but counted apart from D, so --verify_strict ignores it.
+    TEST(BenchVerify, smoke_WrongAuxiliaryIsReportedButNotCountedForD)
+    {
+        BenchVerifyD d(8, 4, 3, HIPBLASLT_BATCH_MODE_STRIDED);
+        d.at(d.result, 2, 5) = 7;
+        CaptureErrorStream capture;
+        EXPECT_EQ(d.run(HIP_R_32F, HIP_R_32F, false, false, true), 0);
+        EXPECT_EQ(d.extra_failures, 1);
+        EXPECT_NE(hipblaslt_cerr.str().find("norm check failed for E of gemm 0: batch 2 has"),
+                  std::string::npos)
+            << hipblaslt_cerr.str();
     }
 
     TEST(BenchVerify, smoke_NormAssertRejectsOneBadBatch)
@@ -312,6 +346,7 @@ namespace
             BenchVerifyD d(1, 1, 8, HIPBLASLT_BATCH_MODE_STRIDED);
             d.at(d.gold, 7, 0)   = 1.0f;
             d.at(d.result, 7, 0) = 1.00004f;
+            CaptureErrorStream             capture;
             ::testing::TestPartResultArray failures;
             {
                 ::testing::ScopedFakeTestPartResultReporter reporter(
@@ -321,6 +356,10 @@ namespace
             }
             ASSERT_EQ(failures.size(), 1);
             EXPECT_TRUE(failures.GetTestPartResult(0).fatally_failed());
+            // The failure is printed before the assertion stops the run.
+            const std::string line = std::string("norm check failed for ") + (auxiliary ? "E" : "D")
+                                     + " of gemm 0: batch 7 has";
+            EXPECT_NE(hipblaslt_cerr.str().find(line), std::string::npos) << hipblaslt_cerr.str();
             EXPECT_GT(d.norm_error, 1e-5);
             EXPECT_LT(d.norm_error / d.batches, 1e-5);
         }
@@ -371,27 +410,41 @@ namespace
         EXPECT_EQ(beyond_limit.run(), 1);
     }
 
-    // A D type that norm_check_general cannot compare is counted as a failure, so exit 0
-    // under --verify_strict always means D was checked.
+    // A type the norm check cannot compare must be reported and rejected even with an
+    // assertion enabled: its uncomputed error of zero is not evidence of a correct result.
     TEST(BenchVerify, smoke_UncomparableOutputTypeCountsAsFailure)
     {
-        BenchVerifyD d(8, 4, 3, HIPBLASLT_BATCH_MODE_STRIDED);
-        EXPECT_GT(norm_tolerance(HIP_R_4F_E2M1), 0);
-        EXPECT_FALSE(norm_check_general_supports(HIP_R_4F_E2M1));
-        struct RestoreErrorStream
+        ASSERT_GT(norm_tolerance(HIP_R_4F_E2M1), 0);
+        ASSERT_FALSE(norm_check_general_supports(HIP_R_4F_E2M1));
+        for(bool auxiliary : {false, true})
         {
-            hipblaslt_internal_ostream saved = std::move(hipblaslt_cerr);
-            ~RestoreErrorStream()
+            for(bool norm_assert : {false, true})
             {
-                hipblaslt_cerr = std::move(saved);
+                SCOPED_TRACE(::testing::Message()
+                             << "auxiliary=" << auxiliary << " norm_assert=" << norm_assert);
+                BenchVerifyD                   d(8, 4, 3, HIPBLASLT_BATCH_MODE_STRIDED);
+                CaptureErrorStream             capture;
+                ::testing::TestPartResultArray assertions;
+                int64_t                        d_failures = 0;
+                {
+                    ::testing::ScopedFakeTestPartResultReporter reporter(
+                        ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD,
+                        &assertions);
+                    d_failures = d.run(HIP_R_32F, HIP_R_4F_E2M1, false, norm_assert, auxiliary);
+                }
+                EXPECT_EQ(d_failures, auxiliary ? 0 : 1);
+                EXPECT_EQ(d.extra_failures, auxiliary ? 1 : 0);
+                ASSERT_EQ(assertions.size(), norm_assert ? 1 : 0);
+                if(norm_assert)
+                    EXPECT_TRUE(assertions.GetTestPartResult(0).fatally_failed());
+                const auto diagnostic = hipblaslt_cerr.str();
+                EXPECT_EQ(diagnostic.find("Error type in norm_check_general"), std::string::npos);
+                EXPECT_NE(
+                    diagnostic.find(auxiliary ? "so E was not verified" : "so D was not verified"),
+                    std::string::npos)
+                    << diagnostic;
             }
-        } restore_error_stream;
-        hipblaslt_cerr        = hipblaslt_internal_ostream{};
-        const auto failures   = d.run(HIP_R_4F_E2M1, HIP_R_4F_E2M1, false);
-        const auto diagnostic = hipblaslt_cerr.str();
-        EXPECT_EQ(failures, 1);
-        EXPECT_EQ(diagnostic.find("Error type in norm_check_general"), std::string::npos);
-        EXPECT_NE(diagnostic.find("so D was not verified"), std::string::npos);
+        }
     }
 
     TEST(BenchVerify, smoke_UnknownOutputTypeCountsAsFailure)
