@@ -210,6 +210,20 @@ TEST(TestConvFftGraph, RefusesExtentsBeyond32Bits)
     EXPECT_FALSE(graphAccepts(huge));
 }
 
+TEST(TestConvFftGraph, RefusesADilatedSpanBeyond32Bits)
+{
+    // 3 taps 2^30 apart: a span of 2^31 + 1 (the padding keeps the output 8 wide).
+    auto wide = largeShape();
+    wide.n = 1;
+    wide.c = 1;
+    wide.k = 1;
+    wide.input = {1, 8};
+    wide.filter = {1, 3};
+    wide.dilation = {1, int64_t{1} << 30};
+    wide.prePadding = wide.postPadding = {0, int64_t{1} << 30};
+    EXPECT_FALSE(graphAccepts(wide));
+}
+
 // ---------------------------------------------------------------------------
 // Kernel match
 // ---------------------------------------------------------------------------
@@ -242,6 +256,11 @@ TEST(TestConvFftKernel, TheDilatedFilterMustFitTheTransform)
     sixteen.pb = 8;
     sixteen.tb = 128;
     EXPECT_FALSE(admits(sixteen, big)); // span 31 > 16
+    {
+        // Not the floor's doing: refused with the floor off as well.
+        const ScopedEnvironmentVariableSetter off("HIP_KERNEL_PROVIDER_CONV_FFT_FLOOR", "0");
+        EXPECT_FALSE(admits(sixteen, big));
+    }
     auto sixtyFour = Fields{};
     sixtyFour.th = sixtyFour.tw = 64;
     sixtyFour.pb = 1;
@@ -383,6 +402,17 @@ TEST(TestConvFftPlan, DepthwiseFusesAndPartitionsBackwardWeights)
     EXPECT_GE(wrw->args.parts, 1);
     EXPECT_GE(static_cast<int64_t>(wrw->args.parts) * wrw->args.tilesPerPart, wrw->tiles);
     EXPECT_EQ(wrw->args.tilesPerPart % f.pb, 0);
+    // Backward weights holds two spectra a tile: 8 tiles of 32x32 exceed the LDS limit there.
+    auto wide = Fields{};
+    wide.th = wide.tw = 32;
+    wide.pb = 8;
+    wide.tb = 128;
+    auto dw11 = dw;
+    dw11.filter = {11, 11};
+    dw11.prePadding = dw11.postPadding = {5, 5};
+    const ScopedEnvironmentVariableSetter floorOff("HIP_KERNEL_PROVIDER_CONV_FFT_FLOOR", "0");
+    EXPECT_TRUE(planOf(dw11, ConvDirection::FORWARD, wide).has_value());
+    EXPECT_FALSE(planOf(dw11, ConvDirection::BACKWARD_WEIGHTS, wide).has_value());
     // The product tile is meaningless without a product: the gn twins are not offered.
     auto narrow = f;
     narrow.gn = 16;
@@ -396,6 +426,21 @@ TEST(TestConvFftPlan, DepthwiseFusesAndPartitionsBackwardWeights)
     sixteen.pb = 8;
     sixteen.tb = 128;
     EXPECT_FALSE(planOf(small, ConvDirection::FORWARD, sixteen).has_value());
+}
+
+TEST(TestConvFftPlan, RefusesFilterSpectraBeyondHalfTheCap)
+{
+    // 196 x 196 channels of 64x64 spectra: 649 MB of filter spectra, over half the 1 GiB cap
+    // (room would remain for the one tile, so only this gate refuses it).
+    auto wide = largeShape();
+    wide.n = 1;
+    wide.c = 196;
+    wide.k = 196;
+    wide.input = {32, 32};
+    auto f64 = Fields{};
+    f64.th = f64.tw = 64;
+    f64.pb = 1;
+    EXPECT_FALSE(planOf(wide, ConvDirection::FORWARD, f64).has_value());
 }
 
 TEST(TestConvFftPlan, RefusesFilterSpectraBeyondTheCap)
