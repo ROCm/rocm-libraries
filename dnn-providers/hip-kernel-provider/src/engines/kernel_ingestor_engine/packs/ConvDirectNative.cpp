@@ -571,9 +571,30 @@ bool shipsTo(std::string_view archs, std::string_view gcnArchName)
     return false;
 }
 
+int64_t ldsLimitOf(std::string_view gcnArchName)
+{
+    // CDNA4 is gfx950 alone; the stripped name keys the family.
+    return hipdnn_plugin_sdk::stripArchFeatures(gcnArchName).rfind("gfx95", 0) == 0 ? 160 * 1024
+                                                                                    : 64 * 1024;
+}
+
+int64_t rowsLdsBytes(const Config& config)
+{
+    if(!config.rows)
+    {
+        return 0;
+    }
+    // The operand is the atom's element (three-bf16 runs on bf16 atoms).
+    const int64_t operandBytes = conv_igemm::atomElement(config.atom) == "f32" ? 4 : 2;
+    const int64_t haloRows = static_cast<int64_t>(config.wp) * config.pw + config.r - 1;
+    const int64_t haloColumns = static_cast<int64_t>(config.wq) * 16 + config.s - 1;
+    return 2 * haloRows * haloColumns * config.bc * operandBytes;
+}
+
 bool configRunsOn(const Config& config, std::string_view gcnArchName)
 {
-    return conv_igemm::atomRunsOn(config.atom, gcnArchName) && shipsTo(config.archs, gcnArchName);
+    return conv_igemm::atomRunsOn(config.atom, gcnArchName) && shipsTo(config.archs, gcnArchName)
+           && rowsLdsBytes(config) <= ldsLimitOf(gcnArchName);
 }
 
 std::optional<Plan>

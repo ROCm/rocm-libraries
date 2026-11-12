@@ -2,7 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 // K2 "rows" kernel: stride-1 2-D direct convolution with filter-row reuse, channels-last, for
-// the gfx950 matrix cores (16-byte LDS DMA). Included by ConvDirect.cpp after ConvDirectCore.h
+// the CDNA 16x16 matrix cores (gfx90a to gfx950), the halo filled by LDS DMA: 16 bytes a lane on
+// gfx950, a dword a lane elsewhere (K2R_DMA16). Included by ConvDirect.cpp after ConvDirectCore.h
 // (atoms, K2Args, k2FilterOffset, k2SplitBf16, k2StaticFor). HIPRTC-compatible.
 //
 // D = W x X^T per 16x16 MFMA atom: the weights are the M operand (output channels) and the
@@ -16,8 +17,10 @@
 // Halo stage: (BP + R - 1) x (BQ + S - 1) pixels x BC channels in 16-byte granules; granule g of
 // column x sits at slot x G + (g + x) mod G of its row (conflict-free 16-byte reads). Filled by
 // LDS DMA (buffer_load ... lds, 16 B per lane): DMA instruction (h, xg) writes 64 consecutive
-// granules of row h, each lane fetching the global granule its slot holds. Two stages, separate
-// LDS objects, so the compiler tracks each DMA against its own stage.
+// granules of row h, each lane fetching the global granule its slot holds. Without 16-byte DMA
+// the same 64 granules take K2R_DMA_SUB = 4 dword instructions, the j-th writing granules
+// 16 j .. 16 j + 15 (lane l: granule 16 j + l / 4, dword l % 4) from the same fetch addresses.
+// Two stages, separate LDS objects, so the compiler tracks each DMA against its own stage.
 //
 // Tiles: blocks walk tiles (channel block fastest, then column tile, row tile, image) in an
 // XCD-contiguous order. With fewer blocks than tiles (the planner launches one block per CU),
@@ -33,6 +36,16 @@
 // Envelope: stride 1, dilation 1, groups 1, KD 1, any padding; reduction channels a multiple of
 // 16 / sizeof(T); per-image input < 2 GiB; formatted weights < 2 GiB.
 #pragma once
+
+// 16-byte LDS DMA (buffer_load_dwordx4 ... lds) is a CDNA4 feature; gfx950 is CDNA4's only
+// member, so its chip macro is the family test. The other MFMA families (gfx90a, gfx94x, and a
+// gfx9-4-generic build) have dword LDS DMA only and take the K2R_DMA_SUB = 4 fill.
+#if defined(__gfx950__)
+#define K2R_DMA16 1
+#else
+#define K2R_DMA16 0
+#endif
+#define K2R_DMA_SUB (K2R_DMA16 ? 1 : 4) // DMA instructions per 64-granule run
 
 #define K2R_VMCNT0 0x0F70 // s_waitcnt vmcnt(0), lgkmcnt and expcnt untouched (gfx9 encoding)
 #define K2R_LGKMCNT0 0xC07F // s_waitcnt lgkmcnt(0), vmcnt and expcnt untouched
@@ -367,6 +380,7 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
     // This wave's DMA instructions [i0, i1) of chunk cc of tile tc into stage st. Lane l takes
     // column x = XPI xg + l / G and slot l % G, so its granule g = (l % G - x) mod G is the same
     // for every instruction. Out-of-image pixels and channels past c read as zero.
+#if K2R_DMA16
     auto dma
         = [&](Raw16 * st, const Tile& tc, int cc, int i0, int i1) __attribute__((always_inline))
     {
@@ -407,6 +421,60 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
                     0);
         }
     };
+#else
+    // Dword DMA: sub-instruction j of run (h, xg) fills granules 16 j .. 16 j + 15 of the run,
+    // lane l granule 16 j + l / 4 (column x = that / G, slot that % G) and its dword l % 4. The
+    // fetch address is the rotation's inverse, as above, plus the dword.
+    auto dma
+        = [&](Raw16 * st, const Tile& tc, int cc, int i0, int i1) __attribute__((always_inline))
+    {
+        constexpr int SUB = K2R_DMA_SUB;
+        constexpr int SPAN = WAVE / SUB; // granules per instruction
+        const T* xi = static_cast<const T*>(a.x) + tc.img * imgElems;
+        const __amdgpu_buffer_rsrc_t xr = k1Rsrc(xi, imgBytes);
+        const int cbytes = cc * BC * static_cast<int>(sizeof(T));
+        const int ln = olane();
+        const int dword = (ln % SUB) * (4 / static_cast<int>(sizeof(T)));
+        int wv = wave;
+        asm volatile("" : "+s"(wv)); // per-call scalar decode, not hoisted
+#pragma unroll
+        for(int it = 0; it < IPW; ++it)
+        {
+            if(it < i0 || it >= i1)
+                continue;
+            const int i = it * NW + wv; // wave-uniform
+            if(i >= NI)
+                continue;
+            const int h = i / XG, xg = i - h * XG;
+            const int ih = tc.oh0 - a.ph + h;
+#pragma unroll
+            for(int j = 0; j < SUB; ++j)
+            {
+                const int q = j * SPAN + ln / SUB; // granule within the run
+                const int lx = q / G;
+                const int gran = static_cast<int>(static_cast<unsigned>(q % G - lx) & (G - 1));
+                const bool cok = gran * GE < a.c - cc * BC;
+                const int iw = tc.ow0 - a.pw + xg * XPI + lx;
+                const bool ok = (static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi))
+                                & (static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi)) & cok;
+                const unsigned off
+                    = ok ? static_cast<unsigned>(((ih * a.wi + iw) * a.c + gran * GE + dword)
+                                                 * static_cast<int>(sizeof(T)))
+                         : K1_OUT_OF_RANGE;
+                if(HW % XPI == 0 || xg * XPI + lx < HW)
+                    __builtin_amdgcn_raw_ptr_buffer_load_lds(
+                        xr,
+                        (__attribute__((address_space(3))) void*)(st + h * ROWG + xg * WAVE
+                                                                  + j * SPAN),
+                        4,
+                        off,
+                        cbytes,
+                        0,
+                        0);
+            }
+        }
+    };
+#endif
 
     // Weights (k2rFormatWeights): this wave's run of FN fragments for (kc, s, r) is contiguous.
     const __amdgpu_buffer_rsrc_t wr = k1Rsrc(
@@ -469,7 +537,9 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
                 constexpr int i1 = (q + 1) * DPS < IPW ? (q + 1) * DPS : IPW;
                 constexpr int full = NI / NW;
                 constexpr int dmin = i1 <= full ? i1 - i0 : (i0 < full ? full - i0 : 0);
-                constexpr int dm = dmin > 0 ? dmin : 0;
+                // K2R_DMA_SUB instructions per issue slot; vmcnt holds at most 63.
+                constexpr int dmi = (dmin > 0 ? dmin : 0) * K2R_DMA_SUB;
+                constexpr int dm = dmi < 63 ? dmi : 63;
                 if(pf)
                     __builtin_amdgcn_s_waitcnt(0x0F70 | (dm & 0xF) | ((dm >> 4) << 14));
                 else

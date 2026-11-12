@@ -601,6 +601,66 @@ TEST(TestConvDirectKernelMatch, RowsConfigsRunOnGfx950WithWholeGranules)
     EXPECT_FALSE(admits(f, "gfx950", filterShape({3, 3, 3}, {1, 1, 1})));
 }
 
+/// A gfx90a rows config: the ping-pong tile on the 16x16x16 atoms, 16-channel chunks (39 KiB).
+ConfigFields rowsGfx9Fields()
+{
+    auto f = rowsFields();
+    f.atom = "mfma16_f16";
+    f.archs = "gfx90a";
+    f.bc = 16;
+    f.pp = 1;
+    f.epi = 0;
+    return f;
+}
+
+TEST(TestConvDirectKernelMatch, RowsConfigsRunOnGfx90aWithinItsLds)
+{
+    const auto f = rowsGfx9Fields();
+    EXPECT_EQ(conv_direct::rowsLdsBytes(*conv_direct::configOf(kernelOf(f, "HALF"))),
+              2 * (2 * 8 + 2) * (2 * 16 + 2) * 16 * 2);
+    EXPECT_TRUE(admits(f, "gfx90a:sramecc+:xnack-"));
+    EXPECT_FALSE(admits(f, "gfx950"));
+    auto bf = f;
+    bf.atom = "mfma16_bf16";
+    EXPECT_TRUE(admits(bf, "gfx90a", baseShape(), "BFLOAT16"));
+    auto exact = f;
+    exact.atom = "mfma16_f32";
+    exact.bc = 8;
+    exact.vec = 4;
+    EXPECT_TRUE(admits(exact, "gfx90a", baseShape(), "FLOAT"));
+}
+
+TEST(TestConvDirectKernelMatch, RowsConfigsDeclineHaloStagesPastTheDeviceLds)
+{
+    EXPECT_EQ(conv_direct::ldsLimitOf("gfx950:sramecc+:xnack-"), 160 * 1024);
+    EXPECT_EQ(conv_direct::ldsLimitOf("gfx942"), 64 * 1024);
+    EXPECT_EQ(conv_direct::ldsLimitOf("gfx90a"), 64 * 1024);
+    // gfx950's widest tile (153 KiB) on a 64 KiB part: declined by LDS alone.
+    auto wide = rowsGfx9Fields();
+    wide.bc = 64;
+    EXPECT_EQ(conv_direct::rowsLdsBytes(*conv_direct::configOf(kernelOf(wide, "HALF"))), 156672);
+    EXPECT_FALSE(admits(wide, "gfx90a"));
+    auto fits = wide;
+    fits.bc = 16;
+    EXPECT_TRUE(admits(fits, "gfx90a"));
+    // Doubling the chunk to 32 channels (77 KiB) passes 64 KiB; fp32 doubles the same tile.
+    auto edge = rowsGfx9Fields();
+    edge.bc = 32;
+    EXPECT_EQ(conv_direct::rowsLdsBytes(*conv_direct::configOf(kernelOf(edge, "HALF"))), 78336);
+    EXPECT_FALSE(admits(edge, "gfx90a"));
+    auto exact = rowsGfx9Fields();
+    exact.atom = "mfma16_f32";
+    exact.vec = 4;
+    EXPECT_FALSE(admits(exact, "gfx90a", baseShape(), "FLOAT")) << "fp32 c16: 78 KiB";
+    exact.bc = 8;
+    EXPECT_TRUE(admits(exact, "gfx90a", baseShape(), "FLOAT"));
+    // gfx950 keeps its 160 KiB.
+    auto big = rowsFields();
+    EXPECT_TRUE(admits(big, "gfx950"));
+    big.bc = 128;
+    EXPECT_FALSE(admits(big, "gfx950"));
+}
+
 TEST(TestConvDirectKernelMatch, RowsConfigsDeclineEachMalformedField)
 {
     ASSERT_TRUE(admits(rowsFields(), "gfx950"));
