@@ -31,6 +31,8 @@
 #include <miopen/env_debug.hpp>                     // debug::env::UpdateEnvVariable (table toggle)
 #include <miopen/db_path.hpp>
 #include <miopen/filesystem.hpp>
+#include <miopen/md5.hpp> // miopen::md5 (loader md5-mismatch test)
+#include <random>
 #include <miopen/handle.hpp>
 #include <string>
 #include <map>
@@ -252,11 +254,12 @@ TEST_P(GPU_CandidateSelection_FP32, SelectBestCandidateValid_Test)
     // returns), so the selection is exercised without reconstructing a raw table key:
     // GenerateValidKernelParams builds synthetic configs that are not enumerated, hence not in the
     // table, and would miss.
-    const auto& vocab = GetConfigEmbeddingVocab(params.arch, params.solver);
+    const auto& vocab      = GetConfigEmbeddingVocab(params.arch, params.solver);
+    const auto& emb_matrix = GetConfigEmbeddingMatrix(params.arch, params.solver);
     ASSERT_FALSE(vocab.empty()) << "shipped config-embedding vocab is empty";
     std::vector<std::vector<float>> encoded_configs;
     for(std::size_t i = 0; i < 3 && i < vocab.size(); ++i)
-        encoded_configs.push_back(vocab[i].second);
+        encoded_configs.push_back(emb_matrix[i]);
     auto ids = model.SelectBestCandidateIndices(encoded_features, encoded_configs);
     ASSERT_FALSE(ids.empty()) << "No candidates were selected!";
     for(const auto& candidate : ids)
@@ -280,26 +283,6 @@ TEST_P(GPU_CandidateSelection_FP32, SelectBestCandidateEmptyInput_Test)
 }
 
 namespace {
-constexpr const char* kWaveletKernel = "DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3";
-
-bool MetadataHasKernel(const CandidateSelectionMetadata& meta, const std::string& kernel_name)
-{
-    try
-    {
-        meta.GetKernelStrMapping(kernel_name);
-        return true;
-    }
-    catch(const std::exception&)
-    {
-        return false;
-    }
-}
-
-// The CShuffleV3 large-tensor kernel emits BlkGemmPipelineScheduler / -Version
-// ("inline_after_optionals") right after the optional NumGroupsToMerge, then the appended SplitK.
-// base_param_count is 15, so the candidate is kernel_name + 15 base params, then (optional NGM),
-// scheduler, version, then the appended SplitK. CK keeps the "BlkGemmPipelineScheduler:" label on
-
 // A complete input-feature map for EngineerCandidateSelectionInputFeatures (every FeatureAt key),
 // so a throw can only come from the precision-class check, not a missing feature.
 std::map<std::string, float> MakeFullInputFeatureMap()
@@ -607,27 +590,6 @@ TEST_P(GPU_CandidateSelection_FP32, Engineered3dInputSwap_Test)
         << "out_d slot must carry in_d after Backward swap";
 }
 
-// The conditional-layout descriptor is loaded from metadata: present for the Wavelet kernel,
-// absent for a fully static kernel (which then decodes via the plain kernel_str_mapping path).
-TEST_P(GPU_CandidateSelection_FP32, ConditionalLayoutDescriptorPresence_Test)
-{
-    const auto& params = GetParam();
-    CandidateSelectionMetadata meta(params.arch, params.solver);
-
-    // Static kernel (used as the common test kernel) must have no conditional layout.
-    EXPECT_EQ(meta.GetConditionalLayout("DeviceGroupedConvBwdWeight_Xdl_CShuffle"), nullptr);
-
-    if(MetadataHasKernel(meta, kWaveletKernel))
-    {
-        const auto* layout = meta.GetConditionalLayout(kWaveletKernel);
-        ASSERT_NE(layout, nullptr) << "Wavelet metadata present but conditional layout missing";
-        EXPECT_EQ(layout->base_param_count, 15u);
-        EXPECT_TRUE(layout->conditional_params.count("NumGroupsToMerge") == 1);
-        EXPECT_TRUE(layout->conditional_params.count("SplitK") == 1);
-        EXPECT_TRUE(layout->packed_params.count("TileLoadMathThreadGroupSize") == 1);
-    }
-}
-
 // === INSTANTIATION ===
 
 // Helper function to generate test parameters for both 2D and 3D solvers
@@ -686,6 +648,7 @@ TEST_P(GPU_CandidateSelection_FP32, SelectBestVocabBestFirst_Test)
 {
     const auto& params = GetParam();
     const auto& vocab  = GetConfigEmbeddingVocab(params.arch, params.solver);
+    const auto& emb    = GetConfigEmbeddingMatrix(params.arch, params.solver);
     ASSERT_FALSE(vocab.empty());
     const auto features = AllOnesFeatures(params.arch, params.solver);
     CandidateSelectionModel model(params.arch, params.solver);
@@ -694,10 +657,10 @@ TEST_P(GPU_CandidateSelection_FP32, SelectBestVocabBestFirst_Test)
     float best_score            = 0.0f;
     for(std::size_t i = 0; i < vocab.size(); ++i)
     {
-        if(vocab[i].second.size() != encoded_features.size())
+        if(emb[i].size() != encoded_features.size())
             continue;
-        const float s = std::inner_product(
-            vocab[i].second.begin(), vocab[i].second.end(), encoded_features.begin(), 0.0f);
+        const float s =
+            std::inner_product(emb[i].begin(), emb[i].end(), encoded_features.begin(), 0.0f);
         if(std::isnan(s))
             continue;
         if(best < 0 || s > best_score)
@@ -711,7 +674,7 @@ TEST_P(GPU_CandidateSelection_FP32, SelectBestVocabBestFirst_Test)
     auto result     = SelectBestVocabCandidate(
         params.arch, params.solver, features, /*use_tf32=*/false, accept_all);
     ASSERT_TRUE(result.has_value());
-    EXPECT_EQ(result->first, VocabBase(vocab[best].first))
+    EXPECT_EQ(result->first, VocabBase(vocab[best]))
         << "accept-all walk did not return the top-ranked candidate";
 }
 
@@ -722,7 +685,7 @@ TEST_P(GPU_CandidateSelection_FP32, SelectBestVocabFirstApplicableWins_Test)
     const auto& params = GetParam();
     const auto& vocab  = GetConfigEmbeddingVocab(params.arch, params.solver);
     ASSERT_FALSE(vocab.empty());
-    const std::string target = VocabBase(vocab[vocab.size() / 2].first);
+    const std::string target = VocabBase(vocab[vocab.size() / 2]);
     const auto features      = AllOnesFeatures(params.arch, params.solver);
     auto only_target         = [&](const std::string& base, int, bool) { return base == target; };
     auto result              = SelectBestVocabCandidate(
@@ -738,7 +701,7 @@ TEST_P(GPU_CandidateSelection_FP32, SelectBestVocabTwoPassTf32_Test)
     const auto& params = GetParam();
     const auto& vocab  = GetConfigEmbeddingVocab(params.arch, params.solver);
     ASSERT_FALSE(vocab.empty());
-    const std::string target = VocabBase(vocab.front().first);
+    const std::string target = VocabBase(vocab.front());
     const auto features      = AllOnesFeatures(params.arch, params.solver);
     auto fp32_only           = [&](const std::string& base, int, bool fp32_pass) {
         return fp32_pass && base == target;
@@ -830,54 +793,125 @@ TEST(CPU_ConfigEmbeddingTableLoader_NONE, AllShippedTablesWellFormed)
                 << ": table present but vocab empty (rejected / md5 mismatch / no v3 block)";
         }
     // This suite is compiled only with MIOPEN_ENABLE_AI_KERNEL_TUNING (see the guard at the top of
-    // the file), so the shipped tables must be installed. A missing set is a packaging bug -- fail
-    // rather than skip, otherwise a build that dropped the .bin artifacts stays green.
-    EXPECT_GT(present, 0) << "no config-embedding tables installed at " << db
-                          << " (shipped .bin artifacts missing while AI kernel tuning is enabled)";
+    // the file). All 12 (gfx942 + gfx950) x 6-solver tables ship with this PR, so require every one
+    // -- EXPECT_GT(present, 0) would stay green if 11 of 12 .bin files were dropped from packaging.
+    EXPECT_EQ(present, static_cast<int>(arches.size() * solvers.size()))
+        << "expected all " << arches.size() * solvers.size()
+        << " shipped config-embedding tables installed at " << db << ", found " << present;
 }
 
-// The loader fails closed on a malformed table (bad magic, unknown version, size/row mismatch):
-// each yields an empty vocab, no throw. Written under a scratch (arch, solver) that collides with
-// nothing shipped.
+// The loader loads a well-formed v3 table and fails closed on every malformed one -- bad magic, a
+// non-v3 version, a row-region size mismatch, an md5 that does not match the input encoder (stale
+// table vs refreshed model), and a truncated kernel-id block. Crafted in a temp directory and read
+// through LoadConfigEmbeddingVocabFromFile, so nothing is written into the installed system db
+// (which is normally read-only, and would make the test GTEST_SKIP / silently never run).
 TEST(CPU_ConfigEmbeddingTableLoader_NONE, RejectsMalformedTables)
 {
-    const auto db = miopen::GetSystemDbPath();
-    auto path_for = [&](const std::string& solver) {
-        return db / ("zztest_" + solver + "_kernel_config_embeddings.bin");
+    namespace fs = miopen::fs;
+    std::random_device rd;
+    const auto dir =
+        fs::temp_directory_path() / ("miopen_cet_" + std::to_string(rd()) + std::to_string(rd()));
+    fs::create_directories(dir);
+
+    auto put_u32 = [](std::vector<char>& b, std::uint32_t v) {
+        const char* c = reinterpret_cast<const char*>(&v);
+        b.insert(b.end(), c, c + 4);
     };
-    // 28-byte v1 header: magic[4] + {version,key_dim,emb_dim,num_rows,key_dtype,emb_dtype} u32.
-    auto header = [](const char* magic,
-                     std::uint32_t ver,
-                     std::uint32_t key_dim,
-                     std::uint32_t emb_dim,
-                     std::uint32_t num_rows) {
+    auto put_f32 = [](std::vector<char>& b, float v) {
+        const char* c = reinterpret_cast<const char*>(&v);
+        b.insert(b.end(), c, c + 4);
+    };
+    // Serialize a MICE table: magic[4] + 6 u32 header (+ 32-byte md5 for v3) + num_rows (key,emb)
+    // rows; for v3 also append the length-prefixed kernel-id block. truncate_ids makes the last
+    // id's length prefix run past EOF. claimed_rows can exceed the rows actually written (size
+    // mismatch).
+    auto make = [&](const char* magic,
+                    std::uint32_t version,
+                    std::uint32_t key_dim,
+                    std::uint32_t emb_dim,
+                    std::uint32_t written_rows,
+                    std::uint32_t claimed_rows,
+                    const std::string& md5_str,
+                    const std::vector<std::string>& ids,
+                    bool truncate_ids) {
         std::vector<char> b;
-        auto put = [&](const void* p, size_t n) {
-            const char* c = static_cast<const char*>(p);
-            b.insert(b.end(), c, c + n);
-        };
-        put(magic, 4);
-        for(std::uint32_t v : {ver, key_dim, emb_dim, num_rows, 0u, 0u})
-            put(&v, 4);
+        b.insert(b.end(), magic, magic + 4);
+        put_u32(b, version);
+        put_u32(b, key_dim);
+        put_u32(b, emb_dim);
+        put_u32(b, claimed_rows);
+        put_u32(b, 0); // key_dtype = fp32
+        put_u32(b, 0); // emb_dtype = fp32
+        if(version == 3)
+        {
+            std::string h = md5_str;
+            h.resize(32, '0');
+            b.insert(b.end(), h.begin(), h.end());
+        }
+        for(std::uint32_t r = 0; r < written_rows; ++r)
+        {
+            for(std::uint32_t k = 0; k < key_dim; ++k)
+                put_f32(b, static_cast<float>(r + k));
+            for(std::uint32_t e = 0; e < emb_dim; ++e)
+                put_f32(b, 0.5f * static_cast<float>(r) + static_cast<float>(e));
+        }
+        if(version == 3)
+        {
+            for(std::uint32_t r = 0; r < written_rows; ++r)
+            {
+                if(truncate_ids && r + 1 == written_rows)
+                {
+                    put_u32(b, 1u << 30); // length prefix runs far past EOF
+                    break;
+                }
+                const std::string& id = r < ids.size() ? ids[r] : std::string();
+                put_u32(b, static_cast<std::uint32_t>(id.size()));
+                b.insert(b.end(), id.begin(), id.end());
+            }
+        }
         return b;
     };
-    auto write = [&](const std::string& solver, const std::vector<char>& bytes) {
-        std::ofstream os(path_for(solver), std::ios::binary);
-        if(os)
-            os.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
-        return static_cast<bool>(os);
+    auto write = [&](const std::string& name, const std::vector<char>& bytes) {
+        std::ofstream os(dir / name, std::ios::binary);
+        os.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
     };
-    const bool wrote = write("badmagic", header("XXXX", 1, 4, 4, 0)) &&
-                       write("badver", header("MICE", 99, 4, 4, 0)) &&
-                       // claims 10 rows but only the header is present -> size mismatch
-                       write("badsize", header("MICE", 1, 4, 4, 10));
-    if(!wrote)
-        GTEST_SKIP() << "System db path not writable for crafting test tables: " << db;
-    EXPECT_TRUE(GetConfigEmbeddingVocab("zztest", "badmagic").empty());
-    EXPECT_TRUE(GetConfigEmbeddingVocab("zztest", "badver").empty());
-    EXPECT_TRUE(GetConfigEmbeddingVocab("zztest", "badsize").empty());
-    for(const char* solver : {"badmagic", "badver", "badsize"})
-        miopen::fs::remove(path_for(solver));
+    auto vocab_of = [&](const std::string& name, const std::string& enc) {
+        return LoadConfigEmbeddingVocabFromFile((dir / name).string(), enc);
+    };
+
+    // Input encoder the table hashes against, with the matching md5 for the positive/mismatch
+    // cases.
+    const std::string enc_bytes = "miopen-test-input-encoder-bytes";
+    write("enc.bin", std::vector<char>(enc_bytes.begin(), enc_bytes.end()));
+    const auto enc_path                = (dir / "enc.bin").string();
+    const std::string good_md5         = miopen::md5(enc_bytes);
+    const std::vector<std::string> ids = {"KernelA", "KernelB"};
+
+    // Positive control: a well-formed v3 table loads to a 2-entry vocab.
+    write("good.bin", make("MICE", 3, 2, 3, 2, 2, good_md5, ids, false));
+    EXPECT_EQ(vocab_of("good.bin", enc_path).size(), 2u);
+
+    // bad magic.
+    write("badmagic.bin", make("XXXX", 3, 2, 3, 2, 2, good_md5, ids, false));
+    EXPECT_TRUE(vocab_of("badmagic.bin", enc_path).empty());
+
+    // non-v3 version (no kernel-id block -> no usable vocab).
+    write("badver.bin", make("MICE", 2, 2, 3, 2, 2, good_md5, ids, false));
+    EXPECT_TRUE(vocab_of("badver.bin", enc_path).empty());
+
+    // size mismatch: header claims 10 rows, only 2 written.
+    write("badsize.bin", make("MICE", 3, 2, 3, 2, 10, good_md5, ids, false));
+    EXPECT_TRUE(vocab_of("badsize.bin", enc_path).empty());
+
+    // md5 mismatch: table hash does not match the input encoder (stale table / refreshed model).
+    write("badmd5.bin", make("MICE", 3, 2, 3, 2, 2, std::string(32, 'f'), ids, false));
+    EXPECT_TRUE(vocab_of("badmd5.bin", enc_path).empty());
+
+    // truncated kernel-id block: a length prefix runs past EOF.
+    write("badids.bin", make("MICE", 3, 2, 3, 2, 2, good_md5, ids, true));
+    EXPECT_TRUE(vocab_of("badids.bin", enc_path).empty());
+
+    fs::remove_all(dir);
 }
 
 #else

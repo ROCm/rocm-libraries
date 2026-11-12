@@ -1744,60 +1744,35 @@ std::vector<float> EncodeInputFeaturesWithFdeep(const std::vector<float>& featur
     return tensors[0].to_vector();
 }
 
-// Precomputed config-tower fast path.
+// Precomputed config-tower vocabulary (v3 config-embedding table).
 //
-// The config tower is a pure function of (arch, solver, kernel-config): its output does not
-// depend on the convolution problem. The set of kernel configs a solver can emit is finite, so
-// all config-tower embeddings can be computed once, offline, and shipped as a lookup table
-// ({arch}_{solver}_kernel_config_embeddings.bin). At runtime we look each encoded candidate vector
-// up by its exact fp32 bytes and read back the stored fp32 embedding -- the value the fdeep config
-// encoder produces for that candidate, stored without quantization loss -- without loading or
-// running the neural model. When the table covers every candidate this lets us drop the
-// ~450 KB-per-solver _kernel_config_encoder.tn.model from the shipped artifacts entirely.
-//
-// Returns nullopt on any miss (table absent, or a candidate not in the table); EncodeKernelConfigs
-// then throws and RunAIHeuristics drops to the non-AI heuristic. The config encoders are not
-// shipped, so there is no fdeep fallback.
+// The config tower is a pure function of (arch, solver, kernel-config): its output does not depend
+// on the convolution problem. The set of kernel configs a solver can emit is finite, so every
+// config-tower embedding is computed once, offline, and shipped as a lookup table
+// ({arch}_{solver}_kernel_config_embeddings.bin) together with the kernel id of each row. At
+// runtime the selection path ranks that whole vocabulary by the two-tower score and walks it
+// best-first, checking applicability lazily -- no fdeep config encoder, no FillValidKernels.
+// Shipping the table lets us drop the ~450 KB-per-solver _kernel_config_encoder.tn.model entirely;
+// the config encoders are not shipped, so there is no fdeep fallback. Only the v3 format (which
+// carries the trailing kernel-id block) is understood: a missing/rejected/older table yields an
+// empty vocab and selection falls through to the non-AI heuristic.
 
-// A loaded config-embedding table: encoded-param vector (raw bytes) -> fp32 embedding.
+// A loaded v3 config-embedding table: the ordered kernel-id vocabulary and the parallel embedding
+// matrix (same row order), consumed by the rank-then-lazy-applicability selection path. Both are
+// empty for a sentinel-only or truncated table, and for an absent or rejected file.
 struct ConfigEmbeddingTable
 {
-    bool present          = false;
-    std::uint32_t key_dim = 0;
-    std::uint32_t emb_dim = 0;
-    std::unordered_map<std::string, std::vector<float>> rows;
-    // v3 only: ordered (kernel_id, embedding) vocabulary, in table row order. Lets the selection
-    // path rank the whole vocab and check applicability lazily (IsArgsSupported) without
-    // FillValidKernels. Empty for v1/v2 tables and for sentinel rows (kernel_id == "").
-    std::vector<std::pair<std::string, std::vector<float>>> vocab;
-    // Parallel to `vocab`: the same embeddings as a contiguous matrix, so the scorer consumes them
-    // directly instead of copying every embedding out of `vocab` on each selection call.
-    std::vector<std::vector<float>> vocab_embeddings;
+    bool present = false;
+    std::vector<std::string> vocab;                   // kernel ids, row order, sentinels dropped
+    std::vector<std::vector<float>> vocab_embeddings; // parallel to vocab
 };
 
-// Build the byte key for an encoded-param vector (exact match, collision-free).
-std::string EmbeddingKey(const std::vector<float>& encoded)
+// Parse a v3 config-embedding file at `path`, verifying its md5 against the input encoder at
+// `enc_path`. Pure function of the two paths (empty vocab on any rejection): the cached
+// GetConfigEmbeddingTable derives both from (arch, solver); the loader tests pass temp files.
+ConfigEmbeddingTable ParseConfigEmbeddingTable(const std::string& path, const std::string& enc_path)
 {
-    return {reinterpret_cast<const char*>(encoded.data()), encoded.size() * sizeof(float)};
-}
-
-// Load and cache one {arch}_{solver}_kernel_config_embeddings.bin. A missing file is cached as
-// an absent (empty) table so we attempt disk I/O only once per (arch, solver).
-const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
-                                                    const std::string& solver)
-{
-    static std::map<std::string, ConfigEmbeddingTable> tables;
-    static std::mutex tables_mutex;
-
-    const std::string cache_key = arch + "_" + solver;
-    std::lock_guard<std::mutex> lock(tables_mutex);
-    auto it = tables.find(cache_key);
-    if(it != tables.end())
-        return it->second;
-
     ConfigEmbeddingTable table;
-    const auto path =
-        (GetSystemDbPath() / (arch + "_" + solver + "_kernel_config_embeddings.bin")).string();
     std::ifstream is(path, std::ios::binary);
     if(is.good())
     {
@@ -1812,20 +1787,20 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
         get(num_rows);
         get(key_dtype);
         get(emb_dtype);
-        // v2/v3 append a 32-char lowercase-hex md5 of the SHIPPED input encoder the table was
+        // v3 appends a 32-char lowercase-hex md5 of the SHIPPED input encoder the table was
         // generated alongside (same training run). A table whose embedded hash does not match the
         // installed input encoder is ignored (fail closed -> non-AI heuristic) rather than scoring
-        // with embeddings from a different run. The input encoder IS shipped, so -- unlike a hash
-        // of the (dropped) config encoder -- this guard fires in production too. v1 (no hash) is
-        // still accepted for backward compatibility.
+        // with embeddings from a different run. The input encoder IS shipped, so this guard fires
+        // in production too. Only v3 is accepted; earlier formats carry no kernel-id block, hence
+        // no usable vocabulary.
         std::string table_enc_md5;
-        if(version == 2 || version == 3)
+        if(version == 3)
         {
             table_enc_md5.resize(32);
             is.read(table_enc_md5.data(), 32);
         }
-        const std::uint32_t header_bytes = (version == 2 || version == 3) ? 60u : 28u;
-        // Only the format this build understands: fp32 keys and fp32 embeddings. Validate the
+        const std::uint32_t header_bytes = 60u; // v3: magic[4] + 6x u32 + 32-byte md5
+        // Only the format this build understands: v3, fp32 keys and fp32 embeddings. Validate the
         // header against the actual file size before trusting num_rows, so a corrupt count cannot
         // drive a huge reserve/allocation.
         const std::uint64_t row_bytes = static_cast<std::uint64_t>(key_dim) * sizeof(float) +
@@ -1834,21 +1809,18 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
         const std::uint64_t file_size = is ? static_cast<std::uint64_t>(is.tellg()) : 0;
         is.seekg(header_bytes, std::ios::beg);
         // v3 appends a variable-length kernel-id block after the rows, so its total size is only
-        // bounded below by the row region; v1/v2 must match exactly.
+        // bounded below by the row region.
         const std::uint64_t rows_end =
             header_bytes + static_cast<std::uint64_t>(num_rows) * row_bytes;
-        bool header_ok = is.good() && std::memcmp(magic, "MICE", 4) == 0 &&
-                         (version == 1 || version == 2 || version == 3) && key_dtype == 0 &&
-                         emb_dtype == 0 && key_dim > 0 && emb_dim > 0 &&
-                         (version == 3 ? file_size >= rows_end : file_size == rows_end);
+        bool header_ok = is.good() && std::memcmp(magic, "MICE", 4) == 0 && version == 3 &&
+                         key_dtype == 0 && emb_dtype == 0 && key_dim > 0 && emb_dim > 0 &&
+                         file_size >= rows_end;
         // Verify the table's embedded hash against the shipped input encoder, failing closed when
         // they differ (models refreshed but the table not regenerated, or a mixed/stale install).
         // The input encoder is always shipped, so this fires in production; a broken install
         // missing it has no AI path anyway, so an absent file is tolerated.
-        if(header_ok && (version == 2 || version == 3))
+        if(header_ok)
         {
-            const auto enc_path =
-                (GetSystemDbPath() / (arch + "_" + solver + "_input_encoder.tn.model")).string();
             std::ifstream enc(enc_path, std::ios::binary | std::ios::ate);
             std::string enc_bytes;
             if(enc.good())
@@ -1870,13 +1842,10 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
         }
         if(header_ok)
         {
-            table.key_dim        = key_dim;
-            table.emb_dim        = emb_dim;
-            const bool has_vocab = (version == 3);
-            table.rows.reserve(num_rows);
-            std::vector<std::vector<float>> ordered_emb; // row-order embeddings, for the v3 vocab
-            if(has_vocab)
-                ordered_emb.reserve(num_rows);
+            // Read the rows in order, keeping each embedding; the fp32 key is read only to advance
+            // past it (the old exact-match key map is gone -- the vocab is ranked by id).
+            std::vector<std::vector<float>> ordered_emb;
+            ordered_emb.reserve(num_rows);
             std::vector<float> key(key_dim);
             std::vector<float> emb(emb_dim);
             std::uint32_t read_rows = 0;
@@ -1888,20 +1857,16 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
                         static_cast<std::streamsize>(emb_dim * sizeof(float)));
                 if(!is.good())
                     break;
-                if(!table.rows.emplace(EmbeddingKey(key), emb).second)
-                    MIOPEN_LOG_W("Duplicate key in config embedding table "
-                                 << path << "; keeping first row");
-                if(has_vocab)
-                    ordered_emb.push_back(emb);
+                ordered_emb.push_back(emb);
             }
-            table.present = (read_rows == num_rows);
-            // v3: read the trailing kernel-id block (num_rows length-prefixed strings) and pair
-            // each non-empty kernel_id with its row embedding. A truncated/corrupt block only
-            // disables the lazy-applicability vocab; the rows map (table fast path) stays usable.
-            if(table.present && has_vocab)
+            // Read the trailing kernel-id block (num_rows length-prefixed strings) and pair each
+            // non-empty kernel_id with its row embedding. A short row region or a truncated/corrupt
+            // kernel-id block leaves the table absent -> empty vocab -> non-AI heuristic.
+            bool vocab_ok = (read_rows == num_rows);
+            if(vocab_ok)
             {
                 table.vocab.reserve(num_rows);
-                bool vocab_ok = true;
+                table.vocab_embeddings.reserve(num_rows);
                 for(std::uint32_t r = 0; r < num_rows; ++r)
                 {
                     std::uint32_t len = 0;
@@ -1921,52 +1886,72 @@ const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
                     }
                     if(!kid.empty()) // skip sentinel rows (no kernel_id)
                     {
-                        table.vocab.emplace_back(std::move(kid), ordered_emb[r]);
+                        table.vocab.push_back(std::move(kid));
                         table.vocab_embeddings.push_back(ordered_emb[r]);
                     }
                 }
-                if(!vocab_ok)
-                {
-                    MIOPEN_LOG_W(
-                        "Config embedding table "
-                        << path
-                        << " has a truncated kernel-id block; disabling lazy-applicability "
-                           "vocab (table fast path still available)");
-                    table.vocab.clear();
-                    table.vocab_embeddings.clear();
-                }
             }
+            table.present = vocab_ok;
             if(!table.present)
             {
-                MIOPEN_LOG_W("Config embedding table at " << path << " is truncated/corrupt; "
-                                                          << "config encoding falls back to the "
-                                                             "non-AI heuristic");
-                table.rows.clear();
+                MIOPEN_LOG_W("Config embedding table at "
+                             << path
+                             << " is truncated/corrupt; config encoding falls back to the "
+                                "non-AI heuristic");
+                table.vocab.clear();
+                table.vocab_embeddings.clear();
             }
             else
             {
-                MIOPEN_LOG_I2("Loaded config embedding table "
-                              << path << " (" << table.rows.size() << " rows"
-                              << (has_vocab ? ", " + std::to_string(table.vocab.size()) + " vocab"
-                                            : std::string())
-                              << ")");
+                MIOPEN_LOG_I2("Loaded config embedding table " << path << " (" << num_rows
+                                                               << " rows, " << table.vocab.size()
+                                                               << " vocab)");
             }
         }
     }
-    return tables.emplace(cache_key, std::move(table)).first->second;
+    return table;
 }
 
-// Ordered (kernel_id, embedding) vocabulary for the rank-then-lazy-applicability selection path.
-// Empty unless a v3 table with a kernel-id block is installed for (arch, solver). Also empty when
-// the precomputed-table kill switch is set, so the rank-then-lazy-applicability fast path (the only
-// consumer) is disabled too -- not just TryEncodeKernelConfigsFromTable below. With an empty vocab
-// the fast path finds nothing and selection falls through to the non-AI heuristic.
-MIOPEN_INTERNALS_EXPORT const std::vector<std::pair<std::string, std::vector<float>>>&
+// Load and cache one {arch}_{solver}_kernel_config_embeddings.bin (md5-checked against the shipped
+// input encoder). A missing/invalid file is cached as an absent (empty) table so we attempt disk
+// I/O only once per (arch, solver).
+const ConfigEmbeddingTable& GetConfigEmbeddingTable(const std::string& arch,
+                                                    const std::string& solver)
+{
+    static std::map<std::string, ConfigEmbeddingTable> tables;
+    static std::mutex tables_mutex;
+
+    const std::string cache_key = arch + "_" + solver;
+    std::lock_guard<std::mutex> lock(tables_mutex);
+    auto it = tables.find(cache_key);
+    if(it != tables.end())
+        return it->second;
+
+    const auto path =
+        (GetSystemDbPath() / (arch + "_" + solver + "_kernel_config_embeddings.bin")).string();
+    const auto enc_path =
+        (GetSystemDbPath() / (arch + "_" + solver + "_input_encoder.tn.model")).string();
+    return tables.emplace(cache_key, ParseConfigEmbeddingTable(path, enc_path)).first->second;
+}
+
+// Test hook: parse a config-embedding .bin at bin_path (md5-checked against the input encoder at
+// input_encoder_path) and return its kernel-id vocabulary. Empty on any rejection. Lets the loader
+// tests craft temp files instead of writing into the installed system db.
+MIOPEN_INTERNALS_EXPORT std::vector<std::string>
+LoadConfigEmbeddingVocabFromFile(const std::string& bin_path, const std::string& input_encoder_path)
+{
+    return ParseConfigEmbeddingTable(bin_path, input_encoder_path).vocab;
+}
+
+// Ordered kernel-id vocabulary for the rank-then-lazy-applicability selection path. Empty unless a
+// valid v3 table is installed for (arch, solver), and empty when the precomputed-table kill switch
+// is set -- selection then finds nothing and falls through to the non-AI heuristic.
+MIOPEN_INTERNALS_EXPORT const std::vector<std::string>&
 GetConfigEmbeddingVocab(const std::string& arch, const std::string& solver)
 {
     if(env::enabled(MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB))
     {
-        static const std::vector<std::pair<std::string, std::vector<float>>> empty;
+        static const std::vector<std::string> empty;
         return empty;
     }
     return GetConfigEmbeddingTable(arch, solver).vocab;
