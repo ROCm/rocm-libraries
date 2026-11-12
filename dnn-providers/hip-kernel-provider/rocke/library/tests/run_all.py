@@ -20,6 +20,11 @@
 #   python rocke/library/tests/run_all.py --gpu           # + on-GPU numeric lane
 #   python rocke/library/tests/run_all.py --only dense    # -k filter
 #   python rocke/library/tests/run_all.py --gpu-only      # ONLY the gpu lane
+#
+# Before pytest it also runs the platform's emitted-IR gates
+# (platform/tools/check_ir_validity.py, check_arch_domain.py) over the library's
+# representative-IR corpora (IR_CORPORA below), as platform/tests/run_all.py runs
+# them over its own harness. --no-ir-gates skips them.
 
 from __future__ import annotations
 
@@ -29,6 +34,11 @@ import sys
 from pathlib import Path
 
 TESTS = Path(__file__).resolve().parent
+PLATFORM_TOOLS = TESTS.parents[1] / "platform" / "tools"
+
+# Library representative-IR corpora: modules exposing cases() / lower_case(),
+# each beside its own golden. The platform gates walk them through --cases.
+IR_CORPORA = (TESTS / "test_conv_ir_golden.py",)
 
 
 def main() -> int:
@@ -45,6 +55,11 @@ def main() -> int:
         help="run ONLY the `gpu`-marked lane (implies --gpu)",
     )
     ap.add_argument("--only", default="", help="pytest -k expression to restrict tests")
+    ap.add_argument(
+        "--no-ir-gates",
+        action="store_true",
+        help="skip the emitted-IR validity and arch-domain gates over IR_CORPORA",
+    )
     ap.add_argument(
         "pytest_args",
         nargs=argparse.REMAINDER,
@@ -64,6 +79,21 @@ def main() -> int:
         extra = extra[1:]
     cmd += extra
 
+    status = 0
+    if not args.no_ir_gates and not args.gpu_only and PLATFORM_TOOLS.is_dir():
+        # Self-skips (green, loudly) on a host with no LLVM tools, like the
+        # platform runner's step.
+        for corpus in IR_CORPORA:
+            for tool in ("check_ir_validity.py", "check_arch_domain.py"):
+                print(f"\n== {tool} over {corpus.name} ==", flush=True)
+                gate = [
+                    sys.executable,
+                    str(PLATFORM_TOOLS / tool),
+                    "--cases",
+                    str(corpus),
+                ]
+                status |= subprocess.run(gate).returncode
+
     print("== rocke library pytest ==")
     print(" ", " ".join(cmd))
     # cwd MUST be the library root, not tests/. `python -m pytest` puts cwd at
@@ -76,7 +106,7 @@ def main() -> int:
     # The platform tree sidesteps this by naming its package `dispatch_tests`; the
     # library tree cannot be renamed without churning develop, so it is rooted
     # correctly here instead.
-    status = subprocess.run(cmd, cwd=str(TESTS.parent)).returncode
+    status |= subprocess.run(cmd, cwd=str(TESTS.parent)).returncode
     print("\nRESULT:", "GREEN" if status == 0 else "RED")
     return status
 

@@ -1,0 +1,154 @@
+{
+  "aliases": {},
+  "flavors": {
+    "llvm20": {
+      "cases": {
+        "conv_winograd_fwd/gfx1250/f4_bf16_prescale_k2": {
+          "arch": "gfx1250",
+          "bytes": 226782,
+          "family": "conv_winograd_fwd",
+          "kernel_name": "conv_winograd_fwd_input_N2H20W24C64_K96Y3X3_f4_bf16_opfp16_v8_b256_ps",
+          "sha256": "898ff84712fbeaec497f1cc224048c80c3e63a9d2c19674b58f75dfbede63286",
+          "status": "ok"
+        },
+        "conv_winograd_fwd/gfx1250/f4_k2": {
+          "arch": "gfx1250",
+          "bytes": 181990,
+          "family": "conv_winograd_fwd",
+          "kernel_name": "conv_winograd_fwd_input_N2H20W24C64_K96Y3X3_f4_fp16_v8_b256",
+          "sha256": "a8653b8d917df0389782d680fc3b101fd45a01ab0d34583685bc68b769dfc07d",
+          "status": "ok"
+        },
+        "conv_winograd_fwd/gfx1250/f4_merged_k2_k1": {
+          "arch": "gfx1250",
+          "bytes": 217142,
+          "family": "conv_winograd_fwd",
+          "kernel_name": "conv_winograd_fwd_merged_k2_k1_N2H20W24C64_K96Y3X3_f4_fp16_v8_b256",
+          "sha256": "849bf850b804ef55fbb71e7d165083118b192cd0763d9109692a7c05a40552dd",
+          "status": "ok"
+        },
+        "conv_winograd_fwd/gfx1250/f6x4_k4": {
+          "arch": "gfx1250",
+          "bytes": 227874,
+          "family": "conv_winograd_fwd",
+          "kernel_name": "conv_winograd_fwd_output_N2H20W24C64_K96Y3X3_f6x4_fp16_v8_b256",
+          "sha256": "bfefe732bf6cb8ad9cba092afaa08cdcc97d61a4ef972e7416095997b55a81a5",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm22": {
+      "cases": {
+        "conv_winograd_fwd/gfx1250/f4_bf16_prescale_k2": {
+          "arch": "gfx1250",
+          "bytes": 226921,
+          "family": "conv_winograd_fwd",
+          "kernel_name": "conv_winograd_fwd_input_N2H20W24C64_K96Y3X3_f4_bf16_opfp16_v8_b256_ps",
+          "sha256": "3da9d887ce0524a3211424f812f20c1b35524c7191a343e551eb08ec9fa4f135",
+          "status": "ok"
+        },
+        "conv_winograd_fwd/gfx1250/f4_k2": {
+          "arch": "gfx1250",
+          "bytes": 182086,
+          "family": "conv_winograd_fwd",
+          "kernel_name": "conv_winograd_fwd_input_N2H20W24C64_K96Y3X3_f4_fp16_v8_b256",
+          "sha256": "274acc17d0006ddfdc0878cb2335cc7962a132337de44be257cc3918777fa01c",
+          "status": "ok"
+        },
+        "conv_winograd_fwd/gfx1250/f4_merged_k2_k1": {
+          "arch": "gfx1250",
+          "bytes": 217324,
+          "family": "conv_winograd_fwd",
+          "kernel_name": "conv_winograd_fwd_merged_k2_k1_N2H20W24C64_K96Y3X3_f4_fp16_v8_b256",
+          "sha256": "3673529d48a25413c4a46d38a81f5e21a0ca15aad3e634197782667224b09807",
+          "status": "ok"
+        },
+        "conv_winograd_fwd/gfx1250/f6x4_k4": {
+          "arch": "gfx1250",
+          "bytes": 227970,
+          "family": "conv_winograd_fwd",
+          "kernel_name": "conv_winograd_fwd_output_N2H20W24C64_K96Y3X3_f6x4_fp16_v8_b256",
+          "sha256": "f5ee442e34c4f6f54ad2467b4710db72381617f1d81729c4d0b1a46249473c75",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm23": {
+      "cases": {
+        "conv_winograd_fwd/gfx1250/f4_bf16_prescale_k2": {
+          "arch": "gfx1250",
+          "bytes": 226985,
+          "family": "conv_winograd_fwd",
+          "kernel_name": "conv_winograd_fwd_input_N2H20W24C64_K96Y3X3_f4_bf16_opfp16_v8_b256_ps",
+          "sha256": "9bcbd4d4a2698b7e097382c707d598a446f62f94eb7fb9168e65b3efdf3745d8",
+          "status": "ok"
+        },
+        "conv_winograd_fwd/gfx1250/f4_k2": {
+          "arch": "gfx1250",
+          "bytes": 182150,
+          "family": "conv_winograd_fwd",
+          "kernel_name": "conv_winograd_fwd_input_N2H20W24C64_K96Y3X3_f4_fp16_v8_b256",
+          "sha256": "0fc68891c7f734561d0f2d31bcc5ceb1faeff0f218f4f9844b96cd650b2a98ff",
+          "status": "ok"
+        },
+        "conv_winograd_fwd/gfx1250/f4_merged_k2_k1": {
+          "arch": "gfx1250",
+          "bytes": 217388,
+          "family": "conv_winograd_fwd",
+          "kernel_name": "conv_winograd_fwd_merged_k2_k1_N2H20W24C64_K96Y3X3_f4_fp16_v8_b256",
+          "sha256": "45c93f7161cc2b7a82b337c262542f240cbb624c68fc1f683cb7cedcf0d147de",
+          "status": "ok"
+        },
+        "conv_winograd_fwd/gfx1250/f6x4_k4": {
+          "arch": "gfx1250",
+          "bytes": 228034,
+          "family": "conv_winograd_fwd",
+          "kernel_name": "conv_winograd_fwd_output_N2H20W24C64_K96Y3X3_f6x4_fp16_v8_b256",
+          "sha256": "f21b44448f19fd5d9372f3b48b39ea02601f751a4591ed9732e50e78f23459cf",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm24": {
+      "cases": {
+        "conv_winograd_fwd/gfx1250/f4_bf16_prescale_k2": {
+          "arch": "gfx1250",
+          "bytes": 226985,
+          "family": "conv_winograd_fwd",
+          "kernel_name": "conv_winograd_fwd_input_N2H20W24C64_K96Y3X3_f4_bf16_opfp16_v8_b256_ps",
+          "sha256": "9bcbd4d4a2698b7e097382c707d598a446f62f94eb7fb9168e65b3efdf3745d8",
+          "status": "ok"
+        },
+        "conv_winograd_fwd/gfx1250/f4_k2": {
+          "arch": "gfx1250",
+          "bytes": 182150,
+          "family": "conv_winograd_fwd",
+          "kernel_name": "conv_winograd_fwd_input_N2H20W24C64_K96Y3X3_f4_fp16_v8_b256",
+          "sha256": "0fc68891c7f734561d0f2d31bcc5ceb1faeff0f218f4f9844b96cd650b2a98ff",
+          "status": "ok"
+        },
+        "conv_winograd_fwd/gfx1250/f4_merged_k2_k1": {
+          "arch": "gfx1250",
+          "bytes": 217388,
+          "family": "conv_winograd_fwd",
+          "kernel_name": "conv_winograd_fwd_merged_k2_k1_N2H20W24C64_K96Y3X3_f4_fp16_v8_b256",
+          "sha256": "45c93f7161cc2b7a82b337c262542f240cbb624c68fc1f683cb7cedcf0d147de",
+          "status": "ok"
+        },
+        "conv_winograd_fwd/gfx1250/f6x4_k4": {
+          "arch": "gfx1250",
+          "bytes": 228034,
+          "family": "conv_winograd_fwd",
+          "kernel_name": "conv_winograd_fwd_output_N2H20W24C64_K96Y3X3_f6x4_fp16_v8_b256",
+          "sha256": "f21b44448f19fd5d9372f3b48b39ea02601f751a4591ed9732e50e78f23459cf",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    }
+  },
+  "schema": "ck.dsl.ir_golden_sha256/v2"
+}

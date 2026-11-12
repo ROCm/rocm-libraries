@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -1018,30 +1018,45 @@ namespace rocalution
     template <typename ValueType>
     int64_t HostVector<ValueType>::Amax(ValueType& value) const
     {
-        int64_t index = 0;
-
-        value = static_cast<ValueType>(0);
+        int64_t   index = 0;
+        ValueType amax  = static_cast<ValueType>(0);
 
         _set_omp_backend_threads(this->local_backend_, this->size_);
 
 #ifdef _OPENMP
-#pragma omp parallel for
+#pragma omp parallel
 #endif
-        for(int64_t i = 0; i < this->size_; ++i)
         {
-            ValueType val = std::abs(this->vec_[i]);
-            if(val > value)
+            int64_t   t_index = 0;
+            ValueType t_amax  = static_cast<ValueType>(0);
+
+#ifdef _OPENMP
+#pragma omp for nowait
+#endif
+            for(int64_t i = 0; i < this->size_; ++i)
+            {
+                ValueType val = std::abs(this->vec_[i]);
+                if(val > t_amax)
+                {
+                    t_amax  = val;
+                    t_index = i;
+                }
+            }
+
+            // Ties resolve to the smallest index, as in the sequential loop
 #ifdef _OPENMP
 #pragma omp critical
 #endif
             {
-                if(val > value)
+                if(t_amax > amax || (t_amax == amax && t_index < index))
                 {
-                    value = val;
-                    index = i;
+                    amax  = t_amax;
+                    index = t_index;
                 }
             }
         }
+
+        value = amax;
 
         return index;
     }
@@ -1597,6 +1612,7 @@ namespace rocalution
         copy_h2h(end - start, values, this->vec_ + start);
     }
 
+    // COVERAGE_EXCL_NO_MPI_START
     template <typename ValueType>
     void HostVector<ValueType>::RSPMISUpdateCFmap(const BaseVector<int>& index,
                                                   BaseVector<ValueType>* values)
@@ -1627,6 +1643,7 @@ namespace rocalution
             }
         }
     }
+    // COVERAGE_EXCL_NO_MPI_STOP
 
     // LCOV_EXCL_START
     template <typename ValueType>

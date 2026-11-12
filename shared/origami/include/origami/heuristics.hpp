@@ -48,6 +48,7 @@ struct heuristic_defaults_t {
   static constexpr size_t DRAM_SECTOR_BYTES      = 64;
   static constexpr size_t LDS_XFER_BYTES         = 128;
   static constexpr double KERNEL_LAUNCH_OVERHEAD = 4.5 * 2200.0;
+  static constexpr double POSTGSU_KERNEL_LAUNCH_OVERHEAD = 1.6 * 2200.0;
   static constexpr size_t POSTGSU_THREADS_PER_WG = 256;
 
   // Empirical Constants

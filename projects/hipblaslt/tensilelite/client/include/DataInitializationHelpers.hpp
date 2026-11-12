@@ -6,6 +6,7 @@
 
 #include "DataInitialization.hpp"
 #include <mxDataGen.hpp>                          // hipDataType, generateMXInput
+#include <mxDataGenerator/PreSwizzle.hpp>         // DGen::preSwizzleScalesGFX950 / GFX1250
 #include <mxDataGenerator/dataTypeInfo.hpp>       // DGen::toFloat / toFloatPacked
 #include <mxDataGenerator/ocp_e2m1_mxfp4.hpp>     // DGen::ocp_e2m1_mxfp4
 #include <mxDataGenerator/ocp_e2m3_mxfp6.hpp>     // DGen::ocp_e2m3_mxfp6
@@ -78,6 +79,100 @@ namespace TensileLite
                 }
             }
             // ----------------------------------------------------------------
+            //  downsampleMXScaleFreeDim
+            //
+            // A 2D MX scaling tile shares one scale across mxBlockFree free-dim
+            // elements, but DGen::ScaleBlockLayout only blocks one axis and always
+            // emits one scale per free element. Collapse those groups here.
+            //
+            // The representative is the group maximum: the data bytes were
+            // quantized against the scales being dropped, so a max can only shrink
+            // a product, never overflow it to inf. Byte-wise max is exact for E8
+            // (UE8M0, byte == unsigned exponent); other encodings take the first
+            // element. Reference and kernel both read what this writes, so they
+            // agree either way -- only value conditioning is lost, not consistency.
+            // ----------------------------------------------------------------
+            inline void downsampleMXScaleFreeDim(uint8_t*       dst,
+                                                 uint8_t const* src,
+                                                 size_t         compactFreeDim,
+                                                 size_t         kBlocks,
+                                                 size_t         mxBlockFree,
+                                                 size_t         elemBytes,
+                                                 bool           kFast,
+                                                 bool           unsignedExponentScale)
+            {
+                if(mxBlockFree <= 1 || compactFreeDim == 0 || kBlocks == 0)
+                    return;
+
+                size_t const tiledFreeDim = (compactFreeDim + mxBlockFree - 1) / mxBlockFree;
+
+                // kFast (bound dim at index 0 -> TN A / NT B) lays the buffer out as
+                // [free][kBlock], so a free step skips a whole row of K-blocks.
+                // Otherwise K-blocks are the slow axis.
+                size_t const srcFreeStride = kFast ? kBlocks : 1;
+                size_t const srcKStride    = kFast ? 1 : compactFreeDim;
+                size_t const dstFreeStride = kFast ? kBlocks : 1;
+                size_t const dstKStride    = kFast ? 1 : tiledFreeDim;
+
+                bool const useMax = unsignedExponentScale && elemBytes == 1;
+
+                for(size_t g = 0; g < tiledFreeDim; g++)
+                {
+                    size_t const fBegin = g * mxBlockFree;
+                    size_t const fEnd   = std::min(fBegin + mxBlockFree, compactFreeDim);
+                    for(size_t kb = 0; kb < kBlocks; kb++)
+                    {
+                        uint8_t const* best
+                            = src + (fBegin * srcFreeStride + kb * srcKStride) * elemBytes;
+                        if(useMax)
+                        {
+                            for(size_t f = fBegin + 1; f < fEnd; f++)
+                            {
+                                uint8_t const* cand
+                                    = src + (f * srcFreeStride + kb * srcKStride) * elemBytes;
+                                if(*cand > *best)
+                                    best = cand;
+                            }
+                        }
+                        std::memcpy(dst + (g * dstFreeStride + kb * dstKStride) * elemBytes,
+                                    best,
+                                    elemBytes);
+                    }
+                }
+            }
+            // ----------------------------------------------------------------
+            //  varyMXScaleFreeTiles
+            //
+            // Random-like data with a mirrored scale init quantizes every block
+            // against the same exponent, so after downsampleMXScaleFreeDim every
+            // 2D tile holds 0x7F and a kernel that reads the wrong scale row still
+            // validates. Offset each E8 by a small exponent (-2..2) that differs
+            // between neighbouring free tiles and K-blocks. The data bytes are
+            // untouched; kernel and reference read the same scales, so products
+            // only move by a power of two. 0x00 / 0xFF (zero / NaN) are kept.
+            // Layout matches downsampleMXScaleFreeDim's dst (compact K-blocks).
+            // ----------------------------------------------------------------
+            inline void varyMXScaleFreeTiles(uint8_t* scale,
+                                             size_t   tiledFreeDim,
+                                             size_t   kBlocks,
+                                             bool     kFast)
+            {
+                size_t const freeStride = kFast ? kBlocks : 1;
+                size_t const kStride    = kFast ? 1 : tiledFreeDim;
+                for(size_t g = 0; g < tiledFreeDim; g++)
+                {
+                    for(size_t kb = 0; kb < kBlocks; kb++)
+                    {
+                        uint8_t& b = scale[g * freeStride + kb * kStride];
+                        if(b == 0x00 || b == 0xFF)
+                            continue;
+                        // Steps by 1 (mod 5) per free tile, so adjacent rows differ.
+                        int const delta = static_cast<int>((g + 2 * kb) % 5) - 2;
+                        b = static_cast<uint8_t>(std::clamp(static_cast<int>(b) + delta, 1, 254));
+                    }
+                }
+            }
+            // ----------------------------------------------------------------
             //  decodeE8M0  : matches mxScaleElementAsFloat(rocisa::DataType::E8,..)
             //                used by Reference.cpp - keep them in sync.
             //  decodeMXElement : thin dispatch over DGen::toFloatPacked / toFloat
@@ -88,6 +183,76 @@ namespace TensileLite
                 if(b == 0x00) return 0.0f;
                 if(b == 0xFF) return std::numeric_limits<float>::quiet_NaN();
                 return std::ldexp(1.0f, static_cast<int>(b) - 127);
+            }
+            // ----------------------------------------------------------------
+            //  naturalMXScaleFromCanonical : inverse of restrideMXScaleBufferKFast.
+            //                Recovers the scales generateMXInput emits for one
+            //                batch (unpadded, pre-swizzle) from the canonical copy.
+            //  swizzleNaturalMXScale : the swizzle generateMXInput applies to
+            //                those scales for `layout`; rows/cols are the data
+            //                tensor's sizes()[0] / sizes()[1].
+            // ----------------------------------------------------------------
+            inline std::vector<uint8_t> naturalMXScaleFromCanonical(uint8_t const* canonical,
+                                                                    size_t         naturalBytes,
+                                                                    bool           kFast,
+                                                                    size_t         compactFree,
+                                                                    size_t         compactKBlocks,
+                                                                    size_t         paddedKBlocks,
+                                                                    size_t         elemBytes)
+            {
+                std::vector<uint8_t> natural(naturalBytes);
+                if(kFast && compactKBlocks != paddedKBlocks)
+                {
+                    size_t const compactRow = compactKBlocks * elemBytes;
+                    size_t const paddedRow  = paddedKBlocks * elemBytes;
+                    for(size_t f = 0; f < compactFree; f++)
+                        std::memcpy(
+                            natural.data() + f * compactRow, canonical + f * paddedRow, compactRow);
+                }
+                else
+                {
+                    std::memcpy(natural.data(), canonical, naturalBytes);
+                }
+                return natural;
+            }
+            inline std::vector<uint8_t> swizzleNaturalMXScale(std::vector<uint8_t> const& natural,
+                                                              MXScaleLayout               layout,
+                                                              size_t                      rows,
+                                                              size_t                      cols,
+                                                              size_t                      mxBlock,
+                                                              bool                        kIsRows)
+            {
+                if(layout == MXScaleLayout::GFX950)
+                {
+                    size_t const kExtent = kIsRows ? rows : cols;
+                    size_t const kBlocks = mxBlock > 0 ? (kExtent + mxBlock - 1) / mxBlock : 0;
+                    if(!kIsRows && mxBlock > 0 && kExtent % mxBlock != 0)
+                        throw std::runtime_error(
+                            "GFX950 scales with K along the columns require K to be a multiple of "
+                            + std::to_string(mxBlock) + ", got " + std::to_string(kExtent));
+                    size_t const mnExtent = (kBlocks > 0 && natural.size() % kBlocks == 0)
+                                                ? natural.size() / kBlocks
+                                                : (kIsRows ? cols : rows);
+                    if(mnExtent * kBlocks != natural.size())
+                        throw std::runtime_error("GFX950 scales do not form an MN by K block grid: "
+                                                 + std::to_string(mnExtent) + " x "
+                                                 + std::to_string(kBlocks) + " covers "
+                                                 + std::to_string(mnExtent * kBlocks) + " of "
+                                                 + std::to_string(natural.size()) + " scales");
+                    if(kIsRows)
+                        return DGen::preSwizzleScalesGFX950(natural, {mnExtent, kBlocks});
+                    // The swizzle reads [MN][K block]; a free-dim contiguous operand's
+                    // natural scales are [K block][MN].
+                    std::vector<uint8_t> mnMajor(natural.size());
+                    for(size_t kb = 0; kb < kBlocks; ++kb)
+                        for(size_t mn = 0; mn < mnExtent; ++mn)
+                            mnMajor[mn * kBlocks + kb] = natural[kb * mnExtent + mn];
+                    return DGen::preSwizzleScalesGFX950(mnMajor, {mnExtent, kBlocks});
+                }
+                if(layout == MXScaleLayout::GFX1250 && mxBlock > 0)
+                    return DGen::preSwizzleScalesGFX1250(
+                        natural, cols, (rows + mxBlock - 1) / mxBlock, mxBlock);
+                return natural;
             }
             inline float decodeMXElement(rocisa::DataType dataType,
                                          uint8_t const*   scalePtr,

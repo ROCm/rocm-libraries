@@ -652,15 +652,6 @@ struct BlockFmhaPipelineQRKSVSTdm
                   "qr_tdm pipeline: FAST_EXP2=0 has no code path here - log2(e) is never folded "
                   "into scale_s, so the kernel would return 2^logit instead of e^logit");
 
-    static_assert(!kHasLogitsSoftCap,
-                  "qr_tdm pipeline does not implement logits soft cap - LogitsTransform is never "
-                  "applied, so scores would reach softmax uncapped and unscaled");
-
-    // Bias and sink are now supported (mirrors baseline qr_ks_vs logic).
-    // Dropout requires kernel dispatch interface expansion (dropout object +
-    // randval window) and is deferred to a follow-up task.
-    static_assert(!kHasDropout, "qr_tdm pipeline does not yet support dropout");
-
     static_assert(QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE ||
                       QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR ||
                       QScaleEnum == BlockAttentionQuantScaleEnum::PERHEAD ||
@@ -676,6 +667,9 @@ struct BlockFmhaPipelineQRKSVSTdm
                            Problem::kUseDoubleKVLdsBuffer),
                   "qr_tdm pipeline: MX needs a K64 or K128 gemm0, no bias and the "
                   "double K/V LDS buffer path");
+
+    static_assert(!kQuantized || (!kHasLogitsSoftCap && !kHasDropout),
+                  "qr_tdm pipeline: softcap/dropout require nonquantized Q/K/V");
 
     static_assert(!kHwGemm1Scale || kK1 == BlockFmhaShape::Gemm1WarpTile::at(number<2>{}),
                   "qr_tdm pipeline: the scaled gemm1 assumes kK1 is one warp-GEMM K step");
@@ -1149,7 +1143,8 @@ struct BlockFmhaPipelineQRKSVSTdm
               typename VDramBlockWindowTmp,
               typename BiasDramBlockWindowTmp,
               typename LSEaccDramBlockWindowTmp,
-              typename PositionEncoding>
+              typename PositionEncoding,
+              typename Features = tuple<identity, identity>>
     CK_TILE_HOST_DEVICE auto run_single_v_double_k_lds_buffer(
         const QDramBlockWindowTmp& q_dram_block_window_tmp,       // M0*K0 tile
         const KDramBlockWindowTmp& k_dram_block_window_tmp,       // N0*K0 tile
@@ -1164,8 +1159,15 @@ struct BlockFmhaPipelineQRKSVSTdm
         const float* k_descale_ptr,
         const float* v_descale_ptr,
         index_t block_scale_size_kv,
-        float v_descale) const
+        float v_descale,
+        const Features& features = {}) const
     {
+        if constexpr(kHasLogitsSoftCap)
+            static_assert(!std::is_same_v<remove_cvref_t<decltype(features.at(I0))>, identity>,
+                          "qr_tdm softcap requires a logits transform callback");
+        if constexpr(kHasDropout)
+            static_assert(!std::is_same_v<remove_cvref_t<decltype(features.at(I1))>, identity>,
+                          "qr_tdm dropout requires a probability callback");
         using Layout = typename Policy::template LdsArenaLayout<Problem>;
         auto* smem_ptrq =
             reinterpret_cast<QDataType*>(static_cast<char*>(smem_arena) + Layout::kQOffset);
@@ -1646,6 +1648,9 @@ struct BlockFmhaPipelineQRKSVSTdm
                 });
             }
 
+            if constexpr(kHasLogitsSoftCap)
+                tile_elementwise_inout([&features](auto& x) { x = features.at(I0)(x); }, s_acc);
+
             const auto k_origin = make_tuple(kv_tile_start, 0);
 
             if constexpr(kHasUnevenSplits)
@@ -1789,6 +1794,10 @@ struct BlockFmhaPipelineQRKSVSTdm
 
             auto rowsum_p = ReduceRowSumLocal(p_compute); // rowsum(Pcompute{j})
             ReduceRowSync(rowsum_p, f_sum);
+
+            // Normalize with the undropped mass; dropout changes only the PV numerator.
+            if constexpr(kHasDropout)
+                features.at(I1)(p_compute, q_origin.at(I0), kv_tile_start);
 
             int32_t p_scale = 0;
             auto p_tile     = MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
@@ -1959,7 +1968,8 @@ struct BlockFmhaPipelineQRKSVSTdm
               typename VDramBlockWindowTmp,
               typename BiasDramBlockWindowTmp,
               typename LSEaccDramBlockWindowTmp,
-              typename PositionEncoding>
+              typename PositionEncoding,
+              typename Features = tuple<identity, identity>>
     CK_TILE_HOST_DEVICE auto run_double_kv_lds_buffer(
         const QDramBlockWindowTmp& __restrict__ q_dram_block_window_tmp,       // M0*K0 tile
         const KDramBlockWindowTmp& __restrict__ k_dram_block_window_tmp,       // N0*K0 tile
@@ -1975,8 +1985,15 @@ struct BlockFmhaPipelineQRKSVSTdm
         const float* v_descale_ptr,
         index_t block_scale_size_kv,
         float v_descale,
-        [[maybe_unused]] const MxDescale& mx = {}) const
+        [[maybe_unused]] const MxDescale& mx = {},
+        const Features& features             = {}) const
     {
+        if constexpr(kHasLogitsSoftCap)
+            static_assert(!std::is_same_v<remove_cvref_t<decltype(features.at(I0))>, identity>,
+                          "qr_tdm softcap requires a logits transform callback");
+        if constexpr(kHasDropout)
+            static_assert(!std::is_same_v<remove_cvref_t<decltype(features.at(I1))>, identity>,
+                          "qr_tdm dropout requires a probability callback");
         using Layout = typename Policy::template LdsArenaLayout<Problem>;
         auto* smem_ptrq =
             reinterpret_cast<QDataType*>(static_cast<char*>(smem_arena) + Layout::kQOffset);
@@ -2705,6 +2722,9 @@ struct BlockFmhaPipelineQRKSVSTdm
                     return load_tile_transpose(v_lds_read_window);
             }();
 
+            if constexpr(kHasLogitsSoftCap)
+                tile_elementwise_inout([&features](auto& x) { x = features.at(I0)(x); }, s_acc);
+
             const auto k_origin = make_tuple(kv_tile_start, 0);
 
             if constexpr(kPadSeqLenK || FmhaMask::IsMasking)
@@ -2874,7 +2894,7 @@ struct BlockFmhaPipelineQRKSVSTdm
             // The current PV consumes P and corrected O, not the denominator.
             // Keep whole-P production unchanged and defer only l's reduction
             // in the guarded path. The original left-fold and row sync remain.
-            constexpr bool kDeferDenominator = kStagedKPairs && FmhaMask::IsMasking;
+            constexpr bool kDeferDenominator = kStagedKPairs && FmhaMask::IsMasking && !kHasDropout;
             static_assert(!(kBandedPCast && kDeferDenominator));
 
             // Cast P before its row sum: the sum's tree then overwrites fp32 P registers the
@@ -2884,6 +2904,13 @@ struct BlockFmhaPipelineQRKSVSTdm
                 if constexpr(kBandedPCast)
                 {
                     return MakePForGemm1AndRowSum<decltype(gemm_1)>(p_compute, p_scale);
+                }
+                else if constexpr(kHasDropout)
+                {
+                    // Normalize with the undropped mass; dropout changes only the PV numerator.
+                    auto rowsum = ReduceRowSumLocal(p_compute);
+                    features.at(I1)(p_compute, q_origin.at(I0), kv_tile_start);
+                    return make_tuple(MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale), rowsum);
                 }
                 else
                 {
@@ -3193,7 +3220,8 @@ struct BlockFmhaPipelineQRKSVSTdm
               typename VDramBlockWindowTmp,
               typename BiasDramBlockWindowTmp,
               typename LSEaccDramBlockWindowTmp,
-              typename PositionEncoding>
+              typename PositionEncoding,
+              typename Features = tuple<identity, identity>>
     CK_TILE_HOST_DEVICE auto operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp,
                                         const KDramBlockWindowTmp& k_dram_block_window_tmp,
                                         const VDramBlockWindowTmp& v_dram_block_window_tmp,
@@ -3203,7 +3231,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                                         PositionEncoding position_encoding,
                                         float scale_s,
                                         void* smem_ptr,
-                                        float sink_v) const
+                                        float sink_v,
+                                        const Features& features = {}) const
     {
         static_assert(!kQuantized, "qr_tdm pipeline: this granularity needs the descale arguments");
         if constexpr(Problem::kUseDoubleKVLdsBuffer)
@@ -3220,7 +3249,9 @@ struct BlockFmhaPipelineQRKSVSTdm
                                             nullptr,
                                             nullptr,
                                             1,
-                                            1.0f);
+                                            1.0f,
+                                            MxDescale{},
+                                            features);
         else
             return run_single_v_double_k_lds_buffer(q_dram_block_window_tmp,
                                                     k_dram_block_window_tmp,
@@ -3235,7 +3266,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                                                     nullptr,
                                                     nullptr,
                                                     1,
-                                                    1.0f);
+                                                    1.0f,
+                                                    features);
     }
 
     template <typename QDramBlockWindowTmp,
@@ -3243,7 +3275,8 @@ struct BlockFmhaPipelineQRKSVSTdm
               typename VDramBlockWindowTmp,
               typename BiasDramBlockWindowTmp,
               typename LSEaccDramBlockWindowTmp,
-              typename PositionEncoding>
+              typename PositionEncoding,
+              typename Features = tuple<identity, identity>>
     CK_TILE_HOST_DEVICE auto operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp,
                                         const KDramBlockWindowTmp& k_dram_block_window_tmp,
                                         const VDramBlockWindowTmp& v_dram_block_window_tmp,
@@ -3258,7 +3291,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                                         const float* v_descale_ptr,
                                         index_t block_scale_size_kv,
                                         float v_descale,
-                                        const MxDescale& mx = {}) const
+                                        const MxDescale& mx      = {},
+                                        const Features& features = {}) const
     {
         static_assert(kQuantized,
                       "qr_tdm pipeline: this granularity ignores the descale arguments");
@@ -3277,7 +3311,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                                             v_descale_ptr,
                                             block_scale_size_kv,
                                             v_descale,
-                                            mx);
+                                            mx,
+                                            features);
         else
             return run_single_v_double_k_lds_buffer(q_dram_block_window_tmp,
                                                     k_dram_block_window_tmp,
@@ -3292,7 +3327,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                                                     k_descale_ptr,
                                                     v_descale_ptr,
                                                     block_scale_size_kv,
-                                                    v_descale);
+                                                    v_descale,
+                                                    features);
     }
 
     template <typename QDramBlockWindowTmp,
@@ -3300,7 +3336,8 @@ struct BlockFmhaPipelineQRKSVSTdm
               typename VDramBlockWindowTmp,
               typename BiasDramBlockWindowTmp,
               typename LSEaccDramBlockWindowTmp,
-              typename PositionEncoding>
+              typename PositionEncoding,
+              typename Features = tuple<identity, identity>>
     CK_TILE_HOST_DEVICE auto operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp,
                                         const KDramBlockWindowTmp& k_dram_block_window_tmp,
                                         const VDramBlockWindowTmp& v_dram_block_window_tmp,
@@ -3310,7 +3347,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                                         PositionEncoding position_encoding,
                                         float scale_s,
                                         float sink_v,
-                                        void* smem_arena) const
+                                        void* smem_arena,
+                                        const Features& features = {}) const
     {
         static_assert(!kQuantized, "qr_tdm pipeline: this granularity needs the descale arguments");
         if constexpr(Problem::kUseDoubleKVLdsBuffer)
@@ -3327,7 +3365,9 @@ struct BlockFmhaPipelineQRKSVSTdm
                                             nullptr,
                                             nullptr,
                                             1,
-                                            1.0f);
+                                            1.0f,
+                                            MxDescale{},
+                                            features);
         else
             return run_single_v_double_k_lds_buffer(q_dram_block_window_tmp,
                                                     k_dram_block_window_tmp,
@@ -3342,7 +3382,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                                                     nullptr,
                                                     nullptr,
                                                     1,
-                                                    1.0f);
+                                                    1.0f,
+                                                    features);
     }
 
     template <typename QDramBlockWindowTmp,
@@ -3350,7 +3391,8 @@ struct BlockFmhaPipelineQRKSVSTdm
               typename VDramBlockWindowTmp,
               typename BiasDramBlockWindowTmp,
               typename LSEaccDramBlockWindowTmp,
-              typename PositionEncoding>
+              typename PositionEncoding,
+              typename Features = tuple<identity, identity>>
     CK_TILE_HOST_DEVICE auto operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp,
                                         const KDramBlockWindowTmp& k_dram_block_window_tmp,
                                         const VDramBlockWindowTmp& v_dram_block_window_tmp,
@@ -3365,7 +3407,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                                         const float* v_descale_ptr,
                                         index_t block_scale_size_kv,
                                         float v_descale,
-                                        const MxDescale& mx = {}) const
+                                        const MxDescale& mx      = {},
+                                        const Features& features = {}) const
     {
         static_assert(kQuantized,
                       "qr_tdm pipeline: this granularity ignores the descale arguments");
@@ -3384,7 +3427,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                                             v_descale_ptr,
                                             block_scale_size_kv,
                                             v_descale,
-                                            mx);
+                                            mx,
+                                            features);
         else
             return run_single_v_double_k_lds_buffer(q_dram_block_window_tmp,
                                                     k_dram_block_window_tmp,
@@ -3399,7 +3443,8 @@ struct BlockFmhaPipelineQRKSVSTdm
                                                     k_descale_ptr,
                                                     v_descale_ptr,
                                                     block_scale_size_kv,
-                                                    v_descale);
+                                                    v_descale,
+                                                    features);
     }
 };
 

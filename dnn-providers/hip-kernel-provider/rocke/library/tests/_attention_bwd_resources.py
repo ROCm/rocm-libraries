@@ -789,21 +789,31 @@ def gate_toolchain_gap(arch: str) -> str | None:
 def compile_or_skip(kernel: Any, *, arch: str, **kw: Any) -> Any:
     """``compile_kernel(kernel, arch=arch, **kw)`` for a test that compiles.
 
-    A compile error skips the test only where the loaded toolchain is not the
+    A loaded compiler that does not accept a ``-mllvm`` option the kernel
+    needs is handled by the shared compile-test policy
+    (:func:`~._compiler_test_utils.skip_where_compiler_refuses_option`): the
+    test skips, or fails under ``ROCKE_REQUIRE_COMPILER_TOOLS=1``. Any other
+    compile error skips the test only where the loaded toolchain is not the
     gate's (:func:`gate_toolchain_gap`). On the gate's toolchain (the
     production comgr, ``llvm22``) a kernel the validator admits must compile,
     so the error is raised and fails the test.
     """
     import pytest
     from rocke.helpers.compile import compile_kernel
+    from rocke.runtime import CompilerOptionNotAccepted
 
-    try:
-        return compile_kernel(kernel, arch=arch, **kw)
-    except Exception as exc:  # noqa: BLE001 - a defect unless the toolchain differs
-        gap = gate_toolchain_gap(arch)
-        if gap is None:
-            raise
-        pytest.skip(f"comgr cannot compile for {arch} ({gap}): {exc}")
+    from ._compiler_test_utils import skip_where_compiler_refuses_option
+
+    with skip_where_compiler_refuses_option():
+        try:
+            return compile_kernel(kernel, arch=arch, **kw)
+        except CompilerOptionNotAccepted:
+            raise  # a fact about the host's compiler: the shared policy decides
+        except Exception as exc:  # noqa: BLE001 - a defect unless the toolchain differs
+            gap = gate_toolchain_gap(arch)
+            if gap is None:
+                raise
+            pytest.skip(f"comgr cannot compile for {arch} ({gap}): {exc}")
 
 
 # --------------------------------------------------------------------------- gate

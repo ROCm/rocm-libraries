@@ -55,7 +55,7 @@ def _kernel(**over):
         "MXBlockA": False, "MXBlockB": False, "Sparse": False, "UseBeta": True,
         "UseScaleAB": False, "UseScaleCD": False, "UseScaleAlphaVec": 0, "UseE": False,
         "ActivationType": ActivationType("none"), "OutputAmaxD": False, "UseBias": 0,
-        "GroupedGemm": False,
+        "GroupedGemm": False, "FusedGemmA2A": False,
     }
     problem_type.update(over.pop("ProblemType", {}))
     kernel = {
@@ -93,6 +93,7 @@ def test_base_layout_exact_ordering():
         "StrideD0", "StrideD1", "StrideC0", "StrideC1",
         "StrideA0", "StrideA1", "StrideB0", "StrideB1",
         "Alpha", "Beta",
+        "BatchOffsetD", "BatchOffsetC", "BatchOffsetA", "BatchOffsetB",
     ]
 
 
@@ -265,10 +266,17 @@ def test_amax_output_addresses():
 
 def test_mbsk_trailing_args_from_algorithm():
     sems = _sems(_writer(), _kernel(GlobalSplitUAlgorithm="MultipleBufferSingleKernel"))
-    assert sems[-3:] == ["AddressTD", "Synchronizer", "GSUSync"]
+    assert sems[-7:] == ["AddressTD", "Synchronizer", "GSUSync",
+                         "BatchOffsetD", "BatchOffsetC", "BatchOffsetA", "BatchOffsetB"]
 
 
 def test_mbsk_trailing_args_from_adaptive_gsua():
     sems = _sems(_writer(), _kernel(AdaptiveGemmGSUA=1))
     for expected in ["AddressTD", "Synchronizer", "GSUSync"]:
         assert expected in sems
+
+
+def test_fused_a2a_appends_one_segment_entry():
+    plain = _sems(_writer(), _kernel())
+    fused = _sems(_writer(), _kernel(ProblemType={"FusedGemmA2A": True}))
+    assert fused == plain + ["FusedA2ASegment"]

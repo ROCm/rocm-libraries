@@ -29,6 +29,7 @@
 #         [ENVIRONMENT <VAR=value>...]
 #         [INSTALL_ENVIRONMENT <VAR=value>...]
 #         [GTEST_FILTER <filter>...]
+#         [EXTRA_ARGS <arg>...]
 #     )
 #
 #   ``TARGET_NAME``
@@ -70,6 +71,11 @@
 #     with ``:`` to form the final filter string passed via ``--gtest_filter``.
 #     If omitted, all tests run. Patterns can be specified one per line for
 #     readability.
+#
+#   ``EXTRA_ARGS``
+#     Optional list of further arguments for the test binary, such as
+#     ``--graph-capture``. They are passed to the build-tree target and test,
+#     to the staged install-tree test, and to every category suite.
 #
 #   ``TEST_CATEGORIES_YAML``
 #     Optional path to a GTest ``test_categories.yaml``. When provided, this
@@ -114,6 +120,13 @@ macro(_build_external_integration_command out_var)
     endif()
     if(ARG_REFERENCE_EXECUTOR)
         list(APPEND ${out_var} "--reference-executor" "${ARG_REFERENCE_EXECUTOR}")
+    endif()
+    # The install-tree entry writes the same arguments, each quoted.
+    set(_EXTRA_ARGS_INSTALL_STR "")
+    if(ARG_EXTRA_ARGS)
+        list(APPEND ${out_var} ${ARG_EXTRA_ARGS})
+        list(JOIN ARG_EXTRA_ARGS "\" \"" _EXTRA_ARGS_INSTALL_STR)
+        set(_EXTRA_ARGS_INSTALL_STR " \"${_EXTRA_ARGS_INSTALL_STR}\"")
     endif()
     if(ARG_GTEST_FILTER)
         list(JOIN ARG_GTEST_FILTER ":" _GTEST_FILTER_STR)
@@ -165,6 +178,7 @@ macro(_stage_external_integration_install_test)
             if(ARG_REFERENCE_EXECUTOR)
                 string(APPEND _install_cmd " \"--reference-executor\" \"${ARG_REFERENCE_EXECUTOR}\"")
             endif()
+            string(APPEND _install_cmd "${_EXTRA_ARGS_INSTALL_STR}")
             if(ARG_GTEST_FILTER)
                 string(APPEND _install_cmd " \"--gtest_filter=${_GTEST_FILTER_STR}\"")
             endif()
@@ -220,6 +234,9 @@ macro(_add_external_integration_category_suites)
         if(ARG_REFERENCE_EXECUTOR)
             list(APPEND _category_command_args "--reference-executor" "${ARG_REFERENCE_EXECUTOR}")
         endif()
+        if(ARG_EXTRA_ARGS)
+            list(APPEND _category_command_args ${ARG_EXTRA_ARGS})
+        endif()
 
         set(_apply_category_args
             TEST_NAME_PREFIX "${_category_prefix}"
@@ -247,6 +264,9 @@ macro(_add_external_integration_category_suites)
             endif()
             if(ARG_REFERENCE_EXECUTOR)
                 list(APPEND _category_install_command_args "--reference-executor" "${ARG_REFERENCE_EXECUTOR}")
+            endif()
+            if(ARG_EXTRA_ARGS)
+                list(APPEND _category_install_command_args ${ARG_EXTRA_ARGS})
             endif()
 
             list(APPEND _apply_category_args
@@ -289,7 +309,7 @@ function(add_external_integration_test_target)
         ARG
         ""
         "TARGET_NAME;PLUGIN_TARGET;ENGINE_NAME;INSTALL_SUBDIR;TEST_CONFIG;REFERENCE_EXECUTOR;TEST_CATEGORIES_YAML;INSTALL_TEST_FILE;TEST_NAME_PREFIX;INSTALL_DESTINATION;INSTALL_STAGING_KEY"
-        "GTEST_FILTER;ENVIRONMENT;INSTALL_ENVIRONMENT;ENVIRONMENT_MODIFICATION;FIXTURES_REQUIRED"
+        "GTEST_FILTER;ENVIRONMENT;INSTALL_ENVIRONMENT;ENVIRONMENT_MODIFICATION;FIXTURES_REQUIRED;EXTRA_ARGS"
         ${ARGN}
     )
 

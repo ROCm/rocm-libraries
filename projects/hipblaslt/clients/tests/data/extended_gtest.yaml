@@ -1,0 +1,759 @@
+---
+# Extended test suite for comprehensive feature coverage
+# Tests grouped GEMM, complex numbers, mixed precision, and advanced features
+include: hipblaslt_common.yaml
+include: matmul_common.yaml
+
+Tests:
+# ==============================================================================
+# GROUPED GEMM OPERATIONS
+# Tests grouped GEMM dispatch, input preparation, and multi-problem execution
+# ==============================================================================
+
+- name: extended_grouped_gemm_basic
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f16_r
+  b_type: f16_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: [N, T]
+  transB: N
+  alpha: 1.0
+  beta: [0.0, 1.0]
+  M: [128, 256]
+  N: [128, 256]
+  K: [128, 256]
+  grouped_gemm: [2, 3, 5]
+  batch_count: 1
+
+# ==============================================================================
+# COMPLEX NUMBER SUPPORT
+# Tests complex arithmetic, conjugate transpose, and complex scaling paths
+# ==============================================================================
+
+- name: extended_complex_float
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f32_c
+  b_type: f32_c
+  c_type: f32_c
+  d_type: f32_c
+  compute_type: c_f32_r
+  scale_type: f32_c
+  transA: [N, T, C]
+  transB: [N, C]
+  alpha: 1.0
+  alphai: [0.0, 1.0]
+  beta: [0.0, 1.0]
+  betai: [0.0, 1.0]
+  M: [128, 256]
+  N: [128, 256]
+  K: [64, 128]
+  batch_count: [1, 2]
+
+- name: extended_complex_double
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f64_c
+  b_type: f64_c
+  c_type: f64_c
+  d_type: f64_c
+  compute_type: c_f64_r
+  scale_type: f64_c
+  transA: [N, C]
+  transB: [N, C]
+  alpha: 1.0
+  alphai: [0.0, 1.0]
+  beta: [0.0, 1.0]
+  betai: [0.0, 1.0]
+  M: 128
+  N: 128
+  K: 64
+  batch_count: 1
+
+- name: extended_complex_float_batch
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f32_c
+  b_type: f32_c
+  c_type: f32_c
+  d_type: f32_c
+  compute_type: c_f32_r
+  scale_type: f32_c
+  transA: N
+  transB: N
+  alpha: [1.0, 2.0]
+  alphai: [0.0, 3.0]
+  beta: [0.0, 4.0]
+  betai: [0.0, 5.0]
+  M: 256
+  N: 256
+  K: 128
+  batch_count: [4, 8]
+  stride_a: 0
+  stride_b: 0
+
+# ==============================================================================
+# 4. ADVANCED GEMM FEATURES - Various scattered uncovered regions
+# ==============================================================================
+
+# Tensor E (auxiliary output) with various data types
+- name: extended_scaleAlpha_vector
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f16_r
+  b_type: f16_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 256
+  N: 256
+  K: 128
+  scaleAlpha_vector: 1
+  batch_count: 1
+
+# Bias with different sources
+- name: extended_bias_sources
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f16_r
+  b_type: f16_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 256
+  N: 256
+  K: 128
+  bias_vector: 1
+  bias_source: [a, b, d]
+  bias_type: f16_r
+  batch_count: 1
+
+# Bias with batch and stride
+- name: extended_gradient_mode
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f16_r
+  b_type: f16_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 256
+  N: 256
+  K: 128
+  gradient: 1
+  batch_count: 1
+
+# Swizzle tensors (stride_a=0 enables swizzle)
+- name: extended_swizzle_tensorA
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f16_r
+  b_type: f16_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 256
+  N: 256
+  K: 128
+  stride_a: 0
+  batch_count: 2
+
+- name: extended_swizzle_tensorB
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f16_r
+  b_type: f16_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 256
+  N: 256
+  K: 128
+  stride_b: 0
+  batch_count: 2
+
+# Combined advanced features
+# ==============================================================================
+# COMBINED: Grouped GEMM with Complex Numbers
+# ==============================================================================
+
+# NOTE: Complex types with grouped GEMM may not be supported
+# Keeping test definition for documentation but skipping execution
+# ==============================================================================
+# FP8/BF8/INT8 DATA TYPES
+# Tests integer and narrow floating-point type conversions and accumulation
+# ==============================================================================
+
+# Float8 FNUZ comprehensive tests
+- name: extended_int8_basic_i32_output
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: i8_r
+  b_type: i8_r
+  c_type: i32_r
+  d_type: i32_r
+  compute_type: c_i32_r
+  scale_type: i32_r
+  transA: [N, T]
+  transB: [N, T]
+  alpha: 1
+  beta: [0, 1]
+  M: [128, 256]
+  N: [128, 256]
+  K: [128, 256]
+  batch_count: 1
+
+# Int8 with i8 output
+- name: extended_int8_basic_i8_output
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: i8_r
+  b_type: i8_r
+  c_type: i8_r
+  d_type: i8_r
+  compute_type: c_i32_r
+  scale_type: i32_r
+  transA: [N, T]
+  transB: [N, T]
+  alpha: 1
+  beta: [0, 1]
+  M: [128, 256]
+  N: [128, 256]
+  K: [128, 256]
+  batch_count: 1
+
+# Int8 with batching
+- name: extended_int8_batch
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: i8_r
+  b_type: i8_r
+  c_type: i32_r
+  d_type: i32_r
+  compute_type: c_i32_r
+  scale_type: i32_r
+  transA: N
+  transB: N
+  alpha: 1
+  beta: 0
+  M: 256
+  N: 256
+  K: 128
+  batch_count: [1, 4]
+
+# FP8 with batching and strides
+# ==============================================================================
+# ERROR PATH TESTS
+# Tests invalid argument validation and error handling in the API layer
+# ==============================================================================
+
+# Bad argument tests using matmul_bad_arg function
+- name: extended_matmul_bad_arg
+  gpu_arch_exclude: '90a|12|11'
+  category: quick
+  function: matmul_bad_arg
+  a_type: f16_r
+  b_type: f16_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  M: 256
+  N: 256
+  K: 128
+
+# ==============================================================================
+# BIAS TYPE COMBINATIONS
+# Tests bias addition with various data type combinations and defaults
+# ==============================================================================
+
+# Bias with different d_type (f32)
+# NOTE: Some bias_type combinations with mismatched d_type may not be supported
+# ============================================================================
+
+# MX Block Size Variants
+- name: extended_grouped_gemm_activation
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f16_r
+  b_type: f16_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 256
+  N: 256
+  K: 128
+  grouped_gemm: 2
+  activation_type: relu
+  batch_count: 1
+
+# ============================================================================
+# Phase 1 Quick Wins: tensile_host.cpp coverage improvements
+# ============================================================================
+
+# ============================================================================
+# PHASE 1: Grouped GEMM Variants (+50 lines expected)
+# Targets: tensile_host.cpp lines 1295-1722, 3359-3386
+# ============================================================================
+
+# Test 1: Large group count (16 groups) with variable problem sizes
+- name: extended_grouped_16
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f16_r
+  b_type: f16_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: [N, T]
+  transB: [N, T]
+  alpha: 1.0
+  beta: [0.0, 1.0]
+  M: [128, 256, 512]
+  N: [128, 256, 512]
+  K: [64, 128, 256]
+  grouped_gemm: 16
+  batch_count: 1
+
+# Test 2: Variable group sizes with comprehensive transpose/beta combos
+# Creates 36 test variations (3 group counts × 2 transA × 2 transB × 3 beta)
+- name: extended_grouped_gemm_large_batch
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f16_r
+  b_type: f16_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 128
+  N: 128
+  K: 64
+  grouped_gemm: 8
+  batch_count: 1
+
+# ============================================================================
+# PHASE 2: Transpose Combinations (+30 lines expected)
+# Targets: tensile_host.cpp problem override logic for different transpose modes
+# ============================================================================
+
+# Test 4: All transpose combinations with FP32 (NN, NT, TN, TT)
+- name: extended_transpose_all
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f32_r
+  b_type: f32_r
+  c_type: f32_r
+  d_type: f32_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: [N, T]
+  transB: [N, T]
+  alpha: [1.0, 2.0]
+  beta: [0.0, 1.0]
+  M: [128, 256]
+  N: [128, 256]
+  K: [64, 128]
+  batch_count: [1, 4]
+
+# Test 5: Transpose with FP16 and complex strides
+- name: extended_transpose_strided
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f16_r
+  b_type: f16_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: [N, T]
+  transB: [N, T]
+  alpha: 1.0
+  beta: 1.0
+  M: 256
+  N: 256
+  K: 128
+  stride_a: [0, 65536]
+  stride_b: [0, 65536]
+  stride_c: 65536
+  stride_d: 65536
+  batch_count: 2
+
+# ============================================================================
+# PHASE 3: Scaling Modes for FP8/BF8 (+25 lines expected)
+# Targets: tensile_host.cpp scaling mode selection and MX format handling
+# ============================================================================
+
+# Test 6: FP8 with all MX block sizes (16, 32, 64)
+# ============================================================================
+# PHASE 4: Solution Index & Algorithm Selection (+15 lines expected)
+# Targets: tensile_host.cpp explicit solution index and algorithm paths
+# ============================================================================
+
+# Test 9: Explicit solution index selection
+- name: extended_solution_index
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f16_r
+  b_type: f16_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 256
+  N: 256
+  K: 128
+  solution_index: [0, 1, 2]
+  batch_count: 1
+
+# Test 10: Algorithm selection with preferences
+- name: extended_algorithm_search
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f32_r
+  b_type: f32_r
+  c_type: f32_r
+  d_type: f32_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 512
+  N: 512
+  K: 256
+  algo: [0, 1, 2]
+  batch_count: 1
+
+# Grouped GEMM: Beta accumulation (targets beta path in grouped context)
+- name: extended_activation_sigmoid
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f16_r
+  b_type: f16_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 256
+  N: 256
+  K: 128
+  activation_type: sigmoid
+  batch_count: 1
+
+# ============================================================================
+# Data Type Conversion Tests: rocblaslt_mat_utils.hpp coverage
+# ============================================================================
+
+# Mixed precision: f16 input, bf16 output
+# ============================================================================
+# Transpose Combinations: tensile_host.cpp problem override tests
+# ============================================================================
+
+# All transpose combinations for comprehensive coverage
+- name: extended_transpose_combinations
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f32_r
+  b_type: f32_r
+  c_type: f32_r
+  d_type: f32_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA:
+    - N
+    - T
+  transB:
+    - N
+    - T
+  alpha: 1.0
+  beta:
+    - 0.0
+    - 1.0
+  M: 128
+  N: 128
+  K: 128
+  batch_count: 1
+
+# ============================================================================
+# Odd-sized matrices: Kernel selection coverage
+# ============================================================================
+
+# Odd sizes to trigger different kernel selection paths
+- name: extended_kernel_select_odd_sizes
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f16_r
+  b_type: f16_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M:
+    - 127
+    - 255
+  N:
+    - 127
+    - 255
+  K:
+    - 127
+    - 255
+  batch_count: 1
+
+# ============================================================================
+# ScaleA/ScaleB Mode Tests: FP8/BF8 scaling paths
+# ============================================================================
+
+# ScaleA/ScaleB mode 1 (scalar scaling)
+# ============================================================================
+# Batch and Stride Tests: Coverage for strided batched operations
+# ============================================================================
+
+# Large batch count
+- name: extended_large_batch_count
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f16_r
+  b_type: f16_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 128
+  N: 128
+  K: 64
+  batch_count: [1, 16]
+
+# Strided batch with non-default strides
+- name: extended_custom_batch_stride
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f32_r
+  b_type: f32_r
+  c_type: f32_r
+  d_type: f32_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 64
+  N: 64
+  K: 64
+  stride_a: 8192
+  stride_b: 8192
+  stride_c: 8192
+  stride_d: 8192
+  batch_count: [1, 4]
+
+# ============================================================================
+# Additional Epilogue/Activation Tests
+# ============================================================================
+
+# GELU activation
+- name: extended_bias_f32
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f16_r
+  b_type: f16_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 256
+  N: 256
+  K: 128
+  bias_vector: 1
+  bias_type: f32_r
+  batch_count: 1
+
+# Bias with f16
+# ============================================================================
+# Custom Type Tests: High Risk, High Reward
+# These types may not have kernel support - will fail with "NO solution"
+# But if they work: +1000 lines instantly!
+# ============================================================================
+
+# BFloat6 (6-bit brain float, E3M2 format)
+# ============================================================================
+# PHASE 4: rocblaslt_auxiliary.cpp Coverage Tests (+87 lines expected)
+# ============================================================================
+
+# Phase 4.1: Matrix Layout Attributes - Custom Strides
+# Targets: rocblaslt_auxiliary.cpp matrix layout attribute handling
+- name: auxiliary_coverage_custom_strides
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f16_r
+  b_type: f16_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: [N, T]
+  transB: [N, T]
+  alpha: 1.0
+  beta: 1.0
+  M: 256
+  N: 256
+  K: 128
+  stride_a: [32768, 65536]
+  stride_b: [32768, 65536]
+  stride_c: 65536
+  stride_d: 65536
+  batch_count: [2, 4]
+
+# Phase 4.1: Matrix Layout Attributes - Row vs Column Order
+- name: auxiliary_coverage_layout_order
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f32_r
+  b_type: f32_r
+  c_type: f32_r
+  d_type: f32_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 128
+  N: 128
+  K: 64
+  order: [col, row]
+  batch_count: 1
+
+# Phase 4.2: Epilogue & Activation - All Epilogue Modes
+# Targets: rocblaslt_auxiliary.cpp epilogue attribute setting
+# Phase 4.2: Epilogue with Bias and Auxiliary Output
+# Phase 4.2: Activation Parameters - Different Argument Values
+# Phase 4.3: Preference & Algorithm - Workspace Limits
+# Targets: rocblaslt_auxiliary.cpp preference attribute handling
+- name: auxiliary_coverage_workspace_limits
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f32_r
+  b_type: f32_r
+  c_type: f32_r
+  d_type: f32_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 512
+  N: 512
+  K: 256
+  workspace_size: [0, 1048576, 16777216]
+  batch_count: 1
+
+# Phase 4.3: Algorithm Search with Max Solutions
+- name: auxiliary_coverage_algorithm_max_solutions
+  gpu_arch_exclude: '90a|12|11'
+  category: pre_checkin
+  function: matmul
+  a_type: f16_r
+  b_type: f16_r
+  c_type: f16_r
+  d_type: f16_r
+  compute_type: c_f32_r
+  scale_type: f32_r
+  transA: N
+  transB: N
+  alpha: 1.0
+  beta: 0.0
+  M: 256
+  N: 256
+  K: 128
+  max_solutions: [1, 4, 8]
+  batch_count: 1

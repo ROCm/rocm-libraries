@@ -886,7 +886,7 @@ dev = [
     { name = "pre-commit" },
     { name = "pytest", specifier = ">=5.4.1" },
     { name = "pytest-cov" },
-    { name = "pytest-xdist", specifier = ">=1.32.0" },
+    { name = "pytest-xdist", specifier = ">=3.2" },
     { name = "rocisa", editable = "rocisa" },
     { name = "syrupy" },
 ]

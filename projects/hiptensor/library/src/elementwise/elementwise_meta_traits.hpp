@@ -39,6 +39,15 @@
 
 namespace hiptensor
 {
+    template <typename Op>
+    struct UnaryCombinedOpScale;
+
+    template <typename Uop, typename Scale>
+    struct UnaryCombinedOpScale<ck::tensor_operation::element_wise::UnaryCombinedOp<Uop, Scale>>
+    {
+        using type = Scale;
+    };
+
     // Meta traits for Scalar elementwise
     template <typename InDataTypeTuple,
               typename OutDataTypeTuple,
@@ -92,9 +101,10 @@ namespace hiptensor
         using InDataT  = tuple_ck_type_tuple_to_hiptensor_type_tuple_t<InDataTypeTuple>;
         using OutDataT = tuple_ck_type_tuple_to_hiptensor_type_tuple_t<OutDataTypeTuple>;
 
-        using AOp  = Aop;
         using COp  = Cop;
         using ACOp = ACop;
+        using AOp     = Aop;
+        using ScaleOp = typename UnaryCombinedOpScale<Aop>::type;
         using CombinedOp
             = ck::tensor_operation::element_wise::BinaryWithUnaryCombinedOp<ACop, Aop, Cop>;
     };
@@ -126,6 +136,7 @@ namespace hiptensor
         using COp        = Cop;
         using ABOp       = ABop;
         using ABCOp      = ABCop;
+        using ScaleOp    = typename UnaryCombinedOpScale<Aop>::type;
         using CombinedOp = ck::tensor_operation::element_wise::
             TrinaryWithUnaryCombinedOp<ABop, ABCop, Aop, Bop, Cop>;
     };

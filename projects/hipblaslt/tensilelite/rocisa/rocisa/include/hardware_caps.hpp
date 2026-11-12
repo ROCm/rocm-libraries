@@ -629,6 +629,22 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     rv["F32XEmulationInfSupport"] = checkInList(isaVersion, {{12, 5, 0}});
     rv["MaxSgprPreload"]     = checkInList(isaVersion, {{12, 5, 0}}) ? 32 : 16;
     rv["SgprPreloadPad"]     = checkInList(isaVersion, {{9, 5, 0}}) || checkInList(isaVersion, {{9, 0, 10}}) || (isaVersion[0] == 9 && isaVersion[1] == 4);
+    // Separation a consumer must leave after an MFMA before reading its ACC.
+    //
+    // This is the *result* latency, not the issue latency: issue latency says
+    // when the next instruction may issue (miIssueLatency, 1 quad-cycle here),
+    // while this says when the result becomes readable. getMFMAIssueLatency
+    // returns both; its first element, matrixInstM / mi_divisor, is this one,
+    // in quad-cycles -- 16/4 = 4 for the gfx950 16x16 MFMA, so 16 cycles. The
+    // value below is in cycles rather than quad-cycles.
+    //
+    // 17, not 16, because the result is readable strictly *after* those 16
+    // cycles elapse; against a >= comparison that threshold is 17.
+    //
+    // Keyed on the architecture, but derived for matrixInstM == 16. The 32x32
+    // shapes have a longer result latency, so a consumer that can see them
+    // must not use this as-is.
+    rv["MfmaToAccReadLatency"] = checkInList(isaVersion, {{9, 5, 0}}) ? 17 : 0;
 
     // True on archs whose MFMA-scale path can consume a swizzled MX scale
     // layout: gfx950 (HostPreSwizzle via the subtile path) and gfx1250

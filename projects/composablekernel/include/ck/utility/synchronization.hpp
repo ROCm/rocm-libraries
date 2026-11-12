@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck/ck.hpp"
+#include "ck/utility/number.hpp"
 
 namespace ck {
 
@@ -13,14 +14,23 @@ __device__ void llvm_amdgcn_s_wait_dscnt(short cnt) __asm("llvm.amdgcn.s.wait.ds
 #endif
 #endif
 
-__device__ void wait_dscnt()
+template <index_t cnt = 0>
+__device__ void wait_dscnt(Number<cnt> = {})
 {
 #if defined(__gfx12__)
-    llvm_amdgcn_s_wait_dscnt(0);
+    llvm_amdgcn_s_wait_dscnt(cnt);
 #elif defined(__gfx11__) || defined(__gfx117__)
-    __builtin_amdgcn_s_waitcnt(0xfc07);
+    constexpr index_t full_vmcnt  = 0x3F << 10;        // [15:10]
+    constexpr index_t full_expcnt = 0x07;              // [2:0]
+    constexpr index_t ds_cnt      = (cnt & 0x3F) << 4; // [9:4]
+    constexpr index_t waitcnt     = full_vmcnt | full_expcnt | ds_cnt;
+    __builtin_amdgcn_s_waitcnt(waitcnt);
 #else
-    __builtin_amdgcn_s_waitcnt(0xc07f);
+    constexpr index_t full_vmcnt = ((0x3F & 0xF) << 0) | ((0x3F & 0x30) << 10); // split: low4 + hi2
+    constexpr index_t full_expcnt = 0x07 << 4;                                  // [6:4]
+    constexpr index_t ds_cnt      = (cnt & 0x0F) << 8;                          // [11:8]
+    constexpr index_t waitcnt     = full_vmcnt | full_expcnt | ds_cnt;
+    __builtin_amdgcn_s_waitcnt(waitcnt);
 #endif
 }
 
@@ -60,10 +70,20 @@ __device__ void block_sync_lds()
 
 __device__ void block_sync_lds_direct_load()
 {
+#if CK_HAS_ASYNCMARK
+    // Wait on async traffic to conclude, then sync the workgroup so that everyone sees the values
+    // in LDS.
+    __builtin_amdgcn_wait_asyncmark(0);
+    block_sync_lds();
+#else
 #if defined(__gfx125__)
+    // The s_wait_asynccnt and manual barrier builtins are invisible to the LLVM memory model, so
+    // wrap them in release/acquire fences to ensure nothing is reordered across these waits.
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
     __builtin_amdgcn_s_wait_asynccnt(0);
     __builtin_amdgcn_s_barrier_signal(-1);
     __builtin_amdgcn_s_barrier_wait(-1);
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
 #elif defined(__gfx12__)
     asm volatile("\
     s_wait_loadcnt 0x0 \n \
@@ -78,16 +98,33 @@ __device__ void block_sync_lds_direct_load()
     s_barrier \
     " ::);
 #endif
+#endif
 }
 
+// Completes the outstanding asynchronous global->LDS DMA loads and publishes the LDS to the
+// workgroup with a barrier. On the asyncmark path this is arch-agnostic -- wait_asyncmark(0) drains
+// the async loads and is visible to the LLVM memory model (no manual fence/waitcnt needed other
+// than what you get from block_sync_lds), then block_sync_lds() barriers. The #else fallbacks
+// reproduce the pre-asyncmark behavior per arch.
 __device__ void block_sync_lds_async_load()
 {
-#if defined(__gfx125__)
-    __builtin_amdgcn_s_wait_asynccnt(0);
-    __syncthreads();
-#else
-    // fall back
+#if CK_HAS_ASYNCMARK
+    __builtin_amdgcn_wait_asyncmark(0);
     block_sync_lds();
+#elif defined(__gfx125__)
+    // Fallback: async-engine completion wait + "local" fences + manual barrier (avoids the
+    // redundant s_wait_loadcnt_dscnt that __syncthreads would inject).
+    __builtin_amdgcn_s_wait_asynccnt(0);
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
+    __builtin_amdgcn_s_barrier_signal(-1);
+    __builtin_amdgcn_s_barrier_wait(-1);
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+#else
+    // Fallback (gfx9, no asyncmark): explicit vmcnt(0) + "global" ordering fence + LDS barrier.
+    __builtin_amdgcn_s_waitcnt(3952); // vmcnt(0)
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "global");
+    block_sync_lds();
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "global");
 #endif
 }
 

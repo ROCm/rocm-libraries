@@ -32,6 +32,7 @@
 
 #include <miopen/problem_description_base.hpp>
 #include <miopen/convolution.hpp>
+#include <miopen/miopen_internal.h>
 
 #if MIOPEN_ENABLE_SQLITE
 #include <miopen/sqlite_db.hpp>

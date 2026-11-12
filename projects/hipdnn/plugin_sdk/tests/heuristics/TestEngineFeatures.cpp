@@ -1244,7 +1244,7 @@ TEST(TestEngineFeatures, WorkModelMatchesEveryGoldenCount)
         {"dropout_mask", [](SdpaAttributesT& op) { op.dropout_mask_tensor_uid = 5; }},
         {"dropout_scale", [](SdpaAttributesT& op) { op.dropout_scale_tensor_uid = 5; }},
         {"dropout_probability", [](SdpaAttributesT& op) { op.dropout_probability = 0.1F; }},
-        {"left_bound", [](SdpaAttributesT& op) { op.left_bound = 0; }},
+        {"left_bound", [](SdpaAttributesT& op) { op.left_bound = 1; }},
         {"right_bound", [](SdpaAttributesT& op) { op.right_bound = 1; }},
     };
     for(const auto& [name, refuse] : refusals)

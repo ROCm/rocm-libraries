@@ -974,7 +974,11 @@ typedef enum rocsparse_spmm_alg_
 typedef enum rocsparse_sddmm_alg_
 {
     rocsparse_sddmm_alg_default = 0, /**< Default sddmm algorithm for the given format. */
-    rocsparse_sddmm_alg_dense   = 1 /**< Sddmm algorithm using dense blas operations. */
+    rocsparse_sddmm_alg_dense
+    [[deprecated("rocsparse_sddmm_alg_dense is deprecated and will be removed "
+                 "in a future release. Use rocsparse_sddmm_alg_default "
+                 "instead.")]]
+    = 1 /**< Sddmm algorithm using dense blas operations. \deprecated This algorithm will be removed in a future release. Use \ref rocsparse_sddmm_alg_default instead. */
 } rocsparse_sddmm_alg;
 
 /*! \ingroup types_module

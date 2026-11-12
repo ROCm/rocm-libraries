@@ -2331,9 +2331,11 @@ double compute_parallel_reduction_latency(const problem_t& problem,
   double L_acc = static_cast<double>((splitting_factor - 1) * VW) *
                  static_cast<double>(kernel_valu_cycles(hardware, config)) * waves_per_simd;
 
-  double L_total = (L_read + L_acc + L_write) * timesteps;
+  double L_total = heuristic_defaults_t::POSTGSU_KERNEL_LAUNCH_OVERHEAD +
+                   (L_read + L_acc + L_write) * timesteps;
 
   if (context.debug) {
+    OLOG_DEBUG("L_parallel_reduce_launch: " << heuristic_defaults_t::POSTGSU_KERNEL_LAUNCH_OVERHEAD);
     OLOG_DEBUG("L_parallel_reduce_active_wgs: " << active_wgs);
     OLOG_DEBUG("L_parallel_reduce_timesteps: " << timesteps);
     OLOG_DEBUG("L_parallel_reduce_bw: " << read_bw);

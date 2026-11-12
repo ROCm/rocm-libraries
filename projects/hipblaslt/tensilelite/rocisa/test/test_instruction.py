@@ -470,7 +470,7 @@ def test_instruction_vmax_f16_true16():
     try:
         low = HighBitSel.LOW
 
-        # abs() source (the activation-clamp shape from AMaxGenerator.max_per_data).
+        # abs() source (the activation-clamp shape from amax_generator.AMaxKernelGenerator.max_per_data).
         inst = VMaxF16(t16(vgpr("Output"), low), t16(vgpr("Output"), low),
                        t16(vgpr("Value+0", isAbs=True), low))
         s = str(inst)

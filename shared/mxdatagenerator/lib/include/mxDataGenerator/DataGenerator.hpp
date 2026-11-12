@@ -2166,8 +2166,10 @@ namespace DGen
 
         const auto block_size = (isScaled<DTYPE>() ? m_options.blockScaling : 1);
 
-        // Prepare a normal distribution with the requested mean and standard deviation
-        std::normal_distribution<> normal_dist{mean, std_dev};
+        // One normal distribution per thread, like m_gen: it caches a spare sample between calls,
+        // so a shared one would race and mix samples across the threads' generators.
+        std::vector<std::normal_distribution<>> normal_dist(
+            m_num_threads, std::normal_distribution<>{mean, std_dev});
 
         const auto numBlocks = numScaleBlocks(block_size);
 
@@ -2191,7 +2193,7 @@ namespace DGen
                 //
 
                 // generate value according to normal distribution
-                auto value = normal_dist(m_gen[tid]);
+                auto value = normal_dist[tid](m_gen[tid]);
 
                 value = m_options.clampToF32 ? static_cast<float>(value) : value;
 

@@ -1,0 +1,30 @@
+# Fortran binding of hipfft: see fortran-bindings.yml.
+name: Fortran bindings (hipfft)
+
+on:
+  pull_request:
+    paths:
+      - 'projects/hipfft/library/include/**.h'
+      - 'bindings/fortran/hipfft/metadata/**'
+      - '.github/workflows/fortran-bindings-hipfft.yml'
+      - '.github/workflows/fortran-bindings.yml'
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bindings:
+    uses: ./.github/workflows/fortran-bindings.yml
+    with:
+      project: hipfft
+      libs: hipfft hipfftw hipfftxt
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
