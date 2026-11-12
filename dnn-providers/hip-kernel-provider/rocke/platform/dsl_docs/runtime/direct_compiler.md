@@ -232,7 +232,9 @@ fixed rules:
   keeps at least the same occupancy. On gfx950, unrolled code that spills no
   more but loses occupancy is also kept when a cost model, counting each block
   by the trips of the loops around it, gives it a fifth fewer cycles at its
-  occupancy than the rolled code at its own.
+  occupancy than the rolled code at its own. In a kernel without MFMAs it is
+  also kept when it keeps three quarters of the waves: the cost model lets the
+  other waves hide each trip's load wait, and a small grid has none.
 - When nothing fits the registers without spilling, the compile tries again
   without merging repeated LDS loads (merged loads live longer) and with each
   WMMA moved up to its operands. It spills only when that does not fit either.

@@ -57,13 +57,25 @@ pub fn keeps(unrolled: &MFunc, u: &CompileStats, rolled: &MFunc, r: &CompileStat
     if u.waves >= r.waves {
         return true;
     }
+    // Without MFMAs a loop's trips wait on their loads, and a kernel that is not the size of the machine (a
+    // reduction over partial results) has no other waves to hide that: `cost` assumes the waves it is given, so it
+    // takes the waiting for cheap. Unrolled, all loads are in flight at once, as LLVM's code is, for up to a
+    // quarter fewer waves.
+    if !has_mfma(unrolled) && u.waves * 4 >= r.waves * 3 {
+        return true;
+    }
     !crate::rir::debug_flag("nounrollcost") && cost(unrolled, u.waves) * 5 <= cost(rolled, r.waves) * 4
+}
+
+/// Whether `f` issues an MFMA.
+fn has_mfma(f: &MFunc) -> bool {
+    f.blocks.iter().flat_map(|b| &b.insts).any(|i| is_mfma(i.op))
 }
 
 /// Slots per wave of `f` (allocated) at `waves` waves per SIMD: each block's
 /// cost model cycles there, weighted by the block's runs (`runs`).
 pub fn cost(f: &MFunc, waves: u32) -> u64 {
-    let mfma = f.blocks.iter().flat_map(|b| &b.insts).any(|i| is_mfma(i.op));
+    let mfma = has_mfma(f);
     let mut one = MFunc { target: f.target, ..MFunc::default() };
     runs(f)
         .into_iter()
@@ -141,6 +153,7 @@ fn constant_before(f: &MFunc, head: usize, reg: Opnd) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::target::gfx9::gen_isa::Gfx9Op;
     use crate::target::Target;
 
     fn s(n: u16) -> Opnd {
@@ -213,5 +226,23 @@ mod tests {
             }
         }
         assert_eq!(crate::rir::unroll::unroll_loops_with(&mut kernel, &mut lds, Some(AUTO)).expect("walks"), 0);
+    }
+
+    #[test]
+    fn a_kernel_without_mfmas_keeps_unrolled_code_that_loses_a_quarter_of_its_waves() {
+        let func = |op: Opc| MFunc {
+            blocks: vec![MBlock { insts: vec![MInst::new(op, [s(4)], [s(4), Opnd::Imm(1)])], loop_depth: 0 }],
+            target: Target::Gfx950,
+            ..MFunc::default()
+        };
+        let stats = |waves| CompileStats { waves, ..CompileStats::default() };
+        let (plain, mfma) = (func(Opc::SAddI32), func(Opc::Gfx9(Gfx9Op::VMfma16x16x32F16)));
+        assert!(!has_mfma(&plain) && has_mfma(&mfma));
+        assert!(keeps(&plain, &stats(6), &plain, &stats(8)), "6 of 8 waves");
+        assert!(!has_mfma(&plain) && keeps(&plain, &stats(8), &plain, &stats(8)));
+        // 5 of 8 waves: the cost model decides, and equal code does not cost a fifth less.
+        assert!(!keeps(&plain, &stats(5), &plain, &stats(8)));
+        // With MFMAs the cost model decides at 7 of 8 waves too.
+        assert!(!keeps(&mfma, &stats(7), &mfma, &stats(8)));
     }
 }
