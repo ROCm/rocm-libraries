@@ -419,10 +419,36 @@ inline std::vector<std::string> iter_names(const char* prefix, size_t n)
     return out;
 }
 
-/* kernels.common.conv_direct_wgrad_wmma.wgrad_wmma_arch_reason: the target of
- * `arch` when the dense and grouped WMMA wgrad kernels run on it (wave32, the
- * WMMA 16x16x32 shape of the dtype, TDM, which marks the gfx1250 class that
- * has ds_load_tr16_b128), else NULL with `reason` set. */
+/* kernels.common.conv_direct_wgrad_wmma.wgrad_wmma_arch_reason on a known
+ * target: true when the dense and grouped WMMA wgrad kernels run on it
+ * (wave32, the WMMA 16x16x32 shape of the dtype, TDM, which marks the gfx1250
+ * class that has ds_load_tr16_b128), else false with `reason` set. */
+inline bool wgrad_wmma_target_ok(
+    const rocke_archtarget_t* target, const char* arch, bool bf16, char* reason, size_t reason_cap)
+{
+    if(target->wave_size != 32)
+    {
+        rocke_spec_set_reasonf(
+            reason, reason_cap, "wave32 kernel (got %s, wave%d)", arch, target->wave_size);
+        return false;
+    }
+    const char* ab = bf16 ? "bf16" : "f16";
+    if(!rocke_mma_catalog_has_shape(
+           rocke_archtarget_mma(target), "wmma", ab, ab, "fp32", 16, 16, 32))
+    {
+        rocke_spec_set_reasonf(reason, reason_cap, "missing wmma 16x16x32 %s on %s", ab, arch);
+        return false;
+    }
+    if(!target->memory.has_tdm)
+    {
+        rocke_spec_set_reasonf(reason, reason_cap, "no TDM (nor ds_load_tr16_b128) on %s", arch);
+        return false;
+    }
+    return true;
+}
+
+/* The target of `arch` when wgrad_wmma_target_ok accepts it, else NULL with
+ * `reason` set. */
 inline const rocke_archtarget_t*
     wgrad_wmma_arch_target(const char* arch, bool bf16, char* reason, size_t reason_cap)
 {
@@ -432,25 +458,7 @@ inline const rocke_archtarget_t*
         rocke_set_unknown_arch_reason(reason, reason_cap, arch);
         return NULL;
     }
-    if(target->wave_size != 32)
-    {
-        rocke_spec_set_reasonf(
-            reason, reason_cap, "wave32 kernel (got %s, wave%d)", arch, target->wave_size);
-        return NULL;
-    }
-    const char* ab = bf16 ? "bf16" : "f16";
-    if(!rocke_mma_catalog_has_shape(
-           rocke_archtarget_mma(target), "wmma", ab, ab, "fp32", 16, 16, 32))
-    {
-        rocke_spec_set_reasonf(reason, reason_cap, "missing wmma 16x16x32 %s on %s", ab, arch);
-        return NULL;
-    }
-    if(!target->memory.has_tdm)
-    {
-        rocke_spec_set_reasonf(reason, reason_cap, "no TDM (nor ds_load_tr16_b128) on %s", arch);
-        return NULL;
-    }
-    return target;
+    return wgrad_wmma_target_ok(target, arch, bf16, reason, reason_cap) ? target : NULL;
 }
 
 /* kernels.common.conv_direct_wgrad_wmma.wgrad_wmma_lds_reason: true (with

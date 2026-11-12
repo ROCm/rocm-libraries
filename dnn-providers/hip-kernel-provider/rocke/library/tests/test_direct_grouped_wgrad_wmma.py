@@ -142,9 +142,9 @@ def test_rejects(pkw, knobs, reason):
 
 
 def test_arch_gate_reads_capabilities():
-    """The arch gate reads ArchTarget capabilities (wave32, WMMA 16x16x32,
-    TDM), not the arch name; the LDS check takes the smaller of the kernel's
-    budget and the arch's capacity."""
+    """The arch gate reads ArchTarget capabilities (wave32, WMMA 16x16x32;
+    TDM in the next test), not the arch name; the LDS check takes the smaller
+    of the kernel's budget and the arch's capacity."""
     from types import SimpleNamespace
 
     from kernels.common.conv_direct_wgrad_wmma import wgrad_wmma_lds_reason
@@ -161,6 +161,31 @@ def test_arch_gate_reads_capabilities():
     )
     assert wgrad_wmma_lds_reason(8192, 4096, small, "gfxX") == "LDS 8192 B > 4 KiB"
     assert wgrad_wmma_lds_reason(1024, 4096, small, "gfxX") is None
+
+
+def test_arch_gate_refuses_a_target_without_tdm(monkeypatch):
+    """A gfx1250 copy without TDM fails the dense and grouped gates (no
+    shipped arch reaches this refusal)."""
+    import dataclasses
+
+    from kernels.common.conv_direct_wgrad_wmma import (
+        DirectWgradWmmaSpec,
+        is_valid_direct_wgrad_wmma_spec,
+    )
+    from rocke.core.arch import ArchTarget
+
+    t = ArchTarget.from_gfx("gfx1250")
+    no_tdm = dataclasses.replace(t, memory=dataclasses.replace(t.memory, has_tdm=False))
+    monkeypatch.setattr(ArchTarget, "from_gfx", staticmethod(lambda arch: no_tdm))
+    dense = DirectWgradWmmaSpec(
+        problem=DirectConvProblem(
+            N=2, H=13, W=40, groups=1, cpg=64, kpg=96, KH=3, KW=3, PAD=1, dtype="bf16"
+        )
+    )
+    want = (False, "no TDM (nor ds_load_tr16_b128) on gfx1250")
+    assert is_valid_direct_wgrad_wmma_spec(dense, "gfx1250") == want
+    spec = GroupedWgradWmmaSpec(problem=_problem())
+    assert is_valid_grouped_wgrad_wmma_spec(spec, "gfx1250") == want
 
 
 def test_one_padding_accepts_a_matching_column_padding():
