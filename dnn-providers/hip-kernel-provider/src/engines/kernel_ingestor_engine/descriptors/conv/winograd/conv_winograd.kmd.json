@@ -78,6 +78,10 @@
     {
       "name": "pf",
       "type": "int"
+    },
+    {
+      "name": "math",
+      "type": "int"
     }
   ]
 }

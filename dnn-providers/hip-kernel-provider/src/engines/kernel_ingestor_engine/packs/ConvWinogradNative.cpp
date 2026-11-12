@@ -38,6 +38,8 @@
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
 #include "engines/kernel_ingestor_engine/descriptors/conv/winograd/kernels/ConvWinogradArgs.h"
+#include "engines/kernel_ingestor_engine/packs/ConvIgemmProblem.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvTf32Split.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvWinogradProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/DeviceUnits.hpp"
 #include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
@@ -437,8 +439,10 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         const int llc = intField("llc");
         const int f16Math = intField("f16math");
         config.pf = intField("pf");
+        config.math = intField("math");
         if((llc != 0 && llc != 1) || (f16Math != 0 && f16Math != 1)
-           || (config.pf != 0 && config.pf != 1))
+           || (config.pf != 0 && config.pf != 1) || (config.math != 0 && config.math != 1)
+           || (config.math == 1 && config.variant != Variant::MULTIPASS))
         {
             return std::nullopt;
         }
@@ -458,6 +462,19 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         switch(config.variant)
         {
         case Variant::MULTIPASS:
+            if(config.math == 1)
+            {
+                // Three-bf16: the matrix-core GEMM's 2 x 2 waves of 16 x 16 fragments, K steps of
+                // 16 (gfx9: bf16 MFMA; gfx11 / gfx12: WMMA).
+                if((config.m < 2 || config.m > 4) || (config.gemmBm != 64 && config.gemmBm != 128)
+                   || (config.gemmBn != 64 && config.gemmBn != 128) || config.gemmBk < 16
+                   || config.gemmBk % 16 != 0 || config.gemmBk > 64
+                   || (config.arch != "gfx9" && config.arch != "gfx11" && config.arch != "gfx12"))
+                {
+                    return std::nullopt;
+                }
+                break;
+            }
             // The GEMM's 16 x 16 threads own runs of 4 rows and columns; its tile loads split
             // evenly over 256 threads.
             if((config.m < 2 || config.m > 4) || config.gemmBm < 64 || config.gemmBm % 64 != 0
@@ -555,6 +572,18 @@ bool configRunsOn(const Config& config, std::string_view gcnArchName)
     const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
     switch(config.variant)
     {
+    case Variant::MULTIPASS:
+        if(config.math == 1)
+        {
+            // Three-bf16: 16 x 16 x 16 bf16 MFMA (bf16_1k: gfx90a and later CDNA), or WMMA.
+            if(config.arch == "gfx9")
+            {
+                return arch == "gfx90a" || arch == "gfx940" || arch == "gfx941" || arch == "gfx942"
+                       || arch == "gfx950";
+            }
+            return arch.size() > 5 && arch.substr(0, 5) == config.arch;
+        }
+        return true;
     case Variant::COOP:
         if(config.arch == "gfx9")
         {
@@ -688,11 +717,20 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
     plan.uOffset = offset;
     plan.uBytes = static_cast<size_t>(uBytes);
     offset = alignUp(offset + plan.uBytes);
+    // Three-bf16: U split into three bf16 parts along the channels.
+    const bool x3 = config.math == 1;
+    if(x3)
+    {
+        plan.u3Offset = offset;
+        plan.u3Bytes = static_cast<size_t>(groups * positions * cgo * cgi * 3 * 2);
+        offset = alignUp(offset + plan.u3Bytes);
+    }
 
     long long slice = n;
     if(multipass)
     {
-        const long long v1 = groups * positions * cgi * tilesPerImage * eb;
+        // Three-bf16 adds V's split (three bf16 parts) per image.
+        const long long v1 = groups * positions * cgi * tilesPerImage * (eb + (x3 ? 6 : 0));
         const long long m1 = groups * positions * cgo * tilesPerImage * 4;
         const size_t cap = config.llcPlan ? llcBytes(device.gcnArchName) / 4 * 3 : workspaceLimit();
         if(config.llcPlan && cap == 0)
@@ -708,8 +746,19 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
             return std::nullopt;
         }
         plan.vOffset = offset;
-        plan.vBytes = static_cast<size_t>(v1 * slice);
+        plan.vBytes = static_cast<size_t>(groups * positions * cgi * tilesPerImage * eb * slice);
         offset = alignUp(offset + plan.vBytes);
+        if(x3)
+        {
+            plan.v3Offset = offset;
+            plan.v3Bytes
+                = static_cast<size_t>(groups * positions * cgi * tilesPerImage * 3 * 2 * slice);
+            offset = alignUp(offset + plan.v3Bytes);
+            const long long most = std::max(groups * positions * cgo * cgi,
+                                            groups * positions * cgi * tilesPerImage * slice);
+            plan.splitBlocks
+                = static_cast<unsigned int>(std::clamp<long long>(divUp(most, 256), 1, 1LL << 16));
+        }
         plan.mOffset = offset;
         plan.mBytes = static_cast<size_t>(m1 * slice);
         offset = alignUp(offset + plan.mBytes);
@@ -852,6 +901,13 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
     return plan;
 }
 
+bool threeBf16Pays(const WinogradProblem& /*problem*/, std::string_view gcnArchName)
+{
+    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
+    return arch == "gfx90a" || arch == "gfx942" || arch == "gfx950" || arch.rfind("gfx11", 0) == 0
+           || arch.rfind("gfx12", 0) == 0;
+}
+
 } // namespace conv_winograd
 
 namespace
@@ -984,6 +1040,13 @@ std::optional<Resolved> resolve(const MatchContext& context, const KernelDefinit
     {
         return std::nullopt;
     }
+    // Three-bf16: fp32 graphs under TF32 permission only.
+    if(config->math == 1
+       && (!fp32 || !conv_igemm::tf32Permitted()
+           || !conv_winograd::threeBf16Pays(*problem, context.deviceProperties.gcnArchName)))
+    {
+        return std::nullopt;
+    }
     // F(3,2) runs stride 2 (by phases), the others stride 1. The fused forward F(3,2) loader
     // gathers whole channels per chunk: 4 virtual channels (phases) at a time.
     const bool phased = problem->args.mode != 0;
@@ -1052,7 +1115,8 @@ public:
         return _kernels[1];
     }
 
-    /// 0 filter, 1 main (GEMM / fused), 2 input transform, 3 output transform.
+    /// 0 filter, 1 main (GEMM / fused), 2 input transform, 3 output transform, 4 the three-bf16
+    /// split.
     compilation::IRunnableKernel& kernelForStream(size_t index, hipStream_t stream) const
     {
         return _kernels[index].kernelForStream(stream);
@@ -1114,6 +1178,14 @@ public:
 
         compilation::KernelCompileOptions options(context.deviceProperties.gcnArchName);
         options.add("CONV_WINO_T", elementTypeFor(resolved->problem.base.dataType));
+        // Three-bf16: the matrix-core GEMM and the split (set only then, so the other configs
+        // compile exactly as before).
+        const bool x3 = config.math == 1;
+        if(x3)
+        {
+            options.add("CONV_WINO_X3", std::string("1"));
+            options.add(std::string(conv_tf32::SPLIT_DEFINE), std::string("1"));
+        }
         const int variantCode = config.variant == Variant::MULTIPASS ? 0
                                 : config.variant == Variant::FUSED   ? 1
                                 : config.variant == Variant::WMMA    ? 2
@@ -1148,9 +1220,10 @@ public:
         options.add("CONV_WINO_PF", std::to_string(config.pf));
         // Fused VALU: pf 1 prefetches two chunks ahead (depth 2).
         options.add("CONV_WINO_PFD", std::to_string(config.pf + 1));
-        options.add(
-            "CONV_WINO_MFMA",
-            std::string(config.variant == Variant::COOP && config.arch == "gfx9" ? "1" : "0"));
+        options.add("CONV_WINO_MFMA",
+                    std::string((config.variant == Variant::COOP || x3) && config.arch == "gfx9"
+                                    ? "1"
+                                    : "0"));
 
         const auto build = [&](std::string_view entryPoint,
                                const std::vector<KernelArgument>& signature,
@@ -1169,15 +1242,25 @@ public:
         switch(config.variant)
         {
         case Variant::MULTIPASS:
+        {
             kernels.push_back(
                 build("ConvWinogradFilter", signatureOf<K5Args>(), 256, plan.filterBlocks));
+            // Three-bf16: the matrix-core GEMM runs 4 waves (wave64 on gfx9, wave32 on RDNA).
+            const unsigned int gemmThreads = x3 ? (config.arch == "gfx9" ? 256 : 128) : 256;
             kernels.push_back(
-                build("ConvWinogradGemm", signatureOf<K5GemmArgs>(), 256, plan.gemmBlocks));
+                build("ConvWinogradGemm", signatureOf<K5GemmArgs>(), gemmThreads, plan.gemmBlocks));
             kernels.push_back(
                 build("ConvWinogradInput", signatureOf<K5Args>(), 256, plan.inputBlocks));
             kernels.push_back(
                 build("ConvWinogradOutput", signatureOf<K5Args>(), 256, plan.outputBlocks));
+            if(x3)
+            {
+                const unsigned int splitGrid[3] = {plan.splitBlocks, 1, 1};
+                kernels.push_back(build(
+                    conv_tf32::SPLIT_ENTRY_POINT, signatureOf<K1Split3Args>(), 256, splitGrid));
+            }
             break;
+        }
         case Variant::FUSED:
             kernels.push_back(
                 build("ConvWinogradFusedFilter", signatureOf<K5Args>(), 256, plan.filterBlocks));
@@ -1293,6 +1376,36 @@ public:
         args.mw = plan.mBytes > 0 ? reinterpret_cast<float*>(base + plan.mOffset) : nullptr;
         // The pre-pass reads the whole filter; its tile counts do not matter.
         dispatch.kernelForStream(0, stream).launch(stream, args);
+        // Three-bf16: U (G x positions x cgo rows of cgi) and each slice's V (G x positions
+        // blocks of cgi rows of tiles) split into three bf16 parts along the channels.
+        const bool x3 = resolved.config.math == 1;
+        const long long positions
+            = resolved.config.m == 3 ? 16 : (resolved.config.m + 2) * (resolved.config.m + 2);
+        const auto split = [&](const void* src,
+                               void* dst,
+                               long long outer,
+                               long long cg,
+                               long long inner,
+                               int pattern) {
+            K1Split3Args splitArgs{};
+            splitArgs.t[0].src = static_cast<const float*>(src);
+            splitArgs.t[0].dst = static_cast<unsigned short*>(dst);
+            splitArgs.t[0].outer = outer;
+            splitArgs.t[0].inner = inner;
+            splitArgs.t[0].groups = 1;
+            splitArgs.t[0].cg = static_cast<int>(cg);
+            splitArgs.t[0].pattern = pattern;
+            dispatch.kernelForStream(4, stream).launch(stream, splitArgs);
+        };
+        if(x3)
+        {
+            split(args.u,
+                  base + plan.u3Offset,
+                  static_cast<long long>(args.groups) * positions * (args.co / args.groups),
+                  args.ci / args.groups,
+                  1,
+                  conv_tf32::PATTERN_A);
+        }
 
         const long long n = problem.args.n;
         const long long eb = problem.elementBytes;
@@ -1330,6 +1443,21 @@ public:
                 gemm.sb = static_cast<long long>(cgi) * slice.tiles;
                 gemm.sc = static_cast<long long>(cgo) * slice.tiles;
                 dispatch.kernelForStream(2, stream).launch(stream, slice);
+                if(x3)
+                {
+                    split(slice.v,
+                          base + plan.v3Offset,
+                          static_cast<long long>(slice.groups) * positions,
+                          cgi,
+                          slice.tiles,
+                          conv_tf32::PATTERN_B);
+                    gemm.a = base + plan.u3Offset;
+                    gemm.b = base + plan.v3Offset;
+                    gemm.k = 3 * cgi;
+                    gemm.lda = 3 * cgi;
+                    gemm.sa = static_cast<long long>(cgo) * 3 * cgi;
+                    gemm.sb = static_cast<long long>(3) * cgi * slice.tiles;
+                }
                 dispatch.kernelForStream(1, stream).launch(stream, gemm);
                 dispatch.kernelForStream(3, stream).launch(stream, slice);
             }

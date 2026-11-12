@@ -37,7 +37,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 1000
     },
@@ -69,7 +70,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 999
     },
@@ -101,7 +103,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 998
     },
@@ -133,7 +136,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 997
     },
@@ -165,7 +169,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 996
     },
@@ -197,7 +202,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 995
     },
@@ -229,7 +235,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 994
     },
@@ -261,7 +268,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 993
     },
@@ -293,7 +301,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 992
     },
@@ -325,7 +334,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 991
     },
@@ -357,7 +367,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 990
     },
@@ -389,7 +400,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 989
     },
@@ -421,7 +433,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 988
     },
@@ -453,7 +466,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 1
+        "pf": 1,
+        "math": 0
       },
       "priority": 987
     },
@@ -485,7 +499,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 1
+        "pf": 1,
+        "math": 0
       },
       "priority": 986
     },
@@ -517,7 +532,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 985
     },
@@ -549,7 +565,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 984
     },
@@ -581,7 +598,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 983
     },
@@ -613,7 +631,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 982
     },
@@ -645,7 +664,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 981
     },
@@ -677,7 +697,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 980
     },
@@ -709,7 +730,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 979
     },
@@ -741,7 +763,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 978
     },
@@ -773,7 +796,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 977
     },
@@ -805,7 +829,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 976
     },
@@ -837,7 +862,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 975
     },
@@ -869,7 +895,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 974
     },
@@ -901,7 +928,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 973
     },
@@ -933,7 +961,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 972
     },
@@ -965,7 +994,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 971
     },
@@ -997,7 +1027,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 970
     },
@@ -1029,7 +1060,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 969
     },
@@ -1061,7 +1093,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 968
     },
@@ -1093,7 +1126,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 967
     },
@@ -1125,7 +1159,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 966
     },
@@ -1157,7 +1192,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 965
     },
@@ -1189,7 +1225,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 964
     },
@@ -1221,7 +1258,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 963
     },
@@ -1253,9 +1291,1198 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 962
+    },
+    {
+      "version": "1.0",
+      "id": "56155a4b-9f8c-5cbb-b113-33bf26d36f79",
+      "name": "conv_winograd.bwd.f32.multipass.f4.nchw.x3.gfx9.g64x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 4,
+        "layout": "NCHW",
+        "arch": "gfx9",
+        "llc": 0,
+        "gemm_bm": 64,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 961
+    },
+    {
+      "version": "1.0",
+      "id": "b7751358-227a-5cdf-a736-b61432f01e06",
+      "name": "conv_winograd.bwd.f32.multipass.f4.nchw.x3.gfx11.g64x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 4,
+        "layout": "NCHW",
+        "arch": "gfx11",
+        "llc": 0,
+        "gemm_bm": 64,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 960
+    },
+    {
+      "version": "1.0",
+      "id": "116861bf-9456-5efe-85d9-8f0c98b33155",
+      "name": "conv_winograd.bwd.f32.multipass.f4.nchw.x3.gfx12.g64x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 4,
+        "layout": "NCHW",
+        "arch": "gfx12",
+        "llc": 0,
+        "gemm_bm": 64,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 959
+    },
+    {
+      "version": "1.0",
+      "id": "c47cca30-b0ec-5cc4-8360-fc5d35f85121",
+      "name": "conv_winograd.bwd.f32.multipass.f4.nchw.x3.gfx9.g128x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 4,
+        "layout": "NCHW",
+        "arch": "gfx9",
+        "llc": 0,
+        "gemm_bm": 128,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 958
+    },
+    {
+      "version": "1.0",
+      "id": "fd9fb44d-5676-5792-8029-437e43bc8004",
+      "name": "conv_winograd.bwd.f32.multipass.f4.nchw.x3.gfx11.g128x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 4,
+        "layout": "NCHW",
+        "arch": "gfx11",
+        "llc": 0,
+        "gemm_bm": 128,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 957
+    },
+    {
+      "version": "1.0",
+      "id": "7119cf76-8eb3-5d87-8adb-a5aa8b088691",
+      "name": "conv_winograd.bwd.f32.multipass.f4.nchw.x3.gfx12.g128x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 4,
+        "layout": "NCHW",
+        "arch": "gfx12",
+        "llc": 0,
+        "gemm_bm": 128,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 956
+    },
+    {
+      "version": "1.0",
+      "id": "a1cae8ff-c075-592d-9369-1f20f91e2b77",
+      "name": "conv_winograd.bwd.f32.multipass.f4.nhwc.x3.gfx9.g64x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 4,
+        "layout": "NHWC",
+        "arch": "gfx9",
+        "llc": 0,
+        "gemm_bm": 64,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 955
+    },
+    {
+      "version": "1.0",
+      "id": "307e5a97-f3ad-5093-92c0-1bea2aa54a7e",
+      "name": "conv_winograd.bwd.f32.multipass.f4.nhwc.x3.gfx11.g64x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 4,
+        "layout": "NHWC",
+        "arch": "gfx11",
+        "llc": 0,
+        "gemm_bm": 64,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 954
+    },
+    {
+      "version": "1.0",
+      "id": "d78fb52c-2105-5069-93c0-710c369f33c8",
+      "name": "conv_winograd.bwd.f32.multipass.f4.nhwc.x3.gfx12.g64x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 4,
+        "layout": "NHWC",
+        "arch": "gfx12",
+        "llc": 0,
+        "gemm_bm": 64,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 953
+    },
+    {
+      "version": "1.0",
+      "id": "b5149c1b-8043-5b48-9894-e5c60e8985ed",
+      "name": "conv_winograd.bwd.f32.multipass.f4.nhwc.x3.gfx9.g128x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 4,
+        "layout": "NHWC",
+        "arch": "gfx9",
+        "llc": 0,
+        "gemm_bm": 128,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 952
+    },
+    {
+      "version": "1.0",
+      "id": "d08e5bab-bdfc-5e63-bfe1-be03e9878b35",
+      "name": "conv_winograd.bwd.f32.multipass.f4.nhwc.x3.gfx11.g128x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 4,
+        "layout": "NHWC",
+        "arch": "gfx11",
+        "llc": 0,
+        "gemm_bm": 128,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 951
+    },
+    {
+      "version": "1.0",
+      "id": "cea71e20-6e9d-5631-af60-e69dcdc19f52",
+      "name": "conv_winograd.bwd.f32.multipass.f4.nhwc.x3.gfx12.g128x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 4,
+        "layout": "NHWC",
+        "arch": "gfx12",
+        "llc": 0,
+        "gemm_bm": 128,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 950
+    },
+    {
+      "version": "1.0",
+      "id": "08c05c70-1684-5d97-af2c-0e663a184231",
+      "name": "conv_winograd.bwd.f32.multipass.f2.nchw.x3.gfx9.g64x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "gfx9",
+        "llc": 0,
+        "gemm_bm": 64,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 949
+    },
+    {
+      "version": "1.0",
+      "id": "8aaaecfb-271b-51c4-b285-46499ec18689",
+      "name": "conv_winograd.bwd.f32.multipass.f2.nchw.x3.gfx11.g64x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "gfx11",
+        "llc": 0,
+        "gemm_bm": 64,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 948
+    },
+    {
+      "version": "1.0",
+      "id": "301cc385-a011-503b-9cb6-033f2af81d8e",
+      "name": "conv_winograd.bwd.f32.multipass.f2.nchw.x3.gfx12.g64x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "gfx12",
+        "llc": 0,
+        "gemm_bm": 64,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 947
+    },
+    {
+      "version": "1.0",
+      "id": "1b95734e-fa1e-5cf9-a117-b9d12e5912f4",
+      "name": "conv_winograd.bwd.f32.multipass.f2.nchw.x3.gfx9.g128x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "gfx9",
+        "llc": 0,
+        "gemm_bm": 128,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 946
+    },
+    {
+      "version": "1.0",
+      "id": "955188f2-bc38-56c8-acab-464f12236d04",
+      "name": "conv_winograd.bwd.f32.multipass.f2.nchw.x3.gfx11.g128x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "gfx11",
+        "llc": 0,
+        "gemm_bm": 128,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 945
+    },
+    {
+      "version": "1.0",
+      "id": "7f796ed8-b9e5-53d5-ba39-4e07fd3036bf",
+      "name": "conv_winograd.bwd.f32.multipass.f2.nchw.x3.gfx12.g128x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 2,
+        "layout": "NCHW",
+        "arch": "gfx12",
+        "llc": 0,
+        "gemm_bm": 128,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 944
+    },
+    {
+      "version": "1.0",
+      "id": "43a1d9b0-f357-51b9-8026-79d6f3fec0ce",
+      "name": "conv_winograd.bwd.f32.multipass.f2.nhwc.x3.gfx9.g64x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 2,
+        "layout": "NHWC",
+        "arch": "gfx9",
+        "llc": 0,
+        "gemm_bm": 64,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 943
+    },
+    {
+      "version": "1.0",
+      "id": "c40bd8e5-422f-593a-909a-5dcdfda21942",
+      "name": "conv_winograd.bwd.f32.multipass.f2.nhwc.x3.gfx11.g64x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 2,
+        "layout": "NHWC",
+        "arch": "gfx11",
+        "llc": 0,
+        "gemm_bm": 64,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 942
+    },
+    {
+      "version": "1.0",
+      "id": "878bc3dd-51ab-5475-874e-b55a421de8d9",
+      "name": "conv_winograd.bwd.f32.multipass.f2.nhwc.x3.gfx12.g64x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 2,
+        "layout": "NHWC",
+        "arch": "gfx12",
+        "llc": 0,
+        "gemm_bm": 64,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 941
+    },
+    {
+      "version": "1.0",
+      "id": "bd5c07a5-d824-504a-8ae4-73b39adb2b71",
+      "name": "conv_winograd.bwd.f32.multipass.f2.nhwc.x3.gfx9.g128x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 2,
+        "layout": "NHWC",
+        "arch": "gfx9",
+        "llc": 0,
+        "gemm_bm": 128,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 940
+    },
+    {
+      "version": "1.0",
+      "id": "bdaec5b9-97e1-5e87-9251-e85eeb85a63f",
+      "name": "conv_winograd.bwd.f32.multipass.f2.nhwc.x3.gfx11.g128x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 2,
+        "layout": "NHWC",
+        "arch": "gfx11",
+        "llc": 0,
+        "gemm_bm": 128,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 939
+    },
+    {
+      "version": "1.0",
+      "id": "acd3ad67-c5d2-5826-bbe0-9e87ab2195eb",
+      "name": "conv_winograd.bwd.f32.multipass.f2.nhwc.x3.gfx12.g128x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 2,
+        "layout": "NHWC",
+        "arch": "gfx12",
+        "llc": 0,
+        "gemm_bm": 128,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 938
+    },
+    {
+      "version": "1.0",
+      "id": "ef137424-bf7a-5d28-a30c-35daa5653486",
+      "name": "conv_winograd.bwd.f32.multipass.f3.nchw.x3.gfx9.g64x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 3,
+        "layout": "NCHW",
+        "arch": "gfx9",
+        "llc": 0,
+        "gemm_bm": 64,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 937
+    },
+    {
+      "version": "1.0",
+      "id": "d2652207-f356-5671-8b25-696c707f39c3",
+      "name": "conv_winograd.bwd.f32.multipass.f3.nchw.x3.gfx11.g64x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 3,
+        "layout": "NCHW",
+        "arch": "gfx11",
+        "llc": 0,
+        "gemm_bm": 64,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 936
+    },
+    {
+      "version": "1.0",
+      "id": "02f11a41-a8b0-5323-b942-402e9c32c622",
+      "name": "conv_winograd.bwd.f32.multipass.f3.nchw.x3.gfx12.g64x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 3,
+        "layout": "NCHW",
+        "arch": "gfx12",
+        "llc": 0,
+        "gemm_bm": 64,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 935
+    },
+    {
+      "version": "1.0",
+      "id": "9658d4bb-8ddb-5c6e-8976-0609b5d1fb67",
+      "name": "conv_winograd.bwd.f32.multipass.f3.nchw.x3.gfx9.g128x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 3,
+        "layout": "NCHW",
+        "arch": "gfx9",
+        "llc": 0,
+        "gemm_bm": 128,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 934
+    },
+    {
+      "version": "1.0",
+      "id": "9e0b5278-4781-5a7a-b873-0619ba952463",
+      "name": "conv_winograd.bwd.f32.multipass.f3.nchw.x3.gfx11.g128x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 3,
+        "layout": "NCHW",
+        "arch": "gfx11",
+        "llc": 0,
+        "gemm_bm": 128,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 933
+    },
+    {
+      "version": "1.0",
+      "id": "0d369ef8-1f6c-560f-8e80-4fd9b7d55de4",
+      "name": "conv_winograd.bwd.f32.multipass.f3.nchw.x3.gfx12.g128x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 3,
+        "layout": "NCHW",
+        "arch": "gfx12",
+        "llc": 0,
+        "gemm_bm": 128,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 932
+    },
+    {
+      "version": "1.0",
+      "id": "d6a43604-b0de-5268-b968-fe07814fdd7c",
+      "name": "conv_winograd.bwd.f32.multipass.f3.nhwc.x3.gfx9.g64x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 3,
+        "layout": "NHWC",
+        "arch": "gfx9",
+        "llc": 0,
+        "gemm_bm": 64,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 931
+    },
+    {
+      "version": "1.0",
+      "id": "2ddb073f-6a73-5987-aa7c-d7bf8340d6a8",
+      "name": "conv_winograd.bwd.f32.multipass.f3.nhwc.x3.gfx11.g64x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 3,
+        "layout": "NHWC",
+        "arch": "gfx11",
+        "llc": 0,
+        "gemm_bm": 64,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 930
+    },
+    {
+      "version": "1.0",
+      "id": "5b86f353-ebf7-54d9-bdd8-4153e92ef152",
+      "name": "conv_winograd.bwd.f32.multipass.f3.nhwc.x3.gfx12.g64x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 3,
+        "layout": "NHWC",
+        "arch": "gfx12",
+        "llc": 0,
+        "gemm_bm": 64,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 929
+    },
+    {
+      "version": "1.0",
+      "id": "1fbe8acf-32f2-5d2a-8f16-a29925af0f93",
+      "name": "conv_winograd.bwd.f32.multipass.f3.nhwc.x3.gfx9.g128x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 3,
+        "layout": "NHWC",
+        "arch": "gfx9",
+        "llc": 0,
+        "gemm_bm": 128,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 928
+    },
+    {
+      "version": "1.0",
+      "id": "3a381714-a0bc-51c3-b6b3-fe50781dbbce",
+      "name": "conv_winograd.bwd.f32.multipass.f3.nhwc.x3.gfx11.g128x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 3,
+        "layout": "NHWC",
+        "arch": "gfx11",
+        "llc": 0,
+        "gemm_bm": 128,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 927
+    },
+    {
+      "version": "1.0",
+      "id": "fcb81474-54b4-5add-a45f-36aefee716e8",
+      "name": "conv_winograd.bwd.f32.multipass.f3.nhwc.x3.gfx12.g128x64x32",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvWinograd.cpp",
+        "entry_point": "ConvWinogradGemm"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "variant": "multipass",
+        "m": 3,
+        "layout": "NHWC",
+        "arch": "gfx12",
+        "llc": 0,
+        "gemm_bm": 128,
+        "gemm_bn": 64,
+        "gemm_bk": 32,
+        "bk": 0,
+        "bt": 0,
+        "ccv": 0,
+        "tm": 0,
+        "tn": 0,
+        "waves": 0,
+        "bins": 0,
+        "f16math": 0,
+        "pf": 0,
+        "math": 1
+      },
+      "priority": 926
     },
     {
       "version": "1.0",
@@ -1285,7 +2512,8 @@
         "waves": 16,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 1000
     },
@@ -1317,7 +2545,8 @@
         "waves": 16,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 999
     },
@@ -1349,7 +2578,8 @@
         "waves": 16,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 998
     },
@@ -1381,7 +2611,8 @@
         "waves": 16,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 997
     },
@@ -1413,7 +2644,8 @@
         "waves": 32,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 996
     },
@@ -1445,7 +2677,8 @@
         "waves": 32,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 995
     },
@@ -1477,7 +2710,8 @@
         "waves": 8,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 994
     },
@@ -1509,7 +2743,8 @@
         "waves": 8,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 993
     },
@@ -1541,7 +2776,8 @@
         "waves": 16,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 992
     },
@@ -1573,7 +2809,8 @@
         "waves": 16,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 991
     },
@@ -1605,7 +2842,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 990
     },
@@ -1637,7 +2875,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 989
     },
@@ -1669,7 +2908,8 @@
         "waves": 8,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 988
     },
@@ -1701,7 +2941,8 @@
         "waves": 8,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 987
     },
@@ -1733,7 +2974,8 @@
         "waves": 16,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 986
     },
@@ -1765,7 +3007,8 @@
         "waves": 16,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 985
     },
@@ -1797,7 +3040,8 @@
         "waves": 8,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 984
     },
@@ -1829,7 +3073,8 @@
         "waves": 8,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 983
     },
@@ -1861,7 +3106,8 @@
         "waves": 8,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 982
     },
@@ -1893,7 +3139,8 @@
         "waves": 8,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 981
     },
@@ -1925,7 +3172,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 980
     },
@@ -1957,7 +3205,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 979
     },
@@ -1989,7 +3238,8 @@
         "waves": 8,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 978
     },
@@ -2021,7 +3271,8 @@
         "waves": 8,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 977
     },
@@ -2053,7 +3304,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 976
     },
@@ -2085,7 +3337,8 @@
         "waves": 16,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 975
     },
@@ -2117,7 +3370,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 974
     },
@@ -2149,7 +3403,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 973
     },
@@ -2181,7 +3436,8 @@
         "waves": 16,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 972
     },
@@ -2213,7 +3469,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 971
     },
@@ -2245,7 +3502,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 970
     },
@@ -2277,7 +3535,8 @@
         "waves": 8,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 969
     },
@@ -2309,7 +3568,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 1,
-        "pf": 1
+        "pf": 1,
+        "math": 0
       },
       "priority": 968
     },
@@ -2341,7 +3601,8 @@
         "waves": 4,
         "bins": 4,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 967
     },
@@ -2373,7 +3634,8 @@
         "waves": 4,
         "bins": 4,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 966
     },
@@ -2405,7 +3667,8 @@
         "waves": 8,
         "bins": 4,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 965
     },
@@ -2437,7 +3700,8 @@
         "waves": 8,
         "bins": 4,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 964
     },
@@ -2469,7 +3733,8 @@
         "waves": 8,
         "bins": 2,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 963
     },
@@ -2501,7 +3766,8 @@
         "waves": 8,
         "bins": 2,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 962
     },
@@ -2533,7 +3799,8 @@
         "waves": 8,
         "bins": 4,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 961
     },
@@ -2565,7 +3832,8 @@
         "waves": 8,
         "bins": 4,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 960
     },
@@ -2597,7 +3865,8 @@
         "waves": 8,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 959
     },
@@ -2629,7 +3898,8 @@
         "waves": 8,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 958
     },
@@ -2661,7 +3931,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 957
     },
@@ -2693,7 +3964,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 956
     },
@@ -2725,7 +3997,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 1,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 955
     },
@@ -2757,7 +4030,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 954
     },
@@ -2789,7 +4063,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 953
     },
@@ -2821,7 +4096,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 952
     },
@@ -2853,7 +4129,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 951
     },
@@ -2885,7 +4162,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 950
     },
@@ -2917,7 +4195,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 949
     },
@@ -2949,7 +4228,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 948
     },
@@ -2981,7 +4261,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 947
     },
@@ -3013,7 +4294,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 946
     },
@@ -3045,7 +4327,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 945
     },
@@ -3077,7 +4360,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 944
     },
@@ -3109,7 +4393,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 943
     },
@@ -3141,7 +4426,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 942
     },
@@ -3173,7 +4459,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 941
     },
@@ -3205,7 +4492,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 940
     },
@@ -3237,7 +4525,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 939
     },
@@ -3269,7 +4558,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 938
     },
@@ -3301,7 +4591,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 937
     },
@@ -3333,7 +4624,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 936
     },
@@ -3365,7 +4657,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 935
     },
@@ -3397,7 +4690,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 934
     },
@@ -3429,7 +4723,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 933
     },
@@ -3461,7 +4756,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 932
     },
@@ -3493,7 +4789,8 @@
         "waves": 16,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 1000
     },
@@ -3525,7 +4822,8 @@
         "waves": 16,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 999
     },
@@ -3557,7 +4855,8 @@
         "waves": 8,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 998
     },
@@ -3589,7 +4888,8 @@
         "waves": 8,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 997
     },
@@ -3621,7 +4921,8 @@
         "waves": 16,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 996
     },
@@ -3653,7 +4954,8 @@
         "waves": 16,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 995
     },
@@ -3685,7 +4987,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 994
     },
@@ -3717,7 +5020,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 993
     },
@@ -3749,7 +5053,8 @@
         "waves": 8,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 992
     },
@@ -3781,7 +5086,8 @@
         "waves": 8,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 991
     },
@@ -3813,7 +5119,8 @@
         "waves": 16,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 990
     },
@@ -3845,7 +5152,8 @@
         "waves": 16,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 989
     },
@@ -3877,7 +5185,8 @@
         "waves": 8,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 988
     },
@@ -3909,7 +5218,8 @@
         "waves": 8,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 987
     },
@@ -3941,7 +5251,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 986
     },
@@ -3973,7 +5284,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 985
     },
@@ -4005,7 +5317,8 @@
         "waves": 8,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 984
     },
@@ -4037,7 +5350,8 @@
         "waves": 8,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 983
     },
@@ -4069,7 +5383,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 982
     },
@@ -4101,7 +5416,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 981
     },
@@ -4133,7 +5449,8 @@
         "waves": 16,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 980
     },
@@ -4165,7 +5482,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 979
     },
@@ -4197,7 +5515,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 978
     },
@@ -4229,7 +5548,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 0,
-        "pf": 1
+        "pf": 1,
+        "math": 0
       },
       "priority": 977
     },
@@ -4261,7 +5581,8 @@
         "waves": 8,
         "bins": 4,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 976
     },
@@ -4293,7 +5614,8 @@
         "waves": 8,
         "bins": 4,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 975
     },
@@ -4325,7 +5647,8 @@
         "waves": 8,
         "bins": 2,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 974
     },
@@ -4357,7 +5680,8 @@
         "waves": 8,
         "bins": 2,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 973
     },
@@ -4389,7 +5713,8 @@
         "waves": 8,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 972
     },
@@ -4421,7 +5746,8 @@
         "waves": 8,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 971
     },
@@ -4453,7 +5779,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 970
     },
@@ -4485,7 +5812,8 @@
         "waves": 4,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 969
     },
@@ -4517,7 +5845,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 968
     },
@@ -4549,7 +5878,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 967
     },
@@ -4581,7 +5911,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 966
     },
@@ -4613,7 +5944,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 965
     },
@@ -4645,7 +5977,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 964
     },
@@ -4677,7 +6010,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 963
     },
@@ -4709,7 +6043,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 962
     },
@@ -4741,7 +6076,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 961
     },
@@ -4773,7 +6109,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 960
     },
@@ -4805,7 +6142,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 959
     },
@@ -4837,7 +6175,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 958
     },
@@ -4869,7 +6208,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 957
     },
@@ -4901,7 +6241,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 956
     },
@@ -4933,7 +6274,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 955
     },
@@ -4965,7 +6307,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 954
     },
@@ -4997,7 +6340,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 953
     },
@@ -5029,7 +6373,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 952
     },
@@ -5061,7 +6406,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 951
     },
@@ -5093,7 +6439,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 950
     },
@@ -5125,7 +6472,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 949
     },
@@ -5157,7 +6505,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 948
     },
@@ -5189,7 +6538,8 @@
         "waves": 0,
         "bins": 0,
         "f16math": 0,
-        "pf": 0
+        "pf": 0,
+        "math": 0
       },
       "priority": 947
     }

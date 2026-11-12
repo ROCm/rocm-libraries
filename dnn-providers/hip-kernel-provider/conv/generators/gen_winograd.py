@@ -36,6 +36,7 @@ FIELDS = [
     "bins",
     "f16math",
     "pf",
+    "math",
 ]
 STRINGS = {"direction", "dtype", "variant", "layout", "arch"}
 # The integer fields identify a config among those one graph admits (the enrolled knob tuple):
@@ -55,6 +56,7 @@ KNOBS = [
     "bins",
     "f16math",
     "pf",
+    "math",
 ]
 ENTRY = {
     "multipass": "ConvWinogradGemm",
@@ -82,6 +84,7 @@ def C(
     bins=0,
     f16math=0,
     pf=0,
+    math=0,
 ):
     return dict(
         variant=variant,
@@ -101,6 +104,7 @@ def C(
         bins=bins,
         f16math=f16math,
         pf=pf,
+        math=math,
     )
 
 
@@ -113,6 +117,24 @@ def multipass(ms, plan):
         for m in ms
         for lay in ("NCHW", "NHWC")
         for g in GEMMS
+    ]
+
+
+# Three-bf16 (math 1, TF32 permission only): fp32 graphs through the fp32 transforms, the
+# transformed filter and input each split into three bf16 parts along the channels (U hi | hi' |
+# lo, V hi | lo | hi'), and the batched GEMM on bf16 matrix cores over 3x the channels (fp32
+# products). arch: the GEMM's atom ("gfx9": 16x16x16 bf16 MFMA, gfx90a and later; gfx11 / gfx12
+# WMMA). gemm_bk: the K step staged in LDS (16-element atom steps).
+GEMMS_X3 = [(64, 64, 32), (128, 64, 32)]
+
+
+def multipass_x3(ms):
+    return [
+        C("multipass", m, lay, arch=a, gemm=g, math=1)
+        for m in ms
+        for lay in ("NCHW", "NHWC")
+        for g in GEMMS_X3
+        for a in ("gfx9", "gfx11", "gfx12")
     ]
 
 
@@ -234,7 +256,8 @@ CATALOG = {
     + fused(F32_BLOCKS)
     + fused(F32_PF_BLOCKS, pf=1)
     + multipass((4, 2, 3), "none")
-    + multipass((4, 2, 3), "llc"),
+    + multipass((4, 2, 3), "llc")
+    + multipass_x3((4, 2, 3)),
     "HALF": coop(COOP_F16)
     + coop(COOP3_F16, m=3)
     + coop(COOP_CDNA_F16, ("gfx9",))
@@ -260,6 +283,8 @@ CATALOG = {
 
 
 def label(c):
+    if c["variant"] == "multipass" and c["math"] == 1:
+        return f"multipass.f{c['m']}.{c['layout'].lower()}.x3.{c['arch']}.g{c['gemm_bm']}x{c['gemm_bn']}x{c['gemm_bk']}"
     if c["variant"] == "multipass":
         return f"multipass.f{c['m']}.{c['layout'].lower()}.g{c['gemm_bm']}x{c['gemm_bn']}x{c['gemm_bk']}.{'llc' if c['llc'] else 'none'}"
     if c["variant"] == "fused":

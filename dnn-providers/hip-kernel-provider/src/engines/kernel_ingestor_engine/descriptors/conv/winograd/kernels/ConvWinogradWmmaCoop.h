@@ -1051,3 +1051,88 @@ __device__ __attribute__((always_inline)) void k5CoopConv(const K5Args& a)
 {
     k5CoopConvA<T, K5CoopWmma<T, GFX12>, MT, NT, KW, F16MATH>(a);
 }
+
+// Three-bf16 multipass (TF32 permission): pass 3 on bf16 matrix cores. C[b] (m x n, fp32) =
+// A[b] (m x k) * B[b] (k x n), A and B bf16 row-major: the transformed filter and input, each
+// split into three parts along the channels (k = 3 x the channels). A workgroup of 4 waves owns
+// a BM x BN tile, 2 x 2 waves of (BM / 2) x (BN / 2); per BK step it stages A as [m][k] and B
+// transposed as [n][k] in LDS (zero past the edges), and each wave's 16 x 16 fragments read
+// their KPL channels contiguously, as the cooperative kernel's do. W: K5CoopMfma<k5_bf16> or
+// K5CoopWmma<k5_bf16, GFX12>.
+template <class W, int BM, int BN, int BK>
+__device__ void k5GemmMma(const K5GemmArgs& g)
+{
+    constexpr int WAVE = W::WAVE, THREADS = 4 * WAVE;
+    constexpr int WM = BM / 2, WN = BN / 2, FM = WM / 16, FN = WN / 16;
+    constexpr int LD = BK + 8; // a staged row: 16-byte aligned, off the bank stride
+    static_assert(BK % 16 == 0 && WM % 16 == 0 && WN % 16 == 0, "16 x 16 x 16 steps");
+    __shared__ __attribute__((aligned(16))) k5_bf16 As[BM * LD];
+    __shared__ __attribute__((aligned(16))) k5_bf16 Bs[BN * LD];
+
+    const int bz = blockIdx.z;
+    const k5_bf16* A = static_cast<const k5_bf16*>(g.a) + bz * g.sa;
+    const k5_bf16* B = static_cast<const k5_bf16*>(g.b) + bz * g.sb;
+    float* C = g.c + bz * g.sc;
+    const int m0 = blockIdx.y * BM, n0 = blockIdx.x * BN;
+    const int tid = threadIdx.x, lane = tid % WAVE, wave = tid / WAVE;
+    const int wm = (wave / 2) * WM, wn = (wave % 2) * WN;
+    const int col = lane & 15, kb = W::kBase(lane);
+
+    typename W::acc acc[FM][FN];
+#pragma unroll
+    for(int i = 0; i < FM; ++i)
+#pragma unroll
+        for(int j = 0; j < FN; ++j)
+            acc[i][j] = typename W::acc{};
+
+    for(int k0 = 0; k0 < g.k; k0 += BK)
+    {
+        __syncthreads();
+        for(int e = tid; e < BM * BK; e += THREADS)
+        {
+            const int r = e / BK, c = e % BK;
+            const int gm = m0 + r, gk = k0 + c;
+            As[r * LD + c] = gm < g.m && gk < g.k ? A[static_cast<long long>(gm) * g.lda + gk]
+                                                  : static_cast<k5_bf16>(0);
+        }
+        for(int e = tid; e < BK * BN; e += THREADS)
+        {
+            const int r = e / BN, c = e % BN;
+            const int gk = k0 + r, gn = n0 + c;
+            Bs[c * LD + r] = gk < g.k && gn < g.n ? B[static_cast<long long>(gk) * g.ldb + gn]
+                                                  : static_cast<k5_bf16>(0);
+        }
+        __syncthreads();
+#pragma unroll
+        for(int kk = 0; kk < BK; kk += 16)
+        {
+            typename W::frag af[FM], bf[FN];
+#pragma unroll
+            for(int i = 0; i < FM; ++i)
+                af[i] = W::loadB(
+                    reinterpret_cast<const unsigned*>(As + (wm + i * 16 + col) * LD + kk + kb));
+#pragma unroll
+            for(int j = 0; j < FN; ++j)
+                bf[j] = W::loadB(
+                    reinterpret_cast<const unsigned*>(Bs + (wn + j * 16 + col) * LD + kk + kb));
+#pragma unroll
+            for(int i = 0; i < FM; ++i)
+#pragma unroll
+                for(int j = 0; j < FN; ++j)
+                    acc[i][j] = W::mma(af[i], bf[j], acc[i][j]);
+        }
+    }
+    // Accumulator e of fragment (i, j): row wm + 16 i + dRow(lane, e), column wn + 16 j + col.
+#pragma unroll
+    for(int i = 0; i < FM; ++i)
+#pragma unroll
+        for(int j = 0; j < FN; ++j)
+#pragma unroll
+            for(int e = 0; e < W::ACCN; ++e)
+            {
+                const int gm = m0 + wm + i * 16 + W::dRow(lane, e);
+                const int gn = n0 + wn + j * 16 + col;
+                if(gm < g.m && gn < g.n)
+                    C[static_cast<long long>(gm) * g.ldc + gn] = acc[i][j][e];
+            }
+}
