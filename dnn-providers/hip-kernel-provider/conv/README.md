@@ -56,7 +56,9 @@ on correctness alone. There is no shape-to-config routing table: the catalog's d
 | Piece | Path, relative to the provider root |
 |---|---|
 | This overview | `conv/` |
-| Descriptors, per family | `src/engines/kernel_ingestor_engine/descriptors/conv/<family>/` |
+| Descriptors, per family | `src/engines/kernel_ingestor_engine/descriptors/conv/<family>/`. The engine descriptors (UED, UDD, KMD, UMD) are in git; the generated instance catalogs (`*.kdp.json`) are in DVC, one `<catalog>.kdp.json.dvc` pointer each (naive's hand-written KDPs stay in git). |
+| Descriptor generators | `conv/generators/gen_*.py`, one per family; `conv/generators/regen_all.py` runs them all. [REGEN.md](REGEN.md) is how to regenerate and upload. |
+| Which families a build serves | `conv/ConvContent.cmake` |
 | Kernel sources | `src/engines/kernel_ingestor_engine/descriptors/conv/<family>/kernels/`, beside the descriptors that name them. An embedded source must sit at its descriptor's folder plus `source_file`, which `descriptor-packaging/tools/hkp_verify_embedded_sources.py` checks at build time. |
 | Native packs (matching, workload rule, dispatch) | `src/engines/kernel_ingestor_engine/packs/Conv<Family>*.cpp` |
 | Kernel embedding (`HKP_CONV_KERNEL_SOURCES`, `HKP_CONV_KERNEL_KEYS`) | `src/engines/kernel_ingestor_engine/CMakeLists.txt` |
@@ -69,6 +71,18 @@ With the option OFF, the packs are not compiled, the kernels are not embedded an
 `conv/` descriptor folder is not packed (`HKP_DESCRIPTOR_FAMILIES` in
 `descriptor-packaging/cmake/HkpPackaging.cmake`).
 
+Fetch the catalogs before configuring (reads are anonymous):
+
+```bash
+# From the repository root.
+dvc pull -r ingestor dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/conv/*/*.kdp.json.dvc
+```
+
+A family whose catalogs are missing is **not served**: configure warns (an error with
+`-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON`), the family's folder is withdrawn from the
+pack, its native pack is not registered and its engine suites are not built
+(`conv/ConvContent.cmake`). The other families build and ship as usual.
+
 Plans built from these engines cannot be saved and loaded: plan serialization covers kpack
 code objects only, and these kernels are compiled from embedded source.
 
@@ -80,9 +94,12 @@ code objects only, and these kernels are compiled from embedded source.
    source's key is its path relative to the descriptor (`kernels/<File>.cpp`); a header is
    keyed by its bare file name, so give each header a name unique across the provider.
 3. Author the family's descriptors under `descriptors/conv/<family>/`, with
-   `kernel_source.kind` `embedded_source` and the key as `source_file`.
+   `kernel_source.kind` `embedded_source` and the key as `source_file`. Write them with a
+   generator (`conv/generators/gen_<family>.py`, added to `FAMILIES` in `regen_all.py`) and
+   record its catalogs in DVC ([REGEN.md](REGEN.md)).
 4. Add the native pack (`packs/Conv<Family>Native.cpp`) and its row in `IngestorPacks.cpp`,
-   inside `#ifdef HIPDNN_ENGINE_CONV`, and its sources to the `HIPKERNELPROVIDER_ENABLE_CONV`
-   block of the engine's CMakeLists.txt.
+   inside `#ifdef HIPDNN_ENGINE_CONV_<FAMILY>` (defined when the family is served), and its
+   sources to the `HIPKERNELPROVIDER_ENABLE_CONV` block of the engine's CMakeLists.txt. Gate
+   its suites on the family in `src/tests/engines/kernel_ingestor_engine/CMakeLists.txt`.
 5. Test every field its matcher reads with a refusal case, and its numerics on the device
    against hipDNN's CPU reference convolution.

@@ -1,10 +1,14 @@
 # Conv descriptor generators
 
-Each script writes one conv engine's complete descriptor set (`*.ued.json`, `*.kmd.json`, `*.umd.json`, `*.udd.json`, `*.kdp.json`) into the directory given as its only argument. The checked-in descriptors under `src/engines/kernel_ingestor_engine/descriptors/conv/<engine>/` are exactly what these scripts produce. Running a script into that directory reproduces the files byte for byte.
+Each script writes one conv engine's complete descriptor set (`*.ued.json`, `*.kmd.json`, `*.umd.json`, `*.udd.json`, `*.kdp.json`) into the directory given as its only argument. The descriptors under `src/engines/kernel_ingestor_engine/descriptors/conv/<engine>/` are exactly what these scripts produce: the small ones in git, the `*.kdp.json` catalogs in DVC (one `<catalog>.dvc` pointer each). Running a script into that directory reproduces the files byte for byte.
+
+`regen_all.py` runs every script below; [../REGEN.md](../REGEN.md) is the procedure (regenerate, `dvc add`, upload, commit the pointers).
 
 ```bash
 # From this directory; Python 3, standard library only.
-python3 gen_igemm.py ../../src/engines/kernel_ingestor_engine/descriptors/conv/igemm
+python3 regen_all.py --check          # every family reproduces, every pointer matches
+python3 regen_all.py --dvc-add        # regenerate all, record the catalogs in DVC
+python3 gen_igemm.py ../../src/engines/kernel_ingestor_engine/descriptors/conv/igemm   # one family
 ```
 
 | script | descriptor dir | engines |

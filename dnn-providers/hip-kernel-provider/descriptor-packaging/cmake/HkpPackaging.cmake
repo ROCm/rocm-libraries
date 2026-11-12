@@ -277,9 +277,10 @@ endfunction()
 # ---------------------------------------------------------------------------
 # _hkp_filter_inputs(<out_var> <root> <files> <exclude_folders>)
 #   <files>, minus the ones under <root> the packer never reads: a path with any hidden
-#   segment (one starting with `.`), and a path inside a top-level folder of
-#   <exclude_folders>. Segments are taken from the path relative to <root>, so a hidden
-#   directory above <root> does not matter.
+#   segment (one starting with `.`), and a path inside a folder of <exclude_folders> --
+#   a top-level child (`rocKE`) or a `/`-separated path below <root> (`conv/igemm`),
+#   matched case-insensitively as load_flat_input() matches it. Segments are taken from
+#   the path relative to <root>, so a hidden directory above <root> does not matter.
 # ---------------------------------------------------------------------------
 function(_hkp_filter_inputs out_var root files exclude_folders)
     set(_kept "")
@@ -288,18 +289,20 @@ function(_hkp_filter_inputs out_var root files exclude_folders)
     foreach(_file IN LISTS files)
         file(RELATIVE_PATH _rel "${root}" "${_file}")
         string(REPLACE "/" ";" _segments "${_rel}")
-        list(LENGTH _segments _count)
-        list(GET _segments 0 _first)
         set(_drop FALSE)
         foreach(_segment IN LISTS _segments)
             if("${_segment}" MATCHES "^[.]")
                 set(_drop TRUE)
             endif()
         endforeach()
-        string(TOLOWER "${_first}" _first_lower)
-        if(_count GREATER 1 AND "${_first_lower}" IN_LIST _excluded)
-            set(_drop TRUE)
-        endif()
+        string(TOLOWER "${_rel}" _rel_lower)
+        foreach(_folder IN LISTS _excluded)
+            string(REGEX REPLACE "/+$" "" _folder "${_folder}")
+            string(FIND "${_rel_lower}" "${_folder}/" _at)
+            if(_at EQUAL 0)
+                set(_drop TRUE)
+            endif()
+        endforeach()
         if(NOT _drop)
             list(APPEND _kept "${_file}")
         endif()
@@ -360,8 +363,10 @@ endfunction()
 #   _hkp_disabled_kinds() lists (rocke): a rocKE UKD prunes as an arch-pruned one
 #   does, and a KDP left with no UKD does not ship.
 #
-#   EXCLUDE_FOLDERS names top-level child folders of the root the pack does not
-#   read at all: the families of HKP_DESCRIPTOR_FAMILIES whose option is OFF.
+#   EXCLUDE_FOLDERS names folders of the root the pack does not read at all: the
+#   families of HKP_DESCRIPTOR_FAMILIES whose option is OFF, and the `/`-separated
+#   subfolders in the HKP_WITHDRAWN_FOLDERS global property (a conv family whose
+#   DVC-stored catalogs were not pulled).
 #
 #   PACK_JOBS caps the worker processes one pack may spawn; 1 selects the packer's
 #   serial path. Omitted, the packer sizes its pool against the machine. Roots have
@@ -1722,6 +1727,11 @@ function(hkp_add_packaging)
             "the hip producer only")
     endif()
     _hkp_disabled_families(_exclude_folders)
+    # Folders below a family that the family's own configure withdrew from this build:
+    # conv/ConvContent.cmake withdraws conv/<family> when the family's DVC-stored
+    # catalogs were not pulled, so its engine descriptors do not ship without kernels.
+    get_property(_withdrawn_folders GLOBAL PROPERTY HKP_WITHDRAWN_FOLDERS)
+    list(APPEND _exclude_folders ${_withdrawn_folders})
     list(APPEND _root_args EXCLUDE_FOLDERS ${_exclude_folders})
 
     # Production descriptors.

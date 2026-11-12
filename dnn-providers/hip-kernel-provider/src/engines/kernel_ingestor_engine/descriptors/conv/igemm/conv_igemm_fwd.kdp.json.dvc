@@ -1,0 +1,6 @@
+outs:
+- md5: 9885cfa645152ae20703006b59e67abe
+  size: 684872
+  hash: md5
+  path: conv_igemm_fwd.kdp.json
+  remote: ingestor
