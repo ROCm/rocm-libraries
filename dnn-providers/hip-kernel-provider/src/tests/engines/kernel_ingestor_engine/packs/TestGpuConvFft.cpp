@@ -202,7 +202,7 @@ int64_t offsetOf(const std::vector<int64_t>& index, const std::vector<int64_t>& 
 
 /// Copies @p filter into @p reflected with every spatial axis reversed.
 template <typename T>
-void reflectFilter(const Tensor<T>& filter, Tensor<T>& reflected)
+void reflectFilter(Tensor<T>& filter, Tensor<T>& reflected)
 {
     const auto& dims = filter.dims();
     const auto* source = static_cast<const T*>(filter.rawHostData());

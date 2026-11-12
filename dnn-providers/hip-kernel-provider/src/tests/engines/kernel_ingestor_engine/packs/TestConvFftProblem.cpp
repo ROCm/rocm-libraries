@@ -172,7 +172,7 @@ TEST(TestConvFftGraph, RefusesThreeD)
 
 TEST(TestConvFftGraph, RefusesStride)
 {
-    for(const auto stride : {std::vector<int64_t>{2, 1}, std::vector<int64_t>{1, 2}})
+    for(const auto& stride : {std::vector<int64_t>{2, 1}, std::vector<int64_t>{1, 2}})
     {
         auto strided = largeShape();
         strided.stride = stride;

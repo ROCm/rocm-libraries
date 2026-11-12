@@ -191,7 +191,8 @@ double fftAdvantage(const FftProblem& problem, const Config& config)
     }
     // Per output point (and per contracted channel pair): direct r s, FFT 4 F / (oh ow) per
     // tile, counting the partial edge tiles.
-    const double tiles = static_cast<double>(divUp(problem.ho, oh)) * divUp(problem.wo, ow);
+    const double tiles
+        = static_cast<double>(divUp(problem.ho, oh)) * static_cast<double>(divUp(problem.wo, ow));
     const double direct = static_cast<double>(problem.ho) * problem.wo * problem.r * problem.s;
     return direct / (4.0 * config.bins() * tiles);
 }
@@ -283,9 +284,9 @@ std::optional<Plan>
 
     plan.fixedOffset = 0;
     plan.aOffset = alignUp(plan.fixedBytes);
-    plan.aBytes = static_cast<size_t>(groups * bins * a.ca) * plan.chunk * 8;
+    plan.aBytes = static_cast<size_t>(groups * bins * a.ca) * static_cast<size_t>(plan.chunk) * 8;
     plan.bOffset = alignUp(plan.aOffset + plan.aBytes);
-    plan.bBytes = static_cast<size_t>(groups * bins * a.cb) * plan.chunk * 8;
+    plan.bBytes = static_cast<size_t>(groups * bins * a.cb) * static_cast<size_t>(plan.chunk) * 8;
     plan.workspaceBytes = plan.bOffset + plan.bBytes;
     plan.transformThreads = config.tb;
 
@@ -300,10 +301,9 @@ std::optional<Plan>
         plan.filterGrid = groups * a.ca * divUp(a.cb, config.pb);
         plan.productGridPerChunk = groups * bins * divUp(a.cb, config.gn) * divUp(plan.chunk, bm);
     }
-    const int64_t maxChannels = std::max(a.ca, a.cb);
-    for(const int64_t grid : {plan.filterGrid,
-                              plan.productGridPerChunk,
-                              static_cast<int64_t>(plan.dataGrid(plan.chunk, maxChannels))})
+    const int maxChannels = std::max(a.ca, a.cb);
+    for(const long long grid :
+        {plan.filterGrid, plan.productGridPerChunk, plan.dataGrid(plan.chunk, maxChannels)})
     {
         if(grid < 1 || grid > INT_LIMIT || grid * 256 > WORK_ITEM_LIMIT)
         {
