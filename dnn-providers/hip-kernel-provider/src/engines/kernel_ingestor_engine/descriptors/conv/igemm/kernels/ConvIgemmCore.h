@@ -2596,3 +2596,45 @@ __device__ inline void k1ReduceSplits(const K1ReduceArgs& a)
         out[i] = K1Elem<T>::store(sum);
     }
 }
+
+// ---------------------------------------------------------------------------------------------
+// Three-bf16 channel split (K1Split3Args): the pre-pass of the engines' TF32 forms. A config
+// compiled with CONV_TF32_SPLIT3 gains the entry point ConvTf32Split; no other config's code
+// changes.
+
+__device__ inline void k1Split3(const K1Split3Tensor& t)
+{
+    if(t.src == nullptr)
+        return;
+    const long long total = t.outer * t.groups * t.cg * t.inner;
+    const long long step = static_cast<long long>(gridDim.x) * blockDim.x;
+    for(long long i = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x; i < total;
+        i += step)
+    {
+        const long long r = i % t.inner;
+        long long rest = i / t.inner;
+        const long long c = rest % t.cg;
+        rest /= t.cg;
+        const long long g = rest % t.groups;
+        const long long o = rest / t.groups;
+        const float v = t.src[i];
+        const unsigned short h = k1FloatToBf(v);
+        const unsigned short l = k1BfLo(v, h);
+        const unsigned short f = k1BfFinite(h);
+        unsigned short* d = t.dst + ((o * t.groups + g) * 3 * t.cg + c) * t.inner + r;
+#pragma unroll
+        for(int part = 0; part < 3; ++part)
+        {
+            const int kind = (t.pattern >> (2 * part)) & 3;
+            d[part * t.cg * t.inner] = kind == 1 ? l : kind == 2 ? f : h;
+        }
+    }
+}
+
+#if defined(CONV_TF32_SPLIT3)
+extern "C" __global__ void __launch_bounds__(256) ConvTf32Split(K1Split3Args a)
+{
+    k1Split3(a.t[0]);
+    k1Split3(a.t[1]);
+}
+#endif
