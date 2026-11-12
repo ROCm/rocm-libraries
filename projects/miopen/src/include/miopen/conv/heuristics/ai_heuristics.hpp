@@ -104,9 +104,11 @@ MIOPEN_INTERNALS_EXPORT std::size_t EngineeredConvFeatureCount(int spatial_dim =
 // Self-describing variant: emits the engineered features in the order named by the model metadata's
 // ``derived_features`` list. Supports the standard block plus optional GEMM-dim tile-divisibility
 // (divfeat) features - a model opts in simply by listing their names, so no code flags are needed.
-// ``raw_in_channels`` is the un-normalized in_channels (for cpg_in/is_depthwise) and ``data_type``
-// drives the dtype-aware K-pack feature. Must match ConvInputPreprocessor.derived_feature_names()
-// in MIOpenFF training. Throws on an unknown feature name.
+// ``phys_in_channels`` is the physical (direction-normalized) in_channels for cpg_in/is_depthwise -
+// not problem.GetInChannels(), which is the forward-output channel for backward problems.
+// ``data_type`` drives the dtype-aware K-pack feature. Must match
+// ConvInputPreprocessor.derived_feature_names() in MIOpenFF training. Throws on an unknown feature
+// name.
 MIOPEN_INTERNALS_EXPORT std::vector<float>
 EngineeredConvFeaturesByName(std::size_t N,
                              std::size_t C_in,
@@ -124,7 +126,7 @@ EngineeredConvFeaturesByName(std::size_t N,
                              std::size_t D_in,
                              std::size_t D_out,
                              std::size_t K_d,
-                             std::size_t raw_in_channels,
+                             std::size_t phys_in_channels,
                              miopenDataType_t data_type,
                              const std::vector<std::string>& names);
 

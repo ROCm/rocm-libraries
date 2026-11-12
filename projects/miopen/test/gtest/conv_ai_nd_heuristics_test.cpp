@@ -556,7 +556,7 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, ExtractTunaNet2dFeaturesGolden)
                                                               /*D_in=*/1,
                                                               /*D_out=*/1,
                                                               /*K_d=*/1,
-                                                              /*raw_in_channels=*/64,
+                                                              /*phys_in_channels=*/64,
                                                               miopenFloat,
                                                               metadata.GetDerivedFeatureNames());
     expected.insert(expected.end(), derived.begin(), derived.end());
@@ -738,7 +738,7 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, ExtractTunaNet2dFeaturesHardcoded)
                                                               /*D_in=*/1,
                                                               /*D_out=*/1,
                                                               /*K_d=*/1,
-                                                              /*raw_in_channels=*/64,
+                                                              /*phys_in_channels=*/64,
                                                               miopenFloat,
                                                               metadata.GetDerivedFeatureNames());
     expected.insert(expected.end(), derived.begin(), derived.end());

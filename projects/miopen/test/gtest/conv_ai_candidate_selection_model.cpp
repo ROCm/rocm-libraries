@@ -1127,7 +1127,7 @@ TEST(CPU_ConvAiEngineeredConvFeaturesByName_NONE, BaseMatchesPositional)
                                                     1,
                                                     1,
                                                     1,
-                                                    /*raw_in_channels=*/256,
+                                                    /*phys_in_channels=*/256,
                                                     miopenInt8,
                                                     kBaseDerivedNames);
     ASSERT_EQ(named.size(), positional.size());
@@ -1183,6 +1183,79 @@ TEST(CPU_ConvAiEngineeredConvFeaturesByName_NONE, DivfeatGolden)
     for(std::size_t i = 0; i < golden_divfeat.size(); ++i)
         EXPECT_NEAR(f[kBaseDerivedNames.size() + i], golden_divfeat[i], 1e-5f)
             << "divfeat mismatch at " << kDivfeatNames[i];
+}
+
+// Golden divfeat for the BACKWARD directions of the same grouped INT8 shape (C_in=256 !=
+// C_out=1024, group=16), pinned from the Python ConvInputPreprocessor. The GEMM dims are selected
+// by direction; cpg_in uses the physical in-channel count (256/16 = 16 -> log1p = 2.8332), NOT the
+// role-swapped forward-output channel. C_in != C_out so the buggy source (cpg_in from out-channels)
+// would fail.
+TEST(CPU_ConvAiEngineeredConvFeaturesByName_NONE, DivfeatGoldenBackward)
+{
+    using namespace miopen::ai::common;
+    std::vector<std::string> names = kBaseDerivedNames;
+    names.insert(names.end(), kDivfeatNames.begin(), kDivfeatNames.end());
+
+    const auto check = [&](ConvDirection dir, const std::vector<float>& golden) {
+        const auto f = EngineeredConvFeaturesByName(16,
+                                                    256,
+                                                    1024,
+                                                    35,
+                                                    35,
+                                                    35,
+                                                    35,
+                                                    1,
+                                                    1,
+                                                    16,
+                                                    256,
+                                                    dir,
+                                                    2,
+                                                    1,
+                                                    1,
+                                                    1,
+                                                    /*phys_in_channels=*/256,
+                                                    miopenInt8,
+                                                    names);
+        ASSERT_EQ(f.size(), names.size());
+        for(std::size_t i = 0; i < golden.size(); ++i)
+            EXPECT_NEAR(f[kBaseDerivedNames.size() + i], golden[i], 1e-5f)
+                << "backward divfeat mismatch at " << kDivfeatNames[i];
+    };
+
+    // M=64 N=256 K=1225
+    check(ConvDirection::BackwardData,
+          {0.00000000f,
+           0.00000000f,
+           0.00000000f,
+           0.50000000f,
+           0.00000000f,
+           0.00000000f,
+           0.00000000f,
+           0.00000000f,
+           0.00568182f,
+           0.00568182f,
+           0.01842949f,
+           0.00000000f,
+           2.83321333f,
+           0.00000000f,
+           0.00000000f});
+    // M=1225 N=256 K=64
+    check(ConvDirection::BackwardWeights,
+          {0.00568182f,
+           0.01842949f,
+           0.04296875f,
+           0.04296875f,
+           0.00000000f,
+           0.00000000f,
+           0.00000000f,
+           0.00000000f,
+           0.00000000f,
+           0.00000000f,
+           0.00000000f,
+           1.00000000f,
+           2.83321333f,
+           0.00000000f,
+           0.00000000f});
 }
 
 // Features are emitted in the order of the names list, and an unknown feature name is rejected.

@@ -242,7 +242,7 @@ EngineeredConvFeaturesByName(std::size_t N,
                              std::size_t D_in,
                              std::size_t D_out,
                              std::size_t K_d,
-                             std::size_t raw_in_channels,
+                             std::size_t phys_in_channels,
                              miopenDataType_t data_type,
                              const std::vector<std::string>& names)
 {
@@ -296,7 +296,8 @@ EngineeredConvFeaturesByName(std::size_t N,
 
     // GEMM dims for the divfeat features. Same direction switch as EngineeredConvFeatures; computed
     // exactly (not reconstructed from the log features) so tile-alignment is not perturbed by
-    // rounding. cpg_in/is_depthwise use the RAW in_channels (matching the training preprocessor).
+    // rounding. cpg_in/is_depthwise use the physical input-channel count (phys_in_channels),
+    // matching the training preprocessor, which reads the un-swapped data in_channels.
     std::size_t g               = groups < 1 ? 1 : groups;
     const double v_out          = static_cast<double>(D_out) * H_out * W_out;
     const double v_filt         = static_cast<double>(K_d) * K_h * K_w;
@@ -331,7 +332,7 @@ EngineeredConvFeaturesByName(std::size_t N,
     };
     // dtype-aware K-pack: INT8 needs K % 4, FP16/BF16 K % 2, FP32 K % 1.
     const double kpack    = data_type == miopenInt8 ? 4.0 : (data_type == miopenFloat ? 1.0 : 2.0);
-    const double cpg_in   = static_cast<double>(raw_in_channels) / static_cast<double>(g);
+    const double cpg_in   = static_cast<double>(phys_in_channels) / static_cast<double>(g);
     by_name["waste_m16"]  = tile_waste(gemm_m, 16);
     by_name["waste_m32"]  = tile_waste(gemm_m, 32);
     by_name["waste_m64"]  = tile_waste(gemm_m, 64);
@@ -1308,7 +1309,9 @@ ExtractTunaNetNDFeatures(const conv::ProblemDescription& problem,
     if(!derived_names.empty())
     {
         // Named engineered features: emit what the model's metadata lists, in order (covers the
-        // optional divfeat features). raw in_channels (un-normalized) is needed for cpg_in.
+        // optional divfeat features). cpg_in needs the physical input-channel count: pass the
+        // direction-normalized C_in, not problem.GetInChannels() (the forward-output channel for
+        // backward problems, where MIOpen stores in=y).
         derived = common::EngineeredConvFeaturesByName(N,
                                                        C_in,
                                                        C_out,
@@ -1325,7 +1328,7 @@ ExtractTunaNetNDFeatures(const conv::ProblemDescription& problem,
                                                        D_in,
                                                        D_out,
                                                        K_d,
-                                                       /*raw_in_channels=*/problem.GetInChannels(),
+                                                       /*phys_in_channels=*/C_in,
                                                        problem.GetInDataType(),
                                                        derived_names);
     }
