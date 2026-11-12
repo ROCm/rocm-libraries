@@ -7169,6 +7169,8 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "TDMSingleIssuer incompatible with LDSSegmentInterleave")
     if state.get("TDMWaveRoleBodies") and not state.get("TDMSingleIssuer"):
       reject(state, printRejectionReason, "TDMWaveRoleBodies requires TDMSingleIssuer")
+    if state.get("TDMClusterSyncAfterFree") and not state.get("TDMSingleIssuer"):
+      reject(state, printRejectionReason, "TDMClusterSyncAfterFree requires TDMSingleIssuer")
     if state.get("MXSBTilePair") and not state.get("TDMSingleIssuer"):
       reject(state, printRejectionReason, "MXSBTilePair requires TDMSingleIssuer")
     if state.get("MXScaleLRB128"):

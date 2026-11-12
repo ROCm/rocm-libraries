@@ -196,6 +196,31 @@ long timing runs). `patch_cluster_safe.py` moves the cluster signal/wait to righ
 FREE barrier, which closes the window but costs 2.8% (168.5 us, still 1.204x). Not upstreamed;
 it is a trade-off to decide.
 
+**Update 2026-11-12: it fails now, and `TDMClusterSyncAfterFree` fixes it.** The subtile
+splice (`ClusterBarrier.insertClusterBarrier`) puts wave 0's cluster signal `CBSIG_WMMA` = 16
+WMMAs before each FREE barrier (A and B each have one), while the other waves may still be
+reading the buffer the peers' multicast refills. With the faster b128/sbpair kernels this
+shows: `du512_tdmsi_b128` fails 4096,4096,1,8192 in 8 of 30 runs, always rows 0-127 of one
+or two tiles (the A half of a WG). `TDMClusterSyncAfterFree: [N]` signals right after the
+FREE barrier and has every wave wait N WMMAs later, just before the TDM issue run
+(`du512_tdmsi_b128_csaf.yaml`, N=4): 0 of 30 failures, 154.8 vs 151.3 us (2.3%). N = 2, 4
+and 6 time the same.
+
+Measured alternatives (hand patches of the N=4 kernel, `logs/20261112-2013*`/`-2015*`):
+
+| Variant | Time | Note |
+| --- | --- | --- |
+| no cluster sync in the loop (racy) | 200-205 us | the sync keeps the WGs in step for multicast |
+| one race-free sync per iteration | 192 us | B's TDM must wait for A's FREE: half an iteration less latency hiding |
+| non-issuer waves wait just before READY | 154.9 us | same as N=4 |
+
+The new placement also exposed a dropped LDS wait: `dropOrphanPreFreeDscnt` removed the
+`s_wait_dscnt` in front of SIG_EARLY's WGP signal, which was the first cover WMMA's own wait
+(C[3,7] reads A[3], whose loads no earlier wait covers). The all-wave cluster wait that
+used to sit there hid it. Symptom: one 16x16 block (local rows 112-127, columns 240-255 or
+112-127) wrong in ~20% of runs. `sinkPreFreeDscntBelowSignal` now moves that wait below the
+signal instead; no timing change.
+
 ## DepthU 512 main loop: TDM supply is the limit (open, found 2026-10-08)
 
 All on the DepthU 512 build (`logs/20261007-205701-gen-du512`), (4096, 4096, 1, 65536), GPU 3

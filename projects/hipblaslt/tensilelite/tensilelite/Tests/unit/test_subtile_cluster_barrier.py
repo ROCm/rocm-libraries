@@ -255,6 +255,70 @@ class TestInsertClusterBarrier:
         wait_i = _idx(lines, "s_barrier_wait -3")
         assert wg < signal_i < wait_i
 
+    def _issueGate(self, wave, tc):
+        from rocisa.code import Label
+        from rocisa.container import sgpr
+        from rocisa.instruction import SCmpEQU32, SCBranchSCC0, SXorB32
+        lbl = Label(f"tdm_si_ld_{tc}_0", "")
+        return [SCmpEQU32(sgpr("WaveIdx"), wave, f"{tc} issue"),
+                SCBranchSCC0(lbl.getLabelName(), "other waves skip"),
+                _fake_tdm(),
+                SXorB32(sgpr(1), sgpr(1), sgpr(2), "desc LDS ^= xorMask"),
+                lbl]
+
+    def _afterFreeBody(self, nCover):
+        from rocisa.instruction import SWaitTensorcnt
+        body = [_fake_wmma(f"pre{i}") for i in range(4)]
+        body += [_wg_signal("SIG_EARLY signal"), _fake_wmma("sigcover"),
+                 _wg_wait("FREE")]
+        body += self._issueGate(2, "B") + self._issueGate(3, "MXSB")
+        body += [_fake_wmma(f"cover{i}") for i in range(nCover)]
+        body += [SWaitTensorcnt(tensorcnt=1, comment="READY"), _wg_barrier("READY")]
+        return body
+
+    def test_after_free_signal_follows_free_and_wait_guards_tdm(self):
+        """TDMClusterSyncAfterFree: WW-1 → CS-3 → N WMMAs → CW-3 → TDM issue run."""
+        from tensilelite.Components.Subtile.ClusterBarrier import insertClusterBarrier
+        out = insertClusterBarrier(_module(*self._afterFreeBody(7)), _make_writer(),
+                                   kernel={"ClusterBarrier": True,
+                                           "TDMClusterSyncAfterFree": 4})
+        lines = _lines(out)
+        free = _idx(lines, "s_barrier_wait -1")
+        cs = _idx(lines, "s_barrier_signal -3")
+        cw = _idx(lines, "s_barrier_wait -3")
+        tdms = [i for i, ln in enumerate(lines) if "tensor_load_to_lds" in ln]
+        ready = _idx(lines, "s_wait_tensorcnt")
+        assert free < cs < cw < tdms[0] < tdms[1] < ready
+        assert sum("v_wmma" in ln for ln in lines[cs:cw]) == 4
+        assert sum("v_wmma" in ln for ln in lines[tdms[1]:ready]) == 3
+        assert not any("s_barrier_wait -1" in ln for ln in lines[free + 1:ready])
+
+    def test_after_free_cover_stops_at_ready(self):
+        """Fewer WMMAs than requested before READY: the issue run stays ahead of READY."""
+        from tensilelite.Components.Subtile.ClusterBarrier import insertClusterBarrier
+        out = insertClusterBarrier(_module(*self._afterFreeBody(2)), _make_writer(),
+                                   kernel={"ClusterBarrier": True,
+                                           "TDMClusterSyncAfterFree": 8})
+        lines = _lines(out)
+        cw = _idx(lines, "s_barrier_wait -3")
+        lastTdm = max(i for i, ln in enumerate(lines) if "tensor_load_to_lds" in ln)
+        assert cw < lastTdm < _idx(lines, "s_wait_tensorcnt")
+        assert sum("v_wmma" in ln for ln in lines[_idx(lines, "s_barrier_signal -3"):cw]) == 2
+
+    def test_after_free_preloop_keeps_legacy_placement(self):
+        """A FREE barrier far ahead of its TDMs (preloop) keeps CS/CW before the barrier."""
+        from tensilelite.Components.Subtile.ClusterBarrier import insertClusterBarrier
+        from rocisa.container import vgpr
+        from rocisa.instruction import DSLoadB128
+        body = [_wg_barrier("prefetch join"),
+                DSLoadB128(dst=vgpr(8, 4), src=vgpr(0), comment="prologue LR"),
+                _fake_wmma("x"), _fake_tdm()]
+        out = insertClusterBarrier(_module(*body), _make_writer(),
+                                   kernel={"ClusterBarrier": True,
+                                           "TDMClusterSyncAfterFree": 4})
+        lines = _lines(out)
+        assert _idx(lines, "s_barrier_wait -3") < _idx(lines, "s_barrier_wait -1")
+
     def test_input_module_left_untouched(self):
         from tensilelite.Components.Subtile.ClusterBarrier import insertClusterBarrier
         mod = _module(*([_fake_wmma(f"w{i}") for i in range(4)]

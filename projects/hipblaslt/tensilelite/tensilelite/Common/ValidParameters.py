@@ -471,6 +471,13 @@ validParameters = { # we need to make sure this matches develop
     # DGen::preSwizzleScalesGFX1250B128), not the InMemorySwizzle one, and only solves
     # batch 1. Requires MXSBTilePair. Off by default.
     "MXScaleLRB128": [0, 1],
+    # Subtile mainloop cluster handshake around each FREE barrier that is followed by a
+    # multicast TDM. 0 (default) = wave 0 signals the cluster CBSIG_WMMA WMMAs before the
+    # FREE barrier, while other waves may still be reading the buffer the peers' multicast
+    # refills. N > 0 = wave 0 signals right after the FREE barrier, and every wave waits
+    # on the cluster N WMMAs later, just before the TDM, so no peer can write a buffer
+    # before every WG of the cluster has freed it.
+    "TDMClusterSyncAfterFree": list(range(0, 9)),
     # TDM multicast across a ClusterDim cluster. 1 (default) = peers share tiles via
     # multicast loads; 0 = every WG fetches its own tiles and the cluster (and its
     # ClusterBarrier) only keeps the WGs in step for GL1/GL2 reuse.

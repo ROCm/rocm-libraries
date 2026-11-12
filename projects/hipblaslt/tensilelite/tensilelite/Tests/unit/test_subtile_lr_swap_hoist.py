@@ -17,7 +17,7 @@ from tensilelite.Components.Subtile.WaitAluInsertion import (
     advanceDsLoadsForWarSlack, splitWaitLRPerTile, mergeFreeReadyBarriers,
     hideWgpBarrierBehindWmma, placeFreeBarrierAfterWmma,
     relocateFreeToLastConsumer, spreadTDMSingleIssuerAdvance,
-    spreadGL2PrefetchIntoWmma, tensorcntExactN, dropOrphanPreFreeDscnt,
+    spreadGL2PrefetchIntoWmma, tensorcntExactN, sinkPreFreeDscntBelowSignal,
 )
 
 TDM = {"enableTDMA": True, "enableTDMB": True}
@@ -442,9 +442,9 @@ def _init_rocisa_gfx1250():
   ri.setKernel(isa, 32)
 
 
-def test_drop_orphan_pre_free_dscnt_before_cw():
-  # Proto: FREE has no barrier-local drain.  After SIG_EARLY+CW:
-  #   dscnt ; CW ; WS ; WMMA ; WW ; TDM  →  CW ; WS ; WMMA ; WW ; TDM
+def test_sink_pre_free_dscnt_below_signal():
+  # The cover WMMAs' fine wait moves below WS instead of holding CW/WS back:
+  #   dscnt ; CW ; WS ; WMMA ; WW ; TDM  →  CW ; WS ; dscnt ; WMMA ; WW ; TDM
   _init_rocisa_gfx1250()
   m = Module("MAINLOOP")
   m.add(SWaitCnt(dscnt=44, vlcnt=-1, vscnt=-1,
@@ -455,16 +455,37 @@ def test_drop_orphan_pre_free_dscnt_before_cw():
   m.add(SBarrier(True, True, False, comment="Barrier"))
   m.add(_tdm())
   kern = {**TDM, "ClusterBarrier": True}
-  out = dropOrphanPreFreeDscnt(m, None, kern)
+  out = sinkPreFreeDscntBelowSignal(m, None, kern)
   kinds = _kinds(out)
-  assert "SWaitCnt" not in kinds
-  assert kinds[0] == "SBarrier"  # CW
-  bars = [i for i, k in enumerate(kinds) if k == "SBarrier"]
-  assert kinds[bars[1] + 1] == "MFMAInstruction"  # cover after WS
-  assert bars[2] < kinds.index("TensorLoadToLds")
+  assert kinds == ["SBarrier", "SBarrier", "SWaitCnt", "MFMAInstruction",
+                   "SBarrier", "TensorLoadToLds"]
 
 
-def test_drop_orphan_pre_free_dscnt_keeps_proof_without_cover():
+def test_sink_pre_free_dscnt_after_free_cluster_sync():
+  # TDMClusterSyncAfterFree: FREE is WW followed by the cluster signal block.
+  from rocisa.instruction import SCmpEQU32, SCBranchSCC0
+  from rocisa.code import Label
+  from rocisa.container import sgpr
+  _init_rocisa_gfx1250()
+  m = Module("MAINLOOP")
+  m.add(SWaitCnt(dscnt=12, vlcnt=-1, vscnt=-1,
+                 comment="tiles of the next WMMA landed"))
+  m.add(SBarrier(True, False, False, comment="SIG_EARLY signal"))
+  m.add(_mfma())
+  m.add(SBarrier(True, True, False, comment="Barrier"))
+  m.add(SCmpEQU32(sgpr("WaveIdx"), 0, "wave 0?"))
+  m.add(SCBranchSCC0("label_skipCBPreSignal_0", "only wave 0 signals the cluster"))
+  m.add(SBarrier(True, False, True, "cluster_barrier signal"))
+  m.add(Label("skipCBPreSignal_0", ""))
+  m.add(_mfma())
+  m.add(SBarrier(True, True, True, "cluster_barrier wait"))
+  m.add(_tdm())
+  kern = {**TDM, "ClusterBarrier": True, "TDMClusterSyncAfterFree": 1}
+  kinds = _kinds(sinkPreFreeDscntBelowSignal(m, None, kern))
+  assert kinds[:3] == ["SBarrier", "SWaitCnt", "MFMAInstruction"]
+
+
+def test_sink_pre_free_dscnt_keeps_proof_without_cover():
   # No SIG_EARLY cover → drain is still the FREE proof; leave it.
   _init_rocisa_gfx1250()
   m = Module("MAINLOOP")
@@ -473,7 +494,7 @@ def test_drop_orphan_pre_free_dscnt_keeps_proof_without_cover():
   m.add(SBarrier(True, True, True, "cluster_barrier wait"))
   m.add(SBarrier(True, True, False, comment="Barrier"))
   m.add(_tdm())
-  out = dropOrphanPreFreeDscnt(m, None, {**TDM, "ClusterBarrier": True})
+  out = sinkPreFreeDscntBelowSignal(m, None, {**TDM, "ClusterBarrier": True})
   assert out is m
 
 

@@ -15,14 +15,21 @@ Slide-safe FREE / multicast entry order (no WG↔cluster interleave):
 CW is placed immediately before the WGP signal that pairs with FREE (SIG_EARLY
 ``s_barrier_signal -1`` when present, otherwise the FREE wait itself).  CS is
 emitted ``CBSIG_WMMA`` WMMAs earlier.  Non-FREE sections are a no-op.
+
+That CS goes out before the other waves are known to be done reading the
+buffer, so a peer can multicast into it early.  ``TDMClusterSyncAfterFree=N``
+orders it instead (signal after FREE, the TDM issue run sunk N WMMAs)::
+
+  wave0:  WS-1 → WW-1 → CS-3 → N WMMAs → CW-3 → tensor_load_to_lds
+  others: WS-1 → WW-1 →        N WMMAs → CW-3 → tensor_load_to_lds
 """
 
 from __future__ import annotations
 
-from rocisa.code import Label, Module
+from rocisa.code import Label, Module, TextBlock
 from rocisa.container import sgpr
 from rocisa.instruction import (SBarrier, BranchInstruction, SCBranchSCC0,
-                                SCmpEQU32, TensorLoadToLds,
+                                SCmpEQU32, SNop, SSetVgprMsb, TensorLoadToLds,
                                 MFMAInstruction, MXMFMAInstruction)
 
 # gemm_wt GEMM_V7_CBSIG_WMMA: WMMAs between cluster signal and its wait.
@@ -195,6 +202,82 @@ def _insertLegacyAfterWgBarrier(module, writer, kernel, signalItems, waitItems):
   return patched
 
 
+def _isTdmIssueGateLabel(inst) -> bool:
+  return isinstance(inst, Label) and "tdm_si_ld" in inst.getLabelName()
+
+
+def _tdmIssueRun(items, freeIdx):
+  """``(start, end)`` of the TDMSingleIssuer issue gates after the FREE wait, or None.
+
+  WMMAs may sit between the FREE wait and the run (FREE-hole).  The run holds
+  only scalar code (gate compare/branch, ``tensor_load_to_lds``, descriptor
+  advance, gate label) and the ``s_nop`` that follows a label.
+  """
+  j = freeIdx + 1
+  while j < len(items) and (_isCoverItem(items[j]) or isinstance(items[j], SNop)):
+    j += 1
+  start, end = j, None
+  while j < len(items):
+    inst = items[j]
+    if _isMMA(inst) or isinstance(inst, SBarrier):
+      break
+    text = str(inst).lstrip()
+    if not (isinstance(inst, (TensorLoadToLds, Label, TextBlock))
+            or text.startswith("s_") or not text) or text.startswith("s_wait"):
+      break
+    if isinstance(inst, Label) and not _isTdmIssueGateLabel(inst):
+      break
+    if isinstance(inst, BranchInstruction) and "tdm_si_ld" not in text:
+      break
+    if isinstance(inst, TensorLoadToLds) or _isTdmIssueGateLabel(inst):
+      end = j + 1
+    j += 1
+  if end is None:
+    return None
+  if end < len(items) and isinstance(items[end], SNop):
+    end += 1
+  return start, end
+
+
+def _isCoverItem(inst) -> bool:
+  return _isMMA(inst) or isinstance(inst, (SSetVgprMsb, TextBlock))
+
+
+def _insertAfterFree(module, items, freeIdxs, writer, kernel, cover):
+  """Race-free handshake per FREE site (``TDMClusterSyncAfterFree``)."""
+  moves = {}     # FREE wait index -> (issue run start, end, sunk-to index)
+  for freeIdx in freeIdxs:
+    start, end = _tdmIssueRun(items, freeIdx)
+    to = end
+    crossed = sum(1 for x in items[freeIdx + 1:start] if _isMMA(x))
+    j = end
+    while j < len(items) and crossed < cover and _isCoverItem(items[j]):
+      if _isMMA(items[j]):
+        crossed += 1
+        to = j + 1
+      j += 1
+    moves[freeIdx] = (start, end, to)
+
+  result = Module(module.name)
+  i = 0
+  while i < len(items):
+    result.add(items[i])
+    if i not in moves:
+      i += 1
+      continue
+    start, end, to = moves[i]
+    for s in subtileClusterBarrierSignal(writer, kernel).flatitems():
+      result.add(s)
+    for inst in items[i + 1:start] + items[end:to]:
+      result.add(inst)
+    for w in subtileClusterBarrierWait(writer, kernel).flatitems():
+      result.add(w)
+    for inst in items[start:end]:
+      result.add(inst)
+    i = to
+  return result
+
+
 def insertClusterBarrier(module, writer, kernel,
                          cbsigWmma=CBSIG_WMMA_DEFAULT,
                          cbwSigOnly=CBW_SIGONLY_DEFAULT):
@@ -231,6 +314,17 @@ def insertClusterBarrier(module, writer, kernel,
     # is not a multicast entry.  Skipping avoids slide-21 "long stall" legacy
     # CS+CW glued onto READY/tail handshakes that do not guard a new TDM.
     return module
+
+  # TDMClusterSyncAfterFree covers the mainloop FREE sites, each followed directly
+  # by its issue run.  The preloop's barrier sits well ahead of its prefetch and is
+  # ordered by the persistent-tile handshake, so it keeps the placement below.
+  cover = int(kernel.get("TDMClusterSyncAfterFree", 0))
+  if cover:
+    direct = [_tdmIssueRun(items, f) is not None for f in freeIdxs]
+    assert all(direct) or not any(direct), \
+        "TDMClusterSyncAfterFree: a section mixes FREE sites with and without a direct TDM issue run"
+    if all(direct):
+      return _insertAfterFree(module, items, freeIdxs, writer, kernel, cover)
 
   # One CS/CW pair per FREE site.  A site's CS is picked among the WMMAs after
   # the previous site's FREE (slide 25), so the handshakes never interleave.

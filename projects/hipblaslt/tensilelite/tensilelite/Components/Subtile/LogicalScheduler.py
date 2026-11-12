@@ -4929,7 +4929,7 @@ class LogicalScheduler:
             advanceDsLoadsForWarSlack, splitWaitLRPerTile,
             relocateFreeToLastConsumer, placeFreeBarrierAfterWmma,
             hideWgpBarrierBehindWmma, spreadTDMSingleIssuerAdvance,
-            spreadGL2PrefetchIntoWmma, dropOrphanPreFreeDscnt)
+            spreadGL2PrefetchIntoWmma, sinkPreFreeDscntBelowSignal)
         from rocisa.code import Module, Label
         from rocisa.container import sgpr
         from rocisa.instruction import SCmpEQU32, SCBranchSCC0, SCBranchSCC1, SMovB32
@@ -5136,9 +5136,9 @@ class LogicalScheduler:
         from .ClusterBarrier import insertClusterBarrier
         module = insertClusterBarrier(module, writer, kernel)
         # Proto: FREE has no barrier-local dscnt.  SIG_EARLY leaves the cover
-        # WMMAs' fine wait glued in front of CW — drop that orphan drain.
+        # WMMAs' fine wait glued in front of CW — sink it below the WGP signal.
         if label.startswith("MAINLOOP"):
-            module = dropOrphanPreFreeDscnt(module, writer, kernel)
+            module = sinkPreFreeDscntBelowSignal(module, writer, kernel)
         return module
 
     def _emit_pgr2_tail_lw_align(self, kernel):

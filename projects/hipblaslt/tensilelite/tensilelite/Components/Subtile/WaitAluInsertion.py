@@ -1605,6 +1605,16 @@ def _tdmFollowsBarrier(items, wait_i):
   return False
 
 
+def _clusterSignalFollows(items, wait_i):
+  """True if the wave-0 cluster signal block opens right after the WGP wait."""
+  for j in range(wait_i + 1, min(wait_i + 4, len(items))):
+    if _isClusterBarrier(items[j]):
+      return "s_barrier_signal -3" in str(items[j])
+    if _isMMA(items[j]) or isinstance(items[j], SBarrier):
+      return False
+  return False
+
+
 def _parseWgBarrierAt(items, bar_i):
   """Return (sig_i, wait_i) for a WGP barrier at ``bar_i``, or None."""
   if bar_i >= len(items):
@@ -1715,18 +1725,18 @@ def _tdmBlockBoundsAfter(items, wait_i):
   return lo, end
 
 
-def dropOrphanPreFreeDscnt(module, writer, kernel):
-  """Remove fine ``s_wait_dscnt`` glued immediately before FREE/CW/WS.
+def sinkPreFreeDscntBelowSignal(module, writer, kernel):
+  """Move the fine ``s_wait_dscnt`` glued before FREE's CW/WS below the WS.
 
   Proto: FREE has no wait of its own — the consumer WMMA's ``s_wait_dscnt`` is
   the proof.  After SIG_EARLY + ClusterBarrier the common shape is::
 
       s_wait_dscnt N ; CW ; WS ; [cover WMMAs] ; WW ; TDM
+   →  CW ; WS ; s_wait_dscnt N ; [cover WMMAs] ; WW ; TDM
 
-  with no MMA between the wait and CW.  That wait is a barrier-local drain
-  (the cover WMMAs that needed it already sit after WS).  Drop it so CW is
-  not stalled on LDS; cover WMMAs keep relying on earlier fine waits in the
-  stream (no new ds_loads between the prior wait and this site).
+  with no MMA between the wait and CW.  The wait is the cover WMMAs' own
+  (the first cover WMMA can read a tile whose loads no earlier wait covers),
+  so it cannot be dropped; below WS it no longer holds back CW or the signal.
 
   Call after ``insertClusterBarrier``.  SIG_EARLY puts cover WMMAs between
   WS and WW, so the FREE pair is not adjacent — locate FREE by WW→TDM, then
@@ -1738,14 +1748,16 @@ def dropOrphanPreFreeDscnt(module, writer, kernel):
     return module
 
   items = list(module.flatitems())
-  drop = set()
+  sinkTo = {}  # drain index -> WS index it goes right after
 
   i = 0
   while i < len(items):
     # FREE wait: wait-only or combined WGP barrier with TDM after.
     is_free_wait = (
         (_isWgWaitOnly(items[i]) or _isCombinedWgBarrier(items[i]))
-        and _tdmFollowsBarrier(items, i))
+        and (_tdmFollowsBarrier(items, i)
+             or (kernel.get("TDMClusterSyncAfterFree")
+                 and _clusterSignalFollows(items, i))))
     if not is_free_wait:
       i += 1
       continue
@@ -1790,16 +1802,20 @@ def dropOrphanPreFreeDscnt(module, writer, kernel):
       i = wait_i + 1
       continue
 
-    drop.add(drain_i)
+    sinkTo[drain_i] = sig_i
     i = wait_i + 1
 
-  if not drop:
+  if not sinkTo:
     return module
 
+  after = {sig_i: items[drain_i] for drain_i, sig_i in sinkTo.items()}
   out = Module(module.name)
   for idx, inst in enumerate(items):
-    if idx not in drop:
-      out.add(inst)
+    if idx in sinkTo:
+      continue
+    out.add(inst)
+    if idx in after:
+      out.add(after[idx])
   return out
 
 
