@@ -1,0 +1,102 @@
+{
+    "generated_on": "10 Nov 2026, 21:21:11",
+    "gpu": {
+        "num_cu": 256,
+        "arch": "gfx1250"
+    },
+    "version_info": {
+        "miopen_version": [
+            "3261e604",
+            "39f12521",
+            "47ea60e6",
+            "67d0cddf",
+            "a6581bb0",
+            "c6f41a64",
+            "f0a5d266",
+            "inf"
+        ]
+    },
+    "source": "perf_db",
+    "device_run_id": 335,
+    "num_inputs": 21,
+    "num_solvers": 18,
+    "num_outputs": 18,
+    "encodings": {
+        "in_layout": {
+            "NCHW": 0,
+            "NHWC": 1
+        },
+        "fil_layout": {
+            "NCHW": 0,
+            "NHWC": 1
+        },
+        "out_layout": {
+            "NCHW": 0,
+            "NHWC": 1
+        },
+        "precision": {
+            "BF16": 0,
+            "FP16": 1,
+            "FP32": 2,
+            "INT8": 3
+        },
+        "direction": {
+            "B": 0,
+            "F": 1,
+            "W": 2
+        },
+        "solver": {
+            "ConvDepthwiseFwd2D": 0,
+            "ConvDirectNaiveConvBwd": 1,
+            "ConvDirectNaiveConvFwd": 2,
+            "ConvDirectNaiveConvWrw": 3,
+            "ConvHipConv": 4,
+            "ConvHipImplicitGemmGroupBwdXdlops": 5,
+            "ConvHipImplicitGemmGroupFwdXdlops": 6,
+            "ConvHipImplicitGemmGroupWrwXdlops": 7,
+            "GemmBwd1x1_stride1": 8,
+            "GemmBwd1x1_stride2": 9,
+            "GemmBwdRest": 10,
+            "GemmFwd1x1_0_1": 11,
+            "GemmFwd1x1_0_1_int8": 12,
+            "GemmFwd1x1_0_2": 13,
+            "GemmFwdRest": 14,
+            "GemmWrw1x1_stride1": 15,
+            "GemmWrwUniversal": 16,
+            "fft": 17
+        }
+    },
+    "conv_params_used_as_features": [
+        "in_channels",
+        "in_h",
+        "in_w",
+        "out_channels",
+        "out_h",
+        "out_w",
+        "fil_h",
+        "fil_w",
+        "pad_h",
+        "pad_w",
+        "conv_stride_h",
+        "conv_stride_w",
+        "dilation_h",
+        "dilation_w",
+        "batchsize",
+        "in_layout",
+        "fil_layout",
+        "out_layout",
+        "precision",
+        "direction",
+        "group_count"
+    ],
+    "redundant_columns": {
+        "spatial_dim": 2,
+        "in_d": 1,
+        "out_d": 1,
+        "fil_d": 1,
+        "pad_d": 0,
+        "conv_stride_d": 1,
+        "dilation_d": 1,
+        "bias": 0
+    }
+}
