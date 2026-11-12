@@ -3978,8 +3978,10 @@ class Solution(collections.abc.Mapping):
         return
       if state["1LDSBuffer"] == -1:
         state["1LDSBuffer"] = 0
-      if state["1LDSBuffer"] and state["PrefetchGlobalRead"] == 2:
-        reject(state, printRejectionReason, "TDM requires at least 2 LDS buffers for PGR2")
+      # TDM requires 1LDSBuffer=0: with a single LDS buffer, the next tile's tensor
+      # loads would write the buffer other waves are still reading.
+      if state["1LDSBuffer"]:
+        reject(state, printRejectionReason, "1LDSBuffer must be 0 for TDM")
         return
 
     # TDMLoadWaveSync needs the StinkyTofu backend (ScheduleIterAlg=4); reject
