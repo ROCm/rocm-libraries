@@ -2164,11 +2164,12 @@ namespace DGen
             const auto magnitudes = sortedNonNegativeCodes<DTYPE>(s_one[0], signBit);
 
             // One normal distribution per thread: libstdc++ caches a spare draw in it.
+            // scaleMean and scaleStdDev are only validated, and only drawn from, for normal scales.
             std::vector<std::normal_distribution<double>> normal_dist(
                 m_num_threads,
-                mode.unitScaleNormalData
-                    ? std::normal_distribution<double>(0.0, 1.0)
-                    : std::normal_distribution<double>(mode.scaleMean, mode.scaleStdDev));
+                mode.normalScale && !mode.unitScaleNormalData
+                    ? std::normal_distribution<double>(mode.scaleMean, mode.scaleStdDev)
+                    : std::normal_distribution<double>(0.0, 1.0));
 
             // Per block: the scale draw, then the block's elements in order.
             std::uniform_int_distribution<size_t> code_dist(0, codes.size() - 1);

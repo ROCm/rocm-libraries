@@ -193,6 +193,23 @@ namespace
         }
     }
 
+    // scaleMean / scaleStdDev only matter for normal scales; binomial and unit-scale modes ignore
+    // them, even values std::normal_distribution would not accept.
+    TEST(Maf2_0Mode, InactiveNormalParametersAreIgnored)
+    {
+        for(const bool unitScale : {false, true})
+        {
+            DataGeneratorOptions opts;
+            Maf2_0               mode;
+            mode.scaleStdDev         = -1.0;
+            mode.unitScaleNormalData = unitScale;
+            opts.initMode            = DataInitMode(mode);
+            opts.blockScaling        = 32;
+            DataGenerator<ocp_e2m1_mxfp4> dgen;
+            EXPECT_NO_THROW(dgen.generate({64}, {1}, opts)) << "unitScale " << unitScale;
+        }
+    }
+
     // Leading dimension 7 is not a multiple of rows 6, so the 35-element buffer is not a whole
     // number of scale-block runs; the tail would stay unwritten, so the layout is rejected.
     TEST(Maf2_0Mode, PartialRowLayoutThrows)
