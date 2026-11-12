@@ -51,8 +51,7 @@ rocsparse_status rocsparse::position_t::free_position_async(hipStream_t stream)
     return rocsparse_status_success;
 }
 
-// The internal mixed-width test reads the pivot the analysis just wrote.
-__attribute__((visibility("default"))) void* rocsparse::position_t::get_position()
+void* rocsparse::position_t::get_position()
 {
     return this->m_position;
 }
@@ -75,8 +74,7 @@ rocsparse_status rocsparse::position_t::set_max_position_async(hipStream_t strea
     return rocsparse_status_success;
 }
 
-__attribute__((visibility("default"))) rocsparse_indextype
-    rocsparse::position_t::get_indextype() const
+rocsparse_indextype rocsparse::position_t::get_indextype() const
 {
     return this->m_position_indextype;
 }

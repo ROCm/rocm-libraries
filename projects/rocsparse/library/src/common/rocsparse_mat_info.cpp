@@ -59,7 +59,7 @@ rocsparse_bsrsm_info _rocsparse_mat_info::get_bsrsm_info()
 {
     return this->m_trm.create_bsrsm_info();
 }
-__attribute__((visibility("default"))) rocsparse_bsrsv_info _rocsparse_mat_info::get_bsrsv_info()
+rocsparse_bsrsv_info _rocsparse_mat_info::get_bsrsv_info()
 {
     return this->m_trm.create_bsrsv_info();
 }
@@ -108,9 +108,8 @@ rocsparse::trm_info_t* _rocsparse_mat_info::get_bsrsm_info(rocsparse_operation o
     return this->get_bsrsm_info()->get(operation, fill_mode);
 }
 
-__attribute__((visibility("default"))) rocsparse::trm_info_t*
-    _rocsparse_mat_info::get_bsrsv_info(rocsparse_operation operation,
-                                        rocsparse_fill_mode fill_mode)
+rocsparse::trm_info_t* _rocsparse_mat_info::get_bsrsv_info(rocsparse_operation operation,
+                                                           rocsparse_fill_mode fill_mode)
 {
     return this->get_bsrsv_info()->get(operation, fill_mode);
 }

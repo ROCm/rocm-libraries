@@ -524,6 +524,7 @@ namespace rocsparse
                                       const J*                  bsr_col_ind,
                                       rocsparse_int             block_dim,
                                       rocsparse::trm_info_t*    trm_info,
+                                      rocsparse_indextype       zero_pivot_indextype,
                                       J*                        zero_pivot,
                                       const T*                  x,
                                       T*                        y,
@@ -544,6 +545,13 @@ namespace rocsparse
         }
 
         if(!trm_info->has_indextypes(rocsparse::get_indextype<I>(), rocsparse::get_indextype<J>()))
+        {
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
+        }
+
+        // The pivot buffer is typed by the analysis that wrote it. A reuse of
+        // another fill mode can leave a different width in the shared pivot.
+        if(zero_pivot_indextype != rocsparse::get_indextype<J>())
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
         }
@@ -650,31 +658,31 @@ namespace rocsparse
     }
 }
 
-// The internal mixed-width test calls the float instantiations.
-#define ROCSPARSE_BSRSV_CORE_INST(VIS, T, I, J)                                                   \
-    template VIS rocsparse_status rocsparse::bsrsv_solve_core<T, I, J>(rocsparse_handle,          \
-                                                                       rocsparse_direction,       \
-                                                                       rocsparse_operation,       \
-                                                                       J,                         \
-                                                                       I,                         \
-                                                                       const T*,                  \
-                                                                       const rocsparse_mat_descr, \
-                                                                       const T*,                  \
-                                                                       const I*,                  \
-                                                                       const J*,                  \
-                                                                       rocsparse_int,             \
-                                                                       rocsparse::trm_info_t*,    \
-                                                                       J*,                        \
-                                                                       const T*,                  \
-                                                                       T*,                        \
-                                                                       rocsparse_solve_policy,    \
-                                                                       void*)
+#define ROCSPARSE_BSRSV_CORE_INST(T, I, J)                                                    \
+    template rocsparse_status rocsparse::bsrsv_solve_core<T, I, J>(rocsparse_handle,          \
+                                                                   rocsparse_direction,       \
+                                                                   rocsparse_operation,       \
+                                                                   J,                         \
+                                                                   I,                         \
+                                                                   const T*,                  \
+                                                                   const rocsparse_mat_descr, \
+                                                                   const T*,                  \
+                                                                   const I*,                  \
+                                                                   const J*,                  \
+                                                                   rocsparse_int,             \
+                                                                   rocsparse::trm_info_t*,    \
+                                                                   rocsparse_indextype,       \
+                                                                   J*,                        \
+                                                                   const T*,                  \
+                                                                   T*,                        \
+                                                                   rocsparse_solve_policy,    \
+                                                                   void*)
 
-#define ROCSPARSE_BSRSV_CORE_INST_T(I, J)                                           \
-    ROCSPARSE_BSRSV_CORE_INST(__attribute__((visibility("default"))), float, I, J); \
-    ROCSPARSE_BSRSV_CORE_INST(, double, I, J);                                      \
-    ROCSPARSE_BSRSV_CORE_INST(, rocsparse_float_complex, I, J);                     \
-    ROCSPARSE_BSRSV_CORE_INST(, rocsparse_double_complex, I, J)
+#define ROCSPARSE_BSRSV_CORE_INST_T(I, J)                     \
+    ROCSPARSE_BSRSV_CORE_INST(float, I, J);                   \
+    ROCSPARSE_BSRSV_CORE_INST(double, I, J);                  \
+    ROCSPARSE_BSRSV_CORE_INST(rocsparse_float_complex, I, J); \
+    ROCSPARSE_BSRSV_CORE_INST(rocsparse_double_complex, I, J)
 
 ROCSPARSE_BSRSV_CORE_INST_T(int32_t, int32_t);
 ROCSPARSE_BSRSV_CORE_INST_T(int64_t, int32_t);
@@ -801,6 +809,7 @@ rocsparse_status rocsparse::bsrsv_solve_template(rocsparse_handle          handl
         bsr_col_ind,
         block_dim,
         trm_info,
+        bsrsv_info->get_indextype(),
         reinterpret_cast<rocsparse_int*>(bsrsv_info->get_position()),
         x,
         y,

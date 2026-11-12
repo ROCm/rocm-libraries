@@ -127,26 +127,25 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
-// The internal mixed-width test calls the float instantiations.
-#define ROCSPARSE_BSRSV_BUFFER_INST(VIS, T, I, J)                                                \
-    template VIS rocsparse_status bsrsv_buffer_size_template<T, I, J>(rocsparse_handle,          \
-                                                                      rocsparse_direction,       \
-                                                                      rocsparse_operation,       \
-                                                                      J,                         \
-                                                                      I,                         \
-                                                                      const rocsparse_mat_descr, \
-                                                                      const T*,                  \
-                                                                      const I*,                  \
-                                                                      const J*,                  \
-                                                                      rocsparse_int,             \
-                                                                      rocsparse_mat_info,        \
-                                                                      size_t*)
+#define ROCSPARSE_BSRSV_BUFFER_INST(T, I, J)                                                 \
+    template rocsparse_status bsrsv_buffer_size_template<T, I, J>(rocsparse_handle,          \
+                                                                  rocsparse_direction,       \
+                                                                  rocsparse_operation,       \
+                                                                  J,                         \
+                                                                  I,                         \
+                                                                  const rocsparse_mat_descr, \
+                                                                  const T*,                  \
+                                                                  const I*,                  \
+                                                                  const J*,                  \
+                                                                  rocsparse_int,             \
+                                                                  rocsparse_mat_info,        \
+                                                                  size_t*)
 
-#define ROCSPARSE_BSRSV_BUFFER_INST_T(I, J)                                           \
-    ROCSPARSE_BSRSV_BUFFER_INST(__attribute__((visibility("default"))), float, I, J); \
-    ROCSPARSE_BSRSV_BUFFER_INST(, double, I, J);                                      \
-    ROCSPARSE_BSRSV_BUFFER_INST(, rocsparse_float_complex, I, J);                     \
-    ROCSPARSE_BSRSV_BUFFER_INST(, rocsparse_double_complex, I, J)
+#define ROCSPARSE_BSRSV_BUFFER_INST_T(I, J)                     \
+    ROCSPARSE_BSRSV_BUFFER_INST(float, I, J);                   \
+    ROCSPARSE_BSRSV_BUFFER_INST(double, I, J);                  \
+    ROCSPARSE_BSRSV_BUFFER_INST(rocsparse_float_complex, I, J); \
+    ROCSPARSE_BSRSV_BUFFER_INST(rocsparse_double_complex, I, J)
 
     ROCSPARSE_BSRSV_BUFFER_INST_T(int32_t, int32_t);
     ROCSPARSE_BSRSV_BUFFER_INST_T(int64_t, int32_t);

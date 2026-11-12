@@ -327,7 +327,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # --- bsrsv 64-bit solve kernels and clamped launch grid [ROCM-28980] ----
   # Distinct anchor at the end of the list. Launches the wide kernels in
   # bsrsv_device_large.h directly and drives rocsparse_sbsrsv_solve with
-  # maxGridSize[0] shrunk. Header-only; no compile-in library TU.
+  # maxGridSize[0] shrunk. The mixed-width host path calls the bsrsv
+  # templates, which stay hidden in librocsparse and are compiled in below.
   unit_test_internal_level2_bsrsv_wide.cpp
 )
 
@@ -459,6 +460,19 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   # header, called by nothing in the library and hidden in librocsparse
   # (AISPARSE-921).
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_internal_spmat_print.cpp
+  # bsrsv analysis, buffer-size and solve templates are hidden in librocsparse.
+  # The mixed-width test calls the float instantiations, so these TUs are
+  # compiled into the test instead of exporting the symbols. Their hidden
+  # callees (csrsv analysis and the gather / csr2coo helpers it uses) come
+  # along with them.
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_bsrsv_analysis.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_bsrsv_buffer_size.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_bsrsv_solve.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csrsv_analysis.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csrsv_analysis_kernels.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2/rocsparse_csrsv_buffer_size.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level1/rocsparse_gthr.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion/rocsparse_gcsr2coo.cpp
 )
 
 # Internal rocsparse::primitives building blocks under test. Like the host-pure

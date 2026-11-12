@@ -941,7 +941,7 @@ void expect_mixed_width_retypes_and_solves()
 
     size_t bytes32 = 0;
     size_t bytes64 = 0;
-    expect_success(
+    ASSERT_NO_FATAL_FAILURE(expect_success(
         rocsparse::bsrsv_buffer_size_template<test_T, int32_t, int32_t>(objects.handle,
                                                                         rocsparse_direction_row,
                                                                         rocsparse_operation_none,
@@ -953,8 +953,8 @@ void expect_mixed_width_retypes_and_solves()
                                                                         d_col32.ptr,
                                                                         kBlockDim,
                                                                         objects.info,
-                                                                        &bytes32));
-    expect_success(
+                                                                        &bytes32)));
+    ASSERT_NO_FATAL_FAILURE(expect_success(
         rocsparse::bsrsv_buffer_size_template<test_T, int64_t, int64_t>(objects.handle,
                                                                         rocsparse_direction_row,
                                                                         rocsparse_operation_none,
@@ -966,45 +966,47 @@ void expect_mixed_width_retypes_and_solves()
                                                                         d_col64.ptr,
                                                                         kBlockDim,
                                                                         objects.info,
-                                                                        &bytes64));
+                                                                        &bytes64)));
     rocsparse_ut::device_vector<char> d_buffer(
         std::vector<char>(std::max(bytes32, bytes64) + 1, 0));
     ASSERT_NE(d_buffer.ptr, nullptr);
 
-    expect_success(rocsparse::bsrsv_analysis_template<test_T, int32_t, int32_t>(
-        objects.handle,
-        rocsparse_direction_row,
-        rocsparse_operation_none,
-        kMb,
-        nnzb32,
-        objects.descr,
-        d_val.ptr,
-        d_row32.ptr,
-        d_col32.ptr,
-        kBlockDim,
-        objects.info,
-        rocsparse_analysis_policy_force,
-        rocsparse_solve_policy_auto,
-        d_buffer.ptr));
+    ASSERT_NO_FATAL_FAILURE(
+        expect_success(rocsparse::bsrsv_analysis_template<test_T, int32_t, int32_t>(
+            objects.handle,
+            rocsparse_direction_row,
+            rocsparse_operation_none,
+            kMb,
+            nnzb32,
+            objects.descr,
+            d_val.ptr,
+            d_row32.ptr,
+            d_col32.ptr,
+            kBlockDim,
+            objects.info,
+            rocsparse_analysis_policy_force,
+            rocsparse_solve_policy_auto,
+            d_buffer.ptr)));
     auto* container = objects.info->get_bsrsv_info();
     ASSERT_NE(container, nullptr);
     EXPECT_EQ(container->get_indextype(), rocsparse_indextype_i32);
 
-    expect_success(rocsparse::bsrsv_analysis_template<test_T, int64_t, int64_t>(
-        objects.handle,
-        rocsparse_direction_row,
-        rocsparse_operation_none,
-        static_cast<int64_t>(kMb),
-        nnzb64,
-        objects.descr,
-        d_val.ptr,
-        d_row64.ptr,
-        d_col64.ptr,
-        kBlockDim,
-        objects.info,
-        rocsparse_analysis_policy_force,
-        rocsparse_solve_policy_auto,
-        d_buffer.ptr));
+    ASSERT_NO_FATAL_FAILURE(
+        expect_success(rocsparse::bsrsv_analysis_template<test_T, int64_t, int64_t>(
+            objects.handle,
+            rocsparse_direction_row,
+            rocsparse_operation_none,
+            static_cast<int64_t>(kMb),
+            nnzb64,
+            objects.descr,
+            d_val.ptr,
+            d_row64.ptr,
+            d_col64.ptr,
+            kBlockDim,
+            objects.info,
+            rocsparse_analysis_policy_force,
+            rocsparse_solve_policy_auto,
+            d_buffer.ptr)));
     EXPECT_EQ(container->get_indextype(), rocsparse_indextype_i64);
 
     const test_T alpha = static_cast<test_T>(1);
@@ -1029,7 +1031,7 @@ void expect_mixed_width_retypes_and_solves()
 
     auto* trm = objects.info->get_bsrsv_info(rocsparse_operation_none, rocsparse_fill_mode_lower);
     ASSERT_NE(trm, nullptr);
-    expect_success(rocsparse::bsrsv_solve_core<test_T, int64_t, int64_t>(
+    ASSERT_NO_FATAL_FAILURE(expect_success(rocsparse::bsrsv_solve_core<test_T, int64_t, int64_t>(
         objects.handle,
         rocsparse_direction_row,
         rocsparse_operation_none,
@@ -1042,11 +1044,12 @@ void expect_mixed_width_retypes_and_solves()
         d_col64.ptr,
         kBlockDim,
         trm,
+        container->get_indextype(),
         static_cast<int64_t*>(container->get_position()),
         d_x.ptr,
         d_y.ptr,
         rocsparse_solve_policy_auto,
-        d_buffer.ptr));
+        d_buffer.ptr)));
     ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
     const std::vector<test_T> y64 = rocsparse_ut::to_host(d_y);
     ASSERT_EQ(static_cast<int>(y64.size()), kRows);
@@ -1060,23 +1063,114 @@ void expect_mixed_width_retypes_and_solves()
         hipSuccess);
     EXPECT_EQ(pivot64, std::numeric_limits<int64_t>::max());
 
-    ASSERT_EQ(hipMemcpy(d_y.ptr, y0.data(), y0.size() * sizeof(test_T), hipMemcpyHostToDevice),
-              hipSuccess);
-    expect_success(rocsparse::bsrsv_analysis_template<test_T, int32_t, int32_t>(
+    // Upper i32 analysis retypes the shared pivot. Reuse of the lower i64
+    // analysis must drop that pivot and create an i64 one. Until it does,
+    // the i64 solve rejects the i32 pivot.
+    ASSERT_EQ(rocsparse_set_mat_fill_mode(objects.descr, rocsparse_fill_mode_upper),
+              rocsparse_status_success);
+    ASSERT_NO_FATAL_FAILURE(
+        expect_success(rocsparse::bsrsv_analysis_template<test_T, int32_t, int32_t>(
+            objects.handle,
+            rocsparse_direction_row,
+            rocsparse_operation_none,
+            kMb,
+            nnzb32,
+            objects.descr,
+            d_val.ptr,
+            d_row32.ptr,
+            d_col32.ptr,
+            kBlockDim,
+            objects.info,
+            rocsparse_analysis_policy_force,
+            rocsparse_solve_policy_auto,
+            d_buffer.ptr)));
+    EXPECT_EQ(container->get_indextype(), rocsparse_indextype_i32);
+    const rocsparse_status mismatched = rocsparse::bsrsv_solve_core<test_T, int64_t, int64_t>(
         objects.handle,
         rocsparse_direction_row,
         rocsparse_operation_none,
-        kMb,
-        nnzb32,
+        static_cast<int64_t>(kMb),
+        nnzb64,
+        &alpha,
         objects.descr,
         d_val.ptr,
-        d_row32.ptr,
-        d_col32.ptr,
+        d_row64.ptr,
+        d_col64.ptr,
         kBlockDim,
-        objects.info,
-        rocsparse_analysis_policy_force,
+        trm,
+        container->get_indextype(),
+        static_cast<int64_t*>(container->get_position()),
+        d_x.ptr,
+        d_y.ptr,
         rocsparse_solve_policy_auto,
-        d_buffer.ptr));
+        d_buffer.ptr);
+    EXPECT_EQ(mismatched, rocsparse_status_invalid_value);
+
+    ASSERT_EQ(rocsparse_set_mat_fill_mode(objects.descr, rocsparse_fill_mode_lower),
+              rocsparse_status_success);
+    ASSERT_NO_FATAL_FAILURE(
+        expect_success(rocsparse::bsrsv_analysis_template<test_T, int64_t, int64_t>(
+            objects.handle,
+            rocsparse_direction_row,
+            rocsparse_operation_none,
+            static_cast<int64_t>(kMb),
+            nnzb64,
+            objects.descr,
+            d_val.ptr,
+            d_row64.ptr,
+            d_col64.ptr,
+            kBlockDim,
+            objects.info,
+            rocsparse_analysis_policy_reuse,
+            rocsparse_solve_policy_auto,
+            d_buffer.ptr)));
+    EXPECT_EQ(container->get_indextype(), rocsparse_indextype_i64);
+    ASSERT_EQ(hipMemcpy(d_y.ptr, y0.data(), y0.size() * sizeof(test_T), hipMemcpyHostToDevice),
+              hipSuccess);
+    ASSERT_NO_FATAL_FAILURE(expect_success(rocsparse::bsrsv_solve_core<test_T, int64_t, int64_t>(
+        objects.handle,
+        rocsparse_direction_row,
+        rocsparse_operation_none,
+        static_cast<int64_t>(kMb),
+        nnzb64,
+        &alpha,
+        objects.descr,
+        d_val.ptr,
+        d_row64.ptr,
+        d_col64.ptr,
+        kBlockDim,
+        trm,
+        container->get_indextype(),
+        static_cast<int64_t*>(container->get_position()),
+        d_x.ptr,
+        d_y.ptr,
+        rocsparse_solve_policy_auto,
+        d_buffer.ptr)));
+    ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+    const std::vector<test_T> y64_reuse = rocsparse_ut::to_host(d_y);
+    for(int32_t row = 0; row < kRows; ++row)
+    {
+        EXPECT_EQ(y64_reuse[static_cast<size_t>(row)], expected(true, row)) << "row " << row;
+    }
+
+    ASSERT_EQ(hipMemcpy(d_y.ptr, y0.data(), y0.size() * sizeof(test_T), hipMemcpyHostToDevice),
+              hipSuccess);
+    ASSERT_NO_FATAL_FAILURE(
+        expect_success(rocsparse::bsrsv_analysis_template<test_T, int32_t, int32_t>(
+            objects.handle,
+            rocsparse_direction_row,
+            rocsparse_operation_none,
+            kMb,
+            nnzb32,
+            objects.descr,
+            d_val.ptr,
+            d_row32.ptr,
+            d_col32.ptr,
+            kBlockDim,
+            objects.info,
+            rocsparse_analysis_policy_force,
+            rocsparse_solve_policy_auto,
+            d_buffer.ptr)));
     EXPECT_EQ(container->get_indextype(), rocsparse_indextype_i32);
     ASSERT_EQ(rocsparse_sbsrsv_solve(objects.handle,
                                      rocsparse_direction_row,
@@ -1150,7 +1244,7 @@ void expect_reuse_drops_mismatched_pivot()
     size_t bytes64   = 0;
     size_t ic0_bytes = 0;
     size_t sv_bytes  = 0;
-    expect_success(
+    ASSERT_NO_FATAL_FAILURE(expect_success(
         rocsparse::bsrsv_buffer_size_template<test_T, int64_t, int64_t>(objects.handle,
                                                                         rocsparse_direction_row,
                                                                         rocsparse_operation_none,
@@ -1162,7 +1256,7 @@ void expect_reuse_drops_mismatched_pivot()
                                                                         d_col64.ptr,
                                                                         kBlockDim,
                                                                         objects.info,
-                                                                        &bytes64));
+                                                                        &bytes64)));
     ASSERT_EQ(rocsparse_set_mat_fill_mode(objects.descr, rocsparse_fill_mode_lower),
               rocsparse_status_success);
     ASSERT_EQ(rocsparse_sbsric0_buffer_size(objects.handle,
@@ -1196,21 +1290,22 @@ void expect_reuse_drops_mismatched_pivot()
 
     ASSERT_EQ(rocsparse_set_mat_fill_mode(objects.descr, rocsparse_fill_mode_upper),
               rocsparse_status_success);
-    expect_success(rocsparse::bsrsv_analysis_template<test_T, int64_t, int64_t>(
-        objects.handle,
-        rocsparse_direction_row,
-        rocsparse_operation_none,
-        static_cast<int64_t>(kMb),
-        nnzb64,
-        objects.descr,
-        d_val.ptr,
-        d_row64.ptr,
-        d_col64.ptr,
-        kBlockDim,
-        objects.info,
-        rocsparse_analysis_policy_force,
-        rocsparse_solve_policy_auto,
-        d_buffer.ptr));
+    ASSERT_NO_FATAL_FAILURE(
+        expect_success(rocsparse::bsrsv_analysis_template<test_T, int64_t, int64_t>(
+            objects.handle,
+            rocsparse_direction_row,
+            rocsparse_operation_none,
+            static_cast<int64_t>(kMb),
+            nnzb64,
+            objects.descr,
+            d_val.ptr,
+            d_row64.ptr,
+            d_col64.ptr,
+            kBlockDim,
+            objects.info,
+            rocsparse_analysis_policy_force,
+            rocsparse_solve_policy_auto,
+            d_buffer.ptr)));
     auto* container = objects.info->get_bsrsv_info();
     ASSERT_NE(container, nullptr);
     EXPECT_EQ(container->get_indextype(), rocsparse_indextype_i64);
@@ -1231,21 +1326,22 @@ void expect_reuse_drops_mismatched_pivot()
                                          rocsparse_solve_policy_auto,
                                          d_buffer.ptr),
               rocsparse_status_success);
-    expect_success(rocsparse::bsrsv_analysis_template<test_T, int32_t, int32_t>(
-        objects.handle,
-        rocsparse_direction_row,
-        rocsparse_operation_none,
-        kMb,
-        nnzb32,
-        objects.descr,
-        d_val.ptr,
-        d_row32.ptr,
-        d_col32.ptr,
-        kBlockDim,
-        objects.info,
-        rocsparse_analysis_policy_reuse,
-        rocsparse_solve_policy_auto,
-        d_buffer.ptr));
+    ASSERT_NO_FATAL_FAILURE(
+        expect_success(rocsparse::bsrsv_analysis_template<test_T, int32_t, int32_t>(
+            objects.handle,
+            rocsparse_direction_row,
+            rocsparse_operation_none,
+            kMb,
+            nnzb32,
+            objects.descr,
+            d_val.ptr,
+            d_row32.ptr,
+            d_col32.ptr,
+            kBlockDim,
+            objects.info,
+            rocsparse_analysis_policy_reuse,
+            rocsparse_solve_policy_auto,
+            d_buffer.ptr)));
     EXPECT_EQ(container->get_indextype(), rocsparse_indextype_i32);
 
     const test_T alpha = static_cast<test_T>(1);

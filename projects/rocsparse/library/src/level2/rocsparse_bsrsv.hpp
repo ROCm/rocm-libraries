@@ -73,6 +73,7 @@ namespace rocsparse
                                       const J*                  bsr_col_ind,
                                       rocsparse_int             block_dim,
                                       trm_info_t*               trm_info,
+                                      rocsparse_indextype       zero_pivot_indextype,
                                       J*                        zero_pivot,
                                       const T*                  x,
                                       T*                        y,
