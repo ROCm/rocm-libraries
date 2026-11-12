@@ -112,11 +112,17 @@ before every rewrite.
   - Lookup order, exactly as in decision 3: saved value in an unpacked sdist → git
     (with the "tree belongs to this repo" guard) → `TENSILELITE_SOURCE_REVISION`
     (fails if it disagrees with git) → none.
-  - The dirty value is `<sha>.dirty.<12-hex diff digest>`, computed from
-    `git diff --binary HEAD` plus untracked, non-ignored files, both over the whole
-    rocm-libraries repository (the same scope as the SHA).
-  - **Amend the local #11016 commit `160805d3d5a2`:** it currently limits both to
-    `projects/hipblaslt/tensilelite`.
+  - The dirty value is `<sha>.dirty.<12-hex digest>` over the whole repository.
+    Use sorted raw Git change records and streamed tracked contents, not patch
+    text. Disable external diff/textconv; disable fsmonitor centrally on every
+    resolver query, including the ownership probe, with `-c core.fsmonitor=`.
+  - For nonignored untracked entries, hash sorted Git-relative path, file type,
+    size and integer `lstat().st_mtime_ns` records without reading contents or
+    following links. Accept same-metadata collisions (decision 3).
+  - Keep sdists link-free: the real backend test must verify source symlinks and
+    hardlinks become regular archive members with correct contents, then extract
+    and build a stamped wheel through native and emulated Python 3.10.8 APIs.
+    Do not weaken `_safe_extractall`'s link rejection on older Python.
 - **Stamping**, never into the source tree:
   - a `build_py` override writes `tensilelite/_build_info.py` into `build_lib`
     (skipped for editable builds) and lists it in `get_outputs()`;
@@ -978,8 +984,8 @@ CMake):
 1. **Unpacked sdist** (`PKG-INFO` at the root): use only the saved
    `_build_info.py` value. If `TENSILELITE_SOURCE_REVISION` is set and differs, fail.
 2. **Git, only if the tree belongs to the repo:**
-   - `git -c safe.directory=* -C <root> ls-files --error-unmatch setup.py`;
-   - then `git -c safe.directory=* -C <root> rev-parse HEAD`.
+   - `git -c safe.directory=* -c core.fsmonitor= -C <root> ls-files --error-unmatch setup.py`;
+   - then the same command prefix with `rev-parse HEAD`.
 3. **`TENSILELITE_SOURCE_REVISION`:** 40-hex, optionally with a dirty suffix. If git
    also produced a SHA and the base commits differ, fail instead of overriding.
 4. **Nothing found:** no SHA, which never pairs, for pip and CMake alike. CMake warns
@@ -994,10 +1000,33 @@ CMake):
 
 **Uncommitted changes:**
 
-- dirty value `<sha>.dirty.<first 12 hex of sha256(diff)>`;
-- the diff is `git diff --binary HEAD` plus untracked, non-ignored files, over the
-  whole repository, the same scope as the SHA it qualifies;
+- dirty value `<sha>.dirty.<first 12 hex of sha256(records)>`;
+- tracked changes: `git diff --raw -z --no-abbrev --no-renames --no-ext-diff
+  --no-textconv --ignore-submodules=none HEAD --`. Hash sorted, length-prefixed
+  path/mode/base-object/status records and streamed contents; record symlink
+  targets and nested gitlink commits/changes rather than reading directories.
+  Staging unchanged working-tree contents does not change the fingerprint;
+- untracked, nonignored entries: sorted repository-relative path, file type,
+  size and integer `st_mtime_ns` from `lstat()`. Never read their contents or
+  follow links. The scope remains the whole repository, matching its SHA;
 - version label `5.0.0+g<sha>.dirty` (no digest in the version).
+
+**Cost and limits (review amendment, 2026-11-12):** Git still scans tracked state
+and enumerates untracked paths. Changed tracked contents are streamed in bounded
+chunks; each untracked entry needs only metadata, so large dumps and tarballs do
+not add content-reading cost to repeated backend calls. This is not a fixed
+runtime cap: tracked changed bytes and file count still matter. No persistent
+metadata cache is introduced.
+
+Python provides integer `st_mtime_ns` on Linux and Windows; use it directly,
+not a float conversion. Filesystem precision can be coarser than nanoseconds.
+Two untracked files with the same path, type, size and observed timestamp can
+have different contents but the same fingerprint; this risk is explicitly
+accepted. Copied dirty checkouts can acquire different timestamps and identities.
+The digest is a practical build-pairing fingerprint, not proof of every byte.
+Clean SHA pairing, installed exact matching, editable commit matching/warnings
+and separate ROCm validation remain unchanged. These fixes require no TheRock
+changes.
 
 **Stamping:**
 
@@ -1024,7 +1053,7 @@ review on 2026-11-10 (pip 26.2.1, setuptools 82, tox 4.56.1, git 2.43):
   unpacked sdist.
 - **A random dirty ID breaks pip.** pip runs `setup.py` three times
   (`egg_info`, `dist_info`, `bdist_wheel`), and differing IDs made pip reject the
-  wheel ("unexpected file name"). A digest of the diff is the same in every run, and
+  wheel ("unexpected file name"). The fingerprint is the same on an unchanged tree, and
   it lets tox's separate `pip install -e` and `invoke build-client` steps pair.
 - **Editable installs go stale when stamped,** and `direct_url.json` records no commit
   for path installs. Hence lazy computation at runtime.
@@ -1032,8 +1061,11 @@ review on 2026-11-10 (pip 26.2.1, setuptools 82, tox 4.56.1, git 2.43):
   keeps the check meaningful across commits without forcing a client rebuild after
   every Python edit. Releases and CI, which use installed packages, stay exact.
 - **`safe.directory` must be the repo root or `*`;** the package directory is
-  rejected. `-c` counts as trusted configuration. `*` is reasonable because the
-  backend already runs this tree's `setup.py`.
+  rejected. The initial probe can inspect an unrelated parent repository, so
+  trusting its config is not equivalent to running the package's `setup.py`.
+  Disable fsmonitor on every query with an empty value: older Git treats `false`
+  as a hook pathname. Disable diff/textconv helpers separately. These controls
+  are not a general sandbox for all Git configuration.
 - **A tree without `.git` inside another checkout inherits that repo's HEAD;** the
   `ls-files` guard detects it.
 - **`git diff --quiet HEAD` ignores untracked files,** hence the explicit untracked
