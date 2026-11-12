@@ -195,7 +195,6 @@ if(GPU_TARGETS MATCHES "gfx94|gfx95|gfx90a|gfx11|gfx12")
             # instead of letting it hold a GPU for the 1500s CTest default.
             set_tests_properties(test_ck_tile_gemm_pipeline_tdm_producer_consumer_wmma
                 PROPERTIES TIMEOUT 900)
-            list(APPEND CK_TILE_GEMM_TEST_TARGETS test_ck_tile_gemm_pipeline_tdm_producer_consumer_wmma)
             # The same pipeline with a CShuffleEpilogue: the split-K (k_batch > 1) coverage.
             add_gtest_executable(test_ck_tile_gemm_pipeline_tdm_producer_consumer_cshuffle_wmma
                 test_gemm_pipeline_comp_tdm_producer_consumer_cshuffle_wmma.cpp)
