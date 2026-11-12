@@ -33,8 +33,6 @@
 //
 #include "unit_test_extra_common.hpp"
 
-#ifdef ROCSPARSE_WITH_SPMAT_SCALE
-
 using namespace extra_ut;
 
 namespace
@@ -308,6 +306,11 @@ TEST_F(ExtraSpmatScale, formats_float)
     run_all_formats<float>(handle);
 }
 
+TEST_F(ExtraSpmatScale, formats_double)
+{
+    run_all_formats<double>(handle);
+}
+
 TEST_F(ExtraSpmatScale, formats_float_complex)
 {
     run_all_formats<rocsparse_float_complex>(handle);
@@ -544,5 +547,3 @@ TEST_F(ExtraSpmatScale, unsupported_value_type)
     EXPECT_EQ(rocsparse_spmat_scale(handle, a.p, source.p, source.p, nullptr),
               rocsparse_status_not_implemented);
 }
-
-#endif // ROCSPARSE_WITH_SPMAT_SCALE

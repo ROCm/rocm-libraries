@@ -32,7 +32,10 @@ dnn-providers/integration-tests/
 dnn-providers/<provider>/
   config/<ENGINE_NAME>.toml                 # per-engine tolerances, validator overrides, skips
   test_categories_integration.yaml          # CTest tiers for the lane (hip-kernel-provider: one
-                                            #   <ENGINE_NAME>_test_categories_integration.yaml per engine)
+                                            #   <ENGINE_NAME>_test_categories_integration.yaml per engine,
+                                            #   except hipkernel_Gfx950Attention_..., shared by the three
+                                            #   gfx950 attention engines, and one hipkernel_flydsl_<op>_...
+                                            #   per FlyDSL op family)
 ```
 
 Terms (full list in the [index](README.md#terms)):
@@ -196,12 +199,14 @@ Resolution rules (`IntegrationTestBundle.hpp`):
 
 | Field | Required | Meaning |
 |---|---|---|
+| `version` | no | `1` or `2`; `1` when absent. A case with [`absent_tensors`](#optional-tensors--absent_tensors) needs `2`. Any other value fails every case of the sweep. |
 | `cases[]` | yes | One test per entry. |
 | `cases[].id` | yes | Non-empty string, unique within the sweep. Becomes the GTest test name. |
 | `cases[].values` | no | Placeholder values; `values.tensors[]` holds per-tensor values keyed by `uid` (each `uid` must exist in the template, once). |
 | `cases[].metadata` | **yes** | Same schema as a [metadata sidecar](#metadata-sidecar--namemetajson), including `no_cpu_reference`, `no_gpu_reference` and `expected_rejection`. A case without it fails to load. For rule R4, the `golden` object with a `path` of the same case counts as declared golden data. A case with `expected_rejection: true` must not have a `golden` object: that is a load error ([details](#expected-rejection-bundles)). |
 | `cases[].golden` | no | `{"path": "golden/<CaseId>/tensors.dvc"}`. If absent or `null`, the case is graph-only. If present without a string `path`, it is an error. |
 | `cases[].tensor_patches` | no | Structural per-tensor edits applied after placeholder expansion; see below. |
+| `cases[].absent_tensors` | no | Uids of template tensors that this case does not have; see [Optional tensors](#optional-tensors--absent_tensors). Needs sweep `version` 2 and case metadata with `format_version` 2. |
 
 Case ids are handles, not descriptions. `import_graph.py` generates them as
 `{shape}_{dtype}_{layout}_{≤3 salient attrs}[_{hash6}]`. It adds the `hash6`
@@ -228,6 +233,72 @@ not carry a baked `value`:
 expanded graph. If a tensor keeps `is_runtime_pass_by_value: true` and a `value`,
 it fails validation at load.
 
+#### Optional tensors — `absent_tensors`
+
+One template can hold the union of the tensors of a set of cases, for example
+with and without a sink, a bias or Stats. Each case then names the template
+tensors that its graph does not have:
+
+```json
+"absent_tensors": [7, 9]
+```
+
+For that case, the harness removes each named tensor from a copy of the
+template. It sets each node port that holds the uid to `null`. It does this
+before it expands the placeholders, so an absent tensor needs no case values.
+Nothing else in the template changes, and no uid changes.
+
+A **node port** is a key whose name ends in `_tensor_uid`, directly under the
+`inputs` or `outputs` object of a node. `null` in a node port is the usual form
+of an optional port that the graph does not use. A port that holds the uid as a
+number with no fraction (`7.0`) also holds the uid.
+
+An absent tensor costs nothing at run time. It gets no allocation, no fill, no
+variant-pack entry and no comparison. The fill draws the seeds of the other
+inputs in uid order without it. Give each input its own `seed` in the metadata
+`inputs`, so that the contents of an input do not change when another tensor is
+absent.
+
+These cases fail to load. The case registers as a failing test, and the message
+names the case, the uid (where there is one) and the rule:
+
+- The case has no `metadata` block, or its metadata has `format_version` 1.
+- The sweep `version` is not 2. A sweep without `version` has version 1.
+- `absent_tensors` is not a non-empty array of integers, or names a uid twice.
+- A uid is not a tensor of the template.
+- The case names an absent tensor in other fields: a `values.tensors[]` entry,
+  a key directly under another case value (for example `values.alignment.<uid>`), a
+  `tensor_patches` entry, a metadata `inputs` entry (a seed-only entry too), a
+  metadata `aliases` entry as the view or as the owner, a metadata
+  `start_offsets` entry, or a metadata `live_rows` entry as the output, the
+  `lengths` tensor or the `like` tensor.
+- The case declares golden data (a `golden` value that is not `null`). Absent
+  tensors and golden data do not go together.
+- The template tensor is virtual, or its `virtual` flag is not a literal
+  boolean in the template (for example a `${case.*}` placeholder).
+- A node port of the template holds a value that is not a uid or `null`, for
+  example a `${case.*}` placeholder. The harness cannot tell whether that port
+  holds an absent tensor.
+- Node ports of more than one node hold the uid, for example the output of one
+  node that is the input of another node.
+- A node holds the uid in a field that is not a node port, for example a flat
+  uid list such as `output_tensor_uids`. The harness looks for the uid under
+  each key whose name holds `uid`.
+- Another template field refers to the uid, for example the
+  `ragged_offset_tensor_uid` of another tensor.
+- The graph does not build: an absent tensor fills a port that the op requires.
+- No output remains to compare.
+
+A single-graph bundle has no `absent_tensors`: its graph has exactly its
+tensors.
+
+Always set `format_version` to `2` in the metadata of a case that uses
+`absent_tensors`. A harness that does not know `format_version` 2 rejects the
+metadata. A harness that knows `format_version` 2 but not `absent_tensors`
+ignores the key and the sweep `version`. It expands the full template, so an
+absent tensor with placeholder dims makes the case fail expansion, and that
+harness skips the case.
+
 ## Metadata sidecar — `{Name}.meta.json`
 
 This file holds provenance and run guards for a single-graph bundle. **Every
@@ -237,12 +308,15 @@ parses it.
 
 | Field | Type | Effect |
 |---|---|---|
-| `format_version` | int | **Required, must be `1`.** Otherwise the whole metadata object is rejected. |
+| `format_version` | int | **Required, `1` or `2`.** Metadata that uses a version-2 feature must use `2`; metadata that uses a version-2 feature with `1` is rejected. A harness rejects a version that it does not know. The version-2 features are the `values` [fill kind](#input-fill-specs), [`aliases`](#tensors-that-share-memory--aliases), [`start_offsets`](#tensors-that-start-past-an-aligned-address--start_offsets) and [`live_rows`](#outputs-with-rows-past-a-live-length--live_rows), and [`absent_tensors`](#optional-tensors--absent_tensors) in a sweep case. |
 | `enforcement_level` | string | `applicability`, `buildable`, or `full` (the default when absent). How far a run must get for a support claim to count as confirmed; see [Support claims](#support-claim-sidecars--namesupportjson-and-supportjson). Any other value rejects the metadata. Not applicable to an expected-rejection bundle: `expected_rejection` overrides it. |
 | `minimum_vram_mb` | int | Skip the case when the device has less VRAM. |
 | `gpu_architecture` | string | Golden data is locked to an arch. Skip the case unless the base arch token of the device matches (`gfx942` matches `gfx942:sramecc+:xnack-`, not `gfx940`). If absent, the data is portable. |
 | `seed` | int | Seed for generated inputs. |
-| `inputs` | object | Per-input overrides keyed by tensor uid as a string (`"3"`); non-numeric keys are skipped with a warning. The O and stats inputs of an SDPA backward node are the exception: after the fill they are recomputed as the forward of its Q, K and V, under its scale, diagonal band and additive mask, so an override for them has no effect. A node whose forward the fill cannot derive (ALiBi, padding, sequence lengths, dropout, ragged tensors, mixed or unsupported data types, a scale tensor that is not a pass-by-value scalar, a Q, K, V or mask computed by the graph) makes the bundle unverifiable, with the reason; `deriveSdpaBackwardForwardOutputs()` is the authority. Shapes the CPU reference rejects, such as stats not shaped `[B, H, Sq, 1]`, keep the override, and the CPU reference then fails the bundle. |
+| `inputs` | object | Per-input fill specs keyed by tensor uid as a string (`"3"`). See [Input fill specs](#input-fill-specs). A key that is not a tensor uid rejects the metadata, and so does an entry that is not a valid fill spec. The O and stats inputs of an SDPA backward node are the exception: after the fill they are recomputed as the forward of its Q, K and V, under its scale, diagonal band and additive mask, so an override for them has no effect. A node whose forward the fill cannot derive (ALiBi, padding, sequence lengths, dropout, ragged tensors, mixed or unsupported data types, a scale tensor that is not a pass-by-value scalar, a Q, K, V or mask computed by the graph) makes the bundle unverifiable, with the reason; `deriveSdpaBackwardForwardOutputs()` is the authority. Shapes the CPU reference rejects, such as stats not shaped `[B, H, Sq, 1]`, keep the override, and the CPU reference then fails the bundle. Likewise, the index input of a MAXPOOL ResampleBwd node is recomputed by `deriveResampleBackwardIndex()` when it is a graph input, so its override has no effect; an index produced by another graph node is not overridden. Non-INT32 indices make the bundle unverifiable. If the CPU forward rejects the ranks, the index keeps its fill and the backward reference then fails the bundle. |
+| `aliases` | array of objects | Inputs that read the memory of another input and have no allocation of their own. See [Tensors that share memory](#tensors-that-share-memory--aliases). Needs `format_version` 2. |
+| `start_offsets` | array of objects | Tensors whose data starts a number of bytes past an aligned address when the engine under test runs. See [Tensors that start past an aligned address](#tensors-that-start-past-an-aligned-address--start_offsets). Needs `format_version` 2. |
+| `live_rows` | array of objects | Dense outputs whose positions past a live length per batch hold no defined value and are not compared. See [Outputs with rows past a live length](#outputs-with-rows-past-a-live-length--live_rows). Needs `format_version` 2. |
 | `no_cpu_reference` | bool | Default `false`. `true`: the CPU reference executor is not an oracle for this bundle. A non-boolean value (`"yes"`, `1`, `null`) rejects the metadata. See [Disabling a reference oracle](#disabling-a-reference-oracle--no_cpu_reference-and-no_gpu_reference). |
 | `no_gpu_reference` | bool | Default `false`. `true`: the GPU reference executor is not an oracle for this bundle. Same type rule. If both flags are `true`, the bundle must declare golden data (rule R4). |
 | `expected_rejection` | bool | Default `false`. `true`: the graph is invalid on purpose and the engine under test must reject it. The harness never executes or compares it. A non-boolean value rejects the metadata. Overrides `enforcement_level`; `no_cpu_reference`, `no_gpu_reference`, `seed` and `inputs` are ignored. See [Expected-rejection bundles](#expected-rejection-bundles). |
@@ -250,13 +324,351 @@ parses it.
 
 A bundle without its metadata is an error. These fields are required:
 
-- `format_version` (`1`) — the harness rejects the metadata without it.
+- `format_version` (`1` or `2`) — the harness rejects the metadata without it.
 - `generator` and `reference_source`, non-empty — `reference-data-scripts/verify_golden_bundles.py`
   requires them. They show a reviewer where the graph and its expected values
   came from.
 
 Generators can write extra keys (`config`, `input_range`, …). The harness ignores
 keys that it does not know.
+
+### Input fill specs
+
+Each entry of `inputs` is a JSON object that tells the harness how to fill one
+input tensor. The harness fills an input tensor that has no entry with the
+default fill for its operation and data type.
+
+```json
+"inputs": {
+    "3": { "kind": "free", "lo": -2.0, "hi": 2.0, "seed": 17 },
+    "5": { "kind": "fixed", "value": 0.125 },
+    "7": { "kind": "values", "values": [64, 32], "repeat": true },
+    "9": { "seed": 4 }
+}
+```
+
+| `kind` | Keys | Fill |
+|---|---|---|
+| `free` | `lo`, `hi` (numbers, default `-1` and `1`) | Uniform random values in the range. |
+| `fixed` | `value` (number, default `0`) | One value in every element. |
+| `values` | `values` (non-empty array of numbers), `repeat` (boolean, default `true`) | The exact numbers given. Needs `format_version` 2. |
+| absent | — | The default fill. Use this form to set only a `seed`. |
+
+All kinds accept an optional `seed`, an unsigned integer. It replaces the seed
+that the harness derives for this tensor from the metadata `seed`. It has no
+effect on a `values` fill.
+
+A `kind` that is not one of the names above rejects the metadata. A `kind` that is
+not a string rejects the metadata too. The error message names the input uid and
+the problem. The bundle then registers as a failing test.
+
+Every form also rejects any key outside the ones listed for it above: the absent form
+takes only `seed`. `free` and `fixed` are checked together against their combined key set
+(`lo`, `hi`, `value`, `seed`), so either accepts all four keys regardless of which `kind` is
+given; only a key outside that combined set is rejected.
+
+#### The `values` kind
+
+- Element *i* of the tensor gets `values[i % n]`, where *n* is the list length.
+  *i* counts the elements in logical index order, the last dimension fastest. The
+  strides of the tensor do not change which element gets which value.
+- With `repeat: false`, *n* must be equal to the element count of the tensor.
+  With `repeat: true`, *n* must not be more than the element count.
+- If every number in the list is a JSON integer, the harness keeps the list as
+  exact 64-bit integers. If one number has a fraction or an exponent (`2.5`,
+  `1.0`, `1e3`), the harness keeps the whole list as double-precision numbers.
+  The JSON reader reads an integer of 2^64 or more as a floating-point number, so
+  such an integer also makes the list double-precision.
+- Integer tensors (`INT8`, `UINT8`, `INT32`, `INT64`, `BOOLEAN`) take only an
+  integer list. Each value must be in the range of the data type. `BOOLEAN` takes
+  only `0` and `1`.
+- Floating-point tensors (`FLOAT`, `HALF`, `BFLOAT16`, `DOUBLE` and the 8-bit
+  floating-point types) take any list. The harness rounds each value to the data
+  type. Integers stay exact up to 2^11 in `HALF`, 2^8 in `BFLOAT16`, 2^24 in
+  `FLOAT` and 2^53 in `DOUBLE`. Larger integers round.
+- The harness cannot fill the sub-byte types (`FP4_E2M1`, `FP6_E2M3`,
+  `FP6_E3M2`, `INT4`) with `values`.
+
+These entries reject the metadata: an empty or absent `values` array, a value
+that is not a number (a string, a boolean, `null`, an array or an object), an
+integer from 2^63 to 2^64 - 1, a `repeat` that is not a boolean, and any key other than
+`kind`, `values`, `repeat` and `seed`.
+
+These errors fail the test with a harness failure: a value out of range for the
+data type, a list stored as double-precision numbers on an integer tensor, a list
+longer than the tensor, a `repeat: false` list with the wrong length, and a
+sub-byte tensor. The test does not skip, and the
+engine does not run.
+
+Always set `format_version` to `2` in metadata that uses `values`. The harness
+rejects `values` in version-1 metadata. A harness older than the `values` kind
+reads an unknown kind as `free`. In version-1 metadata it fills the tensor with
+random values and reports no error. Version 2 makes such a harness reject the
+metadata.
+
+#### Ragged tensors in a bundle without tensor blobs
+
+A bundle without tensor blobs can hold ragged tensors. Give each of these tensors
+a `values` fill spec with its exact values:
+
+- the `ragged_offset_tensor_uid` tensor of each ragged tensor;
+- the `seq_len_q` and `seq_len_kv` tensors of each SDPA node that has a ragged
+  tensor.
+
+The harness fills each ragged input as a dense tensor of its `dims` and
+`strides`, with the seed, as it fills any other input. The offset and seq_len
+values select the rows that the engine and the references read. Positions
+outside these rows hold seed values, and no comparison reads them.
+
+When one of these tensors has no `values` fill spec, the test skips as
+unverifiable: `ragged inputs need exact offset values or golden blobs`. The
+engine does not run.
+
+After the fill, and before the engine runs, the harness checks the layout of
+each ragged tensor. The test fails with a harness failure, and does not skip,
+when:
+
+- the offsets and lengths do not give a valid ragged layout, for example a
+  negative origin or two batches whose rows overlap;
+- the last element that a ragged input reaches is past its dense buffer.
+
+The offsets need not increase from batch to batch when the node has seq_len
+tensors.
+
+The harness compares a ragged output on the host only, as it compares a
+[`live_rows`](#outputs-with-rows-past-a-live-length--live_rows) output. Under
+`--validator auto` (the default) and `--validator cpu`, it copies output that a
+GPU reference left on the device to the host. Under `--validator gpu` the output
+fails with `Ragged output NOT COMPARABLE ON DEVICE`.
+
+### Tensors that share memory — `aliases`
+
+An alias makes one input tensor, the **view**, read the memory of another input
+tensor, the **owner**. The view gets no allocation of its own.
+
+```json
+"aliases": [{"uid": 12, "of": 11, "byte_offset": 0}]
+```
+
+| Key | Value |
+|---|---|
+| `uid` | The uid of the view. |
+| `of` | The uid of the owner. |
+| `byte_offset` | Where the view starts, in bytes from the start of the owner's allocation. |
+
+The view reads the owner's memory through its own dims, strides and data type
+from the graph. The harness does not change the strides of the view.
+
+The fill:
+
+- The harness fills the owner once. First it sets every byte of the owner's
+  allocation to zero, so the gaps between the owner's elements hold zeros. Then
+  it fills the owner's elements on the host.
+- The harness never fills a view. The view still takes its place in the seed
+  sequence, so an alias does not change the contents of any other tensor.
+- An `inputs` entry for a view can set a `seed` only. That entry has no effect.
+
+These entries reject the metadata when it loads. The error names the rule and
+the entry: the view and the owner, or, for an entry that cannot be read, its
+index and the uids that can be read. The bundle then registers as a failing test.
+
+- `aliases` is in version-1 metadata. The message is `aliases needs
+  format_version 2`, whatever the value of `aliases`. Other metadata errors can
+  be reported before it.
+- `aliases` is not an array, or it is empty.
+- An entry is not an object, does not have `uid`, `of` and `byte_offset`, has a
+  value that is not a 64-bit signed integer, or has another key.
+- `byte_offset` is negative.
+- `uid` and `of` are the same tensor.
+- The same `uid` is in two entries.
+- A view is also the owner of another view.
+- The `inputs` entry of a view has a `kind`.
+- The view or the owner is not a tensor of the graph.
+- The view or the owner is virtual or an output. An alias cannot describe an
+  output that the graph writes over an input.
+- The view or the owner is passed by value at run time, has a constant value
+  (`value_type`), is ragged, or has a sub-byte data type (`FP4_E2M1`,
+  `FP6_E2M3`, `FP6_E3M2`, `INT4`).
+- The view or the owner has a negative dim, a different number of dims and
+  strides, or a data type with no element size (`UNSET`).
+- The view or the owner has a negative stride.
+- The view and the owner have different data types.
+- `byte_offset` is not a multiple of the element size of the view.
+- `byte_offset` is not a multiple of the `alignment` of the view (default 16).
+  Set a smaller `alignment` on the view to use a smaller offset.
+- The `alignment` of the owner is not a multiple of the `alignment` of the view.
+  The view's pointer is aligned only as far as the owner's allocation is.
+- The owner has a dimension of zero.
+- The view reaches past the end of the owner's allocation. The view reaches
+  `byte_offset + (1 + Σ (dim − 1) × stride) × element size` bytes. The owner's
+  allocation is `(1 + Σ (dim − 1) × stride) × element size` bytes, from the
+  owner's dims and strides. The message gives the owner's size in bytes. A view
+  with a dimension of zero reaches no bytes, but its `byte_offset` must not be
+  more than the owner's size.
+- The input fill of the graph derives some inputs from other inputs after the
+  fill (an SDPA backward node, see `inputs` above). That fill needs each input as
+  its own tensor.
+- The bundle has golden data or any tensor blob (`{Name}.tensor<uid>.bin`), even
+  when some tensors, such as the view, have no blob. A blob stores each tensor
+  apart.
+
+Always set `format_version` to `2` in metadata that uses `aliases`. A harness
+that does not know `format_version` 2 rejects the metadata. A harness that
+knows `format_version` 2 but not `aliases` ignores the key: each tensor gets its
+own memory, and the harness reports no error. A harness that does not know
+`aliases` also ignores the key in version-1 metadata.
+
+### Tensors that start past an aligned address — `start_offsets`
+
+A start offset makes the engine under test read or write a tensor at an address
+that is a number of bytes past an aligned address. Use it to test an engine with
+a misaligned input or output.
+
+```json
+"start_offsets": [{"uid": 3, "start_offset": 2}, {"uid": 7, "start_offset": 1}]
+```
+
+| Key | Value |
+|---|---|
+| `uid` | The uid of the tensor. An input or an output. |
+| `start_offset` | The number of bytes from an address aligned to 256 bytes to the start of the tensor's data. From 1 to 255. |
+
+The run:
+
+- The harness fills the inputs and loads the golden data as usual.
+- Before the engine runs, the harness copies each tensor in `start_offsets` to
+  a buffer that starts `start_offset` bytes past an address aligned to 256 bytes.
+  The engine gets the address of that copy. An output copy holds the sentinel.
+- After the engine runs, the harness copies each output back into its tensor.
+  An element that the engine does not write still holds the sentinel.
+- The benchmark under `--benchmark` gets new copies that start at the same
+  offsets.
+- Each tensor in `start_offsets` gets a second device allocation while the
+  engine runs. `minimum_vram_mb` does not include it.
+- The CPU and GPU references use the tensors themselves, at aligned addresses.
+  The comparison reads the tensors as usual.
+- An alias view of a tensor in `start_offsets` moves with its owner. The view's
+  address is the owner's new address plus the alias's `byte_offset`.
+
+`start_offset` does not have to be a multiple of the element size. A tensor
+with a 2-byte data type can start 1 byte past an aligned address.
+
+These entries reject the metadata when it loads. The error names the rule and
+the tensor, or, for an entry that cannot be read, its index. The bundle then
+registers as a failing test.
+
+- `start_offsets` is in version-1 metadata. The message is `start_offsets needs
+  format_version 2`, whatever the value of `start_offsets`. Other metadata
+  errors can be reported before it.
+- `start_offsets` is not an array, or it is empty.
+- An entry is not an object, does not have `uid` and `start_offset`, has a
+  value that is not a 64-bit signed integer, or has another key.
+- `start_offset` is less than 1 or more than 255.
+- The same `uid` is in two entries.
+- The tensor is not a tensor of the graph.
+- The tensor is virtual, is passed by value at run time, or has a constant
+  value (`value_type`).
+- The tensor is the view of an alias. A view moves with its owner.
+- The tensor has a sub-byte data type (`FP4_E2M1`, `FP6_E2M3`, `FP6_E3M2`,
+  `INT4`).
+- The tensor declares an `alignment` greater than 0 (default 16), and
+  `start_offset` is not a multiple of it. An engine can trust the declared
+  alignment. Set a smaller `alignment` on the tensor, or `0`, to use a smaller
+  offset.
+
+A bundle with golden data or tensor blobs can use `start_offsets`. A ragged
+tensor and an output that the graph writes over an input can use it too.
+
+Always set `format_version` to `2` in metadata that uses `start_offsets`. A
+harness that does not know `format_version` 2 rejects the metadata. A harness
+that knows `format_version` 2 but not `start_offsets` ignores the key: the
+engine gets aligned addresses, and the harness reports no error.
+
+### Outputs with rows past a live length — `live_rows`
+
+A live-row entry tells the comparison which positions of a dense output hold no
+defined value. Use it for an output beside ragged or padded sequences, where the
+references do not write the rows past each sequence's live length. These rows
+hold the sentinel NaN or another value that is not defined.
+
+```json
+"live_rows": [{"uid": 9, "axis": 2, "lengths": 14}, {"uid": 10, "like": 1}]
+```
+
+| Key | Value |
+|---|---|
+| `uid` | The uid of the output. |
+| `axis` | The axis that the live length bounds. From 1 to the rank of the output minus 1. Axis 0 is the batch. Use with `lengths`. |
+| `lengths` | The uid of an input tensor of type INT32 or INT64 with one element for each batch of the output (`dims[0]`). Element `b` is the live length of batch `b`. |
+| `like` | The uid of a ragged tensor. The output uses the live lengths and the sequence axis of that tensor. Use without `axis`. |
+
+An entry has `lengths` and `axis`, or `like` alone.
+
+The comparison:
+
+- A position of the output whose index on the axis is at least the live length
+  of its batch is not compared. The comparison skips it in the expected tensor
+  and in the actual tensor.
+- The other positions are compared with the output's validator and tolerance.
+- The engine harness applies `live_rows` when it compares with the golden data
+  and with each reference. The golden data validation applies it too.
+
+The comparison treats the output as it treats a ragged output:
+
+- An expected value that is NaN at a live position is not compared.
+- When no position is compared, the comparison fails. An output whose live
+  lengths are all 0 fails.
+- The comparison of a live-row output runs on the host only. Under
+  `--validator auto` (the default) and `--validator cpu`, the harness copies
+  output that a GPU reference left on the device to the host, and compares it
+  there. A bundle without golden data can therefore use `live_rows`. Under
+  `--validator gpu` the output fails with `Output with live rows NOT COMPARABLE
+  ON DEVICE`. Rerun with `--validator auto` or `--validator cpu`.
+
+When the test runs, the harness reads the lengths from the `lengths` tensor, or
+from the `like` tensor. The test fails, and does not skip, when:
+
+- the `lengths` or `like` tensor has no data in the run;
+- the `like` tensor is not ragged, its sequence axis is not an axis of the
+  output, or its extent on that axis is not the output's extent;
+- a length is less than 0 or more than the output's extent on the axis.
+
+These entries reject the metadata when it loads. The error names the rule and
+the output, or, for an entry that cannot be read, its index. The bundle then
+registers as a failing test.
+
+- `live_rows` is in version-1 metadata. The message is `live_rows needs
+  format_version 2`, whatever the value of `live_rows`. Other metadata errors
+  can be reported before it.
+- `live_rows` is not an array, or it is empty.
+- An entry is not an object, does not have `uid`, has a value that is not a
+  64-bit signed integer, or has another key.
+- An entry does not have exactly one of `lengths` and `like`, has `lengths`
+  without `axis`, or has `like` with `axis`.
+- The same `uid` is in two entries.
+- The output is not a tensor of the graph, is not an output that the
+  comparison reads, or is ragged. Or its data type is not `FLOAT`, `HALF`,
+  `BFLOAT16`, `DOUBLE`, `FP8_E4M3`, `FP8_E5M2`, `FP8_E4M3_FNUZ` or
+  `FP8_E5M2_FNUZ`.
+  A ragged output already skips the rows past its live lengths.
+- `axis` is not in the range 1 to the rank of the output minus 1.
+- The `lengths` tensor is not a tensor of the graph, is virtual, is an output,
+  is passed by value at run time, or is the view of an alias.
+- The `lengths` tensor does not have the data type INT32 or INT64, or its
+  element count is not the output's `dims[0]`.
+- The `like` tensor is not a tensor of the graph, is virtual, is not ragged,
+  or does not have the output's `dims[0]`.
+
+The graph does not record the sequence axis of a ragged tensor. Thus the load
+does not check that the `like` tensor and the output have the same extent on
+that axis. The run checks it, and the test fails when the extents differ.
+
+A bundle with or without golden data or tensor blobs can use `live_rows`.
+
+Always set `format_version` to `2` in metadata that uses `live_rows`. A harness
+that does not know `format_version` 2 rejects the metadata. A harness that knows
+`format_version` 2 but not `live_rows` ignores the key and compares every
+position of the output.
 
 ### Disabling a reference oracle — `no_cpu_reference` and `no_gpu_reference`
 
@@ -565,10 +977,16 @@ The two non-default validators:
   in both the reference and the engine output compares equal. NaN,
   opposite-signed infinities, and finite-versus-infinite still fail. Use it for
   outputs whose correct value is infinite on both sides, such as the log-sum-exp
-  of a fully masked SDPA row. It is **host-only**. A tensor that it selects fails
-  with `Validator override NOT APPLICABLE ON DEVICE` whenever its comparison runs
-  on the device. Under `auto`, this is every run where the GPU reference
-  produced the expected values. Run such a config with `--validator cpu`.
+  of a fully masked SDPA row. In a bundle test, the `allclose` comparison of a
+  floating-point output also matches same-signed infinities on the host. On the
+  device, a float, half, bfloat16 or double output follows the same rule: a
+  tensor that fails the device check is graded again on the host -- including a
+  double output that fails the device check only on double-precision drift,
+  which the host's float arithmetic then re-grades. In a C++
+  graph test, this validator is **host-only**. A tensor that it selects fails
+  with `Validator override NOT APPLICABLE ON DEVICE` whenever its comparison
+  runs on the device. Under `auto`, this is every run where the GPU reference produced
+  the expected values. Run such a config with `--validator cpu`.
   Alternatively, narrow the `tensors` glob.
 
 Neither validator is defined for integer outputs. If a glob selects an integer
@@ -596,7 +1014,7 @@ Do not confuse them:
 | `dnn-providers/integration-tests/test_categories.yaml` | This project's own binaries `hipdnn_integration_tests_unit_tests` and `hipdnn_golden_data_tests` |
 | `dnn-providers/integration-tests/test_categories_gpu_ref.yaml` | `hipdnn_gpu_ref_tests`. Quick is an fp32 smoke run; reduced-precision and mixed-type cases are in standard |
 | `dnn-providers/integration-tests/test_categories_external.yaml` | Pre-registered non-GTest CTest tests (the Python verifiers, test-name validation) |
-| `dnn-providers/<provider>/test_categories_integration.yaml` (hip-kernel-provider: `HIP_MLOPS_ENGINE_test_categories_integration.yaml`, `ASM_SDPA_ENGINE_test_categories_integration.yaml`, `hipkernel_Gfx950Attention_test_categories_integration.yaml`) | `hipdnn_integration_tests` **run against that provider's engine** — the lane's bundle suites |
+| `dnn-providers/<provider>/test_categories_integration.yaml` (hip-kernel-provider: `HIP_MLOPS_ENGINE_test_categories_integration.yaml`, `ASM_SDPA_ENGINE_test_categories_integration.yaml`, `hipkernel_Gfx950Attention_test_categories_integration.yaml`, `hipkernel_Gfx942AttentionUnified3d_test_categories_integration.yaml`, `hipkernel_Gfx942AttentionDense_test_categories_integration.yaml`, `hipkernel_flydsl_sdpa_test_categories_integration.yaml`, `hipkernel_flydsl_rmsnorm_test_categories_integration.yaml`, `hipkernel_flydsl_rmsnorm_bwd_test_categories_integration.yaml`) | `hipdnn_integration_tests` **run against that provider's engine** — the lane's bundle suites |
 
 A provider's own `test_categories.yaml` governs its native `*_plugin_tests`
 binaries, not the shared suite.
@@ -645,8 +1063,8 @@ execution_settings:
 | Format | Parsed / checked by | When it fails |
 |---|---|---|
 | Graph `.json` | `IntegrationTestBundle.hpp` | Case dropped from registration with an `ERROR` log line; the run stays green with one test fewer |
-| `graph.template.json` + `sweep.json` | `BundleDiscovery.hpp`, `IntegrationTestBundle.hpp` | A malformed `sweep.json` or a bad/duplicate id aborts registration; a bad case (missing placeholder value, missing metadata, bad `golden.path`) is dropped like a bad graph |
-| `.meta.json` / `cases[].metadata` | `BundleMetadata.hpp`; `reference-data-scripts/verify_golden_bundles.py` | Required for new bundles and every sweep case, with `generator` and `reference_source`. **Malformed** metadata (invalid JSON, a wrong field type, an unsupported `format_version`, a non-integer `inputs` key) throws `BundleMetadataError`: that bundle registers as a **failing** test whose message names the file or case and what is wrong. This holds for every bundle type, graph-only bundles included. A non-boolean `no_cpu_reference` or `no_gpu_reference` is a wrong field type. Setting both without declared golden data throws it too ([rule R4](#disabling-a-reference-oracle--no_cpu_reference-and-no_gpu_reference)); the verifier reports R4 as an error. A non-boolean `expected_rejection` is a wrong field type too, and golden data next to an expected-rejection bundle throws it ([details](#expected-rejection-bundles)). **Absent** metadata behaves as follows. At run time a sweep case without a `metadata` block is dropped; a single-graph bundle without `.meta.json` loads with empty metadata, unless it has golden `.bin` files, in which case it fails. Some SDPA single-graph bundles have no `.meta.json`, and many older sweeps lack `generator` or `reference_source`, so the verifier fails on the whole tree; run it on the directories you touched ([details](adding-tests.md#check-the-data-itself)) |
+| `graph.template.json` + `sweep.json` | `BundleDiscovery.hpp`, `IntegrationTestBundle.hpp` | A malformed `sweep.json` or a bad/duplicate id aborts registration; a bad case (missing placeholder value, missing metadata, bad `golden.path`) is dropped like a bad graph. A sweep `version` other than 1 or 2 registers a **failing** test for each case of the sweep. A case that breaks an [`absent_tensors`](#optional-tensors--absent_tensors) rule registers a **failing** test; an expansion error in such a case is dropped like any other |
+| `.meta.json` / `cases[].metadata` | `BundleMetadata.hpp`; `reference-data-scripts/verify_golden_bundles.py` | Required for new bundles and every sweep case, with `generator` and `reference_source`. **Malformed** metadata (invalid JSON, a wrong field type, an unsupported `format_version`, a non-integer `inputs` key, an unknown or malformed [fill spec](#input-fill-specs), an [`aliases`](#tensors-that-share-memory--aliases), [`start_offsets`](#tensors-that-start-past-an-aligned-address--start_offsets) or [`live_rows`](#outputs-with-rows-past-a-live-length--live_rows) entry that the metadata or the graph rejects, a version-2 feature in version-1 metadata) throws `BundleMetadataError`: that bundle registers as a **failing** test whose message names the file or case and what is wrong. This holds for every bundle type, graph-only bundles included. A non-boolean `no_cpu_reference` or `no_gpu_reference` is a wrong field type. Setting both without declared golden data throws it too ([rule R4](#disabling-a-reference-oracle--no_cpu_reference-and-no_gpu_reference)); the verifier reports R4 as an error. A non-boolean `expected_rejection` is a wrong field type too, and golden data next to an expected-rejection bundle throws it ([details](#expected-rejection-bundles)). **Absent** metadata behaves as follows. At run time a sweep case without a `metadata` block is dropped; a single-graph bundle without `.meta.json` loads with empty metadata, unless it has golden `.bin` files, in which case it fails. Some SDPA single-graph bundles have no `.meta.json`, and many older sweeps lack `generator` or `reference_source`, so the verifier fails on the whole tree; run it on the directories you touched ([details](adding-tests.md#check-the-data-itself)) |
 | `expected_rejection` bundle or case | `BundleMetadata.hpp` at load; the harness at run time; `reference-data-scripts/verify_golden_bundles.py`; `scripts/verify_support_claims.py` | `enforcement_level` and the oracle fields do not apply (it overrides them). Golden data next to it is a load error (`BundleMetadataError`) and a verifier error. A support claim that names it fails the C++ test and is a verifier error. A bundle that does not load is a red `FailedLoad` test, not a dropped case. [Details](#expected-rejection-bundles) |
 | `.support.json` / `support.json` | `SupportClaims.cpp` at run time; `scripts/verify_support_claims.py` by hand | Required for new bundles (not for an expected-rejection bundle), but not enforced: a missing sidecar means "no claims" at run time and is not reported by the verifier. A sidecar that does not parse, and a broken claim, fail that bundle's test |
 | Golden `.bin` / `.dvc` | `IntegrationTestBundle.hpp`; `reference-data-scripts/verify_golden_bundles.py` | Falls back to a reference in `auto` mode, except one that the bundle metadata disables; fails in `golden` mode. A blob that is unreadable or has the wrong size fails the test that needs it, when that test runs |
@@ -654,5 +1072,6 @@ execution_settings:
 | `test_categories*.yaml` | `shared/ctest/parse_test_categories.py` | CMake **warning** at configure; that target's tier suites are not generated, so `ctest -L <tier>` runs fewer tests, with no other notice. Check the configure log or `ctest -N -L <tier>` |
 
 The load problems that register a *failing* test are these: a tensor marked
-`is_runtime_pass_by_value` that still carries a baked `value`, and malformed
-metadata (above).
+`is_runtime_pass_by_value` that still carries a baked `value`, malformed
+metadata, a sweep `version` other than 1 or 2, and a case that breaks an
+`absent_tensors` rule (above).

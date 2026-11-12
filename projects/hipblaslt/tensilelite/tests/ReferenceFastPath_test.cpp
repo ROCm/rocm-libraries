@@ -8,6 +8,7 @@
 #include <Tensile/DataTypes.hpp>
 
 #include <cmath>
+#include <limits>
 #include <vector>
 
 using namespace TensileLite;
@@ -110,4 +111,130 @@ TEST(ReferenceFastPath, AppliesXFloat32OperandMathOpToBothOperands)
 
     ASSERT_NE(expected, fullF32);
     EXPECT_EQ(d[0], expected);
+}
+
+TEST(ReferenceFastPath, DeviceScalarAlphaOverridesInlineZeroInSlowPath)
+{
+    const size_t M = 1;
+    const size_t N = 1;
+    const size_t K = 2;
+
+    auto problem = makePackedProblem(
+        rocisa::DataType::Float, rocisa::DataType::Float, rocisa::DataType::Float, M, N, K);
+    problem.setUseScaleAlphaVec(1);
+    problem.setParams().setDeviceScalarAlpha(true);
+
+    std::vector<float> a           = {1.0f, 2.0f};
+    std::vector<float> b           = {3.0f, 4.0f};
+    std::vector<float> c           = {0.0f};
+    std::vector<float> d           = {0.0f};
+    float              deviceAlpha = 2.0f;
+
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 0.0f, 0.0f);
+    inputs.scaleAlphaVec = &deviceAlpha;
+
+    SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, /*tryFastPath=*/false);
+
+    EXPECT_EQ(d[0], 22.0f);
+}
+
+TEST(ReferenceFastPath, DeviceScalarAlphaOverridesInlineZeroInFastPath)
+{
+    const size_t M = 1;
+    const size_t N = 1;
+    const size_t K = 2;
+
+    auto problem = makePackedProblem(
+        rocisa::DataType::Float, rocisa::DataType::Float, rocisa::DataType::Float, M, N, K);
+    problem.setUseScaleAlphaVec(1);
+    problem.setParams().setDeviceScalarAlpha(true);
+    ASSERT_TRUE(isFastPathEligible(problem));
+
+    std::vector<float> a           = {1.0f, 2.0f};
+    std::vector<float> b           = {3.0f, 4.0f};
+    std::vector<float> c           = {0.0f};
+    std::vector<float> d           = {0.0f};
+    float              deviceAlpha = 2.0f;
+
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 0.0f, 0.0f);
+    inputs.scaleAlphaVec = &deviceAlpha;
+
+    SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, /*tryFastPath=*/true);
+
+    EXPECT_EQ(d[0], 22.0f);
+}
+
+TEST(ReferenceFastPath, DeviceScalarAlphaZeroSkipsNaNReductionInFastPath)
+{
+    const size_t M = 1;
+    const size_t N = 1;
+    const size_t K = 2;
+
+    auto problem = makePackedProblem(
+        rocisa::DataType::Float, rocisa::DataType::Float, rocisa::DataType::Float, M, N, K);
+    problem.setUseScaleAlphaVec(1);
+    problem.setParams().setDeviceScalarAlpha(true);
+    ASSERT_TRUE(isFastPathEligible(problem));
+
+    const float        nan         = std::numeric_limits<float>::quiet_NaN();
+    std::vector<float> a           = {nan, nan};
+    std::vector<float> b           = {1.0f, 1.0f};
+    std::vector<float> c           = {7.0f};
+    std::vector<float> d           = {nan};
+    float              deviceAlpha = 0.0f;
+
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 2.0f, 3.0f);
+    inputs.scaleAlphaVec = &deviceAlpha;
+
+    SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, /*tryFastPath=*/true);
+
+    EXPECT_FALSE(std::isnan(d[0]));
+    EXPECT_EQ(d[0], 21.0f);
+}
+
+TEST(ReferenceFastPath, DeviceScalarAlphaZeroAllowsNullInputsInFastPath)
+{
+    const size_t M = 1;
+    const size_t N = 1;
+    const size_t K = 2;
+
+    auto problem = makePackedProblem(
+        rocisa::DataType::Float, rocisa::DataType::Float, rocisa::DataType::Float, M, N, K);
+    problem.setUseScaleAlphaVec(1);
+    problem.setParams().setDeviceScalarAlpha(true);
+    ASSERT_TRUE(isFastPathEligible(problem));
+
+    std::vector<float> c           = {3.0f};
+    std::vector<float> d           = {0.0f};
+    float              deviceAlpha = 0.0f;
+
+    ContractionInputs inputs(nullptr, nullptr, c.data(), d.data(), 2.0f, 4.0f);
+    inputs.scaleAlphaVec = &deviceAlpha;
+
+    SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, /*tryFastPath=*/true);
+
+    EXPECT_EQ(d[0], 12.0f);
+}
+
+TEST(ReferenceFastPath, DeviceScalarAlphaZeroAllowsNullInputsInSlowPath)
+{
+    const size_t M = 1;
+    const size_t N = 1;
+    const size_t K = 2;
+
+    auto problem = makePackedProblem(
+        rocisa::DataType::Float, rocisa::DataType::Float, rocisa::DataType::Float, M, N, K);
+    problem.setUseScaleAlphaVec(1);
+    problem.setParams().setDeviceScalarAlpha(true);
+
+    std::vector<float> c           = {3.0f};
+    std::vector<float> d           = {0.0f};
+    float              deviceAlpha = 0.0f;
+
+    ContractionInputs inputs(nullptr, nullptr, c.data(), d.data(), 2.0f, 4.0f);
+    inputs.scaleAlphaVec = &deviceAlpha;
+
+    SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, /*tryFastPath=*/false);
+
+    EXPECT_EQ(d[0], 12.0f);
 }
