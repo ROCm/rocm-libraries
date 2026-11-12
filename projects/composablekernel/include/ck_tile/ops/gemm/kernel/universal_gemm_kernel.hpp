@@ -500,11 +500,11 @@ struct UniversalGemmKernel
         }();
     };
 
-    /// True for the gfx125 TDM pipelines (CompTDM V1, V2 and V3 through inheritance, and the
-    /// producer/consumer pipeline): they expose skipCheckValidLaunchParams and consume tuples of
-    /// A/B windows. UniversalGemmKernel also pairs them with a non-TDM epilogue (e.g.
-    /// CShuffleEpilogue for split-K), subject to the whole-tile checks in IsSupportedArgument
-    /// unless the pipeline declares kSupportsTdmSplitK (comp_tdm_v3).
+    /// True for the gfx125 TDM pipelines (CompTDM V1, V2 and V3 through inheritance, the
+    /// producer/consumer pipeline and the run-ahead pipeline): they expose
+    /// skipCheckValidLaunchParams and consume tuples of A/B windows. UniversalGemmKernel also pairs
+    /// them with a non-TDM epilogue (e.g. CShuffleEpilogue for split-K), subject to the whole-tile
+    /// checks in IsSupportedArgument unless the pipeline declares kSupportsTdmSplitK (comp_tdm_v3).
     /// Kernels that host them take a dedicated TDM path.
     static constexpr bool kIsTdmPipeline = has_skip_check_valid_launch_params::value;
 
