@@ -24,6 +24,7 @@ FILES = {
     "hb/ab.md": (HB / "ab.md", 5 * KB),
     "compare.md": (ST / "compare.md", 5 * KB),
     "state.md": (ST / "state.md", 5 * KB),
+    "clone.md": (ST / "clone.md", 5 * KB),
     "DATABASE.md": (ST / "DATABASE.md", 7 * KB),
     "ENTRY-FORMAT.md": (ST / "ENTRY-FORMAT.md", 5 * KB),
     "PROFILING.md": (HB / "PROFILING.md", 5 * KB),

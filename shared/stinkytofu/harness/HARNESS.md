@@ -17,6 +17,7 @@ small. Everything else is read only when needed (see "Read when").
 | [`ab.md`](ab.md) | you verify a change: the A/B flow, the pattern check, the final check |
 | [`compare.md`](compare.md) | you run tier 1: how to compare asm, which configs to run |
 | [`state.md`](state.md) | `progress.md` exists, or you write results |
+| [`clone.md`](clone.md) | `git fetch` fails or prints an error, or the clone is sparse or partial |
 | [`PROFILING.md`](../../../projects/hipblaslt/harness/PROFILING.md) | before a perf A/B or a profiling run |
 | [`DATABASE.md`](DATABASE.md) | `$HARNESS_DB` is set, or you are asked to remember something |
 | [`MAINTAINING.md`](MAINTAINING.md) | you are asked to change this harness |
@@ -29,12 +30,6 @@ small. Everything else is read only when needed (see "Read when").
    change anything. If there are any, tell the developer before starting. A fix may already have landed.
    Rebasing during development is the developer's choice. Before merge, the base skill `rocm-pr-quality`
    (pre-merge gate) does the matching overlap check.
-   - If `git fetch` fails, tell the developer and continue. In a sparse or partial clone it can print
-     `bad tree object` or `failed to run repack`. That message comes from background garbage
-     collection, so check whether the fetch completed: `git rev-parse FETCH_HEAD` must resolve, and
-     `git log -1 --format=%cd FETCH_HEAD` should be a recent date. If it is old, run the fetch again.
-   - In such a clone, do not run `git grep` over history or the whole tree. It downloads missing
-     objects one at a time and can hang. Search the working tree instead.
    - If `progress.md` exists, read it before starting, to see where earlier work stopped (`state.md`).
 2. **Outward actions need the developer.** Push, open, edit, or comment on a PR, or post to a tracker,
    only when the developer says so. Showing the exact text first is already a root `AGENTS.md` rule.
@@ -54,7 +49,12 @@ small. Everything else is read only when needed (see "Read when").
    developer said not to use it, skip it without comment. If the developer says to remember something,
    or not to, follow `DATABASE.md`. At the end of a task, if you learned something that may be worth
    keeping, tell the developer and ask whether to note it down. Write an entry only if they agree.
-6. **Mind the machine's memory.** Builds, Tensile generation, and test runs (Python especially) can
+6. **The A/B flow is a default.** The developer can approve an override of any step of it (the order, the
+   inputs, the thresholds, which steps run). When they do, ask which they mean: this session only, every
+   session (saved locally, where the developer says), or an improvement to the shared harness (then you
+   may edit the harness, through a PR). An override never changes the shared text by itself. It never
+   changes the safety rules: outward actions, shared machines, confidentiality, and memory.
+7. **Mind the machine's memory.** Builds, Tensile generation, and test runs (Python especially) can
    use a lot of memory, and running out can kill the whole session. Cap the parallelism to fit (for
    example `--jobs 4`, or `CMAKE_BUILD_PARALLEL_LEVEL`), run one heavy job at a time, and check the
    free memory (`free -g`) before a long run. Never build the baseline and the candidate at the same

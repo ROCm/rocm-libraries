@@ -10,6 +10,7 @@ Read this only when you are asked to change the harness. Agents verifying a chan
 | `ab.md` | verifying a change | 5 KB |
 | `compare.md` | running tier 1 | 5 KB |
 | `state.md` | `progress.md` exists, or writing results | 5 KB |
+| `clone.md` | `git fetch` fails, or the clone is sparse or partial | 5 KB |
 | `DATABASE.md` | `$HARNESS_DB` is set, or asked to remember | 7 KB |
 | `ENTRY-FORMAT.md` | writing or changing a database entry | 5 KB |
 | `PROFILING.md` (hipBLASLt folder) | before a perf A/B | 5 KB |

@@ -4,12 +4,28 @@ Read this when you verify a change. The goal is performance: does a change make 
 slower, or leave it the same? If the generated asm is identical, performance is identical and no GPU
 run is needed.
 
+## Two phases
+
+1. **Targeted A/B: does the change work?** Before you run anything, agree with the developer on a
+   target (a topic such as fp8 / TN / MAF) and on the goal: what must be true for the change to count
+   as working. For a refactor the goal is identical asm. For an optimization it is different asm,
+   correct results, and a perf gain of at least one SD. The target need not be a perf YAML. Any input is
+   fine, as long as the experiment produces asm for the baseline and the candidate. Run the A/B on that
+   target only.
+2. **Regression A/B: did we regress anything?** Only after phase 1 meets its goal. Run the whole perf
+   set (`compare.md` in `../../../shared/stinkytofu/harness/`, "Phase 2") and look for regressions.
+
+Say which phase a result comes from. A phase 1 result says nothing about the rest. This flow is a
+default, and the developer can approve an override (rule 6 in `HARNESS.md`).
+
+## Steps inside a phase
+
 ```text
-tier 1  CPU  asm A/B, one result per config (TensileLite --cpu-only, baseline vs candidate;
-             inputs and rule: compare.md in ../../../shared/stinkytofu/harness/)
-               identical  -> same asm, same performance: that config is fine, skip tier 2
-               different  -> pattern check, then tier 2 for that config
-tier 2  GPU  perf A/B, only for configs where tier 1 found a difference.
+tier 1  CPU  asm A/B, one result per input (TensileLite --cpu-only, baseline vs candidate;
+             rules: compare.md in ../../../shared/stinkytofu/harness/)
+               identical  -> same asm, same performance: that input is fine, skip tier 2
+               different  -> pattern check, then tier 2 for that input
+tier 2  GPU  perf A/B, only for inputs where tier 1 found a difference.
              BEFORE it, read PROFILING.md
              first check that the kernel under test gives correct results (see PROFILING.md),
              then compare perf

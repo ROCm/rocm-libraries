@@ -1,6 +1,7 @@
 # Comparing asm (tier 1)
 
-Read this when you run tier 1. The flow is in `ab.md`.
+Read this when you run tier 1. The flow is in `ab.md`. The rules below apply to any input. Phase 1 uses
+whatever input the target needs. The perf set in "Phase 2" is for the regression check.
 
 ## What "identical" means (tier 1)
 
@@ -47,15 +48,15 @@ Read this when you run tier 1. The flow is in `ab.md`.
 - on any difference, show the diff. Do not call it "equivalent" unless the developer agrees.
 ```
 
-## Tier 1 config set
+## Phase 2: the regression set
 
-The inputs are the perf YAMLs under `projects/hipblaslt/tensilelite/tensilelite/Utilities/tensile_generator/perf_yamls/<target>/`.
+The inputs are the perf YAMLs under `projects/hipblaslt/tensilelite/tensilelite/Utilities/tensile_generator/perf_yamls/<variant>/`.
 
 ```text
-- the target is a directory name there (a machine variant, not just an arch). Ask the developer
-  which target the change is for. Do not guess. If it has no directory, ask.
-- run every YAML under that target's maf/, mab/, and medium/ directories (skip a directory the
-  target does not have), including the finetune,
+- the variant is a directory name there (a machine variant, not just an arch). Ask the developer
+  which variant the change is for. Do not guess. If it has no directory, ask.
+- run every YAML under that variant's maf/, mab/, and medium/ directories (skip a directory the
+  variant does not have), including the finetune,
   k128k, and other variants. Ignore tuning/ subdirectories: perf YAMLs are for perf tests only.
   No sampling: the full set is already the minimum.
 - one tier 1 result per YAML, not one for the whole set
