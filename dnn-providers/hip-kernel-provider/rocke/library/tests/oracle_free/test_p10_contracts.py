@@ -20,6 +20,7 @@ from ._analytical import (
     UniformCase,
     decode_bits,
     encode_bits,
+    legal_interval,
     legal_keys,
 )
 from ._dense_subject import DENSE_SUBJECTS
@@ -28,26 +29,32 @@ from ._p10_analytical import (
     LANE_KEY,
     LANE_KV_HEAD,
     LANE_PARITY,
+    MASKED_EXPONENTIALS,
     P10_COORDINATE_LANES,
     P10_GROUPED_CASES,
     P10_QUICK_CASES,
     P10_UNGROUPED_CASES,
     RowMoments,
+    TileSchedule,
     _codeword,
     codeword_inputs,
     codeword_target,
     codeword_target_bits,
     codeword_value,
+    emulate_path_exact,
     exact_target_bits,
+    masked_leading_tiles,
     require_p10_scope,
     row_codeword_collisions,
     row_moments,
+    visited_tiles,
 )
 from ._p10_subject import (
     P10_ARCHES,
     P10_SUBJECT_CASES,
     _verify_p10_resolved_spec,
     p10_kernel_key,
+    p10_schedule,
     resolve_p10_subject,
 )
 
@@ -577,3 +584,209 @@ def test_bf16_window_fixture_loses_47_adjacent_row_pairs() -> None:
     assert all(abs(stored[query] - exact[query]) == Fraction(1, 4) for query in ties)
     # The same shape in FP16 keeps every row: eleven significant bits hold 447/4.
     assert row_codeword_collisions(replace(case, dtype="fp16")) == ()
+
+
+# The tile geometry the derivation's tables are written for, and geometries a
+# retune could select instead.
+_DERIVED_SCHEDULE = TileSchedule(128, 64)
+_OTHER_SCHEDULES = (TileSchedule(64, 64), TileSchedule(256, 64), TileSchedule(128, 32))
+_MASKED_EXPONENTIAL_IDS = ("masked-exp-zero", "masked-exp-subnormal")
+
+
+def _schedule_id(schedule: TileSchedule) -> str:
+    return f"{schedule.block_m}x{schedule.block_n}"
+
+
+@pytest.mark.parametrize(
+    "block_m, block_n, message",
+    [
+        (0, 64, r"block_m=0, block_n=64, expected positive tile sizes"),
+        (128, -1, r"block_m=128, block_n=-1, expected positive tile sizes"),
+        (96, 64, r"block_m=96, expected a multiple of block_n=64"),
+    ],
+)
+def test_tile_schedule_rejects_a_geometry_that_does_not_tile(
+    block_m: int, block_n: int, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        TileSchedule(block_m, block_n)
+
+
+def test_tile_helpers_require_whole_tiles_and_a_valid_block() -> None:
+    window, causal = _PAIRING_CASES
+    with pytest.raises(
+        ValueError, match=r"seqlen_q=256, expected a multiple of block_m=192"
+    ):
+        visited_tiles(window, TileSchedule(192, 64), 0)
+    with pytest.raises(
+        ValueError, match=r"window=64, expected a multiple of block_n=128"
+    ):
+        emulate_path_exact(window, TileSchedule(128, 128))
+    with pytest.raises(IndexError):
+        visited_tiles(causal, _DERIVED_SCHEDULE, 2)
+    with pytest.raises(ValueError, match=r"dtype='bf16', expected 'fp16'"):
+        emulate_path_exact(causal, _DERIVED_SCHEDULE, single_rounded=True)
+
+
+def test_visited_tiles_follow_the_kernel_loop_bounds() -> None:
+    window, causal = _PAIRING_CASES
+
+    def tiles(case: UniformCase) -> list[list[int]]:
+        return [list(visited_tiles(case, _DERIVED_SCHEDULE, block)) for block in (0, 1)]
+
+    assert tiles(causal) == [[0, 1], [0, 1, 2, 3]]
+    assert tiles(window) == [[0, 1], [1, 2, 3]]
+
+
+@pytest.mark.parametrize(
+    "schedule", (_DERIVED_SCHEDULE, *_OTHER_SCHEDULES), ids=_schedule_id
+)
+@pytest.mark.parametrize("case", _PAIRING_CASES, ids=lambda case: case.case_id)
+def test_visited_tiles_hold_every_legal_key(
+    case: UniformCase, schedule: TileSchedule
+) -> None:
+    for query in range(case.seqlen_q):
+        tiles = visited_tiles(case, schedule, query // schedule.block_m)
+        first, last = legal_interval(case, query)
+        assert tiles.start * schedule.block_n <= first
+        assert last < tiles.stop * schedule.block_n
+
+
+def test_fully_masked_leading_tiles_of_the_derived_schedule() -> None:
+    window, causal = _PAIRING_CASES
+    rows = range(256)
+    assert not any(masked_leading_tiles(causal, _DERIVED_SCHEDULE, row) for row in rows)
+    depth = {row: masked_leading_tiles(window, _DERIVED_SCHEDULE, row) for row in rows}
+    assert {row for row in rows if depth[row] == 1} == {127, *range(191, 255)}
+    assert {row for row in rows if depth[row] == 2} == {255}
+    assert max(depth.values()) == 2
+    # A 64-row query tile meets a masked leading tile on one row per block only.
+    narrow = TileSchedule(64, 64)
+    assert {
+        row: masked_leading_tiles(window, narrow, row)
+        for row in rows
+        if masked_leading_tiles(window, narrow, row)
+    } == {127: 1, 191: 1, 255: 1}
+
+
+@pytest.mark.parametrize(
+    "masked_exponential", MASKED_EXPONENTIALS, ids=_MASKED_EXPONENTIAL_IDS
+)
+@pytest.mark.parametrize("case", P10_QUICK_CASES, ids=lambda case: case.case_id)
+def test_path_exact_emulation_stores_every_target(
+    case: UniformCase, masked_exponential: float
+) -> None:
+    """With the exponential of zero equal to one and round to nearest, every
+    coordinate stores the correctly rounded target, whichever value the masked
+    exponential takes: what a masked leading tile leaves behind is absorbed."""
+    stored = emulate_path_exact(
+        case, _DERIVED_SCHEDULE, masked_exponential=masked_exponential
+    )
+    assert stored.shape == case.output_shape and stored.dtype == np.uint16
+    assert np.array_equal(stored, codeword_target_bits(case))
+
+
+@pytest.mark.parametrize(
+    "masked_exponential", MASKED_EXPONENTIALS, ids=_MASKED_EXPONENTIAL_IDS
+)
+@pytest.mark.parametrize("schedule", _OTHER_SCHEDULES, ids=_schedule_id)
+@pytest.mark.parametrize("case", _PAIRING_CASES, ids=lambda case: case.case_id)
+def test_path_exact_emulation_does_not_depend_on_the_tile_geometry(
+    case: UniformCase, schedule: TileSchedule, masked_exponential: float
+) -> None:
+    stored = emulate_path_exact(case, schedule, masked_exponential=masked_exponential)
+    assert np.array_equal(stored, codeword_target_bits(case))
+
+
+@pytest.mark.parametrize(
+    "case",
+    [case for case in P10_QUICK_CASES if case.dtype == "fp16"],
+    ids=lambda case: case.case_id,
+)
+def test_fp16_single_rounded_store_keeps_every_target(case: UniformCase) -> None:
+    for masked_exponential in MASKED_EXPONENTIALS:
+        stored = emulate_path_exact(
+            case,
+            _DERIVED_SCHEDULE,
+            masked_exponential=masked_exponential,
+            single_rounded=True,
+        )
+        assert np.array_equal(stored, codeword_target_bits(case))
+
+
+@pytest.mark.parametrize("subject_case", P10_SUBJECT_CASES, ids=_subject_case_id)
+def test_emulation_on_the_dispatch_resolved_schedule_stores_every_target(
+    subject_case: tuple[str, UniformCase],
+) -> None:
+    arch, case = subject_case
+    schedule = p10_schedule(resolve_p10_subject(arch, case))
+    stored = emulate_path_exact(case, schedule)
+    assert np.array_equal(stored, codeword_target_bits(case))
+
+
+def test_emulation_moves_when_masked_keys_keep_weight() -> None:
+    """The emulation is not blind to the mask: a masked exponential that does not
+    vanish turns each row's mean into a mean over every visited key."""
+    window, causal = _PAIRING_CASES
+    for case in (window, causal):
+        stored = emulate_path_exact(case, _DERIVED_SCHEDULE, masked_exponential=1.0)
+        differing = stored != codeword_target_bits(case)
+        assert differing[..., LANE_KEY].any()
+        # The lanes that do not depend on the key are means of a constant.
+        assert not differing[..., LANE_BATCH].any()
+        assert not differing[..., P10_COORDINATE_LANES:].any()
+
+
+_UNIT_ROUNDOFF = Fraction(1, 1 << 24)
+
+
+def _binade(value: Fraction) -> int:
+    """``floor(log2(|value|))`` of a nonzero rational."""
+    magnitude = abs(value)
+    exponent = magnitude.numerator.bit_length() - magnitude.denominator.bit_length()
+    return exponent if Fraction(2) ** exponent <= magnitude else exponent - 1
+
+
+def _cell_margin(value: Fraction, dtype: str) -> Fraction:
+    """Distance from a nonzero value to the nearer edge of its rounding cell."""
+    bits = exact_target_bits(value, dtype)
+    center = abs(_bits_value(bits, dtype))
+    below = abs(_bits_value(bits - 1, dtype))
+    above = abs(_bits_value(bits + 1, dtype))
+    return min(abs(value) - (below + center) / 2, (center + above) / 2 - abs(value))
+
+
+@pytest.mark.parametrize("case", _PAIRING_CASES, ids=lambda case: case.case_id)
+def test_every_target_keeps_its_rounding_cell_under_the_path_exact_error(
+    case: UniformCase,
+) -> None:
+    """Why the emulation stores the targets. With an exact numerator and
+    denominator only ``1 / N`` and ``o * (1 / N)`` round, so the value cast to the
+    dtype is within ``(2u + u**2) |y|`` of the exact target ``y``. That is inside
+    the target's rounding cell for a representable target, and for the other
+    targets by a margin that follows from the odd denominator ``q + 1``."""
+    fraction_bits = _FORMAT[case.dtype][0]
+    error = 2 * _UNIT_ROUNDOFF + _UNIT_ROUNDOFF**2
+    rows = range(case.seqlen_q)
+    key_lane = [codeword_target(case, 0, query, 0, LANE_KEY) for query in rows[1:]]
+    parity = [codeword_target(case, 0, query, 0, LANE_PARITY) for query in rows]
+    constant = [
+        *(codeword_value(batch, 0, 0, LANE_BATCH) for batch in range(2)),
+        *(codeword_value(0, head, 0, LANE_KV_HEAD) for head in range(4)),
+        *(codeword_value(0, 0, 0, dim) for dim in range(P10_COORDINATE_LANES, 64)),
+    ]
+    for value in (*key_lane, *parity, *constant):
+        margin = _cell_margin(value, case.dtype)
+        assert margin > error * abs(value)
+        if _representable(value, case.dtype):
+            assert margin >= abs(value) / (1 << (fraction_bits + 2))
+
+    unrepresentable = [
+        query for query in rows if not _representable(parity[query], case.dtype)
+    ]
+    assert unrepresentable
+    for query in unrepresentable:
+        value, odd = parity[query], query + 1
+        quantum = Fraction(2) ** (_binade(value) - fraction_bits)
+        assert odd % 2 == 1 and (odd * value / quantum).denominator == 1
+        assert _cell_margin(value, case.dtype) >= quantum / (4 * odd)

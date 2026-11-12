@@ -22,6 +22,7 @@ from fractions import Fraction
 from functools import cache
 
 import numpy as np
+from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
 
 from ._analytical import (
     UNIFORM_QUICK_CASES,
@@ -257,3 +258,168 @@ def require_p10_scope(case: UniformCase) -> None:
             f"{len(collisions)} pair(s) of query rows store the same rounded "
             f"codeword, first rows {first} and {second}, expected distinct rows"
         )
+
+
+@dataclass(frozen=True)
+class TileSchedule:
+    """Tile geometry of a dense kernel: query rows per work item, keys per KV tile.
+
+    The kernel runs one KV loop per query block, so which tiles a row visits, and
+    whether it meets a fully masked tile before its legal keys, follows from the
+    geometry and not from the row alone."""
+
+    block_m: int
+    block_n: int
+
+    def __post_init__(self) -> None:
+        if self.block_m <= 0 or self.block_n <= 0:
+            raise ValueError(
+                f"TileSchedule failed - block_m={self.block_m}, "
+                f"block_n={self.block_n}, expected positive tile sizes"
+            )
+        if self.block_m % self.block_n:
+            raise ValueError(
+                f"TileSchedule failed - block_m={self.block_m}, expected a "
+                f"multiple of block_n={self.block_n}"
+            )
+
+
+def _require_whole_tiles(case: UniformCase, schedule: TileSchedule) -> None:
+    whole = (
+        ("seqlen_q", case.seqlen_q, "block_m", schedule.block_m),
+        ("seqlen_k", case.seqlen_k, "block_n", schedule.block_n),
+        ("window", case.window, "block_n", schedule.block_n),
+    )
+    for name, value, tile_name, tile in whole:
+        if value % tile:
+            raise ValueError(
+                f"case {case.case_id} does not tile - {name}={value}, "
+                f"expected a multiple of {tile_name}={tile}"
+            )
+
+
+def visited_tiles(case: UniformCase, schedule: TileSchedule, query_block: int) -> range:
+    """KV tiles the kernel's loop visits for one query block.
+
+    The upper bound is the block's causal diagonal, clamped to the key extent. A
+    sliding window moves only the lower bound, to the tile holding the oldest key
+    the block's first row can still see."""
+    _require_whole_tiles(case, schedule)
+    if not 0 <= query_block < case.seqlen_q // schedule.block_m:
+        raise IndexError(query_block)
+    tiles_per_block = schedule.block_m // schedule.block_n
+    diagonal = query_block * tiles_per_block
+    stop = min(diagonal + tiles_per_block, case.seqlen_k // schedule.block_n)
+    start = max(diagonal - case.window // schedule.block_n, 0)
+    return range(start if case.mask == "window" else 0, stop)
+
+
+def masked_leading_tiles(case: UniformCase, schedule: TileSchedule, query: int) -> int:
+    """Fully masked tiles one row visits before its first tile with a legal key.
+
+    On such a tile the running maximum is the mask value, so every key of the
+    tile gets weight one; the first legal tile then rescales that state away."""
+    first, last = legal_interval(case, query)
+    count = 0
+    for tile in visited_tiles(case, schedule, query // schedule.block_m):
+        tile_first = tile * schedule.block_n
+        if first <= tile_first + schedule.block_n - 1 and tile_first <= last:
+            return count
+        count += 1
+    raise ValueError(
+        f"masked_leading_tiles failed - query={query} of case {case.case_id} "
+        "visits no tile with a legal key"
+    )
+
+
+# What the base-2 exponential may return for the masked argument, about -1e30:
+# zero or the smallest FP32 subnormal.
+MASKED_EXPONENTIALS = (0.0, float(np.nextafter(np.float32(0), np.float32(1))))
+
+
+def _through_dtype(values: np.ndarray, dtype: str) -> np.ndarray:
+    """Round FP32 values to the subject dtype and widen them back to FP32."""
+    if dtype == "fp16":
+        return values.astype(np.float16).astype(np.float32)
+    return bf16_to_f32(f32_to_bf16(values)).reshape(values.shape)
+
+
+def emulate_path_exact(
+    case: UniformCase,
+    schedule: TileSchedule,
+    *,
+    masked_exponential: float = 0.0,
+    single_rounded: bool = False,
+) -> np.ndarray:
+    """Stored bits of one realization of the kernel's arithmetic, ``[B, Sq, Hq, D]``.
+
+    A diagnostic, not a verdict and not an attention implementation: there are no
+    scores, only legal-key membership, because zero Q makes every legal score
+    equal. It follows the kernel's online softmax tile by tile in FP32 with round
+    to nearest: the exponential of zero is one, a fully masked leading tile is
+    accumulated with weight one and rescaled by ``masked_exponential`` at the
+    first legal tile, masked keys of a legal tile weigh ``masked_exponential`` in
+    the denominator and their dtype cast in the numerator, and the output is
+    ``cast(o * (1 / l))``.
+
+    ``single_rounded`` models the FP16 epilogue an affected compiler selects: the
+    exact product ``o * (1 / l)`` rounded once to FP16 instead of to FP32 first.
+    """
+    _require_whole_tiles(case, schedule)
+    if single_rounded and case.dtype != "fp16":
+        raise ValueError(
+            "emulate_path_exact failed - single_rounded=True with "
+            f"dtype={case.dtype!r}, expected 'fp16'"
+        )
+    one = np.float32(1.0)
+    masked = np.float32(masked_exponential)
+    # [B, Hkv, Sk, D], so a key index selects one row of V for every batch and head.
+    values = np.moveaxis(_codeword(case), 1, 2)
+    bounds = [legal_interval(case, query) for query in range(case.seqlen_q)]
+    first = np.array([bound[0] for bound in bounds], dtype=np.int64)
+    last = np.array([bound[1] for bound in bounds], dtype=np.int64)
+
+    stored = np.empty(
+        (case.batch, case.nhead_k, case.seqlen_q, case.head_dim), dtype=np.uint16
+    )
+    for block in range(case.seqlen_q // schedule.block_m):
+        rows = slice(block * schedule.block_m, (block + 1) * schedule.block_m)
+        denominator = np.zeros(schedule.block_m, dtype=np.float32)
+        numerator = np.zeros(
+            (case.batch, case.nhead_k, schedule.block_m, case.head_dim),
+            dtype=np.float32,
+        )
+        max_is_legal = np.zeros(schedule.block_m, dtype=bool)
+        for tile in visited_tiles(case, schedule, block):
+            keys = np.arange(tile * schedule.block_n, (tile + 1) * schedule.block_n)
+            legal = (first[rows, None] <= keys) & (keys <= last[rows, None])
+            now_legal = max_is_legal | legal.any(axis=1)
+            # The running maximum either stays (rescale by the exponential of
+            # zero) or moves from the mask value to a legal score.
+            alpha = np.where(now_legal & ~max_is_legal, masked, one)
+            denominator = denominator * alpha
+            numerator = numerator * alpha[None, None, :, None]
+            weight = np.where(legal | ~now_legal[:, None], one, masked)
+            operand = _through_dtype(weight, case.dtype)
+            tile_sum = np.zeros(schedule.block_m, dtype=np.float32)
+            for index, key in enumerate(keys):
+                tile_sum = tile_sum + weight[:, index]
+                term = operand[None, None, :, index, None] * values[:, :, key, None, :]
+                numerator = numerator + term
+            denominator = denominator + tile_sum
+            max_is_legal = now_legal
+        reciprocal = (one / denominator)[None, None, :, None]
+        product = numerator * reciprocal
+        if single_rounded:
+            # Both factors are FP32, so the FP64 product is exact and the one
+            # rounding below is the single rounding to FP16.
+            exact = numerator.astype(np.float64) * reciprocal.astype(np.float64)
+            bits = exact.astype(np.float16).view(np.uint16)
+        elif case.dtype == "fp16":
+            bits = product.astype(np.float16).view(np.uint16)
+        else:
+            bits = f32_to_bf16(product).reshape(product.shape)
+        stored[:, :, rows] = bits
+
+    kv_head = np.arange(case.nhead_q) // (case.nhead_q // case.nhead_k)
+    return np.ascontiguousarray(np.moveaxis(stored[:, kv_head], 1, 2))
