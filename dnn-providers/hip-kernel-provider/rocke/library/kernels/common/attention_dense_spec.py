@@ -161,6 +161,12 @@ class AttentionDenseSpec:
         the combination instead of silently dropping the window."""
         return False
 
+    def _supports_any_window_size(self) -> bool:
+        """Whether this arch's body serves a ``sliding_window`` that is not a
+        multiple of ``block_n``. Off here so an arch whose tile loops assume whole
+        window tiles rejects such a window instead of skipping keys."""
+        return False
+
     def _supports_noncausal_cross_length_ragged(self) -> bool:
         """Whether this arch's ragged body handles ``seqlen_q != seqlen_kv`` without
         a causal mask (cross-attention)."""
@@ -272,7 +278,10 @@ class AttentionDenseSpec:
         if self.sliding_window > 0:
             if not self.causal and not self._supports_noncausal_window():
                 raise ValueError("sliding_window>0 requires causal=True")
-            if self.sliding_window % self.block_n:
+            if (
+                self.sliding_window % self.block_n
+                and not self._supports_any_window_size()
+            ):
                 raise ValueError(
                     f"sliding_window ({self.sliding_window}) must be a multiple "
                     f"of block_n={self.block_n}"

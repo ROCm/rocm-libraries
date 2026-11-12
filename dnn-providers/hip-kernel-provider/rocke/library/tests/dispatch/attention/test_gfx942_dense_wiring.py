@@ -1087,6 +1087,17 @@ class TestGfx942SlidingWindow(unittest.TestCase):
                 spec = _spec(_req(sliding_window=window))
                 self.assertEqual(spec.sliding_window, window)
 
+    def test_window_not_a_tile_multiple_is_refused(self):
+        """gfx942's window loops assume whole window tiles, so a window that is not
+        a multiple of block_n is refused by the spec, not served with the wrong
+        keys."""
+        with _Gfx942Arch():
+            for window in (100, 129):
+                with self.subTest(window=window):
+                    ok, why = _candidate().admits(_req(sliding_window=window))
+                    self.assertFalse(ok)
+                    self.assertIn("must be a multiple of block_n", why)
+
     def test_sliding_window_in_supports_features(self):
         self.assertIn("sliding_window", _candidate().capability.supports_features)
 

@@ -442,6 +442,7 @@ _G942 = Gfx942AttentionDenseSpec
 _HOOK_CASES: dict[type, tuple[dict, ...]] = {
     _G950: (
         dict(causal=False, sliding_window=128),  # supports_noncausal_window
+        dict(sliding_window=100),  # supports_any_window_size: not a block_n multiple
         dict(ragged=True, seqlen_q=300, seqlen_kv=500, causal=False),  # cross-length
         dict(persistent=True, num_persistent=4, persist_decode="gqa_pair"),
         dict(persistent=True, num_persistent=8, persist_decode="gqa_pair_2phase"),
@@ -487,6 +488,7 @@ _HOOK_CASES: dict[type, tuple[dict, ...]] = {
         dict(persistent=True, num_persistent=304),
         dict(nonpersist_decode="bt_hkv_minor"),
         dict(causal=False, sliding_window=128),  # no noncausal window on gfx942
+        dict(sliding_window=100),  # gfx942 still needs whole window tiles
         dict(batch=0),  # preflight-only reject, with gfx942's validator
     ),
 }
@@ -496,6 +498,7 @@ _HOOK_CASES: dict[type, tuple[dict, ...]] = {
 _HOOKS = (
     "_supports_noncausal_window",
     "_supports_noncausal_cross_length_ragged",
+    "_supports_any_window_size",
     "supported_persist_decodes",
     "supported_nonpersist_decodes",
     "_aligned_causal",
@@ -594,6 +597,7 @@ def _hooks(cls: type) -> dict:
         "supports_noncausal_cross_length_ragged": (
             spec._supports_noncausal_cross_length_ragged()
         ),
+        "supports_any_window_size": spec._supports_any_window_size(),
         "persist_decodes": sorted(spec.supported_persist_decodes()),
         "nonpersist_decodes": sorted(spec.supported_nonpersist_decodes()),
     }

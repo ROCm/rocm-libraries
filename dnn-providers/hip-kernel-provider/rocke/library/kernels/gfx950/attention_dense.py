@@ -212,6 +212,9 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
     def _supports_noncausal_window(self) -> bool:
         return True
 
+    def _supports_any_window_size(self) -> bool:
+        return True
+
     def _supports_noncausal_cross_length_ragged(self) -> bool:
         return True
 
@@ -766,6 +769,20 @@ def _dense_lse_output(
                 )
 
 
+def _window_tile_counts(window: int, block_n: int) -> Tuple[int, int]:
+    """``(reach, full)`` KV-tile counts of a sliding window, with opposite rounding.
+
+    ``reach`` is how many KV tiles behind its diagonal tile a query block's first
+    row can still see, rounded UP so the first loaded tile never skips a visible
+    key. ``full`` is the window length in whole tiles, rounded DOWN so a tile runs
+    without the window mask only when every row of the block sees all of it. They
+    agree when ``window % block_n`` is 0 or 1; both are 0 when the window is off.
+    """
+    if window <= 0:
+        return 0, 0
+    return -(-(window - 1) // block_n), window // block_n
+
+
 def build_attention_dense(
     spec: AttentionDenseSpec, *, arch: str = "gfx950"
 ) -> KernelDef:
@@ -794,7 +811,7 @@ def build_attention_dense(
     NBUF = spec.lds_num_buffers
     PAD = spec.lds_k_row_pad
     W = spec.sliding_window
-    Wt = W // BN  # window length in KV tiles (0 when disabled)
+    Wt_lo, Wt = _window_tile_counts(W, BN)
     # Compile-time bottom-right diagonal shift. The persistent builder returns
     # above and deliberately remains unchanged.
     DIAG_OFF = (Skv - Sq) if spec.causal_bottom_right else 0
@@ -1477,7 +1494,7 @@ def build_attention_dense(
     # start_tile=0 -> full causal, byte-identical to the always-on path.
     if W > 0:
         _diag0 = b.mul(qb, b.const_i32(n_per))
-        _lo_raw = b.sub(_diag0, b.const_i32(Wt))
+        _lo_raw = b.sub(_diag0, b.const_i32(Wt_lo))
         start_tile = b.select(
             b.cmp_gt(_lo_raw, b.const_i32(0)), _lo_raw, b.const_i32(0)
         )
@@ -1941,7 +1958,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     NQB = ((Sq + BLOCK_M - 1) // BLOCK_M) if RAGGED else (Sq // BLOCK_M)
     W = NQB * Hq * B  # total work items
     SW = spec.sliding_window  # sliding-window length (0 = disabled)
-    SWt = SW // BN  # window length in KV tiles
+    SWt_lo, SWt = _window_tile_counts(SW, BN)
     RIGHT = spec.right_bound  # keys visible ahead of the diagonal (causal only)
     # See the default builder: rows with no visible key output zeros. WINDOW_EMPTY is
     # the shape-independent part; EMPTY_ROWS adds the baked Sq/Skv test and applies
@@ -2752,7 +2769,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
         # Sliding-window start tile (see default builder). SW==0 -> start_tile=0.
         if SW > 0:
             _diag0 = b.mul(qb, b.const_i32(n_per))
-            _lo_raw = b.sub(_diag0, b.const_i32(SWt))
+            _lo_raw = b.sub(_diag0, b.const_i32(SWt_lo))
             start_tile = b.select(
                 b.cmp_gt(_lo_raw, b.const_i32(0)), _lo_raw, b.const_i32(0)
             )

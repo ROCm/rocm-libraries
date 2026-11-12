@@ -1789,8 +1789,18 @@ class TestDenseLseNumeric:
             (256, (512, 256), (512, 64), False, False),
             (256, (512, 256), (512, 64), True, False),
             (64, (256, 512), (256, 64), True, True),
+            (130, (512, 256), (512, 64), True, True),
+            (65, (256, 512), (256, 64), True, True),
         ],
-        ids=["plain", "plain-lse", "window", "window-lse", "window-keyless-lse"],
+        ids=[
+            "plain",
+            "plain-lse",
+            "window",
+            "window-lse",
+            "window-keyless-lse",
+            "window130-keyless-lse",
+            "window65-keyless-lse",
+        ],
     )
     def test_packed_dense_short_last_sequence(
         self, shape, window, q_lens, kv_lens, emit_lse, keyless
@@ -2207,7 +2217,7 @@ class TestDensePagedNumeric:
     @pytest.mark.gpu
     @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
     @pytest.mark.parametrize("block_size", [16, 32, 64])
-    @pytest.mark.parametrize("sq,window", [(1024, 256), (2048, 1024)])
+    @pytest.mark.parametrize("sq,window", [(1024, 256), (2048, 1024), (1024, 130)])
     def test_paged_matches_dense_bit_exact(self, dtype, block_size, sq, window):
         """A paged cache must give the same bits as the dense K/V it was scattered
         from, and match the fp32 sliding-window reference.
@@ -2508,6 +2518,12 @@ _VARIANT_BAND_CASES = [
     pytest.param(1024, 512, 320, 64, id="two-sided-w320-r64-1024x512"),
     pytest.param(512, 1024, 64, 0, id="causal-w64-512x1024"),
     pytest.param(1024, 512, 128, 0, id="causal-w128-1024x512-empty"),
+    # Not a multiple of any block_n: the first tile and the mask-free phase use
+    # different tile counts.
+    pytest.param(1024, 1024, 130, 0, id="causal-w130-1024x1024"),
+    pytest.param(1024, 1024, 129, -1, id="left-only-w129-1024x1024"),
+    pytest.param(1024, 512, 130, 64, id="two-sided-w130-r64-1024x512"),
+    pytest.param(512, 1024, 193, 0, id="causal-w193-512x1024"),
 ]
 
 
@@ -2610,6 +2626,117 @@ class TestDenseBandIndexTruthTable:
                 expected[p, :, visible] = 1.0 / len(visible)
         err = (out.float().cpu() - expected[None]).abs().max().item()
         assert err < 1e-2, f"max_abs={err:.3e}"
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("persistent", [False, True], ids=["grid", "persist"])
+    @pytest.mark.parametrize("right", [0, -1], ids=["causal", "left_only"])
+    @pytest.mark.parametrize(
+        "block_m,block_n",
+        [(256, 64), (128, 64), (128, 128), (256, 128)],
+        ids=["bm256bn64", "bm128bn64", "bm128bn128", "bm256bn128"],
+    )
+    @pytest.mark.parametrize("window", [1, 63, 65, 127, 129, 130, 255, 257])
+    def test_any_window_size_visible_key_set_is_exact(
+        self, window, block_m, block_n, right, persistent
+    ):
+        """Windows that are not multiples of ``block_n``, across several KV tiles.
+
+        The first loaded KV tile rounds the window up and the mask-free middle
+        phase rounds it down; a wrong rounding either skips the oldest visible key
+        or reads one key too many. 512 keys span 4-8 tiles, so V[k] = e_(k % 64)
+        aliases channels; the expected row sums the same aliased indicators. With
+        q = 0 every score is exactly 0, so the kernel and the expected row only
+        differ by fp32 summation order before the same bf16 output rounding; one
+        missing or extra key moves some channel by at least ~2e-3 at these
+        shapes, so the bound is 1e-3 against the bf16-rounded expected value.
+        """
+        import torch
+
+        sq = skv = 512
+        batch, head = 2, 64
+        spec = Gfx950AttentionDenseSpec(
+            batch=batch,
+            seqlen_q=sq,
+            seqlen_kv=skv,
+            num_query_heads=2,
+            num_kv_heads=1,
+            head_size=head,
+            causal=right >= 0,
+            dtype="bf16",
+            block_m=block_m,
+            block_n=block_n,
+            sliding_window=window,
+            persistent=persistent,
+        )
+        q = torch.zeros(batch, sq, 2, head, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(batch, skv, 1, head, device="cuda", dtype=torch.bfloat16)
+        v = torch.zeros(batch, skv, 1, head, device="cuda", dtype=torch.bfloat16)
+        v[:, torch.arange(skv), 0, torch.arange(skv) % head] = 1.0
+        out = torch.empty_like(q)
+        run_attention_dense_torch(spec=spec, q=q, k=k, v=v, out=out, scale=1.0)
+        torch.cuda.synchronize()
+        qi = torch.arange(sq).view(-1, 1)
+        ki = torch.arange(skv).view(1, -1)
+        allowed = qi - ki < window
+        if right >= 0:
+            allowed &= ki <= qi
+        weights = allowed.float() / allowed.sum(dim=1, keepdim=True).float()
+        onehot = torch.zeros(skv, head)
+        onehot[torch.arange(skv), torch.arange(skv) % head] = 1.0
+        expected = (weights @ onehot).view(1, sq, 1, head).bfloat16().float()
+        err = (out.float().cpu() - expected).abs().max().item()
+        assert err < 1e-3, f"W={window} {block_m}x{block_n}: max_abs={err:.3e}"
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("persistent", [False, True], ids=["grid", "persist"])
+    @pytest.mark.parametrize(
+        "block_m,block_n", [(128, 128), (256, 128)], ids=["bm128bn128", "bm256bn128"]
+    )
+    def test_left_128_window_with_sinks_and_lse(self, block_m, block_n, persistent):
+        """A ``(128, 0)`` band (128 earlier keys plus the diagonal) is
+        ``sliding_window=129``: GQA 8:1, D64, sinks and LSE against the fp32
+        reference, and the output must differ from the 128-key window."""
+        import torch
+
+        batch, sq, hq, hkv, head = 2, 1024, 8, 1, 64
+        torch.manual_seed(7)
+        q = torch.randn(batch, sq, hq, head, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(batch, sq, hkv, head, device="cuda", dtype=torch.bfloat16)
+        v = torch.randn(batch, sq, hkv, head, device="cuda", dtype=torch.bfloat16)
+        sinks = torch.randn(hq, device="cuda", dtype=torch.bfloat16)
+        scale = 1.0 / math.sqrt(head)
+        outs = {}
+        for window in (129, 128):
+            spec = Gfx950AttentionDenseSpec(
+                batch=batch,
+                seqlen_q=sq,
+                seqlen_kv=sq,
+                num_query_heads=hq,
+                num_kv_heads=hkv,
+                head_size=head,
+                dtype="bf16",
+                block_m=block_m,
+                block_n=block_n,
+                sliding_window=window,
+                persistent=persistent,
+                use_sinks=True,
+                emit_lse=True,
+            )
+            out = torch.empty_like(q)
+            lse = torch.empty(batch, hq, sq, 1, device="cuda", dtype=torch.float32)
+            run_attention_dense_torch(
+                spec=spec, q=q, k=k, v=v, out=out, lse=lse, scale=scale, sinks=sinks
+            )
+            torch.cuda.synchronize()
+            ref, lse_ref = _lse_reference(
+                q, k, v, scale, causal=True, window=window, sinks=sinks
+            )
+            assert (out.float() - ref).abs().max().item() < _tolerance("bf16")
+            assert (lse - lse_ref).abs().max().item() < 1e-3
+            outs[window] = out
+        assert not torch.equal(outs[129], outs[128]), "window 129 ran as 128"
 
 
 if __name__ == "__main__":

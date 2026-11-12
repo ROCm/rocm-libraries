@@ -21,9 +21,9 @@
  * SUBCLASS HOOKS. The Python base calls overridable methods on the concrete
  * subclass. The C port passes them in explicitly:
  *   - __post_init__ consults _supports_noncausal_window,
- *     _supports_noncausal_cross_length_ragged, supported_persist_decodes and
- *     supported_nonpersist_decodes: rocke_attention_dense_traits_t, which holds
- *     only per-class answers.
+ *     _supports_noncausal_cross_length_ragged, _supports_any_window_size,
+ *     supported_persist_decodes and supported_nonpersist_decodes:
+ *     rocke_attention_dense_traits_t, which holds only per-class answers.
  *   - The auto decode policies and the GQA-pair decode checks consult
  *     _aligned_causal, which gfx950 overrides with a per-spec value (right_bound
  *     == 0). That answer is the `lookahead` argument of validate, both
@@ -168,10 +168,13 @@ typedef struct rocke_attention_dense_traits
     /* supported_nonpersist_decodes(), sorted ascending. */
     const char* const* nonpersist_decodes;
     size_t num_nonpersist_decodes;
+    /* _supports_any_window_size(): a sliding_window that is not a multiple of
+     * block_n is valid. Added at the end (ROCKE_ABI_VERSION 18). */
+    bool supports_any_window_size;
 } rocke_attention_dense_traits_t;
 
 /* Base support: all registered persistent and non-persistent decodes, with no
- * noncausal-window or cross-length-ragged support. type_name is
+ * noncausal-window, cross-length-ragged or any-window-size support. type_name is
  * "AttentionDenseSpec". */
 rocke_attention_dense_traits_t rocke_attention_dense_traits_base(void);
 
