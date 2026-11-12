@@ -554,6 +554,37 @@ TEST(TestConvWinogradGraphMatch, Bf16IsDeclinedUnlessPermitted)
     }
 }
 
+TEST(TestConvWinogradKernelMatch, F43IsDeclinedUnlessPermitted)
+{
+    ConfigFields f4;
+    f4.m = 4;
+    ConfigFields f2;
+    for(const auto direction : DIRECTIONS)
+    {
+        const auto pack = direction == ConvDirection::FORWARD ? PACK_FWD : PACK_BWD;
+        const GraphFixture fixture(buildGraph(specFor(baseShape(), direction)),
+                                   testDeviceProperties());
+        const auto bound = matchesGraph(pack, fixture.context());
+        ASSERT_TRUE(bound.has_value());
+        const auto kernelFor = [&](ConfigFields fields) {
+            auto kernel = kernelOf(fields, "FLOAT");
+            kernel.metadata["direction"]
+                = std::string(direction == ConvDirection::FORWARD ? "FWD" : "BWD");
+            return kernel;
+        };
+        {
+            const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter unset(
+                "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_F43", "0");
+            EXPECT_FALSE(matchesKernel(pack, fixture.context(), kernelFor(f4), *bound));
+            // F(2,3) needs no permission.
+            EXPECT_TRUE(matchesKernel(pack, fixture.context(), kernelFor(f2), *bound));
+        }
+        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter permitted(
+            "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_F43", "1");
+        EXPECT_TRUE(matchesKernel(pack, fixture.context(), kernelFor(f4), *bound));
+    }
+}
+
 bool admits(const ConfigFields& fields,
             const std::string& arch,
             ConvShape shape = baseShape(),
@@ -562,10 +593,12 @@ bool admits(const ConfigFields& fields,
     shape.dataType = dtype == "FLOAT"  ? DataType::FLOAT
                      : dtype == "HALF" ? DataType::HALF
                                        : DataType::BFLOAT16;
-    // bf16 graphs are admitted only with the opt-in (bf16Permitted); the configs' own rules
-    // are what these cases test.
+    // bf16 graphs and F(4,3) configs are admitted only with their opt-ins (bf16Permitted,
+    // f43Permitted); the configs' own rules are what these cases test.
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter bf16(
         "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_BF16", "1");
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter f43(
+        "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_F43", "1");
     auto properties = testDeviceProperties();
     properties.gcnArchName = arch;
     properties.multiProcessorCount = 64;

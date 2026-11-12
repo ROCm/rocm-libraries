@@ -79,6 +79,17 @@ std::optional<WinogradProblem>
  */
 bool bf16Permitted();
 
+/**
+ * @brief Whether the F(4,3) configs (fp32 multipass) are admitted: only with
+ *        HIP_KERNEL_PROVIDER_CONV_WINOGRAD_F43 set to a true value.
+ *
+ * F(4,3)'s transforms (points 0, +-1, +-2) carry entries up to 8 and 1/24: about 27 fp32 ulps of
+ * each tile's sum of |products| on a 3x3 c128 layer, against about 1 for F(2,3) and the 5.7
+ * coefficient MIOpen's fp32 Winograd needs. Declined until a plan can carry a numerical note;
+ * the instances stay and serve with the variable set.
+ */
+bool f43Permitted();
+
 enum class Variant
 {
     MULTIPASS,

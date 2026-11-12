@@ -268,6 +268,13 @@ bool bf16Permitted()
     return raw == "1" || raw == "true" || raw == "on" || raw == "yes";
 }
 
+bool f43Permitted()
+{
+    const auto raw = hipdnn_data_sdk::utilities::toLower(hipdnn_data_sdk::utilities::trim(
+        hipdnn_data_sdk::utilities::getEnv("HIP_KERNEL_PROVIDER_CONV_WINOGRAD_F43")));
+    return raw == "1" || raw == "true" || raw == "on" || raw == "yes";
+}
+
 std::optional<WinogradProblem> parseWinogradProblem(const MatchContext& context,
                                                     ConvDirection direction)
 {
@@ -952,7 +959,8 @@ struct Resolved
 
 /// The problem, config and plan of @p kernel on @p context, or nullopt where it does not apply:
 /// its direction and dtype are the graph's, its instructions exist on the device (WMMA
-/// family, wave64 gfx9), F(4,3) only for fp32, WMMA only for fp16 / bf16, the register VALU
+/// family, wave64 gfx9), F(4,3) only for fp32 and only when permitted (f43Permitted), WMMA
+/// only for fp16 / bf16, the register VALU
 /// variant not for bf16, packed-fp16 transform math only for fp16, and it has a plan.
 std::optional<Resolved> resolve(const MatchContext& context, const KernelDefinition& kernel)
 {
@@ -991,7 +999,7 @@ std::optional<Resolved> resolve(const MatchContext& context, const KernelDefinit
     const bool noBf16Mfma
         = config->variant == Variant::COOP && config->arch == "gfx9" && bf16
           && hipdnn_plugin_sdk::stripArchFeatures(context.deviceProperties.gcnArchName) == "gfx908";
-    if((config->m == 4 && !fp32) || (wmmaFamily && fp32)
+    if((config->m == 4 && (!fp32 || !conv_winograd::f43Permitted())) || (wmmaFamily && fp32)
        || (config->variant == Variant::SREG && bf16) || !f16MathOk || noBf16Mfma)
     {
         return std::nullopt;
