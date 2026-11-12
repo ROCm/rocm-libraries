@@ -84,4 +84,5 @@ Ask the conv owners for the graph sets and the latest results; they are not in t
 - **TF32.** Three-bf16 configs register only under `HIP_KERNEL_PROVIDER_CONV_TF32`. Leave it unset for normal fp32 selection.
 - **Winograd workspace.** `HIP_KERNEL_PROVIDER_CONV_WINOGRAD_WORKSPACE_MB` caps K5's workspace. `HIP_KERNEL_PROVIDER_CONV_WINOGRAD_LLC_BYTES` overrides the last-level-cache size its planner assumes; HIP doesn't report MALL.
 - **Winograd engines carry the `WINOGRAD` numerical note** in their engine descriptor, so callers can opt out of them for numerical reasons.
+- **bf16 Winograd is declined** unless `HIP_KERNEL_PROVIDER_CONV_WINOGRAD_BF16` is set. The matrix-core bf16 operands round the transformed tiles to bf16, past the precision model, and MIOpen has no bf16 Winograd to match. The instances stay; once plans can carry a numerical note, the gate becomes a tag. Deferred cost, full NCHW tier at 762934be264: bf16 Winograd was our fastest on 284 graphs on gfx1201 (503 ms call-weighted lost to the next engine, of 4498 ms) and 73 on gfx1100 (440 ms). The NHWC tier has none.
 - **All conv engines here carry the `runtime_compilation` behavior note.**

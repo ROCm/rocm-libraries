@@ -261,6 +261,13 @@ size_t llcBytes(std::string_view gcnArchName)
     return 0;
 }
 
+bool bf16Permitted()
+{
+    const auto raw = hipdnn_data_sdk::utilities::toLower(hipdnn_data_sdk::utilities::trim(
+        hipdnn_data_sdk::utilities::getEnv("HIP_KERNEL_PROVIDER_CONV_WINOGRAD_BF16")));
+    return raw == "1" || raw == "true" || raw == "on" || raw == "yes";
+}
+
 std::optional<WinogradProblem> parseWinogradProblem(const MatchContext& context,
                                                     ConvDirection direction)
 {
@@ -904,7 +911,9 @@ std::optional<ConvDirection> directionFor(const KernelDefinition& kernel)
 std::optional<BoundTokens> graphMatches(const MatchContext& context, ConvDirection direction)
 {
     const auto problem = conv_winograd::parseWinogradProblem(context, direction);
-    if(!problem.has_value())
+    if(!problem.has_value()
+       || (problem->base.dataType == data_objects::DataType::BFLOAT16
+           && !conv_winograd::bf16Permitted()))
     {
         return std::nullopt;
     }

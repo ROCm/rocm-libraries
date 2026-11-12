@@ -68,6 +68,17 @@ std::optional<WinogradProblem>
     parseWinogradProblem(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
                          conv_naive::ConvDirection direction);
 
+/**
+ * @brief Whether the engines admit bf16 graphs: only with HIP_KERNEL_PROVIDER_CONV_WINOGRAD_BF16
+ *        set to a true value.
+ *
+ * The matrix-core bf16 operands round the transformed input and filter tiles to bf16, an error
+ * (about a third of bf16's unit roundoff of each tile's sum of |products|) the convolution's own
+ * precision model does not allow, and MIOpen has no bf16 Winograd to match. Declined until a plan
+ * can carry a numerical note; the bf16 instances and code stay and serve with the variable set.
+ */
+bool bf16Permitted();
+
 enum class Variant
 {
     MULTIPASS,

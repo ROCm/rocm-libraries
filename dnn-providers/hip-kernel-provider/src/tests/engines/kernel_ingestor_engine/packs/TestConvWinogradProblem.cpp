@@ -411,6 +411,15 @@ constexpr PackSymbols PACK_FWD{"",
                                "",
                                "",
                                ""};
+constexpr PackSymbols PACK_BWD{"",
+                               "hipkernel.conv_winograd_bwd.graph_match",
+                               "",
+                               "hipkernel.conv_winograd.kernel_match",
+                               "",
+                               "hipkernel.conv_winograd.dispatch",
+                               "",
+                               "",
+                               ""};
 
 struct ConfigFields
 {
@@ -518,6 +527,33 @@ ConfigFields sreg(int64_t f16math)
     return f;
 }
 
+TEST(TestConvWinogradGraphMatch, Bf16IsDeclinedUnlessPermitted)
+{
+    for(const auto direction : DIRECTIONS)
+    {
+        auto shape = baseShape();
+        shape.dataType = DataType::BFLOAT16;
+        const GraphFixture fixture(buildGraph(specFor(shape, direction)), testDeviceProperties());
+        const auto pack = direction == ConvDirection::FORWARD ? PACK_FWD : PACK_BWD;
+        // The problem parses (the kernels serve it); the engine declines it by default.
+        EXPECT_TRUE(parse(specFor(shape, direction)).has_value());
+        {
+            const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter unset(
+                "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_BF16", "0");
+            EXPECT_FALSE(matchesGraph(pack, fixture.context()).has_value());
+        }
+        {
+            const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter permitted(
+                "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_BF16", "1");
+            EXPECT_TRUE(matchesGraph(pack, fixture.context()).has_value());
+        }
+        // fp16 needs no permission.
+        shape.dataType = DataType::HALF;
+        const GraphFixture half(buildGraph(specFor(shape, direction)), testDeviceProperties());
+        EXPECT_TRUE(matchesGraph(pack, half.context()).has_value());
+    }
+}
+
 bool admits(const ConfigFields& fields,
             const std::string& arch,
             ConvShape shape = baseShape(),
@@ -526,6 +562,10 @@ bool admits(const ConfigFields& fields,
     shape.dataType = dtype == "FLOAT"  ? DataType::FLOAT
                      : dtype == "HALF" ? DataType::HALF
                                        : DataType::BFLOAT16;
+    // bf16 graphs are admitted only with the opt-in (bf16Permitted); the configs' own rules
+    // are what these cases test.
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter bf16(
+        "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_BF16", "1");
     auto properties = testDeviceProperties();
     properties.gcnArchName = arch;
     properties.multiProcessorCount = 64;
