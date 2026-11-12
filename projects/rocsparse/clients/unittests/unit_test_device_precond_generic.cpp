@@ -223,11 +223,183 @@ namespace
             check_csr_matrix<Kind::ilu, T>(handle, a, opt, "boost tol " + std::to_string(tol));
         }
     }
+
+    // Pivots (the entries of D, signed) of ILDL^T(0) of `a` before any boost, with the
+    // boost tolerance `boost_tol` and the boost value `boost_val` (no boost by default).
+    template <typename T>
+    std::vector<double>
+        ildlt_pivots(const csr_matrix<T>& a, double boost_tol = -1.0, double boost_val = 0.0)
+    {
+        std::vector<double> pivots;
+        host_ildlt0(a, boost_tol, boost_val, &pivots);
+        return pivots;
+    }
+
+    inline std::vector<double> moduli(std::vector<double> v)
+    {
+        for(auto& x : v)
+            x = std::abs(x);
+        return v;
+    }
+
+    // spildlt0 with the numeric boost on the grid matrix, whose pivots are positive and
+    // whose D_0 is exactly A_00 = 5:
+    // - tolerances above every pivot, below every pivot, and equal to D_0 (so the test is
+    //   |D_i| <= tol, not <);
+    // - 4.7, between the pivots: only some rows are boosted, their D feeds the later
+    //   rows, and every A_ii (5) is above it, so D_i and not real(A_ii) is compared;
+    // - a negative boost value, which must not flip the positive pivots;
+    // - a matrix with a small negative pivot, which stays negative once boosted.
+    template <typename T>
+    void check_ildlt_boost(rocsparse_handle handle)
+    {
+        const auto   a        = make_grid_matrix<T>(4, false);
+        const auto   pivots   = moduli(ildlt_pivots(a));
+        const double largest  = *std::max_element(pivots.begin(), pivots.end());
+        const double smallest = *std::min_element(pivots.begin(), pivots.end());
+        const auto   check
+            = [&](const csr_matrix<T>& m, double tol, double val, const std::string& what) {
+                  run_options opt;
+                  opt.boost     = true;
+                  opt.boost_tol = tol;
+                  opt.boost_val = val;
+                  check_csr_matrix<Kind::ildlt, T>(handle, m, opt, what);
+              };
+        for(const double tol : {2.0 * largest, 0.5 * smallest, 5.0})
+            check(a, tol, 7.0, "boost tol " + std::to_string(tol));
+
+        // The boosted pivots change the later ones, so the margin to the tolerance is
+        // checked on the pivots of the boosted factorization.
+        const double between        = 4.7;
+        const auto   boosted_pivots = moduli(ildlt_pivots(a, between, 7.0));
+        const auto   boosted_count  = std::count_if(
+            boosted_pivots.begin(), boosted_pivots.end(), [&](double p) { return p <= between; });
+        ASSERT_TRUE(clear_of_pivots(boosted_pivots, between));
+        ASSERT_GT(boosted_count, 0);
+        ASSERT_LT(boosted_count, a.n);
+        check(a, between, 7.0, "boost tol between the pivots");
+
+        check(a, 2.0 * largest, -7.0, "negative boost value");
+
+        // A_55 = 0.3 makes D_5 about -0.12; every other pivot stays above 1 in modulus.
+        csr_matrix<T> indefinite                    = a;
+        indefinite.val[diagonal_position(a, 5)]     = make_value<T>(0.3);
+        const std::vector<double> indefinite_pivots = ildlt_pivots(indefinite, 1.0, 7.0);
+        ASSERT_LT(indefinite_pivots[5], 0.0);
+        ASSERT_GT(indefinite_pivots[5], -1.0);
+        for(int32_t r = 0; r < a.n; ++r)
+        {
+            if(r != 5)
+                ASSERT_GT(std::abs(indefinite_pivots[r]), 1.0) << "row " << r;
+        }
+        check(indefinite, 1.0, 7.0, "negative pivot");
+
+        // Batch b scales A, hence D, by 1 + 0.25 * b: a tolerance of 6.5 boosts every
+        // pivot of batches 0 and 1 (at most 6.25) and none of batch 2 (at least 6.8).
+        run_options batched;
+        batched.boost     = true;
+        batched.boost_tol = 6.5;
+        batched.boost_val = 7.0;
+        for(const bool shared_row_ptr : {true, false})
+            check_csr_case<Kind::ildlt, T>(handle, 4, 3, shared_row_ptr, batched);
+    }
+
+    // The boost of every pivot or of none, with the tolerance passed as a float or a
+    // double, in host or device memory, through the hash kernel (the grid matrix) and the
+    // binary-search kernel (a last row of 600 entries).
+    template <typename T>
+    void check_ildlt_boost_inputs(rocsparse_handle handle)
+    {
+        for(const auto& a : {make_grid_matrix<T>(4, false), make_fat_row_matrix<T>(600)})
+        {
+            const auto   pivots   = moduli(ildlt_pivots(a));
+            const double largest  = *std::max_element(pivots.begin(), pivots.end());
+            const double smallest = *std::min_element(pivots.begin(), pivots.end());
+            for(const double tol : {2.0 * largest, 0.5 * smallest})
+            {
+                for(const bool float_tol : {false, true})
+                {
+                    for(const bool device : {false, true})
+                    {
+                        run_options opt;
+                        opt.boost           = true;
+                        opt.boost_tol       = tol;
+                        opt.boost_val       = 7.0;
+                        opt.boost_tol_float = float_tol;
+                        opt.boost_device    = device;
+                        check_csr_matrix<Kind::ildlt, T>(handle,
+                                                         a,
+                                                         opt,
+                                                         "n " + std::to_string(a.n) + " tol "
+                                                             + std::to_string(tol) + " float_tol "
+                                                             + std::to_string(float_tol)
+                                                             + " device " + std::to_string(device));
+                    }
+                }
+            }
+        }
+    }
 }
 
 TEST_F(PrecondGeneric, spilu0_numeric_boost)
 {
     for_all_types([&](auto tag) { check_ilu_boost<decltype(tag)>(handle); });
+}
+
+TEST_F(PrecondGeneric, spildlt0_numeric_boost)
+{
+    for_all_types([&](auto tag) { check_ildlt_boost<decltype(tag)>(handle); });
+}
+
+TEST_F(PrecondGeneric, spildlt0_numeric_boost_inputs)
+{
+    for_all_types([&](auto tag) { check_ildlt_boost_inputs<decltype(tag)>(handle); });
+}
+
+// With the boost enabled, spildlt0 still reports a pivot at or below the singularity
+// tolerance (numeric_near, first such row) and then boosts it; spilu0 reports none.
+TEST_F(PrecondGeneric, numeric_boost_and_singularity_tolerance)
+{
+    run_options opt;
+    opt.boost        = true;
+    opt.boost_tol    = 100.0;
+    opt.boost_val    = 7.0;
+    opt.set_sing_tol = true;
+    opt.sing_tol     = 5.0;
+    singular_case<Kind::ildlt, double>(
+        handle, make_grid_matrix<double>(4, false), opt, rocsparse_singularity_numeric_near, 0);
+    singular_case<Kind::ilu, double>(
+        handle, make_grid_matrix<double>(4, true), opt, rocsparse_singularity_none, -1);
+}
+
+// The boost enabled without a boost tolerance, without a boost value, or without both:
+// the analysis succeeds, and the compute stage returns rocsparse_status_invalid_pointer
+// without touching the values.
+TEST_F(PrecondGeneric, spildlt0_numeric_boost_unset)
+{
+    const auto a = make_grid_matrix<double>(4, false);
+    for(const bool set_tol : {false, true})
+    {
+        for(const bool set_val : {false, true})
+        {
+            if(set_tol && set_val)
+                continue;
+            SCOPED_TRACE(::testing::Message() << "set_tol " << set_tol << " set_val " << set_val);
+            dev_csr<double, int32_t, int32_t> d;
+            d.init(a, 1, true);
+            ASSERT_NE(d.A, nullptr);
+            run_options opt;
+            opt.boost         = true;
+            opt.boost_tol     = 1.0;
+            opt.boost_val     = 7.0;
+            opt.set_boost_tol = set_tol;
+            opt.set_boost_val = set_val;
+            run_result<double> out;
+            run_factorization<Kind::ildlt, double>(handle, d.A, d.val, 1, opt, out);
+            EXPECT_EQ(out.compute_status, rocsparse_status_invalid_pointer);
+            EXPECT_EQ(out.values, a.val);
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -385,10 +557,11 @@ namespace
         expect_size_error(A::set(handle, descr, A::input(In::boost_val), &value, 1));
         expect_size_error(A::set(handle, descr, A::input(In::sing_tol), &value, 1));
 
-        // Valid inputs: the boost tolerance may be given as a float or a double. The
-        // library stores the pointer and records the datatype as f64 whatever the
-        // size, so a float tolerance would be read as a double: it is only
-        // validated here, no factorization of this test uses it.
+        // Valid inputs: the boost tolerance may be given as a float or a double. spildlt0
+        // records a sizeof(float) tolerance as f32 and reads it as a float. spilu0 and
+        // spic0 record the datatype as f64 whatever the size; spilu0 would then read a
+        // float tolerance as a double, and spic0 never reads its boost (AISPARSE-927). It
+        // is only validated here, no factorization of this test uses it.
         const float ftol = 1.0f;
         EXPECT_EQ(A::set(handle, descr, A::input(In::boost_tol), &ftol, sizeof(float)),
                   rocsparse_status_success);

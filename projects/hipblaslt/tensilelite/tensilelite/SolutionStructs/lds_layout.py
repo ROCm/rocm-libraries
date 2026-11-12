@@ -32,6 +32,9 @@ def format_lds_layout(state, kernel_name):
             whole = offsets.get("aBaseline" if tc == "A" else "bBaseline", False)
             size = _tensor_footprint(state, tc) if whole else _footprint(state, tc)
             components = 1 if whole else 2
+        elif tc == "MXSA" and offsets.get("mxsSplitA"):
+            size = offsets["mxsaHalfBytes"]
+            components = 2
         else:
             size_key = "LdsNumElementsAligned" if offsets else "ldsNumBytes"
             size = state.get(size_key + tc, 0)
@@ -55,7 +58,8 @@ def format_lds_layout(state, kernel_name):
                 group += f" group{component}" if state.get("TDMSplit") else str(component)
             for buffer in range(copies):
                 phase = ("ping", "pong")[buffer] if copies == 2 else f"buffer{buffer}"
-                start = int(base + component * offsets.get("writeStrideBytes", 0) + buffer * stride)
+                component_stride = offsets.get("mxsaStrideBytes", 0) if tc == "MXSA" else offsets.get("writeStrideBytes", 0)
+                start = int(base + component * component_stride + buffer * stride)
                 regions.append((start, start + int(size), f"{group} {phase}"))
     regions.sort()
     layout = "paired" if paired else "interleaved" if offsets else "ordinary"

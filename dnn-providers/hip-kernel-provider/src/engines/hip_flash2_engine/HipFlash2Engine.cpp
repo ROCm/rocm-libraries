@@ -8,6 +8,7 @@
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "HipFlash2FwdPlanBuilder_v2.hpp"
@@ -50,8 +51,11 @@ void HipFlash2Engine::getDetails(
     hipdnnPluginConstData_t& detailsOut) const
 {
     flatbuffers::FlatBufferBuilder builder;
-    auto engineDetails
-        = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(builder, id(), nullptr);
+
+    const std::vector<int32_t> behaviorNotes{
+        static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)};
+    auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(
+        builder, id(), nullptr, &behaviorNotes);
     builder.Finish(engineDetails);
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
     detailsOut.ptr = detachedBuffer->data();

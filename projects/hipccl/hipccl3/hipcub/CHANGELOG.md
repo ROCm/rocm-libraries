@@ -4,8 +4,18 @@ Full documentation for hipCUB is available at [https://rocm.docs.amd.com/project
 
 ## hipCUB-5.1.0 for ROCm 10.3.0
 
+### Changed
+
+* Renamed the CMake option `CODE_COVERAGE` to `HIPCUB_ENABLE_COVERAGE`.
+* Tests no longer set `LLVM_PROFILE_FILE` through CTest. A value set in the environment when running `ctest` is now used. The `coverage_analysis` target still writes profiles to `coverage-report/profraw`.
+
+### Removed
+
+* Deprecated `CODE_COVERAGE`, use `HIPCUB_ENABLE_COVERAGE` instead.
+
 ### Resolved issues
 
+* Fixed `BUILD_TEST`, `BUILD_BENCHMARK`, and `BUILD_EXAMPLE` being set to `OFF` in the CMake cache when hipCUB fetches rocPRIM in the same configure. Projects configured afterwards, such as rocThrust in the hipCCL superbuild, no longer lose their tests.
 * Fixed a build failure when libhipcxx is not on the include path. `radix_rank_sort_operations.hpp` included the libhipcxx `bit` header unconditionally, which does not exist in the standard library fallback.
 
 ## hipCUB-5.0.0 for ROCm 10.2.0

@@ -47,6 +47,7 @@ from kernels.gfx942.attention_dense import (
     attention_dense_signature,
     bf16_cfvst_supported,
     build_attention_dense,
+    default_use_exp2_fast,
     gfx942_kernel_name,
     run_attention_dense_torch,
     supports_attention_dense,
@@ -58,7 +59,6 @@ from kernels.gfx942.attention_dense import (
     _lds_bytes,
     _use_kdb,
     _use_vpf,
-    _use_exp2_fast,
     _v_row_pad,
     _v_swizzle_width,
     _tuned_waves_per_eu,
@@ -857,7 +857,7 @@ def test_supports_rejects_non_gfx942():
 def test_supports_rejects_modes_deferred_to_later_phases(kw, marker):
     """P0 implements the default-grid uniform dense path only. These modes must be
     rejected by ``supports`` -- not merely by ``build`` -- or dispatch selects a spec
-    it cannot build (``gfx942_dense._base_spec`` sets ragged=True for any non-256-multiple
+    it cannot build (``gfx942_dense.tuned_base_spec`` sets ragged=True for any non-256-multiple
     self-attention length, which is most real serving shapes)."""
     ok, why = supports_attention_dense(_spec(**kw), arch="gfx942")
     assert not ok, f"{marker} must be rejected at the supports layer"
@@ -946,14 +946,22 @@ def test_supports_rejects_block_n_larger_than_the_query_tile():
     assert not ok and "block_n" in why
 
 
-def test_supports_rejects_sliding_window_past_seqlen_kv():
-    """SWA + causal where the last query block's window starts past seqlen_kv:
-    start_tile >= n_up -> zero-trip KV loop -> l == 0 -> rcp(0) -> NaN. Same class
-    as the block_n zero-trip guards above."""
-    ok, why = supports_attention_dense(
-        _spec(seqlen_q=1024, seqlen_kv=256, sliding_window=128), arch="gfx942"
+@pytest.mark.parametrize("use_sinks", [False, True])
+@pytest.mark.parametrize("persistent", [False, True])
+def test_supports_accepts_window_past_seqlen_kv(persistent, use_sinks):
+    """The last query block's window starts past seqlen_kv. Its rows see no key and
+    the kernel writes 0 for them (the sink seed with sinks, the row_has_key store
+    mask without), so the shape is admitted on both grids and builds."""
+    spec = _spec(
+        seqlen_q=1024,
+        seqlen_kv=256,
+        sliding_window=128,
+        use_sinks=use_sinks,
+        persistent=persistent,
     )
-    assert not ok and "sliding_window" in why
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert ok, why
+    build_attention_dense(spec, arch="gfx942")
 
 
 def test_supports_accepts_sliding_window_in_range():
@@ -968,24 +976,6 @@ def test_supports_accepts_sinks_alone_and_with_sliding_window():
     for kw in (dict(), dict(sliding_window=128), dict(persistent=True)):
         ok, why = supports_attention_dense(_spec(use_sinks=True, **kw), arch="gfx942")
         assert ok, f"{kw}: {why}"
-
-
-@pytest.mark.parametrize("persistent", [False, True])
-def test_supports_accepts_empty_window_with_sinks(persistent):
-    """With sinks the zero-trip KV loop leaves l at the l0 = 1 seed and o at zero, so
-    the empty-window rows output 0 (softmax over the sink alone) instead of NaN. The
-    guard is lifted for sinks only; the same shape without sinks is still rejected
-    by test_supports_rejects_sliding_window_past_seqlen_kv."""
-    spec = _spec(
-        seqlen_q=1024,
-        seqlen_kv=256,
-        sliding_window=128,
-        use_sinks=True,
-        persistent=persistent,
-    )
-    ok, why = supports_attention_dense(spec, arch="gfx942")
-    assert ok, why
-    build_attention_dense(spec, arch="gfx942")
 
 
 def _sink_seed_sites(kernel):
@@ -2050,7 +2040,8 @@ def _walk_op_names(op):
         (64, "bf16", False, True),
         (64, "bf16", True, True),
         # bf16 D128 DEFAULT-GRID GUARD: plain exp2 on the default grid, exp2_fast on
-        # the persistent grid. The predicate reads no shape -- see _use_exp2_fast.
+        # the persistent grid. The predicate reads no shape -- see
+        # default_use_exp2_fast.
         (128, "bf16", False, False),
         (128, "bf16", True, True),
     ],
@@ -2069,7 +2060,7 @@ def test_exp2_fast_policy_bf16_d128_default_grid_guard(
     which is what lets bf16 D128 share one runtime-shape binary. Pins the guard so a
     future edit that changes the enabled set has to update this matrix on purpose.
     """
-    assert _use_exp2_fast(head_size, dtype, persistent) is expected
+    assert default_use_exp2_fast(head_size, dtype, persistent) is expected
 
 
 @pytest.mark.parametrize(
@@ -2303,7 +2294,7 @@ def test_build_bakes_the_tuned_waves_per_eu_attribute():
 def test_dispatch_applies_gfx942_waves_per_eu_and_leaves_gfx950_alone():
     """The gfx942 dispatch spec factory applies the tune; gfx950 stays at the default.
 
-    The tune lives in gfx942's OWN ``_base_spec`` (``dispatch/attention/gfx942_dense.py``),
+    The tune lives in gfx942's OWN ``tuned_base_spec`` (``dispatch/attention/gfx942_dense.py``),
     so the kernel_name ``wpe`` tag and the emitted attribute agree on the dispatched
     path (``attention_tuning_spec`` -> ``run_attention_dense_torch``). gfx950 has a
     separate factory in its own arch module which MUST keep the spec default

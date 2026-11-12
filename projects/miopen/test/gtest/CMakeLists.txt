@@ -30,6 +30,7 @@ endif()
 if(THEROCK_SANITIZER STREQUAL "ASAN")
     # Disable tests that currently hang or crash under ASAN with CK kernels.
     list(APPEND SKIP_TESTS
+        group_conv_tf32_reuse_test.cpp
         group_conv3d_bwd.cpp
         group_conv3d_fwd.cpp
         group_conv3d_wrw.cpp
@@ -65,12 +66,6 @@ if(THEROCK_SANITIZER STREQUAL "ASAN")
     # temporarily disable: LeakSanitizer reports a memory leak at exit
     # (assertions pass but the process leaks).
     list(APPEND SKIP_TESTS find_2_conv.cpp)
-    # temporarily disable (ALMIOPEN-3097): LeakSanitizer reports leaks at exit because these tests never call
-    # miopenDestroySolution on the solutions returned by miopenFindSolutions (assertions pass).
-    list(APPEND SKIP_TESTS
-        na_inference_find2.cpp
-        na_train_find2.cpp
-    )
     # temporarily disable: these fail under ASan even when run individually
     # on gfx942.
     list(APPEND SKIP_TESTS
@@ -264,12 +259,6 @@ function(add_gtest TEST_NAME TEST_CPP)
         add_gtest_negative_filter("Full/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
         add_gtest_negative_filter("Full/GPU_BNFWDTrainLarge2D_FP32.BnV2LargeFWD_TrainCKfp32/NCHW_BNSpatial_testBNAPIV2_Dim_2_test_id_64") # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
         add_gtest_negative_filter("*SerialRun3D*") # These FP32 SerialRun3D tests use so much memory that they have a risk of timing out the machine during tests
-    endif()
-
-    if(MIOPEN_TEST_GFX94X)
-        # Disable flaky test ALMIOPEN-1926: bias-only CPU/GPU mismatch, a different index each run (39 failures at 36 indices in
-        # 60 days of Jenkins gfx942 builds, 2026-08-24..10-23, incl. 11 of 37 develop builds after /1026 and /1095 were filtered).
-        add_gtest_negative_filter("Full/GPU_LstmMSRnn_FP32*")
     endif()
 
     # Excluded from MIOpen CI: the FP32 case OOMs when shards run concurrently on a single GPU.

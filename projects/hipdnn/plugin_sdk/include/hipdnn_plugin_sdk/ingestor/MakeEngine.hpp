@@ -48,6 +48,8 @@ inline int selectorCode(UhdAdapter adapter)
         return 3;
     case UhdAdapter::CUSTOM_LIBRARY:
         return 4;
+    case UhdAdapter::LINEAR_DATA:
+        return 5;
     // Required by -Wswitch-default; reached only by an adapter missing from this table.
     default:
         throw std::logic_error("UHD adapter has no selector code");
@@ -507,6 +509,25 @@ std::unique_ptr<IEngine<THandle, TSettings, TContext>>
         set.unavailableEnginePredictionArches,
         engineSelectorRevision(set),
         enginePredictionProvenance(set));
+}
+
+/// The engine for @p set over @p state, which other engines may already share: a fresh
+/// state manager (its own caches, no copy of any kernel) is wrapped around it, so the cost
+/// does not grow with the catalog. This is how a provider serves a descriptor set to every
+/// Container after loading it once. @p set supplies the UED, the engine identity and the
+/// engine-prediction bindings; its packs are not read.
+/// @throws std::invalid_argument @p state is null.
+template <typename THandle, typename TSettings, typename TContext>
+std::unique_ptr<IEngine<THandle, TSettings, TContext>>
+    makeEngine(const DescriptorSet& set,
+               std::shared_ptr<const KernelIngestorSharedState<THandle>> state,
+               const IDeviceResolver<THandle>& deviceResolver)
+{
+    auto stateManager = std::make_unique<KernelIngestorStateManager<THandle>>(
+        std::move(state),
+        KernelIngestorStateManager<THandle>::DEFAULT_CATALOG_CACHE_CAPACITY,
+        engineIdentity(set));
+    return makeEngine<THandle, TSettings, TContext>(set, std::move(stateManager), deviceResolver);
 }
 
 } // namespace hipdnn_plugin_sdk::ingestor

@@ -1,0 +1,30 @@
+# Fortran binding of rocsparse: see fortran-bindings.yml.
+name: Fortran bindings (rocsparse)
+
+on:
+  pull_request:
+    paths:
+      - 'projects/rocsparse/library/include/**.h'
+      - 'bindings/fortran/rocsparse/metadata/**'
+      - '.github/workflows/fortran-bindings-rocsparse.yml'
+      - '.github/workflows/fortran-bindings.yml'
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bindings:
+    uses: ./.github/workflows/fortran-bindings.yml
+    with:
+      project: rocsparse
+      libs: rocsparse
+    secrets:
+      APP_ID: ${{ secrets.APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}

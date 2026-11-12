@@ -282,15 +282,6 @@ struct RocblasContractionProblem
 };
 
 /*******************************************************************************
- * This function determines whether or not to use the hipBLASLt backend based
- * on problem specific conditions. This is passed on to the handle's useHipBLASLt
- * function to consolidate with the architecture specific conditions and
- * environment variable state.
-******************************************************************************/
-template <typename Ti, typename To, typename Tc>
-bool useHipBLASLt(const RocblasContractionProblem<Ti, To, Tc>& problem);
-
-/*******************************************************************************
  * runContractionProblem() solves a RocblasContractionProblem                  *
  *******************************************************************************/
 template <typename Ti, typename To, typename Tc>

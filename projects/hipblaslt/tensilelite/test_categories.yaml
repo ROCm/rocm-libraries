@@ -31,14 +31,18 @@ test_categories:
   # GPU tests), so syrupy would flag the un-exercised snapshots as failures.
   # `--snapshot-warn-unused` downgrades those to warnings instead of errors.
   #
-  # The quick and standard categories also pass `--dist=worksteal`. It only takes
-  # effect when pytest-xdist runs (parallel_workers > 1), and it needs
+  # The quick, standard and hw-common categories also pass `--dist=worksteal`. It
+  # only takes effect when pytest-xdist runs (parallel_workers > 1), and it needs
   # pytest-xdist 3.2 or newer. xdist's default `load` scheduler
   # sends each worker a fixed block of consecutive tests sized by count and never
   # takes tests back, and about half of the unit suite's runtime sits in one
   # block of consecutive tests (characterization/_codegen). One or two workers
   # received that block while the rest finished and sat idle. `worksteal` lets
   # idle workers take not-yet-started tests from busy ones.
+  #
+  # hw-common uses it for the same reason: its few expensive configs (dtv, cgemm,
+  # zgemm, bufferLoadStore0, ...) are adjacent in collection order, so `load`
+  # piles them onto one worker while the others go idle.
   #
   # Under xdist each worker only sees its own tests, so syrupy no longer prints
   # its "N snapshots passed" summary and cannot report unused snapshots. Mismatches
@@ -137,6 +141,7 @@ test_categories:
     # the 16 used by the FFM categories assumes one emulator per worker.
     parallel_workers: 4
     pytest_args:
+      - "--dist=worksteal"
       - "--prebuilt-client={ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client"
       - "--global-parameters=LibraryFormat='msgpack'"
       - "--tensile-options=--cxx-compiler,{ROCM_PATH}/bin/amdclang++"

@@ -9,6 +9,8 @@ correct as the recorder/kernel evolve, and that the committed render is invoked 
 """
 from __future__ import annotations
 
+import pytest
+
 from rocke.helpers.tiling import tiling_recorder as tr
 from rocke.helpers.tiling.kernels.tiling_gemm_crc_demo.crc_interleaved_gemm import (
     build_crc_gemm,
@@ -94,6 +96,7 @@ def test_loop_membership_needs_the_iv():
     assert bd._origin_uses_iv(loop_store.origin)
 
 
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_block_diagram_renders(tmp_path):
     out = tmp_path / "block_diagram.png"
     pipe = _record()
@@ -104,6 +107,7 @@ def test_block_diagram_renders(tmp_path):
     assert out.exists() and out.stat().st_size > 0
 
 
+@pytest.mark.usefixtures("requires_matplotlib")
 def test_convenience_method_matches_free_function(tmp_path):
     pipe = _record()
     a = pipe.block_diagram(str(tmp_path / "a.png"))

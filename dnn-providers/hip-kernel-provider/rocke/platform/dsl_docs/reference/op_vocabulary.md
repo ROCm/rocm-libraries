@@ -154,12 +154,25 @@ that range-checks every access. Its offset is i64 and is never widened implicitl
 | `tile.buffer_store_vN`           | `buffer_store_vN`                | `bitcast` + `raw.ptr.buffer.store.{i8,i16,i32,v2i32,v4i32}`  |
 | `tile.async_buffer_load_lds`     | `async_buffer_load_lds`          | `llvm.amdgcn.raw.ptr.buffer.load.lds`                        |
 | `tile.async_buffer_load_lds_addr`| `async_buffer_load_lds_addr`     | same as above; explicit LDS i64 address                       |
+| `tile.buffer_atomic_fadd_f32`    | `buffer_atomic_fadd_f32`         | `raw.ptr.buffer.atomic.fadd.f32` (pre-add result unused)     |
 
 `buffer_load_vN` / `buffer_store_vN` take any scalar whose width is whole bytes (i8, u8, fp8, bf8,
 i16, f16, bf16, i32, f32, i64, f64); one access moves 1, 2, 4, 8 or 16 bytes. The hardware checks an
 access of 4 bytes or more per 4-byte component and a 1- or 2-byte access whole: a load past
 `num_records` reads 0, a store past it writes nothing. The HIP lowering has no vector type for u8 or
 i64 elements, so those two lower through LLVM only.
+
+`buffer_atomic_fadd_f32(rsrc, voffset, soffset, value, cachepolicy=0)` adds an f32 into global
+memory through a buffer resource; `voffset` and `soffset` are byte offsets. The returned pre-add value
+is discarded, so the backend selects the no-return atomic. Guard an invalid offset with `scf_if`
+instead of steering it out of range: a load at the out-of-range sentinel reads 0, but an atomic there
+faults on gfx1250. `cachepolicy` is the intrinsic's raw immediate, an int in 0..31 that both engines
+check in the builder and again in the lowering. On gfx12 and later its bits [2:0] are `th` and [4:3]
+`scope`. `rocke.core.ir.CPOL_ATOMIC_CASCADE_DEV` (C++: `ROCKE_CPOL_ATOMIC_CASCADE_DEV`) is
+`th = TH_ATOMIC_CASCADE (4)` with `scope = SCOPE_DEV (2)`, i.e. 20. With it, the WGP and L2 caches add
+locally and write the sum back once, which removes most of the global read-modify-write traffic of a
+cross-workgroup reduction. The destination must be zeroed first. The encoding is gfx12+, so callers
+pass 0 on gfx9 and gfx11. The op has no HIP lowering.
 
 `buffer_rsrc` takes a global pointer: the intrinsic's overload names `ptr addrspace(1)`, so a
 parameter declared `addr_space="constant"` (`ptr addrspace(4)` in the kernel header) is refused by

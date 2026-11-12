@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <cstdint>
+
 #include "Container.hpp"
 #include "Handle.hpp"
 #include "version.h"
@@ -13,8 +15,21 @@ using namespace hip_kernel_provider::core;
 #define HIPDNN_PLUGIN_HANDLE_TYPE Handle
 #define HIPDNN_PLUGIN_CONTEXT_TYPE Context
 
+// hipDNN's newest engine plugin API (PluginVersionConstants.hpp K_MAX_SUPPORTED_API_VERSION,
+// asserted below), so the backend routes the provider every graph the SDK can express. Which of
+// them an engine sees is the provider's schema guard's to say (GraphSchema.hpp): an engine that
+// has not opted in still declines any graph needing more than providerBaselineGraphSchema().
 #define HIPDNN_PLUGIN_API_VERSION "1.4.0"
 #include <hipdnn_plugin_sdk/EnginePluginImpl.inl>
+
+#include <string_view>
+
+#include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
+
+static_assert(std::string_view(HIPDNN_PLUGIN_API_VERSION)
+                  == hipdnn_plugin_sdk::K_MAX_SUPPORTED_API_VERSION,
+              "the SDK defines another engine plugin API: review the provider's schema guard "
+              "(GraphSchema.hpp) and the engines that opt in, then raise this with it");
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
@@ -46,5 +61,29 @@ using namespace hip_kernel_provider::core;
 extern "C" HIPDNN_PLUGIN_EXPORT void hipdnnEnginePluginResetKpackModuleCacheForTesting()
 {
     hip_kernel_provider::kernel_ingestor_engine::resetIngestorModuleCachesForTesting();
+}
+
+/// Lowers the per-image byte limit hipkernel:Gfx950ConvDgradAot's batch chunker slices
+/// at, inside this loaded plugin, so a small batch exercises the chunked-launch device
+/// path without needing a multi-GiB image. FOR TESTS ONLY, for the same reason as
+/// hipdnnEnginePluginResetKpackModuleCacheForTesting above: the limit lives in a
+/// function-local static (Gfx950ConvDgradGeometry.hpp::batchChunkByteLimitForTesting()),
+/// and a test in another TU holds its own copy of that static unless it reaches through
+/// this exported symbol into the plugin's own.
+extern "C" HIPDNN_PLUGIN_EXPORT void
+    hipdnnEnginePluginSetGfx950ConvDgradAotBatchChunkByteLimitForTesting(int64_t limit)
+{
+    hip_kernel_provider::kernel_ingestor_engine::setGfx950ConvDgradAotBatchChunkByteLimitForTesting(
+        limit);
+}
+
+/// The implicit-GEMM kernel launches hipkernel:Gfx950ConvDgradAot has made inside this
+/// loaded plugin, one per batch slice, so a test can tell a sliced launch from a whole
+/// one. FOR TESTS ONLY, exported for the same reason as the hooks above.
+extern "C" HIPDNN_PLUGIN_EXPORT int64_t
+    hipdnnEnginePluginGfx950ConvDgradAotImplicitLaunchCountForTesting()
+{
+    return hip_kernel_provider::kernel_ingestor_engine::
+        gfx950ConvDgradAotImplicitLaunchCountForTesting();
 }
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

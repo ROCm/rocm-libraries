@@ -37,8 +37,6 @@
 #include <origami/hardware.hpp>
 #include <origami/streamk.hpp>
 
-#include "../../../library/src/amd_detail/rocblaslt/src/include/rocblaslt_arch_revision.hpp"
-
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -171,15 +169,6 @@ namespace
             // that never appear in the library filename.
             const std::string arch      = gpuArchName();
             const std::string processor = arch.substr(0, arch.find(':'));
-            // The subtree the runtime loads, which for an A0 part reporting
-            // gfx1250 is not the one named for processor.
-            hipDeviceProp_t props{};
-            int             device = 0;
-            const int       rev    = hipGetDevice(&device) == hipSuccess
-                                    && hipGetDeviceProperties(&props, device) == hipSuccess
-                                ? props.asicRevision
-                                : -1;
-            const std::string libArch = rocblaslt_revisioned_arch_name(processor, rev);
 
             std::string tried;
             for(const auto& root : libraryRootCandidates())
@@ -187,7 +176,7 @@ namespace
                 // Always the logical single-extension name: the loader resolves
                 // the shipped ".dat.zlib" by appending the suffix itself.
                 const std::filesystem::path logical
-                    = root / libArch / ("TensileLibrary_lazy_" + processor + ".dat");
+                    = root / processor / ("TensileLibrary_lazy_" + processor + ".dat");
                 tried += (tried.empty() ? "" : ", ") + logical.string();
 
                 if(!std::filesystem::exists(logical)
@@ -2129,10 +2118,16 @@ namespace
         auto       solution                  = probeSolution();
         solution->problemType.mxBlockA      = 32;
         solution->problemType.mxBlockB      = 32;
-        solution->problemType.mxScaleFormat = 2; // InMemorySwizzle
-
-        EXPECT_FALSE(admitsUniformSummationOrder(*solution, hardware))
-            << "An unaudited MX scale layout must be refused";
+        // Format 1 retains the HostPreSwizzle envelope. Format 2's TDM
+        // iteration increments need no extra USO geometry check, independent
+        // of this mock processor; kernel compatibility is checked separately.
+        for(int format : {0, 1, 2, 3})
+        {
+            solution->problemType.mxScaleFormat = format;
+            EXPECT_EQ(admitsUniformSummationOrder(*solution, hardware),
+                      format == 1 || format == 2)
+                << "MXScaleFormat=" << format;
+        }
     }
 
     TEST(RowUniformityStreamKRejection_pre_checkin, MXMatrixInstKEnvelope)

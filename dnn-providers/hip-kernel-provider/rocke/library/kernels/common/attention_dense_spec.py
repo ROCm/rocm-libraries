@@ -10,6 +10,7 @@ subclasses in the owning kernel modules.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field, fields as _dataclass_fields
 from types import MappingProxyType
 
@@ -47,11 +48,36 @@ DEFAULT_DENSE_TILE_GEOMETRY = DENSE_TILE_GEOMETRIES["default"]
 # num_records field is unsigned in hardware.
 INT32_LIMIT = 2**31
 
+# Softmax scales both dense kernels compute correctly: a chosen margin, not a hardware
+# limit. gfx950's reason and known limit are noted in its kernel module, above
+# _EMPTY_ROW_MAX_GRID. gfx942 multiplies each fp32 score by scale * log2(e) and masks
+# with -1e30, so a larger scale can push a visible score below the mask (the row max
+# goes to a masked key) or past FLT_MAX (NaN). The hipDNN packs check the same range
+# as 0x1p-64F / 0x1p4F (isSupportedScale, AttentionDenseNative.cpp); change them
+# together. test_attention_dense_scale.py pins both bounds.
+DENSE_MIN_SCALE = 2.0**-64
+DENSE_MAX_SCALE = 2.0**4
+
+
+def check_dense_scale(scale: float) -> None:
+    """Raise unless ``scale`` is in ``[DENSE_MIN_SCALE, DENSE_MAX_SCALE]``.
+
+    NaN and +-inf are invalid input (``ValueError``); a finite scale outside the
+    range, zero and negatives included, is a kernel limit (``NotImplementedError``).
+    Every dense runner calls this before it builds a kernel."""
+    if not math.isfinite(scale):
+        raise ValueError(f"scale must be finite, got {scale!r}")
+    if not DENSE_MIN_SCALE <= scale <= DENSE_MAX_SCALE:
+        raise NotImplementedError(
+            "NOT_YET_IMPLEMENTED: the dense attention kernels support a softmax "
+            f"scale in [2**-64, 2**4], got {scale!r}"
+        )
+
 
 def partial_tile_reason(spec: "AttentionDenseSpec") -> str:
     """Say which sequence length leaves a partial tile on a ``ragged`` spec.
 
-    The dense ``_base_spec`` factories set ``ragged`` for an ordinary graph whose
+    The dense base-spec factories set ``ragged`` for an ordinary graph whose
     lengths are not tile multiples (Sq == Skv == 384 at block_m 256, say), so a
     refusal that only says "ragged" reads as a varlen problem. This names the
     length and the tile instead.
@@ -600,6 +626,14 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
        emitted through ``const_i32`` (no range check) and the voffset feeding it is
        signed i32 arithmetic, so the signed bound is the binding one on both paths.
 
+       The UNIT differs per operand and is not cosmetic. K/V always go through a
+       buffer resource, so they are bounded in bytes. Q is bounded in bytes only
+       when ``ragged`` (the buffer-resource path, whose voffset is ``addr * 2``)
+       and in elements otherwise (``global_load_vN`` takes an element index). O is
+       element-addressed in every mode, despite ``_emit_o_store`` naming its
+       address argument ``q_row_byte``. Bounding ragged Q in elements lets a spec
+       between 2**30 and 2**31 elements through to a byte offset that overflows.
+
     Order matters between 2 and 4: a negative extent makes the products in 4
     vacuously true, so the sign check has to run first.
 
@@ -642,7 +676,17 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
             f"limit ({INT32_LIMIT} B)"
         )
     qo_elems = spec.batch * spec.seqlen_q * spec.num_query_heads * spec.head_size
-    if qo_elems >= INT32_LIMIT:
+    if spec.ragged:
+        # A ragged Q goes through a buffer resource whose num_records AND voffset
+        # are both i32 BYTES, so the ceiling is half the element count the
+        # element-offset paths get. O stays element-addressed even here.
+        qo_bytes = qo_elems * 2
+        if qo_bytes >= INT32_LIMIT:
+            return False, (
+                f"Q/O extent is {qo_bytes} B, at or past the 32-bit "
+                f"buffer-resource limit ({INT32_LIMIT} B)"
+            )
+    elif qo_elems >= INT32_LIMIT:
         return False, (
             f"Q/O extent is {qo_elems} elements, at or past the 32-bit addressing "
             f"limit ({INT32_LIMIT})"
@@ -653,9 +697,12 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
 __all__ = [
     "AttentionDenseSpec",
     "DEFAULT_DENSE_TILE_GEOMETRY",
+    "DENSE_MAX_SCALE",
+    "DENSE_MIN_SCALE",
     "DENSE_TILE_GEOMETRIES",
     "INT32_LIMIT",
     "attention_dense_cache_key",
+    "check_dense_scale",
     "check_dense_spec_preflight",
     "partial_tile_reason",
 ]

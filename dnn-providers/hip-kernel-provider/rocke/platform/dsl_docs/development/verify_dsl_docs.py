@@ -304,14 +304,6 @@ _imp(
         "GroupedGemmSpec",
         "build_grouped_gemm",
         "grouped_gemm_problems",
-        "ConvProblem",
-        "ImplicitGemmConvSpec",
-        "build_implicit_gemm_conv",
-        "DirectConvProblem",
-        "DirectConv16cSpec",
-        "build_direct_conv_16c",
-        "DirectConv4cSpec",
-        "build_direct_conv_4c",
         "ElementwiseSpec",
         "build_elementwise",
         "Reduce2DSpec",
@@ -591,18 +583,6 @@ check("optimize_kernel CSE", t_passes)
 
 section("specs build + lower (LLVM / HIP / CK Tile)")
 
-from kernels.common.conv_implicit_gemm import (
-    ConvProblem,
-    ImplicitGemmConvSpec,
-    build_implicit_gemm_conv,
-)
-from kernels.common.conv_direct_grouped import (
-    DirectConvProblem,
-    DirectConv16cSpec,
-    DirectConv4cSpec,
-    build_direct_conv_16c,
-    build_direct_conv_4c,
-)
 from rocke.instances import (
     TileSpec,
     TraitSpec,
@@ -626,7 +606,6 @@ from rocke.instances import (
 from rocke.core.lower_cktile import (
     lower_spec_to_cktile,
     lower_universal_gemm_to_cktile,
-    lower_implicit_gemm_conv_to_cktile,
 )
 
 
@@ -660,49 +639,10 @@ gemm_out = check(
 )
 
 
-def t_conv_spec() -> None:
-    spec = ImplicitGemmConvSpec(
-        problem=ConvProblem(
-            N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1
-        ),
-        tile_m=64,
-        tile_n=64,
-        tile_k=64,
-        warp_m=2,
-        warp_n=2,
-        warp_tile_m=32,
-        warp_tile_n=32,
-        warp_tile_k=16,
-        pipeline="mem",
-        epilogue="cshuffle",
-    )
-    kernel = build_implicit_gemm_conv(spec)
-    print_ir(kernel)
-    lower_kernel_to_llvm(kernel, arch="gfx950")
-    lower_kernel_to_hip(kernel)
-    lower_spec_to_cktile(spec)
-    lower_implicit_gemm_conv_to_cktile(spec)
-
-
-check("ImplicitGemmConvSpec: build + print_ir + LLVM + HIP + CK Tile", t_conv_spec)
-
-
-def t_direct_conv() -> None:
-    # DirectConvProblem(N, H, W, groups, cpg, kpg, KH=3, KW=3, PAD=1, stride=1)
-    # The 16c spec's default BLOCK_GROUPS=8; use groups=16 so divisibility holds.
-    p16 = DirectConvProblem(
-        N=8, H=56, W=56, groups=16, cpg=16, kpg=16, KH=3, KW=3, PAD=1, stride=1
-    )
-    s16 = DirectConv16cSpec(problem=p16)
-    lower_kernel_to_llvm(build_direct_conv_16c(s16), arch="gfx950")
-    p4 = DirectConvProblem(
-        N=8, H=56, W=56, groups=64, cpg=4, kpg=4, KH=3, KW=3, PAD=1, stride=1
-    )
-    s4 = DirectConv4cSpec(problem=p4)
-    lower_kernel_to_llvm(build_direct_conv_4c(s4), arch="gfx950")
-
-
-check("DirectConv16cSpec + DirectConv4cSpec: build + LLVM", t_direct_conv)
+# NOTE: convolution (kernels.*) doc verification -- the ImplicitGemmConvSpec and
+# DirectConv16cSpec/4cSpec build + lower checks -- has moved to
+# library/tests/test_verify_dsl_docs_conv.py, beside the doc it verifies
+# (library/kernels/conv/docs/convolution.md).
 
 
 def t_smallops() -> None:
@@ -1485,37 +1425,8 @@ def t_sync_helpers() -> None:
 check("no_fence + sync/release helpers callable", t_sync_helpers)
 
 
-# =============================================================================
-# Implicit-GEMM conv end-to-end (GPU)
-# =============================================================================
-
-section("implicit-GEMM conv end-to-end")
-
-
-def t_implicit_conv_e2e() -> None:
-    spec = ImplicitGemmConvSpec(
-        problem=ConvProblem(
-            N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, sH=1, sW=1, pH=1, pW=1, dH=1, dW=1
-        ),
-        tile_m=64,
-        tile_n=64,
-        tile_k=64,
-        warp_m=2,
-        warp_n=2,
-        warp_tile_m=32,
-        warp_tile_n=32,
-        warp_tile_k=16,
-        pipeline="mem",
-        epilogue="cshuffle",
-    )
-    kernel = build_implicit_gemm_conv(spec)
-    art = compile_kernel(kernel)
-    assert art.hsaco_bytes > 0
-    # Don't allocate / launch (the README/run_manifest path handles that).
-    # The static build alone proves the IR + LLVM + comgr path.
-
-
-check("implicit-GEMM conv: build + LLVM + comgr", t_implicit_conv_e2e)
+# NOTE: the implicit-GEMM conv build + comgr check has moved to
+# library/tests/test_verify_dsl_docs_conv.py.
 
 
 # =============================================================================
