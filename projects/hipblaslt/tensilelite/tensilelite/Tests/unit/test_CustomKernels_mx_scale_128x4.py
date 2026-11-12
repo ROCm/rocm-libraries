@@ -246,7 +246,7 @@ def test_logic_file_predicates(rel, fmt, assembler, gfx950_iim):
         def values(tag):
             return set(preds[tag])
 
-        assert values("MXScaleFormat") == {(None, 3)}
+        assert values("MXScaleFormatEquals") == {(None, 3)}
         assert values("AlphaValue") == {(None, "1")}
         assert values("SwizzleTensorA") == {(None, True)}
         assert values("SwizzleTensorB") == {(None, True)}
@@ -275,7 +275,7 @@ def test_canonical_b_logic_file_predicates(assembler, gfx950_iim):
     def values(tag):
         return set(preds[tag])
 
-    assert values("MXScaleFormat") == {(None, 3)}
+    assert values("MXScaleFormatEquals") == {(None, 3)}
     assert values("AlphaValue") == {(None, "1")}
     assert values("SwizzleTensorA") == {(None, True)}
     assert values("SwizzleTensorB") == {(None, False)}
