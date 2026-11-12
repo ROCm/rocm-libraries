@@ -11,15 +11,15 @@ gfx1250-strict job installs ROCm from pip wheels, and tox's packaging env never 
 Part 1 says what changes in which branch and repository. Part 2 records the
 decisions behind those changes. The decision log
 ([PythonBuildGrillingDecisions.md](../PythonBuildGrillingDecisions.md)) records
-decisions 1–14 as Q121–Q134. The TheRock packaging requirements this effort
-answers are written out below, with their status.
+decisions 1–14 as Q121–Q134 and client-path ownership as Q135. The TheRock
+packaging requirements this effort answers are written out below, with their status.
 
-**Status (2026-11-11):** every rocm-libraries branch in section 1.2, including the
-new R0 and R1, is implemented and validated per branch (section 1.5 lists where the
-implementation went beyond or differs from this plan). TheRock T1–T14 exist as
-branches and merge cleanly onto `main` as of 2026-11-11. Publishing, PR
-descriptions and the reply to archana follow separately, each with its own
-approval.
+**Status (2026-11-12):** rocm-libraries stack #15582 and TheRock T1–T14 branches
+are published. The #11022 generator-environment fix, #11025 tox fix, and #11019/#11025
+GEKO correction are committed locally and restacked; they have not been pushed.
+Section 1.5 records their scope and validation. TheRock PRs and the reply to
+archana remain pending. TheRock branches merged cleanly onto `main` as checked
+on 2026-11-11; a full TheRock build has not run.
 
 The table below is the state at the start of the review.
 
@@ -191,6 +191,10 @@ Restack only.
 
 ### #11019 `runtime-client-binding-foundation` (introduces `validate_client`, `_rocm.py`)
 
+- Own `client_executable_name()` and `built_client_path()` in the top-level binding
+  module. Invoke's build/binding tasks use the same filename and CMake layout.
+- Expose `invoke client-path --build-dir ...` for source-build consumers such as
+  GEKO. Task discovery and this query do not import the generator package (Q135).
 - `validate_client()` compares `--source-revision` with the package's own SHA, not
   the distribution version (decision 3):
   - **installed package:** read the SHA from `_build_info.py`, then require an exact
@@ -394,6 +398,10 @@ introduced, decision 1.)
 - Drop this branch's `setup.py` hunk and its `.pkg`/`0.0.0` removal hunks entirely;
   they remove things that are never introduced (audit).
 - Delete geko's `utils._tensilelite_build_environment()` and its tests.
+- Query #11019's `invoke client-path` before building or installing. GEKO does not
+  duplicate the executable suffix or build layout. Generated bash scripts quote
+  interpreter/client paths through `shell_word`; tests cover both executable
+  names, Windows backslashes, spaces and apostrophes without an installed-package skip.
 - Drop the `TENSILELITE_ROCM_VERSION="$(<…/.info/version)"` prefix in
   `.github/scripts/run_rocjitsu_hipblaslt_race_check.sh` (#11026 and #11027 touch it
   again).
@@ -855,7 +863,7 @@ its PR (rocm-libraries#10975) is still open. Read it before designing F1's wheel
 stage, so the two stages use one pattern for building, staging and validating a
 wheel.
 
-## 1.5 Implementation notes (2026-11-11)
+## 1.5 Implementation notes (updated 2026-11-12)
 
 Where the implementation went beyond or differs from section 1.2:
 
@@ -869,6 +877,18 @@ Where the implementation went beyond or differs from section 1.2:
   The build can't repair the installation, and `unknown` warns at runtime
   (decision 14). The runtime treats the same disagreement in the selected ROCm as
   an error (decision 4).
+- **#11019 / #11025:** the binding module owns the platform filename and CMake
+  client output path. GEKO asks the source checkout through `invoke client-path`,
+  because it computes the path before its editable install and its coverage env
+  does not install TensileLite. Invoke defers GPU-helper imports until needed,
+  so querying a path does not initialize the generator runtime. The bash writer
+  owns argument quoting on Linux and Git Bash; callers contain no platform checks.
+  On #11019, 63 binding/build-task tests passed. On #11025, 90 binding/build/tox
+  tests passed and GEKO reported 606 passed, 40 integration/tool skips, and 89.58%
+  coverage against its 80% floor. All new path and quoting tests ran. Native Windows
+  execution is pending. #11032's candidate tests also use the shared helper;
+  215 binding/runtime/build-task tests passed there. See Q135 for the reasons
+  and first-run regression.
 - **#11020:** the wheel also depends on a configured identity file (version, SHA,
   passed identity), so a new commit or identity rebuilds and renames the wheel even
   when no TensileLite file changed.
@@ -876,9 +896,14 @@ Where the implementation went beyond or differs from section 1.2:
   identity survives sdist → wheel; passing a different identity there is an error.
 - **#11022:** codegen depends on the unpacked wheel through the new CMake variable
   `HIPBLASLT_PYTHON_INPUTS`; the client header is configured only when the client
-  is enabled.
+  is enabled. The generator environment also carries `ROCM_VERSION=${hip_VERSION}`:
+  TheRock's build prefix has no ambient `/opt/rocm` for the legacy version lookup.
+  The regression and nine adjacent environment tests passed after the restack.
 - **#11023:** `validate_client` returns the client's SHA and build ROCm together
   (`ClientIdentity`), so the client is queried once.
+- **#11025 tox correction:** `skip_install` applies to all environments. The five
+  environments that run package imports (`logic-corpus`, `rocisa`, `coverage-cpp`,
+  `unit`, `coverage-unit`) explicitly install the checkout before their first import.
 - **#11032:** the pip-SDK smoke check is `scripts/pip_sdk_smoke.py`, tox env
   `pip-sdk-smoke` and workflow `component-ci-tensilelite-pip-sdk-smoke.yml`. Run
   locally against nightly `10.3.0a20261111`, it selected `PythonRocm` and failed
