@@ -220,12 +220,12 @@ TEST_P(GPU_ReduceShapeLimits_FP16, EnforcesLimits)
     RunReduceShapeLimitsCase(GetParam(), miopenHalf);
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_ReduceShapeLimits_FP32,
                          ::testing::ValuesIn(GetReduceShapeLimitsFP32Cases()),
                          [](const auto& info) { return info.param.name; });
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_ReduceShapeLimits_FP16,
                          ::testing::ValuesIn(GetReduceShapeLimitsFP16Cases()),
                          [](const auto& info) { return info.param.name; });

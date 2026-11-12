@@ -201,7 +201,7 @@ TEST_P(GPU_ConvWorkSpaceSizeRange_FP32, BackwardWeights) { RunBwdWeights(GetPara
 
 // clang-format off
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     GPU_ConvWorkSpaceSizeRange_FP32,
     ::testing::Values(
         // n  c    h    w    k  r  s  ph pw sh sw dh dw  (out computed)

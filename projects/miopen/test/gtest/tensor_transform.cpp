@@ -517,10 +517,16 @@ TEST_P(GPU_TensorTransform_I8, TestInt8) { this->Run(); }
 TEST_P(GPU_TensorTransform_FP16, TestFloat16) { this->Run(); }
 TEST_P(GPU_TensorTransform_FP32, TestFloat32) { this->Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TensorTransform_I8, GetSmokeTestCases(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TensorTransform_FP16, GetSmokeTestCases(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TensorTransform_FP32, GetSmokeTestCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_TensorTransform_I8, GetSmokeTestCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_TensorTransform_FP16, GetSmokeTestCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_TensorTransform_FP32, GetSmokeTestCases(), TestNameGenerator{});
 
 INSTANTIATE_TEST_SUITE_P(Full, GPU_TensorTransform_I8, GetFullTestCases(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_TensorTransform_FP16, GetFullTestCases(), TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full, GPU_TensorTransform_FP32, GetFullTestCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         GPU_TensorTransform_FP16,
+                         GetFullTestCases(),
+                         TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         GPU_TensorTransform_FP32,
+                         GetFullTestCases(),
+                         TestNameGenerator{});

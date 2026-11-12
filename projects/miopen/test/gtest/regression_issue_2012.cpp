@@ -104,6 +104,6 @@ using namespace regression_issue_2012;
 
 TEST_P(GPU_regression_issue_2012_FP32, FloatTest_regression_issue_2012) { Run2dDriver(); };
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_regression_issue_2012_FP32,
                          testing::Values(GetTestCases("--float")));

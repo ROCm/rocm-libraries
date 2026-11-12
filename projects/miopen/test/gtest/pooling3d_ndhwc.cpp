@@ -153,10 +153,14 @@ TEST_P(GPU_Pooling3d_NDHWC_BFP16, BFloat16Test_pooling3d_ndhwc)
     }
 };
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling3d_NDHWC_FP32, testing::Values(GetTestCases("--float")));
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         GPU_Pooling3d_NDHWC_FP32,
+                         testing::Values(GetTestCases("--float")));
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Pooling3d_NDHWC_FP16, testing::Values(GetTestCases("--half")));
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         GPU_Pooling3d_NDHWC_FP16,
+                         testing::Values(GetTestCases("--half")));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_Pooling3d_NDHWC_BFP16,
                          testing::Values(GetTestCases("--bfloat16")));

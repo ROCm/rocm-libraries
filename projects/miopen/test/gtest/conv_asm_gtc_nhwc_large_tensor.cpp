@@ -247,17 +247,17 @@ TEST_P(CPU_UnitTestConvSolverAsmGTCFwdNHWCLargeTensorDevApplicability_NONE,
     this->RunTest(miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC{});
 };
 
-INSTANTIATE_TEST_SUITE_P(SmokeInt32Safe,
+INSTANTIATE_TEST_SUITE_P(StandardInt32Safe,
                          CPU_UnitTestConvSolverAsmGTCFwdNHWCLargeTensorDevApplicability_NONE,
                          testing::Combine(testing::Values(GetInRangeParams()),
                                           testing::Values(GetInRangeConvCase())));
 
-INSTANTIATE_TEST_SUITE_P(SmokeActivationsOverInt32,
+INSTANTIATE_TEST_SUITE_P(StandardActivationsOverInt32,
                          CPU_UnitTestConvSolverAsmGTCFwdNHWCLargeTensorDevApplicability_NONE,
                          testing::Combine(testing::Values(GetInRangeParams()),
                                           testing::Values(GetOverInt32ConvCase())));
 
-INSTANTIATE_TEST_SUITE_P(SmokeWeightsOverBound,
+INSTANTIATE_TEST_SUITE_P(StandardWeightsOverBound,
                          CPU_UnitTestConvSolverAsmGTCFwdNHWCLargeTensorDevApplicability_NONE,
                          testing::Combine(testing::Values(GetGatedParams()),
                                           testing::Values(GetWeightsOverBoundConvCase())));
@@ -273,17 +273,17 @@ TEST_P(CPU_UnitTestConvSolverAsmGTCBwdNHWCLargeTensorDevApplicability_NONE,
     this->RunTest(miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC{});
 };
 
-INSTANTIATE_TEST_SUITE_P(SmokeInt32Safe,
+INSTANTIATE_TEST_SUITE_P(StandardInt32Safe,
                          CPU_UnitTestConvSolverAsmGTCBwdNHWCLargeTensorDevApplicability_NONE,
                          testing::Combine(testing::Values(GetInRangeParams()),
                                           testing::Values(GetInRangeConvCase())));
 
-INSTANTIATE_TEST_SUITE_P(SmokeActivationsOverInt32,
+INSTANTIATE_TEST_SUITE_P(StandardActivationsOverInt32,
                          CPU_UnitTestConvSolverAsmGTCBwdNHWCLargeTensorDevApplicability_NONE,
                          testing::Combine(testing::Values(GetInRangeParams()),
                                           testing::Values(GetOverInt32ConvCase())));
 
-INSTANTIATE_TEST_SUITE_P(SmokeWeightsOverBound,
+INSTANTIATE_TEST_SUITE_P(StandardWeightsOverBound,
                          CPU_UnitTestConvSolverAsmGTCBwdNHWCLargeTensorDevApplicability_NONE,
                          testing::Combine(testing::Values(GetGatedParams()),
                                           testing::Values(GetWeightsOverBoundConvCase())));
@@ -299,63 +299,63 @@ TEST_P(CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
     this->RunTest(miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC{});
 };
 
-INSTANTIATE_TEST_SUITE_P(SmokeInt32Safe,
+INSTANTIATE_TEST_SUITE_P(StandardInt32Safe,
                          CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
                          testing::Combine(testing::Values(GetInRangeParams()),
                                           testing::Values(GetInRangeConvCase())));
 
-INSTANTIATE_TEST_SUITE_P(SmokeOverInt32,
+INSTANTIATE_TEST_SUITE_P(StandardOverInt32,
                          CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
                          testing::Combine(testing::Values(GetGatedParams()),
                                           testing::Values(GetOverInt32ConvCase())));
 
-INSTANTIATE_TEST_SUITE_P(SmokeFp32InWindow,
+INSTANTIATE_TEST_SUITE_P(StandardFp32InWindow,
                          CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
                          testing::Combine(testing::Values(GetGfx950WindowParams()),
                                           testing::Values(GetFp32InWindowConvCase())));
 
-INSTANTIATE_TEST_SUITE_P(SmokeFp32OverWindow,
+INSTANTIATE_TEST_SUITE_P(StandardFp32OverWindow,
                          CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
                          testing::Combine(testing::Values(GetGatedParams()),
                                           testing::Values(GetFp32OverWindowConvCase())));
 
-INSTANTIATE_TEST_SUITE_P(SmokeFp32NchwInWindow,
+INSTANTIATE_TEST_SUITE_P(StandardFp32NchwInWindow,
                          CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
                          testing::Combine(testing::Values(GetGfx950WindowParams()),
                                           testing::Values(GetFp32NchwInWindowConvCase())));
 
-INSTANTIATE_TEST_SUITE_P(SmokeFp32NchwOverWindow,
+INSTANTIATE_TEST_SUITE_P(StandardFp32NchwOverWindow,
                          CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
                          testing::Combine(testing::Values(GetGatedParams()),
                                           testing::Values(GetFp32NchwOverWindowConvCase())));
 
-INSTANTIATE_TEST_SUITE_P(SmokeFp32WeightsOverInt32,
+INSTANTIATE_TEST_SUITE_P(StandardFp32WeightsOverInt32,
                          CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
                          testing::Combine(testing::Values(GetGatedParams()),
                                           testing::Values(GetFp32WeightsOverInt32ConvCase())));
 
 INSTANTIATE_TEST_SUITE_P(
-    SmokeBatchPaddingWrapsUnderInt32,
+    StandardBatchPaddingWrapsUnderInt32,
     CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
     testing::Combine(testing::Values(GetGatedParams()),
                      testing::Values(GetBatchPaddingWrapsUnderInt32ConvCase())));
 
-INSTANTIATE_TEST_SUITE_P(SmokeBatchPaddingWrapsInWindow,
+INSTANTIATE_TEST_SUITE_P(StandardBatchPaddingWrapsInWindow,
                          CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
                          testing::Combine(testing::Values(GetGatedParams()),
                                           testing::Values(GetBatchPaddingWrapsInWindowConvCase())));
 
-INSTANTIATE_TEST_SUITE_P(SmokeFp32NchwBatchPaddingWraps,
+INSTANTIATE_TEST_SUITE_P(StandardFp32NchwBatchPaddingWraps,
                          CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
                          testing::Combine(testing::Values(GetGatedParams()),
                                           testing::Values(GetFp32NchwBatchPaddingWrapsConvCase())));
 
-INSTANTIATE_TEST_SUITE_P(SmokeFp32NchwPaddingFallback,
+INSTANTIATE_TEST_SUITE_P(StandardFp32NchwPaddingFallback,
                          CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
                          testing::Combine(testing::Values(GetGfx950WindowParams()),
                                           testing::Values(GetFp32NchwPaddingFallbackConvCase())));
 
-INSTANTIATE_TEST_SUITE_P(SmokeBatchPaddingFits,
+INSTANTIATE_TEST_SUITE_P(StandardBatchPaddingFits,
                          CPU_UnitTestConvSolverAsmGTCWrwNHWCLargeTensorDevApplicability_NONE,
                          testing::Combine(testing::Values(GetInRangeParams()),
                                           testing::Values(GetBatchPaddingFitsConvCase())));

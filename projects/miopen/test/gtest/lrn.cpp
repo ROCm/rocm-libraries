@@ -479,8 +479,8 @@ struct TestNameGenerator
 TEST_P(GPU_Lrn_FP32, TestFloat) { this->Run(); }
 TEST_P(GPU_Lrn_FP16, TestFloat16) { this->Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Lrn_FP32, GetCasesSmoke(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_Lrn_FP32, GetCasesSmoke(), TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Lrn_FP32, GetCasesFull(), TestNameGenerator{});
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Lrn_FP16, GetCasesSmoke(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_Lrn_FP16, GetCasesSmoke(), TestNameGenerator{});
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Lrn_FP16, GetCasesFull(), TestNameGenerator{});

@@ -143,4 +143,4 @@ using GPU_FusionAux_FP32 = FusionAuxTest<float>;
 
 TEST_P(GPU_FusionAux_FP32, TestFloat32) { this->Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_FusionAux_FP32, GetSmokeTestCases(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_FusionAux_FP32, GetSmokeTestCases(), TestNameGenerator{});

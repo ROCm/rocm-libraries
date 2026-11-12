@@ -592,10 +592,10 @@ TEST_P(GPU_Softmax_BFP16, TestBFloat16) { this->Run(); }
 TEST_P(GPU_Softmax_BetaZeroNaN_FP32, ForwardTest) { RunForward(); }
 TEST_P(GPU_Softmax_BetaZeroNaN_FP32, BackwardTest) { RunBackward(); }
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Softmax_FP32, GetCases<float>());
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Softmax_FP16, GetCases<half_float::half>());
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Softmax_BFP16, GetCases<bfloat16>());
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_Softmax_FP32, GetCases<float>());
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_Softmax_FP16, GetCases<half_float::half>());
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_Softmax_BFP16, GetCases<bfloat16>());
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_Softmax_BetaZeroNaN_FP32,
                          testing::Combine(testing::Values(MIOPEN_SOFTMAX_FAST,
                                                           MIOPEN_SOFTMAX_ACCURATE,
@@ -611,7 +611,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 // could issue a final vector load/store that could be 16-byte-misaligned
 // -> UB (memory fault or wrong result).
 // Reuses SoftmaxCommon's full CPU-vs-GPU comparison.
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_Softmax_FP32,
                          testing::Values(
                              // INSTANCE inner = C*H*W, none a multiple of 4:
@@ -646,7 +646,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 // offset 2-byte aligned -> the int4 (dwordx4) load is below the 4-byte hardware
 // alignment CDNA requires. (An EVEN fp16 inner size is still >=4-byte aligned
 // and does NOT fault on gfx942, same as fp32 -- so odd sizes are the real test.)
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_Softmax_FP16,
                          testing::Values(TestCase{{2, 13, 1, 1},
                                                   {1.0f, 0.0f},
@@ -664,7 +664,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                                   MIOPEN_SOFTMAX_MODE_INSTANCE,
                                                   miopenTensorNCHW}));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_Softmax_BFP16,
                          testing::Values(TestCase{{2, 13, 1, 1},
                                                   {1.0f, 0.0f},
@@ -1016,7 +1016,7 @@ std::vector<std::tuple<std::vector<size_t>, std::vector<size_t>>> nonContiguousT
 } // namespace
 
 INSTANTIATE_TEST_SUITE_P(
-    Full,
+    Standard,
     GPU_Softmax_NonContiguous_FP32,
     testing::Combine(
         testing::ValuesIn(nonContiguousTestCases()),
@@ -1032,8 +1032,8 @@ INSTANTIATE_TEST_SUITE_P(
 // behavior is to fail cleanly (miopenStatusNotImplemented) rather than silently
 // mis-address memory.
 // Parameterized (with a single trivial value) so the test's full name is
-// "Smoke/GPU_Softmax_MixedPacking_FP32.ForwardPackedXStridedY/0" -- the
-// leading "Smoke/" prefix (from INSTANTIATE_TEST_SUITE_P) is required for
+// "Quick/GPU_Softmax_MixedPacking_FP32.ForwardPackedXStridedY/0" -- the
+// leading "Quick/" prefix (from INSTANTIATE_TEST_SUITE_P) is required for
 // TheRock CI's "*/GPU_Softmax*" filter (see test_categories.yaml) to select
 // it; a bare TEST_F would not match that glob (no "Prefix/" component).
 struct GPU_Softmax_MixedPacking_FP32 : public testing::TestWithParam<int>
@@ -1075,7 +1075,7 @@ TEST_P(GPU_Softmax_MixedPacking_FP32, ForwardPackedXStridedY)
                                             MIOPEN_SOFTMAX_MODE_INSTANCE));
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Softmax_MixedPacking_FP32, testing::Values(0));
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_Softmax_MixedPacking_FP32, testing::Values(0));
 
 // --- Extra coverage: non-zero x/y offsets --
 // Findings from the tests below (both DISABLED -- see caveats):
@@ -1158,9 +1158,9 @@ TEST_F(GPU_Softmax_Offset_FP32, DISABLED_ForwardNonZeroOffset_FindRace)
 // bare TEST_F's name ("GPU_Softmax_Deadlock_FP32.*") has no "Prefix/" and so
 // would NOT match test_categories.yaml's "*/GPU_Softmax*" glob (nor would
 // TheRock ever pass --gtest_also_run_disabled_tests), converted to a
-// Smoke-prefixed parameterized suite via INSTANTIATE_TEST_SUITE_P so its full
-// name becomes "Smoke/GPU_Softmax_Deadlock_FP32.CsrStreamPartialBlock/<N>" and
-// is selected by CI like the other Smoke/GPU_Softmax_* suites in this file.
+// Quick-prefixed parameterized suite via INSTANTIATE_TEST_SUITE_P so its full
+// name becomes "Quick/GPU_Softmax_Deadlock_FP32.CsrStreamPartialBlock/<N>" and
+// is selected by CI like the other Quick/GPU_Softmax_* suites in this file.
 struct SoftmaxDeadlockCand
 {
     std::vector<size_t> dims;
@@ -1203,7 +1203,7 @@ TEST_P(GPU_Softmax_Deadlock_FP32, CsrStreamPartialBlock)
 // lanes (which reach reduce_block's __syncthreads) with early-returning
 // lanes / whole wavefronts.
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     GPU_Softmax_Deadlock_FP32,
     testing::Values(
         SoftmaxDeadlockCand{{3, 8, 1, 1}, MIOPEN_SOFTMAX_MODE_INSTANCE}, // 15/16 waves return

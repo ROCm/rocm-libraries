@@ -51,4 +51,4 @@ class GPU_FindDb_FP32 : public testing::TestWithParam<miopenDataType_t>
 
 TEST_P(GPU_FindDb_FP32, FloatTest_find_db) { RunFindDbDriver(GetParam()); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_FindDb_FP32, testing::ValuesIn({miopenFloat}));
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_FindDb_FP32, testing::ValuesIn({miopenFloat}));

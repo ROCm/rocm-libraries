@@ -1215,7 +1215,7 @@ TEST_P(CPU_DBSync_NONE, StaticFDBSync)
 #endif
 }
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_DBSync_NONE,
                          testing::Values(std::make_pair("gfx908", 120),
                                          std::make_pair("gfx90a", 104),

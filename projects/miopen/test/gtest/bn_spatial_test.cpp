@@ -1864,7 +1864,7 @@ INSTANTIATE_TEST_SUITE_P(Full, GPU_BN_Spatial_FP32, GetCases(), [](const auto& i
     return NameGenerator(info_);
 });
 
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_BN_Spatial_FP32, GetCases(false), [](const auto& info_) {
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_BN_Spatial_FP32, GetCases(false), [](const auto& info_) {
     return NameGenerator(info_);
 });
 

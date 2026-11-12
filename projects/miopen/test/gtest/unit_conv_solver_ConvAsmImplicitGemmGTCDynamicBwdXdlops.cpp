@@ -135,14 +135,14 @@ TEST_P(CPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicXdlopsDevApplicabilityBwd_
     this->RunTest(miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicBwdXdlops{});
 };
 
-// Smoke tests
-INSTANTIATE_TEST_SUITE_P(Smoke,
+// Quick tests
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicXdlopsBwd_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
                                           testing::ValuesIn(GetConvTestCases(miopenHalf))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicXdlopsBwd_FP32,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
@@ -150,19 +150,19 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 // Device applicability test
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     CPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicXdlopsDevApplicabilityBwd_NONE,
     testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(GetConvTestCases(miopenFloat)[0])));
 
-// Full tests
-INSTANTIATE_TEST_SUITE_P(Full,
+// Standard tests
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicXdlopsBwd_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),
                                           testing::ValuesIn(GetConvTestCasesFull(miopenHalf))));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_UnitTestConvSolverAsmImplicitGemmGTCDynamicXdlopsBwd_FP32,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoImplicitGEMM),

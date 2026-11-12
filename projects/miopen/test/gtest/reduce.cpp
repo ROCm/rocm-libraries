@@ -803,16 +803,17 @@ inline auto GetCasesFull()
     return cases;
 }
 
-// Smoke (pre-commit) tier: a tiny representative subset -- a couple of
+// Quick (pre-commit) tier: a tiny representative subset -- a couple of
 // reduce-dimension layouts crossed with a few representative ops, no indices,
-// single alpha/beta. The complete cross product stays in the Full instantiation.
+// single alpha/beta. The complete cross product stays in the Comprehensive/Full
+// instantiations.
 template <typename T>
 inline auto GenCasesSmoke()
 {
     std::vector<std::vector<float>> alphabetas = {{1.0f, 0.0f}};
 
     // Reduce cases are expensive (each distinct op/dim compiles a kernel), so
-    // keep Smoke minimal: canonical ADD op over a partial and a full reduction.
+    // keep Quick minimal: canonical ADD op over a partial and a full reduction.
     // Other ops (AMAX/NORM2) are exercised by the Standard tier on every CI.
     return testing::Combine(testing::ValuesIn(get_tensor_lengths<T>()),
                             testing::ValuesIn(std::vector<std::vector<int>>{{0}, {0, 1, 2, 3}}),
@@ -822,12 +823,12 @@ inline auto GenCasesSmoke()
                             testing::ValuesIn(alphabetas));
 }
 
-// Standard (per-CI) tier: exercises every distinct reduce code path at least
+// Standard (per-PR) tier: exercises every distinct reduce code path at least
 // once -- all reduce operators, the alpha/beta blend epilogue, and the AMAX
 // flattened-indices path -- without the full nanOpt x indices x alpha/beta cross
-// product (that stays in the Full instantiation). The kernel compile-cache key
-// (see src/reducetensor.cpp) covers reduceOp / nanOpt / indices / dim-count but
-// NOT alpha/beta, so the blend cases below are essentially free.
+// product (that stays in the Comprehensive/Full instantiations). The kernel
+// compile-cache key (see src/reducetensor.cpp) covers reduceOp / nanOpt / indices
+// / dim-count but NOT alpha/beta, so the blend cases below are essentially free.
 template <typename T>
 inline std::vector<TestCase> GenCasesStandard()
 {
@@ -1268,15 +1269,16 @@ TEST_P(GPU_Reduce_FP32, TestFloat) { this->Run(); }
 TEST_P(GPU_Reduce_FP16, TestFloat16) { this->Run(); }
 TEST_P(GPU_Reduce_FP64, TestDouble) { this->Run(); }
 
-// Tiered instantiation: Smoke (pre-commit) and Standard (per-CI) run small
-// subsets; Full (comprehensive/nightly) runs the complete cross product so no
-// coverage is lost. See GenCasesSmoke/GenCasesStandard above.
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Reduce_FP32, GetCasesSmoke<float>());
+// Tiered instantiation: Quick (pre-commit) and Standard (per-PR) run small
+// subsets; Comprehensive (nightly) runs the complete cross product so no
+// coverage is lost (FP64 runs only the complete set, as Full). See
+// GenCasesSmoke/GenCasesStandard above.
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_Reduce_FP32, GetCasesSmoke<float>());
 INSTANTIATE_TEST_SUITE_P(Standard, GPU_Reduce_FP32, GetCasesStandard<float>());
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Reduce_FP32, GetCasesFull<float>());
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_Reduce_FP16, GetCasesSmoke<half_float::half>());
+INSTANTIATE_TEST_SUITE_P(Comprehensive, GPU_Reduce_FP32, GetCasesFull<float>());
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_Reduce_FP16, GetCasesSmoke<half_float::half>());
 INSTANTIATE_TEST_SUITE_P(Standard, GPU_Reduce_FP16, GetCasesStandard<half_float::half>());
-INSTANTIATE_TEST_SUITE_P(Full, GPU_Reduce_FP16, GetCasesFull<half_float::half>());
+INSTANTIATE_TEST_SUITE_P(Comprehensive, GPU_Reduce_FP16, GetCasesFull<half_float::half>());
 INSTANTIATE_TEST_SUITE_P(Full, GPU_Reduce_FP64, GetCasesFull<double>());
 
 // Reduce Custom Tests
@@ -1314,16 +1316,16 @@ class GPU_reduce_custom_fp32_I8 : public ReduceCustomCommon<int8_t>
 };
 
 TEST_P(GPU_reduce_custom_fp32_FP32, FloatTest_reduce_custom_fp32) { this->Run(); };
-INSTANTIATE_TEST_SUITE_P(Full, GPU_reduce_custom_fp32_FP32, GetCasesReduceCustomTestSet1());
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_reduce_custom_fp32_FP32, GetCasesReduceCustomTestSet1());
 
 TEST_P(GPU_reduce_custom_fp32_FP16, CAN_BE_DISABLED_HalfTest_reduce_custom_fp16) { this->Run(); };
-INSTANTIATE_TEST_SUITE_P(Full, GPU_reduce_custom_fp32_FP16, GetCasesReduceCustomTestSet1());
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_reduce_custom_fp32_FP16, GetCasesReduceCustomTestSet1());
 
 TEST_P(GPU_reduce_custom_fp32_BFP16, CAN_BE_DISABLED_BHalfTest_reduce_custom_fp16) { this->Run(); };
-INSTANTIATE_TEST_SUITE_P(Full, GPU_reduce_custom_fp32_BFP16, GetCasesReduceCustomTestSet1());
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_reduce_custom_fp32_BFP16, GetCasesReduceCustomTestSet1());
 
 TEST_P(GPU_reduce_custom_fp32_I8, CAN_BE_DISABLED_IntTest_reduce_custom_fp16) { this->Run(); };
-INSTANTIATE_TEST_SUITE_P(Full, GPU_reduce_custom_fp32_I8, GetCasesReduceCustomTestSet1());
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_reduce_custom_fp32_I8, GetCasesReduceCustomTestSet1());
 
 // original file reduce_custom_fp32_fp16.cpp
 class GPU_reduce_custom_fp32_fp16_FP32 : public ReduceCustomCommon<float>
@@ -1338,6 +1340,10 @@ TEST_P(GPU_reduce_custom_fp32_fp16_FP32, FloatTest_reduce_custom_fp32_fp16) { th
 
 TEST_P(GPU_reduce_custom_fp32_fp16_FP16, HalfTest_reduce_custom_fp32_fp16) { this->Run(); };
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_reduce_custom_fp32_fp16_FP32, GetCasesReduceCustomTestSet2());
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_reduce_custom_fp32_fp16_FP32,
+                         GetCasesReduceCustomTestSet2());
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_reduce_custom_fp32_fp16_FP16, GetCasesReduceCustomTestSet2());
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         GPU_reduce_custom_fp32_fp16_FP16,
+                         GetCasesReduceCustomTestSet2());

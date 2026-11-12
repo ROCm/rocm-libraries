@@ -72,15 +72,15 @@ struct TestNameGenerator
 
 ///////////////////////////////////////////////////////////////////////////////////
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_Cat_FP32,
                          testing::ValuesIn(CatTestConfigs()),
                          TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_Cat_FP16,
                          testing::ValuesIn(CatTestConfigs()),
                          TestNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_Cat_BFP16,
                          testing::ValuesIn(CatTestConfigs()),
                          TestNameGenerator{});

@@ -61,8 +61,12 @@ TEST_P(GPU_AddLayerNorm_BFP16, AddLayerNormTestFw)
     Verify();
 };
 
-INSTANTIATE_TEST_SUITE_P(Full, GPU_AddLayerNorm_FP32, testing::ValuesIn(AddLayerNormTestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Full, GPU_AddLayerNorm_FP16, testing::ValuesIn(AddLayerNormTestConfigs()));
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         GPU_AddLayerNorm_FP32,
+                         testing::ValuesIn(AddLayerNormTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         GPU_AddLayerNorm_FP16,
+                         testing::ValuesIn(AddLayerNormTestConfigs()));
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_AddLayerNorm_BFP16,
                          testing::ValuesIn(AddLayerNormTestConfigs()));

@@ -93,22 +93,22 @@ TEST_P(GPU_SoftMarginLossBackward_BFP16, Test)
     Verify();
 };
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_SoftMarginLossForward_FP32,
                          testing::ValuesIn(SoftMarginLossTestConfigs(1, miopenFloat)));
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_SoftMarginLossForward_FP16,
                          testing::ValuesIn(SoftMarginLossTestConfigs(1, miopenHalf)));
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_SoftMarginLossForward_BFP16,
                          testing::ValuesIn(SoftMarginLossTestConfigs(1, miopenBFloat16)));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_SoftMarginLossBackward_FP32,
                          testing::ValuesIn(SoftMarginLossTestConfigs(0, miopenFloat)));
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_SoftMarginLossBackward_FP16,
                          testing::ValuesIn(SoftMarginLossTestConfigs(0, miopenHalf)));
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_SoftMarginLossBackward_BFP16,
                          testing::ValuesIn(SoftMarginLossTestConfigs(0, miopenBFloat16)));

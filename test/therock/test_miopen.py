@@ -128,22 +128,22 @@ negative_filter.append("Full/GPU_BNOCLFWDTrainSerialRun3D_BFP16*")  # 3 min 37 s
 negative_filter.append("Full/GPU_Lrn_FP32*")  # 2 min 50 sec
 negative_filter.append("Full/GPU_Lrn_FP16*")  # 2 min 20 sec
 negative_filter.append("Full/GPU_BNOCLInferSerialRun3D_BFP16*")  # 2 min 19 sec
-negative_filter.append("Smoke/GPU_BNOCLFWDTrainLarge2D_BFP16*")  # 1 min 55 sec
-negative_filter.append("Smoke/GPU_BNOCLInferLarge2D_BFP16*")  # 1 min 48 sec
+negative_filter.append("Quick/GPU_BNOCLFWDTrainLarge2D_BFP16*")  # 1 min 55 sec
+negative_filter.append("Quick/GPU_BNOCLInferLarge2D_BFP16*")  # 1 min 48 sec
 negative_filter.append("Full/GPU_BNOCLBWDSerialRun3D_BFP16*")  # 1 min 28 sec
-negative_filter.append("Smoke/GPU_BNOCLBWDLarge2D_BFP16*")  # 1 min 19 sec
+negative_filter.append("Quick/GPU_BNOCLBWDLarge2D_BFP16*")  # 1 min 19 sec
 
 negative_filter.append("Full/GPU_UnitTestActivationDescriptor_FP32*")  # 1 min 23 sec
 negative_filter.append("Full/GPU_UnitTestActivationDescriptor_FP16*")  # 1 min 0 sec
 
 negative_filter.append(
-    "Full/GPU_MIOpenDriverRegressionBigTensorTest_FP32*"
+    "Standard/GPU_MIOpenDriverRegressionBigTensorTest_FP32*"
 )  # 0 min 59 sec
 
 negative_filter.append(
-    "Smoke/GPU_BNOCLBWDLargeFusedActivation2D_BFP16*"
+    "Quick/GPU_BNOCLBWDLargeFusedActivation2D_BFP16*"
 )  # 0 min 52 sec
-negative_filter.append("Smoke/GPU_BNOCLBWDLargeFusedActivation2D_FP16*")  # 0 min 49 sec
+negative_filter.append("Quick/GPU_BNOCLBWDLargeFusedActivation2D_FP16*")  # 0 min 49 sec
 
 negative_filter.append("Full/GPU_ConvGrpBiasActivInfer_BFP16*")  # 0 min 40 sec
 negative_filter.append("Full/GPU_ConvGrpBiasActivInfer_FP32*")  # 0 min 38 sec
@@ -166,21 +166,21 @@ TEST_TO_IGNORE = {
     "gfx110X-all": {
         "windows": [
             # Failed on gfx1103
-            "Smoke/CPU_Handle_NONE.TestHIP/with_stream_false_test_id_0",
-            "Full/GPU_reduce_custom_fp32_fp16_FP32.FloatTest_reduce_custom_fp32_fp16/1",
-            "Full/GPU_reduce_custom_fp32_fp16_FP32.FloatTest_reduce_custom_fp32_fp16/5",
-            "Full/GPU_reduce_custom_fp32_fp16_FP32.FloatTest_reduce_custom_fp32_fp16/9",
-            "Full/GPU_reduce_custom_fp32_fp16_FP32.FloatTest_reduce_custom_fp32_fp16/13",
-            "Full/GPU_reduce_custom_fp32_fp16_FP32.FloatTest_reduce_custom_fp32_fp16/17",
-            "Full/GPU_reduce_custom_fp32_fp16_FP16.HalfTest_reduce_custom_fp32_fp16/1",
-            "Full/GPU_reduce_custom_fp32_fp16_FP16.HalfTest_reduce_custom_fp32_fp16/5",
-            "Full/GPU_reduce_custom_fp32_fp16_FP16.HalfTest_reduce_custom_fp32_fp16/9",
-            "Full/GPU_reduce_custom_fp32_fp16_FP16.HalfTest_reduce_custom_fp32_fp16/13",
-            "Full/GPU_reduce_custom_fp32_fp16_FP16.HalfTest_reduce_custom_fp32_fp16/17",
+            "Quick/CPU_Handle_NONE.TestHIP/with_stream_false_test_id_0",
+            "Standard/GPU_reduce_custom_fp32_fp16_FP32.FloatTest_reduce_custom_fp32_fp16/1",
+            "Standard/GPU_reduce_custom_fp32_fp16_FP32.FloatTest_reduce_custom_fp32_fp16/5",
+            "Standard/GPU_reduce_custom_fp32_fp16_FP32.FloatTest_reduce_custom_fp32_fp16/9",
+            "Standard/GPU_reduce_custom_fp32_fp16_FP32.FloatTest_reduce_custom_fp32_fp16/13",
+            "Standard/GPU_reduce_custom_fp32_fp16_FP32.FloatTest_reduce_custom_fp32_fp16/17",
+            "Standard/GPU_reduce_custom_fp32_fp16_FP16.HalfTest_reduce_custom_fp32_fp16/1",
+            "Standard/GPU_reduce_custom_fp32_fp16_FP16.HalfTest_reduce_custom_fp32_fp16/5",
+            "Standard/GPU_reduce_custom_fp32_fp16_FP16.HalfTest_reduce_custom_fp32_fp16/9",
+            "Standard/GPU_reduce_custom_fp32_fp16_FP16.HalfTest_reduce_custom_fp32_fp16/13",
+            "Standard/GPU_reduce_custom_fp32_fp16_FP16.HalfTest_reduce_custom_fp32_fp16/17",
         ]
     },
     "gfx1151": {
-        "windows": ["Full/GPU_UnitTestConvSolverGemmBwdRestBwd_FP16.GemmBwdRest/0"]
+        "windows": ["Standard/GPU_UnitTestConvSolverGemmBwdRestBwd_FP16.GemmBwdRest/0"]
     },
     "gfx950-dcgpu": {"linux": ["*DBSync*"]},
 }
@@ -192,8 +192,8 @@ if AMDGPU_FAMILIES in TEST_TO_IGNORE and os_type in TEST_TO_IGNORE[AMDGPU_FAMILI
 # Failing on on win gfx110x
 if any(prefix in AMDGPU_FAMILIES for prefix in ["gfx110"]):
     negative_filter.append("*/GPU_MIOpenDriver*")
-    negative_filter.append("Smoke/CPU_Handle_NONE*")
-    negative_filter.append("Full/GPU_reduce_custom_fp32*")
+    negative_filter.append("Quick/CPU_Handle_NONE*")
+    negative_filter.append("Standard/GPU_reduce_custom_fp32*")
 
 # Tests to be filtered for navi
 # 1- Ignore gfx942 tests
@@ -203,10 +203,10 @@ if any(prefix in AMDGPU_FAMILIES for prefix in ["gfx110"]):
 if any(prefix in AMDGPU_FAMILIES for prefix in ["gfx110", "gfx115", "gfx120"]):
     # These are ignored in miopen
     negative_filter.append(
-        "Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32"
+        "Quick/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32"
     )  # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
     negative_filter.append(
-        "Smoke/GPU_BNFWDTrainLarge2D_FP32.BnV2LargeFWD_TrainCKfp32/NCHW_BNSpatial_testBNAPIV2_Dim_2_test_id_64"
+        "Quick/GPU_BNFWDTrainLarge2D_FP32.BnV2LargeFWD_TrainCKfp32/NCHW_BNSpatial_testBNAPIV2_Dim_2_test_id_64"
     )  # Temporarily disabled until gfx1151 CI nodes have fw 31 or higher installed
     # this could address 2
     negative_filter.append(
@@ -238,33 +238,33 @@ if any(prefix in AMDGPU_FAMILIES for prefix in ["gfx110", "gfx115", "gfx120"]):
         "*GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_BFP16.ConvHipImplicitGemmGroupWrwXdlops*"
     )
 
-    negative_filter.append("Smoke/GPU_MultiMarginLoss*")
+    negative_filter.append("Quick/GPU_MultiMarginLoss*")
 
     negative_filter.append(
         "*CPU_UnitTestConvSolverImplicitGemmGroupWrwXdlopsDevApplicability_FP16.ConvHipImplicitGemmGroupWrwXdlops*"
     )
 
     # Disable long running tests
-    negative_filter.append("Full/GPU_Softmax_FP32*")  # 24 min
-    negative_filter.append("Full/GPU_Softmax_BFP16*")  # 13 min
-    negative_filter.append("Full/GPU_Softmax_FP16*")  # 11.5 min
-    negative_filter.append("Smoke/GPU_Reduce_FP32*")  # 6.5 min
-    negative_filter.append("Smoke/GPU_Reduce_FP16*")  # 4.5 min
+    negative_filter.append("Standard/GPU_Softmax_FP32*")  # 24 min
+    negative_filter.append("Standard/GPU_Softmax_BFP16*")  # 13 min
+    negative_filter.append("Standard/GPU_Softmax_FP16*")  # 11.5 min
+    negative_filter.append("Quick/GPU_Reduce_FP32*")  # 6.5 min
+    negative_filter.append("Quick/GPU_Reduce_FP16*")  # 4.5 min
 
 ####################################################
 
 # Creating a quick test filter
 quick_filter = [
     # Batch norm FWD smoke tests
-    "Smoke/GPU_BNCKFWDTrainLarge2D_FP16*",
-    "Smoke/GPU_BNOCLFWDTrainLarge2D_FP16*",
-    "Smoke/GPU_BNOCLFWDTrainLarge3D_FP16*",
-    "Smoke/GPU_BNCKFWDTrainLarge2D_BFP16*",
-    "Smoke/GPU_BNOCLFWDTrainLarge2D_BFP16*",
-    "Smoke/GPU_BNOCLFWDTrainLarge3D_BFP16*",
+    "Quick/GPU_BNCKFWDTrainLarge2D_FP16*",
+    "Quick/GPU_BNOCLFWDTrainLarge2D_FP16*",
+    "Quick/GPU_BNOCLFWDTrainLarge3D_FP16*",
+    "Quick/GPU_BNCKFWDTrainLarge2D_BFP16*",
+    "Quick/GPU_BNOCLFWDTrainLarge2D_BFP16*",
+    "Quick/GPU_BNOCLFWDTrainLarge3D_BFP16*",
     # CK Grouped FWD Conv smoke tests
-    "Smoke/GPU_UnitTestConvSolverImplicitGemmFwdXdlops_FP16*",
-    "Smoke/GPU_UnitTestConvSolverImplicitGemmFwdXdlops_BFP16*",
+    "Quick/GPU_UnitTestConvSolverImplicitGemmFwdXdlops_FP16*",
+    "Quick/GPU_UnitTestConvSolverImplicitGemmFwdXdlops_BFP16*",
 ]
 
 # TODO(rocm-libraries#2266): re-enable test for gfx950-dcgpu

@@ -376,14 +376,14 @@ TEST_P(GPU_UnitTestActivationDescriptor_FP16, Activation) { this->RunTest(); };
 
 TEST_P(GPU_UnitTestActivationDescriptor_FP32, Activation) { this->RunTest(); };
 
-// Smoke tests
-INSTANTIATE_TEST_SUITE_P(Smoke,
+// Quick tests
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestActivationDescriptor_FP16,
                          testing::Combine(testing::Values(GetSupportedDevices()),
                                           testing::ValuesIn(GetAllActivationModes()),
                                           testing::ValuesIn(GetTestCases(false))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestActivationDescriptor_FP32,
                          testing::Combine(testing::Values(GetSupportedDevices()),
                                           testing::ValuesIn(GetAllActivationModes()),

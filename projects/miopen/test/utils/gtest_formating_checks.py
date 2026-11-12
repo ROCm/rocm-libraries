@@ -76,8 +76,9 @@ VALID_DATATYPES = {
 TESTSUITE_REGEX = re.compile(
     r"^(CPU|GPU)_[A-Za-z0-9]+(?:_[A-Za-z0-9]+)*_(" + "|".join(VALID_DATATYPES) + r")$"
 )
-# Test type for instantiations must be one of these words, optionally with extra alphanum characters.
-TEST_TYPE_REGEX = re.compile(r"^(Smoke|Standard|Full|Perf|Unit)([A-Za-z0-9]*)?$")
+# Test type for instantiations must name the test_categories.yaml tier that selects them,
+# optionally followed by a variant suffix (e.g. StandardNhwc).
+TEST_TYPE_REGEX = re.compile(r"^(Quick|Standard|Comprehensive|Full)([A-Za-z0-9]*)?$")
 
 # Updated regexes that do not allow newlines in the macro arguments
 TEST_P_REGEX = re.compile(r"\bTEST_P\(\s*([^\n,]+?)\s*,\s*([^\n\)]+?)\s*\)")

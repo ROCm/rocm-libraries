@@ -148,7 +148,7 @@ TEST_P(GPU_FusionSetArg_FP16, TestSetArgApiCall)
     ASSERT_EQ(conv_param->weights, wei_dev.get());
 }
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_FusionSetArg_FP16,
                          testing::Combine(testing::Values(miopenActivationRELU),
                                           testing::ValuesIn(GetNetwork1<ConvTestCaseBase>()),
@@ -376,7 +376,7 @@ TEST_P(GPU_CBAFind2FusionWorkspace_FP32, CBAFind2_testWorkspaceInvalidSize)
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     GPU_CBAFind2FusionWorkspace_FP32,
     testing::Combine(testing::Values(miopenActivationRELU),
                      testing::Values(ConvTestCaseBase{

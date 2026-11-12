@@ -114,10 +114,10 @@ TEST(GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16, SearchStartsAtKernelZe
     EXPECT_TRUE(cfg.IsValid(problem));
 }
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_BFP16,
                          testing::ValuesIn(GetPerfConfigTestCases(miopenBFloat16, "gfx942")));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_PerfConfig_HipImplicitGemm3DGroupFwdXdlops_FP16,
                          testing::ValuesIn(GetPerfConfigTestCases(miopenHalf, "gfx942")));

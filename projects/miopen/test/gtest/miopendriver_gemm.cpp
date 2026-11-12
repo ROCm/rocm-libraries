@@ -69,12 +69,12 @@ using namespace miopendriver_gemm;
 
 TEST_P(GPU_MIOpenDriverGemmTest_FP32, MIOpenDriverGemm) { RunMIOpenDriver(GetParam()); };
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_MIOpenDriverGemmTest_FP32,
                          testing::Values(GetTestCases(miopendriver::basearg::gemm::Float)));
 
 TEST_P(GPU_MIOpenDriverGemmTest_FP16, MIOpenDriverGemm) { RunMIOpenDriver(GetParam()); };
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_MIOpenDriverGemmTest_FP16,
                          testing::Values(GetTestCases(miopendriver::basearg::gemm::Half)));

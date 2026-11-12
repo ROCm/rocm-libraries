@@ -154,8 +154,8 @@ inline auto gcbaInferParamGen(Configs configs, TensorTypes tensorTypes)
                               testing::Values(0.5f));
 }
 
-// Grouped config tiers, each with its own config set. Smoke and Standard use the
-// small synthetic GetSmokeConfigs() (Smoke runs a single layout for the
+// Grouped config tiers, each with its own config set. Quick and Standard use the
+// small synthetic GetSmokeConfigs() (Quick runs a single layout for the
 // pre-commit gate, Standard runs both); Full uses the resnet-like GetConfigs().
 // Full is excluded from every category in the yaml (built but not run), since
 // those configs were not previously running.
@@ -236,7 +236,7 @@ TEST_P(GPU_ConvBiasActivInferFusionCompileStep_FP32, ConvHipDirectFwdFused_testC
 }
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     GPU_ConvBiasActivInferFusionCompileStep_FP32,
     testing::Combine(testing::Values(miopenActivationRELU),
                      testing::ValuesIn(GetNetworkForFusionCompileStepTest<ConvTestCaseBase>()),
@@ -248,7 +248,7 @@ INSTANTIATE_TEST_SUITE_P(
 
 #endif
 
-// Evenly-spaced subset of GetNetwork1 configs for the Smoke (pre-commit) and
+// Evenly-spaced subset of GetNetwork1 configs for the Quick (pre-commit) and
 // Standard (per-CI) tiers. Each instantiation is further multiplied by the
 // fixture's TEST_P count and the layout count.
 static std::vector<ConvTestCaseBase> CbaNetworkSubset(std::size_t count)
@@ -262,9 +262,9 @@ static std::vector<ConvTestCaseBase> CbaNetworkSubset(std::size_t count)
     return out;
 }
 
-// The GetNetwork1 configs NOT in CbaNetworkSubset(count). The Full tier uses
-// this so it does not repeat the Standard tier's configs: comprehensive/full run
-// Standard and Full together, and CbaNetworkSubset(count) + CbaNetworkBeyond(count)
+// The GetNetwork1 configs NOT in CbaNetworkSubset(count). The Comprehensive tier
+// uses this so it does not repeat the Standard tier's configs: comprehensive/full
+// run Standard and Comprehensive together, and CbaNetworkSubset + CbaNetworkBeyond
 // is the complete GetNetwork1 list, so no coverage is lost.
 static std::vector<ConvTestCaseBase> CbaNetworkBeyond(std::size_t count)
 {
@@ -281,7 +281,7 @@ static std::vector<ConvTestCaseBase> CbaNetworkBeyond(std::size_t count)
 }
 
 // FP32: tiered (4 TEST_P fixtures x configs x 1 layout).
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_ConvBiasActivInfer_FP32,
                          testing::Combine(testing::Values(miopenActivationRELU),
                                           testing::ValuesIn(CbaNetworkSubset(3)),
@@ -299,7 +299,7 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                                           testing::Values(0.75f),
                                           testing::Values(0.5f)),
                          CbaParamNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_ConvBiasActivInfer_FP32,
                          testing::Combine(testing::Values(miopenActivationRELU),
                                           testing::ValuesIn(CbaNetworkBeyond(10)),
@@ -309,8 +309,8 @@ INSTANTIATE_TEST_SUITE_P(Full,
                                           testing::Values(0.5f)),
                          CbaParamNameGenerator{});
 
-// FP16: tiered (3 TEST_P fixtures x configs x layouts; Smoke uses one layout).
-INSTANTIATE_TEST_SUITE_P(Smoke,
+// FP16: tiered (3 TEST_P fixtures x configs x layouts; Quick uses one layout).
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_ConvBiasActivInfer_FP16,
                          testing::Combine(testing::Values(miopenActivationRELU),
                                           testing::ValuesIn(CbaNetworkSubset(3)),
@@ -328,7 +328,7 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                                           testing::Values(0.75f),
                                           testing::Values(0.5f)),
                          CbaParamNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          GPU_ConvBiasActivInfer_FP16,
                          testing::Combine(testing::Values(miopenActivationRELU),
                                           testing::ValuesIn(CbaNetworkBeyond(10)),
@@ -338,22 +338,22 @@ INSTANTIATE_TEST_SUITE_P(Full,
                                           testing::Values(0.5f)),
                          CbaParamNameGenerator{});
 
-// Grouped fixtures: tiered Smoke/Standard/Full with nested configs (Smoke subset
+// Grouped fixtures: tiered Quick/Standard/Full with nested configs (Quick subset
 // of Standard subset of Full) and all three activations in each tier. 2D fixtures
 // run NHWC+NCHW; 3D fixtures run NDHWC+NCDHW.
 #define GCBA_2D_LAYOUTS testing::Values(miopenTensorNHWC, miopenTensorNCHW)
 #define GCBA_3D_LAYOUTS testing::Values(miopenTensorNDHWC, miopenTensorNCDHW)
-// Smoke (pre-commit) runs a single layout to stay small; the other layout is
+// Quick (pre-commit) runs a single layout to stay small; the other layout is
 // still covered on every PR by the Standard tier (and nightly by Full).
 #define GCBA_2D_SMOKE_LAYOUT testing::Values(miopenTensorNHWC)
-// Standard runs the layout(s) Smoke does not, so Smoke+Standard cover both with
-// no repeat (the standard category runs both Smoke and Standard).
+// Standard runs the layout(s) Quick does not, so Quick+Standard cover both with
+// no repeat (the standard category runs both Quick and Standard).
 #define GCBA_2D_STD_LAYOUT testing::Values(miopenTensorNCHW)
 #define GCBA_3D_SMOKE_LAYOUT testing::Values(miopenTensorNDHWC)
 #define GCBA_3D_STD_LAYOUT testing::Values(miopenTensorNCDHW)
 
 // BFP16 tests
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_ConvGrpBiasActivInfer_BFP16,
                          gcbaInferParamGen(GroupedSmokeConfigs<2u>(), GCBA_2D_SMOKE_LAYOUT),
                          CbaParamNameGenerator{});
@@ -365,7 +365,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_ConvGrpBiasActivInfer_BFP16,
                          gcbaInferParamGen(GroupedFullConfigs<2u>(), GCBA_2D_LAYOUTS),
                          CbaParamNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_ConvGrpBiasActivInfer3D_BFP16,
                          gcbaInferParamGen(GroupedSmokeConfigs<3u>(), GCBA_3D_SMOKE_LAYOUT),
                          CbaParamNameGenerator{});
@@ -379,7 +379,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          CbaParamNameGenerator{});
 
 // FP16 tests
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_ConvGrpBiasActivInfer_FP16,
                          gcbaInferParamGen(GroupedSmokeConfigs<2u>(), GCBA_2D_SMOKE_LAYOUT),
                          CbaParamNameGenerator{});
@@ -391,7 +391,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_ConvGrpBiasActivInfer_FP16,
                          gcbaInferParamGen(GroupedFullConfigs<2u>(), GCBA_2D_LAYOUTS),
                          CbaParamNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_ConvGrpBiasActivInfer3D_FP16,
                          gcbaInferParamGen(GroupedSmokeConfigs<3u>(), GCBA_3D_SMOKE_LAYOUT),
                          CbaParamNameGenerator{});
@@ -405,7 +405,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          CbaParamNameGenerator{});
 
 // FP32 tests
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_ConvGrpBiasActivInfer_FP32,
                          gcbaInferParamGen(GroupedSmokeConfigs<2u>(), GCBA_2D_SMOKE_LAYOUT),
                          CbaParamNameGenerator{});
@@ -417,7 +417,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          GPU_ConvGrpBiasActivInfer_FP32,
                          gcbaInferParamGen(GroupedFullConfigs<2u>(), GCBA_2D_LAYOUTS),
                          CbaParamNameGenerator{});
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_ConvGrpBiasActivInfer3D_FP32,
                          gcbaInferParamGen(GroupedSmokeConfigs<3u>(), GCBA_3D_SMOKE_LAYOUT),
                          CbaParamNameGenerator{});

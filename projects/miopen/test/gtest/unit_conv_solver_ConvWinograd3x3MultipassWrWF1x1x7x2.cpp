@@ -98,27 +98,27 @@ TEST_P(CPU_UnitTestConvSolverWinograd3x3MultipassF1x1x7x2DevApplicabilityWrw_NON
     this->RunTest(miopen::solver::conv::ConvWinograd3x3MultipassWrW<1, 1, 7, 2>{});
 };
 
-// Smoke tests
-INSTANTIATE_TEST_SUITE_P(Smoke,
+// Quick tests
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverWinograd3x3MultipassF1x1x7x2Wrw_FP16,
                          testing::Combine(testing::Values(GetTestParamsFP16()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCases(miopenHalf))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverWinograd3x3MultipassF1x1x7x2Wrw_BFP16,
                          testing::Combine(testing::Values(GetTestParamsBFP16()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCases(miopenBFloat16))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverWinograd3x3MultipassF1x1x7x2Wrw_FP32,
                          testing::Combine(testing::Values(GetTestParamsFP32()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCases(miopenFloat))));
 
 // Device applicability test
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_UnitTestConvSolverWinograd3x3MultipassF1x1x7x2DevApplicabilityWrw_NONE,
                          testing::Combine(testing::Values(GetTestParamsFP32()),
                                           testing::Values(GetConvTestCases(miopenFloat)[0])));
@@ -170,14 +170,14 @@ TEST_P(CPU_UnitTestConvSolverTransposedWinograd3x3MultipassF1x1x7x2DevApplicabil
     this->RunTest(miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<1, 1, 7, 2>{});
 };
 
-// Smoke tests
-INSTANTIATE_TEST_SUITE_P(Smoke,
+// Quick tests
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverTransposedWinograd3x3MultipassF1x1x7x2Wrw_FP16,
                          testing::Combine(testing::Values(GetTestParamsFP16()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
                                           testing::ValuesIn(GetConvTestCasesNHWC(miopenHalf))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverTransposedWinograd3x3MultipassF1x1x7x2Wrw_FP32,
                          testing::Combine(testing::Values(GetTestParamsFP32()),
                                           testing::Values(miopenConvolutionAlgoWinograd),
@@ -185,7 +185,7 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
 
 // Device applicability test
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     CPU_UnitTestConvSolverTransposedWinograd3x3MultipassF1x1x7x2DevApplicabilityWrw_NONE,
     testing::Combine(testing::Values(GetTestParamsFP32()),
                      testing::Values(GetConvTestCasesNHWC(miopenFloat)[0])));

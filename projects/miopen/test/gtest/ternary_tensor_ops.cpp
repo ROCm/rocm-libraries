@@ -367,11 +367,11 @@ inline auto GetCases()
     return cases;
 }
 
-// The FP32 Smoke/Standard/Full tiers run disjoint slices of GenCases(): the
-// categories run cumulative tiers (standard = Smoke+Standard, comprehensive/full
-// = Smoke+Standard+Full), so the slices reassemble the complete set with no case
-// repeated across tiers. The FP64/FP16 suites have only a Full tier and use the
-// complete GetCases() directly.
+// The FP32 Quick/Standard/Comprehensive tiers run disjoint slices of GenCases():
+// the categories run cumulative tiers (standard = Quick+Standard,
+// comprehensive/full = Quick+Standard+Comprehensive), so the slices reassemble
+// the complete set with no case repeated across tiers. The FP64/FP16 suites have
+// only a Standard tier and use the complete GetCases() directly.
 std::vector<TestCase> GenCasesRange(std::size_t begin, std::size_t end)
 {
     auto cases = GenCases();
@@ -392,7 +392,7 @@ inline auto GetCasesStandard()
     return cases;
 }
 
-// FP32 Full tier: the cases beyond Standard (Smoke + Standard + this = all of
+// FP32 Comprehensive tier: the cases beyond Standard (Quick + Standard + this = all of
 // GenCases()).
 inline auto GetCasesFullDelta()
 {
@@ -407,10 +407,10 @@ TEST_P(GPU_TernaryTensorOps_FP16, TestFloat16) { this->Run(); }
 
 TEST_P(GPU_TernaryTensorOps_FP64, TestDouble) { this->Run(); }
 
-// Tiered: Smoke (pre-commit) and Standard (per-CI) run subsets; Full
-// (comprehensive/nightly) runs the complete set so no coverage is lost.
-INSTANTIATE_TEST_SUITE_P(Smoke, GPU_TernaryTensorOps_FP32, GetCasesSmoke());
+// Tiered: Quick (pre-commit) and Standard (per-PR) run subsets; Comprehensive
+// (nightly) runs the complete set so no coverage is lost.
+INSTANTIATE_TEST_SUITE_P(Quick, GPU_TernaryTensorOps_FP32, GetCasesSmoke());
 INSTANTIATE_TEST_SUITE_P(Standard, GPU_TernaryTensorOps_FP32, GetCasesStandard());
-INSTANTIATE_TEST_SUITE_P(Full, GPU_TernaryTensorOps_FP32, GetCasesFullDelta());
-INSTANTIATE_TEST_SUITE_P(Full, GPU_TernaryTensorOps_FP64, GetCases());
-INSTANTIATE_TEST_SUITE_P(Full, GPU_TernaryTensorOps_FP16, GetCases());
+INSTANTIATE_TEST_SUITE_P(Comprehensive, GPU_TernaryTensorOps_FP32, GetCasesFullDelta());
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_TernaryTensorOps_FP64, GetCases());
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_TernaryTensorOps_FP16, GetCases());

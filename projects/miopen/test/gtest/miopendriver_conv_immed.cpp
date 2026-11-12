@@ -101,18 +101,18 @@ using namespace miopen_conv_immed;
 
 TEST_P(GPU_MIOpenDriverConvImmedTest_FP32, MIOpenDriverConvImmed) { RunMIOpenDriver(GetParam()); };
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_MIOpenDriverConvImmedTest_FP32,
                          testing::Values(GetTestCases(miopendriver::basearg::conv::Float)));
 
 TEST_P(GPU_MIOpenDriverConvImmedTest_FP16, MIOpenDriverConvImmed) { RunMIOpenDriver(GetParam()); };
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_MIOpenDriverConvImmedTest_FP16,
                          testing::Values(GetTestCases(miopendriver::basearg::conv::Half)));
 
 TEST_P(GPU_MIOpenDriverConvImmedTest_BFP16, MIOpenDriverConvImmed) { RunMIOpenDriver(GetParam()); };
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_MIOpenDriverConvImmedTest_BFP16,
                          testing::Values(GetTestCases(miopendriver::basearg::conv::BFloat16)));

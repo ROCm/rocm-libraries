@@ -124,28 +124,28 @@ TEST_P(CPU_UnitTestConvSolverConvDepthwiseBwdData2DDevApplicability_NONE, ConvDe
     this->RunTest(miopen::solver::conv::ConvDepthwiseBwdData2D{});
 };
 
-// Smoke tests
-INSTANTIATE_TEST_SUITE_P(Smoke,
+// Quick tests
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverConvDepthwiseBwdData2D_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvSmokeTestCases(miopenHalf))));
 
 INSTANTIATE_TEST_SUITE_P(
-    Smoke,
+    Quick,
     GPU_UnitTestConvSolverConvDepthwiseBwdData2D_BFP16,
     testing::Combine(testing::Values(GetTestParams()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConvSmokeTestCases(miopenBFloat16))));
 
-// Full tests
-INSTANTIATE_TEST_SUITE_P(Full,
+// Standard tests
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_UnitTestConvSolverConvDepthwiseBwdData2D_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvFullTestCases(miopenHalf))));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_UnitTestConvSolverConvDepthwiseBwdData2D_BFP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
@@ -154,21 +154,21 @@ INSTANTIATE_TEST_SUITE_P(Full,
 // Wave32-only tests (RDNA). Kept apart from the shared cases above because the wave64
 // factory has no 112x112 instance.
 INSTANTIATE_TEST_SUITE_P(
-    FullWave32,
+    StandardWave32,
     GPU_UnitTestConvSolverConvDepthwiseBwdData2D_FP16,
     testing::Combine(testing::Values(GetWave32TestParams()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConvWave32OnlyTestCases(miopenHalf))));
 
 INSTANTIATE_TEST_SUITE_P(
-    FullWave32,
+    StandardWave32,
     GPU_UnitTestConvSolverConvDepthwiseBwdData2D_BFP16,
     testing::Combine(testing::Values(GetWave32TestParams()),
                      testing::Values(miopenConvolutionAlgoDirect),
                      testing::ValuesIn(GetConvWave32OnlyTestCases(miopenBFloat16))));
 
 // Device applicability test
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_UnitTestConvSolverConvDepthwiseBwdData2DDevApplicability_NONE,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(GetConvSmokeTestCases(miopenHalf)[0])));

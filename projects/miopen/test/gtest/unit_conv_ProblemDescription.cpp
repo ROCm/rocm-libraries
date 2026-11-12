@@ -372,7 +372,7 @@ using CPU_ConvProblemDescriptionTestLayoutCalc_NONE = TestLayoutCalc;
 
 TEST_P(CPU_ConvProblemDescriptionTestLayoutCalc_NONE, ConvProblemDescription) { this->RunTest(); };
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          CPU_ConvProblemDescriptionTestLayoutCalc_NONE,
                          testing::ValuesIn(TestLayoutCalc::GetTestCases()));
 
@@ -472,7 +472,7 @@ using CPU_ConvProblemDescriptionTestKeys_NONE = TestProblemKeys;
 
 TEST_P(CPU_ConvProblemDescriptionTestKeys_NONE, ConvProblemDescription) { this->RunTest(); }
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          CPU_ConvProblemDescriptionTestKeys_NONE,
                          testing::ValuesIn(TestProblemKeys::GetTestCases()));
 

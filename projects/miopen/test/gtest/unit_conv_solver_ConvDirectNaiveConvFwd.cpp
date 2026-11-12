@@ -294,78 +294,79 @@ TEST_P(CPU_UnitTestConvSolverDirectNaiveDevApplicabilityFwd_NONE, ConvDirectNaiv
     this->RunTest(miopen::solver::conv::ConvDirectNaiveConvFwd{});
 };
 
-// Smoke tests
-INSTANTIATE_TEST_SUITE_P(Smoke,
+// Quick tests
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverDirectNaiveFwd_I8,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCases(miopenInt8))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverDirectNaiveFwd_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCases(miopenHalf))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverDirectNaiveFwd_BFP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCases(miopenBFloat16))));
 
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverDirectNaiveFwd_FP32,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCases(miopenFloat))));
 
 // Device applicability test
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_UnitTestConvSolverDirectNaiveDevApplicabilityFwd_NONE,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(GetConvTestCases(miopenFloat)[0])));
 
-// Full tests
-INSTANTIATE_TEST_SUITE_P(Full,
+// Standard tests
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_UnitTestConvSolverDirectNaiveFwd_I8,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCasesFull(miopenInt8))));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_UnitTestConvSolverDirectNaiveFwd_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCasesFull(miopenHalf))));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_UnitTestConvSolverDirectNaiveFwd_BFP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCasesFull(miopenBFloat16))));
 
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_UnitTestConvSolverDirectNaiveFwd_FP32,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCasesFull(miopenFloat))));
 
-// Full: Subbatch chunking test (tests 2-chunk processing to prevent grid dimension overflow)
-INSTANTIATE_TEST_SUITE_P(FullSubbatch,
+// Standard: Subbatch chunking test (tests 2-chunk processing to prevent grid dimension overflow)
+INSTANTIATE_TEST_SUITE_P(StandardSubbatch,
                          GPU_UnitTestConvSolverDirectNaiveFwd_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetSubbatchTestCase())));
 
-// Full: Subbatch chunking test for 2D (tests 2-chunk processing to prevent grid dimension overflow)
-INSTANTIATE_TEST_SUITE_P(FullSubbatch2D,
+// Standard: Subbatch chunking test for 2D (tests 2-chunk processing to prevent grid dimension
+// overflow)
+INSTANTIATE_TEST_SUITE_P(StandardSubbatch2D,
                          GPU_UnitTestConvSolverDirectNaiveFwd_FP16,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetSubbatchTestCase2D())));
 
-// Smoke: 3D int8 fwd with int8_t output, NCDHW and NDHWC layouts
-INSTANTIATE_TEST_SUITE_P(Smoke3dInt8,
+// Standard: 3D int8 fwd with int8_t output, NCDHW and NDHWC layouts
+INSTANTIATE_TEST_SUITE_P(Standard3dInt8,
                          GPU_UnitTestConvSolverDirectNaiveFwd_I8,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),

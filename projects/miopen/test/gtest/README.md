@@ -1,8 +1,15 @@
 # gtest conventions
 
 Full test-naming rules live on the wiki: https://github.com/ROCm/MIOpen/wiki/GTest-development#naming
-(`Smoke`/`Standard`/`Full`/`Perf`/`Unit` prefixes, `CPU`/`GPU` hardware token, datatype
-suffix). `check_names.py` enforces that schema against `miopen_gtest --gtest_list_tests`.
+(tier prefix, `CPU`/`GPU` hardware token, datatype suffix). `check_names.py` enforces that
+schema against `miopen_gtest --gtest_list_tests`.
+
+The prefix of a parameterized instantiation names the `test_categories.yaml` tier that first
+selects it: `Quick` (quick), `Standard` (standard), `Comprehensive` (comprehensive) or `Full`
+(full, or excluded from every tier). A variant instantiation of the same fixture keeps a suffix
+after the tier word, e.g. `StandardNhwc`. When a test moves to another tier, rename the prefix
+and the patterns in `test_categories.yaml` together. `-DMIOPEN_TEST_ALL=Off` builds run only the
+`Quick*` instantiations.
 
 ## hipDNN shim surface
 
@@ -10,8 +17,8 @@ A test belongs to the hipDNN backend-swap surface if its full gtest name contain
 token `HipdnnShim`. Parameterized tests get it from the instantiation prefix, e.g.
 `INSTANTIATE_TEST_SUITE_P(HipdnnShim, GPU_ConvFwdApi_FP32, ...)`. Non-parameterized tests
 carry it directly in the suite name instead, e.g. `TEST_F(GPU_HipdnnShimConvFwdApi_FP32, ...)`,
-since `check_names.py`'s prefix check only applies to the `Smoke`/`Standard`/`Full`/`Perf`/
-`Unit` token used by parameterized instantiations.
+since `check_names.py`'s prefix check only applies to the `Quick`/`Standard`/`Comprehensive`/
+`Full` token used by parameterized instantiations.
 
 The token is deliberately specific: it is a filter, so a generic word like `Forwarding`
 would sooner or later pull in an unrelated test and silently double its runtime.
@@ -25,9 +32,9 @@ Two consequences of that being the only entry path, both easy to "fix" in the wr
 direction:
 
 - **Shim-surface tests stay out of `test_categories.yaml` on purpose.** The categorized
-  smoke/standard/full entries turn those patterns into a `--gtest_filter`, so a matching
-  pattern would register a third run of tests the parity entries already run twice. Absence
-  from that file is the design, not a gap.
+  quick/standard/comprehensive/full entries turn those patterns into a `--gtest_filter`, so
+  a matching pattern would register a third run of tests the parity entries already run
+  twice. Absence from that file is the design, not a gap.
 - **Excluding a shim-surface test means narrowing the parity filter,** not calling
   `add_gtest_negative_filter`. That function feeds the shard filter, which the parity entries
   do not use, so disabling a shim test through it looks like it worked and changes nothing.

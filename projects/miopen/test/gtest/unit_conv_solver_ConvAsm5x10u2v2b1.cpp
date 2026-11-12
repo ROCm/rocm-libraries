@@ -69,15 +69,15 @@ TEST_P(CPU_UnitTestConvSolverAsm5x10u2v2b1DevApplicabilityBwd_NONE, ConvAsm5x10u
     this->RunTest(miopen::solver::conv::ConvAsm5x10u2v2b1{});
 };
 
-// Smoke tests
-INSTANTIATE_TEST_SUITE_P(Smoke,
+// Quick tests
+INSTANTIATE_TEST_SUITE_P(Quick,
                          GPU_UnitTestConvSolverAsm5x10u2v2b1Bwd_FP32,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCases(miopenFloat))));
 
 // Device applicability test
-INSTANTIATE_TEST_SUITE_P(Smoke,
+INSTANTIATE_TEST_SUITE_P(Quick,
                          CPU_UnitTestConvSolverAsm5x10u2v2b1DevApplicabilityBwd_NONE,
                          testing::Combine(testing::Values(GetTestParams()),
                                           testing::Values(GetConvTestCases(miopenFloat)[0])));
