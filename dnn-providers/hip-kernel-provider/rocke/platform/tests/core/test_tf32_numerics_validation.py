@@ -74,7 +74,11 @@ def _run_mocked_cli(fault: str, output_dir: str) -> None:
         ),
         patch.object(numerics, "lower_kernel_to_hip", return_value="mock HIP"),
         patch.object(hip_module, "get_device_arch", return_value="gfx942"),
-        patch.object(comgr, "build_hsaco_from_llvm_ir", return_value=(b"mock", None)),
+        patch.object(
+            comgr,
+            "build_hsaco_from_llvm_ir",
+            return_value=(b"mock", comgr.ComgrTimings()),
+        ),
         patch.object(comgr, "resolved_lib_path", return_value="mock COMGR"),
         patch.dict(sys.modules, {"rocke_engine": native}),
         patch.object(sys, "argv", argv),
