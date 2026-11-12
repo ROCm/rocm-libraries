@@ -194,15 +194,18 @@ def test_dense_wave_segments(work, cus, expected):
 
 
 # segm_output is [B*Sq, Hq, S, D] FP32 indexed in i32: at B=1, Sq=32768, D=128 the
-# extent reaches 2**31 at Hq*S = 512. A CU count large enough to ask for 8 segments
-# shows the rule falling back to the largest split that still fits.
-@pytest.mark.parametrize("hq,segments", [(32, 8), (64, 4)])
+# extent reaches 2**31 at Hq*S = 512. That extent's largest index is 2**31 - 1, which
+# still addresses, so Hq*S = 512 is the last split admitted and 1024 is the first
+# refused. A CU count large enough to ask for more shows the rule falling back to the
+# largest split that still fits. At Hq=32 the wave rule binds first (8 < the 16 the
+# workspace would allow), so only Hq=64 sits on the workspace boundary.
+@pytest.mark.parametrize("hq,segments", [(32, 8), (64, 8)])
 def test_gfx950_kv_split_stays_within_i32_workspace(hq, segments):
     spec = _gfx950_grid_spec(32768, 65536, hq, num_cus=100000)
     assert spec.kv_segments == segments
 
 
-@pytest.mark.parametrize("hq,segments", [(32, 8), (64, 4)])
+@pytest.mark.parametrize("hq,segments", [(32, 8), (64, 8)])
 def test_gfx942_kv_split_stays_within_i32_workspace(hq, segments):
     spec = _gfx942_spec(32768, 65536, hq, num_cus=100000)
     assert spec.kv_segments == segments
@@ -212,17 +215,22 @@ def test_gfx942_kv_split_stays_within_i32_workspace(hq, segments):
 def test_supports_rejects_kv_segments_past_i32_workspace(arch, make):
     supports = _supports(arch)
     spec = make(32768, 65536, 64, num_cus=100000)
-    assert supports(replace(spec, kv_segments=4))[0]
-    ok, why = supports(replace(spec, kv_segments=8))
+    # Hq*S = 512 is exactly 2**31 elements, whose largest index is INT32_MAX: served.
+    assert supports(replace(spec, kv_segments=8))[0]
+    ok, why = supports(replace(spec, kv_segments=16))
     assert not ok and "32-bit" in why
 
 
 def test_max_kv_segments_for_extent():
     from kernels.common.attention_dense_kv_split import max_kv_segments_for_extent
 
-    assert max_kv_segments_for_extent(1, 32768, 64, 128, max_segments=8) == 4
+    # Hq*S <= 512 fits, so Hq=64 reaches S=8 and Hq=32 would reach 16 but for the cap.
+    assert max_kv_segments_for_extent(1, 32768, 64, 128, max_segments=8) == 8
     assert max_kv_segments_for_extent(1, 32768, 32, 128, max_segments=8) == 8
     assert max_kv_segments_for_extent(1, 512, 32, 128, max_segments=8) == 8
+    # Uncapped, the boundary itself: Hq*S = 512 admitted, 1024 refused.
+    assert max_kv_segments_for_extent(1, 32768, 32, 128) == 16
+    assert max_kv_segments_for_extent(1, 32768, 64, 128) == 8
     assert max_kv_segments_for_extent(1, 32768, 512, 128) == 1
 
 

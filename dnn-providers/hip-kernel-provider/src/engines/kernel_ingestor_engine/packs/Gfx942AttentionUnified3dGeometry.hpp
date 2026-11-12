@@ -329,7 +329,7 @@ constexpr int64_t GFX942_UNIFIED_3D_I32_INDEX_LIMIT = int64_t{1} << 31;
 
 /**
  * @brief Does every tensor the segment and reduce kernels index with signed 32-bit element
- *        offsets hold fewer than 2^31 elements?
+ *        offsets have a largest offset below 2^31?
  *
  * The kernels compute these flat element offsets in i32 (`kernels/gfx942/attention_tiled_3d.py`,
  * `TensorDescriptor.naive(...).offset` in `rocke/helpers/transforms.py`, lowered to an i32
@@ -340,9 +340,15 @@ constexpr int64_t GFX942_UNIFIED_3D_I32_INDEX_LIMIT = int64_t{1} << 31;
  *  - `segm_max` / `segm_expsum[token, head, seg]`: B * Hq * nseg elements;
  *  - Q and O `[token, head, dim]`: `(token * Hq + head) * D + dim`, B * Hq * D elements.
  *
- * At 2^31 elements or more the last offsets wrap negative and the stores land before the
- * buffer, silently. K and V are addressed through i64 bases and buffer resources instead
- * (stridedKvRefusal bounds them). False for non-positive inputs. Total: never throws.
+ * The bound is on the offset, not the element count: a tensor of N elements reaches
+ * offset N - 1, so exactly 2^31 elements reaches exactly INT32_MAX and is the largest
+ * size that still addresses. Past 2^31 elements the last offsets wrap negative and the
+ * stores land before the buffer. Measured on gfx942: 2^31 elements completes, one more
+ * query token faults. This matches `_check_3d_workspace_addr_width` on the Python launch
+ * path, so a shape is not served by one route and refused by the other.
+ *
+ * K and V are addressed through i64 bases and buffer resources instead (stridedKvRefusal
+ * bounds them). False for non-positive inputs. Total: never throws.
  */
 inline bool
     gfx942Unified3dIndicesFitInt32(int64_t batch, int64_t hq, int64_t numSegments, int64_t headSize)
@@ -360,7 +366,9 @@ inline bool
                 return false;
             }
         }
-        return elements < GFX942_UNIFIED_3D_I32_INDEX_LIMIT;
+        // ``elements - 1`` is the largest offset formed, so a tensor of exactly
+        // ``GFX942_UNIFIED_3D_I32_INDEX_LIMIT`` elements still fits.
+        return elements - 1 < GFX942_UNIFIED_3D_I32_INDEX_LIMIT;
     };
     return fits({batch, hq, numSegments, headSize}) // segm_output
            && fits({batch, hq, numSegments}) // segm_max, segm_expsum
