@@ -331,7 +331,10 @@ class KernelWriterAssembly(KernelWriter):
     return self.states.regCaps["PhysicalMaxSgpr"]//sgprs
 
   def getVgprOccupancy(self, numThreads, vgprs, doubleVgpr=False):
-    if self.states.version[0] == 12:
+    version = tuple(self.states.version[:2])
+    # TODO: gfx10, gfx117x and gfx1250 keep the legacy model until their occupancy is validated.
+    legacyModel = version[0] == 10 or version in ((11, 7), (12, 5))
+    if legacyModel or version[0] == 12:
       # TODO: gfx12 keeps the legacy wave64-based (256) divisor for historic reasons; it should
       # use the wave-size-aware divisor below (wavefront * 4 SIMDs = 128 for wave32) once gfx12
       # occupancy has been benchmarked.
@@ -341,9 +344,7 @@ class KernelWriterAssembly(KernelWriter):
       wavesPerSimdPerWorkgroup = int(ceil(numThreads / float(self.states.kernel["WavefrontSize"] * 4)))
     maxWorkgroups = self.states.archCaps["MaxWavesPerSimd"]//wavesPerSimdPerWorkgroup
 
-    if self.states.version[0] == 12 and self.states.version[1] == 5:
-      # gfx1250: keep the legacy MaxVgpr*2 occupancy model pending its own
-      # benchmarking.
+    if legacyModel:
       totalVgprs = self.states.regCaps["MaxVgpr"] if not doubleVgpr else self.states.regCaps["MaxVgpr"]*2
       vgprAllocateAligned = 4 if not doubleVgpr else 8
     else:

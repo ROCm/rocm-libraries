@@ -319,6 +319,20 @@ def test_gfx1250_keeps_legacy_maxvgpr_occupancy():
     assert kw.getVgprOccupancy(numThreads=256, vgprs=300, doubleVgpr=True) == 6
 
 
+@pytest.mark.parametrize(
+    "isa,numThreads,vgprs,ldsBytes,expected",
+    [
+        ((10, 3, 0), 256, 96, 0, (96, 5)),       # gfx1030
+        ((11, 7, 0), 128, 64, 16384, (64, 8)),   # gfx1170
+        ((11, 7, 1), 128, 64, 16384, (64, 8)),   # gfx1171
+    ],
+)
+def test_gfx10_and_gfx117x_keep_legacy_occupancy(isa, numThreads, vgprs, ldsBytes, expected):
+    """gfx10 and gfx117x stay on the legacy model; expected values are the pre-change results."""
+    kw = _make_writer(_init_rocisa(isa), isa)
+    assert kw.getMaxRegsForOccupancy(numThreads, vgprs, 40, ldsBytes, 0, True) == expected
+
+
 class _RecordingPool:
     """Stands in for a rocisa RegisterPool; records the occupancy limit it is given."""
 
