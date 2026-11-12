@@ -224,6 +224,7 @@ class TestGfx942DenseSupportGates(unittest.TestCase):
                 with self.subTest(seqlen=seqlen):
                     req = _req(seqlen_q=seqlen, seqlen_k=seqlen)
                     spec = _base_spec(req)
+                    tiles.add((spec.block_m, spec.block_n))
                     self.assertNotEqual(seqlen % spec.block_m, 0)
                     ok, why = _candidate().admits(req)
                     self.assertFalse(ok)
@@ -242,7 +243,6 @@ class TestGfx942DenseSupportGates(unittest.TestCase):
                         self.assertIn(kv_part, why)
                     else:
                         self.assertNotIn("seqlen_kv", why)
-                    tiles.add((spec.block_m, spec.block_n))
         # The lengths must reach more than one tile, or a helper that always names
         # one registered pair would pass.
         self.assertGreater(len(tiles), 1, tiles)
