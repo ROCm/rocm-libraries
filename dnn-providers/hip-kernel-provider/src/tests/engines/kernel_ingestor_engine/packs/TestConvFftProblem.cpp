@@ -264,6 +264,10 @@ TEST(TestConvFftKernel, TheDilatedFilterMustFitTheTransform)
         wideOnly.filter = {1, 31};
         wideOnly.prePadding = wideOnly.postPadding = {0, 15};
         EXPECT_FALSE(admits(sixteen, wideOnly)); // span 31 > 16 in w only
+        auto oneOver = big;
+        oneOver.filter = {1, 17};
+        oneOver.prePadding = oneOver.postPadding = {0, 8};
+        EXPECT_FALSE(admits(sixteen, oneOver)); // span 17: an output tile of zero columns
         auto tallOnly = big;
         tallOnly.filter = {31, 1};
         tallOnly.prePadding = tallOnly.postPadding = {15, 0};
