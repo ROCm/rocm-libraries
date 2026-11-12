@@ -793,6 +793,7 @@ class CustomKernel:
                  'workspaceType',
                  'workspaceSizePerElemC',
                  'workspaceSizePerElemBias',
+                 'globalAccumulation',
                  'generated',
                  'uniformSummationOrder']
 
@@ -806,6 +807,7 @@ class CustomKernel:
                    workspaceType=d.get('workspaceType', 'None'),
                    workspaceSizePerElemC=d.get('workspaceSizePerElemC', 0),
                    workspaceSizePerElemBias=d.get('workspaceSizePerElemBias', 0),
+                   globalAccumulation=d.get('globalAccumulation', 0),
                    generated=d.get('generated', False),
                    uniformSummationOrder=d.get('uniformSummationOrder', False))
 

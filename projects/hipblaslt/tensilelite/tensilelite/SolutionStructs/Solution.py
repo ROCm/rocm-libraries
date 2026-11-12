@@ -2234,7 +2234,7 @@ class Solution(collections.abc.Mapping):
         can split K (GlobalSplitU other than 0 or 1) but its grid launches one
         GSU slice per tile.
     """
-    ck = state["CustomKernel"]
+    customKernelState = state["CustomKernel"]
 
     # CustomKernels.py derives the macrotile from MatrixInstruction / MIWaveTile
     # in custom.config, then from an MTxxx token in the kernel name. Any kernel
@@ -2244,13 +2244,13 @@ class Solution(collections.abc.Mapping):
     # dense enumeration (--algo_method 1) dies with SIGFPE as soon as that
     # solution is costed. Kernels that already encode MT in the name
     # or declare MI in custom.config are unchanged.
-    macrotile = list(ck.get("macrotile") or [])
+    macrotile = list(customKernelState.get("macrotile") or [])
     macrotile += [0] * (3 - len(macrotile))
     for i, key in enumerate(("MacroTile0", "MacroTile1", "DepthU")):
       value = macrotile[i] if macrotile[i] > 0 else state.get(key, 0)
       if not isinstance(value, int) or value <= 0:
         raise RuntimeError(
-          f"Custom kernel '{ck.get('name', '?')}' has no usable {key}: it is absent "
+          f"Custom kernel '{customKernelState.get('name', '?')}' has no usable {key}: it is absent "
           f"from the kernel's custom.config, the kernel name encodes no MTxxx token, "
           f"and the consuming logic file does not supply one.")
       macrotile[i] = value
@@ -2258,19 +2258,19 @@ class Solution(collections.abc.Mapping):
     # Keep the block the C++ runtime deserializes in step with the solution:
     # ContractionSolution reads customKernel.macrotile directly for custom-kernel
     # tile and workspace sizing.
-    ck["macrotile"] = macrotile
+    customKernelState["macrotile"] = macrotile
 
     # A split-K kernel reduces into D only once every GSU slice of a tile has
     # arrived, so a grid sized from tile counts alone would return success with D
     # unwritten. GSU and persistent grids account for the split themselves.
     # GlobalSplitU -1 lets the runtime pick a split above 1.
     gsu = state.get("GlobalSplitU", 1)
-    grid = ck.get("grid", [])
+    grid = customKernelState.get("grid", [])
     oneSlicePerTile = all(
       g in ("One", "TilesX", "TilesY", "Batch", "TilesXY", "TilesXYBatch") for g in grid)
     if gsu not in (0, 1) and oneSlicePerTile:
       raise RuntimeError(
-        f"Custom kernel '{ck.get('name', '?')}' runs with GlobalSplitU {gsu}, but its "
+        f"Custom kernel '{customKernelState.get('name', '?')}' runs with GlobalSplitU {gsu}, but its "
         f"CustomKernel grid {grid} launches one GSU slice per tile; use TilesYGSU "
         f"or TilesXYBatchGSU.")
     # The same grid cannot honor a runtime GSU override either; clearing the flag
@@ -2278,27 +2278,42 @@ class Solution(collections.abc.Mapping):
     if oneSlicePerTile:
       state.setdefault("InternalSupportParams", {})["SupportUserGSU"] = False
 
-    # Derive _GlobalAccumulation from GlobalSplitUAlgorithm so the C++
-    # runtime sees a non-zero sizeMapping.globalAccumulation for GSU>1
-    # solutions.  Without this the legacy beta-only kernel
-    # (`Cijk_<dT>_BiasS`) was launched and not found in the library.
-    state["_GlobalAccumulation"]    = None
-    if requiresPartialReduction(state):
-      state["_GlobalAccumulation"] = 'PartialsBuffer'
-    elif state.get("GlobalSplitUAlgorithm", "") == 'SingleBuffer':
-      computeName = state["ProblemType"]["ComputeDataType"].toName()
-      if computeName != state["ProblemType"]["DestDataType"].toName():
-        state["_GlobalAccumulation"] = 'SingleBuffer'
-    elif state.get("GlobalSplitUAlgorithm", "") == 'MultipleBuffer':
-      state["_GlobalAccumulation"] = 'MultipleBuffer'
-    elif state.get("GlobalSplitUAlgorithm", "") == 'MultipleBufferSingleKernel':
-      state["_GlobalAccumulation"] = 'MultipleBufferSingleKernel'
+    accumulationModes = (None, 'SingleBuffer', 'MultipleBuffer',
+                         'MultipleBufferSingleKernel', 'PartialsBuffer')
+    declaredAccumulation = customKernelState.get("globalAccumulation")
+    if declaredAccumulation is not None:
+      if (not isinstance(declaredAccumulation, int)
+          or not 0 <= declaredAccumulation < len(accumulationModes)):
+        raise RuntimeError(
+          f"Custom kernel '{customKernelState.get('name', '?')}' declares "
+          f"globalAccumulation {declaredAccumulation!r}, which is not an integer "
+          f"from 0 to {len(accumulationModes) - 1}.")
+      state["_GlobalAccumulation"] = accumulationModes[declaredAccumulation]
+    else:
+      # Derive _GlobalAccumulation from GlobalSplitUAlgorithm so the C++
+      # runtime sees a non-zero sizeMapping.globalAccumulation for GSU>1
+      # solutions.  Without this the legacy beta-only kernel
+      # (`Cijk_<dT>_BiasS`) was launched and not found in the library.
+      state["_GlobalAccumulation"]    = None
+      if requiresPartialReduction(state):
+        state["_GlobalAccumulation"] = 'PartialsBuffer'
+      elif state.get("GlobalSplitUAlgorithm", "") == 'SingleBuffer':
+        computeName = state["ProblemType"]["ComputeDataType"].toName()
+        if computeName != state["ProblemType"]["DestDataType"].toName():
+          state["_GlobalAccumulation"] = 'SingleBuffer'
+      elif state.get("GlobalSplitUAlgorithm", "") == 'MultipleBuffer':
+        state["_GlobalAccumulation"] = 'MultipleBuffer'
+      elif state.get("GlobalSplitUAlgorithm", "") == 'MultipleBufferSingleKernel':
+        state["_GlobalAccumulation"] = 'MultipleBufferSingleKernel'
+    customKernelState["globalAccumulation"] = accumulationModes.index(state["_GlobalAccumulation"])
+
     state["CUOccupancy"]            = -1
     state["MathClocksUnrolledLoop"] = 0
     state["PackedC0IndicesX"] = []
     state["ThreadTile0"] = 0
     state["ThreadTile1"] = 0
-    state["NumThreads"] = ck["threads"][0] * ck["threads"][1] * ck["threads"][2]
+    state["NumThreads"] = (customKernelState["threads"][0] * customKernelState["threads"][1]
+                           * customKernelState["threads"][2])
 
     numElementsPerWorkGroup = state["MacroTile0"] * state["MacroTile1"]
     state["NumElementsPerThread"] = numElementsPerWorkGroup // state["NumThreads"]
@@ -2314,15 +2329,15 @@ class Solution(collections.abc.Mapping):
     # above, sized like assignDerivedParameters' computeBytes.  custom.config's
     # own ProblemType is advisory -- LibraryIO overwrites it with the logic
     # file's -- so read the type from state.  An explicit declaration wins.
-    if ck.get("workspaceType", "None") == "None" \
+    if customKernelState.get("workspaceType", "None") == "None" \
        and state["_GlobalAccumulation"] == 'PartialsBuffer':
-      ck["workspaceType"]          = "StreamKWithReduction"
-      ck["workspaceSizePerElemC"]  = int(state["ProblemType"]["ComputeDataType"].numBytes())
+      customKernelState["workspaceType"]          = "StreamKWithReduction"
+      customKernelState["workspaceSizePerElemC"]  = int(state["ProblemType"]["ComputeDataType"].numBytes())
 
-    state["_WorkspaceSizePerElemC"] = ck.get("workspaceSizePerElemC", 0)
+    state["_WorkspaceSizePerElemC"] = customKernelState.get("workspaceSizePerElemC", 0)
     state["_WorkspaceSizePerElemBias"] = 0
     if state["ProblemType"]["UseBias"] and state["ProblemType"]["Gradient"]:
-      state["_WorkspaceSizePerElemBias"] = ck.get("workspaceSizePerElemBias", 0)
+      state["_WorkspaceSizePerElemBias"] = customKernelState.get("workspaceSizePerElemBias", 0)
 
     mi = state.get("MatrixInstruction", [])
     state.setdefault("EnableMatrixInstruction", isinstance(mi, list) and len(mi) >= 4)
