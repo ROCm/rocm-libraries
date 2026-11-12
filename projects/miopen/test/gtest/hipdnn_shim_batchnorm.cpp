@@ -740,9 +740,27 @@ INSTANTIATE_TEST_SUITE_P(
                      testing::ValuesIn({miopenActivationPASTHRU})),
     TestNameGenerator<BN3DTestCase>());
 
+namespace {
+
+// The test data seeds each tensor from its lengths, so scale, shift and estMean
+// hold the same value per channel. A channel whose value is negative enough
+// leaves every output at or below zero, and ReLU then zeroes all of it. With two
+// or three channels all of them can, and the fixture fails its "CPU data is all
+// zeros" check; with eight or more the odds are negligible.
+std::vector<BN2DTestCase> ReluNetwork2D()
+{
+    auto cases = Network2DSmall<BN2DTestCase>();
+    cases.erase(
+        std::remove_if(cases.begin(), cases.end(), [](const BN2DTestCase& tc) { return tc.C < 8; }),
+        cases.end());
+    return cases;
+}
+
+} // namespace
+
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          GPU_HipdnnShimBNInferRelu_FP32,
-                         testing::Combine(testing::ValuesIn(Network2DSmall<BN2DTestCase>()),
+                         testing::Combine(testing::ValuesIn(ReluNetwork2D()),
                                           testing::ValuesIn({miopenTensorNCHW, miopenTensorNHWC}),
                                           testing::ValuesIn({miopenBNSpatial}),
                                           testing::ValuesIn({testBNAPIV1, testBNAPIInvVar}),
