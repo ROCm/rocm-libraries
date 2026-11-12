@@ -252,6 +252,9 @@ namespace TensileLite
                 if(layout == MXScaleLayout::GFX1250 && mxBlock > 0)
                     return DGen::preSwizzleScalesGFX1250(
                         natural, cols, (rows + mxBlock - 1) / mxBlock, mxBlock);
+                if(layout == MXScaleLayout::GFX1250B128 && mxBlock > 0)
+                    return DGen::preSwizzleScalesGFX1250B128(
+                        natural, cols, (rows + mxBlock - 1) / mxBlock, mxBlock);
                 return natural;
             }
             inline float decodeMXElement(rocisa::DataType dataType,

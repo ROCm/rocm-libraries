@@ -573,5 +573,74 @@ namespace DGen
         return output;
     }
 
+    /**
+     * @brief Rows per interleaved group of the gfx1250 b128 scale layout.
+     */
+    constexpr size_t preSwizzleScalesGFX1250B128RowGroup = 128;
+
+    /**
+     * @brief Compute the output size of preSwizzleScalesGFX1250B128.
+     *
+     * Same as preSwizzleScalesGFX1250PaddedSize with the slow dimension also
+     * padded to a multiple of preSwizzleScalesGFX1250B128RowGroup.
+     */
+    inline size_t
+        preSwizzleScalesGFX1250B128PaddedSize(size_t slowDim, size_t fastDim, size_t mxBlock)
+    {
+        return preSwizzleScalesGFX1250PaddedSize(
+            roundUp(slowDim, preSwizzleScalesGFX1250B128RowGroup), fastDim, mxBlock);
+    }
+
+    /**
+     * @brief Pre-swizzle scale data for gfx1250 kernels that read scales with
+     *        one ds_load_b128 per K group (Tensile MXScaleLRB128).
+     *
+     * Starts from the preSwizzleScalesGFX1250 layout `{tiles, slowDim, dimk}`
+     * with slowDim padded to a multiple of 128 (zero scales). Inside each tile,
+     * slow index `s = group*128 + block*32 + lane` (block in [0, 4), lane in
+     * [0, 32)) moves to `group*128 + lane*4 + block`, so a lane's four blocks
+     * are adjacent: a wave owning one 128-row group reads its four 32-row
+     * scale tiles for a K group as one 16 B load per lane.
+     *
+     * @param input    The natural-layout scale data (size = slowDim * fastDim).
+     * @param slowDim  Slow (stride > 1) dimension of the natural layout (M/N).
+     * @param fastDim  Fast (stride 1) dimension of the natural layout (K/MX).
+     * @param mxBlock  MX block size (16 or 32).
+     * @return The swizzled scale buffer of
+     *         `preSwizzleScalesGFX1250B128PaddedSize(slowDim, fastDim, mxBlock)` elements.
+     */
+    template <typename T>
+    inline std::vector<T> preSwizzleScalesGFX1250B128(std::vector<T> const& input,
+                                                      size_t                slowDim,
+                                                      size_t                fastDim,
+                                                      size_t                mxBlock)
+    {
+        constexpr size_t group  = preSwizzleScalesGFX1250B128RowGroup;
+        constexpr size_t lanes  = 32;
+        constexpr size_t blocks = group / lanes;
+        std::vector<T> const dimkLayout
+            = preSwizzleScalesGFX1250(input, slowDim, fastDim, mxBlock);
+        size_t const dimk       = 128 / mxBlock;
+        size_t const paddedSlow = roundUp(slowDim, group);
+        size_t const numTiles   = dimkLayout.size() / (slowDim * dimk);
+        std::vector<T> output(paddedSlow * numTiles * dimk, T{});
+
+#pragma omp parallel for collapse(2)
+        for(size_t tile = 0; tile < numTiles; ++tile)
+        {
+            for(size_t s = 0; s < slowDim; ++s)
+            {
+                size_t const lane  = s % lanes;
+                size_t const block = (s / lanes) % blocks;
+                size_t const dst   = s - s % group + lane * blocks + block;
+                for(size_t j = 0; j < dimk; ++j)
+                    output[(tile * paddedSlow + dst) * dimk + j]
+                        = dimkLayout[(tile * slowDim + s) * dimk + j];
+            }
+        }
+
+        return output;
+    }
+
 } // namespace DGen
 

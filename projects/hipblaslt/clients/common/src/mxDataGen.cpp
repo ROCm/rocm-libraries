@@ -497,6 +497,17 @@ std::vector<float> generateData(T                           dgen,
                                                     elementsPerMXBlock));
         }
         break;
+    case MXScaleLayout::GFX1250B128:
+        if(elementsPerMXBlock > 0)
+        {
+            swizzledScaleBytes
+                = DGen::preSwizzleScalesGFX1250B128(scaleBytes,
+                                                    /*slowDim=*/scaleCols,
+                                                    /*fastDim=*/scaleRows,
+                                                    /*mxBlock=*/static_cast<size_t>(
+                                                        elementsPerMXBlock));
+        }
+        break;
     case MXScaleLayout::None:
         break;
     }
@@ -766,6 +777,9 @@ void applyMXScaleLayoutInPlace(uint8_t*      scale,
         if(mxBlock > 0)
             scaleBytes = DGen::preSwizzleScalesGFX1250(scaleBytes, slowDim, fastDim, mxBlock);
         break;
+    case MXScaleLayout::GFX1250B128:
+        // Pads M/N, so the result does not fit the in-place buffer.
+        throw std::runtime_error("applyMXScaleLayoutInPlace: GFX1250B128 is not an in-place layout");
     case MXScaleLayout::None:
         break;
     }

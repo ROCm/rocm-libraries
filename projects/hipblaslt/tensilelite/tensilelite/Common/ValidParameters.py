@@ -465,6 +465,12 @@ validParameters = { # we need to make sure this matches develop
     # (odd tile in lanes 16-31, selected by matrix_b_scale:1). Halves the B scale local
     # reads and VGPRs. Requires TDMSingleIssuer's lane-major scale layout. Off by default.
     "MXSBTilePair": [0, 1],
+    # gfx1250 MXF4 32x16x128: one ds_load_b128 reads a wave's four scale VGPRs for a K
+    # group (instead of four ds_load_b32). The kernel reads scales in the
+    # MXScaleFormat::InMemorySwizzleB128 layout (M/N padded to 128 and lane-interleaved,
+    # DGen::preSwizzleScalesGFX1250B128), not the InMemorySwizzle one, and only solves
+    # batch 1. Requires MXSBTilePair. Off by default.
+    "MXScaleLRB128": [0, 1],
     # TDM multicast across a ClusterDim cluster. 1 (default) = peers share tiles via
     # multicast loads; 0 = every WG fetches its own tiles and the cluster (and its
     # ClusterBarrier) only keeps the WGs in step for GL1/GL2 reuse.

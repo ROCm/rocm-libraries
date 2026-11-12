@@ -2110,10 +2110,10 @@ def _initTDMSingleIssuerAdvParams(mod, writer, kernel, tc):
     raise RuntimeError(
         "TDMSingleIssuer n>=3 advance needs rotate SGPRs; ldsV7 uses n=2")
   if tc.startswith("MX"):
-    from .SubtileScaleEmit import emitScaleTdmStepBytes
+    from .SubtileScaleEmit import emitScaleTdmStepBytes, scaleRowPitch
     ti = _subtileTileInfo(writer, tc)
-    sizeName = "SizeI" if tc == "MXSA" else "SizeJ"
-    mod.add(emitScaleTdmStepBytes(ti, kernel, sgpr("tdmGlobalInc"), sgpr(sizeName),
+    rows = scaleRowPitch(mod, kernel, tc, "tdmGlobalInc")
+    mod.add(emitScaleTdmStepBytes(ti, kernel, sgpr("tdmGlobalInc"), rows,
                                   "TDMSingleIssuer: %s global inc" % tc))
   else:
     ti = _subtileTileInfo(writer, tc)
@@ -2409,6 +2409,11 @@ def _initTDMDescriptorSubtileMX(writer, kernel, tP, refresh=False):
   def descSgprName(idx):
     return f"tdm{tc}Group{idx}"
 
+  if kernel.get("MXScaleLRB128"):
+    mod.add(_initTDMDescriptorSubtileMXB128(
+        writer, kernel, tc, comp, dtype, shape, sizeName, descSgprName, ldsConstOffset, refresh))
+    return mod
+
   # The wave's span is read as a dense (chunk, rowsPerSpan) tensor; LDS padding
   # leaves room for the other K groups' chunks between rows. Single-issuer
   # ITERATE keeps that pad and steps lds_inc=chunk across K-group columns.
@@ -2450,6 +2455,49 @@ def _initTDMDescriptorSubtileMX(writer, kernel, tP, refresh=False):
       mod.add(SMovB32(sgpr(sIter), shape.numKGroups - 1,
                       f"iter_count={shape.numKGroups}-1"))
       mod.add(comp.setIterations(g2, sIter))
+  return mod
+
+
+def _initTDMDescriptorSubtileMXB128(writer, kernel, tc, comp, dtype, shape, sizeName,
+                                    descSgprName, ldsConstOffset, refresh):
+  """MXScaleLRB128 scale descriptor: copy each K group's MT rows to LDS unpadded.
+
+  The host layout already holds the [lane][block] dword order the b128 LR reads
+  (scaleLRB128Layout), so one K group is MT * 4 contiguous bytes, read as rows of
+  `row` bytes. ITERATE steps the K groups: lds_inc = MT * 4, global_inc = padded
+  rows * 4 (scaleRowPitch).
+  """
+  from .SubtileScaleEmit import scaleLRB128Layout, scaleRowPitch
+  lay = scaleLRB128Layout(kernel, tc)
+  assert shape.kGroupRowBytes == 4 and lay["kGroupBytes"] == shape.rowBytes, \
+      f"{tc}: MXScaleLRB128 expects 4 B scale rows covering the MT, got " \
+      f"{shape.kGroupRowBytes} B / {shape.rowBytes} B"
+  assert kernel.get("TDMSingleIssuer"), f"{tc}: MXScaleLRB128 requires TDMSingleIssuer"
+  row = 128
+  rows = shape.rowBytes // row
+  mod = Module(f"Init TDM Descriptor Subtile {tc} (b128 LR layout)")
+  g1 = descSgprName(1)
+  _emitSubtileGroup1Base(
+      mod, comp, writer, kernel, descSgprName(0), g1, tc, dtype, 0, 0, True)
+  ldsTrackSgpr = f"tdmLdsAddr{tc}"
+  if not refresh:
+    mod.add(_emitSubtileMxLdsTracking(writer, kernel, tc, ldsConstOffset))
+  mod.add(comp.setLdsAddr(descSgprName(0), sgpr(ldsTrackSgpr)))
+  mod.add(SMovB32(sgpr(f"{g1}+1"), hex(row << 16), f"dim0 = {row}"))
+  mod.add(SMovB32(sgpr(f"{g1}+2"), hex(rows << 16), f"dim1 = {rows} (MT scale rows)"))
+  mod.add(SMovB32(sgpr(f"{g1}+3"), hex(row << 16), f"tile0 = {row}"))
+  mod.add(SMovB32(sgpr(f"{g1}+4"), rows, "tile1 = scale rows"))
+  mod.add(SMovB32(sgpr(f"{g1}+5"), row, f"row stride = {row}"))
+  mod.add(SMovB64(sgpr(f"{g1}+6", 2), 0, comment="Group1+6/+7 reserved"))
+  g2 = f"tdm{tc}Group2"
+  with writer.allocTmpSgpr(2) as tmp:
+    sIter, sGInc = tmp.idx, tmp.idx + 1
+    pitch = scaleRowPitch(mod, kernel, tc, sGInc)
+    mod.add(SLShiftLeftB32(sgpr(sGInc), 2, pitch, "global_inc = scale rows * 4"))
+    mod.add(SMovB32(sgpr(f"{g2}+0"), 1, "tensor_dim2 = 1"))
+    mod.add(comp.setIterationIncrements(g2, lay["kGroupBytes"], sGInc))
+    mod.add(SMovB32(sgpr(sIter), shape.numKGroups - 1, f"iter_count={shape.numKGroups}-1"))
+    mod.add(comp.setIterations(g2, sIter))
   return mod
 
 
@@ -2548,12 +2596,12 @@ def advanceTDMDescriptorSubtileAfterLoad(writer, kernel, tc):
       mod.add(SCSelectB32(dst=sgpr(f"{group0}+1"), src0=sgpr(tmp), src1=sgpr(f"{group0}+1"),
                           comment="wrap TDM desc LDS to buffer 0"))
   if tc.startswith("MX"):
-    from .SubtileScaleEmit import emitScaleTdmStepBytes
+    from .SubtileScaleEmit import emitScaleTdmStepBytes, scaleRowPitch
     ti = _subtileTileInfo(writer, tc)
-    sizeName = "SizeI" if tc == "MXSA" else "SizeJ"
     with writer.allocTmpSgpr(1, tag="scaleTdmStepPost") as tmpSgprRes:
       inc = tmpSgprRes.idx
-      mod.add(emitScaleTdmStepBytes(ti, kernel, sgpr(inc), sgpr(sizeName), "scale step"))
+      rows = scaleRowPitch(mod, kernel, tc, inc)
+      mod.add(emitScaleTdmStepBytes(ti, kernel, sgpr(inc), rows, "scale step"))
       mod.add(SAddU32(dst=sgpr(f"{group0}+2"), src0=sgpr(f"{group0}+2"), src1=sgpr(inc),
                       comment="%s TDM desc global +=" % tc))
       mod.add(SAddCU32(dst=sgpr(f"{group0}+3"), src0=sgpr(f"{group0}+3"), src1=0,
@@ -2775,9 +2823,10 @@ def tdmApplyTileKOffsetSubtile(writer, kernel, tP):
   with writer.allocTmpSgpr(2, alignment=2, tag="tdmSkOffset") as tmpSgprRes:
     o = tmpSgprRes.idx
     if tc.startswith("MX"):
-      from .SubtileScaleEmit import emitScaleTdmStepBytes
-      mod.add(SMulI32(dst=sgpr(o), src0=sgpr("StreamKLocalStart"), src1=sgpr(f"Size{INDEX_CHARS[tP['idx']]}"),
-                      comment="SK K-start * Size"))
+      from .SubtileScaleEmit import emitScaleTdmStepBytes, scaleRowPitch
+      rows = scaleRowPitch(mod, kernel, tc, o)
+      mod.add(SMulI32(dst=sgpr(o), src0=sgpr("StreamKLocalStart"), src1=rows,
+                      comment="SK K-start * scale rows"))
       mod.add(emitScaleTdmStepBytes(ti, kernel, sgpr(o), sgpr(o), "SK K-start * scale step"))
     else:
       inc = int(ti.depthUBytes)  # per-unroll TDM advance; same source as _emitGRPtrUpdate_TLU0

@@ -22,12 +22,48 @@ from rocisa.container import DSModifiers, MUBUFModifiers, vgpr, sgpr, mgpr
 from rocisa.instruction import (
     BufferLoadB128,
     DSLoadB32,
-    SAddCU32, SAddU32, SAddU64, SSubU32, SLShiftLeftB32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SXorB32,
+    SAddCU32, SAddU32, SAddU64, SAndB32, SSubU32, SLShiftLeftB32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SXorB32,
     TensorLoadToLds,
     VAddU32, VAndB32, VMulLOU32, VReadfirstlaneB32, VXorB32,
     VLShiftLeftB32, VLShiftRightB32,
     VSubU32, VCmpGEU32, VCndMaskB32,
 )
+
+
+# MXScaleLRB128 global scale layout (DGen::preSwizzleScalesGFX1250B128): each K
+# group's M/N rows are padded to this multiple and interleaved within it.
+SCALE_B128_ROW_GROUP = 128
+
+
+def scaleLRB128Layout(kernel, tc):
+  """LDS layout of one MXScaleLRB128 scale K group (A and B alike).
+
+  M/N = group * 128 + block * 32 + lane, where a block is one A tile (32 rows)
+  or one B tile pair (32 columns). The host stores each K group's 128-row group
+  as [lane][block] dwords, so the TDM copies the MT's K group to LDS unchanged
+  and lane L of wave partition p reads its four blocks as one 16 B load at
+  p * 512 + L * 16.
+  """
+  wave = kernel["WavefrontSize"]
+  blocks = SCALE_B128_ROW_GROUP // wave
+  return {"blocks": blocks, "laneBytes": blocks * 4, "groupBytes": SCALE_B128_ROW_GROUP * 4,
+          "kGroupBytes": kernel["MacroTile0" if tc == "MXSA" else "MacroTile1"] * 4}
+
+
+def scaleRowPitch(mod, kernel, tc, tmpIdx):
+  """Operand holding the scale tensor's M/N row count per K group.
+
+  That is Size, except under MXScaleLRB128, whose layout pads it to
+  SCALE_B128_ROW_GROUP (computed into sgpr tmpIdx).
+  """
+  size = sgpr("SizeI" if tc == "MXSA" else "SizeJ")
+  if not kernel.get("MXScaleLRB128"):
+    return size
+  g = SCALE_B128_ROW_GROUP
+  mod.add(SAddU32(dst=sgpr(tmpIdx), src0=size, src1=g - 1, comment=f"scale rows: Size + {g - 1}"))
+  mod.add(SAndB32(dst=sgpr(tmpIdx), src0=sgpr(tmpIdx), src1=hex(~(g - 1) & 0xFFFFFFFF),
+                  comment=f"scale rows: padded to {g}"))
+  return sgpr(tmpIdx)
 
 
 # ---------------------------------------------------------------------------
@@ -111,7 +147,8 @@ def emitScaleGRPtrUpdate(ti, writer, kernel, holdOnLastIter=False):
     module.addComment0("TDM addr update: %s += %s * %u" % (tc, sizeName, ti.scaleDepthU * ti.bpe))
     with writer.allocTmpSgpr(1, tag="scaleTdmStep") as tmpSgprRes:
       inc = tmpSgprRes.idx
-      module.add(emitScaleTdmStepBytes(ti, kernel, sgpr(inc), sgpr(sizeName), "scale step"))
+      rows = scaleRowPitch(module, kernel, tc, inc)
+      module.add(emitScaleTdmStepBytes(ti, kernel, sgpr(inc), rows, "scale step"))
       module.add(SAddU32(dst=sgpr("Address%s+0" % tc), src0=sgpr("Address%s+0" % tc), src1=sgpr(inc)))
       module.add(SAddCU32(dst=sgpr("Address%s+1" % tc), src0=sgpr("Address%s+1" % tc), src1=0))
     # TDMSingleIssuer patches Address into the descriptor after each load.
@@ -323,7 +360,7 @@ def graTileAssignmentScaleSwizzled(writer, kernel):
 #
 # Output: sharedVgprLROffset[0] = partitionIndex * totalScaleBytes
 #
-def _applyScaleWavePartitionLROffset(module, writer, kernel, ti_, waveId):
+def _applyScaleWavePartitionLROffset(module, writer, kernel, ti_, waveId, totalScaleBytes=None):
   tc = ti_.tc
 
   # totalScaleBytes = bytes per wave partition in LDS for this scale tensor.
@@ -331,7 +368,8 @@ def _applyScaleWavePartitionLROffset(module, writer, kernel, ti_, waveId):
   # lrGlobalSubtileGrid[1] = K-dim LR subtile count
   # lrSubtileSize = bytes per LR subtile (2x2 MMA tiles for FP4 scale)
   index = 0 if tc == 'MXSA' else 1
-  totalScaleBytes = (int(ti_.lrGlobalSubtileGrid[0]) // kernel["MIWaveGroup"][index]) * int(ti_.lrGlobalSubtileGrid[1]) * int(ti_.lrSubtileSize)
+  if totalScaleBytes is None:
+    totalScaleBytes = (int(ti_.lrGlobalSubtileGrid[0]) // kernel["MIWaveGroup"][index]) * int(ti_.lrGlobalSubtileGrid[1]) * int(ti_.lrSubtileSize)
 
   tmpSgpr = writer.sgprPool.checkOut(1, tag="_applyScaleWavePartitionLROffset_tmpSgpr")
   tmp = writer.vgprPool.checkOut(2, tag="_applyScaleWavePartitionLROffset_tmp")
@@ -387,15 +425,24 @@ def _lraTileAssignmentScaleSwizzled_legacy(writer, kernel):
   wavesize = kernel["WavefrontSize"]
   waveIdVgpr = writer.vgprPool.checkOut(1, tag="_lraTileAssignmentScaleSwizzled_legacy_waveIdVgpr")
   module.add(VLShiftRightB32(dst=vgpr(waveIdVgpr), shiftHex=hex(wavesize.bit_length()-1), src=vgpr("Serial"), comment="scale: waveId"))
-  _applyScaleWavePartitionLROffset(module, writer, kernel, tiA_, waveIdVgpr)
-  _applyScaleWavePartitionLROffset(module, writer, kernel, tiB_, waveIdVgpr)
+  if kernel.get("MXScaleLRB128"):
+    # One 128-row group per wave partition, [lane][block] dwords (scaleLRB128Layout).
+    for ti_ in [tiA_, tiB_]:
+      lay = scaleLRB128Layout(kernel, ti_.tc)
+      _applyScaleWavePartitionLROffset(module, writer, kernel, ti_, waveIdVgpr,
+                                       totalScaleBytes=lay["groupBytes"])
+    laneBytes = lay["laneBytes"]
+  else:
+    laneBytes = 4
+    _applyScaleWavePartitionLROffset(module, writer, kernel, tiA_, waveIdVgpr)
+    _applyScaleWavePartitionLROffset(module, writer, kernel, tiB_, waveIdVgpr)
   writer.vgprPool.checkIn(waveIdVgpr)
   laneOffset = writer.vgprPool.checkOut(1, tag="_lraTileAssignmentScaleSwizzled_legacy_laneOffset")
   module.add(VAndB32(dst=vgpr(laneOffset), src0=vgpr("Serial"), src1=wavesize-1, comment="scale: laneId"))
   # 4B/lane. Each gfx1250 A/B MMA scale tile uses a distinct VGPR.
-  module.add(VLShiftLeftB32(dst=vgpr(laneOffset), shiftHex=hex(2), src=vgpr(laneOffset), comment="scale: laneId * 4"))
-  module.add(VAddU32(dst=vgpr(tiA_.sharedVgprLROffset[0]), src0=vgpr(laneOffset), src1=vgpr(tiA_.sharedVgprLROffset[0]), comment="scaleA: lrOffset = laneId * 4"))
-  module.add(VAddU32(dst=vgpr(tiB_.sharedVgprLROffset[0]), src0=vgpr(laneOffset), src1=vgpr(tiB_.sharedVgprLROffset[0]), comment="scaleB: lrOffset = laneId * 4"))
+  module.add(VLShiftLeftB32(dst=vgpr(laneOffset), shiftHex=hex(int(math.log2(laneBytes))), src=vgpr(laneOffset), comment="scale: laneId * %u" % laneBytes))
+  module.add(VAddU32(dst=vgpr(tiA_.sharedVgprLROffset[0]), src0=vgpr(laneOffset), src1=vgpr(tiA_.sharedVgprLROffset[0]), comment="scaleA: lrOffset = laneId * %u" % laneBytes))
+  module.add(VAddU32(dst=vgpr(tiB_.sharedVgprLROffset[0]), src0=vgpr(laneOffset), src1=vgpr(tiB_.sharedVgprLROffset[0]), comment="scaleB: lrOffset = laneId * %u" % laneBytes))
   writer.vgprPool.checkIn(laneOffset)
   tmpSgpr = writer.sgprPool.checkOut(1, tag="_lraTileAssignmentScaleSwizzled_legacy_tmpSgpr")
   module.add(SMovB32(dst=sgpr(tmpSgpr), src=hex(writer.ldsStartOffsetMXSA), comment="scale: LDS offset for A scale"))

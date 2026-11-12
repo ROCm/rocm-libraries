@@ -7171,6 +7171,13 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "TDMWaveRoleBodies requires TDMSingleIssuer")
     if state.get("MXSBTilePair") and not state.get("TDMSingleIssuer"):
       reject(state, printRejectionReason, "MXSBTilePair requires TDMSingleIssuer")
+    if state.get("MXScaleLRB128"):
+      if not state.get("MXSBTilePair"):
+        reject(state, printRejectionReason, "MXScaleLRB128 requires MXSBTilePair")
+      elif state["MacroTile0"] // state["MIWaveGroup"][0] != 4 * 32 \
+          or state["MacroTile1"] // state["MIWaveGroup"][1] != 4 * 32:
+        reject(state, printRejectionReason,
+               "MXScaleLRB128 requires four 32-row scale blocks per wave in M and N")
 
     # lds buffer size for reduction
     # if User want to control the LDS usage, we may open this para in the future

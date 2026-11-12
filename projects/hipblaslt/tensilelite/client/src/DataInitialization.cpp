@@ -947,7 +947,10 @@ namespace TensileLite
             const auto m_n  = unrollMajor ? desc.sizes()[1] : desc.sizes()[0];
             const auto b    = desc.sizes()[2];
             const auto padk = (k + dimk - 1) / dimk * dimk;
-            return padk * m_n * b;
+            // M/N slack for GFX1250B128's 128-row padding and the subtile scale
+            // TDM, which reads whole 256-row macro tiles.
+            const auto padmn = (m_n + 255) / 256 * 256;
+            return padk * padmn * b;
         }
 
         double DataInitialization::GetRepresentativeBetaValue(po::variables_map const& args)
@@ -2150,9 +2153,9 @@ namespace TensileLite
             else if(m_mxScaleFormat > 0 && m_mxScaleLayout == MXScaleLayout::GFX1250)
             {
                 if(problem.mxBlockA() > 0)
-                    layoutA = MXScaleLayout::GFX1250;
+                    layoutA = gfx1250SolutionScaleLayout();
                 if(problem.mxBlockB() > 0)
-                    layoutB = MXScaleLayout::GFX1250;
+                    layoutB = gfx1250SolutionScaleLayout();
             }
 
             // We pass cpuInput.valid (host) pointers because the CPU reference
@@ -2204,16 +2207,21 @@ namespace TensileLite
                   // unchanged descriptor means both the canonical scale and the cached
                   // swizzled bytes are still valid. gfx950 is excluded because its
                   // preswizzle choice also depends on the current solution's MI shape.
-                  if(m_mxScaleLayout == MXScaleLayout::GFX1250 && descriptorsUnchanged)
-                  {
-                      return;
-                  }
-
                   auto const cachedSwizzled = m_mxSwizzledDescriptor.find(scaleTensorEnum);
+                  auto const cachedLayout   = m_mxSwizzledLayout.find(scaleTensorEnum);
                   bool const hasMatchingSwizzledScale
                       = swizzleLayout != MXScaleLayout::None
                         && cachedSwizzled != m_mxSwizzledDescriptor.end()
-                        && cachedSwizzled->second == scaleDesc;
+                        && cachedSwizzled->second == scaleDesc
+                        && cachedLayout != m_mxSwizzledLayout.end()
+                        && cachedLayout->second == swizzleLayout;
+
+                  // A cached copy in the other gfx1250 layout has to be re-swizzled.
+                  if(m_mxScaleLayout == MXScaleLayout::GFX1250 && descriptorsUnchanged
+                     && (swizzleLayout == MXScaleLayout::None || hasMatchingSwizzledScale))
+                  {
+                      return;
+                  }
 
                   // A canonical-only upload means gpuInput.valid no longer holds a
                   // trustworthy swizzled scale for this tensor, so clear the cache tag
@@ -2456,6 +2464,14 @@ namespace TensileLite
                           if(padded > swizzledScaleElems)
                               swizzledScaleElems = padded;
                       }
+                      else if(swizzleLayout == MXScaleLayout::GFX1250B128 && mxBlock > 0)
+                      {
+                          size_t const padded
+                              = DGen::preSwizzleScalesGFX1250B128PaddedSize(slowDim, fastDim, mxBlock)
+                                * batchCount;
+                          if(padded > swizzledScaleElems)
+                              swizzledScaleElems = padded;
+                      }
                       else if(swizzleLayout == MXScaleLayout::GFX1250 && mxBlock > 0)
                       {
                           size_t const dimk = 128u / static_cast<size_t>(mxBlock);
@@ -2545,6 +2561,7 @@ namespace TensileLite
                       // scale for this exact descriptor, so later solution passes can
                       // reuse it without re-permuting host data.
                       m_mxSwizzledDescriptor[scaleTensorEnum] = scaleDesc;
+                      m_mxSwizzledLayout[scaleTensorEnum]     = swizzleLayout;
                       *preswizzledFlag = true;
                   }
               };
@@ -3257,7 +3274,9 @@ namespace TensileLite
                     }
                     else if(auto mxIt = m_mxSwizzledDescriptor.find(i);
                             (m_mxScaleLayout == MXScaleLayout::GFX1250 || m_mxScaleLayout == MXScaleLayout::GFX950)
-                            && mxIt != m_mxSwizzledDescriptor.end() && mxIt->second == desc)
+                            && mxIt != m_mxSwizzledDescriptor.end() && mxIt->second == desc
+                            && (m_mxScaleLayout != MXScaleLayout::GFX1250
+                                || m_mxSwizzledLayout[i] == gfx1250SolutionScaleLayout()))
                     {
                         // Already swizzled, and initOneMXSide kept the source bytes
                         // unchanged, so skip the host-side permute.
@@ -3281,8 +3300,66 @@ namespace TensileLite
                         // so all batches are processed at once.
                         using Tensor = Tensor::Manipulation::Tensor;
                         size_t batch = desc.sizes().size() > 2 ? desc.sizes()[2] : 1;
+                        // GFX1250B128 (preSwizzleScalesGFX1250B128) additionally pads
+                        // M/N to 128 and splits it as (group, block 4, lane 32), then
+                        // stores lanes ahead of blocks.
+                        bool const   b128   = m_mxScaleLayout == MXScaleLayout::GFX1250
+                                          && gfx1250SolutionScaleLayout()
+                                                 == MXScaleLayout::GFX1250B128;
+                        size_t const rowGrp = DGen::preSwizzleScalesGFX1250B128RowGroup;
+                        size_t const lanes  = 32;
 
-                        if (unrollMajor)
+                        if (unrollMajor && b128)
+                        {
+                            auto unrolledSize = desc.sizes()[0];
+                            auto tiledSize    = desc.sizes()[1];
+                            size_t dimk       = 128 / MX;
+                            auto tmpTensor    = Tensor({batch, tiledSize, unrolledSize}, desc.elementBytes());
+                            ::Tensor::Manipulation::Shape paddedShape{
+                                batch, DGen::roundUp(tiledSize, rowGrp), DGen::roundUp(unrolledSize, dimk)};
+                            memcpy(tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
+                            uint64_t padVal{};
+                            auto     paddedTensor = ::Tensor::Manipulation::pad(
+                                tmpTensor, paddedShape, &padVal, tmpTensor.getElementSize());
+                            paddedTensor.reshape({batch,
+                                                  paddedShape[1] / rowGrp,
+                                                  rowGrp / lanes,
+                                                  lanes,
+                                                  paddedShape[2] / dimk,
+                                                  dimk});
+                            Tensor permuted = permute(paddedTensor, {0, 4, 1, 3, 2, 5});
+                            ptr             = copyInputBuffers(desc,
+                                                   p.gpuInput.valid.get(),
+                                                   permuted.as<void>(),
+                                                   permuted.getDesc().flattenSize(),
+                                                   hipMemcpyHostToDevice);
+                        }
+                        else if (b128)
+                        {
+                            auto unrolledSize = desc.sizes()[1];
+                            auto tiledSize    = desc.sizes()[0];
+                            size_t dimk       = 128 / MX;
+                            auto tmpTensor    = Tensor({batch, unrolledSize, tiledSize}, desc.elementBytes());
+                            ::Tensor::Manipulation::Shape paddedShape{
+                                batch, DGen::roundUp(unrolledSize, dimk), DGen::roundUp(tiledSize, rowGrp)};
+                            memcpy(tmpTensor.as<void>(), p.cpuInput.valid.get(), tmpTensor.getNumBytes());
+                            uint64_t padVal{};
+                            auto     paddedTensor = ::Tensor::Manipulation::pad(
+                                tmpTensor, paddedShape, &padVal, tmpTensor.getElementSize());
+                            paddedTensor.reshape({batch,
+                                                  paddedShape[1] / dimk,
+                                                  dimk,
+                                                  paddedShape[2] / rowGrp,
+                                                  rowGrp / lanes,
+                                                  lanes});
+                            Tensor permuted = permute(paddedTensor, {0, 1, 3, 5, 4, 2});
+                            ptr             = copyInputBuffers(desc,
+                                                   p.gpuInput.valid.get(),
+                                                   permuted.as<void>(),
+                                                   permuted.getDesc().flattenSize(),
+                                                   hipMemcpyHostToDevice);
+                        }
+                        else if (unrollMajor)
                         {
                             auto unrolledSize = desc.sizes()[0];
                             auto tiledSize    = desc.sizes()[1];

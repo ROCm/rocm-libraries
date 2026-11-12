@@ -18,11 +18,11 @@ from .SubtileLREmit import (
     emitSingleDsRead, localReadLDSBufferSwap,
 )
 from .SubtileScaleEmit import (
-    globalReadDoScaleSubtile, globalReadScalePtrUpdates,
+    globalReadDoScaleSubtile, globalReadScalePtrUpdates, scaleLRB128Layout,
 )
 from rocisa.code import Module
 from rocisa.instruction import (
-    SWaitCnt, SBarrier, DSLoadB32, SBitcmp1B32, SCmpEQU32, SCmpLeU32,
+    SWaitCnt, SBarrier, DSLoadB32, DSLoadB128, SBitcmp1B32, SCmpEQU32, SCmpLeU32,
     SCBranchSCC0, SCBranchSCC1, SMovB32, VAddU32, VAndB32, VCmpGEI32, VCmpGTI32,
     VCmpLeI32, VCmpLtI32, VCndMaskB32, VLShiftLeftB32, VLShiftRightB32, VMovB32,
     VSubI32,
@@ -235,8 +235,15 @@ class InstructionEmitter:
                 mShapeB = self.tileInfoMap['SB'].lrSubtileShape[0]
                 kShapeA = self.tileInfoMap['SA'].lrSubtileShape[1]
                 kShapeB = self.tileInfoMap['SB'].lrSubtileShape[1]
-                sAsel = (a % mShapeA) + mShapeA * (scalePhase % kShapeA)
-                sBsel = (b % mShapeB) + mShapeB * (scalePhase % kShapeB)
+                if self.kernel.get("MXScaleLRB128"):
+                    # The group's VGPRs are consecutive, one per A tile or per B tile
+                    # pair; matrix_b_scale picks the pair's half.
+                    scaleAVgpr += a % mShapeA
+                    scaleBVgpr += (b % mShapeB) // 2
+                    sAsel, sBsel = 0, b % 2
+                else:
+                    sAsel = (a % mShapeA) + mShapeA * (scalePhase % kShapeA)
+                    sBsel = (b % mShapeB) + mShapeB * (scalePhase % kShapeB)
             else:
                 scaleAVgpr = scaleBVgpr = -1
                 sAsel = sBsel = 0
@@ -308,6 +315,18 @@ class InstructionEmitter:
             k_start = placement.tiles.subIterK_start
             if nUnroll > 1:
                 k_start %= self._per_uid_k[tensor]
+            if self.kernel.get("MXScaleLRB128"):
+                kGroupBytes = scaleLRB128Layout(self.kernel, tc)["kGroupBytes"]
+                for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, lrGran.mn):
+                    scaleGroupIdx = tileId // lrGran.mn
+                    kGroupIdx = k_start // ti.lrSubtileShape[1]
+                    vdst = next(iter(vgprTilesScale[tile_map[scaleGroupIdx * lrGran.mn]]))
+                    module.add(DSLoadB128(
+                        dst=vgpr(vdst, 4),
+                        src=vgpr(ti.sharedVgprLROffset[0]),
+                        ds=DSModifiers(offset=kGroupBytes * kGroupIdx + offsetBias),
+                        comment=f"scale{tc}[group{scaleGroupIdx},K={placement.tiles.subIterK_start}]: load 16B from LDS"))
+                return list(module.flatitems())
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, lrGran.mn):
                 scaleGroupIdx = tileId // lrGran.mn
                 groupKey = scaleGroupIdx * lrGran.mn

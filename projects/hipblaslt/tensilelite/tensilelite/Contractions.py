@@ -600,6 +600,9 @@ class ProblemPredicate(Properties.Predicate):
 
         if "BatchSizeEqual" in state:
             rv += [cls('BatchSizeEqual', index=0, value=state["BatchSizeEqual"])]
+        elif state.get("MXScaleLRB128"):
+            # The kernel does not know the scale batch stride of the M/N-padded layout.
+            rv += [cls('BatchSizeEqual', index=0, value=1)]
 
         if "SynchronizerSizeCheck" in state:
             if state["SynchronizerSizeCheck"]:
@@ -1093,6 +1096,8 @@ class Solution:
         rv.problemType.mxScaleFormat = {"NoSwizzle": 0,
                                         "HostPreSwizzle": 1,
                                         "InMemorySwizzle": 2}.get(d.get("MXScaleFormat", "NoSwizzle"), 0)
+        if d.get("MXScaleLRB128"):
+            rv.problemType.mxScaleFormat = 3  # InMemorySwizzleB128
 
         rv.problemPredicate = ProblemPredicate.FromOriginalState(d, rv.problemType)
         rv.taskPredicate = TaskPredicate.FromOriginalState(d, rv.problemType)

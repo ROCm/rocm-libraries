@@ -395,6 +395,14 @@ _MXS_B4_W32_B_PAIR = dict(_MXS_B4_W32_B, scaleLayout=WMMA_SCALE_32x16_W32_MX32_B
 MXSB_B4_W32_N16_PAIR = MXScaleTilePair(
     gr=MXScaleGRGeometry(**_MXS_B4_W32_B_PAIR, loadWidth=16),
     lr=MXScaleLRGeometry(**_MXS_B4_W32_B_PAIR, loadWidth=4, subtileShape=(2, 1)))
+# MXScaleLRB128: one LR group is a wave's four scale VGPRs for one K group
+# (4 A tiles, or 4 B tile pairs), read by a single ds_load_b128.
+MXSA_B4_W32_M32_B128 = MXScaleTilePair(
+    gr=MXScaleGRGeometry(**_MXS_B4_W32_A, loadWidth=16),
+    lr=MXScaleLRGeometry(**_MXS_B4_W32_A, loadWidth=16, subtileShape=(4, 1)))
+MXSB_B4_W32_N16_PAIR_B128 = MXScaleTilePair(
+    gr=MXScaleGRGeometry(**_MXS_B4_W32_B_PAIR, loadWidth=16),
+    lr=MXScaleLRGeometry(**_MXS_B4_W32_B_PAIR, loadWidth=16, subtileShape=(8, 1)))
 
 # C/D output: 128-bit store = 4 f32 elements along N
 CD_F32 = CDTile_1x1(mmaLayout=MFMA_16x16_1B_4N_4V, bpe=4, supportedTypes=('f32',), storeShape=LoadShape(m=1, k=4))
@@ -412,8 +420,11 @@ def selectMXScaleGeometry(kernel: dict, tc: str) -> MXScaleTilePair:
   dtype = kernel["ProblemType"][f"DataType{data_tc}"]
   wave32 = kernel.get("WavefrontSize", 64) == 32
   if dtype.isFloat4() and wave32 and kernel.get("MatrixInstM", 16) == 32:
+    wide = bool(kernel.get("MXScaleLRB128"))
     if tc == 'MXSA':
-      return MXSA_B4_W32_M32
+      return MXSA_B4_W32_M32_B128 if wide else MXSA_B4_W32_M32
+    if wide:
+      return MXSB_B4_W32_N16_PAIR_B128
     return MXSB_B4_W32_N16_PAIR if kernel.get("MXSBTilePair") else MXSB_B4_W32_N16
   if dtype.is6bitFloat() or dtype.isFloat4():
     return MXSA_B4 if tc == 'MXSA' else MXSB_B4

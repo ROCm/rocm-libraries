@@ -1231,6 +1231,18 @@ namespace TensileLite
             // Scale descriptor most recently swizzled into gpuInput.valid, per
             // tensor index. The MX equivalent of g_swizzleCache.
             std::map<size_t, TensorDescriptor> m_mxSwizzledDescriptor;
+            // The layout of that swizzled copy (solutions can differ on gfx1250).
+            std::map<size_t, MXScaleLayout> m_mxSwizzledLayout;
+
+            // The gfx1250 layout the current solution reads its scales in.
+            MXScaleLayout gfx1250SolutionScaleLayout() const
+            {
+                return (m_currentSolution != nullptr
+                        && m_currentSolution->problemType.mxScaleFormat
+                               == static_cast<int>(MXScaleFormat::InMemorySwizzleB128))
+                           ? MXScaleLayout::GFX1250B128
+                           : MXScaleLayout::GFX1250;
+            }
         };
 
         template <>

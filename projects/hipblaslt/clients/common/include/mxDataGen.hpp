@@ -8,6 +8,9 @@ enum class MXScaleLayout
     None    = 0,
     GFX950  = 1,
     GFX1250 = 2,
+    // GFX1250 with each K group's M/N padded to 128 and lane-interleaved
+    // (DGen::preSwizzleScalesGFX1250B128), for Tensile MXScaleLRB128 kernels.
+    GFX1250B128 = 3,
 };
 
 #include "hipblaslt_scaling_format.hpp"

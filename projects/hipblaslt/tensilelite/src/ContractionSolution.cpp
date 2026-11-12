@@ -7178,7 +7178,8 @@ namespace TensileLite
             // InMemorySwizzle's TDM path computes StreamK offsets from each
             // tensor's generated iteration increment.
             if((problemType.mxBlockA != 0 || problemType.mxBlockB != 0)
-               && problemType.mxScaleFormat != 2) // InMemorySwizzle
+               && problemType.mxScaleFormat != static_cast<int>(MXScaleFormat::InMemorySwizzle)
+               && problemType.mxScaleFormat != static_cast<int>(MXScaleFormat::InMemorySwizzleB128))
             {
                 // The granule size below is derived for one specific geometry.
                 // Change the swizzle format, the block size or MatrixInstK and
