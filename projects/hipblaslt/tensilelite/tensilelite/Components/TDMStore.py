@@ -77,8 +77,8 @@ def tdmStoreRejectReason(state):
 
   Solution rejects TDMStoreInst without the HasTDM assembler capability before it asks this. The TDM
   block stages the converted D tile in LDS and stores it once, after the last store batch, with one
-  tensor_store_from_lds per wave. That needs fp32 D, int32 or int8 D from int32 accumulators, or bf16, fp16, fp8 or bf8 D
-  converted from fp32 accumulators, written directly to D, by a GlobalSplitU=1 kernel or by a persistent kernel other than
+  tensor_store_from_lds per wave. That needs fp32 D, fp64 or complex float D from accumulators of their type, int32 or
+  int8 D from int32 accumulators, or bf16, fp16, fp8 or bf8 D converted from fp32 accumulators, written directly to D, by a GlobalSplitU=1 kernel or by a persistent kernel other than
   atomic StreamK, which
   stores each tile it completes, and no LDS data kept from one persistent tile to the next.
   With PrefetchAcrossPersistent the next tile's loads write the main-loop buffers during the epilogue,
@@ -102,10 +102,12 @@ def tdmStoreRejectReason(state):
   sixteenBit = pt["DestDataType"].isBFloat16() or pt["DestDataType"].isHalf()
   converted = sixteenBit or pt["DestDataType"].is8bitFloat()
   integer = (pt["DestDataType"].isInt32() or pt["DestDataType"].isInt8()) and pt["ComputeDataType"].isInt32()
-  if not integer and (not pt["ComputeDataType"].isSingle()
-                      or not (pt["DestDataType"].isSingle() or (converted and pt["HighPrecisionAccumulate"]))):
-    return "TDMStoreInst supports fp32 D, int32 and int8 D from int32 accumulators, and bf16, fp16, fp8 and bf8 D " \
-           "converted from fp32 accumulators"
+  eightByte = (pt["DestDataType"].isDouble() and pt["ComputeDataType"].isDouble()) \
+    or (pt["DestDataType"].isSingleComplex() and pt["ComputeDataType"].isSingleComplex())
+  if not (integer or eightByte) and (not pt["ComputeDataType"].isSingle()
+                                    or not (pt["DestDataType"].isSingle() or (converted and pt["HighPrecisionAccumulate"]))):
+    return "TDMStoreInst supports fp32 D, fp64 and complex float D from accumulators of their type, int32 and int8 D " \
+           "from int32 accumulators, and bf16, fp16, fp8 and bf8 D converted from fp32 accumulators"
   if not state["BufferStore"]:
     return "TDMStoreInst requires BufferStore"
   if isStreamK(state) and state.get("StreamKAtomic", 0):
@@ -263,7 +265,8 @@ def emitTDMStoreLoadCElement(gwb, addrCalc, data, vc0) -> Module:
 def emitTDMStoreStaging(gwb, stagedElements) -> Module:
   """Write this batch's packed D elements to their (M, N) position in the staged tile.
 
-  dsStore writes at most 32 bytes, as two 16-byte stores, so a wider vector, such as fp32 at store vector
+  An element spans the registers of its type from ValuC + sumIdx times their number, as addStore stores it: two
+  for fp64 and complex float. dsStore writes at most 32 bytes, as two 16-byte stores, so a wider vector, such as fp32 at store vector
   width 16, is staged 32 bytes at a time.
   """
   from .PackData import formatting
@@ -272,10 +275,11 @@ def emitTDMStoreStaging(gwb, stagedElements) -> Module:
   bps = kw.states.bpeCexternal * gwb.gwvw
   width = min(bps, 32)
   numRegs = max(1, width // kw.states.bpr)
+  regsPerElement = max(1, kw.states.bpeCexternal // kw.states.bpr)
   for sumIdx, coordOffset0, coordOffset1 in stagedElements:
     addr, offset = _tdmStoreLdsAddress(gwb, module, coordOffset0, coordOffset1)
     for piece in range(bps // width):
-      src = vgpr(formatting(sumIdx + piece * numRegs, "ValuC+", kw.states.c.startVgprValu), numRegs)
+      src = vgpr(formatting(sumIdx * regsPerElement + piece * numRegs, "ValuC+", kw.states.c.startVgprValu), numRegs)
       module.add(dsStore(width, dstAddr=vgpr(addr), src=src, ds=DSModifiers(offset=offset + piece * width),
                          comment="stage D element (%u, %u)" % (coordOffset0, coordOffset1),
                          memToken=MemTokenData([_stagedTileToken(gwb)])))
