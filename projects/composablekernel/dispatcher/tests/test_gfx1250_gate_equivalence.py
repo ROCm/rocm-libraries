@@ -5,7 +5,8 @@
 
 """
 CPU-only equivalence of the gfx1250 pipeline gates (non-MX comp_async,
-comp_tdm, comp_tdm_v2, comp_tdm_pc, comp_tdm_v3 and the tdm / tdmstaged epilogues).
+comp_tdm, comp_tdm_v2, comp_tdm_pc, comp_tdm_v3, comp_tdm_ra and the tdm / tdmstaged
+epilogues).
 
 The Tile Engine keeps its own copy of these rules
 (tile_engine/ops/gemm/gemm_validation_utils.py); the dispatcher uses
@@ -43,6 +44,7 @@ from codegen_common import (  # noqa: E402
     TDM_EPILOGUES,
     CommonTypeMappings,
     comp_tdm_v3_reject_reason,
+    split_pipeline_ring,
     valid_warp_configs,
 )
 
@@ -59,6 +61,7 @@ PIPELINES = (
     "comp_tdm_v2",
     "comp_tdm_pc",
     "comp_tdm_v3",
+    "comp_tdm_ra",
     "compv3",
     "compv4",
     "mem",
@@ -69,6 +72,7 @@ GATED_PIPELINES = (
     "comp_tdm_v2",
     "comp_tdm_pc",
     "comp_tdm_v3",
+    "comp_tdm_ra",
 )
 EPILOGUES = ("cshuffle", "default") + TDM_EPILOGUES
 SCHEDULERS = ("intrawave", "interwave")
@@ -208,6 +212,7 @@ LEGAL_TRAITS = {
     "comp_tdm_v2": ("tdm", "intrawave", (False, False, False)),
     "comp_tdm_pc": ("tdm", "intrawave", (False, False, False)),
     "comp_tdm_v3": ("cshuffle", "intrawave", (False, False, False)),
+    "comp_tdm_ra": ("tdm", "intrawave", (False, False, False)),
 }
 
 
@@ -436,6 +441,71 @@ class TestGfx1250GateEquivalence(unittest.TestCase):
         self.assertEqual(
             mismatches[:10], [], f"{len(mismatches)} mismatches of {compared}"
         )
+
+    def test_ring_tile_space(self):
+        """Ring variants: the TE takes the variant name, the dispatcher the
+        split ring (num_slots / ring_param), over the whole tile space."""
+        variants = (
+            "comp_tdm_ra_s3r2",
+            "comp_tdm_ra_s2r1",
+            "comp_tdm_ra_s4r1",
+            "comp_tdm_pc_s2l1",
+        )
+        mismatches = []
+        accepted = dict.fromkeys(variants, 0)
+        rejected = dict.fromkeys(variants, 0)
+        pads = (False, False, False)
+        for t in _tile_space():
+            for dtype in DTYPES:
+                if not self._baseline_ok("rcr", dtype, t, (True, True, True)):
+                    continue
+                for name in variants:
+                    base, slots, param = split_pipeline_ring(name)
+                    want = _te_accepts(
+                        name, "tdm", "intrawave", False, "rcr", pads, dtype, t
+                    )
+                    got = self.filt.is_kernel_valid(
+                        datatype_a=dtype,
+                        datatype_b=dtype,
+                        datatype_c=CommonTypeMappings.get_output_dtype(dtype),
+                        pipeline=base,
+                        epilogue="tdm",
+                        scheduler="intrawave",
+                        layout="rcr",
+                        pad_m=False,
+                        pad_n=False,
+                        pad_k=False,
+                        num_slots=slots,
+                        ring_param=param,
+                        **t,
+                    )
+                    if gemm_utils is not None:
+                        got = got and gemm_utils._gfx1250_pipeline_supported(
+                            base,
+                            "intrawave",
+                            "tdm",
+                            False,
+                            t["warp_m"],
+                            t["warp_n"],
+                            t["warp_k"],
+                            ARCH,
+                            "standard",
+                            layout="rcr",
+                            dtype=dtype,
+                            warp_tile_k=t["warp_tile_k"],
+                            warp_tile_m=t["warp_tile_m"],
+                            warp_tile_n=t["warp_tile_n"],
+                            tile_mn=(t["tile_m"], t["tile_n"]),
+                            ring=(slots, param),
+                        )
+                    accepted[name] += want
+                    rejected[name] += not want
+                    if want != got:
+                        mismatches.append((name, dtype, t, want, got))
+        for name in variants:
+            self.assertGreater(accepted[name], 0, name)
+            self.assertGreater(rejected[name], 0, name)
+        self.assertEqual(mismatches[:10], [], f"{len(mismatches)} mismatches")
 
 
 if __name__ == "__main__":

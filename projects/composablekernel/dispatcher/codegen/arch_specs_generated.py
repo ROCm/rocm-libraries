@@ -5,7 +5,7 @@
 AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY!
 
 Generated from: arch_specs.json
-Generated at: 2026-11-18T12:25:51.027588
+Generated at: 2026-11-18T10:33:40.045309
 
 To update this file:
 1. Edit arch_specs.json
@@ -171,6 +171,7 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "preshuffle_tdm": 32768,
         "comp_async": 32768,
         "comp_tdm_pc": 16384,
+        "comp_tdm_ra": 16384,
         "wavelet": 65536,
         "compv6": 32768,
         "preshufflev1": 32768,
@@ -188,6 +189,7 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "preshuffle_tdm": 32768,
         "comp_async": 32768,
         "comp_tdm_pc": 16384,
+        "comp_tdm_ra": 16384,
         "wavelet": 65536,
         "compv6": 32768,
         "preshufflev1": 32768,
@@ -205,6 +207,7 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "preshuffle_tdm": 32768,
         "comp_async": 32768,
         "comp_tdm_pc": 16384,
+        "comp_tdm_ra": 16384,
         "wavelet": 65536,
         "compv6": 32768,
         "preshufflev1": 32768,
@@ -222,6 +225,7 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "preshuffle_tdm": 81920,
         "comp_async": 81920,
         "comp_tdm_pc": 40960,
+        "comp_tdm_ra": 40960,
         "wavelet": 163840,
         "compv6": 81920,
         "preshufflev1": 81920,
@@ -239,6 +243,7 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "preshuffle_tdm": 32768,
         "comp_async": 32768,
         "comp_tdm_pc": 16384,
+        "comp_tdm_ra": 16384,
         "wavelet": 65536,
         "compv6": 32768,
         "preshufflev1": 32768,
@@ -256,6 +261,7 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "preshuffle_tdm": 32768,
         "comp_async": 32768,
         "comp_tdm_pc": 16384,
+        "comp_tdm_ra": 16384,
         "wavelet": 65536,
         "compv6": 32768,
         "preshufflev1": 32768,
@@ -273,6 +279,7 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "preshuffle_tdm": 32768,
         "comp_async": 32768,
         "comp_tdm_pc": 16384,
+        "comp_tdm_ra": 16384,
         "wavelet": 65536,
         "compv6": 32768,
         "preshufflev1": 32768,
@@ -290,6 +297,7 @@ LDS_CAPACITY_LIMITS_BY_ARCH: Dict[str, Dict[str, int]] = {
         "preshuffle_tdm": 163840,
         "comp_async": 163840,
         "comp_tdm_pc": 81920,
+        "comp_tdm_ra": 81920,
         "wavelet": 327680,
         "compv6": 163840,
         "preshufflev1": 163840,
@@ -345,6 +353,10 @@ TRAIT_UNSUPPORTED_COMBINATIONS: Set[Tuple[str, str, str]] = {
     ("comp_tdm_v3", "default", "interwave"),
     ("comp_tdm_v3", "tdm", "interwave"),
     ("comp_tdm_v3", "tdmstaged", "interwave"),
+    ("comp_tdm_ra", "cshuffle", "interwave"),
+    ("comp_tdm_ra", "default", "interwave"),
+    ("comp_tdm_ra", "tdm", "interwave"),
+    ("comp_tdm_ra", "tdmstaged", "interwave"),
 }
 
 # Pipelines whose C++ problem requires DoubleSmemBuffer == true.
@@ -356,6 +368,7 @@ DOUBLE_SMEM_BUFFER_PIPELINES: Tuple[str, ...] = (
     "comp_tdm_v2",
     "comp_tdm_pc",
     "comp_tdm_v3",
+    "comp_tdm_ra",
     "preshuffle_tdm",
 )
 
