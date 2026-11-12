@@ -14,6 +14,17 @@ namespace detail {
 template <typename Problem>
 inline constexpr bool fmha_tdm_is_split_partial_v =
     std::is_same_v<remove_cvref_t<typename Problem::ODataType>, float>;
+
+// D128/V128 N128 page tiles of 64-token or larger pages, without sink or bias, other than the
+// KV-split partial kernels: the policy forms their V and next-K read bases once per tile
+// (UsePreparedTileBases) and, with the WMMA operand guard, reads PV stage 0's V in the softmax
+// (FmhaBatchPrefillPageTileScheduleFor). The split partial kernels keep their schedule: with
+// both, the causal M128 P64 split ran 18 % longer on the gtest shapes.
+template <typename Problem, typename Geometry>
+inline constexpr bool fmha_page_tile_d128_prepared_bases_v =
+    Geometry::kHeadDimQK == 128 && Geometry::kDv == 128 && Geometry::kN == 128 &&
+    Problem::kPageBlockSize >= 64 && !Problem::kHasSink &&
+    Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS && !fmha_tdm_is_split_partial_v<Problem>;
 } // namespace detail
 
 // Policy of the gfx1250 batch-prefill page-tile pipeline: the scheduled-TDM policy and the
@@ -102,20 +113,15 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTilePolicy
     }
 
     // The tile's V and next-K read bases are formed once, ahead of every WMMA (PrepareTileBases):
-    // the lean D64 loop, and the linear-page D128/V128 N128 tiles of pages of 64 tokens or more,
-    // without sink or bias. Formed next to their first reads instead, each base is a VALU write
-    // between WMMAs and the read that uses it must drain the WMMA pipe (s_wait_alu
-    // depctr_va_vdst(0)): three such drains per KV tile in the D128 P64 linear loop. Not the
-    // vectorized-page D128 tiles: with the registers their WMMA operand guard keeps allocated, the
-    // two live bases spill the LSE and the P128 dense instances (24 VGPRs).
+    // the lean D64 loop, and the D128/V128 N128 tiles of pages of 64 tokens or more, without sink
+    // or bias. Formed next to their first reads instead, each base is a VALU write between WMMAs
+    // and the read that uses it must drain the WMMA pipe (s_wait_alu depctr_va_vdst(0)): six such
+    // drains per KV tile in the D128 P64 vectorized loop, 3-5% of its time on small grids.
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr bool UsePreparedTileBases()
     {
         return UseLeanD64Loop<Problem>() ||
-               (Geometry::kHeadDimQK == 128 && Geometry::kDv == 128 && Geometry::kN == 128 &&
-                Problem::kPageBlockSize >= 64 && !Problem::kHasSink &&
-                Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
-                !detail::fmha_tdm_is_vectorized_kv<Problem>::value);
+               detail::fmha_page_tile_d128_prepared_bases_v<Problem, Geometry>;
     }
 
     // LDS read bases of one tile: QK stage 0's next K access (formed by the pipeline), and with
@@ -152,6 +158,26 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTilePolicy
             asm volatile("" : "+v"(bases.qk_v0.byte_address));
             asm volatile("" : "+v"(bases.pv_k0.byte_address));
         }
+    }
+
+    // PV stage 0's V fragments (V0) are read in the softmax when the schedule's QK tail stage reads
+    // nothing (FmhaBatchPrefillPageTileScheduleFor): after that stage's RAW fence, with no WMMA in
+    // flight, so they need no drain of the WMMA operand guard.
+    static constexpr bool kReadsV0InSoftmax =
+        !kFmhaTdmSchedQkTailReads<typename Base::Schedule::LocalPlacement>;
+
+    // V0, from the tile's prepared V base, at the start of the softmax's second part (after the row
+    // maxima): its loads overlap the exponentials.
+    template <typename Problem, typename VTensor, typename VWindow>
+    CK_TILE_DEVICE static void
+    LoadV0InSoftmax(VTensor& v_tile, const VWindow& v_window, const TileBases& bases)
+    {
+        static_assert(kReadsV0InSoftmax && UsePreparedTileBases<Problem>());
+        __builtin_amdgcn_sched_barrier(0);
+        static_for<0, Geometry::kVStageLoadCount, 1>{}([&](auto access) {
+            FmhaTdmAffineVRead::Load<decltype(access)::value, Base::kVPhysicalStride>(
+                v_tile, v_window, bases.qk_v0);
+        });
     }
 
     // QK stage with the tile's bases: the earlier stages read the next K tile from qk_stage0; with
@@ -290,6 +316,21 @@ struct FmhaBatchPrefillPageTileTuning : BaseTuning
     using Options = Options_;
 };
 
+// Grouped drains of a guarded page-tile problem. The D128 tiles with prepared tile bases read PV
+// stage 0's V in the softmax, so their QK tail stage refills nothing and one drain covers a whole
+// stage (D128 P64: 20 instead of 27 full drains per KV tile). With V0 read in the QK tail stage it
+// stays alive across that stage and the softmax, and whole-stage groups spill it (32 VGPRs): the
+// kept operands take the low 256 registers.
+template <typename Problem, typename Geometry = FmhaBatchPrefillPageTileGeometryFor<Problem>>
+using FmhaBatchPrefillPageTileGroupedDrainFor =
+    std::conditional_t<detail::fmha_page_tile_d128_prepared_bases_v<Problem, Geometry>,
+                       FmhaTdmSchedGroupedDrainPlacement<
+                           Geometry,
+                           Geometry::kQkWmmasPerStage / Geometry::kQkMIter,
+                           Geometry::kPvWmmasPerStage - kFmhaTdmSchedPvLastMRow<Geometry>,
+                           false>,
+                       FmhaTdmSchedGroupedDrainPlacement<Geometry>>;
+
 // Schedule of a page-tile problem: with the WMMA operand guard (the vectorized KV layout) the
 // WMMA-first rows run with grouped drains; otherwise the shared default schedule.
 template <typename Problem, typename Geometry = FmhaBatchPrefillPageTileGeometryFor<Problem>>
@@ -297,7 +338,7 @@ using FmhaBatchPrefillPageTileScheduleFor = std::conditional_t<
     FmhaBatchPrefillPageTileOptionsFor<Problem>::kWmmaOperandGuard &&
         std::is_same_v<typename FmhaTdmSchedDefaultScheduleFor<Geometry>::LocalPlacement,
                        FmhaTdmSchedWmmaFirstPlacement<FmhaTdmSchedScheduleFor<Geometry>>>,
-    FmhaTdmSchedSequentialTileSchedule<FmhaTdmSchedGroupedDrainPlacement<Geometry>>,
+    FmhaTdmSchedSequentialTileSchedule<FmhaBatchPrefillPageTileGroupedDrainFor<Problem, Geometry>>,
     FmhaTdmSchedDefaultScheduleFor<Geometry>>;
 
 template <typename Problem>

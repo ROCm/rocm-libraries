@@ -736,8 +736,9 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
                         // K64 stage (one M iteration): the P chunk (A operand) of a K step dies
                         // at that step's last row, inside the stage, and the deferred reads of
                         // the next rows may be allocated onto it while its readers are in
-                        // flight, so it stays allocated until the drain too. With one K step a
-                        // stage reads its P chunk up to the last row, which drains first.
+                        // flight, so it stays allocated until the drain too. With one K step
+                        // a chunk lives up to its M iteration's last row; Policy::PvKeptPIters
+                        // names the chunks kept after the stage's last-row fence.
                         if constexpr(Geometry::kPvStageKIter > 1)
                         {
                             constexpr index_t kM = kOutput / Policy::OutputFragments::kNumN / 2;
@@ -766,6 +767,15 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
                     // The rows pending at the RAW fence stay allocated until here.
                     constexpr auto kKeptAfter = Policy::template PvKeptRows<Mode>(ordinal, true);
                     static_for<kKeptAfter.begin, kKeptAfter.end, 1>{}([&](auto q) { keep_v(q); });
+                    // The P chunks of the earlier M iterations stay allocated until here too.
+                    static_for<0, Policy::template PvKeptPIters<Mode>(ordinal), 1>{}([&](auto i_m) {
+                        AWarpTensor kept_p;
+                        kept_p.get_thread_buffer() = a_block_tensor.get_y_sliced_thread_data(
+                            merge_sequences(sequence<0, decltype(i_m)::value>{},
+                                            a_warp_y_index_zeros),
+                            merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
+                        Policy::KeepOperandLive(kept_p);
+                    });
                     o_acc.at(number<kOutputOrdinal>{}) =
                         c_warp_tensor.get_thread_buffer().template get_as<fp32x8_t>(number<0>{});
                 };
@@ -1141,6 +1151,9 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTile
                                 o_acc, scale_m0, scale_m1);
                         },
                         [&](auto) {
+                            if constexpr(Policy::kReadsV0InSoftmax)
+                                Policy::template LoadV0InSoftmax<Problem>(
+                                    v_tile, v_lds_read_window, bases);
                             Policy::template RunSplitSoftmaxPart2AndGetScale<Problem>(
                                 s_new,
                                 m,

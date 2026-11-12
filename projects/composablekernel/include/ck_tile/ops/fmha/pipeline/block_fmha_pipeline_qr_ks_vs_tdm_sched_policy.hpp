@@ -53,10 +53,12 @@ struct fmha_tdm_is_vectorized_kv<Problem, std::void_t<decltype(Problem::kKVMemor
 // Guard (Options::kWmmaOperandGuard; see WaitWmmaOperandsRead for the RAW fence). With the
 // grouped-drain placement (FmhaTdmSchedGroupedDrainPlacement, which the page tile selects for its
 // guarded WMMA-first problems), the reads that follow a last reader are issued after the next WMMA,
-// and one full drain, `s_wait_alu depctr_va_vdst(0)`, covers four m0/m1 pairs or four
-// last-iteration PV rows. The operand registers of the WMMAs that are still in flight before a
-// drain stay allocated (KeepOperandLive, an empty asm use) until that drain, so the register
-// allocator cannot place a refill onto them. Each stage's last row keeps the RAW fence. The other
+// and one full drain, `s_wait_alu depctr_va_vdst(0)`, covers a group of m0/m1 pairs or of
+// last-iteration PV rows: four, or a whole stage where the page tile reads PV stage 0's V in the
+// softmax. The operand registers of the WMMAs that are still in flight before a drain stay
+// allocated (KeepOperandLive, an empty asm use) until that drain, so the register allocator
+// cannot place a refill onto them; an inline-asm operand sits in v0-v255, so a larger group
+// takes more of the low 256 registers. Each stage's last row keeps the RAW fence. The other
 // placements keep a RAW fence after every last-M-iteration WMMA (the last reader of a refilled
 // operand), which drains the WMMA pipe once per last reader.
 // Measured on gfx1250 (BF16, P64/P128 x D64/D128, dense and causal): no refill of a pending WMMA
@@ -405,8 +407,10 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
             else
                 return FmhaTdmPreparedKRead::Address{};
         }();
-        constexpr bool kLeadFirstLoadThisStage = Mode::SelectedPolicy::kLeadFirstLoad &&
-                                                 (Stage == 0 || Stage == Geometry::kQkStages - 1);
+        constexpr bool kLeadFirstLoadThisStage =
+            Mode::SelectedPolicy::kLeadFirstLoad &&
+            (Stage == 0 || (Stage == Geometry::kQkStages - 1 &&
+                            kFmhaTdmSchedQkTailReads<typename SelectedSchedule::LocalPlacement>));
         if constexpr(kLeadFirstLoadThisStage)
         {
             SelectedSchedule::template RunQkReadPrelude<Mode, Stage>([&](auto event) {
@@ -629,7 +633,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     // unguarded refills (see the scope paragraph there).
     static constexpr bool kWmmaOperandGuard = Options::kWmmaOperandGuard;
 
-    // Empty use: keeps an operand's registers live so no later load is allocated onto them.
+    // Empty use: keeps an operand's registers live so no later load is allocated onto them. The
+    // asm operand is allocated in v0-v255.
     template <typename Tensor>
     CK_TILE_DEVICE static void KeepOperandLive(const Tensor& t)
     {
@@ -685,6 +690,24 @@ struct BlockFmhaPipelineQRKSVSTdmSchedPolicy : BlockFmhaPipelineQRKSVSTdmDefault
     }
     // Rows [begin, end) whose operands stay allocated (KeepOperandLive) at row r: with grouped
     // waits, the placement's PvKeptRows; otherwise none.
+    // M iterations [0, n) whose P chunk (the PV A operand) the PV WMMA emitter keeps allocated
+    // after the RAW fence of row r: with one K step per stage and the whole-stage drain groups of a
+    // schedule whose QK tail stage reads nothing (the D128 page tiles), every M iteration but the
+    // last at the stage's last row. A chunk is last read by its M iteration's rows, and there the
+    // register allocator placed the deferred reads of later rows, issued before that fence, onto it
+    // (WMMA operand WAR sites in a static scan). The four-row groups leave the chunks to the
+    // allocator, which places no read there.
+    template <typename Mode>
+    CK_TILE_HOST_DEVICE static constexpr index_t PvKeptPIters(index_t r)
+    {
+        if constexpr(GroupedWait<Mode>() && Geometry::kPvStageKIter == 1 &&
+                     !kFmhaTdmSchedQkTailReads<
+                         typename Mode::SelectedPolicy::Schedule::LocalPlacement>)
+            return r == Geometry::kPvWmmasPerStage - 1 ? Geometry::kPvMIter - 1 : 0;
+        else
+            return 0;
+    }
+
     template <typename Mode>
     CK_TILE_HOST_DEVICE static constexpr FmhaTdmSchedRowRange PvKeptRows(index_t r,
                                                                          bool after_fence)
