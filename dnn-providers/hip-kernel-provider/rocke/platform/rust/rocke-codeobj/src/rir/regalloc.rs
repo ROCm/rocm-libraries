@@ -1172,7 +1172,7 @@ pub(super) fn allocate_spilling_on(f: &mut MFunc, limits: Limits, cfg: SpillConf
             Ok((phys, used, tight)) if used.vgprs <= hard.vgprs && used.sgprs <= hard.sgprs => {
                 rewrite(f, &phys);
                 let spill = spiller.finish(f)?;
-                return Ok(Allocation { num_sgprs: used.sgprs, num_vgprs: used.vgprs, pressure, spill, tight });
+                return Ok(Allocation { num_sgprs: used.sgprs.max(spill.sgprs_needed), num_vgprs: used.vgprs, pressure, spill, tight });
             }
             Ok((_, used, _)) => {
                 if used.sgprs > hard.sgprs {

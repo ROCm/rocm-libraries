@@ -787,11 +787,12 @@ fn spill_best(
             Target::Gfx950 => crate::target::gfx9::spill::agpr_slots(t, hw.vgprs, lds_size, wg).min(agpr_cap()),
             Target::Gfx1151 => 0,
         },
+        scratch_sgpr: None,
     };
     // gfx950: also the accumulator webs in AGPRs beside the spilled values; the cheapest wins (`gfx9::agpr_spill`).
     let spilled = crate::target::gfx9::agpr_spill::banked_spill(&f, cfg, room, |g, cfg| regalloc::allocate_spilling_on(g, hw, cfg, threads));
     banked.extend(spilled.into_iter().map(|(g, b)| (window, g, b)));
-    let a = regalloc::allocate_spilling_on(&mut f, hw, cfg, threads)?;
+    let a = spill_with_wide_agprs(&mut f, hw, cfg, (agprs, room), (lds_size, wg), threads)?;
     if let Some((w, g, b)) = crate::target::gfx9::agpr_spill::cheapest(banked, (&f, &a), lds_size, wg) {
         *func = g;
         return Ok((b, w));
@@ -804,6 +805,52 @@ fn spill_best(
     }
     *func = f;
     Ok((a, window))
+}
+
+/// `allocate_spilling_on` with `cfg`. When that overflows the scratch offset
+/// range, the function is spilled again (gfx950):
+/// 1. with every AGPR that `room` unified registers leave beside the VGPRs
+///    (and the LDS slots the lower occupancy frees), taking the waves those
+///    cost, as LLVM does for a kernel whose state needs the whole register
+///    file (`(agprs, room)`: AGPRs enabled, the unified registers a workgroup
+///    may use);
+/// 2. with an SGPR below the last pair as the base of the scratch accesses past 4 KiB.
+fn spill_with_wide_agprs(
+    f: &mut mir::MFunc,
+    hw: regalloc::Limits,
+    cfg: regalloc::SpillConfig,
+    (agprs, room): (bool, u32),
+    (lds_size, wg): (u32, u32),
+    threads: usize,
+) -> Result<regalloc::Allocation, CompileError> {
+    if f.target != Target::Gfx950 || debug_flag("nowideagpr") {
+        return regalloc::allocate_spilling_on(f, hw, cfg, threads);
+    }
+    let backup = f.clone();
+    let first = regalloc::allocate_spilling_on(f, hw, cfg, threads);
+    if !first.as_ref().err().is_some_and(is_scratch_overflow) {
+        return first;
+    }
+    let t = f.target.info();
+    let wide = if agprs { room.saturating_sub(hw.vgprs.next_multiple_of(4)).min(256).min(agpr_cap()) } else { 0 };
+    let mut cfg = cfg;
+    if wide > cfg.agpr_slots {
+        let unified = hw.vgprs.next_multiple_of(4) + wide;
+        cfg = regalloc::SpillConfig { agpr_slots: wide, lds_slots: cfg.lds_slots.max(t.lds_spill_slots(lds_size, wg, unified)), ..cfg };
+        *f = backup.clone();
+        match regalloc::allocate_spilling_on(f, hw, cfg, threads) {
+            Err(e) if is_scratch_overflow(&e) => {}
+            r => return r,
+        }
+    }
+    // The two SGPRs above it stay free for a relaxed branch (`assemble_relaxed`).
+    let base = hw.sgprs - 3;
+    *f = backup;
+    regalloc::allocate_spilling_on(f, regalloc::Limits { sgprs: base, ..hw }, regalloc::SpillConfig { scratch_sgpr: Some(base as u16), ..cfg }, threads)
+}
+
+fn is_scratch_overflow(e: &CompileError) -> bool {
+    e.kind == "ROCKE_DIRECT_REGISTERS" && e.message.contains("scratch offset range")
 }
 
 /// Threads one compile may run at once: `ROCKE_DIRECT_THREADS` if set, else

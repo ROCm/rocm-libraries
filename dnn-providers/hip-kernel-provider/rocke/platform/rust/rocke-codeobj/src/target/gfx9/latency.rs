@@ -122,6 +122,7 @@ fn spill_config(f: &MFunc, lds_size: u32, wg: u32) -> SpillConfig {
         wg_size: wg.max(1),
         lds_slots: t.lds_spill_slots(lds_size, wg, hw.vgprs),
         agpr_slots: if f.agpr_limit == Some(0) { 0 } else { super::spill::agpr_slots(t, hw.vgprs, lds_size, wg) },
+        scratch_sgpr: None,
     }
 }
 

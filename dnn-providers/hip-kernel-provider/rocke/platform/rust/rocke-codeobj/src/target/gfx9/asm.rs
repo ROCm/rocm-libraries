@@ -749,15 +749,20 @@ pub fn encode(inst: &MInst, out: &mut Vec<u32>) -> Result<(), CompileError> {
             push2(out, words.pack());
         }
         Fmt::Global if form == Form::Scratch => {
-            let (vdst, data) = match defs.first() {
-                Some(d) => (vgpr(d)?, 0),
-                None => (0, vgpr(nth(uses, 0)?)?),
+            let (vdst, data, base) = match defs.first() {
+                Some(d) => (vgpr(d)?, 0, uses.first()),
+                None => (0, vgpr(nth(uses, 0)?)?, uses.get(1)),
             };
             let offset = inst.imm;
             if !(-4096..4096).contains(&offset) {
                 return Err(bad(format!("scratch offset {offset} out of range")));
             }
-            let words = t::EncScratch { op: code, offset: offset as u32, vdst, data, saddr: t::SRC_SADDR_OFF, ..Default::default() };
+            // An SGPR base (offsets past 4 KiB) is the instruction's `saddr`.
+            let saddr = match base {
+                Some(b) => sdst(b)?,
+                None => t::SRC_SADDR_OFF,
+            };
+            let words = t::EncScratch { op: code, offset: offset as u32, vdst, data, saddr, ..Default::default() };
             push2(out, words.pack());
         }
         Fmt::Global => {

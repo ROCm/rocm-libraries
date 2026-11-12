@@ -57,6 +57,10 @@ pub struct SpillConfig {
     /// AGPR slots that leave the occupancy unchanged (gfx950,
     /// `target::gfx9::spill`); spilled webs take them before LDS slots.
     pub agpr_slots: u32,
+    /// An SGPR (past the allocation) that scratch accesses beyond the 4 KiB
+    /// of an instruction's offset use as their base (gfx950): `s_mov_b32`
+    /// before the access, then `saddr` of the instruction.
+    pub scratch_sgpr: Option<u16>,
 }
 
 /// What spilling did.
@@ -77,6 +81,8 @@ pub struct SpillStats {
     pub stores: u32,
     /// VGPR dwords kept in AGPRs a0 onward (gfx950).
     pub agpr_dwords: u32,
+    /// SGPRs the allocation plus the scratch base register need (0: none beyond the allocation).
+    pub sgprs_needed: u32,
 }
 
 /// A spilled VGPR web: its first dword slot, size, and weighted accesses.
@@ -1163,16 +1169,20 @@ impl Spiller {
             let shared = self.share_slots(f, &order);
             (place, in_agpr, agprs, lds, scratch) = shared;
         }
-        if scratch * 4 > 4096 {
+        let far = scratch * 4 > 4096;
+        if far && self.cfg.scratch_sgpr.is_none() {
             return Err(CompileError::new(
                 "ROCKE_DIRECT_REGISTERS",
                 format!("out of VGPRs: {scratch} spilled dwords exceed the 4 KiB scratch offset range"),
             ));
         }
         let stride = 4 * self.cfg.wg_size;
+        let base_sgpr = self.cfg.scratch_sgpr.filter(|_| far);
         for block in f.blocks.iter_mut() {
             let old = std::mem::take(&mut block.insts);
             let mut out = Vec::with_capacity(old.len() + 8);
+            // The value of the base SGPR at this point of the block, if known.
+            let mut base_now: Option<i64> = None;
             for mut inst in old {
                 if inst.op == Opc::VWritelaneB32 && inst.uses.len() == 3 {
                     inst.uses = Uses::from(&inst.uses[..2]);
@@ -1213,12 +1223,25 @@ impl Spiller {
                         });
                     }
                 } else {
-                    let offset = 4 * at as i64;
-                    out.push(if load {
-                        MInst::new(inst.op, [data], []).with_imm(offset)
-                    } else {
-                        MInst::new(inst.op, [], [data]).with_imm(offset)
-                    });
+                    let mut offset = 4 * at as i64;
+                    let mut saddr = None;
+                    if let Some(sgpr) = base_sgpr.filter(|_| offset + 4 * n as i64 > 4096) {
+                        // The instruction's offset is 13 bits signed: the base is the 4 KiB multiple below.
+                        let base = offset & !4095;
+                        if base_now != Some(base) {
+                            out.push(MInst::new(Opc::SMovB32, [Opnd::P(Phys::S(sgpr), 1)], [Opnd::Imm(base as u32)]));
+                            base_now = Some(base);
+                        }
+                        offset -= base;
+                        saddr = Some(Opnd::P(Phys::S(sgpr), 1));
+                    }
+                    out.push(match (load, saddr) {
+                        (true, None) => MInst::new(inst.op, [data], []),
+                        (true, Some(a)) => MInst::new(inst.op, [data], [a]),
+                        (false, None) => MInst::new(inst.op, [], [data]),
+                        (false, Some(a)) => MInst::new(inst.op, [], [data, a]),
+                    }
+                    .with_imm(offset));
                 }
             }
             block.insts = out;
@@ -1226,6 +1249,7 @@ impl Spiller {
         self.stats.lds_dwords = lds;
         self.stats.scratch_dwords = scratch;
         self.stats.agpr_dwords = agprs;
+        self.stats.sgprs_needed = base_sgpr.map_or(0, |s| s as u32 + 1);
         self.stats.lds_bytes = lds * stride;
         self.stats.scratch_bytes = scratch * 4;
         Ok(self.stats)
@@ -1272,6 +1296,8 @@ pub(super) mod tests {
         regs.insert(Key::V(0), 12345);
         let (mut lds, mut scratch) = (HashMap::new(), HashMap::new());
         let mut lanes: HashMap<(Key, u32), u64> = HashMap::new();
+        // The immediates `s_mov_b32` put in SGPRs: the bases of scratch accesses past 4 KiB.
+        let mut bases: HashMap<u16, i64> = HashMap::new();
         let mut out = Vec::new();
         let name = |op: Opc| op.name().bytes().fold(5u64, |h, b| mix(h, b as u64));
         let read = |regs: &HashMap<Key, u64>, o: &Opnd| -> Vec<u64> {
@@ -1296,6 +1322,9 @@ pub(super) mod tests {
                             }
                         }
                         Opc::Copy | Opc::VMovB32 | Opc::SMovB32 => {
+                            if let (Opc::SMovB32, Opnd::P(Phys::S(r), _), Opnd::Imm(x)) = (inst.op, inst.defs[0], inst.uses[0]) {
+                                bases.insert(r, x as i64);
+                            }
                             for (k, v) in defs.iter().zip(read(&regs, &inst.uses[0])) {
                                 regs.insert(*k, v);
                             }
@@ -1307,13 +1336,21 @@ pub(super) mod tests {
                             regs.insert(defs[0], *lds.get(&inst.imm).unwrap_or(&0xbad));
                         }
                         op if op.name().starts_with("scratch_store") => {
+                            let base = inst.uses.get(1).map_or(0, |o| match o {
+                                Opnd::P(Phys::S(r), _) => bases[r],
+                                other => panic!("a scratch base {other:?}"),
+                            });
                             for (k, v) in read(&regs, &inst.uses[0]).into_iter().enumerate() {
-                                scratch.insert(inst.imm + 4 * k as i64, v);
+                                scratch.insert(base + inst.imm + 4 * k as i64, v);
                             }
                         }
                         op if op.name().starts_with("scratch_load") => {
+                            let base = inst.uses.first().map_or(0, |o| match o {
+                                Opnd::P(Phys::S(r), _) => bases[r],
+                                other => panic!("a scratch base {other:?}"),
+                            });
                             for (k, d) in defs.iter().enumerate() {
-                                regs.insert(*d, *scratch.get(&(inst.imm + 4 * k as i64)).unwrap_or(&0xbad));
+                                regs.insert(*d, *scratch.get(&(base + inst.imm + 4 * k as i64)).unwrap_or(&0xbad));
                             }
                         }
                         Opc::VWritelaneB32 => {
@@ -1448,7 +1485,7 @@ pub(super) mod tests {
             let want = effects(&f, 3);
             let mut g = f.clone();
             let limits = regalloc::Limits { vgprs: 24, sgprs: 20 };
-            let cfg = SpillConfig { lds_size: 256, wg_size: 32, lds_slots, agpr_slots: 0 };
+            let cfg = SpillConfig { lds_size: 256, wg_size: 32, lds_slots, agpr_slots: 0, ..Default::default() };
             let a = regalloc::allocate_spilling(&mut g, limits, cfg).expect("allocates");
             assert!(a.num_vgprs <= 24 && a.num_sgprs <= 20, "{a:?}");
             assert!(a.spill.lds_dwords + a.spill.scratch_dwords + a.spill.remat + a.spill.sgpr_dwords > 0);
@@ -1475,7 +1512,7 @@ pub(super) mod tests {
             let f = random_kernel(seed, nv, ns);
             let want = effects(&f, 3);
             let limits = regalloc::Limits { vgprs: 24, sgprs: 20 };
-            let cfg = SpillConfig { lds_size: 256, wg_size: 32, lds_slots, agpr_slots: 0 };
+            let cfg = SpillConfig { lds_size: 256, wg_size: 32, lds_slots, agpr_slots: 0, ..Default::default() };
             let mut base = f.clone();
             let a = regalloc::allocate_spilling(&mut base, limits, cfg).expect("allocates");
             FORCE_SHARE.with(|c| c.set(true));
@@ -1493,6 +1530,28 @@ pub(super) mod tests {
         assert!(shared <= plain, "sharing needs more slots: {shared} vs {plain}");
     }
 
+    /// More than 4 KiB of scratch (gfx950): refused without a base SGPR; with one, the slots past 4 KiB are
+    /// reached through it and every value survives.
+    #[test]
+    fn scratch_past_4_kib_is_addressed_from_an_sgpr() {
+        let f = random_kernel(7, 2600, 12);
+        let want = effects(&f, 3);
+        let limits = regalloc::Limits { vgprs: 24, sgprs: 20 };
+        let mut g = f.clone();
+        let cfg = SpillConfig { lds_size: 256, wg_size: 32, lds_slots: 0, agpr_slots: 0, scratch_sgpr: None };
+        let e = regalloc::allocate_spilling(&mut g, limits, cfg).expect_err("passes 4 KiB");
+        assert!(e.message.contains("scratch offset range"), "{e}");
+        let mut g = f.clone();
+        let cfg = SpillConfig { scratch_sgpr: Some(20), ..cfg };
+        let a = regalloc::allocate_spilling(&mut g, limits, cfg).expect("allocates");
+        assert!(a.spill.scratch_dwords > 1024 && a.num_sgprs == 21, "{a:?}");
+        assert_eq!(effects(&g, 3), want, "{a:?}");
+        let moves = g.blocks.iter().flat_map(|b| &b.insts).filter(|i| i.op == Opc::SMovB32 && i.defs[0] == Opnd::P(Phys::S(20), 1)).count();
+        assert!(moves > 0);
+        super::super::post::expand_pseudos(&mut g).expect("expands");
+        super::super::asm::assemble(&g).expect("encodes");
+    }
+
     /// gfx950: the hottest webs take AGPR slots before LDS and scratch, and
     /// the moves keep every value.
     #[test]
@@ -1504,7 +1563,7 @@ pub(super) mod tests {
             for agpr_slots in [8, 200] {
                 let mut g = f.clone();
                 let limits = regalloc::Limits { vgprs: 24, sgprs: 20 };
-                let cfg = SpillConfig { lds_size: 256, wg_size: 32, lds_slots: 4, agpr_slots };
+                let cfg = SpillConfig { lds_size: 256, wg_size: 32, lds_slots: 4, agpr_slots, ..Default::default() };
                 let a = regalloc::allocate_spilling(&mut g, limits, cfg).expect("allocates");
                 assert!(a.spill.agpr_dwords > 0 && a.spill.agpr_dwords <= agpr_slots, "{a:?}");
                 if agpr_slots == 200 {
