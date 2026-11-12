@@ -144,7 +144,7 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::ScaleBlockSizeA>(),
                      Base::template Pair<Predicates::Contraction::ScaleZeroPointA>(),
                      Base::template Pair<Predicates::Contraction::Int4EncodingA>(),
-                     Base::template Pair<Predicates::Contraction::MXScaleFormat>()});
+                     Base::template Pair<Predicates::Contraction::MXScaleFormatEquals>()});
 
                 auto gmap = Generic::GetSubclasses();
                 rv.insert(gmap.begin(), gmap.end());
@@ -597,8 +597,8 @@ namespace TensileLite
         };
 
         template <typename IO>
-        struct MappingTraits<Predicates::Contraction::MXScaleFormat, IO>
-            : public AutoMappingTraits<Predicates::Contraction::MXScaleFormat, IO>
+        struct MappingTraits<Predicates::Contraction::MXScaleFormatEquals, IO>
+            : public AutoMappingTraits<Predicates::Contraction::MXScaleFormatEquals, IO>
         {
         };
 

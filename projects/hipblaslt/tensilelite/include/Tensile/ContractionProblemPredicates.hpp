@@ -3093,7 +3093,8 @@ namespace TensileLite
             // MX scale layout of the solution. The host does not tell formats below
             // kFirstExactFormat apart, so they match each other; a later format on
             // either side must equal the other side.
-            struct MXScaleFormat : public Predicate_CRTP<MXScaleFormat, ContractionProblemGemm>
+            struct MXScaleFormatEquals
+                : public Predicate_CRTP<MXScaleFormatEquals, ContractionProblemGemm>
             {
                 enum
                 {
@@ -3104,15 +3105,15 @@ namespace TensileLite
 
                 int value = 0;
 
-                MXScaleFormat() = default;
-                MXScaleFormat(int value)
+                MXScaleFormatEquals() = default;
+                MXScaleFormatEquals(int value)
                     : value(value)
                 {
                 }
 
                 static std::string Type()
                 {
-                    return "MXScaleFormat";
+                    return "MXScaleFormatEquals";
                 }
 
                 bool operator()(ContractionProblemGemm const& problem) const override

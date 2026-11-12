@@ -518,7 +518,7 @@ ASSERT_DIM_MAP_PREDICATES = {
 }
 
 # Integer ids of the MXScaleFormat values, as the C++ ProblemType and the
-# MXScaleFormat predicate read them. Append only.
+# MXScaleFormatEquals predicate read them. Append only.
 MX_SCALE_FORMAT_IDS = {
     "NoSwizzle": 0,
     "HostPreSwizzle": 1,
@@ -742,7 +742,7 @@ class ProblemPredicate(Properties.Predicate):
         # The host scale modes do not tell NoSwizzle, HostPreSwizzle and InMemorySwizzle
         # apart, so the predicate matches those loosely and only pins the later formats.
         if problemType.mxBlockA or problemType.mxBlockB:
-            rv += [cls('MXScaleFormat', value=mxScaleFormatId(state))]
+            rv += [cls('MXScaleFormatEquals', value=mxScaleFormatId(state))]
 
         if state['ProblemType']['FusedGemmA2A']:
             rv += [cls('GemmA2AShape', value=state['MacroTile0'])]
