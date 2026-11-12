@@ -94,6 +94,10 @@
     {
       "name": "ep",
       "type": "int"
+    },
+    {
+      "name": "math",
+      "type": "int"
     }
   ]
 }

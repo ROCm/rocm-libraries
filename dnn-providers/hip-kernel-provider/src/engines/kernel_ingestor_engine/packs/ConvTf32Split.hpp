@@ -86,6 +86,34 @@ inline SplitPlan splitPlanFor(const SplitTensor& a, const SplitTensor& b)
     return plan;
 }
 
+/// Whether @p strides lay out @p extents densely in some order (the split views need it): the
+/// dimensions by increasing stride (extent-1 ones ignored), each stride the product of the
+/// extents before it.
+template <size_t N>
+bool isPackedTensor(const long long (&strides)[N], const long long (&extents)[N])
+{
+    size_t order[N];
+    size_t used = 0;
+    for(size_t d = 0; d < N; ++d)
+    {
+        if(extents[d] > 1)
+        {
+            order[used++] = d;
+        }
+    }
+    std::sort(order, order + used, [&](size_t x, size_t y) { return strides[x] < strides[y]; });
+    long long expected = 1;
+    for(size_t i = 0; i < used; ++i)
+    {
+        if(strides[order[i]] != expected)
+        {
+            return false;
+        }
+        expected *= extents[order[i]];
+    }
+    return true;
+}
+
 /// The strides, kept packed in their memory order, of a packed tensor (@p strides over
 /// @p extents, any rank) once dimension @p axis holds three times its extent: the dimensions
 /// outside it (strides of at least its whole extent) scale by 3, the ones inside it stay.

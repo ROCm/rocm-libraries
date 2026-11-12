@@ -52,6 +52,7 @@ INTS = [
     "wq",
     "wn",
     "ep",
+    "math",
 ]
 STRINGS = ["direction", "dtype", "atom", "archs"]
 
@@ -122,6 +123,32 @@ def lds_bytes(atom, cmax, g, t, elem, ep=0):
     return win + w + slots
 
 
+def lds_x3(c):
+    """LDS of a three-bf16 config: bf16 window and weights, fp32 epilogue slots (ep 0)."""
+    t = (c["fm"], c["fn"], c["wm"], c["wq"], c["wn"])
+    g = (c["kd"], c["r"], c["s"], c["sd"], c["sh"], c["sw"])
+    base = lds_bytes(c["atom"], c["cmax"], g, t, 2, 1)
+    slots = c["wm"] * c["wq"] * c["wn"] * 16 * c["fn"] * 16 * 4 if c["ep"] == 0 else 0
+    return base + slots
+
+
+def x3_of(cat):
+    """Three-bf16 (math 1): fp32 graphs under TF32 permission run a bf16 MMA config on the
+    kernel's input and the filter split along the reduction channels (3x; the kernel's
+    ConvTf32Split), output in fp32. Every bf16 MMA config, its channel bound tripled, whose LDS
+    (fp32 epilogue slots) fits."""
+    out_ = {}
+    for archs, c in cat.values():
+        if c["dtype"] != "BFLOAT16":
+            continue
+        x = dict(c, dtype="FLOAT", cmax=c["cmax"] * 3, math=1)
+        if lds_x3(x) > ATOMS[c["atom"]][3]:
+            continue
+        key = tuple(x[k] for k in INTS) + ("FLOATX3",)
+        out_.setdefault(key, [set(), x])[0].update(archs)
+    return out_
+
+
 def lane_ok(atom, s):
     _, wave, ka, _, _ = ATOMS[atom]
     kpl = ka // 4 if wave == 64 else (ka // 2 if atom.startswith("wmma12") else ka)
@@ -188,6 +215,7 @@ def mma_configs(catalog, geoms, ep, cmax_of, tiles_of, sixteen_only=False):
                             wq=t[3],
                             wn=t[4],
                             ep=ep,
+                            math=0,
                         )
                         key = tuple(c[k] for k in INTS) + (dtype,)
                         catalog.setdefault(key, [set(), c])[0].add(arch)
@@ -245,6 +273,7 @@ def fma_configs(catalog, geoms, cmax_of, archs):
                     wq=t[3],
                     wn=t[4],
                     ep=0,
+                    math=0,
                 )
                 key = tuple(c[k] for k in INTS) + (dtype,)
                 catalog.setdefault(key, [set(), c])[0].update(archs)
@@ -327,10 +356,11 @@ for direction, cat in (("fwd", catalog), ("bwd", bwd_catalog)):
         },
     )
     kernels = []
-    for i, (archs, c) in enumerate(cat.values()):
+    x3 = x3_of(cat)
+    for i, (archs, c) in enumerate(list(cat.values()) + list(x3.values())):
         groups = ",".join(a for a in ORDER if a in archs)
         name = (
-            f"conv_smallc.{direction}.{dt[c['dtype']]}.{c['atom']}.c{c['cmax']}.{c['kd']}x{c['r']}x{c['s']}"
+            f"conv_smallc.{direction}.{dt[c['dtype']]}{'x3' if c['math'] else ''}.{c['atom']}.c{c['cmax']}.{c['kd']}x{c['r']}x{c['s']}"
             f".s{c['sd']}x{c['sh']}x{c['sw']}.d{c['dd']}x{c['dh']}x{c['dw']}"
             f".m{c['fm']}n{c['fn']}.w{c['wm']}x{c['wq']}x{c['wn']}"
             + (f".e{c['ep']}" if c["ep"] else "")
@@ -368,5 +398,5 @@ for direction, cat in (("fwd", catalog), ("bwd", bwd_catalog)):
             "kernelDescriptors": kernels,
         },
     )
-    print(direction, len(kernels), "kernel configs")
+    print(direction, len(kernels), "kernel configs,", len(x3), "three-bf16")
     total += len(kernels)

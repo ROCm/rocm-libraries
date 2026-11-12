@@ -17,6 +17,7 @@
 
 #include "engines/kernel_ingestor_engine/descriptors/conv/smallc/kernels/ConvSmallcArgs.h"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveProblem.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvTf32Split.hpp"
 
 /**
  * @file ConvSmallcProblem.hpp
@@ -66,6 +67,10 @@ struct Config
     int dd = 0, dh = 0, dw = 0;
     int fm = 0, fn = 0, wm = 0, wq = 0, wn = 0;
     int ep = 0; ///< epilogue: 0 through LDS slots, 1 from registers (MMA, channels-fastest output)
+    /// 0: the graph's element type. 1: three-bf16 for an fp32 graph under TF32 permission
+    /// (conv_igemm::tf32Permitted): a bf16 MMA config on the kernel's input and the filter split
+    /// along the reduction channels into 3x (ConvTf32Split.hpp), the output written in fp32.
+    int math = 0;
 
     /// Taps per filter row in the weight layout: s rounded up to a power of two.
     int sp() const;
@@ -101,6 +106,21 @@ struct Plan
  *        or the 32-bit offsets.
  */
 std::optional<Plan> planFor(const SmallcProblem& problem, const Config& config);
+
+/// Three-bf16's view of fp32 @p problem: the bf16 problem with the reduction channels (the
+/// kernel's input channels: C forward, K backward) tripled, the kernel input and the filter
+/// split along them (plan; their 3x layouts' strides in args.xs and filterStrides), or nullopt
+/// when the input or the filter is not packed or the 3x input leaves 32 bits.
+struct ThreeBf16
+{
+    SmallcProblem problem;
+    conv_tf32::SplitPlan plan;
+    long long filterStrides[5] = {};
+};
+std::optional<ThreeBf16> threeBf16Of(const SmallcProblem& problem);
+
+/// Whether three-bf16 is admitted on @p gcnArchName (where it pays).
+bool threeBf16Pays(const SmallcProblem& problem, std::string_view gcnArchName);
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::conv_smallc
 

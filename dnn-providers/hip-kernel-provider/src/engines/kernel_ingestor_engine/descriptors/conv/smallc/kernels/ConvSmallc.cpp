@@ -20,6 +20,12 @@
 #ifndef CONV_SMALLC_FMA
 #define CONV_SMALLC_FMA 0
 #endif
+// Three-bf16 (fp32 graphs under TF32 permission): the bf16 kernel on 3x the reduction channels
+// (CONV_SMALLC_T unsigned short) writes its output in fp32 (CONV_SMALLC_TO float);
+// CONV_TF32_SPLIT3 adds the operand split (ConvTf32Split). Undefined otherwise: as before.
+#ifndef CONV_SMALLC_TO
+#define CONV_SMALLC_TO CONV_SMALLC_T
+#endif
 #ifndef CONV_SMALLC_EP
 #define CONV_SMALLC_EP 0
 #endif
@@ -53,7 +59,7 @@ extern "C" __global__ void __launch_bounds__(CONV_SMALLC_BLOCK) ConvSmallc(Small
 #else
     smallcConv<CONV_SMALLC_T,
                CONV_SMALLC_ATOM,
-               CONV_SMALLC_T,
+               CONV_SMALLC_TO,
                CONV_SMALLC_CMAX,
                CONV_SMALLC_KD,
                CONV_SMALLC_R,

@@ -25,7 +25,8 @@
     "wm",
     "wq",
     "wn",
-    "ep"
+    "ep",
+    "math"
   ],
   "behavior_notes": [
     "runtime_compilation"
