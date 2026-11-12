@@ -61,6 +61,7 @@
 #include <memory>
 #include <random>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace
@@ -1708,6 +1709,233 @@ namespace
         [](const ::testing::TestParamInfo<MXFp6SelectionCase>& info) {
             return std::string(info.param.name);
         });
+
+    // The algo of the registered E2M3 kernel at K = 65536, reused for a problem one of
+    // its predicates rejects (another K, alpha != 1), is refused by the ext and the C
+    // API before anything launches.
+    class RowUniformityMXFp6AlgoReuse_pre_checkin : public ::testing::Test
+    {
+    protected:
+        static constexpr int64_t m           = 4096;
+        static constexpr int64_t n           = 4096;
+        static constexpr int64_t kRegistered = 65536;
+
+        hipblasLtHandle_t handle    = nullptr;
+        void*             a         = nullptr;
+        void*             b         = nullptr;
+        void*             d         = nullptr;
+        void*             scaleA    = nullptr;
+        void*             scaleB    = nullptr;
+        void*             workspace = nullptr;
+        const size_t      dBytes    = m * n * sizeof(uint16_t);
+
+        void SetUp() override
+        {
+            if(!gpuAvailable())
+                GTEST_SKIP() << "No GPU available";
+            int device = 0;
+            int chipId = 0;
+            if(gpuArchName().rfind("gfx950", 0) != 0 || hipGetDevice(&device) != hipSuccess
+               || hipDeviceGetAttribute(&chipId, hipDeviceAttributePciChipId, device) != hipSuccess
+               || chipId != 0x75a3)
+                GTEST_SKIP() << "The MXFP6 128x4 kernels are registered for gfx950 chip 0x75a3 only";
+
+            // Sized for the registered K, the largest these cases use: 6-bit elements and
+            // one scale byte per 32 elements of K.
+            const size_t operandBytes = m * kRegistered * 6 / 8;
+            const size_t scaleBytes   = m * kRegistered / 32;
+            for(auto [ptr, bytes] : {std::pair{&a, operandBytes},
+                                     std::pair{&b, operandBytes},
+                                     std::pair{&scaleA, scaleBytes},
+                                     std::pair{&scaleB, scaleBytes}})
+            {
+                ASSERT_EQ(hipMalloc(ptr, bytes), hipSuccess);
+                ASSERT_EQ(hipMemset(*ptr, 0, bytes), hipSuccess);
+            }
+            ASSERT_EQ(hipMalloc(&d, dBytes), hipSuccess);
+            ASSERT_EQ(hipMalloc(&workspace, kWorkspaceBytes), hipSuccess);
+            ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+        }
+
+        void TearDown() override
+        {
+            if(handle)
+                EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+            for(void* p : {a, b, d, scaleA, scaleB, workspace})
+                if(p)
+                    EXPECT_EQ(hipFree(p), hipSuccess);
+        }
+
+        // Fills D with a pattern a GEMM of zero inputs does not write, so a launch shows.
+        void poisonD()
+        {
+            ASSERT_EQ(hipMemset(d, 0x7f, dBytes), hipSuccess);
+        }
+
+        bool dUntouched()
+        {
+            EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+            std::vector<uint8_t> host(dBytes);
+            EXPECT_EQ(hipMemcpy(host.data(), d, dBytes, hipMemcpyDeviceToHost), hipSuccess);
+            return std::all_of(host.begin(), host.end(), [](uint8_t byte) { return byte == 0x7f; });
+        }
+
+        hipblasStatus_t setExtProblem(hipblaslt_ext::Gemm& gemm, int64_t k, const float* alpha)
+        {
+            static const float             beta = 0.0f;
+            hipblaslt_ext::GemmProblemType problemType(HIPBLAS_OP_T,
+                                                       HIPBLAS_OP_N,
+                                                       HIP_R_6F_E2M3,
+                                                       HIP_R_6F_E2M3,
+                                                       HIP_R_16BF,
+                                                       HIP_R_16BF,
+                                                       HIPBLAS_COMPUTE_32F);
+            problemType.setOrderA(HIPBLASLT_ORDER_COL256_R128_EXT);
+            problemType.setOrderB(HIPBLASLT_ORDER_COL256_R128_EXT);
+            hipblaslt_ext::GemmEpilogue epilogue;
+            epilogue.setScalingAType(HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT);
+            epilogue.setScalingBType(HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT);
+            hipblaslt_ext::GemmInputs inputs;
+            inputs.setA(a);
+            inputs.setB(b);
+            inputs.setC(d);
+            inputs.setD(d);
+            inputs.setAlpha(alpha);
+            inputs.setBeta(&beta);
+            inputs.setScaleA(scaleA);
+            inputs.setScaleB(scaleB);
+            return gemm.setProblem(
+                m, n, k, 1, k, k, m, m, k * m, k * n, m * n, m * n, epilogue, inputs, problemType);
+        }
+
+        hipblaslt_ext::Gemm makeGemm()
+        {
+            return hipblaslt_ext::Gemm(handle,
+                                       HIPBLAS_OP_T,
+                                       HIPBLAS_OP_N,
+                                       HIP_R_6F_E2M3,
+                                       HIP_R_6F_E2M3,
+                                       HIP_R_16BF,
+                                       HIP_R_16BF,
+                                       HIPBLAS_COMPUTE_32F);
+        }
+
+        hipblasLtMatmulAlgo_t registeredAlgo()
+        {
+            const float                                   alpha = 1.0f;
+            hipblaslt_ext::Gemm                           gemm  = makeGemm();
+            hipblaslt_ext::GemmPreference                 preference;
+            std::vector<hipblasLtMatmulHeuristicResult_t> picks;
+            preference.setMaxWorkspaceBytes(kWorkspaceBytes);
+            EXPECT_EQ(setExtProblem(gemm, kRegistered, &alpha), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(gemm.algoGetHeuristic(1, preference, picks), HIPBLAS_STATUS_SUCCESS);
+            if(picks.empty())
+            {
+                ADD_FAILURE() << "No solution for the registered problem";
+                return {};
+            }
+            EXPECT_EQ(hipblaslt_ext::getSolutionNameFromAlgo(handle, picks[0].algo).rfind("rocke_", 0),
+                      0u);
+            return picks[0].algo;
+        }
+
+        hipblasStatus_t cMatmul(int64_t k, float alpha, const hipblasLtMatmulAlgo_t& algo)
+        {
+            const float              beta   = 0.0f;
+            const hipblasOperation_t opA    = HIPBLAS_OP_T;
+            const hipblasOperation_t opB    = HIPBLAS_OP_N;
+            const int32_t            order  = HIPBLASLT_ORDER_COL256_R128_EXT;
+            const uint32_t           mode   = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
+            hipblasLtMatmulDesc_t    desc   = nullptr;
+            hipblasLtMatrixLayout_t  la     = nullptr;
+            hipblasLtMatrixLayout_t  lb     = nullptr;
+            hipblasLtMatrixLayout_t  ld     = nullptr;
+            hipblasStatus_t          status = HIPBLAS_STATUS_INTERNAL_ERROR;
+            if(hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F) == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSA, &opA, sizeof(opA))
+                      == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatmulDescSetAttribute(desc, HIPBLASLT_MATMUL_DESC_TRANSB, &opB, sizeof(opB))
+                      == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatmulDescSetAttribute(
+                      desc, HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, &mode, sizeof(mode))
+                      == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatmulDescSetAttribute(
+                      desc, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE, &mode, sizeof(mode))
+                      == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatmulDescSetAttribute(
+                      desc, HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER, &scaleA, sizeof(scaleA))
+                      == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatmulDescSetAttribute(
+                      desc, HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER, &scaleB, sizeof(scaleB))
+                      == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatrixLayoutCreate(&la, HIP_R_6F_E2M3, k, m, k) == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatrixLayoutCreate(&lb, HIP_R_6F_E2M3, k, n, k) == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatrixLayoutCreate(&ld, HIP_R_16BF, m, n, m) == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatrixLayoutSetAttribute(
+                      la, HIPBLASLT_MATRIX_LAYOUT_ORDER, &order, sizeof(order))
+                      == HIPBLAS_STATUS_SUCCESS
+               && hipblasLtMatrixLayoutSetAttribute(
+                      lb, HIPBLASLT_MATRIX_LAYOUT_ORDER, &order, sizeof(order))
+                      == HIPBLAS_STATUS_SUCCESS)
+            {
+                status = hipblasLtMatmul(handle,
+                                         desc,
+                                         &alpha,
+                                         a,
+                                         la,
+                                         b,
+                                         lb,
+                                         &beta,
+                                         d,
+                                         ld,
+                                         d,
+                                         ld,
+                                         &algo,
+                                         workspace,
+                                         kWorkspaceBytes,
+                                         nullptr);
+            }
+            for(auto* layout : {la, lb, ld})
+                if(layout)
+                    hipblasLtMatrixLayoutDestroy(layout);
+            if(desc)
+                hipblasLtMatmulDescDestroy(desc);
+            return status;
+        }
+    };
+
+    TEST_F(RowUniformityMXFp6AlgoReuse_pre_checkin, ExtApiRefusesAlgoForAnotherProblem)
+    {
+        const hipblasLtMatmulAlgo_t algo = registeredAlgo();
+        if(HasFailure())
+            return;
+        const float one = 1.0f;
+        const float two = 2.0f;
+
+        hipblaslt_ext::Gemm gemm = makeGemm();
+        ASSERT_EQ(setExtProblem(gemm, kRegistered, &one), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(gemm.initialize(algo, workspace), HIPBLAS_STATUS_SUCCESS);
+
+        ASSERT_EQ(setExtProblem(gemm, 32768, &one), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(gemm.initialize(algo, workspace), HIPBLAS_STATUS_INVALID_VALUE);
+
+        ASSERT_EQ(setExtProblem(gemm, kRegistered, &two), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(gemm.initialize(algo, workspace), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    TEST_F(RowUniformityMXFp6AlgoReuse_pre_checkin, CApiRefusesAlgoForAnotherProblem)
+    {
+        const hipblasLtMatmulAlgo_t algo = registeredAlgo();
+        if(HasFailure())
+            return;
+
+        EXPECT_EQ(cMatmul(kRegistered, 1.0f, algo), HIPBLAS_STATUS_SUCCESS);
+
+        poisonD();
+        EXPECT_EQ(cMatmul(32768, 1.0f, algo), HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(cMatmul(kRegistered, 2.0f, algo), HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_TRUE(dUntouched()) << "a refused algo launched";
+    }
 
     // Measured non-uniform on gfx950 with the default heuristic path.
     TEST_F(RowUniformity_pre_checkin, Regression_6144x5120x8192)
