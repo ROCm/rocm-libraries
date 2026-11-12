@@ -45,13 +45,13 @@ using IdentitySignatures
                        IdentitySignature<DataType::FLOAT, DataType::BFLOAT16>>;
 
 template <typename Signature>
-class TestPointwiseIdentityPlan : public ::testing::Test
+class PointwiseIdentityPlan : public ::testing::Test
 {
 };
 
-TYPED_TEST_SUITE(TestPointwiseIdentityPlan, IdentitySignatures, );
+TYPED_TEST_SUITE(PointwiseIdentityPlan, IdentitySignatures, );
 
-TYPED_TEST(TestPointwiseIdentityPlan, ExecutePlanUnaryIdentityPreservesValues)
+TYPED_TEST(PointwiseIdentityPlan, ExecutePlanUnaryIdentityPreservesValues)
 {
     using InputType = typename TypeParam::InputType;
     using OutputType = typename TypeParam::OutputType;
