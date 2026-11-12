@@ -314,29 +314,40 @@ __device__ __forceinline__ FftTile fftTileOf(const ConvFftArgs& a, int local)
 }
 
 /// Data windows: rows of src (n, channel, h, w), window origin (h0 - padH, w0 - padW), the
-/// first validH x validW points of the window, zero elsewhere.
+/// first validH x validW points of the window, zero elsewhere. The source fields are held by
+/// value so one kernel can read two sources (backward weights' depthwise path); the tiles come
+/// from the launch's arguments.
 template <class T, int TW, int PB>
 struct FftDataLoader
 {
     const T* src;
     long long chanOff;
+    long long sN;
+    long long sH;
+    long long sW;
+    int srcH;
+    int srcW;
+    int padH;
+    int padW;
+    int validH;
+    int validW;
     const ConvFftArgs* a;
     int pBlock;
 
     __device__ void one(int inst, int row, cfx* z, bool imag) const
     {
         const FftTile t = fftTileOf(*a, pBlock + inst);
-        const int h = t.h0 - a->padH + row;
-        const bool rowOk = t.live && row < a->validH && h >= 0 && h < a->srcH;
-        const T* base = src + chanOff + static_cast<long long>(t.image) * a->srcStr[0]
-                        + static_cast<long long>(h) * a->srcStr[2];
-        const int w0 = t.w0 - a->padW;
+        const int h = t.h0 - padH + row;
+        const bool rowOk = t.live && row < validH && h >= 0 && h < srcH;
+        const T* base
+            = src + chanOff + static_cast<long long>(t.image) * sN + static_cast<long long>(h) * sH;
+        const int w0 = t.w0 - padW;
 #pragma unroll
         for(int i = 0; i < TW; ++i)
         {
             const int w = w0 + i;
-            const float v = (rowOk && i < a->validW && w >= 0 && w < a->srcW)
-                                ? FftElem<T>::load(base[static_cast<long long>(w) * a->srcStr[3]])
+            const float v = (rowOk && i < validW && w >= 0 && w < srcW)
+                                ? FftElem<T>::load(base[static_cast<long long>(w) * sW])
                                 : 0.0f;
             if(imag)
             {
@@ -355,6 +366,46 @@ struct FftDataLoader
         one(ib, rb, z, true);
     }
 };
+
+/// The loader of the launch's main source (src) for channel @p channel (group-major).
+template <class T, int TW, int PB>
+__device__ __forceinline__ FftDataLoader<T, TW, PB>
+    fftSrcLoader(const ConvFftArgs& a, long long channel, int pBlock)
+{
+    return FftDataLoader<T, TW, PB>{static_cast<const T*>(a.src),
+                                    channel * a.srcStr[1],
+                                    a.srcStr[0],
+                                    a.srcStr[2],
+                                    a.srcStr[3],
+                                    a.srcH,
+                                    a.srcW,
+                                    a.padH,
+                                    a.padW,
+                                    a.validH,
+                                    a.validW,
+                                    &a,
+                                    pBlock};
+}
+
+/// The loader of the second source (src2: the zero-padded dy windows, no padding).
+template <class T, int TW, int PB>
+__device__ __forceinline__ FftDataLoader<T, TW, PB>
+    fftSrc2Loader(const ConvFftArgs& a, long long channel, int pBlock)
+{
+    return FftDataLoader<T, TW, PB>{static_cast<const T*>(a.src2),
+                                    channel * a.src2Str[1],
+                                    a.src2Str[0],
+                                    a.src2Str[2],
+                                    a.src2Str[3],
+                                    a.src2H,
+                                    a.src2W,
+                                    0,
+                                    0,
+                                    a.valid2H,
+                                    a.valid2W,
+                                    &a,
+                                    pBlock};
+}
 
 /// Filter taps: instance t is (a, b0 + t); the tile holds tap (r, s) at (r * dilH, s * dilW),
 /// reflected when flip.
@@ -507,9 +558,7 @@ __device__ void fftDataTransform(const ConvFftArgs& a)
     const int gc = blockIdx.x / blocksP; // g * chans + channel
     const int pBlock = (blockIdx.x % blocksP) * PB;
     const int g = gc / a.chans;
-    FftDataLoader<T, TW, PB> loader{
-        static_cast<const T*>(a.src), static_cast<long long>(gc) * a.srcStr[1], &a, pBlock};
-    fft2dForward<TH, TW, PB>(spec, loader);
+    fft2dForward<TH, TW, PB>(spec, fftSrcLoader<T, TW, PB>(a, gc, pBlock));
     ConvFftComplex* out = a.wsOut;
     const int ch = gc % a.chans;
     for(int q = threadIdx.x; q < F * PB; q += blockDim.x)
@@ -599,6 +648,100 @@ __device__ void fftWgradInverse(const ConvFftArgs& a)
     __syncthreads();
     FftWgradStorer<T, TH, TW, PB> storer{static_cast<T*>(a.dst), &a, gk, c0};
     fft2dInverse<TH, TW, PB>(spec, storer);
+}
+
+/// Depthwise forward / backward data (one input and one output channel a group, so no product
+/// over channels): block = PB tiles of channel g; forward transform, multiply by the filter
+/// spectrum (wsB[g][F], conjugated by the filter transform), inverse to the output tiles.
+template <class T, int TH, int TW, int PB>
+__device__ void fftDepthwise(const ConvFftArgs& a)
+{
+    constexpr int F = TH * (TW / 2 + 1);
+    __shared__ cfx spec[PB * F];
+    const int blocksP = (a.pc + PB - 1) / PB;
+    const int g = blockIdx.x / blocksP;
+    const int pBlock = (blockIdx.x % blocksP) * PB;
+    fft2dForward<TH, TW, PB>(spec, fftSrcLoader<T, TW, PB>(a, g, pBlock));
+    const cfx* filter = a.wsB + static_cast<long long>(g) * F;
+    for(int q = threadIdx.x; q < F * PB; q += blockDim.x)
+    {
+        const int f = q / PB;
+        const int t = q % PB;
+        spec[t * F + f] = cfxMul(spec[t * F + f], filter[f]);
+    }
+    __syncthreads();
+    FftOutStorer<T, TH, TW, PB> storer{
+        static_cast<T*>(a.dst), static_cast<long long>(g) * a.dstStr[1], &a, pBlock};
+    fft2dInverse<TH, TW, PB>(spec, storer);
+}
+
+/// Depthwise backward weights, partial sums: block = (channel g, partition of tilesPerPart
+/// tiles). Per PB tiles: x windows (src) and zero-padded dy windows (src2) to spectra, then
+/// conj(DY) X summed per bin in registers (thread tid owns bins tid, tid + TB, ...), in tile
+/// order; the partition's sums go to wsOut[part][g][F].
+template <class T, int TH, int TW, int PB, int TB>
+__device__ void fftDepthwiseWgrad(const ConvFftArgs& a)
+{
+    constexpr int F = TH * (TW / 2 + 1);
+    constexpr int PER = (F + TB - 1) / TB;
+    __shared__ cfx specX[PB * F];
+    __shared__ cfx specD[PB * F];
+    const int g = blockIdx.x / a.parts;
+    const int part = blockIdx.x % a.parts;
+    const int first = part * a.tilesPerPart;
+    const int last = first + a.tilesPerPart < a.pc ? first + a.tilesPerPart : a.pc;
+    cfx acc[PER];
+#pragma unroll
+    for(int i = 0; i < PER; ++i)
+    {
+        acc[i] = cfxMake(0.0f, 0.0f);
+    }
+    for(int pBlock = first; pBlock < last; pBlock += PB)
+    {
+        fft2dForward<TH, TW, PB>(specX, fftSrcLoader<T, TW, PB>(a, g, pBlock));
+        fft2dForward<TH, TW, PB>(specD, fftSrc2Loader<T, TW, PB>(a, g, pBlock));
+#pragma unroll
+        for(int i = 0; i < PER; ++i)
+        {
+            const int f = static_cast<int>(threadIdx.x) + i * TB;
+            if(f < F)
+            {
+                for(int t = 0; t < PB && pBlock + t < last; ++t)
+                {
+                    cfxMac(acc[i], cfxConj(specD[t * F + f]), specX[t * F + f]);
+                }
+            }
+        }
+        __syncthreads();
+    }
+#pragma unroll
+    for(int i = 0; i < PER; ++i)
+    {
+        const int f = static_cast<int>(threadIdx.x) + i * TB;
+        if(f < F)
+        {
+            a.wsOut[(static_cast<long long>(part) * a.groups + g) * F + f] = acc[i];
+        }
+    }
+}
+
+/// Depthwise backward weights, fold: wsY[g][F] = the partitions' sums in partition order.
+template <int TH, int TW>
+__device__ void fftDepthwiseFold(const ConvFftArgs& a)
+{
+    constexpr int F = TH * (TW / 2 + 1);
+    const long long i = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const long long total = static_cast<long long>(a.groups) * F;
+    if(i >= total)
+    {
+        return;
+    }
+    cfx sum = cfxMake(0.0f, 0.0f);
+    for(int part = 0; part < a.parts; ++part)
+    {
+        sum = cfxAdd(sum, a.wsA[part * total + i]);
+    }
+    a.wsY[i] = sum;
 }
 
 /// Forward / backward-data product: Y[g][f][b][p] = sum_a A[g][f][a][p] * B[g][f][a][b] (B

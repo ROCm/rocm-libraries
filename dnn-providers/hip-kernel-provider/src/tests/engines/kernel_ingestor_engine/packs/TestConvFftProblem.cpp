@@ -353,6 +353,47 @@ TEST(TestConvFftPlan, ChunksKeepTheWorkspaceUnderTheCap)
     EXPECT_GE(static_cast<int64_t>(plan->chunk) * plan->chunks, plan->tiles);
 }
 
+TEST(TestConvFftPlan, DepthwiseFusesAndPartitionsBackwardWeights)
+{
+    // RepLKNet-style: 31x31 depthwise, 256 channels, 56x56.
+    auto dw = largeShape();
+    dw.n = 32;
+    dw.c = 256;
+    dw.k = 256;
+    dw.groups = 256;
+    dw.input = {56, 56};
+    dw.filter = {31, 31};
+    dw.prePadding = dw.postPadding = {15, 15};
+    auto f = Fields{};
+    f.th = f.tw = 64;
+    f.pb = 1;
+    const auto fwd = planOf(dw, ConvDirection::FORWARD, f);
+    ASSERT_TRUE(fwd.has_value());
+    EXPECT_TRUE(fwd->depthwise);
+    EXPECT_EQ(fwd->chunks, 1);
+    EXPECT_EQ(fwd->tiles, 32 * 2 * 2);
+    EXPECT_EQ(fwd->productGridPerChunk, 256 * 32 * 2 * 2); // one fused block a tile and channel
+    EXPECT_EQ(fwd->workspaceBytes, size_t{256} * 2112 * 8); // the filter spectra alone
+    const auto wrw = planOf(dw, ConvDirection::BACKWARD_WEIGHTS, f);
+    ASSERT_TRUE(wrw.has_value());
+    EXPECT_GE(wrw->args.parts, 1);
+    EXPECT_GE(static_cast<int64_t>(wrw->args.parts) * wrw->args.tilesPerPart, wrw->tiles);
+    EXPECT_EQ(wrw->args.tilesPerPart % f.pb, 0);
+    // The product tile is meaningless without a product: the gn twins are not offered.
+    auto narrow = f;
+    narrow.gn = 16;
+    EXPECT_FALSE(planOf(dw, ConvDirection::FORWARD, narrow).has_value());
+    // The depthwise floor counts the transforms: a 3x3 depthwise layer is refused.
+    auto small = dw;
+    small.filter = {3, 3};
+    small.prePadding = small.postPadding = {1, 1};
+    auto sixteen = Fields{};
+    sixteen.th = sixteen.tw = 16;
+    sixteen.pb = 8;
+    sixteen.tb = 128;
+    EXPECT_FALSE(planOf(small, ConvDirection::FORWARD, sixteen).has_value());
+}
+
 TEST(TestConvFftPlan, RefusesFilterSpectraBeyondTheCap)
 {
     auto huge = largeShape();

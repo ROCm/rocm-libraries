@@ -107,7 +107,21 @@ inline constexpr int64_t ADMIT_MIN_MACS = int64_t{1} << 26;
 bool admissionFloorEnabled();
 
 /// The direct convolution's multiply-accumulates over the product's (real) ones for @p config.
+/// Depthwise problems (one input and one output channel a group) have no product over channels
+/// to amortize the transforms, so their count adds the forward and inverse transforms of a tile
+/// (2.5 th tw log2(th tw) multiply-accumulate equivalents each) per output tile.
 double fftAdvantage(const FftProblem& problem, const Config& config);
+
+/// The admission floor of the depthwise path (same meaning as ADMIT_RATIO, transforms counted):
+/// depthwise direct kernels are bound by memory and latency rather than arithmetic, so a smaller
+/// arithmetic advantage pays.
+inline constexpr double ADMIT_RATIO_DEPTHWISE = 2.0;
+
+/// True for the depthwise path: one input and one output channel a group.
+inline bool isDepthwise(const FftProblem& problem)
+{
+    return problem.cg == 1 && problem.kg == 1;
+}
 
 /// How a config runs a problem.
 struct Plan
@@ -116,6 +130,9 @@ struct Plan
     Config config;
     ConvFftArgs args{}; ///< the fields every launch shares; per-launch fields set at launch
     int bins = 0;
+    /// The depthwise path: fwd / bwd as filter transform + one fused transform-multiply-inverse
+    /// launch; wrw as per-partition sums, an ordered fold and the inverse.
+    bool depthwise = false;
     int tiles = 0; ///< P
     int chunk = 0; ///< tiles a chunk
     int chunks = 0;
@@ -137,14 +154,17 @@ struct Plan
 };
 
 /**
- * @brief The plan @p config runs @p problem with in @p direction, or nullopt when the config does
- *        not serve it: the dilated filter does not fit the transform (span > th or tw, or a 1-D
+ * @brief The plan @p config runs @p problem with in @p direction on a device of @p computeUnits
+ *        dispatch units (0: unknown; sizes the depthwise wrw partitions), or nullopt when the
+ *        config does not serve it: the dilated filter does not fit the transform (span > th or tw, or a 1-D
  *        transform for a filter taller than one row), the config is below the admission floor,
  *        the filter (or weight-gradient) spectra alone exceed the workspace cap, or a launch
  *        exceeds a 32-bit grid or index.
  */
-std::optional<Plan>
-    planFor(const FftProblem& problem, conv_naive::ConvDirection direction, const Config& config);
+std::optional<Plan> planFor(const FftProblem& problem,
+                            conv_naive::ConvDirection direction,
+                            const Config& config,
+                            int64_t computeUnits = 0);
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::conv_fft
 

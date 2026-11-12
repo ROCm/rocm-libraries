@@ -6,6 +6,7 @@
 #include "engines/kernel_ingestor_engine/packs/ConvFftProblem.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <limits>
 #include <string_view>
@@ -198,17 +199,91 @@ double fftAdvantage(const FftProblem& problem, const Config& config)
     const double tiles
         = static_cast<double>(divUp(problem.ho, oh)) * static_cast<double>(divUp(problem.wo, ow));
     const double direct = static_cast<double>(problem.ho) * problem.wo * problem.r * problem.s;
-    return direct / (4.0 * config.bins() * tiles);
+    double perTile = 4.0 * config.bins();
+    if(isDepthwise(problem))
+    {
+        const double points = static_cast<double>(config.th) * config.tw;
+        perTile += 2.0 * 2.5 * points * std::log2(points);
+    }
+    return direct / (perTile * tiles);
 }
+
+namespace
+{
+
+/// The depthwise path's workspace and grids (planFor's tail for one-channel groups).
+std::optional<Plan> depthwisePlan(Plan plan, bool wrw, int64_t computeUnits)
+{
+    auto& a = plan.args;
+    const int64_t groups = a.groups;
+    const int64_t bins = plan.bins;
+    const int64_t pb = plan.config.pb;
+    plan.chunks = 1;
+    plan.chunk = plan.tiles;
+    a.p0 = 0;
+    a.pc = plan.tiles;
+    const auto spectra = pack_features::checkedProduct({groups, bins, 8});
+    if(!spectra.has_value())
+    {
+        return std::nullopt;
+    }
+    plan.fixedOffset = 0;
+    plan.fixedBytes = static_cast<size_t>(*spectra);
+    plan.aOffset = alignUp(plan.fixedBytes);
+    plan.aBytes = 0;
+    plan.filterGrid = groups; // fwd / bwd filter transform; wrw inverse (one filter a group)
+    if(wrw)
+    {
+        // Enough partitions of the tiles that groups x partitions blocks fill the device four
+        // times over; each partition a whole number of transform blocks.
+        const int64_t units = computeUnits > 0 ? computeUnits : 64;
+        const int64_t blocks = divUp(plan.tiles, pb);
+        const int64_t parts = std::clamp<int64_t>(divUp(4 * units, groups), 1, blocks);
+        const int64_t perPart = divUp(blocks, parts) * pb;
+        a.tilesPerPart = static_cast<int>(perPart);
+        a.parts = static_cast<int>(divUp(plan.tiles, perPart));
+        plan.aBytes = static_cast<size_t>(a.parts) * plan.fixedBytes;
+        plan.productGridPerChunk = groups * a.parts; // the partial-sum launch
+    }
+    else
+    {
+        plan.productGridPerChunk = groups * divUp(plan.tiles, pb); // the fused launch
+    }
+    plan.bOffset = alignUp(plan.aOffset + plan.aBytes);
+    plan.bBytes = 0;
+    plan.workspaceBytes = plan.bOffset;
+    if(plan.workspaceBytes > workspaceCapBytes())
+    {
+        return std::nullopt;
+    }
+    for(const long long grid : {plan.filterGrid, plan.productGridPerChunk})
+    {
+        if(grid < 1 || grid > INT_LIMIT || grid * 256 > WORK_ITEM_LIMIT)
+        {
+            return std::nullopt;
+        }
+    }
+    return plan;
+}
+
+} // namespace
 
 long long Plan::dataGrid(int tilesInChunk, int channels) const
 {
     return divUp(tilesInChunk, config.pb) * static_cast<long long>(args.groups) * channels;
 }
 
-std::optional<Plan>
-    planFor(const FftProblem& problem, ConvDirection direction, const Config& config)
+std::optional<Plan> planFor(const FftProblem& problem,
+                            ConvDirection direction,
+                            const Config& config,
+                            int64_t computeUnits)
 {
+    const bool depthwise = isDepthwise(problem);
+    // One product tile for the depthwise path (it has no product): the gn twins are not offered.
+    if(depthwise && config.gn != 64)
+    {
+        return std::nullopt;
+    }
     if(config.th == 1 && problem.spanH() != 1)
     {
         return std::nullopt;
@@ -221,7 +296,7 @@ std::optional<Plan>
     }
     if(admissionFloorEnabled()
        && (problem.base.multiplyAccumulates < ADMIT_MIN_MACS
-           || fftAdvantage(problem, config) < ADMIT_RATIO))
+           || fftAdvantage(problem, config) < (depthwise ? ADMIT_RATIO_DEPTHWISE : ADMIT_RATIO)))
     {
         return std::nullopt;
     }
@@ -260,6 +335,12 @@ std::optional<Plan>
         return std::nullopt;
     }
     plan.tiles = static_cast<int>(*tiles);
+    plan.depthwise = depthwise;
+    plan.transformThreads = config.tb;
+    if(depthwise)
+    {
+        return depthwisePlan(std::move(plan), wrw, computeUnits);
+    }
 
     const int64_t groups = problem.groups;
     const int64_t bins = plan.bins;

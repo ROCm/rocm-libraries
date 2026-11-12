@@ -316,8 +316,12 @@ std::vector<DeviceCase> deviceCases()
     auto convolution = conv(2, 6, 10, 1, {33, 33}, {13, 13}, {6, 6}, {1, 1}, true);
     convolution.mode = ConvMode::CONVOLUTION;
     add("ConvolutionMode", convolution);
-    // Depthwise.
+    // Depthwise (the fused path: transform, filter multiply, inverse in one launch; backward
+    // weights as partition sums folded in order), a 31x31 one channels-last, and a depth
+    // multiplier of 2 (the general path: two output channels a group).
     add("Depthwise13x13", conv(2, 16, 16, 16, {40, 40}, {13, 13}, {6, 6}, {1, 1}, false));
+    add("Depthwise31x31Nhwc", conv(1, 8, 8, 8, {45, 45}, {31, 31}, {15, 15}, {1, 1}, true));
+    add("DepthwiseMult2", conv(2, 8, 16, 8, {23, 27}, {9, 9}, {4, 4}, {1, 1}, false));
     // An output smaller than any tile, no padding.
     add("ValidSmall", conv(3, 8, 8, 1, {9, 9}, {5, 5}, {0, 0}, {1, 1}, false));
     // Several chunks: a 2 MB workspace cap leaves room for about a hundred 16x16 tiles.

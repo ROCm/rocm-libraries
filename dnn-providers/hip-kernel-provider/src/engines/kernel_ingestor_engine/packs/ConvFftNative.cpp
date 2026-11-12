@@ -31,6 +31,7 @@
 #include "engines/kernel_ingestor_engine/IngestorPreparedDispatch.hpp"
 #include "engines/kernel_ingestor_engine/descriptors/conv/fft/kernels/ConvFftArgs.h"
 #include "engines/kernel_ingestor_engine/packs/ConvFftProblem.hpp"
+#include "engines/kernel_ingestor_engine/packs/DeviceUnits.hpp"
 #include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
 
 /**
@@ -147,7 +148,8 @@ std::optional<Resolved> resolve(const MatchContext& context, const KernelDefinit
     {
         return std::nullopt;
     }
-    auto plan = conv_fft::planFor(*problem, *direction, *config);
+    auto plan = conv_fft::planFor(
+        *problem, *direction, *config, device_units::dispatchUnits(context.deviceProperties));
     if(!plan.has_value())
     {
         return std::nullopt;
@@ -253,7 +255,19 @@ public:
             int threads;
         };
         std::vector<Launch> launches;
-        if(wrw)
+        if(plan.depthwise && wrw)
+        {
+            const long long foldGrid = (static_cast<long long>(a.groups) * plan.bins + 255) / 256;
+            launches = {{"ConvFftDepthwiseWgrad", plan.productGridPerChunk, config.tb},
+                        {"ConvFftDepthwiseFold", foldGrid, 256},
+                        {"ConvFftWgradOut", plan.filterGrid, config.tb}};
+        }
+        else if(plan.depthwise)
+        {
+            launches = {{"ConvFftFilter", plan.filterGrid, config.tb},
+                        {"ConvFftDepthwise", plan.productGridPerChunk, config.tb}};
+        }
+        else if(wrw)
         {
             launches = {{"ConvFftData", plan.dataGrid(plan.chunk, a.ca), config.tb},
                         {"ConvFftData", plan.dataGrid(plan.chunk, a.cb), config.tb},
@@ -315,6 +329,58 @@ public:
             }
         };
 
+        if(plan.depthwise && resolved.direction == ConvDirection::BACKWARD_WEIGHTS)
+        {
+            ConvFftArgs partial = plan.args;
+            partial.src = xPtr; // x windows: th x tw, at the graph's padding
+            copy4(partial.srcStr, problem.xStr);
+            partial.srcH = problem.h;
+            partial.srcW = problem.w;
+            partial.padH = problem.padH;
+            partial.padW = problem.padW;
+            partial.validH = plan.config.th;
+            partial.validW = plan.config.tw;
+            partial.src2 = yPtr; // dy windows: the oh x ow tile, zero-padded
+            copy4(partial.src2Str, problem.yStr);
+            partial.src2H = problem.ho;
+            partial.src2W = problem.wo;
+            partial.valid2H = plan.args.oh;
+            partial.valid2W = plan.args.ow;
+            partial.wsOut = specA;
+            dispatch.kernel(0, stream).launch(stream, partial);
+            ConvFftArgs fold = plan.args;
+            fold.wsA = specA;
+            fold.wsY = fixed;
+            dispatch.kernel(1, stream).launch(stream, fold);
+            ConvFftArgs inverse = plan.args;
+            inverse.wsY = fixed;
+            inverse.dst = wPtr;
+            copy4(inverse.dstStr, problem.wStr);
+            dispatch.kernel(2, stream).launch(stream, inverse);
+            return;
+        }
+        if(plan.depthwise)
+        {
+            const bool bwd = resolved.direction == ConvDirection::BACKWARD_DATA;
+            ConvFftArgs filter = plan.args;
+            filter.filt = wPtr;
+            filter.wsOut = fixed;
+            dispatch.kernel(0, stream).launch(stream, filter);
+            ConvFftArgs fused = plan.args;
+            fused.src = bwd ? yPtr : xPtr;
+            copy4(fused.srcStr, bwd ? problem.yStr : problem.xStr);
+            fused.srcH = bwd ? problem.ho : problem.h;
+            fused.srcW = bwd ? problem.wo : problem.w;
+            fused.padH = bwd ? problem.spanH() - 1 - problem.padH : problem.padH;
+            fused.padW = bwd ? problem.spanW() - 1 - problem.padW : problem.padW;
+            fused.validH = plan.config.th;
+            fused.validW = plan.config.tw;
+            fused.wsB = fixed;
+            fused.dst = bwd ? xPtr : yPtr;
+            copy4(fused.dstStr, bwd ? problem.xStr : problem.yStr);
+            dispatch.kernel(1, stream).launch(stream, fused);
+            return;
+        }
         if(resolved.direction == ConvDirection::BACKWARD_WEIGHTS)
         {
             for(int chunk = 0; chunk < plan.chunks; ++chunk)

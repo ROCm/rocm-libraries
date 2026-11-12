@@ -68,5 +68,12 @@ struct ConvFftArgs
     int p0; ///< first tile of this chunk
     int pc; ///< tiles in this chunk (the spectra's tile extent)
     int accumulate; ///< wgrad: add this chunk's sums to wsY (0 for the first chunk)
-    int padding0;
+    int parts; ///< depthwise wgrad: partitions of the tiles
+    int tilesPerPart; ///< depthwise wgrad: tiles a partition (a multiple of the block's tiles)
+    int src2H; ///< depthwise wgrad: dy extent (src2, read without padding)
+    int src2W;
+    int valid2H; ///< depthwise wgrad: points of a dy window read (the output tile)
+    int valid2W;
+    const void* src2; ///< depthwise wgrad: dy
+    long long src2Str[4]; ///< element strides of src2: n, channel, h, w
 };
