@@ -24,9 +24,9 @@ add_executable( rocfft-internal-test
   data_set_test.cpp
   function_pool_test.cpp
   internal_test_main.cpp
+  kernel_name_test.cpp
   rtc_test.cpp
   solution_map_test.cpp
-  ../data_set.cpp
   ../enum_printer.cpp
   ../rocfft_stub.cpp
 )
@@ -39,6 +39,7 @@ target_compile_definitions( rocfft-internal-test PRIVATE
 target_include_directories( rocfft-internal-test PRIVATE
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/include>
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/device>
+  $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/device/generator>
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/include>
   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/shared>
   $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
@@ -58,6 +59,7 @@ target_link_libraries( rocfft-internal-test PRIVATE
   rocfft-rtc-common
   rocfft-rtc-compile
   rocfft-rtc-gen
+  rocfft-data-set
   rocfft-rtc-launch
   rocfft-rtc-subprocess
   rocfft-solution-map
