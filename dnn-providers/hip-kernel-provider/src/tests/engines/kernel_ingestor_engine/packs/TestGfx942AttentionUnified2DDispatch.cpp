@@ -52,8 +52,14 @@ using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;
 /// cannot quietly stop covering one.
 const std::vector<std::string_view>& allTokens()
 {
-    static const std::vector<std::string_view> s_tokens{
-        Q_TOKEN, K_TOKEN, V_TOKEN, O_TOKEN, MASK_TOKEN, SLIDING_WINDOW_TOKEN, SCALE_BITS_TOKEN};
+    static const std::vector<std::string_view> s_tokens{Q_TOKEN,
+                                                        K_TOKEN,
+                                                        V_TOKEN,
+                                                        O_TOKEN,
+                                                        MASK_TOKEN,
+                                                        SLIDING_WINDOW_TOKEN,
+                                                        SCALE_BITS_TOKEN,
+                                                        STATS_TOKEN};
     return s_tokens;
 }
 
@@ -247,6 +253,14 @@ TEST(TestGfx942AttentionUnified2DDispatch, BindsTheBottomRightMaskAndAZeroSlidin
 TEST(TestGfx942AttentionUnified2DDispatch, BindsExactlyTheTokensTheDispatchReads)
 {
     EXPECT_EQ(bindingsFor(Graph{}).size(), allTokens().size());
+}
+
+/// No LSE-on kernel ships on gfx942, so every matched graph binds NO_STATS, which is what
+/// kernelMatches compares against a candidate that writes no stats.
+TEST(TestGfx942AttentionUnified2DDispatch, BindsNoStatsOutput)
+{
+    constexpr int64_t NO_STATS_UID = -1;
+    EXPECT_EQ(tokenValue(bindingsFor(Graph{}), STATS_TOKEN), NO_STATS_UID);
 }
 
 // =============================================================================

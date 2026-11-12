@@ -69,6 +69,8 @@ constexpr std::string_view NUM_WARPS_FIELD = "num_warps";
 constexpr std::string_view BLOCK_M_PER_WARP_FIELD = "block_m_per_warp";
 constexpr std::string_view USE_MFMA_32X32_FIELD = "use_mfma_32x32";
 constexpr std::string_view USE_TRANSPOSED_QK_32X32_FIELD = "use_transposed_qk_32x32";
+/// 1 for an LSE-on kernel, which also writes the stats output head-major ([B, Hq, Sq, 1]).
+constexpr std::string_view EMIT_LSE_FIELD = "emit_lse";
 
 /// The geometry cold selection prefers: narrow 16x16, 4 warps x 16 rows, a 64-token KV tile.
 constexpr int64_t BASELINE_TILE_SIZE = 64;
@@ -86,6 +88,24 @@ constexpr std::string_view MASK_TOKEN = "gfx950_attention_unified_2d.mask_type";
 constexpr std::string_view SLIDING_WINDOW_TOKEN = "gfx950_attention_unified_2d.sliding_window";
 /// The softmax scale, f32, bound as its bit pattern (BoundTokens carry int64_t).
 constexpr std::string_view SCALE_BITS_TOKEN = "gfx950_attention_unified_2d.scale_bits";
+/// The stats output's uid, or NO_STATS for a graph that asks for none.
+constexpr std::string_view STATS_TOKEN = "gfx950_attention_unified_2d.stats.uid";
+
+/// The engine's bound-token names, field by field.
+constexpr unified_attention::BoundTokenNames tokenNames()
+{
+    unified_attention::BoundTokenNames names;
+    names.q = Q_TOKEN;
+    names.k = K_TOKEN;
+    names.v = V_TOKEN;
+    names.o = O_TOKEN;
+    names.maskType = MASK_TOKEN;
+    names.slidingWindow = SLIDING_WINDOW_TOKEN;
+    names.scaleBits = SCALE_BITS_TOKEN;
+    names.stats = STATS_TOKEN;
+    names.dispatchLabel = "gfx950 attention_unified_2d";
+    return names;
+}
 
 using unified_attention::integerMetadata;
 using unified_attention::MaskType;
@@ -105,6 +125,8 @@ struct AttentionUnified2DCandidate
     int64_t blockMPerWarp = 0;
     bool useMfma32x32 = false;
     bool useTransposedQk32x32 = false;
+    /// Also writes the stats output; its kernarg list ends in lse_ptr.
+    bool emitLse = false;
 };
 
 /**
@@ -129,8 +151,10 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
     const auto blockMPerWarp = integerMetadata(kernel, BLOCK_M_PER_WARP_FIELD);
     const auto useMfma32x32 = integerMetadata(kernel, USE_MFMA_32X32_FIELD);
     const auto useTransposedQk32x32 = integerMetadata(kernel, USE_TRANSPOSED_QK_32X32_FIELD);
+    const auto emitLse = integerMetadata(kernel, EMIT_LSE_FIELD);
     if(!headSize || !numQueryHeads || !numKvHeads || !blockSize || !maskType || !slidingWindow
-       || !tileSize || !numWarps || !blockMPerWarp || !useMfma32x32 || !useTransposedQk32x32)
+       || !tileSize || !numWarps || !blockMPerWarp || !useMfma32x32 || !useTransposedQk32x32
+       || !emitLse)
     {
         return std::nullopt;
     }
@@ -150,7 +174,7 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
         return std::nullopt;
     }
     if(*useMfma32x32 < 0 || *useMfma32x32 > 1 || *useTransposedQk32x32 < 0
-       || *useTransposedQk32x32 > 1)
+       || *useTransposedQk32x32 > 1 || *emitLse < 0 || *emitLse > 1)
     {
         return std::nullopt;
     }
@@ -176,7 +200,8 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
                                        *numWarps,
                                        *blockMPerWarp,
                                        *useMfma32x32 != 0,
-                                       *useTransposedQk32x32 != 0};
+                                       *useTransposedQk32x32 != 0,
+                                       *emitLse != 0};
 }
 
 /// This catalog lists each head configuration as its own entry, so a candidate bakes both head
@@ -197,14 +222,7 @@ constexpr unified_attention::Unified2DArch<AttentionUnified2DCandidate> ARCH{
     {"gfx950",
      GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME,
      &GFX950_UNIFIED_ATTENTION_TRAITS,
-     {Q_TOKEN,
-      K_TOKEN,
-      V_TOKEN,
-      O_TOKEN,
-      MASK_TOKEN,
-      SLIDING_WINDOW_TOKEN,
-      SCALE_BITS_TOKEN,
-      "gfx950 attention_unified_2d"},
+     tokenNames(),
      &gfx950Unified3DServesGqaGroup,
      "Unified3D",
      /*bottomRightOnly=*/false,

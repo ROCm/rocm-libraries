@@ -41,8 +41,9 @@
  *   matchOperands()   node, operands, layout, dtype and shape consistency
  *   (engine rules)    GQA group, head size, seqlen_q, and anything else the engine adds
  *   matchAttributes() whole paged-KV blocks, 32-bit addressing, the mask, every optional
- *                     attribute the kernels cannot honour, and the scale
- *   bindGraph()       the bound tokens, with the engine's catalog mask key
+ *                     attribute the kernels cannot honour, the stats output (matchStats(), for
+ *                     an arch that ships LSE-on kernels; any other declines it) and the scale
+ *   bindGraph()       the bound tokens, with the engine's catalog mask key and stats uid
  *
  * A matcher fix is one edit here; decline lines name their engine through DeclinedBy.
  */
@@ -80,6 +81,32 @@ inline std::string notBshdReason(std::string_view role,
            "[tokens, heads, head_size] and K/V as a gap-free paged cache and takes no stride "
            "arguments";
     return out.str();
+}
+
+/// The bound stats uid of a graph that asks for no softmax statistics.
+inline constexpr int64_t NO_STATS = -1;
+
+/**
+ * @brief Is this stats tensor head-major [B, H, S, 1] and gap-free, the layout the LSE-on
+ *        kernels write? Callers must have checked isWellFormedOperand().
+ *
+ * hipDNN's stats layout. Unit-extent axes are exempt, as in hasBshdStrides(): at decode
+ * (S == 1) the token-major [B, S, H, 1] strides describe the same memory and pass too.
+ */
+inline bool hasHeadMajorStatsStrides(const data_objects::TensorAttributes& tensor)
+{
+    const auto* dims = tensor.dims();
+    const auto* strides = tensor.strides();
+
+    const int64_t heads = dims->Get(HEAD_AXIS);
+    const int64_t sequence = dims->Get(SEQ_AXIS);
+
+    const auto axisOk = [&](uint32_t axis, std::optional<int64_t> expected) {
+        return dims->Get(axis) == 1 || (expected.has_value() && strides->Get(axis) == *expected);
+    };
+
+    return axisOk(BATCH_AXIS, pack_features::checkedProduct({heads, sequence}))
+           && axisOk(HEAD_AXIS, sequence) && axisOk(SEQ_AXIS, 1) && axisOk(HEAD_SIZE_AXIS, 1);
 }
 
 /// The mask kinds these engines serve, in the numbering of rocKE's AttentionMaskType and of
@@ -338,15 +365,77 @@ struct MatchedAttributes
 {
     MaskType mask = MaskType::NO_MASK;
     float scale = 0.0F;
+    /// The stats output's uid, or NO_STATS. Only an LSE-on kernel serves a graph with one.
+    int64_t stats = NO_STATS;
 };
 
 /**
+ * @brief The stats output's uid, NO_STATS for a graph that asks for none, or nullopt (with
+ *        the cause logged) for one these kernels cannot write.
+ *
+ * The LSE-on kernels write the natural-log LSE, FP32, head-major [B, Hq, Sq, 1] (see
+ * hasHeadMajorStatsStrides()). generate_stats and the stats tensor must come together; the
+ * max, sum_exp and rng_dump outputs are never written.
+ */
+inline std::optional<int64_t> matchStats(const MatchContext& context,
+                                         const data_objects::SdpaAttributes& attributes,
+                                         const SdpaShape& problem,
+                                         std::string_view engine)
+{
+    if(attributes.max_tensor_uid().has_value() || attributes.sum_exp_tensor_uid().has_value()
+       || attributes.rng_dump_tensor_uid().has_value())
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "stats"})
+                               << "softmax max, sum_exp and rng_dump outputs are not supported");
+        return std::nullopt;
+    }
+    // generate_stats is optional<bool>; explicit false is no request.
+    const bool generateStats
+        = attributes.generate_stats().has_value() && attributes.generate_stats().value();
+    const auto statsUid = attributes.stats_tensor_uid();
+    if(!generateStats && !statsUid.has_value())
+    {
+        return NO_STATS;
+    }
+    if(!generateStats || !statsUid.has_value())
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "stats"})
+                               << "generate_stats and a stats tensor must come together");
+        return std::nullopt;
+    }
+
+    const auto* stats = findTensor(context, statsUid.value());
+    if(stats == nullptr || !isWellFormedOperand(*stats))
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "stats"})
+                               << "the stats output (uid " << statsUid.value()
+                               << ") is missing, virtual, or not a rank-4 tensor with positive "
+                                  "dims");
+        return std::nullopt;
+    }
+    const auto* dims = stats->dims();
+    if(stats->data_type() != data_objects::DataType::FLOAT || dims->Get(BATCH_AXIS) != problem.batch
+       || dims->Get(HEAD_AXIS) != problem.numQueryHeads || dims->Get(SEQ_AXIS) != problem.seqLenQ
+       || dims->Get(HEAD_SIZE_AXIS) != 1 || !hasHeadMajorStatsStrides(*stats))
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "stats"})
+                               << describeOperand("stats", *stats)
+                               << " is not FP32 head-major [B, Hq, Sq, 1]; the kernel writes the "
+                                  "LSE in that layout and takes no stride arguments");
+        return std::nullopt;
+    }
+    return statsUid;
+}
+
+/**
  * @brief Whole paged-KV blocks, 32-bit addressing, the mask, every optional attribute these
- *        kernels cannot honour, and the scale. Logs each decline under @p engine; the block
- *        sizes and the 32-bit bound are @p traits'.
+ *        kernels cannot honour, the stats output and the scale. Logs each decline under
+ *        @p engine; the block sizes, the 32-bit bound and whether the arch serves a stats
+ *        output at all (UnifiedAttentionArchTraits::servesStats) are @p traits'.
  */
 inline std::optional<MatchedAttributes>
-    matchAttributes(const data_objects::SdpaAttributes& attributes,
+    matchAttributes(const MatchContext& context,
+                    const data_objects::SdpaAttributes& attributes,
                     const SdpaShape& problem,
                     std::string_view engine,
                     const UnifiedAttentionArchTraits& traits)
@@ -472,11 +561,22 @@ inline std::optional<MatchedAttributes>
                                   "supported");
         return std::nullopt;
     }
-    // Auxiliary softmax outputs. generate_stats is optional<bool>; explicit false is fine.
-    if(attributes.stats_tensor_uid().has_value() || attributes.max_tensor_uid().has_value()
-       || attributes.sum_exp_tensor_uid().has_value()
-       || attributes.rng_dump_tensor_uid().has_value()
-       || (attributes.generate_stats().has_value() && attributes.generate_stats().value()))
+    // Auxiliary softmax outputs. An arch that ships no LSE-on kernel declines every one by
+    // name; one that does serves the stats output only.
+    int64_t statsUid = NO_STATS;
+    if(traits.servesStats)
+    {
+        const auto stats = matchStats(context, attributes, problem, engine);
+        if(!stats.has_value())
+        {
+            return std::nullopt;
+        }
+        statsUid = *stats;
+    }
+    else if(attributes.stats_tensor_uid().has_value() || attributes.max_tensor_uid().has_value()
+            || attributes.sum_exp_tensor_uid().has_value()
+            || attributes.rng_dump_tensor_uid().has_value()
+            || (attributes.generate_stats().has_value() && attributes.generate_stats().value()))
     {
         HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "stats"})
                                << "softmax statistics outputs (stats, max, sum_exp, rng_dump or "
@@ -528,7 +628,7 @@ inline std::optional<MatchedAttributes>
         return std::nullopt;
     }
 
-    return MatchedAttributes{*mask, scale};
+    return MatchedAttributes{*mask, scale, statsUid};
 }
 
 /// An engine's bound-token names: each engine prefixes its own, so two engines' bindings
@@ -546,6 +646,9 @@ struct BoundTokenNames
     std::string_view slidingWindow;
     /// The softmax scale, f32, bound as its bit pattern (BoundTokens carry int64_t).
     std::string_view scaleBits;
+    /// The stats output's uid, or NO_STATS: kernelMatches pairs it with the candidate's
+    /// emit_lse.
+    std::string_view stats;
     std::string_view dispatchLabel;
 };
 
@@ -555,6 +658,7 @@ struct BoundTokenNames
 inline BoundTokens bindGraph(const data_objects::SdpaAttributes& attributes,
                              MaskType maskKey,
                              float scale,
+                             int64_t stats,
                              const BoundTokenNames& names)
 {
     BoundTokens bound;
@@ -571,6 +675,7 @@ inline BoundTokens bindGraph(const data_objects::SdpaAttributes& attributes,
     static_assert(sizeof(scaleBits) == sizeof(scale), "float must be 32-bit to round-trip");
     std::memcpy(&scaleBits, &scale, sizeof(scale));
     bound[std::string(names.scaleBits)] = static_cast<int64_t>(scaleBits);
+    bound[std::string(names.stats)] = stats;
     return bound;
 }
 
@@ -584,6 +689,8 @@ struct UnifiedAttentionBinding
     int64_t maskType = 0;
     int64_t slidingWindow = 0;
     float scale = 0.0F;
+    /// The stats output's uid, or NO_STATS.
+    int64_t stats = NO_STATS;
 };
 
 /// Re-reads the bindings bindGraph() established. Throws if one is missing.
@@ -608,6 +715,7 @@ inline UnifiedAttentionBinding readBinding(const BoundTokens& bound, const Bound
     binding.o = read(names.o);
     binding.maskType = read(names.maskType);
     binding.slidingWindow = read(names.slidingWindow);
+    binding.stats = read(names.stats);
 
     const auto scaleBits = static_cast<int32_t>(read(names.scaleBits));
     std::memcpy(&binding.scale, &scaleBits, sizeof(binding.scale));

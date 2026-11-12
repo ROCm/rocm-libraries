@@ -551,6 +551,20 @@ TEST(TestGfx942AttentionUnified2DMatchers, AcceptsTheInertSpellingsOfThoseFeatur
     }
 }
 
+/// No LSE-on kernel ships on gfx942, so a stats output is declined by name even when it is the
+/// head-major FP32 tensor gfx950's LSE-on kernels write: the shared stats match would accept
+/// it, and the catalog would empty at kernel_match with no line to say why.
+TEST(TestGfx942AttentionUnified2DMatchers, DeclinesAWellFormedStatsOutputByName)
+{
+    GraphSpec spec;
+    spec.stats = true;
+    EXPECT_FALSE(graphMatches(spec));
+    EXPECT_EQ(loggedDeclineCause(spec), "stats");
+
+    GraphSpec sameWithoutStats;
+    EXPECT_TRUE(graphMatches(sameWithoutStats));
+}
+
 /// The scale is an f32 kernarg and the kernel folds it into an exp2-domain multiplier: zero,
 /// negative, NaN and infinite scales are not softmax scales.
 TEST(TestGfx942AttentionUnified2DMatchers, DeclinesAScaleThatIsNotAFinitePositiveNumber)

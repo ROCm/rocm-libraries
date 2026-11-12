@@ -63,6 +63,7 @@ inline constexpr std::string_view MASK_TOKEN = "gfx942_attention_unified_2d.mask
 inline constexpr std::string_view SLIDING_WINDOW_TOKEN
     = "gfx942_attention_unified_2d.sliding_window";
 inline constexpr std::string_view SCALE_BITS_TOKEN = "gfx942_attention_unified_2d.scale_bits";
+inline constexpr std::string_view STATS_TOKEN = "gfx942_attention_unified_2d.stats.uid";
 
 using namespace unified_attention;
 

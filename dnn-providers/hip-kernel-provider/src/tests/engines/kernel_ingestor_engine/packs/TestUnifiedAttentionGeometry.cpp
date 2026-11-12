@@ -77,6 +77,14 @@ TEST(TestUnifiedAttentionGeometry, SmallestBlockSizeIsTheMinimumOfTheTraits)
               GFX950_UNIFIED_2D_BLOCK_SIZE_SMALL);
 }
 
+/// Only gfx950 ships LSE-on kernels: gfx942's graph match declines a stats output.
+TEST(TestUnifiedAttentionGeometry, OnlyGfx950ServesAStatsOutput)
+{
+    static_assert(GFX950_UNIFIED_ATTENTION_TRAITS.servesStats);
+    static_assert(!GFX942_UNIFIED_ATTENTION_TRAITS.servesStats);
+    EXPECT_TRUE(Q_MAJOR_WAVE32.servesStats);
+}
+
 /// The same launch on a q-major wave32 target: the axes swap and the CTA halves.
 TEST(TestUnifiedAttentionGeometry, TraitsSwapTheGridAndSizeTheBlock)
 {

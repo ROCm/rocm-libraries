@@ -204,8 +204,8 @@ inline std::optional<BoundTokens> graphMatches(const MatchContext& context,
         return std::nullopt;
     }
 
-    const auto matched
-        = matchAttributes(*operands->attributes, problem, arch.engineName, *arch.traits);
+    const auto matched = matchAttributes(
+        context, *operands->attributes, problem, arch.engineName, *arch.traits);
     if(!matched.has_value())
     {
         return std::nullopt;
@@ -224,12 +224,14 @@ inline std::optional<BoundTokens> graphMatches(const MatchContext& context,
             << " kernel computes the bottom-right causal band only");
         return std::nullopt;
     }
-    return bindGraph(*operands->attributes, matched->mask, matched->scale, arch.tokens);
+    return bindGraph(
+        *operands->attributes, matched->mask, matched->scale, matched->stats, arch.tokens);
 }
 
 /// What the kernel match and the handler ask of one architecture's engine, over its candidate
 /// record @p Candidate (which must carry `headSize`, `blockSize`, `maskType`, `slidingWindow`,
-/// `numWarps` and `blockMPerWarp`).
+/// `numWarps`, `blockMPerWarp` and `emitLse`: whether the kernel also writes the stats output,
+/// always false where no LSE-on kernel ships).
 template <typename Candidate>
 struct Unified2DArch
 {
@@ -272,6 +274,8 @@ inline std::string errorPrefix(std::string_view label)
  *
  *   - dtype, head_size, the arch's head facts (Unified2DArch::headsMatch), the mask kind and
  *     the sliding window;
+ *   - the stats output: a candidate that writes it (emit_lse) serves only a graph that asks
+ *     for it, and every other candidate only a graph that does not;
  *   - block_size, which must divide seqlen_kv (the identity cache is whole blocks).
  */
 template <typename Candidate>
@@ -331,6 +335,15 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
 
+    // Only an LSE-on kernel serves a graph that asks for stats, and only such a graph: the
+    // LSE store is baked in, with its trailing lse_ptr.
+    const auto stats
+        = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, arch.graph.tokens.stats);
+    if(!stats.has_value() || candidate->emitLse != (*stats != NO_STATS))
+    {
+        return false;
+    }
+
     // The identity cache must be whole blocks of THIS candidate's size, and small enough for
     // the table the kernel indexes in 32 bits.
     return unifiedAttentionWorkspaceLayout(problem.batch, problem.seqLenKv, candidate->blockSize)
@@ -351,34 +364,42 @@ bool kernelMatches(const MatchContext& context,
 /// dispatch rather than silently weakening the check.
 ///
 /// Offsets mirror the packed kernarg layout. They are not compared; they exist so the
-/// mismatch diagnostic prints the real layout beside the recorded one.
-inline std::vector<KernelArgument> unified2DKernelSignature()
+/// mismatch diagnostic prints the real layout beside the recorded one. An LSE-on kernel
+/// (@p emitLse) appends lse_ptr.
+inline std::vector<KernelArgument> unified2DKernelSignature(bool emitLse = false)
 {
     constexpr auto PTR = static_cast<uint32_t>(sizeof(void*));
     constexpr auto I32 = static_cast<uint32_t>(sizeof(int32_t));
     constexpr auto F32 = static_cast<uint32_t>(sizeof(float));
 
-    return {KernelArgument{"global_buffer", PTR, 0, "output_ptr"},
-            KernelArgument{"global_buffer", PTR, 8, "query_ptr"},
-            KernelArgument{"global_buffer", PTR, 16, "key_cache_ptr"},
-            KernelArgument{"global_buffer", PTR, 24, "value_cache_ptr"},
-            KernelArgument{"global_buffer", PTR, 32, "sink_ptr"},
-            KernelArgument{"global_buffer", PTR, 40, "block_tables_ptr"},
-            KernelArgument{"global_buffer", PTR, 48, "seq_lens_ptr"},
-            KernelArgument{"global_buffer", PTR, 56, "alibi_slopes_ptr"},
-            KernelArgument{"global_buffer", PTR, 64, "qq_bias_ptr"},
-            KernelArgument{"global_buffer", PTR, 72, "query_start_len_ptr"},
-            KernelArgument{"by_value", F32, 80, "scale"},
-            KernelArgument{"by_value", F32, 84, "k_scale"},
-            KernelArgument{"by_value", F32, 88, "v_scale"},
-            KernelArgument{"by_value", F32, 92, "out_scale"},
-            KernelArgument{"by_value", F32, 96, "softcap"},
-            KernelArgument{"by_value", I32, 100, "num_seqs"},
-            KernelArgument{"by_value", I32, 104, "block_table_stride"},
-            KernelArgument{"by_value", I32, 108, "qq_bias_stride_0"},
-            KernelArgument{"by_value", I32, 112, "num_query_heads"},
-            KernelArgument{"by_value", I32, 116, "num_kv_heads"},
-            KernelArgument{"by_value", I32, 120, "sliding_window"}};
+    std::vector<KernelArgument> arguments{
+        KernelArgument{"global_buffer", PTR, 0, "output_ptr"},
+        KernelArgument{"global_buffer", PTR, 8, "query_ptr"},
+        KernelArgument{"global_buffer", PTR, 16, "key_cache_ptr"},
+        KernelArgument{"global_buffer", PTR, 24, "value_cache_ptr"},
+        KernelArgument{"global_buffer", PTR, 32, "sink_ptr"},
+        KernelArgument{"global_buffer", PTR, 40, "block_tables_ptr"},
+        KernelArgument{"global_buffer", PTR, 48, "seq_lens_ptr"},
+        KernelArgument{"global_buffer", PTR, 56, "alibi_slopes_ptr"},
+        KernelArgument{"global_buffer", PTR, 64, "qq_bias_ptr"},
+        KernelArgument{"global_buffer", PTR, 72, "query_start_len_ptr"},
+        KernelArgument{"by_value", F32, 80, "scale"},
+        KernelArgument{"by_value", F32, 84, "k_scale"},
+        KernelArgument{"by_value", F32, 88, "v_scale"},
+        KernelArgument{"by_value", F32, 92, "out_scale"},
+        KernelArgument{"by_value", F32, 96, "softcap"},
+        KernelArgument{"by_value", I32, 100, "num_seqs"},
+        KernelArgument{"by_value", I32, 104, "block_table_stride"},
+        KernelArgument{"by_value", I32, 108, "qq_bias_stride_0"},
+        KernelArgument{"by_value", I32, 112, "num_query_heads"},
+        KernelArgument{"by_value", I32, 116, "num_kv_heads"},
+        KernelArgument{"by_value", I32, 120, "sliding_window"}};
+    if(emitLse)
+    {
+        // After the runtime kernargs, 8-byte aligned (read off the compiled LSE kernel).
+        arguments.push_back(KernelArgument{"global_buffer", PTR, 128, "lse_ptr"});
+    }
+    return arguments;
 }
 
 /// The compiled kernel plus everything launch() needs, owning nothing that points back into
@@ -522,6 +543,15 @@ public:
         }
 
         const auto candidate = requireCandidate(kernel);
+        // kernelMatches pairs them; a caller that skipped it would launch the wrong kernarg
+        // list.
+        if(candidate.emitLse != (binding.stats != NO_STATS))
+        {
+            refuse(_arch.graph.label,
+                   "kernel '" + hipdnn_plugin_sdk::ingestor::toString(kernel.kernelId)
+                       + (candidate.emitLse ? "' writes stats, but the graph asks for none"
+                                            : "' writes no stats, but the graph asks for them"));
+        }
         const auto problem = boundProblem(context, binding, _arch.graph.label);
         if(_arch.prepareChecks != nullptr)
         {
@@ -540,8 +570,8 @@ public:
                        + "' cannot stage paged-KV metadata for this graph");
         }
 
-        auto code
-            = buildIngestorKernelCode(_kpackLoader, context, kernel, unified2DKernelSignature());
+        auto code = buildIngestorKernelCode(
+            _kpackLoader, context, kernel, unified2DKernelSignature(candidate.emitLse));
 
         // Grid from the SELECTED CANDIDATE'S geometry and the GRAPH PROBLEM, not from
         // descriptor shape metadata: the binary takes its shape at runtime.
@@ -616,29 +646,41 @@ public:
         const int32_t noQqBiasStride = 0;
 
         const auto& p = preparedUnified.problem();
-        preparedUnified.kernelForStream(stream).launch(
-            stream,
-            o.ptr,
-            q.ptr,
-            k.ptr,
-            v.ptr,
-            unused,
-            blockTables,
-            seqLens,
-            unused,
-            unused,
-            queryStartLen,
-            binding.scale,
-            neutralScale,
-            neutralScale,
-            neutralScale,
-            noSoftcap,
-            static_cast<int32_t>(p.batch),
-            static_cast<int32_t>(layout.blocksPerSeq),
-            noQqBiasStride,
-            static_cast<int32_t>(p.numQueryHeads),
-            static_cast<int32_t>(p.numKvHeads),
-            static_cast<int32_t>(preparedUnified.slidingWindow()));
+        // The kernarg list, which an LSE-on kernel ends with the stats output.
+        const auto launchWith = [&](auto... statsArgument) {
+            preparedUnified.kernelForStream(stream).launch(
+                stream,
+                o.ptr,
+                q.ptr,
+                k.ptr,
+                v.ptr,
+                unused,
+                blockTables,
+                seqLens,
+                unused,
+                unused,
+                queryStartLen,
+                binding.scale,
+                neutralScale,
+                neutralScale,
+                neutralScale,
+                noSoftcap,
+                static_cast<int32_t>(p.batch),
+                static_cast<int32_t>(layout.blocksPerSeq),
+                noQqBiasStride,
+                static_cast<int32_t>(p.numQueryHeads),
+                static_cast<int32_t>(p.numKvHeads),
+                static_cast<int32_t>(preparedUnified.slidingWindow()),
+                statsArgument...);
+        };
+        if(binding.stats != NO_STATS)
+        {
+            const auto stats = hipdnn_plugin_sdk::findDeviceBuffer(
+                binding.stats, deviceBuffers, numDeviceBuffers);
+            launchWith(stats.ptr);
+            return;
+        }
+        launchWith();
     }
 
 private:

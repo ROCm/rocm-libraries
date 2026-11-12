@@ -54,15 +54,25 @@ struct UnifiedAttentionArchTraits
     /// `num_warps` and `block_m_per_warp` values the 2D builder takes.
     std::array<int64_t, 4> numWarps = {1, 2, 4, 8};
     std::array<int64_t, 2> blockMPerWarp = {16, 32};
+    /// Whether the architecture ships LSE-on kernels, so a graph asking for the stats output
+    /// can be served. When false, the graph match declines every softmax statistics output.
+    bool servesStats = true;
 };
 
-/// gfx950 (CDNA4): wave64, kv-major grid.
+/// gfx950 (CDNA4): wave64, kv-major grid. Ships LSE-on kernels.
 inline constexpr UnifiedAttentionArchTraits GFX950_UNIFIED_ATTENTION_TRAITS{"gfx950"};
 
 /// gfx942 (CDNA3): wave64, kv-major grid. The 2D builder takes the same block sizes, warp
 /// counts and rows per warp as gfx950; the q-major grid (`use_q_major_grid`) is a codegen
-/// stack no shipped kernel enables.
-inline constexpr UnifiedAttentionArchTraits GFX942_UNIFIED_ATTENTION_TRAITS{"gfx942"};
+/// stack no shipped kernel enables. No LSE-on kernel ships, so a stats output is declined.
+constexpr UnifiedAttentionArchTraits gfx942UnifiedAttentionTraits()
+{
+    UnifiedAttentionArchTraits traits{"gfx942"};
+    traits.servesStats = false;
+    return traits;
+}
+inline constexpr UnifiedAttentionArchTraits GFX942_UNIFIED_ATTENTION_TRAITS
+    = gfx942UnifiedAttentionTraits();
 
 /// Each workspace section starts on this boundary.
 inline constexpr std::size_t UNIFIED_ATTENTION_WORKSPACE_ALIGNMENT = 256;

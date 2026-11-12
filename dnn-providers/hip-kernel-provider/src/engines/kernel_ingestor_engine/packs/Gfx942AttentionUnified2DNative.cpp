@@ -104,6 +104,24 @@ constexpr std::string_view MASK_TOKEN = "gfx942_attention_unified_2d.mask_type";
 constexpr std::string_view SLIDING_WINDOW_TOKEN = "gfx942_attention_unified_2d.sliding_window";
 /// The softmax scale, f32, bound as its bit pattern (BoundTokens carry int64_t).
 constexpr std::string_view SCALE_BITS_TOKEN = "gfx942_attention_unified_2d.scale_bits";
+/// Always NO_STATS: graph_match declines a graph that asks for a stats output.
+constexpr std::string_view STATS_TOKEN = "gfx942_attention_unified_2d.stats.uid";
+
+/// The engine's bound-token names, field by field.
+constexpr unified_attention::BoundTokenNames tokenNames()
+{
+    unified_attention::BoundTokenNames names;
+    names.q = Q_TOKEN;
+    names.k = K_TOKEN;
+    names.v = V_TOKEN;
+    names.o = O_TOKEN;
+    names.maskType = MASK_TOKEN;
+    names.slidingWindow = SLIDING_WINDOW_TOKEN;
+    names.scaleBits = SCALE_BITS_TOKEN;
+    names.stats = STATS_TOKEN;
+    names.dispatchLabel = "gfx942 attention_unified_2d";
+    return names;
+}
 
 using unified_attention::integerMetadata;
 using unified_attention::MaskType;
@@ -127,6 +145,9 @@ struct AttentionUnified2DCandidate
     bool useConflictFreeVStore = false;
     bool useTransposedMaskLimit = false;
     bool useTransposedInvariantHoist = false;
+    /// No LSE-on kernel ships on gfx942: graph_match declines a stats output, so every
+    /// candidate is judged against a graph that binds NO_STATS.
+    static constexpr bool emitLse = false;
 };
 
 /**
@@ -268,14 +289,7 @@ constexpr unified_attention::Unified2DArch<AttentionUnified2DCandidate> ARCH{
     {"gfx942",
      GFX942_ATTENTION_UNIFIED_2D_ENGINE_NAME,
      &GFX942_UNIFIED_ATTENTION_TRAITS,
-     {Q_TOKEN,
-      K_TOKEN,
-      V_TOKEN,
-      O_TOKEN,
-      MASK_TOKEN,
-      SLIDING_WINDOW_TOKEN,
-      SCALE_BITS_TOKEN,
-      "gfx942 attention_unified_2d"},
+     tokenNames(),
      &gfx942Unified3dServesGqaGroup,
      "Unified3d",
      /*bottomRightOnly=*/true,

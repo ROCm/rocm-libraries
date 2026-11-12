@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <variant>
 
 #include <gtest/gtest.h>
@@ -42,6 +43,8 @@ namespace ingestor = hipdnn_plugin_sdk::ingestor;
 
 constexpr std::size_t SEGMENT_ARGUMENTS = 22;
 constexpr std::size_t REDUCE_ARGUMENTS = 6;
+/// The name suffix of an LSE-on twin (the selection's `*_lse` group).
+constexpr std::string_view LSE_SUFFIX = "_lse.gfx950";
 
 TEST(TestGfx950AttentionUnified3DCatalogTiles, EveryShippedKernelsGeometryIsOneTheEngineLaunches)
 {
@@ -87,6 +90,7 @@ TEST(TestGfx950AttentionUnified3DCatalogTiles, EveryEntryLaunchesItsSegmentAndRe
     const auto& set = loadedSet(GFX950_ATTENTION_UNIFIED_3D_ENGINE_NAME);
 
     std::size_t checked = 0;
+    std::size_t lseOn = 0;
     for(const auto& pack : set.packs)
     {
         for(const auto& kernel : pack.kernels)
@@ -105,14 +109,23 @@ TEST(TestGfx950AttentionUnified3DCatalogTiles, EveryEntryLaunchesItsSegmentAndRe
             EXPECT_NE(reduce.symbol, segment.symbol);
             EXPECT_EQ(segment.sha256.size(), 64U);
             EXPECT_EQ(reduce.sha256.size(), 64U);
+            // An LSE-on twin's reduce also writes the stats output: one more trailing pointer.
+            const bool emitsLse = kernel.name.size() > LSE_SUFFIX.size()
+                                  && kernel.name.compare(kernel.name.size() - LSE_SUFFIX.size(),
+                                                         LSE_SUFFIX.size(),
+                                                         LSE_SUFFIX)
+                                         == 0;
+            lseOn += emitsLse ? 1U : 0U;
             ASSERT_EQ(segment.signature.size(), SEGMENT_ARGUMENTS);
-            ASSERT_EQ(reduce.signature.size(), REDUCE_ARGUMENTS);
+            ASSERT_EQ(reduce.signature.size(), REDUCE_ARGUMENTS + (emitsLse ? 1U : 0U));
             EXPECT_EQ(segment.signature.front().name, "segm_output_ptr");
             EXPECT_EQ(reduce.signature.front().name, "output_ptr");
-            EXPECT_EQ(reduce.signature.back().name, "num_query_heads");
+            EXPECT_EQ(reduce.signature.back().name, emitsLse ? "lse_ptr" : "num_query_heads");
         }
     }
     EXPECT_GT(checked, 0U) << "the loaded set holds no kernels to check";
+    // One LSE-on twin per cell: the catalog's 116 cells.
+    EXPECT_EQ(lseOn, 116U);
 }
 
 } // namespace
