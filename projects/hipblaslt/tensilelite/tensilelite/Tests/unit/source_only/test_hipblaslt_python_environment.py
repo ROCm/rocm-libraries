@@ -23,6 +23,7 @@ def _configured_environment(
         "\n".join(
             [
                 f'set(HIPBLASLT_ENABLE_THEROCK {"ON" if therock else "OFF"})',
+                'set(hip_VERSION "7.2.53211")',
                 'set(HIPBLASLT_BUILD_ROCM_ROOT "/graph/rocm")',
                 f'set(HIPBLASLT_BUILD_ROCM_VERSION "{version}")',
                 'set(HIPBLASLT_TENSILELITE_WHEEL_ROOT "/build/tensilelite-wheel")',
@@ -148,6 +149,16 @@ def test_therock_environment_without_a_version_still_marks_the_adapter(tmp_path)
 
     assert "TENSILELITE_ROCM_ADAPTER=therock-ci" in environment
     assert "THEROCK_PACKAGE_VERSION" not in environment
+
+
+@pytest.mark.parametrize("therock", [True, False])
+def test_generator_environment_carries_the_hip_version(tmp_path, therock):
+    # A TheRock build has no /opt/rocm, ROCM_PATH or HIP_PATH for
+    # tensilelite.Toolchain.Component to search when it is imported, so the
+    # version must come from the configure, as in develop's command.
+    environment = _configured_environment(tmp_path, therock=therock)
+
+    assert "ROCM_VERSION=7.2.53211" in environment
 
 
 def test_standalone_environment_retains_selected_rocm_path(tmp_path):
