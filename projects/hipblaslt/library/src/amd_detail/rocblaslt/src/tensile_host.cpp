@@ -82,6 +82,7 @@
 #include <atomic>
 #include <chrono>
 #include <complex>
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
