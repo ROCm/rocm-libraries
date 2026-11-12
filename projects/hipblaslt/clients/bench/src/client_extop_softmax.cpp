@@ -31,6 +31,7 @@
 #include <hipblaslt_init.hpp>
 #include <iostream>
 #include <numeric>
+#include <stdexcept>
 #include <vector>
 
 void printUsage(char* programName)
@@ -125,6 +126,13 @@ void initData(DType* data, std::size_t numElements, hipblaslt_initialization ini
     case hipblaslt_initialization::fp16_accumulator_probe:
         hipblaslt_init_zero<DType>(data, numElements, 1, 1);
         break;
+    // maf1_0, maf2_0 and maf2_0_unit_scale define GEMM A/B/C data; the argument parser already
+    // rejects them, so fail loudly here instead of leaving the buffer unfilled.
+    case hipblaslt_initialization::maf1_0:
+    case hipblaslt_initialization::maf2_0:
+    case hipblaslt_initialization::maf2_0_unit_scale:
+        throw std::invalid_argument(std::string(hipblaslt_initialization2string(initMethod))
+                                    + " is not supported by this client; use hipblaslt-bench");
     default:
         break;
     }
