@@ -132,9 +132,11 @@ struct WrwConfig
     /// 1: the epilogue also writes dw itself, used at one split into K T R S C or one tap
     /// (CONV_K3_DWS); 0: fp32 partials only, as compiled before the direct store. 0 for loop 5.
     int64_t dws = 0;
-    /// 1: block-based buffers (CONV_K3_PB): channels-first K3Tiles loops (0, 1, 6) whose x and
-    /// dy buffers start at the block's first channel, for images past the 32-bit buffer range;
-    /// admitted only there. 0 elsewhere.
+    /// 1: block-based buffers (CONV_K3_PB), for images past the 32-bit buffer range and admitted
+    /// only there: the channels-first K3Tiles loops (0, 1, 6), whose x and dy buffers start at
+    /// the block's first channel (its channel planes within the range), and the generic loop,
+    /// whose buffers start each step at the first element the block can read (its step windows
+    /// within the range; any layout and strides). 0 elsewhere.
     int64_t pb = 0;
     /// The split planner's target blocks per dispatch unit (1, 2, 4 or 8; 1 for loop 5, whose
     /// persistent grid has one workgroup per unit; 8 for small FMA blocks): host-side only.
@@ -145,7 +147,9 @@ struct WrwConfig
     /// (loop 6, at most 16 input channels per group), P (loop 1, the filter height fr, height
     /// stride 1 or phases), U (P with align 2: channels-last output channels in any count), G
     /// (loop 2, gfx950, fr at height stride 1) or D (loop 5, gfx950, as G with unit width
-    /// stride and unit height dilation or one filter row); fr 0 for R and C.
+    /// stride and unit height dilation or one filter row); fr 0 for R and C. Lower case r, p, c:
+    /// their block-based buffer forms, which serve large images alone (channels-first, each
+    /// channel plane within the range); the upper-case kinds serve the other images.
     std::string spec;
 };
 
@@ -165,8 +169,8 @@ struct WrwProblem
     bool filterChannelsLast = false;
     /// Filter taps (ft fr fs).
     int64_t taps = 0;
-    /// One image of x or of dy is past the 32-bit buffer range (channels-first only, each
-    /// channel plane within it): only block-based buffer configs (pb 1) serve it.
+    /// One image of x or of dy spans past the 32-bit buffer range: only block-based buffer
+    /// configs (pb 1) serve it.
     bool largeImage = false;
     /// x and dy have unit channel strides, every other stride a whole number of 16-byte vectors
     /// and channels per group whole vectors (packed or not): the generic loop's channels-last
@@ -195,9 +199,9 @@ std::optional<bool>
  * only, which reads them through their strides) any strides; dw packed K C T R S or
  * K T R S C; the batch within 32 bits; per spatial axis the reach of the kernel's 32-bit
  * position arithmetic ((output extent + 512) x stride + filter x dilation + padding) within 32
- * bits, which bounds every extent, padding, stride and dilation; the taps within 32 bits; one
- * image of x and one of dy within 2^31 bytes (32-bit buffer offsets; packed channels-first
- * images past it with each channel plane within it go to the block-based buffer configs).
+ * bits, which bounds every extent, padding, stride and dilation; the taps within 32 bits. An
+ * image of x or dy spanning past 2^31 bytes is a large image (WrwProblem::largeImage), for the
+ * block-based buffer configs alone.
  */
 std::optional<WrwProblem> parseWrwProblem(const hipdnn_plugin_sdk::ingestor::MatchContext& context);
 
@@ -329,9 +333,15 @@ DirectPlan directPlanFor(int64_t tiles,
  * most 64 passes.
  *
  * Loop 8 (generic taps, the coverage tier): a matrix atom; the filter, strides and dilations
- * runtime (s, sw, dw 0), fr the taps a block (>= 1); layout 1 exactly for problems with
+ * runtime (s, sw 0), fr the taps a block (>= 1); dw 0 (per-tap gathers) or the extra positions
+ * of a shared width window (layout 1, a multiple of 8, unit width stride, (min(fr, filter
+ * width) - 1) x width dilation within dw; fr width taps of one filter row a block, so
+ * ft fr ceil(fs / fr) grid rows a group); layout 1 exactly for problems with
  * vectorChannels, layout 0 for the rest (any strides, read element by element); bq dividing the
- * block's threads, bk and bc whole channel rows a pass; align, ns, wq and pb 0; at most 64
+ * block's threads, bk and bc whole channel rows a pass; align, ns and wq 0; pb 1 (large images)
+ * with each step's windows within the range: x 1 + (min(bc, cg) - 1) xs1 + the filter's depth
+ * and height reach (within the image) x xs2, xs3 + ((bq - 1) sw + (fs - 1) dw + dw) columns
+ * (within the image) x xs4, dy 1 + (min(bk, kg) - 1) ys1 + (bq - 1) ys4; at most 64
  * loads a thread in flight; not for filters of at most 9 taps dilated 6 or more on a filter
  * axis (ASPP-class, where the BLAS path wins). Declined
  * wherever a key of its spec serves the problem (specServes): a specialized config's class.

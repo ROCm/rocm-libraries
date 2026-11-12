@@ -28,7 +28,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -51,7 +52,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -74,7 +76,80 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "964b842b-77c6-500d-8b32-65cd0a71d23d",
+      "name": "conv_depthwise_valu_wrw.f32.nhwc.floor.m2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "FLOAT",
+        "layout": "NHWC",
+        "variant": "floor",
+        "kd": 0,
+        "kh": 0,
+        "kw": 0,
+        "q": 0,
+        "g": 0,
+        "nwg": 0,
+        "bpc": 0,
+        "mult": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a19adcd1-de7d-5f3d-af1a-88e4e0d64f33",
+      "name": "conv_depthwise_valu_wrw.f16.nhwc.floor.m2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "HALF",
+        "layout": "NHWC",
+        "variant": "floor",
+        "kd": 0,
+        "kh": 0,
+        "kw": 0,
+        "q": 0,
+        "g": 0,
+        "nwg": 0,
+        "bpc": 0,
+        "mult": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "8335dec8-c397-5742-b7d3-a51c2a1b932e",
+      "name": "conv_depthwise_valu_wrw.bf16.nhwc.floor.m2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "BFLOAT16",
+        "layout": "NHWC",
+        "variant": "floor",
+        "kd": 0,
+        "kh": 0,
+        "kw": 0,
+        "q": 0,
+        "g": 0,
+        "nwg": 0,
+        "bpc": 0,
+        "mult": 2
       },
       "priority": 0
     },
@@ -97,7 +172,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -120,7 +196,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -143,7 +220,80 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "45e9b854-29d6-576b-a69a-19a34b8edb65",
+      "name": "conv_depthwise_valu_wrw.f32.nchw.floor.m2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "FLOAT",
+        "layout": "NCHW",
+        "variant": "floor",
+        "kd": 0,
+        "kh": 0,
+        "kw": 0,
+        "q": 0,
+        "g": 0,
+        "nwg": 0,
+        "bpc": 0,
+        "mult": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "284eb038-4fb4-55bb-98fd-dce5125b79d2",
+      "name": "conv_depthwise_valu_wrw.f16.nchw.floor.m2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "HALF",
+        "layout": "NCHW",
+        "variant": "floor",
+        "kd": 0,
+        "kh": 0,
+        "kw": 0,
+        "q": 0,
+        "g": 0,
+        "nwg": 0,
+        "bpc": 0,
+        "mult": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2d5d4a2d-7ab1-5cb8-8b31-dfec23c4d314",
+      "name": "conv_depthwise_valu_wrw.bf16.nchw.floor.m2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "BFLOAT16",
+        "layout": "NCHW",
+        "variant": "floor",
+        "kd": 0,
+        "kh": 0,
+        "kw": 0,
+        "q": 0,
+        "g": 0,
+        "nwg": 0,
+        "bpc": 0,
+        "mult": 2
       },
       "priority": 0
     },
@@ -166,7 +316,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -189,7 +340,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -212,7 +364,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -235,7 +388,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -258,7 +412,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -281,7 +436,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -304,7 +460,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -327,7 +484,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -350,7 +508,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -373,7 +532,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -396,7 +556,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -419,7 +580,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -442,7 +604,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -465,7 +628,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -488,7 +652,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -511,7 +676,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -534,7 +700,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -557,7 +724,224 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "85a76dcf-4dd3-5254-87ed-58ba3904c354",
+      "name": "conv_depthwise_valu_wrw.f32.nhwc.tile_k3x3.m2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "FLOAT",
+        "layout": "NHWC",
+        "variant": "tile",
+        "kd": 1,
+        "kh": 3,
+        "kw": 3,
+        "q": 0,
+        "g": 0,
+        "nwg": 0,
+        "bpc": 0,
+        "mult": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6f55d5d4-c052-529e-abb6-9a49540cb454",
+      "name": "conv_depthwise_valu_wrw.f16.nhwc.tile_k3x3.m2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "HALF",
+        "layout": "NHWC",
+        "variant": "tile",
+        "kd": 1,
+        "kh": 3,
+        "kw": 3,
+        "q": 0,
+        "g": 0,
+        "nwg": 0,
+        "bpc": 0,
+        "mult": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "13fea46a-6fd9-5c86-ad4c-eac3e98f5480",
+      "name": "conv_depthwise_valu_wrw.bf16.nhwc.tile_k3x3.m2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "BFLOAT16",
+        "layout": "NHWC",
+        "variant": "tile",
+        "kd": 1,
+        "kh": 3,
+        "kw": 3,
+        "q": 0,
+        "g": 0,
+        "nwg": 0,
+        "bpc": 0,
+        "mult": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "aa727441-59c9-5e5b-a851-4d18c9df5c79",
+      "name": "conv_depthwise_valu_wrw.f32.nhwc.tile_k5x5.m2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "FLOAT",
+        "layout": "NHWC",
+        "variant": "tile",
+        "kd": 1,
+        "kh": 5,
+        "kw": 5,
+        "q": 0,
+        "g": 0,
+        "nwg": 0,
+        "bpc": 0,
+        "mult": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "4a183867-9830-5dc6-a65c-93e9782f93da",
+      "name": "conv_depthwise_valu_wrw.f16.nhwc.tile_k5x5.m2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "HALF",
+        "layout": "NHWC",
+        "variant": "tile",
+        "kd": 1,
+        "kh": 5,
+        "kw": 5,
+        "q": 0,
+        "g": 0,
+        "nwg": 0,
+        "bpc": 0,
+        "mult": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "69b9d7bb-63fc-517e-9bc2-21b6d64c5cae",
+      "name": "conv_depthwise_valu_wrw.bf16.nhwc.tile_k5x5.m2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "BFLOAT16",
+        "layout": "NHWC",
+        "variant": "tile",
+        "kd": 1,
+        "kh": 5,
+        "kw": 5,
+        "q": 0,
+        "g": 0,
+        "nwg": 0,
+        "bpc": 0,
+        "mult": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "cc6dadb5-6c40-537f-bd45-9bbec2420a6c",
+      "name": "conv_depthwise_valu_wrw.f32.nhwc.tile_k7x7.m2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "FLOAT",
+        "layout": "NHWC",
+        "variant": "tile",
+        "kd": 1,
+        "kh": 7,
+        "kw": 7,
+        "q": 0,
+        "g": 0,
+        "nwg": 0,
+        "bpc": 0,
+        "mult": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "aa2afffc-66d9-5edb-8bdd-1c405fd7e317",
+      "name": "conv_depthwise_valu_wrw.f16.nhwc.tile_k7x7.m2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "HALF",
+        "layout": "NHWC",
+        "variant": "tile",
+        "kd": 1,
+        "kh": 7,
+        "kw": 7,
+        "q": 0,
+        "g": 0,
+        "nwg": 0,
+        "bpc": 0,
+        "mult": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6bbcddbe-7df9-58df-b12e-40bf50937ad3",
+      "name": "conv_depthwise_valu_wrw.bf16.nhwc.tile_k7x7.m2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "BFLOAT16",
+        "layout": "NHWC",
+        "variant": "tile",
+        "kd": 1,
+        "kh": 7,
+        "kw": 7,
+        "q": 0,
+        "g": 0,
+        "nwg": 0,
+        "bpc": 0,
+        "mult": 2
       },
       "priority": 0
     },
@@ -580,7 +964,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -603,7 +988,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -626,7 +1012,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -649,7 +1036,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -672,7 +1060,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -695,7 +1084,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -718,7 +1108,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -741,7 +1132,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -764,7 +1156,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -787,7 +1180,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -810,7 +1204,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -833,7 +1228,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -856,7 +1252,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -879,7 +1276,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -902,7 +1300,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -925,7 +1324,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -948,7 +1348,8 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
       },
       "priority": 0
     },
@@ -971,7 +1372,224 @@
         "q": 0,
         "g": 0,
         "nwg": 0,
-        "bpc": 0
+        "bpc": 0,
+        "mult": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "cede4389-f4b7-5d79-9a5c-491deccc9239",
+      "name": "conv_depthwise_valu_wrw.f32.nchw.tile_k3x3.m2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "FLOAT",
+        "layout": "NCHW",
+        "variant": "tile",
+        "kd": 1,
+        "kh": 3,
+        "kw": 3,
+        "q": 0,
+        "g": 0,
+        "nwg": 0,
+        "bpc": 0,
+        "mult": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "c4a41d51-6843-5144-a840-121bc8f9fbfc",
+      "name": "conv_depthwise_valu_wrw.f16.nchw.tile_k3x3.m2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "HALF",
+        "layout": "NCHW",
+        "variant": "tile",
+        "kd": 1,
+        "kh": 3,
+        "kw": 3,
+        "q": 0,
+        "g": 0,
+        "nwg": 0,
+        "bpc": 0,
+        "mult": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "0b83347c-8726-56cb-a706-f71271e20b68",
+      "name": "conv_depthwise_valu_wrw.bf16.nchw.tile_k3x3.m2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "BFLOAT16",
+        "layout": "NCHW",
+        "variant": "tile",
+        "kd": 1,
+        "kh": 3,
+        "kw": 3,
+        "q": 0,
+        "g": 0,
+        "nwg": 0,
+        "bpc": 0,
+        "mult": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "02ec5bac-acf1-5dfc-b4bf-6601ea1dc786",
+      "name": "conv_depthwise_valu_wrw.f32.nchw.tile_k5x5.m2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "FLOAT",
+        "layout": "NCHW",
+        "variant": "tile",
+        "kd": 1,
+        "kh": 5,
+        "kw": 5,
+        "q": 0,
+        "g": 0,
+        "nwg": 0,
+        "bpc": 0,
+        "mult": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "49ff005b-a817-5710-9a85-dc8127a43603",
+      "name": "conv_depthwise_valu_wrw.f16.nchw.tile_k5x5.m2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "HALF",
+        "layout": "NCHW",
+        "variant": "tile",
+        "kd": 1,
+        "kh": 5,
+        "kw": 5,
+        "q": 0,
+        "g": 0,
+        "nwg": 0,
+        "bpc": 0,
+        "mult": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a7a689dc-3bac-5d18-9979-8a44a1031716",
+      "name": "conv_depthwise_valu_wrw.bf16.nchw.tile_k5x5.m2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "BFLOAT16",
+        "layout": "NCHW",
+        "variant": "tile",
+        "kd": 1,
+        "kh": 5,
+        "kw": 5,
+        "q": 0,
+        "g": 0,
+        "nwg": 0,
+        "bpc": 0,
+        "mult": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f50f3c4c-8432-57db-9806-eb22aa6012f0",
+      "name": "conv_depthwise_valu_wrw.f32.nchw.tile_k7x7.m2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "FLOAT",
+        "layout": "NCHW",
+        "variant": "tile",
+        "kd": 1,
+        "kh": 7,
+        "kw": 7,
+        "q": 0,
+        "g": 0,
+        "nwg": 0,
+        "bpc": 0,
+        "mult": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6e6c78ca-157a-5cbd-9a81-57967a8e398c",
+      "name": "conv_depthwise_valu_wrw.f16.nchw.tile_k7x7.m2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "HALF",
+        "layout": "NCHW",
+        "variant": "tile",
+        "kd": 1,
+        "kh": 7,
+        "kw": 7,
+        "q": 0,
+        "g": 0,
+        "nwg": 0,
+        "bpc": 0,
+        "mult": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ed1ac210-5a37-532c-8117-42b3138bd4e7",
+      "name": "conv_depthwise_valu_wrw.bf16.nchw.tile_k7x7.m2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+        "entry_point": "ConvDepthwiseValuWrwPartial"
+      },
+      "metadata": {
+        "dtype": "BFLOAT16",
+        "layout": "NCHW",
+        "variant": "tile",
+        "kd": 1,
+        "kh": 7,
+        "kw": 7,
+        "q": 0,
+        "g": 0,
+        "nwg": 0,
+        "bpc": 0,
+        "mult": 2
       },
       "priority": 0
     },
@@ -994,7 +1612,8 @@
         "q": 32,
         "g": 1,
         "nwg": 1,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1017,7 +1636,8 @@
         "q": 32,
         "g": 1,
         "nwg": 1,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1040,7 +1660,8 @@
         "q": 32,
         "g": 2,
         "nwg": 1,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1063,7 +1684,8 @@
         "q": 32,
         "g": 2,
         "nwg": 1,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1086,7 +1708,8 @@
         "q": 32,
         "g": 1,
         "nwg": 1,
-        "bpc": 4
+        "bpc": 4,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1109,7 +1732,8 @@
         "q": 32,
         "g": 1,
         "nwg": 1,
-        "bpc": 4
+        "bpc": 4,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1132,7 +1756,8 @@
         "q": 32,
         "g": 2,
         "nwg": 1,
-        "bpc": 4
+        "bpc": 4,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1155,7 +1780,8 @@
         "q": 32,
         "g": 2,
         "nwg": 1,
-        "bpc": 4
+        "bpc": 4,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1178,7 +1804,8 @@
         "q": 32,
         "g": 1,
         "nwg": 2,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1201,7 +1828,8 @@
         "q": 32,
         "g": 1,
         "nwg": 2,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1224,7 +1852,8 @@
         "q": 16,
         "g": 2,
         "nwg": 1,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1247,7 +1876,8 @@
         "q": 16,
         "g": 2,
         "nwg": 1,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1270,7 +1900,8 @@
         "q": 16,
         "g": 2,
         "nwg": 2,
-        "bpc": 1
+        "bpc": 1,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1293,7 +1924,8 @@
         "q": 16,
         "g": 2,
         "nwg": 2,
-        "bpc": 1
+        "bpc": 1,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1316,7 +1948,8 @@
         "q": 16,
         "g": 1,
         "nwg": 2,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1339,7 +1972,8 @@
         "q": 16,
         "g": 1,
         "nwg": 2,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1362,7 +1996,8 @@
         "q": 32,
         "g": 1,
         "nwg": 1,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1385,7 +2020,8 @@
         "q": 32,
         "g": 1,
         "nwg": 1,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1408,7 +2044,8 @@
         "q": 32,
         "g": 2,
         "nwg": 1,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1431,7 +2068,8 @@
         "q": 32,
         "g": 2,
         "nwg": 1,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1454,7 +2092,8 @@
         "q": 32,
         "g": 1,
         "nwg": 1,
-        "bpc": 4
+        "bpc": 4,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1477,7 +2116,8 @@
         "q": 32,
         "g": 1,
         "nwg": 1,
-        "bpc": 4
+        "bpc": 4,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1500,7 +2140,8 @@
         "q": 32,
         "g": 2,
         "nwg": 1,
-        "bpc": 4
+        "bpc": 4,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1523,7 +2164,8 @@
         "q": 32,
         "g": 2,
         "nwg": 1,
-        "bpc": 4
+        "bpc": 4,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1546,7 +2188,8 @@
         "q": 32,
         "g": 1,
         "nwg": 2,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1569,7 +2212,8 @@
         "q": 32,
         "g": 1,
         "nwg": 2,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1592,7 +2236,8 @@
         "q": 16,
         "g": 2,
         "nwg": 1,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1615,7 +2260,8 @@
         "q": 16,
         "g": 2,
         "nwg": 1,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1638,7 +2284,8 @@
         "q": 16,
         "g": 2,
         "nwg": 2,
-        "bpc": 1
+        "bpc": 1,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1661,7 +2308,8 @@
         "q": 16,
         "g": 2,
         "nwg": 2,
-        "bpc": 1
+        "bpc": 1,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1684,7 +2332,8 @@
         "q": 16,
         "g": 1,
         "nwg": 2,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1707,7 +2356,8 @@
         "q": 16,
         "g": 1,
         "nwg": 2,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1730,7 +2380,8 @@
         "q": 32,
         "g": 1,
         "nwg": 1,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1753,7 +2404,8 @@
         "q": 32,
         "g": 1,
         "nwg": 1,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1776,7 +2428,8 @@
         "q": 32,
         "g": 2,
         "nwg": 1,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1799,7 +2452,8 @@
         "q": 32,
         "g": 2,
         "nwg": 1,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1822,7 +2476,8 @@
         "q": 32,
         "g": 1,
         "nwg": 1,
-        "bpc": 4
+        "bpc": 4,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1845,7 +2500,8 @@
         "q": 32,
         "g": 1,
         "nwg": 1,
-        "bpc": 4
+        "bpc": 4,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1868,7 +2524,8 @@
         "q": 32,
         "g": 2,
         "nwg": 1,
-        "bpc": 4
+        "bpc": 4,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1891,7 +2548,8 @@
         "q": 32,
         "g": 2,
         "nwg": 1,
-        "bpc": 4
+        "bpc": 4,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1914,7 +2572,8 @@
         "q": 32,
         "g": 1,
         "nwg": 2,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1937,7 +2596,8 @@
         "q": 32,
         "g": 1,
         "nwg": 2,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1960,7 +2620,8 @@
         "q": 16,
         "g": 2,
         "nwg": 1,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -1983,7 +2644,8 @@
         "q": 16,
         "g": 2,
         "nwg": 1,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -2006,7 +2668,8 @@
         "q": 16,
         "g": 2,
         "nwg": 2,
-        "bpc": 1
+        "bpc": 1,
+        "mult": 1
       },
       "priority": 0
     },
@@ -2029,7 +2692,8 @@
         "q": 16,
         "g": 2,
         "nwg": 2,
-        "bpc": 1
+        "bpc": 1,
+        "mult": 1
       },
       "priority": 0
     },
@@ -2052,7 +2716,8 @@
         "q": 16,
         "g": 1,
         "nwg": 2,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     },
@@ -2075,7 +2740,8 @@
         "q": 16,
         "g": 1,
         "nwg": 2,
-        "bpc": 2
+        "bpc": 2,
+        "mult": 1
       },
       "priority": 0
     }

@@ -11,7 +11,8 @@
     "q",
     "g",
     "nwg",
-    "bpc"
+    "bpc",
+    "mult"
   ],
   "behavior_notes": [
     "runtime_compilation"

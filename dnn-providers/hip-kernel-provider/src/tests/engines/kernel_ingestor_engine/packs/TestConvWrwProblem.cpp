@@ -223,6 +223,18 @@ TEST(TestConvWrwForm, AnyStridesParseForTheGenericLoop)
     ASSERT_TRUE(padded.has_value());
     EXPECT_EQ(padded->xSpan, 23 * 160 + 9 * 16 + 11 + 1);
     EXPECT_EQ(padded->ySpan, 40 * 10 * 12);
+    EXPECT_FALSE(padded->largeImage);
+    // Spans past 2^31 bytes (rows 2^28 bytes apart): large images, for block-based buffers.
+    auto xFar = specOf(baseShape());
+    xFar.x.strides = {24 * 10 * 16, 10 * 16, int64_t{1} << 27, 1};
+    const auto xFarProblem = parse(xFar);
+    ASSERT_TRUE(xFarProblem.has_value());
+    EXPECT_TRUE(xFarProblem->largeImage);
+    auto yFar = specOf(baseShape());
+    yFar.y.strides = {40 * 10 * 12, 1, int64_t{1} << 27, 40};
+    const auto yFarProblem = parse(yFar);
+    ASSERT_TRUE(yFarProblem.has_value());
+    EXPECT_TRUE(yFarProblem->largeImage);
 }
 
 TEST(TestConvWrwForm, ChannelVectorsNeedUnitChannelStridesAndWholeVectors)
@@ -334,15 +346,7 @@ std::vector<RefusalCase> refusalCases()
         {"Double",
          [](ConvGraphSpec& s) { s.x.dataType = s.w.dataType = s.y.dataType = DataType::DOUBLE; }},
         // x and dy in no common packed layout (the generic loop's): one image's span through its
-        // strides within 2^31 bytes, without overflow.
-        {"StridedXSpanBeyondOffsets",
-         [](ConvGraphSpec& s) {
-             s.x.strides = {24 * 10 * 16, 10 * 16, int64_t{1} << 27, 1}; // rows 2^28 bytes apart
-         }},
-        {"StridedDySpanBeyondOffsets",
-         [](ConvGraphSpec& s) {
-             s.y.strides = {40 * 10 * 12, 1, int64_t{1} << 27, 40}; // rows 2^28 bytes apart
-         }},
+        // strides without overflow.
         {"StridedSpanOverflows",
          [](ConvGraphSpec& s) {
              s.x.strides = {24 * 10 * 16, int64_t{1} << 61, 16, 1}; // 23 x 2^61
@@ -407,33 +411,6 @@ std::vector<RefusalCase> refusalCases()
              shape.prePadding = shape.postPadding = {1024, 1024, 512};
              shape.stride = {1, 1, 1};
              shape.dilation = {1, 1, 1};
-             reshape(s, shape);
-         }},
-        // One image of x and of dy within 2^31 bytes.
-        {"XImageBeyondOffsets",
-         [](ConvGraphSpec& s) {
-             auto shape = baseShape();
-             shape.n = 1;
-             shape.c = 1;
-             shape.k = 8;
-             shape.input = {1, int64_t{1} << 30}; // fp16: 2^31 bytes
-             shape.filter = {1, 1};
-             shape.prePadding = shape.postPadding = {0, 0};
-             shape.stride = {1, int64_t{1} << 20};
-             reshape(s, shape);
-         }},
-        // An image past the buffer range is served only when each channel plane fits it (block-
-        // based buffers): here one dy plane of 2^30 fp16 elements (2^31 bytes) from an x plane
-        // of 2^29 padded by 2^28 on each side.
-        {"DyChannelPlaneBeyondOffsets",
-         [](ConvGraphSpec& s) {
-             auto shape = baseShape();
-             shape.n = 1;
-             shape.c = 8;
-             shape.k = 8;
-             shape.input = {1, int64_t{1} << 29};
-             shape.filter = {1, 1};
-             shape.prePadding = shape.postPadding = {0, int64_t{1} << 28};
              reshape(s, shape);
          }},
     };
@@ -914,6 +891,33 @@ ConfigFields genericGfx950Fields()
     return f;
 }
 
+/// The generic loop's shared width window: 8 positions past the chunk (channel vectors).
+ConfigFields genericWindowFields()
+{
+    auto f = genericClFields();
+    f.dw = 8;
+    return f;
+}
+
+/// channelsLastShape at width stride 2.
+ConvShape channelsLastStride2Shape()
+{
+    auto shape = baseShape();
+    shape.channelsLast = true;
+    shape.stride = {1, 2};
+    return shape;
+}
+
+/// channelsLastShape at width dilation 5 (3x3: the taps span 10 positions past the first).
+ConvShape channelsLastDilation5Shape()
+{
+    auto shape = baseShape();
+    shape.channelsLast = true;
+    shape.dilation = {1, 5};
+    shape.prePadding = shape.postPadding = {1, 5};
+    return shape;
+}
+
 /// x rows padded to 16 columns (12 used): strided, no packed layout.
 ConvGraphSpec rowPaddedSpec(const ConvShape& shape)
 {
@@ -1030,6 +1034,33 @@ std::vector<ConfigRefusal> configRefusals()
              f.spec = "4R0.5.1.1.0";
              return f;
          }},
+        // The shared window: channel vectors, whole 16-byte units, unit width stride, the
+        // block's width taps within it; never negative.
+        {"GenericWindowNegative",
+         [](ConfigFields& f) { f.dw = -8; },
+         genericWindowFields,
+         "gfx942",
+         channelsLastShape},
+        {"GenericWindowOnElements", [](ConfigFields& f) { f.dw = 8; }, genericFields},
+        {"GenericWindowNotWholeUnits",
+         [](ConfigFields& f) { f.dw = 4; },
+         genericWindowFields,
+         "gfx942",
+         channelsLastShape},
+        {"GenericWindowWidthStride",
+         [](ConfigFields& f) { f.dw = 8; },
+         genericClFields,
+         "gfx942",
+         channelsLastStride2Shape},
+        {"GenericWindowNarrowerThanTheTaps",
+         [](ConfigFields& f) { f.dw = 8; },
+         [] {
+             auto f = genericWindowFields();
+             f.dw = 16;
+             return f;
+         },
+         "gfx942",
+         channelsLastDilation5Shape},
         // Block-based buffers only where the image is past the 32-bit buffer range; 0 or 1.
         {"PbOnASmallImage", [](ConfigFields& f) { f.pb = 1; }},
         {"PbTwo", [](ConfigFields& f) { f.pb = 2; }},
@@ -1415,6 +1446,79 @@ TEST(TestConvWrwKernelMatch, BlockBuffersServeImagesPastTheBufferRangeOnly)
     rows.bk = 32;
     rows.wk = 1;
     EXPECT_TRUE(admits(rows, "gfx942", narrow));
+}
+
+TEST(TestConvWrwKernelMatch, GenericBlockBuffersServeLargeImagesThroughStepWindows)
+{
+    // 64 channels of 4100 x 4200 fp16, channels-last: a 2.2 GB image, 3x3 stride 2.
+    auto large = baseShape();
+    large.c = 64;
+    large.k = 32;
+    large.input = {4100, 4200};
+    large.prePadding = large.postPadding = {1, 1};
+    large.stride = {2, 2};
+    large.channelsLast = true;
+    auto f = genericClFields();
+    EXPECT_FALSE(admits(f, "gfx942", large)); // the image is past the range
+    f.pb = 1;
+    EXPECT_TRUE(admits(f, "gfx942", large));
+    // The step's windows: x from the first reachable element, 64 channels (unit stride), 2
+    // more rows of 4200 x 64, and 31 x 2 + 2 more columns; dy 32 channels by 31 more columns.
+    const auto launch = launchOf(f, large);
+    ASSERT_TRUE(launch.has_value());
+    EXPECT_EQ(launch->args.xImage, 1 + 63 + 2 * 4200 * 64 + (31 * 2 + 2) * 64);
+    EXPECT_EQ(launch->args.yImage, 1 + 31 + 31 * 32);
+    // And the window variant's extra positions (unit width stride: 31 + 2 + 8 columns).
+    auto window = f;
+    window.dw = 8;
+    auto unitWidth = large;
+    unitWidth.stride = {2, 1};
+    const auto windowed = launchOf(window, unitWidth);
+    ASSERT_TRUE(windowed.has_value());
+    EXPECT_EQ(windowed->args.xImage, 1 + 63 + 2 * 4200 * 64 + (31 + 2 + 8) * 64);
+    // pb 1 on a small image: declined (the specialized and per-image configs serve it).
+    EXPECT_FALSE(admits(f, "gfx942", channelsLastShape()));
+    // Channels-first: the step window spans the block's channel planes (2.2 GB 33000 x 33000
+    // fp16 planes are past it) but only the columns a chunk reaches (one 2^31-byte row at
+    // width stride 2^20 is within it).
+    auto planes = baseShape();
+    planes.c = 2;
+    planes.k = 1; // one dy plane: the x window alone past the range
+    planes.input = {33000, 33000};
+    planes.prePadding = planes.postPadding = {1, 1};
+    auto cf = genericFields();
+    cf.pb = 1;
+    EXPECT_FALSE(admits(cf, "gfx942", planes));
+    // The dy window alone: one 0.8 GB x plane, 8 dy planes of it (7 more in the window).
+    auto dyPlanes = baseShape();
+    dyPlanes.n = 1;
+    dyPlanes.c = 1;
+    dyPlanes.k = 8;
+    dyPlanes.input = {20000, 20000};
+    EXPECT_FALSE(admits(cf, "gfx942", dyPlanes));
+    dyPlanes.k = 2;
+    dyPlanes.input = {20000, 30000}; // 1 more 1.2 GB dy plane: within
+    EXPECT_TRUE(admits(cf, "gfx942", dyPlanes));
+    auto row = baseShape();
+    row.n = 1;
+    row.c = 1;
+    row.k = 8;
+    row.input = {1, int64_t{1} << 30}; // fp16: 2^31 bytes in one row
+    row.filter = {1, 1};
+    row.prePadding = row.postPadding = {0, 0};
+    row.stride = {1, int64_t{1} << 20};
+    EXPECT_TRUE(admits(cf, "gfx942", row));
+    auto cfLarge = large;
+    cfLarge.channelsLast = false;
+    cfLarge.c = 2;
+    cfLarge.k = 1;
+    cfLarge.input = {33000, 16500}; // two 1.1 GB planes: window within, image past
+    EXPECT_TRUE(admits(cf, "gfx942", cfLarge));
+    // A specialized block-buffer class (lower case) declines the generic twin.
+    cf.spec = "4r0.3.2.1.0";
+    EXPECT_FALSE(admits(cf, "gfx942", cfLarge));
+    cf.spec = "4R0.3.2.1.0";
+    EXPECT_TRUE(admits(cf, "gfx942", cfLarge));
 }
 
 TEST(TestConvWrwKernelMatch, PackedRowsServeNarrowChannelsFirstOutputsOnly)
@@ -2581,6 +2685,30 @@ TEST(TestConvWrwKernelMatch, TheGenericLoopLeavesWidelyDilatedSmallFiltersToBlas
     EXPECT_FALSE(admits(genericFields(), "gfx942", dilated({1, 9}, {1, 6})));
 }
 
+TEST(TestConvWrwLaunch, TheGenericWindowGroupsWidthTapsPerFilterRow)
+{
+    // 3x3 at 2 taps a block: per filter row ceil(3 / 2) groups, 3 rows (the gathers: 5).
+    auto f = genericWindowFields();
+    f.fr = 2;
+    const auto window = launchOf(f, channelsLastShape());
+    ASSERT_TRUE(window.has_value());
+    EXPECT_EQ(window->gridY, 3u * 2u);
+    auto gathers = genericClFields();
+    gathers.fr = 2;
+    const auto perTap = launchOf(gathers, channelsLastShape());
+    ASSERT_TRUE(perTap.has_value());
+    EXPECT_EQ(perTap->gridY, 5u);
+    // The window covers the taps a block holds: 3 taps a block on a 2-wide filter dilated 8
+    // reach 8 past the first, within a window of 8 (2 x 8 = 16 would not be). 5 x 2 = 10 taps,
+    // past the ASPP-class gate.
+    auto narrow = baseShape();
+    narrow.channelsLast = true;
+    narrow.filter = {5, 2};
+    narrow.dilation = {1, 8};
+    narrow.prePadding = narrow.postPadding = {2, 4};
+    EXPECT_TRUE(admits(genericWindowFields(), "gfx942", narrow));
+}
+
 TEST(TestConvWrwKernelMatch, TheGenericLoopTakesEveryArchsMatrixAtom)
 {
     auto gfx1201 = genericClFields();
@@ -2740,6 +2868,38 @@ TEST(TestConvWrwSpec, KeysServeTheirClassOnly)
     const auto largeServed = conv_wrw::specServes(*largeProblem, "4R0.3.1.1.0", "gfx942");
     ASSERT_TRUE(largeServed.has_value());
     EXPECT_FALSE(*largeServed);
+    // Their block-based buffer forms (lower case) serve them alone: channels-first, each
+    // channel plane within the range.
+    const auto served = [&](const conv_wrw::WrwProblem& problem, const char* key) {
+        const auto result = conv_wrw::specServes(problem, key, "gfx942");
+        return result.has_value() && *result;
+    };
+    EXPECT_TRUE(served(*largeProblem, "4r0.3.1.1.0"));
+    EXPECT_TRUE(served(*largeProblem, "4p0.3.1.1.1"));
+    EXPECT_TRUE(served(*largeProblem, "0c0.3.1.1.0"));
+    const auto small = parse(specOf(baseShape()));
+    ASSERT_TRUE(small.has_value());
+    EXPECT_FALSE(served(*small, "4r0.3.1.1.0"));
+    auto largeCl = large;
+    largeCl.channelsLast = true;
+    const auto largeClProblem = parse(specOf(largeCl));
+    ASSERT_TRUE(largeClProblem.has_value());
+    EXPECT_FALSE(served(*largeClProblem, "4r1.3.1.1.0"));
+    // One 2^30-element x plane (2^31 bytes), and one such dy plane.
+    auto xPlane = large; // width stride 2: the dy plane half as wide, within the range
+    xPlane.c = 1;
+    xPlane.input = {1, int64_t{1} << 30};
+    xPlane.stride = {1, 2};
+    const auto xPlaneProblem = parse(specOf(xPlane));
+    ASSERT_TRUE(xPlaneProblem.has_value());
+    EXPECT_FALSE(served(*xPlaneProblem, "4r0.3.2.1.0"));
+    auto yPlane = large;
+    yPlane.c = 1;
+    yPlane.input = {1, int64_t{1} << 29};
+    yPlane.prePadding = yPlane.postPadding = {0, (int64_t{1} << 28) + 1}; // dy 2^30 wide
+    const auto yPlaneProblem = parse(specOf(yPlane));
+    ASSERT_TRUE(yPlaneProblem.has_value());
+    EXPECT_FALSE(served(*yPlaneProblem, "4r0.3.1.1.0"));
 }
 
 TEST(TestConvWrwSpec, MalformedKeysAreNotClasses)
@@ -2766,7 +2926,12 @@ TEST(TestConvWrwSpec, MalformedKeysAreNotClasses)
                            "4P0.3.1.1.0", // rings do
                            "4U1.3.1.1.0",
                            "4G0.3.1.1.0",
-                           "4D0.3.1.1.0"})
+                           "4D0.3.1.1.0",
+                           // Block-based buffer forms exist for rows, rings, small-C only.
+                           "4g0.3.1.1.3",
+                           "4u1.3.1.1.3",
+                           "8d2.3.1.1.3",
+                           "4x0.3.1.1.0"})
     {
         EXPECT_FALSE(conv_wrw::specServes(*problem, key, "gfx942").has_value()) << key;
     }
@@ -2784,6 +2949,8 @@ TEST(TestConvWrwLoadPasses, TheGenericLoopCountsItsLoads)
     fp32.vec = 4;
     fp32.bq = 16;
     EXPECT_EQ(conv_wrw::loadPassesOf(configOf(fp32), 4, 64), 1 + 3);
+    // The shared window: dy as above; x 8 vectors by 20 words of the 40-position window.
+    EXPECT_EQ(conv_wrw::loadPassesOf(configOf(genericWindowFields()), 2, 64), (1 + 1) * 2);
     // bq not dividing the block.
     auto odd = genericFields();
     odd.bq = 48;
@@ -2794,6 +2961,13 @@ TEST(TestConvWrwLds, MirrorsTheKernelsArithmetic)
 {
     // Generic taps: two buffers of 64 dy and 3 x 64 x rows of 32 + 8 positions.
     EXPECT_EQ(conv_wrw::ldsBytesOf(configOf(genericFields()), 2), 2 * (64 + 3 * 64) * 40 * 2);
+    // Shared window: one x row of 32 + 8 positions per channel, pitched to 56 (7 16-byte units,
+    // odd); 48 positions (6 units, even) would be bumped too.
+    EXPECT_EQ(conv_wrw::ldsBytesOf(configOf(genericWindowFields()), 2),
+              2 * (64 * 40 + 64 * 56) * 2);
+    auto wide = genericWindowFields();
+    wide.dw = 16; // 48 + 8 = 56: already odd
+    EXPECT_EQ(conv_wrw::ldsBytesOf(configOf(wide), 2), 2 * (64 * 40 + 64 * 56) * 2);
     // Ring, channels-first fp16, 64 x 64 x 32, 3 taps: window 34 = 5 vectors of 8, LDA 40,
     // LDB ceil(42 / 8) x 8 + 8 = 56; two buffers of 64 x 40 + 64 x 56.
     auto ring = configOf(ConfigFields{});

@@ -187,6 +187,11 @@ def lds_bytes(c, e):  # ConvWrwGeom.h k3LdsBytes
     )
     vec, align, ns = c["vec"], c["align"], c["ns"]
     if loop == 8:  # generic taps: a bk-row dy chunk and fr bc-row x tiles, two buffers
+        if dw > 0:  # one shared window of bq + dw positions per x row (k3WinPitch)
+            unit = 16 // e
+            pitch = bq + dw + unit
+            pitch += unit if (pitch // unit) % 2 == 0 else 0
+            return 2 * (bk * (bq + unit) + bc * pitch) * e
         return 2 * (bk + fr * bc) * (bq + 16 // e) * e
     if loop == 5:
         wq, fc, fk = c["wq"], bc // (16 * c["wc"]), bk // (16 * c["wk"])
@@ -253,10 +258,12 @@ def passes(c, e):  # ConvWrwProblem.cpp loadPassesOf
             return du(c["bk"], rows) + du(c["fr"] * c["bc"], rows)
         kw = 4 // e
         words = du(c["bq"], kw)
-        return (
-            du(du(c["bk"], vec) * words, threads)
-            + du(c["fr"] * du(c["bc"], vec) * words, threads)
-        ) * kw
+        x_units = (
+            du(c["bc"], vec) * du(c["bq"] + c["dw"], kw)
+            if c["dw"] > 0
+            else c["fr"] * du(c["bc"], vec) * words
+        )
+        return (du(du(c["bk"], vec) * words, threads) + du(x_units, threads)) * kw
     if c["loop"] == 5:
         return d_loads(c)
     if c["loop"] == 4:
@@ -385,12 +392,13 @@ def valid(c, dtype, fma16=False):
         ok = (
             ok
             and c["layout"] in (CF, CL)
-            and c["s"] == c["sw"] == c["dw"] == 0
+            and c["s"] == c["sw"] == 0
+            and (c["dw"] == 0 or (c["layout"] == CL and c["dw"] % 8 == 0))
             and c["fr"] >= 1
             and rows > 0
             and c["bk"] % rows == 0
             and c["bc"] % rows == 0
-            and c["align"] == c["ns"] == c["pb"] == 0
+            and c["align"] == c["ns"] == 0
         )
     elif c["layout"] == CF:
         ok = ok and c["bq"] % c["vec"] == 0 and (fma or c["vec"] % c["sw"] == 0)
@@ -1073,7 +1081,7 @@ def build_pb():
 
 # The generic tier (loop 8): few configs of runtime filter, strides and dilation, each declined
 # wherever a specialized config's class serves (its "spec", written by emit). (atoms per dtype,
-# xcd, [(layout, (bk, bc, wk, wc, bq), taps a block)]), the measured best per arch: gfx950 on
+# xcd, [(layout, (bk, bc, wk, wc, bq), taps a block[, shared-window dw])]), the measured best per arch: gfx950 on
 # 2-D 5x5 / 7x7 and 3-D 1x5x5 channels-last fp16 (1.5-1.9x over the BLAS path), gfx1201 on the
 # same and 1-D k3 (1.7-3.2x).
 GENERIC = [
@@ -1085,6 +1093,8 @@ GENERIC = [
             (CL, (128, 64, 4, 2, 32), 3),
             (CL, (64, 64, 2, 2, 32), 5),
             (CF, (128, 64, 4, 2, 32), 2),
+            # Shared width window (dw 8): 2-D 5x5 / 7x7, 1x5x5 and 1-D k9 5-12% faster.
+            (CL, (64, 64, 2, 2, 64), 9, 8),
         ],
     ),
     (
@@ -1095,6 +1105,8 @@ GENERIC = [
             (CL, (128, 64, 4, 2, 32), 3),
             (CL, (64, 32, 4, 2, 32), 9),
             (CF, (64, 64, 4, 2, 32), 2),
+            # Shared width window (dw 16): 1-D k9 776 against 838 us.
+            (CL, (128, 64, 4, 2, 32), 5, 16),
         ],
     ),
     # gfx908 to gfx950 (64 KiB of LDS): gfx950's tiles at 32 positions.
@@ -1119,10 +1131,13 @@ def build_generic():
     dropped = 0
     for atoms, xcd, tiles in GENERIC:
         for dtype, atom in atoms.items():
-            for lay, tile, taps in tiles:
-                c = C(atom, 8, lay, tile, 0, 0, 0, taps, 16 // eb(dtype), xcd, 0, 0)
+            for lay, tile, taps, *window in tiles:
+                wx = window[0] if window else 0  # dw: shared-window positions
+                c = C(atom, 8, lay, tile, 0, 0, wx, taps, 16 // eb(dtype), xcd, 0, 0)
                 if valid(c, dtype):
                     CATALOG[dtype].extend(with_bpu(c))
+                    # Its block-based buffer twin: images past the 32-bit buffer range.
+                    CATALOG[dtype].extend(with_bpu(dict(c, pb=1)))
                 else:
                     dropped += 1
     return dropped
@@ -1133,20 +1148,18 @@ SPEC_KIND = {0: "R", 6: "C", 1: "P", 2: "G", 5: "D"}
 
 def spec_of(g, cfgs):
     """The specialized classes generic config g declines: every matrix-core config of the dtype
-    (the K3Tiles rows and rings, small-C rows, the DMA ring and the direct loop; not the FMA
-    loops, packed rows (narrow outputs only) or block-based buffers) whose atom runs on one of
-    g's archs, as "<atom_id><kind><layout>.<s>.<sw>.<dw>.<fr>" keys (ConvWrwProblem.hpp).
+    (the K3Tiles rows and rings, small-C rows, the DMA ring and the direct loop, and the
+    block-based buffer forms of rows, rings and small-C rows, in lower case; not the FMA loops
+    or packed rows (narrow outputs only)) whose atom runs on one of g's archs, as
+    "<atom_id><kind><layout>.<s>.<sw>.<dw>.<fr>" keys (ConvWrwProblem.hpp).
     """
     keys = set()
     for c in cfgs:
-        if (
-            c["loop"] not in SPEC_KIND
-            or c["pb"]
-            or not set(archs_of(c)) & set(archs_of(g))
-        ):
+        if c["loop"] not in SPEC_KIND or not set(archs_of(c)) & set(archs_of(g)):
             continue
         kind = "U" if c["loop"] == 1 and c["align"] == 2 else SPEC_KIND[c["loop"]]
-        fr = 0 if kind in "RC" else c["fr"]
+        kind = kind.lower() if c["pb"] else kind
+        fr = 0 if kind.upper() in "RC" else c["fr"]
         keys.add(f"{c['atom_id']}{kind}{c['layout']}.{c['s']}.{c['sw']}.{c['dw']}.{fr}")
     return ";".join(sorted(keys))
 

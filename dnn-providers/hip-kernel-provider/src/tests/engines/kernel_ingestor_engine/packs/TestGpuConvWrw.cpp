@@ -514,6 +514,8 @@ std::vector<DeviceCase> deviceCases()
           };
     generic("Generic5x5Nhwc", conv(24, 40, {13, 17}, {5, 5}, {2, 2}, {2, 2}, {1, 1}, {1, 1}, true));
     generic("Generic1x9Nhwc", conv(32, 64, {150}, {9}, {4}, {4}, {1}, {1}, true));
+    // Dilated width taps (the shared window reads them at offsets of 2).
+    generic("Generic1x5Dilation2Nhwc", conv(32, 32, {90}, {5}, {4}, {4}, {1}, {2}, true));
     generic(
         "Generic1x5x5ThreeDNhwcGrouped",
         conv(32, 32, {3, 9, 11}, {1, 5, 5}, {0, 2, 2}, {0, 2, 2}, {1, 1, 1}, {1, 1, 1}, true, 2));
@@ -529,6 +531,16 @@ std::vector<DeviceCase> deviceCases()
     generic("GenericPaddedChannelsNhwc",
             conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true),
             {10 * 12 * 32, 1, 12 * 32, 32});
+    // One channels-last x image of 2^30 elements (2 GiB in 16-bit, 4 GiB in fp32): the generic
+    // loop's block-based buffers (pb 1), rebased each step. 1x1 stride 4 keeps the CPU
+    // reference short.
+    {
+        DeviceCase largeCl{
+            "LargeImageGenericBlockBuffersNhwc",
+            conv(16384, 8, {256, 256}, {1, 1}, {0, 0}, {0, 0}, {4, 4}, {1, 1}, true, 1, 1)};
+        largeCl.someArchs = true;
+        cases.push_back(largeCl);
+    }
     // Positions 26 apart: not whole vectors, channels-last elements.
     generic("GenericPaddedChannelsNhwcElements",
             conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true),
