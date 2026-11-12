@@ -645,6 +645,15 @@ inline std::vector<KernelArgument> pythonLseAbi()
     return signature;
 }
 
+/// The use_alibi form on the qb_minor grid: the same ten arguments, then alibi_slopes_ptr, which
+/// the launch passes null so the kernel computes hipDNN's slopes.
+inline std::vector<KernelArgument> pythonAlibiAbi()
+{
+    auto signature = pythonAbi();
+    signature.push_back(KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "alibi_slopes_ptr"});
+    return signature;
+}
+
 /// A KPACK descriptor for @p arch's engine recording @p signature, carrying the completed
 /// D128 metadata prepare() reads: head_size and the (@p blockM, @p blockN) tile.
 ///

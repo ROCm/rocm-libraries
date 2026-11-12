@@ -237,6 +237,22 @@ _CASES: tuple[dict, ...] = (
     dict(paged=True, block_size=16, num_kv_blocks=64, persistent=True),
     dict(paged=True, block_size=16, num_kv_blocks=64, head_size=64),
     dict(paged=True, block_size=16, num_kv_blocks=64),
+    # ALiBi: each excluded mode on its own (the emit_lse reject reads a subclass
+    # field, so its cases are hook cases).
+    dict(use_alibi=True, use_sinks=True),
+    dict(
+        use_alibi=True, paged=True, block_size=16, num_kv_blocks=64, sliding_window=256
+    ),
+    dict(use_alibi=True, varlen=True),
+    # The ALiBi rejects come before the sinks ones.
+    dict(
+        use_alibi=True,
+        use_sinks=True,
+        paged=True,
+        block_size=16,
+        num_kv_blocks=64,
+        sliding_window=256,
+    ),
     dict(
         use_sinks=True, paged=True, block_size=16, num_kv_blocks=64, sliding_window=256
     ),
@@ -303,6 +319,10 @@ _CASES: tuple[dict, ...] = (
     dict(head_size=64, block_n=32, lds_k_group_pad=16),
     dict(seqlen_q=256, seqlen_kv=1024, causal_bottom_right=True, sliding_window=256),
     dict(ragged=True, seqlen_q=500, seqlen_kv=500, use_sinks=True),
+    dict(use_alibi=True),
+    dict(use_alibi=True, sliding_window=128),
+    dict(use_alibi=True, causal_bottom_right=True, seqlen_q=256, seqlen_kv=1024),
+    dict(use_alibi=True, causal=False, persistent=True, num_persistent=4),
     dict(varlen=True, batch=4, sliding_window=128),
     dict(paged=True, block_size=16, num_kv_blocks=64, sliding_window=256),
     dict(persistent=True, num_persistent=304, interleave=True),
@@ -476,6 +496,16 @@ _HOOK_CASES: dict[type, tuple[dict, ...]] = {
         # Auto-decode boundaries (review, 10-29).
         dict(seqlen_q=512, seqlen_kv=512, sliding_window=512, persistent=True),
         dict(causal_bottom_right=True, seqlen_q=256, seqlen_kv=1024),
+        # ALiBi reads the class's emit_lse: rejected with bottom-right only.
+        dict(
+            use_alibi=True,
+            causal_bottom_right=True,
+            seqlen_q=256,
+            seqlen_kv=1024,
+            emit_lse=True,
+        ),
+        dict(use_alibi=True, causal_bottom_right=True, emit_lse=True),
+        dict(use_alibi=True, emit_lse=True),
     ),
     _G942: (
         {},  # runtime shape: head and shape parts off
@@ -643,6 +673,10 @@ def _record_hook_case(spec) -> dict:
         "spec": {name: getattr(spec, name) for name in _field_names()},
         "lookahead": _lookahead(spec),
     }
+    if spec.use_alibi and getattr(spec, "emit_lse", False):
+        # The ALiBi check reads the subclass's emit_lse (the C struct's
+        # emit_lse); no other answer depends on it, so only ALiBi cases record it.
+        case["spec"]["emit_lse"] = True
     if expect["valid"]:
         case["name_parts"] = _name_parts(spec)
     case["expect"] = expect
@@ -887,7 +921,7 @@ def _reject_sites() -> tuple[set, set]:
 
 
 def test_cases_reach_every_reject_site():
-    """Every reject the C++ port mirrors is hit by some base case. A count would
+    """Every reject the C++ port mirrors is hit by some base or hook case. A count would
     not notice a site that no case reaches. Reaching a site is necessary, not
     sufficient: a condition with several terms still needs a case each term
     decides on its own (as the varlen and paged pair-decode rows do)."""
@@ -918,6 +952,10 @@ def test_cases_reach_every_reject_site():
     try:
         for c in _load()["cases"]:
             _evaluate(c["spec"])
+        # Rejects that read a subclass field (emit_lse) are reached by hook cases.
+        for cls, table in _HOOK_CASES.items():
+            for overrides in table:
+                _expect(_hook_spec(cls, overrides))
     finally:
         sys.settrace(None)
     missed = sorted(sites - hit)

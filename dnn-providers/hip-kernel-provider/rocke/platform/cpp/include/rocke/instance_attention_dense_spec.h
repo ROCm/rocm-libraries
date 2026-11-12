@@ -31,6 +31,8 @@
  *     spec sees keys ahead of its diagonal (gfx950: right_bound != 0), false for
  *     the base class and gfx942. It is an argument, not a traits field, so a
  *     caller cannot set it once for a type and get it wrong per spec.
+ *   - The ALiBi check reads the subclass field emit_lse through getattr (False
+ *     when the class has none): the struct's emit_lse, set by the concrete spec.
  *   - kernel_name() consults the _*_name_parts methods:
  *     rocke_attention_dense_name_parts_t, which the concrete spec fills.
  *   - check_dense_spec_preflight re-runs the concrete type's validators: the
@@ -111,7 +113,8 @@ extern const rocke_dense_tile_geometry_t
 #define ROCKE_ATTENTION_DENSE_REASON_CAP 512
 #define ROCKE_ATTENTION_DENSE_NAME_CAP 512
 
-/* AttentionDenseSpec, field for field in Python declaration order. dtype,
+/* AttentionDenseSpec, field for field in Python declaration order (then
+ * emit_lse, see SUBCLASS HOOKS). dtype,
  * persist_decode, and nonpersist_decode are caller-owned strings (not copied). */
 typedef struct rocke_attention_dense_spec
 {
@@ -147,6 +150,11 @@ typedef struct rocke_attention_dense_spec
     bool causal_bottom_right; /* False (kw_only) */
     const char* nonpersist_decode; /* "auto" */
     int chiplet_num_xcds; /* 8 */
+    bool use_alibi; /* False (kw_only) */
+
+    /* Not an AttentionDenseSpec field: a subclass field the base checks read
+     * as getattr(self, "emit_lse", False). The concrete spec sets it. */
+    bool emit_lse; /* False */
 } rocke_attention_dense_spec_t;
 
 /* The dataclass defaults. The six shape fields have no Python default and are

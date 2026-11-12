@@ -536,6 +536,9 @@ struct IngestorSdpaGraphSpec
     // The layouts of K and V. Q and O are BSHD.
     SdpaLayout kLayout = SdpaLayout::BSHD;
     SdpaLayout vLayout = SdpaLayout::BSHD;
+    // Sets alibi_mask: hipDNN's ALiBi, which hipDNN defines with a top-left causal mask only
+    // (SdpaSemanticsRegister SEM-021).
+    bool alibi = false;
 };
 
 struct SdpaGraph
@@ -681,6 +684,10 @@ inline SdpaGraph buildSdpaGraph(const std::string& name, const IngestorSdpaGraph
     if(shape.withStats)
     {
         attributes.set_generate_stats(true);
+    }
+    if(shape.alibi)
+    {
+        attributes.set_alibi_mask(true);
     }
 
     auto outputs = graph->sdpa(q, k, v, attributes);

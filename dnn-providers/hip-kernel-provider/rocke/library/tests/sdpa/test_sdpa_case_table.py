@@ -87,7 +87,7 @@ def test_tiers_nested_and_smoke_budget():
 
 
 def test_every_coverage_item_covered_individually_and_in_smoke():
-    forward_items = range(1, 15)
+    forward_items = (*range(1, 15), 17)
     assert set(forward_items) < set(H.COVERAGE_ITEMS)
     for item in forward_items:
         assert [c for c in C.select("full") if item in c.reqs], item

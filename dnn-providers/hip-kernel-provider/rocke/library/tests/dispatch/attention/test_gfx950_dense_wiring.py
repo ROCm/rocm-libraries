@@ -1198,5 +1198,58 @@ class TestGfx950DenseCandidates(unittest.TestCase):
         )
 
 
+class TestDenseAlibi(unittest.TestCase):
+    """ALiBi runs on the grid bodies only; built-in and external slopes both route."""
+
+    def test_only_grid_bodies_admit_alibi(self):
+        for external in (False, True):
+            with self.subTest(external=external):
+                names = _admitting(
+                    _gfx950_dense_req(
+                        **_LLAMA_8K, use_alibi=True, use_alibi_external_slopes=external
+                    )
+                )
+                self.assertEqual(names, {_GRID_NAME, _QBMINOR_NAME})
+
+    def test_flags_pass_through_to_spec(self):
+        req = _gfx950_dense_req(use_alibi=True)
+        external = _gfx950_dense_req(use_alibi=True, use_alibi_external_slopes=True)
+        for spec_id in (_GRID, _QBMINOR):
+            with self.subTest(spec_id=spec_id):
+                spec = _spec(req, spec_id)
+                self.assertTrue(spec.use_alibi)
+                # Caller slopes only change the bound tensor, not the kernel.
+                self.assertEqual(_spec(external, spec_id), spec)
+        self.assertFalse(_spec(_gfx950_dense_req()).use_alibi)
+
+    def test_auto_order_skips_persistent(self):
+        from dispatch.attention.gfx950_dense import dense_auto_order
+
+        req = _gfx950_dense_req(**_LLAMA_8K, use_alibi=True)
+        self.assertEqual(dense_auto_order(req), (_GRID_NAME,))
+
+    def test_external_slopes_without_alibi_is_an_error(self):
+        with self.assertRaisesRegex(ValueError, "use_alibi_external_slopes requires"):
+            dispatch_attention(_gfx950_dense_req(use_alibi_external_slopes=True))
+
+    def test_binding_needs_slopes_iff_the_request_says_external(self):
+        from dispatch.attention.bindings import bind_dense_attention_torch
+
+        tensors = {"q": None, "k": None, "v": None, "out": None}
+        for external, slopes, match in (
+            (True, None, "requires tensors\\['alibi_slopes'\\]"),
+            (False, object(), "use_alibi_external_slopes is off"),
+        ):
+            with self.subTest(external=external):
+                req = _gfx950_dense_req(
+                    use_alibi=True, use_alibi_external_slopes=external
+                )
+                binding = bind_dense_attention_torch(
+                    req, attention_tuning_spec(req, _GRID), tensors
+                )
+                with self.assertRaisesRegex(ValueError, match):
+                    binding.launch(alibi_slopes=slopes)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -22,7 +22,12 @@ torch = pytest.importorskip("torch")
 
 from rocke.numeric.sdpa_reference import hipdnn_left_to_window, sdpa_reference
 
-from dispatch.sdpa.bind_dense import _DensePlan, sdpa_dense_admits, sdpa_dense_bind
+from dispatch.sdpa.bind_dense import (
+    _DensePlan,
+    _dense_served,
+    sdpa_dense_admits,
+    sdpa_dense_bind,
+)
 from tests.sdpa import cases as C
 from tests.sdpa import helpers as H
 from tests.sdpa.binding_harness import bind_tensors, outputs, strided_tensor
@@ -33,8 +38,11 @@ ARCH = "gfx950"
 
 
 def fake_kernel(plan, req):
-    """Attention over exactly the tensors the binding prepared."""
+    """Attention over exactly the tensors the binding prepared, with ALiBi iff the
+    spec the binding launches has it."""
     kt = plan.kernel_tensors()
+    (_, _, spec), *_ = _dense_served(req)[0]
+    alibi = bool(spec.kernel_spec.use_alibi)
     b, s_q = kt["q"].shape[:2]
     s_kv = kt["k"].shape[1]
 
@@ -49,6 +57,7 @@ def fake_kernel(plan, req):
         left_bound=hipdnn_left_to_window(req.left_bound),
         right_bound=req.right_bound,
         top_left=req.diagonal == "top_left",
+        bias=H.alibi_oracle_bias(kt["q"].shape[2], s_q, s_kv) if alibi else None,
         q_offsets=np.arange(b + 1) * s_q,
         kv_offsets=np.arange(b + 1) * s_kv,
     )

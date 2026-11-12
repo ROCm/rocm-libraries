@@ -51,8 +51,14 @@ using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;
 /// cannot quietly stop covering one.
 const std::vector<std::string_view>& allTokens()
 {
-    static const std::vector<std::string_view> s_tokens{
-        Q_TOKEN, K_TOKEN, V_TOKEN, O_TOKEN, MASK_TOKEN, SLIDING_WINDOW_TOKEN, SCALE_BITS_TOKEN};
+    static const std::vector<std::string_view> s_tokens{Q_TOKEN,
+                                                        K_TOKEN,
+                                                        V_TOKEN,
+                                                        O_TOKEN,
+                                                        MASK_TOKEN,
+                                                        SLIDING_WINDOW_TOKEN,
+                                                        SCALE_BITS_TOKEN,
+                                                        ALIBI_TOKEN};
     return s_tokens;
 }
 
@@ -99,6 +105,22 @@ constexpr const char* MISSING_TOKEN_MARKER = "missing bound token";
 constexpr const char* OUTPUT_LAYOUT_MARKER = "not dense BSHD";
 constexpr const char* GEOMETRY_MARKER = "declares no supported geometry";
 constexpr const char* BLOCK_MARKER = "does not divide seqlen_kv";
+constexpr const char* ALIBI_MARKER = "disagree on ALiBi";
+
+/// The default graph with hipDNN's ALiBi (its mask is top-left causal).
+GraphSpec alibiGraph()
+{
+    GraphSpec spec;
+    spec.alibiMask = true;
+    return spec;
+}
+
+KernelSpec alibiKernel()
+{
+    KernelSpec spec;
+    spec.useAlibi = 1;
+    return spec;
+}
 
 } // namespace
 
@@ -238,6 +260,14 @@ TEST(TestGfx950AttentionUnified2DDispatch, BindsEachMaskKindAndAZeroSlidingWindo
     }
 }
 
+/// The ALiBi token is bound for every graph, 1 only for alibi_mask: kernel_match reads it to
+/// keep plain graphs off the ALiBi kernels as much as the reverse.
+TEST(TestGfx950AttentionUnified2DDispatch, BindsAlibiAsOneOnlyForAnAlibiGraph)
+{
+    EXPECT_EQ(tokenValue(bindingsFor(Graph{}), ALIBI_TOKEN), 0);
+    EXPECT_EQ(tokenValue(bindingsFor(Graph(alibiGraph())), ALIBI_TOKEN), 1);
+}
+
 TEST(TestGfx950AttentionUnified2DDispatch, BindsExactlyTheTokensTheDispatchReads)
 {
     EXPECT_EQ(bindingsFor(Graph{}).size(), allTokens().size());
@@ -263,6 +293,30 @@ TEST(TestGfx950AttentionUnified2DDispatch, ReachesTheLoaderOnceEverythingBeforeI
         EXPECT_EQ(failure.find(marker), std::string::npos) << failure;
     }
     EXPECT_NE(failure.find("does not exist"), std::string::npos) << failure;
+}
+
+/// The same positive control for an ALiBi graph and an ALiBi kernel.
+TEST(TestGfx950AttentionUnified2DDispatch, ReachesTheLoaderForAnAlibiGraphAndAnAlibiKernel)
+{
+    const std::string failure = prepareFailureFor(alibiKernel(), alibiGraph());
+
+    ASSERT_FALSE(failure.empty());
+    EXPECT_EQ(failure.find(ALIBI_MARKER), std::string::npos) << failure;
+    EXPECT_NE(failure.find("does not exist"), std::string::npos) << failure;
+}
+
+/// kernel_match keeps the two apart; prepare() refuses a pairing that skipped it, which would
+/// launch a kernel adding (or missing) the ALiBi term with no error.
+TEST(TestGfx950AttentionUnified2DDispatch, RefusesToPrepareWhenTheKernelAndGraphDisagreeOnAlibi)
+{
+    for(const auto& [name, failure] : std::vector<std::pair<std::string, std::string>>{
+            {"ALiBi kernel, plain graph", prepareFailureFor(alibiKernel())},
+            {"plain kernel, ALiBi graph", prepareFailureFor(KernelSpec{}, alibiGraph())}})
+    {
+        SCOPED_TRACE(name);
+        ASSERT_FALSE(failure.empty()) << "prepare() did not fail at all";
+        EXPECT_NE(failure.find(ALIBI_MARKER), std::string::npos) << failure;
+    }
 }
 
 /// Empty BoundTokens is what a mismatched catalog entry would hand prepare(). Without the read
@@ -362,6 +416,7 @@ TEST(TestGfx950AttentionUnified2DDispatch, RefusesToPrepareACandidateWithoutASup
     with([](KernelSpec& s) { s.maskType = 3; });
     with([](KernelSpec& s) { s.headSize = 96; });
     with([](KernelSpec& s) { s.numQueryHeads = 9; });
+    with([](KernelSpec& s) { s.useAlibi = 2; });
 
     for(std::size_t i = 0; i < malformed.size(); ++i)
     {

@@ -20,7 +20,12 @@ from typing import Any
 import numpy as np
 
 from dispatch.sdpa import SdpaRequest
-from rocke.numeric.sdpa_reference import hipdnn_left_to_window, sdpa_reference
+from rocke.numeric.sdpa_reference import (
+    alibi_bias,
+    alibi_slopes,
+    hipdnn_left_to_window,
+    sdpa_reference,
+)
 from .helpers import strided_view
 
 __all__ = ["sdpa_reference_from_request"]
@@ -123,7 +128,6 @@ UNSUPPORTED_FEATURES = (
     "paged",
     "block_mask",
     "sinks",
-    "alibi",
     "fp8_s_o",
     "max_sum_exp",
 )
@@ -138,6 +142,7 @@ def sdpa_reference_from_request(
 
         s     = (Q . K^T) * scale * descale_q * descale_k
         s    += bias[broadcast(b, h_q, q, k)]       # unscaled, by query head
+        s    += (k - q) * alibi_slope(h_q)          # ALiBi (SEM-021)
         s     = -inf where not keep(q, k)
         p     = softmax(s)                          # fully masked row -> p = 0
         O     = (p . V) * descale_v
@@ -167,11 +172,14 @@ def sdpa_reference_from_request(
     ``row_valid`` rows.
 
     Raises ``NotImplementedError`` naming the feature for dropout, paged KV,
-    block masks, sinks, ALiBi, FP8 softmax/output scaling, and max/sum_exp
-    outputs, which this oracle does not model yet (hipDNN's CPU reference does).
+    block masks, sinks, FP8 softmax/output scaling, and max/sum_exp outputs,
+    which this oracle does not model yet (hipDNN's CPU reference does), and for
+    ALiBi off the top-left causal band, which hipDNN's reference declines too.
     """
     features = req.features()
     unsupported = [name for name in UNSUPPORTED_FEATURES if name in features]
+    if req.alibi and (req.right_bound != 0 or req.diagonal != "top_left"):
+        unsupported.append("alibi off the top-left causal band")
     if unsupported:
         raise NotImplementedError(
             f"sdpa_reference_from_request does not implement {', '.join(unsupported)}"
@@ -236,6 +244,9 @@ def sdpa_reference_from_request(
     bias = None
     if req.bias is not None:
         bias = _dense_operand("bias", tensors["bias"], req.bias.tensor)
+    if req.alibi:
+        alibi = alibi_bias(alibi_slopes(h_q), s_q, s_kv)
+        bias = alibi if bias is None else np.asarray(bias, dtype=np.float64) + alibi
 
     out, lse = sdpa_reference(
         np.asarray(q, dtype=np.float64) * descale_qk[:, :, None, None],

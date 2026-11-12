@@ -184,6 +184,11 @@ class AttentionRequest(OperatorRequest):
     layout: str = "auto"  # "auto" | "dense" | "ragged" | "paged"
     use_softcap: bool = False
     use_alibi: bool = False
+    # With ``use_alibi``: the caller binds the slopes as ``tensors["alibi_slopes"]``
+    # (feature ``alibi_external_slopes``) instead of using hipDNN's per-head slopes
+    # from ``nhead_q`` (feature ``alibi``). Admission only: CDNA kernels take either
+    # at run time, while gfx1151 implements caller slopes alone.
+    use_alibi_external_slopes: bool = False
     use_qq_bias: bool = False
     # Dense additive attention bias ``[B|1, H|1, Sq|1, Sk]`` (unit-stride keys)
     # added to the scaled scores; ``attn_bias_dtype`` is "f32" or "q" (the Q
@@ -312,7 +317,9 @@ class AttentionRequest(OperatorRequest):
         if bool(self.use_softcap):
             active.add("softcap")
         if bool(self.use_alibi):
-            active.add("alibi")
+            active.add(
+                "alibi_external_slopes" if self.use_alibi_external_slopes else "alibi"
+            )
         if bool(self.use_qq_bias):
             active.add("qq_bias")
         if bool(self.use_attn_bias):
@@ -406,6 +413,10 @@ def _request_errors(
         errors.append(f"unsupported op {req.op!r}")
     if type(req.emit_lse) is not bool:
         errors.append(f"emit_lse must be a bool, got {type(req.emit_lse).__name__}")
+    if bool(getattr(req, "use_alibi_external_slopes", False)) and not bool(
+        getattr(req, "use_alibi", False)
+    ):
+        errors.append("use_alibi_external_slopes requires use_alibi")
     if type(req.runtime_head_dims) is not bool:
         errors.append(
             "runtime_head_dims must be a bool, got "
@@ -750,7 +761,11 @@ def normalize_band(
         return AttentionBand(
             None, 0 if sq == 1 and not uniform_lengths else None, Alignment.BOTTOM_RIGHT
         )
-    if sq == sk and (uniform_lengths or not _has_no_mask_kernel(req.arch)):
+    # The arch fold would turn top-left ALiBi with LSE into the bottom-right case its
+    # gate refuses as undefined; unfolded, the arch gate names the missing kernel.
+    alibi_lse = bool(req.use_alibi) and bool(req.emit_lse)
+    folds = not _has_no_mask_kernel(req.arch) and not alibi_lse
+    if sq == sk and (uniform_lengths or folds):
         align = Alignment.BOTTOM_RIGHT
     return AttentionBand(left_bound, right_bound, align)
 
@@ -796,7 +811,20 @@ def _problem_with_num_cus(
         causal_top_left=band.top_left,
         right_bound=band.kernel_right_bound,
         emit_lse=bool(req.emit_lse),
+        use_alibi=bool(req.use_alibi),
     )
+
+
+# ALiBi runs on the gfx942 / gfx950 tiled unified paths only.
+UNIFIED_ALIBI_ARCHES = ("gfx942", "gfx950")
+
+
+def unified_coverage_problem(problem: UnifiedAttentionProblem):
+    """``problem`` without the features only the tiled paths implement (LSE output,
+    ALiBi), for the scalar coverage gate; the path's own gate rules on those."""
+    if not (problem.emit_lse or problem.use_alibi):
+        return problem
+    return replace(problem, emit_lse=False, use_alibi=False)
 
 
 def attention_problem(req: AttentionRequest) -> UnifiedAttentionProblem:

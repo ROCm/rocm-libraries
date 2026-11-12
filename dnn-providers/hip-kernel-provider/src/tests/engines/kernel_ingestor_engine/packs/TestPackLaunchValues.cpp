@@ -126,6 +126,8 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseValuesMatchTheV1Contract)
               "hipkernel.gfx950_attention_dense.dispatch.v1");
     EXPECT_EQ(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2,
               "hipkernel.gfx950_attention_dense.dispatch.v2");
+    EXPECT_EQ(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1,
+              "hipkernel.gfx950_attention_dense.dispatch.alibi.v1");
 
     // The stored double converts back to the float the kernel takes, bit for bit.
     const auto stored = values.find("scale");
@@ -357,6 +359,40 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseReadsTheSameValuesUnderV1AndV2)
     auto v3 = savedGfx950AttentionDense();
     v3.dispatchSymbol = "hipkernel.gfx950_attention_dense.dispatch.v3";
     expectReadRefusal(&readGfx950AttentionDenseLaunchInputs, v3, "names no launch-value contract");
+}
+
+// ALiBi binds no tensor (the kernel derives hipDNN's slopes from the query head count), so
+// the alibi contract stores v2's value set unchanged and only its name carries the flag.
+// hipDNN defines ALiBi only on the top-left causal band, so a saved non-causal ALiBi plan
+// is refused; a window is checked as in any plan (gfx950's graph match declines windows).
+TEST(TestPackLaunchValues, Gfx950AttentionDenseReadsAlibiFromTheContractNameAlone)
+{
+    auto launch = gfx950AttentionDenseInputs();
+    launch.binding.slidingWindow = 0;
+    auto alibiBinding = launch.binding;
+    alibiBinding.alibi = true;
+    EXPECT_EQ(gfx950AttentionDenseLaunchValues(alibiBinding, launch.problem, launch.blockM),
+              gfx950AttentionDenseLaunchValues(launch.binding, launch.problem, launch.blockM));
+
+    const SavedLaunchInputs alibi{
+        std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1),
+        gfx950AttentionDenseLaunchValues(alibiBinding, launch.problem, launch.blockM)};
+    const auto fromAlibi = readGfx950AttentionDenseLaunchInputs(alibi);
+    EXPECT_TRUE(fromAlibi.binding.alibi);
+    EXPECT_EQ(fromAlibi.binding.q, launch.binding.q);
+    EXPECT_EQ(fromAlibi.binding.causal, launch.binding.causal);
+    EXPECT_EQ(fromAlibi.problem.numQueryHeads, launch.problem.numQueryHeads);
+    EXPECT_EQ(fromAlibi.blockM, launch.blockM);
+
+    auto nonCausal = alibi;
+    nonCausal.values["causal"] = int64_t{0};
+    nonCausal.values["sliding_window"] = int64_t{0};
+    expectReadRefusal(&readGfx950AttentionDenseLaunchInputs, nonCausal, "in an ALiBi plan");
+
+    auto v1 = savedGfx950AttentionDense();
+    v1.dispatchSymbol = std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1);
+    EXPECT_FALSE(readGfx950AttentionDenseLaunchInputs(v1).binding.alibi);
+    EXPECT_FALSE(readGfx950AttentionDenseLaunchInputs(savedGfx950AttentionDense()).binding.alibi);
 }
 
 TEST(TestPackLaunchValues, PointwiseRefusesMalformedValues)
@@ -739,7 +775,8 @@ TEST(TestPackLaunchValues, Gfx942AttentionDenseReadsOnlyItsV1Contract)
 {
     for(const char* other : {"hipkernel.gfx942_attention_dense.dispatch.v2",
                              "hipkernel.gfx950_attention_dense.dispatch.v1",
-                             "hipkernel.gfx950_attention_dense.dispatch.v2"})
+                             "hipkernel.gfx950_attention_dense.dispatch.v2",
+                             "hipkernel.gfx950_attention_dense.dispatch.alibi.v1"})
     {
         SCOPED_TRACE(other);
         auto saved = savedGfx942AttentionDense();
@@ -751,6 +788,56 @@ TEST(TestPackLaunchValues, Gfx942AttentionDenseReadsOnlyItsV1Contract)
                           "the handler reads the contract "
                           "'hipkernel.gfx942_attention_dense.dispatch.v1'");
     }
+}
+
+// As on gfx950, the alibi contract stores v1's value set unchanged, the grid and stats uid
+// included, and only its name carries the flag. A saved ALiBi plan keeps its window (the
+// windowed ALiBi variants), and a non-causal one is refused, since hipDNN defines ALiBi
+// only on the top-left causal band.
+TEST(TestPackLaunchValues, Gfx942AttentionDenseReadsAlibiFromTheContractNameAlone)
+{
+    auto launch = gfx942AttentionDenseInputs();
+    launch.binding.slidingWindow = 0;
+    launch.binding.stats = 65;
+    attention_dense::AttentionDenseGrid grid;
+    grid.order = attention_dense::AttentionDenseGridOrder::PERSISTENT;
+    grid.decode = attention_dense::AttentionDensePersistDecode::BT_HKV_MINOR;
+    grid.numPersistent = 304;
+    auto alibiBinding = launch.binding;
+    alibiBinding.alibi = true;
+    const auto values
+        = gfx942AttentionDenseLaunchValues(alibiBinding, launch.problem, launch.blockM, grid);
+    EXPECT_EQ(
+        values,
+        gfx942AttentionDenseLaunchValues(launch.binding, launch.problem, launch.blockM, grid));
+
+    const auto fromAlibi = readGfx942AttentionDenseLaunchInputs(
+        {std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1), values});
+    EXPECT_TRUE(fromAlibi.binding.alibi);
+    EXPECT_EQ(fromAlibi.binding.q, launch.binding.q);
+    EXPECT_EQ(fromAlibi.binding.causal, launch.binding.causal);
+    EXPECT_EQ(fromAlibi.binding.stats, launch.binding.stats);
+    EXPECT_EQ(fromAlibi.problem.numQueryHeads, launch.problem.numQueryHeads);
+    EXPECT_EQ(fromAlibi.blockM, launch.blockM);
+    EXPECT_EQ(fromAlibi.grid.order, grid.order);
+    EXPECT_EQ(fromAlibi.grid.decode, grid.decode);
+
+    auto windowed = savedGfx942AttentionDense();
+    windowed.dispatchSymbol = std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1);
+    ASSERT_GT(std::get<int64_t>(windowed.values.at("sliding_window")), 0);
+    const auto fromWindowed = readGfx942AttentionDenseLaunchInputs(windowed);
+    EXPECT_TRUE(fromWindowed.binding.alibi);
+    EXPECT_EQ(fromWindowed.binding.slidingWindow,
+              std::get<int64_t>(windowed.values.at("sliding_window")));
+
+    auto nonCausal = windowed;
+    nonCausal.values["causal"] = int64_t{0};
+    nonCausal.values["sliding_window"] = int64_t{0};
+    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs, nonCausal, "in an ALiBi plan");
+
+    EXPECT_FALSE(readGfx942AttentionDenseLaunchInputs(
+                     {std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1), values})
+                     .binding.alibi);
 }
 
 TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesMalformedValues)

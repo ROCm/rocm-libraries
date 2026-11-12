@@ -430,6 +430,8 @@ rocke_attention_dense_spec_t rocke_attention_dense_spec_default(void)
     s.causal_bottom_right = false;
     s.nonpersist_decode = "auto";
     s.chiplet_num_xcds = 8;
+    s.use_alibi = false;
+    s.emit_lse = false;
     return s;
 }
 
@@ -648,6 +650,21 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
             ROCKE_SPEC_FAIL(
                 reason, cap, "paged not yet implemented for plain-causal (sliding_window>0 only)");
     }
+    if(s->use_alibi)
+    {
+        /* A sink logit would need the per-row anchor shift of the ALiBi term. */
+        if(s->use_sinks)
+            ROCKE_SPEC_FAIL(reason, cap, "use_alibi is not yet supported with use_sinks");
+        if(s->paged)
+            ROCKE_SPEC_FAIL(reason, cap, "use_alibi is not yet supported with paged");
+        if(s->varlen)
+            ROCKE_SPEC_FAIL(reason, cap, "use_alibi is not yet supported with varlen");
+        /* hipDNN defines ALiBi on the top-left diagonal only; off it, the LSE
+         * depends on which query index the term uses (O does not). */
+        if(s->causal_bottom_right && s->emit_lse)
+            ROCKE_SPEC_FAIL(
+                reason, cap, "use_alibi with causal_bottom_right does not support emit_lse");
+    }
     if(s->use_sinks && s->paged)
         ROCKE_SPEC_FAIL(reason, cap, "use_sinks is not yet supported with paged KV");
     if(s->use_sinks && s->varlen)
@@ -830,6 +847,8 @@ rocke_status_t rocke_attention_dense_kernel_name(const rocke_attention_dense_spe
         add("swa%d", s->sliding_window);
     if(s->use_sinks)
         add("sinks");
+    if(s->use_alibi)
+        add("alibi");
     if(s->varlen)
         add("varlen");
     if(s->paged)

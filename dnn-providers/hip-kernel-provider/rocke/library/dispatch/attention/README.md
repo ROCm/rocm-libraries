@@ -454,7 +454,11 @@ The request describes layout (`dense`, `ragged`, or `paged`, power-of-two
 pages) and score features (`use_softcap`, `use_sinks`, `use_alibi`,
 `use_qq_bias`, legacy `sliding_window`, optional `window_right`, or explicit
 `window_left`) before selection; both kernels serve all of them, in any
-combination. `use_fp8=True` selects OCP E4M3FN K/V storage, not FP8 Q/O.
+combination. Their ALiBi reads the caller's slopes, so a gfx1151 ALiBi request
+sets `use_alibi_external_slopes=True` and binds `tensors["alibi_slopes"]` (fp32,
+one value per query head): `use_alibi=True` alone asks for hipDNN's built-in
+slopes derived from the query head count (`SdpaSemanticsRegister` SEM-021),
+which only the gfx942/gfx950 kernels compute. `use_fp8=True` selects OCP E4M3FN K/V storage, not FP8 Q/O.
 FP16/BF16 Q/O and head widths that are multiples of 8 up to 256 (Q/K and V/O
 widths may differ) are supported. Legacy `sliding_window` remains the left
 width; `window_right` supplies an optional runtime right bound, while

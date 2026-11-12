@@ -33,7 +33,12 @@ from typing import Optional
 import numpy as np
 from numpy.lib.stride_tricks import as_strided
 
-from rocke.numeric.sdpa_reference import resolve_diagonal_band, sdpa_reference
+from rocke.numeric.sdpa_reference import (
+    alibi_bias,
+    alibi_slopes,
+    resolve_diagonal_band,
+    sdpa_reference,
+)
 
 CDNA_ARCHS = ("gfx942", "gfx950")
 RDNA_ARCHS = ("gfx1151", "gfx1201", "gfx1250")
@@ -49,9 +54,9 @@ BIAS_LAYOUTS = ("contiguous", "expanded", "row_padded")
 TIERS = ("smoke", "full", "exhaustive")
 
 # Coverage items (``SdpaCase.reqs``): the feature axes a case covers, by
-# number. Items 1 to 14 each have a dedicated group of forward cases whose
-# ids start with ``<name>_``; 15 marks every backward case and 16 the ragged
-# (THD) backward cases (``bwd_cases.py``).
+# number. Items 1 to 14 and 17 each have a dedicated group of forward cases
+# whose ids start with ``<name>_``; 15 marks every backward case and 16 the
+# ragged (THD) backward cases (``bwd_cases.py``).
 COVERAGE_ITEMS = {
     1: "dtype",
     2: "layout",
@@ -69,6 +74,7 @@ COVERAGE_ITEMS = {
     14: "bias",
     15: "bwd",
     16: "bwd_ragged",
+    17: "alibi",
 }
 
 BASE_SEED = 20240611
@@ -121,6 +127,9 @@ class SdpaCase:
     kv_lens: Optional[tuple] = None
     scale: Optional[float] = None
     bias: Optional[BiasSpec] = None
+    # hipDNN ``alibi_mask`` (SEM-021): slopes from h_q, defined on the top-left
+    # causal band only.
+    alibi: bool = False
     emit_lse: bool = False
     decode: bool = False
     fully_masked_rows: bool = False
@@ -324,6 +333,8 @@ def validate_case(case):
         e.append("bad causal_bool")
     if case.scale is not None and not (case.scale > 0 and math.isfinite(case.scale)):
         e.append("scale must be positive and finite")
+    if case.alibi and case.band[1:] != (0, True):
+        e.append("alibi needs the top-left causal band")
     if case.length_mode not in LENGTH_MODES:
         return e + [f"unknown length_mode {case.length_mode!r}"]
     if case.length_mode == "fixed":
@@ -604,13 +615,23 @@ class SdpaReference:
     valid_rows: np.ndarray  # bool, shaped like lse: True for real query rows
 
 
+def alibi_oracle_bias(h_q, s_q, s_kv):
+    """ALiBi as the oracle's additive bias, ``[1, h_q, s_q, s_kv]`` in in-sequence
+    positions, so it holds for padded and ragged batches too."""
+    return alibi_bias(alibi_slopes(h_q), s_q, s_kv)
+
+
 def evaluate(inputs):
     """Run the float64 oracle on materialised inputs."""
     case = inputs.case
     left, right, tl = case.band
+    bias = inputs.bias
+    if case.alibi:
+        alibi = alibi_oracle_bias(case.h_q, case.s_q, case.s_kv)
+        bias = alibi if bias is None else bias + alibi
     kw = dict(
         scale=inputs.scale,
-        bias=inputs.bias,
+        bias=bias,
         left_bound=left,
         right_bound=right,
         top_left=tl,

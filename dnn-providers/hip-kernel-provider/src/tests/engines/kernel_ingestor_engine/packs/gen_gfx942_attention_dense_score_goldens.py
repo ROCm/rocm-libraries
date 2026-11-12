@@ -24,6 +24,8 @@ IngestorGenerator's tests/test_attention_dense_goldens.py runs the same comparis
 
 from __future__ import annotations
 
+import dataclasses
+
 import itertools
 import sys
 from pathlib import Path
@@ -78,12 +80,23 @@ def score_rows():
 
     persist = [p for p, _ in registry.extra_pins if p["spec_id"] == PERSIST_PIN]
     assert len(persist) == 1, registry.extra_pins
-    cells = registry.cells()
-    persist_base = {
-        index: registry.base_spec(cell, persist[0])
-        for index, cell in enumerate(cells)
-        if cell["hdim_q"] == 128
-    }
+    # Every section's cells, primary first, so the also sections' (ALiBi) cells follow the
+    # swept ones; a section pinning the persistent grid gives its D128 cells a policy arm.
+    cells, persist_base = [], {}
+    for section in registry.sections():
+        pins = [section.pin, *(p for p, _ in section.extra_pins)]
+        persist = [p for p in pins if p["spec_id"] == PERSIST_PIN]
+        for cell in section.cells():
+            if cell not in cells:
+                cells.append(cell)
+            if persist and cell["hdim_q"] == 128:
+                # A feature's select (the ALiBi tile) moves the policy arm off the
+                # candidate's default spec.
+                base = section.base_spec(cell, persist[0])
+                selected = section.selected(base)
+                if selected:
+                    base = dataclasses.replace(base, **selected)
+                persist_base.setdefault(cells.index(cell), base)
 
     def cell_index(cell):
         return next(i for i, c in enumerate(cells) if c == cell)

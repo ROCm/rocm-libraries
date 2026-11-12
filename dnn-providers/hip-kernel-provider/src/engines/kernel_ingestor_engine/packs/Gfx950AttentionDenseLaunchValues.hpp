@@ -45,21 +45,29 @@ inline constexpr std::string_view GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
 inline constexpr std::string_view GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2
     = "hipkernel.gfx950_attention_dense.dispatch.v2";
 
-/// The values of the `hipkernel.gfx950_attention_dense.dispatch.v1` and `.v2` contracts,
-/// which share one value set (attention_dense::launchValues): the sixteen both arches save.
+/// The ALiBi contract: v2's values, and the launch also passes a null alibi_slopes_ptr
+/// after the head counts (11 kernel arguments), for use_alibi kernels. Named rather than
+/// numbered, so it does not take the next version of the plain contract.
+inline constexpr std::string_view GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1
+    = "hipkernel.gfx950_attention_dense.dispatch.alibi.v1";
+
+/// The values of the `hipkernel.gfx950_attention_dense.dispatch.v1`, `.v2` and `.alibi.v1`
+/// contracts, which share one value set (attention_dense::launchValues): the sixteen both
+/// arches save.
 hipdnn_plugin_sdk::ingestor::MetadataValues gfx950AttentionDenseLaunchValues(
     const AttentionDenseBinding& binding, const AttentionDenseProblem& problem, int64_t blockM);
 
 /// Everything a gfx950 dense-attention launch is computed from.
 using Gfx950AttentionDenseLaunchInputs = AttentionDenseLaunchInputs;
 
-/// Reads the values of the `hipkernel.gfx950_attention_dense.dispatch.v1` or `.v2`
-/// contract (one value set; the versions differ only in the kernel arguments the launch
-/// passes). `block_m` must be 128 or 256, the two gfx950 builds. For every other rule, and
+/// Reads the values of the `hipkernel.gfx950_attention_dense.dispatch.v1`, `.v2` or
+/// `.alibi.v1` contract (one value set; the contracts differ only in the kernel arguments
+/// the launch passes). The binding's `alibi` is true for `.alibi.v1` only. `block_m` must
+/// be 128 or 256, the two gfx950 builds. For every other rule, and
 /// the one gfx950 exception to them, see attention_dense::readLaunchInputs.
 ///
-/// @throws HipdnnPluginException with a load refusal when the dispatch name is neither
-///         contract, or when a value is missing, extra, of another type or out of range.
+/// @throws HipdnnPluginException with a load refusal when the dispatch name is none of
+///         these contracts, or when a value is missing, extra, of another type or out of range.
 Gfx950AttentionDenseLaunchInputs readGfx950AttentionDenseLaunchInputs(
     const hipdnn_plugin_sdk::ingestor::SavedLaunchInputs& inputs);
 

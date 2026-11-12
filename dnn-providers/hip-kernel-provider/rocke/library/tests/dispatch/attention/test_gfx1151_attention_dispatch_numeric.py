@@ -302,6 +302,7 @@ def _request_for(case, algorithm: str, *, num_cus: int = 0) -> AttentionRequest:
         kv_block_size=case.block_size if case.layout == "paged" else 16,
         use_softcap=bool(case.softcap),
         use_alibi=case.alibi,
+        use_alibi_external_slopes=case.alibi,
         use_qq_bias=case.qq_bias,
         use_fp8=bool(case.kv_dtype),
         layout=case.layout,

@@ -20,7 +20,9 @@ rocKE's catalog, tiles, names or admission rules do:
 - the *GQA probe* family: a rule-driven candidate whose head counts are runtime
   values and whose GQA ratio, a spec property, is baked: ``num_segments`` comes from
   ``batch`` and the KV head count, so head pairs sharing a ratio pick different
-  segments.
+  segments;
+- the *feature probe* family: the probe family plus a ``bias`` request and spec field,
+  for ``enumerate.feature_fields``.
 
 ``provider(tmp_path, monkeypatch)`` binds all four to a throw-away provider root.
 """
@@ -143,6 +145,30 @@ class SplitProbeCandidate(ProbeCandidate):
     @staticmethod
     def _wrap(spec: ProbeSpec) -> ProbeTuning:
         return ProbeTuning(spec, ProbeReduceSpec(spec.dtype, spec.tile_m))
+
+
+@dataclasses.dataclass(frozen=True)
+class FeatureProbeRequest(ProbeRequest):
+    """The probe request with a feature a cell can turn on."""
+
+    bias: bool = False
+
+
+@dataclasses.dataclass(frozen=True)
+class FeatureProbeSpec(ProbeSpec):
+    bias: bool = False
+
+
+class FeatureProbeCandidate(ProbeCandidate):
+    """The probe candidate, carrying the request's ``bias`` into its spec."""
+
+    def select_spec(self, request: FeatureProbeRequest):
+        base = super().select_spec(request)
+        return FeatureProbeSpec(**dataclasses.asdict(base), bias=request.bias)
+
+
+def feature_probe_candidates():
+    return [FeatureProbeCandidate("feature_probe", "probe", "grid")]
 
 
 def probe_candidates():
@@ -290,6 +316,24 @@ def probe_manifest(provider_root, **enumerate_overrides) -> dict:
         "kernel_name_template": "probe.{dtype}_d{hdim}_h{heads}_c{causal}_tn{tile_n}",
         "enumerate": enumerate_block,
     }
+
+
+def feature_probe_manifest(provider_root) -> dict:
+    """The probe manifest over the feature probe family: a ``bias`` cell group and
+    ``bias`` as a feature field that narrows its kernels to the default tile."""
+    manifest = probe_manifest(
+        provider_root,
+        candidates=f"{_MODULE}:feature_probe_candidates",
+        request=f"{_MODULE}:FeatureProbeRequest",
+    )
+    manifest["enumerate"]["cells"].append({"fields": ["bias"], "values": [False, True]})
+    manifest["enumerate"]["feature_fields"] = {
+        "bias": {"name_token": "_bias", "free_fields": []}
+    }
+    manifest["kmd_fields"].append({"name": "bias", "type": "int", "default_value": 0})
+    manifest["specialization"]["metadata_fields"].append("bias")
+    manifest["specialization"]["bindings"]["bias"] = {"field": "bias"}
+    return manifest
 
 
 def conv_probe_manifest(provider_root) -> dict:

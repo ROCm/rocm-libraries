@@ -75,7 +75,7 @@ constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx950_attention_unified_2d
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_unified_2d.dispatch";
 
 // KMD fields (14-field schema). Fields a shipped variant holds at one value across the whole
-// catalog (waves_per_eu, kv_storage_dtype, the sink/alibi/qq-bias/softcap switches) are absent:
+// catalog (waves_per_eu, kv_storage_dtype, the sink/qq-bias/softcap switches) are absent:
 // a variant that moved one of them would have to add it here first, or the candidates collide
 // on the catalog key and the loader drops one. `num_seqs` is declared but not read: the kernel
 // takes the batch as a kernarg and derives its cu_q search trip count from it, so no batch is
@@ -92,6 +92,8 @@ constexpr std::string_view NUM_WARPS_FIELD = "num_warps";
 constexpr std::string_view BLOCK_M_PER_WARP_FIELD = "block_m_per_warp";
 constexpr std::string_view USE_MFMA_32X32_FIELD = "use_mfma_32x32";
 constexpr std::string_view USE_TRANSPOSED_QK_32X32_FIELD = "use_transposed_qk_32x32";
+/// 1 for a kernel that adds ALiBi (hipDNN's slopes, top-left causal only).
+constexpr std::string_view USE_ALIBI_FIELD = "use_alibi";
 
 /// The geometry cold selection prefers: narrow 16x16, 4 warps x 16 rows, a 64-token KV tile.
 constexpr int64_t BASELINE_TILE_SIZE = 64;
@@ -109,6 +111,8 @@ constexpr std::string_view MASK_TOKEN = "gfx950_attention_unified_2d.mask_type";
 constexpr std::string_view SLIDING_WINDOW_TOKEN = "gfx950_attention_unified_2d.sliding_window";
 /// The softmax scale, f32, bound as its bit pattern (BoundTokens carry int64_t).
 constexpr std::string_view SCALE_BITS_TOKEN = "gfx950_attention_unified_2d.scale_bits";
+/// 1 when the graph asks for ALiBi (alibi_mask), else 0.
+constexpr std::string_view ALIBI_TOKEN = "gfx950_attention_unified_2d.alibi";
 
 // ---------------------------------------------------------------------------
 // Matching helpers
@@ -151,15 +155,16 @@ constexpr unified_attention::BoundTokenNames TOKEN_NAMES{Q_TOKEN,
                                                          MASK_TOKEN,
                                                          SLIDING_WINDOW_TOKEN,
                                                          SCALE_BITS_TOKEN,
-                                                         "gfx950 attention_unified_2d"};
+                                                         "gfx950 attention_unified_2d",
+                                                         ALIBI_TOKEN};
 
 /**
  * @brief Graph-scoped applicability for the whole engine.
  *
  * The shared unified-attention match (UnifiedAttentionGraphMatch.hpp) around this engine's
- * rules: GQA groups up to 16, head_size 64 or 128, q_len <= kv_len, and decode handed to
- * Unified3D. Each decline of a graph with an SDPA-forward node logs its cause at INFO (see
- * Declined); any other graph declines silently.
+ * rules: GQA groups up to 16, head_size 64 or 128, q_len <= kv_len, and decode without ALiBi
+ * handed to Unified3D. Each decline of a graph with an SDPA-forward node logs its cause at
+ * INFO (see Declined); any other graph declines silently.
  *
  * @warning Returning std::nullopt empties this engine's WHOLE catalog and skips EVERY
  *          remaining pack, not just this one.
@@ -210,8 +215,9 @@ std::optional<BoundTokens> gfx950AttentionUnified2DGraphMatches(const MatchConte
     // Decode (one query token per sequence) is hipkernel:Gfx950AttentionUnified3D's wherever
     // its split-KV kernel can be built: there the 2D kernel runs one under-filled Q block
     // per sequence while the 3D kernel splits the keys across CTAs. No select_path crossover
-    // is replayed: the boundary is this static rule.
-    if(problem.seqLenQ == 1
+    // is replayed: the boundary is this static rule. Unified3D ships no ALiBi kernels, so
+    // ALiBi decode stays here.
+    if(problem.seqLenQ == 1 && !operands->attributes->alibi_mask()
        && gfx950Unified3DServesGqaGroup(problem.numQueryHeads, problem.numKvHeads))
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"decode"} << "decode (seqlen_q 1) with a GQA group of "
@@ -221,14 +227,14 @@ std::optional<BoundTokens> gfx950AttentionUnified2DGraphMatches(const MatchConte
     }
 
     const auto matched = unified_attention::matchAttributes(
-        *operands->attributes, problem, GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME);
+        *operands->attributes, problem, GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME, TOKEN_NAMES);
     if(!matched.has_value())
     {
         return std::nullopt;
     }
     // All three mask kinds are served, each by its own kernel: top-left and bottom-right
     // coincide only at Sq == Skv, but they are distinct kernel bodies and the catalog carries
-    // both.
+    // both. ALiBi (top-left causal only) has kernels of its own.
     return unified_attention::bindGraph(
         *operands->attributes, matched->mask, matched->scale, TOKEN_NAMES);
 }
@@ -247,6 +253,7 @@ struct AttentionUnified2DCandidate
     int64_t blockMPerWarp = 0;
     bool useMfma32x32 = false;
     bool useTransposedQk32x32 = false;
+    bool useAlibi = false;
 };
 
 /**
@@ -271,8 +278,10 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
     const auto blockMPerWarp = integerMetadata(kernel, BLOCK_M_PER_WARP_FIELD);
     const auto useMfma32x32 = integerMetadata(kernel, USE_MFMA_32X32_FIELD);
     const auto useTransposedQk32x32 = integerMetadata(kernel, USE_TRANSPOSED_QK_32X32_FIELD);
+    const auto useAlibi = integerMetadata(kernel, USE_ALIBI_FIELD);
     if(!headSize || !numQueryHeads || !numKvHeads || !blockSize || !maskType || !slidingWindow
-       || !tileSize || !numWarps || !blockMPerWarp || !useMfma32x32 || !useTransposedQk32x32)
+       || !tileSize || !numWarps || !blockMPerWarp || !useMfma32x32 || !useTransposedQk32x32
+       || !useAlibi)
     {
         return std::nullopt;
     }
@@ -292,7 +301,7 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
         return std::nullopt;
     }
     if(*useMfma32x32 < 0 || *useMfma32x32 > 1 || *useTransposedQk32x32 < 0
-       || *useTransposedQk32x32 > 1)
+       || *useTransposedQk32x32 > 1 || *useAlibi < 0 || *useAlibi > 1)
     {
         return std::nullopt;
     }
@@ -318,7 +327,8 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
                                        *numWarps,
                                        *blockMPerWarp,
                                        *useMfma32x32 != 0,
-                                       *useTransposedQk32x32 != 0};
+                                       *useTransposedQk32x32 != 0,
+                                       *useAlibi != 0};
 }
 
 /**
@@ -329,7 +339,8 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
  * so the metadata carries no shape and none is compared. What a candidate does bake, and
  * what this checks against the graph:
  *
- *   - dtype, head_size, num_query_heads, num_kv_heads, the mask kind and sliding window;
+ *   - dtype, head_size, num_query_heads, num_kv_heads, the mask kind, sliding window and
+ *     ALiBi (use_alibi);
  *   - block_size, which must divide seqlen_kv (the identity cache is whole blocks).
  *
  * The batch is not bounded here: the kernel derives its cu_q search trip count from the
@@ -385,6 +396,13 @@ bool kernelMatches(const MatchContext& context,
     const auto slidingWindow
         = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, SLIDING_WINDOW_TOKEN);
     if(!slidingWindow.has_value() || candidate->slidingWindow != *slidingWindow)
+    {
+        return false;
+    }
+
+    // An ALiBi graph needs an ALiBi candidate and a plain graph a plain one.
+    const auto alibi = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, ALIBI_TOKEN);
+    if(!alibi.has_value() || candidate->useAlibi != (*alibi != 0))
     {
         return false;
     }
@@ -645,6 +663,15 @@ public:
         }
 
         const auto candidate = requireCandidate(kernel);
+        // kernel_match pairs an ALiBi graph with an ALiBi candidate only; a mismatch here is a
+        // caller that skipped it, and would launch the wrong scores.
+        if(candidate.useAlibi != binding.alibi)
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "gfx950 attention_unified_2d: kernel '" + toString(kernel.kernelId)
+                    + "' and the graph disagree on ALiBi");
+        }
         const auto problem = boundProblem(context, binding);
         const auto layout = requireLayout(candidate, problem, kernel);
 
@@ -729,7 +756,9 @@ public:
         void* const queryStartLen = base + layout.queryStartLenOffset;
 
         // Unused pointers are null and the unused scalars neutral: the shipped variants have
-        // no sinks, ALiBi, qq-bias, softcap or fp8, so the kernel never reads them.
+        // no sinks, qq-bias, softcap or fp8, so the kernel never reads them. A null
+        // alibi_slopes_ptr makes a use_alibi variant compute hipDNN's slopes from the query
+        // head count.
         void* const unused = nullptr;
         const float neutralScale = 1.0F;
         const float noSoftcap = 0.0F;

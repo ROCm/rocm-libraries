@@ -121,6 +121,16 @@ constexpr const char* SAVE_LOAD_LSE_CASE = "Shape_WindowTopLeftCrossLength_Lse";
 /// the fast-division pairs recomputed.
 constexpr const char* SAVE_LOAD_PERSISTENT_CASE = "Persist_Gqa40x8WNotAMultipleOfNp";
 constexpr const char* SAVE_LOAD_PERSISTENT_LSE_CASE = "Persist_Gqa40x8WNotAMultipleOfNp_Lse";
+// The ALiBi knob cases the save and load cases build. An ALiBi plan saves under the alibi
+// contract, and only that name restores the flag: a plan restored without it would launch
+// the ALiBi kernel one argument short and score without the bias.
+constexpr const char* ALIBI_SAVE_LOAD_CASE = "Alibi_D128_Bf16Hq40Kv8_Sq256Skv384";
+constexpr const char* ALIBI_SAVE_LOAD_PERSISTENT_LSE_CASE = "Alibi_Persist_D128_Fp16Hq40Kv8_Lse";
+// A windowed ALiBi plan, plain and with LSE: restored under the alibi contract, it must launch
+// the windowed ALiBi kernel with the slopes pointer and match the reference.
+constexpr const char* ALIBI_WINDOW_SAVE_LOAD_CASE = "Alibi_Window512_D64_Fp16Hq12Kv4_Sq640Skv1024";
+constexpr const char* ALIBI_WINDOW_SAVE_LOAD_LSE_CASE
+    = "Alibi_Window512_D64_Fp16Hq12Kv4_Sq640Skv1024_Lse";
 
 /// The suffix of an LSE row's name.
 constexpr const char* LSE_SUFFIX = "_Lse";
@@ -217,6 +227,13 @@ std::string tileName(const Tile& tile)
     return "Bm" + std::to_string(tile.blockM) + "Bn" + std::to_string(tile.blockN);
 }
 
+/// @p shape with alibi_mask set (hipDNN's ALiBi needs the top-left causal mask it carries).
+GraphShape withAlibi(GraphShape shape)
+{
+    shape.alibi = true;
+    return shape;
+}
+
 /// @p knobCase's twin that binds the stats output, named with LSE_SUFFIX.
 KnobCase lseTwin(KnobCase knobCase)
 {
@@ -233,6 +250,7 @@ struct KnobClass
     bool causal;
     int64_t window;
     bool emitLse;
+    bool alibi;
     int64_t blockM;
     int64_t blockN;
     bool persistent;
@@ -264,8 +282,9 @@ std::string camelName(std::string_view snake)
 }
 
 /// The graph a class row runs: hq_minor_swz needs Hq a multiple of 8 and, on the
-/// persistent grid, an even query-block count; a window cell runs Sq = Skv = max(512, 2W);
-/// the other rows rotate MHA, GQA and MQA heads.
+/// persistent grid, an even query-block count; a window cell runs Sq = Skv = max(512, 2W)
+/// with one head, or with ALiBi 3 query heads over 1, so the slopes differ per head and
+/// take hipDNN's second series; the other rows rotate MHA, GQA and MQA heads.
 KnobCase classCase(const KnobClass& knobClass, std::size_t row)
 {
     const std::array<std::pair<int64_t, int64_t>, 4> heads{{{8, 8}, {16, 2}, {8, 1}, {4, 4}}};
@@ -283,7 +302,7 @@ KnobCase classCase(const KnobClass& knobClass, std::size_t row)
     }
     if(knobClass.window != 0)
     {
-        hq = 1;
+        hq = knobClass.alibi ? 3 : 1;
         hkv = 1;
         seq = std::max<int64_t>(512, 2 * knobClass.window);
     }
@@ -293,6 +312,10 @@ KnobCase classCase(const KnobClass& knobClass, std::size_t row)
     {
         mask = Mask::WINDOW_TOP_LEFT;
         cell = "Window" + std::to_string(knobClass.window);
+    }
+    if(knobClass.alibi)
+    {
+        cell += "Alibi";
     }
     std::string name = std::string(knobClass.headSize == 64 ? "D64_" : "D128_")
                        + (dataType == DataType::BFLOAT16 ? "Bf16_" : "Fp16_") + cell + "_"
@@ -309,6 +332,7 @@ KnobCase classCase(const KnobClass& knobClass, std::size_t row)
         Tile{knobClass.blockM, knobClass.blockN},
         Grid{knobClass.persistent, std::string(knobClass.order)},
         knobClass.levers};
+    knobCase.shape.alibi = knobClass.alibi;
     return knobClass.emitLse ? lseTwin(std::move(knobCase)) : knobCase;
 }
 
@@ -322,8 +346,9 @@ std::optional<Levers> classLevers(const KnobCase& knobCase)
     {
         if(row.headSize == shape.headSize && row.dtype == dtype && row.causal == causal
            && row.window == shape.window && row.emitLse == shape.withStats
-           && row.blockM == knobCase.tile.blockM && row.blockN == knobCase.tile.blockN
-           && row.persistent == knobCase.grid.persistent && row.order == knobCase.grid.order)
+           && row.alibi == shape.alibi && row.blockM == knobCase.tile.blockM
+           && row.blockN == knobCase.tile.blockN && row.persistent == knobCase.grid.persistent
+           && row.order == knobCase.grid.order)
         {
             return row.levers;
         }
@@ -379,6 +404,54 @@ std::vector<KnobCase> knobCases()
               FORCED,
               Tile{256, 64},
               persistentGrid("qb_major")});
+
+    // ALiBi with hipDNN's slopes (SdpaSemanticsRegister SEM-021), each with its LSE twin:
+    // non-power-of-two Hq, which takes hipDNN's second slope series, GQA, B > 1 and
+    // Sq != Skv (an odd multiple of 128 too), on the qb_minor grid and the persistent grid,
+    // and the deprecated causal flag. ALiBi kernels ship at the 128/64 tile only.
+    addClass({"Alibi_D128_Bf16Hq40Kv8_Sq256Skv384",
+              withAlibi(makeShape(BF16, 128, 40, 8, Mask::BOUNDS_TOP_LEFT, 0, 2, 256, 384)),
+              FORCED,
+              Tile{128, 64}});
+    addClass({"Alibi_D64_Fp16Hq12Kv4_Sq384Skv640CausalFlag",
+              withAlibi(makeShape(FP16, 64, 12, 4, Mask::CAUSAL_MASK_FLAG, 0, 1, 384, 640)),
+              FORCED,
+              Tile{128, 64}});
+    addClass({"Alibi_Persist_D128_Fp16Hq40Kv8",
+              withAlibi(makeShape(FP16, 128, 40, 8, Mask::BOUNDS_TOP_LEFT, 0, 3, 1024, 1024)),
+              FORCED,
+              Tile{128, 64},
+              persistentGrid("bt_hkv_minor")});
+    addClass({"Alibi_Persist_D128_Bf16Hq12Kv4_Sq512Skv1024",
+              withAlibi(makeShape(BF16, 128, 12, 4, Mask::BOUNDS_TOP_LEFT, 0, 2, 512, 1024)),
+              FORCED,
+              Tile{128, 64},
+              persistentGrid("bt_hkv_minor")});
+    // hipDNN defines ALiBi with a left window too: the windowed ALiBi kernels (qb_minor grid
+    // only) at GQA with Sq < Skv, and at Sq > Skv by less than W, so the last rows keep only
+    // part of their window.
+    addClass({"Alibi_Window512_D64_Fp16Hq12Kv4_Sq640Skv1024",
+              withAlibi(makeShape(FP16, 64, 12, 4, Mask::WINDOW_TOP_LEFT, 512, 2, 640, 1024)),
+              FORCED,
+              Tile{128, 64}});
+    addClass({"Alibi_Window128_D128_Bf16Hq40Kv8_Sq640Skv576",
+              withAlibi(makeShape(BF16, 128, 40, 8, Mask::WINDOW_TOP_LEFT, 128, 1, 640, 576)),
+              FORCED,
+              Tile{128, 64}});
+    cases.push_back(
+        {"Cold_AlibiWindow1024D128",
+         withAlibi(makeShape(BF16, 128, 8, 2, Mask::WINDOW_TOP_LEFT, 1024, 1, 2048, 2048)),
+         COLD,
+         Tile{128, 64}});
+    cases.push_back(
+        {"Cold_AlibiD128",
+         withAlibi(makeShape(BF16, 128, 40, 8, Mask::BOUNDS_TOP_LEFT, 0, 2, 1024, 1024)),
+         COLD,
+         Tile{128, 64}});
+    cases.push_back({"Cold_AlibiD64",
+                     withAlibi(makeShape(FP16, 64, 6, 6, Mask::BOUNDS_TOP_LEFT, 0, 1, 512, 512)),
+                     COLD,
+                     Tile{128, 64}});
 
     // Cold: no knob, so the 256/64 policy kernel where it divides, and otherwise the
     // smallest dividing tile, which the score ranks next; on the grid coldGrid names.
@@ -581,6 +654,7 @@ std::optional<std::string> expectedKernelId(const GraphShape& shape,
         {"lds_k_group_pad", levers.ldsKGroupPad},
         {"use_cfvst", levers.useCfvst},
         {"use_exp2_fast", levers.useExp2Fast},
+        {"use_alibi", int64_t{shape.alibi ? 1 : 0}},
     };
     return detail::onlyServedKernelCarrying(ENGINE, key);
 }
@@ -602,6 +676,7 @@ bool selectedIsOfClass(const std::string& kernelId,
         {"block_n", tile.blockN},
         {"persistent", int64_t{grid.persistent ? 1 : 0}},
         {grid.persistent ? "persist_decode" : "nonpersist_decode", grid.order},
+        {"use_alibi", int64_t{shape.alibi ? 1 : 0}},
     };
     bool found = false;
     bool matches = false;
@@ -661,12 +736,12 @@ int deviceMultiProcessorCount()
 /// The grid a cold case selects: the persistent arm at the decode the registry pins for the
 /// mask where the engine's score prefers it -- D128, no window or one wider than
 /// NARROW_WINDOW keys, and NUM_PERSISTENT a multiple of this device's CU count -- and the
-/// qb_minor grid otherwise.
+/// qb_minor grid otherwise, as for a windowed ALiBi graph, whose kernels ship on it only.
 Grid coldGrid(const GraphShape& shape)
 {
     const int cus = deviceMultiProcessorCount();
     if(shape.headSize != 128 || (shape.window != 0 && shape.window <= NARROW_WINDOW) || cus <= 0
-       || NUM_PERSISTENT % cus != 0)
+       || NUM_PERSISTENT % cus != 0 || (shape.alibi && shape.window != 0))
     {
         return Grid{};
     }
@@ -697,7 +772,7 @@ using IntegrationGpuGfx942AttentionDenseSwzLegality
     = IntegrationGpuGfx942AttentionDenseBase<KnobCase>;
 
 /// Every row runs one compiled kernel, and what the compiler specializes on is the head
-/// size, dtype, causal flag, window, LSE and tile. The table must run every such class the
+/// size, dtype, causal flag, window, LSE, ALiBi and tile. The table must run every such class the
 /// catalog carries, and nothing the catalog lacks.
 TEST_F(IntegrationGpuGfx942AttentionDenseKnobCoverage, CoversEveryCatalogKernelClass)
 {
@@ -713,7 +788,8 @@ TEST_F(IntegrationGpuGfx942AttentionDenseKnobCoverage, CoversEveryCatalogKernelC
                                    int64_t,
                                    int64_t,
                                    int64_t,
-                                   std::string>;
+                                   std::string,
+                                   int64_t>;
 
     std::set<KernelClass> tableClasses;
     for(const auto& knobCase : knobCases())
@@ -730,7 +806,8 @@ TEST_F(IntegrationGpuGfx942AttentionDenseKnobCoverage, CoversEveryCatalogKernelC
                              knobCase.tile.blockM,
                              knobCase.tile.blockN,
                              int64_t{knobCase.grid.persistent ? 1 : 0},
-                             knobCase.grid.order);
+                             knobCase.grid.order,
+                             int64_t{knobCase.shape.alibi ? 1 : 0});
     }
 
     std::set<KernelClass> catalogClasses;
@@ -752,6 +829,8 @@ TEST_F(IntegrationGpuGfx942AttentionDenseKnobCoverage, CoversEveryCatalogKernelC
             const auto* blockM = intField("block_m");
             const auto* blockN = intField("block_n");
             const auto* persistent = intField("persistent");
+            // A record without use_alibi is a plain kernel (the KMD default 0).
+            const auto* alibi = intField("use_alibi");
             const auto stringField = [&kernel](const char* field) -> const std::string* {
                 const auto value = kernel.metadata.find(field);
                 return value == kernel.metadata.end() ? nullptr
@@ -778,7 +857,8 @@ TEST_F(IntegrationGpuGfx942AttentionDenseKnobCoverage, CoversEveryCatalogKernelC
                                    *blockM,
                                    *blockN,
                                    *persistent,
-                                   *order);
+                                   *order,
+                                   alibi == nullptr ? int64_t{0} : *alibi);
         });
 
     const auto onlyIn = [](const std::set<KernelClass>& from, const std::set<KernelClass>& other) {
@@ -795,7 +875,8 @@ TEST_F(IntegrationGpuGfx942AttentionDenseKnobCoverage, CoversEveryCatalogKernelC
                              blockM,
                              blockN,
                              persistent,
-                             order]
+                             order,
+                             alibi]
                     = kernelClass;
                 text += " (D" + std::to_string(headSize) + ", " + dtype + ", causal "
                         + std::to_string(causal) + ", window " + std::to_string(window)
@@ -803,6 +884,7 @@ TEST_F(IntegrationGpuGfx942AttentionDenseKnobCoverage, CoversEveryCatalogKernelC
                         + "/" + std::to_string(blockN);
                 text += ", persistent " + std::to_string(persistent) + " ";
                 text += order;
+                text += ", alibi " + std::to_string(alibi);
                 text += ")";
             }
         }
@@ -1148,6 +1230,34 @@ TEST_F(IntegrationGpuGfx942AttentionDenseSaveLoad, RestoresAPersistentLsePlanInA
 {
     roundTripInAFreshHandle(SaveForm::GRAPH_AND_PLAN, SAVE_LOAD_PERSISTENT_LSE_CASE);
     roundTripInAFreshHandle(SaveForm::PLAN_ONLY, SAVE_LOAD_PERSISTENT_LSE_CASE);
+}
+
+// An ALiBi plan carries no ALiBi launch value; only its contract name restores the flag. A
+// loaded plan that launched without ALiBi, or with v1's argument list, fails the reference.
+TEST_F(IntegrationGpuGfx942AttentionDenseSaveLoad, RestoresAnAlibiGraphAndPlanInAFreshHandle)
+{
+    roundTripInAFreshHandle(SaveForm::GRAPH_AND_PLAN, ALIBI_SAVE_LOAD_CASE);
+}
+
+TEST_F(IntegrationGpuGfx942AttentionDenseSaveLoad, RestoresAnAlibiPlanOnlyInAFreshHandle)
+{
+    roundTripInAFreshHandle(SaveForm::PLAN_ONLY, ALIBI_SAVE_LOAD_CASE);
+}
+
+TEST_F(IntegrationGpuGfx942AttentionDenseSaveLoad, RestoresAPersistentLseAlibiPlanInAFreshHandle)
+{
+    roundTripInAFreshHandle(SaveForm::GRAPH_AND_PLAN, ALIBI_SAVE_LOAD_PERSISTENT_LSE_CASE);
+    roundTripInAFreshHandle(SaveForm::PLAN_ONLY, ALIBI_SAVE_LOAD_PERSISTENT_LSE_CASE);
+}
+
+TEST_F(IntegrationGpuGfx942AttentionDenseSaveLoad, RestoresAWindowedAlibiPlanInAFreshHandle)
+{
+    for(const auto* name : {ALIBI_WINDOW_SAVE_LOAD_CASE, ALIBI_WINDOW_SAVE_LOAD_LSE_CASE})
+    {
+        SCOPED_TRACE(name);
+        roundTripInAFreshHandle(SaveForm::GRAPH_AND_PLAN, name);
+        roundTripInAFreshHandle(SaveForm::PLAN_ONLY, name);
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(Comprehensive,

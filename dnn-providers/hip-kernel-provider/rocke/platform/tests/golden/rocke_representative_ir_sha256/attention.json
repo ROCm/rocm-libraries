@@ -125,10 +125,10 @@
         },
         "attention/gfx950/2d_fp16_d128_b64_alibi": {
           "arch": "gfx950",
-          "bytes": 144424,
+          "bytes": 149247,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_g2_fp16_alibi",
-          "sha256": "4f23312907a9829bbb86bcc48f298bef35af73574375805a0353c96602907886",
+          "sha256": "085e28297d9e90e912c2d8b9410dba82332154d21b9b7c8eda9024e22f9c06ec",
           "status": "ok"
         },
         "attention/gfx950/2d_fp16_d128_b64_left_only_sw64": {
@@ -506,10 +506,10 @@
         },
         "attention/gfx950/2d_fp16_d128_b64_alibi": {
           "arch": "gfx950",
-          "bytes": 144520,
+          "bytes": 149515,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_g2_fp16_alibi",
-          "sha256": "1d843b4c77015ce4c31e3941663d2bca0fa3ea881e80db0664fefc7935aadf8c",
+          "sha256": "1fdcf7237508bf5d80709425ad4d4f8c03cccf0f6c212cfc8db09b610b2590da",
           "status": "ok"
         },
         "attention/gfx950/2d_fp16_d128_b64_left_only_sw64": {
@@ -887,10 +887,10 @@
         },
         "attention/gfx950/2d_fp16_d128_b64_alibi": {
           "arch": "gfx950",
-          "bytes": 144584,
+          "bytes": 149579,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_g2_fp16_alibi",
-          "sha256": "38b15a981ea85b74b45f6bbeb8783a2f2ffb088ebe6ef1717ff5ddacff749151",
+          "sha256": "acbabc23b054e1eeaff676b8ea65266235ba65cced468423316dca2f0dc61438",
           "status": "ok"
         },
         "attention/gfx950/2d_fp16_d128_b64_left_only_sw64": {
@@ -1268,10 +1268,10 @@
         },
         "attention/gfx950/2d_fp16_d128_b64_alibi": {
           "arch": "gfx950",
-          "bytes": 144584,
+          "bytes": 149579,
           "family": "attention",
           "kernel_name": "rocke_uattn2d_tiled_d128_b64_g2_fp16_alibi",
-          "sha256": "38b15a981ea85b74b45f6bbeb8783a2f2ffb088ebe6ef1717ff5ddacff749151",
+          "sha256": "acbabc23b054e1eeaff676b8ea65266235ba65cced468423316dca2f0dc61438",
           "status": "ok"
         },
         "attention/gfx950/2d_fp16_d128_b64_left_only_sw64": {

@@ -30,8 +30,8 @@
  * `rocke/library/kernels/gfx950/attention_dense.py`. They take the same ABI, launch on the
  * same grid formula and are bound from the same graph contract, so one copy of that code
  * serves both engines. What differs per arch reaches it through the descriptor: the tile
- * rules and launch geometry, whether a causal sliding window is served, whether the
- * candidate's head counts are compared, the launch grids its catalog carries
+ * rules and launch geometry, whether a causal sliding window and ALiBi are served, whether
+ * the candidate's head counts are compared, the launch grids its catalog carries
  * (AttentionDensePersistent.hpp), and the launch contracts. Scoring and
  * every read of a KMD field only one engine declares stay in that engine's own
  * `Gfx9xxAttentionDenseNative.cpp`, which also owns the module cache and registration.
@@ -66,6 +66,10 @@ struct AttentionDenseBinding
     /// The stats output the kernel writes the LSE to, or ATTENTION_DENSE_NO_STATS. Only an
     /// arch that serves stats (AttentionDenseArch::servesStats) ever binds one.
     int64_t stats = ATTENTION_DENSE_NO_STATS;
+    /// ALiBi with hipDNN's slopes (the graph's alibi_mask). The kernel computes the slopes
+    /// from num_query_heads, so ALiBi binds no tensor. Only an arch that serves ALiBi
+    /// (AttentionDenseArch::servesAlibi) ever binds it.
+    bool alibi = false;
 };
 
 /// The graph facts the matcher and prepare() both need, derived once from the tensors by
@@ -153,6 +157,9 @@ struct AttentionDenseTokens
     /// The stats output's uid, or ATTENTION_DENSE_NO_STATS. Bound only by an arch that
     /// serves stats; empty for one that does not.
     std::string_view stats;
+    /// 1 when the graph asks for ALiBi, else 0. Bound only by an arch that serves ALiBi;
+    /// empty for one that does not.
+    std::string_view alibi;
 };
 
 /// The grid and block a variant must launch with.
@@ -213,11 +220,23 @@ struct AttentionDenseArch
     std::optional<AttentionDenseGrid> (*candidateGrid)(
         const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel)
         = nullptr;
+    /// Whether a candidate adds ALiBi with hipDNN's slopes and takes an alibi_slopes_ptr
+    /// (null at launch), read from a KMD field only that arch's manifest declares; nullopt
+    /// for a record without a valid value. nullptr for an arch whose catalog has no ALiBi
+    /// kernel: its graph match declines every alibi_mask and binds no ALiBi token.
+    std::optional<bool> (*candidateUsesAlibi)(
+        const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel)
+        = nullptr;
     /// The contract the engine's catalog dispatches through and new plans are saved under.
     AttentionDenseContract currentContract;
     /// A superseded contract whose plans still restore, or an empty symbol for none. It
     /// shares currentContract's launch values and differs only in its kernel arguments.
     AttentionDenseContract legacyContract;
+    /// The contract an ALiBi plan is saved under, or an empty symbol for an arch that serves
+    /// no ALiBi. It shares currentContract's launch values; the launch also passes a null
+    /// alibi_slopes_ptr. Named rather than numbered, so it does not take the next version
+    /// of currentContract. currentContract's handler saves and restores these plans.
+    AttentionDenseContract alibiContract;
 
     bool servesSlidingWindow() const
     {
@@ -232,6 +251,11 @@ struct AttentionDenseArch
     bool servesGrids() const
     {
         return candidateGrid != nullptr;
+    }
+
+    bool servesAlibi() const
+    {
+        return candidateUsesAlibi != nullptr;
     }
 };
 
@@ -248,7 +272,9 @@ std::optional<hipdnn_plugin_sdk::ingestor::BoundTokens>
     graphMatches(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
                  const AttentionDenseArch& arch);
 
-/// Kernel-scoped applicability: does THIS candidate's baked metadata fit the graph?
+/// Kernel-scoped applicability: does THIS candidate's baked metadata fit the graph? On an
+/// arch that serves ALiBi, an ALiBi graph is served by ALiBi candidates only and a plain
+/// graph by plain ones.
 bool kernelMatches(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
                    const hipdnn_plugin_sdk::ingestor::BoundTokens& bound,
                    const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
@@ -311,13 +337,15 @@ hipdnn_plugin_sdk::ingestor::MetadataValues launchValues(const AttentionDenseBin
 /**
  * @brief Reads @p arch's launch values back into the launch state.
  *
- * The dispatch name must be the arch's current or legacy contract; anything else, including
- * the unversioned name, is refused against the current one. `batch`, `seqlen_q`,
- * `seqlen_kv`, the head counts and `head_size` must be in [1, INT32_MAX]; the kernel takes
- * the first three as 32-bit integers. `block_m` must be one the arch's geometry accepts;
- * block_n is not saved, so the arch's full tile rule is not re-run. `scale` must convert to
- * a float and back without change, within [2^-64, 2^4]. `data_type` must be a type the
- * kernel is built for, and `stride_layout` must be `bshd`.
+ * The dispatch name must be the arch's current, legacy or ALiBi contract; anything else,
+ * including the unversioned name, is refused against the current one. A plan saved under
+ * the ALiBi contract binds ALiBi and must be causal, with or without a window: hipDNN
+ * defines ALiBi only on the top-left causal band (SdpaSemanticsRegister SEM-021). `batch`,
+ * `seqlen_q`, `seqlen_kv`, the head counts and `head_size` must be in [1, INT32_MAX]; the
+ * kernel takes the first three as 32-bit integers. `block_m` must be one the arch's
+ * geometry accepts; block_n is not saved, so the arch's full tile rule is not re-run.
+ * `scale` must convert to a float and back without change, within [2^-64, 2^4]. `data_type`
+ * must be a type the kernel is built for, and `stride_layout` must be `bshd`.
  *
  * As both arches' graph and kernel match require, `causal` must be 0 or 1; `sliding_window`
  * non-negative, 0 unless `causal` is 1, and not so narrow that the last query rows see no
@@ -337,8 +365,9 @@ hipdnn_plugin_sdk::ingestor::MetadataValues launchValues(const AttentionDenseBin
  * and grid before this reader runs, so its signature check, which this reader does not
  * see, refuses a kernel whose LSE output or grid disagrees with the plan.
  *
- * @throws HipdnnPluginException with a load refusal when the dispatch name is neither
- *         contract, or when a value is missing, extra, of another type or out of range.
+ * @throws HipdnnPluginException with a load refusal when the dispatch name is none of
+ *         these contracts, or when a value is missing, extra, of another type or out of
+ *         range.
  */
 AttentionDenseLaunchInputs
     readLaunchInputs(const hipdnn_plugin_sdk::ingestor::SavedLaunchInputs& inputs,

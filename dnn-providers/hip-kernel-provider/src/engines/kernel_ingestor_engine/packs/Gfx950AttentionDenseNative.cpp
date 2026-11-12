@@ -35,8 +35,9 @@
  * dispatch, the [2^-64, 2^4] scale range included, are shared with the gfx942 twin
  * (AttentionDenseNative.cpp); what is gfx950's own is bound here: the block_m {128, 256}
  * tiles with their LDS budget, no sliding window, a head-count comparison because the
- * catalog lists each head configuration as its own entry, and the v1 (8-argument) and v2
- * (10-argument) launch contracts.
+ * catalog lists each head configuration as its own entry, the use_alibi variants that serve
+ * ALiBi, and the v1 (8-argument), v2 (10-argument) and alibi.v1 (11-argument) launch
+ * contracts.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -51,6 +52,10 @@ constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.gfx950_attention_de
 constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.gfx950_attention_dense.kernel_match";
 constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx950_attention_dense.score";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_dense.dispatch";
+
+/// The KMD field only this engine's schema carries and the shared pack reads through the
+/// arch: 1 for a kernel that adds ALiBi with hipDNN's slopes.
+constexpr std::string_view USE_ALIBI_FIELD = "use_alibi";
 
 /// The tile every legacy record completes to, and the one cold selection prefers.
 constexpr int64_t BASELINE_BLOCK_M = 256;
@@ -68,6 +73,23 @@ attention_dense::AttentionDenseGeometry gfx950Geometry(int64_t blockM,
         geometry.gridX, geometry.gridY, geometry.gridZ, geometry.blockX};
 }
 
+/// Whether a candidate adds ALiBi: use_alibi 1 or 0. A record written before the field
+/// reads as a plain kernel (the KMD default 0); any other value is malformed and declines
+/// rather than reading as a plain kernel.
+std::optional<bool> candidateUsesAlibi(const KernelDefinition& kernel)
+{
+    if(kernel.metadata.find(std::string(USE_ALIBI_FIELD)) == kernel.metadata.end())
+    {
+        return false;
+    }
+    const auto useAlibi = attention_dense::integerMetadata(kernel, USE_ALIBI_FIELD);
+    if(!useAlibi.has_value() || (*useAlibi != 0 && *useAlibi != 1))
+    {
+        return std::nullopt;
+    }
+    return *useAlibi == 1;
+}
+
 constexpr attention_dense::AttentionDenseArch gfx950Arch()
 {
     attention_dense::AttentionDenseArch arch{};
@@ -82,6 +104,7 @@ constexpr attention_dense::AttentionDenseArch gfx950Arch()
     // asks for one. Bound anyway, so a variant built with a window is never matched.
     arch.tokens.slidingWindow = "gfx950_attention_dense.sliding_window";
     arch.tokens.scaleBits = "gfx950_attention_dense.scale_bits";
+    arch.tokens.alibi = "gfx950_attention_dense.alibi";
     arch.matchesHeadCounts = true;
     arch.isSupportedTile = &isSupportedGfx950AttentionDenseTile;
     arch.geometry = &gfx950Geometry;
@@ -90,10 +113,15 @@ constexpr attention_dense::AttentionDenseArch gfx950Arch()
     arch.windowReachesKeys = nullptr;
     // No catalog variant writes LSE, so every stats output declines under 'stats'.
     arch.candidateWritesLse = nullptr;
+    // ALiBi with hipDNN's slopes on the top-left causal band: the use_alibi variants serve
+    // it without a window (no variant carries one, so maskFor declines windowed ALiBi).
+    arch.candidateUsesAlibi = &candidateUsesAlibi;
     arch.currentContract = {GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2,
                             attention_dense::AttentionDenseAbi::RUNTIME_HEAD_COUNTS};
     arch.legacyContract = {GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1,
                            attention_dense::AttentionDenseAbi::BAKED_HEAD_COUNTS};
+    arch.alibiContract = {GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1,
+                          attention_dense::AttentionDenseAbi::RUNTIME_HEAD_COUNTS};
     return arch;
 }
 
@@ -183,7 +211,7 @@ namespace
 {
 
 /// This engine's dispatch handler for the current (v2) or the legacy (v1) contract,
-/// process-lifetime. Both share one module cache and loader.
+/// process-lifetime (alibi.v1 plans go through the v2 handler). Both share one module cache and loader.
 const IKernelDispatchHandler<Handle>& gfx950AttentionDenseDispatchHandler(bool legacy)
 {
     static const compilation::KpackKernelLoader s_kpackLoader(
@@ -202,13 +230,16 @@ void registerGfx950AttentionDenseSymbols(SymbolScope<Handle>& scope)
     scope.add(std::string(GRAPH_MATCHER_SYMBOL), &gfx950AttentionDenseGraphMatches);
     scope.add(std::string(KERNEL_MATCHER_SYMBOL), &kernelMatches);
     scope.add(std::string(SCORE_SYMBOL), &scoreKernel);
-    // The UDD's unversioned name dispatches the catalog, all of which takes v2.
+    // The UDD's unversioned name dispatches the catalog: v2, and alibi.v1 for ALiBi graphs.
     scope.add(std::string(DISPATCH_SYMBOL), &gfx950AttentionDenseDispatchHandler(/*legacy=*/false));
     scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2),
               &gfx950AttentionDenseDispatchHandler(/*legacy=*/false));
     // Kept so plans saved under v1 still load and launch their 8-argument code object.
     scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1),
               &gfx950AttentionDenseDispatchHandler(/*legacy=*/true));
+    // ALiBi plans: saved by the v2 handler, so their name must resolve to it.
+    scope.add(std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1),
+              &gfx950AttentionDenseDispatchHandler(/*legacy=*/false));
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

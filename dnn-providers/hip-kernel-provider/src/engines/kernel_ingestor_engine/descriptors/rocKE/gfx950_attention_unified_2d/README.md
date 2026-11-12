@@ -11,12 +11,16 @@ plan's workspace (`packs/Gfx950AttentionUnified2DGeometry.hpp`).
 ## Coverage
 
 - Architecture: gfx950 only.
-- Variants: 222 (all `kernel_source.kind = rocke`, compiled at pack time): every one of the
+- Variants: 288 (all `kernel_source.kind = rocke`, compiled at pack time): every one of the
   198 cells at the default geometry, plus 24 variants of two other geometries in the D128
-  (and one D64) cells where an MI355X sweep measured them winning. The selection is
-  `variant_reduce`'s cut of the 792-variant full space (198 cells at four geometries).
+  (and one D64) cells where an MI355X sweep measured them winning, plus 66 ALiBi variants.
+  The 222 non-ALiBi variants are `variant_reduce`'s cut of the 792-variant full space (198
+  cells at four geometries); the full space is 858 with the ALiBi cells.
 - dtype: bf16, fp16. head_size: 64, 128 (D256 prefill is deferred).
 - mask: no mask, top-left causal, bottom-right causal (KMD `mask_type` 0, 1, 2).
+- ALiBi (`alibi_mask`, KMD `use_alibi` 1): hipDNN's slopes (SdpaSemanticsRegister SEM-021),
+  computed in the kernel from the query head count. Top-left causal only, the one mask hipDNN
+  defines ALiBi for, at the default geometry: one variant per head configuration and dtype.
 - Query heads 4 to 128 and KV heads 1 to 128, varying per variant (group of 1 to 16).
 - Geometries (llvm backend, `block_size` 16), one registry candidate each; the first is every
   cell's default:
@@ -29,15 +33,16 @@ plan's workspace (`packs/Gfx950AttentionUnified2DGeometry.hpp`).
 - Batch: any. The kernel takes the batch as the `num_seqs` kernarg and derives its `cu_q`
   binary-search trip count from it at runtime, so no batch is baked. The KMD still declares
   `num_seqs` (511); the engine does not read it.
-- Decode (seqlen_q 1) whose GQA group divides 16 is left to `hipkernel:Gfx950AttentionUnified3D`.
-- Fixed in every variant: no sliding window, no sinks, no ALiBi, no softcap, no fp8, 32-bit K/V
+- Decode (seqlen_q 1) without ALiBi whose GQA group divides 16 is left to
+  `hipkernel:Gfx950AttentionUnified3D`, which ships no ALiBi variants.
+- Fixed in every variant: no sliding window, no sinks, no softcap, no fp8, 32-bit K/V
   addressing (K/V larger than 0x7FFF0000 bytes is declined).
 
 ## Files
 
 | File | In | Notes |
 |---|---|---|
-| `artifacts/gfx950_attention_unified_2d.kdp.json` | DVC | 0.29 MB, the 222 variants. Pointer: `artifacts.dvc` (one artifact for the folder) |
+| `artifacts/gfx950_attention_unified_2d.kdp.json` | DVC | 0.38 MB, the 288 variants. Pointer: `artifacts.dvc` (one artifact for the folder) |
 | `gfx950_attention_unified_2d.kmd.json` | git | variant fields |
 | `gfx950_attention_unified_2d.udd.json` | git | dispatch symbol |
 | `gfx950_attention_unified_2d.ued.json` | git | engine, knobs `tile_size`, `num_warps`, `block_m_per_warp`, `use_mfma_32x32`, `use_transposed_qk_32x32` |

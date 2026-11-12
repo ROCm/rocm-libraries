@@ -84,6 +84,11 @@ kmd_fields:
 - name: use_transposed_qk_32x32
   type: int
   default_value: 0
+# 1 for a kernel that adds hipDNN's ALiBi (slopes computed in the kernel from the query head
+# count; the launch passes a null alibi_slopes_ptr). Served only with a top-left causal mask.
+- name: use_alibi
+  type: int
+  default_value: 0
 specialization:
   metadata_fields:
   - dtype
@@ -99,6 +104,7 @@ specialization:
   - block_m_per_warp
   - use_mfma_32x32
   - use_transposed_qk_32x32
+  - use_alibi
   matcher_only_fields: []
   vocabulary:
     dtype:
@@ -131,6 +137,8 @@ specialization:
       field: use_mfma_32x32
     use_transposed_qk_32x32:
       field: use_transposed_qk_32x32
+    use_alibi:
+      field: use_alibi
 kernel_source_kind: rocke
 workspace_policy: derived
 
@@ -195,17 +203,27 @@ enumerate:
         - [128, 128, 128, 8]
     - fields: [dtype]
       values: [bf16, fp16]
-    - fields: [mask_type]
-      values: [NO_MASK, TOP_LEFT_CAUSAL, BOTTOM_RIGHT_CAUSAL]
+    # hipDNN defines ALiBi only with a top-left causal mask, so no other mask gets an ALiBi
+    # kernel. The `also` sections list no ALiBi row: ALiBi ships at the baseline geometry
+    # only, one kernel per head configuration and dtype.
+    - fields: [mask_type, use_alibi]
+      values:
+        - [NO_MASK, false]
+        - [TOP_LEFT_CAUSAL, false]
+        - [BOTTOM_RIGHT_CAUSAL, false]
+        - [TOP_LEFT_CAUSAL, true]
+  feature_fields:
+    use_alibi: {name_token: _alibi}
   sweep_level: production
   # Full space per geometry: every production sweep spec sharing the cell's feature
   # fields. The codegen flag stacks and waves_per_eu are held at the registry default
   # (reduction.fields.ignored), so each geometry contributes its default spec per cell and
   # variant reduction chooses among the geometries.
   space: full
-  spec_fields: &spec_fields [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_seqs, num_warps, block_m_per_warp, tile_size, causal_top_left, right_bound, use_mfma_32x32, use_transposed_qk_32x32, use_i64_kv_addr]
-  # Every section crosses the primary's cells (the same 198), so each cell has one kernel
-  # per geometry and one default (the primary's).
+  spec_fields: &spec_fields [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_seqs, num_warps, block_m_per_warp, tile_size, causal_top_left, right_bound, use_mfma_32x32, use_transposed_qk_32x32, use_i64_kv_addr, use_alibi]
+  # Every section crosses the primary's cells except the ALiBi ones (198), so each of those
+  # has one kernel per geometry and one default (the primary's); an ALiBi cell has the
+  # primary's kernel only.
   also:
     # A smaller CTA on the narrow path: 2 warps x 16 rows (BLOCK_M 32), 2-page KV tile.
     - pin: {algorithm: unified_tuning, spec_id: gfx950_u2d_narrow_nw2_mw16_t2xb_llvm}
@@ -248,8 +266,11 @@ enumerate:
             - [128, 128, 128, 8]
         - fields: [dtype]
           values: [bf16, fp16]
-        - fields: [mask_type]
-          values: [NO_MASK, TOP_LEFT_CAUSAL, BOTTOM_RIGHT_CAUSAL]
+        - fields: [mask_type, use_alibi]
+          values:
+            - [NO_MASK, false]
+            - [TOP_LEFT_CAUSAL, false]
+            - [BOTTOM_RIGHT_CAUSAL, false]
       spec_fields: *spec_fields
     # The 32x32 MFMA path with a wide (row-major) QK tile: 4 warps x 32 rows, 4-page tile.
     - pin: {algorithm: unified_tuning, spec_id: gfx950_u2d_wide32_nw4_mw32_t4xb_llvm}
@@ -265,7 +286,7 @@ enumerate:
 reduction:
   fields:
     # Spec fields: the mask kind is the spec's (causal_top_left, right_bound) pair.
-    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal_top_left, right_bound, sliding_window, block_size, num_seqs]
+    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal_top_left, right_bound, sliding_window, block_size, num_seqs, use_alibi]
     # The geometry: constant within a section, so variant reduction compares sections.
     performance:
       - {name: tile_size}
@@ -286,6 +307,9 @@ ground_truth:
       NO_MASK: {/nodes/sdpa_node/attributes/causal_mask: false}
       TOP_LEFT_CAUSAL: {/nodes/sdpa_node/attributes/causal_mask: true}
       BOTTOM_RIGHT_CAUSAL: {/nodes/sdpa_node/attributes/causal_mask_bottom_right: true}
+    use_alibi:
+      false: {/nodes/sdpa_node/attributes/alibi_mask: false}
+      true: {/nodes/sdpa_node/attributes/alibi_mask: true}
 
 # Launch-surface audit (`tools/launch_surface.py --check <this file>`).
 launch_surface:
@@ -331,14 +355,17 @@ launch_surface:
   - name: matcher
     python_source: kernels/gfx950/attention_tiled_2d.py:supports_tiled_2d
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified2DNative.cpp
-    kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, block_size, mask_type, sliding_window, num_seqs, tile_size, num_warps, block_m_per_warp, use_mfma_32x32, use_transposed_qk_32x32]
+    kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, block_size, mask_type, sliding_window, num_seqs, tile_size, num_warps, block_m_per_warp, use_mfma_32x32, use_transposed_qk_32x32, use_alibi]
     guard: >
       kernelMatches() returns false (no panic) if dtype, head_size, num_query_heads,
-      num_kv_heads, mask_type or sliding_window disagrees with the graph, Skv is not a
+      num_kv_heads, mask_type, sliding_window or use_alibi disagrees with the graph
+      (alibi_mask asks for use_alibi=1), Skv is not a
       multiple of block_size, the batch exceeds the candidate's capacity, or the
       candidate's geometry is one gfx950 does not build. The metadata's seqlen shape is
       not a build input of this kernel and is not carried. graph_match leaves decode
-      (seqlen_q 1) whose GQA group divides 16 to hipkernel:Gfx950AttentionUnified3D. score()
+      (seqlen_q 1) without ALiBi whose GQA group divides 16 to
+      hipkernel:Gfx950AttentionUnified3D, and admits alibi_mask with a top-left causal
+      mask only. score()
       ranks the applicable baseline geometry first, then ascending (tile_size, num_warps,
       block_m_per_warp).
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionUnified2DMatchers.cpp
@@ -346,9 +373,11 @@ launch_surface:
   - name: kernargs
     python_source: kernels/common/attention_unified.py:_attn_signature
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified2DNative.cpp
-    kmd_fields: [dtype]
+    kmd_fields: [dtype, use_alibi]
     guard: >
       unified2DKernelSignature() is the 18-argument form (10 pointers, 6 f32/i32 scalars,
-      block_table_stride, qq_bias_stride_0). Validated at prepare() time by
-      buildIngestorKernelCode(..., expectedSignature); names are load-bearing.
+      block_table_stride, qq_bias_stride_0) for every variant. Validated at prepare() time by
+      buildIngestorKernelCode(..., expectedSignature); names are load-bearing. The launch
+      passes a null alibi_slopes_ptr, so a use_alibi=1 kernel computes hipDNN's slopes from
+      num_query_heads.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionUnified2DSignature.cpp
