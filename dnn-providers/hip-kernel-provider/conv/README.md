@@ -43,6 +43,14 @@ An engine with several kernel configs lists each in its catalog, admitted by its
 on correctness alone. There is no shape-to-config routing table: the catalog's declared order
 (most general first) is the default, and autotune, then UHD, choose per shape and device.
 
+## Not supported
+
+- **Mixed data types.** Every engine in the group requires x, w and y to share one data type
+  (fp32, fp16 or bf16) and declines anything else, for example x fp32 / w fp16 / y fp32. MIOpen
+  serves these graphs only through its naive kernels: the `ConvDirectNaiveConv*` solvers accept
+  a problem when any two of in/wei/out share a type, and no optimized MIOpen solver takes one.
+  Mixed-type convolution is unsupported here for now.
+
 ## Layout
 
 | Piece | Path, relative to the provider root |
