@@ -16,7 +16,7 @@ __device__ void llvm_amdgcn_s_wait_dscnt(short cnt) __asm("llvm.amdgcn.s.wait.ds
 
 #if CK_HAS_ASYNCMARK
 namespace detail {
-// Some compilers take a trailing stage mask operand in the asyncmark builtins. MaskType holds its
+// Newer compilers take a trailing stage mask operand in the asyncmark builtins. MaskType holds its
 // type for those and is empty otherwise, which drops the mask: such compilers keep one sequence
 // of marks for all stages, so after each wait at least the async operations that the stage mask
 // asks for have completed.
