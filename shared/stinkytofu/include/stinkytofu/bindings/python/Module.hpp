@@ -148,7 +148,6 @@
     X(DsSpread, bool, true)               /* even ds_load spread over the WMMAs */                 \
     X(DsBatchWmmas, int, 4)               /* WMMAs per ds_load pacing batch */                     \
     X(DsCatchUpPace, int, 2)              /* extra ds_loads per batch when behind the even line */ \
-    X(WmmaQueueDepth, int, 8)             /* WMMAs the matrix pipe buffers; 1 = queue model off */ \
     X(WmmaQueueCoverCycles, int, -1)      /* queued WMMA cover kept; < 0 = automatic, 0 = off */   \
     X(DsReadCyclesPerLoad, int, 6)        /* LDS return rate (cycles per ds_load); 0 = off */      \
     X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                                \
