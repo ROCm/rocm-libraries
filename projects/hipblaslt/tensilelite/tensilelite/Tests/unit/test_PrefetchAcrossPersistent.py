@@ -1611,7 +1611,7 @@ def _emit_asm(gfx1250_iim, assembler, **overrides):
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
-    from tensilelite.TensileCreateLibrary.Run import (generateKernelObjectsFromSolutions,
+    from tensilelite.create_library.run import (generateKernelObjectsFromSolutions,
                                                   processKernelSource)
     from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
@@ -2129,3 +2129,133 @@ def test_rap_accepts_the_every_wave_pair(_gp_gfx1250, gfx1250_iim, assembler, ca
                        ProblemType={"MacDataTypeB": "F8", "MXBlockA": 0, "MXBlockB": 0})
     assert sol.get("Valid") is True, "TDMFuse=%d + RAP without scales was rejected: %r" % (fuse, out)
     assert sol.get("ReuseAcrossPersistent") == 1
+
+
+@pytest.mark.parametrize("pap,sia", [(0, 0), (0, 4), (1, 0), (1, 4)])
+def test_persistent_tdm_fences_final_lds_reads_before_next_tile(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, pap, sia):
+    """The next tile may overwrite either bank before slower waves finish NLL."""
+    sol, asm = _emit_asm(gfx1250_iim, assembler,
+                        mi=[16, 16, 128, 1, 1, 1, 1, 2, 2], DepthU=256,
+                        ScheduleIterAlg=sia, PrefetchAcrossPersistent=pap,
+                        TDMLoadWaveSync=False, SuppressNoLoadLoop=False)
+    assert sol.get("Valid"), capsys.readouterr().out
+    assert asm
+    close = asm.index("label_PersistentLoopClose:")
+    backedge = asm.index("label_PersistentLoopStart", close)
+    handoff = asm[close:backedge]
+    _assert_lds_sync_at_barrier(handoff, "hand compute LDS back to persistent TDM prefetch")
+    # The last LDS reader must precede the handoff, and PAP may remain in flight.
+    assert asm.rfind("ds_load", 0, close) != -1
+    assert "ds_load" not in handoff
+    assert "s_wait_tensorcnt" not in handoff
+    # Exhaustion skips the fence using the same check as the backward branch.
+    closing = asm[close:].split("label_KernelEnd:", 1)[0]
+    assert closing.count("s_cmp_ge_u32") == 1
+    assert closing.count("s_cbranch_scc1") == 1
+    target = re.search(r"s_cbranch_scc1\s+(label_\w+)", closing).group(1)
+    exhausted = closing[:closing.index("s_cmp_ge_u32")] + closing[closing.index(target + ":"):]
+    assert "s_wait_dscnt" not in exhausted
+    assert "s_barrier" not in exhausted
+
+
+@pytest.mark.parametrize("vector", [False, True])
+def test_tdm_assignment_close_fences_each_backedge(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, vector):
+    # TDM PAP currently requires StaticGrid. Queue and Hybrid still need to
+    # finish the old tile's LDS reads before their next tile's first prefetch.
+    options = dict(mi=[16, 16, 128, 1, 1, 1, 1, 2, 2], DepthU=256)
+    if vector:
+        options.update(mi=[16, 16, 32, 1, 1, 4, 4, 2, 2], DepthU=128,
+                       ProblemType=dict(_BF16_VECTOR_EPILOGUE, UseBias=1, UseScaleAlphaVec=1))
+    sol, asm = _emit_asm(gfx1250_iim, assembler,
+                        **options,
+                        StreamK=5, StreamKForceDPOnly=0, ScheduleIterAlg=4,
+                        PrefetchAcrossPersistent=0, ForceDisableShadowInit=True,
+                        ClusterLocalRead=0, SuppressNoLoadLoop=False)
+    assert sol.get("Valid") and asm, capsys.readouterr().out
+    close = asm.split("label_PersistentLoopClose:", 1)[1].split("label_KernelEnd:", 1)[0]
+    # Hybrid exercises both concrete assignment closes, including any common fence.
+    common, branches = close.split("// Hybrid: static assignment selected", 1)
+    static, dynamic = branches.split("label_Hybrid_DynamicClose:", 1)
+    for path in (common + static, common + dynamic):
+        instructions = [line.partition("//")[0].strip() for line in path.splitlines()]
+        assert instructions.count("s_wait_dscnt 0") == 1
+        assert instructions.count("s_barrier_signal -1") == 1
+        assert instructions.count("s_barrier_wait -1") == 1
+        wait = instructions.index("s_wait_dscnt 0")
+        signal = instructions.index("s_barrier_signal -1")
+        barrier = instructions.index("s_barrier_wait -1")
+        assert wait < signal < barrier < next(
+            i for i, line in enumerate(instructions) if "label_PersistentLoopStart" in line)
+        assert "s_wait_tensorcnt" not in path
+    assert static.count("s_cmp_ge_u32") == 1
+    assert static.count("s_cbranch_scc1") == 1
+    target = re.search(r"s_cbranch_scc1\s+(label_\w+)", static).group(1)
+    exhausted = common + static[:static.index("s_cmp_ge_u32")] + static[static.index(target + ":"):]
+    # The vector epilogue retains its exit fence; compute alone needs none.
+    assert exhausted.count("s_wait_dscnt 0") == int(vector)
+    assert exhausted.count("s_barrier_wait -1") == int(vector)
+
+
+@pytest.mark.parametrize("debug,vector,single_wave", [
+    (False, False, False), (True, False, False), (False, True, False),
+    pytest.param(True, False, True, id="single-wave-debug"),
+])
+def test_cluster_close_handoff_covers_only_reachable_backedges(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, debug, vector, single_wave):
+    options = dict(mi=[16, 16, 128, 1, 1, 1, 1, 2, 2], DepthU=256)
+    if vector:
+        options.update(mi=[16, 16, 32, 1, 1, 4, 4, 2, 2], DepthU=128,
+                       ProblemType=dict(_BF16_VECTOR_EPILOGUE, UseBias=1, UseScaleAlphaVec=1))
+    elif single_wave:
+        options.update(mi=[16, 16, 32, 1, 1, 4, 4, 1, 1], DepthU=128,
+                       ProblemType=_BF16_VECTOR_EPILOGUE)
+    sol, asm = _emit_asm(gfx1250_iim, assembler,
+                        **options,
+                        ClusterDim=[2, 2], ScheduleIterAlg=4,
+                        PrefetchAcrossPersistent=0, ForceDisableShadowInit=True,
+                        ClusterLocalRead=0, SuppressNoLoadLoop=False,
+                        DebugPersistentKernelLoopForever=debug)
+    assert sol.get("Valid") and asm, capsys.readouterr().out
+    assert (sol["NumThreads"] == sol["WavefrontSize"]) == single_wave
+    close = asm.split("label_PersistentLoopClose:", 1)[1].split("label_KernelEnd:", 1)[0]
+    # One local fence serves compute, epilogue and cluster arrival. It must
+    # precede the cluster signal; debug/epilogue also retain it on exhaustion.
+    # Debug keeps the local fence even with one wave, but skips cluster arrival.
+    assert close.count("s_wait_dscnt 0") == 1
+    assert close.count("s_barrier_signal -1") == 1
+    assert close.count("s_barrier_wait -1") == 1
+    assert (close.index("s_wait_dscnt 0") < close.index("s_barrier_signal -1")
+            < close.index("s_barrier_wait -1") < close.index("s_barrier_signal -3"))
+    guard = close.index("s_cmp_ge_u32")
+    assert close.count("s_cmp_ge_u32") == 1
+    target = re.search(r"s_cbranch_scc1\s+(label_\w+)", close).group(1)
+    exhausted = close[:guard] + close[close.index(target + ":"):]
+    assert exhausted.count("s_wait_dscnt 0") == int(debug or vector)
+    assert exhausted.count("s_barrier_wait -1") == int(debug or vector)
+    assert "s_barrier_signal -3" not in exhausted
+    assert "s_wait_tensorcnt" not in close
+
+
+@pytest.mark.parametrize("assignment,tdma,tdmb,threads,drains,barriers", [
+    (StaticGrid, False, False, 64, 0, 0),
+    (StaticGrid, True, False, 32, 0, 0),
+    (StaticGrid, True, False, 64, 1, 1),
+    (StaticGrid, False, True, 64, 1, 1),
+    (DynamicWorkQueue, False, False, 64, 0, 1),
+])
+def test_persistent_handoff_scope(assignment, tdma, tdmb, threads, drains, barriers):
+    from rocisa.instruction import SBarrier, SWaitCnt
+
+    kernel = dict(TileProcessingStrategy="DataParallel" if assignment is StaticGrid else "StreamK",
+                  WorkAssignment=assignment.__name__, ClusterDim=[1, 1],
+                  enableTDMA=tdma, enableTDMB=tdmb, NumThreads=threads, WavefrontSize=32)
+    if assignment is DynamicWorkQueue:
+        # Hybrid supplies its kernel configuration to the concrete dynamic emitter.
+        kernel["WorkAssignment"] = "Hybrid"
+    always, beforeReentry = assignment().splitPersistentTileHandoff(None, kernel)
+    assert not list(always.flatitems())
+    items = list(beforeReentry.flatitems())
+    assert sum(isinstance(item, SWaitCnt) for item in items) == drains
+    assert sum(isinstance(item, SBarrier) for item in items) == barriers

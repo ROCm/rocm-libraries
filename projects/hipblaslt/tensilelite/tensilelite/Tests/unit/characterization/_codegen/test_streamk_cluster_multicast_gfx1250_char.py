@@ -36,6 +36,7 @@ Python+rocisa codegen without compiling or launching any GPU kernels.
 """
 
 import os
+import re
 
 import pytest
 
@@ -87,18 +88,16 @@ def _next_tile_arrive_follows_lds_drain(src):
     Between the ``PersistentLoopClose`` label and the back edge, the arrive skips
     the last tile, drains LDS, joins the workgroup, and then wave 0 signals ``-3``.
     """
-    lines = src.splitlines()
-    for i, ln in enumerate(lines):
-        if not ln.startswith("label_PersistentLoopClose:"):
-            continue
-        window = lines[i : i + 32]
-        text = "\n".join(window)
-        order = ["label_PersistentMC_SkipNextTileArrive", "s_wait_dscnt 0",
-                 "s_barrier_wait -1", "s_barrier_signal -3",
-                 "label_PersistentMC_SkipNextTileArrive:"]
-        pos = [text.find(token) for token in order]
-        return all(p >= 0 for p in pos) and pos == sorted(pos)
-    return False
+    close = src.partition("label_PersistentLoopClose:")[2].partition("label_KernelEnd:")[0]
+    guard = re.search(r"s_cbranch_scc1\s+(label_\w+)", close)
+    if guard is None:
+        return False
+    # Follow the exit target instead of depending on the handoff's old label.
+    order = ["s_cmp_ge_u32", guard.group(0), "s_wait_dscnt 0",
+             "s_barrier_wait -1", "s_barrier_signal -3",
+             "label_PersistentLoopStart", guard.group(1) + ":"]
+    pos = [close.find(token) for token in order]
+    return all(p >= 0 for p in pos) and pos == sorted(pos)
 
 
 @pytest.mark.parametrize("pgr, cluster_dim", _ARMS, ids=_ARM_IDS)

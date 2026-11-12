@@ -87,10 +87,10 @@ class TestSpec(unittest.TestCase):
         """The C++ validator refuses an unknown scheduler with Python's
         ValueError text, word for word (it wrote only the first clause)."""
         try:
-            import rocke_engine as eng
+            import rocke_library_engine as eng
         except ImportError:
-            self.skipTest("rocke_engine not built")
-        from rocke.core.backend import conv_winograd_gemm_wmma_spec_to_dict
+            self.skipTest("rocke_library_engine not built")
+        from kernels.conv.engine_bridge import conv_winograd_gemm_wmma_spec_to_dict
 
         spec = _spec(sched="bogus")
         why = winograd_gemm_reason(spec)

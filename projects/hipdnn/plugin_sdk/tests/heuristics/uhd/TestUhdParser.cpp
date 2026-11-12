@@ -62,7 +62,8 @@ enum class Base
     NATIVE,
     TREE_DATA,
     CUSTOM_LIBRARY,
-    STATIC_ORDER
+    STATIC_ORDER,
+    LINEAR_DATA
 };
 
 /// A valid document of each body kind. The native one carries every optional block a
@@ -98,6 +99,15 @@ nlohmann::json baseDocument(Base base)
         document["adapter"] = "tree_data";
         document.erase("native");
         document["tree_data"] = {{"artifact", "models/model.fb"}, {"hash", DIGEST}};
+    }
+    else if(base == Base::LINEAR_DATA)
+    {
+        // A within-catalog ranker: a log slowdown, lower is better, estimating no metric.
+        document["adapter"] = "linear_data";
+        document.erase("native");
+        document.erase("score");
+        document["objective"] = "min";
+        document["linear_data"] = {{"artifact", "models/linear.fb"}, {"hash", DIGEST}};
     }
     else if(base == Base::CUSTOM_LIBRARY)
     {
@@ -375,6 +385,24 @@ const std::vector<Refusal> REFUSALS = {
     {"CustomLibraryWithConfiguration",
      Base::CUSTOM_LIBRARY,
      [](nlohmann::json& doc) { doc["custom_library"]["config"] = {{"threads", 4}}; }},
+    {"LinearDataWithTheMaxObjective",
+     Base::LINEAR_DATA,
+     [](nlohmann::json& doc) { doc["objective"] = "max"; }},
+    {"LinearDataWithAMetric",
+     Base::LINEAR_DATA,
+     [](nlohmann::json& doc) { doc["score"] = {{"metric", "time"}}; }},
+    {"LinearDataWithATransform",
+     Base::LINEAR_DATA,
+     [](nlohmann::json& doc) { doc["score"] = {{"transform", "log1p"}}; }},
+    {"LinearDataWithoutASignature",
+     Base::LINEAR_DATA,
+     [](nlohmann::json& doc) { doc.erase("features_signature"); }},
+    {"LinearDataBodyHasAnUnknownKey",
+     Base::LINEAR_DATA,
+     [](nlohmann::json& doc) { doc["linear_data"]["library"] = "x"; }},
+    {"LinearDataNamesAnotherBody",
+     Base::LINEAR_DATA,
+     [](nlohmann::json& doc) { doc["adapter"] = "table"; }},
 };
 
 INSTANTIATE_TEST_SUITE_P(Rule,
@@ -399,6 +427,19 @@ TEST(TestUhdParser, AcceptsEveryBaseDocument)
     const auto custom = parseUhdConfig(baseDocument(Base::CUSTOM_LIBRARY), descriptorPath());
     EXPECT_EQ(custom.customLibrarySymbol, "scorer");
     EXPECT_EQ(custom.modelHash, DIGEST);
+
+    const auto linear = parseUhdConfig(baseDocument(Base::LINEAR_DATA), descriptorPath());
+    EXPECT_EQ(linear.adapterType, "linear_data");
+    EXPECT_EQ(linear.objective, "min");
+    EXPECT_TRUE(linear.scoreMetric.empty());
+    EXPECT_FALSE(linear.scoreCalibrated);
+    EXPECT_EQ(linear.modelHash, DIGEST);
+    EXPECT_EQ(std::filesystem::path(linear.modelArtifactPath).filename().string(), "linear.fb");
+
+    // An identity transform is what an absent one means.
+    auto identity = baseDocument(Base::LINEAR_DATA);
+    identity["score"] = {{"transform", "identity"}, {"calibrated", false}};
+    EXPECT_NO_THROW(parseUhdConfig(identity, descriptorPath()));
 
     // static_order scores nothing, so it is admitted without an objective.
     const auto ordered = parseUhdConfig(baseDocument(Base::STATIC_ORDER), descriptorPath());

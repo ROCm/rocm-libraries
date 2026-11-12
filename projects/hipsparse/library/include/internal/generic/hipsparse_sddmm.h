@@ -49,13 +49,13 @@ extern "C" {
 *  @param[in]
 *  opB                 dense matrix \f$B\f$ operation type.
 *  @param[in]
-*  alpha               scalar \f$\alpha\f$.
+*  alpha               scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  A                   dense matrix \f$A\f$ descriptor.
 *  @param[in]
 *  B                   dense matrix \f$B\f$ descriptor.
 *  @param[in]
-*  beta                scalar \f$\beta\f$.
+*  beta                scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  C                   sparse matrix \f$C\f$ descriptor.
 *  @param[in]
@@ -64,6 +64,7 @@ extern "C" {
 *  alg                 specification of the algorithm to use.
 *  @param[out]
 *  pBufferSizeInBytes  number of bytes of the temporary storage buffer.
+*                      \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
@@ -120,13 +121,13 @@ hipsparseStatus_t hipsparseSDDMM_bufferSize(hipsparseHandle_t           handle,
 *  @param[in]
 *  opB          dense matrix \f$B\f$ operation type.
 *  @param[in]
-*  alpha        scalar \f$\alpha\f$.
+*  alpha        scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  A            dense matrix \f$A\f$ descriptor.
 *  @param[in]
 *  B            dense matrix \f$B\f$ descriptor.
 *  @param[in]
-*  beta         scalar \f$\beta\f$.
+*  beta         scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  C            sparse matrix \f$C\f$ descriptor.
 *  @param[in]
@@ -253,13 +254,13 @@ hipsparseStatus_t hipsparseSDDMM_preprocess(hipsparseHandle_t           handle,
 *  @param[in]
 *  opB          dense matrix \f$B\f$ operation type.
 *  @param[in]
-*  alpha        scalar \f$\alpha\f$.
+*  alpha        scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  A            dense matrix \f$A\f$ descriptor.
 *  @param[in]
 *  B            dense matrix \f$B\f$ descriptor.
 *  @param[in]
-*  beta         scalar \f$\beta\f$.
+*  beta         scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  C            sparse matrix \f$C\f$ descriptor.
 *  @param[in]

@@ -10,7 +10,7 @@ import traceback
 # exercise it; leave the variable unset to see the production default.
 
 from dispatch.attention import AttentionRequest, registered_attention_combos
-from dispatch.attention.common import _problem
+from dispatch.attention.common import attention_problem
 from kernels.common.attention_unified import (
     _enable_3d_graph_replay,
     _num_segments,
@@ -50,7 +50,7 @@ def dump_shape(label, req):
         print(
             f"    spec.kernel_name={spec.kernel_name() if hasattr(spec, 'kernel_name') else spec}"
         )
-    p = _problem(req)
+    p = attention_problem(req)
     n2d = p.total_num_q_blocks_upper_bound * p.num_kv_heads
     want_2d = use_2d_kernel(
         head_size=p.head_size,
@@ -90,7 +90,7 @@ def probe_graph():
     from rocke.runtime import no_fence, time_launches
 
     req = _req()
-    p = _problem(req)
+    p = attention_problem(req)
     dt = torch.bfloat16
     B, Hq, Hkv, D, Sk, page = 1, 32, 8, 128, 1024, 16
     q = torch.randn(B, Hq, D, dtype=dt, device="cuda")

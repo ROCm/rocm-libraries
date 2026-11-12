@@ -57,6 +57,8 @@ BenchmarkProblems:
         - HalfPLR: [0,1]
         - TDMIterateMode: [0]
         - PrefetchGL2: [1, 2]
+        - PrefetchGL2Inc64Bit: [False, True]
+        - PrefetchGL2SAddr: [False, True]
         - TransposeLDS: [-1]
         - LdsPadA: [-1]
         - LdsPadB: [-1]

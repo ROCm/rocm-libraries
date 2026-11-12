@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -41,6 +42,7 @@
 #include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
 #include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950ConvDgradGeometry.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx950ConvGraphPredicates.hpp"
 
 /// @file Gfx950ConvDgradNative.cpp
 /// hipkernel:Gfx950ConvDgradAot: shape-generic AOT instances of rocKE's backward-data
@@ -98,50 +100,9 @@ const data_objects::TensorAttributes* findTensor(const MatchContext& context, in
     return it == tensors.end() ? nullptr : it->second;
 }
 
-bool isDeviceTensor(const data_objects::TensorAttributes* tensor)
-{
-    return tensor != nullptr && !tensor->virtual_()
-           && !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(tensor)
-           && !tensor->ragged_offset_tensor_uid().has_value() && tensor->alignment() >= 16
-           && tensor->alignment() % 16 == 0
-           && (tensor->data_type() == data_objects::DataType::HALF
-               || tensor->data_type() == data_objects::DataType::BFLOAT16);
-}
-
-/// hipDNN [N, C, H, W] dims stored NHWC: dY [N, K, Ho, Wo] as NHWK, W [K, C/G, Y, X] as
-/// KYXC, dX [N, C, Hi, Wi] as NHWC.
-bool hasPackedNhwcStrides(const data_objects::TensorAttributes* tensor)
-{
-    if(tensor == nullptr || tensor->dims() == nullptr || tensor->strides() == nullptr
-       || tensor->dims()->size() != 4 || tensor->strides()->size() != 4)
-    {
-        return false;
-    }
-    const auto* dims = tensor->dims();
-    const std::array<int64_t, 4> extents{dims->Get(0), dims->Get(1), dims->Get(2), dims->Get(3)};
-    if(std::any_of(extents.begin(), extents.end(), [](int64_t e) { return e <= 0; })
-       || !dgrad::wideProduct({extents[0], extents[1], extents[2], extents[3], 2}))
-    {
-        return false;
-    }
-    // The byte-size guard above bounds every multiplication here.
-    const std::array<int64_t, 4> expected{
-        extents[1] * extents[2] * extents[3], 1, extents[1] * extents[3], extents[1]};
-    for(flatbuffers::uoffset_t axis = 0; axis < 4; ++axis)
-    {
-        // A unit-extent axis never contributes to an address, whatever its stride.
-        if(extents[axis] != 1 && tensor->strides()->Get(axis) != expected[axis])
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
-bool hasSpatialRankTwo(const flatbuffers::Vector<int64_t>* values)
-{
-    return values != nullptr && values->size() == 2;
-}
+using gfx950_conv::hasPackedNhwcStrides;
+using gfx950_conv::hasSpatialRankTwo;
+using gfx950_conv::isDeviceTensor;
 
 /// The graph contract: one ConvolutionBwdAttributes node on gfx950 (wave64) with FLOAT
 /// accumulation, cross-correlation, 2-D symmetric padding, three distinct device tensors
@@ -847,6 +808,14 @@ private:
     bool _zeroDx;
 };
 
+/// Implicit-GEMM kernel launches this plugin has made, over the process: one per batch
+/// slice. Read by tests only (gfx950ConvDgradAotImplicitLaunchCountForTesting).
+std::atomic<int64_t>& implicitLaunchCount()
+{
+    static std::atomic<int64_t> s_count{0};
+    return s_count;
+}
+
 class ConvDgradDispatchHandler : public IKernelDispatchHandler<Handle>
 {
 public:
@@ -1058,6 +1027,10 @@ public:
                 params.push_back(const_cast<int32_t*>(&step.values.back()));
             }
             code.kernelForStream(stream).launchWithParams(stream, params.data());
+            if(step.abi == dgrad::Abi::IMPLICIT)
+            {
+                implicitLaunchCount().fetch_add(1, std::memory_order_relaxed);
+            }
         }
     }
 
@@ -1101,6 +1074,11 @@ void resetGfx950ConvDgradAotModuleCache()
 void setGfx950ConvDgradAotBatchChunkByteLimitForTesting(int64_t limit)
 {
     dgrad::batchChunkByteLimitForTesting() = limit;
+}
+
+int64_t gfx950ConvDgradAotImplicitLaunchCountForTesting()
+{
+    return implicitLaunchCount().load(std::memory_order_relaxed);
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

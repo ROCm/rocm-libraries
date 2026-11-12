@@ -7085,6 +7085,7 @@ custom.config:
     SupportsGSU: false
   InternalSupportParams:
     KernArgsVersion: 0
+  MXScaleFormat: NoSwizzle
   ProblemType:
     OperationType: GEMM
     DataType: F6

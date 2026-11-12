@@ -149,15 +149,6 @@ GraphSpec graphSpec(const DgradShape& s,
     return spec;
 }
 
-DeviceProperties gfx950Properties(std::string arch = "gfx950")
-{
-    // By value: matcher tests run on CPU-only and non-gfx950 hosts.
-    DeviceProperties properties;
-    properties.gcnArchName = std::move(arch);
-    properties.warpSize = 64;
-    return properties;
-}
-
 flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
 {
     flatbuffers::FlatBufferBuilder builder;
@@ -375,6 +366,23 @@ TEST(TestGfx950ConvDgradGraphMatcher, AcceptsBothStorageTypesAndBindsTheBackward
                                         1,
                                         static_cast<int64_t>(dtype)}));
         EXPECT_EQ(bound->size(), 4U);
+    }
+}
+
+// The matcher reads the 1.3.0 alignment field (the UED's sdk_version claims it): a declared
+// alignment that is a multiple of 16 bytes is served, as the 8-byte one is refused below.
+TEST(TestGfx950ConvDgradGraphMatcher, AcceptsAlignmentsThatAreMultiplesOf16Bytes)
+{
+    for(const int64_t alignment : {32, 64})
+    {
+        auto spec = graphSpec(DgradShape{});
+        for(auto& tensor : spec.tensors)
+        {
+            tensor.alignment = alignment;
+        }
+        const GraphFixture fixture(buildGraph(spec), gfx950Properties());
+        EXPECT_TRUE(matchesGraph(GFX950_CONV_DGRAD_AOT, fixture.context()))
+            << "alignment " << alignment;
     }
 }
 

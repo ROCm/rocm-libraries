@@ -7,8 +7,9 @@ Three consumers share the math here (``natural_lse_from_log2_stats``):
 
 * the gfx942 / gfx950 dense prefill kernels: ``lse_store`` emits the optional
   LSE store, ``dense_row_has_key`` / ``zero_keyless_row`` the empty-row output
-  masking, and ``validate_dense_lse`` is the host-side contract for the
-  caller-owned LSE buffer;
+  masking, ``validate_dense_lse`` is the host-side contract for the
+  caller-owned LSE buffer, and ``validate_varlen_keys`` the host check for a packed
+  varlen launch without LSE;
 * the unified split-KV reduce and the unified tiled 2D epilogues (gfx942 /
   gfx950): the same IR helpers emit their LSE store, ``lse_row_has_mass`` the
   ``!(l == 0)`` row test, and ``validate_unified_lse`` is their host-side buffer
@@ -68,6 +69,7 @@ __all__ = [
     "make_mfma_lse_epilogue",
     "make_wmma_lse_epilogue",
     "validate_dense_lse",
+    "validate_varlen_keys",
     "zero_keyless_row",
 ]
 
@@ -272,6 +274,50 @@ def validate_dense_lse(
                 )
             if not allow_empty and length == 0:
                 raise ValueError("LSE-enabled packed KV sequences must be nonempty")
+
+
+def validate_varlen_keys(spec, cu_seqlens_q, cu_seqlens_kv):
+    """Host check for a packed varlen launch WITHOUT the LSE output.
+
+    The packed body zeroes no keyless row without LSE and has no empty-KV path, so
+    reject what would come out wrong instead of returning it: a sequence that has
+    queries but a KV length of 0, and, with a sliding window, a sequence whose last
+    query rows see no key (``q_len - kv_len >= window``). A slot with no queries exits
+    before touching KV, so it may have no keys. Both rejections are implementation
+    shortcuts of the packed body, not hardware limits, so they raise
+    ``NotImplementedError`` with a NOT_YET_IMPLEMENTED detail; malformed offsets raise
+    ``ValueError``. The offsets must be int32 (the kernel reads them as such).
+    Tile alignment and the spec maxima are not checked here; with LSE,
+    :func:`validate_dense_lse` checks them. The spec has no sinks with varlen.
+    Synchronizes both offset tensors to host.
+    """
+    for name, tensor in (
+        ("cu_seqlens_q", cu_seqlens_q),
+        ("cu_seqlens_kv", cu_seqlens_kv),
+    ):
+        if str(tensor.dtype) != "torch.int32":
+            raise ValueError(f"{name} must be int32, got {tensor.dtype}")
+    q_off = cu_seqlens_q.tolist()
+    kv_off = cu_seqlens_kv.tolist()
+    if len(q_off) != spec.batch + 1 or len(kv_off) != spec.batch + 1:
+        raise ValueError(
+            "cu_seqlens_q and cu_seqlens_kv must each have batch+1 entries"
+        )
+    window = spec.sliding_window
+    q_lens = [stop - start for start, stop in zip(q_off, q_off[1:])]
+    kv_lens = [stop - start for start, stop in zip(kv_off, kv_off[1:])]
+    for i, (q_len, kv_len) in enumerate(zip(q_lens, kv_lens)):
+        if q_len > 0 and kv_len <= 0:
+            raise NotImplementedError(
+                f"NOT_YET_IMPLEMENTED: packed KV sequence {i} must be nonempty "
+                "without LSE"
+            )
+        if window and q_len - kv_len >= window:
+            raise NotImplementedError(
+                f"NOT_YET_IMPLEMENTED: sequence {i}: sliding_window={window} over "
+                f"q_len={q_len}, kv_len={kv_len} leaves query rows with no key; "
+                "use emit_lse"
+            )
 
 
 Stride = Union[int, Value]
