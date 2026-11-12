@@ -75,8 +75,9 @@ std::optional<WinogradProblem>
                          conv_naive::ConvDirection direction);
 
 /**
- * @brief Whether the engines admit bf16 graphs: only with HIP_KERNEL_PROVIDER_CONV_WINOGRAD_BF16
- *        set to a true value.
+ * @brief Whether the forward and backward-data engines admit bf16 graphs: only with
+ *        HIP_KERNEL_PROVIDER_CONV_WINOGRAD_BF16 set to a true value (the weight-gradient engine
+ *        keeps its own rules).
  *
  * The matrix-core bf16 operands round the transformed input and filter tiles to bf16, an error
  * (about a third of bf16's unit roundoff of each tile's sum of |products|) the convolution's own

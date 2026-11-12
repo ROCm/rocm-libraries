@@ -1184,9 +1184,11 @@ std::optional<ConvDirection> directionFor(const KernelDefinition& kernel)
 std::optional<BoundTokens> graphMatches(const MatchContext& context, ConvDirection direction)
 {
     const auto problem = conv_winograd::parseWinogradProblem(context, direction);
+    // bf16 forward and backward data only by permission (the weight-gradient engine has its
+    // own precision rules).
     if(!problem.has_value()
        || (problem->base.dataType == data_objects::DataType::BFLOAT16
-           && !conv_winograd::bf16Permitted()))
+           && direction != ConvDirection::BACKWARD_WEIGHTS && !conv_winograd::bf16Permitted()))
     {
         return std::nullopt;
     }
