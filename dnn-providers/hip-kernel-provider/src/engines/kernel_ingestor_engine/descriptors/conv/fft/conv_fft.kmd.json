@@ -1,0 +1,39 @@
+{
+  "version": "1.0",
+  "id": "dda33818-91ee-5583-a60a-5208e67641f5",
+  "name": "conv_fft config fields",
+  "fields": [
+    {
+      "name": "direction",
+      "type": "string"
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "th",
+      "type": "int"
+    },
+    {
+      "name": "tw",
+      "type": "int"
+    },
+    {
+      "name": "pb",
+      "type": "int"
+    },
+    {
+      "name": "tb",
+      "type": "int"
+    },
+    {
+      "name": "gn",
+      "type": "int"
+    },
+    {
+      "name": "tm",
+      "type": "int"
+    }
+  ]
+}

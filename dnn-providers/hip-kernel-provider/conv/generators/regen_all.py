@@ -59,6 +59,7 @@ FAMILIES = {
     "gen_depthwise_valu.py": "depthwise_valu",
     "gen_depthwise_valu_wrw.py": "depthwise_valu_wrw",
     "gen_direct.py": "direct",
+    "gen_fft.py": "fft",
     "gen_group.py": "group",
     "gen_igemm.py": "igemm",
     "gen_igemm_nchw.py": "igemm_nchw",

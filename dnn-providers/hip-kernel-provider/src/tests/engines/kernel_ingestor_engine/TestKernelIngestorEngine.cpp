@@ -707,6 +707,9 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
 #ifdef HIPDNN_ENGINE_CONV_GROUP
         "hipkernel.conv_group.dispatch",
 #endif
+#ifdef HIPDNN_ENGINE_CONV_FFT
+        "hipkernel.conv_fft.dispatch",
+#endif
 #endif
     };
     EXPECT_EQ(packDispatchSymbols.size(), ingestorPacks().size())

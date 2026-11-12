@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "93f8b5f0-c72c-5150-9dc4-acd5b05cc41a",
+  "name": "conv_fft dispatch",
+  "dispatch_symbol": "hipkernel.conv_fft.dispatch"
+}

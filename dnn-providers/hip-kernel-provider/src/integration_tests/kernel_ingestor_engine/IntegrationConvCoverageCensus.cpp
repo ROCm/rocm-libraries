@@ -63,7 +63,7 @@ constexpr std::array<const char*, 4> BLAS_ENGINES = {"ROCBLAS_CONV_ENGINE",
                                                      "ROCBLAS_CONV_TF32_ENGINE",
                                                      "HIPBLASLT_CONV_TF32_ENGINE"};
 // The engines this census can name: the conv group and the explicit-GEMM engines.
-constexpr std::array<const char*, 28> KNOWN_ENGINES = {"hipkernel:CONV_NAIVE_FWD",
+constexpr std::array<const char*, 31> KNOWN_ENGINES = {"hipkernel:CONV_NAIVE_FWD",
                                                        "hipkernel:CONV_NAIVE_BWD",
                                                        "hipkernel:CONV_NAIVE_WRW",
                                                        "hipkernel:CONV_DEPTHWISE_VALU_FWD",
@@ -87,6 +87,9 @@ constexpr std::array<const char*, 28> KNOWN_ENGINES = {"hipkernel:CONV_NAIVE_FWD
                                                        "hipkernel:CONV_GROUP_FWD",
                                                        "hipkernel:CONV_GROUP_BWD",
                                                        "hipkernel:CONV_GROUP_WRW",
+                                                       "hipkernel:CONV_FFT_FWD",
+                                                       "hipkernel:CONV_FFT_BWD",
+                                                       "hipkernel:CONV_FFT_WRW",
                                                        "ROCBLAS_CONV_ENGINE",
                                                        "HIPBLASLT_CONV_ENGINE",
                                                        "ROCBLAS_CONV_TF32_ENGINE",
