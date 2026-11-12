@@ -53,6 +53,7 @@ namespace
         ASSERT_TRUE(out.good()) << "cannot write " << path.string();
     }
 
+#ifdef TENSILE_MSGPACK
     // The smallest library the loader accepts, in the indexed layout: a solution
     // table with one entry and a tree that is a single leaf for it. MessagePack
     // for {format_version: 2, solutions_index: [0, 0, 1],
@@ -88,6 +89,7 @@ namespace
            0x94, 0x93, 0x9f, 0x74, 0x84, 0x91, 0x71, 0x79, 0x4e, 0x66, 0x52, 0x51, 0x62, 0x51,
            0x65, 0xd3, 0x92, 0x92, 0xca, 0x82, 0xd4, 0x65, 0xc1, 0x99, 0x79, 0xe9, 0x39, 0xa9,
            0x4b, 0xc1, 0x1a, 0x18, 0x00, 0xb2, 0xa0, 0x22, 0x78};
+#endif
 
     class LongPathLoading : public ::testing::Test
     {
@@ -130,6 +132,7 @@ namespace
         }
     };
 
+#ifdef TENSILE_MSGPACK
     std::shared_ptr<TensileLite::SolutionLibrary<TensileLite::ContractionProblemGemm,
                                                  TensileLite::ContractionSolution>>
         loadLibrary(std::string const& path)
@@ -155,6 +158,7 @@ namespace
 
         EXPECT_NE(loadLibrary(path), nullptr) << "could not load " << path << ".zlib";
     }
+#endif
 
     // Stands in for the HIP runtime: hipModuleLoad opens the narrow path it is
     // given, as the runtime does, and hipModuleLoadData records the image.
