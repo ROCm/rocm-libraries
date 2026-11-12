@@ -1009,8 +1009,7 @@ struct tile_window_with_static_distribution
         static_assert(std::is_same_v<LdsDataType, typename Base::DataType>,
                       "LdsDataType must match tile window's DataType");
 
-        using Traits             = typename Base::Traits;
-        constexpr auto tile_dstr = typename Base::TileDstr{};
+        using Traits = typename Base::Traits;
 
         static constexpr index_t num_tensor_dims = BottomTensorView_::get_num_of_dimension();
 
@@ -1019,15 +1018,14 @@ struct tile_window_with_static_distribution
         const auto& lds_tensor_descriptor  = lds_bottom_tensor_view.get_tensor_descriptor();
         auto smem_base_ptr                 = lds_bottom_tensor_view.get_buffer_view().p_data_;
 
-        const auto& glb_tensor_descriptor = this->bottom_tensor_view_.get_tensor_descriptor();
-
         auto global_strides = get_cached_global_strides();
         if constexpr(RematerializeStride)
         {
             static_assert(Base::NDimBottomTensor == 2 && Traits::PackedSize == 1);
-            auto unit       = make_zero_multi_index<2>();
-            unit(I0)        = 1;
-            const index_t s = glb_tensor_descriptor.calculate_offset(unit);
+            const auto& glb_tensor_descriptor = this->bottom_tensor_view_.get_tensor_descriptor();
+            auto unit                         = make_zero_multi_index<2>();
+            unit(I0)                          = 1;
+            const index_t s                   = glb_tensor_descriptor.calculate_offset(unit);
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
             // Keep the clamped descriptor word local to this TDM issue.
             asm volatile("s_max_i32 %0, %1, 1" : "=s"(global_strides(I0)) : "s"(s) : "scc");
@@ -1043,12 +1041,7 @@ struct tile_window_with_static_distribution
             auto lds_bottom_tensor_thread_idx =
                 lds_window_origin + window_adaptor_thread_coord.get_bottom_index();
 
-            // tdm's box dim is reversed from tile distribution
-            constexpr auto raw_box_dim =
-                to_sequence(tile_dstr.get_ys_to_d_descriptor().get_lengths()).reverse();
-
-            constexpr auto box_dim = raw_box_dim.modify(
-                number<0>{}, number<raw_box_dim.at(number<0>{}) / Traits::PackedSize>{});
+            constexpr auto box_dim = get_tdm_box_dim();
             // Use precomputed tensor descriptor
             const auto lds_coord =
                 make_tensor_coordinate(lds_tensor_descriptor, lds_bottom_tensor_thread_idx);
@@ -1070,16 +1063,7 @@ struct tile_window_with_static_distribution
                 }
                 else
                 {
-                    // Clamp remaining dimensions so out-of-bounds boxes load zeros.
-                    // The extent comes from the pre-pad length: a padded descriptor
-                    // would let TDM pull real neighbouring memory into the padding.
-                    auto dims = to_array<index_t, Base::NDimBottomTensor>(tuple_reverse(
-                        transform_tuples([](auto x) { return max(index_t{0}, x); },
-                                         detail::tdm_real_lengths(glb_tensor_descriptor) -
-                                             this->get_window_origin() -
-                                             window_adaptor_thread_coord.get_bottom_index())));
-                    dims[0] /= Traits::PackedSize;
-                    return dims;
+                    return get_tdm_tensor_dims(window_adaptor_thread_coord);
                 }
             }();
             // Assert that both window origins have the same dimensionality
@@ -1131,6 +1115,89 @@ struct tile_window_with_static_distribution
         }
 
         static_for<0, NumCoord, 1>{}(process_coord);
+    }
+
+    // TDM's box: the distribution's Y lengths, reversed (TDM dimension 0 is the contiguous one),
+    // dimension 0 in packed elements.
+    CK_TILE_DEVICE static constexpr auto get_tdm_box_dim()
+    {
+        using Traits             = typename Base::Traits;
+        constexpr auto tile_dstr = typename Base::TileDstr{};
+        constexpr auto raw_box_dim =
+            to_sequence(tile_dstr.get_ys_to_d_descriptor().get_lengths()).reverse();
+        return raw_box_dim.modify(number<0>{},
+                                  number<raw_box_dim.at(number<0>{}) / Traits::PackedSize>{});
+    }
+
+    // TDM's tensor dimensions for the box at window_adaptor_thread_coord: what is left of the
+    // tensor from the box, reversed as the box, clamped at 0 so out-of-bounds boxes load zeros.
+    // The extent comes from the pre-pad length: a padded descriptor would let TDM pull real
+    // neighbouring memory into the padding.
+    template <typename WindowAdaptorCoord>
+    CK_TILE_DEVICE auto
+    get_tdm_tensor_dims(const WindowAdaptorCoord& window_adaptor_thread_coord) const
+    {
+        using Traits                      = typename Base::Traits;
+        const auto& glb_tensor_descriptor = this->bottom_tensor_view_.get_tensor_descriptor();
+        auto dims = to_array<index_t, Base::NDimBottomTensor>(tuple_reverse(transform_tuples(
+            [](auto x) { return max(index_t{0}, x); },
+            detail::tdm_real_lengths(glb_tensor_descriptor) - this->get_window_origin() -
+                window_adaptor_thread_coord.get_bottom_index())));
+        dims[0] /= Traits::PackedSize;
+        return dims;
+    }
+
+    // The TDM groups of this window's load into lds_tile, as tdm_load_to_lds programs them, for
+    // a caller that builds them once and issues each load by patching its addresses and one
+    // extent (amd_tdm_load<Dim>(groups, ...), GemmPipelineAgBgCrImplBase::GlobalPrefetchTDM).
+    // One box per thread (NumCoord 1), no gather.
+    template <typename TDMConfig_, typename LdsTileWindow_>
+    CK_TILE_DEVICE TDMGroups make_tdm_groups(const TDMConfig_& tdm_config,
+                                             const LdsTileWindow_& lds_tile) const
+    {
+        using LdsTileWindow = remove_cvref_t<LdsTileWindow_>;
+        using DataType      = remove_cvref_t<typename Base::DataType>;
+        using Traits        = typename Base::Traits;
+        static_assert(NumCoord == 1, "make_tdm_groups: one TDM box per thread");
+        static_assert(std::is_same_v<remove_cvref_t<typename LdsTileWindow::DataType>, DataType>,
+                      "LdsDataType must match tile window's DataType");
+        static constexpr index_t num_tensor_dims = BottomTensorView_::get_num_of_dimension();
+
+        const auto& window_adaptor_thread_coord = pre_computed_coords_[I0][I0];
+        const auto& bottom_tensor_thread_coord  = pre_computed_coords_[I0][I1];
+        const auto& lds_bottom_tensor_view      = lds_tile.get_bottom_tensor_view();
+        const auto lds_coord                    = make_tensor_coordinate(
+            lds_bottom_tensor_view.get_tensor_descriptor(),
+            lds_tile.get_window_origin() + window_adaptor_thread_coord.get_bottom_index());
+        // The LDS address goes in as an integer: a flat cast of the LDS pointer would add an
+        // aperture and a null check.
+        const auto lds_addr = static_cast<uint32_t>(
+            reinterpret_cast<uintptr_t>(lds_bottom_tensor_view.get_buffer_view().p_data_ +
+                                        lds_coord.get_offset() / Traits::PackedSize));
+
+        constexpr auto box_dim    = get_tdm_box_dim();
+        const auto tensor_dims    = get_tdm_tensor_dims(window_adaptor_thread_coord);
+        const auto global_strides = get_cached_global_strides();
+        array<uint32_t, num_tensor_dims> dims;
+        array<uint64_t, num_tensor_dims> strides;
+        array<uint16_t, num_tensor_dims> box;
+        static_for<0, num_tensor_dims, 1>{}([&](auto i) {
+            dims(i)    = static_cast<uint32_t>(tensor_dims[i]);
+            strides(i) = static_cast<uint64_t>(global_strides[i]);
+            box(i)     = static_cast<uint16_t>(box_dim.at(i));
+        });
+        static_assert(box_dim.at(number<0>{}) <= TDMElementTraits<DataType>::max_box_dim0,
+                      "TDM tile_dim0 is 16 bits: the box's contiguous extent exceeds "
+                      "TDMElementTraits<T>::max_box_dim0");
+        return TDMDescriptor<DataType, num_tensor_dims>(
+                   this->get_bottom_tensor_view().get_buffer_view().p_data_ +
+                       bottom_tensor_thread_coord.get_offset() / Traits::PackedSize,
+                   reinterpret_cast<void*>(static_cast<uintptr_t>(lds_addr)),
+                   dims.data,
+                   strides.data,
+                   box.data,
+                   tdm_config)
+            .getGroups();
     }
 
 #if defined(__gfx125__)

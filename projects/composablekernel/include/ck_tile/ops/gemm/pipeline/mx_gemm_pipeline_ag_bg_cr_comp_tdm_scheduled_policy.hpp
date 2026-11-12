@@ -382,26 +382,44 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
                           number<static_cast<index_t>(padding.pad_interval)>{});
     }
 
-    /// A's or B's data in LDS as the TDM loads write it, over [component, component row, K
-    /// word]: each component load fills op.rows tile rows from op.base + component * op.stride.
-    /// The offset is in 4-byte words from the operand's base.
+    /// A's or B's data in LDS as the TDM loads write it, over [tile row, K] in elements of the
+    /// operand: component c's op.rows rows start op.stride bytes after component c - 1's. The
+    /// offset is from the operand's base.
     template <typename Problem, bool IsA>
     CK_TILE_HOST_DEVICE static constexpr auto MakeLdsTdmBlockDescriptor()
     {
-        constexpr MxTdmScheduledSpec s     = GetSpec<Problem>();
-        constexpr MxTdmScheduledOperand op = GetLdsOperand<Problem, IsA>();
-        constexpr index_t rows             = IsA ? s.warp_m * s.atom_m() * s.wave_repeat_m()
-                                                 : s.warp_n * s.atom_n() * s.wave_repeat_n();
-        constexpr index_t words            = GetLdsRowBytes<Problem>() / 4;
-        constexpr auto naive               = MakeLdsRunsDescriptor<Problem, IsA>();
-        constexpr index_t inner            = naive.get_lengths()[number<2>{}];
+        constexpr auto runs       = MakeLdsRunsDescriptor<Problem, IsA, true>();
+        constexpr auto lengths    = runs.get_lengths();
+        constexpr index_t comps   = lengths[number<0>{}];
+        constexpr index_t outer   = lengths[number<1>{}];
+        constexpr index_t inner   = lengths[number<2>{}];
+        constexpr index_t k_elems = lengths[number<3>{}];
         return transform_tensor_descriptor(
-            naive,
-            make_tuple(make_pass_through_transform(number<rows / op.rows>{}),
-                       make_merge_transform(make_tuple(number<op.rows / inner>{}, number<inner>{})),
-                       make_pass_through_transform(number<words>{})),
-            make_tuple(sequence<0>{}, sequence<1, 2>{}, sequence<3>{}),
-            make_tuple(sequence<0>{}, sequence<1>{}, sequence<2>{}));
+            runs,
+            make_tuple(
+                make_merge_transform(make_tuple(number<comps>{}, number<outer>{}, number<inner>{})),
+                make_pass_through_transform(number<k_elems>{})),
+            make_tuple(sequence<0, 1, 2>{}, sequence<3>{}),
+            make_tuple(sequence<0>{}, sequence<1>{}));
+    }
+
+    /// The DRAM distribution of one TDM component load of A or B: one box of the component's
+    /// rows (an iterate-mode block of them) by the K tile, the same for every wave; a wave's
+    /// component is its window's origin.
+    template <typename Problem, bool IsA>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeDramTdmTileDistribution()
+    {
+        constexpr MxTdmScheduledOperand op = GetLdsOperand<Problem, IsA>();
+        constexpr index_t box_rows         = op.iterate_rows > 0 ? op.iterate_rows : op.rows;
+        return make_static_tile_distribution(
+            tile_distribution_encoding<
+                sequence<mx_tdm_scheduled::kWaves>,
+                tuple<sequence<box_rows>, sequence<GetSpec<Problem>().tile_k>>,
+                tuple<sequence<0>>,
+                tuple<sequence<0>>,
+                sequence<1, 2>,
+                sequence<0, 0>>{},
+            bool_constant<true>{});
     }
 
     /// A's or B's data in LDS as a descriptor over [tile row in fragment order, K word]. Row t =
@@ -444,8 +462,9 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
             make_tuple(sequence<0>{}, sequence<1>{}));
     }
 
-    /// A's or B's data in LDS as runs of rows, over [component, run, run row, K word].
-    template <typename Problem, bool IsA>
+    /// A's or B's data in LDS as runs of rows, over [component, run, run row, K]: K in 4-byte
+    /// words, or with InElements in elements of the operand.
+    template <typename Problem, bool IsA, bool InElements = false>
     CK_TILE_HOST_DEVICE static constexpr auto MakeLdsRunsDescriptor()
     {
         constexpr MxTdmScheduledSpec s     = GetSpec<Problem>();
@@ -455,7 +474,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
         constexpr index_t atom             = IsA ? s.atom_m() : s.atom_n();
         constexpr index_t repeats          = IsA ? s.wave_repeat_m() : s.wave_repeat_n();
         constexpr index_t rows             = warps * atom * repeats;
-        constexpr index_t words            = row_bytes / 4;
         // A component's rows split into (outer, inner) runs: iterate-mode blocks, padded blocks
         // of whole rows, or one run (rows padded within, or unpadded).
         constexpr bool iterate         = op.iterate_rows > 0;
@@ -473,15 +491,18 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
         static_assert(rows % op.rows == 0 && op.rows % inner == 0 && row_bytes % 4 == 0 &&
                           op.stride % 4 == 0 && outer_stride % 4 == 0 && row_stride % 4 == 0,
                       "comp_tdm_scheduled: the LDS layout is not a whole number of words per run");
+        constexpr auto unit = [](index_t bytes) {
+            return InElements ? bytes * GetKPerByte<Problem>() : bytes / 4;
+        };
         return make_naive_tensor_descriptor(make_tuple(number<rows / op.rows>{},
                                                        number<op.rows / inner>{},
                                                        number<inner>{},
-                                                       number<words>{}),
-                                            make_tuple(number<op.stride / 4>{},
-                                                       number<outer_stride / 4>{},
-                                                       number<row_stride / 4>{},
+                                                       number<unit(row_bytes)>{}),
+                                            make_tuple(number<unit(op.stride)>{},
+                                                       number<unit(outer_stride)>{},
+                                                       number<unit(row_stride)>{},
                                                        number<1>{}),
-                                            number<4>{},
+                                            number < InElements ? 1 : 4 > {},
                                             number<1>{});
     }
     template <typename Problem>

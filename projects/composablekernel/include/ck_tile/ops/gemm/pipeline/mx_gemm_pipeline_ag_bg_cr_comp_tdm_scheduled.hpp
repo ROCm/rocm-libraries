@@ -343,6 +343,9 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         CK_TILE_DEVICE index_t ClampK(index_t k) const { return k < K ? k : K - kTileK; }
 
         template <bool IsA>
+        using DramWindowType = std::conditional_t<IsA, ADramWindow, BDramWindow>;
+
+        template <bool IsA>
         CK_TILE_DEVICE const auto& DramWindow() const
         {
             if constexpr(IsA)
@@ -351,18 +354,37 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                 return b_dram;
         }
 
-        /// Component `component` of A's or B's tile, L.rows rows of it, as a sub-window of the
-        /// operand's DRAM window.
+        /// Component `component` of A's or B's tile as a TDM load window: a sub-window of the
+        /// operand's DRAM window at the component's first row, one box of
+        /// MakeDramTdmTileDistribution. A wide operand's view is rebased at that row in 64 bits,
+        /// as a tensor descriptor offset is 32-bit.
         template <bool IsA>
         CK_TILE_DEVICE auto DramComponentWindow(index_t component) const
         {
             constexpr MxTdmScheduledOperand L = Policy::template GetLdsOperand<Problem, IsA>();
-            const auto& dram                  = DramWindow<IsA>();
-            const auto origin                 = dram.get_window_origin();
-            return make_tile_window(
-                dram.get_bottom_tensor_view(),
-                make_tuple(number<L.rows>{}, number<kTileK>{}),
-                {origin[number<0>{}] + component * L.rows, origin[number<1>{}]});
+            constexpr bool wide               = IsA ? Traits::kWideA : Traits::kWideB;
+            constexpr index_t box_rows        = L.iterate_rows > 0 ? L.iterate_rows : L.rows;
+            constexpr auto lengths            = make_tuple(number<box_rows>{}, number<kTileK>{});
+            constexpr auto dstr = Policy::template MakeDramTdmTileDistribution<Problem, IsA>();
+            const auto& dram    = DramWindow<IsA>();
+            const auto& view    = dram.get_bottom_tensor_view();
+            const index_t row0  = dram.get_window_origin()[number<0>{}] + component * L.rows;
+            const index_t k0    = dram.get_window_origin()[number<1>{}];
+            if constexpr(wide)
+            {
+                using DataType           = remove_cvref_t<typename DramWindowType<IsA>::DataType>;
+                constexpr index_t packed = numeric_traits<DataType>::PackedSize;
+                const index_t row_stride =
+                    view.get_tensor_descriptor().calculate_offset(make_multi_index(1, 0));
+                const auto rebased = make_naive_tensor_view<address_space_enum::global>(
+                    view.get_buffer_view().p_data_ +
+                        static_cast<long_index_t>(row0) * (row_stride / packed),
+                    make_tuple(Lengths(dram)[number<0>{}] - row0, K),
+                    make_tuple(row_stride, 1));
+                return make_tile_window(rebased, lengths, {0, k0}, dstr);
+            }
+            else
+                return make_tile_window(view, lengths, {row0, k0}, dstr);
         }
 
         /// Where component `component` of A's or B's tile lands in buffer 0: an LDS window over
@@ -370,24 +392,17 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         template <bool IsA>
         CK_TILE_DEVICE auto LdsComponentWindow(index_t component) const
         {
+            using DataType = remove_cvref_t<typename DramWindowType<IsA>::DataType>;
             constexpr MxTdmScheduledOperand L = Policy::template GetLdsOperand<Problem, IsA>();
+            constexpr index_t box_rows        = L.iterate_rows > 0 ? L.iterate_rows : L.rows;
             constexpr auto desc = Policy::template MakeLdsTdmBlockDescriptor<Problem, IsA>();
-            const auto view     = make_tensor_view<address_space_enum::lds>(
-                reinterpret_cast<CK_TILE_LDS_ADDR uint32_t*>(smem + L.base), desc);
-            return make_tile_window(
-                view,
-                make_tuple(number<1>{}, number<L.rows>{}, number<kLdsRowBytes / 4>{}),
-                {component, 0, 0});
-        }
-
-        /// The LDS byte address of an LDS window's origin, as the integer TDM takes.
-        template <typename Window>
-        CK_TILE_DEVICE static uint32_t LdsAddress(const Window& window)
-        {
-            const auto& view = window.get_bottom_tensor_view();
-            return static_cast<uint32_t>(reinterpret_cast<uintptr_t>(
-                view.get_buffer_view().p_data_ +
-                view.get_tensor_descriptor().calculate_offset(window.get_window_origin())));
+            // The view starts at the component, offset in words as the block GEMM's reads offset
+            // their rows, so the two share the wave's base.
+            auto* const base = reinterpret_cast<CK_TILE_LDS_ADDR uint32_t*>(smem + L.base) +
+                               component * (L.stride / 4);
+            const auto view = make_tensor_view<address_space_enum::lds>(
+                reinterpret_cast<CK_TILE_LDS_ADDR DataType*>(base), desc);
+            return make_tile_window(view, make_tuple(number<box_rows>{}, number<kTileK>{}), {0, 0});
         }
 
         // ---------------------------------------------------------------- TdmLoader
@@ -439,50 +454,42 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         }
 
         /// The groups of A's or B's component load into buffer 0, from the component's DRAM
-        /// window into its LDS window. The rows left are clipped as tdm_load_to_lds clips them;
-        /// the address is the window origin's, in 64 bits with a wide operand (a tensor
-        /// descriptor offset is 32-bit).
+        /// window into its LDS window, as tile_window::make_tdm_groups builds them. With
+        /// iterate-mode blocks, the block count is what the component's rows left need.
         template <bool IsA>
         CK_TILE_DEVICE TDMGroups DataDescriptor(index_t component) const
         {
             constexpr MxTdmScheduledOperand L = Policy::template GetLdsOperand<Problem, IsA>();
             constexpr bool edge               = IsA ? Traits::kEdgeM : Traits::kEdgeN;
-            constexpr bool wide               = IsA ? Traits::kWideA : Traits::kWideB;
             constexpr bool iterate            = L.iterate_rows > 0;
-            constexpr index_t tile_rows       = iterate ? L.iterate_rows : L.rows;
             const auto dram_window            = DramComponentWindow<IsA>(component);
-            const index_t row0                = dram_window.get_window_origin()[number<0>{}];
-            const uint8_t* base               = Bytes(dram_window);
-            const uint8_t* global =
-                wide ? base + static_cast<long_index_t>(row0) * packed_k : base + row0 * packed_k;
-            const index_t rows_left = max(index_t{0}, Lengths(dram_window)[number<0>{}] - row0);
 
             TDMConfig config = Config<IsA, false>();
             if constexpr(iterate)
             {
-                constexpr index_t count = L.rows / tile_rows;
-                index_t iterations      = count;
+                constexpr index_t tile_rows = L.iterate_rows;
+                constexpr index_t count     = L.rows / tile_rows;
+                const auto& view            = dram_window.get_bottom_tensor_view();
+                index_t iterations          = count;
                 if constexpr(edge)
                 {
                     // Each iteration moves tile_rows rows whatever tensor_dim1 says, so walk
                     // ceil(rows left / tile_rows), at least one: with no rows left, tensor_dim1 0
                     // keeps that one off memory.
-                    const index_t held = max(min(rows_left, L.rows), 1);
+                    const index_t rows_left = max(index_t{0},
+                                                  Lengths(dram_window)[number<0>{}] -
+                                                      dram_window.get_window_origin()[number<0>{}]);
+                    const index_t held      = max(min(rows_left, L.rows), 1);
                     iterations = integer_divide_nonnegative<tile_rows>(held + tile_rows - 1);
                 }
+                const index_t row_bytes = integer_divide_nonnegative<kKPerByte>(
+                    view.get_tensor_descriptor().calculate_offset(make_multi_index(1, 0)));
                 config.iterate_enable = true;
-                config.iter_config    = {static_cast<uint32_t>(packed_k * tile_rows),
+                config.iter_config    = {static_cast<uint32_t>(row_bytes * tile_rows),
                                          static_cast<uint32_t>(L.iterate_stride),
                                          static_cast<uint16_t>(iterations - 1)};
             }
-            return Groups(global,
-                          LdsAddress(LdsComponentWindow<IsA>(component)),
-                          static_cast<uint32_t>(packed_k),
-                          static_cast<uint32_t>(rows_left),
-                          kLdsRowBytes,
-                          tile_rows,
-                          static_cast<uint32_t>(packed_k),
-                          config);
+            return dram_window.make_tdm_groups(config, LdsComponentWindow<IsA>(component));
         }
 
         /// K-major scales [K / 128][MN][4]: one row per K step, 4 B per MN row.
