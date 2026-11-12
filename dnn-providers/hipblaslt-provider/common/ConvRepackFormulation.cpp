@@ -534,13 +534,18 @@ std::optional<ConvGemmPlanCalls>
         slice = 1;
         probe = bandOf(problem, 0, std::min<int64_t>(outRows, 2));
     }
-    form.columnsFirst = layout != ColumnLayout::CHANNELS_LAST && channelsOutermost(problem.y);
+    const bool channelsLast
+        = layout == ColumnLayout::CHANNELS_LAST || layout == ColumnLayout::STAGED_CHANNELS_LAST;
+    form.columnsFirst = !channelsLast && channelsOutermost(problem.y);
     if(form.columnsFirst
        && !sliceStage(problem, form, 0, slice, false, filter, false, probe).has_value())
     {
         form.columnsFirst = false;
     }
-    if(!sliceStage(problem, form, 0, slice, false, filter, false, probe).has_value())
+    const bool stageAllImages = layout == ColumnLayout::STAGED_CHANNELS_LAST && !banded
+                                && problem.n > 1 && channelsOutermost(problem.y);
+    if(stageAllImages
+       || !sliceStage(problem, form, 0, slice, false, filter, false, probe).has_value())
     {
         stageY = true;
         if(!banded)
@@ -897,7 +902,7 @@ std::optional<ConvGemmPlanCalls> stagedOneByOneWeights(const ConvProblem& proble
 }
 
 /// The 1x1 channels-first backward weights of several images in @p layout: batched partials
-/// (CHANNELS_FIRST), staged channels-last (CHANNELS_LAST), or whichever moves fewer workspace
+/// (CHANNELS_FIRST), staged channels-last (CHANNELS_LAST, STAGED_CHANNELS_LAST), or whichever moves fewer workspace
 /// bytes (FOLLOW_Y), each falling back to the other when it does not apply.
 std::optional<ConvGemmPlanCalls>
     oneByOneWeights(const ConvProblem& problem, size_t maxWorkspaceBytes, ColumnLayout layout)
@@ -913,7 +918,7 @@ std::optional<ConvGemmPlanCalls>
     {
         return batched.has_value() ? batched : staged;
     }
-    if(layout == ColumnLayout::CHANNELS_LAST)
+    if(layout == ColumnLayout::CHANNELS_LAST || layout == ColumnLayout::STAGED_CHANNELS_LAST)
     {
         return staged.has_value() ? staged : batched;
     }

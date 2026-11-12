@@ -28,6 +28,10 @@ enum class ColumnLayout
     CHANNELS_FIRST,
     /// Channels-last whatever y's layout; the 1x1 backward weights staged channels-last.
     CHANNELS_LAST,
+    /// Channels-last columns, and a channels-first y of several images staged channels-last
+    /// in the workspace, so one GEMM covers every image of a slice instead of a batch of
+    /// per-image GEMMs (MIOpen's 1x1 stride-2 form); otherwise CHANNELS_LAST.
+    STAGED_CHANNELS_LAST,
 };
 
 /**

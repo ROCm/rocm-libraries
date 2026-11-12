@@ -208,6 +208,49 @@ TEST(TestConvRepackFormulation, AChannelsLastPreferenceOverridesY)
     EXPECT_FALSE(nhwc->columnsFirst);
 }
 
+TEST(TestConvRepackFormulation, StagedChannelsLastRunsOneGemmOverEveryImage)
+{
+    // A channels-first strided 1x1: the other layouts batch a GEMM per image; staged
+    // channels-last copies y channels-last so one GEMM covers both images' positions.
+    ConvGemmShape strided1x1;
+    strided1x1.stride = {2, 2};
+    strided1x1.input = {6, 8};
+    for(const auto direction : ALL_DIRECTIONS)
+    {
+        const auto problem = parse(strided1x1, direction);
+        const auto followY = im2colGemmCalls(problem);
+        const auto staged = im2colGemmCalls(
+            problem, MAX_REPACK_WORKSPACE_BYTES, ColumnLayout::STAGED_CHANNELS_LAST);
+        ASSERT_TRUE(followY.has_value());
+        ASSERT_TRUE(staged.has_value());
+        EXPECT_FALSE(staged->columnsFirst);
+        ASSERT_EQ(gemmStages(*staged), 1u) << static_cast<int>(direction);
+        ASSERT_EQ(staged->stages[0].calls.size(), 1u);
+        const auto& call = staged->stages[0].calls[0];
+        EXPECT_EQ(call.batchCount, 1);
+        // The positions of both images (3 x 4 each) in one GEMM dimension.
+        if(direction == ConvDirection::BACKWARD_WEIGHTS)
+        {
+            EXPECT_EQ(call.k, 2 * 3 * 4);
+        }
+        else
+        {
+            EXPECT_TRUE(call.m == 2 * 3 * 4 || call.n == 2 * 3 * 4);
+        }
+        // y staged channels-last next to the columns.
+        EXPECT_EQ(staged->workspace.size(), followY->workspace.size() + 1);
+    }
+    // Channels-last y needs no staging: the same plan as channels-last columns.
+    const auto nhwc = parse(channelsLast(strided1x1), ConvDirection::BACKWARD_DATA);
+    const auto staged
+        = im2colGemmCalls(nhwc, MAX_REPACK_WORKSPACE_BYTES, ColumnLayout::STAGED_CHANNELS_LAST);
+    const auto plain
+        = im2colGemmCalls(nhwc, MAX_REPACK_WORKSPACE_BYTES, ColumnLayout::CHANNELS_LAST);
+    ASSERT_TRUE(staged.has_value());
+    ASSERT_TRUE(plain.has_value());
+    EXPECT_EQ(staged->workspaceBytes, plain->workspaceBytes);
+}
+
 TEST(TestConvRepackFormulation, ChannelsFirstBackwardWeightsBatchesImagesAfterIm2col)
 {
     // Channels-first backward weights reduces over images, which no single channels-first GEMM

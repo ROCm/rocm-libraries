@@ -468,7 +468,8 @@ void runCase(ConvCase convCase,
              Slicing slicing = Slicing::NONE,
              bool benchmarking = false,
              bool tf32 = false,
-             bool splitReduction = false)
+             bool splitReduction = false,
+             ColumnLayout layout = ColumnLayout::FOLLOW_Y)
 {
     auto& shape = convCase.shape;
     shape.dataType = dataTypeOf<T>();
@@ -497,7 +498,7 @@ void runCase(ConvCase convCase,
         }
         cap = *banding;
     }
-    const ConvGemmPlanBuilder builder(factoryFor(backend), cap, tf32, splitReduction);
+    const ConvGemmPlanBuilder builder(factoryFor(backend), cap, tf32, splitReduction, layout);
     if(!builder.isApplicable(*handle, graph.graph()))
     {
         // The only decline a backend may add to the formulation's is finding no algorithm for
@@ -506,7 +507,7 @@ void runCase(ConvCase convCase,
         const auto problem = parseConvProblem(graph.graph(), convCase.direction);
         ASSERT_TRUE(problem.has_value());
         // The plan the builder formed: under the same workspace cap (images or bands).
-        auto calls = convGemmCalls(*problem, cap);
+        auto calls = convGemmCalls(*problem, cap, layout, splitReduction);
         ASSERT_TRUE(calls.has_value()) << "the formulation declined the convolution";
         ASSERT_EQ(backend, Backend::HIPBLASLT) << "only hipBLASLt declines a formulated GEMM";
         bool threw = false;
@@ -948,6 +949,62 @@ TEST_P(TestGpuConvGemmSplit, Bfp16)
 INSTANTIATE_TEST_SUITE_P(,
                          TestGpuConvGemmSplit,
                          ::testing::Combine(::testing::ValuesIn(splitCases()),
+                                            ::testing::ValuesIn(enabledBackends())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + backendName(std::get<1>(info.param));
+                         });
+
+/// Channels-first cases of several images built with y staged channels-last, one GEMM over
+/// every image (ColumnLayout::STAGED_CHANNELS_LAST): the strided 1x1 it is for, and im2col.
+std::vector<ConvCase> stagedCases()
+{
+    std::vector<ConvCase> cases;
+    for(const auto& convCase : convCases())
+    {
+        for(const auto* name : {"Strided1x1Nchw", "Padded3x3Nchw", "Conv3dNcdhw"})
+        {
+            if(convCase.name.rfind(name, 0) == 0
+               && convCase.name.size() == std::string(name).size() + 3)
+            {
+                cases.push_back(convCase);
+            }
+        }
+    }
+    return cases;
+}
+
+class TestGpuConvGemmStaged : public ::testing::TestWithParam<std::tuple<ConvCase, Backend>>
+{
+};
+
+TEST_P(TestGpuConvGemmStaged, Fp32)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<float>(std::get<0>(GetParam()),
+                   std::get<1>(GetParam()),
+                   Slicing::NONE,
+                   false,
+                   false,
+                   false,
+                   ColumnLayout::STAGED_CHANNELS_LAST);
+}
+
+TEST_P(TestGpuConvGemmStaged, Bfp16)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<BFloat16>(std::get<0>(GetParam()),
+                      std::get<1>(GetParam()),
+                      Slicing::NONE,
+                      false,
+                      false,
+                      false,
+                      ColumnLayout::STAGED_CHANNELS_LAST);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvGemmStaged,
+                         ::testing::Combine(::testing::ValuesIn(stagedCases()),
                                             ::testing::ValuesIn(enabledBackends())),
                          [](const auto& info) {
                              return std::get<0>(info.param).name + "_"

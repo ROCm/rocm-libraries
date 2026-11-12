@@ -25,11 +25,13 @@ namespace hipblaslt_plugin
 ConvGemmPlanBuilder::ConvGemmPlanBuilder(PlanFactory factory,
                                          size_t maxRepackWorkspaceBytes,
                                          bool tf32,
-                                         bool splitReduction)
+                                         bool splitReduction,
+                                         ColumnLayout layout)
     : _factory(std::move(factory))
     , _maxRepackWorkspaceBytes(maxRepackWorkspaceBytes)
     , _tf32(tf32)
     , _splitReduction(splitReduction)
+    , _layout(layout)
 {
 }
 
@@ -76,7 +78,7 @@ bool ConvGemmPlanBuilder::isApplicable(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    auto calls = callsFor(opGraph, ColumnLayout::FOLLOW_Y, _splitReduction);
+    auto calls = callsFor(opGraph, _layout, _splitReduction);
     if(!calls.has_value())
     {
         return false;
@@ -97,7 +99,7 @@ size_t ConvGemmPlanBuilder::getWorkspaceSize(
     const HipdnnEnginePluginHandle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    auto calls = callsFor(opGraph, ColumnLayout::FOLLOW_Y, _splitReduction);
+    auto calls = callsFor(opGraph, _layout, _splitReduction);
     if(!calls.has_value())
     {
         return 0;
@@ -110,7 +112,7 @@ void ConvGemmPlanBuilder::buildPlan(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     HipdnnEnginePluginExecutionContext& executionContext) const
 {
-    auto calls = callsFor(opGraph, ColumnLayout::FOLLOW_Y, _splitReduction);
+    auto calls = callsFor(opGraph, _layout, _splitReduction);
     if(!calls.has_value())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -135,8 +137,12 @@ void ConvGemmPlanBuilder::buildPlan(
         };
         seen.push_back(signature(*calls));
         candidates.push_back({"default", planFor(handle, *calls)});
-        for(const auto& [layout, name] : {std::pair{ColumnLayout::CHANNELS_FIRST, "channels_first"},
-                                          std::pair{ColumnLayout::CHANNELS_LAST, "channels_last"}})
+        // Staged channels-last: one GEMM over every image of a channels-first y, where the
+        // other layouts batch a small per-image GEMM (1x1 stride 2: 25 x 25 outputs an image).
+        for(const auto& [layout, name] :
+            {std::pair{ColumnLayout::CHANNELS_FIRST, "channels_first"},
+             std::pair{ColumnLayout::CHANNELS_LAST, "channels_last"},
+             std::pair{ColumnLayout::STAGED_CHANNELS_LAST, "staged_channels_last"}})
         {
             auto other = callsFor(opGraph, layout);
             if(other.has_value()
