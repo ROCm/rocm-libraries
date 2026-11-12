@@ -341,7 +341,7 @@ TEST(TestConvRepackFormulation, LongReductionIntoA16BitOutputSumsFp32Partials)
     // One output pixel over 16384 terms: forward, a filter as large as its 32 x 32 image of 16
     // channels; backward data, a 1x1 dx of one channel from 16384 output channels. Into a bf16 or
     // half output the reduction runs as 4 chunks of 4096 whose fp32 partials a cast sums in
-    // order; an fp32 output keeps the single GEMM.
+    // order (narrowPartials); an fp32 output, or the default, keeps the single GEMM.
     ConvGemmShape forward;
     forward.n = 1;
     forward.c = forward.k = 16;
@@ -364,7 +364,13 @@ TEST(TestConvRepackFormulation, LongReductionIntoA16BitOutputSumsFp32Partials)
             shape.dataType = dataType;
             SCOPED_TRACE(std::to_string(static_cast<int>(direction)) + " "
                          + std::to_string(static_cast<int>(dataType)));
-            const auto calls = plan(shape, direction);
+            const auto problem = parse(shape, direction);
+            const auto single = convGemmCalls(problem);
+            ASSERT_TRUE(single.has_value());
+            ASSERT_EQ(single->stages.at(0).calls.size(), 1u);
+            EXPECT_EQ(single->stages.at(0).calls[0].k, 16384);
+            const auto calls = convGemmCalls(
+                problem, MAX_REPACK_WORKSPACE_BYTES, ColumnLayout::FOLLOW_Y, false, true);
             ASSERT_TRUE(calls.has_value());
             const bool narrow = dataType != conv_data_objects::DataType::FLOAT;
             const auto& stage = calls->stages.at(0);

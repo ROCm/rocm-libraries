@@ -29,6 +29,18 @@ namespace hipblaslt_plugin
 class ConvGemmPlanBuilder : public IPlanBuilder
 {
 public:
+    /// When a forward or backward data GEMM straight into a 16-bit y or dx with a long reduction
+    /// runs as fp32 partials summed once (convGemmCalls' narrowPartials) instead of one GEMM:
+    /// where the backend may split the reduction itself and round the parts to the output type.
+    enum class NarrowPartials
+    {
+        NEVER,
+        /// hipBLASLt on gfx11: one output pixel over 524288 bf16 terms reads 1.60 against
+        /// 1.26 on gfx1100; gfx12 and CDNA are exact.
+        ON_GFX11,
+        ALWAYS,
+    };
+
     /// Builds the backend's plan for @p calls, or throws when the backend cannot run them.
     using PlanFactory = std::function<std::unique_ptr<IPlan>(const HipdnnEnginePluginHandle&,
                                                              std::vector<GemmCall>)>;
@@ -39,11 +51,13 @@ public:
     /// the builder of a TF32 engine (ConvTf32.hpp). @p splitReduction makes the split reduction
     /// (convGemmCalls) the default plan rather than only a benchmarking candidate, and
     /// @p layout does the same for a layout candidate; tests use them to check those plans.
+    /// @p narrowPartials: see NarrowPartials.
     explicit ConvGemmPlanBuilder(PlanFactory factory,
                                  size_t maxRepackWorkspaceBytes = MAX_REPACK_WORKSPACE_BYTES,
                                  bool tf32 = false,
                                  bool splitReduction = false,
-                                 ColumnLayout layout = ColumnLayout::FOLLOW_Y);
+                                 ColumnLayout layout = ColumnLayout::FOLLOW_Y,
+                                 NarrowPartials narrowPartials = NarrowPartials::NEVER);
 
     bool isApplicable(
         const HipdnnEnginePluginHandle& handle,
@@ -73,6 +87,7 @@ private:
     bool _tf32;
     bool _splitReduction;
     ColumnLayout _layout;
+    NarrowPartials _narrowPartials;
 };
 
 } // namespace hipblaslt_plugin

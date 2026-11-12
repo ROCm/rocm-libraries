@@ -962,7 +962,8 @@ struct ReductionAxis
 /// images and chunks are parallel work. Each call batches the longest of the three axes and the
 /// calls loop the other two. Plans with one GEMM stage only; @p plan unchanged when the chain does
 /// not qualify or the partials do not fit @p maxWorkspaceBytes.
-/// Forward and backward data qualify with one GEMM straight into a 16-bit y or dx.
+/// Forward and backward data qualify, with @p narrowPartials, with one GEMM straight into a
+/// 16-bit y or dx.
 /// The chunks a split reduction cuts a reduction of @p k into: enough that @p tiles output tiles
 /// per chunk reach SPLIT_TARGET_TILES, each chunk at least CHUNK_PIXELS long and the count
 /// dividing k; 1 when no such count above 1 exists.
@@ -982,7 +983,8 @@ int64_t splitChunksFor(int64_t k, int64_t tiles)
 ConvGemmPlanCalls batchReductionChains(const ConvProblem& problem,
                                        ConvGemmPlanCalls plan,
                                        size_t maxWorkspaceBytes,
-                                       bool splitReduction)
+                                       bool splitReduction,
+                                       bool narrowPartials)
 {
     ConvGemmStage* gemmStage = nullptr;
     for(auto& stage : plan.stages)
@@ -1008,7 +1010,7 @@ ConvGemmPlanCalls batchReductionChains(const ConvProblem& problem,
     // (hipBLASLt on gfx11 does), so the partials here are fp32, summed in order and rounded
     // once. An fp32 output, or an fp32 column matrix, is left as it is.
     if(problem.direction != ConvDirection::BACKWARD_WEIGHTS
-       && (calls.size() != 1 || first.d.dataType == data_objects::DataType::FLOAT
+       && (!narrowPartials || calls.size() != 1 || first.d.dataType == data_objects::DataType::FLOAT
            || first.d.uid
                   != (problem.direction == ConvDirection::FORWARD ? problem.y.uid : problem.x.uid)))
     {
@@ -1200,7 +1202,8 @@ std::optional<ConvGemmPlanCalls> sumLongReductionsInFp32(const ConvProblem& prob
 std::optional<ConvGemmPlanCalls> convGemmCalls(const ConvProblem& problem,
                                                size_t maxWorkspaceBytes,
                                                ColumnLayout layout,
-                                               bool splitReduction)
+                                               bool splitReduction,
+                                               bool narrowPartials)
 {
     auto plan = directGemmCalls(problem);
     if(!plan.has_value())
@@ -1217,7 +1220,8 @@ std::optional<ConvGemmPlanCalls> convGemmCalls(const ConvProblem& problem,
     }
     return sumLongReductionsInFp32(
         problem,
-        batchReductionChains(problem, std::move(*plan), maxWorkspaceBytes, splitReduction),
+        batchReductionChains(
+            problem, std::move(*plan), maxWorkspaceBytes, splitReduction, narrowPartials),
         maxWorkspaceBytes);
 }
 

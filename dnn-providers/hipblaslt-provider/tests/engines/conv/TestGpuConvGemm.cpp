@@ -471,8 +471,13 @@ void runCase(ConvCase convCase,
              bool benchmarking = false,
              bool tf32 = false,
              bool splitReduction = false,
-             ColumnLayout layout = ColumnLayout::FOLLOW_Y)
+             ColumnLayout layout = ColumnLayout::FOLLOW_Y,
+             std::optional<ConvGemmPlanBuilder::NarrowPartials> narrowPartials = std::nullopt)
 {
+    // The engines' own policy unless a case forces one.
+    const auto narrow = narrowPartials.value_or(backend == Backend::HIPBLASLT
+                                                    ? ConvGemmPlanBuilder::NarrowPartials::ON_GFX11
+                                                    : ConvGemmPlanBuilder::NarrowPartials::NEVER);
     auto& shape = convCase.shape;
     shape.dataType = dataTypeOf<T>();
     const ConvGemmGraph graph(shape, convCase.direction);
@@ -500,7 +505,8 @@ void runCase(ConvCase convCase,
         }
         cap = *banding;
     }
-    const ConvGemmPlanBuilder builder(factoryFor(backend), cap, tf32, splitReduction, layout);
+    const ConvGemmPlanBuilder builder(
+        factoryFor(backend), cap, tf32, splitReduction, layout, narrow);
     if(!builder.isApplicable(*handle, graph.graph()))
     {
         // The only decline a backend may add to the formulation's is finding no algorithm for
@@ -509,7 +515,11 @@ void runCase(ConvCase convCase,
         const auto problem = parseConvProblem(graph.graph(), convCase.direction);
         ASSERT_TRUE(problem.has_value());
         // The plan the builder formed: under the same workspace cap (images or bands).
-        auto calls = convGemmCalls(*problem, cap, layout, splitReduction);
+        auto calls = convGemmCalls(*problem,
+                                   cap,
+                                   layout,
+                                   splitReduction,
+                                   narrow == ConvGemmPlanBuilder::NarrowPartials::ALWAYS);
         ASSERT_TRUE(calls.has_value()) << "the formulation declined the convolution";
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
         if(backend == Backend::ROCBLAS)
@@ -946,7 +956,7 @@ std::vector<ConvCase> splitCases()
     padded.prePadding = padded.postPadding = {1, 1};
     cases.push_back({"Padded3x3NhwcWrw", padded, ConvDirection::BACKWARD_WEIGHTS});
     // One output pixel over 16384 terms: forward and backward data into a 16-bit output run as
-    // fp32 partials summed once (default and split alike).
+    // fp32 partials summed once (narrow partials, which this suite forces).
     ConvGemmShape pointLong;
     pointLong.n = 1;
     pointLong.c = pointLong.k = 16;
@@ -968,15 +978,29 @@ class TestGpuConvGemmSplit : public ::testing::TestWithParam<std::tuple<ConvCase
 TEST_P(TestGpuConvGemmSplit, Fp32)
 {
     SKIP_IF_NO_DEVICES();
-    runCase<float>(
-        std::get<0>(GetParam()), std::get<1>(GetParam()), Slicing::NONE, false, false, true);
+    // Narrow partials forced: the forward and backward data cases take them on every device.
+    runCase<float>(std::get<0>(GetParam()),
+                   std::get<1>(GetParam()),
+                   Slicing::NONE,
+                   false,
+                   false,
+                   true,
+                   ColumnLayout::FOLLOW_Y,
+                   ConvGemmPlanBuilder::NarrowPartials::ALWAYS);
 }
 
 TEST_P(TestGpuConvGemmSplit, Bfp16)
 {
     SKIP_IF_NO_DEVICES();
-    runCase<BFloat16>(
-        std::get<0>(GetParam()), std::get<1>(GetParam()), Slicing::NONE, false, false, true);
+    // Narrow partials forced: the forward and backward data cases take them on every device.
+    runCase<BFloat16>(std::get<0>(GetParam()),
+                      std::get<1>(GetParam()),
+                      Slicing::NONE,
+                      false,
+                      false,
+                      true,
+                      ColumnLayout::FOLLOW_Y,
+                      ConvGemmPlanBuilder::NarrowPartials::ALWAYS);
 }
 
 INSTANTIATE_TEST_SUITE_P(,

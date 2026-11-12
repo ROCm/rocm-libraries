@@ -5,11 +5,14 @@
 
 #include <algorithm>
 #include <exception>
+#include <map>
+#include <mutex>
 #include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
 
+#include <hip/hip_runtime_api.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
@@ -22,16 +25,51 @@
 namespace hipblaslt_plugin
 {
 
+namespace
+{
+
+/// Whether the current device is gfx11 (gcnArchName read once per device).
+bool currentDeviceIsGfx11()
+{
+    static std::mutex s_mutex;
+    static std::map<int, bool> s_gfx11;
+    int device = 0;
+    if(hipGetDevice(&device) != hipSuccess)
+    {
+        return false;
+    }
+    const std::lock_guard<std::mutex> lock(s_mutex);
+    auto found = s_gfx11.find(device);
+    if(found == s_gfx11.end())
+    {
+        hipDeviceProp_t properties{};
+        const bool gfx11 = hipGetDeviceProperties(&properties, device) == hipSuccess
+                           && std::string(properties.gcnArchName).rfind("gfx11", 0) == 0;
+        found = s_gfx11.emplace(device, gfx11).first;
+    }
+    return found->second;
+}
+
+bool narrowPartials(ConvGemmPlanBuilder::NarrowPartials policy)
+{
+    return policy == ConvGemmPlanBuilder::NarrowPartials::ALWAYS
+           || (policy == ConvGemmPlanBuilder::NarrowPartials::ON_GFX11 && currentDeviceIsGfx11());
+}
+
+} // namespace
+
 ConvGemmPlanBuilder::ConvGemmPlanBuilder(PlanFactory factory,
                                          size_t maxRepackWorkspaceBytes,
                                          bool tf32,
                                          bool splitReduction,
-                                         ColumnLayout layout)
+                                         ColumnLayout layout,
+                                         NarrowPartials narrowPartials)
     : _factory(std::move(factory))
     , _maxRepackWorkspaceBytes(maxRepackWorkspaceBytes)
     , _tf32(tf32)
     , _splitReduction(splitReduction)
     , _layout(layout)
+    , _narrowPartials(narrowPartials)
 {
 }
 
@@ -48,7 +86,11 @@ std::optional<ConvGemmPlanCalls> ConvGemmPlanBuilder::callsFor(
         {
             continue;
         }
-        auto calls = convGemmCalls(*problem, _maxRepackWorkspaceBytes, layout, splitReduction);
+        auto calls = convGemmCalls(*problem,
+                                   _maxRepackWorkspaceBytes,
+                                   layout,
+                                   splitReduction,
+                                   narrowPartials(_narrowPartials));
         if(calls.has_value() && _tf32)
         {
             // A TF32 engine serves only convolutions with an fp32 GEMM; for the rest it would
