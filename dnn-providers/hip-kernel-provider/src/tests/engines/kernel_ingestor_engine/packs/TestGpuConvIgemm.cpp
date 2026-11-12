@@ -1342,6 +1342,25 @@ TEST(TestConvIgemmCatalog, LargeImageConfigsServeExactlyTheImagesPastTwoToTheThi
     }
 }
 
+TEST(TestConvIgemmLaunch, OnlyTheSwizzledWideWmmaTileGetsAnOccupancyTarget)
+{
+    // 4 waves per SIMD for the swizzled 128x128x64 4x2 WMMA tile on the 1.5x-VGPR gfx11 chips;
+    // every other config and device keeps the compiler's choice (0).
+    for(const char* arch : {"gfx1100", "gfx1101", "gfx1151"})
+    {
+        EXPECT_EQ(conv_igemm::occupancyTarget("wmma11_f16", 128, 128, 64, 4, 2, 1, arch), 4);
+        EXPECT_EQ(conv_igemm::occupancyTarget("wmma11_bf16", 128, 128, 64, 4, 2, 1, arch), 4);
+        EXPECT_EQ(conv_igemm::occupancyTarget("wmma11_f16", 128, 128, 64, 4, 2, 0, arch), 0);
+        EXPECT_EQ(conv_igemm::occupancyTarget("wmma11_f16", 128, 128, 64, 2, 4, 1, arch), 0);
+        EXPECT_EQ(conv_igemm::occupancyTarget("wmma11_f16", 128, 128, 32, 4, 2, 1, arch), 0);
+    }
+    for(const char* arch : {"gfx1102", "gfx1150", "gfx1201", "gfx942"})
+    {
+        EXPECT_EQ(conv_igemm::occupancyTarget("wmma11_f16", 128, 128, 64, 4, 2, 1, arch), 0);
+    }
+    EXPECT_EQ(conv_igemm::occupancyTarget("wmma12_f16", 128, 128, 64, 4, 2, 1, "gfx1201"), 0);
+}
+
 TEST(TestConvIgemmLaunch, RowTilesPastOneDispatchRunAsSeveralLaunches)
 {
     // #14424 case X3: N = C = K = 1, 46341 x 46341, 1x1 -- 2^31 + 4633 output rows. One

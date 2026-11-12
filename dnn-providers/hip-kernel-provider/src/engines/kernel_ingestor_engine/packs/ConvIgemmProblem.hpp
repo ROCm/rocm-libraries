@@ -142,6 +142,19 @@ std::optional<Grid> gridFor(const IgemmProblem& problem, int64_t bm, int64_t bn)
 /// dispatch addresses (2^32 - 1 work items along x); the rest run as further launches.
 long long launchTilesFor(long long rowTiles, long long threads);
 
+/// The waves per SIMD the register allocator targets for a config on @p gcnArchName, or 0 for
+/// the compiler's own choice. The swizzled 128x128x64 WMMA tile with 4x2 waves gets 4 on the
+/// gfx11 chips with the 1.5x VGPR file (gfx1100, gfx1101, gfx1151): aiming for 8 there, HIPRTC
+/// spills it (256 VGPRs, 168 B scratch on gfx1101) and it runs 1.6x slower.
+int occupancyTarget(std::string_view atom,
+                    int64_t bm,
+                    int64_t bn,
+                    int64_t bk,
+                    int64_t wm,
+                    int64_t wn,
+                    int64_t swz,
+                    std::string_view gcnArchName);
+
 /// Rows of shift range a halo config stages beyond its row tile (the kernels' K1_HALO_CAP).
 constexpr long long HALO_CAP = 64;
 

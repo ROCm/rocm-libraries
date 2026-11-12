@@ -51,7 +51,17 @@
 #define CONV_IGEMM_BLOCK (CONV_IGEMM_WM * CONV_IGEMM_WN * CONV_IGEMM_ATOM::WAVE)
 #endif
 
-extern "C" __global__ void __launch_bounds__(CONV_IGEMM_BLOCK) ConvIgemm(K1Args a)
+// CONV_IGEMM_WAVES_MAX (with CONV_IGEMM_WAVES_MIN): an occupancy target for the register
+// allocator, waves per SIMD; unset, the compiler's own.
+#if defined(CONV_IGEMM_WAVES_MAX)
+#define CONV_IGEMM_OCCUPANCY \
+    __attribute__((amdgpu_waves_per_eu(CONV_IGEMM_WAVES_MIN, CONV_IGEMM_WAVES_MAX)))
+#else
+#define CONV_IGEMM_OCCUPANCY
+#endif
+
+extern "C" __global__ void __launch_bounds__(CONV_IGEMM_BLOCK) CONV_IGEMM_OCCUPANCY
+    ConvIgemm(K1Args a)
 {
 #if CONV_IGEMM_FMA
     k1ConvFma<CONV_IGEMM_T,

@@ -680,6 +680,23 @@ bool blockOrderServes(int64_t bm, int64_t bn, int64_t xcd, std::string_view gcnA
     return xcd != 0 ? xcds : !(xcds && bm == 256 && bn == 256);
 }
 
+int occupancyTarget(std::string_view atom,
+                    int64_t bm,
+                    int64_t bn,
+                    int64_t bk,
+                    int64_t wm,
+                    int64_t wn,
+                    int64_t swz,
+                    std::string_view gcnArchName)
+{
+    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
+    const bool bigVgprFile = arch == "gfx1100" || arch == "gfx1101" || arch == "gfx1151";
+    return bigVgprFile && atom.rfind("wmma11_", 0) == 0 && bm == 128 && bn == 128 && bk == 64
+                   && wm == 4 && wn == 2 && swz != 0
+               ? 4
+               : 0;
+}
+
 long long launchTilesFor(long long rowTiles, long long threads)
 {
     constexpr long long DISPATCH_ITEMS = std::numeric_limits<uint32_t>::max();
@@ -1308,6 +1325,19 @@ public:
                     std::string(*direction == ConvDirection::FORWARD ? "0" : "1"));
         options.add("K1_BUFFER", std::string(bufferLoads(*problem) ? "1" : "0"));
         options.add("K1_LARGE", std::to_string(tile->large));
+        const int waves = conv_igemm::occupancyTarget(tile->atom,
+                                                      tile->bm,
+                                                      tile->bn,
+                                                      tile->bk,
+                                                      tile->wm,
+                                                      tile->wn,
+                                                      tile->swz,
+                                                      context.deviceProperties.gcnArchName);
+        if(waves > 0)
+        {
+            options.add("CONV_IGEMM_WAVES_MIN", std::to_string(waves));
+            options.add("CONV_IGEMM_WAVES_MAX", std::to_string(waves));
+        }
 
         const auto plan = conv_igemm::splitPlanFor(
             *problem, tile->bm, tile->bn, tile->bk, context.deviceProperties, tile->pack);
