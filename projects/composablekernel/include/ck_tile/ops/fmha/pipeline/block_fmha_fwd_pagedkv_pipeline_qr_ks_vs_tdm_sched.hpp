@@ -124,6 +124,10 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
     static constexpr bool kUsesTdmAffineDramPath       = true;
     static constexpr bool kUsesFixedSegmentedLdsArena  = true;
     static constexpr index_t kBlockPerCu               = Policy::kBlockPerCu;
+    // Q is staged in the K1 slot so Q, K0 and V0 load together.
+    static constexpr bool kOverlapQKVPrologue =
+        Geometry::kHeadDimQK == 128 && Geometry::kN == 128 &&
+        Policy::template GetSmemSizeQ<Problem>() <= Policy::kKFootprintBytes;
 
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
     using QKBlockGemm = remove_cvref_t<decltype(Policy::template GetQKBlockGemm<Problem>())>;
@@ -367,33 +371,6 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
             tdm_config_v.pad_config.pad_interval = LdsPaddingConfigV[number<2>{}];
         }
 
-        // Q tile in LDS
-        auto q_dram_window = make_tile_window(
-            q_dram_block_window_tmp, Policy::template MakeQDramTileDistribution<Problem>());
-
-        auto q_lds_write_view = make_tensor_view<address_space_enum::lds>(
-            static_cast<QDataType*>(smem_ptrk0),
-            Policy::template MakeQLdsBlockDescriptor<Problem>());
-
-        auto q_lds_read_view = make_tensor_view<address_space_enum::lds>(
-            static_cast<QDataType*>(smem_ptrk0),
-            Policy::template MakeQLdsBlockDescriptor<Problem>());
-
-        auto q_lds_store_window =
-            make_tile_window(q_lds_write_view,
-                             Policy::template MakeQLdsBlockDescriptor<Problem>().get_lengths(),
-                             {0, 0});
-
-        auto q_lds_read_window =
-            make_tile_window(q_lds_read_view,
-                             Policy::template MakeQLdsBlockDescriptor<Problem>().get_lengths(),
-                             {0, 0},
-                             Policy::template MakeQRegTileDistribution<Problem>());
-
-        load_tile_tdm(tdm_config_q, q_lds_store_window, q_dram_window);
-        s_wait_tensorcnt_barrier<0>();
-        auto q_tile = load_tile(q_lds_read_window);
-
         // K tile in LDS (sink-aware start)
         const auto kv_load_start =
             (sink_seq_end == 0 && logical_seqlen_k_start > 0) ? logical_seqlen_k_start : 0;
@@ -474,19 +451,67 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
         constexpr index_t k1_loops       = kN0 / kK1;
 
         static_assert(1 <= k1_loops);
-        block_sync_lds<0>();
-        // Fixed TDM prologue: current K/V and the first look-ahead K buffer.
+
         // kv_load_start is where the K/V windows actually begin (nonzero for
         // sliding window, and for the non-sink masked case). The trackers are
         // constructed at 0 by the kernel, so position them before the first
-        // TDM issue.
+        // K/V TDM issue.
         k_page_tracker.seek(kv_load_start);
         v_page_tracker.seek(kv_load_start);
-
         sync_page_ptr(k_dram_window, k_page_tracker);
         sync_page_ptr(v_dram_window, v_page_tracker);
-        load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
-        load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
+
+        // Q tile in LDS
+        auto q_dram_window = make_tile_window(
+            q_dram_block_window_tmp, Policy::template MakeQDramTileDistribution<Problem>());
+
+        void* const smem_ptrq = kOverlapQKVPrologue ? smem_ptrk1 : smem_ptrk0;
+
+        auto q_lds_write_view = make_tensor_view<address_space_enum::lds>(
+            static_cast<QDataType*>(smem_ptrq),
+            Policy::template MakeQLdsBlockDescriptor<Problem>());
+
+        auto q_lds_read_view = make_tensor_view<address_space_enum::lds>(
+            static_cast<QDataType*>(smem_ptrq),
+            Policy::template MakeQLdsBlockDescriptor<Problem>());
+
+        auto q_lds_store_window =
+            make_tile_window(q_lds_write_view,
+                             Policy::template MakeQLdsBlockDescriptor<Problem>().get_lengths(),
+                             {0, 0});
+
+        auto q_lds_read_window =
+            make_tile_window(q_lds_read_view,
+                             Policy::template MakeQLdsBlockDescriptor<Problem>().get_lengths(),
+                             {0, 0},
+                             Policy::template MakeQRegTileDistribution<Problem>());
+
+        if constexpr(kOverlapQKVPrologue)
+        {
+            static_assert(Policy::template GetSmemSizeQ<Problem>() <=
+                              Policy::kLdsOffsetV0 - Policy::kLdsOffsetK1,
+                          "Q in the K1 slot overlaps the V0 buffer");
+            // No TDM completion order is assumed.
+            load_tile_tdm(tdm_config_q, q_lds_store_window, q_dram_window);
+            load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
+            load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
+            s_wait_tensorcnt_barrier<0>();
+        }
+        else
+        {
+            load_tile_tdm(tdm_config_q, q_lds_store_window, q_dram_window);
+            s_wait_tensorcnt_barrier<0>();
+        }
+        auto q_tile = load_tile(q_lds_read_window);
+
+        block_sync_lds<0>();
+        // Fixed TDM prologue: current K/V and the first look-ahead K buffer. With
+        // kOverlapQKVPrologue K0 and V0 were already issued above, so only K1 follows.
+        if constexpr(!kOverlapQKVPrologue)
+        {
+            load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
+            load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
+        }
 
         move_tile_window(k_dram_window, {kN0, 0});
         k_page_tracker.advance();
