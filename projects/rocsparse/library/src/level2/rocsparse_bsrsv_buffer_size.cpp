@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,16 +30,16 @@
 
 namespace rocsparse
 {
-    template <typename T>
+    template <typename T, typename I, typename J>
     static rocsparse_status bsrsv_buffer_size_impl(rocsparse_handle          handle,
                                                    rocsparse_direction       dir,
                                                    rocsparse_operation       trans,
-                                                   rocsparse_int             mb,
-                                                   rocsparse_int             nnzb,
+                                                   J                         mb,
+                                                   I                         nnzb,
                                                    const rocsparse_mat_descr descr,
                                                    const T*                  bsr_val,
-                                                   const rocsparse_int*      bsr_row_ptr,
-                                                   const rocsparse_int*      bsr_col_ind,
+                                                   const I*                  bsr_row_ptr,
+                                                   const J*                  bsr_col_ind,
                                                    rocsparse_int             block_dim,
                                                    rocsparse_mat_info        info,
                                                    size_t*                   buffer_size)
@@ -88,18 +88,18 @@ namespace rocsparse
 
         _rocsparse_spmat_descr csr(rocsparse_format_csr,
                                    static_cast<int64_t>(1),
-                                   mb,
-                                   mb,
-                                   nnzb,
+                                   static_cast<int64_t>(mb),
+                                   static_cast<int64_t>(mb),
+                                   static_cast<int64_t>(nnzb),
                                    rocsparse::get_datatype<T>(),
                                    bsr_val,
                                    nullptr,
                                    static_cast<int64_t>(0),
-                                   rocsparse::get_indextype<rocsparse_int>(),
+                                   rocsparse::get_indextype<I>(),
                                    bsr_row_ptr,
                                    nullptr,
                                    static_cast<int64_t>(0),
-                                   rocsparse::get_indextype<rocsparse_int>(),
+                                   rocsparse::get_indextype<J>(),
                                    bsr_col_ind,
                                    nullptr,
                                    static_cast<int64_t>(0),
@@ -116,14 +116,44 @@ namespace rocsparse
 
         if(trans == rocsparse_operation_transpose)
         {
-            /* Remove additional CSR buffer */
-            *buffer_size -= ((sizeof(T) * nnzb - 1) / 256 + 1) * 256;
-            /* Add BSR buffer instead */
-            *buffer_size += ((sizeof(T) * nnzb * block_dim * block_dim - 1) / 256 + 1) * 256;
+            // nnzb * block_dim * block_dim is the BSR value count. Form it in
+            // 64 bit so a wide index type does not wrap the buffer adjustment.
+            const size_t nnz_blocks = static_cast<size_t>(nnzb);
+            const size_t bdim       = static_cast<size_t>(block_dim);
+            *buffer_size -= ((sizeof(T) * nnz_blocks - 1) / 256 + 1) * 256;
+            *buffer_size += ((sizeof(T) * nnz_blocks * bdim * bdim - 1) / 256 + 1) * 256;
         }
 
         return rocsparse_status_success;
     }
+
+#define ROCSPARSE_BSRSV_BUFFER_INST(T, I, J)                         \
+    template rocsparse_status bsrsv_buffer_size_impl<T, I, J>(       \
+        rocsparse_handle,                                           \
+        rocsparse_direction,                                        \
+        rocsparse_operation,                                        \
+        J,                                                          \
+        I,                                                          \
+        const rocsparse_mat_descr,                                  \
+        const T*,                                                   \
+        const I*,                                                   \
+        const J*,                                                   \
+        rocsparse_int,                                              \
+        rocsparse_mat_info,                                         \
+        size_t*)
+
+#define ROCSPARSE_BSRSV_BUFFER_INST_T(I, J)                         \
+    ROCSPARSE_BSRSV_BUFFER_INST(float, I, J);                       \
+    ROCSPARSE_BSRSV_BUFFER_INST(double, I, J);                      \
+    ROCSPARSE_BSRSV_BUFFER_INST(rocsparse_float_complex, I, J);     \
+    ROCSPARSE_BSRSV_BUFFER_INST(rocsparse_double_complex, I, J)
+
+    ROCSPARSE_BSRSV_BUFFER_INST_T(int32_t, int32_t);
+    ROCSPARSE_BSRSV_BUFFER_INST_T(int64_t, int32_t);
+    ROCSPARSE_BSRSV_BUFFER_INST_T(int64_t, int64_t);
+
+#undef ROCSPARSE_BSRSV_BUFFER_INST_T
+#undef ROCSPARSE_BSRSV_BUFFER_INST
 }
 
 #define C_IMPL(NAME, TYPE)                                                         \

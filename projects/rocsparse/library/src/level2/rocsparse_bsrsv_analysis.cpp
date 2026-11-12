@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,16 +30,16 @@
 
 #include "../level2/rocsparse_csrsv.hpp"
 
-template <typename T>
+template <typename T, typename I, typename J>
 rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          handle,
                                                     rocsparse_direction       dir,
                                                     rocsparse_operation       trans,
-                                                    rocsparse_int             mb,
-                                                    rocsparse_int             nnzb,
+                                                    J                         mb,
+                                                    I                         nnzb,
                                                     const rocsparse_mat_descr descr,
                                                     const T*                  bsr_val,
-                                                    const rocsparse_int*      bsr_row_ptr,
-                                                    const rocsparse_int*      bsr_col_ind,
+                                                    const I*                  bsr_row_ptr,
+                                                    const J*                  bsr_col_ind,
                                                     rocsparse_int             block_dim,
                                                     rocsparse_mat_info        info,
                                                     rocsparse_analysis_policy analysis,
@@ -184,6 +184,36 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
     {                                                                               \
         RETURN_ROCSPARSE_EXCEPTION();                                               \
     }
+
+#define ROCSPARSE_BSRSV_ANALYSIS_INST(T, I, J)                                           \
+    template rocsparse_status rocsparse::bsrsv_analysis_template<T, I, J>(               \
+        rocsparse_handle,                                                                \
+        rocsparse_direction,                                                             \
+        rocsparse_operation,                                                             \
+        J,                                                                               \
+        I,                                                                               \
+        const rocsparse_mat_descr,                                                       \
+        const T*,                                                                        \
+        const I*,                                                                        \
+        const J*,                                                                        \
+        rocsparse_int,                                                                   \
+        rocsparse_mat_info,                                                              \
+        rocsparse_analysis_policy,                                                       \
+        rocsparse_solve_policy,                                                          \
+        void*)
+
+#define ROCSPARSE_BSRSV_ANALYSIS_INST_T(I, J)                         \
+    ROCSPARSE_BSRSV_ANALYSIS_INST(float, I, J);                       \
+    ROCSPARSE_BSRSV_ANALYSIS_INST(double, I, J);                      \
+    ROCSPARSE_BSRSV_ANALYSIS_INST(rocsparse_float_complex, I, J);     \
+    ROCSPARSE_BSRSV_ANALYSIS_INST(rocsparse_double_complex, I, J)
+
+ROCSPARSE_BSRSV_ANALYSIS_INST_T(int32_t, int32_t);
+ROCSPARSE_BSRSV_ANALYSIS_INST_T(int64_t, int32_t);
+ROCSPARSE_BSRSV_ANALYSIS_INST_T(int64_t, int64_t);
+
+#undef ROCSPARSE_BSRSV_ANALYSIS_INST_T
+#undef ROCSPARSE_BSRSV_ANALYSIS_INST
 
 C_IMPL(rocsparse_sbsrsv_analysis, float);
 C_IMPL(rocsparse_dbsrsv_analysis, double);

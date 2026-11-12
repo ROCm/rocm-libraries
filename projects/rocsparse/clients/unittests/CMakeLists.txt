@@ -324,6 +324,11 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_conversion_grid_clamp.cpp
   # Default CSR SpMV algorithm selection (adaptive vs nnz-split).
   unit_test_internal_level2_csrmv_default_dispatch.cpp
+  # --- bsrsv 64-bit solve kernels and clamped launch grid [ROCM-28980] ----
+  # Distinct anchor at the end of the list. Launches the wide kernels in
+  # bsrsv_device_large.h directly and drives rocsparse_sbsrsv_solve with
+  # maxGridSize[0] shrunk. Header-only; no compile-in library TU.
+  unit_test_internal_level2_bsrsv_wide.cpp
 )
 
 if(BUILD_WITH_SPSORT)
@@ -509,6 +514,7 @@ target_compile_options(rocsparse-unit-test-device PRIVATE
 target_include_directories(rocsparse-unit-test-device PRIVATE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/include>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level1>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level2>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/level3>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/conversion>
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0>
