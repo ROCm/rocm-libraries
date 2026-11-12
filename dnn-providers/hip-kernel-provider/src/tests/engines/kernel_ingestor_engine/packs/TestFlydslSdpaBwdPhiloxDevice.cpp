@@ -158,11 +158,11 @@ void runForwardForTheDump(const testing::SdpaGraphSpec& spec, std::vector<float>
     const size_t qBytes = static_cast<size_t>(BATCH * SEQ_Q * HEADS * HEAD_DIM) * HALF_BYTES;
     const size_t kvBytes = static_cast<size_t>(BATCH * SEQ_KV * KV_HEADS * HEAD_DIM) * HALF_BYTES;
     const size_t statsBytes = static_cast<size_t>(BATCH * HEADS * SEQ_Q) * sizeof(float);
-    bwd_device::DeviceBuffer q(qBytes);
-    bwd_device::DeviceBuffer k(kvBytes);
-    bwd_device::DeviceBuffer v(kvBytes);
-    bwd_device::DeviceBuffer o(qBytes);
-    bwd_device::DeviceBuffer stats(statsBytes);
+    const bwd_device::DeviceBuffer q(qBytes);
+    const bwd_device::DeviceBuffer k(kvBytes);
+    const bwd_device::DeviceBuffer v(kvBytes);
+    const bwd_device::DeviceBuffer o(qBytes);
+    const bwd_device::DeviceBuffer stats(statsBytes);
     zero(q, qBytes);
     zero(k, kvBytes);
     zero(v, kvBytes);

@@ -1487,19 +1487,19 @@ TEST(TestFlydslSdpaBwdSplitKernel,
     packed.blockQ = 32;
     auto grouped = baseSpec();
     grouped.kvHeads = 2;
-    const auto far = grouped.withEdit([](SdpaBwdGraph& g) {
+    const auto farStats = grouped.withEdit([](SdpaBwdGraph& g) {
         const int64_t headStride = int64_t{1} << 29;
         g.tensor("stats").strides = {g.heads * headStride, headStride, 1, 1};
     });
     EXPECT_TRUE(serves(Slot::DKDV, grouped, packed));
-    EXPECT_FALSE(serves(Slot::DKDV, far, packed));
-    EXPECT_TRUE(serves(Slot::DKDV, far, plainRow()));
-    EXPECT_TRUE(serves(Slot::PREP, far, plainRow()));
+    EXPECT_FALSE(serves(Slot::DKDV, farStats, packed));
+    EXPECT_TRUE(serves(Slot::DKDV, farStats, plainRow()));
+    EXPECT_TRUE(serves(Slot::PREP, farStats, plainRow()));
 }
 
 TEST(TestFlydslSdpaBwdSplitLaunch, PackedStatsInEitherOrderPassTheirOwnOffsetAndStrides)
 {
-    const auto packedStats = [](std::vector<int64_t> strides) {
+    const auto packedStats = [](const std::vector<int64_t>& strides) {
         return raggedOf(baseSpec(), {"q", "o", "do", "dq"}).withEdit([strides](SdpaBwdGraph& g) {
             g.tensor("stats").strides = strides;
         });

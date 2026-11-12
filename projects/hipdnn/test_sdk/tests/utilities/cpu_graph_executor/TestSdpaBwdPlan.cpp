@@ -1059,17 +1059,18 @@ TEST(TestSdpaBwdPlanZeroDropout, MatchesTheGraphWithoutDropoutFields)
         CpuReferenceGraphExecutor executor;
         EXPECT_TRUE(executor.isApplicable(graph.GetBufferPointer(), graph.GetSize()));
         auto bundle = std::make_unique<SdpaBwdTensorBundle<float>>(dims, dims, dims, seed);
-        std::unordered_map<int64_t, void*> pack{{1, bundle->qTensor.memory().hostData()},
-                                                {2, bundle->kTensor.memory().hostData()},
-                                                {3, bundle->vTensor.memory().hostData()},
-                                                {4, bundle->oTensor.memory().hostData()},
-                                                {5, bundle->doTensor.memory().hostData()},
-                                                {6, bundle->statsTensor.memory().hostData()},
-                                                {7, bundle->dqTensor.memory().hostData()},
-                                                {8, bundle->dkTensor.memory().hostData()},
-                                                {9, bundle->dvTensor.memory().hostData()},
-                                                {SEED_UID, seedTensor.memory().hostData()},
-                                                {OFFSET_UID, offsetTensor.memory().hostData()}};
+        const std::unordered_map<int64_t, void*> pack{
+            {1, bundle->qTensor.memory().hostData()},
+            {2, bundle->kTensor.memory().hostData()},
+            {3, bundle->vTensor.memory().hostData()},
+            {4, bundle->oTensor.memory().hostData()},
+            {5, bundle->doTensor.memory().hostData()},
+            {6, bundle->statsTensor.memory().hostData()},
+            {7, bundle->dqTensor.memory().hostData()},
+            {8, bundle->dkTensor.memory().hostData()},
+            {9, bundle->dvTensor.memory().hostData()},
+            {SEED_UID, seedTensor.memory().hostData()},
+            {OFFSET_UID, offsetTensor.memory().hostData()}};
         EXPECT_NO_THROW(executor.execute(graph.GetBufferPointer(), graph.GetSize(), pack));
         return bundle;
     };

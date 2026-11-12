@@ -1187,7 +1187,7 @@ TEST(TestFlydslSdpaBwdHarness, PerRowBoundNamesTheWorstRowAndIgnoresElementsOutO
     // zero holds nothing but zeros.
     scope[13] = true;
     EXPECT_EQ(worstGradientMiss(got, expected, scope, TOLERANCE, 4)->index, 13U);
-    std::vector<double> zeros(8, 0.0);
+    const std::vector<double> zeros(8, 0.0);
     auto notZero = zeros;
     notZero[6] = 1e-30;
     EXPECT_EQ(worstGradientMiss(notZero, zeros, std::vector<bool>(8, true), TOLERANCE, 4)->index,

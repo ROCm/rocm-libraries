@@ -864,7 +864,7 @@ TEST(TestFlydslSdpaBwdMatcher, LY6ZeroSequenceStrideOnAMultiRowAxisDeclines)
 
 TEST(TestFlydslSdpaBwdMatcher, SS1DenseStatsAcceptPackedAndPaddedStridesAndRecordThem)
 {
-    const auto withStrides = [](std::vector<int64_t> strides) {
+    const auto withStrides = [](const std::vector<int64_t>& strides) {
         return baseline().withEdit(
             [strides](SdpaBwdGraph& g) { g.tensor("stats").strides = strides; });
     };
@@ -908,7 +908,7 @@ TEST(TestFlydslSdpaBwdMatcher, SS1DenseStatsAcceptPackedAndPaddedStridesAndRecor
 
 TEST(TestFlydslSdpaBwdMatcher, SS1DenseStatsThatAliasOrRunBackwardDecline)
 {
-    const auto withStrides = [](std::vector<int64_t> strides) {
+    const auto withStrides = [](const std::vector<int64_t>& strides) {
         return baseline().withEdit(
             [strides](SdpaBwdGraph& g) { g.tensor("stats").strides = strides; });
     };
@@ -1454,7 +1454,7 @@ TEST(TestFlydslSdpaBwdMatcher, SS4StatsAreRaggedExactlyWhenQIs)
 
 TEST(TestFlydslSdpaBwdMatcher, SS5RaggedStatsArePackedOverTokensInEitherOrder)
 {
-    const auto withStrides = [](std::vector<int64_t> strides) {
+    const auto withStrides = [](const std::vector<int64_t>& strides) {
         return raggedSpec({"q"}).withEdit(
             [strides](SdpaBwdGraph& g) { g.tensor("stats").strides = strides; });
     };

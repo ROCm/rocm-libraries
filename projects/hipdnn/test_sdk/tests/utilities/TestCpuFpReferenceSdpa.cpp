@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <functional>
 #include <gtest/gtest.h>
@@ -1943,7 +1944,13 @@ TEST(TestCpuFpReferenceSdpaBwd, KeysNoRowSeesDoNotLeak)
     const std::array<float, 3> poisons{std::numeric_limits<float>::quiet_NaN(),
                                        std::numeric_limits<float>::infinity(),
                                        -std::numeric_limits<float>::infinity()};
-    const auto sameBits = [](float x, float y) { return std::memcmp(&x, &y, sizeof(float)) == 0; };
+    const auto sameBits = [](float x, float y) {
+        uint32_t xBits = 0;
+        uint32_t yBits = 0;
+        std::memcpy(&xBits, &x, sizeof(float));
+        std::memcpy(&yBits, &y, sizeof(float));
+        return xBits == yBits;
+    };
     const auto bitsEqual = [&](const Tensor<float>& x, const Tensor<float>& y) {
         bool equal = true;
         for(int64_t b = 0; b < x.dims()[0]; ++b)

@@ -48,7 +48,7 @@ TEST(TestFlydslSdpaBwdDropoutLaunchValues, AreThoseTheBackwardEnginesLaunchedWit
         float p;
         float scale;
     };
-    const std::array<Row, 7> SCALES = {
+    const std::array<Row, 7> scales = {
         Row{0.0F, 0x1.0p+0F},
         Row{0.1F, 0x1.1c71c8p+0F},
         Row{0.2F, 0x1.4p+0F},
@@ -57,7 +57,7 @@ TEST(TestFlydslSdpaBwdDropoutLaunchValues, AreThoseTheBackwardEnginesLaunchedWit
         Row{0.9F, 0x1.3ffffcp+3F},
         Row{std::nextafter(1.0F, 0.0F), 0x1.0p+24F},
     };
-    for(const auto& row : SCALES)
+    for(const auto& row : scales)
     {
         EXPECT_EQ(flydsl_sdpa::dropoutScale(row.p), row.scale) << "p " << row.p;
     }
@@ -164,11 +164,11 @@ TEST(TestFlydslSdpaBwdPhiloxCounters, AreSixtyFourBitAtPlaneProductsPastTwoToThe
     // (9999 * 1024 + 1023) * 256 + 255 = 2621440076, between 2^31 and 2^32 (a 32-bit index is
     // negative); and of plane 191999 (b 2999, h 63 of 64) at Sq = Skv = 4096: 77 +
     // (191999 * 4096 + 4095) * 1024 + 1023 = 805306368076, above 2^32.
-    const std::array<Row, 2> ROWS
+    const std::array<Row, 2> rows
         = {Row{MaskCoordinates{1249, 7, 1023, 1023, 8, 1024, 1024}, 77U, 0x9C40004CULL},
            Row{MaskCoordinates{2999, 63, 4095, 4095, 64, 4096, 4096}, 77U, 0xBB8000004CULL}};
     constexpr uint64_t SEED = 0x1234567U;
-    for(const auto& row : ROWS)
+    for(const auto& row : rows)
     {
         const auto expected = row.counter;
         EXPECT_GT(expected - row.offset, uint64_t{1} << 31);
@@ -182,7 +182,7 @@ TEST(TestFlydslSdpaBwdPhiloxCounters, AreSixtyFourBitAtPlaneProductsPastTwoToThe
         EXPECT_EQ(randomOf(SEED, row.offset, row.at),
                   static_cast<int32_t>(words[static_cast<size_t>(row.at.key % 4)]));
     }
-    EXPECT_GT(ROWS[1].counter, uint64_t{1} << 32);
+    EXPECT_GT(rows[1].counter, uint64_t{1} << 32);
 }
 
 } // namespace

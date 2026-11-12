@@ -811,11 +811,11 @@ TEST(TestFlydslSdpaBwdMergedKernel, EN1ServesTheSmallestTilePaddedBelowIt)
 {
     RowSpec padded = plainRow(32);
     padded.padded = 1;
-    Shape small;
-    small.headDimQk = 24;
-    small.headDimV = 24;
-    EXPECT_TRUE(serves(specOf(small), padded));
-    EXPECT_FALSE(serves(specOf(small), plainRow(32)));
+    Shape smallShape;
+    smallShape.headDimQk = 24;
+    smallShape.headDimV = 24;
+    EXPECT_TRUE(serves(specOf(smallShape), padded));
+    EXPECT_FALSE(serves(specOf(smallShape), plainRow(32)));
 }
 
 TEST(TestFlydslSdpaBwdMergedKernel, EN1ServesNoHeadDimTheCatalogDoesNotCover)
@@ -1437,12 +1437,12 @@ TEST(TestFlydslSdpaBwdMergedKernarg, EveryRaggedTensorPassesItsOffsetArrayAndMul
     EXPECT_EQ(values.at("varlen_bits"), 0x1515U);
     EXPECT_EQ(values.at("mul_Q"), 8U);
     EXPECT_EQ(values.at("mul_K"), 8U);
-    const std::pair<const char*, int64_t> offsets[] = {{"V", uid::RAGGED_OFFSET_V},
-                                                       {"O", uid::RAGGED_OFFSET_O},
-                                                       {"DO", uid::RAGGED_OFFSET_DO},
-                                                       {"DQ", uid::RAGGED_OFFSET_DQ},
-                                                       {"DK", uid::RAGGED_OFFSET_DK},
-                                                       {"DV", uid::RAGGED_OFFSET_DV}};
+    const std::array<std::pair<const char*, int64_t>, 6> offsets{{{"V", uid::RAGGED_OFFSET_V},
+                                                                  {"O", uid::RAGGED_OFFSET_O},
+                                                                  {"DO", uid::RAGGED_OFFSET_DO},
+                                                                  {"DQ", uid::RAGGED_OFFSET_DQ},
+                                                                  {"DK", uid::RAGGED_OFFSET_DK},
+                                                                  {"DV", uid::RAGGED_OFFSET_DV}}};
     for(const auto& [tensor, id] : offsets)
     {
         SCOPED_TRACE(tensor);
@@ -2354,7 +2354,7 @@ void expectMergedBroadcastDbias(DataType dtype, const char* rowDtype)
     ASSERT_TRUE(serves(spec, row));
     const auto dump = dumpOf(spec, row, WORKSPACE);
     ASSERT_TRUE(dump.reduces);
-    const size_t workspaceBytes
+    const auto workspaceBytes
         = static_cast<size_t>(graph.batch * graph.heads * graph.seqQ * graph.seqKv * 2);
     EXPECT_EQ(dump.workspaceBytes, workspaceBytes);
     // One grid row per output plane: the bias keeps neither axis.

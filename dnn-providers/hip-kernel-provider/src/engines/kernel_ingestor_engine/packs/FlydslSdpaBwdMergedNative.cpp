@@ -87,7 +87,6 @@ namespace
 {
 
 namespace bwd = flydsl_sdpa_bwd;
-namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
 namespace native = flydsl_sdpa_bwd_native;
 using native::BLOCK_KV_FIELD;
 using native::BLOCK_M_FIELD;
