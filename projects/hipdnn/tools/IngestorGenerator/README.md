@@ -946,6 +946,9 @@ engine:
   heuristics:                     # optional; per-arch model UHDs `uhd_gen promote` bound,
     sort_kernel_catalog:          # role -> arch -> [UHD id]. See "Shipping a trained
       gfx942: [<uhd-uuid>]        # model". Not allowed beside `slots`.
+  trained_catalog_sha256:         # optional; per arch bound under sort_kernel_catalog (all
+    gfx942: <64 hex>              # of them), the catalog its models were trained on. See
+                                  # "Trained rankers and catalog changes".
 
 kmd_fields:                       # the KMD's fields[] -- one per axis this engine's
   - name: block_size              # kernels vary along
@@ -992,6 +995,26 @@ packs:
         arch: []                   # optional; must be a subset of the pack's arch
 ```
 
+### Trained rankers and catalog changes: `engine.trained_catalog_sha256`
+
+The descriptor loader ties a model only to its engine's UED/KMD/UMD ids, so a catalog edit
+that keeps those ids (a kernel added, removed or renamed) would leave a model bound under
+`engine.heuristics.sort_kernel_catalog` ranking a catalog it never saw, silently.
+`engine.trained_catalog_sha256` records, per bound arch, the catalog the models were trained
+on (`tools/catalog_fingerprint.py`, which hashes each kernel's `catalog_diff.entry_key`, the
+identity the regeneration gate g3 compares, independent of ids and order). It is optional, but when set its keys must equal the arch keys under
+`heuristics.sort_kernel_catalog`, and like `heuristics` it goes in both the manifest and the
+selection. Set it whenever you bind a trained ranker.
+`tests/test_trained_rankers.py` fails when the shipped KDP no longer matches. After a
+catalog change, retrain on the new catalog and record the new fingerprint:
+
+```bash
+python3 tools/catalog_fingerprint.py <bundle>/artifacts/<pack>.kdp.json
+```
+
+The same test checks that the shipped UED binds exactly the configured ids and, with the
+heuristics pulled from DVC, that each is installed.
+
 ### The engine manifest and `reduction:`
 
 A rocKE registry-backed engine's `configs/<slug>.engine.yaml`, expanded by
@@ -1034,6 +1057,9 @@ enumerate:
     - pin: {...}                  #   pin/fixed/cells/free_fields/spec_fields/max_kernels;
       space: full                 #   candidates/request/sweep_level/space inherited unless set;
                                   #   selector_fields/cell_keyed_by inherited, a different list exits 2
+      spec_overrides: {emit_lse: true}  # optional: spec fields this section's kernels take
+      kernel_name_template: "..."       # optional: this section's own names (needed when
+                                        #   an override would otherwise repeat a name)
 launches:                         # optional: copied onto every kernel's kernel_source
   segment: {}                     #   a KernelModule builder's primary kernel
   reduce: {role: reduce}          #   and each companion, by role
@@ -1098,7 +1124,11 @@ is a cell, so many cells name the same kernel and `--out` fails on duplicate nam
   to ship: the gfx942 split-KV decode pins `kv_cache_policy: stream` (why: the header of
   `configs/gfx942_attention_unified_3d.engine.yaml`). The spec's own validation decides whether
   the value builds; a value it refuses exits 2 naming the request. An overridden field must
-  be a spec field, and must not be a `feature`, `performance` or neutral field. The g3
+  be a spec field, and must not be a `performance` or neutral field. It must not be a
+  `feature` field either, unless another section pins it differently (another value, or
+  none): then the field takes more than one value across the catalog, so it is a feature
+  axis. The gfx950 unified engines' `also` sections override `emit_lse` for their LSE-on
+  twins this way, beside a primary section that leaves it off. The g3
   regeneration gate compares the shipped catalog against the overridden picks.
 - `cell_keyed_by` lists attributes of each combo's `select_spec` (a property is fine)
   that also key the merged cell, so combos merge only when they agree on them. It serves
