@@ -42,6 +42,7 @@ pub mod lits;
 pub mod loop_align;
 pub mod low_i64;
 pub mod m0_order;
+pub mod m0_uniform_add;
 pub mod mask_splat;
 pub mod masks;
 pub mod legalize;
@@ -102,6 +103,7 @@ pub fn prepare(f: &mut MFunc) {
         minmax3::run(f);
     }
     zero_acc::run(f);
+    m0_uniform_add::run(f);
     m0_hoist::run(f);
     rules::peephole(f);
     select::run(f);
