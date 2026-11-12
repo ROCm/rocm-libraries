@@ -219,6 +219,17 @@ the strategy's biggest holes live (see
   head-0 broadcast, goes unrejected. It needs NumPy and HIP only; its CPU
   contracts run in `rocke_library_attention_cpu_pytest`.
 
+- The [structured-logit lane](library/tests/oracle_free/README_P4.md)
+  (`rocke_oracle_free_structured_logit_pytest`, standard tier) launches the
+  same kernel with structured Q and K, so the QK contraction, the scale, the
+  softmax, the online rescale and the per-head Q and K reads reach the output.
+  Each stored value must lie in the set the kernel's pinned floating-point
+  path can store, derived on the CPU from named assumptions and without an
+  attention reference; no tolerance is calibrated from runs. Its CPU contracts
+  (`rocke_oracle_free_structured_logit_cpu_pytest`, standard tier) pin that
+  path in the lowered IR and the compiled code objects and prove that every
+  claimed mutation is rejected.
+
 - **Nothing else in this document proves the math is right.** Byte-identity
   ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)) and golden IR
   ([§4.2](#42-does-the-platforms-output-stay-stable)) are both blind to a

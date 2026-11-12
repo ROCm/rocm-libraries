@@ -7,8 +7,9 @@ There is intentionally no general attention implementation in this module.
 Zero Q forces uniform legal logits, so every expectation follows directly from
 legal-key membership and exact rational rounding into the subject dtype.
 
-P4 copy of the pre-review ``_analytical.py``, kept so the P4 lane stays on the
-cases, calibration and primitives it was derived against.
+The structured-logit lane's own copy of the uniform model: the Hq = Hkv = 4
+quick cases, their calibration and the primitives its enclosures are derived
+against. The uniform lane uses ``_analytical.py``.
 """
 
 from __future__ import annotations
