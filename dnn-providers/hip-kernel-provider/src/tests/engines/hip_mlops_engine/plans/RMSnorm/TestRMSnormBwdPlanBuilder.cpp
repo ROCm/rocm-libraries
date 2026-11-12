@@ -245,6 +245,7 @@ protected:
                 hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                 hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::PointwiseAttributes,
                 pointwiseAttributes.Union());
+            nodes.push_back(nodePointwise);
             auto nodeBwd = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
                 builder,
                 "rmsnorm_bwd",
@@ -252,7 +253,6 @@ protected:
                 hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::RMSNormBackwardAttributes,
                 rmsnormBwdAttributes.Union());
             nodes.push_back(nodeBwd);
-            nodes.push_back(nodePointwise);
         }
 
         auto graphOffset = hipdnn_flatbuffers_sdk::data_objects::CreateGraphDirect(
@@ -427,6 +427,11 @@ TEST_F(TestRMSnormBwdPlanBuilder, IdentityActivationIsApplicable)
 
 TEST_F(TestRMSnormBwdPlanBuilder, ForwardReluIsNotApplicable)
 {
+    auto validBuilder = createRMSnormActivationTestGraph(false, false, false, false, false);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper validGraph(
+        validBuilder.GetBufferPointer(), validBuilder.GetSize());
+    ASSERT_TRUE(_planBuilder.isApplicable(_dummyHandle, validGraph));
+
     auto builder = createRMSnormActivationTestGraph(
         false,
         false,
