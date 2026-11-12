@@ -264,10 +264,12 @@ size_t llcBytes(std::string_view gcnArchName)
 std::optional<WinogradProblem> parseWinogradProblem(const MatchContext& context,
                                                     ConvDirection direction)
 {
-    if(direction != ConvDirection::FORWARD && direction != ConvDirection::BACKWARD_DATA)
+    if(direction != ConvDirection::FORWARD && direction != ConvDirection::BACKWARD_DATA
+       && direction != ConvDirection::BACKWARD_WEIGHTS)
     {
         return std::nullopt;
     }
+    const bool wrw = direction == ConvDirection::BACKWARD_WEIGHTS;
     auto base = conv_naive::parseConvNaiveProblem(context, direction);
     if(!base.has_value() || base->spatialRank != 2)
     {
@@ -290,7 +292,8 @@ std::optional<WinogradProblem> parseWinogradProblem(const MatchContext& context,
     // 3x3, dilation 1, and the same stride (1, or 2 by phases) on both spatial axes (slot 0 is
     // the padded depth axis).
     const long long stride = a.stride[1];
-    if(stride != 1 && stride != 2)
+    // Backward weights: stride 1 only (F(3,r) tiles over dy's extent).
+    if(stride != 1 && (stride != 2 || wrw))
     {
         return std::nullopt;
     }
@@ -327,6 +330,26 @@ std::optional<WinogradProblem> parseWinogradProblem(const MatchContext& context,
     problem.xUid = base->operands.x;
     problem.wUid = base->operands.w;
     problem.yUid = base->operands.y;
+    if(wrw)
+    {
+        auto& b = problem.wrw;
+        b.n = static_cast<int>(a.n);
+        b.groups = static_cast<int>(a.groups);
+        b.c = static_cast<int>(a.c);
+        b.k = static_cast<int>(a.k);
+        b.hi = static_cast<int>(a.inSpatial[1]);
+        b.wi = static_cast<int>(a.inSpatial[2]);
+        b.ho = static_cast<int>(a.outSpatial[1]);
+        b.wo = static_cast<int>(a.outSpatial[2]);
+        b.ph = static_cast<int>(a.prePadding[1]);
+        b.pw = static_cast<int>(a.prePadding[2]);
+        b.flip = a.flipFilter;
+        // dw (k, c/g, d, r, s): the depth slot is the padded axis.
+        b.dwStrides[0] = a.wStrides[0];
+        b.dwStrides[1] = a.wStrides[1];
+        b.dwStrides[2] = a.wStrides[3];
+        b.dwStrides[3] = a.wStrides[4];
+    }
     const bool forward = direction == ConvDirection::FORWARD;
     auto& k5 = problem.args;
     k5.n = static_cast<int>(a.n);
@@ -408,6 +431,10 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         {
             config.variant = Variant::COOP;
         }
+        else if(variant == "wrw")
+        {
+            config.variant = Variant::WRW;
+        }
         else
         {
             return std::nullopt;
@@ -457,6 +484,43 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         }
         switch(config.variant)
         {
+        case Variant::WRW:
+        {
+            // F(3,2), F(3,4) or F(3,6); the transform / GEMM fields of the forward variants unused; the
+            // block's tile step divides the operands' 64-tile padding.
+            const bool fma = config.arch == "any";
+            const bool atom = config.arch == "gfx9" || config.arch == "gfx950"
+                              || config.arch == "gfx11" || config.arch == "gfx12";
+            const int bm = config.gemmBm, bn = config.gemmBn, bk = config.gemmBk;
+            if((config.m != 2 && config.m != 4 && config.m != 6) || config.bk != 0 || config.bt != 0
+               || config.ccv != 0 || (!fma && !atom) || bm < 1 || bn < 1 || bk < 4 || 64 % bk != 0
+               || config.tm < 1 || config.tn < 1 || bm % config.tm != 0 || bn % config.tn != 0)
+            {
+                return std::nullopt;
+            }
+            if(fma)
+            {
+                // A thread owns tm x tn outputs; whole waves, at most 1024 threads.
+                const int threads = (bm / config.tm) * (bn / config.tn);
+                if(config.waves != 0 || threads < 64 || threads > 1024 || threads % 64 != 0)
+                {
+                    return std::nullopt;
+                }
+            }
+            else
+            {
+                // 16 x 16 atoms (tm x tn per wave): KA 16 (32 on gfx950) divides the tile step.
+                const int ka = config.arch == "gfx950" ? 32 : 16;
+                const int wave = config.arch == "gfx11" || config.arch == "gfx12" ? 32 : 64;
+                if(bm % (16 * config.tm) != 0 || bn % (16 * config.tn) != 0 || bk % ka != 0
+                   || config.waves != (bm / (16 * config.tm)) * (bn / (16 * config.tn))
+                   || config.waves * wave > 1024)
+                {
+                    return std::nullopt;
+                }
+            }
+            break;
+        }
         case Variant::MULTIPASS:
             // The GEMM's 16 x 16 threads own runs of 4 rows and columns; its tile loads split
             // evenly over 256 threads.
@@ -555,6 +619,21 @@ bool configRunsOn(const Config& config, std::string_view gcnArchName)
     const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
     switch(config.variant)
     {
+    case Variant::WRW:
+        if(config.arch == "gfx9")
+        {
+            return arch == "gfx908" || arch == "gfx90a" || arch == "gfx940" || arch == "gfx941"
+                   || arch == "gfx942" || arch == "gfx950";
+        }
+        if(config.arch == "gfx950")
+        {
+            return arch == "gfx950";
+        }
+        if(config.arch == "gfx11" || config.arch == "gfx12")
+        {
+            return arch.size() > 5 && arch.substr(0, 5) == config.arch;
+        }
+        return true;
     case Variant::COOP:
         if(config.arch == "gfx9")
         {
@@ -575,10 +654,199 @@ bool configRunsOn(const Config& config, std::string_view gcnArchName)
     }
 }
 
+namespace
+{
+
+/// Backward weights: x and dy transformed into U and V (the operand type: fp32 for FMA and for
+/// fp32 graphs, else the graph's), the GEMM's fp32 partials split over the tiles until the
+/// blocks fill the device, the batch sliced under the workspace limit.
+std::optional<Plan> planWrw(const WinogradProblem& problem,
+                            const Config& config,
+                            const hipdnn_plugin_sdk::ingestor::DeviceProperties& device)
+{
+    const auto& w = problem.wrw;
+    const auto& base = problem.base.args;
+    const Layout layout = config.layout;
+    // x and dy packed in the config's layout are read in place; anything but the other packed
+    // layout is staged to channels-first.
+    if(problem.activations != layout
+       && !(problem.activations == Layout::OTHER && layout == Layout::NCHW))
+    {
+        return std::nullopt;
+    }
+    const bool fma = config.arch == "any";
+    const bool fp32 = problem.base.dataType == data_objects::DataType::FLOAT;
+    const bool bf16 = problem.base.dataType == data_objects::DataType::BFLOAT16;
+    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName);
+    Plan plan;
+    // 16-bit operands only for F(3,2): F(3,4) / F(3,6) run on fp32 operands (FMA, or CDNA's fp32
+    // MFMA for every I/O dtype).
+    const bool fp32Operands = fma || fp32 || config.m >= 4;
+    plan.operandBytes = fp32Operands ? 4 : problem.elementBytes;
+    plan.wrwAtom = fma                      ? 0
+                   : config.arch == "gfx9"  ? (fp32Operands               ? 6
+                                               : bf16 && arch == "gfx908" ? 2
+                                                                          : 1)
+                   : config.arch == "gfx11" ? 3
+                   : config.arch == "gfx12" ? 4
+                                            : 5;
+    const long long ob = plan.operandBytes;
+    const long long bm = config.gemmBm, bn = config.gemmBn, bk = config.gemmBk;
+    plan.gemmThreads = static_cast<unsigned int>(
+        fma ? (bm / config.tm) * (bn / config.tn)
+            : config.waves * (config.arch == "gfx11" || config.arch == "gfx12" ? 32 : 64));
+    // Both LDS tiles, rows of bk tiles plus one 16-byte unit.
+    if((bm + bn) * (bk + 16 / ob) * ob > 65536)
+    {
+        return std::nullopt;
+    }
+
+    const long long r = config.m, positions = (r + 2) * (r + 2);
+    const long long n = w.n, groups = w.groups, cg = w.c / groups, kg = w.k / groups;
+    const long long perImage = divUp(w.ho, r) * divUp(w.wo, r);
+    const long long eb = problem.elementBytes;
+    const long long xImage = static_cast<long long>(w.c) * w.hi * w.wi;
+    const long long dyImage = static_cast<long long>(w.k) * w.ho * w.wo;
+
+    size_t offset = 0;
+    const auto place = [&offset](conv_winograd::Staging& staging) {
+        staging.workspaceOffset = offset;
+        offset = alignUp(offset + staging.bytes);
+    };
+    if(problem.activations != layout)
+    {
+        // Both read: x as plan.in, dy as plan.out.
+        plan.in.needed = true;
+        plan.in.copy
+            = activationCopy(base.xStrides, n, w.c, w.hi, w.wi, layout, true, problem.elementBytes);
+        plan.in.bytes = static_cast<size_t>(n * xImage * eb);
+        place(plan.in);
+        plan.out.needed = true;
+        plan.out.copy
+            = activationCopy(base.yStrides, n, w.k, w.ho, w.wo, layout, true, problem.elementBytes);
+        plan.out.bytes = static_cast<size_t>(n * dyImage * eb);
+        place(plan.out);
+    }
+
+    // Splits over the tiles: enough blocks for about 2048 threads per unit (one split where
+    // the device reports no units).
+    const long long nbk = divUp(kg, bm), nbc = divUp(cg, bn);
+    const long long blocks = nbk * nbc * groups * positions;
+    const long long units = std::max<long long>(1, device_units::dispatchUnits(device));
+    const long long target = units * std::max<long long>(1, 2048 / plan.gemmThreads);
+    const long long wantSplits = divUp(target, blocks);
+    const long long partPerSplit = groups * positions * kg * cg * 4;
+    const auto padded = [](long long tiles) { return divUp(tiles, 64) * 64; };
+    const auto operandBytes
+        = [&](long long tiles) { return groups * positions * (cg + kg) * padded(tiles) * ob; };
+    // The batch slice: U + V + the partials (at the splits the slice would take) under the
+    // limit; the GEMM's 32-bit buffer records hold a block's rows of the slice.
+    const size_t cap = workspaceLimit();
+    const auto splitsFor
+        = [&](long long tiles) { return std::clamp<long long>(wantSplits, 1, padded(tiles) / 64); };
+    // The LLC plan: U, V and the partials of a slice within three quarters of an RDNA device's
+    // last-level cache, so the GEMM reads what the transforms just wrote from the cache.
+    const size_t llc = config.llcPlan ? llcBytes(device.gcnArchName) / 4 * 3 : 0;
+    if(config.llcPlan && llc == 0)
+    {
+        return std::nullopt;
+    }
+    const auto inCache = [&](long long images) {
+        const long long tiles = images * perImage;
+        return operandBytes(tiles) + splitsFor(tiles) * partPerSplit <= static_cast<long long>(llc);
+    };
+    const auto fits = [&](long long images) {
+        const long long tiles = images * perImage;
+        const long long bytes = static_cast<long long>(offset) + operandBytes(tiles)
+                                + splitsFor(tiles) * partPerSplit
+                                + 3 * static_cast<long long>(WORKSPACE_ALIGNMENT);
+        return tiles + 64 <= INT_LIMIT && std::max(bm, bn) * padded(tiles) * ob <= INT_LIMIT
+               && bytes <= static_cast<long long>(cap);
+    };
+    // Declined where even one image passes the limit.
+    if(!fits(1))
+    {
+        return std::nullopt;
+    }
+    long long slice = n;
+    while(slice > 1 && (!fits(slice) || (config.llcPlan && !inCache(slice))))
+    {
+        slice = std::min(slice - 1, slice * 7 / 8);
+    }
+    // The LLC plan is only a distinct config where it slices, and only where a slice fits.
+    if(config.llcPlan && (slice >= n || !inCache(slice)))
+    {
+        return std::nullopt;
+    }
+    const long long tiles = slice * perImage;
+    if(tiles + 64 > INT_LIMIT || std::max(bm, bn) * padded(tiles) * ob > INT_LIMIT)
+    {
+        return std::nullopt;
+    }
+    const long long ldt = padded(tiles);
+    long long splits = splitsFor(tiles);
+    const long long splitTiles = divUp(divUp(ldt, splits), 64) * 64;
+    splits = divUp(ldt, splitTiles);
+
+    plan.wrw = w;
+    plan.wrw.th = static_cast<int>(divUp(w.ho, r));
+    plan.wrw.tw = static_cast<int>(divUp(w.wo, r));
+    plan.wrw.n = static_cast<int>(slice);
+    plan.wrw.tiles = static_cast<int>(tiles);
+    plan.wrw.ldt = static_cast<int>(ldt);
+    plan.wrw.splits = static_cast<int>(splits);
+    plan.wrw.splitTiles = static_cast<int>(splitTiles);
+    plan.sliceImages = static_cast<int>(slice);
+    plan.slices = static_cast<int>(divUp(n, slice));
+
+    plan.uOffset = offset;
+    plan.uBytes = static_cast<size_t>(groups * positions * kg * ldt * ob);
+    offset = alignUp(offset + plan.uBytes);
+    plan.vOffset = offset;
+    plan.vBytes = static_cast<size_t>(groups * positions * cg * ldt * ob);
+    offset = alignUp(offset + plan.vBytes);
+    plan.partOffset = offset;
+    plan.partBytes = static_cast<size_t>(splits * partPerSplit);
+    offset = alignUp(offset + plan.partBytes);
+    plan.workspaceBytes = offset;
+
+    const auto grid = [](unsigned int(&blocks)[3], long long x, long long y, long long z) {
+        if(x < 1 || x > INT_LIMIT || y > GRID_YZ_LIMIT || z > GRID_YZ_LIMIT)
+        {
+            return false;
+        }
+        blocks[0] = static_cast<unsigned int>(x);
+        blocks[1] = static_cast<unsigned int>(std::max<long long>(1, y));
+        blocks[2] = static_cast<unsigned int>(std::max<long long>(1, z));
+        return true;
+    };
+    // K5XformBlock: NCHW 64 tiles x 4 channels, NHWC 16 x 16.
+    const long long tb = layout == Layout::NCHW ? 64 : 16;
+    const long long cb = 256 / tb;
+    if(!grid(plan.inputBlocks, ldt / tb, divUp(cg, cb), groups)
+       || !grid(plan.filterBlocks, ldt / tb, divUp(kg, cb), groups)
+       || !grid(plan.gemmBlocks, blocks * splits, 1, 1)
+       || !grid(plan.outputBlocks, divUp(groups * kg * cg, 256), 1, 1))
+    {
+        return std::nullopt;
+    }
+    return plan;
+}
+
+} // namespace
+
 std::optional<Plan> planFor(const WinogradProblem& problem,
                             const Config& config,
                             const hipdnn_plugin_sdk::ingestor::DeviceProperties& device)
 {
+    if((problem.direction == ConvDirection::BACKWARD_WEIGHTS) != (config.variant == Variant::WRW))
+    {
+        return std::nullopt;
+    }
+    if(config.variant == Variant::WRW)
+    {
+        return planWrw(problem, config, device);
+    }
     const auto& a = problem.args;
     const auto& base = problem.base.args;
     const bool forward = problem.direction == ConvDirection::FORWARD;
@@ -865,6 +1133,7 @@ using conv_winograd::WinogradProblem;
 // The contract with the installed descriptor files, which restate these same strings.
 constexpr std::string_view FWD_GRAPH_MATCHER_SYMBOL = "hipkernel.conv_winograd_fwd.graph_match";
 constexpr std::string_view BWD_GRAPH_MATCHER_SYMBOL = "hipkernel.conv_winograd_bwd.graph_match";
+constexpr std::string_view WRW_GRAPH_MATCHER_SYMBOL = "hipkernel.conv_winograd_wrw.graph_match";
 constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.conv_winograd.kernel_match";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.conv_winograd.dispatch";
 constexpr unsigned int COPY_BLOCK = 256;
@@ -890,6 +1159,10 @@ std::optional<ConvDirection> directionFor(const KernelDefinition& kernel)
         {
             return ConvDirection::BACKWARD_DATA;
         }
+        if(direction == "WRW")
+        {
+            return ConvDirection::BACKWARD_WEIGHTS;
+        }
     }
     catch(const std::exception&)
     {
@@ -912,7 +1185,9 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, ConvDirecti
     bound[std::string(DTYPE_TOKEN)]
         = std::string(data_objects::EnumNameDataType(problem->base.dataType));
     bound[std::string(DIRECTION_TOKEN)]
-        = std::string(direction == ConvDirection::FORWARD ? "FWD" : "BWD");
+        = std::string(direction == ConvDirection::FORWARD         ? "FWD"
+                      : direction == ConvDirection::BACKWARD_DATA ? "BWD"
+                                                                  : "WRW");
     const auto flops = pack_features::checkedMultiply(2, problem->base.multiplyAccumulates);
     if(flops.has_value())
     {
@@ -929,6 +1204,11 @@ std::optional<BoundTokens> fwdGraphMatches(const MatchContext& context)
 std::optional<BoundTokens> bwdGraphMatches(const MatchContext& context)
 {
     return graphMatches(context, ConvDirection::BACKWARD_DATA);
+}
+
+std::optional<BoundTokens> wrwGraphMatches(const MatchContext& context)
+{
+    return graphMatches(context, ConvDirection::BACKWARD_WEIGHTS);
 }
 
 struct Resolved
@@ -970,6 +1250,28 @@ std::optional<Resolved> resolve(const MatchContext& context, const KernelDefinit
     }
     const bool fp32 = problem->base.dataType == data_objects::DataType::FLOAT;
     const bool bf16 = problem->base.dataType == data_objects::DataType::BFLOAT16;
+    if((config->variant == Variant::WRW) != (*direction == ConvDirection::BACKWARD_WEIGHTS))
+    {
+        return std::nullopt;
+    }
+    if(config->variant == Variant::WRW)
+    {
+        // Backward weights: F(3,2), F(3,4) and F(3,6) for every dtype. 16-bit operands round the
+        // larger tiles' transforms past the dtype's Winograd bound, so those run on fp32 operands
+        // (FMA, or CDNA's fp32 MFMA); the 16-bit-only atoms (WMMA, gfx950's 16x16x32) serve F(3,2)
+        // of 16-bit graphs only.
+        const bool sixteenBitAtom = config->arch != "any" && config->arch != "gfx9";
+        if(sixteenBitAtom && (fp32 || config->m != 2))
+        {
+            return std::nullopt;
+        }
+        auto plan = conv_winograd::planFor(*problem, *config, context.deviceProperties);
+        if(!plan.has_value())
+        {
+            return std::nullopt;
+        }
+        return Resolved{std::move(*problem), *config, *plan};
+    }
     const bool wmmaFamily = config->variant == Variant::WMMA || config->variant == Variant::WREG
                             || config->variant == Variant::COOP;
     // Register variants: packed fp16 transform math only for fp16 (bf16 / fp32 transform in fp32).
@@ -1111,6 +1413,7 @@ public:
         const auto& config = resolved->config;
         const auto& plan = resolved->plan;
         const bool multipass = config.variant == Variant::MULTIPASS;
+        const bool wrw = config.variant == Variant::WRW;
 
         compilation::KernelCompileOptions options(context.deviceProperties.gcnArchName);
         options.add("CONV_WINO_T", elementTypeFor(resolved->problem.base.dataType));
@@ -1119,13 +1422,15 @@ public:
                                 : config.variant == Variant::WMMA    ? 2
                                 : config.variant == Variant::WREG    ? 3
                                 : config.variant == Variant::SREG    ? 4
-                                                                     : 5;
+                                : config.variant == Variant::COOP    ? 5
+                                                                     : 6;
         options.add("CONV_WINO_VARIANT", std::to_string(variantCode));
         options.add("CONV_WINO_DIR",
                     std::string(resolved->problem.direction == ConvDirection::FORWARD ? "0" : "1"));
-        options.add(
-            "CONV_WINO_LAYOUT",
-            std::string(multipass && config.layout == conv_winograd::Layout::NHWC ? "1" : "0"));
+        options.add("CONV_WINO_LAYOUT",
+                    std::string((multipass || wrw) && config.layout == conv_winograd::Layout::NHWC
+                                    ? "1"
+                                    : "0"));
         options.add("CONV_WINO_M", std::to_string(config.m));
         options.add("CONV_WINO_GEMM_BM", std::to_string(config.gemmBm));
         options.add("CONV_WINO_GEMM_BN", std::to_string(config.gemmBn));
@@ -1151,6 +1456,10 @@ public:
         options.add(
             "CONV_WINO_MFMA",
             std::string(config.variant == Variant::COOP && config.arch == "gfx9" ? "1" : "0"));
+        if(wrw)
+        {
+            options.add("CONV_WINO_WRW_ATOM", std::to_string(plan.wrwAtom));
+        }
 
         const auto build = [&](std::string_view entryPoint,
                                const std::vector<KernelArgument>& signature,
@@ -1207,6 +1516,19 @@ public:
                 build("ConvWinogradWmmaFilter", signatureOf<K5Args>(), 256, plan.filterBlocks));
             kernels.push_back(
                 build("ConvWinogradCoop", signatureOf<K5Args>(), plan.mainThreads, mainGrid));
+            break;
+        case Variant::WRW:
+            // 0 dy transform, 1 GEMM, 2 x transform, 3 dW.
+            kernels.push_back(
+                build("ConvWinogradWrwDy", signatureOf<K5WrwArgs>(), 256, plan.filterBlocks));
+            kernels.push_back(build("ConvWinogradWrwGemm",
+                                    signatureOf<K5WrwArgs>(),
+                                    plan.gemmThreads,
+                                    plan.gemmBlocks));
+            kernels.push_back(
+                build("ConvWinogradWrwX", signatureOf<K5WrwArgs>(), 256, plan.inputBlocks));
+            kernels.push_back(
+                build("ConvWinogradWrwOut", signatureOf<K5WrwArgs>(), 256, plan.outputBlocks));
             break;
         default:
             break;
@@ -1265,6 +1587,49 @@ public:
             args.dst = dst;
             dispatch.copyForStream(stream).launch(stream, args);
         };
+        if(resolved.config.variant == Variant::WRW)
+        {
+            // x and dy (staged as plan.in / plan.out where not read in place), per batch slice
+            // the two transforms and the GEMM (slices after the first add onto the partials),
+            // then dW.
+            const void* xs = x;
+            const void* dys = y;
+            if(plan.in.needed)
+            {
+                copy(plan.in, x, base + plan.in.workspaceOffset);
+                xs = base + plan.in.workspaceOffset;
+            }
+            if(plan.out.needed)
+            {
+                copy(plan.out, y, base + plan.out.workspaceOffset);
+                dys = base + plan.out.workspaceOffset;
+            }
+            K5WrwArgs args = plan.wrw;
+            args.dw = w;
+            args.u = base + plan.uOffset;
+            args.v = base + plan.vOffset;
+            args.part = reinterpret_cast<float*>(base + plan.partOffset);
+            const long long n = problem.wrw.n;
+            const long long eb = problem.elementBytes;
+            const long long xImage = static_cast<long long>(args.c) * args.hi * args.wi;
+            const long long dyImage = static_cast<long long>(args.k) * args.ho * args.wo;
+            const long long perImage = static_cast<long long>(args.th) * args.tw;
+            for(long long n0 = 0; n0 < n; n0 += plan.sliceImages)
+            {
+                const long long images = std::min<long long>(plan.sliceImages, n - n0);
+                K5WrwArgs slice = args;
+                slice.n = static_cast<int>(images);
+                slice.tiles = static_cast<int>(images * perImage);
+                slice.x = static_cast<const char*>(xs) + n0 * xImage * eb;
+                slice.dy = static_cast<const char*>(dys) + n0 * dyImage * eb;
+                slice.accumulate = n0 > 0 ? 1 : 0;
+                dispatch.kernelForStream(2, stream).launch(stream, slice);
+                dispatch.kernelForStream(0, stream).launch(stream, slice);
+                dispatch.kernelForStream(1, stream).launch(stream, slice);
+            }
+            dispatch.kernelForStream(3, stream).launch(stream, args);
+            return;
+        }
         void* graphIn = forward ? x : y;
         void* graphOut = forward ? y : x;
         const void* in = graphIn;
@@ -1369,6 +1734,7 @@ void registerConvWinogradSymbols(SymbolScope<Handle>& scope)
 {
     scope.add(std::string(FWD_GRAPH_MATCHER_SYMBOL), &fwdGraphMatches);
     scope.add(std::string(BWD_GRAPH_MATCHER_SYMBOL), &bwdGraphMatches);
+    scope.add(std::string(WRW_GRAPH_MATCHER_SYMBOL), &wrwGraphMatches);
     scope.add(std::string(KERNEL_MATCHER_SYMBOL), &kernelMatches);
     scope.add(std::string(DISPATCH_SYMBOL), &convWinogradDispatchHandler());
 }

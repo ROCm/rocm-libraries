@@ -1,5 +1,6 @@
 # Generates the CONV_WINOGRAD_FWD / CONV_WINOGRAD_BWD descriptors (Winograd F(2,3) / F(4,3) for 3x3
-# stride 1, F(3,2) on the phase sub-filters for 3x3 stride 2; K5). Each config is admitted on correctness alone; autotune (UHD later) ranks them.
+# stride 1, F(3,2) on the phase sub-filters for 3x3 stride 2; K5) and CONV_WINOGRAD_WRW (backward
+# weights, F(3,2) / F(3,4) / F(3,6) for 3x3 stride 1). Each config is admitted on correctness alone; autotune (UHD later) ranks them.
 # Priority orders the declared fallback: fused matrix-core (cooperative, then register-built operands), fused
 # VALU (register operands first), multipass, then the
 # multipass LLC-fit plan (an extra config, never forced).
@@ -63,6 +64,7 @@ ENTRY = {
     "wreg": "ConvWinogradWreg",
     "sreg": "ConvWinogradSreg",
     "coop": "ConvWinogradCoop",
+    "wrw": "ConvWinogradWrwGemm",
 }
 
 
@@ -259,7 +261,59 @@ CATALOG = {
 }
 
 
+# Backward weights, F(3,r) (m = r: 2, 4 or 6), x and dy read in either packed layout. The GEMM per
+# Winograd position: (out channels, in channels, tiles per step) and tm x tn = the FMA thread tile
+# ("any": fp32 operands, every arch and dtype) or a wave's 16x16 atoms (MFMA "gfx9" for every
+# dtype; "gfx950" 16x16x32 and WMMA "gfx11" / "gfx12" for 16-bit).
+def wrw(arch, tiles, rs=(2, 4, 6), plan="none"):
+    return [
+        C(
+            "wrw",
+            r,
+            lay,
+            arch=arch,
+            plan=plan,
+            gemm=(bm, bn, bk),
+            tm=tm,
+            tn=tn,
+            waves=0 if arch == "any" else (bm // (16 * tm)) * (bn // (16 * tn)),
+        )
+        for r in rs
+        for lay in ("NCHW", "NHWC")
+        for bm, bn, bk, tm, tn in tiles
+    ]
+
+
+WRW_FMA = [(128, 128, 16, 8, 8), (64, 64, 16, 4, 4)]
+WRW_ATOM = [(128, 128, 32, 4, 4), (64, 64, 32, 2, 2)]
+# 16-bit operands only for F(3,2) (they round F(3,4) / F(3,6) past the dtype's Winograd bound): the
+# 16-bit-only atoms (gfx950 16x16x32, WMMA) serve F(3,2); CDNA "gfx9" configs run F(3,4) / F(3,6) on
+# fp32 operands through the fp32 MFMA, as FMA configs do everywhere.
+WRW_MATRIX16 = (
+    wrw("gfx9", WRW_ATOM)
+    + wrw("gfx950", WRW_ATOM, (2,))
+    + wrw("gfx11", WRW_ATOM, (2,))
+    + wrw("gfx12", WRW_ATOM, (2,))
+)
+WRW_LLC16 = (
+    wrw("gfx11", WRW_ATOM, (2,), "llc")
+    + wrw("gfx12", WRW_ATOM, (2,), "llc")
+    + wrw("any", WRW_FMA, plan="llc")
+)
+WRW_CATALOG = {
+    # The LLC-fit plan (RDNA, a slice's U / V / partials inside the last-level cache): an extra
+    # config of the FMA and WMMA blocks, admitted only where it slices.
+    "FLOAT": wrw("gfx9", WRW_ATOM)
+    + wrw("any", WRW_FMA)
+    + wrw("any", WRW_FMA, plan="llc"),
+    "HALF": WRW_MATRIX16 + wrw("any", WRW_FMA) + WRW_LLC16,
+    "BFLOAT16": WRW_MATRIX16 + wrw("any", WRW_FMA) + WRW_LLC16,
+}
+
+
 def label(c):
+    if c["variant"] == "wrw":
+        return f"wrw.f3x{c['m']}.{c['layout'].lower()}.{c['arch']}.{c['gemm_bm']}x{c['gemm_bn']}x{c['gemm_bk']}t{c['tm']}{c['tn']}{'.llc' if c['llc'] else ''}"
     if c["variant"] == "multipass":
         return f"multipass.f{c['m']}.{c['layout'].lower()}.g{c['gemm_bm']}x{c['gemm_bn']}x{c['gemm_bk']}.{'llc' if c['llc'] else 'none'}"
     if c["variant"] == "fused":
@@ -306,7 +360,7 @@ w(
     },
 )
 total = 0
-for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
+for direction, tag in (("FWD", "fwd"), ("BWD", "bwd"), ("WRW", "wrw")):
     ued = U("ued." + tag)
     w(
         f"conv_winograd_{tag}.ued.json",
@@ -323,7 +377,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
         },
     )
     kernels = []
-    for dtype, cfgs in CATALOG.items():
+    for dtype, cfgs in (WRW_CATALOG if direction == "WRW" else CATALOG).items():
         dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
         for i, c in enumerate(cfgs):
             name = f"conv_winograd.{tag}.{dt}.{label(c)}"
