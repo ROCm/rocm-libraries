@@ -1447,7 +1447,7 @@ TEST(TestGpuFillInputs, SdpaBwdDerivationOnTheDeviceAddsAlibi)
 }
 
 // A forward graph the GPU executor declines goes to the CPU executor.
-TEST(TestGpuFillInputs, SdpaBwdForwardTheGpuDeclinesRunsOnTheCpu)
+TEST(TestGpuFillInputs, SdpaBwdForwardDeclinedOnTheDeviceRunsOnTheCpu)
 {
     SKIP_IF_NO_DEVICES();
     using ::testing::_;
@@ -1466,7 +1466,7 @@ TEST(TestGpuFillInputs, SdpaBwdForwardTheGpuDeclinesRunsOnTheCpu)
 
 // A forward graph the GPU executor rejects before it launches (std::invalid_argument)
 // goes to the CPU executor, after the GPU attempt uploaded O and stats.
-TEST(TestGpuFillInputs, SdpaBwdForwardTheGpuRejectsRunsOnTheCpu)
+TEST(TestGpuFillInputs, SdpaBwdForwardRejectedOnTheDeviceRunsOnTheCpu)
 {
     SKIP_IF_NO_DEVICES();
     using ::testing::_;
