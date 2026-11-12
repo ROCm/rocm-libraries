@@ -101,8 +101,25 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTilePolicy
             return mask.IsOutOfBound(row, col);
     }
 
-    // LDS read bases of one tile: QK stage 0's next K access (formed by the pipeline), and in the
-    // lean D64 loop the QK tail stage's V access 0 and the last PV stage's next-K access 0.
+    // The tile's V and next-K read bases are formed once, ahead of every WMMA (PrepareTileBases):
+    // the lean D64 loop, and the linear-page D128/V128 N128 tiles of pages of 64 tokens or more,
+    // without sink or bias. Formed next to their first reads instead, each base is a VALU write
+    // between WMMAs and the read that uses it must drain the WMMA pipe (s_wait_alu
+    // depctr_va_vdst(0)): three such drains per KV tile in the D128 P64 linear loop. Not the
+    // vectorized-page D128 tiles: with the registers their WMMA operand guard keeps allocated, the
+    // two live bases spill the LSE and the P128 dense instances (24 VGPRs).
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool UsePreparedTileBases()
+    {
+        return UseLeanD64Loop<Problem>() ||
+               (Geometry::kHeadDimQK == 128 && Geometry::kDv == 128 && Geometry::kN == 128 &&
+                Problem::kPageBlockSize >= 64 && !Problem::kHasSink &&
+                Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
+                !detail::fmha_tdm_is_vectorized_kv<Problem>::value);
+    }
+
+    // LDS read bases of one tile: QK stage 0's next K access (formed by the pipeline), and with
+    // UsePreparedTileBases the QK tail stage's V access 0 and the last PV stage's next-K access 0.
     struct TileBases
     {
         FmhaTdmPreparedKRead::Address qk_stage0{};
@@ -110,17 +127,17 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTilePolicy
         FmhaTdmPreparedKRead::Address pv_k0{};
     };
 
-    // Forms the policy's bases of the tile, called with qk_stage0 formed: in the lean D64 loop,
-    // from the V read window and the next K tile (next_k_ptr), ahead of every WMMA, and keeps each
-    // in a VGPR: otherwise the compiler recomputes them next to their first read, where the
-    // VALU-write -> LDS-read wait must also drain the WMMA issued in between.
+    // Forms the policy's bases of the tile, called with qk_stage0 formed: with
+    // UsePreparedTileBases, from the V read window and the next K tile (next_k_ptr), ahead of every
+    // WMMA, and keeps each in a VGPR: otherwise the compiler recomputes them next to their first
+    // read, where the VALU-write -> LDS-read wait must also drain the WMMA issued in between.
     template <typename Problem, typename KLdsView, typename KPointer, typename VWindow>
     CK_TILE_DEVICE static void PrepareTileBases(TileBases& bases,
                                                 const KLdsView& k_lds_view,
                                                 KPointer next_k_ptr,
                                                 const VWindow& v_window)
     {
-        if constexpr(UseLeanD64Loop<Problem>())
+        if constexpr(UsePreparedTileBases<Problem>())
         {
             bases.qk_v0 = FmhaTdmPreparedKRead::Prepare<0>(v_window);
             auto pv_k_window =
@@ -137,8 +154,8 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTilePolicy
         }
     }
 
-    // QK stage with the tile's bases: the earlier stages read the next K tile from qk_stage0; the
-    // lean D64 loop's tail stage reads V from qk_v0.
+    // QK stage with the tile's bases: the earlier stages read the next K tile from qk_stage0; with
+    // UsePreparedTileBases the tail stage reads V from qk_v0.
     template <index_t Stage,
               typename Mode,
               typename BlockGemm,
@@ -163,7 +180,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTilePolicy
                                                             next_b_block_tensor,
                                                             b_lds_window,
                                                             &bases.qk_stage0);
-        else if constexpr(UseLeanD64Loop<typename Mode::SelectedProblem>())
+        else if constexpr(UsePreparedTileBases<typename Mode::SelectedProblem>())
             Base::template RunQkScheduledStage<Stage, Mode>(gemm,
                                                             c_block_tensor,
                                                             a_block_tensor,
@@ -181,7 +198,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTilePolicy
                                                             b_lds_window);
     }
 
-    // PV stage with the tile's bases. In the lean D64 loop, V stage s reads rows
+    // PV stage with the tile's bases. With UsePreparedTileBases, V stage s reads rows
     // [(s+1)*kK1, (s+2)*kK1) of the buffer the QK tail stage started on (the row offset folds into
     // the ds_load immediates), and the last stage reads the next K tile from pv_k0.
     template <index_t Stage,
@@ -197,7 +214,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTilePolicy
                                           const TileBases& bases)
     {
         using Problem = typename Mode::SelectedProblem;
-        if constexpr(UseLeanD64Loop<Problem>())
+        if constexpr(UsePreparedTileBases<Problem>())
         {
             using VDataType                    = remove_cvref_t<typename Problem::VDataType>;
             constexpr index_t kRow             = (Stage + 1) * Problem::BlockFmhaShape::kK1;
