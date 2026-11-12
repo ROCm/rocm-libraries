@@ -125,7 +125,7 @@ Each concern has one model. Query it; do not build a second copy beside it.
 | --- | --- |
 | `s_wait_alu` waits and hazards | `WaitAluTracker` (`query`, `untilFree`, `requiredGap`, `commit`), the same scoreboard `InsertWaitAluPass` uses. |
 | ds pacing | `DsSpreadPacer` and the ds credit queue (`dsReadInflight_`). |
-| WMMA queue and cover | `outstandingWmmas()`, `wmmaQueueDepth()`, `queuedCoverCycles()`. |
+| WMMA queue and cover | `outstandingWmmas()`, `effectiveWmmaQueueDepth()`, `queuedCoverCycles()`. |
 | Barrier placement | The barrier thresholds (`barrierWmmaThresholds_`). |
 | Prefetch placement | `prefetchEarliestWmma_` and `needByWindow_`. |
 
