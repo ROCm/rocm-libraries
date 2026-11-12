@@ -1,0 +1,72 @@
+{
+  "version": "1.0",
+  "id": "7ea15dc3-94f6-5a3b-b241-f5db0b8ea115",
+  "name": "hipkernel:megakernel_standin",
+  "arch": [
+    "gfx942"
+  ],
+  "matchers": [
+    "6d904cb2-83e5-5f2a-b130-e4cafa7d9014"
+  ],
+  "engine": "4b7e2a90-61c3-5d08-9f1e-c2a8d35b7e12",
+  "dispatch": "5c8f3ba1-72d4-5e19-a02f-d3b9e46c8f13",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "4b7e2a90-61c3-5d08-9f1e-c2a8d35b7e12",
+          "kmd_id": "3d9a1c55-0e7b-5f40-8c2d-7a51b0e94c11",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "model",
+            "src",
+            "cus",
+            "kv",
+            "block",
+            "M",
+            "tp",
+            "rt",
+            "lm_head",
+            "block_threads",
+            "lds_bytes"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "8fb26ed4-a507-5b4c-8352-06ec1c9fb216",
+      "name": "megakernel.standin.M1",
+      "arch": [
+        "gfx942"
+      ],
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/MegakernelStandIn.cpp",
+        "entry": "megakernel_standin",
+        "build": {
+          "defines": {}
+        }
+      },
+      "metadata": {
+        "model": "megakernel-standin-gfx942",
+        "src": "0123456789abcdef",
+        "cus": 304,
+        "kv": "ROCM_ATTN",
+        "block": 784,
+        "M": 1,
+        "tp": 1,
+        "rt": 0,
+        "lm_head": false,
+        "block_threads": 256,
+        "lds_bytes": 0
+      },
+      "priority": 0
+    }
+  ]
+}
