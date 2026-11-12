@@ -85,17 +85,21 @@ std::optional<FftProblem> parseFftProblem(const MatchContext& context, ConvDirec
     }
     for(int axis = 1; axis < CONV_NAIVE_SPATIAL_DIMS; ++axis)
     {
-        for(const long long value :
-            {a.inSpatial[axis], a.outSpatial[axis], a.filter[axis], a.prePadding[axis]})
+        for(const long long value : {a.inSpatial[axis],
+                                     a.outSpatial[axis],
+                                     a.filter[axis],
+                                     a.prePadding[axis],
+                                     a.dilation[axis]})
         {
             if(!fitsInt(value))
             {
                 return std::nullopt;
             }
         }
-        // The dilated filter's span within an int as well.
-        const auto span = pack_features::checkedMultiply(a.filter[axis] - 1, a.dilation[axis]);
-        if(!span.has_value() || !fitsInt(*span + 1))
+        // The dilated filter's span within an int as well (both factors are ints here, so the
+        // product cannot overflow 64 bits; a one-tap axis has span 1).
+        const long long span = (a.filter[axis] - 1) * a.dilation[axis] + 1;
+        if(a.filter[axis] < 1 || !fitsInt(span))
         {
             return std::nullopt;
         }
