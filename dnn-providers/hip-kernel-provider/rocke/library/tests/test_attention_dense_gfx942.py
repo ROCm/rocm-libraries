@@ -946,14 +946,22 @@ def test_supports_rejects_block_n_larger_than_the_query_tile():
     assert not ok and "block_n" in why
 
 
-def test_supports_rejects_sliding_window_past_seqlen_kv():
-    """SWA + causal where the last query block's window starts past seqlen_kv:
-    start_tile >= n_up -> zero-trip KV loop -> l == 0 -> rcp(0) -> NaN. Same class
-    as the block_n zero-trip guards above."""
-    ok, why = supports_attention_dense(
-        _spec(seqlen_q=1024, seqlen_kv=256, sliding_window=128), arch="gfx942"
+@pytest.mark.parametrize("use_sinks", [False, True])
+@pytest.mark.parametrize("persistent", [False, True])
+def test_supports_accepts_window_past_seqlen_kv(persistent, use_sinks):
+    """The last query block's window starts past seqlen_kv. Its rows see no key and
+    the kernel writes 0 for them (the sink seed with sinks, the row_has_key store
+    mask without), so the shape is admitted on both grids and builds."""
+    spec = _spec(
+        seqlen_q=1024,
+        seqlen_kv=256,
+        sliding_window=128,
+        use_sinks=use_sinks,
+        persistent=persistent,
     )
-    assert not ok and "sliding_window" in why
+    ok, why = supports_attention_dense(spec, arch="gfx942")
+    assert ok, why
+    build_attention_dense(spec, arch="gfx942")
 
 
 def test_supports_accepts_sliding_window_in_range():
@@ -968,24 +976,6 @@ def test_supports_accepts_sinks_alone_and_with_sliding_window():
     for kw in (dict(), dict(sliding_window=128), dict(persistent=True)):
         ok, why = supports_attention_dense(_spec(use_sinks=True, **kw), arch="gfx942")
         assert ok, f"{kw}: {why}"
-
-
-@pytest.mark.parametrize("persistent", [False, True])
-def test_supports_accepts_empty_window_with_sinks(persistent):
-    """With sinks the zero-trip KV loop leaves l at the l0 = 1 seed and o at zero, so
-    the empty-window rows output 0 (softmax over the sink alone) instead of NaN. The
-    guard is lifted for sinks only; the same shape without sinks is still rejected
-    by test_supports_rejects_sliding_window_past_seqlen_kv."""
-    spec = _spec(
-        seqlen_q=1024,
-        seqlen_kv=256,
-        sliding_window=128,
-        use_sinks=True,
-        persistent=persistent,
-    )
-    ok, why = supports_attention_dense(spec, arch="gfx942")
-    assert ok, why
-    build_attention_dense(spec, arch="gfx942")
 
 
 def _sink_seed_sites(kernel):

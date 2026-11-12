@@ -17,6 +17,14 @@ from ..dtypes import dtype_info
 from ..storage import BitPacking, FragmentPacking, MatrixFragmentLayout
 from .mfma_scale import MATRIX_FORMATS, matrix_operand_layout
 
+# The scale-format code a gfx1250 scaled WMMA takes for A and for B, by scale dtype (LLVM's
+# matrix_{a,b}_scale_fmt immediates).
+SCALE_FORMATS = {
+    MmaScaleDType.E8M0.value: 0,
+    MmaScaleDType.E5M3.value: 1,
+    MmaScaleDType.E4M3.value: 2,
+}
+
 
 def scaled_matrix_layout(dtype: str, abi_words: int) -> MatrixFragmentLayout:
     """gfx1250 scaled operand layout, independent of atom availability.
@@ -108,18 +116,13 @@ def gfx1250_scaled_wmma(op_id: str) -> ScaledWmmaOp | None:
     if _op_id_family().get(op_id) != "wmma_scaled":
         return None
     atom = _mma_op_by_id(op_id)
-    scale_selectors = {
-        MmaScaleDType.E8M0: 0,
-        MmaScaleDType.E5M3: 1,
-        MmaScaleDType.E4M3: 2,
-    }
     # Matrix and scale formats are independent selectors for each operand.
     # Validate the backend contract independently of the catalog query model.
     if (
         atom.a_dtype not in MATRIX_FORMATS
         or atom.b_dtype not in MATRIX_FORMATS
-        or atom.a_scale_dtype not in scale_selectors
-        or atom.b_scale_dtype not in scale_selectors
+        or atom.a_scale_dtype not in SCALE_FORMATS
+        or atom.b_scale_dtype not in SCALE_FORMATS
         or atom.scale_block_k not in (16, 32)
         or atom.srcs[2].dtype != "fp32"
         or atom.dst.dtype != "fp32"
@@ -145,8 +148,8 @@ def gfx1250_scaled_wmma(op_id: str) -> ScaledWmmaOp | None:
         atom=atom,
         matrix_formats=(MATRIX_FORMATS[atom.a_dtype], MATRIX_FORMATS[atom.b_dtype]),
         scale_formats=(
-            scale_selectors[atom.a_scale_dtype],
-            scale_selectors[atom.b_scale_dtype],
+            SCALE_FORMATS[atom.a_scale_dtype],
+            SCALE_FORMATS[atom.b_scale_dtype],
         ),
         scales=ScalePacking(count=atom.a_scale_frag_len, block_k=atom.scale_block_k),
     )
