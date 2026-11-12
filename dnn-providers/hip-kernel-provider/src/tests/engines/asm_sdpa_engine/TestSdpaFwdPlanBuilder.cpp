@@ -4,6 +4,9 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
+#include <cstdint>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <string>
@@ -28,10 +31,14 @@
 #include "hip_kernel_provider_common/HipDeviceUtils.hpp"
 #include "tests/engines/asm_sdpa_engine/DeprecatedCausalMaskCases.hpp"
 #include "tests/engines/asm_sdpa_engine/SdpaAttnScaleCases.hpp"
+#include "tests/engines/asm_sdpa_engine/SdpaPinnedKernels.hpp"
 #include "tests/engines/asm_sdpa_engine/SdpaSinkTokenGraph.hpp"
+#include "tests/engines/asm_sdpa_engine/SdpaStagedArchive.hpp"
 
+#include <hip/hip_runtime.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <optional>
@@ -1084,7 +1091,7 @@ SdpaFwdPlan createFwdPlanWithRuntimeScale(hipdnn_flatbuffers_sdk::data_objects::
     params.maskType = plan_utils::MaskType::NO_MASK;
     params.attnScale
         = hipdnn_plugin_sdk::ScalarOperand{K_FWD_RUNTIME_SCALE_UID, scaleType, true, 0.0};
-    return {std::make_shared<HipModuleGuard>(), params};
+    return {pinnedFwdKernels(), params};
 }
 
 // A pure runtime scale tensor's value arrives only at execute, so execute returns
@@ -2349,6 +2356,166 @@ TEST_F(TestSdpaFwdPlanBuilder, InitializeExecutionSettingsIsNoOp)
     Settings settings;
     // Must not throw or log an error — forward has no knobs.
     EXPECT_NO_THROW(_planBuilder.initializeExecutionSettings(_handle, gw, dummyCfg, settings));
+}
+
+// =============================================================================
+// A plan executed under a handle on another device
+// =============================================================================
+
+// UIDs createValidSdpaFwdGraph assigns to q, k, v and o.
+constexpr int64_t K_Q_UID = 1;
+constexpr int64_t K_K_UID = 2;
+constexpr int64_t K_V_UID = 3;
+constexpr int64_t K_O_UID = 4;
+
+std::string baseArchOf(int ordinal)
+{
+    hipDeviceProp_t properties{};
+    if(hipGetDeviceProperties(&properties, ordinal) != hipSuccess)
+    {
+        return {};
+    }
+    return std::string(hipdnn_plugin_sdk::stripArchFeatures(properties.gcnArchName));
+}
+
+/// BF16 bit patterns of a deterministic spread of values in [-1, 1).
+std::vector<uint16_t> bf16Pattern(size_t count, uint32_t salt)
+{
+    std::vector<uint16_t> values(count);
+    for(size_t i = 0; i < count; ++i)
+    {
+        const auto step = static_cast<uint32_t>((i * 2654435761U + salt) % 2048U);
+        const float value = (static_cast<float>(step) / 1024.0f) - 1.0f;
+        uint32_t bits = 0;
+        std::memcpy(&bits, &value, sizeof(bits));
+        values[i] = static_cast<uint16_t>(bits >> 16);
+    }
+    return values;
+}
+
+/// Executes @p plan on buffers and a stream owned by @p ordinal, with device 0 left
+/// current so the plan has to bind the stream's device itself, and returns O.
+std::vector<uint16_t> executeOnDevice(const hipdnn_plugin_sdk::IPlan<Handle>& plan,
+                                      int ordinal,
+                                      const std::vector<uint16_t>& q,
+                                      const std::vector<uint16_t>& k,
+                                      const std::vector<uint16_t>& v,
+                                      size_t outputCount)
+{
+    std::vector<uint16_t> output(outputCount, 0);
+    EXPECT_EQ(hipSuccess, hipSetDevice(ordinal));
+
+    std::array<void*, 4> buffers{};
+    const std::array<size_t, 4> bytes{q.size() * sizeof(uint16_t),
+                                      k.size() * sizeof(uint16_t),
+                                      v.size() * sizeof(uint16_t),
+                                      outputCount * sizeof(uint16_t)};
+    for(size_t i = 0; i < buffers.size(); ++i)
+    {
+        EXPECT_EQ(hipSuccess, hipMalloc(&buffers[i], bytes[i]));
+    }
+    EXPECT_EQ(hipSuccess, hipMemcpy(buffers[0], q.data(), bytes[0], hipMemcpyHostToDevice));
+    EXPECT_EQ(hipSuccess, hipMemcpy(buffers[1], k.data(), bytes[1], hipMemcpyHostToDevice));
+    EXPECT_EQ(hipSuccess, hipMemcpy(buffers[2], v.data(), bytes[2], hipMemcpyHostToDevice));
+    EXPECT_EQ(hipSuccess, hipMemset(buffers[3], 0, bytes[3]));
+    hipStream_t stream = nullptr;
+    EXPECT_EQ(hipSuccess, hipStreamCreate(&stream));
+
+    Handle handle;
+    handle.setStream(stream);
+    const std::array<hipdnnPluginDeviceBuffer_t, 4> deviceBuffers{
+        hipdnnPluginDeviceBuffer_t{K_Q_UID, buffers[0]},
+        hipdnnPluginDeviceBuffer_t{K_K_UID, buffers[1]},
+        hipdnnPluginDeviceBuffer_t{K_V_UID, buffers[2]},
+        hipdnnPluginDeviceBuffer_t{K_O_UID, buffers[3]}};
+
+    EXPECT_EQ(hipSuccess, hipSetDevice(0));
+    EXPECT_NO_THROW(plan.execute(
+        handle, deviceBuffers.data(), static_cast<uint32_t>(deviceBuffers.size()), nullptr));
+
+    // The launch's device switch does not leak into the caller.
+    int current = -1;
+    EXPECT_EQ(hipSuccess, hipGetDevice(&current));
+    EXPECT_EQ(current, 0);
+
+    EXPECT_EQ(hipSuccess, hipStreamSynchronize(stream));
+    EXPECT_EQ(hipSuccess, hipMemcpy(output.data(), buffers[3], bytes[3], hipMemcpyDeviceToHost));
+
+    EXPECT_EQ(hipSuccess, hipSetDevice(ordinal));
+    EXPECT_EQ(hipSuccess, hipStreamDestroy(stream));
+    for(void* buffer : buffers)
+    {
+        EXPECT_EQ(hipSuccess, hipFree(buffer));
+    }
+    EXPECT_EQ(hipSuccess, hipSetDevice(0));
+    return output;
+}
+
+// A plan is immutable and may be executed under any handle. One built under device 0 and
+// executed under a handle on another device of the same architecture must launch there,
+// with that device's module, and compute what it computes on device 0.
+TEST(TestGpuSdpaFwdPlan, ExecutesOnASecondDeviceOfTheSameArchitecture)
+{
+    SKIP_IF_NO_DEVICES();
+
+    int callerDevice = -1;
+    ASSERT_EQ(hipSuccess, hipGetDevice(&callerDevice));
+    ASSERT_EQ(hipSuccess, hipSetDevice(0));
+
+    const std::string arch = baseArchOf(0);
+    if(arch != "gfx942" && arch != "gfx950")
+    {
+        GTEST_SKIP() << "device 0 (" << arch << ") is not an architecture the SDPA kernels cover";
+    }
+    if(!sdpaArchiveStaged(arch))
+    {
+        GTEST_SKIP() << "the " << arch << " SDPA archive is not staged beside this executable";
+    }
+    int devices = 0;
+    ASSERT_EQ(hipSuccess, hipGetDeviceCount(&devices));
+    int peer = -1;
+    for(int ordinal = 1; ordinal < devices && peer < 0; ++ordinal)
+    {
+        if(baseArchOf(ordinal) == arch)
+        {
+            peer = ordinal;
+        }
+    }
+    if(peer < 0)
+    {
+        GTEST_SKIP() << "needs a second device of architecture " << arch;
+    }
+
+    const std::vector<int64_t> qDims{1, 2, 128, 128};
+    auto builder = createSdpaFwdGraph(qDims, qDims);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    // Built under a default-stream handle while device 0 is current.
+    const SdpaFwdPlanBuilder planBuilder;
+    const Handle buildHandle;
+    ASSERT_TRUE(planBuilder.isApplicable(buildHandle, graphWrapper));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper engineConfig(nullptr,
+                                                                                         0);
+    Context context;
+    ASSERT_NO_THROW(planBuilder.buildPlan(buildHandle, graphWrapper, engineConfig, context));
+    const auto& plan = context.plan();
+
+    const auto count = static_cast<size_t>(qDims[0] * qDims[1] * qDims[2] * qDims[3]);
+    const auto q = bf16Pattern(count, 1U);
+    const auto k = bf16Pattern(count, 2U);
+    const auto v = bf16Pattern(count, 3U);
+
+    const auto onBuildDevice = executeOnDevice(plan, 0, q, k, v, count);
+    const auto onPeer = executeOnDevice(plan, peer, q, k, v, count);
+
+    EXPECT_TRUE(std::any_of(onBuildDevice.begin(), onBuildDevice.end(), [](uint16_t bits) {
+        return bits != 0;
+    })) << "the build-device run wrote no output";
+    // One kernel binary on two devices of one architecture computes the same bits.
+    EXPECT_EQ(onBuildDevice, onPeer);
+
+    ASSERT_EQ(hipSuccess, hipSetDevice(callerDevice));
 }
 
 } // namespace

@@ -3,6 +3,8 @@
 
 #include "plans/SdpaBwdPlan.hpp"
 #include "asm/SdpaBwdKernelArgs.hpp"
+#include "device/LaunchDeviceOrdinal.hpp"
+#include "device/ScopedDevice.hpp"
 #include "plans/SdpaPlanUtils.hpp"
 
 #include <cstddef>
@@ -417,21 +419,8 @@ namespace asm_sdpa_engine
 // Constructors
 // =============================================================================
 
-SdpaBwdPlan::SdpaBwdPlan(CachedModule odoKernel,
-                         CachedModule dqdkdvKernel,
-                         std::optional<CachedModule> postKernel,
-                         SdpaBwdParams params)
-    : _odoKernel(std::move(odoKernel))
-    , _dqdkdvKernel(std::move(dqdkdvKernel))
-    , _postKernel(std::move(postKernel))
-    , _params(params)
-{
-}
-
-SdpaBwdPlan::SdpaBwdPlan(CachedModule odoKernel, CachedModule dqdkdvKernel, SdpaBwdParams params)
-    : _odoKernel(std::move(odoKernel))
-    , _dqdkdvKernel(std::move(dqdkdvKernel))
-    , _postKernel(std::nullopt)
+SdpaBwdPlan::SdpaBwdPlan(std::unique_ptr<SdpaBwdKernels> kernels, SdpaBwdParams params)
+    : _kernels(std::move(kernels))
     , _params(params)
 {
 }
@@ -531,13 +520,36 @@ void SdpaBwdPlan::execute(const Handle& handle,
     // Launching on the same stream guarantees ordering without explicit barriers.
     auto stream = handle.getStream();
 
+    // Resolved from the handle this call was given, not the one the plan was built under:
+    // a plan may be executed under any handle, and its modules must be the ones loaded on
+    // the device the launches run on.
+    const int deviceOrdinal = hip_kernel_provider::device::launchDeviceOrdinal(stream);
+    const SdpaBwdModules modules = _kernels->forOrdinal(deviceOrdinal);
+    if(_params.accumulatorType == AccumulatorType::A32 && !modules.post)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "SdpaBwdPlan::execute: the A32 path was selected but no DQ_CONVERT kernel was "
+            "resolved");
+    }
+
+    // A module has to be launched from the device it was loaded on.
+    const hip_kernel_provider::device::ScopedDevice binding(deviceOrdinal);
+    if(!binding.bound())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+                                                       "SdpaBwdPlan::execute: cannot make device "
+                                                           + std::to_string(deviceOrdinal)
+                                                           + " current to launch SDPA backward");
+    }
+
     // 7a. Build args and launch kernel 1: ODO
     auto odoArgs = buildOdoArgs(mhaArgs);
 
     const unsigned int gdxOdo = _params.odoTiles.gridDim(mhaArgs.seqlen_q);
 
     if(!launchKernel("SDPA backward ODO",
-                     _odoKernel->function(),
+                     modules.odo->function(),
                      &odoArgs,
                      sizeof(odoArgs),
                      gdxOdo,
@@ -578,7 +590,7 @@ void SdpaBwdPlan::execute(const Handle& handle,
     }
 
     if(!launchKernel("SDPA backward DQDKDV",
-                     _dqdkdvKernel->function(),
+                     modules.dqdkdv->function(),
                      &dqdkdvArgs,
                      sizeof(dqdkdvArgs),
                      gdxDqdkdv,
@@ -601,7 +613,7 @@ void SdpaBwdPlan::execute(const Handle& handle,
         const unsigned int gdxPost = _params.dqConvertTiles.gridDim(mhaArgs.seqlen_q);
 
         if(!launchKernel("SDPA backward DQ_CONVERT",
-                         (*_postKernel)->function(),
+                         (*modules.post)->function(),
                          &postArgs,
                          sizeof(postArgs),
                          gdxPost,

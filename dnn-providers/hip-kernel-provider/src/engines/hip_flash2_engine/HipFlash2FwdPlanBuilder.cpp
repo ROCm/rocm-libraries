@@ -13,11 +13,13 @@
 
 // Finding 2 fix: include Utils.hpp so HIP_KERNEL_RETURN_FALSE_IF is defined
 #include "core/Utils.hpp"
+#include "device/LaunchDeviceOrdinal.hpp"
 
 #include "../asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
 #include "Flash2Dispatch.hpp"
 #include "HipFlash2FwdPlan.hpp"
 #include "HipFlash2FwdPlanBuilder_v2.hpp"
+#include "HipFlash2KernelResolver.hpp"
 #include "HipFlash2KernelUtils.hpp"
 
 namespace hip_flash2_engine
@@ -237,6 +239,10 @@ void HipFlash2FwdPlanBuilder::buildPlan(const Handle& handle,
         throw std::runtime_error(msg);
     }
 
+    // The device the plan is built under; execute() resolves its own from the handle it
+    // is given, by the same rule.
+    const int deviceOrdinal = hip_kernel_provider::device::launchDeviceOrdinal(handle.getStream());
+
     Flash2FwdParams params = extractParams(handle, opGraph);
     params.archString = archId;
 
@@ -245,11 +251,13 @@ void HipFlash2FwdPlanBuilder::buildPlan(const Handle& handle,
     // not installed, so an engine built from an older kernels/ directory keeps
     // exactly its previous behaviour. This makes the dispatcher inert until a
     // matching variant set is shipped -- it cannot regress the current engine.
+    //
+    // The CU count is read from the handle's device, the one the arch came from, rather
+    // than whichever device happens to be current.
     int cuCount = 304; // gfx942 default; overridden from the device below
     {
         hipDeviceProp_t prop{};
-        int dev = 0;
-        if(hipGetDevice(&dev) == hipSuccess && hipGetDeviceProperties(&prop, dev) == hipSuccess
+        if(hipGetDeviceProperties(&prop, deviceOrdinal) == hipSuccess
            && prop.multiProcessorCount > 0)
         {
             cuCount = prop.multiProcessorCount;
@@ -294,62 +302,20 @@ void HipFlash2FwdPlanBuilder::buildPlan(const Handle& handle,
         throw std::runtime_error(msg);
     }
 
-    HIPDNN_PLUGIN_LOG_INFO("HipFlash2FwdPlanBuilder::buildPlan -- loading " << coPath
-                                                                            << " fn=" << funcName);
-
-    auto kernelOpt = loadKernelModule(coPath, funcName);
-    if(!kernelOpt)
-    {
-        const std::string msg
-            = "HipFlash2FwdPlanBuilder::buildPlan -- failed to load kernel from: " + coPath;
-        HIPDNN_PLUGIN_LOG_ERROR(msg);
-        throw std::runtime_error(msg);
-    }
-
-    // Verify the object was actually built with the geometry the variant table
-    // claims. The file probe above only proves a file exists at that path --
-    // it says nothing about how the object was compiled. A mismatch is not
-    // benign in EITHER direction: an object built for fewer threads than the
-    // table claims fails every launch with hipError 719, and one built for
-    // more threads launches fine and computes silently wrong results.
-    //
-    // The comparison is therefore exact, not an upper bound. An earlier
-    // revision used `<`, which caught only the loud direction; S. Reeder
-    // demonstrated the gap by copying the 512-thread w8q2k4 object over the
-    // w4q1k4 filename (table: 256 threads) and running the integration suite:
-    // `<` threw 0 times and produced 4 wrong results, `!=` threw 4 times and
-    // produced 0. Exact comparison cannot false-positive here because every
-    // variant carries __launch_bounds__(F2_BLOCK, 1), so
-    // max_flat_workgroup_size equals the compiled block size exactly on all
-    // five (measured 256/512/512/512/512 against a table of the same).
-    if(!params.variantTag.empty())
-    {
-        int maxThreads = 0;
-        const hipError_t attrErr = hipFuncGetAttribute(
-            &maxThreads, HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK, kernelOpt->function());
-        if(attrErr != hipSuccess)
-        {
-            const std::string msg
-                = "HipFlash2FwdPlanBuilder::buildPlan -- hipFuncGetAttribute failed for " + coPath
-                  + ": " + std::string(hipGetErrorString(attrErr));
-            HIPDNN_PLUGIN_LOG_ERROR(msg);
-            throw std::runtime_error(msg);
-        }
-        if(maxThreads != static_cast<int>(params.blockDim))
-        {
-            const std::string msg
-                = "HipFlash2FwdPlanBuilder::buildPlan -- variant '" + params.variantTag
-                  + "' geometry mismatch: " + coPath + " was built for "
-                  + std::to_string(maxThreads) + " threads/block but the variant table claims "
-                  + std::to_string(params.blockDim)
-                  + ". The installed kernel object does not match the variant it is named for.";
-            HIPDNN_PLUGIN_LOG_ERROR(msg);
-            throw std::runtime_error(msg);
-        }
-    }
+    // Loaded for the build device now, so an object that cannot load, or whose geometry
+    // disagrees with the variant table, fails the build rather than the first execute,
+    // and that execute is a memo hit. Another device of this architecture loads its own
+    // module on first use.
+    auto kernels
+        = std::make_unique<Flash2KernelResolver>(archId,
+                                                 coPath,
+                                                 funcName,
+                                                 params.variantTag.empty() ? 0U : params.blockDim,
+                                                 params.variantTag);
+    kernels->forOrdinal(deviceOrdinal);
 
     executionContext.setPlan(
-        std::make_unique<HipFlash2FwdPlan>(std::move(*kernelOpt), std::move(params)));
+        std::make_unique<HipFlash2FwdPlan>(std::move(kernels), std::move(params)));
 }
 
 // ---------------------------------------------------------------------------

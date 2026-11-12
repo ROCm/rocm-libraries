@@ -2,17 +2,20 @@
 // SPDX-License-Identifier: MIT
 
 #include "HipFlash2FwdPlan.hpp"
+#include "device/LaunchDeviceOrdinal.hpp"
+#include "device/ScopedDevice.hpp"
 
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <unordered_map>
 
 namespace hip_flash2_engine
 {
 
-HipFlash2FwdPlan::HipFlash2FwdPlan(HipModuleGuard kernel, Flash2FwdParams params)
-    : _kernel(std::move(kernel))
+HipFlash2FwdPlan::HipFlash2FwdPlan(std::unique_ptr<Flash2Kernels> kernels, Flash2FwdParams params)
+    : _kernels(std::move(kernels))
     , _params(std::move(params))
 {
 }
@@ -112,9 +115,24 @@ void HipFlash2FwdPlan::execute(const Handle& handle,
     const unsigned int blockDim = _params.blockDim;
 
     // -- 4. Dispatch -----------------------------------------------------------
+    // The module is the one loaded on the device the handle's stream names, not the
+    // device the plan was built under: a plan may be executed under any handle.
+    const int deviceOrdinal = hip_kernel_provider::device::launchDeviceOrdinal(handle.getStream());
+    const Flash2Module kernel = _kernels->forOrdinal(deviceOrdinal);
+
+    // A module has to be launched from the device it was loaded on.
+    const hip_kernel_provider::device::ScopedDevice binding(deviceOrdinal);
+    if(!binding.bound())
+    {
+        const std::string msg = "HipFlash2FwdPlan::execute: cannot make device "
+                                + std::to_string(deviceOrdinal) + " current to launch";
+        HIPDNN_PLUGIN_LOG_ERROR(msg);
+        throw std::runtime_error(msg);
+    }
+
     // I5: propagate launch failure so callers see a hard error.
     const bool ok = launchFlash2Kernel(
-        _kernel.function(), args, gridX, gridY, gridZ, blockDim, handle.getStream());
+        kernel->function(), args, gridX, gridY, gridZ, blockDim, handle.getStream());
     if(!ok)
     {
         HIPDNN_PLUGIN_LOG_ERROR("HipFlash2FwdPlan::execute -- kernel launch failed");

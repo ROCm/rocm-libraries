@@ -75,6 +75,7 @@ target_sources(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/SdpaFwdPlanBuilder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/SdpaBwdPlan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/plans/SdpaFwdPlan.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/plans/SdpaKernelResolvers.cpp
 )
 
 target_include_directories(hip_kernel_provider_impl PRIVATE
@@ -160,6 +161,18 @@ if(ASM_KPACK_ENABLED)
             COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_SRC}" "${_DST}"
             COMMENT "Copying ${ARCH} .kpack to build dir"
         )
+        # The unit tests link the provider statically, so the runtime resolves archives
+        # relative to the test executable rather than the plugin. Staged beside it in the
+        # build tree so unit tests can load real kernels; an installed unit test finds none
+        # and skips.
+        if(HIPKERNELPROVIDER_ENABLE_TESTS)
+            set(_TEST_DST "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/arch_content/asm_sdpa/${ARCH}/")
+            add_custom_command(TARGET asm_kernel_kpack POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E make_directory "${_TEST_DST}"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_SRC}" "${_TEST_DST}"
+                COMMENT "Copying ${ARCH} .kpack beside the unit tests"
+            )
+        endif()
     endforeach()
 
     # --- Install .kpack archives next to the installed plugin ---
