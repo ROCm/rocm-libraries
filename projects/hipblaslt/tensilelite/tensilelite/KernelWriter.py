@@ -25,13 +25,13 @@
 from .ExecutionPolicy import isStreamKSpatialCluster, isPersistent, isPersistentDataParallel, isStreamK, hasStaticAssignment, hasDynamicAssignment, hasHybridAssignment
 from rocisa import rocIsa, countInstruction, countGlobalRead, \
             countLocalRead, countLocalWrite, countWeightedLocalRead, countWeightedLocalWrite, countMFMA, getMFMAs
-from rocisa.instruction import SBitcmp1B32
+from .ir import SBitcmp1B32
 
 from rocisa.code import Module, TextBlock, StructuredModule, KernelBody, RegSet, Label
 from rocisa.container import RegisterContainer, RegName, replaceHolder, HWRegContainer, VCC, MemTokenData, sgpr, vgpr
 from rocisa.label import LabelManager
 from rocisa.asmpass import rocIsaPass, rocIsaPassOption
-from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB192, BufferLoadB32, BufferLoadB64, BufferLoadB96, \
+from .ir import BranchInstruction, BufferLoadB128, BufferLoadB192, BufferLoadB32, BufferLoadB64, BufferLoadB96, \
   BufferLoadD16B16, BufferLoadD16U8, DSLoad2B32, DSLoad2B64, DSLoadB128, \
   DSLoadB32, DSLoadB64, DSLoadB192, DSStoreB192, DSLoadB64TrB16, DSLoadB128TrB16, \
   DSLoadB64TrB8, DSLoadB64TrB4, DSLoadB96TrB6, DSLoadInstruction, DSLoadU16, \
@@ -43,7 +43,8 @@ from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB192
   MFMAInstruction, MXMFMAInstruction, SAddU32, SAndB32, SBarrier, SBranch, SCBranchSCC0, SCBranchSCC1, SCBranchVCCNZ, SCmpEQU32, SCmpEQU64, SCmpGeU32, SCmpLeU32, \
   SCSelectB32, SLShiftLeftB32, SLShiftRightB32, SMFMAInstruction, SMovB32, SMovB64, SNop, SEndpgm, SOrB32, SSetPrior, SSetRegIMM32B32, SSubU32, SWaitCnt, SWaitAlu, \
   SLongBranchPositive, VFmaMixF32, VMadMixF32, VMovB32, VAndB32, VCmpEQU32, VCndMaskB32, VMovB64, VNop, VReadfirstlaneB32, TensorLoadToLds, SCMovB32, SCMovB64, t16
-from rocisa.instruction import SSchedulingFence
+from .ir import SSchedulingFence
+from .ir import set_active_version as _set_active_ir_version
 from rocisa.register import RegisterPool
 from rocisa.enum import RegisterType, DataTypeEnum, HighBitSel
 
@@ -7983,6 +7984,10 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
     self.language   = "ASM"
     # ISA version, such as 803
     version = tuple(kernel["ISA"])
+    # Record the ISA for the instruction facade (see ir.py). Today the facade is
+    # a pure passthrough, so this is a no-op; it is the hook the logical-IR
+    # migration flips on to let gfx1250 build logical instructions.
+    _set_active_ir_version(version)
     isgfx950 = kernel["ISA"][:2] == (9, 5)
     ti = rocIsa.getInstance()
     ti.setKernel(version, kernel["WavefrontSize"])
