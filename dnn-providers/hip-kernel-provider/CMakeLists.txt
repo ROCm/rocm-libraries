@@ -47,7 +47,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
 
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
 option(HIPKERNELPROVIDER_ENABLE_ROCKE "Build rocKE engine and smoke tests" OFF)
-option(HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS "Fail configure, instead of warning, when a DVC-stored rocKE or FlyDSL descriptor is not pulled" OFF)
+option(HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS "Fail configure, instead of warning, when a DVC-stored rocKE, FlyDSL or megakernel descriptor is not pulled" OFF)
 # A TheRock build compiles the committed serialization headers by default.
 if(DEFINED THEROCK_SUBPROJECT_TARGET)
     set(_hkp_generate_serialize_default OFF)
@@ -399,12 +399,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT
         "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/descriptors")
 
-    # Large rocKE bundle files (KDPs, kernel objects, heuristic models) and FlyDSL's
-    # per-target content directories (objects, manifest, KDP) are DVC outputs, each a file
-    # with a <file>.dvc pointer or a folder with a <folder>.dvc pointer. For each enabled
-    # producer, warn when one is missing or differs from its pointer (file size, or folder
-    # file count) so the shipped bundle is not silently left out; tests still configure
-    # and run. REQUIRE_DVC_DESCRIPTORS turns the warning into an error for release builds.
+    # Large rocKE bundle files (KDPs, kernel objects, heuristic models), FlyDSL's
+    # per-target content directories, and megakernel code objects are DVC outputs.
+    # Each is a file with a <file>.dvc pointer or a folder with a <folder>.dvc pointer.
+    # For each enabled producer, warn when an output is missing or differs from its
+    # pointer (file size or folder file count) so the bundle is not silently left out.
+    # Tests still configure and run. REQUIRE_DVC_DESCRIPTORS turns the warning
+    # into an error for release builds.
     # The root this build packs from is checked, and the integration test root, whose
     # rocKE seed catalog (gfx950_conv_fwd_aot_seed) keeps its KDPs in DVC too.
     #
@@ -414,6 +415,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # under heuristics/), and the packer refuses a dangling reference. The tests of an
     # integration bundle left out are then not registered. FlyDSL's per-target directories
     # are handled by flydsl/CMakeLists.txt, which ships the targets that were pulled.
+    #
+    # An incomplete megakernel bundle is also left out. When present, its pack step
+    # checks each code object's sha256 against the committed lock.
     set(HKP_PRODUCT_EXCLUDED_BUNDLES "")
     set(HKP_INTEGRATION_EXCLUDED_BUNDLES "")
     if(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT)
@@ -428,7 +432,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     if(HIPKERNELPROVIDER_ENABLE_FLYDSL)
         list(APPEND _dvc_producers FlyDSL)
     endif()
-    # <root label>|<producer> pairs: the test root holds no FlyDSL content.
+    if(ENABLE_MEGAKERNEL_ENGINE)
+        list(APPEND _dvc_producers megakernel)
+    endif()
+    # <root label>|<producer> pairs: the test root holds no FlyDSL or megakernel content.
     set(_dvc_checks "")
     foreach(_producer IN LISTS _dvc_producers)
         list(APPEND _dvc_checks "PRODUCT|${_producer}")
@@ -477,6 +484,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                     string(REGEX MATCH "^[^/]+/[^/]+" _bundle "${_rel}")
                     list(APPEND HKP_${_label}_EXCLUDED_BUNDLES "${_bundle}")
                     set(_skipped "The bundle ${_bundle} will NOT be packed.")
+                elseif(_producer STREQUAL "megakernel")
+                    # One bundle: the family folder. Its KDP names the code objects.
+                    list(APPEND HKP_PRODUCT_EXCLUDED_BUNDLES megakernel)
+                    set(_skipped "The megakernel bundle will NOT be packed.")
                 endif()
                 message(${_level}
                     "hip-kernel-provider: ${_producer} DVC output ${_output} is missing or "
