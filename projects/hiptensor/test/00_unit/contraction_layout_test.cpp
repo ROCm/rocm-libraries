@@ -29,7 +29,9 @@
 #include <hiptensor/hiptensor.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <complex>
 #include <limits>
 #include <map>
 #include <optional>
@@ -44,16 +46,23 @@
 // from a reference computed from the mode labels and the strides given to the
 // descriptors, so it shares no code with hipTensor's host path (unlike the YAML suites,
 // whose reference goes through the same mode normalization as the library).
+//
+// The trinary tests use
+// E[m0,m1,n] = alpha * sum_{k0,k1} A[m0,m1,k0] * B[k0,k1] * C[k1,n] (+ beta * D[m0,m1,n]).
 
 namespace
 {
     constexpr int32_t M0 = 'm', M1 = 'p', N0 = 'n', K0 = 'k', K1 = 'q';
     constexpr double  kTolerance = 1e-4;
 
+    // Floats per element.
+    constexpr int kReal = 1, kComplex = 2;
+
     struct Layout
     {
         bool reversed; // modes listed in reverse order
         bool rowMajor; // packed with the last listed mode contiguous
+        bool padded = false; // every stride doubled, which leaves gaps between elements
     };
 
     constexpr Layout kLayouts[] = {{false, false}, {false, true}, {true, false}, {true, true}};
@@ -61,10 +70,14 @@ namespace
     // The layout every contraction kernel supports: modes in their natural order, col-major.
     constexpr Layout kCanonical{false, false};
 
+    constexpr Layout kRowMajor{false, true};
+    constexpr Layout kPadded{false, false, true};
+
     // Part of a gtest name, e.g. "nat_col".
     std::string tag(Layout l)
     {
-        return std::string(l.reversed ? "rev" : "nat") + (l.rowMajor ? "_row" : "_col");
+        return std::string(l.reversed ? "rev" : "nat") + (l.rowMajor ? "_row" : "_col")
+               + (l.padded ? "_pad" : "");
     }
 
     // Lets gtest print a Layout parameter readably in failure messages.
@@ -86,20 +99,24 @@ namespace
     {
         std::vector<int32_t> modes; // listed order
         std::vector<int64_t> lengths; // listed order
-        std::vector<int64_t> strides; // listed order
+        std::vector<int64_t> strides; // listed order, in elements
         int64_t              elements = 1;
+        int64_t              span       = 1; // positions from the first element to the last
+        int                  components = kReal;
         std::vector<float>   data; // host values; empty for the output D
     };
 
-    // A packed tensor with the given layout and no data.
-    Tensor makeTensor(std::vector<int32_t> modes, ModeMap const& ext, Layout l)
+    // A tensor with the given layout and no data.
+    Tensor
+        makeTensor(std::vector<int32_t> modes, ModeMap const& ext, Layout l, int components = kReal)
     {
         if(l.reversed)
         {
             std::ranges::reverse(modes);
         }
         Tensor t;
-        t.modes = modes;
+        t.modes      = modes;
+        t.components = components;
         for(auto m : modes)
         {
             t.lengths.push_back(ext.at(m));
@@ -108,19 +125,24 @@ namespace
         for(size_t j = 0; j < modes.size(); j++)
         {
             size_t i     = l.rowMajor ? modes.size() - 1 - j : j;
-            t.strides[i] = t.elements;
+            t.strides[i] = t.elements * (l.padded ? 2 : 1);
             t.elements *= t.lengths[i];
+            t.span += (t.lengths[i] - 1) * t.strides[i];
         }
         return t;
     }
 
     // An input tensor: the layout from makeTensor, filled with values in [-1, 1).
-    Tensor makeInput(std::vector<int32_t> modes, ModeMap const& ext, Layout l, unsigned seed)
+    Tensor makeInput(std::vector<int32_t> modes,
+                     ModeMap const&       ext,
+                     Layout               l,
+                     unsigned             seed,
+                     int                  components = kReal)
     {
-        Tensor                                t = makeTensor(std::move(modes), ext, l);
+        Tensor                                t = makeTensor(std::move(modes), ext, l, components);
         std::mt19937                          gen(seed);
         std::uniform_real_distribution<float> dist(-1.f, 1.f);
-        t.data.resize(t.elements);
+        t.data.resize(t.span * t.components);
         for(auto& x : t.data)
         {
             x = dist(gen);
@@ -129,15 +151,21 @@ namespace
     }
 
     // D = alpha * sum(A * B) (+ beta * C)
+    //
+    // With a third factor it is the trinary contraction, where the API calls the factors
+    // A, B and C, the added tensor D and the result E. Here they are a, b, third, c and d.
     struct Contraction
     {
-        float                 alpha;
-        float                 beta;
+        std::complex<float>   alpha;
+        std::complex<float>   beta;
         Tensor                a;
         Tensor                b;
+        std::optional<Tensor> third; // present: trinary contraction
         std::optional<Tensor> c; // absent: scale contraction
         Tensor                d;
         bool                  inPlace = false; // C and D are one buffer
+        bool                  negateC = false; // C is read through HIPTENSOR_OP_NEG
+        hiptensorAlgo_t       algo    = HIPTENSOR_ALGO_DEFAULT;
     };
 
     int64_t offset(Tensor const& t, ModeMap const& idx)
@@ -148,6 +176,13 @@ namespace
             off += t.strides[i] * idx.at(t.modes[i]);
         }
         return off;
+    }
+
+    // The element of t at idx. A real element has a zero imaginary part.
+    std::complex<double> element(Tensor const& t, ModeMap const& idx)
+    {
+        float const* x = &t.data[offset(t, idx) * t.components];
+        return {x[0], t.components == kComplex ? x[1] : 0.f};
     }
 
     // Sets idx to the index values of the given modes at linear position n,
@@ -178,30 +213,49 @@ namespace
         }
     }
 
-    // Independent reference: D = alpha * sum(A * B) (+ beta * C), computed from the mode
-    // labels and the descriptor strides only, accumulated in double.
-    std::vector<double> reference(Contraction const& p, ModeMap const& ext)
+    // Adds to contracted the modes of t that D does not have.
+    void addContracted(Tensor const& t, Tensor const& d, std::vector<int32_t>& contracted)
     {
-        std::vector<int32_t> contracted; // modes of A that D does not have
-        for(auto m : p.a.modes)
+        for(auto m : t.modes)
         {
-            if(std::ranges::find(p.d.modes, m) == p.d.modes.end())
+            if(std::ranges::find(d.modes, m) == d.modes.end()
+               && std::ranges::find(contracted, m) == contracted.end())
             {
                 contracted.push_back(m);
             }
         }
+    }
 
-        std::vector<double> out(p.d.elements, 0.0);
-        ModeMap             idx;
+    // Independent reference: D = alpha * sum(A * B) (+ beta * C), computed from the mode
+    // labels and the descriptor strides only, accumulated in double. One value per
+    // position of D; a gap of a padded D holds NaN.
+    std::vector<std::complex<double>> reference(Contraction const& p, ModeMap const& ext)
+    {
+        std::vector<int32_t> contracted;
+        addContracted(p.a, p.d, contracted);
+        addContracted(p.b, p.d, contracted);
+        if(p.third)
+        {
+            addContracted(*p.third, p.d, contracted);
+        }
+
+        std::vector<std::complex<double>> out(p.d.span, std::numeric_limits<double>::quiet_NaN());
+        ModeMap                           idx;
         forEachIndex(p.d.modes, ext, idx, [&] {
-            double sum = 0.0;
+            std::complex<double> sum = 0.0;
             forEachIndex(contracted, ext, idx, [&] {
-                sum += double(p.a.data[offset(p.a, idx)]) * double(p.b.data[offset(p.b, idx)]);
+                auto product = element(p.a, idx) * element(p.b, idx);
+                if(p.third)
+                {
+                    product *= element(*p.third, idx);
+                }
+                sum += product;
             });
-            double value = double(p.alpha) * sum;
+            auto value = std::complex<double>(p.alpha) * sum;
             if(p.c)
             {
-                value += double(p.beta) * double(p.c->data[offset(*p.c, idx)]);
+                value
+                    += (p.negateC ? -1.0 : 1.0) * std::complex<double>(p.beta) * element(*p.c, idx);
             }
             out[offset(p.d, idx)] = value;
         });
@@ -209,23 +263,34 @@ namespace
     }
 
     // Largest absolute error relative to the largest reference value (at least 1).
-    // An element the kernel never wrote is still NaN and counts as infinitely wrong.
-    double maxRelError(std::vector<float> const& got, std::vector<double> const& ref)
+    // An element the kernel never wrote is still NaN and counts as infinitely wrong,
+    // and so does a gap of a padded D that the kernel wrote to.
+    double maxRelError(std::vector<float> const&                got,
+                       int                                      components,
+                       std::vector<std::complex<double>> const& ref)
     {
         double scale = 1.0;
         double err   = 0.0;
-        for(double x : ref)
+        for(auto const& x : ref)
         {
-            scale = std::max(scale, std::abs(x));
+            if(!std::isnan(x.real()))
+            {
+                scale = std::max(scale, std::abs(x));
+            }
         }
         for(size_t i = 0; i < ref.size(); i++)
         {
-            double e = std::abs(double(got[i]) - ref[i]);
-            if(std::isnan(e))
+            float const*         x = &got[i * components];
+            std::complex<double> value{x[0], components == kComplex ? x[1] : 0.f};
+            bool                 gap = std::isnan(ref[i].real());
+            if(gap != std::isnan(value.real()) || std::isnan(value.imag()))
             {
                 return std::numeric_limits<double>::infinity();
             }
-            err = std::max(err, e);
+            if(!gap)
+            {
+                err = std::max(err, std::abs(value - ref[i]));
+            }
         }
         return err / scale;
     }
@@ -238,7 +303,8 @@ namespace
                                                   static_cast<uint32_t>(t.modes.size()),
                                                   t.lengths.data(),
                                                   t.strides.data(),
-                                                  HIPTENSOR_R_32F,
+                                                  t.components == kComplex ? HIPTENSOR_C_32F
+                                                                           : HIPTENSOR_R_32F,
                                                   sizeof(float)),
                   HIPTENSOR_STATUS_SUCCESS);
         return desc;
@@ -256,33 +322,61 @@ namespace
         Result r;
         auto   descA = describe(h, p.a);
         auto   descB = describe(h, p.b);
+        auto   descT = p.third ? describe(h, *p.third) : nullptr;
         auto   descD = describe(h, p.d);
         auto   descC = p.c ? describe(h, *p.c) : nullptr;
+
+        auto const compute
+            = p.d.components == kComplex ? HIPTENSOR_COMPUTE_DESC_C32F : HIPTENSOR_COMPUTE_DESC_32F;
+        auto const opC = p.negateC ? HIPTENSOR_OP_NEG : HIPTENSOR_OP_IDENTITY;
 
         hiptensorOperationDescriptor_t op   = nullptr;
         hiptensorPlanPreference_t      pref = nullptr;
         hiptensorPlan_t                plan = nullptr;
         uint64_t                       ws   = 0;
-        void *dA = nullptr, *dB = nullptr, *dC = nullptr, *dD = nullptr, *dW = nullptr;
+        void *dA = nullptr, *dB = nullptr, *dT = nullptr, *dC = nullptr, *dD = nullptr,
+             *dW = nullptr;
 
-        r.status = hiptensorCreateContraction(h,
-                                              &op,
-                                              descA,
-                                              p.a.modes.data(),
-                                              HIPTENSOR_OP_IDENTITY,
-                                              descB,
-                                              p.b.modes.data(),
-                                              HIPTENSOR_OP_IDENTITY,
-                                              descC,
-                                              p.c ? p.c->modes.data() : nullptr,
-                                              HIPTENSOR_OP_IDENTITY,
-                                              descD,
-                                              p.d.modes.data(),
-                                              HIPTENSOR_COMPUTE_DESC_32F);
+        if(p.third)
+        {
+            r.status = hiptensorCreateContractionTrinary(h,
+                                                         &op,
+                                                         descA,
+                                                         p.a.modes.data(),
+                                                         HIPTENSOR_OP_IDENTITY,
+                                                         descB,
+                                                         p.b.modes.data(),
+                                                         HIPTENSOR_OP_IDENTITY,
+                                                         descT,
+                                                         p.third->modes.data(),
+                                                         HIPTENSOR_OP_IDENTITY,
+                                                         descC,
+                                                         p.c ? p.c->modes.data() : nullptr,
+                                                         opC,
+                                                         descD,
+                                                         p.d.modes.data(),
+                                                         compute);
+        }
+        else
+        {
+            r.status = hiptensorCreateContraction(h,
+                                                  &op,
+                                                  descA,
+                                                  p.a.modes.data(),
+                                                  HIPTENSOR_OP_IDENTITY,
+                                                  descB,
+                                                  p.b.modes.data(),
+                                                  HIPTENSOR_OP_IDENTITY,
+                                                  descC,
+                                                  p.c ? p.c->modes.data() : nullptr,
+                                                  opC,
+                                                  descD,
+                                                  p.d.modes.data(),
+                                                  compute);
+        }
         if(r.status == HIPTENSOR_STATUS_SUCCESS)
         {
-            r.status = hiptensorCreatePlanPreference(
-                h, &pref, HIPTENSOR_ALGO_DEFAULT, HIPTENSOR_JIT_MODE_NONE);
+            r.status = hiptensorCreatePlanPreference(h, &pref, p.algo, HIPTENSOR_JIT_MODE_NONE);
         }
         if(r.status == HIPTENSOR_STATUS_SUCCESS)
         {
@@ -302,8 +396,13 @@ namespace
                     hipMemcpy(*dst, src.data(), src.size() * sizeof(float), hipMemcpyHostToDevice),
                     hipSuccess);
             };
+            size_t const sizeD = p.d.span * p.d.components;
             upload(&dA, p.a.data);
             upload(&dB, p.b.data);
+            if(p.third)
+            {
+                upload(&dT, p.third->data);
+            }
             if(p.c && !p.inPlace)
             {
                 upload(&dC, p.c->data);
@@ -311,25 +410,32 @@ namespace
             // NaN in D: an element the kernel never writes cannot pass the check.
             // In place, D starts with C's values.
             upload(&dD,
-                   p.inPlace
-                       ? p.c->data
-                       : std::vector<float>(p.d.elements, std::numeric_limits<float>::quiet_NaN()));
+                   p.inPlace ? p.c->data
+                             : std::vector<float>(sizeD, std::numeric_limits<float>::quiet_NaN()));
             if(ws > 0)
             {
                 EXPECT_EQ(hipMalloc(&dW, ws), hipSuccess);
             }
 
-            r.status = hiptensorContract(
-                h, plan, &p.alpha, dA, dB, &p.beta, p.inPlace ? dD : dC, dD, dW, ws, nullptr);
+            void* added = p.inPlace ? dD : dC;
+            if(p.third)
+            {
+                r.status = hiptensorContractTrinary(
+                    h, plan, &p.alpha, dA, dB, dT, &p.beta, added, dD, dW, ws, nullptr);
+            }
+            else
+            {
+                r.status = hiptensorContract(
+                    h, plan, &p.alpha, dA, dB, &p.beta, added, dD, dW, ws, nullptr);
+            }
             EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-            r.D.resize(p.d.elements);
-            EXPECT_EQ(
-                hipMemcpy(r.D.data(), dD, p.d.elements * sizeof(float), hipMemcpyDeviceToHost),
-                hipSuccess);
+            r.D.resize(sizeD);
+            EXPECT_EQ(hipMemcpy(r.D.data(), dD, sizeD * sizeof(float), hipMemcpyDeviceToHost),
+                      hipSuccess);
         }
 
-        for(void* ptr : {dA, dB, dC, dD, dW})
+        for(void* ptr : {dA, dB, dT, dC, dD, dW})
         {
             (void)hipFree(ptr);
         }
@@ -345,7 +451,7 @@ namespace
         {
             hiptensorDestroyOperationDescriptor(op);
         }
-        for(auto desc : {descA, descB, descC, descD})
+        for(auto desc : {descA, descB, descT, descC, descD})
         {
             if(desc)
             {
@@ -371,8 +477,85 @@ namespace
             GTEST_SKIP() << "no kernel for this contraction on this device";
         }
         ASSERT_EQ(r.status, HIPTENSOR_STATUS_SUCCESS);
-        double err = maxRelError(r.D, reference(p, ext));
+        double err = maxRelError(r.D, p.d.components, reference(p, ext));
         EXPECT_LE(err, kTolerance) << "max relative error " << err;
+    }
+
+    // Expects hipTensor to refuse the contraction with the given status. Skips when
+    // the device cannot run this element type at all, which create reports first.
+    void expectRefused(hiptensorHandle_t h, Contraction const& p, hiptensorStatus_t expected)
+    {
+        auto status = run(h, p).status;
+        if(status == HIPTENSOR_STATUS_ARCH_MISMATCH)
+        {
+            GTEST_SKIP() << "no kernel for this element type on this device";
+        }
+        EXPECT_EQ(status, expected);
+    }
+
+    // How a test differs from the plain f32 contraction.
+    struct Variant
+    {
+        int             components = kReal;
+        hiptensorAlgo_t algo       = HIPTENSOR_ALGO_DEFAULT;
+        bool            negateC    = false;
+    };
+
+    // The bilinear contraction of the layout tests, with one layout per tensor.
+    Contraction bilinear(ModeMap const& ext, Layout a, Layout b, Layout c, Layout d, Variant v = {})
+    {
+        return Contraction{.alpha   = {1.5f, v.components == kComplex ? 0.25f : 0.f},
+                           .beta    = {0.5f, v.components == kComplex ? -0.75f : 0.f},
+                           .a       = makeInput({M0, M1, K0, K1}, ext, a, 1, v.components),
+                           .b       = makeInput({N0, K0, K1}, ext, b, 2, v.components),
+                           .c       = makeInput({M0, M1, N0}, ext, c, 3, v.components),
+                           .d       = makeTensor({M0, M1, N0}, ext, d, v.components),
+                           .negateC = v.negateC,
+                           .algo    = v.algo};
+    }
+
+    // Positions of the tensors in the layout array of a trinary contraction, by API name.
+    enum TrinaryTensor
+    {
+        kA,
+        kB,
+        kC,
+        kD,
+        kE,
+        kAll // not a tensor: every tensor gets the layout
+    };
+
+    using TrinaryLayouts = std::array<Layout, 5>;
+
+    constexpr TrinaryLayouts kTrinaryCanonical{
+        kCanonical, kCanonical, kCanonical, kCanonical, kCanonical};
+
+    // The canonical layouts with one tensor, or all of them, laid out as l.
+    TrinaryLayouts trinaryLayouts(int which, Layout l)
+    {
+        TrinaryLayouts layouts = kTrinaryCanonical;
+        for(int i = 0; i < 5; i++)
+        {
+            if(which == i || which == kAll)
+            {
+                layouts[i] = l;
+            }
+        }
+        return layouts;
+    }
+
+    // The trinary contraction of the layout tests, with layouts in the order A, B, C, D, E.
+    Contraction trinary(ModeMap const& ext, TrinaryLayouts const& l, Variant v = {})
+    {
+        return Contraction{.alpha   = {1.5f, v.components == kComplex ? 0.25f : 0.f},
+                           .beta    = {0.5f, v.components == kComplex ? -0.75f : 0.f},
+                           .a       = makeInput({M0, M1, K0}, ext, l[kA], 1, v.components),
+                           .b       = makeInput({K0, K1}, ext, l[kB], 2, v.components),
+                           .third   = makeInput({K1, N0}, ext, l[kC], 4, v.components),
+                           .c       = makeInput({M0, M1, N0}, ext, l[kD], 3, v.components),
+                           .d       = makeTensor({M0, M1, N0}, ext, l[kE], v.components),
+                           .negateC = v.negateC,
+                           .algo    = v.algo};
     }
 
     class ContractionTestBase : public ::testing::Test
@@ -408,8 +591,23 @@ namespace
     {
     };
 
-    // Contractions that hipTensor must refuse.
-    class ContractionRefusedTest : public ContractionTestBase
+    // Trinary: the tensor that gets the layout (a TrinaryTensor; the others are
+    // canonical); the layout; whether m1 has length 1.
+    using TrinaryLayoutCase = std::tuple<int, Layout, bool>;
+
+    class ContractionTrinaryLayoutTest : public ContractionTestBase,
+                                         public ::testing::WithParamInterface<TrinaryLayoutCase>
+    {
+    };
+
+    // The padded tensor of a binary contraction: 0 to 3 for A, B, C, D.
+    class ContractionPaddedTest : public ContractionTestBase,
+                                  public ::testing::WithParamInterface<int>
+    {
+    };
+
+    // The checks on a contraction: what hipTensor must refuse, and what it must still accept.
+    class ContractionCheckTest : public ContractionTestBase
     {
     };
 
@@ -430,6 +628,19 @@ namespace
     {
         auto const& [lc, unitMode] = info.param;
         return "C_" + tag(lc) + "_" + sizeTag(unitMode);
+    }
+
+    std::string trinaryLayoutCaseName(::testing::TestParamInfo<TrinaryLayoutCase> const& info)
+    {
+        constexpr char const* names[]    = {"A", "B", "C", "D", "E", "All"};
+        auto const& [which, l, unitMode] = info.param;
+        return std::string(names[which]) + "_" + tag(l) + "_" + sizeTag(unitMode);
+    }
+
+    std::string paddedCaseName(::testing::TestParamInfo<int> const& info)
+    {
+        constexpr char const* names[] = {"A", "B", "C", "D"};
+        return names[info.param];
     }
 } // namespace
 
@@ -465,6 +676,42 @@ TEST_P(ContractionLayoutTest, Bilinear)
         mHandle, ext, contraction(la, lb, ld), contraction(kCanonical, kCanonical, kCanonical));
 }
 
+// A unary operator on C selects the kernels that apply operators.
+TEST_P(ContractionLayoutTest, BilinearUnary)
+{
+    auto const [la, lb, ld, unitMode] = GetParam();
+    auto const    ext                 = extents(unitMode);
+    Variant const v{.negateC = true};
+    expectCorrect(mHandle,
+                  ext,
+                  bilinear(ext, la, lb, ld, ld, v),
+                  bilinear(ext, kCanonical, kCanonical, kCanonical, kCanonical, v));
+}
+
+// The actor-critic kernel selection picks other kernels than the default one.
+TEST_P(ContractionLayoutTest, BilinearActorCritic)
+{
+    auto const [la, lb, ld, unitMode] = GetParam();
+    auto const    ext                 = extents(unitMode);
+    Variant const v{.algo = HIPTENSOR_ALGO_ACTOR_CRITIC};
+    expectCorrect(mHandle,
+                  ext,
+                  bilinear(ext, la, lb, ld, ld, v),
+                  bilinear(ext, kCanonical, kCanonical, kCanonical, kCanonical, v));
+}
+
+// The complex path needs C laid out like D.
+TEST_P(ContractionLayoutTest, BilinearComplex)
+{
+    auto const [la, lb, ld, unitMode] = GetParam();
+    auto const    ext                 = extents(unitMode);
+    Variant const v{.components = kComplex};
+    expectCorrect(mHandle,
+                  ext,
+                  bilinear(ext, la, lb, ld, ld, v),
+                  bilinear(ext, kCanonical, kCanonical, kCanonical, kCanonical, v));
+}
+
 // C laid out differently from D: develop reads C with D's strides.
 TEST_P(ContractionCLayoutTest, Bilinear)
 {
@@ -481,8 +728,61 @@ TEST_P(ContractionCLayoutTest, Bilinear)
     expectCorrect(mHandle, ext, contraction(lc), contraction(kCanonical));
 }
 
+TEST_P(ContractionCLayoutTest, BilinearUnary)
+{
+    auto const [lc, unitMode] = GetParam();
+    auto const    ext         = extents(unitMode);
+    Variant const v{.negateC = true};
+    expectCorrect(mHandle,
+                  ext,
+                  bilinear(ext, kCanonical, kCanonical, lc, kCanonical, v),
+                  bilinear(ext, kCanonical, kCanonical, kCanonical, kCanonical, v));
+}
+
+TEST_P(ContractionCLayoutTest, BilinearActorCritic)
+{
+    auto const [lc, unitMode] = GetParam();
+    auto const    ext         = extents(unitMode);
+    Variant const v{.algo = HIPTENSOR_ALGO_ACTOR_CRITIC};
+    expectCorrect(mHandle,
+                  ext,
+                  bilinear(ext, kCanonical, kCanonical, lc, kCanonical, v),
+                  bilinear(ext, kCanonical, kCanonical, kCanonical, kCanonical, v));
+}
+
+// One padded tensor: its strides leave gaps, so no kernel may treat it as packed.
+TEST_P(ContractionPaddedTest, Bilinear)
+{
+    auto const            ext = extents(false);
+    std::array<Layout, 4> l{kCanonical, kCanonical, kCanonical, kCanonical};
+    l[GetParam()] = kPadded;
+    expectCorrect(mHandle,
+                  ext,
+                  bilinear(ext, l[0], l[1], l[2], l[3]),
+                  bilinear(ext, kCanonical, kCanonical, kCanonical, kCanonical));
+}
+
+TEST_P(ContractionTrinaryLayoutTest, Bilinear)
+{
+    auto const [which, l, unitMode] = GetParam();
+    auto const ext                  = extents(unitMode);
+    expectCorrect(
+        mHandle, ext, trinary(ext, trinaryLayouts(which, l)), trinary(ext, kTrinaryCanonical));
+}
+
+// The complex path needs D laid out like E, so D always gets E's layout here.
+TEST_P(ContractionTrinaryLayoutTest, BilinearComplex)
+{
+    auto const [which, l, unitMode] = GetParam();
+    auto const    ext               = extents(unitMode);
+    Variant const v{.components = kComplex};
+    auto          layouts = trinaryLayouts(which, l);
+    layouts[kD]           = layouts[kE];
+    expectCorrect(mHandle, ext, trinary(ext, layouts, v), trinary(ext, kTrinaryCanonical, v));
+}
+
 // C must have D's modes: here C lacks n.
-TEST_F(ContractionRefusedTest, CLacksMode)
+TEST_F(ContractionCheckTest, CLacksMode)
 {
     auto const  ext = extents(false);
     Contraction p{.alpha = 1.5f,
@@ -491,11 +791,11 @@ TEST_F(ContractionRefusedTest, CLacksMode)
                   .b     = makeInput({N0, K0, K1}, ext, kCanonical, 2),
                   .c     = makeInput({M0, M1}, ext, kCanonical, 3),
                   .d     = makeTensor({M0, M1, N0}, ext, kCanonical)};
-    EXPECT_EQ(run(mHandle, p).status, HIPTENSOR_STATUS_NOT_SUPPORTED);
+    expectRefused(mHandle, p, HIPTENSOR_STATUS_NOT_SUPPORTED);
 }
 
 // C must give each mode D's extent: here n is 4 in C and 5 in D.
-TEST_F(ContractionRefusedTest, CExtentDiffers)
+TEST_F(ContractionCheckTest, CExtentDiffers)
 {
     auto const ext  = extents(false);
     auto       extC = ext;
@@ -506,12 +806,12 @@ TEST_F(ContractionRefusedTest, CExtentDiffers)
                   .b     = makeInput({N0, K0, K1}, ext, kCanonical, 2),
                   .c     = makeInput({M0, M1, N0}, extC, kCanonical, 3),
                   .d     = makeTensor({M0, M1, N0}, ext, kCanonical)};
-    EXPECT_EQ(run(mHandle, p).status, HIPTENSOR_STATUS_INVALID_VALUE);
+    expectRefused(mHandle, p, HIPTENSOR_STATUS_INVALID_VALUE);
 }
 
 // C and D in one buffer with the same layout: each element is read
 // and written in place.
-TEST_F(ContractionRefusedTest, InPlaceSameLayout)
+TEST_F(ContractionCheckTest, InPlaceSameLayout)
 {
     auto const  ext = extents(false);
     Contraction p{.alpha   = 1.5f,
@@ -521,12 +821,16 @@ TEST_F(ContractionRefusedTest, InPlaceSameLayout)
                   .c       = makeInput({M0, M1, N0}, ext, kCanonical, 3),
                   .d       = makeTensor({M0, M1, N0}, ext, kCanonical),
                   .inPlace = true};
-    expectCorrect(mHandle, ext, p, p);
+    // The skip reference is the same contraction out of place, so that a refused
+    // in-place call fails the test.
+    auto outOfPlace    = p;
+    outOfPlace.inPlace = false;
+    expectCorrect(mHandle, ext, p, outOfPlace);
 }
 
 // C and D in one buffer with different strides: the kernel would read elements
 // of C that it has already overwritten.
-TEST_F(ContractionRefusedTest, InPlaceStridesDiffer)
+TEST_F(ContractionCheckTest, InPlaceStridesDiffer)
 {
     auto const  ext = extents(false);
     Contraction p{.alpha   = 1.5f,
@@ -536,7 +840,174 @@ TEST_F(ContractionRefusedTest, InPlaceStridesDiffer)
                   .c       = makeInput({M0, M1, N0}, ext, kCanonical, 3),
                   .d       = makeTensor({M0, M1, N0}, ext, Layout{false, true}),
                   .inPlace = true};
-    EXPECT_EQ(run(mHandle, p).status, HIPTENSOR_STATUS_NOT_SUPPORTED);
+    expectRefused(mHandle, p, HIPTENSOR_STATUS_NOT_SUPPORTED);
+}
+
+// The complex path does not use C's own layout.
+TEST_F(ContractionCheckTest, ComplexCLayoutDiffers)
+{
+    auto const ext = extents(false);
+    expectRefused(
+        mHandle,
+        bilinear(ext, kCanonical, kCanonical, kRowMajor, kCanonical, {.components = kComplex}),
+        HIPTENSOR_STATUS_NOT_SUPPORTED);
+}
+
+// The complex path sizes its buffers by the number of elements, so it cannot
+// hold a tensor with gaps.
+TEST_F(ContractionCheckTest, ComplexPadded)
+{
+    auto const ext = extents(false);
+    for(int i = 0; i < 4; i++)
+    {
+        SCOPED_TRACE("padded tensor " + std::to_string(i) + " of A, B, C, D");
+        std::array<Layout, 4> l{kCanonical, kCanonical, kCanonical, kCanonical};
+        l[i] = kPadded;
+        expectRefused(mHandle,
+                      bilinear(ext, l[0], l[1], l[2], l[3], {.components = kComplex}),
+                      HIPTENSOR_STATUS_NOT_SUPPORTED);
+    }
+}
+
+// C lists its modes in reverse and is row-major, so each mode has D's stride:
+// the same layout under another description.
+TEST_F(ContractionCheckTest, InPlaceModesReordered)
+{
+    auto const ext = extents(false);
+    auto       p   = bilinear(ext, kCanonical, kCanonical, Layout{true, true}, kCanonical);
+    p.inPlace      = true;
+    // The skip reference is the same contraction out of place, so that a refused
+    // in-place call fails the test.
+    auto outOfPlace    = p;
+    outOfPlace.inPlace = false;
+    expectCorrect(mHandle, ext, p, outOfPlace);
+}
+
+// The stride of a mode of extent 1 moves no position, so it may differ between
+// C and D. Here C lists the unit mode p first: its stride is 1 in C and 3 in D.
+TEST_F(ContractionCheckTest, InPlaceUnitModeStrideDiffers)
+{
+    auto const ext = extents(true);
+    auto       p   = bilinear(ext, kCanonical, kCanonical, kCanonical, kCanonical);
+    p.c            = makeInput({M1, M0, N0}, ext, kCanonical, 3);
+    p.inPlace      = true;
+    // The skip reference is the same contraction out of place, so that a refused
+    // in-place call fails the test.
+    auto outOfPlace    = p;
+    outOfPlace.inPlace = false;
+    expectCorrect(mHandle, ext, p, outOfPlace);
+}
+
+TEST_F(ContractionCheckTest, ComplexUnitModeStrideDiffers)
+{
+    auto const    ext = extents(true);
+    Variant const v{.components = kComplex};
+    auto const    canonical = bilinear(ext, kCanonical, kCanonical, kCanonical, kCanonical, v);
+    auto          p         = canonical;
+    p.c                     = makeInput({M1, M0, N0}, ext, kCanonical, 3, kComplex);
+    expectCorrect(mHandle, ext, p, canonical);
+}
+
+// The complex path splits its tensors into planes. In place, it must read all
+// of C before it writes D.
+TEST_F(ContractionCheckTest, ComplexInPlaceSameLayout)
+{
+    auto const ext = extents(false);
+    auto       p
+        = bilinear(ext, kCanonical, kCanonical, kCanonical, kCanonical, {.components = kComplex});
+    p.inPlace = true;
+    // The skip reference is the same contraction out of place, so that a refused
+    // in-place call fails the test.
+    auto outOfPlace    = p;
+    outOfPlace.inPlace = false;
+    expectCorrect(mHandle, ext, p, outOfPlace);
+}
+
+// Two modes of A share stride 1, so elements overlap. The last element still
+// sits at position "number of elements - 1", which must not pass as packed.
+TEST_F(ContractionCheckTest, ComplexOverlappingStrides)
+{
+    auto const ext = extents(false);
+    auto       p
+        = bilinear(ext, kCanonical, kCanonical, kCanonical, kCanonical, {.components = kComplex});
+    p.a.strides = {1, 1, 2, 32};
+    expectRefused(mHandle, p, HIPTENSOR_STATUS_NOT_SUPPORTED);
+}
+
+// Trinary: D must have E's modes. Here D lacks n.
+TEST_F(ContractionCheckTest, TrinaryDLacksMode)
+{
+    auto const ext = extents(false);
+    auto       p   = trinary(ext, kTrinaryCanonical);
+    p.c            = makeInput({M0, M1}, ext, kCanonical, 3);
+    expectRefused(mHandle, p, HIPTENSOR_STATUS_NOT_SUPPORTED);
+}
+
+// Trinary: D must give each mode E's extent. Here n is 4 in D and 5 in E.
+TEST_F(ContractionCheckTest, TrinaryDExtentDiffers)
+{
+    auto const ext  = extents(false);
+    auto       extD = ext;
+    extD[N0]        = 4;
+    auto p          = trinary(ext, kTrinaryCanonical);
+    p.c             = makeInput({M0, M1, N0}, extD, kCanonical, 3);
+    expectRefused(mHandle, p, HIPTENSOR_STATUS_INVALID_VALUE);
+}
+
+// Trinary: D and E in one buffer with the same layout.
+TEST_F(ContractionCheckTest, TrinaryInPlaceSameLayout)
+{
+    auto const ext = extents(false);
+    auto       p   = trinary(ext, kTrinaryCanonical);
+    p.inPlace      = true;
+    // The skip reference is the same contraction out of place, so that a refused
+    // in-place call fails the test.
+    auto outOfPlace    = p;
+    outOfPlace.inPlace = false;
+    expectCorrect(mHandle, ext, p, outOfPlace);
+}
+
+// Trinary: D and E in one buffer with different strides.
+TEST_F(ContractionCheckTest, TrinaryInPlaceStridesDiffer)
+{
+    auto const ext = extents(false);
+    auto       p   = trinary(ext, trinaryLayouts(kE, kRowMajor));
+    p.inPlace      = true;
+    expectRefused(mHandle, p, HIPTENSOR_STATUS_NOT_SUPPORTED);
+}
+
+TEST_F(ContractionCheckTest, TrinaryComplexInPlaceSameLayout)
+{
+    auto const ext = extents(false);
+    auto       p   = trinary(ext, kTrinaryCanonical, {.components = kComplex});
+    p.inPlace      = true;
+    // The skip reference is the same contraction out of place, so that a refused
+    // in-place call fails the test.
+    auto outOfPlace    = p;
+    outOfPlace.inPlace = false;
+    expectCorrect(mHandle, ext, p, outOfPlace);
+}
+
+// Trinary: the complex path does not use D's own layout.
+TEST_F(ContractionCheckTest, TrinaryComplexDLayoutDiffers)
+{
+    auto const ext = extents(false);
+    expectRefused(mHandle,
+                  trinary(ext, trinaryLayouts(kD, kRowMajor), {.components = kComplex}),
+                  HIPTENSOR_STATUS_NOT_SUPPORTED);
+}
+
+// Trinary: the complex path cannot hold a tensor with gaps.
+TEST_F(ContractionCheckTest, TrinaryComplexPadded)
+{
+    auto const ext = extents(false);
+    for(int i = kA; i <= kE; i++)
+    {
+        SCOPED_TRACE("padded tensor " + std::to_string(i) + " of A, B, C, D, E");
+        expectRefused(mHandle,
+                      trinary(ext, trinaryLayouts(i, kPadded), {.components = kComplex}),
+                      HIPTENSOR_STATUS_NOT_SUPPORTED);
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(Layouts,
@@ -551,3 +1022,12 @@ INSTANTIATE_TEST_SUITE_P(Layouts,
                          ContractionCLayoutTest,
                          ::testing::Combine(::testing::ValuesIn(kLayouts), ::testing::Bool()),
                          cLayoutCaseName);
+
+INSTANTIATE_TEST_SUITE_P(Layouts,
+                         ContractionTrinaryLayoutTest,
+                         ::testing::Combine(::testing::Range(0, 6),
+                                            ::testing::ValuesIn(kLayouts),
+                                            ::testing::Bool()),
+                         trinaryLayoutCaseName);
+
+INSTANTIATE_TEST_SUITE_P(Padded, ContractionPaddedTest, ::testing::Range(0, 4), paddedCaseName);
