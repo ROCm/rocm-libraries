@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "ck_tile/core/arch/arch.hpp"
 #include "ck_tile/core/arch/utility.hpp"
 #include "ck_tile/core/algorithm/space_filling_curve.hpp"
 #include "ck_tile/core/config.hpp"
@@ -760,7 +761,7 @@ struct tile_scatter_gather
                     // converts implicitly to const void*, no explicit cast needed.
                     async_global_load_lds_dwordxn<vector_size>(smem_issue, addr);
 #if CK_TILE_HAS_ASYNCMARK
-                    __builtin_amdgcn_asyncmark();
+                    asyncmark();
 #endif
                 }
                 else if constexpr(std::is_same_v<ValidArray, std::nullptr_t>)
