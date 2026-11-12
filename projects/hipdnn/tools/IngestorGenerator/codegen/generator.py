@@ -26,7 +26,6 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from . import generic_targets as gtmod
 from . import prior_ids
-from .json_output import dump_descriptor
 from .models import (
     KERNEL_SOURCE_KIND_HSACO,
     KERNEL_SOURCE_KIND_KPACK,
@@ -401,7 +400,7 @@ def mint_ids(
 
 
 def _dump(obj: dict) -> str:
-    return dump_descriptor(obj)
+    return json.dumps(obj, indent=2, sort_keys=False) + "\n"
 
 
 def build_kmd(config: IngestorConfig, ids: dict) -> dict:

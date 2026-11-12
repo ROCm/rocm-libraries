@@ -101,6 +101,12 @@ seed runs the shipped native code and registers nothing of its own. Its kernel i
 derived under a namespace of its own engine name, so an instance it shares with the
 product catalog does not carry the same kernel id twice.
 
+The KDPs are in DVC, not git, in the folder's `artifacts/` (tracked by `artifacts.dvc`),
+as the descriptors README's "Large rocKE files live in DVC" prescribes for a rocKE bundle.
+Fetch them with `dvc pull -r ingestor artifacts.dvc` from the folder. Configure checks the
+pointer as it checks the production root's: without the KDPs it warns and leaves the seed
+out of the integration pack, so its tests are not registered.
+
 The folder sits under `rocKE/` so the rocKE family switch excludes it the way it excludes
 the production rocKE bundles. Do not edit these files by hand. Regenerate them with
 `tools/make_conv_aot_config.py --engine-name hipkernel:Gfx950ConvFwdAotSeed

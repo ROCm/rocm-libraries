@@ -136,7 +136,9 @@ one is its own DVC output: `heuristics/<ued-id>/<role>/<arch>/<metric>/model.bin
 `heuristic.uhd.json`, the layout FlyDSL uses. `uhd_gen promote` copies the model there;
 add the pointer with `dvc add model.bin` in that folder, then append `remote: ingestor`
 to it as for any new pointer (below). A model file that nothing refers to by path can
-instead sit in `artifacts/`. Any `.dvc` pointer under `rocKE/` is checked at configure.
+instead sit in `artifacts/`. Any `.dvc` pointer under `rocKE/` is checked at configure,
+here and under the integration test root (`test_descriptors/integration/rocKE/`, whose
+`gfx950_conv_fwd_aot_seed` keeps its KDPs in `artifacts/` the same way).
 
 A KDP in `artifacts/` packs correctly: the packer walks the root recursively and computes
 each packed kernel's archive path from the descriptor's depth (`../../../kpack/...` here).

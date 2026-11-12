@@ -410,8 +410,7 @@ of their own (`make_conv_aot_config.py --sharding k-loop`, the default):
 The KDPs are in DVC, not git: they live in the bundle's `artifacts/` folder, tracked by
 `artifacts.dvc`, and the trained model under `heuristics/` by `heuristics.dvc`. Fetch
 both with `dvc pull -r ingestor artifacts.dvc heuristics.dvc` from the bundle folder;
-see the descriptors README, "Large rocKE files live in DVC". The generator writes each
-KDP with one kernel per line.
+see the descriptors README, "Large rocKE files live in DVC".
 
 The packs declare no `discriminator`, so they are shards of one catalog: the engine's
 graph matcher and the one shared kernel matcher admit all of them, and there is no
@@ -622,7 +621,11 @@ the shipped code and registers nothing of its own. It needs a name of its own be
 the integration binary loads the product root as well. The same tools generate it,
 with the converter's `--engine-name hipkernel:Gfx950ConvFwdAotSeed`. Its config,
 `configs/gfx950_conv_fwd_aot_seed.yaml`, is committed as a worked example. Its census,
-`TestGfx950ConvFwdAotSeedPacks`, reads the integration root's gfx950 shard.
+`TestGfx950ConvFwdAotSeedPacks`, reads the integration root's gfx950 shard. Like the
+shipped bundle's, the seed's KDPs are in DVC, in its `artifacts/` folder tracked by
+`artifacts.dvc`: fetch them with `dvc pull -r ingestor artifacts.dvc` from the seed
+folder. Without them configure warns and leaves the seed out of the integration root,
+and the seed's tests are not registered.
 
 `IntegrationGpuGfx950ConvFwd.cpp` runs one table of 25 graphs per dtype against both
 engines, 9 of them depthwise over several group counts, batches and images. The seed

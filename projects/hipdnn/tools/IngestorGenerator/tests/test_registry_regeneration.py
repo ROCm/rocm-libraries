@@ -336,14 +336,18 @@ def test_g2_the_shipped_catalog_is_generated_from_the_selection(
 
     # The catalog diff covers the KDP's catalog; this covers every byte of every
     # file. The KDP's DVC object is LF; the git-tracked files are compared as text
-    # because an autocrlf checkout holds them as CRLF.
-    assert kdp.read_bytes() == shipped_kdp.read_bytes()
+    # because an autocrlf checkout holds them as CRLF. A mismatch fails with
+    # pytest.fail, not assert: pytest's diff of two MB-sized KDPs runs for longer
+    # than the ctest timeout.
+    if kdp.read_bytes() != shipped_kdp.read_bytes():
+        pytest.fail(f"{kdp.name}: bytes differ from the shipped {shipped_kdp}")
     others = sorted(p.name for p in descriptors.glob("*.json") if p != kdp)
     assert others == sorted(p.name for p in shipped_dir.glob("*.json"))
     for name in others:
-        assert (descriptors / name).read_text(encoding="utf-8") == (
+        if (descriptors / name).read_text(encoding="utf-8") != (
             shipped_dir / name
-        ).read_text(encoding="utf-8"), name
+        ).read_text(encoding="utf-8"):
+            pytest.fail(f"{name}: text differs from the shipped {shipped_dir / name}")
 
 
 @pytest.fixture(scope="module")

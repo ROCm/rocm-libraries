@@ -245,7 +245,8 @@ def test_bundle_ids_are_unique_across_the_conv_aot_bundles():
     may repeat across them."""
     ids = {}
     for folder in (*_FWD_DIRS, _SHIPPED_DIR):
-        for path in folder.glob("*.json"):
+        # A bundle's KDPs are in its DVC artifacts/ folder.
+        for path in [*folder.glob("*.json"), *(folder / "artifacts").glob("*.json")]:
             document = json.loads(path.read_text())
             found = [document["id"]] + [
                 kernel["id"] for kernel in document.get("kernelDescriptors", [])

@@ -383,7 +383,8 @@ endfunction()
 #
 #   EXCLUDE_FOLDERS names folders of the root the pack does not read at all: the
 #   families of HKP_DESCRIPTOR_FAMILIES whose option is OFF (top-level folders), and for
-#   the production root the bundles of HKP_PRODUCT_EXCLUDED_BUNDLES (`/`-separated paths).
+#   the production root the bundles of HKP_PRODUCT_EXCLUDED_BUNDLES and for the
+#   integration root those of HKP_INTEGRATION_EXCLUDED_BUNDLES (`/`-separated paths).
 #
 #   PACK_JOBS caps the worker processes one pack may spawn; 1 selects the packer's
 #   serial path. Omitted, the packer sizes its pool against the machine. Roots have
@@ -1934,8 +1935,10 @@ function(hkp_add_packaging)
         # The only test root with enough distinct hip variants to build a worker
         # pool, so it is the one that exercises the parallel path in a real
         # build. Falls back to the serial path if that root ever drops below two.
+        # HKP_INTEGRATION_EXCLUDED_BUNDLES: its bundles whose DVC outputs were not
+        # pulled, as for the production root above.
         PACK_JOBS 2
-        ${_root_args})
+        ${_root_args} ${HKP_INTEGRATION_EXCLUDED_BUNDLES})
 
     _hkp_wire_root(
         NAME archive_fixture

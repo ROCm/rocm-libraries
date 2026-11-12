@@ -37,7 +37,7 @@ _PROVIDER = (
 _SHIPPED_DIR = _PROVIDER / "descriptors/rocKE/gfx950_conv_fwd_aot"
 _SEED_DIR = _PROVIDER / "test_descriptors/integration/rocKE/gfx950_conv_fwd_aot_seed"
 #: One small shipped shard, for the tests that rewrite a KDP.
-_SEED_KDP = _SEED_DIR / "gfx950_conv_fwd_aot_seed_fp16.kdp.json"
+_SEED_KDP_NAME = "gfx950_conv_fwd_aot_seed_fp16.kdp.json"
 #: GitHub warns about any file above 50 MB; every emitted file stays below it.
 _FILE_SIZE_LIMIT = 50 * 1000 * 1000
 
@@ -108,6 +108,14 @@ def _kdps(folder: Path) -> list[Path]:
     if not paths:
         pytest.skip(f"KDPs not fetched: dvc pull -r ingestor {folder}/artifacts.dvc")
     return paths
+
+
+@pytest.fixture
+def seed_kdp() -> Path:
+    """The seed's fp16 KDP, a real catalog to rewrite; skipped when DVC has not
+    fetched it."""
+    (path,) = [p for p in _kdps(_SEED_DIR) if p.name == _SEED_KDP_NAME]
+    return path
 
 
 @pytest.fixture(scope="module", params=sorted(_BUNDLES))
@@ -370,14 +378,16 @@ def test_main_dedups_and_refuses_unsupported_unless_asked(
     )
 
 
-def test_stabilize_ids_rewrites_kernel_ids_and_refuses_referenced_ones(tmp_path):
+def test_stabilize_ids_rewrites_kernel_ids_and_refuses_referenced_ones(
+    tmp_path, seed_kdp
+):
     kdp = tmp_path / "x.kdp.json"
-    document = json.loads(_SEED_KDP.read_text())
+    document = json.loads(seed_kdp.read_text())
     for kernel in document["kernelDescriptors"]:
         kernel["id"] = str(uuid.uuid4())
     kdp.write_text(json.dumps(document))
     assert tool.stabilize_ids(kdp, _SEED_ENGINE) == len(document["kernelDescriptors"])
-    assert json.loads(kdp.read_text()) == json.loads(_SEED_KDP.read_text())
+    assert json.loads(kdp.read_text()) == json.loads(seed_kdp.read_text())
 
     first = document["kernelDescriptors"][0]
     document["provenance"] = {"note": first["id"]}
@@ -732,8 +742,8 @@ def _stabilize_ids_one_kernel_at_a_time(kdp_path):
     kdp_path.write_text(text)
 
 
-def test_stabilize_ids_matches_the_one_kernel_at_a_time_rewrite(tmp_path):
-    document = json.loads(_SEED_KDP.read_text())
+def test_stabilize_ids_matches_the_one_kernel_at_a_time_rewrite(tmp_path, seed_kdp):
+    document = json.loads(seed_kdp.read_text())
     for kernel in document["kernelDescriptors"]:
         kernel["id"] = str(uuid.uuid4())
     # An unrelated UUID elsewhere in the file is left alone.
@@ -753,8 +763,8 @@ def test_stabilize_ids_matches_the_one_kernel_at_a_time_rewrite(tmp_path):
     assert linear.read_bytes() == reference.read_bytes()
 
 
-def test_stabilize_ids_refuses_a_kernel_id_shared_by_two_kernels(tmp_path):
-    document = json.loads(_SEED_KDP.read_text())
+def test_stabilize_ids_refuses_a_kernel_id_shared_by_two_kernels(tmp_path, seed_kdp):
+    document = json.loads(seed_kdp.read_text())
     first, second = document["kernelDescriptors"][:2]
     second["id"] = first["id"]
     kdp = tmp_path / "x.kdp.json"
