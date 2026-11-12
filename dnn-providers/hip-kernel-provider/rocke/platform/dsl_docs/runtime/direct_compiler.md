@@ -256,8 +256,9 @@ fixed rules:
   before the loop's first one (a 64-bit sum made for its low half alone, the
   LDS-DMA address of every row of a tile, counts: its dead carry chain is
   dropped first). The retried compile is kept if it spills less or, spilling no
-  more, runs more waves or, with both alike, issues at least 3% fewer
-  instructions (blocks weighted by 8 to the power of their loop depth). The
+  more, runs more waves for at most 10% more instructions or, with both alike,
+  issues at least 3% fewer (blocks weighted by 8 to the power of their loop
+  depth). The
   spiller does the same for what it must spill, now also from such VGPRs.
 
 These choices depend only on the input. They are why two kernels of a similar
