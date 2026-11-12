@@ -235,6 +235,9 @@ struct PointwiseSignatureKey
         addComparisonPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
                                   hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
                                   hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addComparisonPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
 
         // GEN_INDEX always produces an INT32 index tensor as output
         addUnaryPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GEN_INDEX,
@@ -281,6 +284,11 @@ struct PointwiseSignatureKey
                                hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
                                hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                                hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16>(map);
+        addTernaryPlanBuilders<hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                               hipdnn_flatbuffers_sdk::data_objects::DataType::INT32>(map);
 
         return map;
     }

@@ -78,7 +78,7 @@ The following table lists the operations currently executable through the GPU gr
 |-----------|-------------------|-------------------|
 | BlockScale Quantize / Dequantize | `ReferenceCapabilityError` | None |
 | MoE Grouped Matmul (forward and backward) | "Unsupported node type" error | None |
-| Pointwise ternary (`BINARY_SELECT`), `MAX`, `MIN`, `CMP_GT` | Not applicable (plan builders reject the mode) | Not implemented |
+| Pointwise modes the GPU lacks (see [Pointwise Modes](#pointwise-modes)) | Not applicable (plan builders reject the mode) | Not implemented |
 | Custom operations | `ReferenceCapabilityError` | None |
 
 Operations with a `gpu-ref` library entry but no executor plan can be called directly from C++ code

@@ -644,7 +644,8 @@ TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForImplementedBinaryModes)
     const std::vector<std::array<DataType, 3>> comparisonCombinations
         = {{DataType::FLOAT, DataType::FLOAT, DataType::FLOAT},
            {DataType::HALF, DataType::HALF, DataType::FLOAT},
-           {DataType::BFLOAT16, DataType::BFLOAT16, DataType::FLOAT}};
+           {DataType::BFLOAT16, DataType::BFLOAT16, DataType::FLOAT},
+           {DataType::INT32, DataType::INT32, DataType::FLOAT}};
 
     for(size_t i = 0; i < implementedBinaryModes.size(); ++i)
     {
@@ -691,6 +692,19 @@ TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForGenIndexInt32Output)
             PointwiseMode::GEN_INDEX, input, DataType::FLOAT, DataType::INT32};
         EXPECT_EQ(planBuilders.count(key), 1u) << key;
     }
+}
+
+TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForInt32BinarySelect)
+{
+    const auto planBuilders = PointwiseSignatureKey::getPlanBuilders();
+
+    const PointwiseSignatureKey key{PointwiseMode::BINARY_SELECT,
+                                    DataType::INT32,
+                                    DataType::FLOAT,
+                                    DataType::INT32,
+                                    DataType::INT32,
+                                    DataType::BOOLEAN};
+    EXPECT_EQ(planBuilders.count(key), 1u) << key;
 }
 
 TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForLogicalOperations)
