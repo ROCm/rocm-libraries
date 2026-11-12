@@ -4,6 +4,7 @@
 /// Unit tests for the supports() gate of the generated GEMM backends.
 /// Note: Uses a stub kernel struct; no kernel is compiled or launched.
 
+#include "ck_tile/ops/epilogue/cshuffle_epilogue.hpp"
 #include "ck_tile/ops/gemm/kernel/gemm_kernel.hpp"
 #include "ck_tile/dispatcher/backends/generated_kernel_backend.hpp"
 #include "ck_tile/dispatcher/backends/generated_tile_backend.hpp"
@@ -92,6 +93,88 @@ void expect_vector_gate()
     EXPECT_FALSE(default_epilogue.supports(Problem(256, 257, 516)));
 }
 
+using StubEpilogueProblem = ck_tile::CShuffleEpilogueProblem<ck_tile::bf16_t,
+                                                             ck_tile::bf16_t,
+                                                             ck_tile::tuple<>,
+                                                             float,
+                                                             ck_tile::bf16_t,
+                                                             ck_tile::tuple<>,
+                                                             ck_tile::tensor_layout::gemm::RowMajor,
+                                                             ck_tile::element_wise::PassThrough,
+                                                             256,
+                                                             256,
+                                                             4,
+                                                             4,
+                                                             16,
+                                                             16,
+                                                             32,
+                                                             false>;
+
+template <int TileM_,
+          int TileN_,
+          bool PadM_,
+          bool PadN_,
+          int VecC_,
+          typename Epilogue_ = ck_tile::CShuffleEpilogue<StubEpilogueProblem>>
+struct TdmStubKernel
+{
+    using ADataType             = ck_tile::bf16_t;
+    using BDataType             = ck_tile::bf16_t;
+    using CDataType             = ck_tile::bf16_t;
+    using AccDataType           = float;
+    static constexpr bool kPadM = PadM_;
+    static constexpr bool kPadN = PadN_;
+    static constexpr bool kPadK = false;
+    static constexpr int TileM  = TileM_;
+    static constexpr int TileN  = TileN_;
+    static constexpr int TileK  = 64;
+    struct GemmPipeline
+    {
+        static constexpr bool skipCheckValidLaunchParams = true;
+        template <bool = false>
+        static constexpr int GetVectorSizeA()
+        {
+            return 1;
+        }
+        template <bool = false>
+        static constexpr int GetVectorSizeB()
+        {
+            return 1;
+        }
+    };
+    using GemmEpilogue               = Epilogue_;
+    static constexpr int VectorSizeC = VecC_;
+    static float launch(const ck_tile::GemmHostArgs&, const ck_tile::stream_config&) { return 0.f; }
+};
+
+template <typename Kernel>
+using TdmTileInstance = backends::
+    GeneratedTileKernelInstance<Kernel, ck_tile::bf16_t, ck_tile::bf16_t, ck_tile::bf16_t, float>;
+
+KernelKey make_tdm_key(std::uint16_t tile_m,
+                       std::uint16_t tile_n,
+                       Pipeline pipeline,
+                       Epilogue epilogue,
+                       LayoutTag layout_c = LayoutTag::RowMajor,
+                       bool pad_m         = false,
+                       bool pad_n         = false)
+{
+    KernelKey key                 = make_test_key(tile_m, tile_n, 64, "gfx1250");
+    key.signature.dtype_a         = DataType::BF16;
+    key.signature.dtype_b         = DataType::BF16;
+    key.signature.dtype_c         = DataType::BF16;
+    key.signature.layout_c        = layout_c;
+    key.algorithm.wave_shape      = {4, 4, 1};
+    key.algorithm.warp_tile_shape = {16, 16, 32};
+    key.algorithm.pipeline        = pipeline;
+    key.algorithm.epilogue        = epilogue;
+    key.algorithm.pad_m           = pad_m;
+    key.algorithm.pad_n           = pad_n;
+    key.algorithm.pad_k           = false;
+    key.algorithm.block_size      = 512;
+    return key;
+}
+
 } // anonymous namespace
 
 TEST(GeneratedBackendTest, GeneratedKernelInstanceGatesVectorWidths)
@@ -118,4 +201,68 @@ TEST(GeneratedBackendTest, FirstFitFallsThroughToNarrowerKernel)
     Dispatcher dispatcher(&registry);
     EXPECT_EQ(dispatcher.select_kernel(Problem(512, 512, 257)), vec);
     EXPECT_EQ(dispatcher.select_kernel(Problem(512, 129, 257)), nullptr);
+}
+
+TEST(GeneratedBackendTest, TdmCShuffleEnforcesCTileWhilePreservingClippedAB)
+{
+    using UnpaddedV3_256 = TdmStubKernel<256, 256, false, false, 8>;
+    using UnpaddedV3_128 = TdmStubKernel<256, 128, false, false, 8>;
+    using PaddedCShuffle = TdmStubKernel<256, 256, false, true, 8>;
+    using TdmEpi256 =
+        TdmStubKernel<256, 256, false, false, 1, ck_tile::TdmEpilogue<StubEpilogueProblem>>;
+
+    auto v3_256 = std::make_shared<TdmTileInstance<UnpaddedV3_256>>(
+        make_tdm_key(256, 256, Pipeline::CompTDMV3, Epilogue::CShuffle), "v3_256");
+    auto v3_128 = std::make_shared<TdmTileInstance<UnpaddedV3_128>>(
+        make_tdm_key(256, 128, Pipeline::CompTDMV3, Epilogue::CShuffle), "v3_128");
+    auto tdm_epi = std::make_shared<TdmTileInstance<TdmEpi256>>(
+        make_tdm_key(256, 256, Pipeline::CompTDMV1, Epilogue::Tdm), "tdm_epi");
+
+    // Clipped A/B loads accept ragged M and K, while unpadded CShuffle rejects
+    // vector-aligned N=384 (not a multiple of TileN=256).
+    EXPECT_TRUE(v3_256->supports(Problem(301, 512, 257)));
+    EXPECT_FALSE(v3_256->supports(Problem(512, 384, 512)));
+
+    Problem split_k(512, 512, 512);
+    split_k.k_batch = 2;
+    EXPECT_FALSE(v3_256->supports(split_k));
+
+    // Padded CShuffle accepts partial C tiles that divide VectorSizeC, and
+    // ColMajor C gates M against TileM/kPadM instead of N.
+    const TdmTileInstance<PaddedCShuffle> padded(
+        make_tdm_key(
+            256, 256, Pipeline::CompTDMV3, Epilogue::CShuffle, LayoutTag::RowMajor, false, true),
+        "padded_v3");
+    EXPECT_TRUE(padded.supports(Problem(301, 384, 257)));
+    EXPECT_FALSE(padded.supports(Problem(301, 386, 257)));
+
+    const TdmTileInstance<UnpaddedV3_256> col_c(
+        make_tdm_key(256, 256, Pipeline::CompTDMV3, Epilogue::CShuffle, LayoutTag::ColMajor),
+        "col_c");
+    EXPECT_TRUE(col_c.supports(Problem(512, 301, 257)));
+    EXPECT_FALSE(col_c.supports(Problem(384, 512, 512)));
+
+    // TdmEpilogue clips C in hardware, so arbitrary N stays supported.
+    EXPECT_TRUE(tdm_epi->supports(Problem(301, 384, 257)));
+    EXPECT_TRUE(tdm_epi->supports(Problem(301, 385, 257)));
+
+    // Registry first-fit must skip the 256-wide CShuffle kernel on N=384 and
+    // select a compatible fallback instead of throwing at launch.
+    Registry registry;
+    ASSERT_TRUE(registry.register_kernel(v3_256));
+    ASSERT_TRUE(registry.register_kernel(v3_128));
+
+    Dispatcher dispatcher(&registry);
+    EXPECT_EQ(dispatcher.select_kernel(Problem(512, 384, 512)), v3_128);
+    EXPECT_EQ(dispatcher.select_kernel(Problem(512, 385, 512)), nullptr);
+
+    ASSERT_TRUE(registry.register_kernel(tdm_epi));
+    dispatcher.set_heuristic([&](const Problem&) -> std::vector<std::string> {
+        return {v3_256->get_key().encode_identifier(),
+                v3_128->get_key().encode_identifier(),
+                tdm_epi->get_key().encode_identifier()};
+    });
+    EXPECT_EQ(dispatcher.select_kernel(Problem(301, 512, 257)), v3_256);
+    EXPECT_EQ(dispatcher.select_kernel(Problem(512, 384, 512)), v3_128);
+    EXPECT_EQ(dispatcher.select_kernel(Problem(301, 385, 257)), tdm_epi);
 }

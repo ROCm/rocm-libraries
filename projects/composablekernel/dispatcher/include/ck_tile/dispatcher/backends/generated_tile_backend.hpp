@@ -7,6 +7,7 @@
 #include "ck_tile/dispatcher/validation/reference_kernels.hpp"
 #include "ck_tile/core.hpp"
 #include "ck_tile/host.hpp"
+#include "ck_tile/ops/epilogue/tdm_epilogue.hpp"
 #include "ck_tile/ops/gemm/kernel/gemm_kernel.hpp"
 #include <hip/hip_runtime.h>
 #include <sstream>
@@ -21,8 +22,9 @@ namespace dispatcher {
 namespace backends {
 
 // True for pipelines that declare skipCheckValidLaunchParams (the TDM pipelines).
-// ck_tile::UniversalGemmKernel::IsSupportedArgument accepts every problem for them:
-// TDM clips each box to the tensor's real extent, so no dim must be a tile multiple.
+// TDM clips each A/B box to the tensor's real extent; TdmEpilogue clips C too,
+// whereas a non-TDM epilogue (CShuffle on comp_tdm_v3) still requires C tile
+// divisibility when unpadded (UniversalGemmKernel::IsCTensorSupported).
 template <typename Pipeline, typename = void>
 struct pipeline_skips_launch_checks : std::false_type
 {
@@ -42,6 +44,17 @@ struct kernel_requires_full_nk_tiles : std::false_type
 template <typename Kernel>
 struct kernel_requires_full_nk_tiles<Kernel, std::void_t<decltype(Kernel::RequiresFullNKTiles)>>
     : std::bool_constant<Kernel::RequiresFullNKTiles>
+{
+};
+
+// True when SelectedKernel declares GemmEpilogue (all codegen kernels do;
+// hand-written test stubs without it fall back to key_.algorithm.epilogue).
+template <typename Kernel, typename = void>
+struct kernel_declares_epilogue : std::false_type
+{
+};
+template <typename Kernel>
+struct kernel_declares_epilogue<Kernel, std::void_t<typename Kernel::GemmEpilogue>> : std::true_type
 {
 };
 
@@ -93,7 +106,9 @@ class GeneratedTileKernelInstance : public KernelInstance
         // is still validated by the kernel's own IsSupportedArgument inside launch(),
         // so the bridge stays a strict functional equivalent of Old-TE. Pipelines
         // that skip that check (TDM) skip this gate too: they clip to real extents.
-        using Pipeline = typename SelectedKernel::GemmPipeline;
+        using Pipeline    = typename SelectedKernel::GemmPipeline;
+        const auto is_row = [](LayoutTag l) { return l == LayoutTag::RowMajor; };
+        const bool row_c  = is_row(key_.signature.layout_c);
         if constexpr(!pipeline_skips_launch_checks<Pipeline>::value)
         {
             constexpr bool pad_m = SelectedKernel::kPadM;
@@ -104,10 +119,8 @@ class GeneratedTileKernelInstance : public KernelInstance
             constexpr int tile_n = SelectedKernel::TileN;
             constexpr int tile_k = SelectedKernel::TileK;
 
-            const auto is_row = [](LayoutTag l) { return l == LayoutTag::RowMajor; };
-            const bool row_a  = is_row(key_.signature.layout_a);
-            const bool row_b  = is_row(key_.signature.layout_b);
-            const bool row_c  = is_row(key_.signature.layout_c);
+            const bool row_a = is_row(key_.signature.layout_a);
+            const bool row_b = is_row(key_.signature.layout_b);
 
             // Which problem dimensions are actually constrained for this layout combo.
             const bool require_m = (!row_a) || (!row_c); // ColMajor A or C gate M
@@ -126,14 +139,30 @@ class GeneratedTileKernelInstance : public KernelInstance
         }
         else
         {
-            // TdmEpilogue overwrites C, so TDM cannot split K, and the kernel's own
-            // check accepts any k_batch. The preshuffle compute TDM launcher also
-            // requires complete N/K tiles.
+            // TDM launchers reject k_batch != 1. The preshuffle compute TDM launcher
+            // also requires complete N/K tiles.
             if(problem.k_batch != 1)
                 return false;
             if constexpr(kernel_requires_full_nk_tiles<SelectedKernel>::value)
             {
                 if(problem.N % SelectedKernel::TileN != 0 || problem.K % SelectedKernel::TileK != 0)
+                    return false;
+            }
+            // Mirror UniversalGemmKernel::IsCTensorSupported for non-TDM epilogues
+            // (e.g. CShuffle on comp_tdm_v3): A/B loads stay hardware-clipped, while
+            // an unpadded contiguous C dimension must still divide the C tile.
+            const bool tdm_epilogue = [&]() {
+                if constexpr(kernel_declares_epilogue<SelectedKernel>::value)
+                    return ck_tile::is_tdm_epilogue_v<typename SelectedKernel::GemmEpilogue>;
+                else
+                    return key_.algorithm.epilogue == Epilogue::Tdm;
+            }();
+            if(!tdm_epilogue)
+            {
+                const std::int64_t c_extent = row_c ? problem.N : problem.M;
+                const int c_tile            = row_c ? SelectedKernel::TileN : SelectedKernel::TileM;
+                const bool pad_c            = row_c ? SelectedKernel::kPadN : SelectedKernel::kPadM;
+                if(!pad_c && c_extent % c_tile != 0)
                     return false;
             }
         }
