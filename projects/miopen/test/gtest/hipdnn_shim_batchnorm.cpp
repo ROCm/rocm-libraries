@@ -1698,6 +1698,14 @@ TEST(GPU_HipdnnShimBNAlphaBeta_FP32, StatusMatchesMiopen)
         const auto result = hs::CaptureCall([&] { return BwdV1(handle, d, true); });
         hs::ExpectStatusParity("alpha_beta_bwd", result, miopenStatusBadParm, reason);
     }
+    {
+        SCOPED_TRACE("bwd param diff");
+        BwdData d;
+        SetUpBwd(d);
+        d.alphaParamDiff  = 2.0f;
+        const auto result = hs::CaptureCall([&] { return BwdV1(handle, d, true); });
+        hs::ExpectStatusParity("alpha_beta_bwd_param_diff", result, miopenStatusBadParm, reason);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1711,6 +1719,11 @@ struct RawTensor
 {
     RawTensor(miopen::Handle& handle, miopenDataType_t type, std::vector<std::size_t> lens)
         : desc(type, std::move(lens)), dev(handle.Create(desc.GetNumBytes()))
+    {
+    }
+
+    RawTensor(miopen::Handle& handle, miopen::TensorDescriptor desc_in)
+        : desc(std::move(desc_in)), dev(handle.Create(desc.GetNumBytes()))
     {
     }
 
@@ -1887,5 +1900,44 @@ TEST(GPU_HipdnnShimBNNoSolver_FP32, StatusMatchesMiopen)
         const auto result = hs::CaptureCall([&] { return p.Bwd(handle); });
         hs::ExpectStatusParity(
             "no_solver_mixed_bwd", result, miopenStatusNotImplemented, no_solver);
+    }
+}
+
+// The hipDNN path repeats MIOpen's parameter checks, so it must reject these
+// with BadParm as MIOpen does: statistics of another rank than x, on forward
+// and on backward, and a training x that is not packed.
+TEST(GPU_HipdnnShimBNBadParm_FP32, StatusMatchesMiopen)
+{
+    auto&& handle = get_handle();
+    const std::vector<std::size_t> nchw{2, 4, 8, 8};
+    const miopen::TensorDescriptor rank3_stats(miopenFloat, std::vector<std::size_t>{1, 4, 1});
+    const char* rank_reason = "as many dimensions as x";
+
+    {
+        SCOPED_TRACE("rank mismatch train");
+        RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
+        p.scale           = RawTensor(handle, rank3_stats);
+        const auto result = hs::CaptureCall([&] { return p.Train(handle); });
+        hs::ExpectStatusParity(
+            "bad_parm_rank_mismatch_train", result, miopenStatusBadParm, rank_reason);
+    }
+    {
+        // Backward passes the scale descriptor for the statistics too.
+        SCOPED_TRACE("rank mismatch bwd");
+        RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
+        p.scale           = RawTensor(handle, rank3_stats);
+        const auto result = hs::CaptureCall([&] { return p.Bwd(handle); });
+        hs::ExpectStatusParity(
+            "bad_parm_rank_mismatch_bwd", result, miopenStatusBadParm, rank_reason);
+    }
+    {
+        SCOPED_TRACE("non-packed train");
+        RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
+        p.x = RawTensor(
+            handle,
+            miopen::TensorDescriptor(miopenFloat, nchw, std::vector<std::size_t>{512, 128, 16, 1}));
+        const auto result = hs::CaptureCall([&] { return p.Train(handle); });
+        hs::ExpectStatusParity(
+            "bad_parm_non_packed_train", result, miopenStatusBadParm, "x must be packed");
     }
 }
