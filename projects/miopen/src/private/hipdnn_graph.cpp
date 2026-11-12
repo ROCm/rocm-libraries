@@ -33,6 +33,10 @@ namespace {
 
 namespace fe = hipdnn_frontend;
 
+// The knob ID hipDNN documents for benchmarking. hipdnn_plugin_sdk's
+// GlobalKnobDefines.hpp defines it; the frontend's copy is in a detail namespace.
+constexpr const char* kBenchmarkingKnob = "global.benchmarking";
+
 struct PlanKeyHash
 {
     size_t operator()(const PlanKey& key) const
@@ -244,9 +248,8 @@ fe::Error BuildBenchmarked(fe::graph::Graph& graph, hipdnnHandle_t hipdnnHandle)
     {
         if(!config.supportsExhaustive)
             continue;
-        error = graph.create_execution_plan_ext(
-            config.engineId,
-            {fe::KnobSetting(fe::autotune::detail::BENCHMARKING_KNOB_NAME, int64_t{1})});
+        error = graph.create_execution_plan_ext(config.engineId,
+                                                {fe::KnobSetting(kBenchmarkingKnob, int64_t{1})});
         if(error.is_good())
             error = graph.check_support();
         if(error.is_good())
