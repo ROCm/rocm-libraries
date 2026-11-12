@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pytest
 
-from config_helpers import findAvailableArchs, findConfigs
+from config_helpers import curatedArchsFromMarkers, findAvailableArchs, findConfigs
 
 _COMMON_DIR = Path(__file__).parent
 
@@ -82,5 +82,6 @@ def pytest_generate_tests(metafunc):
     device_tags = () if metafunc.config.getoption("--build-only", default=False) else None
     configs = findConfigs(availableArchs=archs,
                           deviceTags=device_tags,
-                          splitWorlds=not metafunc.config.getoption("--build-only", default=False))
+                          splitWorlds=not metafunc.config.getoption("--build-only", default=False),
+                          curatedArchs=curatedArchsFromMarkers(metafunc.config.getini("markers")))
     metafunc.parametrize("config", configs)
