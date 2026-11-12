@@ -59,7 +59,6 @@ from dataclasses import dataclass, field, replace as dc_replace
 from typing import Callable, List, Optional, Sequence, Tuple
 
 from rocke.core.ir import (
-    BF16,
     F32,
     I32,
     IRBuilder,
@@ -85,6 +84,7 @@ from rocke.helpers.transforms import (
     unmerge_magic,
 )
 from kernels.common.conv_abi import conv_fwd_problem_block
+from kernels.common.conv_fwd_split_k_reduce import FwdSplitKReduceSpec
 from kernels.common._conv_implicit_gemm_common import (  # noqa: F401 — re-exported for callers
     ConvAccumulatorEpilogue,
     ConvDataSpec,
@@ -97,6 +97,11 @@ from kernels.common._conv_implicit_gemm_common import (  # noqa: F401 — re-exp
     _emit_mfma,
     _emit_smem_load,
     _ir_dtype,
+    _smem_dtype_for,
+    _TF32_LDS_LOAD_MAX,
+    _load_mma_operand,
+    _mfma_issues_per_mma,
+    _tf32_mfma_reason,
     _build_wavelet_loaders,
     compute_wavelet_epi_barriers,
     emit_param_block,
@@ -328,12 +333,13 @@ class ImplicitGemmConvSpec:
     # cshuffle store width derived from kpg is a separate Gm=1 change.)
     group_merge: int = 1
 
-    # Split-K (WMMA only). ``split_k > 1`` builds the split-K binary, not a
-    # fixed degree: the degree and the slice width arrive as the ``ks_count`` /
-    # ``ks`` kernargs (as in wgrad), so one binary serves every degree and the
-    # AOT cache records it as 2. ``-1`` (auto) is resolved by the builder
-    # through the conv split-K resolver (:func:`resolve_fwd_split_k_spec`)
-    # before validation, as for wgrad and dgrad. Every CTA reduces one slice
+    # Split-K (WMMA; MFMA ``mem`` / ``compv3`` / ``compv4``). ``split_k > 1``
+    # builds the split-K binary, not a fixed degree: the degree and the slice
+    # width arrive as the ``ks_count`` / ``ks`` kernargs (as in wgrad), so one
+    # binary serves every degree and the AOT cache records it as 2. ``-1``
+    # (auto) is resolved by the builder through the conv split-K resolver
+    # (:func:`resolve_fwd_split_k_spec`) before validation, as for wgrad and
+    # dgrad. Every CTA reduces one slice
     # of the [Z*]Y*X*cpg reduction and stores its fp32 partial tile into slab
     # ``slice`` of the ``ws_ptr`` workspace, laid out ``[ks_count][M][K]``;
     # Stage 2 (:mod:`kernels.common.conv_fwd_split_k_reduce`) sums the slabs and
@@ -379,8 +385,10 @@ class ImplicitGemmConvSpec:
 
     @property
     def atom(self) -> MfmaAtom:
+        # Keyed on the MMA dtype: a TF32 spec stores fp32 but issues an XF32
+        # atom, whose fragment lengths differ from the fp32 atom's.
         return mfma_atom(
-            self.data.dtype_a, self.warp_tile_m, self.warp_tile_n, self.warp_tile_k
+            self.data.mma_a, self.warp_tile_m, self.warp_tile_n, self.warp_tile_k
         )
 
     # ---- group merging (Gm) ----
@@ -450,6 +458,10 @@ class ImplicitGemmConvSpec:
                 # a kernarg, so only the variant reaches the name.
                 "splitk": self.split_k > 1,
                 f"skc{self.split_k_cluster}": self.split_k_cluster > 0,
+                # TF32 compute keeps fp32 storage, so nothing else in the name
+                # tells it from an fp32 kernel with the same atom shape. Last,
+                # and only when set, so every existing name is unchanged.
+                "tf32": self.data.is_tf32,
             },
         )
 
@@ -480,6 +492,9 @@ class ImplicitGemmConvSpec:
             )
         if self.block_size > 1024:
             raise ValueError(f"block_size {self.block_size} > 1024")
+        _tf32_why = _fwd_tf32_reason(self)
+        if _tf32_why:
+            raise ValueError(_tf32_why)
         layout = self.effective_lds_layout()
         if self.async_dma:
             layout.validate_for_async()
@@ -650,24 +665,62 @@ def fwd_split_k_cluster_problem_reason(problem: ConvProblem) -> Optional[str]:
     return None
 
 
+# MFMA pipelines whose K loop is the single scf.for the split-K slice bounds
+# (``k_lo`` / ``k_hi``) drive; the wavelet and async-DMA loops are not wired.
+_FWD_SPLIT_K_MFMA_PIPELINES = ("mem", "compv3", "compv4")
+
+
+def fwd_split_k_reduce_reason(
+    dtype_d: Optional[str], cluster: bool = False
+) -> Optional[str]:
+    """Why the split-K slabs cannot be folded into ``dtype_d``, or ``None``.
+
+    The two-stage split-K forward hands its fp32 slabs to
+    ``conv_fwd_split_k_reduce`` on every family, so its admission asks Stage
+    2's own validator rather than repeating its dtype list. The cluster form
+    (``cluster``) folds in Stage 1 with the same fp32-to-output cast, so it
+    takes the same outputs.
+    """
+    try:
+        FwdSplitKReduceSpec(dtype_d=dtype_d).validate()
+    except ValueError as exc:
+        if cluster:
+            return f"split-K forward folds through the cluster: {exc}"
+        return f"split-K forward reduces through Stage 2: {exc}"
+    return None
+
+
 def fwd_split_k_reason(
     spec: ImplicitGemmConvSpec, family: str, target=None
 ) -> Optional[str]:
     """Why ``spec``'s split-K forward cannot be built, or ``None``.
 
-    The split-K body is the plain WMMA K loop (``mem`` / ``wavelet``) run over
-    one slice, with an fp32 store into the workspace slab. The paths that drive
-    the K loop differently (async DMA, ``unroll_k``), remap the grid
-    (``chiplet_swizzle``), merge groups, or take the pointwise fast path are not
-    wired for it. Stage 1 stores raw partial sums and the reduction (Stage 2
+    The split-K body is the plain K loop (WMMA ``mem`` / ``wavelet``; MFMA
+    ``mem`` / ``compv3`` / ``compv4``) run over one slice, with an fp32 store
+    into the workspace slab. The paths that drive the K loop differently
+    (async DMA, ``unroll_k``, the MFMA wavelet split), remap the grid
+    (``chiplet_swizzle``), merge groups, or take the pointwise fast path are
+    not wired for it. Stage 1 stores raw partial sums and the reduction (Stage 2
     or the cluster fold) only adds and casts them, so the accumulator
-    epilogue (bias / scale / ReLU / clamp) must be the identity. ``target``
-    (an ``ArchTarget``) gates the cluster form on workgroup-cluster launch.
+    epilogue (bias / scale / ReLU / clamp) must be the identity. Both the
+    two-stage form and the cluster fold take only an output Stage 2 can fold
+    into, on every family (:func:`fwd_split_k_reduce_reason`): fp16 / bf16, so
+    fp32 storage (and TF32 compute over it) stays unsplit. ``target`` (an
+    ``ArchTarget``) gates the cluster form on workgroup-cluster launch.
     """
     if spec.split_k < 1:
         return f"split_k must be >= 1 (got {spec.split_k})"
-    if family != "wmma":
-        return "split-K forward is WMMA-only (built and tested on wave32)"
+    if family != "wmma" and spec.pipeline not in _FWD_SPLIT_K_MFMA_PIPELINES:
+        return (
+            f"split-K forward on MFMA runs the plain K loop only "
+            f"({', '.join(_FWD_SPLIT_K_MFMA_PIPELINES)}; got {spec.pipeline})"
+        )
+    if spec.split_k > 1:
+        _why = fwd_split_k_reduce_reason(
+            spec.data.dtype_d, cluster=bool(spec.split_k_cluster)
+        )
+        if _why is not None:
+            return _why
     if not spec.acc_epilogue.is_identity():
         return (
             "split-K forward supports only the identity acc_epilogue: the "
@@ -842,10 +895,22 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     """
     from rocke.core.arch import ArchTarget
 
+    # pipeline / epilogue = None is a malformed spec, not a request for the
+    # defaults ("mem" / "default"): refused before any rule reads them.
+    if spec.pipeline is None:
+        return False, "pipeline must be set (got None)"
+    if spec.epilogue is None:
+        return False, "epilogue must be set (got None)"
+
     try:
         target = ArchTarget.from_gfx(arch)
     except KeyError as e:
         return False, str(e)
+
+    # The TF32 gate validate() applies arch-free, here on the arch.
+    _tf32_why = _fwd_tf32_reason(spec, arch)
+    if _tf32_why:
+        return False, _tf32_why
 
     # Geometry divisibility (mirrors ``spec.validate``).
     if spec.tile_m % (spec.warp_m * spec.warp_tile_m):
@@ -907,18 +972,20 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
             f"spec wave_size {spec.wave_size} != {arch} wave_size {target.wave_size}"
         )
 
-    # MMA atom must be in the target's catalog for the requested dtype.
+    # MMA atom must be in the target's catalog for the requested dtype. The
+    # catalog is asked for the MMA dtype, which differs from the storage dtype
+    # only under TF32 compute (whose atom the gate above already checked).
     atom = (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)
     if not target.mma.has_shape(
         family=family,
-        a_dtype=spec.data.dtype_a,
-        b_dtype=spec.data.dtype_b,
+        a_dtype=spec.data.mma_a,
+        b_dtype=spec.data.mma_b,
         c_dtype="fp32",
         m=spec.warp_tile_m,
         n=spec.warp_tile_n,
         k=spec.warp_tile_k,
     ):
-        return False, f"unsupported {spec.data.dtype_a} warp_tile {atom} on {arch}"
+        return False, f"unsupported {spec.data.mma_a} warp_tile {atom} on {arch}"
 
     _total_lds, _ab_bytes, _c_lds, _double = implicit_gemm_lds_bytes(spec)
     if not target.fits_lds(_total_lds):
@@ -1048,6 +1115,25 @@ def is_valid_spec(spec: ImplicitGemmConvSpec, arch: str = "gfx950") -> Tuple[boo
     return True, "ok"
 
 
+def _fwd_tf32_reason(spec: ImplicitGemmConvSpec, arch: Optional[str] = None) -> str:
+    """Why ``spec``'s dtypes cannot build (on ``arch``, if given), or ``""``.
+
+    The forward kernel's TF32 gate, used by both ``validate`` (``arch=None``)
+    and :func:`is_valid_spec` (with the arch), as dgrad and wgrad share
+    ``_tf32_conv_spec_reason``. Every non-TF32 spec returns ``""`` unless it
+    spells TF32 as a storage dtype. The atom, register and LDS-stride rules are
+    the ones every direction shares (``_tf32_mfma_reason``); without an arch the
+    atom is checked against every arch's catalog, so ``validate`` rejects what
+    no arch can build and ``is_valid_spec`` adds the arch's own refusals.
+    """
+    why = spec.data.mma_dtype_reason()
+    if why:
+        return why
+    if not spec.data.is_tf32:
+        return ""
+    return _tf32_mfma_reason(spec, arch)
+
+
 def _conv_mma_family(arch: str) -> str:
     from rocke.core.arch import ArchTarget
 
@@ -1068,8 +1154,8 @@ def _resolve_conv_op(spec: ImplicitGemmConvSpec, arch: str):
     target = ArchTarget.from_gfx(arch)
     op = target.mma.op_for_shape(
         family=_conv_mma_family(arch),
-        a_dtype=spec.data.dtype_a,
-        b_dtype=spec.data.dtype_b,
+        a_dtype=spec.data.mma_a,
+        b_dtype=spec.data.mma_b,
         c_dtype="fp32",
         m=spec.warp_tile_m,
         n=spec.warp_tile_n,
@@ -1267,6 +1353,13 @@ def _build_implicit_gemm_conv_impl(
     ok, why = is_valid_spec(spec, arch=arch)
     if not ok:
         raise ValueError(f"invalid conv_igemm spec for {arch}: {why}")
+    if spec.data.is_tf32 and a_operand_override is not None:
+        # The override hands the MFMA its A operand directly, bypassing the
+        # LDS fragment read where the fp32 -> tf32 reinterpretation happens.
+        raise ValueError(
+            "mma_dtype='tf32' does not support a_operand_override: the override "
+            "supplies the A operand in its own type, not as a TF32 fragment"
+        )
     p = spec.problem
     # Group merging (Gm). The kernargs describe the TRUE problem -- the host
     # packs them from the tensors, which do not merge -- so every merged extent
@@ -1391,11 +1484,23 @@ def _build_implicit_gemm_conv_impl(
     atom = spec.atom if op.family == "mma" else None
     a_per_lane = op.a_frag_len
     b_per_lane = op.b_frag_len
-    # LDS operand element type must match the MFMA operand type.
-    # bf16 → BF16, fp32 → F32; fp16 and fp8 go through the default f16 path.
-    _smem_dtype: Optional[Type] = (
-        BF16 if op.a_dtype == "bf16" else F32 if op.a_dtype == "fp32" else None
-    )
+    # LDS operand element type follows the *storage* dtype the tiles were
+    # written in: bf16 → BF16, fp32 → F32; fp16 goes through the default f16
+    # path. Equal to the MMA operand type except under TF32 compute, where the
+    # fp32 fragment is reinterpreted after the read (``_load_mma_operand``).
+    _smem_dtype: Optional[Type] = _smem_dtype_for(spec.data.dtype_a)
+    # Instruction-stream shape of one logical MMA step, for the compv3/compv4
+    # scheduling hints. 1/1 for every non-TF32 atom so their hints are
+    # unchanged; under TF32 an 8-wide fp32 fragment is two ds_read_b128 and a
+    # BF16x3-emulated atom issues three physical MFMAs.
+    if spec.data.is_tf32:
+        _ds_reads_per_frag = -(-a_per_lane // _TF32_LDS_LOAD_MAX)
+        _mfmas_per_mma = _mfma_issues_per_mma(op)
+    else:
+        _ds_reads_per_frag = 1
+        _mfmas_per_mma = 1
+    c_per_lane = op.dst.frag_len
+
     block_m, block_n, block_k = spec.tile_m, spec.tile_n, spec.tile_k
 
     # ---- Tile-level block/warp/lane decomposition (CK Tile ``BlockGemmShape``) ----
@@ -2073,13 +2178,14 @@ def _build_implicit_gemm_conv_impl(
                     )
                 else:
                     a_rows.append(
-                        _emit_smem_load(
+                        _load_mma_operand(
                             b,
                             A_src,
                             a_row,
                             col_base,
                             a_per_lane,
                             smem_dtype=_smem_dtype,
+                            data=spec.data,
                         )
                     )
 
@@ -2089,8 +2195,14 @@ def _build_implicit_gemm_conv_impl(
                     warp_n_off, b.add(b.const_i32(ni * spec.warp_tile_n), n_in_atom)
                 )
                 b_cols.append(
-                    _emit_smem_load(
-                        b, B_src, b_row, col_base, b_per_lane, smem_dtype=_smem_dtype
+                    _load_mma_operand(
+                        b,
+                        B_src,
+                        b_row,
+                        col_base,
+                        b_per_lane,
+                        smem_dtype=_smem_dtype,
+                        data=spec.data,
                     )
                 )
 
@@ -2118,8 +2230,8 @@ def _build_implicit_gemm_conv_impl(
             # - 1 DS group + 1 MFMA group:       186 TFLOPS (best).
             schedule.emit_after_mfma_step(
                 b,
-                ds_read_count=mfmas_m + mfmas_n,
-                mfma_count=mfmas_m * mfmas_n,
+                ds_read_count=(mfmas_m + mfmas_n) * _ds_reads_per_frag,
+                mfma_count=mfmas_m * mfmas_n * _mfmas_per_mma,
             )
 
         return new_accs
@@ -2255,7 +2367,7 @@ def _build_implicit_gemm_conv_impl(
             )
         else:
             DirectEpilogue(
-                atom=spec.atom, grid=grid, out_dtype=spec.data.dtype_d
+                atom=spec.atom, grid=grid, out_dtype=_epi_spec.data.dtype_d
             ).store(
                 b,
                 accs=final_accs_in,
