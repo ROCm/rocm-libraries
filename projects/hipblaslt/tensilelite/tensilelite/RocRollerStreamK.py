@@ -241,3 +241,17 @@ def is_streamk_metadata(args):
     """
     roles = frozenset(SK_ROLE_ORDER) | frozenset(SK_POINTER_ROLES)
     return any(arg.get("semantic") in roles for arg in args)
+
+
+def is_streamk_kernel_metadata(kernel_meta):
+    """True when one ``amdhsa.kernels`` entry declares a Stream-K kernarg.
+
+    The raw-metadata counterpart of is_streamk_metadata: the same stable
+    names and expression classification CustomKernels maps the args with.
+    """
+    for meta_arg in kernel_meta.get(".args") or []:
+        if meta_arg.get(".name") in STABLE_NAME_TO_SEMANTIC:
+            return True
+        if custom_arg_for_metadata(meta_arg) is not None:
+            return True
+    return False

@@ -695,7 +695,9 @@ def _buildCustomKernelFromMetadata(kernelName, fullYaml, kernelConfig):
         "macrotile": macrotile,
         "threads": threads,
         "grid": grid,
-        "occupancy": rocRollerOccupancy(kernelMeta),
+        # Only the rocRoller Stream-K grid reads it; other kernels keep 0 so
+        # their library entries are unchanged.
+        "occupancy": rocRollerOccupancy(kernelMeta) if isRocRollerSK else 0,
         "workspaceType": workspaceType,
         "workspaceSizePerElemC": workspaceSizePerElemC,
         "workspaceSizePerElemBias": 0,

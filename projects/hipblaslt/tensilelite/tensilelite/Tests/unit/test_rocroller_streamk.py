@@ -406,6 +406,55 @@ def test_streamk_metadata_infers_a_rocroller_streamk_launch(name, kernel):
     )
 
 
+def _without_streamk_args(kernel):
+    roles = set(SK_ROLE_ORDER) | set(SK_POINTER_ROLES)
+    meta = _streamk_metadata_yaml(kernel)
+    meta["amdhsa.kernels"][0][".args"] = [
+        a for a in kernel["args"] if _metadataArgToCustomArg(a)["semantic"] not in roles
+    ]
+    return meta
+
+
+def test_a_kernel_without_streamk_args_records_no_occupancy():
+    # Only the rocRoller Stream-K grid reads occupancy; recording it for any
+    # other kernel would change its library entry for nothing.
+    name, kernel = _kernels()[0]
+    meta = _without_streamk_args(kernel)
+    assert rocRollerOccupancy(meta["amdhsa.kernels"][0]) > 0
+    ck = _buildCustomKernelFromMetadata(name, meta, _streamk_config(kernel["macrotile"]))
+    assert ck["grid"] != ["RocRollerStreamK", "One", "One"]
+    assert ck["workspaceType"] == "None"
+    assert ck["occupancy"] == 0
+
+
+def test_occupancy_is_serialized_only_when_recorded():
+    from tensilelite.Common import state
+    from tensilelite.Contractions import CustomKernel
+
+    base = {"name": "k", "args": [], "macrotile": [16, 16, 128], "threads": [64, 1, 1],
+            "grid": ["TilesX", "TilesY", "Batch"]}
+    assert "occupancy" not in state(CustomKernel.FromOriginalState(dict(base)))
+    assert "occupancy" not in state(CustomKernel.FromOriginalState(dict(base, occupancy=0)))
+    assert state(CustomKernel.FromOriginalState(dict(base, occupancy=3)))["occupancy"] == 3
+
+
+@pytest.mark.parametrize("streamk", [True, False], ids=["streamk", "not-streamk"])
+def test_add_custom_config_detects_occupancy_only_for_streamk(tmp_path, streamk):
+    from tensilelite.AddCustomConfig import _read_asm_file
+
+    name, kernel = _kernels()[0]
+    meta = _streamk_metadata_yaml(kernel) if streamk else _without_streamk_args(kernel)
+    asm = tmp_path / f"{name}.s"
+    asm.write_text(
+        ".amdgpu_metadata\n---\n" + yaml.safe_dump(meta) + "...\n.end_amdgpu_metadata\n"
+    )
+    detected = _read_asm_file(str(asm))["detected"]
+    if streamk:
+        assert detected["occupancy"] == rocRollerOccupancy(meta["amdhsa.kernels"][0])
+    else:
+        assert "occupancy" not in detected
+
+
 @pytest.mark.parametrize("compute_type,expected", [("s", 4), ("h", 2), ("d", 8)])
 def test_streamk_workspace_is_sized_by_the_compute_type(compute_type, expected):
     name, kernel = _kernels()[0]

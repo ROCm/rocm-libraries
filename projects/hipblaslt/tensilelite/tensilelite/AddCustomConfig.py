@@ -417,13 +417,15 @@ def _read_asm_file(filepath):
         if wf:
             result["detected"]["wavefront_size"] = int(wf)
         # Workgroups resident per CU, from the kernel's static register and
-        # LDS usage. rocRoller Stream-K grid selection needs it and cannot
-        # recover it later without loading the code object.
+        # LDS usage. Only rocRoller Stream-K grid selection reads it, and it
+        # cannot recover it later without loading the code object.
         from .CustomKernels import rocRollerOccupancy
+        from .RocRollerStreamK import is_streamk_kernel_metadata
 
-        occupancy = rocRollerOccupancy(k)
-        if occupancy:
-            result["detected"]["occupancy"] = occupancy
+        if is_streamk_kernel_metadata(k):
+            occupancy = rocRollerOccupancy(k)
+            if occupancy:
+                result["detected"]["occupancy"] = occupancy
 
     return result
 
