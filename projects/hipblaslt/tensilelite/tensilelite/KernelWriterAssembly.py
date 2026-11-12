@@ -5734,22 +5734,29 @@ class KernelWriterAssembly(KernelWriter):
           # Clamp the span to what is left of the tensor, as the strided branch
           # does with SMinU32: the last workgroup owns fewer than MT when the
           # size leaves a remainder, and that overhang lands off the allocation
-          # on the final K window (tile 96 over M 2048 faults).  numToEnd needs
-          # no rounding up to a whole load: a partial one would lose its DTL
-          # write, but the free-dim assert and MT are both multiples of it.
+          # on the final K window (tile 96 over M 2048 faults).  numToEnd is
+          # first rounded up to a whole load: DTL drops the LDS write for a
+          # partial load, so a span that ends mid-load loses that data.  fp4
+          # pins its free dim to the chunk and so needs neither instruction;
+          # bf16/fp16 keep the multiple at 1 to stay applicable to odd M.
           grTileInfo = self.states.a.tileInfo if tc == 'A' else \
                        (self.states.b.tileInfo if tc == 'B' else None)
-          chunkElems = max(1, int(int(getattr(grTileInfo, "loadWidthGR", 16) or 16)
-                                  / float(tP["bpeGR"])))
+          loadBytes  = int(getattr(grTileInfo, "loadWidthGR", 16) or 16)
+          chunkElems = max(1, int(loadBytes / float(tP["bpeGR"])))
           aem = kernel["AssertFree0ElementMultiple" if tc == 'A'
                        else "AssertFree1ElementMultiple"]
-          assert aem % chunkElems == 0 and kernel[tP["mt"]] % chunkElems == 0, \
-              "%s: TLU=1 free dim and MT must be multiples of %u elements" % (tc, chunkElems)
+          alreadyAligned = (aem % chunkElems == 0
+                            and kernel[tP["mt"]] % chunkElems == 0)
           for i in range(0, numDim):
             idx = indices[i]
             if idx == kernel["ProblemType"]["Index0"] or idx == kernel["ProblemType"]["Index1"]:
               module.add(SSubU32(dst=sgpr(stmp+1), src0=self.sizeRef(idx), src1=sgpr(tileStart+0), \
                         comment="numToEnd = size - WG*MT"))
+              if not alreadyAligned:
+                module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=(chunkElems - 1), \
+                          comment="round up to a whole %uB load (%u elements)"%(loadBytes, chunkElems)))
+                module.add(SAndB32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=hex(~(chunkElems - 1) & 0xffffffff), \
+                          comment="mask off the partial load"))
               module.add(SMinU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=freeSpan, \
                         comment="free span = min(that, MT %u)"%freeSpan))
               module.add(SAddU32(dst=sgpr(stmp+1), src0=sgpr(stmp+1), src1=prePadElems, \
@@ -5988,14 +5995,22 @@ class KernelWriterAssembly(KernelWriter):
     depthU = int(kernel["DepthU"])
 
     # Gather per-tc (kPad, bpeForLimit, kRowStride). kPad and bpeForLimit must
-    # agree across tPs, otherwise bail. kRowStride is None when K is the
-    # contiguous dimension and the unroll stride when it is not (TLU=1), where
-    # the window set up in computeLoadSrd spans DepthU K rows.
+    # agree across the tPs that survive, otherwise bail. kRowStride is None when
+    # K is the contiguous dimension and the unroll stride when it is not
+    # (TLU=1), where the window set up in computeLoadSrd spans DepthU K rows.
+    #
+    # A tensor this function does not handle is skipped rather than abandoning
+    # the whole list, so the other operand still gets its limit tightened.
+    #
+    # The MX bail-outs further down stay `return module` on purpose: they are
+    # not eligibility tests so much as "this configuration is unsupported",
+    # and dropping one scale tensor from a pair would let the uniformity check
+    # below pass on a list it was written to reject.
     tcKpadBpeList = []
     for tP in tPs:
       tc = tP["tensorChar"]
       if tc not in ("A", "B", "MXSA", "MXSB"):
-        return module
+        continue
       strideF = self.strideRef(tc, tP['tileIdx'])
       isMx = tc in ("MXSA", "MXSB")
       kRowStride = None
@@ -6027,8 +6042,13 @@ class KernelWriterAssembly(KernelWriter):
           kRowStride = self.strideRef(tc, kernel["ProblemType"]["IndexUnroll"])
       tcKpadBpeList.append((tc, kPad, bpeForLimit, kRowStride))
 
-    # Joint emission requires uniform kPad/bpe across all tPs (true for A/B
-    # symmetric configs and for MXSA/MXSB scale pairs in the gauntlet).
+    # Every tensor was skipped (e.g. both operands TLU=1): nothing to tighten.
+    if not tcKpadBpeList:
+      return module
+
+    # Joint emission requires uniform kPad/bpe across the tPs that survived
+    # (true for A/B symmetric configs and for MXSA/MXSB scale pairs in the
+    # gauntlet).
     kPad = tcKpadBpeList[0][1]
     bpeForLimit = tcKpadBpeList[0][2]
     if any(kp != kPad or bp != bpeForLimit for _, kp, bp, _ in tcKpadBpeList):
@@ -6112,25 +6132,46 @@ class KernelWriterAssembly(KernelWriter):
         return False
       return True
 
-    assert _eligible(tPA) and _eligible(tPB), \
-      "tailLoopBoundaryDtlLoadAB requires bf16/subtile eligibility for both A and B"
+    # Emit for whichever tensors are eligible, not only when both are.  The
+    # per-tensor blocks below are already independent, so a mixed pair is just a
+    # shorter loop.
+    #
+    # A TLU=1 operand is always ineligible, via the const-unit-stride test: its
+    # contiguous dim is the free dim, so one GR load covers M rows at a single
+    # K.  The hazard this fixup exists for -- a dwordx4 that straddles the K
+    # boundary, where HW zeroes the whole OOB dword and takes the trailing 16-bit
+    # K element with it -- cannot arise there, because no load spans more than
+    # one K.  A K past the end zeroes that load entirely, which is what it should
+    # do.  So an NN kernel (A TLU=1, B TLU=0) legitimately patches B only.
+    eligible = [tP for tP in (tPA, tPB) if _eligible(tP)]
+    if not eligible:
+      return module
 
-    # Both eligible — emit shared K math once, then per-tensor M/load blocks.
+    # Emit shared K math once, then per-tensor M/load blocks.
     loopCounterName = self.loopCounterName(kernel, self.states.unrollIdx)
     waveSize        = kernel["WavefrontSize"]
     depthU          = kernel["DepthU"]
     laneMaskCount   = self.states.laneSGPRCount
 
-    # K-side geometry is identical for A and B in the bf16 subtile path.
-    bpe          = int(tPA["bpeGR"])
+    # K-side geometry is shared by the tensors this emits for, so take it from
+    # an eligible one rather than unconditionally from A -- A may be the tensor
+    # being skipped.
+    bpe          = int(eligible[0]["bpeGR"])
     elemsPerLane = 16 // bpe  # bf16 -> 8
-    tileInfoA       = self.states.a.tileInfo
-    subtileKElems   = int(tileInfoA.subtileShape[1]) * int(tileInfoA.mmaTileShape[1])
+    def _kElems(tP):
+      ti = self.states.a.tileInfo if tP["tensorChar"] == 'A' else self.states.b.tileInfo
+      return int(ti.subtileShape[1]) * int(ti.mmaTileShape[1])
+    subtileKElems   = _kElems(eligible[0])
     assert isPow2(subtileKElems)
+    assert all(_kElems(tP) == subtileKElems and int(tP["bpeGR"]) == bpe
+               for tP in eligible), \
+      "tailLoopBoundaryDtlLoadAB shares one K preamble across tensors, so the " \
+      "eligible ones must agree on subtileKElems and bpe"
 
     skipLabel = Label(self.labels.getNameInc("tailBoundarySkipAB"), "")
 
-    module.addComment1("Tail-loop boundary DTL load (A+B)")
+    module.addComment1("Tail-loop boundary DTL load (%s)"
+                       % "+".join(tP["tensorChar"] for tP in eligible))
 
     # ── Shared block: parity gate + K-derived values ──────────────────────────
     # Reserve sgprs that must outlive the per-tensor block.
@@ -6173,7 +6214,7 @@ class KernelWriterAssembly(KernelWriter):
       # per-tensor when we build sTarget.
 
       # ── Per-tensor block ────────────────────────────────────────────────
-      for tP in (tPA, tPB):
+      for tP in eligible:
         tc       = tP["tensorChar"]
         tileInfo = self.states.a.tileInfo if tc == 'A' else self.states.b.tileInfo
         regList  = tileInfo.localSubtilesRegister[0]
