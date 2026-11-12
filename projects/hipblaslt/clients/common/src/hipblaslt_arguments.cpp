@@ -144,6 +144,7 @@ void Arguments::init()
     skip_launch_solution = -1;
     integer_exact_pattern[0] = 0;
     allow_no_solution        = 0;
+    require_solution_chip_id = 0;
     timing         = 0;
 
     transA = '*';

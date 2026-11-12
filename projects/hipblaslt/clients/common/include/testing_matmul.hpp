@@ -5674,7 +5674,18 @@ void testing_matmul_with_bias(const Arguments& arg,
     returnedAlgoCount = heuristicResult.size();
 
     // A size-threshold sweep may reach shapes the library declines; that is a correct answer.
-    if(arg.allow_no_solution && returnedAlgoCount == 0)
+    // On the chip a case names in require_solution_chip_id, a solution must exist.
+    bool requireSolution = false;
+    if(arg.require_solution_chip_id != 0)
+    {
+        int device = 0;
+        int chipId = 0;
+        requireSolution = hipGetDevice(&device) == hipSuccess
+                          && hipDeviceGetAttribute(&chipId, hipDeviceAttributePciChipId, device)
+                                 == hipSuccess
+                          && chipId == arg.require_solution_chip_id;
+    }
+    if(arg.allow_no_solution && !requireSolution && returnedAlgoCount == 0)
     {
 #ifdef GOOGLE_TEST
         GTEST_SKIP() << "the library offers no solution for this shape";
