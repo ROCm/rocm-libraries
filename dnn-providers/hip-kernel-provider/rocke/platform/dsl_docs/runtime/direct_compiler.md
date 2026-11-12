@@ -258,8 +258,12 @@ fixed rules:
   dropped first). The retried compile is kept if it spills less or, spilling no
   more, runs more waves for at most 10% more instructions or, with both alike,
   issues at least 3% fewer (blocks weighted by 8 to the power of their loop
-  depth). The
-  spiller does the same for what it must spill, now also from such VGPRs.
+  depth). The first compile notes how many VGPRs of pressure the pass would
+  save, and the retry runs only when that could cross a waves threshold of the
+  first compile's register count (with 16 registers of slack: scheduling and
+  fragmentation add to what is counted), or when the first compile spilled or
+  sits within 8 registers of the hardware limit. The spiller does the same for
+  what it must spill, now also from such VGPRs.
 
 These choices depend only on the input. They are why two kernels of a similar
 size can take very different compile times.
