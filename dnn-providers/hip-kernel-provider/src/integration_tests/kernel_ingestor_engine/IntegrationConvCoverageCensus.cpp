@@ -557,9 +557,10 @@ bool knownGap(const nlohmann::json& map, const nlohmann::json& row, const std::s
     return !gaps.empty();
 }
 
-/// Whether a twin's service may rest on the explicit-GEMM engines alone: the map records
-/// it as served only by them on this architecture, or, on an architecture without a column,
-/// on any architecture, or records no HIP or naive service for it anywhere.
+/// Whether a twin's service may rest on the explicit-GEMM engines alone: the map records it
+/// as served only by them on this architecture, or records no HIP or naive service for it
+/// anywhere. On an architecture without a column the HIP engines' reach is unknown, so any
+/// twin may.
 bool mayNeedBlas(const nlohmann::json& map, const nlohmann::json& row, const std::string& arch)
 {
     const auto& tiers = row.at("tier").get_ref<const std::string&>();
@@ -574,7 +575,7 @@ bool mayNeedBlas(const nlohmann::json& map, const nlohmann::json& row, const std
     {
         return tiers[slot] == 'b';
     }
-    return tiers.find('b') != std::string::npos;
+    return true;
 }
 
 constexpr const char* NO_BLAS_NOTE
