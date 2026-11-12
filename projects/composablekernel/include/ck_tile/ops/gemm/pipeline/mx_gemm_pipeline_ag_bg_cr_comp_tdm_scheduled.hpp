@@ -21,12 +21,6 @@ inline constexpr auto kGl2PrefetchCoherence = amd_buffer_coherence_enum::SE_NT;
 inline constexpr auto kGl2PrefetchCoherence = amd_buffer_coherence_enum::coherence_default;
 #endif
 
-/// Keeps LLVM from moving LDS reads or WMMAs across this point; ALU work may cross.
-CK_TILE_DEVICE void fence()
-{
-    sched_fence<LLVMSchedGroupMask::VALU | LLVMSchedGroupMask::SALU | LLVMSchedGroupMask::TRANS>();
-}
-
 /// The MxTdmScheduledGemmTraits values rocKE derives from `spec`'s shape, as host values.
 struct ShapeTraits
 {
@@ -167,6 +161,10 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
     static constexpr index_t kWait0           = Policy::template GetDscntWait<Problem>(0);
     static constexpr index_t kWait1           = Policy::template GetDscntWait<Problem>(1);
     static constexpr index_t kLatePending     = Policy::template GetLatePendingReads<Problem>();
+    /// The sched_fence mask of the pipeline's fences: LDS reads and WMMAs stay put, ALU work may
+    /// cross.
+    static constexpr int32_t kAluMayCross =
+        LLVMSchedGroupMask::VALU | LLVMSchedGroupMask::SALU | LLVMSchedGroupMask::TRANS;
     using BlockGemm  = remove_cvref_t<decltype(Policy::template GetBlockGemm<Problem>())>;
     using CVec       = typename BlockGemm::CVec;
     using CBlockTile = typename BlockGemm::CBlockTile;
@@ -642,9 +640,9 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         {
             if constexpr(kHasCluster)
             {
-                mx_tdm_scheduled::fence();
+                sched_fence<kAluMayCross>();
                 cluster_barrier_signal_wave0(wave);
-                mx_tdm_scheduled::fence();
+                sched_fence<kAluMayCross>();
             }
         }
 
@@ -652,20 +650,20 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         CK_TILE_DEVICE void Refill(index_t k0) const
         {
             PrefetchAhead<StaticParity>(k0);
-            mx_tdm_scheduled::fence();
+            sched_fence<kAluMayCross>();
             if constexpr(kLocalPrefetch)
             {
                 // Tile k+1 is read next, from this point: it is the only TDM load in flight, and
                 // the barrier below publishes it.
                 s_wait_tensorcnt<0>();
                 s_barrier();
-                mx_tdm_scheduled::fence();
+                sched_fence<kAluMayCross>();
             }
         }
 
         CK_TILE_DEVICE void Late(index_t k0, index_t parity) const
         {
-            mx_tdm_scheduled::fence();
+            sched_fence<kAluMayCross>();
             if constexpr(kHasCluster)
                 cluster_barrier_wait();
             // No wave drained its reads of this buffer before the signal; the workgroup barrier
@@ -673,7 +671,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             s_wait_dscnt_pinned<kLatePending>();
             s_barrier();
             Issue(ClampK(k0 + 2 * kTileK), parity);
-            mx_tdm_scheduled::fence();
+            sched_fence<kAluMayCross>();
         }
 
         CK_TILE_DEVICE static void WaitNextTile()
