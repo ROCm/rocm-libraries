@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from ._analytical import UniformCase
 from ._dense_subject import ResolvedDenseSubject, resolve_dense_subject
-from ._p10_analytical import P10_QUICK_CASES, require_p10_scope
+from ._p10_analytical import P10_QUICK_CASES, TileSchedule, require_p10_scope
 
 # The derivation is for the gfx942 body (32x32x8 MFMA atom, its tile loop and its
 # output epilogue). Another architecture needs its own.
@@ -66,3 +66,12 @@ def p10_kernel_key(arch: str, kernel_spec) -> tuple:
     from kernels.common.attention_dense_spec import attention_dense_cache_key
 
     return attention_dense_cache_key(kernel_spec, arch=arch)
+
+
+def p10_schedule(subject: ResolvedDenseSubject) -> TileSchedule:
+    """Tile geometry of the kernel that dispatch resolved for a subject.
+
+    It is read from the resolved spec and never pinned: a retune changes what the
+    emulation and the masked-tile analysis follow instead of failing the gate."""
+    spec = subject.tuning_spec.kernel_spec
+    return TileSchedule(block_m=int(spec.block_m), block_n=int(spec.block_n))
