@@ -25,6 +25,7 @@ fn exchanges(kind: OpKind) -> bool {
             | OpKind::DsBpermute
             | OpKind::DppXor
             | OpKind::QuadPerm
+            | OpKind::DppRowMirror
             | OpKind::MovDpp8
             | OpKind::Permlanex16
             | OpKind::Permlane16

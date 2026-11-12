@@ -1945,7 +1945,7 @@ impl<'a> Isel<'a> {
             // It only orders instructions, so emitting nothing is correct.
             IglpOpt => {}
             LAtomicAdd => self.lds_atomic_add(op)?,
-            DppXor | QuadPerm | MovDpp8 => {
+            DppXor | QuadPerm | DppRowMirror | MovDpp8 => {
                 let (opc, ctrl) = match op.kind {
                     DppXor => match op.int_attr("xor_mask") {
                         Some(mask @ 1..=15) if self.t.target == Target::Gfx950 => match isel_hooks::xor_shuffle(mask as u32) {
@@ -1958,6 +1958,10 @@ impl<'a> Isel<'a> {
                     QuadPerm => match op.int_attr("ctrl") {
                         Some(ctrl @ 0..=255) => (Opc::VMovB32Dpp, dpp16_ctrl(ctrl as u32, true)),
                         _ => return Err(unsupported("tile.quad_perm ctrl outside 0..255")),
+                    },
+                    DppRowMirror => match op.int_attr("ctrl") {
+                        Some(ctrl @ 0x140..=0x141) => (Opc::VMovB32Dpp, dpp16_ctrl(ctrl as u32, true)),
+                        _ => return Err(unsupported("tile.dpp_row_mirror ctrl is not 0x140 or 0x141")),
                     },
                     _ => match op.int_attr("sel") {
                         Some(sel) => {
@@ -3159,13 +3163,13 @@ impl<'a> Isel<'a> {
             Scalar::F16 if self.t.target == Target::Gfx950 && *self.k.ty(value) == Type::Vec(Scalar::F16, 2) => {
                 crate::target::gfx9::conv_ops::pk_add_f16()
             }
+            Scalar::BF16 if self.t.target == Target::Gfx950 && *self.k.ty(value) == Type::Vec(Scalar::BF16, 2) => {
+                crate::target::gfx9::conv_ops::pk_add_bf16()
+            }
             other => return Err(unsupported(format!("memref.global_atomic_add of {other:?}"))),
         };
         let (release, acquire) = match op.str_attr("ordering").unwrap_or("monotonic") {
             "monotonic" => (false, false),
-            Scalar::BF16 if self.t.target == Target::Gfx950 && *self.k.ty(value) == Type::Vec(Scalar::BF16, 2) => {
-                crate::target::gfx9::conv_ops::pk_add_bf16()
-            }
             "release" => (true, false),
             "acquire" => (false, true),
             "acq_rel" | "seq_cst" => (true, true),
@@ -7314,16 +7318,19 @@ mod convmem_tests {
         let body = r#"    %x : i32 = memref.global_load_typed ( %X, %tid ) { align = i:4, elem_type = s:"i32" }
     %a : i32 = tile.dpp_xor ( %x ) { xor_mask = i:1 }
     %b : i32 = tile.quad_perm ( %a ) { ctrl = i:177 }
-    %c : i32 = tile.mov_dpp8 ( %b ) { sel = i:14570689 }
+    %m : i32 = tile.dpp_row_mirror ( %b ) { ctrl = i:320 }
+    %h : i32 = tile.dpp_row_mirror ( %m ) { ctrl = i:321 }
+    %c : i32 = tile.mov_dpp8 ( %h ) { sel = i:14570689 }
     memref.global_store_typed ( %Y, %tid, %c ) { align = i:4, elem_type = s:"i32" }
 "#;
         let text = kernel(params, body);
         let insts = insts(&text);
         let dpp: Vec<i64> = all(&insts, Opc::VMovB32Dpp).iter().map(|i| i.imm).collect();
-        assert_eq!(dpp, [dpp16_ctrl(0x161, true) as i64, dpp16_ctrl(177, true) as i64]);
+        assert_eq!(dpp, [0x161, 177, 0x140, 0x141].map(|c| dpp16_ctrl(c, true) as i64));
         assert_eq!(all(&insts, Opc::VMovB32Dpp8)[0].imm, 0xde_54c1);
         assert!(compiled(&text_with(&text, "xor_mask = i:1", "xor_mask = i:16")).is_err());
         assert!(compiled(&text_with(&text, "ctrl = i:177", "ctrl = i:256")).is_err());
+        assert!(compiled(&text_with(&text, "ctrl = i:320", "ctrl = i:322")).is_err());
     }
 
     /// Encodings checked against `llvm-mc -arch=amdgcn -mcpu=gfx1151 -show-encoding`.

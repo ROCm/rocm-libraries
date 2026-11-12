@@ -1798,6 +1798,7 @@ fn may_clobber_lds(kind: OpKind) -> bool {
                 | OpKind::IglpOpt
                 | OpKind::DppXor
                 | OpKind::QuadPerm
+                | OpKind::DppRowMirror
                 | OpKind::MovDpp8
                 | OpKind::BufferLoadScalar
                 | OpKind::BufferStoreScalar

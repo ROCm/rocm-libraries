@@ -1304,7 +1304,7 @@ impl Checker<'_> {
                     }
                 }
             }
-            DppXor | QuadPerm | MovDpp8 => {
+            DppXor | QuadPerm | DppRowMirror | MovDpp8 => {
                 arity(1, 1)?;
                 let t = types[0];
                 if !(*t == i32t || (op.kind == MovDpp8 && *t == f32t)) || res != Some(t) {
@@ -1313,6 +1313,7 @@ impl Checker<'_> {
                 let (key, range) = match op.kind {
                     DppXor => ("xor_mask", 1..=15),
                     QuadPerm => ("ctrl", 0..=255),
+                    DppRowMirror => ("ctrl", 0x140..=0x141),
                     _ => ("sel", i64::MIN..=i64::MAX),
                 };
                 match self.int(op, key)? {

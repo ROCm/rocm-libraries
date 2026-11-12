@@ -377,6 +377,9 @@ pub enum OpKind {
     LdsAtomicAdd,
     DppXor,
     QuadPerm,
+    /// `tile.dpp_row_mirror (data: i32) {ctrl}`: DPP `row_mirror` (0x140) or
+    /// `row_half_mirror` (0x141), a register-only in-row lane mirror.
+    DppRowMirror,
     MovDpp8,
     // internal forms produced by the optimizer (never parsed)
     KernArg,
@@ -636,6 +639,7 @@ impl OpKind {
             "tile.lds_atomic_add" => OpKind::LdsAtomicAdd,
             "tile.dpp_xor" => OpKind::DppXor,
             "tile.quad_perm" => OpKind::QuadPerm,
+            "tile.dpp_row_mirror" => OpKind::DppRowMirror,
             "tile.mov_dpp8" => OpKind::MovDpp8,
             "arith.trunc_f32_to_bf16" => OpKind::TruncF32ToBf16,
             "tile.buffer_load_bf16" => OpKind::BufferLoadScalar,
@@ -681,12 +685,12 @@ impl OpKind {
             "memref.global_atomic_add" => OpKind::GlobalAtomicAdd,
             // `(ptr<f16>, index, vec<f16x2>)`: an atomic add of both halves at an f16 element index.
             "memref.global_atomic_add_pk_f16" => OpKind::GlobalAtomicAdd,
+            // `(ptr<bf16>, index, vec<bf16x2>)`: the same with `global_atomic_pk_add_bf16`.
+            "memref.global_atomic_add_pk_bf16" => OpKind::GlobalAtomicAdd,
             "memref.fence" => OpKind::Fence,
             "tile.sync_lds_only" => OpKind::SyncLdsOnly,
             "tile.smem_addr_of" => OpKind::SmemAddrOf,
             "tile.smem_ptr_add" => OpKind::SmemPtrAdd,
-            // `(ptr<bf16>, index, vec<bf16x2>)`: the same with `global_atomic_pk_add_bf16`.
-            "memref.global_atomic_add_pk_bf16" => OpKind::GlobalAtomicAdd,
             // rustgemm: `_imm` adds an instruction offset (0..4095 bytes) to the global and the LDS address.
             "tile.async_buffer_load_lds_addr" | "tile.async_buffer_load_lds" | "tile.async_buffer_load_lds_imm" => OpKind::BufferLoadLds,
             "tile.global_load_lds" => OpKind::GlobalLoadLds,
@@ -781,6 +785,7 @@ impl OpKind {
                 | OpKind::LAtomicAdd
                 | OpKind::DppXor
                 | OpKind::QuadPerm
+                | OpKind::DppRowMirror
                 | OpKind::MovDpp8
                 | OpKind::BufferLoadScalar
                 | OpKind::BufferStoreScalar
@@ -846,6 +851,7 @@ impl OpKind {
                     | OpKind::SmemLoadV4
                     | OpKind::DppXor
                     | OpKind::QuadPerm
+                    | OpKind::DppRowMirror
                     | OpKind::MovDpp8
                     | OpKind::BufferLoadScalar
                     | OpKind::Permlanex16

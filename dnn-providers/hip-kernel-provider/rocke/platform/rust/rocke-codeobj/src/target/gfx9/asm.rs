@@ -974,6 +974,9 @@ mod tests {
             (MInst::new(Opc::BufStoreB32, [], [v(1, 1), v(2, 1), s(8, 4), Opnd::Imm(0)]).with_imm(12), vec![0xe070_100c, 0x8002_0102]),
             // v_mov_b32_dpp v1, v2 quad_perm:[1,0,3,2] row_mask:0xf bank_mask:0xf bound_ctrl:1
             (MInst::new(Opc::VMovB32Dpp, [v(1, 1)], [v(2, 1)]).with_imm(dpp16_ctrl(0xb1, true) as i64), vec![0x7e02_02fa, 0xff08_b102]),
+            // v_mov_b32_dpp v1, v2 row_mirror row_mask:0xf bank_mask:0xf bound_ctrl:1 (llvm-mc -mcpu=gfx950), and row_half_mirror
+            (MInst::new(Opc::VMovB32Dpp, [v(1, 1)], [v(2, 1)]).with_imm(dpp16_ctrl(0x140, true) as i64), vec![0x7e02_02fa, 0xff09_4002]),
+            (MInst::new(Opc::VMovB32Dpp, [v(1, 1)], [v(2, 1)]).with_imm(dpp16_ctrl(0x141, true) as i64), vec![0x7e02_02fa, 0xff09_4102]),
         ];
         for (inst, want) in cases {
             assert_eq!(words(inst.clone()), Ok(want), "{inst:?}");
