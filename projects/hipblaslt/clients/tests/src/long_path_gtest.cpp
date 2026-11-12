@@ -1,11 +1,9 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Library and code-object files whose full path is MAX_PATH (260) characters
-// or more. Windows opens such a path only in its \\?\ form, so an install deep
-// enough lost those kernels, and before the shard-load fix it crashed and
-// hung (rocm-libraries #9962). Elsewhere the paths open as usual and these
-// tests pass either way.
+// The fixture creates long paths independently of the loader's conversion.
+// Windows runs exercise the MAX_PATH workaround; other platforms open these
+// paths without conversion.
 
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
@@ -21,6 +19,7 @@
 #include <memory>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #ifdef _WIN32

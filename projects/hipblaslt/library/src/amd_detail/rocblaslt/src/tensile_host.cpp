@@ -3416,7 +3416,8 @@ namespace
                     auto mapping_msgpack_gz = processor_path / ("TensileLibrary_lazy_" + processor + ".dat.zlib");
                     auto mapping_yaml       = processor_path / ("TensileLibrary_lazy_" + processor + ".yaml");
                     if(std::filesystem::exists(TensileLite::longPathSafe(mapping_msgpack.string()))
-                       || std::filesystem::exists(TensileLite::longPathSafe(mapping_msgpack_gz.string()))
+                       || std::filesystem::exists(
+                           TensileLite::longPathSafe(mapping_msgpack_gz.string()))
                        || std::filesystem::exists(TensileLite::longPathSafe(mapping_yaml.string())))
                     {
                         path = std::move(processor_path);
@@ -3436,8 +3437,8 @@ namespace
             if(!lazyLoad)
             {
                 bool no_match = true;
-                for(const auto& entry : std::filesystem::directory_iterator(
-                        TensileLite::longPathSafe(path.string())))
+                for(const auto& entry :
+                    std::filesystem::directory_iterator(TensileLite::longPathSafe(path.string())))
                 {
                     auto filename = entry.path().filename();
                     if(codeObjectTargets(filename, processor))
