@@ -1273,14 +1273,16 @@ struct K1Tiles
             = ((static_cast<long long>(td) * gather.in[1] + th) * gather.in[2] + tw) * gather.chans;
         // PACK: this thread's channel in its own tap, valid while the tap is.
         const int c = PACK != 0 ? chan : c0 + kv;
-        const bool cOk = (PACK != 0 ? qt < gather.taps[0] : c < gather.cgroup) && it < endIt;
+        // Bitwise (not short-circuit) predicates: on per-lane values && lets the compiler turn
+        // the offset select into exec-masked branches around the loads; & keeps a v_cndmask.
+        const bool cOk = (PACK != 0 ? qt < gather.taps[0] : c < gather.cgroup) & (it < endIt);
 #pragma unroll
         for(int p = 0; p < A_PASSES; ++p)
         {
             const int id = aD[p] + td, ih = aH[p] + th, iw = aW[p] + tw;
-            const bool ok = cOk && static_cast<unsigned>(id) < static_cast<unsigned>(gather.in[0])
-                            && static_cast<unsigned>(ih) < static_cast<unsigned>(gather.in[1])
-                            && static_cast<unsigned>(iw) < static_cast<unsigned>(gather.in[2]);
+            const bool ok = cOk & (static_cast<unsigned>(id) < static_cast<unsigned>(gather.in[0]))
+                            & (static_cast<unsigned>(ih) < static_cast<unsigned>(gather.in[1]))
+                            & (static_cast<unsigned>(iw) < static_cast<unsigned>(gather.in[2]));
 #if K1_BUFFER
             const unsigned offset
                 = ok ? static_cast<unsigned>(
@@ -1338,10 +1340,10 @@ struct K1Tiles
             const int r = row + p * ROWS_PER_PASS;
             const int c = c0 + ((slot ^ Swz::key(r)) * VEC);
             const int id = aD[p] + td, ih = aH[p] + th, iw = aW[p] + tw;
-            const bool ok = itOk && c < gather.cgroup
-                            && static_cast<unsigned>(id) < static_cast<unsigned>(gather.in[0])
-                            && static_cast<unsigned>(ih) < static_cast<unsigned>(gather.in[1])
-                            && static_cast<unsigned>(iw) < static_cast<unsigned>(gather.in[2]);
+            const bool ok = itOk & (c < gather.cgroup)
+                            & (static_cast<unsigned>(id) < static_cast<unsigned>(gather.in[0]))
+                            & (static_cast<unsigned>(ih) < static_cast<unsigned>(gather.in[1]))
+                            & (static_cast<unsigned>(iw) < static_cast<unsigned>(gather.in[2]));
             const unsigned offset
                 = ok ? static_cast<unsigned>(
                            aOff[p]
@@ -1366,7 +1368,7 @@ struct K1Tiles
         {
             const int r = row + p * ROWS_PER_PASS;
             const int c = c0 + ((slot ^ Swz::key(r)) * VEC);
-            const bool ok = itOk && bOk[p] && c < gather.cgroup;
+            const bool ok = itOk & bOk[p] & (c < gather.cgroup);
             const unsigned offset
                 = ok ? static_cast<unsigned>(
                            bOff[p]
@@ -1403,7 +1405,7 @@ struct K1Tiles
 #pragma unroll
                 for(int j = 0; j < KV; ++j)
                 {
-                    const bool ok = itOk && bOk[p] && c0 + dK[p] + j < kgroup;
+                    const bool ok = itOk & bOk[p] & (c0 + dK[p] + j < kgroup);
                     const long long off = (c0 + j) * wRow + tap * tapStride;
 #if K1_BUFFER
                     const unsigned offset
@@ -1430,7 +1432,7 @@ struct K1Tiles
             {
 #if K1_BUFFER
                 const unsigned offset
-                    = cOk && bOk[p]
+                    = (cOk & bOk[p])
                           ? static_cast<unsigned>(
                                 bOff[p] + static_cast<int>(off * static_cast<long long>(sizeof(T))))
                           : K1_OUT_OF_RANGE;
@@ -1702,7 +1704,7 @@ struct K1Halo
         for(int p = 0; p < PASSES; ++p)
         {
             const long long pix = pix0 + row + p * RPP;
-            const bool ok = c < cgroup && pix >= base && pix < pixels;
+            const bool ok = (c < cgroup) & (pix >= base) & (pix < pixels);
             const unsigned offset
                 = ok ? static_cast<unsigned>(((pix - base) * chans + chanOffset + c)
                                              * static_cast<long long>(sizeof(T)))
