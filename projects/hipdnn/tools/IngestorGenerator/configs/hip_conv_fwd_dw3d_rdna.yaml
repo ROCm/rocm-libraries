@@ -1,0 +1,768 @@
+# Source of truth for the shipped hipkernel:hip_conv_fwd_dw3d_rdna catalog: a depthwise 3-D
+# forward convolution (groups == C, K a multiple of C) for the gfx11 (RDNA3/3.5) and gfx12
+# (RDNA4) targets, compiled from HIP source (kernels/ConvFwdDepthwise3d.cpp).
+#
+# The specialized kernel takes the filter, the H / W stride and dilation and its output tile at
+# compile time, so it is built for the common filters 3x3x3, 5x5x5, 3x1x1 and 1x3x3 with H / W
+# stride 1 or 2 and H / W dilation 1: NCDHW with the uniform-k grid, one or two output depths
+# per thread (two needs depth stride and dilation 1); NDHWC with one. One generic variant per
+# dtype and layout takes filter, stride and dilation as launch arguments for every other
+# problem. The native matcher (HipConvFwdDw3dRdnaNative.cpp, geometryOf) picks one variant per
+# graph; the tile rules here must match it.
+
+dialect: packaged
+authored_subpath: hip/conv_dw3d_rdna
+engine:
+  name: hipkernel:hip_conv_fwd_dw3d_rdna
+  sdk_version: "1.0.0"
+  knobs: []
+  heuristic: native
+
+kmd_fields:
+- name: kernel_family
+  type: string
+- name: variant
+  type: string
+- name: dtype
+  type: string
+- name: layout
+  type: string
+- name: filter_d
+  type: int
+- name: filter_h
+  type: int
+- name: filter_w
+  type: int
+- name: stride_h
+  type: int
+- name: stride_w
+  type: int
+- name: tile_d
+  type: int
+- name: tile_w
+  type: int
+- name: uniform_k
+  type: int
+
+graph_match:
+  shape: shared_shape
+  discriminator: none
+
+kernel_source_kind: hip
+workspace_policy: none
+
+packs:
+- name: hip_conv_fwd_dw3d_rdna
+  arch: [gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201]
+  kernels:
+  - name: hip_conv_fwd_dw3d_rdna.f32_ncdhw_k3x3x3_s1_td2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 0, DW_NDHWC: 0, DW_KZ: 3, DW_KY: 3, DW_KX: 3, DW_SH: 1, DW_SW: 1, DW_TD: 2, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_d: 3, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, tile_d: 2, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f32_ncdhw_k3x3x3_s1_td1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 0, DW_NDHWC: 0, DW_KZ: 3, DW_KY: 3, DW_KX: 3, DW_SH: 1, DW_SW: 1, DW_TD: 1, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_d: 3, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, tile_d: 1, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f32_ndhwc_k3x3x3_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 0, DW_NDHWC: 1, DW_KZ: 3, DW_KY: 3, DW_KX: 3, DW_SH: 1, DW_SW: 1, DW_TD: 1, DW_TW: 4, DW_UK: 0}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_LAST, filter_d: 3, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, tile_d: 1, tile_w: 4, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f32_ncdhw_k3x3x3_s2_td2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 0, DW_NDHWC: 0, DW_KZ: 3, DW_KY: 3, DW_KX: 3, DW_SH: 2, DW_SW: 2, DW_TD: 2, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_d: 3, filter_h: 3, filter_w: 3, stride_h: 2, stride_w: 2, tile_d: 2, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f32_ncdhw_k3x3x3_s2_td1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 0, DW_NDHWC: 0, DW_KZ: 3, DW_KY: 3, DW_KX: 3, DW_SH: 2, DW_SW: 2, DW_TD: 1, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_d: 3, filter_h: 3, filter_w: 3, stride_h: 2, stride_w: 2, tile_d: 1, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f32_ndhwc_k3x3x3_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 0, DW_NDHWC: 1, DW_KZ: 3, DW_KY: 3, DW_KX: 3, DW_SH: 2, DW_SW: 2, DW_TD: 1, DW_TW: 4, DW_UK: 0}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_LAST, filter_d: 3, filter_h: 3, filter_w: 3, stride_h: 2, stride_w: 2, tile_d: 1, tile_w: 4, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f32_ncdhw_k5x5x5_s1_td2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 0, DW_NDHWC: 0, DW_KZ: 5, DW_KY: 5, DW_KX: 5, DW_SH: 1, DW_SW: 1, DW_TD: 2, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_d: 5, filter_h: 5, filter_w: 5, stride_h: 1, stride_w: 1, tile_d: 2, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f32_ncdhw_k5x5x5_s1_td1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 0, DW_NDHWC: 0, DW_KZ: 5, DW_KY: 5, DW_KX: 5, DW_SH: 1, DW_SW: 1, DW_TD: 1, DW_TW: 8, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_d: 5, filter_h: 5, filter_w: 5, stride_h: 1, stride_w: 1, tile_d: 1, tile_w: 8, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f32_ndhwc_k5x5x5_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 0, DW_NDHWC: 1, DW_KZ: 5, DW_KY: 5, DW_KX: 5, DW_SH: 1, DW_SW: 1, DW_TD: 1, DW_TW: 8, DW_UK: 0}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_LAST, filter_d: 5, filter_h: 5, filter_w: 5, stride_h: 1, stride_w: 1, tile_d: 1, tile_w: 8, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f32_ncdhw_k5x5x5_s2_td2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 0, DW_NDHWC: 0, DW_KZ: 5, DW_KY: 5, DW_KX: 5, DW_SH: 2, DW_SW: 2, DW_TD: 2, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_d: 5, filter_h: 5, filter_w: 5, stride_h: 2, stride_w: 2, tile_d: 2, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f32_ncdhw_k5x5x5_s2_td1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 0, DW_NDHWC: 0, DW_KZ: 5, DW_KY: 5, DW_KX: 5, DW_SH: 2, DW_SW: 2, DW_TD: 1, DW_TW: 8, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_d: 5, filter_h: 5, filter_w: 5, stride_h: 2, stride_w: 2, tile_d: 1, tile_w: 8, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f32_ndhwc_k5x5x5_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 0, DW_NDHWC: 1, DW_KZ: 5, DW_KY: 5, DW_KX: 5, DW_SH: 2, DW_SW: 2, DW_TD: 1, DW_TW: 8, DW_UK: 0}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_LAST, filter_d: 5, filter_h: 5, filter_w: 5, stride_h: 2, stride_w: 2, tile_d: 1, tile_w: 8, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f32_ncdhw_k3x1x1_s1_td2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 0, DW_NDHWC: 0, DW_KZ: 3, DW_KY: 1, DW_KX: 1, DW_SH: 1, DW_SW: 1, DW_TD: 2, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_d: 3, filter_h: 1, filter_w: 1, stride_h: 1, stride_w: 1, tile_d: 2, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f32_ncdhw_k3x1x1_s1_td1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 0, DW_NDHWC: 0, DW_KZ: 3, DW_KY: 1, DW_KX: 1, DW_SH: 1, DW_SW: 1, DW_TD: 1, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_d: 3, filter_h: 1, filter_w: 1, stride_h: 1, stride_w: 1, tile_d: 1, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f32_ndhwc_k3x1x1_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 0, DW_NDHWC: 1, DW_KZ: 3, DW_KY: 1, DW_KX: 1, DW_SH: 1, DW_SW: 1, DW_TD: 1, DW_TW: 4, DW_UK: 0}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_LAST, filter_d: 3, filter_h: 1, filter_w: 1, stride_h: 1, stride_w: 1, tile_d: 1, tile_w: 4, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f32_ncdhw_k3x1x1_s2_td2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 0, DW_NDHWC: 0, DW_KZ: 3, DW_KY: 1, DW_KX: 1, DW_SH: 2, DW_SW: 2, DW_TD: 2, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_d: 3, filter_h: 1, filter_w: 1, stride_h: 2, stride_w: 2, tile_d: 2, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f32_ncdhw_k3x1x1_s2_td1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 0, DW_NDHWC: 0, DW_KZ: 3, DW_KY: 1, DW_KX: 1, DW_SH: 2, DW_SW: 2, DW_TD: 1, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_d: 3, filter_h: 1, filter_w: 1, stride_h: 2, stride_w: 2, tile_d: 1, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f32_ndhwc_k3x1x1_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 0, DW_NDHWC: 1, DW_KZ: 3, DW_KY: 1, DW_KX: 1, DW_SH: 2, DW_SW: 2, DW_TD: 1, DW_TW: 4, DW_UK: 0}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_LAST, filter_d: 3, filter_h: 1, filter_w: 1, stride_h: 2, stride_w: 2, tile_d: 1, tile_w: 4, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f32_ncdhw_k1x3x3_s1_td2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 0, DW_NDHWC: 0, DW_KZ: 1, DW_KY: 3, DW_KX: 3, DW_SH: 1, DW_SW: 1, DW_TD: 2, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_d: 1, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, tile_d: 2, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f32_ncdhw_k1x3x3_s1_td1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 0, DW_NDHWC: 0, DW_KZ: 1, DW_KY: 3, DW_KX: 3, DW_SH: 1, DW_SW: 1, DW_TD: 1, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_d: 1, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, tile_d: 1, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f32_ndhwc_k1x3x3_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 0, DW_NDHWC: 1, DW_KZ: 1, DW_KY: 3, DW_KX: 3, DW_SH: 1, DW_SW: 1, DW_TD: 1, DW_TW: 4, DW_UK: 0}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_LAST, filter_d: 1, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, tile_d: 1, tile_w: 4, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f32_ncdhw_k1x3x3_s2_td2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 0, DW_NDHWC: 0, DW_KZ: 1, DW_KY: 3, DW_KX: 3, DW_SH: 2, DW_SW: 2, DW_TD: 2, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_d: 1, filter_h: 3, filter_w: 3, stride_h: 2, stride_w: 2, tile_d: 2, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f32_ncdhw_k1x3x3_s2_td1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 0, DW_NDHWC: 0, DW_KZ: 1, DW_KY: 3, DW_KX: 3, DW_SH: 2, DW_SW: 2, DW_TD: 1, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_d: 1, filter_h: 3, filter_w: 3, stride_h: 2, stride_w: 2, tile_d: 1, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f32_ndhwc_k1x3x3_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 0, DW_NDHWC: 1, DW_KZ: 1, DW_KY: 3, DW_KX: 3, DW_SH: 2, DW_SW: 2, DW_TD: 1, DW_TW: 4, DW_UK: 0}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_LAST, filter_d: 1, filter_h: 3, filter_w: 3, stride_h: 2, stride_w: 2, tile_d: 1, tile_w: 4, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f32_ncdhw_generic
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_GENERIC: 1, DW_DTYPE: 0, DW_NDHWC: 0}
+    metadata: {kernel_family: dw3d_direct, variant: generic, dtype: FLOAT, layout: CHANNELS_FIRST, filter_d: 0, filter_h: 0, filter_w: 0, stride_h: 0, stride_w: 0, tile_d: 1, tile_w: 4, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f32_ndhwc_generic
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_GENERIC: 1, DW_DTYPE: 0, DW_NDHWC: 1}
+    metadata: {kernel_family: dw3d_direct, variant: generic, dtype: FLOAT, layout: CHANNELS_LAST, filter_d: 0, filter_h: 0, filter_w: 0, stride_h: 0, stride_w: 0, tile_d: 1, tile_w: 4, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ncdhw_k3x3x3_s1_td2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 1, DW_NDHWC: 0, DW_KZ: 3, DW_KY: 3, DW_KX: 3, DW_SH: 1, DW_SW: 1, DW_TD: 2, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_d: 3, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, tile_d: 2, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ncdhw_k3x3x3_s1_td1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 1, DW_NDHWC: 0, DW_KZ: 3, DW_KY: 3, DW_KX: 3, DW_SH: 1, DW_SW: 1, DW_TD: 1, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_d: 3, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, tile_d: 1, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ndhwc_k3x3x3_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 1, DW_NDHWC: 1, DW_KZ: 3, DW_KY: 3, DW_KX: 3, DW_SH: 1, DW_SW: 1, DW_TD: 1, DW_TW: 4, DW_UK: 0}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_LAST, filter_d: 3, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, tile_d: 1, tile_w: 4, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ncdhw_k3x3x3_s2_td2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 1, DW_NDHWC: 0, DW_KZ: 3, DW_KY: 3, DW_KX: 3, DW_SH: 2, DW_SW: 2, DW_TD: 2, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_d: 3, filter_h: 3, filter_w: 3, stride_h: 2, stride_w: 2, tile_d: 2, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ncdhw_k3x3x3_s2_td1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 1, DW_NDHWC: 0, DW_KZ: 3, DW_KY: 3, DW_KX: 3, DW_SH: 2, DW_SW: 2, DW_TD: 1, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_d: 3, filter_h: 3, filter_w: 3, stride_h: 2, stride_w: 2, tile_d: 1, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ndhwc_k3x3x3_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 1, DW_NDHWC: 1, DW_KZ: 3, DW_KY: 3, DW_KX: 3, DW_SH: 2, DW_SW: 2, DW_TD: 1, DW_TW: 4, DW_UK: 0}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_LAST, filter_d: 3, filter_h: 3, filter_w: 3, stride_h: 2, stride_w: 2, tile_d: 1, tile_w: 4, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ncdhw_k5x5x5_s1_td2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 1, DW_NDHWC: 0, DW_KZ: 5, DW_KY: 5, DW_KX: 5, DW_SH: 1, DW_SW: 1, DW_TD: 2, DW_TW: 8, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_d: 5, filter_h: 5, filter_w: 5, stride_h: 1, stride_w: 1, tile_d: 2, tile_w: 8, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ncdhw_k5x5x5_s1_td1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 1, DW_NDHWC: 0, DW_KZ: 5, DW_KY: 5, DW_KX: 5, DW_SH: 1, DW_SW: 1, DW_TD: 1, DW_TW: 8, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_d: 5, filter_h: 5, filter_w: 5, stride_h: 1, stride_w: 1, tile_d: 1, tile_w: 8, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ndhwc_k5x5x5_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 1, DW_NDHWC: 1, DW_KZ: 5, DW_KY: 5, DW_KX: 5, DW_SH: 1, DW_SW: 1, DW_TD: 1, DW_TW: 8, DW_UK: 0}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_LAST, filter_d: 5, filter_h: 5, filter_w: 5, stride_h: 1, stride_w: 1, tile_d: 1, tile_w: 8, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ncdhw_k5x5x5_s2_td2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 1, DW_NDHWC: 0, DW_KZ: 5, DW_KY: 5, DW_KX: 5, DW_SH: 2, DW_SW: 2, DW_TD: 2, DW_TW: 8, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_d: 5, filter_h: 5, filter_w: 5, stride_h: 2, stride_w: 2, tile_d: 2, tile_w: 8, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ncdhw_k5x5x5_s2_td1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 1, DW_NDHWC: 0, DW_KZ: 5, DW_KY: 5, DW_KX: 5, DW_SH: 2, DW_SW: 2, DW_TD: 1, DW_TW: 8, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_d: 5, filter_h: 5, filter_w: 5, stride_h: 2, stride_w: 2, tile_d: 1, tile_w: 8, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ndhwc_k5x5x5_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 1, DW_NDHWC: 1, DW_KZ: 5, DW_KY: 5, DW_KX: 5, DW_SH: 2, DW_SW: 2, DW_TD: 1, DW_TW: 8, DW_UK: 0}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_LAST, filter_d: 5, filter_h: 5, filter_w: 5, stride_h: 2, stride_w: 2, tile_d: 1, tile_w: 8, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ncdhw_k3x1x1_s1_td2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 1, DW_NDHWC: 0, DW_KZ: 3, DW_KY: 1, DW_KX: 1, DW_SH: 1, DW_SW: 1, DW_TD: 2, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_d: 3, filter_h: 1, filter_w: 1, stride_h: 1, stride_w: 1, tile_d: 2, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ncdhw_k3x1x1_s1_td1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 1, DW_NDHWC: 0, DW_KZ: 3, DW_KY: 1, DW_KX: 1, DW_SH: 1, DW_SW: 1, DW_TD: 1, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_d: 3, filter_h: 1, filter_w: 1, stride_h: 1, stride_w: 1, tile_d: 1, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ndhwc_k3x1x1_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 1, DW_NDHWC: 1, DW_KZ: 3, DW_KY: 1, DW_KX: 1, DW_SH: 1, DW_SW: 1, DW_TD: 1, DW_TW: 4, DW_UK: 0}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_LAST, filter_d: 3, filter_h: 1, filter_w: 1, stride_h: 1, stride_w: 1, tile_d: 1, tile_w: 4, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ncdhw_k3x1x1_s2_td2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 1, DW_NDHWC: 0, DW_KZ: 3, DW_KY: 1, DW_KX: 1, DW_SH: 2, DW_SW: 2, DW_TD: 2, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_d: 3, filter_h: 1, filter_w: 1, stride_h: 2, stride_w: 2, tile_d: 2, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ncdhw_k3x1x1_s2_td1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 1, DW_NDHWC: 0, DW_KZ: 3, DW_KY: 1, DW_KX: 1, DW_SH: 2, DW_SW: 2, DW_TD: 1, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_d: 3, filter_h: 1, filter_w: 1, stride_h: 2, stride_w: 2, tile_d: 1, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ndhwc_k3x1x1_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 1, DW_NDHWC: 1, DW_KZ: 3, DW_KY: 1, DW_KX: 1, DW_SH: 2, DW_SW: 2, DW_TD: 1, DW_TW: 4, DW_UK: 0}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_LAST, filter_d: 3, filter_h: 1, filter_w: 1, stride_h: 2, stride_w: 2, tile_d: 1, tile_w: 4, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ncdhw_k1x3x3_s1_td2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 1, DW_NDHWC: 0, DW_KZ: 1, DW_KY: 3, DW_KX: 3, DW_SH: 1, DW_SW: 1, DW_TD: 2, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_d: 1, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, tile_d: 2, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ncdhw_k1x3x3_s1_td1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 1, DW_NDHWC: 0, DW_KZ: 1, DW_KY: 3, DW_KX: 3, DW_SH: 1, DW_SW: 1, DW_TD: 1, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_d: 1, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, tile_d: 1, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ndhwc_k1x3x3_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 1, DW_NDHWC: 1, DW_KZ: 1, DW_KY: 3, DW_KX: 3, DW_SH: 1, DW_SW: 1, DW_TD: 1, DW_TW: 4, DW_UK: 0}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_LAST, filter_d: 1, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, tile_d: 1, tile_w: 4, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ncdhw_k1x3x3_s2_td2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 1, DW_NDHWC: 0, DW_KZ: 1, DW_KY: 3, DW_KX: 3, DW_SH: 2, DW_SW: 2, DW_TD: 2, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_d: 1, filter_h: 3, filter_w: 3, stride_h: 2, stride_w: 2, tile_d: 2, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ncdhw_k1x3x3_s2_td1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 1, DW_NDHWC: 0, DW_KZ: 1, DW_KY: 3, DW_KX: 3, DW_SH: 2, DW_SW: 2, DW_TD: 1, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_d: 1, filter_h: 3, filter_w: 3, stride_h: 2, stride_w: 2, tile_d: 1, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ndhwc_k1x3x3_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 1, DW_NDHWC: 1, DW_KZ: 1, DW_KY: 3, DW_KX: 3, DW_SH: 2, DW_SW: 2, DW_TD: 1, DW_TW: 4, DW_UK: 0}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_LAST, filter_d: 1, filter_h: 3, filter_w: 3, stride_h: 2, stride_w: 2, tile_d: 1, tile_w: 4, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ncdhw_generic
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_GENERIC: 1, DW_DTYPE: 1, DW_NDHWC: 0}
+    metadata: {kernel_family: dw3d_direct, variant: generic, dtype: HALF, layout: CHANNELS_FIRST, filter_d: 0, filter_h: 0, filter_w: 0, stride_h: 0, stride_w: 0, tile_d: 1, tile_w: 4, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.f16_ndhwc_generic
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_GENERIC: 1, DW_DTYPE: 1, DW_NDHWC: 1}
+    metadata: {kernel_family: dw3d_direct, variant: generic, dtype: HALF, layout: CHANNELS_LAST, filter_d: 0, filter_h: 0, filter_w: 0, stride_h: 0, stride_w: 0, tile_d: 1, tile_w: 4, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ncdhw_k3x3x3_s1_td2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 2, DW_NDHWC: 0, DW_KZ: 3, DW_KY: 3, DW_KX: 3, DW_SH: 1, DW_SW: 1, DW_TD: 2, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_d: 3, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, tile_d: 2, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ncdhw_k3x3x3_s1_td1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 2, DW_NDHWC: 0, DW_KZ: 3, DW_KY: 3, DW_KX: 3, DW_SH: 1, DW_SW: 1, DW_TD: 1, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_d: 3, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, tile_d: 1, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ndhwc_k3x3x3_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 2, DW_NDHWC: 1, DW_KZ: 3, DW_KY: 3, DW_KX: 3, DW_SH: 1, DW_SW: 1, DW_TD: 1, DW_TW: 4, DW_UK: 0}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_LAST, filter_d: 3, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, tile_d: 1, tile_w: 4, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ncdhw_k3x3x3_s2_td2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 2, DW_NDHWC: 0, DW_KZ: 3, DW_KY: 3, DW_KX: 3, DW_SH: 2, DW_SW: 2, DW_TD: 2, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_d: 3, filter_h: 3, filter_w: 3, stride_h: 2, stride_w: 2, tile_d: 2, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ncdhw_k3x3x3_s2_td1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 2, DW_NDHWC: 0, DW_KZ: 3, DW_KY: 3, DW_KX: 3, DW_SH: 2, DW_SW: 2, DW_TD: 1, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_d: 3, filter_h: 3, filter_w: 3, stride_h: 2, stride_w: 2, tile_d: 1, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ndhwc_k3x3x3_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 2, DW_NDHWC: 1, DW_KZ: 3, DW_KY: 3, DW_KX: 3, DW_SH: 2, DW_SW: 2, DW_TD: 1, DW_TW: 4, DW_UK: 0}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_LAST, filter_d: 3, filter_h: 3, filter_w: 3, stride_h: 2, stride_w: 2, tile_d: 1, tile_w: 4, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ncdhw_k5x5x5_s1_td2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 2, DW_NDHWC: 0, DW_KZ: 5, DW_KY: 5, DW_KX: 5, DW_SH: 1, DW_SW: 1, DW_TD: 2, DW_TW: 8, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_d: 5, filter_h: 5, filter_w: 5, stride_h: 1, stride_w: 1, tile_d: 2, tile_w: 8, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ncdhw_k5x5x5_s1_td1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 2, DW_NDHWC: 0, DW_KZ: 5, DW_KY: 5, DW_KX: 5, DW_SH: 1, DW_SW: 1, DW_TD: 1, DW_TW: 8, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_d: 5, filter_h: 5, filter_w: 5, stride_h: 1, stride_w: 1, tile_d: 1, tile_w: 8, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ndhwc_k5x5x5_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 2, DW_NDHWC: 1, DW_KZ: 5, DW_KY: 5, DW_KX: 5, DW_SH: 1, DW_SW: 1, DW_TD: 1, DW_TW: 8, DW_UK: 0}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_LAST, filter_d: 5, filter_h: 5, filter_w: 5, stride_h: 1, stride_w: 1, tile_d: 1, tile_w: 8, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ncdhw_k5x5x5_s2_td2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 2, DW_NDHWC: 0, DW_KZ: 5, DW_KY: 5, DW_KX: 5, DW_SH: 2, DW_SW: 2, DW_TD: 2, DW_TW: 8, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_d: 5, filter_h: 5, filter_w: 5, stride_h: 2, stride_w: 2, tile_d: 2, tile_w: 8, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ncdhw_k5x5x5_s2_td1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 2, DW_NDHWC: 0, DW_KZ: 5, DW_KY: 5, DW_KX: 5, DW_SH: 2, DW_SW: 2, DW_TD: 1, DW_TW: 8, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_d: 5, filter_h: 5, filter_w: 5, stride_h: 2, stride_w: 2, tile_d: 1, tile_w: 8, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ndhwc_k5x5x5_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 2, DW_NDHWC: 1, DW_KZ: 5, DW_KY: 5, DW_KX: 5, DW_SH: 2, DW_SW: 2, DW_TD: 1, DW_TW: 8, DW_UK: 0}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_LAST, filter_d: 5, filter_h: 5, filter_w: 5, stride_h: 2, stride_w: 2, tile_d: 1, tile_w: 8, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ncdhw_k3x1x1_s1_td2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 2, DW_NDHWC: 0, DW_KZ: 3, DW_KY: 1, DW_KX: 1, DW_SH: 1, DW_SW: 1, DW_TD: 2, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_d: 3, filter_h: 1, filter_w: 1, stride_h: 1, stride_w: 1, tile_d: 2, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ncdhw_k3x1x1_s1_td1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 2, DW_NDHWC: 0, DW_KZ: 3, DW_KY: 1, DW_KX: 1, DW_SH: 1, DW_SW: 1, DW_TD: 1, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_d: 3, filter_h: 1, filter_w: 1, stride_h: 1, stride_w: 1, tile_d: 1, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ndhwc_k3x1x1_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 2, DW_NDHWC: 1, DW_KZ: 3, DW_KY: 1, DW_KX: 1, DW_SH: 1, DW_SW: 1, DW_TD: 1, DW_TW: 4, DW_UK: 0}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_LAST, filter_d: 3, filter_h: 1, filter_w: 1, stride_h: 1, stride_w: 1, tile_d: 1, tile_w: 4, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ncdhw_k3x1x1_s2_td2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 2, DW_NDHWC: 0, DW_KZ: 3, DW_KY: 1, DW_KX: 1, DW_SH: 2, DW_SW: 2, DW_TD: 2, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_d: 3, filter_h: 1, filter_w: 1, stride_h: 2, stride_w: 2, tile_d: 2, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ncdhw_k3x1x1_s2_td1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 2, DW_NDHWC: 0, DW_KZ: 3, DW_KY: 1, DW_KX: 1, DW_SH: 2, DW_SW: 2, DW_TD: 1, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_d: 3, filter_h: 1, filter_w: 1, stride_h: 2, stride_w: 2, tile_d: 1, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ndhwc_k3x1x1_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 2, DW_NDHWC: 1, DW_KZ: 3, DW_KY: 1, DW_KX: 1, DW_SH: 2, DW_SW: 2, DW_TD: 1, DW_TW: 4, DW_UK: 0}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_LAST, filter_d: 3, filter_h: 1, filter_w: 1, stride_h: 2, stride_w: 2, tile_d: 1, tile_w: 4, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ncdhw_k1x3x3_s1_td2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 2, DW_NDHWC: 0, DW_KZ: 1, DW_KY: 3, DW_KX: 3, DW_SH: 1, DW_SW: 1, DW_TD: 2, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_d: 1, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, tile_d: 2, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ncdhw_k1x3x3_s1_td1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 2, DW_NDHWC: 0, DW_KZ: 1, DW_KY: 3, DW_KX: 3, DW_SH: 1, DW_SW: 1, DW_TD: 1, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_d: 1, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, tile_d: 1, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ndhwc_k1x3x3_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 2, DW_NDHWC: 1, DW_KZ: 1, DW_KY: 3, DW_KX: 3, DW_SH: 1, DW_SW: 1, DW_TD: 1, DW_TW: 4, DW_UK: 0}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_LAST, filter_d: 1, filter_h: 3, filter_w: 3, stride_h: 1, stride_w: 1, tile_d: 1, tile_w: 4, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ncdhw_k1x3x3_s2_td2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 2, DW_NDHWC: 0, DW_KZ: 1, DW_KY: 3, DW_KX: 3, DW_SH: 2, DW_SW: 2, DW_TD: 2, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_d: 1, filter_h: 3, filter_w: 3, stride_h: 2, stride_w: 2, tile_d: 2, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ncdhw_k1x3x3_s2_td1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 2, DW_NDHWC: 0, DW_KZ: 1, DW_KY: 3, DW_KX: 3, DW_SH: 2, DW_SW: 2, DW_TD: 1, DW_TW: 4, DW_UK: 1}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_d: 1, filter_h: 3, filter_w: 3, stride_h: 2, stride_w: 2, tile_d: 1, tile_w: 4, uniform_k: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ndhwc_k1x3x3_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_DTYPE: 2, DW_NDHWC: 1, DW_KZ: 1, DW_KY: 3, DW_KX: 3, DW_SH: 2, DW_SW: 2, DW_TD: 1, DW_TW: 4, DW_UK: 0}
+    metadata: {kernel_family: dw3d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_LAST, filter_d: 1, filter_h: 3, filter_w: 3, stride_h: 2, stride_w: 2, tile_d: 1, tile_w: 4, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ncdhw_generic
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_GENERIC: 1, DW_DTYPE: 2, DW_NDHWC: 0}
+    metadata: {kernel_family: dw3d_direct, variant: generic, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_d: 0, filter_h: 0, filter_w: 0, stride_h: 0, stride_w: 0, tile_d: 1, tile_w: 4, uniform_k: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw3d_rdna.bf16_ndhwc_generic
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_GENERIC: 1, DW_DTYPE: 2, DW_NDHWC: 1}
+    metadata: {kernel_family: dw3d_direct, variant: generic, dtype: BFLOAT16, layout: CHANNELS_LAST, filter_d: 0, filter_h: 0, filter_w: 0, stride_h: 0, stride_w: 0, tile_d: 1, tile_w: 4, uniform_k: 0}
+    priority: 0
+
+# hip kernels are compiled from source by hkp_pack and hydrate no builder object, so every
+# field is matcher-only.
+specialization:
+  metadata_fields: []
+  matcher_only_fields: [kernel_family, variant, dtype, layout, filter_d, filter_h, filter_w,
+                        stride_h, stride_w, tile_d, tile_w, uniform_k]
+  bindings: {}
+  vocabulary: {}
