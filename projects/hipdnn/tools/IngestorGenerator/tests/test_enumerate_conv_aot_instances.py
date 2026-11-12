@@ -346,6 +346,65 @@ def test_main_refuses_a_stale_exclude_label(tmp_path, capsys):
     assert "not-a-real-kernel-label" in capsys.readouterr().err
 
 
+def test_apply_excludes_drops_the_named_instance_and_keeps_the_rest(synthetic_grid):
+    """Unlike test_main_refuses_a_stale_exclude_label, which only exercises the
+    stale-label refusal and never reaches the filtering branch, this names a label
+    the identities actually carry and checks it is gone from the result: a
+    keep-all mutant of apply_excludes (returning every identity regardless of a
+    matching exclude) must fail this."""
+    identities = synthetic_grid[:5]
+    dropped_label = _label(identities[2])
+    excludes = {dropped_label: "a known bug"}
+    kept = tool._common.apply_excludes(
+        identities, excludes, Path("unused.json"), "synthetic grid"
+    )
+    assert kept is not None
+    kept_labels = [_label(i) for i in kept]
+    assert dropped_label not in kept_labels
+    assert sorted(kept_labels) == sorted(
+        _label(i) for i in identities if _label(i) != dropped_label
+    )
+
+
+def test_main_applies_a_real_exclude_to_the_dispatcher_source(
+    tmp_path, monkeypatch, synthetic_grid, capsys
+):
+    """test_main_refuses_a_stale_exclude_label's label never matches an identity, so
+    it never reaches apply_excludes's filtering branch; _fake_main's tests all pass
+    --labels, which skips --excludes entirely (main() only applies it to the
+    dispatcher-source default path). This drives that default path with a label the
+    source actually carries, so a keep-all mutant of apply_excludes's filtering
+    would still write the excluded instance and fail here."""
+    identities = synthetic_grid[:3]
+    dropped_label = _label(identities[0])
+    monkeypatch.setattr(tool, "read_dispatcher_instances", lambda root: identities)
+    monkeypatch.setattr(
+        tool,
+        "sweep_hashes",
+        lambda dtype, jobs: {tool.stable_hash(i) for i in identities},
+    )
+    excludes = tmp_path / "excludes.json"
+    excludes.write_text(json.dumps([{"label": dropped_label, "reason": "a known bug"}]))
+    out = tmp_path / "lists"
+    argv = [
+        "--rocke-root",
+        str(_ROCKE),
+        "--excludes",
+        str(excludes),
+        "--output-dir",
+        str(out),
+        "--jobs",
+        "1",
+    ]
+    status = tool.main(argv)
+    assert status == 0
+    written = json.loads((out / tool.INSTANCE_LIST.format(dtype="fp16")).read_text())
+    written_labels = {tool.identity_label(i) for i in written}
+    assert dropped_label not in written_labels
+    assert len(written) == len(identities) - 1
+    assert f"excluded {dropped_label}" in capsys.readouterr().err
+
+
 def test_committed_instance_lists_are_what_the_tool_enumerates(tmp_path):
     """The shipped catalog's lists are the tool's output for the committed labels and
     the rocKE tree beside them: a change to either has to regenerate the lists (and
