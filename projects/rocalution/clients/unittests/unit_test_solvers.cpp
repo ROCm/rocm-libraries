@@ -3719,6 +3719,8 @@ namespace
     {
     };
 
+    using ComplexTypes = testing::Types<cfloat, cdouble>;
+
     // Chebyshev with the bounds lambda_min and lambda_max reaches a relative residual of
     // 1e-5 on the diagonal system with the eigenvalues lambda. The error is then at most
     // 1e-5 |b| / min |lambda|, below 1e-4 for the systems of the tests.
@@ -3755,7 +3757,7 @@ namespace
     }
 }
 
-TYPED_TEST_SUITE(solvers_complex, HostOnly<testing::Types<cfloat, cdouble>>, TypedName);
+TYPED_TEST_SUITE(solvers_complex, HostOnly<ComplexTypes>, TypedName);
 
 TYPED_TEST(solvers_complex, chebyshev_replaces_real_bounds_of_complex_type)
 {
