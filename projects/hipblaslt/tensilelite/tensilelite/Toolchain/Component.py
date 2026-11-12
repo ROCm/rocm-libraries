@@ -32,7 +32,7 @@ from subprocess import PIPE, STDOUT, CalledProcessError, check_output, run
 from typing import List, Optional
 
 from ..Common import SemanticVersion, print2
-from ..Common.Architectures import compilerTargetOf, deviceTargetFeaturesOf
+from ..Common.Architectures import compilerTargetOf
 from .Validators import validateToolchain
 
 def _invoke(args: List[str], desc: str=""):
@@ -284,7 +284,6 @@ class Assembler(Component):
             srcPath: The path to the assembly source file.
             destPath: The destination path for the generated object file.
         """
-        features = deviceTargetFeaturesOf(targetGfx)
         targetGfx = compilerTargetOf(targetGfx, self.path)
         self._retargetAssemblySource(targetGfx, srcPath)
         args = self._default_args
@@ -293,7 +292,6 @@ class Assembler(Component):
             args = args + ["-Xclangas", "-target-feature", "-Xclangas", "+real-true16"]
         args = [
             *args,
-            *[a for f in features for a in ("-Xclangas", "-target-feature", "-Xclangas", f)],
             f"-mcpu={targetGfx}",
             "-mwavefrontsize64" if wavefrontSize == 64 else "-mno-wavefrontsize64",
             srcPath,
@@ -366,11 +364,8 @@ class Compiler(Component):
             RuntimeError: If the compilation command fails.
         """
         archFlags = [f"--offload-arch={compilerTargetOf(gfx, self.path)}" for gfx in target_list]
-        # -Xclang reaches every device compile; an alias always builds alone.
-        features = [f for gfx in target_list for f in deviceTargetFeaturesOf(gfx)]
-        featureFlags = [a for f in features for a in ("-Xclang", "-target-feature", "-Xclang", f)]
         args = [
-            *(self.default_args), "-I", include_path, *archFlags, *featureFlags, srcPath, "-c", "-o", destPath
+            *(self.default_args), "-I", include_path, *archFlags, srcPath, "-c", "-o", destPath
         ]
         return _invoke(args, f"Compiling HIP source kernels into objects (.cpp -> .o)")
 
