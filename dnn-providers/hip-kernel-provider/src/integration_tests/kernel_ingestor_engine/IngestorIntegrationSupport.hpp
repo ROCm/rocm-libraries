@@ -138,12 +138,12 @@ inline std::string resetProviderModuleCaches()
     return {};
 }
 
-// Sets the loaded provider's own per-image byte limit for hipkernel:Gfx950ConvDgradAot's
-// batch chunker (Gfx950ConvDgradGeometry.hpp::batchChunkByteLimitForTesting()), so a
+// Sets the loaded provider's own per-image byte limit for the dgrad AOT engines' shared
+// batch chunker (ConvDgradAotGeometry.hpp::batchChunkByteLimitForTesting()), so a
 // small batch exercises the chunked-launch device path without a multi-GiB image. The
 // limit lives in a function-local static: a test in another TU that includes the header
 // and mutates it directly holds its own copy, never the plugin's, which is why this goes
-// through the plugin's exported hipdnnEnginePluginSetGfx950ConvDgradAotBatchChunkByteLimit
+// through the plugin's exported hipdnnEnginePluginSetConvDgradAotBatchChunkByteLimit
 // ForTesting symbol instead. Returns a description of the failure, or an empty string.
 inline std::string setProviderDgradBatchChunkByteLimit(int64_t limit)
 {
@@ -158,13 +158,13 @@ inline std::string setProviderDgradBatchChunkByteLimit(int64_t limit)
 
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
     auto* setLimit = reinterpret_cast<void (*)(int64_t)>(hipdnn_data_sdk::utilities::getSymbol(
-        library, "hipdnnEnginePluginSetGfx950ConvDgradAotBatchChunkByteLimitForTesting"));
+        library, "hipdnnEnginePluginSetConvDgradAotBatchChunkByteLimitForTesting"));
     if(setLimit == nullptr)
     {
         hipdnn_data_sdk::utilities::closeLibrary(library);
         return "the provider at " + pluginPath.string()
                + " exports no "
-                 "hipdnnEnginePluginSetGfx950ConvDgradAotBatchChunkByteLimitForTesting; it was "
+                 "hipdnnEnginePluginSetConvDgradAotBatchChunkByteLimitForTesting; it was "
                  "built without HIPDNN_ENABLE_KERNEL_INGESTOR, or the test-only hook was removed";
     }
 
@@ -176,7 +176,7 @@ inline std::string setProviderDgradBatchChunkByteLimit(int64_t limit)
 
 // The loaded provider's count of hipkernel:Gfx950ConvDgradAot implicit-GEMM launches, one
 // per batch slice (exported as
-// hipdnnEnginePluginGfx950ConvDgradAotImplicitLaunchCountForTesting). Writes a
+// hipdnnEnginePluginConvDgradAotImplicitLaunchCountForTesting). Writes a
 // description of the failure to error and returns -1 if the hook is not there.
 inline int64_t providerDgradImplicitLaunchCount(std::string& error)
 {
@@ -189,12 +189,12 @@ inline int64_t providerDgradImplicitLaunchCount(std::string& error)
     }
     // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
     auto* count = reinterpret_cast<int64_t (*)()>(hipdnn_data_sdk::utilities::getSymbol(
-        library, "hipdnnEnginePluginGfx950ConvDgradAotImplicitLaunchCountForTesting"));
+        library, "hipdnnEnginePluginConvDgradAotImplicitLaunchCountForTesting"));
     const auto value = count == nullptr ? -1 : count();
     if(count == nullptr)
     {
         error = "the provider at " + pluginPath.string()
-                + " exports no hipdnnEnginePluginGfx950ConvDgradAotImplicitLaunchCountForTesting";
+                + " exports no hipdnnEnginePluginConvDgradAotImplicitLaunchCountForTesting";
     }
     hipdnn_data_sdk::utilities::closeLibrary(library);
     return value;
