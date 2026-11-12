@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -37,6 +37,7 @@
 
 #include <complex>
 #include <math.h>
+#include <utility>
 
 namespace rocalution
 {
@@ -63,30 +64,49 @@ namespace rocalution
     {
         log_debug(this, "Chebyshev::Set()", lambda_min, lambda_max);
 
-        // The Chebyshev iteration does not converge on an interval that contains 0, such as
-        // the bounds of LocalMatrix::Gershgorin(), whose lower bound is at most 0 and whose
-        // upper bound is at least 0
-        if(std::real(lambda_min) <= 0 && std::real(lambda_max) > 0)
+        // The iteration depends on the bounds only through their sum and the square of their
+        // difference, so their order does not matter. It does not converge if the segment
+        // between them contains 0, such as for the bounds of LocalMatrix::Gershgorin(), whose
+        // lower bound is at most 0 and whose upper bound is at least 0. Only real bounds are
+        // replaced; complex bounds can have real parts of both signs without containing 0.
+        if(std::imag(lambda_min) == 0 && std::imag(lambda_max) == 0)
         {
-            ValueType lower = lambda_max / static_cast<ValueType>(30);
+            if(std::real(lambda_min) > std::real(lambda_max))
+            {
+                std::swap(lambda_min, lambda_max);
+            }
 
-            LOG_VERBOSE_INFO(2,
-                             "*** warning: Chebyshev::Set() lambda_min = "
-                                 << lambda_min
-                                 << " is not positive, using lambda_max / 30 = " << lower);
+            if(std::real(lambda_min) <= 0 && std::real(lambda_max) > 0)
+            {
+                ValueType lower = lambda_max / static_cast<ValueType>(30);
 
-            lambda_min = lower;
+                LOG_VERBOSE_INFO(2,
+                                 "*** warning: Chebyshev::Set() lambda_min = "
+                                     << lambda_min
+                                     << " is not positive, using lambda_max / 30 = " << lower);
+
+                lambda_min = lower;
+            }
+            else if(std::real(lambda_min) < 0 && std::real(lambda_max) == 0)
+            {
+                ValueType upper = lambda_min / static_cast<ValueType>(30);
+
+                LOG_VERBOSE_INFO(2,
+                                 "*** warning: Chebyshev::Set() lambda_max = 0 with a negative "
+                                 "lambda_min, using lambda_min / 30 = "
+                                     << upper);
+
+                lambda_max = upper;
+            }
         }
-        else if(std::real(lambda_min) < 0 && std::real(lambda_max) == 0)
+
+        // 0 lies on the segment from lambda_min to lambda_max
+        const auto product = std::conj(lambda_min) * lambda_max;
+        if(std::imag(product) == 0 && std::real(product) <= 0)
         {
-            ValueType upper = lambda_min / static_cast<ValueType>(30);
-
-            LOG_VERBOSE_INFO(2,
-                             "*** warning: Chebyshev::Set() lambda_max = 0 with a negative "
-                             "lambda_min, using lambda_min / 30 = "
-                                 << upper);
-
-            lambda_max = upper;
+            LOG_INFO("Chebyshev::Set() the segment from lambda_min = "
+                     << lambda_min << " to lambda_max = " << lambda_max << " contains 0");
+            FATAL_ERROR(__FILE__, __LINE__);
         }
 
         this->lambda_min_ = lambda_min;

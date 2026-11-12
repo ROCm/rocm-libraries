@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2021 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -54,12 +54,15 @@ namespace rocalution
 
         /** \brief Set the minimum and maximum eigenvalues of the operator
         * \details The bounds are those of the preconditioned operator if a preconditioner
-        * is set. If \p lambda_max is positive, a \p lambda_min that is not positive, such as
-        * the lower bound of LocalMatrix::Gershgorin(), is replaced by \p lambda_max / 30.
-        * For a negative definite operator, \p lambda_max = 0 with a negative \p lambda_min
-        * is replaced by \p lambda_min / 30. The number of iterations grows with
-        * \p lambda_max / \p lambda_min, and the iteration can diverge if \p lambda_max is
-        * smaller than the largest eigenvalue.
+        * is set, and can be given in either order. Real bounds are first put in order. If
+        * the upper bound is positive, a lower bound that is not positive, such as the lower
+        * bound of LocalMatrix::Gershgorin(), is replaced by the upper bound / 30. This
+        * assumes that the operator is positive definite. For a negative definite operator,
+        * an upper bound of 0 with a negative lower bound is replaced by the lower bound / 30.
+        * Complex bounds are used as they are. The program is terminated if the segment from
+        * \p lambda_min to \p lambda_max then still contains 0. The number of iterations
+        * grows with \p lambda_max / \p lambda_min, and the iteration can diverge if
+        * \p lambda_max is smaller than the largest eigenvalue.
         */
         ROCALUTION_EXPORT
         void Set(ValueType lambda_min, ValueType lambda_max);
