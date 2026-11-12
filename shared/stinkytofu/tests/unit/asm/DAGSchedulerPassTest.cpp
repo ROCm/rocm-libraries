@@ -464,6 +464,33 @@ class DAGSchedulerPassTest : public ::testing::Test {
         return inst;
     }
 
+    struct TwoSccChains {
+        StinkyInstruction* pinnedDef = nullptr;
+        StinkyInstruction* pinnedReader = nullptr;
+        StinkyInstruction* secondDef = nullptr;
+        StinkyInstruction* secondReader = nullptr;
+    };
+
+    // Two SCC chains back to back across a barrier. Chain 1's reader overwrites s40, which the
+    // barrier's tensor_load reads, so it reaches the barrier by that anti-dependency and the
+    // rule pins chain 1 after the wait. Chain 2 is the next SCC writer, so the SCC
+    // anti-dependency on chain 1's reader carries it below the barrier as well.
+    TwoSccChains buildPinPropagatingSccChains(BasicBlock* body) {
+        TwoSccChains out;
+        createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
+        for (int i = 0; i < 6; i++)
+            createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i, /*ldsToken=*/i + 10);
+
+        createMovableWorkgroupBarrier(body, /*ldsToken=*/1);
+        createMovableTensorLoad(body, /*s0=*/40, /*s1=*/48, /*ldsToken=*/1);
+
+        out.pinnedDef = createSSubWritingSgprAndScc(body, /*sgpr=*/90);
+        out.pinnedReader = createSCselectReadingScc(body, /*destSgpr=*/40, /*srcSgpr=*/92);
+        out.secondDef = createSCmpWritingScc(body, /*srcSgpr=*/91);
+        out.secondReader = createSCselectReadingScc(body, /*destSgpr=*/93, /*srcSgpr=*/90);
+        return out;
+    }
+
     // The invariant the cluster-barrier SCC rule enforces: no workgroup barrier
     // may sit between the first and last scheduled member of an SCC def-use
     // chain. Which side of the barrier the chain ends up on is deliberately not
@@ -2450,6 +2477,49 @@ TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_DeadSccCarryOutStaysFree) {
     ASSERT_GE(signalPos, 0);
     EXPECT_LT(positionOf(*body, decrement), signalPos)
         << "the decrement's SCC is dead, so nothing stops it from being hoisted";
+}
+
+// Pinning chain 1 after the wait carries chain 2 past the barrier with it: chain 2's def is
+// the next SCC writer, so the SCC anti-dependency on chain 1's reader keeps it below. Both
+// chains end up whole and below the barrier.
+TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_PinCarriesTheNextChainPastTheBarrier) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    const TwoSccChains ir = buildPinPropagatingSccChains(body);
+    const int before = countStinkyInstructions(*body);
+
+    runPassWithClusterBarrier(/*clusterBarrier=*/true);
+
+    ASSERT_EQ(countStinkyInstructions(*body), before);
+    const int waitPos = lastBarrierWaitPosition(*body);
+    ASSERT_GE(waitPos, 0);
+    EXPECT_GT(positionOf(*body, ir.pinnedDef), waitPos)
+        << "chain 1's reader reaches the barrier through the tensor_load's operand, so the rule "
+           "pins its def after the wait rather than locking the chain"
+        << scheduleOrder(*body);
+    EXPECT_GT(positionOf(*body, ir.secondDef), waitPos) << scheduleOrder(*body);
+    EXPECT_FALSE(barrierSplitsChain(*body, {ir.pinnedDef, ir.pinnedReader}))
+        << scheduleOrder(*body);
+    EXPECT_FALSE(barrierSplitsChain(*body, {ir.secondDef, ir.secondReader}))
+        << scheduleOrder(*body);
+}
+
+// Control for the test above, and the reason the pin is what holds chain 1 together: with the
+// rule off the def is free to hoist, while its reader stays below the barrier either way --
+// the reader overwrites the tensor_load's operand, so it cannot precede that load. The barrier
+// then lands inside the chain.
+TEST_F(DAGSchedulerPassTest, ClusterBarrierSccRule_DisabledLetsBarrierSplitTheFirstChain) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    const TwoSccChains ir = buildPinPropagatingSccChains(body);
+
+    runPassWithClusterBarrier(/*clusterBarrier=*/false);
+
+    const int signalPos = firstBarrierSignalPosition(*body);
+    ASSERT_GE(signalPos, 0);
+    EXPECT_LT(positionOf(*body, ir.pinnedDef), signalPos) << scheduleOrder(*body);
+    EXPECT_TRUE(barrierSplitsChain(*body, {ir.pinnedDef, ir.pinnedReader}))
+        << "without the rule nothing keeps the handshake out of the chain" << scheduleOrder(*body);
 }
 
 // The same pin with no tensor_load in the region: the live-out def belongs
