@@ -76,6 +76,11 @@ hipblasLtMatmul()
 ------------------------------------------
 .. doxygenfunction:: hipblasLtMatmul
 
+An algorithm is valid only for the problem it was queried for. ``hipblasLtMatmul`` and
+``hipblaslt_ext::Gemm::initialize`` refuse an algorithm for a hand-written kernel with
+``HIPBLAS_STATUS_INVALID_VALUE`` when the problem no longer satisfies that kernel's problem
+predicates, such as its sizes, strides, or ``alpha`` value.
+
 Supported data types
 ------------------------------------------
 

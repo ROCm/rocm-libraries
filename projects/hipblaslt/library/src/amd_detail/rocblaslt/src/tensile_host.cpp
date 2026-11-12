@@ -3801,6 +3801,31 @@ namespace
         log_error(caller, rocblaslt_mx_scale_mismatch_message(need));
         return rocblaslt_status_invalid_value;
     }
+
+    // A hand-written kernel may rely on its problem predicates to stay inside the
+    // tensors (fixed sizes or strides, no bounds checks), so an algo for one is
+    // refused once the problem it runs no longer satisfies them. Generated kernels
+    // and the grouped path keep their existing launch checks.
+    rocblaslt_status checkHandwrittenKernelPredicates(
+        const char*                                caller,
+        const TensileLite::ContractionProblemGemm& problem,
+        const TensileLite::ContractionSolution&    solution)
+    {
+        if(solution.customKernel.name.empty() || solution.customKernel.generated
+           || (*solution.problemPredicate)(problem))
+            return rocblaslt_status_success;
+        if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+        {
+            std::ostringstream msg;
+            msg << "Software match: " << solution.description();
+            solution.problemPredicate->debugEval(problem, msg);
+            log_info(caller, msg.str());
+        }
+        log_error(caller,
+                  "the algo's solution does not support this problem; query an algo for "
+                  "this problem instead");
+        return rocblaslt_status_invalid_value;
+    }
 }
 
 namespace
@@ -6481,6 +6506,13 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                 }
             }
 
+            if(callerSuppliedAlgo)
+            {
+                if(auto st = checkHandwrittenKernelPredicates(__func__, data->problem, *solution);
+                   st != rocblaslt_status_success)
+                    return st;
+            }
+
             // Build the inputs here rather than inline, so the flag pointer can
             // be pointed at this solution's region before the kernel arguments
             // are packed. Passing GetTensileInputs(prob) straight in would use
@@ -6812,6 +6844,9 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 log_error(__func__, "workspace size is less than the solution requires");
                 return rocblaslt_status_invalid_value;
             }
+            if(auto st = checkHandwrittenKernelPredicates(__func__, data->problem, *solution);
+               st != rocblaslt_status_success)
+                return st;
 
             // The object API learns its stream here, not at create time, and the
             // flag pointer is baked into the kernel arguments by solve() just
