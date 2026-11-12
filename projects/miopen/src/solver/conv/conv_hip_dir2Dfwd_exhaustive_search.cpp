@@ -22,13 +22,11 @@
 #include <utility>
 #include <vector>
 
-#ifdef max
+// Plain #undef, no #ifdef: cppcheck treats every #ifdef as a configuration and would check this
+// TU with min/max defined as macros, where std::min<T>/std::max<T> in the included headers
+// (e.g. par_for.hpp) is a syntax error. #undef of an undefined macro is a no-op.
 #undef max
-#endif
-
-#ifdef min
 #undef min
-#endif
 
 namespace miopen {
 namespace solver {
