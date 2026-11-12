@@ -504,6 +504,15 @@ EXTRA_TILES = {
     # Channels-last 1x1 on the output rows, measured (bf16) on gfx1201 and gfx1101: the wide
     # tile for most maps, the 64 x 128 one for sdxl c960 k320 192^2.
     ("wmma", ("1x1clr0",)): [(128, 128, 4, 2, 32), (64, 128, 2, 4, 32)],
+    # 5x5x5 3-D (N1 c16-c64, 128^3-132^3), measured on gfx950 and gfx1201 (fp32 / bf16).
+    ("mfma32x16", ("5x5s2r1",)): [(64, 64, 2, 2, 32)],
+    ("mfma32_f16", ("5x5s2r1",)): [(64, 64, 2, 2, 32)],
+    ("mfma32_bf16", ("5x5s2r1",)): [(64, 64, 2, 2, 32)],
+    ("mfma32_f32", ("5x5s2r1",)): [(64, 64, 2, 2, 16)],
+    ("mfma16_f32", ("5x5s2r1", "5x5f")): [(32, 32, 2, 2, 32)],
+    ("wmma", ("5x5s2r1",)): [(64, 32, 4, 2, 32)],
+    ("fma", ("5x5s2r1",)): [(64, 64, 4, 4, 32)],
+    ("fma", ("5x5rf",)): [(64, 64, 4, 4, 32), (32, 64, 4, 4, 32)],
     # gfx942 and gfx90a (the 32 x 32 atom): the fastest tile per stride on both.
     ("mfma32_", ("3x3pk",)): [(128, 64, 4, 2, 64)],
     ("mfma32_", ("3x3s2pk",)): [(64, 64, 2, 2, 64)],
@@ -584,7 +593,15 @@ FILTERS = [
     ("3x3g32", 3, 1, 1, 3, 1, [], [0], [CF]),
     # Channels-last pointwise on RDNA's output rows (diffusion VAE / UNet 1x1; EXTRA_TILES).
     ("1x1clr0", 1, 1, 1, 1, 0, [], [0], [CL]),
+    # 5-wide filters (3-D 5x5x5 volumes, AIPYTORCH-1356; EXTRA_TILES): stride 2 on the output
+    # rows (every dtype), fp32 on the 16 x 16 fp32 ring (5x5f) and the FMA rows (5x5rf).
+    ("5x5s2r1", 5, 2, 1, 1, 0, [], [0], [CF]),
+    ("5x5f", 5, 1, 1, 5, 1, [], [0], [CF]),
+    ("5x5rf", 5, 1, 1, 1, 0, [], [0], [CF]),
 ]
+# fp32-only rows; and the rows with no gfx906 (FMA) configs.
+FLOAT_ONLY = {"5x5f", "5x5rf"}
+NO_FMA906 = FLOAT_ONLY | {"5x5s2r1"}
 # Rows measured on the 16-bit matrix atoms only: no fp32 or FMA (gfx906) configs.
 MATRIX16_ONLY = {
     "7x1",
@@ -634,7 +651,7 @@ FAMILIES = [
         1,
         [CF, CL],
         [],
-        {"3x3", "3x3d2", "1x1", "1x7", "1x11", "3x3s2r1", "2x2s2r1"},
+        {"3x3", "3x3d2", "1x1", "1x7", "1x11", "3x3s2r1", "2x2s2r1", "5x5s2r1", "5x5f"},
     ),
     ({"BFLOAT16": "mfma32_bf16_908"}, CDNA16, 0, [CF, CL], [], BASE),
     ({"HALF": "wmma11_f16", "BFLOAT16": "wmma11_bf16"}, RDNA16, 0, [CF, CL], [], None),
@@ -833,7 +850,11 @@ SMALLC_FILTERS = [
     ("7x7s2r1", 7, 2, 1),
     ("3x3s2", 3, 2, 3),
     ("3x3", 3, 1, 3),
+    ("5x5", 5, 1, 5),
 ]
+# 5x5 small-C rows (3-D 5x5x5 with 16 input channels, AIPYTORCH-1356): 16-bit, channels-first,
+# the tile measured best per atom family (gfx950: 32 x 4 at 64 positions; gfx1201: 64 x 8 at 32).
+SMALLC_5X5_TILES = {"mfma": [(32, 4, 2, 64)], "wmma": [(64, 8, 4, 32)]}
 
 
 def build_smallc():
@@ -844,6 +865,10 @@ def build_smallc():
             for tag, s, sw, fr in SMALLC_FILTERS:
                 for lay in (CF, CL):
                     tiles = SMALLC_TILES + (SMALLC_TILES_CL if lay == CL else [])
+                    if tag == "5x5":
+                        if dtype == "FLOAT" or lay != CF:
+                            continue
+                        tiles = SMALLC_5X5_TILES[atom[:4]]
                     for bk, bc, wk, bq in tiles:
                         c = C(
                             atom,
@@ -912,7 +937,7 @@ def build_fma906():
     for dtype in CATALOG906:
         vec = 16 // eb(dtype)
         for tag, s, sw, dw, fr, loop, idx, aligns, lays in FILTERS:
-            if tag in MATRIX16_ONLY:
+            if tag in MATRIX16_ONLY or tag in NO_FMA906:
                 continue
             # fp32 already has FMA32's tiles (and FMA_TILES) in the shared FMA pack.
             tiles = [] if dtype == "FLOAT" else FMA_TILES.get(tag, FMA32)
@@ -1001,6 +1026,8 @@ def build():
                 if only is not None and tag not in only:
                     continue
                 if tag in MATRIX16_ONLY and dtype == "FLOAT":
+                    continue
+                if tag in FLOAT_ONLY and dtype != "FLOAT":
                     continue
                 picked = (
                     tiles

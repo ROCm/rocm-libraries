@@ -294,6 +294,8 @@ struct DeviceCase
     bool writesDw = false;
     /// Served by the 16-bit matrix atoms only: no fp32 or gfx906 (FMA) configs.
     bool matrix16Only = false;
+    /// No gfx906 (FMA) configs.
+    bool noGfx906 = false;
 };
 
 ConvShape conv(int64_t c,
@@ -460,6 +462,28 @@ std::vector<DeviceCase> deviceCases()
     auto packedConvolution = conv(32, 48, {6, 7}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, false, 2);
     packedConvolution.mode = ConvMode::CONVOLUTION;
     cases.push_back({"PackedRowsGroupedConvolution", packedConvolution});
+    // 5x5x5 volumes (AIPYTORCH-1356): unit stride on the ring / fp32 rows, stride 2 on the
+    // output rows, and few input channels on the small-C rows (16-bit). No gfx906 configs.
+    cases.push_back(
+        {"ThreeD5x5x5",
+         conv(16, 24, {7, 9, 10}, {5, 5, 5}, {2, 2, 2}, {2, 2, 2}, {1, 1, 1}, {1, 1, 1}),
+         false,
+         false,
+         false,
+         true});
+    cases.push_back(
+        {"ThreeD5x5x5Stride2",
+         conv(16, 24, {9, 11, 13}, {5, 5, 5}, {1, 1, 1}, {1, 1, 1}, {2, 2, 2}, {1, 1, 1}),
+         false,
+         false,
+         false,
+         true});
+    cases.push_back({"ThreeD5x5x5FewChannels",
+                     conv(8, 24, {6, 7, 9}, {5, 5, 5}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}),
+                     false,
+                     false,
+                     false,
+                     true});
     return cases;
 }
 
@@ -638,11 +662,11 @@ void runCase(const DeviceCase& deviceCase)
         });
         EXPECT_EQ(mismatches, 0);
     }
-    const bool fmaOrFp32 = shape.dataType == DataType::FLOAT
-                           || hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName) == "gfx906";
+    const bool gfx906 = hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName) == "gfx906";
+    const bool fmaOrFp32 = shape.dataType == DataType::FLOAT || gfx906;
     if(ran == 0
        && (!expectServed(device.gcnArchName, shape.dataType)
-           || (deviceCase.matrix16Only && fmaOrFp32)))
+           || (deviceCase.matrix16Only && fmaOrFp32) || (deviceCase.noGfx906 && gfx906)))
     {
         GTEST_SKIP() << "no catalog config for this case on " << device.gcnArchName;
     }
