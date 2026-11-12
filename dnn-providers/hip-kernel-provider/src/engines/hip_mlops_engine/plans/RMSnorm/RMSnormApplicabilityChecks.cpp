@@ -293,44 +293,7 @@ void RMSnormValidator::checkBwdActivationTensorConfigSupported(
 void RMSnormValidator::checkActivationModeSupported(
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttr, bool isBwd)
 {
-    // hip-kernel-provider rmsnorm supports: PASSTHRU, RELU, CLIPPEDRELU, CLAMP (no Leaky ReLU)
-
-    switch(pointwiseAttr.operation())
-    {
-    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY:
-        return;
-    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD:
-    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD:
-        if(pointwiseAttr.operation()
-           != (isBwd ? hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD
-                     : hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD))
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Rmsnorm fused activation mode must match the normalization direction.");
-        }
-        if(pointwiseAttr.relu_lower_clip_slope().has_value())
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Rmsnorm fused activation does not support Leaky ReLU.");
-        }
-        if(pointwiseAttr.relu_lower_clip().has_value()
-           && pointwiseAttr.relu_lower_clip().value() != 0.0f
-           && !pointwiseAttr.relu_upper_clip().has_value())
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Rmsnorm fused activation does not support standard ReLU with a non-zero "
-                "lower_clip.");
-        }
-        return;
-    default:
-        const std::string activationModeName(EnumNamePointwiseMode(pointwiseAttr.operation()));
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Unsupported activation mode for rmsnorm fusion: " + activationModeName + ".");
-    }
+    checkNormalizationActivationModeSupported(pointwiseAttr, isBwd, "Rmsnorm");
 }
 
 } // namespace hip_kernel_provider::rmsnorm

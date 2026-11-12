@@ -13,6 +13,46 @@ using namespace hip_kernel_provider::core::utils;
 namespace hip_kernel_provider
 {
 
+void checkNormalizationActivationModeSupported(
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attributes,
+    bool isBwd,
+    const std::string& normalizationName)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
+    if(attributes.operation() == PointwiseMode::IDENTITY)
+    {
+        return;
+    }
+    if(attributes.operation() != PointwiseMode::RELU_FWD
+       && attributes.operation() != PointwiseMode::RELU_BWD)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "Unsupported activation mode for " + normalizationName
+                + " fusion: " + EnumNamePointwiseMode(attributes.operation()) + ".");
+    }
+    if(attributes.operation() != (isBwd ? PointwiseMode::RELU_BWD : PointwiseMode::RELU_FWD))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            normalizationName + " fused activation mode must match the normalization direction.");
+    }
+    if(attributes.relu_lower_clip_slope().has_value())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            normalizationName + " fused activation does not support Leaky ReLU.");
+    }
+    if(attributes.relu_lower_clip().has_value() && attributes.relu_lower_clip().value() != 0.0f
+       && !attributes.relu_upper_clip().has_value())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            normalizationName
+                + " fused activation does not support standard ReLU with a non-zero lower_clip.");
+    }
+}
+
 // --- Tensor Descriptor Implementation ---
 
 TensorDescriptor::TensorDescriptor(

@@ -41,6 +41,9 @@ RMS normalization accepts unary `IDENTITY` in either direction; backward
 passthrough does not require ReLU's second input. Existing tensor/layout and
 graph connectivity requirements still apply.
 
+Batch normalization and RMS normalization share the same activation-mode
+validation for direction, passthrough and supported ReLU parameters.
+
 Leaky ReLU is **unsupported** in these legacy normalization fusions: any supplied
 `relu_lower_clip_slope` on a ReLU node (including an explicit zero) is rejected.
 Although the common activation enum names `LEAKY_RELU`, the shared scalar kernels
