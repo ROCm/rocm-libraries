@@ -1748,7 +1748,7 @@ __device__ void k1ConvMma(const K1Args& a)
     const int splits = a.splits > 1 ? a.splits : 1;
     const int split = static_cast<int>(bz) % splits;
     k1Setup<DIR>(a, static_cast<int>(bz) / splits, gather, map, g, phase);
-    const long long m0 = static_cast<long long>(bx) * BM;
+    const long long m0 = (static_cast<long long>(bx) + a.tileBase) * BM;
     if(m0 >= gather.rows)
     {
         return;
@@ -2264,7 +2264,7 @@ __device__ void k1ConvFma(const K1Args& a)
     const int splits = a.splits > 1 ? a.splits : 1;
     const int split = static_cast<int>(blockIdx.z) % splits;
     k1Setup<DIR>(a, static_cast<int>(blockIdx.z) / splits, gather, map, g, phase);
-    const long long m0 = static_cast<long long>(blockIdx.x) * BM;
+    const long long m0 = (static_cast<long long>(blockIdx.x) + a.tileBase) * BM;
     if(m0 >= gather.rows)
     {
         return;

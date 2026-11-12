@@ -1296,6 +1296,24 @@ TEST(TestConvIgemmCatalog, BufferSpanIsWholeImagesFromTheBlocksFirstImage)
     }
 }
 
+TEST(TestConvIgemmLaunch, RowTilesPastOneDispatchRunAsSeveralLaunches)
+{
+    // #14424 case X3: N = C = K = 1, 46341 x 46341, 1x1 -- 2^31 + 4633 output rows. One
+    // dispatch addresses 2^32 - 1 work items along x, so 128-row tiles of 256-thread blocks
+    // (16777253 tiles, 4294976768 work items) take two launches.
+    const long long rows = 46341LL * 46341LL;
+    const long long tiles = (rows + 127) / 128;
+    const long long first = conv_igemm::launchTilesFor(tiles, 256);
+    EXPECT_EQ(first, (int64_t{1} << 24) - 1);
+    EXPECT_LT(first * 256, int64_t{1} << 32);
+    EXPECT_EQ(tiles - first, 38);
+    // Every grid that fits one dispatch is one launch.
+    EXPECT_EQ(conv_igemm::launchTilesFor(1000, 256), 1000);
+    EXPECT_EQ(conv_igemm::launchTilesFor((int64_t{1} << 24) - 1, 256), (int64_t{1} << 24) - 1);
+    EXPECT_EQ(conv_igemm::launchTilesFor(int64_t{1} << 24, 256), (int64_t{1} << 24) - 1);
+    EXPECT_EQ(conv_igemm::launchTilesFor(int64_t{1} << 30, 64), (int64_t{1} << 26) - 1);
+}
+
 } // namespace
 
 #endif

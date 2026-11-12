@@ -675,6 +675,12 @@ bool blockOrderServes(int64_t bm, int64_t bn, int64_t xcd, std::string_view gcnA
     return xcd != 0 ? xcds : !(xcds && bm == 256 && bn == 256);
 }
 
+long long launchTilesFor(long long rowTiles, long long threads)
+{
+    constexpr long long DISPATCH_ITEMS = std::numeric_limits<uint32_t>::max();
+    return std::min<long long>(rowTiles, DISPATCH_ITEMS / std::max<long long>(1, threads));
+}
+
 std::optional<Grid> gridFor(const IgemmProblem& problem, int64_t bm, int64_t bn)
 {
     const auto& a = problem.args;
@@ -767,6 +773,8 @@ constexpr unsigned int COPY_BLOCK = 256;
 /// Bytes a 32-bit buffer offset reaches.
 constexpr long long BUFFER_LIMIT = std::numeric_limits<int>::max();
 constexpr long long COPY_MAX_BLOCKS = 1LL << 20;
+/// Work items one dispatch addresses per grid dimension (the packet's 32-bit grid size).
+constexpr long long MAX_DISPATCH_ITEMS = std::numeric_limits<uint32_t>::max();
 
 constexpr std::string_view X_TOKEN = "conv_igemm.x.uid";
 constexpr std::string_view W_TOKEN = "conv_igemm.w.uid";
@@ -1004,7 +1012,33 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    return conv_igemm::gridFor(*problem, tile->bm, tile->bn).has_value();
+    const auto grid = conv_igemm::gridFor(*problem, tile->bm, tile->bn);
+    if(!grid.has_value())
+    {
+        return false;
+    }
+    // The XCD block order numbers a launch's blocks in 32 bits.
+    const long long launchTiles = conv_igemm::launchTilesFor(grid->x, tile->blockThreads());
+    if(tile->xcd != 0
+       && launchTiles * grid->y * static_cast<long long>(grid->z) > MAX_DISPATCH_ITEMS)
+    {
+        return false;
+    }
+    // A staging transpose is one launch of a block per tile.
+    for(const Staging* staging : {&problem->x, &problem->w, &problem->y})
+    {
+        if(staging->needed && staging->transpose)
+        {
+            const auto& t = staging->transposeArgs;
+            constexpr long long TILE = CONV_IGEMM_TRANSPOSE_TILE;
+            if((t.cols + TILE - 1) / TILE * ((t.rows + TILE - 1) / TILE) * t.batches
+               > MAX_DISPATCH_ITEMS / COPY_BLOCK)
+            {
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 /// The problem a config runs: a direct-filter config reads the graph's filter, and a
@@ -1091,11 +1125,17 @@ class PreparedConvIgemm : public IngestorPreparedDispatch
 {
 public:
     PreparedConvIgemm(IngestorKernelCode conv,
+                      std::optional<IngestorKernelCode> convTail,
+                      long long launchTiles,
+                      long long rowTiles,
                       std::optional<IngestorKernelCode> reduce,
                       std::array<std::optional<IngestorKernelCode>, 3> copies,
                       const IgemmProblem& problem,
                       const conv_igemm::SplitPlan& plan)
         : _conv(std::move(conv))
+        , _convTail(std::move(convTail))
+        , _launchTiles(launchTiles)
+        , _rowTiles(rowTiles)
         , _reduce(std::move(reduce))
         , _copies(std::move(copies))
         , _problem(problem)
@@ -1111,6 +1151,24 @@ public:
     compilation::IRunnableKernel& convForStream(hipStream_t stream) const
     {
         return _conv.kernelForStream(stream);
+    }
+
+    /// The last launch's kernel when the row tiles do not divide into whole launches.
+    compilation::IRunnableKernel& convTailForStream(hipStream_t stream) const
+    {
+        return _convTail.has_value() ? _convTail->kernelForStream(stream)
+                                     : _conv.kernelForStream(stream);
+    }
+
+    /// Row tiles per launch, and in all: a grid past one dispatch's 2^32 work items along x
+    /// runs as consecutive launches of launchTiles() row tiles (the last one the remainder).
+    long long launchTiles() const
+    {
+        return _launchTiles;
+    }
+    long long rowTiles() const
+    {
+        return _rowTiles;
     }
 
     /// The staging copy of x (0), w (1) or y (2).
@@ -1136,6 +1194,9 @@ public:
 
 private:
     IngestorKernelCode _conv;
+    std::optional<IngestorKernelCode> _convTail;
+    long long _launchTiles;
+    long long _rowTiles;
     std::optional<IngestorKernelCode> _reduce;
     std::array<std::optional<IngestorKernelCode>, 3> _copies;
     IgemmProblem _problem;
@@ -1237,8 +1298,23 @@ public:
             *problem, tile->bm, tile->bn, tile->bk, context.deviceProperties, tile->pack);
         auto conv = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, kernel, options, convSignature());
-        conv.setBlockSize(static_cast<unsigned int>(tile->blockThreads()), 1, 1);
-        conv.setGridSize(grid->x, grid->y, grid->z * static_cast<unsigned int>(plan.splits));
+        const auto threads = static_cast<unsigned int>(tile->blockThreads());
+        const unsigned int gridZ = grid->z * static_cast<unsigned int>(plan.splits);
+        // One dispatch addresses at most 2^32 - 1 work items along x: more row tiles than that
+        // run as consecutive launches (K1Args::tileBase), the last one taking the remainder.
+        const long long rowTiles = grid->x;
+        const long long launchTiles = conv_igemm::launchTilesFor(rowTiles, threads);
+        conv.setBlockSize(threads, 1, 1);
+        conv.setGridSize(static_cast<unsigned int>(launchTiles), grid->y, gridZ);
+        std::optional<IngestorKernelCode> convTail;
+        if(rowTiles % launchTiles != 0)
+        {
+            convTail.emplace(buildIngestorKernelCode(
+                _kernelCompiler, _kpackLoader, context, kernel, options, convSignature()));
+            convTail->setBlockSize(threads, 1, 1);
+            convTail->setGridSize(
+                static_cast<unsigned int>(rowTiles % launchTiles), grid->y, gridZ);
+        }
         std::optional<IngestorKernelCode> reduce;
         if(plan.splits > 1)
         {
@@ -1282,7 +1358,7 @@ public:
                 const auto& t = stagings[i]->transposeArgs;
                 constexpr long long TILE = CONV_IGEMM_TRANSPOSE_TILE;
                 blocks = (t.cols + TILE - 1) / TILE * ((t.rows + TILE - 1) / TILE) * t.batches;
-                if(blocks > std::numeric_limits<int>::max())
+                if(blocks > MAX_DISPATCH_ITEMS / COPY_BLOCK)
                 {
                     throw hipdnn_plugin_sdk::HipdnnPluginException(
                         HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
@@ -1298,8 +1374,14 @@ public:
             copy.setGridSize(static_cast<unsigned int>(blocks), 1, 1);
             copies[i].emplace(std::move(copy));
         }
-        return std::make_unique<PreparedConvIgemm>(
-            std::move(conv), std::move(reduce), std::move(copies), *problem, plan);
+        return std::make_unique<PreparedConvIgemm>(std::move(conv),
+                                                   std::move(convTail),
+                                                   launchTiles,
+                                                   rowTiles,
+                                                   std::move(reduce),
+                                                   std::move(copies),
+                                                   *problem,
+                                                   plan);
     }
 
     void launch(const Handle& handle,
@@ -1378,7 +1460,13 @@ public:
         args.outElems = plan.outElems;
         args.partial
             = plan.splits > 1 ? reinterpret_cast<float*>(base + plan.partialOffset) : nullptr;
-        dispatch.convForStream(stream).launch(stream, args);
+        for(long long first = 0; first < dispatch.rowTiles(); first += dispatch.launchTiles())
+        {
+            args.tileBase = static_cast<int>(first);
+            const bool whole = dispatch.rowTiles() - first >= dispatch.launchTiles();
+            (whole ? dispatch.convForStream(stream) : dispatch.convTailForStream(stream))
+                .launch(stream, args);
+        }
         if(plan.splits > 1)
         {
             K1ReduceArgs reduce{

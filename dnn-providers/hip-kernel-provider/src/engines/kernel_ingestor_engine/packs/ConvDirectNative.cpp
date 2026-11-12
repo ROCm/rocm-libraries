@@ -633,7 +633,26 @@ std::optional<Plan>
     }
     const long long gridX
         = static_cast<long long>(tile->tilesW) * tile->tilesH * tile->tilesD * a.n;
-    if(gridX > INT_LIMIT)
+    // A staging transpose is one launch of a 256-thread block per tile.
+    for(const Staging* staging : {&problem.in, &problem.out})
+    {
+        if(staging->needed && staging->transpose)
+        {
+            const auto& t = staging->transposeArgs;
+            constexpr long long TILE = CONV_IGEMM_TRANSPOSE_TILE;
+            if((t.cols + TILE - 1) / TILE * ((t.rows + TILE - 1) / TILE) * t.batches * 256
+               > static_cast<long long>(std::numeric_limits<uint32_t>::max()))
+            {
+                return std::nullopt;
+            }
+        }
+    }
+    // One dispatch addresses at most 2^32 - 1 work items along x (rows configs launch at
+    // most one block per unit).
+    if(gridX > INT_LIMIT
+       || !config.rows
+              && gridX * config.blockThreads()
+                     > static_cast<long long>(std::numeric_limits<uint32_t>::max()))
     {
         return std::nullopt;
     }
@@ -1075,7 +1094,7 @@ public:
                 const auto& t = stagings[i]->transposeArgs;
                 constexpr long long TILE = CONV_IGEMM_TRANSPOSE_TILE;
                 blocks = (t.cols + TILE - 1) / TILE * ((t.rows + TILE - 1) / TILE) * t.batches;
-                if(blocks > std::numeric_limits<int>::max())
+                if(blocks * AUX_BLOCK > std::numeric_limits<uint32_t>::max())
                 {
                     throw hipdnn_plugin_sdk::HipdnnPluginException(
                         HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,

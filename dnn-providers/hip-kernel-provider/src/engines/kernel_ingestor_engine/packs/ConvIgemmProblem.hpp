@@ -135,6 +135,10 @@ struct Grid
 };
 std::optional<Grid> gridFor(const IgemmProblem& problem, int64_t bm, int64_t bn);
 
+/// Row tiles one launch of @p threads-thread blocks takes: all @p rowTiles, or as many as one
+/// dispatch addresses (2^32 - 1 work items along x); the rest run as further launches.
+long long launchTilesFor(long long rowTiles, long long threads);
+
 /// Rows of shift range a halo config stages beyond its row tile (the kernels' K1_HALO_CAP).
 constexpr long long HALO_CAP = 64;
 

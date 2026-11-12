@@ -740,8 +740,11 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
     plan.args.tiles = static_cast<int>(tiles);
     plan.workspaceBytes = offset;
 
+    // Every grid built here runs 256-thread blocks; one dispatch addresses at most 2^32 - 1
+    // work items along x.
     const auto grid = [](unsigned int(&blocks)[3], long long x, long long y, long long z) {
-        if(x < 1 || x > INT_LIMIT || y > GRID_YZ_LIMIT || z > GRID_YZ_LIMIT)
+        if(x < 1 || x > INT_LIMIT || x * 256 > static_cast<long long>(UINT32_MAX)
+           || y > GRID_YZ_LIMIT || z > GRID_YZ_LIMIT)
         {
             return false;
         }
