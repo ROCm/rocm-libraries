@@ -377,7 +377,7 @@ namespace
             }
         }
 
-        scoped_bsrsv_objects(const scoped_bsrsv_objects&) = delete;
+        scoped_bsrsv_objects(const scoped_bsrsv_objects&)            = delete;
         scoped_bsrsv_objects& operator=(const scoped_bsrsv_objects&) = delete;
     };
 
