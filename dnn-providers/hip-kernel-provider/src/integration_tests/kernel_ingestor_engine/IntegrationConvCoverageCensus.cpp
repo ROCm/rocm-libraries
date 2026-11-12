@@ -557,12 +557,24 @@ bool knownGap(const nlohmann::json& map, const nlohmann::json& row, const std::s
     return !gaps.empty();
 }
 
-/// Whether the map records that some architecture serves the row with these providers'
-/// HIP or naive engines (so its service cannot depend on the explicit-GEMM engines).
-bool servedWithoutBlasSomewhere(const nlohmann::json& row)
+/// Whether a twin's service may rest on the explicit-GEMM engines alone: the map records
+/// it as served only by them on this architecture, or, on an architecture without a column,
+/// on any architecture, or records no HIP or naive service for it anywhere.
+bool mayNeedBlas(const nlohmann::json& map, const nlohmann::json& row, const std::string& arch)
 {
     const auto& tiers = row.at("tier").get_ref<const std::string&>();
-    return tiers.find_first_of("hn") != std::string::npos;
+    if(tiers.find_first_of("hn") == std::string::npos)
+    {
+        return true;
+    }
+    const auto& archs = map.at("archs");
+    const auto slot = static_cast<size_t>(
+        std::distance(archs.begin(), std::find(archs.begin(), archs.end(), arch)));
+    if(slot < tiers.size() && tiers[slot] != '-')
+    {
+        return tiers[slot] == 'b';
+    }
+    return tiers.find('b') != std::string::npos;
 }
 
 constexpr const char* NO_BLAS_NOTE
@@ -693,7 +705,7 @@ TEST(IntegrationConvCoverageCensus, EveryServedFwdBwdGraphHasAServedWrwTwin)
         {
             continue;
         }
-        if(!c.blasLoaded && !servedWithoutBlasSomewhere(row))
+        if(!c.blasLoaded && mayNeedBlas(c.map, row, c.arch))
         {
             ++unchecked;
             continue;
