@@ -54,9 +54,10 @@ using namespace hip_kernel_provider::test_utilities;
  *        alone are not offered.
  *
  * The knobs are the geometry (tile_size, num_warps, block_m_per_warp and the MFMA codepath
- * flags). Each expected kernel id is resolved at run time from the production descriptors
- * (kernelIdsFor), and the coverage case holds the tables to exactly the catalog's kernel
- * classes. Each forced case pins a head pair whose GQA ratio its class ships, so a catalog
+ * flags) and the codegen stack (K ring, direct-global Q, conflict-free V stores, the mask
+ * limit and the invariant hoist). Each expected kernel id is resolved at run time from the
+ * production descriptors (kernelIdsFor), and the coverage case holds the tables to exactly the
+ * catalog's kernel classes. Each forced case pins a head pair whose GQA ratio its class ships, so a catalog
  * change that drops that ratio fails the case and its table row is moved with it. The kernels
  * read the head counts at run time and bake only their ratio, so the forced cases run head
  * pairs the manifest's cells never list. Every case runs with a workspace filled with NaN bytes
@@ -137,8 +138,10 @@ void PrintTo(const DeclineCase& declineCase, std::ostream* os)
     *os << declineCase.name;
 }
 
-/// A geometry: (tile_size at block_size 16, num_warps, block_m_per_warp, use_mfma_32x32x8,
-/// use_transposed_qk_32x32), named for the case.
+/// A kernel class: (tile_size at block_size 16, num_warps, block_m_per_warp, use_mfma_32x32x8,
+/// use_transposed_qk_32x32) and the five codegen stack fields (use_k_sliced_ring,
+/// use_q_direct_global, use_conflict_free_v_store, use_transposed_mask_limit,
+/// use_transposed_invariant_hoist), named for the case.
 struct Geometry
 {
     const char* name;
@@ -147,22 +150,28 @@ struct Geometry
     int64_t blockMPerWarp;
     int64_t useMfma32x32x8;
     int64_t useTransposedQk32x32;
+    int64_t useKSlicedRing = 0;
+    int64_t useQDirectGlobal = 0;
+    int64_t useConflictFreeVStore = 0;
+    int64_t useTransposedMaskLimit = 0;
+    int64_t useTransposedInvariantHoist = 0;
 };
 
-/// The catalog's geometries per head size; the first of each is every cell's default.
-constexpr std::array<Geometry, 5> D64_GEOMETRIES{{
+/// The catalog's classes per head size; the first of each is every cell's default geometry.
+/// D64's production stack (ring, direct-global Q, conflict-free V stores, mask limit and
+/// hoist) rides the default's 4 x 32 geometry; fp16 D128's drops direct-global Q.
+constexpr std::array<Geometry, 3> D64_GEOMETRIES{{
     {"Transposed4x32T64", 64, 4, 32, 1, 1},
-    {"Transposed8x32T64", 64, 8, 32, 1, 1},
-    {"Narrow4x16T64", 64, 4, 16, 0, 0},
-    {"Narrow4x32T64", 64, 4, 32, 0, 0},
+    {"Production4x32T64", 64, 4, 32, 1, 1, 1, 1, 1, 1, 1},
     {"Narrow2x16T64", 64, 2, 16, 0, 0},
 }};
-constexpr std::array<Geometry, 5> D128_GEOMETRIES{{
+constexpr std::array<Geometry, 6> D128_GEOMETRIES{{
     {"Transposed2x32T32", 32, 2, 32, 1, 1},
     {"Transposed4x32T32", 32, 4, 32, 1, 1},
     {"Narrow4x16T32", 32, 4, 16, 0, 0},
     {"Narrow2x32T32", 32, 2, 32, 0, 0},
     {"Narrow2x16T16", 16, 2, 16, 0, 0},
+    {"Production4x32T64Ring", 64, 4, 32, 1, 1, 1, 0, 1, 1, 1},
 }};
 
 /// A (query heads, KV heads) pair. Several forced cases use pairs no manifest cell lists,
@@ -179,7 +188,12 @@ Knobs knobsOf(const Geometry& g)
             {"num_warps", g.numWarps},
             {"block_m_per_warp", g.blockMPerWarp},
             {"use_mfma_32x32x8", g.useMfma32x32x8},
-            {"use_transposed_qk_32x32", g.useTransposedQk32x32}};
+            {"use_transposed_qk_32x32", g.useTransposedQk32x32},
+            {"use_k_sliced_ring", g.useKSlicedRing},
+            {"use_q_direct_global", g.useQDirectGlobal},
+            {"use_conflict_free_v_store", g.useConflictFreeVStore},
+            {"use_transposed_mask_limit", g.useTransposedMaskLimit},
+            {"use_transposed_invariant_hoist", g.useTransposedInvariantHoist}};
 }
 
 std::string dtypeName(DataType dataType)
@@ -198,32 +212,29 @@ struct ForcedClass
 };
 
 /// Every kernel class the catalog ships, forced once on a prefill shape with B > 1 and
-/// Sq != Skv; then cold cases the engine's own ranking serves with each head size's default
-/// geometry, one at B 512. Variant reduction dropped D64 Narrow4x16T64 bf16 and D64
-/// Narrow4x32T64 fp16 at every ratio, so they have no case.
+/// Sq != Skv; then cold cases the engine's own ranking serves: rocKE's production stack where
+/// the catalog ships one for the cell, the default geometry where it does not (bf16 D128,
+/// whose production stack lost to the default on every sweep graph). Variant reduction kept
+/// 14 classes; the rest of the geometries have no case.
 std::vector<KnobCase> knobCases()
 {
     constexpr auto BF16 = DataType::BFLOAT16;
     constexpr auto FP16 = DataType::HALF;
-    const std::array<ForcedClass, 18> forced{{
+    const std::array<ForcedClass, 14> forced{{
         {64, &D64_GEOMETRIES[0], BF16, {8, 8}},
         {64, &D64_GEOMETRIES[0], FP16, {24, 6}},
         {64, &D64_GEOMETRIES[1], BF16, {64, 8}},
         {64, &D64_GEOMETRIES[1], FP16, {64, 8}},
+        {64, &D64_GEOMETRIES[2], BF16, {8, 8}},
         {64, &D64_GEOMETRIES[2], FP16, {8, 8}},
-        {64, &D64_GEOMETRIES[3], BF16, {8, 8}},
-        {64, &D64_GEOMETRIES[4], BF16, {20, 10}},
-        {64, &D64_GEOMETRIES[4], FP16, {64, 8}},
         {128, &D128_GEOMETRIES[0], BF16, {48, 3}},
         {128, &D128_GEOMETRIES[0], FP16, {64, 8}},
         {128, &D128_GEOMETRIES[1], BF16, {20, 10}},
-        {128, &D128_GEOMETRIES[1], FP16, {8, 2}},
-        {128, &D128_GEOMETRIES[2], BF16, {8, 8}},
-        {128, &D128_GEOMETRIES[2], FP16, {20, 10}},
+        {128, &D128_GEOMETRIES[2], BF16, {16, 2}},
         {128, &D128_GEOMETRIES[3], BF16, {16, 4}},
-        {128, &D128_GEOMETRIES[3], FP16, {8, 8}},
         {128, &D128_GEOMETRIES[4], BF16, {64, 8}},
-        {128, &D128_GEOMETRIES[4], FP16, {64, 8}},
+        {128, &D128_GEOMETRIES[4], FP16, {8, 8}},
+        {128, &D128_GEOMETRIES[5], FP16, {20, 10}},
     }};
     std::vector<KnobCase> cases;
     for(const auto& f : forced)
@@ -238,12 +249,16 @@ std::vector<KnobCase> knobCases()
              knobsOf(g)});
     }
 
-    cases.push_back({"D64_Cold_SelectsTheDefaultGeometry",
+    cases.push_back({"D64_Cold_SelectsTheProductionStack",
                      {DataType::BFLOAT16, 64, 32, 8, Mask::BOTTOM_RIGHT, 3, 512, 512},
                      {},
-                     knobsOf(D64_GEOMETRIES[0])});
-    cases.push_back({"D128_Cold_SelectsTheDefaultGeometry",
+                     knobsOf(D64_GEOMETRIES[1])});
+    cases.push_back({"D128_Fp16_Cold_SelectsTheProductionStack",
                      {DataType::HALF, 128, 64, 8, Mask::BOTTOM_RIGHT, 1, 512, 2048},
+                     {},
+                     knobsOf(D128_GEOMETRIES[5])});
+    cases.push_back({"D128_Bf16_Cold_SelectsTheDefaultGeometry",
+                     {DataType::BFLOAT16, 128, 64, 8, Mask::BOTTOM_RIGHT, 1, 512, 2048},
                      {},
                      knobsOf(D128_GEOMETRIES[0])});
     // The kernel derives its cu_q search trip count from the num_seqs kernarg.
@@ -593,7 +608,12 @@ TEST_F(IntegrationGpuGfx942AttentionUnified2DKnobCoverage, CoversEveryCatalogKer
                                               "num_warps",
                                               "block_m_per_warp",
                                               "use_mfma_32x32x8",
-                                              "use_transposed_qk_32x32"};
+                                              "use_transposed_qk_32x32",
+                                              "use_k_sliced_ring",
+                                              "use_q_direct_global",
+                                              "use_conflict_free_v_store",
+                                              "use_transposed_mask_limit",
+                                              "use_transposed_invariant_hoist"};
 
     std::set<KernelClass> tableClasses;
     for(const auto& knobCase : knobCases())

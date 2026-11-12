@@ -36,6 +36,20 @@
 # cross-length). A geometry that does not fit the 64 KiB LDS at a head size lists only the
 # other head size's cells. The shipped selection is variant_reduce's cut of this space.
 #
+# Production stacks: rocKE's own spec for these cells is not a geometry in that sweep space.
+# `_spec_gfx942_fp16_flash` and `_spec_gfx942_bf16_flash` (builders/common/attention_spec_builder.py)
+# turn on, together, the mask-limit stack (scalar state, invariant hoist, mask once, mask
+# limit), conflict-free V stores, a K ring or a single K buffer, `waves_per_eu` 2 and the
+# `all` KV cache policy; at D64 also a sliced-K ring of 16-wide slices and direct-global Q.
+# No registry sweep spec combines those, so four `enumerate.also` sections pin them with
+# `spec_overrides`, one per (dtype, head size), each on the geometry rocKE selects:
+# 4 warps x 32 rows, 64-token tile (D64, and fp16 D128 with a depth-2 ring) and 2 warps x
+# 32 rows with a single K buffer (bf16 D128). rocKE routes short prefill (seqlen_q <= 768) to
+# a light narrow geometry instead; those are the narrow geometries below. The five stack
+# fields that tell a production kernel from a geometry's default kernel are KMD fields,
+# knobs and `reduction.fields.performance`, so the sweep ranks them and the catalog key never
+# collides; the rest are fixed by the stack and recorded in the kernel spec.
+#
 # The generated packs/Gfx942AttentionUnified2DNative.cpp and its matcher test are stubs;
 # the provider's copies are hand-maintained and must not be overwritten.
 
@@ -52,6 +66,11 @@ engine:
   - block_m_per_warp
   - use_mfma_32x32x8
   - use_transposed_qk_32x32
+  - use_k_sliced_ring
+  - use_q_direct_global
+  - use_conflict_free_v_store
+  - use_transposed_mask_limit
+  - use_transposed_invariant_hoist
   heuristic: native
 kmd_fields:
 - name: dtype
@@ -98,6 +117,26 @@ kmd_fields:
 - name: use_transposed_qk_32x32
   type: int
   default_value: 1
+# The codegen stack, also public engine knobs. A geometry's default kernel leaves all five
+# off except the 8-warp x 32-row one, which fits the LDS only with direct-Q and conflict-free
+# V stores. A production kernel (see the header) turns on the mask limit and invariant
+# hoist (the 4-flag mask stack moves together, so these two stand for it), conflict-free V
+# stores, the K ring where rocKE uses it and direct-global Q at D64.
+- name: use_k_sliced_ring
+  type: int
+  default_value: 0
+- name: use_q_direct_global
+  type: int
+  default_value: 0
+- name: use_conflict_free_v_store
+  type: int
+  default_value: 0
+- name: use_transposed_mask_limit
+  type: int
+  default_value: 0
+- name: use_transposed_invariant_hoist
+  type: int
+  default_value: 0
 specialization:
   metadata_fields:
   - dtype
@@ -111,6 +150,11 @@ specialization:
   - block_m_per_warp
   - use_mfma_32x32x8
   - use_transposed_qk_32x32
+  - use_k_sliced_ring
+  - use_q_direct_global
+  - use_conflict_free_v_store
+  - use_transposed_mask_limit
+  - use_transposed_invariant_hoist
   matcher_only_fields: []
   vocabulary:
     dtype:
@@ -139,6 +183,16 @@ specialization:
       field: use_mfma_32x32x8
     use_transposed_qk_32x32:
       field: use_transposed_qk_32x32
+    use_k_sliced_ring:
+      field: use_k_sliced_ring
+    use_q_direct_global:
+      field: use_q_direct_global
+    use_conflict_free_v_store:
+      field: use_conflict_free_v_store
+    use_transposed_mask_limit:
+      field: use_transposed_mask_limit
+    use_transposed_invariant_hoist:
+      field: use_transposed_invariant_hoist
 kernel_source_kind: rocke
 workspace_policy: derived
 
@@ -147,7 +201,7 @@ arch: gfx942
 provider_root: dnn-providers/hip-kernel-provider
 source: kernels/gfx942/attention_tiled_2d.py
 builder: build_unified_attention_2d_tiled
-kernel_name_template: attention_unified_2d.{dtype}_d{head_size}_g{num_queries_per_kv}_m{mask_type}_bs{block_size}_t{tile_size}_nw{num_warps}_mw{block_m_per_warp}_x{use_mfma_32x32x8}{use_transposed_qk_32x32}.gfx942
+kernel_name_template: attention_unified_2d.{dtype}_d{head_size}_g{num_queries_per_kv}_m{mask_type}_bs{block_size}_t{tile_size}_nw{num_warps}_mw{block_m_per_warp}_x{use_mfma_32x32x8}{use_transposed_qk_32x32}_f{use_k_sliced_ring}{use_q_direct_global}{use_conflict_free_v_store}{use_transposed_mask_limit}{use_transposed_invariant_hoist}.gfx942
 
 # The registry space the selection is drawn from (see registry_enumerator.py).
 enumerate:
@@ -164,7 +218,7 @@ enumerate:
   # ratio (1, 2, 4, 8, 16), each with 8 KV heads.
   cells: &d64_cells
     - fields: [hdim_q, hdim_v, nhead_q, nhead_k]
-      values:
+      values: &d64_heads
         - [64, 64, 8, 8]
         - [64, 64, 16, 8]
         - [64, 64, 32, 8]
@@ -175,14 +229,16 @@ enumerate:
     - fields: [mask_type]
       values: [BOTTOM_RIGHT_CAUSAL]
   sweep_level: production
-  # Full space per geometry, with the codegen flag stacks and waves_per_eu held at the
-  # registry default (reduction.fields.ignored): each geometry contributes its default
-  # spec per cell, and variant reduction chooses among the geometries. spec_fields
-  # records every field any pinned geometry's default sets: the 8-warp x 32-row
-  # geometry fits the LDS only with direct-Q and conflict-free V stores, which its
-  # default turns on.
+  # Full space per geometry. The five codegen stack fields (hold_fields) are held at each
+  # geometry's default spec, and the rest of the flag stacks and waves_per_eu are held at
+  # the registry default (reduction.fields.ignored): each geometry contributes its default
+  # spec per cell, and variant reduction chooses among the geometries and the production
+  # sections below. spec_fields records every field any pinned geometry's default sets: the
+  # 8-warp x 32-row geometry fits the LDS only with direct-Q and conflict-free V stores,
+  # which its default turns on.
   space: full
-  spec_fields: &spec_fields [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_seqs, num_warps, block_m_per_warp, tile_size, use_mfma_32x32x8, use_transposed_qk_32x32, use_q_direct_global, use_conflict_free_v_store, use_i64_kv_addr]
+  spec_fields: &spec_fields [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_seqs, num_warps, block_m_per_warp, tile_size, use_mfma_32x32x8, use_transposed_qk_32x32, use_q_direct_global, use_conflict_free_v_store, use_i64_kv_addr, use_k_sliced_ring, use_transposed_mask_limit, use_transposed_invariant_hoist]
+  hold_fields: [use_k_sliced_ring, use_q_direct_global, use_conflict_free_v_store, use_transposed_mask_limit, use_transposed_invariant_hoist]
   # The head pair only builds the request; cells merge per GQA ratio (inherited by
   # every also section).
   selector_fields: [nhead_q, nhead_k]
@@ -201,7 +257,7 @@ enumerate:
       fixed: *fixed
       cells: &d128_cells
         - fields: [hdim_q, hdim_v, nhead_q, nhead_k]
-          values:
+          values: &d128_heads
             - [128, 128, 8, 8]
             - [128, 128, 16, 8]
             - [128, 128, 32, 8]
@@ -255,6 +311,80 @@ enumerate:
       cells: *d128_cells
       spec_fields: *spec_fields
       neutral_fields: *neutral
+    # rocKE's production stacks (see the header). Each section's spec_overrides are the
+    # fields rocKE's builder sets beyond the pinned geometry's default spec for that
+    # (dtype, head size) at prefill; tests/test_registry_regeneration.py::test_g9 holds them
+    # to `_tiled_spec_from_problem`.
+    # D64, both dtypes: 4 warps x 32 rows, 64-token tile, a depth-3 ring of 16-wide K
+    # slices and direct-global Q.
+    - pin: {algorithm: unified_tuning, spec_id: gfx942_u2d_transposed_x8_nw4_mw32_t4xb_llvm}
+      fixed: *fixed
+      cells:
+        - fields: [hdim_q, hdim_v, nhead_q, nhead_k]
+          values: *d64_heads
+        - fields: [dtype]
+          values: [bf16, fp16]
+        - fields: [mask_type]
+          values: [BOTTOM_RIGHT_CAUSAL]
+      spec_overrides:
+        waves_per_eu: 2
+        use_transposed_scalar_state: true
+        use_transposed_invariant_hoist: true
+        use_transposed_mask_once: true
+        use_transposed_mask_limit: true
+        use_conflict_free_v_store: true
+        use_k_sliced_ring: true
+        k_slice_hd: 16
+        use_q_direct_global: true
+        kv_cache_policy: all
+      spec_fields: &production_spec_fields [head_size, block_size, num_query_heads, num_kv_heads, dtype, use_sinks, sliding_window, has_softcap, num_seqs, num_warps, block_m_per_warp, tile_size, use_mfma_32x32x8, use_transposed_qk_32x32, use_q_direct_global, use_conflict_free_v_store, use_i64_kv_addr, use_k_sliced_ring, use_transposed_mask_limit, use_transposed_invariant_hoist, waves_per_eu, use_transposed_scalar_state, use_transposed_mask_once, use_k_single_buffer, ring_depth, k_slice_hd, kv_cache_policy]
+      neutral_fields: *neutral
+    # fp16 D128: 4 warps x 32 rows, 64-token tile, depth-2 K ring (a depth-3 ring reuses a
+    # slot before its DMA drains at D128), no direct-global Q.
+    - pin: {algorithm: unified_tuning, spec_id: gfx942_u2d_transposed_x8_nw4_mw32_t2xb_llvm}
+      fixed: *fixed
+      cells:
+        - fields: [hdim_q, hdim_v, nhead_q, nhead_k]
+          values: *d128_heads
+        - fields: [dtype]
+          values: [fp16]
+        - fields: [mask_type]
+          values: [BOTTOM_RIGHT_CAUSAL]
+      spec_overrides:
+        tile_size: 64
+        waves_per_eu: 2
+        use_transposed_scalar_state: true
+        use_transposed_invariant_hoist: true
+        use_transposed_mask_once: true
+        use_transposed_mask_limit: true
+        use_conflict_free_v_store: true
+        use_k_sliced_ring: true
+        ring_depth: 2
+        kv_cache_policy: all
+      spec_fields: *production_spec_fields
+      neutral_fields: *neutral
+    # bf16 D128: no ring (every correct ring is slower at block size 16): 2 warps x 32 rows,
+    # 64-token tile, one K buffer.
+    - pin: {algorithm: unified_tuning, spec_id: gfx942_u2d_transposed_x8_nw2_mw32_t2xb_llvm}
+      fixed: *fixed
+      cells:
+        - fields: [hdim_q, hdim_v, nhead_q, nhead_k]
+          values: *d128_heads
+        - fields: [dtype]
+          values: [bf16]
+        - fields: [mask_type]
+          values: [BOTTOM_RIGHT_CAUSAL]
+      spec_overrides:
+        tile_size: 64
+        waves_per_eu: 2
+        use_transposed_scalar_state: true
+        use_transposed_invariant_hoist: true
+        use_transposed_mask_once: true
+        use_transposed_mask_limit: true
+        use_k_single_buffer: true
+        kv_cache_policy: all
+      spec_fields: *production_spec_fields
+      neutral_fields: *neutral
 
 reduction:
   fields:
@@ -268,10 +398,17 @@ reduction:
       - {name: block_m_per_warp}
       - {name: use_mfma_32x32x8}
       - {name: use_transposed_qk_32x32}
+      - {name: use_k_sliced_ring}
+      - {name: use_q_direct_global}
+      - {name: use_conflict_free_v_store}
+      - {name: use_transposed_mask_limit}
+      - {name: use_transposed_invariant_hoist}
     # num_seqs is neutral (above), so it never varies; listed to state that it is not a
     # kernel axis. The rest are the codegen flag stacks and the occupancy hint the
-    # production sweep varies inside one geometry, held at the registry default.
-    ignored: [num_seqs, waves_per_eu, use_q_direct_global, use_conflict_free_v_store, use_conflict_free_v_store_split, use_conflict_free_v, use_mfma_32x32, use_register_pv, use_transposed_scalar_state, use_transposed_invariant_hoist, use_transposed_mask_once, use_transposed_half_local_pv, use_mfma32_skip_legacy_qreg, use_transposed_mask_limit, use_grouped_kv2_softmax, use_fast_paged_kv_desc, use_early_v_schedule, use_agpr_alloc_zero, use_k_single_buffer, use_k_sliced_ring, ring_depth, k_slice_hd, use_k_sliced_ldsseq, use_iglp_opt, use_qk_pv_sched_group_barrier, use_v_hbm_direct, use_global_load_lds_k, kv_cache_policy, use_q_major_grid, use_causal_mask_phase_split]
+    # production sweep varies inside one geometry, held at the registry default. The five
+    # performance stack fields above are held by enumerate.hold_fields in every section but
+    # the production ones, which pin them with spec_overrides.
+    ignored: [num_seqs, waves_per_eu, use_conflict_free_v_store_split, use_conflict_free_v, use_mfma_32x32, use_register_pv, use_transposed_scalar_state, use_transposed_mask_once, use_transposed_half_local_pv, use_mfma32_skip_legacy_qreg, use_grouped_kv2_softmax, use_fast_paged_kv_desc, use_early_v_schedule, use_agpr_alloc_zero, use_k_single_buffer, ring_depth, k_slice_hd, use_k_sliced_ldsseq, use_iglp_opt, use_qk_pv_sched_group_barrier, use_v_hbm_direct, use_global_load_lds_k, kv_cache_policy, use_q_major_grid, use_causal_mask_phase_split]
   aot_budget_per_arch: 1000
 
 # How owner benchmark rows become hipDNN graphs (tools/ground_truth.py graphs).
@@ -317,14 +454,16 @@ launch_surface:
   - name: matcher
     python_source: kernels/gfx942/attention_tiled_2d.py:supports_tiled_2d
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified2DNative.cpp
-    kmd_fields: [dtype, head_size, num_queries_per_kv, block_size, mask_type, sliding_window, tile_size, num_warps, block_m_per_warp, use_mfma_32x32x8, use_transposed_qk_32x32]
+    kmd_fields: [dtype, head_size, num_queries_per_kv, block_size, mask_type, sliding_window, tile_size, num_warps, block_m_per_warp, use_mfma_32x32x8, use_transposed_qk_32x32, use_k_sliced_ring, use_q_direct_global, use_conflict_free_v_store, use_transposed_mask_limit, use_transposed_invariant_hoist]
     guard: >
       kernelMatches() returns false (no panic) if dtype, head_size, the GQA ratio,
       mask_type or sliding_window disagrees with the graph, Skv is not a multiple of
-      block_size, or the candidate's geometry is one gfx942 does not build. graph_match
-      leaves the single-token decode cells the split-KV gfx942 engine serves to it.
-      score() ranks the cell's default geometry first, then ascending (tile_size,
-      num_warps, block_m_per_warp).
+      block_size, or the candidate's geometry is one gfx942 does not build; a record
+      without one of the five codegen stack fields, or with a value outside 0/1, is
+      declined too. graph_match leaves the single-token decode cells the split-KV gfx942
+      engine serves to it. score() ranks rocKE's production stack for the cell first, then
+      the cell's default geometry, then ascending (tile_size, num_warps, block_m_per_warp,
+      the MFMA flags, the codegen stack).
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified2DMatchers.cpp
 
   - name: kernargs

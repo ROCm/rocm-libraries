@@ -75,60 +75,57 @@ constexpr const char* ARCH_WILDCARD = "*";
 constexpr std::array<const char*, 1> ARCH0_PACK_NAMES = {
     "hipkernel:gfx942_attention_unified_2d",
 };
-constexpr std::array<const char*, 53> ARCH0_KERNEL_NAMES = {
-    "attention_unified_2d.bf16_d128_g16_m2_bs16_t32_nw2_mw32_x11.gfx942",
-    "attention_unified_2d.bf16_d128_g16_m2_bs16_t32_nw4_mw32_x11.gfx942",
-    "attention_unified_2d.bf16_d128_g1_m2_bs16_t16_nw2_mw16_x00.gfx942",
-    "attention_unified_2d.bf16_d128_g1_m2_bs16_t32_nw2_mw32_x00.gfx942",
-    "attention_unified_2d.bf16_d128_g1_m2_bs16_t32_nw2_mw32_x11.gfx942",
-    "attention_unified_2d.bf16_d128_g1_m2_bs16_t32_nw4_mw16_x00.gfx942",
-    "attention_unified_2d.bf16_d128_g1_m2_bs16_t32_nw4_mw32_x11.gfx942",
-    "attention_unified_2d.bf16_d128_g2_m2_bs16_t32_nw2_mw32_x11.gfx942",
-    "attention_unified_2d.bf16_d128_g2_m2_bs16_t32_nw4_mw16_x00.gfx942",
-    "attention_unified_2d.bf16_d128_g2_m2_bs16_t32_nw4_mw32_x11.gfx942",
-    "attention_unified_2d.bf16_d128_g4_m2_bs16_t16_nw2_mw16_x00.gfx942",
-    "attention_unified_2d.bf16_d128_g4_m2_bs16_t32_nw2_mw32_x00.gfx942",
-    "attention_unified_2d.bf16_d128_g4_m2_bs16_t32_nw2_mw32_x11.gfx942",
-    "attention_unified_2d.bf16_d128_g4_m2_bs16_t32_nw4_mw32_x11.gfx942",
-    "attention_unified_2d.bf16_d128_g8_m2_bs16_t16_nw2_mw16_x00.gfx942",
-    "attention_unified_2d.bf16_d128_g8_m2_bs16_t32_nw2_mw32_x11.gfx942",
-    "attention_unified_2d.bf16_d128_g8_m2_bs16_t32_nw4_mw16_x00.gfx942",
-    "attention_unified_2d.bf16_d128_g8_m2_bs16_t32_nw4_mw32_x11.gfx942",
-    "attention_unified_2d.bf16_d64_g16_m2_bs16_t64_nw4_mw32_x11.gfx942",
-    "attention_unified_2d.bf16_d64_g1_m2_bs16_t64_nw2_mw16_x00.gfx942",
-    "attention_unified_2d.bf16_d64_g1_m2_bs16_t64_nw4_mw32_x00.gfx942",
-    "attention_unified_2d.bf16_d64_g1_m2_bs16_t64_nw4_mw32_x11.gfx942",
-    "attention_unified_2d.bf16_d64_g2_m2_bs16_t64_nw2_mw16_x00.gfx942",
-    "attention_unified_2d.bf16_d64_g2_m2_bs16_t64_nw4_mw32_x11.gfx942",
-    "attention_unified_2d.bf16_d64_g4_m2_bs16_t64_nw4_mw32_x11.gfx942",
-    "attention_unified_2d.bf16_d64_g8_m2_bs16_t64_nw2_mw16_x00.gfx942",
-    "attention_unified_2d.bf16_d64_g8_m2_bs16_t64_nw4_mw32_x11.gfx942",
-    "attention_unified_2d.bf16_d64_g8_m2_bs16_t64_nw8_mw32_x11.gfx942",
-    "attention_unified_2d.fp16_d128_g16_m2_bs16_t32_nw2_mw32_x11.gfx942",
-    "attention_unified_2d.fp16_d128_g16_m2_bs16_t32_nw4_mw32_x11.gfx942",
-    "attention_unified_2d.fp16_d128_g1_m2_bs16_t16_nw2_mw16_x00.gfx942",
-    "attention_unified_2d.fp16_d128_g1_m2_bs16_t32_nw2_mw32_x00.gfx942",
-    "attention_unified_2d.fp16_d128_g1_m2_bs16_t32_nw2_mw32_x11.gfx942",
-    "attention_unified_2d.fp16_d128_g1_m2_bs16_t32_nw4_mw32_x11.gfx942",
-    "attention_unified_2d.fp16_d128_g2_m2_bs16_t32_nw2_mw32_x11.gfx942",
-    "attention_unified_2d.fp16_d128_g2_m2_bs16_t32_nw4_mw16_x00.gfx942",
-    "attention_unified_2d.fp16_d128_g2_m2_bs16_t32_nw4_mw32_x11.gfx942",
-    "attention_unified_2d.fp16_d128_g4_m2_bs16_t16_nw2_mw16_x00.gfx942",
-    "attention_unified_2d.fp16_d128_g4_m2_bs16_t32_nw2_mw32_x11.gfx942",
-    "attention_unified_2d.fp16_d128_g4_m2_bs16_t32_nw4_mw32_x11.gfx942",
-    "attention_unified_2d.fp16_d128_g8_m2_bs16_t16_nw2_mw16_x00.gfx942",
-    "attention_unified_2d.fp16_d128_g8_m2_bs16_t32_nw2_mw32_x11.gfx942",
-    "attention_unified_2d.fp16_d128_g8_m2_bs16_t32_nw4_mw32_x11.gfx942",
-    "attention_unified_2d.fp16_d64_g16_m2_bs16_t64_nw4_mw32_x11.gfx942",
-    "attention_unified_2d.fp16_d64_g1_m2_bs16_t64_nw2_mw16_x00.gfx942",
-    "attention_unified_2d.fp16_d64_g1_m2_bs16_t64_nw4_mw16_x00.gfx942",
-    "attention_unified_2d.fp16_d64_g1_m2_bs16_t64_nw4_mw32_x11.gfx942",
-    "attention_unified_2d.fp16_d64_g2_m2_bs16_t64_nw2_mw16_x00.gfx942",
-    "attention_unified_2d.fp16_d64_g2_m2_bs16_t64_nw4_mw32_x11.gfx942",
-    "attention_unified_2d.fp16_d64_g4_m2_bs16_t64_nw4_mw32_x11.gfx942",
-    "attention_unified_2d.fp16_d64_g8_m2_bs16_t64_nw2_mw16_x00.gfx942",
-    "attention_unified_2d.fp16_d64_g8_m2_bs16_t64_nw4_mw32_x11.gfx942",
-    "attention_unified_2d.fp16_d64_g8_m2_bs16_t64_nw8_mw32_x11.gfx942",
+constexpr std::array<const char*, 50> ARCH0_KERNEL_NAMES = {
+    "attention_unified_2d.bf16_d128_g16_m2_bs16_t32_nw2_mw32_x11_f00000.gfx942",
+    "attention_unified_2d.bf16_d128_g16_m2_bs16_t32_nw4_mw32_x11_f00000.gfx942",
+    "attention_unified_2d.bf16_d128_g1_m2_bs16_t16_nw2_mw16_x00_f00000.gfx942",
+    "attention_unified_2d.bf16_d128_g1_m2_bs16_t32_nw2_mw32_x00_f00000.gfx942",
+    "attention_unified_2d.bf16_d128_g1_m2_bs16_t32_nw2_mw32_x11_f00000.gfx942",
+    "attention_unified_2d.bf16_d128_g1_m2_bs16_t32_nw4_mw32_x11_f00000.gfx942",
+    "attention_unified_2d.bf16_d128_g2_m2_bs16_t32_nw2_mw32_x11_f00000.gfx942",
+    "attention_unified_2d.bf16_d128_g2_m2_bs16_t32_nw4_mw16_x00_f00000.gfx942",
+    "attention_unified_2d.bf16_d128_g2_m2_bs16_t32_nw4_mw32_x11_f00000.gfx942",
+    "attention_unified_2d.bf16_d128_g4_m2_bs16_t16_nw2_mw16_x00_f00000.gfx942",
+    "attention_unified_2d.bf16_d128_g4_m2_bs16_t32_nw2_mw32_x00_f00000.gfx942",
+    "attention_unified_2d.bf16_d128_g4_m2_bs16_t32_nw2_mw32_x11_f00000.gfx942",
+    "attention_unified_2d.bf16_d128_g4_m2_bs16_t32_nw4_mw32_x11_f00000.gfx942",
+    "attention_unified_2d.bf16_d128_g8_m2_bs16_t16_nw2_mw16_x00_f00000.gfx942",
+    "attention_unified_2d.bf16_d128_g8_m2_bs16_t32_nw2_mw32_x11_f00000.gfx942",
+    "attention_unified_2d.bf16_d128_g8_m2_bs16_t32_nw4_mw16_x00_f00000.gfx942",
+    "attention_unified_2d.bf16_d128_g8_m2_bs16_t32_nw4_mw32_x11_f00000.gfx942",
+    "attention_unified_2d.bf16_d64_g16_m2_bs16_t64_nw4_mw32_x11_f00000.gfx942",
+    "attention_unified_2d.bf16_d64_g16_m2_bs16_t64_nw4_mw32_x11_f11111.gfx942",
+    "attention_unified_2d.bf16_d64_g1_m2_bs16_t64_nw2_mw16_x00_f00000.gfx942",
+    "attention_unified_2d.bf16_d64_g1_m2_bs16_t64_nw4_mw32_x11_f00000.gfx942",
+    "attention_unified_2d.bf16_d64_g1_m2_bs16_t64_nw4_mw32_x11_f11111.gfx942",
+    "attention_unified_2d.bf16_d64_g2_m2_bs16_t64_nw4_mw32_x11_f00000.gfx942",
+    "attention_unified_2d.bf16_d64_g2_m2_bs16_t64_nw4_mw32_x11_f11111.gfx942",
+    "attention_unified_2d.bf16_d64_g4_m2_bs16_t64_nw4_mw32_x11_f00000.gfx942",
+    "attention_unified_2d.bf16_d64_g4_m2_bs16_t64_nw4_mw32_x11_f11111.gfx942",
+    "attention_unified_2d.bf16_d64_g8_m2_bs16_t64_nw4_mw32_x11_f00000.gfx942",
+    "attention_unified_2d.bf16_d64_g8_m2_bs16_t64_nw4_mw32_x11_f11111.gfx942",
+    "attention_unified_2d.fp16_d128_g16_m2_bs16_t32_nw2_mw32_x11_f00000.gfx942",
+    "attention_unified_2d.fp16_d128_g16_m2_bs16_t64_nw4_mw32_x11_f10111.gfx942",
+    "attention_unified_2d.fp16_d128_g1_m2_bs16_t16_nw2_mw16_x00_f00000.gfx942",
+    "attention_unified_2d.fp16_d128_g1_m2_bs16_t32_nw2_mw32_x11_f00000.gfx942",
+    "attention_unified_2d.fp16_d128_g1_m2_bs16_t64_nw4_mw32_x11_f10111.gfx942",
+    "attention_unified_2d.fp16_d128_g2_m2_bs16_t32_nw2_mw32_x11_f00000.gfx942",
+    "attention_unified_2d.fp16_d128_g2_m2_bs16_t64_nw4_mw32_x11_f10111.gfx942",
+    "attention_unified_2d.fp16_d128_g4_m2_bs16_t32_nw2_mw32_x11_f00000.gfx942",
+    "attention_unified_2d.fp16_d128_g4_m2_bs16_t64_nw4_mw32_x11_f10111.gfx942",
+    "attention_unified_2d.fp16_d128_g8_m2_bs16_t32_nw2_mw32_x11_f00000.gfx942",
+    "attention_unified_2d.fp16_d128_g8_m2_bs16_t64_nw4_mw32_x11_f10111.gfx942",
+    "attention_unified_2d.fp16_d64_g16_m2_bs16_t64_nw4_mw32_x11_f00000.gfx942",
+    "attention_unified_2d.fp16_d64_g16_m2_bs16_t64_nw4_mw32_x11_f11111.gfx942",
+    "attention_unified_2d.fp16_d64_g1_m2_bs16_t64_nw2_mw16_x00_f00000.gfx942",
+    "attention_unified_2d.fp16_d64_g1_m2_bs16_t64_nw4_mw32_x11_f00000.gfx942",
+    "attention_unified_2d.fp16_d64_g1_m2_bs16_t64_nw4_mw32_x11_f11111.gfx942",
+    "attention_unified_2d.fp16_d64_g2_m2_bs16_t64_nw4_mw32_x11_f00000.gfx942",
+    "attention_unified_2d.fp16_d64_g2_m2_bs16_t64_nw4_mw32_x11_f11111.gfx942",
+    "attention_unified_2d.fp16_d64_g4_m2_bs16_t64_nw4_mw32_x11_f00000.gfx942",
+    "attention_unified_2d.fp16_d64_g4_m2_bs16_t64_nw4_mw32_x11_f11111.gfx942",
+    "attention_unified_2d.fp16_d64_g8_m2_bs16_t64_nw4_mw32_x11_f00000.gfx942",
+    "attention_unified_2d.fp16_d64_g8_m2_bs16_t64_nw4_mw32_x11_f11111.gfx942",
 };
 // clang-format on
 
@@ -254,7 +251,7 @@ TEST_F(TestGfx942AttentionUnified2DPacks, DeclaresTheConfiguredSdkVersion)
 
 TEST_F(TestGfx942AttentionUnified2DPacks, ExposesTheConfiguredKnobs)
 {
-    ASSERT_EQ(_set->engine.knobs.size(), 5U);
+    ASSERT_EQ(_set->engine.knobs.size(), 10U);
     EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "tile_size"),
               _set->engine.knobs.end());
     EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "num_warps"),
@@ -265,6 +262,20 @@ TEST_F(TestGfx942AttentionUnified2DPacks, ExposesTheConfiguredKnobs)
               _set->engine.knobs.end());
     EXPECT_NE(
         std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "use_transposed_qk_32x32"),
+        _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "use_k_sliced_ring"),
+              _set->engine.knobs.end());
+    EXPECT_NE(
+        std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "use_q_direct_global"),
+        _set->engine.knobs.end());
+    EXPECT_NE(
+        std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "use_conflict_free_v_store"),
+        _set->engine.knobs.end());
+    EXPECT_NE(
+        std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "use_transposed_mask_limit"),
+        _set->engine.knobs.end());
+    EXPECT_NE(
+        std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "use_transposed_invariant_hoist"),
         _set->engine.knobs.end());
 }
 

@@ -8,6 +8,7 @@
 #include <functional>
 #include <limits>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -650,6 +651,8 @@ TEST(TestGfx942AttentionUnified2DMatchers, KernelMatchDeclinesACandidateWithAnUn
          [](KernelSpec& s) { s.tileSize = 48; });
     with("transposed QK without 32x32x8", [](KernelSpec& s) { s.useMfma32x32x8 = 0; });
     with("a flag of 2", [](KernelSpec& s) { s.useMfma32x32x8 = 2; });
+    with("a K ring flag of 2", [](KernelSpec& s) { s.useKSlicedRing = 2; });
+    with("a mask limit flag of -1", [](KernelSpec& s) { s.useTransposedMaskLimit = -1; });
     with("mask 7", [](KernelSpec& s) { s.maskType = 7; });
     with("ratio 0", [](KernelSpec& s) { s.numQueriesPerKv = 0; });
     with("ratio 17", [](KernelSpec& s) { s.numQueriesPerKv = 17; });
@@ -810,6 +813,63 @@ TEST(TestGfx942AttentionUnified2DMatchers, ScoreDependsOnlyOnTheGeometryAndHeadS
     other.dtype = "FP16";
     other.numQueriesPerKv = 8;
     EXPECT_EQ(scoreOf(GraphSpec{}, other), scoreOf(GraphSpec{}, geometry(64, 4, 16)));
+}
+
+/// rocKE's production stack (the mask limit and the invariant hoist on) ranks above the
+/// head size's default geometry, whatever geometry carries it: bf16 D128's production kernel
+/// is 2 warps x 32 rows at T64, not the T32 default.
+TEST(TestGfx942AttentionUnified2DMatchers, ScoreRanksTheProductionStackAboveTheDefault)
+{
+    EXPECT_EQ(scoreOf(GraphSpec{}, KernelSpec{}), 2.0);
+
+    KernelSpec d128Production;
+    d128Production.tileSize = 64;
+    d128Production.useTransposedMaskLimit = 1;
+    d128Production.useTransposedInvariantHoist = 1;
+    EXPECT_EQ(scoreOf(GraphSpec{}, d128Production), 3.0);
+
+    GraphSpec d64;
+    d64.headSize = 64;
+    KernelSpec d64Production = d64DefaultKernel();
+    d64Production.useKSlicedRing = 1;
+    d64Production.useQDirectGlobal = 1;
+    d64Production.useConflictFreeVStore = 1;
+    d64Production.useTransposedMaskLimit = 1;
+    d64Production.useTransposedInvariantHoist = 1;
+    EXPECT_EQ(scoreOf(d64, d64Production), 3.0);
+    EXPECT_LT(scoreOf(d64, d64DefaultKernel()), scoreOf(d64, d64Production));
+
+    // One half of the pair is not the stack.
+    KernelSpec half = d64DefaultKernel();
+    half.useTransposedMaskLimit = 1;
+    EXPECT_LT(scoreOf(d64, half), 2.0);
+}
+
+/// Alternatives that differ only in a codegen flag still get distinct scores below the default,
+/// so the descriptor-id tie-break never decides between them.
+TEST(TestGfx942AttentionUnified2DMatchers, ScoreSeparatesAlternativesThatDifferOnlyInTheCodegenStack)
+{
+    std::set<double> scores;
+    int variants = 0;
+    for(int bits = 0; bits < 32; ++bits)
+    {
+        KernelSpec spec = geometry(64, 8, 32, 1, 1);
+        spec.useKSlicedRing = bits & 1;
+        spec.useQDirectGlobal = (bits >> 1) & 1;
+        spec.useConflictFreeVStore = (bits >> 2) & 1;
+        spec.useTransposedMaskLimit = (bits >> 3) & 1;
+        spec.useTransposedInvariantHoist = (bits >> 4) & 1;
+        if(spec.useTransposedMaskLimit && spec.useTransposedInvariantHoist)
+        {
+            continue; // the production stack, ranked above
+        }
+        ++variants;
+        const double score = scoreOf(GraphSpec{}, spec);
+        EXPECT_GT(score, 0.0);
+        EXPECT_LT(score, 1.0);
+        scores.insert(score);
+    }
+    EXPECT_EQ(scores.size(), static_cast<std::size_t>(variants));
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

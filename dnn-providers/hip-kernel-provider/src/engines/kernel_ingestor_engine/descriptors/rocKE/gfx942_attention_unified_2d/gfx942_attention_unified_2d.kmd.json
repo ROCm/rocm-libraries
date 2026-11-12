@@ -56,6 +56,31 @@
       "name": "use_transposed_qk_32x32",
       "type": "int",
       "default_value": 1
+    },
+    {
+      "name": "use_k_sliced_ring",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_q_direct_global",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_conflict_free_v_store",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_transposed_mask_limit",
+      "type": "int",
+      "default_value": 0
+    },
+    {
+      "name": "use_transposed_invariant_hoist",
+      "type": "int",
+      "default_value": 0
     }
   ]
 }

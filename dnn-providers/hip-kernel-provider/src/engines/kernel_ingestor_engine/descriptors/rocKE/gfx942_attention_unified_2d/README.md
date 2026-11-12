@@ -11,10 +11,14 @@ plan's workspace (`packs/Gfx942AttentionUnified2DGeometry.hpp`).
 ## Coverage
 
 - Architecture: gfx942 only.
-- Variants: 53 (all `kernel_source.kind = rocke`, compiled at pack time). The selection is
-  `variant_reduce`'s cut of a 100-variant full space (20 cells, each at five geometries): every
-  cell keeps its default geometry plus the alternatives a correctness-checked gfx942 sweep
-  measured as needed, so a cell ships one to five geometries.
+- Variants: 50 (all `kernel_source.kind = rocke`, compiled at pack time). The selection is
+  `variant_reduce`'s cut of a 120-variant full space (20 cells, each at five geometries plus
+  rocKE's production stack for its dtype and head size): every cell keeps its default
+  geometry plus the alternatives a correctness-checked gfx942 sweep measured as needed. The
+  production stack (mask limit, hoist, conflict-free V stores, K ring; direct-global Q at D64)
+  is what rocKE's own dispatcher builds for a long prefill; it ships in every fp16 cell and
+  every bf16 D64 cell, and only the default geometry ships at bf16 D128, where it lost on
+  every sweep graph.
 - Cells: head size x dtype x GQA ratio. The kernels read the head counts as kernel arguments
   and bake only the ratio (KMD `num_queries_per_kv`), so one variant serves every head pair of
   its ratio.
@@ -42,10 +46,10 @@ plan's workspace (`packs/Gfx942AttentionUnified2DGeometry.hpp`).
 
 | File | In | Notes |
 |---|---|---|
-| `artifacts/gfx942_attention_unified_2d.kdp.json` | DVC | 0.07 MB, the 53 variants. Pointer: `artifacts.dvc` (one artifact for the folder) |
+| `artifacts/gfx942_attention_unified_2d.kdp.json` | DVC | 0.07 MB, the 50 variants. Pointer: `artifacts.dvc` (one artifact for the folder) |
 | `gfx942_attention_unified_2d.kmd.json` | git | variant fields |
 | `gfx942_attention_unified_2d.udd.json` | git | dispatch symbol |
-| `gfx942_attention_unified_2d.ued.json` | git | engine, knobs `tile_size`, `num_warps`, `block_m_per_warp`, `use_mfma_32x32x8`, `use_transposed_qk_32x32` |
+| `gfx942_attention_unified_2d.ued.json` | git | engine, knobs `tile_size`, `num_warps`, `block_m_per_warp`, `use_mfma_32x32x8`, `use_transposed_qk_32x32`, `use_k_sliced_ring`, `use_q_direct_global`, `use_conflict_free_v_store`, `use_transposed_mask_limit`, `use_transposed_invariant_hoist` |
 | `gfx942_attention_unified_2d.uhd.json` | git | native selector |
 | `kernel_dtype_matches_graph.umd.json` | git | dtype matcher |
 

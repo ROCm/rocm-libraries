@@ -104,7 +104,7 @@ inline std::optional<BoundTokens> matchGraph(const GraphSpec& spec)
 /// The fields the engine's KMD declares, as a completed catalog record carries them. The
 /// defaults are the D128 cells' default kernel for the default graph (bf16, D128, GQA ratio
 /// 4 from Hq 8 / Hkv 2, bottom-right causal, block 16, transposed 32x32x8, 2 warps x 32
-/// rows, T32).
+/// rows, T32, none of the five codegen stack fields on).
 struct KernelSpec
 {
     std::string dtype = "BF16";
@@ -118,6 +118,11 @@ struct KernelSpec
     int64_t blockMPerWarp = 32;
     int64_t useMfma32x32x8 = 1;
     int64_t useTransposedQk32x32 = 1;
+    int64_t useKSlicedRing = 0;
+    int64_t useQDirectGlobal = 0;
+    int64_t useConflictFreeVStore = 0;
+    int64_t useTransposedMaskLimit = 0;
+    int64_t useTransposedInvariantHoist = 0;
     /// The descriptor id's final byte. Only the ranking cases vary it.
     unsigned idByte = 0xa1;
 };
@@ -158,6 +163,11 @@ inline hipdnn_plugin_sdk::ingestor::MetadataValues metadataOf(const KernelSpec& 
         {std::string("block_m_per_warp"), spec.blockMPerWarp},
         {std::string("use_mfma_32x32x8"), spec.useMfma32x32x8},
         {std::string("use_transposed_qk_32x32"), spec.useTransposedQk32x32},
+        {std::string("use_k_sliced_ring"), spec.useKSlicedRing},
+        {std::string("use_q_direct_global"), spec.useQDirectGlobal},
+        {std::string("use_conflict_free_v_store"), spec.useConflictFreeVStore},
+        {std::string("use_transposed_mask_limit"), spec.useTransposedMaskLimit},
+        {std::string("use_transposed_invariant_hoist"), spec.useTransposedInvariantHoist},
     };
 }
 

@@ -119,9 +119,10 @@ TEST(TestGfx942AttentionUnified2DCatalogTiles, EveryShippedKernelsGeometryIsOneT
     EXPECT_GT(checked, 0U) << "the loaded set holds no kernels to check";
 }
 
-/// The scorer ranks the head size's default geometry first: transposed 32x32x8 at 32 rows per
-/// warp, with 4 warps and a 64-token tile at D64 and 2 warps and a 32-token tile at D128.
-/// Every (head size, ratio, dtype) cell must ship it, or that ranking prefers nothing.
+/// The scorer ranks the head size's default geometry below the production stack: transposed
+/// 32x32x8 at 32 rows per warp, with 4 warps and a 64-token tile at D64 and 2 warps and a
+/// 32-token tile at D128, none of the codegen stack on. Every (head size, ratio, dtype) cell
+/// must ship it, as the floor the production stack is measured against.
 TEST(TestGfx942AttentionUnified2DCatalogTiles, EveryCellShipsItsHeadSizesDefaultGeometry)
 {
     using Cell = std::tuple<int64_t, int64_t, std::string>;
@@ -138,12 +139,14 @@ TEST(TestGfx942AttentionUnified2DCatalogTiles, EveryCellShipsItsHeadSizesDefault
             const auto blockMPerWarp = integerField(kernel, "block_m_per_warp");
             const auto useMfma32x32x8 = integerField(kernel, "use_mfma_32x32x8");
             const auto useTransposed = integerField(kernel, "use_transposed_qk_32x32");
+            const auto maskLimit = integerField(kernel, "use_transposed_mask_limit");
+            const auto hoist = integerField(kernel, "use_transposed_invariant_hoist");
             ASSERT_TRUE(headSize && ratio && dtype && tileSize && numWarps && blockMPerWarp
-                        && useMfma32x32x8 && useTransposed)
+                        && useMfma32x32x8 && useTransposed && maskLimit && hoist)
                 << "kernel '" << kernel.name << "' does not carry its cell and geometry";
 
             const bool isDefault = *useMfma32x32x8 == 1 && *useTransposed == 1
-                                   && *blockMPerWarp == 32
+                                   && *blockMPerWarp == 32 && *maskLimit == 0 && *hoist == 0
                                    && ((*headSize == 64 && *tileSize == 64 && *numWarps == 4)
                                        || (*headSize == 128 && *tileSize == 32 && *numWarps == 2));
             auto& entry = hasDefault[Cell{*headSize, *ratio, *dtype}];
@@ -156,6 +159,53 @@ TEST(TestGfx942AttentionUnified2DCatalogTiles, EveryCellShipsItsHeadSizesDefault
         const auto& [headSize, ratio, dtype] = cell;
         EXPECT_TRUE(found) << "the head_size " << headSize << ", ratio " << ratio << ", " << dtype
                            << " cell ships no kernel of its head size's default geometry";
+    }
+}
+
+/// rocKE's production stack (the mask limit and invariant hoist, with conflict-free V stores
+/// and, where rocKE uses it, the K ring) wins every fp16 cell and every bf16 D64 cell of the
+/// stage 6 sweep, so each of those cells ships it; at bf16 D128 the default geometry beat it
+/// on every graph, so that stack is left out. A catalog that dropped one would regress the
+/// ground-truth rows it serves to the slower default geometry. A stack is its flags
+/// together: the mask limit and the hoist are on or off as a pair, and the K ring needs
+/// conflict-free V stores (the spec's own validation).
+TEST(TestGfx942AttentionUnified2DCatalogTiles, EveryCellRockeServesWithItsProductionStackShipsIt)
+{
+    using Cell = std::tuple<int64_t, int64_t, std::string>;
+    std::map<Cell, bool> hasProduction;
+    for(const auto& pack : loadedSet(GFX942_ATTENTION_UNIFIED_2D_ENGINE_NAME).packs)
+    {
+        for(const auto& kernel : pack.kernels)
+        {
+            const auto headSize = integerField(kernel, "head_size");
+            const auto ratio = integerField(kernel, "num_queries_per_kv");
+            const auto dtype = stringField(kernel, "dtype");
+            const auto ring = integerField(kernel, "use_k_sliced_ring");
+            const auto qDirect = integerField(kernel, "use_q_direct_global");
+            const auto cfvst = integerField(kernel, "use_conflict_free_v_store");
+            const auto maskLimit = integerField(kernel, "use_transposed_mask_limit");
+            const auto hoist = integerField(kernel, "use_transposed_invariant_hoist");
+            ASSERT_TRUE(headSize && ratio && dtype && ring && qDirect && cfvst && maskLimit && hoist)
+                << "kernel '" << kernel.name << "' does not carry its codegen stack";
+
+            EXPECT_EQ(*maskLimit, *hoist)
+                << "kernel '" << kernel.name << "' turns on one of the mask limit and the hoist";
+            EXPECT_TRUE(*ring == 0 || *cfvst == 1)
+                << "kernel '" << kernel.name << "' has the K ring without conflict-free V stores";
+            auto& entry = hasProduction[Cell{*headSize, *ratio, *dtype}];
+            entry = entry || *maskLimit == 1;
+        }
+    }
+    ASSERT_FALSE(hasProduction.empty()) << "the loaded set holds no kernels";
+    for(const auto& [cell, found] : hasProduction)
+    {
+        const auto& [headSize, ratio, dtype] = cell;
+        const bool rockeServesProduction = dtype == "FP16" || headSize == 64;
+        if(rockeServesProduction)
+        {
+            EXPECT_TRUE(found) << "the head_size " << headSize << ", ratio " << ratio << ", "
+                               << dtype << " cell ships no production-stack kernel";
+        }
     }
 }
 

@@ -15,6 +15,11 @@
     "num_warps",
     "block_m_per_warp",
     "use_mfma_32x32x8",
-    "use_transposed_qk_32x32"
+    "use_transposed_qk_32x32",
+    "use_k_sliced_ring",
+    "use_q_direct_global",
+    "use_conflict_free_v_store",
+    "use_transposed_mask_limit",
+    "use_transposed_invariant_hoist"
   ]
 }
