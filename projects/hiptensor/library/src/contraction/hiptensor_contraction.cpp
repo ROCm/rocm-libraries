@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 #include <algorithm>
+#include <cstdint>
 #include <initializer_list>
 #include <set>
 #include <unordered_map>
@@ -143,6 +144,32 @@ static bool isPacked(std::vector<std::size_t> const& lengths,
         packedStride *= lengths[i];
     }
     return true;
+}
+
+// The number of bytes from a tensor's first element to the end of its
+// last one.
+static std::size_t byteSpan(hiptensorTensorDescriptor_t const desc)
+{
+    auto const lengths = hiptensor::getTensorLengths(desc);
+    auto const strides = hiptensor::getTensorStrides(desc);
+    if(hiptensor::elementsFromLengths(lengths) == 0)
+    {
+        return 0;
+    }
+    std::size_t lastPosition = 0;
+    for(std::size_t i = 0; i < lengths.size(); i++)
+    {
+        lastPosition += (lengths[i] - 1) * strides[i];
+    }
+    return (lastPosition + 1) * hiptensor::hiptensorDataTypeSize(desc->mType);
+}
+
+// Two byte ranges overlap when each one begins before the other ends.
+static bool overlaps(void const* c, std::size_t sizeC, void const* d, std::size_t sizeD)
+{
+    auto const beginC = reinterpret_cast<std::uintptr_t>(c);
+    auto const beginD = reinterpret_cast<std::uintptr_t>(d);
+    return beginC < beginD + sizeD && beginD < beginC + sizeC;
 }
 
 // The complex path sizes its buffers by the number of elements and doesn't
@@ -530,6 +557,18 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
     {
         auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
         snprintf(msg, sizeof(msg), "In-place contraction needs C and D to have the same strides");
+        logger->logError("hiptensorContraction", msg);
+        return errorCode;
+    }
+
+    // A C that shares only part of D's memory is read after the kernel
+    // has overwritten it. C may share memory with D only as the same
+    // buffer.
+    if(plan->mOpDesc->mDescC != nullptr && C != D
+       && overlaps(C, byteSpan(plan->mOpDesc->mDescC), D, byteSpan(plan->mOpDesc->mDescD)))
+    {
+        auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
+        snprintf(msg, sizeof(msg), "C and D must not overlap unless they are the same buffer");
         logger->logError("hiptensorContraction", msg);
         return errorCode;
     }
@@ -1711,6 +1750,18 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
     {
         auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
         snprintf(msg, sizeof(msg), "In-place contraction needs D and E to have the same strides");
+        logger->logError("hiptensorContractTrinary", msg);
+        return errorCode;
+    }
+
+    // A D that shares only part of E's memory is read after
+    // the kernel has overwritten it. D may share memory with E only
+    // as the same buffer.
+    if(plan->mOpDesc->mDescD != nullptr && D != E
+       && overlaps(D, byteSpan(plan->mOpDesc->mDescD), E, byteSpan(plan->mOpDesc->mDescE)))
+    {
+        auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
+        snprintf(msg, sizeof(msg), "D and E must not overlap unless they are the same buffer");
         logger->logError("hiptensorContractTrinary", msg);
         return errorCode;
     }

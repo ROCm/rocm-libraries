@@ -315,12 +315,12 @@ HIPTENSOR_EXPORT hiptensorStatus_t hiptensorDestroyPlan(hiptensorPlan_t plan);
 //! @param[in] A Pointer to tensor A data in GPU-accessible memory. Must not overlap with elements written to D.
 //! @param[in] B Pointer to tensor B data in GPU-accessible memory. Must not overlap with elements written to D.
 //! @param[in] beta Scaling factor for C. Data type determined by `descCompute`. Pointer to host memory.
-//! @param[in] C Pointer to tensor C data in GPU-accessible memory. May be the same buffer as D only when C and D have the same layout.
+//! @param[in] C Pointer to tensor C data in GPU-accessible memory. May be the same buffer as D only when C and D have the same layout, and must not overlap D in any other way.
 //! @param[out] D Pointer to tensor D data in GPU-accessible memory.
 //! @param[out] workspace Optional parameter (can be `NULL`). Additional device memory workspace for optimizations.
 //! @param[in] workspaceSize Size of the `workspace` array in bytes.
 //! @param[in] stream HIP stream for all computations.
-//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When the operation isn't supported, or when C and D are the same buffer with different layouts.
+//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When the operation isn't supported, or when C and D are the same buffer with different layouts or overlap in any other way.
 //! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When input data is invalid (typically user error).
 //! @retval `HIPTENSOR_STATUS_SUCCESS` When the operation completes successfully.
 //! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When the handle isn't initialized.
@@ -399,13 +399,13 @@ HIPTENSOR_EXPORT hiptensorStatus_t
 //! @param[in] B Pointer to tensor B data in GPU-accessible memory.
 //! @param[in] C Pointer to tensor C data in GPU-accessible memory.
 //! @param[in] beta Scaling factor for D. Pointer to host memory.
-//! @param[in] D Pointer to tensor D data in GPU-accessible memory. May be the same buffer as E only when D and E have the same layout.
+//! @param[in] D Pointer to tensor D data in GPU-accessible memory. May be the same buffer as E only when D and E have the same layout, and must not overlap E in any other way.
 //! @param[out] E Pointer to tensor E data in GPU-accessible memory.
 //! @param[in] workspace Device memory workspace (must hold at least the intermediate tensor).
 //! @param[in] workspaceSize Size of the `workspace` array in bytes.
 //! @param[in] stream HIP stream for all computations.
 //! @retval `HIPTENSOR_STATUS_SUCCESS` When the operation completes successfully.
-//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When the operation isn't supported, or when D and E are the same buffer with different layouts.
+//! @retval `HIPTENSOR_STATUS_NOT_SUPPORTED` When the operation isn't supported, or when D and E are the same buffer with different layouts or overlap in any other way.
 //! @retval `HIPTENSOR_STATUS_INVALID_VALUE` When input data is invalid.
 //! @retval `HIPTENSOR_STATUS_NOT_INITIALIZED` When the handle isn't initialized.
 //! @retval `HIPTENSOR_STATUS_ARCH_MISMATCH` When the plan was created for a different device.

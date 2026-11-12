@@ -164,6 +164,7 @@ namespace
         std::optional<Tensor> c; // absent: scale contraction
         Tensor                d;
         bool                  inPlace = false; // C and D are one buffer
+        std::optional<int64_t> cOffset; // C starts this many elements after D, in D's buffer
         bool                  negateC = false; // C is read through HIPTENSOR_OP_NEG
         hiptensorAlgo_t       algo    = HIPTENSOR_ALGO_DEFAULT;
     };
@@ -403,21 +404,34 @@ namespace
             {
                 upload(&dT, p.third->data);
             }
-            if(p.c && !p.inPlace)
+            if(p.c && !p.inPlace && !p.cOffset)
             {
                 upload(&dC, p.c->data);
             }
             // NaN in D: an element the kernel never writes cannot pass the check.
-            // In place, D starts with C's values.
-            upload(&dD,
-                   p.inPlace ? p.c->data
-                             : std::vector<float>(sizeD, std::numeric_limits<float>::quiet_NaN()));
+            // In place, D starts with C's values. With an offset, C follows NaN in D's buffer.
+            std::vector<float> initialD(sizeD, std::numeric_limits<float>::quiet_NaN());
+            if(p.inPlace)
+            {
+                initialD = p.c->data;
+            }
+            if(p.cOffset)
+            {
+                initialD.assign(*p.cOffset * p.d.components,
+                                std::numeric_limits<float>::quiet_NaN());
+                initialD.insert(initialD.end(), p.c->data.begin(), p.c->data.end());
+            }
+            upload(&dD, initialD);
             if(ws > 0)
             {
                 EXPECT_EQ(hipMalloc(&dW, ws), hipSuccess);
             }
 
             void* added = p.inPlace ? dD : dC;
+            if(p.cOffset)
+            {
+                added = static_cast<float*>(dD) + *p.cOffset * p.d.components;
+            }
             if(p.third)
             {
                 r.status = hiptensorContractTrinary(
@@ -934,6 +948,26 @@ TEST_F(ContractionCheckTest, ComplexOverlappingStrides)
     expectRefused(mHandle, p, HIPTENSOR_STATUS_NOT_SUPPORTED);
 }
 
+// C begins one element after D in the same buffer: the kernel would read
+// elements of C that it has already overwritten.
+TEST_F(ContractionCheckTest, COverlapsD)
+{
+    auto const ext = extents(false);
+    auto       p   = bilinear(ext, kCanonical, kCanonical, kCanonical, kCanonical);
+    p.cOffset      = 1;
+    expectRefused(mHandle, p, HIPTENSOR_STATUS_NOT_SUPPORTED);
+}
+
+// C begins where D ends: one buffer, but no shared element.
+TEST_F(ContractionCheckTest, CFollowsD)
+{
+    auto const ext      = extents(false);
+    auto const separate = bilinear(ext, kCanonical, kCanonical, kCanonical, kCanonical);
+    auto       p        = separate;
+    p.cOffset           = p.d.span;
+    expectCorrect(mHandle, ext, p, separate);
+}
+
 // Trinary: D must have E's modes. Here D lacks n.
 TEST_F(ContractionCheckTest, TrinaryDLacksMode)
 {
@@ -986,6 +1020,14 @@ TEST_F(ContractionCheckTest, TrinaryComplexInPlaceSameLayout)
     auto outOfPlace    = p;
     outOfPlace.inPlace = false;
     expectCorrect(mHandle, ext, p, outOfPlace);
+}
+
+TEST_F(ContractionCheckTest, TrinaryDOverlapsE)
+{
+    auto const ext = extents(false);
+    auto       p   = trinary(ext, kTrinaryCanonical);
+    p.cOffset      = 1;
+    expectRefused(mHandle, p, HIPTENSOR_STATUS_NOT_SUPPORTED);
 }
 
 // Trinary: the complex path does not use D's own layout.
