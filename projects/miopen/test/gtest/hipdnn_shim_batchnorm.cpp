@@ -1604,6 +1604,38 @@ TEST(GPU_HipdnnShimBNTuning_FP32, FindEnforceUnderNonePolicyMatchesMiopen)
     }
 }
 
+// The shim declines a Search handle only under the MIOPEN_FIND_ENFORCE values that
+// write or clean the perf db. Under SEARCH, here also spelled as its number 3, both
+// MIOpen and the provider search, so the call is served and searches. Each value
+// gets a handle of its own, so the second cannot reuse the first one's invoker or
+// plan, and both perf dbs are off, so neither can load a record.
+TEST(GPU_HipdnnShimBNTuning_FP32, SearchPolicyUnderFindEnforceSearchIsServed)
+{
+    const ScopedEnvironment<bool> warn_search(MIOPEN_WARN_SEARCH, true);
+    const ScopedEnvironment<bool> no_user_db(MIOPEN_DEBUG_DISABLE_USER_DB, true);
+    const ScopedEnvironment<bool> no_system_db(MIOPEN_DEBUG_DISABLE_SYSTEM_DB, true);
+
+    for(const char* value : {"SEARCH", "3"})
+    {
+        SCOPED_TRACE(value);
+        const ScopedFindEnforce find_enforce(value);
+
+        hs::Owned<miopenHandle_t, miopenDestroy> owned_handle;
+        ASSERT_EQ(miopenCreateWithStream(&owned_handle.handle, get_handle().GetStream()),
+                  miopenStatusSuccess);
+        auto&& handle = miopen::deref(owned_handle.handle);
+        const ScopedHandleTuningPolicy policy(handle, miopenTuningPolicySearch);
+
+        TrainData d;
+        const auto result = TrainUnderPolicy(handle, d, miopenBNSpatial, SearchCase());
+        if(ExpectServed("search_policy_find_enforce_" + std::string(value) + "_train", result))
+        {
+            EXPECT_TRUE(Searched(result)) << result.logged;
+            CheckTrain(handle, d, true, false);
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Gaps: MIOpen serves these, the hipDNN path declines them
 
@@ -1643,14 +1675,15 @@ TEST(GPU_HipdnnShimBNGaps_FP32, DbUpdatePolicyIsDeclined)
 // None on its handle whenever the variable is set, so the variable would win
 // there. Under DB_CLEAN the forwarded call would drop the perf-db entry MIOpen
 // tunes, so the shim declines it. DB_UPDATE and SEARCH_DB_UPDATE are declined the
-// same way.
+// same way. DB_CLEAN runs every path; the others run training only, in spellings
+// MIOpen also accepts: lower case, and the action's number (5 is DB_CLEAN).
 TEST(GPU_HipdnnShimBNGaps_FP32, SearchPolicyUnderFindEnforceIsDeclined)
 {
     auto&& handle = get_handle();
     const ScopedHandleTuningPolicy policy(handle, miopenTuningPolicySearch);
-    const ScopedFindEnforce find_enforce("DB_CLEAN");
     const char* reason = "MIOPEN_FIND_ENFORCE";
 
+    const ScopedFindEnforce find_enforce("DB_CLEAN");
     {
         SCOPED_TRACE("train");
         TrainData d;
@@ -1669,6 +1702,18 @@ TEST(GPU_HipdnnShimBNGaps_FP32, SearchPolicyUnderFindEnforceIsDeclined)
         const auto result = InferUnderPolicy(handle, d, false);
         if(hs::RecordGapOutcome("find_enforce_db_clean_infer", result, reason))
             CheckInferWithoutEstimates(handle, d);
+    }
+
+    const std::pair<const char*, const char*> others[] = {
+        {"db_update", "DB_UPDATE"}, {"search_db_update", "search_db_update"}, {"5", "5"}};
+    for(const auto& [name, value] : others)
+    {
+        SCOPED_TRACE(value);
+        const ScopedFindEnforce other(value);
+        TrainData d;
+        if(hs::RecordGapOutcome(
+               "find_enforce_" + std::string(name) + "_train", TrainUnderPolicy(handle, d), reason))
+            CheckTrain(handle, d, true, false);
     }
 }
 
