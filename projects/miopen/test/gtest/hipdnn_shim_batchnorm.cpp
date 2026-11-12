@@ -8,10 +8,13 @@
 // the plan key, running stats updated in place, null save and running pointers,
 // inference without estimated stats, per-activation mode, clipped activations,
 // backward without saved stats, and the calls the hipDNN path declines while
-// MIOpen serves them. Each of those records whether the call was served so the
-// parity harness can pin the expected divergences. The rest record the status,
-// for problems both modes must fail the same way: alpha/beta other than 1/0, and
-// problems no MIOpen solver takes.
+// MIOpen serves them. Most of those record whether the call was served, so the
+// parity harness can pin the expected divergences. The plan-key, in-place and V2
+// activation tests require the call to be served. The rest record the status,
+// for problems both modes must fail the same way: alpha/beta other than 1/0,
+// tensors MIOpen rejects as BadParm, and problems no MIOpen solver takes. The
+// declined-problem test runs only with forwarding on, and checks the reason the
+// hipDNN path gives for problems it does not forward.
 //
 // Not covered, because MIOpen itself has no defined behavior to compare with:
 // null alpha/beta pointers (MIOpen dereferences them), null dscale/dbias on
