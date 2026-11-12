@@ -36,10 +36,13 @@ public:
     /// @p maxRepackWorkspaceBytes bounds the repack workspace of a plan (convGemmCalls); tests
     /// lower it to exercise image slicing on small shapes. @p tf32 lets every fp32 GEMM run as
     /// TF32 where the backend can (GemmCall::tf32), and declines convolutions with no fp32 GEMM:
-    /// the builder of a TF32 engine (ConvTf32.hpp).
+    /// the builder of a TF32 engine (ConvTf32.hpp). @p reducedPrecisionReduction builds only
+    /// reducedPrecisionGemmCalls plans, and only while the switch is set: the builder of a
+    /// reduced-precision-reduction engine (ConvReducedPrecision.hpp).
     explicit ConvGemmPlanBuilder(PlanFactory factory,
                                  size_t maxRepackWorkspaceBytes = MAX_REPACK_WORKSPACE_BYTES,
-                                 bool tf32 = false);
+                                 bool tf32 = false,
+                                 bool reducedPrecisionReduction = false);
 
     bool isApplicable(
         const HipdnnEnginePluginHandle& handle,
@@ -66,6 +69,7 @@ private:
     PlanFactory _factory;
     size_t _maxRepackWorkspaceBytes;
     bool _tf32;
+    bool _reducedPrecisionReduction;
 };
 
 } // namespace hipblaslt_plugin

@@ -58,12 +58,14 @@ constexpr const char* MAP_FILE = "hip_kernel_provider_conv_coverage_map.json";
 constexpr const char* MAP_OUT_ENV = "HIPKERNELPROVIDER_CONV_COVERAGE_MAP_OUT";
 constexpr std::string_view HIP_PREFIX = "hipkernel:CONV_";
 constexpr std::string_view NAIVE_PREFIX = "hipkernel:CONV_NAIVE_";
-constexpr std::array<const char*, 4> BLAS_ENGINES = {"ROCBLAS_CONV_ENGINE",
+constexpr std::array<const char*, 6> BLAS_ENGINES = {"ROCBLAS_CONV_ENGINE",
                                                      "HIPBLASLT_CONV_ENGINE",
                                                      "ROCBLAS_CONV_TF32_ENGINE",
-                                                     "HIPBLASLT_CONV_TF32_ENGINE"};
+                                                     "HIPBLASLT_CONV_TF32_ENGINE",
+                                                     "ROCBLAS_CONV_RPR_ENGINE",
+                                                     "HIPBLASLT_CONV_RPR_ENGINE"};
 // The engines this census can name: the conv group and the explicit-GEMM engines.
-constexpr std::array<const char*, 28> KNOWN_ENGINES = {"hipkernel:CONV_NAIVE_FWD",
+constexpr std::array<const char*, 30> KNOWN_ENGINES = {"hipkernel:CONV_NAIVE_FWD",
                                                        "hipkernel:CONV_NAIVE_BWD",
                                                        "hipkernel:CONV_NAIVE_WRW",
                                                        "hipkernel:CONV_DEPTHWISE_VALU_FWD",
@@ -90,7 +92,9 @@ constexpr std::array<const char*, 28> KNOWN_ENGINES = {"hipkernel:CONV_NAIVE_FWD
                                                        "ROCBLAS_CONV_ENGINE",
                                                        "HIPBLASLT_CONV_ENGINE",
                                                        "ROCBLAS_CONV_TF32_ENGINE",
-                                                       "HIPBLASLT_CONV_TF32_ENGINE"};
+                                                       "HIPBLASLT_CONV_TF32_ENGINE",
+                                                       "ROCBLAS_CONV_RPR_ENGINE",
+                                                       "HIPBLASLT_CONV_RPR_ENGINE"};
 
 enum class Tier
 {
