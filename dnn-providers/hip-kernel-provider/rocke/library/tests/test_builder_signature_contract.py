@@ -349,6 +349,8 @@ REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "kernels.common.conv_direct_fwd_wmma.DirectFwdWmmaSpec": ("problem",),
     "kernels.common.conv_fwd_small_wmma.FwdSmallcWmmaSpec": ("problem",),
     "kernels.common.conv_fwd_small_wmma.FwdSmallkWmmaSpec": ("problem",),
+    "kernels.common.conv_fwd_small_mfma.FwdSmallcMfmaSpec": ("problem",),
+    "kernels.common.conv_fwd_small_mfma.FwdSmallkMfmaSpec": ("problem",),
     "kernels.common.conv_direct_dw_fwd_wmma.DwFwdWmmaSpec": ("problem",),
     "kernels.common.conv_direct_fwd_gstream_wmma.FwdGstreamWmmaSpec": ("problem",),
     "kernels.common.conv_direct_fwd_tapouter_wmma.DirectFwdTapOuterSpec": ("problem",),

@@ -32,6 +32,16 @@ engine:
   knobs:
   - num_segments
   heuristic: native
+  # Trained sort_kernel_catalog models (tflops, time) for gfx950, beside the native
+  # default, and the catalog they were trained on; retrain when it changes
+  # (tests/test_trained_rankers.py, README "Shipping a trained model").
+  heuristics:
+    sort_kernel_catalog:
+      gfx950:
+      - 80b57cd6-ce8f-41cd-9a8e-18e0b1862304
+      - a6acccb8-8263-41f3-98c0-ad7e29918422
+  trained_catalog_sha256:
+    gfx950: 50d895459012b9e4dd65c779688440434ca23f8291d55cba2830376fdb719a6f
 kmd_fields:
 - name: dtype
   type: string
@@ -70,6 +80,11 @@ kmd_fields:
 - name: use_decode_grid
   type: int
   default_value: 1
+# 1 for the LSE-on twin, whose reduce also writes the SDPA stats output. At decode the
+# reduce's token-major LSE is the head-major [B, Hq, 1, 1] stats layout too.
+- name: emit_lse
+  type: int
+  default_value: 0
 specialization:
   metadata_fields:
   - dtype
@@ -81,6 +96,7 @@ specialization:
   - sliding_window
   - num_segments
   - use_decode_grid
+  - emit_lse
   matcher_only_fields: []
   vocabulary:
     dtype:
@@ -105,6 +121,8 @@ specialization:
       field: num_segments
     use_decode_grid:
       field: use_decode_grid
+    emit_lse:
+      field: emit_lse
 kernel_source_kind: rocke
 workspace_policy: derived
 
@@ -221,11 +239,22 @@ enumerate:
       fixed: *fixed
       cells: *cells
       spec_fields: *spec_fields
+    # The LSE-on twin of each cell's seg16 kernel, for SDPA graphs that ask for stats.
+    # The registry never selects emit_lse on a segment spec (the dispatcher passes the
+    # problem's value to the reduce), so the section sets it; one twin per cell
+    # (`space: slice`), named apart by its own template.
+    - pin: {algorithm: unified_tuning, spec_id: gfx950_u3d_splitkv_seg16_t1xb}
+      fixed: *fixed
+      cells: *cells
+      space: slice
+      spec_fields: *spec_fields
+      spec_overrides: {emit_lse: true}
+      kernel_name_template: attention_unified_3d.{dtype}_d{head_size}_hq{num_query_heads}_kv{num_kv_heads}_m{mask_type}_bs{block_size}_seg{num_segments}_lse.gfx950
 
 reduction:
   fields:
     # Spec fields: the mask kind is the spec's (causal_top_left, right_bound) pair.
-    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal_top_left, right_bound, sliding_window, block_size, use_decode_grid]
+    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal_top_left, right_bound, sliding_window, block_size, use_decode_grid, emit_lse]
     performance:
       - {name: num_segments}
     ignored: [waves_per_eu, use_kv_lds_swizzle, use_wave_page_id_load]
@@ -276,9 +305,10 @@ launch_surface:
   - name: matcher
     python_source: kernels/gfx950/attention_tiled_3d.py:supports_tiled_3d
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified3DNative.cpp
-    kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, block_size, mask_type, sliding_window, num_segments, use_decode_grid]
+    kmd_fields: [dtype, head_size, num_query_heads, num_kv_heads, block_size, mask_type, sliding_window, num_segments, use_decode_grid, emit_lse]
     guard: >
-      kernelMatches() returns false (no panic) if dtype, head_size, num_query_heads,
+      kernelMatches() returns false (no panic) if emit_lse disagrees with whether the
+      graph has a stats output, or if dtype, head_size, num_query_heads,
       num_kv_heads, mask_type or sliding_window disagrees with the graph, Skv is not a
       multiple of block_size, the candidate is not a decode-grid kernel or the graph's
       seqlen_q is not 1. A NO_MASK graph is matched as mask_type 2 (bottom-right causal),

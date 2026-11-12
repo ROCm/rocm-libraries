@@ -318,6 +318,15 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
                 environment_for(tests, "rocke_library_mla_pytest")
                 == expected_mla_environment
             )
+        # COMGR-only gates get the package and nothing compiler-specific.
+        comgr_only_environment = environment_for(
+            tests, "rocke_arch_domain_reproducibility"
+        )
+        assert comgr_only_environment.keys() == {"PYTHONPATH"}
+        assert (
+            environment_for(tests, "rocke_compiler_options_reproducibility")
+            == comgr_only_environment
+        )
 
 
 def split_ignored_files(selection):

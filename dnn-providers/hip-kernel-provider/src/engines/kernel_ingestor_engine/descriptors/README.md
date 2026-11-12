@@ -14,16 +14,24 @@ under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the rocKE bundles below, plus
 | `rocKE/gfx942_attention_dense/` | `hipkernel:Gfx942AttentionDense` | `packs/Gfx942AttentionDenseNative.cpp` (shares `packs/AttentionDenseNative.cpp` with gfx950) |
 | `rocKE/gfx1151_wmma_attention/` | `hipkernel:Gfx1151WmmaAttention` | `packs/Gfx1151WmmaAttentionNative.cpp` |
 | `rocKE/gfx1151_wmma_attention_decode/` | `hipkernel:Gfx1151WmmaAttentionDecode` | `packs/Gfx1151WmmaAttentionNative.cpp` |
-| `rocKE/gfx950_conv_dgrad_aot/` | `hipkernel:Gfx950ConvDgradAot` | `packs/Gfx950ConvDgradNative.cpp` |
+| `rocKE/gfx950_conv_dgrad_aot/` | `hipkernel:Gfx950ConvDgradAot` | `packs/ConvDgradAotNative.cpp` |
+| `rocKE/gfx1250_conv_dgrad_aot/` | `hipkernel:Gfx1250ConvDgradAot` | `packs/ConvDgradAotNative.cpp` (shared with gfx950) |
 
 The `gfx950_attention_dense`, `gfx950_attention_unified_2d`, `gfx950_attention_unified_3d`,
-`gfx942_attention_unified_3d`, `gfx942_attention_dense` and `gfx950_conv_dgrad_aot` KDPs are
-stored in DVC (see [Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below)
-and declare gfx950 or gfx942 only; `gfx1151_wmma_attention` and `gfx1151_wmma_attention_decode` KDPs are in
+`gfx942_attention_unified_3d`, `gfx942_attention_dense`, `gfx950_conv_dgrad_aot` and
+`gfx1250_conv_dgrad_aot` KDPs are stored in DVC (see [Large rocKE files live in DVC](#large-rocke-files-live-in-dvc) below)
+and declare gfx950, gfx942 or gfx1250 only; `gfx1151_wmma_attention` and `gfx1151_wmma_attention_decode` KDPs are in
 git and declare the gfx11 and gfx12 RDNA targets. Each bundle packs for a build that has
 rocKE enabled (`HIPKERNELPROVIDER_ENABLE_ROCKE=ON`, which keeps the `rocKE/` folder in the
-walk) and whose GPU targets include an arch its KDP declares; for gfx950 and gfx942 the
-DVC KDPs must also have been pulled.
+walk) and whose GPU targets include an arch its KDP declares; for gfx950, gfx942 and
+gfx1250 the DVC KDPs must also have been pulled.
+
+The two gfx1151 engines declare engine knobs in their UEDs (set in the IngestorGenerator
+configs, not by hand): the prefill bundle `rocKE/gfx1151_wmma_attention/` declares
+`head_size` and `head_size_v`, and the decode bundle `rocKE/gfx1151_wmma_attention_decode/`
+declares `head_size`. A knob value is the bucket width a kernel serves, not an exact size,
+which keeps the knob tuple of every co-admitted kernel distinct. A pin that matches no
+kernel is refused. The tile size (`block_m`) is not a knob.
 
 `FlyDSL/<op>/`, one bundle per op, whose kernels are **pre-built** and stored beside
 their descriptors under `FlyDSL/<op>/<target>/`, as `kind: "hsaco"` UKDs inline in
