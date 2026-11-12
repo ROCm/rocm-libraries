@@ -1371,6 +1371,7 @@
     'AssertAnySizeLessThan',
     'AssertFree0ElementMultiple',
     'AssertFree1ElementMultiple',
+    'AssertMXScalesPreSwizzled',
     'AssertSizeEqual',
     'AssertSizeGreaterThan',
     'AssertSizeLessThan',
@@ -1653,6 +1654,10 @@
       ]),
       'len': 9,
       'type': 'list',
+    }),
+    'AssertMXScalesPreSwizzled': dict({
+      'type': 'int',
+      'value': -1,
     }),
     'AssertSizeEqual': dict({
       'type': 'int',

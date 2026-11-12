@@ -634,6 +634,15 @@ class ProblemPredicate(Properties.Predicate):
                 )
             return cls("TensorBytesLessThan", value=value)
 
+        if key == "AssertMXScalesPreSwizzled":
+            if value == -1:
+                return None
+            if value is not True:
+                raise RuntimeError(
+                    "{} must be True or -1, got {!r}".format(key, value)
+                )
+            return cls("MXScalesPreSwizzled")
+
         if key.endswith('Multiple'):
             if value == 1:
                 return None

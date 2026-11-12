@@ -725,6 +725,70 @@ TEST(Predicates, TensorBytesLessThanBoundsTheLeadingStrideForSingleColumn)
     EXPECT_FALSE(pred.debugEval(hugeLdc, stream));
 }
 
+// The row lists every non-empty tensor's allocated and leading-stride bytes next to the limit, so
+// the failing quantity is visible.
+TEST(Predicates, TensorBytesLessThanDebugEvalPrintsEachTensorsBytes)
+{
+    using namespace TensileLite;
+    Predicates::Contraction::TensorBytesLessThan pred(bytesLimit);
+
+    // ldc = 2^30 bf16 elements is 2^31 bytes, with C's allocated bytes at 8.
+    ContractionProblemGemm hugeLdc = tensorBytesProblem(4, 1, 64, 64, 64, size_t(1) << 30, 4);
+    std::ostringstream     stream;
+    EXPECT_FALSE(pred.debugEval(hugeLdc, stream));
+
+    std::string const row = stream.str();
+    EXPECT_NE(row.find("A alloc bytes="), std::string::npos) << row;
+    EXPECT_NE(row.find("C alloc bytes=8 ld bytes=2147483648; "), std::string::npos) << row;
+    EXPECT_NE(row.find("< sol=2147483648"), std::string::npos) << row;
+}
+
+// Only failing rows are printed unless the debugger is verbose.
+TEST(Predicates, TensorBytesLessThanDebugEvalPrintsNothingWhenSatisfied)
+{
+    using namespace TensileLite;
+    // The singleton reads TENSILE_DB once and cannot be changed in-process.
+    if(Debug::Instance().printPredicateEvaluationVerbose())
+        GTEST_SKIP() << "verbose predicate debugging prints passing rows";
+    Predicates::Contraction::TensorBytesLessThan pred(bytesLimit);
+
+    ContractionProblemGemm smallLdc = tensorBytesProblem(4, 1, 64, 64, 64, 4096, 4);
+    std::ostringstream     stream;
+    EXPECT_TRUE(pred.debugEval(smallLdc, stream));
+    EXPECT_TRUE(stream.str().empty()) << stream.str();
+}
+
+// ----------------------------------------------------------------------------
+// MXScalesPreSwizzled: the kernels read the padded pre-swizzled scale layout, so a caller that
+// flags either operand's scales as packed must not match.
+// ----------------------------------------------------------------------------
+
+TEST(Predicates, MXScalesPreSwizzledRejectsPackedScalesOfEitherOperand)
+{
+    using namespace TensileLite;
+    Predicates::Contraction::MXScalesPreSwizzled pred;
+    EXPECT_EQ(Predicates::Contraction::MXScalesPreSwizzled::Type(), "MXScalesPreSwizzled");
+
+    ContractionProblemGemm problem = tensorBytesProblem(4, 1, 64, 64, 64, 4, 4);
+    EXPECT_TRUE(pred(problem));
+
+    problem.setCustomKernelMXScaleAIsPacked(true);
+    EXPECT_FALSE(pred(problem));
+    problem.setCustomKernelMXScaleAIsPacked(false);
+    problem.setCustomKernelMXScaleBIsPacked(true);
+    EXPECT_FALSE(pred(problem));
+    problem.setCustomKernelMXScalesArePacked(true);
+    EXPECT_FALSE(pred(problem));
+    problem.setCustomKernelMXScalesArePacked(false);
+    EXPECT_TRUE(pred(problem));
+
+    // Only failing rows are printed unless the debugger is verbose.
+    problem.setCustomKernelMXScaleAIsPacked(true);
+    std::ostringstream stream;
+    EXPECT_FALSE(pred.debugEval(problem, stream));
+    EXPECT_NE(stream.str().find("packed scaleA=1 scaleB=0"), std::string::npos) << stream.str();
+}
+
 // A problem without a C tensor has no C extent to bound. The same problem with a C over the
 // limit proves the skip is what lets the empty-C case through.
 TEST(Predicates, TensorBytesLessThanSkipsAnEmptyC)

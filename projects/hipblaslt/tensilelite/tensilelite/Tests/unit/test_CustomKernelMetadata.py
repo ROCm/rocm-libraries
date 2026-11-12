@@ -505,6 +505,7 @@ def test_predicate_keys_round_trip_from_yaml_to_loader(tmp_path):
               - AssertStrideBMultiple: [{1: 4}]
               - AssertTensorBytesLessThan: [2147483648]
               - AssertAnySizeLessThan: [{0: 5, 1: 5}]
+              - AssertMXScalesPreSwizzled: [True]
         """))
 
     config = _parse_tensile_yaml(str(yaml_path), "predicated_kernel")
@@ -514,6 +515,7 @@ def test_predicate_keys_round_trip_from_yaml_to_loader(tmp_path):
     assert "AssertStrideBMultiple: { 1: 4 }" in rendered
     assert "AssertTensorBytesLessThan: 2147483648" in rendered
     assert "AssertAnySizeLessThan: { 0: 5, 1: 5 }" in rendered
+    assert "AssertMXScalesPreSwizzled: true" in rendered
 
     write_kernel(tmp_path / "predicate_keys.s", f"""\
           InternalSupportParams:
@@ -524,6 +526,7 @@ def test_predicate_keys_round_trip_from_yaml_to_loader(tmp_path):
           AssertStrideBMultiple: {config["AssertStrideBMultiple"]}
           AssertTensorBytesLessThan: {config["AssertTensorBytesLessThan"]}
           AssertAnySizeLessThan: {config["AssertAnySizeLessThan"]}
+          AssertMXScalesPreSwizzled: {config["AssertMXScalesPreSwizzled"]}
         """)
     loaded = getCustomKernelConfig("predicate_keys", {}, str(tmp_path))
 
@@ -531,6 +534,7 @@ def test_predicate_keys_round_trip_from_yaml_to_loader(tmp_path):
     assert loaded["AssertStrideBMultiple"] == {1: 4}
     assert loaded["AssertTensorBytesLessThan"] == 2147483648
     assert loaded["AssertAnySizeLessThan"] == {0: 5, 1: 5}
+    assert loaded["AssertMXScalesPreSwizzled"] is True
 
 
 def test_mx_scale_format_round_trips_from_yaml_to_loader(tmp_path):
@@ -1823,6 +1827,28 @@ def test_tensor_bytes_limit_emits_a_predicate_with_the_value():
 
 
 # ---------------------------------------------------------------------------
+# AssertMXScalesPreSwizzled
+# ---------------------------------------------------------------------------
+
+def test_valid_parameters_mx_scales_pre_swizzled():
+    for value in (True, -1):
+        checkParametersAreValid(("AssertMXScalesPreSwizzled", [value]), validParameters)
+    for value in (False, 0, 2, "True"):
+        with pytest.raises(Exception, match="True or -1"):
+            checkParametersAreValid(("AssertMXScalesPreSwizzled", [value]), validParameters)
+
+
+def test_mx_scales_pre_swizzled_emits_a_valueless_predicate():
+    pred = ProblemPredicate.FromOriginalKeyPair(("AssertMXScalesPreSwizzled", True))
+
+    assert pred.tag == "MXScalesPreSwizzled"
+    assert ProblemPredicate.FromOriginalKeyPair(("AssertMXScalesPreSwizzled", -1)) is None
+    for bad in (False, 0, 1, "True"):
+        with pytest.raises(RuntimeError, match="True or -1"):
+            ProblemPredicate.FromOriginalKeyPair(("AssertMXScalesPreSwizzled", bad))
+
+
+# ---------------------------------------------------------------------------
 # AssertAnySizeLessThan
 # ---------------------------------------------------------------------------
 
@@ -1865,6 +1891,7 @@ def test_any_size_less_than_rejects_bad_values_when_building_the_predicate(bad):
         ("AssertStrideAMultiple", {1: 4}),
         ("AssertStrideBMultiple", {1: 4}),
         ("AssertTensorBytesLessThan", 2147483648),
+        ("AssertMXScalesPreSwizzled", True),
     ],
 )
 def test_emitted_predicate_tags_are_registered_in_cpp(key, value):

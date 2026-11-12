@@ -730,6 +730,10 @@ validParameters = { # we need to make sure this matches develop
     # the shipped skinny MXFP8 kernels); a problem with a tensor of at least this many
     # bytes does not match. -1 skips. Fork YAML: AssertTensorBytesLessThan: [2147483648]
     "AssertTensorBytesLessThan": -1,
+    # True requires the problem's MX scales to be in the pre-swizzled (padded HostPreSwizzle)
+    # layout, for handwritten kernels that read that layout only: a caller that hands over
+    # compactly packed scales does not match. -1 skips. Fork YAML: AssertMXScalesPreSwizzled: [True]
+    "AssertMXScalesPreSwizzled": -1,
     # {index: value} where the predicate holds when at least one listed size is below its
     # value (an Or of SizeLessThan), for kernels that serve a problem if either of two
     # extents is small. -1 skips. Fork YAML: AssertAnySizeLessThan: [{0: 5, 1: 5}]
@@ -1577,6 +1581,14 @@ def checkAssertTensorBytesLessThanIsValid(name, value):
     raise Exception(msgBase.format(name, value))
 
 
+def checkAssertMXScalesPreSwizzledIsValid(name, value):
+    """The flag must be True; -1 is the skip sentinel."""
+    if value is True or (type(value) is int and value == -1):
+        return
+    msgBase = "Invalid parameter value: {} = {}\nMust be True or -1 to skip"
+    raise Exception(msgBase.format(name, value))
+
+
 def checkAssertAnySizeLessThanIsValid(name, value):
     """A size map whose limits are positive; -1 is the skip sentinel."""
     checkAssertSizeMapIsValid(name, value)
@@ -1708,6 +1720,8 @@ def checkParametersAreValid(
                 checkAssertMultipleMapIsValid(name, value)
         elif name == "AssertTensorBytesLessThan":
             checkAssertTensorBytesLessThanIsValid(name, value)
+        elif name == "AssertMXScalesPreSwizzled":
+            checkAssertMXScalesPreSwizzledIsValid(name, value)
         elif name == "AssertAnySizeLessThan":
             checkAssertAnySizeLessThanIsValid(name, value)
         elif name == "SpaceFillingAlgo":

@@ -76,6 +76,7 @@ BenchmarkProblems:
         - AssertStrideAMultiple: [{1: 4}]
         - AssertStrideBMultiple: [{1: 4}]
         - AssertTensorBytesLessThan: [2147483648]
+        - AssertMXScalesPreSwizzled: [True]
         # The VALU kernel launches one workgroup per tile and has no guard, and TilesXY of the
         # [4, 1] macrotile equals its tile count only when m is the wide extent.
         - AssertSizeGreaterThan: [{0: 4, 1: 0, 3: 0}]

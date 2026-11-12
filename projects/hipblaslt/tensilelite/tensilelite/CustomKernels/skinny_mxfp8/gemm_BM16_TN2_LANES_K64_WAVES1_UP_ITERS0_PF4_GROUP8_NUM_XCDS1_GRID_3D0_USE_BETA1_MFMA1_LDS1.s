@@ -1,3 +1,14 @@
+// Generated out of tree, then hand-edited: the m/n/k kernarg names in the HSA metadata became m_size/n_size/k_size and
+// the custom.config block was appended (AddCustomConfig). No instruction was edited; an earlier s_nop 11 to 13 edit
+// was reverted so the kernels match the generator output.
+// Constraints (custom.config keys): AssertSizeEqual (batch 1), AssertSizeGreaterThan and AssertSizeLessThan (m, n and K
+// in [1, 2^20]), AssertSummationElementMultiple (K % 32 == 0), AssertStrideAEqual, AssertStrideBEqual,
+// AssertStrideCEqual, AssertStrideDEqual (unit strides), AssertStrideAMultiple, AssertStrideBMultiple,
+// AssertTensorBytesLessThan (tensors < 2^31 bytes), AssertMXScalesPreSwizzled. No bias, activation or scale-alpha.
+// Rule: AssertAnySizeLessThan, min(m, n) <= 4.
+// Invariant: SRD num_records is built from the tensor extent in this file and must never be enlarged (for example to
+// 0x7fffffff): loads past K in the prologue and tail are safe only because soffset is range-checked against it.
+// The 0x80000000 offset for out-of-range A and B rows must stay outside the A and B buffers. Formulas: README.md.
 .amdgcn_target "amdgcn-amd-amdhsa--gfx950"
 .amdhsa_code_object_version 4
 .text
@@ -1936,7 +1947,7 @@ v_mfma_scale_f32_16x16x128_f8f6f4 v[16:19], v[50:57], v[58:65], v[16:19], v34, v
 v_mfma_scale_f32_16x16x128_f8f6f4 v[12:15], v[66:73], v[82:89], v[12:15], v34, v35 op_sel:[0,0,0] op_sel_hi:[1,1,0] cbsz:0 blgp:0
 v_mfma_scale_f32_16x16x128_f8f6f4 v[16:19], v[74:81], v[82:89], v[16:19], v34, v35 op_sel:[1,0,0] op_sel_hi:[1,1,0] cbsz:0 blgp:0
 label_tail_skip_16:
-s_nop 13
+s_nop 11
 s_cmp_eq_u32 s37, 1
 s_cbranch_scc0 label_orientation_b_33
 v_pk_mul_f32 v[12:13], s[28:29], v[12:13] op_sel_hi:[0,1]
@@ -2275,6 +2286,7 @@ custom.config:
   AssertSummationElementMultiple: 32
   AssertTensorBytesLessThan: 2147483648
   AssertAnySizeLessThan: { 0: 5, 1: 5 }
+  AssertMXScalesPreSwizzled: true
   AssertSizeEqual: { 2: 1 }
   AssertSizeGreaterThan: { 0: 0, 1: 0, 3: 0 }
   AssertSizeLessThan: { 0: 1048577, 1: 1048577, 3: 1048577 }

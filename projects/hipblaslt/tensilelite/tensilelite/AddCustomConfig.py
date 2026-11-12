@@ -78,6 +78,7 @@ PREDICATE_FORK_PARAMETER_KEYS = (
     "AssertSummationElementMultiple",
     "AssertTensorBytesLessThan",
     "AssertAnySizeLessThan",
+    "AssertMXScalesPreSwizzled",
 ) + ASSERT_DIM_MAP_PARAMETERS
 
 # Single-valued ForkParameters frozen into custom.config. Predicates select

@@ -78,6 +78,7 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::StrideAMultiple>(),
                      Base::template Pair<Predicates::Contraction::StrideBMultiple>(),
                      Base::template Pair<Predicates::Contraction::TensorBytesLessThan>(),
+                     Base::template Pair<Predicates::Contraction::MXScalesPreSwizzled>(),
                      Base::template Pair<Predicates::Contraction::StrideCEqual>(),
                      Base::template Pair<Predicates::Contraction::StrideDEqual>(),
                      Base::template Pair<Predicates::Contraction::LDCEqualsLDD>(),
@@ -270,6 +271,12 @@ namespace TensileLite
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::TensorBytesLessThan, IO>
             : public AutoMappingTraits<Predicates::Contraction::TensorBytesLessThan, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::MXScalesPreSwizzled, IO>
+            : public AutoMappingTraits<Predicates::Contraction::MXScalesPreSwizzled, IO>
         {
         };
 

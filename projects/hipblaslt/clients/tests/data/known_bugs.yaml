@@ -54,7 +54,7 @@ Known bugs:
   # allocation order. These nine shapes are not shard keys and run the generic Cijk_
   # kernels, not the skinny gemm_BM* ones.
   # REMOVE these entries once the C-load over-read fix (GlobalWriteBatch.py exec-masked
-  # C load) lands.
+  # C load) lands. Fix: #15501. Review by 2026-12-15.
   - { name: matmul_skinny_mxfp8_tn_alpha_beta, function: matmul, M: 29584, N: 4, K: 8192, alpha: 1.5, beta: 0.5, known_bug_platforms: gfx950 }
   - { name: matmul_skinny_mxfp8_tn_alpha_beta, function: matmul, M: 4, N: 16385, K: 2304, alpha: 1.5, beta: 0.5, known_bug_platforms: gfx950 }
   - { name: matmul_skinny_mxfp8_tn_alpha_beta, function: matmul, M: 10240, N: 3, K: 9216, alpha: 1.5, beta: 0.5, known_bug_platforms: gfx950 }

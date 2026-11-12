@@ -76,6 +76,7 @@ BenchmarkProblems:
         - AssertStrideAMultiple: [{1: 4}]
         - AssertStrideBMultiple: [{1: 4}]
         - AssertTensorBytesLessThan: [2147483648]
+        - AssertMXScalesPreSwizzled: [True]
         - AssertSizeGreaterThan: [{0: 0, 1: 0, 3: 0}]
         - AssertSizeLessThan: [{0: 1048577, 1: 1048577, 3: 1048577}]
         - AssertAnySizeLessThan: [{0: 5, 1: 5}]

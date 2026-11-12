@@ -340,7 +340,7 @@ Tests:
 
 # Equality keys include the batch count and the shard only has batch-1 keys, so a batched problem
 # never matches a shard key and runs the existing kernels, even for sizes whose batch-1 form is in the
-# ExactLogic ({4,5120,5120} and {51200,3,5120}). The AssertSizeEqual {2: 1} guard only matters for forced solution indices;
+# ExactLogic ({4,5120,5120} and {1152,2,5120}). The AssertSizeEqual {2: 1} guard only matters for forced solution indices;
 # test_skinny_mxfp8_logic.py checks the guard itself.
 - name: matmul_skinny_mxfp8_tn_fallback_batched
   category: pre_checkin
@@ -351,7 +351,7 @@ Tests:
   transB: N
   matrix_size:
     - { M: 4, N: 5120, K: 5120 }
-    - { M: 51200, N: 3, K: 5120 }
+    - { M: 1152, N: 2, K: 5120 }
   alpha: 1
   beta: 0
   batch_count: 2
@@ -362,7 +362,7 @@ Tests:
 
 # Bias problems do reach the shard's library (its ProblemType has bias), but each skinny solution carries
 # its own ProblemType, built from its custom.config Features (SupportsBias false), that rejects them, so they
-# run the existing kernels even for sizes whose no-bias form is in the ExactLogic ({4,5120,5120} and {51200,3,5120}).
+# run the existing kernels even for sizes whose no-bias form is in the ExactLogic ({4,5120,5120} and {1152,2,5120}).
 - name: matmul_skinny_mxfp8_tn_fallback_bias
   category: pre_checkin
   function:
@@ -372,7 +372,7 @@ Tests:
   transB: N
   matrix_size:
     - { M: 4, N: 5120, K: 5120 }
-    - { M: 51200, N: 3, K: 5120 }
+    - { M: 1152, N: 2, K: 5120 }
   alpha: 1
   beta: 0
   batch_count: 1
@@ -386,7 +386,7 @@ Tests:
 # Activation problems do reach the shard's library (its ProblemType has activation), but each skinny solution
 # carries its own ProblemType, built from its custom.config Features (SupportsActivation false), that rejects
 # them, so they run the existing kernels even for sizes whose no-activation form is in the ExactLogic
-# ({4,5120,5120} and {51200,3,5120}).
+# ({4,5120,5120} and {1152,2,5120}).
 - name: matmul_skinny_mxfp8_tn_fallback_activation
   category: pre_checkin
   function:
@@ -396,7 +396,7 @@ Tests:
   transB: N
   matrix_size:
     - { M: 4, N: 5120, K: 5120 }
-    - { M: 51200, N: 3, K: 5120 }
+    - { M: 1152, N: 2, K: 5120 }
   alpha: 1
   beta: 0
   batch_count: 1

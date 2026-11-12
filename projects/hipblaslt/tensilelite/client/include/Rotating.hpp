@@ -51,7 +51,7 @@ namespace TensileLite
         void addRotatingSize(std::vector<size_t> sizes);
         void setOriginalSizes(std::vector<size_t> sizes);
         void createRotatingMemory(int32_t mode, size_t rotatingSize);
-        std::vector<std::vector<RotatingMemoryUnit>> getRotatingMemory() const;
+        std::vector<std::vector<RotatingMemoryUnit>> const& getRotatingMemory() const;
         std::shared_ptr<void> getData() const;
         size_t getDataSize() const;
         size_t getDataLargestUnitSize() const;

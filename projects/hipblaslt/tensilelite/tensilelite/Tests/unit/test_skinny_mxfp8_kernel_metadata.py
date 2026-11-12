@@ -121,3 +121,16 @@ def test_load_custom_yaml_for_matches_custom_config(name):
     for key, value in config["ProblemType"].items():
         assert problem_type[key] == value, key
     assert doc["LibraryLogic"]["ArchitectureName"] == "gfx950"
+
+
+# ---------------------------------------------------------------------------
+# The .s header is comment-only and names the constraints of the embedded custom.config.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("name", KERNELS)
+def test_header_is_comment_only_and_lists_every_assert_key(name):
+    header = Path(KERNEL_DIR, name + ".s").read_text().split(".amdgcn_target", 1)[0]
+    assert all(line.startswith("//") for line in header.splitlines())
+    missing = [key for key in assert_items(readCustomKernelConfig(name)) if key not in header]
+    assert not missing, missing

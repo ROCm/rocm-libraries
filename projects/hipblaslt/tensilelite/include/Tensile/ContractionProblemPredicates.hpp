@@ -860,6 +860,14 @@ namespace TensileLite
                     return "TensorBytesLessThan";
                 }
 
+                // Leading stride in bytes, 0 for a tensor with no leading dimension.
+                static size_t leadingStrideBytes(TensorDescriptor const& tensor)
+                {
+                    if(tensor.dimensions() < 2)
+                        return 0;
+                    return multiplyElementSize(tensor.strides()[1], tensor.elementBytes());
+                }
+
                 virtual bool operator()(ContractionProblemGemm const& problem) const override
                 {
                     for(TensorDescriptor const* tensor :
@@ -869,9 +877,7 @@ namespace TensileLite
                             continue;
                         if(tensor->totalAllocatedBytes() >= value)
                             return false;
-                        if(tensor->dimensions() >= 2
-                           && multiplyElementSize(tensor->strides()[1], tensor->elementBytes())
-                                  >= value)
+                        if(leadingStrideBytes(*tensor) >= value)
                             return false;
                     }
                     return true;
@@ -880,12 +886,55 @@ namespace TensileLite
                 virtual bool debugEval(ContractionProblemGemm const& problem,
                                        std::ostream&                 stream) const override
                 {
+                    bool const         rv = (*this)(problem);
+                    std::ostringstream details;
+                    char               name = 'A';
+                    for(TensorDescriptor const* tensor :
+                        {&problem.a(), &problem.b(), &problem.c(), &problem.d()})
+                    {
+                        char const tensorName = name++;
+                        if(tensor->empty())
+                            continue;
+                        details << tensorName << " alloc bytes=" << tensor->totalAllocatedBytes()
+                                << " ld bytes=" << leadingStrideBytes(*tensor) << "; ";
+                    }
+                    details << "< sol=" << value;
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
+            // Handwritten kernels that read the padded HostPreSwizzle MX scale layout declare
+            // it. A caller that hands over compactly packed scales (hipBLASLt does for every
+            // format but Block_32_UE8M0_32_8_EXT) sets the custom-kernel packed flags, and the
+            // kernel would read the wrong scales.
+            struct MXScalesPreSwizzled
+                : public Predicate_CRTP<MXScalesPreSwizzled, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+                static std::string Type()
+                {
+                    return "MXScalesPreSwizzled";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return !problem.customKernelMXScaleAIsPacked()
+                           && !problem.customKernelMXScaleBIsPacked();
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
                     bool               rv = (*this)(problem);
                     std::ostringstream details;
-                    details << "bytes A=" << problem.a().totalAllocatedBytes()
-                            << " B=" << problem.b().totalAllocatedBytes()
-                            << " C=" << problem.c().totalAllocatedBytes()
-                            << " D=" << problem.d().totalAllocatedBytes() << " < sol=" << value;
+                    details << "packed scaleA=" << problem.customKernelMXScaleAIsPacked()
+                            << " scaleB=" << problem.customKernelMXScaleBIsPacked()
+                            << " sol=pre-swizzled";
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }
