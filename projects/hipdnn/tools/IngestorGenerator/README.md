@@ -1118,8 +1118,11 @@ is a cell, so many cells name the same kernel and `--out` fails on duplicate nam
   field or sweep spec that moves one would silently file a kernel in the wrong cell.
 - `hold_fields` lists `performance` fields a section keeps at its default spec's value
   instead of varying and projecting them, so a section that leaves a stack of codegen
-  flags alone does not also sweep it. It is inherited by `also` sections unless they set
-  their own, must name spec fields, and applies after `spec_overrides` (a section may
+  flags alone does not also sweep it. It applies to `space: full` sections only: a `slice`
+  section projects no performance field, so one that sets it (or inherits it, where an `also`
+  section's `hold_fields: []` opts out) exits 2. It is inherited by `also` sections unless they
+  set their own, must name spec fields (checked when the section is read, in every section),
+  and applies after `spec_overrides` (a section may
   override and hold the same field: the override moves the default, the hold keeps every spec
   there). The gfx942 unified 2D engine uses the pair for rocKE's production stacks: four
   `also` sections override a (dtype, head size)'s stack on the geometry rocKE selects, while

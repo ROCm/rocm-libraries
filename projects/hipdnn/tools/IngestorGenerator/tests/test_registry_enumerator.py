@@ -1316,3 +1316,49 @@ def test_hold_fields_naming_a_field_the_spec_lacks_is_exit_2(
     assert re_.main(["--manifest", str(path), "--plan-space"]) == 2
     err = capsys.readouterr().err
     assert "hold_fields" in err and "no_such" in err, err
+
+
+def test_registry_refuses_hold_fields_the_spec_lacks_when_it_reads_them(
+    tmp_path, monkeypatch
+):
+    """The names are checked as the section is read, not only once a full-space
+    enumeration reaches `select_full`, and in every `also` section."""
+    manifest = _conv_hold(tmp_path, monkeypatch, hold_fields=["no_such"])
+    with pytest.raises(re_.EnumerationError, match=r"hold_fields.*no_such"):
+        re_.Registry(manifest)
+
+    manifest = _conv_hold(tmp_path / "also", monkeypatch, hold_fields=["tile_m"])
+    section = copy.deepcopy(manifest["enumerate"])
+    section["hold_fields"] = ["no_such"]
+    manifest["enumerate"]["also"] = [section]
+    with pytest.raises(re_.EnumerationError, match=r"hold_fields.*no_such"):
+        re_.Registry(manifest)
+
+
+def test_hold_fields_on_a_slice_section_is_refused(probe, capsys):
+    """A slice section projects no performance field, so `hold_fields` there could hold
+    nothing: refused by name rather than ignored, as only `select_full` read it."""
+    probe.manifest["enumerate"]["hold_fields"] = ["tile_n"]
+    with pytest.raises(re_.EnumerationError, match=r"hold_fields.*'slice'"):
+        re_.Registry(probe.manifest)
+
+    assert _run_probe(probe) == 2
+    err = capsys.readouterr().err
+    assert "hold_fields" in err and "slice" in err, err
+
+
+def test_an_also_slice_section_must_not_inherit_hold_fields(tmp_path, monkeypatch):
+    """`hold_fields` is inherited by an `also` section; a slice one that inherits it is
+    refused too, and `hold_fields: []` opts that section out."""
+    manifest = _conv_hold(tmp_path, monkeypatch, hold_fields=["tile_m"])
+    section = copy.deepcopy(manifest["enumerate"])
+    section["space"] = "slice"
+    del section["hold_fields"]
+    manifest["enumerate"]["also"] = [section]
+    with pytest.raises(
+        re_.EnumerationError, match=r"an enumerate.also section sets hold_fields"
+    ):
+        re_.Registry(manifest)
+
+    section["hold_fields"] = []
+    re_.Registry(manifest)

@@ -502,6 +502,13 @@ class Registry:
         self.neutral_fields = list(decl.get("neutral_fields") or [])
         self.spec_overrides = _mapping(decl, "spec_overrides")
         self.hold_fields = list(decl.get("hold_fields") or [])
+        if self.hold_fields and self.space_kind != "full":
+            raise EnumerationError(
+                f"{where} sets hold_fields {self.hold_fields} on a space: "
+                f"{self.space_kind!r} section, which projects no performance field for it "
+                f"to hold; hold_fields applies to space: full sections only (an also "
+                f"section inherits it: set hold_fields: [] there)."
+            )
         self.cell_keyed_by = list(decl.get("cell_keyed_by") or [])
         for name in itertools.chain(*pins, self.fixed, self.cell_fields):
             if name not in self.request_fields:
@@ -539,6 +546,14 @@ class Registry:
         self.pairs_reduce = False
         #: The ``enumerate.also`` sections, each a `Registry` of its own.
         self.also: list = []
+        if self.hold_fields:
+            # The registry's own spec is where the names must exist, so read it from the first
+            # cell: a typo fails here, whichever section it is in, not only once a full-space
+            # section enumerates it.
+            cells = self.cells()
+            if cells:
+                base, _, _ = self._candidate_space(cells[0], self.pin, self.candidate)
+                check_hold_fields(self.hold_fields, base)
         if primary and decl.get("also"):
             for index, extra in enumerate(decl["also"]):
                 merged = {
@@ -899,6 +914,16 @@ def _unresolvable(sames: list, performance: "OrderedDict") -> set:
     }
 
 
+def check_hold_fields(hold: "list | tuple", spec) -> None:
+    """Refuse a ``hold_fields`` entry that the registry spec ``spec`` has no field for."""
+    unknown = [n for n in hold if n not in _spec_fields(spec)]
+    if unknown:
+        raise EnumerationError(
+            f"enumerate.hold_fields names {unknown}, which the registry spec "
+            f"{type(spec).__name__} does not have."
+        )
+
+
 def select_full(
     spaces: list, classification: Classification, hold: "list | tuple" = ()
 ) -> FullSpace:
@@ -906,12 +931,7 @@ def select_full(
     performance fields this section keeps at its default spec's value (the
     ``hold_fields`` key): they are neither projected nor varied."""
     for base, _ in spaces:
-        unknown = [n for n in hold if n not in _spec_fields(base)]
-        if unknown:
-            raise EnumerationError(
-                f"enumerate.hold_fields names {unknown}, which the registry spec "
-                f"{type(base).__name__} does not have."
-            )
+        check_hold_fields(hold, base)
     performance = OrderedDict(
         (n, accessor)
         for n, accessor in classification.performance.items()
