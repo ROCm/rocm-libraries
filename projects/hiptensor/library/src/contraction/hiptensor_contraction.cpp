@@ -89,6 +89,20 @@ static bool matchesPerMode(std::vector<std::size_t> const& valuesC,
     return true;
 }
 
+// A packed tensor has no gaps, so its last element sits at position
+// "number of elements - 1". The complex path relies on this: it sizes its
+// buffers by the number of elements.
+static bool isPacked(std::vector<std::size_t> const& lengths,
+                     std::vector<std::size_t> const& strides)
+{
+    std::size_t lastPosition = 0;
+    for(std::size_t i = 0; i < lengths.size(); i++)
+    {
+        lastPosition += (lengths[i] - 1) * strides[i];
+    }
+    return lastPosition + 1 == hiptensor::elementsFromLengths(lengths);
+}
+
 // Convert between vectors of void ptrs stored in opaque API objects
 // to vectors of ContractionSolution ptrs with simple cast.
 inline auto toContractionSolutionVec(std::vector<void*> const& v)
@@ -273,6 +287,31 @@ hiptensorStatus_t hiptensorCreateContraction(const hiptensorHandle_t            
         snprintf(msg, sizeof(msg), "Each mode must have the same extent in C and D");
         logger->logError("hiptensorCreateContraction", msg);
         return HIPTENSOR_STATUS_INVALID_VALUE;
+    }
+
+    // The complex path sizes its buffers by the number of elements and does not
+    // use C's own layout, so it needs packed tensors and a C laid out like D.
+    bool isComplex
+        = descCompute == HIPTENSOR_COMPUTE_DESC_C32F || descCompute == HIPTENSOR_COMPUTE_DESC_C64F;
+
+    if(isComplex
+       && (!isPacked(hiptensor::getTensorLengths(descA), hiptensor::getTensorStrides(descA))
+           || !isPacked(hiptensor::getTensorLengths(descB), hiptensor::getTensorStrides(descB))
+           || !isPacked(hiptensor::getTensorLengths(descC), hiptensor::getTensorStrides(descC))
+           || !isPacked(hiptensor::getTensorLengths(descD), hiptensor::getTensorStrides(descD))))
+    {
+        snprintf(msg, sizeof(msg), "Complex contraction needs packed tensors");
+        logger->logError("hiptensorCreateContraction", msg);
+        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+    }
+
+    if(isComplex
+       && !matchesPerMode(
+           hiptensor::getTensorStrides(descC), modeCV, hiptensor::getTensorStrides(descD), modeDV))
+    {
+        snprintf(msg, sizeof(msg), "Complex contraction needs C laid out like D");
+        logger->logError("hiptensorCreateContraction", msg);
+        return HIPTENSOR_STATUS_NOT_SUPPORTED;
     }
 
     *desc = new hiptensorOperationDescriptor();
