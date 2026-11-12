@@ -75,6 +75,11 @@ function(hipblaslt_tensilelite_python_environment output)
     set(_environment
         "PYTHONPATH=${_python_path}"
         "PATH=${_path}"
+        # TensileLite's toolchain module needs the HIP version when it is
+        # imported, so every generator process gets it from the configure,
+        # as develop's command does. A TheRock build has no ROCm directory
+        # for the module to search.
+        "ROCM_VERSION=${hip_VERSION}"
     )
     if(HIPBLASLT_ENABLE_THEROCK)
         # Internal marker: only these commands select TensileLite's TheRock
