@@ -47,13 +47,13 @@ extern "C" {
 *  @param[in]
 *  opA                 matrix operation type.
 *  @param[in]
-*  alpha               scalar \f$\alpha\f$.
+*  alpha               scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  matA                sparse matrix descriptor.
 *  @param[in]
 *  vecX                dense vector descriptor.
 *  @param[in]
-*  beta                scalar \f$\beta\f$.
+*  beta                scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  vecY                dense vector descriptor.
 *  @param[in]
@@ -62,6 +62,7 @@ extern "C" {
 *  alg                 SpMV algorithm for the SpMV computation.
 *  @param[out]
 *  pBufferSizeInBytes  number of bytes of the temporary storage buffer.
+*                      \p pBufferSizeInBytes is always a host variable, regardless of the pointer mode.
 *
 *  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
@@ -115,13 +116,13 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
 *  @param[in]
 *  opA             matrix operation type.
 *  @param[in]
-*  alpha           scalar \f$\alpha\f$.
+*  alpha           scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  matA            matrix descriptor.
 *  @param[in]
 *  vecX            vector descriptor.
 *  @param[in]
-*  beta            scalar \f$\beta\f$.
+*  beta            scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  vecY            vector descriptor.
 *  @param[in]
@@ -281,13 +282,13 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
 *  @param[in]
 *  opA             matrix operation type.
 *  @param[in]
-*  alpha           scalar \f$\alpha\f$.
+*  alpha           scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  matA            matrix descriptor.
 *  @param[in]
 *  vecX            vector descriptor.
 *  @param[in]
-*  beta            scalar \f$\beta\f$.
+*  beta            scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  vecY            vector descriptor.
 *  @param[in]

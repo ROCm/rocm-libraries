@@ -73,26 +73,26 @@ jobs:
               "components": ["hipBLASLt", "hipSPARSELt"]
             }
           }'
-          # Timeouts are set to ~1.5x observed runtimes.
+          # Timeouts are set to at least 1.5x observed runtimes.
           timeouts='{
             "gfx942": {
               "hipblaslt": {
-                "quick":    {"command_timeout": "25m",  "step_timeout_minutes": 35,  "job_timeout_minutes": 65},
-                "standard": {"command_timeout": "140m", "step_timeout_minutes": 150, "job_timeout_minutes": 180}
+                "quick":    {"command_timeout": "25m",  "step_timeout_minutes": 35,  "job_timeout_minutes": 45},
+                "standard": {"command_timeout": "140m", "step_timeout_minutes": 150, "job_timeout_minutes": 160}
               },
               "hipsparselt": {
-                "quick":    {"command_timeout": "15m",  "step_timeout_minutes": 25,  "job_timeout_minutes": 55},
-                "standard": {"command_timeout": "195m", "step_timeout_minutes": 205, "job_timeout_minutes": 235}
+                "quick":    {"command_timeout": "25m",  "step_timeout_minutes": 35,  "job_timeout_minutes": 45},
+                "standard": {"command_timeout": "195m", "step_timeout_minutes": 205, "job_timeout_minutes": 215}
               }
             },
             "gfx950": {
               "hipblaslt": {
-                "quick":    {"command_timeout": "10m",  "step_timeout_minutes": 20,  "job_timeout_minutes": 50},
-                "standard": {"command_timeout": "195m", "step_timeout_minutes": 205, "job_timeout_minutes": 235}
+                "quick":    {"command_timeout": "25m",  "step_timeout_minutes": 35,  "job_timeout_minutes": 45},
+                "standard": {"command_timeout": "195m", "step_timeout_minutes": 205, "job_timeout_minutes": 215}
               },
               "hipsparselt": {
-                "quick":    {"command_timeout": "10m",  "step_timeout_minutes": 20,  "job_timeout_minutes": 50},
-                "standard": {"command_timeout": "195m", "step_timeout_minutes": 205, "job_timeout_minutes": 235}
+                "quick":    {"command_timeout": "25m",  "step_timeout_minutes": 35,  "job_timeout_minutes": 45},
+                "standard": {"command_timeout": "195m", "step_timeout_minutes": 205, "job_timeout_minutes": 215}
               }
             }
           }'
@@ -129,20 +129,25 @@ jobs:
       AMDGPU_FAMILIES: ${{ matrix.family }}
       TEATIME_FORCE_INTERACTIVE: 0
       ARTIFACT_GROUP: ${{ matrix.family }}-host-asan
+      # Each build produces its own generic runtime artifacts. Keep those
+      # separate across families, while allowing test-only reruns to reuse them.
+      THEROCK_RUN_ID: ${{ github.run_id }}-host-asan-${{ matrix.family }}
     steps:
-      - name: "Check out rocm-libraries"
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
       - name: Checkout TheRock repository
+        # TheRock is at the workspace root, so ./.github/actions/... uses its actions.
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          path: TheRock
           ref: ${{ needs.setup.outputs.therock_ref }}
+
+      - name: "Check out rocm-libraries"
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          path: rocm-libraries
 
       - name: Install python deps
         run: |
-          pip install -r TheRock/requirements.txt
+          pip install -r requirements.txt
 
       - name: Adjust git config
         run: |
@@ -151,16 +156,17 @@ jobs:
 
       - name: Setup ccache
         run: |
-          ./TheRock/build_tools/setup_ccache.py \
+          ./build_tools/setup_ccache.py \
             --config-preset "github-oss-dev" \
             --dir "$(dirname "$CCACHE_CONFIGPATH")" \
             --local-path "$CACHE_DIR/ccache"
 
       - name: Runner health status
         run: |
-          ./TheRock/build_tools/health_status.py
+          ./build_tools/health_status.py
 
       - name: Pull DVC files for rocm-libraries
+        working-directory: rocm-libraries
         run: |
           if command -v dvc &> /dev/null; then
             echo "dvc detected"
@@ -172,39 +178,26 @@ jobs:
       - name: Fetch sources
         timeout-minutes: 30
         run: |
-          ./TheRock/build_tools/fetch_sources.py --jobs 12 --depth 1 --progress --no-include-rocm-libraries --no-include-ml-frameworks
+          ./build_tools/fetch_sources.py --jobs 12 --depth 1 --progress --no-include-rocm-libraries --no-include-ml-frameworks
 
       - name: Configure TheRock host-ASAN math-libs
         env:
           amdgpu_families: ${{ env.AMDGPU_FAMILIES }}
           package_version: ADHOCBUILD
-          # Mirrors TheRock's linux-release-host-asan preset while retaining
-          # this workflow's focused single-family build.
+          cmake_preset: linux-release-host-asan
           extra_cmake_options: >-
-            -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=../
+            -DTHEROCK_ROCM_LIBRARIES_SOURCE_DIR=rocm-libraries
             -DTHEROCK_DIST_AMDGPU_FAMILIES=${{ matrix.family }}
             -DTHEROCK_ENABLE_ALL=OFF
             -DTHEROCK_ENABLE_BLAS=ON
             -DTHEROCK_ENABLE_SPARSE=ON
-            -DTHEROCK_SANITIZER=HOST_ASAN
-            -Damd-llvm_BUILD_TYPE=Release
-            -Dtherock-host-blas_BUILD_TYPE=Release
-            -Dtherock-SuiteSparse_BUILD_TYPE=Release
-            -Damd-llvm_SANITIZER=OFF
-            -Damd-comgr_SANITIZER=HOST_ASAN
-            -Dhipcc_SANITIZER=OFF
-            -Dhipify_SANITIZER=OFF
-            -Daqlprofile_SANITIZER=OFF
-            -Drocprof-trace-decoder_SANITIZER=OFF
-            -Droctracer_SANITIZER=OFF
-            -DTHEROCK_FLAG_STAMP_LIBRARY_GIT_VERSIONS=ON
             -Drocprofiler-sdk_CMAKE_ARGS=-DROCPROFILER_BUILD_TESTS=OFF
           BUILD_DIR: build
         run: |
-          python3 TheRock/build_tools/github_actions/build_configure.py
+          python3 build_tools/github_actions/build_configure.py
 
-      - name: Build hipBLASLt through staged hipSPARSELt consumer (HOST_ASAN)
-        run: cmake --build TheRock/build --target hipSPARSELt -- -k 0
+      - name: Build hipSPARSELt and TheRock artifacts (HOST_ASAN)
+        run: cmake --build build --target hipSPARSELt therock-artifacts -- -k 0
 
       - name: Report
         if: ${{ !cancelled() }}
@@ -212,56 +205,21 @@ jobs:
           echo "## hipBLASLt"
           echo "------------------------------------"
           for kind in stage dist; do
-            find TheRock/build -maxdepth 6 -type d -path "*/math-libs/BLAS/hipBLASLt/${kind}" 2>/dev/null || true
-            find TheRock/build -maxdepth 6 -type d -path "*/math-libs/BLAS/hipSPARSELt/${kind}" 2>/dev/null || true
+            find build -maxdepth 6 -type d -path "*/math-libs/BLAS/hipBLASLt/${kind}" 2>/dev/null || true
+            find build -maxdepth 6 -type d -path "*/math-libs/BLAS/hipSPARSELt/${kind}" 2>/dev/null || true
           done
-          find TheRock/build -maxdepth 8 -type f -name "hipblaslt-test" 2>/dev/null || true
+          find build -maxdepth 8 -type f -name "hipblaslt-test" 2>/dev/null || true
           echo "CCache Stats:"
           echo "-------------"
           ccache -s -v || true
 
-      - name: Package ASAN trees
-        if: ${{ !cancelled() }}
-        shell: bash
-        env:
-          COMPONENTS: ${{ join(matrix.components, ' ') }}
+      - name: Configure ASAN artifact upload credentials
+        uses: ./.github/actions/configure_aws_artifacts_credentials
+
+      - name: Compress and upload TheRock artifacts
         run: |
-          set -uo pipefail
-          read -r -a components <<< "$COMPONENTS"
-          for component in "${components[@]}"; do
-            name="${component,,}"
-            mkdir -p "upload/${name}"
-            found=0
-            for kind in stage dist; do
-              d=$(find TheRock/build -maxdepth 6 -type d -path "*/math-libs/BLAS/${component}/${kind}" 2>/dev/null | head -1)
-              if [ -n "$d" ] && [ -d "$d" ]; then
-                echo "Packaging ${component}/${kind}: $d"
-                if tar -C "$d" -czf "upload/${name}/${name}-${kind}.tar.gz" . ; then found=1; fi
-              else
-                echo "::warning::no ${component}/${kind} tree found"
-              fi
-            done
-            [ "$found" = 1 ] || echo "::warning::no stage/dist tree packaged for ${component}"
-            ls -lh "upload/${name}" || true
-          done
-
-      - name: Upload hipBLASLt trees
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
-        with:
-          name: asan-trees-hipblaslt-${{ matrix.family }}
-          path: upload/hipblaslt/*.tar.gz
-          if-no-files-found: warn
-          retention-days: 7
-
-      - name: Upload hipSPARSELt trees
-        if: ${{ !cancelled() && contains(matrix.components, 'hipSPARSELt') }}
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
-        with:
-          name: asan-trees-hipsparselt-${{ matrix.family }}
-          path: upload/hipsparselt/*.tar.gz
-          if-no-files-found: warn
-          retention-days: 7
+          python build_tools/artifact_manager.py push \
+            --stage all --build-dir build
 
   test:
     name: "Test ${{ matrix.component }} HOST_ASAN | ${{ matrix.family }} (${{ needs.setup.outputs.test_type }})"
@@ -292,6 +250,7 @@ jobs:
       THEROCK_DIR: ${{ github.workspace }}
       AMDGPU_FAMILIES: ${{ matrix.family }}
       ARTIFACT_GROUP: ${{ matrix.family }}-host-asan
+      THEROCK_RUN_ID: ${{ github.run_id }}-host-asan-${{ matrix.family }}
       HSA_XNACK: "0"
       TEST_COMPONENT: ${{ matrix.component }}
     steps:
@@ -311,23 +270,26 @@ jobs:
             test/therock
           sparse-checkout-cone-mode: true
 
-      - name: Download ASAN trees
-        timeout-minutes: 30
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
-          name: asan-trees-${{ matrix.component }}-${{ matrix.family }}
-          path: asan-trees
+          python-version: '3.12'
 
-      - name: Assemble runnable tree from dist (+ stage overlay)
+      - name: Install artifact dependencies
+        run: pip install --constraint build_tools/packaging/linux/requirements.txt boto3 pyzstd
+
+      - name: Download and install TheRock artifacts
+        timeout-minutes: 5
         run: |
-          set -euo pipefail
-          mkdir -p "${OUTPUT_ARTIFACTS_DIR}"
-          tar -C "${OUTPUT_ARTIFACTS_DIR}" -xzf "asan-trees/${TEST_COMPONENT}-dist.tar.gz"
-          if [ -f "asan-trees/${TEST_COMPONENT}-stage.tar.gz" ]; then
-            tar -C "${OUTPUT_ARTIFACTS_DIR}" -xzf "asan-trees/${TEST_COMPONENT}-stage.tar.gz"
-          fi
-          test -x "${THEROCK_BIN_DIR}/${TEST_COMPONENT}-test"
-          echo "Extracted tree:"; ls -1 "${OUTPUT_ARTIFACTS_DIR}"
+          # Require fresh destinations: artifact_manager treats existing archives as cached.
+          mkdir "${OUTPUT_ARTIFACTS_DIR}"
+          python build_tools/artifact_manager.py fetch \
+            --stage all --amdgpu-families "$AMDGPU_FAMILIES" \
+            --exclude-components dev,doc \
+            --output-dir "$OUTPUT_ARTIFACTS_DIR" --flatten
+
+      - name: Check test executable
+        run: test -x "${THEROCK_BIN_DIR}/${TEST_COMPONENT}-test"
 
       - name: Driver / GPU sanity check
         timeout-minutes: 3
@@ -352,11 +314,6 @@ jobs:
             echo "ASAN_SYMBOLIZER_PATH=${OUT}/lib/llvm/bin/llvm-symbolizer"
             echo "LD_LIBRARY_PATH=${OUT}/lib:${ASAN_RT_DIR}:${LD_LIBRARY_PATH:-}"
           } >> "$GITHUB_ENV"
-
-      - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
-        with:
-          python-version: '3.12'
 
       - name: Set up Python YAML converter
         run: |
