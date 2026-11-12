@@ -79,9 +79,9 @@ auto GetCandidateSelectionModelFiles(const CandidateSelectionParams& params)
 
 // Note: there is no "skip if the config encoder is missing" guard any more. The config encoder is
 // never shipped (the precomputed embedding table replaces it) and nothing here needs it -- the
-// model constructor does not load it, EncodeKernelConfigs resolves through the table, and the
-// input-feature tests use the input encoder. The fixture already skips/fails on missing input
-// encoder + metadata.
+// model constructor does not load it, candidate selection reads the precomputed config vocabulary,
+// and the input-feature tests use the input encoder. The fixture already skips/fails on missing
+// input encoder + metadata.
 
 auto GetMissingModelFiles(const CandidateSelectionParams& params)
 {
@@ -178,10 +178,9 @@ TEST_P(GPU_CandidateSelection_FP32, EncodeInputFeatures_Test)
     ASSERT_FALSE(encoded.empty()) << "EncodeInputFeatures returned empty vector!";
 }
 
-// (EncodeKernelConfigs on a synthetic candidate is covered by EncodeKernelConfigsEdgeCases: with
-// the fdeep config tower removed, a candidate that is not an exact table key misses and throws, so
-// there is no "encode an arbitrary candidate to a non-empty vector" case to assert -- only a hit,
-// which requires a real enumerated config and is exercised end to end by the driver.)
+// (The config side is now the precomputed vocabulary ranked by SelectBestVocabCandidate -- there is
+// no per-candidate config encode to assert here; the end-to-end selection is exercised by the
+// driver and the SelectBestVocab* tests below.)
 
 TEST_P(GPU_CandidateSelection_FP32, EncodeInputFeaturesEdgeCases_Test)
 {

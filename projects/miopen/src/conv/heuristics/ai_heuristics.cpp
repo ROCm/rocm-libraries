@@ -51,9 +51,9 @@
 #include <unordered_map>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT)
-// Disable the precomputed config-tower embedding table. With no table, config encoding has no
-// source (the fdeep config encoder is not shipped), so EncodeKernelConfigs throws and selection
-// falls back to the non-AI heuristic. Default: use the table when a
+// Disable the precomputed config-tower embedding table. With no table the config vocabulary is
+// empty (the fdeep config encoder is not shipped), so SelectBestVocabCandidate finds nothing and
+// selection falls back to the non-AI heuristic. Default: use the table when a
 // {arch}_{solver}_kernel_config_embeddings.bin is present.
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_ENABLE_LGBM_SELECTOR)
