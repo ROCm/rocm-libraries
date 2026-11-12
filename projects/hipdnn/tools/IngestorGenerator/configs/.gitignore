@@ -4,3 +4,5 @@
 /gfx950_conv_dgrad_aot_bf16.instances.json
 /gfx1250_conv_dgrad_aot_fp16.instances.json
 /gfx1250_conv_dgrad_aot_bf16.instances.json
+/gfx942_conv_dgrad_aot_fp16.instances.json
+/gfx942_conv_dgrad_aot_bf16.instances.json

@@ -4,8 +4,8 @@
 """Turn rocKE AOT backward-data conv instances into a dgrad AOT engine config.
 
 One tool for every dgrad engine of the rocKE adapter's ``TARGETS``, chosen by
-``--arch`` (:func:`arches`): ``hipkernel:Gfx950ConvDgradAot`` (the default) and
-``hipkernel:Gfx1250ConvDgradAot``.
+``--arch`` (:func:`arches`): ``hipkernel:Gfx950ConvDgradAot`` (the default),
+``hipkernel:Gfx942ConvDgradAot`` and ``hipkernel:Gfx1250ConvDgradAot``.
 The input is JSON lists of rocKE ``KernelIdentity`` dicts (or objects carrying one
 under ``"identity"``); the output is a packaged-dialect generator config, followed by
 a ``--stabilize-ids`` step. The YAML dumper, variant layout and id derivation are the
@@ -18,15 +18,17 @@ that the packaged launch runs: an implicit-GEMM identity of the dgrad AOT sweep
 (``benchmarks/common/kernel_sweep.py``; it carries ``lds_k_outer`` and
 ``max_sub_gemms``), or a dgrad identity of the direct sweep
 (``benchmarks/common/direct_kernel_sweep.py``) of a packaged algorithm
-(:func:`packaged_direct_algorithms`), including each gfx950 MFMA pipeline's
-weight-transform helpers (``direct_dgrad_helper``). The helpers are packaged as kernels of their own
+(:func:`packaged_direct_algorithms`), including each gfx950 and gfx942 MFMA
+pipeline's weight-transform helpers (``direct_dgrad_helper``). The helpers are packaged as kernels of their own
 family (``kernel_family`` 2) that the kernel matcher never admits; the MFMA dispatch
 loads them from the same pack. Anything else is listed with its reason and the tool
 exits non-zero, unless ``--skip-unsupported`` is given.
 
 An engine's shipped catalog is ``configs/<arch>_conv_dgrad_aot_<dtype>.instances.json``,
-written by ``tools/enumerate_conv_dgrad_aot_instances.py``::
+written by ``tools/enumerate_conv_dgrad_aot_instances.py``. Run under the catalog's
+own LLVM flavor (gfx950 and gfx942 ``llvm22``, gfx1250 ``llvm24``), e.g. for gfx942::
 
+    export ARCH=gfx942 ROCKE_LLVM_FLAVOR=llvm22
     python tools/make_conv_dgrad_aot_config.py --arch "$ARCH" --rocke-root "$ROCKE" \\
         --instances configs/"$ARCH"_conv_dgrad_aot_{fp16,bf16}.instances.json \\
         --output "$WORK"/dgrad_aot.yaml

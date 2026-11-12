@@ -236,6 +236,54 @@ def test_committed_gfx1250_lists_are_what_the_tool_enumerates(
         assert (out / name).read_bytes() == (_CONFIGS / name).read_bytes(), dtype
 
 
+@pytest.fixture(scope="module")
+def committed_gfx942():
+    """The committed gfx942 per-dtype instance lists."""
+    paths = {
+        dtype: _CONFIGS / tool.INSTANCE_LIST.format(arch="gfx942", dtype=dtype)
+        for dtype in tool.DTYPES
+    }
+    missing = sorted(str(p) for p in paths.values() if not p.exists())
+    if missing:
+        pytest.skip(
+            "DVC-tracked instance list(s) not pulled, run `dvc pull` in "
+            f"{_CONFIGS}: {missing}"
+        )
+    return {dtype: json.loads(path.read_text()) for dtype, path in paths.items()}
+
+
+def test_the_gfx942_lists_are_rockes_gfx942_catalog_and_its_helpers(committed_gfx942):
+    """gfx942 has gfx950's MFMA pipelines: the lists are exactly rocKE's registered
+    gfx942 instances plus the weight-transform helpers their MFMA entries launch."""
+    listed = set()
+    for dtype, entries in committed_gfx942.items():
+        assert {e["arch"] for e in entries} == {"gfx942"}
+        helpers = {tool.stable_hash(e) for e in entries if tool.family(e) == "helper"}
+        needed = {
+            tool.stable_hash(h) for e in entries for h in tool.helper_identities(e)
+        }
+        assert helpers and helpers == needed, dtype
+        listed |= {tool.stable_hash(e) for e in entries if tool.family(e) != "helper"}
+    catalog = tool.read_rocke_catalog("dgrad", "gfx942")
+    assert listed == {tool.stable_hash(i) for i in catalog}
+
+
+def test_committed_gfx942_lists_are_what_the_tool_enumerates(
+    tmp_path, committed_gfx942, monkeypatch
+):
+    """As test_committed_instance_lists_are_what_the_tool_enumerates, for --arch
+    gfx942."""
+    flavor = committed_gfx942["fp16"][0]["llvm_flavor"]
+    monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
+    out = tmp_path / "lists"
+    argv = ["--arch", "gfx942", "--rocke-root", str(_ROCKE)]
+    argv += ["--output-dir", str(out), "--jobs", str(_JOBS)]
+    assert tool.main(argv) == 0
+    for dtype in tool.DTYPES:
+        name = tool.INSTANCE_LIST.format(arch="gfx942", dtype=dtype)
+        assert (out / name).read_bytes() == (_CONFIGS / name).read_bytes(), dtype
+
+
 def test_without_rocke_root_the_tool_binds_the_in_repo_tree(tmp_path, monkeypatch):
     from test_make_conv_dgrad_aot_config import _bound_root
 
@@ -249,6 +297,6 @@ def test_without_rocke_root_the_tool_binds_the_in_repo_tree(tmp_path, monkeypatc
 
 def test_main_refuses_an_arch_the_adapter_does_not_package(tmp_path, capsys):
     with pytest.raises(SystemExit):
-        tool.main(["--arch", "gfx942", "--output-dir", str(tmp_path)])
-    assert "invalid choice: 'gfx942'" in capsys.readouterr().err
+        tool.main(["--arch", "gfx90a", "--output-dir", str(tmp_path)])
+    assert "invalid choice: 'gfx90a'" in capsys.readouterr().err
     assert not any(tmp_path.iterdir())

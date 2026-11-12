@@ -5,8 +5,9 @@
 
 The bundle and catalog tests run for every engine (the ``arch`` fixture: the
 adapter's ``TARGETS``); the rest pin hipkernel:Gfx950ConvDgradAot. Cases only
-hipkernel:Gfx1250ConvDgradAot has are test_make_gfx1250_conv_dgrad_aot_config.py's,
-which reuses the loaders here."""
+hipkernel:Gfx1250ConvDgradAot or hipkernel:Gfx942ConvDgradAot has are
+test_make_gfx1250_conv_dgrad_aot_config.py's and
+test_make_gfx942_conv_dgrad_aot_config.py's, which reuse the loaders here."""
 
 import collections
 import copy
@@ -44,6 +45,8 @@ _FWD_DIRS = (
     _PROVIDER / "test_descriptors/integration/rocKE/gfx950_conv_fwd_aot_seed",
 )
 _FILE_SIZE_LIMIT = 50 * 1000 * 1000
+#: An architecture with no dgrad engine.
+_NO_ENGINE_ARCH = "gfx90a"
 _JOBS = min(32, os.cpu_count() or 1)
 
 
@@ -62,13 +65,14 @@ def _adapter_arches():
 ARCHES = _adapter_arches()
 #: Per engine, the implicit-GEMM pipelines its shards are named for.
 _PIPELINES = {
+    "gfx942": ("mem", "compv3", "compv4"),
     "gfx950": ("mem", "compv3", "compv4"),
     "gfx1250": ("mem", "wavelet"),
 }
 #: Per engine, the (dtype, family, capability) partitions its matched kernels span,
 #: and its implicit-GEMM kernels per dtype.
-_PARTITIONS = {"gfx950": 34, "gfx1250": 46}
-_IMPLICIT_PER_DTYPE = {"gfx950": 141, "gfx1250": 25}
+_PARTITIONS = {"gfx942": 32, "gfx950": 34, "gfx1250": 46}
+_IMPLICIT_PER_DTYPE = {"gfx942": 128, "gfx950": 141, "gfx1250": 25}
 
 
 def slug(arch):
@@ -125,6 +129,13 @@ def load_shipped(arch):
 
 def document(arch, kind):
     return json.loads((shipped_dir(arch) / f"{slug(arch)}.{kind}.json").read_text())
+
+
+def ships_a_ranker(arch):
+    """Whether ``arch``'s engine ships a trained ranker: a promoted model packet
+    turns the UED's default sort list into a list (the native scorer, then the
+    model) and adds the DVC-tracked ``heuristics/`` beside the KDPs."""
+    return isinstance(document(arch, "ued")["sort_kernel_catalog"]["default"], list)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -259,12 +270,8 @@ def test_the_shipped_bundle_is_sharded_below_the_hosting_size_limit(arch, specs)
     }
     assert names == sorted(
         [f"{slug(arch)}.{kind}.json" for kind in ("kmd", "udd", "ued", "uhd")]
-        + [
-            "kernel_dtype_matches_graph.umd.json",
-            "artifacts.dvc",
-            "heuristics.dvc",
-            ".gitignore",
-        ]
+        + ["kernel_dtype_matches_graph.umd.json", "artifacts.dvc", ".gitignore"]
+        + (["heuristics.dvc"] if ships_a_ranker(arch) else [])
     )
     matcher = json.loads((folder / "kernel_dtype_matches_graph.umd.json").read_text())
     top_level = [path for path in folder.iterdir() if path.is_file()]
@@ -293,8 +300,11 @@ def test_the_bundle_names_its_own_native_symbols(arch):
     # id after it instead of replacing it, so "default" is a list once one ships.
     assert list(ued["sort_kernel_catalog"]) == ["default"]
     default = ued["sort_kernel_catalog"]["default"]
-    assert isinstance(default, list) and default[0] == uhd["id"]
-    assert all(isinstance(i, str) for i in default)
+    if ships_a_ranker(arch):
+        assert len(default) > 1 and default[0] == uhd["id"]
+        assert all(isinstance(i, str) for i in default)
+    else:
+        assert default == uhd["id"]
     assert ued["knobs"] == list(tool.engine_knobs(arch))
     kmd_names = [f["name"] for f in kmd["fields"]]
     assert kmd_names == [f["name"] for f in tool.kmd_fields(arch)]
@@ -489,7 +499,7 @@ def test_the_census_names_every_pack_and_kernel(arch, shipped):
     [
         ({"direction": "fwd"}, "dgrad implicit-GEMM"),
         ({"direction": "wgrad"}, "dgrad implicit-GEMM"),
-        ({"arch": "gfx942"}, "no packaged dgrad engine"),
+        ({"arch": _NO_ENGINE_ARCH}, "no packaged dgrad engine"),
         ({"dtype_d": "fp32"}, "mixed operand dtypes"),
         ({"split_k": 2}, "split_k"),
         # Padding stays runtime-only: the tilde records carry it, and nothing bakes it.
@@ -634,8 +644,8 @@ def test_main_dedups_and_refuses_unsupported_unless_asked(
 
 def test_main_refuses_an_arch_the_adapter_does_not_package(capsys):
     with pytest.raises(SystemExit):
-        tool.main(["--arch", "gfx942", "--stabilize-ids", "x.kdp.json"])
-    assert "invalid choice: 'gfx942'" in capsys.readouterr().err
+        tool.main(["--arch", _NO_ENGINE_ARCH, "--stabilize-ids", "x.kdp.json"])
+    assert f"invalid choice: '{_NO_ENGINE_ARCH}'" in capsys.readouterr().err
 
 
 def test_stabilize_ids_derives_product_ids_and_matches_the_shipped_kdp(
