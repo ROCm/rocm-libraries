@@ -133,8 +133,8 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
 
         // Reuse only an analysis built with the same index types. A mismatched one is
         // rebuilt below, so the solve never reads a row map of another width.
-        if(trm != nullptr && trm->get_offset_indextype() == rocsparse::get_indextype<I>()
-           && trm->get_index_indextype() == rocsparse::get_indextype<J>())
+        if(trm != nullptr
+           && trm->has_indextypes(rocsparse::get_indextype<I>(), rocsparse::get_indextype<J>()))
         {
             info->set_bsrsv_info(trans, descr->fill_mode, trm);
             return rocsparse_status_success;
@@ -142,6 +142,13 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
     }
 
     auto bsrsv_info = info->get_bsrsv_info();
+
+    // Reuse stores a raw alias of a bsric0, bsrilu0 or bsrsm analysis in this
+    // slot. recreate deletes whatever the slot holds, so drop the alias first
+    // and leave the analysis with the routine that created it. An analysis
+    // this routine owns stays in the slot and is replaced.
+    info->detach_borrowed_bsrsv(trans, descr->fill_mode);
+
     RETURN_IF_ROCSPARSE_ERROR(bsrsv_info->recreate(
         handle, trans, mb, nnzb, descr, bsr_val, bsr_row_ptr, bsr_col_ind, temp_buffer));
 

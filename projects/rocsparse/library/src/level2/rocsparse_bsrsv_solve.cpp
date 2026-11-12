@@ -538,13 +538,12 @@ namespace rocsparse
         // Validate before any device memory is touched. This is an exported entry point
         // that a future rocsparse_sptrsv caller reaches with other index types, so the
         // analysis must have been built with the same row-pointer and column-index types.
-        if(trm_info == nullptr || temp_buffer == nullptr)
+        if(trm_info == nullptr || temp_buffer == nullptr || zero_pivot == nullptr)
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);
         }
 
-        if(trm_info->get_offset_indextype() != rocsparse::get_indextype<I>()
-           || trm_info->get_index_indextype() != rocsparse::get_indextype<J>())
+        if(!trm_info->has_indextypes(rocsparse::get_indextype<I>(), rocsparse::get_indextype<J>()))
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
         }

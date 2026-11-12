@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -99,6 +99,10 @@ namespace rocsparse
         void clear_bsrilu0_info();
         void clear_bsric0_info();
         void clear_ellsv_info();
+
+        // Null one bsrsv slot when it aliases an analysis another routine owns,
+        // so a later recreate does not delete that analysis.
+        void detach_borrowed_bsrsv(rocsparse_operation operation, rocsparse_fill_mode fill_mode);
 
     public:
         trm_t() = default;
