@@ -165,8 +165,11 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
        && batch_mode    == HIPBLASLT_BATCH_MODE_STRIDED
        // BLAS leaves A and B unreferenced when alpha == 0, so callers may pass
        // null pointers; the native path computes beta * C without reading them.
-       // Evaluated after !pointermode, so alpha is a host pointer here.
-       && !hostScalarIsZero(alphaBetaScalarType(scale_type, compute_type, type_a), alpha))
+       // Evaluated after !pointermode, so alpha is a host pointer here. Read
+       // alpha as the emulated GEMM reads it (FP64 or FP32 for the compute
+       // type), not as the scale type: a 64F compute type with a 32F scale
+       // type passes a double alpha, whose low 4 bytes are zero for 1.0.
+       && !hostScalarIsZero(fixedPointEmulatedComputeDataType(compute_type), alpha))
     {
         FixedPointEmulationSettings emulDecision
             = fixedPointEmulationDecision(handle,
