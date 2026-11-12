@@ -4,6 +4,10 @@
 - `tuning/M<m>_N<n>_K<k>.yaml`: one Tensile tuning config per size. Group 1 = new winner, group 2 = previous logic kernel
   (logic_1109a, for an A/B in the same client run). Pure GEMM, `Exact: [M, N, 1, K, M, M, LDA, LDB]` with LDA = LDB = ceil(K/128)*128,
   EnqueuesPerSync 1000 / NumWarmups 300 / NumBenchmarks 5, RotatingBufferSize 384.
+- `tuning_fused_ldaK/M<m>_N<n>_K<k>.yaml`: the same kernels per size as `tuning/`, as fused GEMM with unpadded
+  leading dimensions: Bias (f32) + ScaleAlphaVec, activation none, ActivationFuncCall true (the problem type of the
+  logic file), `Exact: [M, N, 1, K, M, M, K, K]` (LDA = LDB = K, LDC = LDD = M), same benchmark settings.
+  The logic file serves both variants: its ExactLogic keys are [M, N, 1, K] only (no strides).
 
 ## Results (Tensile client, GPU0, pure GEMM, LDA/LDB padded, median of rounds 1+)
 
