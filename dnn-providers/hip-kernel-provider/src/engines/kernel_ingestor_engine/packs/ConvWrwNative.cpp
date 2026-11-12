@@ -43,7 +43,9 @@
  * where there is no fp32 matrix core and, on gfx950, a direct loop for 16-bit channels-last
  * unit-stride layers (LDS DMA, swizzled transpose reads, an 8-wave ping-pong, a persistent
  * grid): x and dy are read in place
- * (packed channels-first or channels-last), every filter-width tap of a block's filter rows
+ * (packed channels-first or channels-last; the generic tier, loop 8, through any strides and
+ * at runtime filter widths, strides and dilations, where no specialized config's class serves),
+ * every filter-width tap of a block's filter rows
  * accumulates in registers, and the reduction over images and output positions is split over
  * blocks into fp32 partials in the workspace, which ConvWrwReduce (the same source under a
  * second entry point) adds in split order into dw: deterministic, no atomics. At one split
@@ -109,6 +111,11 @@ WrwConfig configOf(const KernelDefinition& kernel)
     config.dws = kernel.getIntMetadata("dws");
     config.pb = kernel.getIntMetadata("pb");
     config.bpu = kernel.getIntMetadata("bpu");
+    // The generic loop's specialized classes (the two tiers); no other loop carries them.
+    if(config.loop == conv_wrw::LOOP_GENERIC)
+    {
+        config.spec = kernel.getStringMetadata("spec");
+    }
     return config;
 }
 

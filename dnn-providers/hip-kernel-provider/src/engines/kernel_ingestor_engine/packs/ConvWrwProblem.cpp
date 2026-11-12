@@ -9,7 +9,9 @@
 #include "engines/kernel_ingestor_engine/descriptors/conv/wrw/kernels/ConvWrwGeom.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
+#include <iterator>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -40,6 +42,9 @@ constexpr int64_t MAX_PASSES = 32;
 constexpr int64_t MAX_PACK_PASSES = 64;
 /// Positions past an output row a block's chunk may reach (bq at most 512).
 constexpr int64_t CHUNK_MARGIN = 512;
+/// The generic loop declines filters of at most this many taps dilated at least this far.
+constexpr int64_t GENERIC_SPARSE_MAX_TAPS = 9;
+constexpr int64_t GENERIC_SPARSE_MIN_DILATION = 6;
 /// The reduce: 256 threads, 64 four-channel quads of dw per block.
 constexpr int64_t REDUCE_QUADS_PER_BLOCK = 64;
 /// The most splits the row reduce takes (measured on gfx942: rows win at 1 and 2 splits, tie
@@ -68,6 +73,31 @@ bool packedInOrder(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
         expected *= extents[axis];
     }
     return true;
+}
+
+/// The elements one image (n fixed) of an operand of @p extents spans through @p strides (non-
+/// negative, as the base parse admits them): 1 + the sum over the other axes of (extent - 1) x
+/// stride. nullopt when the sum overflows.
+std::optional<int64_t> imageSpan(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
+                                 const std::array<long long, CONV_NAIVE_TENSOR_DIMS>& extents)
+{
+    int64_t span = 1;
+    for(size_t axis = 1; axis < CONV_NAIVE_TENSOR_DIMS; ++axis)
+    {
+        // An axis of extent 1, or of stride 0, reaches nothing (checkedMultiply takes positive
+        // factors only).
+        if(extents[axis] == 1 || strides[axis] == 0)
+        {
+            continue;
+        }
+        const auto reach = pack_features::checkedMultiply(extents[axis] - 1, strides[axis]);
+        if(!reach.has_value() || *reach > std::numeric_limits<int64_t>::max() - span)
+        {
+            return std::nullopt;
+        }
+        span += *reach;
+    }
+    return span;
 }
 
 constexpr std::array<size_t, CONV_NAIVE_TENSOR_DIMS> CHANNELS_FIRST_ORDER{0, 1, 2, 3, 4};
@@ -132,7 +162,8 @@ std::optional<WrwProblem> parseWrwProblem(const hipdnn_plugin_sdk::ingestor::Mat
     }
     const auto& a = base->args;
     const long long cg = a.c / a.groups;
-    // x and dy: both packed channels-first or both packed channels-last.
+    // x and dy: both packed channels-first or both packed channels-last (every loop), or any
+    // strides (the generic loop).
     const std::array<long long, CONV_NAIVE_TENSOR_DIMS> xExtents{
         a.n, a.c, a.inSpatial[0], a.inSpatial[1], a.inSpatial[2]};
     const std::array<long long, CONV_NAIVE_TENSOR_DIMS> yExtents{
@@ -143,7 +174,10 @@ std::optional<WrwProblem> parseWrwProblem(const hipdnn_plugin_sdk::ingestor::Mat
                                && packedInOrder(a.yStrides, yExtents, CHANNELS_FIRST_ORDER);
     const bool channelsLast = packedInOrder(a.xStrides, xExtents, CHANNELS_LAST_ORDER)
                               && packedInOrder(a.yStrides, yExtents, CHANNELS_LAST_ORDER);
-    if(!channelsFirst && !channelsLast)
+    // Otherwise (the generic loop only) any positive strides: an image spans its strides' reach.
+    const auto xSpan = imageSpan(a.xStrides, xExtents);
+    const auto ySpan = imageSpan(a.yStrides, yExtents);
+    if(!xSpan.has_value() || !ySpan.has_value())
     {
         return std::nullopt;
     }
@@ -196,6 +230,26 @@ std::optional<WrwProblem> parseWrwProblem(const hipdnn_plugin_sdk::ingestor::Mat
     {
         return std::nullopt;
     }
+    // Strided operands: each image's span one 32-bit-addressed buffer.
+    if(!channelsFirst && !channelsLast
+       && (*xSpan > INT_LIMIT / elementBytes || *ySpan > INT_LIMIT / elementBytes))
+    {
+        return std::nullopt;
+    }
+    // Unit channel strides, every other stride (of an axis past 1) whole 16-byte vectors, and
+    // channels per group whole vectors: the generic loop's channel-vector loads.
+    const long long v = 16 / elementBytes;
+    const long long kg = a.k / a.groups;
+    bool vectorChannels = a.xStrides[1] == 1 && a.yStrides[1] == 1 && cg % v == 0 && kg % v == 0;
+    for(size_t axis = 0; axis < CONV_NAIVE_TENSOR_DIMS; ++axis)
+    {
+        if(axis != 1
+           && ((xExtents[axis] != 1 && a.xStrides[axis] % v != 0)
+               || (yExtents[axis] != 1 && a.yStrides[axis] % v != 0)))
+        {
+            vectorChannels = false;
+        }
+    }
     WrwProblem problem;
     problem.elementBytes = elementBytes;
     problem.channelsFirst = channelsFirst;
@@ -203,6 +257,9 @@ std::optional<WrwProblem> parseWrwProblem(const hipdnn_plugin_sdk::ingestor::Mat
     problem.filterChannelsLast = !filterChannelsFirst;
     problem.taps = *taps;
     problem.largeImage = largeImage;
+    problem.vectorChannels = vectorChannels;
+    problem.xSpan = *xSpan;
+    problem.ySpan = *ySpan;
     problem.xUid = base->operands.x;
     problem.dyUid = base->operands.y;
     problem.dwUid = base->operands.w;
@@ -280,6 +337,27 @@ int64_t ldsBytesOf(const WrwConfig& config, int elementBytes)
 int64_t loadPassesOf(const WrwConfig& config, int elementBytes, int64_t wave)
 {
     const int64_t vec = config.vec;
+    if(config.loop == LOOP_GENERIC)
+    {
+        // k3WrwGeneric's loads a thread holds: channels-first, a position's bk and fr bc channel
+        // rows over threads / bq rows a pass; channels-last, units of vec channels at kw
+        // positions (one 32-bit LDS word), kw loads each.
+        const int64_t threads = config.wk * config.wc * wave;
+        if(threads < 1 || config.bq < 1 || vec < 1 || threads % config.bq != 0)
+        {
+            return std::numeric_limits<int64_t>::max();
+        }
+        if(config.layout == LAYOUT_CHANNELS_FIRST)
+        {
+            const int64_t rows = threads / config.bq;
+            return divUp(config.bk, rows) + divUp(config.fr * config.bc, rows);
+        }
+        const int64_t kw = 4 / elementBytes;
+        const int64_t words = divUp(config.bq, kw);
+        return (divUp(divUp(config.bk, vec) * words, threads)
+                + divUp(config.fr * divUp(config.bc, vec) * words, threads))
+               * kw;
+    }
     if(config.loop == LOOP_DIRECT)
     {
         // The x and dy rounds of a row over an item's 8 / wq waves (k3dLoads).
@@ -378,6 +456,84 @@ int64_t loadPassesOf(const WrwConfig& config, int elementBytes, int64_t wave)
     const int64_t bUnits
         = cf ? rows * config.bc * nbv : rows * config.sw * (ph / kv) * (config.bc / vec);
     return std::max(divUp(aUnits, threads), divUp(bUnits, threads));
+}
+
+std::optional<bool>
+    specServes(const WrwProblem& problem, std::string_view key, std::string_view gcnArchName)
+{
+    // "<atom_id><kind><layout>.<s>.<sw>.<dw>.<fr>"
+    size_t at = 0;
+    const auto readInt = [&](int64_t& value) {
+        const auto [end, ec] = std::from_chars(key.data() + at, key.data() + key.size(), value);
+        if(ec != std::errc() || end == key.data() + at)
+        {
+            return false;
+        }
+        at = static_cast<size_t>(end - key.data());
+        return true;
+    };
+    const auto readDotInt = [&](int64_t& value) {
+        if(at >= key.size() || key[at] != '.')
+        {
+            return false;
+        }
+        ++at;
+        return readInt(value);
+    };
+    int64_t atomId = -1;
+    int64_t layout = -1;
+    int64_t s = 0;
+    int64_t sw = 0;
+    int64_t dw = 0;
+    int64_t fr = -1;
+    if(!readInt(atomId) || atomId < 0 || atomId >= static_cast<int64_t>(ATOMS.size()) - 1
+       || at >= key.size())
+    {
+        return std::nullopt;
+    }
+    const char kind = key[at++];
+    const bool ring = kind == 'P' || kind == 'U' || kind == 'G' || kind == 'D';
+    if((kind != 'R' && kind != 'C' && !ring) || !readInt(layout) || layout < 0 || layout > 2
+       || !readDotInt(s) || !readDotInt(sw) || !readDotInt(dw) || !readDotInt(fr)
+       || at != key.size() || s < 1 || sw < 1 || dw < 1 || (ring ? fr < 1 : fr != 0))
+    {
+        return std::nullopt;
+    }
+    const std::string_view atom = ATOMS[static_cast<size_t>(atomId)];
+    const auto& a = problem.base.args;
+    const bool gfx950 = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName) == "gfx950";
+    if(!conv_igemm::atomRunsOn(atom, gcnArchName)
+       || conv_igemm::atomElement(atom) != conv_igemm::dataElement(problem.base.dataType)
+       || ((kind == 'G' || kind == 'D' || layout == LAYOUT_CHANNELS_LAST_TR) && !gfx950))
+    {
+        return false;
+    }
+    const int64_t vec = 16 / problem.elementBytes;
+    const int64_t kg = a.k / a.groups;
+    const int64_t cg = a.c / a.groups;
+    if((layout == LAYOUT_CHANNELS_FIRST ? !problem.channelsFirst : !problem.channelsLast)
+       || (layout != LAYOUT_CHANNELS_FIRST
+           && ((kind != 'U' && kg % vec != 0) || (kind != 'C' && cg % vec != 0)))
+       || problem.largeImage || s != a.filter[2] || sw != a.stride[2] || dw != a.dilation[2])
+    {
+        return false;
+    }
+    const bool wholeHeight = a.stride[1] == 1 && fr == a.filter[1];
+    switch(kind)
+    {
+    case 'C':
+        return cg <= 16;
+    case 'P':
+    case 'U':
+        // Or height phases (unit height dilation): ceil(filter height / sh) rows each.
+        return wholeHeight || (a.dilation[1] == 1 && fr == divUp(a.filter[1], a.stride[1]));
+    case 'G':
+        return wholeHeight;
+    case 'D':
+        return wholeHeight && (a.dilation[1] == 1 || a.filter[1] == 1);
+    default: // 'R'
+        return true;
+    }
 }
 
 int64_t ldsLimitOf(std::string_view gcnArchName)
@@ -498,7 +654,9 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     const bool direct = config.loop == LOOP_DIRECT;
     const bool smallc = config.loop == LOOP_ROWS_SMALLC;
     const bool packed = config.loop == LOOP_ROWS_PACKED;
-    const bool rows = config.loop == LOOP_ROWS || config.loop == LOOP_ROWS_FMA || smallc || packed;
+    const bool generic = config.loop == LOOP_GENERIC;
+    const bool rows
+        = config.loop == LOOP_ROWS || config.loop == LOOP_ROWS_FMA || smallc || packed || generic;
     if(fma != (info->wave == 0))
     {
         return std::nullopt;
@@ -521,14 +679,23 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     const bool gfx950 = hipdnn_plugin_sdk::stripArchFeatures(arch) == "gfx950";
 
     // Loop and layout.
-    if(config.loop < LOOP_ROWS || config.loop > LOOP_ROWS_PACKED)
+    if(config.loop < LOOP_ROWS || config.loop > LOOP_GENERIC)
     {
         return std::nullopt;
     }
     const bool cf = config.layout == LAYOUT_CHANNELS_FIRST;
     const bool tr = config.layout == LAYOUT_CHANNELS_LAST_TR;
     const bool cl = config.layout == LAYOUT_CHANNELS_LAST || tr;
-    if(!(cf && problem.channelsFirst) && !(cl && problem.channelsLast))
+    if(generic)
+    {
+        // The generic loop reads through the strides: channel vectors (layout 1) exactly where
+        // they load whole, elements (layout 0) everywhere else.
+        if(tr || cl != problem.vectorChannels)
+        {
+            return std::nullopt;
+        }
+    }
+    else if(!(cf && problem.channelsFirst) && !(cl && problem.channelsLast))
     {
         return std::nullopt;
     }
@@ -606,20 +773,49 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         threads = 8 * info->wave;
     }
-    // The filter width, its stride and dilation are compile-time.
-    if(config.s != a.filter[2] || config.sw != a.stride[2] || config.dw != a.dilation[2]
-       || config.fr < 1)
+    if(generic)
+    {
+        // Runtime geometry (s, sw, dw 0), fr taps a block; a position per thread (bq dividing
+        // the block) and whole channel rows a pass. (Channel vectors and 32-bit position words
+        // follow from whole fragments and atom steps.)
+        if(config.s != 0 || config.sw != 0 || config.dw != 0 || config.fr < 1
+           || threads % config.bq != 0 || config.bk % (threads / config.bq) != 0
+           || config.bc % (threads / config.bq) != 0)
+        {
+            return std::nullopt;
+        }
+        // Widely dilated small filters (ASPP-class: at most 9 taps, dilation 6 or more on a
+        // filter axis): each tap gathers a far-apart window and the BLAS path won on every arch
+        // measured, so the generic loop only adds candidates there.
+        int64_t dilation = 1;
+        for(int axis = 0; axis < CONV_NAIVE_SPATIAL_DIMS; ++axis)
+        {
+            if(a.filter[axis] > 1)
+            {
+                dilation = std::max<int64_t>(dilation, a.dilation[axis]);
+            }
+        }
+        if(problem.taps <= GENERIC_SPARSE_MAX_TAPS && dilation >= GENERIC_SPARSE_MIN_DILATION)
+        {
+            return std::nullopt;
+        }
+    }
+    // Every other loop: the filter width, its stride and dilation are compile-time.
+    else if(config.s != a.filter[2] || config.sw != a.stride[2] || config.dw != a.dilation[2]
+            || config.fr < 1)
     {
         return std::nullopt;
     }
-    if(cf)
+    // (The generic loop's channel vectors are the problem's vectorChannels, gated above.)
+    if(!generic && cf)
     {
         if(config.bq % config.vec != 0 || (!fma && config.vec % config.sw != 0))
         {
             return std::nullopt;
         }
     }
-    else if((kg % config.vec != 0 && config.align != 2) || (cg % config.vec != 0 && !smallc))
+    else if(!generic
+            && ((kg % config.vec != 0 && config.align != 2) || (cg % config.vec != 0 && !smallc)))
     {
         return std::nullopt;
     }
@@ -730,17 +926,36 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     }
     // The block, its load passes and its LDS.
     if(threads > MAX_BLOCK
-       || loadPassesOf(config, eb, info->wave) > (packed ? MAX_PACK_PASSES : MAX_PASSES)
+       || loadPassesOf(config, eb, info->wave) > (packed || generic ? MAX_PACK_PASSES : MAX_PASSES)
        || ldsBytesOf(config, eb) > ldsLimitOf(arch))
     {
         return std::nullopt;
     }
-    // Channels-first runs are loaded whole from within an image.
-    const int64_t xImage = a.c * a.inSpatial[0] * a.inSpatial[1] * a.inSpatial[2];
-    const int64_t yImage = a.k * a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2];
-    if(cf && (xImage < config.vec || yImage < config.vec))
+    // Channels-first runs are loaded whole from within an image. The generic loop's buffers
+    // span the images' strides.
+    const int64_t xImage
+        = generic ? problem.xSpan : a.c * a.inSpatial[0] * a.inSpatial[1] * a.inSpatial[2];
+    const int64_t yImage
+        = generic ? problem.ySpan : a.k * a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2];
+    if(!generic && cf && (xImage < config.vec || yImage < config.vec))
     {
         return std::nullopt;
+    }
+    // The two tiers: the generic loop only where no specialized config's class serves.
+    if(generic)
+    {
+        size_t from = 0;
+        while(from < config.spec.size())
+        {
+            const size_t to = std::min(config.spec.find(';', from), config.spec.size());
+            const auto served
+                = specServes(problem, std::string_view(config.spec).substr(from, to - from), arch);
+            if(!served.has_value() || *served)
+            {
+                return std::nullopt;
+            }
+            from = to + 1;
+        }
     }
     const int64_t units = device_units::dispatchUnits(device);
     if(units < 1)
@@ -794,7 +1009,9 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         const int64_t frows = a.filter[0] * a.filter[1];
         // A phased ring runs one grid row per height phase; its tracks walk the dy rows.
         gridY = a.groups
-                * (rows ? divUp(frows, config.fr) : a.filter[0] * (phased ? a.stride[1] : 1));
+                * (generic ? divUp(problem.taps, config.fr)
+                   : rows  ? divUp(frows, config.fr)
+                           : a.filter[0] * (phased ? a.stride[1] : 1));
         // Packed rows: a plane's chunks are its groups of packRows rows.
         chunks = packed ? divUp(a.outSpatial[1], packRows) : divUp(a.outSpatial[2], config.bq);
         trackLen = phased ? a.outSpatial[1] + config.fr - 1
@@ -883,10 +1100,20 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     k3.segs = direct ? static_cast<int>(plan.segs) : static_cast<int>(packWidth);
     k3.segRows = direct ? static_cast<int>(plan.segRows) : static_cast<int>(packRows);
     k3.walk = direct ? static_cast<int>(plan.walk) : 0;
-    const bool channelsLast = !cf;
-    packedStrides({a.n, a.c, a.inSpatial[0], a.inSpatial[1], a.inSpatial[2]}, channelsLast, k3.xs);
-    packedStrides(
-        {a.n, a.k, a.outSpatial[0], a.outSpatial[1], a.outSpatial[2]}, channelsLast, k3.ys);
+    if(generic)
+    {
+        // The graph's own strides (packed or not).
+        std::copy(std::begin(a.xStrides), std::end(a.xStrides), std::begin(k3.xs));
+        std::copy(std::begin(a.yStrides), std::end(a.yStrides), std::begin(k3.ys));
+    }
+    else
+    {
+        const bool channelsLast = !cf;
+        packedStrides(
+            {a.n, a.c, a.inSpatial[0], a.inSpatial[1], a.inSpatial[2]}, channelsLast, k3.xs);
+        packedStrides(
+            {a.n, a.k, a.outSpatial[0], a.outSpatial[1], a.outSpatial[2]}, channelsLast, k3.ys);
+    }
     k3.xImage = xImage;
     k3.yImage = yImage;
     k3.partialElems = *partialElems;

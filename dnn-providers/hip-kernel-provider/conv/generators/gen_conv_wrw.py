@@ -186,6 +186,8 @@ def lds_bytes(c, e):  # ConvWrwGeom.h k3LdsBytes
         c[k] for k in ("loop", "layout", "bk", "bc", "bq", "fr", "s", "sw", "dw")
     )
     vec, align, ns = c["vec"], c["align"], c["ns"]
+    if loop == 8:  # generic taps: a bk-row dy chunk and fr bc-row x tiles, two buffers
+        return 2 * (bk + fr * bc) * (bq + 16 // e) * e
     if loop == 5:
         wq, fc, fk = c["wq"], bc // (16 * c["wc"]), bk // (16 * c["wk"])
         slot = wq * (dx_cols(bc, s, dw) * bc + 32 * bk) + 512
@@ -244,6 +246,17 @@ def lds_bytes(c, e):  # ConvWrwGeom.h k3LdsBytes
 
 def passes(c, e):  # ConvWrwProblem.cpp loadPassesOf
     vec = c["vec"]
+    if c["loop"] == 8:  # k3WrwGeneric's loads a thread holds
+        threads = c["wk"] * c["wc"] * wave(c["atom"])
+        if c["layout"] == CF:
+            rows = threads // c["bq"]
+            return du(c["bk"], rows) + du(c["fr"] * c["bc"], rows)
+        kw = 4 // e
+        words = du(c["bq"], kw)
+        return (
+            du(du(c["bk"], vec) * words, threads)
+            + du(c["fr"] * du(c["bc"], vec) * words, threads)
+        ) * kw
     if c["loop"] == 5:
         return d_loads(c)
     if c["loop"] == 4:
@@ -366,7 +379,20 @@ def valid(c, dtype, fma16=False):
             )
         if c["layout"] == TR:
             ok = ok and kpl == 8 and e == 2 and "gfx950" in ARCHS[c["atom"]]
-    if c["layout"] == CF:
+    if c["loop"] == 8:
+        # Generic taps: runtime geometry, a position per thread, whole channel rows a pass.
+        rows = threads // c["bq"] if threads % c["bq"] == 0 else 0
+        ok = (
+            ok
+            and c["layout"] in (CF, CL)
+            and c["s"] == c["sw"] == c["dw"] == 0
+            and c["fr"] >= 1
+            and rows > 0
+            and c["bk"] % rows == 0
+            and c["bc"] % rows == 0
+            and c["align"] == c["ns"] == c["pb"] == 0
+        )
+    elif c["layout"] == CF:
         ok = ok and c["bq"] % c["vec"] == 0 and (fma or c["vec"] % c["sw"] == 0)
     if c["loop"] == 5:
         # The direct loop: 8 waves, 16 x 16 x 32 atoms, rows kept channels-last, a rotation for
@@ -420,7 +446,7 @@ def valid(c, dtype, fma16=False):
     return (
         ok
         and 1 <= threads <= 1024
-        and passes(c, e) <= (64 if c["loop"] == 7 else 32)
+        and passes(c, e) <= (64 if c["loop"] in (7, 8) else 32)
         and lds_bytes(c, e) <= lds_limit(c)
     )
 
@@ -730,10 +756,12 @@ def D(atom, tile, s, dw, fr, ns):
 def with_bpu(c):
     """The planner's blocks per dispatch unit: for the gfx942 / gfx950 row rings and packed rows
     on matrix cores, 1, 2 and 4 with the 16 x 16 fp32 atom (3-D fp32 layers want 4) and 1 and 2 otherwise
-    (autotune picks); the FMA output rows 2 and 4; elsewhere one value, 1 for blocks of 512
-    threads or more, else 2."""
+    (autotune picks); the FMA output rows 2 and 4; the generic taps 2 (as measured); elsewhere
+    one value, 1 for blocks of 512 threads or more, else 2."""
     if c["loop"] == 5:
         return [c]
+    if c["loop"] == 8:
+        return [dict(c, bpu=2)]
     if c["loop"] in (3, 4):
         threads = (c["bk"] // c["tk"]) * (c["bc"] // c["tc"])
     else:
@@ -1043,6 +1071,86 @@ def build_pb():
     return dropped
 
 
+# The generic tier (loop 8): few configs of runtime filter, strides and dilation, each declined
+# wherever a specialized config's class serves (its "spec", written by emit). (atoms per dtype,
+# xcd, [(layout, (bk, bc, wk, wc, bq), taps a block)]), the measured best per arch: gfx950 on
+# 2-D 5x5 / 7x7 and 3-D 1x5x5 channels-last fp16 (1.5-1.9x over the BLAS path), gfx1201 on the
+# same and 1-D k3 (1.7-3.2x).
+GENERIC = [
+    (
+        {"HALF": "mfma32x16_f16", "BFLOAT16": "mfma32x16_bf16"},
+        1,
+        [
+            (CL, (64, 64, 2, 2, 64), 3),
+            (CL, (128, 64, 4, 2, 32), 3),
+            (CL, (64, 64, 2, 2, 32), 5),
+            (CF, (128, 64, 4, 2, 32), 2),
+        ],
+    ),
+    (
+        {"HALF": "wmma12_f16", "BFLOAT16": "wmma12_bf16"},
+        0,
+        [
+            (CL, (64, 64, 4, 2, 32), 5),
+            (CL, (128, 64, 4, 2, 32), 3),
+            (CL, (64, 32, 4, 2, 32), 9),
+            (CF, (64, 64, 4, 2, 32), 2),
+        ],
+    ),
+    # gfx908 to gfx950 (64 KiB of LDS): gfx950's tiles at 32 positions.
+    (
+        {"HALF": "mfma32_f16", "BFLOAT16": "mfma32_bf16"},
+        0,
+        [
+            (CL, (128, 64, 4, 2, 32), 3),
+            (CL, (64, 64, 2, 2, 32), 5),
+            (CF, (128, 64, 4, 2, 32), 2),
+        ],
+    ),
+    (
+        {"FLOAT": "mfma32_f32"},
+        0,
+        [(CF, (64, 64, 2, 2, 16), 3), (CL, (64, 64, 2, 2, 16), 3)],
+    ),
+]
+
+
+def build_generic():
+    dropped = 0
+    for atoms, xcd, tiles in GENERIC:
+        for dtype, atom in atoms.items():
+            for lay, tile, taps in tiles:
+                c = C(atom, 8, lay, tile, 0, 0, 0, taps, 16 // eb(dtype), xcd, 0, 0)
+                if valid(c, dtype):
+                    CATALOG[dtype].extend(with_bpu(c))
+                else:
+                    dropped += 1
+    return dropped
+
+
+SPEC_KIND = {0: "R", 6: "C", 1: "P", 2: "G", 5: "D"}
+
+
+def spec_of(g, cfgs):
+    """The specialized classes generic config g declines: every matrix-core config of the dtype
+    (the K3Tiles rows and rings, small-C rows, the DMA ring and the direct loop; not the FMA
+    loops, packed rows (narrow outputs only) or block-based buffers) whose atom runs on one of
+    g's archs, as "<atom_id><kind><layout>.<s>.<sw>.<dw>.<fr>" keys (ConvWrwProblem.hpp).
+    """
+    keys = set()
+    for c in cfgs:
+        if (
+            c["loop"] not in SPEC_KIND
+            or c["pb"]
+            or not set(archs_of(c)) & set(archs_of(g))
+        ):
+            continue
+        kind = "U" if c["loop"] == 1 and c["align"] == 2 else SPEC_KIND[c["loop"]]
+        fr = 0 if kind in "RC" else c["fr"]
+        keys.add(f"{c['atom_id']}{kind}{c['layout']}.{c['s']}.{c['sw']}.{c['dw']}.{fr}")
+    return ";".join(sorted(keys))
+
+
 def build():
     dropped = build_direct() + build_unaligned_k() + build_smallc() + build_pb()
     for atoms, tiles, xcd, layouts, loop2, only in FAMILIES:
@@ -1100,6 +1208,8 @@ def build():
                         CATALOG[dtype].extend(with_bpu(c))
                     else:
                         dropped += 1
+    # The generic tier last: the specialized configs keep their priorities.
+    dropped += build_generic()
     # Two rows can give one config (the FMA output rows ignore the filter height: 1x3 and 3x3r1
     # map alike); keep the first.
     for dtype, cfgs in CATALOG.items():
@@ -1135,6 +1245,8 @@ def family_of(c):
     without gfx950, which has its own measured packed-rows tiles."""
     if c["loop"] == 5:
         return "direct"
+    if c["loop"] == 8:
+        return "generic"
     if c["loop"] == 7 and c["atom"].startswith("mfma32_"):
         return "cdnapk"
     if c["atom"] == "fma":
@@ -1156,7 +1268,9 @@ def emit():
             "name": "conv_wrw config fields",
             "fields": [
                 {"name": f, "type": "string" if f in STRINGS else "int"} for f in FIELDS
-            ],
+            ]
+            # The generic loop's specialized classes; empty for every other loop.
+            + [{"name": "spec", "type": "string", "default_value": ""}],
         },
     )
     write(
@@ -1203,13 +1317,15 @@ def emit():
         # list only those archs.
         # The gfx906 list splits in two packs (fma906, fma906b) under the size cap.
         half906 = (len(CATALOG906[dtype]) + 1) // 2
+        # The generic tier comes last, after every specialized config.
         tagged = (
-            [(c, family_of(c)) for c in cfgs]
+            [(c, family_of(c)) for c in cfgs if c["loop"] != 8]
             + [
                 (c, "fma906" if j < half906 else "fma906b")
                 for j, c in enumerate(CATALOG906[dtype])
             ]
             + [(c, "fmardna") for c in CATALOGRDNA.get(dtype, [])]
+            + [(c, family_of(c)) for c in cfgs if c["loop"] == 8]
         )
         for i, (c, fam) in enumerate(tagged):
             pack = packs.setdefault(fam, [])
@@ -1237,7 +1353,12 @@ def emit():
                         "source_file": "kernels/ConvWrw.cpp",
                         "entry_point": "ConvWrw",
                     },
-                    "metadata": {"direction": "WRW", "dtype": dtype, **c},
+                    "metadata": {
+                        "direction": "WRW",
+                        "dtype": dtype,
+                        **c,
+                        **({"spec": spec_of(c, cfgs)} if c["loop"] == 8 else {}),
+                    },
                     "priority": 1000 - i,
                 }
             )

@@ -299,6 +299,11 @@ struct DeviceCase
     bool noGfx906 = false;
     /// Served only where a few configs ship (block-based buffers): skipped where none does.
     bool someArchs = false;
+    /// Served by the generic loop alone, which ships on the matrix atoms of gfx908 to gfx950
+    /// and gfx12: skipped on gfx906 and gfx11.
+    bool genericOnly = false;
+    /// x's element strides (the generic loop's strided operands); empty: packed.
+    std::vector<int64_t> xStrides{};
 };
 
 ConvShape conv(int64_t c,
@@ -497,6 +502,37 @@ std::vector<DeviceCase> deviceCases()
                      false,
                      false,
                      true});
+    // The generic loop (runtime filter, strides, dilation): channels-last 16-bit widths no
+    // specialized config has (5x5, 1x9, 1x5x5, dilation 4), and strided x (padded rows: no
+    // packed layout) in either form.
+    const auto generic
+        = [&](const std::string& name, const ConvShape& shape, std::vector<int64_t> xStrides = {}) {
+              DeviceCase deviceCase{name, shape};
+              deviceCase.genericOnly = true;
+              deviceCase.xStrides = std::move(xStrides);
+              cases.push_back(deviceCase);
+          };
+    generic("Generic5x5Nhwc", conv(24, 40, {13, 17}, {5, 5}, {2, 2}, {2, 2}, {1, 1}, {1, 1}, true));
+    generic("Generic1x9Nhwc", conv(32, 64, {150}, {9}, {4}, {4}, {1}, {1}, true));
+    generic(
+        "Generic1x5x5ThreeDNhwcGrouped",
+        conv(32, 32, {3, 9, 11}, {1, 5, 5}, {0, 2, 2}, {0, 2, 2}, {1, 1, 1}, {1, 1, 1}, true, 2));
+    generic("GenericDilation4Nhwc",
+            conv(16, 16, {40, 40}, {3, 3}, {4, 4}, {4, 4}, {1, 1}, {4, 4}, true, 1, 1));
+    generic("Generic7x7Stride2Nhwc",
+            conv(24, 24, {19, 23}, {7, 7}, {3, 3}, {3, 3}, {2, 2}, {1, 1}, true));
+    // 24 channels of 10 x 12, rows 16 apart (channels-first elements).
+    generic("GenericPaddedRowsNchw",
+            conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}),
+            {24 * 10 * 16, 10 * 16, 16, 1});
+    // Channels-last, positions 32 channels apart (24 used): channel vectors.
+    generic("GenericPaddedChannelsNhwc",
+            conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true),
+            {10 * 12 * 32, 1, 12 * 32, 32});
+    // Positions 26 apart: not whole vectors, channels-last elements.
+    generic("GenericPaddedChannelsNhwcElements",
+            conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true),
+            {10 * 12 * 26, 1, 12 * 26, 26});
     return cases;
 }
 
@@ -559,6 +595,10 @@ void runCase(const DeviceCase& deviceCase)
     if(deviceCase.otherFilterLayout)
     {
         spec.w.strides = packedStrides(spec.w.dims, !shape.channelsLast);
+    }
+    if(!deviceCase.xStrides.empty())
+    {
+        spec.x.strides = deviceCase.xStrides;
     }
     const auto device = currentDeviceProperties();
     const GraphFixture fixture(buildGraph(spec), device);
@@ -683,12 +723,14 @@ void runCase(const DeviceCase& deviceCase)
         });
         EXPECT_EQ(mismatches, 0);
     }
-    const bool gfx906 = hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName) == "gfx906";
+    const auto base = std::string(hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName));
+    const bool gfx906 = base == "gfx906";
     const bool fmaOrFp32 = shape.dataType == DataType::FLOAT || gfx906;
     if(ran == 0
        && (!expectServed(device.gcnArchName, shape.dataType)
            || (deviceCase.matrix16Only && fmaOrFp32) || (deviceCase.noGfx906 && gfx906)
-           || deviceCase.someArchs))
+           || deviceCase.someArchs
+           || (deviceCase.genericOnly && (gfx906 || base.rfind("gfx11", 0) == 0))))
     {
         GTEST_SKIP() << "no catalog config for this case on " << device.gcnArchName;
     }
@@ -793,7 +835,7 @@ TEST(TestConvWrwCatalog, AtomIdsNameTheirAtomsAndEveryConfigFitsItsArchitectures
         EXPECT_GT(archs, 0) << "a config no architecture runs";
         loops.insert(config.loop);
     }
-    EXPECT_EQ(loops, (std::set<int64_t>{0, 1, 2, 3, 4, 5, 6, 7}));
+    EXPECT_EQ(loops, (std::set<int64_t>{0, 1, 2, 3, 4, 5, 6, 7, 8}));
 }
 
 } // namespace
