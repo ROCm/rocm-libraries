@@ -45,13 +45,12 @@ __device__ inline float k1BfToFloat(unsigned short b)
 }
 __device__ inline unsigned short k1FloatToBf(float v)
 {
-    unsigned u = __builtin_bit_cast(unsigned, v);
-    if((u & 0x7f800000u) == 0x7f800000u)
-    {
-        return static_cast<unsigned short>((u >> 16) | ((u & 0xffffu) != 0 ? 0x40u : 0u));
-    }
-    u += 0x7fffu + ((u >> 16) & 1u);
-    return static_cast<unsigned short>(u >> 16);
+    // Nearest-even; a NaN stays a (quiet) NaN, an infinity infinite. Both results and a select,
+    // not a branch: per-lane values, and a branch costs an exec-masked block per element.
+    const unsigned u = __builtin_bit_cast(unsigned, v);
+    const unsigned special = (u >> 16) | ((u & 0xffffu) != 0 ? 0x40u : 0u);
+    const unsigned rounded = (u + 0x7fffu + ((u >> 16) & 1u)) >> 16;
+    return static_cast<unsigned short>((u & 0x7f800000u) == 0x7f800000u ? special : rounded);
 }
 /// Three-bf16's low part of v, given its high part h = k1FloatToBf(v): zero where v - h is not a
 /// number (v infinite), so an infinite operand stays infinite rather than turning into NaN.
@@ -103,7 +102,13 @@ struct K1Elem<k1_bf16>
     }
     __device__ static k1_bf16 store(float v)
     {
+#if defined(__gfx950__)
+        // The hardware conversion (v_cvt_pk_bf16_f32: nearest-even; a NaN stays a NaN, its
+        // payload aside), what k1FloatToBf computes in software on the other targets.
+        return __builtin_bit_cast(k1_bf16, static_cast<__bf16>(v));
+#else
         return k1FloatToBf(v);
+#endif
     }
 };
 
