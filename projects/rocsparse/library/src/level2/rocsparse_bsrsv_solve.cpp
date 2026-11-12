@@ -536,9 +536,9 @@ namespace rocsparse
         constexpr bool bsrsv_legacy_indices
             = std::is_same<I, rocsparse_int>::value && std::is_same<J, rocsparse_int>::value;
 
-        // Validate before any device memory is touched. This is an exported entry point
-        // that a future rocsparse_sptrsv caller reaches with other index types, so the
-        // analysis must have been built with the same row-pointer and column-index types.
+        // Validate before any device memory is touched. A future rocsparse_sptrsv
+        // caller reaches this core with other index types, so the analysis must have
+        // been built with the same row-pointer and column-index types.
         if(trm_info == nullptr || temp_buffer == nullptr || zero_pivot == nullptr)
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);
@@ -786,14 +786,6 @@ rocsparse_status rocsparse::bsrsv_solve_template(rocsparse_handle          handl
     if(trm_info == nullptr)
     {
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);
-    }
-
-    // This entry point reads the zero pivot as rocsparse_int. A pivot of another
-    // index type comes from a wide analysis on the same info, so reject it.
-    if(bsrsv_info->get_position() != nullptr
-       && bsrsv_info->get_indextype() != rocsparse::get_indextype<rocsparse_int>())
-    {
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
     }
 
     RETURN_IF_ROCSPARSE_ERROR((rocsparse::bsrsv_solve_core<T, rocsparse_int, rocsparse_int>(

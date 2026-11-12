@@ -73,6 +73,24 @@ namespace
         val.push_back(diag);
     }
 
+    // Logical off-diagonal blocks. kOffAsym is not symmetric, so a kernel that
+    // reads it with the wrong direction solves with kOffAsymT instead.
+    using block2               = test_T[2][2];
+    constexpr block2 kOffDiag  = {{-1, 0}, {0, -1}};
+    constexpr block2 kOffAsym  = {{-1, 0}, {1, -1}};
+    constexpr block2 kOffAsymT = {{-1, 1}, {0, -1}};
+
+    void append_off_block(std::vector<test_T>& val, const block2& b, rocsparse_direction dir)
+    {
+        for(int32_t i = 0; i < kBlockDim; ++i)
+        {
+            for(int32_t j = 0; j < kBlockDim; ++j)
+            {
+                val.push_back(dir == rocsparse_direction_row ? b[i][j] : b[j][i]);
+            }
+        }
+    }
+
     template <typename I, typename J>
     void build_matrix(bool                 lower,
                       std::vector<I>&      row_ptr,
@@ -80,7 +98,9 @@ namespace
                       std::vector<test_T>& val,
                       std::vector<J>&      map,
                       rocsparse_index_base base         = rocsparse_index_base_zero,
-                      int32_t              singular_row = -1)
+                      int32_t              singular_row = -1,
+                      const block2&        off          = kOffDiag,
+                      rocsparse_direction  dir          = rocsparse_direction_row)
     {
         row_ptr.assign(1, static_cast<I>(0));
         col_ind.clear();
@@ -94,7 +114,7 @@ namespace
                 if(row > 0)
                 {
                     col_ind.push_back(static_cast<J>(row - 1));
-                    append_block(val, static_cast<test_T>(-1));
+                    append_off_block(val, off, dir);
                 }
                 col_ind.push_back(static_cast<J>(row));
                 append_block(
@@ -109,7 +129,7 @@ namespace
                 if(row + 1 < kMb)
                 {
                     col_ind.push_back(static_cast<J>(row + 1));
-                    append_block(val, static_cast<test_T>(-1));
+                    append_off_block(val, off, dir);
                 }
                 map[static_cast<size_t>(row)] = static_cast<J>(kMb - 1 - row);
             }
@@ -135,6 +155,52 @@ namespace
         return lower ? static_cast<test_T>(block_row + 1) : static_cast<test_T>(kMb - block_row);
     }
 
+    // Host solve of the matrix build_matrix creates, with x = 1 and alpha = 1.
+    // The diagonal blocks are the identity, and the entries stay small integers,
+    // so float is exact.
+    std::vector<test_T> reference(bool lower, const block2& off)
+    {
+        std::vector<double> a(static_cast<size_t>(kRows * kRows), 0.0);
+        auto                at = [&](int32_t r, int32_t c) -> double& {
+            return a[static_cast<size_t>(r) * kRows + static_cast<size_t>(c)];
+        };
+        for(int32_t r = 0; r < kRows; ++r)
+        {
+            at(r, r) = 1.0;
+        }
+        for(int32_t br = 0; br < kMb; ++br)
+        {
+            const int32_t bc = lower ? br - 1 : br + 1;
+            if(bc < 0 || bc >= kMb)
+            {
+                continue;
+            }
+            for(int32_t i = 0; i < kBlockDim; ++i)
+            {
+                for(int32_t j = 0; j < kBlockDim; ++j)
+                {
+                    at(br * kBlockDim + i, bc * kBlockDim + j) = off[i][j];
+                }
+            }
+        }
+
+        std::vector<double> y(static_cast<size_t>(kRows), 0.0);
+        for(int32_t k = 0; k < kRows; ++k)
+        {
+            const int32_t r   = lower ? k : kRows - 1 - k;
+            double        sum = 1.0;
+            for(int32_t c = 0; c < kRows; ++c)
+            {
+                if(c != r)
+                {
+                    sum -= at(r, c) * y[static_cast<size_t>(c)];
+                }
+            }
+            y[static_cast<size_t>(r)] = sum;
+        }
+        return std::vector<test_T>(y.begin(), y.end());
+    }
+
     template <uint32_t WFSIZE, typename I, typename J>
     void launch_wide(bool                 lower,
                      uint32_t             grid_x,
@@ -142,13 +208,15 @@ namespace
                      J&                   pivot,
                      rocsparse_index_base base         = rocsparse_index_base_zero,
                      int32_t              singular_row = -1,
-                     bool                 shared       = false)
+                     bool                 shared       = false,
+                     const block2&        off          = kOffDiag,
+                     rocsparse_direction  dir          = rocsparse_direction_row)
     {
         std::vector<I>      row_ptr;
         std::vector<J>      col_ind;
         std::vector<test_T> val;
         std::vector<J>      map;
-        build_matrix(lower, row_ptr, col_ind, val, map, base, singular_row);
+        build_matrix(lower, row_ptr, col_ind, val, map, base, singular_row, off, dir);
 
         const std::vector<test_T> x(static_cast<size_t>(kRows), static_cast<test_T>(1));
         const std::vector<test_T> y(static_cast<size_t>(kRows), static_cast<test_T>(-7));
@@ -197,7 +265,7 @@ namespace
                 d_pivot.ptr,
                 base,
                 rocsparse_diag_type_non_unit,
-                rocsparse_direction_row,
+                dir,
                 true);
         }
         else if(shared)
@@ -221,7 +289,7 @@ namespace
                 d_pivot.ptr,
                 base,
                 rocsparse_diag_type_non_unit,
-                rocsparse_direction_row,
+                dir,
                 true);
         }
         else if(lower)
@@ -245,7 +313,7 @@ namespace
                 d_pivot.ptr,
                 base,
                 rocsparse_diag_type_non_unit,
-                rocsparse_direction_row,
+                dir,
                 true);
         }
         else
@@ -269,7 +337,7 @@ namespace
                 d_pivot.ptr,
                 base,
                 rocsparse_diag_type_non_unit,
-                rocsparse_direction_row,
+                dir,
                 true);
         }
 
@@ -349,6 +417,38 @@ namespace
         else
         {
             expect_wide<32, I, J>(lower, grid_x);
+        }
+    }
+
+    template <uint32_t WFSIZE>
+    void expect_wide_direction(bool lower, bool shared, rocsparse_direction dir)
+    {
+        std::vector<test_T> y;
+        int64_t             pivot{};
+        ASSERT_NO_FATAL_FAILURE((launch_wide<WFSIZE, int64_t, int64_t>(
+            lower, 1, y, pivot, rocsparse_index_base_zero, -1, shared, kOffAsym, dir)));
+        EXPECT_EQ(pivot, std::numeric_limits<int64_t>::max());
+        const std::vector<test_T> ref = reference(lower, kOffAsym);
+        ASSERT_EQ(y.size(), ref.size());
+        for(size_t row = 0; row < ref.size(); ++row)
+        {
+            EXPECT_EQ(y[row], ref[row]) << "row " << row << (lower ? " lower" : " upper")
+                                        << (shared ? " shared" : " general")
+                                        << (dir == rocsparse_direction_row ? " row" : " column");
+        }
+    }
+
+    void expect_wide_direction_device(bool lower, bool shared, rocsparse_direction dir)
+    {
+        const int ws = device_wavefront();
+        ASSERT_TRUE(ws == 32 || ws == 64);
+        if(ws == 64)
+        {
+            expect_wide_direction<64>(lower, shared, dir);
+        }
+        else
+        {
+            expect_wide_direction<32>(lower, shared, dir);
         }
     }
 
@@ -789,6 +889,24 @@ TEST(internal_level2_bsrsv_wide, general_i64_chunk)
 {
     expect_wide_device<int64_t, int64_t>(true, 1);
     expect_wide_device<int64_t, int64_t>(false, 1);
+}
+
+TEST(internal_level2_bsrsv_wide, direction_nonsymmetric_blocks)
+{
+    // A kernel that swapped or ignored dir would solve with the transposed
+    // off-diagonal block, which gives a different solution.
+    for(const bool lower : {true, false})
+    {
+        ASSERT_NE(reference(lower, kOffAsym), reference(lower, kOffAsymT));
+        for(const bool shared : {false, true})
+        {
+            for(const rocsparse_direction dir :
+                {rocsparse_direction_row, rocsparse_direction_column})
+            {
+                expect_wide_direction_device(lower, shared, dir);
+            }
+        }
+    }
 }
 
 TEST(internal_level2_bsrsv_wide, zero_pivot_reports_block_row)
