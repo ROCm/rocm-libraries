@@ -63,8 +63,9 @@ def prepare(case: Case, architecture: str) -> Plan:
             immutable={"sub_gemms": np.asarray(launch.sub_gemm_table, dtype=np.int32)},
         )
 
-    # gfx942 has no production list; gfx950's list does not admit K=33.
-    # These named cases retain explicit kernel coverage, not dispatch coverage.
+    # gfx942's cases keep their explicit configuration (its production dgrad list is
+    # not enrolled here); gfx950's list does not admit K=33. These named cases retain
+    # explicit kernel coverage, not dispatch coverage.
     problem = ConvProblem(**case.problem_fields())
     atom_mn = 16 if architecture == "gfx942" else 32
     spec = DgradConvSpec(

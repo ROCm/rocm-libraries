@@ -1,14 +1,14 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""CPU tests for the shape-generic AOT backward-data instances (hipkernel:Gfx950ConvDgradAot
-and hipkernel:Gfx1250ConvDgradAot).
+"""CPU tests for the shape-generic AOT backward-data instances (hipkernel:Gfx950ConvDgradAot,
+hipkernel:Gfx942ConvDgradAot and hipkernel:Gfx1250ConvDgradAot).
 
 An instance is packaged from a rocKE dgrad ``KernelIdentity``; these tests hold the
 adapter (``builders/common/convolution_backward_data.py``) to the sweeps it comes from,
 over each engine's shipped catalog (the dispatcher's registered dgrad instances of its
 architecture -- ``dispatch/grouped_convolution_instances/<arch>_dgrad.json`` -- and the
-weight-transform helpers gfx950's MFMA rows pull in):
+weight-transform helpers the gfx950 and gfx942 MFMA rows pull in):
 
 * the packaged IR is the sweep kernel's, byte for byte up to the symbol, for one
   instance of every pipeline and implicit-GEMM form;
@@ -61,6 +61,7 @@ from builders.common.convolution_backward_data import (
     _covered,
     aot_dgrad_direct_fields_from_knobs,
     aot_dgrad_direct_instance_fields,
+    build_gfx942_conv_dgrad_aot,
     build_gfx950_conv_dgrad_aot,
     build_gfx1250_conv_dgrad_aot,
     conv_dgrad_aot_launch_problem,
@@ -85,8 +86,15 @@ from kernels.conv.kernel_identity import (
 )
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
+#: The engines with an MFMA pipeline (wave64): their MFMA rows pull in weight-transform
+#: helpers, and their implicit GEMM has patch kernels.
+_MFMA_ARCHES = ("gfx942", "gfx950")
+#: An architecture with no dgrad engine.
+_NO_ENGINE_ARCH = "gfx90a"
+
 #: Each engine's typed build entry point.
 _BUILDERS = {
+    "gfx942": build_gfx942_conv_dgrad_aot,
     "gfx950": build_gfx950_conv_dgrad_aot,
     "gfx1250": build_gfx1250_conv_dgrad_aot,
 }
@@ -229,12 +237,12 @@ def _form(identity: KernelIdentity) -> tuple:
 
 
 def test_the_catalog_converts_and_reproduces_its_identities(arch, catalog):
-    # Every selectable instance plus (gfx950) their weight-transform helpers.
+    # Every selectable instance plus (gfx950, gfx942) their weight-transform helpers.
     registered = registered_conv_grouped_instances(arch, direction="dgrad")
     helpers = sum(1 for _, spec in catalog if spec.is_helper)
     assert len(catalog) == len(registered) + helpers
-    assert len(catalog) > {"gfx950": 400, "gfx1250": 200}[arch]
-    assert (helpers > 0) == (arch == "gfx950")
+    assert len(catalog) > {"gfx942": 340, "gfx950": 400, "gfx1250": 200}[arch]
+    assert (helpers > 0) == (arch in _MFMA_ARCHES)
     algorithms = set()
     for ident, spec in catalog:
         assert spec.ARCH == arch
@@ -284,13 +292,13 @@ def test_every_form_is_packageable_with_the_sweeps_ir(arch, catalog, monkeypatch
             theirs.name, "@K"
         ), ident.label()
     # Every direct algorithm and implicit-GEMM form of the catalog (gfx950 has 35,
-    # gfx1250 16).
-    assert len(seen) > {"gfx950": 30, "gfx1250": 15}[arch]
+    # gfx942 31, gfx1250 16).
+    assert len(seen) > {"gfx942": 27, "gfx950": 30, "gfx1250": 15}[arch]
 
 
 def test_an_mfma_instance_names_the_helpers_its_pipeline_pulls_in(arch, catalog):
-    # Only gfx950 has an MFMA pipeline.
-    assert any(s.is_mfma for _, s in catalog) == (arch == "gfx950")
+    # Only gfx950 and gfx942 have an MFMA pipeline.
+    assert any(s.is_mfma for _, s in catalog) == (arch in _MFMA_ARCHES)
     helpers = {
         (s.dtype, s.direct_variant, s.filter_h, s.cpg, s.kpg, s.fold_k32): s
         for _, s in catalog
@@ -697,7 +705,7 @@ def test_dx_is_zero_filled_exactly_where_the_records_leave_it_unwritten(
 def test_a_patch_plan_zero_fills_only_between_patches(arch, catalog):
     patches = [s for _, s in catalog if s.patch and s.dtype == "fp16"]
     # gfx1250 serves patch embeddings with its direct WMMA patch kernel instead.
-    assert bool(patches) == (arch == "gfx950")
+    assert bool(patches) == (arch in _MFMA_ARCHES)
     if not patches:
         return
     for problem, gaps in (
@@ -825,7 +833,7 @@ def test_problem_for_request_is_the_dgrad_graph_contract(arch):
         _p(1, 8192, 8192, 32, 32, 3, 3, p=(1, 1)), arch=arch
     )[0]
     with pytest.raises(ValueError, match="no packaged dgrad engine"):
-        conv_dgrad_aot_problem_for_request(replace(request, arch="gfx942"))
+        conv_dgrad_aot_problem_for_request(replace(request, arch=_NO_ENGINE_ARCH))
 
 
 # ---------------------------------------------------------------------------
@@ -841,12 +849,18 @@ _DILATIONS = (
 )
 
 
+def _other_engine(arch: str) -> str:
+    """An engine whose wave size, pipelines and direct algorithms differ from
+    ``arch``'s (gfx942 and gfx950 share theirs)."""
+    return next(a for a in TARGETS if TARGETS[a].wave_size != TARGETS[arch].wave_size)
+
+
 def _guard_cases(arch: str, catalog) -> list:
     """``(label, spec, arch passed, refusal text)`` per per-arch guard of
     :func:`supports_conv_dgrad_aot`: a packaged spec of ``arch`` with one field (or
     one pair) replaced by what the other engine, or no engine, accepts."""
     target = TARGETS[arch]
-    other = TARGETS[next(a for a in TARGETS if a != arch)]
+    other = TARGETS[_other_engine(arch)]
     specs = [s for _, s in catalog]
 
     def first(predicate):
@@ -862,10 +876,14 @@ def _guard_cases(arch: str, catalog) -> list:
     runtime_channels = first(lambda s: s.is_runtime_channels)
     wave = f"wave_size must be {target.wave_size} on {arch}"
     foreign_pipeline = next(p for p in other.pipelines if p not in target.pipelines)
-    foreign_variant = {"gfx950": DIRECT_VARIANT_WMMA, "gfx1250": DIRECT_VARIANT_MFMA}
+    foreign_variant = {
+        "gfx942": DIRECT_VARIANT_WMMA,
+        "gfx950": DIRECT_VARIANT_WMMA,
+        "gfx1250": DIRECT_VARIANT_MFMA,
+    }
 
     class _NoEngineSpec(SPEC_CLASSES[arch]):
-        ARCH = "gfx942"
+        ARCH = _NO_ENGINE_ARCH
 
     stray = _NoEngineSpec(
         **{f.name: getattr(implicit, f.name) for f in fields(implicit)}
@@ -1027,11 +1045,11 @@ def test_each_per_arch_guard_refuses_with_its_own_text(arch, catalog):
     direct = next(i for i, s in catalog if s.is_direct and not s.is_helper)
     foreign = next(
         a
-        for a in TARGETS[next(x for x in TARGETS if x != arch)].direct_algorithms
+        for a in TARGETS[_other_engine(arch)].direct_algorithms
         if a not in TARGETS[arch].direct_algorithms
     )
     identity_cases = [
-        (replace(direct, arch="gfx942"), "no packaged dgrad engine for arch"),
+        (replace(direct, arch=_NO_ENGINE_ARCH), "no packaged dgrad engine for arch"),
         (replace(direct, algorithm=foreign), f"no packaged dgrad launch on {arch}"),
     ]
     wmma = next((i for i, _ in catalog if i.algorithm == "direct_dgrad_wmma"), None)
@@ -1054,7 +1072,7 @@ def test_each_per_arch_guard_refuses_with_its_own_text(arch, catalog):
         aot_dgrad_direct_fields_from_knobs(variant, {}, SPEC_CLASSES[arch].DIRECT_KNOBS)
     problem = _p(2, 14, 14, 64, 64, 3, 3, p=(1, 1))
     assert supports_conv_dgrad_aot_problem(problem, arch=arch) == (True, "ok")
-    ok, why = supports_conv_dgrad_aot_problem(problem, arch="gfx942")
+    ok, why = supports_conv_dgrad_aot_problem(problem, arch=_NO_ENGINE_ARCH)
     if ok or "no packaged dgrad engine" not in why:
         wrong.append(("problem of no engine", ok, why, "no packaged dgrad engine"))
     assert not wrong, wrong

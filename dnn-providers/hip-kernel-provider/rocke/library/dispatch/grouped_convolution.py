@@ -8,8 +8,8 @@ WHAT IS REGISTERED
 Exactly the instances in the per-arch, per-direction lists under
 ``grouped_convolution_instances/`` (``<arch>_<direction>.json``) -- currently
 forward and backward-data (dgrad) convolutions on gfx950 and backward-data
-convolutions on gfx1250. Weight-gradient (wgrad), gfx942 forward and gfx1250
-forward have no list registered at all: this rewrite moved fwd/dgrad onto the
+convolutions on gfx942 and gfx1250. Weight-gradient (wgrad), gfx942 forward and
+gfx1250 forward have no list registered at all: this rewrite moved fwd/dgrad onto the
 instance-list machinery but has not yet ported those onto it, so those
 directions/arches are an explicit, declared gap rather than a silent
 regression -- a request for either is rejected with a reason, not routed to a
@@ -201,6 +201,7 @@ _INSTANCE_LISTS: dict[tuple[str, str], str] = {
     ("gfx950", "fwd"): "gfx950_fwd.json",
     ("gfx950", "dgrad"): "gfx950_dgrad.json",
     ("gfx1250", "dgrad"): "gfx1250_dgrad.json",
+    ("gfx942", "dgrad"): "gfx942_dgrad.json",
 }
 
 # The LLVM flavor a request is admitted against unless it names its own: per
@@ -208,7 +209,11 @@ _INSTANCE_LISTS: dict[tuple[str, str], str] = {
 # test_default_llvm_flavor_is_the_registered_one); DEFAULT_LLVM_FLAVOR for an
 # arch with no list.
 DEFAULT_LLVM_FLAVOR = "llvm22"
-DEFAULT_LLVM_FLAVORS: dict[str, str] = {"gfx950": "llvm22", "gfx1250": "llvm24"}
+DEFAULT_LLVM_FLAVORS: dict[str, str] = {
+    "gfx950": "llvm22",
+    "gfx1250": "llvm24",
+    "gfx942": "llvm22",
+}
 
 # The buffers bound to an instance's A, B and D operands, by direction.
 _OPERANDS = {"fwd": ("x", "w", "y"), "dgrad": ("dy", "w", "dx")}
