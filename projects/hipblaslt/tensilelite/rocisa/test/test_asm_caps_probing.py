@@ -101,12 +101,16 @@ def test_probing_an_isa_takes_a_few_assembler_runs(tmp_path, assembler, isa):
     assert _runs(log) < 10
 
 
-@pytest.mark.parametrize("failure", ["unnamed-error", "killed"])
+@pytest.mark.parametrize("failure", ["unnamed-error", "killed", "killed-after-error"])
 @_shell_assembler
 def test_unreadable_batches_are_probed_one_source_at_a_time(tmp_path, assembler, failure):
-    # Every probe is one line, so a run of several is a batch. Fail it in a way
-    # that names no rejected line: an error without one, or a signal.
-    fail = {"unnamed-error": 'echo "error: out of luck" >&2; exit 1', "killed": "kill -KILL $$"}[failure]
+    # Every probe is one line, so a run of several is a batch. Partial
+    # diagnostics before a signal must not count as a complete rejection list.
+    fail = {
+        "unnamed-error": 'echo "error: out of luck" >&2; exit 1',
+        "killed": "kill -KILL $$",
+        "killed-after-error": 'echo "<stdin>:1:1: error: interrupted" >&2; kill -HUP $$',
+    }[failure]
     script = _script(
         tmp_path / "amdclang++",
         'src=$(cat)\n'
