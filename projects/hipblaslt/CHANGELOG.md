@@ -13,6 +13,10 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
   device memory and beta remains on the host. The descriptor mode requires
   `scaleType = HIP_R_32F`; algorithm selection requires a scalar-alpha-capable kernel.
 
+### Resolved issues
+
+* Fixed `hipblaslt-bench` and `hipblaslt-test` rejecting a compute-input type override for A alone and accepting an unsupported override for B alone.
+
 ## hipBLASLt 1.5.0 for ROCm 10.2.0
 
 ### Added
