@@ -48,6 +48,7 @@ from .features import (
 )
 from .dataset.training_table import best_per_shape, slot_training_rows
 from .knobs import graph_bound_twins
+from .physics import derived_features
 from .provenance import ROLES, descriptor_id, snapshot_provenance
 from .immediate import (
     LABEL_STATISTIC,
@@ -1672,6 +1673,9 @@ def feature_recipe(
         signature, omitted = propose_features(
             train_frame[scalar_columns], legal_kernel_fields, pairs
         )
+        # The raw fields above are only those every row publishes; the derived features
+        # read the rest (a 3-D graph's depth axis) through guarded expressions.
+        signature.extend(derived_features(train_frame[sorted(published)]).values())
     if not isinstance(signature, list) or not signature:
         raise ValueError("the feature recipe must be a nonempty canonical array")
     if kmd_fields is not None:

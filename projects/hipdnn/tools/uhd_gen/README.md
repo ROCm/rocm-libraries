@@ -154,6 +154,25 @@ with its constant value), so the provenance says what was asked for and what nev
   none — the engine ranks by a model that cannot discriminate instead of falling back to
   its declared order.
 
+### Derived convolution features
+
+A proposed recipe (no `--features` or `--feature-signature`) reads the fields every row
+publishes. On a corpus that mixes 2-D and 3-D convolutions that drops `dims[4]` and the
+third stride, padding and dilation, and what remains is positional: `dims[3]` is W on a
+2-D graph and H on a 3-D one. When the rows hold a convolution, `generate` therefore adds
+the expressions in `physics.py`:
+
+- each spatial axis of the activation, filter and output, and of the stride, dilation and
+  padding, counted from the innermost one, so a 2-D graph reads as a depth-1 3-D graph;
+- the implicit-GEMM M, N and K of the graph's direction, groups, channels per group, filter
+  and spatial sizes, 128x128 work tiles, channel alignment, and depthwise, pointwise and
+  3x3-unit-stride flags.
+
+They are guarded `value_or_default`/`present` expressions over names some row publishes, so
+the evaluator accepts them on every graph and a graph of another operation reads `-1`. A
+feature that folds to a constant on the corpus (the depth axis of a 2-D-only corpus) is
+left out. An authored recipe is taken as written.
+
 ### `train` arguments
 
 | Argument | Required | Description |
