@@ -1220,9 +1220,7 @@ def tier_b_row(
     high = np.zeros(case.base.head_dim, dtype=np.uint16)
     for dim in range(case.base.head_dim):
         products = _exposed_products(case, exposure, dim, head, trace)
-        steps = _accumulator_steps(
-            case, head, query, products, mfma, mutation, e_ulps
-        )
+        steps = _accumulator_steps(case, head, query, products, mfma, mutation, e_ulps)
         accumulator = steps[-1][1]
         low[dim], high[dim] = cast_single_or_double_hull(
             accumulator, trace.reciprocal, case.dtype
@@ -1676,9 +1674,7 @@ def _emulate_tiles(
         edge = candidates[0] if exp2_steps < 0 else candidates[-1]
         return np.float32(float(_grid_steps(edge, exp2_steps)))
 
-    qk_steps = (
-        _QK_VIOLATION.get(violation, 0) if case.fixture is P4Fixture.WALSH else 0
-    )
+    qk_steps = _QK_VIOLATION.get(violation, 0) if case.fixture is P4Fixture.WALSH else 0
 
     def score_of(key: int) -> Fraction:
         value = score(case, head, query, key, mutation)
@@ -2190,7 +2186,19 @@ MODE_ASSUMPTION = (
     "FP32-to-FP16 and FP32-to-BF16 conversions round to nearest even and keep "
     "subnormals"
 )
-P4_ASSUMPTIONS = ("A-E v1", "A-MFMA v1", "A-F v1")
+# Every named assumption Tier B is conditional on, in the order of the
+# soundness theorem. A calibration entry lists exactly these versions.
+P4_ASSUMPTION_STATEMENTS = (
+    EXP2_ASSUMPTION,
+    MFMA_ASSUMPTION,
+    QK_ASSUMPTION,
+    DIV_ASSUMPTION,
+    EPILOGUE_ASSUMPTION,
+    MODE_ASSUMPTION,
+)
+P4_ASSUMPTIONS = tuple(
+    statement.split(":", 1)[0] for statement in P4_ASSUMPTION_STATEMENTS
+)
 # Looser v_exp_f32 bound used only to attribute a failure to A-E.
 _RELAXED_EXP2_ULPS = 2
 
@@ -2797,7 +2805,9 @@ class P4CalibrationEntry:
 
     It names the policy, the assumption versions, the case ids and the dispatch
     fingerprint, and has no width, ULP or tolerance field: no measurement can
-    enlarge Tier B. Provenance belongs in the commit that edits the table."""
+    enlarge Tier B. An entry that omits a named assumption, or lists another
+    version of one, ratifies a different contract and is refused. Provenance
+    belongs in the commit that edits the table."""
 
     policy: str
     assumptions: tuple[str, ...]
@@ -2833,7 +2843,14 @@ P4_CALIBRATION: Mapping[tuple[str, str, str], P4CalibrationEntry] = MappingProxy
     {
         ("gfx942", "attention_gfx942_dense", "fp16"): P4CalibrationEntry(
             policy=P4_POLICY,
-            assumptions=("A-E v1", "A-MFMA v1", "A-F v1"),
+            assumptions=(
+                "A-E v1",
+                "A-MFMA v1",
+                "A-QK v1",
+                "A-DIV v1",
+                "A-F v1",
+                "A-MODE v1",
+            ),
             case_ids=(
                 "fp16-causal-b1-sq256-sk256-hq4-hk4-d64-p4identity-p0xp6,p1xn5,n2xn2,n0xp2",
                 "fp16-causal-b1-sq256-sk256-hq4-hk4-d64-p4cyclic-r37-p0xp6,p1xn5,n2xn2,n0xp2",
@@ -2844,7 +2861,14 @@ P4_CALIBRATION: Mapping[tuple[str, str, str], P4CalibrationEntry] = MappingProxy
         ),
         ("gfx942", "attention_gfx942_dense", "bf16"): P4CalibrationEntry(
             policy=P4_POLICY,
-            assumptions=("A-E v1", "A-MFMA v1", "A-F v1"),
+            assumptions=(
+                "A-E v1",
+                "A-MFMA v1",
+                "A-QK v1",
+                "A-DIV v1",
+                "A-F v1",
+                "A-MODE v1",
+            ),
             case_ids=(
                 "bf16-window64-b1-sq256-sk256-hq4-hk4-d64-p4identity-p0xp6,p1xn5,n2xn2,n0xp2",
                 "bf16-window64-b1-sq256-sk256-hq4-hk4-d64-p4cyclic-r37-p0xp6,p1xn5,n2xn2,n0xp2",
