@@ -144,7 +144,7 @@ __device__ void k2SplitReduce(const K2ReduceArgs& a)
 __device__ inline void k2SplitBf16(float v, unsigned short& hi, unsigned short& lo)
 {
     hi = k1FloatToBf(v);
-    lo = k1FloatToBf(v - k1BfToFloat(hi));
+    lo = k1BfLo(v, hi);
 }
 
 /// x' from x: pixels x c fp32 -> pixels x 3c bf16.
@@ -162,7 +162,7 @@ __device__ inline void k2SplitInput(const K2SplitArgs& a)
         k2SplitBf16(x[i], hi, lo);
         unsigned short* d = xs + p * 3 * a.c + ch;
         d[0] = hi;
-        d[a.c] = hi;
+        d[a.c] = k1BfFinite(hi); // pairs with the weights' lo
         d[2 * a.c] = lo;
     }
 }
@@ -198,7 +198,7 @@ __device__ inline void k2FormatWeightsSplit(const K2FormatArgs& f)
                                            : w[k2FilterOffset(f, n, c, tap, mirror)];
                 unsigned short hi, lo;
                 k2SplitBf16(v, hi, lo);
-                out = part == 1 ? lo : hi;
+                out = part == 1 ? lo : part == 2 ? k1BfFinite(hi) : hi; // part 2 pairs with x lo
             }
         }
         wf[i] = out;

@@ -599,3 +599,29 @@ if(DEFINED hip_kernel_provider_tests_TEST_ENVIRONMENT)
     set(hip_kernel_provider_tests_TEST_ENVIRONMENT
         "${hip_kernel_provider_tests_TEST_ENVIRONMENT}" PARENT_SCOPE)
 endif()
+
+# The conv RDNA generic-target compile check (conv/tools/rdna_generic/check_generic.py): a
+# sample of logged conv configs, each compiled for its RDNA chip and for the chip's LLVM
+# generic target with the ROCm clang. It fails when a config does not compile or when its
+# generic build loses the chip build's matrix-core instructions (a WMMA config fallen back to
+# its trap). Host-only and minutes long, so opt-in and labeled out of the tiered suites.
+if(HIPKERNELPROVIDER_CONV_GENERIC_COMPILE_TEST AND HIPDNN_ENABLE_KERNEL_INGESTOR
+   AND HIPKERNELPROVIDER_ENABLE_CONV)
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    if(DEFINED ROCM_PATH)
+        set(_hkp_generic_rocm "${ROCM_PATH}")
+    else()
+        set(_hkp_generic_rocm "/opt/rocm")
+    endif()
+    set(_hkp_generic_tools "${CMAKE_CURRENT_SOURCE_DIR}/../../conv/tools/rdna_generic")
+    enable_testing()
+    add_test(
+        NAME hkp_conv_rdna_generic_compile
+        COMMAND
+            ${Python3_EXECUTABLE} ${_hkp_generic_tools}/check_generic.py
+            --configs ${_hkp_generic_tools}/rdna_generic_sample.jsonl
+            --kernels-root ${CMAKE_CURRENT_SOURCE_DIR}/../engines/kernel_ingestor_engine/descriptors/conv
+            --rocm ${_hkp_generic_rocm} -j 2)
+    set_tests_properties(hkp_conv_rdna_generic_compile PROPERTIES
+        LABELS "conv_generic_compile" TIMEOUT 3600)
+endif()

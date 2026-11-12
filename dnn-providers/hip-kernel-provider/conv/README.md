@@ -109,6 +109,69 @@ pack, its native pack is not registered and its engine suites are not built
 Plans built from these engines cannot be saved and loaded: plan serialization covers kpack
 code objects only, and these kernels are compiled from embedded source.
 
+## TF32 (testing only)
+
+Two environment variables, read when a plan is admitted, permit TF32-class math for fp32
+convolutions. Both are **temporary testing switches**. Unset (the default), every fp32 plan
+these providers admit is exact fp32.
+
+| Variable | Covers |
+|---|---|
+| `HIP_KERNEL_PROVIDER_CONV_TF32` | Every hip-kernel-provider conv engine that has a TF32 form (below). |
+| `HIPBLASLT_PROVIDER_CONV_TF32` | The hipblaslt-provider's explicit-GEMM `HIPBLASLT_CONV_TF32_ENGINE` and `ROCBLAS_CONV_TF32_ENGINE` (`hipblaslt-provider/docs/OperationSupport.md`). |
+
+With the switch set, the provider admits a TF32-class config only for an fp32 graph. It sits
+beside the exact configs, and autotune chooses among them. A TF32 config is never admitted for
+fp16, bf16 or mixed graphs. It is never admitted without the switch.
+
+The final form follows cuDNN, and these switches are not part of it:
+
+- an engine that may use TF32 reports the `TENSOR_CORE` numerical note;
+- the caller excludes such engines with `Graph::deselect_numeric_notes`;
+- `HIPDNN_TF32_OVERRIDE=0` turns TF32 off process-wide.
+
+Neither the per-engine note reporting nor `deselect_numeric_notes` exists yet. When they land,
+the switches go away.
+
+TF32 forms:
+
+| Engine | Directions | TF32 form | Archs |
+|---|---|---|---|
+| Implicit GEMM (K1) | fwd, bwd | three-bf16 everywhere; on gfx942 also xf32 MFMA, its inputs rounded to nearest | gfx908, gfx90a, gfx942, gfx950, gfx11, gfx12 |
+| Halo-tile direct (K2) | fwd, bwd | three-bf16 | gfx908, gfx90a, gfx942, gfx950, gfx11, gfx12 |
+| `CONV_WRW` (K3) | wrw | three-bf16 over 3N images; admitted only on the shape classes where it measured faster than exact | gfx90a, gfx942, gfx950, gfx11, gfx12 |
+| NCHW implicit GEMM (K7) | bwd | three-bf16; admitted only for strided 3-D filters of 27+ taps on RDNA | gfx11, gfx12 |
+| `CONV_GROUP` (K4) | fwd, bwd | three-bf16 for wide groups (17 to 64 channels a group): each depth tap multiplies the three part pairs into the same accumulators | gfx90a, gfx942, gfx950, gfx11, gfx12 |
+
+Three-bf16 splits each fp32 operand into a high and a low bf16 part. The reduction then runs on
+bf16 matrix cores over three part pairs and writes fp32 out:
+
+- K1, K2, K3 and K7 triple the reduction channels (or K3's images) in a pre-pass.
+- K4 reads three part copies of each operand.
+
+The lo x lo term is dropped, so the error is about 2^-16 of each product. That is tighter than
+TF32's 2^-11. An infinity propagates as it does in fp32.
+
+The forms are checked against an fp64 reference within a TF32 tolerance. Every form has a test
+that, with the switch unset, no TF32 config is admitted. An exact or 16-bit config compiles to
+the same ISA as before the TF32 forms were added.
+
+These stay exact fp32 with or without the switch:
+
+- VALU and FMA configs;
+- the depthwise VALU engines;
+- the naive reference engine;
+- every engine on gfx906, and every engine on gfx908 other than K1 and K2.
+
+These had three-bf16 forms built, measured slower than their exact configs on every arch, and
+so have none:
+
+- `CONV_STEM_BWD` and `CONV_SMALLC` (1 to 4 input channels, bandwidth-bound): 0.25-0.75x;
+- K4 small groups and K4 backward weights: 0.28-0.77x;
+- `CONV_WINOGRAD` (K5): 0.21-0.58x. That form was multipass: the split after the fp32
+  transforms, and a bf16 matrix-core batched GEMM. Its fp32 configs are VALU. A paying form
+  needs the split inside the fused cooperative kernel.
+
 ## Adding an engine family
 
 1. Put the HIP source under `descriptors/conv/<family>/kernels/`, with every shape a runtime

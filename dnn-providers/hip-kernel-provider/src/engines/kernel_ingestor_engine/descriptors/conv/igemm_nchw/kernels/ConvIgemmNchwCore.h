@@ -670,7 +670,8 @@ template <class T,
           int ST,
           int TAPS,
           int FLAT = 0,
-          int HALOK = VEC>
+          int HALOK = VEC,
+          class TO = T>
 __device__ void k7DgradMma(const K7Args& a)
 {
     constexpr int WAVE = Atom::WAVE;
@@ -700,9 +701,14 @@ __device__ void k7DgradMma(const K7Args& a)
     constexpr int LDB = BN * CP + PADE;
     constexpr int A_LDS = KMAJOR ? BK * LDA : Tiles::template aRow<LDK>(WQ);
     constexpr int B_LDS = KMAJOR ? BK * LDB : SMAX * BN * LDK;
-    constexpr int OLD = BMQ * ST + 16 / static_cast<int>(sizeof(T));
-    constexpr int OUT_LDS = BN * OLD;
+    // The output tile in dx's element type TO (fp32 for three-bf16, else T), staged over the
+    // operand tiles: VECO of them a 16-byte vector.
+    constexpr int OLD = BMQ * ST + 16 / static_cast<int>(sizeof(TO));
+    constexpr int OUT_LDS
+        = (BN * OLD * static_cast<int>(sizeof(TO)) + static_cast<int>(sizeof(T)) - 1)
+          / static_cast<int>(sizeof(T));
     constexpr int LDS = A_LDS + B_LDS > OUT_LDS ? A_LDS + B_LDS : OUT_LDS;
+    constexpr int VECO = VEC * static_cast<int>(sizeof(T)) / static_cast<int>(sizeof(TO));
     static_assert(WTQ % DIM == 0 && WTN % DIM == 0 && BK % Atom::KA == 0, "K7 wave tile");
     static_assert((BMQ * ST) % VEC == 0, "K7 epilogue");
 
@@ -714,7 +720,7 @@ __device__ void k7DgradMma(const K7Args& a)
     const K7Block b = FLAT > 0 ? k7BlockFlat<ST>(a, BMQ, BN) : k7Block<ST>(a, BMQ, BN);
     if(!b.live)
     {
-        k7ZeroTile<T, VEC, BN, BMQ * ST, THREADS, ST, FLAT>(a, b);
+        k7ZeroTile<TO, VECO, BN, BMQ * ST, THREADS, ST, FLAT>(a, b);
         return;
     }
     const int tid = threadIdx.x;
@@ -832,7 +838,7 @@ __device__ void k7DgradMma(const K7Args& a)
     // Epilogue: the tile into LDS as Os[c][x - x0], then each channel's contiguous dx run out in
     // vectors.
     __syncthreads();
-    T* Os = lds;
+    TO* Os = reinterpret_cast<TO*>(lds);
 #pragma unroll
     for(int p = 0; p < PW; ++p)
     {
@@ -847,7 +853,7 @@ __device__ void k7DgradMma(const K7Args& a)
                 {
                     const int q = wq * WTQ + i * DIM + Atom::dRow(lane, e);
                     const int c = wn * WTN + n * DIM + lane % DIM;
-                    Os[c * OLD + q * ST + px] = K1Elem<T>::store(acc[p][i][n][e]);
+                    Os[c * OLD + q * ST + px] = K1Elem<TO>::store(acc[p][i][n][e]);
                 }
     }
     if constexpr(NP < ST)
@@ -858,16 +864,16 @@ __device__ void k7DgradMma(const K7Args& a)
             const int c = v / (BMQ * (ST - NP));
             const int rest = v - c * (BMQ * (ST - NP));
             const int q = rest / (ST - NP);
-            Os[c * OLD + q * ST + NP + rest - q * (ST - NP)] = T{};
+            Os[c * OLD + q * ST + NP + rest - q * (ST - NP)] = TO{};
         }
     }
     __syncthreads();
-    constexpr int XV = BMQ * ST / VEC;
+    constexpr int XV = BMQ * ST / VECO;
     for(int v = tid; v < BN * XV; v += THREADS)
     {
         const int c = v / XV;
-        const int xv = (v - c * XV) * VEC;
-        k7Store<T, VEC, ST, FLAT>(a, b, b.c0 + c, b.x0 + xv, Os + c * OLD + xv);
+        const int xv = (v - c * XV) * VECO;
+        k7Store<TO, VECO, ST, FLAT>(a, b, b.c0 + c, b.x0 + xv, Os + c * OLD + xv);
     }
 }
 

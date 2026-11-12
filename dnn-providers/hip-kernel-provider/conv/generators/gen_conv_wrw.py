@@ -107,6 +107,7 @@ INTS = [
     "wq",
     "dws",
     "pb",
+    "math",
 ]
 STRINGS = ["direction", "dtype", "atom"]
 FIELDS = STRINGS + INTS
@@ -735,7 +736,7 @@ def C(atom, loop, layout, tile, s, sw, dw, fr, vec, xcd, align, ns):
         bpu=0,
         wq=0,
     )
-    return dict(c, dws=dws_of(c), pb=0)
+    return dict(c, dws=dws_of(c), pb=0, math=0)
 
 
 def D(atom, tile, s, dw, fr, ns):
@@ -765,6 +766,7 @@ def D(atom, tile, s, dw, fr, ns):
         wq=wq,
         dws=0,
         pb=0,
+        math=0,
     )
 
 
@@ -1263,6 +1265,56 @@ def build():
     return dropped
 
 
+# Three-bf16 (math 1): fp32 graphs under TF32 permission run a bf16 config on x and dy split
+# into 3N bf16 images (ConvWrwSplit), dw in fp32 through the reduce (so dws 0). The configs are
+# a subset of the bf16 catalog on the atoms where three bf16 products beat exact fp32: per
+# (atom, loop, layout, filter, align) its first two tiles, loops 0, 1, 5 (gfx950 direct) and 6
+# (small-C). Not gfx908 (its half-rate bf16 atom makes three products slower than fp32 MFMA).
+X3_ATOMS = {
+    "mfma16_bf16",  # the CDNA small-C rows (stems)
+    "mfma32_bf16",
+    "mfma32x16_bf16",
+    "mfma16x32_bf16",
+    "wmma11_bf16",
+    "wmma12_bf16",
+}
+X3_LOOPS = (0, 1, 5, 6)
+X3_TILES = 2
+CATALOGX3 = []
+
+
+def build_x3():
+    groups = {}
+    for c in CATALOG["BFLOAT16"]:
+        # Not the block-buffer forms (pb): the 3N problem keeps the 32-bit buffer range.
+        if c["atom"] not in X3_ATOMS or c["loop"] not in X3_LOOPS or c["pb"]:
+            continue
+        g = (
+            c["atom"],
+            c["loop"],
+            c["layout"],
+            c["s"],
+            c["sw"],
+            c["dw"],
+            c["fr"],
+            c["align"],
+        )
+        t = tuple(c[f] for f in ("bk", "bc", "bq", "wk", "wc", "wq", "ns", "xcd"))
+        tiles = groups.setdefault(g, [])
+        if t in tiles or len(tiles) >= X3_TILES:
+            continue
+        tiles.append(t)
+        CATALOGX3.append(dict(c, dws=0, math=1))
+    seen = set()
+    kept = []
+    for c in CATALOGX3:
+        key = tuple(c[f] for f in INTS)
+        if key not in seen:
+            seen.add(key)
+            kept.append(c)
+    CATALOGX3[:] = kept
+
+
 def dws_of(c):
     """CONV_K3_DWS: 1 compiles the direct dw store (one split into K T R S C or one tap) into
     the epilogue, 0 keeps the partials-only epilogue. 0 for loop 5 (partials only) and for
@@ -1364,6 +1416,11 @@ def emit():
                 for j, c in enumerate(CATALOG906[dtype])
             ]
             + [(c, "fmardna") for c in CATALOGRDNA.get(dtype, [])]
+            # Three-bf16 (TF32 permission only) in packs of their own, ahead of the generic tier.
+            + [
+                (c, "x3" + family_of(c))
+                for c in (CATALOGX3 if dtype == "FLOAT" else [])
+            ]
             + [(c, family_of(c)) for c in cfgs if c["loop"] == 8]
         )
         for i, (c, fam) in enumerate(tagged):
@@ -1377,7 +1434,7 @@ def emit():
             if c["loop"] == 5:
                 thr += f"q{c['wq']}"
             name = (
-                f"conv_wrw.{dt}.{c['atom']}.l{c['loop']}.{lay}.{c['bk']}x{c['bc']}x{c['bq']}"
+                f"conv_wrw.{dt}{'x3' if c['math'] else ''}.{c['atom']}.l{c['loop']}.{lay}.{c['bk']}x{c['bc']}x{c['bq']}"
                 f".{thr}.fr{c['fr']}s{c['s']}sw{c['sw']}dw{c['dw']}"
                 f".v{c['vec']}.x{c['xcd']}a{c['align']}n{c['ns']}b{c['bpu']}"
                 + (".pb" if c["pb"] else "")
@@ -1443,6 +1500,7 @@ if __name__ == "__main__":
     dropped = build()
     dropped += build_fma906()
     dropped += build_fmardna()
+    build_x3()
     n = emit()
     print(n, "kernel configs;", dropped, "candidates dropped (LDS, passes or tile)")
     for dtype, cfgs in CATALOG.items():
@@ -1456,3 +1514,4 @@ if __name__ == "__main__":
             len(CATALOGRDNA.get(dtype, [])),
             "RDNA FMA",
         )
+    print("  FLOAT three-bf16 (TF32 permission):", len(CATALOGX3))

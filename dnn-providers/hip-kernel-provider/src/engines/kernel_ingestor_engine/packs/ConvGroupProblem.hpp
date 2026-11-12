@@ -6,12 +6,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
 #include "engines/kernel_ingestor_engine/descriptors/conv/group/kernels/ConvGroupArgs.h"
 #include "engines/kernel_ingestor_engine/packs/ConvIgemmProblem.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvTf32Split.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvWrwProblem.hpp"
 
 namespace hip_kernel_provider::kernel_ingestor_engine::conv_group
@@ -141,5 +143,25 @@ std::optional<GroupWrwLaunch>
                    int blocks,
                    int bpu,
                    const hipdnn_plugin_sdk::ingestor::DeviceProperties& device);
+
+/// Three-bf16 (TF32 permission, math 1 configs): the split copies a launch reads and where they
+/// sit in the workspace (after everything else the dispatch keeps there).
+struct GroupSplit
+{
+    conv_tf32::SplitPlan plan;
+    size_t offset = 0; ///< the split copies' first byte in the workspace
+    size_t workspaceBytes = 0; ///< the whole workspace, the split copies included
+};
+
+/// Forward and backward data, wide groups: the kernel's input (x forward, dy backward, as staged
+/// or in place) split whole into parts hi | hi' | lo, and every phase's fp32 expanded filter (one
+/// span) into hi | lo | hi'. The bf16 wide kernel runs P 3: each depth tap multiplies the three
+/// part pairs into the same fp32 accumulators.
+GroupSplit groupSplitOf(const GroupProblem& problem);
+
+/// Whether the three-bf16 form of @p problem is admitted on @p gcnArchName: wide groups (small
+/// groups and backward weights measured slower than exact) on the matrix-core architectures it
+/// is built for (gfx90a, gfx942, gfx950, gfx11, gfx12).
+bool threeBf16Pays(const GroupProblem& problem, std::string_view gcnArchName);
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::conv_group

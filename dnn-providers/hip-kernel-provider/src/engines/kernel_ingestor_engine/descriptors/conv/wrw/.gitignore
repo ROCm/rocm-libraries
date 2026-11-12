@@ -21,3 +21,7 @@
 /conv_wrw_f32_fmardna.kdp.json
 /conv_wrw_f32_generic.kdp.json
 /conv_wrw_f32_genericfma.kdp.json
+/conv_wrw_f32_x3cdna.kdp.json
+/conv_wrw_f32_x3direct.kdp.json
+/conv_wrw_f32_x3gfx950.kdp.json
+/conv_wrw_f32_x3rdna.kdp.json

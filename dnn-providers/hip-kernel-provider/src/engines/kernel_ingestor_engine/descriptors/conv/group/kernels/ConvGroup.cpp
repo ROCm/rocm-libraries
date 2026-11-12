@@ -19,10 +19,19 @@
 //                       k4WrwMmaWide under CONV_GROUP_WIDE with _NBI, _NBO), with
 //                       CONV_GROUP_TW dy columns a tile and the partials' reduce
 //                       (ConvGroupWrwReduce); _R, _S, _ST, _TH, _CB, _CF as above
+//   CONV_GROUP_TO       three-bf16 (wide groups, with CONV_GROUP_T bf16 and CONV_GROUP_P 3): the
+//                       output type, float (default CONV_GROUP_T)
+//   CONV_GROUP_P        three-bf16: 3 input and filter parts (default 1)
 //   K1_BUFFER           0 (the K1 header's buffer loads are not used here)
 
 #ifndef K1_BUFFER
 #define K1_BUFFER 0
+#endif
+#ifndef CONV_GROUP_TO
+#define CONV_GROUP_TO CONV_GROUP_T
+#endif
+#ifndef CONV_GROUP_P
+#define CONV_GROUP_P 1
 #endif
 #include "ConvGroupCore.h"
 
@@ -128,7 +137,9 @@ extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE) ConvGrou
                   CONV_GROUP_WP,
                   CONV_GROUP_NBI,
                   CONV_GROUP_NBO,
-                  CONV_GROUP_CF>(a);
+                  CONV_GROUP_CF,
+                  CONV_GROUP_TO,
+                  CONV_GROUP_P>(a);
 }
 #elif defined(CONV_GROUP_PF) && CONV_GROUP_PF
 extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE) ConvGroup(K4Args a)
