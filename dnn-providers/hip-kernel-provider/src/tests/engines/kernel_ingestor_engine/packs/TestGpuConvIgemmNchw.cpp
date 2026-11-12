@@ -3,6 +3,7 @@
 
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_CONV)
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <filesystem>
@@ -18,6 +19,7 @@
 #include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -26,6 +28,7 @@
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvIgemmNchwProblem.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvIgemmProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
@@ -340,6 +343,25 @@ std::vector<DeviceCase> deviceCases()
     };
 }
 
+/// Whether every case of @p dataType must find a config on this device: fp32 always, 16-bit
+/// only with a 16-bit matrix-core atom (the 16-bit FMA configs cover some cases; gfx906 has no
+/// such atom, and the catalog stays as it is).
+bool everyCaseServed(DataType dataType)
+{
+    if(dataType == DataType::FLOAT)
+    {
+        return true;
+    }
+    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(currentDeviceProperties().gcnArchName);
+    const std::array<const char*, 3> atoms
+        = dataType == DataType::HALF
+              ? std::array<const char*, 3>{"mfma16_f16", "wmma11_f16", "wmma12_f16"}
+              : std::array<const char*, 3>{"mfma16_bf16", "wmma11_bf16", "wmma12_bf16"};
+    return std::any_of(atoms.begin(), atoms.end(), [&](const char* atom) {
+        return conv_igemm::atomRunsOn(atom, arch);
+    });
+}
+
 template <typename T>
 void runCase(ConvShape shape)
 {
@@ -407,7 +429,10 @@ void runCase(ConvShape shape)
         });
         EXPECT_EQ(mismatches, 0);
     }
-    EXPECT_GE(ran, 1) << "no catalog config serves this case";
+    if(everyCaseServed(shape.dataType))
+    {
+        EXPECT_GE(ran, 1) << "no catalog config serves this case";
+    }
 }
 
 class TestGpuConvIgemmNchw : public ::testing::TestWithParam<DeviceCase>
