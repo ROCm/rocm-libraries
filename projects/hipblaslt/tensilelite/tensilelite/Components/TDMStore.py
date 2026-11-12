@@ -108,8 +108,6 @@ def tdmStoreRejectReason(state):
                                     or not (pt["DestDataType"].isSingle() or (converted and pt["HighPrecisionAccumulate"]))):
     return "TDMStoreInst supports fp32 D, fp64 and complex float D from accumulators of their type, int32 and int8 D " \
            "from int32 accumulators, and bf16, fp16, fp8 and bf8 D converted from fp32 accumulators"
-  if not state["BufferStore"]:
-    return "TDMStoreInst requires BufferStore"
   if isStreamK(state) and state.get("StreamKAtomic", 0):
     return "TDMStoreInst does not support atomic StreamK"
   if not isPersistent(state) and state["GlobalSplitU"] not in (1, -1):
