@@ -56,12 +56,16 @@ enum class hipblaslt_initialization
     // Uniform random in [-6.0, 6.0] (full FP4 E2M1 range); ~4% zeros vs ~50% for hpl
     uniform_low_precision  = 999,
     // MAF1.0 data init: A = sin(idx), B and C = cos(idx), idx = i + j * rows + batch * rows * cols
-    // of the stored matrix, rounded once from double; --scaleA/B 1/2 scales are 0.5
+    // of the stored matrix, rounded once from double; block-scaled (MX) operands get every block
+    // scale 0.5 with the unscaled codes (value = 0.5 * code), and --scaleA/B 1/2 scales are 0.5
     maf1_0 = 1000,
-    // MAF2.0 data init: N(0,1) for the non-scaled types (FP64, FP32, FP16, BF16, FP8);
-    // deterministic, mxDataGenerator-style seeding
+    // MAF2.0 data init: N(0,1) for the non-scaled types (FP64, FP32, FP16, BF16, FP8); for
+    // block-scaled (MX) operands, mxDataGenerator Maf2_0 (E8M0 scales: 2^Binomial, FP4 with UE4M3
+    // or UE5M3 scales: N(0.34375, 0.08); data uniform over the encodings); deterministic,
+    // mxDataGenerator-style seeding
     maf2_0 = 1001,
-    // MAF2.0 X=1 rows: non-scaled operands are filled as maf2_0
+    // MAF2.0 X=1 rows: block-scaled (MX) FP8 and FP4 operands get every block scale 1.0 and N(0,1)
+    // data rounded to the element type; other operands are filled as maf2_0
     maf2_0_unit_scale = 1002,
 };
 

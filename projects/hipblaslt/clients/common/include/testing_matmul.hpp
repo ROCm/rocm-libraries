@@ -1867,6 +1867,18 @@ void testing_matmul(const Arguments& arg)
     hipblasltSetColdIterationsValue(arg.cold_iters);
     hipblasltSetHotIterationsValue(arg.iters);
 
+    // maf2_0_unit_scale is the MAF2.0 plan for block-scaled FP8 and FP4 (all scales 1, N(0,1)
+    // data); reject block-scaled FP6 before any resources are created.
+    auto const unitScaleType = [](hipDataType t) {
+        return t == HIP_R_8F_E4M3 || t == HIP_R_8F_E5M2
+               || t == static_cast<hipDataType>(HIP_R_4F_E2M1);
+    };
+    if(arg.initialization == hipblaslt_initialization::maf2_0_unit_scale
+       && ((isBlockScaling(arg.scaleA) && !unitScaleType(arg.a_type))
+           || (isBlockScaling(arg.scaleB) && !unitScaleType(arg.b_type))))
+        throw std::invalid_argument(
+            "maf2_0_unit_scale applies to block-scaled fp8 and fp4 inputs only; use maf2_0");
+
     // integer_exact: skip gfx11 only for 16-bit A (fp16/bf16)—GPU vs CPU exact match unreliable there;
     // f32/f64 (and TF32x1 f32 path) still run on Navi.
     if(arg.initialization == hipblaslt_initialization::integer_exact)
@@ -3426,6 +3438,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::norm_dist
                && arg.initialization != hipblaslt_initialization::rand_int
                && arg.initialization != hipblaslt_initialization::uniform_low_precision
+               && arg.initialization != hipblaslt_initialization::maf1_0
+               && arg.initialization != hipblaslt_initialization::maf2_0
+               && arg.initialization != hipblaslt_initialization::maf2_0_unit_scale
                && !(arg.initialization == hipblaslt_initialization::integer_exact
                     && arg.fast_check))
             {
@@ -3433,9 +3448,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                 GTEST_SKIP() << "unsupported MX initialization: "
                              << hipblaslt_initialization2string(arg.initialization);
 #else
-                hipblaslt_cout << "Initialization of microscaling data only allows hpl, trig_float, "
-                                  "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, not "
-                               << hipblaslt_initialization2string(arg.initialization) << std::endl;
+                hipblaslt_cout
+                    << "Initialization of microscaling data only allows hpl, trig_float, "
+                       "uniform_01, zero, norm_dist, rand_int, uniform_low_precision, "
+                       "maf1_0, maf2_0 or maf2_0_unit_scale, not "
+                    << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
 #endif
             }
@@ -3473,7 +3490,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       scaleLayoutA,
                                       hipblaslt_initialization2string(arg.initialization),
                                       /*min_val=*/-1.0f,
-                                      /*max_val=*/1.0f);
+                                      /*max_val=*/1.0f,
+                                      /*scaleInitMethod=*/"",
+                                      // A broadcast A (stride 0) is one matrix: every batch
+                                      // regenerates batch 0, so data, scales and reference agree.
+                                      /*seedIndex=*/
+                                      static_cast<uint32_t>(0 + 3 * (stride_a[i] == 0 ? 0 : b)));
                 refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
             }
             refA.emplace_back(std::move(refAAll));
@@ -3539,6 +3561,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::norm_dist
                && arg.initialization != hipblaslt_initialization::rand_int
                && arg.initialization != hipblaslt_initialization::uniform_low_precision
+               && arg.initialization != hipblaslt_initialization::maf1_0
+               && arg.initialization != hipblaslt_initialization::maf2_0
+               && arg.initialization != hipblaslt_initialization::maf2_0_unit_scale
                && !(arg.initialization == hipblaslt_initialization::integer_exact
                     && arg.fast_check))
             {
@@ -3546,9 +3571,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                 GTEST_SKIP() << "unsupported MX initialization: "
                              << hipblaslt_initialization2string(arg.initialization);
 #else
-                hipblaslt_cout << "Initialization of microscaling data only allows hpl, trig_float, "
-                                  "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, not "
-                               << hipblaslt_initialization2string(arg.initialization) << std::endl;
+                hipblaslt_cout
+                    << "Initialization of microscaling data only allows hpl, trig_float, "
+                       "uniform_01, zero, norm_dist, rand_int, uniform_low_precision, "
+                       "maf1_0, maf2_0 or maf2_0_unit_scale, not "
+                    << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
 #endif
             }
@@ -3588,7 +3615,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       scaleLayoutB,
                                       hipblaslt_initialization2string(arg.initialization),
                                       /*min_val=*/-1.0f,
-                                      /*max_val=*/1.0f);
+                                      /*max_val=*/1.0f,
+                                      /*scaleInitMethod=*/"",
+                                      // A broadcast B (stride 0) is one matrix, as for A above.
+                                      /*seedIndex=*/
+                                      static_cast<uint32_t>(1 + 3 * (stride_b[i] == 0 ? 0 : b)));
                 refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
             }
             refB.emplace_back(std::move(refBAll));
