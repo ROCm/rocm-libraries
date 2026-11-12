@@ -30,6 +30,13 @@
 // Space-to-depth from channels-first column vectors (sbStemBwd's SDV).
 #define CONV_SB_SDV (CONV_SB_SD != 0 && CONV_SB_LAYOUT == 0 && CONV_SB_VEC > 1)
 
+// Three-bf16 (fp32 graphs under TF32 permission): the bf16 kernel on 3x the output channels
+// (CONV_SB_T unsigned short) writes dx in fp32 (CONV_SB_TO float); CONV_TF32_SPLIT3 adds the
+// operand split (ConvTf32Split). Undefined otherwise: dx in the element type, as before.
+#ifndef CONV_SB_TO
+#define CONV_SB_TO CONV_SB_T
+#endif
+
 #ifdef CONV_SB_ATOM
 #define CONV_SB_FMA 0
 #define CONV_SB_ATOM_T CONV_SB_ATOM
@@ -55,7 +62,8 @@ extern "C" __global__ void __launch_bounds__(CONV_SB_TH* CONV_SB_ATOM_T::WAVE)
               CONV_SB_SH,
               CONV_SB_SW,
               CONV_SB_FT,
-              CONV_SB_SD>(a);
+              CONV_SB_SD,
+              CONV_SB_TO>(a);
 }
 
 extern "C" __global__ void __launch_bounds__(256) ConvStemBwdTransform(ConvStemBwdTransformArgs a)

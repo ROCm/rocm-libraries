@@ -32,6 +32,8 @@
 #include "engines/kernel_ingestor_engine/packs/ConvIgemmProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvStemBwdProblem.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvTf32TestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvTf32Timing.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
@@ -183,6 +185,7 @@ conv_stem_bwd::StemBwdConfig configOf(const hipdnn_plugin_sdk::ingestor::KernelD
     c.sw = kernel.getIntMetadata("sw");
     c.ft = kernel.getIntMetadata("ft");
     c.sd = kernel.getIntMetadata("sd");
+    c.math = kernel.getIntMetadata("math");
     return c;
 }
 
@@ -429,8 +432,16 @@ int ldsOfCompiled(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
     return bytes;
 }
 
+/// The configs a run takes: the graph's own element type, or (fp32 under TF32 permission) the
+/// three-bf16 ones.
+enum class Math
+{
+    NATIVE,
+    THREE_BF16,
+};
+
 template <typename T>
-void runCase(const DeviceCase& deviceCase)
+void runCase(const DeviceCase& deviceCase, Math math = Math::NATIVE, bool infinities = false)
 {
     auto shape = deviceCase.shape;
     shape.dataType = dataTypeOf<T>();
@@ -451,6 +462,10 @@ void runCase(const DeviceCase& deviceCase)
     constexpr unsigned int SEED = 4321;
     y.fillTensorWithRandomValues(-1.0f, 1.0f, SEED);
     w.fillTensorWithRandomValues(-1.0f, 1.0f, SEED + 1);
+    if(infinities)
+    {
+        conv_tf32_test::plantInfinities(y);
+    }
     Tensor<T> reference(x.dims(), x.strides());
     if(shape.mode == ConvMode::CONVOLUTION)
     {
@@ -476,14 +491,17 @@ void runCase(const DeviceCase& deviceCase)
     {
         reductionLength *= extent;
     }
-    const float accumulationBound = 2e-6f * static_cast<float>(reductionLength);
+    const float accumulationBound
+        = (math == Math::THREE_BF16 ? conv_tf32_test::THREE_BF16_BOUND : 2e-6f)
+          * static_cast<float>(reductionLength);
 
     static std::set<std::string> s_ldsChecked;
     const auto& handler = dispatchHandler(PACK);
     int ran = 0;
     for(const auto& kernel : catalog())
     {
-        if(!matchesKernel(PACK, fixture.context(), kernel, *bound))
+        if(!matchesKernel(PACK, fixture.context(), kernel, *bound)
+           || (kernel.getIntMetadata("math") == 1) != (math == Math::THREE_BF16))
         {
             continue;
         }
@@ -499,7 +517,10 @@ void runCase(const DeviceCase& deviceCase)
         {
             const int compiled = ldsOfCompiled(kernel, config, shape.dataType, device.gcnArchName);
             // Nothing but the two staged tiles takes LDS.
-            EXPECT_EQ(compiled, conv_stem_bwd::ldsBytesOf(config, static_cast<int>(sizeof(T))));
+            // Three-bf16 compiles the bf16 kernel.
+            EXPECT_EQ(compiled,
+                      conv_stem_bwd::ldsBytesOf(
+                          config, config.math == 1 ? 2 : static_cast<int>(sizeof(T))));
             EXPECT_LE(compiled, conv_stem_bwd::ldsLimitOf(device.gcnArchName));
         }
 
@@ -527,13 +548,18 @@ void runCase(const DeviceCase& deviceCase)
             const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
             const float tolerance
                 = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
-            if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
+            if(!conv_tf32_test::matches(got, want, tolerance) && ++mismatches <= 5)
             {
                 ADD_FAILURE() << "at linear index " << offsetOf(index, x.strides()) << ": got "
                               << got << ", want " << want << ", tolerance " << tolerance;
             }
         });
         EXPECT_EQ(mismatches, 0);
+    }
+    if(ran == 0 && math == Math::THREE_BF16)
+    {
+        // The three-bf16 subset need not cover every shape (the catalog test checks it serves).
+        GTEST_SKIP() << "no three-bf16 config serves this case";
     }
     // Every device with a matrix core runs 16-bit; every device runs fp32 (FMA).
     EXPECT_GE(ran, 1) << "no catalog config serves this case";
@@ -568,12 +594,113 @@ INSTANTIATE_TEST_SUITE_P(,
 
 // ---- Host-only: the shipped catalog ----
 
+/// The three-bf16 fp32 configs (TF32 permission) at three-bf16's bound, and with +inf and -inf in
+/// dy (each must reach dx as itself, NaN where both meet).
+class TestGpuConvStemBwdThreeBf16 : public ::testing::TestWithParam<DeviceCase>
+{
+};
+
+TEST_P(TestGpuConvStemBwdThreeBf16, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!conv_tf32_test::hasThreeBf16(currentDeviceProperties().gcnArchName))
+    {
+        GTEST_SKIP() << "no three-bf16 configs on this device";
+    }
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(conv_tf32_test::TF32_ENV,
+                                                                           "1");
+    runCase<float>(GetParam(), Math::THREE_BF16);
+}
+
+TEST_P(TestGpuConvStemBwdThreeBf16, FloatInfinities)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!conv_tf32_test::hasThreeBf16(currentDeviceProperties().gcnArchName))
+    {
+        GTEST_SKIP() << "no three-bf16 configs on this device";
+    }
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(conv_tf32_test::TF32_ENV,
+                                                                           "1");
+    runCase<float>(GetParam(), Math::THREE_BF16, true);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvStemBwdThreeBf16,
+                         ::testing::ValuesIn(deviceCases()),
+                         [](const auto& info) { return info.param.name; });
+
+/// Opt-in (STEM_TF32_TIMING=<shape CSV>): the best exact and the best three-bf16 config per
+/// shape, TF32 permitted. See ConvTf32Timing.hpp.
+TEST(TestGpuConvStemBwdTiming, ExactAgainstThreeBf16)
+{
+    SKIP_IF_NO_DEVICES();
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(conv_tf32_test::TF32_ENV,
+                                                                           "1");
+    conv_tf32_timing::timeByForm(
+        PACK, ConvDirection::BACKWARD_DATA, catalog(), "STEM_TF32_TIMING", [](const auto& kernel) {
+            return std::string(kernel.getIntMetadata("math") == 1 ? "bf16x3" : "exact");
+        });
+}
+
+/// Without TF32 permission no three-bf16 config is admitted; with it, fp32 graphs admit some on
+/// every arch with bf16 matrix cores (not gfx908), and 16-bit graphs none.
+TEST(TestConvStemBwdCatalog, ThreeBf16OnlyUnderTf32Permission)
+{
+    const auto shape = deviceCases().front().shape;
+    for(const char* arch : {"gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1201", "gfx908"})
+    {
+        for(const auto dataType : {DataType::FLOAT, DataType::BFLOAT16})
+        {
+            SCOPED_TRACE(std::string(arch) + (dataType == DataType::FLOAT ? " fp32" : " bf16"));
+            auto typed = shape;
+            typed.dataType = dataType;
+            auto device = testDeviceProperties();
+            device.gcnArchName = arch;
+            device.warpSize = std::string(arch).rfind("gfx1", 0) == 0 ? 32 : 64;
+            const GraphFixture fixture(buildGraph(specFor(typed, ConvDirection::BACKWARD_DATA)),
+                                       device);
+            const auto bound = matchesGraph(PACK, fixture.context());
+            ASSERT_TRUE(bound.has_value());
+            const auto admitted = [&] {
+                int count = 0;
+                for(const auto& kernel : catalog())
+                {
+                    count += kernel.getIntMetadata("math") == 1
+                             && matchesKernel(PACK, fixture.context(), kernel, *bound);
+                }
+                return count;
+            };
+            {
+                const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter off(
+                    conv_tf32_test::TF32_ENV, "");
+                EXPECT_EQ(admitted(), 0);
+            }
+            const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter on(
+                conv_tf32_test::TF32_ENV, "1");
+            const bool expected = dataType == DataType::FLOAT && std::string(arch) != "gfx908";
+            EXPECT_EQ(admitted() > 0, expected);
+        }
+    }
+}
+
 TEST(TestConvStemBwdCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its integer knobs: within one dtype (what
     // one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 13> KNOBS{
-        "atom_id", "layout", "vec", "u", "v", "nb", "kc", "th", "fm", "sh", "sw", "ft", "sd"};
+    static constexpr std::array<const char*, 14> KNOBS{"atom_id",
+                                                       "layout",
+                                                       "vec",
+                                                       "u",
+                                                       "v",
+                                                       "nb",
+                                                       "kc",
+                                                       "th",
+                                                       "fm",
+                                                       "sh",
+                                                       "sw",
+                                                       "ft",
+                                                       "sd",
+                                                       "math"};
     std::set<std::vector<int64_t>> seen[3];
     for(const auto& kernel : catalog())
     {
@@ -603,7 +730,8 @@ TEST(TestConvStemBwdCatalog, AtomIdsNameTheirAtomsAndEveryConfigFitsItsArchitect
         EXPECT_EQ(kernel.source.entryPoint, "ConvStemBwd");
         const auto dtype = std::string(kernel.getStringMetadata("dtype"));
         dtypes.insert(dtype);
-        const int elementBytes = dtype == "FLOAT" ? 4 : 2;
+        // Three-bf16 configs (math 1) are bf16 kernels on fp32 graphs.
+        const int elementBytes = dtype == "FLOAT" && config.math == 0 ? 4 : 2;
         EXPECT_TRUE(config.vec == 1 || config.vec * elementBytes == 16);
         EXPECT_LE(config.nb, conv_stem_bwd::MAX_COLUMNS);
         int archs = 0;

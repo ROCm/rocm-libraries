@@ -117,6 +117,7 @@ INTS = [
     "sw",
     "ft",
     "sd",
+    "math",
 ]
 STRINGS = ["direction", "dtype", "atom"]
 FIELDS = STRINGS + INTS
@@ -236,10 +237,35 @@ def build():
                                     "sw": s,
                                     "ft": ft,
                                     "sd": sd,
+                                    "math": 0,
                                 }
                             )
         catalog[dtype] = cfgs
     return catalog
+
+
+# Three-bf16 (math 1): fp32 graphs under TF32 permission run a bf16 matrix config on dy and w
+# split along K into 3K channels (the kernel's ConvTf32Split), dx written in fp32. Per (atom,
+# layout, vector, window, strides, depth taps, space-to-depth) the bf16 catalog's first X3_TILES
+# configs; not gfx908 (half-rate bf16 is slower than its fp32 MFMA).
+X3_TILES = 2
+
+
+def x3_of(catalog):
+    groups = {}
+    out_ = []
+    for c in catalog["BFLOAT16"]:
+        if c["atom"] == "fma" or c["atom"].endswith("_908"):
+            continue
+        g = tuple(
+            c[f] for f in ("atom", "layout", "vec", "u", "v", "sh", "sw", "ft", "sd")
+        )
+        n = groups.get(g, 0)
+        if n >= X3_TILES:
+            continue
+        groups[g] = n + 1
+        out_.append(dict(c, math=1))
+    return out_
 
 
 def emit(catalog):
@@ -291,8 +317,11 @@ def emit(catalog):
     tuples = set()
     for stale in out.glob("conv_stem_bwd*.kdp.json"):
         stale.unlink()
-    for dtype, cfgs in catalog.items():
-        dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
+    for dtype, cfgs in list(catalog.items()) + [("FLOATX3", x3_of(catalog))]:
+        dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16", "FLOATX3": "f32x3"}[
+            dtype
+        ]
+        dtype = "FLOAT" if dtype == "FLOATX3" else dtype
         packs = {}
         for i, c in enumerate(cfgs):
             fam = family_of(c["atom"])
@@ -319,7 +348,7 @@ def emit(catalog):
                         "entry_point": "ConvStemBwd",
                     },
                     "metadata": {"direction": "BWD", "dtype": dtype, **c},
-                    "priority": 1000 - i,
+                    "priority": 1000 - i - (len(catalog["FLOAT"]) if c["math"] else 0),
                 }
             )
         # One pack per dtype and atom family (the repository caps a file at 500 KB).

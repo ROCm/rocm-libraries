@@ -86,6 +86,45 @@ inline SplitPlan splitPlanFor(const SplitTensor& a, const SplitTensor& b)
     return plan;
 }
 
+/// The strides, kept packed in their memory order, of a packed tensor (@p strides over
+/// @p extents, any rank) once dimension @p axis holds three times its extent: the dimensions
+/// outside it (strides of at least its whole extent) scale by 3, the ones inside it stay.
+template <size_t N>
+void triplePackedAxis(long long (&strides)[N], const long long (&extents)[N], size_t axis)
+{
+    const long long span = strides[axis] * extents[axis];
+    for(size_t d = 0; d < N; ++d)
+    {
+        if(d != axis && strides[d] >= span)
+        {
+            strides[d] *= 3;
+        }
+    }
+}
+
+/// The split view of a packed tensor (@p strides over @p extents) along @p axis in @p groups
+/// groups: [outer][groups][cg][inner], inner the axis's stride.
+template <size_t N>
+SplitTensor splitTensorOf(const long long (&strides)[N],
+                          const long long (&extents)[N],
+                          size_t axis,
+                          int64_t groups,
+                          int pattern)
+{
+    int64_t elements = 1;
+    for(size_t d = 0; d < N; ++d)
+    {
+        elements *= extents[d];
+    }
+    SplitTensor t;
+    t.inner = strides[axis];
+    t.groups = groups;
+    t.cg = extents[axis] / groups;
+    t.outer = elements / (extents[axis] * t.inner);
+    t.pattern = pattern;
+    return t;
+}
+
 /// The kernel arguments of @p plan for sources @p a and @p b and a workspace at @p workspace.
 inline K1Split3Args
     splitArgsFor(const SplitPlan& plan, const void* a, const void* b, void* workspace)

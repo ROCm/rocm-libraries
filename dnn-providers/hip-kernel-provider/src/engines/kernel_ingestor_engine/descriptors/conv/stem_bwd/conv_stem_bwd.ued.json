@@ -19,7 +19,8 @@
     "sh",
     "sw",
     "ft",
-    "sd"
+    "sd",
+    "math"
   ],
   "behavior_notes": [
     "runtime_compilation"

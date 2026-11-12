@@ -1,0 +1,2623 @@
+{
+  "version": "1.0",
+  "id": "16e08e96-b725-58ca-8ab9-7dec1f8e23d9",
+  "name": "hipkernel:conv_stem_bwd_f32x3_gfx950",
+  "arch": [],
+  "matchers": [
+    "feda6e7e-60e3-520f-8e32-cb03183b6d87"
+  ],
+  "engine": "abbafa58-214d-59ae-a968-0bec9aa15c9c",
+  "dispatch": "15253d78-61b1-5534-b551-c9c37e3dd289",
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "d481e04a-2186-505c-81fa-80f6f3e2eede",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s2x2.w4x4.nb16.kc32.t2f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 309
+    },
+    {
+      "version": "1.0",
+      "id": "102c4e29-78e7-5e84-85ab-db5a92dd0fbe",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s2x2.w4x4.nb16.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 308
+    },
+    {
+      "version": "1.0",
+      "id": "83832350-b899-54a8-ab9e-121f88d28c19",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s2x2.w4x4.nb16.kc32.t2f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 307
+    },
+    {
+      "version": "1.0",
+      "id": "b5b27162-4d1e-504f-a3d8-fc5d1df1cc41",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s2x2.w4x4.nb16.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 306
+    },
+    {
+      "version": "1.0",
+      "id": "bd51ffc1-bb45-5348-a91f-94c6137ffd1a",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s2x2.w4x4.nb16.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 305
+    },
+    {
+      "version": "1.0",
+      "id": "84746747-e336-5bb1-bd33-734864f18705",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s2x2.w4x4.nb16.kc32.t4f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 304
+    },
+    {
+      "version": "1.0",
+      "id": "576748e1-6a4d-52f4-8fc2-7f1ac7209648",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s2x2.w2x2.nb16.kc32.t2f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 2,
+        "v": 2,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 303
+    },
+    {
+      "version": "1.0",
+      "id": "aa68e570-7af9-5a96-9b12-73e4bb62ee6f",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s2x2.w2x2.nb16.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 2,
+        "v": 2,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 302
+    },
+    {
+      "version": "1.0",
+      "id": "dca4899d-b687-5cc9-aad4-9ee0196abbd6",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s2x2.w2x2.nb16.kc32.t2f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 2,
+        "v": 2,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 301
+    },
+    {
+      "version": "1.0",
+      "id": "e963921d-5804-5ce3-b3a9-96e446c8cd92",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s2x2.w2x2.nb16.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 2,
+        "v": 2,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 300
+    },
+    {
+      "version": "1.0",
+      "id": "18fb1aa7-59dd-5c84-bd5d-d891c0652e3c",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s2x2.w2x2.nb16.kc32.t2f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 2,
+        "v": 2,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 299
+    },
+    {
+      "version": "1.0",
+      "id": "ec79b8a9-158e-5c71-8d09-789121211e07",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s2x2.w2x2.nb16.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 2,
+        "v": 2,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 298
+    },
+    {
+      "version": "1.0",
+      "id": "7a1a40a0-5e51-502f-8945-1e36c66b5b4d",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s2x2.w3x3.nb16.kc32.t2f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 297
+    },
+    {
+      "version": "1.0",
+      "id": "f687bae3-8a19-5e43-b0cc-8e47109e9017",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s2x2.w3x3.nb16.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 296
+    },
+    {
+      "version": "1.0",
+      "id": "2ec4014f-947d-559b-b37a-6e121bc0040b",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s2x2.w3x3.nb16.kc32.t2f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 295
+    },
+    {
+      "version": "1.0",
+      "id": "3a4ee707-1748-5ef1-afab-a374be92deac",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s2x2.w3x3.nb16.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 294
+    },
+    {
+      "version": "1.0",
+      "id": "4eab1f0a-a8f0-5237-a514-fc26c851a31b",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s2x2.w3x3.nb16.kc32.t2f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 293
+    },
+    {
+      "version": "1.0",
+      "id": "73c86a1f-eeb5-5e4c-8b64-9e9659c8b5f7",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s2x2.w3x3.nb16.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 292
+    },
+    {
+      "version": "1.0",
+      "id": "ac755cd9-b219-58a7-b484-81fb2ae1b468",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s2x2.w1x1.nb16.kc32.t2f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 1,
+        "v": 1,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 291
+    },
+    {
+      "version": "1.0",
+      "id": "abc9ade4-ab13-5124-ad0f-25a4a9ebe7ca",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s2x2.w1x1.nb16.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 1,
+        "v": 1,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 290
+    },
+    {
+      "version": "1.0",
+      "id": "af3a1d11-4239-52ea-ae26-f2a71c2ba4dc",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s2x2.w1x1.nb16.kc32.t2f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 1,
+        "v": 1,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 289
+    },
+    {
+      "version": "1.0",
+      "id": "a60287d6-b38c-5cd9-b18d-11df80471c32",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s2x2.w1x1.nb16.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 1,
+        "v": 1,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 288
+    },
+    {
+      "version": "1.0",
+      "id": "0ababd22-dc52-5e8c-bab2-b430af5f8c2d",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s2x2.w1x1.nb16.kc32.t2f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 1,
+        "v": 1,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 287
+    },
+    {
+      "version": "1.0",
+      "id": "7812ec29-c9b1-55fc-91c6-fa91aca1f06f",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s2x2.w1x1.nb16.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 1,
+        "v": 1,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 286
+    },
+    {
+      "version": "1.0",
+      "id": "d7856757-1587-5867-80ee-9c0057a49140",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s1x1.w3x3.nb16.kc32.t2f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 285
+    },
+    {
+      "version": "1.0",
+      "id": "da6f4015-ac7f-5497-8e1e-da8ee152eb80",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s1x1.w3x3.nb16.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 284
+    },
+    {
+      "version": "1.0",
+      "id": "578a1670-5dff-550e-aca8-9143ff5797d5",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s1x1.w3x3.nb16.kc32.t2f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 283
+    },
+    {
+      "version": "1.0",
+      "id": "a0c82cfd-acb1-5c14-9ac5-12df7df15a43",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s1x1.w3x3.nb16.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 282
+    },
+    {
+      "version": "1.0",
+      "id": "d4de0695-6894-55da-8be4-24aca9c4df22",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s1x1.w3x3.nb16.kc32.t2f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 281
+    },
+    {
+      "version": "1.0",
+      "id": "d0cfc73d-a48d-5b6a-91d9-e7ea231dd168",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s1x1.w3x3.nb16.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 280
+    },
+    {
+      "version": "1.0",
+      "id": "68174a71-9400-56fe-811f-ec0ca7dd723a",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s1x1.w5x5.nb16.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 5,
+        "v": 5,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 279
+    },
+    {
+      "version": "1.0",
+      "id": "9bc03f19-3d7e-5b79-9c76-f242241d3adc",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s1x1.w5x5.nb16.kc32.t4f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 5,
+        "v": 5,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 4,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 278
+    },
+    {
+      "version": "1.0",
+      "id": "1a2f718a-c151-5666-a123-2222cfa8bb07",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s1x1.w5x5.nb16.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 5,
+        "v": 5,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 277
+    },
+    {
+      "version": "1.0",
+      "id": "3e4d3614-17ed-5d95-bf69-2b2c205cc722",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s1x1.w5x5.nb16.kc32.t4f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 5,
+        "v": 5,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 4,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 276
+    },
+    {
+      "version": "1.0",
+      "id": "58c18088-6d69-578f-94e9-0bc369ee2124",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s1x1.w5x5.nb16.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 5,
+        "v": 5,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 275
+    },
+    {
+      "version": "1.0",
+      "id": "76031d0d-7a7d-5a0c-90ab-8bf4e674e06b",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s1x1.w5x5.nb16.kc32.t4f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 5,
+        "v": 5,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 4,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 274
+    },
+    {
+      "version": "1.0",
+      "id": "7053f697-d53a-5883-8274-74e39c66bd2f",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s1x1.w7x7.nb16.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 7,
+        "v": 7,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 273
+    },
+    {
+      "version": "1.0",
+      "id": "3fbfc96a-36cf-5d7d-9360-84196398b251",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s1x1.w7x7.nb16.kc32.t4f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 7,
+        "v": 7,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 4,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 272
+    },
+    {
+      "version": "1.0",
+      "id": "db2b5134-16f6-55bb-8eb9-a501c79640fd",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s1x1.w7x7.nb16.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 7,
+        "v": 7,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 271
+    },
+    {
+      "version": "1.0",
+      "id": "c9883606-9e5d-5095-b62a-910991720262",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s1x1.w7x7.nb16.kc32.t8f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 7,
+        "v": 7,
+        "nb": 16,
+        "kc": 32,
+        "th": 8,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 270
+    },
+    {
+      "version": "1.0",
+      "id": "8a456972-c7b8-5396-a036-59e9c01b2b98",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s1x1.w7x7.nb16.kc32.t8f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 7,
+        "v": 7,
+        "nb": 16,
+        "kc": 32,
+        "th": 8,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 269
+    },
+    {
+      "version": "1.0",
+      "id": "517d58f0-643e-56c6-a039-d6821a9b5a18",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s1x1.w1x1.nb16.kc32.t2f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 1,
+        "v": 1,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 268
+    },
+    {
+      "version": "1.0",
+      "id": "248d2cee-4ee7-5bab-a63e-df7f1167afe9",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s1x1.w1x1.nb16.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 1,
+        "v": 1,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 267
+    },
+    {
+      "version": "1.0",
+      "id": "91712e5e-d6fe-578f-9049-97495c9ae832",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s1x1.w1x1.nb16.kc32.t2f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 1,
+        "v": 1,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 266
+    },
+    {
+      "version": "1.0",
+      "id": "17b6f5f6-be7e-5f12-b5be-1456a0aff82c",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s1x1.w1x1.nb16.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 1,
+        "v": 1,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 265
+    },
+    {
+      "version": "1.0",
+      "id": "61c30b9c-7ed1-56ad-8e84-4ebfe4b1e02a",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s1x1.w1x1.nb16.kc32.t2f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 1,
+        "v": 1,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 264
+    },
+    {
+      "version": "1.0",
+      "id": "5c797738-6538-58e7-b8f6-e3fb908d1a94",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s1x1.w1x1.nb16.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 1,
+        "v": 1,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 263
+    },
+    {
+      "version": "1.0",
+      "id": "bdc7e728-c293-50b4-b79d-bde52e1fd9e4",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s4x4.w1x1.nb48.kc32.t2f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 1,
+        "v": 1,
+        "nb": 48,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 4,
+        "sw": 4,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 262
+    },
+    {
+      "version": "1.0",
+      "id": "a02c871b-1f4a-5043-9131-01ac82888b60",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s4x4.w1x1.nb48.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 1,
+        "v": 1,
+        "nb": 48,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 4,
+        "sw": 4,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 261
+    },
+    {
+      "version": "1.0",
+      "id": "97e98ad1-9eaa-5760-94b3-e7e4ba8322dc",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s4x4.w1x1.nb48.kc32.t2f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 1,
+        "v": 1,
+        "nb": 48,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 4,
+        "sw": 4,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 260
+    },
+    {
+      "version": "1.0",
+      "id": "dd65fa24-7428-5c37-9231-05de6c59a43b",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s4x4.w1x1.nb48.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 1,
+        "v": 1,
+        "nb": 48,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 4,
+        "sw": 4,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 259
+    },
+    {
+      "version": "1.0",
+      "id": "07eca946-02dc-57e3-ba4e-9a6eab2c0001",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s4x4.w1x1.nb48.kc32.t2f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 1,
+        "v": 1,
+        "nb": 48,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 4,
+        "sw": 4,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 258
+    },
+    {
+      "version": "1.0",
+      "id": "522286e8-f2b0-5a38-9a96-4e870299e3ed",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s4x4.w1x1.nb48.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 1,
+        "v": 1,
+        "nb": 48,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 4,
+        "sw": 4,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 257
+    },
+    {
+      "version": "1.0",
+      "id": "9c3dd799-4d61-5edc-a4e9-d295613ad767",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s4x4.w4x4.nb48.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 48,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 4,
+        "sw": 4,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 256
+    },
+    {
+      "version": "1.0",
+      "id": "60980992-345f-5e96-94e4-6c104a720d05",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s4x4.w4x4.nb48.kc32.t4f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 48,
+        "kc": 32,
+        "th": 4,
+        "fm": 4,
+        "sh": 4,
+        "sw": 4,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 255
+    },
+    {
+      "version": "1.0",
+      "id": "4ad95d0a-435f-5d1f-baa7-76c7f296b4ad",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s4x4.w4x4.nb48.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 48,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 4,
+        "sw": 4,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 254
+    },
+    {
+      "version": "1.0",
+      "id": "44521705-0e38-5a27-8834-fd513fa4aa5c",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s4x4.w4x4.nb48.kc32.t4f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 48,
+        "kc": 32,
+        "th": 4,
+        "fm": 4,
+        "sh": 4,
+        "sw": 4,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 253
+    },
+    {
+      "version": "1.0",
+      "id": "b0254e90-9846-5b15-99a9-335d803a6e6e",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s4x4.w4x4.nb48.kc32.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 4,
+        "v": 4,
+        "nb": 48,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 4,
+        "sw": 4,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 252
+    },
+    {
+      "version": "1.0",
+      "id": "e732600a-0c0a-5a24-8697-d9729f61ad8f",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s4x4.w4x4.nb48.kc32.t8f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 4,
+        "v": 4,
+        "nb": 48,
+        "kc": 32,
+        "th": 8,
+        "fm": 2,
+        "sh": 4,
+        "sw": 4,
+        "ft": 0,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 251
+    },
+    {
+      "version": "1.0",
+      "id": "491fc06d-0f08-58bd-9aac-d853c2d3cec8",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s2x2.w4x4.nb16.kc32.t2f4.d1",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 1,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 114
+    },
+    {
+      "version": "1.0",
+      "id": "da407e75-a46d-52ed-9e02-a33beea8e88e",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s2x2.w4x4.nb16.kc32.t4f2.d1",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 1,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 113
+    },
+    {
+      "version": "1.0",
+      "id": "2c4a804e-6392-55d5-a8f6-e77a1467ef69",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s2x2.w4x4.nb16.kc32.t2f4.d1",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 1,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 112
+    },
+    {
+      "version": "1.0",
+      "id": "555a9bbd-50ff-51db-b666-63e9aba278e0",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s2x2.w4x4.nb16.kc32.t4f2.d1",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 1,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 111
+    },
+    {
+      "version": "1.0",
+      "id": "ce847f6b-941e-5fec-ac42-613e51f5c73c",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s2x2.w4x4.nb16.kc32.t4f2.d1",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 1,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 110
+    },
+    {
+      "version": "1.0",
+      "id": "38541507-380d-5418-8393-c8e0835f10b7",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s2x2.w4x4.nb16.kc32.t4f4.d1",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 1,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 109
+    },
+    {
+      "version": "1.0",
+      "id": "1e5573be-ccf7-57d0-b2de-a029bb039eb1",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s2x2.w4x4.nb16.kc32.t2f4.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 3,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 108
+    },
+    {
+      "version": "1.0",
+      "id": "dac239cf-5e41-50df-840c-40ec8239f932",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s2x2.w4x4.nb16.kc32.t4f2.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 3,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 107
+    },
+    {
+      "version": "1.0",
+      "id": "e1bcc1f0-1cf9-5ff4-95d6-e87467c83f31",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s2x2.w4x4.nb16.kc32.t2f4.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 3,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 106
+    },
+    {
+      "version": "1.0",
+      "id": "da7a3532-7004-592b-b897-f5b2f8226226",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s2x2.w4x4.nb16.kc32.t4f2.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 3,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 105
+    },
+    {
+      "version": "1.0",
+      "id": "9e9a8db2-2dbf-57ce-8dbd-72f091f11a80",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s2x2.w4x4.nb16.kc32.t4f2.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 3,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 104
+    },
+    {
+      "version": "1.0",
+      "id": "cfe73f44-9e74-5cfc-959f-cce07351593a",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s2x2.w4x4.nb16.kc32.t4f4.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
+        "ft": 3,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 103
+    },
+    {
+      "version": "1.0",
+      "id": "a7852f88-726b-57ff-8965-d653afd886f6",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s1x1.w3x3.nb16.kc32.t2f4.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 1,
+        "sw": 1,
+        "ft": 3,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 102
+    },
+    {
+      "version": "1.0",
+      "id": "27aa981d-b50f-5aee-94f9-e5bd088c8c86",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s1x1.w3x3.nb16.kc32.t4f2.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 3,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 101
+    },
+    {
+      "version": "1.0",
+      "id": "a28ad4f9-a773-5f0a-bfa6-6869dbfb3ff8",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s1x1.w3x3.nb16.kc32.t2f4.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 1,
+        "sw": 1,
+        "ft": 3,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 100
+    },
+    {
+      "version": "1.0",
+      "id": "872a814f-73c1-5dd9-a279-092e9bdc51d5",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s1x1.w3x3.nb16.kc32.t4f2.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 3,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 99
+    },
+    {
+      "version": "1.0",
+      "id": "a61af0b2-356c-5e92-8fed-b0de52467ace",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s1x1.w3x3.nb16.kc32.t2f4.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 2,
+        "fm": 4,
+        "sh": 1,
+        "sw": 1,
+        "ft": 3,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 98
+    },
+    {
+      "version": "1.0",
+      "id": "fb51eace-fdec-54ae-89cd-14bb6a84cee0",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s1x1.w3x3.nb16.kc32.t4f2.d3",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 3,
+        "sd": 0,
+        "math": 1
+      },
+      "priority": 97
+    },
+    {
+      "version": "1.0",
+      "id": "c91e8878-1a09-57e9-977c-6a545af97637",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s1x1.w2x2.nb16.kc32.t4f4.sd2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 2,
+        "v": 2,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 4,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 2,
+        "math": 1
+      },
+      "priority": 44
+    },
+    {
+      "version": "1.0",
+      "id": "8ab48d60-d61c-5440-aace-fefb6325570b",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s1x1.w2x2.nb16.kc64.t4f2.sd2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 2,
+        "v": 2,
+        "nb": 16,
+        "kc": 64,
+        "th": 4,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 2,
+        "math": 1
+      },
+      "priority": 43
+    },
+    {
+      "version": "1.0",
+      "id": "9a4836d8-0272-5aa0-a49f-ef354da3137b",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s1x1.w2x2.nb16.kc32.t8f2.sd2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 2,
+        "v": 2,
+        "nb": 16,
+        "kc": 32,
+        "th": 8,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 2,
+        "math": 1
+      },
+      "priority": 42
+    },
+    {
+      "version": "1.0",
+      "id": "4557cdd0-7524-50ce-99d7-56f70e77c129",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s1x1.w2x2.nb16.kc32.t8f2.sd2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 2,
+        "v": 2,
+        "nb": 16,
+        "kc": 32,
+        "th": 8,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 2,
+        "math": 1
+      },
+      "priority": 41
+    },
+    {
+      "version": "1.0",
+      "id": "a2cac8fa-14e5-578b-b631-877287245230",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s1x1.w3x3.nb16.kc32.t4f4.sd2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 4,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 2,
+        "math": 1
+      },
+      "priority": 40
+    },
+    {
+      "version": "1.0",
+      "id": "156bc7ba-4515-5ea4-aaa8-de5c830ace00",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s1x1.w3x3.nb16.kc32.t8f2.sd2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 8,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 2,
+        "math": 1
+      },
+      "priority": 39
+    },
+    {
+      "version": "1.0",
+      "id": "7198116b-66f7-5101-a857-38e399c478d6",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s1x1.w3x3.nb16.kc32.t8f2.sd2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 3,
+        "v": 3,
+        "nb": 16,
+        "kc": 32,
+        "th": 8,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 2,
+        "math": 1
+      },
+      "priority": 38
+    },
+    {
+      "version": "1.0",
+      "id": "04d03c81-a83f-5059-8fab-6eb884ceb79e",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nhwc.v8.s1x1.w4x4.nb16.kc32.t4f4.sd2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 1,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 4,
+        "fm": 4,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 2,
+        "math": 1
+      },
+      "priority": 37
+    },
+    {
+      "version": "1.0",
+      "id": "8d16e920-01cb-5445-8243-bc2e57fca321",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v8.s1x1.w4x4.nb16.kc32.t8f2.sd2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 8,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 2,
+        "math": 1
+      },
+      "priority": 36
+    },
+    {
+      "version": "1.0",
+      "id": "a07e35c3-890b-59e0-963b-439231bcc686",
+      "name": "conv_stem_bwd.f32x3.mfma16x32_bf16.nchw.v1.s1x1.w4x4.nb16.kc32.t8f2.sd2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "FLOAT",
+        "atom": "mfma16x32_bf16",
+        "atom_id": 9,
+        "layout": 0,
+        "vec": 1,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 32,
+        "th": 8,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 2,
+        "math": 1
+      },
+      "priority": 35
+    }
+  ]
+}

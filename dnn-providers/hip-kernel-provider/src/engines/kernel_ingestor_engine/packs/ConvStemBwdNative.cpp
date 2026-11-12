@@ -91,6 +91,7 @@ StemBwdConfig configOf(const KernelDefinition& kernel)
     config.sw = kernel.getIntMetadata("sw");
     config.ft = kernel.getIntMetadata("ft");
     config.sd = kernel.getIntMetadata("sd");
+    config.math = kernel.getIntMetadata("math");
     return config;
 }
 
@@ -170,15 +171,27 @@ const std::vector<KernelArgument>& transformSignature()
     return s_signature;
 }
 
+const std::vector<KernelArgument>& splitSignature()
+{
+    static const std::vector<KernelArgument> s_signature{
+        {"by_value", static_cast<uint32_t>(sizeof(K1Split3Args)), 0, ""}};
+    return s_signature;
+}
+
 class PreparedConvStemBwd : public IngestorPreparedDispatch
 {
 public:
+    /// @p split is set for three-bf16 (StemBwdLaunch::split) only.
     PreparedConvStemBwd(IngestorKernelCode main,
                         IngestorKernelCode transform,
+                        std::optional<IngestorKernelCode> split,
                         const StemBwdLaunch& launch,
                         const StemBwdProblem& problem)
         : _main(std::move(main))
         , _transform(std::move(transform))
+        , _split(std::move(split))
+        , _plan(launch.plan)
+        , _splitOffset(launch.splitOffset)
         , _args(launch.args)
         , _transformArgs(launch.transform)
         , _dxUid(problem.dxUid)
@@ -202,11 +215,22 @@ public:
         return _transform.kernelForStream(stream);
     }
 
+    bool hasSplit() const
+    {
+        return _split.has_value();
+    }
+
+    compilation::IRunnableKernel& splitForStream(hipStream_t stream) const
+    {
+        return _split->kernelForStream(stream);
+    }
+
     void argsFor(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
                  uint32_t numDeviceBuffers,
                  void* workspace,
                  ConvStemBwdArgs& args,
-                 ConvStemBwdTransformArgs& transform) const
+                 ConvStemBwdTransformArgs& transform,
+                 K1Split3Args& split) const
     {
         args = _args;
         transform = _transformArgs;
@@ -216,11 +240,23 @@ public:
         args.b = workspace;
         args.dy = hipdnn_plugin_sdk::findDeviceBuffer(_dyUid, deviceBuffers, numDeviceBuffers).ptr;
         args.dx = hipdnn_plugin_sdk::findDeviceBuffer(_dxUid, deviceBuffers, numDeviceBuffers).ptr;
+        if(_split.has_value())
+        {
+            // Three-bf16: the transform reads the split w, the kernel the split dy (3K channels),
+            // both after the transformed filter.
+            split = conv_tf32::splitArgsFor(
+                _plan, args.dy, transform.w, static_cast<char*>(workspace) + _splitOffset);
+            args.dy = split.t[0].dst;
+            transform.w = split.t[1].dst;
+        }
     }
 
 private:
     IngestorKernelCode _main;
     IngestorKernelCode _transform;
+    std::optional<IngestorKernelCode> _split;
+    conv_tf32::SplitPlan _plan;
+    size_t _splitOffset;
     ConvStemBwdArgs _args;
     ConvStemBwdTransformArgs _transformArgs;
     int64_t _dxUid;
@@ -284,8 +320,18 @@ public:
         main.setGridSize(launch->gridX, launch->gridY, launch->gridZ);
         transform.setBlockSize(launch->transformBlock, 1, 1);
         transform.setGridSize(launch->transformGrid, 1, 1);
+        std::optional<IngestorKernelCode> split;
+        if(launch->split)
+        {
+            KernelDefinition splitKernel = kernel;
+            splitKernel.source.entryPoint = std::string(conv_tf32::SPLIT_ENTRY_POINT);
+            split = buildIngestorKernelCode(
+                _kernelCompiler, _kpackLoader, context, splitKernel, options, splitSignature());
+            split->setBlockSize(256, 1, 1);
+            split->setGridSize(launch->plan.grid, 1, 1);
+        }
         return std::make_unique<PreparedConvStemBwd>(
-            std::move(main), std::move(transform), *launch, *problem);
+            std::move(main), std::move(transform), std::move(split), *launch, *problem);
     }
 
     void launch(const Handle& handle,
@@ -302,8 +348,13 @@ public:
         const auto& dispatch = dynamic_cast<const PreparedConvStemBwd&>(prepared);
         ConvStemBwdArgs args{};
         ConvStemBwdTransformArgs transform{};
-        dispatch.argsFor(deviceBuffers, numDeviceBuffers, workspace, args, transform);
+        K1Split3Args split{};
+        dispatch.argsFor(deviceBuffers, numDeviceBuffers, workspace, args, transform, split);
         const auto stream = handle.getStream();
+        if(dispatch.hasSplit())
+        {
+            dispatch.splitForStream(stream).launch(stream, split);
+        }
         dispatch.transformForStream(stream).launch(stream, transform);
         dispatch.mainForStream(stream).launch(stream, args);
     }

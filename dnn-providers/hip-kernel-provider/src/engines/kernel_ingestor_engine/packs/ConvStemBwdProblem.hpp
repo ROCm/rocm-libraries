@@ -19,6 +19,7 @@
 
 #include "engines/kernel_ingestor_engine/descriptors/conv/stem_bwd/kernels/ConvStemBwdArgs.h"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveProblem.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvTf32Split.hpp"
 
 /**
  * @file ConvStemBwdProblem.hpp
@@ -120,6 +121,10 @@ struct StemBwdConfig
     /// Stride 1: SPACE_TO_DEPTH, super-pixels of sd x sd dx pixels on a space-to-depth view of
     /// dy (the phases fill the GEMM columns, the sub-pixels join the reduction). 0: off.
     int64_t sd = 0;
+    /// 0: the graph's element type. 1: three-bf16 for an fp32 graph under TF32 permission
+    /// (conv_igemm::tf32Permitted): a bf16 matrix config on dy and w split along K into 3K
+    /// channels (ConvTf32Split.hpp), dx written in fp32.
+    int64_t math = 0;
 };
 
 /// A backward-data convolution the kernels serve.
@@ -212,6 +217,11 @@ struct StemBwdLaunch
     ConvStemBwdArgs args{};
     ConvStemBwdTransformArgs transform{};
     size_t workspaceBytes = 0;
+    /// Three-bf16 (math 1): the split dy and w (plan) after the transformed filter, at
+    /// splitOffset in the workspace.
+    bool split = false;
+    conv_tf32::SplitPlan plan;
+    size_t splitOffset = 0;
 };
 
 /// The transform's most blocks (a grid-stride loop covers the rest).
@@ -234,6 +244,18 @@ inline constexpr int64_t MAX_TRANSFORM_BLOCKS = 1024;
  * launch limits (x 2^31 - 1; y and z 65535); the transformed filter within 2^31 bytes (32-bit buffer
  * offsets).
  */
+/**
+ * @brief The bf16 problem a three-bf16 config runs for fp32 @p problem: K tripled (dy packed in
+ *        its order with 3K channels; w's K-major strides unchanged), or nullopt when dy's image
+ *        leaves 32 bits.
+ */
+std::optional<StemBwdProblem> threeBf16ProblemOf(const StemBwdProblem& problem);
+
+/// Whether three-bf16 is admitted for @p problem on @p gcnArchName (where it pays).
+bool threeBf16Pays(const StemBwdProblem& problem, std::string_view gcnArchName);
+
+/// math 0, or 1 (three-bf16): an fp32 problem, TF32 permitted, a bf16 matrix atom, threeBf16Pays;
+/// the config is then gated on threeBf16ProblemOf(problem) and the launch carries the split.
 std::optional<StemBwdLaunch>
     stemBwdLaunchFor(const StemBwdProblem& problem,
                      const StemBwdConfig& config,
