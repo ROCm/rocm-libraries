@@ -244,6 +244,19 @@ fixed rules:
   which then stay live across all of them), and the compile with more waves is
   kept if it spills no more.
 
+- On gfx950, a kernel that spills, or that runs fewer waves than the hardware
+  allows, is compiled again with its loop-invariant addresses and masks
+  recomputed where a deeper loop uses them (`rir/remat.rs`). Front ends compute
+  every per-lane offset a loop needs once in front of it (`tid * 272 + 544`,
+  one column index per MFMA tile), which holds a register each for the whole
+  loop: 74 of the 309 dwords live at the peak of the 256x128 attention tile.
+  A one-dword VGPR value that one VALU instruction makes from constants,
+  scalars and VGPRs defined once is made again in front of each use in a deeper
+  loop, when the VGPRs it reads are live there anyway and its other uses come
+  before the loop's first one. The retried compile is kept if it spills less or,
+  spilling no more, runs more waves. The spiller does the same for what it
+  must spill, now also from such VGPRs.
+
 These choices depend only on the input. They are why two kernels of a similar
 size can take very different compile times.
 
@@ -340,6 +353,8 @@ Switches for both targets:
 | `nolicm` | No loop-invariant code motion. |
 | `noalias` | Ignores the `noalias` facts: every pair of global accesses stays in order. |
 | `nounroll` | No automatic unrolling. Loops the IR marks `unroll = true` still unroll. |
+| `noremat` | gfx950: no retry with loop-invariant addresses recomputed in loops, and the spiller recomputes values only from constants and scalars. |
+| `tracepressure` | Prints the pressure of load sinking alone and of each window to stderr, the registers live at the busiest point by defining opcode (`ROCKE_DIRECT_TRACE_FILE=path` also writes the function with its pressure per instruction), and what the remat retry did. |
 | `noglobalfold` | Leaves the constants of unrolled copies in their global addresses (no offset folding). |
 | `noldsreuse` | Every LDS allocation gets its own space. |
 | `nohashcons` | Parses repeated constants as written. |

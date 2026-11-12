@@ -29,6 +29,7 @@ pub mod print;
 pub mod reassoc;
 pub mod regalloc;
 mod reload;
+pub(crate) mod remat;
 pub mod unroll;
 mod scan;
 mod scan_line;
@@ -588,6 +589,14 @@ fn schedule_and_allocate(
     let base_pressure = known.pressure();
     let fits_hw = |p: &regalloc::Pressure| p.vgprs <= hw.vgprs && p.sgprs <= hw.sgprs;
     let mut target = waves(base_pressure.vgprs.min(hw.vgprs));
+    if debug_flag("tracepressure") {
+        eprintln!("pressure: sunk {} vgpr {} sgpr; hw {} vgpr; target waves {}", base_pressure.vgprs, base_pressure.sgprs, hw.vgprs, target);
+        regalloc::trace_pressure(sunk, "sunk");
+        for w in [64usize, 32, 16] {
+            let (_, p) = known.schedule(w);
+            eprintln!("pressure: window {w}: {} vgpr {} sgpr", p.vgprs, p.sgprs);
+        }
+    }
     let budget = |target: u32| regalloc::Limits { vgprs: t.vgpr_budget(target, lds_size, wg).min(hw.vgprs), sgprs: hw.sgprs };
     let windows: &[usize] = if debug_flag("nosched") { &[] } else { &[64, 32, 16] };
     let mut base: Option<(mir::MFunc, regalloc::Allocation)> = None;
@@ -1202,6 +1211,43 @@ pub(crate) fn compile_parsed_by_on(
     threads: usize,
     target: Target,
 ) -> Result<CompiledKernel, CompileError> {
+    let first = compile_unrolling(text, parse, threads, target);
+    // gfx950: a kernel that spills, or runs fewer waves than it could, is compiled again with its
+    // loop-invariant addresses and masks computed where they are used (`remat`), and keeps that
+    // compile when it spills less or, spilling no more, runs more waves.
+    if target != Target::Gfx950 || debug_flag("noremat") || remat::enabled() || remat::off() {
+        return first;
+    }
+    if first.as_ref().is_ok_and(|u| spilled(&u.stats) == 0 && u.stats.waves >= target.info().max_waves) {
+        return first;
+    }
+    remat::reset();
+    let second = remat::with(true, || compile_unrolling(text, parse, threads, target));
+    if debug_flag("tracepressure") {
+        eprintln!(
+            "remat retry: {} recomputations; first {:?}, second {:?}",
+            remat::changed(),
+            first.as_ref().map(|u| (u.stats.vgprs, u.stats.waves, spilled(&u.stats))),
+            second.as_ref().map(|u| (u.stats.vgprs, u.stats.waves, spilled(&u.stats)))
+        );
+    }
+    if remat::changed() == 0 {
+        return first;
+    }
+    match (first, second) {
+        (Ok(a), Ok(b)) => Ok(if spilled(&b.stats) < spilled(&a.stats) || (spilled(&b.stats) == spilled(&a.stats) && b.stats.waves > a.stats.waves) { b } else { a }),
+        (Err(_), Ok(b)) => Ok(b),
+        (first, _) => first,
+    }
+}
+
+/// `compile_parsed_by_on` before its retry with `remat`.
+fn compile_unrolling(
+    text: &str,
+    parse: &dyn Fn(&str) -> Result<ast::Kernel, CompileError>,
+    threads: usize,
+    target: Target,
+) -> Result<CompiledKernel, CompileError> {
     if debug_flag("nounroll") {
         return compile_retrying(text, parse, None, &mut 0, threads, target);
     }
@@ -1458,6 +1504,9 @@ fn compile_with(
         laps.lap("prepare");
         crate::target::gfx9::legalize::run(&mut sel.func);
         crate::target::gfx9::lits::share(&mut sel.func);
+        if remat::enabled() {
+            remat::run(&mut sel.func);
+        }
     } else {
         peephole::optimize(&mut sel.func);
         uniform_masks::reuse_masks(&mut sel.func);

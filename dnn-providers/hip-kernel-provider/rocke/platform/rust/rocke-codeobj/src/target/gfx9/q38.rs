@@ -978,8 +978,9 @@ mod tests {
                 .map(|x| x.split_whitespace().nth(2).unwrap_or("").trim_end_matches(',').to_string())
                 .collect()
         };
-        let plain = order(&listing(&text));
-        let lev = order(&rir::with_levers(&["loadorder"], || listing(&text)));
+        // Without the remat retry, whose outcome depends on the occupancy the order leaves.
+        let plain = order(&rir::remat::without(|| listing(&text)));
+        let lev = order(&rir::remat::without(|| rir::with_levers(&["loadorder"], || listing(&text))));
         scopes_match_kernel_levers(&text, &["loadorder"]);
         assert_eq!(plain.len(), 30, "{plain:?}");
         assert_eq!(lev, plain, "loadorder reordered the guarded loads");

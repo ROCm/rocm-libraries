@@ -295,8 +295,11 @@ fn spilled(o: &Opnd, slot_of: &[Option<u32>]) -> Option<(VRef, u32)> {
 /// Whether `inst` computes its one result purely from constants and, for
 /// a VGPR, single-definition SGPRs, so it can be repeated where those are
 /// live. Scalar candidates are moves of constants only: anything else might
-/// clobber SCC where the copy lands.
-fn pure_def(inst: &MInst, class: Class, vregs: &[VRegInfo], defs: &[u32]) -> bool {
+/// clobber SCC where the copy lands. With `vsources` (gfx950), a VGPR result
+/// may also read single-definition VGPRs, and VGPRs that are never written
+/// (the thread id): what keeps one live across a loop is then the source
+/// that the loop reads anyway, not each address computed from it.
+pub(super) fn pure_def(inst: &MInst, class: Class, vregs: &[VRegInfo], defs: &[u32], vsources: bool) -> bool {
     if inst.mods != 0 || inst.defs.len() != 1 {
         return false;
     }
@@ -309,7 +312,8 @@ fn pure_def(inst: &MInst, class: Class, vregs: &[VRegInfo], defs: &[u32]) -> boo
     };
     pure && inst.uses.iter().all(|o| match o {
         Opnd::Imm(_) => true,
-        Opnd::R(s) => vregs[s.reg as usize].class == Class::S && defs[s.reg as usize] == 1,
+        Opnd::R(s) if vregs[s.reg as usize].class == Class::S => defs[s.reg as usize] == 1,
+        Opnd::R(s) => vsources && (defs[s.reg as usize] == 1 || defs[s.reg as usize] == 0 && vregs[s.reg as usize].fixed.is_some()),
         Opnd::P(..) => false,
     })
 }
@@ -725,6 +729,7 @@ impl Spiller {
         // (coverage, register, recomputed, freed); a candidate whose
         // recomputation reads registers is settled once their use positions
         // are known.
+        let vsources = f.target == crate::target::Target::Gfx950 && !super::debug_flag("noremat_v");
         let mut cands: Vec<(u64, u32, bool, u32)> = Vec::new();
         let mut sourced: Vec<usize> = Vec::new();
         for r in 0..nv as u32 {
@@ -752,7 +757,7 @@ impl Spiller {
             let pure = members[r as usize] == 1
                 && size == 1
                 && defs[r as usize] == 1
-                && def_inst[r as usize].is_some_and(|(b, k)| pure_def(&f.blocks[b as usize].insts[k as usize], class, &f.vregs, defs));
+                && def_inst[r as usize].is_some_and(|(b, k)| pure_def(&f.blocks[b as usize].insts[k as usize], class, &f.vregs, defs, vsources));
             let reads = pure && def_inst[r as usize].is_some_and(|(b, k)| f.blocks[b as usize].insts[k as usize].uses.iter().any(|o| matches!(o, Opnd::R(_))));
             if reads {
                 sourced.push(cands.len());
@@ -789,17 +794,36 @@ impl Spiller {
         cands.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
         let mut covered = 0u32;
         let mut out = Vec::new();
+        // A recomputation reads its sources where it lands, so none of them may itself be recomputed
+        // (no longer live there): a register read by a chosen recomputation stays, and a chosen
+        // recomputation reads none of the others chosen.
+        let mut recomputed = std::collections::HashSet::new();
+        let mut read_by_remat = std::collections::HashSet::new();
+        let mut stored = std::collections::HashSet::new();
+        let sources_of = |r: u32| -> Vec<u32> {
+            let (b, k) = def_inst[r as usize].expect("defined once");
+            f.blocks[b as usize].insts[k as usize].uses.iter().filter_map(|o| o.vref().map(|v| v.reg)).collect()
+        };
         for (_, r, remat, freed) in cands {
             if covered >= need {
                 break;
             }
+            if remat && sources_of(r).iter().any(|s| recomputed.contains(s) || stored.contains(s)) {
+                continue;
+            }
+            if read_by_remat.contains(&r) {
+                continue;
+            }
             covered += freed;
             if remat {
+                recomputed.insert(r);
+                read_by_remat.extend(sources_of(r));
                 let (b, k) = def_inst[r as usize].expect("defined once");
                 out.push(Choice::Remat(r, (b as usize, k as usize)));
             } else {
                 let list: Vec<(u32, u8)> =
                     (0..nv as u32).filter(|&v| root[v as usize].0 == r).map(|v| (v, root[v as usize].1)).collect();
+                stored.extend(list.iter().map(|&(v, _)| v));
                 out.push(Choice::Spill(list, groups.gsize[r as usize], cost[r as usize]));
             }
         }
