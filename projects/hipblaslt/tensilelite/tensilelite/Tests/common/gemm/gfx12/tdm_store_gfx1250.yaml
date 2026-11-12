@@ -1413,3 +1413,67 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [383, 127, 1, 128]
           - Exact: [384, 125, 2, 128, 400, 400, 128, 128]
+  ########################################
+  # bf8 D converted from fp32 accumulators and int8 D from int32 accumulators: 1-byte elements, which the
+  # TDM block stages with ds_store_b8 at store vector width 1 and reads back with ds_load_u8, at every
+  # TDMStoreInst level on bf8 and int8 inputs. M is odd and ldd = 136, so the columns of D do not start
+  # 16-byte aligned.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b8
+      DestDataType: b8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 2, 2, 2, 2]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - PrefetchGlobalRead: [2]
+        - StoreVectorWidth: [1, -1]
+        - TDMStoreInst: [0, 1, 2, 3]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [127, 127, 1, 128]
+          - Exact: [128, 125, 2, 128, 136, 136, 128, 128]
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: i8
+      DestDataType: i8
+      ComputeDataType: i
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 64, 1, 1, 2, 2, 2, 2]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - PrefetchGlobalRead: [2]
+        - StoreVectorWidth: [1, -1]
+        - TDMStoreInst: [0, 1, 2, 3]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [127, 127, 1, 128]
+          - Exact: [128, 125, 2, 128, 136, 136, 128, 128]
