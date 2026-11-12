@@ -535,7 +535,7 @@ else()
   )
 
   if( NOT ENABLE_ASAN_PACKAGING )
-    install(TARGETS miopen_gtest
+    install(TARGETS miopen_gtest addkernels
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
         DESTINATION ${CMAKE_INSTALL_BINDIR}
         COMPONENT clients)
@@ -546,6 +546,41 @@ else()
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
         DESTINATION ${DATA_INSTALL_DIR}/bin
         COMPONENT clients)
+
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    set(MIOPEN_ROCJITSU_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/rocjitsu")
+    set(MIOPEN_ROCJITSU_POLICY "${CMAKE_CURRENT_BINARY_DIR}/rocjitsu_policy.json")
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+        "${MIOPEN_ROCJITSU_SOURCE_DIR}/rocjitsu_selection.py")
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}"
+            "${MIOPEN_ROCJITSU_SOURCE_DIR}/rocjitsu_selection.py"
+            --export-policy "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+            "${MIOPEN_ROCJITSU_POLICY}"
+        RESULT_VARIABLE MIOPEN_ROCJITSU_EXPORT_RESULT
+        ERROR_VARIABLE MIOPEN_ROCJITSU_EXPORT_ERROR)
+    if(NOT MIOPEN_ROCJITSU_EXPORT_RESULT EQUAL 0)
+      message(FATAL_ERROR "Cannot export rocjitsu policy: ${MIOPEN_ROCJITSU_EXPORT_ERROR}")
+    endif()
+    install(PROGRAMS "${MIOPEN_ROCJITSU_SOURCE_DIR}/run_rocjitsu.py"
+        DESTINATION ${DATA_INSTALL_DIR}/rocjitsu
+        COMPONENT clients)
+    install(FILES
+        "${MIOPEN_ROCJITSU_SOURCE_DIR}/rocjitsu_cpu.py"
+        "${MIOPEN_ROCJITSU_SOURCE_DIR}/rocjitsu_reports.py"
+        "${MIOPEN_ROCJITSU_SOURCE_DIR}/rocjitsu_selection.py"
+        "${MIOPEN_ROCJITSU_POLICY}"
+        DESTINATION ${DATA_INSTALL_DIR}/rocjitsu
+        COMPONENT clients)
+
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+      add_test(NAME test_rocjitsu_runtime
+          COMMAND "${Python3_EXECUTABLE}" -m unittest discover -v
+              -s "${MIOPEN_ROCJITSU_SOURCE_DIR}" -p "test_rocjitsu_*.py")
+      set_tests_properties(test_rocjitsu_runtime PROPERTIES
+          TIMEOUT 60 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+    endif()
   endif()
 endif()
 

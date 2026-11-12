@@ -136,7 +136,7 @@ test_categories:
       # that carry no size-tier prefix). They need no GPU and are fast.
       - "CPU_*"
 
-    exclude:
+    exclude: &quick_exclusions
       - "*/GPU_MIOpenDriver*"
       # Each fans out to 32 worker processes loading MIOpen, OOM-killing
       # small shared-RAM runners (e.g. gfx1151). Still run in standard/full.
@@ -431,7 +431,7 @@ test_categories:
 
   ffm-quick:
     description: "FFM Quick Tests - Quick tests for NPI PRs"
-    test_patterns:
+    test_patterns: &ffm_positive_patterns
         # --- Batch normalization (fwd train / infer / bwd, 2D + 3D, per-act + spatial) ---
       - "Smoke/GPU_BnPeract_FP32*"
       - "Smoke/GPU_BnPeract_FP16*"
@@ -580,6 +580,90 @@ test_categories:
     labels:
       - "ffm-quick"
       - "ffm-full"
+
+  rocjitsu-quick:
+    description: "Cost-bounded Smoke/CPU and FFM baseline for rocjitsu emulation"
+    test_patterns:
+      - *ffm_positive_patterns
+      - "Smoke/*"
+      - "CPU_*"
+    exclude:
+      - *quick_exclusions
+      # Temporary gfx1250 HipConv kernel-image loading failure on emulator and
+      # native B0 hardware (KPACK TU-index mismatch). Keep host checks; remove
+      # this GPU ignore once the image-loading fix lands.
+      - "Smoke/GPU_UnitTestConvSolverConvHipConv*.*"
+      # Dense/dilated 28^3 fused cases exceed 800s; keep smaller 3D and all 2D.
+      - "Smoke/GPU_ConvGrpBiasActivInfer3D_*.*/*_G_1_N_32_C_64_K_128_D_28_H_28_W_28_*"
+      # Large activation-only shapes across both layouts add 459s.
+      - "Smoke/GPU_ConvGrpActivInfer*.*/0"
+      - "Smoke/GPU_ConvGrpActivInfer*.*/1"
+      - "Smoke/GPU_ConvGrpActivInfer*.*/8"
+      - "Smoke/GPU_ConvGrpActivInfer*.*/9"
+      # The only FP16/BF16 plain 3D-forward Smoke shape takes over 24 minutes.
+      # Keep host applicability, smaller fused/reference forward and bwd/wrw.
+      - "Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_FP16.*"
+      - "Smoke/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_BFP16.*"
+      # Keep no-tune/unlimited-workspace representatives in every direction.
+      - "Smoke/GPU_Find2Conv_FP32.*_tune_1_*"
+      - "Smoke/GPU_Find2Conv_FP32.*_preallocate_1_*"
+      - "Smoke/GPU_Find2Conv_FP32.*_ws_limit_0_*"
+      - "Smoke/GPU_Find2Conv_FP32.*_attach_binaries_1"
+      # Defer reduction-volume stress; retain p=1/2, reductions and packing.
+      - "Smoke/GPU_MultiMarginLoss_*.*/6"
+      - "Smoke/GPU_MultiMarginLoss_*.*/7"
+      - "Smoke/GPU_MultiMarginLoss_*.*/8"
+      - "Smoke/GPU_MultiMarginLoss_*.*/9"
+      - "Smoke/GPU_MultiMarginLoss_*.*/10"
+      - "Smoke/GPU_MultiMarginLoss_*.*/11"
+      # Monolithic large FindDb driver; keep CPU DB/workspace/determinism checks.
+      - "Smoke/GPU_FindDb_FP32.*"
+      # Two N=16/C=8 3D BN configurations (IDs 8..23); keep D>1 and C=3 cases.
+      - "Smoke/GPU_BNFWDTrainSmall3D_FP32.*_test_id_8"
+      - "Smoke/GPU_BNFWDTrainSmall3D_FP32.*_test_id_9"
+      - "Smoke/GPU_BNFWDTrainSmall3D_FP32.*_test_id_10"
+      - "Smoke/GPU_BNFWDTrainSmall3D_FP32.*_test_id_11"
+      - "Smoke/GPU_BNFWDTrainSmall3D_FP32.*_test_id_12"
+      - "Smoke/GPU_BNFWDTrainSmall3D_FP32.*_test_id_13"
+      - "Smoke/GPU_BNFWDTrainSmall3D_FP32.*_test_id_14"
+      - "Smoke/GPU_BNFWDTrainSmall3D_FP32.*_test_id_15"
+      - "Smoke/GPU_BNFWDTrainSmall3D_FP32.*_test_id_16"
+      - "Smoke/GPU_BNFWDTrainSmall3D_FP32.*_test_id_17"
+      - "Smoke/GPU_BNFWDTrainSmall3D_FP32.*_test_id_18"
+      - "Smoke/GPU_BNFWDTrainSmall3D_FP32.*_test_id_19"
+      - "Smoke/GPU_BNFWDTrainSmall3D_FP32.*_test_id_20"
+      - "Smoke/GPU_BNFWDTrainSmall3D_FP32.*_test_id_21"
+      - "Smoke/GPU_BNFWDTrainSmall3D_FP32.*_test_id_22"
+      - "Smoke/GPU_BNFWDTrainSmall3D_FP32.*_test_id_23"
+      - "Smoke/GPU_BNInferSmall3D_FP32.*_test_id_8"
+      - "Smoke/GPU_BNInferSmall3D_FP32.*_test_id_9"
+      - "Smoke/GPU_BNInferSmall3D_FP32.*_test_id_10"
+      - "Smoke/GPU_BNInferSmall3D_FP32.*_test_id_11"
+      - "Smoke/GPU_BNInferSmall3D_FP32.*_test_id_12"
+      - "Smoke/GPU_BNInferSmall3D_FP32.*_test_id_13"
+      - "Smoke/GPU_BNInferSmall3D_FP32.*_test_id_14"
+      - "Smoke/GPU_BNInferSmall3D_FP32.*_test_id_15"
+      - "Smoke/GPU_BNInferSmall3D_FP32.*_test_id_16"
+      - "Smoke/GPU_BNInferSmall3D_FP32.*_test_id_17"
+      - "Smoke/GPU_BNInferSmall3D_FP32.*_test_id_18"
+      - "Smoke/GPU_BNInferSmall3D_FP32.*_test_id_19"
+      - "Smoke/GPU_BNInferSmall3D_FP32.*_test_id_20"
+      - "Smoke/GPU_BNInferSmall3D_FP32.*_test_id_21"
+      - "Smoke/GPU_BNInferSmall3D_FP32.*_test_id_22"
+      - "Smoke/GPU_BNInferSmall3D_FP32.*_test_id_23"
+    representative_cases:
+      tensor_reorder:
+        suite_pattern: "Smoke/GPU_TensorReorder_*"
+        strategy: axis_extremes
+      reference_kernels:
+        suite_pattern: "Smoke/GPU_reference_kernel_*"
+        strategy: semantic_cover
+        # These FFM forward fixtures stay complete, not merely representative.
+        protected_patterns:
+          - "Smoke/GPU_reference_kernel_fwd_3d_NCDHW_FP32_FP32"
+          - "Smoke/GPU_reference_kernel_fwd_3d_NCDHW_FP16_FP16"
+    labels:
+      - "rocjitsu-quick"
 
 # Common GPU exclusion patterns - used by multiple GPU architectures
 gfx11_common_patterns: &gfx11_common_patterns
@@ -737,4 +821,5 @@ execution_settings:
     comprehensive: 7200 # 2 hours
     ffm-quick:  7200    # 2 hours
     ffm-full:  7200     # 2 hours
+    rocjitsu-quick: 1500 # 50 minutes after multiplier; parallel CPU then GPU phases
     full: 14400         # 4 hours

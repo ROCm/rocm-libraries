@@ -6,6 +6,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
+* [Tests] Install `addkernels` beside the combined `miopen_gtest` executable so the
+  installed quick CPU inliner test can execute its real helper instead of failing
+  with command-not-found.
 * [Conv] Fixed deterministic convolutions that reused the find-db record and the cached invokers
   of a non-deterministic call with the same problem. The deterministic call could return a stale
   time and, in one handle, run a non-deterministic split-K kernel. The find-db key now contains
@@ -63,12 +66,21 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   replay a captured graph.
 
 ### Added
-* [CI] Added gfx1250 FFM quick-subset coverage through the native TheRock `miopen-gfx1250-rocjitsu-quick` CPU test component. Its TheRock-owned source runner consumes existing MIOpen/CK artifacts without rebuilding them; test-only selection requires a TheRock ref containing the component.
+* [CI] Added a MIOpen-owned `rocjitsu-quick` category sharing the FFM baseline and
+  additional Smoke/CPU coverage. The installed architecture-aware runner consumes
+  PR-built MIOpen/CK artifacts through the native TheRock gfx1250 CPU component;
+  a single target registry enables adding further architectures after qualification.
+  Static exclusions and adaptive coverage policy live in `test_categories.yaml`.
+  CPU checks run in isolated parallel shards, followed by GPU checks at up to
+  16 simulator dispatch workers; merged reports require every selected identity.
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
   RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
   filters up to 7x7 and is selected through Find mode.
 
 ### Changed
+* [CI] Temporarily exclude GPU HipConv solver suites from the `rocjitsu-quick` category
+  pending the HipConv kernel-image loading fix. Host checks and ordinary hardware
+  categories remain unchanged; remove the exclusion once the fix lands.
 * [Conv] Enabled the 2D and 3D grouped forward CK xdlops solvers in deterministic mode. Forward
   never uses split-K, so these solvers are deterministic; previously, deterministic forward
   convolutions could only use the GEMM and naive solvers.
