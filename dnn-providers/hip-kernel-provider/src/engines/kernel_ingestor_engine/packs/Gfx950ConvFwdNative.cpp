@@ -1302,14 +1302,16 @@ public:
         // A and writes the output through D. B is unused by the fold.
         const auto workspaceBytes = static_cast<int32_t>(convPrepared.workspaceBytes());
         if(workspace == nullptr || reinterpret_cast<uintptr_t>(workspace) % 16 != 0
-           || !conv::bufferRangesDoNotOverlap({reinterpret_cast<uintptr_t>(a.ptr),
-                                               reinterpret_cast<uintptr_t>(b.ptr),
-                                               reinterpret_cast<uintptr_t>(workspace)},
-                                              {bytes[0], bytes[1], workspaceBytes})
-           || !conv::bufferRangesDoNotOverlap({reinterpret_cast<uintptr_t>(workspace),
-                                               reinterpret_cast<uintptr_t>(b.ptr),
-                                               reinterpret_cast<uintptr_t>(d.ptr)},
-                                              {workspaceBytes, bytes[1], bytes[2]}))
+           || !conv::bufferRangesDoNotOverlap(
+               {reinterpret_cast<uintptr_t>(a.ptr),
+                reinterpret_cast<uintptr_t>(b.ptr),
+                reinterpret_cast<uintptr_t>(workspace)},
+               std::array<int32_t, 3>{bytes[0], bytes[1], workspaceBytes})
+           || !conv::bufferRangesDoNotOverlap(
+               {reinterpret_cast<uintptr_t>(workspace),
+                reinterpret_cast<uintptr_t>(b.ptr),
+                reinterpret_cast<uintptr_t>(d.ptr)},
+               std::array<int32_t, 3>{workspaceBytes, bytes[1], bytes[2]}))
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -1373,10 +1375,10 @@ private:
                                  hipStream_t stream,
                                  const std::array<void*, 3>& pointers)
     {
-        if(!conv::wholeRangesDoNotOverlap({reinterpret_cast<uintptr_t>(pointers[0]),
-                                           reinterpret_cast<uintptr_t>(pointers[1]),
-                                           reinterpret_cast<uintptr_t>(pointers[2])},
-                                          prepared.wholeBytes()))
+        if(!conv::bufferRangesDoNotOverlap({reinterpret_cast<uintptr_t>(pointers[0]),
+                                            reinterpret_cast<uintptr_t>(pointers[1]),
+                                            reinterpret_cast<uintptr_t>(pointers[2])},
+                                           prepared.wholeBytes()))
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,

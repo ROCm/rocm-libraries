@@ -13,8 +13,19 @@
 #include <string_view>
 #include <vector>
 
+#include "engines/kernel_ingestor_engine/packs/Gfx950ConvGeometryCommon.hpp"
+
 namespace hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_fwd
 {
+
+using gfx950_conv::bufferRangesDoNotOverlap;
+using gfx950_conv::ceilDiv;
+using gfx950_conv::DIRECT_KERNARG_NAMES;
+using gfx950_conv::DW_DGRAD_MFMA_CH;
+using gfx950_conv::DW_DGRAD_WIN_MAX_TENSOR_BYTES;
+using gfx950_conv::LaunchGeometry;
+using gfx950_conv::MagicDivision;
+using gfx950_conv::magicDivision;
 
 /// Logical NCHW/KCYX dimensions. The kernel stores A as NHWC, B as KYXC, D as NHWK.
 /// C and K are totals across all groups; B holds C / groups channels per filter.
@@ -44,57 +55,12 @@ struct Geometry
     std::array<int32_t, 3> tensorBytes; // A, B, D, in the rocKE launch ABI order.
 };
 
-struct LaunchGeometry
-{
-    unsigned int gridX;
-    unsigned int gridY;
-    unsigned int gridZ;
-    unsigned int blockX;
-};
-
-namespace detail
-{
-template <typename Bytes>
-inline bool rangesDoNotOverlap(const std::array<uintptr_t, 3>& addresses,
-                               const std::array<Bytes, 3>& bytes)
-{
-    for(size_t i = 0; i < addresses.size(); ++i)
-    {
-        if(bytes[i] <= 0
-           || addresses[i]
-                  > std::numeric_limits<uintptr_t>::max() - static_cast<uintptr_t>(bytes[i]))
-        {
-            return false;
-        }
-        for(size_t j = 0; j < i; ++j)
-        {
-            // Subtract ordered addresses so even untrusted pointers cannot overflow.
-            if(addresses[i] >= addresses[j]
-                   ? addresses[i] - addresses[j] < static_cast<uintptr_t>(bytes[j])
-                   : addresses[j] - addresses[i] < static_cast<uintptr_t>(bytes[i]))
-            {
-                return false;
-            }
-        }
-    }
-    return true;
-}
-} // namespace detail
-
-/// The compiled pointer arguments are noalias. Check complete storage ranges,
-/// including partially overlapping views, before passing them to the kernel.
+/// bufferRangesDoNotOverlap for the launch ABI's packed i32 byte counts: the shared,
+/// i64-array overload (brought in above) does the actual range check.
 inline bool bufferRangesDoNotOverlap(const std::array<uintptr_t, 3>& addresses,
                                      const std::array<int32_t, 3>& bytes)
 {
-    return detail::rangesDoNotOverlap(addresses, bytes);
-}
-
-/// bufferRangesDoNotOverlap for the whole tensors a batch-split launch covers, whose
-/// byte counts may pass the launch ABI's i32.
-inline bool wholeRangesDoNotOverlap(const std::array<uintptr_t, 3>& addresses,
-                                    const std::array<int64_t, 3>& bytes)
-{
-    return detail::rangesDoNotOverlap(addresses, bytes);
+    return gfx950_conv::bufferRangesDoNotOverlap(addresses, {bytes[0], bytes[1], bytes[2]});
 }
 
 /// The builder's A_bytes/B_bytes/D_bytes arguments and indexing use signed i32.
@@ -196,34 +162,6 @@ inline std::optional<LaunchGeometry> launchGeometry(const Problem& problem,
                           static_cast<unsigned int>(gridY),
                           static_cast<unsigned int>(problem.groups),
                           static_cast<unsigned int>(warpM * warpN * waveSize)};
-}
-
-/// One (multiplier, shift) pair of rocKE's calculate_magic_numbers in
-/// rocke/platform/python/rocke/helpers/transforms.py, a port of CK Tile's
-/// magic_division32_bit_range. The kernel reads the multiplier with an unsigned mul-hi,
-/// so it is passed as the i32 with the same bit pattern (conv_args._magic_as_i32).
-struct MagicDivision
-{
-    int32_t multiplier;
-    int32_t shift;
-};
-
-inline std::optional<MagicDivision> magicDivision(int64_t divisor)
-{
-    if(divisor < 1 || divisor > std::numeric_limits<int32_t>::max())
-    {
-        return std::nullopt;
-    }
-    int32_t shift = 0;
-    while((int64_t{1} << shift) < divisor)
-    {
-        ++shift;
-    }
-    // 2^shift - divisor < divisor <= 2^31, so the shifted value fits in 63 bits and the
-    // quotient plus one stays below 2^32.
-    const auto d = static_cast<uint64_t>(divisor);
-    const uint64_t multiplier = ((((uint64_t{1} << shift) - d) << 32) / d) + 1;
-    return MagicDivision{static_cast<int32_t>(static_cast<uint32_t>(multiplier)), shift};
 }
 
 /// The forward implicit-GEMM kernels decode the reduction index with 24-bit multiplies;
@@ -347,23 +285,9 @@ inline std::optional<ImplicitGemmKernargs> implicitGemmKernargs(const Problem& p
 }
 
 /// The runtime block that follows the six leading arguments in the forward direct-conv
-/// ABI, in order: conv_direct_arg_names(direction="fwd") in conv_abi.py. Filter extents,
-/// stride and padding are compiled into the direct kernels, so they are not arguments.
-constexpr std::array<std::string_view, 14> DIRECT_KERNARG_NAMES{"p_N",
-                                                                "p_Hi",
-                                                                "p_Wi",
-                                                                "p_Ho",
-                                                                "p_Wo",
-                                                                "p_groups",
-                                                                "p_total_c",
-                                                                "p_total_k",
-                                                                "p_A_stride_n",
-                                                                "p_A_stride_hi",
-                                                                "p_A_stride_wi",
-                                                                "p_D_stride_n",
-                                                                "p_D_stride_ho",
-                                                                "p_D_stride_wo"};
-
+/// ABI, in order: conv_direct_arg_names(direction="fwd") in conv_abi.py (DIRECT_KERNARG_NAMES,
+/// brought in above). Filter extents, stride and padding are compiled into the direct
+/// kernels, so they are not arguments.
 using DirectKernargs = std::array<int32_t, DIRECT_KERNARG_NAMES.size()>;
 
 /// The values for DIRECT_KERNARG_NAMES; mirrors ConvArgs.to_launch_values for a
@@ -898,12 +822,6 @@ inline bool directCompiledMatches(const DirectCapabilities& compiled, const Prob
            && directServes(compiled, problem);
 }
 
-/// ceil(a / b) for a >= 0, b > 0, without the overflow of a + b - 1.
-inline int64_t ceilDiv(int64_t a, int64_t b)
-{
-    return a == 0 ? 0 : 1 + (a - 1) / b;
-}
-
 /// The (x, y, z) grid with every axis at most 65535 and at least 1, else std::nullopt.
 inline std::optional<LaunchGeometry>
     boundedDirectGrid(int64_t gridX, int64_t gridY, int64_t gridZ, int64_t threads)
@@ -1126,15 +1044,6 @@ inline std::optional<LaunchGeometry> nongroupedDirectLaunch(const Problem& probl
                           static_cast<unsigned int>(threads)};
 }
 
-/// The MFMA channels one wave of the windowed kernel owns (DW_DGRAD_MFMA_CH in
-/// conv_direct_grouped.py).
-constexpr int64_t DIRECT_WINDOWED_MFMA_CH = 8;
-
-/// Every in-range byte offset plus the windowed kernel's sentinel
-/// (DW_DGRAD_WIN_OOB_LANE / DW_DGRAD_WIN_OOB_UNIFORM, both 1<<30) must stay a valid
-/// unsigned 32-bit offset (DW_DGRAD_WIN_MAX_TENSOR_BYTES in conv_direct_grouped.py).
-constexpr int64_t DW_DGRAD_WIN_MAX_TENSOR_BYTES = (int64_t{1} << 30) - 1;
-
 /// Whether the product of @p factors is at most @p limit, computed by dividing down rather
 /// than multiplying up: the problem fields windowedDirectLaunch checks this against are
 /// untrusted and can be large enough that their product overflows int64 before it is ever
@@ -1159,11 +1068,11 @@ inline bool fitsWithinBytes(int64_t limit, std::initializer_list<int64_t> factor
 /// the runtime problem (square filter, stride 1 or 2, no dilation, cpg = kpg = 1 or a
 /// multiple of 8 up to 64, block_h a multiple of the stride), then
 ///
-/// At cpg == 1 (pure depthwise) every wave still owns DIRECT_WINDOWED_MFMA_CH one-hot
+/// At cpg == 1 (pure depthwise) every wave still owns DW_DGRAD_MFMA_CH one-hot
 /// lanes, but only its first lane is masked against the problem's group count; a group
 /// count not a multiple of it leaves phantom lanes reading real weight memory out of
 /// range and corrupting real channels through the MFMA's off-diagonal terms, so this also
-/// requires problem.groups a multiple of DIRECT_WINDOWED_MFMA_CH there.
+/// requires problem.groups a multiple of DW_DGRAD_MFMA_CH there.
 /// direct_launch_geometry's grid over the transposed stride-1 problem:
 ///   (ceil(stride * Wo / (32 / w_fold)), ceil(C / (8 * block_waves)),
 ///    ceil(N / w_fold) * ceil(stride * Ho / block_h))
@@ -1180,15 +1089,15 @@ inline std::optional<LaunchGeometry> windowedDirectLaunch(const Problem& problem
        || (compiled.strideH != 1 && compiled.strideH != 2) || problem.groups <= 0
        || problem.c % problem.groups != 0 || problem.k % problem.groups != 0
        || problem.c / problem.groups != instance.cpg || problem.k / problem.groups != instance.kpg
-       || (grouped ? instance.cpg != instance.kpg || instance.cpg % DIRECT_WINDOWED_MFMA_CH != 0
-                         || instance.cpg > 64
-                   // Each wave still owns DIRECT_WINDOWED_MFMA_CH one-hot MFMA lanes even
-                   // at cpg == 1: only the wave's first lane is masked against problem.groups
-                   // (conv_direct_grouped.py), so a group count that is not a multiple of it
-                   // leaves phantom lanes issuing in-range weight reads past the real
-                   // channels and writing into the real channels' store slots.
-                   : instance.cpg != 1 || instance.kpg != 1
-                         || problem.groups % DIRECT_WINDOWED_MFMA_CH != 0)
+       || (grouped
+               ? instance.cpg != instance.kpg || instance.cpg % DW_DGRAD_MFMA_CH != 0
+                     || instance.cpg > 64
+               // Each wave still owns DW_DGRAD_MFMA_CH one-hot MFMA lanes even
+               // at cpg == 1: only the wave's first lane is masked against problem.groups
+               // (conv_direct_grouped.py), so a group count that is not a multiple of it
+               // leaves phantom lanes issuing in-range weight reads past the real
+               // channels and writing into the real channels' store slots.
+               : instance.cpg != 1 || instance.kpg != 1 || problem.groups % DW_DGRAD_MFMA_CH != 0)
        || instance.blockH < 1 || instance.blockWaves < 1
        || instance.blockWaves > DIRECT_MAX_BLOCK_WAVES
        || (instance.wFold != 1 && instance.wFold != 2 && instance.wFold != 4)
@@ -1208,7 +1117,7 @@ inline std::optional<LaunchGeometry> windowedDirectLaunch(const Problem& problem
         return std::nullopt;
     }
     const auto tileW = 32 / instance.wFold;
-    const auto blockCh = instance.blockWaves * DIRECT_WINDOWED_MFMA_CH;
+    const auto blockCh = instance.blockWaves * DW_DGRAD_MFMA_CH;
     const auto stride1H = compiled.strideH * geometry.ho;
     const auto stride1W = compiled.strideH * geometry.wo;
     return boundedDirectGrid(ceilDiv(stride1W, tileW),

@@ -24,16 +24,17 @@ constexpr Problem SMOKE{2, 32, 32, 14, 14, 3, 3, 1, 1, 1, 1, 1, 1};
 
 TEST(TestGfx950ConvFwdGeometry, RejectsAliasedAndPartiallyOverlappingStorage)
 {
+    using Bytes = std::array<int32_t, 3>;
     // Adjacent storage is legal, independent of argument address order.
-    EXPECT_TRUE(bufferRangesDoNotOverlap({0x1000, 0x1100, 0x1300}, {256, 512, 128}));
-    EXPECT_TRUE(bufferRangesDoNotOverlap({0x1300, 0x1100, 0x1000}, {128, 512, 256}));
-    EXPECT_FALSE(bufferRangesDoNotOverlap({0x1000, 0x1000, 0x2000}, {256, 512, 128}));
-    EXPECT_FALSE(bufferRangesDoNotOverlap({0x1000, 0x10F0, 0x2000}, {256, 512, 128}));
-    EXPECT_FALSE(bufferRangesDoNotOverlap({0x1000, 0x2000, 0x1010}, {256, 512, 128}));
-    EXPECT_FALSE(bufferRangesDoNotOverlap({0x2000, 0x1000, 0x1010}, {256, 512, 128}));
-    EXPECT_FALSE(bufferRangesDoNotOverlap({0x1000, 0x2000, 0x3000}, {0, 512, 128}));
+    EXPECT_TRUE(bufferRangesDoNotOverlap({0x1000, 0x1100, 0x1300}, Bytes{256, 512, 128}));
+    EXPECT_TRUE(bufferRangesDoNotOverlap({0x1300, 0x1100, 0x1000}, Bytes{128, 512, 256}));
+    EXPECT_FALSE(bufferRangesDoNotOverlap({0x1000, 0x1000, 0x2000}, Bytes{256, 512, 128}));
+    EXPECT_FALSE(bufferRangesDoNotOverlap({0x1000, 0x10F0, 0x2000}, Bytes{256, 512, 128}));
+    EXPECT_FALSE(bufferRangesDoNotOverlap({0x1000, 0x2000, 0x1010}, Bytes{256, 512, 128}));
+    EXPECT_FALSE(bufferRangesDoNotOverlap({0x2000, 0x1000, 0x1010}, Bytes{256, 512, 128}));
+    EXPECT_FALSE(bufferRangesDoNotOverlap({0x1000, 0x2000, 0x3000}, Bytes{0, 512, 128}));
     EXPECT_FALSE(bufferRangesDoNotOverlap(
-        {0x1000, 0x2000, std::numeric_limits<uintptr_t>::max() - 63}, {256, 512, 128}));
+        {0x1000, 0x2000, std::numeric_limits<uintptr_t>::max() - 63}, Bytes{256, 512, 128}));
 }
 
 TEST(TestGfx950ConvFwdGeometry, PaddedSmokeUsesByteCountsAndPartialMTile)
@@ -1211,11 +1212,12 @@ TEST(TestGfx950ConvFwdGeometry, NongroupedBatchChunksAreRockesBatchSplit)
         EXPECT_EQ(nongroupedBatchChunks(problem), chunks) << problem.n << " " << problem.hi;
     }
     // The whole tensors a split batch covers pass the i32 ABI, so they compare in i64.
+    using WholeBytes = std::array<int64_t, 3>;
     constexpr int64_t TWO_GIB = int64_t{1} << 31;
-    EXPECT_TRUE(wholeRangesDoNotOverlap({0, uintptr_t{1} << 32, uintptr_t{1} << 33},
-                                        {TWO_GIB, 4608, TWO_GIB}));
-    EXPECT_FALSE(wholeRangesDoNotOverlap({0, uintptr_t{1} << 32, uintptr_t{1} << 30},
-                                         {TWO_GIB, 4608, TWO_GIB}));
+    EXPECT_TRUE(bufferRangesDoNotOverlap({0, uintptr_t{1} << 32, uintptr_t{1} << 33},
+                                         WholeBytes{TWO_GIB, 4608, TWO_GIB}));
+    EXPECT_FALSE(bufferRangesDoNotOverlap({0, uintptr_t{1} << 32, uintptr_t{1} << 30},
+                                          WholeBytes{TWO_GIB, 4608, TWO_GIB}));
 }
 
 TEST(TestGfx950ConvFwdGeometry, GroupMergedInstanceLaunchesGroupsOverMerge)
