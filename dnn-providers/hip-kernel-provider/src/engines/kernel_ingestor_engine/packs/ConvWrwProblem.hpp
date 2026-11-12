@@ -147,7 +147,9 @@ struct WrwConfig
     /// (loop 6, at most 16 input channels per group), P (loop 1, the filter height fr, height
     /// stride 1 or phases), U (P with align 2: channels-last output channels in any count), G
     /// (loop 2, gfx950, fr at height stride 1) or D (loop 5, gfx950, as G with unit width
-    /// stride and unit height dilation or one filter row); fr 0 for R and C. Lower case r, p, c:
+    /// stride and unit height dilation or one filter row); fr 0 for R and C. F, S, Q (atom fma
+    /// alone, for the generic FMA form): the FMA output rows of vectors (channels-first rows of
+    /// whole vectors), of scalar units, and the FMA ring (fr at height stride 1). Lower case r, p, c:
     /// their block-based buffer forms, which serve large images alone (channels-first, each
     /// channel plane within the range); the upper-case kinds serve the other images.
     std::string spec;
@@ -332,7 +334,9 @@ DirectPlan directPlanFor(int64_t tiles,
  * width), bq dividing the block's threads, align 0. Its units are elements (no pass masks): at
  * most 64 passes.
  *
- * Loop 8 (generic taps, the coverage tier): a matrix atom; the filter, strides and dilations
+ * Loop 8 (generic taps, the coverage tier): a matrix atom, or "fma" (the FMA form: tk x tc
+ * thread tiles, wk wc 0, only where no matrix atom takes the element, not for fewer than 8
+ * input channels a group or width strides of 4 or more); the filter, strides and dilations
  * runtime (s, sw 0), fr the taps a block (>= 1); dw 0 (per-tap gathers) or the extra positions
  * of a shared width window (layout 1, a multiple of 8, unit width stride, (min(fr, filter
  * width) - 1) x width dilation within dw; fr width taps of one filter row a block, so

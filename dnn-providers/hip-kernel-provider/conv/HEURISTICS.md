@@ -49,6 +49,7 @@ Measured against the BLAS path, 16-bit channels-last:
 - gfx1201: 2.6-3.2x faster on the same shapes, and 1.7x on 1-D k3.
 - 1-D k9: 0.69x on gfx950 and 0.96x on gfx1201, so BLAS still wins there. Heuristics should rank BLAS above the generic tier for it.
 - ASPP-class filters (at most 9 taps, dilation 6 or more): BLAS won on every arch measured (d18 16-bit 0.6-0.7x, d6 fp32 0.6x). The generic tier declines them.
+- RDNA fp32 runs the generic tier's FMA form, because RDNA has no fp32 matrix core. On gfx1201, against BLAS, it was faster on 5x5 (1.6x), 1-D k9 (1.4x), 3x3 stride 3 (4.2x) and 5x5x5 (3.5x). It was slower on stems and patchify-class width strides (4.2-7.9x behind), so it declines fewer than 8 input channels per group and width strides of 4 or more.
 
 ## What the knobs mean
 

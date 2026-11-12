@@ -187,6 +187,9 @@ def lds_bytes(c, e):  # ConvWrwGeom.h k3LdsBytes
     )
     vec, align, ns = c["vec"], c["align"], c["ns"]
     if loop == 8:  # generic taps: a bk-row dy chunk and fr bc-row x tiles, two buffers
+        if c["tk"]:  # the FMA form: [position][channel] rows of bk / bc + 16 bytes
+            u = 16 // e
+            return 2 * (bq * (bk + u) + (bq + dw if dw > 0 else fr * bq) * (bc + u)) * e
         if dw > 0:  # one shared window of bq + dw positions per x row (k3WinPitch)
             unit = 16 // e
             pitch = bq + dw + unit
@@ -252,7 +255,11 @@ def lds_bytes(c, e):  # ConvWrwGeom.h k3LdsBytes
 def passes(c, e):  # ConvWrwProblem.cpp loadPassesOf
     vec = c["vec"]
     if c["loop"] == 8:  # k3WrwGeneric's loads a thread holds
-        threads = c["wk"] * c["wc"] * wave(c["atom"])
+        threads = (
+            (c["bk"] // c["tk"]) * (c["bc"] // c["tc"])
+            if c["tk"]
+            else c["wk"] * c["wc"] * wave(c["atom"])
+        )
         if c["layout"] == CF:
             rows = threads // c["bq"]
             return du(c["bk"], rows) + du(c["fr"] * c["bc"], rows)
@@ -336,7 +343,7 @@ def valid(c, dtype, fma16=False):
     16-bit graphs, which only devices without a matrix core for the type take (gfx906).
     """
     e = eb(dtype)
-    fma = c["loop"] in (3, 4)
+    fma = c["loop"] in (3, 4) or (c["loop"] == 8 and c["atom"] == "fma")
     ok = (c["vec"] * e == 16 or (c["loop"] == 4 and c["vec"] == 1)) and (
         c["atom"] == "fma"
     ) == fma
@@ -359,7 +366,7 @@ def valid(c, dtype, fma16=False):
         )
         ok = (
             ok
-            and (c["sw"] == 1 or c["loop"] == 4)
+            and (c["sw"] == 1 or c["loop"] in (4, 8))
             and c["layout"] in (CF, CL)
             and c["xcd"] == 0
         )
@@ -1124,6 +1131,18 @@ GENERIC = [
         0,
         [(CF, (64, 64, 2, 2, 16), 3), (CL, (64, 64, 2, 2, 16), 3)],
     ),
+    # The FMA form, fp32 where no matrix core takes it (RDNA; tiles (bk, bc, tk, tc, bq)),
+    # measured on gfx1201 against the BLAS path: 5x5 1.6x, 1-D k9 1.4x, 3x3 s3 4.2x, 5x5x5 3.5x.
+    (
+        {"FLOAT": "fma"},
+        0,
+        [
+            (CF, (64, 64, 4, 4, 16), 5),
+            (CF, (128, 64, 8, 4, 16), 3),
+            (CL, (64, 64, 8, 4, 16), 3),
+            (CL, (64, 64, 4, 4, 32), 5, 8),
+        ],
+    ),
 ]
 
 
@@ -1151,15 +1170,22 @@ def spec_of(g, cfgs):
     (the K3Tiles rows and rings, small-C rows, the DMA ring and the direct loop, and the
     block-based buffer forms of rows, rings and small-C rows, in lower case; not the FMA loops
     or packed rows (narrow outputs only)) whose atom runs on one of g's archs, as
-    "<atom_id><kind><layout>.<s>.<sw>.<dw>.<fr>" keys (ConvWrwProblem.hpp).
+    "<atom_id><kind><layout>.<s>.<sw>.<dw>.<fr>" keys (ConvWrwProblem.hpp). The FMA form's
+    configs (atom "fma") also decline the FMA loops' classes: F (output rows of vectors), S (of
+    scalar units), Q (the FMA ring).
     """
     keys = set()
     for c in cfgs:
-        if c["loop"] not in SPEC_KIND or not set(archs_of(c)) & set(archs_of(g)):
+        if c["atom"] == "fma":
+            if g["atom"] != "fma" or c["loop"] not in (3, 4):
+                continue
+            kind = "Q" if c["loop"] == 3 else "S" if c["vec"] == 1 else "F"
+        elif c["loop"] not in SPEC_KIND or not set(archs_of(c)) & set(archs_of(g)):
             continue
-        kind = "U" if c["loop"] == 1 and c["align"] == 2 else SPEC_KIND[c["loop"]]
-        kind = kind.lower() if c["pb"] else kind
-        fr = 0 if kind.upper() in "RC" else c["fr"]
+        else:
+            kind = "U" if c["loop"] == 1 and c["align"] == 2 else SPEC_KIND[c["loop"]]
+            kind = kind.lower() if c["pb"] else kind
+        fr = 0 if kind.upper() in "RCFS" else c["fr"]  # the rows' kinds carry no height
         keys.add(f"{c['atom_id']}{kind}{c['layout']}.{c['s']}.{c['sw']}.{c['dw']}.{fr}")
     return ";".join(sorted(keys))
 
@@ -1259,7 +1285,7 @@ def family_of(c):
     if c["loop"] == 5:
         return "direct"
     if c["loop"] == 8:
-        return "generic"
+        return "genericfma" if c["atom"] == "fma" else "generic"
     if c["loop"] == 7 and c["atom"].startswith("mfma32_"):
         return "cdnapk"
     if c["atom"] == "fma":
@@ -1345,7 +1371,7 @@ def emit():
             lay = ["nchw", "nhwc", "nhwctr"][c["layout"]]
             thr = (
                 f"t{c['tk']}x{c['tc']}"
-                if c["loop"] in (3, 4)
+                if c["atom"] == "fma"
                 else f"w{c['wk']}x{c['wc']}"
             )
             if c["loop"] == 5:
@@ -1370,7 +1396,11 @@ def emit():
                         "direction": "WRW",
                         "dtype": dtype,
                         **c,
-                        **({"spec": spec_of(c, cfgs)} if c["loop"] == 8 else {}),
+                        **(
+                            {"spec": spec_of(c, cfgs + CATALOGRDNA.get(dtype, []))}
+                            if c["loop"] == 8
+                            else {}
+                        ),
                     },
                     "priority": 1000 - i,
                 }
@@ -1387,6 +1417,7 @@ def emit():
                         "fma906b": FMA906_ARCHS,
                         "fmardna": FMARDNA_ARCHS,
                         "cdnapk": CDNA[:3],
+                        "genericfma": FMARDNA_ARCHS,
                     }.get(fam, []),
                     "matchers": [umd],
                     "engine": ued,

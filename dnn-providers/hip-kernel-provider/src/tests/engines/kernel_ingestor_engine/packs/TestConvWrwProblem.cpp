@@ -891,6 +891,23 @@ ConfigFields genericGfx950Fields()
     return f;
 }
 
+/// The generic loop's FMA form (fp32 where no matrix core takes it): 64 x 64 channels by 4 x 4
+/// a thread, 16 positions a step, 5 taps a block.
+ConfigFields genericFmaFields()
+{
+    ConfigFields f;
+    f.atom = "fma";
+    f.atomId = 16;
+    f.loop = 8;
+    f.s = f.sw = f.dw = 0;
+    f.fr = 5;
+    f.bq = 16;
+    f.wk = f.wc = 0;
+    f.tk = f.tc = 4;
+    f.vec = 4;
+    return f;
+}
+
 /// The generic loop's shared width window: 8 positions past the chunk (channel vectors).
 ConfigFields genericWindowFields()
 {
@@ -2709,6 +2726,59 @@ TEST(TestConvWrwLaunch, TheGenericWindowGroupsWidthTapsPerFilterRow)
     EXPECT_TRUE(admits(genericWindowFields(), "gfx942", narrow));
 }
 
+TEST(TestConvWrwKernelMatch, TheGenericFmaFormServesFp32WithoutAMatrixCore)
+{
+    const auto f = genericFmaFields();
+    // fp32 on RDNA; not where a matrix atom takes the element (fp32 on CDNA, 16-bit on RDNA).
+    EXPECT_TRUE(admits(f, "gfx1201", floatShape()));
+    EXPECT_TRUE(admits(f, "gfx1100", floatShape()));
+    EXPECT_FALSE(admits(f, "gfx942", floatShape()));
+    EXPECT_FALSE(admits(f, "gfx1201", baseShape()));
+    auto half = f; // 16-bit without a matrix core: 8-element vectors
+    half.vec = 8;
+    EXPECT_TRUE(admits(half, "gfx906", baseShape()));
+    // The FMA thread tiles' gates: whole quads, no waves.
+    auto pairs = f;
+    pairs.tk = 2;
+    EXPECT_FALSE(admits(pairs, "gfx1201", floatShape()));
+    auto waves = f;
+    waves.wk = 1;
+    EXPECT_FALSE(admits(waves, "gfx1201", floatShape()));
+    // Stems (fewer than 8 input channels a group) and width strides of 4 or more: BLAS's.
+    auto stem = floatShape();
+    stem.c = 7;
+    EXPECT_FALSE(admits(f, "gfx1201", stem));
+    stem.c = 8;
+    EXPECT_TRUE(admits(f, "gfx1201", stem));
+    auto patch = floatShape();
+    patch.input = {20, 24};
+    patch.stride = {1, 4};
+    EXPECT_FALSE(admits(f, "gfx1201", patch));
+    patch.stride = {1, 3};
+    EXPECT_TRUE(admits(f, "gfx1201", patch));
+    // Rows that are not whole vectors (the FMA loops' channels-first gate is theirs alone).
+    auto width13 = floatShape();
+    width13.input = {10, 13};
+    EXPECT_TRUE(admits(f, "gfx1201", width13));
+    // The FMA loops' classes decline it: rows of vectors (F), of scalar units (S), the ring (Q).
+    auto served = f;
+    served.spec = "16F0.3.1.1.0";
+    EXPECT_FALSE(admits(served, "gfx1201", floatShape()));
+    served.spec = "16S0.3.1.1.0";
+    EXPECT_FALSE(admits(served, "gfx1201", floatShape()));
+    served.spec = "16Q0.3.1.1.3";
+    EXPECT_FALSE(admits(served, "gfx1201", floatShape()));
+    // Its loads and LDS: 256 threads, 16 positions: 16 channel rows a pass, 64 / 16 + 5 x 64 /
+    // 16 loads; [position][channel] tiles of 64 + 4 channels.
+    EXPECT_EQ(conv_wrw::loadPassesOf(configOf(f), 4, 0), 4 + 20);
+    EXPECT_EQ(conv_wrw::ldsBytesOf(configOf(f), 4), 2 * (16 * 68 + 5 * 16 * 68) * 4);
+    auto window = f;
+    window.layout = 1;
+    window.dw = 8;
+    window.bq = 32;
+    EXPECT_EQ(conv_wrw::ldsBytesOf(configOf(window), 4), 2 * (32 * 68 + 40 * 68) * 4);
+}
+
 TEST(TestConvWrwKernelMatch, TheGenericLoopTakesEveryArchsMatrixAtom)
 {
     auto gfx1201 = genericClFields();
@@ -2845,6 +2915,55 @@ TEST(TestConvWrwSpec, KeysServeTheirClassOnly)
          "gfx950",
          true},
         {"8D2.3.1.1.3", nhwcGfx950, "gfx942", false},
+        // The FMA loops (atom 16): fp32 everywhere, 16-bit where no matrix atom takes it;
+        // channels-first vectors need rows of whole vectors, scalar units (S) any.
+        {"16F0.3.1.1.0", floatShape(), "gfx1201", true},
+        {"16F0.3.1.1.0", floatShape(), "gfx942", true},
+        {"16F0.3.1.1.0", alignedShape(), "gfx1201", false}, // 16-bit: the matrix atoms'
+        {"16F0.3.1.1.0", alignedShape(), "gfx906", true}, // rows of 16: whole 8-vectors
+        {"16F0.3.1.1.0",
+         [] {
+             auto shape = floatShape();
+             shape.input = {10, 13};
+             return shape;
+         }(),
+         "gfx1201",
+         false},
+        {"16S0.3.1.1.0",
+         [] {
+             auto shape = floatShape();
+             shape.input = {10, 13};
+             return shape;
+         }(),
+         "gfx1201",
+         true},
+        {"16Q0.3.1.1.3", floatShape(), "gfx1201", true},
+        {"16Q0.3.1.1.3",
+         [] {
+             auto shape = floatShape();
+             shape.stride = {2, 1};
+             return shape;
+         }(),
+         "gfx1201",
+         false},
+        {"16S1.3.1.1.0",
+         [] {
+             auto shape = floatShape();
+             shape.channelsLast = true;
+             shape.c = 5;
+             return shape;
+         }(),
+         "gfx1201",
+         true},
+        {"16F1.3.1.1.0",
+         [] {
+             auto shape = floatShape();
+             shape.channelsLast = true;
+             shape.c = 5;
+             return shape;
+         }(),
+         "gfx1201",
+         false},
     };
     for(const auto& c : cases)
     {
@@ -2931,7 +3050,13 @@ TEST(TestConvWrwSpec, MalformedKeysAreNotClasses)
                            "4g0.3.1.1.3",
                            "4u1.3.1.1.3",
                            "8d2.3.1.1.3",
-                           "4x0.3.1.1.0"})
+                           "4x0.3.1.1.0",
+                           // FMA kinds take the fma atom alone, and it no other kind.
+                           "4F0.3.1.1.0",
+                           "4S0.3.1.1.0",
+                           "4Q0.3.1.1.3",
+                           "16P0.3.1.1.3",
+                           "16Q0.3.1.1.0"})
     {
         EXPECT_FALSE(conv_wrw::specServes(*problem, key, "gfx942").has_value()) << key;
     }

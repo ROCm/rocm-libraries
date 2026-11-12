@@ -133,6 +133,14 @@ constexpr long long k3LdsBytes(int loop,
     {
         // Generic taps: two buffers of a bk-row dy chunk and fr (taps a block) bc-row x tiles,
         // rows of bq positions padded by 16 bytes.
+        // The FMA form (tk > 0): [position][channel] tiles, rows of bk / bc channels + 16
+        // bytes, fr tiles of bq positions or (dw > 0) one window of bq + dw.
+        if(tk > 0)
+        {
+            const long long u = 16 / eb;
+            const long long xRows = dw > 0 ? bq + dw : static_cast<long long>(fr) * bq;
+            return 2 * (static_cast<long long>(bq) * (bk + u) + xRows * (bc + u)) * eb;
+        }
         // dw > 0: one shared window of bq + dw positions per x row instead of fr tiles.
         const long long ld = bq + 16 / eb;
         if(dw > 0)
