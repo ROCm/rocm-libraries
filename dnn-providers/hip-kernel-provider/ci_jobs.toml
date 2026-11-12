@@ -1,0 +1,58 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# How TheRock CI splits hip-kernel-provider's tests into jobs.
+#
+# TheRock reads this file at the commit under test (see
+# TheRock/build_tools/github_actions/component_test_jobs.py for the schema). Each
+# group becomes one job, hipkernelprovider-<name>, running the tests whose CTest
+# labels match the group's regexes. The remainder job, hipkernelprovider-unit, runs
+# every test no group claims: unit tests, the rocKE tests and the in-tree
+# integration binary. A test missing from every group still runs there.
+#
+# Engine integration suites carry their engine name as a CTest label (":" becomes
+# "_"), set by add_external_integration_test_target() in
+# dnn-providers/integration-tests/cmake/HipdnnIntegrationTestHelpers.cmake.
+#
+# Shard counts: a sharded job splits gtest cases across shards, and every non-gtest
+# entry (the rocKE pytest checks) runs in full in each shard. TheRock fails a
+# sharded job that selects a non-gtest entry, so the remainder stays at 1 shard.
+
+schema = 1
+
+[defaults]
+shards = 1
+timeout_minutes = 30
+
+[remainder]
+name = "unit"
+# About 26 minutes of tests on standard (rocKE pytest is about 21 of them).
+timeout_minutes = { quick = 30, standard = 45, comprehensive = 90, full = 120 }
+
+[[group]]
+name = "hip-mlops"
+labels = ["^HIP_MLOPS_ENGINE$"]
+# About 20 (linux) to 26 (windows) minutes of gtest cases on standard.
+shards = { standard = 2, comprehensive = 4, full = 4 }
+timeout_minutes = { comprehensive = 60, full = 90 }
+
+[[group]]
+name = "asm-sdpa"
+labels = ["^ASM_SDPA_ENGINE$"]
+
+[[group]]
+name = "flydsl"
+labels = ["^hipkernel_flydsl_"]
+
+[[group]]
+name = "rocke"
+labels = ["^hipkernel_Gfx"]
+# The attention engines exist only when rocKE is built
+# (HIPKERNELPROVIDER_ENABLE_ROCKE): rocm-libraries PR and postsubmit CI build it,
+# TheRock's own CI and the rocm-libraries nightly do not.
+allow_empty = true
+
+[[group.exclude_family]]
+platform = "windows"
+families = ["gfx110X-all"]
+reason = "no rocKE attention engine ships for gfx11"
