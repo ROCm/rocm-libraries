@@ -1,0 +1,104 @@
+# OOB BBS TN exact tuning, category 15, M=578352 N=1 K=14768 (fused GEMM, lda=ldb=14768): group 1 = winner.
+# fused GEMM, lda=ldb=K, 20261111 winner
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  SleepPercent: 0
+  EnqueuesPerSync: 400
+  NumWarmups: 160
+  NumBenchmarks: 5
+  SyncsPerBenchmark: 1
+  KernelTime: true
+  NumElementsToValidate: 128
+  BoundsCheck: 0
+  # Match hipblaslt-bench --initialization trig_float.
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeC: 12
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  RotatingBufferSize: 384
+  Architecture: gfx1250
+  # Device 0 of ROCR_VISIBLE_DEVICES.
+  Device: 0
+  CpuThreads: 32
+  PrintSolutionRejectionReason: true
+  CSVExportWinner: true
+  CSVMergeSameProblemID: false
+  KeepBuildTmp: false
+BenchmarkProblems:
+- - OperationType: GEMM
+    DataType: b
+    DestDataType: b
+    ComputeDataType: s
+    HighPrecisionAccumulate: true
+    TransposeA: true
+    TransposeB: false
+    UseBeta: true
+    Batched: true
+    SupportUserArgs: true
+    UseBias: 1
+    Activation: true
+    ActivationType: hipblaslt_all
+    ActivationComputeDataType: s
+    UseScaleAlphaVec: 1
+  - # winner: MT192x16x256 20261111 fused winner
+    InitialSolutionParameters: null
+    BenchmarkCommonParameters:
+    - KernelLanguage: [Assembly]
+    ForkParameters:
+    - ActivationFuncCall: [true]
+    - ClusterLocalRead: [0]
+    - DepthU: [256]
+    - DirectToLdsMetadata: [0]
+    - DtlPlusLdsBuf: [0]
+    - ExpandPointerSwap: [false]
+    - GlobalReadVectorWidthA: [1]
+    - GlobalReadVectorWidthB: [1]
+    - InitCIterWmma: [1]
+    - LDSTrInst: [true]
+    - LdsBlockSizePerPadA: [512]
+    - LdsBlockSizePerPadB: [512]
+    - LdsBlockSizePerPadMXSA: [0]
+    - LdsBlockSizePerPadMXSB: [0]
+    - LdsBlockSizePerPadMetadata: [0]
+    - LdsPadA: [8]
+    - LdsPadB: [8]
+    - LdsPadMXSA: [0]
+    - LdsPadMXSB: [0]
+    - LocalReadVectorWidthA: [8]
+    - LocalReadVectorWidthB: [8]
+    - MIArchVgpr: [true]
+    - MXLoadInst: ["TDM"]
+    - MXScaleFormat: ["InMemorySwizzle"]
+    - MatrixInstruction: [[16, 16, 32, 1, 1, 3, 1, 4, 1]]
+    - MaxLDS: [327680]
+    - MbskPrefetchMethod: [0]
+    - MinGRIncPerMfma: [1]
+    - PrefetchGL2: [1]
+    - PrefetchGlobalRead: [2]
+    - ScheduleGROverBarrier: [0]
+    - ScheduleIterAlg: [4]
+    - SourceSwap: [true]
+    - StaggerU: [0]
+    - StaggerUStride: [0]
+    - StoreVectorWidth: [1]
+    - TDMInst: [3]
+    - TransposeLDS: [1]
+    - UseCustomMainLoopSchedule: [0]
+    - VectorWidthA: [1]
+    - VectorWidthB: [1]
+    - WavefrontSize: [32]
+    - WorkGroup: [[64, 2, 1]]
+    - WorkGroupMapping: [1]
+    BenchmarkJoinParameters: null
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [578352, 1, 1, 14768, 578352, 578352, 14768, 14768]
+    - BiasTypeArgs: [s]
+    - ActivationArgs:
+      - [Enum: none]
+LibraryLogic:
+  ScheduleName: gfx1250
+  DeviceNames: [Device 73f0]
+  ArchitectureName: gfx1250
+  LibraryType: Equality
