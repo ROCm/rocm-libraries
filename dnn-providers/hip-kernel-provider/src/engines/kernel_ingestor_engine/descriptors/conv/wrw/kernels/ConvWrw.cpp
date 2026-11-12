@@ -31,9 +31,51 @@
 // CONV_K3_SWZ (default 1: the ping-pong and the swizzled rows; 0 only for ablation).
 // ConvWrwReduce, the partials' fixed-order sum, shares the source, as does ConvWrwReduceRows, the
 // same sum by K C T R S rows (the host's choice for at most 2 splits).
+// Three-bf16 (fp32 graphs under TF32 permission) compiles the bf16 kernel (CONV_K3_T unsigned
+// short) with CONV_K3_MATH 1, which adds ConvWrwSplit (the operands split into 3N bf16 images,
+// K3SplitArgs), and CONV_K3_TO float, the reduces' dw element type. Neither is defined
+// otherwise, so every other config compiles exactly as before.
 
 #include "ConvWrwCore.h"
 #include "ConvWrwDirect.h"
+
+#ifndef CONV_K3_TO
+#define CONV_K3_TO CONV_K3_T
+#endif
+
+#if defined(CONV_K3_MATH) && CONV_K3_MATH == 1
+/// x -> [hi | hi | lo], dy -> [hi | lo | hi], bf16 hi = round(v), lo = round(v - hi); lo is zero
+/// where the remainder is not a number (an infinite v), so inf stays inf rather than NaN.
+extern "C" __global__ void __launch_bounds__(256) ConvWrwSplit(K3SplitArgs a)
+{
+    const long long step = static_cast<long long>(gridDim.x) * blockDim.x;
+    const long long total = a.xElems > a.yElems ? a.xElems : a.yElems;
+    for(long long i = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x; i < total;
+        i += step)
+    {
+        if(i < a.xElems)
+        {
+            const float v = a.x[i];
+            const unsigned short h = k1FloatToBf(v);
+            const float r = v - k1BfToFloat(h);
+            const unsigned short l = k1FloatToBf(r == r ? r : 0.0f);
+            a.xs[i] = h;
+            a.xs[a.xElems + i] = h;
+            a.xs[2 * a.xElems + i] = l;
+        }
+        if(i < a.yElems)
+        {
+            const float v = a.dy[i];
+            const unsigned short h = k1FloatToBf(v);
+            const float r = v - k1BfToFloat(h);
+            const unsigned short l = k1FloatToBf(r == r ? r : 0.0f);
+            a.ys[i] = h;
+            a.ys[a.yElems + i] = l;
+            a.ys[2 * a.yElems + i] = h;
+        }
+    }
+}
+#endif
 
 #ifndef CONV_K3_PP
 #define CONV_K3_PP 1
@@ -184,10 +226,10 @@ extern "C" __global__ void __launch_bounds__(CONV_K3_THREADS) ConvWrw(K3Args a)
 
 extern "C" __global__ void __launch_bounds__(256) ConvWrwReduce(K3ReduceArgs a)
 {
-    k3Reduce<CONV_K3_T>(a);
+    k3Reduce<CONV_K3_TO>(a);
 }
 
 extern "C" __global__ void __launch_bounds__(256) ConvWrwReduceRows(K3ReduceArgs a)
 {
-    k3ReduceRows<CONV_K3_T>(a);
+    k3ReduceRows<CONV_K3_TO>(a);
 }

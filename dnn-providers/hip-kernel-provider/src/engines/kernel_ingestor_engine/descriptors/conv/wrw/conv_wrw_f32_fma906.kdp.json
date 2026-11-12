@@ -13,43 +13,6 @@
   "kernelDescriptors": [
     {
       "version": "1.0",
-      "id": "20ec8708-732d-57c5-be86-3a631dac3c09",
-      "name": "conv_wrw.f32.fma.l3.nchw.64x16x32.t4x4.fr3s3sw1dw1.v4.x0a0n0b2",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvWrw.cpp",
-        "entry_point": "ConvWrw"
-      },
-      "metadata": {
-        "direction": "WRW",
-        "dtype": "FLOAT",
-        "atom": "fma",
-        "atom_id": 16,
-        "loop": 3,
-        "layout": 0,
-        "bk": 64,
-        "bc": 16,
-        "bq": 32,
-        "fr": 3,
-        "s": 3,
-        "sw": 1,
-        "dw": 1,
-        "wk": 0,
-        "wc": 0,
-        "tk": 4,
-        "tc": 4,
-        "vec": 4,
-        "xcd": 0,
-        "align": 0,
-        "ns": 0,
-        "bpu": 2,
-        "wq": 0,
-        "dws": 1
-      },
-      "priority": 431
-    },
-    {
-      "version": "1.0",
       "id": "3dd22e03-7564-5286-ac31-dbd916e561db",
       "name": "conv_wrw.f32.fma.l4.nchw.64x16x32.t4x4.fr3s3sw1dw1.v1.x0a0n0b2",
       "kernel_source": {
@@ -81,7 +44,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 430
     },
@@ -118,46 +82,10 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 429
-    },
-    {
-      "version": "1.0",
-      "id": "196b822c-cfa3-5c17-825d-97dd4dbdf452",
-      "name": "conv_wrw.f32.fma.l3.nhwc.64x16x32.t4x4.fr3s3sw1dw1.v4.x0a0n0b2",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvWrw.cpp",
-        "entry_point": "ConvWrw"
-      },
-      "metadata": {
-        "direction": "WRW",
-        "dtype": "FLOAT",
-        "atom": "fma",
-        "atom_id": 16,
-        "loop": 3,
-        "layout": 1,
-        "bk": 64,
-        "bc": 16,
-        "bq": 32,
-        "fr": 3,
-        "s": 3,
-        "sw": 1,
-        "dw": 1,
-        "wk": 0,
-        "wc": 0,
-        "tk": 4,
-        "tc": 4,
-        "vec": 4,
-        "xcd": 0,
-        "align": 0,
-        "ns": 0,
-        "bpu": 2,
-        "wq": 0,
-        "dws": 1
-      },
-      "priority": 428
     },
     {
       "version": "1.0",
@@ -192,7 +120,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 427
     },
@@ -229,46 +158,10 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 426
-    },
-    {
-      "version": "1.0",
-      "id": "1e86eb57-0039-56af-936f-3915cd150df4",
-      "name": "conv_wrw.f32.fma.l3.nchw.32x16x32.t4x4.fr3s3sw1dw1.v4.x0a0n0b2",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvWrw.cpp",
-        "entry_point": "ConvWrw"
-      },
-      "metadata": {
-        "direction": "WRW",
-        "dtype": "FLOAT",
-        "atom": "fma",
-        "atom_id": 16,
-        "loop": 3,
-        "layout": 0,
-        "bk": 32,
-        "bc": 16,
-        "bq": 32,
-        "fr": 3,
-        "s": 3,
-        "sw": 1,
-        "dw": 1,
-        "wk": 0,
-        "wc": 0,
-        "tk": 4,
-        "tc": 4,
-        "vec": 4,
-        "xcd": 0,
-        "align": 0,
-        "ns": 0,
-        "bpu": 2,
-        "wq": 0,
-        "dws": 1
-      },
-      "priority": 425
     },
     {
       "version": "1.0",
@@ -303,7 +196,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 424
     },
@@ -340,46 +234,10 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 423
-    },
-    {
-      "version": "1.0",
-      "id": "6d764c9a-cf11-5665-b8ad-4e672da2ea53",
-      "name": "conv_wrw.f32.fma.l3.nhwc.32x16x32.t4x4.fr3s3sw1dw1.v4.x0a0n0b2",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvWrw.cpp",
-        "entry_point": "ConvWrw"
-      },
-      "metadata": {
-        "direction": "WRW",
-        "dtype": "FLOAT",
-        "atom": "fma",
-        "atom_id": 16,
-        "loop": 3,
-        "layout": 1,
-        "bk": 32,
-        "bc": 16,
-        "bq": 32,
-        "fr": 3,
-        "s": 3,
-        "sw": 1,
-        "dw": 1,
-        "wk": 0,
-        "wc": 0,
-        "tk": 4,
-        "tc": 4,
-        "vec": 4,
-        "xcd": 0,
-        "align": 0,
-        "ns": 0,
-        "bpu": 2,
-        "wq": 0,
-        "dws": 1
-      },
-      "priority": 422
     },
     {
       "version": "1.0",
@@ -414,7 +272,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 421
     },
@@ -451,7 +310,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 420
     },
@@ -488,7 +348,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 419
     },
@@ -525,7 +386,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 418
     },
@@ -562,7 +424,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 417
     },
@@ -599,7 +462,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 416
     },
@@ -636,7 +500,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 415
     },
@@ -673,7 +538,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 414
     },
@@ -710,7 +576,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 413
     },
@@ -747,7 +614,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 412
     },
@@ -784,7 +652,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 411
     },
@@ -821,7 +690,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 410
     },
@@ -858,7 +728,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 409
     },
@@ -895,7 +766,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 408
     },
@@ -932,7 +804,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 407
     },
@@ -969,7 +842,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 406
     },
@@ -1006,7 +880,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 405
     },
@@ -1043,7 +918,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 404
     },
@@ -1080,7 +956,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 403
     },
@@ -1117,7 +994,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 402
     },
@@ -1154,7 +1032,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 401
     },
@@ -1191,7 +1070,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 400
     },
@@ -1228,7 +1108,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 399
     },
@@ -1265,7 +1146,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 398
     },
@@ -1302,7 +1184,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 397
     },
@@ -1339,7 +1222,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 396
     },
@@ -1376,7 +1260,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 395
     },
@@ -1413,7 +1298,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 394
     },
@@ -1450,7 +1336,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 393
     },
@@ -1487,7 +1374,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 392
     },
@@ -1524,7 +1412,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 391
     },
@@ -1561,46 +1450,10 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 390
-    },
-    {
-      "version": "1.0",
-      "id": "74179d1b-16f8-59d4-9698-252507edbfde",
-      "name": "conv_wrw.f32.fma.l3.nchw.64x16x32.t4x4.fr1s1sw1dw1.v4.x0a0n0b2",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvWrw.cpp",
-        "entry_point": "ConvWrw"
-      },
-      "metadata": {
-        "direction": "WRW",
-        "dtype": "FLOAT",
-        "atom": "fma",
-        "atom_id": 16,
-        "loop": 3,
-        "layout": 0,
-        "bk": 64,
-        "bc": 16,
-        "bq": 32,
-        "fr": 1,
-        "s": 1,
-        "sw": 1,
-        "dw": 1,
-        "wk": 0,
-        "wc": 0,
-        "tk": 4,
-        "tc": 4,
-        "vec": 4,
-        "xcd": 0,
-        "align": 0,
-        "ns": 0,
-        "bpu": 2,
-        "wq": 0,
-        "dws": 1
-      },
-      "priority": 389
     },
     {
       "version": "1.0",
@@ -1635,7 +1488,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 388
     },
@@ -1672,46 +1526,10 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 387
-    },
-    {
-      "version": "1.0",
-      "id": "721c9fd6-9837-5689-b629-3dc06ca27188",
-      "name": "conv_wrw.f32.fma.l3.nhwc.64x16x32.t4x4.fr1s1sw1dw1.v4.x0a0n0b2",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvWrw.cpp",
-        "entry_point": "ConvWrw"
-      },
-      "metadata": {
-        "direction": "WRW",
-        "dtype": "FLOAT",
-        "atom": "fma",
-        "atom_id": 16,
-        "loop": 3,
-        "layout": 1,
-        "bk": 64,
-        "bc": 16,
-        "bq": 32,
-        "fr": 1,
-        "s": 1,
-        "sw": 1,
-        "dw": 1,
-        "wk": 0,
-        "wc": 0,
-        "tk": 4,
-        "tc": 4,
-        "vec": 4,
-        "xcd": 0,
-        "align": 0,
-        "ns": 0,
-        "bpu": 2,
-        "wq": 0,
-        "dws": 1
-      },
-      "priority": 386
     },
     {
       "version": "1.0",
@@ -1746,7 +1564,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 385
     },
@@ -1783,46 +1602,10 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 384
-    },
-    {
-      "version": "1.0",
-      "id": "fa71f516-822e-5a15-ab5a-7dcb6501cb40",
-      "name": "conv_wrw.f32.fma.l3.nchw.32x16x32.t4x4.fr1s1sw1dw1.v4.x0a0n0b2",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvWrw.cpp",
-        "entry_point": "ConvWrw"
-      },
-      "metadata": {
-        "direction": "WRW",
-        "dtype": "FLOAT",
-        "atom": "fma",
-        "atom_id": 16,
-        "loop": 3,
-        "layout": 0,
-        "bk": 32,
-        "bc": 16,
-        "bq": 32,
-        "fr": 1,
-        "s": 1,
-        "sw": 1,
-        "dw": 1,
-        "wk": 0,
-        "wc": 0,
-        "tk": 4,
-        "tc": 4,
-        "vec": 4,
-        "xcd": 0,
-        "align": 0,
-        "ns": 0,
-        "bpu": 2,
-        "wq": 0,
-        "dws": 1
-      },
-      "priority": 383
     },
     {
       "version": "1.0",
@@ -1857,7 +1640,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 382
     },
@@ -1894,46 +1678,10 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 381
-    },
-    {
-      "version": "1.0",
-      "id": "44bcd313-6248-5dce-a3b0-329e149fe498",
-      "name": "conv_wrw.f32.fma.l3.nhwc.32x16x32.t4x4.fr1s1sw1dw1.v4.x0a0n0b2",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvWrw.cpp",
-        "entry_point": "ConvWrw"
-      },
-      "metadata": {
-        "direction": "WRW",
-        "dtype": "FLOAT",
-        "atom": "fma",
-        "atom_id": 16,
-        "loop": 3,
-        "layout": 1,
-        "bk": 32,
-        "bc": 16,
-        "bq": 32,
-        "fr": 1,
-        "s": 1,
-        "sw": 1,
-        "dw": 1,
-        "wk": 0,
-        "wc": 0,
-        "tk": 4,
-        "tc": 4,
-        "vec": 4,
-        "xcd": 0,
-        "align": 0,
-        "ns": 0,
-        "bpu": 2,
-        "wq": 0,
-        "dws": 1
-      },
-      "priority": 380
     },
     {
       "version": "1.0",
@@ -1968,7 +1716,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 379
     },
@@ -2005,7 +1754,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 378
     },
@@ -2042,7 +1792,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 377
     },
@@ -2079,7 +1830,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 376
     },
@@ -2116,7 +1868,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 375
     },
@@ -2153,7 +1906,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 374
     },
@@ -2190,7 +1944,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 373
     },
@@ -2227,7 +1982,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 372
     },
@@ -2264,7 +2020,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 371
     },
@@ -2301,7 +2058,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 370
     },
@@ -2338,7 +2096,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 369
     },
@@ -2375,7 +2134,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 368
     },
@@ -2412,7 +2172,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 367
     },
@@ -2449,7 +2210,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 366
     },
@@ -2486,7 +2248,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 365
     },
@@ -2523,7 +2286,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 364
     },
@@ -2560,7 +2324,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 363
     },
@@ -2597,46 +2362,10 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 362
-    },
-    {
-      "version": "1.0",
-      "id": "244d07ef-b49c-5bbf-9115-3cf334d2b6b6",
-      "name": "conv_wrw.f32.fma.l3.nchw.64x16x32.t4x4.fr1s3sw1dw1.v4.x0a0n0b2",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvWrw.cpp",
-        "entry_point": "ConvWrw"
-      },
-      "metadata": {
-        "direction": "WRW",
-        "dtype": "FLOAT",
-        "atom": "fma",
-        "atom_id": 16,
-        "loop": 3,
-        "layout": 0,
-        "bk": 64,
-        "bc": 16,
-        "bq": 32,
-        "fr": 1,
-        "s": 3,
-        "sw": 1,
-        "dw": 1,
-        "wk": 0,
-        "wc": 0,
-        "tk": 4,
-        "tc": 4,
-        "vec": 4,
-        "xcd": 0,
-        "align": 0,
-        "ns": 0,
-        "bpu": 2,
-        "wq": 0,
-        "dws": 1
-      },
-      "priority": 361
     },
     {
       "version": "1.0",
@@ -2671,7 +2400,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 360
     },
@@ -2708,46 +2438,10 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 359
-    },
-    {
-      "version": "1.0",
-      "id": "e1a7a003-8c83-5459-aec4-6702227c140e",
-      "name": "conv_wrw.f32.fma.l3.nhwc.64x16x32.t4x4.fr1s3sw1dw1.v4.x0a0n0b2",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvWrw.cpp",
-        "entry_point": "ConvWrw"
-      },
-      "metadata": {
-        "direction": "WRW",
-        "dtype": "FLOAT",
-        "atom": "fma",
-        "atom_id": 16,
-        "loop": 3,
-        "layout": 1,
-        "bk": 64,
-        "bc": 16,
-        "bq": 32,
-        "fr": 1,
-        "s": 3,
-        "sw": 1,
-        "dw": 1,
-        "wk": 0,
-        "wc": 0,
-        "tk": 4,
-        "tc": 4,
-        "vec": 4,
-        "xcd": 0,
-        "align": 0,
-        "ns": 0,
-        "bpu": 2,
-        "wq": 0,
-        "dws": 1
-      },
-      "priority": 358
     },
     {
       "version": "1.0",
@@ -2782,7 +2476,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 357
     },
@@ -2819,46 +2514,10 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 356
-    },
-    {
-      "version": "1.0",
-      "id": "d06a230d-51e8-5391-bbb9-33c8fcfabc70",
-      "name": "conv_wrw.f32.fma.l3.nchw.32x16x32.t4x4.fr1s3sw1dw1.v4.x0a0n0b2",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvWrw.cpp",
-        "entry_point": "ConvWrw"
-      },
-      "metadata": {
-        "direction": "WRW",
-        "dtype": "FLOAT",
-        "atom": "fma",
-        "atom_id": 16,
-        "loop": 3,
-        "layout": 0,
-        "bk": 32,
-        "bc": 16,
-        "bq": 32,
-        "fr": 1,
-        "s": 3,
-        "sw": 1,
-        "dw": 1,
-        "wk": 0,
-        "wc": 0,
-        "tk": 4,
-        "tc": 4,
-        "vec": 4,
-        "xcd": 0,
-        "align": 0,
-        "ns": 0,
-        "bpu": 2,
-        "wq": 0,
-        "dws": 1
-      },
-      "priority": 355
     },
     {
       "version": "1.0",
@@ -2893,7 +2552,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 354
     },
@@ -2930,46 +2590,10 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 353
-    },
-    {
-      "version": "1.0",
-      "id": "34c0e897-45bd-5a0f-89c4-331ecd6d6094",
-      "name": "conv_wrw.f32.fma.l3.nhwc.32x16x32.t4x4.fr1s3sw1dw1.v4.x0a0n0b2",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvWrw.cpp",
-        "entry_point": "ConvWrw"
-      },
-      "metadata": {
-        "direction": "WRW",
-        "dtype": "FLOAT",
-        "atom": "fma",
-        "atom_id": 16,
-        "loop": 3,
-        "layout": 1,
-        "bk": 32,
-        "bc": 16,
-        "bq": 32,
-        "fr": 1,
-        "s": 3,
-        "sw": 1,
-        "dw": 1,
-        "wk": 0,
-        "wc": 0,
-        "tk": 4,
-        "tc": 4,
-        "vec": 4,
-        "xcd": 0,
-        "align": 0,
-        "ns": 0,
-        "bpu": 2,
-        "wq": 0,
-        "dws": 1
-      },
-      "priority": 352
     },
     {
       "version": "1.0",
@@ -3004,7 +2628,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 351
     },
@@ -3041,7 +2666,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 350
     },
@@ -3078,7 +2704,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 349
     },
@@ -3115,7 +2742,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 348
     },
@@ -3152,7 +2780,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 347
     },
@@ -3189,7 +2818,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 346
     },
@@ -3226,7 +2856,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 345
     },
@@ -3263,7 +2894,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 344
     },
@@ -3300,7 +2932,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 343
     },
@@ -3337,7 +2970,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 342
     },
@@ -3374,7 +3008,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 341
     },
@@ -3411,7 +3046,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 340
     },
@@ -3448,7 +3084,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 339
     },
@@ -3485,7 +3122,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 338
     },
@@ -3522,7 +3160,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 337
     },
@@ -3559,7 +3198,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 336
     },
@@ -3596,7 +3236,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 335
     },
@@ -3633,7 +3274,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 334
     },
@@ -3670,7 +3312,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 333
     },
@@ -3707,7 +3350,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 332
     },
@@ -3744,7 +3388,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 331
     },
@@ -3781,7 +3426,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 330
     },
@@ -3818,7 +3464,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 329
     },
@@ -3855,7 +3502,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 328
     },
@@ -3892,7 +3540,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 327
     },
@@ -3929,7 +3578,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 326
     },
@@ -3966,7 +3616,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 325
     },
@@ -4003,7 +3654,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 324
     },
@@ -4040,7 +3692,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 323
     },
@@ -4077,7 +3730,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 322
     },
@@ -4114,7 +3768,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 321
     },
@@ -4151,7 +3806,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 320
     },
@@ -4188,7 +3844,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 319
     },
@@ -4225,7 +3882,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 318
     },
@@ -4262,7 +3920,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 317
     },
@@ -4299,7 +3958,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 316
     },
@@ -4336,7 +3996,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 315
     },
@@ -4373,7 +4034,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 314
     },
@@ -4410,7 +4072,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 313
     },
@@ -4447,7 +4110,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 312
     },
@@ -4484,7 +4148,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 311
     },
@@ -4521,46 +4186,10 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 310
-    },
-    {
-      "version": "1.0",
-      "id": "2fefe3df-76cc-5638-a83a-d95b34d11ec7",
-      "name": "conv_wrw.f32.fma.l3.nchw.64x16x32.t4x4.fr1s7sw1dw1.v4.x0a0n0b2",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvWrw.cpp",
-        "entry_point": "ConvWrw"
-      },
-      "metadata": {
-        "direction": "WRW",
-        "dtype": "FLOAT",
-        "atom": "fma",
-        "atom_id": 16,
-        "loop": 3,
-        "layout": 0,
-        "bk": 64,
-        "bc": 16,
-        "bq": 32,
-        "fr": 1,
-        "s": 7,
-        "sw": 1,
-        "dw": 1,
-        "wk": 0,
-        "wc": 0,
-        "tk": 4,
-        "tc": 4,
-        "vec": 4,
-        "xcd": 0,
-        "align": 0,
-        "ns": 0,
-        "bpu": 2,
-        "wq": 0,
-        "dws": 1
-      },
-      "priority": 309
     },
     {
       "version": "1.0",
@@ -4595,7 +4224,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 308
     },
@@ -4632,46 +4262,10 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 307
-    },
-    {
-      "version": "1.0",
-      "id": "d3908690-b90a-5958-8d23-a2cfbb706d90",
-      "name": "conv_wrw.f32.fma.l3.nhwc.64x16x32.t4x4.fr1s7sw1dw1.v4.x0a0n0b2",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvWrw.cpp",
-        "entry_point": "ConvWrw"
-      },
-      "metadata": {
-        "direction": "WRW",
-        "dtype": "FLOAT",
-        "atom": "fma",
-        "atom_id": 16,
-        "loop": 3,
-        "layout": 1,
-        "bk": 64,
-        "bc": 16,
-        "bq": 32,
-        "fr": 1,
-        "s": 7,
-        "sw": 1,
-        "dw": 1,
-        "wk": 0,
-        "wc": 0,
-        "tk": 4,
-        "tc": 4,
-        "vec": 4,
-        "xcd": 0,
-        "align": 0,
-        "ns": 0,
-        "bpu": 2,
-        "wq": 0,
-        "dws": 1
-      },
-      "priority": 306
     },
     {
       "version": "1.0",
@@ -4706,7 +4300,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 305
     },
@@ -4743,46 +4338,10 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 304
-    },
-    {
-      "version": "1.0",
-      "id": "b66190bd-22db-55e7-b4c3-f9e432ddd943",
-      "name": "conv_wrw.f32.fma.l3.nchw.32x16x32.t4x4.fr1s7sw1dw1.v4.x0a0n0b2",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvWrw.cpp",
-        "entry_point": "ConvWrw"
-      },
-      "metadata": {
-        "direction": "WRW",
-        "dtype": "FLOAT",
-        "atom": "fma",
-        "atom_id": 16,
-        "loop": 3,
-        "layout": 0,
-        "bk": 32,
-        "bc": 16,
-        "bq": 32,
-        "fr": 1,
-        "s": 7,
-        "sw": 1,
-        "dw": 1,
-        "wk": 0,
-        "wc": 0,
-        "tk": 4,
-        "tc": 4,
-        "vec": 4,
-        "xcd": 0,
-        "align": 0,
-        "ns": 0,
-        "bpu": 2,
-        "wq": 0,
-        "dws": 1
-      },
-      "priority": 303
     },
     {
       "version": "1.0",
@@ -4817,7 +4376,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 302
     },
@@ -4854,46 +4414,10 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 301
-    },
-    {
-      "version": "1.0",
-      "id": "6612502c-e118-5a1d-8d88-8c1f5a9f4713",
-      "name": "conv_wrw.f32.fma.l3.nhwc.32x16x32.t4x4.fr1s7sw1dw1.v4.x0a0n0b2",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvWrw.cpp",
-        "entry_point": "ConvWrw"
-      },
-      "metadata": {
-        "direction": "WRW",
-        "dtype": "FLOAT",
-        "atom": "fma",
-        "atom_id": 16,
-        "loop": 3,
-        "layout": 1,
-        "bk": 32,
-        "bc": 16,
-        "bq": 32,
-        "fr": 1,
-        "s": 7,
-        "sw": 1,
-        "dw": 1,
-        "wk": 0,
-        "wc": 0,
-        "tk": 4,
-        "tc": 4,
-        "vec": 4,
-        "xcd": 0,
-        "align": 0,
-        "ns": 0,
-        "bpu": 2,
-        "wq": 0,
-        "dws": 1
-      },
-      "priority": 300
     },
     {
       "version": "1.0",
@@ -4928,7 +4452,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 299
     },
@@ -4965,7 +4490,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 298
     },
@@ -5002,7 +4528,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 297
     },
@@ -5039,7 +4566,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 296
     },
@@ -5076,7 +4604,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 295
     },
@@ -5113,7 +4642,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 294
     },
@@ -5150,7 +4680,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 293
     },
@@ -5187,7 +4718,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 292
     },
@@ -5224,7 +4756,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 291
     },
@@ -5261,7 +4794,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 290
     },
@@ -5298,7 +4832,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 289
     },
@@ -5335,7 +4870,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 288
     },
@@ -5372,7 +4908,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 287
     },
@@ -5409,7 +4946,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 286
     },
@@ -5446,7 +4984,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 285
     },
@@ -5483,7 +5022,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 284
     },
@@ -5520,7 +5060,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 283
     },
@@ -5557,7 +5098,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 282
     },
@@ -5594,7 +5136,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 281
     },
@@ -5631,7 +5174,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 280
     },
@@ -5668,7 +5212,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 279
     },
@@ -5705,7 +5250,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 278
     },
@@ -5742,7 +5288,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 277
     },
@@ -5779,7 +5326,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 276
     },
@@ -5816,7 +5364,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 275
     },
@@ -5853,7 +5402,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 274
     },
@@ -5890,7 +5440,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 273
     },
@@ -5927,7 +5478,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 272
     },
@@ -5964,7 +5516,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 271
     },
@@ -6001,7 +5554,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 270
     },
@@ -6038,7 +5592,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 269
     },
@@ -6075,7 +5630,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 268
     },
@@ -6112,7 +5668,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 267
     },
@@ -6149,7 +5706,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 266
     },
@@ -6186,7 +5744,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 265
     },
@@ -6223,7 +5782,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 264
     },
@@ -6260,7 +5820,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 263
     },
@@ -6297,7 +5858,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 262
     },
@@ -6334,7 +5896,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 261
     },
@@ -6371,7 +5934,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 260
     },
@@ -6408,7 +5972,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 259
     },
@@ -6445,7 +6010,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 258
     },
@@ -6482,7 +6048,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 257
     },
@@ -6519,7 +6086,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 256
     },
@@ -6556,7 +6124,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 255
     },
@@ -6593,7 +6162,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 254
     },
@@ -6630,7 +6200,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 253
     },
@@ -6667,7 +6238,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 252
     },
@@ -6704,7 +6276,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 251
     },
@@ -6741,7 +6314,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 250
     },
@@ -6778,7 +6352,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 249
     },
@@ -6815,7 +6390,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 248
     },
@@ -6852,7 +6428,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 247
     },
@@ -6889,7 +6466,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 246
     },
@@ -6926,7 +6504,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 245
     },
@@ -6963,7 +6542,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 244
     },
@@ -7000,7 +6580,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 243
     },
@@ -7037,7 +6618,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 242
     },
@@ -7074,7 +6656,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 241
     },
@@ -7111,7 +6694,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 240
     },
@@ -7148,7 +6732,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 239
     },
@@ -7185,7 +6770,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 238
     },
@@ -7222,7 +6808,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 237
     },
@@ -7259,7 +6846,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 236
     },
@@ -7296,7 +6884,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 235
     },
@@ -7333,7 +6922,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 234
     },
@@ -7370,7 +6960,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 233
     },
@@ -7407,7 +6998,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 232
     },
@@ -7444,7 +7036,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 231
     },
@@ -7481,7 +7074,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 230
     },
@@ -7518,7 +7112,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 229
     },
@@ -7555,7 +7150,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 228
     },
@@ -7592,7 +7188,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 227
     },
@@ -7629,7 +7226,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 226
     },
@@ -7666,7 +7264,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 225
     },
@@ -7703,7 +7302,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 224
     },
@@ -7740,7 +7340,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 223
     },
@@ -7777,7 +7378,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 222
     },
@@ -7814,7 +7416,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 221
     },
@@ -7851,7 +7454,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 220
     },
@@ -7888,7 +7492,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 219
     },
@@ -7925,7 +7530,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 218
     },
@@ -7962,7 +7568,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 217
     },
@@ -7999,7 +7606,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 216
     },
@@ -8036,7 +7644,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 215
     },
@@ -8073,7 +7682,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 214
     },
@@ -8110,7 +7720,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 213
     },
@@ -8147,7 +7758,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 212
     },
@@ -8184,7 +7796,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 211
     },
@@ -8221,7 +7834,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 210
     },
@@ -8258,7 +7872,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 209
     },
@@ -8295,7 +7910,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 208
     },
@@ -8332,7 +7948,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 207
     },
@@ -8369,7 +7986,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 206
     },
@@ -8406,7 +8024,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 205
     },
@@ -8443,7 +8062,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 204
     },
@@ -8480,7 +8100,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 203
     },
@@ -8517,7 +8138,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 202
     },
@@ -8554,7 +8176,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 201
     },
@@ -8591,7 +8214,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 200
     },
@@ -8628,7 +8252,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 199
     },
@@ -8665,7 +8290,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 198
     },
@@ -8702,7 +8328,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 197
     },
@@ -8739,7 +8366,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 196
     },
@@ -8776,7 +8404,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 195
     },
@@ -8813,7 +8442,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 194
     },
@@ -8850,7 +8480,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 193
     },
@@ -8887,7 +8518,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 192
     },
@@ -8924,7 +8556,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 191
     },
@@ -8961,7 +8594,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 190
     },
@@ -8998,7 +8632,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 189
     },
@@ -9035,7 +8670,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 188
     },
@@ -9072,7 +8708,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 187
     },
@@ -9109,7 +8746,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 186
     },
@@ -9146,7 +8784,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 185
     },
@@ -9183,7 +8822,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 184
     },
@@ -9220,7 +8860,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 183
     },
@@ -9257,7 +8898,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 182
     },
@@ -9294,7 +8936,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 181
     },
@@ -9331,7 +8974,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 180
     },
@@ -9368,7 +9012,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 179
     },
@@ -9405,7 +9050,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 178
     },
@@ -9442,7 +9088,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 177
     },
@@ -9479,7 +9126,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 176
     },
@@ -9516,7 +9164,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 175
     },
@@ -9553,7 +9202,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 174
     },
@@ -9590,7 +9240,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 173
     },
@@ -9627,7 +9278,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 172
     },
@@ -9664,7 +9316,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 171
     },
@@ -9701,7 +9354,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 170
     },
@@ -9738,7 +9392,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 169
     },
@@ -9775,7 +9430,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 168
     },
@@ -9812,7 +9468,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 167
     },
@@ -9849,7 +9506,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 166
     },
@@ -9886,7 +9544,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 165
     },
@@ -9923,7 +9582,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 164
     },
@@ -9960,7 +9620,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 163
     },
@@ -9997,7 +9658,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 162
     },
@@ -10034,7 +9696,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 161
     },
@@ -10071,7 +9734,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 160
     },
@@ -10108,7 +9772,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 159
     },
@@ -10145,7 +9810,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 158
     },
@@ -10182,7 +9848,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 157
     },
@@ -10219,7 +9886,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 156
     },
@@ -10256,7 +9924,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 155
     },
@@ -10293,7 +9962,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 154
     },
@@ -10330,7 +10000,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 153
     },
@@ -10367,7 +10038,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 152
     },
@@ -10404,7 +10076,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 151
     },
@@ -10441,7 +10114,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 150
     },
@@ -10478,7 +10152,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 149
     },
@@ -10515,7 +10190,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 148
     },
@@ -10552,7 +10228,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 147
     },
@@ -10589,7 +10266,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 146
     },
@@ -10626,7 +10304,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 145
     },
@@ -10663,7 +10342,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 144
     },
@@ -10700,7 +10380,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 143
     },
@@ -10737,7 +10418,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 142
     },
@@ -10774,7 +10456,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 141
     },
@@ -10811,7 +10494,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 140
     },
@@ -10848,7 +10532,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 139
     },
@@ -10885,7 +10570,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 138
     },
@@ -10922,7 +10608,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 137
     },
@@ -10959,7 +10646,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 136
     },
@@ -10996,7 +10684,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 135
     },
@@ -11033,7 +10722,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 134
     },
@@ -11070,7 +10760,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 133
     },
@@ -11107,7 +10798,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 132
     },
@@ -11144,7 +10836,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 131
     },
@@ -11181,7 +10874,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 130
     },
@@ -11218,7 +10912,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 129
     },
@@ -11255,7 +10950,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 128
     },
@@ -11292,7 +10988,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 127
     },
@@ -11329,7 +11026,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 126
     },
@@ -11366,7 +11064,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 125
     },
@@ -11403,7 +11102,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 124
     },
@@ -11440,7 +11140,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 123
     },
@@ -11477,7 +11178,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 122
     },
@@ -11514,7 +11216,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 121
     },
@@ -11551,7 +11254,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 120
     },
@@ -11588,7 +11292,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 119
     },
@@ -11625,7 +11330,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 118
     },
@@ -11662,7 +11368,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 117
     },
@@ -11699,7 +11406,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 116
     },
@@ -11736,7 +11444,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 115
     },
@@ -11773,7 +11482,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 114
     },
@@ -11810,7 +11520,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 113
     },
@@ -11847,7 +11558,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 112
     },
@@ -11884,7 +11596,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 111
     },
@@ -11921,7 +11634,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 110
     },
@@ -11958,7 +11672,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 109
     },
@@ -11995,7 +11710,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 108
     },
@@ -12032,7 +11748,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 107
     },
@@ -12069,7 +11786,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 106
     },
@@ -12106,7 +11824,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 105
     },
@@ -12143,7 +11862,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 104
     },
@@ -12180,7 +11900,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 103
     },
@@ -12217,7 +11938,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 102
     },
@@ -12254,7 +11976,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 101
     },
@@ -12291,7 +12014,8 @@
         "ns": 0,
         "bpu": 4,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 100
     }

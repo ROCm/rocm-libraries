@@ -46,7 +46,8 @@
         "ns": 0,
         "bpu": 1,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 120
     },
@@ -83,7 +84,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 119
     },
@@ -120,7 +122,8 @@
         "ns": 0,
         "bpu": 1,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 118
     },
@@ -157,7 +160,8 @@
         "ns": 0,
         "bpu": 2,
         "wq": 0,
-        "dws": 1
+        "dws": 1,
+        "math": 0
       },
       "priority": 117
     }

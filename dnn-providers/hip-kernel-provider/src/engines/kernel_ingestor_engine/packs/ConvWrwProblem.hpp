@@ -134,6 +134,10 @@ struct WrwConfig
     /// The split planner's target blocks per dispatch unit (1, 2, 4 or 8; 1 for loop 5, whose
     /// persistent grid has one workgroup per unit; 8 for small FMA blocks): host-side only.
     int64_t bpu = 0;
+    /// 0: the graph's element type. 1: three-bf16 for an fp32 graph under TF32 permission
+    /// (tf32Permitted): a bf16 config run on x and dy split into 3N bf16 images by
+    /// ConvWrwSplit (K3SplitArgs), dw written in fp32 by the reduce.
+    int64_t math = 0;
 };
 
 /// A backward-weights convolution the kernels serve.
@@ -197,6 +201,13 @@ struct WrwLaunch
     size_t workspaceBytes = 0;
     /// The kernel writes dw itself (args.dwStore): no workspace, no reduce launch.
     bool dwStore = false;
+    /// Three-bf16 (math 1): ConvWrwSplit runs first and writes the split operands to the
+    /// workspace's first splitBytes (xs, then ys at splitYOffset); the partials follow them.
+    bool split = false;
+    unsigned int splitGrid = 0;
+    size_t splitYOffset = 0;
+    size_t splitBytes = 0;
+    K3SplitArgs splitArgs{};
 };
 
 /// The workspace the splits' fp32 partials may take at most; splits are reduced to fit.
@@ -292,6 +303,10 @@ DirectPlan directPlanFor(int64_t tiles,
  * columns: only for narrow outputs, 2 wv at most bq; the filter width whole (s the filter
  * width), bq dividing the block's threads, align 0. Its units are elements (no pass masks): at
  * most 64 passes.
+ *
+ * math 0, or 1 (three-bf16): an fp32 graph, TF32 permitted (tf32Permitted), a bf16 atom, dws 0,
+ * 3N within 32 bits; the launch is the config's on the bf16 problem of 3N images, with
+ * ConvWrwSplit ahead of it and the split operands ahead of the partials in the workspace.
  */
 std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
                                       const WrwConfig& config,

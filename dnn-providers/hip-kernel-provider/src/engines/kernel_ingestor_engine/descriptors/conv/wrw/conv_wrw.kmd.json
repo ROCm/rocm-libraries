@@ -98,6 +98,10 @@
     {
       "name": "dws",
       "type": "int"
+    },
+    {
+      "name": "math",
+      "type": "int"
     }
   ]
 }

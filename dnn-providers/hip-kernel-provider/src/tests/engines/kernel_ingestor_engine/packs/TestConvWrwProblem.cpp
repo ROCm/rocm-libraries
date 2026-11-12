@@ -11,6 +11,8 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
+
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvWrwProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
@@ -414,7 +416,7 @@ struct ConfigFields
     int64_t atomId = 4;
     int64_t loop = 1, layout = 0;
     int64_t bk = 64, bc = 64, bq = 32, fr = 3, s = 3, sw = 1, dw = 1, wk = 2, wc = 2, vec = 8;
-    int64_t tk = 0, tc = 0, xcd = 0, align = 0, ns = 0, bpu = 2, wq = 0, dws = 1;
+    int64_t tk = 0, tc = 0, xcd = 0, align = 0, ns = 0, bpu = 2, wq = 0, dws = 1, math = 0;
 };
 
 /// The base config as the output-rows loop.
@@ -507,7 +509,8 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
                        {"ns", f.ns},
                        {"bpu", f.bpu},
                        {"wq", f.wq},
-                       {"dws", f.dws}};
+                       {"dws", f.dws},
+                       {"math", f.math}};
     return kernel;
 }
 
@@ -536,6 +539,7 @@ WrwConfig configOf(const ConfigFields& f)
     c.bpu = f.bpu;
     c.wq = f.wq;
     c.dws = f.dws;
+    c.math = f.math;
     return c;
 }
 
@@ -646,6 +650,17 @@ ConfigFields floatFields()
     f.atomId = 7;
     f.vec = 4;
     f.bq = 16;
+    return f;
+}
+
+/// Three-bf16 (math 1): the bf16 32 x 32 ring config on an fp32 graph, partials only.
+ConfigFields threeBf16Fields()
+{
+    ConfigFields f;
+    f.atom = "mfma32_bf16";
+    f.atomId = 5;
+    f.dws = 0;
+    f.math = 1;
     return f;
 }
 
@@ -2246,6 +2261,140 @@ TEST(TestConvWrwDefines, EveryFieldIsADefine)
     EXPECT_EQ(fma[12], (std::pair<std::string, std::string>{"CONV_K3_TK", "4"}));
     EXPECT_THROW(static_cast<void>(conv_wrw::compileDefinesFor(DataType::DOUBLE, configOf(f), "")),
                  std::invalid_argument);
+}
+
+using hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter;
+
+constexpr const char* TF32_ENV = "HIP_KERNEL_PROVIDER_CONV_TF32";
+
+TEST(TestConvWrwThreeBf16, OnlyWithTf32PermissionAndOnlyForFloatGraphs)
+{
+    {
+        const ScopedEnvironmentVariableSetter off(TF32_ENV, "");
+        EXPECT_FALSE(admits(threeBf16Fields(), "gfx942", floatShape()));
+    }
+    {
+        const ScopedEnvironmentVariableSetter no(TF32_ENV, "0");
+        EXPECT_FALSE(admits(threeBf16Fields(), "gfx942", floatShape()));
+    }
+    const ScopedEnvironmentVariableSetter on(TF32_ENV, "1");
+    EXPECT_TRUE(admits(threeBf16Fields(), "gfx942", floatShape()));
+    EXPECT_TRUE(admits(threeBf16Fields(), "gfx90a", floatShape()));
+    // 16-bit graphs take the bf16 configs themselves, never their three-bf16 form.
+    auto bf16 = floatShape();
+    bf16.dataType = DataType::BFLOAT16;
+    EXPECT_FALSE(admits(threeBf16Fields(), "gfx942", bf16));
+    EXPECT_FALSE(admits(threeBf16Fields(), "gfx942", baseShape()));
+    // The atom runs on the device: not gfx908 (no 1k bf16 atom), not RDNA (wave64 MFMA).
+    EXPECT_FALSE(admits(threeBf16Fields(), "gfx908", floatShape()));
+    EXPECT_FALSE(admits(threeBf16Fields(), "gfx1100", floatShape()));
+}
+
+/// Every field three-bf16 adds, one refusal each, from a config admitted under permission.
+TEST(TestConvWrwThreeBf16, RefusesOneFieldAtATime)
+{
+    const ScopedEnvironmentVariableSetter on(TF32_ENV, "1");
+    const auto shape = floatShape();
+    ASSERT_TRUE(admits(threeBf16Fields(), "gfx942", shape));
+    const auto refuses = [&](const std::function<void(ConfigFields&)>& mutate) {
+        auto f = threeBf16Fields();
+        mutate(f);
+        return !admits(f, "gfx942", shape);
+    };
+    EXPECT_TRUE(refuses([](ConfigFields& f) { f.math = 2; }));
+    EXPECT_TRUE(refuses([](ConfigFields& f) { f.math = -1; }));
+    // dw is written in fp32 by the reduce; the direct store would write bf16.
+    EXPECT_TRUE(refuses([](ConfigFields& f) { f.dws = 1; }));
+    // A 16-bit atom other than bf16.
+    EXPECT_TRUE(refuses([](ConfigFields& f) {
+        f.atom = "mfma32_f16";
+        f.atomId = 4;
+    }));
+    // The exact fp32 atom (whose vector would be 4).
+    EXPECT_TRUE(refuses([](ConfigFields& f) {
+        f.atom = "mfma32_f32";
+        f.atomId = 7;
+        f.vec = 4;
+        f.bq = 16;
+    }));
+    // The bf16 kernel's vector: 8 elements of 2 bytes.
+    EXPECT_TRUE(refuses([](ConfigFields& f) { f.vec = 4; }));
+    // The FMA ring.
+    EXPECT_TRUE(refuses([](ConfigFields& f) {
+        f.atom = "fma";
+        f.atomId = 16;
+        f.loop = 3;
+        f.wk = 0;
+        f.wc = 0;
+        f.tk = 4;
+        f.tc = 4;
+    }));
+    // The math-0 twin of the config is a bf16 config: it does not serve an fp32 graph.
+    EXPECT_TRUE(refuses([](ConfigFields& f) { f.math = 0; }));
+}
+
+TEST(TestConvWrwThreeBf16, LaunchesTheBf16ConfigOnThreeTimesTheImagesAfterTheSplit)
+{
+    const ScopedEnvironmentVariableSetter on(TF32_ENV, "1");
+    const auto x3 = launchOf(threeBf16Fields(), floatShape());
+    ASSERT_TRUE(x3.has_value());
+    // The bf16 config on the bf16 problem of 6 images.
+    auto plainFields = threeBf16Fields();
+    plainFields.math = 0;
+    auto tripled = floatShape();
+    tripled.dataType = DataType::BFLOAT16;
+    tripled.n = 6;
+    const auto plain = launchOf(plainFields, tripled);
+    ASSERT_TRUE(plain.has_value());
+    EXPECT_EQ(x3->args.n, 6);
+    EXPECT_EQ(x3->args.steps, plain->args.steps);
+    EXPECT_EQ(x3->args.splits, plain->args.splits);
+    EXPECT_EQ(x3->args.xImage, plain->args.xImage);
+    EXPECT_EQ(x3->gridX, plain->gridX);
+    EXPECT_EQ(x3->gridZ, plain->gridZ);
+    EXPECT_EQ(x3->kernelType, "K1AtomMfma32Bf16");
+    EXPECT_FALSE(x3->dwStore);
+    // x 2 x 24 x 120 and dy 2 x 40 x 120 elements, three bf16 copies each, 256-byte aligned;
+    // the partials after them.
+    EXPECT_TRUE(x3->split);
+    EXPECT_EQ(x3->splitArgs.xElems, 2 * 24 * 120);
+    EXPECT_EQ(x3->splitArgs.yElems, 2 * 40 * 120);
+    EXPECT_EQ(x3->splitYOffset, size_t{3} * 2 * 2 * 24 * 120);
+    EXPECT_EQ(x3->splitBytes, size_t{3} * 2 * 2 * (24 + 40) * 120);
+    EXPECT_EQ(x3->workspaceBytes, x3->splitBytes + plain->workspaceBytes);
+    EXPECT_EQ(x3->splitGrid, (2u * 40 * 120 + 255) / 256);
+    EXPECT_FALSE(plain->split);
+}
+
+TEST(TestConvWrwThreeBf16, CompilesTheBf16KernelWithTheSplitAndFp32Dw)
+{
+    const auto config = configOf(threeBf16Fields());
+    const auto defines = conv_wrw::compileDefinesFor(DataType::FLOAT, config, "K1AtomMfma32Bf16");
+    const auto valueOf = [&](const std::string& name) -> std::string {
+        for(const auto& [key, value] : defines)
+        {
+            if(key == name)
+            {
+                return value;
+            }
+        }
+        return "<unset>";
+    };
+    EXPECT_EQ(valueOf("CONV_K3_T"), "unsigned short");
+    EXPECT_EQ(valueOf("CONV_K3_TO"), "float");
+    EXPECT_EQ(valueOf("CONV_K3_MATH"), "1");
+    // Math 0 defines neither, so every other config's code is unchanged.
+    for(const auto dataType : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
+    {
+        auto plain = config;
+        plain.math = 0;
+        for(const auto& [key, value] :
+            conv_wrw::compileDefinesFor(dataType, plain, "K1AtomMfma32Bf16"))
+        {
+            EXPECT_NE(key, "CONV_K3_TO");
+            EXPECT_NE(key, "CONV_K3_MATH");
+        }
+    }
 }
 
 } // namespace
