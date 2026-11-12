@@ -288,7 +288,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
                         int pack_gqa,
                         const ck_tile::stream_config& stream_config,
                         std::optional<std::string> json   = std::nullopt,
-                        std::string* selected_kernel_name = nullptr)
+                        std::string* selected_kernel_name = nullptr,
+                        double alpha_k                    = 2)
 {
     using TypeConfig = FmhaFwdTypeConfig<DataTypeConfig>;
 
@@ -2905,8 +2906,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     const double alpha_rows = static_cast<double>(
                         mask.type == mask_enum::no_mask ? real_seqlen_q
                                                         : std::min(real_seqlen_q, real_seqlen_k));
-                    // The one policy constant: the worst correct head measured needed 1.07.
-                    constexpr double alpha_k = 2;
+                    // alpha_k is the policy knob: the worst correct head measured needed 1.07 at 2.
                     // 1/12 is the variance of a half-ULP round-to-nearest.
                     const double alpha_tol =
                         alpha_k * std::sqrt(u_p * u_p / (12 * alpha_rows) +

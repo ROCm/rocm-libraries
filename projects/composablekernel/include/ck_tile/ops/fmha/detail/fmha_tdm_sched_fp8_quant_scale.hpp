@@ -52,6 +52,27 @@ struct FmhaTdmSchedFp8QuantScale
     // Neutral scale operand, four E8M0 1.0 bytes; a zeroed one decodes to 2^-127.
     static constexpr int32_t kE8m0One = 0x7f7f7f7f;
 
+    // Stochastic-rounding seed: a mixed query-row hash plus a Weyl step per KV tile.
+    static constexpr uint32_t kPSeedStep = 0x9e3779b9u;
+    CK_TILE_DEVICE static uint32_t PSeed(index_t row, index_t kv_tile)
+    {
+        auto x = static_cast<uint32_t>(row);
+        x      = (x ^ (x >> 16)) * 0x85ebca6bu;
+        x      = (x ^ (x >> 13)) * 0xc2b2ae35u;
+        return (x ^ (x >> 16)) + static_cast<uint32_t>(kv_tile) * kPSeedStep;
+    }
+
+    // 256 * P to fp8 with stochastic rounding, so small P are kept on average instead of flushed.
+    CK_TILE_DEVICE static fp8x8_t QuantizePStochastic(const fp32x8_t& v, uint32_t seed, float scale)
+    {
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
+        return bit_cast<fp8x8_t>(__builtin_amdgcn_cvt_scalef32_sr_pk8_fp8_f32(v, seed, scale));
+#else
+        ignore = seed;
+        return fp32x8_to_fp8x8(v, scale);
+#endif
+    }
+
     // MX: one E8M0 per kMxGranularity elements along each GEMM's K dimension.
     static constexpr index_t kMxGranularity = 32;
     // E8M0 bytes of one Q/K scale row, and of one QK WMMA K step (K64 steps: two).

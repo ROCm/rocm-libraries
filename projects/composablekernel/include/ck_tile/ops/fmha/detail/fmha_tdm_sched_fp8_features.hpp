@@ -44,6 +44,8 @@ struct FmhaTdmSchedFp8Features
     static constexpr float kPScale = 256.0f;
     // Normalize O by the row sum of the fp8 P gemm_1 consumed, so a common rounding gain cancels.
     static constexpr bool kNormalizeQuantizedP = kQuantized && !kMx;
+    // P is rounded stochastically where O is normalized by the sum of the same quantized P.
+    static constexpr bool kStochasticP = kNormalizeQuantizedP;
     // Without LSE or sink nothing needs the unquantized row sum, so l sums q(P) directly.
     static constexpr bool kQuantizedRowSum =
         kNormalizeQuantizedP && !Problem::kStoreLSE && !Problem::kHasSink && !EnableVirtualSink;
@@ -84,6 +86,8 @@ struct FmhaTdmSchedFp8Features
     static constexpr bool kProgressiveMax = kD256 && kUseCountdownLoop && kMx;
     // Blockscale keeps the per-stage K read order; other modes issue the next K group early.
     static constexpr bool kQkLead = !kBlockScale;
+    // Every-tile sink escape: one scalar P seed per wavefront (blockscale has no SGPR to spare).
+    static constexpr bool kScalarPSeed = kSinkEscapeEveryTile && !kBlockScale;
     // One predicate pass keeps D64 sink edge tiles from holding tail and pad indices.
     static constexpr bool kFusedEdgePredicate = Geometry::kHeadDimQK == 64 &&
                                                 !FmhaMask::IsMasking &&

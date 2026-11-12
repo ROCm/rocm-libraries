@@ -112,6 +112,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     static constexpr float kPScale             = Features::kPScale;
     static constexpr bool kNormalizeQuantizedP = Features::kNormalizeQuantizedP;
     static constexpr bool kQuantizedRowSum     = Features::kQuantizedRowSum;
+    static constexpr bool kStochasticP         = Features::kStochasticP;
     static constexpr bool kLdsSegSplit         = Features::kLdsSegSplit;
     static constexpr bool kUnpinnedMaskWidth   = Features::kUnpinnedMaskWidth;
     static constexpr bool kBiasViaTdm          = Features::kBiasViaTdm;
@@ -271,9 +272,13 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                              bool_constant<true>{});
     }
 
+    // Stochastic-rounding seeds of the two query rows a lane holds.
+    using PSeeds = array<uint32_t, 2>;
+
     // Re-pack gemm_0 C (M-outer) into gemm_1 A (K-outer) in-thread; lanes already align.
     template <typename Gemm1, typename PComputeTensor>
-    CK_TILE_DEVICE static auto MakePForGemm1(const PComputeTensor& p_compute)
+    CK_TILE_DEVICE static auto MakePForGemm1(const PComputeTensor& p_compute,
+                                             [[maybe_unused]] const PSeeds& p_seeds)
     {
         static_assert(Geometry::PRepackLayout::kInThread &&
                           Gemm1::MIterPerWarp == Geometry::kPvMIter,
@@ -293,8 +298,17 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                     static_for<0, kVec, 1>{}([&](auto e) {
                         v[e()] = p_compute.get_thread_buffer()[number<i * kVec + e>{}];
                     });
-                    t.get_thread_buffer().template set_as<fp8x8_t>(
-                        i, fp32x8_to_fp8x8(v, 1.0f / kPScale));
+                    // The first half of the converts holds the lane's first row (M-outer).
+                    constexpr index_t kRow =
+                        Features::kScalarPSeed
+                            ? 0
+                            : decltype(i)::value * kVec * 2 / decltype(t)::get_thread_buffer_size();
+                    if constexpr(kStochasticP)
+                        t.get_thread_buffer().template set_as<fp8x8_t>(
+                            i, QuantScale::QuantizePStochastic(v, p_seeds[kRow], 1.0f / kPScale));
+                    else
+                        t.get_thread_buffer().template set_as<fp8x8_t>(
+                            i, fp32x8_to_fp8x8(v, 1.0f / kPScale));
                 });
                 return t;
             }
@@ -451,6 +465,23 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         const auto logical_seqlen_k_end   = tile_range_result.get(ck_tile::number<2>{});
 
         const auto num_sink_loop = integer_divide_ceil(sink_seq_end, kN0);
+
+        // Seeded by query position and KV tile, so merged GQA rows match their unmerged heads.
+        [[maybe_unused]] PSeeds p_seeds{};
+        if constexpr(kStochasticP)
+        {
+            static_assert(MLBlockTileType::get_thread_buffer_size() == PSeeds::size());
+            const index_t first_tile = num_sink_loop > 0 ? 0 : logical_seqlen_k_start / kN0;
+            index_t r                = 0;
+            sweep_tile_span(decltype(m)::get_distributed_spans()[I0], [&](auto idx0) {
+                index_t row = q_origin.at(I0) + TileIndex::LaneRowOf<decltype(m)>(make_tuple(idx0));
+                if constexpr(kMergeHeads)
+                    row = merged.seqlen_q == 1 ? 0 : row % merged.seqlen_q;
+                if constexpr(Features::kScalarPSeed)
+                    row = __builtin_amdgcn_readfirstlane(row);
+                p_seeds(r++) = QuantScale::PSeed(row, first_tile);
+            });
+        }
 
         // No KV tile to visit: write the empty-row LSE and a zero O.
         if(const index_t logical_num_total_loop =
@@ -1541,7 +1572,15 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                                 o_acc,
                                 col_scale);
                         });
-                    return MakePForGemm1<decltype(gemm_1)>(s_new);
+                    if constexpr(kStochasticP)
+                    {
+                        const PSeeds tile_seeds = p_seeds;
+                        static_for<0, Features::kScalarPSeed ? 1 : 2, 1>{}(
+                            [&](auto k) { p_seeds(k) += QuantScale::kPSeedStep; });
+                        return MakePForGemm1<decltype(gemm_1)>(s_new, tile_seeds);
+                    }
+                    else
+                        return MakePForGemm1<decltype(gemm_1)>(s_new, PSeeds{});
                 }();
                 return p_tile;
             };
