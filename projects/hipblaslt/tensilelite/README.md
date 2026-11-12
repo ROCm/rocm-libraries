@@ -196,6 +196,7 @@ and use it as the compiler launcher. No additional configuration is needed.
 * `TENSILELITE_ENABLE_CLIENT`: Enables generation of tensilelite client application (default: `ON`)
 * `TENSILELITE_ENABLE_AUTOBUILD`: Generate wrapper scripts (e.g. `Tensile.sh`) for the cmake build tree. **Deprecated** — run `tensilelite/bin/Tensile` directly instead (default: `OFF`)
 * `TENSILELITE_BUILD_TESTING`: Build tensilelite host library tests (default: `OFF`)
+* `TENSILELITE_CLIENT_FORCE_RPATH`: Tags the client's library search path as DT_RPATH, so `LD_LIBRARY_PATH` cannot replace the libraries it was built against, HIP and HSA included. Needs `patchelf`; without it, configure warns and the client keeps DT_RUNPATH (default: `ON`)
 * `GPU_TARGETS:` Semicolon separated list of gfx targets to build
 
 ## How to Rebuild Object Codes Directly from Assembly

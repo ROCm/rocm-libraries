@@ -141,11 +141,20 @@ endif()
 # client load that ROCm's libtensilelite-host.so.1 instead of the one it was
 # built against; both share the SONAME but not the ABI or library format.
 # Re-tagging the same path list as DT_RPATH puts it ahead of LD_LIBRARY_PATH.
+# That holds for every directory in the list, so LD_LIBRARY_PATH can no longer
+# swap in another libamdhip64 or libhsa-runtime64 either; configure with
+# -DTENSILELITE_CLIENT_FORCE_RPATH=OFF for that. The re-tag needs patchelf.
 # The list is read back from the binary rather than recomputed, so it stays
 # whatever CMake (or a superbuild) chose, and install-time RPATH_CHANGE keeps
-# the tag.
+# the tag. The build-tree list keeps the empty entries CMake pads it with when
+# the install list is longer: install-time RPATH_CHANGE matches and overwrites
+# them in place and fails if they are stripped. The loader reads an empty entry
+# as the current directory; any padded build-tree binary already searches it
+# for libraries the real entries don't have (system libraries included), and
+# the re-tag moves that search ahead of LD_LIBRARY_PATH. Installed clients have
+# no empty entries.
 option(TENSILELITE_CLIENT_FORCE_RPATH
-    "Tag the client executables' search path as DT_RPATH instead of DT_RUNPATH" ON)
+    "Tag the client executables' search path as DT_RPATH (ahead of LD_LIBRARY_PATH); needs patchelf" ON)
 if(TENSILELITE_CLIENT_FORCE_RPATH AND UNIX AND NOT APPLE)
     find_program(TENSILELITE_PATCHELF patchelf)
     if(TENSILELITE_PATCHELF)
