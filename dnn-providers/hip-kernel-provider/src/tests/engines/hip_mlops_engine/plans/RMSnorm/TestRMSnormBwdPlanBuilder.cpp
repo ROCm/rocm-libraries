@@ -427,18 +427,17 @@ TEST_F(TestRMSnormBwdPlanBuilder, IdentityActivationIsApplicable)
 
 TEST_F(TestRMSnormBwdPlanBuilder, ForwardReluIsNotApplicable)
 {
-    auto validBuilder = createRMSnormActivationTestGraph(false, false, false, false, false);
+    auto validBuilder = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph();
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper validGraph(
         validBuilder.GetBufferPointer(), validBuilder.GetSize());
     ASSERT_TRUE(_planBuilder.isApplicable(_dummyHandle, validGraph));
 
-    auto builder = createRMSnormActivationTestGraph(
-        false,
-        false,
-        false,
-        false,
-        false,
-        hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD);
+    auto nativeGraph
+        = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(validBuilder.GetBufferPointer());
+    nativeGraph->nodes[0]->attributes.AsPointwiseAttributes()->operation
+        = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD;
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(builder, nativeGraph.get()));
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
 

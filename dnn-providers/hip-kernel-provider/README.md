@@ -31,9 +31,9 @@ HipKernelEngine
 - **Kernels** (`kernels/`): Device-side kernel source code embedded at build time
 - **Plugin SDK Integration**: Implements `IPlan`, `IPlanBuilder`, `IEngine` interfaces
 
-### Legacy HIP MLops normalization fusion
+### HIP MLops normalization fusion
 
-The legacy HIP MLops batch normalization and RMS normalization plans support
+The HIP MLops batch normalization and RMS normalization plans support
 ReLU, clipped ReLU, and clamp with
 `RELU_FWD` for forward plans or `RELU_BWD` for backward plans. Batch normalization
 forward plans, including training, also accept a fused `IDENTITY` node.
@@ -44,15 +44,15 @@ graph connectivity requirements still apply.
 Batch normalization and RMS normalization share the same activation-mode
 validation for direction, passthrough and supported ReLU parameters.
 
-Leaky ReLU is **unsupported** in these legacy normalization fusions: any supplied
+Leaky ReLU is **unsupported** in these normalization fusions: any supplied
 `relu_lower_clip_slope` on a ReLU node (including an explicit zero) is rejected.
 Although the common activation enum names `LEAKY_RELU`, the shared scalar kernels
 do not implement its forward function or gradient, so accepting the slope would
 silently produce incorrect results.
 
-Legacy layer normalization supports only a single normalization node, not fused
+Layer normalization supports only a single normalization node, not fused
 pointwise graphs (including `IDENTITY`, ReLU, and leaky ReLU). These restrictions
-describe the legacy HIP MLops engine, not kernel-ingestor descriptor support.
+describe the HIP MLops engine, not kernel-ingestor descriptor support.
 
 ## Building
 
