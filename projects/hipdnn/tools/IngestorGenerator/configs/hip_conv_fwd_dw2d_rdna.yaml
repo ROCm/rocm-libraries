@@ -1,0 +1,463 @@
+# Source of truth for the shipped hipkernel:hip_conv_fwd_dw2d_rdna catalog: a depthwise 2-D (and
+# 1-D) forward convolution (groups == C, K a multiple of C) for the gfx11 (RDNA3/3.5) and gfx12
+# (RDNA4) targets, compiled from HIP source.
+#
+# The specialized kernel (kernels/ConvFwdDepthwise2d.cpp) takes NCHW with K == C and compiles
+# the filter, padding, stride and dilation in. It is built for "same" pre-padding,
+# dilation x (filter - 1) / 2, on 3x3 / 5x5 / 7x7 at stride 1 or 2 and 1x31 at stride 1, and,
+# on the dilation-grid walk (LANE_ON_DILATION_GRID), on 3x3 at dilation 2, 4, 6, 12, 18 and 5x5
+# at dilation 2, stride 1. Every other problem, NHWC and channel multipliers above 1 included,
+# runs on the generic depthwise kernel of the dw3d bundle with depth 1. The native matcher
+# (HipConvFwdDw2dRdnaNative.cpp, geometryOf) picks one variant per graph; the shapes here must
+# match it.
+
+dialect: packaged
+authored_subpath: hip/conv_dw2d_rdna
+engine:
+  name: hipkernel:hip_conv_fwd_dw2d_rdna
+  sdk_version: "1.0.0"
+  knobs: []
+  heuristic: native
+
+kmd_fields:
+- name: kernel_family
+  type: string
+- name: variant
+  type: string
+- name: dtype
+  type: string
+- name: layout
+  type: string
+- name: filter_h
+  type: int
+- name: filter_w
+  type: int
+- name: stride
+  type: int
+- name: dilation
+  type: int
+
+graph_match:
+  shape: shared_shape
+  discriminator: none
+
+kernel_source_kind: hip
+workspace_policy: none
+
+packs:
+- name: hip_conv_fwd_dw2d_rdna
+  arch: [gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201]
+  kernels:
+  - name: hip_conv_fwd_dw2d_rdna.f32_nchw_k3x3_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: float, FILTER_H: 3, FILTER_W: 3, PAD_H: 1, PAD_W: 1, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 1, DILATION_W: 1, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 0}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_h: 3, filter_w: 3, stride: 1, dilation: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f32_nchw_k3x3_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: float, FILTER_H: 3, FILTER_W: 3, PAD_H: 1, PAD_W: 1, STRIDE_H: 2, STRIDE_W: 2, DILATION_H: 1, DILATION_W: 1, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 0}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_h: 3, filter_w: 3, stride: 2, dilation: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f32_nchw_k5x5_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: float, FILTER_H: 5, FILTER_W: 5, PAD_H: 2, PAD_W: 2, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 1, DILATION_W: 1, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 0}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_h: 5, filter_w: 5, stride: 1, dilation: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f32_nchw_k5x5_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: float, FILTER_H: 5, FILTER_W: 5, PAD_H: 2, PAD_W: 2, STRIDE_H: 2, STRIDE_W: 2, DILATION_H: 1, DILATION_W: 1, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 0}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_h: 5, filter_w: 5, stride: 2, dilation: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f32_nchw_k7x7_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: float, FILTER_H: 7, FILTER_W: 7, PAD_H: 3, PAD_W: 3, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 1, DILATION_W: 1, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 0}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_h: 7, filter_w: 7, stride: 1, dilation: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f32_nchw_k7x7_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: float, FILTER_H: 7, FILTER_W: 7, PAD_H: 3, PAD_W: 3, STRIDE_H: 2, STRIDE_W: 2, DILATION_H: 1, DILATION_W: 1, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 0}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_h: 7, filter_w: 7, stride: 2, dilation: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f32_nchw_k1x31_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: float, FILTER_H: 1, FILTER_W: 31, PAD_H: 0, PAD_W: 15, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 1, DILATION_W: 1, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 0}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_h: 1, filter_w: 31, stride: 1, dilation: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f32_nchw_k3x3_d2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: float, FILTER_H: 3, FILTER_W: 3, PAD_H: 2, PAD_W: 2, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 2, DILATION_W: 2, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 1}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_h: 3, filter_w: 3, stride: 1, dilation: 2}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f32_nchw_k3x3_d4
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: float, FILTER_H: 3, FILTER_W: 3, PAD_H: 4, PAD_W: 4, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 4, DILATION_W: 4, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 1}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_h: 3, filter_w: 3, stride: 1, dilation: 4}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f32_nchw_k3x3_d6
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: float, FILTER_H: 3, FILTER_W: 3, PAD_H: 6, PAD_W: 6, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 6, DILATION_W: 6, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 1}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_h: 3, filter_w: 3, stride: 1, dilation: 6}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f32_nchw_k3x3_d12
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: float, FILTER_H: 3, FILTER_W: 3, PAD_H: 12, PAD_W: 12, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 12, DILATION_W: 12, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 1}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_h: 3, filter_w: 3, stride: 1, dilation: 12}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f32_nchw_k3x3_d18
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: float, FILTER_H: 3, FILTER_W: 3, PAD_H: 18, PAD_W: 18, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 18, DILATION_W: 18, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 1}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_h: 3, filter_w: 3, stride: 1, dilation: 18}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f32_nchw_k5x5_d2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: float, FILTER_H: 5, FILTER_W: 5, PAD_H: 4, PAD_W: 4, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 2, DILATION_W: 2, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 1}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_h: 5, filter_w: 5, stride: 1, dilation: 2}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f32_nchw_generic
+    kernel_source:
+      kind: hip
+      source: ../conv_dw3d_rdna/kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_GENERIC: 1, DW_DTYPE: 0, DW_NDHWC: 0}
+    metadata: {kernel_family: dw2d_direct, variant: generic, dtype: FLOAT, layout: CHANNELS_FIRST, filter_h: 0, filter_w: 0, stride: 0, dilation: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f32_nhwc_generic
+    kernel_source:
+      kind: hip
+      source: ../conv_dw3d_rdna/kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_GENERIC: 1, DW_DTYPE: 0, DW_NDHWC: 1}
+    metadata: {kernel_family: dw2d_direct, variant: generic, dtype: FLOAT, layout: CHANNELS_LAST, filter_h: 0, filter_w: 0, stride: 0, dilation: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f16_nchw_k3x3_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __half, FILTER_H: 3, FILTER_W: 3, PAD_H: 1, PAD_W: 1, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 1, DILATION_W: 1, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 0}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_h: 3, filter_w: 3, stride: 1, dilation: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f16_nchw_k3x3_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __half, FILTER_H: 3, FILTER_W: 3, PAD_H: 1, PAD_W: 1, STRIDE_H: 2, STRIDE_W: 2, DILATION_H: 1, DILATION_W: 1, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 0}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_h: 3, filter_w: 3, stride: 2, dilation: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f16_nchw_k5x5_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __half, FILTER_H: 5, FILTER_W: 5, PAD_H: 2, PAD_W: 2, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 1, DILATION_W: 1, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 0}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_h: 5, filter_w: 5, stride: 1, dilation: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f16_nchw_k5x5_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __half, FILTER_H: 5, FILTER_W: 5, PAD_H: 2, PAD_W: 2, STRIDE_H: 2, STRIDE_W: 2, DILATION_H: 1, DILATION_W: 1, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 0}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_h: 5, filter_w: 5, stride: 2, dilation: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f16_nchw_k7x7_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __half, FILTER_H: 7, FILTER_W: 7, PAD_H: 3, PAD_W: 3, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 1, DILATION_W: 1, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 0}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_h: 7, filter_w: 7, stride: 1, dilation: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f16_nchw_k7x7_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __half, FILTER_H: 7, FILTER_W: 7, PAD_H: 3, PAD_W: 3, STRIDE_H: 2, STRIDE_W: 2, DILATION_H: 1, DILATION_W: 1, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 0}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_h: 7, filter_w: 7, stride: 2, dilation: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f16_nchw_k1x31_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __half, FILTER_H: 1, FILTER_W: 31, PAD_H: 0, PAD_W: 15, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 1, DILATION_W: 1, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 0}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_h: 1, filter_w: 31, stride: 1, dilation: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f16_nchw_k3x3_d2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __half, FILTER_H: 3, FILTER_W: 3, PAD_H: 2, PAD_W: 2, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 2, DILATION_W: 2, OUT_PER_LANE: 4, LANE_ON_DILATION_GRID: 1}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_h: 3, filter_w: 3, stride: 1, dilation: 2}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f16_nchw_k3x3_d4
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __half, FILTER_H: 3, FILTER_W: 3, PAD_H: 4, PAD_W: 4, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 4, DILATION_W: 4, OUT_PER_LANE: 4, LANE_ON_DILATION_GRID: 1}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_h: 3, filter_w: 3, stride: 1, dilation: 4}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f16_nchw_k3x3_d6
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __half, FILTER_H: 3, FILTER_W: 3, PAD_H: 6, PAD_W: 6, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 6, DILATION_W: 6, OUT_PER_LANE: 4, LANE_ON_DILATION_GRID: 1}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_h: 3, filter_w: 3, stride: 1, dilation: 6}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f16_nchw_k3x3_d12
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __half, FILTER_H: 3, FILTER_W: 3, PAD_H: 12, PAD_W: 12, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 12, DILATION_W: 12, OUT_PER_LANE: 4, LANE_ON_DILATION_GRID: 1}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_h: 3, filter_w: 3, stride: 1, dilation: 12}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f16_nchw_k3x3_d18
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __half, FILTER_H: 3, FILTER_W: 3, PAD_H: 18, PAD_W: 18, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 18, DILATION_W: 18, OUT_PER_LANE: 4, LANE_ON_DILATION_GRID: 1}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_h: 3, filter_w: 3, stride: 1, dilation: 18}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f16_nchw_k5x5_d2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __half, FILTER_H: 5, FILTER_W: 5, PAD_H: 4, PAD_W: 4, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 2, DILATION_W: 2, OUT_PER_LANE: 4, LANE_ON_DILATION_GRID: 1}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_h: 5, filter_w: 5, stride: 1, dilation: 2}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f16_nchw_generic
+    kernel_source:
+      kind: hip
+      source: ../conv_dw3d_rdna/kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_GENERIC: 1, DW_DTYPE: 1, DW_NDHWC: 0}
+    metadata: {kernel_family: dw2d_direct, variant: generic, dtype: HALF, layout: CHANNELS_FIRST, filter_h: 0, filter_w: 0, stride: 0, dilation: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.f16_nhwc_generic
+    kernel_source:
+      kind: hip
+      source: ../conv_dw3d_rdna/kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_GENERIC: 1, DW_DTYPE: 1, DW_NDHWC: 1}
+    metadata: {kernel_family: dw2d_direct, variant: generic, dtype: HALF, layout: CHANNELS_LAST, filter_h: 0, filter_w: 0, stride: 0, dilation: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.bf16_nchw_k3x3_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __hip_bfloat16, FILTER_H: 3, FILTER_W: 3, PAD_H: 1, PAD_W: 1, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 1, DILATION_W: 1, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 0}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_h: 3, filter_w: 3, stride: 1, dilation: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.bf16_nchw_k3x3_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __hip_bfloat16, FILTER_H: 3, FILTER_W: 3, PAD_H: 1, PAD_W: 1, STRIDE_H: 2, STRIDE_W: 2, DILATION_H: 1, DILATION_W: 1, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 0}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_h: 3, filter_w: 3, stride: 2, dilation: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.bf16_nchw_k5x5_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __hip_bfloat16, FILTER_H: 5, FILTER_W: 5, PAD_H: 2, PAD_W: 2, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 1, DILATION_W: 1, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 0}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_h: 5, filter_w: 5, stride: 1, dilation: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.bf16_nchw_k5x5_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __hip_bfloat16, FILTER_H: 5, FILTER_W: 5, PAD_H: 2, PAD_W: 2, STRIDE_H: 2, STRIDE_W: 2, DILATION_H: 1, DILATION_W: 1, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 0}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_h: 5, filter_w: 5, stride: 2, dilation: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.bf16_nchw_k7x7_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __hip_bfloat16, FILTER_H: 7, FILTER_W: 7, PAD_H: 3, PAD_W: 3, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 1, DILATION_W: 1, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 0}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_h: 7, filter_w: 7, stride: 1, dilation: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.bf16_nchw_k7x7_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __hip_bfloat16, FILTER_H: 7, FILTER_W: 7, PAD_H: 3, PAD_W: 3, STRIDE_H: 2, STRIDE_W: 2, DILATION_H: 1, DILATION_W: 1, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 0}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_h: 7, filter_w: 7, stride: 2, dilation: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.bf16_nchw_k1x31_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __hip_bfloat16, FILTER_H: 1, FILTER_W: 31, PAD_H: 0, PAD_W: 15, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 1, DILATION_W: 1, OUT_PER_LANE: 2, LANE_ON_DILATION_GRID: 0}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_h: 1, filter_w: 31, stride: 1, dilation: 1}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.bf16_nchw_k3x3_d2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __hip_bfloat16, FILTER_H: 3, FILTER_W: 3, PAD_H: 2, PAD_W: 2, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 2, DILATION_W: 2, OUT_PER_LANE: 4, LANE_ON_DILATION_GRID: 1}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_h: 3, filter_w: 3, stride: 1, dilation: 2}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.bf16_nchw_k3x3_d4
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __hip_bfloat16, FILTER_H: 3, FILTER_W: 3, PAD_H: 4, PAD_W: 4, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 4, DILATION_W: 4, OUT_PER_LANE: 4, LANE_ON_DILATION_GRID: 1}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_h: 3, filter_w: 3, stride: 1, dilation: 4}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.bf16_nchw_k3x3_d6
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __hip_bfloat16, FILTER_H: 3, FILTER_W: 3, PAD_H: 6, PAD_W: 6, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 6, DILATION_W: 6, OUT_PER_LANE: 4, LANE_ON_DILATION_GRID: 1}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_h: 3, filter_w: 3, stride: 1, dilation: 6}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.bf16_nchw_k3x3_d12
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __hip_bfloat16, FILTER_H: 3, FILTER_W: 3, PAD_H: 12, PAD_W: 12, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 12, DILATION_W: 12, OUT_PER_LANE: 4, LANE_ON_DILATION_GRID: 1}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_h: 3, filter_w: 3, stride: 1, dilation: 12}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.bf16_nchw_k3x3_d18
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __hip_bfloat16, FILTER_H: 3, FILTER_W: 3, PAD_H: 18, PAD_W: 18, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 18, DILATION_W: 18, OUT_PER_LANE: 4, LANE_ON_DILATION_GRID: 1}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_h: 3, filter_w: 3, stride: 1, dilation: 18}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.bf16_nchw_k5x5_d2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvFwdDepthwise2d.cpp
+      entry: ConvFwdDepthwise2d
+      build:
+        defines: {IO_DTYPE: __hip_bfloat16, FILTER_H: 5, FILTER_W: 5, PAD_H: 4, PAD_W: 4, STRIDE_H: 1, STRIDE_W: 1, DILATION_H: 2, DILATION_W: 2, OUT_PER_LANE: 4, LANE_ON_DILATION_GRID: 1}
+    metadata: {kernel_family: dw2d_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_h: 5, filter_w: 5, stride: 1, dilation: 2}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.bf16_nchw_generic
+    kernel_source:
+      kind: hip
+      source: ../conv_dw3d_rdna/kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_GENERIC: 1, DW_DTYPE: 2, DW_NDHWC: 0}
+    metadata: {kernel_family: dw2d_direct, variant: generic, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_h: 0, filter_w: 0, stride: 0, dilation: 0}
+    priority: 0
+  - name: hip_conv_fwd_dw2d_rdna.bf16_nhwc_generic
+    kernel_source:
+      kind: hip
+      source: ../conv_dw3d_rdna/kernels/ConvFwdDepthwise3d.cpp
+      entry: ConvFwdDepthwise3d
+      build:
+        defines: {DW_GENERIC: 1, DW_DTYPE: 2, DW_NDHWC: 1}
+    metadata: {kernel_family: dw2d_direct, variant: generic, dtype: BFLOAT16, layout: CHANNELS_LAST, filter_h: 0, filter_w: 0, stride: 0, dilation: 0}
+    priority: 0
+
+# hip kernels are compiled from source by hkp_pack and hydrate no builder object, so every
+# field is matcher-only.
+specialization:
+  metadata_fields: []
+  matcher_only_fields: [kernel_family, variant, dtype, layout, filter_h, filter_w, stride, dilation]
+  bindings: {}
+  vocabulary: {}
