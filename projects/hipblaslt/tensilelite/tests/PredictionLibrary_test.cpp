@@ -365,37 +365,6 @@ TEST(PredictionLibraryTest, Gfx1250KnobsReachOrigamiConfig)
     EXPECT_EQ(config.cache_hints_d, 4);
 }
 
-// Libraries built before the Multicast key follow Tensile's rule: clustered, and either not
-// persistent or persistent with a static spatial assignment.  A recorded value wins.
-TEST(PredictionLibraryTest, MulticastDefaultsToTensileRuleForOldLibraries)
-{
-    auto clustered     = makeMappedSolution(1, TensileLite::dim3(2, 2, 1));
-    auto persistent_dp = makeMappedSolution(2, TensileLite::dim3(2, 2, 1));
-    auto streamk       = makeMappedSolution(3, TensileLite::dim3(2, 2, 1));
-    auto dynamic_dp    = makeMappedSolution(4, TensileLite::dim3(2, 2, 1));
-    auto plain         = makeMappedSolution(5);
-    auto recorded_off  = makeMappedSolution(6, TensileLite::dim3(2, 2, 1));
-    persistent_dp->sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
-    streamk->sizeMapping.tileProcessingStrategy       = TileProcessingStrategy::StreamK;
-    dynamic_dp->sizeMapping.tileProcessingStrategy    = TileProcessingStrategy::DataParallel;
-    dynamic_dp->sizeMapping.workAssignment            = WorkAssignment::DynamicWorkQueue;
-    recorded_off->sizeMapping.Multicast               = 0;
-
-    SolutionMap<ContractionSolution> solutions;
-    for(auto const& s : {clustered, persistent_dp, streamk, dynamic_dp, plain, recorded_off})
-        solutions.emplace(s->index, s);
-
-    ContractionProblemPredictionLibrary lib;
-    loadPredictionLibrary({1, 2, 3, 4, 5, 6}, solutions, lib);
-    ASSERT_EQ(lib.origami_config_list.size(), 6u);
-    EXPECT_TRUE(lib.origami_config_list[0].tensile().multicast);
-    EXPECT_TRUE(lib.origami_config_list[1].tensile().multicast);
-    EXPECT_TRUE(lib.origami_config_list[2].tensile().multicast);
-    EXPECT_FALSE(lib.origami_config_list[3].tensile().multicast);
-    EXPECT_FALSE(lib.origami_config_list[4].tensile().multicast);
-    EXPECT_FALSE(lib.origami_config_list[5].tensile().multicast);
-}
-
 // The per-tile flags are written once while the library is loaded.
 // An NT-B solution at 128x256 must not mark the 256x256 solution.
 TEST(PredictionLibraryTest, NonTemporalAvailabilityIsMemoizedPerMacroTile)

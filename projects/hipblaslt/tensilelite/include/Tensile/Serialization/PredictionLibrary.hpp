@@ -173,7 +173,7 @@ namespace TensileLite
                                     .prefetch_local_read
                                     = solution->sizeMapping.PrefetchLocalRead,
                                     .half_plr             = solution->sizeMapping.HalfPLR,
-                                    .multicast = solution->sizeMapping.clusterMulticast(),
+                                    .multicast = solution->sizeMapping.Multicast != 0,
                                     .adaptive_gemm = solution->sizeMapping.adaptiveGemm,
                                 },
                             };
