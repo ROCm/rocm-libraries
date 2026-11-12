@@ -428,6 +428,18 @@ void FillTrueStats(BwdData& d, double eps)
     }
 }
 
+// The test data seeds each tensor from its lengths, so dy holds the same values as
+// x. Backward with the true stats of x then cancels to a residue of order
+// epsilon / variance: rounding noise, which the compare fails on in both modes.
+// Draw dy from a seed of its own.
+void DecoupleDy(miopen::Handle& handle, BwdData& d)
+{
+    prng::reset_seed(1);
+    for(auto& v : d.dy.data)
+        v = prng::gen_descreet_uniform_sign<float>(2e-3, 1000);
+    d.dy_dev = handle.Write(d.dy.data);
+}
+
 // True when every element still holds the NaN the test data poisoned it with.
 bool Untouched(miopen::Handle& handle, const miopen::Allocator::ManageDataPtr& dev, std::size_t n)
 {
@@ -1197,6 +1209,7 @@ TEST(GPU_HipdnnShimBNBwdWithoutSavedStats_FP32, MatchesCpuReference)
         SCOPED_TRACE(c.name);
         BwdData d;
         SetUpBwd(d);
+        DecoupleDy(handle, d);
         d.epsilon = c.epsilon;
         SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, c.mode);
 
