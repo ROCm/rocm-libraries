@@ -1477,3 +1477,69 @@ BenchmarkProblems:
         - ProblemSizes:
           - Exact: [127, 127, 1, 128]
           - Exact: [128, 125, 2, 128, 136, 136, 128, 128]
+  ########################################
+  # fp64 D on a VALU kernel as f64_gfx1250.yaml builds and complex float D on a WMMA kernel as cgemm_gfx1250.yaml
+  # builds: 8-byte elements, which the TDM block stages from their register pairs, with ds_store_b64 at store vector
+  # width 1, at every TDMStoreInst level.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: d
+      DestDataType: d
+      ComputeDataType: d
+      HighPrecisionAccumulate: False
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - ThreadTile:
+          - [4, 4]
+        - WorkGroup:
+          - [8, 4, 1]
+        - DepthU: [16]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [0]
+        - PrefetchGlobalRead: [2]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - StoreVectorWidth: [1, -1]
+        - TDMStoreInst: [0, 1, 2, 3]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [63, 33, 1, 32]
+          - Exact: [64, 31, 2, 32, 72, 72, 32, 32]
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: c
+      DestDataType: c
+      ComputeDataType: c
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 2, 2, 2, 2]
+        - DepthU: [16]
+        - WavefrontSize: [32]
+        - ScheduleIterAlg: [4]
+        - TDMInst: [3]
+        - PrefetchGlobalRead: [2]
+        - StoreVectorWidth: [1, -1]
+        - TDMStoreInst: [0, 1, 2, 3]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [127, 127, 1, 32]
+          - Exact: [128, 125, 2, 32, 136, 136, 32, 32]
