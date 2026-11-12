@@ -64,8 +64,16 @@ struct FmhaTdmSchedFp8Features
         std::is_same_v<FmhaMask, SimplifiedGenericAttentionMask<FmhaMask::IsMasking>> &&
         !kUseCountdownLoop && !(Problem::kMergeNumHeadGroupsSeqLenQ && FmhaMask::IsMasking);
 
-    // Sink tiles with a mask run apart, so only they carry the per-lane sink escape.
-    static constexpr bool kSinkEscapeLoop = Problem::kHasSink && FmhaMask::IsMasking && kBandMask;
+    // The elementwise bias tile reaches LDS by TDM and is read back right before its add.
+    static constexpr bool kBiasViaTdm = Bias == BlockAttentionBiasEnum::ELEMENTWISE_BIAS;
+
+    // Two bias workgroups per CU cannot afford two loop copies; every tile carries the escape.
+    static constexpr bool kSinkEscapeEveryTile = Problem::kHasSink && FmhaMask::IsMasking &&
+                                                 kBandMask && kBiasViaTdm &&
+                                                 Policy::kBlockPerCu > 1;
+    // Otherwise sink tiles with a mask run apart, so only they carry the per-lane sink escape.
+    static constexpr bool kSinkEscapeLoop =
+        Problem::kHasSink && FmhaMask::IsMasking && kBandMask && !kSinkEscapeEveryTile;
 
     // ISA tuning only: same values, chosen for register use or the instruction schedule.
     // Merged D192 at two workgroups per CU cannot afford IsOutOfBoundUnsigned's per-row VGPRs.

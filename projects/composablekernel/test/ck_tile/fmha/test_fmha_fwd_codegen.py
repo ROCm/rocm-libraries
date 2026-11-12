@@ -1923,7 +1923,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                         (t.F_bm0, t.F_bn0, t.F_bk0, t.F_bn1, t.F_bk1, t.F_bk0max),
                         (32 if one_wave else 128, 128, 192, 128, 128, 192),
                     )
-                    # MX, bias and the packed-GQA LDS/VGPR outliers run one workgroup per CU.
+                    # MX and the packed-GQA LDS/VGPR outliers run one workgroup per CU.
                     packed_one = _fp8_sched_kind(k) == "packgqa" and (
                         (
                             dtype == "fp8"
@@ -1937,11 +1937,7 @@ class TestGfx125V128Codegen(unittest.TestCase):
                     occupancy = (
                         1
                         if not one_wave
-                        and (
-                            k.F_pipeline.F_qscale == "mx"
-                            or k.F_pipeline.F_bias == "bias"
-                            or packed_one
-                        )
+                        and (k.F_pipeline.F_qscale == "mx" or packed_one)
                         else 2
                     )
                     self.assertEqual(

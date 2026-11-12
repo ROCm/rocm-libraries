@@ -114,6 +114,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     static constexpr bool kQuantizedRowSum     = Features::kQuantizedRowSum;
     static constexpr bool kLdsSegSplit         = Features::kLdsSegSplit;
     static constexpr bool kUnpinnedMaskWidth   = Features::kUnpinnedMaskWidth;
+    static constexpr bool kBiasViaTdm          = Features::kBiasViaTdm;
 
     static constexpr index_t kAlignmentQ    = Policy::template GetAlignmentQ<Problem>();
     static constexpr index_t kAlignmentK    = Policy::template GetAlignmentK<Problem>();
@@ -183,6 +184,19 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
     using QuantScale = FmhaTdmSchedFp8QuantScale<Geometry, kBlockSize, kK1, kQKHeaddim>;
     // The kernel stores O through the inherited StoreOutput and kOLdsBytes.
     using OutputStore = FmhaTdmSchedFp8OutputStore<Geometry, ODataType>;
+    using BiasLoad    = FmhaTdmSchedFp8BiasLoad<Geometry>;
+    static_assert(!kBiasViaTdm || std::is_same_v<BiasDataType, float>);
+    // Bias TDM transfers per wavefront and tile, counted into every later tensorcnt wait.
+    static constexpr index_t kBiasTdmOps = kBiasViaTdm ? BiasLoad::kTdmOps : 0;
+    // The bias tile shares the O staging LDS, which only the epilogue writes.
+    static constexpr bool kOwnsOutputLds = kBiasViaTdm;
+    static constexpr index_t kOutputLdsBytes =
+        kBiasViaTdm ? max(OutputStore::kOLdsBytes, BiasLoad::kLdsBytes) : OutputStore::kOLdsBytes;
+    CK_TILE_DEVICE static void* OutputLds()
+    {
+        alignas(16) __shared__ char buf[kOutputLdsBytes];
+        return buf;
+    }
 
     static_assert(!kBlockScale || (QuantScale::kPScaleGranularity == QuantScale::kKVScaleAlign &&
                                    kN0 % QuantScale::kKVScaleAlign == 0 &&
@@ -206,7 +220,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__gfx125__)
     // Static LDS of one workgroup: arena, O staging, and MX or row scales.
     static constexpr index_t kStaticLdsBytes =
-        Policy::GetLdsArenaSize() + OutputStore::kOLdsBytes +
+        Policy::GetLdsArenaSize() + kOutputLdsBytes +
         (kMx ? 2 * QuantScale::kMxLdsTileDwords * static_cast<index_t>(sizeof(int32_t)) : 0) +
         (kRowScale ? 2 * kBlockSize * static_cast<index_t>(sizeof(float)) : 0);
     static constexpr index_t kLdsWorkgroupsPerCu =
@@ -512,20 +526,67 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         const auto kv_load_start =
             (sink_seq_end == 0 && logical_seqlen_k_start > 0) ? logical_seqlen_k_start : 0;
 
-        // Bias tile window
+        // Without bias this is a null window; its no-op moves keep those instances unchanged.
         const auto bias_origin = bias_dram_block_window_tmp.get_window_origin();
         auto bias_dram_window =
             make_tile_window(bias_dram_block_window_tmp.get_bottom_tensor_view(),
                              bias_dram_block_window_tmp.get_window_lengths(),
                              {bias_origin.at(number<0>{}), kv_load_start},
                              gemm_0.MakeCBlockTile().get_tile_distribution());
-        // The next KV tile's bias is in flight while the current tile is scored.
-        [[maybe_unused]] auto bias_next = [&] {
-            if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
-                return load_tile(bias_dram_window, number<-1>{}, bool_constant<false>{});
+        // Bias by TDM: tensor base, row stride, real extents, and the column of the next tile.
+        [[maybe_unused]] const float* bias_base = nullptr;
+        [[maybe_unused]] index_t bias_stride    = 0;
+        [[maybe_unused]] index_t bias_rows      = 0;
+        [[maybe_unused]] index_t bias_cols      = 0;
+        [[maybe_unused]] index_t bias_row       = 0;
+        [[maybe_unused]] index_t bias_col       = kv_load_start;
+        [[maybe_unused]] float* bias_lds        = nullptr;
+        if constexpr(kBiasViaTdm)
+        {
+            static_assert(TileIndex::IsWaveInterleavedBands<
+                              typename SaccBlockTileType::StaticTileDistribution,
+                              Geometry::kQkMIter,
+                              Geometry::QkWmma::kM,
+                              Geometry::kWaves>(),
+                          "each wavefront reads back only the bias rows it loaded");
+            const auto& bias_view = bias_dram_block_window_tmp.get_bottom_tensor_view();
+            const auto& bias_desc = bias_view.get_tensor_descriptor();
+            const auto lengths    = detail::tdm_real_lengths(bias_desc);
+            bias_base             = bias_view.get_buffer_view().p_data_;
+            bias_stride           = bias_desc.calculate_offset(make_multi_index(1, 0));
+            bias_rows             = lengths.at(I0);
+            bias_cols             = lengths.at(I1);
+            bias_row              = bias_dram_block_window_tmp.get_window_origin().at(I0);
+            bias_lds              = static_cast<float*>(OutputLds());
+        }
+        [[maybe_unused]] auto bias_lds_window = [&] {
+            if constexpr(kBiasViaTdm)
+                return make_tile_window(
+                    make_tensor_view<address_space_enum::lds>(
+                        bias_lds,
+                        make_naive_tensor_descriptor(
+                            make_tuple(number<kM0>{}, number<kN0>{}),
+                            make_tuple(number<BiasLoad::kRowPitch>{}, number<1>{}),
+                            number<4>{},
+                            number<1>{})),
+                    make_tuple(number<kM0>{}, number<kN0>{}),
+                    {0, 0},
+                    gemm_0.MakeCBlockTile().get_tile_distribution());
             else
                 return 0;
         }();
+        // LDS byte address of this lane's first bias read; every other read is an immediate offset.
+        [[maybe_unused]] int32_t bias_lds_base = 0;
+        if constexpr(kBiasViaTdm)
+        {
+            FmhaTdmSchedFp8PinnedWindow<remove_cvref_t<decltype(bias_lds_window)>, 1>::ComputeBases(
+                bias_lds_window, &bias_lds_base);
+            bias_lds_base = Pins::PinToVgpr(bias_lds_base);
+        }
+        [[maybe_unused]] auto issue_bias = [&]() {
+            BiasLoad::Issue(
+                bias_base, bias_stride, bias_rows, bias_cols, bias_row, bias_col, bias_lds);
+        };
 
         auto k_dram_window =
             make_tile_window(k_dram_block_window_tmp,
@@ -618,6 +679,8 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
         load_tile_tdm(tdm_config_q, q_lds_store_window, q_dram_window);
         load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
         load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
+        if constexpr(kBiasViaTdm)
+            issue_bias();
         move_tile_window(k_dram_window, {kN0, 0});
         // K1 is consumed at iteration 1. A one-tile prefix must jump before K1 loads.
         if constexpr(kHasSink)
@@ -647,11 +710,13 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
             std::is_same_v<Schedule,
                            FmhaTdmSchedSequentialTileSchedule<typename Schedule::LocalPlacement>>,
             "the iteration-0 V0 wait in Begin assumes the sequential tile schedule");
-        // Prologue TDM transfers issued after Q (K0, V0, K1) and after K0 (V0, K1).
-        constexpr index_t kTdmIssuedAfterQ  = 3;
-        constexpr index_t kTdmIssuedAfterK0 = 2;
-        // Begin of iteration 0 sees V0, K1 in flight; later Begins see at most the next K.
-        constexpr index_t kTdmIssuedAfterV0 = 1;
+        // Prologue TDM transfers issued after Q (K0, V0, bias, K1) and after K0 (V0, bias, K1).
+        constexpr index_t kTdmIssuedAfterQ  = 3 + kBiasTdmOps;
+        constexpr index_t kTdmIssuedAfterK0 = 2 + kBiasTdmOps;
+        // Begin waits for its V with that tile's bias and the next K still in flight.
+        constexpr index_t kTdmIssuedAfterV0 = 1 + kBiasTdmOps;
+        // A bias tile is read with the next K and V transfers still in flight.
+        [[maybe_unused]] constexpr index_t kTdmIssuedAfterBias = 2;
 
         [[maybe_unused]] array<int32_t, Geometry::kQkMIter * QuantScale::kMxQkScaleDwords> q_scales;
         if constexpr(kMx)
@@ -1131,17 +1196,44 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
 
             auto process_score = [&]() {
                 // QK scores are ready for bias, masking, and softmax.
-                if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
+                if constexpr(kBiasViaTdm)
                 {
                     if constexpr(Features::kKDescale != FmhaTdmSchedFp8KDescale::WithScaleS)
                         tile_elementwise_inout([&scale_s](auto& x) { x = x * scale_s; }, s_acc);
-                    const auto bias_tile = bias_next;
-                    tile_elementwise_inout(
-                        [](auto& x, const auto& y) {
-                            x += log2e_v<SaccDataType> * type_convert<SaccDataType>(y);
-                        },
-                        s_acc,
-                        bias_tile);
+                    // This wavefront's rows only, so its own tensorcnt is the whole RAW wait.
+                    s_wait_tensorcnt<kTdmIssuedAfterBias>();
+                    Pins::CompilerMemoryFence();
+                    using BiasWindow = remove_cvref_t<decltype(bias_lds_window)>;
+                    using BiasRead   = FmhaTdmSchedFp8Load<BiasWindow::NumAccessPerCoord, 16>;
+                    constexpr index_t kChunk  = 2;
+                    constexpr index_t kChunks = BiasWindow::NumAccessPerCoord / kChunk;
+                    const FmhaTdmSchedFp8PinnedWindow<BiasWindow, 1> pinned_bias{bias_lds_window,
+                                                                                 &bias_lds_base};
+                    SaccBlockTileType bias_tile;
+                    auto load_chunk = [&](auto c) {
+                        static_for<0, kChunk, 1>{}([&](auto i) {
+                            BiasRead::template LoadInstruction<c * kChunk + i>(bias_tile,
+                                                                               pinned_bias);
+                        });
+                    };
+                    // Two chunks in flight bound the bias VGPRs; each add retires one chunk.
+                    load_chunk(number<0>{});
+                    static_for<0, kChunks, 1>{}([&](auto c) {
+                        __builtin_amdgcn_sched_barrier(0);
+                        if constexpr(c + 1 < kChunks)
+                            load_chunk(number<c + 1>{});
+                        static_for<0, kChunk, 1>{}([&](auto i) {
+                            static_for<0, 4, 1>{}([&](auto j) {
+                                constexpr index_t e =
+                                    BiasRead::template DestinationOffset<typename BiasWindow::Base,
+                                                                         c * kChunk + i>(j);
+                                s_acc.get_thread_buffer()(number<e>{}) +=
+                                    log2e_v<SaccDataType> *
+                                    bias_tile.get_thread_buffer()[number<e>{}];
+                            });
+                        });
+                    });
+                    __builtin_amdgcn_sched_barrier(0);
                 }
 
                 constexpr bool kDeferTensorReady = Mode::kDeferTensorReady;
@@ -1357,19 +1449,31 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                     }
                 }
 
-                // Sink->normal window jump
-                if constexpr(kHasSink)
+                if constexpr(kBiasViaTdm)
                 {
-                    if(i_total_loops == num_sink_loop - 1)
+                    if constexpr(kHasSink)
                     {
-                        move_tile_window(bias_dram_window,
-                                         {0, logical_seqlen_k_start - sink_seq_end});
+                        if(i_total_loops == num_sink_loop - 1)
+                            bias_col += logical_seqlen_k_start - sink_seq_end;
                     }
+                    bias_col += kN0;
+                    // The adds consumed this tile; its reads retire before the TDM overwrites it.
+                    Pins::CompilerMemoryFence();
+                    s_wait_dscnt<0>();
+                    issue_bias();
                 }
-                move_tile_window(bias_dram_window, {0, kN0});
-                // Unguarded loads issue together; out-of-range keys are masked to -inf.
-                if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
-                    bias_next = load_tile(bias_dram_window, number<-1>{}, bool_constant<false>{});
+                else
+                {
+                    if constexpr(kHasSink)
+                    {
+                        if(i_total_loops == num_sink_loop - 1)
+                        {
+                            move_tile_window(bias_dram_window,
+                                             {0, logical_seqlen_k_start - sink_seq_end});
+                        }
+                    }
+                    move_tile_window(bias_dram_window, {0, kN0});
+                }
             };
 
             auto run_softmax = [&] {
@@ -1417,7 +1521,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                                 Softmax::template RunSplitSoftmaxPart01<Problem>(
                                     s_new, m, softmax_scale, delta_m0, delta_m1, col_scale);
                         },
-                        [&]() { s_wait_tensorcnt_barrier<Policy::kVPrefetchTensorCount>(); },
+                        [&]() {
+                            s_wait_tensorcnt_barrier<Policy::kVPrefetchTensorCount + kBiasTdmOps>();
+                        },
                         // Part 2 below rescales the output inside its exp stream.
                         [](auto) {},
                         [&](auto) {
@@ -1471,7 +1577,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
 
             auto advance_iteration = [&]() {
                 // Fixed boundary: wait for the next K tile before advancing.
-                s_wait_tensorcnt_barrier<Policy::kKPrefetchTensorCount>();
+                s_wait_tensorcnt_barrier<Policy::kKPrefetchTensorCount == 0
+                                             ? 0
+                                             : Policy::kKPrefetchTensorCount + kBiasTdmOps>();
             };
 
             auto tile_ops = MakeFmhaTdmSchedTileOps(begin_iteration,
@@ -1572,7 +1680,7 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                          v_lds_next_ptr,
                          v_lds_cur_ptr,
                          std::false_type{},
-                         std::false_type{});
+                         bool_constant<Features::kSinkEscapeEveryTile>{});
                 if constexpr(kUseCountdownLoop)
                 {
                     even_buffer = !even_buffer;
@@ -1730,6 +1838,9 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                 // The final PV stage's next-K reads have no consumer in the last iteration.
                 s_wait_dscnt<0>();
             });
+        // Every wavefront's terminal bias TDM lands before any O staging write reuses the LDS.
+        if constexpr(kBiasViaTdm)
+            s_wait_tensorcnt_barrier<0>();
 
         return output;
     }

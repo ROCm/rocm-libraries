@@ -2069,7 +2069,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     # Workgroups per CU; the pipeline takes them from the generated traits.
     # Every quantization mode fits 512 VGPRs without mainloop spills, so all run two per CU.
     _QR_TDM_SCHED_FP8_OCCUPANCY = 2
-    # The elementwise bias tile does not fit two workgroups' VGPRs, so it runs one per CU.
+    # Bias: D64/D128 run as fast at one per CU and keep the split sink loop; D192 runs two.
     _QR_TDM_SCHED_FP8_BIAS_OCCUPANCY = 1
     # D256 exceeds half of a CU's VGPRs and LDS, so it runs one workgroup per CU.
     _QR_TDM_SCHED_FP8_D256_OCCUPANCY = 1
@@ -2130,7 +2130,7 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
             )
         ):
             return cls._QR_TDM_SCHED_FP8_D192_MERGED_OCCUPANCY
-        if bias == "bias":
+        if bias == "bias" and hdim != 192:
             return cls._QR_TDM_SCHED_FP8_BIAS_OCCUPANCY
         return cls._QR_TDM_SCHED_FP8_OCCUPANCY
 

@@ -3769,14 +3769,26 @@ struct FmhaFwdKernel
             if constexpr(detail::stores_output_via_tdm_v<FmhaPipeline>)
             {
                 // o_ptr already holds the group's physical query start; rows stop at seqlen_q.
-                alignas(16) __shared__ char smem_o[FmhaPipeline::kOLdsBytes];
-                FmhaPipeline::StoreOutput(o_acc_tile,
-                                          o_ptr + static_cast<long_index_t>(i_m0) * row_stride_o +
-                                              i_n1,
-                                          num_rows_q - i_m0,
-                                          kargs.hdim_v - i_n1,
-                                          row_stride_o,
-                                          smem_o);
+                // A pipeline that owns the staging LDS also uses it inside its main loop.
+                if constexpr(FmhaPipeline::kOwnsOutputLds)
+                    FmhaPipeline::StoreOutput(
+                        o_acc_tile,
+                        o_ptr + static_cast<long_index_t>(i_m0) * row_stride_o + i_n1,
+                        num_rows_q - i_m0,
+                        kargs.hdim_v - i_n1,
+                        row_stride_o,
+                        FmhaPipeline::OutputLds());
+                else
+                {
+                    alignas(16) __shared__ char smem_o[FmhaPipeline::kOLdsBytes];
+                    FmhaPipeline::StoreOutput(
+                        o_acc_tile,
+                        o_ptr + static_cast<long_index_t>(i_m0) * row_stride_o + i_n1,
+                        num_rows_q - i_m0,
+                        kargs.hdim_v - i_n1,
+                        row_stride_o,
+                        smem_o);
+                }
             }
             else
             {
