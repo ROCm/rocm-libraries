@@ -419,7 +419,7 @@ def main():
                 check_identity=check_identity,
                 host_cache=host_cache,
                 search_host_data=search_host_data,
-                arch=d.get("arch"),
+                arch=item.get("arch", d.get("arch")),
             )
 
 

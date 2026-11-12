@@ -148,8 +148,9 @@ measures and reports exactly as described above.
   unknown names are errors. Known pipelines can be absent for a particular
   arch, dtype, layout or problem; no surviving configs is an error. Explicit
   `--pairs` names outside the filtered space are rejected, while `"*"` means
-  all eligible kernels within that space. Omitting the flag keeps every
-  pipeline from the selected configs.
+  all eligible kernels within that space. Explicit selections are recorded
+  under `"pipelines"` in `--list-pairs` and in a search's `run.json`; omitting
+  the flag keeps every pipeline from the selected configs.
 - `--list-pairs PATH` — dry run: expand and pair as a real run would, write every
   `(problem, kernel)` pair it would measure together with each kernel's
   configuration, and exit without building. Use it to see the size of a sweep

@@ -243,10 +243,14 @@ def _get_cover(data, where):
     """``warm_start.cover``: a candidate field name, or a list of distinct
     ones (kept as a tuple)."""
     v = data.get("cover")
+
+    def is_name(f):
+        return bool(f) and f == f.strip()
+
     if not isinstance(v, list):
-        return _get(data, where, "cover", str, None, bool,
+        return _get(data, where, "cover", str, None, is_name,
                     "a candidate field name or a list of them")
-    if v and all(isinstance(f, str) and f for f in v) and len(set(v)) == len(v):
+    if v and all(isinstance(f, str) and is_name(f) for f in v) and len(set(v)) == len(v):
         return tuple(v)
     raise SettingsError(f"{where}.cover={v!r}: expected a candidate field name or "
                         "a list of distinct ones")
@@ -964,7 +968,7 @@ class SearchCoordinator:
         if names == "*":
             names = [c.kernel_name for c in p.cands]
         by_name = {c.kernel_name: c for c in p.cands}
-        picks = [by_name[n] for n in names if n in by_name]
+        picks = [by_name[n] for n in dict.fromkeys(names) if n in by_name]
         if picks:
             picks = picks[: warm.top_k]
         if warm is not None and warm.cover is not None:
@@ -1007,15 +1011,23 @@ class SearchCoordinator:
         by_field: Dict[str, Dict[str, str]] = {}
         for name in _cover_fields(cover):
             groups: Dict[Any, List[Candidate]] = {}
+            values: Dict[Any, Any] = {}
             for c in p.cands:
                 if name in c.record:
-                    groups.setdefault(c.record[name], []).append(c)
+                    v = c.record[name]
+                    k = (type(v), v)
+                    values.setdefault(k, v)
+                    groups.setdefault(k, []).append(c)
             drawn = {
-                v: random.Random(repr(("cover", p.seed, name, v))).choice(cands)
-                for v, cands in groups.items()
+                k: random.Random(repr(("cover", p.seed, name, values[k]))).choice(cands)
+                for k, cands in groups.items()
             }
-            have = {c.record.get(name) for c in [*picks, *out]}
-            new = [c for v, c in drawn.items() if v not in have]
+            have = {
+                (type(c.record[name]), c.record[name])
+                for c in [*picks, *out]
+                if name in c.record
+            }
+            new = [c for k, c in drawn.items() if k not in have]
             by_field[name] = {str(c.record[name]): c.kernel_name for c in new}
             out += new
         p.cover = by_field[cover] if isinstance(cover, str) else by_field

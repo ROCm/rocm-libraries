@@ -1044,7 +1044,7 @@ def main():
     )
     args = parser.parse_args()
     pipeline_metadata = (
-        {"pipelines": args.pipelines} if args.pipelines is not None else {}
+        {"pipelines": list(args.pipelines)} if args.pipelines is not None else {}
     )
     if args.verify_tol is None:
         args.verify_tol = VERIFY_TOL.get(args.dtype, DEFAULT_VERIFY_TOL)
@@ -1193,6 +1193,7 @@ def main():
         )
     vfb.report_rejects()
 
+    expanded_pipelines = list(dict.fromkeys(cfg.pipeline for cfg in all_configs))
     if args.pipelines is not None:
         all_configs = [cfg for cfg in all_configs if cfg.pipeline in args.pipelines]
         print(f"  Pipeline filter (--pipelines): {', '.join(args.pipelines)}")
@@ -1204,6 +1205,14 @@ def main():
 
     print(f"  Expanded configs: {len(all_configs)}")
     if not all_configs:
+        if args.pipelines is not None and expanded_pipelines:
+            print(
+                f"  ERROR: 0 configs left after --pipelines {', '.join(args.pipelines)} "
+                f"for dtype {args.dtype} on {arch} (layout {sweep_layout}); "
+                f"{', '.join(config_paths)} expanded only: "
+                f"{', '.join(expanded_pipelines)}"
+            )
+            return 1
         print(
             f"  ERROR: 0 configs expanded for dtype {args.dtype} on {arch} "
             f"(layout {sweep_layout}); no config in {', '.join(config_paths)} "
