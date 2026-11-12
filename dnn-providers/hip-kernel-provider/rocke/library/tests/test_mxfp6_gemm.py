@@ -25,6 +25,7 @@ from kernels.gfx950.mxfp6_gemm.gemm import (
     kernel_name,
     lds_bytes,
     plan,
+    scale_layout_of,
     tile_of_wg,
     validate_spec,
 )
@@ -503,7 +504,9 @@ def test_descriptor_names_the_packers_the_bench_uses(over):
     assert validate_spec(spec)[0]
     c = descriptor(spec)["contract"]
     src = inspect.getsource(bench)
-    assert "L.pack_scales_for(a.scales, spec.atom, spec.scale_layout)" in src
+    assert "L.pack_scales_for(a.scales, spec.atom, sla)" in src and "L.pack_scales_for(b.scales, spec.atom, slb)" in src
+    assert 'sla, slb = scale_layout_of(spec, "A"), scale_layout_of(spec, "B")' in src
+    assert scale_layout_of(spec, "A") == scale_layout_of(spec, "B") == spec.scale_layout  # a_scale_src tile
     assert 'L.pack_operand(a, la, spec.tile_m)' in src and 'la, lb = operand_layout_of(spec, "A"), operand_layout_of(spec, "B")' in src
     want = {"tile": "layout.pack_scales_tile(", "kstep": "layout.pack_scales("}[spec.scale_layout]
     assert want in c["scales"] and f"'{spec.scale_layout}'" in c["scales"]
@@ -873,11 +876,25 @@ _BDIR_REGRESSIONS = [
 ]
 
 
+def _as_ring(**over):
+    """best_mixed with raw A scales through the LDS ring (``a_scale_src="ring"``) + overrides, as a spec dict."""
+    from kernels.gfx950.mxfp6_gemm.gemm import PRESETS
+
+    return {**PRESETS["best_mixed"], "a_scale_src": "ring", **over}
+
+
+#: a_scale_src="ring" variants (every as_lead, early / late DTL slots, the hazard probes, the 8-tile stage-ring body)
+_AS_RING = [_as_ring(), _as_ring(as_lead=5, as_slot=2), _as_ring(as_lead=2, as_slot=48), _as_ring(as_lead=3, as_slot=16),
+            _as_ring(probe="as_hazard"), _as_ring(probe="as_stale"),
+            {"frag_mode": "prefetch", "acq_slot": 2, "read_every": 3, "unroll": 8, "a_scale_src": "ring"}]
+
+
 @pytest.mark.parametrize("over", _BDIR_REGRESSIONS + [{}, {"scale_src": "vgpr", "scale_slot": 2},
                                                       {"frag_mode": "prefetch", "acq_slot": 8, "read_every": 3},
                                                       {"scale_dtl": "x4w"},
                                                       {"scale_dtl": "x4w", "frag_mode": "prefetch", "acq_slot": 4,
-                                                       "read_every": 3, "unroll": 3, "rsrc_once": True}] + _LINE2)
+                                                       "read_every": 3, "unroll": 3, "rsrc_once": True}] + _LINE2
+                         + _AS_RING)
 def test_vm_issue_order_matches_the_vmcnt_model(over):
     """Regression (search: b_direct faults / races): every tile's emitted VM issue kinds, in order, equal the
     static model's (``_vm_events``) for that tile; the prologue too."""
@@ -1259,3 +1276,215 @@ def test_host_quantizer_rules():
     assert (np.abs(v - xf)[ok] <= (sc * 0.0625 * 2.0 + 1e-300)[ok] * 4).all()  # within the format's step
     amax = np.abs(xf[3:, :]).reshape(13, 8, 32).max(-1)
     assert np.array_equal(q.scales[3:].astype(np.int32) - 127, np.floor(np.log2(amax)).astype(np.int32) - 2)
+
+
+# ----------------------------------------------------------------- raw A scales through an LDS ring (a_scale_src)
+
+
+@pytest.mark.parametrize("over", _AS_RING[:4] + [_AS_RING[-1]])
+@pytest.mark.parametrize("k", [65536, 4096])
+def test_as_ring_schedule_is_hazard_free(over, k):
+    """a_scale_src="ring" (the builder's own VM event model): period P's DTLs go into slot P % 2; tile u's scales are
+    read in tile u - 1 right after its acquire. Every read finds its period's DTLs issued before the acquire that
+    precedes it (and counted by it), and no DTL into a slot is issued before the acquire that follows the slot's
+    last read (acquire = lgkmcnt(0) + barrier at the acquire slot; a DTL at the acquire slot runs after it)."""
+    from kernels.gfx950.mxfp6_gemm.gemm import _Builder
+
+    shape = {} if k == 65536 else {"m": 512, "n": 512, "k": 4096, "xcd_block": "none"}
+    spec = replace(Mxfp6GemmSpec(), **{**over, **shape})
+    assert validate_spec(spec)[0], validate_spec(spec)
+    bd = _Builder(spec)
+    ev = bd._vm_events()
+    T, acq = bd.n_tiles, spec.acq_slot
+    dtl = [(i, (t, s, tg)) for i, (t, s, kd, tg) in enumerate(ev) if kd == "asdtl"]
+    assert len(dtl) == bd.n_per * bd.n_as and sorted({tg for _, (_, _, tg) in dtl}) == list(range(0, T, 4))
+    counts = bd._acquire_counts()
+    n_pre = sum(1 for e in ev if e[0] == -1 and e[1] < 0)  # issued before the prologue's acquire of tile 0
+    for u in range(T):
+        P = u // 4
+        rd_tile = u - 1  # the read of tile u's scales (prologue for u = 0)
+        mine = [(i, x) for i, x in dtl if x[2] == 4 * P]
+        # issued before the acquire of tile u (at tile u - 1's acquire slot) ...
+        for _, (t, s, _) in mine:
+            assert (t == -1 and s < 0) or t < rd_tile or (t == rd_tile and s < acq), (u, t, s)
+        # ... and covered by its vmcnt: the events issued before that acquire minus those still allowed in flight
+        if rd_tile < 0:
+            pos = n_pre
+        else:  # index of the first event at / after the acquire slot of tile rd_tile (the builder's own position)
+            pos = next((i for i, e in enumerate(ev) if (e[0] == rd_tile and e[1] >= acq) or e[0] > rd_tile), len(ev))
+        assert all(i <= pos - 1 - counts[u] for i, _ in mine), (u, counts[u], [i for i, _ in mine], pos)
+    # no overwrite before the slot's last read is fenced: the DTL of period P (slot P % 2) vs the reads of period P - 2
+    for _, (t, s, tg) in dtl:
+        P = tg // 4
+        if P < 2:
+            continue
+        last_read_tile = 4 * (P - 2) + 3 - 1  # tile reading the last tile of period P - 2
+        fence_tile = last_read_tile + 1  # its next acquire (lgkmcnt(0) + barrier)
+        assert t > fence_tile or (t == fence_tile and s >= acq), (P, t, s, fence_tile)
+
+
+def test_as_ring_reads_assemble_the_tile_scale_dwords():
+    """Host emulation of the ring's lane math: wave w's DTL j, lane l writes row 64 (w + nw j) + l's 16 bytes of
+    period P at slot (P % 2) * rows * 16 + row * 16; ``_as_read`` assembles, for lane l and dword d of tile u, bytes
+    i = raw[(wave row 0 + 64 d + 16 i + l % 16), 4 u + l / 16] -- exactly ``pack_scales_tile``'s dword."""
+    rows, nkb = 256, 64  # 16 K tiles
+    rng = np.random.default_rng(5)
+    raw = rng.integers(0, 256, size=(rows, nkb), dtype=np.uint8)
+    tiled = L.pack_scales_tile(raw, "16x16x128").view(np.uint8).reshape(nkb // 4, rows // 128, 64, 2, 4)
+    nw = 4
+    for u in range(nkb // 4):
+        P = u // 4
+        ring = np.zeros((2, rows, 16), np.uint8)
+        for w in range(nw):
+            for j in range(rows * 16 // 1024 // nw):
+                for lane in range(64):
+                    r = 64 * (w + nw * j) + lane
+                    ring[P % 2, r] = raw[r, 4 * AS_P * P: 4 * AS_P * P + 16]  # blocks 16 P .. 16 P + 15
+        words = ring.reshape(2, rows * 4, 4)
+        for wm in range(2):
+            for lane in range(64):
+                kg = lane // 16
+                for d in range(2):
+                    got = [words[P % 2, (wm * 128 + lane % 16 + 64 * d + 16 * i) * 4 + u % 4][kg] for i in range(4)]
+                    assert got == list(tiled[u, wm, lane, d]), (u, wm, lane, d)
+
+
+AS_P = 4  # K tiles per ring period (gemm.AS_PERIOD)
+
+
+def test_as_ring_rules_lds_and_contract():
+    from kernels.gfx950.mxfp6_gemm.gemm import AS_PERIOD, PRESETS, as_ring_bytes, preset
+
+    assert AS_PERIOD == AS_P
+    base = preset("best_mixed")
+    ring = preset("best_mixed", a_scale_src="ring")
+    assert validate_spec(ring)[0]
+    # the A part of the stage scale images (3 x 1 KiB) leaves, the 2-slot ring (8 KiB) comes in
+    assert lds_bytes(ring) == lds_bytes(base) - 3 * 1024 + 8192 and as_ring_bytes(ring) == 8192
+    assert lds_bytes(ring) <= 160 * 1024
+    assert scale_layout_of(ring, "A") == "raw" and scale_layout_of(ring, "B") == "tile"
+    c = descriptor(ring)["contract"]["scales"]
+    assert c.startswith("A: e8m0 per 32 K, uint8 [M, K/32] row-major as produced") and "pack_scales_tile" in c
+    assert kernel_name(ring) != kernel_name(base)
+    # one dwordx4 DTL per wave and period; the stage refill loses A's dword scale DTL
+    assert len(plan(ring).dtl_slots) == len(plan(base).dtl_slots) - 1
+    for bad in ({"scale_src": "vgpr", "scale_slot": 2}, {"atom": "32x32x64"}, {"k_rot": 1}, {"as_lead": 6},
+                {"as_lead": 5, "as_slot": 0}, {"unroll": 4}, {"scale_layout": "raw"}, {"carry": 2},
+                {"frag_mode": "jit", "acq_slot": -1}):
+        assert not validate_spec(replace(ring, **bad))[0], bad
+    assert not validate_spec(replace(base, probe="as_hazard"))[0]
+    assert validate_spec(replace(ring, as_lead=5, as_slot=1))[0]
+    assert PRESETS["best_mixed"].get("a_scale_src", "tile") == "tile"  # off by default
+
+
+def test_as_ring_kernel_reads_the_ring_with_dwords_and_perms():
+    """The ring variant lowers; A's scale reads are dword LDS loads + v_perm (no A stage scale image allocations)."""
+    spec = replace(Mxfp6GemmSpec(), **_as_ring(m=512, n=512, k=4096, xcd_block="none"))
+    k, ll = _lower(spec)
+    assert "ringAS" in ll and "sstA0" not in ll and "sstB0" in ll
+    assert ll.count("llvm.amdgcn.perm") >= 6
+
+
+# ----------------------------------------------------------------- tile scales through period rings (pring)
+
+_PRING = [_as_ring(a_scale_src="pring"), _as_ring(a_scale_src="pring", as_lead=5, as_slot=2),
+          _as_ring(a_scale_src="tile", b_scale_src="pring"), _as_ring(a_scale_src="tile", b_scale_src="pring",
+                                                                      bs_lead=2, bs_slot=30),
+          _as_ring(a_scale_src="pring", as_period=3, b_scale_src="pring", bs_period=3,
+                   bs_lead=3, bs_slot=16)]  # period 3 (dwordx3: model only, the direct compiler has no b96 LDS DMA)
+
+
+@pytest.mark.parametrize("over", _PRING)
+@pytest.mark.parametrize("k", [65536, 4096])
+def test_scale_rings_schedule_is_hazard_free(over, k):
+    """Every scale ring (raw A, packed A / B): period P's DTLs into slot P % 2 are issued and counted before the
+    acquire that precedes the first read of the period's tiles; no DTL into a slot precedes the acquire that follows
+    the last read of the slot's previous period. Emission order equals the static VM model."""
+    from kernels.gfx950.mxfp6_gemm.gemm import _Builder, scale_rings
+
+    shape = {} if k == 65536 else {"m": 512, "n": 512, "k": 4096, "xcd_block": "none"}
+    spec = replace(Mxfp6GemmSpec(), **{**over, **shape})
+    assert validate_spec(spec)[0], validate_spec(spec)
+    bd = _Builder(spec)
+    bd.build()
+    ev = bd._vm_events()
+    T, acq = bd.n_tiles, spec.acq_slot
+    counts = bd._acquire_counts()
+    n_pre = sum(1 for e in ev if e[0] == -1 and e[1] < 0)
+    for X, (kind, P, lead, slot) in scale_rings(spec).items():
+        kd = "asdtl" if X == "A" else "bsdtl"
+        dtl = [(i, (t, s, tg)) for i, (t, s, k_, tg) in enumerate(ev) if k_ == kd]
+        NP = -(-T // P)
+        assert len(dtl) == NP * bd.sr_n[X] and sorted({tg for _, (_, _, tg) in dtl}) == list(range(0, NP * P, P))
+        for u in range(T):
+            rd = u - 1
+            mine = [(i, x) for i, x in dtl if x[2] == P * (u // P)]
+            for _, (t, s, _) in mine:
+                assert (t == -1 and s < 0) or t < rd or (t == rd and s < acq), (X, u, t, s)
+            pos = n_pre if rd < 0 else next((i for i, e in enumerate(ev) if (e[0] == rd and e[1] >= acq) or e[0] > rd),
+                                            len(ev))
+            assert all(i <= pos - 1 - counts[u] for i, _ in mine), (X, u)
+        for _, (t, s, tg) in dtl:
+            p_ = tg // P
+            if p_ < 2:
+                continue
+            fence = P * (p_ - 2) + P - 1  # tile whose acquire follows the read of period p - 2's last tile
+            assert t > fence or (t == fence and s >= acq), (X, p_, t, s, fence)
+    model, got = {}, {}
+    for tile, _s, kind_, _t in ev:
+        model.setdefault(tile, []).append(kind_)
+    for tag, kind_ in bd.vm_trace:
+        got.setdefault(tag, []).append(kind_)
+    assert got.get(None, []) == model.get(-1, [])
+    for tag, kinds in got.items():
+        if isinstance(tag, int):
+            assert kinds == model.get(tag, []), (tag, kinds, model.get(tag))
+
+
+@pytest.mark.parametrize("P", [3, 4])
+def test_pring_layout_and_ring_reads_return_the_tile_images(P):
+    """layout.pack_scales_period + the pring DTL lane map (wave w, lane l: P dwords at byte w P 256 + 4 P l of the
+    period block) + the ring read (slot, t: word (slot P + t) 256 + 128 wq + 2 l) return pack_scales_tile's dwords of
+    tile u for the CTA's row block, for every tile incl. a partial last period."""
+    rows, nkb = 512, 4 * 10  # 2 row blocks, 10 K tiles (P = 3: a padded last period)
+    raw = np.random.default_rng(9).integers(0, 256, size=(rows, nkb), dtype=np.uint8)
+    tile = L.pack_scales_tile(raw, "16x16x128").reshape(nkb // 4, rows // 128, 64, 2)
+    per = L.pack_scales_for(raw, "16x16x128", f"period{P}x256").view(np.uint8)
+    NP = -(-(nkb // 4) // P)
+    assert per.size == (rows // 256) * NP * P * 1024
+    for q in range(rows // 256):
+        ring = np.zeros((2, P * 1024), np.uint8)
+        for u in range(nkb // 4):
+            p_ = u // P
+            if u % P == 0:  # the period's DTLs (4 waves x 64 lanes x 4 P bytes)
+                for w in range(4):
+                    for lane in range(64):
+                        src = ((q * NP + p_) * P) * 1024 + w * P * 256 + 4 * P * lane
+                        ring[p_ % 2, w * P * 256 + 4 * P * lane: w * P * 256 + 4 * P * lane + 4 * P] = per[src:src + 4 * P]
+            words = ring.reshape(-1).view(np.uint32)
+            for wq in range(2):
+                for lane in range(64):
+                    i0 = ((p_ % 2) * P + u % P) * 256 + 128 * wq + 2 * lane
+                    assert list(words[i0:i0 + 2]) == list(tile[u, 2 * q + wq, lane]), (P, q, u, wq, lane)
+
+
+def test_pring_rules_and_lds():
+    from kernels.gfx950.mxfp6_gemm.gemm import preset, scale_ring_bytes
+
+    base = preset("best_mixed")
+    for over, extra in (({"a_scale_src": "pring"}, 8192 - 3072), ({"b_scale_src": "pring"}, 8192 - 3072)):
+        s = replace(base, **over)
+        assert validate_spec(s)[0] and lds_bytes(s) == lds_bytes(base) + extra
+    both = replace(base, a_scale_src="pring", b_scale_src="pring")
+    assert not validate_spec(both)[0] and "LDS" in validate_spec(both)[1]  # 2 x 8 KiB rings do not fit next to line2m
+    p3 = replace(base, a_scale_src="pring", as_period=3)
+    assert validate_spec(p3)[0] and scale_ring_bytes(p3, "A") == 6144
+    assert scale_layout_of(replace(base, b_scale_src="pring"), "B") == "period4x256"
+    assert scale_layout_of(p3, "A") == "period3x256" and scale_layout_of(p3, "B") == "tile"
+    for bad in ({"a_scale_src": "pring", "as_period": 5}, {"b_scale_src": "pring", "bs_lead": 6},
+                {"b_scale_src": "pring", "bs_lead": 5, "bs_slot": 0}, {"a_scale_src": "pring", "as_perm": 8},
+                {"probe": "bs_hazard"}, {"a_scale_src": "pring", "probe": "as_lite"},
+                {"a_scale_src": "pring", "unroll": 1}):
+        assert not validate_spec(replace(base, **bad))[0], bad
+    d = descriptor(replace(base, b_scale_src="pring"))["contract"]["scales"]
+    assert "'period4x256'" in d and "b_scale_src=pring" in d

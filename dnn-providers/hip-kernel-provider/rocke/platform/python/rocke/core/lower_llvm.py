@@ -6273,6 +6273,7 @@ class _Lowerer:
         rsrc, voffset, soffset = op.operands
         result_type = op.result.type
         form = _BUFFER_ACCESS_FORMS[nbytes]
+        aux = int(op.attrs.get("aux", 0))  # cache-policy bits (``coherency``)
         self._need(f"raw.ptr.buffer.load.{form.suffix}")
         tmp = self._fresh(form.load_hint)
         self._current().emit(
@@ -6281,7 +6282,7 @@ class _Lowerer:
             f"ptr addrspace(8) {self._operand(rsrc)}, "
             f"i32 {self._operand(voffset)}, "
             f"i32 {self._operand(soffset)}, "
-            f"i32 0)"
+            f"i32 {aux})"
         )
         self._current().emit(
             f"  {op.result.name} = bitcast {form.llvm_type} {tmp} to "

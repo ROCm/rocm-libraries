@@ -54,6 +54,7 @@ from kernels.gfx950.mxfp6_gemm.gemm import (
     grid_of,
     kernel_name,
     operand_layout_of,
+    scale_layout_of,
     validate_spec,
 )
 
@@ -217,7 +218,8 @@ def _compile_rust(kernel, out: Path) -> dict:
     tool = os.environ.get("ROCKE_RUST_COMPILE")
     if not tool or not os.path.exists(tool):
         raise RuntimeError("compiler 'rust' needs ROCKE_RUST_COMPILE = path of the direct compiler's target_compile")
-    text = serialize(kernel)
+    with _no_gc():
+        text = serialize(kernel)
     levers = os.environ.get("ROCKE_RUST_LEVERS", RUST_LEVERS)
     checked = check_rust_levers(tool, levers)
     with tempfile.TemporaryDirectory() as td:
@@ -433,6 +435,15 @@ def compile_arms(arms: dict, work: Path, jobs: int, compiler: str = "auto") -> d
                                   "compiler": "aiter-asm"} if co and os.path.exists(co)
                                  else {"ok": False, "error": "AITER_CO not set / missing"})
                 continue
+            if over.get("_co"):  # an external code object (another implementation's build, same-job comparison)
+                co = over["_co"]
+                if isinstance(co, str):  # a JSON file written by the external build step
+                    co = json.loads(Path(co).read_text()) if os.path.exists(co) else {}
+                ok = bool(co.get("hsaco")) and os.path.exists(co["hsaco"])
+                results[name] = ({"ok": True, "hsaco": co["hsaco"], "name": co["name"], "ext": co,
+                                  "compiler": co.get("compiler", "external")} if ok
+                                 else {"ok": False, "error": f"external code object missing: {co}"})
+                continue
             which = over.get("_compiler", compiler)
             arm_env = dict(env)
             if over.get("_levers"):  # direct-compiler lever set of this arm (default RUST_LEVERS)
@@ -646,8 +657,24 @@ def cmd_run(args) -> int:
                            _put(aiter_pack_scale(b)))
         return op_dev[key]
 
+    def upload_ext(d: str, x: dict) -> tuple:
+        """An external code object's inputs of dist ``d``: the arrays its own packer wrote from this run's
+        canonical operands (``<inputs>/<dist>_<fmt>_{a,b,sa,sb}.npy``)."""
+        co, fmt = x["ext"], x["spec"].elem_fmt
+        key = ("ext", co["inputs"], d, fmt)
+        if key not in op_dev:
+            op_dev[key] = tuple(_put(np.ascontiguousarray(np.load(Path(co["inputs"]) / f"{d}_{fmt}_{t}.npy")))
+                                for t in ("a", "b", "sa", "sb"))
+        return op_dev[key]
+
     def kargs_of(nm: str, d: str) -> bytes:
         x = loaded[nm]
+        if x.get("ext"):  # kernarg layout "ptr5_i3": a, b, sa, sb, c, then M, N, K as int32
+            if x["ext"].get("kargs", "ptr5_i3") != "ptr5_i3":
+                raise SystemExit(f"arm {nm}: unknown external kernarg layout {x['ext'].get('kargs')}")
+            pa, pb, sa, sb = upload_ext(d, x)
+            s = x["spec"]
+            return struct.pack("<QQQQQiii", pa, pb, sa, sb, dev["c"], s.m, s.n, s.k)
         if x.get("aiter"):
             pa, pb, sa, sb = upload_aiter(d, x["spec"])
             return aiter_kargs(pa, pb, sa, sb, dev["c"], x["spec"].m, x["spec"].n, x["spec"].k)
@@ -666,10 +693,11 @@ def cmd_run(args) -> int:
         ko = (d, spec.elem_fmt, la, lb, spec.tile_m, spec.tile_n)
         if ko not in op_dev:
             op_dev[ko] = (_put(L.pack_operand(a, la, spec.tile_m)), _put(L.pack_operand(b, lb, spec.tile_n)))
-        ks = (d, spec.elem_fmt, spec.atom, spec.scale_layout, tuple(bias))
+        sla, slb = scale_layout_of(spec, "A"), scale_layout_of(spec, "B")  # A raw under a_scale_src="ring"
+        ks = (d, spec.elem_fmt, spec.atom, sla, slb, tuple(bias))
         if ks not in scale_dev:
-            scale_dev[ks] = (_put(L.pack_scales_for(a.scales, spec.atom, spec.scale_layout)),
-                             _put(L.pack_scales_for(b.scales, spec.atom, spec.scale_layout)))
+            scale_dev[ks] = (_put(L.pack_scales_for(a.scales, spec.atom, sla)),
+                             _put(L.pack_scales_for(b.scales, spec.atom, slb)))
         return op_dev[ko] + scale_dev[ks]
 
     loaded = {}
@@ -683,6 +711,11 @@ def cmd_run(args) -> int:
             spec = _spec_from({k_: v for k_, v in (arms.get(nm) or {}).items() if not k_.startswith("_")})
             loaded[nm] = {"mod": mod, "fn": mod.get_function(meta["name"]), "grid": (spec.n // 256, spec.m // 256, 1),
                           "block": (256, 1, 1), "spec": spec, "bias": (0, 0), "aiter": True}
+            continue
+        if meta.get("ext"):
+            co = meta["ext"]
+            loaded[nm] = {"mod": mod, "fn": mod.get_function(meta["name"]), "grid": tuple(co["grid"]),
+                          "block": tuple(co["block"]), "spec": spec, "bias": (0, 0), "ext": co}
             continue
         bias = tuple(int(x) for x in str((arms.get(nm) or mutants.get(nm)).get("_bias", "0,0")).split(","))
         if sum(bias) != -spec.out_exp2:
@@ -718,6 +751,9 @@ def cmd_run(args) -> int:
         if not mode:
             return [(x["fn"], x["grid"], x["block"], kargs_of(nm, d))]
         spec = x["spec"]
+        if any(scale_layout_of(spec, X) not in ("tile", "kstep") for X in ("A", "B")):
+            raise SystemExit(f"arm {nm}: the GPU repack (_pack) writes the tile layout; this spec reads "
+                             f"{scale_layout_of(spec, 'A')} / {scale_layout_of(spec, 'B')} scales")
         a, b, _ = data[(d, spec.elem_fmt)]
         pa, pb, sa, sb = upload(d, spec, x["bias"])
         key = ("raw", d, spec.elem_fmt)
@@ -953,5 +989,12 @@ def main(argv=None) -> int:
     return {"gen": cmd_gen, "compare": cmd_compare, "compile": cmd_compile, "run": cmd_run}[args.cmd](args)
 
 
-if __name__ == "__main__":
+def _no_gc():
+    """The cyclic GC paused while an IR is built / serialized (2x faster; kernels.gfx950.mxfp6_gemm.gemm.no_gc)."""
+    from kernels.gfx950.mxfp6_gemm.gemm import no_gc
+
+    return no_gc()
+
+
+if __name__ == "__main__":  # (last: `python -m` runs main() here, so every helper above must already be defined)
     raise SystemExit(main())

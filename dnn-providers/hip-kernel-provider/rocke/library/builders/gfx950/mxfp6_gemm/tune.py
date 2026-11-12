@@ -944,11 +944,14 @@ class GpuWorker:
             else:
                 self.op_dev[ko] = (self._put(a.codes), self._put(b.codes))
         sl = getattr(spec, "scale_layout", "kstep")
-        ks = (d, spec.atom, sl)
+        sla = slb = sl
+        if hasattr(self.mod, "scale_layout_of"):  # a_scale_src="ring": A's scales raw (no repack)
+            sla, slb = self.mod.scale_layout_of(spec, "A"), self.mod.scale_layout_of(spec, "B")
+        ks = (d, spec.atom, sla, slb)
         if ks not in self.sc_dev:
             if hasattr(L, "pack_scales_for"):
-                self.sc_dev[ks] = (self._put(L.pack_scales_for(a.scales, spec.atom, sl)),
-                                   self._put(L.pack_scales_for(b.scales, spec.atom, sl)))
+                self.sc_dev[ks] = (self._put(L.pack_scales_for(a.scales, spec.atom, sla)),
+                                   self._put(L.pack_scales_for(b.scales, spec.atom, slb)))
             else:
                 self.sc_dev[ks] = (self._put(L.pack_scales(a.scales, spec.atom)), self._put(L.pack_scales(b.scales, spec.atom)))
         return self.op_dev[ko] + self.sc_dev[ks]

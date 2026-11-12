@@ -1315,10 +1315,11 @@ class _Lowerer:
         rsrc, voffset, soffset = op.operands
         result_type = op.result.type
         suffix, raw_t = _HIP_BUFFER_ACCESS[nbytes]
+        aux = int(op.attrs.get("aux", 0))  # cache-policy bits (``coherency``)
         tmp = f"_blraw_{_name(op.result).lstrip('%')}"
         self._emit(
             f"{raw_t} {tmp} = __builtin_amdgcn_raw_buffer_load{suffix}("
-            f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
+            f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, {aux});"
         )
         self._emit(
             f"{_type_to_hip(result_type)} {_name(op.result)}; "

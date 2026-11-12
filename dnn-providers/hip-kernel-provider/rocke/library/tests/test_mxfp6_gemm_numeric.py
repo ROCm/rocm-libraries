@@ -82,6 +82,10 @@ CONFIGS = {
     "mixed-a-canonical-best": {"a_layout": "canonical", "frag_mode": "prefetch", "acq_slot": 2, "read_every": 3,
                                "read_delay": 4, "dtl_delay": 1, "unroll": 4, "tile_lgkm0": True, "dtl_imm": True,
                                "rsrc_once": True, "swap_ab": False},
+    # raw A scales through the LDS ring (no repack), on the stage-ring c0c1 body (LLVM build)
+    "as-ring-stage": {"frag_mode": "prefetch", "acq_slot": 2, "read_every": 3, "unroll": 8, "a_scale_src": "ring"},
+    "as-ring-stage-lead5-perm40": {"frag_mode": "prefetch", "acq_slot": 2, "read_every": 3, "unroll": 8,
+                                   "a_scale_src": "ring", "as_lead": 5, "as_slot": 4, "as_perm": 40},
     "mma-pairs": {"mma_order": "pairs"},
     "swap-ab-false": {"swap_ab": False},
     "store-nt": {"store_nt": True},
@@ -180,12 +184,12 @@ def _run(rt, spec, a, b, launches=3, levers=None):
         rt.memcpy_h2d(p, (ctypes.c_ubyte * x.nbytes).from_buffer(x), x.nbytes)
         return p
 
-    from kernels.gfx950.mxfp6_gemm.gemm import operand_layout_of
+    from kernels.gfx950.mxfp6_gemm.gemm import operand_layout_of, scale_layout_of
 
     ptrs = [put(L.pack_operand(a, operand_layout_of(spec, "A"), spec.tile_m)),
             put(L.pack_operand(b, operand_layout_of(spec, "B"), spec.tile_n)),
-            put(L.pack_scales_for(a.scales, spec.atom, spec.scale_layout)),
-            put(L.pack_scales_for(b.scales, spec.atom, spec.scale_layout))]
+            put(L.pack_scales_for(a.scales, spec.atom, scale_layout_of(spec, "A"))),
+            put(L.pack_scales_for(b.scales, spec.atom, scale_layout_of(spec, "B")))]
     c = rt.alloc(spec.m * spec.n * 2)
     out = np.empty((spec.m, spec.n), dtype=np.uint16)
     grid, block = grid_of(spec)
@@ -257,6 +261,96 @@ def test_preset_mutants_fail(runtime, data, name, over):
     r = L.check_against_reference(_run(runtime, spec, a, b, launches=1, levers=PRESET_LEVERS.get(name))[0],
                                   ref, abs_sum)
     assert not r["pass"], f"{name} + {over} passed"
+
+
+#: best_mixed with raw A scales through the LDS ring (a_scale_src="ring"): the variants the GPU gate covers
+AS_RING = {"ring": {"a_scale_src": "ring"}, "ring-p56": {"a_scale_src": "ring", "as_perm": 56},
+           "ring-lead5": {"a_scale_src": "ring", "as_lead": 5, "as_slot": 2, "as_perm": 32},
+           "ring-lead2": {"a_scale_src": "ring", "as_lead": 2, "as_slot": 40, "as_perm": 16},
+           "ring-lead3": {"a_scale_src": "ring", "as_lead": 3, "as_slot": 16, "as_perm": 56}}
+
+
+@pytest.mark.parametrize("var", list(AS_RING))
+def test_as_ring_full_output(runtime, data, var):
+    """best_mixed + a_scale_src ring (direct compiler, best_mixed's levers): A's scales raw as produced, bitwise int,
+    Gaussian / uniform within tolerance, launches identical, both formats."""
+    from kernels.gfx950.mxfp6_gemm.gemm import PRESET_LEVERS, preset
+
+    for fmt in ("e2m3", "e3m2"):
+        spec = preset("best_mixed", **SHAPE, **AS_RING[var], elem_fmt=fmt)
+        for name, (a, b, (ref, abs_sum)) in data[fmt].items():
+            outs = _run(runtime, spec, a, b, levers=PRESET_LEVERS["best_mixed"])
+            assert all(np.array_equal(outs[0], o) for o in outs[1:]), f"{var}/{fmt}/{name}: launches differ (race)"
+            r = L.check_against_reference(outs[0], ref, abs_sum, exact=(name == "int"))
+            assert r["pass"], f"{var}/{fmt}/{name}: {r}"
+
+
+@pytest.mark.parametrize("over", [{"mutant": "scale_sel"}, {"mutant": "k_order"}, {"mutant": "drop_kstep"},
+                                  {"mutant": "wrong_fmt"}, {"probe": "l2m_nocopy"}, {"probe": "l2m_lead4"},
+                                  # the scale ring's own hazards: the next period's DTL into the slot still being read,
+                                  # the reads from the other slot
+                                  {"probe": "as_hazard"}, {"probe": "as_stale"}])
+@pytest.mark.parametrize("var", ["ring", "ring-lead5", "ring-lead2"])
+def test_as_ring_mutants_fail(runtime, data, var, over):
+    """Must-fail mutants of the ring candidate itself (incl. the line-ring and scale-ring hazards): each must fail the
+    tolerance check on Gaussian data."""
+    from kernels.gfx950.mxfp6_gemm.gemm import PRESET_LEVERS, preset, validate_spec
+
+    spec = preset("best_mixed", **SHAPE, **AS_RING[var], **over)
+    assert validate_spec(spec)[0], validate_spec(spec)
+    a, b, (ref, abs_sum) = data[spec.elem_fmt]["gauss"]
+    r = L.check_against_reference(_run(runtime, spec, a, b, launches=1, levers=PRESET_LEVERS["best_mixed"])[0],
+                                  ref, abs_sum)
+    assert not r["pass"], f"{var} + {over} passed"
+
+
+#: best_mixed with tile scales re-laid per K-tile period and fetched through 2-slot LDS rings (pring)
+PRING = {"pa4": {"a_scale_src": "pring"}, "pb4": {"b_scale_src": "pring"},
+         "pa4-l5": {"a_scale_src": "pring", "as_lead": 5, "as_slot": 2},
+         "pb4-l2": {"b_scale_src": "pring", "bs_lead": 2, "bs_slot": 30},
+         "pa4-l3-pb-off": {"a_scale_src": "pring", "as_lead": 3, "as_slot": 20}}
+
+
+@pytest.mark.parametrize("var", list(PRING))
+def test_pring_full_output(runtime, data, var):
+    """best_mixed + pring scale rings (direct compiler, best_mixed's levers): bitwise int, Gaussian / uniform within
+    tolerance, launches identical, both formats."""
+    from kernels.gfx950.mxfp6_gemm.gemm import PRESET_LEVERS, preset
+
+    for fmt in ("e2m3", "e3m2"):
+        spec = preset("best_mixed", **SHAPE, **PRING[var], elem_fmt=fmt)
+        for name, (a, b, (ref, abs_sum)) in data[fmt].items():
+            outs = _run(runtime, spec, a, b, levers=PRESET_LEVERS["best_mixed"])
+            assert all(np.array_equal(outs[0], o) for o in outs[1:]), f"{var}/{fmt}/{name}: launches differ (race)"
+            r = L.check_against_reference(outs[0], ref, abs_sum, exact=(name == "int"))
+            assert r["pass"], f"{var}/{fmt}/{name}: {r}"
+
+
+@pytest.mark.parametrize("over", [{"mutant": "scale_sel"}, {"mutant": "k_order"}, {"mutant": "drop_kstep"},
+                                  {"mutant": "wrong_fmt"}, {"probe": "l2m_nocopy"}, {"probe": "l2m_lead4"}])
+@pytest.mark.parametrize("var", ["pa4", "pb4"])
+def test_pring_mutants_fail(runtime, data, var, over):
+    """Must-fail mutants of the pring candidates themselves (incl. the line-ring hazards)."""
+    from kernels.gfx950.mxfp6_gemm.gemm import PRESET_LEVERS, preset
+
+    spec = preset("best_mixed", **SHAPE, **PRING[var], **over)
+    a, b, (ref, abs_sum) = data[spec.elem_fmt]["gauss"]
+    r = L.check_against_reference(_run(runtime, spec, a, b, launches=1, levers=PRESET_LEVERS["best_mixed"])[0],
+                                  ref, abs_sum)
+    assert not r["pass"], f"{var} + {over} passed"
+
+
+@pytest.mark.parametrize("var,probe", [("pa4", "as_hazard"), ("pa4", "as_stale"), ("pa4-l5", "as_hazard"),
+                                       ("pb4", "bs_hazard"), ("pb4", "bs_stale"), ("pb4-l2", "bs_stale")])
+def test_pring_hazards_fail(runtime, data, var, probe):
+    """The scale ring's own hazards: the next period's DTL into the slot still being read, reads of the other slot."""
+    from kernels.gfx950.mxfp6_gemm.gemm import PRESET_LEVERS, preset
+
+    spec = preset("best_mixed", **SHAPE, **PRING[var], probe=probe)
+    a, b, (ref, abs_sum) = data[spec.elem_fmt]["gauss"]
+    r = L.check_against_reference(_run(runtime, spec, a, b, launches=1, levers=PRESET_LEVERS["best_mixed"])[0],
+                                  ref, abs_sum)
+    assert not r["pass"], f"{var} + {probe} passed"
 
 
 @pytest.mark.parametrize("name", ["best_mixed", "best_canonical"])
@@ -410,6 +504,18 @@ _EDGE_SPECS = {
     "best_canonical_k3-full-grid": ("best_canonical_k3", {}, FULL_GRID_K8),
     "best_canonical_stage-full-grid": ("best_canonical_stage", {}, FULL_GRID),
     "best_mixed-full-grid-krot": ("best_mixed", {"k_rot": 1}, FULL_GRID_K8),
+    # raw A scales through the LDS ring (a_scale_src="ring"; no repack)
+    "best_mixed-ring": ("best_mixed", {"a_scale_src": "ring", "as_perm": 56}),
+    "best_mixed-ring-e3m2": ("best_mixed", {"a_scale_src": "ring", "as_perm": 56, "elem_fmt": "e3m2"}),
+    "best_mixed-ring-default": ("best_mixed", {"a_scale_src": "ring"}),
+    "best_mixed-ring-lead5": ("best_mixed", {"a_scale_src": "ring", "as_lead": 5, "as_slot": 2, "as_perm": 32}),
+    "best_mixed-ring-full-grid": ("best_mixed", {"a_scale_src": "ring", "as_perm": 56}, FULL_GRID_K8),
+    "best_mixed-pa4": ("best_mixed", {"a_scale_src": "pring"}),
+    "best_mixed-pb4-e3m2": ("best_mixed", {"b_scale_src": "pring", "elem_fmt": "e3m2"}),
+    "best_mixed-pa4-full-grid": ("best_mixed", {"a_scale_src": "pring"}, FULL_GRID_K8),
+    "best_mixed-pb4-full-grid": ("best_mixed", {"b_scale_src": "pring", "bs_lead": 5, "bs_slot": 2}, FULL_GRID_K8),
+    "best_mixed-ring-lead2-full-grid":("best_mixed", {"a_scale_src": "ring", "as_lead": 2, "as_slot": 40,
+                                                       "as_perm": 16}, FULL_GRID_K8),
     "best_mixed_stage-full-grid-krot": ("best_mixed_stage", {"k_rot": 1}, FULL_GRID),
 }
 
@@ -438,7 +544,8 @@ def test_edge_cases(runtime, name):
 
 @pytest.mark.parametrize("name", ["default", "best", "best-e3m2", "best_canonical", "best_mixed", "best_canonical-e3m2",
                                   "best_mixed-e3m2", "best_mixed_line2m", "best_mixed_line2m-e3m2",
-                                  "best_mixed_f2", "best_mixed_f2-e3m2"])
+                                  "best_mixed_f2", "best_mixed_f2-e3m2", "best_mixed-ring", "best_mixed-ring-e3m2",
+                                  "best_mixed-pa4", "best_mixed-pb4-e3m2"])
 def test_subnormal_behaviour(runtime, name, capsys):
     """Outputs in the fp32 subnormal range follow one convention (all flushed or all kept); the result is printed and
     recorded in the notes (the reference accepts either)."""
@@ -459,3 +566,91 @@ def test_subnormal_behaviour(runtime, name, capsys):
 
 
 # The GPU pack / quantize tests (pack.py) moved to test_mxfp6_pack_gpu.py (pack agent, 2026-11-07).
+
+
+#: best_mixed (the record canonical-A kernel) with the 256x256 structural items: direct B beside the line2m A ring,
+#: C staged through LDS with dwordx4 stores, both
+REC_STRUCT = {"bdir1": {"b_direct": True, "b_depth": 1}, "bdir2": {"b_direct": True, "b_depth": 2},
+              "bdir3": {"b_direct": True, "b_depth": 3}, "epi": {"epi_lds": True},
+              "bdir2-epi": {"b_direct": True, "b_depth": 2, "epi_lds": True},
+              # one barrier per tile: no line release, the lines two tiles ahead after the acquire
+              "merge": {"line_merge": True}, "merge-early": {"line_merge": True, "line_early": True},
+              "merge-epi": {"line_merge": True, "epi_lds": True}}
+
+
+@pytest.mark.parametrize("var", list(REC_STRUCT))
+def test_rec_struct_full_output(runtime, data, var):
+    """best_mixed + the structural items (best_mixed's levers): bitwise int, Gaussian / uniform within tolerance,
+    launches identical, both formats."""
+    from kernels.gfx950.mxfp6_gemm.gemm import PRESET_LEVERS, preset, validate_spec
+
+    for fmt in ("e2m3", "e3m2"):
+        spec = preset("best_mixed", **SHAPE, **REC_STRUCT[var], elem_fmt=fmt)
+        assert validate_spec(spec)[0], validate_spec(spec)
+        for name, (a, b, (ref, abs_sum)) in data[fmt].items():
+            outs = _run(runtime, spec, a, b, levers=PRESET_LEVERS["best_mixed"])
+            assert all(np.array_equal(outs[0], o) for o in outs[1:]), f"{var}/{fmt}/{name}: launches differ (race)"
+            r = L.check_against_reference(outs[0], ref, abs_sum, exact=(name == "int"))
+            assert r["pass"], f"{var}/{fmt}/{name}: {r}"
+
+
+@pytest.mark.parametrize("over", [{"mutant": "scale_sel"}, {"mutant": "k_order"}, {"mutant": "drop_kstep"}])
+@pytest.mark.parametrize("var", ["bdir2", "epi", "merge"])
+def test_rec_struct_mutants_fail(runtime, data, var, over):
+    from kernels.gfx950.mxfp6_gemm.gemm import PRESET_LEVERS, preset, validate_spec
+
+    spec = preset("best_mixed", **SHAPE, **REC_STRUCT[var], **over)
+    assert validate_spec(spec)[0], validate_spec(spec)
+    a, b, (ref, abs_sum) = data["e2m3"]["gauss"]
+    r = L.check_against_reference(_run(runtime, spec, a, b, launches=1, levers=PRESET_LEVERS["best_mixed"])[0],
+                                  ref, abs_sum)
+    assert not r["pass"], f"{var} {over}: the mutant passed"
+
+
+@pytest.mark.parametrize("var", ["merge", "merge-early"])
+def test_line_merge_hazard_mutant_fails(runtime, data, var):
+    """line_merge's must-fail hazard (lmerge_lead: the line refills one tile further ahead overwrite a line the next tile
+    still reads): fails on Gaussian data."""
+    from kernels.gfx950.mxfp6_gemm.gemm import PRESET_LEVERS, preset, validate_spec
+
+    spec = preset("best_mixed", **SHAPE, **REC_STRUCT[var], mutant="lmerge_lead")
+    assert validate_spec(spec)[0], validate_spec(spec)
+    a, b, (ref, abs_sum) = data["e2m3"]["gauss"]
+    r = L.check_against_reference(_run(runtime, spec, a, b, launches=1, levers=PRESET_LEVERS["best_mixed"])[0],
+                                  ref, abs_sum)
+    assert not r["pass"], f"{var}: lmerge_lead passed"
+
+
+#: best_v6's structure with canonical (not pre-tiled) A: the DMAs build A's c0c1 image (a_fill c0c1)
+AFILL = {"v6": ("best_v6", {"a_layout": "canonical", "a_fill": "c0c1"}),
+         "v6-nt": ("best_v6", {"a_layout": "canonical", "a_fill": "c0c1", "store_nt": True}),
+         "mixed-stage": ("best_mixed_stage", {"a_fill": "c0c1"})}
+
+
+@pytest.mark.parametrize("var", list(AFILL))
+def test_afill_full_output(runtime, data, var):
+    """a_fill c0c1 (canonical A rows -> the c0c1 LDS image by dwordx4 + dword DMAs): bitwise int, Gaussian / uniform
+    within tolerance, launches identical, both formats."""
+    from kernels.gfx950.mxfp6_gemm.gemm import PRESET_LEVERS, preset, validate_spec
+
+    name, over = AFILL[var]
+    for fmt in ("e2m3", "e3m2"):
+        spec = preset(name, **SHAPE, **over, elem_fmt=fmt)
+        assert validate_spec(spec)[0], validate_spec(spec)
+        for dname, (a, b, (ref, abs_sum)) in data[fmt].items():
+            outs = _run(runtime, spec, a, b, levers=PRESET_LEVERS[name])
+            assert all(np.array_equal(outs[0], o) for o in outs[1:]), f"{var}/{fmt}/{dname}: launches differ"
+            r = L.check_against_reference(outs[0], ref, abs_sum, exact=(dname == "int"))
+            assert r["pass"], f"{var}/{fmt}/{dname}: {r}"
+
+
+@pytest.mark.parametrize("over", [{"mutant": "scale_sel"}, {"mutant": "k_order"}, {"mutant": "drop_kstep"}])
+def test_afill_mutants_fail(runtime, data, over):
+    from kernels.gfx950.mxfp6_gemm.gemm import PRESET_LEVERS, preset, validate_spec
+
+    name, o = AFILL["v6"]
+    spec = preset(name, **SHAPE, **o, **over)
+    assert validate_spec(spec)[0], validate_spec(spec)
+    a, b, (ref, abs_sum) = data["e2m3"]["gauss"]
+    r = L.check_against_reference(_run(runtime, spec, a, b, launches=1, levers=PRESET_LEVERS[name])[0], ref, abs_sum)
+    assert not r["pass"], f"{over}: the mutant passed"

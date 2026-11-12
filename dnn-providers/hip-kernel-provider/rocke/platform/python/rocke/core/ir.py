@@ -6528,7 +6528,13 @@ class IRBuilder:
         ).result
 
     def buffer_load_vN(
-        self, rsrc: Value, voffset: Value, soffset: Value, dtype: "Type", n: int
+        self,
+        rsrc: Value,
+        voffset: Value,
+        soffset: Value,
+        dtype: "Type",
+        n: int,
+        coherency: int = 0,
     ) -> Value:
         """Dtype-generic vectorised `raw_ptr_buffer_load` of N elements.
 
@@ -6545,14 +6551,24 @@ class IRBuilder:
         in-range components, and only a 1- or 2-byte load reads a last
         element that ends off a 4-byte boundary.
 
-        Attrs: ``elem_type``, and ``dwords`` for an access of whole dwords.
-        Both lowerings take the access width from the result type.
+        ``coherency`` is the load's cache-policy bits (:data:`CACHE_ALL` /
+        :data:`CACHE_GLOBAL` / :data:`CACHE_STREAM` / :data:`NON_TEMPORAL`),
+        e.g. non-temporal for weights streamed once; 0 (the default) adds no
+        attribute, so the IR is unchanged.
+
+        Attrs: ``elem_type``, ``dwords`` for an access of whole dwords, and
+        ``aux`` for a nonzero ``coherency``. Both lowerings take the access
+        width from the result type.
         """
+        if coherency not in (0, 1, 2, 3):
+            raise ValueError(f"coherency must be 0..3 (got {coherency})")
         nbytes = _buffer_access_bytes("buffer_load_vN", dtype, n)
         attrs: dict[str, Any] = {}
         if nbytes >= 4:
             attrs["dwords"] = nbytes // 4
         attrs["elem_type"] = dtype.name
+        if coherency:
+            attrs["aux"] = int(coherency)
         return self._op(
             "tile.buffer_load_vN",
             [rsrc, voffset, soffset],

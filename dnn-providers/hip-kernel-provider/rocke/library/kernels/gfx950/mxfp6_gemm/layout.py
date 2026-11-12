@@ -566,6 +566,9 @@ def pack_operand_c0c1(op: Operand, block_rows: int, pair: bool = False) -> np.nd
     6-register MFMA operands (vs two b128 + two b64 reads with ``pair=False``).
     """
     R = block_rows
+    if op.rows % R and op.rows > R and R % (32 if pair else 16) == 0 and op.k % 128 == 0:
+        # edge_tiles: whole blocks, the last one shifted to rows [rows - R, rows) (the kernel's last tile origin)
+        return pack_operand_c0c1(_edge_blocks(op, R), R, pair)
     if op.rows % R or R % (32 if pair else 16) or op.k % 128:
         raise ValueError("rows must be a multiple of block_rows (a multiple of 16 / 32 paired), K of 128")
     nr, nt = op.rows // R, op.k // 128
@@ -580,13 +583,120 @@ def pack_operand_c0c1(op: Operand, block_rows: int, pair: bool = False) -> np.nd
     return np.ascontiguousarray(np.concatenate([c0, c1], axis=2)).reshape(-1)
 
 
+#: (legacy) tail padding of an M-contiguous image: none -- the kernel's descriptor ends at the entry, so the 4
+#: overlap bytes its last 16-byte DMA chunk fetches past the final K row read 0
+MCONTIG_PAD = 0
+
+
+def _edge_blocks(op: "Operand", R: int) -> "Operand":
+    """``edge_tiles``: the operand's whole R-row blocks and a last block of rows [rows - R, rows)."""
+    keep = op.rows - op.rows % R
+    idx = np.concatenate([np.arange(keep), np.arange(op.rows - R, op.rows)])
+    return Operand(len(idx), op.k, np.ascontiguousarray(op.codes[idx]), np.ascontiguousarray(op.scales[idx]), op.fmt)
+
+
+def pad_k(op: "Operand", mult: int = 128) -> "Operand":
+    """``k_tail``: the operand with K padded to a multiple of ``mult`` (zero codes, zero E8M0 scales = 2^-127, never
+    NaN): the pre-tiled B and the scale images of a K that is a multiple of 32 but not of 128."""
+    kp = -(-op.k // mult) * mult
+    if kp == op.k:
+        return op
+    if op.k % 32:
+        raise ValueError("pad_k: K must be a multiple of 32 (one MX block)")
+    codes = np.zeros((op.rows, kp * 6 // 8), np.uint8)
+    codes[:, :op.k * 6 // 8] = op.codes
+    scales = np.zeros((op.rows, kp // 32), np.uint8)
+    scales[:, :op.k // 32] = op.scales
+    return Operand(op.rows, kp, codes, scales, op.fmt)
+
+
+def pad_rows(op: Operand, rows: int) -> Operand:
+    """``op`` with zero rows (codes and scales) appended up to ``rows``."""
+    if rows <= op.rows:
+        return op
+    codes = np.zeros((rows, op.codes.shape[1]), np.uint8)
+    codes[:op.rows] = op.codes
+    scales = np.zeros((rows, op.scales.shape[1]), np.uint8)
+    scales[:op.rows] = op.scales
+    return Operand(rows, op.k, codes, scales, op.fmt)
+
+
+def mcontig_codes(op: Operand) -> np.ndarray:
+    """The M-contiguous storage of an operand (``a_layout="mcontig"``): ``[K, rows]`` codes, every K row a dense
+    little-endian 6-bit stream of ``rows * 6 / 8`` bytes (value ``m`` of K row ``k`` at bits ``[6m, 6m + 6)``) --
+    what a producer writing the activation transposed (hipBLASLt opB = T) stores. Scales stay per 32 along K."""
+    if op.rows % 4:
+        raise ValueError("rows must be a multiple of 4")
+    return pack_codes(np.ascontiguousarray(unpack_codes(op.codes, op.k).T))
+
+
+def tr_b6_model(rows96: np.ndarray) -> np.ndarray:
+    """``ds_read_b96_tr_b6`` for one 16-lane group: lane ``j`` addresses a 96-bit row of 16 six-bit elements (dense LE,
+    element ``t`` at bits ``6 t``); lane ``t`` receives element ``t`` of every row ``j`` (its element ``j`` at bits
+    ``6 j``). ``rows96``: ``[16][12]`` bytes -> ``[16][12]`` bytes (the GPU suite pins this against the hardware)."""
+    codes = unpack_codes(np.asarray(rows96, np.uint8).reshape(16, 12), 16)  # [j][t]
+    return pack_codes(np.ascontiguousarray(codes.T))  # [t][j]
+
+
 def pack_operand(op: Operand, layout: str, block_rows: int) -> np.ndarray:
     """The device byte image of an operand for ``operand_layout``."""
     if layout == "canonical":
         return np.ascontiguousarray(op.codes).reshape(-1)
     if layout in ("c0c1", "c0c1p"):
         return pack_operand_c0c1(op, block_rows, pair=layout == "c0c1p")
+    if layout == "mcontig":  # rows % 16 != 0: the M-padded producer layout (gemm.mcontig_rows), zero padding rows
+        return np.ascontiguousarray(mcontig_codes(pad_rows(op, -(-op.rows // 16) * 16))).reshape(-1)
     raise ValueError(f"unknown operand layout {layout!r}")
+
+
+def pack_scales_wtile(scales: np.ndarray, block_rows: int, wave_rows: int, period: int = 1) -> np.ndarray:
+    """Per-wave op_sel scale images (``scale_layout="wtile"``, 16x16x128, uint32 dwords, flat).
+
+    For K tile ``s``, ``block_rows``-row CTA tile ``q``, wave side ``w`` (``block_rows / wave_rows`` of them), lane
+    ``l`` and dword ``d`` (``D`` = :func:`wtile_dwords` per lane): byte ``i`` =
+    ``scale[block_rows q + wave_rows w + 16 (4 d + i) + l % 16, 4 s + l // 16]`` -- the scale of the wave's MFMA tile
+    ``f = 4 d + i`` (the MFMA's ``op_sel``), 0 past the wave's ``wave_rows / 16`` tiles. One CTA tile's image of a K
+    tile is ``[w][64][D]`` dwords, contiguous; images are ordered ``[s][q]``::
+
+        dword index = (((s * (rows / block_rows) + q) * W + w) * 64 + l) * D + d
+
+    ``period`` P > 1 (``wtile_period``): the lane's dwords of P consecutive K tiles are contiguous::
+
+        dword index = ((((s / P * (rows / block_rows) + q) * W + w) * 64 + l) * P + s % P) * D + d
+    """
+    scales = np.asarray(scales, dtype=np.uint8)
+    rows, nkb = scales.shape
+    R, Wr = block_rows, wave_rows
+    if rows % R and rows > R:  # edge_tiles: the last image from rows [rows - R, rows)
+        scales = np.concatenate([scales[:rows - rows % R], scales[rows - R:]])
+        rows = scales.shape[0]
+    if rows % R or R % Wr or Wr % 16 or nkb % 4:
+        raise ValueError("rows a multiple of block_rows, block_rows of wave_rows, wave_rows of 16, K/32 of 4")
+    nq, W, F, ns = rows // R, R // Wr, Wr // 16, nkb // 4
+    D = wtile_dwords(Wr)
+    # x[q, w, f, r16, s, g] with row = R q + Wr w + 16 f + r16, kb = 4 s + g
+    x = scales.reshape(nq, W, F, 16, ns, 4)
+    out = np.zeros((ns, nq, W, 4, 16, 4 * D), dtype=np.uint8)  # s q w g r16 byte(4 d + i)
+    out[..., :F] = x.transpose(4, 0, 1, 5, 3, 2)
+    out = np.ascontiguousarray(out).reshape(ns, nq, W, 64, D * 4).view(np.uint32).reshape(ns, nq, W, 64, D)
+    if period > 1:
+        if ns % period:
+            raise ValueError("K / 128 must be a multiple of the period")
+        out = out.reshape(ns // period, period, nq, W, 64, D).transpose(0, 2, 3, 4, 1, 5)
+    return np.ascontiguousarray(out).reshape(-1)
+
+
+def raw_transpose_model(words: np.ndarray) -> np.ndarray:
+    """``gemm.raw_scale_transpose`` on 64 lane words (uint32): lane 16 g + r, byte i = byte g of lane 16 i + r."""
+    w = np.asarray(words, dtype=np.uint32).reshape(4, 16).view(np.uint8).reshape(4, 16, 4)  # [i][r][g]
+    return np.ascontiguousarray(w.transpose(2, 1, 0)).reshape(64, 4).view(np.uint32).reshape(64)
+
+
+def wtile_dwords(wave_rows: int) -> int:
+    """Scale dwords per lane of a ``wave_rows``-row wave side: ceil(f / 4) for f = wave_rows / 16 MFMA tiles, rounded
+    up to 1, 2 or 4 (one ds_read / buffer_load of that width); the kernel's ``gemm.wtile_dwords``."""
+    d = -(-(wave_rows // 16) // 4)
+    return 1 if d <= 1 else (2 if d == 2 else 4 * -(-d // 4))
 
 
 def c0c1_slot(row_in_block: int, kgroup: int) -> int:
@@ -632,4 +742,32 @@ def pack_scales_for(scales: np.ndarray, atom: str, scale_layout: str) -> np.ndar
         return pack_scales_tile(scales, atom)
     if scale_layout == "raw":  # the canonical [rows, K/32] bytes as produced: no packing
         return np.ascontiguousarray(scales, dtype=np.uint8)
+    if scale_layout.startswith("period"):  # "period{P}x{block rows}" (pring)
+        P, br = (int(x) for x in scale_layout[len("period"):].split("x"))
+        return pack_scales_period(scales, atom, P, br)
+    if scale_layout.startswith("wtile"):  # "wtile{block rows}x{wave rows}" (gemm.scale_layout_of)
+        if atom != "16x16x128":
+            raise ValueError("wtile scales are built for the 16x16x128 atom")
+        body, _, per = scale_layout[len("wtile"):].partition("p")  # "wtile{R}x{Wr}[p{P}]"
+        br, wr = (int(x) for x in body.split("x"))
+        return pack_scales_wtile(scales, br, wr, int(per) if per else 1)
     raise ValueError(f"unknown scale layout {scale_layout!r}")
+
+
+def pack_scales_period(scales: np.ndarray, atom: str, period: int, block_rows: int) -> np.ndarray:
+    """``pack_scales_tile`` re-laid per K-tile period (``a_scale_src`` / ``b_scale_src`` "pring", uint32 dwords):
+    for each ``block_rows`` row block q (a CTA tile) and period p, the block's tile images (``block_rows`` x 4
+    bytes each, as ``pack_scales_tile`` holds them contiguously) of K tiles ``P p .. P p + P - 1`` back to back;
+    K tiles past K (the last period of a K / 128 not divisible by P) are zero. Byte offset of (q, p, t, b) =
+    ((q NP + p) P + t) block_rows 4 + b, NP = ceil(K / 128 / P)."""
+    scales = np.asarray(scales, dtype=np.uint8)
+    rows, nkb = scales.shape
+    if rows % block_rows or block_rows % 128:
+        raise ValueError("rows must be a multiple of block_rows, block_rows of 128")
+    ns = nkb // 4
+    npd = -(-ns // period)
+    img = pack_scales_tile(scales, atom).view(np.uint8).reshape(ns, rows // 128, 512)
+    img = img.reshape(ns, rows // block_rows, block_rows * 4).transpose(1, 0, 2)  # [q][s][block image]
+    out = np.zeros((rows // block_rows, npd * period, block_rows * 4), np.uint8)
+    out[:, :ns] = img
+    return np.ascontiguousarray(out).view(np.uint32).reshape(-1)
