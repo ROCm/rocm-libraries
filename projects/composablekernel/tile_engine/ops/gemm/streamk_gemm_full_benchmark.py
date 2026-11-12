@@ -56,10 +56,11 @@ sys.path.insert(0, str(_COMMON_DIR))
 sys.path.insert(0, str(_THIS_DIR))
 
 from gemm_utils import (  # noqa: E402
-    parse_streamk_budgets,
+    STREAMK_BUDGET_ENV,
     STREAMK_REDUCTION_STRATEGIES,
     _resolve_arch,
     expand_sweep,
+    parse_streamk_budgets,
     setup_multiple_gemm_dispatchers,
     unique_by_name,
 )
@@ -158,12 +159,18 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
         for _, cfg, lib in batch
     ]
     payload = json.dumps(
-        {"items": items, "verify": args.verify, "verify_tol": args.verify_tol}
+        {
+            "items": items,
+            "verify": args.verify,
+            "verify_tol": args.verify_tol,
+            "arch": args.arch,
+            "check_identity": True,
+        }
     )
 
     env = base_env.copy()
     env["HIP_VISIBLE_DEVICES"] = str(device_id)
-    env["CK_TILE_STREAMK_BUDGET_PCT"] = str(budget_pct)
+    env[STREAMK_BUDGET_ENV] = str(budget_pct)
 
     rows, lines, n_fail = [], [], 0
     proc = None
