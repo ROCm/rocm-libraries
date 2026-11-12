@@ -46,6 +46,7 @@
 #include "utility.hpp"
 #include <Tensile/Contractions.hpp>
 #include <Tensile/DataTypes.hpp>
+#include <Tensile/SolutionLibrary.hpp>
 #include <atomic>
 
 // Return the value category for a value, as a double precision value, such
@@ -175,21 +176,31 @@ inline bool& rocblaslt_suppress_tensile_error_messages()
     return t_suppress;
 }
 
+// searchType selects how the solution library filters rows. Callers that have
+// already collected the GridBased and Prediction candidates pass
+// GEMM_TYPE_ONLY_NO_RANKING so those rows are not searched again.
+// The value applies only to this call.
 rocblaslt_status getAllSolutions(RocblasltContractionProblem&                    prob,
                                  rocblaslt_handle                                handle,
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
-                                 size_t                                          maxWorkSpaceBytes);
+                                 size_t                                          maxWorkSpaceBytes,
+                                 TensileLite::SolutionLibrarySearchType          searchType
+                                 = TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY);
 
 rocblaslt_status getAllSolutions(std::vector<RocblasltContractionProblem>&       probs,
                                  rocblaslt_handle                                handle,
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
-                                 size_t                                          maxWorkSpaceBytes);
+                                 size_t                                          maxWorkSpaceBytes,
+                                 TensileLite::SolutionLibrarySearchType          searchType
+                                 = TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY);
 
 rocblaslt_status getAllSolutions(std::shared_ptr<void>                           gemmData,
                                  rocblaslt_handle                                handle,
                                  rocblaslt::RocGemmType                          gemmType,
                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
-                                 size_t                                          maxWorkSpaceBytes);
+                                 size_t                                          maxWorkSpaceBytes,
+                                 TensileLite::SolutionLibrarySearchType          searchType
+                                 = TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY);
 
 rocblaslt_status
     getSolutionsFromIndex(rocblaslt_handle                                handle,
@@ -246,20 +257,25 @@ std::vector<std::shared_ptr<TensileLite::ContractionSolution>>
  * getBestSolutions() calls finTopSolutions from Tensile and converts to       *
  * rocblaslt_matmul_heuristic_result                                           *
  *******************************************************************************/
+// In both getBestSolutions overloads, layoutRuledOut, if given, is set when no
+// solution is returned and the MX scale layout rule refused a candidate, or the
+// scale modes accept no layout.
 rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   rocblaslt_handle                   handle,
                                   std::shared_ptr<void>              gemmData,
                                   int                                requestedAlgoCount,
                                   rocblaslt_matmul_heuristic_result  heuristicResultsArray[],
                                   int*                               returnAlgoCount,
-                                  size_t                             maxWorkSpaceBytes);
+                                  size_t                             maxWorkSpaceBytes,
+                                  bool*                              layoutRuledOut = nullptr);
 
 rocblaslt_status getBestSolutions(rocblaslt_handle       handle,
                                   rocblaslt::RocGemmType gemmType,
                                   std::shared_ptr<void>  gemmData,
                                   const size_t           workspaceBytes,
                                   const int              requestedAlgoCount,
-                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults);
+                                  std::vector<rocblaslt_matmul_heuristic_result>& heuristicResults,
+                                  bool* layoutRuledOut = nullptr);
 
 /**
  * Tops heuristicResultsArray up to requestedAlgoCount from the size-independent

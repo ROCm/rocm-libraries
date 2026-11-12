@@ -192,6 +192,7 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # rocsparse_dense_transpose*.cpp compiled in (appended to
   # ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES below).
   unit_test_internal_common_large_grids.cpp
+  unit_test_internal_common_bsr_ind.cpp
   unit_test_internal_infostructs.cpp
   #10156: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_precond_direct.cpp
@@ -264,6 +265,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_level3_mm_grid_y.cpp
   unit_test_internal_conversion_csr2csc_buffer.cpp
   unit_test_internal_extra_geam.cpp
+  # gebsrmv / gebsr2csr / bsrgeam grid.x clamp
+  unit_test_internal_gebsr_grid_clamp.cpp
   unit_test_internal_extra_csrgemm_bitmap.cpp
   # --- bsrgemm scaling-copy grid.x clamp [AISPARSE-676] ---------------------
   # Distinct anchor (after the geam internal tests) so this leaf does not
@@ -274,11 +277,20 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   #10154: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_extra_geam.cpp
   unit_test_internal_level3_sddmm.cpp
+  # --- sddmm grid clamp / grid stride [AISPARSE-673] ------------------------
+  # Distinct anchor at the very end of the list so this leaf does not conflict
+  # with the sibling large-grid branches that append after their own groups.
+  # Drives rocsparse_sddmm through roc::rocsparse with a shrunken
+  # handle->properties.maxGridSize[0], plus a direct launch of the CSR/CSC
+  # dense-sample kernel; no compile-in library TUs.
+  unit_test_internal_level3_sddmm_grid_clamp.cpp
   unit_test_internal_level3_bsrmm.cpp
   # bsrmm grid.x/grid.y and coomm block reduce forced clamp [AISPARSE-665/704]
   unit_test_internal_level3_bsrmm_grids.cpp
   #10158: distinct anchor to avoid stacked-branch merge conflicts
   unit_test_host_level3.cpp
+  # bsrsm solve / copy_scale / bsr_gather forced grid.x clamp [AISPARSE-670]
+  unit_test_internal_level3_bsrsm.cpp
   unit_test_internal_level2_extras.cpp
   # csrmv LRB / adaptive partial_scale_y forced grid.x clamp [AISPARSE-662]
   unit_test_internal_level2_csrmv_lrb_grids.cpp
@@ -295,6 +307,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   # rocsparse_format_ell and rocsparse_v2_spmv on rocsparse_format_sell
   # through the public generic descriptor API; no compile-in TUs.
   unit_test_internal_level2_ell_sell.cpp
+  # bsrxmv / bsrmv block-row grid clamp, through the public entry points.
+  unit_test_internal_level2_bsrxmv_grid.cpp
   # --- csr2ell strided-batched grid.y clamp regression [AISPARSE-683] -------
   # Distinct anchor at the end of the list so this leaf does not conflict with
   # sibling branches appending elsewhere. Needs the defining library TU in
@@ -439,6 +453,7 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_compute.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_preprocess.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_buffer_size.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_history.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_sync.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_async.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/../../library/src/precond/itilu0/rocsparse_csritilu0x_sync_fusion.cpp
@@ -600,23 +615,30 @@ set_tests_properties(
 endif()
 
 # ---------------------------------------------------------------------------
-# Code coverage: instrument the unit-test binaries so the library sources that
-# are compiled directly into them (primitives, level-1 device kernels,
-# indextype/datatype utils) emit LLVM profile data. Without this the binaries
-# run under `make coverage` but produce no .profraw and contribute nothing.
-# Matches the flags applied to the rocsparse library target.
+# Code coverage: instrument the unit-test binaries so host code in the library
+# sources compiled directly into them (primitives, the host side of the level-1
+# translation units, indextype/datatype utils) emits LLVM profile data.
+# -Xarch_host leaves the device kernels uninstrumented. Without this the
+# binaries run under `make coverage` but produce no .profraw and contribute
+# nothing. Matches the flags applied to the rocsparse library target.
 # ---------------------------------------------------------------------------
 if(BUILD_CODE_COVERAGE)
   foreach(_cov_tgt rocsparse-unit-test rocsparse-unit-test-device)
     if(TARGET ${_cov_tgt})
-      target_compile_options(${_cov_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-      # Host-only instrumentation, as for the library target: device-side
-      # coverage crashes the HIP runtime at profile dump (AISPARSE-778).
+      # Host-only instrumentation, as for the library target. -Xarch_host keeps
+      # it off the device image (AISPARSE-778). ccache < 4.12.1 drops -Xarch_*
+      # arguments (ccache/ccache#1632). A dropped -Xarch_host then leaves the
+      # profiles empty instead of aborting at profile dump. The launcher is
+      # cleared on these targets so the flags reach clang. That clear does
+      # nothing when ccache is the compiler itself
+      # (CXX=/usr/lib/ccache/amdclang++).
       target_compile_options(${_cov_tgt} PRIVATE
-        "SHELL:-Xarch_device -fno-profile-instr-generate"
-        "SHELL:-Xarch_device -fno-coverage-mapping")
+        "SHELL:-Xarch_host -fprofile-instr-generate"
+        "SHELL:-Xarch_host -fcoverage-mapping")
       target_link_options(${_cov_tgt} PRIVATE -u__llvm_profile_runtime)
       target_link_libraries(${_cov_tgt} PRIVATE ${ROCSPARSE_PROFILE_RUNTIME})
+      set_property(TARGET ${_cov_tgt} PROPERTY C_COMPILER_LAUNCHER "")
+      set_property(TARGET ${_cov_tgt} PROPERTY CXX_COMPILER_LAUNCHER "")
     endif()
   endforeach()
 endif()

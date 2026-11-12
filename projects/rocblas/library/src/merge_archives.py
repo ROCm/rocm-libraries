@@ -10,7 +10,6 @@
 
 from argparse import ArgumentParser
 from ctypes.util import find_library
-import distutils.spawn
 import glob
 import tempfile
 import os
@@ -105,7 +104,7 @@ def main():
 
     ar_exe = args.ar_exe
     if not ar_exe:
-        ar_exe = distutils.spawn.find_executable('ar')
+        ar_exe = shutil.which('ar')
     if not ar_exe:
         print_and_exit("failed to find 'ar' executable")
 
