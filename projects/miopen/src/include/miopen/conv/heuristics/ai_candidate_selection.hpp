@@ -47,7 +47,8 @@ std::vector<float> EncodeInputFeaturesWithFdeep(const std::vector<float>& featur
                                                 const std::string& solver);
 
 /// Ordered kernel-id vocabulary from the installed v3 config-embedding table. Empty when no v3
-/// table is present (callers then fall back to FillValidKernels). Implemented in ai_heuristics.cpp.
+/// table is present (callers then fail closed to the solver's non-AI default). Implemented in
+/// ai_heuristics.cpp.
 MIOPEN_INTERNALS_EXPORT const std::vector<std::string>&
 GetConfigEmbeddingVocab(const std::string& arch, const std::string& solver);
 
@@ -68,7 +69,7 @@ LoadConfigEmbeddingVocabFromFile(const std::string& bin_path,
 /// fdeep config encoder), then walks the ranking best-first and returns the first candidate
 /// accepted by is_args_supported(kernel_id, split_k). Returns {kernel_id (with "+split_k" suffix
 /// where the solver uses one), split_k} or nullopt when no vocab is available or none is applicable
-/// (caller falls back to the FillValidKernels path). Behaviour-preserving: first applicable in
+/// (caller fails closed to the solver's non-AI default). Behaviour-preserving: first applicable in
 /// score order is the argmax over applicable candidates.
 MIOPEN_INTERNALS_EXPORT std::optional<std::pair<std::string, int>> SelectBestVocabCandidate(
     const std::string& arch,

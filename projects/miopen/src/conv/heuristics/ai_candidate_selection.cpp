@@ -699,22 +699,25 @@ MIOPEN_INTERNALS_EXPORT std::optional<std::pair<std::string, int>> SelectBestVoc
         return std::nullopt;
     }
 
-    // Parse the "+<split_k>" a split-k solver appends after the closing '>' of the GetTypeString.
-    // The base kernel string itself can contain '+' (e.g. "<256l+256m, ...>"), so search only after
-    // the final '>'. No suffix (non-split-k solvers) -> split_k 1.
-    const auto split_k_of = [](const std::string& kid) -> int {
+    // Split a vocab kernel id into its bare GetTypeString and the "+<split_k>" a split-k solver
+    // appends after the closing '>'. The base string itself can contain '+' (e.g.
+    // "<256l+256m, ...>"), so search only after the final '>'. No suffix (non-split-k solvers) ->
+    // base unchanged, split_k 1.
+    const auto parse_kernel_id = [](const std::string& kid) -> std::pair<std::string, int> {
         const auto gt   = kid.rfind('>');
         const auto plus = kid.find('+', gt == std::string::npos ? 0 : gt);
         if(plus == std::string::npos)
-            return 1;
+            return {kid, 1};
+        int split_k = 1;
         try
         {
-            return std::stoi(kid.substr(plus + 1));
+            split_k = std::stoi(kid.substr(plus + 1));
         }
         catch(...)
         {
-            return 1;
+            split_k = 1;
         }
+        return {kid.substr(0, plus), split_k};
     };
 
     try
@@ -754,16 +757,9 @@ MIOPEN_INTERNALS_EXPORT std::optional<std::pair<std::string, int>> SelectBestVoc
                 if(idx < 0 || static_cast<std::size_t>(idx) >= vocab.size())
                     continue;
                 const std::string& kernel_id = vocab[idx];
-                const int split_k            = split_k_of(kernel_id);
                 // Hand the check the bare GetTypeString; the caller's ck_validator re-appends
-                // "+<split_k>" for split-k solvers only. Return the same bare string.
-                std::string base = kernel_id;
-                {
-                    const auto gt   = kernel_id.rfind('>');
-                    const auto plus = kernel_id.find('+', gt == std::string::npos ? 0 : gt);
-                    if(plus != std::string::npos)
-                        base = kernel_id.substr(0, plus);
-                }
+                // "+<split_k>" for split-k solvers only.
+                const auto [base, split_k] = parse_kernel_id(kernel_id);
                 ++checks;
                 if(is_args_supported(base, split_k, fp32_pass))
                 {

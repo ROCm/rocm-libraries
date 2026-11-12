@@ -340,8 +340,8 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
         // config vocabulary (v3 table) is installed, rank the whole vocabulary by model score and
         // check applicability lazily top-down, skipping the (often ~200 ms) FillValidKernels
         // enumeration. Behaviour-preserving: first applicable in score order is the argmax over
-        // applicable candidates. Falls through to the enumeration path when no vocab is installed
-        // or none of the ranked candidates is applicable.
+        // applicable candidates. Fails closed to the solver's non-AI default when no vocab is
+        // installed or none of the ranked candidates is applicable.
         if constexpr(!std::is_same_v<CKValidatorCreatorFunc, std::nullptr_t>)
         {
             // Whole fast-path attempt (features + rank + lazy applicability): rank the precomputed
@@ -350,7 +350,7 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
                                                           " CandidateSelection.lazy_fastpath");
             std::map<std::string, float> fp_features =
                 GetFeaturesND(problem, ctx.GetStream().GetMaxComputeUnits(), arch);
-            // Item 6: build the per-candidate applicability check here, from the CK validator plus
+            // Build the per-candidate applicability check here, from the CK validator plus
             // the solver's deterministic and split-k gates, so each solver no longer hand-rolls its
             // own is_args_supported lambda. SelectBestVocabCandidate returns the bare
             // GetTypeString.
@@ -376,7 +376,7 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
                              << state.kernel_id);
                 return true;
             }
-            // Item 3: a lazy miss -- vocab present but nothing applicable, the table absent, or the
+            // A lazy miss -- vocab present but nothing applicable, the table absent, or the
             // LGBM-only/kill switch -- goes straight to the solver's non-AI default (fail-closed).
             return false;
         }

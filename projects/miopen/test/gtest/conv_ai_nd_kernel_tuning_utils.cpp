@@ -227,11 +227,7 @@ bool CheckModelFilesExist(const std::string& arch, const std::string& solver_nam
     std::string db_path = miopen::GetSystemDbPath().string();
     auto metadata       = db_path + "/" + arch + "_" + solver_name + "_metadata.tn.model";
     auto input_encoder  = db_path + "/" + arch + "_" + solver_name + "_input_encoder.tn.model";
-    auto kernel_config_encoder =
-        db_path + "/" + arch + "_" + solver_name + "_kernel_config_encoder.tn.model";
-
-    return miopen::fs::exists(metadata) && miopen::fs::exists(input_encoder) &&
-           miopen::fs::exists(kernel_config_encoder);
+    return miopen::fs::exists(metadata) && miopen::fs::exists(input_encoder);
 }
 
 // Test parameters combining dimension and data type/direction

@@ -620,7 +620,7 @@ std::vector<CandidateSelectionParams> GenerateCandidateSelectionParams()
 }
 
 // ============================================================================
-// Item 5: lazy-applicability walk (SelectBestVocabCandidate)
+// lazy-applicability walk (SelectBestVocabCandidate)
 // ============================================================================
 namespace {
 // Bare GetTypeString from a vocab id: strip a trailing "+<split_k>" after the final '>'.
@@ -764,7 +764,7 @@ INSTANTIATE_TEST_SUITE_P(Full,
                          });
 
 // ============================================================================
-// Item 5: config-embedding table loader
+// config-embedding table loader
 // ============================================================================
 // Every shipped table loads into a non-empty vocabulary: well-formed MICE, a v3 vocab block, and an
 // md5 that matches the installed input encoder (a mismatch rejects the table -> empty vocab).
@@ -863,7 +863,7 @@ TEST(CPU_ConfigEmbeddingTableLoader_NONE, RejectsMalformedTables)
                     put_u32(b, 1u << 30); // length prefix runs far past EOF
                     break;
                 }
-                const std::string& id = r < ids.size() ? ids[r] : std::string();
+                const std::string id = r < ids.size() ? ids[r] : std::string();
                 put_u32(b, static_cast<std::uint32_t>(id.size()));
                 b.insert(b.end(), id.begin(), id.end());
             }
