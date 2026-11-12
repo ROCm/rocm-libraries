@@ -2433,6 +2433,29 @@ error for `+rocm`/`+devrocm` packages and warns for `+g` packages; unknown warns
 Only the client and, later, rocisa compile against ROCm; the wheel is pure
 Python, so a build-machine label on it would check the wrong artifact.
 
+### Q135 — Who owns client filenames, build paths and GEKO script quoting?
+
+**Decision: Accepted (2026-11-12).** Put `client_executable_name()` and
+`built_client_path()` in #11019's top-level `_tensilelite_client_binding` module,
+where client naming already lives. Installed lookup and Invoke's build/binding
+tasks use that policy. GEKO in #11025 asks the source checkout through
+`invoke client-path --build-dir ...`, avoiding another Windows suffix/layout rule.
+
+GEKO computes this path before its editable install; its README dependency step
+and coverage env do not install TensileLite. A direct import from an installed
+wheel would add a first-run prerequisite. Task discovery and the path query instead
+use the standalone binding module, with GPU-helper imports deferred until a task
+needs them. A subprocess regression rejects every generator import during a real
+Invoke query; it failed before deferring the imports and passed afterward.
+
+The output writer's `shell_word()` quotes interpreter/client paths for its bash
+scripts, including Git Bash on Windows. Literal path cases and actual bash
+round-trips cover backslashes, spaces and apostrophes. Build/cache tests consume
+both filenames without skipping when TensileLite is absent. Native Windows CI
+remains required; Linux path and shell tests do not prove a Windows client build.
+This correction changes neither source-SHA pairing nor ROCm validation and requires
+no TheRock change.
+
 ### Findings recorded in this review
 
 - **SHA design experiments (2026-11-10;** pip 26.2.1, setuptools 82, tox 4.56.1,
