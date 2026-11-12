@@ -878,6 +878,34 @@ TEST(GPU_HipdnnShimBNPlanKey_FP32, MomentumSelectsItsOwnPlan)
     ExpectOwnPlan([](TrainData& d) { d.averageFactor = 0.9; });
 }
 
+// Plain backward without saved stats, at the provider's epsilon, runs a graph that
+// recomputes the stats from x. The same problem with saved stats must not reuse
+// it: that plan would ignore the saved stats the caller passed, which the test
+// data draws at random, far from the true ones.
+TEST(GPU_HipdnnShimBNPlanKey_FP32, SavedStatsSelectTheirOwnPlan)
+{
+    auto&& handle = get_handle();
+
+    {
+        SCOPED_TRACE("without saved stats");
+        BwdData d;
+        SetUpBwd(d);
+        DecoupleDy(handle, d);
+        d.epsilon = kProviderEpsilon;
+        ASSERT_EQ(BwdV1(handle, d, false), miopenStatusSuccess);
+        FillTrueStats(d, d.epsilon);
+        CheckBwd(handle, d);
+    }
+    {
+        SCOPED_TRACE("with saved stats");
+        BwdData d;
+        SetUpBwd(d);
+        d.epsilon = kProviderEpsilon;
+        ASSERT_EQ(BwdV1(handle, d, true), miopenStatusSuccess);
+        CheckBwd(handle, d);
+    }
+}
+
 // V1 binds the same running-stat buffers as input and output. Each call must
 // apply the running update exactly once.
 TEST(GPU_HipdnnShimBNInPlace_FP32, RunningStatsUpdateOncePerCall)
