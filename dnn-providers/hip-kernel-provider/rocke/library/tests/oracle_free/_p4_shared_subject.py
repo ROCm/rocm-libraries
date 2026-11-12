@@ -5,13 +5,14 @@
 
 Torch-free end to end: inputs and the output are raw ``uint16`` host arrays,
 device buffers are :class:`rocke.runtime.DeviceMem`, and the launch goes through
-:func:`launch_attention_dense`, the compile, cache and launch path that
-``run_attention_dense_torch`` used to delegate to. Dispatch, the runner and the
+:func:`launch_attention_dense`, a pointer-level compile, cache and launch
+path kept in this module. Dispatch, the runner and the
 HIP runtime are imported only inside the functions that use them, so CPU
 collection and the analytical contracts need neither a GPU nor ROCm.
 
-P4 copy of the pre-review ``_gfx942_subject.py``, kept so the P4 lane stays on
-the subject and launch path it was derived against.
+The structured-logit lane's own subject adapter: the launch path and the
+Hq = Hkv = 4 quick shapes its enclosures are derived against. The uniform lane
+uses ``_dense_subject.py``.
 """
 
 from __future__ import annotations
@@ -47,14 +48,14 @@ def launch_attention_dense(
 ) -> None:
     """Torch-free compile (cached) + launch of the gfx942 dense prefill kernel.
 
-    Copy of the pre-review ``kernels.gfx942.attention_dense.launch_attention_dense``,
-    the pointer-level core ``run_attention_dense_torch`` delegated to; the kernel
-    module no longer exports it. ``q``/``k``/``v``/``out`` (and ``sinks``, ``lse``
-    and the ``segment_workspace`` values) are anything the launcher packs as a
-    device pointer: an ``int`` address, a :class:`rocke.runtime.DeviceMem`, or an
-    object exposing ``data_ptr()``. The layout contract is the torch entry's; this
-    layer checks only spec legality and that each spec-required buffer is present,
-    so shape, dtype, placement and aliasing are the caller's to guarantee.
+    A test-local pointer-level launcher: the kernel module exports only the
+    Torch entry, and this suite is Torch-free. ``q``/``k``/``v``/``out`` (and
+    ``sinks``, ``lse`` and the ``segment_workspace`` values) are anything the
+    launcher packs as a device pointer: an ``int`` address, a
+    :class:`rocke.runtime.DeviceMem`, or an object exposing ``data_ptr()``. The
+    layout contract is the torch entry's; this layer checks only spec legality
+    and that each spec-required buffer is present, so shape, dtype, placement
+    and aliasing are the caller's to guarantee.
 
     ``spec.kv_segments > 1`` needs ``segment_workspace``, a mapping with one FP32
     buffer per ``SEGMENT_PARAMS`` name; the caller then runs
@@ -123,8 +124,8 @@ def launch_attention_dense(
 
 
 class DenseCase(Protocol):
-    """What the adapter reads from a case: the P3 ``UniformCase`` and the P4
-    ``P4Case`` both provide it."""
+    """What the adapter reads from a case: the uniform ``UniformCase`` and the
+    structured-logit ``P4Case`` both provide it."""
 
     output_shape: tuple[int, int, int, int]  # [B, Sq, Hq, D]
     key_shape: tuple[int, int, int, int]  # [B, Sk, Hkv, D]

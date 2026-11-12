@@ -1,10 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""On-GPU structured-logit (P4) checks for the shipped gfx942 dense kernel.
+"""On-GPU structured-logit checks for the shipped gfx942 dense kernel.
 
 Each quick case launches its fixture under the four basis exposures and the
-folded exposure, twice, through the same raw-bit adapter as the uniform (P3)
+folded exposure, twice, through the same raw-bit adapter as the uniform
 lane. Every stored coordinate must lie in the Tier B set derived on the CPU
 from the pinned arithmetic path; no measured value enters that set.
 
@@ -161,7 +161,9 @@ def test_p4_structured_logits(case: P4Case) -> None:
 
     Mutation self-checks and record capture run before the gate, so an
     unratified case still records what ratification needs."""
-    arch = current_device_arch_in(("gfx942",), subject="the gfx942 dense P4 gate")
+    arch = current_device_arch_in(
+        ("gfx942",), subject="the gfx942 dense structured-logit gate"
+    )
     subject = resolve_dense_subject(case)
     observation = _run_exposures(case, subject)
     deterministic = _same_bits(observation, _run_exposures(case, subject))

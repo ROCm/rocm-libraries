@@ -1,9 +1,9 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Exact FP32 reachable-set primitives for the structured-logit (P4) check.
+"""Exact FP32 reachable-set primitives for the structured-logit check.
 
-P4 predicts, for every exposed output coordinate, the set of stored values that
+The check predicts, for every exposed output coordinate, the set of stored values that
 the pinned dense-kernel arithmetic can produce. The set is built by
 propagating closed intervals of FP32 values through each step of the path, so
 it encloses every reachable state rather than one chosen realization.
@@ -100,7 +100,7 @@ def round_f32(value: Fraction, mode: str = "rn") -> Fraction:
     ``mode`` is ``"rn"`` (nearest, ties to even), ``"rd"`` (toward -inf),
     ``"ru"`` (toward +inf) or ``"rz"`` (toward zero; no part of the path model,
     used only by the assumption-violating emulations). Subnormals are kept
-    (gradual underflow). Overflow raises: no P4 quantity comes near the FP32
+    (gradual underflow). Overflow raises: no quantity of the check comes near the FP32
     range limit."""
     if mode not in _ROUNDING_MODES:
         raise ValueError(f"mode must be one of {sorted(_ROUNDING_MODES)}")
@@ -240,7 +240,7 @@ def sum_any_order(terms: Iterable[F32Interval]) -> F32Interval:
     The one-addition error model behind the bound holds when the rounded sum
     is normal, and also for a subnormal sum under gradual underflow, where the
     addition is exact. It does not hold for a subnormal sum under a flushing
-    mode, so the P4 recurrence applies this function only to a tile that
+    mode, so the row recurrence applies this function only to a tile that
     holds a normal-scale term (:func:`tile_sum`). The result is itself FP32,
     so the real bounds are snapped inward: up for the lower end, down for the
     upper end."""
@@ -348,11 +348,11 @@ P4_EPILOGUE_ARTIFACTS: Mapping[str, EpilogueArtifact] = MappingProxyType(
                 ),
                 (
                     "bf16",
-                    "e34c0c0287fcf41f71f7a4cec2dc00758194beb090c4a2131aef21ad6ccebfad",
+                    "83204d7a008414796a83d860422f2cd41064d509ad33dee8ad81f9536a72c661",
                 ),
             ),
             single_lanes=frozenset({0, 1}),
-            evidence="ISA, and every coordinate of both Phase 4 gfx942 captures",
+            evidence="ISA, and every coordinate of the gfx942 captures",
         ),
         "rocm-7.1.0": EpilogueArtifact(
             compiler=(
@@ -366,7 +366,7 @@ P4_EPILOGUE_ARTIFACTS: Mapping[str, EpilogueArtifact] = MappingProxyType(
                 ),
                 (
                     "bf16",
-                    "d748447b7b854f82f12bf2e04a5aab1ed13d0a4a4f2402a696669591e2c6be19",
+                    "b8b5a1b2b5a9f632f7c947468b421affb6abf25a1646c2676f16a91e7401305a",
                 ),
             ),
             single_lanes=frozenset({0, 3}),
@@ -491,7 +491,7 @@ def exp2_nearest(argument: Fraction) -> Fraction:
 
 
 class P4ScopeError(ArithmeticError):
-    """A row leaves the domain on which the P4 enclosure is derived.
+    """A row leaves the domain on which the enclosure is derived.
 
     The enclosure is then undefined rather than widened: the correct quick
     matrix must never raise this, and a mutated row that does makes no claim."""
@@ -505,7 +505,8 @@ class P4ScopeError(ArithmeticError):
 # backend expands the ``fdiv`` into a scaled ``v_rcp_f32`` refinement sequence
 # ending in ``v_div_fixup_f32``, and no cited source states that the sequence
 # is correctly rounded. A-DIV names that premise on the range the denominator
-# is proved to reach (lemma L); outside it the enclosure is not derived.
+# is shown to reach on the quick matrix; outside it the enclosure is not
+# derived.
 # ---------------------------------------------------------------------------
 
 DIV_ASSUMPTION = "A-DIV v1: FDIV(1, l) = RN(1 / l) for every FP32 l in [1/2, 2**9)"
@@ -564,7 +565,7 @@ def target_rank(bits: int, dtype: str) -> int:
 def d_ulp(first: int, second: int, dtype: str) -> int:
     """Target-ULP distance: the rank difference of two FP16/BF16 values.
 
-    Every count of target ULPs in P4 (the Tier A radius, the separation
+    Every count of target ULPs in this check (the Tier A radius, the separation
     margins, the head-scale search) is a value of this distance; no real-valued
     ULP size is used."""
     return abs(target_rank(first, dtype) - target_rank(second, dtype))
@@ -582,7 +583,7 @@ def ordered_distance(first: tuple[int, int], second: tuple[int, int]) -> int:
 
 
 # ---------------------------------------------------------------------------
-# P4 fixtures. Every row has two logit classes: the distinguished keys, with
+# Fixtures. Every row has two logit classes: the distinguished keys, with
 # logit ``c``, and the background keys, with logit 0. Each head carries its own
 # ``c = a_h b_h / sqrt(D)`` (``8 a_h b_h`` times a row sign for the Walsh
 # contraction), so a kernel that reads the wrong Q or K head changes a logit.
@@ -605,12 +606,13 @@ MASKED_SCORE = f32(-1e30)
 
 
 class P4Fixture(str, Enum):
-    """Structured Q/K profiles; V uses the P3 basis and folded exposures."""
+    """Structured Q/K profiles; V uses the uniform lane's basis and folded
+    exposures."""
 
-    IDENTITY = "identity"  # P4A: Q and K one-hot at the key's period residue
-    CYCLIC = "cyclic"  # P4B: K one-hot shifted by r
-    WALSH = "walsh"  # P4C: dense signed Walsh rows, one nonzero score per row
-    LATE_MAX = "late_max"  # P4A with K rows below L zeroed: the max arrives late
+    IDENTITY = "identity"  # Q and K one-hot at the key's period residue
+    CYCLIC = "cyclic"  # K one-hot shifted by r
+    WALSH = "walsh"  # dense signed Walsh rows, one nonzero score per row
+    LATE_MAX = "late_max"  # identity with K rows below L zeroed: the max arrives late
 
 
 _FIXTURE_SHIFT = {
@@ -643,7 +645,7 @@ def _scale_token(value: Fraction) -> str:
 
 @dataclass(frozen=True)
 class P4Case:
-    """One P4 launch configuration: shape, fixture, per-head scales, KV tiling.
+    """One launch configuration: shape, fixture, per-head scales, KV tiling.
 
     ``q_scales[h]`` and ``k_scales[h]`` are ``a_h`` and ``b_h``: zero or signed
     powers of two, exact in FP16 and BF16. ``block_m``/``block_n`` are the
@@ -664,16 +666,18 @@ class P4Case:
         object.__setattr__(self, "k_scales", tuple(Fraction(v) for v in self.k_scales))
         base = self.base
         if base.head_dim != P4_PERIOD:
-            raise ValueError(f"P4 requires head_dim == {P4_PERIOD}")
+            raise ValueError(f"structured logits require head_dim == {P4_PERIOD}")
         if base.nhead_q != base.nhead_k:
-            raise ValueError("P4 requires Hq == Hkv: each head carries its own logit")
+            raise ValueError(
+                "structured logits require Hq == Hkv: each head carries its own logit"
+            )
         if len(self.q_scales) != base.nhead_q or len(self.k_scales) != base.nhead_k:
             raise ValueError("one Q and one K scale per head")
         for value in (*self.q_scales, *self.k_scales):
             if value != 0 and not _is_signed_power_of_two(value):
                 raise ValueError(f"scale {value} is not zero or a signed power of two")
         if self.block_n != P4_PERIOD or self.block_m % self.block_n:
-            raise ValueError("P4 tiles require block_n == 64 dividing block_m")
+            raise ValueError("the tiles require block_n == 64 dividing block_m")
         if self.fixture is P4Fixture.CYCLIC:
             if not 0 < self.shift < P4_PERIOD:
                 raise ValueError("the cyclic fixture requires 0 < shift < 64")
@@ -719,7 +723,7 @@ class P4Case:
 
 class P4Mutation(str, Enum):
     """Wrong kernel semantics whose Tier B must be disjoint from the correct one
-    at some coordinate (T5). Each is a closed-form change of the score, the
+    at some coordinate. Each is a closed-form change of the score, the
     legal key set or the softmax recurrence; none needs a reference attention."""
 
     OMIT_SQRT_D = "omit_sqrt_d"  # scale 1 instead of 1/sqrt(D)
@@ -748,7 +752,8 @@ _OMITTED_WALSH_BLOCK = {
     P4Mutation.OMIT_WALSH_BLOCK_3: 3,
 }
 _WALSH_BLOCK = 16
-# The one-key mask-boundary mutations share P3's legal-interval semantics.
+# The one-key mask-boundary mutations share the uniform lane's legal-interval
+# semantics.
 _BOUNDARY_MUTATION = {
     mutation: UniformMutation(mutation.value)
     for mutation in (
@@ -774,7 +779,7 @@ def score_numerator(
     key: int,
     mutation: P4Mutation | None = None,
 ) -> Fraction:
-    """The exact QK dot product ``acc`` (lemma B1: every partial sum is exact).
+    """The exact QK dot product ``acc`` (every partial sum is exact in FP32).
 
     Under ``mutation`` it is the dot product the mutated kernel forms. K rows
     outside ``[0, Sk)`` (an off-by-one read) follow the fixture's formula. With
@@ -847,7 +852,7 @@ P4_EXPOSURES = (*(f"basis@{offset}" for offset in UNIFORM_BASIS_OFFSETS), "folde
 
 
 def p4_inputs(case: P4Case, exposure: str) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Q, K and the P3 exposure's V (scaled ``2**h`` per KV head)."""
+    """Q, K and the uniform exposure's V (scaled ``2**h`` per KV head)."""
     q, k = p4_query_key(case)
     if exposure == "folded":
         v = uniform_inputs_folded(case.base)[2]
@@ -887,12 +892,12 @@ def visited_tiles(
 
 
 class TileClass(str, Enum):
-    """What one visited KV tile holds for one row (§ tile classes).
+    """What one visited KV tile holds for one row.
 
     ``LEGAL`` has a legal key: its weights are normal-scale and its masked keys
     weigh at most ``2**-149``. ``MASKED_PREFIX`` is fully masked with no legal
     tile before it: every weight is ``E(0)``, near one, and the first legal
-    tile rescales that state by at most ``2**-149`` (lemma M).
+    tile rescales that state by at most ``2**-149``.
     ``MASKED_AFTER_LEGAL`` is fully masked after a legal tile: every weight is
     at most ``2**-149``."""
 
@@ -926,7 +931,7 @@ def masked_prefix(
     case: P4Case, query: int, mutation: P4Mutation | None = None
 ) -> tuple[int, ...]:
     """The fully masked leading tiles of ``query`` (class M0), in loop order;
-    their number is ``rho`` of lemma T."""
+    the enclosure is derived for at most one."""
     tiles = visited_tiles(case, query, mutation)
     classes = tile_classes(case, query, mutation)
     return tuple(
@@ -943,8 +948,8 @@ def prefix_selected_keys(
     dim: int,
     mutation: P4Mutation | None = None,
 ) -> int:
-    """``r`` of lemma T: how many keys the exposed coordinate selects inside the
-    masked prefix of ``query``."""
+    """How many keys the exposed coordinate selects inside the masked prefix of
+    ``query``."""
     return sum(
         exposure_key(case, exposure, dim, tile) is not None
         for tile in masked_prefix(case, query, mutation)
@@ -954,15 +959,16 @@ def prefix_selected_keys(
 def masked_prefix_scope(
     case: P4Case, query: int, mutation: P4Mutation | None = None
 ) -> str | None:
-    """Why ``query`` is outside lemma M, or ``None`` when it is covered.
+    """Why the masked-prefix argument does not cover ``query``, or ``None`` when
+    it does.
 
-    Lemma M is derived for at most one fully masked leading tile followed by a
+    The residue bound is derived for at most one fully masked leading tile followed by a
     legal tile. More leading masked tiles, or a row with no legal tile at all,
     need their own residue bound and are not enclosed."""
     classes = tile_classes(case, query, mutation)
     prefix = sum(item is TileClass.MASKED_PREFIX for item in classes)
     if prefix > 1:
-        return f"row {query} has {prefix} fully masked leading tiles (lemma M: 1)"
+        return f"row {query} has {prefix} fully masked leading tiles (derived for 1)"
     if TileClass.LEGAL not in classes:
         return f"row {query} visits no tile with a legal key"
     return None
@@ -1067,7 +1073,8 @@ def row_trace(
     sum, never to the accumulator. ``e_ulps`` loosens A-E for failure
     attribution only.
 
-    Raises :class:`P4ScopeError` for a row outside lemma M or whose
+    Raises :class:`P4ScopeError` for a row the masked-prefix argument does not
+    cover or whose
     denominator leaves the A-DIV domain."""
     outside = masked_prefix_scope(case, query, mutation)
     if outside is not None:
@@ -1146,9 +1153,10 @@ def _accumulator_steps(
     ``RN(o alpha)`` and after the tile's PV atoms.
 
     Per tile ``o = MFMA(RN(o alpha), product)``. With one nonzero product per
-    output per tile (lemma P), the tile performs at most one real addition; it
+    output per tile, the tile performs at most one real addition; it
     is exact when the accumulator is zero, else faithful (or RN when pinned).
-    After a masked prefix the rescaled value is the residue of lemma M."""
+    After a masked prefix the rescaled value is the prefix residue, at most
+    ``2**(h-149)``."""
     if mfma not in MFMA_ROUNDING:
         raise ValueError(f"mfma must be one of {MFMA_ROUNDING}")
     trace = row_trace(case, head, query, mutation, e_ulps)
@@ -1252,7 +1260,7 @@ def tier_b_bounds(
 
 
 # ---------------------------------------------------------------------------
-# Certified targets (T0) and Tier A (T3).
+# Certified targets and Tier A.
 # ---------------------------------------------------------------------------
 
 
@@ -1314,7 +1322,7 @@ def coordinate_class(
 
 @dataclass(frozen=True)
 class CertifiedTarget:
-    """``q_T(y*)`` and what certifies it (T0).
+    """``q_T(y*)`` and what certifies it.
 
     A rational target is rounded exactly and has no boundary record. An
     irrational one carries the two rounding boundaries adjacent to its bits
@@ -1346,7 +1354,7 @@ def rounding_boundaries(bits: int, dtype: str) -> tuple[Fraction | None, Fractio
 def certify_target(
     dtype: str, exponent: int, item: CoordinateClass, digits: int = 50
 ) -> CertifiedTarget:
-    """``q_T(2**h (m_c e^c + m_0) / (n_c e^c + n_0))``, certified (T0).
+    """``q_T(2**h (m_c e^c + m_0) / (n_c e^c + n_0))``, certified.
 
     Rational when ``c = 0`` or the coordinate's class mix is proportional to the
     row's, and then rounded exactly. Otherwise irrational
@@ -1394,7 +1402,7 @@ def tier_a_bounds(
     rows: Iterable[int] | None = None,
     classes: set[tuple[int, CoordinateClass]] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Certified target bits and the T3 radius (1 at the row max, 2 elsewhere,
+    """Certified target bits and the Tier A radius (1 at the row max, 2 elsewhere,
     0 for a structural zero) for every coordinate of one exposure. ``classes``,
     when given, collects each distinct ``(head exponent, class)``."""
     center = np.zeros(case.output_shape, dtype=np.uint16)
@@ -1453,7 +1461,7 @@ class P4Violation(str, Enum):
 
     These realizations are diagnostic. They are never enclosed: an output that
     leaves Tier B this way must fail and be attributed to the assumption, and
-    one that stays inside Tier B shows that P4 cannot observe the primitive,
+    one that stays inside Tier B shows that the check cannot observe the primitive,
     which is no evidence for the assumption."""
 
     # A-E: every v_exp_f32 result two FP32 steps outside its candidate hull.
@@ -1968,7 +1976,7 @@ P4_HEAD_SCALE_MARGIN: Mapping[str, int] = MappingProxyType(
 )
 P4_CYCLIC_SHIFT = 37
 P4_LATE_KEYS = 64
-# Tile sizes of the calibrated P3 quick specs (the same dispatch identities).
+# Tile sizes of the calibrated uniform quick specs (the same dispatch identities).
 _QUICK_BLOCK_M = {
     dtype: entry.spec.block_m for (_, _, dtype), entry in UNIFORM_CALIBRATION.items()
 }
@@ -1978,7 +1986,7 @@ P4_SEARCH_BASES = tuple(
 
 
 def p4_quick_case(base: UniformCase, fixture: P4Fixture) -> P4Case:
-    """The quick-lane case of one fixture on one P3 quick shape."""
+    """The quick-lane case of one fixture on one uniform quick shape."""
     fixture = P4Fixture(fixture)
     q_scales, k_scales = P4_HEAD_SCALES[fixture_family(fixture)]
     return P4Case(
@@ -2024,7 +2032,7 @@ def tier_a_exposure(
 
 
 # ---------------------------------------------------------------------------
-# Mutation separation (T5).
+# Mutation separation.
 # ---------------------------------------------------------------------------
 
 _EVERY_FIXTURE = (
@@ -2074,12 +2082,13 @@ class Separation:
 
 
 # Block, tile, window and causal-diagonal edges of both quick kernels. A gap on
-# a subset of rows lower-bounds the full gap, which is enough to prove I5.
+# a subset of rows lower-bounds the full gap, which is enough to prove that the
+# mutation is caught.
 P4_SEPARATION_ROWS = (0, 1, 6, 7, 31, 63, 64, 65, 127, 128, 191, 192, 255)
 
 SEPARATION_LABELS = (
-    "owned by P3",
-    "owned by another P4 fixture",
+    "owned by the uniform lane",
+    "owned by another fixture",
     "needs a stronger fixture",
     "out of scope",
 )
@@ -2091,7 +2100,7 @@ SEPARATION_LABELS = (
 # max arrives in a later tile, separates it on the same kernel.
 P4_UNSEPARATED: Mapping[tuple[str, P4Mutation], str] = MappingProxyType(
     {
-        (case.case_id, P4Mutation.OMIT_RESCALE): "owned by another P4 fixture"
+        (case.case_id, P4Mutation.OMIT_RESCALE): "owned by another fixture"
         for case in P4_QUICK_CASES
         if case.mask == "causal" and case.fixture is not P4Fixture.LATE_MAX
     }
@@ -2104,9 +2113,9 @@ def mutation_separation(
     *,
     rows: Iterable[int] | None = P4_SEPARATION_ROWS,
 ) -> Separation:
-    """Evaluate T5 for one mutation over every exposure; ``rows=None`` uses
-    every row. A row the mutated semantics put outside lemma M has no mutated
-    enclosure and proves nothing; T5 needs one separating coordinate, so
+    """Evaluate the separation of one mutation over every exposure; ``rows=None``
+    uses every row. A row whose mutated enclosure is not derived proves
+    nothing; separation needs one coordinate, so
     leaving it out lower-bounds the gap."""
     mutation = P4Mutation(mutation)
     if mutation not in applicable_mutations(case):
@@ -2133,7 +2142,8 @@ def mutation_separation(
 
 def row_scope(case: P4Case, query: int, mutation: P4Mutation | None) -> str | None:
     """Why the enclosure of ``query`` is not derived under ``mutation`` for some
-    head (outside lemma M, or a denominator outside the A-DIV domain), or
+    head (more than one fully masked leading tile, no legal tile, or a
+    denominator outside the A-DIV domain), or
     ``None`` when every head is covered."""
     try:
         for head in range(case.base.nhead_q):
@@ -2248,7 +2258,7 @@ _VIOLATION_LABEL: Mapping[P4Violation, P4Label] = MappingProxyType(
 )
 # Violations whose stores stay inside Tier B at every coordinate of the quick
 # matrix (all 1,310,720 coordinates of each case, both epilogue roundings):
-# the stored bits cannot show them. This records P4's sensitivity to the
+# the stored bits cannot show them. This records the check's sensitivity to the
 # primitive; it is no evidence for the assumption. The conversions are the
 # observable ones: a truncating cast, and for FP16 a truncated store.
 P4_UNOBSERVED_VIOLATIONS = frozenset(
@@ -2310,7 +2320,7 @@ class P4Result:
 
 
 def _genuine_addition(case: P4Case, query: int, head: int, dim: int) -> bool:
-    """Whether a folded coordinate's MFMA adds two nonzero values (§2.1)."""
+    """Whether a folded coordinate's MFMA adds two nonzero values."""
     trace = row_trace(case, head, query)
     exponent = case.head_scale_exponents[head]
     nonzero = 0
@@ -2435,7 +2445,7 @@ def analyze_p4_policy(
     derived (:func:`derived_rows`).
 
     Observed values are only compared: nothing here can enlarge Tier B or the
-    exponential candidate sets (I6)."""
+    exponential candidate sets."""
     selected = None if mutation is None else P4Mutation(mutation)
     if selected is not None and selected not in applicable_mutations(case):
         raise ValueError(f"mutation {selected.value} does not apply to {case.case_id}")
@@ -2641,10 +2651,10 @@ class P4Diagnostics:
     order, ``E = RN(2**x)``, RN MFMA, double-rounded epilogue). When the
     launched code object is a named epilogue artifact, ``artifact_exact``
     counts agreement with that artifact's per-site epilogue; agreement
-    everywhere is then consistent with E1 = the nearest exponential, which the
+    everywhere is then consistent with a correctly rounded exponential, which the
     IR-exact count alone cannot show on an affected compiler. ``mfma_rn``
     counts folded coordinates with a genuine MFMA addition that lie in the
-    RN-accumulate Tier B (E6)."""
+    RN-accumulate Tier B."""
 
     ir_exact: int
     artifact: str | None
@@ -2793,7 +2803,7 @@ def p4_records(
 
 
 # ---------------------------------------------------------------------------
-# Calibration: identity and scope only (D8, invariant I6).
+# Calibration: identity and scope only.
 # ---------------------------------------------------------------------------
 
 P4_POLICY = "tier_b"
@@ -2816,7 +2826,7 @@ class P4CalibrationEntry:
 
     def __post_init__(self) -> None:
         if self.policy != P4_POLICY:
-            raise ValueError(f"P4 supports only policy={P4_POLICY!r}")
+            raise ValueError(f"only policy={P4_POLICY!r} is supported")
         if tuple(self.assumptions) != P4_ASSUMPTIONS:
             raise ValueError(f"assumptions must be {P4_ASSUMPTIONS}")
         if not self.case_ids or len(set(self.case_ids)) != len(self.case_ids):
@@ -2838,7 +2848,7 @@ class P4CalibrationEntry:
 
 # Ratified on gfx942. Case ids are literal, so changing a fixture, its head
 # scales or the quick shapes fails closed instead of following silently. The
-# dispatch fingerprint is the ratified uniform (P3) one; a contract checks it.
+# dispatch fingerprint is the ratified uniform one; a contract checks it.
 P4_CALIBRATION: Mapping[tuple[str, str, str], P4CalibrationEntry] = MappingProxyType(
     {
         ("gfx942", "attention_gfx942_dense", "fp16"): P4CalibrationEntry(
@@ -2903,13 +2913,13 @@ def require_p4_calibration(
     entry = table.get(key)
     if entry is None:
         raise AssertionError(
-            f"no P4 calibration for {key}, case={case.case_id}; "
+            f"no structured-logit calibration for {key}, case={case.case_id}; "
             f"{_P4_RECALIBRATION_REMEDY}{suffix}"
         )
     problems = entry.mismatch(case, spec)
     if problems:
         raise AssertionError(
-            f"P4 calibration {key} does not cover case={case.case_id}: "
+            f"structured-logit calibration {key} does not cover case={case.case_id}: "
             f"{'; '.join(problems)}; {_P4_RECALIBRATION_REMEDY}{suffix}"
         )
     return entry
