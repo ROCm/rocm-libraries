@@ -275,14 +275,12 @@ class TestValidateConfig(unittest.TestCase):
         codegen_dir = os.path.join(os.path.dirname(__file__), "..", "codegen", "fmha")
         # Scope instance_gen's import-time path changes and temporary modules.
         # Validate with the same validation module object used by instance_gen.
-        with (
-            mock.patch.object(sys, "path", [codegen_dir, *sys.path]),
-            mock.patch.dict(sys.modules),
-        ):
-            import instance_gen
+        with mock.patch.object(sys, "path", [codegen_dir, *sys.path]):
+            with mock.patch.dict(sys.modules):
+                import instance_gen
 
-            validation = sys.modules["validation"]
-            self._check_gfx1100_batch_prefill_emission(instance_gen, validation)
+                validation = sys.modules["validation"]
+                self._check_gfx1100_batch_prefill_emission(instance_gen, validation)
 
     def _check_gfx1100_batch_prefill_emission(self, instance_gen, validation):
         sweep = os.path.join(
@@ -386,6 +384,24 @@ class TestValidateConfig(unittest.TestCase):
                 self.assertTrue(
                     any("tile/wave/warp shapes" in e for e in r.errors), r.errors
                 )
+
+    def test_gfx1100_batch_prefill_m0_table_rejects_ambiguous_pair(self):
+        from fmha.validation import (
+            GFX11_BATCH_PREFILL_SHAPES,
+            _build_gfx11_batch_prefill_m0,
+        )
+
+        expected = {(128, 128): 128, (96, 96): 64, (64, 64): 64}
+        self.assertEqual(
+            _build_gfx11_batch_prefill_m0(GFX11_BATCH_PREFILL_SHAPES), expected
+        )
+        self.assertEqual(GFX11_BATCH_PREFILL_M0, expected)
+        shapes = set(GFX11_BATCH_PREFILL_SHAPES)
+        shapes.add(
+            ((128, 32, 32, 96, 32, 96), (8, 1, 1, 8, 1, 1), (16, 16, 16, 16, 16, 16))
+        )
+        with self.assertRaisesRegex(ValueError, r"\(96, 96\).*more than one M0"):
+            _build_gfx11_batch_prefill_m0(shapes)
 
     def test_splitkv_combine_bn1_must_be_32(self):
         cfg = _base_config(family="fwd_splitkv_combine", pipeline="qr")

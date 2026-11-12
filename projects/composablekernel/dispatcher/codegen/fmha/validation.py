@@ -371,16 +371,27 @@ GFX11_BATCH_PREFILL_SHAPES = {
     ((64, 32, 32, 64, 32, 64), (4, 1, 1, 4, 1, 1), (16, 16, 16, 16, 16, 16)),
 }
 
+
 # gfx1100 batch_prefill: each (hdim_q, hdim_v) pair maps to the one M0 that has
 # device evidence, derived from the shapes above so the two cannot drift. Each warp
 # owns one 16-row WMMA slice, so the block is M0 / 16 warps of 32 lanes, i.e.
 # M0 * 2 threads: M0=128 lands on Gfx11Policy's Independent-V path (block 256) and
 # M0=64 on the fallback gemm1, which the pipeline reaches by permuting P into that
 # gemm's A distribution.
-GFX11_BATCH_PREFILL_M0 = {
-    (tile[5], tile[3]): tile[0]
-    for tile, _, _ in sorted(GFX11_BATCH_PREFILL_SHAPES, reverse=True)
-}
+def _build_gfx11_batch_prefill_m0(shapes) -> Dict[Tuple[int, int], int]:
+    """Map (hdim_q, hdim_v) -> M0; a pair with two M0s would make emission ambiguous."""
+    m0 = {}
+    for tile, _, _ in sorted(shapes, reverse=True):
+        pair = (tile[5], tile[3])
+        if m0.setdefault(pair, tile[0]) != tile[0]:
+            raise ValueError(
+                f"gfx11 batch_prefill head dims {pair} map to more than one M0: "
+                f"{m0[pair]} and {tile[0]}"
+            )
+    return m0
+
+
+GFX11_BATCH_PREFILL_M0 = _build_gfx11_batch_prefill_m0(GFX11_BATCH_PREFILL_SHAPES)
 
 
 def check_logits_bias(logits: str, bias: str) -> bool:
