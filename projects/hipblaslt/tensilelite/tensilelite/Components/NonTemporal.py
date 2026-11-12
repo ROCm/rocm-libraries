@@ -123,8 +123,9 @@ def tdmIgnoredHints(state, asm_caps):
 
     In a set of tdmHintSets one instruction moves every member, so on an ISA with th:
     modifiers it carries one NonTemporal scope, TemporalHint and NonVolatile for all of them:
-    the fields tdmCacheModifiers emits for the set. A key is listed when its value differs
-    from that field; NonTemporal is compared on its scope bits, the only ones a TDM load reads.
+    the fields tdmCacheModifiers emits for the set. A stashed member (tdmStashedMembers) issues
+    its own load with those same fields. A key is listed when its value differs from that
+    field; NonTemporal is compared on its scope bits, the only ones a TDM load reads.
     """
     if not _has_temporal_hint(asm_caps):
         return []
