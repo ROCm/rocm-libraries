@@ -8,6 +8,7 @@
 #include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
 #include "ck_tile/ops/common/tensor_layout.hpp"
 #include "ck_tile/ops/gemm/pipeline/gemm_universal_pipeline_ag_bg_cr_policy.hpp"
+#include "ck_tile/ops/gemm/pipeline/tdm_multicast_direction.hpp"
 
 namespace ck_tile {
 
@@ -26,13 +27,6 @@ struct scale_block_size_or_default<T, std::void_t<decltype(T::ScaleBlockSize)>>
     static constexpr index_t value = T::ScaleBlockSize;
 };
 } // namespace detail
-
-enum class MultiCastDirection
-{
-    kM,
-    kN,
-    kMN
-};
 
 // Default policy for GemmPipelineAgBgCrCompTDM
 template <bool WaveSpecialized                               = false,

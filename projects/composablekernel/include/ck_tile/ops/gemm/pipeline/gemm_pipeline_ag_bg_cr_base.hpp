@@ -127,16 +127,22 @@ struct GemmPipelineAgBgCrImplBase
         amd_tdm_load<Dim>(groups, lds_addr, global_addr, extent);
     }
 
-    // The TDMConfig of A's or B's LDS tile: the LDS padding of Policy::GetLdsPaddingConfig, no
-    // cluster multicast.
-    template <bool IsA>
-    CK_TILE_DEVICE static TDMConfig MakeTdmConfig()
+    // The TDMConfig of A's or B's LDS tile, or with IsScale of its scales: the LDS padding of
+    // Policy::GetLdsPaddingConfig and the cluster multicast workgroup_mask (none by default).
+    template <bool IsA, bool IsScale = false>
+    CK_TILE_DEVICE static TDMConfig MakeTdmConfig(uint16_t workgroup_mask = 0)
     {
-        constexpr auto padding = Policy::template GetLdsPaddingConfig<Problem, IsA>();
+        constexpr auto padding = [] {
+            if constexpr(IsScale)
+                return Policy::template GetLdsPaddingConfig<Problem, IsA, true>();
+            else
+                return Policy::template GetLdsPaddingConfig<Problem, IsA>();
+        }();
         TDMConfig config;
         config.pad_enable              = padding[number<0>{}];
         config.pad_config.pad_amount   = padding[number<1>{}];
         config.pad_config.pad_interval = padding[number<2>{}];
+        config.workgroup_mask          = workgroup_mask;
         return config;
     }
 

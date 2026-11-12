@@ -12,6 +12,7 @@
 #include "ck_tile/ops/gemm/pipeline/gemm_pipeline_problem.hpp"
 #include "ck_tile/ops/gemm/pipeline/tile_gemm_traits.hpp"
 #include "ck_tile/ops/gemm/pipeline/mx_gemm_pipeline_ag_bg_cr_comp_tdm_scheduled_tuning.hpp"
+#include "ck_tile/ops/gemm/pipeline/tdm_multicast_direction.hpp"
 
 namespace ck_tile {
 
@@ -366,15 +367,19 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
         return (IsScale || op.iterate_rows == 0) && op.pad_bytes > 0;
     }
 
-    /// The TDM LDS padding of A's or B's data or scales; the zero config without padding.
+    /// The TDM LDS padding of A's or B's data or scales as the default TDM policy gives it:
+    /// (pad_enable, pad_amount, pad_interval), zeros without padding.
     template <typename Problem, bool IsA, bool IsScale = false>
-    CK_TILE_HOST_DEVICE static constexpr TDMLdsPaddingConfig GetLdsPaddingConfig()
+    CK_TILE_HOST_DEVICE static constexpr auto GetLdsPaddingConfig()
     {
         constexpr MxTdmScheduledOperand op = GetLdsOperand<Problem, IsA, IsScale>();
-        if constexpr(GetLdsPadEnable<Problem, IsA, IsScale>())
-            return make_tdm_lds_padding_config(op.block_bytes, op.pad_bytes);
-        else
-            return TDMLdsPaddingConfig{};
+        constexpr bool enable              = GetLdsPadEnable<Problem, IsA, IsScale>();
+        constexpr TDMLdsPaddingConfig padding =
+            enable ? make_tdm_lds_padding_config(op.block_bytes, op.pad_bytes)
+                   : TDMLdsPaddingConfig{};
+        return make_tuple(number<enable>{},
+                          number<static_cast<index_t>(padding.pad_amount)>{},
+                          number<static_cast<index_t>(padding.pad_interval)>{});
     }
 
     /// A's or B's data in LDS as a descriptor over [tile row in fragment order, K word]. Row t =
@@ -652,28 +657,25 @@ struct MxGemmPipelineAgBgCrCompTDMScheduledPolicy
         return true;
     }
 
-    /// The cluster workgroups that share this one's A (same cluster y) or B (same cluster x)
-    /// tile and so receive its TDM loads; 0 without a cluster. Grid x walks N tiles and y M
-    /// tiles.
-    template <bool IsA>
-    CK_TILE_DEVICE static uint32_t GetTDMWorkgroupMask(index_t cluster_wx, index_t cluster_wy)
+    /// The cluster workgroups that share this one's A (kM: same M tile) or B (kN: same N tile)
+    /// and so receive its TDM loads; 0 without a cluster. As the default TDM policy's, but grid
+    /// x walks N tiles and y M tiles, and the cluster shape is the tuning's.
+    template <MultiCastDirection Direction, typename Problem>
+    CK_TILE_DEVICE static uint16_t GetTDMWorkgroupMask(dim3 block_id_in_cluster)
     {
+        static_assert(Direction != MultiCastDirection::kMN,
+                      "comp_tdm_scheduled multicasts A along M and B along N");
+        uint32_t mask = 0;
         if constexpr(!HasCluster())
-        {
-            ignore = cluster_wx;
-            ignore = cluster_wy;
-            return 0;
-        }
-        else if constexpr(IsA)
-        {
-            ignore = cluster_wx;
-            return cluster_mask_same_y(Tuning::kClusterDimX, cluster_wy);
-        }
+            ignore = block_id_in_cluster;
+        else if constexpr(Direction == MultiCastDirection::kM)
+            mask = cluster_mask_same_y(Tuning::kClusterDimX, block_id_in_cluster.y);
         else
-        {
-            ignore = cluster_wy;
-            return cluster_mask_same_x(Tuning::kClusterDimX, Tuning::kClusterDimY, cluster_wx);
-        }
+            mask = cluster_mask_same_x(
+                Tuning::kClusterDimX, Tuning::kClusterDimY, block_id_in_cluster.x);
+        // A cluster has at most 16 workgroups; without this the 16-bit mask costs an s_and.
+        __builtin_assume(mask <= 0xFFFFu);
+        return static_cast<uint16_t>(mask);
     }
 
     /// The C block tile: per thread the WMMA C fragments of its M and N repeats, (rm, rn) outer

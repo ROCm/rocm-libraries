@@ -255,8 +255,8 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         uint32_t smem_addr;
         index_t packed_k;
         index_t k_atoms;
-        uint32_t a_mask = 0;
-        uint32_t b_mask = 0;
+        uint16_t a_mask = 0;
+        uint16_t b_mask = 0;
         TDMGroups data{};
         TDMGroups scale{};
         // Group 0 of each load is rebuilt from these: patching the hoisted descriptor's own
@@ -307,8 +307,12 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                 cluster_wx = static_cast<index_t>(get_cluster_workgroup_id_x());
                 cluster_wy = static_cast<index_t>(get_cluster_workgroup_id_y());
             }
-            b_mask = Policy::template GetTDMWorkgroupMask<false>(cluster_wx, cluster_wy);
-            a_mask = Policy::template GetTDMWorkgroupMask<true>(cluster_wx, cluster_wy);
+            const dim3 block_id_in_cluster{
+                static_cast<uint32_t>(cluster_wx), static_cast<uint32_t>(cluster_wy), 0};
+            b_mask = Policy::template GetTDMWorkgroupMask<MultiCastDirection::kN, Problem>(
+                block_id_in_cluster);
+            a_mask = Policy::template GetTDMWorkgroupMask<MultiCastDirection::kM, Problem>(
+                block_id_in_cluster);
         }
 
         template <typename Window>
@@ -376,17 +380,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         template <bool IsA, bool IsScale>
         CK_TILE_DEVICE TDMConfig Config() const
         {
-            const uint32_t workgroup_mask = IsA ? a_mask : b_mask;
-            // A cluster has at most 16 workgroups; without this the 16-bit field costs an s_and.
-            __builtin_assume(workgroup_mask <= 0xFFFFu);
-            constexpr bool pad_enable = Policy::template GetLdsPadEnable<Problem, IsA, IsScale>();
-            constexpr TDMLdsPaddingConfig padding =
-                Policy::template GetLdsPaddingConfig<Problem, IsA, IsScale>();
-            TDMConfig config{};
-            config.pad_enable     = pad_enable;
-            config.pad_config     = padding;
-            config.workgroup_mask = static_cast<uint16_t>(workgroup_mask);
-            return config;
+            return PipelineImplBase::template MakeTdmConfig<IsA, IsScale>(IsA ? a_mask : b_mask);
         }
 
         template <bool IsA>
