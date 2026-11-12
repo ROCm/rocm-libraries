@@ -457,6 +457,10 @@ validParameters = { # we need to make sure this matches develop
     # issuer-only READY wait_tensorcnt=1. Only UseSubtileImpl + TDMInst=3 +
     # MIWaveGroup[2,2] + MT256/DU512 MX. Off by default.
     "TDMSingleIssuer": [0, 1],
+    # TDMSingleIssuer mainloop: one body per wave with its issuer duties (TDM, GL2 PF,
+    # cluster signal) resolved at codegen, entered by a single WaveIdx dispatch, instead
+    # of one shared body that tests WaveIdx for every duty each iteration. Off by default.
+    "TDMWaveRoleBodies": [0, 1],
     # TDM multicast across a ClusterDim cluster. 1 (default) = peers share tiles via
     # multicast loads; 0 = every WG fetches its own tiles and the cluster (and its
     # ClusterBarrier) only keeps the WGs in step for GL1/GL2 reuse.

@@ -6812,34 +6812,59 @@ class LogicalScheduler:
         # offsets (no mid-iter v_xor). Even starts phase 0, odd starts phase 1;
         # ExitEven xors LR VGPRs once so NGLL/NLL (runtime xor) see buf1.
         abLdsBake = getattr(self, "_ab_lds_bake", False) and not portSplit
+        assert abLdsBake or not kernel.get("TDMWaveRoleBodies"), \
+            "TDMWaveRoleBodies needs the TDMSingleIssuer A/B LDS bake mainloop"
         if abLdsBake:
             from .SubtileLREmit import localReadLDSBufferSwap
             assert uf == 1, "A/B LDS bake requires unroll_factor==1"
             assert skipMainloop is not None, "A/B LDS bake exits the odd copy to SkipMainloop"
-            loopBeginOdd = Label("LoopBeginL_BufOdd", "", alignment=16)
             exitEven = Label("ExitMainloopBufEven", "")
-            module.add(loopBegin)
-            addTraceMarker()
-            loopBodyEven = self._emitLoop(
-                writer, kernel, "MAINLOOP_C0_BufEven", self._emitted_per_unroll[0])
-            _emitBodySetupBranch(
-                module, loopBodyEven, loopExitSetup("buf even"),
-                SCBranchSCC1(labelName=exitEven.getLabelName(),
-                             comment="buf even exit → sync LR + NGLL"),
-                hoist=exitHoist)
-            module.add(loopBeginOdd)
-            addTraceMarker()
-            loopBodyOdd = self._emitLoop(
-                writer, kernel, "MAINLOOP_C0_BufOdd",
-                self._emitted_odd_per_unroll[0])
-            _emitBodySetupBranch(
-                module, loopBodyOdd, loopExitSetup("buf odd"),
-                SCBranchSCC0(labelName=loopBegin.getLabelName(),
-                             comment="restart mainloop (buf even)"),
-                hoist=exitHoist)
-            # Odd exit skips ExitEven's xor (VGPR still buf0) into SkipMainloop.
-            module.add(SBranch(labelName=skipMainloop.getLabelName(),
-                               comment="buf odd exit → NGLL (VGPR already buf0)"))
+            # TDMWaveRoleBodies: one even/odd pair per wave with its WaveIdx
+            # gates folded; waves dispatch once here instead of per duty.
+            roles = (list(range(kernel["NumThreads"] // kernel["WavefrontSize"]))
+                     if kernel.get("TDMWaveRoleBodies") else [None])
+            # _emitLoop adjusts wait counts in place: copy before any role emits.
+            emittedEven = [self._emitted_per_unroll[0]] + [
+                copy.deepcopy(self._emitted_per_unroll[0]) for _ in roles[1:]]
+            emittedOdd = [self._emitted_odd_per_unroll[0]] + [
+                copy.deepcopy(self._emitted_odd_per_unroll[0]) for _ in roles[1:]]
+            suffixes = ["" if r in (None, 0) else f"_W{r}" for r in roles]
+            loopBegins = [loopBegin] + [Label("LoopBeginL" + s, "", alignment=16)
+                                        for s in suffixes[1:]]
+            if len(roles) > 1:
+                from .WaveRoleBodies import emitWaveRoleDispatch
+                emitWaveRoleDispatch(module, loopBegins, "TDMWaveRoleBodies")
+
+            def roleBody(body, role):
+                if role is None:
+                    return body
+                from .WaveRoleBodies import foldWaveIdxGates
+                return foldWaveIdxGates(body, role)
+
+            for ri, role in enumerate(roles):
+                sfx = suffixes[ri]
+                loopBeginOdd = Label("LoopBeginL_BufOdd" + sfx, "", alignment=16)
+                module.add(loopBegins[ri])
+                addTraceMarker()
+                loopBodyEven = roleBody(self._emitLoop(
+                    writer, kernel, "MAINLOOP_C0_BufEven" + sfx, emittedEven[ri]), role)
+                _emitBodySetupBranch(
+                    module, loopBodyEven, loopExitSetup("buf even"),
+                    SCBranchSCC1(labelName=exitEven.getLabelName(),
+                                 comment="buf even exit → sync LR + NGLL"),
+                    hoist=exitHoist)
+                module.add(loopBeginOdd)
+                addTraceMarker()
+                loopBodyOdd = roleBody(self._emitLoop(
+                    writer, kernel, "MAINLOOP_C0_BufOdd" + sfx, emittedOdd[ri]), role)
+                _emitBodySetupBranch(
+                    module, loopBodyOdd, loopExitSetup("buf odd"),
+                    SCBranchSCC0(labelName=loopBegins[ri].getLabelName(),
+                                 comment="restart mainloop (buf even)"),
+                    hoist=exitHoist)
+                # Odd exit skips ExitEven's xor (VGPR still buf0) into SkipMainloop.
+                module.add(SBranch(labelName=skipMainloop.getLabelName(),
+                                   comment="buf odd exit → NGLL (VGPR already buf0)"))
             module.add(exitEven)
             module.add(localReadLDSBufferSwap("A", writer, kernel))
             module.add(localReadLDSBufferSwap("B", writer, kernel))

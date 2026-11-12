@@ -7167,6 +7167,8 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "TDMSingleIssuer requested but not applicable: %s" % _siWhy)
       elif state.get("LDSSegmentInterleave", 0) != 0:
         reject(state, printRejectionReason, "TDMSingleIssuer incompatible with LDSSegmentInterleave")
+    if state.get("TDMWaveRoleBodies") and not state.get("TDMSingleIssuer"):
+      reject(state, printRejectionReason, "TDMWaveRoleBodies requires TDMSingleIssuer")
 
     # lds buffer size for reduction
     # if User want to control the LDS usage, we may open this para in the future
