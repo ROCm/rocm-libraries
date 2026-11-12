@@ -15,7 +15,7 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 * Changed `hiptensorPermute` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` when the output tensor's data type differs from the input tensor's. Previously the mismatch passed validation and the call failed with `HIPTENSOR_STATUS_INTERNAL_ERROR` because no kernel matched.
 * Changed `hiptensorElementwiseTrinaryExecute` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` when the data type of D differs from that of C, matching `hiptensorElementwiseBinaryExecute`. Previously the mismatch failed later with `HIPTENSOR_STATUS_INTERNAL_ERROR`.
 * Changed `hiptensorCreateContraction` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` when C doesn't carry exactly the modes of D, and `HIPTENSOR_STATUS_INVALID_VALUE` when a mode has a different extent in C and in D. `hiptensorCreateContractionTrinary` applies the same rule to D and E. Previously the mismatch passed validation.
-* Changed `hiptensorContract` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` for an in-place contraction, where C and D are the same buffer, when C and D have different strides. Previously it returned wrong results with `HIPTENSOR_STATUS_SUCCESS`.
+* Changed `hiptensorContract` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` for an in-place contraction, where C and D are the same buffer, when C and D have different strides. `hiptensorContractTrinary` applies the same rule to D and E. Previously both returned wrong results with `HIPTENSOR_STATUS_SUCCESS`.
 * Changed `hiptensorCreateContraction` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` for a complex contraction when a tensor isn't packed or when C is laid out differently from D. Previously both cases returned wrong results with `HIPTENSOR_STATUS_SUCCESS`.
 
 ### Resolved issues
