@@ -150,7 +150,7 @@ __device__ void k2rFormatWeightsElementwise(const K2FormatArgs& f)
                                                : w[k2FilterOffset(f, n, cc, tap, mirror)];
                     unsigned short hi, lo;
                     k2SplitBf16(v, hi, lo);
-                    out = part == 1 ? lo : hi;
+                    out = part == 1 ? lo : part == 2 ? k1BfFinite(hi) : hi; // part 2: with x lo
                 }
             }
             reinterpret_cast<unsigned short*>(wf)[i] = out;

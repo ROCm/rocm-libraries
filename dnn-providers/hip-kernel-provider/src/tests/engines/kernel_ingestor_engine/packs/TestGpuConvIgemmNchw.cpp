@@ -27,6 +27,8 @@
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvIgemmNchwProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvTf32TestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvTf32Timing.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
@@ -88,54 +90,59 @@ const std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>& catalog()
             roots.push_back(dir / "lib" / "hipdnn_plugins" / "engines"
                             / HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR);
         }
-        const std::string file = "conv_igemm_nchw_bwd.kdp.json";
-        std::filesystem::path found;
-        for(const auto& root : roots)
-        {
-            std::error_code error;
-            for(auto it = std::filesystem::recursive_directory_iterator(root, error);
-                !error && found.empty() && it != std::filesystem::recursive_directory_iterator();
-                it.increment(error))
-            {
-                if(it->path().filename() == file)
-                {
-                    found = it->path();
-                }
-            }
-            if(!found.empty())
-            {
-                break;
-            }
-        }
-        if(found.empty())
-        {
-            throw std::runtime_error("no " + file + " beside the provider or this test binary");
-        }
-        std::ifstream stream(found);
-        const auto pack = nlohmann::json::parse(stream);
+        // The native configs and the three-bf16 ones (TF32 permission), one pack each.
         std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> kernels;
-        for(const auto& descriptor : pack.at("kernelDescriptors"))
+        for(const std::string file :
+            {"conv_igemm_nchw_bwd.kdp.json", "conv_igemm_nchw_bwd_f32x3.kdp.json"})
         {
-            hipdnn_plugin_sdk::ingestor::KernelDefinition kernel;
-            kernel.name = descriptor.at("name").get<std::string>();
-            kernel.source.kind = hipdnn_plugin_sdk::ingestor::KernelSourceKind::EMBEDDED_SOURCE;
-            kernel.source.sourceFile
-                = descriptor.at("kernel_source").at("source_file").get<std::string>();
-            kernel.source.entryPoint
-                = descriptor.at("kernel_source").at("entry_point").get<std::string>();
-            for(const auto& [key, value] : descriptor.at("metadata").items())
+            std::filesystem::path found;
+            for(const auto& root : roots)
             {
-                if(value.is_string())
+                std::error_code error;
+                for(auto it = std::filesystem::recursive_directory_iterator(root, error);
+                    !error && found.empty()
+                    && it != std::filesystem::recursive_directory_iterator();
+                    it.increment(error))
                 {
-                    kernel.metadata[key] = value.get<std::string>();
+                    if(it->path().filename() == file)
+                    {
+                        found = it->path();
+                    }
                 }
-                else
+                if(!found.empty())
                 {
-                    kernel.metadata[key] = value.get<int64_t>();
+                    break;
                 }
             }
-            kernel.priority = descriptor.at("priority").get<int64_t>();
-            kernels.push_back(std::move(kernel));
+            if(found.empty())
+            {
+                throw std::runtime_error("no " + file + " beside the provider or this test binary");
+            }
+            std::ifstream stream(found);
+            const auto pack = nlohmann::json::parse(stream);
+            for(const auto& descriptor : pack.at("kernelDescriptors"))
+            {
+                hipdnn_plugin_sdk::ingestor::KernelDefinition kernel;
+                kernel.name = descriptor.at("name").get<std::string>();
+                kernel.source.kind = hipdnn_plugin_sdk::ingestor::KernelSourceKind::EMBEDDED_SOURCE;
+                kernel.source.sourceFile
+                    = descriptor.at("kernel_source").at("source_file").get<std::string>();
+                kernel.source.entryPoint
+                    = descriptor.at("kernel_source").at("entry_point").get<std::string>();
+                for(const auto& [key, value] : descriptor.at("metadata").items())
+                {
+                    if(value.is_string())
+                    {
+                        kernel.metadata[key] = value.get<std::string>();
+                    }
+                    else
+                    {
+                        kernel.metadata[key] = value.get<int64_t>();
+                    }
+                }
+                kernel.priority = descriptor.at("priority").get<int64_t>();
+                kernels.push_back(std::move(kernel));
+            }
         }
         return kernels;
     }();
@@ -340,8 +347,16 @@ std::vector<DeviceCase> deviceCases()
     };
 }
 
+/// The configs a run takes: the graph's own element type, or (fp32 under TF32 permission) the
+/// three-bf16 ones.
+enum class Math
+{
+    NATIVE,
+    THREE_BF16,
+};
+
 template <typename T>
-void runCase(ConvShape shape)
+void runCase(ConvShape shape, Math math = Math::NATIVE, bool infinities = false)
 {
     shape.dataType = dataTypeOf<T>();
     const auto spec = specFor(shape, ConvDirection::BACKWARD_DATA);
@@ -355,6 +370,10 @@ void runCase(ConvShape shape)
     constexpr unsigned int SEED = 4321;
     y.fillTensorWithRandomValues(-1.0f, 1.0f, SEED);
     w.fillTensorWithRandomValues(-1.0f, 1.0f, SEED + 1);
+    if(infinities)
+    {
+        conv_tf32_test::plantInfinities(y);
+    }
     Tensor<T> reference(x.dims(), x.strides());
     CpuFpReferenceConvolution::dgrad(
         reference, w, y, shape.stride, shape.dilation, shape.prePadding, shape.postPadding);
@@ -364,13 +383,16 @@ void runCase(ConvShape shape)
     {
         reductionLength *= extent;
     }
-    const float accumulationBound = 2e-6f * static_cast<float>(reductionLength);
+    const float accumulationBound
+        = (math == Math::THREE_BF16 ? conv_tf32_test::THREE_BF16_BOUND : 2e-6f)
+          * static_cast<float>(reductionLength);
 
     const auto& handler = dispatchHandler(PACK);
     int ran = 0;
     for(const auto& kernel : catalog())
     {
-        if(!matchesKernel(PACK, fixture.context(), kernel, *bound))
+        if(!matchesKernel(PACK, fixture.context(), kernel, *bound)
+           || (kernel.getIntMetadata("math") == 1) != (math == Math::THREE_BF16))
         {
             continue;
         }
@@ -378,7 +400,14 @@ void runCase(ConvShape shape)
         ++ran;
         const auto prepared = handler.prepare(fixture.context(), *bound, kernel);
         ASSERT_NE(prepared, nullptr);
-        EXPECT_EQ(handler.workspaceBytes(fixture.context(), *bound, kernel), size_t{0});
+        // Workspace: none, or (three-bf16) the split dy and w.
+        const size_t workspaceBytes = handler.workspaceBytes(fixture.context(), *bound, kernel);
+        EXPECT_EQ(workspaceBytes == 0, math == Math::NATIVE);
+        void* workspace = nullptr;
+        if(workspaceBytes > 0)
+        {
+            ASSERT_EQ(hipMalloc(&workspace, workspaceBytes), hipSuccess);
+        }
 
         x.fillWithSentinelValue();
         const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers{
@@ -387,8 +416,12 @@ void runCase(ConvShape shape)
             hipdnnPluginDeviceBuffer_t{Y_UID, y.rawDeviceData()}};
         const Handle handle;
         handler.launch(
-            handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), nullptr);
+            handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
         ASSERT_EQ(hipStreamSynchronize(handle.getStream()), hipSuccess);
+        if(workspace != nullptr)
+        {
+            ASSERT_EQ(hipFree(workspace), hipSuccess);
+        }
         x.markDeviceModified();
 
         const auto* actual = static_cast<const T*>(x.rawHostData());
@@ -399,13 +432,18 @@ void runCase(ConvShape shape)
             const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
             const float tolerance
                 = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
-            if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
+            if(!conv_tf32_test::matches(got, want, tolerance) && ++mismatches <= 5)
             {
                 ADD_FAILURE() << "at linear index " << offsetOf(index, x.strides()) << ": got "
                               << got << ", want " << want << ", tolerance " << tolerance;
             }
         });
         EXPECT_EQ(mismatches, 0);
+    }
+    if(ran == 0 && math == Math::THREE_BF16)
+    {
+        // The three-bf16 subset need not cover every shape (the catalog test checks it serves).
+        GTEST_SKIP() << "no three-bf16 config serves this case";
     }
     EXPECT_GE(ran, 1) << "no catalog config serves this case";
 }
@@ -436,6 +474,108 @@ INSTANTIATE_TEST_SUITE_P(,
                          TestGpuConvIgemmNchw,
                          ::testing::ValuesIn(deviceCases()),
                          [](const auto& info) { return info.param.name; });
+
+/// The three-bf16 fp32 configs (TF32 permission) against the fp64 reference at three-bf16's bound,
+/// and with +inf and -inf in dy (each must reach dx as itself, NaN where both meet).
+class TestGpuConvIgemmNchwThreeBf16 : public ::testing::TestWithParam<DeviceCase>
+{
+};
+
+TEST_P(TestGpuConvIgemmNchwThreeBf16, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!conv_tf32_test::hasThreeBf16(currentDeviceProperties().gcnArchName))
+    {
+        GTEST_SKIP() << "no three-bf16 configs on this device";
+    }
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(conv_tf32_test::TF32_ENV,
+                                                                           "1");
+    runCase<float>(GetParam().shape, Math::THREE_BF16);
+}
+
+TEST_P(TestGpuConvIgemmNchwThreeBf16, FloatInfinities)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!conv_tf32_test::hasThreeBf16(currentDeviceProperties().gcnArchName))
+    {
+        GTEST_SKIP() << "no three-bf16 configs on this device";
+    }
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(conv_tf32_test::TF32_ENV,
+                                                                           "1");
+    runCase<float>(GetParam().shape, Math::THREE_BF16, true);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvIgemmNchwThreeBf16,
+                         ::testing::ValuesIn(deviceCases()),
+                         [](const auto& info) { return info.param.name; });
+
+/// Opt-in (K7_TF32_TIMING=<shape CSV>): the best exact and the best three-bf16 config per shape,
+/// TF32 permitted. See ConvTf32Timing.hpp.
+TEST(TestGpuConvIgemmNchwTiming, ExactAgainstThreeBf16)
+{
+    SKIP_IF_NO_DEVICES();
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(conv_tf32_test::TF32_ENV,
+                                                                           "1");
+    conv_tf32_timing::timeByForm(
+        PACK, ConvDirection::BACKWARD_DATA, catalog(), "K7_TF32_TIMING", [](const auto& kernel) {
+            return std::string(kernel.getIntMetadata("math") == 1 ? "bf16x3" : "exact");
+        });
+}
+
+/// Without TF32 permission no three-bf16 config is admitted; with it, fp32 graphs admit some
+/// where threeBf16Pays (RDNA, 3-D 3x3x3 at stride 2), and 16-bit graphs none.
+TEST(TestConvIgemmNchwCatalog, ThreeBf16OnlyUnderTf32Permission)
+{
+    ConvShape shape;
+    for(const auto& deviceCase : deviceCases())
+    {
+        if(deviceCase.name == "ThreeD3x3x3S2")
+        {
+            shape = deviceCase.shape;
+        }
+    }
+    ASSERT_EQ(shape.filter.size(), 3u);
+    for(const char* arch : {"gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1201", "gfx908"})
+    {
+        for(const auto dataType : {DataType::FLOAT, DataType::BFLOAT16})
+        {
+            SCOPED_TRACE(std::string(arch) + (dataType == DataType::FLOAT ? " fp32" : " bf16"));
+            auto typed = shape;
+            typed.dataType = dataType;
+            auto device = testDeviceProperties();
+            device.gcnArchName = arch;
+            device.warpSize = std::string(arch).rfind("gfx1", 0) == 0 ? 32 : 64;
+            const GraphFixture fixture(buildGraph(specFor(typed, ConvDirection::BACKWARD_DATA)),
+                                       device);
+            const auto bound = matchesGraph(PACK, fixture.context());
+            ASSERT_TRUE(bound.has_value());
+            const auto admitted = [&] {
+                int count = 0;
+                for(const auto& kernel : catalog())
+                {
+                    count += kernel.getIntMetadata("math") == 1
+                             && matchesKernel(PACK, fixture.context(), kernel, *bound);
+                }
+                return count;
+            };
+            {
+                const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter off(
+                    conv_tf32_test::TF32_ENV, "");
+                EXPECT_EQ(admitted(), 0);
+            }
+            const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter on(
+                conv_tf32_test::TF32_ENV, "1");
+            const auto problem = conv_igemm_nchw::parseNchwProblem(fixture.context());
+            ASSERT_TRUE(problem.has_value());
+            const bool expected
+                = dataType == DataType::FLOAT && conv_igemm_nchw::threeBf16Pays(*problem, arch);
+            EXPECT_EQ(admitted() > 0, expected);
+            EXPECT_EQ(expected,
+                      dataType == DataType::FLOAT && std::string(arch).rfind("gfx1", 0) == 0);
+        }
+    }
+}
 
 // ---- Host-only: the shipped catalog ----
 
@@ -480,7 +620,8 @@ TEST(TestConvIgemmNchwCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its integer knobs: within one dtype (what
     // one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 15> KNOBS{"atom_id",
+    static constexpr std::array<const char*, 16> KNOBS{"math",
+                                                       "atom_id",
                                                        "bmq",
                                                        "bn",
                                                        "bk",
@@ -529,7 +670,9 @@ TEST(TestConvIgemmNchwCatalog, AtomIdsNameTheirAtomsAndEveryConfigFitsLds)
         config.halo = kernel.getIntMetadata("halo");
         EXPECT_EQ(conv_igemm_nchw::atomIdOf(config.atom), config.atomId);
         EXPECT_EQ(stringOf(kernel, "direction"), "BWD");
-        const int elementBytes = stringOf(kernel, "dtype") == "FLOAT" ? 4 : 2;
+        config.math = kernel.getIntMetadata("math");
+        // Three-bf16 configs (math 1) are bf16 kernels on fp32 graphs.
+        const int elementBytes = stringOf(kernel, "dtype") == "FLOAT" && config.math == 0 ? 4 : 2;
         EXPECT_LE(conv_igemm_nchw::ldsBytesOf(config, elementBytes), 65536);
         strides.insert(config.stride);
     }

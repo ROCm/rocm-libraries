@@ -49,6 +49,7 @@ INTS = [
     "stages",
     "flat",
     "halo",
+    "math",
 ]
 STRINGS = ["direction", "dtype", "atom"]
 FIELDS = ["direction", "dtype", "atom"] + INTS
@@ -109,6 +110,7 @@ def M(atom, bmq, bn, bk, wm, wn, wp, vec, stride, taps, flat=0, halo=0):
         stages=1,
         flat=flat,
         halo=halo or vec,
+        math=0,
     )
 
 
@@ -130,6 +132,7 @@ def F(bmq, bn, bk, tq, tc, vec, stride, taps, stages, flat=0, halo=0):
         stages=stages,
         flat=flat,
         halo=halo or vec,
+        math=0,
     )
 
 
@@ -465,6 +468,36 @@ def build_t1():
                 CATALOG[dtype] += t1_fma(dtype, stride, flat)
 
 
+# Three-bf16 (math 1): fp32 graphs under TF32 permission run a bf16 matrix-core config on dy and w
+# split along K into 3K channels (the kernel's ConvTf32Split), dx written in fp32. Per (atom,
+# stride, taps, flat) the bf16 catalog's first X3_TILES tiles whose LDS (fp32 output tile) fits.
+X3_ATOMS = {"mfma16_bf16", "wmma11_bf16", "wmma12_bf16"}
+X3_TILES = 2
+CATALOGX3 = []
+
+
+def lds_x3(c):
+    wq = c["bmq"] + c["halo"]
+    ldk = c["bk"] + 8
+    a = wq * ldk + wq // c["vec"] * 8
+    b = c["stride"] * c["taps"] * c["bn"] * ldk
+    o = c["bn"] * (c["bmq"] * c["stride"] + 4) * 4
+    return max((a + b) * 2, o)
+
+
+def build_x3():
+    groups = {}
+    for c in CATALOG["BFLOAT16"]:
+        if c["atom"] not in X3_ATOMS:
+            continue
+        g = (c["atom"], c["stride"], c["taps"], c["flat"])
+        tiles = groups.setdefault(g, [])
+        if len(tiles) >= X3_TILES or lds_x3(c) > LDS_LIMIT:
+            continue
+        tiles.append(c)
+        CATALOGX3.append(dict(c, math=1))
+
+
 def emit():
     kmd, umd, udd = U("kmd"), U("umd"), U("udd")
     write(
@@ -511,8 +544,12 @@ def emit():
         },
     )
     kernels = []
-    for dtype, cfgs in CATALOG.items():
-        dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
+    x3 = []
+    for dtype, cfgs in list(CATALOG.items()) + [("FLOATX3", CATALOGX3)]:
+        dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16", "FLOATX3": "f32x3"}[
+            dtype
+        ]
+        dtype = "FLOAT" if dtype == "FLOATX3" else dtype
         for i, c in enumerate(cfgs):
             kind = (
                 f"w{c['wm']}x{c['wn']}x{c['wp']}"
@@ -524,7 +561,7 @@ def emit():
             ) + (
                 f".h{c['halo']}" if c["halo"] != c["vec"] else ""
             )
-            kernels.append(
+            (x3 if c["math"] else kernels).append(
                 {
                     "version": "1.0",
                     "id": U(name),
@@ -535,7 +572,7 @@ def emit():
                         "entry_point": "ConvIgemmNchw",
                     },
                     "metadata": {"direction": "BWD", "dtype": dtype, **c},
-                    "priority": 1000 - i,
+                    "priority": 1000 - i - (len(CATALOG["FLOAT"]) if c["math"] else 0),
                 }
             )
     write(
@@ -551,6 +588,20 @@ def emit():
             "kernelDescriptors": kernels,
         },
     )
+    write(
+        "conv_igemm_nchw_bwd_f32x3.kdp.json",
+        {
+            "version": "1.0",
+            "id": U("kdp.bwd.f32x3"),
+            "name": "hipkernel:conv_igemm_nchw_bwd_f32x3",
+            "arch": [],
+            "matchers": [umd],
+            "engine": ued,
+            "dispatch": udd,
+            "kernelDescriptors": x3,
+        },
+    )
+    kernels += x3
     names = [k["name"] for k in kernels]
     assert len(names) == len(set(names)), "duplicate config names"
     tuples = [
@@ -565,4 +616,6 @@ if __name__ == "__main__":
     build()
     build_t1()
     build_st1()
+    build_x3()
     emit()
+    print(len(CATALOGX3), "three-bf16 configs (TF32 permission)")

@@ -23,7 +23,8 @@
     "nbi",
     "nbo",
     "tw",
-    "bpu"
+    "bpu",
+    "math"
   ],
   "behavior_notes": [
     "runtime_compilation"

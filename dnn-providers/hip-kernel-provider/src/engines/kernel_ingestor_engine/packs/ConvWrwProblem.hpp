@@ -153,6 +153,10 @@ struct WrwConfig
     /// their block-based buffer forms, which serve large images alone (channels-first, each
     /// channel plane within the range); the upper-case kinds serve the other images.
     std::string spec;
+    /// 0: the graph's element type. 1: three-bf16 for an fp32 graph under TF32 permission
+    /// (tf32Permitted): a bf16 config run on x and dy split into 3N bf16 images by
+    /// ConvWrwSplit (K3SplitArgs), dw written in fp32 by the reduce.
+    int64_t math = 0;
 };
 
 /// A backward-weights convolution the kernels serve.
@@ -238,6 +242,13 @@ struct WrwLaunch
     size_t workspaceBytes = 0;
     /// The kernel writes dw itself (args.dwStore): no workspace, no reduce launch.
     bool dwStore = false;
+    /// Three-bf16 (math 1): ConvWrwSplit runs first and writes the split operands to the
+    /// workspace's first splitBytes (xs, then ys at splitYOffset); the partials follow them.
+    bool split = false;
+    unsigned int splitGrid = 0;
+    size_t splitYOffset = 0;
+    size_t splitBytes = 0;
+    K3SplitArgs splitArgs{};
 };
 
 /// The workspace the splits' fp32 partials may take at most; splits are reduced to fit.
@@ -349,10 +360,25 @@ DirectPlan directPlanFor(int64_t tiles,
  * loads a thread in flight; not for filters of at most 9 taps dilated 6 or more on a filter
  * axis (ASPP-class, where the BLAS path wins). Declined
  * wherever a key of its spec serves the problem (specServes): a specialized config's class.
+ * math 0, or 1 (three-bf16): an fp32 graph, TF32 permitted (tf32Permitted), a bf16 atom, dws 0,
+ * 3N within 32 bits; the launch is the config's on the bf16 problem of 3N images, with
+ * ConvWrwSplit ahead of it and the split operands ahead of the partials in the workspace.
  */
 std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
                                       const WrwConfig& config,
                                       const hipdnn_plugin_sdk::ingestor::DeviceProperties& device);
+
+/**
+ * @brief Whether three-bf16 (math 1, x and dy as 3N bf16 images) is admitted for @p problem on
+ *        @p gcnArchName: the classes where it measured faster than exact fp32 K3
+ *        (~/old-asic-hipdnn/tf32/PLAN.md). The 3N images triple the operand traffic, so it pays
+ *        only where the bf16 kernel is about 3x the fp32 one or the exact path is weak.
+ *
+ * gfx942, gfx950: unit stride, at least 9 filter taps, at least 128 input and 64 output channels
+ * per group. gfx11, gfx12 (exact fp32 on FMA): at most 4 input channels per group (stems), or at
+ * least 256 with at least 9 taps. Elsewhere (gfx90a, whose bf16 rate is only 4x fp32 MFMA): never.
+ */
+bool threeBf16Pays(const WrwProblem& problem, std::string_view gcnArchName);
 
 /**
  * @brief The preprocessor definitions ConvWrw.cpp is compiled with for @p config on
