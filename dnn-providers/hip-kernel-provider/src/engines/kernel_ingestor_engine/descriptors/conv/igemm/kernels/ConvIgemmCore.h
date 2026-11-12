@@ -160,11 +160,20 @@ struct K1Raw<2>
 #define K1_HALO_CAP 64
 #endif
 
+// Every caller passes wave-uniform values; readfirstlane says so. A base derived through a
+// 64-bit division otherwise stays in VGPRs and the compiler wraps every buffer access in a
+// waterfall loop (TheRock 10.3 HIPRTC; K1, K7 and stem-bwd). Already-scalar values fold away.
 __device__ inline __amdgpu_buffer_rsrc_t k1Rsrc(const void* base, long long bytes)
 {
     const int records = bytes < 0x7fffffffLL ? static_cast<int>(bytes) : 0x7fffffff;
+    const unsigned long long p = reinterpret_cast<unsigned long long>(base);
+    const unsigned lo = __builtin_amdgcn_readfirstlane(static_cast<unsigned>(p));
+    const unsigned hi = __builtin_amdgcn_readfirstlane(static_cast<unsigned>(p >> 32));
     return __builtin_amdgcn_make_buffer_rsrc(
-        const_cast<void*>(base), static_cast<short>(0), records, K1_RSRC_FLAGS);
+        reinterpret_cast<void*>((static_cast<unsigned long long>(hi) << 32) | lo),
+        static_cast<short>(0),
+        __builtin_amdgcn_readfirstlane(records),
+        K1_RSRC_FLAGS);
 }
 
 template <class Raw>

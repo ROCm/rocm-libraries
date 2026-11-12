@@ -63,11 +63,19 @@ __device__ inline float k5Round(float v)
 #define K5_RSRC_FLAGS 0x00020000
 #endif
 
+// Callers pass wave-uniform values; readfirstlane says so, so the descriptor stays in SGPRs and
+// no buffer access becomes a waterfall loop (seen in ConvWinogradCoop with TheRock 10.3 HIPRTC).
 __device__ inline __amdgpu_buffer_rsrc_t k5Rsrc(const void* base, long long bytes)
 {
     const int records = bytes < 0x7fffffffLL ? static_cast<int>(bytes) : 0x7fffffff;
+    const unsigned long long p = reinterpret_cast<unsigned long long>(base);
+    const unsigned lo = __builtin_amdgcn_readfirstlane(static_cast<unsigned>(p));
+    const unsigned hi = __builtin_amdgcn_readfirstlane(static_cast<unsigned>(p >> 32));
     return __builtin_amdgcn_make_buffer_rsrc(
-        const_cast<void*>(base), static_cast<short>(0), records, K5_RSRC_FLAGS);
+        reinterpret_cast<void*>((static_cast<unsigned long long>(hi) << 32) | lo),
+        static_cast<short>(0),
+        __builtin_amdgcn_readfirstlane(records),
+        K5_RSRC_FLAGS);
 }
 template <class T>
 __device__ inline float k5BufLoad(__amdgpu_buffer_rsrc_t r, unsigned voff, unsigned soff)
