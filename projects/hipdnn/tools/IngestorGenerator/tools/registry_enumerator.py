@@ -27,6 +27,14 @@ into one cell holding every combo's pick; ``neutral_fields`` first sets the name
 spec fields, which the manifest author asserts are IR-neutral, to the default
 spec's value. See `cell_spaces`.
 
+``spec_overrides`` sets spec fields on every spec of the section, so a section can ship a
+production stack (several codegen flags that only make sense together) that the pinned
+candidate's sweep never combines. An override may name a ``reduction.fields.performance``
+field: that field is a kernel axis across sections, each section pinning one value of it.
+``hold_fields`` (per section, inherited) names performance fields the section keeps at its
+default spec's value instead of projecting, so a section that leaves a stack alone does not
+also sweep it. See `select_full`.
+
 One pack may draw kernels from more than one registry candidate: ``enumerate.also`` lists
 further sections, each with its own ``pin``, ``fixed``, ``cells``, ``free_fields``,
 ``spec_fields`` and ``max_kernels`` (the candidate list, request class, sweep level and
@@ -182,6 +190,7 @@ def _validate_manifest(path: str, manifest: dict) -> None:
             "spec_fields",
             "selector_fields",
             "neutral_fields",
+            "hold_fields",
             "cell_keyed_by",
         ):
             _require(
@@ -414,6 +423,7 @@ class Registry:
         "space",
         "selector_fields",
         "cell_keyed_by",
+        "hold_fields",
     )
     #: The ``enumerate`` keys under which `cell_spaces` rewrites or merges the
     #: registry's specs, so a request combo's ``select_spec`` is no longer a cell's
@@ -480,9 +490,8 @@ class Registry:
             )
         self.groups = self._parse_groups(decl["cells"])
         self.cell_fields = [f for fields, _ in self.groups for f in fields]
-        check_value_map_cells(
-            self.groups, (manifest.get("ground_truth") or {}).get("value_map")
-        )
+        # The value_map is checked once over every section's cells (below): a section may
+        # cross only some of a field's values.
         self.selector_fields = list(decl.get("selector_fields") or [])
         unknown = [n for n in self.selector_fields if n not in self.cell_fields]
         if unknown:
@@ -492,6 +501,7 @@ class Registry:
             )
         self.neutral_fields = list(decl.get("neutral_fields") or [])
         self.spec_overrides = _mapping(decl, "spec_overrides")
+        self.hold_fields = list(decl.get("hold_fields") or [])
         self.cell_keyed_by = list(decl.get("cell_keyed_by") or [])
         for name in itertools.chain(*pins, self.fixed, self.cell_fields):
             if name not in self.request_fields:
@@ -551,6 +561,11 @@ class Registry:
                             f"to inherit it)."
                         )
                 self.also.append(section)
+        if primary:
+            check_value_map_cells(
+                [group for s in self.sections() for group in s.groups],
+                (manifest.get("ground_truth") or {}).get("value_map"),
+            )
 
     def sections(self) -> list:
         """This section, then each ``enumerate.also`` section."""
@@ -884,10 +899,25 @@ def _unresolvable(sames: list, performance: "OrderedDict") -> set:
     }
 
 
-def select_full(spaces: list, classification: Classification) -> FullSpace:
-    """Apply the ``space: full`` rules to ``[(base, specs), ...]``."""
-    performance = classification.performance
-    ignored = set(classification.ignored)
+def select_full(
+    spaces: list, classification: Classification, hold: "list | tuple" = ()
+) -> FullSpace:
+    """Apply the ``space: full`` rules to ``[(base, specs), ...]``. ``hold`` names
+    performance fields this section keeps at its default spec's value (the
+    ``hold_fields`` key): they are neither projected nor varied."""
+    for base, _ in spaces:
+        unknown = [n for n in hold if n not in _spec_fields(base)]
+        if unknown:
+            raise EnumerationError(
+                f"enumerate.hold_fields names {unknown}, which the registry spec "
+                f"{type(base).__name__} does not have."
+            )
+    performance = OrderedDict(
+        (n, accessor)
+        for n, accessor in classification.performance.items()
+        if n not in hold
+    )
+    ignored = set(classification.ignored) | set(hold)
     held_notes: "OrderedDict[tuple, None]" = OrderedDict()
     projected: set = set()
     sames = _feature_matched(spaces, classification)
@@ -1062,13 +1092,12 @@ def cell_spaces(registry: Registry, classification: Classification) -> CellSpace
                     f"also names: a {kind} field defines a kernel, so it cannot "
                     f"only steer the selector or leave the IR unchanged."
                 )
-    for kind in ("feature", "performance"):
-        clash = [n for n in overrides if n in getattr(classification, kind)]
-        if clash:
-            raise EnumerationError(
-                f"enumerate.spec_overrides names {clash}, which reduction.fields.{kind} "
-                f"also names: a pinned field takes one value, so it is no {kind} axis."
-            )
+    clash = [n for n in overrides if n in classification.feature]
+    if clash:
+        raise EnumerationError(
+            f"enumerate.spec_overrides names {clash}, which reduction.fields.feature "
+            f"also names: a pinned field takes one value, so it is no feature axis."
+        )
     both = sorted(set(overrides) & set(neutral))
     if both:
         raise EnumerationError(
@@ -1168,7 +1197,7 @@ def _section_rows(registry: Registry, classification: Classification) -> tuple:
     merged = cell_spaces(registry, classification)
     cells, spaces = merged.cells, merged.spaces
     if full:
-        selected = select_full(spaces, classification)
+        selected = select_full(spaces, classification, registry.hold_fields)
         kept_per_cell, projected, held = (
             selected.kept,
             selected.projected,
@@ -1474,7 +1503,9 @@ def plan_space(manifest: dict, out=None, strict: bool = False) -> int:
         for section, _, section_spaces, _ in sections:
             if section.space_kind == "full":
                 selected = select_full(
-                    section_spaces, classification.with_performance(performance)
+                    section_spaces,
+                    classification.with_performance(performance),
+                    section.hold_fields,
                 )
                 total += sum(len(kept) for kept in selected.kept)
             else:

@@ -811,8 +811,8 @@ def _also_performance(m):
             ["spec_overrides", "no_such"],
         ),
         (
-            lambda m: m["enumerate"].update(spec_overrides={"num_segments": 2}),
-            ["spec_overrides", "num_segments", "performance"],
+            lambda m: m["enumerate"].update(spec_overrides={"hdim": 128}),
+            ["spec_overrides", "hdim", "feature"],
         ),
         (_override_and_neutral, ["spec_overrides", "neutral_fields", "num_seqs"]),
     ],
@@ -826,7 +826,7 @@ def _also_performance(m):
         "neutral-is-performance",
         "overrides-not-a-mapping",
         "overrides-unknown",
-        "overrides-is-performance",
+        "overrides-is-feature",
         "overrides-is-neutral",
     ],
 )
@@ -1255,3 +1255,62 @@ def test_manifest_heuristics_reach_the_generated_engine_and_its_ued(probe):
     catalog = build_ued(config, mint_ids(config))["sort_kernel_catalog"]
     assert list(catalog) == ["default", "gfx942"]
     assert catalog["gfx942"] == [model]
+
+
+# hold_fields / performance overrides: a section pins a performance field to one value (a
+# production stack the registry's sweep never combines) and the others hold it.
+
+
+def _conv_hold(tmp_path, monkeypatch, **enumerate_keys):
+    manifest = synth.conv_probe_manifest(synth.provider(tmp_path, monkeypatch))
+    manifest["reduction"]["fields"] = {
+        "feature": ["direction", "dtype", "arch"],
+        "performance": [{"name": "tile_m"}],
+        "ignored": ["tile_n", "tile_k"],
+    }
+    manifest["enumerate"].update(enumerate_keys)
+    return manifest
+
+
+def _tile_ms(manifest) -> list:
+    return [k["kernel_source"]["spec"]["tile_m"] for k in _kernels(manifest)]
+
+
+def test_a_performance_field_varies_unless_the_section_holds_it(tmp_path, monkeypatch):
+    manifest = _conv_hold(tmp_path, monkeypatch)
+    assert _tile_ms(manifest) == [64, 128, 64, 128, 64, 128, 64, 128]
+    manifest["enumerate"]["hold_fields"] = ["tile_m"]
+    assert _tile_ms(manifest) == [64, 64, 64, 64]
+
+
+def test_a_section_may_override_a_performance_field_it_also_holds(tmp_path, monkeypatch):
+    """The override moves the section's default spec; holding then keeps every spec of the
+    section there, so the performance field is one value per section."""
+    manifest = _conv_hold(
+        tmp_path, monkeypatch, hold_fields=["tile_m"], spec_overrides={"tile_m": 128}
+    )
+    assert _tile_ms(manifest) == [128, 128, 128, 128]
+
+
+def test_an_also_section_inherits_hold_fields_and_pins_its_own_value(
+    tmp_path, monkeypatch
+):
+    """The production-stack pattern: the primary holds the performance field at its
+    default and an `also` section, inheriting the hold, overrides it to another value, so
+    every cell ships one kernel per value."""
+    manifest = _conv_hold(tmp_path, monkeypatch, hold_fields=["tile_m"])
+    section = copy.deepcopy(manifest["enumerate"])
+    section["spec_overrides"] = {"tile_m": 128}
+    del section["hold_fields"]
+    manifest["enumerate"]["also"] = [section]
+    assert _tile_ms(manifest) == [64] * 4 + [128] * 4
+
+
+def test_hold_fields_naming_a_field_the_spec_lacks_is_exit_2(
+    tmp_path, monkeypatch, capsys
+):
+    manifest = _conv_hold(tmp_path, monkeypatch, hold_fields=["no_such"])
+    path = synth.write_manifest(tmp_path / "m.engine.yaml", manifest)
+    assert re_.main(["--manifest", str(path), "--plan-space"]) == 2
+    err = capsys.readouterr().err
+    assert "hold_fields" in err and "no_such" in err, err
