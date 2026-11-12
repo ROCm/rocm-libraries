@@ -457,19 +457,19 @@ struct DagScratch {
 /// and whether it takes an issue cycle. It depends on the block, not on the
 /// window, so one graph serves every window.
 pub(super) struct BlockDag {
-    pub(super) succ_start: Vec<u32>,
-    pub(super) succs: Vec<(u32, u32)>,
-    pub(super) preds: Vec<u32>,
-    pub(super) height: Vec<u32>,
-    pub(super) issues: Vec<bool>,
+    succ_start: Vec<u32>,
+    succs: Vec<(u32, u32)>,
+    preds: Vec<u32>,
+    height: Vec<u32>,
+    issues: Vec<bool>,
     /// Per instruction, the slots it holds gfx950's matrix pipe for; empty
     /// when the block has no MFMA.
-    pub(super) pipe: Vec<u8>,
+    pipe: Vec<u8>,
     /// Lever `loadfirst`: the vector memory loads (and the instructions
     /// their addresses wait on, through `height`) that issue as soon as they
     /// are ready, ahead of instructions that could start sooner; empty when
     /// no instruction of the block has the lever.
-    pub(super) urgent: Vec<bool>,
+    urgent: Vec<bool>,
 }
 
 /// rust-compiler-v2 (`target::gfx9::sched_groups`): each instruction's successors in block `block`'s dependence graph.
@@ -882,7 +882,7 @@ impl BlockDag {
     /// The rank of MFMA `i`, `k` with its start raised to `cycle`, when the
     /// matrix pipe frees at `free`: it starts no sooner, and if it can start
     /// at `cycle` it goes before any other instruction that can.
-    pub(super) fn piped(&self, i: usize, k: u64, free: u32, cycle: u32) -> u64 {
+    fn piped(&self, i: usize, k: u64, free: u32, cycle: u32) -> u64 {
         if self.pipe[i] == 0 {
             return k;
         }
@@ -984,11 +984,6 @@ impl Dags {
     /// `window` of the function the graphs are of.
     pub(super) fn orders(&self, window: usize) -> Vec<Vec<u32>> {
         self.0.iter().map(|dag| dag.order(window)).collect()
-    }
-
-    /// The dependence graph of block `block`.
-    pub(super) fn dag(&self, block: usize) -> &BlockDag {
-        &self.0[block]
     }
 
     /// `orders(window)` of block `block` alone.

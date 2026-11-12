@@ -329,7 +329,6 @@ on the same inputs in these ways:
 | `rematv` | Spilling also recomputes at their uses single-definition VGPR values computed from VGPRs defined once outside every loop (at least three sharing a source) instead of storing them. | `rir/spill.rs` |
 | `valcoal` | Allocation coalesces a copy of a dword defined once earlier in its block into its source's register while the source is still live (both hold one value), when the copy dies in the block. | `rir/regalloc.rs` |
 | `packtuple` | Two adjacent f32 VALU instructions whose results are the two halves of one tuple pack into one `v_pk_*` that writes the tuple. | `target/gfx9/pack.rs` |
-| `pressorder` | When no scheduling window fits the registers, a list schedule that tracks the live VGPRs and prefetches as far as the cap allows (loads keep a reserve for the accumulators still to come) is tried before load sinking alone, packed tuples or program order. | `rir/pressure_order.rs`, `rir/mod.rs` |
 
 ## Debug controls
 

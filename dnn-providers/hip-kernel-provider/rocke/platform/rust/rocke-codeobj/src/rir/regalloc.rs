@@ -797,33 +797,6 @@ impl Liveness {
         Some((orders, most))
     }
 
-    /// The units live into block `b` and out of it (as `unit << 1 | sgpr`), whatever the order of its instructions.
-    pub(super) fn block_boundary(&self, lists: &UnitLists, b: usize) -> (Vec<u32>, Vec<u32>) {
-        let (live, is_v) = (&self.live, &self.is_v);
-        let mut cur = Bits::new(*live.base.last().expect("non-empty"));
-        let out: Vec<u32> = self.live_out.of(b).map(|u| (u as u32) << 1 | u32::from(!is_v.get(u))).collect();
-        for u in self.live_out.of(b) {
-            cur.set(u);
-        }
-        let first = live.first[b] as usize;
-        for i in (first..live.first[b + 1] as usize).rev() {
-            let (defs, used) = lists.of(i);
-            for &x in defs {
-                cur.clear((x >> 1) as usize);
-            }
-            for &x in used {
-                cur.set((x >> 1) as usize);
-            }
-        }
-        let live_in = cur.ones().map(|u| (u as u32) << 1 | u32::from(!is_v.get(u))).collect();
-        (live_in, out)
-    }
-
-    /// The linear index of block `b`'s first instruction.
-    pub(super) fn first_inst(&self, b: usize) -> usize {
-        self.live.first[b] as usize
-    }
-
     /// `pressure_listed` of block `b` alone, with its instructions in
     /// `order`, or as they stand; `cur` is a set of every unit to work in.
     fn block_pressure_listed(&self, lists: &UnitLists, b: usize, order: Option<&[u32]>, cur: &mut Bits) -> Pressure {
@@ -875,14 +848,6 @@ impl Liveness {
             most.sgprs = most.sgprs.max(n[1] + extra[1]);
         }
         most
-    }
-}
-
-impl UnitLists {
-    /// The units instruction `i` (its linear index in the function) writes and reads.
-    pub(super) fn of(&self, i: usize) -> (&[u32], &[u32]) {
-        let (start, uses, end) = (self.start[i] as usize, self.uses[i] as usize, self.start[i + 1] as usize);
-        (&self.units[start..uses], &self.units[uses..end])
     }
 }
 

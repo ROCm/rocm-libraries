@@ -224,7 +224,7 @@ def test_a_kernels_direct_levers_apply_to_its_compile_only(monkeypatch) -> None:
 
 
 def test_attention_kernels_get_the_attention_levers(monkeypatch) -> None:
-    """Names starting ``rocke_attention`` add ``DIRECT_ATTENTION_LEVERS``; ``ROCKE_DIRECT_DEFAULT_LEVERS`` replaces them."""
+    """Names starting ``rocke_attention_dense`` add ``DIRECT_ATTENTION_LEVERS``; ``ROCKE_DIRECT_DEFAULT_LEVERS`` replaces them."""
     from rocke.helpers import compile as compile_mod
 
     class _K:
@@ -236,6 +236,7 @@ def test_attention_kernels_get_the_attention_levers(monkeypatch) -> None:
         compile_mod.DIRECT_ATTENTION_LEVERS
     )
     assert compile_mod._attention_levers(_K("conv_fprop")) == []
+    assert compile_mod._attention_levers(_K("rocke_attention_u3d_splitkv")) == []
     monkeypatch.setenv("ROCKE_DIRECT_DEFAULT_LEVERS", "")
     assert compile_mod._attention_levers(_K("rocke_attention_dense_d64")) == []
 

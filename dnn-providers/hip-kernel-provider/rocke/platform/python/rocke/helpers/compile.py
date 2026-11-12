@@ -141,7 +141,7 @@ DIRECT_LEVERS_ATTR = "direct_levers"
 DIRECT_SCOPES_ATTR = "direct_scopes"
 SCOPE_OP_ATTR = "rocke.scope"
 DIRECT_DEFAULT_LEVERS = ("acqfence", "bufoffany", "fmax3")
-# Levers the direct backend adds for attention kernels (names starting ``rocke_attention``) on top of the defaults:
+# Levers the direct backend adds for attention kernels (names starting ``rocke_attention_dense``) on top of the defaults:
 # ``cmpreassoc`` (a causal mask's per-element constants stay immediates of one base), ``rematv`` (spilling
 # recomputes hoisted address offsets), ``valcoal`` / ``packtuple`` (the row-sum tuples take no copies and pack
 # into ``v_pk_add_f32``). Dense attention b2_s2048 on MI355X, rust / best COMGR geomean over 37 kernels: 1.108 ->
@@ -354,11 +354,11 @@ def direct_default_levers() -> List[str]:
 
 
 def _attention_levers(kernel: KernelDef) -> List[str]:
-    """``DIRECT_ATTENTION_LEVERS`` for an attention kernel, unless ``ROCKE_DIRECT_DEFAULT_LEVERS`` is set (it
+    """``DIRECT_ATTENTION_LEVERS`` for a dense attention kernel, unless ``ROCKE_DIRECT_DEFAULT_LEVERS`` is set (it
     replaces every default, ``""`` leaving the plain direct object)."""
     if os.environ.get(_DIRECT_DEFAULTS_ENV) is not None:
         return []
-    is_attention = str(getattr(kernel, "name", "")).startswith("rocke_attention")
+    is_attention = str(getattr(kernel, "name", "")).startswith("rocke_attention_dense")
     return list(DIRECT_ATTENTION_LEVERS) if is_attention else []
 
 
