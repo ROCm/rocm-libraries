@@ -317,6 +317,7 @@ _SPEC_PERTURBATIONS = {
     "chiplet_num_xcds": (1, 4),
     "lazy_rescale": (False, True),
     "use_sinks": (True,),
+    "use_alibi": (True,),
 }
 
 # The gfx942-private half of the same table: fields Gfx942AttentionDenseSpec adds on
