@@ -477,6 +477,35 @@ struct tensile_params_t {
   bool lds_transpose_read_a = false;
   bool lds_transpose_read_b = false;
 
+  /// TensileLite TDMInst: A/B move global-to-LDS by tensor DMA (0 = per-lane loads, 3 = both).
+  int tdm_inst = 0;
+
+  /// TensileLite PrefetchGL2: tiles the GL2 prefetch runs ahead of the global-read front.
+  int prefetch_gl2 = 0;
+
+  /// TensileLite PrefetchLocalRead. -1 = unknown (the local-read exposure term is skipped).
+  int prefetch_local_read = -1;
+
+  /// TensileLite HalfPLR bitmask: 1 = A, 2 = B, 3 = both read only half ahead.
+  int half_plr = 0;
+
+  /// Cluster peers share A/B tiles by multicast (TensileLite Multicast).
+  bool multicast = false;
+
+  /// TensileLite ClusterAIDMapping: -1 = off, -2 = AID read from hardware, 0..7 = start XCC.
+  int cluster_aid_mapping = -1;
+
+  /// A and B ride their own TDM descriptor sets on a multi-wave kernel (TensileLite TDMFuse 1-3).
+  bool tdm_separate_ab = false;
+
+  /// The kernel walks tiles from a persistent workgroup rank (TensileLite TileProcessingStrategy
+  /// DataParallel or StreamK). config_t::stream_k marks only the StreamK ones.
+  bool persistent = false;
+
+  /// TensileLite AdaptiveGemm: edge-tile stores pick the widest vector width the remainder
+  /// allows instead of the scalar edge path.
+  int adaptive_gemm = 0;
+
   constexpr bool operator==(const tensile_params_t& o) const noexcept {
     return depth_u == o.depth_u && global_split_u == o.global_split_u &&
            global_accumulation == o.global_accumulation && local_split_u == o.local_split_u &&
@@ -496,7 +525,11 @@ struct tensile_params_t {
            unroll_major_lds_a == o.unroll_major_lds_a &&
            unroll_major_lds_b == o.unroll_major_lds_b &&
            lds_transpose_read_a == o.lds_transpose_read_a &&
-           lds_transpose_read_b == o.lds_transpose_read_b;
+           lds_transpose_read_b == o.lds_transpose_read_b && tdm_inst == o.tdm_inst &&
+           prefetch_gl2 == o.prefetch_gl2 && prefetch_local_read == o.prefetch_local_read &&
+           half_plr == o.half_plr && multicast == o.multicast &&
+           cluster_aid_mapping == o.cluster_aid_mapping && tdm_separate_ab == o.tdm_separate_ab &&
+           persistent == o.persistent && adaptive_gemm == o.adaptive_gemm;
   }
 
   std::size_t hash() const {
@@ -529,7 +562,16 @@ struct tensile_params_t {
                               unroll_major_lds_a,
                               unroll_major_lds_b,
                               lds_transpose_read_a,
-                              lds_transpose_read_b);
+                              lds_transpose_read_b,
+                              tdm_inst,
+                              prefetch_gl2,
+                              prefetch_local_read,
+                              half_plr,
+                              multicast,
+                              cluster_aid_mapping,
+                              tdm_separate_ab,
+                              persistent,
+                              adaptive_gemm);
   }
 };
 

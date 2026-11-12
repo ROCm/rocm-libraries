@@ -32,6 +32,7 @@ from . import Properties
 from .Common import state, state_key_ordering, IsaInfo
 from .Common.Architectures import gfxToIsa
 from .Common.DataType import DataType
+from .Components.TDMFuse import tdmSeparateABDescriptors
 from .Common.GlobalParameters import internalParameters
 from .SolutionStructs import Solution as OriginalSolution
 from .SolutionStructs.Problem import getBiasDataTypeListDefault, getGateResidualDataTypeListDefault
@@ -830,6 +831,7 @@ class SizeMapping:
                  'temporalHintA',
                  'temporalHintB',
                  'hasTemporalHint',
+                 'adaptiveGemm',
                  'adaptiveGemmNTAB',
                  'customMainLoopScheduling',
                  'useSubtileImpl',
@@ -856,7 +858,15 @@ class SizeMapping:
                  'ExpertSchedulingMode',
                  'clusterDim',
                  'BufferLoad',
-                 'BufferStore'
+                 'BufferStore',
+                 'temporalHintD',
+                 'PrefetchLocalRead',
+                 'HalfPLR',
+                 'PrefetchGL2',
+                 'TDMInst',
+                 'TDMSeparateAB',
+                 'ClusterAIDMapping',
+                 'Multicast'
                  ]
 
     @classmethod
@@ -939,6 +949,7 @@ class SizeMapping:
                    temporalHintA            = d.get('TemporalHintA', 0),
                    temporalHintB            = d.get('TemporalHintB', 0),
                    hasTemporalHint          = bool(d.get('_HasTemporalHint', False)),
+                   adaptiveGemm             = int(d.get('AdaptiveGemm', 0)),
                    adaptiveGemmNTAB         = d['AdaptiveGemmNTAB'] if 'AdaptiveGemmNTAB' in d else 0,
                    customMainLoopScheduling = d['UseCustomMainLoopSchedule'],
                    useSubtileImpl           = bool(d.get('UseSubtileImpl', False)),
@@ -971,7 +982,15 @@ class SizeMapping:
                    # the other newly-added-but-optional fields above (e.g.
                    # PrefetchAcrossPersistent, TemporalHintA/B).
                    BufferLoad               = bool(d.get('BufferLoad', True)),
-                   BufferStore              = bool(d.get('BufferStore', True))
+                   BufferStore              = bool(d.get('BufferStore', True)),
+                   temporalHintD            = d.get('TemporalHintD', 0),
+                   PrefetchLocalRead        = int(d.get('PrefetchLocalRead', 1)),
+                   HalfPLR                  = int(d.get('HalfPLR', 0)),
+                   PrefetchGL2              = int(d.get('PrefetchGL2', 0)),
+                   TDMInst                  = int(d.get('TDMInst', 0)),
+                   TDMSeparateAB            = tdmSeparateABDescriptors(d),
+                   ClusterAIDMapping        = int(d.get('ClusterAIDMapping', -1)),
+                   Multicast                = int(bool(d.get('Multicast', False)))
                    )
     @classmethod
     def ReadOriginalMacroTile(cls, d):

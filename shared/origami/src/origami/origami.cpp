@@ -36,6 +36,61 @@ std::vector<prediction_result_t> select_topk_configs(const problem_t& problem,
   return topk_configs;
 }
 
+// gfx1250 maps WGM only.  Its persistent kernels reread WorkGroup0 from the hardware id after the
+// WGMXCC remap, and the chunked, K-Coherent and StaggerU remaps are untested there, so all of them
+// stay off (WGMXCC 1, chunk 0, split-K 0).  WGM is the positive slab width whose first wave puts the
+// fewest A/B DRAM bytes on one L2 domain (the compute_memory_latency_cdna5 footprint); ties keep
+// WGM 1.  Tensor-DMA operands count as temporal, as in the ranking model.
+static workgroup_mapping_t select_workgroup_mapping_gfx1250(const problem_t& problem,
+                                                            const hardware_t& hardware,
+                                                            const config_t& config) {
+  const gemm::context_t context(problem, hardware, config);
+  const size_t per_domain = hardware.xcd_per_l2_domain();
+  const size_t splits     = std::max<size_t>(context.splitting_factor, 1);
+  const size_t batch      = std::max<size_t>(problem.batch, 1);
+  const dim4_t grid       = {splits, context.grid_m, context.grid_n, batch};
+  const size_t wave       = std::min(grid.total(), std::max<size_t>(context.n_cu, 1));
+  const bool tdm          = config.has_tensile_params() && config.tensile().tdm_inst != 0;
+  const bool a_temporal   = tdm || config.cache_hints_a < 4;
+  const bool b_temporal   = tdm || config.cache_hints_b < 4;
+  const double l2_cap     = static_cast<double>(hardware.l2_domain_capacity());
+  const operand_traffic_t& traffic = context.traffic;
+
+  workgroup_mapping_t best{0, 0, 1, 1};
+  double best_bytes = std::numeric_limits<double>::max();
+  std::vector<char> a_seen, b_seen;
+  for (int wgm : {1, 2, 4, 8, 16, 32, 64}) {
+    a_seen.assign(grid.m * splits * batch, 0);
+    b_seen.assign(grid.n * splits * batch, 0);
+    double requests = 0.0, a_unique = 0.0, b_unique = 0.0;
+    for (size_t id = 0; id < wave; ++id) {
+      if (hardware.dispatch_xcd(id) / per_domain != 0) continue;
+      const dim4_t t = gemm::wgm_to_grid(grid, workgroup_mapping_t{0, 0, 0, wgm}, id);
+      char& a = a_seen[(t.b * splits + t.k) * grid.m + t.m];
+      char& b = b_seen[(t.b * splits + t.k) * grid.n + t.n];
+      a_unique += a ? 0.0 : 1.0;
+      b_unique += b ? 0.0 : 1.0;
+      a = b = 1;
+      requests += 1.0;
+    }
+    const double a_load = a_unique * traffic.a_iter_bytes;
+    const double b_load = b_unique * traffic.b_iter_bytes;
+    auto hit = [&](bool temporal, double unique, double own, double other) {
+      if (!temporal || !(requests > 0.0) || !(own > 0.0)) return 0.0;
+      const double residency = std::min(l2_cap / (own + other * own / (a_load + b_load)), 1.0);
+      return residency * std::max(1.0 - unique / requests, 0.0);
+    };
+    const double bytes =
+        (1.0 - hit(a_temporal, a_unique, a_load, b_load)) * traffic.a_iter_bytes * traffic.a_cl_share +
+        (1.0 - hit(b_temporal, b_unique, b_load, a_load)) * traffic.b_iter_bytes * traffic.b_cl_share;
+    if (bytes < best_bytes * (1.0 - 1e-9)) {
+      best_bytes = bytes;
+      best.wgm   = wgm;
+    }
+  }
+  return best;
+}
+
 /**
  * @brief Selects the best workgroup mapping parameters (maximizing cache hits) given fixed macro
  * tile sizes.
@@ -65,6 +120,9 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
 
   // Early Exit: problem sizes are invalid
   if (M < 1 || N < 1 || K < 1 || batch < 1) { return workgroup_mapping_t{0, 0, 0}; }
+
+  if (hardware.arch == hardware_t::architecture_t::gfx1250)
+    return select_workgroup_mapping_gfx1250(problem, hardware, config);
 
   // Default values
   // Honor the caller's CU budget (problem.num_cus); 0 means use all CUs.
@@ -449,6 +507,9 @@ staggerU_t select_staggerU(const problem_t& problem,
   // Early Exit: problem sizes are invalid
   if (M < 1 || N < 1 || K < 1 || batch < 1) { return staggerU_t{0, 0, 0}; }
 
+  // gfx1250 runs no StaggerU remap (see select_workgroup_mapping_gfx1250).
+  if (hardware.arch == hardware_t::architecture_t::gfx1250) return staggerU_t{0, 0, 0};
+
   // Default values
   // Honor the caller's CU budget (problem.num_cus); 0 means use all CUs.
   size_t numCUs       = resolve_num_cus(problem.num_cus, hardware.N_CU);
@@ -572,7 +633,7 @@ staggerU_t select_staggerU(const problem_t& problem,
   // 0.95 is a heuristic to make sure we don't exceed L2 capacity and if we are not
   // underestimating the working set. The effect of a false prediction is more severe
   // than not predicting at all.
-  if (working_set > 0.95 * hardware.L2_capacity) return staggerU_t{0, 0, 0};
+  if (working_set > 0.95 * hardware.l2_domain_capacity()) return staggerU_t{0, 0, 0};
   // Early Exit: L2 value is already max_staggerU
   if (L2_value == max_staggerU)
     return staggerU_t{L2_mapping, max_staggerU, out_staggerUStrideShift};

@@ -2118,21 +2118,38 @@ namespace TensileLite
             {
                 if(sizes.size() >= 4)
                 {
+                    // Built as PredictionLibrary builds the ranking's problem, so both see
+                    // the same operand layouts and pick the same WGM.
+                    auto miDataType = datatypeToAnalyticalDatatype(problem.computeInputTypeA());
+                    if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
+                        miDataType = origami::data_type_t::XFloat32;
                     origami::problem_t origami_problem = {
-                        .size    = {sizes[0], sizes[1], sizes[3]},
-                        .batch   = sizes[2],
+                        .size        = {sizes[0], sizes[1], sizes[3]},
+                        .batch       = sizes[2],
                         // CU budget hint; 0 = use all CUs.
-                        .num_cus = static_cast<size_t>(problem.getParams().smCountTarget()),
-                        .a_dtype = datatypeToAnalyticalDatatype(problem.a().dataType()),
-                        .b_dtype = datatypeToAnalyticalDatatype(problem.b().dataType()),
+                        .num_cus     = static_cast<size_t>(problem.getParams().smCountTarget()),
+                        .a_transpose = problem.transA() ? origami::transpose_t::T
+                                                        : origami::transpose_t::N,
+                        .b_transpose = problem.transB() ? origami::transpose_t::T
+                                                        : origami::transpose_t::N,
+                        .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
+                        .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
+                        .c_dtype     = datatypeToAnalyticalDatatype(problem.c().dataType()),
+                        .d_dtype     = datatypeToAnalyticalDatatype(problem.d().dataType()),
+                        .mi_dtype    = miDataType,
                     };
+                    // Origami ranks an auto mapping with this same call, on effective hints.
                     origami::config_t origami_config = {
                         .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
                                           static_cast<size_t>(sizeMapping.macroTile.y),
                                           static_cast<size_t>(sizeMapping.depthU)},
-                        .cache_hints_a = sizeMapping.cacheHintA(),
-                        .cache_hints_b = sizeMapping.cacheHintB(),
+                        .cache_hints_a = sizeMapping.effectiveCacheHintA(),
+                        .cache_hints_b = sizeMapping.effectiveCacheHintB(),
                     };
+                    // gfx1250 counts tensor-DMA operands as temporal, as Origami's ranking does.
+                    if(hipAMDGPU->analyticalHardware->arch
+                       == origami::hardware_t::architecture_t::gfx1250)
+                        origami_config.tensile().tdm_inst = sizeMapping.TDMInst;
 
                     origami::workgroup_mapping_t prediction_results
                         = origami::select_workgroup_mapping(origami_problem,
@@ -7718,7 +7735,12 @@ namespace TensileLite
                                static_cast<size_t>(self.sizeMapping.matrixInstruction[2])},
                         .occupancy = std::max(self.sizeMapping.CUOccupancy, static_cast<int>(1)),
                         .workgroup_mapping         = self.sizeMapping.workGroupMapping,
-                        .workspace_size            = problem.workspaceSize(),
+                        // The spatial-cluster schedule re-cuts this grid and checks its own
+                        // (unpadded) workspace requirement, so the per-WG tile check must not
+                        // turn the exact size it reports into a whole-tile grid.
+                        .workspace_size            = self.usesStreamKSpatialCluster()
+                                                         ? std::numeric_limits<size_t>::max()
+                                                         : problem.workspaceSize(),
                         .workspace_size_per_elem_c = self.sizeMapping.isPersistentDataParallel()
                                                          ? static_cast<size_t>(DataTypeInfo::Get(self.problemType.computeType).elementSize)
                                                          : self.sizeMapping.workspaceSizePerElemC,

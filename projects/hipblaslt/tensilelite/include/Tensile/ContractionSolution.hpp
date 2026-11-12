@@ -509,6 +509,7 @@ namespace TensileLite
 
         int temporalHintA = 0;
         int temporalHintB = 0;
+        int temporalHintD = 0;
 
         bool hasTemporalHint = false;
         bool BufferLoad = true;
@@ -525,7 +526,36 @@ namespace TensileLite
             return hasTemporalHint ? (temporalHintB == 1 || temporalHintB == 3 ? 4 : 0)
                                    : nonTemporalB;
         }
+        /// @see cacheHintA. On TemporalHint archs NonTemporalD selects a cache scope instead.
+        int cacheHintD() const
+        {
+            return hasTemporalHint ? (temporalHintD == 1 || temporalHintD == 3 ? 4 : 0)
+                                   : NonTemporalD;
+        }
 
+        /// One tensor_load_to_lds moves both A and B: a multi-wave TDM kernel that is not
+        /// subtiled and does not give A and B their own descriptor sets. Its TH bits serve both
+        /// operands, and a TH the two do not agree on stays at the default (tdmCacheModifiers).
+        bool tdmLoadSharesTemporalHint() const
+        {
+            return hasTemporalHint && (TDMInst & 3) == 3 && waveNum > 1 && !useSubtileImpl
+                   && !TDMSeparateAB;
+        }
+        /// cacheHintA/B for the hint A/B loads actually carry (@see tdmLoadSharesTemporalHint).
+        int effectiveCacheHintA() const
+        {
+            return tdmLoadSharesTemporalHint() && temporalHintA != temporalHintB ? 0
+                                                                                 : cacheHintA();
+        }
+        /// @see effectiveCacheHintA
+        int effectiveCacheHintB() const
+        {
+            return tdmLoadSharesTemporalHint() && temporalHintA != temporalHintB ? 0
+                                                                                 : cacheHintB();
+        }
+
+        /// AdaptiveGemm: edge-tile stores pick the widest vector width the remainder allows.
+        int adaptiveGemm     = 0;
         int adaptiveGemmNTAB = 0;
 
         int customMainLoopScheduling = 0;
@@ -557,6 +587,30 @@ namespace TensileLite
         int  UnrollMajorLDSB = -1;
         bool enableLDSTrA    = false;
         bool enableLDSTrB    = false;
+
+        int PrefetchLocalRead = 1;
+        int HalfPLR           = 0;
+        int PrefetchGL2       = 0;
+        int TDMInst           = 0;
+        /// TDMFuse gives A and B their own TDM descriptor sets on a multi-wave kernel.
+        bool TDMSeparateAB     = false;
+        int  ClusterAIDMapping = -1;
+        /// Cluster peers share A/B tiles by TDM multicast: 1 or 0, -1 if the library predates
+        /// the key (@see clusterMulticast).
+        int Multicast = -1;
+
+        /// Whether cluster peers multicast A/B tiles.  Libraries without the Multicast key
+        /// follow Tensile's rule: clustered, and either not persistent or persistent with a
+        /// static spatial assignment.  Tensile also requires TDM-multicast hardware, which
+        /// gfx1250-strict lacks; older libraries do not record which one they target.
+        bool clusterMulticast() const
+        {
+            if(Multicast >= 0)
+                return Multicast != 0;
+            return clusterDim.x * clusterDim.y > 1
+                   && (!isPersistent()
+                       || (hasStaticAssignment() && (isStreamK() || isPersistentDataParallel())));
+        }
 
         int expertSchedulingMode = 0;
 

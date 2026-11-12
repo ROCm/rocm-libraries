@@ -11,6 +11,7 @@
 #include <numeric>
 #include <stdexcept>
 #include <tuple>
+#include <vector>
 
 #include "origami/hardware.hpp"
 #include "origami/heuristics.hpp"
@@ -19,6 +20,7 @@
 #include "origami/types.hpp"
 
 #include "origami/gemm.hpp"
+#include "origami/origami.hpp"
 #include "origami/simulator/tensilelite/formocast_simulator.hpp"
 #include "origami/streamk.hpp"
 
@@ -98,7 +100,9 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
 
   // Per-operand DRAM traffic: pure function of the values set above; computed
   // once here and shared by the cache-hit and memory-latency models.
-  traffic = compute_operand_traffic(problem, config, *this);
+  // gfx1250 reads DRAM in aligned 256 B blocks.
+  traffic = compute_operand_traffic(
+      problem, config, *this, hardware.is_cdna5() ? 256 : heuristic_defaults_t::DRAM_SECTOR_BYTES);
 
   // Hardware-derived values
   active_cus           = cus;
@@ -430,6 +434,71 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
   return {0, 0, out_wgmxcc, static_cast<int32_t>(best_wgm)};
 }
 
+// Workgroups per cluster (Cs along M by Ck along N); 1 where the hardware has no clusters.
+static size_t cluster_size(const hardware_t& hardware, const config_t& config) {
+  if (!hardware.is_cdna5()) return 1;
+  return std::max<size_t>(config.cluster_dim.m, 1) * std::max<size_t>(config.cluster_dim.n, 1);
+}
+
+// Clusters running at once: each is placed whole inside one shader engine (two per XCD).
+static size_t clusters_per_wave(const hardware_t& hardware, size_t usable_cus, size_t cluster) {
+  const size_t num_se     = std::max<size_t>(hardware.NUM_XCD * 2, 1);
+  const size_t wgp_per_se = std::max<size_t>(usable_cus / num_se, 1);
+  return std::max<size_t>(num_se * (wgp_per_se / std::max<size_t>(cluster, 1)), 1);
+}
+
+// Cs x Ck blocks of output tiles covering the grid; boundary blocks are padded.
+static size_t cluster_blocks(const problem_t& problem, const config_t& config) {
+  return math::safe_ceil_div(math::safe_ceil_div(problem.size.m, config.mt.m),
+                             std::max<size_t>(config.cluster_dim.m, 1)) *
+         math::safe_ceil_div(math::safe_ceil_div(problem.size.n, config.mt.n),
+                             std::max<size_t>(config.cluster_dim.n, 1)) *
+         std::max<size_t>(problem.batch, 1);
+}
+
+struct spatial_streamk_launch_t {
+  size_t num_wgs;
+  size_t tiles;
+  reduction_t reduction;
+};
+
+// Static StreamK with a cluster runs TensileLite's spatial schedule
+// (resolveClusteredStreamKSettings): each cluster works a K range of one block, and boundary
+// blocks keep all their peers, which load and synchronize but own no output.  The grid chosen
+// for the real tiles is re-cut into whole clusters over the padded blocks.  A whole-tile grid
+// becomes whole blocks, and a parallel split keeps its split count per block while the
+// resident WGs allow it.  Otherwise the tree schedule follows the uniform summation order
+// hipBLASLt requests by default: every block takes the same number of K chunks, at least 8
+// iterations each, or the blocks run whole, at most one cluster each.
+static spatial_streamk_launch_t spatial_streamk_launch(const problem_t& problem,
+                                                       const hardware_t& hardware,
+                                                       const config_t& config,
+                                                       size_t c,
+                                                       size_t num_mts,
+                                                       size_t grid,
+                                                       reduction_t reduction) {
+  const size_t blocks = cluster_blocks(problem, config);
+  const size_t padded = blocks * c;
+  if (grid == num_mts) return {padded, padded, reduction_t::tree};
+
+  const size_t iters = std::max<size_t>(math::safe_ceil_div(problem.size.k, config.mt.k), 1);
+  size_t budget      = grid;
+  if (grid > num_mts)
+    budget = (reduction == reduction_t::parallel) ? padded * std::min(grid / num_mts, iters)
+                                                  : std::max(grid, padded);
+  const size_t resident = hardware.N_CU * std::max<size_t>(config.occupancy, 1);
+  const size_t clusters =
+      std::max<size_t>(std::min({std::max(budget, c) / c, resident / c, blocks * iters}), 1);
+
+  size_t splits = std::min(clusters / blocks, iters);
+  if (reduction == reduction_t::parallel && splits >= 2)
+    return {padded * splits, padded, reduction};
+  if (clusters % blocks != 0)
+    while (splits >= 2 && (iters % splits != 0 || iters / splits < 8)) --splits;
+  if (splits >= 2) return {padded * splits, padded, reduction_t::tree};
+  return {std::min(clusters, blocks) * c, padded, reduction_t::tree};
+}
+
 // Compute the launch parameters for the kernel.
 std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameters(
     const problem_t& problem,
@@ -455,11 +524,29 @@ std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameter
   // behaviour analytically. So for now, if the num_wgs is less than the num_mts, we calculate
   // num_timesteps based on the num_mts. Otherwise, we use num_wgs to compute num_timesteps.
   // Usable CU count: derived from the problem's CU budget (problem.num_cus).
-  const size_t usable_cus       = resolve_num_cus(problem.num_cus, hardware.N_CU);
+  const size_t usable_cus = resolve_num_cus(problem.num_cus, hardware.N_CU);
+  size_t num_timesteps    = num_wgs > num_mts ? math::safe_ceil_div(num_wgs, usable_cus)
+                                              : math::safe_ceil_div(num_mts, usable_cus);
+  size_t scheduled_tiles  = num_mts;
+
+  // Cluster kernels run in waves of whole clusters.  Static StreamK re-cuts its grid into the
+  // spatial schedule, and a non-persistent kernel pads its grid to whole clusters; padded
+  // workgroups exit at once but are charged their slot.
+  const size_t c = cluster_size(hardware, config);
+  if (c > 1 && config.stream_k == 3) {
+    const auto spatial = spatial_streamk_launch(
+        problem, hardware, config, c, num_mts, num_wgs, reduction_strategy);
+    reduction_strategy = spatial.reduction;
+    num_wgs            = spatial.num_wgs;
+    scheduled_tiles    = spatial.tiles;
+    const size_t wave  = std::min(num_wgs, clusters_per_wave(hardware, usable_cus, c) * c);
+    num_timesteps      = math::safe_ceil_div(std::max(num_wgs, scheduled_tiles), wave);
+  } else if (c > 1 && config.stream_k == 0) {
+    num_timesteps = math::safe_ceil_div(cluster_blocks(problem, config),
+                                        clusters_per_wave(hardware, usable_cus, c));
+  }
   const size_t num_active_cus   = num_wgs < usable_cus ? num_wgs : usable_cus;
-  const size_t num_timesteps    = num_wgs > num_mts ? math::safe_ceil_div(num_wgs, usable_cus)
-                                                    : math::safe_ceil_div(num_mts, usable_cus);
-  const size_t splitting_factor = math::safe_ceil_div(num_wgs, num_mts);
+  const size_t splitting_factor = math::safe_ceil_div(num_wgs, scheduled_tiles);
 
   return std::make_tuple(
       reduction_strategy, num_wgs, num_active_cus, num_timesteps, splitting_factor);
@@ -1417,11 +1504,197 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
   return rates;
 }
 
+// Smooth minimum (x^-s + y^-s)^(-1/s), evaluated relative to the smaller value.
+static double soft_min(double x, double y, double sharpness) {
+  const double lo = std::min(x, y);
+  const double hi = std::max(x, y);
+  if (!(lo > 0.0)) return std::max(lo, 0.0);
+  return lo * std::pow(1.0 + std::pow(lo / hi, sharpness), -1.0 / sharpness);
+}
+
+// gfx1250 A/B memory latency per K-iteration, in four steps:
+//   1. L2 hit rates of A and B (no MALL) from the tiles the launch's first wave places on one
+//      L2 domain (the four XCDs of an AID), against the domain's capacity.
+//   2. L2 and DRAM read times: L2 bytes in 128 B lines per K-iteration, DRAM bytes in 256 B
+//      blocks, at the measured tensor-DMA (or per-lane) bandwidths.
+//   3. Multicast clusters cut the L2 request bytes.
+//   4. TemporalHint is left out here; compute_total_latency scales kernels whose A and B
+//      tensor-DMA loads both carry it (temporal_hint_factor).
+// Load latency is charged by compute_tile_latency from *l2_hit_rate and *l2_cycles.
+static double compute_memory_latency_cdna5(const problem_t& problem,
+                                           const hardware_t& hardware,
+                                           const config_t& config,
+                                           const context_t& context,
+                                           double* l2_hit_rate,
+                                           double* l2_cycles) {
+  const size_t num_xcd    = std::max<size_t>(hardware.NUM_XCD, 1);
+  const size_t per_domain = hardware.xcd_per_l2_domain();
+  const size_t n_cu       = std::max<size_t>(context.n_cu, 1);
+  const size_t grid_m     = std::max<size_t>(context.grid_m, 1);
+  const size_t grid_n     = std::max<size_t>(context.grid_n, 1);
+  const size_t splits     = std::max<size_t>(context.splitting_factor, 1);
+  const size_t batch      = std::max<size_t>(problem.batch, 1);
+  const size_t cs         = std::max<size_t>(config.cluster_dim.m, 1);
+  const size_t ck         = std::max<size_t>(config.cluster_dim.n, 1);
+  const bool multicast = cs * ck > 1 && (!config.has_tensile_params() || tparams(config).multicast);
+  const bool tdm       = tparams(config).tdm_inst != 0;
+
+  // 1. L2 hit rates.  Workgroup i runs on XCD dispatch_xcd(i) (WGMXCC does not remap on
+  //    gfx1250) and WGM (the solution's, else the predicted one) orders the ids into slabs.  A
+  //    cluster c is dispatched whole onto XCD dispatch_xcd(c), two shader engines per XCD,
+  //    bypassing WGM; ClusterAIDMapping can hand each domain one contiguous part of the cluster
+  //    grid.  A load hits when another tile on the domain already brought that A row / B
+  //    column (same K split and batch).
+  std::vector<char> a_seen(grid_m * splits * batch, 0);
+  std::vector<char> b_seen(grid_n * splits * batch, 0);
+  double requests = 0.0, a_unique = 0.0, b_unique = 0.0;
+  auto touch = [](std::vector<char>& seen, size_t i, double& unique) {
+    if (!seen[i]) seen[i] = 1, unique += 1.0;
+  };
+  auto on_domain0 = [&](size_t id) { return hardware.dispatch_xcd(id) / per_domain == 0; };
+  if (cs * ck > 1) {
+    const size_t cx_n      = math::safe_ceil_div(grid_m, cs);
+    const size_t cy_n      = math::safe_ceil_div(grid_n, ck);
+    const size_t per_batch = cx_n * cy_n;
+    const size_t wave = std::min({per_batch * batch,
+                                  clusters_per_wave(hardware, n_cu, cs * ck),
+                                  std::max<size_t>(context.num_wgs / (cs * ck), 1)});
+    const int caid           = tparams(config).cluster_aid_mapping;
+    const size_t num_domains = std::max<size_t>(num_xcd / per_domain, 1);
+    const bool aid_remap     = caid != -1 && config.stream_k == 0 && (cs & (cs - 1)) == 0 &&
+                           (ck & (ck - 1)) == 0 && grid_m % cs == 0 && grid_n % ck == 0 &&
+                           per_batch % num_xcd == 0 && splits == 1 && (cy_n % 2 == 0 || cx_n % 2 == 0);
+    for (size_t c = 0; c < wave; ++c) {
+      if (!on_domain0(c)) continue;
+      const size_t b  = c / per_batch;
+      const size_t cl = c % per_batch;
+      size_t cx = cl % cx_n, cy = cl / cx_n;
+      if (aid_remap) {
+        // The kernel's own placement guess: read from the hardware (-2), else (c + start) % 8,
+        // which matches the dispatch for start = NUM_XCD - 1.
+        const size_t xcd = (caid == -2) ? hardware.dispatch_xcd(c)
+                                        : (cl + static_cast<size_t>(caid)) % num_xcd;
+        const size_t l   = (xcd / per_domain) * (per_batch / num_domains) +
+                         (cl / num_xcd) * per_domain + xcd % per_domain;
+        cx = (cy_n % 2 == 0) ? l % cx_n : l / cy_n;
+        cy = (cy_n % 2 == 0) ? l / cx_n : l % cy_n;
+      }
+      size_t rows = 0, cols = 0;
+      for (; rows < cs && cx * cs + rows < grid_m; ++rows) touch(a_seen, b * grid_m + cx * cs + rows, a_unique);
+      for (; cols < ck && cy * ck + cols < grid_n; ++cols) touch(b_seen, b * grid_n + cy * ck + cols, b_unique);
+      requests += static_cast<double>(rows * cols);
+    }
+  } else {
+    const dim4_t grid = {splits, grid_m, grid_n, batch};
+    const size_t wave = std::min(grid.total(), n_cu);
+    int wgm           = config.has_tensile_params() ? config.workgroup_mapping : context.wgm.wgm;
+    // An auto mapping on gfx1250 ranks what ContractionSolution::calculateAutoWGM launches.
+    if (wgm == 0 && hardware.arch == hardware_t::architecture_t::gfx1250 &&
+        config.has_tensile_params() && tparams(config).workgroup_mapping_xcc == -1 &&
+        (config.stream_k > 0 || tparams(config).persistent)) {
+      config_t host;
+      host.mt                 = config.mt;
+      host.cache_hints_a      = config.cache_hints_a;
+      host.cache_hints_b      = config.cache_hints_b;
+      host.tensile().tdm_inst = tparams(config).tdm_inst;
+      wgm = select_workgroup_mapping(problem, hardware, host, context.num_wgs).wgm;
+    }
+    if (wgm == 0) wgm = static_cast<int>(std::ceil(std::sqrt(static_cast<double>(n_cu / num_xcd))));
+    for (size_t id = 0; id < wave; ++id) {
+      if (!on_domain0(id)) continue;
+      const dim4_t t = wgm_to_grid(grid, workgroup_mapping_t{0, 0, 0, wgm}, id);
+      touch(a_seen, (t.b * splits + t.k) * grid_m + t.m, a_unique);
+      touch(b_seen, (t.b * splits + t.k) * grid_n + t.n, b_unique);
+      requests += 1.0;
+    }
+  }
+  const operand_traffic_t& traffic = context.traffic;
+  const double l2_cap              = static_cast<double>(hardware.l2_domain_capacity());
+  const double a_load              = a_unique * traffic.a_iter_bytes;
+  const double b_load              = b_unique * traffic.b_iter_bytes;
+  const double load                = a_load + b_load;
+  auto hit = [&](double unique, double own, double other) {
+    if (!(requests > 0.0) || !(own > 0.0)) return 0.0;
+    const double residency = std::min(l2_cap / (own + other * own / load), 1.0);
+    return residency * std::max(1.0 - unique / requests, 0.0);
+  };
+  double H_a = hit(a_unique, a_load, b_load);
+  double H_b = hit(b_unique, b_load, a_load);
+  // Per-lane batched loads re-request a tile from every wave that misses L1.
+  if (problem.batch > 1 && !tdm && load < l2_cap) {
+    const double boost   = (1.0 - load / l2_cap) * (1.0 - load / l2_cap);
+    const double ceiling = heuristic_defaults_t::L2_AMP_CEILING_BATCHED;
+    H_a                  = std::min(H_a + boost * std::max(ceiling - H_a, 0.0), 1.0);
+    H_b                  = std::min(H_b + boost * std::max(ceiling - H_b, 0.0), 1.0);
+  }
+
+  // 2. Read times.  Per WG and K-iteration: DRAM bytes in 256 B blocks over the WG's K range
+  //    (context traffic), L2 bytes in 128 B lines per K-iteration; cross-tile line sharing for
+  //    small M / N at each granule.
+  const bool a_trans    = (problem.a_transpose == transpose_t::T);
+  const bool b_trans    = (problem.b_transpose == transpose_t::T);
+  const double mt_m     = static_cast<double>(std::min<size_t>(problem.size.m, config.mt.m));
+  const double mt_n     = static_cast<double>(std::min<size_t>(problem.size.n, config.mt.n));
+  const double mt_k     = static_cast<double>(std::max<size_t>(config.mt.k, 1));
+  const double a_rows   = a_trans ? mt_m : mt_k;
+  const double a_row    = (a_trans ? mt_k : mt_m) * context.a_bytes;
+  const double b_rows   = b_trans ? mt_k : mt_n;
+  const double b_row    = (b_trans ? mt_n : mt_k) * context.b_bytes;
+  const double a_l2_wg  = a_rows * std::ceil(a_row / 128.0) * 128.0;
+  const double b_l2_wg  = b_rows * std::ceil(b_row / 128.0) * 128.0;
+  const double cus      = static_cast<double>(context.active_cus);
+  double Ld_a_l2        = cus * a_l2_wg * std::min(1.0, problem.size.m * context.a_bytes / 128.0);
+  double Ld_b_l2        = cus * b_l2_wg * std::min(1.0, problem.size.n * context.b_bytes / 128.0);
+  const double Ld_dram  = cus * ((1.0 - H_a) * traffic.a_iter_bytes * traffic.a_cl_share +
+                                (1.0 - H_b) * traffic.b_iter_bytes * traffic.b_cl_share);
+
+  // Tensor DMA (tdm_bandwidth microbenchmark): a row holds a WGP's DMA path for
+  // max(row bytes, beat) / rate (L2: 557 B/ns, 256 B beat; DRAM: 354 B/ns, 183 B beat), and
+  // the WGPs' rate meets the level's peak in a soft minimum (sharpness 3.30 / 9.72).  Per-lane
+  // loads: L2 scales with the active CUs, DRAM with the occupancy quadratic.
+  const double clk = hardware.compute_clock_ghz;
+  double l2_bw     = hardware.mem1_perf_ratio * cus / static_cast<double>(hardware.N_CU);
+  double dram_bw   = hardware.mem3_perf_ratio * context.mem_bw_limited;
+  if (tdm && cus > 0.0) {
+    const double l2_ns   = (a_rows * std::max(a_row, 256.0) + b_rows * std::max(b_row, 256.0)) / 557.0;
+    const double dram_ns = (a_rows * std::max(a_row, 183.0) + b_rows * std::max(b_row, 183.0)) / 354.0;
+    l2_bw   = soft_min(cus * (a_l2_wg + b_l2_wg) / l2_ns, hardware.mem1_perf_ratio * clk, 3.30) / clk;
+    dram_bw = soft_min(cus * (traffic.a_iter_bytes + traffic.b_iter_bytes) / dram_ns,
+                       hardware.mem3_perf_ratio * clk, 9.72) / clk;
+  }
+
+  // 3. Multicast: a cluster requests each A tile once per cluster row and each B tile once per
+  //    cluster column.
+  if (multicast) {
+    Ld_a_l2 *= static_cast<double>(math::safe_ceil_div(grid_n, ck)) / static_cast<double>(grid_n);
+    Ld_b_l2 *= static_cast<double>(math::safe_ceil_div(grid_m, cs)) / static_cast<double>(grid_m);
+  }
+  const double Ld_l2      = Ld_a_l2 + Ld_b_l2;
+  const double L_mem_l2   = (l2_bw > 0.0) ? Ld_l2 / l2_bw : 0.0;
+  const double L_mem_dram = (dram_bw > 0.0) ? Ld_dram / dram_bw : 0.0;
+
+  if (l2_hit_rate) *l2_hit_rate = (Ld_l2 > 0.0) ? (H_a * Ld_a_l2 + H_b * Ld_b_l2) / Ld_l2 : 0.0;
+  if (l2_cycles) *l2_cycles = L_mem_l2;
+  if (context.debug) {
+    OLOG_DEBUG("L2HitA: " << H_a);
+    OLOG_DEBUG("L2HitB: " << H_b);
+    OLOG_DEBUG("Ld_l2: " << Ld_l2);
+    OLOG_DEBUG("Ld_dram: " << Ld_dram);
+    OLOG_DEBUG("L2BW: " << l2_bw);
+    OLOG_DEBUG("DramBW: " << dram_bw);
+    OLOG_DEBUG("L_mem_l2: " << L_mem_l2);
+    OLOG_DEBUG("L_mem_dram: " << L_mem_dram);
+  }
+  return std::max(L_mem_l2, L_mem_dram);
+}
+
 // Determine the memory latency
 double compute_memory_latency(const problem_t& problem,
                               const hardware_t& hardware,
                               const config_t& config,
                               const context_t& context) {
+  if (hardware.is_cdna5())
+    return compute_memory_latency_cdna5(problem, hardware, config, context, nullptr, nullptr);
   const bool debug = context.debug;
 
   // Extract parameters from structured types
@@ -1551,8 +1824,6 @@ double compute_epilogue_latency(const problem_t& problem,
   const size_t grid_m                  = context.grid_m;
   const size_t grid_n                  = context.grid_n;
   const size_t num_output_tiles        = context.num_output_tiles;
-  const double store_bw                = hardware.mem3_perf_ratio * context.mem_bw_limited;
-  const double reduce_bw               = hardware.mem3_perf_ratio * context.write_mem_bw_limited;
   const bool debug                     = context.debug;
   const reduction_t reduction_strategy = context.reduction_strategy;
   const bool is_parallel_reduction     = (reduction_strategy == reduction_t::parallel);
@@ -1595,6 +1866,31 @@ double compute_epilogue_latency(const problem_t& problem,
   // TensileLite stores gwvw_d contiguous M elements per lane in both SourceSwap
   // modes, so a store only splits when it is wider than one buffer_store.
   const size_t natural_svw = max_isa_store_elems;
+
+  // Device write bandwidth: mem3 x the occupancy quadratic, or on gfx1250 the measured
+  // epilogue-store curve (store_bandwidth microbenchmark: a wave's store instruction of B bytes
+  // takes 14.31 ns + B / 29.2 B/ns, a WGP's waves share 216 B/ns, the device meets 20.95 TB/s
+  // with sharpness 2.17; rates as fractions of the 17.13 TB/s DRAM peak).  The K-split
+  // reduction reads its partials at the read bandwidth and writes D at the store one.
+  double store_bw           = hardware.mem3_perf_ratio * context.mem_bw_limited;
+  const double reduce_bw    = hardware.mem3_perf_ratio * context.write_mem_bw_limited;
+  double reduce_write_bw    = reduce_bw;
+  if (hardware.is_cdna5() && hardware.mem3_perf_ratio > 0.0) {
+    const double dram_peak  = hardware.mem3_perf_ratio * hardware.compute_clock_ghz;  // B/ns
+    const double inst_bytes = static_cast<double>(WAVEFRONT_SIZE) *
+                              static_cast<double>(std::min(requested_svw, natural_svw)) * d_bytes;
+    const double wgp_rate =
+        1.0 / ((14.31 + inst_bytes / (29.2 / 17130.0 * dram_peak)) /
+                   (static_cast<double>(wave_num_epi) * inst_bytes) +
+               1.0 / (216.0 / 17130.0 * dram_peak));
+    auto device_bw = [&](size_t writers) {
+      const double w = static_cast<double>(std::max<size_t>(writers, 1));
+      return soft_min(w * wgp_rate, 20950.0 / 17130.0 * dram_peak, 2.17) /
+             hardware.compute_clock_ghz;
+    };
+    store_bw        = device_bw(num_active_cus);
+    reduce_write_bw = device_bw(std::min(num_output_tiles, N_CU));
+  }
 
   // Per-CU write bandwidth: total write BW shared among all writers.
   const size_t num_writers = std::max(num_active_cus, static_cast<size_t>(1));
@@ -1776,7 +2072,8 @@ double compute_epilogue_latency(const problem_t& problem,
       double L_partial_read = partial_bytes / per_cu_reduce_bw;
       double L_accumulate =
           static_cast<double>(n_partials * tile_m * tile_n) / WAVEFRONT_SIZE;
-      double L_partial_write = static_cast<double>(tile_m) * tile_n * d_bytes / per_cu_reduce_bw;
+      double L_partial_write = static_cast<double>(tile_m) * tile_n * d_bytes /
+                               (reduce_write_bw / static_cast<double>(num_output_tiles));
       tile.reduction         = L_sync + L_partial_read + L_accumulate + L_partial_write;
     }
 
@@ -1927,7 +2224,10 @@ double compute_tile_latency(const problem_t& problem,
 
   // Per-K-iter cycle costs (simple MFMA-only compute model; bytes/BW memory).
   double L_compute = static_cast<double>(compute_mt_compute_latency(problem, hardware, config));
-  double L_mem     = compute_memory_latency(problem, hardware, config, context);
+  double l2_hit = 0.0, l2_cycles = 0.0;
+  double L_mem  = hardware.is_cdna5() ? compute_memory_latency_cdna5(
+                                           problem, hardware, config, context, &l2_hit, &l2_cycles)
+                                      : compute_memory_latency(problem, hardware, config, context);
 
   // LDS read time that narrow M/N-contiguous reads (VectorWidth * bpe below a
   // bank) add over the full-width floor.  The LDS pipe feeds the MFMAs, so only
@@ -1960,6 +2260,33 @@ double compute_tile_latency(const problem_t& problem,
 
   L_compute = L_compute / per_wave_score * (simds_per_cu / simds_busy);
   L_compute += L_local_read;
+
+  // LDS-read latency the WMMAs of one sub-iteration (MI_K of K) leave uncovered.
+  // PrefetchLocalRead issues the next sub-iteration's reads before this one's WMMAs; HalfPLR
+  // (1 = A, 2 = B, 3 = both) issues only half of the selected operand's reads early and the
+  // rest mid-MAC, giving that operand half the WMMA time.  Each operand's exposure is weighted
+  // by its share of the sub-iteration's LDS reads (wave.m rows of A, wave.n rows of B).
+  double L_lds_latency          = 0.0;
+  const double lds_read_latency = hardware.lds_read_latency();
+  if (lds_read_latency > 0.0 && tp.prefetch_local_read >= 0) {
+    const dim3_t wave        = compute_wave_share(config);
+    const double sub_iters   = std::max(1.0, static_cast<double>(wave.k) / config.mi.k);
+    const double wmma_cycles = static_cast<double>(hardware.get_mi_latency(
+                                   config.mi.m, config.mi.n, config.mi.k, problem.mi_dtype)) *
+                               static_cast<double>(hardware.parallel_mi_cu);
+    const double sub_iter_wmma = (static_cast<double>(wave.m) / config.mi.m) *
+                                 (static_cast<double>(wave.n) / config.mi.n) * wmma_cycles;
+    auto exposed = [&](bool half) {
+      const double cover = (tp.prefetch_local_read == 0) ? 0.0
+                           : half                         ? 0.5 * sub_iter_wmma
+                                                          : sub_iter_wmma;
+      return std::max(0.0, lds_read_latency - cover);
+    };
+    const double share_a = static_cast<double>(wave.m) / static_cast<double>(wave.m + wave.n);
+    L_lds_latency = (share_a * exposed(tp.half_plr & 1) + (1.0 - share_a) * exposed(tp.half_plr & 2)) *
+                    sub_iters;
+  }
+  L_compute += L_lds_latency;
 
   // XF32 / BF16-from-f32 conversion, charged per main-loop iter.
   // TODO: gfx90a also lacks native TF32 and should get CVT overhead, but
@@ -2009,10 +2336,35 @@ double compute_tile_latency(const problem_t& problem,
   // ---------------------------------------------------------------------------
   // 1. Prologue (PGR first-load stall)
   // ---------------------------------------------------------------------------
+  // Load-to-use latency the global-read prefetch leaves uncovered (zero unless the hardware
+  // has measured memory latencies).  A tile's load issues PGR-1 iterations before the tile is
+  // used and lands after its latency plus its own transfer through L2.  While the device is
+  // DRAM-bound the other CUs' loads overlap that latency, so the shared DRAM time is not part
+  // of it.  PrefetchGL2 pulls the tile into L2 that many iterations earlier, so its load then
+  // sees only L2 latency.
+  double L_latency_iter  = 0.0;
+  double L_latency_first = 0.0;
+  if (hardware.dram_latency_ns() > 0.0) {
+    const double clk      = hardware.compute_clock_ghz;
+    const double lat_l2   = hardware.l2_latency_ns() * clk;
+    const double lat_load = l2_hit * lat_l2 + (1.0 - l2_hit) * hardware.dram_latency_ns() * clk;
+    const double L_iter   = (pgr <= 1) ? L_mem + L_compute * compute_tile_penalty
+                                       : std::max(L_mem, L_compute * compute_tile_penalty);
+    const double gl2_lead = hardware.is_cdna5()
+                                ? static_cast<double>(std::max(tp.prefetch_gl2, 0)) * L_iter
+                                : 0.0;
+    const double lat_eff  = std::max(lat_l2, lat_load - gl2_lead);
+    L_latency_iter =
+        (pgr <= 1)
+            ? lat_eff
+            : std::max(0.0, lat_eff + l2_cycles - static_cast<double>(pgr - 1) * L_iter);
+    L_latency_first = lat_load;
+  }
+
   // The prologue stalls at vmcnt only on the oldest PGR load (~1 x L_mem);
   // skipped when k_iters == 0.  No ETP: loads are bounded to active lanes, so
   // OOB lanes generate no DRAM traffic (compute-only ETP is applied below).
-  const double L_prologue = (k_iters > 0) ? L_mem : 0.0;
+  const double L_prologue = (k_iters > 0) ? L_mem + L_latency_first : 0.0;
 
   // ---------------------------------------------------------------------------
   // 2. MainLoop = L_main + L_ngll + L_nll + L_tail + L_pgr_stall + bookkeeping
@@ -2030,6 +2382,7 @@ double compute_tile_latency(const problem_t& problem,
   double L_main = (pgr <= 1)
       ? (L_mem_stream + L_compute_stream_eff)
       : std::max(L_mem_stream, L_compute_stream_eff);
+  L_main += L_latency_iter * static_cast<double>(num_main_iters);
   L_main *= eff_scale;
   L_main += L_cvt * static_cast<double>(num_main_iters) * compute_tile_penalty;
 
@@ -2090,6 +2443,18 @@ double compute_tile_latency(const problem_t& problem,
       (pgr >= 3) ? (1.0 / static_cast<double>(pgr - 1)) : 1.0;
   const double L_loop_overhead =
       heuristic_defaults_t::K_ITER_LOOP_OVERHEAD * static_cast<double>(k_iters) * pgr_loop_overlap;
+
+  // A multicast load completes only when every peer has issued it, so cluster peers advance in
+  // lockstep through a cluster-barrier handshake at each in-loop tensor load, plus one before
+  // the first load.  The round trip is ~100 cycles for 8-16 peers (84 for 2), but the
+  // handshake runs behind the iteration's loads and MFMAs: only the part a short iteration
+  // cannot cover, 100 cycles less a tenth of the iteration, is exposed (fit to CD/1x1 pairs).
+  const bool multicast = hardware.is_cdna5() && config.cluster_dim.m * config.cluster_dim.n > 1 &&
+                         (!config.has_tensile_params() || tp.multicast);
+  const double L_cluster_sync =
+      (multicast && k_iters > 0)
+          ? (static_cast<double>(k_iters) + 1.0) * std::max(0.0, 100.0 - 0.1 * std::max(L_mem, L_compute))
+          : 0.0;
 
   // With one LDS buffer the next iteration's tile can only be written once every wave has read
   // the current one, so the writes fit only between the MFMAs of the last K-step.  When writing
@@ -2164,7 +2529,7 @@ double compute_tile_latency(const problem_t& problem,
 
   // MainLoop subtotal.
   const double L_mainloop = L_main + L_ngll + L_nll + L_tail + L_pgr_stall + L_loop_overhead +
-                            L_single_lds_buffer + L_du_waste;
+                            L_single_lds_buffer + L_du_waste + L_cluster_sync;
 
   // ---------------------------------------------------------------------------
   // 3. Epilogue (per-tile store; compute is already covered by NLL)
@@ -2204,8 +2569,14 @@ double compute_tile_latency(const problem_t& problem,
   }
   // LocalSplitU LDS reduction, charged once per tile (0 when lsu <= 1).
   const double L_lsu_reduce = compute_lsu_reduction_latency(problem, hardware, config, context);
-  const double L_tile_total =
-      (L_prologue + L_mainloop + L_epilogue + L_lsu_reduce) * weight_tile_total;
+  // gfx1250 AdaptiveGemm with an M remainder runs 0.88-0.97x the time of the otherwise
+  // identical kernel, the most at few K-iterations; without an M remainder it changes nothing.
+  const double adaptive_gemm_factor =
+      (hardware.is_cdna5() && tp.adaptive_gemm != 0 && problem.size.m % config.mt.m != 0)
+          ? 1.0 - 0.11 / (1.0 + static_cast<double>(k_iters) / 128.0)
+          : 1.0;
+  const double L_tile_total = (L_prologue + L_mainloop + L_epilogue + L_lsu_reduce) *
+                              weight_tile_total * adaptive_gemm_factor;
 
   if (debug) {
     OLOG_DEBUG("per_wave wgs_per_cu: " << wgs_per_cu);
@@ -2220,6 +2591,11 @@ double compute_tile_latency(const problem_t& problem,
     OLOG_DEBUG("L_lds_read: " << L_lds_read);
     OLOG_DEBUG("L_lds_floor: " << L_lds_floor);
     OLOG_DEBUG("L_local_read: " << L_local_read);
+    OLOG_DEBUG("L_lds_latency: " << L_lds_latency);
+    OLOG_DEBUG("l2_hit: " << l2_hit);
+    OLOG_DEBUG("L_latency_iter: " << L_latency_iter);
+    OLOG_DEBUG("L_latency_first: " << L_latency_first);
+    OLOG_DEBUG("L_cluster_sync: " << L_cluster_sync);
     OLOG_DEBUG("L_compute: " << L_compute);
     OLOG_DEBUG("L_cvt: " << L_cvt);
     OLOG_DEBUG("k_per_split: " << k_per_split);
@@ -2306,9 +2682,11 @@ double compute_parallel_reduction_latency(const problem_t& problem,
 
   // Bandwidth based on occupancy of the reduction kernel.  Workspace
   // partials are served at MALL bandwidth (mem2) regardless of the
-  // main-kernel cache_hints_d setting.
+  // main-kernel cache_hints_d setting; without a MALL they come from DRAM.
   const double bw_per_cu = compute_mem_bw_from_occupancy(hardware, active_wgs);
-  double read_bw         = std::max(hardware.mem2_perf_ratio * bw_per_cu, 1e-12);
+  const double partials_ratio =
+      hardware.has_MALL() ? hardware.mem2_perf_ratio : hardware.mem3_perf_ratio;
+  double read_bw = std::max(partials_ratio * bw_per_cu, 1e-12);
 
   // Total data movement per timestep:
   //   Read:  active_wgs × threads_per_wg × VW × splitting_factor × compute_bytes
@@ -2345,6 +2723,33 @@ double compute_parallel_reduction_latency(const problem_t& problem,
   }
 
   return L_total;
+}
+
+// gfx1250 TemporalHint (1,1) on tensor-DMA A and B (every tensor_load_to_lds carries
+// th:TH_LOAD_NT; a shared A+B load drops a hint the two do not agree on, so (1,0) and (0,1) run
+// as (0,0)).  86 same-library (1,1)/(0,0) StreamK pairs on 46 BF16 TN shapes split by the
+// problem's A+B+D footprint against the total L2: (1,1) ran 1.117x faster (geomean, 27 of 32
+// pairs) from 0.78x to 2.76x, 0.999x up to 5.73x (no rule in between) and 0.896x above (0 of
+// 10).  No pair was smaller; below 0.75x the pool's (1,1) picks on OOB_200 ran 0.994x their
+// (0,0) copies (19 shapes), so the hint is neutral there.  The (1,1) win does not show in the L2
+// counters (5120^3 gains 1.5x on 1.4x the DRAM reads), so the factor scales the whole kernel time.
+static double temporal_hint_factor(const problem_t& problem,
+                                   const hardware_t& hardware,
+                                   const config_t& config,
+                                   const context_t& context) {
+  if (!hardware.is_cdna5() || (tparams(config).tdm_inst & 3) != 3 || config.cache_hints_a < 4 ||
+      config.cache_hints_b < 4)
+    return 1.0;
+  const double m = static_cast<double>(problem.size.m);
+  const double n = static_cast<double>(problem.size.n);
+  const double k = static_cast<double>(problem.size.k);
+  const double footprint = static_cast<double>(std::max<size_t>(problem.batch, 1)) *
+                           (m * k * context.a_bytes + n * k * context.b_bytes + m * n * context.d_bytes);
+  const double l2 = static_cast<double>(hardware.num_l2_domains() * hardware.l2_domain_capacity());
+  if (footprint < 0.75 * l2) return 1.0;
+  if (footprint < 2.76 * l2) return 1.0 / 1.117;
+  if (footprint > 5.73 * l2) return 1.0 / 0.896;
+  return 1.0;
 }
 
 double compute_total_latency(const problem_t& problem,
@@ -2406,10 +2811,12 @@ double compute_total_latency(const problem_t& problem,
     // Use Dot2 only for M < 3
     if (MI_M == 1 && MI_N == 1 && MI_K == 64 && M > 2) return std::numeric_limits<double>::max();
 
+    // gfx1250 loads carry TemporalHints, not the glc/slc/nt bits these rules were fit on.
+    const bool nt_rules              = !hardware.is_cdna5();
     constexpr size_t cache_line_bits = heuristic_defaults_t::CACHE_LINE_BYTES * 8;  // 128 B in bits
     size_t K_mod_128bytes    = K * a_bits % cache_line_bits;
     size_t MT_K_mod_128bytes = MT_K * a_bits % cache_line_bits;
-    if (K_mod_128bytes == 0 && MT_K_mod_128bytes == 0) {
+    if (nt_rules && K_mod_128bytes == 0 && MT_K_mod_128bytes == 0) {
       // avoid division by 0 if K == 0
       if (M <= MT_M * 2 && !b_trans && ((N * b_bits) / (M * a_bits) > 5)) {
         // Use nontemporal B, if the library has one to use
@@ -2427,7 +2834,7 @@ double compute_total_latency(const problem_t& problem,
           return std::numeric_limits<double>::max();
         }
       }
-    } else if (config.cache_hints_a || config.cache_hints_b) {
+    } else if (nt_rules && (config.cache_hints_a || config.cache_hints_b)) {
       return std::numeric_limits<double>::max();
     }
   }
@@ -2450,8 +2857,13 @@ double compute_total_latency(const problem_t& problem,
   double L_parallel_reduce = compute_parallel_reduction_latency(problem, hardware, config, context);
   total_latency += L_parallel_reduce;
 
+  //  6) TemporalHint on tensor-DMA loads
+  const double th_factor = temporal_hint_factor(problem, hardware, config, context);
+  total_latency *= th_factor;
+
   if (context.debug) {
     OLOG_DEBUG("L_parallel_reduce: " << L_parallel_reduce);
+    OLOG_DEBUG("TemporalHintFactor: " << th_factor);
     OLOG_DEBUG("total_latency: " << total_latency);
     OLOG_DEBUG("=================================");
   }

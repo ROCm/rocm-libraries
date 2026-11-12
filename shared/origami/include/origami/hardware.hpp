@@ -326,10 +326,20 @@ class ORIGAMI_EXPORT hardware_t {
         // AMD Radeon 820M iGPU
         return {0.240, NO_MALL_AVAILABLE, 0.066, 2, std::make_tuple(0, 0.19, 0), 1.5, 2, 32 * 1024};
       case architecture_t::gfx1250: {
-        // TODO: Update with real gfx1250 constants when available
+        // Tensor-DMA (tensor_load_to_lds) read bandwidth microbenchmarked with one workgroup
+        // per WGP (2.4 GHz engine, 1.9 GHz memory clock): L2 saturates at 41.9 TB/s and DRAM
+        // at a sustained 17.1 TB/s (19.8 TB/s only right after the GPU idles).  Below
+        // saturation tensor-DMA loads and epilogue stores follow their own measured curves
+        // (gemm.cpp); the quadratic below is the fraction of the DRAM peak per-lane loads reach
+        // vs active WGPs (and the post-GSU reduction kernel's traffic).  mem3 is scaled by
+        // memory/engine clock and mem_clock_ratio is engine/memory clock, so both hardware_t
+        // constructors agree.
         auto c                       = get_gfx950_arch_constants(std::nullopt);
+        c.mem1_perf_ratio            = 41.93;
         c.mem2_perf_ratio            = NO_MALL_AVAILABLE;
-        c.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.016, 0);
+        c.mem3_perf_ratio            = 17.13 * 1.9 / 2.4;
+        c.mem_bw_per_wg_coefficients = std::make_tuple(-1.81e-5, 8.43e-3, -1.42e-3);
+        c.mem_clock_ratio            = 2.4 / 1.9;
         c.simds_per_cu               = 4;
         c.l1_capacity                = 0;  // RDNA4 has no L1D between vcache and L2
         return c;
@@ -1105,6 +1115,39 @@ class ORIGAMI_EXPORT hardware_t {
    * @return true if the architecture has MALL, false otherwise
    */
   bool has_MALL() const;
+
+  /// gfx1250 (CDNA5): four XCDs per AID share one L2, tensor DMA, no MALL.  Measured on a
+  /// 256-WGP, 8-XCC part at 2.4 GHz; every other architecture keeps the CDNA model.
+  bool is_cdna5() const { return arch == architecture_t::gfx1250; }
+
+  /// XCDs that share one L2: the four XCCs of an AID on gfx1250, otherwise one.
+  size_t xcd_per_l2_domain() const { return is_cdna5() ? 4 : 1; }
+
+  /// Number of L2 domains.
+  size_t num_l2_domains() const {
+    return NUM_XCD >= xcd_per_l2_domain() ? NUM_XCD / xcd_per_l2_domain() : 1;
+  }
+
+  /// XCD that runs the workgroup (or whole cluster) with dispatch id `id`.  Dispatch is
+  /// round-robin over the XCDs; on gfx1250 id 0 lands on the last XCD (XCC 7 on all GPUs
+  /// measured), so id i runs on XCD (i + NUM_XCD - 1) % NUM_XCD.
+  size_t dispatch_xcd(size_t id) const {
+    const size_t n = NUM_XCD > 0 ? NUM_XCD : 1;
+    return is_cdna5() ? (id + n - 1) % n : id % n;
+  }
+
+  /// Effective capacity of one L2 domain in bytes.  On gfx1250 a warm working set stays at
+  /// L2 latency up to ~80-96 MiB per AID although HIP reports 4 MiB.
+  size_t l2_domain_capacity() const { return is_cdna5() ? (96ull << 20) : L2_capacity; }
+
+  /// Load-to-use latency of a DRAM access (single-wave pointer chase), 0 if unmodeled.
+  double dram_latency_ns() const { return is_cdna5() ? 180.0 : 0.0; }
+
+  /// Load-to-use latency of an L2 hit, 0 if unmodeled.
+  double l2_latency_ns() const { return is_cdna5() ? 125.0 : 0.0; }
+
+  /// Dependent LDS read latency in cycles the matrix pipe must cover, 0 if unmodeled.
+  double lds_read_latency() const { return is_cdna5() ? 70.0 : 0.0; }
 
   /**
    * @brief Check if hardware supports native TF32 matrix instructions.

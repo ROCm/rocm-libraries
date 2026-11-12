@@ -164,7 +164,16 @@ NB_MODULE(origami, m) {
       .def_rw("unroll_major_lds_a", &origami::tensile_params_t::unroll_major_lds_a)
       .def_rw("unroll_major_lds_b", &origami::tensile_params_t::unroll_major_lds_b)
       .def_rw("lds_transpose_read_a", &origami::tensile_params_t::lds_transpose_read_a)
-      .def_rw("lds_transpose_read_b", &origami::tensile_params_t::lds_transpose_read_b);
+      .def_rw("lds_transpose_read_b", &origami::tensile_params_t::lds_transpose_read_b)
+      .def_rw("tdm_inst", &origami::tensile_params_t::tdm_inst)
+      .def_rw("prefetch_gl2", &origami::tensile_params_t::prefetch_gl2)
+      .def_rw("prefetch_local_read", &origami::tensile_params_t::prefetch_local_read)
+      .def_rw("half_plr", &origami::tensile_params_t::half_plr)
+      .def_rw("multicast", &origami::tensile_params_t::multicast)
+      .def_rw("cluster_aid_mapping", &origami::tensile_params_t::cluster_aid_mapping)
+      .def_rw("tdm_separate_ab", &origami::tensile_params_t::tdm_separate_ab)
+      .def_rw("persistent", &origami::tensile_params_t::persistent)
+      .def_rw("adaptive_gemm", &origami::tensile_params_t::adaptive_gemm);
 
   nanobind::class_<origami::config_t>(m, "config_t")
       .def(nanobind::init<>())
@@ -311,7 +320,10 @@ NB_MODULE(origami, m) {
       .def_rw("parallel_mi_cu", &hardware_t::parallel_mi_cu)
       .def_rw("mem_bw_per_wg_coefficients", &hardware_t::mem_bw_per_wg_coefficients)
       .def_rw("NUM_XCD", &hardware_t::NUM_XCD)
-      .def_rw("pci_chip_id", &hardware_t::pci_chip_id);
+      .def_rw("pci_chip_id", &hardware_t::pci_chip_id)
+      .def("xcd_per_l2_domain", &hardware_t::xcd_per_l2_domain)
+      .def("num_l2_domains", &hardware_t::num_l2_domains)
+      .def("l2_domain_capacity", &hardware_t::l2_domain_capacity);
 
   m.def("get_hardware_for_device",
         static_cast<hardware_t (*)(int)>(&hardware_t::get_hardware_for_device),

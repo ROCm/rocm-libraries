@@ -38,6 +38,7 @@
 #include <string>
 #include <vector>
 
+#include <Tensile/AMDGPUPredicates.hpp>
 #include <Tensile/ContractionLibrary.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
@@ -329,6 +330,77 @@ TEST(PredictionLibraryTest, UnmappedTemporalHintsStayCached)
     }
 }
 
+// gfx1250 kernel knobs the latency model reads: tensor DMA and its A/B descriptor sets, GL2
+// prefetch, local-read prefetch, the solution's own workgroup mapping, cluster sharing, and the
+// store cache hint.
+TEST(PredictionLibraryTest, Gfx1250KnobsReachOrigamiConfig)
+{
+    auto solution                                  = makeMappedSolution(42);
+    solution->sizeMapping.TDMInst                  = 3;
+    solution->sizeMapping.TDMSeparateAB            = true;
+    solution->sizeMapping.PrefetchGL2              = 2;
+    solution->sizeMapping.PrefetchLocalRead        = 1;
+    solution->sizeMapping.HalfPLR                  = 3;
+    solution->sizeMapping.ClusterAIDMapping        = -2;
+    solution->sizeMapping.Multicast                = 1;
+    solution->sizeMapping.workGroupMappingXCC      = 8;
+    solution->sizeMapping.workGroupMappingXCCGroup = -1;
+    solution->sizeMapping.hasTemporalHint          = true;
+    solution->sizeMapping.temporalHintD            = 1;
+    solution->sizeMapping.NonTemporalD             = 2;
+
+    SolutionMap<ContractionSolution> solutions;
+    solutions.emplace(42, solution);
+
+    ContractionProblemPredictionLibrary lib;
+    loadPredictionLibrary({42}, solutions, lib);
+    ASSERT_EQ(lib.origami_config_list.size(), 1u);
+    auto const& config = lib.origami_config_list[0];
+    auto const& tp     = config.tensile();
+    EXPECT_EQ(tp.tdm_inst, 3);
+    EXPECT_TRUE(tp.tdm_separate_ab);
+    EXPECT_EQ(tp.prefetch_gl2, 2);
+    EXPECT_EQ(tp.prefetch_local_read, 1);
+    EXPECT_EQ(tp.half_plr, 3);
+    EXPECT_EQ(tp.cluster_aid_mapping, -2);
+    EXPECT_TRUE(tp.multicast);
+    EXPECT_EQ(tp.workgroup_mapping_xcc, 8);
+    EXPECT_EQ(tp.workgroup_mapping_xcc_group, -1);
+    // On TemporalHint archs NonTemporalD is a scope selector; TemporalHintD carries the hint.
+    EXPECT_EQ(config.cache_hints_d, 4);
+}
+
+// Libraries built before the Multicast key follow Tensile's rule: clustered, and either not
+// persistent or persistent with a static spatial assignment.  A recorded value wins.
+TEST(PredictionLibraryTest, MulticastDefaultsToTensileRuleForOldLibraries)
+{
+    auto clustered     = makeMappedSolution(1, TensileLite::dim3(2, 2, 1));
+    auto persistent_dp = makeMappedSolution(2, TensileLite::dim3(2, 2, 1));
+    auto streamk       = makeMappedSolution(3, TensileLite::dim3(2, 2, 1));
+    auto dynamic_dp    = makeMappedSolution(4, TensileLite::dim3(2, 2, 1));
+    auto plain         = makeMappedSolution(5);
+    auto recorded_off  = makeMappedSolution(6, TensileLite::dim3(2, 2, 1));
+    persistent_dp->sizeMapping.tileProcessingStrategy = TileProcessingStrategy::DataParallel;
+    streamk->sizeMapping.tileProcessingStrategy       = TileProcessingStrategy::StreamK;
+    dynamic_dp->sizeMapping.tileProcessingStrategy    = TileProcessingStrategy::DataParallel;
+    dynamic_dp->sizeMapping.workAssignment            = WorkAssignment::DynamicWorkQueue;
+    recorded_off->sizeMapping.Multicast               = 0;
+
+    SolutionMap<ContractionSolution> solutions;
+    for(auto const& s : {clustered, persistent_dp, streamk, dynamic_dp, plain, recorded_off})
+        solutions.emplace(s->index, s);
+
+    ContractionProblemPredictionLibrary lib;
+    loadPredictionLibrary({1, 2, 3, 4, 5, 6}, solutions, lib);
+    ASSERT_EQ(lib.origami_config_list.size(), 6u);
+    EXPECT_TRUE(lib.origami_config_list[0].tensile().multicast);
+    EXPECT_TRUE(lib.origami_config_list[1].tensile().multicast);
+    EXPECT_TRUE(lib.origami_config_list[2].tensile().multicast);
+    EXPECT_FALSE(lib.origami_config_list[3].tensile().multicast);
+    EXPECT_FALSE(lib.origami_config_list[4].tensile().multicast);
+    EXPECT_FALSE(lib.origami_config_list[5].tensile().multicast);
+}
+
 // The per-tile flags are written once while the library is loaded.
 // An NT-B solution at 128x256 must not mark the 256x256 solution.
 TEST(PredictionLibraryTest, NonTemporalAvailabilityIsMemoizedPerMacroTile)
@@ -351,4 +423,177 @@ TEST(PredictionLibraryTest, NonTemporalAvailabilityIsMemoizedPerMacroTile)
     EXPECT_TRUE(lib.origami_config_list[0].non_temporal_b_available);
     EXPECT_FALSE(lib.origami_config_list[1].non_temporal_a_available);
     EXPECT_FALSE(lib.origami_config_list[1].non_temporal_b_available);
+}
+
+namespace
+{
+    std::shared_ptr<ContractionSolution> makeArchSolution(int index, AMDGPU::Processor processor)
+    {
+        auto solution               = makeMappedSolution(index);
+        solution->hardwarePredicate = std::make_shared<Predicates::IsSubclass<Hardware, AMDGPU>>(
+            std::make_shared<Predicates::GPU::ProcessorEqual>(processor));
+        return solution;
+    }
+
+    // Loads each solution into a library of its own and returns its effective config.
+    origami::config_t effectiveConfig(std::shared_ptr<ContractionSolution> const& solution)
+    {
+        SolutionMap<ContractionSolution> solutions;
+        solutions.emplace(solution->index, solution);
+        ContractionProblemPredictionLibrary lib;
+        loadPredictionLibrary({solution->index}, solutions, lib);
+        EXPECT_EQ(lib.origami_config_list.size(), 1u);
+        return lib.origami_config_list.at(0);
+    }
+}
+
+// gfx12 persistent kernels without clusters reread their workgroup id after the WGMXCC remap.
+TEST(PredictionLibraryTest, Gfx1250PersistentWorkGroupMappingXccIsNeutral)
+{
+    for(auto strategy : {TileProcessingStrategy::StreamK, TileProcessingStrategy::DataParallel})
+    {
+        auto solution                                    = makeArchSolution(1, AMDGPU::Processor::gfx1250);
+        solution->sizeMapping.tileProcessingStrategy     = strategy;
+        solution->sizeMapping.workGroupMapping           = -16;
+        solution->sizeMapping.workGroupMappingXCC        = 8;
+        solution->sizeMapping.workGroupMappingXCCGroup   = 64;
+        auto const config                                = effectiveConfig(solution);
+        EXPECT_EQ(config.workgroup_mapping, -16);
+        EXPECT_EQ(config.tensile().workgroup_mapping_xcc, 1);
+        EXPECT_EQ(config.tensile().workgroup_mapping_xcc_group, -1);
+        EXPECT_TRUE(config.tensile().persistent);
+    }
+
+    // A non-persistent gfx1250 kernel keeps the remap.
+    auto plain                                  = makeArchSolution(2, AMDGPU::Processor::gfx1250);
+    plain->sizeMapping.workGroupMappingXCC      = 8;
+    plain->sizeMapping.workGroupMappingXCCGroup = 64;
+    auto const config                           = effectiveConfig(plain);
+    EXPECT_EQ(config.tensile().workgroup_mapping_xcc, 8);
+    EXPECT_EQ(config.tensile().workgroup_mapping_xcc_group, 64);
+    EXPECT_FALSE(config.tensile().persistent);
+}
+
+// gfx950 has no reread and no TemporalHint: its configs keep every declared value.
+TEST(PredictionLibraryTest, Gfx950ConfigsKeepTheirDeclaredValues)
+{
+    auto solution                                  = makeArchSolution(1, AMDGPU::Processor::gfx950);
+    solution->sizeMapping.tileProcessingStrategy   = TileProcessingStrategy::StreamK;
+    solution->sizeMapping.workGroupMapping         = -8;
+    solution->sizeMapping.workGroupMappingXCC      = 8;
+    solution->sizeMapping.workGroupMappingXCCGroup = 64;
+    solution->sizeMapping.nonTemporalA             = 4;
+    solution->sizeMapping.TDMInst                  = 3;
+    solution->sizeMapping.waveNum                  = 4;
+    auto const config                              = effectiveConfig(solution);
+    EXPECT_EQ(config.workgroup_mapping, -8);
+    EXPECT_EQ(config.tensile().workgroup_mapping_xcc, 8);
+    EXPECT_EQ(config.tensile().workgroup_mapping_xcc_group, 64);
+    EXPECT_EQ(config.cache_hints_a, 4);
+    EXPECT_EQ(config.cache_hints_b, 0);
+}
+
+// One tensor_load_to_lds moving A and B keeps only a TH both agree on; separate loads keep their own.
+TEST(PredictionLibraryTest, SharedTdmLoadKeepsOnlyAnAgreedTemporalHint)
+{
+    struct Case
+    {
+        int  thA, thB, waves;
+        bool separate, subtile;
+        int  cacheA, cacheB;
+    };
+    Case const cases[] = {
+        {1, 0, 4, false, false, 0, 0}, // one-sided: the load carries the default
+        {0, 1, 4, false, false, 0, 0},
+        {1, 3, 4, false, false, 0, 0}, // both non-temporal, but different TH
+        {1, 1, 4, false, false, 4, 4}, // agreed
+        {1, 0, 4, true, false, 4, 0},  // TDMFuse 1-3: own descriptor sets
+        {1, 0, 1, false, false, 4, 0}, // one wave: one descriptor per tensor
+        {1, 0, 4, false, true, 4, 0},  // subtile: one descriptor per tensor
+    };
+    for(auto const& c : cases)
+    {
+        auto solution                         = makeArchSolution(1, AMDGPU::Processor::gfx1250);
+        solution->sizeMapping.hasTemporalHint = true;
+        solution->sizeMapping.TDMInst         = 3;
+        solution->sizeMapping.temporalHintA   = c.thA;
+        solution->sizeMapping.temporalHintB   = c.thB;
+        solution->sizeMapping.waveNum         = c.waves;
+        solution->sizeMapping.TDMSeparateAB   = c.separate;
+        solution->sizeMapping.useSubtileImpl  = c.subtile;
+        auto const config                     = effectiveConfig(solution);
+        EXPECT_EQ(config.cache_hints_a, c.cacheA) << c.thA << "," << c.thB << " waves " << c.waves;
+        EXPECT_EQ(config.cache_hints_b, c.cacheB) << c.thA << "," << c.thB << " waves " << c.waves;
+    }
+}
+
+// Cluster kernels branch over wgmXCC and DefaultWGM, persistent or not.
+TEST(PredictionLibraryTest, ClusterKernelsBypassWorkGroupMapping)
+{
+    for(auto strategy : {TileProcessingStrategy::None, TileProcessingStrategy::StreamK})
+    {
+        auto solution = makeMappedSolution(1, TensileLite::dim3(2, 2, 1));
+        solution->hardwarePredicate = makeArchSolution(0, AMDGPU::Processor::gfx1250)->hardwarePredicate;
+        solution->sizeMapping.tileProcessingStrategy   = strategy;
+        solution->sizeMapping.workGroupMapping         = 8;
+        solution->sizeMapping.workGroupMappingXCC      = 4;
+        solution->sizeMapping.workGroupMappingXCCGroup = 64;
+        auto const config                              = effectiveConfig(solution);
+        EXPECT_EQ(config.workgroup_mapping, 1);
+        EXPECT_EQ(config.tensile().workgroup_mapping_xcc, 1);
+        EXPECT_EQ(config.tensile().workgroup_mapping_xcc_group, -1);
+    }
+}
+
+// Auto values reach Origami as auto, so it fills them in the way the launch does; WGM -1 is
+// DefaultWGM's identity.
+TEST(PredictionLibraryTest, AutoWorkGroupMappingStaysAuto)
+{
+    for(auto strategy : {TileProcessingStrategy::None, TileProcessingStrategy::StreamK})
+    {
+        auto solution = makeArchSolution(1, AMDGPU::Processor::gfx1250);
+        solution->sizeMapping.tileProcessingStrategy   = strategy;
+        solution->sizeMapping.workGroupMapping         = 0;
+        solution->sizeMapping.workGroupMappingXCC      = -1;
+        solution->sizeMapping.workGroupMappingXCCGroup = -1;
+        auto const config                              = effectiveConfig(solution);
+        EXPECT_EQ(config.workgroup_mapping, 0);
+        EXPECT_EQ(config.tensile().workgroup_mapping_xcc, -1);
+    }
+
+    auto identity                          = makeArchSolution(1, AMDGPU::Processor::gfx1250);
+    identity->sizeMapping.workGroupMapping = -1;
+    EXPECT_EQ(effectiveConfig(identity).workgroup_mapping, 1);
+}
+
+// Solutions with identical effective configs share one ranked config; selection tries the one
+// whose kernel uses all of its declared values first, then the lower index.
+TEST(PredictionLibraryTest, IdenticalEffectiveConfigsShareOneRankedConfig)
+{
+    auto xcc8  = makeArchSolution(10, AMDGPU::Processor::gfx1250);
+    auto xcc1  = makeArchSolution(20, AMDGPU::Processor::gfx1250);
+    auto xcc4  = makeArchSolution(5, AMDGPU::Processor::gfx1250);
+    auto other = makeArchSolution(30, AMDGPU::Processor::gfx1250);
+    for(auto const& s : {xcc8, xcc1, xcc4, other})
+        s->sizeMapping.tileProcessingStrategy = TileProcessingStrategy::StreamK;
+    xcc8->sizeMapping.workGroupMappingXCC = 8;
+    xcc1->sizeMapping.workGroupMappingXCC = 1;
+    xcc4->sizeMapping.workGroupMappingXCC = 4;
+    other->sizeMapping.macroTile          = TensileLite::dim3(128, 256, 1);
+
+    SolutionMap<ContractionSolution> solutions;
+    for(auto const& s : {xcc8, xcc1, xcc4, other})
+        solutions.emplace(s->index, s);
+
+    ContractionProblemPredictionLibrary lib;
+    loadPredictionLibrary({10, 20, 5, 30}, solutions, lib);
+    ASSERT_EQ(lib.solution_list.size(), 4u);
+    ASSERT_EQ(lib.origami_config_list.size(), 2u);
+    ASSERT_EQ(lib.config_solutions.size(), 2u);
+    for(std::size_t g = 0; g < lib.origami_config_list.size(); ++g)
+        EXPECT_EQ(lib.origami_config_list[g].index, g);
+    EXPECT_EQ(lib.config_solutions[0], (std::vector<std::size_t>{1, 0, 2}));
+    EXPECT_EQ(lib.config_solutions[1], (std::vector<std::size_t>{3}));
+    EXPECT_EQ(lib.solution_list[lib.config_solutions[0][0]].second, xcc1);
+    EXPECT_EQ(lib.solution_list[lib.config_solutions[1][0]].second, other);
 }
