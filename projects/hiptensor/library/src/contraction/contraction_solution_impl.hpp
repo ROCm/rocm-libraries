@@ -67,6 +67,17 @@ namespace hiptensor
     std::vector<std::size_t>
         applyCKColMajorStridesOptimizationForContraction(std::vector<std::size_t> const& lengths);
 
+    // The lengths of one normalized tensor and the strides CK will use for it.
+    struct NormalizedLayout
+    {
+        std::vector<std::size_t> const& lengths;
+        std::vector<std::size_t>&       strides;
+    };
+
+    // Replaces the strides with CK ColMajor strides if every tensor is packed
+    // col-major; otherwise keeps the true strides of all of them.
+    void applyCKColMajorStridesToAllOrNone(std::initializer_list<NormalizedLayout> tensors);
+
     template <typename DeviceOp, typename Enabler = void>
     class ContractionSolutionImpl;
 
@@ -161,25 +172,10 @@ namespace hiptensor
                 return std::vector<ck::index_t>(v.begin(), v.end());
             };
 
-            // CK ColMajor strides are computed from lengths alone and renumber the
-            // elements. The renumbering is consistent only if every tensor is packed
-            // col-major in its normalized mode order, so tensors sharing an index
-            // (A/D: M, A/B: K, B/D: N) still pair the same elements. Apply it to all
-            // tensors or to none; otherwise keep the true strides.
-            if(isPackedColMajorLayout(normal_a_ms_ks_strides, normal_a_ms_ks_lengths)
-               && isPackedColMajorLayout(normal_b_ns_ks_strides, normal_b_ns_ks_lengths)
-               && isPackedColMajorLayout(normal_ds_ms_ns_strides, normal_ds_ms_ns_lengths)
-               && isPackedColMajorLayout(normal_e_ms_ns_strides, normal_e_ms_ns_lengths))
-            {
-                normal_a_ms_ks_strides
-                    = applyCKColMajorStridesOptimizationForContraction(normal_a_ms_ks_lengths);
-                normal_b_ns_ks_strides
-                    = applyCKColMajorStridesOptimizationForContraction(normal_b_ns_ks_lengths);
-                normal_ds_ms_ns_strides
-                    = applyCKColMajorStridesOptimizationForContraction(normal_ds_ms_ns_lengths);
-                normal_e_ms_ns_strides
-                    = applyCKColMajorStridesOptimizationForContraction(normal_e_ms_ns_lengths);
-            }
+            applyCKColMajorStridesToAllOrNone({{normal_a_ms_ks_lengths, normal_a_ms_ks_strides},
+                                               {normal_b_ns_ks_lengths, normal_b_ns_ks_strides},
+                                               {normal_ds_ms_ns_lengths, normal_ds_ms_ns_strides},
+                                               {normal_e_ms_ns_lengths, normal_e_ms_ns_strides}});
 
             // Initialize the argument pointer
             if constexpr(std::is_same_v<typename Traits::AOp, ck::tensor_operation::element_wise::PassThrough> 
@@ -348,22 +344,9 @@ namespace hiptensor
                 return std::vector<ck::index_t>(v.begin(), v.end());
             };
 
-            // CK ColMajor strides are computed from lengths alone and renumber the
-            // elements. The renumbering is consistent only if every tensor is packed
-            // col-major in its normalized mode order, so tensors sharing an index
-            // (A/D: M, A/B: K, B/D: N) still pair the same elements. Apply it to all
-            // tensors or to none; otherwise keep the true strides.
-            if(isPackedColMajorLayout(normal_a_ms_ks_strides, normal_a_ms_ks_lengths)
-               && isPackedColMajorLayout(normal_b_ns_ks_strides, normal_b_ns_ks_lengths)
-               && isPackedColMajorLayout(normal_e_ms_ns_strides, normal_e_ms_ns_lengths))
-            {
-                normal_a_ms_ks_strides
-                    = applyCKColMajorStridesOptimizationForContraction(normal_a_ms_ks_lengths);
-                normal_b_ns_ks_strides
-                    = applyCKColMajorStridesOptimizationForContraction(normal_b_ns_ks_lengths);
-                normal_e_ms_ns_strides
-                    = applyCKColMajorStridesOptimizationForContraction(normal_e_ms_ns_lengths);
-            }
+            applyCKColMajorStridesToAllOrNone({{normal_a_ms_ks_lengths, normal_a_ms_ks_strides},
+                                               {normal_b_ns_ks_lengths, normal_b_ns_ks_strides},
+                                               {normal_e_ms_ns_lengths, normal_e_ms_ns_strides}});
 
             // Initialize the argument pointer
             if constexpr(

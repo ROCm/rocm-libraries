@@ -231,6 +231,11 @@ namespace hiptensor
     std::vector<std::size_t>
         applyCKColMajorStridesOptimizationForContraction(std::vector<std::size_t> const& lengths)
     {
+        // A normalized tensor holds two groups of modes (M and K, N and K, or M and N).
+        // The split at size() / 2 is right only when all groups have the same size.
+        static_assert(MaxNumDimsM == MaxNumDimsN && MaxNumDimsN == MaxNumDimsK,
+                      "CK col-major strides need MaxNumDimsM == MaxNumDimsN == MaxNumDimsK");
+
         std::vector<std::size_t> strides(lengths.size(), 1);
         // Assign second half of strides
         int stride = 1;
@@ -247,6 +252,28 @@ namespace hiptensor
             stride *= lengths[s];
         }
         return strides;
+    }
+
+    // CK ColMajor strides are computed from lengths alone and renumber the
+    // elements. The renumbering is consistent only if every tensor is packed
+    // col-major in its normalized mode order, so tensors sharing an index
+    // (A/D: M, A/B: K, B/D: N) still pair the same elements. Apply it to all
+    // tensors or to none; otherwise keep the true strides.
+    void applyCKColMajorStridesToAllOrNone(std::initializer_list<NormalizedLayout> tensors)
+    {
+        bool allPacked = true;
+        for(auto const& tensor : tensors)
+        {
+            allPacked = allPacked && isPackedColMajorLayout(tensor.strides, tensor.lengths);
+        }
+
+        if(allPacked)
+        {
+            for(auto const& tensor : tensors)
+            {
+                tensor.strides = applyCKColMajorStridesOptimizationForContraction(tensor.lengths);
+            }
+        }
     }
 
     ContractionSolution::ContractionSolution(
