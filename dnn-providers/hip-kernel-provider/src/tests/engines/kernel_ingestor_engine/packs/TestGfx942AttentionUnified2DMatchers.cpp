@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -15,6 +16,10 @@
 
 #include <gtest/gtest.h>
 
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
+
+#include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified2DGeometry.hpp"
 #include "tests/engines/kernel_ingestor_engine/packs/Gfx942AttentionUnified2DTestGraphs.hpp"
 
 /**
@@ -60,6 +65,37 @@ void expectEveryCaseDeclines(const std::vector<DeclineCase>& cases)
     }
 }
 
+/// Whether the catalog ships GQA group @p ratio, by the list graph_match reads.
+bool shipsGqaRatio(int64_t ratio)
+{
+    return std::find(GFX942_UNIFIED_2D_SHIPPED_RATIOS.begin(),
+                     GFX942_UNIFIED_2D_SHIPPED_RATIOS.end(),
+                     ratio)
+           != GFX942_UNIFIED_2D_SHIPPED_RATIOS.end();
+}
+
+/// The cause key of the decline graph_match logs at INFO for @p spec ("<engine> declined the
+/// graph [<cause>]: ..."), or empty when it logged none.
+std::string loggedDeclineCause(const GraphSpec& spec)
+{
+    const std::string marker
+        = std::string(GFX942_ATTENTION_UNIFIED_2D_ENGINE_NAME) + " declined the graph [";
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    graphMatches(spec);
+    for(const auto& log : recorder.getRecordedLogs())
+    {
+        const auto at = log.message.find(marker);
+        const auto causeEnd
+            = at == std::string::npos ? at : log.message.find(']', at + marker.size());
+        if(log.severity == HIPDNN_SEV_INFO && causeEnd != std::string::npos)
+        {
+            return log.message.substr(at + marker.size(), causeEnd - at - marker.size());
+        }
+    }
+    return {};
+}
+
 } // namespace
 
 // =============================================================================
@@ -87,20 +123,23 @@ TEST(TestGfx942AttentionUnified2DMatchers, AcceptsBottomRightCausalAtBothDataTyp
     }
 }
 
-/// Both head sizes, and group sizes up to the widest of 16. graph_match admits any dividing
-/// group; which ratios the catalog carries is kernel_match's.
-TEST(TestGfx942AttentionUnified2DMatchers, AcceptsBothHeadSizesAndEveryGroupUpToSixteen)
+/// Both head sizes, and every group size the catalog ships (1, 2, 4, 8 and 16) on a spread of
+/// head pairs. graph_match declines any other group by name (below).
+TEST(TestGfx942AttentionUnified2DMatchers, AcceptsBothHeadSizesAndEveryGroupTheCatalogShips)
 {
     for(const int64_t headSize : {64, 128})
     {
-        for(const auto& [hq, hkv] : std::vector<std::pair<int64_t, int64_t>>{
-                {8, 8}, {8, 4}, {16, 1}, {32, 2}, {28, 4}, {128, 8}})
+        for(const int64_t ratio : GFX942_UNIFIED_2D_SHIPPED_RATIOS)
         {
-            GraphSpec spec;
-            spec.headSize = headSize;
-            spec.numQueryHeads = hq;
-            spec.numKvHeads = hkv;
-            EXPECT_TRUE(graphMatches(spec)) << "D" << headSize << " Hq " << hq << " Hkv " << hkv;
+            for(const int64_t hkv : {1, 4, 8})
+            {
+                GraphSpec spec;
+                spec.headSize = headSize;
+                spec.numKvHeads = hkv;
+                spec.numQueryHeads = ratio * hkv;
+                EXPECT_TRUE(graphMatches(spec))
+                    << "D" << headSize << " Hq " << spec.numQueryHeads << " Hkv " << hkv;
+            }
         }
     }
 }
@@ -119,7 +158,7 @@ TEST(TestGfx942AttentionUnified2DMatchers, AcceptsAQueryAsLongAsOrShorterThanThe
 }
 
 /// Decode (seqlen_q 1) is the split-KV Unified3d engine's at every GQA ratio its catalog
-/// ships (1, 2, 4, 8, 16); any other dividing group stays here.
+/// ships (1, 2, 4, 8, 16), and named so in the decline.
 TEST(TestGfx942AttentionUnified2DMatchers, LeavesDecodeToTheSplitKvEngineAtTheRatiosItShips)
 {
     GraphSpec decode;
@@ -131,13 +170,37 @@ TEST(TestGfx942AttentionUnified2DMatchers, LeavesDecodeToTheSplitKvEngineAtTheRa
         decode.numQueryHeads = hq;
         decode.numKvHeads = hkv;
         EXPECT_FALSE(graphMatches(decode)) << "Hq " << hq << " Hkv " << hkv;
+        EXPECT_EQ(loggedDeclineCause(decode), "decode") << "Hq " << hq << " Hkv " << hkv;
     }
-    for(const auto& [hq, hkv] : std::vector<std::pair<int64_t, int64_t>>{{40, 8}, {12, 1}})
+}
+
+/// A group the catalog ships no kernel for is declined by name rather than left to empty the
+/// catalog at kernel_match: at prefill and at decode alike, since the split-KV engine ships no
+/// such group either.
+TEST(TestGfx942AttentionUnified2DMatchers, DeclinesAGroupTheCatalogDoesNotShipByName)
+{
+    int64_t checked = 0;
+    for(int64_t ratio = 1; ratio <= GFX942_UNIFIED_2D_MAX_QUERIES_PER_KV; ++ratio)
     {
-        decode.numQueryHeads = hq;
-        decode.numKvHeads = hkv;
-        EXPECT_TRUE(graphMatches(decode)) << "Hq " << hq << " Hkv " << hkv;
+        if(shipsGqaRatio(ratio))
+        {
+            continue;
+        }
+        ++checked;
+        for(const int64_t seqLenQ : {1, 96})
+        {
+            GraphSpec spec;
+            spec.numKvHeads = 4;
+            spec.numQueryHeads = ratio * spec.numKvHeads;
+            spec.seqLenQ = seqLenQ;
+            EXPECT_FALSE(graphMatches(spec)) << "group " << ratio << ", Sq " << seqLenQ;
+            EXPECT_EQ(loggedDeclineCause(spec), "gqa") << "group " << ratio << ", Sq " << seqLenQ;
+        }
     }
+    // Every group up to the widest, less the shipped ones.
+    EXPECT_EQ(checked,
+              GFX942_UNIFIED_2D_MAX_QUERIES_PER_KV
+                  - static_cast<int64_t>(GFX942_UNIFIED_2D_SHIPPED_RATIOS.size()));
 }
 
 // =============================================================================
@@ -557,7 +620,9 @@ TEST(TestGfx942AttentionUnified2DMatchers, KernelMatchDeclinesACandidateBuiltFor
 }
 
 /// The kernel reads the head counts as kernargs and bakes only their ratio: one ratio-4
-/// candidate serves every head pair of ratio 4, and none of another.
+/// candidate serves every head pair of ratio 4, and none of another. Every pair is of a ratio
+/// the catalog ships (1, 2, 4, 8, 16): graph_match declines any other, so a pair of one would
+/// never reach kernel_match.
 TEST(TestGfx942AttentionUnified2DMatchers, KernelMatchServesEveryHeadPairOfItsRatio)
 {
     for(const auto& [hq, hkv] :
@@ -569,7 +634,7 @@ TEST(TestGfx942AttentionUnified2DMatchers, KernelMatchServesEveryHeadPairOfItsRa
         EXPECT_TRUE(matchesKernel(spec, KernelSpec{})) << "Hq " << hq << " Hkv " << hkv;
     }
     for(const auto& [hq, hkv] :
-        std::vector<std::pair<int64_t, int64_t>>{{8, 8}, {8, 4}, {32, 4}, {48, 4}})
+        std::vector<std::pair<int64_t, int64_t>>{{8, 8}, {8, 4}, {32, 4}, {16, 1}})
     {
         GraphSpec spec;
         spec.numQueryHeads = hq;

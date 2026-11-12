@@ -503,7 +503,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         EveryShippedKernelsGeometryIsOneTheEngineLaunches
         EveryCellShipsItsHeadSizesDefaultGeometry
         EveryCellRockeServesWithItsProductionStackShipsIt
-        EveryShippedKernelIsBottomRightCausalWithoutAWindow)
+        EveryShippedKernelIsBottomRightCausalWithoutAWindow
+        TheShippedGqaRatioListIsTheCatalogsRatios)
     set(_hkp_model_binding_cases_gfx942_unified_3d
         TheBoundL2KernelRankerLoads
         TheBoundL1EnginePredictorLoadsAndMatchesThisBuild)

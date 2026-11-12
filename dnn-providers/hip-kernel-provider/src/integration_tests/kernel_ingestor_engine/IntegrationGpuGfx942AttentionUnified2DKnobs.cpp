@@ -284,7 +284,7 @@ std::vector<DeclineCase> declineCases()
         {"TopLeftCausal", {DataType::BFLOAT16, 128, 8, 2, Mask::TOP_LEFT, 2, 96, 256}},
         {"TopLeftCausalAtEqualLengths",
          {DataType::BFLOAT16, 128, 8, 2, Mask::TOP_LEFT, 2, 256, 256}},
-        // A GQA ratio the catalog does not ship: graph_match admits it, no kernel matches.
+        // A GQA ratio the catalog does not ship: graph_match declines it by name.
         {"RatioThree", {DataType::BFLOAT16, 128, 24, 8, Mask::BOTTOM_RIGHT, 2, 96, 256}},
     };
 }

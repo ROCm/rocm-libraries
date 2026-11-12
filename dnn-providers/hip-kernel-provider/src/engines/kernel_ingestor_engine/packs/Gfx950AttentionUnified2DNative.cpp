@@ -190,7 +190,9 @@ bool headsMatch(const AttentionUnified2DCandidate& candidate, const SdpaShape& p
 /// This engine's rules and records, for the shared graph match, kernel match and dispatch.
 /// All three mask kinds are served, each by its own kernel: top-left and bottom-right coincide
 /// only at Sq == Skv, but they are distinct kernel bodies and the catalog carries both. Decode
-/// is handed to Unified3D wherever its split-KV kernel can be built.
+/// is handed to Unified3D wherever its split-KV kernel can be built. The catalog lists each
+/// head pair as its own entry (e.g. 28/4 and 40/8, ratios 7 and 5, ship while 7/1 does not), so
+/// no GQA ratio list can say which graphs it serves and none is judged at graph_match.
 constexpr unified_attention::Unified2DArch<AttentionUnified2DCandidate> ARCH{
     {"gfx950",
      GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME,
@@ -205,7 +207,9 @@ constexpr unified_attention::Unified2DArch<AttentionUnified2DCandidate> ARCH{
       "gfx950 attention_unified_2d"},
      &gfx950Unified3DServesGqaGroup,
      "Unified3D",
-     /*bottomRightOnly=*/false},
+     /*bottomRightOnly=*/false,
+     /*shippedGqaRatios=*/nullptr,
+     /*numShippedGqaRatios=*/0},
     &candidateFor,
     &headsMatch,
     /*prepareChecks=*/nullptr};

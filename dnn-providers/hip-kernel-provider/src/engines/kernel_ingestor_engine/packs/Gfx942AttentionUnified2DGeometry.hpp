@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -36,6 +37,12 @@ inline constexpr int64_t GFX942_UNIFIED_2D_WAVE_LANES = GFX942_UNIFIED_ATTENTION
 /// `1 <= num_queries_per_kv <= 16` (`supports_tiled_2d`).
 inline constexpr int64_t GFX942_UNIFIED_2D_MAX_QUERIES_PER_KV
     = GFX942_UNIFIED_ATTENTION_TRAITS.maxQueriesPerKv;
+
+/// The GQA groups (query heads per key/value head) the catalog ships kernels for, one per
+/// (dtype, head size, group) cell. The kernel runs any group up to the maximum above, so this
+/// is the catalog's limit, not the kernel's: graph_match declines every other group by name,
+/// and the catalog census holds this list to the groups the shipped kernels carry.
+inline constexpr std::array<int64_t, 5> GFX942_UNIFIED_2D_SHIPPED_RATIOS{1, 2, 4, 8, 16};
 
 /// The largest KV tile, in pages: the dispatcher's tile policies are 1x, 2x, 4x and 8x.
 inline constexpr int64_t GFX942_UNIFIED_2D_MAX_TILE_BLOCKS

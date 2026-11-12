@@ -87,13 +87,50 @@ struct Unified2DGraphArch
     /// Whether a graph asking for a mask other than the bottom-right causal band is declined
     /// by name: the catalog carries only that kernel. False serves every mask kind.
     bool bottomRightOnly = false;
+    /// The GQA groups the catalog ships, or nullptr when no group is judged: a catalog keyed
+    /// by head pair rather than by ratio lists pairs a ratio list cannot name.
+    const int64_t* shippedGqaRatios = nullptr;
+    std::size_t numShippedGqaRatios = 0;
 };
+
+/// Whether the catalog ships a kernel for GQA group @p ratio: the one ratio rule. graph_match
+/// declines a group this refuses by name, so it cannot empty the catalog at kernel_match.
+inline bool servesGqaRatio(const Unified2DGraphArch& arch, int64_t ratio)
+{
+    if(arch.shippedGqaRatios == nullptr)
+    {
+        return true;
+    }
+    for(std::size_t i = 0; i < arch.numShippedGqaRatios; ++i)
+    {
+        if(arch.shippedGqaRatios[i] == ratio)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+/// The shipped groups as a decline line spells them: "1, 2, 4, 8 and 16".
+inline std::string describeShippedGqaRatios(const Unified2DGraphArch& arch)
+{
+    std::string text;
+    for(std::size_t i = 0; i < arch.numShippedGqaRatios; ++i)
+    {
+        if(i > 0)
+        {
+            text += i + 1 == arch.numShippedGqaRatios ? " and " : ", ";
+        }
+        text += std::to_string(arch.shippedGqaRatios[i]);
+    }
+    return text;
+}
 
 /**
  * @brief Graph-scoped applicability for the whole engine.
  *
  * The shared unified-attention match (UnifiedAttentionGraphMatch.hpp) around the 2D engines'
- * rules: a whole GQA group (up to the traits' widest), head_size 64 or 128,
+ * rules: a whole GQA group the catalog ships (up to the traits' widest), head_size 64 or 128,
  * q_len <= kv_len, decode handed to the split-KV engine, and the arch's mask restriction. Each
  * decline of a graph with an SDPA-forward node logs its cause at INFO under the engine's name;
  * any other graph declines silently.
@@ -121,6 +158,17 @@ inline std::optional<BoundTokens> graphMatches(const MatchContext& context,
             (DeclinedBy{arch.engineName, "gqa"})
             << "query heads " << problem.numQueryHeads << " must be a whole multiple, at most "
             << arch.traits->maxQueriesPerKv << ", of key/value heads " << problem.numKvHeads);
+        return std::nullopt;
+    }
+
+    // A group the catalog ships no kernel for would pass every check below and then empty the
+    // catalog at kernel_match, with no line to say why.
+    if(!servesGqaRatio(arch, *ratio))
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{arch.engineName, "gqa"})
+                               << "a GQA group of " << *ratio
+                               << " is not supported; the catalog ships groups of "
+                               << describeShippedGqaRatios(arch));
         return std::nullopt;
     }
 

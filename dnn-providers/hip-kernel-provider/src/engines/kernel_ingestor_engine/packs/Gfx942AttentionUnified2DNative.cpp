@@ -278,7 +278,9 @@ constexpr unified_attention::Unified2DArch<AttentionUnified2DCandidate> ARCH{
       "gfx942 attention_unified_2d"},
      &gfx942Unified3dServesGqaGroup,
      "Unified3d",
-     /*bottomRightOnly=*/true},
+     /*bottomRightOnly=*/true,
+     GFX942_UNIFIED_2D_SHIPPED_RATIOS.data(),
+     GFX942_UNIFIED_2D_SHIPPED_RATIOS.size()},
     &candidateFor,
     &headsMatch,
     &checkRatioAndWindow};

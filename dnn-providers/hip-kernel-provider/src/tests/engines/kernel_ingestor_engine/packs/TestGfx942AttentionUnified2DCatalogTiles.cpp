@@ -229,6 +229,28 @@ TEST(TestGfx942AttentionUnified2DCatalogTiles, EveryShippedKernelIsBottomRightCa
     EXPECT_GT(checked, 0U) << "the loaded set holds no kernels to check";
 }
 
+/// graph_match declines every GQA group but those GFX942_UNIFIED_2D_SHIPPED_RATIOS lists, so the
+/// list must be exactly the groups the catalog ships: a shipped group missing from it would
+/// never be served, and a listed group with no kernel would pass graph_match and then empty
+/// the catalog at kernel_match.
+TEST(TestGfx942AttentionUnified2DCatalogTiles, TheShippedGqaRatioListIsTheCatalogsRatios)
+{
+    std::set<int64_t> shipped;
+    for(const auto& pack : loadedSet(GFX942_ATTENTION_UNIFIED_2D_ENGINE_NAME).packs)
+    {
+        for(const auto& kernel : pack.kernels)
+        {
+            const auto ratio = integerField(kernel, "num_queries_per_kv");
+            ASSERT_TRUE(ratio.has_value())
+                << "kernel '" << kernel.name << "' carries no num_queries_per_kv";
+            shipped.insert(*ratio);
+        }
+    }
+    const std::set<int64_t> listed(GFX942_UNIFIED_2D_SHIPPED_RATIOS.begin(),
+                                   GFX942_UNIFIED_2D_SHIPPED_RATIOS.end());
+    EXPECT_EQ(shipped, listed);
+}
+
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR
