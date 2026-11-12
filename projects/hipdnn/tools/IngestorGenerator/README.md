@@ -402,13 +402,21 @@ regeneration drops it (and the regeneration gate's byte compare fails):
 3. Regenerate. The UED comes out byte-identical to the promoted one; nothing else
    changes, and the reader still resolves the native UHD from `default` only, so the
    model UHD under `heuristics/` mints and reuses no id.
-4. `dvc add heuristics` in the bundle directory, and commit the `.dvc` pointer.
+4. Add the model's DVC pointer: in its leaf folder
+   (`heuristics/<ued-id>/<role>/<arch>/<metric>/`) run `dvc add model.bin`, append
+   `remote: ingestor` to the new `model.bin.dvc`, and commit the pointer and the `.gitignore`
+   `dvc add` writes beside it, with `heuristic.uhd.json`. One pointer per model, not one for
+   `heuristics/`; the provider's configure scan and `dvc pull -r ingestor` read it. A build
+   that did not pull the model ships without it and warns; one built with
+   `HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` fails instead.
 
 Roles are the three promote accepts. Keys are one concrete arch (`gfx942`, not `gfx9` or
 `gfx950-dcgpu`); `default` is allowed except under `sort_kernel_catalog`, whose `default`
 is the generator's native UHD (so that role also needs `heuristic: native`). Values are
-non-empty lists of distinct UUIDs. A slotted engine refuses the key: its rankers are
-per slot. Without `engine.heuristics` every output is unchanged.
+what promote writes: a non-empty list of distinct UUIDs for every role -- one model per
+ranking metric for `sort_kernel_catalog` and `predict_engine`, and the candidate generators
+(`predict_applicable_kernels`) for future JIT spaces. A slotted engine refuses the key: its
+rankers are per slot. Without `engine.heuristics` every output is unchanged.
 
 ## Output
 
@@ -481,7 +489,7 @@ counts, SDK version and runtime source kind come from the actual output, after
 normalization and deduplication. Packaged runtime source kind is KPACK, not the authored
 builder kind. The file is emitted in the form the provider's `.clang-format` (pre-commit
 pins clang-format 18.1.4) produces, so a copy is not reformatted later;
-`tests/test_packs_formatting.py` checks the shipped gfx950 config against the live file and,
+`tests/test_packs_formatting.py` checks each manifest-backed shipped config against its live file and,
 with `HIPDNN_CLANG_FORMAT` naming a binary, every shipped config against clang-format.
 
 **The census lives in its own binary.** `Test<Name>Packs.cpp` is spliced into
@@ -923,11 +931,18 @@ engine:
                                   # Must be a single path stem (^[A-Za-z0-9_][A-Za-z0-9_-]*$).
   knobs: [block_size]             # optional; must all be int-typed kmd_fields
   heuristic: native | none        # optional, default "native"; "none" omits the UHD
-  native_symbols_from: hipkernel:Other   # optional: the descriptors name that engine's
-                                  # registered native symbols instead of minting this
-                                  # engine's own (e.g. a test-only engine serving a
-                                  # subset of a shipped catalog). Ignore the emitted
-                                  # native stub then: nothing registers it.
+  native_symbols_from: hipkernel.other_engine   # optional: another engine's dotted
+                                  # native-symbol namespace, stated exactly as that
+                                  # engine registers it (`<namespace>.<its slug>`, any
+                                  # '-' folded to '_'; e.g.
+                                  # hipkernel.gfx950_attention_unified_2d). The
+                                  # descriptors name its registered native symbols
+                                  # instead of minting this engine's own (e.g. a
+                                  # test-only engine serving a subset of a shipped
+                                  # catalog). Only an engine's own namespace is derived,
+                                  # so a borrowed one never guesses at the other
+                                  # engine's `slug`. Ignore the emitted native stub
+                                  # then: nothing registers it.
   heuristics:                     # optional; per-arch model UHDs `uhd_gen promote` bound,
     sort_kernel_catalog:          # role -> arch -> [UHD id]. See "Shipping a trained
       gfx942: [<uhd-uuid>]        # model". Not allowed beside `slots`.

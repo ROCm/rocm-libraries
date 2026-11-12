@@ -9,9 +9,10 @@
  *
  * For each new instruction: the catalog row (dtypes, shape, fragment lengths
  * in logical values per lane), the tile.mma result rocke_b_mma builds from the
- * bare op_id (<8 x c>), and that it has no A or B lane maps yet; the fp8 / bf8
- * -> f32 K 128 rows keep the result map of their K 64 forms and are what
- * selection picks, the others have no result map. For f32 16x16x4: the
+ * bare op_id (<8 x c>), and that it has no A or B lane maps yet -- except
+ * fp8 x fp8 -> f32 at K 128, which carries the fp8 GEMM's A/B maps in dword
+ * slots; the fp8 / bf8 -> f32 K 128 rows keep the result map of their K 64
+ * forms and are what selection picks, the others have no result map. For f32 16x16x4: the
  * A and B maps, evaluated on every (lane, slot) of a wave, are CK's -- lane l
  * holds row l % 16 of A (column l % 16 of B) and K 2 * (l / 16) + slot -- and
  * the result map is the gfx12 accumulator's. Mirrors
@@ -49,6 +50,9 @@ struct Case
     int k;
     int k_per_lane; /* values of A and of B per lane */
     const char* k64_op_id; /* the K 64 form whose result map it keeps, or NULL */
+    /* Carries the fp8 GEMM's A/B maps, so its fragments count the dword slots
+     * of the <16 x i32> carrier (k_per_lane / 4) instead of logical values. */
+    bool gemm_maps = false;
 };
 
 static std::vector<Case> cases()
@@ -66,7 +70,8 @@ static std::vector<Case> cases()
          "fp32",
          128,
          64,
-         "wmma_gfx1250_f32_16x16x64_fp8_fp8"},
+         "wmma_gfx1250_f32_16x16x64_fp8_fp8",
+         true},
         {"wmma_gfx1250_f32_16x16x128_fp8_bf8",
          "fp8e4m3",
          "bf8e5m2",
@@ -167,24 +172,30 @@ static void check_case(const rocke_arch_target_t* arch, const Case& t)
     if(!op)
         return;
     CHECK(strcmp(op->family, "wmma") == 0, id);
-    CHECK(strcmp(op->a_dtype, t.a) == 0 && strcmp(op->b_dtype, t.b) == 0
-              && strcmp(op->c_dtype, t.c) == 0 && op->dst_dtype == NULL,
+    CHECK(strcmp(op->srcs[0].dtype, t.a) == 0 && strcmp(op->srcs[1].dtype, t.b) == 0
+              && strcmp(op->srcs[2].dtype, t.c) == 0 && strcmp(op->dst.dtype, t.c) == 0,
           id);
     CHECK(op->m == 16 && op->n == 16 && op->k == t.k, id);
-    CHECK(op->a_frag_len == t.k_per_lane && op->b_frag_len == t.k_per_lane && op->c_frag_len == 8
-              && op->wave_size == 32,
+    const int frag = t.gemm_maps ? t.k_per_lane / 4 : t.k_per_lane;
+    CHECK(op->srcs[0].frag_len == frag && op->srcs[1].frag_len == frag && op->srcs[2].frag_len == 8
+              && op->dst.frag_len == 8 && op->wave_size == 32,
           id);
-    CHECK(op->a_layout == NULL && op->b_layout == NULL, id);
+    if(t.gemm_maps)
+        CHECK(op->srcs[0].layout != NULL && op->srcs[1].layout != NULL, id);
+    else
+        CHECK(op->srcs[0].layout == NULL && op->srcs[1].layout == NULL, id);
     if(t.k64_op_id)
     {
         const rocke_mma_op_t* k64 = rocke_mma_catalog_by_op_id(&arch->mma, t.k64_op_id);
-        CHECK(k64 != NULL && op->c_layout != NULL && op->c_layout == k64->c_layout, id);
+        CHECK(k64 != NULL && op->srcs[2].layout != NULL && op->srcs[2].layout == k64->srcs[2].layout
+                  && op->dst.layout != NULL && op->dst.layout == k64->dst.layout,
+              id);
         CHECK(rocke_mma_catalog_select_largest_k(&arch->mma, "wmma", t.a, t.b, t.c, 16, 16, -1)
                   == op,
               id);
     }
     else
-        CHECK(op->c_layout == NULL, id);
+        CHECK(op->srcs[2].layout == NULL && op->dst.layout == NULL, id);
 
     /* rocke_b_mma sizes the result from the bare op_id: <8 x c>. */
     rocke_ir_builder_t b;

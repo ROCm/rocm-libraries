@@ -894,21 +894,12 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         FILES
             "${_tensilelite_src}/scripts/analyze_timing.py"
             "${_tensilelite_src}/scripts/check_no_absolute_imports.py"
+            "${_tensilelite_src}/scripts/lcov_dir_summary.py"
             "${_tensilelite_src}/scripts/precommit_affected_tests.py"
         DESTINATION "${_tensilelite_install_dest}/scripts"
         COMPONENT tests
     )
 
-    # Imported or executed directly by unit tests, so these must ship at the
-    # tensilelite root, not under scripts/.
-    install(
-        FILES
-            "${_tensilelite_src}/AMaxGenerator.py"
-            "${_tensilelite_src}/SoftmaxGenerator.py"
-            "${_tensilelite_src}/LayerNormGenerator.py"
-        DESTINATION "${_tensilelite_install_dest}"
-        COMPONENT tests
-    )
     # Preserve executable permissions on entry points
     install(
         PROGRAMS
