@@ -41,8 +41,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 1000
     },
@@ -78,8 +77,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 999
     },
@@ -115,8 +113,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 998
     },
@@ -152,8 +149,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 997
     },
@@ -189,8 +185,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 996
     },
@@ -226,8 +221,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 995
     },
@@ -263,8 +257,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 994
     },
@@ -300,8 +293,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 993
     },
@@ -337,8 +329,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 992
     },
@@ -374,8 +365,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 991
     },
@@ -411,8 +401,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 990
     },
@@ -448,8 +437,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 989
     },
@@ -485,8 +473,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 988
     },
@@ -522,8 +509,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 987
     },
@@ -559,8 +545,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 986
     },
@@ -596,8 +581,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 985
     },
@@ -633,8 +617,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 984
     },
@@ -670,8 +653,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 983
     },
@@ -707,8 +689,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 982
     },
@@ -744,8 +725,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 981
     },
@@ -781,8 +761,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 980
     },
@@ -818,8 +797,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 979
     },
@@ -855,8 +833,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 978
     },
@@ -892,8 +869,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 977
     },
@@ -929,8 +905,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 976
     },
@@ -966,8 +941,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 975
     },
@@ -1003,8 +977,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 974
     },
@@ -1040,8 +1013,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 973
     },
@@ -1077,8 +1049,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 972
     },
@@ -1114,8 +1085,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 971
     },
@@ -1151,8 +1121,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 970
     },
@@ -1188,8 +1157,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 969
     },
@@ -1225,8 +1193,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 968
     },
@@ -1262,8 +1229,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 967
     },
@@ -1299,8 +1265,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 966
     },
@@ -1336,8 +1301,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 965
     },
@@ -1373,8 +1337,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 964
     },
@@ -1410,8 +1373,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 963
     },
@@ -1447,8 +1409,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 962
     },
@@ -1484,8 +1445,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 961
     },
@@ -1521,8 +1481,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 960
     },
@@ -1558,8 +1517,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 959
     },
@@ -1595,8 +1553,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 958
     },
@@ -1632,8 +1589,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 957
     },
@@ -1669,8 +1625,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 956
     },
@@ -1706,8 +1661,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 955
     },
@@ -1743,8 +1697,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 954
     },
@@ -1780,8 +1733,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 953
     },
@@ -1817,8 +1769,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 952
     },
@@ -1854,8 +1805,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 951
     },
@@ -1891,8 +1841,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 950
     },
@@ -1928,8 +1877,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 949
     },
@@ -1965,8 +1913,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 948
     },
@@ -2002,8 +1949,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 947
     },
@@ -2039,8 +1985,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 946
     },
@@ -2076,8 +2021,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 945
     },
@@ -2113,8 +2057,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 944
     },
@@ -2150,8 +2093,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 943
     },
@@ -2187,8 +2129,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 942
     },
@@ -2224,8 +2165,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 941
     },
@@ -2261,8 +2201,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 940
     },
@@ -2298,8 +2237,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 939
     },
@@ -2335,8 +2273,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 938
     },
@@ -2372,8 +2309,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 937
     },
@@ -2409,8 +2345,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 936
     },
@@ -2446,8 +2381,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 935
     },
@@ -2483,8 +2417,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 934
     },
@@ -2520,8 +2453,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 933
     },
@@ -2557,8 +2489,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 932
     },
@@ -2594,8 +2525,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 931
     },
@@ -2631,8 +2561,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 930
     },
@@ -2668,8 +2597,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 929
     },
@@ -2705,8 +2633,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 928
     },
@@ -2742,8 +2669,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 927
     },
@@ -2779,8 +2705,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 926
     },
@@ -2816,8 +2741,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 925
     },
@@ -2853,8 +2777,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 924
     },
@@ -2890,8 +2813,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 923
     },
@@ -2927,8 +2849,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 922
     },
@@ -2964,8 +2885,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 921
     },
@@ -3001,8 +2921,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 920
     },
@@ -3038,8 +2957,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 919
     },
@@ -3075,8 +2993,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 918
     },
@@ -3112,8 +3029,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 917
     },
@@ -3149,8 +3065,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 916
     },
@@ -3186,8 +3101,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 915
     },
@@ -3223,8 +3137,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 914
     },
@@ -3260,8 +3173,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 913
     },
@@ -3297,8 +3209,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 912
     },
@@ -3334,8 +3245,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 911
     },
@@ -3371,8 +3281,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 910
     },
@@ -3408,8 +3317,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 909
     },
@@ -3445,8 +3353,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 908
     },
@@ -3482,8 +3389,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 907
     },
@@ -3519,8 +3425,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 906
     },
@@ -3556,8 +3461,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 905
     },
@@ -3593,8 +3497,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 904
     },
@@ -3630,8 +3533,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 903
     },
@@ -3667,8 +3569,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 902
     },
@@ -3704,8 +3605,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 901
     },
@@ -3741,8 +3641,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 900
     },
@@ -3778,8 +3677,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 899
     },
@@ -3815,8 +3713,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 898
     },
@@ -3852,8 +3749,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 897
     },
@@ -3889,8 +3785,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 896
     },
@@ -3926,8 +3821,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 895
     },
@@ -3963,8 +3857,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 894
     },
@@ -4000,8 +3893,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 893
     },
@@ -4037,8 +3929,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 892
     },
@@ -4074,8 +3965,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 891
     },
@@ -4111,8 +4001,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 890
     },
@@ -4148,8 +4037,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 889
     },
@@ -4185,8 +4073,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 888
     },
@@ -4222,8 +4109,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 887
     },
@@ -4259,8 +4145,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 886
     },
@@ -4296,8 +4181,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 885
     },
@@ -4333,8 +4217,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 884
     },
@@ -4370,8 +4253,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 883
     },
@@ -4407,8 +4289,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 882
     },
@@ -4444,8 +4325,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 881
     },
@@ -4481,8 +4361,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 880
     },
@@ -4518,8 +4397,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 879
     },
@@ -4555,8 +4433,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 878
     },
@@ -4592,8 +4469,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 877
     },
@@ -4629,8 +4505,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 876
     },
@@ -4666,8 +4541,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 875
     },
@@ -4703,8 +4577,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 874
     },
@@ -4740,8 +4613,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 873
     },
@@ -4777,8 +4649,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 872
     },
@@ -4814,8 +4685,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 871
     },
@@ -4851,8 +4721,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 870
     },
@@ -4888,8 +4757,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 869
     },
@@ -4925,8 +4793,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 868
     },
@@ -4962,8 +4829,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 867
     },
@@ -4999,8 +4865,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 866
     },
@@ -5036,8 +4901,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 865
     },
@@ -5073,8 +4937,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 864
     },
@@ -5110,8 +4973,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 863
     },
@@ -5147,8 +5009,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 862
     },
@@ -5184,8 +5045,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 861
     },
@@ -5221,8 +5081,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 860
     },
@@ -5258,8 +5117,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 859
     },
@@ -5295,8 +5153,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 858
     },
@@ -5332,8 +5189,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 857
     },
@@ -5369,8 +5225,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 856
     },
@@ -5406,8 +5261,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 855
     },
@@ -5443,8 +5297,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 854
     },
@@ -5480,8 +5333,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 853
     },
@@ -5517,8 +5369,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 852
     },
@@ -5554,8 +5405,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 851
     },
@@ -5591,8 +5441,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 850
     },
@@ -5628,8 +5477,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 849
     },
@@ -5665,8 +5513,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 848
     },
@@ -5702,8 +5549,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 847
     },
@@ -5739,8 +5585,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 846
     },
@@ -5776,8 +5621,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 845
     },
@@ -5813,8 +5657,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 844
     },
@@ -5850,8 +5693,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 843
     },
@@ -5887,8 +5729,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 842
     },
@@ -5924,8 +5765,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 841
     },
@@ -5961,8 +5801,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 840
     },
@@ -5998,8 +5837,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 839
     },
@@ -6035,8 +5873,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 838
     },
@@ -6072,8 +5909,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 837
     },
@@ -6109,8 +5945,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 836
     },
@@ -6146,8 +5981,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 835
     },
@@ -6183,8 +6017,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 834
     },
@@ -6220,8 +6053,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 833
     },
@@ -6257,8 +6089,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 832
     },
@@ -6294,8 +6125,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 831
     },
@@ -6331,8 +6161,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 830
     },
@@ -6368,8 +6197,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 829
     },
@@ -6405,8 +6233,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 828
     },
@@ -6442,8 +6269,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 827
     },
@@ -6479,8 +6305,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 826
     },
@@ -6516,8 +6341,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 825
     },
@@ -6553,8 +6377,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 824
     },
@@ -6590,8 +6413,7 @@
         "wm": 2,
         "wq": 2,
         "wn": 2,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 823
     },
@@ -6627,8 +6449,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 822
     },
@@ -6664,8 +6485,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 1,
-        "ep": 1,
-        "math": 0
+        "ep": 1
       },
       "priority": 821
     },
@@ -6701,8 +6521,7 @@
         "wm": 8,
         "wq": 2,
         "wn": 4,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 820
     },
@@ -6738,8 +6557,7 @@
         "wm": 8,
         "wq": 2,
         "wn": 4,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 819
     },
@@ -6775,8 +6593,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 4,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 818
     },
@@ -6812,8 +6629,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 2,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 817
     },
@@ -6849,8 +6665,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 816
     },
@@ -6886,8 +6701,7 @@
         "wm": 8,
         "wq": 2,
         "wn": 4,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 815
     },
@@ -6923,8 +6737,7 @@
         "wm": 8,
         "wq": 2,
         "wn": 4,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 814
     },
@@ -6960,8 +6773,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 4,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 813
     },
@@ -6997,8 +6809,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 2,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 812
     },
@@ -7034,8 +6845,7 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 811
     },
@@ -7071,8 +6881,7 @@
         "wm": 8,
         "wq": 2,
         "wn": 4,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 810
     },
@@ -7108,8 +6917,7 @@
         "wm": 8,
         "wq": 2,
         "wn": 4,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 809
     },
@@ -7145,8 +6953,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 4,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 808
     },
@@ -7182,8 +6989,7 @@
         "wm": 4,
         "wq": 2,
         "wn": 2,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 807
     },
@@ -7219,2008 +7025,9 @@
         "wm": 4,
         "wq": 1,
         "wn": 1,
-        "ep": 0,
-        "math": 0
+        "ep": 0
       },
       "priority": 806
-    },
-    {
-      "version": "1.0",
-      "id": "9a05b386-c923-58da-9909-3568e3295d25",
-      "name": "conv_smallc.bwd.f32x3.mfma16x32_bf16.c12.1x3x3.s1x1x1.d1x1x1.m4n2.w4x2x1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16x32_bf16",
-        "archs": "gfx950",
-        "atom_id": 5,
-        "wave": 64,
-        "ka": 32,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 4,
-        "fn": 2,
-        "wm": 4,
-        "wq": 2,
-        "wn": 1,
-        "ep": 0,
-        "math": 1
-      },
-      "priority": 805
-    },
-    {
-      "version": "1.0",
-      "id": "26929efe-d60c-5451-9142-6a989a6f815d",
-      "name": "conv_smallc.bwd.f32x3.mfma16x32_bf16.c12.1x3x3.s1x1x1.d1x1x1.m2n4.w4x1x1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16x32_bf16",
-        "archs": "gfx950",
-        "atom_id": 5,
-        "wave": 64,
-        "ka": 32,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 4,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 0,
-        "math": 1
-      },
-      "priority": 804
-    },
-    {
-      "version": "1.0",
-      "id": "08b3db80-5061-5a19-83d7-b5f8e85190b3",
-      "name": "conv_smallc.bwd.f32x3.mfma16x32_bf16.c12.1x3x3.s1x1x1.d1x1x1.m2n2.w4x1x1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16x32_bf16",
-        "archs": "gfx950",
-        "atom_id": 5,
-        "wave": 64,
-        "ka": 32,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 2,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 0,
-        "math": 1
-      },
-      "priority": 803
-    },
-    {
-      "version": "1.0",
-      "id": "b9e1d00e-f779-5c3a-972f-6b9eb591dbb7",
-      "name": "conv_smallc.bwd.f32x3.mfma16x32_bf16.c9.3x3x3.s1x1x1.d1x1x1.m4n2.w4x2x1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16x32_bf16",
-        "archs": "gfx950",
-        "atom_id": 5,
-        "wave": 64,
-        "ka": 32,
-        "cmax": 9,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 4,
-        "fn": 2,
-        "wm": 4,
-        "wq": 2,
-        "wn": 1,
-        "ep": 0,
-        "math": 1
-      },
-      "priority": 802
-    },
-    {
-      "version": "1.0",
-      "id": "f843e3a8-b8bf-5d58-8786-f551f5ca901b",
-      "name": "conv_smallc.bwd.f32x3.mfma16x32_bf16.c9.3x3x3.s1x1x1.d1x1x1.m2n4.w4x1x1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16x32_bf16",
-        "archs": "gfx950",
-        "atom_id": 5,
-        "wave": 64,
-        "ka": 32,
-        "cmax": 9,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 4,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 0,
-        "math": 1
-      },
-      "priority": 801
-    },
-    {
-      "version": "1.0",
-      "id": "07e9b196-5e3a-5ade-a91d-81dce0b66466",
-      "name": "conv_smallc.bwd.f32x3.mfma16x32_bf16.c9.3x3x3.s1x1x1.d1x1x1.m2n2.w4x1x1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16x32_bf16",
-        "archs": "gfx950",
-        "atom_id": 5,
-        "wave": 64,
-        "ka": 32,
-        "cmax": 9,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 2,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 0,
-        "math": 1
-      },
-      "priority": 800
-    },
-    {
-      "version": "1.0",
-      "id": "de12ea16-5593-55df-a7f4-6ac1cf8be1c8",
-      "name": "conv_smallc.bwd.f32x3.mfma16x32_bf16.c12.3x3x3.s1x1x1.d1x1x1.m4n2.w4x2x1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16x32_bf16",
-        "archs": "gfx950",
-        "atom_id": 5,
-        "wave": 64,
-        "ka": 32,
-        "cmax": 12,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 4,
-        "fn": 2,
-        "wm": 4,
-        "wq": 2,
-        "wn": 1,
-        "ep": 0,
-        "math": 1
-      },
-      "priority": 799
-    },
-    {
-      "version": "1.0",
-      "id": "bab0b7da-cb87-5511-9dee-4b3acf9cbaa2",
-      "name": "conv_smallc.bwd.f32x3.mfma16x32_bf16.c12.3x3x3.s1x1x1.d1x1x1.m2n4.w4x1x1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16x32_bf16",
-        "archs": "gfx950",
-        "atom_id": 5,
-        "wave": 64,
-        "ka": 32,
-        "cmax": 12,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 4,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 0,
-        "math": 1
-      },
-      "priority": 798
-    },
-    {
-      "version": "1.0",
-      "id": "8fa4d6d5-05ef-5223-b250-2c5e90f34c89",
-      "name": "conv_smallc.bwd.f32x3.mfma16x32_bf16.c12.3x3x3.s1x1x1.d1x1x1.m2n2.w4x1x1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16x32_bf16",
-        "archs": "gfx950",
-        "atom_id": 5,
-        "wave": 64,
-        "ka": 32,
-        "cmax": 12,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 2,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 0,
-        "math": 1
-      },
-      "priority": 797
-    },
-    {
-      "version": "1.0",
-      "id": "97fa2f7c-15e9-5d41-87b3-91b45798bfb1",
-      "name": "conv_smallc.bwd.f32x3.mfma16_bf16.c12.1x3x3.s1x1x1.d1x1x1.m4n2.w4x2x1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16_bf16",
-        "archs": "gfx90a,gfx942",
-        "atom_id": 2,
-        "wave": 64,
-        "ka": 16,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 4,
-        "fn": 2,
-        "wm": 4,
-        "wq": 2,
-        "wn": 1,
-        "ep": 0,
-        "math": 1
-      },
-      "priority": 796
-    },
-    {
-      "version": "1.0",
-      "id": "9c23fd35-8e74-5e83-87e7-bf9fb6d834af",
-      "name": "conv_smallc.bwd.f32x3.mfma16_bf16.c12.1x3x3.s1x1x1.d1x1x1.m2n4.w4x1x1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16_bf16",
-        "archs": "gfx90a,gfx942",
-        "atom_id": 2,
-        "wave": 64,
-        "ka": 16,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 4,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 0,
-        "math": 1
-      },
-      "priority": 795
-    },
-    {
-      "version": "1.0",
-      "id": "34369129-2249-5508-a424-0a2a0f01df2e",
-      "name": "conv_smallc.bwd.f32x3.mfma16_bf16.c12.1x3x3.s1x1x1.d1x1x1.m2n2.w4x1x1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16_bf16",
-        "archs": "gfx90a,gfx942",
-        "atom_id": 2,
-        "wave": 64,
-        "ka": 16,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 2,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 0,
-        "math": 1
-      },
-      "priority": 794
-    },
-    {
-      "version": "1.0",
-      "id": "5d74e866-1108-5ebb-945e-43d3993f86ae",
-      "name": "conv_smallc.bwd.f32x3.mfma16_bf16.c9.3x3x3.s1x1x1.d1x1x1.m2n2.w4x1x1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16_bf16",
-        "archs": "gfx90a,gfx942",
-        "atom_id": 2,
-        "wave": 64,
-        "ka": 16,
-        "cmax": 9,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 2,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 0,
-        "math": 1
-      },
-      "priority": 793
-    },
-    {
-      "version": "1.0",
-      "id": "11a03d5f-56c9-5343-8a3a-13e90fafd2fc",
-      "name": "conv_smallc.bwd.f32x3.mfma16_bf16.c12.3x3x3.s1x1x1.d1x1x1.m2n2.w4x1x1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16_bf16",
-        "archs": "gfx90a,gfx942",
-        "atom_id": 2,
-        "wave": 64,
-        "ka": 16,
-        "cmax": 12,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 2,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 0,
-        "math": 1
-      },
-      "priority": 792
-    },
-    {
-      "version": "1.0",
-      "id": "78e24839-e761-5d7d-8c3f-185f163f7719",
-      "name": "conv_smallc.bwd.f32x3.wmma11_bf16.c12.1x3x3.s1x1x1.d1x1x1.m4n2.w4x2x1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "wmma11_bf16",
-        "archs": "gfx11",
-        "atom_id": 7,
-        "wave": 32,
-        "ka": 16,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 4,
-        "fn": 2,
-        "wm": 4,
-        "wq": 2,
-        "wn": 1,
-        "ep": 0,
-        "math": 1
-      },
-      "priority": 791
-    },
-    {
-      "version": "1.0",
-      "id": "c83680e7-281b-52be-94ea-175733163ec3",
-      "name": "conv_smallc.bwd.f32x3.wmma11_bf16.c12.1x3x3.s1x1x1.d1x1x1.m2n4.w4x1x1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "wmma11_bf16",
-        "archs": "gfx11",
-        "atom_id": 7,
-        "wave": 32,
-        "ka": 16,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 4,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 0,
-        "math": 1
-      },
-      "priority": 790
-    },
-    {
-      "version": "1.0",
-      "id": "a39e14a6-26a4-53f0-977c-c483a10b847a",
-      "name": "conv_smallc.bwd.f32x3.wmma11_bf16.c12.1x3x3.s1x1x1.d1x1x1.m2n2.w4x1x1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "wmma11_bf16",
-        "archs": "gfx11",
-        "atom_id": 7,
-        "wave": 32,
-        "ka": 16,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 2,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 0,
-        "math": 1
-      },
-      "priority": 789
-    },
-    {
-      "version": "1.0",
-      "id": "6402697f-f08f-5cc2-95a2-9145e5e92c28",
-      "name": "conv_smallc.bwd.f32x3.wmma11_bf16.c9.3x3x3.s1x1x1.d1x1x1.m2n2.w4x1x1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "wmma11_bf16",
-        "archs": "gfx11",
-        "atom_id": 7,
-        "wave": 32,
-        "ka": 16,
-        "cmax": 9,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 2,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 0,
-        "math": 1
-      },
-      "priority": 788
-    },
-    {
-      "version": "1.0",
-      "id": "7351cee7-84b3-5a8f-a51d-29b280e1045d",
-      "name": "conv_smallc.bwd.f32x3.wmma11_bf16.c12.3x3x3.s1x1x1.d1x1x1.m2n2.w4x1x1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "wmma11_bf16",
-        "archs": "gfx11",
-        "atom_id": 7,
-        "wave": 32,
-        "ka": 16,
-        "cmax": 12,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 2,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 0,
-        "math": 1
-      },
-      "priority": 787
-    },
-    {
-      "version": "1.0",
-      "id": "ca8160e0-ca81-56d3-b8ca-f1458b2d3f9f",
-      "name": "conv_smallc.bwd.f32x3.wmma12_bf16.c12.1x3x3.s1x1x1.d1x1x1.m4n2.w4x2x1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "wmma12_bf16",
-        "archs": "gfx12",
-        "atom_id": 9,
-        "wave": 32,
-        "ka": 16,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 4,
-        "fn": 2,
-        "wm": 4,
-        "wq": 2,
-        "wn": 1,
-        "ep": 0,
-        "math": 1
-      },
-      "priority": 786
-    },
-    {
-      "version": "1.0",
-      "id": "28225427-00af-54f4-8afd-5adb3102f7f8",
-      "name": "conv_smallc.bwd.f32x3.wmma12_bf16.c12.1x3x3.s1x1x1.d1x1x1.m2n4.w4x1x1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "wmma12_bf16",
-        "archs": "gfx12",
-        "atom_id": 9,
-        "wave": 32,
-        "ka": 16,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 4,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 0,
-        "math": 1
-      },
-      "priority": 785
-    },
-    {
-      "version": "1.0",
-      "id": "b67535b3-6cc8-58e3-af91-6664a71dc5e5",
-      "name": "conv_smallc.bwd.f32x3.wmma12_bf16.c12.1x3x3.s1x1x1.d1x1x1.m2n2.w4x1x1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "wmma12_bf16",
-        "archs": "gfx12",
-        "atom_id": 9,
-        "wave": 32,
-        "ka": 16,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 2,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 0,
-        "math": 1
-      },
-      "priority": 784
-    },
-    {
-      "version": "1.0",
-      "id": "b10d375a-4986-5915-bd5f-4b70e3b0842b",
-      "name": "conv_smallc.bwd.f32x3.wmma12_bf16.c9.3x3x3.s1x1x1.d1x1x1.m2n2.w4x1x1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "wmma12_bf16",
-        "archs": "gfx12",
-        "atom_id": 9,
-        "wave": 32,
-        "ka": 16,
-        "cmax": 9,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 2,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 0,
-        "math": 1
-      },
-      "priority": 783
-    },
-    {
-      "version": "1.0",
-      "id": "1f1037b3-587d-5d87-8455-cfc7c7f1df55",
-      "name": "conv_smallc.bwd.f32x3.wmma12_bf16.c12.3x3x3.s1x1x1.d1x1x1.m2n2.w4x1x1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "wmma12_bf16",
-        "archs": "gfx12",
-        "atom_id": 9,
-        "wave": 32,
-        "ka": 16,
-        "cmax": 12,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 2,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 0,
-        "math": 1
-      },
-      "priority": 782
-    },
-    {
-      "version": "1.0",
-      "id": "67859df1-6eec-5af9-8848-b85e84a70d9d",
-      "name": "conv_smallc.bwd.f32x3.mfma16x32_bf16.c12.1x3x3.s1x1x1.d1x1x1.m2n4.w2x2x2.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16x32_bf16",
-        "archs": "gfx950",
-        "atom_id": 5,
-        "wave": 64,
-        "ka": 32,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 4,
-        "wm": 2,
-        "wq": 2,
-        "wn": 2,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 781
-    },
-    {
-      "version": "1.0",
-      "id": "0abf797d-4469-5c46-8bf5-e961b7fb098a",
-      "name": "conv_smallc.bwd.f32x3.mfma16x32_bf16.c12.1x3x3.s1x1x1.d1x1x1.m2n4.w4x1x1.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16x32_bf16",
-        "archs": "gfx950",
-        "atom_id": 5,
-        "wave": 64,
-        "ka": 32,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 4,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 780
-    },
-    {
-      "version": "1.0",
-      "id": "1353d3fc-c05a-57b9-99d8-bae0d69779c6",
-      "name": "conv_smallc.bwd.f32x3.mfma16x32_bf16.c12.1x3x3.s1x1x1.d1x1x1.m4n2.w4x2x1.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16x32_bf16",
-        "archs": "gfx950",
-        "atom_id": 5,
-        "wave": 64,
-        "ka": 32,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 4,
-        "fn": 2,
-        "wm": 4,
-        "wq": 2,
-        "wn": 1,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 779
-    },
-    {
-      "version": "1.0",
-      "id": "09d4fdc1-1362-5b2e-aaab-a785dfdf30c9",
-      "name": "conv_smallc.bwd.f32x3.mfma16x32_bf16.c12.1x3x3.s1x1x1.d1x1x1.m2n8.w2x2x1.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16x32_bf16",
-        "archs": "gfx950",
-        "atom_id": 5,
-        "wave": 64,
-        "ka": 32,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 8,
-        "wm": 2,
-        "wq": 2,
-        "wn": 1,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 778
-    },
-    {
-      "version": "1.0",
-      "id": "302122fa-f508-5934-8d44-f20e95ca5d51",
-      "name": "conv_smallc.bwd.f32x3.mfma16x32_bf16.c9.3x3x3.s1x1x1.d1x1x1.m2n4.w2x2x2.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16x32_bf16",
-        "archs": "gfx950",
-        "atom_id": 5,
-        "wave": 64,
-        "ka": 32,
-        "cmax": 9,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 4,
-        "wm": 2,
-        "wq": 2,
-        "wn": 2,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 777
-    },
-    {
-      "version": "1.0",
-      "id": "eb5afe88-98dd-5d23-ad3d-9c1fd0536a9c",
-      "name": "conv_smallc.bwd.f32x3.mfma16x32_bf16.c9.3x3x3.s1x1x1.d1x1x1.m2n4.w4x1x1.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16x32_bf16",
-        "archs": "gfx950",
-        "atom_id": 5,
-        "wave": 64,
-        "ka": 32,
-        "cmax": 9,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 4,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 776
-    },
-    {
-      "version": "1.0",
-      "id": "d17a8e6c-775b-5c8b-bfce-591b0201a403",
-      "name": "conv_smallc.bwd.f32x3.mfma16x32_bf16.c9.3x3x3.s1x1x1.d1x1x1.m4n2.w4x2x1.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16x32_bf16",
-        "archs": "gfx950",
-        "atom_id": 5,
-        "wave": 64,
-        "ka": 32,
-        "cmax": 9,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 4,
-        "fn": 2,
-        "wm": 4,
-        "wq": 2,
-        "wn": 1,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 775
-    },
-    {
-      "version": "1.0",
-      "id": "d2e52d74-dcd3-5d66-b4a5-6ed92718425a",
-      "name": "conv_smallc.bwd.f32x3.mfma16x32_bf16.c9.3x3x3.s1x1x1.d1x1x1.m2n8.w2x2x1.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16x32_bf16",
-        "archs": "gfx950",
-        "atom_id": 5,
-        "wave": 64,
-        "ka": 32,
-        "cmax": 9,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 8,
-        "wm": 2,
-        "wq": 2,
-        "wn": 1,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 774
-    },
-    {
-      "version": "1.0",
-      "id": "c8ae3f08-879d-50df-9111-6e1e2639d2ba",
-      "name": "conv_smallc.bwd.f32x3.mfma16x32_bf16.c12.3x3x3.s1x1x1.d1x1x1.m2n4.w2x2x2.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16x32_bf16",
-        "archs": "gfx950",
-        "atom_id": 5,
-        "wave": 64,
-        "ka": 32,
-        "cmax": 12,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 4,
-        "wm": 2,
-        "wq": 2,
-        "wn": 2,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 773
-    },
-    {
-      "version": "1.0",
-      "id": "3db3f9ce-cf01-54a7-8a4a-8b0bed516ffe",
-      "name": "conv_smallc.bwd.f32x3.mfma16x32_bf16.c12.3x3x3.s1x1x1.d1x1x1.m2n4.w4x1x1.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16x32_bf16",
-        "archs": "gfx950",
-        "atom_id": 5,
-        "wave": 64,
-        "ka": 32,
-        "cmax": 12,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 4,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 772
-    },
-    {
-      "version": "1.0",
-      "id": "a5e4203c-2916-585c-939d-df5d9beba02c",
-      "name": "conv_smallc.bwd.f32x3.mfma16x32_bf16.c12.3x3x3.s1x1x1.d1x1x1.m4n2.w4x2x1.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16x32_bf16",
-        "archs": "gfx950",
-        "atom_id": 5,
-        "wave": 64,
-        "ka": 32,
-        "cmax": 12,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 4,
-        "fn": 2,
-        "wm": 4,
-        "wq": 2,
-        "wn": 1,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 771
-    },
-    {
-      "version": "1.0",
-      "id": "3affe739-ed3b-5b84-9d81-6badf113c701",
-      "name": "conv_smallc.bwd.f32x3.mfma16x32_bf16.c12.3x3x3.s1x1x1.d1x1x1.m2n8.w2x2x1.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16x32_bf16",
-        "archs": "gfx950",
-        "atom_id": 5,
-        "wave": 64,
-        "ka": 32,
-        "cmax": 12,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 8,
-        "wm": 2,
-        "wq": 2,
-        "wn": 1,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 770
-    },
-    {
-      "version": "1.0",
-      "id": "9c5f915b-d460-5b5f-b374-12a040eb2e11",
-      "name": "conv_smallc.bwd.f32x3.mfma16_bf16.c12.1x3x3.s1x1x1.d1x1x1.m2n4.w2x2x2.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16_bf16",
-        "archs": "gfx90a,gfx942",
-        "atom_id": 2,
-        "wave": 64,
-        "ka": 16,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 4,
-        "wm": 2,
-        "wq": 2,
-        "wn": 2,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 769
-    },
-    {
-      "version": "1.0",
-      "id": "949fc21d-ab42-5c11-9cc1-c387f2d4d4bf",
-      "name": "conv_smallc.bwd.f32x3.mfma16_bf16.c12.1x3x3.s1x1x1.d1x1x1.m2n4.w4x1x1.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16_bf16",
-        "archs": "gfx90a,gfx942",
-        "atom_id": 2,
-        "wave": 64,
-        "ka": 16,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 4,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 768
-    },
-    {
-      "version": "1.0",
-      "id": "edadc47a-9452-5e08-b058-318c1d1bd3c7",
-      "name": "conv_smallc.bwd.f32x3.mfma16_bf16.c12.1x3x3.s1x1x1.d1x1x1.m4n2.w4x2x1.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16_bf16",
-        "archs": "gfx90a,gfx942",
-        "atom_id": 2,
-        "wave": 64,
-        "ka": 16,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 4,
-        "fn": 2,
-        "wm": 4,
-        "wq": 2,
-        "wn": 1,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 767
-    },
-    {
-      "version": "1.0",
-      "id": "fa228782-f13f-5a6e-9e4d-8468327b3917",
-      "name": "conv_smallc.bwd.f32x3.mfma16_bf16.c12.1x3x3.s1x1x1.d1x1x1.m2n8.w2x2x1.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16_bf16",
-        "archs": "gfx90a,gfx942",
-        "atom_id": 2,
-        "wave": 64,
-        "ka": 16,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 8,
-        "wm": 2,
-        "wq": 2,
-        "wn": 1,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 766
-    },
-    {
-      "version": "1.0",
-      "id": "a408ca7c-8567-5c17-9954-ffab76372f59",
-      "name": "conv_smallc.bwd.f32x3.mfma16_bf16.c9.3x3x3.s1x1x1.d1x1x1.m2n4.w4x1x1.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16_bf16",
-        "archs": "gfx90a,gfx942",
-        "atom_id": 2,
-        "wave": 64,
-        "ka": 16,
-        "cmax": 9,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 4,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 765
-    },
-    {
-      "version": "1.0",
-      "id": "9e2daeba-db59-570b-96bb-51da1f515b5e",
-      "name": "conv_smallc.bwd.f32x3.mfma16_bf16.c9.3x3x3.s1x1x1.d1x1x1.m4n2.w4x2x1.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "mfma16_bf16",
-        "archs": "gfx90a,gfx942",
-        "atom_id": 2,
-        "wave": 64,
-        "ka": 16,
-        "cmax": 9,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 4,
-        "fn": 2,
-        "wm": 4,
-        "wq": 2,
-        "wn": 1,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 764
-    },
-    {
-      "version": "1.0",
-      "id": "fdde472b-f1b9-5eff-9e5d-272457078f4e",
-      "name": "conv_smallc.bwd.f32x3.wmma11_bf16.c12.1x3x3.s1x1x1.d1x1x1.m2n4.w2x2x2.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "wmma11_bf16",
-        "archs": "gfx11",
-        "atom_id": 7,
-        "wave": 32,
-        "ka": 16,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 4,
-        "wm": 2,
-        "wq": 2,
-        "wn": 2,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 763
-    },
-    {
-      "version": "1.0",
-      "id": "a41812b6-60d0-57e3-9ec8-4f07e4925a4f",
-      "name": "conv_smallc.bwd.f32x3.wmma11_bf16.c12.1x3x3.s1x1x1.d1x1x1.m2n4.w4x1x1.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "wmma11_bf16",
-        "archs": "gfx11",
-        "atom_id": 7,
-        "wave": 32,
-        "ka": 16,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 4,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 762
-    },
-    {
-      "version": "1.0",
-      "id": "591058d9-20e0-5809-bbcb-e257d48e2061",
-      "name": "conv_smallc.bwd.f32x3.wmma11_bf16.c12.1x3x3.s1x1x1.d1x1x1.m2n8.w2x2x1.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "wmma11_bf16",
-        "archs": "gfx11",
-        "atom_id": 7,
-        "wave": 32,
-        "ka": 16,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 8,
-        "wm": 2,
-        "wq": 2,
-        "wn": 1,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 761
-    },
-    {
-      "version": "1.0",
-      "id": "6f84b8d0-b153-5603-82cd-914642abf7c6",
-      "name": "conv_smallc.bwd.f32x3.wmma11_bf16.c12.1x3x3.s1x1x1.d1x1x1.m2n2.w4x1x1.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "wmma11_bf16",
-        "archs": "gfx11",
-        "atom_id": 7,
-        "wave": 32,
-        "ka": 16,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 2,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 760
-    },
-    {
-      "version": "1.0",
-      "id": "a8089fba-e379-5fbc-b605-402fe7b6a89b",
-      "name": "conv_smallc.bwd.f32x3.wmma11_bf16.c9.3x3x3.s1x1x1.d1x1x1.m2n4.w4x1x1.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "wmma11_bf16",
-        "archs": "gfx11",
-        "atom_id": 7,
-        "wave": 32,
-        "ka": 16,
-        "cmax": 9,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 4,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 759
-    },
-    {
-      "version": "1.0",
-      "id": "a9076017-6e26-5585-a61d-140bc63e5f95",
-      "name": "conv_smallc.bwd.f32x3.wmma11_bf16.c9.3x3x3.s1x1x1.d1x1x1.m2n2.w4x1x1.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "wmma11_bf16",
-        "archs": "gfx11",
-        "atom_id": 7,
-        "wave": 32,
-        "ka": 16,
-        "cmax": 9,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 2,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 758
-    },
-    {
-      "version": "1.0",
-      "id": "791919db-768b-5623-8403-9485b41f60b0",
-      "name": "conv_smallc.bwd.f32x3.wmma11_bf16.c12.3x3x3.s1x1x1.d1x1x1.m2n2.w4x1x1.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "wmma11_bf16",
-        "archs": "gfx11",
-        "atom_id": 7,
-        "wave": 32,
-        "ka": 16,
-        "cmax": 12,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 2,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 757
-    },
-    {
-      "version": "1.0",
-      "id": "5388735b-a6dc-5637-84e9-7ca731ba3b45",
-      "name": "conv_smallc.bwd.f32x3.wmma12_bf16.c12.1x3x3.s1x1x1.d1x1x1.m2n4.w2x2x2.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "wmma12_bf16",
-        "archs": "gfx12",
-        "atom_id": 9,
-        "wave": 32,
-        "ka": 16,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 4,
-        "wm": 2,
-        "wq": 2,
-        "wn": 2,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 756
-    },
-    {
-      "version": "1.0",
-      "id": "6747351e-9f6d-5ba8-9aa0-cffee54c7e56",
-      "name": "conv_smallc.bwd.f32x3.wmma12_bf16.c12.1x3x3.s1x1x1.d1x1x1.m2n4.w4x1x1.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "wmma12_bf16",
-        "archs": "gfx12",
-        "atom_id": 9,
-        "wave": 32,
-        "ka": 16,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 4,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 755
-    },
-    {
-      "version": "1.0",
-      "id": "3e8832a0-c57b-5b51-9015-aaf98830e3a0",
-      "name": "conv_smallc.bwd.f32x3.wmma12_bf16.c12.1x3x3.s1x1x1.d1x1x1.m4n2.w4x2x1.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "wmma12_bf16",
-        "archs": "gfx12",
-        "atom_id": 9,
-        "wave": 32,
-        "ka": 16,
-        "cmax": 12,
-        "kd": 1,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 4,
-        "fn": 2,
-        "wm": 4,
-        "wq": 2,
-        "wn": 1,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 754
-    },
-    {
-      "version": "1.0",
-      "id": "e5c471d3-2df3-52f5-8b4f-9d32cc4e6835",
-      "name": "conv_smallc.bwd.f32x3.wmma12_bf16.c9.3x3x3.s1x1x1.d1x1x1.m2n4.w4x1x1.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "wmma12_bf16",
-        "archs": "gfx12",
-        "atom_id": 9,
-        "wave": 32,
-        "ka": 16,
-        "cmax": 9,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 2,
-        "fn": 4,
-        "wm": 4,
-        "wq": 1,
-        "wn": 1,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 753
-    },
-    {
-      "version": "1.0",
-      "id": "6abf0b33-de08-5e55-8117-6f624fd91cfd",
-      "name": "conv_smallc.bwd.f32x3.wmma12_bf16.c9.3x3x3.s1x1x1.d1x1x1.m4n2.w4x2x1.e1",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvSmallc.cpp",
-        "entry_point": "ConvSmallc"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "FLOAT",
-        "atom": "wmma12_bf16",
-        "archs": "gfx12",
-        "atom_id": 9,
-        "wave": 32,
-        "ka": 16,
-        "cmax": 9,
-        "kd": 3,
-        "r": 3,
-        "s": 3,
-        "sd": 1,
-        "sh": 1,
-        "sw": 1,
-        "dd": 1,
-        "dh": 1,
-        "dw": 1,
-        "fm": 4,
-        "fn": 2,
-        "wm": 4,
-        "wq": 2,
-        "wn": 1,
-        "ep": 1,
-        "math": 1
-      },
-      "priority": 752
     }
   ]
 }

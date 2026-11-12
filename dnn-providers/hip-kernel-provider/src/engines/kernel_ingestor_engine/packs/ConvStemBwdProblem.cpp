@@ -280,84 +280,10 @@ int64_t ldsLimitOf(std::string_view gcnArchName)
     return hipdnn_plugin_sdk::stripArchFeatures(gcnArchName) == "gfx950" ? 160 * 1024 : 64 * 1024;
 }
 
-std::optional<StemBwdProblem> threeBf16ProblemOf(const StemBwdProblem& problem)
-{
-    StemBwdProblem t = problem;
-    auto& a = t.base.args;
-    const long long dyExtents[CONV_NAIVE_TENSOR_DIMS]
-        = {a.n, a.k, a.outSpatial[0], a.outSpatial[1], a.outSpatial[2]};
-    conv_tf32::triplePackedAxis(a.yStrides, dyExtents, 1);
-    a.k *= 3;
-    const auto dyImage
-        = pack_features::checkedProduct({a.k, a.outSpatial[0], a.outSpatial[1], a.outSpatial[2]});
-    if(a.k > INT_LIMIT || !dyImage.has_value() || *dyImage > INT_LIMIT / 2)
-    {
-        return std::nullopt;
-    }
-    t.base.dataType = data_objects::DataType::BFLOAT16;
-    t.elementBytes = 2;
-    return t;
-}
-
-bool threeBf16Pays(const StemBwdProblem& /*problem*/, std::string_view gcnArchName)
-{
-    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
-    return arch == "gfx90a" || arch == "gfx942" || arch == "gfx950" || arch.rfind("gfx11", 0) == 0
-           || arch.rfind("gfx12", 0) == 0;
-}
-
-namespace
-{
-std::optional<StemBwdLaunch>
-    launchCore(const StemBwdProblem& problem,
-               const StemBwdConfig& config,
-               const hipdnn_plugin_sdk::ingestor::DeviceProperties& device);
-} // namespace
-
 std::optional<StemBwdLaunch>
     stemBwdLaunchFor(const StemBwdProblem& problem,
                      const StemBwdConfig& config,
                      const hipdnn_plugin_sdk::ingestor::DeviceProperties& device)
-{
-    if(config.math == 0)
-    {
-        return launchCore(problem, config, device);
-    }
-    if(config.math != 1 || problem.base.dataType != data_objects::DataType::FLOAT
-       || !conv_igemm::tf32Permitted() || conv_igemm::atomElement(config.atom) != "bf16"
-       || !threeBf16Pays(problem, device.gcnArchName))
-    {
-        return std::nullopt;
-    }
-    const auto tripled = threeBf16ProblemOf(problem);
-    if(!tripled.has_value())
-    {
-        return std::nullopt;
-    }
-    auto launch = launchCore(*tripled, config, device);
-    if(!launch.has_value())
-    {
-        return std::nullopt;
-    }
-    const auto& a = problem.base.args;
-    const long long dyExtents[CONV_NAIVE_TENSOR_DIMS]
-        = {a.n, a.k, a.outSpatial[0], a.outSpatial[1], a.outSpatial[2]};
-    const long long wExtents[CONV_NAIVE_TENSOR_DIMS]
-        = {a.k, a.c, a.filter[0], a.filter[1], a.filter[2]};
-    launch->split = true;
-    launch->plan = conv_tf32::splitPlanFor(
-        conv_tf32::splitTensorOf(a.yStrides, dyExtents, 1, 1, conv_tf32::PATTERN_A),
-        conv_tf32::splitTensorOf(a.wStrides, wExtents, 0, 1, conv_tf32::PATTERN_B));
-    launch->splitOffset = (launch->workspaceBytes + 255) / 256 * 256;
-    launch->workspaceBytes = launch->splitOffset + launch->plan.bytes;
-    return launch;
-}
-
-namespace
-{
-std::optional<StemBwdLaunch> launchCore(const StemBwdProblem& problem,
-                                        const StemBwdConfig& config,
-                                        const hipdnn_plugin_sdk::ingestor::DeviceProperties& device)
 {
     // The atom: known, its id, on this device, taking the graph's element type. "fma" takes
     // fp32 only (16-bit runs on the matrix cores everywhere).
@@ -533,7 +459,6 @@ std::optional<StemBwdLaunch> launchCore(const StemBwdProblem& problem,
     t.dw = m.sdw;
     return launch;
 }
-} // namespace
 
 std::vector<std::pair<std::string, std::string>> compileDefinesFor(data_objects::DataType dataType,
                                                                    const StemBwdConfig& config,
@@ -554,15 +479,7 @@ std::vector<std::pair<std::string, std::string>> compileDefinesFor(data_objects:
     default:
         throw std::invalid_argument("conv_stem_bwd: unsupported element type");
     }
-    // Three-bf16: the bf16 kernel writing fp32 dx, plus the split pre-pass. Defined only then.
-    const bool split = config.math == 1 && dataType == data_objects::DataType::FLOAT;
-    std::vector<std::pair<std::string, std::string>> defines{
-        {"CONV_SB_T", split ? std::string("unsigned short") : element}};
-    if(split)
-    {
-        defines.emplace_back("CONV_SB_TO", "float");
-        defines.emplace_back(std::string(conv_tf32::SPLIT_DEFINE), "1");
-    }
+    std::vector<std::pair<std::string, std::string>> defines{{"CONV_SB_T", element}};
     if(!kernelType.empty())
     {
         defines.emplace_back("CONV_SB_ATOM", std::string(kernelType));

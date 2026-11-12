@@ -267,60 +267,6 @@ std::optional<SmallcProblem> parseSmallcProblem(const MatchContext& context,
     return problem;
 }
 
-std::optional<ThreeBf16> threeBf16Of(const SmallcProblem& problem)
-{
-    const auto& a = problem.base.args;
-    const bool backward = problem.backward;
-    // The kernel's input (x forward, dy backward) and the graph's filter (K C D H W), packed.
-    const long long* inStrides = backward ? a.yStrides : a.xStrides;
-    const long long* inSpatial = backward ? a.outSpatial : a.inSpatial;
-    const long long inExtents[5]
-        = {a.n, backward ? a.k : a.c, inSpatial[0], inSpatial[1], inSpatial[2]};
-    long long in[5];
-    long long w[5];
-    std::copy(inStrides, inStrides + 5, in);
-    std::copy(a.wStrides, a.wStrides + 5, w);
-    const long long wExtents[5] = {a.k, a.c, a.filter[0], a.filter[1], a.filter[2]};
-    if(!conv_tf32::isPackedTensor(in, inExtents) || !conv_tf32::isPackedTensor(w, wExtents))
-    {
-        return std::nullopt;
-    }
-    // The reduction channels: the input's axis 1; the filter's C forward, K backward.
-    const size_t wAxis = backward ? 0 : 1;
-    ThreeBf16 t;
-    t.plan = conv_tf32::splitPlanFor(
-        conv_tf32::splitTensorOf(in, inExtents, 1, 1, conv_tf32::PATTERN_A),
-        conv_tf32::splitTensorOf(w, wExtents, wAxis, 1, conv_tf32::PATTERN_B));
-    conv_tf32::triplePackedAxis(in, inExtents, 1);
-    conv_tf32::triplePackedAxis(w, wExtents, wAxis);
-    t.problem = problem;
-    t.problem.base.dataType = data_objects::DataType::BFLOAT16;
-    t.problem.elementBytes = 2;
-    t.problem.args.c = problem.args.c * 3;
-    for(int i = 0; i < 5; ++i)
-    {
-        t.problem.args.xs[i] = in[i];
-        t.filterStrides[i] = w[i];
-    }
-    long long span = 1;
-    for(int i = 0; i < 5; ++i)
-    {
-        span *= i == 1 ? inExtents[i] * 3 : inExtents[i];
-    }
-    if(problem.args.c * 3LL > INT_LIMIT || span / a.n * 2 >= INT_LIMIT)
-    {
-        return std::nullopt;
-    }
-    return t;
-}
-
-bool threeBf16Pays(const SmallcProblem& /*problem*/, std::string_view gcnArchName)
-{
-    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
-    return arch == "gfx90a" || arch == "gfx942" || arch == "gfx950" || arch.rfind("gfx11", 0) == 0
-           || arch.rfind("gfx12", 0) == 0;
-}
-
 std::optional<Config> configOf(const KernelDefinition& kernel)
 {
     Config config;
@@ -385,12 +331,6 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     {
         return std::nullopt;
     }
-    const auto math = intField(kernel, "math");
-    if(!math.has_value() || *math < 0 || *math > 1 || (*math == 1 && config.fma))
-    {
-        return std::nullopt;
-    }
-    config.math = *math;
     for(const int value : {config.cmax,
                            config.kd,
                            config.r,
@@ -566,12 +506,6 @@ struct Admitted
     SmallcProblem problem;
     Config config;
     Plan plan;
-    /// Three-bf16 (math 1): the split kernel input and filter after the formatted weights, at
-    /// splitOffset in the workspace; the filter's 3x strides for the format pre-pass.
-    bool split = false;
-    conv_tf32::SplitPlan splitPlan;
-    size_t splitOffset = 0;
-    long long filterStrides[5] = {};
 };
 
 std::optional<Admitted> admitted(const MatchContext& context, const KernelDefinition& kernel)
@@ -588,42 +522,10 @@ std::optional<Admitted> admitted(const MatchContext& context, const KernelDefini
         context, direction == "BWD" ? ConvDirection::BACKWARD_DATA : ConvDirection::FORWARD);
     if(!problem.has_value() || *dtype != data_objects::EnumNameDataType(problem->base.dataType)
        || !conv_igemm::atomRunsOn(config->atom, context.deviceProperties.gcnArchName)
-       || !shipsTo(config->archs, context.deviceProperties.gcnArchName))
-    {
-        return std::nullopt;
-    }
-    if(config->math == 1)
-    {
-        // Three-bf16: a bf16 MMA config for an fp32 graph under TF32 permission, on the 3x
-        // problem.
-        if(problem->base.dataType != data_objects::DataType::FLOAT || !conv_igemm::tf32Permitted()
-           || conv_igemm::atomElement(config->atom) != "bf16"
-           || !conv_smallc::threeBf16Pays(*problem, context.deviceProperties.gcnArchName))
-        {
-            return std::nullopt;
-        }
-        const auto x3 = conv_smallc::threeBf16Of(*problem);
-        if(!x3.has_value())
-        {
-            return std::nullopt;
-        }
-        const auto plan = conv_smallc::planFor(x3->problem, *config);
-        if(!plan.has_value())
-        {
-            return std::nullopt;
-        }
-        Admitted run;
-        run.problem = x3->problem;
-        run.config = *config;
-        run.plan = *plan;
-        run.split = true;
-        run.splitPlan = x3->plan;
-        run.splitOffset = (plan->weightBytes + 255) / 256 * 256;
-        std::copy(std::begin(x3->filterStrides), std::end(x3->filterStrides), run.filterStrides);
-        return run;
-    }
-    if(!config->fma
-       && conv_igemm::atomElement(config->atom) != conv_igemm::dataElement(problem->base.dataType))
+       || !shipsTo(config->archs, context.deviceProperties.gcnArchName)
+       || (!config->fma
+           && conv_igemm::atomElement(config->atom)
+                  != conv_igemm::dataElement(problem->base.dataType)))
     {
         return std::nullopt;
     }
@@ -632,14 +534,7 @@ std::optional<Admitted> admitted(const MatchContext& context, const KernelDefini
     {
         return std::nullopt;
     }
-    Admitted run;
-    run.problem = std::move(*problem);
-    run.config = *config;
-    run.plan = *plan;
-    std::copy(std::begin(run.problem.base.args.wStrides),
-              std::end(run.problem.base.args.wStrides),
-              run.filterStrides);
-    return run;
+    return Admitted{std::move(*problem), *config, *plan};
 }
 
 /// Kernel-scoped applicability: the config's direction, dtype, channel bound, filter, stride and
@@ -679,13 +574,9 @@ std::string elementTypeFor(data_objects::DataType dataType)
 class PreparedConvSmallc : public IngestorPreparedDispatch
 {
 public:
-    PreparedConvSmallc(IngestorKernelCode conv,
-                       IngestorKernelCode format,
-                       std::optional<IngestorKernelCode> split,
-                       Admitted admitted)
+    PreparedConvSmallc(IngestorKernelCode conv, IngestorKernelCode format, Admitted admitted)
         : _conv(std::move(conv))
         , _format(std::move(format))
-        , _split(std::move(split))
         , _admitted(std::move(admitted))
     {
     }
@@ -706,15 +597,10 @@ public:
     {
         return _admitted;
     }
-    compilation::IRunnableKernel& split(hipStream_t stream) const
-    {
-        return _split->kernelForStream(stream);
-    }
 
 private:
     IngestorKernelCode _conv;
     IngestorKernelCode _format;
-    std::optional<IngestorKernelCode> _split;
     Admitted _admitted;
 };
 
@@ -734,9 +620,7 @@ public:
                           const KernelDefinition& kernel) const override
     {
         const auto run = admitted(context, kernel);
-        return !run.has_value() ? 0
-               : run->split     ? run->splitOffset + run->splitPlan.bytes
-                                : run->plan.weightBytes;
+        return run.has_value() ? run->plan.weightBytes : 0;
     }
 
     std::unique_ptr<PreparedDispatch> prepare(const MatchContext& context,
@@ -756,13 +640,7 @@ public:
         }
         const auto& config = run->config;
         compilation::KernelCompileOptions options(context.deviceProperties.gcnArchName);
-        // Three-bf16: the bf16 kernel (the admitted problem's type) writing fp32, plus the split.
         options.add("CONV_SMALLC_T", elementTypeFor(run->problem.base.dataType));
-        if(run->split)
-        {
-            options.add("CONV_SMALLC_TO", std::string("float"));
-            options.add(std::string(conv_tf32::SPLIT_DEFINE), std::string("1"));
-        }
         options.add("CONV_SMALLC_FMA", std::string(config.fma ? "1" : "0"));
         if(!config.fma)
         {
@@ -807,22 +685,8 @@ public:
                 (run->plan.weightElems + AUX_BLOCK - 1) / AUX_BLOCK, 1, AUX_MAX_BLOCKS)),
             1,
             1);
-        std::optional<IngestorKernelCode> split;
-        if(run->split)
-        {
-            KernelDefinition splitKernel = kernel;
-            splitKernel.source.entryPoint = std::string(conv_tf32::SPLIT_ENTRY_POINT);
-            split = buildIngestorKernelCode(_kernelCompiler,
-                                            _kpackLoader,
-                                            context,
-                                            splitKernel,
-                                            options,
-                                            signatureOf<K1Split3Args>());
-            split->setBlockSize(AUX_BLOCK, 1, 1);
-            split->setGridSize(run->splitPlan.grid, 1, 1);
-        }
         return std::make_unique<PreparedConvSmallc>(
-            std::move(conv), std::move(format), std::move(split), std::move(*run));
+            std::move(conv), std::move(format), std::move(*run));
     }
 
     void launch(const Handle& handle,
@@ -846,19 +710,6 @@ public:
         const auto& a = run.problem.base.args;
         const auto& config = run.config;
         const bool backward = run.problem.backward;
-        if(run.split)
-        {
-            // Three-bf16: the kernel's input and the filter split along the reduction channels,
-            // after the formatted weights; the pre-pass and the kernel read the split copies.
-            const auto split
-                = conv_tf32::splitArgsFor(run.splitPlan,
-                                          backward ? y : x,
-                                          w,
-                                          static_cast<char*>(workspace) + run.splitOffset);
-            dispatch.split(stream).launch(stream, split);
-            (backward ? y : x) = split.t[0].dst;
-            w = split.t[1].dst;
-        }
 
         // Backward: the kernel's output channel n is the graph's c and its reduction channel
         // the graph's k (filter strides swapped), over the reflected filter.
@@ -867,7 +718,7 @@ public:
         fmt.wf = workspace;
         for(int i = 0; i < 5; ++i)
         {
-            fmt.wStrides[i] = run.filterStrides[i];
+            fmt.wStrides[i] = a.wStrides[i];
         }
         if(backward)
         {

@@ -66,10 +66,6 @@
     {
       "name": "sd",
       "type": "int"
-    },
-    {
-      "name": "math",
-      "type": "int"
     }
   ]
 }

@@ -12,7 +12,6 @@
 #include <vector>
 
 #include <gtest/gtest.h>
-#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvStemBwdProblem.hpp"
@@ -600,7 +599,6 @@ struct ConfigFields
     int64_t layout = 0, vec = 8, u = 4, v = 4, nb = 16, kc = 32, th = 4, fm = 2, sh = 2, sw = 2;
     int64_t ft = 0;
     int64_t sd = 0;
-    int64_t math = 0;
 };
 
 /// A space-to-depth config for stride1Shape().
@@ -647,8 +645,7 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
                        {"sh", f.sh},
                        {"sw", f.sw},
                        {"ft", f.ft},
-                       {"sd", f.sd},
-                       {"math", f.math}};
+                       {"sd", f.sd}};
     return kernel;
 }
 
@@ -669,7 +666,6 @@ StemBwdConfig configOf(const ConfigFields& f)
     c.sw = f.sw;
     c.ft = f.ft;
     c.sd = f.sd;
-    c.math = f.math;
     return c;
 }
 
@@ -953,75 +949,6 @@ INSTANTIATE_TEST_SUITE_P(,
                          ::testing::ValuesIn(configRefusals()),
                          [](const auto& info) { return info.param.name; });
 
-/// Three-bf16 (math 1): the base config's bf16 twin on the fp32 graph, TF32 permission only.
-ConfigFields threeBf16Fields()
-{
-    ConfigFields f;
-    f.atom = "mfma16_bf16";
-    f.atomId = 1;
-    f.math = 1;
-    return f;
-}
-
-TEST(TestConvStemBwdThreeBf16, OnlyUnderTf32PermissionForFloatGraphs)
-{
-    ASSERT_EQ(conv_stem_bwd::atomIdOf("mfma16_bf16"), 1);
-    {
-        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter off(
-            "HIP_KERNEL_PROVIDER_CONV_TF32", "");
-        EXPECT_FALSE(admits(threeBf16Fields(), "gfx942", floatShape()));
-    }
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter on(
-        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
-    EXPECT_TRUE(admits(threeBf16Fields(), "gfx942", floatShape()));
-    EXPECT_TRUE(admits(threeBf16Fields(), "gfx90a", floatShape()));
-    // 16-bit graphs take the bf16 configs themselves.
-    auto bf16 = floatShape();
-    bf16.dataType = DataType::BFLOAT16;
-    EXPECT_FALSE(admits(threeBf16Fields(), "gfx942", bf16));
-    EXPECT_FALSE(admits(threeBf16Fields(), "gfx942", baseShape()));
-    // One refusal per field three-bf16 adds.
-    auto two = threeBf16Fields();
-    two.math = 2;
-    EXPECT_FALSE(admits(two, "gfx942", floatShape()));
-    auto half = threeBf16Fields();
-    half.atom = "mfma16_f16";
-    half.atomId = 0;
-    EXPECT_FALSE(admits(half, "gfx942", floatShape()));
-    auto fma = fmaFields();
-    fma.math = 1;
-    EXPECT_FALSE(admits(fma, "gfx942", floatShape()));
-    auto plain = threeBf16Fields();
-    plain.math = 0;
-    EXPECT_FALSE(admits(plain, "gfx942", floatShape()));
-    // gfx908: no three-bf16 (half-rate bf16 atom).
-    EXPECT_FALSE(admits(threeBf16Fields(), "gfx908", floatShape()));
-}
-
-TEST(TestConvStemBwdThreeBf16, TheLaunchIsTheTripledProblemsAfterTheFilter)
-{
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter on(
-        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
-    const auto x3 = launchOf(threeBf16Fields(), floatShape());
-    ASSERT_TRUE(x3.has_value());
-    auto plainFields = threeBf16Fields();
-    plainFields.math = 0;
-    auto tripled = floatShape();
-    tripled.dataType = DataType::BFLOAT16;
-    tripled.k *= 3;
-    const auto plain = launchOf(plainFields, tripled);
-    ASSERT_TRUE(plain.has_value());
-    EXPECT_TRUE(x3->split);
-    EXPECT_EQ(x3->args.k, plain->args.k);
-    EXPECT_EQ(x3->args.kp, plain->args.kp);
-    EXPECT_EQ(x3->gridX, plain->gridX);
-    EXPECT_EQ(x3->splitOffset, (plain->workspaceBytes + 255) / 256 * 256);
-    EXPECT_EQ(x3->workspaceBytes, x3->splitOffset + x3->plan.bytes);
-    EXPECT_EQ(x3->plan.a.cg, floatShape().k);
-    EXPECT_EQ(x3->plan.b.cg, floatShape().k);
-    EXPECT_FALSE(plain->split);
-}
-
 TEST(TestConvStemBwdKernelMatch, TheBaseConfigsServeTheBaseProblem)
 {
     EXPECT_TRUE(admits(ConfigFields{}));
@@ -1166,7 +1093,6 @@ TEST(TestConvStemBwdKernelMatch, MissingMetadataRefuses)
                              "sw",
                              "ft",
                              "sd",
-                             "math",
                              "direction"})
     {
         auto kernel = kernelOf(ConfigFields{}, "HALF");

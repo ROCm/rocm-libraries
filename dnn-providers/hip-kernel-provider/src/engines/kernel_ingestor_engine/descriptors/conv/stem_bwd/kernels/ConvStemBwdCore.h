@@ -135,8 +135,7 @@ template <class T,
           int SH,
           int SW,
           int FT = 0,
-          int SD = 0,
-          class TO = T>
+          int SD = 0>
 __device__ void sbStemBwd(const ConvStemBwdArgs& a)
 {
     // The phases of a super-pixel: the strides, or SD x SD on a space-to-depth view of dy.
@@ -343,8 +342,7 @@ __device__ void sbStemBwd(const ConvStemBwdArgs& a)
         }
     };
 
-    // dx in its element type TO (fp32 for three-bf16, else T).
-    TO* dx = static_cast<TO*>(a.dx) + n * a.dxs[0] + (FT != 0 ? od * a.dxd : 0);
+    T* dx = static_cast<T*>(a.dx) + n * a.dxs[0] + (FT != 0 ? od * a.dxd : 0);
     if constexpr(FMA)
     {
         // Thread (row wave, column lane): FM super-pixels, all NB columns, in fp32.
@@ -418,7 +416,7 @@ __device__ void sbStemBwd(const ConvStemBwdArgs& a)
             {
                 const int x = PW * (j0 + m * DIM + lane) + q;
                 if(x < a.wi)
-                    dx[ch * a.dxs[1] + y * a.dxs[2] + x * a.dxs[3]] = K1Elem<TO>::store(acc[m][c]);
+                    dx[ch * a.dxs[1] + y * a.dxs[2] + x * a.dxs[3]] = K1Elem<T>::store(acc[m][c]);
             }
         }
     }
@@ -498,7 +496,7 @@ __device__ void sbStemBwd(const ConvStemBwdArgs& a)
                     const int x = PW * j + q;
                     if(x < a.wi)
                         dx[c * a.dxs[1] + y * a.dxs[2] + x * a.dxs[3]]
-                            = K1Elem<TO>::store(acc[m][f][e]);
+                            = K1Elem<T>::store(acc[m][f][e]);
                 }
         }
     }

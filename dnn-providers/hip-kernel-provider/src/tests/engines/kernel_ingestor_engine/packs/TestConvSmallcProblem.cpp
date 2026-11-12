@@ -9,7 +9,6 @@
 #include <vector>
 
 #include <gtest/gtest.h>
-#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvSmallcProblem.hpp"
@@ -80,7 +79,6 @@ struct Fields
     int64_t kd = 1, r = 7, s = 7, sd = 1, sh = 2, sw = 2, dd = 1, dh = 1, dw = 1;
     int64_t fm = 4, fn = 2, wm = 2, wq = 2, wn = 2;
     int64_t ep = 0;
-    int64_t math = 0;
 };
 
 hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const Fields& f)
@@ -109,8 +107,7 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const Fields& f)
                        {"wm", f.wm},
                        {"wq", f.wq},
                        {"wn", f.wn},
-                       {"ep", f.ep},
-                       {"math", f.math}};
+                       {"ep", f.ep}};
     return kernel;
 }
 
@@ -307,8 +304,6 @@ TEST(TestConvSmallcKernel, DeclinesEachMalformedField)
         {"wn", [](Fields& f) { f.wn = 0; }},
         {"ep", [](Fields& f) { f.ep = 2; }},
         {"ep negative", [](Fields& f) { f.ep = -1; }},
-        {"math", [](Fields& f) { f.math = 2; }},
-        {"math negative", [](Fields& f) { f.math = -1; }},
     };
     for(const auto& [name, mutate] : mutations)
     {
@@ -316,51 +311,6 @@ TEST(TestConvSmallcKernel, DeclinesEachMalformedField)
         mutate(f);
         EXPECT_FALSE(admits(f)) << name;
     }
-}
-
-/// Three-bf16 (math 1): a bf16 MMA config with a 3x channel bound on the fp32 graph, TF32
-/// permission only.
-Fields threeBf16Fields()
-{
-    Fields f;
-    f.atom = "wmma11_bf16";
-    f.atomId = 7;
-    f.dtype = "FLOAT";
-    f.cmax = 9;
-    f.math = 1;
-    return f;
-}
-
-TEST(TestConvSmallcThreeBf16, OnlyUnderTf32PermissionForFloatGraphs)
-{
-    auto fp32 = stemShape();
-    fp32.dataType = DataType::FLOAT;
-    {
-        const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter off(
-            "HIP_KERNEL_PROVIDER_CONV_TF32", "");
-        EXPECT_FALSE(admits(threeBf16Fields(), "gfx1100", fp32));
-    }
-    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter on(
-        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
-    EXPECT_TRUE(admits(threeBf16Fields(), "gfx1100", fp32));
-    // The channel bound takes the tripled channels: 3 x 3 = 9.
-    auto narrow = threeBf16Fields();
-    narrow.cmax = 8;
-    EXPECT_FALSE(admits(narrow, "gfx1100", fp32));
-    // A bf16 graph takes the bf16 configs themselves.
-    auto bf16 = threeBf16Fields();
-    bf16.dtype = "BFLOAT16";
-    auto bf16Shape = stemShape();
-    bf16Shape.dataType = DataType::BFLOAT16;
-    EXPECT_FALSE(admits(bf16, "gfx1100", bf16Shape));
-    // A 16-bit atom other than bf16; the FMA kernel; the math-0 twin.
-    auto half = threeBf16Fields();
-    half.atom = "wmma11_f16";
-    half.atomId = 6;
-    EXPECT_FALSE(admits(half, "gfx1100", fp32));
-    auto plain = threeBf16Fields();
-    plain.math = 0;
-    EXPECT_FALSE(admits(plain, "gfx1100", fp32));
 }
 
 TEST(TestConvSmallcKernel, FmaConfigsRunAnywhereWhenTheirThreadsCoverTheTile)
