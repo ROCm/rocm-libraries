@@ -47,7 +47,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
 
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
 option(HIPKERNELPROVIDER_ENABLE_ROCKE "Build rocKE engine and smoke tests" OFF)
-option(HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS "Fail configure, instead of warning, when a DVC-stored rocKE or FlyDSL descriptor is not pulled" OFF)
+option(HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS "Fail configure, instead of warning, when a DVC-stored rocKE, FlyDSL or megakernel descriptor is not pulled" OFF)
 # A TheRock build compiles the committed serialization headers by default.
 if(DEFINED THEROCK_SUBPROJECT_TARGET)
     set(_hkp_generate_serialize_default OFF)
@@ -73,6 +73,13 @@ option(HIPKERNELPROVIDER_ENABLE_FLYDSL
        "Pack the prebuilt FlyDSL kernels for the kernel ingestor" OFF)
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
 option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
+# The megakernel descriptor family (descriptors/megakernel/, packs/MegakernelNative.cpp):
+# persistent decode megakernels served through a hipDNN custom op. The same name is the
+# HKP_DESCRIPTOR_FAMILIES entry and the compile definition that builds the native pack.
+option(ENABLE_MEGAKERNEL_ENGINE "Build the megakernel custom-op ingestor family" OFF)
+if(ENABLE_MEGAKERNEL_ENGINE AND NOT HIPDNN_ENABLE_KERNEL_INGESTOR)
+    message(FATAL_ERROR "ENABLE_MEGAKERNEL_ENGINE requires HIPDNN_ENABLE_KERNEL_INGESTOR=ON")
+endif()
 
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
@@ -371,18 +378,21 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT
         "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/descriptors")
 
-    # Large rocKE bundle files (KDPs, kernel objects, heuristic models) and FlyDSL's
-    # per-target content directories (objects, manifest, KDP) are DVC outputs, each a file
-    # with a <file>.dvc pointer or a folder with a <folder>.dvc pointer. For each enabled
-    # producer, warn when one is missing or differs from its pointer (file size, or folder
-    # file count) so the shipped bundle is not silently left out; tests still configure
-    # and run. REQUIRE_DVC_DESCRIPTORS turns the warning into an error for release builds.
-    # Only the root this build packs from is checked.
+    # Large rocKE bundle files (KDPs, kernel objects, heuristic models), FlyDSL's
+    # per-target content directories (objects, manifest, KDP) and the megakernel code
+    # objects are DVC outputs, each a file with a <file>.dvc pointer or a folder with a
+    # <folder>.dvc pointer. For each enabled producer, warn when one is missing or differs
+    # from its pointer (file size, or folder file count) so the shipped bundle is not
+    # silently left out; tests still configure and run. REQUIRE_DVC_DESCRIPTORS turns the
+    # warning into an error for release builds. Only the root this build packs from is
+    # checked.
     #
     # A rocKE bundle with any such output is left out of the product pack whole
     # (HKP_PRODUCT_EXCLUDED_BUNDLES): its git-tracked descriptors may name one that lives
     # in the missing output (a UED naming a trained UHD under heuristics/), and the packer
-    # refuses a dangling reference. FlyDSL's per-target directories are handled by
+    # refuses a dangling reference. The megakernel family is one bundle and is left out the
+    # same way; when present, its pack step also checks each code object's sha256 against
+    # the family's committed lock. FlyDSL's per-target directories are handled by
     # flydsl/CMakeLists.txt, which ships the targets that were pulled.
     set(HKP_PRODUCT_EXCLUDED_BUNDLES "")
     if(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT)
@@ -396,6 +406,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     endif()
     if(HIPKERNELPROVIDER_ENABLE_FLYDSL)
         list(APPEND _dvc_producers FlyDSL)
+    endif()
+    if(ENABLE_MEGAKERNEL_ENGINE)
+        list(APPEND _dvc_producers megakernel)
     endif()
     foreach(_producer IN LISTS _dvc_producers)
         file(GLOB_RECURSE _dvc_pointers "${_dvc_root}/${_producer}/*.dvc")
@@ -429,6 +442,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                     string(REGEX MATCH "^[^/]+/[^/]+" _bundle "${_rel}")
                     list(APPEND HKP_PRODUCT_EXCLUDED_BUNDLES "${_bundle}")
                     set(_skipped "The bundle ${_bundle} will NOT be packed.")
+                elseif(_producer STREQUAL "megakernel")
+                    # One bundle: the family folder. Its KDP names the code objects.
+                    list(APPEND HKP_PRODUCT_EXCLUDED_BUNDLES megakernel)
+                    set(_skipped "The megakernel bundle will NOT be packed.")
                 endif()
                 message(${_level}
                     "hip-kernel-provider: ${_producer} DVC output ${_output} is missing or "
