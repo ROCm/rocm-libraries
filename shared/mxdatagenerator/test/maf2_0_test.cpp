@@ -431,6 +431,32 @@ namespace
         EXPECT_EQ(byte(0.0), 0x00);
         EXPECT_EQ(byte(1e-39), 0x00);
         EXPECT_EQ(byte(1e300), 0xFE);
+        EXPECT_EQ(byte(std::ldexp(1.0, 127)), 0xFE);
+        EXPECT_EQ(byte(std::ldexp(1.75, 126)), 0xFE);
+        EXPECT_EQ(byte(std::numeric_limits<double>::infinity()), 0xFE);
+        EXPECT_EQ(byte(-std::numeric_limits<double>::infinity()), 0xFE);
+    }
+
+    // A non-finite normal-scale parameter is rejected rather than drawn from.
+    TEST(Maf2_0Mode, NonFiniteNormalParametersThrow)
+    {
+        const double inf = std::numeric_limits<double>::infinity();
+        for(auto [mean, stdDev] : {std::pair{0.34375, inf},
+                                   std::pair{inf, 0.08},
+                                   std::pair{std::nan(""), 0.08},
+                                   std::pair{0.34375, std::nan("")}})
+        {
+            DataGeneratorOptions opts;
+            Maf2_0               mode;
+            mode.normalScale  = true;
+            mode.scaleMean    = mean;
+            mode.scaleStdDev  = stdDev;
+            opts.initMode     = DataInitMode(mode);
+            opts.blockScaling = 32;
+            EXPECT_THROW(DataGenerator<ocp_e2m1_mxfp4>().generate({64}, {1}, opts),
+                         std::invalid_argument)
+                << "mean " << mean << " stdDev " << stdDev;
+        }
     }
 
     TEST(Maf2_0Mode, NormalScaleE4M3AndE5M3RoundToNearestEven)

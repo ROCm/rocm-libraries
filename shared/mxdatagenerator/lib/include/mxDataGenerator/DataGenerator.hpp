@@ -724,6 +724,10 @@ namespace DGen
         {
             if(!(a >= std::ldexp(1.0, -126)))
                 return 0x00;
+            // At or above 2^127 (infinity included) the result saturates; frexp's exponent is
+            // unspecified for infinity.
+            if(a >= std::ldexp(1.0, 127))
+                return 0xFE;
             int          e;
             const double m      = 2.0 * std::frexp(a, &e); // a = m * 2^(e-1), m in [1, 2)
             int          biased = e - 1 + 127;
@@ -2109,9 +2113,11 @@ namespace DGen
                && (mode.n < 0 || mode.n > (1 << 20)))
                 throw std::invalid_argument(
                     "DataGenerator::generate_data_maf2_0: n must be in [0, 2^20]");
-            if(mode.normalScale && !(mode.scaleStdDev > 0.0))
-                throw std::invalid_argument(
-                    "DataGenerator::generate_data_maf2_0: scaleStdDev must be positive");
+            if(mode.normalScale
+               && !(mode.scaleStdDev > 0.0 && std::isfinite(mode.scaleStdDev)
+                    && std::isfinite(mode.scaleMean)))
+                throw std::invalid_argument("DataGenerator::generate_data_maf2_0: scaleStdDev must "
+                                            "be positive and finite, scaleMean finite");
             // As in generate_data_maf1_0: the scale blocks tile memory in runs of the contiguous
             // dimension.
             if(m_contiguousDim > 0 && m_dataDesc.array_size % m_contiguousDim != 0)
