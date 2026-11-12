@@ -144,10 +144,12 @@ rocblas_status rocsolver_lacpy_template(rocblas_handle handle,
     static constexpr int64_t LACPY_MAX_BLOCKSYZ = 64 * 1024 - 1;
     static constexpr int64_t LACPY_MAX_BLOCKS = INT32_MAX / (BS2 * BS2);
     const int64_t blocksx = std::min<int64_t>(ceildiv(m, BS2), LACPY_MAX_BLOCKSX);
-    const int64_t blocksy
-        = std::min<int64_t>({ceildiv(n, BS2), LACPY_MAX_BLOCKSYZ, LACPY_MAX_BLOCKS / blocksx});
-    const int64_t blocksz = std::min<int64_t>(
-        {batch_count, LACPY_MAX_BLOCKSYZ, LACPY_MAX_BLOCKS / (blocksx * blocksy)});
+    const int64_t blocksy = std::max<int64_t>(
+        1, std::min<int64_t>({ceildiv(n, BS2), LACPY_MAX_BLOCKSYZ, LACPY_MAX_BLOCKS / blocksx}));
+    const int64_t blocksz = std::max<int64_t>(
+        1,
+        std::min<int64_t>({batch_count, LACPY_MAX_BLOCKSYZ, LACPY_MAX_BLOCKS / (blocksx * blocksy)}));
+    assert(blocksx * blocksy * blocksz <= LACPY_MAX_BLOCKS);
     ROCSOLVER_LAUNCH_KERNEL((lacpy_kernel<T>), dim3(blocksx, blocksy, blocksz), dim3(BS2, BS2, 1),
                             0, stream, uplo, m, n, A, shiftA, lda, strideA, B, shiftB, ldb, strideB,
                             batch_count);
