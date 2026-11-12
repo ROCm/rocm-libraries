@@ -7,6 +7,25 @@
 
 namespace ck_tile {
 
+namespace detail {
+// Writes the two A-layout dwords for one packed C-layout dword v (see PermuteWarpGemmCToA).
+template <index_t I, typename OutTensor>
+CK_TILE_DEVICE void permute_c_to_a_dword(OutTensor& out, uint32_t v)
+{
+    // Perm byte selectors are swapped for the second row (16 lanes) because it needs to be done
+    // once instead to swapping w and v everytime
+    const uint32_t byte_selector0 = get_lane_id() < 16 ? 0x05'04'01'00 : 0x01'00'05'04;
+    const uint32_t byte_selector1 = get_lane_id() < 16 ? 0x07'06'03'02 : 0x03'02'07'06;
+    // Swap rows (lane <-> lane ^ 16)
+    const auto w = __builtin_amdgcn_permlanex16(0, v, 0x76543210, 0xfedcba98, false, true);
+    // Interleave values of lane and lane ^ 16
+    out.get_thread_buffer().template set_as<uint32_t>(number<I * 2 + 0>{},
+                                                      __builtin_amdgcn_perm(w, v, byte_selector0));
+    out.get_thread_buffer().template set_as<uint32_t>(number<I * 2 + 1>{},
+                                                      __builtin_amdgcn_perm(w, v, byte_selector1));
+}
+} // namespace detail
+
 // C distribution of gfx11 WMMA is not compatible with A distribution:
 // C: 2 lanes per row (lane and lane + 16), 8 values per lane are interleaved.
 // A: 1 lane per row, 16 values, lane and lane + 16 have the same values.
@@ -21,22 +40,37 @@ CK_TILE_DEVICE static constexpr void PermuteWarpGemmCToA(OutTensor& out, const I
     constexpr index_t n_out = OutTensor::get_thread_buffer_size();
     static_assert(n_out == InTensor::get_thread_buffer_size() * 2);
 
-    // Perm byte selectors are swapped for the second row (16 lanes) because it needs to be done
-    // once instead to swapping w and v everytime
-    const uint32_t byte_selector0 = get_lane_id() < 16 ? 0x05'04'01'00 : 0x01'00'05'04;
-    const uint32_t byte_selector1 = get_lane_id() < 16 ? 0x07'06'03'02 : 0x03'02'07'06;
     static_for<0, n_out, 1>{}([&](auto i) {
-        const auto v = in.get_thread_buffer().template get_as<uint32_t>(i);
-        // Swap rows (lane <-> lane ^ 16)
-        const auto w = __builtin_amdgcn_permlanex16(0, v, 0x76543210, 0xfedcba98, false, true);
-        // Interleave values of lane and lane ^ 16
-        out.get_thread_buffer().template set_as<uint32_t>(
-            number<i * 2 + 0>{}, __builtin_amdgcn_perm(w, v, byte_selector0));
-        out.get_thread_buffer().template set_as<uint32_t>(
-            number<i * 2 + 1>{}, __builtin_amdgcn_perm(w, v, byte_selector1));
+        detail::permute_c_to_a_dword<i>(out, in.get_thread_buffer().template get_as<uint32_t>(i));
     });
 #else
     static_assert(false, "PermuteWarpGemmCToA is only for gfx11");
+    ignore = out;
+    ignore = in;
+#endif
+}
+
+// PermuteWarpGemmCToA for an fp32 C tile and a bf16 A tile: converts with the configured
+// float->bf16 rounding and packs each pair into one dword with integer ops, instead of
+// cast_tile's per-element 16-bit moves.
+template <typename OutTensor, typename InTensor>
+CK_TILE_DEVICE static constexpr void PermuteWarpGemmCToAFromF32(OutTensor& out, const InTensor& in)
+{
+#if defined(__gfx11__)
+    static_assert(std::is_same_v<typename OutTensor::DataType, bf16_t>);
+    static_assert(std::is_same_v<typename InTensor::DataType, float>);
+
+    constexpr index_t n_in = InTensor::get_thread_buffer_size();
+    static_assert(OutTensor::get_thread_buffer_size() == n_in * 2);
+
+    const auto& buf = in.get_thread_buffer();
+    static_for<0, n_in / 2, 1>{}([&](auto i) {
+        const uint32_t lo = float_to_bf16_hi_raw(buf[number<2 * i>{}]);
+        const uint32_t hi = float_to_bf16_hi_raw(buf[number<2 * i + 1>{}]);
+        detail::permute_c_to_a_dword<i>(out, __builtin_amdgcn_perm(hi, lo, 0x07'06'03'02));
+    });
+#else
+    static_assert(false, "PermuteWarpGemmCToAFromF32 is only for gfx11");
     ignore = out;
     ignore = in;
 #endif

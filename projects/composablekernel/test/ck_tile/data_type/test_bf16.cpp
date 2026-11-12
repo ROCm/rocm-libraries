@@ -155,6 +155,38 @@ TEST_F(Bf16ConversionTest, FloatToBf16RoundingModes)
     }
 }
 
+// Round half away without NaN handling: ties away from zero, otherwise identical to RNE
+TEST_F(Bf16ConversionTest, FloatToBf16RtaNoNan)
+{
+    constexpr auto rta   = constant<bf16_rounding_mode::rta_no_nan>{};
+    constexpr auto rne   = constant<bf16_rounding_mode::standard>{};
+    const auto from_bits = [](uint32_t b) { return bit_cast<float>(b); };
+
+    // 1 + half a bf16 ulp: RNE rounds to even (down), RTA away from zero
+    EXPECT_EQ(float_to_bf16_raw(from_bits(0x3F808000u), rne), 0x3F80);
+    EXPECT_EQ(float_to_bf16_raw(from_bits(0x3F808000u), rta), 0x3F81);
+    EXPECT_EQ(float_to_bf16_raw(from_bits(0xBF808000u), rta), 0xBF81);
+
+    for(uint32_t b = 0x00000001u; b < 0x7F800000u; b += 0x00012345u)
+    {
+        for(uint32_t sign : {0u, 0x80000000u})
+        {
+            const uint32_t x = b | sign;
+            if((x & 0xFFFFu) != 0x8000u)
+                EXPECT_EQ(float_to_bf16_raw(from_bits(x), rta),
+                          float_to_bf16_raw(from_bits(x), rne))
+                    << std::hex << x;
+        }
+    }
+
+    // Overflow rounds to infinity; NaNs that are canonical or have zero low 16 bits stay NaN
+    EXPECT_EQ(float_to_bf16_raw(from_bits(0x7F7FFFFFu), rta), 0x7F80);
+    EXPECT_EQ(float_to_bf16_raw(from_bits(0x7F800000u), rta), 0x7F80);
+    EXPECT_EQ(float_to_bf16_raw(from_bits(0x7FC00000u), rta), 0x7FC0);
+    EXPECT_EQ(float_to_bf16_raw(from_bits(0xFFC00000u), rta), 0xFFC0);
+    EXPECT_EQ(float_to_bf16_raw(from_bits(0x7FFF0000u), rta), 0x7FFF);
+}
+
 // Test double to bf16 conversion
 TEST_F(Bf16ConversionTest, DoubleToBf16)
 {
