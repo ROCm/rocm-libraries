@@ -30,6 +30,7 @@ pub mod reassoc;
 pub mod regalloc;
 mod reload;
 pub mod unroll;
+pub mod voff_split;
 mod scan;
 mod scan_line;
 pub mod session;
