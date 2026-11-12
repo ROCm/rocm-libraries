@@ -1,0 +1,6 @@
+outs:
+- md5: 8c4fb2dadd84cf843f5cb4884e601e59
+  size: 252853
+  hash: md5
+  path: conv_wrw_bf16_fma906b.kdp.json
+  remote: ingestor

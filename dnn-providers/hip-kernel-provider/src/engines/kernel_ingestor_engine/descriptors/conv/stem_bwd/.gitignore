@@ -1,0 +1,11 @@
+/conv_stem_bwd_bf16_cdna.kdp.json
+/conv_stem_bwd_bf16_cdna908.kdp.json
+/conv_stem_bwd_bf16_fma906.kdp.json
+/conv_stem_bwd_bf16_gfx950.kdp.json
+/conv_stem_bwd_bf16_rdna.kdp.json
+/conv_stem_bwd_f16_cdna.kdp.json
+/conv_stem_bwd_f16_fma906.kdp.json
+/conv_stem_bwd_f16_gfx950.kdp.json
+/conv_stem_bwd_f16_rdna.kdp.json
+/conv_stem_bwd_f32_cdna.kdp.json
+/conv_stem_bwd_f32_fma.kdp.json
