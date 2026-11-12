@@ -535,7 +535,7 @@ private:
                                              + ".float 'summation_order' must be finite and "
                                                "positive");
                 }
-                _floatSummationOrder = *number;
+                _floatSummationOrder = number;
             }
         }
     }

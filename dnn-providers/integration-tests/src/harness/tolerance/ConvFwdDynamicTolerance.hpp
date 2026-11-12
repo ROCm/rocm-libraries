@@ -222,14 +222,8 @@ inline std::array<std::optional<int64_t>, 3>
 {
     std::array<std::optional<int64_t>, 3> operands;
     operands[0] = pointwise.in_0_tensor_uid();
-    if(pointwise.in_1_tensor_uid().has_value())
-    {
-        operands[1] = *pointwise.in_1_tensor_uid();
-    }
-    if(pointwise.in_2_tensor_uid().has_value())
-    {
-        operands[2] = *pointwise.in_2_tensor_uid();
-    }
+    operands[1] = pointwise.in_1_tensor_uid();
+    operands[2] = pointwise.in_2_tensor_uid();
     return operands;
 }
 
