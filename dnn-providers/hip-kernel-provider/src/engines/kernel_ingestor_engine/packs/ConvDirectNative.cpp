@@ -650,9 +650,9 @@ std::optional<Plan>
     // One dispatch addresses at most 2^32 - 1 work items along x (rows configs launch at
     // most one block per unit).
     if(gridX > INT_LIMIT
-       || !config.rows
-              && gridX * config.blockThreads()
-                     > static_cast<long long>(std::numeric_limits<uint32_t>::max()))
+       || (!config.rows
+           && gridX * config.blockThreads()
+                  > static_cast<long long>(std::numeric_limits<uint32_t>::max())))
     {
         return std::nullopt;
     }
