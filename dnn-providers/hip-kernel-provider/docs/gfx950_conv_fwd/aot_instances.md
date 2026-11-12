@@ -347,6 +347,14 @@ kernel built on the windowed dgrad kernel's Toeplitz MFMA form
 (`DirectDepthwiseDgradWindowedSpec` with `fwd=True`); see the "Direct instances"
 table for its kernel spec.
 
+`win`'s "same"-padding, `Y <= 9` window leaves a gap: a stride-1 depthwise request
+whose filter is 11x11 or wider, or whose padding is not "same" (so neither `win` nor
+the dropped `std`/`tiled`/`col`/`spatial` families serve it at this catalog's trim),
+has no direct candidate at all and runs implicit GEMM instead. A smaller 11x11 request
+that still falls in a group-merged implicit-GEMM identity's cohort runs that merged
+kernel; a request not covered by any instance falls back to the widest-combination
+scan above.
+
 The list is the union of the fastest kernel (top-1) per measured shape over rocKE's
 forward sweeps on 2-D fp16 and bf16 forward convolutions. Unlike the previous catalog it
 adds no coverage of its own: it has no `col` kernel, and only one implicit-GEMM

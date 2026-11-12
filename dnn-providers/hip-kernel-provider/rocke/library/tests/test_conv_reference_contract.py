@@ -480,7 +480,17 @@ def test_source_adapter_preserves_implicit_gemm_cohort(architecture):
         elif case.name == "grouped-odd":
             assert case.C // case.groups == case.K // case.groups == 33
         elif case.name == "depthwise":
-            assert grid[2] == 64
+            if architecture == "gfx950":
+                coverage = (
+                    f"{architecture} {case.id} must cover a group-merged "
+                    f"instance's grid; got grid={grid}. The trimmed "
+                    "gfx950_fwd.json dispatcher admits only a group_merge=8 "
+                    "implicit_gemm candidate for this shape, so its grid's "
+                    "group dimension is groups/8, not groups itself. " + _REQUALIFY
+                )
+                assert grid[2] == 8, coverage
+            else:
+                assert grid[2] == 64
         elif case.name == "out-1x1":
             assert case.output_shape[1:3] == (1, 1)
 
