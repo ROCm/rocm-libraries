@@ -28,8 +28,18 @@
 # The harness's generic engine-support check (checkEngineSupportOrSkip /
 # verifyGraph) skips any case ASM_SDPA_ENGINE doesn't service, so pinning the
 # whole SDPA surface is safe.
+#
+# Quarantined SdpaBackward rejection probes (RFC 0022 §6; test plan sdpa-bwd.md
+# §4.2). Each carries metadata.expected_rejection: the engine must decline it,
+# and ASM_SDPA_ENGINE accepts it today, so it would fail every lane. Each entry
+# names its ticket; the pull request that adds the decline deletes it.
+#   prbt04, prbt04n an O dtype that differs from Q's: ALMIOPEN-3050
+#   prbr05          dropout_scale_inv without a dropout mask: ALMIOPEN-3051
 _common_excludes: &common_excludes
   - "*DISABLED*"
+  - "*_SdpaBackward_*.prbt04_*"
+  - "*_SdpaBackward_*.prbt04n_*"
+  - "*_SdpaBackward_*.prbr05_*"
 
 test_categories:
   quick:

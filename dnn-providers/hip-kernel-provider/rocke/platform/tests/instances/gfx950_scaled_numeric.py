@@ -5,7 +5,6 @@
 Missing compiler tools skip numeric validation.
 """
 
-import os
 import re
 import shutil
 import subprocess
@@ -13,22 +12,13 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from rocke.tests.gpu import current_device_arch_in
 
 FORMATS = ("fp8", "bf8", "fp6", "bf6", "fp4")
 
 
 def require_gpu():
-    if not Path("/dev/kfd").exists():
-        if os.environ.get("ROCKE_REQUIRE_GFX950") == "1":
-            pytest.fail("gfx950 numeric validation requires /dev/kfd")
-        pytest.skip("requires an AMD GPU")
-    from rocke.runtime.hip_module import get_device_arch
-
-    arch = get_device_arch(0)
-    if arch != "gfx950":
-        if os.environ.get("ROCKE_REQUIRE_GFX950") == "1":
-            pytest.fail(f"requires gfx950; found {arch}")
-        pytest.skip(f"requires gfx950; found {arch}")
+    current_device_arch_in(("gfx950",), subject="gfx950 numeric validation")
 
 
 def _require_tool(name: str) -> str:

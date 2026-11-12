@@ -1,0 +1,8 @@
+{
+  "format_version": 1,
+  "generator": "hand-authored",
+  "reference_source": "none: expected_rejection bundle (never executed)",
+  "operation": "Matmul",
+  "expected_rejection": true,
+  "notes": "Twin of quick/Matmul/Default case 3_16_128_fp32_ncl_6d8970 with the batch dimension of B changed from 1 to 2. A and C have batch 3, so the batch dimensions are neither equal, nor 1, nor broadcast-compatible: invalid per the hipDNN Matmul contract (MatmulNode batch broadcast rule), and refused by hipBLASLt (MatmulParams::setBatchInfo). The claimed valid twin is the positive control."
+}
