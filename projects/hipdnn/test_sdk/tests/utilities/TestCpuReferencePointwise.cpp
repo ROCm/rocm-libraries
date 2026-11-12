@@ -3748,7 +3748,7 @@ TEST(TestCpuReferencePointwiseScalarDefaults, OmittedScalarAttributesDefaultToOn
 
     input.fillWithValue(1.0f);
     BackwardImpl::pointwiseCompute(PointwiseMode::SWISH_BWD, output, upstreamGrad, input);
-    EXPECT_NEAR(output.getHostValue(0, 0, 0, 0), 1.8553410236f, 1e-7f); // 2 * (s + x s (1 - s))
+    EXPECT_NEAR(output.getHostValue(0, 0, 0, 0), 1.8553410237f, 1e-7f); // 2 * (s + x s (1 - s))
 
     BackwardImpl::pointwiseCompute(PointwiseMode::SOFTPLUS_BWD, output, upstreamGrad, input);
     EXPECT_NEAR(output.getHostValue(0, 0, 0, 0), 1.4621171573f, 1e-7f); // 2 * sigmoid(1)
@@ -3769,8 +3769,9 @@ TEST(TestCpuReferencePointwiseSoftplusLinearBranch, MatchesFormulaAroundTheCutof
         {10.0f, 1.0f, 10.0000453989f}, // beta * x = 10, below the cutoff
         {20.0f, 1.0f, 20.0000000021f}, // beta * x = 20, at the cutoff
         {40.0f, 1.0f, 40.0f}, // beta * x = 40, linear branch
+        {1000.0f, 1.0f, 1000.0f}, // beta * x = 1000, exp would overflow double
         {60.0f, 0.5f, 60.0f}, // beta * x = 30, linear branch with beta != 1
-        {5.0f, 2.0f, 5.0000226995f}, // beta * x = 10, below the cutoff with beta != 1
+        {5.0f, 2.0f, 5.0000226994f}, // beta * x = 10, below the cutoff with beta != 1
     };
 
     for(const auto& testCase : cases)

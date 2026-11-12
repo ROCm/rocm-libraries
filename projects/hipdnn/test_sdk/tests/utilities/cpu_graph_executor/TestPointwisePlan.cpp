@@ -210,10 +210,31 @@ TEST_F(TestPointwisePlan, ExecutePlanUnarySwishFwdWithBeta)
 
     auto [serializedGraph, serErr] = graph->to_binary();
     ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+    const auto* input
+        = static_cast<Tensor<float>*>(&tensorBundle.getTensor(attributes.in_0_tensor_uid()));
+    const auto* output
+        = static_cast<Tensor<float>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+
     CpuReferenceGraphExecutor{}.execute(
         serializedGraph.data(), serializedGraph.size(), variantPack);
 
-    SUCCEED();
+    // Swish(x) = x * sigmoid(beta * x) with beta = 0.5
+    for(int64_t channel = 0; channel < 3; ++channel)
+    {
+        for(int64_t height = 0; height < 4; ++height)
+        {
+            for(int64_t width = 0; width < 4; ++width)
+            {
+                const auto x = static_cast<double>(input->getHostValue(0, channel, height, width));
+                const double expected = x / (1.0 + std::exp(-0.5 * x));
+                EXPECT_NEAR(static_cast<double>(output->getHostValue(0, channel, height, width)),
+                            expected,
+                            1e-5);
+            }
+        }
+    }
 }
 
 TEST_F(TestPointwisePlan, ExecutePlanUnaryExp)
@@ -1388,6 +1409,11 @@ TEST(TestTernaryPointwisePlan, ExecuteHalfBinarySelectBroadcast)
     executeTernaryBinarySelectBroadcast<half>();
 }
 
+TEST(TestTernaryPointwisePlan, ExecuteInt32BinarySelectBroadcast)
+{
+    executeTernaryBinarySelectBroadcast<int32_t>();
+}
+
 TEST(TestTernaryPointwisePlan, ExecuteBfloat16BinarySelectBroadcast)
 {
     executeTernaryBinarySelectBroadcast<bfloat16>();
@@ -1435,6 +1461,50 @@ TEST_F(TestPointwisePlan, CompareGreaterProducesBooleanMask)
     {
         const auto widthIndex = static_cast<size_t>(width);
         EXPECT_EQ(output->getHostValue(0, 0, 0, width), EXPECTED[widthIndex]);
+    }
+}
+
+TEST_F(TestPointwisePlan, CompareGreaterAcceptsInt32Inputs)
+{
+    auto [graph, tensorBundle, variantPack]
+        = buildPointwiseBinaryGraph({1, 1, 1, 4},
+                                    {1, 1, 1, 4},
+                                    {1, 1, 1, 4},
+                                    DataType::INT32,
+                                    DataType::INT32,
+                                    DataType::FLOAT,
+                                    DataType::BOOLEAN,
+                                    hipdnn_frontend::PointwiseMode::CMP_GT);
+
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+    const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+    auto* input0
+        = static_cast<Tensor<int32_t>*>(&tensorBundle.getTensor(attributes.in_0_tensor_uid()));
+    auto* input1 = static_cast<Tensor<int32_t>*>(
+        &tensorBundle.getTensor(attributes.in_1_tensor_uid().value()));
+    const auto* output
+        = static_cast<Tensor<bool>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+
+    constexpr std::array<int32_t, 4> INPUT0_VALUES = {-2, 0, 3, 4};
+    constexpr std::array<int32_t, 4> INPUT1_VALUES = {-3, 0, 5, 1};
+    constexpr std::array EXPECTED = {true, false, false, true};
+    for(int64_t width = 0; width < 4; ++width)
+    {
+        const auto widthIndex = static_cast<size_t>(width);
+        input0->setHostValue(INPUT0_VALUES[widthIndex], 0, 0, 0, width);
+        input1->setHostValue(INPUT1_VALUES[widthIndex], 0, 0, 0, width);
+    }
+    input0->markHostModified();
+    input1->markHostModified();
+
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
+
+    for(int64_t width = 0; width < 4; ++width)
+    {
+        EXPECT_EQ(output->getHostValue(0, 0, 0, width), EXPECTED[static_cast<size_t>(width)]);
     }
 }
 
@@ -1937,34 +2007,131 @@ TEST(TestPointwisePlanBuilder, IsApplicableTernary)
     tensorMapWithoutMask.erase(attributes.in_2_tensor_uid().value());
     EXPECT_FALSE(planBuilder.isApplicable(graphWrapper.getNode(0), tensorMapWithoutMask));
 }
-TEST(TestPointwisePlanBuilder, RejectsParameterizedTernary)
+TEST_F(TestPointwisePlan, ParametersOnTernaryModeAreIgnored)
 {
-    auto [graph, tensorBundle, variantPack]
-        = buildPointwiseTernaryGraph({1},
-                                     {1},
-                                     {1},
-                                     {1},
-                                     DataType::FLOAT,
-                                     DataType::FLOAT,
-                                     DataType::BOOLEAN,
-                                     DataType::FLOAT,
-                                     DataType::FLOAT,
-                                     hipdnn_frontend::PointwiseMode::BINARY_SELECT,
-                                     TensorLayout::NCHW,
-                                     0.0f);
+    const std::vector<std::array<std::optional<float>, 4>> parameters
+        = {{std::optional<float>{0.0f}, std::nullopt, std::nullopt, std::nullopt},
+           {std::nullopt, std::optional<float>{0.5f}, std::nullopt, std::nullopt},
+           {std::nullopt, std::nullopt, std::optional<float>{0.5f}, std::nullopt},
+           {std::nullopt, std::nullopt, std::nullopt, std::optional<float>{0.5f}}};
 
-    auto [serializedGraph, serErr] = graph->to_binary();
-    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
-    const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
-    const PointwisePlanBuilder<DataType::FLOAT,
-                               DataType::FLOAT,
-                               DataType::BOOLEAN,
-                               DataType::FLOAT,
-                               DataType::FLOAT>
-        planBuilder;
+    for(const auto& [reluLowerClip, swishBeta, eluAlpha, softplusBeta] : parameters)
+    {
+        auto [graph, tensorBundle, variantPack]
+            = buildPointwiseTernaryGraph({1, 1, 1, 1},
+                                         {1, 1, 1, 1},
+                                         {1, 1, 1, 1},
+                                         {1, 1, 1, 1},
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         DataType::BOOLEAN,
+                                         DataType::FLOAT,
+                                         DataType::FLOAT,
+                                         hipdnn_frontend::PointwiseMode::BINARY_SELECT,
+                                         TensorLayout::NCHW,
+                                         reluLowerClip,
+                                         swishBeta,
+                                         eluAlpha,
+                                         softplusBeta);
 
-    EXPECT_THROW(planBuilder.buildNodePlan(graphWrapper, graphWrapper.getNode(0)),
-                 std::runtime_error);
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+        const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+        const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+        auto* input0
+            = static_cast<Tensor<float>*>(&tensorBundle.getTensor(attributes.in_0_tensor_uid()));
+        auto* input1 = static_cast<Tensor<float>*>(
+            &tensorBundle.getTensor(attributes.in_1_tensor_uid().value()));
+        auto* mask = static_cast<Tensor<bool>*>(
+            &tensorBundle.getTensor(attributes.in_2_tensor_uid().value()));
+        const auto* output
+            = static_cast<Tensor<float>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+        input0->setHostValue(5.0f, 0, 0, 0, 0);
+        input1->setHostValue(7.0f, 0, 0, 0, 0);
+        mask->setHostValue(true, 0, 0, 0, 0);
+        input0->markHostModified();
+        input1->markHostModified();
+        mask->markHostModified();
+
+        CpuReferenceGraphExecutor{}.execute(
+            serializedGraph.data(), serializedGraph.size(), variantPack);
+
+        EXPECT_FLOAT_EQ(output->getHostValue(0, 0, 0, 0), 5.0f);
+    }
+}
+
+TEST_F(TestPointwisePlan, ParametersOnModesThatDoNotUseThemAreIgnored)
+{
+    const std::vector<int64_t> dims = {1, 3, 2, 2};
+
+    auto [unaryGraph, unaryBundle, unaryPack]
+        = buildPointwiseUnaryGraph(dims,
+                                   dims,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   hipdnn_frontend::PointwiseMode::EXP,
+                                   1,
+                                   TensorLayout::NCHW,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   std::nullopt,
+                                   2.0f);
+
+    auto [unarySerialized, unaryErr] = unaryGraph->to_binary();
+    ASSERT_TRUE(unaryErr.is_good()) << unaryErr.get_message();
+    const GraphWrapper unaryWrapper(unarySerialized.data(), unarySerialized.size());
+    const auto& unaryAttributes
+        = unaryWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+    const auto* unaryInput
+        = static_cast<Tensor<float>*>(&unaryBundle.getTensor(unaryAttributes.in_0_tensor_uid()));
+    const auto* unaryOutput
+        = static_cast<Tensor<float>*>(&unaryBundle.getTensor(unaryAttributes.out_0_tensor_uid()));
+
+    CpuReferenceGraphExecutor{}.execute(unarySerialized.data(), unarySerialized.size(), unaryPack);
+
+    for(int64_t c = 0; c < 3; ++c)
+    {
+        EXPECT_NEAR(unaryOutput->getHostValue(0, c, 1, 1),
+                    std::exp(unaryInput->getHostValue(0, c, 1, 1)),
+                    1e-5f);
+    }
+
+    auto [binaryGraph, binaryBundle, binaryPack]
+        = buildPointwiseBinaryGraph(dims,
+                                    dims,
+                                    dims,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    hipdnn_frontend::PointwiseMode::ADD,
+                                    1,
+                                    TensorLayout::NCHW,
+                                    0.0f);
+
+    auto [binarySerialized, binaryErr] = binaryGraph->to_binary();
+    ASSERT_TRUE(binaryErr.is_good()) << binaryErr.get_message();
+    const GraphWrapper binaryWrapper(binarySerialized.data(), binarySerialized.size());
+    const auto& binaryAttributes
+        = binaryWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+    const auto* binaryInput0
+        = static_cast<Tensor<float>*>(&binaryBundle.getTensor(binaryAttributes.in_0_tensor_uid()));
+    const auto* binaryInput1 = static_cast<Tensor<float>*>(
+        &binaryBundle.getTensor(binaryAttributes.in_1_tensor_uid().value()));
+    const auto* binaryOutput
+        = static_cast<Tensor<float>*>(&binaryBundle.getTensor(binaryAttributes.out_0_tensor_uid()));
+
+    CpuReferenceGraphExecutor{}.execute(
+        binarySerialized.data(), binarySerialized.size(), binaryPack);
+
+    for(int64_t c = 0; c < 3; ++c)
+    {
+        EXPECT_FLOAT_EQ(binaryOutput->getHostValue(0, c, 1, 1),
+                        binaryInput0->getHostValue(0, c, 1, 1)
+                            + binaryInput1->getHostValue(0, c, 1, 1));
+    }
 }
 
 TEST(TestPointwisePlanBuilder, IsApplicableGenIndexAxisOutsideOutputRankIsDeclined)
@@ -2000,5 +2167,91 @@ TEST(TestPointwisePlanBuilder, IsApplicableGenIndexAxisOutsideOutputRankIsDeclin
 
         EXPECT_FALSE(planBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()))
             << "axis " << axis;
+    }
+}
+
+TEST(TestPointwisePlanBuilder, IsApplicableGenIndexAcceptsFirstAndLastAxis)
+{
+    for(const int64_t axis : {int64_t{0}, int64_t{3}})
+    {
+        auto [graph, tensorBundle, variantPack]
+            = buildPointwiseUnaryGraph({2, 3, 2, 4},
+                                       {2, 3, 2, 4},
+                                       DataType::FLOAT,
+                                       DataType::FLOAT,
+                                       DataType::INT32,
+                                       hipdnn_frontend::PointwiseMode::GEN_INDEX,
+                                       1,
+                                       TensorLayout::NCHW,
+                                       std::nullopt,
+                                       std::nullopt,
+                                       std::nullopt,
+                                       std::nullopt,
+                                       std::nullopt,
+                                       std::nullopt,
+                                       axis);
+
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+        const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+        const PointwisePlanBuilder<DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::FLOAT,
+                                   DataType::INT32>
+            planBuilder;
+
+        EXPECT_TRUE(planBuilder.isApplicable(graphWrapper.getNode(0), graphWrapper.getTensorMap()))
+            << "axis " << axis;
+    }
+}
+
+TEST_F(TestPointwisePlan, GenIndexProducesCoordinateAlongFirstAndThirdAxis)
+{
+    for(const int64_t axis : {int64_t{0}, int64_t{2}})
+    {
+        auto [graph, tensorBundle, variantPack]
+            = buildPointwiseUnaryGraph({2, 3, 2, 4},
+                                       {2, 3, 2, 4},
+                                       DataType::FLOAT,
+                                       DataType::FLOAT,
+                                       DataType::INT32,
+                                       hipdnn_frontend::PointwiseMode::GEN_INDEX,
+                                       1,
+                                       TensorLayout::NCHW,
+                                       std::nullopt,
+                                       std::nullopt,
+                                       std::nullopt,
+                                       std::nullopt,
+                                       std::nullopt,
+                                       std::nullopt,
+                                       axis);
+
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+        const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+        const auto& attributes = graphWrapper.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
+        const auto* output
+            = static_cast<Tensor<int32_t>*>(&tensorBundle.getTensor(attributes.out_0_tensor_uid()));
+
+        CpuReferenceGraphExecutor{}.execute(
+            serializedGraph.data(), serializedGraph.size(), variantPack);
+
+        for(int64_t n = 0; n < 2; ++n)
+        {
+            for(int64_t c = 0; c < 3; ++c)
+            {
+                for(int64_t h = 0; h < 2; ++h)
+                {
+                    for(int64_t w = 0; w < 4; ++w)
+                    {
+                        const std::array<int64_t, 4> coordinate = {n, c, h, w};
+                        EXPECT_EQ(output->getHostValue(n, c, h, w),
+                                  static_cast<int32_t>(coordinate[static_cast<size_t>(axis)]))
+                            << "axis " << axis;
+                    }
+                }
+            }
+        }
     }
 }

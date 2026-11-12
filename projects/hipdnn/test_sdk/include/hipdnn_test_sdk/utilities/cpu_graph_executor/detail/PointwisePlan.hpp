@@ -94,7 +94,9 @@ public:
 
     void execute(const std::unordered_map<int64_t, void*>& variantPack) override
     {
-        if(_params.hasModeParameters())
+        // Parameters a mode does not consume are ignored, as cuDNN does. Ternary modes take none.
+        if(_params.hasModeParameters()
+           && !hipdnn_flatbuffers_sdk::utilities::isTernaryPointwiseMode(_params.mode))
         {
             executeParameterized(variantPack);
         }
@@ -345,18 +347,6 @@ public:
         const auto* in2Tensor = (nodeAttributes->in_2_tensor_uid().has_value()
                                      ? tensorMap.at(*nodeAttributes->in_2_tensor_uid())
                                      : nullptr);
-
-        if(hipdnn_flatbuffers_sdk::utilities::isTernaryPointwiseMode(nodeAttributes->operation())
-           && (nodeAttributes->relu_lower_clip().has_value()
-               || nodeAttributes->relu_upper_clip().has_value()
-               || nodeAttributes->relu_lower_clip_slope().has_value()
-               || nodeAttributes->swish_beta().has_value()
-               || nodeAttributes->elu_alpha().has_value()
-               || nodeAttributes->softplus_beta().has_value()))
-        {
-            throw std::runtime_error("Parameterized ternary pointwise operations are not supported "
-                                     "in PointwisePlanBuilder for the Cpu Graph Executor");
-        }
 
         return std::make_unique<PointwisePlan<Input0Type, Input1Type, Input2Type, OutputType>>(
             PointwiseParams(nodeAttributes->operation(),

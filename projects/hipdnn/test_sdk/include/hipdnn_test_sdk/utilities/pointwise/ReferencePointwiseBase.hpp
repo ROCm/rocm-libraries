@@ -273,8 +273,8 @@ private:
                 pointwise::SoftplusForward<ComputeType>{static_cast<ComputeType>(softplusBeta)});
             break;
         default:
-            throw std::runtime_error("Unsupported parameterized pointwise operation: "
-                                     + std::to_string(static_cast<int>(operation)));
+            executeUnaryOperation<InputType, ComputeType>(operation, output, input);
+            return;
         }
 
         policy.markOutputModified(output);
@@ -457,8 +457,9 @@ private:
                 pointwise::SoftplusBackward<ComputeType>{static_cast<ComputeType>(softplusBeta)});
             break;
         default:
-            throw std::runtime_error("Unsupported parameterized binary pointwise operation: "
-                                     + std::to_string(static_cast<int>(operation)));
+            executeBinaryOperation<Input1Type, Input2Type, ComputeType>(
+                operation, output, input1, input2);
+            return;
         }
 
         policy.markOutputModified(output);

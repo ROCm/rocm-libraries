@@ -452,7 +452,7 @@ TEST(TestClassifyPointwiseOp, AllModesReturnValidClass)
             << name;
     }
 
-    // The float evaluation of the newly implemented unary modes (run through the CPU reference with
+    // The float evaluation of the unary modes with a numerical function (run through the CPU reference with
     // float compute) must stay within the tolerance of their class relative to the exact (double)
     // result.
     struct UnaryCase
