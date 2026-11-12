@@ -26,6 +26,7 @@
 
 #include "hipblaslt_arguments.hpp"
 #include "hipblaslt_bench_options.hpp"
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <hipblaslt_benchmark/benchmark_stats.hpp>
@@ -235,6 +236,27 @@ static void validation_error [[noreturn]] (const char* name)
                       "generates the data correctly, and that endianness is the same."
                    << std::endl;
     hipblaslt_abort();
+}
+
+void Arguments::raise_to_packed_layout(bool strides)
+{
+    auto      raise    = [](int64_t& value, int64_t minimum) { value = std::max(value, minimum); };
+    int const problems = grouped_gemm == 0 ? 1 : grouped_gemm;
+    for(int i = 0; i < problems; i++)
+    {
+        raise(lda[i], transA == 'N' ? M[i] : K[i]);
+        raise(ldb[i], transB == 'N' ? K[i] : N[i]);
+        raise(ldc[i], M[i]);
+        raise(ldd[i], M[i]);
+        raise(lde[i], M[i]);
+        if(!strides)
+            continue;
+        raise(stride_a[i], lda[i] * (transA == 'N' ? K[i] : M[i]));
+        raise(stride_b[i], ldb[i] * (transB == 'N' ? N[i] : K[i]));
+        raise(stride_c[i], ldc[i] * N[i]);
+        raise(stride_d[i], ldd[i] * N[i]);
+        raise(stride_e[i], lde[i] * N[i]);
+    }
 }
 
 // hipblaslt_gentest.py is expected to conform to this format.
