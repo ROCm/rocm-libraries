@@ -87,7 +87,6 @@ the experiment's ``plan.md`` for their measured results.
 """
 
 import hashlib
-import math
 from contextlib import nullcontext as _nullcontext
 from dataclasses import dataclass, field, fields as _dataclass_fields
 from types import MappingProxyType
@@ -101,6 +100,7 @@ from kernels.common.attention_dense_spec import (
     AttentionDenseSpec as _AttentionDenseSpecBase,
     DENSE_TILE_GEOMETRIES,
     attention_dense_cache_key,
+    check_dense_scale,
     check_dense_spec_preflight,
 )
 from kernels.common.attention_dense_decode import (
@@ -134,6 +134,7 @@ from kernels.common._attention_additive_bias import (
     additive_bias_row,
     append_additive_bias_signature,
     declare_additive_bias_params,
+    make_bias_floor,
     validate_dense_additive_bias,
 )
 from kernels.common._lse_store import (
@@ -167,27 +168,23 @@ _DEFAULT_LDS_K_ROW_PAD = 8
 #   only +32 fully clears the V-read conflicts (matches flyDSL's SMEM_V_PAD).
 # Lazy-rescale re-anchor threshold in the log2 domain: skip the O/l rescale when
 # every lane's (tile_max - running_max) <= this. exp2(8)=256 bounds P (times the
-# ordinary kernel's small fma rounding residue; see _MAX_SCALE), so the spec
-# rejects anything larger.
+# ordinary kernel's small fma rounding residue; see the scale-range note below), so
+# the spec rejects anything larger.
 _DEFAULT_LAZY_RESCALE_THRESHOLD = 8.0
 # sched_barrier mask: 11 instruction-class bits (__builtin_amdgcn_sched_barrier).
 _SCHED_BARRIER_MASK_MAX = 0x7FF
 _PV_LOOP_ORDERS = frozenset({"d_major", "k_major"})
 _IGLP_OFF = -1
-# Accepted softmax-scale range, a chosen safety margin (not a hardware limit).
-# The ordinary kernel takes the row max on unscaled scores (valid only for
-# scale > 0) and computes exp2(fma(s, qk_scale, -m)) with m = fl(max * qk_scale).
+# Why this kernel is exact in the shared scale range [DENSE_MIN_SCALE,
+# DENSE_MAX_SCALE] (kernels.common.attention_dense_spec). The ordinary kernel
+# takes the row max on unscaled scores (valid only for scale > 0) and computes
+# exp2(fma(s, qk_scale, -m)) with m = fl(max * qk_scale).
 # For the row-max element that argument is the product's rounding residue, at
 # most half an ulp of max * qk_scale, so a large scale or score lets it grow
 # until P overflows (first in the fp16 cast before the PV MFMA). At scale 2**4
 # and |raw score| <= 1e6 the residue is at most 1, so P stays within about
 # 2**9 even on top of the lazy-rescale threshold. The bounds also keep the
 # -2**99 mask sentinel exact, finite and far below real scores after the scale.
-# Scales outside [2**-64, 2**4], including NaN, +-inf and scale <= 0, are
-# rejected rather than mis-computed. The hipDNN matcher mirrors this range as
-# the literals 0x1p-64F / 0x1p4F in Gfx950AttentionDenseNative.cpp
-# (gfx950AttentionDenseGraphMatches) and its gtest; change them together.
-# TestScaleValidation pins both bounds to those literals.
 #
 # KNOWN LIMITATION (ordinary grid only): nothing bounds the raw score, so the
 # residue above is bounded only by the size of the log2-domain row max m, not by
@@ -201,35 +198,34 @@ _IGLP_OFF = -1
 # the output stays finite at any magnitude. If this limit is ever hit, apply the
 # persistent grid's form here: multiply each fp32 score by qk_scale after the QK
 # MFMA and use exp2(s - m). That costs the ordinary path a little speed.
-_MIN_SCALE = 2.0**-64
-_MAX_SCALE = 2.0**4
+
 # A row with no visible key (a window past the end of the keys) is masked in every tile,
 # so its running max stays at the mask sentinel: -2**99 * qk_scale on the grid body, i.e.
-# <= -2**35 for scale >= _MIN_SCALE, and -1e30 on the persistent body (scores are scaled
-# before the mask). Real maxima are far above both thresholds.
+# <= -2**35 for scale >= DENSE_MIN_SCALE, and -1e30 on the persistent body (scores are
+# scaled before the mask). Real maxima are far above both thresholds.
 _EMPTY_ROW_MAX_GRID = -(2.0**33)
 _EMPTY_ROW_MAX_PERSIST = -1e29
 # The grid body's mask sentinel, written into masked scores (see neg_inf in
 # build_attention_dense for why it is a power of two).
 _MASK_SENTINEL = -(2.0**99)
-# Bias-on grid body, natural-log (bias) units: the bias is clamped to this floor
-# before the log2 conversion, so a biased score stays near -2**97 * log2e (about
-# -2.3e29), strictly above _MASK_SENTINEL. Otherwise a bias of -inf or below about
-# -4.4e29 loses the row max to masked keys (they get P = 1). Keys at the floor still
-# get P = 0 next to any real key. A NaN bias also clamps to the floor: fmax lowers to
-# llvm.maxnum, which returns the non-NaN operand. 97 keeps the floor's score about
-# 2.8x above the sentinel and leaves room for _BIAS_LIVE_ROW_MIN between them.
+# Bias-on grid body, natural-log (bias) units: a finite bias is raised to this floor
+# before the log2 conversion (which overflows fp32 for finfo.min), so a finite biased
+# score stays near or above -2**97 * log2e (about -2.3e29), strictly above
+# _MASK_SENTINEL: a key at the floor still gets P = 0 next to any real key, and a row
+# of floor keys (HF's finfo.min padding) normalises over them like PyTorch, because
+# masked keys at the sentinel get P = 0 next to it. A bias of -inf is NOT raised: its
+# score is -inf, below the sentinel, and its key gets P = 0 (exp2(-inf) = 0). The max
+# seeds at the sentinel, so it is never -inf. NaN passes through too, and its row is
+# NaN, as in the reference.
 _BIAS_FLOOR = -(2.0**97)
-# Bias-on grid body, log2 (score) units -- the same number as _BIAS_FLOOR, but a
-# separate choice: it only has to sit above the floor's score and far below any real
-# one. A row whose running max is at or below it has no live key (every key it sees
-# is masked or at the floor), so it stores O = 0 and LSE = -inf, as the hipDNN
-# reference does for a row whose every score is -inf. A finite bias below about
-# -1.1e29 therefore counts as -inf too, where PyTorch would give the row the uniform
-# softmax. _EMPTY_ROW_MAX_GRID (-2**33) cannot serve here: a real bias of, say, -1e10
-# makes a legitimate row max far smaller than that.
-_BIAS_LIVE_ROW_MIN = -(2.0**97)
-assert _MASK_SENTINEL < _BIAS_FLOOR * LOG2E < _BIAS_LIVE_ROW_MIN
+# Bias-on grid body, log2 (score) units, a separate choice from _BIAS_FLOOR: it only has
+# to sit between the sentinel and the floor's score (-2**99 < -2**98 < -2.3e29). A row
+# whose running max is at or below it has no live key (every key it saw is -inf or masked
+# at the sentinel), so it stores O = 0 and LSE = -inf, as the hipDNN reference does for
+# a row whose every score is -inf. _EMPTY_ROW_MAX_GRID (-2**33) cannot serve here: a real
+# bias of, say, -1e10 makes a legitimate row max far smaller than that.
+_BIAS_LIVE_ROW_MIN = -(2.0**98)
+assert _MASK_SENTINEL < _BIAS_LIVE_ROW_MIN < _BIAS_FLOOR * LOG2E
 
 
 @dataclass(frozen=True)
@@ -1006,7 +1002,8 @@ def build_attention_dense(
         additive_bias = declare_additive_bias_params(b)
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
 
-    # native v_exp_f32 (softmax arg bounded; see _MAX_SCALE) or the guarded exp2
+    # native v_exp_f32 (softmax arg bounded; see the scale-range note above
+    # _EMPTY_ROW_MAX_GRID) or the guarded exp2
     _exp2 = b.exp2_fast if spec.use_exp2_fast else b.exp2
 
     tid = b.thread_id_x()
@@ -1026,8 +1023,8 @@ def build_attention_dense(
     # the scale: exp2 of it is 0 when negative and inf (then NaN) when positive.
     # With bias on, the scores are already scaled (add_bias), so the sentinel goes
     # in unscaled and m seeds at it: a fully masked first tile gives P = exp2(0) = 1,
-    # cleared by the next real tile the same way. _BIAS_FLOOR keeps every biased
-    # score strictly above it.
+    # cleared by the next real tile the same way. _BIAS_FLOOR keeps every finite biased
+    # score strictly above it; a -inf bias scores -inf, below it.
     neg_inf = b.const_f32(_MASK_SENTINEL)
     if use_sinks:
         rcp_ln2 = b.const_f32(LOG2E)
@@ -1097,7 +1094,7 @@ def build_attention_dense(
             b, additive_bias, seq_idx=bt, q_head=hq, q_row=bias_q_row
         )
         bias_log2e = b.const_f32(LOG2E)
-        bias_floor = b.const_f32(_BIAS_FLOOR)
+        bias_floor = make_bias_floor(b, _BIAS_FLOOR, LOG2E)
         # The bias load is masked only on the ragged body, the one body that visits
         # rows and keys past the real extents (the partial last query block and KV
         # tile). The others visit KV tiles below n_ktiles_val only: the loops stop
@@ -1360,7 +1357,7 @@ def build_attention_dense(
             # multiply on the row max) and into the exp2 argument as one FMA,
             # so the scale adds no per-score instruction. Needs qk_scale > 0
             # (max commutes with the scale); the runner enforces the
-            # [_MIN_SCALE, _MAX_SCALE] range.
+            # [DENSE_MIN_SCALE, DENSE_MAX_SCALE] range.
             s_reg.append([b.vec_extract(acc, i) for i in range(16)])
         return s_reg
 
@@ -1556,7 +1553,7 @@ def build_attention_dense(
         bound: the compiler may pair two exp-argument FMAs into one v_pk_fma_f32, so a
         step can issue fewer VALU ops than named."""
         # fma(s, qk_scale, -m) is not bounded for huge scores: see the KNOWN
-        # LIMITATION note at _MAX_SCALE.
+        # LIMITATION note above _EMPTY_ROW_MAX_GRID.
         neg_m = b.fneg(m_new)
         slots = [(nsub, i) for nsub in range(N_SUB) for i in range(16)]
         p_vals = [[None] * 16 for _ in range(N_SUB)]
@@ -1695,7 +1692,7 @@ def build_attention_dense(
 
     m0, alpha0, _skip0 = softmax_max(s0, m_init)
     # tile-0 softmax exp + relayout only; PV lags by one tile (fused into the loop).
-    neg_m0 = b.fneg(m0)  # same unbounded-score limitation; see _MAX_SCALE
+    neg_m0 = b.fneg(m0)  # unbounded-score limitation: see above _EMPTY_ROW_MAX_GRID
     p0_vals = [
         [_p_exp(s0[nsub][i], neg_m0) for i in range(16)] for nsub in range(N_SUB)
     ]
@@ -1929,7 +1926,8 @@ def build_attention_dense(
         # A row whose band holds no key never sees a real score, so its running max is
         # still at the mask sentinel and its P is the exp2(0) = 1 of a fully masked tile
         # (the mean of V), not zero. Real maxima are bounded far above the threshold
-        # (see _MAX_SCALE), so a max at the threshold means "no visible key": store zeros.
+        # (see _EMPTY_ROW_MAX_GRID), so a max at the threshold means "no visible key":
+        # store zeros.
         # Under runtime_shape the runtime band can bump an empty row's max, so this
         # heuristic is unreliable there -- those rows are zeroed in the O store instead
         # via row_has_key below, the integer bit-mask the LSE path uses.
@@ -1945,6 +1943,11 @@ def build_attention_dense(
         # come from rcp_l here; with LSE they come from row_has_key, which gains
         # bias_row_live below and zeroes O in _emit_o_store.
         bias_row_live = b.fcmp("ogt", m_i, b.const_f32(_BIAS_LIVE_ROW_MIN))
+        # A NaN bias on a visible key makes P and so l NaN, but the max ignores a NaN
+        # score (maxnum), so a row of NaN keys alone keeps the sentinel as its max and
+        # would read as dead: O = 0 and LSE = -inf with LSE on (without it O = NaN * 0
+        # is NaN anyway). A NaN l keeps such a row live, and its output and LSE NaN.
+        bias_row_live = b.lor(bias_row_live, b.fcmp("uno", l_i, l_i))
         if not spec.emit_lse:
             rcp_l = b.select(bias_row_live, rcp_l, b.const_f32(0.0))
     if varlen:
@@ -2122,7 +2125,8 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     # argument, as on the grid body: the row max is taken on unscaled scores
     # and each probability is exp2(fma(s, qk_scale, -m)), one VALU op per score
     # instead of a multiply and a subtract. The row sum is a pairwise <2 x f32>
-    # tree. Same unbounded-score limitation as the grid body (see _MAX_SCALE).
+    # tree. Same unbounded-score limitation as the grid body (see the KNOWN LIMITATION
+    # note above _EMPTY_ROW_MAX_GRID).
     # The window phases keep scaling each score before the max.
     FOLD_SCALE = SW == 0
     # Without a window, at D128, the next tile's K load is issued right after
@@ -3320,6 +3324,7 @@ def run_attention_dense_torch(
     kv_lens=None,
     sinks=None,
     validate_paged: bool = True,
+    validate_varlen: bool = True,
     lse=None,
     additive_bias=None,
 ):
@@ -3328,9 +3333,9 @@ def run_attention_dense_torch(
     tensors ([B, S, H, D] for q/out, [B, Skv, Hkv, D] for k/v); ``scale`` is the
     softmax scale (1/sqrt(D)) and is supported in ``[2**-64, 2**4]`` (the
     ordinary kernel takes the row max on unscaled scores and folds the scale
-    into an fma; see ``_MAX_SCALE``). A NaN or infinite scale raises
-    ``ValueError``; a finite scale outside the range raises
-    ``NotImplementedError``. Returns ``out``.
+    into an fma; see the scale-range note above ``_EMPTY_ROW_MAX_GRID``). A NaN
+    or infinite scale raises ``ValueError``; a finite scale outside the range
+    raises ``NotImplementedError``. Returns ``out``.
     torch is imported lazily by the launcher — this module stays torch-free at
     import time.
 
@@ -3341,9 +3346,17 @@ def run_attention_dense_torch(
     Fully masked real rows write O=0 and LSE=-inf; with a finite attention sink,
     those rows instead write the sink logit as LSE. Invalid padded rows do not
     write. Supplying ``lse`` with ``emit_lse=False`` is an error.
-    The enabled varlen path checks cumulative offsets on the host (a device
-    sync): Q lengths must be block_m multiples, KV lengths positive block_n
-    multiples, and both must be within their spec maxima.
+    A varlen launch checks its cumulative offsets on the host (a device sync):
+    int32 ``[batch+1]`` on q's device, spanning the packed tensors, Q lengths
+    block_m multiples and KV lengths block_n multiples, both within their spec
+    maxima (``ValueError``). Two valid inputs are not implemented
+    (``NotImplementedError``): a sequence with queries and no keys, and, without LSE
+    or an additive bias, with a sliding window, a sequence that leaves query rows
+    without a key (only those epilogues zero such a row). A sequence with no
+    queries may have no keys. With LSE the check is part of the LSE contract and
+    always runs; without it, ``validate_varlen=False`` skips it on a hot or
+    graph-captured path, except for an additive-bias launch, which is always
+    checked (the bias is loaded unmasked, by in-sequence position).
 
     Arbitrary (non-256-multiple) sequence lengths are served WITHOUT host
     padding by the in-kernel ragged path: build ``spec`` with ``ragged=True``
@@ -3382,27 +3395,24 @@ def run_attention_dense_torch(
     ``[B|1, Hq|1, Sq|1, Skv]`` tensor (``Sq``/``Skv`` the spec's, i.e. the maxima
     for varlen, which indexes it by in-sequence position) on q's device,
     contiguous along ``Skv``. It is added to the scaled scores before the mask,
-    ``softmax(QK * scale + bias)``; a size-1 axis broadcasts. ``-inf`` masks a key,
-    and so do NaN and any finite value below about -1.1e29. A row left with no
-    unmasked key stores O = 0 and LSE = -inf (the sink logit with ``use_sinks``):
-    the hipDNN reference's answer for a row whose every score is -inf. A row whose
-    keys are all finite but below about -1.1e29 (e.g. ``finfo(float32).min``
-    padding) gets the same zeros, where PyTorch would give it the uniform softmax.
-    Varlen offsets are checked as for LSE (on q's device, a device sync, no KV
-    sequence empty). With LSE on, the LSE buffer may not overlap the bias.
-    ``ValueError`` for a
-    missing, unexpected or malformed bias, ``NotImplementedError`` when its
+    ``softmax(QK * scale + bias)``; a size-1 axis broadcasts. ``-inf`` masks a key.
+    A row left with no unmasked key stores O = 0 and LSE = -inf (the sink logit with
+    ``use_sinks``): the hipDNN reference's answer for a row whose every score is
+    -inf. A finite bias is an ordinary score, with one exception: one below -2**97
+    (about -1.6e29) is raised to that, which keeps it above the kernel's mask
+    sentinel. A row whose every visible key is below it (e.g. ``finfo(float32).min``
+    padding) therefore gets the uniform softmax over them, as in the reference and
+    PyTorch, with an LSE of about -2**97 where the reference's is about the bias
+    itself; keys whose biases differ below it are not told apart. A NaN bias on a
+    visible key makes its row NaN (O and LSE), as in the reference; a NaN on a key
+    the mask removes is ignored. A varlen bias launch always checks its offsets, as
+    above. With LSE on, the LSE buffer may not overlap the bias. ``ValueError`` for
+    a missing, unexpected or malformed bias, ``NotImplementedError`` when its
     largest element index reaches 2**31 (the kernel indexes it in i32)."""
     ok, why = supports_attention_dense(spec, arch=arch)
     if not ok:
         raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
-    if not math.isfinite(scale):
-        raise ValueError(f"scale must be finite, got {scale!r}")
-    if not _MIN_SCALE <= scale <= _MAX_SCALE:
-        raise NotImplementedError(
-            "NOT_YET_IMPLEMENTED: the gfx950 dense kernel supports a softmax "
-            f"scale in [2**-64, 2**4], got {scale!r}"
-        )
+    check_dense_scale(scale)
     if spec.varlen and (cu_seqlens_q is None or cu_seqlens_kv is None):
         raise ValueError(
             "varlen=True requires cu_seqlens_q and cu_seqlens_kv (int32 [batch+1]); "
@@ -3511,10 +3521,15 @@ def run_attention_dense_torch(
         additive_bias=additive_bias,
     )
     # After the LSE presence checks, which must fail before any input is touched.
-    _check_head_dims(spec, q=q, k=k, v=v, out=out)
-    if spec.varlen and spec.use_additive_bias and not spec.emit_lse:
-        # The bias is sized by the spec maxima and loaded unmasked; with LSE on,
-        # validate_dense_lse above already ran this check (one device sync).
+    if (
+        spec.varlen
+        and not spec.emit_lse
+        and (validate_varlen or spec.use_additive_bias)
+    ):
+        # LSE off: the one host check of the packed offsets. With LSE it already ran
+        # inside validate_dense_lse, so no launch runs it twice. The additive bias is
+        # sized by the spec maxima and loaded unmasked, so a bias launch is checked
+        # even with validate_varlen=False.
         validate_dense_varlen_offsets(
             spec,
             cu_seqlens_q,
@@ -3523,6 +3538,7 @@ def run_attention_dense_torch(
             kv_tokens=k.shape[0],
             device=q.device,
         )
+    _check_head_dims(spec, q=q, k=k, v=v, out=out)
 
     from rocke.helpers.compile import compile_kernel
     from rocke.runtime import KernelLauncher, LaunchConfig

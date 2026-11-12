@@ -137,6 +137,41 @@ def test_the_aligned_body_reads_the_bias_four_keys_per_element_aligned_load(mode
     assert _BIAS_X4_LOAD.findall(llvm(replace(spec, use_additive_bias=False))) == []
 
 
+def _ll_float(x):
+    """``x`` as an fp32 constant in LLVM IR text (the double's hex)."""
+    import struct
+
+    f32 = struct.unpack("<f", struct.pack("<f", x))[0]
+    return "0x%016X" % struct.unpack("<Q", struct.pack("<d", f32))[0]
+
+
+@pytest.mark.parametrize("mode", ["default", "ragged", "lse", "lse_d64", "d64_fp16"])
+def test_the_bias_floor_lets_minus_inf_and_nan_through(mode):
+    """A finite bias is raised to the floor as ``max(vq, fma(v, 0, floor_q))`` with
+    ``vq = v * log2e / 4``: the fma is NaN for -inf and NaN, and ``maxnum`` returns
+    its other operand, so those two are not raised (a plain max against the floor
+    constant, the earlier form, turned -inf and NaN into the floor). Every biased
+    element has one guard, in the vector-load and the scalar-load bodies alike, and
+    no max has the floor, or its quarter-scaled twin, as an operand."""
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+    from kernels.gfx950.attention_dense import _BIAS_FLOOR, LOG2E
+
+    spec = _bias(_MODES[mode])
+    ll = _lower_kernel_to_llvm_python(
+        build_attention_dense(spec, arch="gfx950"), arch="gfx950", llvm_flavor="llvm22"
+    )
+    zero = _ll_float(0.0)
+    floor_q = _ll_float(_BIAS_FLOOR * LOG2E / 4)
+    guards = re.findall(
+        rf"@llvm\.fmuladd\.f32\(float %\S+, float {zero}, float {floor_q}\)", ll
+    )
+    # One per element of every KV-tile body: 16 per 32 keys of the tile.
+    assert guards and len(guards) % (16 * (spec.block_n // 32)) == 0
+    floors = {floor_q, _ll_float(_BIAS_FLOOR)}
+    for m in re.finditer(r"@llvm\.maxnum\.f32\(float (\S+), float (\S+)\)", ll):
+        assert not floors & {m.group(1), m.group(2)}
+
+
 def test_bias_keeps_the_runtime_shape_cohort():
     """The bias strides are kernargs, so an aligned bias kernel still serves every
     batch and length from one binary."""
@@ -222,6 +257,17 @@ def test_bias_is_refused_with_a_kv_segment_split():
         ValueError, match=r"use_additive_bias is not supported with kv_segments > 1"
     ):
         replace(_BASE, kv_segments=2, use_additive_bias=True)
+
+
+def test_the_kv_segment_knob_is_out_of_scope_with_a_bias():
+    """The tuning axis and the kernel's admission share one rule (``kv_split_admits``),
+    so a bias spec is not offered a split the spec would refuse."""
+    from dispatch.attention.dense_rules import dense_axes_for
+
+    plain = replace(_BASE, persistent=False)
+    assert "kv_segments" in {a.name for a in dense_axes_for(plain, "gfx950")}
+    biased = replace(plain, use_additive_bias=True)
+    assert "kv_segments" not in {a.name for a in dense_axes_for(biased, "gfx950")}
 
 
 # --------------------------------------------------------------------------- #
@@ -364,13 +410,6 @@ _BAD_OFFSETS = {
         [0, 256, 512],
         r"cu_seqlens_kv endpoints must span its packed tensor",
     ),
-    # The prologue always scores KV tile 0: for an empty sequence that is the next
-    # sequence's keys, or K/V past the packed tensor for the last one.
-    "kv-empty-sequence": (
-        [0, 512, 1024],
-        [0, 0, 1280],
-        r"cu_seqlens_kv sequences must be nonempty",
-    ),
 }
 
 
@@ -387,14 +426,27 @@ def test_runner_refuses_varlen_offsets_the_bias_cannot_serve(case):
         )
 
 
-def _run_varlen_bias(cu_seqlens_q, cu_seqlens_kv):
+def test_runner_refuses_an_empty_kv_sequence_that_has_queries():
+    """The prologue always scores KV tile 0: for an empty sequence that is the next
+    sequence's keys, or K/V past the packed tensor for the last one. The check is the
+    shared one, so it is a NotImplementedError, not malformed input."""
+    torch = pytest.importorskip("torch", reason="the offsets are torch tensors")
+    with pytest.raises(NotImplementedError, match=r"packed KV sequence 0 must be"):
+        _run_varlen_bias(
+            torch.tensor([0, 512, 1024], dtype=torch.int32),
+            torch.tensor([0, 0, 512], dtype=torch.int32),
+            kv_tokens=512,
+        )
+
+
+def _run_varlen_bias(cu_seqlens_q, cu_seqlens_kv, q_tokens=1024, kv_tokens=1280):
     """A varlen bias launch with LSE off; q, k, v, out and the bias are on the CPU
     (torch devices compare unequal to the string "cpu")."""
     import torch
 
     cpu = torch.device("cpu")
-    q = SimpleNamespace(device=cpu, shape=(1024, _H, 128))
-    kv = SimpleNamespace(device=cpu, shape=(1280, 2, 128))
+    q = SimpleNamespace(device=cpu, shape=(q_tokens, _H, 128))
+    kv = SimpleNamespace(device=cpu, shape=(kv_tokens, 2, 128))
     run_attention_dense_torch(
         spec=_bias({"varlen": True}),
         q=q,

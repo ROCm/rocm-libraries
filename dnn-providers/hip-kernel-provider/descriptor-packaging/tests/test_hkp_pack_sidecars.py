@@ -168,6 +168,120 @@ class TestResolution:
         assert not (inter_dir / "pack" / "store" / "real.bin").exists()
 
 
+_POINTER = (
+    "outs:\n- md5: 0123456789abcdef0123456789abcdef\n  size: 9\n  path: model.bin\n"
+)
+
+
+def _root_with_unpulled_model(
+    tmp_path: Path, artifact: str = "model.bin", pointer: bool = True
+) -> Path:
+    """A model UHD whose model file was never pulled; its `.dvc` pointer is in git."""
+    root = tmp_path / "src"
+    _write_json(root / "pack" / "heuristic.uhd.json", _model_uhd(artifact))
+    if pointer:
+        pointer_path = root / "pack" / (artifact + ".dvc")
+        pointer_path.parent.mkdir(parents=True, exist_ok=True)
+        pointer_path.write_text(_POINTER, encoding="utf-8")
+    return root
+
+
+class TestUnpulledModel:
+    """A model file that `dvc pull` never fetched leaves its UHD out, not the pack
+    failing; a release build that sets REQUIRE_DVC_DESCRIPTORS still fails."""
+
+    def test_an_absent_model_with_a_pointer_leaves_its_uhd_out_with_a_warning(
+        self, tmp_path: Path
+    ):
+        root = _root_with_unpulled_model(tmp_path)
+        logs: list[str] = []
+
+        flat = load_flat_input(root, GENERIC_TARGETS, log=logs.append)
+
+        assert [d for d in flat.descriptors if d.type == "uhd"] == []
+        assert flat.sidecars_for(flat.descriptors) == []
+        (warning,) = [m for m in logs if m.startswith("warning:")]
+        assert "heuristic.uhd.json" in warning
+        assert str(root / "pack" / "model.bin.dvc") in warning
+        assert "dvc pull -r ingestor" in warning
+
+    def test_the_pointer_of_a_nested_model_is_the_one_beside_that_model(
+        self, tmp_path: Path
+    ):
+        root = _root_with_unpulled_model(tmp_path, "models/model.bin")
+        logs: list[str] = []
+
+        flat = load_flat_input(root, GENERIC_TARGETS, log=logs.append)
+
+        assert [d for d in flat.descriptors if d.type == "uhd"] == []
+        assert any(str(root / "pack" / "models" / "model.bin.dvc") in m for m in logs)
+
+    def test_strict_dvc_makes_an_absent_model_with_a_pointer_an_error(
+        self, tmp_path: Path
+    ):
+        root = _root_with_unpulled_model(tmp_path)
+
+        with pytest.raises(HkpPackError, match="payload source not found") as caught:
+            load_flat_input(
+                root, GENERIC_TARGETS, log=lambda *_: None, require_dvc=True
+            )
+
+        assert "dvc pull -r ingestor" in str(caught.value)
+
+    def test_an_absent_model_without_a_pointer_is_an_error_even_when_not_strict(
+        self, tmp_path: Path
+    ):
+        """A missing file nothing tracks is a typo, not an un-pulled build."""
+        root = _root_with_unpulled_model(tmp_path, pointer=False)
+        # A pointer for some other file does not excuse this one.
+        (root / "pack" / "other.bin.dvc").write_text(_POINTER, encoding="utf-8")
+
+        with pytest.raises(HkpPackError, match="payload source not found"):
+            load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
+
+    @pytest.mark.parametrize("strict", [False, True])
+    def test_a_present_model_ships_unchanged_pointer_or_not(
+        self, tmp_path: Path, strict: bool
+    ):
+        root = _root_with_unpulled_model(tmp_path)
+        (root / "pack" / "model.bin").write_bytes(b"HGBM-stub")
+        logs: list[str] = []
+
+        flat = load_flat_input(
+            root, GENERIC_TARGETS, log=logs.append, require_dvc=strict
+        )
+
+        (uhd,) = [d for d in flat.descriptors if d.type == "uhd"]
+        (sidecar,) = uhd.sidecars
+        assert sidecar.source.read_bytes() == b"HGBM-stub"
+        assert not any(m.startswith("warning:") for m in logs)
+
+    def test_a_ued_naming_the_left_out_model_still_loads(
+        self, tmp_path: Path, main_fixture: Path
+    ):
+        """The packer validates the dropped UHD with the UED that names it, then
+        ships the UED with a dangling id, which the loader reads as the role off
+        (RFC 0020 §13.2). Every other UHD of the root still ships."""
+        root = _root_with_roles(
+            tmp_path, main_fixture, predict_engine={"gfx942": _TFLOPS_ID}
+        )
+        model = _model_uhd("model.bin")
+        model["id"] = _TFLOPS_ID
+        model["score"] = {"metric": "tflops", "calibrated": True}
+        _write_json(root / f"model_{_TFLOPS_ID[:3]}.uhd.json", model)
+        (root / "model.bin.dvc").write_text(_POINTER, encoding="utf-8")
+
+        flat = load_flat_input(root, GENERIC_TARGETS, log=lambda *_: None)
+
+        shipped = {d.id for d in flat.by_type("uhd")}
+        assert _TFLOPS_ID not in shipped
+        assert {_TIME_ID, _OTHER_TFLOPS_ID, _ORDERING_ID} <= shipped
+        ued = next(
+            d for d in flat.by_type("ued") if d.path.name == "pointwise.ued.json"
+        )
+        assert ued.doc["predict_engine"] == {"gfx942": _TFLOPS_ID}
+
+
 class TestRejection:
     def test_missing_artifact_is_an_error_not_a_warning(self, tmp_path: Path):
         """Do not package a model whose named bytes are missing."""
@@ -408,6 +522,10 @@ def _canonical_uhd_validator():
         "feature_semantics_text",
         "unsupported_transform",
         "uppercase_ids",
+        "linear_data",
+        "linear_data_max_objective",
+        "linear_data_metric",
+        "linear_data_transform",
     ],
 )
 def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation):
@@ -420,7 +538,13 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
         "time_metric",
         "feature_semantics",
         "uppercase_ids",
+        "linear_data",
     )
+    if mutation.startswith("linear_data"):
+        # RFC 0019 §7.5: a log slowdown, lower is better, in no registered unit.
+        doc["adapter"] = "linear_data"
+        doc["linear_data"] = doc.pop("tree_data")
+        doc["objective"] = "min"
     if mutation == "missing_objective":
         del doc["objective"]
     elif mutation == "missing_provenance":
@@ -467,6 +591,12 @@ def test_packaging_and_canonical_schema_agree_on_uhd_headers(tmp_path, mutation)
         doc["trained_against"]["feature_semantics_revision"] = "1"
     elif mutation == "unsupported_transform":
         doc["score"] = {"transform": "softplus"}
+    elif mutation == "linear_data_max_objective":
+        doc["objective"] = "max"
+    elif mutation == "linear_data_metric":
+        doc["score"] = {"metric": "time"}
+    elif mutation == "linear_data_transform":
+        doc["score"] = {"transform": "log1p"}
     elif mutation == "uppercase_ids":
         doc["id"] = doc["id"].upper()
         doc["trained_against"]["ued"]["id"] = doc["trained_against"]["ued"][
@@ -951,7 +1081,7 @@ def test_all_role_and_arch_models_remain_reachable_when_packaging(
         tmp_path,
         main_fixture,
         predict_engine={"gfx942": [_TFLOPS_ID, _TIME_ID]},
-        predict_applicable_kernels={"default": _ORDERING_ID},
+        predict_applicable_kernels={"default": [_ORDERING_ID]},
     )
     ued_path = root / "pointwise.ued.json"
     ued = json.loads(ued_path.read_text(encoding="utf-8"))
@@ -978,6 +1108,14 @@ def test_all_role_and_arch_models_remain_reachable_when_packaging(
         (
             {
                 "sort_kernel_catalog": {
+                    "default": ["bb58374f-2972-57b1-a9cb-c358bddef2e5", _ORDERING_ID]
+                }
+            },
+            "no metric",
+        ),
+        (
+            {
+                "predict_applicable_kernels": {
                     "default": ["bb58374f-2972-57b1-a9cb-c358bddef2e5", _ORDERING_ID]
                 }
             },
@@ -1041,7 +1179,7 @@ def test_packaging_admits_every_ued_field_the_loader_reads(tmp_path, main_fixtur
 
     def mutate(ued):
         ued["knobs"] = ["block_size"]
-        ued["behavior_notes"] = ["runtime_compilation"]
+        ued["behavior_notes"] = ["runtime_compilation", "supports_graph_capture"]
         ued["numerical_notes"] = ["ftz"]
         ued["sdk_version"] = "1.2.3"
         ued["graph_match"] = {"native": "test.match", "x-note": "ignored"}
@@ -1162,11 +1300,6 @@ def test_packaging_rejects_a_model_named_outside_an_arch_map(
             "twice",
         ),
         ({"predict_engine": {"gfx942": [_TFLOPS_ID, "not-a-uuid"]}}, "requires a UUID"),
-        # A candidate generator has no metric, so no list form (RFC 0019 §3.1).
-        (
-            {"predict_applicable_kernels": {"default": [_ORDERING_ID]}},
-            "requires a UUID",
-        ),
     ],
 )
 def test_packaging_rejects_malformed_role_values(

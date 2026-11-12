@@ -41,7 +41,7 @@ _STRIDES = ("batch", "head", "sq")
 # being non-negative too; the x4 loads then add only a host-constant offset); every
 # host validator of a bias launch bounds the largest element index by this
 # (through check_additive_bias_reach). The gfx1151 dispatch binding keeps its own
-# copy of the bound; the hipDNN dense pack (Gfx950AttentionDenseNative.cpp) states
+# copy of the bound; the hipDNN dense packs (shared AttentionDenseNative.cpp) state
 # it once, as the inclusive MAX_BIAS_INDEX = 2**31 - 1.
 ADDITIVE_BIAS_INDEX_LIMIT = 2**31
 
@@ -92,6 +92,50 @@ def additive_bias_row(
     return b.add(base, q_off)
 
 
+@dataclass(frozen=True)
+class BiasFloor:
+    """Constants of the floored bias path: ``score + max(bias, floor) * log2 e``
+    with -inf, +inf and NaN passed through (see :func:`make_bias_floor`).
+
+    The floor exists because ``finfo(float32).min * log2 e`` overflows fp32 and
+    would read as -inf. The bias is therefore converted in quarter units
+    (``vq = bias * log2 e / 4``, which cannot overflow), floored there, and the 4
+    is folded back into the fma that adds it to the score. Scaling by a power of
+    two is exact, so the sum equals the one of an unfloored bias bit for bit
+    (outside the denormal range). ``fma(bias, 0, floor_q)`` is ``floor_q`` for a
+    finite bias and NaN for -inf, +inf and NaN, and ``max`` returns its non-NaN
+    operand, so only a finite bias is raised: no per-element compare. Both max
+    operands are arithmetic results, so the backend adds no canonicalising max
+    for a loaded value. Per element that is a multiply, an fma, a max and an fma,
+    the instruction count of the plain ``max(bias, floor)`` form it replaces
+    (canonicalise, max, multiply, add); the guard does not wait for the multiply."""
+
+    floor_q: Value  # floor * log2 e / 4
+    rcp_ln2_q: Value  # log2 e / 4
+    four: Value
+    zero: Value
+
+
+def make_bias_floor(b: IRBuilder, floor: float, rcp_ln2: float) -> BiasFloor:
+    """The constants for a ``floor`` (natural-log units; finite, negative) and
+    ``rcp_ln2`` = log2 e."""
+    return BiasFloor(
+        floor_q=b.const_f32(floor * rcp_ln2 / 4),
+        rcp_ln2_q=b.const_f32(rcp_ln2 / 4),
+        four=b.const_f32(4.0),
+        zero=b.const_f32(0.0),
+    )
+
+
+def _floored_term(b: IRBuilder, score: Value, v: Value, floor: BiasFloor) -> Value:
+    """``score + max(v, floor) * log2 e`` for the bias ``v``, -inf, +inf and NaN
+    passed through: ``score + max(vq, floor_q) * 4`` with ``vq`` = ``v * log2 e / 4``
+    and the guard ``fma(v, 0, floor_q)``."""
+    vq = b.fmul(v, floor.rcp_ln2_q)
+    guard = b.fma(v, floor.zero, floor.floor_q)
+    return b.fma(b.fmax(vq, guard), floor.four, score)
+
+
 def add_additive_bias_at(
     b: IRBuilder,
     score: Value,
@@ -101,7 +145,7 @@ def add_additive_bias_at(
     col: Value,
     mask: Value | None,
     rcp_ln2: Value,
-    floor: Value | None = None,
+    floor: BiasFloor | None = None,
 ) -> Value:
     """Return ``score + bias[row + col] * rcp_ln2`` for a ``row`` from
     :func:`additive_bias_row` with the same params. ``score`` is in log2 units
@@ -111,18 +155,19 @@ def add_additive_bias_at(
     Where ``mask`` is false the lane loads element 0 and adds 0. ``mask=None``
     emits a plain, unchecked load: only for callers whose every ``(row, col)``
     is in range, which the host validation of the launch has to guarantee.
-    ``floor`` (natural-log units) clamps the bias from below, -inf and NaN
-    included, for kernels whose mask is a finite sentinel. There is no upper
-    clamp: a bias whose log2 value overflows fp32 (above about 2.3e38) makes
-    the row NaN."""
+    ``floor`` (a :class:`BiasFloor`, which carries its own log2 e: ``rcp_ln2`` is
+    then unused) raises a finite bias to at least the floor, for kernels whose
+    mask is a finite sentinel. -inf and NaN are not raised: -inf scores -inf and a
+    NaN makes its row NaN. There is no upper clamp: a bias whose log2 value
+    overflows fp32 (above about 2.3e38) makes the row NaN."""
     idx = b.add(row, col)
     if mask is None:
         v = b.global_load(p.ptr, idx, F32, align=4)
     else:
         v = b.masked_global_load(p.ptr, idx, mask, b.const_f32(0.0), dtype=F32, align=4)
-    if floor is not None:
-        v = b.fmax(v, floor)
-    return b.fadd(score, b.fmul(v, rcp_ln2))
+    if floor is None:
+        return b.fadd(score, b.fmul(v, rcp_ln2))
+    return _floored_term(b, score, v, floor)
 
 
 def additive_bias_elem_ptr(
@@ -155,15 +200,15 @@ def add_additive_bias_x4_at(
     *,
     offset: int,
     rcp_ln2: Value,
-    floor: Value | None = None,
+    floor: BiasFloor | None = None,
 ) -> list[Value]:
     """Vector form of :func:`add_additive_bias_at` for four consecutive keys:
     return ``scores[j] + ptr[offset + j] * rcp_ln2`` for ``j`` in 0..3, where
     ``ptr`` comes from :func:`additive_bias_elem_ptr` and ``offset`` is a constant
     element offset from it, read with one 16-byte load instead of four 4-byte
-    ones. Each element gets the same floor clamp, scale and add as the scalar
-    form, so the results are bitwise equal to it (pinned on the GPU against the
-    scalar path).
+    ones. Each element gets the same floor, scale and add as the scalar form,
+    so the results are bitwise equal to it (pinned on the GPU against the scalar
+    path).
 
     The load is plain and unchecked, like ``mask=None`` in the scalar form: all
     four keys must be in range. It is only element-aligned (``align=4``): the
@@ -174,14 +219,15 @@ def add_additive_bias_x4_at(
         )
     elem_off = b.const_i32(offset)
     vec = b.global_load_vN(ptr, elem_off, F32, 4, align=4)
-    out: list[Value] = []
-    for j, score in enumerate(scores):
-        v = b.vec_extract(vec, j)
-        if floor is not None:
-            v = b.fmax(v, floor)
-        scaled_bias = b.fmul(v, rcp_ln2)
-        out.append(b.fadd(score, scaled_bias))
-    return out
+    if floor is None:
+        return [
+            b.fadd(score, b.fmul(b.vec_extract(vec, j), rcp_ln2))
+            for j, score in enumerate(scores)
+        ]
+    return [
+        _floored_term(b, score, b.vec_extract(vec, j), floor)
+        for j, score in enumerate(scores)
+    ]
 
 
 def add_additive_bias(

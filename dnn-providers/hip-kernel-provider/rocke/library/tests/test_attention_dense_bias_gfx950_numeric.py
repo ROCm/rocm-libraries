@@ -303,36 +303,31 @@ def test_minus_inf_entries_mask_keys(tile):
 
 @pytest.mark.parametrize("mask", ["none", "top_left"])
 def test_bias_below_the_mask_sentinel(mask, tile):
-    """A bias below the kernel's -2**99 mask sentinel must not hand the row max to
-    masked keys. Every key at -1e30 counts as masked (below about -1.1e29 the kernel
-    treats a bias as -inf): causal rows 0..3 see only such keys and, with no mask,
-    head 1 has nothing else, so those rows store 0 -- not the mean of the future keys
-    and not NaN. Every other row matches the reference.
-
-    This is a deliberate divergence, documented on run_attention_dense_torch: the
-    reference (like PyTorch) gives a row of finite scores the softmax over them, here
-    the uniform one, so the expected rows are set to 0 by hand below."""
+    """A finite bias far below the kernel's -2**99 mask sentinel is still an ordinary
+    (very negative) score: a row whose every visible key has one gets the uniform
+    softmax over them, as the reference and PyTorch give it, and not the mean of the
+    masked future keys (which would win the row max if the sentinel outranked the
+    bias) or NaN. Causal rows 0..3 see only such keys and, with no mask, head 1 has
+    nothing else. V has mean 1, so a row of zeros fails."""
     dtype, d, hq, hkv, batch, sq, skv = "bf16", 128, 4, 4, 1, 256, 256
     spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, tile=tile, mask=mask)
     q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, (batch, hq, sq, skv))
+    v = v + 1.0
     bias[..., :4] = -1e30
     if mask == "none":
         bias[:, 1] = -1e30
     scale = 1.0 / math.sqrt(d)
     out = _run(spec, q, k, v, bias, scale)
     ref, _ = _reference(q, k, v, scale, bias, mask)
-    if mask == "top_left":
-        ref[:, :4] = 0.0  # [B, Sq, Hq, D]: rows 0..3 of every head
-    else:
-        ref[:, :, 1] = 0.0  # head 1, every row
     assert torch.isfinite(out).all()
+    assert ref[:, :4].abs().mean().item() > 0.5  # the rows under test are not zero
     assert _max_abs(out, ref) < _tolerance(dtype)
 
 
 def test_a_finfo_min_mask_matches_the_reference(tile):
-    """HF-style float masks use finfo(float32).min, which the kernel treats as -inf.
-    Here every odd key and the whole first KV tile are masked for every row; each
-    row keeps live keys later on."""
+    """HF-style float masks use finfo(float32).min. Here every odd key and the whole
+    first KV tile are masked for every row; each row keeps live keys later on, so
+    the masked keys get weight 0."""
     dtype, d, hq, hkv, batch, sq, skv = "fp16", 128, 4, 4, 1, 256, 512
     spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, tile=tile, mask="none")
     q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, (batch, hq, sq, skv))
@@ -344,6 +339,73 @@ def test_a_finfo_min_mask_matches_the_reference(tile):
     ref, _ = _reference(q, k, v, scale, bias, "none")
     assert not torch.isnan(out).any()
     assert _max_abs(out, ref) < _tolerance(dtype)
+
+
+@pytest.mark.parametrize("lse", [False, True], ids=["no-lse", "lse"])
+@pytest.mark.parametrize("mask", ["none", "top_left", "window"])
+def test_a_row_of_finfo_min_biases_is_the_uniform_softmax(mask, lse, tile):
+    """Head 1 has finfo(float32).min for every key, so each of its rows has no key
+    above the others: the softmax is uniform over the keys the mask leaves visible
+    (the causal triangle, the window), O = mean(V) there, as in the reference and
+    PyTorch. V has mean 1, so a row of zeros fails. The LSE the reference gives is
+    about finfo.min; the kernel clamps the bias at -2**97 and reports about that
+    (finite, below -1e28), and the other heads' LSE match the reference."""
+    dtype, d, hq, hkv, batch, sq, skv = "bf16", 128, 4, 4, 1, 512, 512
+    spec = _spec(
+        dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, tile=tile, mask=mask, lse=lse
+    )
+    q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, (batch, hq, sq, skv))
+    v = v + 1.0
+    bias[:, 1] = torch.finfo(torch.float32).min
+    scale = 1.0 / math.sqrt(d)
+    kw = {}
+    if lse:
+        kw["lse"] = torch.full(
+            (batch, hq, sq, 1), float("nan"), device="cuda", dtype=torch.float32
+        )
+    out = _run(spec, q, k, v, bias, scale, **kw)
+    ref, lse_ref = _reference(q, k, v, scale, bias, mask)
+    assert torch.isfinite(out).all()
+    assert ref[:, :, 1].abs().mean().item() > 0.5
+    assert _max_abs(out, ref) < _tolerance(dtype)
+    if lse:
+        got = kw["lse"][..., 0].cpu()
+        assert torch.isfinite(got).all() and (got[:, 1] < -1e28).all()
+        other = [0, 2, 3]
+        assert (got[:, other] - lse_ref[:, other]).abs().max().item() < _tolerance(
+            dtype
+        )
+
+
+@pytest.mark.parametrize("lse", [False, True], ids=["no-lse", "lse"])
+@pytest.mark.parametrize("mask", ["none", "top_left"])
+def test_minus_inf_and_finfo_min_in_one_row(mask, lse, tile):
+    """Head 1 has finfo.min on even keys and -inf on odd ones, with the odd keys' V
+    (that head's) shifted by 10: a row is uniform over its visible even keys only,
+    as in the reference. Neither value may stand in for the other: -inf is a key out
+    of the softmax, finfo.min one in it."""
+    dtype, d, hq, hkv, batch, sq, skv = "bf16", 128, 4, 4, 1, 256, 256
+    spec = _spec(
+        dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, tile=tile, mask=mask, lse=lse
+    )
+    q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, (batch, hq, sq, skv))
+    v = v + 1.0
+    v[:, 1::2, 1] += 10.0
+    bias[:, 1, :, 0::2] = torch.finfo(torch.float32).min
+    bias[:, 1, :, 1::2] = float("-inf")
+    scale = 1.0 / math.sqrt(d)
+    kw = {}
+    if lse:
+        kw["lse"] = torch.full(
+            (batch, hq, sq, 1), float("nan"), device="cuda", dtype=torch.float32
+        )
+    out = _run(spec, q, k, v, bias, scale, **kw)
+    ref, _ = _reference(q, k, v, scale, bias, mask)
+    assert torch.isfinite(out).all()
+    assert ref[:, :, 1].abs().mean().item() > 0.5
+    assert _max_abs(out, ref) < _tolerance(dtype)
+    if lse:
+        assert torch.isfinite(kw["lse"][:, 1]).all()
 
 
 @pytest.mark.parametrize("lse", [False, True], ids=["no-lse", "lse"])
@@ -381,6 +443,36 @@ def test_a_row_with_no_finite_score_outputs_zero(lse, tile):
         got = kw["lse"][..., 0].cpu()
         assert torch.isneginf(got[:, :, :64]).all()
         assert (got[:, :, 64:] - lse_ref[:, :, 64:]).abs().max().item() < _tolerance(
+            dtype
+        )
+
+
+@pytest.mark.parametrize("lse", [False, True], ids=["no-lse", "lse"])
+def test_a_head_of_minus_inf_biases_outputs_zero(lse, tile):
+    """With no mask, head 1 has -inf for every key: each of its rows has no finite
+    score, so O = 0 and LSE = -inf (the hipDNN reference); the other heads are
+    ordinary."""
+    dtype, d, hq, hkv, batch, sq, skv = "bf16", 128, 4, 4, 1, 256, 256
+    spec = _spec(
+        dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, tile=tile, mask="none", lse=lse
+    )
+    q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, (batch, hq, sq, skv))
+    bias[:, 1] = float("-inf")
+    scale = 1.0 / math.sqrt(d)
+    kw = {}
+    if lse:
+        kw["lse"] = torch.full(
+            (batch, hq, sq, 1), float("nan"), device="cuda", dtype=torch.float32
+        )
+    out = _run(spec, q, k, v, bias, scale, **kw)
+    ref, lse_ref = _reference(q, k, v, scale, bias, "none")
+    assert out[:, :, 1].abs().max().item() == 0.0
+    assert _max_abs(out, ref) < _tolerance(dtype)
+    if lse:
+        got = kw["lse"][..., 0].cpu()
+        assert torch.isneginf(got[:, 1]).all()
+        other = [0, 2, 3]
+        assert (got[:, other] - lse_ref[:, other]).abs().max().item() < _tolerance(
             dtype
         )
 
@@ -474,21 +566,49 @@ def test_varlen_window_sequences_past_their_keys(tile):
         assert out[dead : q_offsets[s + 1]].abs().max().item() == 0.0, s
 
 
-def test_nan_entries_mask_keys(tile):
-    """A NaN bias entry masks its key (the floor clamp returns the non-NaN operand),
-    like -inf: every odd key here. The output stays finite and matches the reference
-    with NaN read as -inf."""
-    dtype, d, hq, hkv, batch, sq, skv = "fp16", 128, 4, 4, 1, 256, 512
-    spec = _spec(dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, tile=tile, mask="none")
-    q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, (batch, hq, sq, skv))
-    bias[..., 1::2] = float("nan")
-    scale = 1.0 / math.sqrt(d)
-    out = _run(spec, q, k, v, bias, scale)
-    ref, _ = _reference(
-        q, k, v, scale, torch.nan_to_num(bias, nan=float("-inf")), "none"
+@pytest.mark.parametrize("lse", [False, True], ids=["no-lse", "lse"])
+@pytest.mark.parametrize("mask", ["none", "top_left"])
+def test_a_nan_bias_makes_its_row_nan(mask, lse, tile):
+    """A NaN bias on a visible key makes its whole row NaN (O and LSE), as in the
+    reference; every other row matches it. Head 0 row 10 has one NaN key (key 7,
+    visible under every mask), head 2 row 20 has NaN on every key (the max ignores a
+    NaN score, so only the NaN denominator keeps the row from reading as dead), and
+    head 1 row 5 has a NaN at key 200: visible only without the mask, so under the
+    causal mask the key is skipped, whatever its bias, and the row stays finite."""
+    dtype, d, hq, hkv, batch, sq, skv = "fp16", 128, 4, 4, 1, 256, 256
+    spec = _spec(
+        dtype, d, hq, hkv, batch=batch, sq=sq, skv=skv, tile=tile, mask=mask, lse=lse
     )
-    assert torch.isfinite(out).all()
-    assert _max_abs(out, ref) < _tolerance(dtype)
+    q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, (batch, hq, sq, skv))
+    nan = float("nan")
+    bias[0, 0, 10, 7] = nan
+    bias[0, 2, 20, :] = nan
+    bias[0, 1, 5, 200] = nan
+    nan_rows = {(0, 10), (2, 20)} | ({(1, 5)} if mask == "none" else set())
+    scale = 1.0 / math.sqrt(d)
+    kw = {}
+    if lse:
+        kw["lse"] = torch.full(
+            (batch, hq, sq, 1), 0.0, device="cuda", dtype=torch.float32
+        )
+    out = _run(spec, q, k, v, bias, scale, **kw)
+    # The reference reads NaN as -inf; its rows with NaN are compared apart.
+    ref, lse_ref = _reference(
+        q, k, v, scale, torch.nan_to_num(bias, nan=float("-inf")), mask
+    )
+    got = out.float().cpu()  # [B, Sq, Hq, D]
+    expect_nan = torch.zeros(batch, sq, hq, dtype=torch.bool)
+    for h, r in nan_rows:
+        expect_nan[0, r, h] = True
+    assert torch.equal(torch.isnan(got).all(-1), expect_nan)
+    assert not (torch.isnan(got).any(-1) & ~expect_nan).any()
+    live = ~expect_nan
+    assert (got - ref).abs().amax(-1)[live].max().item() < _tolerance(dtype)
+    if lse:
+        got_lse = kw["lse"][..., 0].cpu().permute(0, 2, 1)  # [B, Sq, Hq]
+        assert torch.equal(torch.isnan(got_lse), expect_nan)
+        diff = (got_lse - lse_ref.permute(0, 2, 1)).abs()
+        assert diff[live].max().item() < _tolerance(dtype)
 
 
 @pytest.mark.parametrize("mask", ["top_left", "window"])
@@ -544,8 +664,13 @@ def test_sinks_with_bias(tile):
 
 @pytest.mark.parametrize(
     "q_lens, kv_lens, bias_name",
-    [((256, 512), (128, 256), "full"), ((0, 256, 512), (64, 128, 256), "batch_bcast")],
-    ids=["two-seqs-full", "empty-first-seq-batch-bcast"],
+    [
+        ((256, 512), (128, 256), "full"),
+        ((0, 256, 512), (64, 128, 256), "batch_bcast"),
+        # Slots with no queries and no keys never load K/V.
+        ((0, 256, 512, 0), (0, 128, 256, 0), "batch_bcast"),
+    ],
+    ids=["two-seqs-full", "empty-first-seq-batch-bcast", "idle-first-and-last-slots"],
 )
 @pytest.mark.parametrize("lse", [False, True], ids=["no-lse", "lse"])
 def test_varlen_indexes_the_bias_by_in_sequence_position(

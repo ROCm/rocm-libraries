@@ -139,8 +139,8 @@ Its bias-on body scales each score into the log2 domain right after the QK MFMA
 (`s * qk_scale + bias * log2e`) instead of folding the scale into the row max and
 the exp2 FMA, which a per-key term would break; the bias-off IR is unchanged. Its
 semantics differ from the unified kernels' (knob reference above): the bias is
-added before the mask and clamped at -2**97, and a row with no unmasked key writes
-zeros (see the [prefill builder README](../../../library/builders/gfx950/attention/prefill/README.md)).
+added before the mask and raised to at least -2**97 (`-inf` and NaN pass through), and
+a row with no unmasked key writes zeros (see the [prefill builder README](../../../library/builders/gfx950/attention/prefill/README.md)).
 Numerics: [test_attention_dense_bias_gfx950_numeric.py](../../../library/tests/test_attention_dense_bias_gfx950_numeric.py)
 (needs torch) and its torch-free subset
 [test_attention_dense_bias_gfx950_gpu.py](../../../library/tests/test_attention_dense_bias_gfx950_gpu.py),

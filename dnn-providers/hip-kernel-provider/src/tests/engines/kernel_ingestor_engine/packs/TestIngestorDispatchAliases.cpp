@@ -13,6 +13,7 @@
 #include "core/Handle.hpp"
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvFwdLaunchValues.hpp"
+#include "engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseLaunchValues.hpp"
 #include "engines/kernel_ingestor_engine/packs/PointwiseLaunchValues.hpp"
 
@@ -72,6 +73,19 @@ TEST(TestIngestorDispatchAliases, TheBiasContractIsServedByTheCurrentHandler)
 
     expectOneHandler("hipkernel.gfx950_attention_dense.dispatch",
                      GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3);
+}
+
+// gfx942 has one contract. Its versioned name resolves to the handler of the unversioned
+// one, so a plan saved through the catalog's handler names that same handler, and it has
+// no version it never defined.
+TEST(TestIngestorDispatchAliases, Gfx942AttentionDenseHasOneContractOnItsCatalogHandler)
+{
+    registerNativeIngestorSymbols();
+
+    expectOneHandler("hipkernel.gfx942_attention_dense.dispatch",
+                     GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1);
+    EXPECT_EQ(DispatchRegistry<Handle>::tryResolve("hipkernel.gfx942_attention_dense.dispatch.v2"),
+              nullptr);
 }
 
 } // namespace

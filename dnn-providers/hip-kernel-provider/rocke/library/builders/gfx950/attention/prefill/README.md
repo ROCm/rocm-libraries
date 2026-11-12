@@ -234,9 +234,18 @@ aligned packed inputs, sinks, and supported wide-load variants. Existing mode
 restrictions still apply. Enabled packed inputs require same-device int32
 cumulative offsets of length `B+1`, monotone from zero to each packed extent.
 Each nonempty Q length must be a `block_m` multiple and at most spec `seqlen_q`;
-each KV length must be a positive `block_n` multiple and at most spec `seqlen_kv`.
-Zero-Q sequences write no rows. These offset-content checks may synchronize;
-LSE buffer checks use metadata only.
+each KV length must be a `block_n` multiple and at most spec `seqlen_kv`, and
+positive unless the sequence has no queries. Zero-Q sequences write no rows and
+never read their keys. These offset-content checks may synchronize; LSE buffer
+checks use metadata only.
+
+The same offset checks run on every packed launch, with LSE or without
+(`validate_dense_varlen_offsets`; without LSE, `validate_varlen=False` skips them,
+except for a launch with an additive bias). Two valid inputs are not implemented:
+a sequence with queries and no keys (`NotImplementedError` without LSE), and,
+without LSE or an additive bias, with a sliding window, a sequence whose last query
+rows see no key (`q_len - kv_len >= window`; `NotImplementedError`), because only
+the LSE and bias epilogues zero such a row.
 
 Through the dispatcher, set `emit_lse=True` on a pinned dense `AttentionRequest` and
 pass the buffer as `tensors["lse"]`; `dispatch_attention(req).bind_torch(tensors)`
@@ -272,18 +281,22 @@ run_attention_dense_torch(
   (not the KV head). The key axis must be full length at unit stride; the other strides
   are free (a padded row pitch works), and an extent-1 axis broadcasts through stride 0.
   Under varlen, `Sq`/`Skv` are the spec maxima and each sequence reads its rows by
-  in-sequence position, so the offsets are checked as for LSE (a device sync; no KV
-  sequence may be empty).
+  in-sequence position, so the offsets are always checked (a device sync; see the
+  packed-offset rules above).
 - **Size.** The kernel indexes the bias in i32: a launch whose largest element index
   reaches 2**31 (8 GiB of fp32) raises `NotImplementedError`; broadcast an axis or split
   the launch. Strides that reach past the tensor's storage raise `ValueError`.
-- **Masking values.** `-inf` masks a key, and so do NaN and any finite value below
-  about -1.1e29: the kernel clamps the bias at -2**97 to keep it above its own mask
-  sentinel. A row with no unmasked key writes zero output and `LSE=-inf` (`LSE=sink`
-  with a finite sink), as the hipDNN reference does for a row of `-inf` scores. A row
-  whose keys are all finite but below the threshold (e.g. `finfo(float32).min` padding)
-  gets the same zeros, where PyTorch gives it the uniform softmax. A bias above about
-  2.3e38 overflows to a NaN row.
+- **Masking values.** `-inf` masks a key. A row with no unmasked key writes zero output
+  and `LSE=-inf` (`LSE=sink` with a finite sink), as the hipDNN reference does for a row
+  of `-inf` scores. A finite bias is an ordinary score, except that one below -2**97
+  (about -1.6e29) is raised to that, which keeps it above the kernel's own mask
+  sentinel. A row whose visible keys are all below it (e.g. `finfo(float32).min`
+  padding) therefore gets the uniform softmax over them, as the reference and PyTorch
+  give it (O = mean(V) over the keys the mask leaves), with an `LSE` of about -2**97
+  where theirs is about the bias itself; biases that differ below -2**97 are not told
+  apart. A NaN bias on a visible key makes its row NaN (O and `LSE`), as in the
+  reference; a NaN on a key the mask removes is ignored. A bias above about 2.3e38
+  overflows to a NaN row.
 - **Composes with** every mask (none, top-left and bottom-right causal, sliding window,
   lookahead), fixed ragged, packed varlen, sinks and LSE, fp16/bf16, D64/D128.
 
@@ -366,7 +379,9 @@ and the sinks / softcap options compose; ALiBi and QQ-bias are only defined for
 causal masks. At `seqlen_q == 1` top-left attends only key 0, which is the
 definition of top-left, not a bug. A row whose band holds no key outputs zeros (the
 same in the unified and dense kernels, and what PyTorch SDPA returns for a fully
-masked row).
+masked row), except in packed varlen dense launches without LSE or an additive bias:
+the launcher rejects a keyless-window sequence on the host there instead of zeroing
+it (a sequence with queries and no keys is rejected in every packed launch).
 
 The standalone dense kernel (`algorithm="attention_dense_grid"` / `"attention_dense_persist"`) implements the same band
 on the top-left diagonal -- full attention (including ragged cross-attention

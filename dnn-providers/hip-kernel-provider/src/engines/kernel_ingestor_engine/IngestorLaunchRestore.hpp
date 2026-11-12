@@ -174,6 +174,13 @@ inline void requireOnlyLaunchValues(const hipdnn_plugin_sdk::ingestor::SavedLaun
     }
 }
 
+/// The same check for a value set that is fixed at compile time.
+inline void requireOnlyLaunchValues(const hipdnn_plugin_sdk::ingestor::SavedLaunchInputs& inputs,
+                                    std::initializer_list<std::string_view> names)
+{
+    requireOnlyLaunchValues(inputs, std::vector<std::string_view>(names));
+}
+
 /// Runs the restore checks a pack shares, in order, and loads the saved code on
 /// @p deviceOrdinal:
 ///   1. The signature recorded for the saved kernel must match @p declaredSignature, the

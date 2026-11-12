@@ -8,8 +8,9 @@ Three consumers share the math here (``natural_lse_from_log2_stats``):
 * the gfx942 / gfx950 dense prefill kernels: ``lse_store`` emits the optional
   LSE store, ``dense_row_has_key`` / ``zero_keyless_row`` the empty-row output
   masking, ``validate_dense_lse`` is the host-side contract for the
-  caller-owned LSE buffer, and ``validate_dense_varlen_offsets`` its
-  packed-offset check, which the dense additive-bias path reuses;
+  caller-owned LSE buffer, and ``validate_dense_varlen_offsets`` the host check
+  every packed varlen launch runs on its offsets (inside ``validate_dense_lse``
+  with LSE, in the launcher without);
 * the unified split-KV reduce and the unified tiled 2D epilogues (gfx942 /
   gfx950): the same IR helpers emit their LSE store, ``lse_row_has_mass`` the
   ``!(l == 0)`` row test, and ``validate_unified_lse`` is their host-side buffer
@@ -267,26 +268,30 @@ def validate_dense_varlen_offsets(
 ) -> None:
     """Check packed varlen offsets against ``spec``: on ``device`` (the launch's Q
     device; the kernel dereferences them), int32 [batch+1], spanning the packed
-    tensors, each length monotone, tile-aligned and within the spec maxima, and no
-    KV sequence empty. Reads the offsets to host: a device sync.
+    tensors, each length monotone, tile-aligned and within the spec maxima. Reads
+    the offsets to host: a device sync. Malformed offsets raise ``ValueError``.
 
     The packed dense body has no per-sequence load-tail handling, and the paths
     that read per-sequence state (LSE, the additive bias) index it by in-sequence
-    position. An empty KV sequence is refused because the prologue always scores
-    KV tile 0, which for it is the next sequence's keys (and, for the last one,
-    K/V past the packed tensor); an empty query sequence writes nothing."""
-    import torch
+    position. Two valid inputs are beyond it (implementation shortcuts, not hardware
+    limits):
 
-    for name, tensor, extent, tile, maximum, allow_empty in (
-        ("cu_seqlens_q", cu_seqlens_q, q_tokens, spec.block_m, spec.seqlen_q, True),
-        (
-            "cu_seqlens_kv",
-            cu_seqlens_kv,
-            kv_tokens,
-            spec.block_n,
-            spec.seqlen_kv,
-            False,
-        ),
+    * a sequence with queries and no keys. The prologue always scores KV tile 0,
+      which for an empty sequence is the next sequence's keys (and, for the last
+      one, K/V past the packed tensor). Without LSE this raises
+      ``NotImplementedError`` (``NOT_YET_IMPLEMENTED``); with LSE it stays the
+      ``ValueError`` that path has always raised;
+    * with a sliding window and neither LSE nor an additive bias, a sequence whose
+      last query rows see no key (``q_len - kv_len >= window``): only the LSE and
+      bias epilogues zero such a row; the plain one stores the mean of V. This
+      raises ``NotImplementedError``.
+
+    A slot with no queries may have no keys, in every path: its workgroups return
+    on the query-block bound before they load K/V or write a row."""
+    lengths = []
+    for name, tensor, extent, tile, maximum in (
+        ("cu_seqlens_q", cu_seqlens_q, q_tokens, spec.block_m, spec.seqlen_q),
+        ("cu_seqlens_kv", cu_seqlens_kv, kv_tokens, spec.block_n, spec.seqlen_kv),
     ):
         if tensor.device != device:
             raise ValueError(
@@ -302,14 +307,31 @@ def validate_dense_varlen_offsets(
         offsets = tensor.tolist()
         if offsets[0] != 0 or offsets[-1] != extent:
             raise ValueError(f"{name} endpoints must span its packed tensor")
-        for start, stop in zip(offsets, offsets[1:]):
-            length = stop - start
+        lengths.append([stop - start for start, stop in zip(offsets, offsets[1:])])
+        for length in lengths[-1]:
             if length < 0 or length > maximum or length % tile:
                 raise ValueError(
                     f"{name} lengths must be monotone, tile-aligned, and within spec"
                 )
-            if not allow_empty and length == 0:
-                raise ValueError(f"{name} sequences must be nonempty")
+
+    window = spec.sliding_window
+    check_window = (
+        window and not spec.emit_lse and not getattr(spec, "use_additive_bias", False)
+    )
+    for i, (q_len, kv_len) in enumerate(zip(*lengths)):
+        if q_len and not kv_len:
+            if spec.emit_lse:
+                raise ValueError("LSE-enabled packed KV sequences must be nonempty")
+            raise NotImplementedError(
+                f"NOT_YET_IMPLEMENTED: packed KV sequence {i} must be nonempty "
+                f"when it has queries (q_len={q_len})"
+            )
+        if check_window and q_len - kv_len >= window:
+            raise NotImplementedError(
+                f"NOT_YET_IMPLEMENTED: sequence {i}: sliding_window={window} over "
+                f"q_len={q_len}, kv_len={kv_len} leaves query rows with no key; "
+                "use emit_lse"
+            )
 
 
 Stride = Union[int, Value]
