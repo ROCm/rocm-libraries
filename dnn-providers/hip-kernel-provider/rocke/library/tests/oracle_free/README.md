@@ -1,10 +1,17 @@
 # Oracle-free attention tests
 
-This suite launches the shipped dense attention kernels and checks masked
-uniform probabilities without a complete attention oracle. Zero Q makes
-every legal score equal, so the softmax row for query `q` is uniform over its
-legal key set `A(q)`. Each expected output follows from legal-key arithmetic
-alone, rounded correctly into the subject dtype.
+This suite launches the shipped dense attention kernels and checks them without
+a complete attention oracle. It has two lanes:
+
+| Lane | Checks | Verdict |
+|---|---|---|
+| Uniform probabilities ([Exposures](#exposures) to [Scope](#scope)) | masked attention on zero Q | every stored bit equals a closed form |
+| [Key-permutation relation](#key-permutation-relation) | unmasked attention on nonuniform scores | two launches agree within a derived bound |
+
+The uniform-probability lane sets Q to zero. Zero Q makes every legal score
+equal, so the softmax row for query `q` is uniform over its legal key set
+`A(q)`. Each expected output follows from legal-key arithmetic alone, rounded
+correctly into the subject dtype.
 
 ## Exposures
 
@@ -171,13 +178,166 @@ kernel with a mask or denominator bug can write exactly what a mutation
 predicts. When that happens, the unrejected mutation is reported together with
 the control's violations, not as a checker failure.
 
+## Key-permutation relation
+
+Unmasked attention depends on its keys only as a set of (key, value) pairs.
+Permuting the key tokens of K and V with one map `pi` therefore leaves the
+output unchanged:
+
+`O(Q, pi K, pi V) = O(Q, K, V)`.
+
+This lane launches the subject on both sides of that identity and compares the
+two stored outputs with each other. There is no expected output, no closed form
+and no reference: the tolerance follows from the kernel's arithmetic path.
+
+The relation needs mask mode none. Under a causal or window mask the legal keys
+of a row depend on the token index that the map moves. The gfx942 dense kernel
+serves unmasked attention only at `seqlen_q == seqlen_k` with whole tiles, so
+the cases are square.
+
+### Inputs
+
+| Tensor | Values |
+|---|---|
+| Q, K | pseudo-random multiples of 1/8 in `[-3, 3]`, bell-shaped, close to unit variance |
+| V | pseudo-random `+1` or `-1` |
+
+The values come from an explicit integer hash of the element index, not from a
+library random stream, and are exact in FP16 and BF16. The Q and K lattice makes
+every product a multiple of 1/64, and FP32 holds every partial sum of a `D`-term
+contraction exactly. The score of a (query, key) pair is therefore the same FP32
+value wherever the key sits, which is what lets the two launches be compared.
+No query row is zero and no two key or value tokens are equal, so a value paired
+with the wrong key changes the output.
+
+### Token maps
+
+A map is stored destination-to-source: destination token `k` receives source
+token `map[k]`, for every batch element and KV head. Whole token vectors move
+and their bits are copied, so the transformation is exact.
+
+| Map | Definition |
+|---|---|
+| `shift_one` | `k + 1 mod Sk` |
+| `reverse` | `Sk - 1 - k` |
+| `cross_tile` | `k + 16 mod Sk`; needs `Sk > 16` |
+| `partial_final_tile` | moves the tail span `Sk mod 16` to the front; needs `Sk mod 16 != 0` |
+| `adjacent_swap` | exchanges tokens 0 and 1 |
+
+The 16-token span is a boundary of the test, not the kernel's tile size.
+`partial_final_tile` needs a ragged key length, which the whole-tile gfx942
+kernel does not take; the quick cases run the other four.
+
+`adjacent_swap` closes a gap the other maps leave. A kernel that pairs the
+score of key `j` with the value of key `sigma(j)` satisfies the relation under a
+map exactly when `sigma` commutes with that map. The shifts and the reverse
+generate a dihedral group, and for even `Sk` the shift by `Sk / 2` commutes with
+all of it: a value read half a sequence away from its key would pass every one
+of them. No nontrivial shift commutes with the adjacent swap, so with it the
+only such pairing that passes every map is the correct one.
+
+### Bound
+
+Per row, both launches compute the same FP32 scores as a multiset, so they share
+the row maximum `m` and the ideal weights `p_k = exp2(s_k - m)`. What differs is
+which key falls in which tile: the running maximum, the rescale points and every
+summation order. Each launch's stored output is within `per_run` of the ideal
+`sum(p_k v_k) / sum(p_k)`, and the residual tolerance is `2 * per_run`:
+
+| Term of `per_run` | Source | Size |
+|---|---|---|
+| Probability cast | the accumulator multiplies V by the weight rounded to the subject dtype; the normalizer sums the unrounded weight | `2^-(p+1) max\|V\|`, `p` the dtype's fraction bits |
+| Output store | one conversion of `acc / l` to the subject dtype | half an ULP at the largest admissible output |
+| FP32 remainder | one `exp2` and one rounded argument per key tile, accumulation in any order, the reciprocal | about a tenth of the total in FP16, a hundredth in BF16 |
+
+For the quick shape (256 keys in four tiles, `max|V| = 1`) the tolerance is
+`2.14e-3` in FP16 and `1.58e-2` in BF16.
+
+`permutation_bound` evaluates it from the dtype, the key count, the key-tile
+count of the spec dispatch resolved, `max|V|`, and a bound on the spread of a
+row's scores taken from the row norms of Q and K. It reads no output, so a
+faulty kernel cannot widen its own tolerance, and it is not fitted to any
+measurement. The worst case needs the rounding of every weight to line up, so a
+correct kernel sits well inside the bound. The largest residual is reported as
+a fraction of the bound; a fraction that grows over time is a drift signal even
+while the test passes.
+
+The bound holds for every single-pass dense variant, whatever its tile, grid,
+persistence or scheduling knobs, under these assumptions about the executed
+path:
+
+- FP32 addition, multiplication, MFMA accumulation and the reciprocal return one
+  of the two FP32 neighbours of their exact result;
+- `exp2` is within one FP32 ULP;
+- the probability cast and the output store round to nearest even and keep
+  subnormals;
+- the normalizer sums uncast weights, the accumulator consumes cast ones, and
+  both are rescaled by `exp2(m_old - m_new)` per key tile.
+
+The subject adapter refuses the same specs as for the uniform lane (split-KV,
+sinks, LSE, ragged, bottom-right, paged, varlen) and additionally requires the
+resolved spec to be unmasked.
+
+### Policy
+
+For every map, each of these is a hard violation:
+
+- a stored value in either output is not finite (`invalid`); the output is
+  prefilled with quiet NaN, so an unwritten coordinate counts;
+- a stored magnitude exceeds the largest output the inputs admit
+  (`magnitude`); a blow-up both launches share would otherwise cancel;
+- `|O_A - O_B|` exceeds the bound at any coordinate (`residual`).
+
+### Pairing mutations
+
+Three more launches break the pairing, starting from `reverse`:
+
+| Mutation | K map | V map |
+|---|---|---|
+| `key_only` | `reverse` | identity |
+| `value_only` | identity | `reverse` |
+| `different_maps` | `reverse` | `shift_one` |
+
+Each must exceed the bound in every (batch, query head). A head whose output
+stays inside the bound ignores which value belongs to which key: a constant or
+all-zero output, or attention that does not depend on K, fails here although it
+satisfies the identity. When the joint permutations fail as well, the message
+reports their violations as the diagnosis.
+
+### What the relation cannot see
+
+A defect applied identically to both launches cancels. A wrong scale, a wrong
+KV-head routing, a wrong output placement or any fixed transformation of the
+output satisfies the identity. The uniform-probability lane and the pinned SDPA
+lane cover those.
+
+### Cases
+
+| Arch | Dtype | Case |
+|---|---|---|
+| gfx942 | FP16 | `B1,Sq256,Sk256,H8/2,D64`, unmasked |
+| gfx942 | BF16 | `B1,Sq256,Sk256,H8/2,D64`, unmasked |
+
+Each case is eight launches: the base inputs, four joint permutations and three
+pairing mutations. `PERMUTATION_SUBJECT_CASES` in `_dense_subject.py` lists the
+`(arch, case)` pairs, and the skip and failure semantics are those of the
+uniform lane: only a device of another architecture skips.
+
+The CPU contracts in `test_permutation_contracts.py` exercise the analyzer on
+an FP32 model of the kernel's single-pass online softmax: the modeled joint
+permutations stay inside the bound, the modeled mutations leave it in every
+head, and two modeled pairing defects are caught by the maps the group argument
+predicts. The model lives only in those contracts.
+
 ## Oracle prohibition
 
 Verdicts may use only deterministic profile construction, independent legal-key
-arithmetic, exact rational rounding, and diagnostic reductions. They must not
+arithmetic, exact rational rounding, a tolerance derived from the kernel's
+arithmetic path and input statistics, and diagnostic reductions. They must not
 call Torch SDPA, rocKE numeric references, SDPA reference helpers, or a
 pinned-reference bundle. A CPU source contract checks the suite for those
-dependencies.
+dependencies. The kernel model in the key-permutation contracts takes part in no
+GPU verdict.
 
 The whole suite is Torch-free, and CPU contracts enforce it in two ways:
 
@@ -197,12 +357,15 @@ From the `rocke/library` directory (NumPy and pytest only; Torch is not needed):
 ```bash
 # CPU contracts: rounding, encoding, mutations, policy, vectorized-versus-scalar
 # analyzer agreement, proof scope, adapter ABI, Torch-free and oracle-free
-# source policy.
-python -m pytest tests/oracle_free/test_contracts.py -vv
+# source policy; then the key-permutation maps, inputs, bound and analyzer.
+python -m pytest tests/oracle_free/test_contracts.py \
+  tests/oracle_free/test_permutation_contracts.py -vv
 
-# Uniform-probability production launches on a visible gfx942 device.
+# Uniform-probability and key-permutation production launches on a visible
+# gfx942 device.
 HIP_VISIBLE_DEVICES=0 python -m pytest \
-  tests/oracle_free/test_analytical_dense.py -vv -rs
+  tests/oracle_free/test_analytical_dense.py \
+  tests/oracle_free/test_permutation_dense.py -vv -rs
 ```
 
 From the installed `bin/hip_kernel_provider` directory, the GPU launches and the

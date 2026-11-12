@@ -114,6 +114,10 @@ class UniformCase:
             f"sk{self.seqlen_k}-hq{self.nhead_q}-hk{self.nhead_k}-d{self.head_dim}"
         )
 
+    def require_scope(self) -> None:
+        """Refuse a case outside the zero-ULP theorem's range."""
+        require_proven_scope(self)
+
 
 # GQA (four query heads per KV head), so a kernel that drops the group divisor
 # reads the wrong V scale and fails. The dtype/mask pairing complements the

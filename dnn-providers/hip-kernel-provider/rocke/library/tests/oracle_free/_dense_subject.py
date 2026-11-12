@@ -1,7 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Narrow uniform-probability subject adapter for the shipped dense attention kernels.
+"""Narrow subject adapter of the oracle-free lanes for the shipped dense attention
+kernels.
 
 Torch-free end to end: inputs and the output are raw ``uint16`` host arrays,
 device buffers are :class:`rocke.runtime.DeviceMem`, and the launch goes through
@@ -12,8 +13,9 @@ way. Dispatch, the runner and the HIP runtime are imported only inside the
 functions that use them, so CPU collection and the analytical contracts need
 neither a GPU nor ROCm.
 
-Adding an architecture is one :data:`DENSE_SUBJECTS` entry plus its cases in
-:data:`QUICK_SUBJECT_CASES`.
+A lane describes its case through :class:`DenseCase`. Adding an architecture is
+one :data:`DENSE_SUBJECTS` entry plus its cases in :data:`QUICK_SUBJECT_CASES` or
+:data:`PERMUTATION_SUBJECT_CASES`.
 """
 
 from __future__ import annotations
@@ -23,15 +25,53 @@ import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import Protocol
 
 import numpy as np
 
-from ._analytical import UNIFORM_QUICK_CASES, UniformCase, require_proven_scope
+from ._analytical import UNIFORM_QUICK_CASES, UniformCase
+from ._permutation import PERMUTATION_QUICK_CASES, PermutationCase
 
 _POINTER_ALIGNMENT = 16
 # Quiet-NaN output prefill: a coordinate the kernel never writes reads back as
 # invalid instead of passing as a stale zero.
 _NAN_BITS = {"fp16": 0x7E00, "bf16": 0x7FC0}
+# Dispatch mask ordinal of each case mask: NO_MASK, or TOP_LEFT_CAUSAL with the
+# window carried by ``sliding_window``.
+_MASK_TYPES = {"none": 0, "causal": 1, "window": 1}
+
+
+class DenseCase(Protocol):
+    """What the adapter reads from one lane's case.
+
+    ``mask`` is ``"none"``, ``"causal"`` or ``"window"`` (with ``window > 0``).
+    ``require_scope`` raises ``ValueError`` for a case the lane's derivation does
+    not cover."""
+
+    batch: int
+    seqlen_q: int
+    seqlen_k: int
+    nhead_q: int
+    nhead_k: int
+    head_dim: int
+    dtype: str
+
+    @property
+    def mask(self) -> str: ...
+
+    @property
+    def window(self) -> int: ...
+
+    @property
+    def output_shape(self) -> tuple[int, int, int, int]: ...
+
+    @property
+    def key_shape(self) -> tuple[int, int, int, int]: ...
+
+    @property
+    def case_id(self) -> str: ...
+
+    def require_scope(self) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -61,6 +101,10 @@ DENSE_SUBJECTS: Mapping[str, DenseSubject] = MappingProxyType(
 QUICK_SUBJECT_CASES: tuple[tuple[str, UniformCase], ...] = tuple(
     ("gfx942", case) for case in UNIFORM_QUICK_CASES
 )
+# The key-permutation lane's (arch, case) matrix: unmasked cases on gfx942.
+PERMUTATION_SUBJECT_CASES: tuple[tuple[str, PermutationCase], ...] = tuple(
+    ("gfx942", case) for case in PERMUTATION_QUICK_CASES
+)
 
 
 @dataclass(frozen=True)
@@ -72,8 +116,17 @@ class ResolvedDenseSubject:
     tuning_spec: object
     candidate_name: str
 
+    def key_tiles(self, seqlen_k: int) -> int:
+        """KV tiles one query row's single pass visits over ``seqlen_k`` keys."""
+        return -(-seqlen_k // int(self.tuning_spec.kernel_spec.block_n))
 
-def _validate_host_bits(case: UniformCase, q, k, v) -> None:
+
+def softmax_scale(case: DenseCase) -> float:
+    """The softmax scale every launch passes: ``1 / sqrt(head_dim)``."""
+    return 1.0 / math.sqrt(case.head_dim)
+
+
+def _validate_host_bits(case: DenseCase, q, k, v) -> None:
     """Validate the dense ABI on the raw-bit host inputs."""
     expected_shapes = {
         "q": case.output_shape,
@@ -121,26 +174,29 @@ def _validate_device_buffers(
                 raise ValueError(f"{left_name} overlaps {right_name}")
 
 
-def _validate_supported_case(arch: str, case: UniformCase) -> None:
-    """Reject an architecture without a subject or a case outside the proof."""
+def _validate_supported_case(arch: str, case: DenseCase) -> None:
+    """Reject an architecture without a subject or a case outside its lane's
+    derivation."""
     if arch not in DENSE_SUBJECTS:
         raise ValueError(
-            f"no dense uniform-probability subject for {arch}; "
-            f"known: {sorted(DENSE_SUBJECTS)}"
+            f"no dense oracle-free subject for {arch}; known: {sorted(DENSE_SUBJECTS)}"
         )
-    require_proven_scope(case)
+    if case.mask not in _MASK_TYPES:
+        raise ValueError(f"case mask must be one of {sorted(_MASK_TYPES)}")
+    case.require_scope()
 
 
-def _verify_resolved_spec(arch: str, case: UniformCase, tuning_spec) -> None:
-    """Check the dispatch-resolved spec against the zero-ULP proof's scope.
+def _verify_resolved_spec(arch: str, case: DenseCase, tuning_spec) -> None:
+    """Check the dispatch-resolved spec against the scope the lanes derive for.
 
-    The proof covers every single-pass dense variant, so tile, grid,
-    persistence, fast exp2 and scheduling knobs are deliberately free: a retune
-    keeps running, and a defect in any of them still fails the exact policy.
-    What it does not cover is refused here, before any launch, as a failure:
-    another candidate, a KV-segment split (its partial-softmax combine), sinks
-    and LSE (extra buffers and epilogues the adapter does not supply), ragged
-    tail tiles, the bottom-right band, and paged or varlen layouts."""
+    The uniform-probability proof and the key-permutation bound both cover every
+    single-pass dense variant, so tile, grid, persistence, fast exp2 and
+    scheduling knobs are deliberately free: a retune keeps running, and a defect
+    in any of them still fails the lane's policy. What they do not cover is
+    refused here, before any launch, as a failure: another candidate, a
+    KV-segment split (its partial-softmax combine), sinks and LSE (extra buffers
+    and epilogues the adapter does not supply), ragged tail tiles, the
+    bottom-right band, and paged or varlen layouts."""
     subject = DENSE_SUBJECTS[arch]
     if tuning_spec.path != "dense":
         raise AssertionError(f"dispatch returned path={tuning_spec.path!r}")
@@ -159,7 +215,7 @@ def _verify_resolved_spec(arch: str, case: UniformCase, tuning_spec) -> None:
         "num_kv_heads": case.nhead_k,
         "head_size": case.head_dim,
         "dtype": case.dtype,
-        "causal": True,
+        "causal": case.mask != "none",
         "sliding_window": case.window if case.mask == "window" else 0,
     }
     for field, value in expected.items():
@@ -170,33 +226,31 @@ def _verify_resolved_spec(arch: str, case: UniformCase, tuning_spec) -> None:
             )
     if spec.use_sinks:
         raise AssertionError(
-            "the uniform-probability check requires attention sinks to be disabled"
+            "the oracle-free dense checks require attention sinks to be disabled"
         )
     if spec.emit_lse:
         raise AssertionError(
-            "the uniform-probability check requires the direct non-LSE epilogue"
+            "the oracle-free dense checks require the direct non-LSE epilogue"
         )
     if spec.kv_segments != 1:
         raise AssertionError(
-            "the uniform-probability check requires single-pass KV, "
+            "the oracle-free dense checks require single-pass KV, "
             f"kv_segments={spec.kv_segments}"
         )
     if spec.ragged:
-        raise AssertionError(
-            "the uniform-probability check requires a non-ragged shape"
-        )
+        raise AssertionError("the oracle-free dense checks require a non-ragged shape")
     if spec.causal_bottom_right:
         raise AssertionError(
-            "the uniform-probability check requires the top-left causal band"
+            "the oracle-free dense checks require the top-left causal band"
         )
     if spec.paged or spec.varlen:
         raise AssertionError(
-            "the uniform-probability check requires a dense, non-paged, "
+            "the oracle-free dense checks require a dense, non-paged, "
             "non-varlen layout"
         )
 
 
-def _resolve_tuning_spec(arch: str, case: UniformCase):
+def _resolve_tuning_spec(arch: str, case: DenseCase):
     """Resolve the subject's dense candidate at its default configuration."""
     from dispatch.attention import AttentionRequest, attention_tuning_spec
 
@@ -209,7 +263,7 @@ def _resolve_tuning_spec(arch: str, case: UniformCase):
         hdim_q=case.head_dim,
         hdim_v=case.head_dim,
         arch=arch,
-        mask_type=1,
+        mask_type=_MASK_TYPES[case.mask],
         sliding_window=case.window if case.mask == "window" else 0,
         dtype=case.dtype,
     )
@@ -218,7 +272,7 @@ def _resolve_tuning_spec(arch: str, case: UniformCase):
     return tuning_spec
 
 
-def resolve_dense_subject(arch: str, case: UniformCase) -> ResolvedDenseSubject:
+def resolve_dense_subject(arch: str, case: DenseCase) -> ResolvedDenseSubject:
     """Resolve one supported case on one architecture."""
     _validate_supported_case(arch, case)
     tuning_spec = _resolve_tuning_spec(arch, case)
@@ -232,7 +286,7 @@ def resolve_dense_subject(arch: str, case: UniformCase) -> ResolvedDenseSubject:
 
 def run_dense_case(
     arch: str,
-    case: UniformCase,
+    case: DenseCase,
     q: np.ndarray,
     k: np.ndarray,
     v: np.ndarray,
@@ -280,7 +334,7 @@ def run_dense_case(
         k=device["k"],
         v=device["v"],
         out=device["out"],
-        scale=1.0 / math.sqrt(case.head_dim),
+        scale=softmax_scale(case),
     )
     runtime.sync()
     out = host["out"]
