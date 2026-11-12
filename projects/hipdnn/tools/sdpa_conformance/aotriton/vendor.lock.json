@@ -1,35 +1,36 @@
 {
   "collection": {
     "0": {
-      "default": 3917,
-      "forward": 497088
+      "default": 4658,
+      "forward": 497264
     },
     "1": {
-      "default": 183161,
-      "forward": 177408
+      "default": 185252,
+      "forward": 177584
     },
     "2": {
-      "default": 413561,
-      "forward": 177408
+      "default": 415652,
+      "forward": 177584
     },
     "3": {
-      "default": 499409,
-      "forward": 177408
+      "default": 501500,
+      "forward": 177584
     }
   },
   "files": {
     "LICENSE": "47fb6a076a04a40545bee723a9b7f25e9e2084e22065044b10352e2c46d0c349",
-    "modules/flash/tests/_common_test.py": "f4b2138184a910e8d26d489bed2efb1c7f0a28e1f7f57f6cae5aadd8aa066aad",
-    "modules/flash/tests/_core_test_backward.py": "677b3e45760ba265612096ba7cbb4a6373abfa50b75f5114f5b7476878f89901",
+    "modules/flash/tests/_common_test.py": "06bf7372163ca14ef5d6be23955e88224a240103989ee9ee0cb5cd41d14accaf",
+    "modules/flash/tests/_core_test_backward.py": "e2b681a46318ad1d3c88db19571cbb83a66c73ad8b0597aa848860ff2d92fe1c",
     "modules/flash/tests/_core_test_common_mistakes.py": "03dbef536923a3f88a912654cfd0a5e3ec87c96f3204b8d9c4c089dfbcb68b67",
     "modules/flash/tests/_perf_report.py": "ed9c1be402fe1ee5ebc4a38ae88cbefd74a57df371bee999669c6779fa699277",
-    "modules/flash/tests/adiffs/gfx1100.txt": "b956ad1baa48bc4ed5c3c80c0b23945efe5d5ecbb3ba2cacfafabd9a9ffa7409",
+    "modules/flash/tests/adiffs/gfx1100.txt": "ddc5c56b9a0c16829fe6a7a88f2702e4873d3aea99957c45638be37fd5494260",
     "modules/flash/tests/adiffs/gfx1150.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "modules/flash/tests/adiffs/gfx1151.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "modules/flash/tests/adiffs/gfx1201.txt": "cd08c2c2a4e8b80e0468288109858159d9174d34f0f64bc987112cd1d3295b1b",
-    "modules/flash/tests/adiffs/gfx90a.txt": "e4d6743ebd652412bd27b10f7e9f380bcd38c2e45ae980e85a8c598c084253a0",
-    "modules/flash/tests/adiffs/gfx950.txt": "034d038f4922f4e50d3a30377705a3033117ed592ba8cb982a2ce8d216fc51cf",
-    "modules/flash/tests/attn_torch_function.py": "681ed1b6ac21a2bf8ee9c892de6678c85536f19010692f637a20fe65cf131d14",
+    "modules/flash/tests/adiffs/gfx1201.txt": "ae2069e12b2b410effb627f4b7d37eeb2c72e24cc9e10b26b65849c75b225367",
+    "modules/flash/tests/adiffs/gfx90a.txt": "25133061907f8b8bb37ce26cf270fce7ada24641869e898a9369e52ff6e5cea5",
+    "modules/flash/tests/adiffs/gfx942.txt": "a7765490fa52b6083d060de3ce97f9cd6a726b2a7fbffacac101198dc130d594",
+    "modules/flash/tests/adiffs/gfx950.txt": "efe0f6ae6265e16a822abecfe7e0b0433c9ed50a0065db0bd9f4a684812f9571",
+    "modules/flash/tests/attn_torch_function.py": "bcdfb8f18f067db25cba1c3cee56e0cb2fe2a6c6d7ecc4b1046967690295d3e1",
     "modules/flash/tests/bwd_preprocess.py": "c576eee7d4eb14bde3128ae9cc28008ed341cb648ee5e5d0e005c675705e4b93",
     "modules/flash/tests/bwd_split_kernel.py": "4d7a21ba527ce603feae97fbe8a6e68214bb8d5ac575977fe640c1debf68e449",
     "modules/flash/tests/conftest.py": "bc3db073973edd68691e9b246f6082a02cb51d3a48dfbbe56cd5133a3ce4b271",
@@ -38,18 +39,18 @@
     "modules/flash/tests/performance_backward.py": "79fb54060ec70d3ec22b279022207cb4d9ac16990acc32fbe214a477e940ceed",
     "modules/flash/tests/performance_forward.py": "40b16e41dfa51e5adbed6db5c008283f2311389e6c7fc5a8be14e762d66496e0",
     "modules/flash/tests/pytest2entry.py": "cc328bbb6ec768ce1340c51736c4f5120d606902dd5ec7066787490158cef4a8",
-    "modules/flash/tests/test_backward.py": "cf2decf8524aafd7d441a9fcf499d36e618763733d14b529b8128013f74ae3e1",
-    "modules/flash/tests/test_forward.py": "a3993d41e2ed297792de582ca64de28494a8f973675c649172e979d333bdff57",
-    "modules/flash/tests/test_varlen.py": "5628843b224f68e7686ae5f8bc4934ababdb64e6dcbd28a5335e7192568a06f1",
-    "modules/flash/tests/test_varlen_translation.cc": "44619c289a0c7647d9f2b0d6072dca89f930ed259ac26039102d5f81371d6f7d",
+    "modules/flash/tests/test_backward.py": "103dded1123ad3f16b3d31b28ad0c79c2c3461115deabc42d873d2a7b5d6e8a5",
+    "modules/flash/tests/test_forward.py": "4ece75ece17cfb039714a1ca2148e5a8dbd99ced3d73b73c6552f718c821316e",
+    "modules/flash/tests/test_varlen.py": "892576d203a425dcf4c2033f79864c6cbfb292f7bb3af0e7db284e4a6695161e",
+    "modules/flash/tests/test_varlen_translation.cc": "2532654be17b71018ee1e83ba854dedbf46ac76777068cdf9ef18b70f139c2c1",
     "modules/flash/tests/triton_attn_torch_function.py": "3a6ce27bba8bed11231c6c9ce40d65adb7563df2445ee361e7c6d815620e9004",
     "modules/flash/tests/triton_backward.py": "9d34bd9638c549eb7b10562f881a322968b06a8408403274208665c7a2ed0be7",
     "modules/flash/tests/triton_forward.py": "c53d04a1018d0c9724fd76d45259160d4e56ef8f3ea3c756f2bc31de80ba8149",
-    "modules/flash/tests/varlen_attn_torch_function.py": "5dadcc08392b70462d8fe1c4ffaa1e1c1bd42ffd7a81b61a943ca973dadceb7d",
+    "modules/flash/tests/varlen_attn_torch_function.py": "c2a2b4f1e8c1b1832efce0e7d3744edf5b988533d6e8f62a372f2f38fd7932b6",
     "python/pytest-gpu-lease/pytest_gpu_lease/__init__.py": "4ae07baa3970d124e69eaf055929484d144d260b3605c9def64e2180dd48c9b6",
     "python/pytest-gpu-lease/pytest_gpu_lease/plugin.py": "3aac8899de76be322c04d18c2a11f471137127d97daeb340be8ca286efee0027",
     "python/pytest-gpu-lease/pytest_gpu_lease/watchdog.py": "2f52e14a5225ff58f7e87282688ba0003d563037f469d3196fe6400bdf05852d"
   },
-  "pin": "619f3636a23d94d6f258c89ff4ca7005afc019bb",
+  "pin": "a09a19361408e25ac515d4fd59970cd249a1b4a6",
   "replaced": "modules/flash/tests/aotriton_flash.py"
 }
