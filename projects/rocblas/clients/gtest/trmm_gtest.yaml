@@ -622,6 +622,8 @@ Tests:
   category: pre_checkin
   function:
     - trmm
+    - trmm_batched
+    - trmm_strided_batched
   precision: *single_double_precisions_complex_real
   side: [L, R]
   uplo: [L, U]
@@ -629,13 +631,17 @@ Tests:
   diag: [N]
   matrix_size: *internal_api_matrix_size_range_inplace
   alpha_beta: *complex_alpha
-  api: INTERNAL
+  stride_scale: [ 1 ]
+  batch_count: [ 3 ]
+  api: [ INTERNAL, INTERNAL_64 ]
   outofplace: [false      ] # test inplace
 
 - name: trmm_internal_api_outofplace
   category: pre_checkin
   function:
     - trmm
+    - trmm_batched
+    - trmm_strided_batched
   precision: *single_double_precisions_complex_real
   side: [L, R]
   uplo: [L, U]
@@ -643,8 +649,51 @@ Tests:
   diag: [N]
   matrix_size: *internal_api_matrix_size_range_outofplace
   alpha_beta: *complex_alpha
-  api: INTERNAL
+  stride_scale: [ 1 ]
+  batch_count: [ 3 ]
+  api: [ INTERNAL, INTERNAL_64 ]
   outofplace: [       true] # test outofplace
+
+# device pointer mode internal calls must stay capturable in a hip graph
+# device pointer mode gemm reads alpha and beta back to host, so graph capture is
+# only possible for sizes that never reach gemm (k <= NB in-place, k <= 512 out-of-place)
+- name: trmm_internal_api_graph_test_inplace
+  category: pre_checkin
+  function:
+    - trmm
+    - trmm_strided_batched
+  precision: *single_double_precisions_complex_real
+  side: [L, R]
+  uplo: [L]
+  transA: [N, C]
+  diag: [N]
+  matrix_size:
+    - { M:    10, N:    10, lda:    10, ldb:    10, ldc:   10 }
+    - { M:    16, N:    12, lda:    16, ldb:    17, ldc:   17 }
+  alpha_beta: *complex_alpha
+  stride_scale: [ 1 ]
+  batch_count: [ 2 ]
+  pointer_mode_host: false
+  graph_test: true
+  api: INTERNAL
+  outofplace: false
+
+- name: trmm_internal_api_graph_test_outofplace
+  category: pre_checkin
+  function: trmm
+  precision: *single_double_precisions_complex_real
+  side: [L, R]
+  uplo: [L]
+  transA: [N, C]
+  diag: [N]
+  matrix_size:
+    - { M:   100, N:    90, lda:   100, ldb:   101, ldc:  102 }
+    - { M:   512, N:   500, lda:   512, ldb:   513, ldc:  514 }
+  alpha_beta: *complex_alpha
+  pointer_mode_host: false
+  graph_test: true
+  api: INTERNAL
+  outofplace: true
 
 - name: trmm_NaN
   category: pre_checkin
