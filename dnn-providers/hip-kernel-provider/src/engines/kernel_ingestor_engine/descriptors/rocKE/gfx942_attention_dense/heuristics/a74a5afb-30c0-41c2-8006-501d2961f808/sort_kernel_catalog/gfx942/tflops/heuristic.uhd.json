@@ -1,0 +1,139 @@
+{
+  "version": "1.0",
+  "id": "8d71f503-ac1b-4bd0-aa53-fb93f364381a",
+  "name": "hipkernel:Gfx942AttentionDense kernel ranker (L2, gfx942, tflops)",
+  "adapter": "tree_data",
+  "features_signature": [
+    "$kernel.block_m",
+    "$kernel.block_n",
+    "$kernel.causal_diag_split",
+    "$kernel.lds_k_group_pad",
+    "$kernel.lds_row_pad",
+    "$kernel.nonpersist_decode",
+    "$kernel.persist_decode",
+    "$kernel.persistent",
+    "$kernel.pv_priority",
+    "$kernel.use_cfvst",
+    "$kernel.use_exp2_fast",
+    "$kernel.v_reg_prefetch",
+    "$gfx942_attention_dense.causal",
+    "$graph.logical_bytes",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].generate_stats",
+        false
+      ]
+    },
+    "$graph.nodes[0].k.data_type",
+    "$graph.nodes[0].k.dims[0]",
+    "$graph.nodes[0].k.dims[1]",
+    "$graph.nodes[0].k.dims[2]",
+    "$graph.nodes[0].k.dims[3]",
+    "$graph.nodes[0].k.numel",
+    "$graph.nodes[0].k.strides[0]",
+    "$graph.nodes[0].k.strides[1]",
+    "$graph.nodes[0].k.strides[2]",
+    "$graph.nodes[0].o.data_type",
+    "$graph.nodes[0].o.dims[0]",
+    "$graph.nodes[0].o.dims[1]",
+    "$graph.nodes[0].o.dims[2]",
+    "$graph.nodes[0].o.dims[3]",
+    "$graph.nodes[0].o.numel",
+    "$graph.nodes[0].o.strides[0]",
+    "$graph.nodes[0].o.strides[1]",
+    "$graph.nodes[0].o.strides[2]",
+    "$graph.nodes[0].q.data_type",
+    "$graph.nodes[0].q.dims[0]",
+    "$graph.nodes[0].q.dims[1]",
+    "$graph.nodes[0].q.dims[2]",
+    "$graph.nodes[0].q.dims[3]",
+    "$graph.nodes[0].q.numel",
+    "$graph.nodes[0].q.strides[0]",
+    "$graph.nodes[0].q.strides[1]",
+    "$graph.nodes[0].q.strides[2]",
+    "$graph.nodes[0].v.data_type",
+    "$graph.nodes[0].v.dims[0]",
+    "$graph.nodes[0].v.dims[1]",
+    "$graph.nodes[0].v.dims[2]",
+    "$graph.nodes[0].v.dims[3]",
+    "$graph.nodes[0].v.numel",
+    "$graph.nodes[0].v.strides[0]",
+    "$graph.nodes[0].v.strides[1]",
+    "$graph.nodes[0].v.strides[2]",
+    "$graph.tensor_count",
+    "$graph.tensors[0].data_type",
+    "$graph.tensors[0].dims[0]",
+    "$graph.tensors[0].dims[1]",
+    "$graph.tensors[0].dims[2]",
+    "$graph.tensors[0].dims[3]",
+    "$graph.tensors[0].strides[0]",
+    "$graph.tensors[0].strides[1]",
+    "$graph.tensors[0].strides[2]",
+    "$graph.tensors[1].data_type",
+    "$graph.tensors[1].dims[0]",
+    "$graph.tensors[1].dims[1]",
+    "$graph.tensors[1].dims[2]",
+    "$graph.tensors[1].dims[3]",
+    "$graph.tensors[1].strides[0]",
+    "$graph.tensors[1].strides[1]",
+    "$graph.tensors[1].strides[2]",
+    "$graph.tensors[2].data_type",
+    "$graph.tensors[2].dims[0]",
+    "$graph.tensors[2].dims[1]",
+    "$graph.tensors[2].dims[2]",
+    "$graph.tensors[2].dims[3]",
+    "$graph.tensors[2].strides[0]",
+    "$graph.tensors[2].strides[1]",
+    "$graph.tensors[2].strides[2]",
+    "$graph.tensors[3].data_type",
+    "$graph.tensors[3].dims[0]",
+    "$graph.tensors[3].dims[1]",
+    "$graph.tensors[3].dims[2]",
+    "$graph.tensors[3].dims[3]",
+    "$graph.tensors[3].strides[0]",
+    "$graph.tensors[3].strides[1]",
+    "$graph.tensors[3].strides[2]"
+  ],
+  "features_hash": "sha256:da6d8c49cb3b2052",
+  "trained_against": {
+    "ued": {
+      "id": "a74a5afb-30c0-41c2-8006-501d2961f808",
+      "revision": "1.0"
+    },
+    "kmd": {
+      "id": "daac46c8-97fb-4012-b00c-500f0bf3b955",
+      "revision": "1.0"
+    },
+    "umd": [
+      {
+        "id": "c1a8caf0-42aa-4852-a967-23328e1f6eb7",
+        "revision": "1.0"
+      }
+    ],
+    "feature_semantics_revision": 1
+  },
+  "objective": "max",
+  "score": {
+    "metric": "tflops",
+    "calibrated": true,
+    "transform": "log"
+  },
+  "tree_data": {
+    "artifact": "model.bin",
+    "hash": "0dd57b4ab6c1a2306f5b4279d1c3166ae54321a217aa6b99a72ad8f24d02ba31"
+  },
+  "categorical_encoding": {
+    "$kernel.nonpersist_decode": {
+      "bt_hkv_minor": 0,
+      "hq_minor_swz": 1,
+      "qb_minor": 2
+    },
+    "$kernel.persist_decode": {
+      "auto": 0,
+      "bt_hkv_minor": 1,
+      "hkv_major": 2,
+      "hq_minor_swz": 3,
+      "qb_major": 4
+    }
+  }
+}

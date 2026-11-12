@@ -8,7 +8,10 @@
   },
   "metadata": "daac46c8-97fb-4012-b00c-500f0bf3b955",
   "sort_kernel_catalog": {
-    "default": "964ee17d-c2cf-4420-a0c3-f2bc92e8a5c8"
+    "default": "964ee17d-c2cf-4420-a0c3-f2bc92e8a5c8",
+    "gfx942": [
+      "8d71f503-ac1b-4bd0-aa53-fb93f364381a"
+    ]
   },
   "knobs": [
     "block_m",
@@ -26,5 +29,10 @@
     "use_cfvst",
     "use_exp2_fast",
     "lds_k_group_pad"
-  ]
+  ],
+  "predict_engine": {
+    "gfx942": [
+      "3a8f1ffa-2304-46e1-ba46-3f686cb7401a"
+    ]
+  }
 }

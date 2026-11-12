@@ -49,6 +49,13 @@ engine:
   - use_exp2_fast
   - lds_k_group_pad
   heuristic: native
+  heuristics:
+    sort_kernel_catalog:
+      gfx942:
+      - 8d71f503-ac1b-4bd0-aa53-fb93f364381a
+    predict_engine:
+      gfx942:
+      - 3a8f1ffa-2304-46e1-ba46-3f686cb7401a
 kmd_fields:
 - name: dtype
   type: string

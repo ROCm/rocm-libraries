@@ -380,6 +380,31 @@ inline std::optional<std::string>
     return std::nullopt;
 }
 
+// Who ordered that engine's catalog: the `decided_by` of the trained ranker's `uhd trace` line
+// ("model", or "declared_order" when it could not rank and fell back), or nullopt when no
+// trained ranker traced for that engine (the native score decided, or there was one candidate).
+inline std::optional<std::string>
+    rankingDecidedBy(const ServedEngine& engine,
+                     const hipdnn_test_sdk::utilities::IsolatedLogRecorder& recorder)
+{
+    const std::string traced = std::string("uhd trace: engine '") + engine.name + "'";
+    const std::string field = " decided_by=";
+    for(const auto& log : recorder.getRecordedLogs())
+    {
+        if(log.message.find(traced) == std::string::npos)
+        {
+            continue;
+        }
+        const auto at = log.message.find(field);
+        if(at != std::string::npos)
+        {
+            const auto begin = at + field.size();
+            return log.message.substr(begin, log.message.find(' ', begin) - begin);
+        }
+    }
+    return std::nullopt;
+}
+
 // Prints `KNOB_SELECTED <case> <kernelId>` when the case ends, however it ends, so a run's
 // log carries the selected kernel of every case, including a failing one.
 class SelectedKernelReport
