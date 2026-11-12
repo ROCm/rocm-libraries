@@ -13,6 +13,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "migration-scripts"))
+from bundle_utils import (  # noqa: E402
+    ABSENT_TENSORS_KEY,
+    UNRESOLVED,
+    absent_case_problems,
+    walk_dotted_path,
+)
+
 ALLOWED_TIERS = {"quick", "standard", "comprehensive", "full"}
 BUNDLE_SIZE_WARNING_BYTES = 1024 * 1024
 BUNDLE_SIZE_ERROR_BYTES = 2 * 1024 * 1024
@@ -1368,6 +1376,11 @@ def extract_placeholder(value: object) -> str | None:
     return None
 
 
+def first_path_token(path: str) -> str:
+    """The first dotted component of a placeholder path: ``a.b`` -> ``a``."""
+    return path.split(".", 1)[0]
+
+
 def collect_placeholders(
     value: object, scalar_fields: set[str], attribute_fields: set[str]
 ) -> None:
@@ -1444,6 +1457,7 @@ def resolve_case_tensor_specs(
     sweep_path: Path,
     case_label: str,
     result: VerificationResult,
+    absent_uids: set[int] = frozenset(),
 ) -> dict[int, dict[str, object]]:
     if not isinstance(case_tensors, list):
         result.error(
@@ -1483,6 +1497,9 @@ def resolve_case_tensor_specs(
             )
             continue
 
+        if uid in absent_uids:
+            continue
+
         required_fields = tensor_placeholder_fields.get(uid, set())
         spec: dict[str, object] = dict(literal_tensor_specs.get(uid, {}))
         for field_name in TEMPLATE_TENSOR_FIELDS + OPTIONAL_TEMPLATE_TENSOR_FIELDS:
@@ -1504,7 +1521,7 @@ def resolve_case_tensor_specs(
 
         case_tensor_specs[uid] = spec
 
-    missing_uids = template_tensor_uids - set(case_tensor_specs)
+    missing_uids = template_tensor_uids - absent_uids - set(case_tensor_specs)
     if missing_uids:
         result.error(
             sweep_path,
@@ -1609,6 +1626,8 @@ def validate_sweep_case(
     result: VerificationResult,
     stats_tensor_uids: set[int] | None = None,
     length_uids: dict[int, int] | None = None,
+    absent_uids: set[int] = frozenset(),
+    tensor_scoped_fields: set[tuple[int, str]] | None = None,
 ) -> None:
     if not isinstance(case, dict):
         result.error(sweep_path, f"case {index} is not an object")
@@ -1637,16 +1656,51 @@ def validate_sweep_case(
         )
         values = {}
 
+    # An absent tensor leaves the template before placeholder expansion, so its
+    # placeholders need no values.
+    tensor_scoped_fields = {
+        (uid, f) for uid, f in tensor_scoped_fields or () if uid not in absent_uids
+    }
+
     for field_name in sorted(scalar_fields):
-        if field_name not in values:
+        if first_path_token(field_name) not in values:
             result.error(
                 sweep_path,
                 f"case '{case_label}' is missing placeholder value for '{field_name}'",
             )
+    # A placeholder on a tensor's own template object resolves the way the C++
+    # loader's resolvePlaceholder() does: first by walking the full (possibly
+    # dotted) path through that tensor's own values.tensors[] entry, then -- if
+    # that walk fails -- by walking the same path through the top-level values
+    # instead. There is no restriction on which field names may be looked up
+    # per-tensor.
+    raw_case_tensors = {}
+    if isinstance(values.get("tensors"), list):
+        for tensor in values["tensors"]:
+            if isinstance(tensor, dict) and is_integer(tensor.get("uid")):
+                raw_case_tensors.setdefault(tensor["uid"], tensor)
+    for uid, field_name in sorted(tensor_scoped_fields):
+        tensor_entry = raw_case_tensors.get(uid)
+        resolved = (
+            walk_dotted_path(tensor_entry, field_name)
+            if tensor_entry is not None
+            else UNRESOLVED
+        )
+        if resolved is UNRESOLVED:
+            resolved = walk_dotted_path(values, field_name)
+        if resolved is UNRESOLVED:
+            result.error(
+                sweep_path,
+                f"case '{case_label}' is missing placeholder value for '{field_name}'",
+                uid,
+            )
+    used_keys = {first_path_token(f) for f in scalar_fields} | {
+        first_path_token(f) for _, f in tensor_scoped_fields
+    }
     for key in values:
         if key in ("tensors", "attributes"):
             continue
-        if key not in scalar_fields:
+        if key not in used_keys:
             result.warning(
                 sweep_path, f"case '{case_label}' has unused values entry '{key}'"
             )
@@ -1680,6 +1734,7 @@ def validate_sweep_case(
         sweep_path,
         case_label,
         result,
+        absent_uids,
     )
     validated_specs = validate_case_tensor_shapes(
         case_tensor_specs, sweep_path, case_label, result
@@ -1828,10 +1883,19 @@ def validate_sweep_bundle(
         if key in ("tensors", "nodes"):
             continue
         collect_placeholders(value, scalar_fields, attribute_fields)
+    tensor_scoped_fields: set[tuple[int, str]] = set()
+    for tensor in tensors:
+        if not isinstance(tensor, dict) or not is_integer(tensor.get("uid")):
+            continue
+        fields: set[str] = set()
+        for key, value in tensor.items():
+            if key not in TEMPLATE_TENSOR_FIELDS:
+                collect_placeholders(value, fields, attribute_fields)
+        tensor_scoped_fields.update((tensor["uid"], f) for f in fields)
 
     version = sweep.get("version")
-    if not is_integer(version) or version < 1:
-        result.error(sweep_path, "version is required and must be a positive integer")
+    if not is_integer(version) or version not in (1, 2):
+        result.error(sweep_path, "version is required and must be 1 or 2")
 
     cases = sweep.get("cases")
     if not isinstance(cases, list) or not cases:
@@ -1842,6 +1906,19 @@ def validate_sweep_bundle(
     seen_case_ids: set[str] = set()
 
     for index, case in enumerate(cases):
+        absent_uids: set[int] = set()
+        if isinstance(case, dict) and ABSENT_TENSORS_KEY in case:
+            case_id = case.get("id")
+            case_label = (
+                case_id if isinstance(case_id, str) and case_id else f"#{index}"
+            )
+            for problem in absent_case_problems(sweep, template, case):
+                result.error(
+                    sweep_path, f"case '{case_label}' absent_tensors: {problem}"
+                )
+            absent = case[ABSENT_TENSORS_KEY]
+            if isinstance(absent, list):
+                absent_uids = {uid for uid in absent if is_integer(uid)}
         validate_sweep_case(
             case,
             index,
@@ -1859,6 +1936,8 @@ def validate_sweep_bundle(
             result,
             stats_tensor_uids,
             length_uids,
+            absent_uids,
+            tensor_scoped_fields,
         )
 
 

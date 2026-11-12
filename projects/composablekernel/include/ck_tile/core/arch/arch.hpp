@@ -115,6 +115,7 @@ enum struct amdgcn_target_id
     GFX1150         = 0x1150,
     GFX1151         = 0x1151,
     GFX1152         = 0x1152,
+    GFX1251         = 0x1251,
     GFX1153         = 0x1153,
     GFX11_GENERIC   = 0x11FF,
     GFX1170         = 0x1170,
@@ -161,6 +162,7 @@ CK_TILE_HOST_DEVICE constexpr const char* to_string(amdgcn_target_id target_id)
     case amdgcn_target_id::GFX1201: return "GFX1201";
     case amdgcn_target_id::GFX12_GENERIC: return "GFX12_GENERIC";
     case amdgcn_target_id::GFX1250: return "GFX1250";
+    case amdgcn_target_id::GFX1251: return "GFX1251";
     case amdgcn_target_id::AMDGCN_SPIRV: return "AMDGCN_SPIRV";
     case amdgcn_target_id::HOST: return "HOST";
     }
@@ -178,6 +180,7 @@ enum struct amdgcn_target_family_id
     // GFX12 family, its MMA builtins and data-type ABI differ, so it must not be treated as a
     // GFX12-family device (which would incorrectly enable the legacy GFX12 WMMA specializations).
     GFX1250 = 0x1250,
+    GFX1251 = 0x1251,
     HOST    = 0x00,
 };
 
@@ -192,6 +195,7 @@ CK_TILE_HOST_DEVICE constexpr const char* to_string(amdgcn_target_family_id fami
     case amdgcn_target_family_id::GFX117: return "GFX117";
     case amdgcn_target_family_id::GFX12: return "GFX12";
     case amdgcn_target_family_id::GFX1250: return "GFX1250";
+    case amdgcn_target_family_id::GFX1251: return "GFX1251";
     case amdgcn_target_family_id::HOST: return "HOST";
     }
     __builtin_unreachable();
@@ -311,7 +315,16 @@ static constexpr auto make_amdgcn_gfx1250_target()
 {
     return amdgcn_target<targetId,
                          amdgcn_target_family_id::GFX1250,
-                         amdgcn_target_arch_id::RDNA,
+                         amdgcn_target_arch_id::CDNA,
+                         amdgcn_target_wave_size_id::WAVE32>{};
+}
+
+template <amdgcn_target_id targetId>
+static constexpr auto make_amdgcn_gfx1251_target()
+{
+    return amdgcn_target<targetId,
+                         amdgcn_target_family_id::GFX1251,
+                         amdgcn_target_arch_id::CDNA,
                          amdgcn_target_wave_size_id::WAVE32>{};
 }
 
@@ -364,6 +377,12 @@ template <typename CompilerTarget>
 static constexpr bool is_target_family_gfx1250()
 {
     return CompilerTarget::FAMILY_ID == amdgcn_target_family_id::GFX1250;
+}
+
+template <typename CompilerTarget>
+static constexpr bool is_target_family_gfx1251()
+{
+    return CompilerTarget::FAMILY_ID == amdgcn_target_family_id::GFX1251;
 }
 
 template <typename CompilerTarget>
@@ -427,6 +446,13 @@ static constexpr bool is_target_wave_size_64()
     }                                                                     \
     else
 
+#define MAP_COMPILER_STATE_TO_GFX1251_TARGET(COMPILER_STATE, TARGET_ID)   \
+    if constexpr(amdgcn_compiler_target_state::COMPILER_STATE)            \
+    {                                                                     \
+        return make_amdgcn_gfx1251_target<amdgcn_target_id::TARGET_ID>(); \
+    }                                                                     \
+    else
+
 /**
  * @brief Returns the amdgcn_target of the current compiler pass.
  * @note This is where we tie the compiler state to our internal target architecture representation
@@ -462,6 +488,7 @@ constexpr auto get_compiler_target()
     MAP_COMPILER_STATE_TO_GFX12_TARGET(CK_TILE_ARCH_GFX1201, GFX1201);
     MAP_COMPILER_STATE_TO_GFX12_TARGET(CK_TILE_ARCH_GFX12_GENERIC, GFX12_GENERIC);
     MAP_COMPILER_STATE_TO_GFX1250_TARGET(CK_TILE_ARCH_GFX1250, GFX1250);
+    MAP_COMPILER_STATE_TO_GFX1251_TARGET(CK_TILE_ARCH_GFX1251, GFX1251);
 
     // SPIR-V: target-agnostic, resolved at runtime
     if constexpr(amdgcn_compiler_target_state::CK_TILE_ARCH_SPIRV)
@@ -539,6 +566,10 @@ static constexpr auto getCMakeCompilerTarget()
     {
         return make_amdgcn_gfx1250_target<id>();
     }
+    else if constexpr(id == amdgcn_target_id::GFX1251)
+    {
+        return make_amdgcn_gfx1251_target<id>();
+    }
     else
     {
 #if USE_NEW_UNIFIED_FRAMEWORK // Avoid hard errors for third parties including arch.hpp
@@ -560,6 +591,7 @@ static constexpr auto getCMakeCompilerTarget()
 #undef MAP_COMPILER_STATE_TO_GFX11_TARGET
 #undef MAP_COMPILER_STATE_TO_GFX12_TARGET
 #undef MAP_COMPILER_STATE_TO_GFX1250_TARGET
+#undef MAP_COMPILER_STATE_TO_GFX1251_TARGET
 
 // Sanity check: device compile must have a valid target architecture
 static_assert(!amdgcn_compiler_target_state::CK_TILE_DEVICE_COMPILE ||
@@ -619,6 +651,7 @@ CK_TILE_HOST auto hip_device_prop_gcn_arch_name_to_amdgcn_target_id(char const* 
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_TARGET_ID("gfx1201", GFX1201);
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_TARGET_ID("gfx12_generic", GFX12_GENERIC);
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_TARGET_ID("gfx1250", GFX1250);
+    MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_TARGET_ID("gfx1251", GFX1251);
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_TARGET_ID("amdgcnspirv", AMDGCN_SPIRV);
 
     // Default case: return HOST target if no match is found
@@ -716,6 +749,13 @@ using enable_if_target_family_gfx12_t =
  */
 template <typename CompilerTarget>
 using enable_if_target_gfx1250_t = enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX1250>;
+
+/**
+ * @brief SFINAE enabler for GFX1251 target
+ * @tparam CompilerTarget The compiler target to check
+ */
+template <typename CompilerTarget>
+using enable_if_target_gfx1251_t = enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX1251>;
 
 /**
  * @brief SFINAE enabler for CDNA architecture targets
@@ -822,6 +862,14 @@ static constexpr auto make_amdgcn_gfx1250_target(amdgcn_target_id targetId)
                          .WAVE_SIZE_ID = amdgcn_target_wave_size_id::WAVE32};
 }
 
+static constexpr auto make_amdgcn_gfx1251_target(amdgcn_target_id targetId)
+{
+    return amdgcn_target{.TARGET_ID    = targetId,
+                         .FAMILY_ID    = amdgcn_target_family_id::GFX1251,
+                         .ARCH_ID      = amdgcn_target_arch_id::RDNA,
+                         .WAVE_SIZE_ID = amdgcn_target_wave_size_id::WAVE32};
+}
+
 static constexpr bool is_target_family_gfx9(amdgcn_target target)
 {
     return target.FAMILY_ID == amdgcn_target_family_id::GFX9;
@@ -850,6 +898,11 @@ static constexpr bool is_target_family_gfx12(amdgcn_target target)
 static constexpr bool is_target_family_gfx1250(amdgcn_target target)
 {
     return target.FAMILY_ID == amdgcn_target_family_id::GFX1250;
+}
+
+static constexpr bool is_target_family_gfx1251(amdgcn_target target)
+{
+    return target.FAMILY_ID == amdgcn_target_family_id::GFX1251;
 }
 
 static constexpr bool is_target_arch_cdna(amdgcn_target target)
@@ -903,6 +956,12 @@ static constexpr bool is_target_wave_size_64(amdgcn_target target)
         return make_amdgcn_gfx1250_target(amdgcn_target_id::TARGET_ID); \
     }
 
+#define MAP_COMPILER_STATE_TO_GFX1251_TARGET(COMPILER_STATE, TARGET_ID) \
+    if constexpr(amdgcn_compiler_target_state::COMPILER_STATE)          \
+    {                                                                   \
+        return make_amdgcn_gfx1251_target(amdgcn_target_id::TARGET_ID); \
+    }
+
 /*! @brief Returns the amdgcn_target of the current compiler pass.
  * @note This is where we tie the compiler state to our internal target architecture representation
  * at compile time.
@@ -937,6 +996,7 @@ CK_TILE_HOST_DEVICE constexpr auto get_compiler_target()
     MAP_COMPILER_STATE_TO_GFX12_TARGET(CK_TILE_ARCH_GFX1201, GFX1201);
     MAP_COMPILER_STATE_TO_GFX12_TARGET(CK_TILE_ARCH_GFX12_GENERIC, GFX12_GENERIC);
     MAP_COMPILER_STATE_TO_GFX1250_TARGET(CK_TILE_ARCH_GFX1250, GFX1250);
+    MAP_COMPILER_STATE_TO_GFX1251_TARGET(CK_TILE_ARCH_GFX1251, GFX1251);
 
     // Default to HOST
     return amdgcn_target{};
@@ -948,6 +1008,7 @@ CK_TILE_HOST_DEVICE constexpr auto get_compiler_target()
 #undef MAP_COMPILER_STATE_TO_GFX11_TARGET
 #undef MAP_COMPILER_STATE_TO_GFX12_TARGET
 #undef MAP_COMPILER_STATE_TO_GFX1250_TARGET
+#undef MAP_COMPILER_STATE_TO_GFX1251_TARGET
 
 // Sanity check: device compile must have a valid target architecture
 static_assert(!amdgcn_compiler_target_state::CK_TILE_DEVICE_COMPILE ||
@@ -994,6 +1055,13 @@ static_assert(!amdgcn_compiler_target_state::CK_TILE_HOST_COMPILE ||
     }                                                                                      \
     else
 
+#define MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_GFX1251_TARGET(NAME_STRING, TARGET_ID) \
+    if constexpr(str.find(NAME_STRING) != std::string::npos)                               \
+    {                                                                                      \
+        return make_amdgcn_gfx1251_target(amdgcn_target_id::TARGET_ID);                    \
+    }                                                                                      \
+    else
+
 /**
  * @brief Converts a lower-case string to the corresponding amdgcn_target_arch_id value.
  *        Returns amdgcn_target_arch_id::HOST if no match is found.
@@ -1031,6 +1099,7 @@ CK_TILE_HOST auto hip_device_prop_gcn_arch_name_to_amdgcn_target(char const* tes
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_GFX12_TARGET("gfx1201", GFX1201);
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_GFX12_TARGET("gfx12_generic", GFX12_GENERIC);
     MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_GFX1250_TARGET("gfx1250", GFX1250);
+    MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_GFX1251_TARGET("gfx1251", GFX1251);
     // Default case
     return amdgcn_target{};
 }
@@ -1040,6 +1109,7 @@ CK_TILE_HOST auto hip_device_prop_gcn_arch_name_to_amdgcn_target(char const* tes
 #undef MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_GFX11_TARGET
 #undef MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_GFX12_TARGET
 #undef MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_GFX1250_TARGET
+#undef MAP_HIP_DEVICE_PROP_GCN_ARCH_NAME_STRING_TO_GFX1251_TARGET
 
 /**
  * @brief SFINAE enabler for a compiler target if the target id is in the list of supported target
@@ -1224,6 +1294,7 @@ CK_TILE_DEVICE index_t get_block_id() { return blockIdx.x; }
 
 CK_TILE_DEVICE void block_sync_load_raw(index_t cnt = 0)
 {
+    // Note: this doesn't force LDS to complete.
 #ifdef __gfx12__
     asm volatile("s_wait_loadcnt %0 \n"
                  "s_barrier_signal -1 \n"
@@ -1451,7 +1522,10 @@ CK_TILE_DEVICE void s_wait_dscnt()
 template <index_t N = 0>
 CK_TILE_DEVICE void s_wait_asynccnt()
 {
-#if defined(__gfx125__)
+#if CK_TILE_HAS_ASYNCMARK
+    // We consistently asyncmark DMAs, so this will have the same effect on gfx12+.
+    __builtin_amdgcn_wait_asyncmark(N);
+#elif defined(__gfx125__)
     __builtin_amdgcn_s_wait_asynccnt(N);
 #else
     (void)N;
@@ -1487,7 +1561,55 @@ CK_TILE_DEVICE void s_waitcnt_barrier()
 template <index_t lgkmcnt = 0>
 CK_TILE_DEVICE void block_sync_lds()
 {
-    s_waitcnt_barrier<waitcnt_arg::kMaxVmCnt, waitcnt_arg::kMaxExpCnt, lgkmcnt>();
+    // LDS fence: synchronize LDS across a workgroup barrier. The release/acquire fences make the
+    // barrier visible to the LLVM memory model so the optimizer cannot move LDS accesses across
+    // it; "local" keeps them LDS-only (no VMEM synchronization is added). The explicit
+    // lgkmcnt/dscnt wait is kept as a workaround for ROCm 7.2-10.1 where a release fence's wait
+    // could be elided when it was the first memory op in a loop (loop-carried counts mishandled);
+    // see ac4f0dc9 / ck::block_sync_lds.
+    s_waitcnt_lgkm<lgkmcnt>();
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
+#if defined(__gfx12__)
+    __builtin_amdgcn_s_barrier_signal(-1);
+    __builtin_amdgcn_s_barrier_wait(-1);
+#else
+    __builtin_amdgcn_s_barrier();
+#endif
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+}
+
+// Pre-asyncmark gfx9 FALLBACK for publishing direct/async global->LDS data across a barrier. The
+// explicit vmcnt(0) is load-bearing -- a workgroup-scope fence does not emit a vmem wait (verified
+// in ISA) -- and the "global" fence stops the optimizer from moving the VMEM loads across the
+// barrier; block_sync_lds() then does the LDS-side wait + "local" fence + barrier. Prefer
+// block_sync_lds_async_load() below; do not call directly from pipelines.
+template <index_t vmcnt = 0>
+CK_TILE_DEVICE void block_sync_lds_after_global_load()
+{
+    s_waitcnt<vmcnt, waitcnt_arg::kMaxExpCnt, waitcnt_arg::kMaxLgkmCnt>();
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "global");
+    block_sync_lds();
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "global");
+}
+
+// Completes the outstanding asynchronous global->LDS DMA loads (down to `vmcnt` still in flight)
+// and publishes the LDS to the workgroup with a barrier. On the asyncmark path this is arch-
+// agnostic: wait_asyncmark(vmcnt) drains the async loads and is visible to the LLVM memory model
+// (no manual fence), then block_sync_lds() barriers. Otherwise it falls back per arch (gfx125
+// asynccnt, gfx9 via block_sync_lds_after_global_load). Pipelines should call this rather than
+// block_sync_lds_after_global_load() directly.
+template <index_t vmcnt = 0>
+CK_TILE_DEVICE void block_sync_lds_async_load()
+{
+#if CK_TILE_HAS_ASYNCMARK
+    __builtin_amdgcn_wait_asyncmark(vmcnt);
+    block_sync_lds();
+#elif defined(__gfx125__)
+    __builtin_amdgcn_s_wait_asynccnt(vmcnt);
+    block_sync_lds();
+#else
+    block_sync_lds_after_global_load<vmcnt>();
+#endif
 }
 
 template <index_t tensorcnt = 0>
@@ -1508,12 +1630,25 @@ CK_TILE_DEVICE void s_wait_tensorcnt_barrier()
 template <index_t vmcnt = 0>
 CK_TILE_DEVICE void block_sync_lds_direct_load()
 {
-#if defined(__gfx125__)
+    // Publishes direct-to-LDS loaded data to a workgroup, keeping a partial `vmcnt`
+    // worth of async loads in flight (the partial count must be preserved).
+#if CK_TILE_HAS_ASYNCMARK
+    // The loads were issued as async-form DMAs with an asyncmark() each; wait_asyncmark(vmcnt)
+    // drains to `vmcnt` outstanding (memory-model-visible, no manual fence) and block_sync_lds()
+    // supplies the LDS "local" fence + barrier.
+    s_wait_asynccnt<vmcnt>();
+    block_sync_lds();
+#elif defined(__gfx125__)
     __builtin_amdgcn_s_wait_asynccnt(vmcnt);
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
     __builtin_amdgcn_s_barrier_signal(-1);
     __builtin_amdgcn_s_barrier_wait(-1);
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
 #else
-    s_waitcnt_barrier<vmcnt, waitcnt_arg::kMaxExpCnt, waitcnt_arg::kMaxLgkmCnt>();
+    s_waitcnt<vmcnt, waitcnt_arg::kMaxExpCnt, waitcnt_arg::kMaxLgkmCnt>();
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
+    __builtin_amdgcn_s_barrier();
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
 #endif
 }
 

@@ -63,6 +63,7 @@ class _States:
     archCaps = {"LDSBankCount": 32, "LDSBankWidth": 4, "DeviceLDS": 163840}
     laneSGPRCount = 2
     subtileLdsSwizzle = True
+    unrollIdx = 0
 
     def __init__(self):
         self.vgprPool = _Pool()
@@ -88,6 +89,10 @@ class _Writer:
 
     def isConstUnitStride(self, ref):
         return False
+
+    def globalReadIncsOperand(self, tc, loopIdx):
+        from rocisa.container import sgpr
+        return sgpr("GlobalReadIncs%s+%u" % (tc, loopIdx))
 
     def allocTmpSgpr(self, num, alignment=None, tag=None):
         import contextlib
@@ -309,6 +314,25 @@ def test_gr_pointer_advances_by_one_depthu_window(stack):
     writer, ti = _tile(stack, kernel=kernel)
     module = GR._emitGRPtrUpdate_TLU1(ti.gr.config.tag, ti.gr, ti, writer, kernel)
     assert module is not None
+
+
+@pytest.mark.parametrize("stack", [_XOR_STACK, _COL_SCATTER_STACK])
+def test_gr_pointer_advance_holds_the_window_in_a_pinned_sgpr(stack):
+    """The K-window must land in GlobalReadIncs, never in a pool temp.
+
+    PostLoopStoreInNll splices the fused store's coordinate VALU into this
+    block's MFMA gaps after both streams are generated, so a released
+    allocTmpSgpr register gets handed to the coord stream as well and the two
+    live ranges overlap (an NT fp4 store then wrote ~1.4GB past D). Pinning the
+    window removes the only pool temp this block ever held.
+    """
+    kernel = _kernel()
+    writer, ti = _tile(stack, kernel=kernel)
+    before = writer.sgprPool.size()
+    module = GR._emitGRPtrUpdate_TLU1(ti.gr.config.tag, ti.gr, ti, writer, kernel)
+    text = str(module)
+    assert "sgprGlobalReadIncs%s" % ti.tc in text
+    assert writer.sgprPool.size() == before, "advance must not draw a pool temp"
 
 
 def test_gr_row_major_load_is_emitted():

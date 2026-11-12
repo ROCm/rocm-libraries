@@ -12,9 +12,10 @@ indexing), no 128-bit transpose read. The relabel chain probe is lowered too.
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 
 import pytest
-from rocke.core.ir import F16, IRBuilder
+from rocke.core.ir import F16, F32, IRBuilder, VectorType
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as lower
 
 from kernels.common._attention_bwd_caps import (
@@ -51,6 +52,24 @@ def _cases():
 
 
 # --- geometry -------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("arch", BWD_ARCHES)
+def test_zero_acc_uses_accumulator_source_not_result_width(arch):
+    g = BlockGemm(arch, "fp16", 16, 16, 16, (1, 1))
+    atom = g.op
+    source_width = atom.srcs[2].frag_len + 1
+    # Deliberately asymmetric metadata tests the emission role, not a new ISA ABI.
+    g.__dict__["op"] = replace(
+        atom, srcs=(*atom.srcs[:2], replace(atom.srcs[2], frag_len=source_width))
+    )
+    b = IRBuilder("source_accumulator_width")
+    acc = g.zero_acc(b)
+    assert g.op.dst.frag_len == atom.dst.frag_len
+    assert len(acc) == g.frags_m and all(len(row) == g.frags_n for row in acc)
+    assert all(
+        value.type == VectorType(F32, source_width) for row in acc for value in row
+    )
 
 
 def test_geometry_and_wave_ranges():
@@ -260,7 +279,7 @@ def test_mma_frag_issues_the_fragment_chain_of_mma(arch):
     dt = "fp16"
     g = BlockGemm(arch, dt, 32, 64, 64, (2, 1))
     b = IRBuilder("mma_frag_probe")
-    n = g.op.c_frag_len
+    n = g.op.dst.frag_len
     a = [[b.zero_vec_f32(4) for _ in range(g.k_steps)] for _ in range(g.frags_m)]
     bb = [[b.zero_vec_f32(4) for _ in range(g.k_steps)] for _ in range(g.frags_n)]
     acc = g.zero_acc(b)

@@ -889,6 +889,18 @@ llvm_amdgcn_raw_buffer_load_lds(int32x4_t rsrc,
                                 index_t offset,
                                 index_t aux) __asm("llvm.amdgcn.raw.buffer.load.lds");
 
+// Same as above but takes the new-style buffer resource and a runtime size (the
+// __builtin_amdgcn_raw_ptr_buffer_load_lds requires a compile-time immediate size, which is too
+// restrictive here).
+__device__ void
+llvm_amdgcn_raw_ptr_buffer_load_lds(__amdgpu_buffer_rsrc_t rsrc,
+                                    __attribute__((address_space(3))) uint32_t* lds_ptr,
+                                    index_t size,
+                                    index_t voffset,
+                                    index_t soffset,
+                                    index_t offset,
+                                    index_t aux) __asm("llvm.amdgcn.raw.ptr.buffer.load.lds");
+
 #ifndef __HIPCC_RTC__
 template <typename T, index_t NumElemsPerThread>
 __device__ void amd_direct_load_global_to_lds(const T* global_base_ptr,
@@ -913,11 +925,26 @@ __device__ void amd_direct_load_global_to_lds(const T* global_base_ptr,
     ignore = bytes_per_thread;
 #endif
 
-    const int32x4_t src_resource =
-        make_wave_buffer_resource(global_base_ptr, src_element_space_size);
+    const __amdgpu_buffer_rsrc_t src_resource =
+        make_wave_buffer_resource_new(global_base_ptr, src_element_space_size);
     const index_t global_offset_bytes = is_valid ? global_offset * sizeof(T) : 0x80000000;
 
-#if CK_USE_AMD_LDS_DIRECT_LOAD_INLINE_ASM
+#if CK_HAS_ASYNCMARK
+    // Use asyncmark so that waits on "normal" global memory don't get interleaved with the waits
+    // needed for async DMAs to complete, since it's hard to get LLVM's alias analysis to do the
+    // right thing without markers.
+    __attribute__((address_space(3))) uint32_t* lds_ptr =
+#ifndef CK_CODE_GEN_RTC
+        reinterpret_cast<__attribute__((address_space(3))) uint32_t*>(
+            reinterpret_cast<uintptr_t>(lds_base_ptr + lds_offset));
+#else
+        reinterpret_cast<__attribute__((address_space(3))) uint32_t*>(
+            reinterpret_cast<size_t>(lds_base_ptr + lds_offset));
+#endif
+    __builtin_amdgcn_raw_ptr_buffer_load_async_lds(
+        src_resource, lds_ptr, bytes_per_thread, global_offset_bytes, 0, 0, 0);
+    __builtin_amdgcn_asyncmark();
+#elif CK_USE_AMD_LDS_DIRECT_LOAD_INLINE_ASM
     T* lds_ptr = lds_base_ptr + lds_offset;
 #ifndef CK_CODE_GEN_RTC
     auto const lds_ptr_sgpr =
@@ -941,7 +968,7 @@ __device__ void amd_direct_load_global_to_lds(const T* global_base_ptr,
             reinterpret_cast<size_t>(lds_base_ptr + lds_offset));
 #endif
 
-    llvm_amdgcn_raw_buffer_load_lds(
+    llvm_amdgcn_raw_ptr_buffer_load_lds(
         src_resource, lds_ptr, bytes_per_thread, global_offset_bytes, 0, 0, 0);
 #endif
 }
@@ -1242,6 +1269,9 @@ __device__ void amd_async_load_global_to_lds(const T* global_base_ptr,
             reinterpret_cast<DstVecType*>(lds_base_ptr + lds_offset + static_dst_offset);
         *lds_ptr = {};
     }
+#if CK_HAS_ASYNCMARK
+    __builtin_amdgcn_asyncmark();
+#endif
 }
 
 template <typename T,

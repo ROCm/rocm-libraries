@@ -44,7 +44,6 @@ from rocke.helpers.tiling.tensor_transforms.ranges import (
     Side,
     _required_checks,
 )
-from rocke.tests.gpu import current_device_arch
 from rocke.tests.source_tree import require_dsl_docs, require_library_tree
 
 from ._harness import (
@@ -458,11 +457,12 @@ def test_a_halo_column_fed_into_an_xor_is_valid_exactly_on_the_lanes_inside_the_
 # --- on the GPU -------------------------------------------------------------------------------
 
 
-def test_gpu_a_conv_input_tile_with_a_halo_and_ragged_edges_is_valid_exactly_where_enumerated():
+def test_gpu_a_conv_input_tile_with_a_halo_and_ragged_edges_is_valid_exactly_where_enumerated(
+    any_gpu: str,
+):
     """A 2 x 5 x 7 x 3 input, a 3 x 3 filter with pad 1: rows past ``N * Ho * Wo`` (the ragged M
     tile), columns past ``Y * X * C`` (the K tail) and halo taps outside ``H`` / ``W`` on both
     sides are invalid; every other access is valid."""
-    current_device_arch()
     n, h, w, c = 2, 5, 7, 3
     graph, tensor = _conv(n, h, w, c)
     m_length, k_length = graph.inputs["m"], graph.inputs["k"]
@@ -479,7 +479,7 @@ def test_gpu_a_conv_input_tile_with_a_halo_and_ragged_edges_is_valid_exactly_whe
         assert all(r.valid is not None for r in results)
         return [r.valid for r in results]
 
-    stored = run_lanes(build, n_blocks=n_blocks)
+    stored = run_lanes(any_gpu, build, n_blocks=n_blocks)
     for blk, t in itertools.product(range(n_blocks), range(WAVE)):
         for j, k in enumerate(constants):
             m, kk = blk * 16 + t // 4, (t % 4) * 8 + k

@@ -233,6 +233,7 @@ namespace rocRoller
 
         auto newAddr = addr;
         co_yield genLocalAddr(newAddr);
+        co_yield addLargerOffset2Addr(offset, newAddr, dsReadTrMnemonic);
         auto ctx = m_context.lock();
 
         // TODO: consider multiple load case

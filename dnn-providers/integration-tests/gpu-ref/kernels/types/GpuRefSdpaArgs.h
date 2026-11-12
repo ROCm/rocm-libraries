@@ -222,7 +222,11 @@ struct SdpaRaggedFwdArgs
 
 // --- fp8 dequantize (the SDPA forward's dequantize-first fp8 wrapper) ---
 // out (packed float, x's dims) = float(x) * descale(b, h / headsPerKv). The descale is a scalar
-// (both strides zero) or [B, H_kv, 1, 1]; nullptr means 1.
+// (both strides zero) or [B, H_kv, 1, 1]; nullptr means 1. dims is the logical [B, H, S, D]: x's
+// own dims when dense, [B, H, max_seq_kv, D] for a paged container, whose logical row s of batch b
+// lives at block pageTable[b * pageTableStrB + (s / blockSize) * pageTableStrT], slot
+// s % blockSize (out keeps the container's packed layout). Rows s >= seqLen[b * seqLenStride]
+// (padding; seqLen nullptr = none) are neither read nor written (SEM-008).
 // NOLINTBEGIN(misc-non-private-member-variables-in-classes,
 //             readability-identifier-naming,
 //             modernize-avoid-c-arrays)
@@ -235,6 +239,10 @@ struct SdpaDequantArgs
     const float* descale;
     long long descaleBatchStride, descaleHeadStride;
     long long headsPerKv;
+    const int* seqLen;
+    long long seqLenStride;
+    const int* pageTable;
+    long long pageTableStrB, pageTableStrT, blockSize;
 };
 // NOLINTEND(misc-non-private-member-variables-in-classes,
 //           readability-identifier-naming,

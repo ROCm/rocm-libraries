@@ -28,20 +28,32 @@
 // The generic rocsparse_spgeam API is driven through
 //  - the combined analysis/compute flow and the split symbolic/numeric flow,
 //  - the output matrix C created before or after the analysis,
-//  - host and device scalars,
+//  - host and device scalars, including scalars whose datatype differs from
+//    the compute datatype,
 //  - index base one (and mixed bases) for A, B and C,
 //  - the stage state machine (each stage after the listed stage sequences,
 //    including the numeric-only flow: numeric analysis + numeric compute on a
-//    fresh descriptor with a user supplied sparsity pattern of C), and
-//  - the argument checks.
+//    fresh descriptor with a user supplied sparsity pattern of C),
+//  - the argument checks, and
+//  - transposed and conjugate transposed operands, which are not implemented.
 // Every successful flow compares the whole C (row pointer, column indices and
 // values) against a host reference C = alpha * A + beta * B.
 //
 #include "unit_test_extra_common.hpp"
 
 #include <memory>
+#include <vector>
 
 using namespace extra_ut;
+
+namespace rocsparse_ut
+{
+    template <>
+    inline rocsparse_datatype dt_of<int32_t>()
+    {
+        return rocsparse_datatype_i32_r;
+    }
+}
 
 namespace
 {
@@ -297,6 +309,182 @@ namespace
             }
     }
 
+    // C = alpha * A + beta * B with the matrices in the compute type T and alpha / beta
+    // in the scalar type S (S != T). The values have small integer parts, exact in both
+    // types.
+    template <typename T, typename S>
+    void mixed_scalar_geam(rocsparse_handle handle, bool device, bool split)
+    {
+        SCOPED_TRACE(testing::Message()
+                     << "compute " << rocsparse_ut::dt_of<T>() << " scalar "
+                     << rocsparse_ut::dt_of<S>() << " device " << device << " split " << split);
+        using I = int32_t;
+        Rng       rng(311);
+        const Csr A = random_csr<T>(9, 7, 4, rng);
+        const Csr B = random_csr<T>(9, 7, 4, rng);
+        ASSERT_GT(A.nnz(), 0);
+        ASSERT_GT(B.nnz(), 0);
+        const S   alpha_h = S(2), beta_h = S(-1);
+        const Bsr want = bsr_geam(to_c(alpha_h), bsr_from_csr(A), to_c(beta_h), bsr_from_csr(B));
+
+        DevBuf<I> pA, pB, cA, cB;
+        DevBuf<T> vA, vB;
+        SpmatH    sA, sB, sC;
+        ASSERT_NO_FATAL_FAILURE((make_csr_descr<T, I, I>(sA, A, pA, cA, vA)));
+        ASSERT_NO_FATAL_FAILURE((make_csr_descr<T, I, I>(sB, B, pB, cB, vB)));
+        DevBuf<S> d_alpha(std::vector<S>{alpha_h}), d_beta(std::vector<S>{beta_h});
+        ASSERT_TRUE(d_alpha.ptr && d_beta.ptr);
+
+        PointerModeGuard mode(handle, mode_of(device));
+        SpgeamDescrH     h;
+        ASSERT_NE(h.d, nullptr);
+        ASSERT_NO_FATAL_FAILURE(spgeam_set_inputs(
+            handle,
+            h.d,
+            rocsparse_ut::dt_of<S>(),
+            rocsparse_ut::dt_of<T>(),
+            device ? static_cast<const void*>(d_alpha.ptr) : static_cast<const void*>(&alpha_h),
+            device ? static_cast<const void*>(d_beta.ptr) : static_cast<const void*>(&beta_h)));
+
+        auto run = [&](rocsparse_spgeam_stage stage, rocsparse_spmat_descr C) {
+            size_t bs = 0;
+            EXPECT_EQ(rocsparse_spgeam_buffer_size(handle, h.d, sA.p, sB.p, C, stage, &bs, nullptr),
+                      rocsparse_status_success);
+            DevBuf<char> tmp(bs);
+            return rocsparse_spgeam(handle, h.d, sA.p, sB.p, C, stage, bs, tmp.ptr, nullptr);
+        };
+
+        ASSERT_EQ(
+            run(split ? rocsparse_spgeam_stage_symbolic_analysis : rocsparse_spgeam_stage_analysis,
+                nullptr),
+            rocsparse_status_success);
+        int64_t nnz_C = -1;
+        ASSERT_EQ(rocsparse_spgeam_get_output(
+                      handle, h.d, rocsparse_spgeam_output_nnz, &nnz_C, sizeof(nnz_C), nullptr),
+                  rocsparse_status_success);
+        ASSERT_EQ(nnz_C, want.nnzb());
+
+        // C's values sit between two guard pads of `pad` elements.
+        constexpr size_t pad   = 64;
+        const T          guard = T(-12345);
+        DevBuf<I>        pC(static_cast<size_t>(A.m) + 1), cC(static_cast<size_t>(nnz_C));
+        DevBuf<T>        vC_padded(std::vector<T>(static_cast<size_t>(nnz_C) + 2 * pad, guard));
+        ASSERT_TRUE(pC.ptr && cC.ptr && vC_padded.ptr);
+        ASSERT_EQ(rocsparse_create_csr_descr(&sC.p,
+                                             A.m,
+                                             A.n,
+                                             nnz_C,
+                                             pC.ptr,
+                                             cC.ptr,
+                                             vC_padded.ptr + pad,
+                                             rocsparse_indextype_i32,
+                                             rocsparse_indextype_i32,
+                                             rocsparse_index_base_zero,
+                                             rocsparse_ut::dt_of<T>()),
+                  rocsparse_status_success);
+        if(split)
+        {
+            for(auto stage : {rocsparse_spgeam_stage_symbolic_compute,
+                              rocsparse_spgeam_stage_numeric_analysis,
+                              rocsparse_spgeam_stage_numeric_compute})
+                ASSERT_EQ(run(stage, sC.p), rocsparse_status_success);
+        }
+        else
+        {
+            ASSERT_EQ(run(rocsparse_spgeam_stage_compute, sC.p), rocsparse_status_success);
+        }
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        const std::vector<T> all = vC_padded.host();
+        const size_t         nnz = static_cast<size_t>(nnz_C);
+        for(size_t k = 0; k < pad; ++k)
+        {
+            EXPECT_EQ(all[k], guard) << "front pad " << k;
+            EXPECT_EQ(all[pad + nnz + k], guard) << "back pad " << k;
+        }
+        std::vector<I> hp = pC.host(), hc = cC.host();
+        std::vector<T> hv(all.begin() + pad, all.begin() + pad + nnz);
+        sort_rows(hp, 0, hc, hv);
+        expect_idx_equal<I>(hp, want.ptr, 0, "C row_ptr");
+        expect_idx_equal<I>(hc, want.col, 0, "C col_ind");
+        expect_vec_equal<T>(hv, want.val, "C val");
+    }
+
+    // A transposed or conjugate transposed operand: rocsparse_spgeam_buffer_size and
+    // rocsparse_spgeam return not_implemented at every stage, both when the operations
+    // are set before the analysis and when they are changed after an analysis with
+    // operation none. The values of C are not written, and once the operations are
+    // none again the compute stage gives the reference C.
+    template <typename T, typename I, typename J>
+    void transposed_geam(rocsparse_handle    handle,
+                         bool                device,
+                         rocsparse_operation op_A,
+                         rocsparse_operation op_B)
+    {
+        SCOPED_TRACE(testing::Message()
+                     << "op_A " << op_A << " op_B " << op_B << " device " << device);
+        constexpr auto ni = rocsparse_status_not_implemented;
+        Geam<T, I, J>  g;
+        ASSERT_NO_FATAL_FAILURE(g.init(handle, device, 401));
+        ASSERT_NO_FATAL_FAILURE(g.create_C(g.want.nnzb()));
+        const cplx           sentinel(-7.0, 0.0);
+        const std::vector<T> filled(g.vC.n, from_c<T>(sentinel));
+        ASSERT_EQ(hipMemcpy(g.vC.ptr, filled.data(), g.vC.n * sizeof(T), hipMemcpyHostToDevice),
+                  hipSuccess);
+
+        auto expect_C_untouched = [&](const char* what) {
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            const std::vector<T> got = g.vC.host();
+            for(size_t k = 0; k < got.size(); ++k)
+                EXPECT_TRUE(close<T>(got[k], sentinel))
+                    << what << ": C value " << k << " was written";
+        };
+        auto set_ops = [&](rocsparse_spgeam_descr d, rocsparse_operation a, rocsparse_operation b) {
+            ASSERT_EQ(rocsparse_spgeam_set_input(
+                          handle, d, rocsparse_spgeam_input_operation_A, &a, sizeof(a), nullptr),
+                      rocsparse_status_success);
+            ASSERT_EQ(rocsparse_spgeam_set_input(
+                          handle, d, rocsparse_spgeam_input_operation_B, &b, sizeof(b), nullptr),
+                      rocsparse_status_success);
+        };
+        DevBuf<char> tmp(size_t(4096));
+        auto expect_rejected = [&](rocsparse_spgeam_descr d, stage_t s, rocsparse_spmat_descr C) {
+            size_t bs = 0;
+            EXPECT_EQ(rocsparse_spgeam_buffer_size(handle, d, g.sA.p, g.sB.p, C, s, &bs, nullptr),
+                      ni)
+                << "buffer_size " << stage_name(s);
+            EXPECT_EQ(rocsparse_spgeam(handle, d, g.sA.p, g.sB.p, C, s, tmp.n, tmp.ptr, nullptr),
+                      ni)
+                << stage_name(s);
+        };
+
+        // The operations are set before the first stage.
+        {
+            SpgeamDescrH h;
+            ASSERT_NE(h.d, nullptr);
+            g.set_inputs(h.d);
+            ASSERT_NO_FATAL_FAILURE(set_ops(h.d, op_A, op_B));
+            for(stage_t s : {AN, SA, NA})
+                expect_rejected(h.d, s, nullptr);
+            for(stage_t s : {CO, SC, NC})
+                expect_rejected(h.d, s, g.sC.p);
+            ASSERT_NO_FATAL_FAILURE(expect_C_untouched("operations set before the analysis"));
+        }
+
+        // The analysis runs with operation none, then the operations change.
+        ASSERT_NO_FATAL_FAILURE(g.ok(AN, true));
+        ASSERT_NO_FATAL_FAILURE(set_ops(g.descr, op_A, op_B));
+        for(stage_t s : {CO, SC, NC})
+            expect_rejected(g.descr, s, g.sC.p);
+        ASSERT_NO_FATAL_FAILURE(expect_C_untouched("operations changed after the analysis"));
+
+        // The rejected calls left the descriptor usable.
+        ASSERT_NO_FATAL_FAILURE(
+            set_ops(g.descr, rocsparse_operation_none, rocsparse_operation_none));
+        ASSERT_NO_FATAL_FAILURE(g.ok(CO, true));
+        ASSERT_NO_FATAL_FAILURE(g.check_C());
+    }
+
     struct ExtraSpgeam : public rocsparse_ut::HandleTest
     {
     };
@@ -548,4 +736,46 @@ TEST_F(ExtraSpgeam, argument_errors)
     ASSERT_NO_FATAL_FAILURE(g.ok(AN, true));
     ASSERT_NO_FATAL_FAILURE(g.ok(CO, true));
     ASSERT_NO_FATAL_FAILURE(g.check_C());
+}
+
+// Only rocsparse_operation_none is supported for A and B; the transpose and conjugate
+// transpose operations return not_implemented.
+TEST_F(ExtraSpgeam, transposed_operations_not_implemented)
+{
+    constexpr auto op_n = rocsparse_operation_none;
+    constexpr auto op_t = rocsparse_operation_transpose;
+    constexpr auto op_c = rocsparse_operation_conjugate_transpose;
+    ASSERT_NO_FATAL_FAILURE((transposed_geam<float, int32_t, int32_t>(handle, false, op_t, op_n)));
+    ASSERT_NO_FATAL_FAILURE((transposed_geam<float, int32_t, int32_t>(handle, false, op_n, op_t)));
+    ASSERT_NO_FATAL_FAILURE((transposed_geam<float, int32_t, int32_t>(handle, false, op_t, op_c)));
+    ASSERT_NO_FATAL_FAILURE(
+        (transposed_geam<rocsparse_float_complex, int32_t, int32_t>(handle, false, op_c, op_c)));
+    ASSERT_NO_FATAL_FAILURE((transposed_geam<double, int64_t, int32_t>(handle, false, op_t, op_t)));
+    ASSERT_NO_FATAL_FAILURE(
+        (transposed_geam<rocsparse_float_complex, int64_t, int64_t>(handle, true, op_n, op_c)));
+}
+
+// The scalar datatype differs from the compute datatype, including real or integer
+// scalars with a complex compute type: alpha and beta are converted to the compute
+// type, C equals the host reference C = alpha * A + beta * B, and nothing is written
+// outside C.
+TEST_F(ExtraSpgeam, scalar_type_differs_from_compute_type)
+{
+    for(const bool device : {false, true})
+        for(const bool split : {false, true})
+        {
+            ASSERT_NO_FATAL_FAILURE((mixed_scalar_geam<float, double>(handle, device, split)));
+            ASSERT_NO_FATAL_FAILURE((mixed_scalar_geam<double, float>(handle, device, split)));
+            ASSERT_NO_FATAL_FAILURE(
+                (mixed_scalar_geam<rocsparse_float_complex, float>(handle, device, split)));
+            ASSERT_NO_FATAL_FAILURE(
+                (mixed_scalar_geam<rocsparse_float_complex, double>(handle, device, split)));
+            ASSERT_NO_FATAL_FAILURE(
+                (mixed_scalar_geam<rocsparse_double_complex, float>(handle, device, split)));
+            ASSERT_NO_FATAL_FAILURE(
+                (mixed_scalar_geam<rocsparse_double_complex, double>(handle, device, split)));
+            ASSERT_NO_FATAL_FAILURE((mixed_scalar_geam<float, int32_t>(handle, device, split)));
+            ASSERT_NO_FATAL_FAILURE(
+                (mixed_scalar_geam<rocsparse_double_complex, int32_t>(handle, device, split)));
+        }
 }

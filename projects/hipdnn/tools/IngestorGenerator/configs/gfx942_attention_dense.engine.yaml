@@ -1,0 +1,561 @@
+# Engine manifest for hipkernel:Gfx942AttentionDense.
+#
+# Everything about the engine that rocKE does not know: identity, KMD schema,
+# metadata mapping, the registry space its kernels are drawn from, and how that
+# space is reduced. The shipped kernel set is configs/gfx942_attention_dense.yaml;
+# tests/test_registry_regeneration.py gates it against this manifest.
+#
+#     python tools/registry_enumerator.py --manifest configs/gfx942_attention_dense.engine.yaml --out <scratch>/config.yaml
+#
+# The generated packs/Gfx942AttentionDenseNative.cpp and
+# tests/TestGfx942AttentionDenseMatchers.cpp are stubs; the provider's copies are
+# hand-maintained and must not be overwritten.
+#
+# Unlike gfx950, the gfx942 dense body reads batch, both sequence lengths AND both
+# head counts from kernel params (Gfx942AttentionDenseSpec.runtime_param_fields), so a
+# kernel is identified by dtype, head size, mask, window and tuning alone. The head
+# counts therefore sit in enumerate.fixed rather than in a cell axis: every head
+# configuration lands on the same kernels.
+#
+# emit_lse is a compile-time variant: an emit_lse kernel also writes the softmax
+# log-sum-exp (the graph's stats output) through one trailing lse_ptr argument. It is a
+# cell axis, a KMD field and a name slot, so an LSE kernel and its non-LSE twin with the
+# same knobs never share a catalog key, and every non-LSE kernel keeps its spec and code
+# object (emit_lse=False emits no new IR).
+#
+# The launch grid is a tuning arm inside a cell: the one-CTA-per-block grid at the
+# qb_minor, bt_hkv_minor or hq_minor_swz block order, or (D128) the persistent grid of
+# num_persistent = 304 CTAs at a pinned persist_decode, whose launch adds a fast-division
+# magic/shift pair per decode divisor. persistent, num_persistent, persist_decode and
+# nonpersist_decode are KMD fields the native dispatch reads to size the grid and pass
+# those kernargs, and every field that varies inside a cell is also an engine knob.
+#
+# The body levers (causal_diag_split, o_store_width, pv_loop_order, use_cfvst,
+# use_exp2_fast, lds_k_group_pad) are performance knobs too: the full enumeration, which
+# the reduction sweep installs whole, crosses them one at a time with every cell's arms.
+# use_cfvst and use_exp2_fast are projected through the kernel's own resolvers, so their KMD
+# value is the resolved one. Window cells get the same arms but stay floor-only (no swept
+# graph has a window), so window_wave_skip and the narrow-window tile are held.
+
+dialect: packaged
+authored_subpath: rocKE/gfx942_attention_dense
+engine:
+  name: hipkernel:Gfx942AttentionDense
+  census_name_symbol: GFX942_ATTENTION_DENSE_ENGINE_NAME
+  sdk_version: 1.0.0
+  knobs:
+  - block_m
+  - block_n
+  - lds_row_pad
+  - pv_priority
+  - persistent
+  - persist_decode
+  - nonpersist_decode
+  - lds_num_buffers
+  - v_reg_prefetch
+  - causal_diag_split
+  - o_store_width
+  - pv_loop_order
+  - use_cfvst
+  - use_exp2_fast
+  - lds_k_group_pad
+  heuristic: native
+kmd_fields:
+- name: dtype
+  type: string
+- name: head_size
+  type: int
+  default_value: 128
+- name: num_query_heads
+  type: int
+  default_value: 8
+- name: num_kv_heads
+  type: int
+  default_value: 8
+- name: causal
+  type: int
+  default_value: 1
+- name: ragged
+  type: int
+  default_value: 0
+- name: sliding_window
+  type: int
+  default_value: 0
+# 1: the kernel writes LSE through a trailing lse_ptr and serves only graphs that bind a
+# stats output; 0: neither. A record omitting it completes to the non-LSE kernel.
+- name: emit_lse
+  type: int
+  default_value: 0
+- name: batch
+  type: int
+  default_value: 1
+- name: seqlen_q
+  type: int
+  default_value: 512
+- name: seqlen_kv
+  type: int
+  default_value: 512
+# Tile metadata, also public engine knobs. A record omitting either field
+# completes to the 256/64 baseline tile through these defaults.
+- name: block_m
+  type: int
+  default_value: 256
+- name: block_n
+  type: int
+  default_value: 64
+# Performance knobs at the policy default the kernel resolves when left unset
+# (Gfx942AttentionDenseSpec.lds_row_pad / pv_priority).
+- name: lds_row_pad
+  type: int
+  default_value: 8
+- name: pv_priority
+  type: int
+  default_value: 0
+# The launch grid. persistent 0: one CTA per (query block, query head, batch) in the
+# nonpersist_decode block order. persistent 1: num_persistent CTAs stride over the work
+# items in the persist_decode order. Each grid ignores the other's fields; a record
+# omitting them completes to the qb_minor grid, and a persistent record must name its
+# decode ('auto' is refused: it resolves from the build shape).
+- name: persistent
+  type: int
+  default_value: 0
+- name: num_persistent
+  type: int
+  default_value: 304
+- name: persist_decode
+  type: string
+  default_value: auto
+- name: nonpersist_decode
+  type: string
+  default_value: qb_minor
+# Split KV: a build with kv_segments > 1 multiplies the grid's x extent and needs a
+# workspace and a combine launch the native dispatch does not make, so kernel_match
+# serves 1 only. Every variant is built at 1; the field is here so a split-KV record is
+# refused rather than launched on the wrong grid.
+- name: kv_segments
+  type: int
+  default_value: 1
+# Persistent-grid pipeline levers: two K buffers, V register prefetch. Body only.
+- name: lds_num_buffers
+  type: int
+  default_value: 1
+- name: v_reg_prefetch
+  type: int
+  default_value: 0
+# Body-only levers at the kernel's own default when unset (Gfx942AttentionDenseSpec):
+# the causal diagonal split, the O store width in elements, the PV loop order and the
+# D64 K-group LDS pad.
+- name: causal_diag_split
+  type: int
+  default_value: 0
+- name: o_store_width
+  type: int
+  default_value: 4
+- name: pv_loop_order
+  type: string
+  default_value: d_major
+- name: lds_k_group_pad
+  type: int
+  default_value: 8
+# The conflict-free V store and the single-instruction exp2, as the kernel resolves them
+# (resolved_use_cfvst / resolved_use_exp2_fast): their policy depends on head size, dtype
+# and grid, so they have no default and every record carries the resolved value.
+- name: use_cfvst
+  type: int
+- name: use_exp2_fast
+  type: int
+specialization:
+  metadata_fields:
+  - dtype
+  - head_size
+  - num_query_heads
+  - num_kv_heads
+  - causal
+  - ragged
+  - sliding_window
+  - emit_lse
+  - batch
+  - seqlen_q
+  - seqlen_kv
+  - block_m
+  - block_n
+  - lds_row_pad
+  - pv_priority
+  - persistent
+  - num_persistent
+  - persist_decode
+  - nonpersist_decode
+  - kv_segments
+  - lds_num_buffers
+  - v_reg_prefetch
+  - causal_diag_split
+  - o_store_width
+  - pv_loop_order
+  - lds_k_group_pad
+  - use_cfvst
+  - use_exp2_fast
+  matcher_only_fields: []
+  vocabulary:
+    dtype:
+      bf16: BF16
+      fp16: FP16
+  bindings:
+    dtype:
+      field: dtype
+    head_size:
+      field: head_size
+    num_query_heads:
+      field: num_query_heads
+    num_kv_heads:
+      field: num_kv_heads
+    causal:
+      field: causal
+    ragged:
+      field: ragged
+    sliding_window:
+      field: sliding_window
+    emit_lse:
+      field: emit_lse
+    batch:
+      field: batch
+    seqlen_q:
+      field: seqlen_q
+    seqlen_kv:
+      field: seqlen_kv
+    block_m:
+      field: block_m
+    block_n:
+      field: block_n
+    lds_row_pad:
+      field: lds_row_pad
+    pv_priority:
+      field: pv_priority
+    persistent:
+      field: persistent
+    num_persistent:
+      field: num_persistent
+    persist_decode:
+      field: persist_decode
+    nonpersist_decode:
+      field: nonpersist_decode
+    kv_segments:
+      field: kv_segments
+    lds_num_buffers:
+      field: lds_num_buffers
+    v_reg_prefetch:
+      field: v_reg_prefetch
+    causal_diag_split:
+      field: causal_diag_split
+    o_store_width:
+      field: o_store_width
+    pv_loop_order:
+      field: pv_loop_order
+    lds_k_group_pad:
+      field: lds_k_group_pad
+    use_cfvst:
+      method: resolved_use_cfvst
+    use_exp2_fast:
+      method: resolved_use_exp2_fast
+kernel_source_kind: rocke
+workspace_policy: none
+
+pack: gfx942_attention_dense
+arch: gfx942
+provider_root: dnn-providers/hip-kernel-provider
+source: kernels/gfx942/attention_dense.py
+builder: build_attention_dense
+kernel_name_template: attention_dense.{dtype}_d{head_size}_c{causal}_swa{sliding_window}_lse{emit_lse}_bm{block_m}_bn{block_n}.gfx942
+
+# The registry space the selection is drawn from (see registry_enumerator.py).
+enumerate:
+  candidates: dispatch.attention:attention_candidates
+  request: dispatch.attention.common:AttentionRequest
+  # gfx942_dense_qbminor is the dense candidate whose default spec is the grid the
+  # native dispatch launches by default: one CTA per (query block, query head, batch)
+  # at the qb_minor block order, one KV segment. Its knob space scopes persistent,
+  # nonpersist_decode and kv_segments out (dense_rules.py), so none of its specs leaves
+  # that grid kind; it gives every cell its default spec. The other pins add the other
+  # grids the native dispatch launches, each fixed by its candidate's default spec:
+  # the D128 persistent grid (304 CTAs, decode pinned, its knob space minus the CTA
+  # count), and the bt_hkv_minor and hq_minor_swz block orders (default spec only).
+  pin:
+    - {algorithm: attention_dense, spec_id: gfx942_dense_qbminor}
+    - {algorithm: attention_dense, spec_id: gfx942_dense_persist_aot}
+    - {algorithm: attention_dense, spec_id: gfx942_dense_btminor_aot}
+    - {algorithm: attention_dense, spec_id: gfx942_dense_hqswz_aot}
+  # Request fields every cell shares. Batch, sequence lengths and head counts are
+  # runtime kernel params on gfx942, so they only seed the build-time spec.
+  fixed: {arch: gfx942, batch: 1, seqlen_q: 512, seqlen_k: 512, nhead_q: 8, nhead_k: 8}
+  # Crossed in order, first group outermost (the catalog order).
+  cells:
+    - fields: [hdim_q, hdim_v]
+      values:
+        - [64, 64]
+        - [128, 128]
+    - fields: [dtype]
+      values: [bf16, fp16]
+    # A causal sliding window is TOP_LEFT_CAUSAL plus sliding_window = W, the number
+    # of keys attended including the diagonal (the graph's left_bound). The window is
+    # baked into the kernel and must be a multiple of block_n. Sources (D64/D128 models
+    # with sliding-window layers): 128 gpt-oss (its layers carry sinks, so served once
+    # sinks land), 512 Phi-4-mini-flash-reasoning (D64), 1024 Gemma 3 27B (D128), 2048
+    # Arcee Trinity and Phi-3-medium-4k (D128; its config says 2047). 4096 (Mistral-7B
+    # v0.1, StarCoder2, Command R7B, OLMo 3, EXAONE 4.0) is a follow-up.
+    - fields: [mask_type, sliding_window]
+      values:
+        - [TOP_LEFT_CAUSAL, 0]
+        - [NO_MASK, 0]
+        - [TOP_LEFT_CAUSAL, 128]
+        - [TOP_LEFT_CAUSAL, 512]
+        - [TOP_LEFT_CAUSAL, 1024]
+        - [TOP_LEFT_CAUSAL, 2048]
+    # Innermost: each kernel's LSE twin follows it. The twin differs only in the trailing
+    # lse_ptr store, so it shares the cell's knob space.
+    - fields: [emit_lse]
+      values: [false, true]
+  sweep_level: production
+  # Every production-sweep spec sharing a cell's feature fields; the knobs it keeps
+  # are reduction.fields.performance, every other varying field is held at default.
+  space: full
+  # Fields of the registry spec every generated kernel carries: the whole
+  # Gfx942AttentionDenseSpec, so hkp_pack hydrates nothing from a changed default.
+  spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lazy_rescale, interleave, persist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, causal_bottom_right, lds_row_pad, v_row_pad, use_cfvst, use_v_swizzle, use_exp2_fast, iglp, lds_num_buffers, iglp_mode, pv_loop_order, o_store_width, pv_priority, pv_sched_fence_mask, causal_diag_split, emit_lse, nonpersist_decode, kv_segments, window_wave_skip, v_reg_prefetch, chiplet_num_xcds]
+  # Frozen build cost of a `space: slice` enumeration (unused under `space: full`, whose
+  # bound is reduction.aot_budget_per_arch).
+  max_kernels: 1600
+
+# How the variant space is reduced; copied verbatim into the generated config.
+# Feature fields define a cell; performance knobs are the tuning arms, in priority order.
+reduction:
+  fields:
+    feature: [dtype, head_size, num_query_heads, num_kv_heads, causal, sliding_window, emit_lse, ragged, batch, seqlen_q, seqlen_kv]
+    performance:
+      - {name: block_m, divides: seqlen_q}
+      - {name: block_n, divides: seqlen_kv}
+      - {name: lds_row_pad}
+      - {name: pv_priority}
+      - {name: persistent}
+      - {name: persist_decode}
+      - {name: nonpersist_decode}
+      - {name: lds_num_buffers}
+      - {name: v_reg_prefetch}
+      - {name: causal_diag_split}
+      - {name: o_store_width}
+      - {name: pv_loop_order}
+      - {name: use_cfvst, unset_resolves_by: resolved_use_cfvst}
+      - {name: use_exp2_fast, unset_resolves_by: resolved_use_exp2_fast}
+      - {name: lds_k_group_pad}
+    # Held at the registry default: the persistent CTA count (one value, 304) and the
+    # interleaved order, the KV split, the window wave skip (window cells are floor-only:
+    # no swept graph has a window), and the levers measured neutral or negative, or with
+    # no resolver (waves_per_eu, iglp, iglp_mode, v_row_pad, use_v_swizzle,
+    # pv_sched_fence_mask).
+    ignored: [waves_per_eu, num_persistent, interleave, iglp, iglp_mode, pv_sched_fence_mask, v_row_pad, use_v_swizzle, kv_segments, window_wave_skip, chiplet_num_xcds]
+  # Bounds the enumerated (swept) catalog; the shipped catalog is a reduced subset.
+  aot_budget_per_arch: 1600
+
+# How owner benchmark rows become hipDNN graphs (tools/ground_truth.py graphs).
+ground_truth:
+  graph_template: templates/attention_sdpa_fwd.graph.json
+  value_map:
+    dtype: {bf16: bfloat16, fp16: half}
+    mask_type:
+      TOP_LEFT_CAUSAL: {/nodes/sdpa_node/attributes/causal_mask: true}
+      NO_MASK: {/nodes/sdpa_node/attributes/causal_mask: false}
+
+# Launch-surface audit (`tools/launch_surface.py --check <this file>`).
+launch_surface:
+  - name: grid
+    python_source: kernels/gfx942/attention_dense.py:attention_dense_grid
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseGeometry.hpp
+    kmd_fields: [block_m, seqlen_q, num_query_heads, batch, kv_segments]
+    guard: >
+      kernel_match refuses kv_segments other than 1, so no split-KV grid is launched.
+      gfx942AttentionDenseGeometry() throws HipdnnPluginException for a block_m
+      that is not a positive multiple of 32 within a 1024-thread CTA, and for
+      non-positive seqlen_q, num_query_heads or batch. Grid is
+      (ceil(Sq/block_m), Hq, B) from the candidate's own block_m and the graph's
+      shape on the qb_minor grid; the other grids are the grid_order surface, and
+      emit_lse does not change the grid.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDenseGeometry.cpp
+
+  - name: block
+    python_source: kernels/gfx942/attention_dense.py:attention_dense_block
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseGeometry.hpp
+    kmd_fields: [block_m]
+    guard: >
+      block_m / GFX942_ROWS_PER_WAVE(32) * GFX942_WAVE_LANES(64) threads.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDenseGeometry.cpp
+
+  # The tile rules and the window translation are restated by hand from the rocKE Python.
+  # The sliding-window zero-trip guard and the empty-row rule are this engine's own policy,
+  # not restated Python (windowLeavesRowsWithoutKeys in AttentionDenseNative.cpp says why).
+  # The LDS budget is not restated. Matching and dispatch are shared with gfx950
+  # (AttentionDenseNative.cpp); Gfx942AttentionDenseNative.cpp binds them to the gfx942
+  # tile, geometry, window, stats (LSE) and launch-grid hooks.
+  - name: matcher
+    python_source: kernels/gfx942/attention_dense.py:supports_attention_dense
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionDenseNative.cpp
+    kmd_fields: [dtype, head_size, causal, sliding_window, ragged, block_m, block_n]
+    guard: >
+      kernelMatches() returns false (no panic) if dtype, head_size, causal or
+      sliding_window disagrees with the graph, the candidate's tile is not one
+      isSupportedGfx942AttentionDenseTile() admits, the candidate is ragged,
+      Sq % block_m or Skv % block_n is non-zero, or the window leaves the last
+      query block no key tile (gfx942AttentionDenseWindowReachesKeys()). Head
+      counts, batch and sequence lengths are runtime kernel arguments and are never
+      compared (matchesHeadCounts is false for gfx942). graph_match maps a causal
+      band of left_bound L to sliding_window L, declines every non-causal band, and
+      declines a window that leaves query rows no key (seqlen_q - seqlen_kv >= W),
+      with or without stats. It binds the stats output when stats_tensor_uid is
+      set and generate_stats is not false (stats_flag declines the uid with false
+      and true without a uid), and declines Max, Sum_exp and the RNG dump
+      (stats_rowstats), a stats tensor that is not FLOAT (stats_dtype), and one
+      that is not rank-4 [B,Hq,Sq,1] with packed strides [Hq*Sq,Sq,1,*],
+      non-virtual, non-ragged, not pass-by-value, with a non-negative uid
+      (stats_layout). gfx950 binds no stats and declines them all as 'stats'.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseMatchers.cpp
+
+  - name: kernargs
+    python_source: kernels/gfx942/attention_dense.py:attention_dense_signature
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionDenseNative.cpp
+    kmd_fields: [seqlen_q, seqlen_kv, num_query_heads, num_kv_heads, batch, persistent, persist_decode]
+    guard: >
+      kernelSignature(RUNTIME_HEAD_COUNTS, grid, writesLse), the ABI of gfx942's one
+      launch contract (hipkernel.gfx942_attention_dense.dispatch.v1), is the 10-arg
+      form (q,k,v,o,scale,batch,seqlen_q,seqlen_kv,num_query_heads,num_kv_heads) on
+      every non-persistent grid; on the persistent grid a <d>_magic, <d>_shift i32 pair
+      per fast-division divisor of persist_decode follows, in the decode's own order
+      (14 or 16 args); an emit_lse=1 kernel takes lse_ptr last (offset 56, 72 or 80),
+      chosen by whether the graph binds a stats output. use_sinks=False everywhere.
+      Validated at prepare() time by buildIngestorKernelCode(..., expectedSignature),
+      and at restore by restoreIngestorLaunch() before any saved value is read; the
+      restore selects the form from the saved stats.uid, grid_order and persist_decode
+      first. launch() packs its argument addresses in the same order and throws if their
+      count is not the signature's.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDenseSignature.cpp
+
+  # emit_lse is baked into the kernel (one trailing lse_ptr store of the natural-log LSE
+  # at element (b*Hq + h)*Sq + s, no stride arguments), so it selects candidates rather
+  # than ranking them.
+  - name: lse
+    python_source: kernels/common/_lse_store.py:validate_dense_lse
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseNative.cpp
+    kmd_fields: [emit_lse]
+    guard: >
+      candidateWritesLse() reads emit_lse as 0 or 1 and answers nullopt for a
+      missing or other value, which kernelMatches() declines. kernelMatches()
+      admits a candidate only when emit_lse == (the graph binds a stats output),
+      and graph_match binds only the contiguous FP32 [B,Hq,Sq,1] stats tensor
+      validate_dense_lse requires; prepare() re-checks it and throws BAD_PARAM.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseMatchers.cpp
+
+  # The cold ranking reads the grid, the LDS/scheduling knobs, the persistent pipeline
+  # levers and the body levers to order arms; only the grid enters the launch
+  # (grid_select). use_cfvst and use_exp2_fast rank against the policy the kernel resolves
+  # them to (gfx942AttentionDenseCfvstPolicy / gfx942AttentionDenseExp2FastPolicy in
+  # Gfx942AttentionDenseGeometry.hpp), checked against default_use_cfvst /
+  # default_use_exp2_fast and over the full enumeration by
+  # gen_gfx942_attention_dense_score_goldens.py.
+  - name: score
+    python_source: dispatch/attention/gfx942_dense.py:tuned_base_spec
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseNative.cpp
+    kmd_fields: [block_m, block_n, lds_row_pad, pv_priority, lds_num_buffers, v_reg_prefetch, causal_diag_split, o_store_width, pv_loop_order, use_cfvst, use_exp2_fast, lds_k_group_pad, dtype, head_size, causal, sliding_window, seqlen_kv, persistent]
+    guard: >
+      scoreKernel() returns 0 for a record without a launchable tile or grid, or with a
+      missing or negative lds_row_pad / pv_priority / v_reg_prefetch /
+      causal_diag_split / lds_k_group_pad, an lds_num_buffers or o_store_width below 1,
+      a pv_loop_order other than d_major or k_major, or a use_cfvst / use_exp2_fast
+      other than 0 or 1; otherwise a distinct positive score per knob combination,
+      lexicographic over (grid, tile, lds_row_pad, pv_priority, lds_num_buffers,
+      v_reg_prefetch, causal_diag_split, o_store_width, pv_loop_order, use_cfvst,
+      use_exp2_fast, lds_k_group_pad) with the policy arms first: 256/64, pad 8,
+      priority 0, one K buffer, no V prefetch, no diagonal split, o_store_width 4,
+      d_major, use_cfvst at D128, use_exp2_fast except bf16 D128 off the persistent
+      grid, K-group pad 8. The grid rank puts
+      persistent first where tuned_base_spec turns it on (D128, no window or one wider
+      than 256 keys) and the catalog's 304 CTAs are a multiple of the device's
+      multiProcessorCount; otherwise qb_minor first and persistent last. Among
+      persistent arms the decode the registry pins for the mask leads (bt_hkv_minor
+      under balance_causal at the build shape's seqlen_kv, else qb_major).
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseMatchers.cpp
+
+  # The body policies an unset use_cfvst / use_exp2_fast resolves to, restated for the
+  # cold score's policy arms (the score surface above ranks against them). Checked per
+  # (dtype, head size, grid kind) against the Python by POLICY_GOLDENS
+  # (gen_gfx942_attention_dense_score_goldens.py, kept current by IngestorGenerator's
+  # tests/test_attention_dense_goldens.py).
+  - name: cfvst_policy
+    python_source: kernels/gfx942/attention_dense.py:default_use_cfvst
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseGeometry.hpp:gfx942AttentionDenseCfvstPolicy
+    kmd_fields: [dtype, head_size, use_cfvst]
+    guard: >
+      gfx942AttentionDenseCfvstPolicy() is true at head_size 128 for either dtype
+      (rows-per-DMA 1), false otherwise; it reads no shape.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseMatchers.cpp
+
+  - name: exp2_fast_policy
+    python_source: kernels/gfx942/attention_dense.py:default_use_exp2_fast
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseGeometry.hpp:gfx942AttentionDenseExp2FastPolicy
+    kmd_fields: [dtype, head_size, persistent, use_exp2_fast]
+    guard: >
+      gfx942AttentionDenseExp2FastPolicy() is false only for bf16 at head_size 128 off
+      the persistent grid, true otherwise; it reads no shape.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseMatchers.cpp
+
+  # The launch grid each candidate is built for, read from its KMD.
+  - name: grid_select
+    python_source: dispatch/attention/gfx942_dense.py:ingestor_base_spec
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx942AttentionDenseNative.cpp
+    kmd_fields: [persistent, num_persistent, persist_decode, nonpersist_decode]
+    guard: >
+      candidateGrid() answers nullopt, which kernelMatches() declines and prepare()
+      refuses with BAD_PARAM, for a persistent value other than 0 or 1, a
+      nonpersist_decode that is not qb_minor, bt_hkv_minor or hq_minor_swz, and on
+      the persistent grid a persist_decode that is auto (it resolves from the build
+      shape) or gqa_pair* (it bakes the shape), or a num_persistent outside
+      [1, INT32_MAX]. Each grid ignores the other's fields.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseMatchers.cpp
+
+  # The grids past qb_minor: NONPERSIST_DECODES[order].grid, and (num_persistent, 1, 1).
+  - name: grid_order
+    python_source: kernels/gfx942/attention_dense.py:attention_dense_grid
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionDensePersistent.hpp
+    kmd_fields: [persistent, num_persistent, nonpersist_decode, block_m, seqlen_q, num_query_heads, batch]
+    guard: >
+      gridDims() gives (B, Hq, nqb) at bt_hkv_minor, (8 nqb, Hq/8, B) at hq_minor_swz
+      and exactly (num_persistent, 1, 1) on the persistent grid, nqb =
+      ceil(Sq/block_m); makePreparedAttentionDense() throws BAD_PARAM for a dimension
+      outside [1, INT32_MAX]. Checked against the Python's own grid over a shape table
+      (gen_attention_dense_persistent_goldens.py).
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDensePersistent.cpp
+
+  # The persistent decode's fast-division kernargs, recomputed per launch and on restore.
+  - name: fastdiv_kernargs
+    python_source: kernels/common/attention_dense_decode.py:fastdiv_kernargs
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionDensePersistent.hpp
+    kmd_fields: [persistent, persist_decode, num_query_heads, num_kv_heads, batch, seqlen_q, block_m]
+    guard: >
+      fastDivKernargs() passes one (magic, shift) per PERSIST_DECODES[decode]
+      .fastdiv_divisors entry, in that order -- qb_major (batch, Hq, gqa), hkv_major
+      (batch, gqa, nqb), bt_hkv_minor (batch, Hq), hq_minor_swz (nqb, Hq, gqa) -- from
+      fastDivPair(), calculate_magic_numbers with the magic as its i32 bit pattern;
+      gqa = Hq/Hkv and nqb = Sq/block_m. Never saved. Checked against
+      calculate_magic_numbers for every divisor in 1..4096 and 512 random ones to 2^20,
+      and against attention_dense_runtime_args over a shape table.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDensePersistent.cpp
+
+  # Where a decode is a bijection, and the fast division exact.
+  - name: decode_legality
+    python_source: kernels/common/attention_dense_decode.py:fastdiv_dividend_bound
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionDensePersistent.hpp
+    kmd_fields: [persistent, persist_decode, nonpersist_decode, num_persistent, causal, sliding_window]
+    guard: >
+      gridIllegality() restates each decode's check and the 2^30 dividend bound:
+      hq_minor_swz needs Hq % 8 == 0 (both grids), and on the persistent grid
+      num_persistent % 8 == 0 and an even query-block count under balance_causal
+      (causal, no window shorter than Skv); every persistent decode needs nqb*Hq*B, and
+      bt_hkv_minor also gqa*Hq, below 2^30. kernelMatches() declines, prepare() throws
+      BAD_PARAM and restore refuses the plan. Checked against Gfx942AttentionDenseSpec
+      construction and fastdiv_kernargs over a shape table.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDensePersistent.cpp

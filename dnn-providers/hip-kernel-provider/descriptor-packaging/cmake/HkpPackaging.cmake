@@ -281,9 +281,10 @@ endfunction()
 # ---------------------------------------------------------------------------
 # _hkp_filter_inputs(<out_var> <root> <files> <exclude_folders>)
 #   <files>, minus the ones under <root> the packer never reads: a path with any hidden
-#   segment (one starting with `.`), and a path inside a top-level folder of
-#   <exclude_folders>. Segments are taken from the path relative to <root>, so a hidden
-#   directory above <root> does not matter.
+#   segment (one starting with `.`), and a path inside a folder of <exclude_folders> (a
+#   top-level folder, or a `/`-separated path under <root>), matched case-insensitively
+#   as the packer matches it. Segments are taken from the path relative to <root>, so a
+#   hidden directory above <root> does not matter.
 # ---------------------------------------------------------------------------
 function(_hkp_filter_inputs out_var root files exclude_folders)
     set(_kept "")
@@ -292,23 +293,37 @@ function(_hkp_filter_inputs out_var root files exclude_folders)
     foreach(_file IN LISTS files)
         file(RELATIVE_PATH _rel "${root}" "${_file}")
         string(REPLACE "/" ";" _segments "${_rel}")
-        list(LENGTH _segments _count)
-        list(GET _segments 0 _first)
         set(_drop FALSE)
         foreach(_segment IN LISTS _segments)
             if("${_segment}" MATCHES "^[.]")
                 set(_drop TRUE)
             endif()
         endforeach()
-        string(TOLOWER "${_first}" _first_lower)
-        if(_count GREATER 1 AND "${_first_lower}" IN_LIST _excluded)
-            set(_drop TRUE)
-        endif()
+        string(TOLOWER "${_rel}" _rel_lower)
+        foreach(_folder IN LISTS _excluded)
+            string(REGEX REPLACE "/+$" "" _folder "${_folder}")
+            string(FIND "${_rel_lower}" "${_folder}/" _at)
+            if(_at EQUAL 0)
+                set(_drop TRUE)
+            endif()
+        endforeach()
         if(NOT _drop)
             list(APPEND _kept "${_file}")
         endif()
     endforeach()
     set(${out_var} "${_kept}" PARENT_SCOPE)
+endfunction()
+
+# _hkp_require_dvc_arg(<out_var>)
+#   The packer argument for HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS: a model file left
+#   behind by a skipped `dvc pull` ships without its UHD and warns, unless the build asks
+#   for strict DVC (release builds), where `--require-dvc` makes it fail the pack.
+function(_hkp_require_dvc_arg out_var)
+    set(_arg "")
+    if(HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS)
+        set(_arg --require-dvc)
+    endif()
+    set(${out_var} "${_arg}" PARENT_SCOPE)
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -366,8 +381,9 @@ endfunction()
 #   _hkp_disabled_kinds() lists (rocke): a rocKE UKD prunes as an arch-pruned one
 #   does, and a KDP left with no UKD does not ship.
 #
-#   EXCLUDE_FOLDERS names top-level child folders of the root the pack does not
-#   read at all: the families of HKP_DESCRIPTOR_FAMILIES whose option is OFF.
+#   EXCLUDE_FOLDERS names folders of the root the pack does not read at all: the
+#   families of HKP_DESCRIPTOR_FAMILIES whose option is OFF (top-level folders), and for
+#   the production root the bundles of HKP_PRODUCT_EXCLUDED_BUNDLES (`/`-separated paths).
 #
 #   PACK_JOBS caps the worker processes one pack may spawn; 1 selects the packer's
 #   serial path. Omitted, the packer sizes its pool against the machine. Roots have
@@ -416,6 +432,7 @@ function(hkp_wire_pack_target)
     foreach(_folder IN LISTS ARG_EXCLUDE_FOLDERS)
         list(APPEND _exclude_args --exclude-folder "${_folder}")
     endforeach()
+    _hkp_require_dvc_arg(_require_dvc_arg)
 
     set(_inter_root "${CMAKE_CURRENT_BINARY_DIR}/hkp-${ARG_NAME}-intermediate")
     # Inside the output root, so the stamp shares the fate of the tree it vouches for.
@@ -511,6 +528,7 @@ function(hkp_wire_pack_target)
                 --generic-targets-json "${HIPDNN_PLUGIN_SDK_GPU_GENERIC_TARGETS_JSON}"
                 ${_producer_arg}
                 ${_exclude_args}
+                ${_require_dvc_arg}
         COMMAND "${CMAKE_COMMAND}" -E make_directory "${ARG_OUT_ROOT}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${_stamp}"
         DEPENDS "${HKP_TOOL}" ${_source_inputs} ${_tool_sources}
@@ -1408,24 +1426,6 @@ function(hkp_product_ships_engine_for_arch out_var engine arch)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_gfx950_attention_dense_available(<out>)
-#   hkp_product_ships_engine_for_arch() for hipkernel:Gfx950AttentionDense on gfx950.
-# ---------------------------------------------------------------------------
-function(hkp_gfx950_attention_dense_available out_var)
-    hkp_product_ships_engine_for_arch(_available "hipkernel:Gfx950AttentionDense" gfx950)
-    set(${out_var} "${_available}" PARENT_SCOPE)
-endfunction()
-
-# ---------------------------------------------------------------------------
-# hkp_gfx942_attention_unified_3d_available(<out>)
-#   hkp_product_ships_engine_for_arch() for hipkernel:Gfx942AttentionUnified3d on gfx942.
-# ---------------------------------------------------------------------------
-function(hkp_gfx942_attention_unified_3d_available out_var)
-    hkp_product_ships_engine_for_arch(_available "hipkernel:Gfx942AttentionUnified3d" gfx942)
-    set(${out_var} "${_available}" PARENT_SCOPE)
-endfunction()
-
-# ---------------------------------------------------------------------------
 # hkp_product_offers_engine(<out_var> <engine>)
 #   TRUE when the `product` root, under this build's excluded folders and disabled
 #   kinds, carries <engine> for any arch its descriptors are authored for.
@@ -1433,7 +1433,7 @@ endfunction()
 #   Arch-agnostic: it reads what the root offers, never GPU_TARGETS, because it gates
 #   host and test content outside the arch content, which must work with another build's
 #   arch content. Registrations that ship in a per-arch shard use
-#   hkp_gfx950_attention_dense_available() instead.
+#   hkp_product_ships_engine_for_arch() instead.
 #
 #   FALSE when `product` is neither wired nor recorded dormant, and when it was never
 #   probed (an empty root). A probe that could not answer reads as
@@ -1463,16 +1463,6 @@ function(hkp_product_offers_engine out_var engine)
     if("${engine}" IN_LIST _offered)
         set(${out_var} TRUE PARENT_SCOPE)
     endif()
-endfunction()
-
-# ---------------------------------------------------------------------------
-# hkp_gfx950_conv_dgrad_aot_available(<out>)
-#   The same predicate for the shape-generic AOT-instance backward-data engine,
-#   hipkernel:Gfx950ConvDgradAot, which ships its own bundle (the `product` root).
-# ---------------------------------------------------------------------------
-function(hkp_gfx950_conv_dgrad_aot_available out_var)
-    hkp_product_ships_engine_for_arch(_ships "hipkernel:Gfx950ConvDgradAot" gfx950)
-    set(${out_var} "${_ships}" PARENT_SCOPE)
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -1575,7 +1565,7 @@ endfunction()
 # _hkp_report_dormant(<reason> <name> <root> <arches> <exclude_folders>
 #                     <disabled_kinds>)
 #   The STATUS line for a _hkp_dormant_reason() verdict. It names the arch list, the
-#   excluded folders that exist as top-level folders of <root> and the kinds pruned with
+#   excluded folders that exist under <root> and the kinds pruned with
 #   the option that pruned them (<disabled_kinds> is _hkp_disabled_kinds()'s output): the
 #   values to change to make packing happen. The production root keeps its own wording.
 # ---------------------------------------------------------------------------
@@ -1602,6 +1592,12 @@ function(_hkp_report_dormant reason name root arches exclude_folders disabled_ki
             string(TOLOWER "${_child}" _child_lower)
             if(IS_DIRECTORY "${root}/${_child}" AND "${_child_lower}" IN_LIST _excluded)
                 list(APPEND _present "${_child}")
+            endif()
+        endforeach()
+        # A nested entry (a bundle path) is named as given when it exists.
+        foreach(_folder IN LISTS exclude_folders)
+            if(_folder MATCHES "/" AND IS_DIRECTORY "${root}/${_folder}")
+                list(APPEND _present "${_folder}")
             endif()
         endforeach()
     endif()
@@ -1785,7 +1781,10 @@ function(hkp_add_packaging)
 
     _hkp_resolve_product_pack_jobs(_product_jobs_args)
 
-    # Production descriptors.
+    # Production descriptors. HKP_PRODUCT_EXCLUDED_BUNDLES names bundles of the production
+    # root (paths relative to it) the consumer found incomplete, e.g. a bundle whose DVC
+    # outputs were not pulled: packing what remains of one would ship descriptors that
+    # name files it does not have. Appended last, so they join EXCLUDE_FOLDERS.
     _hkp_wire_root(
         NAME product
         SOURCE_ROOT "${_source_root}"
@@ -1794,7 +1793,7 @@ function(hkp_add_packaging)
         ROCM_KPACK_DIR "${_rocm_kpack_dir}"
         OUT_ROOT "${HIPKERNELPROVIDER_DESCRIPTOR_BUILD_DIR}"
         ${_product_jobs_args}
-        ${_root_args})
+        ${_root_args} ${HKP_PRODUCT_EXCLUDED_BUNDLES})
 
     # Test descriptors, one pack per authored set. The shared root is packed into both
     # test roots, so both test binaries see the same authored descriptors; the two need
@@ -1926,8 +1925,10 @@ function(hkp_add_packaging)
     hkp_register_tests("${_rocm_kpack_dir}" "${HKP_HIPCC}" "${_rocke_comgr_lib}")
     if(HIPKERNELPROVIDER_ENABLE_PACKAGING_PROBES)
         include("${HKP_PKG_DIR}/cmake/HkpPackagingProbes.cmake")
+        # Probes read the production root, so they skip its excluded bundles too.
         hkp_load_packaging_probes(
-            "${_rocm_kpack_dir}" "${HKP_HIPCC}" "${_rocke_comgr_lib}" ${_root_args})
+            "${_rocm_kpack_dir}" "${HKP_HIPCC}" "${_rocke_comgr_lib}" ${_root_args}
+            ${HKP_PRODUCT_EXCLUDED_BUNDLES})
     endif()
 endfunction()
 

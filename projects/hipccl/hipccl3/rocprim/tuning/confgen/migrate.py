@@ -2,6 +2,7 @@
 
 import logging
 import argparse
+import json
 import re
 
 log = logging.getLogger("confgen.migrate")
@@ -17,7 +18,12 @@ def try_make_int(text: str):
 def main():
     cli = argparse.ArgumentParser()
     cli.add_argument("--config", "-c")
-    cli.add_argument("--variable", "-v", action="append")
+    cli.add_argument(
+        "--variable",
+        "-v",
+        action="append",
+        help="Name of the constructor argument at this position, '_' to skip it.",
+    )
 
     args = cli.parse_args()
 
@@ -29,7 +35,11 @@ def main():
 
             # Detect target guard.
             # Assume this is a top level template, so we don't have to do any other fancy matching.
-            if re.match(r"^template", line):
+            # Skip targets that already have a target annotation.
+            has_target_annotation = bool(modified_lines) and re.match(
+                r"^// TARGET: ", modified_lines[-1]
+            )
+            if re.match(r"^template", line) and not has_target_annotation:
                 for search_index in range(i, len(lines)):
                     comp_target = re.match(
                         r"comp_target<gen::(?P<gen>\w+), target_arch::(?P<arch>\w+), gpu::(?P<gpu>\w+), rep::(?P<rep>\w+)>>",
@@ -48,13 +58,18 @@ def main():
 
             # Detect type guard (any variable names).
             types_match = re.match(r"^ +// Based on (?P<types>.+)$", line)
+            # Detect an existing config annotation, so it can be extended with more variables.
+            config_match = re.match(r"^ +// CONFIG: (?P<config>\{.*\})$", line)
 
-            if types_match is not None:
-                # Parse "a = x, b = y, c = z" into {"a": "x", "b": "y", "c": "z"}
+            if types_match is not None or config_match is not None:
                 config = {}
-                for pair in types_match["types"].split(", "):
-                    name, _, value = pair.partition(" = ")
-                    config[name.strip()] = value.strip()
+                if types_match is not None:
+                    # Parse "a = x, b = y, c = z" into {"a": "x", "b": "y", "c": "z"}
+                    for pair in types_match["types"].split(", "):
+                        name, _, value = pair.partition(" = ")
+                        config[name.strip()] = value.strip()
+                else:
+                    config = json.loads(re.sub("'", '"', config_match["config"]))
 
                 return_found = False
                 return_complete = False
@@ -87,7 +102,12 @@ def main():
                 return_string = re.sub(r"[\{\} ]", "", return_string)
 
                 return_values = [try_make_int(x) for x in return_string.split(",")]
-                config |= dict(zip(args.variable, return_values))
+                # Variables named '_' skip the constructor argument at that position.
+                config |= {
+                    name: value
+                    for name, value in zip(args.variable, return_values)
+                    if name != "_"
+                }
                 log.debug(f"Found config: {config}")
 
                 # Replace current line
@@ -105,4 +125,4 @@ def main():
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.DEBUG)
-    main()  
+    main()

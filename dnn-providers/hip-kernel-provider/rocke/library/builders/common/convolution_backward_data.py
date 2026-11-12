@@ -39,7 +39,9 @@ pack (``Gfx950ConvDgradGeometry.hpp``) ports; the two are compared by
 
 from __future__ import annotations
 
+import itertools
 import json
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
@@ -1360,14 +1362,42 @@ def _launch_values(conv_args, bytes_: tuple[int, int, int], **extra) -> tuple:
 def _covered(extent: int, runs) -> bool:
     """Whether the ``(offset, stride, count, width)`` runs -- ``width`` consecutive
     positions from each of ``offset + stride * t``, ``t < count`` -- cover every
-    position in ``[0, extent)``."""
-    hit = bytearray(extent)
+    position in ``[0, extent)``.
+
+    Decided from the runs alone, in time and memory independent of ``extent``. Inside
+    its span ``[offset, offset + stride * (count - 1) + width)`` a run covers exactly
+    the positions ``p`` with ``(p - offset) % stride < width``. The span ends cut
+    ``[0, extent)`` into segments, each under a fixed set of runs whose union repeats
+    with the lcm of their strides, so one period of a segment (or the whole segment,
+    if shorter) decides it. ``coversExtent`` in Gfx950ConvDgradGeometry.hpp is the
+    C++ twin.
+    """
+    spans = []  # (lo, hi, offset, period, width)
     for offset, stride, count, width in runs:
-        for t in range(count):
-            start = offset + stride * t
-            for pos in range(max(start, 0), min(start + width, extent)):
-                hit[pos] = 1
-    return all(hit)
+        if count <= 0 or width <= 0:
+            continue
+        if stride < 0:
+            offset, stride = offset + stride * (count - 1), -stride
+        hi = offset + stride * (count - 1) + width
+        if count == 1 or stride <= width:
+            spans.append((offset, hi, offset, 1, 1))
+        else:
+            spans.append((offset, hi, offset, stride, width))
+    cuts = {0, extent}
+    for lo, hi, *_ in spans:
+        cuts.update(min(max(v, 0), extent) for v in (lo, hi))
+    cuts = sorted(cuts)
+    for a, b in itertools.pairwise(cuts):
+        active = [s for s in spans if s[0] <= a and b <= s[1]]
+        period = 1
+        for _, _, _, stride, _ in active:
+            period = math.lcm(period, stride)
+            if period >= b - a:
+                break
+        for pos in range(a, min(b, a + period)):
+            if not any((pos - o) % st < w for _, _, o, st, w in active):
+                return False
+    return True
 
 
 def _dx_fully_written(problem: ConvProblem, sub_gemms, patch: bool) -> bool:
