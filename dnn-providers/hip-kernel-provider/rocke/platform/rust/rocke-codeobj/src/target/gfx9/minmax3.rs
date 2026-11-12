@@ -11,6 +11,14 @@
 //! virtual registers, before allocation; the inner operands must not change
 //! between the two instructions and EXEC must not change. Integer min / max
 //! are associative and commutative, so the result is bitwise the pair's.
+//!
+//! Lever `fmax3` does the same for `v_max_f32` / `v_min_f32` (`v_max3_f32`,
+//! `v_min3_f32`), as LLVM combines `fmaxnum(fmaxnum(a, b), c)` (the row maxima
+//! of the attention softmax: one `v_max3_f32` per two elements instead of two
+//! `v_max_f32`). Sources that may be signaling NaNs were quieted by their own
+//! instructions when selected, so the three-operand max sees what the pair saw.
+//! An instruction with equal sources, the quieting `v_max_f32 x, x`, is not
+//! the inner or the outer one.
 
 use crate::rir::mir::*;
 
@@ -23,6 +31,18 @@ enum Kind {
     MinI,
     MaxU,
     MinU,
+    MaxF,
+    MinF,
+}
+
+impl Kind {
+    /// The lever that turns the fusion of this kind on.
+    fn lever(self) -> &'static str {
+        match self {
+            Kind::MaxF | Kind::MinF => "fmax3",
+            _ => "minmax3",
+        }
+    }
 }
 
 fn kind(op: Opc) -> Option<Kind> {
@@ -31,6 +51,8 @@ fn kind(op: Opc) -> Option<Kind> {
         Opc::VMinI32 => Some(Kind::MinI),
         Opc::VMaxU32 => Some(Kind::MaxU),
         Opc::VMinU32 => Some(Kind::MinU),
+        Opc::VMaxF32 => Some(Kind::MaxF),
+        Opc::VMinF32 => Some(Kind::MinF),
         _ => None,
     }
 }
@@ -41,6 +63,8 @@ fn three(k: Kind) -> Opc {
         Kind::MinI => Gfx9Op::VMin3I32,
         Kind::MaxU => Gfx9Op::VMax3U32,
         Kind::MinU => Gfx9Op::VMin3U32,
+        Kind::MaxF => return Opc::VMax3F32,
+        Kind::MinF => return Opc::VMin3F32,
     })
 }
 
@@ -49,6 +73,7 @@ fn ordered(k: Kind, lo: u32, hi: u32) -> bool {
     match k {
         Kind::MaxI | Kind::MinI => (lo as i32) <= (hi as i32),
         Kind::MaxU | Kind::MinU => lo <= hi,
+        Kind::MaxF | Kind::MinF => false,
     }
 }
 
@@ -83,7 +108,11 @@ pub fn run(f: &mut MFunc) -> usize {
                 }
             }
             let Some(ko) = kind(outer.op) else { continue };
-            if outer.mods != 0 || outer.uses.len() != 2 || !f.lever(&outer, "minmax3") {
+            if outer.mods != 0 || outer.uses.len() != 2 || !f.lever(&outer, ko.lever()) {
+                continue;
+            }
+            // The quieting `v_max_f32 x, x` is neither.
+            if matches!(ko, Kind::MaxF | Kind::MinF) && outer.uses[0] == outer.uses[1] {
                 continue;
             }
             // The inner instruction: one operand of `outer`, defined once in this block, used only here.
@@ -99,7 +128,7 @@ pub fn run(f: &mut MFunc) -> usize {
                 }
                 let inner = &f.blocks[b].insts[i];
                 let Some(ki) = kind(inner.op) else { continue };
-                if inner.mods != 0 || inner.uses.len() != 2 {
+                if inner.mods != 0 || inner.uses.len() != 2 || (matches!(ki, Kind::MaxF | Kind::MinF) && inner.uses[0] == inner.uses[1]) {
                     continue;
                 }
                 let (a, c) = (inner.uses[0], inner.uses[1]);
@@ -113,6 +142,8 @@ pub fn run(f: &mut MFunc) -> usize {
                 }
                 let fused = if ki == ko {
                     Some((three(ko), [a, c, other]))
+                } else if matches!(ki, Kind::MaxF | Kind::MinF) || matches!(ko, Kind::MaxF | Kind::MinF) {
+                    None
                 } else {
                     // med3: min(max(x, lo), hi) or max(min(x, hi), lo), lo <= hi, both constants.
                     let med = match (ki, ko) {
@@ -232,5 +263,62 @@ mod tests {
         ];
         let mut f = func(mixed, 16);
         assert_eq!(crate::rir::with_levers(&["minmax3"], || run(&mut f)), 0);
+    }
+
+    #[test]
+    fn a_float_max_chain_pairs_into_max3_with_its_own_lever() {
+        let insts = vec![
+            MInst::new(Opc::VMaxF32, [v(10)], [v(0), v(1)]),
+            MInst::new(Opc::VMaxF32, [v(11)], [v(10), v(2)]),
+            MInst::new(Opc::VMaxF32, [v(12)], [v(11), v(3)]),
+            MInst::new(Opc::VMaxF32, [v(13)], [v(12), v(4)]),
+            MInst::new(Opc::VMovB32, [v(14)], [v(13)]),
+        ];
+        let mut f = func(insts.clone(), 16);
+        assert_eq!(crate::rir::with_levers(&["minmax3"], || run(&mut f)), 0, "the integer lever leaves floats alone");
+        let mut f = func(insts, 16);
+        assert_eq!(crate::rir::with_levers(&["fmax3"], || run(&mut f)), 2);
+        let ops: Vec<Opc> = f.blocks[0].insts.iter().map(|i| i.op).collect();
+        assert_eq!(ops, [Opc::VMax3F32, Opc::VMax3F32, Opc::VMovB32]);
+        assert_eq!(&f.blocks[0].insts[0].uses[..], &[v(0), v(1), v(2)]);
+        assert_eq!(&f.blocks[0].insts[1].uses[..], &[v(11), v(3), v(4)]);
+    }
+
+    #[test]
+    fn the_quieting_max_and_mixed_min_max_are_not_fused() {
+        // v_max_f32 x, x quiets x: it is neither the inner nor the outer instruction.
+        let quiet = vec![
+            MInst::new(Opc::VMaxF32, [v(10)], [v(0), v(0)]),
+            MInst::new(Opc::VMaxF32, [v(11)], [v(10), v(2)]),
+            MInst::new(Opc::VMovB32, [v(12)], [v(11)]),
+        ];
+        let mut f = func(quiet, 16);
+        assert_eq!(crate::rir::with_levers(&["fmax3"], || run(&mut f)), 0);
+        let quiet_outer = vec![
+            MInst::new(Opc::VMaxF32, [v(10)], [v(0), v(1)]),
+            MInst::new(Opc::VMaxF32, [v(11)], [v(10), v(10)]),
+            MInst::new(Opc::VMovB32, [v(12)], [v(11)]),
+        ];
+        let mut f = func(quiet_outer, 16);
+        assert_eq!(crate::rir::with_levers(&["fmax3"], || run(&mut f)), 0);
+        let mixed = vec![
+            MInst::new(Opc::VMaxF32, [v(10)], [v(0), v(1)]),
+            MInst::new(Opc::VMinF32, [v(11)], [v(10), v(2)]),
+            MInst::new(Opc::VMovB32, [v(12)], [v(11)]),
+        ];
+        let mut f = func(mixed, 16);
+        assert_eq!(crate::rir::with_levers(&["fmax3"], || run(&mut f)), 0);
+        // an inner result read twice, and a float min chain
+        let twice = vec![
+            MInst::new(Opc::VMinF32, [v(10)], [v(0), v(1)]),
+            MInst::new(Opc::VMinF32, [v(11)], [v(10), v(2)]),
+            MInst::new(Opc::VMovB32, [v(12)], [v(11)]),
+            MInst::new(Opc::VMovB32, [v(13)], [v(10)]),
+        ];
+        let mut f = func(twice.clone(), 16);
+        assert_eq!(crate::rir::with_levers(&["fmax3"], || run(&mut f)), 0);
+        let mut f = func(twice[..3].to_vec(), 16);
+        assert_eq!(crate::rir::with_levers(&["fmax3"], || run(&mut f)), 1);
+        assert_eq!(f.blocks[0].insts[0].op, Opc::VMin3F32);
     }
 }

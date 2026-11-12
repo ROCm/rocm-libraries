@@ -139,6 +139,8 @@ pub(crate) fn debug_flag(name: &str) -> bool {
 ///   SGPR's VGPR copy) as loop blocks do (`target::gfx9::legalize`).
 /// - `bufoffany`: a buffer access's constant voffset part (0..4095) goes
 ///   to the offset field even when the rest's sign is unknown (`rir::opt`).
+/// - `fmax3`: a `v_max_f32` (`v_min_f32`) whose operand is the only use of an earlier one in its block becomes one
+///   `v_max3_f32` (`v_min3_f32`), as LLVM combines `fmaxnum` chains (`target::gfx9::minmax3`).
 /// - `dsrebase`, `scalesep`, `loadorder`, `bitop3`, `selxor`, `subadd`: see
 ///   their passes (`rir::isel`, `target::gfx9::mfma`, `rir::post`,
 ///   `target::gfx9::bitop3`, `rir::opt`).
@@ -184,7 +186,7 @@ pub(crate) fn kernel_lever(name: &str) -> bool {
 pub const LEVERS: &[&str] = &[
     "acqfence", "addrfold", "bitop3", "bufoffany", "devfn", "dmafree", "dmamanual", "dmamanualring",
     "dmamanualringw", "dppcombine", "dppcombinef", "dppcombinei", "dppmirror", "ds128", "dsb96",
-    "dsfold", "dshoist", "dsrebase", "fmac", "fp6pass", "i16vec", "ldsalias", "ldsduos", "ldsgroup", "ldspairs",
+    "dsfold", "dshoist", "dsrebase", "fmac", "fmax3", "fp6pass", "i16vec", "ldsalias", "ldsduos", "ldsgroup", "ldspairs",
     "ldspairsfar", "ldsquads", "licm", "litreuse", "litshare", "loadfirst", "loadorder", "loopalign", "m0cse",
     "m0fill", "m0share", "masksall", "minmax", "minmax3", "nofence", "nopause", "novmfence", "packfar",
     "scalesep", "selxor", "sgb", "smemfree", "soffshare", "soffsharek", "sreassoc", "storewait", "subadd",
