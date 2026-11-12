@@ -36,3 +36,14 @@ target_include_directories(hip_kernel_provider_impl PUBLIC
 )
 
 target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_HIP_MLOPS=1)
+
+# ============================================================================
+# Selector revision
+# ============================================================================
+# The `selector_revision` a deployed L1 model for this engine must record; inputs are
+# documented in HipMlopsSelectorRevision.cmake.
+include("${CMAKE_CURRENT_SOURCE_DIR}/HipMlopsSelectorRevision.cmake")
+hkp_hip_mlops_revision(_hip_mlops_revision "${CMAKE_CURRENT_SOURCE_DIR}" CONFIGURE_DEPENDS)
+target_compile_definitions(hip_kernel_provider_impl PRIVATE
+    HKP_HIP_MLOPS_REVISION="${_hip_mlops_revision}")
+message(STATUS "hip-kernel-provider: hip_mlops selector revision ${_hip_mlops_revision}")
