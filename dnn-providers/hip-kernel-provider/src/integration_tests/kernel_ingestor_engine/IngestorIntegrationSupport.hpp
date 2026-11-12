@@ -48,6 +48,18 @@
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
 
+// A test name's dtype token: "Fp16" for HALF, "Bf16" otherwise (the 16-bit conv engines).
+inline std::string dtypeSuffix(hipdnn_frontend::DataType dtype)
+{
+    return dtype == hipdnn_frontend::DataType::HALF ? "Fp16" : "Bf16";
+}
+
+// The engine log's count of the candidates a plan build ranked.
+inline std::string candidateCount(size_t candidates)
+{
+    return std::to_string(candidates) + " candidate(s)";
+}
+
 // The two forms in which the frontend saves a built plan.
 enum class SaveForm
 {
@@ -160,6 +172,32 @@ inline std::string setProviderDgradBatchChunkByteLimit(int64_t limit)
 
     hipdnn_data_sdk::utilities::closeLibrary(library);
     return {};
+}
+
+// The loaded provider's count of hipkernel:Gfx950ConvDgradAot implicit-GEMM launches, one
+// per batch slice (exported as
+// hipdnnEnginePluginGfx950ConvDgradAotImplicitLaunchCountForTesting). Writes a
+// description of the failure to error and returns -1 if the hook is not there.
+inline int64_t providerDgradImplicitLaunchCount(std::string& error)
+{
+    const auto pluginPath = loadedProviderPluginPath();
+    auto* library = hipdnn_data_sdk::utilities::openLoadedLibrary(pluginPath);
+    if(library == nullptr)
+    {
+        error = "the provider at " + pluginPath.string() + " is not loaded";
+        return -1;
+    }
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-reinterpret-cast)
+    auto* count = reinterpret_cast<int64_t (*)()>(hipdnn_data_sdk::utilities::getSymbol(
+        library, "hipdnnEnginePluginGfx950ConvDgradAotImplicitLaunchCountForTesting"));
+    const auto value = count == nullptr ? -1 : count();
+    if(count == nullptr)
+    {
+        error = "the provider at " + pluginPath.string()
+                + " exports no hipdnnEnginePluginGfx950ConvDgradAotImplicitLaunchCountForTesting";
+    }
+    hipdnn_data_sdk::utilities::closeLibrary(library);
+    return value;
 }
 
 // Replaces handle with a new hipDNN handle that uses stream.

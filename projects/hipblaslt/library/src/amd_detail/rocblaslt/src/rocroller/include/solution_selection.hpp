@@ -75,6 +75,7 @@ struct SolutionIndexParameters
 
 int                     parametersToIndex(const SolutionIndexParameters& params);
 SolutionIndexParameters indexToParameters(int index);
+bool                    isRocRollerSolutionIndex(int index);
 
 /**
  * Compact kernel label for rocRoller algo indices (negative signed int, bit 31 set).

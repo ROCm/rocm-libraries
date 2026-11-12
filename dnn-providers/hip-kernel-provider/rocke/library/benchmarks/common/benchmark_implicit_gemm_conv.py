@@ -178,7 +178,7 @@ _GROUP_MERGE_SWEEP = (2, 4, 8, 16, 32, 64)
 # physical unit -- only ratios between degrees are compared -- so a constant's
 # absolute magnitude says nothing about its influence. Scope: gfx950, forward;
 # refit before relying on it elsewhere. Method and fitting tooling are described
-# in examples/gfx950/conv_fwd/fwd_merged_groups_case_study.md.
+# in library/builders/gfx950/conv_fwd/fwd_merged_groups_case_study.md.
 _FWD_MERGE_DEGREES = (1, 2, 4, 8, 16, 32, 64)
 _FWD_MERGE_CONSTS = (
     # Cost of issuing the A load per K step, divided by the achieved vector
@@ -5012,6 +5012,20 @@ def _run_from_cache(args, arch, target, cases, cache, directions) -> int:
                         flush=True,
                     )
                     continue
+            if direction == "wgrad" and len(batch_chunks) > 1:
+                # A batch too large for the kernels' i32 addressing runs as
+                # slices that accumulate into dW: only the kernels that add
+                # into dW can serve it.
+                candidates = [c for c in candidates if _wgrad_accumulates(c[0])]
+                if not candidates:
+                    print(
+                        f"Case {case_idx} {problem.short()} {case_dtype} wgrad: "
+                        f"no compatible kernel (the batch runs as "
+                        f"{len(batch_chunks)} slices, which needs a split-K "
+                        f"kernel that accumulates into dW)",
+                        flush=True,
+                    )
+                    continue
             if direction == "wgrad":
                 candidates = _filter_wgrad_two_stage_candidates(
                     candidates, args.two_stage
@@ -5533,7 +5547,9 @@ def _fast_rank_candidates(
             # A stream-K binary partitions K over its CTA pool itself; the
             # split-K kernarg is not its knob, so it ranks once.
             degrees = (None,)
-        elif direction == "wgrad" and ident.split_k > 1:
+        elif direction in ("wgrad", "fwd") and ident.split_k > 1:
+            # A split-K forward binary takes its degree as a kernarg too, so
+            # it ranks once per degree like wgrad's.
             degrees = _runtime_split_ks(
                 problem, ident, args.split_k, args.split_k_degrees
             )
@@ -6128,7 +6144,7 @@ def _split_k_degrees(
 
     ``direction="fwd"`` serves the split-K forward binary: the resolver's
     degree is the forward policy's
-    (:func:`rocke.helpers.split_k.select_split_k_fwd`), added only where it
+    (:func:`kernels.common.conv_split_k.select_split_k_fwd`), added only where it
     splits -- where it does not, the plain forward binary is the one to time --
     and a degree is also dropped when its grid exceeds
     ``_FWD_SPLIT_K_MAX_CTAS`` workgroups or its fp32 workspace passes the i32
@@ -6321,9 +6337,14 @@ def _batch_chunks(direction, problem, dtype) -> list:
     sentinel is the i32 maximum, so no operand it is launched on may exceed
     2^31 - 1 bytes. fwd and dgrad compute every image independently, and N is
     a kernarg: a batch whose activations are larger runs as consecutive
-    launches of the same binary over equal slices of N, at offset pointers.
-    wgrad reduces over N, so it cannot be split that way; neither can a weight
-    tensor, which has no batch.
+    launches of the same binary over equal slices of N, at offset pointers. A
+    weight tensor, which has no batch, cannot be split.
+
+    wgrad reduces over N, so its slices are not independent launches -- but
+    they can accumulate: a kernel that adds into dW (the packed-atomic split-K
+    family), run over consecutive slices with dW zeroed once before the first,
+    computes the whole reduction. The caller offers only such kernels when
+    this returns more than one slice (see :func:`_wgrad_accumulates`).
 
     Raises ``ValueError`` for a problem no split can bring into range.
     """
@@ -6339,12 +6360,6 @@ def _batch_chunks(direction, problem, dtype) -> list:
         )
     if per_image * problem.N <= _INT32_MAX:
         return [(0, problem.N)]
-    if direction == "wgrad":
-        raise ValueError(
-            f"the activations ({per_image * problem.N} bytes) exceed the "
-            f"kernels' 2^31-byte operand addressing, and wgrad reduces over the "
-            f"batch, so it cannot run as batch slices"
-        )
     if per_image > _INT32_MAX:
         raise ValueError(
             f"one image's activations ({per_image} bytes) exceed the kernels' "
@@ -6353,6 +6368,17 @@ def _batch_chunks(direction, problem, dtype) -> list:
     n_chunks = -(-problem.N // (_INT32_MAX // per_image))
     step = -(-problem.N // n_chunks)
     return [(n0, min(step, problem.N - n0)) for n0 in range(0, problem.N, step)]
+
+
+def _wgrad_accumulates(ident) -> bool:
+    """Whether a cached wgrad binary adds into dW rather than storing it.
+
+    Only those can run a wgrad problem as batch slices (:func:`_batch_chunks`):
+    the packed-atomic split-K family accumulates into a dW zeroed once. The
+    non-split kernel stores dW, and two-stage and stream-K finish with a
+    reduce that overwrites it, so each slice would erase the previous ones.
+    """
+    return ident.split_k > 1 and not ident.two_stage and ident.streamk == "off"
 
 
 def _cached_bind_batch(batch_chunks, direction, problem, ident, *rest):
@@ -6366,9 +6392,28 @@ def _cached_bind_batch(batch_chunks, direction, problem, ident, *rest):
     if len(batch_chunks) == 1:
         return _cached_bind(direction, problem, ident, *rest)
     (meta, rt, launcher, case_dtype, split_k, ptrs, sizes, *tail) = rest
-    a_image, d_image = sizes[0] // problem.N, sizes[2] // problem.N
     runs = []
+    if direction == "wgrad":
+        # A (dY) and B (X) are the activations, D (dW) the reduction target:
+        # every slice adds into the whole dW, which only the first one zeroes.
+        if not _wgrad_accumulates(ident):
+            print(
+                f"  [skip] {ident.label()}: a wgrad problem split into "
+                f"{len(batch_chunks)} batch slices needs a kernel that "
+                f"accumulates into dW",
+                flush=True,
+            )
+            return None
+        a_image, b_image = sizes[0] // problem.N, sizes[1] // problem.N
+    else:
+        a_image, d_image = sizes[0] // problem.N, sizes[2] // problem.N
     for n0, n in batch_chunks:
+        if direction == "wgrad":
+            sl_ptrs = (ptrs[0] + n0 * a_image, ptrs[1] + n0 * b_image, ptrs[2])
+            sl_sizes = (n * a_image, n * b_image, sizes[2])
+        else:
+            sl_ptrs = (ptrs[0] + n0 * a_image, ptrs[1], ptrs[2] + n0 * d_image)
+            sl_sizes = (n * a_image, sizes[1], n * d_image)
         bound = _cached_bind(
             direction,
             dc_replace(problem, N=n),
@@ -6378,9 +6423,10 @@ def _cached_bind_batch(batch_chunks, direction, problem, ident, *rest):
             launcher,
             case_dtype,
             split_k,
-            (ptrs[0] + n0 * a_image, ptrs[1], ptrs[2] + n0 * d_image),
-            (n * a_image, sizes[1], n * d_image),
+            sl_ptrs,
+            sl_sizes,
             *tail,
+            zero_dw=n0 == 0,
         )
         if bound is None:
             return None
@@ -6409,8 +6455,13 @@ def _cached_bind(
     KernelLauncher,
     LaunchConfig,
     live_extras: list,
+    zero_dw: bool = True,
 ):
     """``(run, label)`` of a cached (non-stream-K) binary at ``split_k``.
+
+    ``zero_dw=False`` leaves out the dW clear of the packed-atomic split-K
+    wgrad launch: the later batch slices of a sliced wgrad problem add into
+    the dW the first slice zeroed (:func:`_cached_bind_batch`).
 
     ``ptrs`` / ``sizes`` are the A, B, D buffers. The device scratch the
     launch config allocates is appended to ``live_extras`` (freed by
@@ -6459,7 +6510,8 @@ def _cached_bind(
     # queues ahead of this kernel's launches rather than draining for them.
     stream = resolve_stream(cfg.stream)
     if (
-        direction == "wgrad"
+        zero_dw
+        and direction == "wgrad"
         and ident.split_k > 1
         and not ident.two_stage
         and ident.streamk == "off"

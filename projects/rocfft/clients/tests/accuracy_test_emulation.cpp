@@ -76,32 +76,41 @@ INSTANTIATE_TEST_SUITE_P(emulation_1D,
                                                              true)),
                          accuracy_test::TestName);
 
-// For quick 2D tests, run a similar number of cases to 1D cases,
-// since 2D is a NxN combinatorial explosion.
-INSTANTIATE_TEST_SUITE_P(emulation_2D,
-                         accuracy_test,
-                         ::testing::ValuesIn(param_generator(
-                             quick_tests_only ? emulation_prob / emulation_range_2D.size()
-                                              : emulation_prob,
-                             generate_lengths({emulation_range_2D, emulation_range_2D}),
-                             precision_range_sp_dp,
-                             batch_range_1D,
-                             stride_range,
-                             stride_range,
-                             ioffset_range_zero,
-                             ooffset_range_zero,
-                             place_range,
-                             true)),
-                         accuracy_test::TestName);
+// 2D and 3D are combinatorial explosions of test cases.  Given a
+// count of 2D or 3D cases, compute a probability for those cases,
+// scaled relative to the count of 1D cases.  We compute
+// k=count/count_1D and return a probability of:
+// - emulation_prob / k when test_prob == 0
+// - emulation_prob when test_prob == 1
+// Assumes count > emulation_range_1D.size() (i.e. k > 1).
+static double scaled_emulation_prob(size_t count)
+{
+    double k = static_cast<double>(count) / emulation_range_1D.size();
+    return emulation_prob * 1.0 / (k - (k - 1) * test_prob);
+}
 
-// For quick 3D tests, run a similar number of cases to 1D cases,
-// since 3D is a NxNxN combinatorial explosion.
+INSTANTIATE_TEST_SUITE_P(
+    emulation_2D,
+    accuracy_test,
+    ::testing::ValuesIn(param_generator(scaled_emulation_prob(emulation_range_2D.size()
+                                                              * emulation_range_2D.size()),
+                                        generate_lengths({emulation_range_2D, emulation_range_2D}),
+                                        precision_range_sp_dp,
+                                        batch_range_1D,
+                                        stride_range,
+                                        stride_range,
+                                        ioffset_range_zero,
+                                        ooffset_range_zero,
+                                        place_range,
+                                        true)),
+    accuracy_test::TestName);
+
 INSTANTIATE_TEST_SUITE_P(
     emulation_3D,
     accuracy_test,
     ::testing::ValuesIn(param_generator(
-        quick_tests_only ? emulation_prob / emulation_range_3D.size() / emulation_range_3D.size()
-                         : emulation_prob,
+        scaled_emulation_prob(emulation_range_3D.size() * emulation_range_3D.size()
+                              * emulation_range_3D.size()),
         generate_lengths({emulation_range_3D, emulation_range_3D, emulation_range_3D}),
         precision_range_sp_dp,
         batch_range_1D,

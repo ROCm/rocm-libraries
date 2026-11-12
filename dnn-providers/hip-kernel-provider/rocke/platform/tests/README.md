@@ -72,7 +72,7 @@ for what is actually exercised vs. manual/diagnostic/demo.
 | `dispatch/` | `dispatch_tests/{gemm,attention,conv,moe,norm}` | - |
 | `analysis/` | (covered via `test_rocke.py`) | - |
 | `benchmark/` | `test_occupancy_targets.py` (the occupancy model on every target rocKE lowers for; gfx908 checked against llc) | - |
-| `support/` | tests of the `rocke.tests` helpers: `test_gpu.py`, `test_ir_validity.py`, `test_arch_marks.py`, `test_universal_gemm.py` | - |
+| `support/` | tests of the `rocke.tests` helpers: `test_gpu.py`, `test_ir_validity.py`, `test_arch_marks.py`, `test_universal_gemm.py`, `test_llc.py` | - |
 | `tools/` | `test_arch_domain_artifact.py` (source-only structure/generator units), `test_run_all.py`, tool-sidecar units | `rocke_arch_domain_reproducibility` (**CTest**, artifact reproduction through the host toolchain) |
 | (root) | `test_rocke.py` (multi-layer monolith), `test_rocke_ci_static.py` | - |
 
@@ -97,7 +97,9 @@ do not all edit one central file:
 | `tests/cmake/PortableIrTests.cmake` | Portable-IR native tests and the replay CLI |
 | `tests/cmake/InstanceTests.cmake` | Instance-layer native tests |
 | `tests/cmake/TestCategoryLabels.cmake` | Provider YAML category application after every test is registered |
-| `platform/CMakeLists.txt` | Installed Python and library CTest entries; not build-tree C++ ownership |
+| `platform/CMakeLists.txt` | Installed Python CTest entries; includes `library/tests/ctest_lists.cmake`; not build-tree C++ ownership |
+| `library/tests/ctest_lists.cmake` | Installed library CTest entries (each library suite enrols its own pytest files) |
+| `library/cpp/tests/CMakeLists.txt` | Library C++ mirror host tests (`rocke_wgrad_streamk_host`, `rocke_conv_direct_dw_dgrad_host`) |
 
 Add a native target to its concern-owned fragment. Do not put registration back
 in the orchestrator, and do not create a generic catch-all fragment. Keep unusual
@@ -411,6 +413,9 @@ and the [convolution guide](../../library/tests/conv_reference/docs/conv-test-re
 publication requirements, and coverage limits.
 
 The convolution gradient host contract joins `rocke_library_conv_pytest`.
+The conv IR golden, platform-regression, split-K, `ceil_div` and conv
+doc-example (`test_verify_dsl_docs_conv.py`) host tests run as their own entry,
+`rocke_library_conv_ir_pytest`.
 `rocke_library_gpu_pytest` also runs the dgrad and wgrad cases in
 `conv_reference/gradient_cases.py` on each of gfx942/gfx950 against live NumPy
 oracles, with three executions per case.
