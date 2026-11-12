@@ -351,6 +351,7 @@ Switches for both targets:
 | `nocoalesce` | No copy coalescing in the register allocator. |
 | `nohoist` | Leaves spill reloads right before their uses. |
 | `verifyspill` | Checks every spill round against a full recomputation. Slow. |
+| `showwindow` | Prints the scheduling window each compile chose, and the VGPRs and spilled dwords of the result, to stderr. |
 | `burs` | Plans 32-bit integer address arithmetic with the prototype tree-pattern selector (`rir/burs.rs`). Off by default. |
 
 gfx1151 only:

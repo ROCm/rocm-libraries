@@ -152,6 +152,9 @@ pub(crate) fn debug_flag(name: &str) -> bool {
 ///   the instructions its address waits on, as soon as they are ready, ahead
 ///   of instructions that could start sooner (`rir::post`): the loads keep
 ///   the most in flight.
+/// - `widewin`: a gfx950 kernel without MFMAs also tries scheduling windows of 128, 256 and 512 places, widest first, and
+///   takes the widest whose schedule keeps the occupancy of load sinking alone: more loads in flight per wave (the
+///   split-KV attention reduce kernels, whose launches are too small for other waves to hide the loads' latency).
 /// - `devfn`: every leading `inreg` parameter is preloaded, past the 14 user SGPRs (`opt::kernarg_preload`): the
 ///   build is disassembled into a device function (`dsv41_mono/direct_fn.py`), never launched.
 /// - `litshare`: one register per literal and block before scheduling
@@ -190,7 +193,7 @@ pub const LEVERS: &[&str] = &[
     "ldspairsfar", "ldsquads", "licm", "litreuse", "litshare", "loadfirst", "loadorder", "loopalign", "m0cse",
     "m0fill", "m0share", "masksall", "minmax", "minmax3", "nofence", "nopause", "novmfence", "packfar",
     "scalesep", "selxor", "sgb", "smemfree", "soffshare", "soffsharek", "sreassoc", "storewait", "subadd",
-    "u16zext", "vmemfirst", "vmlat100", "vmlat60", "wgfence", "wpecap", "xorcmp",
+    "u16zext", "vmemfirst", "vmlat100", "vmlat60", "wgfence", "widewin", "wpecap", "xorcmp",
 ];
 
 /// The names of lever list `text` (`,` / `+` separated; `-name` turns a
@@ -589,7 +592,13 @@ fn schedule_and_allocate(
     let fits_hw = |p: &regalloc::Pressure| p.vgprs <= hw.vgprs && p.sgprs <= hw.sgprs;
     let mut target = waves(base_pressure.vgprs.min(hw.vgprs));
     let budget = |target: u32| regalloc::Limits { vgprs: t.vgpr_budget(target, lds_size, wg).min(hw.vgprs), sgprs: hw.sgprs };
-    let windows: &[usize] = if debug_flag("nosched") { &[] } else { &[64, 32, 16] };
+    let windows: &[usize] = if debug_flag("nosched") {
+        &[]
+    } else if func.target == Target::Gfx950 && kernel_lever("widewin") && !crate::target::gfx9::unrolled::has_mfma(func) {
+        &[512, 256, 128, 64, 32, 16]
+    } else {
+        &[64, 32, 16]
+    };
     let mut base: Option<(mir::MFunc, regalloc::Allocation)> = None;
     // Each window's schedule and pressure; `None` until a later step needs
     // them if the window could not be tried (`schedule_capped`).
@@ -758,6 +767,9 @@ fn spill_best(
     let agprs = candidates[0].1.agpr_limit != Some(0);
     for (window, f, _) in candidates.iter().filter(|_| agprs) {
         if let Some((g, a)) = crate::target::gfx9::agpr::allocate_banked(f, hw).filter(|(_, a)| a.unified_vgprs() <= room) {
+            if debug_flag("showwindow") {
+                eprintln!("rocke: banked AGPR allocation, scheduling window {} ({} unified VGPRs)", window, a.unified_vgprs());
+            }
             *func = g;
             return Ok((a, *window));
         }
@@ -947,6 +959,9 @@ fn schedule_and_widen(
     post::sink_load_uses(&mut sunk, 32);
     let known = Schedules::new(&sunk)?;
     let chosen = schedule_and_allocate(func, &sunk, &known, lds_size, wg, spill, threads)?;
+    if debug_flag("showwindow") {
+        eprintln!("rocke: scheduling window {} ({} VGPRs, {} spilled dwords)", chosen.1, chosen.0.num_vgprs, chosen.0.spill.lds_dwords + chosen.0.spill.scratch_dwords);
+    }
     if spill || chosen.0.spill.lds_dwords + chosen.0.spill.scratch_dwords > 0 {
         return Ok(chosen);
     }
@@ -1372,6 +1387,9 @@ impl Resume {
         } else {
             spill_best(&mut s.sel.func, candidates, lds_size, wg, threads)?
         };
+        if debug_flag("showwindow") {
+            eprintln!("rocke: spilling compile, scheduling window {} ({} VGPRs, {} spilled dwords)", window, alloc.num_vgprs, alloc.spill.lds_dwords + alloc.spill.scratch_dwords);
+        }
         complete(s, alloc, window, unrolled)
     }
 }

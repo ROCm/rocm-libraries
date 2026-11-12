@@ -67,7 +67,7 @@ pub fn lost_waves_without_mfma(f: &MFunc, s: &CompileStats, target: crate::targe
 }
 
 /// Whether `f` issues an MFMA.
-fn has_mfma(f: &MFunc) -> bool {
+pub(crate) fn has_mfma(f: &MFunc) -> bool {
     f.blocks.iter().flat_map(|b| &b.insts).any(|i| is_mfma(i.op))
 }
 
@@ -239,6 +239,14 @@ mod tests {
         // VGPRs and a lost wave; without merging, all loads are in flight at once.
         assert_eq!(s.waves, Target::Gfx950.info().max_waves, "{s:?}");
         assert!(s.vgprs <= 40 && s.spill.scratch_dwords == 0, "{s:?}");
+    }
+
+    #[test]
+    fn lever_widewin_keeps_more_split_kv_reduce_loads_in_flight_at_the_same_waves() {
+        let plain = crate::rir::compile_any_target(SPLITKV_REDUCE, Target::Gfx950).unwrap_or_else(|e| panic!("{e}"));
+        let wide = crate::rir::with_levers(&["widewin"], || crate::rir::compile_any_target(SPLITKV_REDUCE, Target::Gfx950)).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(wide.stats.waves, plain.stats.waves);
+        assert!(wide.stats.vgprs > plain.stats.vgprs && wide.stats.vgprs <= 64 && wide.stats.spill.scratch_dwords == 0, "{:?} {:?}", plain.stats, wide.stats);
     }
 
     #[test]
