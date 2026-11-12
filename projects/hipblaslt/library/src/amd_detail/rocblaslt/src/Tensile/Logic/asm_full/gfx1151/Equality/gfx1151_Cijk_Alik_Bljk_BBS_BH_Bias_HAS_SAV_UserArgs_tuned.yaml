@@ -4948,6 +4948,105 @@
     reorderGRInstForDTVB: false
     tailLoopOptA: false
     tailLoopOptB: false
+  - DepthU: 256
+    EnableMatrixInstruction: false
+    ISA: [11, 5, 1]
+    MatrixInstruction: []
+    PrefetchGlobalRead: 2
+    ScheduleIterAlg: 1
+    SolutionIndex: 16
+    ThreadTile: [1, 4]
+    Valid: true
+    WaveSplitK: true
+    WavefrontSize: 32
+    WorkGroup: [1, 1, 32]
+  - DepthU: 256
+    EnableMatrixInstruction: false
+    ISA: [11, 5, 1]
+    MatrixInstruction: []
+    PrefetchGlobalRead: 2
+    ScheduleIterAlg: 1
+    SolutionIndex: 17
+    ThreadTile: [1, 4]
+    Valid: true
+    WaveSplitK: true
+    WavefrontSize: 32
+    WorkGroup: [2, 1, 16]
+  - DepthU: 256
+    EnableMatrixInstruction: false
+    GlobalReadVectorWidthA: 8
+    GlobalReadVectorWidthB: 8
+    ISA: [11, 5, 1]
+    MatrixInstruction: []
+    PrefetchGlobalRead: 2
+    ScheduleIterAlg: 1
+    SolutionIndex: 18
+    StaggerU: 32
+    ThreadTile: [1, 4]
+    Valid: true
+    WaveSplitK: true
+    WavefrontSize: 32
+    WorkGroup: [8, 1, 16]
+  - DepthU: 256
+    EnableMatrixInstruction: false
+    GlobalReadVectorWidthA: 8
+    GlobalReadVectorWidthB: 8
+    ISA: [11, 5, 1]
+    MatrixInstruction: []
+    PrefetchGlobalRead: 2
+    ScheduleIterAlg: 1
+    SolutionIndex: 19
+    StaggerU: 32
+    ThreadTile: [1, 4]
+    Valid: true
+    WaveSplitK: true
+    WavefrontSize: 32
+    WorkGroup: [8, 1, 8]
+  - DepthU: 256
+    EnableMatrixInstruction: false
+    GlobalReadVectorWidthA: 8
+    GlobalReadVectorWidthB: 8
+    ISA: [11, 5, 1]
+    MatrixInstruction: []
+    PrefetchGlobalRead: 2
+    ScheduleIterAlg: 1
+    SolutionIndex: 20
+    StaggerU: 32
+    ThreadTile: [2, 4]
+    Valid: true
+    WaveSplitK: true
+    WavefrontSize: 32
+    WorkGroup: [8, 1, 16]
+  - DepthU: 256
+    EnableMatrixInstruction: false
+    GlobalReadVectorWidthA: 8
+    GlobalReadVectorWidthB: 8
+    ISA: [11, 5, 1]
+    MatrixInstruction: []
+    PrefetchGlobalRead: 2
+    ScheduleIterAlg: 1
+    SolutionIndex: 21
+    StaggerU: 32
+    ThreadTile: [1, 4]
+    Valid: true
+    WaveSplitK: true
+    WavefrontSize: 32
+    WorkGroup: [4, 1, 16]
+  - DepthU: 512
+    EnableMatrixInstruction: false
+    GlobalReadVectorWidthA: 8
+    GlobalReadVectorWidthB: 8
+    ISA: [11, 5, 1]
+    MatrixInstruction: []
+    PrefetchGlobalRead: 2
+    ScheduleIterAlg: 1
+    SolutionIndex: 22
+    StaggerU: 32
+    ThreadTile: [1, 4]
+    Valid: true
+    WaveSplitK: true
+    WavefrontSize: 32
+    WorkGroup: [2, 1, 32]
 - [2, 3, 0, 1]
 - - - [1024, 1568, 1, 4096]
     - [0, 63]
@@ -4993,6 +5092,28 @@
     - [5, 88.6]
   - - [2048, 215, 1, 512]
     - [15, 41.9]
+  - - [1, 768, 1, 768]
+    - [16, 44.3]
+  - - [2, 1024, 1, 488]
+    - [17, 37.6]
+  - - [256, 11, 1, 1024]
+    - [18, 24.7]
+  - - [256, 15, 1, 1024]
+    - [19, 24.2]
+  - - [512, 7, 1, 512]
+    - [19, 24.6]
+  - - [512, 7, 1, 2048]
+    - [20, 47.6]
+  - - [1000, 1, 1, 1280]
+    - [20, 54.1]
+  - - [2048, 1, 1, 2048]
+    - [21, 69.4]
+  - - [2048, 1, 1, 8192]
+    - [16, 83.4]
+  - - [6144, 1, 1, 4096]
+    - [22, 88]
+  - - [92560, 1, 1, 4096]
+    - [22, 97]
 - null
 - null
 - DeviceEfficiency
