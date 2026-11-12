@@ -451,6 +451,10 @@ pub enum OpKind {
     VecAnd,
     /// `vector.lshr (a, b: vec<i32xN>)`: element-wise logical shift right of `a` by `b`.
     VecLshr,
+    /// `tile.global_load_atomic (ptr, index) {ordering, scope}`: a monotonic atomic load of the
+    /// i32 or i64 at `ptr[index]`; `tile.global_store_atomic (ptr, index, value)` its store.
+    GlobalLoadAtomic,
+    GlobalStoreAtomic,
     /// `tile.byte_perm (a, b) {sel}`: `v_perm_b32`, the bytes of `{a, b}` that `sel` names.
     BytePerm,
     /// `tile.s_wait_asynccnt {n}`: gfx1250's wait on its asynchronous LDS
@@ -710,6 +714,8 @@ impl OpKind {
             "vector.and" => OpKind::VecAnd,
             "vector.lshr" => OpKind::VecLshr,
             "tile.byte_perm" => OpKind::BytePerm,
+            "tile.global_load_atomic" => OpKind::GlobalLoadAtomic,
+            "tile.global_store_atomic" => OpKind::GlobalStoreAtomic,
             "tile.s_wait_asynccnt" => OpKind::WaitAsyncCnt,
             "memref.global_flag_wait_eq" => OpKind::FlagWaitEq,
             "memref.global_flag_store" => OpKind::FlagStore,
@@ -812,6 +818,8 @@ impl OpKind {
                 | OpKind::Permlane32Swap
                 | OpKind::ReadLane
                 | OpKind::WriteLane
+                | OpKind::GlobalLoadAtomic
+                | OpKind::GlobalStoreAtomic
                 | OpKind::WaitAsyncCnt
                 | OpKind::FlagWaitEq
                 | OpKind::FlagStore
@@ -898,6 +906,7 @@ impl OpKind {
                 | OpKind::TaggedPoll
                 | OpKind::AtomicAddScoped
                 | OpKind::GlobalStoreCp
+                | OpKind::GlobalStoreAtomic
                 // Orders memory like a write: nothing is reused across it.
                 | OpKind::CompilerFence
         )

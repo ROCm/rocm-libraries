@@ -1099,7 +1099,7 @@ impl<'a> Isel<'a> {
         if self.burs.is_some() && burs::select(self, op)? {
             return Ok(());
         }
-        // i16 is implemented only as the 16-bit view of a scalar f16. Lever `i16vec` (PLAN decision 18): an
+        // i16 is implemented only as the 16-bit view of a scalar f16 Lever `i16vec` (PLAN decision 18): an
         // element extract or insert of an i16 vector takes the f16 path (the 16-bit half of its dword), as the
         // large-batch MoE's x-scale reads (`zext(extract(bitcast(vec<i8x2> -> vec<i16x1>)))`) need.
         let i16_vec = |v: &ValueId| matches!(self.k.ty(*v), Type::Vec(Scalar::I16, _));
@@ -1647,6 +1647,7 @@ impl<'a> Isel<'a> {
                 let out = self.v3(Opc::VPermB32, a, b, sel, 0);
                 self.set(op.results[0], Val::W(out));
             }
+            GlobalLoadAtomic | GlobalStoreAtomic if self.t.target == Target::Gfx950 => self.global_atomic(op)?,
             CvtFp8ToF32 | CvtBf8ToF32 | CvtPkF32Fp8 | CvtPkF32Bf8 | CvtF32ToFp8 | CvtF32ToBf8 | CvtPkFp8F32 | CvtPkBf8F32 => {
                 use crate::target::gfx9::fp8::{self, Cvt};
                 if self.t.target == Target::Gfx1151 {
@@ -4185,21 +4186,26 @@ impl<'a> Isel<'a> {
     /// The address of the i32 `flags[index]` as global access operands:
     /// the index sign-extended and scaled, as the reference's GEP takes it.
     fn flag_addr(&mut self, flags: ValueId, index: ValueId) -> Result<(Uses, u32), CompileError> {
+        self.element_addr(flags, index, 2)
+    }
+
+    /// The address of element `index` of `ptr`, elements of `1 << shift` bytes.
+    fn element_addr(&mut self, flags: ValueId, index: ValueId, shift: u32) -> Result<(Uses, u32), CompileError> {
         let base = self.d(flags)?;
         let i = self.w(index)?;
         let uniform = self.uni(flags) && self.uni(index);
         let off = match i {
             Opnd::Imm(c) => {
-                let bytes = c as i32 as i64 * 4;
+                let bytes = (c as i32 as i64) << shift;
                 (Opnd::Imm(bytes as u32), Opnd::Imm((bytes >> 32) as u32))
             }
             _ if uniform => {
                 let s = self.to_s(i);
-                (self.s_bin(Opc::SLshlB32, s, Opnd::Imm(2)), self.s_bin(Opc::SAshrI32, s, Opnd::Imm(30)))
+                (self.s_bin(Opc::SLshlB32, s, Opnd::Imm(shift)), self.s_bin(Opc::SAshrI32, s, Opnd::Imm(32 - shift)))
             }
             _ => {
                 let v = self.to_v(i);
-                (self.v_bin(Opc::VLshlrevB32, Opnd::Imm(2), v), self.v_bin(Opc::VAshrrevI32, Opnd::Imm(30), v))
+                (self.v_bin(Opc::VLshlrevB32, Opnd::Imm(shift), v), self.v_bin(Opc::VAshrrevI32, Opnd::Imm(32 - shift), v))
             }
         };
         let (lo, hi) = self.add64(base, off, uniform, false);
@@ -4345,6 +4351,44 @@ impl<'a> Isel<'a> {
             self.emit(MInst::new(plain, [], [voff, r(base), data]).with_mods(mods));
         }
         self.emit(MInst::new(Opc::SchedBarrier, [], []));
+        Ok(())
+    }
+
+    /// `tile.global_load_atomic` / `tile.global_store_atomic` on gfx950: monotonic only, as the memory
+    /// model of gfx950 spells them, a plain access with the scope's cache bits (agent: sc1, system:
+    /// sc0 and sc1, workgroup: none). The ordered forms need fences and cache invalidates: refused.
+    fn global_atomic(&mut self, op: &Op) -> Result<(), CompileError> {
+        use crate::target::gfx9::cpol::M_SC1;
+        let store = op.kind == OpKind::GlobalStoreAtomic;
+        let name = if store { "tile.global_store_atomic" } else { "tile.global_load_atomic" };
+        if op.str_attr("ordering") != Some("monotonic") {
+            return Err(unsupported(format!("{name} with ordering {:?}", op.str_attr("ordering"))));
+        }
+        let mods = match op.str_attr("scope") {
+            Some("agent") => M_SC1,
+            Some("system") => M_GLC | M_SC1,
+            Some("workgroup") => 0,
+            other => return Err(unsupported(format!("{name} at scope {other:?}"))),
+        };
+        let data_ty = self.k.ty(if store { op.operands[2] } else { op.results[0] }).clone();
+        let wide = data_ty == Type::Scalar(Scalar::I64);
+        let (mut uses, saddr) = self.element_addr(op.operands[0], op.operands[1], if wide { 3 } else { 2 })?;
+        if store {
+            if wide {
+                let (lo, hi) = self.d(op.operands[2])?;
+                let pair = self.pair_v(lo, hi);
+                uses.push(r(pair));
+            } else {
+                let value = self.w(op.operands[2])?;
+                uses.push(self.to_v(value));
+            }
+            self.emit(MInst::new(if wide { Opc::GStoreB64 } else { Opc::GStoreB32 }, [], uses).with_mods(mods | saddr));
+            return Ok(());
+        }
+        let dst = self.vgpr(if wide { 2 } else { 1 });
+        self.emit(MInst::new(if wide { Opc::GLoadB64 } else { Opc::GLoadB32 }, [r(dst)], uses).with_mods(mods | saddr));
+        let val = if wide { Val::D(r(sub(dst, 0, 1)), r(sub(dst, 1, 1))) } else { Val::W(r(dst)) };
+        self.set(op.results[0], val);
         Ok(())
     }
 

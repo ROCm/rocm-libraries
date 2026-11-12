@@ -988,6 +988,16 @@ impl Checker<'_> {
                     return Err(mismatch());
                 }
             }
+            // A monotonic atomic i32 or i64 load / store at `ptr[index]` (the reference lowering's
+            // `load atomic` / `store atomic`); the ordering and scope are checked at selection.
+            GlobalLoadAtomic | GlobalStoreAtomic => {
+                let store = op.kind == GlobalStoreAtomic;
+                arity(usize::from(!store), 2 + usize::from(store))?;
+                let data = if store { types[2] } else { res.expect("one result") };
+                if !matches!(types[0], Type::Ptr(_)) || *types[1] != i32t || !matches!(data, Type::Scalar(Scalar::I32 | Scalar::I64)) {
+                    return Err(mismatch());
+                }
+            }
             // `llvm.amdgcn.writelane` of an i32 or f32: (value, lane, passthrough).
             WriteLane => {
                 arity(1, 3)?;

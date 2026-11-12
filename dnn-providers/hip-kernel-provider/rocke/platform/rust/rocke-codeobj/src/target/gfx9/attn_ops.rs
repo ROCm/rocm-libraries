@@ -13,6 +13,10 @@
 //!   constant) into a constant lane; any other lane is refused.
 //! * `tile.byte_perm (a, b) {sel}`: `v_perm_b32` with the selector in an SGPR
 //!   (gfx9's VOP3 takes no literal).
+//! * `tile.global_load_atomic` / `tile.global_store_atomic` (monotonic): a plain
+//!   `global_load` / `global_store` of one or two dwords with the scope's cache
+//!   bits (agent: `sc1`, system: `sc0 sc1`, workgroup: none). The other
+//!   orderings are refused.
 //! * A compare of two i8 values: each widened to 32 bits, sign-extended for
 //!   the signed predicates and zero-extended for `eq`, `ne` and `ult` (the
 //!   i8 is one byte of a word whose other bytes hold anything), then the
@@ -88,6 +92,32 @@ mod tests {
         // A lane that is not a constant is refused, not miscompiled.
         let dynamic = write("%m", 5).replace("%l : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:5 }", "%l : i32 = arith.add ( %tid, %c7 )");
         assert!(rir::compile_any_target(&kernel(params, &dynamic), Target::Gfx950).is_err());
+    }
+
+    #[test]
+    fn monotonic_atomics_are_plain_accesses_with_the_scopes_cache_bits() {
+        let params = "    %X : ptr<i64,global>\n    %Y : ptr<i32,global>\n";
+        let body = |scope: &str, ordering: &str| {
+            format!(
+                "    %p : i64 = tile.global_load_atomic ( %X, %tid ) {{ ordering = s:\"{ordering}\", scope = s:\"{scope}\" }}\n    \
+                 tile.global_store_atomic ( %X, %tid, %p ) {{ ordering = s:\"{ordering}\", scope = s:\"{scope}\" }}\n    \
+                 %q : i32 = tile.global_load_atomic ( %Y, %tid ) {{ ordering = s:\"{ordering}\", scope = s:\"{scope}\" }}\n    \
+                 tile.global_store_atomic ( %Y, %tid, %q ) {{ ordering = s:\"{ordering}\", scope = s:\"{scope}\" }}\n"
+            )
+        };
+        for (scope, bits) in [("agent", "mods:0x2000"), ("system", "mods:0x3000"), ("workgroup", "")] {
+            let listing = rir::compile_any_target(&kernel(params, &body(scope, "monotonic")), Target::Gfx950).unwrap_or_else(|e| panic!("{scope}: {e}")).listing();
+            for (op, n) in [("global_load_dwordx2", 1), ("global_store_dwordx2", 1), ("global_load_dword ", 1), ("global_store_dword ", 1)] {
+                let lines: Vec<&str> = listing.lines().filter(|l| l.contains(op)).collect();
+                assert_eq!(lines.len(), n, "{scope} {op}: {listing}");
+                // The listing prints the modifiers as a mask: sc0 is bit 12, sc1 bit 13.
+                let cache = lines[0].split_whitespace().find(|w| w.starts_with("mods:")).unwrap_or("");
+                assert_eq!(cache, bits, "{scope} {op}: {}", lines[0]);
+            }
+        }
+        for ordering in ["acquire", "seq_cst"] {
+            assert!(rir::compile_any_target(&kernel(params, &body("agent", ordering)), Target::Gfx950).is_err(), "{ordering}");
+        }
     }
 
     /// `x <pred> -2` for an i8 `x` loaded from memory: the bytes 0x7f and 0x80
