@@ -75,3 +75,19 @@ TEST(HostUnitMXScaleFormatPredicate, smoke_FormatDistinguishesCachedProblems)
     EXPECT_NE(std::hash<TensileLite::ContractionProblemGemm>{}(plain),
               std::hash<TensileLite::ContractionProblemGemm>{}(tiled));
 }
+
+// A solution with AssertAlphaValue must not be reused from the cache for another alpha.
+TEST(HostUnitMXScaleFormatPredicate, smoke_AlphaRestrictionDistinguishesCachedProblems)
+{
+    using TensileLite::ScalarValue;
+    using TensileLite::Predicates::Contraction::AlphaValue;
+    auto one = problemWithScaleFormat(3);
+    auto any = problemWithScaleFormat(3);
+    one.setAlphaRestriction(ScalarValue::One);
+    any.setAlphaRestriction(ScalarValue::Any);
+    EXPECT_TRUE(AlphaValue(ScalarValue::One)(one));
+    EXPECT_FALSE(AlphaValue(ScalarValue::One)(any));
+    EXPECT_FALSE(one == any);
+    EXPECT_NE(std::hash<TensileLite::ContractionProblemGemm>{}(one),
+              std::hash<TensileLite::ContractionProblemGemm>{}(any));
+}
