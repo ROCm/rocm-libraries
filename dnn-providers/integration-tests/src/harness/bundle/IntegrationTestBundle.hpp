@@ -77,7 +77,9 @@ struct TensorBlobs
 //
 // A registered bundle lives for the whole process, so it holds no tensor data itself:
 // reading every golden blob at registration kept all of it in memory for the run.
-// Each test reads what it needs with loadTensors() and owns the result.
+// Each test reads what it needs with loadTensors(), or under --benchmark-reference
+// with loadInputs() and, when golden outputs verify it, loadGoldenOutputs(), and
+// owns the result.
 struct IntegrationTestBundle
 {
     flatbuffers::DetachedBuffer graphBuffer;
@@ -99,12 +101,38 @@ struct IntegrationTestBundle
     // of a type that has no tensor.
     TensorMap loadTensors() const
     {
-        TensorMap tensors;
-        if(!blobs.has_value())
-        {
-            return tensors;
-        }
+        auto tensors = loadInputs();
+        loadGoldenOutputs(tensors);
+        return tensors;
+    }
 
+    // Reads only the input blobs, as loadTensors() does. Under --benchmark-reference
+    // the golden outputs are read separately, inside the reference timing.
+    TensorMap loadInputs() const
+    {
+        TensorMap tensors;
+        if(blobs.has_value())
+        {
+            loadTensorUids(tensors, blobs->inputUids);
+        }
+        return tensors;
+    }
+
+    // Adds the golden output blobs to `tensors`, which must already hold the inputs:
+    // a ragged output takes its offset tensor from them. Does nothing for a graph-only
+    // bundle. Throws as loadTensors() does.
+    void loadGoldenOutputs(TensorMap& tensors) const
+    {
+        if(blobs.has_value())
+        {
+            loadTensorUids(tensors, blobs->outputUids);
+        }
+    }
+
+private:
+    // Callers check that the bundle has blobs.
+    void loadTensorUids(TensorMap& tensors, const std::vector<int64_t>& uids) const
+    {
         const auto& graph = *hipdnn_flatbuffers_sdk::data_objects::GetGraph(graphBuffer.data());
         std::unordered_map<int64_t, const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>
             attrByUid;
@@ -117,7 +145,7 @@ struct IntegrationTestBundle
         // declares one, their seq_len tensor, so they load last. Both are always
         // inputs, so an output's offset and seq_len are already loaded.
         const auto lengthUids = hipdnn_test_sdk::utilities::raggedLengthUids(graph);
-        const auto loadUids = [&](const std::vector<int64_t>& uids) {
+        const auto loadUids = [&] {
             std::vector<int64_t> raggedUids;
             for(const int64_t uid : uids)
             {
@@ -152,9 +180,7 @@ struct IntegrationTestBundle
             }
         };
 
-        loadUids(blobs->inputUids);
-        loadUids(blobs->outputUids);
-        return tensors;
+        loadUids();
     }
 };
 
