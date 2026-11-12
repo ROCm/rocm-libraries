@@ -504,12 +504,14 @@ inline DataType effectiveTensorDataType(const std::shared_ptr<graph::TensorAttri
 }
 
 // Validates an SDPA attention-sink tensor (forward sink_token, backward sink_token and
-// dsink_token) when present: dims exactly [1, H_q, 1, 1] and data type FLOAT (cuDNN) or the
-// graph I/O data type (hipDNN extension).
+// dsink_token) when present: dims exactly [1, H_q, 1, 1] and an effective data type of FLOAT
+// (cuDNN) or Q's effective data type (hipDNN extension; Q's own type, or the graph I/O type when
+// Q's is unset). A sink whose effective type and Q's are both unset is rejected.
 inline Error validateSdpaSinkTensor(const std::shared_ptr<graph::TensorAttributes>& tensor,
                                     const std::string& nodeName,
                                     const std::string& role,
                                     int64_t numHeadsQ,
+                                    DataType qEffectiveDataType,
                                     DataType ioDataType)
 {
     if(!tensor)
@@ -523,10 +525,11 @@ inline Error validateSdpaSinkTensor(const std::shared_ptr<graph::TensorAttribute
                           nodeName + ": " + role + " must have dims [1, H_q, 1, 1] with H_q="
                               + std::to_string(numHeadsQ));
     const auto effective = effectiveTensorDataType(tensor, ioDataType);
-    HIPDNN_RETURN_IF_TRUE(effective != DataType::FLOAT
-                              && (ioDataType == DataType::NOT_SET || effective != ioDataType),
-                          ErrorCode::INVALID_VALUE,
-                          nodeName + ": " + role + " must have FLOAT or the graph I/O data type");
+    HIPDNN_RETURN_IF_TRUE(
+        effective != DataType::FLOAT
+            && (qEffectiveDataType == DataType::NOT_SET || effective != qEffectiveDataType),
+        ErrorCode::INVALID_VALUE,
+        nodeName + ": " + role + " must have FLOAT or Q's data type");
     return {};
 }
 

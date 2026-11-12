@@ -459,6 +459,14 @@ TEST(TestGpuSdpaBwdPlan, DeclinesLikeCpu)
              s.dropoutMask = true;
          }),
          false},
+        // scale_inv needs an explicit dropout mask; a Philox node carrying one is declined.
+        {"Philox with rng_dump and scale_inv",
+         editedSpec([](RawBwdSpec& s) {
+             s.dropout = 0.1F;
+             s.rngDump = true;
+             s.dropoutScaleInvDims = std::vector<int64_t>{1};
+         }),
+         false},
         // Determinism is served (the references are deterministic); max_total_seq_len is a hint.
         {"deterministic", editedSpec([](RawBwdSpec& s) { s.deterministic = true; }), true},
         {"max_total_seq_len hint", editedSpec([](RawBwdSpec& s) { s.maxTotalSeqLenQ = 64; }), true},

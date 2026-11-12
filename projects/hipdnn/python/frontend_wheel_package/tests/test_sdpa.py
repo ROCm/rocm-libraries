@@ -254,6 +254,22 @@ class TestSdpaAttributeBindings:
             ),
         )
 
+    def test_backward_new_members_default_and_assign_directly(self):
+        attributes = hipdnn.SdpaBackwardAttributes()
+        assert attributes.is_deterministic_algorithm is False
+        assert attributes.max_total_seq_len_q is None
+        assert attributes.max_total_seq_len_kv is None
+        assert attributes.get_sink_token() is None
+        assert attributes.get_dsink_token() is None
+        assert attributes.get_rng_dump() is None
+
+        attributes.is_deterministic_algorithm = True
+        attributes.max_total_seq_len_q = 11
+        attributes.max_total_seq_len_kv = 13
+        assert attributes.is_deterministic_algorithm is True
+        assert attributes.max_total_seq_len_q == 11
+        assert attributes.max_total_seq_len_kv == 13
+
     @pytest.mark.parametrize(
         "attributes_type", [hipdnn.SdpaAttributes, hipdnn.SdpaBackwardAttributes]
     )

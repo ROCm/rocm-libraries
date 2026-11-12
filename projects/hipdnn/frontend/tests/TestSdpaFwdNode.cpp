@@ -800,7 +800,7 @@ TEST(TestSdpaFwdNode, PreValidateSeqLenShapeAndType)
     }
 }
 
-// Sink: [1, H_q, 1, 1], FLOAT (cuDNN) or the graph io type (an unset dtype takes the io type).
+// Sink: [1, H_q, 1, 1], FLOAT (cuDNN) or Q's data type (an unset dtype takes the io type).
 TEST(TestSdpaFwdNode, PreValidateSinkShapeAndType)
 {
     auto q = makeTensor4D(2, 8, 16, 64);
@@ -821,10 +821,12 @@ TEST(TestSdpaFwdNode, PreValidateSinkShapeAndType)
         << "one logit per query head";
     for(const auto& dims : {std::vector<int64_t>{2, 8, 1, 1},
                             std::vector<int64_t>{1, 8, 2, 1},
-                            std::vector<int64_t>{1, 8, 1, 2}})
+                            std::vector<int64_t>{1, 8, 1, 2},
+                            std::vector<int64_t>{1, 8, 1, 1, 1},
+                            std::vector<int64_t>{1, 8, 1}})
     {
         EXPECT_EQ(validate(dims, DataType::FLOAT, DataType::HALF), error_code_t::INVALID_VALUE)
-            << "dims other than H_q are 1, got " << dims[0] << ", " << dims[2] << ", " << dims[3];
+            << "dims other than H_q are 1, rank 4, got rank " << dims.size();
     }
     EXPECT_EQ(validate({8}, DataType::FLOAT, DataType::HALF), error_code_t::INVALID_VALUE)
         << "rank 4";
@@ -837,6 +839,33 @@ TEST(TestSdpaFwdNode, PreValidateSinkShapeAndType)
     EXPECT_EQ(validate({1, 8, 1, 1}, DataType::NOT_SET, DataType::BFLOAT16), error_code_t::OK)
         << "an unset dtype becomes the io type";
     EXPECT_EQ(validate({1, 8, 1, 1}, DataType::NOT_SET, DataType::FLOAT), error_code_t::OK);
+}
+
+// The non-FLOAT sink type is compared with Q's effective type, not the graph io type.
+TEST(TestSdpaFwdNode, PreValidateSinkDataTypeReferentIsQ)
+{
+    const auto validate = [](DataType qType, DataType sinkType, DataType io) {
+        auto q = makeTensor4D(2, 8, 16, 64);
+        q->set_data_type(qType);
+        auto attrs = makeMinimalAttrs(q, makeTensor4D(2, 2, 32, 64), makeTensor4D(2, 2, 32, 64));
+        auto sink = std::make_shared<TensorAttributes>();
+        sink->set_dim({1, 8, 1, 1}).set_data_type(sinkType);
+        attrs.set_sink_token(sink);
+        GraphAttributes graphAttrs;
+        graphAttrs.set_io_data_type(io);
+        const SdpaFwdNode node(std::move(attrs), graphAttrs);
+        return node.pre_validate_node().code;
+    };
+    EXPECT_EQ(validate(DataType::BFLOAT16, DataType::BFLOAT16, DataType::HALF), error_code_t::OK)
+        << "Q's explicit type, io type differs";
+    EXPECT_EQ(validate(DataType::BFLOAT16, DataType::BFLOAT16, DataType::NOT_SET), error_code_t::OK)
+        << "Q's explicit type, io type unset";
+    EXPECT_EQ(validate(DataType::BFLOAT16, DataType::HALF, DataType::HALF),
+              error_code_t::INVALID_VALUE)
+        << "equal to the io type but not to Q's explicit type";
+    EXPECT_EQ(validate(DataType::NOT_SET, DataType::NOT_SET, DataType::NOT_SET),
+              error_code_t::INVALID_VALUE)
+        << "sink and Q both unset: nothing to compare against";
 }
 
 // Philox seed / offset: INT32 or INT64, exactly one element (same rule as SdpaBwdNode).
@@ -876,6 +905,12 @@ TEST(TestSdpaFwdNode, PreValidateSeedOffsetShapeAndType)
               error_code_t::INVALID_VALUE);
     EXPECT_EQ(validate(typed({1, 1, 1, 1, 1}, DataType::INT64), typed({1}, DataType::INT64)),
               error_code_t::INVALID_VALUE);
+    EXPECT_EQ(validate(typed({}, DataType::INT64), typed({1}, DataType::INT64)),
+              error_code_t::INVALID_VALUE)
+        << "empty seed dims";
+    EXPECT_EQ(validate(typed({1}, DataType::INT64), typed({}, DataType::INT64)),
+              error_code_t::INVALID_VALUE)
+        << "empty offset dims";
 }
 
 TEST(TestSdpaFwdNode, GetNodeTypeReturnsSdpaFwd)

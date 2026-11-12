@@ -96,12 +96,14 @@ hipDNN knob IDs are matched to `KnobType_t` by their last dot-separated segment,
 
 ## SDPA operands
 
-Two accepted ranges are wider than cuDNN's documented contract. Status of both: user-authorized 2026-11-07, pending an approving reviewer.
+Two accepted ranges are wider than cuDNN's documented contract. The sink range lets an engine whose kernel reads the sink in the I/O data type serve a graph without a cast. The seed and offset range accepts cuDNN's own host scalars, whose constructor gives dims `{1}`.
 
 | Operand | cuDNN | hipDNN |
 |---|---|---|
-| `sink_token`, `dsink_token` (forward and backward) | Documented and tested as FLOAT `[1, H_q, 1, 1]`; the frontend checks nothing | FLOAT or the graph I/O dtype, dims exactly `[1, H_q, 1, 1]`; `dsink_token` must have the sink's dtype. Kernels that work in the I/O dtype need no cast ([SEM-022](./SdpaSemanticsRegister.md)) |
+| `sink_token`, `dsink_token` (forward and backward) | Documented and tested as FLOAT `[1, H_q, 1, 1]`; the frontend checks nothing | FLOAT or Q's data type (the graph I/O data type when Q's is unset), dims exactly `[1, H_q, 1, 1]`; `dsink_token` must have the sink's data type ([SEM-022](./SdpaSemanticsRegister.md)) |
 | Philox `seed`, `offset` (forward and backward) | Documented as INT32 or INT64, `(1,1,1,1)`, CPU or GPU; the frontend checks nothing | INT32 or INT64 with every dim 1 and rank 1 to 4, host or device. `set_value` and cuDNN's scalar constructor produce rank 1 ([SEM-028](./SdpaSemanticsRegister.md)) |
+
+Behavior change in the forward node: the rules above apply to `SdpaFwdNode` as well as `SdpaBwdNode`. A forward graph whose seed or offset has a data type other than INT32 or INT64 (including an unset data type, which resolves to the graph I/O data type and so fails when that is floating point), more than one element, or a rank outside 1 to 4 now fails `validate()` with `INVALID_VALUE`. The forward sink, previously FLOAT only, now also accepts Q's data type. The frontend tests `TestSdpaFwdNode.PreValidateSeedOffsetShapeAndType` and `TestSdpaFwdNode.PreValidateSinkShapeAndType` cover the forward rules.
 
 ## Build and execute
 

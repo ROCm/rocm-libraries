@@ -314,11 +314,13 @@ batch when `seq_len_q/kv` are set).
   (`scaled_dot_product_flash_attention.h:1532-1551`) shows no visible negation in the frontend. hipDNN pins `-`
   by derivation, finite differences and an FP64 autograd golden.
 - **Dtype:** cuDNN's frontend checks neither sink nor dSink; its tests allocate FLOAT `(1, H_q, 1, 1)`. hipDNN
-  accepts FLOAT or the graph I/O dtype, dims exactly `[1, H_q, 1, 1]`, in the forward and the backward, and dSink
-  must have the sink's dtype (user-authorized extension, `KNOWN_DIVERGENCES.md`; vLLM's model-dtype sinks need no
-  adapter conversion). A dSink without a sink fails with `ATTRIBUTE_NOT_SET`; a sink without a dSink is
-  accepted, as in cuDNN. Ragged Q/K/V/O with a sink is accepted. The references read and write either dtype,
-  accumulate in fp32 and round once.
+  accepts FLOAT or Q's data type (the graph I/O data type when Q's is unset), dims exactly `[1, H_q, 1, 1]`, in
+  the forward and the backward, and dSink must have the sink's data type. The wider range lets an engine whose
+  kernel reads the sink in the I/O data type serve a graph without a cast (`KNOWN_DIVERGENCES.md`; vLLM's
+  model-dtype sinks need no adapter conversion). Behavior change in the forward: the forward sink, previously
+  FLOAT only, now also accepts Q's data type (`TestSdpaFwdNode.PreValidateSinkShapeAndType`). A dSink without a
+  sink fails with `ATTRIBUTE_NOT_SET`; a sink without a dSink is accepted, as in cuDNN. Ragged Q/K/V/O with a
+  sink is accepted. The references read and write either data type, accumulate in fp32 and round once.
 - **hipDNN today:** both references implement the forward sink and the backward dSink. Pinned by
   `SinkWithUniformScores`, `SinkOnFullyMaskedRow`, `SinkEqualsExtraZeroValueKey`, CPU/GPU parity and the paged sink
   golden bundles; backward by `SinkEqualsExtraZeroValueKeyBackward`, `SinkBackwardUniformScores`,
@@ -425,7 +427,10 @@ batch when `seq_len_q/kv` are set).
   none of it, and its own host scalar constructor gives dims `{1}` (`graph_properties.h:149-153`, v1.24.0).
 - **hipDNN:** forward and backward `validate()` check each present seed and offset: data type INT32 or INT64
   explicitly (an unset type resolves to the graph I/O type and fails), every dim 1, rank 1 to 4. Both
-  pass-by-value and device tensors are accepted; placement is not checked.
+  pass-by-value and device tensors are accepted; placement is not checked. Behavior change in the forward: a
+  forward graph whose seed or offset has another data type (including an unset type that resolves to a floating
+  I/O type), more than one element, or a rank outside 1 to 4 now fails `validate()` with `INVALID_VALUE`
+  (`TestSdpaFwdNode.PreValidateSeedOffsetShapeAndType`).
 - **Contract:** cuDNN's documented types and placement. The shape rule is relaxed from `(1,1,1,1)` to "all dims 1,
   rank 1 to 4" because `TensorAttributes::set_value` and cuDNN's scalar constructor produce rank 1. Listed in
   `KNOWN_DIVERGENCES.md`.

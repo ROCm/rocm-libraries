@@ -156,9 +156,9 @@ public:
         HIPDNN_CHECK_ERROR(
             validateSeqLenTensor(attributes.get_seq_len_kv(), "seq_len_kv", qDims[0]));
 
-        // Rule 4c: attention sink (cuDNN): one logit per query head, [1, H_q, 1, 1], FLOAT or the
-        // graph I/O data type.
-        HIPDNN_CHECK_ERROR(validateSinkToken(numHeads));
+        // Rule 4c: attention sink (cuDNN): one logit per query head, [1, H_q, 1, 1], FLOAT or Q's
+        // data type.
+        HIPDNN_CHECK_ERROR(validateSinkToken(numHeads, q));
 
         // Rule 4d: Philox dropout operands (cuDNN): single-element INT32 or INT64.
         HIPDNN_CHECK_ERROR(detail::validateSdpaPhiloxOperand(
@@ -259,14 +259,16 @@ public:
     }
 
 private:
-    // sink_token, when present: [1, H_q, 1, 1], FLOAT (cuDNN) or the graph I/O data type.
-    Error validateSinkToken(int64_t numHeadsQ) const
+    // sink_token, when present: [1, H_q, 1, 1], FLOAT (cuDNN) or Q's data type.
+    Error validateSinkToken(int64_t numHeadsQ, const std::shared_ptr<TensorAttributes>& q) const
     {
+        const auto ioDataType = graph_attributes.get_io_data_type();
         return detail::validateSdpaSinkTensor(attributes.get_sink_token(),
                                               "SdpaFwdNode",
                                               "sink_token",
                                               numHeadsQ,
-                                              graph_attributes.get_io_data_type());
+                                              detail::effectiveTensorDataType(q, ioDataType),
+                                              ioDataType);
     }
 
     // seq_len_q / seq_len_kv, when present: INT32 [B, 1, 1, 1] (cuDNN).

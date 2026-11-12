@@ -126,6 +126,8 @@ import sys
 
 # Find files in utilities folder without requiring a package to be created
 sys.path.insert(1, os.path.dirname(os.path.realpath(__file__)) + "/utilities/")
+# Sibling generators (generate_sdpa_fwd_golden) when this file is loaded by path.
+sys.path.insert(1, os.path.dirname(os.path.realpath(__file__)))
 import torch
 from sdpa_common import (  # noqa: E402  (needs the sys.path entry above)
     DTYPE_MAP,

@@ -1459,6 +1459,25 @@ flatbuffers::FlatBufferBuilder philoxGraph(bool withDump = true,
     return makeRawSdpaBwdGraph(
         attrs, std::nullopt, std::nullopt, {1, 2, 4, 1}, DataType::FLOAT, extras);
 }
+
+// A dropout_scale_inv tensor needs an explicit dropout mask, so a Philox-with-dump node that also
+// carries one is declined: the references derive scale_inv from p and would not read it.
+flatbuffers::FlatBufferBuilder philoxGraphWithScaleInv()
+{
+    SdpaBackwardAttributesT attrs;
+    attrs.dropout_probability = PHILOX_P;
+    attrs.rng_dump_tensor_uid = BWD_RNG_DUMP_UID;
+    attrs.seed_tensor_uid = BWD_SEED_UID;
+    attrs.offset_tensor_uid = BWD_OFFSET_UID;
+    attrs.dropout_scale_inv_tensor_uid = BWD_DROPOUT_SCALE_INV_UID;
+    const std::vector<RawBwdExtraTensor> extras
+        = {{BWD_RNG_DUMP_UID, DataType::FLOAT, {1, 2, 4, 4}},
+           {BWD_SEED_UID, DataType::INT64, {1}},
+           {BWD_OFFSET_UID, DataType::INT64, {1}},
+           {BWD_DROPOUT_SCALE_INV_UID, DataType::FLOAT, {1, 1, 1, 1}}};
+    return makeRawSdpaBwdGraph(
+        attrs, std::nullopt, std::nullopt, {1, 2, 4, 1}, DataType::FLOAT, extras);
+}
 } // namespace
 
 // The references have no oracle for a kernel's random stream, so Philox dropout is served only
@@ -1483,6 +1502,7 @@ TEST(TestSdpaBwdPlanDropout, PhiloxNeedsRngDump)
         isApplicableRaw(philoxGraph(true, PHILOX_P, true, true, DataType::FLOAT, {1, 2, 3, 4})));
     EXPECT_FALSE(isApplicableRaw(philoxGraph(
         true, PHILOX_P, true, true, DataType::FLOAT, {1, 2, 4, 4}, /*withExplicitMask=*/true)));
+    EXPECT_FALSE(isApplicableRaw(philoxGraphWithScaleInv()));
 }
 
 // The engine's dumped keep mask is the explicit mask with scale 1 / (1 - p) and scale_inv 1 - p

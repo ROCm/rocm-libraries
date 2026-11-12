@@ -137,8 +137,12 @@ public:
     DiagonalAlignment diagonal_alignment = DiagonalAlignment::TOP_LEFT;
 
     // Backward-only hints and requests (cuDNN set_deterministic_algorithm / set_max_total_seq_len_*)
+    /// Request a deterministic backward pass; engines that cannot guarantee it decline the graph.
     bool is_deterministic_algorithm = false;
+    /// Total packed Q length in tokens (sum of all sequence lengths); a workspace hint no hipDNN
+    /// engine consumes. validate() requires a ragged Q, K, V or O when it is set.
     std::optional<int64_t> max_total_seq_len_q;
+    /// Total packed K/V length in tokens; same contract as max_total_seq_len_q.
     std::optional<int64_t> max_total_seq_len_kv;
 
     // NOLINTEND(readability-identifier-naming)
@@ -220,6 +224,7 @@ public:
     {
         return getInput(InputNames::Dropout_scale_inv);
     }
+    /// Attention-sink input; see docs/KNOWN_DIVERGENCES.md for the hipDNN differences.
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> get_sink_token() const
     {
@@ -248,11 +253,14 @@ public:
     {
         return getOutput(OutputNames::dBias);
     }
+    /// Sink-token gradient output; requires the sink token. See docs/KNOWN_DIVERGENCES.md.
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> get_dsink_token() const
     {
         return getOutput(OutputNames::DSINK_TOKEN);
     }
+    /// Optional dropout keep-mask output; used only when dropout_probability is set with seed and
+    /// offset.
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> get_rng_dump() const
     {
@@ -367,6 +375,8 @@ public:
     {
         return setInput(InputNames::SEQ_LEN_KV, std::move(value));
     }
+    /// Philox seed (INT32 or INT64, one element); see docs/KNOWN_DIVERGENCES.md for the hipDNN
+    /// differences.
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaBackwardAttributes& set_seed(const std::shared_ptr<TensorAttributes>& value)
     {
@@ -417,8 +427,9 @@ public:
     {
         return setInput(InputNames::Dropout_scale_inv, std::move(value));
     }
-    /// @brief Set the attention-sink input tensor, [1, H_q, 1, 1], FLOAT or the graph I/O
-    ///        data type. The Stats input must be sink-inclusive.
+    /// @brief Set the attention-sink input tensor, [1, H_q, 1, 1], FLOAT or Q's data type (the
+    ///        graph I/O data type when Q's is unset). The Stats input must be sink-inclusive.
+    ///        See docs/KNOWN_DIVERGENCES.md for the hipDNN differences.
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaBackwardAttributes& set_sink_token(const std::shared_ptr<TensorAttributes>& value)
     {
@@ -484,8 +495,9 @@ public:
     {
         return setOutput(OutputNames::DSINK_TOKEN, std::move(value));
     }
-    /// @brief Set the output tensor receiving the dropout keep-mask the engine generated,
-    ///        [B, H_q, S_q, S_kv] FLOAT.
+    /// @brief Set the optional output tensor receiving the dropout keep-mask the engine
+    ///        generated, [B, H_q, S_q, S_kv] FLOAT. Consumed only when dropout_probability is
+    ///        set with seed and offset.
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaBackwardAttributes& set_rng_dump(const std::shared_ptr<TensorAttributes>& value)
     {

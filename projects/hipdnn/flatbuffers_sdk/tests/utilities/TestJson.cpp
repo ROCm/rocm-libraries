@@ -444,10 +444,11 @@ TEST(TestJson, SdpaBackwardJsonWithoutNewKeysReadsAsNullAndFalse)
     EXPECT_FALSE(attrs->max_total_seq_len_kv().has_value());
 }
 
-TEST(TestJson, SdpaBackwardBufferWithoutNewFieldsReadsAsNullAndFalse)
+TEST(TestJson, SdpaBackwardBufferWithNewFieldsUnsetReadsAsNullAndFalse)
 {
-    // FlatBuffers omits defaulted trailing fields, so a buffer packed with none of them set is
-    // byte-for-byte what a writer that predates them produces.
+    // A buffer built with none of the new fields set reads them back as null / false. This
+    // checks the accessors' defaults only; it cannot detect a vtable slot shift against a buffer
+    // written by an older schema.
     auto graphBuilder = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph();
     const auto* attrs = GetGraph(graphBuilder.GetBufferPointer())
                             ->nodes()

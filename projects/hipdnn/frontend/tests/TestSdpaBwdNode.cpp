@@ -1,14 +1,24 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <functional>
 #include <gtest/gtest.h>
+#include <map>
 
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/SdpaBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/node/SdpaBwdNode.hpp>
+#include <unordered_map>
+#include <vector>
+
+#include "fake_backend/MockHipdnnBackend.hpp"
 #include <optional>
 
 using namespace hipdnn_frontend;
@@ -1053,8 +1063,16 @@ TEST(TestSdpaBwdNode, PreValidateFailsSeedRank5)
               error_code_t::INVALID_VALUE);
 }
 
+TEST(TestSdpaBwdNode, PreValidateFailsSeedOffsetEmptyDims)
+{
+    EXPECT_EQ(validateSeedOffset(makeTyped({}, DataType::INT64), makeTyped({1}, DataType::INT64)),
+              error_code_t::INVALID_VALUE);
+    EXPECT_EQ(validateSeedOffset(makeTyped({1}, DataType::INT64), makeTyped({}, DataType::INT64)),
+              error_code_t::INVALID_VALUE);
+}
+
 //==============================================================================
-// Sink / dSink: [1, H_q, 1, 1], FLOAT or the graph I/O data type
+// Sink / dSink: [1, H_q, 1, 1], FLOAT or Q's data type
 //==============================================================================
 
 TEST(TestSdpaBwdNode, PreValidateSucceedsSinkAndDsinkFloat)
@@ -1085,13 +1103,55 @@ TEST(TestSdpaBwdNode, PreValidateSucceedsSinkUnsetDtypeResolvesToIoType)
         << "an unset sink dtype is the io type, equal to the dSink dtype";
 }
 
+TEST(TestSdpaBwdNode, PreValidateFailsSinkAndDsinkWhenNoDataTypeResolves)
+{
+    EXPECT_EQ(validateBwd(
+                  [](SdpaBackwardAttributes& a) {
+                      a.set_sink_token(makeTyped({1, 8, 1, 1}, DataType::NOT_SET));
+                  },
+                  DataType::NOT_SET),
+              error_code_t::INVALID_VALUE)
+        << "sink and Q are both unset: no data type to compare against";
+    EXPECT_EQ(validateBwd(
+                  [](SdpaBackwardAttributes& a) {
+                      a.set_sink_token(makeTyped({1, 8, 1, 1}, DataType::NOT_SET));
+                      a.set_dsink_token(makeTyped({1, 8, 1, 1}, DataType::NOT_SET));
+                  },
+                  DataType::NOT_SET),
+              error_code_t::INVALID_VALUE);
+}
+
+TEST(TestSdpaBwdNode, PreValidateSucceedsSinkAndDsinkInQExplicitDtype)
+{
+    const auto configure = [](SdpaBackwardAttributes& a) {
+        a.get_q()->set_data_type(DataType::BFLOAT16);
+        a.set_sink_token(makeTyped({1, 8, 1, 1}, DataType::BFLOAT16));
+        a.set_dsink_token(makeTyped({1, 8, 1, 1}, DataType::BFLOAT16));
+    };
+    EXPECT_EQ(validateBwd(configure, DataType::HALF), error_code_t::OK)
+        << "the referent is Q's own type, not the graph io type";
+    EXPECT_EQ(validateBwd(configure, DataType::NOT_SET), error_code_t::OK);
+}
+
+TEST(TestSdpaBwdNode, PreValidateFailsSinkInIoDtypeWhenQHasExplicitDtype)
+{
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
+                  a.get_q()->set_data_type(DataType::BFLOAT16);
+                  a.set_sink_token(makeTyped({1, 8, 1, 1}, DataType::HALF));
+              }),
+              error_code_t::INVALID_VALUE)
+        << "equal to the io type (HALF) but not to Q's explicit type";
+}
+
 TEST(TestSdpaBwdNode, PreValidateFailsSinkWrongDims)
 {
     for(const auto& dims : {std::vector<int64_t>{1, 2, 1, 1},
                             std::vector<int64_t>{2, 8, 1, 1},
                             std::vector<int64_t>{1, 8, 2, 1},
                             std::vector<int64_t>{1, 8, 1, 2},
-                            std::vector<int64_t>{8}})
+                            std::vector<int64_t>{8},
+                            std::vector<int64_t>{1, 8, 1, 1, 1},
+                            std::vector<int64_t>{1, 8, 1}})
     {
         EXPECT_EQ(validateBwd([&](SdpaBackwardAttributes& a) {
                       a.set_sink_token(makeTyped(dims, DataType::FLOAT));
@@ -1221,10 +1281,226 @@ TEST(TestSdpaBwdNode, PreValidateSucceedsMaxTotalSeqLenNonPositive)
         << "no positivity check, as cuDNN";
 }
 
+TEST(TestSdpaBwdNode, PreValidateSucceedsMaxTotalSeqLenWithRaggedOnlyV)
+{
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
+                  a.get_v()->set_ragged_offset(makeTyped({3, 1, 1, 1}, DataType::INT32));
+                  a.set_max_total_seq_len_kv(128);
+              }),
+              error_code_t::OK)
+        << "V alone counts as packed";
+}
+
 TEST(TestSdpaBwdNode, PreValidateSucceedsDeterministicTrueAndFalse)
 {
     EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) { a.set_deterministic_algorithm(true); }),
               error_code_t::OK);
     EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) { a.set_deterministic_algorithm(false); }),
               error_code_t::OK);
+}
+
+//==============================================================================
+// Packer / unpacker round trip through a recording backend (no device)
+//==============================================================================
+
+namespace
+{
+// Backend fake that stores every SetAttribute per (descriptor, attribute) and answers
+// GetAttribute from that store; an attribute never set reports zero elements.
+class TestSdpaBwdPackUnpack : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        using ::testing::_;
+
+        _backend = std::make_shared<::testing::NiceMock<Mock_hipdnn_backend>>();
+        hipdnn_frontend::detail::IHipdnnBackend::setInstance(_backend);
+
+        ON_CALL(*_backend, backendCreateDescriptor(_, _))
+            .WillByDefault([this](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* desc) {
+                *desc = reinterpret_cast<hipdnnBackendDescriptor_t>(
+                    &_descriptorPool[_nextDescriptor++]);
+                return HIPDNN_STATUS_SUCCESS;
+            });
+        ON_CALL(*_backend, backendDestroyDescriptor(_))
+            .WillByDefault(::testing::Return(HIPDNN_STATUS_SUCCESS));
+        ON_CALL(*_backend, backendFinalize(_))
+            .WillByDefault(::testing::Return(HIPDNN_STATUS_SUCCESS));
+        ON_CALL(*_backend, backendSetAttribute(_, _, _, _, _))
+            .WillByDefault([this](hipdnnBackendDescriptor_t desc,
+                                  hipdnnBackendAttributeName_t name,
+                                  hipdnnBackendAttributeType_t type,
+                                  int64_t count,
+                                  const void* elements) {
+                Stored stored;
+                stored.count = count;
+                if(elements != nullptr && count > 0)
+                {
+                    stored.bytes.resize(static_cast<size_t>(count) * elementSize(type));
+                    std::memcpy(stored.bytes.data(), elements, stored.bytes.size());
+                }
+                _store[key(desc, name)] = std::move(stored);
+                return HIPDNN_STATUS_SUCCESS;
+            });
+        ON_CALL(*_backend, backendGetAttribute(_, _, _, _, _, _))
+            .WillByDefault([this](hipdnnBackendDescriptor_t desc,
+                                  hipdnnBackendAttributeName_t name,
+                                  hipdnnBackendAttributeType_t type,
+                                  int64_t requested,
+                                  int64_t* count,
+                                  void* elements) {
+                const auto found = _store.find(key(desc, name));
+                if(found == _store.end() || found->second.bytes.empty())
+                {
+                    *count = 0;
+                    return HIPDNN_STATUS_SUCCESS;
+                }
+                const auto n = std::min(requested, found->second.count);
+                if(elements == nullptr)
+                {
+                    *count = found->second.count;
+                    return HIPDNN_STATUS_SUCCESS;
+                }
+                std::memcpy(elements,
+                            found->second.bytes.data(),
+                            static_cast<size_t>(n) * elementSize(type));
+                *count = n;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    }
+
+    void TearDown() override
+    {
+        hipdnn_frontend::detail::IHipdnnBackend::resetInstance();
+        _backend.reset();
+    }
+
+    static std::shared_ptr<TensorAttributes>
+        makeUidTensor(int64_t uid, const std::vector<int64_t>& dims, DataType type)
+    {
+        std::vector<int64_t> strides(dims.size(), 1);
+        for(size_t i = dims.size(); i-- > 1;)
+        {
+            strides[i - 1] = strides[i] * dims[i];
+        }
+        auto t = std::make_shared<TensorAttributes>();
+        t->set_uid(uid).set_dim(dims).set_stride(strides).set_data_type(type);
+        return t;
+    }
+
+private:
+    struct Stored
+    {
+        int64_t count = 0;
+        std::vector<std::byte> bytes;
+    };
+
+    static size_t elementSize(hipdnnBackendAttributeType_t type)
+    {
+        switch(type)
+        {
+        case HIPDNN_TYPE_BACKEND_DESCRIPTOR:
+            return sizeof(hipdnnBackendDescriptor_t);
+        case HIPDNN_TYPE_BOOLEAN:
+            return sizeof(bool);
+        case HIPDNN_TYPE_INT64:
+            return sizeof(int64_t);
+        case HIPDNN_TYPE_CHAR:
+            return 1;
+        default: // FLOAT and the enum types
+            return sizeof(int32_t);
+        }
+    }
+
+    static std::pair<std::uintptr_t, int64_t> key(hipdnnBackendDescriptor_t desc,
+                                                  hipdnnBackendAttributeName_t name)
+    {
+        return {reinterpret_cast<std::uintptr_t>(desc), static_cast<int64_t>(name)};
+    }
+
+    std::shared_ptr<::testing::NiceMock<Mock_hipdnn_backend>> _backend;
+    std::array<char, 256> _descriptorPool{};
+    size_t _nextDescriptor = 0;
+    std::map<std::pair<std::uintptr_t, int64_t>, Stored> _store;
+};
+} // namespace
+
+TEST_F(TestSdpaBwdPackUnpack, SinkDsinkRngDumpDeterministicAndMaxTotalSeqLenSurviveRoundTrip)
+{
+    SdpaBackwardAttributes attrs;
+    attrs.set_q(makeUidTensor(1, {2, 8, 16, 64}, DataType::FLOAT));
+    attrs.set_k(makeUidTensor(2, {2, 8, 32, 64}, DataType::FLOAT));
+    attrs.set_v(makeUidTensor(3, {2, 8, 32, 64}, DataType::FLOAT));
+    attrs.set_o(makeUidTensor(4, {2, 8, 16, 64}, DataType::FLOAT));
+    attrs.set_do(makeUidTensor(5, {2, 8, 16, 64}, DataType::FLOAT));
+    attrs.set_stats(makeUidTensor(6, {2, 8, 16, 1}, DataType::FLOAT));
+    attrs.set_dq(makeUidTensor(7, {2, 8, 16, 64}, DataType::FLOAT));
+    attrs.set_dk(makeUidTensor(8, {2, 8, 32, 64}, DataType::FLOAT));
+    attrs.set_dv(makeUidTensor(9, {2, 8, 32, 64}, DataType::FLOAT));
+    attrs.set_sink_token(makeUidTensor(10, {1, 8, 1, 1}, DataType::FLOAT));
+    attrs.set_dsink_token(makeUidTensor(11, {1, 8, 1, 1}, DataType::FLOAT));
+    attrs.set_rng_dump(makeUidTensor(12, {2, 8, 16, 32}, DataType::FLOAT));
+    attrs.set_deterministic_algorithm(true);
+    attrs.set_max_total_seq_len_q(128).set_max_total_seq_len_kv(256);
+    attrs.set_compute_data_type(DataType::FLOAT);
+
+    const GraphAttributes graphAttrs;
+    const SdpaBwdNode packed(std::move(attrs), graphAttrs);
+    std::unordered_map<int64_t, hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor> tensorDescs;
+    std::vector<hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor> operations;
+    const auto packError = packed.create_operation(tensorDescs, operations);
+    ASSERT_EQ(packError.code, error_code_t::OK) << packError.err_msg;
+    ASSERT_EQ(operations.size(), 1U);
+
+    SdpaBwdNode unpacked(SdpaBackwardAttributes{}, graphAttrs);
+    std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
+    const auto unpackError = unpacked.unpack_from_descriptor(operations[0].get(), tensorMap);
+    ASSERT_EQ(unpackError.code, error_code_t::OK) << unpackError.err_msg;
+
+    const auto& out = unpacked.attributes;
+    ASSERT_NE(out.get_sink_token(), nullptr);
+    EXPECT_EQ(out.get_sink_token()->get_uid(), 10);
+    EXPECT_EQ(out.get_sink_token()->get_dim(), (std::vector<int64_t>{1, 8, 1, 1}));
+    ASSERT_NE(out.get_dsink_token(), nullptr);
+    EXPECT_EQ(out.get_dsink_token()->get_uid(), 11);
+    ASSERT_NE(out.get_rng_dump(), nullptr);
+    EXPECT_EQ(out.get_rng_dump()->get_uid(), 12);
+    EXPECT_TRUE(out.is_deterministic_algorithm);
+    EXPECT_EQ(out.max_total_seq_len_q, std::optional<int64_t>{128});
+    EXPECT_EQ(out.max_total_seq_len_kv, std::optional<int64_t>{256});
+}
+
+TEST_F(TestSdpaBwdPackUnpack, UnsetNewFieldsStayUnsetAfterRoundTrip)
+{
+    SdpaBackwardAttributes attrs;
+    attrs.set_q(makeUidTensor(1, {2, 8, 16, 64}, DataType::FLOAT));
+    attrs.set_k(makeUidTensor(2, {2, 8, 32, 64}, DataType::FLOAT));
+    attrs.set_v(makeUidTensor(3, {2, 8, 32, 64}, DataType::FLOAT));
+    attrs.set_o(makeUidTensor(4, {2, 8, 16, 64}, DataType::FLOAT));
+    attrs.set_do(makeUidTensor(5, {2, 8, 16, 64}, DataType::FLOAT));
+    attrs.set_stats(makeUidTensor(6, {2, 8, 16, 1}, DataType::FLOAT));
+    attrs.set_dq(makeUidTensor(7, {2, 8, 16, 64}, DataType::FLOAT));
+    attrs.set_dk(makeUidTensor(8, {2, 8, 32, 64}, DataType::FLOAT));
+    attrs.set_dv(makeUidTensor(9, {2, 8, 32, 64}, DataType::FLOAT));
+    attrs.set_compute_data_type(DataType::FLOAT);
+
+    const GraphAttributes graphAttrs;
+    const SdpaBwdNode packed(std::move(attrs), graphAttrs);
+    std::unordered_map<int64_t, hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor> tensorDescs;
+    std::vector<hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor> operations;
+    ASSERT_EQ(packed.create_operation(tensorDescs, operations).code, error_code_t::OK);
+
+    SdpaBwdNode unpacked(SdpaBackwardAttributes{}, graphAttrs);
+    std::unordered_map<int64_t, std::shared_ptr<TensorAttributes>> tensorMap;
+    ASSERT_EQ(unpacked.unpack_from_descriptor(operations[0].get(), tensorMap).code,
+              error_code_t::OK);
+
+    const auto& out = unpacked.attributes;
+    EXPECT_EQ(out.get_sink_token(), nullptr);
+    EXPECT_EQ(out.get_dsink_token(), nullptr);
+    EXPECT_EQ(out.get_rng_dump(), nullptr);
+    EXPECT_FALSE(out.is_deterministic_algorithm);
+    EXPECT_FALSE(out.max_total_seq_len_q.has_value());
+    EXPECT_FALSE(out.max_total_seq_len_kv.has_value());
 }

@@ -368,14 +368,15 @@ public:
         HIPDNN_CHECK_ERROR(detail::validateSdpaPhiloxOperand(
             attributes.get_offset(), "SdpaBwdNode", "offset", ioDataType));
 
-        // Rule 12: attention sink and its gradient: [1, H_q, 1, 1], FLOAT or the graph I/O data
-        // type; the gradient has the sink's data type and needs the sink (cuDNN).
+        // Rule 12: attention sink and its gradient: [1, H_q, 1, 1], FLOAT or Q's data type; the
+        // gradient has the sink's data type and needs the sink (cuDNN).
         const auto sink = attributes.get_sink_token();
         const auto dSink = attributes.get_dsink_token();
+        const auto qDataType = detail::effectiveTensorDataType(q, ioDataType);
         HIPDNN_CHECK_ERROR(detail::validateSdpaSinkTensor(
-            sink, "SdpaBwdNode", "sink_token", numHeads, ioDataType));
+            sink, "SdpaBwdNode", "sink_token", numHeads, qDataType, ioDataType));
         HIPDNN_CHECK_ERROR(detail::validateSdpaSinkTensor(
-            dSink, "SdpaBwdNode", "dsink_token", numHeads, ioDataType));
+            dSink, "SdpaBwdNode", "dsink_token", numHeads, qDataType, ioDataType));
         HIPDNN_RETURN_IF_TRUE(dSink && !sink,
                               ErrorCode::ATTRIBUTE_NOT_SET,
                               "SdpaBwdNode: dsink_token requires sink_token");

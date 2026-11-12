@@ -638,8 +638,8 @@ EXT_RULES = [
     ("FLOAT dropout mask", "always: the references need FLOAT", "SEM-015"),
     ("dropout_probability without RNG state", "dropout_probability = 0",
      "the fill and engines read it as no dropout; the references decline it (ALMIOPEN-3149, ALMIOPEN-3150)"),
-    ("sink dtype", "sink and dSink in the IO dtype, both the same dtype",
-     "ALMIOPEN-3184 (user-authorized superset of cuDNN's FLOAT sink)"),
+    ("sink dtype", "sink and dSink in Q's dtype, both the same dtype",
+     "SEM-022: a superset of cuDNN's FLOAT sink, so a kernel that reads the sink in the IO dtype needs no cast"),
 ]
 # fmt: on
 
@@ -921,7 +921,7 @@ GATES = {
     "HG18": ("HG18: finite-only validator", "to file"),
     "harness: zero strides rejected": ("HG17: zero input strides (#14709 lets the data SDK Tensor hold them; "
                                        "H62 needs a GPU run to confirm)", "to file"),
-    "none": ("no oracle (Philox: the backward schema has no rng_dump)", "to file"),
+    "none": ("no oracle (Philox: the engine's RNG stream is engine-defined)", "to file"),
     "p0": ("a SEM entry for dropout_probability = 0 without RNG state, and a reference that models it "
            "(the references decline any dropout_probability since #14358)", "ALMIOPEN-3149 or ALMIOPEN-3150"),
     "none (decline-only probe mode)": ("a decline-only probe mode that does not allocate", "to file"),

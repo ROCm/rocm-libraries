@@ -16,8 +16,8 @@ namespace hipdnn_test_sdk::detail
 {
 
 /// The attention sink of an SDPA node as the FLOAT [1, H, 1, 1] tensor the CPU reference reads.
-/// A sink is FLOAT or the graph's I/O dtype (NativeType); the I/O dtype one widens to float
-/// exactly, so the reference sees the same logit the engine does.
+/// A sink is FLOAT or Q's data type (NativeType); the Q-dtype one widens to float exactly, so
+/// the reference sees the same logit the engine does.
 template <typename NativeType>
 class SdpaSinkOperand
 {

@@ -85,7 +85,7 @@ listed as an accepted hint (the last row).
 | Padding (`seq_len_q/kv`, `padding_mask`) | INT32 `[B, 1, 1, 1]`, both; pad rows give `O = 0`, `LSE = -inf` | SEM-008, 010 |
 | Paged K/V (`page_table_k/v`, `max_seq_len_kv`) | K, V or both paged, each with its own block size; table INT32 `[B, 1, ceil(max/block), 1]`; extent inferred as cuDNN does when unset; needs padding | SEM-009 |
 | Ragged tensors (`ragged_offset` on any primary) | native forward for BF16 and FP8 E4M3, any container-valid layout, `seq_len_q/kv` bound as lengths; everything else (other dtypes, bias, sinks, `Max` / `Sum_exp`, ragged Q over non-ragged paged K/V, backward) through the dense rewrite; the dense rewrite declines what it cannot rewrite (RFC 0014 §4.10) | RFC 0014, SEM-026 |
-| Attention sink (`sink_token`) | FLOAT or the graph I/O dtype, `[1, H_q, 1, 1]`; read in either dtype | SEM-022 |
+| Attention sink (`sink_token`) | FLOAT or Q's data type (the graph I/O data type when Q's is unset), `[1, H_q, 1, 1]`; read in either dtype | SEM-022 |
 | ALiBi (`alibi_mask`) | cuDNN slopes, `+ (skv - sq) * slope(h)`; top-left causal only (as cuDNN). The frontend accepts other alignments; the references decline them | SEM-021 |
 | Block-sparse mask (`block_mask`) | UINT8, one bit per 128 x 128 tile | SEM-025 |
 | Dropout, explicit mask (`dropout_mask`, `dropout_scale`) | FLOAT `[B or 1, H or 1, Sq, Skv]` | SEM-015 |
@@ -107,7 +107,7 @@ listed as an accepted hint (the last row).
 | Dropout, explicit mask (`dropout_mask`, `dropout_scale`, `dropout_scale_inv`) | cuDNN's composition (SEM-015) |
 | Ragged | through the dense rewrite; origins and `seq_len` lengths for every role |
 | Philox dropout | With an `rng_dump` output: the engine's backward keep mask is applied as an explicit mask with `dropout_scale = 1 / (1 - p)` and `dropout_scale_inv = 1 - p` (SEM-015). Without `rng_dump` the plan declines |
-| Attention sink and `dsink` | `sink_token` and `dsink_token`, FLOAT or the graph I/O dtype, `[1, H_q, 1, 1]`, dSink dtype equal to the sink's; dSink = `-Σ exp(sink - LSE) * D` over live rows, fp32 accumulation, one rounding (SEM-022). `dsink` requires `sink_token`; the LSE passed in must include the sink |
+| Attention sink and `dsink` | `sink_token` and `dsink_token`, FLOAT or Q's data type (the graph I/O data type when Q's is unset), `[1, H_q, 1, 1]`, dSink dtype equal to the sink's; dSink = `-Σ exp(sink - LSE) * D` over live rows, fp32 accumulation, one rounding (SEM-022). `dsink` requires `sink_token`; the LSE passed in must include the sink |
 | `is_deterministic_algorithm`, `max_total_seq_len_q/kv` | accepted; the references are deterministic, the hints are ignored (SEM-027) |
 
 ### 2.3 Reference-only extensions
