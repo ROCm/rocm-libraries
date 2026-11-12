@@ -27,6 +27,7 @@
 #pragma once
 
 #include <Tensile/AMDGPU.hpp>
+#include <Tensile/LongPath.hpp>
 #include <Tensile/Tensile.hpp>
 #include <hip/hip_runtime.h>
 #include <unordered_set>
@@ -55,6 +56,10 @@ namespace TensileLite
                 decltype(&hipModuleUnload)   unload       = hipModuleUnload;
                 decltype(&hipGetLastError)   getLastError = hipGetLastError;
                 decltype(&hipModuleLoadData) loadData     = hipModuleLoadData;
+                // Gives the path to open a code object with. When it differs
+                // from the path given, hipModuleLoad could not open the file,
+                // so the adapter reads it and calls loadData instead.
+                decltype(&longPathSafe) resolvePath = longPathSafe;
             };
 
             SolutionAdapter();

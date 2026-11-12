@@ -52,18 +52,20 @@ namespace TensileLite
         {
             // hipModuleLoad opens the file by its narrow path, so it fails for a
             // path Windows will only open in verbatim form (see LongPath.hpp).
-            // Such a file is read into `image` and loaded from memory instead.
-            // HIP keeps referring to that buffer, so on success the caller must
-            // keep `image` until the module is unloaded. It is left empty when
-            // the file was loaded by path.
+            // When resolvePath gives a different path, or the path is already in
+            // that form, the file is read into `image` and loaded from memory
+            // instead. HIP keeps referring to that buffer, so on success the
+            // caller must keep `image` until the module is unloaded. It is left
+            // empty when the file was loaded by path.
             hipError_t loadModuleFile(SolutionAdapter::ModuleApi const& api,
                                       hipModule_t*                      module,
                                       std::string const&                path,
                                       std::vector<char>&                image)
             {
                 image.clear();
-                auto const openPath = longPathSafe(path);
-                if(!isVerbatimPath(openPath))
+                auto const openPath = api.resolvePath(path);
+                if(openPath.native() == std::filesystem::path(path).native()
+                   && !isVerbatimPath(openPath))
                     return api.load(module, path.c_str());
 
                 std::ifstream file(openPath, std::ios::binary | std::ios::ate);
