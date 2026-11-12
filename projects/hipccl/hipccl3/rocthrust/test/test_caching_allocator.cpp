@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@
 template <typename Allocator>
 void test_implementation(Allocator alloc)
 {
-  using Traits = typename thrust::detail::allocator_traits<Allocator>;
+  using Traits = typename _THRUST_STD::allocator_traits<Allocator>;
   using Ptr    = typename Allocator::pointer;
 
   Ptr p = Traits::allocate(alloc, 123);

@@ -1,19 +1,6 @@
-/*
- *  Copyright 2008-2018 NVIDIA Corporation
- *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
- *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2008-2018, NVIDIA Corporation. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
 
 /*! \file internal_functional.inl
  *  \brief Non-public functionals used to implement algorithm internals.
@@ -36,14 +23,13 @@
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/detail/tuple_of_iterator_references.h>
 #include <thrust/iterator/iterator_traits.h>
-#include <thrust/tuple.h>
 
 #include _THRUST_LIBCXX_INCLUDE(__functional/address_stability.h)
 #include _THRUST_LIBCXX_INCLUDE(__iterator/discard_iterator.h)
 #include _THRUST_LIBCXX_INCLUDE(__iterator/tabulate_output_iterator.h)
 #include _THRUST_LIBCXX_INCLUDE(__iterator/transform_input_output_iterator.h)
 #include _THRUST_LIBCXX_INCLUDE(__iterator/transform_output_iterator.h)
-#include _THRUST_STD_INCLUDE(__host_stdlib/memory) // for ::new
+#include _THRUST_STD_INCLUDE(__host_stdlib/memory)
 #include _THRUST_STD_INCLUDE(__new/device_new.h)
 #include _THRUST_STD_INCLUDE(__tuple_dir/get.h)
 #include _THRUST_STD_INCLUDE(__tuple_dir/tuple_element.h)
@@ -52,6 +38,7 @@
 #include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
 #include _THRUST_STD_INCLUDE(__type_traits/is_reference.h)
 #include _THRUST_STD_INCLUDE(__type_traits/type_identity.h)
+#include _THRUST_STD_INCLUDE(tuple)
 
 THRUST_NAMESPACE_BEGIN
 

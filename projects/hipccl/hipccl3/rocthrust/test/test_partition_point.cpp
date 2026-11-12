@@ -135,6 +135,7 @@ void TestPartitionPointWithBigIndexesHelper(int magnitude)
             (1ll << magnitude) - 17);
 }
 
+#ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
 TEST(PartitionPointTests, TestPartitionPointWithBigIndexes)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -144,3 +145,4 @@ TEST(PartitionPointTests, TestPartitionPointWithBigIndexes)
   TestPartitionPointWithBigIndexesHelper(32);
   TestPartitionPointWithBigIndexesHelper(33);
 }
+#endif // THRUST_FORCE_32_BIT_OFFSET_TYPE

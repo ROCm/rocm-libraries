@@ -20,6 +20,7 @@ Documentation for rocThrust available at
 * Defined `THRUST_COMP_DEPR_IMPL` with `_CCCL_WARNING`.
 * Replaced `thrust::constant_iterator`, `thrust::make_discard_iterator`, `thrust::permutation_iterator`, `thrust::strided_iterator`, `thrust::tabulate_output_iterator` and `thrust::transform_output_iterator` with `hip::constant_iterator`, `hip::make_discard_iterator`, `hip::permutation_iterator`, `hip::strided_iterator`, `hip::tabulate_output_iterator` and `hip::transform_output_iterator` instead.
 * Renamed the CMake option `CODE_COVERAGE` to `ROCTHRUST_ENABLE_COVERAGE`.
+* Replaced `std::move` operators to `hip::std` operators.
 
 ### Removed
 

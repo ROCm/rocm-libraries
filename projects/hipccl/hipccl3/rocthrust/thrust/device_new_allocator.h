@@ -1,18 +1,6 @@
-/*
- *  Copyright 2008-2013 NVIDIA Corporation
- *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2008-2013, NVIDIA Corporation. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
 
 /*! \file
  *  \brief An allocator which allocates storage with \p device_new.
@@ -34,11 +22,7 @@
 #include <thrust/device_ptr.h>
 #include <thrust/device_reference.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(cstdint)
-#else
-#  include <cstddef>
-#endif
+#include _THRUST_STD_INCLUDE(cstdint)
 
 #include _THRUST_STD_INCLUDE(limits)
 
@@ -55,6 +39,10 @@ THRUST_NAMESPACE_BEGIN
  *  \see device_new
  *  \see device_ptr
  *  \see https://en.cppreference.com/w/cpp/memory/allocator
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename T>
 class device_new_allocator
@@ -85,11 +73,19 @@ public:
    *  instantiated with another type.
    *
    *  \tparam U The other type to use for instantiation.
+   *
+   *  \verbatim embed:rst:leading-asterisk
+   *     .. versionadded:: 2.2.0
+   *  \endverbatim
    */
   template <typename U>
   struct rebind
   {
     /*! The alias \p other gives the type of the rebound \p device_new_allocator.
+     *
+     *  \verbatim embed:rst:leading-asterisk
+     *     .. versionadded:: 2.2.0
+     *  \endverbatim
      */
     using other = device_new_allocator<U>;
   }; // end rebind
@@ -110,6 +106,10 @@ public:
 
   /*! Returns the address of an allocated object.
    *  \return <tt>&r</tt>.
+   *
+   *  \verbatim embed:rst:leading-asterisk
+   *     .. versionadded:: 2.2.0
+   *  \endverbatim
    */
   THRUST_HOST_DEVICE inline pointer address(reference r)
   {
@@ -118,6 +118,10 @@ public:
 
   /*! Returns the address an allocated object.
    *  \return <tt>&r</tt>.
+   *
+   *  \verbatim embed:rst:leading-asterisk
+   *     .. versionadded:: 2.2.0
+   *  \endverbatim
    */
   THRUST_HOST_DEVICE inline const_pointer address(const_reference r)
   {
@@ -128,6 +132,10 @@ public:
    *  \param cnt The number of objects to allocate.
    *  \return A \p pointer to uninitialized storage for \p cnt objects.
    *  \note Memory allocated by this function must be deallocated with \p deallocate.
+   *
+   *  \verbatim embed:rst:leading-asterisk
+   *     .. versionadded:: 2.2.0
+   *  \endverbatim
    */
   THRUST_HOST inline pointer allocate(size_type cnt, const_pointer = const_pointer(static_cast<T*>(0)))
   {
@@ -145,6 +153,10 @@ public:
    *  \param cnt The size of the previous allocation.
    *  \note Memory deallocated by this function must previously have been
    *        allocated with \p allocate.
+   *
+   *  \verbatim embed:rst:leading-asterisk
+   *     .. versionadded:: 2.2.0
+   *  \endverbatim
    */
   THRUST_HOST inline void deallocate(pointer p, [[maybe_unused]] size_type cnt) noexcept
   {
@@ -154,6 +166,10 @@ public:
 
   /*! Returns the largest value \c n for which <tt>allocate(n)</tt> might succeed.
    *  \return The largest value \c n for which <tt>allocate(n)</tt> might succeed.
+   *
+   *  \verbatim embed:rst:leading-asterisk
+   *     .. versionadded:: 2.2.0
+   *  \endverbatim
    */
   THRUST_HOST_DEVICE inline size_type max_size() const
   {
@@ -163,6 +179,10 @@ public:
 
   /*! Compares against another \p device_malloc_allocator for equality.
    *  \return \c true
+   *
+   *  \verbatim embed:rst:leading-asterisk
+   *     .. versionadded:: 2.2.0
+   *  \endverbatim
    */
   THRUST_HOST_DEVICE inline bool operator==(device_new_allocator const&)
   {
@@ -171,6 +191,10 @@ public:
 
   /*! Compares against another \p device_malloc_allocator for inequality.
    *  \return \c false
+   *
+   *  \verbatim embed:rst:leading-asterisk
+   *     .. versionadded:: 2.2.0
+   *  \endverbatim
    */
   THRUST_HOST_DEVICE inline bool operator!=(device_new_allocator const& a)
   {

@@ -1,19 +1,6 @@
-/*
- *  Copyright 2008-2018 NVIDIA Corporation
- *  Modifications Copyright© 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
- *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2008-2018, NVIDIA Corporation. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
 
 #pragma once
 
@@ -33,12 +20,11 @@
 #include <thrust/detail/allocator/value_initialize_range.h>
 #include <thrust/detail/contiguous_storage.h>
 
+#include _THRUST_STD_INCLUDE(__host_stdlib/stdexcept)
 #include _THRUST_STD_INCLUDE(__utility/move.h)
 #include _THRUST_STD_INCLUDE(__utility/swap.h)
 
 #include <nv/target>
-
-#include _THRUST_STD_INCLUDE(__host_stdlib/stdexcept)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -255,7 +241,7 @@ THRUST_HOST_DEVICE contiguous_storage<T, Alloc>& contiguous_storage<T, Alloc>::o
   {
     deallocate();
   }
-  if constexpr (allocator_traits<Alloc>::propagate_on_container_move_assignment::value)
+  if constexpr (_THRUST_STD::allocator_traits<Alloc>::propagate_on_container_move_assignment::value)
   {
     m_allocator = _THRUST_STD::move(other.m_allocator);
   }
