@@ -67,6 +67,13 @@ __device__ inline unsigned short k1BfLo(float v, unsigned short h)
     const float r = v - k1BfToFloat(h);
     return k1FloatToBf(r == r ? r : 0.0f);
 }
+/// Three-bf16's high part for the cross terms (hi x the other operand's lo): zero for an infinity.
+/// The hi x hi term alone carries an infinity, so inf x b is inf (NaN only where b is 0), as in
+/// fp32; a cross term would add inf x lo, NaN when lo is 0 or of the other sign.
+__device__ inline unsigned short k1BfFinite(unsigned short h)
+{
+    return (h & 0x7fffu) == 0x7f80u ? static_cast<unsigned short>(0) : h;
+}
 
 template <class T>
 struct K1Elem;
@@ -541,6 +548,26 @@ enum K1Math
     K1_MATH_NATIVE = 0,
     K1_MATH_BF16X3 = 1
 };
+
+/// @p f with each bf16 infinity zeroed (k1BfFinite): three-bf16's cross-term high parts.
+template <class Atom>
+__device__ inline typename Atom::frag k1FiniteFrag(typename Atom::frag f)
+{
+    if constexpr(Atom::KPL == 1)
+    {
+        return f;
+    }
+    else
+    {
+#pragma unroll
+        for(int i = 0; i < Atom::KPL; ++i)
+        {
+            f[i] = __builtin_bit_cast(typename Atom::elem,
+                                      k1BfFinite(__builtin_bit_cast(unsigned short, f[i])));
+        }
+        return f;
+    }
+}
 
 template <class Atom, class T>
 __device__ inline typename Atom::frag k1Frag(const T* p)
@@ -1920,13 +1947,21 @@ __device__ void k1ConvMma(const K1Args& a)
                     bh[j] = k1Frag<Atom>(p);
                     bl[j] = k1Frag<Atom>(p + BN * LD);
                 }
+                // Cross terms take the high parts with infinities zeroed (k1BfFinite).
+                typename Atom::frag af[FM], bf[FN];
+#pragma unroll
+                for(int i = 0; i < FM; ++i)
+                    af[i] = k1FiniteFrag<Atom>(ah[i]);
+#pragma unroll
+                for(int j = 0; j < FN; ++j)
+                    bf[j] = k1FiniteFrag<Atom>(bh[j]);
 #pragma unroll
                 for(int i = 0; i < FM; ++i)
 #pragma unroll
                     for(int j = 0; j < FN; ++j)
                     {
-                        acc[i][j] = Atom::mma(al[i], bh[j], acc[i][j]);
-                        acc[i][j] = Atom::mma(ah[i], bl[j], acc[i][j]);
+                        acc[i][j] = Atom::mma(al[i], bf[j], acc[i][j]);
+                        acc[i][j] = Atom::mma(af[i], bl[j], acc[i][j]);
                         acc[i][j] = Atom::mma(ah[i], bh[j], acc[i][j]);
                     }
             }

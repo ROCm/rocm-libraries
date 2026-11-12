@@ -46,7 +46,8 @@
 #if defined(CONV_K3_MATH) && CONV_K3_MATH == 1
 /// Splits n fp32 values of v into bf16 hi = round(v) and lo = round(v - hi) (zero where the
 /// remainder is not a number: an infinite v stays infinite rather than NaN) and writes them to
-/// three copies: c0, c1, c2 (each n long) take hi, lo or hi by `pattern` (bit i: copy i takes lo).
+/// three copies c0, c1, c2 (each n long), copy i taking 2 bits of `pattern`: 0 hi, 1 lo, 2 hi with
+/// infinities zeroed (k1BfFinite: the copy that meets the other operand's lo).
 /// Eight values a thread, 16-byte loads and stores, when n is a whole number of eights.
 __device__ inline void k3SplitPlane(const float* v, unsigned short* s, long long n, int pattern)
 {
@@ -60,17 +61,21 @@ __device__ inline void k3SplitPlane(const float* v, unsigned short* s, long long
         {
             const f4 a = reinterpret_cast<const f4*>(v)[2 * i];
             const f4 b = reinterpret_cast<const f4*>(v)[2 * i + 1];
-            u8 h, l;
+            u8 h, l, f;
 #pragma unroll
             for(int e = 0; e < 8; ++e)
             {
                 const float x = e < 4 ? a[e] : b[e - 4];
                 h[e] = k1FloatToBf(x);
                 l[e] = k1BfLo(x, h[e]);
+                f[e] = k1BfFinite(h[e]);
             }
 #pragma unroll
             for(int c = 0; c < 3; ++c)
-                reinterpret_cast<u8*>(s + c * n)[i] = ((pattern >> c) & 1) != 0 ? l : h;
+            {
+                const int part = (pattern >> (2 * c)) & 3;
+                reinterpret_cast<u8*>(s + c * n)[i] = part == 1 ? l : part == 2 ? f : h;
+            }
         }
         return;
     }
@@ -80,15 +85,18 @@ __device__ inline void k3SplitPlane(const float* v, unsigned short* s, long long
         const unsigned short l = k1BfLo(v[i], h);
 #pragma unroll
         for(int c = 0; c < 3; ++c)
-            s[c * n + i] = ((pattern >> c) & 1) != 0 ? l : h;
+        {
+            const int part = (pattern >> (2 * c)) & 3;
+            s[c * n + i] = part == 1 ? l : part == 2 ? k1BfFinite(h) : h;
+        }
     }
 }
 
-/// x -> [hi | hi | lo], dy -> [hi | lo | hi] (K3SplitArgs).
+/// x -> [hi | hi' | lo], dy -> [hi | lo | hi'] (K3SplitArgs; hi' meets the other's lo).
 extern "C" __global__ void __launch_bounds__(256) ConvWrwSplit(K3SplitArgs a)
 {
-    k3SplitPlane(a.x, a.xs, a.xElems, 4);
-    k3SplitPlane(a.dy, a.ys, a.yElems, 2);
+    k3SplitPlane(a.x, a.xs, a.xElems, 0 | 2 << 2 | 1 << 4);
+    k3SplitPlane(a.dy, a.ys, a.yElems, 0 | 1 << 2 | 2 << 4);
 }
 #endif
 
