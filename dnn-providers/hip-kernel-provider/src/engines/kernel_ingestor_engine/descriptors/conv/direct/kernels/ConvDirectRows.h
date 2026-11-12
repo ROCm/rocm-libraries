@@ -1,7 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// K2 "rows" kernel: stride-1 2-D direct convolution with filter-row reuse, channels-last, for
+// K2 "rows" kernel: stride-1 2-D and 3-D direct convolution with filter-row reuse, channels-last, for
 // the CDNA 16x16 matrix cores (gfx90a to gfx950), the halo filled by LDS DMA: 16 bytes a lane on
 // gfx950, a dword a lane elsewhere (K2R_DMA16). Included by ConvDirect.cpp after ConvDirectCore.h
 // (atoms, K2Args, k2FilterOffset, k2SplitBf16, k2StaticFor). HIPRTC-compatible.
@@ -33,8 +33,13 @@
 // EPI 1 (16-bit output, PP 0): the epilogue transposes through LDS so 8 lanes store one pixel's
 // 16 FN channels as 16-byte pieces; EPI 0 stores each lane's 4 channels directly.
 //
-// Envelope: stride 1, dilation 1, groups 1, KD 1, any padding; reduction channels a multiple of
-// 16 / sizeof(T); per-image input < 2 GiB; formatted weights < 2 GiB.
+// 3-D (KD > 1): a tile is one output plane's rows x columns x channels; its chunks walk the depth
+// taps whose input plane lies in the image (each staged as a 2-D halo, re-read through L2 by the
+// neighbouring planes), each tap's R filter rows as in 2-D.
+//
+// Envelope: stride 1, dilation 1, groups 1, KD 1 (2-D) or KD x R x S (3-D), any padding;
+// reduction channels a multiple of 16 / sizeof(T); per-image input < 2 GiB; formatted weights
+// < 2 GiB.
 #pragma once
 
 // 16-byte LDS DMA (buffer_load_dwordx4 ... lds) is a CDNA4 feature; gfx950 is CDNA4's only
@@ -294,7 +299,8 @@ template <class T,
           int BC,
           int PP,
           int EPI,
-          class TO = T>
+          class TO = T,
+          int KD = 1>
 __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
 {
     constexpr int WAVE = 64;
@@ -348,7 +354,9 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
     // share of the logical tiles proportional to its block count; its blocks take them
     // round-robin, so concurrent blocks of one XCD work on neighbouring tiles (shared L2).
     const int kBlocks = (a.k + BN - 1) / BN;
-    const long long total = static_cast<long long>(a.tilesW) * a.tilesH * a.n * kBlocks;
+    long long total = static_cast<long long>(a.tilesW) * a.tilesH * a.n * kBlocks;
+    if constexpr(KD > 1)
+        total *= a.dout;
     const int gsz = static_cast<int>(gridDim.x);
     const int xcd = static_cast<int>(blockIdx.x) % K1_XCDS;
     const int local = static_cast<int>(blockIdx.x) / K1_XCDS;
@@ -357,9 +365,15 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
     const int tEnd = static_cast<int>(total * cum(xcd + 1) / gsz);
     const int tFirst = static_cast<int>(total * cum(xcd) / gsz) + local;
 
+    // 3-D (KD > 1): a tile is also one output plane od. Its chunks run over the depth taps whose
+    // input plane is in the image, [t0, t0 + nt), times the channel chunks: chunk v is tap
+    // t0 + v / nCh, channel chunk v % nCh. An output plane with no such tap runs one tap of an
+    // out-of-image plane (zero input), so it still writes zeros.
+    const int nCh = (a.c + BC - 1) / BC;
     struct Tile
     {
         int kb, oh0, ow0, img;
+        int od, t0, nv; // 3-D only
     };
     auto decode = [&](int t) __attribute__((always_inline))
     {
@@ -369,21 +383,57 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
         const int tq = t % a.tilesW;
         t /= a.tilesW;
         const int tp = t % a.tilesH;
-        c.img = t / a.tilesH;
+        if constexpr(KD > 1)
+        {
+            t /= a.tilesH;
+            c.od = t % a.dout;
+            c.img = t / a.dout;
+            const int lo = a.pd - c.od, hi = a.di + a.pd - c.od; // taps [lo, hi) are in the image
+            const int t0 = lo > 0 ? lo : 0, t1 = hi < KD ? hi : KD;
+            c.t0 = t1 > t0 ? t0 : 0;
+            c.nv = (t1 > t0 ? t1 - t0 : 1) * nCh;
+        }
+        else
+        {
+            c.img = t / a.tilesH;
+            c.od = 0;
+            c.t0 = 0;
+            c.nv = nCh;
+        }
         c.oh0 = tp * BP;
         c.ow0 = tq * BQ;
         return c;
     };
-    const long long imgElems = static_cast<long long>(a.hi) * a.wi * a.c;
+    const long long imgElems = KD > 1 ? static_cast<long long>(a.di) * a.hi * a.wi * a.c
+                                      : static_cast<long long>(a.hi) * a.wi * a.c;
     const long long imgBytes = imgElems * static_cast<long long>(sizeof(T));
+
+    // Chunk v of tile tc: its channel chunk and (3-D) its input plane.
+    auto chunkOf = [&](const Tile& tc, int v, int& cc, int& plane) __attribute__((always_inline))
+    {
+        if constexpr(KD > 1)
+        {
+            const int tap = v / nCh;
+            cc = v - tap * nCh;
+            plane = tc.od - a.pd + tc.t0 + tap;
+        }
+        else
+        {
+            cc = v;
+            plane = 0;
+        }
+    };
 
     // This wave's DMA instructions [i0, i1) of chunk cc of tile tc into stage st. Lane l takes
     // column x = XPI xg + l / G and slot l % G, so its granule g = (l % G - x) mod G is the same
     // for every instruction. Out-of-image pixels and channels past c read as zero.
 #if K2R_DMA16
-    auto dma
-        = [&](Raw16 * st, const Tile& tc, int cc, int i0, int i1) __attribute__((always_inline))
+    auto dma = [&](Raw16 * st, const Tile& tc, int v, int i0, int i1) __attribute__((always_inline))
     {
+        int cc, plane;
+        chunkOf(tc, v, cc, plane);
+        const bool pok = KD > 1 ? static_cast<unsigned>(plane) < static_cast<unsigned>(a.di) : true;
+        const int prow = KD > 1 ? plane * a.hi : 0; // the plane's first row in the image
         const T* xi = static_cast<const T*>(a.x) + tc.img * imgElems;
         const __amdgpu_buffer_rsrc_t xr = k1Rsrc(xi, imgBytes);
         const int cbytes = cc * BC * static_cast<int>(sizeof(T));
@@ -406,8 +456,8 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
             const int ih = tc.oh0 - a.ph + h;
             const int iw = iwl + xg * XPI;
             const bool ok = (static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi))
-                            & (static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi)) & cok;
-            const unsigned off = ok ? static_cast<unsigned>(((ih * a.wi + iw) * a.c + gofs)
+                            & (static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi)) & cok & pok;
+            const unsigned off = ok ? static_cast<unsigned>((((prow + ih) * a.wi + iw) * a.c + gofs)
                                                             * static_cast<int>(sizeof(T)))
                                     : K1_OUT_OF_RANGE;
             if(HW % XPI == 0 || xg * XPI + lx < HW)
@@ -425,9 +475,12 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
     // Dword DMA: sub-instruction j of run (h, xg) fills granules 16 j .. 16 j + 15 of the run,
     // lane l granule 16 j + l / 4 (column x = that / G, slot that % G) and its dword l % 4. The
     // fetch address is the rotation's inverse, as above, plus the dword.
-    auto dma
-        = [&](Raw16 * st, const Tile& tc, int cc, int i0, int i1) __attribute__((always_inline))
+    auto dma = [&](Raw16 * st, const Tile& tc, int v, int i0, int i1) __attribute__((always_inline))
     {
+        int cc, plane;
+        chunkOf(tc, v, cc, plane);
+        const bool pok = KD > 1 ? static_cast<unsigned>(plane) < static_cast<unsigned>(a.di) : true;
+        const int prow = KD > 1 ? plane * a.hi : 0; // the plane's first row in the image
         constexpr int SUB = K2R_DMA_SUB;
         constexpr int SPAN = WAVE / SUB; // granules per instruction
         const T* xi = static_cast<const T*>(a.x) + tc.img * imgElems;
@@ -456,11 +509,12 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
                 const bool cok = gran * GE < a.c - cc * BC;
                 const int iw = tc.ow0 - a.pw + xg * XPI + lx;
                 const bool ok = (static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi))
-                                & (static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi)) & cok;
-                const unsigned off
-                    = ok ? static_cast<unsigned>(((ih * a.wi + iw) * a.c + gran * GE + dword)
-                                                 * static_cast<int>(sizeof(T)))
-                         : K1_OUT_OF_RANGE;
+                                & (static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi)) & cok
+                                & pok;
+                const unsigned off = ok ? static_cast<unsigned>(
+                                              (((prow + ih) * a.wi + iw) * a.c + gran * GE + dword)
+                                              * static_cast<int>(sizeof(T)))
+                                        : K1_OUT_OF_RANGE;
                 if(HW % XPI == 0 || xg * XPI + lx < HW)
                     __builtin_amdgcn_raw_ptr_buffer_load_lds(
                         xr,
@@ -476,25 +530,27 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
     };
 #endif
 
-    // Weights (k2rFormatWeights): this wave's run of FN fragments for (kc, s, r) is contiguous.
+    // Weights (k2rFormatWeights): this wave's run of FN fragments for (kc, s, t r) is contiguous;
+    // the pre-pass orders a depth tap's filter rows as KD R rows (tap t, row r: t R + r).
     const __amdgpu_buffer_rsrc_t wr = k1Rsrc(
-        a.w, static_cast<long long>(a.ca) * a.kpad * KA * R * S * static_cast<int>(sizeof(T)));
-    auto loadW = [&](Frag(&w)[FN], int r, int nb, int cc, int qq) __attribute__((always_inline))
+        a.w, static_cast<long long>(a.ca) * a.kpad * KA * KD * R * S * static_cast<int>(sizeof(T)));
+    auto loadW
+        = [&](Frag(&w)[FN], int r, int nb, int cc, int qq, int tap) __attribute__((always_inline))
     {
         const unsigned wl = static_cast<unsigned>(olane() * FB);
-        const int so
-            = ((((nb / (FN * DIM)) * a.ca + cc * KK + qq % KK) * S + qq / KK) * R + r) * FN * FRAG;
+        const int so = ((((nb / (FN * DIM)) * a.ca + cc * KK + qq % KK) * S + qq / KK) * (KD * R)
+                        + (KD > 1 ? tap * R : 0) + r)
+                       * FN * FRAG;
 #pragma unroll
         for(int j = 0; j < FN; ++j)
             w[j] = __builtin_bit_cast(Frag, k2rBufferLoad<RawF>(wr, wl + j * FRAG, so));
     };
 
     typename Atom::acc acc[PW][FN];
-    const int nCh = (a.c + BC - 1) / BC;
 
-    // One chunk cc of the current tile from stage CUR; prefetches (dmaTile, dmaCc) into the other
-    // stage when pf.
-    auto chunk = [&](auto CUR, int nb, int cc, const Tile& dmaTile, int dmaCc, bool pf)
+    // One chunk of the current tile (channel chunk cc, depth tap) from stage CUR; prefetches
+    // chunk dmaCc of dmaTile into the other stage when pf.
+    auto chunk = [&](auto CUR, int nb, int cc, int tap, const Tile& dmaTile, int dmaCc, bool pf)
         __attribute__((always_inline))
     {
         constexpr int cs = decltype(CUR)::value;
@@ -508,7 +564,7 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
             Frag wfr[R][FN];
 #pragma unroll
             for(int r = 0; r < R; ++r)
-                loadW(wfr[r], r, nb, cc, q);
+                loadW(wfr[r], r, nb, cc, q, tap);
             if constexpr(q < DSTEPS)
             {
                 if(pf)
@@ -570,6 +626,13 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
             k2rBarrier();
     };
 
+    // The output plane of tile tc: the image (2-D), or the image's plane od (3-D).
+    auto outPlane = [&](const Tile& tc) __attribute__((always_inline))
+    {
+        return KD > 1 ? static_cast<long long>(tc.img) * a.dout + tc.od
+                      : static_cast<long long>(tc.img);
+    };
+
     // Direct epilogue: the lane holds channels n .. n + 3 of column ow for each row p.
     auto store = [&](const Tile& tc, int nb) __attribute__((always_inline))
     {
@@ -583,7 +646,7 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
             const int oh = tc.oh0 + wp * PW + p;
             if(oh >= a.ho || ow >= a.wo)
                 continue;
-            TO* yp = y + ((static_cast<long long>(tc.img) * a.ho + oh) * a.wo + ow) * a.k;
+            TO* yp = y + ((outPlane(tc) * a.ho + oh) * a.wo + ow) * a.k;
 #pragma unroll
             for(int j = 0; j < FN; ++j)
             {
@@ -648,8 +711,8 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
                 const int ow = tc.ow0 + wq * DIM + xx;
                 const int n = nb + c8 * (16 / static_cast<int>(sizeof(TO)));
                 if(oh < a.ho && ow < a.wo && n < a.k)
-                    *reinterpret_cast<Raw16*>(
-                        y + ((static_cast<long long>(tc.img) * a.ho + oh) * a.wo + ow) * a.k + n)
+                    *reinterpret_cast<Raw16*>(y + ((outPlane(tc) * a.ho + oh) * a.wo + ow) * a.k
+                                              + n)
                         = v;
             }
         }
@@ -684,13 +747,20 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
     auto step = [&](auto SG) __attribute__((always_inline))
     {
         constexpr int sc = decltype(SG)::value;
-        const bool last = cc + 1 >= nCh;
+        const bool last = cc + 1 >= (KD > 1 ? tc.nv : nCh);
         const bool hasNext = t + bpx < tEnd;
         // The chunk to prefetch: the next of this tile, or the first of the next tile.
         Tile dt = tc;
         if(last && hasNext)
             dt = decode(t + bpx);
-        chunk(SG, nb, cc, dt, last ? 0 : cc + 1, !last || hasNext);
+        int wcc = cc, tap = 0; // chunk cc's channel chunk and depth tap (3-D)
+        if constexpr(KD > 1)
+        {
+            const int tv = cc / nCh;
+            wcc = cc - tv * nCh;
+            tap = tc.t0 + tv;
+        }
+        chunk(SG, nb, wcc, tap, dt, last ? 0 : cc + 1, !last || hasNext);
         if(!last)
         {
             ++cc;

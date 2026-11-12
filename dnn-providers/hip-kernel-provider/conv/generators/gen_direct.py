@@ -137,13 +137,14 @@ def F(f, bc, tm, tn, nt, vec, ring=1, pipe=0):
 
 def RW(atom, f, pw, fn, wp, wq, wk, bc, vec, pp=0, epi=1, math=0):
     """Filter-row reuse kernel (ConvDirectRows.h): LDS DMA (16-byte on gfx950, dword elsewhere),
-    16x16 MFMA atoms, 2-D only."""
+    16x16 MFMA atoms; 2-D, or 3-D (each output plane walks its depth taps' input planes).
+    """
     return dict(
         kind="rows",
         atom=atom,
         atom_id=ATOMS.index(atom),
         math=math,
-        kd=1,
+        kd=f[0],
         r=f[1],
         s=f[2],
         bm=wp * pw,
@@ -202,6 +203,8 @@ for dt in ("HALF", "BFLOAT16"):
             RW(f"mfma16_{e}", F33, 8, 4, 2, 2, 2, 16, 8, pp=1, epi=0),
             RW(f"mfma16_{e}", F33, 4, 4, 2, 1, 2, 32, 8),
             RW(f"mfma16_{e}", F33, 8, 2, 2, 2, 2, 16, 8),
+            RW(f"mfma16_{e}", F333, 8, 4, 2, 2, 2, 16, 8, pp=1, epi=0),
+            RW(f"mfma16_{e}", F333, 4, 4, 2, 1, 2, 32, 8),
         ],
     )
     # gfx942
@@ -237,6 +240,8 @@ for dt in ("HALF", "BFLOAT16"):
             RW(f"mfma16x32_{e}", F77, 8, 2, 2, 2, 2, 32, 8),
             RW(f"mfma16x32_{e}", F17, 8, 4, 2, 2, 2, 32, 8),
             RW(f"mfma16x32_{e}", F71, 8, 2, 2, 2, 2, 32, 8),
+            RW(f"mfma16x32_{e}", F333, 8, 4, 2, 2, 2, 64, 8),
+            RW(f"mfma16x32_{e}", F333, 8, 2, 2, 2, 2, 64, 8),
         ],
     )
     add(
