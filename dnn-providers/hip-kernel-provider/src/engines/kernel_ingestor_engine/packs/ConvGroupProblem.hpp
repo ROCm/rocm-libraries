@@ -153,24 +153,15 @@ struct GroupSplit
     size_t workspaceBytes = 0; ///< the whole workspace, the split copies included
 };
 
-/// Forward and backward data: the kernel's input (x forward, dy backward, as staged or in place)
-/// split whole into parts hi | hi' | lo, and every phase's fp32 expanded filter (one span) into
-/// hi | lo | hi'. The bf16 kernel runs P 3: each depth tap multiplies the three part pairs into
-/// the same fp32 accumulators.
+/// Forward and backward data, wide groups: the kernel's input (x forward, dy backward, as staged
+/// or in place) split whole into parts hi | hi' | lo, and every phase's fp32 expanded filter (one
+/// span) into hi | lo | hi'. The bf16 wide kernel runs P 3: each depth tap multiplies the three
+/// part pairs into the same fp32 accumulators.
 GroupSplit groupSplitOf(const GroupProblem& problem);
 
-/// Backward weights: x and dy split whole into three parts each (outermost, so a packed tensor
-/// becomes 3N images: x hi | hi' | lo, dy hi | lo | hi'), the bf16 wrw kernel run on the 3N
-/// problem, its fp32 partials reduced into fp32 dw. @p problem is the graph's (fp32); the result
-/// is the problem the kernel runs (3N images, bf16 elements).
-GroupWrwProblem threeBf16WrwProblem(const GroupWrwProblem& problem);
-
-/// The split of @p problem's (the graph's) x and dy after @p partialBytes of partials.
-GroupSplit groupWrwSplitOf(const GroupWrwProblem& problem, size_t partialBytes);
-
-/// Whether the three-bf16 form of @p problem is admitted on @p gcnArchName: the matrix-core
-/// architectures it is built for (gfx90a, gfx942, gfx950, gfx11, gfx12).
+/// Whether the three-bf16 form of @p problem is admitted on @p gcnArchName: wide groups (small
+/// groups and backward weights measured slower than exact) on the matrix-core architectures it
+/// is built for (gfx90a, gfx942, gfx950, gfx11, gfx12).
 bool threeBf16Pays(const GroupProblem& problem, std::string_view gcnArchName);
-bool threeBf16WrwPays(const GroupWrwProblem& problem, std::string_view gcnArchName);
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::conv_group

@@ -581,54 +581,14 @@ GroupSplit groupSplitOf(const GroupProblem& problem)
     return split;
 }
 
-GroupWrwProblem threeBf16WrwProblem(const GroupWrwProblem& problem)
+bool threeBf16Pays(const GroupProblem& problem, std::string_view gcnArchName)
 {
-    GroupWrwProblem tripled = problem;
-    tripled.wrw.base.args.n *= 3;
-    tripled.wrw.elementBytes = 2;
-    return tripled;
-}
-
-GroupSplit groupWrwSplitOf(const GroupWrwProblem& problem, size_t partialBytes)
-{
-    const auto& a = problem.wrw.base.args;
-    conv_tf32::SplitTensor x;
-    x.outer = 1;
-    x.cg = 1;
-    x.inner = a.n * a.c * a.inSpatial[0] * a.inSpatial[1] * a.inSpatial[2];
-    x.pattern = conv_tf32::PATTERN_A;
-    conv_tf32::SplitTensor dy = x;
-    dy.inner = a.n * a.k * a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2];
-    dy.pattern = conv_tf32::PATTERN_B;
-    GroupSplit split;
-    split.plan = conv_tf32::splitPlanFor(x, dy);
-    split.offset = alignUp(partialBytes);
-    split.workspaceBytes = split.offset + split.plan.bytes;
-    return split;
-}
-
-namespace
-{
-
-bool threeBf16Arch(std::string_view gcnArchName)
-{
+    // Wide groups only: small groups multiply the block-diagonal expansion 16 / cg times over,
+    // and measured 0.3-0.8x of exact on gfx950 and gfx1201.
     const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
-    return arch == "gfx90a" || arch == "gfx942" || arch == "gfx950" || arch.rfind("gfx11", 0) == 0
-           || arch.rfind("gfx12", 0) == 0;
-}
-
-} // namespace
-
-bool threeBf16Pays(const GroupProblem& /*problem*/, std::string_view gcnArchName)
-{
-    return threeBf16Arch(gcnArchName);
-}
-
-bool threeBf16WrwPays(const GroupWrwProblem& problem, std::string_view gcnArchName)
-{
-    // The 3N images' count within the kernel's 32-bit batch.
-    return problem.wrw.base.args.n * 3 <= std::numeric_limits<int>::max()
-           && threeBf16Arch(gcnArchName);
+    return problem.nbi > 0
+           && (arch == "gfx90a" || arch == "gfx942" || arch == "gfx950"
+               || arch.rfind("gfx11", 0) == 0 || arch.rfind("gfx12", 0) == 0);
 }
 
 } // namespace conv_group
@@ -806,10 +766,12 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel, ConvDirection directi
     const int64_t tw = kernel.getIntMetadata("tw");
     tile.bpu = kernel.getIntMetadata("bpu");
     tile.math = kernel.getIntMetadata("math");
-    // Three-bf16: a bf16 matrix-core config, not phase-fused.
+    // Three-bf16: a bf16 wide-group config, forward or backward data, not phase-fused.
     if(tile.math < 0 || tile.math > 1
        || (tile.math == 1
-           && (tile.fma || tile.pf != 0 || conv_igemm::atomElement(tile.atom) != "bf16")))
+           && (tile.fma || tile.pf != 0 || tile.nbi == 0
+               || direction == ConvDirection::BACKWARD_WEIGHTS
+               || conv_igemm::atomElement(tile.atom) != "bf16")))
     {
         return std::nullopt;
     }
@@ -945,29 +907,17 @@ std::optional<std::pair<conv_group::GroupWrwProblem, conv_group::GroupWrwLaunch>
 {
     auto problem = conv_group::parseGroupWrwProblem(context);
     // The FMA kernel takes any element type (the catalog ships it for fp32) at the graph's
-    // channels a group. Three-bf16 (math 1): a bf16 atom for an fp32 graph under TF32
-    // permission.
-    const bool x3 = tile.math == 1;
+    // channels a group.
     if(!problem.has_value()
        || kernel.getStringMetadata("dtype")
               != data_objects::EnumNameDataType(problem->wrw.base.dataType)
        || !conv_igemm::atomRunsOn(tile.atom, context.deviceProperties.gcnArchName)
        || (tile.fma ? tile.cg != problem->cg
-                    : !x3
-                          && conv_igemm::atomElement(tile.atom)
-                                 != conv_igemm::dataElement(problem->wrw.base.dataType)))
+                    : conv_igemm::atomElement(tile.atom)
+                          != conv_igemm::dataElement(problem->wrw.base.dataType)))
     {
         return std::nullopt;
     }
-    if(x3
-       && (problem->wrw.base.dataType != data_objects::DataType::FLOAT
-           || !conv_igemm::tf32Permitted()
-           || !conv_group::threeBf16WrwPays(*problem, context.deviceProperties.gcnArchName)))
-    {
-        return std::nullopt;
-    }
-    // The problem the kernel runs: the graph's, or (three-bf16) its 3N bf16 images.
-    const auto run = x3 ? conv_group::threeBf16WrwProblem(*problem) : *problem;
     // A wide config for the blocks the graph's groups span, small configs for small groups.
     if(tile.nbi != problem->nbi)
     {
@@ -983,7 +933,7 @@ std::optional<std::pair<conv_group::GroupWrwProblem, conv_group::GroupWrwLaunch>
     // Channel blocks a workgroup: cb, or a wide group's nbo dy blocks.
     const auto blocks = static_cast<int>(tile.nbi != 0 ? tile.nbo : tile.cb);
     if(tile.th > 4096 || tile.tw > 4096
-       || conv_group::groupWrwLdsBytes(run.wrw.elementBytes,
+       || conv_group::groupWrwLdsBytes(problem->wrw.elementBytes,
                                        problem->filterR,
                                        problem->filterS,
                                        problem->stride,
@@ -996,7 +946,7 @@ std::optional<std::pair<conv_group::GroupWrwProblem, conv_group::GroupWrwLaunch>
         return std::nullopt;
     }
     auto launch = conv_group::groupWrwLaunch(
-        run, th, tw, blocks, static_cast<int>(tile.bpu), context.deviceProperties);
+        *problem, th, tw, blocks, static_cast<int>(tile.bpu), context.deviceProperties);
     if(!launch.has_value())
     {
         return std::nullopt;
@@ -1215,32 +1165,12 @@ public:
     PreparedConvGroupWrw(IngestorKernelCode conv,
                          IngestorKernelCode reduce,
                          conv_group::GroupWrwProblem problem,
-                         conv_group::GroupWrwLaunch launch,
-                         std::optional<IngestorKernelCode> split,
-                         conv_group::GroupSplit splitPlan)
+                         conv_group::GroupWrwLaunch launch)
         : _conv(std::move(conv))
         , _reduce(std::move(reduce))
         , _problem(std::move(problem))
         , _launch(launch)
-        , _split(std::move(split))
-        , _splitPlan(splitPlan)
     {
-    }
-
-    /// Three-bf16: the split kernel (nullopt otherwise) and its plan.
-    bool split() const
-    {
-        return _split.has_value();
-    }
-
-    compilation::IRunnableKernel& splitForStream(hipStream_t stream) const
-    {
-        return _split->kernelForStream(stream);
-    }
-
-    const conv_group::GroupSplit& splitPlan() const
-    {
-        return _splitPlan;
     }
 
     const IngestorKernelCode& kernelCode() const override
@@ -1273,8 +1203,6 @@ private:
     IngestorKernelCode _reduce;
     conv_group::GroupWrwProblem _problem;
     conv_group::GroupWrwLaunch _launch;
-    std::optional<IngestorKernelCode> _split;
-    conv_group::GroupSplit _splitPlan;
 };
 
 class ConvGroupDispatchHandler : public IKernelDispatchHandler<Handle>
@@ -1302,14 +1230,7 @@ public:
         if(*direction == ConvDirection::BACKWARD_WEIGHTS)
         {
             const auto wrw = wrwFor(context, kernel, *tile);
-            if(!wrw.has_value())
-            {
-                return 0;
-            }
-            return tile->math == 1
-                       ? conv_group::groupWrwSplitOf(wrw->first, wrw->second.workspaceBytes)
-                             .workspaceBytes
-                       : wrw->second.workspaceBytes;
+            return wrw.has_value() ? wrw->second.workspaceBytes : 0;
         }
         const auto problem = problemFor(context, *direction, *tile);
         if(!problem.has_value())
@@ -1627,18 +1548,7 @@ private:
         const auto& problem = wrw->first;
         compilation::KernelCompileOptions options(context.deviceProperties.gcnArchName);
         options.add("CONV_GROUP_WRW", std::string("1"));
-        // Three-bf16: the bf16 kernel on the 3N images, the reduce writing fp32, plus the split.
-        const bool x3 = tile.math == 1;
-        if(x3)
-        {
-            options.add("CONV_GROUP_T", std::string("unsigned short"));
-            options.add("CONV_GROUP_TO", std::string("float"));
-            options.add(std::string(conv_tf32::SPLIT_DEFINE), std::string("1"));
-        }
-        else
-        {
-            options.add("CONV_GROUP_T", elementTypeFor(problem.wrw.base.dataType));
-        }
+        options.add("CONV_GROUP_T", elementTypeFor(problem.wrw.base.dataType));
         if(tile.fma)
         {
             options.add("CONV_GROUP_FMA", std::string("1"));
@@ -1677,19 +1587,8 @@ private:
                                               signatureOf<K4WrwReduceArgs>());
         reduce.setBlockSize(COPY_BLOCK, 1, 1);
         reduce.setGridSize(wrw->second.reduceGrid, 1, 1);
-        std::optional<IngestorKernelCode> split;
-        conv_group::GroupSplit splitPlan;
-        if(x3)
-        {
-            splitPlan = conv_group::groupWrwSplitOf(problem, wrw->second.workspaceBytes);
-            split = splitKernelCode(context, kernel, options, splitPlan);
-        }
-        return std::make_unique<PreparedConvGroupWrw>(std::move(conv),
-                                                      std::move(reduce),
-                                                      std::move(wrw->first),
-                                                      wrw->second,
-                                                      std::move(split),
-                                                      splitPlan);
+        return std::make_unique<PreparedConvGroupWrw>(
+            std::move(conv), std::move(reduce), std::move(wrw->first), wrw->second);
     }
 
     static void launchWrw(const Handle& handle,
@@ -1711,16 +1610,6 @@ private:
         args.dy
             = hipdnn_plugin_sdk::findDeviceBuffer(problem.dyUid, deviceBuffers, numDeviceBuffers)
                   .ptr;
-        if(dispatch.split())
-        {
-            // Three-bf16: x and dy split into three parts each (3N images), after the partials.
-            const auto& plan = dispatch.splitPlan();
-            const auto split = conv_tf32::splitArgsFor(
-                plan.plan, args.x, args.dy, static_cast<char*>(workspace) + plan.offset);
-            dispatch.splitForStream(stream).launch(stream, split);
-            args.x = split.t[0].dst;
-            args.dy = split.t[1].dst;
-        }
         args.partial = static_cast<float*>(workspace);
         dispatch.convForStream(stream).launch(stream, args);
         K4WrwReduceArgs reduce = dispatch.wrwLaunch().reduce;

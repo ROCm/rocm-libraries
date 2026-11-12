@@ -125,21 +125,7 @@ __device__ __forceinline__ int k4HaloColumn(int hc)
 // CF: in and out are packed channels-first (N C D H W) and read and written in place: the halo is
 // gathered along its rows (consecutive threads, consecutive columns of one channel), and the
 // accumulators go out through LDS so each row of output columns is written contiguously.
-// Three-bf16 (P 3, T bf16, TO float): in and w each hold three parts (a.xps and a.wpt elements
-// apart); each depth tap stages and multiplies the parts one after another into the same
-// accumulators, and the output is written in TO.
-template <class T,
-          class Atom,
-          int FT,
-          int R,
-          int S,
-          int ST,
-          int TH,
-          int WP,
-          int CB,
-          int CF = 0,
-          class TO = T,
-          int P = 1>
+template <class T, class Atom, int FT, int R, int S, int ST, int TH, int WP, int CB, int CF = 0>
 __device__ void k4ConvMma(const K4Args& a)
 {
     constexpr int WAVE = Atom::WAVE;
@@ -171,9 +157,9 @@ __device__ void k4ConvMma(const K4Args& a)
     const long long img = b / a.dout;
     const int oh0 = thi * TH, ow0 = twi * TW;
     const int ih0 = oh0 * ST - a.ph, iw0 = ow0 * ST - a.pw;
-    const T* in0 = static_cast<const T*>(a.in);
-    const T* w0 = static_cast<const T*>(a.w);
-    TO* out = static_cast<TO*>(a.out);
+    const T* in = static_cast<const T*>(a.in);
+    const T* w = static_cast<const T*>(a.w);
+    T* out = static_cast<T*>(a.out);
     const int tid = threadIdx.x;
     const int lane = tid % WAVE, wave = tid / WAVE;
     const int row = lane % 16;
@@ -187,18 +173,14 @@ __device__ void k4ConvMma(const K4Args& a)
         for(int p = 0; p < WP; ++p)
             acc[it][p] = typename Atom::acc{};
 
-    // Depth taps, each its P parts one after another.
-    for(int step = 0; step < FT * P; ++step)
+    for(int ft = 0; ft < FT; ++ft)
     {
-        const int ft = step / P, part = step % P;
         const int id = od * a.sd - a.pd + ft;
         // A plane past the input contributes nothing (uniform across the workgroup).
         if(static_cast<unsigned>(id) >= static_cast<unsigned>(a.di))
             continue;
-        if(ft > 0 || part > 0)
+        if(ft > 0)
             __syncthreads(); // the previous plane's reads are done
-        const T* in = P > 1 ? in0 + part * a.xps : in0;
-        const T* w = P > 1 ? w0 + part * a.wpt : w0;
         const long long plane = img * a.di + id;
         if constexpr(CF != 0)
         {
@@ -295,9 +277,7 @@ __device__ void k4ConvMma(const K4Args& a)
     {
         // Through LDS: [row][channel][column] (a column pad), then rows of columns out.
         constexpr int OP = TW + 1;
-        static_assert(TH * CH * OP * sizeof(TO) <= HR * HC * PITCH * sizeof(T),
-                      "the output tile fits the halo");
-        TO* tile = reinterpret_cast<TO*>(halo);
+        static_assert(TH * CH * OP <= HR * HC * PITCH, "the output tile fits the halo");
         __syncthreads();
 #pragma unroll
         for(int it = 0; it < ITEMS; ++it)
@@ -310,13 +290,13 @@ __device__ void k4ConvMma(const K4Args& a)
             for(int p = 0; p < WP; ++p)
 #pragma unroll
                 for(int e = 0; e < Atom::ACC; ++e)
-                    tile[(r * CH + cbi * 16 + lane % 16) * OP + p * 16 + Atom::dRow(lane, e)]
-                        = K1Elem<TO>::store(acc[it][p][e]);
+                    halo[(r * CH + cbi * 16 + lane % 16) * OP + p * 16 + Atom::dRow(lane, e)]
+                        = K1Elem<T>::store(acc[it][p][e]);
         }
         __syncthreads();
         const long long outPlanes = static_cast<long long>(a.outD) * a.outH * a.outW;
-        TO* dst = out + (img * a.c + static_cast<long long>(cbt) * CH) * outPlanes
-                  + static_cast<long long>(od * a.osd + a.ood) * a.outH * a.outW;
+        T* dst = out + (img * a.c + static_cast<long long>(cbt) * CH) * outPlanes
+                 + static_cast<long long>(od * a.osd + a.ood) * a.outH * a.outW;
         for(int i = tid; i < TH * CH * TW; i += THREADS)
         {
             const int ow = i % TW, ch = (i / TW) % CH, r = i / (TW * CH);
@@ -324,7 +304,7 @@ __device__ void k4ConvMma(const K4Args& a)
             if(oh < a.ho && ow0 + ow < a.wo)
                 dst[ch * outPlanes + static_cast<long long>(oh * a.osh + a.ooh) * a.outW
                     + (ow0 + ow) * a.osw + a.oow]
-                    = tile[(r * CH + ch) * OP + ow];
+                    = halo[(r * CH + ch) * OP + ow];
         }
         return;
     }
@@ -347,7 +327,7 @@ __device__ void k4ConvMma(const K4Args& a)
                     out[((outPlane * a.outH + oh * a.osh + a.ooh) * a.outW + ow * a.osw + a.oow)
                             * a.c
                         + cb * 16 + lane % 16]
-                        = K1Elem<TO>::store(acc[it][p][e]);
+                        = K1Elem<T>::store(acc[it][p][e]);
             }
     }
 }
@@ -700,7 +680,10 @@ __device__ inline void k4ExpandWide(const K4ExpandArgs& a, int taps)
 // accumulates its (row, output block) items over every tap and input block, B fragments from the
 // dense per-group expansion. Grid: (groups x output-block tiles) x column tiles x row tiles x
 // output planes x images. Channels need not be multiples of 16; cg is a multiple of the 16-byte
-// vector (a.cg runtime). Three-bf16 (P 3, TO float) as k4ConvMma.
+// vector (a.cg runtime).
+// Three-bf16 (P 3, T bf16, TO float): in and w each hold three parts (a.xps and a.wpt elements
+// apart); each depth tap stages and multiplies the parts one after another into the same
+// accumulators, and the output is written in TO.
 template <class T,
           class Atom,
           int FT,

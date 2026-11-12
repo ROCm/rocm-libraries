@@ -616,11 +616,9 @@ INSTANTIATE_TEST_SUITE_P(,
                                                                                    : "Wrw");
                          });
 
-/// The three-bf16 fp32 configs (TF32 permission) at three-bf16's bound; and, for wide groups,
-/// with +inf and -inf in the kernel's input (each must reach the output as itself, NaN where
-/// both meet). Small groups multiply the block-diagonal expansion's zeros by every channel of a
-/// block, so an infinity turns its neighbour groups' outputs NaN in the exact configs as well:
-/// a K4 behavior outside TF32, not tested here.
+/// The three-bf16 fp32 configs (TF32 permission; wide groups, forward and backward data) at
+/// three-bf16's bound, and with +inf and -inf in the kernel's input (each must reach the output
+/// as itself, NaN where both meet). Small-group cases admit none and skip.
 class TestGpuConvGroupThreeBf16
     : public ::testing::TestWithParam<std::tuple<DeviceCase, ConvDirection>>
 {
@@ -642,10 +640,9 @@ TEST_P(TestGpuConvGroupThreeBf16, FloatInfinities)
 {
     SKIP_IF_NO_DEVICES();
     const auto& shape = std::get<0>(GetParam()).shape;
-    if(!conv_tf32_test::hasThreeBf16(currentDeviceProperties().gcnArchName)
-       || shape.c / shape.groups <= 16)
+    if(!conv_tf32_test::hasThreeBf16(currentDeviceProperties().gcnArchName))
     {
-        GTEST_SKIP() << "no three-bf16 configs on this device, or small groups";
+        GTEST_SKIP() << "no three-bf16 configs on this device";
     }
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(conv_tf32_test::TF32_ENV,
                                                                            "1");
@@ -656,14 +653,11 @@ INSTANTIATE_TEST_SUITE_P(,
                          TestGpuConvGroupThreeBf16,
                          ::testing::Combine(::testing::ValuesIn(deviceCases()),
                                             ::testing::Values(ConvDirection::FORWARD,
-                                                              ConvDirection::BACKWARD_DATA,
-                                                              ConvDirection::BACKWARD_WEIGHTS)),
+                                                              ConvDirection::BACKWARD_DATA)),
                          [](const auto& info) {
-                             const auto direction = std::get<1>(info.param);
                              return std::get<0>(info.param).name
-                                    + (direction == ConvDirection::FORWARD         ? "Fwd"
-                                       : direction == ConvDirection::BACKWARD_DATA ? "Bwd"
-                                                                                   : "Wrw");
+                                    + (std::get<1>(info.param) == ConvDirection::FORWARD ? "Fwd"
+                                                                                         : "Bwd");
                          });
 
 /// Opt-in (GROUP_TF32_TIMING=<shape CSV>, its direction column choosing the pack): the best
@@ -673,8 +667,7 @@ TEST(TestGpuConvGroupTiming, ExactAgainstThreeBf16)
     SKIP_IF_NO_DEVICES();
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(conv_tf32_test::TF32_ENV,
                                                                            "1");
-    for(const auto direction :
-        {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS})
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         conv_tf32_timing::timeByForm(
             packFor(direction),
@@ -684,36 +677,47 @@ TEST(TestGpuConvGroupTiming, ExactAgainstThreeBf16)
             [](const auto& kernel) {
                 return std::string(kernel.getIntMetadata("math") == 1 ? "bf16x3" : "exact");
             },
-            direction == ConvDirection::FORWARD         ? "@fwd"
-            : direction == ConvDirection::BACKWARD_DATA ? "@bwd"
-                                                        : "@wrw");
+            direction == ConvDirection::FORWARD ? "@fwd" : "@bwd");
     }
 }
 
 // ---- Host-only: the graph gates, one decline per field, and the kernel gates ----
 
-/// Without TF32 permission no three-bf16 config is admitted; with it, fp32 graphs admit some in
-/// every direction on every arch with bf16 matrix cores (not gfx908), and bf16 graphs none.
+/// Without TF32 permission no three-bf16 config is admitted; with it, fp32 wide-group graphs
+/// admit some forward and backward data on every arch with bf16 matrix cores (not gfx908), and
+/// bf16 graphs, small groups and backward weights none.
 TEST(TestConvGroupCatalog, ThreeBf16OnlyUnderTf32Permission)
 {
-    // ResNeXt-like: 4 channels a group.
-    auto shape = dense(64, 64, {12, 13}, {3, 3}, {1, 1}, true);
-    shape.groups = 16;
-    for(const auto direction :
-        {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS})
+    // RegNet-like wide groups (32 channels), and ResNeXt-like small ones (4).
+    auto wide = dense(64, 64, {12, 13}, {3, 3}, {1, 1}, true);
+    wide.groups = 2;
+    auto small = wide;
+    small.groups = 16;
+    for(const auto& item :
+        std::vector<std::pair<ConvDirection, ConvShape>>{{ConvDirection::FORWARD, wide},
+                                                         {ConvDirection::BACKWARD_DATA, wide},
+                                                         {ConvDirection::FORWARD, small},
+                                                         {ConvDirection::BACKWARD_DATA, small},
+                                                         {ConvDirection::BACKWARD_WEIGHTS, wide}})
     {
+        const auto direction = item.first;
+        const auto& shape = item.second;
         for(const char* arch : {"gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1201", "gfx908"})
         {
             for(const auto dataType : {DataType::FLOAT, DataType::BFLOAT16})
             {
                 SCOPED_TRACE(std::string(arch) + (dataType == DataType::FLOAT ? " fp32" : " bf16")
-                             + " direction " + std::to_string(static_cast<int>(direction)));
-                shape.dataType = dataType;
+                             + " direction " + std::to_string(static_cast<int>(direction))
+                             + " groups " + std::to_string(shape.groups));
+                auto graphShape = shape;
+                graphShape.dataType = dataType;
                 auto device = testDeviceProperties();
                 device.gcnArchName = arch;
                 device.warpSize = std::string(arch).rfind("gfx1", 0) == 0 ? 32 : 64;
+                // The wrw launch planner sizes its grid from the units.
+                device.multiProcessorCount = 64;
                 const auto pack = packFor(direction);
-                const GraphFixture fixture(buildGraph(specFor(shape, direction)), device);
+                const GraphFixture fixture(buildGraph(specFor(graphShape, direction)), device);
                 const auto bound = matchesGraph(pack, fixture.context());
                 ASSERT_TRUE(bound.has_value());
                 const auto admitted = [&] {
@@ -732,7 +736,9 @@ TEST(TestConvGroupCatalog, ThreeBf16OnlyUnderTf32Permission)
                 }
                 const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter on(
                     conv_tf32_test::TF32_ENV, "1");
-                const bool expected = dataType == DataType::FLOAT && std::string(arch) != "gfx908";
+                const bool expected = dataType == DataType::FLOAT && std::string(arch) != "gfx908"
+                                      && shape.groups == wide.groups
+                                      && direction != ConvDirection::BACKWARD_WEIGHTS;
                 EXPECT_EQ(admitted() > 0, expected);
             }
         }
@@ -1147,7 +1153,7 @@ TEST(TestConvGroupCatalog, WideKernelGatesBlocksTileAndForm)
 
 TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
 {
-    static constexpr std::array<const char*, 17> KNOBS{"atom",
+    static constexpr std::array<const char*, 18> KNOBS{"atom",
                                                        "t",
                                                        "r",
                                                        "s",
@@ -1163,7 +1169,8 @@ TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
                                                        "nbi",
                                                        "nbo",
                                                        "tw",
-                                                       "bpu"};
+                                                       "bpu",
+                                                       "math"};
     for(const auto direction :
         {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS})
     {
@@ -1171,7 +1178,11 @@ TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
         for(const auto& kernel : catalog(direction))
         {
             SCOPED_TRACE(kernel.name);
-            const int bytes = kernel.getStringMetadata("dtype") == "FLOAT" ? 4 : 2;
+            // Three-bf16 configs (math 1) stage bf16.
+            const int bytes
+                = kernel.getStringMetadata("dtype") == "FLOAT" && kernel.getIntMetadata("math") == 0
+                      ? 4
+                      : 2;
             std::string tuple = kernel.getStringMetadata("dtype");
             for(const char* knob : KNOBS)
             {
