@@ -1941,3 +1941,71 @@ TEST(GPU_HipdnnShimBNBadParm_FP32, StatusMatchesMiopen)
             "bad_parm_non_packed_train", result, miopenStatusBadParm, "x must be packed");
     }
 }
+
+// Problems that pass MIOpen's checks but that the hipDNN path does not forward.
+// Natively MIOpen runs or rejects them by its own rules, so only the forwarding
+// mode is checked. The reason is checked, not just the status, because each
+// problem is built to reach one decline first. Inference is used where it can
+// be, since its parameter checks do not test packedness.
+TEST(GPU_HipdnnShimBNDeclined_FP32, UnsupportedProblemsAreDeclinedWithReason)
+{
+    if(!hs::ForwardingEnabled())
+        return;
+
+    auto&& handle = get_handle();
+    const std::vector<std::size_t> nchw{2, 4, 8, 8};
+    const miopen::TensorDescriptor padded(
+        miopenFloat, nchw, std::vector<std::size_t>{512, 128, 16, 1});
+
+    auto expect_declined_because = [&](const hs::CallResult& result, const char* reason) {
+        // With a check missing the call is served, so its work must finish
+        // before the buffers are freed.
+        handle.Finish();
+        EXPECT_EQ(result.status, miopenStatusUnsupportedOp) << reason;
+        hs::ExpectForwardedDecline(result, reason);
+    };
+
+    {
+        SCOPED_TRACE("non-packed infer");
+        RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
+        p.x = RawTensor(handle, padded);
+        p.y = RawTensor(handle, padded);
+        expect_declined_because(hs::CaptureCall([&] { return p.Infer(handle); }),
+                                "supports only packed tensors");
+    }
+    {
+        SCOPED_TRACE("non-packed bwd");
+        RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
+        p.x  = RawTensor(handle, padded);
+        p.dy = RawTensor(handle, padded);
+        p.dx = RawTensor(handle, padded);
+        expect_declined_because(hs::CaptureCall([&] { return p.Bwd(handle); }),
+                                "supports only packed tensors");
+    }
+    {
+        // Packed NHWC strides, while x is NCHW.
+        SCOPED_TRACE("y layout infer");
+        RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
+        p.y = RawTensor(
+            handle,
+            miopen::TensorDescriptor(miopenFloat, nchw, std::vector<std::size_t>{256, 1, 32, 4}));
+        expect_declined_because(hs::CaptureCall([&] { return p.Infer(handle); }),
+                                "same shape and layout");
+    }
+    {
+        SCOPED_TRACE("spatial scale infer");
+        RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
+        p.scale = RawTensor(handle, miopen::TensorDescriptor(miopenFloat, nchw));
+        expect_declined_because(hs::CaptureCall([&] { return p.Infer(handle); }),
+                                "statistics shaped {1, C, 1, ...}");
+    }
+    {
+        SCOPED_TRACE("vectorized infer");
+        RawProblem p(handle, nchw, miopenFloat, miopenFloat, miopenFloat);
+        const miopen::TensorDescriptor vectorized(miopenFloat, miopenTensorNCHWc4, nchw);
+        p.x = RawTensor(handle, vectorized);
+        p.y = RawTensor(handle, vectorized);
+        expect_declined_because(hs::CaptureCall([&] { return p.Infer(handle); }),
+                                "vectorized tensor layouts");
+    }
+}
