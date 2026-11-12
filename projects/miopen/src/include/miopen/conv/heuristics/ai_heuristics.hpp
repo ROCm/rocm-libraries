@@ -101,6 +101,14 @@ MIOPEN_INTERNALS_EXPORT std::vector<float> EngineeredConvFeatures(std::size_t N,
 // describes; use this instead of hardcoding the size. Defined in ai_heuristics.cpp.
 MIOPEN_INTERNALS_EXPORT std::size_t EngineeredConvFeatureCount(int spatial_dim = 2);
 
+// Default derived-feature names in the fixed positional order (the base block: 18 for 2D, plus
+// ``log_d_in`` for 3D). Used for models whose metadata lists no ``derived_features`` so both
+// engineered-feature extractors can always drive EngineeredConvFeaturesByName instead of branching
+// to the positional EngineeredConvFeatures.
+// EngineeredConvFeaturesByName(DefaultDerivedFeatureNames) is pinned equal to
+// EngineeredConvFeatures by CPU_ConvAiEngineeredConvFeaturesByName_NONE tests.
+MIOPEN_INTERNALS_EXPORT std::vector<std::string> DefaultDerivedFeatureNames(int spatial_dim = 2);
+
 // Self-describing variant: emits the engineered features in the order named by the model metadata's
 // ``derived_features`` list. Supports the standard block plus optional GEMM-dim tile-divisibility
 // (divfeat) features - a model opts in simply by listing their names, so no code flags are needed.

@@ -594,63 +594,40 @@ EngineerCandidateSelectionInputFeatures(const std::map<std::string, float>& feat
                                 : direction_code == 1.0f ? common::ConvDirection::BackwardData
                                                          : common::ConvDirection::BackwardWeights;
     const auto& derived_names = metadata.derived_feature_names();
-    std::vector<float> derived;
-    if(!derived_names.empty())
-    {
-        // Named engineered features: emit exactly what the model's metadata lists, in order. This
-        // transparently covers the optional divfeat features - a model opts in by listing them.
-        // cpg_in/is_depthwise need the physical input-channel count; use the direction-normalized
-        // C_in (not the raw map value, which is the forward-output channel for backward problems).
-        const bool needs_phys_in_channels =
-            std::find(derived_names.begin(), derived_names.end(), "log_cpg_in") !=
-                derived_names.end() ||
-            std::find(derived_names.begin(), derived_names.end(), "is_depthwise") !=
-                derived_names.end();
-        const auto phys_in_channels = needs_phys_in_channels ? C_in : std::size_t{0};
-        derived                     = common::EngineeredConvFeaturesByName(N,
-                                                       C_in,
-                                                       C_out,
-                                                       H_in,
-                                                       W_in,
-                                                       H_out,
-                                                       W_out,
-                                                       K_h,
-                                                       K_w,
-                                                       groups,
-                                                       num_cu,
-                                                       gemm_dir,
-                                                       is_3d ? 3 : 2,
-                                                       D_in,
-                                                       D_out,
-                                                       K_d,
-                                                       phys_in_channels,
-                                                       data_type,
-                                                       derived_names);
-    }
-    else
-    {
-        // Older model without named engineered features: keep the fixed positional block.
-        derived =
-            is_3d
-                ? common::EngineeredConvFeatures(N,
-                                                 C_in,
-                                                 C_out,
-                                                 H_in,
-                                                 W_in,
-                                                 H_out,
-                                                 W_out,
-                                                 K_h,
-                                                 K_w,
-                                                 groups,
-                                                 num_cu,
-                                                 gemm_dir,
-                                                 3,
-                                                 D_in,
-                                                 D_out,
-                                                 K_d)
-                : common::EngineeredConvFeatures(
-                      N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu, gemm_dir);
-    }
+    // A model that lists derived_features uses them (covers the optional divfeat set); one with
+    // none falls back to the default base block, so this always drives the named builder rather
+    // than branching to positional EngineeredConvFeatures.
+    std::vector<std::string> default_names;
+    if(derived_names.empty())
+        default_names = common::DefaultDerivedFeatureNames(is_3d ? 3 : 2);
+    const auto& names = derived_names.empty() ? default_names : derived_names;
+
+    // cpg_in/is_depthwise need the physical input-channel count; use the direction-normalized C_in
+    // (not the raw map value, which is the forward-output channel for backward problems). Only
+    // consulted when a divfeat name is present, so base-only models need no "in_channels" entry.
+    const bool needs_phys_in_channels =
+        std::find(names.begin(), names.end(), "log_cpg_in") != names.end() ||
+        std::find(names.begin(), names.end(), "is_depthwise") != names.end();
+    const auto phys_in_channels = needs_phys_in_channels ? C_in : std::size_t{0};
+    const auto derived          = common::EngineeredConvFeaturesByName(N,
+                                                              C_in,
+                                                              C_out,
+                                                              H_in,
+                                                              W_in,
+                                                              H_out,
+                                                              W_out,
+                                                              K_h,
+                                                              K_w,
+                                                              groups,
+                                                              num_cu,
+                                                              gemm_dir,
+                                                              is_3d ? 3 : 2,
+                                                              D_in,
+                                                              D_out,
+                                                              K_d,
+                                                              phys_in_channels,
+                                                              data_type,
+                                                              names);
     engineered.insert(engineered.end(), derived.begin(), derived.end());
 
     const std::size_t expected_size = in_layout.size() + fil_layout.size() + out_layout.size() +

@@ -1136,6 +1136,64 @@ TEST(CPU_ConvAiEngineeredConvFeaturesByName_NONE, BaseMatchesPositional)
             << "base feature mismatch at " << kBaseDerivedNames[i];
 }
 
+// Guards the DefaultDerivedFeatureNames fallback that both engineered-feature extractors use for
+// models whose metadata lists no derived_features: for every (spatial_dim, direction) the named
+// builder driven by DefaultDerivedFeatureNames must reproduce the positional EngineeredConvFeatures
+// block byte for byte. EngineeredConvFeatures and EngineeredConvFeaturesByName are parallel
+// implementations, so this pins that routing base-only models through the named path does not
+// change their features for 3D or backward (BaseMatchesPositional only covers 2D forward).
+TEST(CPU_ConvAiEngineeredConvFeaturesByName_NONE, DefaultNamesMatchPositional)
+{
+    using namespace miopen::ai::common;
+    EXPECT_EQ(DefaultDerivedFeatureNames(2), kBaseDerivedNames);
+    EXPECT_EQ(DefaultDerivedFeatureNames(2).size(), EngineeredConvFeatureCount(2));
+    EXPECT_EQ(DefaultDerivedFeatureNames(3).size(), EngineeredConvFeatureCount(3));
+
+    struct Case
+    {
+        int sd;
+        ConvDirection dir;
+    };
+    const std::vector<Case> cases = {
+        {2, ConvDirection::Forward},
+        {2, ConvDirection::BackwardData},
+        {2, ConvDirection::BackwardWeights},
+        {3, ConvDirection::Forward},
+        {3, ConvDirection::BackwardData},
+        {3, ConvDirection::BackwardWeights},
+    };
+    for(const auto& c : cases)
+    {
+        const auto positional = EngineeredConvFeatures(
+            16, 256, 1024, 35, 35, 35, 35, 3, 3, 16, 256, c.dir, c.sd, 5, 5, 3);
+        const auto named = EngineeredConvFeaturesByName(16,
+                                                        256,
+                                                        1024,
+                                                        35,
+                                                        35,
+                                                        35,
+                                                        35,
+                                                        3,
+                                                        3,
+                                                        16,
+                                                        256,
+                                                        c.dir,
+                                                        c.sd,
+                                                        5,
+                                                        5,
+                                                        3,
+                                                        /*phys_in_channels=*/256,
+                                                        miopenFloat,
+                                                        DefaultDerivedFeatureNames(c.sd));
+        ASSERT_EQ(named.size(), positional.size())
+            << "sd=" << c.sd << " dir=" << static_cast<int>(c.dir);
+        for(std::size_t i = 0; i < positional.size(); ++i)
+            EXPECT_FLOAT_EQ(named[i], positional[i])
+                << "default-names mismatch sd=" << c.sd << " dir=" << static_cast<int>(c.dir)
+                << " at " << DefaultDerivedFeatureNames(c.sd)[i];
+    }
+}
+
 // Golden divfeat values for a forward INT8 grouped shape (C=256, K=1024, 1x1, group=16, N=16),
 // pinned from the MIOpenFF training ConvInputPreprocessor.compute_derived_features(). Catches any
 // C++/Python drift in the tile-divisibility math (tile-waste, dtype-aware K-pack, cpg_in flags).

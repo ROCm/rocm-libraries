@@ -624,14 +624,22 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, ExtractTunaNet2dFeaturesGoldenBackward)
         // Direction-normalized raw values: for backward the in_channels feature is the physical C
         // (GetOutChannels), out_channels is K; spatial dims are symmetric here.
         const std::map<std::string, float> golden_raw = {
-            {"in_channels", static_cast<float>(c)},  {"in_h", static_cast<float>(hw)},
-            {"in_w", static_cast<float>(hw)},        {"out_channels", static_cast<float>(k)},
-            {"out_h", static_cast<float>(hw)},       {"out_w", static_cast<float>(hw)},
-            {"fil_h", 3.0f},                         {"fil_w", 3.0f},
-            {"pad_h", 1.0f},                         {"pad_w", 1.0f},
-            {"conv_stride_h", 1.0f},                 {"conv_stride_w", 1.0f},
-            {"dilation_h", 1.0f},                    {"dilation_w", 1.0f},
-            {"batchsize", 1.0f},                     {"group_count", 1.0f},
+            {"in_channels", static_cast<float>(c)},
+            {"in_h", static_cast<float>(hw)},
+            {"in_w", static_cast<float>(hw)},
+            {"out_channels", static_cast<float>(k)},
+            {"out_h", static_cast<float>(hw)},
+            {"out_w", static_cast<float>(hw)},
+            {"fil_h", 3.0f},
+            {"fil_w", 3.0f},
+            {"pad_h", 1.0f},
+            {"pad_w", 1.0f},
+            {"conv_stride_h", 1.0f},
+            {"conv_stride_w", 1.0f},
+            {"dilation_h", 1.0f},
+            {"dilation_w", 1.0f},
+            {"batchsize", 1.0f},
+            {"group_count", 1.0f},
         };
         AppendExpectedRawFeatures(expected, metadata, golden_raw);
 

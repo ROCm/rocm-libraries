@@ -103,16 +103,19 @@ std::vector<std::string> MetadataND::LoadDerivedFeatures(const std::string& arch
     auto json_opt = LoadJSONSafe(arch);
     if(!json_opt)
         return {};
+    // Absent key: legacy model that keeps the positional block (fine, return empty). Present but
+    // malformed: throw so the metadata load fails with a named cause, instead of silently returning
+    // empty and later tripping an opaque engineered-width mismatch in ModelND::Forward.
+    if(!json_opt->contains("derived_features"))
+        return {};
     try
     {
-        if(json_opt->contains("derived_features"))
-            return json_opt->at("derived_features").get<std::vector<std::string>>();
+        return json_opt->at("derived_features").get<std::vector<std::string>>();
     }
     catch(const std::exception& e)
     {
-        MIOPEN_LOG_I2("Failed to load derived_features for " << arch << ": " << e.what());
+        MIOPEN_THROW("Malformed 'derived_features' in metadata for " + arch + ": " + e.what());
     }
-    return {};
 }
 
 std::optional<size_t> MetadataND::LoadNumInputs(const std::string& arch)

@@ -225,6 +225,33 @@ MIOPEN_INTERNALS_EXPORT std::size_t EngineeredConvFeatureCount(int spatial_dim)
         .size();
 }
 
+MIOPEN_INTERNALS_EXPORT std::vector<std::string> DefaultDerivedFeatureNames(int spatial_dim)
+{
+    // Fixed positional order of the base derived block, matching EngineeredConvFeatures and the
+    // training preprocessor's derived_feature_names(). 3D appends log_d_in after the 2D block.
+    std::vector<std::string> names = {"log_flops",
+                                      "log_gemm_m",
+                                      "log_gemm_n",
+                                      "log_gemm_k",
+                                      "gemm_m_over_n",
+                                      "gemm_m_over_k",
+                                      "gemm_n_over_k",
+                                      "log_gemm_size",
+                                      "log_work_per_cu",
+                                      "spatial_reduction",
+                                      "filter_coverage",
+                                      "channel_ratio",
+                                      "group_density",
+                                      "log_h_in",
+                                      "log_w_in",
+                                      "log_c_in",
+                                      "log_c_out",
+                                      "log_batch"};
+    if(spatial_dim == 3)
+        names.emplace_back("log_d_in");
+    return names;
+}
+
 MIOPEN_INTERNALS_EXPORT std::vector<float>
 EngineeredConvFeaturesByName(std::size_t N,
                              std::size_t C_in,
@@ -1305,56 +1332,34 @@ ExtractTunaNetNDFeatures(const conv::ProblemDescription& problem,
                                     ? common::ConvDirection::BackwardData
                                     : common::ConvDirection::BackwardWeights;
     const auto& derived_names = metadata.GetDerivedFeatureNames();
-    std::vector<float> derived;
-    if(!derived_names.empty())
-    {
-        // Named engineered features: emit what the model's metadata lists, in order (covers the
-        // optional divfeat features). cpg_in needs the physical input-channel count: pass the
-        // direction-normalized C_in, not problem.GetInChannels() (the forward-output channel for
-        // backward problems, where MIOpen stores in=y).
-        derived = common::EngineeredConvFeaturesByName(N,
-                                                       C_in,
-                                                       C_out,
-                                                       H_in,
-                                                       W_in,
-                                                       H_out,
-                                                       W_out,
-                                                       K_h,
-                                                       K_w,
-                                                       groups,
-                                                       num_cu,
-                                                       gemm_dir,
-                                                       (spatial_dim == 3) ? 3 : 2,
-                                                       D_in,
-                                                       D_out,
-                                                       K_d,
-                                                       /*phys_in_channels=*/C_in,
-                                                       problem.GetInDataType(),
-                                                       derived_names);
-    }
-    else
-    {
-        derived =
-            (spatial_dim == 3)
-                ? common::EngineeredConvFeatures(N,
-                                                 C_in,
-                                                 C_out,
-                                                 H_in,
-                                                 W_in,
-                                                 H_out,
-                                                 W_out,
-                                                 K_h,
-                                                 K_w,
-                                                 groups,
-                                                 num_cu,
-                                                 gemm_dir,
-                                                 3,
-                                                 D_in,
-                                                 D_out,
-                                                 K_d)
-                : common::EngineeredConvFeatures(
-                      N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu, gemm_dir);
-    }
+    // A model that lists derived_features uses them (covers the optional divfeat set); one with
+    // none falls back to the default base block, so the extractor always drives the named builder
+    // rather than branching to positional EngineeredConvFeatures. cpg_in needs the physical
+    // input-channel count: pass the direction-normalized C_in, not problem.GetInChannels() (the
+    // forward-output channel for backward problems, where MIOpen stores in=y).
+    std::vector<std::string> default_names;
+    if(derived_names.empty())
+        default_names = common::DefaultDerivedFeatureNames(spatial_dim);
+    const auto& names  = derived_names.empty() ? default_names : derived_names;
+    const auto derived = common::EngineeredConvFeaturesByName(N,
+                                                              C_in,
+                                                              C_out,
+                                                              H_in,
+                                                              W_in,
+                                                              H_out,
+                                                              W_out,
+                                                              K_h,
+                                                              K_w,
+                                                              groups,
+                                                              num_cu,
+                                                              gemm_dir,
+                                                              (spatial_dim == 3) ? 3 : 2,
+                                                              D_in,
+                                                              D_out,
+                                                              K_d,
+                                                              /*phys_in_channels=*/C_in,
+                                                              problem.GetInDataType(),
+                                                              names);
     features.insert(features.end(), derived.begin(), derived.end());
     return features;
 }
