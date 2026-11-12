@@ -131,8 +131,17 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     if(HIPKERNELPROVIDER_ENABLE_CONV)
         target_sources(hip_kernel_provider_integration_tests PRIVATE
             kernel_ingestor_engine/IntegrationGpuConvNaive.cpp
+            kernel_ingestor_engine/IntegrationConvCoverageCensus.cpp
         )
         target_compile_definitions(hip_kernel_provider_integration_tests PRIVATE HIPDNN_ENGINE_CONV=1)
+        # The coverage census reads its map beside the binary, in the build tree and the
+        # install tree alike.
+        set(_hkp_conv_coverage_map
+            ${CMAKE_CURRENT_SOURCE_DIR}/kernel_ingestor_engine/hip_kernel_provider_conv_coverage_map.json)
+        configure_file(${_hkp_conv_coverage_map}
+                       ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/hip_kernel_provider_conv_coverage_map.json
+                       COPYONLY)
+        install(FILES ${_hkp_conv_coverage_map} DESTINATION ${CMAKE_INSTALL_BINDIR})
     endif()
     # This target links only the SDKs, not hip_kernel_provider_private, so it does not
     # inherit the provider's gate and needs the definition set directly.
