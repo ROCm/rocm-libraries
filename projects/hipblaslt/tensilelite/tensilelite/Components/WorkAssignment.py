@@ -149,6 +149,25 @@ class WorkAssignment(Component):
         self._clusterElectArriveSignal(writer, module, labelBase='PersistentMC_SkipSignal', electTag='PersistentMulticastElect')
         return module
 
+    def persistentClusterPrefetchHandoff(self, writer, kernel):
+        """Release PAP's destination bank across all multicast peers.
+
+        PAP is placed after the last reads of that bank have been issued; the
+        remaining current-tile compute/reads use registers or the other bank.
+        A local barrier alone cannot protect a peer's LDS from multicast writes.
+        Complete this cluster phase here because primed entry skips the normal
+        first-load wait. The loop-close fallback must then skip its arrive too.
+        """
+        module = Module('Persistent cluster PAP handoff')
+        if not persistentSpatialCluster(kernel):
+            return module
+        assert writer.states.asmCaps.get('HasClusterBarrier', False), 'cluster B-multicast requires the HasClusterBarrier asm capability'
+        module.add(SWaitCnt(dscnt=0, comment='PAP: finish reads of the next-tile LDS bank'))
+        module.add(SBarrier(comment='PAP: all waves release the multicast destination bank'))
+        self._clusterElectArriveSignal(writer, module, labelBase='PersistentMC_SkipPapSignal',
+                                       electTag='PersistentMulticastPapElect', wait=True)
+        return module
+
     def persistentTileHandoff(self, writer, kernel):
         """Emit both phases when the caller unconditionally re-enters."""
         always, beforeReentry = self.splitPersistentTileHandoff(writer, kernel)
@@ -191,16 +210,25 @@ class WorkAssignment(Component):
 
         if cluster:
             assert writer.states.asmCaps.get('HasClusterBarrier', False), 'persistent cluster handoff requires HasClusterBarrier'
+            pap = kernel.get('PrefetchAcrossPersistent', 0)
+            if debug or pap:
+                skipArrive = Label(writer.labels.getNameInc('PersistentMC_SkipNextTileArrive'), '')
             if debug:
                 # Debug forces re-entry even after exhaustion. Keep its local
                 # fence above, but do not signal a nonexistent next cluster tile.
                 partition = Component.TileProcessingStrategy.find(writer).staticPartition()
-                skipArrive = Label(writer.labels.getNameInc('PersistentMC_SkipNextTileArrive'), '')
                 beforeReentry.add(SCmpGeU32(src0=sgpr(partition.cursor), src1=sgpr(partition.bound), comment='no next tile: nothing to arrive for'))
                 beforeReentry.add(SCBranchSCC1(labelName=skipArrive.getLabelName()))
+            # PAP completes its cluster phase at prefetch. Keep the local DS/TDM
+            # fence above, but do not signal again when primed entry skips the wait.
+            if pap:
+                beforeReentry.add(SBitcmp1B32(src0=sgpr('PersistentPrefetchState'), src1=0,
+                                             comment='PAP already completed the next-tile cluster handoff?'))
+                beforeReentry.add(SCBranchSCC1(labelName=skipArrive.getLabelName(),
+                                              comment='primed entry skips the matching first-load wait'))
             # Normal StaticGrid re-entry is already guarded by its exit check.
             self._clusterElectArriveSignal(writer, beforeReentry, labelBase='PersistentMC_SkipTileSignal', electTag='PersistentMulticastTileElect')
-            if debug:
+            if debug or pap:
                 beforeReentry.add(skipArrive)
         return always, beforeReentry
 
