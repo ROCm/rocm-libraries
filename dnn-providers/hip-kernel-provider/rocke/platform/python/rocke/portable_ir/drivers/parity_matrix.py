@@ -42,7 +42,7 @@ def _auto_flavor() -> Tuple[str, str]:
     from rocke.core.lower_llvm import _flavor_for_llvm
     from rocke.runtime.code_object import _require_compiler_info
 
-    info = _require_compiler_info()
+    info = _require_compiler_info("comgr")
     return _flavor_for_llvm(info.llvm_version[0]), info.describe()
 
 

@@ -6,7 +6,9 @@ from [`rust/rocke-codeobj`](../../rust/rocke-codeobj/). No LLVM component takes
 part in a compile: no COMGR, Clang, LLD, assembler, subprocess, code-object
 cache or precompiled image. The crate depends only on the Rust standard
 library. COMGR stays the default code-object compiler, and it is the reference
-the direct compiler is tested against.
+the direct compiler is tested against. Which entry points use the direct
+compiler, and how to turn it on for a subset and monitor it, are under
+[Using it](#using-it).
 
 This page describes what the compiler does, how to call it, what it refuses,
 and how to debug and change it. It records no measurements: measured
@@ -73,11 +75,56 @@ artifact.direct_fallback      # why the direct compiler refused, after a fallbac
 - When the direct compiler raises `DirectUnsupported` (a target it does not
   compile for, or an op it does not lower for the target), `compile_kernel`
   builds the kernel with COMGR instead and records the reason in
-  `direct_fallback`. Every other rejection raises `CodeObjectError`: nothing
-  else falls back.
-- One kernel per code object. `compile_module` (several kernels in one code
-  object) and the LLVM-IR entry points (`build_hsaco_from_llvm_ir`,
-  `build_hsaco_from_llvm_modules`) are COMGR-only and refuse `direct`.
+  `direct_fallback`. Every other rejection raises `CodeObjectError`, unless
+  `ROCKE_DIRECT_FALLBACK=all` (see [Rollout controls](#rollout-controls)).
+  `ROCKE_DIRECT_STRICT=1` turns every fallback into an error.
+- One kernel per code object.
+
+### Entry points under `ROCKE_CODEOBJ_BACKEND=direct`
+
+The direct compiler reads rocKE IR, so an entry point that takes LLVM IR has
+nothing to give it. The environment setting never redirects those entries and
+never makes them fail:
+
+| Entry point | Compiler under `ROCKE_CODEOBJ_BACKEND=direct` |
+|---|---|
+| `compile_kernel` | direct; COMGR after a refusal, unless `ROCKE_DIRECT_STRICT=1`. |
+| `compile_module` (several kernels, one code object) | COMGR always: the direct compiler writes one kernel per code object. `ROCKE_DIRECT_STRICT` does not apply. An explicit `code_object_backend="direct"` is a refusal: `DirectUnsupported` under strict, else COMGR with the reason in `ModuleArtifact.direct_fallback`. |
+| `build_hsaco_from_llvm_ir`, `build_hsaco_from_llvm_modules`, `lower_kernel_for_code_object`, and the examples and drivers built on them (`ck_tile_parity`, the lowering registry, `compile_fn`) | COMGR always. An explicit `backend="direct"` raises `CodeObjectError`. |
+| LLVM flavor detection (`_detect_llvm_flavor`) | Asks COMGR. |
+
+Which compiler built what is observable. `rocke.runtime.code_object.backend_usage()`
+returns process-wide counts (`direct`, `comgr`, `fallback` for the COMGR builds
+that were direct requests, `refused` for direct requests that raised, and
+`fallback_reasons`, reason to count); `reset_backend_usage()` zeroes them.
+`ROCKE_DIRECT_LOG=1` also writes one line per compiled kernel to stderr:
+
+```text
+rocke-direct: kernel=<name> backend=<direct|comgr|refused> fallback=<reason or ->
+```
+
+`compile_kernel` and `compile_module` record every compile; a direct compile of
+a kernel built through another entry (`build_direct_rocke_ir_hsaco`) is not
+counted.
+
+### Rollout controls
+
+COMGR stays the default. These variables only matter when the direct backend is
+selected (`ROCKE_CODEOBJ_BACKEND=direct`, the argument, or a kernel's request).
+They are the knobs for turning direct on for a subset and watching it.
+
+| Variable | Values (default) | Effect |
+|---|---|---|
+| `ROCKE_DIRECT_STRICT` | `1` \| `0` (`0`) | A direct failure raises instead of falling back. For validation runs. |
+| `ROCKE_DIRECT_FALLBACK` | `unsupported` \| `all` (`unsupported`) | Which direct failures fall back to COMGR: only `DirectUnsupported`, or every `CodeObjectError` (an unreadable op, no register allocation, a missing library). |
+| `ROCKE_DIRECT_DENY` | comma-separated `fnmatch` patterns on the kernel name (unset) | Matching kernels go to COMGR without trying direct. Wins over the allow list. |
+| `ROCKE_DIRECT_ALLOW` | the same (unset) | When set, only matching kernels try direct. |
+| `ROCKE_DIRECT_LOG` | `1` \| `0` (`0`) | One stderr line per compiled kernel. |
+
+A kernel the lists keep off direct is a configured choice, not a refusal: it
+compiles with COMGR even under `ROCKE_DIRECT_STRICT=1`, and counts as a
+`fallback` with the reason `denied by ROCKE_DIRECT_DENY=<pattern>` or `not in
+ROCKE_DIRECT_ALLOW`.
 
 ### `rocke.runtime`
 
