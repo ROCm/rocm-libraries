@@ -1639,6 +1639,16 @@ TEST(GPU_HipdnnShimBNTuning_FP32, SearchPolicyUnderFindEnforceSearchIsServed)
 // ---------------------------------------------------------------------------
 // Gaps: MIOpen serves these, the hipDNN path declines them
 
+// The hipDNN path declines a tuning gap with UnsupportedOp. RecordGapOutcome also
+// accepts NotImplemented, which conv declines need, so this checks the status too.
+bool RecordTuningGap(const std::string& case_name, const hs::CallResult& result, const char* reason)
+{
+    const bool served = hs::RecordGapOutcome(case_name, result, reason);
+    if(hs::ForwardingEnabled() && !served)
+        EXPECT_EQ(result.status, miopenStatusUnsupportedOp) << case_name << ": " << result.message;
+    return served;
+}
+
 // The provider sets only None or Search on its handle, so it cannot run the
 // policies that also write or clean the perf db. The shim declines them for
 // training and backward, and for inference without the estimated stats, which
@@ -1652,21 +1662,20 @@ TEST(GPU_HipdnnShimBNGaps_FP32, DbUpdatePolicyIsDeclined)
     {
         SCOPED_TRACE("train");
         TrainData d;
-        if(hs::RecordGapOutcome(
-               "tuning_policy_dbupdate_train", TrainUnderPolicy(handle, d), reason))
+        if(RecordTuningGap("tuning_policy_dbupdate_train", TrainUnderPolicy(handle, d), reason))
             CheckTrain(handle, d, true, false);
     }
     {
         SCOPED_TRACE("bwd");
         BwdData d;
-        if(hs::RecordGapOutcome("tuning_policy_dbupdate_bwd", BwdUnderPolicy(handle, d), reason))
+        if(RecordTuningGap("tuning_policy_dbupdate_bwd", BwdUnderPolicy(handle, d), reason))
             CheckBwd(handle, d);
     }
     {
         SCOPED_TRACE("infer");
         InferData d;
         const auto result = InferUnderPolicy(handle, d, false);
-        if(hs::RecordGapOutcome("tuning_policy_dbupdate_infer", result, reason))
+        if(RecordTuningGap("tuning_policy_dbupdate_infer", result, reason))
             CheckInferWithoutEstimates(handle, d);
     }
 }
@@ -1687,20 +1696,20 @@ TEST(GPU_HipdnnShimBNGaps_FP32, SearchPolicyUnderFindEnforceIsDeclined)
     {
         SCOPED_TRACE("train");
         TrainData d;
-        if(hs::RecordGapOutcome("find_enforce_db_clean_train", TrainUnderPolicy(handle, d), reason))
+        if(RecordTuningGap("find_enforce_db_clean_train", TrainUnderPolicy(handle, d), reason))
             CheckTrain(handle, d, true, false);
     }
     {
         SCOPED_TRACE("bwd");
         BwdData d;
-        if(hs::RecordGapOutcome("find_enforce_db_clean_bwd", BwdUnderPolicy(handle, d), reason))
+        if(RecordTuningGap("find_enforce_db_clean_bwd", BwdUnderPolicy(handle, d), reason))
             CheckBwd(handle, d);
     }
     {
         SCOPED_TRACE("infer");
         InferData d;
         const auto result = InferUnderPolicy(handle, d, false);
-        if(hs::RecordGapOutcome("find_enforce_db_clean_infer", result, reason))
+        if(RecordTuningGap("find_enforce_db_clean_infer", result, reason))
             CheckInferWithoutEstimates(handle, d);
     }
 
@@ -1711,7 +1720,7 @@ TEST(GPU_HipdnnShimBNGaps_FP32, SearchPolicyUnderFindEnforceIsDeclined)
         SCOPED_TRACE(value);
         const ScopedFindEnforce other(value);
         TrainData d;
-        if(hs::RecordGapOutcome(
+        if(RecordTuningGap(
                "find_enforce_" + std::string(name) + "_train", TrainUnderPolicy(handle, d), reason))
             CheckTrain(handle, d, true, false);
     }
