@@ -3,4 +3,5 @@
 
 if(GPU_TARGETS MATCHES "gfx9|gfx11|gfx12|amdgcnspirv")
     add_gtest_executable(test_ck_tile_elementwise_1d test_elementwise_1d.cpp)
+    add_gtest_executable(test_ck_tile_fast_gelu_asm test_fast_gelu_asm.cpp)
 endif()

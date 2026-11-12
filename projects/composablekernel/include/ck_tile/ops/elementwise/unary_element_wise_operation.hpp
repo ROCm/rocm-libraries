@@ -1282,7 +1282,7 @@ struct FastGeluAsm
                      "v_rcp_f32 %[v_tmp], %[v_tmp]              ; 1/(emu+1.0f)\n"
                      "s_nop 0                                   ; hazard for rcp \n"
                      "v_mul_f32 %[v_y], %[v_tmp], %[v_x]        ; x * 1/(emu+1f)\n"
-                     : [v_y] "=v"(y), [v_tmp] "+v"(tmp)
+                     : [v_y] "=v"(y), [v_tmp] "=&v"(tmp)
                      : [v_x] "v"(x), [s_c1] "s"(c1), [v_c2] "v"(c2), [s_log2e] "s"(log2e_)
                      :);
     }
