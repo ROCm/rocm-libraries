@@ -621,7 +621,8 @@ set( DATA_INSTALL_DIR ${CMAKE_INSTALL_DATADIR}/${MIOPEN_INSTALL_DIR} )
 set( DATABASE_INSTALL_DIR ${DATA_INSTALL_DIR}/db )
 
 if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
-    find_package(frugally-deep CONFIG REQUIRED)
+    # The bundled Keras 3 LSTM models (*.ktn.model) need frugally-deep 0.21 or newer.
+    find_package(frugally-deep 0.21 CONFIG REQUIRED)
     message(STATUS "Build with frugally-deep ${frugally-deep_VERSION} ${frugally-deep_DIR}")
     find_package(Eigen3 REQUIRED)
     message(STATUS "Build with Eigen3 ${Eigen3_VERSION} ${Eigen3_DIR}")
