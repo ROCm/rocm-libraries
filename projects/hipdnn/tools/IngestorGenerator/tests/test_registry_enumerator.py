@@ -1283,7 +1283,9 @@ def test_a_performance_field_varies_unless_the_section_holds_it(tmp_path, monkey
     assert _tile_ms(manifest) == [64, 64, 64, 64]
 
 
-def test_a_section_may_override_a_performance_field_it_also_holds(tmp_path, monkeypatch):
+def test_a_section_may_override_a_performance_field_it_also_holds(
+    tmp_path, monkeypatch
+):
     """The override moves the section's default spec; holding then keeps every spec of the
     section there, so the performance field is one value per section."""
     manifest = _conv_hold(

@@ -268,15 +268,18 @@ TEST_F(TestGfx942AttentionUnified2DPacks, ExposesTheConfiguredKnobs)
     EXPECT_NE(
         std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "use_q_direct_global"),
         _set->engine.knobs.end());
-    EXPECT_NE(
-        std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "use_conflict_free_v_store"),
-        _set->engine.knobs.end());
-    EXPECT_NE(
-        std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "use_transposed_mask_limit"),
-        _set->engine.knobs.end());
-    EXPECT_NE(
-        std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "use_transposed_invariant_hoist"),
-        _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(),
+                        _set->engine.knobs.end(),
+                        "use_conflict_free_v_store"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(),
+                        _set->engine.knobs.end(),
+                        "use_transposed_mask_limit"),
+              _set->engine.knobs.end());
+    EXPECT_NE(std::find(_set->engine.knobs.begin(),
+                        _set->engine.knobs.end(),
+                        "use_transposed_invariant_hoist"),
+              _set->engine.knobs.end());
 }
 
 /// The engine ships a ranking model, so its score symbol must be REGISTERED, not merely

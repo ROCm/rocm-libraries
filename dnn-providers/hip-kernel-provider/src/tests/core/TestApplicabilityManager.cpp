@@ -1514,8 +1514,7 @@ TEST(TestDenseAttentionOrder, DenseComesBeforeUnified2DInEveryArrangement)
     constexpr int64_t BEFORE = 0x41;
     constexpr int64_t BETWEEN = 0x42;
     constexpr int64_t AFTER = 0x43;
-    std::vector<int64_t> arrangement{
-        BEFORE, BETWEEN, AFTER, denseAttentionId(), unified2DId()};
+    std::vector<int64_t> arrangement{BEFORE, BETWEEN, AFTER, denseAttentionId(), unified2DId()};
     std::sort(arrangement.begin(), arrangement.end());
     do
     {
@@ -1564,11 +1563,9 @@ TEST_F(TestApplicabilityManager, ListsDenseAttentionAheadOfUnified2DWhateverTheR
             ApplicabilityPool pool{budget};
             ApplicabilityManager manager{pool};
             addHandWritten(manager, HAND_YES, true);
-            const std::array<int64_t, 2> order = denseRegisteredFirst
-                                                     ? std::array<int64_t, 2>{denseAttentionId(),
-                                                                              unified2DId()}
-                                                     : std::array<int64_t, 2>{unified2DId(),
-                                                                              denseAttentionId()};
+            const std::array<int64_t, 2> order
+                = denseRegisteredFirst ? std::array<int64_t, 2>{denseAttentionId(), unified2DId()}
+                                       : std::array<int64_t, 2>{unified2DId(), denseAttentionId()};
             for(const auto id : order)
             {
                 if(staged)

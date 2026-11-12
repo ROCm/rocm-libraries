@@ -933,7 +933,9 @@ def test_g9_each_production_kernel_is_rockes_own_prefill_spec(
             for f, v in spec.items()
             if f != "num_seqs" and rocke[f] != v
         }
-        assert not moved, f"{kernel['name']} differs from rocKE's production spec: {moved}"
+        assert (
+            not moved
+        ), f"{kernel['name']} differs from rocKE's production spec: {moved}"
 
 
 def _knob_clashes(features, knobs, kernels) -> list:

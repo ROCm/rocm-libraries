@@ -309,9 +309,9 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
     const auto useTransposedInvariantHoist
         = integerMetadata(kernel, USE_TRANSPOSED_INVARIANT_HOIST_FIELD);
     if(!headSize || !numQueriesPerKv || !blockSize || !maskType || !slidingWindow || !tileSize
-       || !numWarps || !blockMPerWarp || !useMfma32x32x8 || !useTransposedQk32x32
-       || !useKSlicedRing || !useQDirectGlobal || !useConflictFreeVStore
-       || !useTransposedMaskLimit || !useTransposedInvariantHoist)
+       || !numWarps || !blockMPerWarp || !useMfma32x32x8 || !useTransposedQk32x32 || !useKSlicedRing
+       || !useQDirectGlobal || !useConflictFreeVStore || !useTransposedMaskLimit
+       || !useTransposedInvariantHoist)
     {
         return std::nullopt;
     }

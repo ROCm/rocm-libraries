@@ -185,7 +185,8 @@ TEST(TestGfx942AttentionUnified2DCatalogTiles, EveryCellRockeServesWithItsProduc
             const auto cfvst = integerField(kernel, "use_conflict_free_v_store");
             const auto maskLimit = integerField(kernel, "use_transposed_mask_limit");
             const auto hoist = integerField(kernel, "use_transposed_invariant_hoist");
-            ASSERT_TRUE(headSize && ratio && dtype && ring && qDirect && cfvst && maskLimit && hoist)
+            ASSERT_TRUE(headSize && ratio && dtype && ring && qDirect && cfvst && maskLimit
+                        && hoist)
                 << "kernel '" << kernel.name << "' does not carry its codegen stack";
 
             EXPECT_EQ(*maskLimit, *hoist)

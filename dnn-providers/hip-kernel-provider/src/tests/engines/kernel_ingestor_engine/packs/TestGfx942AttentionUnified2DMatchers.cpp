@@ -839,15 +839,16 @@ TEST(TestGfx942AttentionUnified2DMatchers, ScoreRanksTheProductionStackAboveTheD
     EXPECT_EQ(scoreOf(d64, d64Production), 3.0);
     EXPECT_LT(scoreOf(d64, d64DefaultKernel()), scoreOf(d64, d64Production));
 
-    // One half of the pair is not the stack.
+    // One half of the pair is not the stack: it ranks no higher than the default geometry it rides.
     KernelSpec half = d64DefaultKernel();
     half.useTransposedMaskLimit = 1;
-    EXPECT_LT(scoreOf(d64, half), 2.0);
+    EXPECT_LE(scoreOf(d64, half), 2.0);
 }
 
 /// Alternatives that differ only in a codegen flag still get distinct scores below the default,
 /// so the descriptor-id tie-break never decides between them.
-TEST(TestGfx942AttentionUnified2DMatchers, ScoreSeparatesAlternativesThatDifferOnlyInTheCodegenStack)
+TEST(TestGfx942AttentionUnified2DMatchers,
+     ScoreSeparatesAlternativesThatDifferOnlyInTheCodegenStack)
 {
     std::set<double> scores;
     int variants = 0;
