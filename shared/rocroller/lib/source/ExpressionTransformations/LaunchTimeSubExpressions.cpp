@@ -7,6 +7,8 @@
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/KernelOptions_detail.hpp>
 
+#include <fmt/ostream.h>
+
 template <typename T>
 constexpr auto cast_to_unsigned(T val)
 {
@@ -56,11 +58,14 @@ namespace rocRoller
 
                 auto argName = kernel->uniqueArgName(argumentName(expr));
 
-                Log::debug("LTSE: Adding arg {} complexity {}, varType {}, expr {}",
-                           argName,
-                           complexity(expr),
-                           toString(varType),
-                           toString(expr));
+                if(Log::logger().should_log(LogLevel::Debug))
+                {
+                    Log::debug("LTSE: Adding arg {} complexity {}, varType {}, expr {}",
+                               argName,
+                               complexity(expr),
+                               fmt::streamed(varType),
+                               fmt::streamed(expr));
+                }
 
                 return kernel->addArgument({argName, varType, DataDirection::ReadOnly, expr});
             }
@@ -224,8 +229,6 @@ namespace rocRoller
 
         ExpressionPtr launchTimeSubExpressions(ExpressionPtr expr, ContextPtr ctx)
         {
-            auto startStr = toString(expr);
-
             if(ctx->kernel()->startedCodeGeneration())
             {
                 auto visitor = LaunchTimeExpressionVisitor(ctx, false);
@@ -251,10 +254,10 @@ namespace rocRoller
                 auto v2 = visitor.call(v1);
 
                 Log::trace("launchTimeSubExpressions: {} -> {} -> {} -> {}",
-                           toString(expr),
-                           toString(v0),
-                           toString(v1),
-                           toString(v2));
+                           fmt::streamed(expr),
+                           fmt::streamed(v0),
+                           fmt::streamed(v1),
+                           fmt::streamed(v2));
 
                 AssertFatal(resultVariableType(expr) == resultVariableType(v2),
                             ShowValue(expr),
@@ -293,10 +296,10 @@ namespace rocRoller
                 auto v2       = visitor2.call(v1);
 
                 Log::trace("launchTimeSubExpressions: {} -> {} -> {} -> {}",
-                           toString(expr),
-                           toString(v0),
-                           toString(v1),
-                           toString(v2));
+                           fmt::streamed(expr),
+                           fmt::streamed(v0),
+                           fmt::streamed(v1),
+                           fmt::streamed(v2));
 
                 AssertFatal(resultVariableType(expr) == resultVariableType(v2),
                             ShowValue(expr),
