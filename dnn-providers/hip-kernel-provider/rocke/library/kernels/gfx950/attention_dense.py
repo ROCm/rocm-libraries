@@ -1084,6 +1084,18 @@ def build_attention_dense(
     zero_soff = b.const_i32(0)
     K_lds_addr = b.smem_addr_of(K_lds)
     V_lds_addr = b.smem_addr_of(V_lds)
+
+    # Per-(batch, token) K/V byte stride = Hkv*D*2, shared by the packed and
+    # contiguous bounds below. Runtime under runtime_shape (one binary serves every
+    # head count), baked otherwise. Emitted fresh at each buffer_rsrc so the baked
+    # case keeps its exact two-const node count.
+    def _kv_elem_bytes_ir():
+        return (
+            b.mul(_stride_k(), b.const_i32(2))
+            if spec.runtime_shape
+            else b.const_i32(Hkv * D * 2)
+        )
+
     # Emit a SEPARATE num_records IR node per buffer_rsrc (NOT one shared node):
     # develop emits two here, so sharing one silently breaks byte-identity (the
     # attention_dense representative-IR golden).
@@ -1120,20 +1132,13 @@ def build_attention_dense(
         # prefetched tile is never consumed, and a window start tile past the keys
         # feeds only q-blocks that have no key (their P@V now runs over zero V
         # rows, not the next sequence's).
-        # Row size baked: varlen is never runtime_shape, so _stride_k() is the
-        # constant Hkv*D and a row is Hkv*D*2 bytes (the baked branch of
-        # _kv_elem_bytes_ir() below). kv_seq1 <= batch*seqlen_kv for a well-formed
-        # cu_seqlens_kv, and the preflight keeps batch*seqlen_kv*Hkv*D*2 < 2**31,
-        # so the i32 product cannot overflow.
-        assert not spec.runtime_shape, (
-            "runtime_shape admits a varlen spec, but the varlen K/V bound bakes the "
-            "row size Hkv*D*2: take it from _kv_elem_bytes_ir()'s runtime arm"
-        )
-        KV_ROW_BYTES = Hkv * D * 2
-        k_row_bytes = b.const_i32(KV_ROW_BYTES)
+        #
+        # kv_seq1 <= batch*seqlen_kv for a well-formed cu_seqlens_kv, and the preflight
+        # keeps batch*seqlen_kv*Hkv*D*2 < 2**31, so the i32 product cannot overflow.
+        k_row_bytes = _kv_elem_bytes_ir()
         k_num_records = b.mul(kv_seq1, k_row_bytes)
         k_rsrc = b.buffer_rsrc(k, k_num_records)
-        v_row_bytes = b.const_i32(KV_ROW_BYTES)
+        v_row_bytes = _kv_elem_bytes_ir()
         v_num_records = b.mul(kv_seq1, v_row_bytes)
         v_rsrc = b.buffer_rsrc(v, v_num_records)
     else:
@@ -1142,16 +1147,6 @@ def build_attention_dense(
         # drop valid reads for a larger one. For the baked sub-modes the product is
         # exactly the B*Skv this used to bake -- run_attention_dense_torch fills the
         # params from the same spec -- so only the emitted IR changes.
-        # Per-(batch, token) K/V byte stride = Hkv*D*2. Runtime under runtime_shape
-        # (one binary serves every head count), baked otherwise. Emitted fresh at each
-        # buffer_rsrc so the baked branch keeps its exact two-const node count.
-        def _kv_elem_bytes_ir():
-            return (
-                b.mul(_stride_k(), b.const_i32(2))
-                if spec.runtime_shape
-                else b.const_i32(Hkv * D * 2)
-            )
-
         k_rsrc = b.buffer_rsrc(
             k, b.mul(b.mul(batch_p, seqlen_kv_p), _kv_elem_bytes_ir())
         )
