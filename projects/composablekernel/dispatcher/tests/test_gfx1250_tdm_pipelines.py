@@ -42,6 +42,7 @@ from codegen_common import (  # noqa: E402
     GFX1250_COMP_ASYNC_PAD_REJECT_REASON,
     comp_tdm_pc_acc_reject_reason,
     GFX1250_COMPV5_REJECT_REASON,
+    GEMM_TDM_CSHUFFLE_PIPELINES,
     STREAMK_GFX1250_PIPELINES,
     gfx1250_comp_async_8bit_warp_tile_k_rejected,
     gfx1250_comp_async_8bit_warp_tile_mn_rejected,
@@ -321,9 +322,18 @@ class TestArchFilterGfx1250Rejects(unittest.TestCase):
             )
 
     def test_tdm_scheduler_and_epilogue(self):
+        if te is not None:
+            self.assertEqual(
+                GEMM_TDM_CSHUFFLE_PIPELINES, te.GEMM_TDM_CSHUFFLE_PIPELINES
+            )
         for pipe in TDM_PIPELINES:
             for epi in ("cshuffle", "default"):
-                self.assertFalse(self._valid(pipeline=pipe, epilogue=epi), (pipe, epi))
+                # Plain GEMM also pairs comp_tdm_pc with cshuffle; spelled out so that
+                # widening GEMM_TDM_CSHUFFLE_PIPELINES needs a test change.
+                want = epi == "cshuffle" and pipe == "comp_tdm_pc"
+                self.assertEqual(
+                    self._valid(pipeline=pipe, epilogue=epi), want, (pipe, epi)
+                )
             self.assertFalse(
                 self._valid(pipeline=pipe, epilogue="tdm", scheduler="interwave")
             )
@@ -333,6 +343,14 @@ class TestArchFilterGfx1250Rejects(unittest.TestCase):
                 self.assertFalse(
                     self._valid(arch, pipeline=pipe, epilogue="tdm"), (arch, pipe)
                 )
+        # The cshuffle pairing is plain GEMM only: preshuffle has no comp_tdm_pc kernel.
+        self.assertFalse(
+            self._valid(
+                pipeline="comp_tdm_pc",
+                epilogue="cshuffle",
+                operator=OperatorType.GEMM_PRESHUFFLE,
+            )
+        )
 
     def test_compv5_rejected_on_gfx1250_only(self):
         # compv5 reads BlockGemm::Traits::KPack, which its block GEMM lacks: no build.
@@ -677,6 +695,18 @@ class TestUnifiedCodegenGolden(unittest.TestCase):
         self.assertIn("2x2x1", tdm_v2[0])
         # comp_tdm_pc: both wave layouts (128x128 stays under the accumulator cap).
         self.assertEqual(len(tdm_pc), 2)
+        # Plain GEMM also pairs comp_tdm_pc with cshuffle (unpadded, non-persistent);
+        # comp_tdm and comp_tdm_v2 never.
+        tdm_pc_cshuffle = [n for n in names if "_comp_tdm_pc_cshuffle_" in n]
+        self.assertEqual(len(tdm_pc_cshuffle), 2)
+        for n in tdm_pc_cshuffle:
+            self.assertIn("_cshuffle_intrawave_False_False_False_False_", n)
+        self.assertFalse(
+            any(
+                "_comp_tdm_cshuffle_" in n or "_comp_tdm_v2_cshuffle_" in n
+                for n in names
+            )
+        )
         # comp_async: 2 wave layouts x persistent on/off, fully padded,
         # cshuffle only.
         self.assertEqual(len(async_), 4)
@@ -720,6 +750,22 @@ class TestUnifiedCodegenGolden(unittest.TestCase):
         ).read_text()
         self.assertIn("Pipeline::CompTDMPC", wrapper)
         self.assertIn("Epilogue::Tdm", wrapper)
+
+    def test_gfx1250_tdm_pc_cshuffle_header_contents(self):
+        out, names = self._gen("gfx1250", "standard")
+        name = next(n for n in names if "_comp_tdm_pc_cshuffle_" in n and "2x2x1" in n)
+        text = (out / name).read_text()
+        self.assertIn("GemmPipelineAgBgCrCompTDMProducerConsumer<", text)
+        self.assertIn("CShuffleEpilogue<", text)
+        self.assertNotIn("TdmEpilogue<", text)
+        # Split-K is why this pairing exists: GemmKernel::IsSupportedArgument validates
+        # k_batch, as in the Tile Engine instance builder (_tdm_k_batch_guard).
+        self.assertNotIn("args.k_batch != 1", text)
+        wrapper = (
+            out / "dispatcher_wrappers" / f"dispatcher_wrapper_{name}"
+        ).read_text()
+        self.assertIn("Pipeline::CompTDMPC", wrapper)
+        self.assertIn("Epilogue::CShuffle", wrapper)
 
     def test_gfx1250_compv3_header_has_no_tdm(self):
         out, names = self._gen("gfx1250", "standard")
@@ -906,6 +952,42 @@ class TestStreamKCodegen(unittest.TestCase):
         self.assertIn("TdmEpilogue<EpilogueProblem>", text)
         self.assertIn("StreamKReductionStrategy::Linear", text)
 
+    def test_tile_engine_sweep_config(self):
+        # The streamk_gemm_full_benchmark.py sweep config: atomic on cshuffle only,
+        # linear and tree on both epilogues, each persistent and not, and the kernel
+        # name carries the epilogue, persistence and strategy it is built with.
+        import gemm_utils
+
+        path = (
+            TE_GEMM_DIR / "gemm_streamk" / "configs" / "gfx1250_comp_tdm_pc_config.json"
+        )
+        cfgs = gemm_utils.expand_sweep(
+            str(path), "gfx1250", "fp16", "rcr", variant="stream_k"
+        )
+        self.assertEqual(
+            {
+                (c.pipeline, c.epilogue, c.reduction_strategy, c.persistent)
+                for c in cfgs
+            },
+            {
+                ("comp_tdm_pc", epi, strategy, persistent)
+                for strategy in ("atomic", "linear", "tree")
+                for epi in (
+                    ("cshuffle",) if strategy == "atomic" else ("cshuffle", "tdm")
+                )
+                for persistent in (False, True)
+            },
+        )
+        for c in cfgs:
+            suffix = "_streamk"
+            if c.reduction_strategy != "atomic":
+                suffix += f"_{c.reduction_strategy}"
+            self.assertIn(
+                f"_comp_tdm_pc_{c.epilogue}_intrawave_False_False_False_{c.persistent}_",
+                c.name,
+            )
+            self.assertTrue(c.name.endswith(suffix), c.name)
+
 
 class TestStreamKTraitRejectReason(unittest.TestCase):
     def test_epilogue_follows_reduction(self):
@@ -1031,6 +1113,11 @@ class TestGemmUtilsSweepGate(unittest.TestCase):
         self.assertTrue(self._ok("comp_tdm_pc", "tdm"))
         self.assertTrue(self._ok("comp_tdm_pc", "tdm", waves=(4, 2, 1)))
         self.assertFalse(self._ok("comp_tdm_pc", "tdm", variant="batched"))
+        # Plain GEMM also takes cshuffle (split-K), still not batched or persistent.
+        self.assertTrue(self._ok("comp_tdm_pc", "cshuffle"))
+        self.assertFalse(self._ok("comp_tdm_pc", "cshuffle", variant="batched"))
+        self.assertFalse(self._ok("comp_tdm_pc", "cshuffle", persist=True))
+        self.assertFalse(self._ok("comp_tdm_pc", "default"))
         self.assertFalse(self._ok("comp_tdm_pc", "tdm", arch="gfx950"))
         self.assertFalse(self._ok("comp_tdm_pc", "tdm", persist=True))
         self.assertFalse(self._ok("comp_tdm_pc", "tdm", sched="interwave"))

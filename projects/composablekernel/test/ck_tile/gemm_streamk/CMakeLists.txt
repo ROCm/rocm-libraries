@@ -191,7 +191,8 @@ if(GPU_TARGETS MATCHES "gfx1250")
     # stage, keeps atomic rows only. The timeout only bounds the host process: waves stalled on a
     # named barrier are removed by queue preemption (CWSR), so a stalled ring can still leave the
     # device needing a reset. The tests skip their launches when kernel.numa_balancing != 0 for
-    # that reason, and ctest reports that skip as Skipped.
+    # that reason. The executable exits with SKIP_RETURN_CODE, which ctest reports as Skipped,
+    # only if a test skipped and none failed, so a failing host-only check still fails the entry.
     # One TU per suite so the 4 atomic and 10 linear/tree kernel instantiations compile in
     # parallel; both share test_gemm_streamk_pc_gfx1250_fixture.hpp.
     foreach(variant IN ITEMS full smoke)
@@ -218,7 +219,7 @@ if(GPU_TARGETS MATCHES "gfx1250")
         set_property(TEST ${test_target} APPEND PROPERTY LABELS CK_TILE_GEMM_STREAMK_TESTS)
         set_tests_properties(${test_target} PROPERTIES
             TIMEOUT 300
-            SKIP_REGULAR_EXPRESSION "\\[  SKIPPED \\]")
+            SKIP_RETURN_CODE 77)
         list(APPEND CK_TILE_GFX1250_STREAMK_TEST_TARGETS ${test_target})
     endforeach()
     add_custom_target(ck_tile_gemm_streamk_tests

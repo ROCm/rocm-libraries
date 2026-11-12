@@ -84,6 +84,32 @@ TYPED_TEST(TestGfx1250StreamKPCAtomic, MisalignedPointersRejected)
     EXPECT_FALSE(supported(aligned, aligned, c_odd));
 }
 
+TYPED_TEST(TestGfx1250StreamKPCAtomic, SplitKBatchRejected)
+{
+    // Stream-K splits K itself. For the producer/consumer pipeline with the CShuffle epilogue
+    // UniversalGemmKernel substitutes k_batch = 1 in its TDM check, and K = 8 * K_Tile keeps 2 and
+    // 8 splits on whole K tiles, so only StreamKKernel's own check rejects them.
+    using Kernel  = typename TestFixture::Kernel;
+    const auto M  = TestFixture::M_Tile;
+    const auto N  = TestFixture::N_Tile;
+    const auto K  = 8 * TestFixture::K_Tile;
+    const auto* p = reinterpret_cast<void*>(std::uintptr_t{0x1000});
+    auto* c       = reinterpret_cast<void*>(std::uintptr_t{0x1000});
+    auto args     = TestFixture::MakeArgs(M, N, K, p, p, c);
+    ASSERT_TRUE(TestFixture::IsArgSupported(args, TestFixture::kNumWorkgroups));
+    for(const ck_tile::index_t k_batch : {2, 8})
+    {
+        SCOPED_TRACE(::testing::Message() << "k_batch=" << k_batch);
+        args.k_batch     = k_batch;
+        const auto kargs = Kernel::MakeKernelArgs(args, TestFixture::kNumWorkgroups, 1);
+        // The premise: without StreamKKernel's check this argument would be accepted.
+        EXPECT_TRUE(Kernel::UniversalGemmKernel::IsSupportedArgument(kargs));
+        EXPECT_FALSE(Kernel::IsSupportedArgument(kargs));
+    }
+    args.k_batch = 0;
+    EXPECT_FALSE(TestFixture::IsArgSupported(args, TestFixture::kNumWorkgroups));
+}
+
 TYPED_TEST(TestGfx1250StreamKPCAtomic, ResidencyCheckDoesNotApply)
 {
     // Atomic workgroups never wait on each other, so a budget past the device's is still valid.
@@ -116,4 +142,19 @@ TYPED_TEST(TestGfx1250StreamKPCAtomic, HostMembersInstantiate)
     const std::string name = Kernel::GetName();
     EXPECT_NE(name.find("atomic"), std::string::npos) << name;
     EXPECT_GT(Kernel::MaxOccupancyGridSize(ck_tile::stream_config{}).x, 0u);
+}
+
+// Shared by the full and smoke executables. Returns SKIP_RETURN_CODE (CMakeLists.txt), which ctest
+// reports as Skipped, only if a test skipped (the launches do while kernel.numa_balancing != 0)
+// and none failed, so a failing host-only test still fails the executable.
+int main(int argc, char** argv)
+{
+    constexpr int CTEST_SKIP_RETURN_CODE = 77;
+    ::testing::InitGoogleTest(&argc, argv);
+    if(RUN_ALL_TESTS() != 0)
+    {
+        return 1;
+    }
+    const bool any_skipped = ::testing::UnitTest::GetInstance()->skipped_test_count() > 0;
+    return any_skipped ? CTEST_SKIP_RETURN_CODE : 0;
 }

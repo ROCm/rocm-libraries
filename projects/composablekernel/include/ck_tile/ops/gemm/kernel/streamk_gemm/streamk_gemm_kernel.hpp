@@ -356,9 +356,18 @@ struct StreamKKernel
     {
         if constexpr(UniversalGemmKernel::kIsTdmPipeline)
         {
-            // Off gfx125 the TDM instructions compile to no-ops. UniversalGemmKernel checks the
-            // rest: the TDM arguments and, with a non-TDM epilogue, the C tail.
-            if(!UniversalGemmKernel::IsTdmDeviceSupported("Stream-K GEMM"))
+            // Revalidate the actual k_batch (UniversalGemmKernel substitutes 1 for a
+            // split-K-capable TDM pipeline with a non-TDM epilogue, but Stream-K splits K itself)
+            // and the device (UniversalGemmKernel checks it only for named-barrier pipelines; off
+            // gfx125 the TDM instructions compile to no-ops). UniversalGemmKernel checks the rest,
+            // including the C tail with a non-TDM epilogue.
+            if(!UniversalGemmKernel::IsTdmArgumentSupported("Stream-K GEMM",
+                                                            kargs.k_batch,
+                                                            kargs.K,
+                                                            kargs.as_ptr[0],
+                                                            kargs.bs_ptr[0],
+                                                            kargs.e_ptr) ||
+               !UniversalGemmKernel::IsTdmDeviceSupported("Stream-K GEMM"))
             {
                 return false;
             }
@@ -379,8 +388,9 @@ struct StreamKKernel
             {
                 if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                 {
-                    CK_TILE_ERROR("Stream-K linear/tree reduction needs every Stream-K workgroup "
-                                  "resident at once, but there are more than the device holds!");
+                    CK_TILE_ERROR("Stream-K linear/tree reduction: sk_ctas exceeds NumCU() * "
+                                  "Occupancy(), the conservative residency bound for workgroups "
+                                  "that wait on each other's partial tiles!");
                 }
                 return false;
             }
