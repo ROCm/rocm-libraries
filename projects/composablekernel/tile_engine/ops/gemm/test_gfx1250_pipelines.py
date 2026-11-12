@@ -112,6 +112,10 @@ class TestTraitParse(unittest.TestCase):
             "comp_tdm_pc_tdm_intrawave_False_False_False_False",
             "comp_tdm_pc_s2l1_tdm_intrawave_False_False_False_False",
             "comp_tdm_pc_s5l4_cshuffle_intrawave_False_False_False",
+            "comp_tdm_ra_tdm_intrawave_False_False_False_False",
+            "comp_tdm_ra_s3r2_tdm_intrawave_False_False_False_False",
+            "comp_tdm_ra_s2r1_tdm_intrawave_False_False_False",
+            "comp_tdm_ra_s12r11_tdm_intrawave_False_False_False",
             "comp_tdm_v3_cshuffle_intrawave_False_False_False_False",
             "comp_async_eight_waves_cshuffle_intrawave_False_False_False",
             "weight_preshuffle_default_intrawave_False_False_False",
@@ -123,13 +127,40 @@ class TestTraitParse(unittest.TestCase):
                 f.write(f'include("{macro}")\n')
                 for t in traits:
                     f.write(f"ck_tile_gemm_split_trait({t} p e s)\n")
-                    f.write('message("${p}|${e}|${s}")\n')
+                    f.write("ck_tile_gemm_pipeline_group(${p} g)\n")
+                    f.write('message("${p}|${e}|${s}|${g}")\n')
             out = subprocess.run(
                 ["cmake", "-P", script], capture_output=True, text=True, check=True
             )
         got = [line for line in out.stderr.splitlines() if line]
-        want = ["|".join(split_trait(t)[:3]) for t in traits]
+        want = []
+        for t in traits:
+            p, e, s = split_trait(t)[:3]
+            want.append("|".join((p, e, s, vu.split_pipeline_ring(p)[0])))
         self.assertEqual(got, want)
+
+    @unittest.skipUnless(shutil.which("cmake"), "cmake not available")
+    def test_cmake_pipeline_group(self):
+        want = {
+            "comp_tdm_ra": "comp_tdm_ra",
+            "comp_tdm_ra_s3r2": "comp_tdm_ra",
+            "comp_tdm_pc_s2l1": "comp_tdm_pc",
+            "comp_tdm_ra_s2l1": "comp_tdm_ra_s2l1",
+            "comp_tdm_v2": "comp_tdm_v2",
+        }
+        macro = os.path.join(_HERE, "gemm_trait_parse.cmake")
+        with tempfile.TemporaryDirectory() as tmp:
+            script = os.path.join(tmp, "probe.cmake")
+            with open(script, "w") as f:
+                f.write(f'include("{macro}")\n')
+                for p in want:
+                    f.write(f"ck_tile_gemm_pipeline_group({p} g)\n")
+                    f.write('message("${g}")\n')
+            out = subprocess.run(
+                ["cmake", "-P", script], capture_output=True, text=True, check=True
+            )
+        got = [line for line in out.stderr.splitlines() if line]
+        self.assertEqual(got, list(want.values()))
 
 
 class TestValidationRules(unittest.TestCase):
@@ -539,14 +570,16 @@ class TestValidationRules(unittest.TestCase):
         # test_gemm_universal_gfx1250.py indexes PIPELINE_SMEM_SLOTS directly
         # (not .get) for every pipeline it lints, so a missing key is a KeyError
         # rather than a readable failure. Every gfx1250 pipeline plus compv4 must
-        # have an entry; comp_tdm_pc is the only one that rings four slots today.
+        # have an entry; comp_tdm_pc and comp_tdm_ra ring four slots by default.
         required = (
             set(vu.GEMM_TDM_PIPELINES) | set(vu.GEMM_ASYNC_PIPELINES) | {"compv4"}
         )
         self.assertEqual(required - set(vu.PIPELINE_SMEM_SLOTS), set())
-        # comp_tdm_pc's entry mirrors GemmPipelineAgBgCrCompTDMProducerConsumerPolicy's
-        # NumSlots_ default, <4, 0>.
+        # comp_tdm_pc's and comp_tdm_ra's entries mirror the NumSlots_ default of
+        # GemmPipelineAgBgCrCompTDMProducerConsumerPolicy (<4, 0>) and
+        # GemmPipelineAgBgCrCompTDMRunAheadPolicy (<4, 3>).
         self.assertEqual(vu.PIPELINE_SMEM_SLOTS["comp_tdm_pc"], 4)
+        self.assertEqual(vu.PIPELINE_SMEM_SLOTS["comp_tdm_ra"], 4)
         self.assertEqual(set(vu.PIPELINE_SMEM_SLOTS.values()), {2, 4})
         # Pipelines with no entry fall back to a single slot (full LDS budget).
         self.assertEqual(vu.DEFAULT_SMEM_SLOTS, 1)
@@ -675,6 +708,174 @@ class TestCompTdmPcRing(_BuilderCase):
         names = [k["name"] for k in b._get_sampled_kernel_list()]
         self.assertEqual(len(names), 2, names)
         self.assertEqual(sum("_comp_tdm_pc_s2l1_tdm_" in n for n in names), 1, names)
+
+
+class TestCompTdmRa(_BuilderCase):
+    """comp_tdm_ra (GemmPipelineAgBgCrCompTDMRunAhead) and its NumSlots/RunAhead rings,
+    "comp_tdm_ra_s{S}r{R}"."""
+
+    def test_trait_parse(self):
+        self.assertIn("comp_tdm_ra", MULTI_TOKEN_PIPELINES)
+        for pipeline in ("comp_tdm_ra", "comp_tdm_ra_s3r2"):
+            combo = TraitCombo(pipeline, "tdm", "intrawave", False, False, False, False)
+            self.assertEqual(parse_trait(join_trait(combo)), combo, pipeline)
+            self.assertEqual(
+                split_trait(f"{pipeline}_tdm_intrawave_False_False_False")[:3],
+                [pipeline, "tdm", "intrawave"],
+            )
+
+    def test_split_and_reject(self):
+        split = vu.split_pipeline_ring
+        self.assertEqual(split("comp_tdm_ra"), ("comp_tdm_ra", 0, 0))
+        self.assertEqual(split("comp_tdm_ra_s3r2"), ("comp_tdm_ra", 3, 2))
+        # The policy default <4, 3> is plain comp_tdm_ra.
+        self.assertEqual(split("comp_tdm_ra_s4r3"), ("comp_tdm_ra", 0, 0))
+        # Each pipeline keeps its own ring spelling.
+        self.assertEqual(split("comp_tdm_ra_s2l1"), ("comp_tdm_ra_s2l1", 0, 0))
+        self.assertEqual(split("comp_tdm_pc_s2r1"), ("comp_tdm_pc_s2r1", 0, 0))
+        for good in ("comp_tdm_ra", "comp_tdm_ra_s2r1", "comp_tdm_ra_s8r7"):
+            self.assertEqual(vu.pipeline_ring_reject_reason(good), "", good)
+        for bad in (
+            "comp_tdm_ra_s1r0",
+            "comp_tdm_ra_s3r0",
+            "comp_tdm_ra_s3r3",
+            "comp_tdm_ra_s0r1",
+            "comp_tdm_ra_s0r2",
+        ):
+            self.assertTrue(vu.pipeline_ring_reject_reason(bad), bad)
+
+    def test_trait_rules(self):
+        ok = vu.is_trait_combination_valid
+        for pipeline in ("comp_tdm_ra", "comp_tdm_ra_s3r2"):
+            self.assertTrue(
+                ok(pipeline, "tdm", "intrawave", False, "gemm_universal"), pipeline
+            )
+            self.assertFalse(ok(pipeline, "tdm", "interwave", False, "gemm_universal"))
+            self.assertFalse(ok(pipeline, "tdm", "intrawave", True, "gemm_universal"))
+            for epilogue in ("cshuffle", "default"):
+                self.assertFalse(
+                    ok(pipeline, epilogue, "intrawave", False, "gemm_universal"),
+                    epilogue,
+                )
+            for prefix in ("batched_gemm", "gemm_multi_d", "gemm_preshuffle"):
+                self.assertFalse(
+                    ok(pipeline, "tdm", "intrawave", False, prefix), prefix
+                )
+        self.assertFalse(
+            ok("comp_tdm_ra", "tdm", "intrawave", False, "gemm_universal", "rcr", True)
+        )
+        self.assertFalse(
+            ok("comp_tdm_ra_s3r3", "tdm", "intrawave", False, "gemm_universal")
+        )
+
+    def test_wave_rules(self):
+        v = vu.validate_gemm_gfx1250_pipeline
+        self.assertTrue(v(128, 128, 2, 2, 1, "fp16", "comp_tdm_ra", "gfx1250")[0])
+        self.assertTrue(v(64, 64, 1, 1, 1, "fp16", "comp_tdm_ra", "gfx1250")[0])
+        ok, reason = v(128, 128, 1, 2, 2, "fp16", "comp_tdm_ra", "gfx1250")
+        self.assertFalse(ok)
+        self.assertIn("warp_k=1", reason)
+        # Built for one 128x128 C tile per wave (512 accumulators per lane):
+        # comp_tdm_pc's 256-per-lane accumulator cap does not apply.
+        self.assertTrue(v(256, 256, 2, 2, 1, "fp16", "comp_tdm_ra", "gfx1250")[0])
+        self.assertFalse(v(256, 256, 2, 2, 1, "fp16", "comp_tdm_pc", "gfx1250")[0])
+        self.assertFalse(v(128, 128, 2, 2, 1, "fp16", "comp_tdm_ra", "gfx950")[0])
+
+    def test_lds_follows_slots(self):
+        self.assertEqual(vu.PIPELINE_SMEM_SLOTS["comp_tdm_ra"], 4)
+        # 256x256x128 fp16 needs ~136KB per slot: over 320K/3, under 320K/2.
+        tile = (256, 256, 128, "fp16", "fp16")
+        lds = vu.validate_lds_capacity
+        self.assertFalse(lds(*tile, "comp_tdm_ra", "gfx1250", True)[0])
+        self.assertFalse(lds(*tile, "comp_tdm_ra_s3r1", "gfx1250", True)[0])
+        ok, reason = lds(*tile, "comp_tdm_ra_s2r1", "gfx1250", True)
+        self.assertTrue(ok, reason)
+        # 256x128x128 fp16 needs ~102KB per slot: over 320K/4, under 320K/3.
+        tile = (256, 128, 128, "fp16", "fp16")
+        for pipeline in ("comp_tdm_ra", "comp_tdm_ra_s4r1"):
+            self.assertFalse(lds(*tile, pipeline, "gfx1250", True)[0], pipeline)
+        ok, reason = lds(*tile, "comp_tdm_ra_s3r2", "gfx1250", True)
+        self.assertTrue(ok, reason)
+
+    def test_instance(self):
+        code = self._gen("gemm_universal", "comp_tdm_ra", "tdm")
+        self.assertIn(
+            "ck_tile::GemmPipelineAgBgCrCompTDMRunAhead<UniversalGemmProblem>", code
+        )
+        self.assertNotIn("CompTDMRARingPipeline", code)
+        self.assertIn("TdmEpilogue", code)
+        self.assertNotIn("CShuffleEpilogue<", code)
+        self.assertIn("DoubleSmemBuffer = true", code)
+        self.assertIn(
+            'throw std::runtime_error("TDM pipeline requires k_batch==1")', code
+        )
+
+        ring = self._gen("gemm_universal", "comp_tdm_ra_s3r2", "tdm")
+        self.assertIn(
+            "using CompTDMRARingPipeline = "
+            "ck_tile::GemmPipelineAgBgCrCompTDMRunAhead<\n    Problem,\n"
+            "    ck_tile::GemmPipelineAgBgCrCompTDMRunAheadPolicy<3, 2>>;",
+            ring,
+        )
+        self.assertIn("using GemmPipeline = CompTDMRARingPipeline<", ring)
+        self.assertIn("_comp_tdm_ra_s3r2_tdm_intrawave_", ring)
+        with self.assertRaisesRegex(
+            ValueError, r"run_ahead=3 must be in \[1, num_slots=3\)"
+        ):
+            self._gen("gemm_universal", "comp_tdm_ra_s3r3", "tdm")
+        with self.assertRaisesRegex(ValueError, "requires the tdm epilogue"):
+            self._gen("gemm_universal", "comp_tdm_ra", "cshuffle")
+        with self.assertRaisesRegex(ValueError, "does not support the comp_tdm_ra"):
+            self._gen("batched_gemm", "comp_tdm_ra", "tdm")
+
+    def test_shipped_config(self):
+        # gemm_universal/configs/gfx1250_comp_tdm_ra.json: the default ring and the
+        # rings the policy gtest covers, on the tiles the gtests cover. Every
+        # (ring, tile) pair survives the gemm_universal rules.
+        path = os.path.join(
+            _HERE, "gemm_universal", "configs", "gfx1250_comp_tdm_ra.json"
+        )
+        pipelines = (
+            "comp_tdm_ra",
+            "comp_tdm_ra_s3r2",
+            "comp_tdm_ra_s2r1",
+            "comp_tdm_ra_s4r1",
+        )
+        tiles = ("128x128x64", "128x256x64", "256x128x64", "256x256x64")
+        for dtype, warp_tile in (
+            ("fp16", "16x16x32"),
+            ("bf16", "16x16x32"),
+            ("fp8", "16x16x64"),
+        ):
+            tmp = tempfile.mkdtemp()
+            self.addCleanup(shutil.rmtree, tmp, True)
+            b = GemmKernelBuilder("gemm_universal", tmp, "gfx1250", dtype, "rcr", path)
+            b.USE_OP_WARP_TILE_ROWS = True  # as GemmUniversalKernelBuilder
+            names = sorted(k["name"] for k in b._get_sampled_kernel_list())
+            want = sorted(
+                f"gemm_universal_{dtype}_rcr_{p}_tdm_intrawave_False_False_False_False"
+                f"_{t}_2x2x1_{warp_tile}"
+                for p in pipelines
+                for t in tiles
+            )
+            self.assertEqual(names, want, dtype)
+
+    def test_default_configs_do_not_list_ra(self):
+        for path in (
+            os.path.join(
+                _HERE, "gemm_universal", "configs", "default_config_gfx1250.json"
+            ),
+            os.path.join(
+                _HERE, "gemm_universal", "configs", "default_ci_config_gfx1250.json"
+            ),
+            os.path.join(_HERE, "configs", "default_ci_config_gfx1250.json"),
+            os.path.join(_HERE, "configs", "default_ci_config_gfx1250_fp8.json"),
+        ):
+            with open(path) as f:
+                pipelines = json.load(f)["trait_config"]["pipeline"]["values"]
+            self.assertFalse(
+                [p for p in pipelines if p.startswith("comp_tdm_ra")], path
+            )
 
 
 class TestBuilderGolden(_BuilderCase):

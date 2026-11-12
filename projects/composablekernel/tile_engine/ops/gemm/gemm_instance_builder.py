@@ -36,7 +36,7 @@ GEMM_PACKED_B_PIPELINES = _validation_utils.GEMM_PACKED_B_PIPELINES
 
 # gfx1250 pipelines. Only the ops listed here may emit them; every other op
 # raises instead of silently generating an unsupported kernel.
-TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2", "comp_tdm_pc", "comp_tdm_v3")
+TDM_PIPELINES = ("comp_tdm", "comp_tdm_v2", "comp_tdm_pc", "comp_tdm_v3", "comp_tdm_ra")
 ASYNC_PIPELINES = ("comp_async",)
 GFX1250_PIPELINES = TDM_PIPELINES + ASYNC_PIPELINES
 GFX1250_PIPELINE_OPS = ("gemm_universal", "batched_gemm")
@@ -74,8 +74,21 @@ def _check_tdm_epilogue(pipeline, epilogue, kernel_name_prefix):
         )
 
 
-# Emitted in place of the pipeline type for a comp_tdm_pc ring variant.
-RING_PIPELINE_ALIAS = "CompTDMPCRingPipeline"
+# Per ringed pipeline: the alias emitted in place of the pipeline type for a
+# non-default ring, the policy template it binds the ring to, and the policy's
+# name for the ring parameter.
+RING_PIPELINE_TYPES = {
+    "comp_tdm_pc": (
+        "CompTDMPCRingPipeline",
+        "ck_tile::GemmPipelineAgBgCrCompTDMProducerConsumerPolicy",
+        "PublishLag",
+    ),
+    "comp_tdm_ra": (
+        "CompTDMRARingPipeline",
+        "ck_tile::GemmPipelineAgBgCrCompTDMRunAheadPolicy",
+        "RunAhead",
+    ),
+}
 
 
 def lookup_pipeline(pipeline_map, pipeline, what="pipeline"):
@@ -294,11 +307,11 @@ class GemmKernelBuilder:
         prefix = self.kernel_name_prefix
         if pipeline in GFX1250_PIPELINES and prefix not in GFX1250_PIPELINE_OPS:
             raise ValueError(f"{prefix} does not support the {pipeline} pipeline")
-        if (
-            pipeline == _validation_utils.GEMM_TDM_V3_PIPELINE
-            and prefix not in _validation_utils.GFX1250_TDM_V3_OPS
-        ):
-            raise ValueError(f"{prefix} does not support the {pipeline} pipeline")
+        op_reason = _validation_utils.gfx1250_pipeline_op_reject_reason(
+            pipeline, prefix
+        )
+        if op_reason:
+            raise ValueError(op_reason)
         _check_tdm_epilogue(pipeline, epilogue, prefix)
         pad_reason = _validation_utils.tdm_pad_reject_reason(
             pipeline, epilogue, pad_m, pad_n, pad_k
@@ -706,13 +719,13 @@ class GemmKernelBuilder:
         ) = self._normalize_trait_combo(trait_combo)
 
         kernel_name = self._format_kernel_name(trait_combo, tile_config)
-        # A comp_tdm_pc ring variant names the kernel; everything below sees the
-        # base pipeline, and the ring reaches the C++ only through the alias
-        # emitted by _ring_pipeline_alias.
+        # A comp_tdm_pc / comp_tdm_ra ring variant names the kernel; everything
+        # below sees the base pipeline, and the ring reaches the C++ only through
+        # the alias emitted by _ring_pipeline_alias.
         ring_reason = _validation_utils.pipeline_ring_reject_reason(pipeline)
         if ring_reason:
             raise ValueError(f"{pipeline}: {ring_reason}")
-        pipeline, num_slots, publish_lag = _validation_utils.split_pipeline_ring(
+        pipeline, num_slots, ring_param = _validation_utils.split_pipeline_ring(
             pipeline
         )
         base_trait_combo = (pipeline, *self._normalize_trait_combo(trait_combo)[1:])
@@ -735,6 +748,7 @@ class GemmKernelBuilder:
                 "comp_tdm_v2": "ck_tile::GemmPipelineAgBgCrCompTDMV2",
                 "comp_tdm_pc": "ck_tile::GemmPipelineAgBgCrCompTDMProducerConsumer",
                 "comp_tdm_v3": "ck_tile::GemmPipelineAgBgCrCompTDMV3",
+                "comp_tdm_ra": "ck_tile::GemmPipelineAgBgCrCompTDMRunAhead",
             }
             # Map pipeline names to base pipeline for hot loop detection
             base_pipeline_map = {
@@ -746,6 +760,7 @@ class GemmKernelBuilder:
                 "comp_tdm_v2": "ck_tile::BaseGemmPipelineAgBgCrCompTDM",
                 "comp_tdm_pc": "ck_tile::BaseGemmPipelineAgBgCrCompTDM",
                 "comp_tdm_v3": "ck_tile::BaseGemmPipelineAgBgCrCompTDM",
+                "comp_tdm_ra": "ck_tile::BaseGemmPipelineAgBgCrCompTDM",
             }
             self._check_pipeline_allowed_for_op(pipeline, epilogue, pad_m, pad_n, pad_k)
             if validate:
@@ -807,9 +822,15 @@ class GemmKernelBuilder:
         instance_code += self.populate_kernel_dtype_layout()
         if num_slots:
             instance_code += self._ring_pipeline_alias(
-                lookup_pipeline(pipeline_impl_map, pipeline), num_slots, publish_lag
+                pipeline,
+                lookup_pipeline(pipeline_impl_map, pipeline),
+                num_slots,
+                ring_param,
             )
-            pipeline_impl_map = {**pipeline_impl_map, pipeline: RING_PIPELINE_ALIAS}
+            pipeline_impl_map = {
+                **pipeline_impl_map,
+                pipeline: RING_PIPELINE_TYPES[pipeline][0],
+            }
         instance_code += self.populate_strut_begin(kernel_name)
         instance_code += self.populate_tile_config(tile_config)
         instance_code += self.populate_trait_config(base_trait_combo)
@@ -841,15 +862,16 @@ class GemmKernelBuilder:
         return kernel_name, instance_code
 
     @staticmethod
-    def _ring_pipeline_alias(pipeline_impl, num_slots, publish_lag):
-        """Alias template binding a non-default comp_tdm_pc ring, so every emitter
-        can keep spelling the pipeline as ``<impl><Problem>``."""
+    def _ring_pipeline_alias(pipeline, pipeline_impl, num_slots, ring_param):
+        """Alias template binding a non-default comp_tdm_pc / comp_tdm_ra ring, so
+        every emitter can keep spelling the pipeline as ``<impl><Problem>``."""
+        alias, policy, ring_param_name = RING_PIPELINE_TYPES[pipeline]
         return f"""
-// comp_tdm_pc ring: NumSlots = {num_slots}, PublishLag = {publish_lag}
+// {pipeline} ring: NumSlots = {num_slots}, {ring_param_name} = {ring_param}
 template <typename Problem>
-using {RING_PIPELINE_ALIAS} = {pipeline_impl}<
+using {alias} = {pipeline_impl}<
     Problem,
-    ck_tile::GemmPipelineAgBgCrCompTDMProducerConsumerPolicy<{num_slots}, {publish_lag}>>;
+    {policy}<{num_slots}, {ring_param}>>;
 """
 
     def populate_kernel_header(self, kernel_name):
