@@ -417,7 +417,9 @@ std::optional<GroupProblem> channelsFirstInPlace(const GroupProblem& problem)
 std::optional<GroupWrwProblem> parseGroupWrwProblem(const MatchContext& context)
 {
     auto wrw = conv_wrw::parseWrwProblem(context);
-    if(!wrw.has_value())
+    // The K4 wrw kernels read x and dy in place, both packed channels-first or both packed
+    // channels-last; parseWrwProblem also serves other strides (K3's generic tier).
+    if(!wrw.has_value() || !(wrw->channelsFirst || wrw->channelsLast))
     {
         return std::nullopt;
     }
