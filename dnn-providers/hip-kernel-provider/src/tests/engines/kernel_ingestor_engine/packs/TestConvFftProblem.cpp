@@ -257,9 +257,17 @@ TEST(TestConvFftKernel, TheDilatedFilterMustFitTheTransform)
     sixteen.tb = 128;
     EXPECT_FALSE(admits(sixteen, big)); // span 31 > 16
     {
-        // Not the floor's doing: refused with the floor off as well.
+        // Not the floor's doing: refused with the floor off as well, in either axis alone.
         const ScopedEnvironmentVariableSetter off("HIP_KERNEL_PROVIDER_CONV_FFT_FLOOR", "0");
         EXPECT_FALSE(admits(sixteen, big));
+        auto wideOnly = big;
+        wideOnly.filter = {1, 31};
+        wideOnly.prePadding = wideOnly.postPadding = {0, 15};
+        EXPECT_FALSE(admits(sixteen, wideOnly)); // span 31 > 16 in w only
+        auto tallOnly = big;
+        tallOnly.filter = {31, 1};
+        tallOnly.prePadding = tallOnly.postPadding = {15, 0};
+        EXPECT_FALSE(admits(sixteen, tallOnly)); // span 31 > 16 in h only
     }
     auto sixtyFour = Fields{};
     sixtyFour.th = sixtyFour.tw = 64;
@@ -411,9 +419,11 @@ TEST(TestConvFftPlan, DepthwiseFusesAndPartitionsBackwardWeights)
     auto dw11 = dw;
     dw11.filter = {11, 11};
     dw11.prePadding = dw11.postPadding = {5, 5};
-    const ScopedEnvironmentVariableSetter floorOff("HIP_KERNEL_PROVIDER_CONV_FFT_FLOOR", "0");
-    EXPECT_TRUE(planOf(dw11, ConvDirection::FORWARD, wide).has_value());
-    EXPECT_FALSE(planOf(dw11, ConvDirection::BACKWARD_WEIGHTS, wide).has_value());
+    {
+        const ScopedEnvironmentVariableSetter floorOff("HIP_KERNEL_PROVIDER_CONV_FFT_FLOOR", "0");
+        EXPECT_TRUE(planOf(dw11, ConvDirection::FORWARD, wide).has_value());
+        EXPECT_FALSE(planOf(dw11, ConvDirection::BACKWARD_WEIGHTS, wide).has_value());
+    }
     // The product tile is meaningless without a product: the gn twins are not offered.
     auto narrow = f;
     narrow.gn = 16;
