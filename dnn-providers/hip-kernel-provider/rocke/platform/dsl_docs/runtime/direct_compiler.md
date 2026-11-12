@@ -279,7 +279,7 @@ on the same inputs in these ways:
   `ROCKE_DIRECT_UNSUPPORTED`.
 - `tile.iglp_opt` is accepted and has no effect: scheduling groups are not
   implemented.
-- `agpr_alloc`: only `[0, 0]`.
+- `agpr_alloc`: `[0, 0]` (no AGPRs) and `[lo, hi]` with `hi` up to 256 (at most `hi`). The kernel attribute `mfma_vgpr_form` (rocKE's `-amdgpu-mfma-vgpr-form`) is accepted and changes nothing: accumulators stay in VGPRs and move to AGPRs only as above.
 - An op name the parser does not know is `ROCKE_DIRECT_PARSE`, so
   `compile_kernel` raises instead of falling back. A new IR op needs at least
   its name and `OpKind` in `rir/ast.rs`, and a `ROCKE_DIRECT_UNSUPPORTED`

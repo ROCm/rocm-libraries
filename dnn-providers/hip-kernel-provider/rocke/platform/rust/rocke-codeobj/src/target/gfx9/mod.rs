@@ -609,6 +609,24 @@ mod tests {
         assert!(small.stats.spill.agpr_dwords <= 32 && !small.listing().contains("s99"), "{:?}", small.stats.spill);
     }
 
+    /// `mfma_vgpr_form` (rocKE's `-amdgpu-mfma-vgpr-form` request) is accepted and changes nothing: the
+    /// accumulators are in VGPRs unless the allocator banks them, and `agpr_alloc` limits that as before.
+    #[test]
+    fn mfma_vgpr_form_is_accepted_and_changes_nothing() {
+        use crate::rir;
+        use crate::target::Target;
+        let with = |attrs: &str, text: String| text.replacen("attrs { ", &format!("attrs {{ {attrs}, "), 1);
+        for (extra, vgprs) in [("", 64), ("agpr_alloc = l:[ i:0, i:0 ]", 64), ("agpr_alloc = l:[ i:32, i:32 ]", 64), ("", 256)] {
+            let plain = |text: String| if extra.is_empty() { text } else { with(extra, text) };
+            let compile = |text: String| rir::compile_any_target_limited(&text, Target::Gfx950, vgprs).unwrap_or_else(|e| panic!("{extra}: {e}"));
+            let (want, got) = (compile(plain(accumulators(6))), compile(with("mfma_vgpr_form = b:true", plain(accumulators(6)))));
+            assert!(got.hsaco == want.hsaco, "{extra} @ {vgprs}");
+            if extra.contains("i:0, i:0") {
+                assert!(!got.listing().contains("accvgpr"));
+            }
+        }
+    }
+
     #[test]
     fn kernels_with_agpr_alloc_0_use_no_agprs() {
         use crate::rir;

@@ -979,6 +979,11 @@ pub(super) fn prologue<'a>(lines: &mut Lines<'a>) -> Result<Prologue<'a>, Compil
                 // rustgemm: rocKE's LLVM-only `-amdgpu-mfma-vgpr-form=0` switch; MFMA forms here follow the
                 // allocation (AGPR accumulators -> the AGPR form).
                 ("mfma_agpr_form", Attr::Bool(_)) => {}
+                // The same switch the other way (`-amdgpu-mfma-vgpr-form`: MFMA accumulators in VGPRs, the
+                // AGPRs left to what `agpr_alloc` reserves). That is this allocator's own rule: accumulators
+                // stay in VGPRs and move to AGPRs (within `agpr_alloc`'s cap) only when no schedule fits
+                // without; `agpr_alloc = [0, 0]` keeps them out for good.
+                ("mfma_vgpr_form", Attr::Bool(_)) => {}
                 // The ops carry `@loc`s; their presence alone turns on the debug sections.
                 ("debug_info", Attr::Bool(_)) => {}
                 // The kernel orders its LDS DMA with explicit waits and barriers.
