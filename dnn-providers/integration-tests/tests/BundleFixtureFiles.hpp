@@ -8,8 +8,8 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
-#include <memory>
 #include <hipdnn_data_sdk/types.hpp>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <set>
