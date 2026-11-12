@@ -9,6 +9,8 @@
 #include <limits>
 #include <utility>
 
+#include <hipdnn_plugin_sdk/ArchMatch.hpp>
+
 #include "engines/kernel_ingestor_engine/packs/ConvIgemmProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
 
@@ -239,21 +241,100 @@ int64_t ldsBytesOf(const NchwConfig& config, int elementBytes)
         return config.stages * config.bk * (lda + ldb) * elementBytes;
     }
     const int64_t wq = config.bmq + config.halo;
-    const int64_t out = config.bn * (config.bmq * config.stride + pad);
+    // The output tile: dx's element type (fp32 for three-bf16), over the operand tiles.
+    const int outBytes = config.math == 1 ? 4 : elementBytes;
+    const int64_t out = config.bn * (config.bmq * config.stride + 16 / outBytes) * outBytes;
     if(config.atom.size() >= 3 && config.atom.substr(config.atom.size() - 3) == "f32")
     {
         // One k per lane: k-major tiles as the FMA kernel's (no transposing stores).
         const int64_t chunks = divUp(smax, pad);
         const int64_t cp = (chunks % 2 == 0 ? chunks + 1 : chunks) * pad;
-        return std::max(config.bk * ((wq + pad) + config.bn * cp + pad), out) * elementBytes;
+        return std::max(config.bk * ((wq + pad) + config.bn * cp + pad) * elementBytes, out);
     }
     const int64_t ldk = config.bk + pad;
     const int64_t aTile = wq * ldk + (config.vec > 0 ? wq / config.vec : 0) * pad;
     const int64_t bTile = smax * config.bn * ldk;
-    return std::max(aTile + bTile, out) * elementBytes;
+    return std::max((aTile + bTile) * elementBytes, out);
 }
 
+std::optional<NchwProblem> threeBf16ProblemOf(const NchwProblem& problem)
+{
+    NchwProblem t = problem;
+    const auto& a = problem.base.args;
+    const int64_t k3 = a.k * 3;
+    const int64_t dyImage = problem.args.dyImage * 3;
+    const auto filter = pack_features::checkedProduct({k3, a.c, problem.args.fStride});
+    if(!fitsInt(k3) || dyImage > INT_LIMIT / 2 || !filter.has_value() || *filter > INT_LIMIT / 2)
+    {
+        return std::nullopt;
+    }
+    t.base.dataType = data_objects::DataType::BFLOAT16;
+    t.elementBytes = 2;
+    t.base.args.k = k3;
+    t.args.k = static_cast<int>(k3);
+    t.args.dyImage = dyImage;
+    t.flat = problem.flat && a.n * dyImage <= INT_LIMIT / 2;
+    return t;
+}
+
+bool threeBf16Pays(const NchwProblem& problem, std::string_view gcnArchName)
+{
+    // Timed against the best exact config on 12 top fp32 K7 shapes (PLAN.md): 0.05-0.74x on
+    // gfx950, gfx942 and gfx90a; on gfx1201 (exact on FMA) 1.07x and 1.46x for 3-D 3x3x3 at
+    // stride 2 and 0.15-0.79x elsewhere. Admitted only there.
+    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
+    const auto& a = problem.base.args;
+    const bool rdna = arch.rfind("gfx11", 0) == 0 || arch.rfind("gfx12", 0) == 0;
+    return rdna && problem.base.spatialRank == 3 && a.stride[0] >= 2 && a.stride[1] >= 2
+           && a.stride[2] >= 2 && a.filter[0] * a.filter[1] * a.filter[2] >= 27;
+}
+
+namespace
+{
+std::optional<NchwLaunch> launchCore(const NchwProblem& problem, const NchwConfig& config);
+} // namespace
+
 std::optional<NchwLaunch> nchwLaunchFor(const NchwProblem& problem, const NchwConfig& config)
+{
+    if(config.math == 0)
+    {
+        return launchCore(problem, config);
+    }
+    if(config.math != 1 || problem.base.dataType != data_objects::DataType::FLOAT
+       || !conv_igemm::tf32Permitted() || conv_igemm::atomElement(config.atom) != "bf16")
+    {
+        return std::nullopt;
+    }
+    const auto tripled = threeBf16ProblemOf(problem);
+    if(!tripled.has_value())
+    {
+        return std::nullopt;
+    }
+    auto launch = launchCore(*tripled, config);
+    if(!launch.has_value())
+    {
+        return std::nullopt;
+    }
+    const auto& a = problem.base.args;
+    conv_tf32::SplitTensor dy;
+    dy.outer = a.n;
+    dy.cg = a.k;
+    dy.inner = static_cast<int64_t>(problem.args.rowsY) * problem.args.wy;
+    dy.pattern = conv_tf32::PATTERN_A;
+    conv_tf32::SplitTensor w;
+    w.outer = 1;
+    w.cg = a.k;
+    w.inner = a.c * static_cast<int64_t>(problem.args.fStride);
+    w.pattern = conv_tf32::PATTERN_B;
+    launch->split = true;
+    launch->plan = conv_tf32::splitPlanFor(dy, w);
+    launch->args = tripled->args;
+    return launch;
+}
+
+namespace
+{
+std::optional<NchwLaunch> launchCore(const NchwProblem& problem, const NchwConfig& config)
 {
     const auto atomId = atomIdOf(config.atom);
     if(atomId < 0 || atomId != config.atomId)
@@ -358,8 +439,10 @@ std::optional<NchwLaunch> nchwLaunchFor(const NchwProblem& problem, const NchwCo
     launch.gridY = static_cast<unsigned int>(gridY);
     launch.gridZ = static_cast<unsigned int>(gridZ);
     launch.block = static_cast<unsigned int>(threads);
+    launch.args = problem.args;
     return launch;
 }
+} // namespace
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::conv_igemm_nchw
 

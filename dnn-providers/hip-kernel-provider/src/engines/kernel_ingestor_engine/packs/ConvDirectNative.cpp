@@ -504,8 +504,8 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
     {
         if(config.pw < 1 || config.fn < 1 || config.wp < 1 || config.wq < 1 || config.wk < 1
            || (config.pp != 0 && config.pp != 1) || (config.pp == 1 && config.wk != 2)
-           || (config.epi != 0 && config.epi != 1) || config.kd != 1 || config.ring != 0
-           || config.bl != 0 || config.split != 0 || config.wm != 0 || config.wn != 0
+           || (config.epi != 0 && config.epi != 1) || config.ring != 0 || config.bl != 0
+           || config.split != 0 || config.wm != 0 || config.wn != 0
            || config.bm != config.wp * config.pw || config.bn != config.wk * config.fn * 16)
         {
             return std::nullopt;
@@ -571,9 +571,30 @@ bool shipsTo(std::string_view archs, std::string_view gcnArchName)
     return false;
 }
 
+int64_t ldsLimitOf(std::string_view gcnArchName)
+{
+    // CDNA4 is gfx950 alone; the stripped name keys the family.
+    return hipdnn_plugin_sdk::stripArchFeatures(gcnArchName).rfind("gfx95", 0) == 0 ? 160 * 1024
+                                                                                    : 64 * 1024;
+}
+
+int64_t rowsLdsBytes(const Config& config)
+{
+    if(!config.rows)
+    {
+        return 0;
+    }
+    // The operand is the atom's element (three-bf16 runs on bf16 atoms).
+    const int64_t operandBytes = conv_igemm::atomElement(config.atom) == "f32" ? 4 : 2;
+    const int64_t haloRows = static_cast<int64_t>(config.wp) * config.pw + config.r - 1;
+    const int64_t haloColumns = static_cast<int64_t>(config.wq) * 16 + config.s - 1;
+    return 2 * haloRows * haloColumns * config.bc * operandBytes;
+}
+
 bool configRunsOn(const Config& config, std::string_view gcnArchName)
 {
-    return conv_igemm::atomRunsOn(config.atom, gcnArchName) && shipsTo(config.archs, gcnArchName);
+    return conv_igemm::atomRunsOn(config.atom, gcnArchName) && shipsTo(config.archs, gcnArchName)
+           && rowsLdsBytes(config) <= ldsLimitOf(gcnArchName);
 }
 
 std::optional<Plan>
@@ -595,15 +616,18 @@ std::optional<Plan>
     const long long taps = static_cast<long long>(config.kd) * config.r * config.s;
     plan.cpad = static_cast<int>(std::min(cpad, INT_LIMIT));
     plan.weightElems = taps * cpad * kpad;
+    // The kernels read the formatted weights through one buffer of 31-bit byte offsets.
+    const long long weightOperandBytes = config.math ? 2 : problem.elementBytes;
     if(reduction % config.vec != 0 || columnBlocks > MAX_GRID_YZ || cpad > INT_LIMIT
-       || plan.weightElems >= INT_LIMIT)
+       || plan.weightElems >= INT_LIMIT || plan.weightElems * weightOperandBytes >= BUFFER_LIMIT)
     {
         return std::nullopt;
     }
     std::optional<Tile> tile;
     if(config.rows)
     {
-        // Fixed tile; each block walks tiles, one block per compute unit at most.
+        // Fixed tile of one output plane; each block walks tiles, one block per compute unit at
+        // most. A 2-D config (kd 1) takes 2-D problems; a 3-D one walks every output plane.
         Tile t;
         t.th = config.wp * config.pw;
         t.tw = config.wq * 16;
@@ -611,13 +635,14 @@ std::optional<Plan>
         t.tilesW = static_cast<int>(divUp(a.wo, t.tw));
         t.tilesH = static_cast<int>(divUp(a.ho, t.th));
         t.tilesD = 1;
-        t.blocks = static_cast<long long>(t.tilesW) * t.tilesH * a.n * columnBlocks;
+        t.blocks = static_cast<long long>(t.tilesW) * t.tilesH * a.n * a.dout * columnBlocks;
         // The halo moves in 16-byte granules of whole channels; 32-bit offsets within one input
         // image; the tile count fits an int.
         const int operandBytes = config.math ? 2 : problem.elementBytes;
-        const long long imageBytes = static_cast<long long>(a.hi) * a.wi * reduction * operandBytes;
-        if(config.vec * operandBytes != 16 || a.dout != 1 || a.di != 1 || imageBytes >= BUFFER_LIMIT
-           || t.blocks > INT_LIMIT)
+        const long long imageBytes
+            = static_cast<long long>(a.di) * a.hi * a.wi * reduction * operandBytes;
+        if(config.vec * operandBytes != 16 || (config.kd == 1 && (a.dout != 1 || a.di != 1))
+           || imageBytes >= BUFFER_LIMIT || t.blocks > INT_LIMIT)
         {
             return std::nullopt;
         }

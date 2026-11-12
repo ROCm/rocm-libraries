@@ -82,6 +82,20 @@ struct K3ReduceArgs
     int padding0; ///< keeps the struct size a multiple of 8 on host and device alike
 };
 
+/// Three-bf16 (an fp32 graph under TF32 permission, a config of math 1): ConvWrwSplit writes
+/// x and dy, both packed, as 3N bf16 images each, xs = [x hi | x hi | x lo] and ys = [dy hi |
+/// dy lo | dy hi], so the bf16 kernel's sum over 3N images is x hi dy hi + x hi dy lo + x lo dy
+/// hi (lo * lo dropped), accumulated in fp32 like any other partials.
+struct K3SplitArgs
+{
+    const float* x;
+    const float* dy;
+    unsigned short* xs;
+    unsigned short* ys;
+    long long xElems; ///< elements of x (one third of xs)
+    long long yElems; ///< elements of dy (one third of ys)
+};
+
 /// The row reduce's channels per block; it takes taps * channels within 4096 floats of LDS.
 #define K3_REDUCE_ROW_CHANNELS 64
 #define K3_REDUCE_ROW_MAX_TAPS 64

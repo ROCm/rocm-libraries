@@ -28,7 +28,7 @@
  *        from the dispatch code so every gate can be tested without a device.
  *
  * The kernel reads x and dy in place, both packed channels-first (N C D H W) or both
- * channels-last (N D H W C), and writes fp32 partials [split][g][tap][k][c] into the workspace;
+ * channels-last (N D H W C), or (the generic loop) through any strides, and writes fp32 partials [split][g][tap][k][c] into the workspace;
  * a second kernel adds the splits in a fixed order and writes dw, packed K C T R S or K T R S C,
  * in its element type (deterministic, no atomics). At one split with dw's channels contiguous
  * (K T R S C, or one tap) a config compiled with the direct store (dws 1) writes dw itself: no
@@ -87,6 +87,7 @@ inline constexpr int64_t LOOP_ROWS_FMA = 4; ///< output rows on FMA (exact fp32,
 inline constexpr int64_t LOOP_DIRECT = 5; ///< direct (gfx950, 16-bit, persistent grid)
 inline constexpr int64_t LOOP_ROWS_SMALLC = 6; ///< output rows, (channel, tap) N axis (stems)
 inline constexpr int64_t LOOP_ROWS_PACKED = 7; ///< output rows, several narrow rows a step
+inline constexpr int64_t LOOP_GENERIC = 8; ///< generic taps: runtime filter, strides (coverage)
 
 /// The activation layouts (CONV_K3_LAYOUT): the graph's x and dy are channels-first (0) or
 /// channels-last (1: transposed into LDS; 2: kept channels-last, read with LDS transpose reads).
@@ -131,9 +132,31 @@ struct WrwConfig
     /// 1: the epilogue also writes dw itself, used at one split into K T R S C or one tap
     /// (CONV_K3_DWS); 0: fp32 partials only, as compiled before the direct store. 0 for loop 5.
     int64_t dws = 0;
+    /// 1: block-based buffers (CONV_K3_PB), for images past the 32-bit buffer range and admitted
+    /// only there: the channels-first K3Tiles loops (0, 1, 6), whose x and dy buffers start at
+    /// the block's first channel (its channel planes within the range), and the generic loop,
+    /// whose buffers start each step at the first element the block can read (its step windows
+    /// within the range; any layout and strides). 0 elsewhere.
+    int64_t pb = 0;
     /// The split planner's target blocks per dispatch unit (1, 2, 4 or 8; 1 for loop 5, whose
     /// persistent grid has one workgroup per unit; 8 for small FMA blocks): host-side only.
     int64_t bpu = 0;
+    /// Loop 8 only (the "spec" metadata string): the specialized geometry classes the catalog
+    /// serves on this config's archs, which the generic config declines. ';'-separated keys
+    /// "<atom_id><kind><layout>.<s>.<sw>.<dw>.<fr>", kind R (loop 0, any filter height), C
+    /// (loop 6, at most 16 input channels per group), P (loop 1, the filter height fr, height
+    /// stride 1 or phases), U (P with align 2: channels-last output channels in any count), G
+    /// (loop 2, gfx950, fr at height stride 1) or D (loop 5, gfx950, as G with unit width
+    /// stride and unit height dilation or one filter row); fr 0 for R and C. F, S, Q (atom fma
+    /// alone, for the generic FMA form): the FMA output rows of vectors (channels-first rows of
+    /// whole vectors), of scalar units, and the FMA ring (fr at height stride 1). Lower case r, p, c:
+    /// their block-based buffer forms, which serve large images alone (channels-first, each
+    /// channel plane within the range); the upper-case kinds serve the other images.
+    std::string spec;
+    /// 0: the graph's element type. 1: three-bf16 for an fp32 graph under TF32 permission
+    /// (tf32Permitted): a bf16 config run on x and dy split into 3N bf16 images by
+    /// ConvWrwSplit (K3SplitArgs), dw written in fp32 by the reduce.
+    int64_t math = 0;
 };
 
 /// A backward-weights convolution the kernels serve.
@@ -152,18 +175,39 @@ struct WrwProblem
     bool filterChannelsLast = false;
     /// Filter taps (ft fr fs).
     int64_t taps = 0;
+    /// One image of x or of dy spans past the 32-bit buffer range: only block-based buffer
+    /// configs (pb 1) serve it.
+    bool largeImage = false;
+    /// x and dy have unit channel strides, every other stride a whole number of 16-byte vectors
+    /// and channels per group whole vectors (packed or not): the generic loop's channels-last
+    /// configs (16-byte channel loads) serve exactly these, its channels-first ones the rest.
+    bool vectorChannels = false;
+    /// Elements one image of x / of dy spans through its strides (the packed image when packed).
+    int64_t xSpan = 0;
+    int64_t ySpan = 0;
 };
+
+/// Whether specialized key @p key (WrwConfig::spec) serves @p problem on @p gcnArchName: its
+/// atom runs there and takes the graph's element type (G and D, and layout 2, on gfx950 only),
+/// the graph's x and dy are packed in its layout (channels-last: output channels per group
+/// whole 16-byte vectors except for U, input channels except for C) and within the 32-bit buffer
+/// range, its width class is the filter's (width, stride, dilation) and its filter-height rule
+/// holds. nullopt for a malformed key.
+std::optional<bool>
+    specServes(const WrwProblem& problem, std::string_view key, std::string_view gcnArchName);
 
 /**
  * @brief The backward-weights convolution @p context's graph describes, or nullopt when the
  *        kernels do not serve it.
  *
  * Everything parseConvNaiveProblem gates (both convolution modes), plus: fp32, fp16 or bf16;
- * x and dy both packed channels-first or both packed channels-last; dw packed K C T R S or
+ * x and dy both packed channels-first or both packed channels-last, or (for the generic loop
+ * only, which reads them through their strides) any strides; dw packed K C T R S or
  * K T R S C; the batch within 32 bits; per spatial axis the reach of the kernel's 32-bit
  * position arithmetic ((output extent + 512) x stride + filter x dilation + padding) within 32
- * bits, which bounds every extent, padding, stride and dilation; the taps within 32 bits; one
- * image of x and one of dy within 2^31 bytes (32-bit buffer offsets).
+ * bits, which bounds every extent, padding, stride and dilation; the taps within 32 bits. An
+ * image of x or dy spanning past 2^31 bytes is a large image (WrwProblem::largeImage), for the
+ * block-based buffer configs alone.
  */
 std::optional<WrwProblem> parseWrwProblem(const hipdnn_plugin_sdk::ingestor::MatchContext& context);
 
@@ -173,7 +217,8 @@ int64_t ldsBytesOf(const WrwConfig& config, int elementBytes);
 
 /// The most load passes (loads per thread and step, each tracked by a bit of a 32-bit mask) of
 /// a config's dy and x tiles; @p wave is the atom's wave width (ignored for loop 3). Loop 7's
-/// element units (K3PackTiles), tracked by no mask.
+/// element units (K3PackTiles), tracked by no mask; loop 8's loads a thread holds (elements, or
+/// 16-byte channel vectors at each position of a 32-bit LDS word).
 int64_t loadPassesOf(const WrwConfig& config, int elementBytes, int64_t wave);
 
 /// The LDS a workgroup may use on @p gcnArchName: 160 KiB on gfx950, else 64 KiB.
@@ -197,6 +242,13 @@ struct WrwLaunch
     size_t workspaceBytes = 0;
     /// The kernel writes dw itself (args.dwStore): no workspace, no reduce launch.
     bool dwStore = false;
+    /// Three-bf16 (math 1): ConvWrwSplit runs first and writes the split operands to the
+    /// workspace's first splitBytes (xs, then ys at splitYOffset); the partials follow them.
+    bool split = false;
+    unsigned int splitGrid = 0;
+    size_t splitYOffset = 0;
+    size_t splitBytes = 0;
+    K3SplitArgs splitArgs{};
 };
 
 /// The workspace the splits' fp32 partials may take at most; splits are reduced to fit.
@@ -292,10 +344,41 @@ DirectPlan directPlanFor(int64_t tiles,
  * columns: only for narrow outputs, 2 wv at most bq; the filter width whole (s the filter
  * width), bq dividing the block's threads, align 0. Its units are elements (no pass masks): at
  * most 64 passes.
+ *
+ * Loop 8 (generic taps, the coverage tier): a matrix atom, or "fma" (the FMA form: tk x tc
+ * thread tiles, wk wc 0, only where no matrix atom takes the element, not for fewer than 8
+ * input channels a group or width strides of 4 or more); the filter, strides and dilations
+ * runtime (s, sw 0), fr the taps a block (>= 1); dw 0 (per-tap gathers) or the extra positions
+ * of a shared width window (layout 1, a multiple of 8, unit width stride, (min(fr, filter
+ * width) - 1) x width dilation within dw; fr width taps of one filter row a block, so
+ * ft fr ceil(fs / fr) grid rows a group); layout 1 exactly for problems with
+ * vectorChannels, layout 0 for the rest (any strides, read element by element); bq dividing the
+ * block's threads, bk and bc whole channel rows a pass; align, ns and wq 0; pb 1 (large images)
+ * with each step's windows within the range: x 1 + (min(bc, cg) - 1) xs1 + the filter's depth
+ * and height reach (within the image) x xs2, xs3 + ((bq - 1) sw + (fs - 1) dw + dw) columns
+ * (within the image) x xs4, dy 1 + (min(bk, kg) - 1) ys1 + (bq - 1) ys4; at most 64
+ * loads a thread in flight; not for filters of at most 9 taps dilated 6 or more on a filter
+ * axis (ASPP-class, where the BLAS path wins). Declined
+ * wherever a key of its spec serves the problem (specServes): a specialized config's class.
+ * math 0, or 1 (three-bf16): an fp32 graph, TF32 permitted (tf32Permitted), a bf16 atom, dws 0,
+ * 3N within 32 bits; the launch is the config's on the bf16 problem of 3N images, with
+ * ConvWrwSplit ahead of it and the split operands ahead of the partials in the workspace.
  */
 std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
                                       const WrwConfig& config,
                                       const hipdnn_plugin_sdk::ingestor::DeviceProperties& device);
+
+/**
+ * @brief Whether three-bf16 (math 1, x and dy as 3N bf16 images) is admitted for @p problem on
+ *        @p gcnArchName: the classes where it measured faster than exact fp32 K3
+ *        (~/old-asic-hipdnn/tf32/PLAN.md). The 3N images triple the operand traffic, so it pays
+ *        only where the bf16 kernel is about 3x the fp32 one or the exact path is weak.
+ *
+ * gfx942, gfx950: unit stride, at least 9 filter taps, at least 128 input and 64 output channels
+ * per group. gfx11, gfx12 (exact fp32 on FMA): at most 4 input channels per group (stems), or at
+ * least 256 with at least 9 taps. Elsewhere (gfx90a, whose bf16 rate is only 4x fp32 MFMA): never.
+ */
+bool threeBf16Pays(const WrwProblem& problem, std::string_view gcnArchName);
 
 /**
  * @brief The preprocessor definitions ConvWrw.cpp is compiled with for @p config on

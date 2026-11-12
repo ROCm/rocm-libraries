@@ -582,12 +582,14 @@ struct WrwConfig
     int64_t g = 0;
     int64_t nwg = 0;
     int64_t bpc = 0;
+    /// The depth multiplier (output channels per input channel).
+    int64_t mult = 1;
 
     std::string tag() const
     {
         return layout + "_" + variant + "_k" + std::to_string(kd) + "x" + std::to_string(kh) + "x"
                + std::to_string(kw) + "_q" + std::to_string(q) + "g" + std::to_string(g) + "w"
-               + std::to_string(nwg) + "b" + std::to_string(bpc);
+               + std::to_string(nwg) + "b" + std::to_string(bpc) + "m" + std::to_string(mult);
     }
 };
 
@@ -616,6 +618,12 @@ const std::vector<WrwConfig>& wrwCatalog()
                     {1, 3, 3}, {1, 5, 5}, {1, 7, 7}, {1, 1, 4}, {1, 1, 31}, {3, 3, 3}})
             {
                 configs.push_back({layout, "tile", kd, kh, kw});
+            }
+            // Depth multiplier 2: the floor and the 2-D tiles.
+            configs.push_back({layout, "floor", 0, 0, 0, 0, 0, 0, 0, 2});
+            for(const int64_t k : {3, 5, 7})
+            {
+                configs.push_back({layout, "tile", 1, k, k, 0, 0, 0, 0, 2});
             }
         }
         for(const int64_t k : {3, 5, 7})
@@ -661,8 +669,37 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition wrwKernelFor(const WrwConfig& conf
            {"q", config.q},
            {"g", config.g},
            {"nwg", config.nwg},
-           {"bpc", config.bpc}};
+           {"bpc", config.bpc},
+           {"mult", config.mult}};
     return kernel;
+}
+
+/// Depth multiplier 2 (two output channels per input channel; MobileNet-style expansion and
+/// separable layers): the backward-weights VALU variants. Odd channel counts, a strided and a
+/// dilated floor case, 1-D and 3-D.
+std::vector<DeviceCase> multiplierCases()
+{
+    const auto times2 = [](ConvShape shape) {
+        shape.k = 2 * shape.c;
+        return shape;
+    };
+    std::vector<DeviceCase> cases;
+    cases.push_back({"Mult2Nhwc3x3", times2(depthwise(37, {13, 11}, {3, 3}, {1, 1}, true))});
+    cases.push_back({"Mult2Nchw3x3", times2(depthwise(9, {13, 11}, {3, 3}, {1, 1}, false))});
+    cases.push_back({"Mult2Nhwc5x5", times2(depthwise(21, {19, 17}, {5, 5}, {2, 2}, true))});
+    cases.push_back({"Mult2Nchw7x7", times2(depthwise(10, {18, 21}, {7, 7}, {3, 3}, false))});
+    cases.push_back({"Mult2Nhwc7x7", times2(depthwise(20, {18, 21}, {7, 7}, {3, 3}, true))});
+    cases.push_back({"Mult2Nchw5x5", times2(depthwise(11, {19, 37}, {5, 5}, {2, 2}, false))});
+    auto strided = times2(depthwise(19, {15, 14}, {3, 3}, {1, 1}, true));
+    strided.stride = {2, 2};
+    cases.push_back({"Mult2NhwcStride2", strided});
+    auto dilated = times2(depthwise(6, {12, 13}, {3, 3}, {2, 2}, false));
+    dilated.dilation = {2, 2};
+    cases.push_back({"Mult2NchwDilation2", dilated});
+    cases.push_back({"Mult2Nhwc1d", times2(depthwise(13, {23}, {5}, {2}, true))});
+    cases.push_back(
+        {"Mult2Ndhwc3x3x3", times2(depthwise(11, {5, 9, 10}, {3, 3, 3}, {1, 1, 1}, true))});
+    return cases;
 }
 
 /// Every config that admits @p shape runs it, from a workspace the handler sizes, against the
@@ -782,16 +819,104 @@ INSTANTIATE_TEST_SUITE_P(,
                          ::testing::ValuesIn(deviceCases()),
                          [](const auto& info) { return info.param.name; });
 
+INSTANTIATE_TEST_SUITE_P(Multiplier,
+                         TestGpuConvDepthwiseValuWrw,
+                         ::testing::ValuesIn(multiplierCases()),
+                         [](const auto& info) { return info.param.name; });
+
+// Host-only: the kernel's multiplier is the graph's; the graph's output channels a whole
+// multiple of its input channels; no matrix-core (hankel) config takes a multiplier.
+TEST(TestConvDepthwiseValuWrwMultiplier, KernelsServeTheirOwnMultiplier)
+{
+    const auto pack = wrwPack();
+    const auto admits = [&](ConvShape shape, const WrwConfig& config, const std::string& arch) {
+        shape.dataType = DataType::HALF;
+        const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::BACKWARD_WEIGHTS)),
+                                   countedDevice(64, arch));
+        const auto bound = matchesGraph(pack, fixture.context());
+        return bound.has_value()
+               && matchesKernel(
+                   pack, fixture.context(), wrwKernelFor(config, DataType::HALF), *bound);
+    };
+    auto one = depthwise(40, {13, 21}, {3, 3}, {1, 1}, true);
+    auto two = one;
+    two.k = 80;
+    const WrwConfig floor1{"NHWC", "floor", 0, 0, 0};
+    const WrwConfig floor2{"NHWC", "floor", 0, 0, 0, 0, 0, 0, 0, 2};
+    EXPECT_TRUE(admits(one, floor1, "gfx942"));
+    EXPECT_FALSE(admits(one, floor2, "gfx942"));
+    EXPECT_TRUE(admits(two, floor2, "gfx942"));
+    EXPECT_FALSE(admits(two, floor1, "gfx942"));
+    // 60 output channels from 40: no whole multiplier, no graph.
+    auto ragged = one;
+    ragged.k = 60;
+    ragged.dataType = DataType::HALF;
+    const GraphFixture fixture(buildGraph(specFor(ragged, ConvDirection::BACKWARD_WEIGHTS)),
+                               countedDevice(64, "gfx942"));
+    EXPECT_FALSE(matchesGraph(pack, fixture.context()).has_value());
+    // The matrix-core kernel walks input channels: never with a multiplier.
+    const WrwConfig hankel1{"NHWC", "hankel", 1, 3, 3, 32, 1, 1, 2};
+    WrwConfig hankel2 = hankel1;
+    hankel2.mult = 2;
+    EXPECT_TRUE(admits(one, hankel1, "gfx942"));
+    EXPECT_FALSE(admits(two, hankel2, "gfx942"));
+    // Output channels times taps within 32 bits: 2^28 output channels from 2^18 (3x3).
+    auto wide = depthwise(int64_t{1} << 18, {4, 4}, {3, 3}, {1, 1}, true);
+    wide.k = int64_t{1} << 28;
+    wide.n = 1;
+    wide.dataType = DataType::HALF;
+    const GraphFixture wideFixture(buildGraph(specFor(wide, ConvDirection::BACKWARD_WEIGHTS)),
+                                   countedDevice(64, "gfx942"));
+    EXPECT_FALSE(matchesGraph(pack, wideFixture.context()).has_value());
+    wide.k = int64_t{1} << 26;
+    const GraphFixture fitFixture(buildGraph(specFor(wide, ConvDirection::BACKWARD_WEIGHTS)),
+                                  countedDevice(64, "gfx942"));
+    EXPECT_TRUE(matchesGraph(pack, fitFixture.context()).has_value());
+}
+
+// Host-only: the partitions and the partial sums run over output channels, so 40 channels at
+// multiplier 2 take the workspace of 80 plain depthwise channels.
+TEST(TestConvDepthwiseValuWrwMultiplier, TheWorkspaceCountsOutputChannels)
+{
+    const auto pack = wrwPack();
+    const auto workspaceOf = [&](ConvShape shape, const WrwConfig& config) {
+        shape.dataType = DataType::HALF;
+        const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::BACKWARD_WEIGHTS)),
+                                   countedDevice(64, "gfx942"));
+        const auto bound = matchesGraph(pack, fixture.context());
+        EXPECT_TRUE(bound.has_value());
+        const auto kernel = wrwKernelFor(config, DataType::HALF);
+        EXPECT_TRUE(matchesKernel(pack, fixture.context(), kernel, *bound));
+        return dispatchHandler(pack).workspaceBytes(fixture.context(), *bound, kernel);
+    };
+    for(const bool channelsLast : {true, false})
+    {
+        const std::string layout = channelsLast ? "NHWC" : "NCHW";
+        auto two = depthwise(40, {13, 21}, {3, 3}, {1, 1}, channelsLast);
+        two.k = 80;
+        const auto eighty = depthwise(80, {13, 21}, {3, 3}, {1, 1}, channelsLast);
+        const auto withTwo = workspaceOf(two, WrwConfig{layout, "floor", 0, 0, 0, 0, 0, 0, 0, 2});
+        const auto withEighty = workspaceOf(eighty, WrwConfig{layout, "floor", 0, 0, 0});
+        EXPECT_GT(withTwo, 0u) << layout;
+        EXPECT_EQ(withTwo, withEighty) << layout;
+    }
+}
+
 // Host-only: every backward-weights config serves some device case.
 TEST(TestConvDepthwiseValuCatalog, EveryWrwConfigServesADeviceCase)
 {
     const auto pack = wrwPack();
+    auto allCases = deviceCases();
+    for(const auto& deviceCase : multiplierCases())
+    {
+        allCases.push_back(deviceCase);
+    }
     for(const auto& config : wrwCatalog())
     {
         bool served = false;
         // The matrix-core configs run on CDNA; gfx950 has the LDS every one of them fits.
         const std::string arch = config.variant == "hankel" ? "gfx950" : "gfx000";
-        for(const auto& deviceCase : deviceCases())
+        for(const auto& deviceCase : allCases)
         {
             auto shape = deviceCase.shape;
             shape.dataType = DataType::HALF;
@@ -1123,6 +1248,17 @@ TEST(TestConvDepthwiseValuWrwHankel, RefusesOneFieldAtATime)
             matchesKernel(pack, fixture.context(), wrwKernelFor(config, shape.dataType), *bound),
             c.admitted);
     }
+}
+
+TEST(TestConvDepthwiseValuWrwComputeType, ServesCudnnsComputeTypesPerElementType)
+{
+    expectCudnnComputeTypes(depthwise(37, {13, 11}, {3, 3}, {1, 1}, true),
+                            {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16},
+                            [](const ConvShape& s) {
+                                const GraphFixture fixture(
+                                    buildGraph(specFor(s, ConvDirection::BACKWARD_WEIGHTS)));
+                                return matchesGraph(wrwPack(), fixture.context()).has_value();
+                            });
 }
 
 } // namespace

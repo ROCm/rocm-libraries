@@ -31,9 +31,9 @@
 
 /**
  * @file TestGpuConvWinograd.cpp
- * @brief The Winograd convolution kernels (CONV_WINOGRAD_FWD, CONV_WINOGRAD_BWD) on the device,
- *        through the engines' own graph match, kernel match, prepare and launch, against
- *        hipDNN's CPU reference convolution.
+ * @brief The Winograd convolution kernels (CONV_WINOGRAD_FWD, CONV_WINOGRAD_BWD,
+ *        CONV_WINOGRAD_WRW) on the device, through the engines' own graph match, kernel match,
+ *        prepare and launch, against hipDNN's CPU reference convolution.
  *
  * Every config of the installed catalog that the kernel match admits on this device runs on
  * every case, forward and backward data, in fp32, fp16 and bf16: the multipass engine in both
@@ -46,6 +46,11 @@
  * output alone, so the tolerance scales with the largest sum of |products| among the outputs
  * of the neighbourhood (the reference convolution of |x| and |w|), by the bound of the study for
  * each dtype and tile: fp32 1e-5 (F(2,3)) and 5e-5 (F(4,3)), fp16 2e-3, bf16 1.6e-2.
+ *
+ * Backward weights (F(3,2), F(3,4), F(3,6)) runs every admitted wrw config on the stride-1 cases
+ * plus batch-sliced and split-heavy ones, graded with the dynamic-tolerance model against a
+ * double-accumulated reference: fp16 up to 12 eps sigma, bf16 the same absolute level (fp16
+ * Winograd's), fp32 the base summation allowance (c 4).
  */
 namespace
 {
@@ -66,8 +71,9 @@ using BFloat16 = hipdnn_data_sdk::types::bfloat16;
 PackSymbols packFor(ConvDirection direction)
 {
     return {"",
-            direction == ConvDirection::FORWARD ? "hipkernel.conv_winograd_fwd.graph_match"
-                                                : "hipkernel.conv_winograd_bwd.graph_match",
+            direction == ConvDirection::FORWARD         ? "hipkernel.conv_winograd_fwd.graph_match"
+            : direction == ConvDirection::BACKWARD_DATA ? "hipkernel.conv_winograd_bwd.graph_match"
+                                                        : "hipkernel.conv_winograd_wrw.graph_match",
             "",
             "hipkernel.conv_winograd.kernel_match",
             "",
@@ -99,11 +105,12 @@ std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> catalog(ConvDirection
             roots.push_back(dir / "lib" / "hipdnn_plugins" / "engines"
                             / HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR);
         }
-        std::array<std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>, 2> catalogs;
+        std::array<std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>, 3> catalogs;
         for(size_t i = 0; i < catalogs.size(); ++i)
         {
-            const std::string file
-                = i == 0 ? "conv_winograd_fwd.kdp.json" : "conv_winograd_bwd.kdp.json";
+            const std::string file = i == 0   ? "conv_winograd_fwd.kdp.json"
+                                     : i == 1 ? "conv_winograd_bwd.kdp.json"
+                                              : "conv_winograd_wrw.kdp.json";
             std::filesystem::path found;
             for(const auto& root : roots)
             {
@@ -155,7 +162,9 @@ std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> catalog(ConvDirection
         }
         return catalogs;
     }();
-    return s_catalogs[direction == ConvDirection::FORWARD ? 0 : 1];
+    return s_catalogs[direction == ConvDirection::FORWARD         ? 0
+                      : direction == ConvDirection::BACKWARD_DATA ? 1
+                                                                  : 2];
 }
 
 void forEachIndex(const std::vector<int64_t>& dims,
@@ -555,9 +564,227 @@ INSTANTIATE_TEST_SUITE_P(,
 
 // ---- Host-only: the shipped catalog ----
 
+// ---- Backward weights ----
+
+struct WrwCase
+{
+    std::string name;
+    ConvShape shape;
+    bool mixedLayouts = false;
+    /// The engine's workspace limit in MiB (0: default): small enough to slice the batch.
+    int workspaceMb = 0;
+};
+
+std::vector<WrwCase> wrwCases()
+{
+    std::vector<WrwCase> cases;
+    for(const auto& deviceCase : deviceCases())
+    {
+        if(deviceCase.shape.stride[0] == 1)
+        {
+            cases.push_back({deviceCase.name, deviceCase.shape, deviceCase.mixedLayouts});
+        }
+    }
+    // Many tiles over few channel blocks: the GEMM splits over the tiles.
+    auto deep = dense(16, 24, {33, 35}, 1, false);
+    deep.n = 6;
+    cases.push_back({"NchwManyTilesSplit", deep});
+    auto deepNhwc = deep;
+    deepNhwc.channelsLast = true;
+    cases.push_back({"NhwcManyTilesSplit", deepNhwc});
+    // A small workspace limit: the batch runs in slices that add onto the partials (2 MiB for
+    // channels-last, whose transposed x and dy copies take part of it).
+    auto sliced = dense(40, 72, {12, 14}, 1, true);
+    sliced.n = 9;
+    cases.push_back({"NhwcSlicedBatch", sliced, false, 2});
+    auto slicedNchw = sliced;
+    slicedNchw.channelsLast = false;
+    slicedNchw.groups = 2;
+    cases.push_back({"NchwSlicedBatchGrouped", slicedNchw, false, 1});
+    // Top padding 3 over one input row: dW rows 0 and 1 see only padding (exactly 0).
+    auto deadTaps = dense(8, 8, {1, 5}, 1, false);
+    deadTaps.prePadding = {3, 1};
+    deadTaps.postPadding = {0, 1};
+    cases.push_back({"NchwDeadTaps", deadTaps});
+    return cases;
+}
+
+template <typename T>
+void runWrwCase(const WrwCase& wrwCase)
+{
+    const std::string limit = std::to_string(wrwCase.workspaceMb);
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter workspaceLimit(
+        "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_WORKSPACE_MB", wrwCase.workspaceMb > 0 ? limit : "");
+    auto shape = wrwCase.shape;
+    shape.dataType = dataTypeOf<T>();
+    auto spec = specFor(shape, ConvDirection::BACKWARD_WEIGHTS);
+    if(wrwCase.mixedLayouts)
+    {
+        spec.y.strides = packedStrides(spec.y.dims, !shape.channelsLast);
+    }
+    const GraphFixture fixture(buildGraph(spec), currentDeviceProperties());
+    const auto pack = packFor(ConvDirection::BACKWARD_WEIGHTS);
+    const auto bound = matchesGraph(pack, fixture.context());
+    ASSERT_TRUE(bound.has_value()) << "the engine refused a case it should serve";
+
+    Tensor<T> x(spec.x.dims, spec.x.strides);
+    Tensor<T> w(spec.w.dims, spec.w.strides);
+    Tensor<T> y(spec.y.dims, spec.y.strides);
+    constexpr unsigned int SEED = 4321;
+    x.fillTensorWithRandomValues(-1.0f, 1.0f, SEED);
+    y.fillTensorWithRandomValues(-1.0f, 1.0f, SEED + 1);
+
+    // The cross-correlation dW (reflected for true convolution), accumulated in double.
+    Tensor<float> correlation(spec.w.dims, spec.w.strides);
+    Tensor<float> reference(spec.w.dims, spec.w.strides);
+    CpuFpReferenceConvolution::wgrad<T, float, T, double>(
+        x, correlation, y, shape.stride, shape.dilation, shape.prePadding, shape.postPadding);
+    if(shape.mode == ConvMode::CONVOLUTION)
+    {
+        reflectFilter(correlation, reference);
+    }
+    else
+    {
+        forEachIndex(correlation.dims(), [&](const std::vector<int64_t>& index) {
+            static_cast<float*>(reference.rawHostData())[offsetOf(index, reference.strides())]
+                = static_cast<const float*>(
+                    correlation.rawHostData())[offsetOf(index, correlation.strides())];
+        });
+        reference.markHostModified();
+    }
+    // The dynamic-tolerance model's band (dnn-providers/integration-tests docs/tolerances.md):
+    // K products per dW element, sigma = sqrt(K mean(x^2) mean(dy^2)); output rounding 2 eps |ref|,
+    // summation order c sqrt(K) u32 (sigma (+ |ref| for fp32)), intermediates lambda eps sigma.
+    // fp16: lambda 12 (the model's half value); bf16: the same absolute level, fp16 Winograd's
+    // (12 fp16 eps = 1.5 bf16 eps); fp32: the base model's c 4 (the shipped tiles measured at most
+    // 2.31).
+    const auto meanSquare = [](Tensor<T>& tensor) {
+        double sum = 0.0;
+        size_t count = 0;
+        const auto* data = static_cast<const T*>(tensor.rawHostData());
+        forEachIndex(tensor.dims(), [&](const std::vector<int64_t>& index) {
+            const auto v
+                = static_cast<double>(static_cast<float>(data[offsetOf(index, tensor.strides())]));
+            sum += v * v;
+            ++count;
+        });
+        return sum / static_cast<double>(count);
+    };
+    const double reductions = static_cast<double>(spec.y.dims[0] * spec.y.dims[2] * spec.y.dims[3]);
+    const double sigma = std::sqrt(reductions * meanSquare(x) * meanSquare(y));
+    constexpr bool FP32 = std::is_same_v<T, float>;
+    const double eps = FP32
+                           ? std::ldexp(1.0, -23)
+                           : (std::is_same_v<T, Half> ? std::ldexp(1.0, -10) : std::ldexp(1.0, -7));
+    const double lambda = std::is_same_v<T, Half> ? 12.0 : (FP32 ? 0.0 : 1.5);
+    const double summation = (FP32 ? 4.0 : 1.0) * std::sqrt(reductions) * std::ldexp(1.0, -24);
+    const double minNormal = std::is_same_v<T, Half> ? std::ldexp(1.0, -14) : std::ldexp(1.0, -126);
+
+    const auto& handler = dispatchHandler(pack);
+    int ran = 0;
+    for(const auto& kernel : catalog(ConvDirection::BACKWARD_WEIGHTS))
+    {
+        if(!matchesKernel(pack, fixture.context(), kernel, *bound))
+        {
+            continue;
+        }
+        SCOPED_TRACE(kernel.name);
+        ++ran;
+        const auto prepared = handler.prepare(fixture.context(), *bound, kernel);
+        ASSERT_NE(prepared, nullptr);
+        const size_t workspaceBytes = handler.workspaceBytes(fixture.context(), *bound, kernel);
+        if(wrwCase.workspaceMb > 0)
+        {
+            EXPECT_LE(workspaceBytes, static_cast<size_t>(wrwCase.workspaceMb) << 20);
+        }
+        void* workspace = nullptr;
+        if(workspaceBytes > 0)
+        {
+            ASSERT_EQ(hipMalloc(&workspace, workspaceBytes), hipSuccess);
+            // Stale partials or operands must not leak into the result.
+            ASSERT_EQ(hipMemset(workspace, 0x7f, workspaceBytes), hipSuccess);
+        }
+        w.fillWithSentinelValue();
+        const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers{
+            hipdnnPluginDeviceBuffer_t{X_UID, x.rawDeviceData()},
+            hipdnnPluginDeviceBuffer_t{W_UID, w.rawDeviceData()},
+            hipdnnPluginDeviceBuffer_t{Y_UID, y.rawDeviceData()}};
+        const Handle handle;
+        handler.launch(
+            handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
+        ASSERT_EQ(hipStreamSynchronize(handle.getStream()), hipSuccess);
+        // Deterministic: a second run over a re-poisoned workspace gives the same bits.
+        const size_t dwBytes = static_cast<size_t>(w.elementCount()) * sizeof(T);
+        std::vector<unsigned char> first(dwBytes), second(dwBytes);
+        ASSERT_EQ(hipMemcpy(first.data(), w.rawDeviceData(), dwBytes, hipMemcpyDeviceToHost),
+                  hipSuccess);
+        if(workspace != nullptr)
+        {
+            ASSERT_EQ(hipMemset(workspace, 0x5a, workspaceBytes), hipSuccess);
+        }
+        handler.launch(
+            handle, *prepared, buffers.data(), static_cast<uint32_t>(buffers.size()), workspace);
+        ASSERT_EQ(hipStreamSynchronize(handle.getStream()), hipSuccess);
+        ASSERT_EQ(hipMemcpy(second.data(), w.rawDeviceData(), dwBytes, hipMemcpyDeviceToHost),
+                  hipSuccess);
+        EXPECT_TRUE(first == second) << "two runs differ";
+        if(workspace != nullptr)
+        {
+            ASSERT_EQ(hipFree(workspace), hipSuccess);
+        }
+        w.markDeviceModified();
+
+        const auto* actual = static_cast<const T*>(w.rawHostData());
+        const auto* expected = static_cast<const float*>(reference.rawHostData());
+        int64_t mismatches = 0;
+        forEachIndex(w.dims(), [&](const std::vector<int64_t>& index) {
+            const auto got
+                = static_cast<double>(static_cast<float>(actual[offsetOf(index, w.strides())]));
+            const auto want = static_cast<double>(expected[offsetOf(index, reference.strides())]);
+            const double tolerance = (2.0 * eps + (FP32 ? summation : 0.0)) * std::fabs(want)
+                                     + (summation + lambda * eps) * sigma + minNormal;
+            if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
+            {
+                ADD_FAILURE() << "at linear index " << offsetOf(index, w.strides()) << ": got "
+                              << got << ", want " << want << ", tolerance " << tolerance;
+            }
+        });
+        EXPECT_EQ(mismatches, 0);
+    }
+    EXPECT_GE(ran, 1) << "no catalog config serves this case";
+}
+
+class TestGpuConvWinogradWrw : public ::testing::TestWithParam<WrwCase>
+{
+};
+
+TEST_P(TestGpuConvWinogradWrw, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    runWrwCase<float>(GetParam());
+}
+
+TEST_P(TestGpuConvWinogradWrw, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runWrwCase<Half>(GetParam());
+}
+
+TEST_P(TestGpuConvWinogradWrw, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runWrwCase<BFloat16>(GetParam());
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvWinogradWrw,
+                         ::testing::ValuesIn(wrwCases()),
+                         [](const auto& info) { return info.param.name; });
+
 TEST(TestConvWinogradCatalog, EveryConfigParses)
 {
-    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    for(const auto direction :
+        {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS})
     {
         for(const auto& kernel : catalog(direction))
         {

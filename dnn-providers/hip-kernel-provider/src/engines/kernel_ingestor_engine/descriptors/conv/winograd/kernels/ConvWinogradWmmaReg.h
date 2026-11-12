@@ -67,7 +67,8 @@ __device__ inline unsigned k5WregPack(float lo, float hi)
                                   k5h2{static_cast<_Float16>(lo), static_cast<_Float16>(hi)});
 }
 
-// The other half-wave's value of the same lane position (gfx11 v_permlanex16).
+// The other half-wave's value of the same lane position (gfx11 v_permlanex16). __GFX11__, not a
+// chip list: every gfx11 target, gfx11-generic included, has the instruction.
 __device__ inline unsigned k5SwapHalves(unsigned x)
 {
 #if defined(__GFX11__) && K5_WAVE32

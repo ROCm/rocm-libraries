@@ -21,7 +21,8 @@
     "taps",
     "stages",
     "flat",
-    "halo"
+    "halo",
+    "math"
   ],
   "behavior_notes": [
     "runtime_compilation"

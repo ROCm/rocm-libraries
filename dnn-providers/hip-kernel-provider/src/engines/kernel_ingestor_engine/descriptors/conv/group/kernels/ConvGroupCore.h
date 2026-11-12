@@ -4,6 +4,8 @@
 // Small-group convolution cores (K4): groups of cg <= 16 channels each way, run per 16-channel
 // block on a 16x16 matrix-core atom (the K1 atoms) with the block-diagonal expanded filter, so a
 // block's A fragment (16 output pixels x 16 channels) feeds 16 / cg whole groups at once.
+// Backward weights (k4WrwMma, k4WrwFma, k4WrwReduce) keep the diagonal blocks of the same
+// block products, the reduction over dy positions.
 #pragma once
 
 #include "ConvGroupArgs.h"
@@ -679,6 +681,9 @@ __device__ inline void k4ExpandWide(const K4ExpandArgs& a, int taps)
 // dense per-group expansion. Grid: (groups x output-block tiles) x column tiles x row tiles x
 // output planes x images. Channels need not be multiples of 16; cg is a multiple of the 16-byte
 // vector (a.cg runtime).
+// Three-bf16 (P 3, T bf16, TO float): in and w each hold three parts (a.xps and a.wpt elements
+// apart); each depth tap stages and multiplies the parts one after another into the same
+// accumulators, and the output is written in TO.
 template <class T,
           class Atom,
           int FT,
@@ -689,7 +694,9 @@ template <class T,
           int WP,
           int NBI,
           int NBO,
-          int CF = 0>
+          int CF = 0,
+          class TO = T,
+          int P = 1>
 __device__ void k4ConvMmaWide(const K4Args& a)
 {
     constexpr int WAVE = Atom::WAVE;
@@ -706,7 +713,8 @@ __device__ void k4ConvMmaWide(const K4Args& a)
     constexpr int OCH = 16 * NBO; // output channels a workgroup
     static_assert(Atom::DIM == 16 && 16 % Atom::KA == 0, "16x16 atoms with k-steps dividing 16");
     static_assert(TH % 4 == 0 && NBI % NBO == 0, "whole rows a wave, whole tiles a group");
-    static_assert(CF == 0 || TH * OCH * (TW + 1) <= HR * HC * PITCH, "output tile fits the halo");
+    static_assert(CF == 0 || TH * OCH * (TW + 1) * sizeof(TO) <= HR * HC * PITCH * sizeof(T),
+                  "output tile fits the halo");
     typedef typename K1Raw<16>::type Raw;
     __shared__ __attribute__((aligned(16))) T halo[HR * HC * PITCH];
 
@@ -727,10 +735,10 @@ __device__ void k4ConvMmaWide(const K4Args& a)
     const long long img = b / a.dout;
     const int oh0 = thi * TH, ow0 = twi * TW;
     const int ih0 = oh0 * ST - a.ph, iw0 = ow0 * ST - a.pw;
-    const T* in = static_cast<const T*>(a.in);
-    const T* w = static_cast<const T*>(a.w)
-                 + static_cast<long long>(g * NBI + ot * NBO) * TAPS * NBI * 256;
-    T* out = static_cast<T*>(a.out);
+    const T* in0 = static_cast<const T*>(a.in);
+    const T* w0 = static_cast<const T*>(a.w)
+                  + static_cast<long long>(g * NBI + ot * NBO) * TAPS * NBI * 256;
+    TO* out = static_cast<TO*>(a.out);
     const int tid = threadIdx.x;
     const int lane = tid % WAVE, wave = tid / WAVE;
     const int row = lane % 16;
@@ -748,13 +756,17 @@ __device__ void k4ConvMmaWide(const K4Args& a)
             for(int ob = 0; ob < NBO; ++ob)
                 acc[rr][p][ob] = typename Atom::acc{};
 
-    for(int ft = 0; ft < FT; ++ft)
+    // Depth taps, each its P parts one after another.
+    for(int step = 0; step < FT * P; ++step)
     {
+        const int ft = step / P, part = step % P;
         const int id = od * a.sd - a.pd + ft;
         if(static_cast<unsigned>(id) >= static_cast<unsigned>(a.di))
             continue;
-        if(ft > 0)
+        if(ft > 0 || part > 0)
             __syncthreads();
+        const T* in = P > 1 ? in0 + part * a.xps : in0;
+        const T* w = P > 1 ? w0 + part * a.wpt : w0;
         for(int i = tid; i < HR * HC * VP; i += THREADS)
         {
             int v, hc, hr;
@@ -852,6 +864,7 @@ __device__ void k4ConvMmaWide(const K4Args& a)
     if constexpr(CF != 0)
     {
         constexpr int OP = TW + 1;
+        TO* tile = reinterpret_cast<TO*>(halo);
         __syncthreads();
 #pragma unroll
         for(int rr = 0; rr < RPW; ++rr)
@@ -861,9 +874,9 @@ __device__ void k4ConvMmaWide(const K4Args& a)
                 for(int p = 0; p < WP; ++p)
 #pragma unroll
                     for(int e = 0; e < Atom::ACC; ++e)
-                        halo[((wave + 4 * rr) * OCH + ob * 16 + lane % 16) * OP + p * 16
+                        tile[((wave + 4 * rr) * OCH + ob * 16 + lane % 16) * OP + p * 16
                              + Atom::dRow(lane, e)]
-                            = K1Elem<T>::store(acc[rr][p][ob][e]);
+                            = K1Elem<TO>::store(acc[rr][p][ob][e]);
         __syncthreads();
         const long long outPlanes = static_cast<long long>(a.outD) * a.outH * a.outW;
         for(int i = tid; i < TH * OCH * TW; i += THREADS)
@@ -875,7 +888,7 @@ __device__ void k4ConvMmaWide(const K4Args& a)
                     + (static_cast<long long>(od * a.osd + a.ood) * a.outH + oh * a.osh + a.ooh)
                           * a.outW
                     + (ow0 + ow) * a.osw + a.oow]
-                    = halo[(r * OCH + ch) * OP + ow];
+                    = tile[(r * OCH + ch) * OP + ow];
         }
         return;
     }
@@ -898,7 +911,7 @@ __device__ void k4ConvMmaWide(const K4Args& a)
                         out[((outPlane * a.outH + oh * a.osh + a.ooh) * a.outW + ow * a.osw + a.oow)
                                 * a.c
                             + c0 + gch]
-                            = K1Elem<T>::store(acc[rr][p][ob][e]);
+                            = K1Elem<TO>::store(acc[rr][p][ob][e]);
                 }
         }
 }
@@ -1160,4 +1173,801 @@ __device__ inline void k4Expand(const K4ExpandArgs& a)
                 = own ? static_cast<const unsigned short*>(a.src)[src]
                       : static_cast<unsigned short>(0);
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Backward weights (CONV_GROUP_WRW, K4WrwArgs).
+
+// One staging of NR x NC pixels of plane `plane` of image `img` (a tensor of `planes` x h x w
+// pixels and c channels, packed channels-first (CF) or channels-last), from row r0 and column
+// c0, CH channels from ch0, zero outside the plane: load() issues all of a thread's loads into
+// registers (straight-line, so none waits on another), store() puts them in LDS [pixel][PITCH];
+// a tile's loads are issued before the barrier that ends the previous tile's multiplies.
+// Channels-last: 16-byte loads along the channels. Channels-first: a thread gathers VEC channels
+// of one pixel (one load a channel, consecutive threads consecutive columns) and stores them as
+// one vector.
+// MASKC: channels at or past cmax (counted from ch0) read as zero, never loaded from (wide
+// groups padded to whole blocks).
+template <class T, int CF, int NR, int NC, int CH, int PITCH, int THREADS, bool MASKC = false>
+struct K4WrwStaging
+{
+    typedef typename K1Raw<16>::type Raw;
+    static constexpr int VEC = 16 / static_cast<int>(sizeof(T));
+    static constexpr int VP = CH / VEC; // vectors a pixel
+    static constexpr int N = VP * NR * NC;
+    static constexpr int IT = (N + THREADS - 1) / THREADS;
+    Raw v[IT];
+
+    // The LDS element offset of unit i.
+    __device__ static int slot(int i)
+    {
+        if constexpr(CF != 0)
+            return (i % (NC * NR)) * PITCH + i / (NC * NR) * VEC;
+        else
+            return (i / VP) * PITCH + i % VP * VEC;
+    }
+
+    __device__ void load(const T* src,
+                         long long img,
+                         int plane,
+                         int planes,
+                         int h,
+                         int w,
+                         int c,
+                         int ch0,
+                         int r0,
+                         int c0,
+                         int tid,
+                         int cmax = CH)
+    {
+        const long long hw = static_cast<long long>(h) * w;
+#pragma unroll
+        for(int it = 0; it < IT; ++it)
+        {
+            // Straight-line: a unit past N loads unit 0 (stored by no one), so every load issues
+            // before the first use.
+            const bool live = N % THREADS == 0 || tid + it * THREADS < N;
+            const int i = live ? tid + it * THREADS : 0;
+            int pc, pr, vv;
+            if constexpr(CF != 0)
+            {
+                pc = i % NC;
+                pr = (i / NC) % NR;
+                vv = i / (NC * NR);
+            }
+            else
+            {
+                vv = i % VP;
+                pc = (i / VP) % NC;
+                pr = i / VP / NC;
+            }
+            const int ih = r0 + pr, iw = c0 + pc;
+            // Clamped address, then zero: no per-load branch.
+            const bool ok = static_cast<unsigned>(ih) < static_cast<unsigned>(h)
+                            && static_cast<unsigned>(iw) < static_cast<unsigned>(w);
+            const int sh = ok ? ih : 0, sw = ok ? iw : 0;
+            if constexpr(CF != 0)
+            {
+                const long long image = static_cast<long long>(planes) * hw;
+                const T* at = src + (img * c + ch0) * image + plane * hw
+                              + static_cast<long long>(sh) * w + sw;
+                union
+                {
+                    Raw raw;
+                    T e[VEC];
+                } val;
+#pragma unroll
+                for(int j = 0; j < VEC; ++j)
+                {
+                    if constexpr(MASKC)
+                    {
+                        const bool in = vv * VEC + j < cmax;
+                        const T e = at[(in ? vv * VEC + j : 0) * image];
+                        val.e[j] = in ? e : T{};
+                    }
+                    else
+                    {
+                        val.e[j] = at[(vv * VEC + j) * image];
+                    }
+                }
+                v[it] = ok ? val.raw : Raw{};
+            }
+            else
+            {
+                const bool in = !MASKC || vv * VEC < cmax; // whole vectors: cmax a multiple
+                const long long at
+                    = (((img * planes + plane) * h + sh) * w + sw) * c + ch0 + (in ? vv * VEC : 0);
+                const Raw val = *reinterpret_cast<const Raw*>(src + at);
+                v[it] = ok && in ? val : Raw{};
+            }
+        }
+    }
+
+    __device__ void store(T* dst, int tid) const
+    {
+#pragma unroll
+        for(int it = 0; it < IT; ++it)
+        {
+            const int i = tid + it * THREADS;
+            if(N % THREADS != 0 && i >= N)
+                continue;
+            *reinterpret_cast<Raw*>(dst + slot(i)) = v[it];
+        }
+    }
+};
+
+// Element i of a fragment (a scalar fragment when the atom takes one element a lane).
+template <class Atom, class T>
+__device__ __forceinline__ void k4FragSet(typename Atom::frag& f, int i, T v)
+{
+    if constexpr(Atom::KPL == 1)
+        f = __builtin_bit_cast(typename Atom::elem, v);
+    else
+        f[i] = __builtin_bit_cast(typename Atom::elem, v);
+}
+
+// The LDS reads of a wrw fragment from a channels-last [pixel][channel] tile: a lane's KPL
+// positions of its channel. Element by element (NP = KPL reads of one element); on gfx950 for
+// 16-bit atoms of 4 or 8 positions a lane, by the transpose read ds_read_b64_tr_b16 (NP = KPL / 4
+// reads): in each 16-lane group, source lane s reads 4 channels 4 (s % 4) .. at the group's
+// position s / 4 and the read hands lane j channel j at the 4 positions. Every lane supplies its
+// own address, so the positions may be any pixels (flattened chunks, the zero pixel).
+#if defined(__gfx950__)
+#define K4_WRW_TR 1
+#else
+#define K4_WRW_TR 0
+#endif
+template <class Atom, class T>
+struct K4WrwFrag
+{
+    static constexpr int KPL = Atom::KPL;
+    static constexpr bool TR = K4_WRW_TR && sizeof(T) == 2 && (KPL == 4 || KPL == 8);
+    static constexpr int NP = TR ? KPL / 4 : KPL; // reads (and positions) a lane addresses
+    // The fragment position (0 .. KPL - 1 past the lane's kBase) read i addresses.
+    __device__ static int pos(int lane, int i)
+    {
+        return TR ? 4 * i + (lane % 16) / 4 : i;
+    }
+    // The lane's channel within its 16-channel block.
+    __device__ static int chan(int lane)
+    {
+        return TR ? 4 * (lane % 4) : lane % 16;
+    }
+    // The fragment from element offsets off[i] (pixel offset + block base + chan).
+    __device__ static typename Atom::frag read(const T* sm, const int (&off)[NP])
+    {
+        typename Atom::frag f;
+        if constexpr(TR)
+        {
+#if defined(__gfx950__)
+            typedef short s4 __attribute__((ext_vector_type(4)));
+            typedef __attribute__((address_space(3))) s4 lds_s4;
+            s4 v[NP];
+#pragma unroll
+            for(int i = 0; i < NP; ++i)
+                v[i] = __builtin_amdgcn_ds_read_tr16_b64_v4i16((lds_s4*)(sm + off[i]));
+            if constexpr(NP == 1)
+                f = __builtin_bit_cast(typename Atom::frag, v[0]);
+            else
+                f = __builtin_bit_cast(typename Atom::frag,
+                                       __builtin_shufflevector(v[0], v[1], 0, 1, 2, 3, 4, 5, 6, 7));
+#endif
+        }
+        else
+        {
+#pragma unroll
+            for(int i = 0; i < NP; ++i)
+                k4FragSet<Atom>(f, i, sm[off[i]]);
+        }
+        return f;
+    }
+};
+
+// Matrix-core backward weights. Per 16-channel block the block-diagonal product
+//   D[k][c] += A[k][q] B[c][q], A = dy, B = x at the tap's shift, q the dy positions,
+// keeps the 16 / cg diagonal cg x cg blocks (whole groups) of each 16 x 16 result. A workgroup
+// of 4 waves owns CB channel blocks, one depth tap (ft) and a split's run of tiles; per tile it
+// stages the TH x TW dy positions and the x halo they reach ((TH - 1) ST + R rows x (TW - 1) ST
+// + S columns) channels-last in LDS, then multiplies chunks of KA positions (the tile's positions
+// flattened, so a chunk may span rows): a lane reads its KPL positions element by element, the x
+// address of each its position's halo pixel plus the tap's offset. Positions past the tile's
+// valid rows and columns read a zero pixel in both operands. The tile's global loads are issued
+// before the barrier that ends the previous tile's multiplies. Waves: CB >= 4, CB / 4 blocks a
+// wave; else 4 / CB waves a block, each taking every (4 / CB)-th chunk, their sums added in wave
+// order through LDS at the end. The workgroup writes its split's partial slot.
+template <class T, class Atom, int R, int S, int ST, int TH, int TW, int CB, int CF>
+__device__ void k4WrwMma(const K4WrwArgs& a)
+{
+    constexpr int WAVE = Atom::WAVE;
+    constexpr int THREADS = 4 * WAVE;
+    constexpr int CH = 16 * CB;
+    constexpr int VEC = 16 / static_cast<int>(sizeof(T));
+    constexpr int PITCH = CH + VEC;
+    constexpr int HR = (TH - 1) * ST + R, HC = (TW - 1) * ST + S;
+    constexpr int P = TH * TW;
+    constexpr int KA = Atom::KA, KPL = Atom::KPL;
+    constexpr int NCH = (P + KA - 1) / KA; // chunks a tile
+    constexpr int TAPS = R * S;
+    constexpr int WPB = CB >= 4 ? 1 : 4 / CB; // waves a block
+    constexpr int BPW = CB >= 4 ? CB / 4 : 1; // blocks a wave
+    constexpr int XPIX = HR * HC; // the halo's pixels; then the dy tile's, then one zero pixel
+    constexpr int ZERO = (XPIX + P) * PITCH;
+    // The waves' sums of a block (WPB > 1), one wave a block at a time, TPR taps a round: as many
+    // as the staging's LDS holds (at least one).
+    constexpr int STAGE_BYTES = (XPIX + P + 1) * PITCH * static_cast<int>(sizeof(T));
+    constexpr int TAP_BYTES = CB * Atom::ACC * WAVE * 4;
+    constexpr int TPR = STAGE_BYTES / TAP_BYTES >= TAPS ? TAPS
+                        : STAGE_BYTES / TAP_BYTES > 0   ? STAGE_BYTES / TAP_BYTES
+                                                        : 1;
+    constexpr int RED = WPB > 1 ? TPR * TAP_BYTES : 0;
+    constexpr int SM = (STAGE_BYTES > RED ? STAGE_BYTES : RED) / static_cast<int>(sizeof(T));
+    static_assert(Atom::DIM == 16, "16x16 atoms");
+    static_assert(CB == 1 || CB == 2 || CB % 4 == 0, "whole blocks a wave or waves a block");
+    __shared__ __attribute__((aligned(16))) T sm[SM];
+
+    const int cTiles = a.c / CH;
+    long long b = blockIdx.x;
+    const int cbt = static_cast<int>(b % cTiles);
+    b /= cTiles;
+    const int ft = static_cast<int>(b % a.ft);
+    const long long split = b / a.ft;
+    const long long begin = split * a.tiles / a.splits;
+    const long long end = (split + 1) * a.tiles / a.splits;
+    const T* x = static_cast<const T*>(a.x);
+    const T* dy = static_cast<const T*>(a.dy);
+    const int tid = threadIdx.x;
+    const int lane = tid % WAVE, wave = tid / WAVE;
+    const int c16 = lane % 16;
+    const int kb = Atom::template kBase<KPL>(lane);
+    const int sub = wave % WPB;
+    const int blk0 = wave / WPB * BPW; // the wave's first block within the tile
+
+    for(int i = tid; i < PITCH; i += THREADS)
+        sm[ZERO + i] = T{};
+
+    typename Atom::acc acc[BPW][TAPS];
+#pragma unroll
+    for(int bb = 0; bb < BPW; ++bb)
+#pragma unroll
+        for(int tap = 0; tap < TAPS; ++tap)
+            acc[bb][tap] = typename Atom::acc{};
+
+    // The first tile's coordinates; later tiles step them (no divisions a tile).
+    int twi, thi, od;
+    long long img;
+    {
+        long long t = begin;
+        twi = static_cast<int>(t % a.tilesW);
+        t /= a.tilesW;
+        thi = static_cast<int>(t % a.tilesH);
+        t /= a.tilesH;
+        od = static_cast<int>(t % a.dout);
+        img = t / a.dout;
+    }
+    K4WrwStaging<T, CF, HR, HC, CH, PITCH, THREADS> xs;
+    K4WrwStaging<T, CF, TH, TW, CH, PITCH, THREADS> ys;
+    for(long long ti = begin; ti < end; ++ti)
+    {
+        const int id = od * a.sd - a.pd + ft;
+        const int oh0 = thi * TH, ow0 = twi * TW;
+        const long long tImg = img;
+        const int tOd = od;
+        if(++twi == a.tilesW)
+        {
+            twi = 0;
+            if(++thi == a.tilesH)
+            {
+                thi = 0;
+                if(++od == a.dout)
+                {
+                    od = 0;
+                    ++img;
+                }
+            }
+        }
+        // A plane past the input contributes nothing (uniform across the workgroup).
+        if(static_cast<unsigned>(id) >= static_cast<unsigned>(a.di))
+            continue;
+        // All of the tile's loads, then its LDS stores.
+        xs.load(
+            x, tImg, id, a.di, a.hi, a.wi, a.c, cbt * CH, oh0 * ST - a.ph, ow0 * ST - a.pw, tid);
+        ys.load(dy, tImg, tOd, a.dout, a.ho, a.wo, a.c, cbt * CH, oh0, ow0, tid);
+        __syncthreads(); // the previous tile's reads are done
+        xs.store(sm, tid);
+        ys.store(sm + XPIX * PITCH, tid);
+        __syncthreads();
+        const int vh = a.ho - oh0, vw = a.wo - ow0; // the tile's valid rows and columns
+#pragma unroll
+        for(int jj = 0; jj < (NCH + WPB - 1) / WPB; ++jj)
+        {
+            const int j = jj * WPB + sub;
+            if(NCH % WPB != 0 && j >= NCH)
+                break;
+            typedef K4WrwFrag<Atom, T> F;
+            int dyo[F::NP], xo[F::NP];
+            bool ok[F::NP];
+#pragma unroll
+            for(int i = 0; i < F::NP; ++i)
+            {
+                const int p = j * KA + kb + F::pos(lane, i);
+                const int r = p / TW, q = p % TW;
+                ok[i] = p < P && r < vh && q < vw;
+                dyo[i] = ok[i] ? (XPIX + p) * PITCH : ZERO;
+                xo[i] = (r * ST * HC + q * ST) * PITCH;
+            }
+#pragma unroll
+            for(int bb = 0; bb < BPW; ++bb)
+            {
+                const int cbo = (blk0 + bb) * 16 + F::chan(lane);
+                int o[F::NP];
+#pragma unroll
+                for(int i = 0; i < F::NP; ++i)
+                    o[i] = dyo[i] + cbo;
+                const typename Atom::frag af = F::read(sm, o);
+#pragma unroll
+                for(int fr = 0; fr < R; ++fr)
+#pragma unroll
+                    for(int fs = 0; fs < S; ++fs)
+                    {
+                        const int tapo = (fr * HC + fs) * PITCH;
+#pragma unroll
+                        for(int i = 0; i < F::NP; ++i)
+                            o[i] = (ok[i] ? xo[i] + tapo : ZERO) + cbo;
+                        const typename Atom::frag bf = F::read(sm, o);
+                        acc[bb][fr * S + fs] = Atom::mma(af, bf, acc[bb][fr * S + fs]);
+                    }
+            }
+        }
+    }
+
+    if constexpr(WPB > 1)
+    {
+        // Wave sub 0 of each block adds the others' sums in wave order, TPR taps a round.
+        float* red = reinterpret_cast<float*>(sm);
+        const int blk = wave / WPB;
+#pragma unroll
+        for(int t0 = 0; t0 < TAPS; t0 += TPR)
+#pragma unroll
+            for(int s = 1; s < WPB; ++s)
+            {
+                __syncthreads();
+                if(sub == s)
+#pragma unroll
+                    for(int t = 0; t < TPR && t0 + t < TAPS; ++t)
+#pragma unroll
+                        for(int e = 0; e < Atom::ACC; ++e)
+                            red[((t * CB + blk) * Atom::ACC + e) * WAVE + lane] = acc[0][t0 + t][e];
+                __syncthreads();
+                if(sub == 0)
+#pragma unroll
+                    for(int t = 0; t < TPR && t0 + t < TAPS; ++t)
+#pragma unroll
+                        for(int e = 0; e < Atom::ACC; ++e)
+                            acc[0][t0 + t][e]
+                                += red[((t * CB + blk) * Atom::ACC + e) * WAVE + lane];
+            }
+        if(sub != 0)
+            return;
+    }
+    // The diagonal (in-group) entries into the split's slot: [g][k][c][tap].
+    const int taps = a.ft * TAPS;
+    float* out = a.partial + split * a.partialElems;
+#pragma unroll
+    for(int bb = 0; bb < BPW; ++bb)
+    {
+        const int ch = cbt * CH + (blk0 + bb) * 16; // the block's first channel
+#pragma unroll
+        for(int tap = 0; tap < TAPS; ++tap)
+#pragma unroll
+            for(int e = 0; e < Atom::ACC; ++e)
+            {
+                const int k = Atom::dRow(lane, e);
+                if(k / a.cg == c16 / a.cg)
+                {
+                    const int g = (ch + k) / a.cg;
+                    out[((static_cast<long long>(g) * a.cg + k % a.cg) * a.cg + c16 % a.cg) * taps
+                        + ft * TAPS + tap]
+                        = acc[bb][tap][e];
+                }
+            }
+    }
+}
+
+// Wide-group matrix-core backward weights (16 < cg <= 64, cg a multiple of 8; the catalog ships
+// NBI 2, groups of 24 and 32): a group's cg
+// channels padded to NBI 16-channel blocks (staged zero past cg). A workgroup owns one group's
+// NBO dy blocks (output tile ot of NBI / NBO) against all NBI x blocks, one depth tap and a
+// split's run of tiles; wave w multiplies x block w % NBI against the NBO dy blocks (the tap's B
+// fragment serves all NBO), every (NBI < 4: 4 / NBI)-th chunk, the waves of an x block added in
+// wave order through LDS at the end (NBI 3: the fourth wave idles). Dense per group: every entry
+// of a block product within cg is a dw entry. Same tiles, flattened chunks and zero pixel as
+// k4WrwMma; partials [split][g][k][c][tap].
+template <class T, class Atom, int R, int S, int ST, int TH, int TW, int NBI, int NBO, int CF>
+__device__ void k4WrwMmaWide(const K4WrwArgs& a)
+{
+    constexpr int WAVE = Atom::WAVE;
+    constexpr int THREADS = 4 * WAVE;
+    constexpr int VEC = 16 / static_cast<int>(sizeof(T));
+    constexpr int XCH = 16 * NBI, YCH = 16 * NBO;
+    constexpr int XPITCH = XCH + VEC, YPITCH = YCH + VEC;
+    constexpr int HR = (TH - 1) * ST + R, HC = (TW - 1) * ST + S;
+    constexpr int P = TH * TW;
+    constexpr int KA = Atom::KA, KPL = Atom::KPL;
+    constexpr int NCH = (P + KA - 1) / KA;
+    constexpr int TAPS = R * S;
+    constexpr int WPB = NBI >= 4 ? 1 : (NBI == 3 ? 1 : 4 / NBI); // waves an x block
+    constexpr int XOFF = 0, YOFF = HR * HC * XPITCH; // element offsets of the x halo, dy tile
+    constexpr int ZERO = YOFF + P * YPITCH; // one zero pixel (XPITCH wide)
+    // The x blocks' waves' sums (WPB > 1), TPR taps a round: as many as the staging's LDS holds.
+    constexpr int STAGE_BYTES = (ZERO + XPITCH) * static_cast<int>(sizeof(T));
+    constexpr int TAP_BYTES = NBI * NBO * Atom::ACC * WAVE * 4;
+    constexpr int TPR = STAGE_BYTES / TAP_BYTES >= TAPS ? TAPS
+                        : STAGE_BYTES / TAP_BYTES > 0   ? STAGE_BYTES / TAP_BYTES
+                                                        : 1;
+    constexpr int RED = WPB > 1 ? TPR * TAP_BYTES : 0;
+    constexpr int SM = (STAGE_BYTES > RED ? STAGE_BYTES : RED) / static_cast<int>(sizeof(T));
+    static_assert(Atom::DIM == 16 && NBI >= 2 && NBI <= 4 && NBI % NBO == 0, "wide tiles");
+    __shared__ __attribute__((aligned(16))) T sm[SM];
+
+    const int groups = a.c / a.cg;
+    constexpr int OT = NBI / NBO;
+    long long b = blockIdx.x;
+    const int ot = static_cast<int>(b % OT);
+    b /= OT;
+    const int g = static_cast<int>(b % groups);
+    b /= groups;
+    const int ft = static_cast<int>(b % a.ft);
+    const long long split = b / a.ft;
+    const long long begin = split * a.tiles / a.splits;
+    const long long end = (split + 1) * a.tiles / a.splits;
+    const T* x = static_cast<const T*>(a.x);
+    const T* dy = static_cast<const T*>(a.dy);
+    const int tid = threadIdx.x;
+    const int lane = tid % WAVE, wave = tid / WAVE;
+    const int c16 = lane % 16;
+    const int kb = Atom::template kBase<KPL>(lane);
+    const int ib = wave % NBI, sub = wave / NBI; // the wave's x block; its chunk subset
+    const bool active = NBI != 3 || wave < 3;
+    const int c0 = g * a.cg; // the group's first channel
+    const int k0 = ot * YCH; // the tile's first dy channel within the group
+
+    for(int i = tid; i < XPITCH; i += THREADS)
+        sm[ZERO + i] = T{};
+
+    typename Atom::acc acc[NBO][TAPS];
+#pragma unroll
+    for(int ob = 0; ob < NBO; ++ob)
+#pragma unroll
+        for(int tap = 0; tap < TAPS; ++tap)
+            acc[ob][tap] = typename Atom::acc{};
+
+    int twi, thi, od;
+    long long img;
+    {
+        long long t = begin;
+        twi = static_cast<int>(t % a.tilesW);
+        t /= a.tilesW;
+        thi = static_cast<int>(t % a.tilesH);
+        t /= a.tilesH;
+        od = static_cast<int>(t % a.dout);
+        img = t / a.dout;
+    }
+    K4WrwStaging<T, CF, HR, HC, XCH, XPITCH, THREADS, true> xs;
+    K4WrwStaging<T, CF, TH, TW, YCH, YPITCH, THREADS, true> ys;
+    for(long long ti = begin; ti < end; ++ti)
+    {
+        const int id = od * a.sd - a.pd + ft;
+        const int oh0 = thi * TH, ow0 = twi * TW;
+        const long long tImg = img;
+        const int tOd = od;
+        if(++twi == a.tilesW)
+        {
+            twi = 0;
+            if(++thi == a.tilesH)
+            {
+                thi = 0;
+                if(++od == a.dout)
+                {
+                    od = 0;
+                    ++img;
+                }
+            }
+        }
+        if(static_cast<unsigned>(id) >= static_cast<unsigned>(a.di))
+            continue;
+        xs.load(
+            x, tImg, id, a.di, a.hi, a.wi, a.c, c0, oh0 * ST - a.ph, ow0 * ST - a.pw, tid, a.cg);
+        ys.load(dy, tImg, tOd, a.dout, a.ho, a.wo, a.c, c0 + k0, oh0, ow0, tid, a.cg - k0);
+        __syncthreads();
+        xs.store(sm + XOFF, tid);
+        ys.store(sm + YOFF, tid);
+        __syncthreads();
+        if(!active)
+            continue;
+        const int vh = a.ho - oh0, vw = a.wo - ow0;
+#pragma unroll
+        for(int jj = 0; jj < (NCH + WPB - 1) / WPB; ++jj)
+        {
+            const int j = jj * WPB + sub;
+            if(NCH % WPB != 0 && j >= NCH)
+                break;
+            typedef K4WrwFrag<Atom, T> F;
+            int dyo[F::NP], xo[F::NP];
+            bool ok[F::NP];
+#pragma unroll
+            for(int i = 0; i < F::NP; ++i)
+            {
+                const int p = j * KA + kb + F::pos(lane, i);
+                const int r = p / TW, q = p % TW;
+                ok[i] = p < P && r < vh && q < vw;
+                dyo[i] = ok[i] ? YOFF + p * YPITCH : ZERO;
+                xo[i] = (r * ST * HC + q * ST) * XPITCH;
+            }
+            const int ch = F::chan(lane);
+            int o[F::NP];
+            typename Atom::frag af[NBO];
+#pragma unroll
+            for(int ob = 0; ob < NBO; ++ob)
+            {
+#pragma unroll
+                for(int i = 0; i < F::NP; ++i)
+                    o[i] = dyo[i] + ob * 16 + ch;
+                af[ob] = F::read(sm, o);
+            }
+#pragma unroll
+            for(int fr = 0; fr < R; ++fr)
+#pragma unroll
+                for(int fs = 0; fs < S; ++fs)
+                {
+                    const int tapo = (fr * HC + fs) * XPITCH;
+#pragma unroll
+                    for(int i = 0; i < F::NP; ++i)
+                        o[i] = (ok[i] ? xo[i] + tapo : ZERO) + ib * 16 + ch;
+                    const typename Atom::frag bf = F::read(sm, o);
+#pragma unroll
+                    for(int ob = 0; ob < NBO; ++ob)
+                        acc[ob][fr * S + fs] = Atom::mma(af[ob], bf, acc[ob][fr * S + fs]);
+                }
+        }
+    }
+
+    if constexpr(WPB > 1)
+    {
+        float* red = reinterpret_cast<float*>(sm);
+#pragma unroll
+        for(int t0 = 0; t0 < TAPS; t0 += TPR)
+#pragma unroll
+            for(int s = 1; s < WPB; ++s)
+            {
+                __syncthreads();
+                if(sub == s)
+#pragma unroll
+                    for(int t = 0; t < TPR && t0 + t < TAPS; ++t)
+#pragma unroll
+                        for(int ob = 0; ob < NBO; ++ob)
+#pragma unroll
+                            for(int e = 0; e < Atom::ACC; ++e)
+                                red[(((t * NBI + ib) * NBO + ob) * Atom::ACC + e) * WAVE + lane]
+                                    = acc[ob][t0 + t][e];
+                __syncthreads();
+                if(sub == 0)
+#pragma unroll
+                    for(int t = 0; t < TPR && t0 + t < TAPS; ++t)
+#pragma unroll
+                        for(int ob = 0; ob < NBO; ++ob)
+#pragma unroll
+                            for(int e = 0; e < Atom::ACC; ++e)
+                                acc[ob][t0 + t][e]
+                                    += red[(((t * NBI + ib) * NBO + ob) * Atom::ACC + e) * WAVE
+                                           + lane];
+            }
+        if(sub != 0)
+            return;
+    }
+    if(!active)
+        return;
+    const int taps = a.ft * TAPS;
+    const int c = ib * 16 + c16;
+    float* out
+        = a.partial + split * a.partialElems + static_cast<long long>(g) * a.cg * a.cg * taps;
+#pragma unroll
+    for(int ob = 0; ob < NBO; ++ob)
+#pragma unroll
+        for(int tap = 0; tap < TAPS; ++tap)
+#pragma unroll
+            for(int e = 0; e < Atom::ACC; ++e)
+            {
+                const int k = k0 + ob * 16 + Atom::dRow(lane, e);
+                if(k < a.cg && c < a.cg)
+                    out[(static_cast<long long>(k) * a.cg + c) * taps + ft * TAPS + tap]
+                        = acc[ob][tap][e];
+            }
+}
+
+// FMA backward weights (no matrix cores: fp32 on RDNA, and any element type anywhere): the same
+// grid, tiles, staging and partials as k4WrwMma, without the block-diagonal zeros. 256 threads; a
+// unit is one (output channel k, input channel c) pair of a group among the tile's CB blocks (16
+// CB x CG units, CG the graph's channels a group), owning all R x S taps; 256 / units threads
+// share a unit, each taking every (256 / units)-th row segment of PX dy positions of a tile (a
+// segment within one dy row, TW a multiple of PX) and holding the x row window the segment's
+// taps reach in registers. The threads of a unit are added in order through LDS at the end.
+template <class T, int R, int S, int ST, int TH, int TW, int CB, int CG, int PX, int CF>
+__device__ void k4WrwFma(const K4WrwArgs& a)
+{
+    constexpr int THREADS = 256;
+    constexpr int CH = 16 * CB;
+    constexpr int VEC = 16 / static_cast<int>(sizeof(T));
+    constexpr int PITCH = CH + VEC;
+    constexpr int HR = (TH - 1) * ST + R, HC = (TW - 1) * ST + S;
+    constexpr int P = TH * TW;
+    constexpr int TAPS = R * S;
+    constexpr int UNITS = CH * CG;
+    constexpr int SUBS = THREADS / UNITS; // threads a unit
+    constexpr int SEGS = TH * (TW / PX); // row segments a tile
+    constexpr int WIN = (PX - 1) * ST + S; // x columns a segment's taps reach
+    constexpr int XPIX = HR * HC;
+    constexpr int ZERO = (XPIX + P) * PITCH;
+    constexpr int RED = SUBS > 1 ? THREADS * TAPS : 0;
+    constexpr int STAGE_BYTES = (XPIX + P + 1) * PITCH * static_cast<int>(sizeof(T));
+    constexpr int SM
+        = (STAGE_BYTES > RED * 4 ? STAGE_BYTES : RED * 4) / static_cast<int>(sizeof(T));
+    static_assert(16 % CG == 0 && THREADS % UNITS == 0, "whole groups, whole units a block");
+    static_assert(TW % PX == 0, "whole segments a row");
+    __shared__ __attribute__((aligned(16))) T sm[SM];
+
+    const int cTiles = a.c / CH;
+    long long b = blockIdx.x;
+    const int cbt = static_cast<int>(b % cTiles);
+    b /= cTiles;
+    const int ft = static_cast<int>(b % a.ft);
+    const long long split = b / a.ft;
+    const long long begin = split * a.tiles / a.splits;
+    const long long end = (split + 1) * a.tiles / a.splits;
+    const T* x = static_cast<const T*>(a.x);
+    const T* dy = static_cast<const T*>(a.dy);
+    const int tid = threadIdx.x;
+    const int unit = tid % UNITS, sub = tid / UNITS;
+    const int k = unit / CG, c = unit % CG; // the tile's channel k; c within k's group
+    const int xc = k / CG * CG + c; // the tile's x channel
+
+    for(int i = tid; i < PITCH; i += THREADS)
+        sm[ZERO + i] = T{};
+
+    float acc[TAPS];
+#pragma unroll
+    for(int tap = 0; tap < TAPS; ++tap)
+        acc[tap] = 0.0f;
+
+    int twi, thi, od;
+    long long img;
+    {
+        long long t = begin;
+        twi = static_cast<int>(t % a.tilesW);
+        t /= a.tilesW;
+        thi = static_cast<int>(t % a.tilesH);
+        t /= a.tilesH;
+        od = static_cast<int>(t % a.dout);
+        img = t / a.dout;
+    }
+    K4WrwStaging<T, CF, HR, HC, CH, PITCH, THREADS> xs;
+    K4WrwStaging<T, CF, TH, TW, CH, PITCH, THREADS> ys;
+    for(long long ti = begin; ti < end; ++ti)
+    {
+        const int id = od * a.sd - a.pd + ft;
+        const int oh0 = thi * TH, ow0 = twi * TW;
+        const long long tImg = img;
+        const int tOd = od;
+        if(++twi == a.tilesW)
+        {
+            twi = 0;
+            if(++thi == a.tilesH)
+            {
+                thi = 0;
+                if(++od == a.dout)
+                {
+                    od = 0;
+                    ++img;
+                }
+            }
+        }
+        if(static_cast<unsigned>(id) >= static_cast<unsigned>(a.di))
+            continue;
+        xs.load(
+            x, tImg, id, a.di, a.hi, a.wi, a.c, cbt * CH, oh0 * ST - a.ph, ow0 * ST - a.pw, tid);
+        ys.load(dy, tImg, tOd, a.dout, a.ho, a.wo, a.c, cbt * CH, oh0, ow0, tid);
+        __syncthreads();
+        xs.store(sm, tid);
+        ys.store(sm + XPIX * PITCH, tid);
+        __syncthreads();
+        const int vh = a.ho - oh0, vw = a.wo - ow0;
+        for(int sg = sub; sg < SEGS; sg += SUBS)
+        {
+            const int r = sg / (TW / PX), q0 = sg % (TW / PX) * PX;
+            if(r >= vh || q0 >= vw)
+                continue;
+            // Positions past the valid columns read the zero pixel's dy and skip their taps.
+            float d[PX];
+            bool ok[PX];
+#pragma unroll
+            for(int p = 0; p < PX; ++p)
+            {
+                ok[p] = q0 + p < vw;
+                d[p] = K1Elem<T>::load(sm[(ok[p] ? (XPIX + r * TW + q0 + p) * PITCH : ZERO) + k]);
+            }
+#pragma unroll
+            for(int fr = 0; fr < R; ++fr)
+            {
+                const T* row = sm + ((r * ST + fr) * HC + q0 * ST) * PITCH + xc;
+                float xv[WIN];
+#pragma unroll
+                for(int j = 0; j < WIN; ++j)
+                    xv[j] = K1Elem<T>::load(row[j * PITCH]);
+#pragma unroll
+                for(int p = 0; p < PX; ++p)
+#pragma unroll
+                    for(int fs = 0; fs < S; ++fs)
+                        acc[fr * S + fs] = ok[p] ? fmaf(d[p], xv[p * ST + fs], acc[fr * S + fs])
+                                                 : acc[fr * S + fs];
+            }
+        }
+    }
+
+    if constexpr(SUBS > 1)
+    {
+        // Thread sub 0 of each unit adds the others' sums in order.
+        __syncthreads();
+        float* red = reinterpret_cast<float*>(sm);
+#pragma unroll
+        for(int tap = 0; tap < TAPS; ++tap)
+            red[tap * THREADS + tid] = acc[tap];
+        __syncthreads();
+        if(sub != 0)
+            return;
+        for(int s = 1; s < SUBS; ++s)
+#pragma unroll
+            for(int tap = 0; tap < TAPS; ++tap)
+                acc[tap] += red[tap * THREADS + s * UNITS + unit];
+    }
+    const int taps = a.ft * TAPS;
+    const int g = (cbt * CH + k) / a.cg;
+    float* out = a.partial + split * a.partialElems
+                 + ((static_cast<long long>(g) * a.cg + k % a.cg) * a.cg + c) * taps + ft * TAPS;
+#pragma unroll
+    for(int tap = 0; tap < TAPS; ++tap)
+        out[tap] = acc[tap];
+}
+
+// The partials' fixed-order sum (K4WrwReduceArgs): a block's 256 threads are 256 / G dw
+// elements (in the partials' [g][k][c][tap] order) by G slot groups, G the slot count rounded up
+// to a power of two, at most K4_WRW_REDUCE_GROUPS; group j adds slots j, j + G, ... in order,
+// and the group sums are added in group order through LDS. The association depends only on the
+// slot count, so the result is bitwise reproducible.
+template <class T>
+__device__ inline void k4WrwReduce(const K4WrwReduceArgs& a)
+{
+    __shared__ float part[256];
+    const int G = k4WrwReduceGroups(a.slots), E = 256 / G;
+    const int lane = threadIdx.x % E, grp = threadIdx.x / E;
+    const long long i = static_cast<long long>(blockIdx.x) * E + lane;
+    const bool live = i < a.partialElems;
+    float sum = 0.0f;
+    if(live)
+        for(int sp = grp; sp < a.slots; sp += G)
+            sum += a.partial[sp * a.partialElems + i];
+    part[threadIdx.x] = sum;
+    __syncthreads();
+    if(grp != 0 || !live)
+        return;
+    for(int j = 1; j < G; ++j)
+        sum += part[j * E + lane];
+    const int taps = a.t * a.r * a.s;
+    int tap = static_cast<int>(i % taps);
+    long long rest = i / taps;
+    const int c = static_cast<int>(rest % a.cg);
+    const long long k = rest / a.cg; // over all groups
+    if(a.reflect)
+        tap = taps - 1 - tap;
+    const int ts = tap % a.s, tr = (tap / a.s) % a.r, tt = tap / (a.s * a.r);
+    static_cast<T*>(a.dw)[k * a.sK + c * a.sC + tt * a.sT + tr * a.sR + ts * a.sS]
+        = K1Elem<T>::store(sum);
 }

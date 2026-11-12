@@ -26,17 +26,10 @@
 #else
 #define K1_HAS_MFMA_BF16_1K 0
 #endif
-#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) \
-    || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)
-#define K1_HAS_WMMA11 1
-#else
-#define K1_HAS_WMMA11 0
-#endif
-#if defined(__gfx1200__) || defined(__gfx1201__)
-#define K1_HAS_WMMA12 1
-#else
-#define K1_HAS_WMMA12 0
-#endif
+// RDNA families, not chip lists, so a gfx11-generic / gfx12-generic build keeps its WMMA atoms.
+#include "ConvArchFamily.h"
+#define K1_HAS_WMMA11 HKP_ARCH_GFX11
+#define K1_HAS_WMMA12 HKP_ARCH_GFX12
 
 typedef _Float16 k1_half;
 typedef unsigned short k1_bf16; // bf16 bits
@@ -59,6 +52,20 @@ __device__ inline unsigned short k1FloatToBf(float v)
     }
     u += 0x7fffu + ((u >> 16) & 1u);
     return static_cast<unsigned short>(u >> 16);
+}
+/// Three-bf16's low part of v, given its high part h = k1FloatToBf(v): zero where v - h is not a
+/// number (v infinite), so an infinite operand stays infinite rather than turning into NaN.
+__device__ inline unsigned short k1BfLo(float v, unsigned short h)
+{
+    const float r = v - k1BfToFloat(h);
+    return k1FloatToBf(r == r ? r : 0.0f);
+}
+/// Three-bf16's high part for the cross terms (hi x the other operand's lo): zero for an infinity.
+/// The hi x hi term alone carries an infinity, so inf x b is inf (NaN only where b is 0), as in
+/// fp32; a cross term would add inf x lo, NaN when lo is 0 or of the other sign.
+__device__ inline unsigned short k1BfFinite(unsigned short h)
+{
+    return (h & 0x7fffu) == 0x7f80u ? static_cast<unsigned short>(0) : h;
 }
 
 template <class T>
@@ -150,9 +157,7 @@ typedef long long K1Pos;
 #else
 typedef int K1Pos;
 #endif
-#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) \
-    || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)                      \
-    || defined(__gfx1200__) || defined(__gfx1201__)
+#if HKP_ARCH_GFX11 || HKP_ARCH_GFX12
 #define K1_RSRC_FLAGS 0x31004000
 #elif defined(__gfx1010__) || defined(__gfx1030__) || defined(__gfx1031__) || defined(__gfx1032__)
 #define K1_RSRC_FLAGS 0x31014000
@@ -279,6 +284,30 @@ struct K1AtomMfmaF32 : K1Mfma // v_mfma_f32_16x16x4_f32: gfx908+
     }
 };
 
+/// xf32 operands rounded to nearest-even TF32 (10 mantissa bits) before the MFMA, which itself
+/// would truncate (a bias toward zero); NaN stays NaN (quiet), inf stays inf. As hipBLASLt (#9176)
+/// and NVIDIA's cvt.rna.tf32.f32 do. The xf32 atoms take operands already rounded: the multiply
+/// rounds each fragment once where it loads it (K1Xf32), not at every MFMA that reuses it.
+__device__ inline float k1Tf32(float v)
+{
+    unsigned u = __builtin_bit_cast(unsigned, v);
+    if((u & 0x7f800000u) == 0x7f800000u)
+    {
+        u |= (u & 0x7fffffu) != 0 ? 0x400000u : 0u;
+    }
+    else
+    {
+        u += 0xfffu + ((u >> 13) & 1u);
+    }
+    return __builtin_bit_cast(float, u & 0xffffe000u);
+}
+// Element by element into a new vector: a loop writing a vector's elements was miscompiled
+// (every element took element 0's result).
+__device__ inline k1f<2> k1Tf32(k1f<2> v)
+{
+    return k1f<2>{k1Tf32(v[0]), k1Tf32(v[1])};
+}
+
 struct K1AtomMfmaXf32 : K1Mfma // v_mfma_f32_16x16x8_xf32: gfx942 only
 {
     static constexpr int KA = 8, KPL = 2;
@@ -293,6 +322,18 @@ struct K1AtomMfmaXf32 : K1Mfma // v_mfma_f32_16x16x8_xf32: gfx942 only
         return c;
 #endif
     }
+};
+
+/// Whether @p Atom is an xf32 atom (its fragments rounded to TF32 once loaded).
+template <class Atom>
+struct K1Xf32
+{
+    static constexpr bool value = false;
+};
+template <>
+struct K1Xf32<K1AtomMfmaXf32>
+{
+    static constexpr bool value = true;
 };
 
 struct K1AtomMfmaF16X32 : K1Mfma // v_mfma_f32_16x16x32_f16: gfx950
@@ -415,6 +456,11 @@ K1_MFMA32_ATOM(K1AtomMfma32F32, 2, 1, float, float, K1_HAS_MFMA, K1_CALL_32F32)
 K1_MFMA32_ATOM(K1AtomMfma32Xf32, 4, 2, float, k1f<2>, K1_HAS_XF32, K1_CALL_32XF32)
 K1_MFMA32_ATOM(K1AtomMfma32F16X16, 16, 8, _Float16, k1h<8>, K1_HAS_MFMA950, K1_CALL_32F16X16)
 K1_MFMA32_ATOM(K1AtomMfma32Bf16X16, 16, 8, short, k1s<8>, K1_HAS_MFMA950, K1_CALL_32BF16X16)
+template <>
+struct K1Xf32<K1AtomMfma32Xf32>
+{
+    static constexpr bool value = true;
+};
 
 // gfx11 WMMA (wave32): both half-waves hold all 16 k of the same rows; D rows interleave.
 struct K1Wmma11
@@ -521,6 +567,33 @@ enum K1Math
     K1_MATH_NATIVE = 0,
     K1_MATH_BF16X3 = 1
 };
+
+/// @p f with each bf16 infinity zeroed (k1BfFinite): three-bf16's cross-term high parts.
+template <class Atom>
+__device__ inline typename Atom::frag k1FiniteFrag(typename Atom::frag f)
+{
+    if constexpr(Atom::KPL == 1)
+    {
+        return f;
+    }
+    else
+    {
+        // On whole dwords (two bf16 each): a per-element 16-bit select was miscompiled on gfx12
+        // (fragments rebuilt from the wrong halves).
+        constexpr int N = Atom::KPL / 2;
+        typedef unsigned W __attribute__((ext_vector_type(N)));
+        W w = __builtin_bit_cast(W, f);
+#pragma unroll
+        for(int i = 0; i < N; ++i)
+        {
+            const unsigned v = w[i];
+            const unsigned low = (v & 0x7fffu) == 0x7f80u ? 0x0000ffffu : 0u;
+            const unsigned high = (v & 0x7fff0000u) == 0x7f800000u ? 0xffff0000u : 0u;
+            w[i] = v & ~(low | high);
+        }
+        return __builtin_bit_cast(typename Atom::frag, w);
+    }
+}
 
 template <class Atom, class T>
 __device__ inline typename Atom::frag k1Frag(const T* p)
@@ -1405,7 +1478,7 @@ struct K1Tiles
                 {
                     const unsigned short h = k1FloatToBf(v[e]);
                     d[e * ld] = h;
-                    d[e * ld + plane] = k1FloatToBf(v[e] - k1BfToFloat(h));
+                    d[e * ld + plane] = k1BfLo(v[e], h);
                 }
             }
             else if constexpr(KV == 2)
@@ -1470,7 +1543,7 @@ struct K1Tiles
         {
             const unsigned short he = k1FloatToBf(v[e]);
             h[e] = he;
-            l[e] = k1FloatToBf(v[e] - k1BfToFloat(he));
+            l[e] = k1BfLo(v[e], he);
         }
         *reinterpret_cast<Half*>(d) = h;
         *reinterpret_cast<Half*>(d + plane) = l;
@@ -1900,13 +1973,21 @@ __device__ void k1ConvMma(const K1Args& a)
                     bh[j] = k1Frag<Atom>(p);
                     bl[j] = k1Frag<Atom>(p + BN * LD);
                 }
+                // Cross terms take the high parts with infinities zeroed (k1BfFinite).
+                typename Atom::frag af[FM], bf[FN];
+#pragma unroll
+                for(int i = 0; i < FM; ++i)
+                    af[i] = k1FiniteFrag<Atom>(ah[i]);
+#pragma unroll
+                for(int j = 0; j < FN; ++j)
+                    bf[j] = k1FiniteFrag<Atom>(bh[j]);
 #pragma unroll
                 for(int i = 0; i < FM; ++i)
 #pragma unroll
                     for(int j = 0; j < FN; ++j)
                     {
-                        acc[i][j] = Atom::mma(al[i], bh[j], acc[i][j]);
-                        acc[i][j] = Atom::mma(ah[i], bl[j], acc[i][j]);
+                        acc[i][j] = Atom::mma(al[i], bf[j], acc[i][j]);
+                        acc[i][j] = Atom::mma(af[i], bl[j], acc[i][j]);
                         acc[i][j] = Atom::mma(ah[i], bh[j], acc[i][j]);
                     }
             }
@@ -1919,6 +2000,16 @@ __device__ void k1ConvMma(const K1Args& a)
 #pragma unroll
                 for(int j = 0; j < FN; ++j)
                     bf[j] = k1Frag<Atom>(Bs + (wn * WTN + j * DIM + fragRow) * LD + kk + kb);
+                if constexpr(K1Xf32<Atom>::value)
+                {
+                    // xf32: each fragment rounded once, for every MFMA that reuses it.
+#pragma unroll
+                    for(int i = 0; i < FM; ++i)
+                        af[i] = k1Tf32(af[i]);
+#pragma unroll
+                    for(int j = 0; j < FN; ++j)
+                        bf[j] = k1Tf32(bf[j]);
+                }
 #pragma unroll
                 for(int i = 0; i < FM; ++i)
 #pragma unroll
@@ -2534,3 +2625,45 @@ __device__ inline void k1ReduceSplits(const K1ReduceArgs& a)
         out[i] = K1Elem<T>::store(sum);
     }
 }
+
+// ---------------------------------------------------------------------------------------------
+// Three-bf16 channel split (K1Split3Args): the pre-pass of the engines' TF32 forms. A config
+// compiled with CONV_TF32_SPLIT3 gains the entry point ConvTf32Split; no other config's code
+// changes.
+
+__device__ inline void k1Split3(const K1Split3Tensor& t)
+{
+    if(t.src == nullptr)
+        return;
+    const long long total = t.outer * t.groups * t.cg * t.inner;
+    const long long step = static_cast<long long>(gridDim.x) * blockDim.x;
+    for(long long i = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x; i < total;
+        i += step)
+    {
+        const long long r = i % t.inner;
+        long long rest = i / t.inner;
+        const long long c = rest % t.cg;
+        rest /= t.cg;
+        const long long g = rest % t.groups;
+        const long long o = rest / t.groups;
+        const float v = t.src[i];
+        const unsigned short h = k1FloatToBf(v);
+        const unsigned short l = k1BfLo(v, h);
+        const unsigned short f = k1BfFinite(h);
+        unsigned short* d = t.dst + ((o * t.groups + g) * 3 * t.cg + c) * t.inner + r;
+#pragma unroll
+        for(int part = 0; part < 3; ++part)
+        {
+            const int kind = (t.pattern >> (2 * part)) & 3;
+            d[part * t.cg * t.inner] = kind == 1 ? l : kind == 2 ? f : h;
+        }
+    }
+}
+
+#if defined(CONV_TF32_SPLIT3)
+extern "C" __global__ void __launch_bounds__(256) ConvTf32Split(K1Split3Args a)
+{
+    k1Split3(a.t[0]);
+    k1Split3(a.t[1]);
+}
+#endif

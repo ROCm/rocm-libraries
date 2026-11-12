@@ -182,4 +182,35 @@ TEST(TestConvGemmFormulation, OneByOneThreeDChannelsLast)
     }
 }
 
+TEST(TestConvGemmFormulation, ServesCudnnsComputeTypesPerElementType)
+{
+    using conv_data_objects::DataType;
+    // cuDNN's convolution compute types (cudnn-frontend docs/developer/graph-api.mdx): FLOAT
+    // for every element type, HALF also for HALF; UNSET reads as FLOAT.
+    for(const auto element : {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16})
+    {
+        for(const auto compute : {DataType::UNSET,
+                                  DataType::FLOAT,
+                                  DataType::HALF,
+                                  DataType::BFLOAT16,
+                                  DataType::DOUBLE,
+                                  DataType::INT32,
+                                  DataType::INT8})
+        {
+            ConvGemmShape shape;
+            shape.dataType = element;
+            shape.computeType = compute;
+            const bool served = compute == DataType::UNSET || compute == DataType::FLOAT
+                                || (compute == DataType::HALF && element == DataType::HALF);
+            for(const auto direction : ALL_DIRECTIONS)
+            {
+                const ConvGemmGraph graph(shape, direction);
+                EXPECT_EQ(parseConvProblem(graph.graph(), direction).has_value(), served)
+                    << conv_data_objects::EnumNameDataType(element) << " elements, "
+                    << conv_data_objects::EnumNameDataType(compute) << " compute";
+            }
+        }
+    }
+}
+
 } // namespace

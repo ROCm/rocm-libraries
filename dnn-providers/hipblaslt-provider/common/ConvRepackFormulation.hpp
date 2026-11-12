@@ -60,4 +60,16 @@ std::optional<ConvGemmPlanCalls> convGemmCalls(const ConvProblem& problem,
                                                = MAX_REPACK_WORKSPACE_BYTES,
                                                ColumnLayout layout = ColumnLayout::FOLLOW_Y);
 
+/**
+ * @brief The reduced-precision-reduction plan for @p problem, or nullopt when it has none: the
+ *        plan of the ROCBLAS_CONV_RPR and HIPBLASLT_CONV_RPR engines (ConvReducedPrecision.hpp).
+ *
+ * A 1x1, unit-stride, unpadded fp16 backward weights of several channels-first images, which no
+ * single GEMM reads, as one GEMM per image into dw, each after the first adding to it (beta 1):
+ * MIOpen's GemmWrw1x1_stride1. Each image's sum is exact in fp32, but dw is rounded to fp16 once
+ * per image (cuDNN's REDUCED_PRECISION_REDUCTION) where convGemmCalls rounds once. No workspace.
+ * bf16 has no reduced form: cuDNN serves it with FLOAT compute only.
+ */
+std::optional<ConvGemmPlanCalls> reducedPrecisionGemmCalls(const ConvProblem& problem);
+
 } // namespace hipblaslt_plugin

@@ -261,6 +261,18 @@ TEST(TestConvDepthwiseValuProblem, LaunchDeclinesABlockOverTheLimit)
     EXPECT_FALSE(launchFor(*problem, huge).has_value());
 }
 
+TEST(TestConvDepthwiseValuComputeType, ServesCudnnsComputeTypesPerElementType)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        expectCudnnComputeTypes(
+            depthwise(),
+            {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16},
+            [direction](const ConvShape& s) { return parse(s, direction).has_value(); });
+    }
+}
+
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR && HIPDNN_ENGINE_CONV

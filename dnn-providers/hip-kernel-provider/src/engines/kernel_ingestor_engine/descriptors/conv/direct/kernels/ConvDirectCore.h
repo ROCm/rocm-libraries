@@ -38,6 +38,61 @@
 #include "ConvDirectArgs.h"
 #include "ConvIgemmCore.h"
 
+// Weight fragments by buffer load, the lane's column as the vector offset and the step's
+// wave-uniform offset as the scalar offset, where that measured faster than flat loads (spec
+// lead bench, 2026-11-12): the matrix-core kernel on gfx950 and RDNA, the FMA kernel also on
+// gfx90a. Elsewhere the flat loads stay (gfx90a's matrix-core kernel needs 20 more VGPRs in the
+// buffer form and loses a wave per SIMD; gfx906/908/942 are not measured).
+#if K1_HAS_WMMA11 || K1_HAS_WMMA12 || defined(__gfx950__)
+#define K2_MMA_WBUF 1
+#else
+#define K2_MMA_WBUF 0
+#endif
+#if K2_MMA_WBUF || defined(__gfx90a__)
+#define K2_FMA_WBUF 1
+#else
+#define K2_FMA_WBUF 0
+#endif
+
+/// Buffer load of 2, 4, 8 or 16 bytes at vector offset @p offset plus wave-uniform @p soffset.
+template <class Raw>
+__device__ inline Raw k2BufferLoadS(__amdgpu_buffer_rsrc_t r, unsigned offset, int soffset)
+{
+    static_assert(sizeof(Raw) == 16 || sizeof(Raw) == 8 || sizeof(Raw) == 4 || sizeof(Raw) == 2,
+                  "buffer load size");
+    if constexpr(sizeof(Raw) == 16)
+        return __builtin_amdgcn_raw_buffer_load_b128(r, offset, soffset, 0);
+    else if constexpr(sizeof(Raw) == 8)
+        return __builtin_amdgcn_raw_buffer_load_b64(r, offset, soffset, 0);
+    else if constexpr(sizeof(Raw) == 4)
+        return __builtin_amdgcn_raw_buffer_load_b32(r, offset, soffset, 0);
+    else
+        return __builtin_amdgcn_raw_buffer_load_b16(r, offset, soffset, 0);
+}
+
+/// A matrix fragment by buffer loads (k2BufferLoadS), 16 bytes at a time past 16 bytes.
+template <class Frag>
+__device__ inline Frag k2FragLoadS(__amdgpu_buffer_rsrc_t r, unsigned offset, int soffset)
+{
+    if constexpr(sizeof(Frag) <= 16)
+    {
+        return __builtin_bit_cast(
+            Frag, k2BufferLoadS<typename K1Raw<sizeof(Frag)>::type>(r, offset, soffset));
+    }
+    else
+    {
+        static_assert(sizeof(Frag) % 16 == 0, "fragment of whole 16-byte parts");
+        struct Parts
+        {
+            typename K1Raw<16>::type p[sizeof(Frag) / 16];
+        } parts;
+#pragma unroll
+        for(int i = 0; i < static_cast<int>(sizeof(Frag) / 16); ++i)
+            parts.p[i] = k2BufferLoadS<typename K1Raw<16>::type>(r, offset + 16u * i, soffset);
+        return __builtin_bit_cast(Frag, parts);
+    }
+}
+
 /// Offset of filter element (forward roles) k, c, tap (t, r, s) through the graph's strides;
 /// `mirror` reflects the taps.
 __device__ inline long long
@@ -144,7 +199,7 @@ __device__ void k2SplitReduce(const K2ReduceArgs& a)
 __device__ inline void k2SplitBf16(float v, unsigned short& hi, unsigned short& lo)
 {
     hi = k1FloatToBf(v);
-    lo = k1FloatToBf(v - k1BfToFloat(hi));
+    lo = k1BfLo(v, hi);
 }
 
 /// x' from x: pixels x c fp32 -> pixels x 3c bf16.
@@ -162,7 +217,7 @@ __device__ inline void k2SplitInput(const K2SplitArgs& a)
         k2SplitBf16(x[i], hi, lo);
         unsigned short* d = xs + p * 3 * a.c + ch;
         d[0] = hi;
-        d[a.c] = hi;
+        d[a.c] = k1BfFinite(hi); // pairs with the weights' lo
         d[2 * a.c] = lo;
     }
 }
@@ -198,7 +253,7 @@ __device__ inline void k2FormatWeightsSplit(const K2FormatArgs& f)
                                            : w[k2FilterOffset(f, n, c, tap, mirror)];
                 unsigned short hi, lo;
                 k2SplitBf16(v, hi, lo);
-                out = part == 1 ? lo : hi;
+                out = part == 1 ? lo : part == 2 ? k1BfFinite(hi) : hi; // part 2 pairs with x lo
             }
         }
         wf[i] = out;
@@ -629,6 +684,18 @@ __device__ void k2ConvMma(const K2Args& a)
     const T* wf = static_cast<const T*>(a.w);
     const int rowStep = b.hw * LDC;
     const int tapStride = a.ca * a.kpad * KA; // elements per tap in wf
+#if K2_MMA_WBUF
+    // Register-path weights (BL 0) through a buffer: the lane's column bytes are the vector
+    // offset, fixed for the whole kernel; the step's (chunk, k-step, tap) offset is wave-uniform
+    // and goes in the scalar offset, so a fragment load costs no VALU address arithmetic. The
+    // planner keeps the formatted weights within the buffer's 31-bit range.
+    const __amdgpu_buffer_rsrc_t wRsrc = k1Rsrc(
+        wf, static_cast<long long>(KD) * R * S * tapStride * static_cast<long long>(sizeof(T)));
+    unsigned bByte[FN];
+#pragma unroll
+    for(int j = 0; j < FN; ++j)
+        bByte[j] = static_cast<unsigned>(bCol[j]) * static_cast<unsigned>(sizeof(T));
+#endif
 
     typename Atom::acc acc[SETS][FM][FN];
 #pragma unroll
@@ -654,6 +721,20 @@ __device__ void k2ConvMma(const K2Args& a)
             dt[t] = tapOf(t);
         auto loadB = [&](int q, Frag(&bf)[NB][FN]) {
             const int kk = q / (R * S), rs = q % (R * S);
+#if K2_MMA_WBUF
+            const unsigned wq = static_cast<unsigned>(((cb + cc) * (BC / KA) + kk) * a.kpad * KA
+                                                      + rs * tapStride);
+#pragma unroll
+            for(int t = 0; t < NB; ++t)
+            {
+                const unsigned so
+                    = (wq + static_cast<unsigned>((dt[t] < 0 ? 0 : dt[t]) * R * S * tapStride))
+                      * static_cast<unsigned>(sizeof(T));
+#pragma unroll
+                for(int j = 0; j < FN; ++j)
+                    bf[t][j] = k2FragLoadS<Frag>(wRsrc, bByte[j], static_cast<int>(so));
+            }
+#else
             const T* wq = wf + ((cb + cc) * (BC / KA) + kk) * a.kpad * KA + rs * tapStride;
 #pragma unroll
             for(int t = 0; t < NB; ++t)
@@ -663,6 +744,7 @@ __device__ void k2ConvMma(const K2Args& a)
                 for(int j = 0; j < FN; ++j)
                     bf[t][j] = *reinterpret_cast<const Frag*>(wt + bCol[j]);
             }
+#endif
         };
         // Weight fragments PD steps ahead, in a ring indexed by compile-time step numbers. PD from
         // a ~16-VGPR budget: deep for fp32 (one VGPR per fragment), one step for big fragments.
@@ -980,8 +1062,28 @@ __device__ void k2ConvFma(const K2Args& a)
 
     Loader ld;
     ld.init(a, b, tid);
-    const T* wf = static_cast<const T*>(a.w) + n0 + tn * TN;
+#if K2_FMA_WBUF
+    // Weights through a buffer: the thread's TN columns are the vector offset, fixed for the
+    // whole kernel; a step's (tap, channel) position is a wave-uniform element offset of
+    // [tap][c][kpad] and goes in the scalar offset (no per-load address arithmetic).
+    typedef int WPos;
+    const WPos wf = 0;
     const int tapStride = a.ca * a.kpad;
+    const __amdgpu_buffer_rsrc_t wRsrc = k1Rsrc(
+        a.w, static_cast<long long>(KD) * R * S * tapStride * static_cast<long long>(sizeof(T)));
+    const unsigned wLane = static_cast<unsigned>(n0 + tn * TN) * static_cast<unsigned>(sizeof(T));
+    auto wLoad = [&](WPos e, int q) {
+        return k2BufferLoadS<Raw>(wRsrc,
+                                  wLane + static_cast<unsigned>(q * SV * sizeof(T)),
+                                  static_cast<int>(static_cast<unsigned>(e) * sizeof(T)));
+    };
+#else
+    // Weights by flat loads: a step's position is a pointer to the thread's TN columns.
+    typedef const T* WPos;
+    WPos wf = static_cast<const T*>(a.w) + n0 + tn * TN;
+    const int tapStride = a.ca * a.kpad;
+    auto wLoad = [&](WPos p, int q) { return *reinterpret_cast<const Raw*>(p + q * SV); };
+#endif
 
     float acc[SETS][TM][TN];
 #pragma unroll
@@ -999,7 +1101,7 @@ __device__ void k2ConvFma(const K2Args& a)
 #pragma unroll 2
         for(int c = 0; c < BC; ++c)
         {
-            const T* wc = wf + (cc * BC + c) * a.kpad;
+            const WPos wc = wf + (cc * BC + c) * a.kpad;
 #pragma unroll
             for(int r = 0; r < R; ++r)
             {
@@ -1013,12 +1115,12 @@ __device__ void k2ConvFma(const K2Args& a)
             }
         }
     };
-    auto fmaInto = [&](float(&ac)[TM][TN], const float(&av)[TM + S - 1], int s, const T* wt) {
+    auto fmaInto = [&](float(&ac)[TM][TN], const float(&av)[TM + S - 1], int s, WPos wt) {
         float bv[TN];
 #pragma unroll
         for(int q = 0; q < TN / SV; ++q)
         {
-            const Raw raw = *reinterpret_cast<const Raw*>(wt + q * SV);
+            const Raw raw = wLoad(wt, q);
             const T* e = reinterpret_cast<const T*>(&raw);
 #pragma unroll
             for(int v = 0; v < SV; ++v)
@@ -1038,15 +1140,15 @@ __device__ void k2ConvFma(const K2Args& a)
         constexpr int CPI = R % 2 ? 2 : 1;
         static_assert(BC % CPI == 0, "BC");
         const float* halo = lds + stage * STAGE + aBase;
-        const T* wt = wf + t0 * R * S * tapStride + cc * BC * a.kpad;
+        const WPos wt = wf + t0 * R * S * tapStride + cc * BC * a.kpad;
         Raw wr[2][S][TN / SV];
         auto loadW = [&](int c, int r, Raw(&w)[S][TN / SV]) {
-            const T* wc = wt + c * a.kpad + r * S * tapStride;
+            const WPos wc = wt + c * a.kpad + r * S * tapStride;
 #pragma unroll
             for(int s = 0; s < S; ++s)
 #pragma unroll
                 for(int q = 0; q < TN / SV; ++q)
-                    w[s][q] = *reinterpret_cast<const Raw*>(wc + s * tapStride + q * SV);
+                    w[s][q] = wLoad(wc + s * tapStride, q);
         };
         loadW(0, 0, wr[0]);
         pf();
@@ -1097,7 +1199,7 @@ __device__ void k2ConvFma(const K2Args& a)
 #pragma unroll
         for(int t = 0; t < KD; ++t)
             act[t] = jj - t >= 0 && jj - t < b.dsEff;
-        chunk(stage, cc, [&](const float(&av)[TM + S - 1], int s, const T* w0) {
+        chunk(stage, cc, [&](const float(&av)[TM + S - 1], int s, WPos w0) {
 #pragma unroll
             for(int t = 0; t < KD; ++t)
                 if(act[t])
@@ -1113,7 +1215,7 @@ __device__ void k2ConvFma(const K2Args& a)
         {
             pf();
             const int off = t * R * S * tapStride;
-            chunk(stage, cc, [&](const float(&av)[TM + S - 1], int s, const T* w0) {
+            chunk(stage, cc, [&](const float(&av)[TM + S - 1], int s, WPos w0) {
                 fmaInto(acc[0], av, s, w0 + off);
             });
         }

@@ -134,7 +134,16 @@ std::optional<Config> configOf(const hipdnn_plugin_sdk::ingestor::KernelDefiniti
 /// "any", the exact architecture, or its family ("gfx11", "gfx12").
 bool shipsTo(std::string_view archs, std::string_view gcnArchName);
 
-/// Whether the device runs @p config: its atom exists there and its ship list names it.
+/// LDS per workgroup on @p gcnArchName: 160 KiB on CDNA4 (gfx950), 64 KiB on every other family.
+int64_t ldsLimitOf(std::string_view gcnArchName);
+
+/// LDS a rows config's kernel declares: two halo stages of (wp pw + r - 1) x (16 wq + s - 1)
+/// pixels x bc channels of the atom's operand (ConvDirectRows.h; the staged epilogue reuses a
+/// stage). 0 for a config of another kind.
+int64_t rowsLdsBytes(const Config& config);
+
+/// Whether the device runs @p config: its atom exists there, its ship list names it, and (rows)
+/// its halo stages fit the device's LDS.
 bool configRunsOn(const Config& config, std::string_view gcnArchName);
 
 /// How a config runs a problem: the tile, the split, the launch grid and the workspace.
@@ -160,7 +169,7 @@ struct Plan
  * CUs on gfx9, WGPs on gfx10+); the per-unit block targets below are in that unit.
  *
  * A rows config has a fixed tile (wp pw rows x 16 wq columns) and launches at most one block per
- * compute unit, each walking its share of the tiles (rows kernels hold ~153 KiB of LDS).
+ * compute unit, each walking its share of the tiles (rowsLdsBytes: up to ~153 KiB on gfx950).
  *
  * The tile is th x tw output pixels (tw a multiple of the FMA run length) of ds planes, chosen to
  * minimize padded pixel slots plus halo loads within the config's halo bound; depth is split

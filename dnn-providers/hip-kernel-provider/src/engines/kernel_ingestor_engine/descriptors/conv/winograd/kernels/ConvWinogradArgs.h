@@ -62,6 +62,31 @@ struct K5GemmArgs
     long long sa, sb, sc;
 };
 
+/// Backward weights (ConvWinogradWrw.h), F(3,r): x (N, C, HI, WI) and dy (N, K, HO, WO), both
+/// packed NCHW (other layouts staged), into dw (K, C/G, 3, 3) at any strides; 3x3 stride 1
+/// correlation with top/left padding (ph, pw).
+struct K5WrwArgs
+{
+    const void* x;
+    const void* dy;
+    void* dw;
+    void* u; // workspace: transformed dy, [g][p][K/G][ldt]
+    void* v; // workspace: transformed x, [g][p][C/G][ldt]
+    float* part; // workspace: fp32 GEMM partials, [split][g][p][K/G][C/G]
+    int n, groups;
+    int c, k; // channels over all groups
+    int hi, wi, ho, wo;
+    int ph, pw;
+    int th, tw; // dy tiles per image along H and W (ceil(HO / r), ceil(WO / r))
+    int tiles; // n * th * tw: the slice's tiles
+    int ldt; // tile stride of U and V: tiles rounded up to K5W_LPAD (zero tiles past `tiles`)
+    int flip; // nonzero: true convolution, dw is stored reflected
+    int splits; // GEMM splits over the tiles
+    int splitTiles; // tiles per split, a multiple of K5W_LPAD
+    int accumulate; // GEMM: add onto the partials (batch slices after the first)
+    long long dwStrides[4]; // (k, c, r, s) element strides of dw
+};
+
 /// A strided copy of up to K5_COPY_RANK axes, for staging an operand in or out of the workspace.
 struct K5CopyArgs
 {

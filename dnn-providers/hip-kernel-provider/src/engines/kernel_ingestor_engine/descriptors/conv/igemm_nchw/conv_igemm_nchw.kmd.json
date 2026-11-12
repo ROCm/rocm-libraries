@@ -74,6 +74,10 @@
     {
       "name": "halo",
       "type": "int"
+    },
+    {
+      "name": "math",
+      "type": "int"
     }
   ]
 }

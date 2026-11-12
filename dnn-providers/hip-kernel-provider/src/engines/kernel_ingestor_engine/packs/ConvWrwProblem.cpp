@@ -9,7 +9,9 @@
 #include "engines/kernel_ingestor_engine/descriptors/conv/wrw/kernels/ConvWrwGeom.h"
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
+#include <iterator>
 #include <limits>
 #include <stdexcept>
 #include <utility>
@@ -40,6 +42,12 @@ constexpr int64_t MAX_PASSES = 32;
 constexpr int64_t MAX_PACK_PASSES = 64;
 /// Positions past an output row a block's chunk may reach (bq at most 512).
 constexpr int64_t CHUNK_MARGIN = 512;
+/// The generic loop declines filters of at most this many taps dilated at least this far.
+constexpr int64_t GENERIC_SPARSE_MAX_TAPS = 9;
+constexpr int64_t GENERIC_SPARSE_MIN_DILATION = 6;
+/// The generic FMA form declines fewer input channels a group, or this width stride and past.
+constexpr int64_t GENERIC_FMA_MIN_CHANNELS = 8;
+constexpr int64_t GENERIC_FMA_MAX_STRIDE = 4;
 /// The reduce: 256 threads, 64 four-channel quads of dw per block.
 constexpr int64_t REDUCE_QUADS_PER_BLOCK = 64;
 /// The most splits the row reduce takes (measured on gfx942: rows win at 1 and 2 splits, tie
@@ -68,6 +76,31 @@ bool packedInOrder(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
         expected *= extents[axis];
     }
     return true;
+}
+
+/// The elements one image (n fixed) of an operand of @p extents spans through @p strides (non-
+/// negative, as the base parse admits them): 1 + the sum over the other axes of (extent - 1) x
+/// stride. nullopt when the sum overflows.
+std::optional<int64_t> imageSpan(const long long (&strides)[CONV_NAIVE_TENSOR_DIMS],
+                                 const std::array<long long, CONV_NAIVE_TENSOR_DIMS>& extents)
+{
+    int64_t span = 1;
+    for(size_t axis = 1; axis < CONV_NAIVE_TENSOR_DIMS; ++axis)
+    {
+        // An axis of extent 1, or of stride 0, reaches nothing (checkedMultiply takes positive
+        // factors only).
+        if(extents[axis] == 1 || strides[axis] == 0)
+        {
+            continue;
+        }
+        const auto reach = pack_features::checkedMultiply(extents[axis] - 1, strides[axis]);
+        if(!reach.has_value() || *reach > std::numeric_limits<int64_t>::max() - span)
+        {
+            return std::nullopt;
+        }
+        span += *reach;
+    }
+    return span;
 }
 
 constexpr std::array<size_t, CONV_NAIVE_TENSOR_DIMS> CHANNELS_FIRST_ORDER{0, 1, 2, 3, 4};
@@ -132,7 +165,8 @@ std::optional<WrwProblem> parseWrwProblem(const hipdnn_plugin_sdk::ingestor::Mat
     }
     const auto& a = base->args;
     const long long cg = a.c / a.groups;
-    // x and dy: both packed channels-first or both packed channels-last.
+    // x and dy: both packed channels-first or both packed channels-last (every loop), or any
+    // strides (the generic loop).
     const std::array<long long, CONV_NAIVE_TENSOR_DIMS> xExtents{
         a.n, a.c, a.inSpatial[0], a.inSpatial[1], a.inSpatial[2]};
     const std::array<long long, CONV_NAIVE_TENSOR_DIMS> yExtents{
@@ -143,7 +177,10 @@ std::optional<WrwProblem> parseWrwProblem(const hipdnn_plugin_sdk::ingestor::Mat
                                && packedInOrder(a.yStrides, yExtents, CHANNELS_FIRST_ORDER);
     const bool channelsLast = packedInOrder(a.xStrides, xExtents, CHANNELS_LAST_ORDER)
                               && packedInOrder(a.yStrides, yExtents, CHANNELS_LAST_ORDER);
-    if(!channelsFirst && !channelsLast)
+    // Otherwise (the generic loop only) any positive strides: an image spans its strides' reach.
+    const auto xSpan = imageSpan(a.xStrides, xExtents);
+    const auto ySpan = imageSpan(a.yStrides, yExtents);
+    if(!xSpan.has_value() || !ySpan.has_value())
     {
         return std::nullopt;
     }
@@ -178,15 +215,32 @@ std::optional<WrwProblem> parseWrwProblem(const hipdnn_plugin_sdk::ingestor::Mat
     {
         return std::nullopt;
     }
-    // One image of x and of dy is one 32-bit-addressed buffer.
+    // One image of x and of dy is one 32-bit-addressed buffer; or (channels-first, block-based
+    // buffers) each channel plane is, and a block's buffers span its channel planes.
     const auto xImage
         = pack_features::checkedProduct({a.c, a.inSpatial[0], a.inSpatial[1], a.inSpatial[2]});
     const auto yImage
         = pack_features::checkedProduct({a.k, a.outSpatial[0], a.outSpatial[1], a.outSpatial[2]});
-    if(!xImage.has_value() || !yImage.has_value() || *xImage > INT_LIMIT / elementBytes
-       || *yImage > INT_LIMIT / elementBytes)
+    if(!xImage.has_value() || !yImage.has_value())
     {
         return std::nullopt;
+    }
+    // An image whose span passes the 32-bit buffer range: only the block-based buffer configs
+    // (pb 1) serve it, each with its own window gate.
+    const bool largeImage = *xSpan > INT_LIMIT / elementBytes || *ySpan > INT_LIMIT / elementBytes;
+    // Unit channel strides, every other stride (of an axis past 1) whole 16-byte vectors, and
+    // channels per group whole vectors: the generic loop's channel-vector loads.
+    const long long v = 16 / elementBytes;
+    const long long kg = a.k / a.groups;
+    bool vectorChannels = a.xStrides[1] == 1 && a.yStrides[1] == 1 && cg % v == 0 && kg % v == 0;
+    for(size_t axis = 0; axis < CONV_NAIVE_TENSOR_DIMS; ++axis)
+    {
+        if(axis != 1
+           && ((xExtents[axis] != 1 && a.xStrides[axis] % v != 0)
+               || (yExtents[axis] != 1 && a.yStrides[axis] % v != 0)))
+        {
+            vectorChannels = false;
+        }
     }
     WrwProblem problem;
     problem.elementBytes = elementBytes;
@@ -194,6 +248,10 @@ std::optional<WrwProblem> parseWrwProblem(const hipdnn_plugin_sdk::ingestor::Mat
     problem.channelsLast = channelsLast;
     problem.filterChannelsLast = !filterChannelsFirst;
     problem.taps = *taps;
+    problem.largeImage = largeImage;
+    problem.vectorChannels = vectorChannels;
+    problem.xSpan = *xSpan;
+    problem.ySpan = *ySpan;
     problem.xUid = base->operands.x;
     problem.dyUid = base->operands.y;
     problem.dwUid = base->operands.w;
@@ -271,6 +329,32 @@ int64_t ldsBytesOf(const WrwConfig& config, int elementBytes)
 int64_t loadPassesOf(const WrwConfig& config, int elementBytes, int64_t wave)
 {
     const int64_t vec = config.vec;
+    if(config.loop == LOOP_GENERIC)
+    {
+        // k3WrwGeneric's loads a thread holds: channels-first, a position's bk and fr bc channel
+        // rows over threads / bq rows a pass; channels-last, units of vec channels at kw
+        // positions (one 32-bit LDS word), kw loads each.
+        // (The FMA form: tk x tc channels a thread.)
+        const int64_t threads = config.tk > 0 && config.tc > 0
+                                    ? (config.bk / config.tk) * (config.bc / config.tc)
+                                    : config.wk * config.wc * wave;
+        if(threads < 1 || config.bq < 1 || vec < 1 || threads % config.bq != 0)
+        {
+            return std::numeric_limits<int64_t>::max();
+        }
+        if(config.layout == LAYOUT_CHANNELS_FIRST)
+        {
+            const int64_t rows = threads / config.bq;
+            return divUp(config.bk, rows) + divUp(config.fr * config.bc, rows);
+        }
+        const int64_t kw = 4 / elementBytes;
+        const int64_t words = divUp(config.bq, kw);
+        // dw > 0: one window of bq + dw positions for every tap.
+        const int64_t xUnits = config.dw > 0
+                                   ? divUp(config.bc, vec) * divUp(config.bq + config.dw, kw)
+                                   : config.fr * divUp(config.bc, vec) * words;
+        return (divUp(divUp(config.bk, vec) * words, threads) + divUp(xUnits, threads)) * kw;
+    }
     if(config.loop == LOOP_DIRECT)
     {
         // The x and dy rounds of a row over an item's 8 / wq waves (k3dLoads).
@@ -369,6 +453,111 @@ int64_t loadPassesOf(const WrwConfig& config, int elementBytes, int64_t wave)
     const int64_t bUnits
         = cf ? rows * config.bc * nbv : rows * config.sw * (ph / kv) * (config.bc / vec);
     return std::max(divUp(aUnits, threads), divUp(bUnits, threads));
+}
+
+std::optional<bool>
+    specServes(const WrwProblem& problem, std::string_view key, std::string_view gcnArchName)
+{
+    // "<atom_id><kind><layout>.<s>.<sw>.<dw>.<fr>"
+    size_t at = 0;
+    const auto readInt = [&](int64_t& value) {
+        const auto [end, ec] = std::from_chars(key.data() + at, key.data() + key.size(), value);
+        if(ec != std::errc() || end == key.data() + at)
+        {
+            return false;
+        }
+        at = static_cast<size_t>(end - key.data());
+        return true;
+    };
+    const auto readDotInt = [&](int64_t& value) {
+        if(at >= key.size() || key[at] != '.')
+        {
+            return false;
+        }
+        ++at;
+        return readInt(value);
+    };
+    int64_t atomId = -1;
+    int64_t layout = -1;
+    int64_t s = 0;
+    int64_t sw = 0;
+    int64_t dw = 0;
+    int64_t fr = -1;
+    if(!readInt(atomId) || atomId < 0 || atomId >= static_cast<int64_t>(ATOMS.size())
+       || at >= key.size())
+    {
+        return std::nullopt;
+    }
+    // Lower case r, p, c: the block-based buffer (pb) forms of R, P, C. F, S, Q: the FMA loops
+    // (the "fma" atom alone): output rows of vectors, of scalar units, the FMA ring.
+    const char letter = key[at++];
+    const bool blockBuffers = letter == 'r' || letter == 'p' || letter == 'c';
+    const char kind = blockBuffers ? static_cast<char>(letter - 'a' + 'A') : letter;
+    const bool fmaKind = kind == 'F' || kind == 'S' || kind == 'Q';
+    const bool ring = kind == 'P' || kind == 'U' || kind == 'G' || kind == 'D' || kind == 'Q';
+    const bool fmaAtom = atomId == static_cast<int64_t>(ATOMS.size()) - 1;
+    if((kind != 'R' && kind != 'C' && kind != 'F' && kind != 'S' && !ring) || fmaKind != fmaAtom
+       || !readInt(layout) || layout < 0 || layout > 2 || !readDotInt(s) || !readDotInt(sw)
+       || !readDotInt(dw) || !readDotInt(fr) || at != key.size() || s < 1 || sw < 1 || dw < 1
+       || (ring ? fr < 1 : fr != 0))
+    {
+        return std::nullopt;
+    }
+    const std::string_view atom = ATOMS[static_cast<size_t>(atomId)];
+    const auto& a = problem.base.args;
+    const bool gfx950 = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName) == "gfx950";
+    const auto element = conv_igemm::dataElement(problem.base.dataType);
+    // The FMA loops take fp32 everywhere and 16-bit only where no matrix atom takes it.
+    if(!conv_igemm::atomRunsOn(atom, gcnArchName)
+       || (fmaAtom ? element != "f32" && runsMatrixAtomFor(element, gcnArchName)
+                   : conv_igemm::atomElement(atom) != element)
+       || ((kind == 'G' || kind == 'D' || layout == LAYOUT_CHANNELS_LAST_TR) && !gfx950))
+    {
+        return false;
+    }
+    const int64_t vec = 16 / problem.elementBytes;
+    const int64_t kg = a.k / a.groups;
+    const int64_t cg = a.c / a.groups;
+    if((layout == LAYOUT_CHANNELS_FIRST ? !problem.channelsFirst : !problem.channelsLast)
+       || (layout != LAYOUT_CHANNELS_FIRST && kind != 'S'
+           && ((kind != 'U' && kg % vec != 0) || (kind != 'C' && cg % vec != 0)))
+       || problem.largeImage != blockBuffers || s != a.filter[2] || sw != a.stride[2]
+       || dw != a.dilation[2])
+    {
+        return false;
+    }
+    // The FMA loops' vectors: channels-first rows of x and dy whole vectors.
+    if((kind == 'F' || kind == 'Q') && layout == LAYOUT_CHANNELS_FIRST
+       && (a.inSpatial[2] % vec != 0 || a.outSpatial[2] % vec != 0))
+    {
+        return false;
+    }
+    // Block-based buffers: channels-first, each channel plane of x and dy within the range.
+    if(blockBuffers
+       && (layout != LAYOUT_CHANNELS_FIRST
+           || a.inSpatial[0] * a.inSpatial[1] * a.inSpatial[2] > INT_LIMIT / problem.elementBytes
+           || a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2]
+                  > INT_LIMIT / problem.elementBytes))
+    {
+        return false;
+    }
+    const bool wholeHeight = a.stride[1] == 1 && fr == a.filter[1];
+    switch(kind)
+    {
+    case 'C':
+        return cg <= 16;
+    case 'P':
+    case 'U':
+        // Or height phases (unit height dilation): ceil(filter height / sh) rows each.
+        return wholeHeight || (a.dilation[1] == 1 && fr == divUp(a.filter[1], a.stride[1]));
+    case 'G':
+    case 'Q':
+        return wholeHeight;
+    case 'D':
+        return wholeHeight && (a.dilation[1] == 1 || a.filter[1] == 1);
+    default: // 'R'
+        return true;
+    }
 }
 
 int64_t ldsLimitOf(std::string_view gcnArchName)
@@ -477,6 +666,56 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
                                       const WrwConfig& config,
                                       const hipdnn_plugin_sdk::ingestor::DeviceProperties& device)
 {
+    if(config.math != 0)
+    {
+        // Three-bf16: the bf16 config on 3N images of split x and dy (x hi dy hi + x hi dy lo +
+        // x lo dy hi), partials and reduce as ever (the reduce writes fp32 dw). TF32 permission
+        // only, fp32 graphs only; the direct dw store would write bf16, so dws 0. The split
+        // copies x and dy whole, images outermost, so both must be packed (channels-first or
+        // channels-last); not the generic tier (loop 8) or the block-based buffer forms (pb).
+        if(config.math != 1 || problem.base.dataType != data_objects::DataType::FLOAT
+           || !conv_igemm::tf32Permitted() || conv_igemm::atomElement(config.atom) != "bf16"
+           || config.dws != 0 || config.loop == LOOP_GENERIC || config.pb != 0
+           || !(problem.channelsFirst || problem.channelsLast)
+           || problem.base.args.n * 3 > INT_LIMIT || !threeBf16Pays(problem, device.gcnArchName))
+        {
+            return std::nullopt;
+        }
+        WrwProblem split = problem;
+        split.base.dataType = data_objects::DataType::BFLOAT16;
+        split.elementBytes = 2;
+        split.base.args.n = problem.base.args.n * 3;
+        WrwConfig plain = config;
+        plain.math = 0;
+        auto launch = wrwLaunchFor(split, plain, device);
+        if(!launch.has_value())
+        {
+            return std::nullopt;
+        }
+        const auto& a = problem.base.args;
+        const auto xElems = pack_features::checkedProduct(
+            {a.n, a.c, a.inSpatial[0], a.inSpatial[1], a.inSpatial[2]});
+        const auto yElems = pack_features::checkedProduct(
+            {a.n, a.k, a.outSpatial[0], a.outSpatial[1], a.outSpatial[2]});
+        if(!xElems.has_value() || !yElems.has_value())
+        {
+            return std::nullopt;
+        }
+        // xs (3 x xElems bf16), ys (3 x yElems bf16), each from a 256-byte boundary.
+        const auto align = [](int64_t bytes) { return (bytes + 255) / 256 * 256; };
+        const int64_t xsBytes = align(*xElems * 3 * 2);
+        const int64_t splitBytes = xsBytes + align(*yElems * 3 * 2);
+        launch->split = true;
+        launch->splitYOffset = static_cast<size_t>(xsBytes);
+        launch->splitBytes = static_cast<size_t>(splitBytes);
+        launch->splitArgs.xElems = *xElems;
+        launch->splitArgs.yElems = *yElems;
+        launch->splitGrid = static_cast<unsigned int>(
+            std::min<int64_t>(divUp(std::max(*xElems, *yElems), 256), int64_t{1} << 16));
+        launch->workspaceBytes += static_cast<size_t>(splitBytes);
+        return launch;
+    }
+
     // The atom: known, its id, on this device, taking the graph's element type. "fma" is the
     // FMA ring's, which takes fp32 only (16-bit runs on the matrix cores everywhere).
     const auto atomId = atomIdOf(config.atom);
@@ -485,11 +724,15 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         return std::nullopt;
     }
-    const bool fma = config.loop == LOOP_RING_FMA || config.loop == LOOP_ROWS_FMA;
+    const bool generic = config.loop == LOOP_GENERIC;
+    // The generic loop's FMA form: the "fma" atom (thread tiles tk x tc).
+    const bool genericFma = generic && info->wave == 0;
+    const bool fma = config.loop == LOOP_RING_FMA || config.loop == LOOP_ROWS_FMA || genericFma;
     const bool direct = config.loop == LOOP_DIRECT;
     const bool smallc = config.loop == LOOP_ROWS_SMALLC;
     const bool packed = config.loop == LOOP_ROWS_PACKED;
-    const bool rows = config.loop == LOOP_ROWS || config.loop == LOOP_ROWS_FMA || smallc || packed;
+    const bool rows
+        = config.loop == LOOP_ROWS || config.loop == LOOP_ROWS_FMA || smallc || packed || generic;
     if(fma != (info->wave == 0))
     {
         return std::nullopt;
@@ -498,8 +741,10 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     const auto element = conv_igemm::dataElement(problem.base.dataType);
     // The FMA loops take fp32 everywhere, and 16-bit (accumulating in fp32) only where no
     // matrix atom takes it (gfx906, gfx900): elsewhere they would only add slow candidates.
+    // The generic FMA form only where no matrix atom takes the element (fp32 on RDNA): the
+    // matrix generic configs serve the rest.
     if(!conv_igemm::atomRunsOn(config.atom, arch)
-       || (fma ? element != "f32" && runsMatrixAtomFor(element, arch)
+       || (fma ? (element != "f32" || genericFma) && runsMatrixAtomFor(element, arch)
                : conv_igemm::atomElement(config.atom) != element))
     {
         return std::nullopt;
@@ -512,14 +757,23 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     const bool gfx950 = hipdnn_plugin_sdk::stripArchFeatures(arch) == "gfx950";
 
     // Loop and layout.
-    if(config.loop < LOOP_ROWS || config.loop > LOOP_ROWS_PACKED)
+    if(config.loop < LOOP_ROWS || config.loop > LOOP_GENERIC)
     {
         return std::nullopt;
     }
     const bool cf = config.layout == LAYOUT_CHANNELS_FIRST;
     const bool tr = config.layout == LAYOUT_CHANNELS_LAST_TR;
     const bool cl = config.layout == LAYOUT_CHANNELS_LAST || tr;
-    if(!(cf && problem.channelsFirst) && !(cl && problem.channelsLast))
+    if(generic)
+    {
+        // The generic loop reads through the strides: channel vectors (layout 1) exactly where
+        // they load whole, elements (layout 0) everywhere else.
+        if(tr || cl != problem.vectorChannels)
+        {
+            return std::nullopt;
+        }
+    }
+    else if(!(cf && problem.channelsFirst) && !(cl && problem.channelsLast))
     {
         return std::nullopt;
     }
@@ -572,24 +826,112 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         return std::nullopt;
     }
+    // Block-based buffers: exactly the graphs whose image is past the 32-bit buffer range (the
+    // parse admits those channels-first only), on the K3Tiles loops, with a block's bk dy and
+    // bc x channel planes within it.
+    if(config.pb != 0 && config.pb != 1)
+    {
+        return std::nullopt;
+    }
+    if(problem.largeImage != (config.pb == 1))
+    {
+        return std::nullopt;
+    }
+    // The generic loop's per-step windows (pb 1): from the step's first reachable element, the
+    // block's channels, the filter's reach in depth and height, and its chunk's columns.
+    int64_t xWindow = 0;
+    int64_t yWindow = 0;
+    if(config.pb == 1 && generic)
+    {
+        const auto& xs = a.xStrides;
+        const auto& ys = a.yStrides;
+        const int64_t columns = (config.bq - 1) * a.stride[2] + (a.filter[2] - 1) * a.dilation[2]
+                                + std::max<int64_t>(config.dw, 0);
+        xWindow = 1 + (std::min<int64_t>(config.bc, cg) - 1) * xs[1]
+                  + std::min<int64_t>((a.filter[0] - 1) * a.dilation[0], a.inSpatial[0] - 1) * xs[2]
+                  + std::min<int64_t>((a.filter[1] - 1) * a.dilation[1], a.inSpatial[1] - 1) * xs[3]
+                  + std::min<int64_t>(columns, a.inSpatial[2] - 1) * xs[4];
+        yWindow = 1 + (std::min<int64_t>(config.bk, kg) - 1) * ys[1]
+                  + std::min<int64_t>(config.bq - 1, a.outSpatial[2] - 1) * ys[4];
+        if(xWindow > INT_LIMIT / eb || yWindow > INT_LIMIT / eb)
+        {
+            return std::nullopt;
+        }
+    }
+    else if(config.pb == 1)
+    {
+        // The K3Tiles loops: channels-first, a block's channel planes within the range.
+        const int64_t xPlane = a.inSpatial[0] * a.inSpatial[1] * a.inSpatial[2];
+        const int64_t yPlane = a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2];
+        if((config.loop != LOOP_ROWS && config.loop != LOOP_RING && config.loop != LOOP_ROWS_SMALLC)
+           || !problem.channelsFirst || config.bc * xPlane > INT_LIMIT / eb
+           || config.bk * yPlane > INT_LIMIT / eb)
+        {
+            return std::nullopt;
+        }
+    }
     if(direct)
     {
         threads = 8 * info->wave;
     }
-    // The filter width, its stride and dilation are compile-time.
-    if(config.s != a.filter[2] || config.sw != a.stride[2] || config.dw != a.dilation[2]
-       || config.fr < 1)
+    if(generic)
+    {
+        // Runtime geometry (s, sw, dw 0), fr taps a block; a position per thread (bq dividing
+        // the block) and whole channel rows a pass. (Channel vectors and 32-bit position words
+        // follow from whole fragments and atom steps.)
+        // (A negative dw is declined with the LDS: ldsBytesOf takes no negative field.)
+        if(config.s != 0 || config.sw != 0 || config.fr < 1 || threads % config.bq != 0
+           || config.bk % (threads / config.bq) != 0 || config.bc % (threads / config.bq) != 0)
+        {
+            return std::nullopt;
+        }
+        // dw > 0, the shared width window of bq + dw positions: channel vectors, whole 16-byte
+        // units of extra positions, unit width stride, and the block's width taps within it.
+        if(config.dw > 0
+           && (!cl || config.dw % 8 != 0 || a.stride[2] != 1
+               || (std::min<int64_t>(config.fr, a.filter[2]) - 1) * a.dilation[2] > config.dw))
+        {
+            return std::nullopt;
+        }
+        // Widely dilated small filters (ASPP-class: at most 9 taps, dilation 6 or more on a
+        // filter axis): each tap gathers a far-apart window and the BLAS path won on every arch
+        // measured, so the generic loop only adds candidates there.
+        int64_t dilation = 1;
+        for(int axis = 0; axis < CONV_NAIVE_SPATIAL_DIMS; ++axis)
+        {
+            if(a.filter[axis] > 1)
+            {
+                dilation = std::max<int64_t>(dilation, a.dilation[axis]);
+            }
+        }
+        if(problem.taps <= GENERIC_SPARSE_MAX_TAPS && dilation >= GENERIC_SPARSE_MIN_DILATION)
+        {
+            return std::nullopt;
+        }
+        // The FMA form leaves stems (few input channels a group: the channel tile mostly
+        // empty) and patchify-class width strides (no reuse between a chunk's taps) to BLAS,
+        // which won both on gfx1201 (AlexNet 11x11 s4 c3, ViT 4x4 s4 c3, wav2vec k10 s5).
+        if(genericFma && (cg < GENERIC_FMA_MIN_CHANNELS || a.stride[2] >= GENERIC_FMA_MAX_STRIDE))
+        {
+            return std::nullopt;
+        }
+    }
+    // Every other loop: the filter width, its stride and dilation are compile-time.
+    else if(config.s != a.filter[2] || config.sw != a.stride[2] || config.dw != a.dilation[2]
+            || config.fr < 1)
     {
         return std::nullopt;
     }
-    if(cf)
+    // (The generic loop's channel vectors are the problem's vectorChannels, gated above.)
+    if(!generic && cf)
     {
         if(config.bq % config.vec != 0 || (!fma && config.vec % config.sw != 0))
         {
             return std::nullopt;
         }
     }
-    else if((kg % config.vec != 0 && config.align != 2) || (cg % config.vec != 0 && !smallc))
+    else if(!generic
+            && ((kg % config.vec != 0 && config.align != 2) || (cg % config.vec != 0 && !smallc)))
     {
         return std::nullopt;
     }
@@ -668,7 +1010,8 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         return std::nullopt;
     }
-    if(fma && cf && (a.inSpatial[2] % config.vec != 0 || a.outSpatial[2] % config.vec != 0))
+    if(fma && !generic && cf
+       && (a.inSpatial[2] % config.vec != 0 || a.outSpatial[2] % config.vec != 0))
     {
         return std::nullopt;
     }
@@ -700,17 +1043,37 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     }
     // The block, its load passes and its LDS.
     if(threads > MAX_BLOCK
-       || loadPassesOf(config, eb, info->wave) > (packed ? MAX_PACK_PASSES : MAX_PASSES)
+       || loadPassesOf(config, eb, info->wave) > (packed || generic ? MAX_PACK_PASSES : MAX_PASSES)
        || ldsBytesOf(config, eb) > ldsLimitOf(arch))
     {
         return std::nullopt;
     }
-    // Channels-first runs are loaded whole from within an image.
-    const int64_t xImage = a.c * a.inSpatial[0] * a.inSpatial[1] * a.inSpatial[2];
-    const int64_t yImage = a.k * a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2];
-    if(cf && (xImage < config.vec || yImage < config.vec))
+    // Channels-first runs are loaded whole from within an image. The generic loop's buffers
+    // span the images' strides.
+    // (Block-based generic buffers: the per-step windows.)
+    const int64_t xImage = generic ? (config.pb == 1 ? xWindow : problem.xSpan)
+                                   : a.c * a.inSpatial[0] * a.inSpatial[1] * a.inSpatial[2];
+    const int64_t yImage = generic ? (config.pb == 1 ? yWindow : problem.ySpan)
+                                   : a.k * a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2];
+    if(!generic && cf && (xImage < config.vec || yImage < config.vec))
     {
         return std::nullopt;
+    }
+    // The two tiers: the generic loop only where no specialized config's class serves.
+    if(generic)
+    {
+        size_t from = 0;
+        while(from < config.spec.size())
+        {
+            const size_t to = std::min(config.spec.find(';', from), config.spec.size());
+            const auto served
+                = specServes(problem, std::string_view(config.spec).substr(from, to - from), arch);
+            if(!served.has_value() || *served)
+            {
+                return std::nullopt;
+            }
+            from = to + 1;
+        }
     }
     const int64_t units = device_units::dispatchUnits(device);
     if(units < 1)
@@ -764,7 +1127,11 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         const int64_t frows = a.filter[0] * a.filter[1];
         // A phased ring runs one grid row per height phase; its tracks walk the dy rows.
         gridY = a.groups
-                * (rows ? divUp(frows, config.fr) : a.filter[0] * (phased ? a.stride[1] : 1));
+                * (generic && config.dw > 0
+                       ? a.filter[0] * a.filter[1] * divUp(a.filter[2], config.fr)
+                   : generic ? divUp(problem.taps, config.fr)
+                   : rows    ? divUp(frows, config.fr)
+                             : a.filter[0] * (phased ? a.stride[1] : 1));
         // Packed rows: a plane's chunks are its groups of packRows rows.
         chunks = packed ? divUp(a.outSpatial[1], packRows) : divUp(a.outSpatial[2], config.bq);
         trackLen = phased ? a.outSpatial[1] + config.fr - 1
@@ -853,10 +1220,20 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     k3.segs = direct ? static_cast<int>(plan.segs) : static_cast<int>(packWidth);
     k3.segRows = direct ? static_cast<int>(plan.segRows) : static_cast<int>(packRows);
     k3.walk = direct ? static_cast<int>(plan.walk) : 0;
-    const bool channelsLast = !cf;
-    packedStrides({a.n, a.c, a.inSpatial[0], a.inSpatial[1], a.inSpatial[2]}, channelsLast, k3.xs);
-    packedStrides(
-        {a.n, a.k, a.outSpatial[0], a.outSpatial[1], a.outSpatial[2]}, channelsLast, k3.ys);
+    if(generic)
+    {
+        // The graph's own strides (packed or not).
+        std::copy(std::begin(a.xStrides), std::end(a.xStrides), std::begin(k3.xs));
+        std::copy(std::begin(a.yStrides), std::end(a.yStrides), std::begin(k3.ys));
+    }
+    else
+    {
+        const bool channelsLast = !cf;
+        packedStrides(
+            {a.n, a.c, a.inSpatial[0], a.inSpatial[1], a.inSpatial[2]}, channelsLast, k3.xs);
+        packedStrides(
+            {a.n, a.k, a.outSpatial[0], a.outSpatial[1], a.outSpatial[2]}, channelsLast, k3.ys);
+    }
     k3.xImage = xImage;
     k3.yImage = yImage;
     k3.partialElems = *partialElems;
@@ -882,6 +1259,25 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     return launch;
 }
 
+bool threeBf16Pays(const WrwProblem& problem, std::string_view gcnArchName)
+{
+    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
+    const auto& a = problem.base.args;
+    const int64_t cg = a.c / a.groups;
+    const int64_t kg = a.k / a.groups;
+    const int64_t taps = problem.taps;
+    if(arch == "gfx942" || arch == "gfx950")
+    {
+        const bool unitStride = a.stride[0] == 1 && a.stride[1] == 1 && a.stride[2] == 1;
+        return unitStride && taps >= 9 && cg >= 128 && kg >= 64;
+    }
+    if(arch.rfind("gfx11", 0) == 0 || arch.rfind("gfx12", 0) == 0)
+    {
+        return cg <= 4 || (cg >= 256 && taps >= 9);
+    }
+    return false;
+}
+
 std::vector<std::pair<std::string, std::string>> compileDefinesFor(data_objects::DataType dataType,
                                                                    const WrwConfig& config,
                                                                    std::string_view kernelType)
@@ -901,7 +1297,16 @@ std::vector<std::pair<std::string, std::string>> compileDefinesFor(data_objects:
     default:
         throw std::invalid_argument("conv_wrw: unsupported element type");
     }
-    std::vector<std::pair<std::string, std::string>> defines{{"CONV_K3_T", element}};
+    // Three-bf16: the bf16 kernel, ConvWrwSplit (CONV_K3_MATH), and fp32 dw from the reduces
+    // (CONV_K3_TO). Defined only then, so no other config's code changes.
+    const bool split = config.math == 1 && dataType == data_objects::DataType::FLOAT;
+    std::vector<std::pair<std::string, std::string>> defines{
+        {"CONV_K3_T", split ? std::string("unsigned short") : element}};
+    if(split)
+    {
+        defines.emplace_back("CONV_K3_TO", "float");
+        defines.emplace_back("CONV_K3_MATH", "1");
+    }
     if(!kernelType.empty())
     {
         defines.emplace_back("CONV_K3_ATOM", std::string(kernelType));
@@ -928,6 +1333,11 @@ std::vector<std::pair<std::string, std::string>> compileDefinesFor(data_objects:
     for(const auto& [name, value] : fields)
     {
         defines.emplace_back(std::string("CONV_K3_") + name, std::to_string(value));
+    }
+    // Defined only when set, so every other config compiles as before.
+    if(config.pb != 0)
+    {
+        defines.emplace_back("CONV_K3_PB", std::to_string(config.pb));
     }
     return defines;
 }

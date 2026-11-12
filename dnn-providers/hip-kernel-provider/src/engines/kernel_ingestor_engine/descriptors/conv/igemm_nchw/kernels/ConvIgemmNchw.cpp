@@ -18,6 +18,13 @@
 
 #include "ConvIgemmNchwCore.h"
 
+// Three-bf16 (fp32 graphs under TF32 permission): the bf16 kernel on 3x the reduction channels
+// (CONV_K7_T unsigned short) writes dx in fp32 (CONV_K7_TO float); CONV_TF32_SPLIT3 adds the
+// operand split (ConvTf32Split). Undefined otherwise: dx in the element type, as before.
+#ifndef CONV_K7_TO
+#define CONV_K7_TO CONV_K7_T
+#endif
+
 #if CONV_K7_FMA
 #define CONV_K7_BLOCK ((CONV_K7_BN / CONV_K7_TC) * (CONV_K7_BMQ / CONV_K7_TQ))
 #else
@@ -52,6 +59,7 @@ extern "C" __global__ void __launch_bounds__(CONV_K7_BLOCK) ConvIgemmNchw(K7Args
                CONV_K7_STRIDE,
                CONV_K7_TAPS,
                CONV_K7_FLAT,
-               CONV_K7_HALO>(a);
+               CONV_K7_HALO,
+               CONV_K7_TO>(a);
 #endif
 }

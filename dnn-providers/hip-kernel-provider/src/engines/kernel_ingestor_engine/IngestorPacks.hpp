@@ -62,6 +62,8 @@ void registerConvDepthwiseMfmaSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<H
 void resetConvDepthwiseMfmaModuleCache();
 void registerConvSmallcSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetConvSmallcModuleCache();
+void registerConvFftSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetConvFftModuleCache();
 void registerConvIgemmSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetConvIgemmModuleCache();
 void registerConvIgemmNchwSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);

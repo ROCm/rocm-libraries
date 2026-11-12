@@ -19,6 +19,7 @@
 // in-channels (fp16 path, odd C zero-padded). Size P * ceil(cgi/VW) * cgo * G * 4 bytes.
 #pragma once
 
+#include "ConvArchFamily.h"
 #include "ConvWinogradCore.h"
 
 typedef _Float16 k5h2 __attribute__((ext_vector_type(2)));
@@ -54,9 +55,7 @@ __device__ inline float k5Round(float v)
 
 // Buffer loads: 32-bit byte offsets from a per-tensor resource (tensor < 2 GiB; the host slices
 // the batch otherwise); per-chunk and per-row offsets go in the scalar offset.
-#if defined(__gfx1100__) || defined(__gfx1101__) || defined(__gfx1102__) || defined(__gfx1103__) \
-    || defined(__gfx1150__) || defined(__gfx1151__) || defined(__gfx1152__)                      \
-    || defined(__gfx1200__) || defined(__gfx1201__)
+#if HKP_ARCH_GFX11 || HKP_ARCH_GFX12
 #define K5_RSRC_FLAGS 0x31004000
 #elif defined(__gfx1010__) || defined(__gfx1030__) || defined(__gfx1031__) || defined(__gfx1032__)
 #define K5_RSRC_FLAGS 0x31014000

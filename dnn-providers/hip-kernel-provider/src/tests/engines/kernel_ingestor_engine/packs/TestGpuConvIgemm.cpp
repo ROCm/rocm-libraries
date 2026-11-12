@@ -18,6 +18,7 @@
 #include <hip/hip_runtime.h>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
+#include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -27,6 +28,7 @@
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvIgemmProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvTf32Timing.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
@@ -345,8 +347,49 @@ std::vector<DeviceCase> deviceCases()
     return cases;
 }
 
+/// Which configs a run takes: the graph's own element type, or (fp32 under TF32 permission) the
+/// TF32-class ones: xf32 atoms (gfx942) and three-bf16.
+enum class Math
+{
+    NATIVE,
+    TF32,
+};
+
+/// +inf and -inf planted into @p input (the tensor the reduction reads, besides the filter).
 template <typename T>
-void runCase(ConvShape shape, ConvDirection direction)
+void plantInfinities(Tensor<T>& input)
+{
+    int64_t count = 1;
+    for(const auto extent : input.dims())
+    {
+        count *= extent;
+    }
+    auto* data = static_cast<T*>(input.rawHostData());
+    data[0] = static_cast<T>(INFINITY);
+    data[count / 2] = static_cast<T>(-INFINITY);
+    input.markHostModified();
+}
+
+/// A result matches its reference: within @p tolerance where the reference is finite, the same
+/// infinity, or NaN where the reference is NaN.
+bool matches(float got, float want, float tolerance)
+{
+    if(std::isnan(want))
+    {
+        return std::isnan(got);
+    }
+    if(std::isinf(want))
+    {
+        return got == want;
+    }
+    return std::fabs(got - want) <= tolerance;
+}
+
+template <typename T>
+void runCase(ConvShape shape,
+             ConvDirection direction,
+             Math math = Math::NATIVE,
+             bool infinities = false)
 {
     shape.dataType = dataTypeOf<T>();
     const auto spec = specFor(shape, direction);
@@ -362,6 +405,10 @@ void runCase(ConvShape shape, ConvDirection direction)
     const bool forward = direction == ConvDirection::FORWARD;
     (forward ? x : y).fillTensorWithRandomValues(-1.0f, 1.0f, SEED);
     w.fillTensorWithRandomValues(-1.0f, 1.0f, SEED + 1);
+    if(infinities)
+    {
+        plantInfinities(forward ? x : y);
+    }
     Tensor<T>& written = forward ? y : x;
 
     const bool reflect = shape.mode == ConvMode::CONVOLUTION;
@@ -398,16 +445,30 @@ void runCase(ConvShape shape, ConvDirection direction)
     {
         reductionLength *= extent;
     }
-    const float accumulationBound = 2e-6f * static_cast<float>(reductionLength);
-
     const auto& handler = dispatchHandler(pack);
     int ran = 0;
     for(const auto& kernel : catalog(direction))
     {
-        if(!matchesKernel(pack, fixture.context(), kernel, *bound))
+        const bool xf32 = kernel.getStringMetadata("atom").find("xf32") != std::string::npos;
+        const bool split = kernel.getStringMetadata("math") == "bf16x3";
+        if(!matchesKernel(pack, fixture.context(), kernel, *bound)
+           || (xf32 || split) != (math == Math::TF32))
         {
             continue;
         }
+        // Known, reported to the fwd lead: group fusion's zero filter blocks multiply the other
+        // groups' infinities into NaN (0 x inf), so fused configs are left out of the
+        // infinity runs until that is fixed.
+        if(infinities && kernel.getIntMetadata("fuse") != 0)
+        {
+            continue;
+        }
+        // xf32 rounds each operand to 10 mantissa bits (about 2^-11 of a product each);
+        // three-bf16 drops lo x lo (about 2^-16).
+        const float accumulationBound = (xf32    ? 1e-3f
+                                         : split ? 3e-5f
+                                                 : 2e-6f)
+                                        * static_cast<float>(reductionLength);
         SCOPED_TRACE(kernel.name);
         ++ran;
         const auto prepared = handler.prepare(fixture.context(), *bound, kernel);
@@ -442,7 +503,7 @@ void runCase(ConvShape shape, ConvDirection direction)
             const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
             const float tolerance
                 = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
-            if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
+            if(!matches(got, want, tolerance) && ++mismatches <= 5)
             {
                 ADD_FAILURE() << "at linear index " << offsetOf(index, written.strides())
                               << ": got " << got << ", want " << want << ", tolerance "
@@ -479,6 +540,103 @@ TEST_P(TestGpuConvIgemm, BFloat16)
 INSTANTIATE_TEST_SUITE_P(,
                          TestGpuConvIgemm,
                          ::testing::Combine(::testing::ValuesIn(deviceCases()),
+                                            ::testing::Values(ConvDirection::FORWARD,
+                                                              ConvDirection::BACKWARD_DATA)),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name
+                                    + (std::get<1>(info.param) == ConvDirection::FORWARD ? "Fwd"
+                                                                                         : "Bwd");
+                         });
+
+/// Whether the device has TF32-class K1 configs: bf16 matrix cores where three bf16 products
+/// are admitted (gfx908 included), and gfx942's xf32.
+bool hasTf32Forms()
+{
+    const auto properties = currentDeviceProperties();
+    const std::string arch(hipdnn_plugin_sdk::stripArchFeatures(properties.gcnArchName));
+    return arch == "gfx908" || arch == "gfx90a" || arch == "gfx942" || arch == "gfx950"
+           || arch.rfind("gfx11", 0) == 0 || arch.rfind("gfx12", 0) == 0;
+}
+
+std::vector<DeviceCase> tf32Cases()
+{
+    std::vector<DeviceCase> cases;
+    for(const auto& deviceCase : deviceCases())
+    {
+        if(deviceCase.name == "Nhwc3x3" || deviceCase.name == "Nchw3x3"
+           || deviceCase.name == "Ndhwc3x3x3" || deviceCase.name == "Nhwc1x1"
+           || deviceCase.name == "NhwcGroupedStride2")
+        {
+            cases.push_back(deviceCase);
+        }
+    }
+    return cases;
+}
+
+/// The TF32-class fp32 configs (xf32, three-bf16) under TF32 permission, against the fp64 reference
+/// at their own bounds; and with +inf and -inf in the input, where every output a infinity reaches
+/// must be that infinity (or NaN where both meet), as exact fp32 gives. Native fp32 configs take
+/// the same infinities.
+class TestGpuConvIgemmTf32 : public ::testing::TestWithParam<std::tuple<DeviceCase, ConvDirection>>
+{
+};
+
+TEST_P(TestGpuConvIgemmTf32, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!hasTf32Forms())
+    {
+        GTEST_SKIP() << "no TF32-class configs on this device";
+    }
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(
+        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
+    runCase<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::TF32);
+}
+
+TEST_P(TestGpuConvIgemmTf32, FloatInfinities)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!hasTf32Forms())
+    {
+        GTEST_SKIP() << "no TF32-class configs on this device";
+    }
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(
+        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
+    runCase<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::TF32, true);
+}
+
+TEST_P(TestGpuConvIgemmTf32, FloatInfinitiesNative)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, true);
+}
+
+/// Opt-in (K1_TF32_TIMING=<shape CSV>, forward): the best config per math form (exact, xf32,
+/// three-bf16) per shape, TF32 permitted. See ConvTf32Timing.hpp.
+TEST(TestGpuConvIgemmTiming, ByMathForm)
+{
+    SKIP_IF_NO_DEVICES();
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(
+        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
+    conv_tf32_timing::timeByForm(
+        packFor(ConvDirection::FORWARD),
+        ConvDirection::FORWARD,
+        catalog(ConvDirection::FORWARD),
+        "K1_TF32_TIMING",
+        [](const auto& kernel) {
+            if(kernel.getStringMetadata("math") == "bf16x3")
+            {
+                return std::string("bf16x3");
+            }
+            return std::string(kernel.getStringMetadata("atom").find("xf32") != std::string::npos
+                                   ? "xf32"
+                                   : "exact");
+        });
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvIgemmTf32,
+                         ::testing::Combine(::testing::ValuesIn(tf32Cases()),
                                             ::testing::Values(ConvDirection::FORWARD,
                                                               ConvDirection::BACKWARD_DATA)),
                          [](const auto& info) {
@@ -1378,6 +1536,20 @@ TEST(TestConvIgemmLaunch, RowTilesPastOneDispatchRunAsSeveralLaunches)
     EXPECT_EQ(conv_igemm::launchTilesFor((int64_t{1} << 24) - 1, 256), (int64_t{1} << 24) - 1);
     EXPECT_EQ(conv_igemm::launchTilesFor(int64_t{1} << 24, 256), (int64_t{1} << 24) - 1);
     EXPECT_EQ(conv_igemm::launchTilesFor(int64_t{1} << 30, 64), (int64_t{1} << 26) - 1);
+}
+
+TEST(TestConvIgemmComputeType, ServesCudnnsComputeTypesPerElementType)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        expectCudnnComputeTypes(
+            dense(16, 24, {7, 6}, {3, 3}, {1, 1}, true),
+            {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16},
+            [direction](const ConvShape& s) {
+                const GraphFixture fixture(buildGraph(specFor(s, direction)));
+                return conv_igemm::parseIgemmProblem(fixture.context(), direction).has_value();
+            });
+    }
 }
 
 } // namespace

@@ -17,7 +17,8 @@
 /**
  * @file TestConvWinogradProblem.cpp
  * @brief Host-only checks of the Winograd convolution engines (CONV_WINOGRAD_FWD,
- *        CONV_WINOGRAD_BWD): what the graph match accepts, one refusal per gated field, the
+ *        CONV_WINOGRAD_BWD, CONV_WINOGRAD_WRW): what the graph match accepts, one refusal per
+ *        gated field, the
  *        forward form it derives, and what the kernel match admits per config and device
  *        (variant family, dtype, tile, layout, the LLC plan). No device is used.
  */
@@ -33,6 +34,15 @@ using hipdnn_flatbuffers_sdk::data_objects::ConvMode;
 using hipdnn_flatbuffers_sdk::data_objects::DataType;
 
 constexpr ConvDirection DIRECTIONS[] = {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA};
+constexpr ConvDirection ALL_DIRECTIONS[]
+    = {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS};
+
+std::string directionName(ConvDirection direction)
+{
+    return direction == ConvDirection::FORWARD         ? "Fwd"
+           : direction == ConvDirection::BACKWARD_DATA ? "Bwd"
+                                                       : "Wrw";
+}
 
 /// The base problem every refusal mutates: 3x3, stride 1, padding 1, NCHW.
 ConvShape baseShape()
@@ -131,6 +141,51 @@ INSTANTIATE_TEST_SUITE_P(,
                                     + (std::get<1>(info.param) == ConvDirection::FORWARD ? "Fwd"
                                                                                          : "Bwd");
                          });
+
+class TestConvWinogradWrwAccepts : public ::testing::TestWithParam<AcceptCase>
+{
+};
+
+TEST_P(TestConvWinogradWrwAccepts, StrideOneOnly)
+{
+    const auto& accept = GetParam();
+    const auto parsed = parse(specFor(accept.shape, ConvDirection::BACKWARD_WEIGHTS));
+    // Backward weights serves stride 1 (F(3,r) tiles over dy); stride 2 is refused.
+    EXPECT_EQ(parsed.has_value(), accept.shape.stride.empty() || accept.shape.stride[0] == 1);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestConvWinogradWrwAccepts,
+                         ::testing::ValuesIn(acceptCases()),
+                         [](const auto& info) { return info.param.name; });
+
+TEST(TestConvWinogradForm, BackwardWeightsKeepsTheGraphsRolesAndDwStrides)
+{
+    auto shape = baseShape();
+    shape.prePadding = {2, 0};
+    shape.postPadding = {0, 1};
+    shape.mode = ConvMode::CONVOLUTION;
+    shape.channelsLast = true;
+    const auto problem = parse(specFor(shape, ConvDirection::BACKWARD_WEIGHTS));
+    ASSERT_TRUE(problem.has_value());
+    const auto& a = problem->wrw;
+    EXPECT_EQ(a.n, 2);
+    EXPECT_EQ(a.c, 4);
+    EXPECT_EQ(a.k, 6);
+    EXPECT_EQ(a.hi, 7);
+    EXPECT_EQ(a.wi, 6);
+    EXPECT_EQ(a.ho, 7);
+    EXPECT_EQ(a.wo, 5);
+    EXPECT_EQ(a.ph, 2);
+    EXPECT_EQ(a.pw, 0);
+    EXPECT_EQ(a.flip, 1);
+    // KRSC: (k, c, r, s) strides (36, 1, 12, 4).
+    EXPECT_EQ(a.dwStrides[0], 36);
+    EXPECT_EQ(a.dwStrides[1], 1);
+    EXPECT_EQ(a.dwStrides[2], 12);
+    EXPECT_EQ(a.dwStrides[3], 4);
+    EXPECT_EQ(problem->activations, conv_winograd::Layout::NHWC);
+}
 
 TEST(TestConvWinogradForm, ForwardKeepsTheGraphsRoles)
 {
@@ -247,7 +302,9 @@ TEST(TestConvWinogradForm, StrideTwoBackwardScattersPhasesAsChannels)
 
 TensorSpec& written(ConvGraphSpec& spec)
 {
-    return spec.direction == ConvDirection::FORWARD ? spec.y : spec.x;
+    return spec.direction == ConvDirection::FORWARD         ? spec.y
+           : spec.direction == ConvDirection::BACKWARD_DATA ? spec.x
+                                                            : spec.w;
 }
 
 /// Rebuilds the operands of @p spec from @p shape (a consistent change of several fields).
@@ -381,21 +438,32 @@ TEST_P(TestConvWinogradRefuses, OneField)
 INSTANTIATE_TEST_SUITE_P(,
                          TestConvWinogradRefuses,
                          ::testing::Combine(::testing::ValuesIn(refusalCases()),
-                                            ::testing::ValuesIn(DIRECTIONS)),
+                                            ::testing::ValuesIn(ALL_DIRECTIONS)),
                          [](const auto& info) {
                              return std::get<0>(info.param).name
-                                    + (std::get<1>(info.param) == ConvDirection::FORWARD ? "Fwd"
-                                                                                         : "Bwd");
+                                    + directionName(std::get<1>(info.param));
                          });
 
-TEST(TestConvWinogradDirection, RefusesWeightGradientsAndTheOtherDirection)
+TEST(TestConvWinogradDirection, EachDirectionRefusesTheOthersGraphs)
 {
-    const GraphFixture forward(buildGraph(specFor(baseShape(), ConvDirection::FORWARD)));
-    EXPECT_FALSE(parseWinogradProblem(forward.context(), ConvDirection::BACKWARD_DATA).has_value());
-    EXPECT_FALSE(
-        parseWinogradProblem(forward.context(), ConvDirection::BACKWARD_WEIGHTS).has_value());
-    const GraphFixture wrw(buildGraph(specFor(baseShape(), ConvDirection::BACKWARD_WEIGHTS)));
-    EXPECT_FALSE(parseWinogradProblem(wrw.context(), ConvDirection::BACKWARD_WEIGHTS).has_value());
+    for(const auto graph : ALL_DIRECTIONS)
+    {
+        const GraphFixture fixture(buildGraph(specFor(baseShape(), graph)));
+        for(const auto direction : ALL_DIRECTIONS)
+        {
+            SCOPED_TRACE(directionName(graph) + " graph as " + directionName(direction));
+            EXPECT_EQ(parseWinogradProblem(fixture.context(), direction).has_value(),
+                      graph == direction);
+        }
+    }
+}
+
+TEST(TestConvWinogradDirection, BackwardWeightsRefusesStrideTwo)
+{
+    auto shape = baseShape();
+    shape.stride = {2, 2};
+    EXPECT_FALSE(parse(specFor(shape, ConvDirection::BACKWARD_WEIGHTS)).has_value());
+    EXPECT_TRUE(parse(specFor(shape, ConvDirection::FORWARD)).has_value());
 }
 
 // ---------------------------------------------------------------------------
@@ -1248,6 +1316,495 @@ TEST(TestConvWinogradPlan, StrideTwoStagesTheGraphsOperandsAndUsesSixteenPositio
         ASSERT_TRUE(staged->in.needed);
         EXPECT_EQ(staged->in.bytes, direction == ConvDirection::FORWARD ? xBytes : yBytes);
         EXPECT_EQ(staged->out.bytes, direction == ConvDirection::FORWARD ? yBytes : xBytes);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Backward weights (CONV_WINOGRAD_WRW): kernel match, one refusal per config field, plan
+// ---------------------------------------------------------------------------
+
+constexpr PackSymbols PACK_WRW{"",
+                               "hipkernel.conv_winograd_wrw.graph_match",
+                               "",
+                               "hipkernel.conv_winograd.kernel_match",
+                               "",
+                               "hipkernel.conv_winograd.dispatch",
+                               "",
+                               "",
+                               ""};
+
+/// An FMA config (fp32 operands, every arch): F(3,2), 64 x 64 x 16, 4 x 4 thread tiles.
+ConfigFields wrwFma()
+{
+    ConfigFields f;
+    f.variant = "wrw";
+    f.m = 2;
+    f.gemmBm = f.gemmBn = 64;
+    f.gemmBk = 16;
+    f.tm = f.tn = 4;
+    return f;
+}
+
+/// A matrix-core config: 64 x 64 x 32, 2 x 2 atoms per wave (4 waves).
+ConfigFields wrwAtom(const std::string& arch)
+{
+    auto f = wrwFma();
+    f.arch = arch;
+    f.gemmBk = 32;
+    f.tm = f.tn = 2;
+    f.waves = 4;
+    return f;
+}
+
+hipdnn_plugin_sdk::ingestor::KernelDefinition wrwKernelOf(const ConfigFields& f,
+                                                          const std::string& dtype)
+{
+    auto kernel = kernelOf(f, dtype);
+    kernel.metadata["direction"] = std::string("WRW");
+    return kernel;
+}
+
+DataType dataTypeNamed(const std::string& dtype)
+{
+    return dtype == "FLOAT"  ? DataType::FLOAT
+           : dtype == "HALF" ? DataType::HALF
+                             : DataType::BFLOAT16;
+}
+
+bool admitsWrw(const ConfigFields& fields,
+               const std::string& arch,
+               ConvShape shape = baseShape(),
+               const std::string& dtype = "FLOAT")
+{
+    shape.dataType = dataTypeNamed(dtype);
+    auto properties = testDeviceProperties();
+    properties.gcnArchName = arch;
+    properties.multiProcessorCount = 64;
+    const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::BACKWARD_WEIGHTS)),
+                               properties);
+    const auto bound = matchesGraph(PACK_WRW, fixture.context());
+    return bound.has_value()
+           && matchesKernel(PACK_WRW, fixture.context(), wrwKernelOf(fields, dtype), *bound);
+}
+
+TEST(TestConvWinogradWrwKernelMatch, FmaRunsEverywhereWithinEachDtypesErrorBand)
+{
+    // fp32 operands on every arch; fp32 graphs stop at F(3,4) (F(3,6) measured past MIOpen's
+    // Winograd summation error).
+    for(const auto* arch : {"gfx906", "gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1201"})
+    {
+        for(const auto* dtype : {"FLOAT", "HALF", "BFLOAT16"})
+        {
+            for(const int64_t r : {2, 4, 6})
+            {
+                auto f = wrwFma();
+                f.m = r;
+                SCOPED_TRACE(std::string(arch) + " " + dtype + " r" + std::to_string(r));
+                // (baseShape's K is 84: fp32 F(3,4) needs 512.)
+                EXPECT_EQ(admitsWrw(f, arch, baseShape(), dtype),
+                          r == 2 || std::string(dtype) != "FLOAT");
+            }
+        }
+    }
+}
+
+TEST(TestConvWinogradWrwKernelMatch, ChannelsFirstConfigsServeEveryLayout)
+{
+    // The transforms read channels-first; channels-last graphs are transposed in. NHWC configs
+    // are refused.
+    auto nhwc = wrwFma();
+    nhwc.layout = "NHWC";
+    auto channelsLast = baseShape();
+    channelsLast.channelsLast = true;
+    EXPECT_TRUE(admitsWrw(wrwFma(), "gfx942"));
+    EXPECT_TRUE(admitsWrw(wrwFma(), "gfx942", channelsLast));
+    EXPECT_FALSE(admitsWrw(nhwc, "gfx942", channelsLast));
+    EXPECT_FALSE(admitsWrw(nhwc, "gfx942"));
+}
+
+TEST(TestConvWinogradWrwKernelMatch, Fp32FourByThreeFromFiveHundredTwelveProducts)
+{
+    // fp32 F(3,4)'s summation error is inside the band from K = N x Ho x Wo = 512 on.
+    auto f4 = wrwFma();
+    f4.m = 4;
+    auto shape = baseShape(); // n 2, 7 x 6: K 84
+    EXPECT_FALSE(admitsWrw(f4, "gfx942", shape, "FLOAT"));
+    EXPECT_TRUE(admitsWrw(f4, "gfx942", shape, "HALF"));
+    EXPECT_TRUE(admitsWrw(wrwFma(), "gfx942", shape, "FLOAT"));
+    shape.input = {16, 16}; // K 512
+    EXPECT_TRUE(admitsWrw(f4, "gfx942", shape, "FLOAT"));
+    shape.input = {16, 15}; // K 480
+    EXPECT_FALSE(admitsWrw(f4, "gfx942", shape, "FLOAT"));
+}
+
+TEST(TestConvWinogradWrwKernelMatch, MatrixCoreAtomsOnlyOnTheirFamilies)
+{
+    // MFMA 16x16 (gfx908 and later CDNA): F(3,2) on fp32 and fp16 operands; bf16 graphs only
+    // on fp32 operands (F(3,4) / F(3,6)).
+    auto bf16Tile = wrwAtom("gfx9");
+    bf16Tile.m = 4;
+    for(const auto* device : {"gfx908", "gfx950"})
+    {
+        EXPECT_TRUE(admitsWrw(wrwAtom("gfx9"), device, baseShape(), "FLOAT"));
+        EXPECT_TRUE(admitsWrw(wrwAtom("gfx9"), device, baseShape(), "HALF"));
+        EXPECT_FALSE(admitsWrw(wrwAtom("gfx9"), device, baseShape(), "BFLOAT16"));
+        EXPECT_TRUE(admitsWrw(bf16Tile, device, baseShape(), "BFLOAT16"));
+    }
+    EXPECT_FALSE(admitsWrw(wrwAtom("gfx9"), "gfx906"));
+    EXPECT_FALSE(admitsWrw(wrwAtom("gfx9"), "gfx1201"));
+    // gfx950's 16x16x32: gfx950 only, fp16 only.
+    EXPECT_TRUE(admitsWrw(wrwAtom("gfx950"), "gfx950", baseShape(), "HALF"));
+    EXPECT_FALSE(admitsWrw(wrwAtom("gfx950"), "gfx942", baseShape(), "HALF"));
+    EXPECT_FALSE(admitsWrw(wrwAtom("gfx950"), "gfx950", baseShape(), "FLOAT"));
+    EXPECT_FALSE(admitsWrw(wrwAtom("gfx950"), "gfx950", baseShape(), "BFLOAT16"));
+    // WMMA: its family, fp16 only.
+    EXPECT_TRUE(admitsWrw(wrwAtom("gfx11"), "gfx1100", baseShape(), "HALF"));
+    EXPECT_FALSE(admitsWrw(wrwAtom("gfx11"), "gfx1100", baseShape(), "BFLOAT16"));
+    EXPECT_TRUE(admitsWrw(wrwAtom("gfx12"), "gfx1201", baseShape(), "HALF"));
+    EXPECT_FALSE(admitsWrw(wrwAtom("gfx11"), "gfx1201", baseShape(), "HALF"));
+    EXPECT_FALSE(admitsWrw(wrwAtom("gfx12"), "gfx1201", baseShape(), "FLOAT"));
+}
+
+TEST(TestConvWinogradWrwKernelMatch, LargerTilesRunOnFp32Operands)
+{
+    for(const int64_t r : {4, 6})
+    {
+        SCOPED_TRACE(r);
+        auto fma = wrwFma();
+        fma.m = r;
+        auto mfma = wrwAtom("gfx9");
+        mfma.m = r;
+        EXPECT_TRUE(admitsWrw(fma, "gfx942", baseShape(), "BFLOAT16"));
+        // CDNA's fp32 MFMA on fp32 operands, for every dtype.
+        auto bigger = baseShape();
+        bigger.input = {16, 16};
+        EXPECT_EQ(admitsWrw(mfma, "gfx942", bigger, "FLOAT"), r == 4);
+        EXPECT_TRUE(admitsWrw(mfma, "gfx942", baseShape(), "BFLOAT16"));
+        EXPECT_TRUE(admitsWrw(mfma, "gfx908", baseShape(), "HALF"));
+        // The 16-bit-only atoms: F(3,2) only.
+        for(const auto* arch : {"gfx950", "gfx11", "gfx12"})
+        {
+            auto sixteen = wrwAtom(arch);
+            sixteen.m = r;
+            const std::string device = std::string(arch) == "gfx950"  ? "gfx950"
+                                       : std::string(arch) == "gfx11" ? "gfx1100"
+                                                                      : "gfx1201";
+            EXPECT_FALSE(admitsWrw(sixteen, device, baseShape(), "HALF"));
+            EXPECT_FALSE(admitsWrw(sixteen, device, baseShape(), "BFLOAT16"));
+        }
+    }
+    const auto plan = [](const ConfigFields& fields, DataType dataType) {
+        auto shape = baseShape();
+        shape.dataType = dataType;
+        auto properties = testDeviceProperties();
+        properties.gcnArchName = "gfx942";
+        properties.multiProcessorCount = 64;
+        const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::BACKWARD_WEIGHTS)),
+                                   properties);
+        const auto problem
+            = parseWinogradProblem(fixture.context(), ConvDirection::BACKWARD_WEIGHTS);
+        return conv_winograd::planFor(*problem,
+                                      *conv_winograd::configOf(wrwKernelOf(
+                                          fields, dataType == DataType::HALF ? "HALF" : "FLOAT")),
+                                      properties);
+    };
+    auto f2 = wrwAtom("gfx9");
+    auto f4 = wrwAtom("gfx9");
+    f4.m = 4;
+    // F(3,2) of a 16-bit graph: 16-bit operands on the f16 MFMA; F(3,4): fp32 operands, f32 MFMA.
+    EXPECT_EQ(plan(f2, DataType::HALF)->operandBytes, 2);
+    EXPECT_EQ(plan(f2, DataType::HALF)->wrwAtom, 1);
+    EXPECT_EQ(plan(f4, DataType::HALF)->operandBytes, 4);
+    EXPECT_EQ(plan(f4, DataType::HALF)->wrwOpt, 0);
+    EXPECT_EQ(plan(f4, DataType::HALF)->wrwAtom, 1);
+}
+
+TEST(TestConvWinogradWrwKernelMatch, HalfOperandFmaOnlyForHalfGraphsThreeByTwo)
+{
+    // f16math: the FMA path on fp16 operands (v_dot2_f32_f16), for fp16 graphs' F(3,2) only.
+    auto dot2 = wrwFma();
+    dot2.f16math = 1;
+    EXPECT_TRUE(admitsWrw(dot2, "gfx906", baseShape(), "HALF"));
+    EXPECT_TRUE(admitsWrw(dot2, "gfx1201", baseShape(), "HALF"));
+    EXPECT_FALSE(admitsWrw(dot2, "gfx906", baseShape(), "BFLOAT16"));
+    EXPECT_FALSE(admitsWrw(dot2, "gfx906", baseShape(), "FLOAT"));
+    auto larger = dot2;
+    larger.m = 4;
+    EXPECT_FALSE(admitsWrw(larger, "gfx906", baseShape(), "HALF"));
+    auto atom = wrwAtom("gfx9");
+    atom.f16math = 1;
+    EXPECT_FALSE(admitsWrw(atom, "gfx942", baseShape(), "HALF"));
+    auto shape = baseShape();
+    shape.dataType = DataType::HALF;
+    auto properties = testDeviceProperties();
+    properties.gcnArchName = "gfx906";
+    properties.multiProcessorCount = 60;
+    const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::BACKWARD_WEIGHTS)),
+                               properties);
+    const auto problem = parseWinogradProblem(fixture.context(), ConvDirection::BACKWARD_WEIGHTS);
+    ASSERT_TRUE(problem.has_value());
+    const auto plan = conv_winograd::planFor(
+        *problem, *conv_winograd::configOf(wrwKernelOf(dot2, "HALF")), properties);
+    ASSERT_TRUE(plan.has_value());
+    EXPECT_EQ(plan->wrwOpt, 1);
+    EXPECT_EQ(plan->operandBytes, 2);
+    EXPECT_EQ(plan->wrwAtom, 0);
+}
+
+TEST(TestConvWinogradWrwKernelMatch, DirectionAndVariantMustAgree)
+{
+    // A wrw config never serves forward graphs, a forward config never serves wrw graphs.
+    auto forwardTagged = wrwKernelOf(wrwFma(), "FLOAT");
+    forwardTagged.metadata["direction"] = std::string("FWD");
+    auto shape = baseShape();
+    const GraphFixture forward(buildGraph(specFor(shape, ConvDirection::FORWARD)),
+                               testDeviceProperties());
+    const auto forwardBound = matchesGraph(PACK_FWD, forward.context());
+    ASSERT_TRUE(forwardBound.has_value());
+    EXPECT_FALSE(matchesKernel(PACK_FWD, forward.context(), forwardTagged, *forwardBound));
+    EXPECT_FALSE(admitsWrw(ConfigFields{}, "gfx942"));
+}
+
+TEST(TestConvWinogradWrwKernelMatch, RefusesEachInconsistentField)
+{
+    // One decline per field the wrw variant gates (each starting from an admitted config).
+    struct Case
+    {
+        std::string name;
+        ConfigFields fields;
+        std::string arch = "gfx942";
+        std::string dtype = "FLOAT";
+    };
+    std::vector<Case> cases;
+    const auto fma = [&](const std::string& name, const std::function<void(ConfigFields&)>& edit) {
+        auto f = wrwFma();
+        edit(f);
+        cases.push_back({name, f});
+    };
+    const auto atom = [&](const std::string& name,
+                          const std::string& arch,
+                          const std::string& device,
+                          const std::string& dtype,
+                          const std::function<void(ConfigFields&)>& edit) {
+        auto f = wrwAtom(arch);
+        edit(f);
+        cases.push_back({name, f, device, dtype});
+    };
+    fma("TileThree", [](ConfigFields& f) { f.m = 3; });
+    fma("TileEight", [](ConfigFields& f) { f.m = 8; });
+    fma("LlcPlan", [](ConfigFields& f) { f.llc = 1; });
+    fma("LlcPlanTwo", [](ConfigFields& f) { f.llc = 2; });
+    fma("FusedKBlock", [](ConfigFields& f) { f.bk = 64; });
+    fma("FusedTileBlock", [](ConfigFields& f) { f.bt = 32; });
+    fma("FusedChunk", [](ConfigFields& f) { f.ccv = 4; });
+    fma("Bins", [](ConfigFields& f) { f.bins = 4; });
+    fma("F16MathTwo", [](ConfigFields& f) { f.f16math = 2; });
+    fma("Prefetch", [](ConfigFields& f) { f.pf = 1; });
+
+    fma("UnknownLayout", [](ConfigFields& f) { f.layout = "NCDHW"; });
+    fma("NoOutChannelBlock", [](ConfigFields& f) { f.gemmBm = 0; });
+    fma("NoInChannelBlock", [](ConfigFields& f) { f.gemmBn = 0; });
+    fma("TileStepNotDividing64", [](ConfigFields& f) { f.gemmBk = 24; });
+    fma("TileStepUnderFour", [](ConfigFields& f) { f.gemmBk = 2; });
+    // 96 / 11 rows (or columns) of threads: whole waves, but 96 is not a multiple of 11.
+    fma("ThreadRowsNotDividing", [](ConfigFields& f) {
+        f.gemmBm = 96;
+        f.tm = 11;
+    });
+    fma("ThreadColumnsNotDividing", [](ConfigFields& f) {
+        f.gemmBn = 96;
+        f.tn = 11;
+    });
+    fma("FmaWithWaves", [](ConfigFields& f) { f.waves = 4; });
+    fma("FmaUnderOneWave", [](ConfigFields& f) {
+        f.tm = f.tn = 8;
+        f.gemmBm = f.gemmBn = 32;
+    });
+    fma("FmaOver1024Threads", [](ConfigFields& f) { f.tm = f.tn = 1; });
+    fma("FmaPartialWave", [](ConfigFields& f) {
+        f.gemmBn = 48;
+        f.tm = 8;
+    });
+    fma("LdsOver64KiB", [](ConfigFields& f) {
+        f.gemmBm = f.gemmBn = 512;
+        f.gemmBk = 32;
+        f.tm = f.tn = 16;
+    });
+    // An arch no atom family has (fp16, F(3,2): no other gate applies).
+    atom("UnknownArch", "gfx10", "gfx1030", "HALF", [](ConfigFields&) {});
+    atom("AtomWavesWrong", "gfx9", "gfx942", "HALF", [](ConfigFields& f) { f.waves = 2; });
+    // 48 rows (columns) of 2 atoms per wave: one wave along them, consistently counted.
+    atom("AtomRowsNotWhole", "gfx9", "gfx942", "HALF", [](ConfigFields& f) {
+        f.gemmBm = 48;
+        f.waves = 2;
+    });
+    atom("AtomColumnsNotWhole", "gfx9", "gfx942", "HALF", [](ConfigFields& f) {
+        f.gemmBn = 48;
+        f.waves = 2;
+    });
+    atom("AtomNoOutChannelBlock", "gfx9", "gfx942", "HALF", [](ConfigFields& f) {
+        f.gemmBm = 0;
+        f.waves = 0;
+    });
+    atom("AtomNoInChannelBlock", "gfx9", "gfx942", "HALF", [](ConfigFields& f) {
+        f.gemmBn = 0;
+        f.waves = 0;
+    });
+    atom("AtomTileStepUnderKa", "gfx9", "gfx942", "HALF", [](ConfigFields& f) { f.gemmBk = 8; });
+    atom("Gfx950TileStepUnder32", "gfx950", "gfx950", "HALF", [](ConfigFields& f) {
+        f.gemmBk = 16;
+    });
+    atom("AtomOver1024Threads", "gfx9", "gfx942", "HALF", [](ConfigFields& f) {
+        f.gemmBm = f.gemmBn = 128;
+        f.tm = f.tn = 1;
+        f.waves = 64;
+    });
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(c.name);
+        EXPECT_FALSE(admitsWrw(c.fields, c.arch, baseShape(), c.dtype));
+    }
+    // The bases are admitted.
+    EXPECT_TRUE(admitsWrw(wrwFma(), "gfx942"));
+    EXPECT_TRUE(admitsWrw(wrwAtom("gfx9"), "gfx942", baseShape(), "HALF"));
+    EXPECT_TRUE(admitsWrw(wrwAtom("gfx950"), "gfx950", baseShape(), "HALF"));
+}
+
+std::optional<conv_winograd::Plan> wrwPlan(const ConvShape& shape,
+                                           const ConfigFields& fields,
+                                           int units = 64,
+                                           const std::string& arch = "gfx942")
+{
+    auto properties = testDeviceProperties();
+    properties.gcnArchName = arch;
+    properties.multiProcessorCount = units;
+    const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::BACKWARD_WEIGHTS)),
+                               properties);
+    const auto problem = parseWinogradProblem(fixture.context(), ConvDirection::BACKWARD_WEIGHTS);
+    const auto config = conv_winograd::configOf(wrwKernelOf(fields, "FLOAT"));
+    if(!problem.has_value() || !config.has_value())
+    {
+        return std::nullopt;
+    }
+    return conv_winograd::planFor(*problem, *config, properties);
+}
+
+TEST(TestConvWinogradWrwPlan, SizesTransformsAndPartialsAndPadsTheTiles)
+{
+    // n2 7x6 -> dy 7x6 at padding 1; F(3,2): 4 x 3 tiles per image, 24 tiles -> padded to 64.
+    auto f = wrwFma();
+    const auto plan = wrwPlan(baseShape(), f, 1);
+    ASSERT_TRUE(plan.has_value());
+    EXPECT_EQ(plan->wrw.th, 4);
+    EXPECT_EQ(plan->wrw.tw, 3);
+    EXPECT_EQ(plan->wrw.tiles, 24);
+    EXPECT_EQ(plan->wrw.ldt, 64);
+    EXPECT_EQ(plan->slices, 1);
+    EXPECT_EQ(plan->wrw.splits, 1);
+    EXPECT_EQ(plan->uBytes, size_t{16 * 6 * 64 * 4});
+    EXPECT_EQ(plan->vBytes, size_t{16 * 4 * 64 * 4});
+    EXPECT_EQ(plan->partBytes, size_t{16 * 6 * 4 * 4});
+    EXPECT_GE(plan->workspaceBytes, plan->uBytes + plan->vBytes + plan->partBytes);
+    // F(3,4): 36 positions, 2 x 2 tiles per image.
+    f.m = 4;
+    const auto big = wrwPlan(baseShape(), f, 1);
+    ASSERT_TRUE(big.has_value());
+    EXPECT_EQ(big->wrw.tiles, 8);
+    EXPECT_EQ(big->uBytes, size_t{36 * 6 * 64 * 4});
+}
+
+TEST(TestConvWinogradWrwPlan, SplitsTheTilesUntilTheBlocksFillTheDevice)
+{
+    auto shape = baseShape();
+    shape.n = 64;
+    shape.input = {32, 32};
+    // 16 positions x 1 block: 64 units want splits; each split a whole number of 64 tiles.
+    const auto plan = wrwPlan(shape, wrwFma(), 64);
+    ASSERT_TRUE(plan.has_value());
+    EXPECT_GT(plan->wrw.splits, 1);
+    EXPECT_EQ(plan->wrw.splitTiles % 64, 0);
+    EXPECT_GE(static_cast<long long>(plan->wrw.splits) * plan->wrw.splitTiles, plan->wrw.ldt);
+    EXPECT_LT(static_cast<long long>(plan->wrw.splits - 1) * plan->wrw.splitTiles, plan->wrw.ldt);
+    EXPECT_EQ(plan->partBytes, size_t{16 * 6 * 4 * 4} * static_cast<size_t>(plan->wrw.splits));
+    // A device reporting no units: one split.
+    const auto unknown = wrwPlan(shape, wrwFma(), 0);
+    ASSERT_TRUE(unknown.has_value());
+    EXPECT_EQ(unknown->wrw.splits, 1);
+}
+
+TEST(TestConvWinogradWrwPlan, SlicesTheBatchUnderTheWorkspaceLimit)
+{
+    auto shape = baseShape();
+    shape.n = 64;
+    shape.c = 64;
+    shape.k = 64;
+    shape.input = {32, 32};
+    const auto whole = wrwPlan(shape, wrwFma());
+    ASSERT_TRUE(whole.has_value());
+    EXPECT_EQ(whole->slices, 1);
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter limit(
+        "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_WORKSPACE_MB", "8");
+    const auto sliced = wrwPlan(shape, wrwFma());
+    ASSERT_TRUE(sliced.has_value());
+    EXPECT_GT(sliced->slices, 1);
+    EXPECT_LE(sliced->workspaceBytes, size_t{8} << 20);
+    EXPECT_EQ(sliced->wrw.n, sliced->sliceImages);
+    EXPECT_EQ(sliced->wrw.tiles, sliced->sliceImages * 16 * 16);
+    // One image past the limit: declined.
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tiny(
+        "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_WORKSPACE_MB", "1");
+    EXPECT_FALSE(wrwPlan(shape, wrwFma()).has_value());
+}
+
+TEST(TestConvWinogradWrwPlan, StagesChannelsLastByTransposeAndMixedByCopy)
+{
+    auto properties = testDeviceProperties();
+    properties.multiProcessorCount = 64;
+    const auto planOf = [&](const ConvGraphSpec& spec) {
+        const GraphFixture fixture(buildGraph(spec), properties);
+        const auto problem
+            = parseWinogradProblem(fixture.context(), ConvDirection::BACKWARD_WEIGHTS);
+        return conv_winograd::planFor(
+            *problem, *conv_winograd::configOf(wrwKernelOf(wrwFma(), "FLOAT")), properties);
+    };
+    // Channels-first: read in place.
+    const auto nchw = planOf(specFor(baseShape(), ConvDirection::BACKWARD_WEIGHTS));
+    ASSERT_TRUE(nchw.has_value());
+    EXPECT_FALSE(nchw->in.needed);
+    EXPECT_FALSE(nchw->out.needed);
+    // Packed channels-last: the tiled transpose, dims (N, H x W, C), 64 x 64 tiles per image.
+    auto channelsLast = baseShape();
+    channelsLast.channelsLast = true;
+    const auto nhwc = planOf(specFor(channelsLast, ConvDirection::BACKWARD_WEIGHTS));
+    ASSERT_TRUE(nhwc.has_value());
+    EXPECT_TRUE(nhwc->in.needed && nhwc->in.transpose);
+    EXPECT_TRUE(nhwc->out.needed && nhwc->out.transpose);
+    EXPECT_EQ(nhwc->in.copy.dims[0], 2);
+    EXPECT_EQ(nhwc->in.copy.dims[1], 7 * 6);
+    EXPECT_EQ(nhwc->in.copy.dims[2], 4);
+    EXPECT_EQ(nhwc->out.copy.dims[2], 6);
+    EXPECT_EQ(nhwc->in.transposeBlocks[0], 1u);
+    EXPECT_EQ(nhwc->in.transposeBlocks[1], 1u);
+    EXPECT_EQ(nhwc->in.transposeBlocks[2], 2u);
+    EXPECT_EQ(nhwc->in.bytes, size_t{2 * 4 * 7 * 6 * 4});
+    // Mixed layouts: the element-wise copy.
+    auto spec = specFor(baseShape(), ConvDirection::BACKWARD_WEIGHTS);
+    spec.y.strides = packedStrides(spec.y.dims, true);
+    const auto mixed = planOf(spec);
+    ASSERT_TRUE(mixed.has_value());
+    EXPECT_TRUE(mixed->in.needed && !mixed->in.transpose);
+    EXPECT_TRUE(mixed->out.needed && !mixed->out.transpose);
+    EXPECT_EQ(mixed->out.bytes, size_t{2 * 6 * 7 * 6 * 4});
+}
+
+TEST(TestConvWinogradComputeType, ServesCudnnsComputeTypesPerElementType)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        expectCudnnComputeTypes(
+            baseShape(),
+            {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16},
+            [direction](const ConvShape& s) { return parse(specFor(s, direction)).has_value(); });
     }
 }
 

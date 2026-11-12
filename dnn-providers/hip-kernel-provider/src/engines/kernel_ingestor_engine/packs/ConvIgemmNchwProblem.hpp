@@ -13,6 +13,7 @@
 
 #include "engines/kernel_ingestor_engine/descriptors/conv/igemm_nchw/kernels/ConvIgemmNchwArgs.h"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveProblem.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvTf32Split.hpp"
 
 /**
  * @file ConvIgemmNchwProblem.hpp
@@ -77,6 +78,10 @@ struct NchwConfig
     /// ((taps - 1) dilation, plus one at strides past 1). FMA: the vector (a register window,
     /// unit dilation), or wider at stride 1.
     int64_t halo = 0;
+    /// 0: the graph's element type. 1: three-bf16 for an fp32 graph under TF32 permission
+    /// (conv_igemm::tf32Permitted): a bf16 matrix-core config on dy and w split along K into 3K
+    /// channels (ConvTf32Split.hpp), dx written in fp32.
+    int64_t math = 0;
 };
 
 /// A backward-data convolution the kernel serves.
@@ -105,6 +110,10 @@ struct NchwLaunch
     unsigned int block = 0;
     /// K1's atom template (empty for the FMA kernel).
     std::string_view kernelType;
+    /// Three-bf16 (math 1): the split pre-pass and the kernel's arguments for the 3K problem.
+    bool split = false;
+    conv_tf32::SplitPlan plan;
+    K7Args args{};
 };
 
 /**
@@ -124,8 +133,18 @@ std::optional<NchwProblem>
 /// The atom_id of @p atom, or -1 for an unknown one.
 int64_t atomIdOf(std::string_view atom);
 
-/// LDS bytes a config's kernel declares (the kernels' own arithmetic), for @p elementBytes.
+/// LDS bytes a config's kernel declares (the kernels' own arithmetic), for @p elementBytes (the
+/// operands'; a math-1 config writes its output tile in fp32).
 int64_t ldsBytesOf(const NchwConfig& config, int elementBytes);
+
+/**
+ * @brief The bf16 problem a three-bf16 config runs for fp32 @p problem: K tripled (dy and w
+ *        split along K, ConvTf32Split.hpp), or nullopt when its 3K offsets leave 32 bits.
+ */
+std::optional<NchwProblem> threeBf16ProblemOf(const NchwProblem& problem);
+
+/// Whether three-bf16 is admitted for @p problem on @p gcnArchName (where it pays).
+bool threeBf16Pays(const NchwProblem& problem, std::string_view gcnArchName);
 
 /**
  * @brief The launch of @p config on @p problem, or nullopt when the config does not compute it
@@ -138,6 +157,11 @@ int64_t ldsBytesOf(const NchwConfig& config, int elementBytes);
  * tap's reach (FMA: one vector at unit dilation, wider at stride 1); flat against the problem; the LDS within 64 KiB;
  * the grid within the launch limits. The device and dtype checks are the kernel
  * match's (atomRunsOn, the dtype string).
+ *
+ * math 0, or 1 (three-bf16): an fp32 problem, TF32 permitted, a bf16 matrix-core atom (the
+ * kernel match also requires threeBf16Pays for the device); the config is then gated on
+ * threeBf16ProblemOf(problem), and the launch carries the split pre-pass (plan) and the 3K
+ * problem's arguments.
  */
 std::optional<NchwLaunch> nchwLaunchFor(const NchwProblem& problem, const NchwConfig& config);
 
