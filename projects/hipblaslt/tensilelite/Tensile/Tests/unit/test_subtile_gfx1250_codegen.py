@@ -538,7 +538,7 @@ class TestGfx1250MxSubtileTdm:
         assert "tensor_load_to_lds" not in asm
 
     def test_a_lr_four_ds_load_b128(self):
-        """32x16 A is 16 VGPRs: four ds_load_b128 per MMA tile."""
+        """32x16 A is 16 VGPRs: four ds_load_b128 per MMA tile (one stencil + imms)."""
         from Tensile.Components.Subtile.SubtileLREmit import emitSingleDsRead
         kernel = _fp4_tdm_kernel()
         writer, tiA, tiB, *_ = _create_writer_gfx1250_mx(kernel)
@@ -548,20 +548,38 @@ class TestGfx1250MxSubtileTdm:
         tiA.allocVgprTileRegisters_legacy(writer, kernel)
         tile = tiA.vgprTiles[0]
         assert len(tile.regList.indices) == 16
-        assert len(tiA.sharedVgprLROffset) == 8
+        # gemm_wt style: one stencil VGPR; per-read displacements are immediates.
+        assert len(tiA.sharedVgprLROffset) == 1
         asm = str(emitSingleDsRead(tiA, 0, 0, 0, tile, swizzled=False))
         assert asm.count("ds_load_b128") == 4
         for i in range(4):
             assert "read=%u" % i in asm
+        # DepthU=256 -> depthUBytes=128. Pad-adjusted read imms:
+        # 0, 32, 16*128+16*(2048/256)=2176, 2080+128=2208. One addr VGPR.
+        assert asm.count(", v1 ") == 4 or asm.count(", v1\n") + asm.count(", v1 ") >= 1
+        assert "offset:32" in asm
+        assert "offset:2176" in asm
+        assert "offset:2208" in asm
+        # Same stencil for every read (gemm_wt); previously each read had its own VGPR.
+        assert len(set(
+            line.split(",")[1].strip().split()[0]
+            for line in asm.splitlines() if "ds_load_b128" in line or "ds_read_b128" in line
+        )) == 1
         asmSecondM = str(emitSingleDsRead(tiA, 1, 0, 0, tile, swizzled=False))
+        # Tile stride 4352 + read imms.
         assert "offset:4352" in asmSecondM
-        assert "offset:4608" not in asmSecondM
-        # Second K-subtile (DepthU 512): subtileShapeK * instK * 0.5 B = 128 B into the row.
+        assert "offset:4384" in asmSecondM
+        assert "offset:6528" in asmSecondM
+        assert "offset:6560" in asmSecondM
+        # Second K-subtile: +128 B into the row, plus the same read imms.
         asmSecondK = str(emitSingleDsRead(tiA, 0, 1, 0, tile, swizzled=False))
-        assert asmSecondK.count("offset:128") == 4
+        assert "offset:128" in asmSecondK
+        assert "offset:160" in asmSecondK
+        assert "offset:2304" in asmSecondK
+        assert "offset:2336" in asmSecondK
 
     def test_b_lr_dual_ds_load_b128(self):
-        """32x16 B stays 8 VGPRs: two ds_load_b128 per MMA tile."""
+        """32x16 B stays 8 VGPRs: two ds_load_b128 per MMA tile (one stencil + imms)."""
         from Tensile.Components.Subtile.SubtileLREmit import emitSingleDsRead
         kernel = _fp4_tdm_kernel()
         writer, tiA, tiB, *_ = _create_writer_gfx1250_mx(kernel)
@@ -571,12 +589,13 @@ class TestGfx1250MxSubtileTdm:
         tiB.allocVgprTileRegisters_legacy(writer, kernel)
         tile = tiB.vgprTiles[0]
         assert len(tile.regList.indices) == 8
-        assert len(tiB.sharedVgprLROffset) == 4
+        assert len(tiB.sharedVgprLROffset) == 1
         asm = str(emitSingleDsRead(tiB, 0, 0, 0, tile, swizzled=False))
         assert asm.count("ds_load_b128") == 2
         assert "read=0" in asm
         assert "read=1" in asm
         assert "read=2" not in asm
+        assert "offset:32" in asm
 
     def test_lra_maps_a_instm32_and_b_instm16(self):
         """32x16 WMMA lanes pair rows and alternating K quarters."""
@@ -590,9 +609,9 @@ class TestGfx1250MxSubtileTdm:
         assert "A: WMMA row = laneId % 16" in asm
         assert "B: WMMA row = laneId % 16" in asm
         assert "A: WMMA K quarter = laneId / 16" in asm
-        assert "A: WMMA read 0 byte offset" in asm
-        assert "A: WMMA read 7 byte offset" in asm
-        assert "B: WMMA read 3 byte offset" in asm
+        assert "A: WMMA LR stencil" in asm
+        assert "B: WMMA LR stencil" in asm
+        assert "A: WMMA read 7 byte offset" not in asm
         assert "A: accumulated LDS padding" in asm
         assert "B: accumulated LDS padding" in asm
         assert "TDM wave partition" in asm

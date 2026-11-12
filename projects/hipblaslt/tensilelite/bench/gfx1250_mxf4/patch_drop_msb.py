@@ -35,9 +35,9 @@ seen = 0
 dropped = 0
 msbRe = re.compile(r"^s_set_vgpr_msb ")
 for l in lines:
-    if re.match(r"/\* MAINLOOP_C0 start \*/", l):
+    if re.match(r"/\* MAINLOOP_C0 start \*/", l) or l.startswith("label_LoopBeginL:"):
         inLoop = True
-    elif re.match(r"/\* MAINLOOP_C0 end \*/", l):
+    elif re.match(r"/\* MAINLOOP_C0 end \*/", l) or l.startswith("label_ExitMainloopBufEven:"):
         inLoop = False
 
     if inLoop and msbRe.match(l):
@@ -48,7 +48,7 @@ for l in lines:
     out.append(l)
 
 print(f"{dropped}/{seen} s_set_vgpr_msb dropped from MAINLOOP_C0 (every={args.every})", file=sys.stderr)
-assert seen > 200, f"expected 247 s_set_vgpr_msb in one MAINLOOP_C0 copy, saw {seen}"
+assert seen > 200, f"expected >200 s_set_vgpr_msb in the mainloop region, saw {seen}"
 
 dst = f"{BENCH}/logs/{time.strftime('%Y%m%d-%H%M%S')}-dropmsb-{args.name}"
 os.makedirs(dst)

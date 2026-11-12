@@ -43,6 +43,10 @@ from ...Common.GlobalParameters import globalParameters
 
 # ds_load_b128 reads 4 contiguous VGPRs.
 DS_B128_VGPRS = 4
+# gfx1250 VGPR MSB bank size: logical ids bank*256 .. bank*256+255 share one
+# s_set_vgpr_msb window. gemm_wt keeps ValuA/B inside a single bank so WMMAs
+# and their ds_loads do not thrash the MSB between consecutive operand tiles.
+VGPR_BANK = 256
 
 def _checkout_tile(pool, numRegs, tag):
     """Check out one VGPR tile as a single contiguous, min(numRegs, 4)-aligned block (b128-aligned when numRegs >= 4)."""
@@ -62,17 +66,117 @@ def _checkin_tile(tile):
     tile.regList.pool.checkIn(tile.regList.indices[0])
 
 
+def _tiles_from_bases(pool, bases, numRegs):
+    """Build RegisterTileInfo list from checkOutMulti bases."""
+    from Tensile.Components.Subtile.Kernel import RegisterTileInfo
+    tiles = []
+    for base in bases:
+        tile = RegisterTileInfo(pool)
+        for k in range(numRegs):
+            tile.append(int(base) + k)
+        tiles.append(tile)
+    return tiles
+
+
+def _range_available(pool, start, size):
+    """True when [start, start+size) is Available (room past pool.size() counts as free)."""
+    Available = pool.Status.Available
+    end = start + size
+    if hasattr(pool, "appendPool") and end > pool.size():
+        pool.appendPool(end)
+    pl = pool.getPool()
+    n = len(pl)
+    if end > n:
+        return False
+    return all(pl[i].status == Available for i in range(start, end))
+
+
+def _occupy_below(pool, limit, tag):
+    """Check out every free register in [0, limit) so the next first-fit lands at/after limit."""
+    Available = pool.Status.Available
+    blockers = []
+    while True:
+        pl = pool.getPool()
+        start = None
+        for i in range(min(limit, len(pl))):
+            if pl[i].status == Available:
+                start = i
+                break
+        if start is None:
+            break
+        end = start + 1
+        while end < limit and end < len(pl) and pl[end].status == Available:
+            end += 1
+        idx = pool.checkOutAligned(end - start, 1, tag=tag, preventOverflow=False)
+        if idx >= limit:
+            pool.checkIn(idx)
+            break
+        blockers.append(idx)
+    return blockers
+
+
+def _checkout_tiles_contiguous(pool, count, numRegs, tag):
+    """Check out `count` tiles as one contiguous block (gemm_wt-style packing).
+
+    Uses checkOutMulti so each tile keeps its own checkIn handle (dealloc still
+    works per-tile) while the physical range is contiguous and hole-free.
+    """
+    if count <= 0:
+        return []
+    align = min(numRegs, DS_B128_VGPRS)
+    sizes = [numRegs] * count
+    tags = ["%s_%u" % (tag, i) for i in range(count)]
+    bases = pool.checkOutMulti(sizes, align, tags)
+    return _tiles_from_bases(pool, bases, numRegs)
+
+
+def _checkout_ab_packed(pool, countA, regsA, countB, regsB, tag):
+    """Pack ValuA then ValuB into one contiguous span, preferring a single MSB bank.
+
+    When A+B fit in VGPR_BANK registers, temporarily occupy free regs below a
+    free bank so first-fit places the whole operand slab inside that bank
+    (typically bank 3 after ValuC fills banks 0-2). Falls back to plain
+    contiguous packing when no single bank can hold them.
+    """
+    nA, nB = int(countA), int(countB)
+    if nA <= 0 and nB <= 0:
+        return [], []
+    total = nA * regsA + nB * regsB
+    align = min(regsA if nA else regsB, DS_B128_VGPRS)
+
+    blockers = []
+    if total > 0 and total <= VGPR_BANK:
+        # Prefer the highest bank that can hold the slab (leave bank 0 for scales).
+        for bank in range(3, -1, -1):
+            start = bank * VGPR_BANK
+            if _range_available(pool, start, total):
+                blockers = _occupy_below(pool, start, tag + "_bankBlocker")
+                break
+
+    sizes = [regsA] * nA + [regsB] * nB
+    tags = ["%s_A%u" % (tag, i) for i in range(nA)] + ["%s_B%u" % (tag, i) for i in range(nB)]
+    try:
+        bases = pool.checkOutMulti(sizes, align, tags) if sizes else []
+    finally:
+        for b in blockers:
+            pool.checkIn(b)
+
+    basesA = bases[:nA]
+    basesB = bases[nA:]
+    return (_tiles_from_bases(pool, basesA, regsA),
+            _tiles_from_bases(pool, basesB, regsB))
+
+
 def _hoistSetupBeforeLastMFMA(loopBody, setupInsts):
-    """Move loop-control setup (dec + compare) above the body's last MFMA.
+    """Move loop-control setup above the body's last MFMA.
 
     Place the loop-control branch immediately after the last MFMA to hide
-    branching latency behind it. The decrement+compare that feed the branch's
-    SCC are normally emitted right after the body (MFMA; s_sub; s_cmp;
-    s_cbranch); hoisting them above the final MFMA produces (s_sub; s_cmp;
-    MFMA; s_cbranch) so the branch directly follows the MFMA.
+    branching latency behind it. Classic setup is ``s_sub; s_cmp``; gfx1250
+    borrow-exit is a single ``s_sub`` (SCC <- borrow, no s_cmp). Hoisting
+    produces ``(setup; MFMA; s_cbranch)`` so the branch follows the MFMA.
 
-    The hoist is dependency-safe: SCC set by s_cmp survives the MFMA (which
-    never touches SCC), and the MFMA does not read LoopCounterL.
+    The hoist is dependency-safe: SCC from s_cmp / s_sub survives the MFMA
+    (which never touches SCC), and the MFMA does not read LoopCounterL.
 
     Falls back to appending the setup when the body has no MFMA (e.g. a skip
     branch with no preceding compute), leaving behavior unchanged there.
@@ -103,7 +207,7 @@ def _hoistSetupBeforeLastMFMA(loopBody, setupInsts):
 
 
 def _emitBodySetupBranch(module, loopBody, setupInsts, branch, hoist):
-    """Append a loop body, its dec+compare setup, and the trailing control branch.
+    """Append a loop body, its exit-test setup, and the trailing control branch.
 
     When ``hoist`` is set, the setup is moved above the body's last MFMA (via
     _hoistSetupBeforeLastMFMA) so the branch lands right after that MFMA to hide
@@ -348,6 +452,17 @@ class SchedulerConfig:
                               # upfront; by itself just removes the 2-deep register reuse.
     hoistTDMSetup: bool = False  # TDM A/B: issue gr_inc + descriptor refresh before the
                               # GR chain's barrier so only tensor_load_to_lds waits on it.
+    persistentTDMPatch: bool = False  # TDMSingleIssuer: descriptors stay live per issuer
+    # TDMSingleIssuer: emit the (A-site) ungated descriptor advance as a postOp
+    # of the MFMA this many slots before the GR instead of right before the
+    # barrier/load, so it hides under in-flight WMMAs. 0 = at the GR (preOp).
+    sinkTDMAdvance: int = 0
+                              # wave; do not hoist tdm_refresh (patch lives inside the
+                              # wave-gated load so other issuers' SGPRs stay intact).
+    # B/SB local reads run this many K-chunks ahead of their MFMA (A/SA stay at 1).
+    # >1 finishes B's reads of a macro tile earlier, so B's FREE/TDM and READY
+    # separate from A's. Single partition only.
+    lrLookaheadB: int = 1
 
     # Resolve a partition spec into per-partition sizes along one dimension.
     # spec is either:
@@ -448,6 +563,16 @@ class SchedulerConfig:
         self.offsetPartition = 1 if self.pgr >= 2 else 0
         if self.pgr == 0:
             assert self.numPartitions == 1, "pgr=0 requires numPartitions=1"
+        # Deeper B lookahead is only modelled for one partition with 1-K LR chunks;
+        # elsewhere (incl. VGPR-driven partition fallbacks) fall back to 1.
+        if (self.lrLookaheadB > 1
+                and (self.pgr == 0 or self.numPartitions > 1 or data_multi_du
+                     or self.lrB.k != 1 or (self.hasScale and self.lrSB.k != 1)
+                     or self.lrLookaheadB >= self.numSubIterK)):
+            self.lrLookaheadB = 1
+
+    def lrLookahead(self, tensor: str) -> int:
+        return self.lrLookaheadB if tensor in ('B', 'SB') else 1
 
     @property
     def partitionSizesM(self) -> List[int]:
@@ -1002,13 +1127,30 @@ class LogicalScheduler:
 
                 for side_idx, side in enumerate(sides):
                     slot_k = base_slot + (side_idx % k_gran)
+                    lookahead = cfg.lrLookahead(side[0][0])
+                    if lookahead > 1:
+                        # Single partition: target chunk wraps into MT n+1.
+                        target = chunk_idx + lookahead
+                        is_wrap = target >= num_chunks
+                        lr_mt = 1 if is_wrap else 0
+                        lr_k_start = (target % num_chunks) * k_gran
+                        lr_k_end = lr_k_start + k_gran
+                    else:
+                        is_wrap = (next_chunk == 0)
+                        lr_mt = 1 if is_last and is_wrap else 0
+                        lr_k_start = next_chunk * k_gran
+                        lr_k_end = lr_k_start + k_gran
                     # Redirect LRs away from slots committed to a different MT,
                     # keeping each slot MT-homogeneous.
                     # This reduce the number of wait_gr_sync needed as all LRs 
                     # in the same subIterK wait for the same MT iterration.
-                    committed = slot_mt.get(slot_k)
+                    # A deeper-lookahead side is meant to read MT n+1 alongside
+                    # the other side's MT n reads, so it is tracked on its own.
+                    mt_key = (slot_k, lookahead) if cfg.lrLookaheadB > 1 else slot_k
+                    committed = slot_mt.get(mt_key)
                     if committed is not None and committed != lr_mt:
                         slot_k = numK - 1
+                        mt_key = (slot_k, lookahead) if cfg.lrLookaheadB > 1 else slot_k
 
                     for tensor, gran in side:
                         tile_range = nxt if (is_wrap or not multi_part) else cur
@@ -1048,7 +1190,8 @@ class LogicalScheduler:
                             subIterK_slot=emit_slot,
                         )
                         slots[emit_slot].lrs.append(lr)
-                        slot_mt[emit_slot] = lr_mt
+                        slot_mt[(emit_slot, lookahead) if cfg.lrLookaheadB > 1
+                                else emit_slot] = lr_mt
 
         return slots
 
@@ -1297,6 +1440,12 @@ class LogicalScheduler:
                 return 1
             if cfg.scaleFullResidency and tensor in ('SA', 'SB'):
                 return num_k_groups[tensor]
+            # Lookahead L keeps L+1 K-chunks live; round up to a divisor of the
+            # chunk count so set indices stay periodic without unrolling.
+            need = cfg.lrLookahead(tensor) + 1
+            nkg = num_k_groups[tensor]
+            if need > 2:
+                return next(d for d in range(need, nkg + 1) if nkg % d == 0)
             return 2
 
         def _tile_set_idx(tensor, unroll_iter, k_chunk, gran):
@@ -1628,6 +1777,7 @@ class LogicalScheduler:
         # correctly produces mt_offset=-2 GR->LR overlap, but DEADLOCKS at
         # runtime until the mainloop prologue prefetches numLdsBlk-1 MTs and the
         # producer/consumer barrier handshake is in place (see deep-pipeline TODO).
+        # Also: DU512 MXF4 ×3 LDS exceeds MaxLDS; prior TDMPlus attempts failed.
         offsetMT = 0 if pgr == 0 else 1
 
         maxUnroll = max(self.config.numUnroll.values())
@@ -2455,6 +2605,8 @@ class LogicalScheduler:
         lr_inc_tensors = set()  # tensors that already received lr_inc via MT transition
 
         multiDU = self._is_multi_du() and self.config.pgr == 1
+        sinkAdv = self.config.sinkTDMAdvance if self.config.persistentTDMPatch else 0
+        mfma_hist = []  # MFMA placements of slots already walked (global order)
 
         for pi, slots in enumerate(self._partitions):
             for slot in slots:
@@ -2491,8 +2643,15 @@ class LogicalScheduler:
                             prev_mt = 0
                         if prev_mt != mt:
                             if gr.tiles.tileId_start == 0:
-                                gr.preOps.append(GRIncOp(tensor=tensor, unrollId=uid))
+                                if (sinkAdv and tensor == 'A'
+                                        and len(mfma_hist) >= sinkAdv):
+                                    mfma_hist[-sinkAdv].postOps.append(
+                                        GRIncOp(tensor=tensor, unrollId=uid))
+                                else:
+                                    gr.preOps.append(GRIncOp(tensor=tensor, unrollId=uid))
                     last_gr_mt[key] = mt
+                if slot.mfma is not None:
+                    mfma_hist.append(slot.mfma)
 
         if multiDU:
             for (tensor, uid), gr in last_gr.items():
@@ -2843,7 +3002,9 @@ class LogicalScheduler:
                         op for op in gr.preOps[start:] if not isinstance(op, GRIncOp)]
                     hoisted += incs
                     gran = self.config.grA if gr.tensor == 'A' else self.config.grB
-                    if (gr.tensor in ('A', 'B') and gr.tiles.tileId_start == 0
+                    if (not self.config.persistentTDMPatch
+                            and gr.tensor in ('A', 'B')
+                            and gr.tiles.tileId_start == 0
                             and gr.tiles.subIterK_start == gr.unrollId * gran.k):
                         hoisted.append(TDMRefreshOp(tensor=gr.tensor))
                         gr.tdmDescHoisted = True
@@ -3341,6 +3502,19 @@ class LogicalScheduler:
             if tensor in first_mfma.vgpr_tile_maps:
                 lr.vgpr_tile_map = copy.deepcopy(first_mfma.vgpr_tile_maps[tensor])
             placements.append(lr)
+        # Deeper lookahead: the mainloop's first LRs for these tensors target
+        # chunk L, so the preloop also fills chunks 1..L-1.
+        for tensor in self.tensors:
+            t = tiles[tensor]
+            for k in range(1, self.config.lrLookahead(tensor)):
+                mfma = self._partitions[0][k].mfma
+                lr = LRPlacement(
+                    tensor=tensor, mtIteration=0,
+                    tiles=MFMATileRange(k, k + 1, t.tileId_start, t.tileId_end),
+                    subIterK_slot=0, partition=0)
+                if tensor in mfma.vgpr_tile_maps:
+                    lr.vgpr_tile_map = copy.deepcopy(mfma.vgpr_tile_maps[tensor])
+                placements.append(lr)
         return placements
 
     def _make_depops_all_tensors(self, cls) -> List[BaseOp]:
@@ -3526,6 +3700,7 @@ class LogicalScheduler:
           LR          — first partition, subIterK=0
           skip(LE 1, NLL)
           GR(MT 1)    — first partition tiles (× numUnroll if unrolled)
+          PrefetchGL2 — optional GL2 warm (when PrefetchGL2 > 0)
           skip(LE 2, NGLL)
 
         Returns [1 partition][1 subIterK][EmittedModules] to match emit() shape.
@@ -3645,7 +3820,11 @@ class LogicalScheduler:
         from Tensile.Components.Subtile.WaitAluInsertion import (
             insertLRSwapRawWaitAlu, setMatrixReuse, insertLRSwapWarWaitAlu,
             hoistLRSwapAboveWaitTDM, spreadLRSwapAcrossPriorMfma,
-            spreadPreFreeTDMSALU, spreadPostReadyDsLoads)
+            spreadPreFreeTDMSALU, spreadPostReadyDsLoads,
+            advanceDsLoadsForWarSlack, splitWaitLRPerTile,
+            relocateFreeToLastConsumer, placeFreeBarrierAfterWmma,
+            hideWgpBarrierBehindWmma, spreadTDMSingleIssuerAdvance,
+            spreadGL2PrefetchIntoWmma, dropOrphanPreFreeDscnt)
         from rocisa.code import Module, Label
         from rocisa.container import sgpr
         from rocisa.instruction import SCmpEQU32, SCBranchSCC0, SMovB32
@@ -3677,16 +3856,25 @@ class LogicalScheduler:
                         em_list,
                         multiDU=self._is_multi_du(),
                         minGapDsReadToWait=minGapDsReadToWait)
-                    if lrOrder:
+                    # Without LDSSegmentInterleave, still prefer B-first on MAINLOOP
+                    # so B LRs age before the subIterK wait_lr (enables split waits).
+                    # Only reorder A/B data slots — do not move SA/SB (scale WAR /
+                    # early-issue assumptions). No reverse: B0 is first-used.
+                    useOrder = lrOrder
+                    if (useOrder is None and label.startswith("MAINLOOP")
+                            and isGfx1250):
+                        _b_then_a = (('B', False), ('A', False))
+                        useOrder = (_b_then_a, _b_then_a)
+                    if useOrder:
                         from rocisa.instruction import LocalReadInstruction
-                        orderTensors = {t for order in lrOrder for t, _ in order}
+                        orderTensors = {t for order in useOrder for t, _ in order}
                         tensorOf = {id(inst): em.source.tensor
                                     for em in em_list
                                     if em.opType == 'lr' and em.source.tensor in orderTensors
                                     for item in em.instructions
                                     for inst in (item.flatitems() if isinstance(item, Module) else [item])
                                     if isinstance(inst, LocalReadInstruction)}
-                        scheduled = _reorderLocalReads(scheduled, tensorOf, lrOrder, lrGate)
+                        scheduled = _reorderLocalReads(scheduled, tensorOf, useOrder, lrGate)
                     if (isGfx1250 and self.config.hasScale
                             and label.startswith("MAINLOOP")):
                         scheduled = issueScaleReadsEarly(
@@ -3724,7 +3912,39 @@ class LogicalScheduler:
         # only — NGLL/tail has different live scale regs and fails validate).
         if label.startswith("MAINLOOP"):
             module = spreadPostReadyDsLoads(module, writer, kernel)
-            # splitWaitLRPerTile: tried; regresses ~1% — leave off for now.
+            # SCHED=3-style: pull A/B data LRs left to last-reader+1 (WAR fence)
+            # to grow ds_load→first-use slack; then recompute per-tile dscnt.
+            module = advanceDsLoadsForWarSlack(module, writer, kernel)
+            module = splitWaitLRPerTile(module, writer, kernel)
+            # Proto FREE: park barrier+TDM after the WMMA that first consumes the
+            # freed slice's last load (fine wait is the proof — no hard dscnt=0).
+            module = relocateFreeToLastConsumer(module, writer, kernel)
+            # FREE-hole: wait_dscnt; WMMAs; barrier (wait after WMMA).
+            module = placeFreeBarrierAfterWmma(module, writer, kernel)
+            # Proto SIG_EARLY: drain ; signal ; WMMAs ; wait — hide WGP wait
+            # behind independent cover (FREE-hole MMAs / READY pre-drain MMAs).
+            module = hideWgpBarrierBehindWmma(module, writer, kernel)
+            # Proto SALU-in-hole: split the post-load TDMSingleIssuer advance wall
+            # into per-issuer gated chunks and hide them under following WMMAs.
+            module = spreadTDMSingleIssuerAdvance(module, writer, kernel)
+            # MERGE_BAR unwired: hoisting READY ahead of this iter's TDM forces
+            # tcnt_exact N=0 (nothing issued after the awaited fill) and stalls
+            # every iteration (~0.86–0.90×). Proto mainloop keeps wait_tensorcnt 1
+            # *after* TDM+cover so the wait is latency-hidden (N=1 pipeline, not
+            # a drain). Classic FREE→TDM→cover→tcnt 1→READY matches that.
+            # Re-spread post-READY A/B b128 after advances: the first pass runs
+            # before advances are split, so issuer SALU islands truncate the
+            # WMMA cover window and leave a ~10-load burst at READY. With
+            # advances already in WMMA holes, a second pass can hide that burst.
+            module = spreadPostReadyDsLoads(module, writer, kernel)
+            # gemm_wt GL2 PF: lift Inc+Issue off the post-TDM wall into post-LR
+            # WMMA holes clear of pf_tdm_gap (no-op when PrefetchGL2==0).
+            module = spreadGL2PrefetchIntoWmma(module, writer, kernel)
+        elif label.startswith("NGLL") or label.startswith("NLL"):
+            # Fine dscnt only (no WAR-slack advance / spreadPostReady — those
+            # aborted the client on exit paths). Replaces classic hard drains.
+            module = splitWaitLRPerTile(module, writer, kernel)
+
         # gfx1250: enable WMMA matrix-A reuse on the final post-schedule order.
         module = setMatrixReuse(module, writer, kernel, 'a')
         module = setMatrixReuse(module, writer, kernel, 'b')
@@ -3734,10 +3954,14 @@ class LogicalScheduler:
         if self.config.pgr == 0 and label.startswith("MAINLOOP"):
             module = insertLRSwapWarWaitAlu(module, writer, kernel)
         # Cluster barrier: splice both halves against the final post-schedule order.
-        # Signal goes right after the mainloop's existing workgroup barrier (reusing
-        # that sync); the wait is appended at the end to hide its cross-CU latency.
+        # FREE sites: proto pretdm — signal ~CBSIG_WMMA earlier, wait just before
+        # FREE WGP, then TDM.  Non-FREE (preloop) keeps signal+wait after the WGP.
         from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
         module = insertClusterBarrier(module, writer, kernel)
+        # Proto: FREE has no barrier-local dscnt.  SIG_EARLY leaves the cover
+        # WMMAs' fine wait glued in front of CW — drop that orphan drain.
+        if label.startswith("MAINLOOP"):
+            module = dropOrphanPreFreeDscnt(module, writer, kernel)
         return module
 
     def _emit_pgr2_tail_lw_align(self, kernel):
@@ -3799,8 +4023,8 @@ class LogicalScheduler:
         module = Module("MainAndExitLoops")
         uf = self.unroll_factor
 
-        # gfx1250 requires a loop-back/exit s_cbranch to be alone/first after an
-        # MFMA, so hoist the per-copy dec+compare above the body's last MFMA.
+        # gfx1250: hoist the per-copy exit-test SALU above the body's last MFMA
+        # so the loop-back/exit s_cbranch sits right after that MFMA.
         isGfx1250 = writer.states.archCaps.get("HasWmmaArbStallBit", False)
 
         def make_subtile_pap_module(skip_barrier=False):
@@ -3963,6 +4187,29 @@ class LogicalScheduler:
         loopBegin = Label("LoopBeginL", "", alignment=16)
 
         exitValue = self.config.pgr
+        # gemm_wt / slide "exit test in a hole": one s_sub sets SCC on borrow
+        # (no s_cmp), then s_cbranch. Bias LoopCounterL once to (iters - 1) so
+        # the last iteration's s_sub borrows — same as opt_v7's
+        # ``kcnt = ceil(K/du) - 1``. PrefetchGL2 guards still need the unbiased
+        # count, so keep classic sub+cmp when PrefetchGL2 > 0. No exit restore:
+        # the tail recomputes LoopCounterL from K % DepthU.
+        useBorrowExit = isGfx1250 and kernel.get("PrefetchGL2", 0) == 0
+
+        def loopExitSetup(comment_tag):
+            """SALU that feeds the loop-control branch's SCC."""
+            if useBorrowExit:
+                return [
+                    SSubU32(dst=sgpr("LoopCounterL"),
+                            src0=sgpr("LoopCounterL"), src1=1,
+                            comment=f"dec counterL (borrow=exit) ({comment_tag})"),
+                ]
+            return [
+                SSubU32(dst=sgpr("LoopCounterL"),
+                        src0=sgpr("LoopCounterL"), src1=1,
+                        comment=f"dec counterL ({comment_tag})"),
+                SCmpEQU32(src0=sgpr("LoopCounterL"), src1=exitValue,
+                          comment=f"counterL == {exitValue}? ({comment_tag} exit)"),
+            ]
 
         exitLabels = [Label(f"ExitC{ui}", "") for ui in range(uf - 1)]
         loopBeginB = Label("LoopBeginL_PortB", "", alignment=16) if portSplit else None
@@ -3978,6 +4225,13 @@ class LogicalScheduler:
             from rocisa.instruction import SMovB32 as _SMovB32
             from rocisa.instruction import STtraceData as _STtraceData
 
+        # After preloop skip guards (unbiased L): mainloop iters = L - PGR, so
+        # kcnt = iters - 1 = L - (PGR + 1). One subtract, matching gemm_wt.
+        if useBorrowExit:
+            module.add(SSubU32(dst=sgpr("LoopCounterL"),
+                               src0=sgpr("LoopCounterL"), src1=exitValue + 1,
+                               comment="borrow-exit: L = (L - PGR) - 1 = iters-1"))
+
         def emitMainloopCopies(begin, lrOrder, suffix, ownCopy, lrGate=None):
             module.add(begin)
             for ui in range(uf):
@@ -3992,14 +4246,7 @@ class LogicalScheduler:
                 emitted = copy.deepcopy(self._emitted_per_unroll[ui]) if ownCopy else self._emitted_per_unroll[ui]
                 loopBody = self._emitLoop(writer, kernel, f"MAINLOOP_C{ui}" + suffix,
                                           emitted, lrOrder=lrOrder, lrGate=lrGate)
-                # dec + compare that produce the SCC the loop-control branch reads.
-                setupInsts = [
-                    SSubU32(dst=sgpr("LoopCounterL"),
-                            src0=sgpr("LoopCounterL"), src1=1,
-                            comment=f"dec counterL (copy {ui})"),
-                    SCmpEQU32(src0=sgpr("LoopCounterL"), src1=exitValue,
-                              comment=f"counterL == {exitValue}? (copy {ui} exit)"),
-                ]
+                setupInsts = loopExitSetup(f"copy {ui}")
                 if ui < uf - 1:
                     branch = SCBranchSCC1(
                         labelName=exitLabels[ui].getLabelName(),
@@ -4008,18 +4255,78 @@ class LogicalScheduler:
                     branch = SCBranchSCC0(
                         labelName=begin.getLabelName(),
                         comment="restart mainloop")
-                _emitBodySetupBranch(module, loopBody, setupInsts, branch, hoist=isGfx1250)
+                # Borrow-exit: do NOT hoist — emit ``s_sub; s_cbranch`` as the
+                # literal iteration tail (proto: one SALU then branch). Classic
+                # sub+cmp still hoists above the last MFMA on gfx1250.
+                _emitBodySetupBranch(module, loopBody, setupInsts, branch,
+                                     hoist=isGfx1250 and not useBorrowExit)
 
-        emitMainloopCopies(loopBegin, LR_ORDERS_EVEN if portSplit else None, "", False,
-                           LR_GATE_EVEN if portSplit else None)
-        if portSplit:
-            module.add(SBranch(labelName=loopEnd.getLabelName(), comment="even waves: skip B-first copy"))
-            emitMainloopCopies(loopBeginB, LR_ORDERS_ODD, "_PortB", True, LR_GATE_ODD)
-            module.add(loopEnd)
+        # TDMSingleIssuer: ×2 mainloop bodies with A/B buf half baked into ds
+        # offsets (no mid-iter v_xor). Even starts phase 0, odd starts phase 1;
+        # ExitEven xors LR VGPRs once so NGLL/NLL (runtime xor) see buf1.
+        skipMainloop = Label("SkipMainloop", "")
+        abLdsBake = getattr(self, "_ab_lds_bake", False) and not portSplit
+        exitHoist = isGfx1250 and not useBorrowExit
+        if abLdsBake:
+            from Tensile.Components.Subtile.SubtileLREmit import localReadLDSBufferSwap
+            loopBeginOdd = Label("LoopBeginL_BufOdd", "", alignment=16)
+            exitEven = Label("ExitMainloopBufEven", "")
+            assert uf == 1, "A/B LDS bake requires unroll_factor==1"
+            module.add(loopBegin)
+            if emitTraceMarker:
+                module.add(_SMovB32(dst=mgpr(0), src=sgpr("LoopCounterL"),
+                                    comment="trace: M0 = LoopCounterL"))
+                module.add(_STtraceData(comment="trace: emit M0 to SQTT"))
+            loopBodyEven = self._emitLoop(
+                writer, kernel, "MAINLOOP_C0_BufEven", self._emitted_per_unroll[0])
+            _emitBodySetupBranch(
+                module, loopBodyEven, loopExitSetup("buf even"),
+                SCBranchSCC1(labelName=exitEven.getLabelName(),
+                             comment="buf even exit → sync LR + NGLL"),
+                hoist=exitHoist)
+            module.add(loopBeginOdd)
+            if emitTraceMarker:
+                module.add(_SMovB32(dst=mgpr(0), src=sgpr("LoopCounterL"),
+                                    comment="trace: M0 = LoopCounterL"))
+                module.add(_STtraceData(comment="trace: emit M0 to SQTT"))
+            loopBodyOdd = self._emitLoop(
+                writer, kernel, "MAINLOOP_C0_BufOdd",
+                self._emitted_odd_per_unroll[0])
+            _emitBodySetupBranch(
+                module, loopBodyOdd, loopExitSetup("buf odd"),
+                SCBranchSCC0(labelName=loopBegin.getLabelName(),
+                             comment="restart mainloop (buf even)"),
+                hoist=exitHoist)
+            # Odd exit skips ExitEven's xor (VGPR still buf0) into SkipMainloop.
+            module.add(SBranch(labelName=skipMainloop.getLabelName(),
+                               comment="buf odd exit → NGLL (VGPR already buf0)"))
+            module.add(exitEven)
+            module.add(localReadLDSBufferSwap("A", writer, kernel))
+            module.add(localReadLDSBufferSwap("B", writer, kernel))
+            # MX scales also bake under even/odd (sc_nbuf=2); sync VGPR bases
+            # so NGLL/NLL runtime xor sees buf1 after an even exit.
+            if kernel["ProblemType"].get("MXBlockA", 0):
+                module.add(localReadLDSBufferSwap("MXSA", writer, kernel))
+            if kernel["ProblemType"].get("MXBlockB", 0):
+                module.add(localReadLDSBufferSwap("MXSB", writer, kernel))
+            # NGLL/NLL are separate modules, so insertLRSwapRawWaitAlu won't
+            # see these xors; wait here before falling into SkipMainloop.
+            if isGfx1250:
+                from rocisa.instruction import SWaitAlu
+                module.add(SWaitAlu(
+                    va_vdst=0,
+                    comment="wait for ExitEven LR buffer xor before NGLL"))
+        else:
+            emitMainloopCopies(loopBegin, LR_ORDERS_EVEN if portSplit else None, "", False,
+                               LR_GATE_EVEN if portSplit else None)
+            if portSplit:
+                module.add(SBranch(labelName=loopEnd.getLabelName(), comment="even waves: skip B-first copy"))
+                emitMainloopCopies(loopBeginB, LR_ORDERS_ODD, "_PortB", True, LR_GATE_ODD)
+                module.add(loopEnd)
 
         # ── NGLL + NLL exit paths ──
         hasNGLL = self.config.pgr >= 2
-        module.add(Label("SkipMainloop", ""))
+        module.add(skipMainloop)
         if hasNGLL:
             module.add(Label("SkipToNGLL", ""))
 
@@ -4173,13 +4480,20 @@ class LogicalScheduler:
             return int(math.ceil(tileInfo.mmaTileRegCount * lrGran.k * lrGran.mn))
 
         def _alloc_tiles(count, numRegs):
-            return [_checkout_tile(writer.vgprPool, numRegs, "allocVgprTiles_vstart")
-                    for _ in range(count)]
+            # Contiguous slab (not per-tile first-fit) so a small bank-0 hole
+            # cannot steal one B tile away from the rest of ValuB.
+            return _checkout_tiles_contiguous(
+                writer.vgprPool, count, numRegs, "allocVgprTiles_vstart")
 
-        self.vgprTilesA = _alloc_tiles(self.tile_peaks.get('A', 0),
-                                       _tile_vgpr_count(tileInfoA, cfg.lrA))
-        self.vgprTilesB = _alloc_tiles(self.tile_peaks.get('B', 0),
-                                       _tile_vgpr_count(tileInfoB, cfg.lrB))
+        # Pack ValuA+ValuB into one contiguous span, preferably one MSB bank
+        # (gemm_wt style). Scales stay on the reserved bank-0 hole below.
+        regsA = _tile_vgpr_count(tileInfoA, cfg.lrA)
+        regsB = _tile_vgpr_count(tileInfoB, cfg.lrB)
+        self.vgprTilesA, self.vgprTilesB = _checkout_ab_packed(
+            writer.vgprPool,
+            self.tile_peaks.get('A', 0), regsA,
+            self.tile_peaks.get('B', 0), regsB,
+            "allocVgprTiles")
 
         if cfg.hasScale and scaleTileInfoA and scaleTileInfoB:
             # A/B were placed while the reservation was still held, so freeing
@@ -4332,8 +4646,8 @@ class LogicalScheduler:
                 _checkin_tile(tile)
 
         def _alloc_tiles(count, numRegs):
-            return [_checkout_tile(writer.vgprPool, numRegs, "reallocTailTilesFlat_vstart")
-                    for _ in range(count)]
+            return _checkout_tiles_contiguous(
+                writer.vgprPool, count, numRegs, "reallocTailTilesFlat_vstart")
 
         def _swap(target, new_tiles):
             # In-place swap so the InstructionEmitter's references stay valid.
@@ -4360,12 +4674,15 @@ class LogicalScheduler:
             _swap(self.vgprTilesSA, [])
             _swap(self.vgprTilesSB, [])
 
-        _swap(self.vgprTilesA,
-              _alloc_tiles(peaks.get('A', 0),
-                           _tile_vgpr_count(info['tileInfoA'], cfg.lrA)))
-        _swap(self.vgprTilesB,
-              _alloc_tiles(peaks.get('B', 0),
-                           _tile_vgpr_count(info['tileInfoB'], cfg.lrB)))
+        regsA = _tile_vgpr_count(info['tileInfoA'], cfg.lrA)
+        regsB = _tile_vgpr_count(info['tileInfoB'], cfg.lrB)
+        newA, newB = _checkout_ab_packed(
+            writer.vgprPool,
+            peaks.get('A', 0), regsA,
+            peaks.get('B', 0), regsB,
+            "reallocTailTilesFlat")
+        _swap(self.vgprTilesA, newA)
+        _swap(self.vgprTilesB, newB)
 
         # Flat tiles are freed wholesale by deallocVgprTiles at kernel end;
         # there are no pre-freed tids to skip.
@@ -4414,14 +4731,35 @@ class LogicalScheduler:
 
         emitter.populate(self._preloop_emitted, unroll_iter=0)
 
+        # Even/odd A/B LDS-buf baking (drop mainloop v_xor): only when the
+        # emitter can bake and we have a single unroll copy (dual bodies own
+        # the even/odd phase; uf>1 would need a larger cross product).
+        self._ab_lds_bake = bool(
+            emitter._bakeAbLdsBuf and self.unroll_factor == 1)
+
         self._emitted_per_unroll = []
+        self._emitted_odd_per_unroll = []
         self._ngll_per_unroll = []
         self._nll_per_unroll = []
         for ui in range(self.unroll_factor):
-            em_copy = copy.deepcopy(self._emitted)
-            emitter.populate(em_copy, unroll_iter=ui)
-            self._emitted_per_unroll.append(em_copy)
+            if self._ab_lds_bake:
+                emitter.begin_ab_lds_bake(0, 0)
+                em_even = copy.deepcopy(self._emitted)
+                emitter.populate(em_even, unroll_iter=ui)
+                emitter.end_ab_lds_bake()
+                self._emitted_per_unroll.append(em_even)
 
+                emitter.begin_ab_lds_bake(1, 1)
+                em_odd = copy.deepcopy(self._emitted)
+                emitter.populate(em_odd, unroll_iter=ui)
+                emitter.end_ab_lds_bake()
+                self._emitted_odd_per_unroll.append(em_odd)
+            else:
+                em_copy = copy.deepcopy(self._emitted)
+                emitter.populate(em_copy, unroll_iter=ui)
+                self._emitted_per_unroll.append(em_copy)
+
+            # NGLL/NLL/tail keep runtime A/B xor (ExitEven syncs VGPR parity).
             ngll_copy = copy.deepcopy(self._ngll_emitted)
             emitter.populate(ngll_copy, unroll_iter=ui)
             self._ngll_per_unroll.append(ngll_copy)

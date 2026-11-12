@@ -1,0 +1,81 @@
+# Plain FP4 (no MXBlock), classic non-subtile path. Same MT/MI/DepthU/StreamK
+# as configs/du512_fp4.yaml for an apples-to-apples USI0 vs USI1 compare.
+# ClusterDim / PrefetchGL2 / SIP are subtile-only — omitted here.
+GlobalParameters:
+  SyncsPerBenchmark: 1
+  EnqueuesPerSync: 100
+  NumWarmups: 100
+  NumElementsToValidate: 0
+  PrintLevel: 3
+  Device: 1
+  CMakeBuildType: Release
+  KernelTime: True
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 0
+  DataInitTypeD: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  BoundsCheck: 0
+  KeepBuildTmp: True
+  CpuThreads: 1
+  RotatingBufferSize: 0
+  Architecture: gfx1250
+  ISA: [[12, 5, 0]]
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  -
+    - # ProblemType — F4 without MXBlock
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      UseBias: 0
+      SupportUserArgs: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [true]
+        - MatrixInstruction:
+          - [32, 16, 128, 1,  1, 4, 8,  2, 2]  # MT 256x256  WG 2x2  WT 4x8
+        - DepthU: [512, 256]
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - UseSubtileImpl: [false]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - TDMInst: [3]
+        - SourceSwap: [false]
+        - StaggerU: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - GlobalSplitU: [1]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - PreloadKernArgs: [False]
+        - SwInstructionPrefetch: [0]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4096, 4096, 1, 65536]

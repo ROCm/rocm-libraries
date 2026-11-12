@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 import math
+import os
 from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from copy import deepcopy
@@ -114,6 +115,7 @@ from .SubtileGREmit import (
     emitSingleBufferLoad, emitSubtileBufferLoad, globalReadDoSubtile,
     globalReadDTLInitCommonSgpr, globalReadLDSBufferSwap, globalReadPtrUpdates,
     tdmGlobalOffsetSubtile, initTDMLdsTrackingSubtile, initTDMDescriptorSubtile,
+    initTDMDescriptorsSubtilePersistent,
     tdmApplyStreamKOffsetSubtile, initTDMClampSubtile,
 )
 from .SubtileLREmit import (
@@ -1420,6 +1422,36 @@ def _emitMultiDUTailSrdRewind(writer, kernel, numUnroll, tiA, tiB, scaleTiA, sca
   return module
 
 
+def _reportVgprBudget(writer, scheduler, tiA, tiB, scaleTiA, scaleTiB,
+                      vgprBudget, vgprUsedBefore, numVgpr, partSizeM, partSizeN):
+  """SUBTILE_VGPR_REPORT=1: print the main-loop VGPR budget and the free spans left after
+  the tile pool is allocated."""
+  cfg = scheduler.config
+  regs = lambda ti, g: int(math.ceil(ti.mmaTileRegCount * g.k * g.mn)) if ti is not None else 0
+  per = {'A': regs(tiA, cfg.lrA), 'B': regs(tiB, cfg.lrB),
+         'SA': regs(scaleTiA, cfg.lrSA) if cfg.hasScale else 0,
+         'SB': regs(scaleTiB, cfg.lrSB) if cfg.hasScale else 0}
+  pool = writer.vgprPool
+  pl = pool.getPool()
+  Available = pool.Status.Available
+  spans, start = [], None
+  for i in range(len(pl) + 1):
+    free = i < len(pl) and pl[i].status == Available
+    if free and start is None:
+      start = i
+    elif not free and start is not None:
+      spans.append((start, i - start))
+      start = None
+  past = max(0, vgprBudget - len(pl))
+  print(f"[SUBTILE_VGPR_REPORT] budget {vgprBudget}  used before tiles {vgprUsedBefore}  "
+        f"tiles {numVgpr}  partitions M{partSizeM} N{partSizeN}  numSubIterK {cfg.numSubIterK}")
+  for t in scheduler.tensors:
+    p = scheduler.tile_peaks.get(t, 0)
+    print(f"[SUBTILE_VGPR_REPORT]   {t:2s} peak {p:3d} tiles x {per[t]:2d} VGPRs = {p * per[t]}")
+  print(f"[SUBTILE_VGPR_REPORT]   pool size {len(pl)}  free after tiles {pool.available()} "
+        f"(+{past} past pool end)  free spans {spans}")
+
+
 def mainLoop(writer, kernel):
   module = Module()
   tensorParametersA = writer.tPA
@@ -1482,6 +1514,11 @@ def mainLoop(writer, kernel):
           numLdsBlk=kernel.get("NumLdsBlk", 2),
           scaleFullResidency=bool(kernel.get("ScaleLRFullResidency", False)),
           hoistTDMSetup=bool(kernel.get("enableTDMA") and kernel.get("enableTDMB")),
+          persistentTDMPatch=bool(kernel.get("TDMSingleIssuer")),
+          # Only relevant if gr_inc emits the advance again (it doesn't for the
+          # wave-gated TDMSingleIssuer path). Not part of the cache key.
+          sinkTDMAdvance=int(os.environ.get("TDMSI_ADV_SINK", "0")),
+          lrLookaheadB=int(kernel.get("LRLookaheadB", 1)),
       )
 
       scheduler = LogicalScheduler(cfg)
@@ -1492,6 +1529,17 @@ def mainLoop(writer, kernel):
           break
   scheduler.allocVgprTiles(writer, tiA, tiB,
                            scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB)
+  if os.environ.get("SUBTILE_VGPR_REPORT"):
+    _reportVgprBudget(writer, scheduler, tiA, tiB, scaleTiA, scaleTiB,
+                      vgprBudget, vgprUsed, numVgpr, partSizeM, partSizeN)
+  if os.environ.get("SUBTILE_SCHED_DUMP"):
+    with open(os.environ["SUBTILE_SCHED_DUMP"], "a") as f:
+      f.write(f"=== {kernel['SolutionNameMin'] if 'SolutionNameMin' in kernel else ''}\n")
+      f.write(f"{cfg}\n")
+      for title, fn in (("VGPR", scheduler.print_vgpr), ("GR", scheduler.print_gr),
+                        ("DEPS", scheduler.print_deps), ("GROUP", scheduler.print_group_lr_gr),
+                        ("EMIT", scheduler.print_emit_dep_order)):
+        f.write(f"--- {title}\n{fn()}\n")
   dtileInfo = writer.states.d.tileInfo
 
   # For plain FP8 (miK=128, no MX scale): allocate a unit scale VGPR and initialize
@@ -1515,23 +1563,32 @@ def mainLoop(writer, kernel):
       scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
       tensorParametersA=tensorParametersA,
       tensorParametersB=tensorParametersB)
-  # gfx1250: enable expert scheduling mode and disable WMMA arb stall
-  # before entering the mainloop / any wmma issue.
+  # gfx1250 / slide-22 WAVE_SCHED_MODE around the K loop (gemm_wt opt_v7):
+  #   DEP_MODE=2  (expert-partial: no VALU dep tracking; SALU still tracked)
+  #   bit[2]=1    (DISABLE_XDL_ARB_STALL: no post-WMMA arb stall → burst + holes)
+  # We already set DEP_MODE=2; the arb-stall bit was missing, so WMMAs still
+  # serialized one-per-8-cyc and left little room to hide LR/TDM/SALU.
   if writer.states.archCaps.get("HasWmmaArbStallBit", False):
     module.add(SNop(waitState=0, comment="nop before SSetReg"))
     module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0, 2]),
                                src=2,
-                               comment="enable expert scheduling mode"))
+                               comment="enable expert scheduling: DEP_MODE=2"))
+    module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[2, 1]),
+                               src=1,
+                               comment="DISABLE_XDL_ARB_STALL (bit 2)"))
     module.add(SNop(waitState=0, comment="nop after SSetReg"))
 
   module.add(scheduler.emitMainAndExitLoops(writer, kernel, tensorParametersA, tensorParametersB))
 
-  # gfx1250: disable expert scheduling mode after NLL.
+  # gfx1250: restore normal scheduling before epilogue stores.
   if writer.states.archCaps.get("HasWmmaArbStallBit", False):
     module.add(SNop(waitState=0, comment="nop before SSetReg"))
     module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0, 2]),
                                src=0,
-                               comment="disable expert scheduling mode"))
+                               comment="leave expert scheduling: DEP_MODE=0"))
+    module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[2, 1]),
+                               src=0,
+                               comment="clear DISABLE_XDL_ARB_STALL"))
     module.add(SNop(waitState=0, comment="nop after SSetReg"))
 
   # Wrap the tail loop with the runtime K%DU counter setup and skip branch,

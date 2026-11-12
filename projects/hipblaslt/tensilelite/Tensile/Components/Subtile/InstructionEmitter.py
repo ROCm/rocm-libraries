@@ -22,9 +22,10 @@ from Tensile.Components.Subtile.SubtileScaleEmit import (
 )
 from rocisa.code import Module
 from rocisa.instruction import (
-    SWaitCnt, SBarrier, DSLoadB32, SCmpEQU32, SCmpLeU32,
-    SCBranchSCC1, SMovB32, VAddU32, VAndB32, VCmpGEI32, VCmpGTI32, VCmpLeI32,
-    VCmpLtI32, VCndMaskB32, VLShiftLeftB32, VLShiftRightB32, VMovB32, VSubI32,
+    SWaitCnt, SBarrier, DSLoadB32, SBitcmp1B32, SCmpEQU32, SCmpLeU32,
+    SCBranchSCC0, SCBranchSCC1, SMovB32, VAddU32, VAndB32, VCmpGEI32, VCmpGTI32,
+    VCmpLeI32, VCmpLtI32, VCndMaskB32, VLShiftLeftB32, VLShiftRightB32, VMovB32,
+    VSubI32,
 )
 from rocisa.instruction import SWaitTensorcnt
 from rocisa.container import vgpr, sgpr, DSModifiers, ContinuousRegister
@@ -149,6 +150,45 @@ class InstructionEmitter:
         # emit_mask_k_init, consumed by every emit_mask_k call in the tail body.
         self._tail_vDiff = None
 
+        # TDMSingleIssuer A/B double-buf: bake buf half into ds immediates and
+        # drop the mid-loop v_xor toggles. Active only while populate() runs
+        # under begin_ab_lds_bake(); NGLL/NLL/tail keep runtime xor.
+        self._bakeAbLdsBuf = bool(
+            kernel.get("TDMSingleIssuer") and getattr(writer, "ldsV7", None))
+        self._bakingAbLds = False
+        self._ldsBufPhase = {"A": 0, "B": 0}
+
+    def begin_ab_lds_bake(self, phase_a=0, phase_b=0):
+        """Start compile-time A/B/MX LDS buf-half baking for one populate pass.
+
+        phase_* is the buffer half used by mtIteration=0 LRs. mtIteration=1
+        LRs use the other half (``phase ^ mtIteration``). populate() walks
+        EmittedModules in list order (primaries before preOp lr_incs), so the
+        bias cannot be tracked by toggling on emit_lr_inc — use mtIteration.
+        SA follows A's phase, SB follows B's (gemm_wt: scale buf from iter parity).
+        """
+        assert self._bakeAbLdsBuf, "A/B LDS bake requires TDMSingleIssuer + ldsV7"
+        self._bakingAbLds = True
+        self._ldsBufPhase = {"A": int(phase_a) & 1, "B": int(phase_b) & 1}
+
+    def end_ab_lds_bake(self):
+        self._bakingAbLds = False
+
+    def _ab_lds_offset_bias(self, tensor, mtIteration=0):
+        """Bake even/odd LDS buf into ds immediates (A/B data + MX scales)."""
+        if not self._bakingAbLds:
+            return 0
+        lay = self.writer.ldsV7
+        if tensor in ("A", "B"):
+            phase = self._ldsBufPhase[tensor] ^ (int(mtIteration) & 1)
+            return phase * int(lay.buf)
+        if tensor in ("SA", "SB"):
+            # Scale ring depth is 2 (sc_nbuf); same even/odd phase as A/B.
+            key = "A" if tensor == "SA" else "B"
+            phase = self._ldsBufPhase[key] ^ (int(mtIteration) & 1)
+            return phase * int(lay.sc_buf)
+        return 0
+
     def emit_mfma(self, placement, unroll_iter=0):
         """Emit MFMA instructions from MFMAPlacement."""
         module = Module()
@@ -223,6 +263,7 @@ class InstructionEmitter:
             # offset. Skip the modulo in that case.
             nUnroll = self.config.numUnroll.get(tensor, 1)
             per_uid_k = self._per_uid_k[tensor] if nUnroll > 1 else None
+            offsetBias = self._ab_lds_offset_bias(tensor, placement.mtIteration)
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, lrGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, lrGran.k):
                     local_k = (k % per_uid_k) if per_uid_k is not None else k
@@ -231,12 +272,14 @@ class InstructionEmitter:
                     dstTile = vgprTiles[tile_map[tileId]]
                     swizzled = self.writer.states.subtileLdsSwizzle
                     module.add(emitSingleDsRead(
-                        ti, tileId, subtileK, subIterK_within, dstTile, swizzled=swizzled))
+                        ti, tileId, subtileK, subIterK_within, dstTile,
+                        swizzled=swizzled, offsetBias=offsetBias))
         elif tensor in ('SA', 'SB'):
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             ti = self.tileInfoMap[tensor]
             lrGran = self.config.lrSA if tensor == 'SA' else self.config.lrSB
             vgprTilesScale = self.vgprTilesSA if tensor == 'SA' else self.vgprTilesSB
+            offsetBias = self._ab_lds_offset_bias(tensor, placement.mtIteration)
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, lrGran.mn):
                 scaleGroupIdx = tileId // lrGran.mn
                 groupKey = scaleGroupIdx * lrGran.mn
@@ -247,7 +290,7 @@ class InstructionEmitter:
                 chunk = int(ti.ldsChunkBytes)
                 groupPos = int(ti.lrSubtileSize) * scaleGroupIdx
                 dsOffset = (groupPos // chunk) * chunk * numKGroups + chunk * kGroupIdx \
-                    + groupPos % chunk
+                    + groupPos % chunk + offsetBias
                 vdst = next(iter(vgprTilesScale[tile_map[groupKey]]))
                 module.add(DSLoadB32(
                     dst=vgpr(vdst),
@@ -267,10 +310,14 @@ class InstructionEmitter:
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, grGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, grGran.k):
                     subtileK = (k - uid_k_base) // self.subtileShapeK
+                    # TDMSingleIssuer patches inside the wave-gated load; a
+                    # pre-load refresh on every wave would clobber other issuers'
+                    # persistent descriptors (MX aliases A/B SGPR names).
                     if (self.kernel.get("UseSubtileImpl")
                             and self.kernel.get("enableTDM%s" % tensor, False)
                             and tileId == 0 and subtileK == 0
-                            and not placement.tdmDescHoisted):
+                            and not placement.tdmDescHoisted
+                            and not self.kernel.get("TDMSingleIssuer")):
                         module.add(refreshTDMDescriptorSubtile(
                             self.writer, self.kernel, tensor))
                     module.add(emitSingleBufferLoad(ti, self.kernel, tileId, subtileK,
@@ -278,10 +325,15 @@ class InstructionEmitter:
         elif tensor in ('SA', 'SB'):
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             if (self.kernel.get("UseSubtileImpl")
-                    and self.kernel.get("enableTDM%s" % tc[-1], False)):
+                    and self.kernel.get("enableTDM%s" % tc[-1], False)
+                    and not self.kernel.get("TDMSingleIssuer")):
                 module.add(refreshTDMDescriptorSubtile(
                     self.writer, self.kernel, tc))
             module.add(globalReadDoScaleSubtile(tc, self.writer, self.kernel))
+        if self.kernel.get("TDMSingleIssuer"):
+            # Wave-gated issue (cmp; cbranch; load; advance; label): one item so
+            # no WMMA/LR/barrier lands inside the region other waves skip.
+            return [module]
         return list(module.flatitems())
 
     def emit_wait_gr(self, source):
@@ -298,7 +350,8 @@ class InstructionEmitter:
         if self.kernel.get("enableTDMA", False) and self.kernel.get("enableTDMB", False):
             # TDMSingleIssuer: match ldsv7-w1 — wait=1 only on mainloop READY while
             # PGR still has fills outstanding; prologue/tail drain (wait=0). LR swaps
-            # (A/B xor + scale ring) are hoisted above the wait.
+            # (A/B xor + scale ring) are hoisted above the wait. Issuer-only: even
+            # waves (0/2) own TDM; prefetch waves 1/3 skip wait_tensorcnt.
             if force_drain:
                 tdmCnt = 0
                 label = "full drain"
@@ -306,11 +359,16 @@ class InstructionEmitter:
                 outstanding = counts.A + counts.B + counts.SA + counts.SB
                 tdmCnt = 1 if outstanding > 0 else 0
                 label = "single-issuer READY" if tdmCnt else "single-issuer READY drain"
+
             else:
                 tdmCnt = counts.A + counts.B + counts.SA + counts.SB
                 label = "tensor_load_to_lds"
-            return [SWaitTensorcnt(tensorcnt=tdmCnt,
-                                   comment=f"Wait TDM ({label}): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")]
+            wait = SWaitTensorcnt(
+                tensorcnt=tdmCnt,
+                comment=f"Wait TDM ({label}): A={counts.A} B={counts.B} SA={counts.SA} SB={counts.SB}")
+            # gemm_wt: A/B on 0/2 and MX on PF 1/3 — every wave issues TDM, so
+            # all waves must wait (no even-only gate).
+            return [wait]
 
         # TODO. Hardcoded for now, but we should just get this from atomic emit codes (emitSingleBufferLoad, ...)
         grMap = {'A': max(1,int(1.0/self.tileInfoA.loadRatioGR)),
@@ -346,15 +404,28 @@ class InstructionEmitter:
         return list(mod.flatitems()) if mod is not None else []
 
     def emit_lr_inc(self, source):
-        """Emit localReadLDSBufferSwap for a single tensor."""
+        """Emit localReadLDSBufferSwap for a single tensor.
+
+        Under A/B/MX LDS bake (TDMSingleIssuer even/odd mainloop bodies),
+        A/B/SA/SB runtime swaps are omitted — buf half is baked into ds
+        immediates via mtIteration (gemm_wt mx_sbuf=2 + even unroll).
+        """
         tensor = source.tensor
+        if self._bakingAbLds and tensor in ("A", "B", "SA", "SB"):
+            return []
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
         module = Module()
         module.add(localReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
 
     def emit_gr_inc(self, source):
-        """Emit globalReadPtrUpdates + globalReadLDSBufferSwap for a single tensor."""
+        """Emit globalReadPtrUpdates + globalReadLDSBufferSwap for a single tensor.
+
+        TDMSingleIssuer: nothing here — the wave-gated advances are emitted
+        right after the unified tensor_load (SubtileGREmit).
+        """
+        if self.kernel.get("TDMSingleIssuer"):
+            return []
         tensor = source.tensor
         tc = {'A': 'A', 'B': 'B', 'SA': 'MXSA', 'SB': 'MXSB'}.get(tensor, tensor)
         module = Module()
@@ -365,37 +436,87 @@ class InstructionEmitter:
         module.add(globalReadLDSBufferSwap(tc, self.writer, self.kernel))
         return list(module.flatitems())
 
+    def _gl2_prefetch_comp(self):
+        from Tensile.KernelWriterAssembly import GL2PrefetchLoad
+        return GL2PrefetchLoad.find(self.writer)
+
+    def _emit_gl2_wave_gated(self, body_mod, wave, tag):
+        """Wrap ``body_mod`` in a WaveIdx==wave gate (gemm_wt PF waves)."""
+        writer = self.writer
+        out = Module(f"GL2 Prefetch {tag} wave {wave}")
+        skip = Label(writer.labels.getUniqueNamePrefix(f"gl2_pf_{tag}"), "")
+        out.add(SCmpEQU32(src0=sgpr("WaveIdx"), src1=wave,
+                          comment=f"TDMSingleIssuer: GL2 PF {tag} = wave {wave}"))
+        out.add(SCBranchSCC0(labelName=skip.getLabelName(),
+                             comment=f"other waves skip GL2 PF {tag}"))
+        out.add(body_mod)
+        out.add(skip)
+        return out
+
     def emit_gl2_prefetch(self):
-        """Emit GL2 prefetch loads (global_prefetch_b8) for all tensors."""
+        """Emit GL2 prefetch loads (global_prefetch_b8).
+
+        TDMSingleIssuer (gemm_wt): wave 1 issues A, wave 3 issues B; MX scale
+        PF omitted (``GEMM_MX_PF=0``). Non-TDMSI: all tensors as before.
+        """
         writer = self.writer
         kernel = self.kernel
         tPA = self.tensorParametersMap['A']
         tPB = self.tensorParametersMap['B']
-        mod = writer.gl2PrefetchIssueLoad(kernel, tPA, tPB)
-        return list(mod.flatitems())
+        if not kernel.get("TDMSingleIssuer"):
+            return list(writer.gl2PrefetchIssueLoad(kernel, tPA, tPB).flatitems())
+
+        from Tensile.Components.Subtile.LdsV7Layout import PREFETCH_A, PREFETCH_B
+        comp = self._gl2_prefetch_comp()
+        mod = Module("GL2 Prefetch Issue Load (TDMSingleIssuer)")
+        mod.addComment0("GL2 Prefetch Issue Load (wave-gated A/B; no MX PF)")
+        mod.add(self._emit_gl2_wave_gated(
+            comp.issueLoad(writer, kernel, tPA), PREFETCH_A, "A"))
+        mod.add(self._emit_gl2_wave_gated(
+            comp.issueLoad(writer, kernel, tPB), PREFETCH_B, "B"))
+        # Each wave gate is one schedulable item (see emit_gr).
+        return list(mod.items())
 
     def emit_gl2_prefetch_inc(self):
         """Emit GL2 prefetch address increment with end-of-K guard.
 
         Mirrors the SIA path: when LoopCounterL <= PGR + PrefetchGL2,
         zero the increment SGPRs so prefetch stops advancing past K.
-        Then advance all GL2 prefetch addresses by the (possibly zeroed) increment.
+        Then advance GL2 prefetch addresses by the (possibly zeroed) increment.
+
+        TDMSingleIssuer: only A/B Inc (wave-gated); MX Inc omitted with MX PF.
         """
         writer = self.writer
         kernel = self.kernel
         tPA = self.tensorParametersMap['A']
         tPB = self.tensorParametersMap['B']
-        from rocisa.code import Module
-        from rocisa.instruction import SCmpLeU32, SCMovB32
-        from rocisa.container import sgpr
+        from rocisa.instruction import SCMovB32
         mod = Module("GL2 Prefetch Increment")
         loopCounter = writer.loopCounter(kernel, writer.states.unrollIdx)
         pgl = kernel["PrefetchGL2"]
         pgr = kernel["PrefetchGlobalRead"]
-        mod.add(SCmpLeU32(src0=loopCounter, src1=pgr + pgl,
-                          comment=f"counterL <= PGR({pgr})+PGL({pgl})?"))
-        mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncA"), src=0))
-        mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncB"), src=0))
+        # The cmovs read SCC from the cmp: kept as one schedulable item so the
+        # instruction scheduler cannot slot an SCC-writing op between them.
+        guard = Module("GL2 Prefetch end-of-K guard")
+        guard.add(SCmpLeU32(src0=loopCounter, src1=pgr + pgl,
+                            comment=f"counterL <= PGR({pgr})+PGL({pgl})?"))
+        guard.add(SCMovB32(dst=sgpr("GL2PrefetchIncA"), src=0))
+        guard.add(SCMovB32(dst=sgpr("GL2PrefetchIncB"), src=0))
+
+        if kernel.get("TDMSingleIssuer"):
+            from Tensile.Components.Subtile.LdsV7Layout import PREFETCH_A, PREFETCH_B
+            comp = self._gl2_prefetch_comp()
+            # End-of-K zero is all-wave (per-wave SGPRs); address bump is gated
+            # with the matching issue so unused waves skip VALU.
+            mod.add(self._emit_gl2_wave_gated(
+                comp.incrementAddr(writer, kernel, tPA), PREFETCH_A, "IncA"))
+            mod.add(self._emit_gl2_wave_gated(
+                comp.incrementAddr(writer, kernel, tPB), PREFETCH_B, "IncB"))
+            return [guard] + list(mod.items())
+
+        for inst in guard.flatitems():
+            mod.add(inst)
+
         if kernel["ProblemType"].get("MXBlockA", 0):
             mod.add(SCMovB32(dst=sgpr("GL2PrefetchIncMXSA"), src=0))
         if kernel["ProblemType"].get("MXBlockB", 0):

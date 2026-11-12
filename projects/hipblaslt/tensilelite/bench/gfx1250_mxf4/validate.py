@@ -23,6 +23,8 @@ ap.add_argument("sizes", nargs="*", default=DEFAULT)
 ap.add_argument("--jitter", type=int, default=4)
 ap.add_argument("--print-max", type=int, default=4)
 ap.add_argument("--timeout", type=int, default=120, help="seconds before the client is killed")
+ap.add_argument("--device", type=int, default=None,
+                help="run on device-idx N with no HIP_VISIBLE_DEVICES mask (instead of GPU_ID)")
 args = ap.parse_args()
 
 logdir = os.path.join(BENCH, args.logdir) if not os.path.isabs(args.logdir) else args.logdir
@@ -30,6 +32,8 @@ src = glob.glob(f"{logdir}/**/ClientParameters.ini", recursive=True)[0]
 lines = [l for l in open(src).read().splitlines()
          if not re.match(r"(problem-size|[a-d]-strides|mx-scale-jitter|num-elements-to-validate"
                          r"|print-max|num-benchmarks|num-enqueues-per-sync|num-warmups)=", l)]
+if args.device is not None:
+    lines = [l for l in lines if not l.startswith("device-idx=")] + [f"device-idx={args.device}"]
 for s in args.sizes:
     m, n, b, k = s.split(",")
     lines += [f"problem-size={m},{n},{b},{k}", f"a-strides=-1,{k},-1", f"b-strides=-1,{k},-1",
@@ -39,8 +43,11 @@ lines += ["num-elements-to-validate=-1", f"print-max={args.print_max}", "num-ben
 ini, log = f"{logdir}/validate.ini", f"{logdir}/validate.log"
 open(ini, "w").write("\n".join(lines) + "\n")
 
-env = dict(os.environ, HIP_VISIBLE_DEVICES=os.environ.get("GPU_ID", "3"),
-           LD_LIBRARY_PATH=f"{ROCM}/lib/llvm/lib/x86_64-unknown-linux-gnu")
+env = dict(os.environ, LD_LIBRARY_PATH=f"{ROCM}/lib/llvm/lib/x86_64-unknown-linux-gnu")
+if args.device is None:
+    env["HIP_VISIBLE_DEVICES"] = os.environ.get("GPU_ID", "3")
+else:
+    env.pop("HIP_VISIBLE_DEVICES", None)
 env.pop("ROCR_VISIBLE_DEVICES", None)
 with open(log, "w") as f:
     try:

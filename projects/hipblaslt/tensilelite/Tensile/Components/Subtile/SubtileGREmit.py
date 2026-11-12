@@ -33,7 +33,9 @@ from rocisa.instruction import (
     TensorLoadToLds,
     VMulLOU32, VReadfirstlaneB32, VSubU32, VXorB32,
 )
-from .LdsV7Layout import HALF_ROWS, ISSUER_A, ISSUER_B, ISSUER_MXSA, ISSUER_MXSB
+from .LdsV7Layout import (
+    HALF_ROWS, ISSUER_A, ISSUER_B, ISSUER_MXSA, ISSUER_MXSB,
+)
 
 from .SubtileGeometry import (
     RegList,
@@ -527,7 +529,7 @@ def _emitGRPtrUpdate_TLU0(tag, tile, ti, writer, kernel):
   tc = ti.tc
   # TDM path: advance Address{tc} and sync the TDM descriptor instead of SRD.
   if kernel.get("enableTDM%s" % tc, False):
-    # refreshTDMDescriptorSubtile copies Address{tc} into the descriptor before every load.
+    # Address{tc} is copied into the descriptor by refresh/patch before each load.
     module = Module(f"TDM GR Ptr Update ({tc})")
     inc = int(ti.depthUBytes)
     module.addComment0("TDM addr update: %s += %u" % (tc, inc))
@@ -880,25 +882,21 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
   if kernel.get("enableTDM%s" % tileInfo.tc[0], False):
     if sId0 == 0 and sId1 == 0:
       tc = tileInfo.tc
+      singleIssuer = bool(kernel.get("TDMSingleIssuer"))
+      # TDMSingleIssuer (gemm_wt): A/B on 0/2, MXSA/MXSB on PF 1/3. Advances
+      # sit inside each issuer gate. Each GR site emits its own tensor's load.
+      if singleIssuer:
+        if writer is None:
+          return module
+        module.add(emitTDMSingleIssuerLoad(writer, kernel, tc))
+        return module
       group0 = "tdm%sGroup0" % tc
       group1 = "tdm%sGroup1" % tc
-      singleIssuer = bool(kernel.get("TDMSingleIssuer"))
-      isSubtileIter = _isSubtileIterateMode(kernel, tc) or singleIssuer
+      isSubtileIter = _isSubtileIterateMode(kernel, tc)
       group2 = sgpr("tdm%sGroup2" % tc, 4) if isSubtileIter else None
       group3 = sgpr("tdm%sGroup3" % tc, 4) if isSubtileIter else None
-      if singleIssuer:
-        issuer = ISSUER_A if tc == "A" else ISSUER_B
-        name = (writer.labels.getUniqueNamePrefix("tdm_si_%s" % tc)
-                if writer is not None else "tdm_si_%s" % tc)
-        skip = Label(name, "")
-        module.add(SCmpEQU32(src0=sgpr("WaveIdx"), src1=issuer,
-                             comment="TDMSingleIssuer: %s issuer = wave %d" % (tc, issuer)))
-        module.add(SCBranchSCC0(labelName=skip.getLabelName(),
-                                comment="other waves skip %s TDM" % tc))
       module.add(TensorLoadToLds(sgpr(group0, 4), sgpr(group1, 8), group2, group3,
                                  comment="TDM: global->LDS for %s" % tc))
-      if singleIssuer:
-        module.add(skip)
     return module
 
   linearId = tileInfo.getLocalSubtileLinearId(sId0, sId1)
@@ -1026,13 +1024,14 @@ def _tdmSwapLdsBuffer(tc, writer, kernel):
   module = Module()
   ldsAddrSgpr = "tdmLdsAddr%s" % tc
   swapSgpr = "tdmLdsSwapMask%s" % tc
-  # refreshTDMDescriptorSubtile copies tdmLdsAddr{tc} into the descriptor before every load.
+  # TDMSingleIssuer patches tdmLdsAddr into the descriptor after each load.
   n, stride = _tdmSwapParams(tc, writer)
-  if n < 3:
+  useRotate = n >= 3 or bool(kernel.get("TDMSingleIssuer"))
+  if not useRotate:
     module.addComment0("TDM: swap %s LDS buffer (XOR with per-tensor swap mask)" % tc)
     module.add(SXorB32(dst=sgpr(ldsAddrSgpr), src0=sgpr(ldsAddrSgpr), src1=sgpr(swapSgpr), comment=""))
     return module
-  # n >= 3: rotate write address by one buffer and wrap past the last one.
+  # Rotate write address by one buffer and wrap past the last one.
   # swapSgpr holds the per-tensor ceiling (base + n*stride).
   module.addComment0("TDM: rotate %s LDS write buffer (+1 of %d, wrap at ceiling)" % (tc, n))
   with writer.allocTmpSgpr(1) as tmpRes:
@@ -1254,15 +1253,20 @@ def _commitSubtileLdsTracking(mod, tc, waveOffsetSgprIdx, ldsTotalSize, writer):
 
   n == 2 : tdmLdsSwapMask = addr ^ (addr + stride)   (xor toggle)
   n >= 3 : tdmLdsSwapMask = addr + n*stride          (rotate ceiling)
+
+  TDMSingleIssuer (ldsV7): only track LDS addr — advance uses tdmLdsXorMask /
+  tdmGlobalInc (SwapMask SGPRs are not allocated).
   """
   ldsTrackSgpr = f"tdmLdsAddr{tc}"
-  swapMaskSgpr = f"tdmLdsSwapMask{tc}"
   n, stride = _tdmSwapParams(tc, writer)
   # ldsTotalSize arg kept for call-site compatibility; v7 overrides via _tdmSwapParams.
   if n < 3 and getattr(writer, "ldsV7", None) is None:
     stride = ldsTotalSize
   mod.add(SMovB32(dst=sgpr(ldsTrackSgpr), src=sgpr(waveOffsetSgprIdx),
                   comment=f"init {ldsTrackSgpr} for buffer tracking"))
+  if getattr(writer, "ldsV7", None) is not None:
+    return
+  swapMaskSgpr = f"tdmLdsSwapMask{tc}"
   if n >= 3:
     mod.add(SAddU32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=n * stride,
                     comment=f"ceiling = addr + {n}*stride({stride})"))
@@ -1271,6 +1275,44 @@ def _commitSubtileLdsTracking(mod, tc, waveOffsetSgprIdx, ldsTotalSize, writer):
                   comment=f"addr + stride({stride})"))
   mod.add(SXorB32(dst=sgpr(swapMaskSgpr), src0=sgpr(waveOffsetSgprIdx), src1=sgpr(swapMaskSgpr),
                   comment="swapMask = addr XOR (addr + stride)"))
+
+
+def _initTDMSingleIssuerAdvParams(mod, writer, kernel, tc):
+  """Load wave-private advance SGPRs for this issuer's tensor.
+
+  Must run inside the issuer-wave gate. Early (ungated) LDS tracking writes
+  every tensor's ceiling into the aliased tdmLdsSwapMaskA on every wave, so
+  the final early value is always MXSB's ceiling — rewrite it here from this
+  wave's tdmLdsAddr{tc}.
+
+  Advance bodies are split (proto-style): A/B uses xor + global bump only;
+  MX uses rotate/wrap + global bump. A/B still zero unused rotate params so
+  leftover readers stay safe.
+  """
+  if not kernel.get("TDMSingleIssuer"):
+    return
+  n, stride = _tdmSwapParams(tc, writer)
+  addr = sgpr("tdmLdsAddr%s" % tc)
+  if n < 3:
+    # xorMask = addr ^ (addr + stride); SwapMask/AdvStride not allocated under SI.
+    mod.add(SAddU32(dst=sgpr("tdmLdsXorMask"), src0=addr, src1=stride,
+                    comment="TDMSingleIssuer: %s addr+stride" % tc))
+    mod.add(SXorB32(dst=sgpr("tdmLdsXorMask"), src0=addr, src1=sgpr("tdmLdsXorMask"),
+                    comment="TDMSingleIssuer: %s xor mask" % tc))
+  else:
+    # n>=3 rotate needs SwapMask/AdvStride/Span — not allocated under ldsV7.
+    raise RuntimeError(
+        "TDMSingleIssuer n>=3 advance needs rotate SGPRs; ldsV7 uses n=2")
+  if tc.startswith("MX"):
+    from .SubtileScaleEmit import emitScaleTdmStepBytes
+    ti = _subtileTileInfo(writer, tc)
+    sizeName = "SizeI" if tc == "MXSA" else "SizeJ"
+    mod.add(emitScaleTdmStepBytes(ti, kernel, sgpr("tdmGlobalInc"), sgpr(sizeName),
+                                  "TDMSingleIssuer: %s global inc" % tc))
+  else:
+    ti = _subtileTileInfo(writer, tc)
+    mod.add(SMovB32(dst=sgpr("tdmGlobalInc"), src=int(ti.depthUBytes),
+                    comment="TDMSingleIssuer: %s global inc=%u" % (tc, int(ti.depthUBytes))))
 
 
 def _emitSubtileDataLdsTracking(writer, tc, mt, du, bpe, numWaves, wavelen,
@@ -1359,9 +1401,11 @@ def _emitSubtileMxLdsTracking(writer, kernel, tc, ldsConstOffset):
 def initTDMLdsTrackingSubtile(writer, kernel, tP):
   """Prologue: record the per-wave LDS base and double-buffer swap mask.
 
-  refreshTDMDescriptorSubtile rebuilds the descriptor before every load, and the
-  scale descriptors alias the A/B registers, so a descriptor built here is never
-  consumed. Address{tc} stays with tdmGlobalOffsetSubtile and the StreamK offset.
+  Without TDMSingleIssuer, refresh rebuilds the descriptor before every load
+  (scale aliases A/B), so a descriptor built here is never consumed.
+  TDMSingleIssuer inits once via initTDMDescriptorsSubtilePersistent and then
+  patches LDS + global from these trackers. Address{tc} stays with
+  tdmGlobalOffsetSubtile and the StreamK offset.
   """
   tc = tP["tensorChar"]
   bpe = tP["bpeGR"]
@@ -1589,9 +1633,8 @@ def _initTDMDescriptorSubtileMX(writer, kernel, tP, refresh=False):
 
   if singleIssuer:
     # ITERATE over K groups: lds_inc=chunk, global_inc=Size*kGroupRowBytes.
-    # Group2 is aliased onto the host A/B descriptor's Group2.
-    host = "A" if tc == "MXSA" else "B"
-    g2 = f"tdm{host}Group2"
+    # MX aliases A Group2 (wave-private on PF waves 1/3).
+    g2 = f"tdm{tc}Group2"
     with writer.allocTmpSgpr(2) as tmp:
       sIter, sGInc = tmp.idx, tmp.idx + 1
       mod.add(SMulI32(sgpr(sGInc), sgpr(sizeName), shape.kGroupRowBytes,
@@ -1645,12 +1688,224 @@ def initTDMClampSubtile(writer, kernel, tc):
   return mod
 
 
-def refreshTDMDescriptorSubtile(writer, kernel, tc):
-  """Rebuild an aliased subtile descriptor immediately before its load.
+def patchTDMDescriptorSubtile(writer, kernel, tc):
+  """Copy live Address/LDS trackers into a persistent subtile TDM descriptor.
 
-  Uses only constants, Size/Stride SGPRs, Address{tc}, the tracked LDS address
-  and tdmClamp{tc} (initTDMClampSubtile), so it has no VALU dependency.
+  TDMSingleIssuer keeps one descriptor per issuer wave in wave-private SGPRs
+  (MXSA/MXSB still alias the A/B names). Only LDS + global change each
+  iteration — matching the mxf4 prototype — so the mainloop avoids the full
+  dim/tile/iterate rebuild that was dominating SALU latency.
   """
+  from ...Components.TensorDataMover import TensorDataMoverLoad
+  comp = TensorDataMoverLoad.find(writer)
+  group0 = f"tdm{tc}Group0"
+  mod = Module(f"Patch TDM Descriptor Subtile {tc}")
+  mod.add(comp.setLdsAddr(group0, sgpr(f"tdmLdsAddr{tc}")))
+  mod.add(comp.setGlobalAddr(group0, f"Address{tc}"))
+  return mod
+
+
+def advanceTDMDescriptorSubtileAfterLoad(writer, kernel, tc):
+  """Proto-style post-TDM prepare: mutate LDS + global in the live descriptor.
+
+  Issued immediately after tensor_load_to_lds so the next iteration's
+  barrier→load path has no descriptor SALU. Matches mxf4_proto:
+    tensor_load
+    s_mov/xor LDS in Group0+1
+    s_add global in Group0+2
+  Shadow Address/tdmLdsAddr trackers are not updated here; the next tile
+  re-bases them in setupNewTile. Replaces pre-load gr_inc for TDMSingleIssuer.
+
+  Under TDMSingleIssuer all tensors share the A SGPR names (wave-private
+  values), so patches always target tdmAGroup0.
+  """
+  group0 = "tdmAGroup0" if kernel.get("TDMSingleIssuer") else f"tdm{tc}Group0"
+  mod = Module(f"Advance TDM after load {tc}")
+  n, stride = _tdmSwapParams(tc, writer)
+  # TDMSingleIssuer stores a rotate ceiling in SwapMask (even for A/B n=2).
+  useRotate = n >= 3 or bool(kernel.get("TDMSingleIssuer"))
+  if not useRotate:
+    mod.addComment0("TDM: xor %s LDS in descriptor (next buffer)" % tc)
+    mod.add(SXorB32(dst=sgpr(f"{group0}+1"), src0=sgpr(f"{group0}+1"),
+                    src1=sgpr(f"tdmLdsSwapMask{tc}"), comment=""))
+  else:
+    # Rotate LDS write addr in the descriptor and wrap at ceiling.
+    mod.addComment0("TDM: rotate %s LDS in descriptor (+1 of %d)" % (tc, n))
+    with writer.allocTmpSgpr(1) as tmpRes:
+      tmp = tmpRes.idx
+      mod.add(SAddU32(dst=sgpr(f"{group0}+1"), src0=sgpr(f"{group0}+1"), src1=stride,
+                      comment="%s TDM desc LDS -> next buffer" % tc))
+      mod.add(SSubU32(dst=sgpr(tmp), src0=sgpr(f"{group0}+1"), src1=n * stride,
+                      comment="wrapped-to-buffer0 candidate"))
+      mod.add(SCmpGeU32(src0=sgpr(f"{group0}+1"), src1=sgpr(f"tdmLdsSwapMask{tc}"),
+                        comment="past the last LDS buffer?"))
+      mod.add(SCSelectB32(dst=sgpr(f"{group0}+1"), src0=sgpr(tmp), src1=sgpr(f"{group0}+1"),
+                          comment="wrap TDM desc LDS to buffer 0"))
+  if tc.startswith("MX"):
+    from .SubtileScaleEmit import emitScaleTdmStepBytes
+    ti = _subtileTileInfo(writer, tc)
+    sizeName = "SizeI" if tc == "MXSA" else "SizeJ"
+    with writer.allocTmpSgpr(1, tag="scaleTdmStepPost") as tmpSgprRes:
+      inc = tmpSgprRes.idx
+      mod.add(emitScaleTdmStepBytes(ti, kernel, sgpr(inc), sgpr(sizeName), "scale step"))
+      mod.add(SAddU32(dst=sgpr(f"{group0}+2"), src0=sgpr(f"{group0}+2"), src1=sgpr(inc),
+                      comment="%s TDM desc global +=" % tc))
+      mod.add(SAddCU32(dst=sgpr(f"{group0}+3"), src0=sgpr(f"{group0}+3"), src1=0,
+                       comment="%s TDM desc global carry" % tc))
+  else:
+    ti = _subtileTileInfo(writer, tc)
+    inc = int(ti.depthUBytes)
+    mod.addComment0("TDM: bump %s global in descriptor += %u" % (tc, inc))
+    mod.add(SAddU64(dst=sgpr(f"{group0}+2", 2), src0=sgpr(f"{group0}+2", 2), src1=inc))
+  return mod
+
+
+def _tdmSIGroup0(tc):
+  """Live descriptor Group0 name for SI (A/B share A; MX aliases MXSA→A)."""
+  if tc in ("A", "B"):
+    return "tdmAGroup0"
+  if tc in ("MXSA", "MXSB"):
+    return "tdmMXSAGroup0"
+  return f"tdm{tc}Group0"
+
+
+def _tdmSIGroup1(tc):
+  if tc in ("A", "B"):
+    return "tdmAGroup1"
+  if tc in ("MXSA", "MXSB"):
+    return "tdmMXSAGroup1"
+  return f"tdm{tc}Group1"
+
+
+def _emitTDMSingleIssuerGlobalBump(tc=None):
+  """``S[2:3] += tdmGlobalInc`` on the live desc only (proto TJ_ADDR).
+
+  Shadow ``Address`` / ``tdmLdsAddr`` stay at the tile base — ``setupNewTile``
+  re-bases them. Data and MX keep separate Group0/1 so dual-issue does not
+  clobber the advanced data descriptor.
+  """
+  g0 = _tdmSIGroup0(tc) if tc else "tdmAGroup0"
+  mod = Module("TDMSingleIssuer global bump")
+  mod.add(SAddU32(dst=sgpr(f"{g0}+2"), src0=sgpr(f"{g0}+2"),
+                  src1=sgpr("tdmGlobalInc"),
+                  comment="desc global += inc"))
+  mod.add(SAddCU32(dst=sgpr(f"{g0}+3"), src0=sgpr(f"{g0}+3"), src1=0,
+                   comment="desc global carry"))
+  return mod
+
+
+def _emitTDMSingleIssuerAdvanceAB(tc=None):
+  """A/B (and MX depth-2) advance: xor LDS toggle + global bump on live desc."""
+  g0 = _tdmSIGroup0(tc) if tc else "tdmAGroup0"
+  mod = Module("TDMSingleIssuer advance A/B")
+  mod.addComment0("TDMSingleIssuer: xor toggle + global bump (proto TOGGLE+ADDR)")
+  mod.add(SXorB32(dst=sgpr(f"{g0}+1"), src0=sgpr(f"{g0}+1"),
+                  src1=sgpr("tdmLdsXorMask"),
+                  comment="desc LDS ^= xorMask (buf0^buf1)"))
+  mod.add(_emitTDMSingleIssuerGlobalBump(tc))
+  return mod
+
+
+def _emitTDMSingleIssuerAdvanceMX(writer, tc):
+  """MX depth>=3 advance: ring rotate + wrap, then global bump on live desc."""
+  g0 = _tdmSIGroup0(tc)
+  mod = Module("TDMSingleIssuer advance MX")
+  mod.addComment0("TDMSingleIssuer: MX rotate/wrap + global bump")
+  with writer.allocTmpSgpr(1) as tmpRes:
+    tmp = tmpRes.idx
+    mod.add(SAddU32(dst=sgpr(f"{g0}+1"), src0=sgpr(f"{g0}+1"),
+                    src1=sgpr("tdmLdsAdvStride"),
+                    comment="desc LDS += stride"))
+    mod.add(SSubU32(dst=sgpr(tmp), src0=sgpr(f"{g0}+1"),
+                    src1=sgpr("tdmLdsAdvSpan"),
+                    comment="wrapped-to-buffer0 candidate"))
+    mod.add(SCmpGeU32(src0=sgpr(f"{g0}+1"), src1=sgpr("tdmLdsSwapMaskA"),
+                      comment="past last LDS buffer?"))
+    mod.add(SCSelectB32(dst=sgpr(f"{g0}+1"), src0=sgpr(tmp),
+                        src1=sgpr(f"{g0}+1"),
+                        comment="wrap desc LDS to buffer 0"))
+  mod.add(_emitTDMSingleIssuerGlobalBump(tc))
+  return mod
+
+
+def _emitTDMSingleIssuerAdvanceBody(writer, tc):
+  """Proto-style per-tensor advance body (no shared xor+rotate template).
+
+  MX with sc_nbuf==2 (gemm_wt default) uses the same xor toggle as A/B;
+  rotate/wrap is only for rings deeper than 2.
+  """
+  n, _ = _tdmSwapParams(tc, writer)
+  if tc.startswith("MX") and n >= 3:
+    return _emitTDMSingleIssuerAdvanceMX(writer, tc)
+  return _emitTDMSingleIssuerAdvanceAB(tc)
+
+
+def _emitTDMSingleIssuerAdvance(writer, kernel, tc):
+  """Wave-gated post-load advance using wave-private advance params."""
+  issuer = {"A": ISSUER_A, "B": ISSUER_B, "MXSA": ISSUER_MXSA, "MXSB": ISSUER_MXSB}[tc]
+  mod = Module(f"TDMSingleIssuer advance {tc}")
+  name = writer.labels.getUniqueNamePrefix("tdm_si_adv_%s" % tc)
+  skip = Label(name, "")
+  mod.add(SCmpEQU32(src0=sgpr("WaveIdx"), src1=issuer,
+                    comment="TDMSingleIssuer: %s advance = wave %d" % (tc, issuer)))
+  mod.add(SCBranchSCC0(labelName=skip.getLabelName(),
+                       comment="other waves skip %s advance" % tc))
+  mod.add(_emitTDMSingleIssuerAdvanceBody(writer, tc))
+  mod.add(skip)
+  return mod
+
+
+def _tdmSingleIssuerTensorParams(writer, tc):
+  ti = _subtileTileInfo(writer, tc)
+  idx = 0 if tc.endswith("A") else 1
+  return {
+      "tensorChar": tc,
+      "idx": idx,
+      "tileChar": f"{idx}{INDEX_CHARS[idx]}",
+      "bpeGR": ti.bpe,
+  }
+
+
+def _emitTDMSingleIssuerWaveLoads(writer, kernel, wave, tc):
+  """One tensor_load + advance on its issuer wave; other waves skip.
+
+  gemm_wt: A/B on 0/2, MX on PF 1/3 (each wave owns one descriptor in the
+  shared A/MX SGPR names). Adv params are wave-private.
+  """
+  g0, g1 = _tdmSIGroup0(tc), _tdmSIGroup1(tc)
+  g2 = "tdm%sGroup2" % tc
+  mod = Module("TDMSingleIssuer loads %s wave %d" % (tc, wave))
+  skip = Label(writer.labels.getUniqueNamePrefix("tdm_si_ld_%s" % tc), "")
+  mod.add(SCmpEQU32(src0=sgpr("WaveIdx"), src1=wave,
+                    comment="TDMSingleIssuer: %s issue = wave %d" % (tc, wave)))
+  mod.add(SCBranchSCC0(labelName=skip.getLabelName(),
+                       comment="other waves skip %s TDM issue" % tc))
+  mod.add(TensorLoadToLds(
+      sgpr(g0, 4), sgpr(g1, 8),
+      sgpr(g2, 4), sgpr("tdm%sGroup3" % tc, 4),
+      comment="TDMSingleIssuer: %s tensor_load (wave %d)" % (tc, wave)))
+  mod.add(_emitTDMSingleIssuerAdvanceBody(writer, tc))
+  mod.add(skip)
+  return mod
+
+
+_TDM_SI_ISSUER = {"A": ISSUER_A, "B": ISSUER_B, "MXSA": ISSUER_MXSA, "MXSB": ISSUER_MXSB}
+
+
+def emitTDMSingleIssuerLoad(writer, kernel, tc):
+  """TDMSingleIssuer GR site for ``tc`` (A, B, MXSA or MXSB): its issuer-gated load."""
+  return _emitTDMSingleIssuerWaveLoads(writer, kernel, _TDM_SI_ISSUER[tc], tc)
+
+
+def refreshTDMDescriptorSubtile(writer, kernel, tc):
+  """Sync a subtile descriptor immediately before its load.
+
+  TDMSingleIssuer: patch LDS + global only (descriptor inited once per tile).
+  Otherwise rebuild from constants / Size / Stride / Address / tdmLdsAddr /
+  tdmClamp (no VALU dependency) because scale aliases overwrite A/B.
+  """
+  if kernel.get("TDMSingleIssuer"):
+    return patchTDMDescriptorSubtile(writer, kernel, tc)
   ti = _subtileTileInfo(writer, tc)
   idx = 0 if tc.endswith("A") else 1
   tP = {
@@ -1660,6 +1915,39 @@ def refreshTDMDescriptorSubtile(writer, kernel, tc):
     "bpeGR": ti.bpe,
   }
   return initTDMDescriptorSubtile(writer, kernel, tP, refresh=True)
+
+
+def initTDMDescriptorsSubtilePersistent(writer, kernel):
+  """Wave-gated one-time full TDM init for TDMSingleIssuer.
+
+  Proto roles: A+MXSA on w0, B+MXSB on w2 (dedicated MX Group0/1). Prefetch
+  waves 1/3 leave descriptors untouched.
+  """
+  mod = Module("Init TDM Descriptors Subtile Persistent")
+  if not kernel.get("TDMSingleIssuer"):
+    return mod
+  # One issuer wave per tensor; each ends with its own adv params live.
+  issuers = (("MXSA", ISSUER_MXSA), ("MXSB", ISSUER_MXSB),
+             ("A", ISSUER_A), ("B", ISSUER_B))
+  for tc, issuer in issuers:
+    if tc.startswith("MX"):
+      if not (kernel["ProblemType"].get("MXBlock%s" % tc[-1], 0)
+              and kernel.get("enableTDM%s" % tc[-1], False)):
+        continue
+    elif not kernel.get("enableTDM%s" % tc[-1], False):
+      continue
+    tP = _tdmSingleIssuerTensorParams(writer, tc)
+    name = writer.labels.getUniqueNamePrefix("tdm_si_init_%s" % tc)
+    skip = Label(name, "")
+    mod.add(SCmpEQU32(src0=sgpr("WaveIdx"), src1=issuer,
+                      comment="TDMSingleIssuer: init %s on wave %d" % (tc, issuer)))
+    mod.add(SCBranchSCC0(labelName=skip.getLabelName(),
+                         comment="other waves skip %s TDM init" % tc))
+    mod.add(initTDMDescriptorSubtile(writer, kernel, tP, refresh=True))
+    # Load xor mask + globalInc for the issuer advance (SwapMask not used).
+    _initTDMSingleIssuerAdvParams(mod, writer, kernel, tc)
+    mod.add(skip)
+  return mod
 
 
 def tdmApplyStreamKOffsetSubtile(writer, kernel, tP):

@@ -1,0 +1,84 @@
+# Plain FP4 (no MXBlock) DU512 subtile — correct codegen for F4 without
+# scale tensors. Same tile/cluster as du512_cl24 / sclds4 base
+# (MT256x256x512, StreamK 3 DP-only, ClusterDim [2,4]).
+# Emit path: v_wmma_scale_f32_32x16x128_f4 with a unit E8M0 scale
+# (v_mov 0x7f7f7f7f), not bare v_wmma_f32_*_f4. Keep: logs/20261105-224609
+# (10/10 validate on GPU1).
+GlobalParameters:
+  SyncsPerBenchmark: 1
+  EnqueuesPerSync: 100
+  NumWarmups: 100
+  NumElementsToValidate: 0
+  PrintLevel: 3
+  Device: 0
+  CMakeBuildType: Release
+  KernelTime: True
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 0
+  DataInitTypeD: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  BoundsCheck: 0
+  KeepBuildTmp: True
+  CpuThreads: 1
+  RotatingBufferSize: 0
+  Architecture: gfx1250
+  ISA: [[12, 5, 0]]
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  -
+    - # ProblemType — F4 without MXBlock (plain v_wmma_f32_*_f4)
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      UseBias: 0
+      SupportUserArgs: True
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [true]
+        - MatrixInstruction:
+          - [32, 16, 128, 1,  1, 4, 8,  2, 2]  # MT 256x256  WG 2x2  WT 4x8
+        - DepthU: [512]
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [2]
+        - PrefetchGL2: [0]
+        - ScheduleIterAlg: [3]
+        - UseSubtileImpl: [true]
+        - StreamK: [3]
+        - StreamKForceDPOnly: [1]
+        - ClusterDim: [[2, 4]]
+        - LDSSegmentInterleave: [0]
+        - TDMInst: [3]
+        - SourceSwap: [false]
+        - StaggerU: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - 1LDSBuffer: [0]
+        - StoreVectorWidth: [-1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - GlobalSplitU: [1]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - PreloadKernArgs: [False]
+        - SwInstructionPrefetch: [0]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4096, 4096, 1, 65536]

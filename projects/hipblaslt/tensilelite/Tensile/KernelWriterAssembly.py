@@ -1178,7 +1178,15 @@ class KernelWriterAssembly(KernelWriter):
       if kernel["ProblemType"]["MXBlockA"]:
         # Defer MXSA's alias only when B owns the set and is allocated below.
         mxsaOwner = setOwner("MXSA")
-        if kernel["UseSubtileImpl"]:
+        tdmSIUnifyEarly = bool(kernel.get("TDMSingleIssuer") and kernel["UseSubtileImpl"])
+        if tdmSIUnifyEarly:
+          # gemm_wt: MX on PF waves 1/3 — wave-private A Group0/1/2 names hold
+          # MX there (wave 0/2 keep A/B). No dedicated MX SGPR block.
+          module.add(RegSet("s", "sgprtdmMXSAGroup0", "sgprtdmAGroup0"))
+          module.add(RegSet("s", "sgprtdmMXSAGroup1", "sgprtdmAGroup1"))
+          module.add(RegSet("s", "sgprtdmMXSAGroup2", "sgprtdmAGroup2"))
+          module.add(RegSet("s", "sgprtdmMXSAGroup3", "sgprtdmAGroup2"))
+        elif kernel["UseSubtileImpl"]:
           # Subtile issues data and scale loads at disjoint schedule points.
           # Rebuild the descriptor before each issue and reuse A's 12 SGPRs
           # (separate sets do not fit in the SGPR budget).
@@ -1192,21 +1200,32 @@ class KernelWriterAssembly(KernelWriter):
           module.add(self.defineSgpr("tdmMXSAGroup0", 4, 4))
           module.add(self.defineSgpr("tdmMXSAGroup1", 8, 4))
 
+    # TDMSingleIssuer: data tensors share A SGPR names (wave 0=A, wave 2=B);
+    # MX shares the dedicated MXSA names (wave 0=MXSA, wave 2=MXSB).
+    tdmSIUnify = bool(kernel.get("TDMSingleIssuer") and kernel["UseSubtileImpl"])
+
     if kernel["enableTDMB"]:
       # Alias B's descriptor onto A's when the grouping seats them on one set,
       # which halves the SGPR cost of the default row.
-      # Subtile uses separate descriptors -- deferred allocation provides
-      # enough SGPR headroom, and separate descriptors avoid the reinit
-      # overhead before each tensor_load_to_lds.
-      if setOwner("B") == "A":
+      # Subtile (non-SI) uses separate descriptors -- deferred allocation
+      # provides enough SGPR headroom, and separate descriptors avoid the
+      # reinit overhead before each tensor_load_to_lds.
+      if setOwner("B") == "A" or tdmSIUnify:
         module.add(RegSet("s", "sgprtdmBGroup0", "sgprtdmAGroup0"))
         module.add(RegSet("s", "sgprtdmBGroup1", "sgprtdmAGroup1"))
-        if kernel.get("_TDMIterateModeA", False) or kernel.get("_TDMIterateModeB", False):
+        if (kernel.get("_TDMIterateModeA", False) or kernel.get("_TDMIterateModeB", False)
+            or self.states.subtileIterateModeA or self.states.subtileIterateModeB
+            or tdmSIUnify):
           module.add(RegSet("s", "sgprtdmBGroup2", "sgprtdmAGroup2"))
           module.add(RegSet("s", "sgprtdmBGroup3", "sgprtdmAGroup2"))
         if kernel["ProblemType"]["MXBlockB"]:
+          # SI: MXSB aliases dedicated MXSA (wave-private). Non-SI: onto MXSA
+          # owner set (A-aliased or dedicated).
           module.add(RegSet("s", "sgprtdmMXSBGroup0", "sgprtdmMXSAGroup0"))
           module.add(RegSet("s", "sgprtdmMXSBGroup1", "sgprtdmMXSAGroup1"))
+          if tdmSIUnify:
+            module.add(RegSet("s", "sgprtdmMXSBGroup2", "sgprtdmMXSAGroup2"))
+            module.add(RegSet("s", "sgprtdmMXSBGroup3", "sgprtdmMXSAGroup2"))
       else:
         module.add(self.defineSgpr("tdmBGroup0", 4, 4))
         module.add(self.defineSgpr("tdmBGroup1", 8, 4))
@@ -1266,8 +1285,9 @@ class KernelWriterAssembly(KernelWriter):
       # _tdmSplitMultiWaveInc); nothing is persisted here.
 
       # Shared-scale sets select no second scale increment.
-      if kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"] \
-         and not tdmSharedScaleSetActive(kernel):
+      # TDMSingleIssuer uses wave-private tdmGlobalInc instead.
+      if (kernel["ProblemType"]["MXBlockA"] and kernel["ProblemType"]["MXBlockB"]
+          and not tdmSharedScaleSetActive(kernel) and not tdmSIUnify):
         module.add(self.defineSgpr("tdmMXSAMXSBIncs", 1))
 
     # Single-wave (NumWaves == 1): descriptors are independent, so TDMSplit
@@ -1287,14 +1307,22 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["UseSubtileImpl"] and kernel["enableTDMA"] and kernel["enableTDMB"]:
       module.add(self.defineSgpr("tdmLdsAddrA", 1))
       module.add(self.defineSgpr("tdmLdsAddrB", 1))
-      module.add(self.defineSgpr("tdmLdsSwapMaskA", 1))
-      module.add(self.defineSgpr("tdmLdsSwapMaskB", 1))
+      if tdmSIUnify:
+        # Wave-private advance params. ldsV7 sc_nbuf=2 uses XorMask only —
+        # skip SwapMask + AdvStride/Span (SGPR room for dedicated MX Group0/1/2).
+        module.add(self.defineSgpr("tdmLdsXorMask", 1))
+        module.add(self.defineSgpr("tdmGlobalInc", 1))
+      else:
+        module.add(self.defineSgpr("tdmLdsSwapMaskA", 1))
+        module.add(self.defineSgpr("tdmLdsSwapMaskB", 1))
       if kernel["ProblemType"]["MXBlockA"]:
         module.add(self.defineSgpr("tdmLdsAddrMXSA", 1))
-        module.add(self.defineSgpr("tdmLdsSwapMaskMXSA", 1))
+        if not tdmSIUnify:
+          module.add(self.defineSgpr("tdmLdsSwapMaskMXSA", 1))
       if kernel["ProblemType"]["MXBlockB"]:
         module.add(self.defineSgpr("tdmLdsAddrMXSB", 1))
-        module.add(self.defineSgpr("tdmLdsSwapMaskMXSB", 1))
+        if not tdmSIUnify:
+          module.add(self.defineSgpr("tdmLdsSwapMaskMXSB", 1))
 
     return module
 

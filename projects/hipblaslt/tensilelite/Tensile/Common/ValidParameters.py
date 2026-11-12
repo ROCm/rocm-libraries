@@ -426,10 +426,20 @@ validParameters = { # we need to make sure this matches develop
     #        run a main-loop copy that reads B before A, so the two ports never share a segment.
     # Recommended: set [0, 1] when tuning to compare baseline vs interleaved.
     "LDSSegmentInterleave": [-1, 0, 1, 2],
-    # gfx1250 subtile MXF4: gemm_wt-style A0/A1/B0/B1 segment LDS + one TDM issuer
-    # per operand (wave0 A, wave1 B, wave2 MXSA, wave3 MXSB) with READY wait_tensorcnt=1.
-    # Only UseSubtileImpl + TDMInst=3 + MIWaveGroup[2,2] + MT256/DU512 MX. Off by default.
+    # gfx1250 subtile MXF4: gemm_wt-style A0/A1/B0/B1 segment LDS + proto roles
+    # (TDM A+MXSA on w0, B+MXSB on w2; GL2 PF on 1/3; dedicated MX Group0/1) with
+    # issuer-only READY wait_tensorcnt=1. Only UseSubtileImpl + TDMInst=3 +
+    # MIWaveGroup[2,2] + MT256/DU512 MX. Off by default.
     "TDMSingleIssuer": [0, 1],
+    # TDM multicast across a ClusterDim cluster. 1 (default) = peers share tiles via
+    # multicast loads; 0 = every WG fetches its own tiles and the cluster (and its
+    # ClusterBarrier) only keeps the WGs in step for GL1/GL2 reuse.
+    "ClusterMulticast": [0, 1],
+    # Subtile: B/MXSB local reads run this many K-steps (MatrixInstK) ahead of their
+    # WMMA instead of 1, with one VGPR set per in-flight K-step. B finishes reading
+    # each LDS slice earlier, so its FREE/TDM and READY split from A's. Single
+    # partition only (falls back to 1 otherwise).
+    "LRLookaheadB": [1, 2, 3],
     # StreamK persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
     # generated code keeps that first-PGR data durable and restores borrowed

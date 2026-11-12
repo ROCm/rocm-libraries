@@ -266,9 +266,11 @@ def _allocLROffsetRegs_1x2(tag, tile, ti, writer, kernel):
 
   Two register groups are allocated:
 
-  1. sharedVgprLROffset[]: one VGPR per ds_read within a subtile.
-     numLRPerSubtile = ceil(lrSubtileSize / (loadWidthLR * waveSize)).
-     Each VGPR holds the per-lane byte offset into LDS for one ds_read_b128.
+  1. sharedVgprLROffset[]: per-lane LDS byte-offset VGPRs.
+     Default: one VGPR per ds_read within a subtile
+     (numLRPerSubtile = ceil(lrSubtileSize / (loadWidthLR * waveSize))).
+     32x16 WMMA + TDM (gemm_wt style): a SINGLE stencil VGPR; per-read
+     and per-tile displacements go into the ds_load immediate.
 
   2. sharedVgprLROffsetSwap[]: same count, used for double-buffering.
      While one set is in use for the current iteration's LR, the other
@@ -276,7 +278,8 @@ def _allocLROffsetRegs_1x2(tag, tile, ti, writer, kernel):
   """
   tile.sharedVgprLROffset = []
   tile.sharedVgprLROffsetSwap = []
-  for i in range(ti.numLRPerSubtile):
+  nAddr = 1 if isWmma32x16Tdm(writer, kernel) else ti.numLRPerSubtile
+  for i in range(nAddr):
     tile.sharedVgprLROffset.append(writer.vgprPool.checkOut(1, tag="_allocLROffsetRegs_1x2_sharedVgprLROffset"))
     tile.sharedVgprLROffsetSwap.append(writer.vgprPool.checkOut(1, tag="_allocLROffsetRegs_1x2_sharedVgprLROffsetSwap"))
 
@@ -661,23 +664,58 @@ def _emitLaneRowCol(module, writer, kernel, tileInfo, lane16, lane16Group,
                          comment="%s: offsetRow = %d*lane" % (tc, ldsRowStride)))
 
 
-def _emitWmma32x16TdmLROffsets(module, writer, kernel, tileInfo):
-  """Build identity-LDS addresses in the register order required by 32x16 WMMA.
+def _wmma32x16ReadLogicalBytes(tileInfo, subIterK, readIdx):
+  """Logical (pre-pad) byte displacement of one 32x16 WMMA ds_load from the stencil.
 
-  The instruction does not consume one complete matrix row per lane. Lanes
-  0..15 and 16..31 own alternating 32-element K quarters, and A additionally
-  pairs M rows r and r+16 in each lane. Each half-wave reads 16 consecutive
-  rows so the 16B TDM pad spreads a b128 read across all LDS banks; the
-  resulting accumulator row order is fixed up after the loop by
+  Matches the former per-addr bake in _emitWmma32x16TdmLROffsets: each pair of
+  b128 reads supplies K[0:32] and K[64:96] (or the complementary quarters for
+  lanes 16..31). A's second pair supplies the corresponding data for row r+16.
+  """
+  rowStride = int(tileInfo.depthUBytes)
+  tileKBytes = int(tileInfo.mmaTileShape[1] * tileInfo.bpe)
+  kOffset = int(subIterK) * tileKBytes + (int(readIdx) % 2) * 32
+  rowOffset = (int(readIdx) // 2) * 16 * rowStride if tileInfo.tc == 'A' else 0
+  return kOffset + rowOffset
+
+
+def _wmma32x16PaddedDelta(tileInfo, logicalBytes):
+  """Pad-adjusted immediate for a displacement from the padded stencil base.
+
+  TDM inserts ``ldsRowPadBytes`` after every ``ldsBlockSizePerPadBytes``. The
+  stencil VGPR already includes pad at the lane origin, so the ds_load
+  immediate must be pad(stencil + d) - pad(stencil). For the 32x16 WMMA
+  stencil (residue 0 or 16 in a 256 B block) and the logical displacements
+  above, that simplifies to d + pad * (d // interval).
+  """
+  d = int(logicalBytes)
+  padAmount = int(getattr(tileInfo, "ldsRowPadBytes", 0))
+  padInterval = int(getattr(tileInfo, "ldsBlockSizePerPadBytes", 0))
+  if padAmount and padInterval:
+    d += padAmount * (d // padInterval)
+  return d
+
+
+def _emitWmma32x16TdmLROffsets(module, writer, kernel, tileInfo):
+  """Build the gemm_wt-style single LR stencil for 32x16 WMMA + TDM.
+
+  One VGPR holds the per-lane origin (row * DepthU + K-quarter*16, with TDM
+  pad folded in). Every tile / read beyond that is reached by the ds_load
+  16-bit immediate (see emitSingleDsRead / _wmma32x16ReadLogicalBytes).
+
+  Lanes 0..15 and 16..31 own alternating 32-element K quarters, and A
+  additionally pairs M rows r and r+16 in each lane. Each half-wave reads 16
+  consecutive rows so the 16B TDM pad spreads a b128 read across all LDS
+  banks; the resulting accumulator row order is fixed up after the loop by
   emitWmma32x16AccRowFixup.
   """
   tc = tileInfo.tc
   rowStride = int(tileInfo.depthUBytes)
   padAmount = int(getattr(tileInfo, "ldsRowPadBytes", 0))
   padInterval = int(getattr(tileInfo, "ldsBlockSizePerPadBytes", 0))
-  tileKBytes = int(tileInfo.mmaTileShape[1] * tileInfo.bpe)
-  regsPerRead = tileInfo.loadWidthLR // 4
-  readsPerTile = int(tileInfo.geometry.lr.mmaLayout.vgprs // regsPerRead)
+  assert len(tileInfo.sharedVgprLROffset) == 1, (
+      "%s: 32x16 WMMA TDM expects a single LR stencil VGPR, got %u"
+      % (tc, len(tileInfo.sharedVgprLROffset)))
+  dst = tileInfo.sharedVgprLROffset[0]
   base = writer.vgprPool.checkOut(3, tag="_emitWmma32x16TdmLROffsets")
   laneRow, laneHalf, rowBase = base, base + 1, base + 2
 
@@ -691,29 +729,17 @@ def _emitWmma32x16TdmLROffsets(module, writer, kernel, tileInfo):
                             src=vgpr(laneHalf), comment=f"{tc}: K byte offset = laneHalf * 16"))
   module.add(VMulLOU32(dst=vgpr(rowBase), src0=rowStride, src1=vgpr(laneRow),
                        comment=f"{tc}: row byte offset"))
-  module.add(VAddU32(dst=vgpr(rowBase), src0=vgpr(rowBase), src1=vgpr(laneHalf),
-                     comment=f"{tc}: row + lane K quarter"))
-
-  for offsetIdx, dst in enumerate(tileInfo.sharedVgprLROffset):
-    mmaTile = offsetIdx // readsPerTile
-    readIdx = offsetIdx % readsPerTile
-    # Each pair of b128 reads supplies K[0:32] and K[64:96] (or the
-    # complementary quarters for lanes 16..31). A's second pair supplies
-    # the corresponding data for row r+16.
-    kOffset = mmaTile * tileKBytes + (readIdx % 2) * 32
-    rowOffset = (readIdx // 2) * 16 * rowStride if tc == 'A' else 0
-    byteOffset = kOffset + rowOffset
-    module.add(VAddU32(dst=vgpr(dst), src0=vgpr(rowBase), src1=byteOffset,
-                       comment=f"{tc}: WMMA read {offsetIdx} byte offset"))
-    if padAmount and padInterval:
-      module.add(VLShiftRightB32(dst=vgpr(laneHalf),
-                                 shiftHex=hex(padInterval.bit_length() - 1),
-                                 src=vgpr(dst), comment=f"{tc}: pad block index"))
-      module.add(VLShiftLeftB32(dst=vgpr(laneHalf),
-                                shiftHex=hex(padAmount.bit_length() - 1),
-                                src=vgpr(laneHalf), comment=f"{tc}: accumulated LDS padding"))
-      module.add(VAddU32(dst=vgpr(dst), src0=vgpr(dst), src1=vgpr(laneHalf),
-                         comment=f"{tc}: padded LDS address"))
+  module.add(VAddU32(dst=vgpr(dst), src0=vgpr(rowBase), src1=vgpr(laneHalf),
+                     comment=f"{tc}: WMMA LR stencil (row + lane K quarter)"))
+  if padAmount and padInterval:
+    module.add(VLShiftRightB32(dst=vgpr(laneHalf),
+                               shiftHex=hex(padInterval.bit_length() - 1),
+                               src=vgpr(dst), comment=f"{tc}: pad block index"))
+    module.add(VLShiftLeftB32(dst=vgpr(laneHalf),
+                              shiftHex=hex(padAmount.bit_length() - 1),
+                              src=vgpr(laneHalf), comment=f"{tc}: accumulated LDS padding"))
+    module.add(VAddU32(dst=vgpr(dst), src0=vgpr(dst), src1=vgpr(laneHalf),
+                       comment=f"{tc}: padded LDS address"))
 
   writer.vgprPool.checkIn(base)
 
@@ -785,7 +811,8 @@ def localReadResetOffsetsSubtile(writer, kernel):
   return module
 
 
-def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
+def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True,
+                     offsetBias=0):
   """Emit DSLoadB128 instruction(s) for one MMA tile within a subtile.
 
   For wave32 tiles with 8 VGPRs, emits two DSLoadB128 instructions
@@ -797,6 +824,8 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
       subIterK:  subIterK index within the subtile (maps to mfmaC; subtileShape[0]=1 so mfmaR=0)
       dstTile:   RegisterTileInfo \u2014 destination vgpr tile for the load
       swizzled:  If True, LDS uses swizzled subtile layout; if False, contiguous K-row layout
+      offsetBias: Extra bytes added to the ds immediate (TDMSingleIssuer bake of
+                  LDS buf0/buf1 half so LR VGPRs stay at buf0 and skip v_xor).
 
   Returns a Module. For tiles with numRegs > 4 (e.g. FP8 8-VGPR tiles), emits
   multiple ds_read_b128 instructions (one per 4 VGPRs), each using the next
@@ -828,6 +857,11 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
     offsetStride = tileBytes + tilePadBytes
     offset = sId0 * offsetStride + int(sId1 * subtileShapeK * instK * tileInfo.bpe)
 
+  offset = int(offset) + int(offsetBias)
+  assert 0 <= offset < 65536, (
+      "Subtile%s: ds offset %u out of u16 range (bias=%u)"
+      % (tileInfo.tc, offset, offsetBias))
+
   dstVgpr = dstTile.regList.indices[0]
   numRegs = len(dstTile.regList.indices)
   numReadsForTile = numRegs // REGS_PER_DS_READ
@@ -835,13 +869,26 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
       "Subtile%s: %u VGPRs not a multiple of ds_load width %u"
       % (tileInfo.tc, numRegs, REGS_PER_DS_READ))
 
+  # gemm_wt style: one stencil VGPR + per-read immediates. Legacy path keeps
+  # one addr VGPR per read with the read displacement already baked in.
+  singleBase = len(tileInfo.sharedVgprLROffset) == 1
   module = Module()
   for readIdx in range(numReadsForTile):
-    addrVgpr = tileInfo.sharedVgprLROffset[mfmaId * numReadsForTile + readIdx]
+    if singleBase:
+      addrVgpr = tileInfo.sharedVgprLROffset[0]
+      readImm = _wmma32x16PaddedDelta(
+          tileInfo, _wmma32x16ReadLogicalBytes(tileInfo, mfmaId, readIdx))
+      dsOffset = int(offset) + int(readImm)
+      assert 0 <= dsOffset < 65536, (
+          "Subtile%s: ds offset %u out of u16 range (tile=%u readImm=%u bias=%u)"
+          % (tileInfo.tc, dsOffset, offset, readImm, offsetBias))
+    else:
+      addrVgpr = tileInfo.sharedVgprLROffset[mfmaId * numReadsForTile + readIdx]
+      dsOffset = offset
     module.add(DSLoadB128(
         dst=vgpr(dstVgpr + readIdx * REGS_PER_DS_READ, REGS_PER_DS_READ),
         src=vgpr(addrVgpr),
-        ds=DSModifiers(offset=offset),
+        ds=DSModifiers(offset=dsOffset),
         comment="Subtile%s[%u, %u] subIterK=%u read=%u" % (tileInfo.tc, sId0, sId1, subIterK, readIdx)))
   return module
 

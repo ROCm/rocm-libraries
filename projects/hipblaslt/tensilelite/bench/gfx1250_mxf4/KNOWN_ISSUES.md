@@ -827,3 +827,140 @@ What is left and why:
   the last free segment, the next iteration's TDM writes land in a segment being read, and
   address conflicts appear. Duplicating B and SB per port would remove the shared data but adds
   about 50% L2-to-LDS traffic, the suspected main bottleneck.
+
+## TDMSingleIssuer DU512 campaign (2026-10-29 … 2026-11-05)
+
+Working config: `configs/du512_tdmsi.yaml` (MT256x256x512, StreamK 3 DP-only, ClusterDim
+`[2,4]`, `TDMSingleIssuer: 1`, `PrefetchGL2: 2`, `LDSSegmentInterleave: 0`). Timing size
+(4096, 4096, 1, 65536) on GPU 1 via `gpu-guard` (no `HIP_VISIBLE_DEVICES` remap; client
+`device-idx=1`; `LD_LIBRARY_PATH=/opt/rocm/lib/llvm/lib/x86_64-unknown-linux-gnu`). Bust the
+`d18c4974e047` cache dir when regenerating after Python-side codegen changes.
+
+### Current fastest keep
+
+Absolute fastest (asm-patched, not generator-TDMSI): **`logs/20261023-211741-sclds4-sclds4`**
+(sciter2 + scale LDS depth 4 on multicast+[2,4]+hoist). Historical: **155.0 µs / 14.19 PF**
+(GPU 2). Reconfirmed 2026-11-05 GPU 1: median **~161.6 µs / 13.61 PF** (6×5w/20e). Symlinks:
+`logs/t-fastest`, `logs/t-mxpf` → this dir. Not yet upstreamed (`patch_scale_iterate.py` +
+`patch_scale_lds4.py`).
+
+Best **generator** TDMSI keep (for upstream work):
+
+| Build | Notes | Median us (6×5w/20e) |
+| --- | --- | --- |
+| **`logs/20261105-213051`** (SIP=0, classic preloop) | Generator line | **~165–167 / ~13.2 PF** |
+| `logs/20261104-163327` (Proto TDM-hide, MERGE off) | Best ratio vs dsGlue | ~1.010× vs `20261030-153152` (5/8) |
+| `logs/20261105-202520` (MX-on-PF gemm_wt roles) | 90 SGPRs, all-wave `wait_tensorcnt` | ~167 |
+| `logs/20261030-153152` (`dsGlue` / spreadPostReady) | Common alt_timing baseline | ~167–170 |
+
+Classic PGR=2 preloop order (kept): `WaitGR → Sync → LR → Skip LE1 NLL → MT1 → GL2 → Skip LE2 NGLL`.
+Main-loop pipeline kept as classic FREE→TDM→cover→`wait_tensorcnt 1`→READY (latency-hidden),
+not a drain.
+
+### What helped (upstreamed or still wired)
+
+- **TDMSingleIssuer** + WAVE_SCHED `DEP_MODE=2 | DISABLE_XDL_ARB_STALL` (bit 2).
+- **Borrow-exit** (`s_sub` / `s_cbranch` tail; bias one `L -= PGR+1`, no exit restore):
+  `logs/20261029-212851`.
+- **Proto-style SI advance** (A/B xor+add; MX rotate only) + **spread into WMMA holes**.
+- **MX `sc_nbuf` 3→2** with scale buf baked into even/odd `ds` immediates (gemm_wt `mx_sbuf=2`).
+- **spreadPostReady** (`dsGlue`): hide READY `b128` burst under following WMMAs —
+  `logs/20261030-153152`.
+- **Wave-gated GL2 PF** (wave1=A, wave3=B; no MX PF) parked after last LR (TDM-gap=24).
+  Earlier post-gap placement was slower (`logs/20261102-183606`, ~0.979×) — reverted.
+- **Proto FREE last-consumer** (`relocateFreeToLastConsumer`) + FREE-hole /
+  `hideWgpBarrierBehindWmma` (SIG_EARLY) — wired; timing ~flat to slight win depending on twin.
+- **gemm_wt MX-on-PF roles**: TDM A/B on waves 0/2; scale TDM + GL2 PF on 1/3
+  (`mx_wave = pf_wave`). `logs/20261105-202520`, 10/10, ~167 us.
+
+### Tried and abandoned / neutral
+
+| Experiment | Result |
+| --- | --- |
+| Dual-issue A+MX on waves 0/2 (dedicated MX Group0/1/2; unalias/stash/iterate-rearm/`tcnt0`) | Prologue-only correctness (2/10); abandoned — gemm_wt keeps MX on PF waves |
+| `mergeFreeReadyBarriers` + `tensorcntExactN` at FREE (N=0) | Correct but stalls (~0.86× vs dsGlue); same class as forceDrain |
+| Harden FREE fine wait to `dscnt=0` / MERGE-on drains | ~0.90×; keep fine N at last-consumer, classic N=1 pipeline |
+| Proto cluster `CBSIG_WMMA=16` + `CBW_SIGONLY` (wave0-only cluster wait) | Slightly slower than dsGlue (~0.98–0.99×) |
+| `SwInstructionPrefetch` RelDynamic via StinkyTofu on UseSubtileImpl | Wrong path: Stinky hazard / `v_permlane16_swap` emit / RelDynamic mid-epilogue offset 0. **Do not use Stinky for subtile.** |
+| Tensile-side SIP prologue (`Components/Subtile/InstructionPrefetch.py`, entry `s_prefetch_inst_pc_rel` covering `label_LoopBeginL`) | 10/10; vs SIP=0 twin ~**1.002×** (3/6) — noise. Left **Off** in `du512_tdmsi.yaml`. |
+| Proto preloop reorder (MT1 → GL2 → burst LR → `s_wait_dscnt 0`; short-K gated via `PreloopAfterMT1`) | 10/10 (`logs/20261105-220052`); vs SIP=0 ~**1.003×** (2/6). **Reverted** to classic LR→MT1→GL2. |
+
+### ATT / prologue `ds_load` stalls (open)
+
+On a long-K ATT of the SIP-on build (`output24`, cycles ~110k–140k pre-steady mainloop),
+prologue / early-loop `ds_load`s show long stalls. gemm_wt `opt_v7` issues GL2 PF, then the
+prologue LR burst, then a single `s_wait_dscnt 0` before the cluster rendezvous. Matching that
+preloop order in Tensile did not move end-to-end time (above). Next: confirm whether the stall
+is LDS miss / bank / dependency on the first READY, or instruction-cache cold in that window
+(SIP was already tried and was neutral).
+
+### Generator notes for this line
+
+- Subtile SIP lives in `Tensile/Components/Subtile/InstructionPrefetch.py` (two-pass
+  assemble→objdump→rewrite). Wired from `KernelWriter.kernelBodySubtile`; independent of Stinky.
+- Unit tests: `Tensile/Tests/unit/test_subtile_instruction_prefetch.py`.
+- Client under gpu-guard needs physical `Device` / `device-idx` matching the reserved GPU
+  (Device 0 under a GPU1 reservation aborts the smoke client even when the `.co` is fine).
+
+## Plain FP4 (no MX) codegen (2026-11-05)
+
+Config: `configs/du512_fp4.yaml` — F4 TN, **no** `MXBlockA/B` / `DataTypeMXS*`, same DU512
+geometry as cl24 (`MT256x256x512`, StreamK 3 DP-only, `ClusterDim [2,4]`, `TDMInst 3`,
+`PrefetchGL2 0`). Keep: **`logs/20261105-224609`** (symlink `logs/t-fp4`).
+
+- Asm: `v_wmma_scale_f32_32x16x128_f4` with `v_mov_b32 … 0x7f7f7f7f` unit E8M0 scale —
+  that is the generator’s correct non-MX path (no MX TDM/LR). Manual rewrite to bare
+  `v_wmma_f32_32x16x128_f4` (`logs/20261105-224151-fp4-noscale`) is not codegen-correct.
+- Validate: **10/10** on GPU1 (`device-idx=1`, no `HIP_VISIBLE` remap).
+- Timing vs sclds4 (GPU0, 6×5w/20e, `logs/_time_fp4.py`): FP4 median **150.8 µs / 14.63 PF**,
+  sclds4 **157.9 µs / 13.92 PF** — FP4 **1.052×** faster (6/6). Different problem types
+  (plain F4 vs MX); FLOPS still `2·M·N·K`.
+- Non-subtile twin (`configs/du512_fp4_nonsu.yaml`, keep `logs/20261106-151523` /
+  `logs/t-fp4-nonsu`): **DepthU 512 rejects** (VGPR overflow ~1048). Working classic is
+  **MT256×256×256 USI0**. GPU1 4×5w/20e vs subtile DU512: nonsu **~315 µs / ~7.0 PF**,
+  subtile **~154 µs / ~14.3 PF** (~**2.05×**). Not same DepthU — DU512 classic does not
+  assemble.
+
+## Cluster barrier efficiency (slides 21–25, 2026-11-09)
+
+Slide rules (MI450 hipblaslt codegen features July 2026): cluster barrier guards
+multicast `tensor_load_to_lds`; hang if `CW-3`→`CS-3` without intervening `WW-1`;
+safe min-delay is early `CS-3`, late `CW-3` immediately before FREE `WW-1`.
+
+### Static audit `logs/t-fp4` (5 CS/CW pairs)
+
+| Site (CS line) | Class | Hide (WMMAs CS→CW) | Notes |
+| --- | --- | --- | --- |
+| 1275 | FREE_PRETDM | 15 | Preloop; CW→WW→TDM (slide 25 OK) |
+| 1665 | FREE_PRETDM | 15 | Mainloop FREE; CW→WW→TDM |
+| 2285 | LEGACY_GLUED | 0 | After READY WW; **no TDM after CW** — redundant long stall |
+| 2852 | LEGACY_GLUED | 0 | Same READY/tail pattern |
+| 3148 | OTHER (glued) | 0 | Tail; no following WW/TDM |
+
+- **Illegal `CW→CS` (no WW):** 0 (slide-25 hang pattern absent).
+- `logs/t-mxpf`: also 0 illegal; FREE sites hide ~32 WMMAs; some CS_CW_HIDDEN on non-FREE.
+
+Efficiency suspect is the **legacy glued** READY/tail handshakes (slide-21 long stall),
+not a deadlock. Fix: `insertClusterBarrier` no-ops when the section has no FREE
+(WGP→TDM) site (`ClusterBarrier.py`); FREE pretdm unchanged.
+
+**ATT baseline (2026-11-09):** `rocprofv3` ATT still unusable here (GPU0 default
+hits kernel gate; `--att-gpu-index 1` SEGV / comgr; older ROCm wraps fail
+library load). Prefer GRBM_GUI_ACTIVE + static CS audit over ATT for now.
+
+### MXF4 CB-skip remasure (2026-11-09, GPU1)
+
+Generator keep `logs/t-mxpf-cbskip` → `20261109-185248` (vs pre
+`logs/t-mxpf-pre` → `20261105-213051`). Asm CS/CW **6→3** (legacy READY/tail
+glued sites dropped; FREE pretdm kept). Validate **10/10**.
+
+GRBM_GUI_ACTIVE at (4096, 4096, 1, 65536), 5w/5e
+(`logs/20261109-190702-cyc-{pre,cbskip}`):
+
+| build | Mcycles | vs pre | µs |
+| --- | ---: | ---: | ---: |
+| pre | 2.263 | — | 159.8 |
+| cbskip | 2.245 | **−0.8%** | 158.1 |
+
+Legacy glued CW removal is real in codegen; end-to-end GPU-active cycles move
+only ~1% on this macrotile — FREE-site CW still dominates the handshake cost.

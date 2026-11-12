@@ -14,15 +14,28 @@ These tests exercise ``insertClusterBarrier`` directly with a mock writer so
 they stay fast and hardware-free.
 """
 
+import shutil
 from unittest.mock import MagicMock
 
+import pytest
+from rocisa import rocIsa
 from rocisa.code import Label, Module
 from rocisa.container import DSModifiers, MemTokenData, sgpr, vgpr
 from rocisa.instruction import DSLoadB64, Instruction, SAndB32, SBarrier, SBitcmp1B32, SCBranchSCC1, SCmpEQU32, SCmpLeU32, SLShiftRightB32, TensorLoadToLds, VReadfirstlaneB32
 
+from Tensile.Common.Architectures import gfxToIsa
 from Tensile.Components.DecouplePGR import dcpThickGateFromTokenPasses
 from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
 from Tensile.KernelWriter import KernelWriter
+
+
+@pytest.fixture(autouse=True)
+def _rocisa_gfx1250_for_cluster_barrier():
+    """Pairing tests that call insertClusterBarrier need gfx1250 asm caps."""
+    ri = rocIsa.getInstance()
+    asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
+    ri.init(gfxToIsa("gfx1250"), asmpath)
+    ri.setKernel(gfxToIsa("gfx1250"), 32)
 
 
 def _mockWriter():
@@ -53,27 +66,44 @@ def _indices(items):
     return sig, wait
 
 
-def test_wait_dominates_early_exit_branch():
-    """The cluster wait must sit after the signal but before the first exit."""
+def _freeSiteModule(withExitsAfterTdm=True):
+    """Minimal FREE→TDM section so insertClusterBarrier emits CS/CW."""
+    from rocisa.instruction import MFMAInstruction
+    from rocisa.container import vgpr
+    from rocisa.enum import InstType
     module = Module("section")
-    module.add(SCmpEQU32(sgpr("LoopCounterL"), 1, "LoopCounter LE 1?"))
-    module.add(SCBranchSCC1("label_SkipToNLL", "skip to NLL"))
-    module.add(SCmpEQU32(sgpr("LoopCounterL"), 2, "LoopCounter LE 2?"))
-    module.add(SCBranchSCC1("label_SkipToNGLL", "skip to NGLL"))
+    for _ in range(4):
+        module.add(MFMAInstruction(InstType.INST_F32, InstType.INST_F32,
+                                   [16, 16, 4], False, vgpr(0, 4), vgpr(4),
+                                   vgpr(5), 0, comment="wmma"))
+    module.add(SBarrier(comment="FREE"))
+    module.add(TensorLoadToLds(sgpr(0, 4), sgpr(0, 8), sgpr(0, 4), sgpr(0, 4),
+                               "TDM"))
+    if withExitsAfterTdm:
+        module.add(SCmpEQU32(sgpr("LoopCounterL"), 1, "LoopCounter LE 1?"))
+        module.add(SCBranchSCC1("label_SkipToNLL", "skip to NLL"))
+        module.add(SCmpEQU32(sgpr("LoopCounterL"), 2, "LoopCounter LE 2?"))
+        module.add(SCBranchSCC1("label_SkipToNGLL", "skip to NGLL"))
+    return module
 
-    items = insertClusterBarrier(module, _mockWriter(), _kernel()).flatitems()
+
+def test_wait_dominates_early_exit_branch():
+    """On a FREE site, CS→CW land before FREE; exits after TDM cannot skip CW."""
+    items = insertClusterBarrier(
+        _freeSiteModule(), _mockWriter(), _kernel()).flatitems()
     sig, wait = _indices(items)
+    free = next(i for i, x in enumerate(items)
+                if isinstance(x, SBarrier) and "s_barrier_wait -1" in str(x))
     firstExit = next(i for i, x in enumerate(items) if isinstance(x, SCBranchSCC1))
-
-    assert sig < wait < firstExit, (
-        "cluster wait must follow the signal and precede the first early-exit "
-        "branch so no taken branch can skip it"
+    assert sig < wait < free < firstExit, (
+        "cluster wait must follow the signal, precede FREE, and precede "
+        "post-TDM early-exit branches"
     )
 
 
 def test_wait_never_placed_after_exit_branch():
     """Anti-regression: no early-exit branch may precede the cluster wait."""
-    module = Module("section")
+    module = _freeSiteModule(withExitsAfterTdm=False)
     module.add(SCmpEQU32(sgpr("LoopCounterL"), 32, "LoopCounter LE 32?"))
     module.add(SCBranchSCC1("label_SkipTailLoopL", "early-exit tail"))
 

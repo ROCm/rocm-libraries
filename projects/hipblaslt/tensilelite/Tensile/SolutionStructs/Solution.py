@@ -1258,6 +1258,7 @@ class Solution(collections.abc.Mapping):
     # Broadcasting additionally needs hardware TDM-multicast (an arch fact, in archCaps);
     # clustering and ClusterBarrier are separate features kept even where it is absent.
     state["Multicast"] = bool(clusterPeersShareTiles
+                              and state.get("ClusterMulticast", 1)
                               and isaInfoMap[state["ISA"]].archCaps.get("HasTDMMulticast", True))
     # ClusterBarrier emits SCmp/branch on sgpr("WaveIdx"), which is only allocated when TDM is enabled.
     state["ClusterBarrier"] = bool(clusterPeersShareTiles and state["TDMInst"] != 0

@@ -223,7 +223,7 @@ def emitScaleGRPtrUpdate(ti, writer, kernel):
       module.add(emitScaleTdmStepBytes(ti, kernel, sgpr(inc), sgpr(sizeName), "scale step"))
       module.add(SAddU32(dst=sgpr("Address%s+0" % tc), src0=sgpr("Address%s+0" % tc), src1=sgpr(inc)))
       module.add(SAddCU32(dst=sgpr("Address%s+1" % tc), src0=sgpr("Address%s+1" % tc), src1=0))
-    # refreshTDMDescriptorSubtile copies Address{tc} into the descriptor before every load.
+    # TDMSingleIssuer patches Address into the descriptor after each load.
     return module
 
   inc = int(ti.lrSubtileSize * ti.lrGlobalSubtileGrid[1])
@@ -516,29 +516,15 @@ def globalReadDoScaleSubtile(tc, writer, kernel):
     return module
 
   if kernel.get("enableTDMA", False) and kernel.get("enableTDMB", False):
-    from rocisa.code import Label
-    from rocisa.instruction import SCmpEQU32, SCBranchSCC0
-    from .LdsV7Layout import ISSUER_MXSA, ISSUER_MXSB
+    if kernel.get("TDMSingleIssuer"):
+      from .SubtileGREmit import emitTDMSingleIssuerLoad
+      module.add(emitTDMSingleIssuerLoad(writer, kernel, tc))
+      return module
+    module.addComment0("Scale GR: %s (TDM: tensor_load_to_lds)" % tc)
     group0 = "tdm%sGroup0" % tc
     group1 = "tdm%sGroup1" % tc
-    singleIssuer = bool(kernel.get("TDMSingleIssuer"))
-    # Scale ITERATE reuses the host A/B Group2 (MX descriptors alias Group0/1 only).
-    host = "A" if tc == "MXSA" else "B"
-    group2 = sgpr("tdm%sGroup2" % host, 4) if singleIssuer else None
-    group3 = sgpr("tdm%sGroup3" % host, 4) if singleIssuer else None
-    module.addComment0("Scale GR: %s (TDM: tensor_load_to_lds)" % tc)
-    if singleIssuer:
-      issuer = ISSUER_MXSA if tc == "MXSA" else ISSUER_MXSB
-      name = writer.labels.getUniqueNamePrefix("tdm_si_%s" % tc)
-      skip = Label(name, "")
-      module.add(SCmpEQU32(src0=sgpr("WaveIdx"), src1=issuer,
-                           comment="TDMSingleIssuer: %s issuer = wave %d" % (tc, issuer)))
-      module.add(SCBranchSCC0(labelName=skip.getLabelName(),
-                              comment="other waves skip %s TDM" % tc))
-    module.add(TensorLoadToLds(sgpr(group0, 4), sgpr(group1, 8), group2, group3,
+    module.add(TensorLoadToLds(sgpr(group0, 4), sgpr(group1, 8), None, None,
                                comment="TDM: global->LDS for %s" % tc))
-    if singleIssuer:
-      module.add(skip)
     return module
 
   tileInfo = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo

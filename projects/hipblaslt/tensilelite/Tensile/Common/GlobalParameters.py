@@ -545,6 +545,8 @@ defaultBenchmarkCommonParameters = [
     {"1LDSBuffer": [0]},
     {"LDSSegmentInterleave": [0]},
     {"TDMSingleIssuer": [0]},
+    {"ClusterMulticast": [1]},
+    {"LRLookaheadB": [1]},
     {"DepthU": [-1]},
     {"NonTemporalE": [0]},
     {"NonTemporalGate": [0]},

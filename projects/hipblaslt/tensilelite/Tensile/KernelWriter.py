@@ -69,6 +69,7 @@ from .Common.GlobalParameters import globalParameters
 from .Common.Architectures import ARCH_CAP_OVERRIDES
 from .Common.ValidParameters import resolveSwInstructionPrefetch, \
   SW_INSTRUCTION_PREFETCH_AUTO
+from .Components.Subtile.InstructionPrefetch import insertPrologueInstructionPrefetch
 from Tensile.SolutionStructs.Naming import getKernelNameMin
 from Tensile.Toolchain.Component import Assembler
 
@@ -5467,8 +5468,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(SMovB64(dst=sgpr("AddressMXSB", 2), src=sgpr("AddressMXSBBase", 2),
                            comment="re-base MXSB to tensor base"))
     if hasTDM:
-      # Addresses are consumed by the per-load descriptor refresh. Only the LDS
-      # base and swap mask have to exist before the first tensor_load_to_lds.
+      # Addresses feed the per-load descriptor sync (full refresh, or
+      # TDMSingleIssuer patch). Only the LDS base and swap mask have to exist
+      # before the first tensor_load_to_lds.
       module.add(tdmGlobalOffsetSubtile(self, kernel, tensorParametersA))
       module.add(initTDMLdsTrackingSubtile(self, kernel, tensorParametersA))
       module.add(tdmGlobalOffsetSubtile(self, kernel, tensorParametersB))
@@ -5506,6 +5508,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
         if tc.startswith("MX") and not kernel["ProblemType"]["MXBlock%s" % tc[-1]]:
           continue
         module.add(initTDMClampSubtile(self, kernel, tc))
+      # TDMSingleIssuer: full descriptor once per issuer wave; mainloop only
+      # patches LDS + global (see patchTDMDescriptorSubtile).
+      module.add(initTDMDescriptorsSubtilePersistent(self, kernel))
 
     # Claim the scale tiles' bank-0 registers before D takes the low range.
     self.reserveMxScaleVgprs([mxsatileInfo, mxsbtileInfo])
@@ -5691,7 +5696,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
     error = self.states.overflowedResources
     print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")
 
-    return (error, str(moduleKernelBody))
+    # Subtile path: rocisa emit + optional prologue s_prefetch_inst_pc_rel when
+    # SwInstructionPrefetch is Relative (Components/Subtile/InstructionPrefetch.py).
+    asm = insertPrologueInstructionPrefetch(
+        str(moduleKernelBody), kernel, self.assembler, self.states.version)
+    return (error, asm)
 
 
   ##############################################################################
@@ -7322,8 +7331,22 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # and CUOccupancy.  Replaces the previous O(assembly-size) str()+regex scan.
     self.updateOccupancyFromMaxVgpr(kernel, moduleKernelBody, passResult.maxVgpr)
 
+    return self._finishKernelAssembly(kernel, moduleKernelBody, fs)
+
+  ##############################################################################
+  # Finish kernel assembly (optional StinkyTofu pipeline + emit)
+  ##############################################################################
+  def _finishKernelAssembly(self, kernel, moduleKernelBody, fs, stinkyClusterBarrier=None):
+    """Emit final asm, optionally through StinkyTofu.
+
+    Used by ``kernelBody`` (non-subtile). Subtile uses rocisa emit +
+    ``insertPrologueInstructionPrefetch`` instead — no StinkyTofu.
+    """
     # Initialize stModule as None (will be set for supported architectures)
     stModule = None
+
+    if stinkyClusterBarrier is None:
+      stinkyClusterBarrier = bool(kernel.get("ClusterBarrier", False))
 
     # Run StinkyTofu conversion for supported architectures
     t0_start = time.perf_counter()
@@ -7382,7 +7405,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                "EnableSwInstructionPrefetchRelStatic": swpRelEnable,
                                # Cluster-barrier handshake insertion in Gfx1250Backend
                                # (kernel-scope at every OptLevel when set).
-                               "ClusterBarrier": bool(kernel.get("ClusterBarrier", False)),
+                               "ClusterBarrier": bool(stinkyClusterBarrier),
                                # StreamKMulticast gates the per-iteration cooperative-broadcast
                                # drain in InsertClusterBarrierPass Rule 3 (mainloop): with PGR>=2
                                # an `s_wait_tensorcnt 0` is emitted after the cooperative
@@ -7444,6 +7467,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                            options=stinky_module_options)
       t1a_end = time.perf_counter()
       print2(f"StinkyTofu (1a) toStinkyTofuModule: {t1a_end - t1a_start:.4f}s")
+
+      costDir = str(globalParameters.get("StinkyTofuCostOutputDir") or "")
+      if costDir:
+        # Full Tensile kernel names exceed NAME_MAX when used as a directory leaf;
+        # hash keeps RelDynamic / AccumulateInstructionSize dumps path-safe.
+        import hashlib
+        kn = getattr(self.states, "kernelName", "") or "kernel"
+        stModule.setOutputDir(costDir)
+        stModule.setOutputName(hashlib.sha256(kn.encode()).hexdigest()[:16])
 
       # Run pipeline — builder handles O0 internally (skips optimization,
       # still runs required passes like InsertVgprMsb)
@@ -7507,9 +7539,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       print2(f"Using StinkyTofu Assembly")
       return (error, st_asm)
-    else:
-      print2(f"Using Original Rocisa Assembly")
-      return (error, str(moduleKernelBody))
+
+    print2(f"Using Original Rocisa Assembly")
+    return (error, str(moduleKernelBody))
 
   ##############################################################################
   # Init Kernel
