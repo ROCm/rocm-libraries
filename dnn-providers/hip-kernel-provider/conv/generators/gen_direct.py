@@ -70,13 +70,14 @@ INTS = [
 ]
 ROWS0 = dict(rows=0, pw=0, fn=0, wp=0, wq=0, wk=0, pp=0, epi=0)
 STRINGS = ["direction", "dtype", "kind", "atom", "archs"]
-F33, F55, F77, F17, F71, F333 = (
+F33, F55, F77, F17, F71, F333, F555 = (
     (1, 3, 3),
     (1, 5, 5),
     (1, 7, 7),
     (1, 1, 7),
     (1, 7, 1),
     (3, 3, 3),
+    (5, 5, 5),
 )
 FILTERS2D = [F33, F55, F77, F17, F71]
 
@@ -261,6 +262,16 @@ for dt in ("HALF", "BFLOAT16"):
                 M(f"mfma16_{e}", F33, 128, 192, 16, 2, 4, 8),
             ],
         )
+    # 5x5x5 (ConvTranspose3d grad-input, c64 -> k16 / k32): 16- and 32-wide K blocks; the
+    # halo in LDS feeds all 125 taps where the implicit GEMM re-gathers them.
+    add(
+        dt,
+        ["gfx950"],
+        [
+            M(f"mfma16x32_{e}", F555, 128, 16, 32, 4, 1, 8, ring=0),
+            M(f"mfma16x32_{e}", F555, 128, 32, 32, 4, 1, 8, ring=0),
+        ],
+    )
     # gfx11 / gfx12
     for fam in ("11", "12"):
         a = f"wmma{fam}_{e}"
@@ -391,6 +402,14 @@ add(
     "FLOAT",
     ["gfx950"],
     [
+        M("mfma16_f32", F555, 128, 16, 8, 4, 1, 4, ring=0),
+        M("mfma16_f32", F555, 256, 32, 16, 4, 1, 4, ring=0),
+    ],
+)
+add(
+    "FLOAT",
+    ["gfx950"],
+    [
         M("mfma16_f32", F33, 128, 64, 16, 2, 2, 4, bl=1),
         M("mfma16_f32", F33, 128, 128, 16, 2, 2, 4, bl=1),
         M("mfma16_f32", F33, 128, 64, 16, 2, 2, 4, bl=1, split=1),
@@ -480,7 +499,7 @@ for fam in ("11", "12"):
 # The floor, every arch: FMA for every filter and dtype, a vector form and a scalar (any C) form.
 for dt in ("FLOAT", "HALF", "BFLOAT16"):
     v = 4 if dt == "FLOAT" else 8
-    for f in FILTERS2D + [F333]:
+    for f in FILTERS2D + [F333, F555]:
         add(
             dt,
             ["any"],

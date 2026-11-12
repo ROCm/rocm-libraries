@@ -32,13 +32,14 @@ namespace hip_kernel_provider::kernel_ingestor_engine::conv_direct
 
 /// The filter extents (depth, height, width) the kernels are instantiated for. A 2-D filter has
 /// depth 1; 1-D graphs are not served.
-inline constexpr std::array<std::array<int, 3>, 6> FILTERS{{
+inline constexpr std::array<std::array<int, 3>, 7> FILTERS{{
     {1, 3, 3},
     {1, 5, 5},
     {1, 7, 7},
     {1, 1, 7},
     {1, 7, 1},
     {3, 3, 3},
+    {5, 5, 5},
 }};
 
 /// A strided copy (or, for packed channels-first activations, a tiled transpose) of one
