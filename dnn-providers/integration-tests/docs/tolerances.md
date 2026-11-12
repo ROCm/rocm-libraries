@@ -518,10 +518,16 @@ of 512 or less.
 What the wider band gives up is detection at long reductions: at `K` = 18,432
 a float output that is wrong by less than 6.5e-5 of its size at a typical element
 (1.5e-4 at `c` = 9) passes, where the fixed 1e-5 band caught a defect of 1.0e-5.
-No float detection data was measured for this model, as it was for half and
-bfloat16 above: the figures above are the width of the band, not a measured
-detection rate. At a typical output the base band is tighter than the fixed one
-up to `K` of about 540, and MIOpen's up to about 130.
+Float detection was measured on the dump data with the bugs of the half and
+bfloat16 table, scored on the outputs whose bug-free result passes the
+tolerance: a missing filter tap, a missing input channel, a shifted input and a
+missing bias are caught in every output at 1e-5, at `c` = 9 (a missing tap:
+10,312 to 10,316 of 10,316) and at `c` = 4 (non-Winograd outputs); one element
+off by 4 ULP is caught by none (at most 4 of 9,133 at `c` = 4). Truncation was
+not injected for float, and defects between 4 ULP and a missing tap were not
+measured, so the band widths above remain the bound on what it can see. At a
+typical output the base band is tighter than the fixed one up to `K` of about
+540, and MIOpen's up to about 130.
 
 ### The base coefficient and the engine's
 
