@@ -129,10 +129,28 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # The conv engine group's engines, end to end. The definition is set directly for the
     # same reason as the ingestor's below: this target does not link the provider.
     if(HIPKERNELPROVIDER_ENABLE_CONV)
-        target_sources(hip_kernel_provider_integration_tests PRIVATE
-            kernel_ingestor_engine/IntegrationGpuConvNaive.cpp
-        )
+        # Naive's suite needs naive's catalogs; the coverage census reads every family's
+        # engines, so it needs every family's (conv/ConvContent.cmake).
+        if("naive" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+            target_sources(hip_kernel_provider_integration_tests PRIVATE
+                kernel_ingestor_engine/IntegrationGpuConvNaive.cpp)
+        endif()
+        if(HIPKERNELPROVIDER_CONV_ALL_FAMILIES_SERVED)
+            target_sources(hip_kernel_provider_integration_tests PRIVATE
+                kernel_ingestor_engine/IntegrationConvCoverageCensus.cpp)
+        else()
+            message(STATUS "conv: coverage census not built -- not every conv family is "
+                           "served (${HIPKERNELPROVIDER_CONV_UNSERVED_FAMILIES})")
+        endif()
         target_compile_definitions(hip_kernel_provider_integration_tests PRIVATE HIPDNN_ENGINE_CONV=1)
+        # The coverage census reads its map beside the binary, in the build tree and the
+        # install tree alike.
+        set(_hkp_conv_coverage_map
+            ${CMAKE_CURRENT_SOURCE_DIR}/kernel_ingestor_engine/hip_kernel_provider_conv_coverage_map.json)
+        configure_file(${_hkp_conv_coverage_map}
+                       ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/hip_kernel_provider_conv_coverage_map.json
+                       COPYONLY)
+        install(FILES ${_hkp_conv_coverage_map} DESTINATION ${CMAKE_INSTALL_BINDIR})
     endif()
     # This target links only the SDKs, not hip_kernel_provider_private, so it does not
     # inherit the provider's gate and needs the definition set directly.

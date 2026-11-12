@@ -196,6 +196,7 @@ conv_wrw::WrwConfig configOf(const hipdnn_plugin_sdk::ingestor::KernelDefinition
     c.ns = kernel.getIntMetadata("ns");
     c.wq = kernel.getIntMetadata("wq");
     c.dws = kernel.getIntMetadata("dws");
+    c.pb = kernel.getIntMetadata("pb");
     c.math = kernel.getIntMetadata("math");
     return c;
 }
@@ -296,6 +297,15 @@ struct DeviceCase
     bool writesDw = false;
     /// Served by the 16-bit matrix atoms only: no fp32 or gfx906 (FMA) configs.
     bool matrix16Only = false;
+    /// No gfx906 (FMA) configs.
+    bool noGfx906 = false;
+    /// Served only where a few configs ship (block-based buffers): skipped where none does.
+    bool someArchs = false;
+    /// Served by the generic loop alone, which ships on the matrix atoms of gfx908 to gfx950
+    /// and gfx12: skipped on gfx906 and gfx11.
+    bool genericOnly = false;
+    /// x's element strides (the generic loop's strided operands); empty: packed.
+    std::vector<int64_t> xStrides{};
 };
 
 ConvShape conv(int64_t c,
@@ -462,6 +472,81 @@ std::vector<DeviceCase> deviceCases()
     auto packedConvolution = conv(32, 48, {6, 7}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, false, 2);
     packedConvolution.mode = ConvMode::CONVOLUTION;
     cases.push_back({"PackedRowsGroupedConvolution", packedConvolution});
+    // 5x5x5 volumes (AIPYTORCH-1356): unit stride on the ring / fp32 rows, stride 2 on the
+    // output rows, and few input channels on the small-C rows (16-bit). No gfx906 configs.
+    cases.push_back(
+        {"ThreeD5x5x5",
+         conv(16, 24, {7, 9, 10}, {5, 5, 5}, {2, 2, 2}, {2, 2, 2}, {1, 1, 1}, {1, 1, 1}),
+         false,
+         false,
+         false,
+         true});
+    cases.push_back(
+        {"ThreeD5x5x5Stride2",
+         conv(16, 24, {9, 11, 13}, {5, 5, 5}, {1, 1, 1}, {1, 1, 1}, {2, 2, 2}, {1, 1, 1}),
+         false,
+         false,
+         false,
+         true});
+    // One x image past 2 GiB in 16-bit (64 channels of 4100 x 4200; past 4 GiB in fp32): only
+    // the block-based buffer configs (pb 1) serve it, each block's 32 (16-bit) or 16 (fp32)
+    // channel planes within the 32-bit range. One output channel keeps the CPU reference short.
+    cases.push_back({"LargeImageBlockBuffers",
+                     conv(64, 1, {4100, 4200}, {3, 3}, {0, 0}, {0, 0}, {2, 2}, {1, 1}, false, 1, 1),
+                     false,
+                     false,
+                     false,
+                     true,
+                     true});
+    cases.push_back({"ThreeD5x5x5FewChannels",
+                     conv(8, 24, {6, 7, 9}, {5, 5, 5}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}),
+                     false,
+                     false,
+                     false,
+                     true});
+    // The generic loop (runtime filter, strides, dilation): channels-last 16-bit widths no
+    // specialized config has (5x5, 1x9, 1x5x5, dilation 4), and strided x (padded rows: no
+    // packed layout) in either form.
+    const auto generic
+        = [&](const std::string& name, const ConvShape& shape, std::vector<int64_t> xStrides = {}) {
+              DeviceCase deviceCase{name, shape};
+              deviceCase.genericOnly = true;
+              deviceCase.xStrides = std::move(xStrides);
+              cases.push_back(deviceCase);
+          };
+    generic("Generic5x5Nhwc", conv(24, 40, {13, 17}, {5, 5}, {2, 2}, {2, 2}, {1, 1}, {1, 1}, true));
+    generic("Generic1x9Nhwc", conv(32, 64, {150}, {9}, {4}, {4}, {1}, {1}, true));
+    // Dilated width taps (the shared window reads them at offsets of 2).
+    generic("Generic1x5Dilation2Nhwc", conv(32, 32, {90}, {5}, {4}, {4}, {1}, {2}, true));
+    generic(
+        "Generic1x5x5ThreeDNhwcGrouped",
+        conv(32, 32, {3, 9, 11}, {1, 5, 5}, {0, 2, 2}, {0, 2, 2}, {1, 1, 1}, {1, 1, 1}, true, 2));
+    generic("GenericDilation4Nhwc",
+            conv(16, 16, {40, 40}, {3, 3}, {4, 4}, {4, 4}, {1, 1}, {4, 4}, true, 1, 1));
+    generic("Generic7x7Stride2Nhwc",
+            conv(24, 24, {19, 23}, {7, 7}, {3, 3}, {3, 3}, {2, 2}, {1, 1}, true));
+    // 24 channels of 10 x 12, rows 16 apart (channels-first elements).
+    generic("GenericPaddedRowsNchw",
+            conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}),
+            {24 * 10 * 16, 10 * 16, 16, 1});
+    // Channels-last, positions 32 channels apart (24 used): channel vectors.
+    generic("GenericPaddedChannelsNhwc",
+            conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true),
+            {10 * 12 * 32, 1, 12 * 32, 32});
+    // One channels-last x image of 2^30 elements (2 GiB in 16-bit, 4 GiB in fp32): the generic
+    // loop's block-based buffers (pb 1), rebased each step. 1x1 stride 4 keeps the CPU
+    // reference short.
+    {
+        DeviceCase largeCl{
+            "LargeImageGenericBlockBuffersNhwc",
+            conv(16384, 8, {256, 256}, {1, 1}, {0, 0}, {0, 0}, {4, 4}, {1, 1}, true, 1, 1)};
+        largeCl.someArchs = true;
+        cases.push_back(largeCl);
+    }
+    // Positions 26 apart: not whole vectors, channels-last elements.
+    generic("GenericPaddedChannelsNhwcElements",
+            conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true),
+            {10 * 12 * 26, 1, 12 * 26, 26});
     return cases;
 }
 
@@ -563,10 +648,22 @@ void runCase(const DeviceCase& deviceCase, Math math = Math::NATIVE, bool infini
     {
         spec.w.strides = packedStrides(spec.w.dims, !shape.channelsLast);
     }
+    if(!deviceCase.xStrides.empty())
+    {
+        spec.x.strides = deviceCase.xStrides;
+    }
     const auto device = currentDeviceProperties();
     const GraphFixture fixture(buildGraph(spec), device);
     const auto bound = matchesGraph(PACK, fixture.context());
     ASSERT_TRUE(bound.has_value()) << "the engine refused a case it should serve";
+    // Cases only a few configs serve skip before building their (large) tensors.
+    if(deviceCase.someArchs
+       && std::none_of(catalog().begin(), catalog().end(), [&](const auto& kernel) {
+              return matchesKernel(PACK, fixture.context(), kernel, *bound);
+          }))
+    {
+        GTEST_SKIP() << "no catalog config for this case on " << device.gcnArchName;
+    }
 
     Tensor<T> x(spec.x.dims, spec.x.strides);
     Tensor<T> w(spec.w.dims, spec.w.strides);
@@ -704,11 +801,14 @@ void runCase(const DeviceCase& deviceCase, Math math = Math::NATIVE, bool infini
             GTEST_SKIP() << "three-bf16 is not admitted for this class on " << device.gcnArchName;
         }
     }
-    const bool fmaOrFp32 = shape.dataType == DataType::FLOAT
-                           || hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName) == "gfx906";
+    const auto base = std::string(hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName));
+    const bool gfx906 = base == "gfx906";
+    const bool fmaOrFp32 = shape.dataType == DataType::FLOAT || gfx906;
     if(ran == 0
        && (!expectServed(device.gcnArchName, shape.dataType)
-           || (deviceCase.matrix16Only && fmaOrFp32)))
+           || (deviceCase.matrix16Only && fmaOrFp32) || (deviceCase.noGfx906 && gfx906)
+           || deviceCase.someArchs
+           || (deviceCase.genericOnly && (gfx906 || base.rfind("gfx11", 0) == 0))))
     {
         GTEST_SKIP() << "no catalog config for this case on " << device.gcnArchName;
     }
@@ -865,9 +965,9 @@ TEST(TestConvWrwCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its integer knobs: within one dtype (what
     // one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 22> KNOBS{
-        "atom_id", "loop", "layout", "bk",  "bc",  "bq",    "fr", "s",   "sw", "dw",  "wk",
-        "wc",      "tk",   "tc",     "vec", "xcd", "align", "ns", "bpu", "wq", "dws", "math"};
+    static constexpr std::array<const char*, 23> KNOBS{
+        "atom_id", "loop", "layout", "bk",  "bc", "bq",    "fr",  "s",  "sw",  "dw", "wk",  "wc",
+        "tk",      "tc",   "vec",    "xcd", "ns", "align", "bpu", "wq", "dws", "pb", "math"};
     std::set<std::vector<int64_t>> seen[3];
     for(const auto& kernel : catalog())
     {
@@ -881,6 +981,37 @@ TEST(TestConvWrwCatalog, KnobsTellApartEveryConfigOfAGraph)
         }
         EXPECT_TRUE(seen[slot].insert(tuple).second);
     }
+}
+
+TEST(TestConvWrwCatalog, EveryGenericSpecKeyParses)
+{
+    // A malformed key declines its generic config everywhere: the generator's keys must all be
+    // the host's grammar.
+    auto shape = conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1});
+    shape.dataType = DataType::FLOAT;
+    const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::BACKWARD_WEIGHTS)));
+    const auto problem = conv_wrw::parseWrwProblem(fixture.context());
+    ASSERT_TRUE(problem.has_value());
+    int keys = 0;
+    for(const auto& kernel : catalog())
+    {
+        if(kernel.getIntMetadata("loop") != conv_wrw::LOOP_GENERIC)
+        {
+            continue;
+        }
+        SCOPED_TRACE(kernel.name);
+        const std::string spec(kernel.getStringMetadata("spec"));
+        size_t from = 0;
+        while(from < spec.size())
+        {
+            const size_t to = std::min(spec.find(';', from), spec.size());
+            const auto key = spec.substr(from, to - from);
+            EXPECT_TRUE(conv_wrw::specServes(*problem, key, "gfx1201").has_value()) << key;
+            ++keys;
+            from = to + 1;
+        }
+    }
+    EXPECT_GT(keys, 0);
 }
 
 TEST(TestConvWrwCatalog, AtomIdsNameTheirAtomsAndEveryConfigFitsItsArchitectures)
@@ -922,7 +1053,7 @@ TEST(TestConvWrwCatalog, AtomIdsNameTheirAtomsAndEveryConfigFitsItsArchitectures
         EXPECT_GT(archs, 0) << "a config no architecture runs";
         loops.insert(config.loop);
     }
-    EXPECT_EQ(loops, (std::set<int64_t>{0, 1, 2, 3, 4, 5, 6, 7}));
+    EXPECT_EQ(loops, (std::set<int64_t>{0, 1, 2, 3, 4, 5, 6, 7, 8}));
 }
 
 } // namespace

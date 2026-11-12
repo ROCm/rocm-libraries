@@ -21,6 +21,18 @@ constexpr int k3DivUp(int a, int b)
     return (a + b - 1) / b;
 }
 
+/// The generic loop's window row pitch (elements of eb bytes) for wpos positions (a whole number
+/// of 16-byte units): at least wpos + 16 bytes, an odd number of 16-byte units (a row stride of
+/// 4 mod 8 dwords keeps the fragment reads of consecutive rows off each other's banks).
+constexpr int k3WinPitch(int wpos, int eb)
+{
+    const int unit = 16 / eb;
+    int p = wpos + unit;
+    if((p / unit) % 2 == 0)
+        p += unit;
+    return p;
+}
+
 // Direct loop (5): rows of c channels in LDS, [column][channel] with the 4-channel groups of
 // column x XOR-rotated by 4 g(x), g taking three bits of x (candidate r: bits 3,1,0 / 1,3,0 /
 // 0,1,3, masked to c / 16 - 1). A rotation is conflict-free when every half-wave of every
@@ -117,6 +129,29 @@ constexpr long long k3LdsBytes(int loop,
                                int ns,
                                int wq = 0)
 {
+    if(loop == 8)
+    {
+        // Generic taps: two buffers of a bk-row dy chunk and fr (taps a block) bc-row x tiles,
+        // rows of bq positions padded by 16 bytes.
+        // The FMA form (tk > 0): [position][channel] tiles, rows of bk / bc channels + 16
+        // bytes, fr tiles of bq positions or (dw > 0) one window of bq + dw.
+        if(tk > 0)
+        {
+            const long long u = 16 / eb;
+            const long long xRows = dw > 0 ? bq + dw : static_cast<long long>(fr) * bq;
+            return 2 * (static_cast<long long>(bq) * (bk + u) + xRows * (bc + u)) * eb;
+        }
+        // dw > 0: one shared window of bq + dw positions per x row instead of fr tiles.
+        const long long ld = bq + 16 / eb;
+        if(dw > 0)
+        {
+            return 2
+                   * (static_cast<long long>(bk) * ld
+                      + static_cast<long long>(bc) * k3WinPitch(bq + dw, eb))
+                   * eb;
+        }
+        return 2 * (static_cast<long long>(bk) + static_cast<long long>(fr) * bc) * ld * eb;
+    }
     if(loop == 5)
     {
         // ns ring slots of wq items' x and dy rows plus a drain round; the waves_q sum's

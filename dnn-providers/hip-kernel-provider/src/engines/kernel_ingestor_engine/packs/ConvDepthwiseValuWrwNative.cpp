@@ -86,7 +86,9 @@ std::optional<WrwProblem> parseWrwProblem(const MatchContext& context)
         return std::nullopt;
     }
     const auto& a = base->args;
-    if(a.groups < 1 || a.c != a.groups || a.k != a.groups)
+    // One input channel a group; the base parse makes the output channels a whole number per
+    // group (the multiplier).
+    if(a.groups < 1 || a.c != a.groups)
     {
         return std::nullopt;
     }
@@ -96,6 +98,7 @@ std::optional<WrwProblem> parseWrwProblem(const MatchContext& context)
         return std::nullopt;
     }
     // Shapes in 32-bit ints; element offsets are formed in 64 bits by the kernels.
+    // (The output channels are bounded with their taps below.)
     for(const long long value : {a.n, a.c})
     {
         if(value < 1 || value > INT_LIMIT)
@@ -120,12 +123,13 @@ std::optional<WrwProblem> parseWrwProblem(const MatchContext& context)
     }
     const long long rows = a.n * a.outSpatial[0] * a.outSpatial[1];
     const long long taps = a.filter[0] * a.filter[1] * a.filter[2];
-    if(rows > INT_LIMIT || taps > INT_LIMIT || a.c * taps > INT_LIMIT)
+    if(rows > INT_LIMIT || taps > INT_LIMIT || a.k * taps > INT_LIMIT)
     {
         return std::nullopt;
     }
 
     WrwProblem problem;
+    problem.mult = a.k / a.c;
     problem.layout = *layout;
     problem.ndims = base->spatialRank == 3 ? 3 : 2;
     problem.flipFilter = a.flipFilter != 0;
@@ -175,8 +179,10 @@ int64_t blocksPerPartitionOf(const WrwProblem& problem, const WrwConfig& config)
     {
         return divUp(a.c, 64 * config.nwg);
     }
-    return problem.layout == DepthwiseLayout::CHANNELS_LAST ? divUp(a.c, CHANNELS_PER_BLOCK)
-                                                            : static_cast<int64_t>(a.c);
+    // The VALU kernels walk output channels.
+    const int64_t channels = a.c * problem.mult;
+    return problem.layout == DepthwiseLayout::CHANNELS_LAST ? divUp(channels, CHANNELS_PER_BLOCK)
+                                                            : channels;
 }
 
 } // namespace
@@ -207,8 +213,9 @@ bool hankelAdmits(const WrwProblem& problem, const WrwConfig& config, std::strin
         return false;
     }
     const auto& a = problem.args;
-    if(problem.layout != DepthwiseLayout::CHANNELS_LAST || problem.ndims != 2 || a.kd != 1
-       || config.kd != 1 || a.kh != config.kh || a.kw != config.kw)
+    // No multiplier (the matrix-core kernel walks input channels).
+    if(config.mult != 1 || problem.layout != DepthwiseLayout::CHANNELS_LAST || problem.ndims != 2
+       || a.kd != 1 || config.kd != 1 || a.kh != config.kh || a.kw != config.kw)
     {
         return false;
     }
@@ -242,7 +249,7 @@ void partitionFor(WrwProblem& problem, int64_t computeUnits, const WrwConfig& co
 size_t workspaceBytesFor(const WrwProblem& problem)
 {
     const auto& a = problem.args;
-    return static_cast<size_t>(a.partitions) * static_cast<size_t>(a.c)
+    return static_cast<size_t>(a.partitions) * static_cast<size_t>(a.c * problem.mult)
            * static_cast<size_t>(a.taps) * sizeof(float);
 }
 
@@ -252,7 +259,7 @@ std::optional<WrwLaunch> launchFor(const WrwProblem& problem, const WrwConfig& c
     WrwLaunch launch;
     launch.block = BLOCK;
     launch.partialGrid = int64_t{a.partitions} * blocksPerPartitionOf(problem, config);
-    launch.foldGrid = divUp(int64_t{a.c} * a.taps, BLOCK);
+    launch.foldGrid = divUp(int64_t{a.c} * problem.mult * a.taps, BLOCK);
     if(launch.partialGrid < 1 || launch.partialGrid > INT_LIMIT || launch.foldGrid > INT_LIMIT)
     {
         return std::nullopt;
@@ -312,6 +319,7 @@ conv_depthwise_valu_wrw::WrwConfig configOf(const KernelDefinition& kernel)
     config.g = kernel.getIntMetadata("g");
     config.nwg = kernel.getIntMetadata("nwg");
     config.bpc = kernel.getIntMetadata("bpc");
+    config.mult = kernel.getIntMetadata("mult");
     return config;
 }
 
@@ -357,6 +365,11 @@ bool kernelMatches(const MatchContext& context,
     }
     const auto config = configOf(kernel);
     const bool hankel = config.variant == "hankel";
+    // The kernel's multiplier is the graph's.
+    if(config.mult != problem->mult)
+    {
+        return false;
+    }
     // The matrix-core fields are the hankel variant's alone.
     if(!hankel && (config.q != 0 || config.g != 0 || config.nwg != 0 || config.bpc != 0))
     {
@@ -492,6 +505,11 @@ public:
         const bool hankel = config.variant == "hankel";
         options.add("CONV_DW_VARIANT", std::string(hankel ? "2" : tile ? "1" : "0"));
         options.add("CONV_DW_FLIP", std::string(problem->flipFilter ? "1" : "0"));
+        // Defined only for a multiplier, so the multiplier-1 programs compile as before.
+        if(config.mult != 1)
+        {
+            options.add("CONV_DW_MULT", std::to_string(config.mult));
+        }
         if(tile || hankel)
         {
             options.add("CONV_DW_KD", std::to_string(config.kd));

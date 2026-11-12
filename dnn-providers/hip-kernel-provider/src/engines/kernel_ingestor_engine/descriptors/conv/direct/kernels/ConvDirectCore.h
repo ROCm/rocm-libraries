@@ -64,32 +64,63 @@ __device__ void k2FormatWeights(const K2FormatArgs& f)
     const T* w = static_cast<const T*>(f.w);
     T* wf = static_cast<T*>(f.wf);
     const int taps = f.kd * f.r * f.s;
-    const long long total = static_cast<long long>(taps) * f.cpad * f.kpad;
     const int cas = f.cpad / f.ka;
+    // Runs of ka reduction elements (tap, chunk, column n): one filter offset per run and 32-bit
+    // index math (the planner keeps the formatted weights below 2^31 elements). The pass runs on
+    // every execution: per element (2-byte accesses) it took 0.105 ms for a 384 x 384 x 27 bf16
+    // filter on gfx1201, a quarter of the convolution; the 16-byte form below takes 0.016 ms.
+    const int runs = taps * cas * f.kpad;
+    const int cred = f.backward ? f.k0 : f.c0;
+    const long long step = f.backward ? f.wStrides[0] : f.wStrides[1];
     // Backward data rotates the taps, true convolution reflects them: together they cancel.
     const bool mirror = (f.backward != 0) != (f.flip != 0);
-    for(long long i = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x; i < total;
-        i += static_cast<long long>(gridDim.x) * blockDim.x)
+    // Channels-last forward filter with 16-byte aligned channel runs: 16-byte loads and stores.
+    constexpr int VEC = 16 / static_cast<int>(sizeof(T));
+    typedef unsigned K2U4 __attribute__((ext_vector_type(4)));
+    const bool vec = !f.backward && f.wStrides[1] == 1 && f.ka % VEC == 0 && cred % VEC == 0
+                     && f.wStrides[0] % VEC == 0 && f.wStrides[2] % VEC == 0
+                     && f.wStrides[3] % VEC == 0 && f.wStrides[4] % VEC == 0
+                     && reinterpret_cast<unsigned long long>(w) % 16 == 0
+                     && reinterpret_cast<unsigned long long>(wf) % 16 == 0;
+    if(vec)
     {
-        const int kk = static_cast<int>(i % f.ka);
-        long long rest = i / f.ka;
-        const int n = static_cast<int>(rest % f.kpad);
-        rest /= f.kpad;
-        const int ca = static_cast<int>(rest % cas);
-        const int tap = static_cast<int>(rest / cas);
-        const int c = ca * f.ka + kk;
-        T v = K1Elem<T>::store(0.0f);
-        if(!f.backward)
+        const int vpr = f.ka / VEC;
+        const int units = runs * vpr;
+        for(int u = blockIdx.x * blockDim.x + threadIdx.x; u < units; u += gridDim.x * blockDim.x)
         {
-            if(n < f.k0 && c < f.c0)
-                v = w[k2FilterOffset(f, n, c, tap, mirror)];
+            const int i = u / vpr;
+            const int v = u - i * vpr;
+            const int n = i % f.kpad;
+            const int rest = i / f.kpad;
+            const int ca = rest % cas;
+            const int tap = rest / cas;
+            const int c = ca * f.ka + v * VEC;
+            K2U4 val = {0u, 0u, 0u, 0u};
+            if(n < f.k0 && c < cred)
+                val = *reinterpret_cast<const K2U4*>(w + k2FilterOffset(f, n, c, tap, mirror));
+            *reinterpret_cast<K2U4*>(wf + static_cast<long long>(u) * VEC) = val;
         }
-        else
+        return;
+    }
+    for(int i = blockIdx.x * blockDim.x + threadIdx.x; i < runs; i += gridDim.x * blockDim.x)
+    {
+        const int n = i % f.kpad;
+        const int rest = i / f.kpad;
+        const int ca = rest % cas;
+        const int tap = rest / cas;
+        const int c0 = ca * f.ka;
+        const bool live = f.backward ? n < f.c0 : n < f.k0;
+        const long long base = !live        ? 0
+                               : f.backward ? k2FilterOffset(f, c0, n, tap, mirror)
+                                            : k2FilterOffset(f, n, c0, tap, mirror);
+        T* dst = wf + static_cast<long long>(i) * f.ka;
+        for(int kk = 0; kk < f.ka; ++kk)
         {
-            if(n < f.c0 && c < f.k0)
-                v = w[k2FilterOffset(f, c, n, tap, mirror)];
+            T v = K1Elem<T>::store(0.0f);
+            if(live && c0 + kk < cred)
+                v = w[base + kk * step];
+            dst[kk] = v;
         }
-        wf[i] = v;
     }
 }
 

@@ -89,12 +89,18 @@ inline constexpr int64_t LANES_PER_COMPUTE_UNIT = 64;
 /// fallback every graph keeps, so an unknown count is guessed low rather than declined.
 inline constexpr int64_t FALLBACK_COMPUTE_UNITS = 16;
 
+/// Lanes that share one dw element's reduction in the backward-weights kernel (its block, a
+/// fixed-order tree sum): ConvNaive.cpp's CONV_NAIVE_WRW_BLOCK.
+inline constexpr int64_t NAIVE_WRW_LANES_PER_ELEMENT = 256;
+
 /**
  * @brief True when the naive kernel finishes @p problem within budget on @p device.
  *
- * Each output element is one thread that runs its multiply-accumulates in sequence, so the
- * time follows the work per lane: the total over the lanes the problem can occupy, which is
- * the smaller of the device's lanes and the output element count.
+ * Forward and backward data: each output element is one thread that runs its
+ * multiply-accumulates in sequence. Backward weights: each dw element is one block of
+ * NAIVE_WRW_LANES_PER_ELEMENT lanes. The time follows the work per lane: the total over the
+ * lanes the problem can occupy, the smaller of the device's lanes and the output elements'
+ * lanes.
  */
 bool withinWorkloadBudget(const ConvNaiveProblem& problem,
                           const hipdnn_plugin_sdk::ingestor::DeviceProperties& device);

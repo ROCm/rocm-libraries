@@ -100,8 +100,17 @@
       "type": "int"
     },
     {
+      "name": "pb",
+      "type": "int"
+    },
+    {
       "name": "math",
       "type": "int"
+    },
+    {
+      "name": "spec",
+      "type": "string",
+      "default_value": ""
     }
   ]
 }

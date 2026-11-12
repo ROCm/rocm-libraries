@@ -26,8 +26,10 @@ under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds three producers' bundles:
   kernels are HIP source, `kind: "embedded_source"`, stored beside their descriptors under
   `conv/<family>/kernels/`, embedded in the plugin and compiled at runtime through HIPRTC, so
   its KDPs declare no arch and pack into every shard. A bundle packs for a build that has the
-  group enabled (`HIPKERNELPROVIDER_ENABLE_CONV`, OFF by default). See `conv/README.md` in the
-  provider tree.
+  group enabled (`HIPKERNELPROVIDER_ENABLE_CONV`, OFF by default). The generated instance
+  catalogs (`conv/<family>/*.kdp.json`) are in DVC, one `<catalog>.dvc` pointer each (see
+  [Conv catalogs live in DVC](#conv-catalogs-live-in-dvc) below); naive's three hand-written
+  KDPs and every other descriptor stay in git. See `conv/README.md` in the provider tree.
 
 For any other build the root has nothing to pack and production packaging is dormant,
 unless the cache variable below is pointed elsewhere.
@@ -144,6 +146,31 @@ The small descriptors name each other by id, not by path, so moving a KDP needs 
 - **FlyDSL:** each `FlyDSL/<op>/<target>.dvc` pointer is checked the same way when
   `HIPKERNELPROVIDER_ENABLE_FLYDSL` is ON (with the kernel ingestor); a target not pulled
   ships no FlyDSL kernels. `flydsl/REGEN.md` covers updating them.
+- **conv:** each `conv/<family>/<catalog>.kdp.json.dvc` pointer is checked the same way
+  when `HIPKERNELPROVIDER_ENABLE_CONV` is ON (with the kernel ingestor). A family with a
+  catalog not pulled is not served: its folder is withdrawn from the pack and its native
+  pack is not registered (`conv/ConvContent.cmake`). `conv/REGEN.md` covers updating them.
+
+## Conv catalogs live in DVC
+
+A conv family's KDPs are generated instance catalogs (`conv/generators/`), tens of
+thousands of lines each, so they are DVC outputs. They stay **beside** the family's other
+descriptors rather than in an `artifacts/` folder: an `embedded_source` UKD names its
+source relative to its own folder (`kernels/<File>.cpp`), the packer refuses a `..`
+segment, and `hkp_verify_embedded_sources` checks the source sits at the KDP's folder plus
+`source_file`. A KDP in a DVC folder could not have the git-tracked `kernels/` below it, so
+each catalog is a single-file output with its own pointer:
+
+```
+conv/<family>/
+  *.ued.json, *.udd.json, *.kmd.json, *.umd.json   in git
+  kernels/                                         in git
+  <catalog>.kdp.json.dvc                           in git: md5, size, remote: ingestor
+  <catalog>.kdp.json                               git-ignored (.gitignore), from DVC
+```
+
+`conv/generators/regen_all.py` regenerates every family and records the pointers;
+`conv/REGEN.md` is the procedure.
 
 ### Adding or changing a large file
 
