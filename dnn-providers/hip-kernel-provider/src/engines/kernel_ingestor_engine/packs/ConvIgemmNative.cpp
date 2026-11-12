@@ -518,6 +518,15 @@ std::optional<IgemmProblem> parseIgemmProblem(const MatchContext& context, ConvD
     problem.wSrcTap = krsc ? cg : 1;
     layOutWorkspace(problem);
 
+    // The kernels index the positions of one image (input and output) in 32 bits: an image of
+    // more than 2^31 - 1 pixels (#14424 X3: 46341 x 46341) is declined until the generic tier
+    // has a 64-bit large-image variant.
+    if(a.inSpatial[0] * a.inSpatial[1] * a.inSpatial[2] > INT_LIMIT
+       || a.outSpatial[0] * a.outSpatial[1] * a.outSpatial[2] > INT_LIMIT)
+    {
+        return std::nullopt;
+    }
+
     // Rows of the GEMM, and how far one block's rows reach in the gathered tensor.
     long long imageBytes = 0;
     long long rowsPerImage = 1;

@@ -1296,6 +1296,30 @@ TEST(TestConvIgemmCatalog, BufferSpanIsWholeImagesFromTheBlocksFirstImage)
     }
 }
 
+TEST(TestConvIgemmProblem, ImagesPastTwoToTheThirtyOnePixelsAreDeclined)
+{
+    // The kernels index one image's positions in 32 bits. #14424 X3 (46341 x 46341, 1x1, one
+    // channel) has 2^31 + 4633 pixels: declined. 46340 x 46340 (2^31 - 88733) is served, and so
+    // is the same pixel count spread over images (16 x 11586 x 11586).
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        auto x3 = dense(1, 1, {46341, 46341}, {1, 1}, {0, 0}, true);
+        x3.n = 1;
+        x3.dataType = DataType::HALF;
+        const GraphFixture big(buildGraph(specFor(x3, direction)));
+        EXPECT_FALSE(conv_igemm::parseIgemmProblem(big.context(), direction).has_value());
+        auto under = x3;
+        under.input = {46340, 46340};
+        const GraphFixture fits(buildGraph(specFor(under, direction)));
+        EXPECT_TRUE(conv_igemm::parseIgemmProblem(fits.context(), direction).has_value());
+        auto batched = x3;
+        batched.n = 16;
+        batched.input = {11586, 11586};
+        const GraphFixture many(buildGraph(specFor(batched, direction)));
+        EXPECT_TRUE(conv_igemm::parseIgemmProblem(many.context(), direction).has_value());
+    }
+}
+
 TEST(TestConvIgemmLaunch, RowTilesPastOneDispatchRunAsSeveralLaunches)
 {
     // #14424 case X3: N = C = K = 1, 46341 x 46341, 1x1 -- 2^31 + 4633 output rows. One
