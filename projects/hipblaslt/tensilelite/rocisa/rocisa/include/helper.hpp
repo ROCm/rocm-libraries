@@ -25,13 +25,14 @@
 #include <array>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 using IsaVersion = std::array<int, 3>;
 
 // Runs cmd with input on its stdin and returns its exit code. In debug mode the
-// child writes to our stdout and stderr; otherwise captureOutput returns what it
-// wrote to both (Windows returns it either way).
+// child writes to our stdout and stderr. Otherwise captureOutput returns what it
+// wrote to both; Windows captures this output regardless of captureOutput.
 std::pair<int, std::string> run(const std::vector<char*>& cmd,
                                 const std::string&        input,
                                 bool                      debug         = false,
