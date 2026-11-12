@@ -58,6 +58,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <unistd.h>
@@ -1367,6 +1368,66 @@ TEST_F(PlaceholderIndexedShardTest, MasterIndexLookupOfMissingShardReturnsNull)
     master->loadLibrary(0);
     EXPECT_EQ(master->loadedFiles.count(kShardPrefix), 1u)
         << "the shard was not loaded once it existed";
+}
+
+// The two tests below repeat the recovery cases with a shard built from the
+// legacy fixture, so the retry has a real solution to return. The shard is
+// moved aside for the first lookup and put back for the second.
+TEST_F(PlaceholderIndexedShardTest, MissingShardServesSolutionsAfterFileAppears)
+{
+#ifdef TENSILELITE_TSAN
+    GTEST_SKIP() << kTsanRetrySkip;
+#endif
+    singleTree = true;
+    if(!layOutLibrary())
+        GTEST_SKIP() << "legacy fixture unavailable or stale; see configs/SolutionLibraries/readme";
+
+    const fs::path shard  = tmpDir / (std::string(kShardPrefix) + ".dat.zlib");
+    const fs::path hidden = tmpDir / "hidden.dat.zlib";
+    fs::rename(shard, hidden);
+
+    const int    index  = *std::min_element(shardIndices.begin(), shardIndices.end());
+    const AMDGPU device = TensileLite::testing::makeDevice(
+        TensileLite::testing::_MI350_CHIP_ID, TensileLite::testing::_SPX_CU, "mi350spx");
+    const auto problem = TensileLite::testing::dummyProblem();
+
+    Master fresh;
+    Holder cold;
+    wirePlaceholder(cold, fresh, tmpDir);
+
+    EXPECT_THROW(cold.getSolutionByIndex(problem, device, index), std::runtime_error);
+
+    fs::rename(hidden, shard);
+
+    auto solution = cold.getSolutionByIndex(problem, device, index);
+    ASSERT_NE(solution, nullptr) << "the retry did not serve index " << index;
+    EXPECT_EQ(solution->index, index);
+    EXPECT_EQ(solution->codeObjectFilename.load(), std::string(kShardPrefix) + ".co");
+}
+
+TEST_F(PlaceholderIndexedShardTest, MasterIndexLookupServesSolutionAfterFileAppears)
+{
+    if(!layOutLibrary())
+        GTEST_SKIP() << "legacy fixture unavailable or stale; see configs/SolutionLibraries/readme";
+
+    const fs::path shard  = tmpDir / (std::string(kShardPrefix) + ".dat.zlib");
+    const fs::path hidden = tmpDir / "hidden.dat.zlib";
+    fs::rename(shard, hidden);
+
+    auto lib = LoadLibraryFile<ContractionProblemGemm, ContractionSolution>(masterPath().string());
+    ASSERT_NE(lib, nullptr);
+    auto* master = dynamic_cast<Master*>(lib.get());
+    ASSERT_NE(master, nullptr);
+    ASSERT_TRUE(master->initLibraryMapping(masterPath().string()));
+
+    const int index = shardIndices.front();
+    EXPECT_EQ(master->resolveSolutionByIndex(index), nullptr);
+
+    fs::rename(hidden, shard);
+
+    auto solution = master->resolveSolutionByIndex(index);
+    ASSERT_NE(solution, nullptr) << "the retry did not serve index " << index;
+    EXPECT_EQ(solution->index, index);
 }
 
 TEST_F(PlaceholderIndexedShardTest, ShardRegistersOnceWhenReachedFromBothSides)

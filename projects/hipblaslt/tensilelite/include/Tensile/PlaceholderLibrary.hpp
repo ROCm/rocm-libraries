@@ -169,7 +169,7 @@ namespace TensileLite
         // missing file.
         if(path.size() >= 260)
             message += " (the path is " + std::to_string(path.size())
-                       + " characters, at or over the Windows MAX_PATH limit)";
+                       + " characters, at or over the Windows MAX_PATH limit of 260)";
 #endif
         return message;
     }
