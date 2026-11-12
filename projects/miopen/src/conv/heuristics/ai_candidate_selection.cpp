@@ -715,7 +715,8 @@ std::size_t ComputeKernelConfigPreprocessorOutputDim(const CandidateSelectionMet
             ++raw_numerical_features;
     }
 
-    return onehot_features + raw_numerical_features + KernelConfigDerivedFeatureCount(metadata.arch());
+    return onehot_features + raw_numerical_features +
+           KernelConfigDerivedFeatureCount(metadata.arch());
 }
 
 float GetRawConfigParamBySuffix(const std::vector<float>& raw_config_features,
