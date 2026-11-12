@@ -215,6 +215,16 @@ def test_configured_binding_is_exclusive_even_when_missing(tmp_path, monkeypatch
     assert selected == binding.ClientCandidate(configured, "explicit TensileLite client binding")
 
 
+@pytest.mark.parametrize(
+    ("platform", "name"),
+    [("linux", "tensilelite-client"), ("darwin", "tensilelite-client"), ("win32", "tensilelite-client.exe")],
+)
+def test_client_name_and_build_path_contract(tmp_path, platform, name):
+    assert binding.client_executable_name(platform) == name
+    expected = (tmp_path / "build").resolve() / "tensilelite" / "client" / name
+    assert binding.built_client_path(tmp_path / "build", platform) == expected
+
+
 def test_default_client_candidate_uses_first_existing_executable_path(tmp_path, monkeypatch):
     home = tmp_path / "home"
     monkeypatch.setattr(binding.Path, "home", classmethod(lambda cls: home))

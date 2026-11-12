@@ -12,10 +12,9 @@ import sys
 
 _TASKS_DIR = pathlib.Path(__file__).parent.resolve()
 
-# Architecture detection, steppings included, lives in the packaged TensileLite tree
-# (invoke-free) so CI test artifacts can exercise it directly; these @task
-# wrappers only expose it on the invoke command line.
-from tensilelite.GpuArch import cmake_gpu_target, detect_gpu_arch
+# Task discovery and client-path must work before the generator is installed.
+# Import GPU helpers only inside the tasks that need the generator.
+from _tensilelite_client_binding import built_client_path as _built_client_path
 
 
 def _cmake_bool(value):
@@ -29,6 +28,8 @@ def _cmake_gpu_targets(spec):
     ``cmake_gpu_target`` so ``gfx942:sramecc+:xnack-`` (what tox forwards from
     an unstripped probe) becomes ``gfx942``.
     """
+    from tensilelite.GpuArch import cmake_gpu_target
+
     return ",".join(
         cmake_gpu_target(part.strip()) for part in spec.split(",") if part.strip()
     )
@@ -36,6 +37,8 @@ def _cmake_gpu_targets(spec):
 
 def _resolve_gpu_targets(spec):
     if spec is None:
+        from tensilelite.GpuArch import detect_gpu_arch
+
         detected = detect_gpu_arch()
         if not detected:
             return None, None
@@ -67,6 +70,8 @@ def _detect_rocm():
 
 @task
 def get_gpu_arch(c):
+    from tensilelite.GpuArch import cmake_gpu_target, detect_gpu_arch
+
     detected = detect_gpu_arch()
     if detected:
         print(cmake_gpu_target(detected))
@@ -165,6 +170,8 @@ def _want_stinkytofu(stinkytofu, targets=None):
     if val in ("off", "false", "no", "0"):
         return False
     if val in ("auto", "none", ""):
+        from tensilelite.GpuArch import detect_gpu_arch
+
         arch = targets if targets is not None else (detect_gpu_arch() or "")
         return "gfx1250" in arch
     raise Exit(f"Invalid stinkytofu mode {stinkytofu!r}; use auto, on, or off", code=1)
@@ -342,6 +349,12 @@ def build_client(
 
     if build:
         c.run(shlex.join(["cmake", "--build", build_dir, "--parallel"]))
+
+@task(help={"build_dir": "TensileLite CMake build directory."})
+def client_path(c, build_dir="build_tmp"):
+    """Print the absolute client output path without building or installing it."""
+    print(_built_client_path(build_dir))
+
 
 @task(help={"build_dir": "CMake build directory containing tensilelite-client."})
 def configure_client(c, build_dir="build_tmp"):
@@ -558,7 +571,3 @@ def build_coverage(
 
     c.run(shlex.join(cmake_cmd))
     c.run(shlex.join(["cmake", "--build", build_dir, "--parallel"]))
-
-def _built_client_path(build_dir):
-    executable = "tensilelite-client.exe" if sys.platform == "win32" else "tensilelite-client"
-    return pathlib.Path(build_dir).resolve() / "tensilelite" / "client" / executable
