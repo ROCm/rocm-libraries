@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <random>
 #include <set>
@@ -124,6 +125,20 @@ namespace
         // Saturation at the top of E8M0 (2^127, byte 254).
         const auto high = maf2_0ScaleBytes<ocp_e4m3_mxfp8>(10, 130);
         EXPECT_EQ(high.back(), 254);
+    }
+
+    // An extreme center must saturate, not overflow the exponent arithmetic.
+    TEST(Maf2_0Mode, ExtremeCenterSaturates)
+    {
+        const int big = std::numeric_limits<int>::max(), small = std::numeric_limits<int>::min();
+        for(const auto byte : maf2_0ScaleBytes<ocp_e4m3_mxfp8>(10, big))
+            EXPECT_EQ(byte, 0xFE);
+        for(const auto byte : maf2_0ScaleBytes<ocp_e4m3_mxfp8>(10, small))
+            EXPECT_EQ(byte, 0x00);
+        for(const auto byte : maf2_0ScaleBytes<ocp_e2m1_mxfp4_e4m3>(10, big))
+            EXPECT_EQ(byte, 0x7E);
+        for(const auto byte : maf2_0ScaleBytes<ocp_e2m1_mxfp4_e4m3>(10, small))
+            EXPECT_EQ(byte, 0x00);
     }
 
     TEST(Maf2_0Mode, E4M3ScaleTableSaturatesAndUnderflowsLikeRne)

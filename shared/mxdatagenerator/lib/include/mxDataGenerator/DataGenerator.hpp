@@ -700,7 +700,13 @@ namespace DGen
         const int            trials = 2 * n + 1;
         std::vector<uint8_t> table(trials + 1);
         for(int k = 0; k <= trials; k++)
-            table[k] = nearestScaleByteRne(scales, std::ldexp(1.0, k - (n + 1) + center));
+        {
+            // In 64 bits so an extreme center cannot overflow; any exponent beyond +-2000 already
+            // saturates (2^2000 is +inf, 2^-2000 is 0 in double).
+            const int64_t e
+                = std::clamp<int64_t>(int64_t(k) - (int64_t(n) + 1) + int64_t(center), -2000, 2000);
+            table[k] = nearestScaleByteRne(scales, std::ldexp(1.0, static_cast<int>(e)));
+        }
         return table;
     }
 
