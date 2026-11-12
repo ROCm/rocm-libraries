@@ -704,7 +704,9 @@ class TestGpuConvWrwThreeBf16 : public ::testing::TestWithParam<DeviceCase>
 TEST_P(TestGpuConvWrwThreeBf16, Float)
 {
     SKIP_IF_NO_DEVICES();
-    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(currentDeviceProperties().gcnArchName);
+    // Held: stripArchFeatures returns a view into the name.
+    const auto properties = currentDeviceProperties();
+    const std::string arch(hipdnn_plugin_sdk::stripArchFeatures(properties.gcnArchName));
     if(arch != "gfx90a" && arch != "gfx942" && arch != "gfx950" && arch.rfind("gfx11", 0) != 0
        && arch.rfind("gfx12", 0) != 0)
     {
