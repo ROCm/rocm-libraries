@@ -313,14 +313,9 @@ struct BlockFmhaFwdPagedKVPipelineProblem
     static constexpr index_t kBlockPerCu    = Traits::kBlockPerCu;
     static constexpr bool kHasSink          = Traits::kHasSink;
 
-    // No codegen path currently sets BlockFmhaPipelineProblem's
-    // kUseDoubleKVLdsBuffer_ template parameter to true (it always takes its
-    // default of false), so every production qr_tdm_sched kernel today runs
-    // with this flag false. Mirror that as a fixed value here so the shared
-    // block_fmha_pipeline_qr_ks_vs_tdm_policy.hpp (used by both the dense and
-    // paged-KV qr_tdm_sched pipelines) has something to read; the paged-KV
-    // qr_tdm_sched pipeline only supports kQKHeaddim == 128 (< 256), where
-    // this flag is a no-op in the LDS padding gate formula anyway.
+    // Read by the shared qr_tdm policy. The paged-KV qr_tdm_sched pipeline only
+    // runs kQKHeaddim == 128, where this flag does not change the LDS padding
+    // gate, so it is fixed to false.
     static constexpr bool kUseDoubleKVLdsBuffer = false;
 };
 

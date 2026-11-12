@@ -1816,12 +1816,15 @@ ck_tile::index_t fmha_fwd_block_scale_size_kv(const std::string& data_type,
                                               ck_tile::index_t hdim_v);
 
 // qr_tdm_sched folds paging into the base pointer, which is only valid when a
-// kN0 tile never straddles two pages. Anything else falls back to the generic
-// paged pipeline.
+// kN0 tile never straddles two pages. Gappy group mode also needs every
+// per-batch kv_l2p_offset to be kN0 aligned, which the host cannot see without
+// copying seqstart_k back, so it is declined as a whole. Anything declined
+// falls back to the generic paged pipeline.
 inline bool fmha_fwd_pagedkv_tdm_sched_applicable(ck_tile::index_t page_block_size,
+                                                  bool is_gappy,
                                                   ck_tile::index_t kN0)
 {
-    return 0 < page_block_size && (page_block_size % kN0) == 0;
+    return 0 < page_block_size && (page_block_size % kN0) == 0 && !is_gappy;
 }
 
 struct fmha_fwd_pagedkv_traits

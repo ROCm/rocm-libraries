@@ -219,14 +219,8 @@ struct BlockFmhaFwdPagedKVPipelineQRKSVSTdmSched
                           kN0 == KDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                           kK0 == KDramBlockWindowTmp{}.get_window_lengths()[I1] &&
                           // V is untransposed row-major here: dim0 is seqlen_k
-                          // (kN0 tokens per tile), dim1 is hdim_v (kN1).
-                          // Callers MUST build V's window with lengths (kN0, kN1).
-                          // The dense kernel builds it as (kN1, kK1) instead; that is
-                          // a known pre-existing bug, harmless there only because the
-                          // dense path never reads these window lengths (box dims come
-                          // from the tile distribution, bounds from tdm_real_lengths).
-                          // Do not copy that shape here: this path's page-tracking
-                          // logic does read these lengths, so they are load-bearing.
+                          // (kN0 per tile), dim1 is hdim_v (kN1). Not the
+                          // (kN1, kK1) the dense kernel passes.
                           kN0 == VDramBlockWindowTmp{}.get_window_lengths()[I0] &&
                           kN1 == VDramBlockWindowTmp{}.get_window_lengths()[I1] &&
                           kM0 == BiasDramBlockWindowTmp{}.get_window_lengths()[I0] &&

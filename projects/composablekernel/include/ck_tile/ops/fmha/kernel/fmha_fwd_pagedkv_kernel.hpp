@@ -1402,21 +1402,10 @@ struct FmhaFwdPagedKVKernel
                 static_assert(kIsPagedKV,
                               "qr_pagedkv_tdm_sched is only reachable with paged kv kargs");
 
-                // l2p_offset (kv_l2p_offset, is_gappy group mode only) must be a
-                // multiple of kN0 -- see tdm_page_tracker.hpp:29-31 -- or the
-                // tile-advance countdown in TdmPageTracker::seek() fires late and
-                // tiles silently straddle two pages. The host-side gate only
-                // covers page_block_size % kN0 == 0; it cannot cheaply cover
-                // this one too, because kv_l2p_offset comes from
-                // kargs.seqstart_k_ptr[i_batch], a device-only buffer (see its
-                // use a few lines above) -- checking it host-side would need a
-                // device-to-host copy of the whole per-batch array on every
-                // dispatch, not a free pointer-free comparison like
-                // page_block_size. A plain assert() would not help either: this
-                // library's dev preset still builds Release (-DNDEBUG), which
-                // compiles assert() away, so the check has to trap explicitly
-                // instead of relying on the macro (mirrors tf32_t's bit_cast
-                // check in core/numeric/tfloat32.hpp).
+                // kv_l2p_offset must be a multiple of kN0, or TdmPageTracker::seek()
+                // fires late and tiles straddle two pages silently. The host gate
+                // declines gappy group mode; this traps a direct launch that
+                // bypasses it (assert() is compiled out in Release).
                 if constexpr(kIsGroupMode)
                 {
                     // is_gappy only exists on the group-mode kargs; batch mode
@@ -1425,7 +1414,7 @@ struct FmhaFwdPagedKVKernel
                     {
                         printf(
                             "%s:%d: error: kv_l2p_offset (%d) must be a multiple of kN0 (%d) for "
-                            "qr_pagedkv_tdm_sched group mode; see tdm_page_tracker.hpp:29-31\n",
+                            "qr_pagedkv_tdm_sched group mode; see TdmPageTracker\n",
                             __FILE__,
                             __LINE__,
                             kv_l2p_offset,
@@ -1434,27 +1423,13 @@ struct FmhaFwdPagedKVKernel
                     }
                 }
 
-                // TDM needs affine DRAM strides and the logical (GLOBAL, not
-                // page-local) seqlen bounds -- the pipeline's own TdmPageTracker
-                // folds paging into the base pointer instead of rewriting the
-                // window origin (see tdm_page_tracker.hpp). So K/V here are
-                // plain untransposed naive views over the GLOBAL coordinate
-                // space, not page_block_size-bounded navigator windows. Mirrors
-                // fmha_fwd_kernel.hpp's make_k_dram/make_v_dram affine-path
-                // construction (the dense sibling of this pipeline).
-                //
-                // kv_global_len is the number of rows in the PHYSICAL (shifted)
-                // coordinate space -- it is only correct as a page count (see
-                // num_pages_tdm below). The window origin the TDM descriptor
-                // sees here is the LOGICAL (l2p-unaware) one: TdmPageTracker
-                // folds kv_l2p_offset into the base pointer (refresh(), see
-                // tdm_page_tracker.hpp:118-131), so a logical row r in
-                // [0, seqlen_k) is what gets offered to this view. Sizing the
-                // view's height to kv_global_len instead of kargs.seqlen_k would
-                // let TDM's hardware zero-clamp admit kv_l2p_offset extra rows
-                // past the real end of the sequence, reading real tokens out of
-                // the next physical page instead of returning zero on the final
-                // partial tile.
+                // TdmPageTracker::refresh() folds paging and kv_l2p_offset into the
+                // base pointer, so K/V are plain affine views over LOGICAL global
+                // rows rather than page-bounded navigator windows. Their height
+                // must be seqlen_k: kv_global_len would let the TDM zero clamp
+                // admit kv_l2p_offset extra rows and read real tokens from the
+                // next physical page on the final partial tile. kv_global_len is
+                // valid only as a page count (num_pages_tdm below).
                 const index_t kv_global_len = kv_l2p_offset + kargs.seqlen_k;
 
                 const auto k_dram_tdm = make_naive_tensor_view<address_space_enum::global>(

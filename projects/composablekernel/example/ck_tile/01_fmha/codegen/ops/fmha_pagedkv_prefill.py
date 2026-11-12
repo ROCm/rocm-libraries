@@ -248,13 +248,11 @@ class FmhaFwdApiTrait:
 
     @property
     def tdm_sched_gate(self) -> str:
-        # qr_pagedkv_tdm_sched folds paging into the base pointer, which is only
-        # valid when a kN0 tile never straddles two pages. Add a runtime check
-        # so dispatch falls back to the next (non-tdm_sched) matching trait
-        # when it does not hold; see fmha_fwd_pagedkv_tdm_sched_applicable in
-        # fmha_fwd.hpp.
+        # Runtime check so dispatch falls back to the next (non-tdm_sched)
+        # matching trait when the page layout does not suit qr_pagedkv_tdm_sched;
+        # see fmha_fwd_pagedkv_tdm_sched_applicable in fmha_fwd.hpp.
         if self.pipeline_tag == "qr_pagedkv_tdm_sched":
-            return f" && fmha_fwd_pagedkv_tdm_sched_applicable(a.page_block_size, {self.bn0})"
+            return f" && fmha_fwd_pagedkv_tdm_sched_applicable(a.page_block_size, a.is_gappy, {self.bn0})"
         return ""
 
 
