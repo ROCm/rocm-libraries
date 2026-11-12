@@ -274,8 +274,8 @@ def _fake_query_client(path, revision):
 @pytest.mark.skipif(os.name == "nt", reason="uses a POSIX test executable")
 def test_default_client_candidate_skips_a_client_from_another_commit(tmp_path):
     installation = _installation(tmp_path)
-    primary = tmp_path / "primary" / binding._CLIENT_EXECUTABLE
-    fallback = tmp_path / "fallback" / binding._CLIENT_EXECUTABLE
+    primary = tmp_path / "primary" / binding.client_executable_name()
+    fallback = tmp_path / "fallback" / binding.client_executable_name()
     _fake_query_client(primary, _OTHER_SHA)
     _fake_query_client(fallback, _SHA)
 
@@ -291,7 +291,7 @@ def test_default_client_candidate_skips_a_client_from_another_commit(tmp_path):
 @pytest.mark.skipif(os.name == "nt", reason="uses a POSIX test executable")
 def test_default_client_candidate_reports_every_client_from_another_commit(tmp_path):
     installation = _installation(tmp_path)
-    candidates = [tmp_path / name / binding._CLIENT_EXECUTABLE for name in ("first", "second")]
+    candidates = [tmp_path / name / binding.client_executable_name() for name in ("first", "second")]
     for candidate in candidates:
         _fake_query_client(candidate, _OTHER_SHA)
 
