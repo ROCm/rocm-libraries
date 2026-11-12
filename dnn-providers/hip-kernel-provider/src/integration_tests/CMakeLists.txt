@@ -135,6 +135,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             target_sources(hip_kernel_provider_integration_tests PRIVATE
                 kernel_ingestor_engine/IntegrationGpuConvNaive.cpp)
         endif()
+        # The census classifies graphs the explicit-GEMM conv engines serve as tier b. It loads
+        # them when the hipBLASLt provider beside this one was built with
+        # HIPBLASLTPROVIDER_ENABLE_CONV=ON; without them it skips the b rows and the wrw twins
+        # only they serve, and says so.
         if(HIPKERNELPROVIDER_CONV_ALL_FAMILIES_SERVED)
             target_sources(hip_kernel_provider_integration_tests PRIVATE
                 kernel_ingestor_engine/IntegrationConvCoverageCensus.cpp)
