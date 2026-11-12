@@ -2978,7 +2978,7 @@ TEST_F(TestSdpaBwdPlanBuilder, IsApplicableBoundsTheTsProductByTheResolvedTileSi
 // =============================================================================
 
 // A32: FP32 [B, H_q, S_q, D_qk] with the unpadded head dim.
-TEST(TestSdpaBwdDqAccLayout, A32IsFp32WithTheGraphHeadDim)
+TEST(TestSdpaBwdDqAccLayout, A32UsesFourByteElementsAtTheGraphHeadDim)
 {
     const auto layout = sdpaBwdDqAccLayout(2, 8, 200, 96, AccumulatorType::A32);
     EXPECT_EQ(layout.elementBytes, 4u);
@@ -3031,7 +3031,7 @@ TEST(TestSdpaBwdDqAccLayout, FitsU32BoundsThePerBatchSpanAtBatchOne)
         sdpaBwdDqAccFitsU32(sdpaBwdDqAccLayout(1, 64, 262129, 128, AccumulatorType::A16), 64));
 }
 
-TEST(TestSdpaBwdWorkspaceSize, A32IsTheDBufferAndAnFp32DqAcc)
+TEST(TestSdpaBwdWorkspaceSize, A32IsTheDBufferAndAFourByteDqAcc)
 {
     // D buffer 2*8*512*4 = 32768; dq_acc 2*8*512*128*4 = 4194304
     EXPECT_EQ(sdpaBwdWorkspaceSize(2, 8, 512, 128, AccumulatorType::A32, true), 32768u + 4194304u);
