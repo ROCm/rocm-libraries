@@ -94,6 +94,8 @@ def _call_nll_body(kernel):
     tpA, tpB = _make_tps()
 
     self = MagicMock()
+    # FUSI uses ordinary LDS writes, so the PAP two-group path is inactive.
+    self.papPgr2PipelineEnabled.return_value = False
 
     # states fields read before / during the loop
     self.states.numItersPLR = 1
