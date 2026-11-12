@@ -342,8 +342,10 @@ _PRIVATE_PERTURBATIONS = {
     "emit_lse": (True, False),
     "kv_segments": (2, 4),  # default grid only; skipped on the persistent base
     "use_additive_bias": (True,),
-    # Legal only with use_additive_bias=True -> the *_bias bases. False resolves to the
-    # same scalar loads the policy picks, so only True moves the IR (and the name).
+    # Legal only with use_additive_bias=True -> the *_bias bases. A value equal to the
+    # policy's verdict is the same body and name, so on the bases where the policy picks
+    # the 4-wide loads only False moves the IR (and the name), and on the scalar-policy
+    # base only True does.
     "use_bias_x4": (True, False),
 }
 
@@ -418,6 +420,10 @@ _INJECTIVITY_BASES = {
     # through the bias-on body (a refused combination is skipped, not asserted on).
     "d128_fp16_bias": dict(head_size=128, dtype="fp16", use_additive_bias=True),
     "d64_bf16_bias": dict(head_size=64, dtype="bf16", use_additive_bias=True),
+    # fp16 D128, 256-row tile, no mask (the policy's former scalar group).
+    "d128_fp16_full_bias": dict(
+        head_size=128, dtype="fp16", causal=False, use_additive_bias=True
+    ),
     "persistent_d128_bf16_bias": dict(
         head_size=128,
         dtype="bf16",

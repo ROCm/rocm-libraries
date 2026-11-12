@@ -161,8 +161,9 @@ rescale them; the bias-off IR is unchanged. Semantics are the gfx950 dense kerne
 (`-inf` masks a key, a finite value such as `finfo(float32).min` is an ordinary score,
 a NaN on a visible key makes its row NaN, a row with no unmasked key writes zeros).
 `use_bias_x4` chooses 4-wide or scalar bias loads; the policy
-(`_use_bias_x4`) picks 4-wide loads for bf16 D64 only and scalar loads elsewhere, and
-the name tags only an explicit value that differs from it. Tests: the host contract
+(`_use_bias_x4`) picks 4-wide loads for every bias body (measured ahead of or level with
+the scalar form on every compiler generation checked), and the name tags only an explicit
+value that differs from it. Tests: the host contract
 [test_attention_dense_bias_gfx942.py](../../../library/tests/test_attention_dense_bias_gfx942.py)
 (CPU lane), the numerics
 [test_attention_dense_bias_gfx942_numeric.py](../../../library/tests/test_attention_dense_bias_gfx942_numeric.py)

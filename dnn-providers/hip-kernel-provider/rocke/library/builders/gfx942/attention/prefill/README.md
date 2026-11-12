@@ -182,17 +182,25 @@ run_attention_dense_torch(
 - **Load width.** `use_bias_x4` picks how the bias is read: `True` reads four keys per
   16-byte load (element-aligned only; one pointer per KV tile, the offsets folded into
   the load immediates), `False` one key per load, and `None` (default) asks the policy
-  (`_use_bias_x4`). The policy picks the 4-wide loads for bf16 D64 only, where scalar
-  loads spill to scratch inside the KV loop under that config's 128-VGPR cap; every
-  other config keeps scalar loads until a device measurement says otherwise (neither
-  form spills on D128 with the floored bias term). Both add the same scores bit for bit. The kernel name tags an
-  explicit value only when it differs from the policy (`bx41` / `bx40` after `addb`),
-  so a policy change alters the code under an unchanged `_addb` symbol.
+  (`_use_bias_x4`). The policy picks the 4-wide loads for every bias body: timed on every
+  compiler generation checked, the 4-wide form won or tied in every measured cell, and
+  no D128 body spills in either form since the floored bias term. Two small losses are
+  accepted for the one rule (narrow-window D64 bf16 on one compiler generation, D64
+  causal with LSE on one other); the 304-CU part is unmeasured. Both forms add the
+  same scores bit for bit. The kernel name tags an explicit value only when it differs from
+  the policy (`bx41` / `bx40` after `addb`), so a policy change alters the code under an
+  unchanged `_addb` symbol.
 
 Through the dispatcher, set `use_attn_bias=True` (fp32 only: `attn_bias_dtype="f32"`)
 on an `AttentionRequest` pinned to `gfx942_dense` (a `layout="dense"` request routes
 there too) and pass the bias as `tensors["attn_bias"]`. The factory keeps the KV-segment
-split off a bias request. hipDNN does not serve the bias on gfx942 yet.
+split off a bias request. A bias request over equal lengths with a full or causal band,
+no sliding window and no sinks (LSE allowed) is built on 128-row query blocks on the
+non-persistent grid, with a 32-key tile at D128 and a 64-key tile at D64, the work-decode
+order that follows the mask, and the waves-per-eu of the other configs at bf16 D64: the
+default geometry measured slower with a bias. fp16 at D64 under a causal band is the
+exception: it measured no clear gain there, so it keeps the default geometry. Every other
+bias request keeps the default geometry. hipDNN does not serve the bias on gfx942 yet.
 
 ## Why a separate kernel (not an arch branch in the gfx950 file)
 

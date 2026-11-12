@@ -978,32 +978,33 @@ def _use_bias_x4(spec: "Gfx942AttentionDenseSpec") -> bool:
     of four C rows, at a constant offset from a per-tile pointer) rather than one key
     per load.
 
-    On for bf16 D64, the one config where the scalar form does not fit. Its dispatch
-    geometry caps the body at 128 VGPRs (waves-per-eu 4, see
-    :func:`_tuned_waves_per_eu`); with scalar bias loads it spills to scratch inside
-    the KV loop on every compiler generation, and with the 16-byte loads it fits
-    without any scratch. LLVM 22 and later merge the scalar loads into 16-byte ones
-    themselves, so the difference is the per-load 64-bit address arithmetic the x4
-    form folds into one tile pointer. Every other config stays scalar until measured
-    on a device: with the floored bias term no D128 body spills in either form on any
-    compiler generation, and D64 fp16 runs at a 256-VGPR cap where both forms fit (a
-    few narrow-window bodies spill a little outside the KV loops in either form).
-    Both forms are legal on every body -- no ragged body, so every query row and key
-    the kernel visits is inside the bias -- and add bitwise the same biased scores.
+    On for every bias body. Timed against the scalar form on every compiler generation
+    checked (four), over both dtypes and head sizes, with and without a mask, the
+    LSE output, a sliding window and a chunked bottom-right band, the 4-wide form won
+    or tied in every measured cell. No D128 body spills to scratch in either form
+    since the floored bias term (design (c)), so the spill premise that once carved
+    out groups is gone. Two small losses are accepted for a single rule: narrow-window
+    D64 bf16 on one compiler generation, and D64 causal with the LSE output on one
+    other. The part with 304 compute units is unmeasured. LLVM 22 and later merge the
+    scalar loads into 16-byte ones themselves; the 4-wide form folds the per-load
+    64-bit address arithmetic into one tile pointer. Both forms are legal on every
+    body -- no ragged body, so every query row and key the kernel visits is inside the
+    bias -- and add bitwise the same biased scores.
 
-    Takes the spec rather than (head_size, dtype) so a measured policy can read the
-    compile-time fields the kernel name carries (LSE, grid, tile, dtype, head size)
-    without changing the call sites. It must NOT read a ``runtime_param_fields``
-    entry or the environment: the name and ``attention_dense_cache_key`` drop those,
-    so two bodies would share one symbol and one launcher slot
+    Takes the spec rather than (head_size, dtype) so a later carve-out can read the
+    compile-time fields the kernel name carries (tile, mask, LSE, dtype, head size)
+    and has one place to live. It must NOT read a ``runtime_param_fields`` entry or the
+    environment: the name and ``attention_dense_cache_key`` drop those, so two bodies
+    would share one symbol and one launcher slot
     (``test_bias_x4_policy_ignores_runtime_shape_fields``).
 
     Changing a verdict changes the IR under the unchanged ``_addb`` symbol: re-bless
     both gfx942 goldens and regenerate any AOT pack in the same change. Explicit
-    specs rename with it (``bx41`` drops, ``bx40`` appears), so add
-    ``use_bias_x4=False`` golden rows then, or the scalar body loses its pin.
+    specs rename with it (``bx41`` drops, ``bx40`` appears), so keep the
+    ``use_bias_x4=False`` golden rows, or the scalar body loses its pin.
     """
-    return spec.head_size == 64 and spec.dtype == "bf16"
+    del spec  # every bias body takes the 4-wide form; see the docstring
+    return True
 
 
 def _pack_p_bf16(b: IRBuilder, elems):

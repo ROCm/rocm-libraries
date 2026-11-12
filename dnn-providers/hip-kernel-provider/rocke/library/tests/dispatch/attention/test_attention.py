@@ -80,6 +80,7 @@ EXPECTED_FEATURES = {
         "sliding_window",
     },
     "attention_gfx942_dense_qbminor": {
+        "attn_bias",
         "causal",
         "causal_bottom_right",
         "layout_dense",

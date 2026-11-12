@@ -79,10 +79,23 @@ def persistent(request):
 
 
 def _spec(
-    dtype, d, hq, hkv, *, batch, sq, skv, mask, persistent, sinks=False, lse=False
+    dtype,
+    d,
+    hq,
+    hkv,
+    *,
+    batch,
+    sq,
+    skv,
+    mask,
+    persistent,
+    sinks=False,
+    lse=False,
+    tile=None,
 ):
     """The bias spec the dispatch factory builds for the request, on the grid asked
-    for (a knob on its default spec, as the sweeps and the pins set it)."""
+    for and, with ``tile``, at that ``(block_m, block_n)`` (knobs on its default spec,
+    as the sweeps and the pins set them)."""
     from dispatch.attention import AttentionRequest, tuning_spec_with_knobs
 
     req = AttentionRequest(
@@ -101,10 +114,12 @@ def _spec(
         emit_lse=lse,
         use_attn_bias=True,
     )
-    spec = tuning_spec_with_knobs(
-        req, "gfx942_dense", {"persistent": persistent}
-    ).kernel_spec
+    knobs = {"persistent": persistent}
+    if tile is not None:
+        knobs.update(block_m=tile[0], block_n=tile[1])
+    spec = tuning_spec_with_knobs(req, "gfx942_dense", knobs).kernel_spec
     assert spec.use_additive_bias and spec.persistent is persistent
+    assert tile is None or (spec.block_m, spec.block_n) == tile
     assert spec.kv_segments == 1 and not spec.ragged
     return spec
 
@@ -161,10 +176,10 @@ def _lse_buffer(batch, hq, sq):
     "d, x4", [(64, True), (128, False)], ids=["d64-x4", "d128-scalar"]
 )
 def test_bias_shape_x_mask(bias_name, mask, d, x4, persistent):
-    """Every bias shape under every mask, bf16 GQA-4, B=2, with the load form the
-    kernel's policy picks for the head size (4-wide at D64, scalar at D128; forced, so
-    a policy change does not move the coverage). Bottom-right runs Sq != Skv so its
-    diagonal moves; the window runs past one KV tile."""
+    """Every bias shape under every mask, bf16 GQA-4, B=2, with a different load form
+    per head size (4-wide at D64, scalar at D128; forced, so a policy change does not
+    move the coverage). Bottom-right runs Sq != Skv so its diagonal moves; the window
+    runs past one KV tile."""
     dtype, hq, hkv, batch = "bf16", 8, 2, 2
     sq, skv = extents(mask)
     spec = _spec(
@@ -199,6 +214,35 @@ def test_dtype_x_head_size(dtype, d, hq, hkv, mask, persistent):
     )
     shape = BIAS_SHAPES[SHAPE_FOR_MASK[mask]](batch, hq, sq, skv)
     q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, shape)
+    scale = 1.0 / math.sqrt(d)
+    out = _run(spec, q, k, v, bias, scale)
+    ref, _ = _reference(q, k, v, scale, bias, mask)
+    assert max_abs(out, ref) < tolerance(dtype), (dtype, d, mask)
+
+
+@pytest.mark.parametrize("mask", ["none", "top_left"])
+@pytest.mark.parametrize(
+    "dtype, d", [("bf16", 128), ("fp16", 64)], ids=["bf16-d128", "fp16-d64"]
+)
+def test_the_default_geometry_tile_serves_the_bias(dtype, d, mask, persistent):
+    """The 256-row tile of the bias-off default geometry on both grids. The factory
+    builds the 128-row tile for these requests, but a pin or a sweep can still ask for
+    this one, and the persistent grid at D128 is where it used to be the default."""
+    hq, hkv, batch = 8, 2, 2
+    sq, skv = extents(mask)
+    spec = _spec(
+        dtype,
+        d,
+        hq,
+        hkv,
+        batch=batch,
+        sq=sq,
+        skv=skv,
+        mask=mask,
+        persistent=persistent,
+        tile=(256, 64),
+    )
+    q, k, v, bias = _inputs(dtype, d, hq, hkv, batch, sq, skv, (batch, hq, sq, skv))
     scale = 1.0 / math.sqrt(d)
     out = _run(spec, q, k, v, bias, scale)
     ref, _ = _reference(q, k, v, scale, bias, mask)
