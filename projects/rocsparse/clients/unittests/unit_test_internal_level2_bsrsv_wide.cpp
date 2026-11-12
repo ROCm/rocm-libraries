@@ -590,6 +590,129 @@ namespace
 
         ASSERT_EQ(rocsparse_bsric0_clear(objects.handle, objects.info), rocsparse_status_success);
     }
+
+    // bsric0 builds the analysis, bsrsv reuse borrows it, and a non-singular
+    // solve must succeed. The reuse branch gives the solve its own zero pivot.
+    void expect_borrowed_reuse_solves()
+    {
+        std::vector<rocsparse_int> row_ptr;
+        std::vector<rocsparse_int> col_ind;
+        std::vector<test_T>        val;
+        std::vector<rocsparse_int> map;
+        build_matrix(true, row_ptr, col_ind, val, map);
+
+        const rocsparse_int nnzb = static_cast<rocsparse_int>(col_ind.size());
+        rocsparse_ut::device_vector<rocsparse_int> d_row_ptr(row_ptr);
+        rocsparse_ut::device_vector<rocsparse_int> d_col_ind(col_ind);
+        rocsparse_ut::device_vector<test_T>        d_val(val);
+        const std::vector<test_T>           x(static_cast<size_t>(kRows), static_cast<test_T>(1));
+        const std::vector<test_T>           y0(static_cast<size_t>(kRows), static_cast<test_T>(-7));
+        rocsparse_ut::device_vector<test_T> d_x(x);
+        rocsparse_ut::device_vector<test_T> d_y(y0);
+
+        scoped_bsrsv_objects objects;
+        ASSERT_EQ(rocsparse_create_handle(&objects.handle), rocsparse_status_success);
+        ASSERT_EQ(rocsparse_create_mat_descr(&objects.descr), rocsparse_status_success);
+        ASSERT_EQ(rocsparse_set_mat_fill_mode(objects.descr, rocsparse_fill_mode_lower),
+                  rocsparse_status_success);
+        ASSERT_EQ(rocsparse_set_mat_diag_type(objects.descr, rocsparse_diag_type_non_unit),
+                  rocsparse_status_success);
+        ASSERT_EQ(rocsparse_create_mat_info(&objects.info), rocsparse_status_success);
+
+        size_t ic0_bytes = 0;
+        size_t sv_bytes  = 0;
+        ASSERT_EQ(rocsparse_sbsric0_buffer_size(objects.handle,
+                                                rocsparse_direction_row,
+                                                kMb,
+                                                nnzb,
+                                                objects.descr,
+                                                d_val.ptr,
+                                                d_row_ptr.ptr,
+                                                d_col_ind.ptr,
+                                                kBlockDim,
+                                                objects.info,
+                                                &ic0_bytes),
+                  rocsparse_status_success);
+        ASSERT_EQ(rocsparse_sbsrsv_buffer_size(objects.handle,
+                                               rocsparse_direction_row,
+                                               rocsparse_operation_none,
+                                               kMb,
+                                               nnzb,
+                                               objects.descr,
+                                               d_val.ptr,
+                                               d_row_ptr.ptr,
+                                               d_col_ind.ptr,
+                                               kBlockDim,
+                                               objects.info,
+                                               &sv_bytes),
+                  rocsparse_status_success);
+
+        rocsparse_ut::device_vector<char> d_buffer(
+            std::vector<char>(std::max(ic0_bytes, sv_bytes) + 1, 0));
+        ASSERT_NE(d_buffer.ptr, nullptr);
+
+        ASSERT_EQ(rocsparse_sbsric0_analysis(objects.handle,
+                                             rocsparse_direction_row,
+                                             kMb,
+                                             nnzb,
+                                             objects.descr,
+                                             d_val.ptr,
+                                             d_row_ptr.ptr,
+                                             d_col_ind.ptr,
+                                             kBlockDim,
+                                             objects.info,
+                                             rocsparse_analysis_policy_force,
+                                             rocsparse_solve_policy_auto,
+                                             d_buffer.ptr),
+                  rocsparse_status_success);
+        ASSERT_EQ(rocsparse_sbsrsv_analysis(objects.handle,
+                                            rocsparse_direction_row,
+                                            rocsparse_operation_none,
+                                            kMb,
+                                            nnzb,
+                                            objects.descr,
+                                            d_val.ptr,
+                                            d_row_ptr.ptr,
+                                            d_col_ind.ptr,
+                                            kBlockDim,
+                                            objects.info,
+                                            rocsparse_analysis_policy_reuse,
+                                            rocsparse_solve_policy_auto,
+                                            d_buffer.ptr),
+                  rocsparse_status_success);
+
+        const test_T alpha = static_cast<test_T>(1);
+        ASSERT_EQ(rocsparse_sbsrsv_solve(objects.handle,
+                                         rocsparse_direction_row,
+                                         rocsparse_operation_none,
+                                         kMb,
+                                         nnzb,
+                                         &alpha,
+                                         objects.descr,
+                                         d_val.ptr,
+                                         d_row_ptr.ptr,
+                                         d_col_ind.ptr,
+                                         kBlockDim,
+                                         objects.info,
+                                         d_x.ptr,
+                                         d_y.ptr,
+                                         rocsparse_solve_policy_auto,
+                                         d_buffer.ptr),
+                  rocsparse_status_success);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        const std::vector<test_T> y = rocsparse_ut::to_host(d_y);
+        ASSERT_EQ(static_cast<int>(y.size()), kRows);
+        for(int32_t row = 0; row < kRows; ++row)
+        {
+            EXPECT_EQ(y[static_cast<size_t>(row)], expected(true, row)) << "row " << row;
+        }
+
+        rocsparse_int position = -2;
+        EXPECT_EQ(rocsparse_bsrsv_zero_pivot(objects.handle, objects.info, &position),
+                  rocsparse_status_success);
+        ASSERT_EQ(rocsparse_bsric0_clear(objects.handle, objects.info), rocsparse_status_success);
+    }
 }
 
 TEST(internal_level2_bsrsv_wide, general_i32_chunk)
@@ -723,4 +846,9 @@ TEST(internal_level2_bsrsv_wide, public_singular_pivot_clamped)
 TEST(internal_level2_bsrsv_wide, force_keeps_borrowed_bsric0_analysis)
 {
     ASSERT_NO_FATAL_FAILURE(expect_borrowed_analysis_survives_force());
+}
+
+TEST(internal_level2_bsrsv_wide, reuse_borrowed_bsric0_solves)
+{
+    ASSERT_NO_FATAL_FAILURE(expect_borrowed_reuse_solves());
 }

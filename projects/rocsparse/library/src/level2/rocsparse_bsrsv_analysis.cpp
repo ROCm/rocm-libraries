@@ -137,6 +137,16 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
            && trm->has_indextypes(rocsparse::get_indextype<I>(), rocsparse::get_indextype<J>()))
         {
             info->set_bsrsv_info(trans, descr->fill_mode, trm);
+
+            // The borrowed analysis brings no zero pivot for this container, and the
+            // solve reads it from here. Create it once, without touching a pivot that
+            // this container already holds from its own analysis.
+            auto bsrsv_info = info->get_bsrsv_info();
+            if(bsrsv_info->get_position() == nullptr)
+            {
+                RETURN_IF_ROCSPARSE_ERROR(bsrsv_info->create_zero_pivot_async(
+                    rocsparse::get_indextype<J>(), handle->stream));
+            }
             return rocsparse_status_success;
         }
     }
