@@ -149,6 +149,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         # tree around the archive. Binary-relative for the reason the defines above are.
         HIPKERNELPROVIDER_MULTI_LAUNCH_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_MULTI_LAUNCH}")
 
+    # The production descriptor tree, as the same binary-relative offset the integration
+    # binary uses. Only TestGfx950ConvDgradMatchers reads it, to run the shipped dgrad
+    # catalog's metadata through the real state manager; it skips when this configuration
+    # packs no production tree, so no dependency on hkp_packaging_product is added here.
+    target_compile_definitions(hip_kernel_provider_tests PRIVATE
+        HIPKERNELPROVIDER_PRODUCT_DESCRIPTOR_RELDIR="${HIPKERNELPROVIDER_PLUGIN_ENGINE_RELDIR}/${HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR}")
+
     # The same descriptor defines the ordinary binary carries, minus the kpack reldir, so
     # the shared main() resolves its root identically in both. The archive cases that read
     # the kpack reldir stay in the ordinary binary, and a define no source here consumes
@@ -355,7 +362,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             EXPECTED_CASES
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsUniqueObjectsAndOneTopServeAllPerClass
+                ShipsTheF32Objects
                 RanksTheNarrowerBucketFirst
+                ShipsTheWideAndPairBuckets
+                StagesTheHeadDim256KeysInChunksOn64KiBParts
                 EveryKernelDeclaresItsFamilysSignature
         )
     endif()
@@ -369,6 +379,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsUniqueObjectsAndOneTopServeAllPerClass
                 EveryKernelDeclaresItsFamilysSignature
+                ServesHeadDim256OnFourWaves
         )
     endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_cdna_decode)
@@ -394,7 +405,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsEverySpecializedAndGenericVariantOnce
                 RanksTheNarrowestServingObjectFirst
-                EveryKernelDeclaresTheThirtyEightSlotSignature
+                EveryKernelDeclaresTheFortySevenSlotSignature
         )
     endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_aiw)
@@ -419,12 +430,43 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsEveryDecodeVariantOnce
                 RanksTheNarrowestServingObjectFirst
-                EveryKernelDeclaresTheFortySlotSignature
+                EveryKernelDeclaresTheFortyFourSlotSignature
         )
     endif()
 
-    # Census for the gfx950 attention production packs. Each reads only the product
-    # shard, so it is eligible for census registration.
+    # The cases every generated Test<Engine>Packs suite below registers, shared by the
+    # attention and RDNA calls.
+    set(_hkp_generated_packs_cases
+        LoadsExactlyTheEmittedPacks
+        LoadsExactlyTheEmittedKernels
+        EveryLoadedDescriptorCoversTheRequestedArch
+        EveryKernelDeclaresTheEmittedRuntimeSourceKind
+        DeclaresTheConfiguredSdkVersion
+        ExposesTheConfiguredKnobs
+        RanksThroughItsRegisteredScoreSymbol
+        CarriesNoGraphScopedMatcher
+        CarriesExactlyOneSharedKernelScopedMatcher
+    )
+
+    # A suite whose engine config declares behavior_notes renders one more case. The list
+    # names those suites; keep it in step with the configs' engine.behavior_notes.
+    set(_hkp_behavior_notes_suites
+        TestGfx950AttentionDensePacks
+        TestGfx1151WmmaAttentionPacks
+        TestGfx1151WmmaAttentionDecodePacks
+    )
+    # _hkp_generated_packs_cases_for(<out> <suite>): the cases <suite> registers.
+    function(_hkp_generated_packs_cases_for out_var suite)
+        set(_cases ${_hkp_generated_packs_cases})
+        if(suite IN_LIST _hkp_behavior_notes_suites)
+            list(APPEND _cases DeclaresItsConfiguredBehaviorNotes)
+        endif()
+        set(${out_var} ${_cases} PARENT_SCOPE)
+    endfunction()
+
+    # Census for each HKP_PINNED_ATTENTION_ENGINES engine's production pack (the table is in
+    # ../CMakeLists.txt). Each reads only the product shard, so it is eligible for census
+    # registration.
     #
     # The predicate and ARCHES narrow independently -- whether `product` carries THIS
     # bundle at all, and which of its wired architectures the bundle emits for. Either
@@ -433,54 +475,86 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # The Pointwise call above needs neither: its fixtures are the unit root itself, and
     # they cover every architecture it is wired for.
     #
-    # Each item is "<snake slug>|<engine local name>|<hand-written companion cases>": the
-    # generated Test<local>Packs suite pins the same cases for every engine, and the
-    # companion Test<local>CatalogTiles suite checks every shipped kernel against that
-    # engine's own launchability rule. The companion gets its own call because a pin names
-    # one suite's cases. _hkp_gfx950_attention_<snake> is left set for the cross-engine
-    # suite below.
-    foreach(_gfx950_engine IN ITEMS
-            "dense|Gfx950AttentionDense|EveryShippedKernelsTileIsOneTheEngineLaunches"
-            "unified_2d|Gfx950AttentionUnified2D|EveryShippedKernelsGeometryIsOneTheEngineLaunches"
-            "unified_3d|Gfx950AttentionUnified3D|EveryShippedKernelsGeometryIsOneTheEngineLaunches,EveryEntryLaunchesItsSegmentAndReduceKernels")
-        string(REPLACE "|" ";" _gfx950_engine "${_gfx950_engine}")
-        list(GET _gfx950_engine 0 _snake)
-        list(GET _gfx950_engine 1 _local)
-        list(GET _gfx950_engine 2 _companion_cases)
-        string(REPLACE "," ";" _companion_cases "${_companion_cases}")
+    # An engine with hand-written companion suites lists each one's cases below under
+    # _hkp_<stem>_cases_<arch>_<snake slug>, the companion's suite being
+    # Test<local><Suite> for each <Suite> <stem> pair in _hkp_companion_suites. Each gets its
+    # own call because a pin names one suite's cases. _hkp_<arch>_attention_<snake slug> is
+    # left set for the cross-engine suite below.
+    #   CatalogTiles checks every shipped kernel against the engine's own launchability rule.
+    #   ModelBinding fails the build when a shipped trained ranker would be refused at
+    #   runtime, which the engine otherwise only logs before ranking on priority. A model
+    #   whose model.bin was not pulled is packed without its UHD, with a warning and an entry
+    #   in hkp-unpulled-models.record; the suite tolerates an absent UHD only when that record
+    #   names it, and never when HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS is ON, which it
+    #   learns from the compile definition below.
+    set(_hkp_companion_suites CatalogTiles catalog_tiles ModelBinding model_binding)
+    set_source_files_properties(
+        "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dModelBinding.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx1250ConvDgradAotModelBinding.cpp"
+        PROPERTIES COMPILE_DEFINITIONS
+            "HKP_REQUIRE_DVC_DESCRIPTORS=$<BOOL:${HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS}>")
+    set(_hkp_catalog_tiles_cases_gfx950_dense EveryShippedKernelsTileIsOneTheEngineLaunches)
+    set(_hkp_catalog_tiles_cases_gfx950_unified_2d
+        EveryShippedKernelsGeometryIsOneTheEngineLaunches)
+    set(_hkp_catalog_tiles_cases_gfx950_unified_3d
+        EveryShippedKernelsGeometryIsOneTheEngineLaunches
+        EveryEntryLaunchesItsSegmentAndReduceKernels)
+    set(_hkp_catalog_tiles_cases_gfx942_dense EveryShippedKernelsTileIsOneTheEngineLaunches)
+    set(_hkp_model_binding_cases_gfx942_unified_3d
+        TheBoundL2KernelRankerLoads
+        TheBoundL1EnginePredictorLoadsAndMatchesThisBuild)
 
-        hkp_product_ships_engine_for_arch(_hkp_gfx950_attention_${_snake}
-                                          "hipkernel:${_local}" gfx950)
-        if(_hkp_gfx950_attention_${_snake})
+    set(_engines ${HKP_PINNED_ATTENTION_ENGINES})
+    while(_engines)
+        list(POP_FRONT _engines _arch _snake _local _filter_var _toml _categories_var)
+        hkp_product_ships_engine_for_arch(_hkp_${_arch}_attention_${_snake}
+                                          "hipkernel:${_local}" ${_arch})
+        if(_hkp_${_arch}_attention_${_snake})
+            _hkp_generated_packs_cases_for(_hkp_cases Test${_local}Packs)
             hkp_register_census_tests(
                 TARGET hip_kernel_provider_census_tests
                 PACK_NAME product
-                ARCHES gfx950
+                ARCHES ${_arch}
                 SUITES Test${_local}Packs
-                EXPECTED_CASES
-                    LoadsExactlyTheEmittedPacks
-                    LoadsExactlyTheEmittedKernels
-                    EveryLoadedDescriptorCoversTheRequestedArch
-                    EveryKernelDeclaresTheEmittedRuntimeSourceKind
-                    DeclaresTheConfiguredSdkVersion
-                    ExposesTheConfiguredKnobs
-                    RanksThroughItsRegisteredScoreSymbol
-                    CarriesNoGraphScopedMatcher
-                    CarriesExactlyOneSharedKernelScopedMatcher
-            )
-            hkp_register_census_tests(
-                TARGET hip_kernel_provider_census_tests
-                PACK_NAME product
-                ARCHES gfx950
-                SUITES Test${_local}CatalogTiles
-                EXPECTED_CASES ${_companion_cases}
+                EXPECTED_CASES ${_hkp_cases}
             )
         else()
             message(STATUS
                 "hkp: this configuration does not ship hipkernel:${_local} for "
-                "gfx950, so its census is not registered.")
+                "${_arch}, so its census is not registered.")
         endif()
-    endforeach()
+        set(_companions ${_hkp_companion_suites})
+        while(_companions)
+            list(POP_FRONT _companions _suite _stem)
+            if(_hkp_${_arch}_attention_${_snake}
+               AND DEFINED _hkp_${_stem}_cases_${_arch}_${_snake})
+                hkp_register_census_tests(
+                    TARGET hip_kernel_provider_census_tests
+                    PACK_NAME product
+                    ARCHES ${_arch}
+                    SUITES Test${_local}${_suite}
+                    EXPECTED_CASES ${_hkp_${_stem}_cases_${_arch}_${_snake}}
+                )
+            endif()
+            unset(_hkp_${_stem}_cases_${_arch}_${_snake})
+        endwhile()
+    endwhile()
+    # The loop unsets each row's entries, so one left set names no row and its census would
+    # silently never register.
+    set(_hkp_companion_stems "")
+    set(_companions ${_hkp_companion_suites})
+    while(_companions)
+        list(POP_FRONT _companions _suite _stem)
+        list(APPEND _hkp_companion_stems ${_stem})
+    endwhile()
+    list(JOIN _hkp_companion_stems "|" _hkp_companion_stems)
+    get_directory_property(_hkp_unmatched VARIABLES)
+    list(FILTER _hkp_unmatched INCLUDE REGEX "^_hkp_(${_hkp_companion_stems})_cases_")
+    if(_hkp_unmatched)
+        message(FATAL_ERROR
+            "hkp: ${_hkp_unmatched} names no HKP_PINNED_ATTENTION_ENGINES row's <arch> and "
+            "<snake slug>, so its companion census would never register.")
+    endif()
 
     # Unified2D hands decode to Unified3D by a static rule, so with both engines shipped,
     # every 2D cell that rule hands off must have a 3D kernel.
@@ -495,36 +569,10 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         )
     endif()
 
-    # Census for the gfx942 unified 3D (split-KV decode) production pack; gated like
-    # gfx950's above.
-    hkp_gfx942_attention_unified_3d_available(_hkp_gfx942_attention_unified_3d)
-    if(_hkp_gfx942_attention_unified_3d)
-        hkp_register_census_tests(
-            TARGET hip_kernel_provider_census_tests
-            PACK_NAME product
-            ARCHES gfx942
-            SUITES TestGfx942AttentionUnified3dPacks
-            EXPECTED_CASES
-                LoadsExactlyTheEmittedPacks
-                LoadsExactlyTheEmittedKernels
-                EveryLoadedDescriptorCoversTheRequestedArch
-                EveryKernelDeclaresTheEmittedRuntimeSourceKind
-                DeclaresTheConfiguredSdkVersion
-                ExposesTheConfiguredKnobs
-                RanksThroughItsRegisteredScoreSymbol
-                CarriesNoGraphScopedMatcher
-                CarriesExactlyOneSharedKernelScopedMatcher
-        )
-    else()
-        message(STATUS
-            "hkp: this configuration does not ship hipkernel:Gfx942AttentionUnified3d for "
-            "gfx942, so its census is not registered.")
-    endif()
-
     # One generic kernel set per RDNA family ships in every RDNA3/3.5 and RDNA4 shard,
     # as two engines: the prefill objects and the split-KV decode objects (the wide-Q
     # prefill and D256 decode geometries differ per family). The census checks each wired
-    # shard against its own inventory. Gated per arch like gfx950 above.
+    # shard against its own inventory. Gated per arch like the attention engines above.
     foreach(_engine_suite IN ITEMS
             "hipkernel:Gfx1151WmmaAttention|TestGfx1151WmmaAttentionPacks"
             "hipkernel:Gfx1151WmmaAttentionDecode|TestGfx1151WmmaAttentionDecodePacks")
@@ -540,21 +588,13 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             endif()
         endforeach()
         if(_hkp_rdna_wmma_attention_arches)
+            _hkp_generated_packs_cases_for(_hkp_cases ${_hkp_suite})
             hkp_register_census_tests(
                 TARGET hip_kernel_provider_census_tests
                 PACK_NAME product
                 ARCHES ${_hkp_rdna_wmma_attention_arches}
                 SUITES ${_hkp_suite}
-                EXPECTED_CASES
-                    LoadsExactlyTheEmittedPacks
-                    LoadsExactlyTheEmittedKernels
-                    EveryLoadedDescriptorCoversTheRequestedArch
-                    EveryKernelDeclaresTheEmittedRuntimeSourceKind
-                    DeclaresTheConfiguredSdkVersion
-                    ExposesTheConfiguredKnobs
-                    RanksThroughItsRegisteredScoreSymbol
-                    CarriesNoGraphScopedMatcher
-                    CarriesExactlyOneSharedKernelScopedMatcher
+                EXPECTED_CASES ${_hkp_cases}
             )
         else()
             message(STATUS
@@ -562,6 +602,53 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 "so its census is not registered.")
         endif()
     endforeach()
+
+    # Census for the shape-generic backward-data AOT-instance pack,
+    # hipkernel:Gfx950ConvDgradAot.
+    hkp_product_ships_engine_for_arch(_hkp_gfx950_conv_dgrad_aot
+                                      "hipkernel:Gfx950ConvDgradAot" gfx950)
+    if(_hkp_gfx950_conv_dgrad_aot)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx950
+            SUITES TestGfx950ConvDgradAotPacks
+            EXPECTED_CASES ${_hkp_generated_packs_cases}
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx950ConvDgradAot for "
+            "gfx950, so its census is not registered.")
+    endif()
+
+    # ... and its gfx1250 sibling, hipkernel:Gfx1250ConvDgradAot.
+    hkp_product_ships_engine_for_arch(_hkp_gfx1250_conv_dgrad_aot
+                                      "hipkernel:Gfx1250ConvDgradAot" gfx1250)
+    if(_hkp_gfx1250_conv_dgrad_aot)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx1250
+            SUITES TestGfx1250ConvDgradAotPacks
+            EXPECTED_CASES ${_hkp_generated_packs_cases}
+        )
+        # Its trained ranker, as the ModelBinding companion above checks the attention
+        # engine's: the bound model loads and scores every shipped kernel.
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx1250
+            SUITES TestGfx1250ConvDgradAotModelBinding
+            EXPECTED_CASES
+                TheBoundL2KernelRankerLoads
+                TheBoundL2KernelRankerScoresEveryShippedKernel
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx1250ConvDgradAot for "
+            "gfx1250, so its census is not registered.")
+    endif()
+
 endif()
 
 clang_tidy_check(hip_kernel_provider_tests)

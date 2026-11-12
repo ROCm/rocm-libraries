@@ -613,14 +613,13 @@ TEST(TestKernelIngestorEngine, ReportsTheSerializationNoteOnlyOnSaveableEngines)
         EXPECT_EQ(std::count(pointwiseNotes.begin(), pointwiseNotes.end(), SERIALIZATION_NOTE), 0);
     };
 
-    // The first Container takes the state managers that discovery built; a later one builds
-    // its own. Both construction paths must report the note.
-    rediscoverStateManagersForTesting();
+    // Every Container reads the shared state discovery built, the first and a later one
+    // alike. Both must report the note.
+    rediscoverSharedStatesForTesting();
     {
         SCOPED_TRACE("first Container");
         Container container;
-        ASSERT_EQ(takeDiscoveredStateManager(loadedSet(CONV_FWD.engineName).engine.id).get(),
-                  nullptr);
+        ASSERT_NE(discoveredSharedState(loadedSet(CONV_FWD.engineName).engine.id), nullptr);
         expectTheNoteOnlyOnConvFwd(container);
     }
     {
@@ -648,10 +647,13 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
     const std::vector<std::string_view> packDispatchSymbols{
         "hipkernel.pointwise.dispatch",
         "hipkernel.conv_fwd.dispatch",
+        "hipkernel.gfx950_conv_dgrad_aot.dispatch",
+        "hipkernel.gfx1250_conv_dgrad_aot.dispatch",
         "hipkernel.gfx950_attention_dense.dispatch",
         "hipkernel.gfx942_attention_unified3d.dispatch",
         "hipkernel.gfx950_attention_unified_2d.dispatch",
         "hipkernel.gfx950_attention_unified_3d.dispatch",
+        "hipkernel.gfx942_attention_dense.dispatch",
         "hipkernel.gfx1151_wmma_attention.dispatch",
         "hipkernel.gfx1151_wmma_attention_decode.dispatch",
 #ifdef HIPDNN_ENGINE_FLYDSL
@@ -664,6 +666,8 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.flydsl_sdpa_cdna.dispatch",
         "hipkernel.flydsl_sdpa_cdna_dualwave.dispatch",
         "hipkernel.flydsl_sdpa_cdna_decode.dispatch",
+        "hipkernel.flydsl_sdpa_dropout_mask.dispatch",
+        "hipkernel.flydsl_sdpa_head_pad.dispatch",
 #endif
     };
     EXPECT_EQ(packDispatchSymbols.size(), ingestorPacks().size())

@@ -17,6 +17,10 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 * Changed `hiptensorCreateContraction` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` when C doesn't carry exactly the modes of D, and `HIPTENSOR_STATUS_INVALID_VALUE` when a mode has a different extent in C and in D. `hiptensorCreateContractionTrinary` applies the same rule to D and E. Previously the mismatch passed validation.
 * Changed `hiptensorContract` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` for an in-place contraction, where C and D are the same buffer, when C and D have different strides. `hiptensorContractTrinary` applies the same rule to D and E. Both also return `HIPTENSOR_STATUS_NOT_SUPPORTED` when the two tensors overlap without being the same buffer. Previously both returned wrong results with `HIPTENSOR_STATUS_SUCCESS`.
 * Changed `hiptensorCreateContraction` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` for a complex contraction when a tensor isn't packed or when C is laid out differently from D. `hiptensorCreateContractionTrinary` applies the same rule to D and E. Previously both cases returned wrong results with `HIPTENSOR_STATUS_SUCCESS`.
+* Changed the `hiptensor::hiptensor` CMake target to propagate `hip::host` instead of `hip::device`. Code that links hipTensor is no longer compiled as HIP for every GPU target by default. Projects that compile their own HIP kernels must link `hip::device` themselves.
+
+### Optimized
+* Reduced build time by compiling library, test, and sample sources that define no GPU kernels for the host only, and by removing the unused CPU reference implementations from `libhiptensor.so`. They are now built only into the test suite's host reference library.
 
 ### Resolved issues
 * Fixed `hiptensorElementwiseBinaryExecute` and `hiptensorReduce` treating the alpha, beta, and gamma scalars as 0 when the compute descriptor is `HIPTENSOR_COMPUTE_DESC_16BF`.

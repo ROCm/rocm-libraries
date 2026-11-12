@@ -667,7 +667,7 @@ def _emitDerived(sol, assembler):
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
-    from tensilelite.TensileCreateLibrary.Run import (generateKernelObjectsFromSolutions,
+    from tensilelite.create_library.run import (generateKernelObjectsFromSolutions,
                                                   processKernelSource)
     from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
@@ -1695,7 +1695,7 @@ PER_SITE = (                                       # gfx1250
 )
 
 
-MERGED = (                                         # gfx1250v0
+MERGED = (                                         # gfx1250-strict
     site(CLONE, MATH, ["s_branch label_%s" % TAIL]),
     ["label_LoopBeginL:"] + FILL,
     site(MAIN, MATH),
