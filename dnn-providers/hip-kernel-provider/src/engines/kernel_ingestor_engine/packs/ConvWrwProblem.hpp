@@ -313,6 +313,18 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
                                       const hipdnn_plugin_sdk::ingestor::DeviceProperties& device);
 
 /**
+ * @brief Whether three-bf16 (math 1, x and dy as 3N bf16 images) is admitted for @p problem on
+ *        @p gcnArchName: the classes where it measured faster than exact fp32 K3
+ *        (~/old-asic-hipdnn/tf32/PLAN.md). The 3N images triple the operand traffic, so it pays
+ *        only where the bf16 kernel is about 3x the fp32 one or the exact path is weak.
+ *
+ * gfx942, gfx950: unit stride, at least 9 filter taps, at least 128 input and 64 output channels
+ * per group. gfx11, gfx12 (exact fp32 on FMA): at most 4 input channels per group (stems), or at
+ * least 256 with at least 9 taps. Elsewhere (gfx90a, whose bf16 rate is only 4x fp32 MFMA): never.
+ */
+bool threeBf16Pays(const WrwProblem& problem, std::string_view gcnArchName);
+
+/**
  * @brief The preprocessor definitions ConvWrw.cpp is compiled with for @p config on
  *        @p dataType (CONV_K3_T, CONV_K3_ATOM = @p kernelType unless empty (the FMA ring), and
  *        one CONV_K3_<FIELD> per integer field), in a fixed order. Both entry points compile

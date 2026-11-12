@@ -2267,34 +2267,46 @@ using hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter;
 
 constexpr const char* TF32_ENV = "HIP_KERNEL_PROVIDER_CONV_TF32";
 
+/// An fp32 graph three-bf16 is admitted for on CDNA (threeBf16Pays): 128 input and 64 output
+/// channels, 3x3, unit stride.
+ConvShape x3Shape()
+{
+    auto shape = floatShape();
+    shape.c = 128;
+    shape.k = 64;
+    return shape;
+}
+
 TEST(TestConvWrwThreeBf16, OnlyWithTf32PermissionAndOnlyForFloatGraphs)
 {
     {
         const ScopedEnvironmentVariableSetter off(TF32_ENV, "");
-        EXPECT_FALSE(admits(threeBf16Fields(), "gfx942", floatShape()));
+        EXPECT_FALSE(admits(threeBf16Fields(), "gfx942", x3Shape()));
     }
     {
         const ScopedEnvironmentVariableSetter no(TF32_ENV, "0");
-        EXPECT_FALSE(admits(threeBf16Fields(), "gfx942", floatShape()));
+        EXPECT_FALSE(admits(threeBf16Fields(), "gfx942", x3Shape()));
     }
     const ScopedEnvironmentVariableSetter on(TF32_ENV, "1");
-    EXPECT_TRUE(admits(threeBf16Fields(), "gfx942", floatShape()));
-    EXPECT_TRUE(admits(threeBf16Fields(), "gfx90a", floatShape()));
+    EXPECT_TRUE(admits(threeBf16Fields(), "gfx942", x3Shape()));
+    EXPECT_TRUE(admits(threeBf16Fields(), "gfx950", x3Shape()));
+    // gfx90a: three bf16 products never beat its exact fp32 MFMA here (threeBf16Pays).
+    EXPECT_FALSE(admits(threeBf16Fields(), "gfx90a", x3Shape()));
     // 16-bit graphs take the bf16 configs themselves, never their three-bf16 form.
-    auto bf16 = floatShape();
+    auto bf16 = x3Shape();
     bf16.dataType = DataType::BFLOAT16;
     EXPECT_FALSE(admits(threeBf16Fields(), "gfx942", bf16));
     EXPECT_FALSE(admits(threeBf16Fields(), "gfx942", baseShape()));
     // The atom runs on the device: not gfx908 (no 1k bf16 atom), not RDNA (wave64 MFMA).
-    EXPECT_FALSE(admits(threeBf16Fields(), "gfx908", floatShape()));
-    EXPECT_FALSE(admits(threeBf16Fields(), "gfx1100", floatShape()));
+    EXPECT_FALSE(admits(threeBf16Fields(), "gfx908", x3Shape()));
+    EXPECT_FALSE(admits(threeBf16Fields(), "gfx1100", x3Shape()));
 }
 
 /// Every field three-bf16 adds, one refusal each, from a config admitted under permission.
 TEST(TestConvWrwThreeBf16, RefusesOneFieldAtATime)
 {
     const ScopedEnvironmentVariableSetter on(TF32_ENV, "1");
-    const auto shape = floatShape();
+    const auto shape = x3Shape();
     ASSERT_TRUE(admits(threeBf16Fields(), "gfx942", shape));
     const auto refuses = [&](const std::function<void(ConfigFields&)>& mutate) {
         auto f = threeBf16Fields();
@@ -2336,12 +2348,12 @@ TEST(TestConvWrwThreeBf16, RefusesOneFieldAtATime)
 TEST(TestConvWrwThreeBf16, LaunchesTheBf16ConfigOnThreeTimesTheImagesAfterTheSplit)
 {
     const ScopedEnvironmentVariableSetter on(TF32_ENV, "1");
-    const auto x3 = launchOf(threeBf16Fields(), floatShape());
+    const auto x3 = launchOf(threeBf16Fields(), x3Shape());
     ASSERT_TRUE(x3.has_value());
     // The bf16 config on the bf16 problem of 6 images.
     auto plainFields = threeBf16Fields();
     plainFields.math = 0;
-    auto tripled = floatShape();
+    auto tripled = x3Shape();
     tripled.dataType = DataType::BFLOAT16;
     tripled.n = 6;
     const auto plain = launchOf(plainFields, tripled);
@@ -2354,16 +2366,54 @@ TEST(TestConvWrwThreeBf16, LaunchesTheBf16ConfigOnThreeTimesTheImagesAfterTheSpl
     EXPECT_EQ(x3->gridZ, plain->gridZ);
     EXPECT_EQ(x3->kernelType, "K1AtomMfma32Bf16");
     EXPECT_FALSE(x3->dwStore);
-    // x 2 x 24 x 120 and dy 2 x 40 x 120 elements, three bf16 copies each, 256-byte aligned;
+    // x 2 x 128 x 120 and dy 2 x 64 x 120 elements, three bf16 copies each, 256-byte aligned;
     // the partials after them.
     EXPECT_TRUE(x3->split);
-    EXPECT_EQ(x3->splitArgs.xElems, 2 * 24 * 120);
-    EXPECT_EQ(x3->splitArgs.yElems, 2 * 40 * 120);
-    EXPECT_EQ(x3->splitYOffset, size_t{3} * 2 * 2 * 24 * 120);
-    EXPECT_EQ(x3->splitBytes, size_t{3} * 2 * 2 * (24 + 40) * 120);
+    EXPECT_EQ(x3->splitArgs.xElems, 2 * 128 * 120);
+    EXPECT_EQ(x3->splitArgs.yElems, 2 * 64 * 120);
+    EXPECT_EQ(x3->splitYOffset, size_t{3} * 2 * 2 * 128 * 120);
+    EXPECT_EQ(x3->splitBytes, size_t{3} * 2 * 2 * (128 + 64) * 120);
     EXPECT_EQ(x3->workspaceBytes, x3->splitBytes + plain->workspaceBytes);
-    EXPECT_EQ(x3->splitGrid, (2u * 40 * 120 + 255) / 256);
+    EXPECT_EQ(x3->splitGrid, (2u * 128 * 120 + 255) / 256);
     EXPECT_FALSE(plain->split);
+}
+
+/// The classes three-bf16 is admitted for (threeBf16Pays), one refusal per gate.
+TEST(TestConvWrwThreeBf16, PaysOnlyWhereItMeasuredFaster)
+{
+    const auto pays = [](const ConvShape& shape, const char* arch) {
+        const auto problem = parse(specOf(shape));
+        return problem.has_value() && conv_wrw::threeBf16Pays(*problem, arch);
+    };
+    EXPECT_TRUE(pays(x3Shape(), "gfx942"));
+    EXPECT_TRUE(pays(x3Shape(), "gfx950:sramecc+:xnack-"));
+    EXPECT_FALSE(pays(x3Shape(), "gfx90a"));
+    EXPECT_FALSE(pays(x3Shape(), "gfx908"));
+    auto narrowC = x3Shape();
+    narrowC.c = 64;
+    EXPECT_FALSE(pays(narrowC, "gfx950"));
+    auto narrowK = x3Shape();
+    narrowK.k = 32;
+    EXPECT_FALSE(pays(narrowK, "gfx950"));
+    auto pointwise = x3Shape();
+    pointwise.filter = {1, 1};
+    pointwise.prePadding = pointwise.postPadding = {0, 0};
+    EXPECT_FALSE(pays(pointwise, "gfx950"));
+    auto strided = x3Shape();
+    strided.stride = {2, 2};
+    EXPECT_FALSE(pays(strided, "gfx950"));
+    // RDNA (exact fp32 on FMA): stems of few channels, or 256+ channels with 9+ taps.
+    auto stem = x3Shape();
+    stem.c = 3;
+    EXPECT_TRUE(pays(stem, "gfx1201"));
+    EXPECT_TRUE(pays(stem, "gfx1100"));
+    EXPECT_FALSE(pays(x3Shape(), "gfx1201"));
+    auto wide = x3Shape();
+    wide.c = 256;
+    EXPECT_TRUE(pays(wide, "gfx1201"));
+    auto widePointwise = pointwise;
+    widePointwise.c = 256;
+    EXPECT_FALSE(pays(widePointwise, "gfx1201"));
 }
 
 TEST(TestConvWrwThreeBf16, CompilesTheBf16KernelWithTheSplitAndFp32Dw)

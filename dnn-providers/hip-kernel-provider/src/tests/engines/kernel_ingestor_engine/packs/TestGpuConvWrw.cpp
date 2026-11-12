@@ -688,6 +688,15 @@ void runCase(const DeviceCase& deviceCase, Math math = Math::NATIVE, bool infini
         });
         EXPECT_EQ(mismatches, 0);
     }
+    // Three-bf16 is admitted only where it measured faster (threeBf16Pays).
+    if(ran == 0 && math == Math::THREE_BF16)
+    {
+        const auto problem = conv_wrw::parseWrwProblem(fixture.context());
+        if(problem.has_value() && !conv_wrw::threeBf16Pays(*problem, device.gcnArchName))
+        {
+            GTEST_SKIP() << "three-bf16 is not admitted for this class on " << device.gcnArchName;
+        }
+    }
     const bool fmaOrFp32 = shape.dataType == DataType::FLOAT
                            || hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName) == "gfx906";
     if(ran == 0
@@ -803,6 +812,19 @@ std::vector<DeviceCase> threeBf16Cases()
     {
         throw std::logic_error("a three-bf16 case names no device case");
     }
+    // Shapes three-bf16 is admitted for (threeBf16Pays): CDNA's 128+ input and 64+ output
+    // channels at 3x3 unit stride, and RDNA's 256+ channels (the stems above cover RDNA's few).
+    cases.push_back(
+        {"Wide128Nchw3x3", conv(128, 64, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1})});
+    cases.push_back(
+        {"Wide128Nhwc3x3", conv(128, 64, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true)});
+    cases.push_back(
+        {"Wide128Ncdhw3x3x3",
+         conv(128, 64, {4, 6, 7}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1})});
+    cases.push_back(
+        {"Wide256Nchw3x3", conv(256, 72, {6, 9}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1})});
+    cases.push_back({"Wide256Nhwc3x3Grouped",
+                     conv(512, 128, {6, 9}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true, 2)});
     return cases;
 }
 

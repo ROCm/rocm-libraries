@@ -484,7 +484,8 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         // only, fp32 graphs only; the direct dw store would write bf16, so dws 0.
         if(config.math != 1 || problem.base.dataType != data_objects::DataType::FLOAT
            || !conv_igemm::tf32Permitted() || conv_igemm::atomElement(config.atom) != "bf16"
-           || config.dws != 0 || problem.base.args.n * 3 > INT_LIMIT)
+           || config.dws != 0 || problem.base.args.n * 3 > INT_LIMIT
+           || !threeBf16Pays(problem, device.gcnArchName))
         {
             return std::nullopt;
         }
@@ -926,6 +927,25 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     r.wtap = problem.filterChannelsLast ? cg : 1;
     r.rows = reduceRows ? 1 : 0;
     return launch;
+}
+
+bool threeBf16Pays(const WrwProblem& problem, std::string_view gcnArchName)
+{
+    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
+    const auto& a = problem.base.args;
+    const int64_t cg = a.c / a.groups;
+    const int64_t kg = a.k / a.groups;
+    const int64_t taps = problem.taps;
+    if(arch == "gfx942" || arch == "gfx950")
+    {
+        const bool unitStride = a.stride[0] == 1 && a.stride[1] == 1 && a.stride[2] == 1;
+        return unitStride && taps >= 9 && cg >= 128 && kg >= 64;
+    }
+    if(arch.rfind("gfx11", 0) == 0 || arch.rfind("gfx12", 0) == 0)
+    {
+        return cg <= 4 || (cg >= 256 && taps >= 9);
+    }
+    return false;
 }
 
 std::vector<std::pair<std::string, std::string>> compileDefinesFor(data_objects::DataType dataType,
