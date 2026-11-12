@@ -1517,6 +1517,24 @@ TEST(TestConvGroupWrwLaunch, SplitsFillTheDeviceAndPartialsSizeTheWorkspace)
     EXPECT_FALSE(conv_group::groupWrwLaunch(*problem, 8, 16, 16, 4, properties).has_value());
 }
 
+TEST(TestConvGroupComputeType, ServesCudnnsComputeTypesPerElementType)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        expectCudnnComputeTypes(
+            resnext(),
+            {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16},
+            [direction](const ConvShape& s) {
+                const GraphFixture fixture(buildGraph(specFor(s, direction)));
+                return conv_group::parseGroupProblem(fixture.context(), direction).has_value();
+            });
+    }
+    expectCudnnComputeTypes(
+        resnext(), {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16}, [](const ConvShape& s) {
+            return parsedWrw(specFor(s, ConvDirection::BACKWARD_WEIGHTS)).has_value();
+        });
+}
+
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR && HIPDNN_ENGINE_CONV

@@ -940,6 +940,17 @@ TEST(TestConvDirectPlan, ADeviceWithoutUnitsIsDeclined)
     }
 }
 
+TEST(TestConvDirectComputeType, ServesCudnnsComputeTypesPerElementType)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        expectCudnnComputeTypes(
+            baseShape(),
+            {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16},
+            [direction](const ConvShape& s) { return parse(specFor(s, direction)).has_value(); });
+    }
+}
+
 } // namespace
 
 #endif

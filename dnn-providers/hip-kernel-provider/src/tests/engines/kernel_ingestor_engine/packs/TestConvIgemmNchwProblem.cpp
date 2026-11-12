@@ -902,6 +902,14 @@ TEST(TestConvIgemmNchwAtoms, IdsFollowTheTable)
     EXPECT_EQ(conv_igemm_nchw::atomIdOf("mfma64"), -1);
 }
 
+TEST(TestConvIgemmNchwComputeType, ServesCudnnsComputeTypesPerElementType)
+{
+    expectCudnnComputeTypes(
+        baseShape(), {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16}, [](const ConvShape& s) {
+            return parse(specFor(s, ConvDirection::BACKWARD_DATA)).has_value();
+        });
+}
+
 } // namespace
 
 #endif

@@ -3190,6 +3190,13 @@ TEST(TestConvWrwDefines, EveryFieldIsADefine)
                  std::invalid_argument);
 }
 
+TEST(TestConvWrwComputeType, ServesCudnnsComputeTypesPerElementType)
+{
+    expectCudnnComputeTypes(baseShape(),
+                            {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16},
+                            [](const ConvShape& s) { return parse(specOf(s)).has_value(); });
+}
+
 } // namespace
 
 #endif

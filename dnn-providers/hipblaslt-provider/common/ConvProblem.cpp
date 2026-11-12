@@ -223,14 +223,6 @@ std::optional<ConvProblem> parseConvProblem(const IGraph& graph, ConvDirection d
         return std::nullopt;
     }
 
-    // The GEMMs accumulate in f32: at least the precision any of these asks for.
-    const auto computeType = graph.getNodeWrapper(0).computeDataType();
-    if(computeType != data_objects::DataType::UNSET && computeType != data_objects::DataType::FLOAT
-       && computeType != data_objects::DataType::HALF
-       && computeType != data_objects::DataType::BFLOAT16)
-    {
-        return std::nullopt;
-    }
     if(fields->mode != data_objects::ConvMode::CROSS_CORRELATION
        && fields->mode != data_objects::ConvMode::CONVOLUTION)
     {
@@ -248,6 +240,16 @@ std::optional<ConvProblem> parseConvProblem(const IGraph& graph, ConvDirection d
     const auto w = deviceOperand(graph, fields->w, wType);
     const auto y = deviceOperand(graph, fields->y, yType);
     if(!x.has_value() || !w.has_value() || !y.has_value() || xType != wType || xType != yType)
+    {
+        return std::nullopt;
+    }
+
+    // cuDNN's compute types for a convolution (cudnn-frontend docs/developer/graph-api.mdx,
+    // "Compute Data Type"): FLOAT for every element type, HALF also for HALF; UNSET reads as
+    // FLOAT. The GEMMs accumulate in f32, at least the precision either asks for.
+    const auto computeType = graph.getNodeWrapper(0).computeDataType();
+    if(computeType != data_objects::DataType::UNSET && computeType != data_objects::DataType::FLOAT
+       && !(computeType == data_objects::DataType::HALF && xType == data_objects::DataType::HALF))
     {
         return std::nullopt;
     }

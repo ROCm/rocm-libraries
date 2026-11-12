@@ -6,9 +6,12 @@
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_CONV)
 
 #include <cstdint>
+#include <initializer_list>
 #include <optional>
 #include <string>
 #include <vector>
+
+#include <gtest/gtest.h>
 
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_bwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
@@ -110,6 +113,7 @@ struct ConvShape
     bool channelsLast = false;
     data_objects::DataType dataType = data_objects::DataType::FLOAT;
     data_objects::ConvMode mode = data_objects::ConvMode::CROSS_CORRELATION;
+    data_objects::DataType computeType = data_objects::DataType::FLOAT;
 
     std::vector<int64_t> output() const
     {
@@ -149,6 +153,7 @@ inline ConvGraphSpec specFor(const ConvShape& shape, ConvDirection direction)
     spec.stride = shape.stride;
     spec.dilation = shape.dilation;
     spec.mode = shape.mode;
+    spec.computeType = shape.computeType;
     return spec;
 }
 
@@ -248,6 +253,52 @@ inline flatbuffers::FlatBufferBuilder buildGraph(const ConvGraphSpec& spec)
                                                    ::flatbuffers::nullopt,
                                                    spec.overrideShapeEnabled));
     return builder;
+}
+
+/// cuDNN's convolution compute types for @p element (cudnn-frontend docs/developer/graph-api.mdx,
+/// "Compute Data Type"): FLOAT for every element type, HALF also for HALF; UNSET reads as FLOAT.
+/// Restated here rather than calling the provider's convServesComputeType, so a change to
+/// either one fails the tests below.
+inline bool cudnnServesComputeType(data_objects::DataType compute, data_objects::DataType element)
+{
+    using data_objects::DataType;
+    return compute == DataType::UNSET || compute == DataType::FLOAT
+           || (compute == DataType::HALF && element == DataType::HALF);
+}
+
+/**
+ * @brief For each of @p elements, @p accepts(shape) holds for exactly the compute types cuDNN
+ *        serves for that element type.
+ *
+ * @p shape with a FLOAT compute type must be accepted for every one of @p elements, so each
+ * refusal can only come from the compute type.
+ */
+template <typename Accepts>
+void expectCudnnComputeTypes(ConvShape shape,
+                             std::initializer_list<data_objects::DataType> elements,
+                             Accepts accepts)
+{
+    using data_objects::DataType;
+    for(const auto element : elements)
+    {
+        shape.dataType = element;
+        shape.computeType = DataType::FLOAT;
+        ASSERT_TRUE(accepts(shape)) << data_objects::EnumNameDataType(element);
+        for(const auto compute : {DataType::UNSET,
+                                  DataType::FLOAT,
+                                  DataType::HALF,
+                                  DataType::BFLOAT16,
+                                  DataType::DOUBLE,
+                                  DataType::INT32,
+                                  DataType::INT8,
+                                  DataType::FP8_E4M3})
+        {
+            shape.computeType = compute;
+            EXPECT_EQ(accepts(shape), cudnnServesComputeType(compute, element))
+                << data_objects::EnumNameDataType(element) << " elements, "
+                << data_objects::EnumNameDataType(compute) << " compute";
+        }
+    }
 }
 
 } // namespace conv_naive_test
