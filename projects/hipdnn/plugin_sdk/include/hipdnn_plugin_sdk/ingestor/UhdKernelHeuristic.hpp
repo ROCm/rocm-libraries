@@ -113,6 +113,49 @@ inline uhd::FeatureExtractionContext catalogProblemFeatures(const MatchContext& 
     return features;
 }
 
+/// What a stat says about a model artifact: whether it exists, when it was last written and
+/// how large it is. Two equal stamps mean the file is taken to be unchanged; a rewrite within
+/// the file system's timestamp granularity that keeps the size is not seen.
+struct ArtifactStamp
+{
+    std::filesystem::path path;
+    bool exists = false;
+    std::filesystem::file_time_type modified;
+    std::uintmax_t size = 0;
+
+    /// Never throws: a file that cannot be stat'ed is stamped as absent.
+    static ArtifactStamp of(const std::filesystem::path& path)
+    {
+        ArtifactStamp stamp;
+        stamp.path = path;
+        std::error_code error;
+        const auto modified = std::filesystem::last_write_time(path, error);
+        if(error)
+        {
+            return stamp;
+        }
+        const auto size = std::filesystem::file_size(path, error);
+        if(error)
+        {
+            return stamp;
+        }
+        stamp.exists = true;
+        stamp.modified = modified;
+        stamp.size = size;
+        return stamp;
+    }
+
+    friend bool operator==(const ArtifactStamp& lhs, const ArtifactStamp& rhs)
+    {
+        return lhs.path == rhs.path && lhs.exists == rhs.exists && lhs.modified == rhs.modified
+               && lhs.size == rhs.size;
+    }
+    friend bool operator!=(const ArtifactStamp& lhs, const ArtifactStamp& rhs)
+    {
+        return !(lhs == rhs);
+    }
+};
+
 /// One candidate's number, in the two forms that must not be conflated.
 struct CandidateScore
 {
@@ -481,12 +524,17 @@ public:
     }
 
     /// The model @p metric's own entries name for @p arch, loaded once per (metric, arch key)
-    /// and cached, failures included, so a broken model is read and reported once. The one
-    /// outcome not cached is an artifact that is not deployed yet: it is retried on the next
-    /// call so a model being deployed recovers (RFC 0019 §5), and reported once. The same
-    /// policy as uhd::EngineModelBinding. Loads outside the lock; concurrent first uses may
-    /// both load, and the first cached result wins. Fallback stays inside the metric (RFC 0019
-    /// §3.1).
+    /// and cached. A model that loads is kept for the resolver's lifetime. A model that is
+    /// refused is cached as refused together with the stat signature (modification time and
+    /// size) its artifact had when it was read, so an unchanged broken model is read and
+    /// reported once; each later call costs one stat, and a model whose artifact has changed
+    /// since is loaded again, so one replaced after a failed load (e.g. read while still being
+    /// written) is used without a restart. A refusal that never read the artifact (e.g. a KMD
+    /// field check) does not depend on it and stays cached. An artifact that is not deployed
+    /// yet is not cached: it is retried on the next call so a model being deployed recovers
+    /// (RFC 0019 §5), and reported once. Loads outside the lock; concurrent uses may both
+    /// load, a loaded model is never replaced, and a newer outcome replaces a refusal.
+    /// Fallback stays inside the metric (RFC 0019 §3.1).
     std::shared_ptr<const UhdKernelHeuristic> resolveFor(const std::string& metric,
                                                          const std::string& arch) const
     {
@@ -497,35 +545,73 @@ public:
             return nullptr;
         }
         const auto cacheKey = std::make_pair(metric, key);
+        std::optional<ArtifactStamp> refusedAt;
         {
             const std::lock_guard<std::mutex> lock(_archMutex);
             if(const auto cached = _archCache.find(cacheKey); cached != _archCache.end())
             {
-                return cached->second;
+                if(cached->second.model != nullptr || !cached->second.refusedAt.has_value())
+                {
+                    return cached->second.model;
+                }
+                refusedAt = cached->second.refusedAt;
             }
         }
+        // Stat outside the lock: an artifact unchanged since it was refused is not read again.
+        if(refusedAt.has_value() && ArtifactStamp::of(refusedAt->path) == *refusedAt)
+        {
+            return nullptr;
+        }
+
         // Lazily resolved models face the same knob/field checks (RFC 0019 §8.3).
         std::ostringstream failure;
         bool awaitingArtifact = false;
+        std::optional<ArtifactStamp> readAt;
         std::shared_ptr<const UhdKernelHeuristic> loaded = create(*chosen,
                                                                   _describedBy,
                                                                   _knobs,
                                                                   _kmdFields,
                                                                   failure,
                                                                   awaitingArtifact,
-                                                                  _reserveWorkspaceTokens);
+                                                                  _reserveWorkspaceTokens,
+                                                                  &readAt);
 
         const std::lock_guard<std::mutex> lock(_archMutex);
         bool report = false;
+        const auto cached = _archCache.find(cacheKey);
         if(awaitingArtifact)
         {
+            // A refused artifact since removed is back to not deployed.
+            if(cached != _archCache.end() && cached->second.model == nullptr)
+            {
+                _archCache.erase(cached);
+            }
             report = _archAwaitingReported.insert(cacheKey).second;
+        }
+        else if(cached == _archCache.end())
+        {
+            report = loaded == nullptr;
+            _archCache.emplace(cacheKey,
+                               ArchEntry{loaded, loaded == nullptr ? readAt : std::nullopt});
+        }
+        else if(cached->second.model != nullptr)
+        {
+            // A concurrent load won; keep the model already handed out.
+            loaded = cached->second.model;
         }
         else
         {
-            const auto [cached, inserted] = _archCache.emplace(cacheKey, std::move(loaded));
-            loaded = cached->second;
-            report = inserted && loaded == nullptr;
+            // Replacing a refusal. A concurrent retry that read the same artifact already
+            // reported it.
+            report = loaded == nullptr && cached->second.refusedAt != readAt;
+            if(loaded != nullptr)
+            {
+                HIPDNN_PLUGIN_LOG_INFO("uhd: " << _describedBy << " model for metric "
+                                               << (metric.empty() ? "(none)" : "'" + metric + "'")
+                                               << " on '" << key
+                                               << "' loaded after its artifact changed");
+            }
+            cached->second = ArchEntry{loaded, loaded == nullptr ? readAt : std::nullopt};
         }
         if(report)
         {
@@ -564,9 +650,13 @@ public:
     }
 
 private:
+    using ArtifactStamp = detail::ArtifactStamp;
+
     /// tryCreate() without the ERROR: why the UHD was refused goes to @p failure, so a caller
     /// that retries can report it once. @p awaitingArtifact is set when the refusal is only
-    /// that the model artifact is not deployed yet, so a later call may succeed.
+    /// that the model artifact is not deployed yet, so a later call may succeed. @p readAt,
+    /// when given, receives the artifact's stat signature taken just before the artifact is
+    /// read, and stays empty when the outcome did not depend on reading it.
     static std::shared_ptr<UhdKernelHeuristic>
         create(const HeuristicDescriptor& descriptor,
                const std::string& describedBy,
@@ -574,7 +664,8 @@ private:
                const std::unordered_set<std::string>& kmdFields,
                std::ostream& failure,
                bool& awaitingArtifact,
-               bool reserveWorkspaceTokens = false)
+               bool reserveWorkspaceTokens = false,
+               std::optional<ArtifactStamp>* readAt = nullptr)
     {
         // RFC 0019 §9.4 load time: covers config, signature compilation and artifact read.
         const auto loadStart = Clock::now();
@@ -678,6 +769,12 @@ private:
                             << config.modelArtifactPath
                             << "' is not deployed; kernels rank by priority, then id";
                     return nullptr;
+                }
+                // Before the read: a write that lands during it changes the signature, so
+                // the next call retries.
+                if(readAt != nullptr)
+                {
+                    *readAt = ArtifactStamp::of(config.modelArtifactPath);
                 }
             }
 
@@ -1150,10 +1247,19 @@ private:
     /// The KMD's declared field names, for checking lazily resolved models (§6.3 check 2).
     std::unordered_set<std::string> _kmdFields;
     mutable std::mutex _archMutex;
+    /// One resolveFor() outcome.
+    struct ArchEntry
+    {
+        /// Null when the model was refused.
+        std::shared_ptr<const UhdKernelHeuristic> model;
+        /// For a refused model whose artifact was read: the artifact as it was then, so a
+        /// changed one is loaded again. Empty for a refusal that is permanent.
+        std::optional<ArtifactStamp> refusedAt;
+    };
     /// Keyed by (metric, arch key): one UHD per metric per key, so the pair names a model.
-    /// Holds every load outcome, a failure as nullptr, except an artifact not yet deployed.
-    mutable std::map<std::pair<std::string, std::string>, std::shared_ptr<const UhdKernelHeuristic>>
-        _archCache;
+    /// Holds every load outcome, a failure as a null model, except an artifact not yet
+    /// deployed.
+    mutable std::map<std::pair<std::string, std::string>, ArchEntry> _archCache;
     /// Keys whose undeployed artifact was already logged; guarded by _archMutex.
     mutable std::set<std::pair<std::string, std::string>> _archAwaitingReported;
 
