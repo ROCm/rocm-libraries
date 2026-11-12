@@ -285,7 +285,8 @@ struct K1AtomMfmaF32 : K1Mfma // v_mfma_f32_16x16x4_f32: gfx908+
 
 /// xf32 operands rounded to nearest-even TF32 (10 mantissa bits) before the MFMA, which itself
 /// would truncate (a bias toward zero); NaN stays NaN (quiet), inf stays inf. As hipBLASLt (#9176)
-/// and NVIDIA's cvt.rna.tf32.f32 do.
+/// and NVIDIA's cvt.rna.tf32.f32 do. The xf32 atoms take operands already rounded: the multiply
+/// rounds each fragment once where it loads it (K1Xf32), not at every MFMA that reuses it.
 __device__ inline float k1Tf32(float v)
 {
     unsigned u = __builtin_bit_cast(unsigned, v);
@@ -314,12 +315,24 @@ struct K1AtomMfmaXf32 : K1Mfma // v_mfma_f32_16x16x8_xf32: gfx942 only
     __device__ static acc mma(frag a, frag b, acc c)
     {
 #if defined(__gfx942__)
-        return __builtin_amdgcn_mfma_f32_16x16x8_xf32(k1Tf32(a), k1Tf32(b), c, 0, 0, 0);
+        return __builtin_amdgcn_mfma_f32_16x16x8_xf32(a, b, c, 0, 0, 0);
 #else
         __builtin_trap();
         return c;
 #endif
     }
+};
+
+/// Whether @p Atom is an xf32 atom (its fragments rounded to TF32 once loaded).
+template <class Atom>
+struct K1Xf32
+{
+    static constexpr bool value = false;
+};
+template <>
+struct K1Xf32<K1AtomMfmaXf32>
+{
+    static constexpr bool value = true;
 };
 
 struct K1AtomMfmaF16X32 : K1Mfma // v_mfma_f32_16x16x32_f16: gfx950
@@ -415,7 +428,7 @@ struct K1Mfma32
 #define K1_HAS_MFMA_BF16_908 0
 #endif
 #if defined(__gfx942__)
-#define K1_CALL_32XF32 __builtin_amdgcn_mfma_f32_32x32x4_xf32(k1Tf32(a), k1Tf32(b), c, 0, 0, 0)
+#define K1_CALL_32XF32 __builtin_amdgcn_mfma_f32_32x32x4_xf32(a, b, c, 0, 0, 0)
 #define K1_HAS_XF32 1
 #else
 #define K1_CALL_32XF32 c
@@ -442,6 +455,11 @@ K1_MFMA32_ATOM(K1AtomMfma32F32, 2, 1, float, float, K1_HAS_MFMA, K1_CALL_32F32)
 K1_MFMA32_ATOM(K1AtomMfma32Xf32, 4, 2, float, k1f<2>, K1_HAS_XF32, K1_CALL_32XF32)
 K1_MFMA32_ATOM(K1AtomMfma32F16X16, 16, 8, _Float16, k1h<8>, K1_HAS_MFMA950, K1_CALL_32F16X16)
 K1_MFMA32_ATOM(K1AtomMfma32Bf16X16, 16, 8, short, k1s<8>, K1_HAS_MFMA950, K1_CALL_32BF16X16)
+template <>
+struct K1Xf32<K1AtomMfma32Xf32>
+{
+    static constexpr bool value = true;
+};
 
 // gfx11 WMMA (wave32): both half-waves hold all 16 k of the same rows; D rows interleave.
 struct K1Wmma11
@@ -1981,6 +1999,16 @@ __device__ void k1ConvMma(const K1Args& a)
 #pragma unroll
                 for(int j = 0; j < FN; ++j)
                     bf[j] = k1Frag<Atom>(Bs + (wn * WTN + j * DIM + fragRow) * LD + kk + kb);
+                if constexpr(K1Xf32<Atom>::value)
+                {
+                    // xf32: each fragment rounded once, for every MFMA that reuses it.
+#pragma unroll
+                    for(int i = 0; i < FM; ++i)
+                        af[i] = k1Tf32(af[i]);
+#pragma unroll
+                    for(int j = 0; j < FN; ++j)
+                        bf[j] = k1Tf32(bf[j]);
+                }
 #pragma unroll
                 for(int i = 0; i < FM; ++i)
 #pragma unroll
