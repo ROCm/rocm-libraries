@@ -107,6 +107,13 @@ PlanKey& PlanKey::add(const char* s)
     return *this;
 }
 
+PlanKey& PlanKey::add(std::string_view s)
+{
+    _key.push_back('|');
+    _key.append(s.data(), s.size());
+    return *this;
+}
+
 PlanKey& PlanKey::add(const at::Tensor& t)
 {
     _key.append("|t");
@@ -131,7 +138,8 @@ std::optional<Decline> runGraphOp(const char* op,
                                   const PlanKey& key,
                                   const at::Tensor& anchor,
                                   const GraphBuilder& builder,
-                                  std::initializer_list<const void*> slotPtrs)
+                                  const void* const* slotPtrs,
+                                  size_t numSlots)
 {
     const c10::DeviceGuard guard(anchor.device());
     Runtime& runtime = Runtime::forDevice(anchor.device().index());
@@ -155,7 +163,16 @@ std::optional<Decline> runGraphOp(const char* op,
                               at::TensorOptions().dtype(at::kByte).device(anchor.device()));
         workspacePtr = workspace.data_ptr();
     }
-    return runtime.execute(*entry, slotPtrs.begin(), slotPtrs.size(), workspacePtr, stream);
+    return runtime.execute(*entry, slotPtrs, numSlots, workspacePtr, stream);
+}
+
+std::optional<Decline> runGraphOp(const char* op,
+                                  const PlanKey& key,
+                                  const at::Tensor& anchor,
+                                  const GraphBuilder& builder,
+                                  std::initializer_list<const void*> slotPtrs)
+{
+    return runGraphOp(op, key, anchor, builder, slotPtrs.begin(), slotPtrs.size());
 }
 
 std::shared_ptr<PlanEntry>
