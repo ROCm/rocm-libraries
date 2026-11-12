@@ -3,8 +3,9 @@
 # SPDX-License-Identifier: MIT
 """Write the golden vectors the native dgrad AOT engine tests compare with.
 
-One tool for both dgrad engines (``hipkernel:Gfx950ConvDgradAot``,
-``hipkernel:Gfx1250ConvDgradAot``); the catalog's architecture picks the engine. The
+One tool for every dgrad engine (``hipkernel:Gfx950ConvDgradAot``,
+``hipkernel:Gfx942ConvDgradAot``, ``hipkernel:Gfx1250ConvDgradAot``); the catalog's
+architecture picks the engine. The
 native pack (``packs/ConvDgradAotGeometry.hpp``) ports the launch plan of the
 rocKE adapter (``builders/common/convolution_backward_data.py``,
 ``conv_dgrad_aot_plan``). This tool runs the adapter over an engine's shipped catalog
@@ -23,6 +24,9 @@ Regenerate after a catalog or adapter change::
     python tools/make_conv_dgrad_aot_test_vectors.py --rocke-root "$ROCKE" \\
         --instances configs/gfx950_conv_dgrad_aot_{fp16,bf16}.instances.json \\
         --output "$PACKS"/Gfx950ConvDgradTestVectors.hpp
+    python tools/make_conv_dgrad_aot_test_vectors.py --rocke-root "$ROCKE" \\
+        --instances configs/gfx942_conv_dgrad_aot_{fp16,bf16}.instances.json \\
+        --output "$PACKS"/Gfx942ConvDgradTestVectors.hpp
     python tools/make_conv_dgrad_aot_test_vectors.py --rocke-root "$ROCKE" \\
         --instances configs/gfx1250_conv_dgrad_aot_{fp16,bf16}.instances.json \\
         --output "$PACKS"/Gfx1250ConvDgradTestVectors.hpp
@@ -152,6 +156,19 @@ def synthetic_problems(specs) -> list:
             _shape(2, 4, 320, 64, 96, 3, 3, 1, 1, dtype="bf16"),
             _shape(2, 3, 32, 224, 224, 3, 3, 2, 1),
             _shape(2, 3, 64, 224, 224, 7, 7, 2, 3, dtype="bf16"),
+        ]
+    if {spec.ARCH for spec in specs} == {"gfx942"}:
+        # gfx942's streaming depthwise lanes own cpl channels each: groups that cpl does
+        # and does not divide. Then grouped shapes wider per group than any direct
+        # binary bakes, which only the implicit GEMM serves.
+        rows += [
+            _shape(4, 96, 96, 56, 56, 3, 3, 1, 1, g=96),
+            _shape(4, 97, 97, 56, 56, 3, 3, 1, 1, g=97),
+            _shape(2, 33, 33, 28, 28, 3, 3, 2, 1, g=33, dtype="bf16"),
+            _shape(2, 144, 144, 112, 112, 3, 3, 1, 1, g=144, dtype="bf16"),
+            _shape(2, 256, 256, 64, 64, 3, 3, 1, 1, g=2),
+            _shape(2, 512, 512, 32, 32, 3, 3, 1, 1, g=4, dtype="bf16"),
+            _shape(2, 1024, 1024, 16, 256, 3, 3, 1, 1, g=8),
         ]
     directs = [s for s in specs if s.is_direct and not s.is_helper]
     for spec in directs:
