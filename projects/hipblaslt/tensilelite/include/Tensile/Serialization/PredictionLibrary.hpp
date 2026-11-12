@@ -130,15 +130,48 @@ namespace TensileLite
                                 .workgroup_mapping         = solution->sizeMapping.workGroupMapping,
                                 .cache_hints_a             = solution->sizeMapping.cacheHintA(),
                                 .cache_hints_b             = solution->sizeMapping.cacheHintB(),
+                                .cache_hints_d             = solution->sizeMapping.NonTemporalD,
                                 .workspace_size            = std::numeric_limits<size_t>::max(),
                                 .workspace_size_per_elem_c = std::numeric_limits<size_t>::max(),
-                                .stream_k                  = solution->sizeMapping.streamK,
+                                .stream_k                  = (solution->sizeMapping.isStreamK() ? (solution->sizeMapping.hasDynamicAssignment() ? 4 : solution->sizeMapping.hasHybridAssignment() ? 5 : 3) : 0),
                                 .index                     = local_index,
+                                .grvw_a                    = static_cast<std::size_t>(
+                                    solution->sizeMapping.grvwA),
+                                .grvw_b                    = static_cast<std::size_t>(
+                                    solution->sizeMapping.grvwB),
+                                .gwvw_d                    = static_cast<std::size_t>(
+                                    solution->sizeMapping.gwvwD),
+                                .vector_width_a            = solution->sizeMapping.VectorWidthA,
+                                .vector_width_b            = solution->sizeMapping.VectorWidthB,
+                                .cluster_dim               = {solution->sizeMapping.clusterDim.x,
+                                                              solution->sizeMapping.clusterDim.y,
+                                                              solution->sizeMapping.clusterDim.z},
+                                .backend                   = origami::tensile_params_t{
+                                    .local_split_u        = solution->sizeMapping.LocalSplitU,
+                                    .direct_to_vgpr_a     = solution->sizeMapping.DirectToVgprA,
+                                    .direct_to_vgpr_b     = solution->sizeMapping.DirectToVgprB,
+                                    .direct_to_lds_a      = solution->sizeMapping.DirectToLdsA,
+                                    .direct_to_lds_b      = solution->sizeMapping.DirectToLdsB,
+                                    .wavefront_size       = solution->sizeMapping.WavefrontSize,
+                                    .wave_group_m         = solution->sizeMapping.waveGroup[0],
+                                    .wave_group_n         = solution->sizeMapping.waveGroup[1],
+                                    .prefetch_global_read = solution->sizeMapping.PrefetchGlobalRead,
+                                    .buffer_load          = solution->sizeMapping.BufferLoad,
+                                    .buffer_store         = solution->sizeMapping.BufferStore,
+                                    .one_lds_buffer       = solution->sizeMapping.OneLDSBuffer,
+                                    .source_swap          = solution->sizeMapping.SourceSwap,
+                                    .unroll_major_lds_a   = solution->sizeMapping.UnrollMajorLDSA,
+                                    .unroll_major_lds_b   = solution->sizeMapping.UnrollMajorLDSB,
+                                    .lds_transpose_read_a = solution->sizeMapping.enableLDSTrA,
+                                    .lds_transpose_read_b = solution->sizeMapping.enableLDSTrB,
+                                },
                             };
 
                             lib.origami_config_list.emplace_back(origami_config);
                         }
                     }
+                    // Once per library load. rank_configs reads the flags.
+                    origami::memoize_non_temporal_availability(lib.origami_config_list);
                 }
             }
             const static bool flow = false;

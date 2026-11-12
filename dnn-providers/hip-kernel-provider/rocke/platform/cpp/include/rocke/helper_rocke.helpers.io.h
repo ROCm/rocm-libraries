@@ -117,6 +117,25 @@ rocke_value_t* rocke_b_load_scalar_as_f32(rocke_ir_builder_t* b,
 rocke_value_t* rocke_b_load_vec(
     rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx, const char* dtype, int n);
 
+/* C99 port of rocke.helpers.io.load_vec with its keyword options:
+ *
+ *     def load_vec(b, ptr, idx, *, dtype, n,
+ *                  temporal_hint=TemporalHint.DEFAULT) -> Value:
+ *         if n not in (2, 4, 8): raise ValueError(...)
+ *         return b.global_load_vN(ptr, idx, io_ir_type(dtype), n,
+ *                                 temporal_hint=temporal_hint)
+ *
+ * Same checks and results as rocke_b_load_vec, which forwards here with
+ * opts == NULL (all defaults). `opts` follows the rocke_mem_opts_t rules in
+ * ir.h: a new option is a new field there, never a new entry point here.
+ * Returns NULL on bad n / bad dtype / bad opts / errored builder. */
+rocke_value_t* rocke_b_load_vec_ex(rocke_ir_builder_t* b,
+                                   rocke_value_t* ptr,
+                                   rocke_value_t* idx,
+                                   const char* dtype,
+                                   int n,
+                                   const rocke_mem_opts_t* opts);
+
 /* C99 port of rocke.helpers.io.load_vec_as_f32:
  *
  *     def load_vec_as_f32(b, ptr, idx, *, dtype, n) -> list[Value]:
@@ -133,6 +152,23 @@ int rocke_b_load_vec_as_f32(rocke_ir_builder_t* b,
                             const char* dtype,
                             int n,
                             rocke_value_t** out);
+
+/* C99 port of rocke.helpers.io.load_vec_as_f32 with its keyword options:
+ *
+ *     def load_vec_as_f32(b, ptr, idx, *, dtype, n,
+ *                         temporal_hint=TemporalHint.DEFAULT) -> list[Value]:
+ *         v = load_vec(b, ptr, idx, dtype=dtype, n=n, temporal_hint=temporal_hint)
+ *         return [b.cast_to_f32(b.vec_extract(v, i)) for i in range(n)]
+ *
+ * Same contract as rocke_b_load_vec_as_f32, which forwards here with
+ * opts == NULL; `opts` as for rocke_b_load_vec_ex. */
+int rocke_b_load_vec_as_f32_ex(rocke_ir_builder_t* b,
+                               rocke_value_t* ptr,
+                               rocke_value_t* idx,
+                               const char* dtype,
+                               int n,
+                               rocke_value_t** out,
+                               const rocke_mem_opts_t* opts);
 
 /* C99 port of rocke.helpers.io.load_lane_slice_f32:
  *
@@ -170,6 +206,22 @@ int rocke_b_load_lane_slice_f32(rocke_ir_builder_t* b,
  * errored builder. */
 void rocke_b_store_vec(
     rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx, rocke_value_t* value, int n);
+
+/* C99 port of rocke.helpers.io.store_vec with its keyword options:
+ *
+ *     def store_vec(b, ptr, idx, value, *, n,
+ *                   temporal_hint=TemporalHint.DEFAULT) -> None:
+ *         if n not in (2, 4, 8): raise ValueError(...)
+ *         b.global_store_vN(ptr, idx, value, n, temporal_hint=temporal_hint)
+ *
+ * Same contract as rocke_b_store_vec, which forwards here with opts == NULL;
+ * `opts` as for rocke_b_load_vec_ex. */
+void rocke_b_store_vec_ex(rocke_ir_builder_t* b,
+                          rocke_value_t* ptr,
+                          rocke_value_t* idx,
+                          rocke_value_t* value,
+                          int n,
+                          const rocke_mem_opts_t* opts);
 
 /* C99 port of rocke.helpers.io.pack_f32_to:
  *
@@ -219,6 +271,46 @@ void rocke_b_vector_row_copy(rocke_ir_builder_t* b,
                              int H,
                              const char* dtype,
                              int vec_bytes);
+
+/* C++ port of rocke.helpers.io.concat_tree:
+ *
+ *     def concat_tree(b, parts):
+ *         while len(parts) > 1:
+ *             parts = [b.vec_concat(parts[i], parts[i + 1])
+ *                      for i in range(0, len(parts), 2)]
+ *         return parts[0]
+ *
+ * Joins `count` vector parts in order by pairwise vec_concat, round by round.
+ * `count` must be a power of two (ROCKE_ERR_VALUE otherwise). `parts` is
+ * borrowed and left unchanged. */
+rocke_value_t* rocke_b_concat_tree(rocke_ir_builder_t* b, rocke_value_t* const* parts, int count);
+
+/* C++ port of rocke.helpers.io.smem_load_fragment:
+ *
+ *     def smem_load_fragment(b, smem, row, idx, *, dtype, n, max_elems=4,
+ *                            stride=None):
+ *         if n <= max_elems:
+ *             return b.smem_load_vN(smem, row, idx, dtype=dtype, n=n)
+ *         step = max_elems if stride is None else stride
+ *         parts = [b.smem_load_vN(smem, row,
+ *                                 idx if h == 0 else b.add(idx, b.const_i32(h * step)),
+ *                                 dtype=dtype, n=max_elems)
+ *                  for h in range(n // max_elems)]
+ *         return concat_tree(b, parts)
+ *
+ * LDS read of an n-element `dtype` fragment at [row, idx] in loads of at most
+ * `max_elems` elements, piece h at idx + h * stride, joined in K order. With
+ * f32 and max_elems = 4 every piece is one 16-byte ds_read_b128. `stride` <= 0
+ * is Python's `None` (contiguous pieces, stride = max_elems). n not a multiple
+ * of max_elems records ROCKE_ERR_VALUE. */
+rocke_value_t* rocke_b_smem_load_fragment(rocke_ir_builder_t* b,
+                                          rocke_value_t* smem,
+                                          rocke_value_t* row,
+                                          rocke_value_t* idx,
+                                          const rocke_type_t* dtype,
+                                          int n,
+                                          int max_elems,
+                                          int stride);
 
 #ifdef __cplusplus
 }

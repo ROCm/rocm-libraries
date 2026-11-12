@@ -22,12 +22,20 @@ This module is *dispatch / heuristic* only: it never touches the frozen kernel
 body. It computes a valid split degree from the shape + tile + arch, gated so it
 returns ``1`` for anything that already fills the device, and honors the
 ``ROCKE_GEMM_SPLIT_K`` env override (``auto`` / ``off`` / ``<n>``).
+
+The convolution split-K selectors (wgrad, forward) live with the conv kernels,
+in ``library/kernels/common/conv_split_k.py``; they share :class:`SplitKDecision`
+and the CU table (:data:`ARCH_NUM_CUS`, :func:`num_cus`) from here.
 """
 
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
+
+from .spec import ceil_div
 
 # gfx950 (MI350X) compute-unit count: 8 XCDs * 32 CUs. This is the number of
 # CTAs needed to give every CU one resident block; the heuristic targets it as
@@ -38,20 +46,28 @@ GFX950_NUM_XCDS = 8
 GFX950_CU_PER_XCD = 32
 GFX950_TARGET_CTAS = GFX950_NUM_XCDS * GFX950_CU_PER_XCD  # 256
 
-# Per-arch CU counts for the wgrad split-K heuristic.
-# Mirrors CK's ``get_num_cus()`` but as a static table so it works without a
-# live device.  Keys match the ``gfx`` strings returned by ``ArchTarget``.
-_ARCH_NUM_CUS: dict[str, int] = {
-    "gfx942": 304,  # MI300X: 8 XCDs * 38 CUs
-    "gfx950": 256,  # MI350X: 8 XCDs * 32 CUs
-    "gfx1151": 64,  # RDNA gfx1151 (WMMA)
-}
-_DEFAULT_NUM_CUS = 256
+# Per-arch CU counts. Mirrors CK's ``get_num_cus()`` but as a static table so
+# it works without a live device. Keys match the ``gfx`` strings returned by
+# ``ArchTarget``. Public: library kernels size their launches from it (conv
+# split-K, attention decode); read it through :func:`num_cus` unless "is the
+# arch in the table" is the question.
+ARCH_NUM_CUS: Mapping[str, int] = MappingProxyType(
+    {
+        "gfx942": 304,  # MI300X: 8 XCDs * 38 CUs
+        "gfx950": 256,  # MI350X: 8 XCDs * 32 CUs
+        "gfx1151": 64,  # RDNA gfx1151 (WMMA)
+    }
+)
+# The count assumed for an arch the table does not list.
+DEFAULT_NUM_CUS = 256
 
-# Assumed waves-per-CU for a 256-thread wgrad kernel (conservative; CK uses
-# hipOccupancyMaxActiveBlocksPerMultiprocessor which we cannot call at build
-# time).  2 is the safe lower bound for the LDS-heavy wgrad tile shapes.
-WGRAD_ASSUMED_WAVES_PER_CU = 2
+
+def num_cus(arch: str) -> int:
+    """CU count of the bare ``gfx`` name ``arch``, or :data:`DEFAULT_NUM_CUS`
+    when the table does not list it. A target id (``gfx950:sramecc+``) is the
+    caller's to strip."""
+    return ARCH_NUM_CUS.get(arch, DEFAULT_NUM_CUS)
+
 
 # Empirically (gfx950 decode-GEMM split-K sweep) the launch + atomic-reduce
 # overhead floor sits near a per-slice K-depth of ~512 elements. Splitting K so
@@ -79,10 +95,6 @@ class SplitKDecision:
     base_grid: int
     target_ctas: int
     reason: str
-
-
-def _ceil_div(a: int, b: int) -> int:
-    return (int(a) + int(b) - 1) // int(b)
 
 
 def _largest_valid_split_k(K: int, tile_k: int, cap: int) -> int:
@@ -177,8 +189,8 @@ def select_split_k(
     env = os.environ if env is None else env
     mode, forced = _parse_env_override(env)
 
-    m_tiles = _ceil_div(M, tile_m)
-    n_tiles = _ceil_div(N, tile_n)
+    m_tiles = ceil_div(int(M), int(tile_m))
+    n_tiles = ceil_div(int(N), int(tile_n))
     base_grid = m_tiles * n_tiles * max(1, int(batch))
     max_split = max(1, K // tile_k)
 
@@ -222,54 +234,4 @@ def select_split_k(
         target_ctas,
         f"grid {base_grid} << target {target_ctas}; "
         f"K-depth target -> split_k {chosen} (slice K={K // chosen})",
-    )
-
-
-def select_split_k_wgrad(
-    *,
-    wg_M: int,
-    wg_N: int,
-    wg_K: int,
-    tile_m: int,
-    tile_n: int,
-    tile_k: int,
-    arch: str = "gfx950",
-    waves_per_cu: int = WGRAD_ASSUMED_WAVES_PER_CU,
-) -> SplitKDecision:
-    """Pick a split-K degree for a wgrad GEMM, mirroring CK's formula.
-
-    CK's ``calculate_optimal_k_batch`` (``split_k_utils.hpp``) computes::
-
-        grid_size    = ceil(M / tile_m) * ceil(N / tile_n)   [* batch, but batch=1 for wgrad]
-        max_capacity = max_occupancy_per_cu * num_cus
-        split_k      = floor(max_capacity / grid_size)       clamped to [1, wg_K]
-
-    We cannot call ``hipOccupancyMaxActiveBlocksPerMultiprocessor`` at Python
-    build time, so ``max_occupancy_per_cu`` is approximated by
-    ``waves_per_cu`` (default: ``WGRAD_ASSUMED_WAVES_PER_CU = 2``), and
-    ``num_cus`` is looked up from the static ``_ARCH_NUM_CUS`` table.
-
-    The resulting ``split_k`` is the raw CK value; it is NOT snapped to a
-    valid K-divisor because :class:`WgradConvSpec` pads K_wg to the next
-    multiple of ``tile_k * split_k``, so any positive degree is legal.
-    """
-    num_cus = _ARCH_NUM_CUS.get(arch, _DEFAULT_NUM_CUS)
-    max_capacity = waves_per_cu * num_cus
-
-    m_tiles = _ceil_div(wg_M, tile_m)
-    n_tiles = _ceil_div(wg_N, tile_n)
-    base_grid = m_tiles * n_tiles
-
-    if base_grid <= 0:
-        return SplitKDecision(1, base_grid, max_capacity, "empty grid")
-
-    split_k = max(1, int(max_capacity // base_grid))
-    split_k = min(split_k, wg_K)
-
-    return SplitKDecision(
-        split_k,
-        base_grid,
-        max_capacity,
-        f"CK formula: floor({max_capacity} / {base_grid}) = {split_k} "
-        f"(num_cus={num_cus} waves_per_cu={waves_per_cu})",
     )

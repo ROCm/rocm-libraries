@@ -21,16 +21,23 @@
 #include <string>
 #include <vector>
 
+#include "common/PlatformUtils.hpp"
 #include "common/Utilities.hpp"
+#include "harness/Benchmark.hpp"
+#include "harness/Capture.hpp"
+#include "harness/CaptureReport.hpp"
 #include "harness/SharedHandle.hpp"
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/bundle/BundleRegistration.hpp"
+#include "harness/bundle/HarnessPolicy.hpp"
 #include "harness/bundle/LoadedEngineTable.hpp"
+#include "harness/bundle/ProductionPolicy.hpp"
 #include "harness/bundle/SupportClaimReport.hpp"
 #include "harness/bundle/SupportClaimWriter.hpp"
 #include "harness/bundle/SupportObservationLog.hpp"
 #include "harness/bundle/UnverifiableBundleReport.hpp"
+#include "harness/bundle/VerifierTally.hpp"
 
 namespace
 {
@@ -116,8 +123,9 @@ int main(int argc, char** argv) noexcept
         parser.add_argument("--skip-graph-validation")
             .default_value(false)
             .implicit_value(true)
-            .help("PASS immediately after confirming engine support, "
-                  "without executing or validating the graph");
+            .help("PASS immediately after confirming engine support, without executing or "
+                  "validating the graph. Bundles stop at the applicability rung and need "
+                  "--test-engine; support claims are still enforced.");
         parser.add_argument("--tc", "--test-config")
             .help("Path to a TOML configuration file for per-test tolerance overrides.");
         parser.add_argument("--reference-executor")
@@ -141,19 +149,41 @@ int main(int argc, char** argv) noexcept
         // parameterized tests (which ref executor is exercised as the SUT).
         parser.add_argument("--vm", "--verification-mode")
             .help("How bundle engine output is verified: 'auto' (default; golden -> "
-                  "GPU ref -> CPU ref -> skip), 'golden', 'gpu', or 'cpu'. Validating "
+                  "GPU ref -> CPU ref -> fail), 'golden', 'gpu', or 'cpu'. Validating "
                   "golden data against a reference (no engine involved) is not a mode "
                   "here; run the hipdnn_golden_data_tests binary instead. Can also be "
                   "set via HIPDNN_TEST_VERIFICATION_MODE env var.");
+        parser.add_argument("--validator")
+            .help("Where outputs are compared: 'auto' (default; follow the reference -- "
+                  "the device for a GPU reference, the host for a CPU reference or golden "
+                  "data), 'cpu', or 'gpu'. Applies to bundle and C++ graph tests alike. "
+                  "Can also be set via HIPDNN_TEST_VALIDATOR env var.");
         parser.add_argument("--capture-bundles")
             .help("Capture C++ graph tests as JSON bundles into the given directory. "
                   "Each test writes a {suite}/{case}/{case}.json + .meta.json pair.");
+        // On by default so that a lane which forgets to ask for it still gets it: the
+        // failure this guards against is a sidecar quietly going stale, and a default
+        // of off means every new engine has to remember to opt in before it is
+        // protected. Passing it explicitly is still meaningful -- it is the difference
+        // between "check if you can" and "check, and say so if you cannot", which is
+        // what the --test-engine requirement below keys on.
+        //
+        // An optional value rather than a bare switch: a switch cannot be turned off,
+        // and one takes no value, so "=false" would be split off, handed to GTest as a
+        // stray argument, and leave enforcement on without a word.
         parser.add_argument("--enforce-support-claims")
-            .default_value(false)
-            .implicit_value(true)
-            .help("Enforce engine support claims from .support.json sidecars. "
+            .default_value(true)
+            .nargs(argparse::nargs_pattern::optional)
+            .metavar("true|false")
+            .action(hipdnn_integration_tests::bundle::parseEnforceClaimsValue)
+            .help("Enforce engine support claims from .support.json sidecars (default). "
                   "A broken claim (engine no longer supports a claimed graph) becomes "
-                  "a test FAIL instead of a silent SKIP.");
+                  "a test FAIL instead of a silent SKIP. Passing this explicitly also "
+                  "makes a missing --test-engine an error rather than a quiet "
+                  "downgrade to reporting. Use --enforce-support-claims=false to "
+                  "turn enforcement off: claims are still read and the summary is "
+                  "still printed, but a broken claim is reported instead of failing "
+                  "the test.");
         parser.add_argument("--write-support-claims")
             .default_value(false)
             .implicit_value(true)
@@ -164,6 +194,35 @@ int main(int argc, char** argv) noexcept
                   "change = zero git diff. Run one at a time: concurrent "
                   "--write-support-claims runs against the same bundle tree race "
                   "on the sidecars and the last writer wins.");
+        parser.add_argument("--benchmark-reference")
+            .default_value(false)
+            .implicit_value(true)
+            .help("Measure each bundle test's reference preparation, CPU/GPU compute or "
+                  "golden-output loading, and expected-output transfers, excluding engine "
+                  "execution and comparison (both still run). Print per-test wall times and "
+                  "reference_benchmark_* properties.");
+        parser.add_argument("--benchmark")
+            .default_value(false)
+            .implicit_value(true)
+            .help("After a test verifies the engine's outputs, time the same engine on "
+                  "the same tensors with Graph::autotune() and print min/robust/mean/"
+                  "stddev device time per test. The values are also written as "
+                  "benchmark_* properties in --gtest_output files.");
+        parser.add_argument("--benchmark-iterations")
+            .scan<'i', int>()
+            .help("Timed executions per test (default 20). Requires --benchmark.");
+        parser.add_argument("--benchmark-warmup")
+            .scan<'i', int>()
+            .help("Untimed executions before timing (default 30). Requires --benchmark.");
+        parser.add_argument("--graph-capture")
+            .default_value(false)
+            .implicit_value(true)
+            .help("After a bundle test verifies the engine's outputs, capture the same "
+                  "execution into a HIP graph on the handle's stream, replay it a few "
+                  "times into reset outputs and verify the replayed outputs against the "
+                  "same oracle. Engines that do not report the SUPPORTS_GRAPH_CAPTURE "
+                  "behavior note are skipped. Needs a GPU; cannot be combined with "
+                  "--benchmark.");
 
         std::vector<std::string> remainingArgs;
         try
@@ -262,6 +321,22 @@ int main(int argc, char** argv) noexcept
             }
         }
 
+        // Parse --validator (case-insensitive); invalid value -> exit 1.
+        std::optional<hipdnn_integration_tests::ValidatorDevice> validator;
+        if(parser.is_used("--validator"))
+        {
+            try
+            {
+                validator = hipdnn_integration_tests::parseValidatorDevice(
+                    parser.get<std::string>("--validator"));
+            }
+            catch(const std::exception& e)
+            {
+                std::cerr << "Error: " << e.what() << '\n';
+                return 1;
+            }
+        }
+
         // Parse --capture-bundles argument
         std::optional<std::filesystem::path> captureDir;
         if(parser.is_used("--capture-bundles"))
@@ -304,6 +379,85 @@ int main(int argc, char** argv) noexcept
             hipdnn_integration_tests::SupportMatrixCollector::get().setOutputPath(outputFile);
         }
 
+        const bool writeSupportClaims = parser.get<bool>("--write-support-claims");
+
+        hipdnn_integration_tests::bundle::ClaimModeRequest claimRequest;
+        // Enforcement defaults on, so the flag's value alone cannot tell a lane that
+        // typed it from one that inherited the default; only whether it was typed can,
+        // and resolveClaimMode() owes those two different answers.
+        if(parser.is_used("--enforce-support-claims"))
+        {
+            claimRequest.enforce = parser.get<bool>("--enforce-support-claims");
+        }
+        claimRequest.writing = writeSupportClaims;
+        claimRequest.hasEngine = engineName.has_value();
+
+        const auto claimMode = hipdnn_integration_tests::bundle::resolveClaimMode(claimRequest);
+        if(claimMode.error.has_value())
+        {
+            std::cerr << *claimMode.error;
+            return 1;
+        }
+
+        if(writeSupportClaims && !articlePath.has_value())
+        {
+            std::cerr << "--write-support-claims requires --test-article (mode B or C).\n"
+                      << "Mode A (auto-select) cannot generate support claims.\n";
+            return 1;
+        }
+
+        // Only that a directory was named -- "is this the source tree" is not
+        // decidable, a build directory is just a directory. The env var is the
+        // documented alternative to the flag, so it satisfies this too.
+        if(writeSupportClaims && !goldenDataDir.has_value()
+           && hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_GOLDEN_DATA_DIR").empty())
+        {
+            std::cerr << "--write-support-claims requires a bundle data directory: pass "
+                      << "--golden-data-dir or set HIPDNN_TEST_GOLDEN_DATA_DIR.\n"
+                      << "Point it at the source tree -- sidecars written into a build "
+                      << "directory are lost on the next clean build.\n";
+            return 1;
+        }
+
+        hipdnn_integration_tests::BenchmarkRequest benchmarkRequest;
+        benchmarkRequest.enabled = parser.get<bool>("--benchmark");
+        benchmarkRequest.timedIterations = parser.present<int>("--benchmark-iterations");
+        benchmarkRequest.warmupIterations = parser.present<int>("--benchmark-warmup");
+        benchmarkRequest.skipGraphValidation = skipGraphValidation;
+        benchmarkRequest.captureBundles = captureDir.has_value();
+        benchmarkRequest.writeSupportClaims = writeSupportClaims;
+        auto benchmark = hipdnn_integration_tests::resolveBenchmark(benchmarkRequest);
+        if(benchmark.error.has_value())
+        {
+            std::cerr << "Error: " << *benchmark.error << "\n";
+            return 1;
+        }
+
+        hipdnn_integration_tests::CaptureRequest captureRequest;
+        captureRequest.enabled = parser.get<bool>("--graph-capture");
+        captureRequest.benchmark = benchmarkRequest.enabled;
+        captureRequest.skipGraphValidation = skipGraphValidation;
+        captureRequest.captureBundles = captureDir.has_value();
+        captureRequest.writeSupportClaims = writeSupportClaims;
+        // TestConfig applies the same env override later; it wins over --no-bundles.
+        {
+            const auto bundlesEnv = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_ALLOW_BUNDLES");
+            if(bundlesEnv == "0" || bundlesEnv == "false")
+            {
+                captureRequest.bundlesDisabled = true;
+            }
+            else if(bundlesEnv != "1" && bundlesEnv != "true")
+            {
+                captureRequest.bundlesDisabled = !allowBundles;
+            }
+        }
+        auto graphCapture = hipdnn_integration_tests::resolveCapture(captureRequest);
+        if(graphCapture.error.has_value())
+        {
+            std::cerr << "Error: " << *graphCapture.error << "\n";
+            return 1;
+        }
+
         hipdnn_integration_tests::TestConfigOptions opts;
         opts.articlePath = std::move(articlePath);
         opts.engineName = std::move(engineName);
@@ -314,38 +468,33 @@ int main(int argc, char** argv) noexcept
         opts.allowBundles = allowBundles;
         opts.goldenDataDir = std::move(goldenDataDir);
         opts.verificationMode = verificationMode;
+        opts.validatorDevice = validator;
         opts.captureDir = std::move(captureDir);
-        opts.enforceSupportClaims = parser.get<bool>("--enforce-support-claims");
-        opts.writeSupportClaims = parser.get<bool>("--write-support-claims");
-
-        if(opts.writeSupportClaims && !opts.articlePath.has_value())
-        {
-            std::cerr << "--write-support-claims requires --test-article (mode B or C).\n"
-                      << "Mode A (auto-select) cannot generate support claims.\n";
-            return 1;
-        }
-
-        // Only that a directory was named -- "is this the source tree" is not
-        // decidable, a build directory is just a directory. The env var is the
-        // documented alternative to the flag, so it satisfies this too.
-        if(opts.writeSupportClaims && !opts.goldenDataDir.has_value()
-           && hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_GOLDEN_DATA_DIR").empty())
-        {
-            std::cerr << "--write-support-claims requires a bundle data directory: pass "
-                      << "--golden-data-dir or set HIPDNN_TEST_GOLDEN_DATA_DIR.\n"
-                      << "Point it at the source tree -- sidecars written into a build "
-                      << "directory are lost on the next clean build.\n";
-            return 1;
-        }
-
-        if(opts.writeSupportClaims && opts.enforceSupportClaims)
-        {
-            std::cerr << "--write-support-claims and --enforce-support-claims are "
-                      << "mutually exclusive.\n";
-            return 1;
-        }
+        opts.writeSupportClaims = writeSupportClaims;
+        opts.benchmark = benchmark.settings;
+        opts.graphCapture = graphCapture.settings;
+        opts.benchmarkReference = parser.get<bool>("--benchmark-reference");
+        opts.enforceSupportClaims
+            = claimMode.mode == hipdnn_integration_tests::bundle::ClaimMode::ENFORCE;
 
         hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
+
+        // Checked against the initialized config: HIPDNN_TEST_ALLOW_BUNDLES can override
+        // --no-bundles either way, and only initialize() settles which one wins.
+        const auto& initializedConfig = hipdnn_integration_tests::TestConfig::get();
+        hipdnn_integration_tests::ReferenceBenchmarkRequest referenceRequest;
+        referenceRequest.enabled = initializedConfig.benchmarkReference();
+        referenceRequest.skipGraphValidation = initializedConfig.skipGraphValidation();
+        referenceRequest.captureBundles = initializedConfig.hasCaptureDir();
+        referenceRequest.writeSupportClaims = initializedConfig.writeSupportClaims();
+        referenceRequest.bundlesDisabled = !initializedConfig.allowBundles();
+        const auto referenceError
+            = hipdnn_integration_tests::validateReferenceBenchmark(referenceRequest);
+        if(referenceError.has_value())
+        {
+            std::cerr << "Error: " << *referenceError << '\n';
+            return 1;
+        }
 
         // Reconstruct argc/argv for GTest from remaining (unknown) args.
         // argv[0] (program name) must be first — GTest requires it.
@@ -372,6 +521,15 @@ int main(int argc, char** argv) noexcept
         // Register HipErrorHandler to check and clear HIP errors after each test
         testing::TestEventListeners& listeners = testing::UnitTest::GetInstance()->listeners();
         listeners.Append(new hipdnn_test_sdk::utilities::HipErrorHandler);
+        // With --gtest_repeat=N the coverage summary's counts are the last iteration's;
+        // the verifier and capture tallies printed beside them have to restart with each
+        // iteration too.
+        listeners.Append(new hipdnn_integration_tests::bundle::VerifierTallyIterationReset);
+        listeners.Append(new hipdnn_integration_tests::CaptureTallyIterationReset);
+        if(initializedConfig.benchmarkReference())
+        {
+            listeners.Append(new hipdnn_integration_tests::ReferenceBenchmarkSummary);
+        }
 
         // Create shared handle (triggers engine loading). The guards below own
         // teardown for every exit path from here on, including the outer catch,
@@ -415,18 +573,6 @@ int main(int argc, char** argv) noexcept
             return 1;
         }
 
-        // Enforcement checks a sidecar against a named engine. Without one there
-        // is nothing to check, and silently degrading to "enforced nothing, exit 0"
-        // is the exact failure --enforce-support-claims exists to prevent.
-        if(hipdnn_integration_tests::TestConfig::get().enforceSupportClaims()
-           && !hipdnn_integration_tests::TestConfig::get().hasEngineName())
-        {
-            std::cerr << "Error: --enforce-support-claims requires --test-engine; there is no "
-                         "engine to\n"
-                         "       check sidecar claims against.\n";
-            return 1;
-        }
-
         // Enumerated before any test records support data (see setEngineNames); the
         // vector keeps enumeration order for the table columns below.
         std::vector<std::string> loadedEngineNames;
@@ -447,18 +593,49 @@ int main(int argc, char** argv) noexcept
                 std::move(engineNamesById));
         }
 
-        hipdnn_integration_tests::bundle::registerBundleTests();
+        // Owns the rocRAND generator used to fill large inputs on the device. Created
+        // here so it is destroyed when this scope ends, while HIP and rocRAND are still
+        // loaded, and not with the registered tests, which GTest keeps until static
+        // destruction. The tests hold it weakly.
+        //
+        // Device-filled inputs differ from the host fill's, so a failure seen with them
+        // is reproduced bit-for-bit only on the same path. HIPDNN_TEST_HOST_INPUT_FILL=1
+        // withholds the filler, which makes every input a host fill.
+        const auto hostInputFill
+            = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_HOST_INPUT_FILL");
+        const bool forceHostInputFill = !hostInputFill.empty() && hostInputFill != "0";
+        const auto deviceFiller
+            = forceHostInputFill ? std::shared_ptr<hipdnn_integration_tests::DeviceInputFiller>()
+                                 : std::make_shared<hipdnn_integration_tests::DeviceInputFiller>();
+        const auto registrationStats
+            = hipdnn_integration_tests::bundle::registerBundleTests(deviceFiller);
 
         const int result = RUN_ALL_TESTS();
 
         // Print bundles that ended without a verdict (no oracle / reference bug).
-        // Informational only — these SKIP, so they do not affect `result`.
+        // Informational only — the tests themselves already carry the verdict, so
+        // this does not touch `result`.
         hipdnn_integration_tests::bundle::UnverifiableBundleReport::get().print();
         if(!hipdnn_integration_tests::TestConfig::get().writeSupportClaims())
         {
+            const auto& config = hipdnn_integration_tests::TestConfig::get();
+
+            // The same arch token and platform the verdicts were recorded under, so an
+            // entry only repeats them when it genuinely differs from the run.
+            hipdnn_integration_tests::bundle::SupportClaimRunContext run;
+            if(config.hasEngineName())
+            {
+                run.engine = std::string(config.getEngineName());
+            }
+            run.arch = hipdnn_integration_tests::bundle::baseArchToken(config.getCurrentArch());
+            run.platform = hipdnn_integration_tests::currentPlatform();
+            run.bundleRoot = hipdnn_integration_tests::bundle::resolveDataDir();
+
             hipdnn_integration_tests::bundle::printSupportClaimSummary(
                 hipdnn_integration_tests::bundle::supportClaimCoverage(),
                 hipdnn_integration_tests::bundle::SupportClaimVerdicts::get(),
+                hipdnn_integration_tests::bundle::claimMode(),
+                run,
                 std::cerr);
         }
 
@@ -491,18 +668,25 @@ int main(int argc, char** argv) noexcept
            && hipdnn_integration_tests::bundle::verifiedNothing(
                hipdnn_integration_tests::bundle::supportClaimCoverage()))
         {
-            std::cerr
-                << "\nFATAL: --enforce-support-claims is active and "
-                << hipdnn_integration_tests::bundle::supportClaimCoverage().graphsWithClaims
-                << " graph(s) carrying support\n"
-                   "       claims were discovered, but not one of them was ever queried. "
-                   "Enforcement\n"
-                   "       passed having verified nothing, so the run fails instead. Usual "
-                   "causes:\n"
-                   "         - no --test-engine was given, so there is no engine to check claims "
-                   "against\n"
-                   "         - the GPU or the engine plugin failed to load\n"
-                   "         - a --gtest_filter selected only graphs without claims\n";
+            std::cerr << "\nFATAL: --enforce-support-claims is active and "
+                      << hipdnn_integration_tests::bundle::supportClaimCoverage().graphsReachedBody
+                      << " graph(s) carrying support\n"
+                         "       claims actually ran, but not one of them was ever queried. "
+                         "Enforcement\n"
+                         "       passed having verified nothing, so the run fails instead. The "
+                         "usual cause\n"
+                         "       is that every one of them failed to open, so the query was "
+                         "never\n"
+                         "       reachable; those tests are already red on their own account.\n"
+                         "\n"
+                         "       A missing GPU or an engine plugin that did not load is *not* a "
+                         "cause:\n"
+                         "       both exit non-zero long before any test body runs.\n"
+                         "\n"
+                         "       A --gtest_filter that selected only unclaimed graphs is *not* a "
+                         "cause:\n"
+                         "       the count above is seeded by the tests that ran, not by what was "
+                         "discovered.\n";
             exitCode = 1;
         }
 
@@ -525,14 +709,18 @@ int main(int argc, char** argv) noexcept
             // neither is allowed to run empty.
             if(hipdnn_integration_tests::TestConfig::get().hasEngineName() || dataDirFound)
             {
-                // Print the counts, not a guess: "0 registered" is a build or
-                // discovery problem, "N registered, 0 selected" is a filter
-                // problem. They have different fixes and these numbers are the
+                // Print the counts, not a guess. "0 discovered" is a build or
+                // discovery problem; "N discovered, all excluded by the filter" is a
+                // filter problem. They have different fixes and these numbers are the
                 // only way to tell them apart from a CI log.
                 const int suiteCount = unitTest->total_test_suite_count();
+                const auto& registration = registrationStats;
                 std::cerr << "Error: zero tests ran.\n"
                           << "  registered:      " << unitTest->total_test_count() << " test(s) in "
                           << suiteCount << " suite(s)\n"
+                          << "  discovered:      " << registration.discovered << " bundle test(s), "
+                          << registration.excludedByFilter
+                          << " excluded by --gtest_filter before loading\n"
                           << "  selected:        0 (nothing matched --gtest_filter)\n"
                           << "  gtest_filter:    " << GTEST_FLAG_GET(filter) << "\n"
                           << "  bundle data dir: " << dataDir
@@ -566,6 +754,45 @@ int main(int argc, char** argv) noexcept
                       << std::setprecision(1) << pct << "%)\n"
                       << "Skipped: " << skip << "\n"
                       << "Failed:  " << failed << "\n";
+
+            // Which oracle graded each test body that ran: auto mode falls through
+            // golden -> GPU reference -> CPU reference, and a pass alone does not say
+            // where it landed.
+            const auto verifiers = hipdnn_integration_tests::bundle::VerifierTally::get().counts();
+            if(verifiers.total() > 0)
+            {
+                std::cerr << "Verified by: golden " << verifiers.golden << ", gpu_ref "
+                          << verifiers.gpuReference << ", cpu_ref " << verifiers.cpuReference
+                          << ", rejected " << verifiers.rejected << ", none " << verifiers.none
+                          << "\n";
+            }
+
+            if(graphCapture.settings.has_value())
+            {
+                const auto captures = hipdnn_integration_tests::CaptureTally::get().counts();
+                std::cerr << "Graph capture: replayed " << captures.replayed << ", mismatch "
+                          << captures.mismatch << ", declined " << captures.declined << ", failed "
+                          << captures.failed << "\n";
+
+                // A pass that never reached the capture step (an enforcement-level rung,
+                // or a C++ graph test) checks nothing --graph-capture asked for. A run
+                // whose passes were all of that kind would otherwise report success
+                // having captured nothing. A run where every test skipped is left
+                // alone: on another architecture an engine-pinned lane skips by design.
+                //
+                // An expected rejection passes for any engine that declines the graph and
+                // has nothing to capture, so it does not count: an engine that serves none
+                // of the selected cases would otherwise fail on the rejection cases alone.
+                const auto rejected = static_cast<int>(verifiers.rejected);
+                const int capturablePasses = passed > rejected ? passed - rejected : 0;
+                if(capturablePasses > 0 && captures.replayed == 0)
+                {
+                    std::cerr << "\nFATAL: --graph-capture is active and " << capturablePasses
+                              << " test(s) passed other than expected rejections, but not one "
+                                 "graph was captured and replayed.\n";
+                    exitCode = 1;
+                }
+            }
         }
 
         // Generate support matrix if requested

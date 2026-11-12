@@ -5,14 +5,13 @@
 .. _api-reference:
 
 ******************************************
-API Reference Guide
+API reference guide
 ******************************************
-
-This chapter describes the hipThreads C++ API.
-It is generated from the in-source documentation.
 
 Threading
 =========
+
+The threading groups cover threads, mutexes, and condition variables.
 
 .. doxygengroup:: threading
 
@@ -36,6 +35,8 @@ Condition variables
 
 C library utilities
 ===================
+
+The C library groups cover memory allocation and byte and string manipulation.
 
 .. doxygengroup:: c_library
 

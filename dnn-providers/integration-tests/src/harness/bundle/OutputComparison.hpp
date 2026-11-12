@@ -16,11 +16,13 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/ReferenceValidationInterface.hpp>
 
+#include "harness/ValidationSite.hpp"
+
 namespace hipdnn_integration_tests::bundle
 {
 
 using OutputTensors
-    = std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>;
+    = std::unordered_map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>>;
 
 /// One output tensor that did not match, with the diff already formatted.
 ///
@@ -33,6 +35,17 @@ struct TensorMismatch
     std::string label; ///< the tensor's name, or "uid=N" when it has none
     std::string report; ///< formatted header plus per-element diff, ready to print
 };
+
+/// The live rows of one dense output. A position whose index on `axis` is at least
+/// `lengths[index[0]]` holds no defined value and is not compared.
+struct LiveRows
+{
+    int axis = 1;
+    std::vector<int64_t> lengths;
+};
+
+/// Live rows keyed by output uid.
+using LiveRowMap = std::unordered_map<int64_t, LiveRows>;
 
 /// Where the expected values for one output uid come from — golden data on the
 /// bundle, or a reference executor's own output buffers.
@@ -47,12 +60,25 @@ using ExpectedTensorLookup = std::function<hipdnn_data_sdk::utilities::ITensor&(
 /// through cancellation — layernorm/RMSNorm backward dscale/dbias — where per-element
 /// relative error is unbounded while the aggregate error is not.
 ///
-/// Nothing selects RMS on its own: only an engine's TOML config can, via a
-/// [[validator_overrides]] entry naming the tensor.
+/// ALLCLOSE_MATCHING_INFINITIES grades exactly as ALLCLOSE does, except that an
+/// element that is infinite with the same sign in both the reference and the device
+/// output compares equal. NaN, opposite-signed infinities and finite-versus-infinite
+/// disagreements still fail, and finite elements are still graded by atol/rtol. It
+/// exists for an output whose correct value is infinite on both sides — an SDPA
+/// forward log-sum-exp row that is fully masked, whose reference and device values
+/// are both -inf and are both right. makeValidator() has no device implementation of it.
+///
+/// compareTensor() grades a floating-point ALLCLOSE tensor as
+/// ALLCLOSE_MATCHING_INFINITIES on the host, and a FLOAT, HALF, BFLOAT16 or DOUBLE one
+/// also on the device.
+///
+/// Nothing selects RMS or ALLCLOSE_MATCHING_INFINITIES on its own: only an engine's
+/// TOML config can, via a [[validator_overrides]] entry naming the tensor.
 enum class ValidatorKind
 {
     ALLCLOSE,
     RMS,
+    ALLCLOSE_MATCHING_INFINITIES,
 };
 
 /// How one tensor is compared. Resolved per output tensor, and overridable per test
@@ -74,6 +100,12 @@ struct ComparisonTolerance
     {
         return ComparisonTolerance{0.0f, 0.0f, ValidatorKind::RMS, threshold};
     }
+
+    static ComparisonTolerance allCloseMatchingInfinities(float atolIn, float rtolIn)
+    {
+        return ComparisonTolerance{
+            atolIn, rtolIn, ValidatorKind::ALLCLOSE_MATCHING_INFINITIES, 0.0f};
+    }
 };
 
 /// Resolves how one output tensor is compared.
@@ -89,13 +121,21 @@ using ToleranceLookup = std::function<ComparisonTolerance(
 /// Compare one tensor. Returns nullopt when it matched.
 ///
 /// Pure: no gtest, no config lookups, no harness state. Everything it needs to
-/// describe a failure is an argument.
+/// describe a failure is an argument. The mismatch report is always built on the
+/// host, whichever site made the pass/fail call.
+///
+/// A floating-point tensor graded by ALLCLOSE or ALLCLOSE_MATCHING_INFINITIES matches
+/// same-signed infinities on the host (see ValidatorKind). At the device site, a FLOAT,
+/// HALF, BFLOAT16 or DOUBLE tensor graded by either kind follows the same rule: a tensor
+/// that fails the device allclose is graded again on the host. A ragged tensor at the
+/// device site is reported as not comparable.
 std::optional<TensorMismatch>
     compareTensor(int64_t uid,
                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attrs,
                   hipdnn_data_sdk::utilities::ITensor& expected,
                   hipdnn_data_sdk::utilities::ITensor& actual,
                   ComparisonTolerance tolerance,
+                  ValidationSite site,
                   const std::string& contextLine);
 
 /// Compare every uid in `outputUids`, and keep going after the first mismatch: one
@@ -103,13 +143,22 @@ std::optional<TensorMismatch>
 ///
 /// `toleranceFor` resolves how each output is compared, so the caller owns the TOML
 /// override and this stays free of TestConfig.
+///
+/// An output in `liveRows` is compared at `hostOnlySite` (or at `site` when it is not set)
+/// through a host view of each side that skips the positions past each batch's live
+/// length. A ragged output is compared at `hostOnlySite` (or at `site`) too. A live-row
+/// or ragged output at the device site is reported as not comparable. Throws
+/// std::invalid_argument when an entry does not fit its output.
 std::vector<TensorMismatch>
     compareOutputs(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
                    const std::vector<int64_t>& outputUids,
                    OutputTensors& actual,
                    const ExpectedTensorLookup& expectedFor,
                    const ToleranceLookup& toleranceFor,
-                   const std::string& contextLine);
+                   ValidationSite site,
+                   const std::string& contextLine,
+                   const LiveRowMap& liveRows = {},
+                   std::optional<ValidationSite> hostOnlySite = std::nullopt);
 
 /// The tensor's name, or "uid=N" when the graph did not give it one.
 ///
@@ -128,16 +177,18 @@ struct ValidatorSelection
     std::string error; ///< non-empty exactly when `validator` is null
 };
 
-/// Builds the validator `tolerance` selects for one output tensor.
+/// Builds the validator `tolerance` selects for one output tensor, running at `site`.
 ///
-/// RMS is implemented for FLOAT/HALF/BFLOAT16/DOUBLE only, so a `tensors` glob one
-/// wildcard too wide can select it for an integer output. The TOML parser cannot catch
-/// that — a tensor's data type is not known until its graph is read — so it surfaces
-/// here as a named failure that says which glob over-matched, rather than as an
-/// exception unwinding out of the test body.
+/// RMS and ALLCLOSE_MATCHING_INFINITIES are both implemented for FLOAT/HALF/BFLOAT16/
+/// DOUBLE only — RMS has no integer formulation, and an integer has no infinity to
+/// match — so a `tensors` glob one wildcard too wide can select either of them for an
+/// integer output. The TOML parser cannot catch that — a tensor's data type is not
+/// known until its graph is read — so it surfaces here as a named failure that says
+/// which glob over-matched, rather than as an exception unwinding out of the test body.
 ValidatorSelection makeValidator(hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                                  const std::string& label,
-                                 const ComparisonTolerance& tolerance);
+                                 const ComparisonTolerance& tolerance,
+                                 ValidationSite site);
 
 /// The failure report for one tensor: header plus per-element drift profile.
 ///

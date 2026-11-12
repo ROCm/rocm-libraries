@@ -23,6 +23,8 @@
  */
 
 #include "rocke/verify.h"
+#include "rocke/mfma_scale_internal.h"
+#include "rocke/tf32_internal.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -30,6 +32,7 @@
 #include <string.h>
 
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h"
 
 /* ----------------------------------------------------- diagnostic buffer */
 
@@ -93,6 +96,13 @@ typedef struct verifier
     vscope_entry_t* scope; /* growable name->type table */
     int scope_count;
     int scope_cap;
+    /* Python _enclosing_loop_names: the induction-variable and carried-value
+     * names of the scf.for loops whose body is being checked, outermost first,
+     * then those of the loop being entered. Truncated on leaving a loop, like
+     * the scope table. */
+    const char** loop_names;
+    int loop_name_count;
+    int loop_name_cap;
 } verifier_t;
 
 static void v_errf(verifier_t* v, const rocke_op_t* op, const char* fmt, ...)
@@ -149,6 +159,30 @@ static void scope_put(verifier_t* v, const char* name, const rocke_type_t* t)
     v->scope[v->scope_count].name = name;
     v->scope[v->scope_count].type = t;
     v->scope_count++;
+}
+
+/* Push the names of the scf.for `loop` being entered (its induction variable
+ * and carried values, rocke_i_scf_for_value_names) onto v->loop_names. */
+static void loop_names_push(verifier_t* v, const rocke_op_t* loop)
+{
+    const int count = rocke_i_scf_for_value_names(loop, NULL);
+    if(v->loop_name_count + count > v->loop_name_cap)
+    {
+        int nc = v->loop_name_cap ? v->loop_name_cap : 16;
+        while(nc < v->loop_name_count + count)
+        {
+            nc *= 2;
+        }
+        const char** grown = (const char**)realloc(v->loop_names, (size_t)nc * sizeof(*grown));
+        if(!grown)
+        {
+            v->db.oom = 1;
+            return;
+        }
+        v->loop_names = grown;
+        v->loop_name_cap = nc;
+    }
+    v->loop_name_count += rocke_i_scf_for_value_names(loop, v->loop_names + v->loop_name_count);
 }
 
 /* legal pointer address spaces */
@@ -290,8 +324,14 @@ static const char* const* required_attrs(rocke_opcode_t o, int* n)
     static const char* mma_keys[] = {"op_id"};
     static const char* yield_keys[] = {"num"};
     static const char* asm_keys[] = {"template", "constraints"};
+    static const char* scope_order_keys[] = {"scope", "ordering"};
+    static const char* scope_keys[] = {"scope"};
+    static const char* assume_range_keys[] = {"multiple_of", "residue"};
     switch(o)
     {
+    case ROCKE_OP_ARITH_ASSUME_RANGE:
+        *n = 2;
+        return assume_range_keys;
     case ROCKE_OP_ARITH_CONSTANT:
         *n = 2;
         return constant_keys;
@@ -308,6 +348,13 @@ static const char* const* required_attrs(rocke_opcode_t o, int* n)
     case ROCKE_OP_TILE_INLINE_ASM:
         *n = 2;
         return asm_keys;
+    case ROCKE_OP_MEMREF_FENCE:
+    case ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE:
+        *n = 2;
+        return scope_order_keys;
+    case ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ:
+        *n = 1;
+        return scope_keys;
     default:
         *n = 0;
         return NULL;
@@ -319,8 +366,67 @@ static void check_op(verifier_t* v, const rocke_op_t* op);
 
 /* ---- contracts ---- */
 
+/* IRBuilder._FENCE_SCOPES / _FENCE_ORDERINGS / _FLAG_STORE_ORDERINGS. */
+static const char* const k_fence_scopes[] = {"workgroup", "agent", "system", NULL};
+static const char* const k_fence_orderings[] = {"acquire", "release", "acq_rel", "seq_cst", NULL};
+static const char* const k_flag_store_orderings[] = {"monotonic", "release", "seq_cst", NULL};
+
+static bool in_set(const char* s, const char* const* set)
+{
+    for(; *set; ++set)
+        if(!strcmp(s, *set))
+            return true;
+    return false;
+}
+
+/* Python Verifier._check_sync_attrs: scope / ordering values of a fence or
+ * flag op (presence is checked by the required-attrs pass). */
+static void check_sync_attrs(verifier_t* v, const rocke_op_t* op, const char* const* orderings)
+{
+    const char* scope = rocke_attr_get_str(&op->attrs, "scope");
+    const char* ordering = rocke_attr_get_str(&op->attrs, "ordering");
+    if(scope && !in_set(scope, k_fence_scopes))
+        v_errf(v, op, "%s: unknown scope '%s'", op->name, scope);
+    if(orderings && ordering && !in_set(ordering, orderings))
+        v_errf(v, op, "%s: unknown ordering '%s'", op->name, ordering);
+}
+
+/* Python ir._assume_range_errors: every rule an arith.assume_range marker's
+ * attrs break, in order, with the same texts (one home:
+ * cpp/core/ir/range_marker.cpp). */
+struct marker_sink_t
+{
+    verifier_t* v;
+    const rocke_op_t* op;
+};
+
+static void report_marker_error(void* ctx, const char* message)
+{
+    marker_sink_t* sink = (marker_sink_t*)ctx;
+    v_errf(sink->v, sink->op, "%s", message);
+}
+
+static void check_assume_range_attrs(verifier_t* v, const rocke_op_t* op)
+{
+    marker_sink_t sink{v, op};
+    rocke_assume_range_errors(
+        &op->attrs, op->operands, op->num_operands, report_marker_error, &sink);
+}
+
 static void check_contract(verifier_t* v, const rocke_op_t* op)
 {
+    if(op->opcode == ROCKE_OP_TILE_MMA)
+    {
+        const char* id = rocke_attr_get_str(&op->attrs, "op_id");
+        if(const char* error = rocke_scaled_mfma_error(id, op->operands, op->num_operands))
+            v_errf(v, op, "%s", error);
+        if(rocke_gfx950_scaled_mfma(id)
+           && (op->num_results != 1 || strcmp(op->results[0]->type->name, "vec<f32x16>") != 0))
+            v_errf(v, op, "scaled MFMA result must be vec<f32x16>");
+    }
+    const char* tf32_error = rocke_tf32_op_error(op);
+    if(tf32_error)
+        v_errf(v, op, "%s", tf32_error);
     rocke_opcode_t o = op->opcode;
     const char* name = op->name;
     if(is_binary_same_type(o))
@@ -346,6 +452,15 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
         {
             v_errf(v, op, "%s: result type %s != operand type %s", name, tn(r), tn(a));
         }
+        char wrap_buf[128];
+        const char* wrap_error
+            = o == ROCKE_OP_ARITH_ADD
+                  ? rocke_i_add_wrap_error(&op->attrs, a, wrap_buf, sizeof wrap_buf)
+                  : NULL;
+        if(wrap_error)
+        {
+            v_errf(v, op, "%s", wrap_error);
+        }
     }
     else if(is_unary_same_type(o))
     {
@@ -368,6 +483,10 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
                    tn(op->results[0]->type),
                    tn(op->operands[0]->type));
         }
+        if(o == ROCKE_OP_MATH_TANH && strcmp(tn(op->operands[0]->type), "f32") != 0)
+        {
+            v_errf(v, op, "math.tanh requires f32 operand, got %s", tn(op->operands[0]->type));
+        }
     }
     else if(is_cmp(o))
     {
@@ -386,6 +505,39 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
         {
             v_errf(v, op, "%s: result must be i1, got %s", name, tn(op->results[0]->type));
         }
+        char pred_buf[128];
+        const char* pred_error
+            = o == ROCKE_OP_ARITH_CMP
+                  ? rocke_i_cmp_pred_error(&op->attrs, a, pred_buf, sizeof pred_buf)
+                  : NULL;
+        if(pred_error)
+        {
+            v_errf(v, op, "%s", pred_error);
+        }
+    }
+    else if(o == ROCKE_OP_ARITH_ASSUME_RANGE)
+    {
+        if(op->num_operands < 1 || op->num_operands > 3 || op->num_results != 1)
+        {
+            v_errf(v,
+                   op,
+                   "%s: expected 1 to 3 operands / 1 result, got %d / %d",
+                   name,
+                   op->num_operands,
+                   op->num_results);
+            return;
+        }
+        const rocke_type_t* t = op->operands[0]->type;
+        if(!rocke_type_eq(op->results[0]->type, t))
+        {
+            v_errf(v,
+                   op,
+                   "%s: result type %s != operand type %s",
+                   name,
+                   tn(op->results[0]->type),
+                   tn(t));
+        }
+        check_assume_range_attrs(v, op);
     }
     else if(o == ROCKE_OP_ARITH_SELECT)
     {
@@ -459,11 +611,103 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
                    op->num_operands);
         }
     }
+    else if(o == ROCKE_OP_SCF_IF_ELSE)
+    {
+        char err[ROCKE_ERR_MSG_CAP];
+        const rocke_op_t* yld = NULL;
+        for(int branch = 0; branch < 2; ++branch)
+        {
+            if(!rocke_i_if_else_branch_yield(op, branch, &yld, err, sizeof err))
+            {
+                v_errf(v, op, "%s", err);
+                break;
+            }
+        }
+    }
+    else if(o == ROCKE_OP_TILE_BUFFER_LOAD_VN || o == ROCKE_OP_TILE_BUFFER_STORE_VN)
+    {
+        char err[256];
+        if(rocke_i_buffer_op_bytes(op, err, sizeof err) == 0)
+        {
+            v_errf(v, op, "%s", err);
+        }
+    }
     else if(o == ROCKE_OP_CF_RETURN)
     {
         if(op->num_operands || op->num_results)
         {
             v_errf(v, op, "%s: must have no operands and no results", name);
+        }
+    }
+    else if(o == ROCKE_OP_MEMREF_FENCE)
+    {
+        if(op->num_operands || op->num_results)
+        {
+            v_errf(v, op, "%s: must have no operands and no results", name);
+        }
+        check_sync_attrs(v, op, k_fence_orderings);
+    }
+    else if(o == ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE || o == ROCKE_OP_MEMREF_GLOBAL_FLAG_WAIT_EQ)
+    {
+        if(op->num_operands != 3 || op->num_results)
+        {
+            v_errf(v,
+                   op,
+                   "%s: expected 3 operands / 0 results, got %d / %d",
+                   name,
+                   op->num_operands,
+                   op->num_results);
+            return;
+        }
+        const rocke_type_t* pt = op->operands[0]->type;
+        /* ir._is_flag_ptr: both lowerers address the flag as an i32. */
+        if(!pt || pt->kind != ROCKE_TYPE_PTR || !pt->space || strcmp(pt->space, "global")
+           || strcmp(tn(pt->pointee), "i32"))
+        {
+            v_errf(v, op, "%s: expected a global i32 pointer, got %s", name, tn(pt));
+        }
+        const char* what[] = {"index", "value"};
+        for(int i = 0; i < 2; ++i)
+        {
+            const rocke_type_t* t = op->operands[i + 1]->type;
+            if(strcmp(tn(t), "i32"))
+            {
+                v_errf(v, op, "%s: %s must be i32, got %s", name, what[i], tn(t));
+            }
+        }
+        check_sync_attrs(
+            v, op, o == ROCKE_OP_MEMREF_GLOBAL_FLAG_STORE ? k_flag_store_orderings : NULL);
+    }
+    else if(o == ROCKE_OP_TILE_GLOBAL_PTR_OFFSET)
+    {
+        char err[256];
+        if(const char* error = rocke_i_global_ptr_offset_op_error(op, err, sizeof err))
+        {
+            v_errf(v, op, "%s", error);
+        }
+    }
+    else if(o == ROCKE_OP_TILE_GLOBAL_PTR_TO_I64)
+    {
+        char err[256];
+        if(const char* error = rocke_i_global_ptr_to_i64_op_error(op, err, sizeof err))
+        {
+            v_errf(v, op, "%s", error);
+        }
+    }
+    else if(o == ROCKE_OP_TILE_TRAP)
+    {
+        char err[64];
+        if(const char* error = rocke_i_trap_op_error(op, err, sizeof err))
+        {
+            v_errf(v, op, "%s", error);
+        }
+    }
+    else if(o == ROCKE_OP_TILE_GPU_CHECK_FAILED)
+    {
+        char err[64];
+        if(const char* error = rocke_i_gpu_check_failed_op_error(op, err, sizeof err))
+        {
+            v_errf(v, op, "%s", error);
         }
     }
 }
@@ -537,9 +781,17 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
             }
         }
     }
+    {
+        char descriptor_error[ROCKE_ERR_MSG_CAP];
+        if(rocke_i_scf_for_carried_descriptor_error(op, descriptor_error, sizeof descriptor_error))
+        {
+            v_errf(v, op, "%s", descriptor_error);
+        }
+    }
 
     /* body scope: snapshot + iv + iter-arg block values */
     int saved = v->scope_count;
+    const int enclosing_loop_names = v->loop_name_count;
     const char* iv = rocke_attr_get_str(&op->attrs, "iv");
     if(iv)
     {
@@ -570,8 +822,26 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
         }
     }
 
+    /* Hand-built IR can reuse a loop name the builder and parsers refuse. This
+     * loop's names go onto v->loop_names above the enclosing loops'. */
+    loop_names_push(v, op);
+    if(!v->db.oom)
+    {
+        const char* reused
+            = rocke_i_first_reused_loop_name(v->loop_names,
+                                             (size_t)enclosing_loop_names,
+                                             v->loop_names + enclosing_loop_names,
+                                             (size_t)(v->loop_name_count - enclosing_loop_names));
+        if(reused)
+        {
+            char msg[ROCKE_ERR_MSG_CAP];
+            v_errf(v, op, "%s", rocke_i_reused_loop_name_message(reused, msg, sizeof msg));
+        }
+    }
+
     const rocke_region_t* body = op->regions[0];
     check_region(v, body, 0);
+    v->loop_name_count = enclosing_loop_names;
 
     /* body should end in scf.yield matching iter-arg types (if any iter-args) */
     if(num_iter_inits > 0)
@@ -729,6 +999,12 @@ static void check_region(verifier_t* v, const rocke_region_t* region, int is_ker
     }
 }
 
+/* A rocke_param_fact_errors message, reported as a kernel-level error. */
+static void v_param_fact_error(void* ctx, const char* message)
+{
+    v_errf((verifier_t*)ctx, NULL, "%s", message);
+}
+
 /* ---- entry ---- */
 
 rocke_status_t rocke_verify(const rocke_kernel_def_t* k, rocke_diag_t** out, size_t* n)
@@ -749,6 +1025,18 @@ rocke_status_t rocke_verify(const rocke_kernel_def_t* k, rocke_diag_t** out, siz
     verifier_t v;
     memset(&v, 0, sizeof(v));
 
+    /* The two block-size kernel attrs state one fact two ways; a kernel sets
+     * one. Same text as Python verify.py _BOTH_WORKGROUP_SIZES. */
+    if(rocke_attr_get(&k->attrs, "workgroup_size") != NULL
+       && rocke_attr_get(&k->attrs, "max_workgroup_size") != NULL)
+    {
+        v_errf(&v,
+               NULL,
+               "kernel sets both workgroup_size and max_workgroup_size -- set one: "
+               "workgroup_size is the exact launch block size, max_workgroup_size an upper "
+               "bound on it");
+    }
+
     /* top-level scope: kernel params */
     for(int i = 0; i < k->num_params; ++i)
     {
@@ -756,6 +1044,8 @@ rocke_status_t rocke_verify(const rocke_kernel_def_t* k, rocke_diag_t** out, siz
         char where[160];
         snprintf(where, sizeof(where), "param '%s'", p->name ? p->name : "");
         check_type(&v, p->type, where, NULL);
+        rocke_param_fact_errors(
+            (const rocke_param_t* const*)k->params, k->num_params, i, v_param_fact_error, &v);
         char vname[160];
         snprintf(vname, sizeof(vname), "%%%s", p->name ? p->name : "");
         if(scope_has(&v, vname))
@@ -805,6 +1095,7 @@ rocke_status_t rocke_verify(const rocke_kernel_def_t* k, rocke_diag_t** out, siz
         }
     }
     free(v.scope);
+    free(v.loop_names);
 
     if(v.db.oom)
     {

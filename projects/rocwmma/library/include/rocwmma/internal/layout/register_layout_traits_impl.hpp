@@ -125,7 +125,7 @@ namespace rocwmma
         // VectorWidth to 1 in the opposite data layout grain.
         // This applies to all matrix layouts.
         template <typename RegisterLayout>
-        ROCWMMA_DEVICE constexpr static bool testStorageLayoutIdentity()
+        ROCWMMA_HOST_DEVICE constexpr static bool testStorageLayoutIdentity()
         {
             using traits = register_layout_traits<RegisterLayout>;
             if constexpr(traits::is_col_inline)

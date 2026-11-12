@@ -17,7 +17,7 @@
 # TheRock/build_tools/github_actions/test_executable_scripts/test_tensilelite.py,
 # which ran two suites unconditionally:
 #   - rocisa_tests/            (rocisa pytest modules)
-#   - Tensile/Tests/unit/      (TensileLite unit tests, incl. GPU subtile tests)
+#   - tensilelite/Tests/unit/      (TensileLite unit tests, incl. GPU subtile tests)
 #
 # comprehensive/full reproduce that legacy set exactly (GPU tests included).
 # quick/standard run the same suites minus GPU-hardware tests (marker `gpu`) so
@@ -30,15 +30,48 @@ test_categories:
   # The unit categories run a partial slice of the suite (quick/standard exclude
   # GPU tests), so syrupy would flag the un-exercised snapshots as failures.
   # `--snapshot-warn-unused` downgrades those to warnings instead of errors.
+  #
+  # The quick, standard and hw-common categories also pass `--dist=worksteal`. It
+  # only takes effect when pytest-xdist runs (parallel_workers > 1), and it needs
+  # pytest-xdist 3.2 or newer. xdist's default `load` scheduler
+  # sends each worker a fixed block of consecutive tests sized by count and never
+  # takes tests back, and about half of the unit suite's runtime sits in one
+  # block of consecutive tests (characterization/_codegen). One or two workers
+  # received that block while the rest finished and sat idle. `worksteal` lets
+  # idle workers take not-yet-started tests from busy ones.
+  #
+  # hw-common uses it for the same reason: its few expensive configs (dtv, cgemm,
+  # zgemm, bufferLoadStore0, ...) are adjacent in collection order, so `load`
+  # piles them onto one worker while the others go idle.
+  #
+  # Under xdist each worker only sees its own tests, so syrupy no longer prints
+  # its "N snapshots passed" summary and cannot report unused snapshots. Mismatches
+  # still fail the tests, and unused snapshots were only warnings here.
+  #
+  # The quick and standard categories run eight xdist workers (parallel_workers:
+  # 8), overriding the global 1. The job's CPU allocation is 25 CPUs
+  # (KUBE_CPU_REQUEST), which the host's CPU count does not reflect. Each worker
+  # repeats its own startup (collecting the whole tree and priming ISA
+  # capabilities), so more workers stop paying for themselves: measured locally
+  # under a 25-CPU quota with worksteal and in-process ParallelMap, eight workers
+  # took 98 s and 25 took 102 s, against 394 s for one. The unit conftest pins
+  # CpuThreads to 1, so the tests no longer fan out their own process pools on
+  # top of the xdist workers.
+  #
+  # comprehensive and full stay at one worker: they also run the GPU unit tests
+  # (marker `gpu`), which take no per-GPU lock, so eight workers would all use
+  # the runner's one GPU. See execution_settings below.
   quick:
     description: "Fast host-only sanity checks (rocisa + TensileLite unit, no GPU)"
+    parallel_workers: 8
     test_paths:
       - "rocisa_tests"
-      - "Tensile/Tests/unit"
+      - "tensilelite/Tests/unit"
     exclude_markers:
       - "gpu"
     pytest_args:
       - "--snapshot-warn-unused"
+      - "--dist=worksteal"
     labels:
       - "quick"
       - "pre-commit"
@@ -46,13 +79,15 @@ test_categories:
 
   standard:
     description: "Pre-checkin validation (rocisa + TensileLite unit, no GPU)"
+    parallel_workers: 8
     test_paths:
       - "rocisa_tests"
-      - "Tensile/Tests/unit"
+      - "tensilelite/Tests/unit"
     exclude_markers:
       - "gpu"
     pytest_args:
       - "--snapshot-warn-unused"
+      - "--dist=worksteal"
     labels:
       - "standard"
       - "pr"
@@ -62,7 +97,7 @@ test_categories:
     description: "Nightly comprehensive run (rocisa + TensileLite unit, incl. GPU)"
     test_paths:
       - "rocisa_tests"
-      - "Tensile/Tests/unit"
+      - "tensilelite/Tests/unit"
     pytest_args:
       - "--snapshot-warn-unused"
     labels:
@@ -74,12 +109,44 @@ test_categories:
     description: "Complete suite (rocisa + TensileLite unit, incl. GPU)"
     test_paths:
       - "rocisa_tests"
-      - "Tensile/Tests/unit"
+      - "tensilelite/Tests/unit"
     pytest_args:
       - "--snapshot-warn-unused"
     labels:
       - "full"
       - "all"
+
+  # Common-GEMM tests on real hardware, matching Math CI's `preliminary` stage
+  # (`tox -e py3 -- tensilelite/Tests -m common`). Selected by TheRock's
+  # tensilelite-common job, which pins this category via TEST_CATEGORY.
+  #
+  # Unlike the emulation categories below, arch selection here is opt-out:
+  # configMarks() tags every config `common` from its path and turns each
+  # config's declared skip-gfxNNNN marks into skips for the arch that
+  # rocm_agent_enumerator reports. Selecting on a concrete gfx target instead
+  # would match almost nothing, so do not use {AMDGPU_TARGETS} here.
+  #
+  # --gpu-targets is deliberately absent. Hardware detection also sets
+  # PyTestBuildArchNames, which Tensile reads as the build architecture, so a
+  # gfx120X runner builds for whichever of gfx1200/gfx1201 it actually has.
+  hw-common:
+    description: "Common GEMM tests on real hardware"
+    test_paths:
+      - "tensilelite/Tests/common"
+    pytest_markers:
+      - "common"
+    # On a 1-GPU runner every worker is pinned to the same GPU and
+    # worker_lock_path serializes their client runs, so extra workers only
+    # parallelize codegen and builds. 4 is what Math CI runs (tox default);
+    # the 16 used by the FFM categories assumes one emulator per worker.
+    parallel_workers: 4
+    pytest_args:
+      - "--dist=worksteal"
+      - "--prebuilt-client={ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client"
+      - "--global-parameters=LibraryFormat='msgpack'"
+      - "--tensile-options=--cxx-compiler,{ROCM_PATH}/bin/amdclang++"
+    labels:
+      - "hw-common"
 
   # Common-GEMM tests (GPU emulation). These are the only tests that
   # build/run kernels through the client, so they require the TensileLite-specific
@@ -88,7 +155,7 @@ test_categories:
   ffm-quick:
     description: "Common GEMM tests (FFM emulation)"
     test_paths:
-      - "Tensile/Tests/common"
+      - "tensilelite/Tests/common"
     pytest_markers:
       - "{AMDGPU_TARGETS}"
     # These GEMM tests build/run independent kernels; run them across xdist
@@ -98,7 +165,7 @@ test_categories:
     # `{ROCM_PATH}` is substituted with the install prefix at runtime (same as the
     # execution_settings.environment block). The `--prebuilt-client`,
     # `--global-parameters` and `--tensile-options` flags are custom options
-    # registered in tensilelite's conftest.py (Tensile/Tests/conftest.py).
+    # registered in tensilelite's conftest.py (tensilelite/Tests/conftest.py).
     pytest_args:
       - "--prebuilt-client={ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client"
       - "--global-parameters=LibraryFormat='msgpack'"
@@ -114,7 +181,7 @@ test_categories:
   emu-fast:
     description: "Common GEMM tests for emulation pre-submits"
     test_paths:
-      - "Tensile/Tests/common"
+      - "tensilelite/Tests/common"
     pytest_markers:
       - "{AMDGPU_TARGETS} and emu_fast"
     parallel_workers: 16
@@ -129,7 +196,7 @@ test_categories:
   emu-full:
     description: "All common GEMM tests for emulation nightly"
     test_paths:
-      - "Tensile/Tests/common"
+      - "tensilelite/Tests/common"
     pytest_markers:
       - "{AMDGPU_TARGETS}"
     parallel_workers: 16
@@ -154,6 +221,9 @@ execution_settings:
     standard: 2700        # 45 minutes
     comprehensive: 25200  # 7 hours
     full: 28800           # 8 hours
+    # Hang guard only; Math CI runs this suite with no per-test timeout. The
+    # slowest config seen there (streamk/sk_I8gemm_quick.yaml) took 3173s.
+    hw-common: 5400       # 90 minutes
     ffm-quick: 2700       # 45 minutes
     emu-fast: 2400        # 40 minutes
     emu-full: 28800       # 8 hours

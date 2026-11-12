@@ -1,8 +1,8 @@
 # Measured Results From The Validation Pass
 
-This page records the measurements that landed during the documentation validation pass on this checkout. All numbers are MI355X / gfx950 / ROCm 7.0.2 / torch 2.8.0+rocm7.0.2.git245bf6ed / Python 3.12.3. Reproduction commands are below each table; run them from the Composable Kernel repository root with the Python interpreter for your ROCm environment.
+This page records the measurements that landed during the documentation validation pass on this checkout. All numbers are gfx950 / ROCm 7.0.2 / torch 2.8.0+rocm7.0.2.git245bf6ed / Python 3.12.3. Reproduction commands are below each table; run them from the `rocke/platform/` root with the Python interpreter for your ROCm environment.
 
-These numbers are smoke-grade — they confirm the kernels build, verify, and reach a sane TFLOPS / latency band. They are **not** the hero numbers; for that, run the full `examples/gfx950/attention/parity_unified_attention.py --attempts 10 --warmup 5` harness or the `runbook_compliance.md` empirical sweeps with median + spread reporting.
+These numbers are smoke-grade — they confirm the kernels build, verify, and reach a sane TFLOPS / latency band. They are **not** the hero numbers; for that, run the full `library/builders/gfx950/attention/prefill/parity_unified_attention.py --attempts 10 --warmup 5` harness or the `runbook_compliance.md` empirical sweeps with median + spread reporting.
 
 ## Static Unit Tests
 
@@ -44,7 +44,7 @@ A small handful of doc inaccuracies surfaced during this verification and were c
 - `BiasAdd` kwargs are `(param_name, dtype)` (was wrongly `bias_dtype` in `fusion/overview.md`).
 - `pack_f32_to(b, scalars_f32, *, dtype)` and `store_vec(b, ptr, idx, value, *, n)` are keyword-only with `dtype`/`n`, no `target_dtype` (was wrong in `primitives/intrinsics_and_primitives.md`).
 - `BatchedGemmSpec` and `GroupedGemmSpec` both require `name` (and `GroupedGemmSpec` also `trait`).
-- `DirectConvProblem` fields are `(N, H, W, groups, cpg, kpg, KH, KW, PAD, stride)` — not the `(Hi, Wi, Y, X, sH, sW, pH, pW, dH, dW)` shape used by `ConvProblem` (was wrong in `instances/convolution.md`).
+- `DirectConvProblem` fields are `(N, H, W, groups, cpg, kpg, KH, KW, PAD, stride)` — not the `(Hi, Wi, Y, X, sH, sW, pH, pW, dH, dW)` shape used by `ConvProblem` (was wrong in the convolution doc, now `library/kernels/conv/docs/convolution.md`).
 - `QDType` is `Literal["i8", "fp8e4m3", "bf8e5m2"]`, not an enum; values are plain strings (was wrong in `primitives/quantization.md`).
 
 ## Generated Example Harness
@@ -150,9 +150,9 @@ All passes within the per-op tolerance table (`examples/common/ck_tile_parity.py
 ```bash
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 export AITER_PATH=<aiter-checkout>
-PYTHONPATH="python:${AITER_PATH}" \
-  python \
-  python/rocke/examples/gfx950/attention/parity_unified_attention.py \
+PYTHONPATH=python:../library \
+  python -m \
+  builders.gfx950.attention.prefill.parity_unified_attention \
   --scenario decode_d128_b16 --attempts 1 --warmup 0 --paths auto,2d,3d \
   --report "$OUT_DIR"/rocke_attention_smoke.json
 ```
@@ -263,7 +263,7 @@ These are listed not as gaps in the DSL, but as places where additional measurem
 Single command to reproduce the full validation pass in this doc:
 
 ```bash
-cd <composablekernel-checkout>
+cd <rocke>/platform
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python:../library python tests/test_rocke.py
@@ -277,7 +277,7 @@ PYTHONPATH=python python python/rocke/examples/common/distribution_2d_add_demo.p
 PYTHONPATH=python python python/rocke/examples/common/ck_tile_parity.py --op all
 
 export AITER_PATH=<aiter-checkout>
-PYTHONPATH="python:${AITER_PATH}" python \
-  python/rocke/examples/gfx950/attention/parity_unified_attention.py \
+PYTHONPATH=python:../library python -m \
+  builders.gfx950.attention.prefill.parity_unified_attention \
   --scenario decode_d128_b16 --attempts 1 --warmup 0 --paths auto,2d,3d
 ```

@@ -28,23 +28,44 @@
 
 namespace rocsparse
 {
-    template <uint32_t BLOCKSIZE, typename I, typename T>
+    template <typename I, typename T, typename K>
     ROCSPARSE_DEVICE_ILF void
-        roti_device(I nnz, T* x_val, const I* x_ind, T* y, T c, T s, rocsparse_index_base idx_base)
+        roti_element(K idx, T* x_val, const I* x_ind, T* y, T c, T s, rocsparse_index_base idx_base)
     {
-        I idx = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+        const I i = x_ind[idx] - idx_base;
 
-        if(idx >= nnz)
-        {
-            return;
-        }
-
-        I i = x_ind[idx] - idx_base;
-
-        T xr = x_val[idx];
-        T yr = y[i];
+        const T xr = x_val[idx];
+        const T yr = y[i];
 
         x_val[idx] = rocsparse::fma<T>(c, xr, s * yr);
         y[i]       = rocsparse::fma<T>(c, yr, -s * xr);
+    }
+
+    // GRID_STRIDE must be true whenever the grid was clamped below
+    // ceil(nnz / BLOCKSIZE) blocks. Otherwise the grid holds at most 2^32 - 1
+    // work-items, so nnz and the element index both fit in 32 bits.
+    template <uint32_t BLOCKSIZE, bool GRID_STRIDE, typename I, typename T>
+    ROCSPARSE_DEVICE_ILF void
+        roti_device(I nnz, T* x_val, const I* x_ind, T* y, T c, T s, rocsparse_index_base idx_base)
+    {
+        if constexpr(GRID_STRIDE)
+        {
+            const int64_t stride = static_cast<int64_t>(hipGridDim_x) * BLOCKSIZE;
+            const int64_t gid    = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+
+            for(int64_t idx = gid; idx < nnz; idx += stride)
+            {
+                rocsparse::roti_element(idx, x_val, x_ind, y, c, s, idx_base);
+            }
+        }
+        else
+        {
+            const uint32_t idx = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+
+            if(idx < static_cast<uint32_t>(nnz))
+            {
+                rocsparse::roti_element(idx, x_val, x_ind, y, c, s, idx_base);
+            }
+        }
     }
 }

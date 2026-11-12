@@ -1,0 +1,20 @@
+# Anywhere {branch} is used, the branch name will be substituted.
+# These comments will also be removed.
+root: index
+subtrees:
+
+  - caption: Install
+    entries:
+    - file: install/install
+      title: Install hipCUB
+    - file: install/build
+      title: Build from source
+  - caption: Reference
+    entries:
+    - file: api-reference/data-type-support
+      title: Precision support
+    - file: doxygen/html/index
+      title: API library
+  - caption: About
+    entries:
+    - file: license

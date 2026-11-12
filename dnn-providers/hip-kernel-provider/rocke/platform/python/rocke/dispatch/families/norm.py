@@ -31,7 +31,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Sequence, Tuple
 
-from ...core.arch import ArchTarget, known_arches
+from ...core.arch import ArchTarget, arches_with_own_facts
 from ...instances.common import layernorm2d as _ln
 from ...instances.common import rmsnorm2d as _rms
 from ..core import (
@@ -85,8 +85,10 @@ NORM_DIM_VOCABULARY = ("rows", "cols")
 # both wave sizes. This is the documented exception to the wave-size consistency
 # invariant, which exists to catch MMA kernels that bake a wave size into their
 # geometry. The per-arch LDS / max-threads checks in the instance validators are
-# what actually narrow this list per request.
-_NORM_ARCHES = known_arches()
+# what actually narrow this list per request. Each generic target stands for the
+# processors whose rows point at it (``listed_arch_for``), so listing them again
+# would only build the generic's kernels once more per member.
+_NORM_ARCHES = arches_with_own_facts()
 
 
 def _norm_dtype(dtype: str) -> str:
@@ -248,18 +250,30 @@ def _kernel_id(req: NormRequest, candidate: KernelCandidate, spec) -> KernelId:
     )
 
 
+def registered_norm_combos(
+    req: OperatorRequest,
+) -> Tuple[Tuple[KernelCandidate, object], ...]:
+    """Every registered norm candidate that can launch ``req``.
+
+    Probes opt-in variants and expands each candidate's ``sweep_space``.
+    Production :func:`dispatch_norm` is unchanged.
+    """
+    if _request_errors(req):
+        return ()
+    return NORM_REGISTRY.combos(req)
+
+
 def norm_sweep_space(req: OperatorRequest) -> Sequence[object]:
     if _request_errors(req):
         return ()
-    specs = []
-    seen = set()
-    for candidate in NORM_REGISTRY.supported(req):
-        spec = candidate.select_spec(req)
-        h = stable_json_hash(asdict(spec), n=16)
-        if h not in seen:
-            seen.add(h)
-            specs.append(spec)
-    return tuple(specs)
+    return NORM_REGISTRY.sweep_space(req)
+
+
+def dispatch_norm_all(req: NormRequest) -> Tuple[DispatchResult, ...]:
+    """Every eligible norm2d kernel for ``req``, including opt-in variants."""
+    if _request_errors(req):
+        return ()
+    return NORM_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
 
 
 def dispatch_norm(req: NormRequest, *, ranker: Ranker | None = None) -> DispatchResult:

@@ -405,7 +405,9 @@ public:
                     std::ostringstream oss;
                     oss << "work buffer allocation failed ("
                         << byte_size_to_str(workbuffersizes[device]) << " requested)";
+#ifndef ROCFFT_BUILD_INTERNAL
                     oss << "\n" << device_memory_accountant::singleton().get_details(device);
+#endif
                     throw work_buffer_alloc_failure(oss.str(), workbuffersizes[device], hip_status);
                 }
 
@@ -419,6 +421,27 @@ public:
         }
 
         return ret;
+    }
+
+    // with exactly one input brick and one output brick on the same device, rocFFT should run
+    // there: throws ROCFFT_FAIL if any other device requires work memory
+    // TODO: extend to other layouts once rocFFT stops gathering any onto the current device
+    void validate_work_memory_devices()
+    {
+        if(mp_lib != fft_mp_lib_none || ifields.size() != 1 || ofields.size() != 1
+           || ifields[0].bricks.size() != 1 || ofields[0].bricks.size() != 1
+           || ifields[0].bricks[0].device != ofields[0].bricks[0].device)
+            return;
+        if(setup_structs() != fft_status_success)
+            throw ROCFFT_FAIL("plan setup failed while validating work memory");
+
+        const int brick_device = ifields[0].bricks[0].device;
+        for(size_t device = 0; device < workbuffersizes.size(); ++device)
+        {
+            if(static_cast<int>(device) != brick_device && workbuffersizes[device] > 0)
+                throw ROCFFT_FAIL("work memory required on device " + std::to_string(device)
+                                  + ", which holds no brick");
+        }
     }
 
     fft_status set_funcptr_callbacks(std::vector<void*>* load_cb_func,

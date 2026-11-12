@@ -1,6 +1,6 @@
 #pragma once
 
-#include "hipconv/conv2d_params.hpp"
+#include "hipconv/conv_params.hpp"
 
 namespace hipconv::cdna4::direct
 {

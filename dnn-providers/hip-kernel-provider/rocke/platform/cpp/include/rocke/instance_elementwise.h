@@ -7,7 +7,8 @@
  *
  * Emits a single AMDGPU kernel that walks one contiguous N-element tensor with
  * vectorised global loads/stores and applies a fused unary or binary operation
- * per element. Compute is f32 internally; I/O is f16 or bf16.
+ * per element. Compute is f32 internally for f16 or bf16 I/O; f64 I/O computes
+ * in f64 (native f64 ops only, vec=2).
  *
  *   Python (elementwise.py)               C99 (this header)
  *   -----------------------------------   --------------------------------------
@@ -32,7 +33,7 @@
  * reason string; the convenience lower returns a rocke_status_t.
  *
  * ACTIVATION DEPENDENCY. The transcendental ops (silu/swish/tanh/sigmoid/
- * quick_gelu/gelu_tanh and the GLU binaries) reduce to the two exp2-based
+ * quick_gelu/gelu_tanh and the GLU binaries) reduce to the two shared
  * primitives rocke_sigmoid_via_exp2 / rocke_tanh_via_exp2 from
  * rocke/helper_rocke.helpers.activations.h, exactly as the Python imports
  * _sigmoid_via_exp2 / _tanh_via_exp2.
@@ -53,7 +54,7 @@ extern "C" {
 /* --------------------------------------------------------- ElementwiseSpec */
 
 /* Mirror of Python ElementwiseSpec. `op` is one of the unary or binary op
- * spellings (see the dispatch tables below); `dtype` is "f16" or "bf16". */
+ * spellings (see the dispatch tables below); `dtype` is "f16", "bf16" or "f64". */
 typedef struct rocke_elementwise_spec
 {
     const char* op; /* required (no default in Python)                  */

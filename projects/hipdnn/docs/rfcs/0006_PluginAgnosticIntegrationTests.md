@@ -1,5 +1,10 @@
 # RFC 0006: Plugin-Agnostic Integration Tests
 
+- **Status**: Implemented
+- **Status notes**: The suite shipped as `dnn-providers/integration-tests` (#4087). Each provider runs the suite against its own plugin and engine (`--test-article`, `--test-engine`, `--test-config`). Graph-verification coverage is mostly data bundles (RFC 0011); C++ graph tests build only with `-DBUILD_CPP_GRAPH_TESTS=ON`.
+- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
+
+
 ## Table of Contents
 1. [Executive Summary](#executive-summary)
 2. [Problem Statement](#problem-statement)
@@ -8,18 +13,17 @@
 5. [Implementation Details](#implementation-details)
    - [IntegrationGraphVerificationHarness](#integrationgraphverificationharness-base-class)
    - [Test Fixture Convention](#test-fixture-convention)
-   - [BuildEngineTestMatrix Function](#buildenginetestmatrix-function)
-   - [GTest Test Discovery](#aside-gtest-test-discovery)
+   - [Engine Selection](#engine-selection)
    - [Configuration System](#configuration-system)
 6. [TheRock CI Integration](#therock-ci-integration)
-   - [Test Configurations](#test-configurations)
+   - [Build configurations for tests](#build-configurations-for-tests)
    - [Managing CI Time Budgets](#managing-ci-time-budgets)
 7. [Adding New Tests](#adding-new-tests)
 
 ## Executive Summary
 
 This RFC documents a standalone integration test project for hipDNN enabling plugin-agnostic testing with runtime capability discovery.
-The test infrastructure automatically defines a cartesian product of (engine, graph) pairs for numerical integration tests, giving each plugin an automatic level of test coverage "out of the box."
+The same tests run against each plugin. At run time, each test asks hipDNN whether the selected plugin and engine support its graph, and skips the test if not. This gives each plugin an automatic level of test coverage "out of the box."
 
 ### Key Benefits
 - **Reduced Duplication**: Eliminates near-identical test suites in each plugin
@@ -28,7 +32,7 @@ The test infrastructure automatically defines a cartesian product of (engine, gr
 
 ## Problem Statement
 
-Each plugin (MIOpen, fusilli, etc.) needs numerical integration tests for all graph variants it claims to support - preferably in a way that gives strong signal when debugging. Today, nearly identical tests exist in multiple locations: [miopen conv test](https://github.com/ROCm/rocm-libraries/blob/9924d667c218d067403608d77f432dd13585a848/dnn-providers/miopen-provider/integration_tests/IntegrationGpuConvForward.cpp) vs [fusilli conv test](https://github.com/iree-org/fusilli/blob/9328342731374ef7113f1f95c18a986c1df3739d/plugins/hipdnn-plugin/test/integration/convolution/conv_fprop_parameterized_full.cpp).
+Each plugin (MIOpen, fusilli, etc.) needs numerical integration tests for all graph variants it claims to support - preferably in a way that gives strong signal when debugging. Without a shared suite, nearly identical tests exist in multiple locations: [miopen conv test](https://github.com/ROCm/rocm-libraries/blob/9924d667c218d067403608d77f432dd13585a848/dnn-providers/miopen-provider/integration_tests/IntegrationGpuConvForward.cpp) vs [fusilli conv test](https://github.com/iree-org/fusilli/blob/9328342731374ef7113f1f95c18a986c1df3739d/plugins/hipdnn-plugin/test/integration/convolution/conv_fprop_parameterized_full.cpp).
 
 ## Design Goals
 
@@ -42,15 +46,19 @@ Each plugin (MIOpen, fusilli, etc.) needs numerical integration tests for all gr
 
 ### Overview
 
+The suite is in `dnn-providers/integration-tests/` and builds one binary, `hipdnn_integration_tests`. See its [README](../../../../dnn-providers/integration-tests/README.md).
+
+Bundles and sweeps under `integration-test-bundles/` ([RFC 0011](./0011_BundleTestFramework.md)) are the default way to test that a graph runs on an engine. C++ graph tests are kept for special cases and build only with `-DBUILD_CPP_GRAPH_TESTS=ON`.
+
 Most of the testing infrastructure can be taken directly from existing MIOpen integration test suite:
 
-**IntegrationGraphVerificationHarness**: Base class providing GTest support and CPU reference execution for validation.
+**IntegrationGraphVerificationHarness**: Base class providing GTest support and reference execution for validation.
 
 The plugin-agnostic integration test suite requires a few additional pieces; specifically:
 
-1. **Test Fixture Convention**: Static `buildGraph()` method on fixtures enables capability queries without test execution
-2. **BuildEngineTestMatrix**: Template function that expands test cases to (engine, testCase) pairs based on runtime capability queries
-3. **Configuration System**: TOML file specifies expected plugins, expected failures, and per-engine tolerances
+1. **Test Fixture Convention**: Static `buildGraph()` method on fixtures builds the graph for a test case
+2. **Engine Selection**: Command-line options select the plugin and engine under test. Each test checks engine support at run time and skips if the graph is not supported.
+3. **Configuration System**: A per-engine TOML file specifies test skips and tolerance overrides
 
 TheRock CI integration requires two additional considerations:
 1. **Filtering tests to match build configurations**: not all builds include all plugins
@@ -60,64 +68,64 @@ TheRock CI integration requires two additional considerations:
 
 ### IntegrationGraphVerificationHarness Base Class
 
-This is relatively unchanged from existing MIOpen plugin infrastructure, it provides a numerical validation framework:
+The class is in `src/harness/IntegrationGraphVerificationHarness.hpp`. It provides a numerical validation framework. This is a simplified view:
 
 ```cpp
 template <typename DataType, typename TestCaseType>
 class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<TestCaseType>
 {
 protected:
-    hipdnnHandle_t _handle = nullptr;
-    hipStream_t _stream = nullptr;
-
     void SetUp() override
     {
+        SKIP_IF_NO_DEVICES();
+
         // Initialize HIP
         ASSERT_EQ(hipInit(0), hipSuccess);
-        ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
-        ASSERT_EQ(hipStreamCreate(&_stream), hipSuccess);
-        ASSERT_EQ(hipdnnSetStream(_handle, _stream), HIPDNN_STATUS_SUCCESS);
+        ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
 
-        // Verify loaded plugins match expected configuration
-        verifyExpectedPlugins();
+        // Apply [[test_skips]] from the TOML config
+        if(auto reason = checkTomlSkip(currentTestName()))
+        {
+            GTEST_SKIP() << *reason;
+        }
     }
 
-    void verifyGraph(hipdnn_frontend::graph::Graph& graph, unsigned int seed)
+    void verifyGraph(hipdnn_frontend::graph::Graph& graph)
     {
-        // 1. Build graph for execution
-        auto result = graph.build(_handle);
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK);
+        // 1. Skip if the selected engine does not support the graph
+        ASSERT_NO_FATAL_FAILURE(ensureEngineSupport(graph));
+        if(testing::Test::IsSkipped())
+            return;
 
-        // 2. Generate test data bundles (CPU and GPU)
-        hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle, cpuBundle;
-        generateBundles(graph, cpuBundle, gpuBundle, outputTensorIds);
-        initializeBundle(graph, gpuBundle, seed);
-        initializeBundle(graph, cpuBundle, seed);
+        // 2. Build execution plans
+        ASSERT_NO_FATAL_FAILURE(buildExecutionPlans(graph));
 
-        // 3. Execute on GPU and CPU reference
-        executeGpuGraph(_handle, graph, gpuBundle);
-        executeCpuGraph(graph, cpuBundle);
+        // 3. Generate and initialize test data bundles
+        hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle, refBundle;
+        generateBundles(graph, refBundle, gpuBundle);
+        initializeBundle(graph, gpuBundle);
+        initializeBundle(graph, refBundle);
 
-        // 4. Validate outputs
-        for(const auto& tensorId : outputTensorIds)
-        {
-            bool valid = _tensorIdToValidatorMap.at(tensorId)->allClose(
-                *cpuBundle.tensors.at(tensorId),
-                *gpuBundle.tensors.at(tensorId));
-            ASSERT_TRUE(valid);
-        }
+        // 4. Execute on GPU and on the reference executor
+        ASSERT_NO_FATAL_FAILURE(executeGpuGraph(getSharedHandle(), graph, gpuBundle));
+        ASSERT_NO_FATAL_FAILURE(executeReferenceGraph(graph, refBundle));
+
+        // 5. Validate outputs
+        ASSERT_NO_FATAL_FAILURE(validateOutputs(gpuBundle, refBundle));
     }
 
     virtual void runGraphTest() = 0;
 };
 ```
 
+The reference executor is a CPU or GPU executor, selected with `--reference-executor`. All tests share one hipDNN handle from `getSharedHandle()`.
+
 ### Test Fixture Convention
 
-Fixtures must provide a static `buildGraph()` method that constructs and validates the graph without executing it:
+Fixtures provide a static `buildGraph()` method that constructs and validates the graph without executing it:
 
 ```cpp
-class ConvForward : public IntegrationGraphVerificationHarness<DataType, EngineTestCase<ConvFwdTestCase>>
+class ConvForward : public IntegrationGraphVerificationHarness<DataType, ConvFwdTestCase>
 {
 public:
     struct GraphOutputs
@@ -125,7 +133,6 @@ public:
         std::shared_ptr<graph::TensorAttributes> y;
     };
 
-    // Required: static method for capability queries
     static std::pair<graph::Graph, GraphOutputs> buildGraph(
         hipdnnHandle_t handle, const ConvFwdTestCase& tc)
     {
@@ -152,271 +159,95 @@ public:
 };
 ```
 
-### BuildEngineTestMatrix Function
+### Engine Selection
 
-The core filtering logic queries engine capabilities at test instantiation time:
+Each run tests one plugin, given with `--test-article`/`--ta`, and, optionally, one engine, given with `--test-engine`/`--te`. Without `--test-engine`, hipDNN picks the engine.
 
-```cpp
-template <typename TestCase>
-struct EngineTestCase
-{
-    int64_t engineId;
-    TestCase testCase;
-};
-```
+`INSTANTIATE_TEST_SUITE_P` uses plain GTest generators. Engine support is checked inside each test by `checkEngineSupportOrSkip()`, which `verifyGraph()` calls:
 
-```cpp
-template <typename FixtureClass, typename TestCase>
-std::vector<EngineTestCase<TestCase>> BuildEngineTestMatrix(
-    testing::internal::ParamGenerator<TestCase> testCaseGen) {
-
-    std::vector<EngineTestCase<TestCase>> result;
-
-    // Create handle for capability queries
-    // Plugin loading is cached, so this is cheap after first call
-    hipdnnHandle_t handle;
-    hipdnnCreate(&handle);
-
-    for (const auto& testCase : testCaseGen) {
-        auto [graph, outputs] = FixtureClass::buildGraph(handle, testCase);
-
-        // Query which engines support this graph
-        std::vector<int64_t> engineIds;
-        auto status = graph.get_ranked_engine_ids(engineIds);
-        if(status.is_bad())
-        {
-            // No loaded engine supports the graph - skip this test case
-            continue;
-        }
-
-        for (int64_t engineId : engineIds) {
-            result.push_back(EngineTestCase<TestCase>{engineId, testCase});
-        }
-    }
-
-    hipdnnDestroy(handle);
-    return result;
-}
-```
-
-### ASIDE: GTest Test Discovery
-
-GTest parameterized test discovery happens in two phases:
-
-1. **Static initialization**: `INSTANTIATE_TEST_SUITE_P` registers parameter generator functions with GTest's internal registry. The generators are not called yet.
-
-```cpp
-INSTANTIATE_TEST_SUITE_P(
-    Smoke,
-    IntegrationGpuConvFwd2dFp32,
-    testing::ValuesIn(BuildEngineTestMatrix<IntegrationGpuConvFwd2dFp32, ConvFwdTestCase>(
-        testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                         testing::ValuesIn(test_conv_common::getConvTestCases4D())))),
-    EngineTestNameGenerator<ConvFwdTestCase>);
-// At this point, GTest stores a pointer to a function that will call BuildEngineTestMatrix
-```
-
-2. **InitGoogleTest()**: GTest invokes all registered generator functions to create the actual test instances.
-
-```cpp
-// main.cpp
-int main(int argc, char** argv)
-{
-    // Phase 2: Generator functions are invoked here, including BuildEngineTestMatrix()
-    ::testing::InitGoogleTest(&argc, argv);
-
-    auto result = RUN_ALL_TESTS();
-    return result;
-}
-```
-
-`BuildEngineTestMatrix` runs during `InitGoogleTest()`, not static init. At this point:
-- Plugins are loaded (triggered by first `hipdnnCreate()` call)
-- Engine capabilities can be queried
-- Test cases are filtered based on actual runtime support
+1. It calls `get_ranked_engine_ids()` on the graph.
+2. If an engine is named and that engine does not support the graph, it skips the test.
+3. If no engine is named and no engine supports the graph, it skips the test.
+4. With `--fail-on-unsupported`, it fails the test instead of skipping it.
+5. If an engine is named and supports the graph, it calls `set_preferred_engine_id_ext()` with that engine.
 
 ### Configuration System
 
 While the test suite has no compile-time dependency on plugins, runtime configuration is still needed for:
 
-- **expected failures**: mark specific (engine, test) combinations as expected to fail, so known issues don't block CI
-- **expected plugins**: given the runtime test discovery, we need a way to verify that expected plugins are actually loaded - otherwise missing plugins generate no tests therefore no test _failures_.
-  - NOTE: The TOML config lists ALL available plugins. At test time the expected plugins may be filtered down based on test configuration - see [Test Configurations](#test-configurations) for details.
+- **test skips**: skip specific tests on specific architectures, so known issues don't block CI
 - **numerical tolerance configuration**: allow for engine specific tolerance configuration.
 
-Following the standard pattern in `TheRock`, a Python script is responsible for running the tests (see [`build_tools/github_actions/test_executable_scripts/`](https://github.com/ROCm/TheRock/tree/main/build_tools/github_actions/test_executable_scripts)). The test runner converts user-edited TOML configuration to JSON and passes it to the C++ test harness via environment variable.
+Each provider keeps a per-engine TOML file, for example `dnn-providers/miopen-provider/config/MIOPEN_ENGINE.toml`. The binary reads it with `--test-config`/`--tc` and parses it in C++ with toml++.
 
 #### Configuration File Format (TOML)
 
+The file has these tables:
+
+- `[meta]`: file format version.
+- `[[tolerance_overrides]]`: `filters` (GTest-style globs on the full test name), `atol`, and `rtol`.
+- `[[test_skips]]`: `archs`, `filters`, and `reason`.
+
 ```toml
-[plugins.miopen]
-path = "libmiopen_plugin.so"
-engines = ["MIOPEN_PLUGIN"]
+[meta]
+version = 1
 
-[plugins.fusilli]
-path = "libfusilli_plugin.so"
-engines = ["FUSILLI"]
-
-[engines.FUSILLI]
-tolerance = "dynamic"  # maps to pre-defined methods of determining acceptable tolerance in C++
-expected_failures = [
-    "IntegrationGpuConvFwd3dFp32/Smoke.Correctness/NCDHW_1x1x4x4x4_1x1x3x3x3",
-    "IntegrationGpuConvFwd3dFp32/Smoke.Correctness/NCDHW_1x1x8x8x8_1x1x3x3x3",
-]
-
-[engines.MIOPEN_PLUGIN]
-tolerance = "gh_12678_tolerance_workaround"
+[[tolerance_overrides]]
+filters = ["Full/*BatchnormBackwardCalcStats3d*.Correctness/0"]
+atol = 0.002
+rtol = 0.012
 ```
 
-Tolerance configuration is kept general: the name maps to a function that takes a graph as input and outputs a tolerance. Most plugins should use standard methods, but highly specific workaround methods can be added.
-
-##### Why TOML -> JSON?
-
-- **TOML**: Human-friendly - comments! A TOML parser is part of the Python standard library (as of 3.10)
-- **JSON**: Easy to parse in C++ - `nlohmann/json` is already a hipDNN dependency
-
-Users only interact with the TOML file.
+When more than one filter matches, later entries take precedence. Tests with no override use the default tolerances from `src/harness/tolerance/ToleranceResolver.hpp`.
 
 ## TheRock CI Integration
 
 ### Build configurations for tests
 
-[Test configurations](https://github.com/AaronStGeorge/rocm-libraries/blob/b9b531a79ec16689aa839600953be238c6d10d94/.github/scripts/therock_matrix.py#L70-L78) may not include every plugin (e.g., MIOpen-only builds when changes only affect MIOpen). The integration test infrastructure must:
+[Test configurations](https://github.com/AaronStGeorge/rocm-libraries/blob/b9b531a79ec16689aa839600953be238c6d10d94/.github/scripts/therock_matrix.py#L70-L78) may not include every plugin (e.g., MIOpen-only builds when changes only affect MIOpen). The integration test infrastructure must run only tests for plugins that are physically present - don't fail because fusilli isn't installed in an MIOpen-only build.
 
-1. **Run only tests for plugins that are physically present** - don't fail because fusilli isn't installed in an MIOpen-only build
-2. **Verify expected plugins are loaded** - if a build is supposed to include MIOpen but doesn't load it there should be a error
-
-#### Filtering plugin-loaded checks based on enabled plugins
-
-The test harness needs to know which plugins are expected to load. The TOML config lists all available plugins, but a given build may only include a subset. So that the test runner knows what _should_ be loaded, `TheRock` build (will) install an enabled plugin manifest as part of the super-build.
-
-NOTE: the `THEROCK_ENABLE_*_PLUGIN` variables are set by the build topology infrastructure not necessarily by the user; so, for example, `THEROCK_ENABLE_FUSILLI_PLUGIN` is set even when the user only specified `THEROCK_ENABLE_IREE_LIBS`.
-
-```cmake
-# ml-libs/CMakeLists.txt - inside if(THEROCK_ENABLE_HIPDNN_INTEGRATION_TESTS)
-set(_plugins_json_array "")
-if(THEROCK_ENABLE_MIOPEN_PLUGIN)
-  list(APPEND _plugins_json_array "\"miopen\"")
-endif()
-if(THEROCK_ENABLE_FUSILLI_PLUGIN)
-  list(APPEND _plugins_json_array "\"fusilli\"")
-endif()
-string(REPLACE ";" ", " _plugins_json_str "${_plugins_json_array}")
-
-file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/build_enabled_hipdnn_plugins_manifest.json"
-  "{\n  \"plugins\": [${_plugins_json_str}]\n}\n")
-```
-
-The Python test runner reads the JSON manifest and filters the TOML config:
-
-```python
-enabled_plugins_path = Path(THEROCK_BIN_DIR) / "build_enabled_hipdnn_plugins_manifest.json"
-with open(enabled_plugins_path) as f:
-    enabled_plugins = set(json.load(f).get("plugins", []))
-
-config["plugins"] = {
-    name: cfg for name, cfg in config["plugins"].items()
-    if name in enabled_plugins
-}
-```
-
-This filtered config is passed to the C++ test harness, which verifies hipDNN loads exactly the expected plugins.
+Each provider registers the suite against its own plugin with `add_external_integration_test_target()` from `dnn-providers/integration-tests/cmake/HipdnnIntegrationTestHelpers.cmake`. The provider passes its plugin target, engine name, TOML config, and test categories file. So the suite does not need to know which plugins a build enables.
 
 ### Managing CI Time Budgets
 
-As the test suite grows tests will need to be categorized so CI can prioritize the highest-signal tests within the time limits of each stage (pre-submit, post-submit, nightly, weekly). The integration tests will adopt the approach and infrastructure in [rocm-libraries' standardized test filtering infrastructure](https://github.com/ROCm/rocm-libraries/pull/3513) to solve this problem.
+As the test suite grows tests will need to be categorized so CI can prioritize the highest-signal tests within the time limits of each stage (pre-submit, post-submit, nightly, weekly). The integration tests use [rocm-libraries' standardized test filtering infrastructure](https://github.com/ROCm/rocm-libraries/pull/3513) to solve this problem.
 
 The infrastructure for test filtering and individual test timeouts is defined in [PR #3513](https://github.com/ROCm/rocm-libraries/pull/3513); this RFC only needs to establish a test naming convention to leverage it.
 
 #### Filtering Configuration from [PR #3513](https://github.com/ROCm/rocm-libraries/pull/3513)
 
-[PR #3513](https://github.com/ROCm/rocm-libraries/pull/3513) introduces `test_categories.yaml` to map test name patterns to CTest labels and define per-test timeouts. CI invokes tests via labels: `ctest -L Smoke` for pre-submit, `ctest -L Full` for post-submit.
+[PR #3513](https://github.com/ROCm/rocm-libraries/pull/3513) introduces test categories YAML files to map test name patterns to CTest labels and define per-test timeouts. CI invokes tests via labels, for example `ctest -L quick`.
 
 ##### Test Categories
 
-NOTE: the number and names of categories can be changed later, hopefully `TheRock` standardizes names over time.
-
-| Category | Target Time | CI Stage |
-|----------|-------------|----------|
-| Smoke | 5 min | Pre-submit |
-| Full | 30 min | Post-submit |
-| Nightly | 2 hrs | Nightly |
-
-```yaml
-test_categories:
-  Smoke:
-    description: "Pre-submit sanity checks"
-    test_patterns:
-      - "*/Smoke.*"
-    labels: ["Smoke"]
-
-  Full:
-    description: "Post-submit validation"
-    test_patterns:
-      - "*/Smoke.*"
-      - "*/Full.*"
-    labels: ["Full"]
-
-  Nightly:
-    description: "Nightly full coverage"
-    test_patterns:
-      - "*"
-    labels: ["Nightly"]
-
-execution_settings:
-  default_timeout: 60
-  category_timeouts:
-    Smoke: 60      # Individual Smoke tests should be fast
-    Full: 300      # 5 min per test
-    Nightly: 600   # 10 min per test
-```
+The categories are `quick`, `standard`, `comprehensive`, and `full`. Each provider defines them for this suite in `test_categories_integration.yaml`, for example `dnn-providers/miopen-provider/test_categories_integration.yaml`. Higher categories include the patterns of lower ones, so `ctest -L standard` also runs the quick tests.
 
 ##### Naming Convention
 
-To match the patterns above, each `INSTANTIATE_TEST_SUITE_P` uses a category prefix (`Smoke`, `Full`, or `Nightly`):
+Bundle tests are named after their tier directory (`quick_*`, `standard_*`, and so on). C++ suites use a category prefix on `INSTANTIATE_TEST_SUITE_P`: `Smoke`, `Quick`, `Standard`, `Comprehensive`, or `Full`.
 
 ```cpp
 // Pre-submit tests - small, fast cases
 INSTANTIATE_TEST_SUITE_P(Smoke, IntegrationGpuConvFwd2dFp32,
-    testing::ValuesIn(BuildEngineTestMatrix<IntegrationGpuConvFwd2dFp32, ConvFwdTestCase>(
-        testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                         testing::ValuesIn(test_conv_common::getQuickConvTestCases4D())))),
-    EngineTestNameGenerator<ConvFwdTestCase>);
-
-// Post-submit tests - more comprehensive
-INSTANTIATE_TEST_SUITE_P(Full, IntegrationGpuConvFwd2dFp32,
-    testing::ValuesIn(BuildEngineTestMatrix<IntegrationGpuConvFwd2dFp32, ConvFwdTestCase>(
-        testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                         testing::ValuesIn(test_conv_common::getStandardConvTestCases4D())))),
-    EngineTestNameGenerator<ConvFwdTestCase>);
-
-// Nightly tests - exhaustive coverage
-INSTANTIATE_TEST_SUITE_P(Nightly, IntegrationGpuConvFwd2dFp32,
-    testing::ValuesIn(BuildEngineTestMatrix<IntegrationGpuConvFwd2dFp32, ConvFwdTestCase>(
-        testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-                         testing::ValuesIn(test_conv_common::getComprehensiveConvTestCases4D())))),
-    EngineTestNameGenerator<ConvFwdTestCase>);
-```
-
-This produces test names like:
-```
-IntegrationGpuConvFwd2dFp32/Smoke.Correctness/Fusilli_NCHW_1x16x16x16_1x16x3x3
-IntegrationGpuConvFwd2dFp32/Smoke.Correctness/MIOpen_NCHW_1x16x16x16_1x16x3x3
-IntegrationGpuConvFwd2dFp32/Full.Correctness/Fusilli_NCHW_8x32x64x64_32x32x3x3
-IntegrationGpuConvFwd2dFp32/Full.Correctness/MIOpen_NCHW_8x32x64x64_32x32x3x3
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::ValuesIn(test_conv_common::getQuickConvTestCases4D())));
 ```
 
 #### Test suite (vs individual test) time budget
 
-The test count scales combinatorially with plugins and graphs (each test runs per capable engine); configurations with all plugins enabled will eventually stretch CI time budgets. GTest and the category system provide the flexibility to address this.
+The test count scales with plugins and graphs; configurations with all plugins enabled will eventually stretch CI time budgets. GTest and the category system provide the flexibility to address this.
 
 Two strategies are available:
 1. **Shard**: GTest supports sharding out of the box via environment variables
-2. **Recategorize**: Move slower tests to a less frequent category (Smoke → Full → Nightly)
+2. **Recategorize**: Move slower tests to a less frequent category (quick → standard → comprehensive → full)
 
 This RFC suggests setting CI stage timeouts at the maximum acceptable budget, then sharding or recategorizing as headroom runs out.
 
 ## Adding New Tests
+
+New graph-verification coverage must be a bundle. `src/integration-tests/CMakeLists.txt` enforces this. Use a C++ test only for behavior other than "a graph runs and matches a reference", for example error paths or serialization round-trips. See the integration-tests [README](../../../../dnn-providers/integration-tests/README.md) and [adding-tests.md](../../../../dnn-providers/integration-tests/docs/adding-tests.md).
+
+The steps below apply to C++ tests.
 
 ### Step 1: Define the Test Case Type
 
@@ -428,7 +259,7 @@ using ConvFwdTestCase = std::tuple<TensorLayout, ConvTestParams>;
 
 ```cpp
 template <typename DataType>
-class ConvForward : public IntegrationGraphVerificationHarness<DataType, EngineTestCase<ConvFwdTestCase>>
+class ConvForward : public IntegrationGraphVerificationHarness<DataType, ConvFwdTestCase>
 {
 public:
     struct GraphOutputs { /* output tensor attributes */ };
@@ -453,23 +284,18 @@ This method must:
 ```cpp
 void runGraphTest() override
 {
-    const auto& param = this->GetParam();
-    auto [graphObj, outputs] = buildGraph(this->_handle, param.testCase);
+    const auto& testCase = this->GetParam();
+    auto [graphObj, outputs] = buildGraph(getSharedHandle(), testCase);
 
-    // Look up tolerance based on engine config and graph properties
-    auto tolerance = getTolerance(param.engineId, graphObj);
+    // Register validators for outputs, with the resolved tolerance
+    this->registerValidator(outputs.y, this->getTolerance(graphObj, outputs.y));
 
-    // Register validators for outputs
-    this->registerValidator(outputs.y, tolerance);
-
-    // Force execution on the specific engine
-    graphObj.set_preferred_engine_id_ext(param.engineId);
-
-    this->verifyGraph(graphObj, seed);
+    // Checks engine support, then executes and validates
+    this->verifyGraph(graphObj);
 }
 ```
 
-### Step 5: Instantiate with BuildEngineTestMatrix
+### Step 5: Instantiate the Test Suite
 
 ```cpp
 using MyFixtureFp32 = MyFixture<float>;
@@ -483,11 +309,7 @@ TEST_P(MyFixtureFp32, Correctness)
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     MyFixtureFp32,
-    testing::ValuesIn(BuildEngineTestMatrix<MyFixtureFp32, MyTestCase>(
-        testing::Combine(
-            testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
-            testing::ValuesIn(getTestCases())))),
-    EngineTestNameGenerator<MyTestCase>);
+    testing::Combine(
+        testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+        testing::ValuesIn(getTestCases())));
 ```
-
-NOTE: `GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST` prevents spurious failures when no engines support a given test configuration.

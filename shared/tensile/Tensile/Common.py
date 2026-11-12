@@ -22,23 +22,22 @@
 #
 ################################################################################
 
-from . import __version__
-from . import Parallel
-from .Utilities.ConditionalImports import print, TENSILE_TERM_COLORS
-from .Utilities.Toolchain import getVersion
-from collections import OrderedDict
-
-from copy import deepcopy
-from .AsmCaps import getCapabilitiesCache
-from typing import Any, NamedTuple, Optional, Tuple, Dict
-
 import math
 import os.path
+import re
+import shutil
 import subprocess
 import sys
 import time
 import warnings
-import re
+from collections import OrderedDict
+from copy import deepcopy
+from pathlib import Path
+from typing import Any, Dict, NamedTuple, Optional, Tuple
+
+from . import Parallel, __version__
+from .AsmCaps import getCapabilitiesCache
+from .Utilities.ConditionalImports import TENSILE_TERM_COLORS, print
 
 startTime = time.time()
 
@@ -49,6 +48,9 @@ IsaVersion = Tuple[int, int, int]
 def isGfx12(isaVersion: IsaVersion) -> bool:
   return isaVersion[0] == 12
 
+def isGfx117(isaVersion: IsaVersion) -> bool:
+  return isaVersion[:2] == (11, 7)
+
 class SemanticVersion(NamedTuple):
     major: int
     minor: int
@@ -56,6 +58,86 @@ class SemanticVersion(NamedTuple):
 
     def __str__(self) -> str:
         return f"{self.major}.{self.minor}.{self.patch}"
+
+
+_DEFAULT_ROCM_ROOT = Path("/opt/rocm")
+_HIP_VERSION_PARTS = ("MAJOR", "MINOR", "PATCH")
+
+
+def _parseHipVersion(versionString: str) -> str:
+  versionMatch = re.match(r"^\s*(\d+)\.(\d+)\.(\d+)", versionString)
+  if not versionMatch:
+    raise ValueError(f"Invalid HIP version: {versionString!r}")
+  return ".".join(versionMatch.groups())
+
+
+def _readHipBuildVersion(path: Path) -> Optional[str]:
+  """Read HIP_VERSION_MAJOR/MINOR/PATCH from a HIP metadata file."""
+  try:
+    contents = path.read_text()
+  except OSError:
+    return None
+
+  values = []
+  for part in _HIP_VERSION_PARTS:
+    value = re.search(
+        rf"^\s*(?:#define\s+)?HIP_VERSION_{part}(?:\s*=\s*|\s+)(\d+)",
+        contents,
+        re.MULTILINE,
+    )
+    if not value:
+      raise ValueError(f"Invalid HIP version file: {path}")
+    values.append(value.group(1))
+  return ".".join(values)
+
+
+def _readHipVersionFromRoot(root: Path) -> Optional[str]:
+  """Read the HIP build version from HIP metadata files only.
+
+  Reads share/hip/version and include/hip/hip_version.h, which contain the
+  HIP build version including the patch/build number used for feature gating.
+  The ROCm release file (.info/version) is intentionally excluded — it contains
+  only the release version and silently drops the build number, which can cause
+  incorrect feature detection when patch-level thresholds are checked.
+  """
+  for relativePath in (Path("share/hip/version"), Path("include/hip/hip_version.h")):
+    versionString = _readHipBuildVersion(root / relativePath)
+    if versionString:
+      return versionString
+  return None
+
+
+def _getHipVersion() -> str:
+  """Return the HIP build version used by the selected ROCm toolchain."""
+  versionString = os.environ.get("ROCM_VERSION")
+  if versionString:
+    return _parseHipVersion(versionString)
+
+  for root in (os.environ.get("ROCM_PATH"), os.environ.get("HIP_PATH"), _DEFAULT_ROCM_ROOT):
+    if root:
+      versionString = _readHipVersionFromRoot(Path(root))
+      if versionString:
+        return _parseHipVersion(versionString)
+
+  for executable in ("amdclang++", "rocm-smi", "amd-smi"):
+    executablePath = shutil.which(executable)
+    if not executablePath:
+      continue
+    candidate = Path(executablePath).resolve().parent
+    for _ in range(5):
+      versionString = _readHipVersionFromRoot(candidate)
+      if versionString:
+        return _parseHipVersion(versionString)
+      parent = candidate.parent
+      if parent == candidate:
+        break
+      candidate = parent
+
+  raise ValueError(
+      "Failed to get ROCm version from ROCM_VERSION, ROCM_PATH, HIP_PATH, "
+      "/opt/rocm, or a PATH-derived ROCm root"
+  )
+
 
 class DeveloperWarning(Warning):
     """Custom warning for Tensile developers.
@@ -253,7 +335,7 @@ globalParameters["SupportedISA"] = [(8,0,3),
                                     (9,4,2), (9,5,0),
                                     (10,1,0), (10,1,1), (10,1,2), (10,3,0), (10,3,1), (10,3,2), (10,3,3), (10,3,4), (10,3,5), (10,3,6),
                                     (11,0,0), (11,0,1), (11,0,2), (11,0,3),
-                                    (11,5,0), (11,5,1), (11,5,2), (11,5,3),
+                                    (11,5,0), (11,5,1), (11,5,2), (11,5,3), (11,7,0), (11,7,1),
                                     (12,0,0), (12,0,1), (12,5,0)] # assembly kernels writer supports these architectures
 
 globalParameters["KeepBuildTmp"] = True                           # Do not remove build artifacts during the build process or build_tmp after build completes
@@ -330,9 +412,11 @@ architectureMap = {
   'gfx1030':'navi21', 'gfx1031':'navi22', 'gfx1032':'navi23', 'gfx1033':'van gogh', 'gfx1034':'navi24', 'gfx1035':'rembrandt', 'gfx1036':'raphael',
   'gfx1100':'navi31', 'gfx1101':'navi32', 'gfx1102':'navi33', 'gfx1103':'gfx1103',
   'gfx1150':'strixpoint', 'gfx1151':'strixhalo', 'gfx1152':'gfx1152', 'gfx1153':'gfx1153',
+  'gfx1170':'gfx1170', 'gfx1171':'gfx1171',
   'gfx1200':'gfx1200',
   'gfx1201':'gfx1201',
-  'gfx1250':'gfx1250'
+  'gfx1250':'gfx1250',
+  'gfx1250-strict':'gfx1250'
 }
 
 def getArchitectureName(gfxName: str) -> Optional[str]:
@@ -2034,11 +2118,11 @@ def GetAsmCaps(isaVersion: IsaVersion, hipVersion: SemanticVersion, cachedAsmCap
     derivedAsmCaps["HasLshlOr"]             = tryAssembler(isaVersion, "v_lshl_or_b32 v47, v36, 0x2, v34")
     derivedAsmCaps["HasSMulHi"]             = tryAssembler(isaVersion, "s_mul_hi_u32 s47, s36, s34")
 
-    if isGfx12(isaVersion):
+    if isGfx12(isaVersion) or isGfx117(isaVersion):
       # Tensile only enables WMMA kernels with WavefrontSize=32. Probe the same
-      # gfx12 operand layout and wave mode that codegen uses; the wave64 form
-      # accepts different operands and would advertise support for a path that
-      # SolutionStructs rejects.
+      # gfx117/gfx12 operand layout and wave mode that codegen uses; the wave64
+      # form accepts different operands and would advertise support for a path
+      # that SolutionStructs rejects.
       derivedAsmCaps["HasWMMA"]             = tryAssembler(isaVersion, "v_wmma_f32_16x16x16_f16 v[0:7], v[8:11], v[12:15], v[0:7]", False, "-mno-wavefrontsize64")
     else:
       derivedAsmCaps["HasWMMA"]             = tryAssembler(isaVersion, "v_wmma_f32_16x16x16_f16 v[0:3], v[8:15], v[16:23], v[0:3]")
@@ -2115,7 +2199,7 @@ def GetAsmCaps(isaVersion: IsaVersion, hipVersion: SemanticVersion, cachedAsmCap
 
     derivedAsmCaps["SupportedSource"] = True
 
-    ignoreCacheCheck = globalParameters["IgnoreAsmCapCache"]
+    ignoreCacheCheck = globalParameters["IgnoreAsmCapCache"] or compilerTarget("gfx1250") == "gfx1250-strict"
 
     # disable cache checking for < rocm 5.3
     if len(hipVersion) >= 2:
@@ -2220,10 +2304,26 @@ def gfxArch(name: str) -> Optional[IsaVersion]:
 
     return rv
 
+def configureCompilerTarget(architecture):
+    targets = architecture.replace("_", ";").split(";")
+    if "gfx1250-strict" in targets:
+        if any(a in targets for a in ("gfx1250", "all")):
+            raise ValueError("gfx1250-strict requires a separate generator invocation")
+        os.environ["TENSILE_GFX1250_COMPILER_TARGET"] = "gfx1250-strict"
+    else:
+        os.environ.pop("TENSILE_GFX1250_COMPILER_TARGET", None)
+
+
+def compilerTarget(name):
+    if name == "gfx1250" and os.environ.get("TENSILE_GFX1250_COMPILER_TARGET") == "gfx1250-strict":
+        return "gfx1250-strict"
+    return name
+
+
 def gfxName(arch):
     # convert last digit to hex because reasons
     name = str(arch[0]) + str(arch[1]) + ('%x' % arch[2])
-    return 'gfx' + ''.join(map(str,name))
+    return compilerTarget('gfx' + ''.join(map(str,name)))
 
 
 def detectIsaWindows(output):
@@ -2410,12 +2510,10 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None, *,
       printExit("Config file requires version=%s is not compatible with current Tensile version=%s" \
           % (config["MinimumRequiredVersion"], __version__) )
 
-  if "HipConfig" in config:
-    output = getVersion(config["HipConfig"], regex=r'(.+)')
-    globalParameters["HipClangVersion"] = output.strip()
-    tPrint(1, f"# Found HIP version: {globalParameters['HipClangVersion']}")
-  else:
-    raise ValueError("HipConfig not specified in config, could not set HipClangVersion")
+  # Note: Python ROCm SDK (pip) version detection is intentionally omitted
+  # here; it will be handled by PR #11023 with proper feature-gating.
+  globalParameters["HipClangVersion"] = _getHipVersion()
+  tPrint(1, f"# Found HIP version: {globalParameters['HipClangVersion']}")
 
   # User-specified global parameters
   tPrint(3, "GlobalParameters:")
@@ -2529,7 +2627,6 @@ def assignGlobalParameters( config, capabilitiesCache: Optional[dict] = None, *,
     "Version",
     "ClientConfig",
     "WriteMasterSolutionIndex",
-    "HipConfig",
     "OffloadBundler",
     "Assembler",
   }

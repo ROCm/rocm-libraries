@@ -12,11 +12,15 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
+#include <fstream>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
@@ -24,8 +28,9 @@
 #include "BundleFixtureFiles.hpp"
 #include "HarnessTestSupport.hpp"
 #include "harness/ReferenceCapabilityError.hpp"
-#include "harness/bundle/BundleReferenceValidationHarness.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
+#include "harness/reference-validation/BundleReferenceValidationHarness.hpp"
+#include "harness/reference-validation/ReferenceOpCoverage.hpp"
 #include "mocks/MockReferenceExecutors.hpp"
 
 using namespace hipdnn_integration_tests;
@@ -88,12 +93,30 @@ protected:
         }
     }
 
-    // Gives a harness a bundle that has golden data. The harness itself is built by
-    // each case: ::testing::Test is non-copyable, so it cannot be handed back.
+    // Gives a harness a bundle that has golden data and no expected gap: these cases
+    // exercise the ordinary path, not the known-gap one. The harness itself is built
+    // by each case: ::testing::Test is non-copyable, so it cannot be handed back.
     void setGoldenBundle(BundleReferenceValidationHarness& harness)
     {
         harness.setBundle(fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true),
-                          _tempDir / "Bundle");
+                          _tempDir / "Bundle",
+                          /*expectedGap=*/std::nullopt);
+    }
+
+    // Same, but expecting the reference to decline under `gap`.
+    void setGoldenBundleExpecting(BundleReferenceValidationHarness& harness,
+                                  const KnownReferenceGap& gap)
+    {
+        harness.setBundle(fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true),
+                          _tempDir / "Bundle",
+                          gap);
+    }
+
+    // A GPU gap entry. The harness asserts whatever entry it is handed and looks nothing
+    // up, so a fixture entry exercises the path even when the live table is empty.
+    static KnownReferenceGap aKnownGpuGap()
+    {
+        return {ReferenceExecutorType::GPU, "fixture_gap.Small", "fixture GPU gap"};
     }
 };
 
@@ -107,7 +130,7 @@ TEST_F(TestBundleReferenceValidationHarness, SetUpFailsForABundleRegisteredWithN
     auto bundle = fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/false);
     BundleReferenceValidationHarness harness(
         ReferenceExecutorType::CPU, /*requiresDevice=*/false, executors());
-    harness.setBundle(bundle, _tempDir / "Bundle");
+    harness.setBundle(bundle, _tempDir / "Bundle", /*expectedGap=*/std::nullopt);
 
     ::testing::TestPartResultArray results;
     driveSetUp(harness, &results);
@@ -117,8 +140,8 @@ TEST_F(TestBundleReferenceValidationHarness, SetUpFailsForABundleRegisteredWithN
 }
 
 // The second guard covers a state the file-based fixtures cannot produce (the
-// loader only ever sets hasGoldenOutputs once tensors is already populated -- see
-// IntegrationTestBundle.hpp's loadTensorDataIfPresent), so this bundle is built by
+// loader only ever sets hasGoldenOutputs once blobs is already populated -- see
+// IntegrationTestBundle.hpp's describeTensorBlobs), so this bundle is built by
 // hand rather than through fixtures::loadBundle.
 TEST_F(TestBundleReferenceValidationHarness, SetUpFailsForABundleRegisteredWithNoTensorData)
 {
@@ -127,13 +150,38 @@ TEST_F(TestBundleReferenceValidationHarness, SetUpFailsForABundleRegisteredWithN
 
     BundleReferenceValidationHarness harness(
         ReferenceExecutorType::CPU, /*requiresDevice=*/false, executors());
-    harness.setBundle(bundle, "no-tensor-data-bundle");
+    harness.setBundle(bundle, "no-tensor-data-bundle", /*expectedGap=*/std::nullopt);
 
     ::testing::TestPartResultArray results;
     driveSetUp(harness, &results);
 
     EXPECT_TRUE(testing_support::anyFailed(results));
     EXPECT_NE(testing_support::allMessages(results).find("no tensor data"), std::string::npos);
+}
+
+// A bundle cannot declare both an alias and golden/output tensor data at once: the
+// normal loader already blocks that combination earlier (checkAliasRules), so the only
+// way to reach this guard is a hand-built bundle that bypasses it, the same way the
+// test above reaches the neighboring no-tensor-data guard.
+TEST_F(TestBundleReferenceValidationHarness, BodyFailsForABundleWithAnAliasAndGoldenData)
+{
+    auto bundle = std::make_shared<IntegrationTestBundle>();
+    bundle->hasGoldenOutputs = true; // clears SetUp()'s first guard
+    bundle->blobs.emplace(); // clears SetUp()'s second guard
+    bundle->metadata.aliases.push_back(TensorAlias{1, 0, 0});
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::CPU, /*requiresDevice=*/false, executors());
+    harness.setBundle(bundle, "alias-and-golden-data-bundle", /*expectedGap=*/std::nullopt);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_NE(testing_support::allMessages(results).find(
+                  "aliases cannot be used with golden tensor data"),
+              std::string::npos)
+        << testing_support::allMessages(results);
 }
 
 // The regression this rework fixes: useDevice() used to read _referenceType ==
@@ -161,7 +209,7 @@ TEST_F(TestBundleReferenceValidationHarness,
     auto bundle = fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true);
     BundleReferenceValidationHarness harness(
         ReferenceExecutorType::GPU, /*requiresDevice=*/true, executors());
-    harness.setBundle(bundle, _tempDir / "Bundle");
+    harness.setBundle(bundle, _tempDir / "Bundle", /*expectedGap=*/std::nullopt);
 
     // Driven through TestBody() directly rather than SetUp()+TestBody(): SetUp()'s
     // SKIP_IF_NO_DEVICES() gate is keyed off the registration flag alone and would
@@ -199,7 +247,7 @@ TEST_F(TestBundleReferenceValidationHarness,
     auto bundle = fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true);
     BundleReferenceValidationHarness harness(
         ReferenceExecutorType::GPU, /*requiresDevice=*/true, executors());
-    harness.setBundle(bundle, _tempDir / "Bundle");
+    harness.setBundle(bundle, _tempDir / "Bundle", /*expectedGap=*/std::nullopt);
 
     // Not driven through SetUp(): same seam as above. The guard at the top of this
     // test already confirmed a device is present for this process.
@@ -238,6 +286,77 @@ TEST_F(TestBundleReferenceValidationHarness, InapplicableReferenceFailsRatherTha
     EXPECT_NE(testing_support::allMessages(results).find("is required to support this graph"),
               std::string::npos)
         << testing_support::allMessages(results);
+}
+
+// A bundle on the known-gap list still runs; it just expects the reference to
+// decline. That keeps the gap counted and named instead of skipped, and keeps the
+// suite green while the missing shapes are implemented elsewhere.
+TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleThatIsDeclinedPasses)
+{
+    const auto gap = aKnownGpuGap();
+
+    ON_CALL(_gpuExecutor, isApplicable(::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(false));
+    EXPECT_CALL(_gpuExecutor, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    setGoldenBundleExpecting(harness, gap);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results)) << testing_support::allMessages(results);
+}
+
+// A reference may decline by throwing ReferenceCapabilityError instead of returning
+// false. That is the same answer, so a listed gap declined that way must pass too,
+// not fail as an escaped exception.
+TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleDeclinedByThrowingPasses)
+{
+    const auto gap = aKnownGpuGap();
+
+    ON_CALL(_gpuExecutor, isApplicable(::testing::_, ::testing::_))
+        .WillByDefault([](void*, size_t) -> bool {
+            throw ReferenceCapabilityError("stub: no plan for this shape");
+        });
+    EXPECT_CALL(_gpuExecutor, execute(::testing::_, ::testing::_, ::testing::_)).Times(0);
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    setGoldenBundleExpecting(harness, gap);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results)) << testing_support::allMessages(results);
+}
+
+// The self-retiring half, and the reason this is an expected-failure list rather
+// than a skip list: the moment the reference can run a listed graph, the entry is
+// stale and the run goes red until someone deletes it. A skip list would instead
+// go quiet exactly when the gap closed, and the bundle would stay unverified.
+TEST_F(TestBundleReferenceValidationHarness, KnownGapBundleThatGainsSupportFails)
+{
+    const auto gap = aKnownGpuGap();
+
+    ON_CALL(_gpuExecutor, isApplicable(::testing::_, ::testing::_))
+        .WillByDefault(::testing::Return(true));
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    setGoldenBundleExpecting(harness, gap);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
+    const auto messages = testing_support::allMessages(results);
+    EXPECT_NE(messages.find("now reports this graph applicable"), std::string::npos) << messages;
+    EXPECT_NE(messages.find(std::string(gap.bundleId)), std::string::npos) << messages;
 }
 
 // Same contract by the other route: the reference accepts the graph up front and
@@ -281,6 +400,30 @@ TEST_F(TestBundleReferenceValidationHarness, ReferenceThatThrowsIsReportedWithIt
     EXPECT_TRUE(testing_support::anyFailed(results));
     EXPECT_NE(testing_support::allMessages(results).find("stub: reference exploded"),
               std::string::npos);
+}
+
+// A golden blob that cannot be read fails this lane's test with the reason and the
+// bundle, instead of the bundle having been dropped quietly at registration.
+TEST_F(TestBundleReferenceValidationHarness, UnreadableGoldenBlobFailsTheRunWithTheReason)
+{
+    auto bundle = fixtures::loadBundle(_tempDir, "Bundle", /*includeGoldenOutput=*/true);
+    ASSERT_TRUE(bundle->blobs.has_value());
+    ASSERT_FALSE(bundle->blobs->inputUids.empty());
+    std::ofstream(bundle->blobs->pathForUid(bundle->blobs->inputUids.front()),
+                  std::ios::binary | std::ios::trunc)
+        << "too short";
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    harness.setBundle(bundle, _tempDir / "Bundle", /*expectedGap=*/std::nullopt);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+    const auto messages = testing_support::allMessages(results);
+    EXPECT_NE(messages.find("golden tensor data failed to load"), std::string::npos) << messages;
+    EXPECT_NE(messages.find((_tempDir / "Bundle").string()), std::string::npos) << messages;
 }
 
 // The green path, and the mismatch path beside it: a reference whose output equals
@@ -336,6 +479,147 @@ TEST_F(TestBundleReferenceValidationHarness, DriftedReferenceOutputFailsNamingTh
     const std::string messages = testing_support::allMessages(results);
     EXPECT_NE(messages.find("Golden data validation"), std::string::npos) << messages;
     EXPECT_NE(messages.find("UID " + std::to_string(fixtures::K_OUTPUT_UID)), std::string::npos)
+        << messages;
+}
+
+// The reference is handed output buffers laid out like the golden data: an SDPA bundle whose
+// Stats sits [H,T] with a gap between its batches (L7d) allocates both outputs to the
+// elementSpace of the dense view, built with the node's seq_len lengths.
+TEST_F(TestBundleReferenceValidationHarness, RaggedSdpaOutputsTakeTheirLengthsFromSeqLen)
+{
+    ON_CALL(_gpuExecutor, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([](void*, size_t, const VariantPack& variantPack) {
+            auto variantPackCopy = variantPack;
+            fixtures::writeRaggedSdpaGappedOutputs(variantPackCopy, 0.0f);
+        });
+
+    const auto layout = fixtures::raggedSdpaGappedStatsCase();
+    const auto dir = _tempDir / layout.name;
+    fixtures::writeRaggedSdpaCase(dir, layout);
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    harness.setBundle(fixtures::loadWrittenBundle(dir, layout.name), dir, std::nullopt);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
+// ---- live_rows -------------------------------------------------------------
+
+namespace
+{
+
+constexpr float K_NAN = std::numeric_limits<float>::quiet_NaN();
+constexpr float K_NEGATIVE_INF = -std::numeric_limits<float>::infinity();
+
+// A reference that writes `value` to every element of y, including the rows past the
+// live lengths.
+void referenceWrites(::testing::NiceMock<MockReferenceGraphExecutor>& executor, float value)
+{
+    ON_CALL(executor, execute(::testing::_, ::testing::_, ::testing::_))
+        .WillByDefault([value](void*, size_t, const VariantPack& variantPack) {
+            auto* ptr = static_cast<float*>(variantPack.at(fixtures::K_OUTPUT_UID));
+            std::fill(ptr, ptr + fixtures::K_OUTPUT_ELEMS, value);
+        });
+}
+
+} // namespace
+
+TEST_F(TestBundleReferenceValidationHarness, LiveRowGoldenNaNPastTheLengthsIsNotCompared)
+{
+    referenceWrites(_gpuExecutor, fixtures::K_OUTPUT_VALUE);
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    harness.setBundle(fixtures::writeLiveRowBundle(_tempDir, "live_rows", {1, 0}, K_NAN),
+                      _tempDir / "live_rows",
+                      std::nullopt);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
+// Golden y holds -inf past the lengths and the reference writes a finite value there:
+// only the lengths keep those positions out of the comparison.
+TEST_F(TestBundleReferenceValidationHarness, LiveRowGoldenInfPastTheLengthsIsNotCompared)
+{
+    referenceWrites(_gpuExecutor, fixtures::K_OUTPUT_VALUE);
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    harness.setBundle(
+        fixtures::writeLiveRowBundle(_tempDir, "live_rows_inf", {1, 0}, K_NEGATIVE_INF),
+        _tempDir / "live_rows_inf",
+        std::nullopt);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_FALSE(testing_support::anyFailed(results)) << testing_support::allMessages(results);
+    EXPECT_FALSE(testing_support::anySkipped(results));
+}
+
+TEST_F(TestBundleReferenceValidationHarness, LiveRowGoldenInfWithoutLiveRowsFails)
+{
+    referenceWrites(_gpuExecutor, fixtures::K_OUTPUT_VALUE);
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    harness.setBundle(fixtures::writeLiveRowBundle(
+                          _tempDir, "no_live_rows", {1, 0}, K_NEGATIVE_INF, /*withLiveRows=*/false),
+                      _tempDir / "no_live_rows",
+                      std::nullopt);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    EXPECT_TRUE(testing_support::anyFailed(results));
+}
+
+TEST_F(TestBundleReferenceValidationHarness, LiveRowDriftInALiveRowFails)
+{
+    referenceWrites(_gpuExecutor, fixtures::K_OUTPUT_VALUE + 100.0f);
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    harness.setBundle(fixtures::writeLiveRowBundle(_tempDir, "live_drift", {1, 0}, K_NAN),
+                      _tempDir / "live_drift",
+                      std::nullopt);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    ASSERT_TRUE(testing_support::anyFailed(results));
+    const auto messages = testing_support::allMessages(results);
+    EXPECT_NE(messages.find("UID " + std::to_string(fixtures::K_OUTPUT_UID)), std::string::npos)
+        << messages;
+}
+
+TEST_F(TestBundleReferenceValidationHarness, LiveRowLengthPastTheExtentFailsTheValidation)
+{
+    referenceWrites(_gpuExecutor, fixtures::K_OUTPUT_VALUE);
+
+    BundleReferenceValidationHarness harness(
+        ReferenceExecutorType::GPU, /*requiresDevice=*/false, executors());
+    harness.setBundle(fixtures::writeLiveRowBundle(_tempDir, "live_too_long", {5, 0}, K_NAN),
+                      _tempDir / "live_too_long",
+                      std::nullopt);
+
+    ::testing::TestPartResultArray results;
+    drive(harness, &results);
+
+    ASSERT_TRUE(testing_support::anyFailed(results));
+    EXPECT_FALSE(testing_support::anySkipped(results));
+    const auto messages = testing_support::allMessages(results);
+    EXPECT_NE(messages.find("live_rows cannot be applied"), std::string::npos) << messages;
+    EXPECT_NE(messages.find("length 5 of batch 0 is not in the range 0 to 4"), std::string::npos)
         << messages;
 }
 

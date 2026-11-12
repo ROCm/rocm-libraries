@@ -20,11 +20,11 @@ Prerequisites
 
 On Linux, :doc:`ROCm <rocm:install/rocm>` must be installed before hipThreads is built.
 
-hipThreads has the following prerequisites on Linux and Microsoft Windows:
+hipThreads has the following prerequisites on Linux and Windows:
 
 * `CMake <https://cmake.org/>`_ version 3.21 or higher
 * `hipcc <https://rocm.docs.amd.com/projects/HIPCC/en/latest/index.html>`_
-* ROCm 7.12 or later, which provides HIP and libhipcxx
+* HIP and libhipcxx from an installed ROCm
 * A build tool such as ``make`` or `Ninja <https://ninja-build.org/>`_
 
 hipThreads has these additional prerequisites on Windows:
@@ -48,7 +48,11 @@ Use sparse checkout when cloning the hipThreads project:
   git sparse-checkout init --cone
   git sparse-checkout set projects/hipthreads
 
-Then use ``git checkout`` to check out the branch you need.
+Then use ``git checkout`` to check out the branch you need. For example, to check out the develop branch:
+
+.. code-block:: bash
+
+   git checkout develop
 
 The develop branch is intended for users who want to preview new features or contribute to the hipThreads code base.
 
@@ -142,6 +146,6 @@ For instance, to build and run the SIMD-optimized SAXPY example on Linux:
 
 On Windows, use the same Ninja, clang, and ``-DCMAKE_HIP_ARCHITECTURES`` flags as the library build above.
 The exact configure, build, and run commands for each step, on both Linux and Windows, are recorded in a comment at the bottom of that step's ``CMakeLists.txt``.
-Some examples need extra setup — for example, the sparse matrix multiply data is pulled with ``git lfs``, and llama3.c takes a model path as an argument — so check the ``CMakeLists.txt`` footer for the step you are building.
+Some examples need extra setup — for example, the sparse matrix multiply data is left out of clones and must be pulled with ``git lfs``, and llama3.c takes a model path as an argument — so check the ``CMakeLists.txt`` footer for the step you are building.
 
 After installing, see :doc:`../how-to/hipThreads-in-a-project` to consume hipThreads from your own CMake project.

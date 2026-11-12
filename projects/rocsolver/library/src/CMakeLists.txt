@@ -472,20 +472,6 @@ endif()
 # Ignore loop unrolling failures
 target_compile_options(rocsolver PRIVATE -Wno-pass-failed)
 
-# hipcc adds these options automatically. These options might have an effect
-# on performance, so add them when building with clang directly, just in case.
-if(USE_HIPCXX)
-  target_compile_options(rocsolver PRIVATE
-    "$<$<COMPILE_LANGUAGE:HIP>:SHELL:-mllvm -amdgpu-early-inline-all=true>"
-    "$<$<COMPILE_LANGUAGE:HIP>:SHELL:-mllvm -amdgpu-function-calls=false>"
-  )
-elseif(CMAKE_CXX_COMPILER MATCHES ".*clang\\+\\+.*")
-  target_compile_options(rocsolver PRIVATE
-    "SHELL:-mllvm -amdgpu-early-inline-all=true"
-    "SHELL:-mllvm -amdgpu-function-calls=false"
-  )
-endif()
-
 if(BUILD_OFFLOAD_COMPRESS)
   target_compile_options(rocsolver PRIVATE "--offload-compress")
 endif()
@@ -520,6 +506,11 @@ endif()
 
 if(OPTIMAL)
   target_compile_definitions(rocsolver PRIVATE OPTIMAL)
+endif()
+
+# Feature flag: larfg setting tau=2 when norm(x)=0.
+if(ROCSOLVER_ENABLE_LARFG_TAU2)
+  target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_LARFG_TAU2)
 endif()
 
 if(ROCSOLVER_USE_INTERNAL_BLAS)

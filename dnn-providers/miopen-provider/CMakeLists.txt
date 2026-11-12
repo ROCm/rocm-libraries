@@ -136,6 +136,7 @@ include(CheckToolVersion)
 include(ClangCheck)
 include(ClangTidy)
 include(Sanitizers)
+include(WindowsDllStaging)
 
 include(Dependencies)
 if(NOT MIOPENPROVIDER_SKIP_TESTS)
@@ -238,9 +239,11 @@ target_link_libraries(miopen_plugin_impl PUBLIC ${MIOPEN_PROVIDER_MIOPEN_LIB} hi
 target_compile_definitions(miopen_plugin_impl PUBLIC MIOPEN_BETA_API)
 # When linking the private implementation library, force-include the symbol-rename
 # header so the provider's public C API calls bind the _impl entry points exported
-# by libMIOpen_private.so. This mirrors how MIOpen_private itself is built (a
-# force-included src/private/miopen_private_rename.h) and keeps the provider sources
-# free of _impl spellings. PUBLIC so the force-include also reaches the unit-test
+# by libMIOpen_private.so. The header is generated from MIOpen's
+# include/miopen/miopen.h by projects/miopen/script/generate_wrapper_sources.py, in
+# the same run that writes the src/private/miopen_private_rename.h MIOpen_private is
+# built with, so the two renames cannot differ. It keeps the provider sources free
+# of _impl spellings. PUBLIC so the force-include also reaches the unit-test
 # targets, which compile the provider headers. With the split OFF nothing is
 # force-included and the provider calls the public C API unchanged.
 #
@@ -346,8 +349,6 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
     if(TARGET hipdnn_integration_tests)
         list(APPEND DNN_PROVIDER_TEST_RUN_DEPENDS miopen_plugin hipdnn_integration_tests)
     endif()
-    set(DNN_PROVIDER_CHECK_EXCLUDE_LABELS ex_gpu_gfx110X)
-
 
     # Finalize test targets with prefix to avoid collisions in superbuild mode
     # Keep this after all build folders have been added so they have a chance to register their tests
@@ -421,6 +422,8 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
             ENGINE_NAME    MIOPEN_ENGINE
             INSTALL_SUBDIR miopen_plugin
             TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/config/MIOPEN_ENGINE.toml
+            # Five small batchnorm inference bundles: a few seconds on one GPU.
+            BENCHMARK_REFERENCE_SMOKE_FILTER "quick_BatchnormFwdInference_Inference.*"
             ${_external_category_args}
         )
         message(STATUS "Created ${PROJECT_NAME}-external-integration-check target")
@@ -449,6 +452,7 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
             apply_ctest_category_labels(
                 "${MIOPENPROVIDER_CTEST_CATEGORIES_YAML}"
                 EXPLICIT_TESTS ${PROJECT_NAME}-external-integration-check
+                               ${PROJECT_NAME}-external-integration-check-benchmark-reference-smoke
             )
         endif()
     else()
@@ -474,6 +478,7 @@ install(TARGETS miopen_plugin EXPORT miopen-plugin
         LIBRARY DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
         RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}")
 
 add_clang_tidy_custom_target()
 

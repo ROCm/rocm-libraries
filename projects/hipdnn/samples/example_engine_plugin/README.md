@@ -20,13 +20,14 @@ Runtime Compilation):
 | ROCm (HIP SDK + HIPRTC) | GPU kernel compilation and execution | `hipStream_t`, `hipMalloc`, HIPRTC APIs |
 | hipDNN (installed) | Plugin SDK, data SDK, frontend library | Typically installed at `/opt/rocm` (Linux) |
 | GPU hardware | Runtime execution of HIPRTC-compiled kernels | Any ROCm-supported GPU |
-| Internet access | GTest is downloaded via CMake `FetchContent` | Only needed for the first build |
+| GoogleTest including GoogleMock | Unit testing and mocking frameworks | Supplied by the hipDNN developer image, or provide its CMake package via `CMAKE_PREFIX_PATH` or `GTest_DIR`; fetching requires `-DALLOW_FETCH_DEPS=ON` |
 
 ## Directory Structure
 
 ```
 example_engine_plugin/
 ├── CMakeLists.txt                       # Root CMake: project options, dependencies
+├── CMakePresets.json                    # Ninja debug/release configure and build presets
 ├── README.md                            # This file
 ├── README_TEMPLATE.md                   # Template README for new plugins (copy as README.md)
 ├── ai_plugin_rename_prompt.md            # AI agent prompt for copy-and-rename plugin creation
@@ -53,7 +54,7 @@ example_engine_plugin/
 │   ├── ExampleProviderContainer.hpp/cpp   # Engine registration and EngineManager
 │   ├── ExampleProviderHandle.hpp/cpp      # Plugin handle (stream, container reference)
 │   ├── ExampleProviderContext.hpp         # Execution context
-│   ├── ExampleProviderSettings.hpp        # Execution settings (reluNegativeSlope)
+│   ├── ExampleProviderSettings.hpp        # Execution settings (reluNegativeSlope, blockSize)
 │   ├── hip/                             # HIPRTC infrastructure (DI interfaces + impls)
 │   │   ├── IKernelCompiler.hpp          # Interface: compile(filename, options)
 │   │   ├── ICompiledProgram.hpp         # Interface: getRunnableKernel(name)
@@ -97,11 +98,26 @@ example_engine_plugin/
 
 Run these commands from the example_engine_plugin folder.
 
+The [hipDNN developer image](../../dockerfiles/README.md) installs GoogleTest/GoogleMock and spdlog automatically in `/usr/local`. The Linux recipe below uses those packages without manual downloads, installs, or a fetch flag, together with hipDNN and ROCm in `/opt/rocm`.
+
+Outside the image, supply complete installed prefixes: HIP/HIPRTC, the hipDNN plugin, data, FlatBuffers and frontend SDK packages and their transitive dependencies (including FlatBuffers and nlohmann_json when enabled), and GoogleTest including GoogleMock. Use absolute paths in the `CMAKE_PREFIX_PATH` lists below; `GTest_DIR` can identify the installed GoogleTest package instead of adding its prefix. The alternative `ALLOW_FETCH_DEPS=ON` only permits fetching GoogleTest, not hipDNN, HIP, or the other SDK dependencies. A copied plugin is an independent configure and does not inherit a previous hipDNN or samples build's fetch setting.
+
 ### Linux (GCC)
 
 ```bash
 cmake -B build -DCMAKE_PREFIX_PATH="/opt/rocm"
 cmake --build build
+```
+
+Outside the image, replace the configure command with one of:
+
+```bash
+cmake -B build -DALLOW_FETCH_DEPS=OFF \
+    -DCMAKE_PREFIX_PATH="/path/to/hipdnn-install;/path/to/rocm;/path/to/dependencies"
+
+# Alternatively, fetch missing GoogleTest.
+cmake -B build -DALLOW_FETCH_DEPS=ON \
+    -DCMAKE_PREFIX_PATH="/path/to/hipdnn-install;/path/to/rocm;/path/to/dependencies"
 ```
 
 Run all tests, including the sample app:
@@ -119,10 +135,10 @@ ctest --test-dir build -R example_provider_sample
 The tests and sample can also be run directly:
 
 ```bash
-./build/bin/example_provider_tests
+./build/bin/hipdnn_example_provider_unit_tests
 ```
 ```bash
-./build/bin/example_provider_sample
+./build/bin/hipdnn_example_provider_sample
 ```
 
 Install the plugin:
@@ -143,18 +159,20 @@ set PATH=C:\AMD\ROCm\bin;%PATH%
 With MSVC installed:
 
 ```powershell
-cmake -B build -G "Visual Studio 17 2022"
+cmake -B build -G "Visual Studio 17 2022" -DALLOW_FETCH_DEPS=OFF -DCMAKE_PREFIX_PATH="C:/path/to/hipdnn-install;C:/AMD/ROCm;C:/path/to/dependencies"
 cmake --build build --config Release
 ctest --test-dir build --build-config Release
 ```
 
+If GoogleTest is not installed, use `-DALLOW_FETCH_DEPS=ON` instead of `OFF` in this configure command; keep the installed SDK and other dependency prefixes.
+
 The tests and sample can also be run directly:
 
 ```powershell
-.\build\bin\Release\example_provider_tests.exe
+.\build\bin\Release\hipdnn_example_provider_unit_tests.exe
 ```
 ```powershell
-.\build\bin\Release\example_provider_sample.exe
+.\build\bin\Release\hipdnn_example_provider_sample.exe
 ```
 
 ### Windows (GNU/Clang with Ninja)
@@ -162,18 +180,20 @@ The tests and sample can also be run directly:
 With Clang and Ninja installed, and with the ROCm `bin` folder in your system PATH:
 
 ```powershell
-cmake -B build -G "Ninja"
+cmake -B build -G "Ninja" -DALLOW_FETCH_DEPS=OFF -DCMAKE_PREFIX_PATH="C:/path/to/hipdnn-install;C:/AMD/ROCm;C:/path/to/dependencies"
 cmake --build build
 ctest --test-dir build
 ```
 
+If GoogleTest is not installed, use `-DALLOW_FETCH_DEPS=ON` instead of `OFF` in this configure command; keep the installed SDK and other dependency prefixes.
+
 The tests and sample can also be run directly:
 
 ```powershell
-.\build\bin\example_provider_tests.exe
+.\build\bin\hipdnn_example_provider_unit_tests.exe
 ```
 ```powershell
-.\build\bin\example_provider_sample.exe
+.\build\bin\hipdnn_example_provider_sample.exe
 ```
 
 ### CMake Options
@@ -182,6 +202,13 @@ The tests and sample can also be run directly:
 |---|---|---|
 | `EXAMPLEPROVIDER_BUILD_UNIT_TESTS` | `ON` | Build unit tests (no GPU required) |
 | `EXAMPLEPROVIDER_BUILD_SAMPLE` | `ON` | Build sample application (serves as acceptance test via `ctest`) |
+| `EXAMPLEPROVIDER_ENABLE_CLANG_TIDY` | `OFF` | Run clang-tidy during compilation (requires `clang-tidy` on `PATH`) |
+| `BUILD_ADDRESS_SANITIZER` | `OFF` | Build with Address Sanitizer (Linux only) |
+| `TEST_ENVIRONMENT` | `""` | Environment variables for the unit tests, as `VAR1=val1;VAR2=val2` |
+| `ALLOW_FETCH_DEPS` | `OFF` | Allow fetching GoogleTest when its CMake package is unavailable; inherited from the samples parent build |
+| `EXAMPLE_PROVIDER_GTEST_VERSION` | `1.17.0` | GoogleTest tag used by the explicit fetch fallback; installed packages and supplied source trees take precedence |
+
+The samples parent forwards an installed `GTest_DIR` or its supplied GoogleTest source tree to the plugin's separate build. An explicitly supplied source tree also works with fetching disabled. Package/source/version cache entries are refreshed when the parent inputs change. A copied standalone plugin keeps its own matching fallback default and needs no monorepo version include.
 
 To build only the plugin library (no tests or sample):
 
@@ -602,15 +629,17 @@ prefix. These are the `ExampleProvider`-prefixed files from the
 |---|---|
 | `hipdnn-example-provider` (project name) | `your-name-provider` |
 | `example_provider_impl` | `your_name_provider_impl` |
+| `example_provider_impl_kernel_sources` | `your_name_provider_impl_kernel_sources` |
 | `example_provider_private` | `your_name_provider_private` |
 | `example_provider_plugin` | `your_name_provider_plugin` |
 | `example_provider_compile_options` | `your_name_provider_compile_options` |
 | `example_provider_kernel_embed` | `your_name_provider_kernel_embed` |
-| `example_provider_tests` | `your_name_provider_tests` |
-| `example_provider_sample` | `your_name_provider_sample` |
+| `hipdnn_example_provider_unit_tests` | `hipdnn_your_name_provider_unit_tests` |
+| `hipdnn_example_provider_sample` | `hipdnn_your_name_provider_sample` |
 | `EXAMPLEPROVIDER_BUILD_UNIT_TESTS` | `YOURNAMEPROVIDER_BUILD_UNIT_TESTS` |
 | `EXAMPLEPROVIDER_BUILD_SAMPLE` | `YOURNAMEPROVIDER_BUILD_SAMPLE` |
 | `EXAMPLEPROVIDER_ENABLE_CLANG_TIDY` | `YOURNAMEPROVIDER_ENABLE_CLANG_TIDY` |
+| `EXAMPLE_PROVIDER_GTEST_VERSION` | `YOUR_NAME_PROVIDER_GTEST_VERSION` |
 | `example_provider_version_file_dir` (function) | `your_name_provider_version_file_dir` |
 | `example_provider_setup_version` (function) | `your_name_provider_setup_version` |
 | `example_provider_generate_version_header` (function) | `your_name_provider_generate_version_header` |

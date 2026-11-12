@@ -231,6 +231,23 @@ rocblas_status rocsolver_sytrf_template(rocblas_handle handle,
         return rocblas_status_success;
     }
 
+#ifndef NDEBUG
+    {
+        // -------------------------------
+        // initialize scratch work[] array
+        // with NaN to verify the code is not
+        // accessing uninitialized memory
+        // -------------------------------
+        size_t size_work = 0;
+        rocsolver_sytrf_getMemorySize<T>(n, batch_count, &size_work);
+        if((work != nullptr) && (size_work > 0))
+        {
+            int value = 0xFF;
+            HIP_CHECK(hipMemsetAsync(work, value, size_work, stream));
+        }
+    }
+#endif
+
     dim3 grid(1, batch_count, 1);
     dim3 threads(SYTRF_MAX_THDS, 1, 1);
 

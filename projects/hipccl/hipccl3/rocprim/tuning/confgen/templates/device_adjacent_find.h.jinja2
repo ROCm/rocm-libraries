@@ -1,0 +1,17 @@
+{% extends "common/base.h.jinja2" %}
+
+{% block tparams %}
+    class input_type
+{% endblock %}
+
+{% block config_guard scoped %}
+    {{ mk_type_trait_guard(type.input_type) }}{{ mk_type_sz_check(type.input_type) }}
+{% endblock %}
+
+{% block config_constructor -%}
+adjacent_find_config_params{ { {{ config.block_size_x }}, {{ config.ipt }} } }
+{%- endblock %}
+
+{% block config_base_type -%}
+adjacent_find_config_params_base<input_type>
+{%- endblock %}

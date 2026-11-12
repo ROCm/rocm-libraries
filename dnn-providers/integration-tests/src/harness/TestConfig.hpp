@@ -16,7 +16,10 @@
 #include <string_view>
 
 #include "common/PlatformUtils.hpp"
+#include "harness/Benchmark.hpp"
+#include "harness/Capture.hpp"
 #include "harness/TestSettings.hpp"
+#include "harness/ValidationSite.hpp"
 
 namespace hipdnn_integration_tests
 {
@@ -110,6 +113,24 @@ inline std::optional<VerificationMode>
     return std::nullopt;
 }
 
+// Resolve the requested validator: CLI value wins, then HIPDNN_TEST_VALIDATOR, then
+// nullopt (AUTO). Kept separate from TestConfig::initialize() so the precedence logic is
+// independently testable.
+inline std::optional<ValidatorDevice>
+    resolveValidatorDevice(std::optional<ValidatorDevice> cliValue)
+{
+    if(cliValue.has_value())
+    {
+        return cliValue;
+    }
+    auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_VALIDATOR");
+    if(!envVal.empty())
+    {
+        return parseValidatorDevice(envVal);
+    }
+    return std::nullopt;
+}
+
 // Resolve golden data dir: CLI value wins, then env var, then nullopt.
 inline std::optional<std::filesystem::path>
     resolveGoldenDataDir(std::optional<std::filesystem::path> cliValue)
@@ -137,9 +158,17 @@ struct TestConfigOptions
     bool allowBundles = true;
     std::optional<std::filesystem::path> goldenDataDir;
     std::optional<VerificationMode> verificationMode;
+    std::optional<ValidatorDevice> validatorDevice;
     std::optional<std::filesystem::path> captureDir;
+    // Off here, on at the command line: main.cpp resolves --enforce-support-claims
+    // (default true) and its opt-out into this field before initializing. In-process
+    // callers get the inert value, so a test that never mentions claims cannot be
+    // failed by one.
     bool enforceSupportClaims = false;
     bool writeSupportClaims = false;
+    std::optional<BenchmarkSettings> benchmark;
+    std::optional<CaptureSettings> graphCapture;
+    bool benchmarkReference = false;
 };
 
 // Singleton class for storing CLI-based test configuration.
@@ -208,6 +237,9 @@ public:
 
         instance._enforceSupportClaims = opts.enforceSupportClaims;
         instance._writeSupportClaims = opts.writeSupportClaims;
+        instance._benchmark = opts.benchmark;
+        instance._graphCapture = opts.graphCapture;
+        instance._benchmarkReference = opts.benchmarkReference;
 
         // Golden bundle configuration — default is ON; env var can override.
         instance._allowBundles = opts.allowBundles;
@@ -233,6 +265,7 @@ public:
 
         instance._goldenDataDir = resolveGoldenDataDir(std::move(opts.goldenDataDir));
         instance._verificationMode = resolveVerificationMode(opts.verificationMode);
+        instance._validatorDevice = resolveValidatorDevice(opts.validatorDevice);
         instance._captureDir = std::move(opts.captureDir);
 
         // Detect device 0's gfx arch and VRAM once at startup. Used by
@@ -428,6 +461,17 @@ public:
         return _verificationMode.value_or(VerificationMode::AUTO);
     }
 
+    // Where comparisons run. Resolved once at init: CLI flag > HIPDNN_TEST_VALIDATOR
+    // env var > AUTO default (follow the reference).
+    ValidatorDevice getValidatorDevice() const
+    {
+        throwIfNotInitialized();
+        return _validatorDevice.value_or(ValidatorDevice::AUTO);
+    }
+
+    /// Query every claim-bearing bundle against the engine under test, print the
+    /// summary, and fail the test on a broken claim. One flag for all three: whether
+    /// the sidecar is read and whether a break is fatal are the same decision.
     bool enforceSupportClaims() const
     {
         throwIfNotInitialized();
@@ -457,6 +501,27 @@ public:
         return _captureDir.value();
     }
 
+    /// Set by --benchmark-reference: time the reference of each bundle test.
+    bool benchmarkReference() const
+    {
+        throwIfNotInitialized();
+        return _benchmarkReference;
+    }
+
+    /// Set by --benchmark: how to time each verified graph. Empty when off.
+    const std::optional<BenchmarkSettings>& benchmarkSettings() const
+    {
+        throwIfNotInitialized();
+        return _benchmark;
+    }
+
+    /// Set by --graph-capture: capture and replay each verified graph. Empty when off.
+    const std::optional<CaptureSettings>& graphCaptureSettings() const
+    {
+        throwIfNotInitialized();
+        return _graphCapture;
+    }
+
 private:
     TestConfig() = default;
 
@@ -474,7 +539,11 @@ private:
     std::optional<ReferenceExecutorType> _referenceExecutorType;
     std::optional<std::filesystem::path> _goldenDataDir;
     std::optional<VerificationMode> _verificationMode;
+    std::optional<ValidatorDevice> _validatorDevice;
     std::optional<std::filesystem::path> _captureDir;
+    std::optional<BenchmarkSettings> _benchmark;
+    std::optional<CaptureSettings> _graphCapture;
+    bool _benchmarkReference = false;
     std::string _currentArch;
     std::size_t _currentDeviceVramMb = 0;
     std::string _currentPlatform;

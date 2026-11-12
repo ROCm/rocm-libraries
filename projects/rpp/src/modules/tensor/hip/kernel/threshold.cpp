@@ -188,7 +188,8 @@ RppStatus hip_exec_threshold_tensor(T* srcPtr, RpptDescPtr srcDescPtr, T* dstPtr
                                     RpptDescPtr dstDescPtr, Rpp32f* minTensor, Rpp32f* maxTensor,
                                     RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
                                     rpp::Handle& handle) {
-    if (roiType == RpptRoiType::LTRB) hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle);
+    if (roiType == RpptRoiType::LTRB)
+        RPP_RETURN_IF_ERROR(hip_exec_roi_conversion_ltrb_to_xywh(roiTensorPtrSrc, handle));
 
     Rpp32s globalThreads_x = (dstDescPtr->w + 7) >> 3;
     Rpp32s globalThreads_y = dstDescPtr->h;

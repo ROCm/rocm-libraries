@@ -27,6 +27,7 @@
 #include "internal/conversion/rocsparse_csr2gebsr.h"
 #include "rocsparse_control.hpp"
 #include "rocsparse_gebsr2gebsr.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_utility.hpp"
 
 #include "gebsr2csr_device.h"
@@ -61,6 +62,17 @@
         bsr_col_ind_C,                                                             \
         row_block_dim_C,                                                           \
         col_block_dim_C);
+
+namespace rocsparse
+{
+    // The gebsr -> csr -> gebsr path stores the intermediate CSR matrix, of
+    // nblocks * block_dim rows (or columns), with rocsparse_int indices.
+    static bool gebsr_csr_dim_overflows(rocsparse_int nblocks, rocsparse_int block_dim)
+    {
+        return static_cast<int64_t>(nblocks) * block_dim
+               > std::numeric_limits<rocsparse_int>::max();
+    }
+}
 
 template <typename T>
 rocsparse_status rocsparse::gebsr2gebsr_buffer_size_template(rocsparse_handle          handle, //0
@@ -113,6 +125,15 @@ rocsparse_status rocsparse::gebsr2gebsr_buffer_size_template(rocsparse_handle   
     ROCSPARSE_CHECKARG_SIZE(12, col_block_dim_C);
     ROCSPARSE_CHECKARG(12, col_block_dim_C, (col_block_dim_C == 0), rocsparse_status_invalid_size);
 
+    ROCSPARSE_CHECKARG(9,
+                       row_block_dim_A,
+                       rocsparse::gebsr_csr_dim_overflows(mb, row_block_dim_A),
+                       rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG(10,
+                       col_block_dim_A,
+                       rocsparse::gebsr_csr_dim_overflows(nb, col_block_dim_A),
+                       rocsparse_status_invalid_size);
+
     ROCSPARSE_CHECKARG_POINTER(5, descr_A);
     ROCSPARSE_CHECKARG(5,
                        descr_A,
@@ -141,7 +162,7 @@ rocsparse_status rocsparse::gebsr2gebsr_buffer_size_template(rocsparse_handle   
             // Perform the conversion gebsr->gebsr by performing gebsr->csr->gebsr.
             const rocsparse_int m = mb * row_block_dim_A;
 
-            *buffer_size = sizeof(rocsparse_int) * (m + 1)
+            *buffer_size = sizeof(rocsparse_int) * (size_t(m) + 1)
                            + sizeof(rocsparse_int) * row_block_dim_A * col_block_dim_A * nnzb
                            + sizeof(T) * row_block_dim_A * col_block_dim_A * nnzb;
         }
@@ -158,7 +179,7 @@ rocsparse_status rocsparse::gebsr2gebsr_buffer_size_template(rocsparse_handle   
         // Perform the conversion gebsr->gebsr by performing gebsr->csr->gebsr.
         rocsparse_int m = mb * row_block_dim_A;
 
-        *buffer_size = sizeof(rocsparse_int) * (m + 1)
+        *buffer_size = sizeof(rocsparse_int) * (size_t(m) + 1)
                        + sizeof(rocsparse_int) * row_block_dim_A * col_block_dim_A * nnzb
                        + sizeof(T) * row_block_dim_A * col_block_dim_A * nnzb;
     }
@@ -256,6 +277,15 @@ rocsparse_status rocsparse::gebsr2gebsr_template(rocsparse_handle          handl
     ROCSPARSE_CHECKARG_SIZE(16, col_block_dim_C);
     ROCSPARSE_CHECKARG(16, col_block_dim_C, (col_block_dim_C == 0), rocsparse_status_invalid_size);
 
+    ROCSPARSE_CHECKARG(9,
+                       row_block_dim_A,
+                       rocsparse::gebsr_csr_dim_overflows(mb, row_block_dim_A),
+                       rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG(10,
+                       col_block_dim_A,
+                       rocsparse::gebsr_csr_dim_overflows(nb, col_block_dim_A),
+                       rocsparse_status_invalid_size);
+
     const rocsparse_status status = rocsparse::gebsr2gebsr_quickreturn(handle,
                                                                        dir,
                                                                        mb,
@@ -313,10 +343,12 @@ rocsparse_status rocsparse::gebsr2gebsr_template(rocsparse_handle          handl
                        (row_block_dim_C > 32 && temp_buffer == nullptr),
                        rocsparse_status_invalid_pointer);
 
-    const rocsparse_int m    = mb * row_block_dim_A;
-    const rocsparse_int n    = nb * col_block_dim_A;
-    const rocsparse_int mb_c = (m + row_block_dim_C - 1) / row_block_dim_C;
-    const rocsparse_int nb_c = (n + col_block_dim_C - 1) / col_block_dim_C;
+    const rocsparse_int m = mb * row_block_dim_A;
+    const rocsparse_int n = nb * col_block_dim_A;
+    const rocsparse_int mb_c
+        = static_cast<rocsparse_int>((int64_t(m) + row_block_dim_C - 1) / row_block_dim_C);
+    const rocsparse_int nb_c
+        = static_cast<rocsparse_int>((int64_t(n) + col_block_dim_C - 1) / col_block_dim_C);
 
     rocsparse_int start  = 0;
     rocsparse_int end    = 0;
@@ -432,7 +464,7 @@ rocsparse_status rocsparse::gebsr2gebsr_template(rocsparse_handle          handl
         rocsparse_int* ptr = reinterpret_cast<rocsparse_int*>(temp_buffer);
 
         rocsparse_int* csr_row_ptr = reinterpret_cast<rocsparse_int*>(ptr);
-        ptr += (m + 1);
+        ptr += size_t(m) + 1;
         rocsparse_int* csr_col_ind = reinterpret_cast<rocsparse_int*>(ptr);
         ptr += size_t(nnzb) * col_block_dim_A * row_block_dim_A;
         T* csr_val = reinterpret_cast<T*>(ptr);
@@ -537,6 +569,14 @@ try
     ROCSPARSE_CHECKARG(7, row_block_dim, (row_block_dim == 0), rocsparse_status_invalid_size);
     ROCSPARSE_CHECKARG_SIZE(8, col_block_dim);
     ROCSPARSE_CHECKARG(8, col_block_dim, (col_block_dim == 0), rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG(7,
+                       row_block_dim,
+                       rocsparse::gebsr_csr_dim_overflows(mb, row_block_dim),
+                       rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG(8,
+                       col_block_dim,
+                       rocsparse::gebsr_csr_dim_overflows(nb, col_block_dim),
+                       rocsparse_status_invalid_size);
 
     ROCSPARSE_CHECKARG_POINTER(9, csr_descr);
     ROCSPARSE_CHECKARG(9,
@@ -563,11 +603,8 @@ try
         rocsparse_int start = 0;
         rocsparse_int end   = 0;
 
-        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&end,
-                                                     &bsr_row_ptr[mb * row_block_dim],
-                                                     sizeof(rocsparse_int),
-                                                     hipMemcpyDeviceToHost,
-                                                     handle->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+            &end, &bsr_row_ptr[mb], sizeof(rocsparse_int), hipMemcpyDeviceToHost, handle->stream));
         RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
             &start, &bsr_row_ptr[0], sizeof(rocsparse_int), hipMemcpyDeviceToHost, handle->stream));
         RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
@@ -581,11 +618,14 @@ try
 
     constexpr rocsparse_int block_size     = 256;
     rocsparse_int           wavefront_size = handle->wavefront_size;
-    rocsparse_int           grid_size      = mb * row_block_dim / (block_size / wavefront_size);
-    if(mb * row_block_dim % (block_size / wavefront_size) != 0)
-    {
-        grid_size++;
-    }
+
+    // One wavefront per CSR row. The row count fits rocsparse_int (checked above),
+    // but one wavefront per row reaches the 2^32 work-item dispatch limit well
+    // before that, so the grid is clamped and gebsr2csr_nnz_kernel grid-strides.
+    const int64_t  num_rows       = static_cast<int64_t>(mb) * row_block_dim;
+    const int64_t  rows_per_block = block_size / wavefront_size;
+    const uint32_t grid_size
+        = rocsparse::get_grid_size_x(handle, (num_rows - 1) / rows_per_block + 1, block_size);
 
     dim3 blocks(grid_size);
     dim3 threads(block_size);
@@ -717,6 +757,15 @@ try
     ROCSPARSE_CHECKARG_SIZE(13, col_block_dim_C);
     ROCSPARSE_CHECKARG(13, col_block_dim_C, (col_block_dim_C == 0), rocsparse_status_invalid_size);
 
+    ROCSPARSE_CHECKARG(8,
+                       row_block_dim_A,
+                       rocsparse::gebsr_csr_dim_overflows(mb, row_block_dim_A),
+                       rocsparse_status_invalid_size);
+    ROCSPARSE_CHECKARG(9,
+                       col_block_dim_A,
+                       rocsparse::gebsr_csr_dim_overflows(nb, col_block_dim_A),
+                       rocsparse_status_invalid_size);
+
     ROCSPARSE_CHECKARG_POINTER(14, nnz_total_dev_host_ptr);
 
     ROCSPARSE_CHECKARG(15,
@@ -727,10 +776,12 @@ try
     // Stream
     hipStream_t stream = handle->stream;
 
-    const rocsparse_int m    = mb * row_block_dim_A;
-    const rocsparse_int n    = nb * col_block_dim_A;
-    const rocsparse_int mb_c = (m + row_block_dim_C - 1) / row_block_dim_C;
-    const rocsparse_int nb_c = (n + col_block_dim_C - 1) / col_block_dim_C;
+    const rocsparse_int m = mb * row_block_dim_A;
+    const rocsparse_int n = nb * col_block_dim_A;
+    const rocsparse_int mb_c
+        = static_cast<rocsparse_int>((int64_t(m) + row_block_dim_C - 1) / row_block_dim_C);
+    const rocsparse_int nb_c
+        = static_cast<rocsparse_int>((int64_t(n) + col_block_dim_C - 1) / col_block_dim_C);
 
     // Quick return if possible
     if(mb == 0 || nb == 0 || nnzb == 0)
@@ -881,7 +932,7 @@ try
         rocsparse_int* ptr = reinterpret_cast<rocsparse_int*>(temp_buffer);
 
         rocsparse_int* csr_row_ptr = reinterpret_cast<rocsparse_int*>(ptr);
-        ptr += (m + 1);
+        ptr += size_t(m) + 1;
         rocsparse_int* csr_col_ind = reinterpret_cast<rocsparse_int*>(ptr);
 
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_gebsr2csr_nnz(handle,

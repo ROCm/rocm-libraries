@@ -31,6 +31,7 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Float6.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Float8_BFloat8.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Half.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Int4.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Int8.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_Int8x4.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/DataTypes_XFloat32.hpp"
@@ -47,6 +48,7 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MLFeatures.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MLPClassification.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MLPClassificationLibrary.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MXScaleFormat.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MapLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MasterSolutionLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/MatchingLibrary.hpp"
@@ -57,8 +59,10 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/PredictionLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ProblemKey.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Properties.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/RocRollerWgmKernargs.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/PropertyMatching.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ScalarValueTypes.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ScaleAlphaVec.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization/Base.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization/Containers.hpp"
@@ -90,6 +94,8 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/TensorDescriptor_fwd.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/TensorOps.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/TensorOps_fwd.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/LocalKernelIndex.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/LocalKernelLibrary.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Utils.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/UtilsOrigami.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/geom.hpp"
@@ -105,7 +111,7 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/SolutionValidation.hpp"
 )
 
-if(HIPBLASLT_ENABLE_YAML)
+if(TENSILELITE_ENABLE_YAML)
     target_sources(tensilelite-host
         PRIVATE
             FILE_SET tensilelite_private_headers TYPE HEADERS

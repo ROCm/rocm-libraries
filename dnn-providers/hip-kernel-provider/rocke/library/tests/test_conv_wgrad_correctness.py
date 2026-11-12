@@ -20,7 +20,9 @@ Coverage:
   - Split-K: 1 (direct store) and >1 (atomic accumulation)
   - Shapes: regular 3x3, pointwise 1x1, strided, C=24 (mult-8 not-16 edge),
     asymmetric HW, small channel
-  - Dtypes: fp16, bf16
+  - Dtypes: fp16, bf16; tf32 compute over fp32 storage (``TestConvWgradTf32``:
+    default/cshuffle, split-K atomic, two-stage, stream-K, grouped and 3-D,
+    against an IEEE fp32 reference)
 
 The vector-load path is enabled for every sync MMA family (MFMA and WMMA); only
 the async-DMA path is excluded. The sweep runs on MFMA (gfx942/gfx950) and, for
@@ -50,6 +52,8 @@ from typing import List, Tuple
 from rocke.runtime.hip_module import get_device_arch
 
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
+if _HAS_TORCH:
+    from builders.common.conv_reference import tf32_reference_inputs, tf32_reference_tol
 GPU_ARCH = get_device_arch(0)
 _IS_MFMA = GPU_ARCH in ("gfx942", "gfx950")  # wave64 / MFMA targets
 
@@ -257,20 +261,23 @@ def _make_spec(
         dW=shape.dW,
         groups=shape.groups,
     )
-    # split_k == -1 means "auto": resolve to a concrete degree (CK formula) up
-    # front, exactly as the benchmark does, so the spec and the launch grid's
-    # z-dim agree (a grid with z=-1 is an invalid launch).
+    # split_k == -1 means "auto": resolve to a concrete degree up front with the
+    # resolver dispatch and the benchmark use, so the spec and the launch grid's
+    # z-dim agree (a grid with z=-1 is an invalid launch). This helper builds
+    # the packed-atomic kernel, so that is the reduction the degree is sized for.
     if split_k == -1:
-        from rocke.helpers.split_k import select_split_k_wgrad
+        from kernels.common.conv_split_k import resolve_conv_split_k
 
-        split_k = select_split_k_wgrad(
-            wg_M=problem.kpg,
-            wg_N=problem.Y * problem.X * problem.cpg,
-            wg_K=problem.N * problem.Ho * problem.Wo,
+        split_k = resolve_conv_split_k(
+            "wgrad",
+            problem,
+            arch=arch,
+            dtype=dtype,
             tile_m=tile_m,
             tile_n=tile_n,
             tile_k=tile_k,
-            arch=arch,
+            block_size=warp_m * warp_n * target.wave_size,
+            reduction="atomic",
         ).split_k
     spec = WgradConvSpec(
         problem=problem,
@@ -314,15 +321,31 @@ def _run_one(
     async_dma: bool = False,
     warp_tile_mn: "int | None" = None,
     tile_k: "int | None" = None,
+    group_merge: int = 1,
+    tile_m: "int | None" = None,
+    tile_n: "int | None" = None,
+    unroll_k: bool = False,
+    prefetch_addr: bool = False,
+    register_prefetch: bool = False,
+    prefetch_global_regs: bool = False,
+    vector_size_c: "int | None" = None,
+    spec_override=None,
+    positive: bool = False,
 ) -> Tuple[bool, str]:
     """Build, compile, launch, and verify one wgrad kernel.
+
+    ``spec_override`` runs that exact WgradConvSpec (e.g. what dispatch selects)
+    instead of one built from the tile arguments. ``positive`` draws X and dY
+    from [0, 1) instead of [-1, 1): same-sign partials do not cancel their
+    16-bit rounding under split-K, which makes this the accuracy worst case.
 
     Returns ``(passed, reason)`` where ``reason`` is non-empty on skip or failure.
     """
     import torch
 
     from rocke import compile_kernel
-    from rocke.helpers.manifest import conv_args_signature
+    from kernels.common.conv_args import ConvArgs
+    from kernels.common.conv_abi import conv_args_signature
     from kernels.common.conv_implicit_gemm_wgrad import (
         build_implicit_gemm_conv_wgrad,
         is_valid_wgrad_spec,
@@ -330,18 +353,52 @@ def _run_one(
     from rocke.runtime.hip_module import HipError, Runtime
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
 
-    spec, problem, _wtk = _make_spec(
-        arch,
-        shape,
-        dtype,
-        pipeline,
-        epilogue,
-        split_k,
-        lds_k_outer,
-        async_dma,
-        warp_tile_mn=warp_tile_mn,
-        tile_k=tile_k,
-    )
+    if spec_override is not None:
+        spec, problem, _wtk = spec_override, spec_override.problem, None
+        split_k = spec.split_k
+    else:
+        spec, problem, _wtk = _make_spec(
+            arch,
+            shape,
+            dtype,
+            pipeline,
+            epilogue,
+            split_k,
+            lds_k_outer,
+            async_dma,
+            warp_tile_mn=warp_tile_mn,
+            tile_k=tile_k,
+        )
+    if spec is not None and (
+        group_merge > 1
+        or tile_m
+        or tile_n
+        or unroll_k
+        or prefetch_addr
+        or register_prefetch
+        or prefetch_global_regs
+        or vector_size_c is not None
+    ):
+        from dataclasses import replace as _dc_replace
+
+        _over = {}
+        if unroll_k:
+            _over["unroll_k"] = True
+        if prefetch_addr:
+            _over["prefetch_addr"] = True
+        if register_prefetch:
+            _over["register_prefetch"] = True
+        if prefetch_global_regs:
+            _over["prefetch_global_regs"] = True
+        if vector_size_c is not None:
+            _over["vector_size_c"] = vector_size_c
+        if tile_m:
+            _over["tile_m"] = tile_m
+        if tile_n:
+            _over["tile_n"] = tile_n
+        if group_merge > 1:
+            _over["group_merge"] = group_merge
+        spec = _dc_replace(spec, **_over)
     if spec is None:
         return True, f"skip (no atom): {_wtk}"
 
@@ -352,7 +409,9 @@ def _run_one(
     try:
         kernel = build_implicit_gemm_conv_wgrad(spec, arch=arch)
     except ValueError as e:
-        return True, f"skip (build error): {e}"
+        # The validator admitted this spec, so a build error is a bug, not a
+        # configuration the arch lacks -- fail rather than skip.
+        return False, f"build error for a spec the validator admitted: {e}"
 
     try:
         artifact = compile_kernel(kernel, arch=arch)
@@ -362,8 +421,9 @@ def _run_one(
     _torch_dtype = {"fp16": torch.float16, "bf16": torch.bfloat16}[dtype]
     torch.manual_seed(0)
     p = problem
-    X_f32 = torch.empty(p.N, p.Hi, p.Wi, p.C).uniform_(-1.0, 1.0)
-    dY_f32 = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0)
+    _lo = 0.0 if positive else -1.0
+    X_f32 = torch.empty(p.N, p.Hi, p.Wi, p.C).uniform_(_lo, 1.0)
+    dY_f32 = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(_lo, 1.0)
     X_t = X_f32.to(_torch_dtype)
     dY_t = dY_f32.to(_torch_dtype)
     # dW is the (grouped) weight gradient: packed KYXC with the per-group channel
@@ -381,7 +441,12 @@ def _run_one(
     rt.memcpy_h2d(X_dev, _u8(X_t), X_t.nbytes)
     rt.memset(dW_dev, 0, dW_t.nbytes)  # split-K atomic-add needs a zeroed dW
 
-    sig = conv_args_signature(dtype)
+    sig = conv_args_signature(
+        dtype,
+        direction="wgrad",
+        is_3d=spec.problem.is_3d,
+        two_stage=bool(getattr(spec, "two_stage", False)),
+    )
     try:
         launcher = KernelLauncher(
             hsaco=artifact.hsaco,
@@ -397,20 +462,27 @@ def _run_one(
     # wgrad grid: x = ceil(N_wg / tile_n), y = ceil(M / tile_m),
     # z = groups * split_k (the group axis rides on z alongside split-K;
     # == split_k for groups=1).
-    gx = (spec.wg_N + spec.tile_n - 1) // spec.tile_n
-    gy = (spec.wg_M + spec.tile_m - 1) // spec.tile_m
-    gz = p.groups * spec.split_k
+    gx = (spec.grid_N + spec.tile_n - 1) // spec.tile_n
+    gy = (spec.grid_M + spec.tile_m - 1) // spec.tile_m
+    gz = spec.grid_groups * spec.split_k
     grid = (gx, gy, gz)
     block = (spec.block_size, 1, 1)
 
-    values = {
-        "A": dY_dev,
-        "B": X_dev,
-        "D": dW_dev,
-        "A_bytes": dY_t.nbytes,
-        "B_bytes": X_t.nbytes,
-        "D_bytes": dW_t.nbytes,
-    }
+    values = ConvArgs.from_problem(
+        spec.problem,
+        direction="wgrad",
+        tile_m=spec.tile_m,
+        tile_n=spec.tile_n,
+        tile_k=spec.tile_k,
+    ).to_launch_values(
+        int(dY_dev),
+        int(X_dev),
+        int(dW_dev),
+        dY_t.nbytes,
+        X_t.nbytes,
+        dW_t.nbytes,
+        split_k=max(1, spec.split_k),
+    )
     launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
 
     dW_cpu = torch.empty_like(dW_t)
@@ -582,15 +654,19 @@ class TestConvWgradCorrectness(unittest.TestCase):
     def test_lds_k_outer_split_k(self):
         """K-outer under split-K atomics (the shipping configuration).
 
-        MFMA-only on purpose. On gfx1250 ``_KOUTER_EPILOGUE`` is ``default``
-        (WMMA rejects cshuffle), and the atomic guard rejects 16-bit dtype_d
-        with the default epilogue at split_k > 1 -- so this bf16 + split_k=8
-        request is invalid on wave32 and every subTest would skip. Widening the
-        gate would report ``passed`` while executing nothing. Add a supported
-        wave32 atomic configuration before extending this test.
+        Runs on MFMA and on the wave32 arches whose 16-bit split-K goes through
+        the WMMA atomic epilogue (``wgrad_wmma_split_k_available``). There
+        ``_KOUTER_EPILOGUE`` is ``default`` -- the only epilogue WMMA has -- and
+        the validator admits it with split_k > 1. ``_assert_ran`` keeps an
+        all-skipped run from reporting a false green.
         """
-        if not _IS_MFMA:
-            self.skipTest(f"wgrad split-K atomics are MFMA-only; got {GPU_ARCH}")
+        from kernels.common.conv_implicit_gemm_wgrad import (
+            wgrad_wmma_split_k_available,
+        )
+
+        if not _IS_MFMA and not wgrad_wmma_split_k_available(GPU_ARCH):
+            self.skipTest(f"no 16-bit wgrad split-K atomic path on {GPU_ARCH}")
+        ran = 0
         for shape in _SHAPES:
             with self.subTest(shape=shape.id):
                 self._check(
@@ -601,6 +677,8 @@ class TestConvWgradCorrectness(unittest.TestCase):
                     split_k=8,
                     lds_k_outer=True,
                 )
+                ran += 1
+        self._assert_ran(ran, "lds_k_outer split-K")
 
     def test_lds_k_outer_async_dma(self):
         """Direct global->LDS load, which is only legal on the K-outer tile.
@@ -674,6 +752,30 @@ class TestConvWgradCorrectness(unittest.TestCase):
                     with self.subTest(shape=shape.id, dtype=dtype, split_k=split_k):
                         self._check(shape, dtype, "mem", "cshuffle", split_k)
 
+    def test_split_k_wmma(self):
+        """16-bit split-K atomics on WMMA, through the 'default' epilogue.
+
+        WMMA has no cshuffle, so test_split_k (which needs it) skips on wave32.
+        Here the WMMA split-K epilogue issues one packed <2 x dtype> atomic per
+        accumulator element with a zero partner, and several K-slices race on
+        the same dword -- every degree must still reproduce the reference.
+        """
+        from kernels.common.conv_implicit_gemm_wgrad import (
+            wgrad_wmma_split_k_available,
+        )
+
+        if not wgrad_wmma_split_k_available(GPU_ARCH):
+            self.skipTest(f"WMMA 16-bit split-K atomics not enabled on {GPU_ARCH}")
+        ran = 0
+        for dtype in _DTYPES:
+            for shape in _SHAPES:
+                for split_k in (2, 4, 16, -1):
+                    with self.subTest(shape=shape.id, dtype=dtype, split_k=split_k):
+                        self._check(shape, dtype, "mem", "default", split_k)
+                        ran += 1
+        # Every config here is valid on gfx1250, so a skip is a regression.
+        self.assertEqual(ran, len(_DTYPES) * len(_SHAPES) * 4, "a case skipped")
+
     def test_grouped(self):
         # Grouped wgrad (grid-per-group, group index on block_id_z).  Includes the
         # cardinality-grouped hero (g32/cpg8/kpg8) where each group fills only a
@@ -736,6 +838,208 @@ class TestConvWgradCorrectness(unittest.TestCase):
             for shape in grouped:
                 with self.subTest(shape=shape.id, dtype=dtype):
                     self._check(shape, dtype, "mem", "default")
+
+    def test_wide_tile_spec_at_degree_cap_gfx1250(self):
+        """Run gfx1250 split-K wgrad the way the AOT cache serves it.
+
+        wgrad has no dispatcher instance list; as on gfx950 it is served from
+        the AOT cache. So the kernel here is taken from the cache grid
+        (:mod:`kernels.conv.aot_jobs`, the one split-K binary per geometry,
+        filtered by the same validity and problem-support checks the cache
+        build and lookup apply), and its degree from the launch-time resolver
+        (``_runtime_split_ks`` with ``--split-k -1``). The binary is built here
+        at that degree rather than at the cache's ``split_k=2`` marker; the
+        degree is a kernarg, so the IR is the same.
+
+        These are 2x2-warp tiles of the gfx1250 cover, and the bf16 problems are sized so the
+        degree lands on its cap. The last bf16 problem (small channels, deep
+        reduction) asks for 128 before the cap; all-positive partials miss the
+        tolerance there. fp16 takes its own policy (fill to 1024 CTAs, 2048
+        grouped, slices down to 512, up to 128); its cases run at the degree the
+        resolver picks. The inputs are all-positive -- same-sign partials
+        do not cancel their 16-bit rounding -- so this also bounds the accuracy
+        at the cap.
+        """
+        from kernels.common._conv_implicit_gemm_common import (
+            ConvDataSpec,
+            ConvProblem,
+        )
+        from kernels.common.conv_implicit_gemm_wgrad import (
+            WgradConvSpec,
+            wgrad_wmma_split_k_available,
+        )
+        from kernels.conv import aot_jobs
+        from kernels.conv.kernel_identity import identity_supports_problem
+        from rocke.core.arch import ArchTarget
+
+        from benchmarks.common.benchmark_implicit_gemm_conv import _runtime_split_ks
+
+        target = ArchTarget.from_gfx(GPU_ARCH)
+        if target.wave_size != 32 or not wgrad_wmma_split_k_available(GPU_ARCH):
+            self.skipTest(f"WMMA split-K not enabled on {GPU_ARCH}")
+        # (N, H=W, C, K, G, dtype, (tile_m, tile_n, tile_k), --split-k,
+        #  expected degree); -1 is the resolver's pick.
+        cases = [
+            (32, 32, 64, 96, 1, "bf16", (32, 64, 64), -1, 12),
+            (32, 32, 64, 128, 1, "fp16", (64, 128, 64), -1, 64),
+            (32, 32, 64, 64, 4, "bf16", (32, 128, 32), -1, 12),
+            (32, 32, 64, 64, 4, "fp16", (32, 128, 32), -1, 64),
+            (64, 64, 16, 16, 1, "bf16", (32, 64, 64), -1, 12),
+        ]
+        ran = 0
+        for N, HW, C, K, G, dtype, tile, requested, degree in cases:
+            with self.subTest(N=N, HW=HW, C=C, K=K, G=G, dtype=dtype):
+                problem = ConvProblem(
+                    N=N, Hi=HW, Wi=HW, C=C, K=K, Y=3, X=3, pH=1, pW=1, groups=G
+                )
+                geometries = [
+                    g
+                    for g in aot_jobs._geometry_list(target, dtype, "wgrad")
+                    if tuple(g[:5]) == (*tile, 2, 2)
+                    and g[5] == 16
+                    and g[6:8] == ("mem", "default")
+                ]
+                # The cache's packed-atomic split-K binaries for this geometry
+                # (synchronous K loop) that would be built (spec validity) and
+                # offered for this problem (lookup).
+                jobs = [
+                    j
+                    for j in aot_jobs._direction_jobs(
+                        "wgrad", GPU_ARCH, dtype, target, (2,), 1, geometries=geometries
+                    )
+                    if not j.identity.two_stage
+                    and not j.identity.async_dma
+                    and aot_jobs._spec_is_valid(j, GPU_ARCH, dtype)
+                    and identity_supports_problem(j.identity, problem)[0]
+                ]
+                self.assertTrue(jobs, f"no cached split-K kernel serves {problem}")
+                job = max(
+                    jobs,
+                    key=lambda j: (
+                        j.identity.vector_size_a,
+                        j.identity.vector_size_b,
+                    ),
+                )
+                self.assertFalse(job.identity.two_stage)
+                if requested != -1:
+                    # Not split by default: auto launches no split-K binary.
+                    self.assertEqual(_runtime_split_ks(problem, job.identity, -1), ())
+                (resolved,) = _runtime_split_ks(problem, job.identity, requested)
+                self.assertEqual(resolved, degree)
+                spec = WgradConvSpec(
+                    problem=problem,
+                    data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+                    **dict(job.spec_kwargs, split_k=resolved),
+                )
+                shape = _Shape(
+                    f"wide_N{N}H{HW}W{HW}C{C}K{K}G{G}",
+                    N=N,
+                    Hi=HW,
+                    Wi=HW,
+                    C=C,
+                    K=K,
+                    Y=3,
+                    X=3,
+                    pH=1,
+                    pW=1,
+                    groups=G,
+                )
+                passed, why = _run_one(
+                    GPU_ARCH,
+                    shape,
+                    dtype,
+                    spec.pipeline,
+                    spec.epilogue,
+                    spec_override=spec,
+                    positive=True,
+                )
+                # _run_one reports a rejected spec as (True, "skip ..."); that is
+                # not an executed kernel, so it must not count as one.
+                self.assertTrue(
+                    passed and not why.startswith("skip"),
+                    f"{shape.id} {dtype} spk{degree}: {why}",
+                )
+                ran += 1
+        self.assertEqual(ran, len(cases), "every case must run")
+
+    def test_grouped_split_k_wmma(self):
+        """Grouped wgrad under WMMA split-K atomics.
+
+        The group rides block_id_z alongside the K-slice (z = groups*split_k),
+        and the WMMA atomic epilogue folds group*kpg into each dW row, so every
+        group must be written and every slice of it accumulated. _run_one fails
+        a run that leaves any group's output-channel rows at zero.
+        """
+        from kernels.common.conv_implicit_gemm_wgrad import (
+            wgrad_wmma_split_k_available,
+        )
+
+        if not wgrad_wmma_split_k_available(GPU_ARCH):
+            self.skipTest(f"WMMA 16-bit split-K atomics not enabled on {GPU_ARCH}")
+        grouped = [
+            _Shape(
+                "g4_N2H14W14C64K64",
+                N=2,
+                Hi=14,
+                Wi=14,
+                C=64,
+                K=64,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=4,
+            ),
+            _Shape(
+                "g4_asym_N2H14W14C64K128",
+                N=2,
+                Hi=14,
+                Wi=14,
+                C=64,
+                K=128,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=4,
+            ),
+            _Shape(
+                "g32_N2H14W14C256K256",
+                N=2,
+                Hi=14,
+                Wi=14,
+                C=256,
+                K=256,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=32,
+            ),
+            # A longer reduction, so the auto degree splits it.
+            _Shape(
+                "g2_N8H28W28C64K64",
+                N=8,
+                Hi=28,
+                Wi=28,
+                C=64,
+                K=64,
+                Y=3,
+                X=3,
+                pH=1,
+                pW=1,
+                groups=2,
+            ),
+        ]
+        ran = 0
+        for dtype in _DTYPES:
+            for shape in grouped:
+                for split_k in (2, 16, -1):
+                    with self.subTest(shape=shape.id, dtype=dtype, split_k=split_k):
+                        self._check(shape, dtype, "mem", "default", split_k)
+                        ran += 1
+        # Every config here is valid on gfx1250, so a skip is a regression.
+        self.assertEqual(ran, len(_DTYPES) * len(grouped) * 3, "a case skipped")
 
     def test_grouped_cshuffle(self):
         # Grouped wgrad with the LDS-staged cshuffle epilogue: the staged store
@@ -987,9 +1291,10 @@ class TestConvWgradVectorLoad(unittest.TestCase):
         )
 
     def test_gfx1250_grouped_wgrad_dual_engine(self):
-        # Grouped wgrad (grid-per-group, Gm=1) on gfx1250 (wave32 WMMA 16x16x32).
-        # Group merging is MFMA-only (is_valid_wgrad_spec rejects Gm>1 on WMMA), so
-        # this guards only the grouped Gm=1 WMMA path. Lower through the backend
+        # Grouped wgrad (grid-per-group) on gfx1250 (wave32 WMMA 16x16x32).
+        # Group merging is MFMA-only, so it cannot apply on wave32; this guards
+        # the grouped WMMA path as it ships, one conv group per workgroup.
+        # Lower through the backend
         # dispatcher so under ROCKE_BACKEND=both it also asserts Python == C++ on the
         # gfx1250 serialized-IR path. vec>1 shape (C=K=64, cpg=kpg=16), so it does
         # NOT hit the scalar tile.buffer_load gap -- no both-lane skip needed.
@@ -1112,26 +1417,6 @@ class TestWgradDefaultLdsKOuter(unittest.TestCase):
             if prev is not None:
                 os.environ["ROCKE_WGRAD_LDS_K_OUTER"] = prev
 
-    def test_dispatch_uses_the_same_policy(self):
-        """Dispatch must not carry its own copy of the gate.
-
-        The divergent copy compared a module constant against a tuple, which is
-        constant-true regardless of the request, and never checked wave_size.
-        """
-        try:
-            from library.dispatch.grouped_convolution import _wgrad_lds_k_outer
-        except ImportError:
-            self.skipTest("library.dispatch not importable in this environment")
-
-        class _Req:
-            def __init__(self, arch, dtype):
-                self.arch, self.dtype = arch, dtype
-
-        self.assertTrue(_wgrad_lds_k_outer(_Req("gfx950", "bf16"), 32))
-        self.assertFalse(_wgrad_lds_k_outer(_Req("gfx942", "bf16"), 32))
-        self.assertFalse(_wgrad_lds_k_outer(_Req("gfx950", "fp32"), 32))
-        self.assertFalse(_wgrad_lds_k_outer(_Req("gfx950", "bf16"), 64))
-
     def test_policy_agrees_with_validate(self):
         """Anything the policy turns on must actually construct."""
         from kernels.common._conv_implicit_gemm_common import ConvProblem
@@ -1228,6 +1513,7 @@ def _run_two_stage_ts(spec, arch, rt, dY_t, X_t):
     import torch
     from kernels.common.conv_implicit_gemm_wgrad_two_stage import (
         build_implicit_gemm_conv_wgrad_two_stage,
+        wgrad_stage1_launch_values,
     )
     from kernels.common.conv_wgrad_workspace_reduce import (
         WgradReduceSpec,
@@ -1262,34 +1548,37 @@ def _run_two_stage_ts(spec, arch, rt, dY_t, X_t):
             problem=spec.problem,
             dtype_d=spec.data.dtype_d,
             groups=p.groups,
+            # Must match Stage 1 or the fold covers the wrong slab count.
+            ws_replicas=spec.ws_replicas,
         )
         s2_grid = wgrad_reduce_grid(s2_spec)
         s2_block = (s2_spec.block_size, 1, 1)
 
         # Stage 1: z = groups * split_k (encodes group and slice index).
         s1_grid = (
-            (spec.wg_N + spec.tile_n - 1) // spec.tile_n,
-            (spec.wg_M + spec.tile_m - 1) // spec.tile_m,
-            p.groups * spec.split_k,
+            (spec.grid_N + spec.tile_n - 1) // spec.tile_n,
+            (spec.grid_M + spec.tile_m - 1) // spec.tile_m,
+            spec.grid_groups * spec.split_k,
         )
         s1_block = (spec.block_size, 1, 1)
 
-        s1_vals = {
-            "A": dY_dev,
-            "B": X_dev,
-            "D": dW_dev,
-            "A_bytes": dY_t.nbytes,
-            "B_bytes": X_t.nbytes,
-            "D_bytes": dW_t.nbytes,
-            "ws_ptr": ws_dev,
-            "ws_bytes": ws_nbytes,
-        }
+        # Stage 1 is an AOT wgrad kernel: the shape travels as kernargs.
+        s1_vals = wgrad_stage1_launch_values(
+            spec,
+            dY_ptr=int(dY_dev),
+            X_ptr=int(X_dev),
+            dW_ptr=int(dW_dev),
+            dY_bytes=dY_t.nbytes,
+            X_bytes=X_t.nbytes,
+            dW_bytes=dW_t.nbytes,
+            ws_ptr=int(ws_dev),
+            ws_bytes=ws_nbytes,
+        )
         s2_vals = {
             "ws_ptr": ws_dev,
             "dw_ptr": dW_dev,
             "wg_M": spec.wg_M,
             "wg_N": spec.wg_N,
-            "split_k": spec.split_k,
             "ws_bytes": ws_nbytes,
             "dw_bytes": dW_t.nbytes,
             "groups": p.groups,
@@ -1326,6 +1615,12 @@ def _check_two_stage(
     warp_tile_mn: "int | None" = None,
     tile_k: "int | None" = None,
     seed: int = 0,
+    group_merge: int = 1,
+    tile_m: "int | None" = None,
+    tile_n: "int | None" = None,
+    prefetch_addr: bool = False,
+    register_prefetch: bool = False,
+    prefetch_global_regs: bool = False,
 ) -> "Tuple[bool, str]":
     """Build and run the two-stage wgrad pipeline; compare against CPU reference.
 
@@ -1367,6 +1662,18 @@ def _check_two_stage(
 
     # Promote to two-stage.
     ts_spec = _dc_replace(base_spec, two_stage=True)
+    if tile_m is not None:
+        ts_spec = _dc_replace(ts_spec, tile_m=tile_m)
+    if tile_n is not None:
+        ts_spec = _dc_replace(ts_spec, tile_n=tile_n)
+    if group_merge > 1:
+        ts_spec = _dc_replace(ts_spec, group_merge=group_merge)
+    if prefetch_addr:
+        ts_spec = _dc_replace(ts_spec, prefetch_addr=True)
+    if register_prefetch:
+        ts_spec = _dc_replace(ts_spec, register_prefetch=True)
+    if prefetch_global_regs:
+        ts_spec = _dc_replace(ts_spec, prefetch_global_regs=True)
     if ts_spec.split_k <= 1:
         return True, "split_k=1 after auto-resolve; two-stage needs split_k>1"
 
@@ -1390,6 +1697,36 @@ def _check_two_stage(
     max_abs = dW_ref.abs().max().item()
     if max_abs < 1e-6:
         return True, "reference near-zero; skipped numeric check"
+
+    # Coverage guards, checked before the tolerance so a dropped slab reports
+    # as "whole rows missing" rather than as a vague numeric failure.
+    #
+    # Rows catch an accumulator bound left at the per-group extent under group
+    # merging: every merged row above 0 then fails the test and its dW slab is
+    # never written. Columns catch the failure the row guard structurally
+    # cannot see -- a decompaction error that writes the correct output channel
+    # at the wrong (y, x, c) position, which is the new mode the block-diagonal
+    # predicate introduces.
+    nz_ref_row = dW_ref.reshape(p.K, -1).abs().sum(dim=1) > 0
+    nz_out_row = dW_ours.reshape(p.K, -1).abs().sum(dim=1) > 0
+    n_missing_rows = int((nz_ref_row & ~nz_out_row).sum())
+    if n_missing_rows:
+        return False, (
+            f"{n_missing_rows}/{p.K} dW output-channel rows are zero while the "
+            f"reference is non-zero (groups={groups}, group_merge={group_merge}, "
+            f"spk{ts_spec.split_k}) -- whole groups are not being written"
+        )
+    cpg = p.C // p.groups
+    n_cols = p.K * p.Y * p.X
+    nz_ref_col = dW_ref.reshape(n_cols, cpg).abs().sum(dim=1) > 0
+    nz_out_col = dW_ours.reshape(n_cols, cpg).abs().sum(dim=1) > 0
+    n_missing_cols = int((nz_ref_col & ~nz_out_col).sum())
+    if n_missing_cols:
+        return False, (
+            f"{n_missing_cols}/{n_cols} dW (k,y,x) positions are zero while the "
+            f"reference is non-zero (groups={groups}, group_merge={group_merge}) "
+            f"-- the merged column index decompacts to the wrong position"
+        )
 
     tol = 5e-2
     rel_err = (dW_ours - dW_ref).abs().max().item() / max_abs
@@ -1516,11 +1853,27 @@ class TestConvWgradTwoStage(unittest.TestCase):
                     self._check(shape, dtype, "mem", split_k=-1, seed=3)
 
     # ------------------------------------------------------------------
-    # Determinism guarantee
+    # Run-to-run stability (NOT a determinism guarantee)
     # ------------------------------------------------------------------
 
     def test_is_deterministic(self):
-        """Two consecutive runs on identical inputs produce bit-exact output."""
+        """Two consecutive runs on identical inputs produce bit-exact output.
+
+        This is an empirical stability check on the *two-stage* spec, not a
+        determinism guarantee for it. Stage 1 f32-atomic-adds a group's
+        K-slices into shared replica slabs, so the summation order is
+        scheduler-dependent and f32 addition is not associative -- Stage 2's
+        ordered fold over the replicas does not recover determinism for partial
+        sums that were already reordered.
+
+        This is not a loss of determinism for the family: a wgrad at
+        ``split_k <= 1`` is still bit-exact, and that is what
+        ``rocke_wgrad_conv_spec_is_deterministic`` reports true for. It reports
+        false for every ``split_k > 1`` spec, two-stage included, and that is
+        the answer a host should act on. What this test catches is a *change*
+        in behaviour for a fixed launch geometry, which is worth a signal even
+        though a failure here is not by itself a correctness bug.
+        """
         import torch
 
         spec = _make_two_stage_spec(self.ARCH)
@@ -1842,13 +2195,10 @@ class TestWgradValidatorAgreement(unittest.TestCase):
             self.fail(f"is_valid_wgrad_spec said valid but validate() raised: {raised}")
         return ok, why
 
-    def test_force_deterministic_accepted_by_both(self):
-        # force_deterministic is promoted to two_stage by the builder, so the
-        # workspace-store epilogue applies and 'default' is legal for 16-bit dW.
-        # validate() used to miss the promotion and demand cshuffle.
-        ok, why = self._agree(
-            self._spec(split_k=4, force_deterministic=True, epilogue="default")
-        )
+    def test_two_stage_accepted_by_both(self):
+        # two_stage uses the f32 scratch-atomic epilogue, so 'default' is legal
+        # for a 16-bit dW. validate() used to demand cshuffle here.
+        ok, why = self._agree(self._spec(split_k=4, two_stage=True, epilogue="default"))
         self.assertTrue(ok, why)
 
     def test_plain_atomic_still_requires_cshuffle(self):
@@ -1856,13 +2206,11 @@ class TestWgradValidatorAgreement(unittest.TestCase):
         ok, _ = self._agree(self._spec(split_k=4, epilogue="default"))
         self.assertFalse(ok, "split_k atomic + 16-bit dW + default must be rejected")
 
-    def test_force_deterministic_does_not_exempt_runtime_degree(self):
-        # split_k == 0 is the runtime-degree atomic encoding and can never be
-        # promoted to two-stage, so it still needs cshuffle.
-        ok, _ = self._agree(
-            self._spec(split_k=0, force_deterministic=True, epilogue="default")
-        )
-        self.assertFalse(ok, "split_k=0 is atomic regardless of force_deterministic")
+    def test_split_k_zero_rejected(self):
+        # The split degree is always a launch parameter; there is no separate
+        # "runtime degree" encoding, so 0 is not a valid spec value.
+        ok, _ = self._agree(self._spec(split_k=0, two_stage=True, epilogue="default"))
+        self.assertFalse(ok, "split_k=0 is not a valid wgrad spec value")
 
     def test_two_stage_with_split_k_1_rejected_by_predicate(self):
         # validate() and the C++ both reject this; the public predicate used to
@@ -1880,14 +2228,14 @@ class TestWgradValidatorAgreement(unittest.TestCase):
         self.assertIn("two_stage", why)
 
 
-class TestWgradTwoStageIsCdnaOnly(unittest.TestCase):
-    """Two-stage wgrad must be rejected on WMMA rather than crashing the builder.
+class TestWgradTwoStageOnWmma(unittest.TestCase):
+    """Two-stage wgrad on WMMA: built on gfx1250, rejected cleanly elsewhere.
 
-    ``_emit_wgrad_workspace_store_epilogue`` is MFMA-only -- it calls
-    ``c_warp_params(atom)`` and ``atom`` is None on wave32 -- and the epilogue
-    dispatch tests ``_is_two_stage`` before the WMMA branch. Without a validator
-    gate a two-stage wave32 spec reaches that emitter and dies with an
-    ``AttributeError``, which no caller pre-filters against.
+    ``_emit_wgrad_workspace_store_epilogue`` decodes the WMMA C fragment through
+    ``op.dst_layout()`` (the MFMA one through the atom). Its f32 scratch adds are
+    global float atomics, so a wave32 arch without validated float atomics
+    (gfx1151) must get a validation error, never an exception out of the
+    emitter.
     """
 
     def _gfx1250_spec(self, **kw):
@@ -1897,9 +2245,10 @@ class TestWgradTwoStageIsCdnaOnly(unittest.TestCase):
         )
         from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
 
+        dtype_d = kw.pop("dtype_d", "fp32")
         base = dict(
             problem=ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1),
-            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="fp32"),
+            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d=dtype_d),
             tile_m=32,
             tile_n=32,
             tile_k=32,
@@ -1915,28 +2264,36 @@ class TestWgradTwoStageIsCdnaOnly(unittest.TestCase):
         base.update(kw)
         return WgradConvSpec(**base)
 
-    def test_two_stage_rejected_on_wmma(self):
-        from kernels.common.conv_implicit_gemm_wgrad import (
-            is_valid_wgrad_spec,
-        )
-
-        ok, why = is_valid_wgrad_spec(
-            self._gfx1250_spec(split_k=4, two_stage=True), "gfx1250"
-        )
-        self.assertFalse(ok, "two-stage on WMMA must be rejected")
-        self.assertIn("CDNA", why)
-
-    def test_two_stage_build_raises_value_error_not_attribute_error(self):
-        # The failure mode that matters: a clean ValueError a caller can handle,
-        # never an AttributeError out of the epilogue emitter.
+    def test_two_stage_admitted_on_gfx1250(self):
         from kernels.common.conv_implicit_gemm_wgrad import (
             build_implicit_gemm_conv_wgrad,
+            is_valid_wgrad_spec,
+            wgrad_two_stage_available,
         )
 
+        self.assertTrue(wgrad_two_stage_available("gfx1250"))
+        for dtype_d in ("fp32", "fp16", "bf16"):
+            spec = self._gfx1250_spec(split_k=4, two_stage=True, dtype_d=dtype_d)
+            ok, why = is_valid_wgrad_spec(spec, "gfx1250")
+            self.assertTrue(ok, f"two-stage on gfx1250 WMMA ({dtype_d}): {why}")
+            build_implicit_gemm_conv_wgrad(spec, arch="gfx1250")
+
+    def test_two_stage_rejected_without_float_atomics(self):
+        # gfx1151 has no validated float global atomics: a clean ValueError a
+        # caller can handle, never an exception out of the epilogue emitter.
+        from kernels.common.conv_implicit_gemm_wgrad import (
+            build_implicit_gemm_conv_wgrad,
+            is_valid_wgrad_spec,
+            wgrad_two_stage_available,
+        )
+
+        self.assertFalse(wgrad_two_stage_available("gfx1151"))
+        spec = self._gfx1250_spec(split_k=4, two_stage=True, warp_tile_k=16)
+        ok, why = is_valid_wgrad_spec(spec, "gfx1151")
+        self.assertFalse(ok)
+        self.assertIn("has_global_float_atomic_add", why)
         with self.assertRaises(ValueError):
-            build_implicit_gemm_conv_wgrad(
-                self._gfx1250_spec(split_k=4, two_stage=True), arch="gfx1250"
-            )
+            build_implicit_gemm_conv_wgrad(spec, arch="gfx1151")
 
     def test_split_k_atomic_still_valid_on_wmma(self):
         # The gate is two-stage-specific: the packed atomic epilogue DOES have a
@@ -1948,6 +2305,104 @@ class TestWgradTwoStageIsCdnaOnly(unittest.TestCase):
 
         ok, why = is_valid_wgrad_spec(self._gfx1250_spec(split_k=4), "gfx1250")
         self.assertTrue(ok, f"WMMA split-K atomic must stay valid: {why}")
+
+    def test_two_stage_available_predicate(self):
+        # The validator and the dispatcher share this predicate, so it must
+        # say no exactly where the scratch-store epilogue cannot be emitted.
+        from kernels.common.conv_implicit_gemm_wgrad import (
+            wgrad_two_stage_available,
+        )
+
+        for arch in ("gfx942", "gfx950", "gfx1250"):
+            self.assertTrue(wgrad_two_stage_available(arch), arch)
+        for arch in ("gfx1151", "gfx1201"):
+            self.assertFalse(wgrad_two_stage_available(arch), arch)
+
+    def test_16bit_split_k_atomic_arch_scope(self):
+        # WMMA split-K is admitted only where the arch catalog marks the float
+        # global atomics as run on a device; other wave32 arches stay rejected.
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_wgrad import (
+            is_valid_wgrad_spec,
+            wgrad_wmma_split_k_available,
+        )
+        from rocke.core.arch import ArchTarget
+
+        self.assertTrue(wgrad_wmma_split_k_available("gfx1250"))
+        for arch in ("gfx1151", "gfx1201"):
+            self.assertFalse(wgrad_wmma_split_k_available(arch), arch)
+            self.assertFalse(
+                ArchTarget.from_gfx(arch).memory.has_global_float_atomic_add, arch
+            )
+        for dtype in ("bf16", "fp16", "fp32"):
+            data = ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d=dtype)
+            spec = self._gfx1250_spec(data=data, split_k=4)
+            spec.validate()
+            ok, why = is_valid_wgrad_spec(spec, "gfx1250")
+            self.assertTrue(ok, f"{dtype} split-K on gfx1250 must be valid: {why}")
+            # Other wave32 arches: split-K stays off for every dW dtype.
+            for arch in ("gfx1151", "gfx1201"):
+                other = self._gfx1250_spec(data=data, split_k=4, warp_tile_k=16)
+                ok, why = is_valid_wgrad_spec(other, arch)
+                self.assertFalse(ok, f"{dtype} split-K on {arch} must stay rejected")
+                self.assertIn("enabled only on", why)
+            # The cshuffle epilogue is admitted for WMMA split-K too: it pairs
+            # through LDS from the WMMA fragment (CShuffleEpilogue.from_grid_op).
+            ok, why = is_valid_wgrad_spec(
+                self._gfx1250_spec(data=data, split_k=4, epilogue="cshuffle"),
+                "gfx1250",
+            )
+            self.assertTrue(ok, f"{dtype} cshuffle split-K on gfx1250: {why}")
+
+    def test_wmma_cshuffle_split_k_needs_even_store_vec(self):
+        # The cshuffle epilogue pairs from LDS on WMMA as on MFMA, so unlike the
+        # default WMMA epilogue it needs an even store vector.
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
+
+        for dtype in ("bf16", "fp16"):
+            data = ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype)
+            for sv, want in ((1, False), (2, True), (8, True)):
+                spec = self._gfx1250_spec(
+                    data=data, split_k=4, epilogue="cshuffle", vector_size_c=sv
+                )
+                ok, why = is_valid_wgrad_spec(spec, "gfx1250")
+                self.assertEqual(ok, want, f"{dtype} sv={sv}: {why}")
+            ok, _ = is_valid_wgrad_spec(
+                self._gfx1250_spec(data=data, split_k=4, vector_size_c=1), "gfx1250"
+            )
+            self.assertTrue(ok, "the default WMMA epilogue ignores the store vector")
+
+    def test_wmma_split_k_ignores_store_vec(self):
+        # The AOT cache grid pins vector_size_c=1 for the default epilogue. The
+        # MFMA packed atomic needs an even store width (it emits sv/2 pairs per
+        # thread), but the WMMA epilogue forms one pair per accumulator element
+        # and never reads it, so only the dW row parity applies on wave32.
+        from kernels.common._conv_implicit_gemm_common import (
+            ConvDataSpec,
+            ConvProblem,
+        )
+        from kernels.common.conv_implicit_gemm_wgrad import (
+            is_valid_wgrad_spec,
+            wgrad_atomic_epilogue_available,
+        )
+
+        for dtype in ("bf16", "fp16"):
+            data = ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype)
+            spec = self._gfx1250_spec(data=data, split_k=4, vector_size_c=1)
+            spec.validate()
+            ok, why = is_valid_wgrad_spec(spec, "gfx1250")
+            self.assertTrue(ok, f"{dtype} WMMA split-K at vector_size_c=1: {why}")
+            even = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+            self.assertFalse(wgrad_atomic_epilogue_available(even, dtype, 1)[0])
+            self.assertTrue(
+                wgrad_atomic_epilogue_available(even, dtype, 1, wave_size=32)[0]
+            )
+            # The row parity still applies on WMMA: wg_N = 3*3*3 = 27 is odd.
+            odd = ConvProblem(N=8, Hi=56, Wi=56, C=3, K=64, Y=3, X=3, pH=1, pW=1)
+            self.assertFalse(
+                wgrad_atomic_epilogue_available(odd, dtype, None, wave_size=32)[0]
+            )
 
 
 class TestWgradKOuterLdsBudget(unittest.TestCase):
@@ -2024,6 +2479,1059 @@ class TestWgradKOuterLdsBudget(unittest.TestCase):
             f"validator should charge the K-outer shape ({k_outer_bytes}), "
             f"not the M-outer one ({m_outer_bytes}); got: {why}",
         )
+
+
+@unittest.skipIf(_skip_reason(), _skip_reason())
+class TestWgradDoubleBufferedSplitKTail(unittest.TestCase):
+    """async_dma / unroll_k at split_k > 1 with an odd tile count per slice.
+
+    Both double-buffered K-loops compute two tiles per step, so with an odd
+    count the last step's second tile lies past the slice end. Under split-K
+    that tile is the *next* slice's first, and only the k_zero_fill redirect
+    keeps it out of this slice's partial sum -- a bug there double-counts
+    one tile per slice and shows up only in dW, never in the parity gate.
+    """
+
+    # wg_K = N*Ho*Wo; tile_k = 64.
+    # 640 = 2 slices x 5 full tiles; 600 = 2 slices of 5 tiles, the last one
+    # partial (the zero tail inside the slice as well as past it).
+    _CASES = (
+        _Shape(
+            "odd5_N10H8W8C64K64", N=10, Hi=8, Wi=8, C=64, K=64, Y=3, X=3, pH=1, pW=1
+        ),
+        _Shape(
+            "odd5_part_N6H10W10C64K64",
+            N=6,
+            Hi=10,
+            Wi=10,
+            C=64,
+            K=64,
+            Y=3,
+            X=3,
+            pH=1,
+            pW=1,
+        ),
+    )
+
+    def _sweep(self, **knobs) -> None:
+        # Both loops exist on MFMA; gfx1250 WMMA has async_dma only (the
+        # global_load_async_to_lds ping-pong) and rejects unroll_k. Every case
+        # must build and run: a skip (an invalid spec) is a failure, not a
+        # quiet pass.
+        gfx1250_async = GPU_ARCH == "gfx1250" and knobs.get("async_dma", False)
+        if not (_IS_MFMA or gfx1250_async):
+            self.skipTest(f"{knobs} wgrad is not built on {GPU_ARCH}")
+        for shape in self._CASES:
+            for dtype in _DTYPES:
+                with self.subTest(shape=shape.id, dtype=dtype):
+                    ok, why = _run_one(
+                        GPU_ARCH,
+                        shape,
+                        dtype,
+                        "mem",
+                        _KOUTER_EPILOGUE,
+                        split_k=2,
+                        **knobs,
+                    )
+                    _assert_case_ran(self, ok, f"{shape.id} {dtype} {knobs}: {why}")
+
+    def test_async_dma_odd_slice(self):
+        self._sweep(async_dma=True, lds_k_outer=True)
+
+    def test_unroll_k_odd_slice(self):
+        self._sweep(unroll_k=True)
+
+
+def _assert_case_ran(test, ok: bool, why: str) -> None:
+    """Fail unless the case was actually built, launched and compared.
+
+    ``_run_one`` and ``_check_two_stage`` report an unbuildable spec as
+    ``(True, "skip (...)")`` so a sweep over many shapes can step past configs
+    an arch does not support. A test that only asserts ``ok`` therefore passes
+    when every one of its cases was skipped. That is not hypothetical: the
+    group-merge cases below silently skipped their whole ``group_merge > 1``
+    axis until this guard was added, because the shape defaulted to groups=1
+    and the gate rejected every merged spec.
+    """
+    test.assertTrue(ok, why)
+    test.assertFalse(why.startswith("skip"), f"case was skipped rather than run: {why}")
+
+
+@unittest.skipIf(_skip_reason(), _skip_reason())
+class TestWgradWmmaCShuffle(unittest.TestCase):
+    """gfx1250 dW numerics for the WMMA cshuffle epilogue.
+
+    The tile is staged through LDS from the WMMA result layout (op.dst_layout()) and
+    written as wide stores, or as genuine packed atomic pairs under split-K. A
+    wrong lane-to-element mapping shows up only in dW, so every case runs
+    against the CPU reference: direct store and split-K, fp16 and bf16, partial
+    M/N tiles (C=24), pointwise, stride 2, grouped, and the async K loop.
+    """
+
+    _CASES = (
+        _Shape(
+            "3x3_N2H14W14C64K64", N=2, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1
+        ),
+        _Shape(
+            "3x3_C24_N2H12W12C24K32",
+            N=2,
+            Hi=12,
+            Wi=12,
+            C=24,
+            K=32,
+            Y=3,
+            X=3,
+            pH=1,
+            pW=1,
+        ),
+        _Shape("1x1_N2H14W14C32K32", N=2, Hi=14, Wi=14, C=32, K=32, Y=1, X=1),
+        _Shape(
+            "3x3s2_N2H15W15C32K48",
+            N=2,
+            Hi=15,
+            Wi=15,
+            C=32,
+            K=48,
+            Y=3,
+            X=3,
+            sH=2,
+            sW=2,
+            pH=1,
+            pW=1,
+        ),
+        _Shape(
+            "3x3_g2_N2H10W10C32K32",
+            N=2,
+            Hi=10,
+            Wi=10,
+            C=32,
+            K=32,
+            Y=3,
+            X=3,
+            pH=1,
+            pW=1,
+            groups=2,
+        ),
+    )
+
+    def _sweep(self, **knobs) -> None:
+        if GPU_ARCH != "gfx1250":
+            self.skipTest(
+                f"the WMMA cshuffle epilogue is gfx1250-tested; on {GPU_ARCH}"
+            )
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+        from kernels.common.conv_implicit_gemm import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+        for shape in self._CASES:
+            p = ConvProblem(
+                N=shape.N,
+                Hi=shape.Hi,
+                Wi=shape.Wi,
+                C=shape.C,
+                K=shape.K,
+                Y=shape.Y,
+                X=shape.X,
+                sH=shape.sH,
+                sW=shape.sW,
+                pH=shape.pH,
+                pW=shape.pW,
+                groups=shape.groups,
+            )
+            for dtype in _DTYPES:
+                for split_k in (1, 2):
+                    for tm, tn, tk, wm, wn in ((32, 64, 32, 2, 2), (64, 32, 64, 2, 1)):
+                        spec = WgradConvSpec(
+                            problem=p,
+                            data=ConvDataSpec(
+                                dtype_a=dtype, dtype_b=dtype, dtype_d=dtype
+                            ),
+                            tile_m=tm,
+                            tile_n=tn,
+                            tile_k=tk,
+                            warp_m=wm,
+                            warp_n=wn,
+                            warp_tile_m=16,
+                            warp_tile_n=16,
+                            warp_tile_k=32,
+                            wave_size=32,
+                            pipeline="mem",
+                            epilogue="cshuffle",
+                            split_k=split_k,
+                            lds_k_outer=True,
+                            **knobs,
+                        )
+                        with self.subTest(
+                            shape=shape.id, dtype=dtype, sk=split_k, tile=(tm, tn, tk)
+                        ):
+                            ok, why = _run_one(
+                                GPU_ARCH,
+                                shape,
+                                dtype,
+                                "mem",
+                                "cshuffle",
+                                spec_override=spec,
+                            )
+                            _assert_case_ran(
+                                self, ok, f"{shape.id} {dtype} {knobs}: {why}"
+                            )
+
+    def test_cshuffle(self):
+        self._sweep()
+
+    def test_cshuffle_async(self):
+        self._sweep(async_dma=True)
+
+
+@unittest.skipIf(_skip_reason(), _skip_reason())
+class TestWgradTwoStageWmmaNumerics(unittest.TestCase):
+    """gfx1250 dW numerics for two-stage (f32 workspace) split-K on WMMA.
+
+    The Stage 1 scratch epilogue decodes the WMMA result fragment through
+    op.dst_layout(); a wrong lane-to-element mapping only shows in dW. Covers an
+    odd dW row (a 3-channel stem, wg_N = 27, which the packed atomic cannot
+    serve) and a 2x2 stride-2 downsample, fp16 and bf16, with the plain and the
+    async K loop.
+    """
+
+    _CASES = (
+        _Shape(
+            "stem_C3_N4H32W32C3K32", N=4, Hi=32, Wi=32, C=3, K=32, Y=3, X=3, pH=1, pW=1
+        ),
+        _Shape(
+            "2x2s2_N4H32W32C32K64",
+            N=4,
+            Hi=32,
+            Wi=32,
+            C=32,
+            K=64,
+            Y=2,
+            X=2,
+            sH=2,
+            sW=2,
+        ),
+    )
+
+    def _sweep(self, **knobs) -> None:
+        if GPU_ARCH != "gfx1250":
+            self.skipTest(f"two-stage WMMA wgrad is gfx1250-only; on {GPU_ARCH}")
+        for shape in self._CASES:
+            if knobs.get("async_dma") and shape.C % 2:
+                continue  # the async copy needs an even channel run
+            for dtype in _DTYPES:
+                for split_k in (4, 16):
+                    with self.subTest(shape=shape.id, dtype=dtype, sk=split_k):
+                        ok, why = _check_two_stage(
+                            shape, dtype, "mem", split_k, seed=7, **knobs
+                        )
+                        self.assertTrue(ok, f"{shape.id} {dtype} {knobs}: {why}")
+                        self.assertFalse(why.startswith("split_k=1"), why)
+
+    def test_two_stage(self):
+        self._sweep()
+
+    def test_two_stage_kouter(self):
+        self._sweep(lds_k_outer=True)
+
+    def test_two_stage_async(self):
+        self._sweep(lds_k_outer=True, async_dma=True)
+
+
+@unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "needs CDNA GPU + torch")
+class TestWgradGroupMergeNumerics(unittest.TestCase):
+    """GPU numerics for group merging, over the two-stage path.
+
+    ``_check_two_stage`` applies row- and column-coverage guards before the
+    tolerance check, so a dropped group slab or a mis-decompacted column
+    reports as such rather than as an opaque numeric failure.
+    """
+
+    # Depthwise: cpg == kpg == 1, so wg_N == Y*X and merged N == Y*X*Gm.
+    _DW = _Shape(
+        "3x3_dw_N2H12W12C64K64",
+        N=2,
+        Hi=12,
+        Wi=12,
+        C=64,
+        K=64,
+        Y=3,
+        X=3,
+        pH=1,
+        pW=1,
+        groups=64,
+    )
+
+    # The subject of these cases is group merging, not the LDS layout: the
+    # K-outer staging only rides along because it is the layout the merged
+    # dispatch prefers where it exists. It is gated to _KOUTER_ARCHES, so
+    # pinning it True would turn every case below into a skip on gfx942 --
+    # which _assert_case_ran correctly reports as a failure rather than a
+    # green. Follow the arch instead and keep the merge coverage running.
+    _KOUTER = GPU_ARCH in _KOUTER_ARCHES
+
+    def test_group_merge_without_two_stage(self):
+        # The primary path: split_k=1, so dW is written straight from the tile
+        # by the direct or CShuffle store. Both carry the block-diagonal mask
+        # in their addr_fn, so no workspace and no second kernel are involved.
+        for epilogue in ("default", "cshuffle"):
+            for gm in (1, 2, 4, 8):
+                with self.subTest(epilogue=epilogue, group_merge=gm):
+                    ok, why = _run_one(
+                        GPU_ARCH,
+                        self._DW,
+                        "bf16",
+                        "mem",
+                        epilogue,
+                        split_k=1,
+                        lds_k_outer=self._KOUTER,
+                        warp_tile_mn=16,
+                        tile_k=32,
+                        tile_m=32,
+                        tile_n=128,
+                        group_merge=gm,
+                    )
+                    _assert_case_ran(self, ok, why)
+
+    def test_group_merge_split_k_requires_two_stage(self):
+        # Merging and split-K compose, but a merged tile cannot use the
+        # packed-atomic split-K epilogue: it has no way to drop an off-diagonal
+        # group pair, so it would accumulate garbage into a live dW element.
+        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
+
+        spec, _p, _wtk = _make_spec(
+            GPU_ARCH, self._DW, "fp32", "mem", "default", 4, warp_tile_mn=16, tile_k=32
+        )
+        if spec is None:
+            self.skipTest("spec construction failed")
+        from dataclasses import replace as _dc_replace
+
+        spec = _dc_replace(
+            spec,
+            problem=_dc_replace(spec.problem, groups=64),
+            tile_m=32,
+            tile_n=128,
+            group_merge=8,
+            two_stage=False,
+        )
+        ok, why = is_valid_wgrad_spec(spec, arch=GPU_ARCH)
+        self.assertFalse(ok, "atomic split-K + group_merge must be rejected")
+        self.assertIn("two-stage", why)
+        # The two-stage form of the same degree is the supported combination.
+        ts = _dc_replace(spec, two_stage=True)
+        ok_ts, why_ts = is_valid_wgrad_spec(ts, arch=GPU_ARCH)
+        self.assertTrue(ok_ts, why_ts)
+
+    def test_group_merge_with_two_stage_split_k(self):
+        # The combination that matters: merging widens the loads, split-K keeps
+        # the grid full. Runs through the two-stage workspace epilogue, whose
+        # store predicate carries the diagonal mask.
+        for gm in (2, 4, 8):
+            for spk in (4, 8):
+                with self.subTest(group_merge=gm, split_k=spk):
+                    ok, why = _check_two_stage(
+                        self._DW,
+                        "bf16",
+                        "mem",
+                        groups=64,
+                        split_k=spk,
+                        group_merge=gm,
+                        tile_m=32,
+                        tile_n=128,
+                        warp_tile_mn=16,
+                        tile_k=32,
+                        seed=70 + gm,
+                    )
+                    self.assertTrue(ok, why)
+
+    def test_group_merge_equals_group_count(self):
+        # grid_groups == 1: the merged problem has a single group. Before the
+        # grouped path was forced on for merged specs this raised
+        # UnboundLocalError rather than building.
+        shape = _Shape(
+            "3x3_dw_N2H12W12C8K8",
+            N=2,
+            Hi=12,
+            Wi=12,
+            C=8,
+            K=8,
+            Y=3,
+            X=3,
+            pH=1,
+            pW=1,
+            groups=8,
+        )
+        ok, why = _run_one(
+            GPU_ARCH,
+            shape,
+            "bf16",
+            "mem",
+            "default",
+            split_k=1,
+            lds_k_outer=self._KOUTER,
+            warp_tile_mn=16,
+            tile_k=32,
+            tile_m=32,
+            tile_n=128,
+            group_merge=8,
+        )
+        _assert_case_ran(self, ok, why)
+
+
+@unittest.skipUnless(not _SKIP_REASON, _SKIP_REASON or "needs CDNA GPU + torch")
+class TestWgradPrefetchAddrNumerics(unittest.TestCase):
+    """GPU numerics for ``prefetch_addr`` (carried K-loop byte offsets).
+
+    The flag replaces the synchronous K loop of every pipeline that shares it,
+    so the cases cover each pipeline, both LDS layouts, the split-K atomic and
+    two-stage epilogues, grouped and group-merged problems. Most shapes in
+    ``_SHAPES`` have a reduction that is not a multiple of tile_k, so the last
+    tile's out-of-range rows exercise the carried sentinel offsets too.
+    """
+
+    _KOUTER_AXIS = (False, True) if GPU_ARCH in _KOUTER_ARCHES else (False,)
+
+    def _run(self, shape, dtype, pipeline, epilogue, **kw):
+        ok, why = _run_one(
+            GPU_ARCH, shape, dtype, pipeline, epilogue, prefetch_addr=True, **kw
+        )
+        _assert_case_ran(self, ok, why)
+
+    def test_pipelines(self):
+        for pipeline in _PIPELINES:
+            for kouter in self._KOUTER_AXIS:
+                for dtype in _DTYPES:
+                    shapes = _SHAPES if pipeline == "mem" else _SHAPES[:3]
+                    for shape in shapes:
+                        with self.subTest(
+                            pipeline=pipeline,
+                            kouter=kouter,
+                            dtype=dtype,
+                            shape=shape.id,
+                        ):
+                            self._run(
+                                shape, dtype, pipeline, "cshuffle", lds_k_outer=kouter
+                            )
+
+    def test_atom_16x16x16(self):
+        for kouter in self._KOUTER_AXIS:
+            for shape in _SHAPES[:3]:
+                with self.subTest(kouter=kouter, shape=shape.id):
+                    self._run(
+                        shape,
+                        "bf16",
+                        "compv4",
+                        "cshuffle",
+                        lds_k_outer=kouter,
+                        warp_tile_mn=16,
+                        tile_k=32,
+                    )
+
+    def test_split_k_atomic(self):
+        # compv3 + register_prefetch prefetches the next tile into registers
+        # across the MFMAs, so under split-K it reads one tile past its
+        # slice; fp16 covers the packed fp16 atomic.
+        for kouter in self._KOUTER_AXIS:
+            for pipeline in ("mem", "compv3", "compv4"):
+                for dtype in _DTYPES:
+                    for shape in (_SHAPES[0], _SHAPES[2]):
+                        with self.subTest(
+                            kouter=kouter,
+                            pipeline=pipeline,
+                            dtype=dtype,
+                            shape=shape.id,
+                        ):
+                            self._run(
+                                shape,
+                                dtype,
+                                pipeline,
+                                "cshuffle",
+                                split_k=4,
+                                lds_k_outer=kouter,
+                                register_prefetch=(pipeline == "compv3"),
+                            )
+
+    def test_two_stage(self):
+        for kouter in self._KOUTER_AXIS:
+            for pipeline in ("mem", "compv3"):
+                for shape in (_SHAPES[0], _SHAPES[2]):
+                    with self.subTest(kouter=kouter, pipeline=pipeline, shape=shape.id):
+                        ok, why = _check_two_stage(
+                            shape,
+                            "bf16",
+                            pipeline,
+                            split_k=4,
+                            lds_k_outer=kouter,
+                            seed=90,
+                            prefetch_addr=True,
+                            register_prefetch=(pipeline == "compv3"),
+                        )
+                        _assert_case_ran(self, ok, why)
+
+    def test_grouped(self):
+        shape = _Shape(
+            "g4_N2H14W14C64K64",
+            N=2,
+            Hi=14,
+            Wi=14,
+            C=64,
+            K=64,
+            Y=3,
+            X=3,
+            pH=1,
+            pW=1,
+            groups=4,
+        )
+        for kouter in self._KOUTER_AXIS:
+            with self.subTest(kouter=kouter):
+                self._run(shape, "bf16", "mem", "cshuffle", lds_k_outer=kouter)
+
+    def test_group_merge(self):
+        dw = TestWgradGroupMergeNumerics._DW
+        kouter = TestWgradGroupMergeNumerics._KOUTER
+        for gm in (4, 8):
+            with self.subTest(group_merge=gm, split_k=1):
+                self._run(
+                    dw,
+                    "bf16",
+                    "mem",
+                    "default",
+                    lds_k_outer=kouter,
+                    warp_tile_mn=16,
+                    tile_k=32,
+                    tile_m=32,
+                    tile_n=128,
+                    group_merge=gm,
+                )
+            with self.subTest(group_merge=gm, split_k=4):
+                ok, why = _check_two_stage(
+                    dw,
+                    "bf16",
+                    "mem",
+                    groups=64,
+                    split_k=4,
+                    group_merge=gm,
+                    tile_m=32,
+                    tile_n=128,
+                    warp_tile_mn=16,
+                    tile_k=32,
+                    seed=95 + gm,
+                    prefetch_addr=True,
+                )
+                _assert_case_ran(self, ok, why)
+
+
+@unittest.skipUnless(
+    not _SKIP_REASON and _IS_MFMA, _SKIP_REASON or "needs an MFMA GPU + torch"
+)
+class TestWgradPrefetchGlobalRegsNumerics(unittest.TestCase):
+    """GPU numerics for ``prefetch_global_regs`` (the register-prefetch K loop).
+
+    The flag replaces the synchronous K loop of every pipeline that shares it
+    (MFMA only), so the cases cover each pipeline, both LDS layouts, both
+    MFMA atoms, the split-K atomic and two-stage epilogues and a grouped
+    problem. Each iteration reads the next tile, so a split-K slice reads one
+    tile past its end and the last slice one past the tensor: neither may
+    reach dW. Most shapes in ``_SHAPES`` have a reduction that is not a
+    multiple of tile_k, so the last tile's out-of-range rows are covered too.
+    """
+
+    _KOUTER_AXIS = (False, True) if GPU_ARCH in _KOUTER_ARCHES else (False,)
+
+    def _run(self, shape, dtype, pipeline, epilogue, **kw):
+        ok, why = _run_one(
+            GPU_ARCH, shape, dtype, pipeline, epilogue, prefetch_global_regs=True, **kw
+        )
+        _assert_case_ran(self, ok, why)
+
+    def test_pipelines(self):
+        for pipeline in _PIPELINES:
+            for kouter in self._KOUTER_AXIS:
+                for dtype in _DTYPES:
+                    shapes = _SHAPES if pipeline == "mem" else _SHAPES[:3]
+                    for shape in shapes:
+                        with self.subTest(
+                            pipeline=pipeline,
+                            kouter=kouter,
+                            dtype=dtype,
+                            shape=shape.id,
+                        ):
+                            self._run(
+                                shape, dtype, pipeline, "cshuffle", lds_k_outer=kouter
+                            )
+
+    def test_atom_16x16(self):
+        for kouter in self._KOUTER_AXIS:
+            for dtype in _DTYPES:
+                for shape in _SHAPES[:3]:
+                    with self.subTest(kouter=kouter, dtype=dtype, shape=shape.id):
+                        self._run(
+                            shape,
+                            dtype,
+                            "compv4",
+                            "cshuffle",
+                            lds_k_outer=kouter,
+                            warp_tile_mn=16,
+                        )
+
+    def test_split_k_atomic(self):
+        # fp16 / bf16 dW: the packed 16-bit atomics, at the default dW width and
+        # at width 2 (one lane-contiguous <2 x dtype> pair per lane), the width
+        # the gfx950 AOT grid builds them at.
+        for kouter in self._KOUTER_AXIS:
+            for pipeline in ("mem", "compv3", "compv4"):
+                for dtype in _DTYPES:
+                    for shape in (_SHAPES[0], _SHAPES[2]):
+                        for vec_c in (None, 2):
+                            with self.subTest(
+                                kouter=kouter,
+                                pipeline=pipeline,
+                                dtype=dtype,
+                                shape=shape.id,
+                                vector_size_c=vec_c,
+                            ):
+                                self._run(
+                                    shape,
+                                    dtype,
+                                    pipeline,
+                                    "cshuffle",
+                                    split_k=4,
+                                    lds_k_outer=kouter,
+                                    vector_size_c=vec_c,
+                                )
+
+    def test_two_stage(self):
+        for kouter in self._KOUTER_AXIS:
+            for pipeline in ("mem", "compv3", "compv4"):
+                for dtype in _DTYPES:
+                    for shape in (_SHAPES[0], _SHAPES[2]):
+                        with self.subTest(
+                            kouter=kouter,
+                            pipeline=pipeline,
+                            dtype=dtype,
+                            shape=shape.id,
+                        ):
+                            ok, why = _check_two_stage(
+                                shape,
+                                dtype,
+                                pipeline,
+                                split_k=4,
+                                lds_k_outer=kouter,
+                                seed=97,
+                                prefetch_global_regs=True,
+                            )
+                            _assert_case_ran(self, ok, why)
+
+    def test_deep_two_stage(self):
+        # A long 1xN reduction split many ways: every slice is a few tiles, so
+        # the read past each slice's end lands in the next slice's rows.
+        shape = _Shape("1x3_N4H1W1024C32K32", N=4, Hi=1, Wi=1024, C=32, K=32, Y=1, X=3)
+        for dtype in _DTYPES:
+            with self.subTest(dtype=dtype):
+                ok, why = _check_two_stage(
+                    shape,
+                    dtype,
+                    "compv3",
+                    split_k=32,
+                    lds_k_outer=self._KOUTER_AXIS[-1],
+                    seed=98,
+                    prefetch_global_regs=True,
+                )
+                _assert_case_ran(self, ok, why)
+
+    def test_grouped(self):
+        shape = _Shape(
+            "g4_N2H14W14C64K64",
+            N=2,
+            Hi=14,
+            Wi=14,
+            C=64,
+            K=64,
+            Y=3,
+            X=3,
+            pH=1,
+            pW=1,
+            groups=4,
+        )
+        for kouter in self._KOUTER_AXIS:
+            for dtype in _DTYPES:
+                with self.subTest(kouter=kouter, dtype=dtype):
+                    self._run(shape, dtype, "mem", "cshuffle", lds_k_outer=kouter)
+
+
+# ---------------------------------------------------------------------------
+# TF32 compute over fp32 storage
+# ---------------------------------------------------------------------------
+#
+# A TF32 spec stores fp32 and reinterprets each LDS fragment as vec<tf32xN>:
+# gfx950 runs it as three BF16 MFMAs over a hi/lo split of the full fp32
+# payload, gfx942 as the native xf32 MFMA, which ignores the low 13 mantissa
+# bits. So the reference is fp32 computed with TF32 *disabled* (torch 2.10
+# defaults conv to tf32), and on gfx942 it is computed from inputs truncated
+# the way the hardware truncates them.
+#
+# Bounds are relative to the reference's peak |dW|. gfx950: 1e-4, which a
+# single BF16 pass misses by more than an order of magnitude
+# (TestConvWgradTf32Bound pins that on the CPU). gfx942: 1e-3 against the
+# truncated-input reference -- a global bound cannot separate truncated TF32
+# from one BF16 pass on raw inputs. Both rules live in conv_reference
+# (tf32_reference_inputs / tf32_reference_tol), shared by every TF32 test.
+
+
+# Per arch, the two TF32 atoms as (warp_tile_mn, warp_tile_k).
+_TF32_ATOMS = {"gfx950": ((32, 16), (16, 32)), "gfx942": ((32, 4), (16, 8))}
+
+_TF32_GROUPED = _Shape(
+    "3x3_g3_N2H10W10C48K120", N=2, Hi=10, Wi=10, C=48, K=120, Y=3, X=3, pH=1, pW=1,
+    groups=3,
+)  # fmt: skip
+
+
+def _tf32_problem_3d(groups: int = 1):
+    from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+    return ConvProblem(
+        N=1, Di=5, Hi=6, Wi=6, C=16 * groups, K=32 * groups, Z=3, Y=3, X=3,
+        sD=1, pD=1, dD=1, pH=1, pW=1, groups=groups,
+    )  # fmt: skip
+
+
+def _tf32_problem(shape: _Shape):
+    from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+    return ConvProblem(
+        N=shape.N, Hi=shape.Hi, Wi=shape.Wi, C=shape.C, K=shape.K, Y=shape.Y,
+        X=shape.X, sH=shape.sH, sW=shape.sW, pH=shape.pH, pW=shape.pW,
+        dH=shape.dH, dW=shape.dW, groups=shape.groups,
+    )  # fmt: skip
+
+
+def _tf32_spec(problem, atom, **kw):
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+    from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec
+
+    edge, k = atom
+    base = dict(
+        problem=problem,
+        data=ConvDataSpec("fp32", "fp32", "fp32", mma_dtype="tf32"),
+        tile_m=64,
+        tile_n=64,
+        tile_k=32,
+        warp_m=2,
+        warp_n=2,
+        warp_tile_m=edge,
+        warp_tile_n=edge,
+        warp_tile_k=k,
+    )
+    base.update(kw)
+    return WgradConvSpec(**base)
+
+
+def _wgrad_reference_nd(X, dY, p):
+    """fp32 dW (KYXC / KZYXC) from channel-last X / dY, 2-D or 3-D, IEEE."""
+    import torch
+
+    from builders.common.conv_reference import ieee_fp32
+
+    with ieee_fp32():
+        if p.is_3d:
+            w = torch.nn.grad.conv3d_weight(
+                X.permute(0, 4, 1, 2, 3).contiguous(),
+                weight_size=(p.K, p.C // p.groups, p.Z, p.Y, p.X),
+                grad_output=dY.permute(0, 4, 1, 2, 3).contiguous(),
+                stride=(p.sD, p.sH, p.sW),
+                padding=(p.pD, p.pH, p.pW),
+                dilation=(p.dD, p.dH, p.dW),
+                groups=p.groups,
+            )
+            return w.permute(0, 2, 3, 4, 1).contiguous()
+        w = torch.nn.grad.conv2d_weight(
+            X.permute(0, 3, 1, 2).contiguous(),
+            weight_size=(p.K, p.C // p.groups, p.Y, p.X),
+            grad_output=dY.permute(0, 3, 1, 2).contiguous(),
+            stride=(p.sH, p.sW),
+            padding=(p.pH, p.pW),
+            dilation=(p.dH, p.dW),
+            groups=p.groups,
+        )
+        return w.permute(0, 2, 3, 1).contiguous()
+
+
+def _tf32_tensors(p, seed: int = 0):
+    import torch
+
+    torch.manual_seed(seed)
+    sp_in = (p.Di, p.Hi, p.Wi) if p.is_3d else (p.Hi, p.Wi)
+    sp_out = (p.Do, p.Ho, p.Wo) if p.is_3d else (p.Ho, p.Wo)
+    sp_w = (p.Z, p.Y, p.X) if p.is_3d else (p.Y, p.X)
+    X = torch.empty(p.N, *sp_in, p.C).uniform_(-1.0, 1.0)
+    dY = torch.empty(p.N, *sp_out, p.K).uniform_(-1.0, 1.0)
+    dW = torch.empty(p.K, *sp_w, p.C // p.groups, dtype=torch.float32)
+    return X, dY, dW
+
+
+def _run_tf32(spec, arch: str):
+    """Build, launch and return ``(dW, reference)`` for one TF32 wgrad spec.
+
+    One runner for every epilogue mode: the plain / split-K-atomic launch, the
+    two-stage pipeline (Stage 1 into the f32 scratch, then the Stage 2 reduce),
+    and the stream-K launch with its flags / partials workspace.
+    """
+    import torch
+
+    from rocke import compile_kernel
+    from rocke.runtime.hip_module import Runtime
+    from rocke.runtime.launcher import KernelLauncher, LaunchConfig
+    from kernels.common.conv_abi import conv_args_signature
+    from kernels.common.conv_args import ConvArgs
+    from kernels.common.conv_implicit_gemm_wgrad import (
+        build_implicit_gemm_conv_wgrad,
+        wgrad_streamk_grid,
+        wgrad_streamk_launch_values,
+        wgrad_streamk_signature,
+        wgrad_streamk_workspace_layout,
+        wgrad_streamk_workspace_nbytes,
+    )
+    from kernels.common.conv_implicit_gemm_wgrad_two_stage import (
+        wgrad_stage1_launch_values,
+        wgrad_two_stage_workspace_nbytes,
+    )
+    from kernels.common.conv_wgrad_workspace_reduce import (
+        WgradReduceSpec,
+        build_conv_wgrad_workspace_reduce,
+        wgrad_reduce_grid,
+        wgrad_reduce_signature,
+    )
+
+    p = spec.problem
+    X, dY, dW = _tf32_tensors(p)
+    ref = _wgrad_reference_nd(
+        tf32_reference_inputs(X, arch), tf32_reference_inputs(dY, arch), p
+    )
+
+    art = compile_kernel(build_implicit_gemm_conv_wgrad(spec, arch=arch), arch=arch)
+    streamk = spec.streamk != "off"
+    two_stage = spec.two_stage and spec.split_k > 1
+    if streamk:
+        sig = wgrad_streamk_signature(spec)
+    else:
+        sig = conv_args_signature(
+            "fp32", direction="wgrad", is_3d=p.is_3d, two_stage=two_stage
+        )
+    launcher = KernelLauncher(
+        hsaco=art.hsaco, kernel_name=art.kernel_name, signature=sig
+    )
+
+    rt = Runtime()
+    bufs = [rt.alloc(dY.nbytes), rt.alloc(X.nbytes), rt.alloc(dW.nbytes)]
+    try:
+        rt.memcpy_h2d(bufs[0], _u8(dY), dY.nbytes)
+        rt.memcpy_h2d(bufs[1], _u8(X), X.nbytes)
+        rt.memset(bufs[2], 0, dW.nbytes)
+        block = (spec.block_size, 1, 1)
+        if streamk:
+            ws_bytes = wgrad_streamk_workspace_nbytes(spec, arch=arch)
+            ws = rt.alloc(max(ws_bytes, 4))
+            bufs.append(ws)
+            rt.memset(ws, 0, max(ws_bytes, 4))
+            flags_bytes, _ = wgrad_streamk_workspace_layout(spec, arch=arch)
+            extra = {}
+            if spec.streamk_reduction in ("linear", "tree"):
+                extra = dict(sk_flags=ws, sk_partials=ws + flags_bytes)
+            values = wgrad_streamk_launch_values(
+                spec, bufs[0], bufs[1], bufs[2], dY.nbytes, X.nbytes, dW.nbytes,
+                arch=arch, **extra,
+            )  # fmt: skip
+            grid = wgrad_streamk_grid(spec, arch=arch)
+            launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
+        else:
+            grid = (
+                (spec.grid_N + spec.tile_n - 1) // spec.tile_n,
+                (spec.grid_M + spec.tile_m - 1) // spec.tile_m,
+                spec.grid_groups * max(1, spec.split_k),
+            )
+            if two_stage:
+                ws_bytes = wgrad_two_stage_workspace_nbytes(spec)
+                ws = rt.alloc(ws_bytes)
+                bufs.append(ws)
+                rt.memset(ws, 0, ws_bytes)
+                values = wgrad_stage1_launch_values(
+                    spec, dY_ptr=int(bufs[0]), X_ptr=int(bufs[1]),
+                    dW_ptr=int(bufs[2]), dY_bytes=dY.nbytes, X_bytes=X.nbytes,
+                    dW_bytes=dW.nbytes, ws_ptr=int(ws), ws_bytes=ws_bytes,
+                )  # fmt: skip
+            else:
+                values = ConvArgs.from_problem(
+                    p,
+                    direction="wgrad",
+                    tile_m=spec.tile_m,
+                    tile_n=spec.tile_n,
+                    tile_k=spec.tile_k,
+                ).to_launch_values(
+                    int(bufs[0]), int(bufs[1]), int(bufs[2]),
+                    dY.nbytes, X.nbytes, dW.nbytes,
+                    split_k=max(1, spec.split_k),
+                )  # fmt: skip
+            launcher(values, config=LaunchConfig(grid=grid, block=block, fence=True))
+            if two_stage:
+                rspec = WgradReduceSpec(
+                    problem=p,
+                    dtype_d="fp32",
+                    groups=p.groups,
+                    ws_replicas=spec.ws_replicas,
+                )
+                rart = compile_kernel(
+                    build_conv_wgrad_workspace_reduce(rspec, arch=arch), arch=arch
+                )
+                reducer = KernelLauncher(
+                    hsaco=rart.hsaco,
+                    kernel_name=rart.kernel_name,
+                    signature=wgrad_reduce_signature(rspec),
+                )
+                rvalues = {
+                    "ws_ptr": ws,
+                    "dw_ptr": bufs[2],
+                    "wg_M": spec.wg_M,
+                    "wg_N": spec.wg_N,
+                    "ws_bytes": ws_bytes,
+                    "dw_bytes": dW.nbytes,
+                    "groups": p.groups,
+                }
+                reducer(
+                    rvalues,
+                    config=LaunchConfig(
+                        grid=wgrad_reduce_grid(rspec),
+                        block=(rspec.block_size, 1, 1),
+                        fence=True,
+                    ),
+                )
+        out = torch.empty_like(dW)
+        rt.memcpy_d2h(_u8(out), bufs[2], dW.nbytes)
+    finally:
+        for buf in bufs:
+            rt.free(buf)
+    return out, ref
+
+
+def _tf32_rel_err(out, ref) -> float:
+    """max |out - ref| relative to the reference's peak |dW|."""
+    return float((out - ref).abs().max() / ref.abs().max())
+
+
+class TestConvWgradTf32Bound(unittest.TestCase):
+    """The gfx950 bound rejects what a broken TF32 path would produce. CPU only."""
+
+    def test_one_bf16_pass_fails_the_bound(self):
+        if not _HAS_TORCH:
+            self.skipTest("torch not importable")
+        import torch
+
+        p = _tf32_problem(_SHAPES[0])
+        X, dY, _ = _tf32_tensors(p)
+        ref = _wgrad_reference_nd(X, dY, p)
+        bf16 = _wgrad_reference_nd(
+            X.to(torch.bfloat16).float(), dY.to(torch.bfloat16).float(), p
+        )
+        # More than 10x over the bound: a single BF16 pass cannot pass it.
+        self.assertGreater(_tf32_rel_err(bf16, ref), 10 * tf32_reference_tol("gfx950"))
+
+
+@unittest.skipUnless(
+    not _SKIP_REASON and GPU_ARCH in _TF32_ATOMS,
+    _SKIP_REASON or f"tf32 wgrad is gfx942/gfx950 only (got {GPU_ARCH})",
+)
+class TestConvWgradTf32(unittest.TestCase):
+    """GPU numerics for TF32 wgrad: every epilogue mode, both atoms of the arch."""
+
+    def _check(self, problem, label: str, **kw) -> None:
+        from kernels.common.conv_implicit_gemm_wgrad import is_valid_wgrad_spec
+
+        for atom in _TF32_ATOMS[GPU_ARCH]:
+            spec = _tf32_spec(problem, atom, **kw)
+            with self.subTest(case=label, atom=f"{atom[0]}x{atom[0]}x{atom[1]}"):
+                ok, why = is_valid_wgrad_spec(spec, GPU_ARCH)
+                self.assertTrue(ok, f"{label}: {why}")
+                out, ref = _run_tf32(spec, GPU_ARCH)
+                written = out.reshape(problem.K, -1).abs().sum(dim=1) > 0
+                expected = ref.reshape(problem.K, -1).abs().sum(dim=1) > 0
+                missing = int((expected & ~written).sum())
+                self.assertEqual(missing, 0, f"{label}: {missing} dW rows unwritten")
+                rel = _tf32_rel_err(out, ref)
+                tol = tf32_reference_tol(GPU_ARCH)
+                self.assertLess(rel, tol, f"{label}: rel_err={rel:.3e} >= {tol:.0e}")
+                print(f"  PASS  tf32 {label} {atom}  rel_err={rel:.2e}", flush=True)
+
+    def test_epilogues_and_pipelines(self):
+        for shape in _SHAPES:
+            p = _tf32_problem(shape)
+            for pipe in ("mem", "compv4", "basic"):
+                for epi in _EPILOGUES:
+                    self._check(
+                        p, f"{shape.id}/{pipe}/{epi}", pipeline=pipe, epilogue=epi
+                    )
+
+    def test_unroll_k(self):
+        self._check(
+            _tf32_problem(_SHAPES[0]), "unroll_k", pipeline="compv4", unroll_k=True
+        )
+
+    def test_lds_k_pad_4(self):
+        # Row stride tile_k + 4: aligned for the <=4-wide fragment loads but not
+        # a multiple of gfx950's 8-wide fragment, so its two halves straddle a
+        # 32-byte boundary on odd rows.
+        for shape in (_SHAPES[0], _SHAPES[2]):
+            p = _tf32_problem(shape)
+            for epi in _EPILOGUES:
+                self._check(p, f"{shape.id}/pad4/{epi}", lds_k_pad=4, epilogue=epi)
+        self._check(_tf32_problem(_SHAPES[0]), "pad4/spk4", lds_k_pad=4, split_k=4)
+
+    def test_split_k_atomic(self):
+        for shape in _SHAPES:
+            p = _tf32_problem(shape)
+            for epi in _EPILOGUES:
+                self._check(p, f"{shape.id}/spk4/{epi}", split_k=4, epilogue=epi)
+
+    def test_two_stage(self):
+        for shape in _SHAPES:
+            p = _tf32_problem(shape)
+            self._check(p, f"{shape.id}/two_stage", split_k=4, two_stage=True)
+
+    def test_streamk(self):
+        for shape in (_SHAPES[0], _SHAPES[2]):
+            p = _tf32_problem(shape)
+            for red in ("linear", "tree", "atomic"):
+                self._check(
+                    p, f"{shape.id}/sk_{red}", streamk="dp_sk", streamk_ctas=6,
+                    streamk_reduction=red,
+                )  # fmt: skip
+        self._check(
+            _tf32_problem(_SHAPES[0]), "sk_persistent", streamk="persistent",
+            streamk_ctas=6,
+        )  # fmt: skip
+
+    def test_grouped(self):
+        p = _tf32_problem(_TF32_GROUPED)
+        self._check(p, "grouped/default")
+        self._check(p, "grouped/cshuffle", epilogue="cshuffle")
+        self._check(p, "grouped/spk4", split_k=4)
+        self._check(p, "grouped/two_stage", split_k=4, two_stage=True)
+        self._check(
+            p, "grouped/sk_atomic", streamk="dp_sk", streamk_ctas=6,
+            streamk_reduction="atomic",
+        )  # fmt: skip
+
+    def test_3d(self):
+        for g in (1, 2):
+            p = _tf32_problem_3d(g)
+            self._check(p, f"3d_g{g}/default")
+            self._check(p, f"3d_g{g}/cshuffle", epilogue="cshuffle")
+            self._check(p, f"3d_g{g}/spk4", split_k=4)
+            self._check(p, f"3d_g{g}/two_stage", split_k=4, two_stage=True)
+        p = _tf32_problem_3d()
+        for red in ("linear", "tree", "atomic"):
+            self._check(
+                p, f"3d/sk_{red}", streamk="dp_sk", streamk_ctas=6,
+                streamk_reduction=red,
+            )  # fmt: skip
 
 
 if __name__ == "__main__":

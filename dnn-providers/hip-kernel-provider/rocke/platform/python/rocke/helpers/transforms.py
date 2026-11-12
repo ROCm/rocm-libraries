@@ -69,10 +69,12 @@ addressing.
 
 from __future__ import annotations
 
+import operator
 from dataclasses import dataclass, replace
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 from ..core.ir import F16, I32, I64, IRBuilder, Type, Value
+from . import magic_division
 
 
 # ---------------------------------------------------------------------
@@ -110,64 +112,6 @@ def _ge(b: IRBuilder, lhs: Value, rhs: Value) -> Value:
 
 def _lt(b: IRBuilder, lhs: Value, rhs: Value) -> Value:
     return b.cmp_lt(lhs, rhs)
-
-
-# ---------------------------------------------------------------------
-# Magic-number division (mirrors ck_tile/core/utility/magic_div.hpp)
-# ---------------------------------------------------------------------
-
-
-def calculate_magic_numbers(divisor: int) -> Tuple[int, int]:
-    """Compute the ``(multiplier, shift)`` pair for unsigned magic division.
-
-    Direct port of CK Tile's
-    ``magic_division32_bit_range::calculate_magic_numbers`` (the
-    ``magic_division`` alias used by ``merge_v2_magic_division``). The
-    returned constants reproduce ``dividend // divisor`` via the mul-hi
-    sequence in :func:`do_magic_division` for any ``dividend`` that fits
-    in the 31-bit unsigned range (the same restriction CK Tile documents).
-
-    The math:
-
-    .. code-block:: text
-
-        shift      = ceil(log2(divisor))           (smallest s with 2**s >= divisor)
-        multiplier = ((2**shift - divisor) << 32) // divisor + 1
-
-    Both values are plain Python ``int`` (compile-time constants); they are
-    baked into the emitted IR as ``const_i32`` operands, exactly like the
-    C++ constexpr path.
-    """
-    if divisor < 1:
-        raise ValueError(f"magic division requires divisor >= 1, got {divisor}")
-    shift = 0
-    while (1 << shift) < divisor:
-        shift += 1
-    multiplier = (((1 << shift) - divisor) << 32) // divisor + 1
-    return multiplier, shift
-
-
-def do_magic_division(
-    b: IRBuilder, dividend: Value, multiplier: int, shift: int
-) -> Value:
-    """Emit ``dividend // divisor`` using the magic ``(multiplier, shift)``.
-
-    Mirrors CK Tile's ``do_magic_division`` device path
-    (``tmp = __umulhi(dividend, multiplier); (tmp + dividend) >> shift``),
-    which the AMDGPU backend lowers without an integer-division instruction.
-    ``dividend`` is an i32 SSA value interpreted as unsigned; the result is
-    the i32 quotient. ``multiplier`` / ``shift`` come from
-    :func:`calculate_magic_numbers`.
-    """
-    # ``multiplier`` is a uint32 that may exceed the i32 signed range; bake
-    # it into the i32 constant as its two's-complement bit pattern so the
-    # unsigned ``umul_hi`` sees the right bits (matches the C++ uint32 path).
-    mult_i32 = multiplier - (1 << 32) if multiplier >= (1 << 31) else multiplier
-    tmp = b.umul_hi_i32(dividend, b.const_i32(mult_i32))
-    summed = b.add(tmp, dividend)
-    if shift == 0:
-        return summed
-    return b.lshr(summed, b.const_i32(shift))
 
 
 # ---------------------------------------------------------------------
@@ -392,6 +336,96 @@ class Embed(Transform):
         return {self.lower[0]: CoordVar(self.lower[0], acc, valid)}
 
 
+class EmbedDynamic(Transform):
+    """Affine map with runtime strides and bounds (SSA Values).
+
+    Like :class:`Embed` but ``strides``, ``offset``, ``lo``, ``hi`` are
+    ``Value`` objects (or ``int`` for compile-time). This allows the
+    convolution stride / padding / dilation / input-height / input-width
+    parameters to come from kernel arguments at launch time, enabling
+    shape-generic (AOT) kernels.
+
+    Each parameter may be either an ``int`` (compile-time constant,
+    emitted as ``const_i32``) or a ``Value`` (runtime SSA value, used
+    as-is). This mirrors the ``PadDynamic`` design.
+    """
+
+    upper: Tuple[str, ...]
+    lower: Tuple[str, ...]
+    _strides: Tuple[Any, ...]
+    _offset: Any
+    _lo: Any
+    _hi: Any
+
+    def __init__(
+        self,
+        upper: Sequence[str],
+        lower: str,
+        strides: Sequence[Any],
+        offset: Any = 0,
+        lo: Any = None,
+        hi: Any = None,
+    ) -> None:
+        if len(upper) != len(strides):
+            raise ValueError(
+                f"EmbedDynamic expects len(upper) == len(strides) "
+                f"(got {upper!r}, {strides!r})"
+            )
+        object.__setattr__(self, "upper", tuple(upper))
+        object.__setattr__(self, "lower", (lower,))
+        object.__setattr__(self, "_strides", tuple(strides))
+        object.__setattr__(self, "_offset", offset)
+        object.__setattr__(self, "_lo", lo)
+        object.__setattr__(self, "_hi", hi)
+
+    @staticmethod
+    def _v(b: IRBuilder, x: Any) -> Value:
+        return x if isinstance(x, Value) else b.const_i32(int(x))
+
+    def apply(self, b: IRBuilder, coords: Dict[str, CoordVar]) -> Dict[str, CoordVar]:
+        acc: Optional[Value] = None
+        valid_acc: Optional[Value] = None
+        for name, s in zip(self.upper, self._strides):
+            u = coords[name]
+            valid_acc = _and(b, valid_acc, u.valid)
+            s_v = self._v(b, s)
+            if isinstance(s, int) and s == 1:
+                term = u.value
+            else:
+                term = b.mul(u.value, s_v)
+            acc = term if acc is None else b.add(acc, term)
+        off_v = self._v(b, self._offset)
+        if isinstance(self._offset, int) and self._offset == 0:
+            pass
+        else:
+            acc = b.add(acc, off_v) if acc is not None else off_v
+        if acc is None:
+            acc = off_v
+        bounds: Optional[Value] = None
+        if self._lo is not None:
+            bounds = _and(b, bounds, _ge(b, acc, self._v(b, self._lo)))
+        if self._hi is not None:
+            bounds = _and(b, bounds, _lt(b, acc, self._v(b, self._hi)))
+        valid = _and(b, valid_acc, bounds)
+        return {self.lower[0]: CoordVar(self.lower[0], acc, valid)}
+
+
+def embed_dynamic(
+    upper: Sequence[str],
+    lower: str,
+    strides: Sequence[Any],
+    offset: Any = 0,
+    lo: Any = None,
+    hi: Any = None,
+) -> EmbedDynamic:
+    """Affine map with possibly-runtime strides and bounds.
+
+    Pass ``strides`` / ``offset`` / ``lo`` / ``hi`` as ``int`` for
+    compile-time constants or as ``Value`` for runtime SSA values.
+    """
+    return EmbedDynamic(upper, lower, strides, offset, lo, hi)
+
+
 @dataclass(frozen=True)
 class Merge(Transform):
     """Flatten N upper coords into one linear lower coord.
@@ -513,9 +547,9 @@ class UnmergeMagicDiv(Transform):
 
     Numerically identical to :class:`Unmerge` -- it splits one flat upper
     coord into ``N`` lower coords -- but emits the mul-hi magic-division
-    sequence (:func:`do_magic_division`) instead of literal ``b.div`` /
-    ``b.mod``. This mirrors CK Tile's ``merge_v2_magic_division`` (the
-    default ``make_merge_transform``), whose ``calculate_lower_index`` is
+    sequence (:func:`rocke.helpers.magic_division.do_magic_division`)
+    instead of literal ``b.div`` / ``b.mod``. This mirrors CK Tile's
+    ``merge_v2_magic_division`` (the default ``make_merge_transform``), whose ``calculate_lower_index`` is
     exactly this flat-to-multi split. It removes the integer-division /
     modulo ops from the runtime addressing path (the single biggest source
     of div/mod assembly in conv ``m -> (n, ho, wo)`` / ``k -> (r, s, c)``
@@ -557,14 +591,94 @@ class UnmergeMagicDiv(Transform):
                 rem = b.const_i32(0)
                 quot = tmp
             else:
-                mult, shift = calculate_magic_numbers(d)
-                quot = do_magic_division(b, tmp, mult, shift)
+                mult, shift = magic_division.calculate_magic_numbers(d)
+                quot = magic_division.do_magic_division(b, tmp, mult, shift)
                 rem = b.sub(tmp, b.mul(quot, b.const_i32(d)))
             name = self.lower[i]
             out[name] = CoordVar(name, rem, u.valid)
             tmp = quot
         out[self.lower[0]] = CoordVar(self.lower[0], tmp, u.valid)
         return out
+
+
+class UnmergeMagicDynamic(Transform):
+    """``Unmerge`` via magic-number division with runtime magic numbers.
+
+    Like :class:`UnmergeMagicDiv` but the ``(multiplier, shift, dim)``
+    triples are SSA ``Value`` objects passed as kernel arguments, enabling
+    shape-generic (AOT) kernels. The host computes the magic constants via
+    :func:`rocke.helpers.magic_division.calculate_magic_numbers` at launch
+    time and passes them in.
+
+    ``magic_triples`` is a sequence of ``(multiplier, shift, dim)`` tuples,
+    one per lower coord except the leading one (which gets the final quotient).
+    Each element may be a ``Value`` (runtime) or ``int`` (compile-time).
+    """
+
+    upper: Tuple[str, ...]
+    lower: Tuple[str, ...]
+    _magic_triples: Tuple[Tuple[Any, Any, Any], ...]
+
+    def __init__(
+        self,
+        upper_name: str,
+        lowers: Sequence[str],
+        magic_triples: Sequence[Tuple[Any, Any, Any]],
+    ) -> None:
+        if len(magic_triples) != len(lowers) - 1:
+            raise ValueError(
+                f"UnmergeMagicDynamic needs len(lowers)-1 magic triples "
+                f"(got {len(lowers)} lowers, {len(magic_triples)} triples)"
+            )
+        object.__setattr__(self, "upper", (upper_name,))
+        object.__setattr__(self, "lower", tuple(lowers))
+        object.__setattr__(self, "_magic_triples", tuple(magic_triples))
+
+    @staticmethod
+    def _v(b: IRBuilder, x: Any) -> Value:
+        return x if isinstance(x, Value) else b.const_i32(int(x))
+
+    def apply(self, b: IRBuilder, coords: Dict[str, CoordVar]) -> Dict[str, CoordVar]:
+        u = coords[self.upper[0]]
+        n = len(self.lower)
+        out: Dict[str, CoordVar] = {}
+        tmp = u.value
+        for i in range(n - 1, 0, -1):
+            mult, shift, dim = self._magic_triples[i - 1]
+            mult_v = self._v(b, mult)
+            shift_v = self._v(b, shift)
+            dim_v = self._v(b, dim)
+            if isinstance(dim, int) and dim == 1:
+                rem = b.const_i32(0)
+                quot = tmp
+            else:
+                quot = magic_division.do_magic_division_dynamic(b, tmp, mult_v, shift_v)
+                rem = b.sub(tmp, b.mul(quot, dim_v))
+            name = self.lower[i]
+            out[name] = CoordVar(name, rem, u.valid)
+            tmp = quot
+        out[self.lower[0]] = CoordVar(self.lower[0], tmp, u.valid)
+        return out
+
+
+def unmerge_magic_dynamic(
+    upper: str,
+    into: Sequence[str],
+    magic_triples: Sequence[Tuple[Any, Any, Any]],
+) -> UnmergeMagicDynamic:
+    """Unmerge with runtime magic-number division constants.
+
+    ``magic_triples`` has ``len(into) - 1`` entries, each ``(mult, shift, dim)``
+    — either ``int`` (compile-time) or ``Value`` (runtime). The triples
+    correspond to ``into[1], into[2], ...`` (the leading coord gets the
+    final quotient and needs no division).
+
+    Host-side code computes each triple via::
+
+        mult, shift = magic_division.calculate_magic_numbers(dim)
+        # pass mult, shift, dim as kernel args
+    """
+    return UnmergeMagicDynamic(upper, into, magic_triples)
 
 
 @dataclass(frozen=True)
@@ -1429,6 +1543,18 @@ class TensorDescriptor:
             remaining = next_remaining
         return coords
 
+    def _term(self, b: IRBuilder, i: int, value: Value) -> Value:
+        """Base coord ``i``'s i32 offset term: ``value`` times its stride, with no
+        multiply for a stride of 1. :class:`DynamicTensorDescriptor` overrides
+        the stride source; every offset/move loop goes through this hook."""
+        stride = self.base_strides[i]
+        return value if stride == 1 else b.mul(value, b.const_i32(stride))
+
+    def _term_i64(self, b: IRBuilder, i: int, wide: Value) -> Value:
+        """Base coord ``i``'s i64 term: the already-widened ``wide`` times its
+        stride (always multiplied, as the i64 paths do)."""
+        return b.mul(wide, b.const_i64(int(self.base_strides[i])))
+
     def offset(
         self,
         b: IRBuilder,
@@ -1444,17 +1570,14 @@ class TensorDescriptor:
         coords = self._run_chain(b, upper_values)
         offset: Optional[Value] = None
         valid: Optional[Value] = None
-        for name, stride in zip(self.base_names, self.base_strides):
+        for i, name in enumerate(self.base_names):
             if name not in coords:
                 raise ValueError(
                     f"after chain, base coord {name!r} not in {sorted(coords.keys())}"
                 )
             c = coords[name]
             valid = _and(b, valid, c.valid)
-            if stride == 1:
-                term = c.value
-            else:
-                term = b.mul(c.value, b.const_i32(stride))
+            term = self._term(b, i, c.value)
             offset = term if offset is None else b.add(offset, term)
         if offset is None:
             offset = b.const_i32(0)
@@ -1479,7 +1602,7 @@ class TensorDescriptor:
         base_i64: Optional[Value] = None
         within: Optional[Value] = None
         valid: Optional[Value] = None
-        for name, stride in zip(self.base_names, self.base_strides):
+        for i, name in enumerate(self.base_names):
             if name not in coords:
                 raise ValueError(
                     f"after chain, base coord {name!r} not in {sorted(coords.keys())}"
@@ -1491,9 +1614,9 @@ class TensorDescriptor:
                 # descriptor (uniform per wave), so pin the (wave-uniform)
                 # block id to an SGPR before widening.
                 base_val = b.to_sgpr_u32(c.value)
-                base_i64 = b.mul(b.zext(base_val, I64), b.const_i64(int(stride)))
+                base_i64 = self._term_i64(b, i, b.zext(base_val, I64))
             else:
-                term = c.value if stride == 1 else b.mul(c.value, b.const_i32(stride))
+                term = self._term(b, i, c.value)
                 within = term if within is None else b.add(within, term)
         if base_i64 is None:
             raise ValueError(
@@ -1521,7 +1644,7 @@ class TensorDescriptor:
         coords = self._run_chain(b, upper_values)
         off: Optional[Value] = None
         valid: Optional[Value] = None
-        for name, stride in zip(self.base_names, self.base_strides):
+        for i, name in enumerate(self.base_names):
             if name not in coords:
                 raise ValueError(
                     f"after chain, base coord {name!r} not in {sorted(coords.keys())}"
@@ -1529,10 +1652,9 @@ class TensorDescriptor:
             c = coords[name]
             valid = _and(b, valid, c.valid)
             if name == i64_coord:
-                term = b.mul(b.zext(c.value, I64), b.const_i64(int(stride)))
+                term = self._term_i64(b, i, b.zext(c.value, I64))
             else:
-                t32 = c.value if stride == 1 else b.mul(c.value, b.const_i32(stride))
-                term = b.zext(t32, I64)
+                term = b.zext(self._term(b, i, c.value), I64)
             off = term if off is None else b.add(off, term)
         if off is None:
             off = b.const_i64(0)
@@ -1623,23 +1745,94 @@ class TensorDescriptor:
         delta, new = self._run_chain_delta(b, old_values, delta_values)
         off_delta: Optional[Value] = None
         valid: Optional[Value] = None
-        for name, stride in zip(self.base_names, self.base_strides):
+        for i, name in enumerate(self.base_names):
             if name not in delta:
                 raise ValueError(
                     f"after chain, base coord {name!r} not in {sorted(delta.keys())}"
                 )
             valid = _and(b, valid, new[name].valid)
-            dv = delta[name].value
-            term = dv if stride == 1 else b.mul(dv, b.const_i32(stride))
+            term = self._term(b, i, delta[name].value)
             off_delta = term if off_delta is None else b.add(off_delta, term)
         if off_delta is None:
             return prev_offset, valid
         return b.add(prev_offset, off_delta), valid
 
 
+@dataclass
+class DynamicTensorDescriptor(TensorDescriptor):
+    """A :class:`TensorDescriptor` whose base strides may be runtime SSA Values.
+
+    Constructed via :meth:`DynamicTensorDescriptor.create`. The transform
+    chain works identically to the static descriptor; the final stride
+    reduction multiplies a base coord by its runtime ``Value`` stride, and an
+    ``int`` stride follows the static rule (no multiply for 1).
+
+    ``dynamic_strides`` holds one entry per base coord, in the same order as
+    ``base_names``: the runtime ``Value``, or ``None`` where ``base_strides``
+    holds the compile-time stride (1 at every runtime position).
+    """
+
+    dynamic_strides: Tuple[Optional[Value], ...] = ()
+
+    def _term(self, b: IRBuilder, i: int, value: Value) -> Value:
+        stride_v = self.dynamic_strides[i]
+        if stride_v is not None:
+            return b.mul(value, stride_v)
+        return super()._term(b, i, value)
+
+    def _term_i64(self, b: IRBuilder, i: int, wide: Value) -> Value:
+        stride_v = self.dynamic_strides[i]
+        if stride_v is not None:
+            return b.mul(wide, b.zext(stride_v, I64))
+        return super()._term_i64(b, i, wide)
+
+    @classmethod
+    def create(
+        cls,
+        name: str,
+        *,
+        coord_names: Sequence[str],
+        strides: Sequence[Union[Value, int]],
+    ) -> "DynamicTensorDescriptor":
+        """Build a descriptor from per-coord strides, each a runtime i32 SSA
+        ``Value`` (in elements, usually from kernel arguments) or an ``int``.
+
+        ``coord_names`` and ``strides`` must have the same length. The
+        descriptor can then be extended with ``.transform(...)`` just like a
+        static descriptor.
+        """
+        if len(coord_names) != len(strides):
+            raise ValueError("coord_names and strides length mismatch")
+        coord_names = tuple(coord_names)
+        dynamic = tuple(s if isinstance(s, Value) else None for s in strides)
+        static = []
+        for i, s in enumerate(strides):
+            if isinstance(s, Value):
+                static.append(1)
+                continue
+            # operator.index rejects a float or string stride instead of truncating it.
+            try:
+                static.append(operator.index(s))
+            except TypeError:
+                raise TypeError(
+                    f"strides[{i}] must be a Value or an int, got {type(s).__name__}"
+                ) from None
+        return cls(
+            name=name,
+            base_names=coord_names,
+            base_lengths=tuple(0 for _ in coord_names),
+            base_strides=tuple(static),
+            chain=(),
+            upper_names=coord_names,
+            dynamic_strides=dynamic,
+        )
+
+
 __all__ = [
     "CoordVar",
+    "DynamicTensorDescriptor",
     "Embed",
+    "EmbedDynamic",
     "Freeze",
     "Indirect",
     "Insert",
@@ -1658,10 +1851,10 @@ __all__ = [
     "Unmerge",
     "UnmergeDivMod",
     "UnmergeMagicDiv",
+    "UnmergeMagicDynamic",
     "XorT",
-    "calculate_magic_numbers",
-    "do_magic_division",
     "embed",
+    "embed_dynamic",
     "freeze",
     "indirect",
     "insert",
@@ -1679,5 +1872,6 @@ __all__ = [
     "unmerge",
     "unmerge_div_mod",
     "unmerge_magic",
+    "unmerge_magic_dynamic",
     "xor_t",
 ]

@@ -27,11 +27,12 @@ import numpy as np
 from threading import Lock
 from tqdm import tqdm
 from pathlib import Path
-from typing import Sequence
+from typing import List, Sequence
 
 from geko.bench.utils import parse_benchmark_output, update_lib_source, is_built_custom_library
 from geko import library
-from geko.constants import GEMM_FIELDS
+from geko.constants import GEMM_FIELDS, GEMM_LOG_FIELDS
+from geko.bench import log
 from geko.bench.log import verify_output, dump as dump_bench_yaml, read as read_bench_yaml
 from geko.concurrency.runner import Runner, Worker
 from geko.utils import parse_devices
@@ -56,6 +57,7 @@ UNIQ_COLS = (
     "avg_MCLK", 
     "median_MCLK"
 )
+
 
 def run(
     hipblaslt_path: str | Path,
@@ -323,6 +325,7 @@ def standard_benchmark(
             f"Probe output rows ({len(df_probe)}) do not match bench rows ({len(rows)}); "
             f"check '{probe_out}'"
         )
+    df_probe = log.realign_rows(rows, df_probe)
 
     scaled_rows = copy.deepcopy(rows)
     for i, row in enumerate(scaled_rows):
@@ -389,7 +392,7 @@ def compare(
             Defaults to "benchmarks".
         verify (bool, optional): Whether to run accuracy verification tests.
             Defaults to True.
-        cache (bool, optional): Whether to reuse existing Tensile library and results.
+        cache (bool, optional): Whether to reuse existing TensileLite library and results.
             Defaults to False.
         duration (float, optional): Target benchmark duration in seconds.  
             This is the duration of each benchmark. It will be used to calculate the number of iterations.
@@ -409,7 +412,7 @@ def compare(
         ValueError: If no valid libraries found in lib_dir.
 
     Note:
-        - Creates Tensile library if not cached.
+        - Creates TensileLite library if not cached.
         - Generates benchmark input files for each library.
         - Compares reference vs tuned performance with ratio calculation.
     """

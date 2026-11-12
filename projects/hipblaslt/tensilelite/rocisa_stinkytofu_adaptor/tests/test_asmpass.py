@@ -8,6 +8,8 @@ import os
 import sys
 import unittest
 
+from _adaptor_testcase import AdaptorTestCase
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _PKG_PARENT = os.path.normpath(os.path.join(_HERE, ".."))
 if _PKG_PARENT not in sys.path:
@@ -19,7 +21,7 @@ from rocisa_stinkytofu_adaptor.container import sgpr, vgpr  # noqa: E402
 from rocisa_stinkytofu_adaptor.instruction import MacroInstruction, VMovB32  # noqa: E402
 
 
-class TestRocIsaPassOption(unittest.TestCase):
+class TestRocIsaPassOption(AdaptorTestCase):
     def test_defaults_match_pass_hpp(self):
         o = asmpass.rocIsaPassOption()
         self.assertFalse(o.insertDelayAlu)
@@ -30,13 +32,13 @@ class TestRocIsaPassOption(unittest.TestCase):
         self.assertTrue(o.doOpt())
 
 
-class TestRocIsaPassResult(unittest.TestCase):
+class TestRocIsaPassResult(AdaptorTestCase):
     def test_default_cycles(self):
         r = asmpass.rocIsaPassResult()
         self.assertEqual(r.cycles, -1)
 
 
-class TestGetActFuncNames(unittest.TestCase):
+class TestGetActFuncNames(AdaptorTestCase):
     def test_module_name(self):
         self.assertEqual(
             asmpass.getActFuncModuleName(8, 12, 3, 4),
@@ -50,7 +52,7 @@ class TestGetActFuncNames(unittest.TestCase):
         )
 
 
-class TestMacroToInstruction(unittest.TestCase):
+class TestMacroToInstruction(AdaptorTestCase):
     def test_expands_macro_call_and_drops_definition(self):
         body = Module("body")
         macro = Macro("FOO", ["vdst:req=v0", "ssrc:req=s0"])
@@ -98,7 +100,7 @@ class TestMacroToInstruction(unittest.TestCase):
         self.assertEqual(res.cycles, 0)
 
 
-class TestModuleExports(unittest.TestCase):
+class TestModuleExports(AdaptorTestCase):
     def test_public_symbols(self):
         for name in (
             "rocIsaPass",

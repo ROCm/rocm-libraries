@@ -26,6 +26,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -39,7 +40,7 @@
 #include "../device/kernels/callback.h"
 #include "../device/kernels/common.h"
 #include "compute_scheme.h"
-#include "data_layout.h"
+#include "data_set.h"
 #include "enum_printer.h"
 #include "exec_info.h"
 #include "function_map_key.h"
@@ -419,9 +420,7 @@ struct NodeMetaData
     std::vector<size_t>     length;
     std::vector<size_t>     outputLength;
     std::vector<size_t>     inStride, outStride;
-    std::vector<size_t>     inStrideBlue, outStrideBlue;
     size_t                  iDist = 0, oDist = 0;
-    size_t                  iDistBlue = 0, oDistBlue = 0;
     size_t                  iOffset = 0, oOffset = 0;
     int                     direction         = -1;
     rocfft_result_placement placement         = rocfft_placement_inplace;
@@ -434,15 +433,15 @@ struct NodeMetaData
 
     // TODO: `batch`, `dimension`, `length`, `outputLength` `inStride`,
     // `outStride`, `iDist`, and `oDist` could (and should) be replaced
-    // by two data_layout_t member objects instead.
-    inline data_layout_t layout_for(io_data_label io) const
+    // by two data_set_t member objects instead.
+    inline data_set_t layout_for(io_data_label io) const
     {
         switch(io)
         {
         case io_data_label::INPUT:
-            return data_layout_t::full_layout(length, inStride, batch, iDist);
+            return data_set_t::full_range(length, inStride, batch, iDist);
         case io_data_label::OUTPUT:
-            return data_layout_t::full_layout(outputLength, outStride, batch, oDist);
+            return data_set_t::full_range(outputLength, outStride, batch, oDist);
         default:
             throw std::invalid_argument("Unknown io data label given to "
                                         + ROCFFT_CURRENT_FUNCTION);
@@ -452,8 +451,8 @@ struct NodeMetaData
     inline bool is_using_default_contiguous_layout_for(io_data_label io) const
     {
         return layout_for(io)
-               == data_layout_t::default_full_layout(
-                   io == io_data_label::INPUT ? length : outputLength, batch);
+               == data_set_t::default_full_range(io == io_data_label::INPUT ? length : outputLength,
+                                                 batch);
     };
 
     explicit NodeMetaData(TreeNode* refNode);
@@ -573,14 +572,116 @@ public:
     // Stride of the FFT in each dimension
     std::vector<size_t> inStride, outStride;
 
-    // Stride of the fused Bluestein FFT in each dimension
-    std::vector<size_t> inStrideBlue, outStrideBlue;
-
     // Distance between consecutive batch members:
     size_t iDist = 0, oDist = 0;
 
-    // Distance between consecutive batch members in fused Bluestein nodes
-    size_t iDistBlue = 0, oDistBlue = 0;
+    // Encapsulation of Bluestein-specific additional members (stored as an
+    // optional instance in TreeNode object, valued only for nodes involved
+    // in a Bluestein algorithm strategy).
+    struct BluesteinParams
+    {
+        BluesteinParams(size_t transformLength, size_t paddedLength, BluesteinType bluesteinType)
+            : type(bluesteinType)
+            , transform_length(transformLength)
+            , padded_length(paddedLength)
+            , fuse(BluesteinFuseType::BFT_NONE)
+        {
+            if(paddedLength + 1 < 2 * transformLength)
+                throw std::invalid_argument(
+                    ROCFFT_CURRENT_FUNCTION
+                    + ": paddedLength is too small for the given transformLength");
+        }
+
+        // Bluestein strategy for this node; fixed at construction.
+        BluesteinType get_type() const
+        {
+            return type;
+        }
+        // Original (unpadded) FFT length "N", always complex.
+        size_t get_transform_length() const
+        {
+            return transform_length;
+        }
+        // Padded convolution length "M >= 2*N - 1", always complex.
+        size_t get_padded_length() const
+        {
+            return padded_length;
+        }
+
+        BluesteinFuseType get_fuse_type() const
+        {
+            return fuse;
+        }
+
+        // Load- and store-side descriptions of the data set in
+        // the convolution buffer (OB_TEMP_BLUESTEIN buffer), valued
+        // for fused-Bluestein's BFT_FWD_CHIRP_MUL and BFT_INV_CHIRP_MUL
+        // stages (only). These stages re-interpret the padded_length as
+        // the product of 2 smaller lengths (1D-via-2D transforms).
+        const std::optional<data_set_t>& get_conv_buf_layout(io_data_label io) const
+        {
+            return io == io_data_label::INPUT ? conv_buf_layout_in : conv_buf_layout_out;
+        }
+
+        // Set the fused-operation type.  A real (non-BFT_NONE) fuse type
+        // is only valid on a BT_MULTI_KERNEL_FUSED node, and such a node
+        // cannot be reset to BFT_NONE.
+        void set_fuse_type(BluesteinFuseType fuseType)
+        {
+            if((fuseType == BluesteinFuseType::BFT_NONE) != (type != BT_MULTI_KERNEL_FUSED))
+                throw std::invalid_argument(ROCFFT_CURRENT_FUNCTION
+                                            + ": a non-BFT_NONE fuse type requires a "
+                                              "BT_MULTI_KERNEL_FUSED node (and vice versa)");
+            fuse = fuseType;
+        }
+
+        void set_conv_buffer_layout(io_data_label io, data_set_t buffer_layout)
+        {
+            // Only the Hadamard-product stages address OB_TEMP_BLUESTEIN,
+            // on both sides.
+            if(type != BT_MULTI_KERNEL_FUSED
+               || (fuse != BluesteinFuseType::BFT_FWD_CHIRP_MUL
+                   && fuse != BluesteinFuseType::BFT_INV_CHIRP_MUL))
+            {
+                throw std::runtime_error(
+                    ROCFFT_CURRENT_FUNCTION
+                    + ": the Bluestein's convolution buffer's I/O layouts are relevant only for "
+                      "the FWD_CHIRP_MUL and INV_CHIRP_MUL stages of a BT_MULTI_KERNEL_FUSED");
+            }
+            auto buffer_layout_len = buffer_layout.lengths();
+            if(buffer_layout_len.size() < 2
+               || buffer_layout_len[0] * buffer_layout_len[1] != padded_length)
+            {
+                throw std::invalid_argument(
+                    ROCFFT_CURRENT_FUNCTION
+                    + ": the first two length dimensions of the convolution buffer layout must "
+                      "factorize the padded length");
+            }
+            const auto& other_layout = get_conv_buf_layout(other(io));
+            if(other_layout && !other_layout->is_dimensionally_consistent_with(buffer_layout))
+            {
+                throw std::invalid_argument(
+                    ROCFFT_CURRENT_FUNCTION
+                    + ": the I/O layouts of convolution buffers must be dimensionally consistent");
+            }
+
+            if(io == io_data_label::INPUT)
+                conv_buf_layout_in = std::move(buffer_layout);
+            else
+                conv_buf_layout_out = std::move(buffer_layout);
+        }
+
+    private:
+        BluesteinType             type;
+        size_t                    transform_length;
+        size_t                    padded_length;
+        BluesteinFuseType         fuse;
+        std::optional<data_set_t> conv_buf_layout_in, conv_buf_layout_out;
+    };
+
+    // Bluestein state: set on Bluestein nodes and their non-FFT children;
+    // FFT sub-plans (and their descendants) carry it only in the fused strategy.
+    std::optional<BluesteinParams> blue;
 
     // Offsets to start of data in buffer:
     size_t iOffset = 0, oOffset = 0;
@@ -637,22 +738,11 @@ public:
     ComputeScheme   scheme = CS_NONE;
     OperatingBuffer obIn = OB_UNINIT, obOut = OB_UNINIT;
 
-    // Length of the FFT for computing zero-padded linear convolutions
-    // in Bluestein's algorithm. If Bluestein is required to compute an
-    // FFT of length N, then lengthBlue >= 2N - 1.
-    size_t lengthBlue  = 0;
-    size_t lengthBlueN = 0;
-
     // Index of off-dimension in partial-pass nodes
     size_t ppOffDim = 0;
 
     // Index of current dimension (full pass) in partial-pass nodes
     size_t ppCurrDim = 0;
-
-    //
-    BluesteinType     typeBlue   = BluesteinType::BT_NONE;
-    BluesteinFuseType fuseBlue   = BluesteinFuseType::BFT_NONE;
-    bool              need_chirp = false;
 
     // Device pointers:
     // twiddle memory is owned by the repo
@@ -720,7 +810,10 @@ public:
     bool isPlacementAllowed(rocfft_result_placement) const;
     bool isOutBufAllowed(OperatingBuffer oB) const;
     bool isOutArrayTypeAllowed(rocfft_array_type) const;
-    bool isRootNode() const;
+    bool isRootNode() const
+    {
+        return parent == nullptr;
+    }
     bool isLeafNode() const;
     // Get the current node downcasted to a LeafNode.  Throws bad_cast
     // if this node isn't actually a leaf.
@@ -804,7 +897,13 @@ public:
     void RecursiveInsertNode(TreeNode* pos, std::unique_ptr<TreeNode>& newNode);
 
     // Get root node of plan
-    const TreeNode* GetPlanRoot() const;
+    const TreeNode* GetPlanRoot() const
+    {
+        if(isRootNode())
+            return this;
+
+        return parent->GetPlanRoot();
+    }
     // If 'this' is a leaf, return it.  Otherwise, return the first
     // leaf node under 'this' in the execution sequence.
     TreeNode* GetFirstLeaf();
@@ -816,12 +915,41 @@ public:
     TreeNode* GetRealEvenAncestor();
 
     // Return true if the root plan is C2C, R2C, or C2R
-    bool IsRootPlanC2CTransform() const;
-    bool IsRootPlanR2CTransform() const;
-    bool IsRootPlanC2RTransform() const;
+    bool IsRootPlanC2CTransform() const
+    {
+        auto root = GetPlanRoot();
+        return (root->inArrayType != rocfft_array_type_real)
+               && (root->outArrayType != rocfft_array_type_real);
+    }
+    bool IsRootPlanR2CTransform() const
+    {
+        auto root = GetPlanRoot();
+        return (root->inArrayType == rocfft_array_type_real)
+               && (root->outArrayType != rocfft_array_type_real);
+    }
+    bool IsRootPlanC2RTransform() const
+    {
+        auto root = GetPlanRoot();
+        return (root->inArrayType != rocfft_array_type_real)
+               && (root->outArrayType == rocfft_array_type_real);
+    }
 
-    // Return the transform type of the root plan
-    rocfft_transform_type GetRootPlanTransformType() const;
+    // Return the transform type of the root plan.
+    rocfft_transform_type GetRootPlanTransformType() const
+    {
+        const auto root = GetPlanRoot();
+
+        if(IsRootPlanC2CTransform() && root->direction == -1)
+            return rocfft_transform_type_complex_forward;
+        else if(IsRootPlanC2CTransform() && root->direction == 1)
+            return rocfft_transform_type_complex_inverse;
+        else if(IsRootPlanR2CTransform())
+            return rocfft_transform_type_real_forward;
+        else if(IsRootPlanC2RTransform())
+            return rocfft_transform_type_real_inverse;
+        else
+            throw std::runtime_error("Unknown root plan transform type");
+    }
 
     // Return ancestor node of 'this' that is partial-pass, or
     // nullptr if there is no such ancestor
@@ -838,12 +966,17 @@ public:
     {
         return outputLength.empty() ? length : outputLength;
     }
-    // Padding needs matching stride + length to make its decisions.
-    // For most nodes, outStride + length can be used together.  For
-    // some nodes, outputLength is what matches outStride.
-    virtual bool UseOutputLengthForPadding()
+    // True if outStride is indexed in outputLength order rather than length
+    // order (e.g. fused SBRC transposes, embedded r2c/c2r).  Anything pairing
+    // a length vector with outStride should go through LengthForOutStride().
+    virtual bool OutputLengthMatchesOutStride() const
     {
         return false;
+    }
+    // The length vector that pairs with outStride.
+    std::vector<size_t> LengthForOutStride() const
+    {
+        return OutputLengthMatchesOutStride() ? GetOutputLength() : length;
     }
 
     virtual bool KernelCheck(std::vector<FMKey>& kernel_keys = EmptyFMKeyVec) = 0;
@@ -882,11 +1015,18 @@ public:
         if(!pp_parent_node)
             throw std::runtime_error("Invalid parent node for partial pass");
 
-        return PPFMKey(pp_parent_node->length[0],
-                       pp_parent_node->length[1],
-                       pp_parent_node->length[2],
+        auto transform_type = GetRootPlanTransformType();
+        auto parent_length  = pp_parent_node->length;
+
+        // For c2r we want the real length, not the complex length for querying the function pool
+        if(transform_type == rocfft_transform_type_real_inverse)
+            parent_length[0] = (parent_length[0] - 1) * 2;
+
+        return PPFMKey(parent_length[0],
+                       parent_length[1],
+                       parent_length[2],
                        precision,
-                       GetRootPlanTransformType(),
+                       transform_type,
                        pp_parent_node->scheme);
     }
 
@@ -943,6 +1083,20 @@ public:
     // buffer - those nodes aren't connected to the input/output chain
     // of user data
     bool IsBluesteinChirpSetup();
+
+    // return true if this node is a fused-Bluestein leaf whose kernel
+    // reads the chirp table.
+    bool NeedsChirp() const;
+
+    BluesteinFuseType GetBluesteinFuseType() const
+    {
+        return blue ? blue->get_fuse_type() : BluesteinFuseType::BFT_NONE;
+    }
+
+    BluesteinType GetBluesteinType() const
+    {
+        return blue ? blue->get_type() : BluesteinType::BT_NONE;
+    }
 
     // Assuming callbacks need to run on this node, return the
     // specific CallbackType for this node - takes into account
@@ -1037,18 +1191,10 @@ public:
     void         SetupGridParam(GridParam& gp) override;
     FMKey        GetKernelKey() const override;
 
-    // Temporary workaround for gfx1250 which has an issue with very large 32-bit pointer offsets
-    size_t GetU32IntegerLimit() const
-    {
-
-        return is_device_gcn_arch(deviceProp, "gfx1250") ? static_cast<size_t>(INT32_MAX)
-                                                         : static_cast<size_t>(UINT32_MAX);
-    };
-
     // Return the integer type for this node's kernel.
     KIntType GetKIntType() const
     {
-        auto idx_limit = GetU32IntegerLimit();
+        auto idx_limit = static_cast<size_t>(UINT32_MAX);
 
         // The strides and dists also have to fit, not just the indices the
         // kernel reaches.  A dist is packed into the argument buffer even
@@ -1072,22 +1218,30 @@ public:
         // launch (see powX.cpp) and don't affect kernel index arithmetic.
         const auto& io_stride = io == io_data_label::INPUT ? inStride : outStride;
         const auto& io_dist   = io == io_data_label::INPUT ? iDist : oDist;
-        const auto  io_length = io == io_data_label::INPUT ? length : GetOutputLength();
+        // inStride always pairs with length, outStride does not on every node.
+        const auto io_length = io == io_data_label::INPUT ? length : LengthForOutStride();
 
         // compute_ptrdiff returns the buffer size (one-past-the-end).
         auto ptrdiff = compute_ptrdiff(io_length, io_stride, batch, io_dist) - 1;
 
+        if(!blue || !blue->get_conv_buf_layout(io))
+            return ptrdiff;
         // Fused Bluestein kernels index the Bluestein work buffer in the same
         // kernel, over the same lengths but with the Bluestein strides + dist.
         // Whichever side reaches further decides the integer type.
-        const auto& io_stride_blue = io == io_data_label::INPUT ? inStrideBlue : outStrideBlue;
-        if(fuseBlue == BFT_NONE || io_stride_blue.size() < io_length.size())
-            return ptrdiff;
+        const auto fuse_type = GetBluesteinFuseType();
 
-        const auto& io_dist_blue = io == io_data_label::INPUT ? iDistBlue : oDistBlue;
+        // The INV_CHIRP_MUL CC load and FWD_CHIRP_MUL RC store add the padded length to the
+        // index in-kernel, to skip the chirp's FFT stored first in the Bluestein buffer.
+        const bool offset_by_padded_length
+            = (io == io_data_label::INPUT && fuse_type == BFT_INV_CHIRP_MUL
+               && scheme == CS_KERNEL_STOCKHAM_BLOCK_CC)
+              || (io == io_data_label::OUTPUT && fuse_type == BFT_FWD_CHIRP_MUL
+                  && scheme == CS_KERNEL_STOCKHAM_BLOCK_RC);
 
         return std::max(ptrdiff,
-                        compute_ptrdiff(io_length, io_stride_blue, batch, io_dist_blue) - 1);
+                        blue->get_conv_buf_layout(io)->buffer_element_count() - 1
+                            + (offset_by_padded_length ? blue->get_padded_length() : 0));
     };
 
     // Max stride or dist packed into the kernel argument buffer for a given
@@ -1104,30 +1258,36 @@ public:
                                                    : *std::max_element(io_stride.begin(), io_stride.end());
         max_stride             = std::max(max_stride, io_dist);
 
-        if(fuseBlue == BFT_NONE)
+        if(GetBluesteinFuseType() == BFT_NONE)
             return max_stride;
 
         // Fused Bluestein kernels also take the Bluestein lengths, and the
         // higher-dimension Bluestein strides + dist, as integer_type.  See
         // BluesteinData and RTCKernelStockham::get_launch_args.
-        max_stride = std::max({max_stride, lengthBlueN, lengthBlue});
+        // Note: max(padded_length, transform_length) == padded_length by construction.
+        max_stride = std::max(max_stride, blue->get_padded_length());
 
-        // BFT_FWD_CHIRP passes zeros for the Bluestein strides and dist.
-        if(fuseBlue == BFT_FWD_CHIRP)
+        // BFT_FWD_CHIRP does not use the convolution buffer
+        const auto& conv_layout = blue->get_conv_buf_layout(io);
+        if(!conv_layout)
             return max_stride;
 
-        const auto& io_stride_blue = io == io_data_label::INPUT ? inStrideBlue : outStrideBlue;
-        const auto& io_dist_blue   = io == io_data_label::INPUT ? iDistBlue : oDistBlue;
-
-        // Only dims 2 and 3 are packed; dims 0 and 1 are implied by lengthBlue.
+        const auto io_stride_blue = conv_layout->strides();
+        // Only dims 2 and 3 are packed; dims 0 and 1 are implied by
+        // padded_length.
         for(size_t i = 2; i < io_stride_blue.size() && i < 4; ++i)
             max_stride = std::max(max_stride, io_stride_blue[i]);
 
-        return std::max(max_stride, io_dist_blue);
+        return std::max(max_stride, conv_layout->distance());
     };
 
     virtual void GetKernelFactors();
     virtual void GetKernelPartialPassFactors();
+
+    // Allocate the twiddle tables a partial-pass kernel needs.  The caller
+    // resolves off_dim_length because ppOffDim indexes the plan's dimensions,
+    // which do not always line up with this node's length vector.
+    bool CreatePartialPassDeviceResources(size_t off_dim_length);
 };
 
 /*****************************************************

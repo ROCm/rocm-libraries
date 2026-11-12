@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -64,11 +64,25 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define ROCRAND_PHILOX_W32_0 0x9E3779B9U
 #define ROCRAND_PHILOX_W32_1 0xBB67AE85U
 
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__)
+    #define ROCRAND_BUILTIN_ADDC(a, b, carry_in, carry_out) \
+        __builtin_addc(a, b, carry_in, carry_out)
+#else
+    #define ROCRAND_BUILTIN_ADDC(a, b, carry_in, carry_out)                           \
+        (                                                                             \
+            [&]()                                                                     \
+            {                                                                         \
+                unsigned int sum = (a) + (b) + (carry_in);                            \
+                *carry_out       = (sum < (a) || ((carry_in) && sum <= (b))) ? 1 : 0; \
+                return sum;                                                           \
+            }())
+#endif
+
 /** \rocrand_internal \addtogroup rocranddevice
  *
  *  @{
  */
- /**
+/**
  * \def ROCRAND_PHILOX4x32_DEFAULT_SEED
  * \brief Default seed for PHILOX4x32 PRNG.
  */
@@ -83,12 +97,12 @@ class philox4x32_10_engine
 public:
     struct philox4x32_10_state
     {
-        uint4 counter;
-        uint4 result;
-        uint2 key;
+        uint4        counter;
+        uint4        result;
+        uint2        key;
         unsigned int substate;
 
-    #ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
+#ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
         // The Box–Muller transform requires two inputs to convert uniformly
         // distributed real values [0; 1] to normally distributed real values
         // (with mean = 0, and stddev = 1). Often user wants only one
@@ -96,10 +110,11 @@ public:
         // numbers the 2nd value is saved for future requests.
         float  boxmuller_float; // normally distributed float
         double boxmuller_double; // normally distributed double
-    #endif
+#endif
     };
 
-    __forceinline__ __device__ __host__ philox4x32_10_engine()
+    __forceinline__ __device__ __host__
+    philox4x32_10_engine()
     {
         this->seed(ROCRAND_PHILOX4x32_DEFAULT_SEED, 0, 0);
     }
@@ -109,9 +124,10 @@ public:
     /// and skips \p offset random numbers.
     ///
     /// A subsequence consists of 2 ^ 66 random numbers.
-    __forceinline__ __device__ __host__ philox4x32_10_engine(const unsigned long long seed,
-                                                             const unsigned long long subsequence,
-                                                             const unsigned long long offset)
+    __forceinline__ __device__ __host__
+    philox4x32_10_engine(const unsigned long long seed,
+                         const unsigned long long subsequence,
+                         const unsigned long long offset)
     {
         this->seed(seed, subsequence, offset);
     }
@@ -121,9 +137,10 @@ public:
     /// and \p offset random numbers.
     ///
     /// A subsequence consists of 2 ^ 66 random numbers.
-    __forceinline__ __device__ __host__ void seed(unsigned long long       seed_value,
-                                                  const unsigned long long subsequence,
-                                                  const unsigned long long offset)
+    __forceinline__ __device__ __host__
+    void seed(unsigned long long       seed_value,
+              const unsigned long long subsequence,
+              const unsigned long long offset)
     {
         m_state.key.x = static_cast<unsigned int>(seed_value);
         m_state.key.y = static_cast<unsigned int>(seed_value >> 32);
@@ -131,7 +148,8 @@ public:
     }
 
     /// Advances the internal state to skip \p offset numbers.
-    __forceinline__ __device__ __host__ void discard(unsigned long long offset)
+    __forceinline__ __device__ __host__
+    void discard(unsigned long long offset)
     {
         this->discard_impl(offset);
         this->m_state.result = this->ten_rounds(m_state.counter, m_state.key);
@@ -141,51 +159,55 @@ public:
     /// a subsequence consisting of 2 ^ 66 random numbers.
     /// In other words, this function is equivalent to calling \p discard
     /// 2 ^ 66 times without using the return value, but is much faster.
-    __forceinline__ __device__ __host__ void discard_subsequence(unsigned long long subsequence)
+    __forceinline__ __device__ __host__
+    void discard_subsequence(unsigned long long subsequence)
     {
         this->discard_subsequence_impl(subsequence);
         m_state.result = this->ten_rounds(m_state.counter, m_state.key);
     }
 
-    __forceinline__ __device__ __host__ void restart(const unsigned long long subsequence,
-                                                     const unsigned long long offset)
+    __forceinline__ __device__ __host__
+    void restart(const unsigned long long subsequence, const unsigned long long offset)
     {
-        m_state.counter = {0, 0, 0, 0};
-        m_state.result  = {0, 0, 0, 0};
+        m_state.counter  = {0, 0, 0, 0};
+        m_state.result   = {0, 0, 0, 0};
         m_state.substate = 0;
-    #ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
+#ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
         m_state.boxmuller_float  = ROCRAND_NAN_FLOAT;
         m_state.boxmuller_double = ROCRAND_NAN_DOUBLE;
-    #endif
+#endif
         this->discard_subsequence_impl(subsequence);
         this->discard_impl(offset);
         m_state.result = this->ten_rounds(m_state.counter, m_state.key);
     }
 
-    __forceinline__ __device__ __host__ unsigned int operator()()
+    __forceinline__ __device__ __host__
+    unsigned int operator()()
     {
         return this->next();
     }
 
-    __forceinline__ __device__ __host__ unsigned int next()
+    __forceinline__ __device__ __host__
+    unsigned int next()
     {
-    #if defined(__HIP_PLATFORM_AMD__)
-        unsigned int ret = ROCRAND_HIPVEC_ACCESS(m_state.result)[m_state.substate];
-    #else
-        unsigned int ret = (&m_state.result.x)[m_state.substate];
-    #endif
+        unsigned int s = m_state.substate;
+        unsigned int vs[4]
+            = {m_state.result.x, m_state.result.y, m_state.result.z, m_state.result.w};
+        unsigned int ret = vs[s];
 
-        m_state.substate++;
-        if(m_state.substate == 4)
+        s++;
+        if(s == 4)
         {
-            m_state.substate = 0;
+            s = 0;
             this->discard_state();
             m_state.result = this->ten_rounds(m_state.counter, m_state.key);
         }
+        m_state.substate = s;
         return ret;
     }
 
-    __forceinline__ __device__ __host__ uint4 next4()
+    __forceinline__ __device__ __host__
+    uint4 next4()
     {
         uint4 ret = m_state.result;
         this->discard_state();
@@ -196,7 +218,8 @@ public:
 protected:
     // Advances the internal state to skip \p offset numbers.
     // DOES NOT CALCULATE NEW 4 UINTs (m_state.result)
-    __forceinline__ __device__ __host__ void discard_impl(unsigned long long offset)
+    __forceinline__ __device__ __host__
+    void discard_impl(unsigned long long offset)
     {
         // Adjust offset for subset
         m_state.substate += offset & 3;
@@ -208,82 +231,93 @@ protected:
     }
 
     // DOES NOT CALCULATE NEW 4 UINTs (m_state.result)
-    __forceinline__ __device__ __host__ void
-        discard_subsequence_impl(unsigned long long subsequence)
+    __forceinline__ __device__ __host__
+    void discard_subsequence_impl(unsigned long long subsequence)
     {
-        unsigned int lo = static_cast<unsigned int>(subsequence);
-        unsigned int hi = static_cast<unsigned int>(subsequence >> 32);
+        const unsigned int lo    = static_cast<unsigned int>(subsequence);
+        const unsigned int hi    = static_cast<unsigned int>(subsequence >> 32);
+        unsigned int       carry = 0;
 
-        unsigned int temp = m_state.counter.z;
-        m_state.counter.z += lo;
-        m_state.counter.w += hi + (m_state.counter.z < temp ? 1 : 0);
+        m_state.counter.z = ROCRAND_BUILTIN_ADDC(m_state.counter.z, lo, 0, &carry);
+        m_state.counter.w = ROCRAND_BUILTIN_ADDC(m_state.counter.w, hi, carry, &carry);
     }
 
     // Advances the internal state by offset times.
     // DOES NOT CALCULATE NEW 4 UINTs (m_state.result)
-    __forceinline__ __device__ __host__ void discard_state(unsigned long long offset)
+    __forceinline__ __device__ __host__
+    void discard_state(unsigned long long offset)
     {
-        unsigned int lo = static_cast<unsigned int>(offset);
-        unsigned int hi = static_cast<unsigned int>(offset >> 32);
+        const unsigned int lo    = static_cast<unsigned int>(offset);
+        const unsigned int hi    = static_cast<unsigned int>(offset >> 32);
+        unsigned int       carry = 0;
 
-        uint4 temp = m_state.counter;
-        m_state.counter.x += lo;
-        m_state.counter.y += hi + (m_state.counter.x < temp.x ? 1 : 0);
-        m_state.counter.z += (m_state.counter.y < temp.y ? 1 : 0);
-        m_state.counter.w += (m_state.counter.z < temp.z ? 1 : 0);
+        m_state.counter.x = ROCRAND_BUILTIN_ADDC(m_state.counter.x, lo, 0, &carry);
+        m_state.counter.y = ROCRAND_BUILTIN_ADDC(m_state.counter.y, hi, carry, &carry);
+        m_state.counter.z = ROCRAND_BUILTIN_ADDC(m_state.counter.z, 0, carry, &carry);
+        m_state.counter.w = ROCRAND_BUILTIN_ADDC(m_state.counter.w, 0, carry, &carry);
     }
 
     // Advances the internal state to the next state
     // DOES NOT CALCULATE NEW 4 UINTs (m_state.result)
-    __forceinline__ __device__ __host__ void discard_state()
+    __forceinline__ __device__ __host__
+    void discard_state()
     {
         m_state.counter = this->bump_counter(m_state.counter);
     }
 
-    __forceinline__ __device__ __host__ static uint4 bump_counter(uint4 counter)
+    __forceinline__ __device__ __host__
+    static uint4 bump_counter(uint4 counter)
     {
-        counter.x++;
-        unsigned int add      = counter.x == 0 ? 1 : 0;
-        counter.y += add; add = counter.y == 0 ? add : 0;
-        counter.z += add; add = counter.z == 0 ? add : 0;
-        counter.w += add;
+        unsigned int carry = 0;
+        counter.x          = ROCRAND_BUILTIN_ADDC(counter.x, 1, 0, &carry);
+        counter.y          = ROCRAND_BUILTIN_ADDC(counter.y, 0, carry, &carry);
+        counter.z          = ROCRAND_BUILTIN_ADDC(counter.z, 0, carry, &carry);
+        counter.w          = ROCRAND_BUILTIN_ADDC(counter.w, 0, carry, &carry);
         return counter;
     }
 
-    __forceinline__ __device__ __host__ uint4 interleave(const uint4 prev, const uint4 next) const
+    __forceinline__ __device__ __host__
+    uint4 interleave(const uint4 prev, const uint4 next) const
     {
         switch(m_state.substate)
         {
-            case 0:
-                return prev;
-            case 1:
-                return uint4{ prev.y, prev.z, prev.w, next.x };
-            case 2:
-                return uint4{ prev.z, prev.w, next.x, next.y };
-            case 3:
-                return uint4{ prev.w, next.x, next.y, next.z };
+            case 0: return prev;
+            case 1: return uint4{prev.y, prev.z, prev.w, next.x};
+            case 2: return uint4{prev.z, prev.w, next.x, next.y};
+            case 3: return uint4{prev.w, next.x, next.y, next.z};
         }
         __builtin_unreachable();
     }
 
     // 10 Philox4x32 rounds
-    __forceinline__ __device__ __host__ uint4 ten_rounds(uint4 counter, uint2 key)
+    __forceinline__ __device__ __host__
+    uint4 ten_rounds(uint4 counter, uint2 key)
     {
-        counter = this->single_round(counter, key); key = this->bumpkey(key); // 1
-        counter = this->single_round(counter, key); key = this->bumpkey(key); // 2
-        counter = this->single_round(counter, key); key = this->bumpkey(key); // 3
-        counter = this->single_round(counter, key); key = this->bumpkey(key); // 4
-        counter = this->single_round(counter, key); key = this->bumpkey(key); // 5
-        counter = this->single_round(counter, key); key = this->bumpkey(key); // 6
-        counter = this->single_round(counter, key); key = this->bumpkey(key); // 7
-        counter = this->single_round(counter, key); key = this->bumpkey(key); // 8
-        counter = this->single_round(counter, key); key = this->bumpkey(key); // 9
-        return this->single_round(counter, key);                        // 10
+        counter = this->single_round(counter, key);
+        key     = this->bumpkey(key); // 1
+        counter = this->single_round(counter, key);
+        key     = this->bumpkey(key); // 2
+        counter = this->single_round(counter, key);
+        key     = this->bumpkey(key); // 3
+        counter = this->single_round(counter, key);
+        key     = this->bumpkey(key); // 4
+        counter = this->single_round(counter, key);
+        key     = this->bumpkey(key); // 5
+        counter = this->single_round(counter, key);
+        key     = this->bumpkey(key); // 6
+        counter = this->single_round(counter, key);
+        key     = this->bumpkey(key); // 7
+        counter = this->single_round(counter, key);
+        key     = this->bumpkey(key); // 8
+        counter = this->single_round(counter, key);
+        key     = this->bumpkey(key); // 9
+        return this->single_round(counter, key); // 10
     }
 
 private:
     // Single Philox4x32 round
-    __forceinline__ __device__ __host__ static uint4 single_round(uint4 counter, uint2 key)
+    __forceinline__ __device__ __host__
+    static uint4 single_round(uint4 counter, uint2 key)
     {
         // Source: Random123
         unsigned long long mul0 = detail::mul_u64_u32(ROCRAND_PHILOX_M4x32_0, counter.x);
@@ -295,7 +329,8 @@ private:
         return uint4{hi1 ^ counter.y ^ key.x, lo1, hi0 ^ counter.w ^ key.y, lo0};
     }
 
-    __forceinline__ __device__ __host__ static uint2 bumpkey(uint2 key)
+    __forceinline__ __device__ __host__
+    static uint2 bumpkey(uint2 key)
     {
         key.x += ROCRAND_PHILOX_W32_0;
         key.y += ROCRAND_PHILOX_W32_1;
@@ -306,9 +341,9 @@ protected:
     // State
     philox4x32_10_state m_state;
 
-    #ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
+#ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
     friend struct detail::engine_boxmuller_helper<philox4x32_10_engine>;
-    #endif
+#endif
 
 }; // philox4x32_10_engine class
 

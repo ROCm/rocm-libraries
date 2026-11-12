@@ -137,7 +137,11 @@ grammar has a fixed shape.
 The param's SSA value name as seen by op operands is `%<name>` (the builder
 stores params as `Value(name="%"+name)`); the serializer writes the bare
 `%<name>` here and the parser registers `%<name>` in the value table so operand
-references resolve.
+references resolve. The parser also links that Value to its `Param`, and each `Param`
+to the parameters declared before it, so `stated_facts_of` reads a parsed kernel's
+facts as it reads a built one's. A relation fact (`ge`, `gt`, `le`, `lt`, `eq`)
+is a string attr holding the canonical JSON of its intexpr tree:
+`%sb : i32 { ge = s:"{\"mul\":[{\"param\":\"M\"},{\"param\":\"ldc\"}]}" }`.
 
 ---
 
@@ -326,6 +330,9 @@ Two notions of equality:
      defensively.
    - **`loc` stripping.** `@loc "..."` is dropped (authoring-site provenance is
      not semantic).
+   - **Relation leaves.** A relation fact names parameters, so its `param`
+     leaves are renamed through the same map by walking its tree (never by text
+     substitution), and it is re-written as canonical JSON.
 
    `canonical_equal(a, b)` returns `canonicalize(serialize(a)) ==
    canonicalize(serialize(b))`. This is the comparator the differential harness
@@ -386,3 +393,9 @@ kernel @add_one {
 
 (`parse` of that text rebuilds a `KernelDef` whose `lower_kernel_to_llvm`
 output is identical to the original's.)
+
+The scalar name `tf32` denotes logical TF32 with a 32-bit I32 carrier. It may
+appear in vectors, pointers, shared-memory types and loop carries, using the
+existing type grammar (for example, `vec<tf32x2>`). Serialization preserves its
+logical identity independently of `f32` and `i32`; no format-version change is
+needed. The public dtype alias `xf32` normalizes to `tf32` before IR construction.

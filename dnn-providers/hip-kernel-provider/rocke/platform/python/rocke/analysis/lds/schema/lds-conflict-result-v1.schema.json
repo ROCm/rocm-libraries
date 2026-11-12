@@ -1,0 +1,162 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rocm.docs.amd.com/schemas/rocke/lds-conflict-result-v1.schema.json",
+  "title": "rocKE LDS conflict result version 1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "profile",
+    "request",
+    "coordinate_axes",
+    "accesses",
+    "conflict_groups",
+    "summary",
+    "diagnostics"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "profile": { "$ref": "#/$defs/profile" },
+    "request": { "$ref": "#/$defs/request" },
+    "coordinate_axes": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "accesses": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/access" }
+    },
+    "conflict_groups": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/conflictGroup" }
+    },
+    "summary": { "$ref": "#/$defs/summary" },
+    "diagnostics": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/diagnostic" }
+    }
+  },
+  "$defs": {
+    "nonNegativeInteger": { "type": "integer", "minimum": 0 },
+    "positiveInteger": { "type": "integer", "minimum": 1 },
+    "integerArray": {
+      "type": "array",
+      "items": { "type": "integer" }
+    },
+    "idArray": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/nonNegativeInteger" },
+      "uniqueItems": true
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["target", "profile_version"],
+      "properties": {
+        "target": { "type": "string", "minLength": 1 },
+        "profile_version": { "$ref": "#/$defs/positiveInteger" }
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["opcode", "direction", "access_width_bytes", "wave_size", "active_lanes"],
+      "properties": {
+        "opcode": { "type": "string", "minLength": 1 },
+        "direction": { "enum": ["read", "write"] },
+        "access_width_bytes": { "$ref": "#/$defs/positiveInteger" },
+        "wave_size": { "$ref": "#/$defs/positiveInteger" },
+        "active_lanes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonNegativeInteger" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "access": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "access_id",
+        "lane",
+        "lds_byte_address",
+        "access_width_bytes",
+        "coordinate",
+        "classification",
+        "conflict_group_ids"
+      ],
+      "properties": {
+        "access_id": { "$ref": "#/$defs/nonNegativeInteger" },
+        "lane": { "$ref": "#/$defs/nonNegativeInteger" },
+        "lds_byte_address": { "$ref": "#/$defs/nonNegativeInteger" },
+        "access_width_bytes": { "$ref": "#/$defs/positiveInteger" },
+        "coordinate": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "#/$defs/integerArray" }
+          ]
+        },
+        "classification": { "enum": ["normal", "conflict", "broadcast", "inactive"] },
+        "conflict_group_ids": { "$ref": "#/$defs/idArray" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "classification": { "enum": ["normal", "inactive"] } } },
+          "then": { "properties": { "conflict_group_ids": { "maxItems": 0 } } }
+        },
+        {
+          "if": { "properties": { "classification": { "enum": ["conflict", "broadcast"] } } },
+          "then": { "properties": { "conflict_group_ids": { "minItems": 1 } } }
+        }
+      ]
+    },
+    "conflictGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["group_id", "kind", "multiplicity", "access_ids"],
+      "properties": {
+        "group_id": { "$ref": "#/$defs/nonNegativeInteger" },
+        "kind": { "enum": ["distinct-address-conflict", "broadcast"] },
+        "multiplicity": { "type": "integer", "minimum": 2 },
+        "access_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/nonNegativeInteger" },
+          "minItems": 2,
+          "uniqueItems": true
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "active_access_count",
+        "conflicted_access_count",
+        "broadcast_access_count",
+        "inactive_access_count",
+        "conflict_group_count",
+        "maximum_multiplicity"
+      ],
+      "properties": {
+        "active_access_count": { "$ref": "#/$defs/nonNegativeInteger" },
+        "conflicted_access_count": { "$ref": "#/$defs/nonNegativeInteger" },
+        "broadcast_access_count": { "$ref": "#/$defs/nonNegativeInteger" },
+        "inactive_access_count": { "$ref": "#/$defs/nonNegativeInteger" },
+        "conflict_group_count": { "$ref": "#/$defs/nonNegativeInteger" },
+        "maximum_multiplicity": { "$ref": "#/$defs/nonNegativeInteger" }
+      }
+    },
+    "diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "severity", "access_ids"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "message": { "type": "string", "minLength": 1 },
+        "severity": { "enum": ["info", "warning", "error"] },
+        "access_ids": { "$ref": "#/$defs/idArray" }
+      }
+    }
+  }
+}

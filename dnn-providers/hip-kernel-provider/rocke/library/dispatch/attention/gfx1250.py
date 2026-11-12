@@ -156,6 +156,11 @@ def _make_wmma_fwd_candidate() -> KernelCandidate:
             spec, seqlen_q=int(req.seqlen_q), batch=int(req.batch)
         )
 
+    def bind_torch(request, spec, tensors, **kwargs):
+        from .bindings import bind_wmma_attention_torch
+
+        return bind_wmma_attention_torch(request, spec, tensors, **kwargs)
+
     candidate = KernelCandidate(
         name=name,
         family=FAMILY,
@@ -171,9 +176,12 @@ def _make_wmma_fwd_candidate() -> KernelCandidate:
         block=lambda spec: (spec.block_size, 1, 1),  # one wave32 per CTA
         signature=lambda _spec: _args_signature(),
         sweep_space=lambda req: (select(req),) if candidate.admits(req)[0] else (),
+        bind_torch=bind_torch,
     )
     return candidate
 
 
-def register(registry: CandidateRegistry) -> None:
-    registry.register(_make_wmma_fwd_candidate())
+def register(route: CandidateRegistry, execution: CandidateRegistry) -> None:
+    candidate = _make_wmma_fwd_candidate()
+    route.register(candidate)
+    execution.register(candidate)

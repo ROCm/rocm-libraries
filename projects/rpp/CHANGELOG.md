@@ -2,6 +2,38 @@
 
 Full documentation for RPP is available at [https://rocm.docs.amd.com/projects/rpp/en/latest](https://rocm.docs.amd.com/projects/rpp/en/latest)
 
+## (Unreleased) RPP 3.3.0
+
+### Added
+
+- rocFFT acceleration for the HIP audio spectrogram, with plan caching. rocFFT is loaded at runtime with `dlopen` and is not a build dependency. It is packaged as a soft dependency (`Recommends` on Debian, `Suggests` on RPM). If `librocfft.so.0` cannot be loaded, the HIP spectrogram returns `RPP_ERROR_NOT_IMPLEMENTED`. All other functions are unaffected.
+- An in-house CPU FFT for the audio spectrogram. This replaces the FFTS dependency.
+
+### Changed
+
+- Audio augmentations are now always enabled. The `RPP_AUDIO_SUPPORT` CMake option has been removed.
+- `rppt_spectrogram` returns `RPP_ERROR_INVALID_ARGUMENTS` when `power` is not 1 or 2, when `windowLength` or `windowStep` is not positive, or when `nfft` is nonzero and smaller than `windowLength`.
+
+## RPP 3.2.0 for ROCm 10.2.0
+
+### Added
+
+- Intra-image multithreading support for HOST backend geometric operators: Resize, Rotate, Warp Affine, Warp Perspective, Fisheye, Lens Correction, Remap, Resize Crop Mirror, Resize Mirror Normalize, and Crop Mirror Normalize.
+- Support for building RPP on non-x86 architectures using the SIMDE (SIMD Everywhere) library for portable SIMD intrinsics; x86 builds are unchanged.
+- `rppGetStatusString()` helper that maps an `RppStatus` code to its enumerator name string.
+- Support for the `gfx1250-strict` GPU target in HIP builds.
+- `RPP_RETURN_IF_ERROR` macro in `rppdefs.h` for propagating nested `RppStatus` failures from the enclosing function.
+
+### Changed
+
+- On non-x86 architectures, `simde` (found via `pkg-config`) is now a required RPP build dependency and is propagated to consumers of the `rpp` CMake package.
+
+### Resolved issues
+
+- Fixed HOST backend I8 Resize Mirror Normalize scalar path to use proper rounding and avoid intermediate type conversions, ensuring consistency with SIMD path and reference implementation.
+- Corrected `rppt_log` to return `RPP_ERROR_INVALID_SRC_DATATYPE` instead of the misleading `RPP_ERROR_INVALID_DST_DATATYPE` for unsupported source datatypes.
+- Fixed error propagation through the HIP kernel dispatcher: kernel launch failures now return `RPP_ERROR_HIP_LAUNCH` instead of `RPP_SUCCESS`, which previously masked launch errors as pixel mismatches on GPUs with no matching kernel binary.
+
 ## RPP 3.2.0 ROCm 10.1.0
 
 ### Added
@@ -10,6 +42,7 @@ Full documentation for RPP is available at [https://rocm.docs.amd.com/projects/r
 - Runtime backend selection parameter (`RppBackend executionBackend`) for all RPP tensor API functions
 - Backend tracking in `rppHandle_t` to store backend type (HOST or HIP)
 - `RPP_ERROR_HIP_LAUNCH` error type for reporting HIP kernel launch errors
+- `rppGetStatusString()` to convert an `RppStatus` value into its enumerator name
 - `rpp_BACKEND_TYPE` and `rpp_AUDIO_AUGMENTATIONS_SUPPORT` variables to RPP CMake package config
 
 ### Changed

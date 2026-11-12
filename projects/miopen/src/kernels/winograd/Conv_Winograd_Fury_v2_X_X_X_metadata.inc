@@ -130,22 +130,24 @@ amdhsa.kernels:
 kernel_end \kernel_name
 
 .if (.amdgcn.gfx_generation_number == 11)
-    .if ((.amdgcn.gfx_generation_minor == 0 && (.amdgcn.gfx_generation_stepping == 0 || .amdgcn.gfx_generation_stepping == 1)) || (.amdgcn.gfx_generation_minor == 5 && .amdgcn.gfx_generation_stepping == 1))
+    .if (.amdgcn.gfx_generation_minor == 7)
+        // gfx117x
+        vgpr_cnt = 156
+    .elseif ((.amdgcn.gfx_generation_minor == 0 && (.amdgcn.gfx_generation_stepping == 0 || .amdgcn.gfx_generation_stepping == 1)) || (.amdgcn.gfx_generation_minor == 5 && .amdgcn.gfx_generation_stepping == 1))
         // gfx1100, gfx1101, gfx1151
         vgpr_cnt = 252
     .else
         // gfx1102, gfx1103, gfx1150
         vgpr_cnt = 168
     .endif
-    sgpr_cnt = 0 // 128 SGPRs always allocated for gfx10-gfx11
-    workgroup_size_x = 384
 .endif
 
 .if (.amdgcn.gfx_generation_number == 12)
     vgpr_cnt = 252
-    sgpr_cnt = 0 // 128 SGPRs always allocated for gfx12
-    workgroup_size_x = 384
 .endif
+
+sgpr_cnt = 0 // 128 SGPRs always allocated for gfx10-gfx11-gfx12
+workgroup_size_x = 384
 
 .amdgcn.next_free_sgpr = sgpr_cnt
 .amdgcn.next_free_vgpr = vgpr_cnt
@@ -158,7 +160,17 @@ __dx10_clamp = 0
 
 .rodata
 .p2align 6
-.if (.amdgcn.gfx_generation_number == 11)
+.if (.amdgcn.gfx_generation_number == 11 && .amdgcn.gfx_generation_minor == 7)
+.amdhsa_kernel \kernel_name
+    .amdhsa_group_segment_fixed_size         __group_segment_fixed_size
+    .amdhsa_user_sgpr_dispatch_ptr           __sgpr_dispatch_ptr // s[0:1]
+    .amdhsa_user_sgpr_kernarg_segment_ptr    __sgpr_kernarg_segment_ptr // s[2:3]
+    .amdhsa_next_free_vgpr                   .amdgcn.next_free_vgpr
+    .amdhsa_next_free_sgpr                   .amdgcn.next_free_sgpr
+    .amdhsa_wavefront_size32                 0
+    .amdhsa_workgroup_processor_mode         0
+.end_amdhsa_kernel
+.elseif (.amdgcn.gfx_generation_number == 11)
 .amdhsa_kernel \kernel_name
     .amdhsa_group_segment_fixed_size         __group_segment_fixed_size
     .amdhsa_user_sgpr_dispatch_ptr           __sgpr_dispatch_ptr // s[0:1]
@@ -196,11 +208,19 @@ METADATA_WRAPPER sgpr_cnt, 0, workgroup_size_x, <\kernel_name>
 .endm
 
 .macro KERNEL_PROLOG version_name:req kernel_name_postfix:req
+.if (.amdgcn.gfx_generation_number == 11 && .amdgcn.gfx_generation_minor == 7)
+	PROLOG_KERNEL_DESCRIPTOR_WRAPPER \version_name, %(.amdgcn.gfx_generation_number * 10 + .amdgcn.gfx_generation_minor), \kernel_name_postfix
+.else
 	PROLOG_KERNEL_DESCRIPTOR_WRAPPER \version_name, %.amdgcn.gfx_generation_number, \kernel_name_postfix
+.endif
 .endm
 
 .macro KERNEL_EPILOG version_name:req kernel_name_postfix:req
+.if (.amdgcn.gfx_generation_number == 11 && .amdgcn.gfx_generation_minor == 7)
+	EPILOG_KERNEL_DESCRIPTOR_WRAPPER \version_name, %(.amdgcn.gfx_generation_number * 10 + .amdgcn.gfx_generation_minor), \kernel_name_postfix
+.else
 	EPILOG_KERNEL_DESCRIPTOR_WRAPPER \version_name, %.amdgcn.gfx_generation_number, \kernel_name_postfix
+.endif
 .endm
 
 .if (.amdgcn.gfx_generation_number != 11 && .amdgcn.gfx_generation_number != 12)

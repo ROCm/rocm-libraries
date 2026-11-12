@@ -40,11 +40,11 @@ inline void ensureTestConfigInitialized()
 /// A policy for a deviceless run: host pointers, so the mocked engine can write
 /// straight into the variant pack and no ITensor ever hipMallocs.
 inline HarnessPolicy hostPolicy(VerificationMode mode = VerificationMode::AUTO,
-                                bool enforceSupportClaims = false)
+                                ClaimMode claims = ClaimMode::WARN)
 {
     HarnessPolicy policy;
     policy.mode = mode;
-    policy.enforceSupportClaims = enforceSupportClaims;
+    policy.claims = claims;
     policy.placement = TensorPlacement::HOST;
     policy.arch = "gfx942";
     policy.platform = "linux";
@@ -129,6 +129,9 @@ struct HarnessMocks
         deps.claimObserver = nonOwning<ISupportClaimObserver>(claimObserver);
         deps.reporter = nonOwning<IVerificationReporter>(reporter);
         deps.policy = std::move(policy);
+        // Never synchronizes, so the suites that turn on --benchmark-reference need no
+        // device; a suite that wants the real synchronize installs it itself.
+        deps.referenceTimer = ReferenceBenchmarkTimer();
         return deps;
     }
 };
@@ -188,6 +191,24 @@ inline void captureReferenceErrors(::testing::NiceMock<MockVerificationReporter>
     ON_CALL(reporter, recordReferenceError(_, _))
         .WillByDefault(
             [&out](const std::string&, const std::string& reason) { out.push_back(reason); });
+}
+
+/// Collects the verifier the harness reports for each test body, and, when asked, the
+/// detail (an expected rejection's stage) printed with it.
+inline void captureVerifiers(::testing::NiceMock<MockVerificationReporter>& reporter,
+                             std::vector<Verifier>& out,
+                             std::vector<std::string>* details = nullptr)
+{
+    using ::testing::_;
+    ON_CALL(reporter, recordVerifier(_, _, _))
+        .WillByDefault(
+            [&out, details](const std::string&, Verifier verifier, const std::string& detail) {
+                out.push_back(verifier);
+                if(details != nullptr)
+                {
+                    details->push_back(detail);
+                }
+            });
 }
 
 inline bool anyFailed(const ::testing::TestPartResultArray& results)

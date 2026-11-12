@@ -243,6 +243,7 @@ DefaultSolution:
   WorkGroupReduction: false
 Solutions:
 - SolutionIndex: 0
+  SolutionUID: 0uR2vpdOu6AN
   SolutionNameMin: Cijk_Alik_Bjlk_I8II_BH_MT128x128x64_MI32x32x8x1_SN_1LDSB0_EPS0_GRVWA4_LPA4_MIWT2_2_SVW2_TLDS1_VWA2_WG64_4_1
   ActivationFuncCall: false
   AssignedDerivedParameters: true
@@ -369,6 +370,7 @@ Solutions:
   _WorkspaceSizePerElemC: 0
   _staggerStrideShift: 2
 - SolutionIndex: 1
+  SolutionUID: 0uR2vpdPOmSj
   SolutionNameMin: Cijk_Alik_Bjlk_I8II_BH_MT64x64x64_MI32x32x8x1_SN_1LDSB0_EPS0_GRVWA8_LPA8_MIWT1_1_SVW1_TLDS1_VWA1_WG64_4_1
   ActivationFuncCall: false
   AssignedDerivedParameters: true
@@ -495,6 +497,7 @@ Solutions:
   _WorkspaceSizePerElemC: 0
   _staggerStrideShift: 2
 - SolutionIndex: 2
+  SolutionUID: 0uR2vpdOivNW
   SolutionNameMin: Cijk_Alik_Bjlk_I8II_BH_MT128x128x64_MI32x32x8x1_SN_1LDSB1_EPS0_GRVWA4_LPA4_MIWT2_2_SVW2_TLDS1_VWA2_WG64_4_1
   1LDSBuffer: 1
   ActivationFuncCall: false
@@ -622,6 +625,7 @@ Solutions:
   _WorkspaceSizePerElemC: 0
   _staggerStrideShift: 2
 - SolutionIndex: 3
+  SolutionUID: 0uR2vpdPXcMS
   SolutionNameMin: Cijk_Alik_Bjlk_I8II_BH_MT128x128x64_MI32x32x8x1_SN_1LDSB1_EPS1_GRVWA4_LPA4_MIWT2_2_SVW2_TLDS1_VWA2_WG64_4_1
   1LDSBuffer: 1
   ActivationFuncCall: false

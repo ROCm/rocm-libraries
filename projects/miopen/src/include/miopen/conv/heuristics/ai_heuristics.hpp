@@ -106,6 +106,11 @@ MIOPEN_INTERNALS_EXPORT std::size_t EngineeredConvFeatureCount(int spatial_dim =
 // one place. Defined in ai_heuristics.cpp.
 bool IsTunaNetCategoricalFeature(const std::string& name);
 
+// True when MIOPEN_DEBUG_LGBM_ONLY is set: the fdeep heuristics (TunaNet solver selection and the
+// KTN / two-tower kernel-tuning models) are bypassed so only the LGBM solver selector and LGBM
+// perf-config picker run. Defined in ai_heuristics.cpp.
+bool LgbmOnly();
+
 /**
  * @brief Load JSON from file path
  * @param path File system path to JSON file
@@ -422,6 +427,13 @@ protected:
  */
 MIOPEN_INTERNALS_EXPORT std::unique_ptr<ModelND> GetNDModel(const std::string& device,
                                                             const int& dim);
+
+/**
+ * @brief Check if TunaNet models (legacy 2D or ND) are bundled for the given device
+ * @param device GPU device name (e.g., "gfx942", "gfx1250")
+ * @return true if the system db ships .tn.model files for this device
+ */
+MIOPEN_INTERNALS_EXPORT bool HasBundledTunaNetModels(const std::string& device);
 
 /// Engineered input-feature vector for the TunaNetND input encoder: categorical one-hots
 /// (layouts, precision, direction) sized from the metadata encodings, raw passthrough features, and

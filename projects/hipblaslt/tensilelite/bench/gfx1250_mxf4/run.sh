@@ -118,7 +118,7 @@ run_tensile() {
   fi
   echo "==> Tensile  python=$PYTHON"
   echo "==> Tensile  yaml=$TENSILE_YAML  out=$dest"
-  "$PYTHON" "$TENSILELITE/Tensile/bin/Tensile" "${extra[@]}" "$TENSILE_YAML" "$dest"
+  "$PYTHON" "$TENSILELITE/tensilelite/bin/Tensile" "${extra[@]}" "$TENSILE_YAML" "$dest"
 }
 
 need_rocprof() {
@@ -151,7 +151,7 @@ profile_client() {
       --output-directory "$dest/rocprof" \
       --output-file "$label" \
       -- \
-      "$PYTHON" "$TENSILELITE/Tensile/bin/Tensile" "$TENSILE_YAML" "$dest/tensile"
+      "$PYTHON" "$TENSILELITE/tensilelite/bin/Tensile" "$TENSILE_YAML" "$dest/tensile"
     echo "==> done  $dest"
     return
   fi

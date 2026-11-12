@@ -1,0 +1,66 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+################################################################################
+# S10 ConvertAfterDS fp8->f16 WIDE-TILE arm (LocalRead.py).
+#
+# Target missing lines (Tensile/Components/LocalRead.py):
+#   1332, 1338, 1357 : lrvwTile==4 arm (via the VectorWidthA=4 fork)
+#   1363            : elif (lrvwTileA==8 and tc=='A') or (lrvwTileB==8 and tc=='B')
+#                      the lrvwTile==8 wide-tile arm (via VectorWidthA=8)
+#
+# Gate: lrvwTileA = VectorWidthA when NOT UnrollMajorLDSA and MacDataTypeA fp8
+#   (numBytes<4 so forceLrvwTile1A=False). NT-for-A (TransposeA=False) ->
+#   TLUA=1 -> UnrollMajorLDSA=False, so VectorWidthA flows to lrvwTileA.
+#   VectorWidthA fork {4,8} drives lrvwTileA in {4,8}.
+#   ConvertAfterDS + bpe(half)=2 != bpeDS(fp8)=1 satisfies the enclosing arm.
+#   LocalReadVectorWidth=8 satisfies LRVW>=MIInputPerThread.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: h
+      DataTypeA: F8
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - ConvertAfterDS: [True]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1, 1, 4, 2, 2, 2]   # MIWaveTile0=4 -> multiple of VectorWidthA=4
+          - [16, 16, 32, 1, 1, 8, 2, 2, 2]   # MIWaveTile0=8 -> multiple of VectorWidthA in {4,8}
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - LdsPadA: [0]
+        - LdsPadB: [0]
+        - StaggerU: [0]
+        - 1LDSBuffer: [0]
+        - GlobalSplitU: [1]
+        - VectorWidthA: [4, 8]
+        - LocalReadVectorWidth: [8]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - SourceSwap: [True]
+        - ExpandPointerSwap: [False]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]

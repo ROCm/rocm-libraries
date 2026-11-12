@@ -5,6 +5,7 @@
 
 #include <functional>
 #include <ostream>
+#include <type_traits>
 #include <variant>
 
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormBwdSignatureKey.hpp>
@@ -12,6 +13,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormFwdInferenceWithVarianceSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BatchnormTrainSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BlockScaleDequantizeSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/BlockScaleQuantizeSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionBwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionFwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ConvolutionWrwSignatureKey.hpp>
@@ -28,6 +30,7 @@
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/ResampleFwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaBwdSignatureKey.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaFwdSignatureKey.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/SdpaRaggedFwdSignatureKey.hpp>
 
 namespace hipdnn_test_sdk::detail
 {
@@ -47,6 +50,7 @@ using PlanRegistrySignatureKey = std::variant<BatchnormFwdInferenceSignatureKey,
                                               BatchnormFwdInferenceWithVarianceSignatureKey,
                                               BatchnormBwdSignatureKey,
                                               BatchnormTrainSignatureKey,
+                                              BlockScaleQuantizeSignatureKey,
                                               BlockScaleDequantizeSignatureKey,
                                               ConvolutionFwdSignatureKey,
                                               ConvolutionBwdSignatureKey,
@@ -63,6 +67,7 @@ using PlanRegistrySignatureKey = std::variant<BatchnormFwdInferenceSignatureKey,
                                               ResampleBwdSignatureKey,
                                               SdpaBwdSignatureKey,
                                               SdpaFwdSignatureKey,
+                                              SdpaRaggedFwdSignatureKey,
                                               ReductionSignatureKey>;
 
 struct PlanRegistrySignatureKeyHash
@@ -75,22 +80,18 @@ struct PlanRegistrySignatureKeyHash
 
 struct PlanRegistrySignatureKeyEqual
 {
-    template <typename T, typename U>
-    bool operator()([[maybe_unused]] const T& a, [[maybe_unused]] const U& b) const
-    {
-        return false;
-    }
-
-    template <typename T>
-    bool operator()(const T& a, const T& b) const
-    {
-        return a == b;
-    }
-
-    // NOLINTNEXTLINE(readability-redundant-casting)
+    // Compare the active alternatives' indices first, then visit only `a` and fetch the matching
+    // alternative from `b`. Visiting both variants would instantiate one visitor call per pair of
+    // alternatives (N*N) instead of N.
     bool operator()(const PlanRegistrySignatureKey& a, const PlanRegistrySignatureKey& b) const
     {
-        return std::visit(*this, a, b);
+        if(a.index() != b.index())
+        {
+            return false;
+        }
+
+        return std::visit(
+            [&b](const auto& x) { return x == std::get<std::decay_t<decltype(x)>>(b); }, a);
     }
 };
 

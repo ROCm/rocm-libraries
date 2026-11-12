@@ -1,0 +1,15 @@
+{% extends "common/base.h.jinja2" %}
+
+{% block tparams %}
+    class value_type
+{% endblock %}
+
+{% block config_guard scoped %}{{ mk_type_trait_guard(type.value_type) }}{{ mk_type_sz_check(type.value_type) }}{% endblock %}
+
+{% block config_constructor -%}
+adjacent_difference_config_params{ { {{ config.block_size_x }}, {{ config.ipt }} } }
+{%- endblock %}
+
+{% block config_base_type -%}
+adjacent_difference_config_params_base<value_type>
+{%- endblock %}

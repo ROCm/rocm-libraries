@@ -3,6 +3,9 @@
 
 <p align="center"><img width="70%" src="docs/data/AMD_RPP_logo.png" /></p>
 
+> [!NOTE]
+> The published RPP documentation is available [here](https://rocm.docs.amd.com/projects/rpp/en/latest/) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the `docs` folder of this repository. As with all ROCm projects, the documentation is open source. For more information on contributing to the documentation, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
+
 AMD ROCm Performance Primitives (RPP) library is a comprehensive, high-performance computer
 vision library for AMD processors that have `HIP`, or `CPU` backends.
 
@@ -200,6 +203,13 @@ RPP supports various 2D image, 3D image (voxel), and audio augmentations and pri
 | audio tensor add tensor | ✅ | ✅ |
 | audio tensor multiply scalar | ✅ | ✅ |
 
+> [!NOTE]
+> Audio augmentations use an in-house FFT implementation on the CPU (HOST) backend and rocFFT on the
+> GPU (HIP) backend. rocFFT is loaded at runtime rather than linked, so it is not needed to build or
+> install RPP; it is required only to run the HIP spectrogram, which reports
+> `RPP_ERROR_NOT_IMPLEMENTED` if `librocfft.so.0` cannot be loaded. Every other RPP function works
+> with rocFFT absent.
+
 </details>
 
 <details>
@@ -295,10 +305,8 @@ Install RPP runtime, development, and test packages.
 > `amdrocm-core-sdk` meta packages, so only `amdrocm-rpp-test` has to be
 > installed explicitly on a standard ROCm installation.
 
-> [!IMPORTANT]
-> The RPP packages built by TheRock are currently built with audio
-> augmentations disabled (`RPP_AUDIO_SUPPORT=OFF`). Build from source to enable
-> audio augmentation support.
+> [!NOTE]
+> Audio augmentations are always enabled.
 
 #### Ubuntu
 

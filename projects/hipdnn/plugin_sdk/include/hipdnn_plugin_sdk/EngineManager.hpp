@@ -7,15 +7,18 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <vector>
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_plugin_sdk/heuristics/RankingMetric.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
 
 namespace hipdnn_plugin_sdk
@@ -53,7 +56,7 @@ public:
      *
      * An id already claimed keeps the incumbent and logs the loser rather than throwing:
      * two engines hashing onto one id (RFC 0003) is an authoring collision, and this is
-     * the backstop for pairs the descriptor policy can't see -- RFC 0020 §10.2.1 drops
+     * the backstop for pairs the descriptor policy can't see -- RFC 0020 §13.2.1 drops
      * every UED in a name collision before it reaches this list, but two hand-written
      * engines have no such gate, and refusing both here would take a working engine down
      * to punish one duplicate.
@@ -88,7 +91,20 @@ public:
         std::vector<int64_t> applicable;
         for(const auto& [id, engine] : _engines)
         {
-            if(engine->isApplicable(handle, opGraph))
+            bool isApplicable = false;
+            try
+            {
+                isApplicable = engine->isApplicable(handle, opGraph);
+            }
+            catch(const std::exception& e)
+            {
+                // One engine failing its check must not hide the plugin's other engines.
+                HIPDNN_PLUGIN_LOG_WARN("engine manager: "
+                                       << describeEngine(id, {})
+                                       << " threw from isApplicable and is skipped: " << e.what());
+            }
+
+            if(isApplicable)
             {
                 applicable.push_back(id);
             }
@@ -103,6 +119,49 @@ public:
     {
         auto& engine = getEngine(engineId);
         engine.getDetails(handle, opGraph, engineDetailsOut);
+    }
+
+    void enumerateCandidates(THandle& handle,
+                             const IGraph& opGraph,
+                             const IEngineConfig& engineConfig,
+                             uint64_t offset,
+                             uint64_t limit,
+                             hipdnnPluginConstData_t& detailsOut)
+    {
+        if(limit == 0 || limit > 10000)
+        {
+            throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                        "Candidate page limit must be in [1, 10000]");
+        }
+        getEngine(engineConfig.engineId())
+            .enumerateCandidates(handle, opGraph, engineConfig, offset, limit, detailsOut);
+    }
+
+    /**
+     * @brief Dispatches a prediction or description to the requested engine.
+     * @param engineConfig Engine identity, selection constraints, and `ranking_metric`
+     *        (empty = "tflops").
+     * @param kind ENGINE never falls back to CONFIGURATION.
+     * @param evaluate False publishes binding/features without model evaluation.
+     * @throws HipdnnPluginException BAD_PARAM for an unknown kind or unregistered metric,
+     *         before any engine sees the request (RFC 0019 §4.4).
+     */
+    hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
+        getPrediction(THandle& handle,
+                      const IGraph& opGraph,
+                      const IEngineConfig& engineConfig,
+                      hipdnnEnginePredictionKind_t kind,
+                      bool evaluate) const
+    {
+        if(kind != HIPDNN_ENGINE_PREDICTION_ENGINE
+           && kind != HIPDNN_ENGINE_PREDICTION_CONFIGURATION)
+        {
+            throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                        "Unknown engine prediction kind");
+        }
+        std::ignore = heuristics::rankingMetric(engineConfig);
+        return getEngine(engineConfig.engineId())
+            .getPrediction(handle, opGraph, engineConfig, kind, evaluate);
     }
 
     size_t getMaxWorkspaceSize(const THandle& handle,
@@ -135,6 +194,12 @@ protected:
                                             + " not found.");
         }
         return *it->second;
+    }
+
+    /// Registered engines, in the order getApplicableEngineIds visits them.
+    const std::unordered_map<int64_t, std::unique_ptr<Engine>>& engines() const noexcept
+    {
+        return _engines;
     }
 
 private:

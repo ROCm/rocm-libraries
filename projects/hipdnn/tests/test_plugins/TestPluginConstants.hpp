@@ -59,6 +59,24 @@ inline const std::string& testExecuteFailsPluginPath()
     return s_testExecuteFailsPluginPath;
 }
 
+#ifdef TEST_NO_SOLVER_PLUGIN_NAME
+inline const std::string& testNoSolverPluginPath()
+{
+    static const std::string s_testNoSolverPluginPath
+        = getTestCustomFilepathForPlugin(TEST_NO_SOLVER_PLUGIN_NAME);
+    return s_testNoSolverPluginPath;
+}
+#endif
+
+#ifdef TEST_RESOURCE_FAIL_PLUGIN_NAME
+inline const std::string& testResourceFailPluginPath()
+{
+    static const std::string s_testResourceFailPluginPath
+        = getTestCustomFilepathForPlugin(TEST_RESOURCE_FAIL_PLUGIN_NAME);
+    return s_testResourceFailPluginPath;
+}
+#endif
+
 // The hashed-name plugin is consumed only by the frontend engine-filtering
 // integration tests, so only targets that define TEST_HASHED_NAME_PLUGIN_NAME get
 // this accessor.
@@ -223,6 +241,16 @@ inline const std::string& testAutotunePluginPath()
     static const std::string s_testAutotunePluginPath
         = getTestCustomFilepathForPlugin(TEST_AUTOTUNE_PLUGIN_NAME);
     return s_testAutotunePluginPath;
+}
+#endif
+
+// Consumed only by the cuDNN v8 compatibility layer integration tests in the frontend test target.
+#ifdef TEST_CUDNN_COMPATIBILITY_V8_PLUGIN_NAME
+inline const std::string& testCudnnCompatibilityV8PluginPath()
+{
+    static const std::string s_testCudnnCompatibilityV8PluginPath
+        = getTestCustomFilepathForPlugin(TEST_CUDNN_COMPATIBILITY_V8_PLUGIN_NAME);
+    return s_testCudnnCompatibilityV8PluginPath;
 }
 #endif
 } // namespace hipdnn_tests::plugin_constants

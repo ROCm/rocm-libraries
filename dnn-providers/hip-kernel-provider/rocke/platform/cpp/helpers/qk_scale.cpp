@@ -15,6 +15,8 @@
 
 #include "rocke/helper_rocke.helpers.qk_scale.h"
 
+#include <stdarg.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "rocke/ir_internal.h" /* rocke_i_set_err, rocke_i_live */
@@ -54,7 +56,18 @@ void rocke_qk_scale_spec_init(rocke_qk_scale_spec_t* spec, rocke_qk_scale_layout
     spec->stride_block = 1;
 }
 
-int rocke_qk_scale_spec_validate(const rocke_qk_scale_spec_t* spec, const char** out_reason)
+/* Write the rejection message into the caller's buffer, if it gave one. */
+static void qk_scale_reason(char* reason, size_t reason_cap, const char* fmt, ...)
+{
+    if(reason == NULL || reason_cap == 0)
+        return;
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(reason, reason_cap, fmt, args);
+    va_end(args);
+}
+
+int rocke_qk_scale_spec_validate(const rocke_qk_scale_spec_t* spec, char* reason, size_t reason_cap)
 {
     /* Python __post_init__:
      *
@@ -65,32 +78,26 @@ int rocke_qk_scale_spec_validate(const rocke_qk_scale_spec_t* spec, const char**
      *         raise ValueError("per_block scale_block must be > 0 "
      *                          "(got {scale_block})")
      */
-    if(out_reason != NULL)
-    {
-        *out_reason = "";
-    }
+    qk_scale_reason(reason, reason_cap, "%s", "");
     if(spec == NULL)
     {
-        if(out_reason != NULL)
-        {
-            *out_reason = "QkScaleSpec is NULL";
-        }
+        qk_scale_reason(reason, reason_cap, "QkScaleSpec is NULL");
         return 0;
     }
     if(spec->layout != ROCKE_QK_SCALE_PER_HEAD && spec->layout != ROCKE_QK_SCALE_PER_BLOCK)
     {
-        if(out_reason != NULL)
-        {
-            *out_reason = "QkScaleSpec.layout must be 'per_head' or 'per_block'";
-        }
+        qk_scale_reason(reason,
+                        reason_cap,
+                        "QkScaleSpec.layout must be 'per_head' or 'per_block', got %d",
+                        (int)spec->layout);
         return 0;
     }
     if(spec->layout == ROCKE_QK_SCALE_PER_BLOCK && spec->scale_block <= 0)
     {
-        if(out_reason != NULL)
-        {
-            *out_reason = "per_block scale_block must be > 0";
-        }
+        qk_scale_reason(reason,
+                        reason_cap,
+                        "per_block scale_block must be > 0 (got %d)",
+                        (int)spec->scale_block);
         return 0;
     }
     return 1;

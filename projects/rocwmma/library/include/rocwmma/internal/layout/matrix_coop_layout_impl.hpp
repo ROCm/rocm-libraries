@@ -92,7 +92,7 @@ namespace rocwmma
 
         template <typename MatrixLayout, uint32_t WaveCount>
         // Finds the iterative sub-space for each split
-        ROCWMMA_DEVICE constexpr /* static */ auto
+        ROCWMMA_HOST_DEVICE constexpr /* static */ auto
             MatrixCoopLayout::calcSplitStrides(uint32_t splitCount)
         {
             // Separate stride space
@@ -109,7 +109,7 @@ namespace rocwmma
         }
 
         template <typename MatrixLayout, uint32_t WaveCount>
-        ROCWMMA_DEVICE constexpr /* static */ inline auto
+        ROCWMMA_HOST_DEVICE constexpr /* static */ inline auto
             MatrixCoopLayout::strideCounts(const uint32_t waveCount /* = WaveCount */)
         {
             // Note: MaxWaves is the actual maximum amount of waves that can participate.
@@ -118,7 +118,7 @@ namespace rocwmma
         }
 
         template <typename MatrixLayout, uint32_t WaveCount>
-        ROCWMMA_DEVICE constexpr /* static */ inline auto MatrixCoopLayout::strides()
+        ROCWMMA_HOST_DEVICE constexpr /* static */ inline auto MatrixCoopLayout::strides()
         {
             return MatrixLayout::strides();
         }

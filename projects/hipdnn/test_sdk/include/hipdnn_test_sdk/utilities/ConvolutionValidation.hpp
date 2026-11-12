@@ -15,7 +15,9 @@ namespace hipdnn_test_sdk::utilities
 
 /// Validates convolution parameters against tensor dimensions.
 /// Checks that strides/dilations/padding vectors have correct sizes and valid values,
-/// and that the output tensor spatial dimensions match the expected convolution output.
+/// that the output tensor's batch size matches the input's and its channel count matches
+/// the weight's output-channel count, and that the output tensor spatial dimensions match
+/// the expected convolution output.
 ///
 /// Callers are responsible for validating tensor dimension counts before calling this
 /// (e.g. restricting to 3D/4D/5D for GPU kernels, or >= 3 for a generic CPU path).
@@ -41,6 +43,20 @@ inline void validateConvolutionParams(const std::vector<int64_t>& xDims,
     {
         throw std::invalid_argument(
             "Output tensor must have the same number of dimensions as input");
+    }
+
+    if(yDims[0] != xDims[0])
+    {
+        throw std::invalid_argument("Output tensor batch size " + std::to_string(yDims[0])
+                                    + " does not match input batch size "
+                                    + std::to_string(xDims[0]));
+    }
+
+    if(yDims[1] != wDims[0])
+    {
+        throw std::invalid_argument("Output tensor channel count " + std::to_string(yDims[1])
+                                    + " does not match weight output-channel count "
+                                    + std::to_string(wDims[0]));
     }
 
     if(strides.size() != nSpatialDims)

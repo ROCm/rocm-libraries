@@ -1,0 +1,8 @@
+{
+  "wmma_scale/bf6/bf6/e8m0/e8m0": "930c277cc3b6a894d2b6bc0b569b3d9049da57ce266bf6c3d646be64ab5d5367",
+  "wmma_scale/fp6/fp6/e8m0/e8m0": "2ca1f52257108495fa785b1c4d18b75786f5e5760e546b13d5b539dcdeb9a018",
+  "wmma_scale/fp8/fp8/e8m0/e8m0": "f1954ea941e2378613c3491a357d0eaa6c8ee721eac72a8b70c38007104614b0",
+  "wmma_scale16/bf6/bf6/e8m0/e8m0": "6ceabdbe6e65901e5ea44a82a28e222c94f99fc91bd5d2c88879fe4ef5a218bb",
+  "wmma_scale16/fp6/fp6/e8m0/e8m0": "6cfa49f6373c268f9cb548e319361dd82a407baa569d415cb95d040bc1c5d358",
+  "wmma_scale16/fp8/fp8/e8m0/e8m0": "82db41335268b332fc30cdd82bf74b674b91124f1836541ad71aa51be5fa129b"
+}

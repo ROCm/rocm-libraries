@@ -78,7 +78,11 @@ Use sparse checkout when cloning the RPP project:
   git sparse-checkout init --cone
   git sparse-checkout set projects/rpp
 
-Then use ``git checkout`` to check out the branch you need.
+Then use ``git checkout`` to check out the branch you need. For example, to check out the develop branch:
+
+.. code:: shell
+
+   git checkout develop
 
 The develop branch is intended for users who want to preview new features or
 contribute to the RPP code base.
@@ -125,8 +129,16 @@ The available CMake options are:
 
 * ``BACKEND``: Set to ``CPU`` for CPU-only builds. ``HIP`` by default.
 * ``CMAKE_BUILD_TYPE``: Set to ``Debug`` or ``Release``. ``Release`` by default.
-* ``RPP_AUDIO_SUPPORT``: Set to ``ON`` to enable audio augmentations. ``OFF`` by
-  default.
+
+Audio augmentations are always enabled. They use an in-house FFT implementation on the
+CPU backend and rocFFT on the GPU (HIP) backend.
+
+rocFFT is a runtime dependency only. The HIP spectrogram loads ``librocfft.so.0`` with
+``dlopen`` on first use, so the rocFFT headers and import library are not required to build
+or install RPP, and rocFFT is packaged as a soft dependency (``Recommends`` on Debian,
+``Suggests`` on RPM). If it cannot be loaded, the HIP spectrogram returns
+``RPP_ERROR_NOT_IMPLEMENTED`` and prints a one-time diagnostic; every other RPP function is
+unaffected.
 
 .. _verify-install:
 

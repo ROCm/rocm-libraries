@@ -83,6 +83,454 @@ constexpr Config configs[] = {
         .kw       = 3,
     },
 
+    // ======================= tf32 tiles (elem_bytes = 4) =======================
+    //
+    // The doubled LDS tile picks the whole family's tall-narrow shape:
+    //   - waves_k = 4, waves_q = 1 (K128, Q16). LDS only fits the doubled tile at
+    //     block_h * block_w <= 319, which a Q(32) block blows past. And a tf32 lane
+    //     covers 4 channels, so a wave loads 4 columns and the W axis needs
+    //     ceil(block_w / 4) = 5 waves, which only a 4-way K split supplies.
+    //   - wave_k16 = 2, so the writer takes its narrow register store: the LDS-staged
+    //     wide store is 16-bit only, and skipping it frees the staging pad the doubled
+    //     tile needs.
+    //   - wave_p is the largest keeping block_h * block_w <= 319, per filter.
+    //
+    // Per (filter, direction) there are four entries: the divisible tile and the three
+    // fallback corners (output count not a multiple of 128; a reduction of one C(64)
+    // iteration; both). There is no unfold, K256, or K96 sibling, so the standard tile
+    // serves every output width and the padded K128 covers those counts.
+
+    // ---- 3x3 tf32: P(14) x Q(16) x K(128), block_h 16 x block_w 18 = 288 ----
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 7,
+        .waves_q    = 1,
+        .kh         = 3,
+        .kw         = 3,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k     = 4,
+        .wave_k16    = 2,
+        .wave_p      = 7,
+        .waves_q     = 1,
+        .kh          = 3,
+        .kw          = 3,
+        .k_divisible = false,
+        .elem_bytes  = 4,
+    },
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 7,
+        .waves_q    = 1,
+        .kh         = 3,
+        .kw         = 3,
+        .single_c   = true,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k     = 4,
+        .wave_k16    = 2,
+        .wave_p      = 7,
+        .waves_q     = 1,
+        .kh          = 3,
+        .kw          = 3,
+        .k_divisible = false,
+        .single_c    = true,
+        .elem_bytes  = 4,
+    },
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 7,
+        .waves_q    = 1,
+        .kh         = 3,
+        .kw         = 3,
+        .direction  = hipconv::Direction::Dgrad,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k     = 4,
+        .wave_k16    = 2,
+        .wave_p      = 7,
+        .waves_q     = 1,
+        .kh          = 3,
+        .kw          = 3,
+        .direction   = hipconv::Direction::Dgrad,
+        .k_divisible = false,
+        .elem_bytes  = 4,
+    },
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 7,
+        .waves_q    = 1,
+        .kh         = 3,
+        .kw         = 3,
+        .direction  = hipconv::Direction::Dgrad,
+        .single_c   = true,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k     = 4,
+        .wave_k16    = 2,
+        .wave_p      = 7,
+        .waves_q     = 1,
+        .kh          = 3,
+        .kw          = 3,
+        .direction   = hipconv::Direction::Dgrad,
+        .k_divisible = false,
+        .single_c    = true,
+        .elem_bytes  = 4,
+    },
+
+    // ---- 2x2 tf32: P(16) x Q(16) x K(128), block_h 17 x block_w 17 = 289 ----
+    //
+    // The shallowest halo of the family, so it affords the full wave_p = 8.
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 8,
+        .waves_q    = 1,
+        .kh         = 2,
+        .kw         = 2,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k     = 4,
+        .wave_k16    = 2,
+        .wave_p      = 8,
+        .waves_q     = 1,
+        .kh          = 2,
+        .kw          = 2,
+        .k_divisible = false,
+        .elem_bytes  = 4,
+    },
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 8,
+        .waves_q    = 1,
+        .kh         = 2,
+        .kw         = 2,
+        .single_c   = true,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k     = 4,
+        .wave_k16    = 2,
+        .wave_p      = 8,
+        .waves_q     = 1,
+        .kh          = 2,
+        .kw          = 2,
+        .k_divisible = false,
+        .single_c    = true,
+        .elem_bytes  = 4,
+    },
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 8,
+        .waves_q    = 1,
+        .kh         = 2,
+        .kw         = 2,
+        .direction  = hipconv::Direction::Dgrad,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k     = 4,
+        .wave_k16    = 2,
+        .wave_p      = 8,
+        .waves_q     = 1,
+        .kh          = 2,
+        .kw          = 2,
+        .direction   = hipconv::Direction::Dgrad,
+        .k_divisible = false,
+        .elem_bytes  = 4,
+    },
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 8,
+        .waves_q    = 1,
+        .kh         = 2,
+        .kw         = 2,
+        .direction  = hipconv::Direction::Dgrad,
+        .single_c   = true,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k     = 4,
+        .wave_k16    = 2,
+        .wave_p      = 8,
+        .waves_q     = 1,
+        .kh          = 2,
+        .kw          = 2,
+        .direction   = hipconv::Direction::Dgrad,
+        .k_divisible = false,
+        .single_c    = true,
+        .elem_bytes  = 4,
+    },
+
+    // ---- 4x4 tf32: P(12) x Q(16) x K(128), block_h 15 x block_w 19 = 285 ----
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 6,
+        .waves_q    = 1,
+        .kh         = 4,
+        .kw         = 4,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k     = 4,
+        .wave_k16    = 2,
+        .wave_p      = 6,
+        .waves_q     = 1,
+        .kh          = 4,
+        .kw          = 4,
+        .k_divisible = false,
+        .elem_bytes  = 4,
+    },
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 6,
+        .waves_q    = 1,
+        .kh         = 4,
+        .kw         = 4,
+        .single_c   = true,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k     = 4,
+        .wave_k16    = 2,
+        .wave_p      = 6,
+        .waves_q     = 1,
+        .kh          = 4,
+        .kw          = 4,
+        .k_divisible = false,
+        .single_c    = true,
+        .elem_bytes  = 4,
+    },
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 6,
+        .waves_q    = 1,
+        .kh         = 4,
+        .kw         = 4,
+        .direction  = hipconv::Direction::Dgrad,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k     = 4,
+        .wave_k16    = 2,
+        .wave_p      = 6,
+        .waves_q     = 1,
+        .kh          = 4,
+        .kw          = 4,
+        .direction   = hipconv::Direction::Dgrad,
+        .k_divisible = false,
+        .elem_bytes  = 4,
+    },
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 6,
+        .waves_q    = 1,
+        .kh         = 4,
+        .kw         = 4,
+        .direction  = hipconv::Direction::Dgrad,
+        .single_c   = true,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k     = 4,
+        .wave_k16    = 2,
+        .wave_p      = 6,
+        .waves_q     = 1,
+        .kh          = 4,
+        .kw          = 4,
+        .direction   = hipconv::Direction::Dgrad,
+        .k_divisible = false,
+        .single_c    = true,
+        .elem_bytes  = 4,
+    },
+
+    // ---- 5x5 tf32: P(10) x Q(16) x K(128), block_h 14 x block_w 20 = 280 ----
+    //
+    // The deepest halo, so the shortest tile: wave_p = 6 would need 160.5 KiB.
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 5,
+        .waves_q    = 1,
+        .kh         = 5,
+        .kw         = 5,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k     = 4,
+        .wave_k16    = 2,
+        .wave_p      = 5,
+        .waves_q     = 1,
+        .kh          = 5,
+        .kw          = 5,
+        .k_divisible = false,
+        .elem_bytes  = 4,
+    },
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 5,
+        .waves_q    = 1,
+        .kh         = 5,
+        .kw         = 5,
+        .single_c   = true,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k     = 4,
+        .wave_k16    = 2,
+        .wave_p      = 5,
+        .waves_q     = 1,
+        .kh          = 5,
+        .kw          = 5,
+        .k_divisible = false,
+        .single_c    = true,
+        .elem_bytes  = 4,
+    },
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 5,
+        .waves_q    = 1,
+        .kh         = 5,
+        .kw         = 5,
+        .direction  = hipconv::Direction::Dgrad,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k     = 4,
+        .wave_k16    = 2,
+        .wave_p      = 5,
+        .waves_q     = 1,
+        .kh          = 5,
+        .kw          = 5,
+        .direction   = hipconv::Direction::Dgrad,
+        .k_divisible = false,
+        .elem_bytes  = 4,
+    },
+    {
+        .waves_k    = 4,
+        .wave_k16   = 2,
+        .wave_p     = 5,
+        .waves_q    = 1,
+        .kh         = 5,
+        .kw         = 5,
+        .direction  = hipconv::Direction::Dgrad,
+        .single_c   = true,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k     = 4,
+        .wave_k16    = 2,
+        .wave_p      = 5,
+        .waves_q     = 1,
+        .kh          = 5,
+        .kw          = 5,
+        .direction   = hipconv::Direction::Dgrad,
+        .k_divisible = false,
+        .single_c    = true,
+        .elem_bytes  = 4,
+    },
+    // ---- tf32 K(64) divisible tiles (wave_k16 = 1) ----
+    //
+    // Same tile as the K128 entry of each filter, split 4 ways over K(16) instead of
+    // K(32). It serves output == 64, the one count where halving block_k costs nothing:
+    // the K128 tile runs a single block there anyway and just pads. Above
+    // wide_k128_min_output the shared threshold in is_valid_config cedes back to K128.
+    {
+        .waves_k    = 4,
+        .wave_k16   = 1,
+        .wave_p     = 7,
+        .waves_q    = 1,
+        .kh         = 3,
+        .kw         = 3,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k    = 4,
+        .wave_k16   = 1,
+        .wave_p     = 7,
+        .waves_q    = 1,
+        .kh         = 3,
+        .kw         = 3,
+        .direction  = hipconv::Direction::Dgrad,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k    = 4,
+        .wave_k16   = 1,
+        .wave_p     = 8,
+        .waves_q    = 1,
+        .kh         = 2,
+        .kw         = 2,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k    = 4,
+        .wave_k16   = 1,
+        .wave_p     = 8,
+        .waves_q    = 1,
+        .kh         = 2,
+        .kw         = 2,
+        .direction  = hipconv::Direction::Dgrad,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k    = 4,
+        .wave_k16   = 1,
+        .wave_p     = 6,
+        .waves_q    = 1,
+        .kh         = 4,
+        .kw         = 4,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k    = 4,
+        .wave_k16   = 1,
+        .wave_p     = 6,
+        .waves_q    = 1,
+        .kh         = 4,
+        .kw         = 4,
+        .direction  = hipconv::Direction::Dgrad,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k    = 4,
+        .wave_k16   = 1,
+        .wave_p     = 5,
+        .waves_q    = 1,
+        .kh         = 5,
+        .kw         = 5,
+        .elem_bytes = 4,
+    },
+    {
+        .waves_k    = 4,
+        .wave_k16   = 1,
+        .wave_p     = 5,
+        .waves_q    = 1,
+        .kh         = 5,
+        .kw         = 5,
+        .direction  = hipconv::Direction::Dgrad,
+        .elem_bytes = 4,
+    },
+    // ===================== end of the tf32 tiles =====================
+
     // 2x2
     {
         .wave_k16 = 4,
@@ -427,6 +875,17 @@ constexpr Config configs[] = {
         .kw          = 5,
         .k_divisible = false,
     },
+    // 3x1
+    //
+    // The 3x1 K256 arbitrary-K sibling covers only the counts the K256 selection
+    // claims, which at a wide output map it never does, so K=32 had no tile.
+    {
+        .wave_k16    = 4,
+        .wave_p      = 8,
+        .kh          = 3,
+        .kw          = 1,
+        .k_divisible = false,
+    },
     // Small-C fallback (K64, single_c): serves C in [2, 64].
     //
     // The single lone C(64) peel iteration over-computes to C_padded=64 against zero
@@ -461,6 +920,14 @@ constexpr Config configs[] = {
         .wave_p   = 6,
         .kh       = 5,
         .kw       = 5,
+        .single_c = true,
+    },
+    // 3x1
+    {
+        .wave_k16 = 2,
+        .wave_p   = 8,
+        .kh       = 3,
+        .kw       = 1,
         .single_c = true,
     },
     // Small-C arbitrary-output fallback (K64, single_c, k_divisible=false).
@@ -501,6 +968,18 @@ constexpr Config configs[] = {
         .wave_p      = 6,
         .kh          = 5,
         .kw          = 5,
+        .k_divisible = false,
+        .single_c    = true,
+    },
+    // 3x1
+    //
+    // The pointwise fold of a (3,1,1) conv3d lands here whenever C and K are both
+    // small: C=32, K=32 fails the divisible tiles on both counts at once.
+    {
+        .wave_k16    = 2,
+        .wave_p      = 8,
+        .kh          = 3,
+        .kw          = 1,
         .k_divisible = false,
         .single_c    = true,
     },
@@ -819,6 +1298,35 @@ constexpr Config configs[] = {
         .direction = hipconv::Direction::Dgrad,
     },
 
+    // Dgrad 3x1 large-tensor tiles: mirror the fprop 3x1 large_tensor trio.
+    // K128
+    {
+        .wave_k16     = 4,
+        .wave_p       = 8,
+        .kh           = 3,
+        .kw           = 1,
+        .direction    = hipconv::Direction::Dgrad,
+        .large_tensor = true,
+    },
+    // K96
+    {
+        .wave_k16     = 3,
+        .wave_p       = 8,
+        .kh           = 3,
+        .kw           = 1,
+        .direction    = hipconv::Direction::Dgrad,
+        .large_tensor = true,
+    },
+    // K64
+    {
+        .wave_k16     = 2,
+        .wave_p       = 8,
+        .kh           = 3,
+        .kw           = 1,
+        .direction    = hipconv::Direction::Dgrad,
+        .large_tensor = true,
+    },
+
     // 3x1 dgrad K256 tile (waves_k=4): mirrors the fprop 3x1 K256 for dgrad.
     {
         .waves_k   = 4,
@@ -885,6 +1393,15 @@ constexpr Config configs[] = {
         .direction   = hipconv::Direction::Dgrad,
         .k_divisible = false,
     },
+    // 3x1: mirrors the fprop 3x1 arbitrary-K fallback.
+    {
+        .wave_k16    = 4,
+        .wave_p      = 8,
+        .kh          = 3,
+        .kw          = 1,
+        .direction   = hipconv::Direction::Dgrad,
+        .k_divisible = false,
+    },
     // Dgrad small-dout fallback (single_c): serves dout in [2, 64].
     //
     // The dgrad analog of the fprop small-C config (dout is the reduction). dout
@@ -922,6 +1439,15 @@ constexpr Config configs[] = {
         .wave_p    = 6,
         .kh        = 5,
         .kw        = 5,
+        .direction = hipconv::Direction::Dgrad,
+        .single_c  = true,
+    },
+    // 3x1
+    {
+        .wave_k16  = 2,
+        .wave_p    = 8,
+        .kh        = 3,
+        .kw        = 1,
         .direction = hipconv::Direction::Dgrad,
         .single_c  = true,
     },
@@ -969,6 +1495,16 @@ constexpr Config configs[] = {
         .k_divisible = false,
         .single_c    = true,
     },
+    // 3x1
+    {
+        .wave_k16    = 2,
+        .wave_p      = 8,
+        .kh          = 3,
+        .kw          = 1,
+        .direction   = hipconv::Direction::Dgrad,
+        .k_divisible = false,
+        .single_c    = true,
+    },
 };
 
 constexpr int num_configs = sizeof(configs) / sizeof(configs[0]);
@@ -985,14 +1521,16 @@ constexpr int config_index(int wave_k16,
                            hipconv::Direction direction = hipconv::Direction::Fprop,
                            int unfold_n                 = 1,
                            int waves_k                  = 2,
-                           bool large_tensor            = false)
+                           bool large_tensor            = false,
+                           int elem_bytes               = 2)
 {
     for(int i = 0; i < num_configs; ++i)
     {
         if(configs[i].wave_k16 == wave_k16 && configs[i].kh == kh && configs[i].kw == kw &&
            configs[i].k_divisible == k_divisible && configs[i].single_c == single_c &&
            configs[i].direction == direction && configs[i].unfold_n == unfold_n &&
-           configs[i].waves_k == waves_k && configs[i].large_tensor == large_tensor)
+           configs[i].waves_k == waves_k && configs[i].large_tensor == large_tensor &&
+           configs[i].elem_bytes == elem_bytes)
         {
             return i;
         }

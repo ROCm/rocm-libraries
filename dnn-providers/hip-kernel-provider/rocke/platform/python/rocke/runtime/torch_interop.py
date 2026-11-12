@@ -8,7 +8,8 @@ through the same hipModule path as `run_manifest`, without host staging.
 This module holds `resolve_stream` (substitute torch's current stream so
 its caching allocator stays coherent -- degrades to the HIP null stream
 when torch is absent, so the numpy/manifest hip-only path calls it too),
-`empty_workspace`, and the `launch_torch_kernel` back-compat shim.
+`empty_workspace`, `torch_dtype`, `device_tensor`, and the
+`launch_torch_kernel` back-compat shim.
 
 Kernel-argument packing is torch-agnostic and lives in `packing.py`; this
 module builds on it.
@@ -16,8 +17,9 @@ module builds on it.
 
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
-from typing import Any, Mapping, Sequence, Tuple
+from typing import Any, Mapping, Optional, Sequence, Tuple
 
 
 @dataclass(frozen=True)
@@ -55,12 +57,20 @@ def resolve_stream(stream, device=None) -> int:
     numpy ``run_manifest`` runner) can pass ``stream=0`` and we will
     return ``0`` -- there's no torch caching allocator to be racing
     against, so the legacy HIP null stream is fine.
+
+    Never imports torch: only a process that has already imported it can
+    hold torch tensors, so an unimported torch means there is no allocator
+    to stay coherent with. Importing it here would also be unsafe -- a
+    torch-free caller in an environment that merely has torch installed
+    has already loaded a HIP runtime by the time it launches, and TheRock
+    torch preloads its bundled ROCm libraries at import, which aborts the
+    process. Library discovery follows the same rule
+    (``runtime_coexistence._candidate_lib_paths``).
     """
     if stream is not None and int(stream) != 0:
         return int(stream)
-    try:
-        import torch
-    except Exception:
+    torch = sys.modules.get("torch")
+    if torch is None:
         return 0
     try:
         if device is None:
@@ -92,6 +102,21 @@ def empty_workspace(shape: Sequence[int], *, dtype: Any, device: Any):
     return torch.empty(tuple(int(x) for x in shape), dtype=dtype, device=device)
 
 
+def torch_dtype(name: str):
+    """The ``torch.dtype`` named ``name`` (e.g. ``"float16"``, ``"int32"``)."""
+    dtype = getattr(_require_torch(), name, None)
+    if dtype is None:
+        raise ValueError(f"torch has no dtype {name!r}")
+    return dtype
+
+
+def device_tensor(values: Sequence[Any], *, dtype: Any, device: Any):
+    """A 1-D tensor holding ``values`` on ``device``, e.g. a launch's int32
+    lengths or block table built from host-side Python ints."""
+    torch = _require_torch()
+    return torch.tensor(list(values), dtype=dtype, device=device)
+
+
 def launch_torch_kernel(
     *,
     hsaco: bytes,
@@ -103,6 +128,7 @@ def launch_torch_kernel(
     warmup: int = 5,
     attempts: int = 100,
     stream: int = 0,
+    cluster_dims: Optional[Sequence[int]] = None,
 ) -> TorchLaunchSummary:
     """Compile, time, and launch a CK DSL kernel on torch tensors.
 
@@ -121,6 +147,9 @@ def launch_torch_kernel(
     (no device sync, no event creation). That single-shot mode is
     required for HIP graph capture, where ``hipDeviceSynchronize`` and
     ``hipEventRecord`` are illegal on the captured stream.
+
+    ``cluster_dims`` is the kernel's compiled cluster shape, if any; every
+    launch then uses it (see :class:`KernelLauncher`).
     """
     # Local import to avoid a runtime/__init__ circular at module load.
     from .launcher import KernelLauncher, LaunchConfig, time_launches
@@ -129,6 +158,7 @@ def launch_torch_kernel(
         hsaco=hsaco,
         kernel_name=kernel_name,
         signature=signature,
+        cluster_dims=cluster_dims,
     )
     cfg = LaunchConfig(grid=grid, block=block, stream=stream)
 
