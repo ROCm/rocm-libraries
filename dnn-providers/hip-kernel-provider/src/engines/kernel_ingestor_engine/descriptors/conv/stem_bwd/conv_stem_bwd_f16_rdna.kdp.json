@@ -36,7 +36,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 855
+      "priority": 857
     },
     {
       "version": "1.0",
@@ -65,7 +65,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 854
+      "priority": 856
     },
     {
       "version": "1.0",
@@ -94,7 +94,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 853
+      "priority": 855
     },
     {
       "version": "1.0",
@@ -123,7 +123,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 852
+      "priority": 854
     },
     {
       "version": "1.0",
@@ -152,7 +152,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 851
+      "priority": 853
     },
     {
       "version": "1.0",
@@ -181,7 +181,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 850
+      "priority": 852
     },
     {
       "version": "1.0",
@@ -210,7 +210,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 849
+      "priority": 851
     },
     {
       "version": "1.0",
@@ -239,36 +239,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 848
-    },
-    {
-      "version": "1.0",
-      "id": "cbc1dce1-891b-5c08-a591-b8f8a2b2fbc7",
-      "name": "conv_stem_bwd.f16.wmma11_f16.nhwc.v8.s2x2.w2x2.nb16.kc32.t4f4",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvStemBwd.cpp",
-        "entry_point": "ConvStemBwd"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "HALF",
-        "atom": "wmma11_f16",
-        "atom_id": 12,
-        "layout": 1,
-        "vec": 8,
-        "u": 2,
-        "v": 2,
-        "nb": 16,
-        "kc": 32,
-        "th": 4,
-        "fm": 4,
-        "sh": 2,
-        "sw": 2,
-        "ft": 0,
-        "sd": 0
-      },
-      "priority": 847
+      "priority": 850
     },
     {
       "version": "1.0",
@@ -297,7 +268,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 846
+      "priority": 849
     },
     {
       "version": "1.0",
@@ -326,7 +297,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 845
+      "priority": 848
     },
     {
       "version": "1.0",
@@ -355,7 +326,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 844
+      "priority": 847
     },
     {
       "version": "1.0",
@@ -384,7 +355,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 843
+      "priority": 846
     },
     {
       "version": "1.0",
@@ -413,7 +384,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 842
+      "priority": 845
     },
     {
       "version": "1.0",
@@ -442,7 +413,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 841
+      "priority": 844
     },
     {
       "version": "1.0",
@@ -471,7 +442,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 840
+      "priority": 843
     },
     {
       "version": "1.0",
@@ -500,7 +471,36 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 839
+      "priority": 842
+    },
+    {
+      "version": "1.0",
+      "id": "32941187-f89a-5c22-a286-e81de01667ef",
+      "name": "conv_stem_bwd.f16.wmma11_f16.nhwc.v8.s2x2.w1x1.nb16.kc64.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma11_f16",
+        "atom_id": 12,
+        "layout": 1,
+        "vec": 8,
+        "u": 1,
+        "v": 1,
+        "nb": 16,
+        "kc": 64,
+        "th": 4,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0
+      },
+      "priority": 841
     },
     {
       "version": "1.0",
@@ -529,7 +529,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 838
+      "priority": 840
     },
     {
       "version": "1.0",
@@ -558,7 +558,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 837
+      "priority": 839
     },
     {
       "version": "1.0",
@@ -587,7 +587,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 836
+      "priority": 838
     },
     {
       "version": "1.0",
@@ -616,7 +616,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 835
+      "priority": 837
     },
     {
       "version": "1.0",
@@ -645,7 +645,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 834
+      "priority": 836
     },
     {
       "version": "1.0",
@@ -674,7 +674,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 833
+      "priority": 835
     },
     {
       "version": "1.0",
@@ -703,7 +703,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 832
+      "priority": 834
     },
     {
       "version": "1.0",
@@ -732,7 +732,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 831
+      "priority": 833
     },
     {
       "version": "1.0",
@@ -761,7 +761,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 830
+      "priority": 832
     },
     {
       "version": "1.0",
@@ -790,7 +790,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 829
+      "priority": 831
     },
     {
       "version": "1.0",
@@ -819,7 +819,36 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 828
+      "priority": 830
+    },
+    {
+      "version": "1.0",
+      "id": "d3418905-32c7-5efb-9d9a-1be9afa1e9c9",
+      "name": "conv_stem_bwd.f16.wmma11_f16.nhwc.v8.s1x1.w1x1.nb16.kc64.t4f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma11_f16",
+        "atom_id": 12,
+        "layout": 1,
+        "vec": 8,
+        "u": 1,
+        "v": 1,
+        "nb": 16,
+        "kc": 64,
+        "th": 4,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 0
+      },
+      "priority": 829
     },
     {
       "version": "1.0",
@@ -848,7 +877,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 827
+      "priority": 828
     },
     {
       "version": "1.0",
@@ -877,7 +906,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 826
+      "priority": 827
     },
     {
       "version": "1.0",
@@ -906,7 +935,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 825
+      "priority": 826
     },
     {
       "version": "1.0",
@@ -935,7 +964,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 824
+      "priority": 825
     },
     {
       "version": "1.0",
@@ -964,7 +993,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 823
+      "priority": 824
     },
     {
       "version": "1.0",
@@ -993,7 +1022,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 822
+      "priority": 823
     },
     {
       "version": "1.0",
@@ -1022,7 +1051,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 821
+      "priority": 822
     },
     {
       "version": "1.0",
@@ -1051,7 +1080,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 820
+      "priority": 821
     },
     {
       "version": "1.0",
@@ -1080,7 +1109,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 819
+      "priority": 820
     },
     {
       "version": "1.0",
@@ -1109,7 +1138,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 818
+      "priority": 819
     },
     {
       "version": "1.0",
@@ -1138,7 +1167,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 817
+      "priority": 818
     },
     {
       "version": "1.0",
@@ -1167,7 +1196,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 816
+      "priority": 817
     },
     {
       "version": "1.0",
@@ -1193,6 +1222,35 @@
         "fm": 2,
         "sh": 4,
         "sw": 4,
+        "ft": 0,
+        "sd": 0
+      },
+      "priority": 816
+    },
+    {
+      "version": "1.0",
+      "id": "7c55fb9f-96aa-56e6-a4cd-1466d8cb4d72",
+      "name": "conv_stem_bwd.f16.wmma12_f16.nhwc.v8.s2x2.w4x4.nb16.kc16.t2f4",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma12_f16",
+        "atom_id": 14,
+        "layout": 1,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 16,
+        "th": 2,
+        "fm": 4,
+        "sh": 2,
+        "sw": 2,
         "ft": 0,
         "sd": 0
       },
@@ -1316,6 +1374,35 @@
     },
     {
       "version": "1.0",
+      "id": "b11c4170-4b6a-5f3d-827d-65950e0f5ba1",
+      "name": "conv_stem_bwd.f16.wmma12_f16.nchw.v8.s2x2.w4x4.nb16.kc16.t8f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma12_f16",
+        "atom_id": 14,
+        "layout": 0,
+        "vec": 8,
+        "u": 4,
+        "v": 4,
+        "nb": 16,
+        "kc": 16,
+        "th": 8,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0
+      },
+      "priority": 810
+    },
+    {
+      "version": "1.0",
       "id": "40a8fe76-74d5-51bc-b176-eb44a0405d8b",
       "name": "conv_stem_bwd.f16.wmma12_f16.nchw.v1.s2x2.w4x4.nb16.kc16.t4f2",
       "kernel_source": {
@@ -1341,7 +1428,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 810
+      "priority": 809
     },
     {
       "version": "1.0",
@@ -1370,7 +1457,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 809
+      "priority": 808
     },
     {
       "version": "1.0",
@@ -1399,7 +1486,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 808
+      "priority": 807
     },
     {
       "version": "1.0",
@@ -1428,7 +1515,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 807
+      "priority": 806
     },
     {
       "version": "1.0",
@@ -1457,7 +1544,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 806
+      "priority": 805
     },
     {
       "version": "1.0",
@@ -1486,7 +1573,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 805
+      "priority": 804
     },
     {
       "version": "1.0",
@@ -1515,7 +1602,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 804
+      "priority": 803
     },
     {
       "version": "1.0",
@@ -1544,7 +1631,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 803
+      "priority": 802
     },
     {
       "version": "1.0",
@@ -1573,7 +1660,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 802
+      "priority": 801
     },
     {
       "version": "1.0",
@@ -1602,7 +1689,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 801
+      "priority": 800
     },
     {
       "version": "1.0",
@@ -1631,7 +1718,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 800
+      "priority": 799
     },
     {
       "version": "1.0",
@@ -1660,7 +1747,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 799
+      "priority": 798
     },
     {
       "version": "1.0",
@@ -1689,7 +1776,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 798
+      "priority": 797
     },
     {
       "version": "1.0",
@@ -1718,7 +1805,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 797
+      "priority": 796
     },
     {
       "version": "1.0",
@@ -1747,7 +1834,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 796
+      "priority": 795
     },
     {
       "version": "1.0",
@@ -1776,7 +1863,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 795
+      "priority": 794
     },
     {
       "version": "1.0",
@@ -1805,7 +1892,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 794
+      "priority": 793
     },
     {
       "version": "1.0",
@@ -1834,7 +1921,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 793
+      "priority": 792
     },
     {
       "version": "1.0",
@@ -1863,7 +1950,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 792
+      "priority": 791
     },
     {
       "version": "1.0",
@@ -1892,7 +1979,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 791
+      "priority": 790
     },
     {
       "version": "1.0",
@@ -1921,7 +2008,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 790
+      "priority": 789
     },
     {
       "version": "1.0",
@@ -1950,7 +2037,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 789
+      "priority": 788
     },
     {
       "version": "1.0",
@@ -1979,7 +2066,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 788
+      "priority": 787
     },
     {
       "version": "1.0",
@@ -2008,7 +2095,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 787
+      "priority": 786
     },
     {
       "version": "1.0",
@@ -2037,7 +2124,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 786
+      "priority": 785
     },
     {
       "version": "1.0",
@@ -2066,7 +2153,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 785
+      "priority": 784
     },
     {
       "version": "1.0",
@@ -2095,7 +2182,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 784
+      "priority": 783
     },
     {
       "version": "1.0",
@@ -2124,7 +2211,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 783
+      "priority": 782
     },
     {
       "version": "1.0",
@@ -2153,7 +2240,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 782
+      "priority": 781
     },
     {
       "version": "1.0",
@@ -2182,7 +2269,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 781
+      "priority": 780
     },
     {
       "version": "1.0",
@@ -2211,7 +2298,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 780
+      "priority": 779
     },
     {
       "version": "1.0",
@@ -2240,7 +2327,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 779
+      "priority": 778
     },
     {
       "version": "1.0",
@@ -2269,7 +2356,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 778
+      "priority": 777
     },
     {
       "version": "1.0",
@@ -2298,7 +2385,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 777
+      "priority": 776
     },
     {
       "version": "1.0",
@@ -2327,7 +2414,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 776
+      "priority": 775
     },
     {
       "version": "1.0",
@@ -2356,7 +2443,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 775
+      "priority": 774
     },
     {
       "version": "1.0",
@@ -2385,7 +2472,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 774
+      "priority": 773
     },
     {
       "version": "1.0",
@@ -2414,7 +2501,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 773
+      "priority": 772
     },
     {
       "version": "1.0",
@@ -2443,7 +2530,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 772
+      "priority": 771
     },
     {
       "version": "1.0",
@@ -2472,7 +2559,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 771
+      "priority": 770
     },
     {
       "version": "1.0",
@@ -2501,7 +2588,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 770
+      "priority": 769
     },
     {
       "version": "1.0",
@@ -2530,7 +2617,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 769
+      "priority": 768
     },
     {
       "version": "1.0",
@@ -2621,8 +2708,8 @@
     },
     {
       "version": "1.0",
-      "id": "7101a7c9-9967-5360-9415-5ebe236c869b",
-      "name": "conv_stem_bwd.f16.wmma11_f16.nchw.v1.s2x2.w4x4.nb16.kc16.t8f2.d1",
+      "id": "3e9e4e8c-0fbd-533e-919a-497caa4ee174",
+      "name": "conv_stem_bwd.f16.wmma11_f16.nhwc.v8.s2x2.w4x4.nb16.kc16.t2f4.d3",
       "kernel_source": {
         "kind": "embedded_source",
         "source_file": "kernels/ConvStemBwd.cpp",
@@ -2633,17 +2720,17 @@
         "dtype": "HALF",
         "atom": "wmma11_f16",
         "atom_id": 12,
-        "layout": 0,
-        "vec": 1,
+        "layout": 1,
+        "vec": 8,
         "u": 4,
         "v": 4,
         "nb": 16,
         "kc": 16,
-        "th": 8,
-        "fm": 2,
+        "th": 2,
+        "fm": 4,
         "sh": 2,
         "sw": 2,
-        "ft": 1,
+        "ft": 3,
         "sd": 0
       },
       "priority": 665
@@ -3139,7 +3226,7 @@
         "ft": 0,
         "sd": 2
       },
-      "priority": 610
+      "priority": 609
     },
     {
       "version": "1.0",
@@ -3168,7 +3255,7 @@
         "ft": 0,
         "sd": 2
       },
-      "priority": 609
+      "priority": 608
     },
     {
       "version": "1.0",
@@ -3197,7 +3284,7 @@
         "ft": 0,
         "sd": 2
       },
-      "priority": 608
+      "priority": 607
     },
     {
       "version": "1.0",
@@ -3226,7 +3313,7 @@
         "ft": 0,
         "sd": 2
       },
-      "priority": 607
+      "priority": 606
     },
     {
       "version": "1.0",
@@ -3255,7 +3342,7 @@
         "ft": 0,
         "sd": 2
       },
-      "priority": 606
+      "priority": 605
     },
     {
       "version": "1.0",
@@ -3284,7 +3371,7 @@
         "ft": 0,
         "sd": 2
       },
-      "priority": 605
+      "priority": 604
     },
     {
       "version": "1.0",
@@ -3313,7 +3400,7 @@
         "ft": 0,
         "sd": 2
       },
-      "priority": 604
+      "priority": 603
     },
     {
       "version": "1.0",
@@ -3342,7 +3429,7 @@
         "ft": 0,
         "sd": 2
       },
-      "priority": 603
+      "priority": 602
     },
     {
       "version": "1.0",
@@ -3371,7 +3458,7 @@
         "ft": 0,
         "sd": 2
       },
-      "priority": 602
+      "priority": 601
     },
     {
       "version": "1.0",
@@ -3400,7 +3487,7 @@
         "ft": 0,
         "sd": 2
       },
-      "priority": 601
+      "priority": 600
     },
     {
       "version": "1.0",
@@ -3429,7 +3516,7 @@
         "ft": 0,
         "sd": 2
       },
-      "priority": 600
+      "priority": 599
     },
     {
       "version": "1.0",
@@ -3458,7 +3545,7 @@
         "ft": 0,
         "sd": 2
       },
-      "priority": 599
+      "priority": 598
     },
     {
       "version": "1.0",
@@ -3487,7 +3574,7 @@
         "ft": 0,
         "sd": 2
       },
-      "priority": 598
+      "priority": 597
     },
     {
       "version": "1.0",
@@ -3516,7 +3603,7 @@
         "ft": 0,
         "sd": 2
       },
-      "priority": 597
+      "priority": 596
     },
     {
       "version": "1.0",
@@ -3545,7 +3632,7 @@
         "ft": 0,
         "sd": 2
       },
-      "priority": 596
+      "priority": 595
     },
     {
       "version": "1.0",
@@ -3574,7 +3661,7 @@
         "ft": 0,
         "sd": 2
       },
-      "priority": 595
+      "priority": 594
     },
     {
       "version": "1.0",
@@ -3603,7 +3690,36 @@
         "ft": 0,
         "sd": 2
       },
-      "priority": 594
+      "priority": 593
+    },
+    {
+      "version": "1.0",
+      "id": "261d6f5c-aee9-5097-bfe1-7e9fa9e025b7",
+      "name": "conv_stem_bwd.f16.wmma12_f16.nchw.v1.s1x1.w2x2.nb16.kc16.t4f2.sd2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "HALF",
+        "atom": "wmma12_f16",
+        "atom_id": 14,
+        "layout": 0,
+        "vec": 1,
+        "u": 2,
+        "v": 2,
+        "nb": 16,
+        "kc": 16,
+        "th": 4,
+        "fm": 2,
+        "sh": 1,
+        "sw": 1,
+        "ft": 0,
+        "sd": 2
+      },
+      "priority": 592
     },
     {
       "version": "1.0",
@@ -3632,7 +3748,7 @@
         "ft": 0,
         "sd": 2
       },
-      "priority": 593
+      "priority": 591
     },
     {
       "version": "1.0",
@@ -3661,7 +3777,7 @@
         "ft": 0,
         "sd": 2
       },
-      "priority": 592
+      "priority": 590
     },
     {
       "version": "1.0",
@@ -3690,7 +3806,7 @@
         "ft": 0,
         "sd": 2
       },
-      "priority": 591
+      "priority": 589
     },
     {
       "version": "1.0",
@@ -3719,7 +3835,7 @@
         "ft": 0,
         "sd": 2
       },
-      "priority": 590
+      "priority": 588
     },
     {
       "version": "1.0",
@@ -3748,7 +3864,7 @@
         "ft": 0,
         "sd": 2
       },
-      "priority": 589
+      "priority": 587
     },
     {
       "version": "1.0",
@@ -3777,7 +3893,7 @@
         "ft": 0,
         "sd": 2
       },
-      "priority": 588
+      "priority": 586
     },
     {
       "version": "1.0",
@@ -3806,7 +3922,7 @@
         "ft": 0,
         "sd": 2
       },
-      "priority": 587
+      "priority": 585
     },
     {
       "version": "1.0",
@@ -3835,7 +3951,7 @@
         "ft": 0,
         "sd": 2
       },
-      "priority": 586
+      "priority": 584
     }
   ]
 }

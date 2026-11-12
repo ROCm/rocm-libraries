@@ -38,7 +38,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 726
+      "priority": 720
     },
     {
       "version": "1.0",
@@ -67,7 +67,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 725
+      "priority": 719
     },
     {
       "version": "1.0",
@@ -96,7 +96,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 724
+      "priority": 718
     },
     {
       "version": "1.0",
@@ -125,7 +125,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 723
+      "priority": 717
     },
     {
       "version": "1.0",
@@ -154,7 +154,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 722
+      "priority": 716
     },
     {
       "version": "1.0",
@@ -183,7 +183,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 721
+      "priority": 715
     },
     {
       "version": "1.0",
@@ -212,7 +212,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 720
+      "priority": 714
     },
     {
       "version": "1.0",
@@ -241,7 +241,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 719
+      "priority": 713
     },
     {
       "version": "1.0",
@@ -270,7 +270,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 718
+      "priority": 712
     },
     {
       "version": "1.0",
@@ -299,7 +299,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 717
+      "priority": 711
     },
     {
       "version": "1.0",
@@ -328,7 +328,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 716
+      "priority": 710
     },
     {
       "version": "1.0",
@@ -357,7 +357,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 715
+      "priority": 709
     },
     {
       "version": "1.0",
@@ -386,7 +386,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 714
+      "priority": 708
     },
     {
       "version": "1.0",
@@ -415,7 +415,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 713
+      "priority": 707
     },
     {
       "version": "1.0",
@@ -444,7 +444,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 712
+      "priority": 706
     },
     {
       "version": "1.0",
@@ -473,7 +473,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 711
+      "priority": 705
     },
     {
       "version": "1.0",
@@ -502,7 +502,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 710
+      "priority": 704
     },
     {
       "version": "1.0",
@@ -531,7 +531,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 709
+      "priority": 703
     },
     {
       "version": "1.0",
@@ -560,7 +560,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 708
+      "priority": 702
     },
     {
       "version": "1.0",
@@ -589,7 +589,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 707
+      "priority": 701
     },
     {
       "version": "1.0",
@@ -618,7 +618,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 706
+      "priority": 700
     },
     {
       "version": "1.0",
@@ -647,7 +647,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 705
+      "priority": 699
     },
     {
       "version": "1.0",
@@ -676,7 +676,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 704
+      "priority": 698
     },
     {
       "version": "1.0",
@@ -705,7 +705,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 703
+      "priority": 697
     },
     {
       "version": "1.0",
@@ -734,7 +734,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 702
+      "priority": 696
     },
     {
       "version": "1.0",
@@ -763,7 +763,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 701
+      "priority": 695
     },
     {
       "version": "1.0",
@@ -792,7 +792,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 700
+      "priority": 694
     },
     {
       "version": "1.0",
@@ -821,7 +821,36 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 699
+      "priority": 693
+    },
+    {
+      "version": "1.0",
+      "id": "a46523dc-5631-5eda-8980-63fc1866901f",
+      "name": "conv_stem_bwd.bf16.fma.nchw.v1.s2x2.w1x1.nb12.kc16.t32f2",
+      "kernel_source": {
+        "kind": "embedded_source",
+        "source_file": "kernels/ConvStemBwd.cpp",
+        "entry_point": "ConvStemBwd"
+      },
+      "metadata": {
+        "direction": "BWD",
+        "dtype": "BFLOAT16",
+        "atom": "fma",
+        "atom_id": 16,
+        "layout": 0,
+        "vec": 1,
+        "u": 1,
+        "v": 1,
+        "nb": 12,
+        "kc": 16,
+        "th": 32,
+        "fm": 2,
+        "sh": 2,
+        "sw": 2,
+        "ft": 0,
+        "sd": 0
+      },
+      "priority": 692
     },
     {
       "version": "1.0",
@@ -850,7 +879,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 698
+      "priority": 691
     },
     {
       "version": "1.0",
@@ -879,7 +908,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 697
+      "priority": 690
     },
     {
       "version": "1.0",
@@ -908,36 +937,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 696
-    },
-    {
-      "version": "1.0",
-      "id": "9a1c79a3-1ece-59a1-986d-6e510760dae4",
-      "name": "conv_stem_bwd.bf16.fma.nhwc.v8.s1x1.w3x3.nb3.kc16.t32f2",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvStemBwd.cpp",
-        "entry_point": "ConvStemBwd"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "BFLOAT16",
-        "atom": "fma",
-        "atom_id": 16,
-        "layout": 1,
-        "vec": 8,
-        "u": 3,
-        "v": 3,
-        "nb": 3,
-        "kc": 16,
-        "th": 32,
-        "fm": 2,
-        "sh": 1,
-        "sw": 1,
-        "ft": 0,
-        "sd": 0
-      },
-      "priority": 695
+      "priority": 689
     },
     {
       "version": "1.0",
@@ -966,7 +966,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 694
+      "priority": 688
     },
     {
       "version": "1.0",
@@ -995,7 +995,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 693
+      "priority": 687
     },
     {
       "version": "1.0",
@@ -1024,7 +1024,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 692
+      "priority": 686
     },
     {
       "version": "1.0",
@@ -1053,7 +1053,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 691
+      "priority": 685
     },
     {
       "version": "1.0",
@@ -1082,7 +1082,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 690
+      "priority": 684
     },
     {
       "version": "1.0",
@@ -1111,7 +1111,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 689
+      "priority": 683
     },
     {
       "version": "1.0",
@@ -1140,7 +1140,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 688
+      "priority": 682
     },
     {
       "version": "1.0",
@@ -1169,7 +1169,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 687
+      "priority": 681
     },
     {
       "version": "1.0",
@@ -1198,7 +1198,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 686
+      "priority": 680
     },
     {
       "version": "1.0",
@@ -1227,7 +1227,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 685
+      "priority": 679
     },
     {
       "version": "1.0",
@@ -1256,7 +1256,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 684
+      "priority": 678
     },
     {
       "version": "1.0",
@@ -1285,7 +1285,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 683
+      "priority": 677
     },
     {
       "version": "1.0",
@@ -1314,7 +1314,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 682
+      "priority": 676
     },
     {
       "version": "1.0",
@@ -1343,7 +1343,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 681
+      "priority": 675
     },
     {
       "version": "1.0",
@@ -1372,7 +1372,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 680
+      "priority": 674
     },
     {
       "version": "1.0",
@@ -1401,7 +1401,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 679
+      "priority": 673
     },
     {
       "version": "1.0",
@@ -1430,7 +1430,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 678
+      "priority": 672
     },
     {
       "version": "1.0",
@@ -1459,7 +1459,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 677
+      "priority": 671
     },
     {
       "version": "1.0",
@@ -1488,36 +1488,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 676
-    },
-    {
-      "version": "1.0",
-      "id": "a0bf6c0c-c41d-5a48-a501-c2feb7147baa",
-      "name": "conv_stem_bwd.bf16.fma.nhwc.v8.s1x1.w1x1.nb3.kc16.t16f2",
-      "kernel_source": {
-        "kind": "embedded_source",
-        "source_file": "kernels/ConvStemBwd.cpp",
-        "entry_point": "ConvStemBwd"
-      },
-      "metadata": {
-        "direction": "BWD",
-        "dtype": "BFLOAT16",
-        "atom": "fma",
-        "atom_id": 16,
-        "layout": 1,
-        "vec": 8,
-        "u": 1,
-        "v": 1,
-        "nb": 3,
-        "kc": 16,
-        "th": 16,
-        "fm": 2,
-        "sh": 1,
-        "sw": 1,
-        "ft": 0,
-        "sd": 0
-      },
-      "priority": 675
+      "priority": 670
     },
     {
       "version": "1.0",
@@ -1546,7 +1517,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 674
+      "priority": 669
     },
     {
       "version": "1.0",
@@ -1575,7 +1546,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 673
+      "priority": 668
     },
     {
       "version": "1.0",
@@ -1604,7 +1575,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 672
+      "priority": 667
     },
     {
       "version": "1.0",
@@ -1633,7 +1604,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 671
+      "priority": 666
     },
     {
       "version": "1.0",
@@ -1662,7 +1633,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 670
+      "priority": 665
     },
     {
       "version": "1.0",
@@ -1691,7 +1662,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 669
+      "priority": 664
     },
     {
       "version": "1.0",
@@ -1720,7 +1691,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 668
+      "priority": 663
     },
     {
       "version": "1.0",
@@ -1749,7 +1720,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 667
+      "priority": 662
     },
     {
       "version": "1.0",
@@ -1778,7 +1749,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 666
+      "priority": 661
     },
     {
       "version": "1.0",
@@ -1807,7 +1778,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 665
+      "priority": 660
     },
     {
       "version": "1.0",
@@ -1836,7 +1807,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 664
+      "priority": 659
     },
     {
       "version": "1.0",
@@ -1865,7 +1836,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 663
+      "priority": 658
     },
     {
       "version": "1.0",
@@ -1894,7 +1865,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 662
+      "priority": 657
     },
     {
       "version": "1.0",
@@ -1923,7 +1894,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 661
+      "priority": 656
     },
     {
       "version": "1.0",
@@ -1952,7 +1923,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 660
+      "priority": 655
     },
     {
       "version": "1.0",
@@ -1981,7 +1952,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 659
+      "priority": 654
     },
     {
       "version": "1.0",
@@ -2010,7 +1981,7 @@
         "ft": 0,
         "sd": 0
       },
-      "priority": 658
+      "priority": 653
     },
     {
       "version": "1.0",
@@ -2039,7 +2010,7 @@
         "ft": 1,
         "sd": 0
       },
-      "priority": 598
+      "priority": 589
     },
     {
       "version": "1.0",
@@ -2068,7 +2039,7 @@
         "ft": 1,
         "sd": 0
       },
-      "priority": 597
+      "priority": 588
     },
     {
       "version": "1.0",
@@ -2097,7 +2068,7 @@
         "ft": 1,
         "sd": 0
       },
-      "priority": 596
+      "priority": 587
     },
     {
       "version": "1.0",
@@ -2126,7 +2097,7 @@
         "ft": 1,
         "sd": 0
       },
-      "priority": 595
+      "priority": 586
     },
     {
       "version": "1.0",
@@ -2155,7 +2126,7 @@
         "ft": 1,
         "sd": 0
       },
-      "priority": 594
+      "priority": 585
     },
     {
       "version": "1.0",
@@ -2184,7 +2155,7 @@
         "ft": 1,
         "sd": 0
       },
-      "priority": 593
+      "priority": 584
     },
     {
       "version": "1.0",
@@ -2213,7 +2184,7 @@
         "ft": 3,
         "sd": 0
       },
-      "priority": 592
+      "priority": 583
     },
     {
       "version": "1.0",
@@ -2242,7 +2213,7 @@
         "ft": 3,
         "sd": 0
       },
-      "priority": 591
+      "priority": 582
     },
     {
       "version": "1.0",
@@ -2271,7 +2242,7 @@
         "ft": 3,
         "sd": 0
       },
-      "priority": 590
+      "priority": 581
     },
     {
       "version": "1.0",
@@ -2300,7 +2271,7 @@
         "ft": 3,
         "sd": 0
       },
-      "priority": 589
+      "priority": 580
     },
     {
       "version": "1.0",
@@ -2329,7 +2300,7 @@
         "ft": 3,
         "sd": 0
       },
-      "priority": 588
+      "priority": 579
     },
     {
       "version": "1.0",
@@ -2358,7 +2329,7 @@
         "ft": 3,
         "sd": 0
       },
-      "priority": 587
+      "priority": 578
     },
     {
       "version": "1.0",
@@ -2387,7 +2358,7 @@
         "ft": 3,
         "sd": 0
       },
-      "priority": 586
+      "priority": 577
     },
     {
       "version": "1.0",
@@ -2416,7 +2387,7 @@
         "ft": 3,
         "sd": 0
       },
-      "priority": 585
+      "priority": 576
     },
     {
       "version": "1.0",
@@ -2445,7 +2416,7 @@
         "ft": 3,
         "sd": 0
       },
-      "priority": 584
+      "priority": 575
     },
     {
       "version": "1.0",
@@ -2474,7 +2445,7 @@
         "ft": 3,
         "sd": 0
       },
-      "priority": 583
+      "priority": 574
     },
     {
       "version": "1.0",
@@ -2503,7 +2474,7 @@
         "ft": 3,
         "sd": 0
       },
-      "priority": 582
+      "priority": 573
     },
     {
       "version": "1.0",
@@ -2532,7 +2503,7 @@
         "ft": 3,
         "sd": 0
       },
-      "priority": 581
+      "priority": 572
     },
     {
       "version": "1.0",
@@ -2561,7 +2532,7 @@
         "ft": 3,
         "sd": 0
       },
-      "priority": 580
+      "priority": 571
     },
     {
       "version": "1.0",
@@ -2590,7 +2561,7 @@
         "ft": 3,
         "sd": 0
       },
-      "priority": 579
+      "priority": 570
     }
   ]
 }
