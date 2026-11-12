@@ -24,6 +24,7 @@
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
 #include "common/ConvRepackFormulation.hpp"
+#include "common/GemmFormulation.hpp"
 #include "engines/conv/BenchmarkedPlan.hpp"
 #include "engines/conv/ConvGemmPlanBuilder.hpp"
 #include "engines/conv/ConvGemmTestGraphs.hpp"
@@ -1056,6 +1057,101 @@ INSTANTIATE_TEST_SUITE_P(,
                                     + backendName(std::get<1>(info.param));
                          });
 
+/// Whether any GEMM of @p problem's plan, as fitted to the libraries' limits, is one rocBLAS
+/// would split into chunks rounded to a narrow output between them.
+bool roundsReductionChunks(const ConvProblem& problem)
+{
+    const auto calls = convGemmCalls(problem);
+    if(!calls.has_value())
+    {
+        return false;
+    }
+    for(const auto& stage : calls->stages)
+    {
+        for(const auto& call : fitLibraryLimits(stage.calls))
+        {
+            if(rocblasRoundsReductionChunks(call))
+            {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+#ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
+/// A 1x1 NCHW backward data of one 8193 x 8193 image of 16 channels in bf16: its GEMM reduces
+/// over k = 16 channels, each a plane of 67 M elements apart, so rocBLAS would cut the reduction
+/// into chunks of 15 and 1 and round the first to bf16 before adding the second. The rocBLAS
+/// plan declines it; in fp32, or channels-last (k walks unit stride), it is kept. Host-only:
+/// nothing runs.
+TEST(TestConvGemmRocblasLimits, DeclinesAReductionRocblasWouldRoundBetweenChunks)
+{
+    ConvGemmShape shape;
+    shape.n = 1;
+    shape.c = shape.k = 16;
+    shape.input = {8193, 8193};
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        for(const auto dataType : {conv_data_objects::DataType::BFLOAT16,
+                                   conv_data_objects::DataType::HALF,
+                                   conv_data_objects::DataType::FLOAT})
+        {
+            for(const bool channelsLastLayout : {false, true})
+            {
+                ConvGemmShape variant = shape;
+                variant.dataType = dataType;
+                variant.xChannelsLast = variant.wChannelsLast = variant.yChannelsLast
+                    = channelsLastLayout;
+                const ConvGemmGraph graph(variant, direction);
+                const auto problem = parseConvProblem(graph.graph(), direction);
+                ASSERT_TRUE(problem.has_value());
+                const auto calls = convGemmCalls(*problem);
+                ASSERT_TRUE(calls.has_value());
+                const bool narrow = dataType != conv_data_objects::DataType::FLOAT;
+                const bool expectDecline = narrow && !channelsLastLayout;
+                EXPECT_EQ(roundsReductionChunks(*problem), expectDecline)
+                    << static_cast<int>(direction) << " " << static_cast<int>(dataType) << " "
+                    << channelsLastLayout;
+                bool declined = false;
+                for(const auto& stage : calls->stages)
+                {
+                    try
+                    {
+                        static_cast<void>(RocblasGemmPlan(stage.calls));
+                    }
+                    catch(const std::exception&)
+                    {
+                        declined = true;
+                    }
+                }
+                EXPECT_EQ(declined, expectDecline);
+                // Every call the rocBLAS plan keeps with a narrow output reduces over fewer
+                // than 2^31 bytes of the operand k walks, so rocBLAS never chunks it.
+                if(!declined)
+                {
+                    for(const auto& stage : calls->stages)
+                    {
+                        for(const auto& call : RocblasGemmPlan(stage.calls).calls())
+                        {
+                            if(call.d.dataType == conv_data_objects::DataType::FLOAT)
+                            {
+                                continue;
+                            }
+                            const int64_t stride
+                                = std::max(call.transposeA ? int64_t{1} : call.a.leadingDimension,
+                                           call.transposeB ? call.b.leadingDimension : int64_t{1});
+                            EXPECT_LE(call.k * stride * elementBytes(call.a.dataType),
+                                      ROCBLAS_REDUCTION_BYTES);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+#endif
+
 /// A value in [-1, 1) with 8 significant bits (exact in fp16, bf16 and fp32) for element @p index
 /// of a tensor seeded @p seed: what the large tests fill and what their reference reads back.
 double patternValue(uint64_t index, uint64_t seed)
@@ -1194,9 +1290,16 @@ TEST_P(TestGpuConvGemmLarge, Fp16Sampled)
     const ConvGemmPlanBuilder builder(factoryFor(backend));
     if(!builder.isApplicable(*handle, graph.graph()))
     {
-        // As in runCase: only hipBLASLt may decline a formulated GEMM, by finding no kernel
-        // (a leading dimension past its kernels' 32-bit offsets, say); rocBLAS serves it.
-        ASSERT_EQ(backend, Backend::HIPBLASLT) << "declined";
+        // hipBLASLt may decline a formulated GEMM by finding no kernel (a leading dimension
+        // past its kernels' 32-bit offsets, say); rocBLAS only one whose reduction it would
+        // split into a narrow output (rocblasRoundsReductionChunks).
+        if(backend == Backend::ROCBLAS)
+        {
+            const auto problem = parseConvProblem(graph.graph(), largeCase.direction);
+            ASSERT_TRUE(problem.has_value());
+            ASSERT_TRUE(roundsReductionChunks(*problem)) << "rocBLAS declined a call it can run";
+            GTEST_SKIP() << "rocBLAS would round between chunks of a reduction";
+        }
         GTEST_SKIP() << "hipBLASLt has no algorithm for a GEMM of this convolution";
     }
     HipdnnEnginePluginExecutionContext context;

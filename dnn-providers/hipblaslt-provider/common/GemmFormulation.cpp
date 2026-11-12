@@ -239,6 +239,25 @@ std::vector<GemmCall> splitAlong(std::vector<GemmCall> calls, SplitAxis axis, in
 
 } // namespace
 
+bool rocblasRoundsReductionChunks(const GemmCall& call)
+{
+    if(call.d.dataType == data_objects::DataType::FLOAT)
+    {
+        return false;
+    }
+    // rocBLAS's rule (Tensile gemm): k walks lda when a is not transposed, ldb when b is.
+    const int64_t stride = std::max(call.transposeA ? int64_t{1} : call.a.leadingDimension,
+                                    call.transposeB ? call.b.leadingDimension : int64_t{1});
+    int64_t strideBytes = 0;
+    if(__builtin_mul_overflow(stride, elementBytes(call.a.dataType), &strideBytes))
+    {
+        return call.k > 1;
+    }
+    const int64_t chunk
+        = strideBytes > 0 ? std::max(int64_t{1}, ROCBLAS_REDUCTION_BYTES / strideBytes) : call.k;
+    return call.k > chunk;
+}
+
 std::vector<GemmCall> fitLibraryLimits(std::vector<GemmCall> calls)
 {
     std::vector<GemmCall> fitted;

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include <functional>
+#include <limits>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -269,6 +270,56 @@ TEST(TestMatmulProblem, LongExtentsSplitIntoChunks)
     EXPECT_EQ(split[1].a.offset, MAX_GEMM_EXTENT * 8); // a stored m x k: k walks columns
     EXPECT_EQ(split[1].b.offset, MAX_GEMM_EXTENT); // b stored k x n: k walks rows
     EXPECT_EQ(split[1].d.offset, 0);
+}
+
+TEST(TestMatmulProblem, RocblasChunkedReductionsIntoNarrowOutputsAreFlagged)
+{
+    namespace data_objects = hipdnn_flatbuffers_sdk::data_objects;
+    // bf16, a stored m x k (not transposed): k walks lda. rocBLAS's chunk is the largest k with
+    // k * lda * 2 bytes under 2^31.
+    GemmCall call = smallCall();
+    call.batchCount = 1;
+    for(auto* operand : {&call.a, &call.b, &call.d})
+    {
+        operand->dataType = data_objects::DataType::BFLOAT16;
+    }
+    const int64_t lda = 8193 * 8193;
+    call.a.leadingDimension = lda;
+    const int64_t chunk = ROCBLAS_REDUCTION_BYTES / (lda * 2);
+    ASSERT_EQ(chunk, 15);
+    call.k = chunk;
+    EXPECT_FALSE(rocblasRoundsReductionChunks(call));
+    call.k = chunk + 1; // the 16-channel backward data of one 8193 x 8193 image
+    EXPECT_TRUE(rocblasRoundsReductionChunks(call));
+    EXPECT_GT(call.k * call.a.leadingDimension * 2, ROCBLAS_REDUCTION_BYTES);
+
+    // An fp32 d sums the chunks in fp32: one rounding per chunk at fp32, as a split k would.
+    GemmCall fp32Out = call;
+    fp32Out.d.dataType = data_objects::DataType::FLOAT;
+    EXPECT_FALSE(rocblasRoundsReductionChunks(fp32Out));
+
+    // a transposed: k walks unit stride, whatever lda.
+    GemmCall unitStride = call;
+    unitStride.transposeA = true;
+    EXPECT_FALSE(rocblasRoundsReductionChunks(unitStride));
+
+    // b transposed: k walks ldb.
+    GemmCall viaB = call;
+    viaB.a.leadingDimension = 8;
+    EXPECT_FALSE(rocblasRoundsReductionChunks(viaB));
+    viaB.transposeB = true;
+    viaB.b.leadingDimension = lda;
+    EXPECT_TRUE(rocblasRoundsReductionChunks(viaB));
+
+    // fp16 the same; an overflowing stride flags any k past 1.
+    GemmCall half = call;
+    half.a.dataType = half.b.dataType = half.d.dataType = data_objects::DataType::HALF;
+    EXPECT_TRUE(rocblasRoundsReductionChunks(half));
+    half.a.leadingDimension = std::numeric_limits<int64_t>::max();
+    half.k = 1;
+    EXPECT_FALSE(rocblasRoundsReductionChunks(half));
+    half.k = 2;
+    EXPECT_TRUE(rocblasRoundsReductionChunks(half));
 }
 
 } // namespace

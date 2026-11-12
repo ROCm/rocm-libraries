@@ -62,4 +62,19 @@ constexpr int64_t MAX_GEMM_EXTENT = int64_t{1} << 30;
  */
 std::vector<GemmCall> fitLibraryLimits(std::vector<GemmCall> calls);
 
+/// The bytes of the operand a reduction walks past which rocBLAS's Tensile path splits the
+/// reduction itself (k times the leading dimension k walks, times a's element size): it keeps
+/// its kernels' 32-bit offsets in range by chunking k and adding each chunk into d.
+constexpr int64_t ROCBLAS_REDUCTION_BYTES = std::numeric_limits<int32_t>::max();
+
+/**
+ * @brief Whether rocBLAS would split @p call's reduction into chunks summed in a non-fp32 d.
+ *
+ * Each chunk's partial sum is rounded to d's type before the next adds to it, so a half or
+ * bf16 d is rounded once per chunk instead of once. No split of m, n or the batch helps: the
+ * stride k walks is a leading dimension, fixed by the operand's layout. The rocBLAS plans
+ * decline such a call (hipBLASLt does not split k).
+ */
+bool rocblasRoundsReductionChunks(const GemmCall& call);
+
 } // namespace hipblaslt_plugin

@@ -20,6 +20,14 @@ namespace hipblaslt_plugin
 RocblasGemmPlan::RocblasGemmPlan(std::vector<GemmCall> calls)
     : _calls(fitLibraryLimits(std::move(calls)))
 {
+    // A reduction rocBLAS would chunk into a half or bf16 output rounds once per chunk:
+    // declined, so the result is summed in fp32 and rounded once, or not computed here.
+    if(std::any_of(_calls.begin(), _calls.end(), rocblasRoundsReductionChunks))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "rocBLAS would split a reduction into a narrow output, rounding between the parts");
+    }
 }
 
 size_t RocblasGemmPlan::getWorkspaceSize(const HipdnnEnginePluginHandle& /*handle*/) const

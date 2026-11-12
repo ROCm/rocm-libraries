@@ -1124,25 +1124,6 @@ ConvGemmPlanCalls batchReductionChains(const ConvProblem& problem,
     return plan;
 }
 
-/// Reduction bytes past which rocBLAS splits a GEMM's k itself (k times the leading dimension
-/// k walks), keeping each chunk's partial sum in the output type.
-constexpr int64_t SPLIT_REDUCTION_BYTES = std::numeric_limits<int32_t>::max();
-
-/// Whether a backend may sum @p call's reduction in pieces rounded to a narrow d between them.
-bool splitsIntoNarrowOutput(const GemmCall& call)
-{
-    if(call.d.dataType == data_objects::DataType::FLOAT)
-    {
-        return false;
-    }
-    const int64_t aStride = call.transposeA ? 1 : call.a.leadingDimension;
-    const int64_t bStride = call.transposeB ? call.b.leadingDimension : 1;
-    const int64_t bytes = elementBytes(call.a.dataType);
-    int64_t reach = 0;
-    return __builtin_mul_overflow(call.k, std::max(aStride, bStride) * bytes, &reach)
-           || reach >= SPLIT_REDUCTION_BYTES;
-}
-
 /// @p plan with a backward-weights GEMM whose reduction a backend could split (rocBLAS does,
 /// past 2^31 bytes of the operand k walks) summed into an fp32 copy of w in the workspace and
 /// rounded into w once, as the sliced plans already are; nullopt when the copy does not fit.
@@ -1155,7 +1136,7 @@ std::optional<ConvGemmPlanCalls> sumLongReductionsInFp32(const ConvProblem& prob
     {
         for(const auto& call : stage.calls)
         {
-            needed = needed || (call.d.uid == problem.w.uid && splitsIntoNarrowOutput(call));
+            needed = needed || (call.d.uid == problem.w.uid && rocblasRoundsReductionChunks(call));
         }
     }
     if(problem.direction != ConvDirection::BACKWARD_WEIGHTS || !needed)
