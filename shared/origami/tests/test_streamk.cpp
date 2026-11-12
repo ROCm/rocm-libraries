@@ -457,3 +457,113 @@ TEST_CASE("Origami streamk: ipt <= 1 switches to DP above two waves of workgroup
                 p, make_hardware(950), c, origami::grid_selection_t::k_split_aware) == 768);
   }
 }
+
+TEST_CASE("Origami streamk: W4A16 on gfx1151 shares partial waves over the CUs",
+          "[streamk][grid][w4a16]") {
+  auto hw = make_hardware(950);
+  hw.arch = origami::hardware_t::architecture_t::gfx1151;
+  auto grid = [&](size_t m,
+                  size_t n,
+                  size_t mt_m,
+                  size_t mt_n,
+                  origami::data_type_t a_dtype,
+                  size_t k   = 4096) {
+    auto p    = make_problem(m, n, k);
+    p.a_dtype = a_dtype;
+    p.num_cus = 40;
+    auto c    = make_config(mt_m, mt_n, 64);
+    c.workspace_size            = std::numeric_limits<size_t>::max() / 2;
+    c.workspace_size_per_elem_c = 4;
+    return origami::streamk::select_grid_size(p, hw, c, origami::grid_selection_t::k_split_aware);
+  };
+  const auto i4 = origami::data_type_t::Int4;
+
+  // 64 tiles on 40 CUs: one workgroup per CU sharing them, not 24 CUs with two.
+  REQUIRE(grid(4096, 128, 64, 128, i4) == 40);
+  // Tiles that already fill the CUs evenly stay data parallel.
+  REQUIRE(grid(10240, 128, 64, 128, i4) == 160);
+  // Token tiles of at most 48 stream weights: two workgroups per CU.
+  REQUIRE(grid(4096, 32, 32, 32, i4) == 80);
+  // Past five tiles per CU the generic rule applies again (204 tiles: data parallel's
+  // last wave would be mostly idle).
+  REQUIRE(grid(13056, 128, 64, 128, i4)
+          == grid(13056, 128, 64, 128, origami::data_type_t::BFloat16));
+  // Other A types keep the generic rule.
+  REQUIRE(grid(4096, 128, 64, 128, origami::data_type_t::BFloat16) != 40);
+
+  // At most a tile per CU: one workgroup per CU, the tiles' K split over all of
+  // them ...
+  REQUIRE(grid(2048, 128, 64, 128, i4) == 40);
+  REQUIRE(grid(1024, 128, 64, 128, i4) == 40);
+  // ... unless K is short: 32 tiles (over half the CUs) with 16 K iterations run
+  // data parallel, with 17 they split; 16 tiles split from 9.
+  REQUIRE(grid(2048, 128, 64, 128, i4, 1088) == 40);
+  REQUIRE(grid(2048, 128, 64, 128, i4, 1024) == 32);
+  REQUIRE(grid(1024, 128, 64, 128, i4, 576) == 40);
+  REQUIRE(grid(1024, 128, 64, 128, i4, 512) == 16);
+  // Over five tiles per CU with at most 8 K iterations: data parallel, here where the
+  // base choice gives the 32-wide token tiles two workgroups per CU.
+  REQUIRE(grid(12928, 32, 64, 32, i4, 512) == 202);
+}
+
+TEST_CASE("Origami streamk: W4A16 on gfx1151 with at most a tile per CU",
+          "[streamk][grid][w4a16]") {
+  auto hw = make_hardware(950);
+  hw.arch = origami::hardware_t::architecture_t::gfx1151;
+  auto grid = [&](size_t m, size_t mt_m, int waves, size_t workspace = 0,
+                  origami::data_type_t a_dtype = origami::data_type_t::Int4) {
+    auto p    = make_problem(m, 256, 4096);
+    p.a_dtype = a_dtype;
+    p.num_cus = 40;
+    auto c    = make_config(mt_m, 256, 64);
+    c.workspace_size            = workspace ? workspace : std::numeric_limits<size_t>::max() / 2;
+    c.workspace_size_per_elem_c = 4;
+    c.tensile().wave_group_m    = waves / 2;
+    c.tensile().wave_group_n    = 2;
+    return origami::streamk::select_grid_size(p, hw, c, origami::grid_selection_t::k_split_aware);
+  };
+  // 4- and 8-wave workgroups: one per CU, the K of 10 or 32 tiles split over all.
+  REQUIRE(grid(640, 64, 4) == 40);
+  REQUIRE(grid(2048, 64, 8) == 40);
+  // 16-wave workgroups have a CU each anyway: 32 tiles run data parallel, but 24
+  // (three fifths of the CUs) split K over all; 16 tiles (at most half the CUs),
+  // data parallel.
+  REQUIRE(grid(2048, 64, 16) == 32);
+  REQUIRE(grid(1536, 64, 16) == 40);
+  REQUIRE(grid(1024, 64, 16) == 16);
+  // Partial tiles that do not fit in the workspace leave it to grid_k_split_aware.
+  const auto bf16 = origami::data_type_t::BFloat16;
+  REQUIRE(grid(2048, 64, 8, 1) == grid(2048, 64, 8, 1, bf16));
+  REQUIRE(grid(2048, 64, 8, 1) != 40);
+}
+
+TEST_CASE("Origami streamk: W4A16 on gfx1151 runs data parallel when its last wave wastes little",
+          "[streamk][grid][w4a16]") {
+  auto hw = make_hardware(950);
+  hw.arch = origami::hardware_t::architecture_t::gfx1151;
+  auto grid = [&](size_t m, size_t n, size_t mt_m, size_t mt_n, int waves) {
+    auto p    = make_problem(m, n, 4096);
+    p.a_dtype = origami::data_type_t::Int4;
+    p.num_cus = 40;
+    auto c    = make_config(mt_m, mt_n, 64);
+    c.workspace_size            = std::numeric_limits<size_t>::max() / 2;
+    c.workspace_size_per_elem_c = 4;
+    c.tensile().wave_group_m    = waves / 2;
+    c.tensile().wave_group_n    = 2;
+    return origami::streamk::select_grid_size(p, hw, c, origami::grid_selection_t::k_split_aware);
+  };
+
+  // 192 tiles of 96x256 (4.8 per CU, 5 waves): data parallel.
+  REQUIRE(grid(1536, 3072, 96, 256, 8) == 192);
+  // 168 tiles (4.2 per CU): the last wave is mostly idle, so one workgroup per CU.
+  REQUIRE(grid(1344, 3072, 96, 256, 8) == 40);
+  // 148 tiles (3.7 per CU): shared with 8-wave workgroups, data parallel with
+  // 16-wave ones.
+  REQUIRE(grid(37888, 160, 256, 160, 8) == 40);
+  REQUIRE(grid(37888, 160, 256, 160, 16) == 148);
+  // One row of 32-wide token tiles shares 192 tiles (4.8 per CU) over two
+  // workgroups per CU; with two rows, or 768 tiles in one row, data parallel.
+  REQUIRE(grid(6144, 32, 32, 32, 8) == 80);
+  REQUIRE(grid(3072, 64, 32, 32, 8) == 192);
+  REQUIRE(grid(24576, 32, 32, 32, 8) == 768);
+}

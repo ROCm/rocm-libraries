@@ -359,15 +359,97 @@ static size_t correct_sk_grid_for_partial_tiles(size_t sk_grid,
   return (floor_iters % iters_per_tile != 0) ? tiles : sk_grid;
 }
 
+/**
+ * @brief Stream-K grid of W4A16 (int4 A) kernels on gfx1151, or nullopt to use the
+ *        generic grid. Measured on ~1300 prefill GEMMs (66 LLM projection layers
+ *        with M from 16 to 4096, plus other model layers), 8 W4A16 types.
+ *
+ * The gfx1151 W4A16 kernels are all Stream-K: a grid of one workgroup per tile
+ * (grid = tiles) runs them data parallel (DP). With t = tiles / CUs:
+ *
+ * t <= 1:
+ *   1. 16-wave workgroups: DP, unless 0.5 < t <= 0.75.
+ *   2. Short K (<= 8 K iterations, or <= 16 when t > 0.5): DP. Splitting K
+ *      does not pay for the fixup.
+ *   3. Otherwise one workgroup per CU, splitting K, if the partial tiles fit in
+ *      the workspace.
+ * t > 5 and short K (<= 8 K iterations): DP.
+ * Otherwise (t > 1):
+ *   4. DP when the last wave wastes little: ceil(t) / t below 1.5 (16-wave
+ *      workgroups), 1.15 (4-wave, non-token tiles) or 1.06 (the rest). Not for a
+ *      single row of token tiles with t <= 5: sharing streams the weights faster.
+ *   5. Token tiles (MT_N <= 48): 2 workgroups per CU, sharing the tiles.
+ *   6. Other tiles with t < 5: one workgroup per CU, sharing the tiles.
+ *   In 5 and 6, tiles that divide evenly stay DP, and so do partial tiles that do
+ *   not fit in the workspace.
+ * Anything else: the generic grid.
+ */
+static std::optional<size_t> grid_k_split_aware_gfx1151_w4a16(const problem_t& problem,
+                                                              const config_t& config,
+                                                              size_t cu_count) {
+  using D = w4a16_defaults_t;
+  const size_t tiles = compute_number_of_output_tiles(
+      config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch);
+  const size_t tile_size = config.mt.m * config.mt.n * config.workspace_size_per_elem_c;
+  const size_t k_iters   = math::safe_ceil_div(problem.size.k, config.mt.k);
+  int waves              = D::DEFAULT_WAVES_PER_WORKGROUP;
+  if (config.has_tensile_params()) {
+    const auto& tp = config.tensile();
+    waves = std::max(tp.wave_group_m, 1) * std::max(tp.wave_group_n, 1) * std::max(tp.local_split_u, 1);
+  }
+  if (tiles <= cu_count) {
+    const double t = static_cast<double>(tiles) / static_cast<double>(cu_count);
+    // Rule 1.
+    if (waves >= D::FULL_CU_WAVES && !(t > D::FULL_CU_SPLIT_MIN_TILES_PER_CU && t <= D::FULL_CU_SPLIT_MAX_TILES_PER_CU))
+      return tiles;
+    // Rule 2.
+    if (k_iters <= D::SK_SPLIT_MIN_K_ITERS || (k_iters <= D::SK_SPLIT_MIN_K_ITERS_OVER_HALF && 2 * tiles > cu_count))
+      return tiles;
+    // Rule 3.
+    if (tiles == cu_count || tile_size * cu_count <= config.workspace_size) return cu_count;
+  } else if (tiles > D::GRID_SHARED_MAX_TILES_PER_CU * cu_count && k_iters <= D::MANY_TILES_DP_MAX_K_ITERS) {
+    return tiles;  // many tiles, short K: DP
+  } else {
+    // Rule 4.
+    const bool token_tile = config.mt.n <= D::TOKEN_TILE_MAX_N;
+    const bool token_row  = token_tile && problem.size.n <= config.mt.n
+        && static_cast<double>(tiles)
+               <= D::TOKEN_ROW_SHARED_MAX_TILES_PER_CU * static_cast<double>(cu_count);
+    if (!token_row) {
+      double max_rounding = D::DP_MAX_WAVE_ROUNDING_8_WAVES;
+      if (waves >= D::FULL_CU_WAVES)
+        max_rounding = D::DP_MAX_WAVE_ROUNDING_16_WAVES;
+      else if (waves <= 4 && !token_tile)
+        max_rounding = D::DP_MAX_WAVE_ROUNDING_4_WAVES;
+      if (static_cast<double>(math::safe_ceil_div(tiles, cu_count) * cu_count)
+          < max_rounding * static_cast<double>(tiles))
+        return tiles;
+    }
+    // Rules 5 and 6.
+    if (token_tile || tiles < D::GRID_SHARED_MAX_TILES_PER_CU * cu_count) {
+      const size_t per_cu = token_tile ? D::TOKEN_TILE_WGS_PER_CU : 1;
+      size_t grid         = (tiles % (per_cu * cu_count) != 0) ? per_cu * cu_count : tiles;
+      if (tiles % grid != 0 && tile_size * grid > config.workspace_size) grid = tiles;
+      return grid;
+    }
+  }
+  return std::nullopt;
+}
+
 // @param cu_budget Internal genuine-cap budget: the resolved CU cap when the
 //        caller supplied a genuine cap (problem.num_cus is positive and below
 //        the physical N_CU), else 0 ("no genuine cap / use all CUs"). Computed
 //        by select_grid_size so this file-local helper keeps its original
 //        max_cus-driven grid-cap and occupancy-multiplier semantics.
 size_t grid_k_split_aware(const problem_t& problem,
+                          const hardware_t& hardware,
                           const config_t& config,
                           size_t cu_count,
                           size_t cu_budget) {
+  if (hardware.arch == hardware_t::architecture_t::gfx1151 && problem.a_dtype == data_type_t::Int4) {
+    if (const auto grid = grid_k_split_aware_gfx1151_w4a16(problem, config, cu_count)) return *grid;
+  }
+
   size_t tiles = compute_number_of_output_tiles(
       config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch);
 
@@ -483,7 +565,7 @@ size_t select_grid_size(const problem_t& problem,
       return streamk::grid_analytical(problem, hardware, config, 10);
 
     case grid_selection_t::k_split_aware:
-      return streamk::grid_k_split_aware(problem, config, cu_count, cu_budget);
+      return streamk::grid_k_split_aware(problem, hardware, config, cu_count, cu_budget);
 
     case grid_selection_t::number_of_cus:
     default: return cu_count;
