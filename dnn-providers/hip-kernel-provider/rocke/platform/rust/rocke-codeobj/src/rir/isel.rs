@@ -611,6 +611,11 @@ impl<'a> Isel<'a> {
         }
     }
 
+    /// The low dword of a 64-bit value.
+    fn lo_dword(&mut self, v: ValueId) -> Result<Opnd, CompileError> {
+        Ok(self.d(v)?.0)
+    }
+
     fn tuple(&mut self, v: ValueId) -> Result<VRef, CompileError> {
         match self.get(v)? {
             Val::T(t) => Ok(t),
@@ -3697,6 +3702,13 @@ impl<'a> Isel<'a> {
                 };
                 let out = self.m_bin(opc, a, b);
                 self.set(v, Val::M(out));
+            }
+            // Only the low dword is read (`low_i64`): a 32-bit op, the high dword 0 which no use reads.
+            Type::Scalar(Scalar::I64) if self.lds_dma.low_int.contains(&v) => {
+                let a = self.lo_dword(op.operands[0])?;
+                let b = self.lo_dword(op.operands[1])?;
+                let lo = self.int_bin(op.kind, a, b, uniform, false)?;
+                self.set(v, Val::D(lo, Opnd::Imm(0)));
             }
             Type::Scalar(Scalar::I64) => {
                 let a = self.d(op.operands[0])?;

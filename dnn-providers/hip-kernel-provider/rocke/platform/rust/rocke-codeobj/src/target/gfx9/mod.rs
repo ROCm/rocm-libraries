@@ -40,6 +40,7 @@ pub mod lds_tr;
 pub mod licm_const;
 pub mod lits;
 pub mod loop_align;
+pub mod low_i64;
 pub mod m0_order;
 pub mod mask_splat;
 pub mod masks;
