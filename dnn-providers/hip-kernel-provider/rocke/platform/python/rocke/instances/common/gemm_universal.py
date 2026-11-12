@@ -1079,6 +1079,17 @@ def _emit_mma(b: IRBuilder, op, a: Value, bb: Value, c: Value) -> Value:
     byte-for-byte on CDNA (the helpers were already thin wrappers over
     :meth:`mma`).
     """
+    # EXPERIMENT (uncommitted, diagnostic only, WRONG RESULTS): feed floor.
+    # ROCKE_EXP_NO_WMMA=1 drops the matmul (its fragment reads die with it);
+    # =2 keeps the fragment reads, sunk into an empty side-effecting asm.
+    import os as _os_nw
+
+    _nw = _os_nw.environ.get("ROCKE_EXP_NO_WMMA", "")
+    if _nw == "1":
+        return c
+    if _nw == "2":
+        b.inline_asm("; frag sink", "v,v", [a, bb])
+        return c
     return b.mma(op, a, bb, c)
 
 
@@ -1305,6 +1316,31 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     M = b.param("M", I32)
     N = b.param("N", I32)
     K = b.param("K", I32)
+    # EXPERIMENT (uncommitted): ROCKE_EXP_MX=1 -> MX FP8 (E8M0 scale per 32 K)
+    # on the gfx1250 WMMA + TDM path. Scales arrive pre-swizzled as
+    # [K/128][rows][4] bytes (one 4-scale word per row per 128-deep K step),
+    # are staged into LDS by TDM next to A/B, and feed the scaled WMMA.
+    import os as _os_mx
+
+    _mx = bool(_os_mx.environ.get("ROCKE_EXP_MX"))
+    if _mx:
+        from ...core.arch import ArchTarget as _AT_mx
+        from ...core.ir import I8 as _I8_mx
+
+        _mx_op = _AT_mx.from_gfx(arch).mma.op_for_shape(
+            family="wmma_scaled",
+            a_dtype=spec.data.dtype_a,
+            b_dtype=spec.data.dtype_b,
+            c_dtype="fp32",
+            scales=("e8m0", "e8m0", 32),
+            m=spec.tile.warp_tile_m,
+            n=spec.tile.warp_tile_n,
+            k=spec.tile.warp_tile_k,
+        )
+        if _mx_op is None or spec.tile.warp_tile_k != 128 or not spec.trait.tdm:
+            raise ValueError("ROCKE_EXP_MX needs the gfx1250 16x16x128 fp8 TDM path")
+        AS = b.param("A_scale", PtrType(_I8_mx, "global"), noalias=True, readonly=True, align=16)
+        BS = b.param("B_scale", PtrType(_I8_mx, "global"), noalias=True, readonly=True, align=16)
     if spec.batched:
         # Per-batch strides (in elements, not bytes). The kernel uses
         # ``block_id_z`` as the batch index and adds
@@ -1606,6 +1642,12 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     _lds_k = block_k + _lds_pad
     A_smem = b.smem_alloc(storage_dtype, [_A_LDS_M, _lds_k], name_hint="A_smem")
     B_smem = b.smem_alloc(storage_dtype, [_B_LDS_N, _lds_k], name_hint="B_smem")
+    if _mx:
+        # Scale ring: row = buffer * k_steps + k_step, column = tile row; one
+        # i32 (4 E8M0 scales) per element. Matches the TDM tile below.
+        _mx_ksteps = block_k // 128
+        AS_smem = b.smem_alloc(I32, [_nbuf * _mx_ksteps, block_m], name_hint="AS_smem")
+        BS_smem = b.smem_alloc(I32, [_nbuf * _mx_ksteps, block_n], name_hint="BS_smem")
     # When ``_two_buf`` (compv4 DB or dtl_prefetch) the two halves share
     # this one ``2*block_m``/``2*block_n``-tall region; the K-loop's
     # ``lds_parity`` shifts the load-store and MFMA-read row origin by
@@ -1860,6 +1902,36 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     before_issue()
                 b.tensor_load_to_lds(*groups, cachepolicy=0)
 
+            def _issue_scale(sptr, row_off, rows, extent, smem, wg_mask=0):
+                # MX scales of this K tile: global [K/128][extent][4] bytes; the
+                # tile is (block_k/128) K-step rows of ``rows * 4`` bytes.
+                ksteps = block_k // 128
+                c4 = b.const_i32(4)
+                kstep0 = b.div(k_off, b.const_i32(128))
+                row_bytes = b.mul(extent, c4)
+                origin = b.add(
+                    b.mul(b.zext(kstep0, _I64), b.zext(row_bytes, _I64)),
+                    b.zext(b.mul(row_off, c4), _I64),
+                )
+                lds = b.smem_addr_of(smem)
+                buf_bytes = ksteps * rows * 4
+                if isinstance(lds_parity, Value):
+                    lds = b.smem_ptr_add(lds, b.zext(b.mul(lds_parity, b.const_i32(buf_bytes)), _I64))
+                elif lds_parity:
+                    lds = b.smem_ptr_add(lds, b.zext(b.const_i32(lds_parity * buf_bytes), _I64))
+                groups = b.tdm_descriptor_2d(
+                    b.global_addr_of(sptr, origin),
+                    lds,
+                    elem_bytes=1,
+                    tensor_dim0=b.smax(b.sub(row_bytes, b.mul(row_off, c4)), zero),
+                    tensor_dim1=b.smax(b.sub(b.div(K, b.const_i32(128)), kstep0), zero),
+                    row_stride=row_bytes,
+                    tile_dim0=rows * 4,
+                    tile_dim1=ksteps,
+                    workgroup_mask=wg_mask,
+                )
+                b.tensor_load_to_lds(*groups, cachepolicy=0)
+
             # ``tensor_load_to_lds`` is a wave-level instruction that moves the
             # whole tile, so letting every wave issue it copies the tile once
             # per wave. One wave owns each operand; the rest reach the LDS
@@ -1876,13 +1948,29 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         a_wave = b.const_i32(2 * lds_parity)
                     _b_wave = b.add(a_wave, b.const_i32(1))
                     b_wave = lambda: _b_wave
+                # MX scale variants: ROCKE_EXP_MX_SCALE_MC=0 -> scale loads never
+                # multicast; ROCKE_EXP_MX_SCALE_WAVE=a -> the A-issuing wave also
+                # issues the B scales, so the B wave issues only its data load.
+                _smc = _os_mx.environ.get("ROCKE_EXP_MX_SCALE_MC", "1") != "0"
+                _swa = _os_mx.environ.get("ROCKE_EXP_MX_SCALE_WAVE", "") == "a"
+                _sa_mask = _tdm_a_mask if _smc else 0
+                _sb_mask = _tdm_b_mask if _smc else 0
                 with b.scf_if(b.cmp_eq(_tdm_wave_id, a_wave)):
                     _issue(A, block_m_off, block_m, M, a_lds, tdm_batch_a, _tdm_a_mask)
+                    if _mx:
+                        _issue_scale(AS, block_m_off, block_m, M, AS_smem, _sa_mask)
+                        if _swa:
+                            _issue_scale(BS, block_n_off, block_n, N, BS_smem, _sb_mask)
                 with b.scf_if(b.cmp_eq(_tdm_wave_id, b_wave())):
                     _issue(Bp, block_n_off, block_n, N, b_lds, tdm_batch_b, _tdm_b_mask)
+                    if _mx and not _swa:
+                        _issue_scale(BS, block_n_off, block_n, N, BS_smem, _sb_mask)
             else:
                 _issue(A, block_m_off, block_m, M, a_lds, tdm_batch_a, _tdm_a_mask)
                 _issue(Bp, block_n_off, block_n, N, b_lds, tdm_batch_b, _tdm_b_mask)
+                if _mx:
+                    _issue_scale(AS, block_m_off, block_m, M, AS_smem, _tdm_a_mask)
+                    _issue_scale(BS, block_n_off, block_n, N, BS_smem, _tdm_b_mask)
             return
         if spec.trait.direct_to_lds:
             # For each pass, every lane copies one chunk of HALVES halves
@@ -2224,6 +2312,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         atom_mn_base: Value,
         k_tile_base: Value,
         frag_len: int,
+        chunk_stride: int = 16,
     ) -> Value:
         """Load one ``frag_len``-wide operand fragment from a row-major LDS tile.
 
@@ -2249,12 +2338,14 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             # 4*frag_len bytes as 16-byte chunks, bitcast each to <4 x i32>,
             # and concatenate into the <frag_len x i32> operand.
             frag = None
-            for off in range(0, frag_len * 4, 16):
+            # ``chunk_stride`` 16: the lane's bytes are K-contiguous. 32: the
+            # scaled (MX) WMMA interleaves 16-byte chunks between lane halves.
+            for ci in range(frag_len * 4 // 16):
                 chunk = _emit_smem_load(
                     b,
                     src,
                     lds_row,
-                    b.add(lds_col, b.const_i32(off)),
+                    b.add(lds_col, b.const_i32(ci * chunk_stride)),
                     16,
                     storage_dtype,
                 )
@@ -2306,6 +2397,31 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         b_map = op.b_layout()  # (k, col):  col = lane % 16
         a_row_in_atom, a_k_in_atom = a_map.coord(b, lane, 0)
         b_k_in_atom, b_col_in_atom = b_map.coord(b, lane, 0)
+        _chunk = 16
+        # DIAG (wrong results): ROCKE_EXP_MX_DIAG_FRAG=plain keeps the unscaled
+        # contiguous read pattern; ROCKE_EXP_MX_DIAG_SCALE=const skips scale reads.
+        _mx_dfrag = _os_mx.environ.get("ROCKE_EXP_MX_DIAG_FRAG") == "plain"
+        _mx_dsc = _os_mx.environ.get("ROCKE_EXP_MX_DIAG_SCALE") == "const"
+        if _mx and not _mx_dfrag:
+            # Scaled WMMA lane map: row/col = lane % 16 (as unscaled); the lane
+            # holds K chunks (2c + lane // 16) * 16 .. +15 for c = 0..3.
+            a_k_in_atom = b.mul(b.div(lane, b.const_i32(16)), b.const_i32(16))
+            b_k_in_atom = a_k_in_atom
+            _chunk = 32
+        if _mx:
+            _mx_lane16 = b.mod(lane, b.const_i32(16))
+            _mx_ks = block_k // 128
+            if isinstance(lds_parity, Value):
+                _mx_row0 = b.mul(lds_parity, b.const_i32(_mx_ks)) if _prefetch else b.const_i32(0)
+            else:
+                _mx_row0 = b.const_i32((lds_parity if _prefetch else 0) * _mx_ks)
+
+            def _mx_scale(smem, kk, mn_off):
+                if _mx_dsc:
+                    return b.const_i32(0x7F7F7F7F)
+                return _emit_smem_load(
+                    b, smem, b.add(_mx_row0, b.const_i32(kk)), b.add(mn_off, _mx_lane16), 1, I32
+                )
         warp_m_off = b.mul(warp_m_idx, b.const_i32(mfmas_m * t.warp_tile_m))
         warp_n_off = b.mul(warp_n_idx, b.const_i32(mfmas_n * t.warp_tile_n))
         # The ring/ping-pong slot this K-tile was filled into. The load side
@@ -2386,6 +2502,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         atom_row,
                         k_tile_base,
                         a_per_lane,
+                        _chunk,
                     )
                 )
             b_cols = []
@@ -2404,16 +2521,48 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         atom_row,
                         k_tile_base,
                         b_per_lane,
+                        _chunk,
                     )
                 )
+            if _mx and _os_mx.environ.get("ROCKE_EXP_MX_SWZ") == "1" and not _mx_dsc:
+                # Swizzled scales (host pre-permutes each warp block of 16*R rows:
+                # logical row 16*r + l sits at slot R*l + r), so a lane's R repeat
+                # words are contiguous: R/4 ds_load_b128 instead of R ds_load_b32.
+                def _mx_words(smem, mn_off, reps):
+                    base = b.add(mn_off, b.mul(_mx_lane16, b.const_i32(reps)))
+                    row = b.add(_mx_row0, b.const_i32(kk))
+                    words = []
+                    for q in range(reps // 4):
+                        v = _emit_smem_load(b, smem, row, b.add(base, b.const_i32(4 * q)), 4, I32)
+                        words += [b.vec_extract(v, i) for i in range(4)]
+                    return words
+
+                if mfmas_m % 4 or mfmas_n % 4:
+                    raise ValueError("ROCKE_EXP_MX_SWZ needs 4 | repeats")
+                a_sc = _mx_words(AS_smem, warp_m_off, mfmas_m)
+                b_sc = _mx_words(BS_smem, warp_n_off, mfmas_n)
+            elif _mx:
+                a_sc = [
+                    _mx_scale(AS_smem, kk, b.add(warp_m_off, b.const_i32(mi * t.warp_tile_m)))
+                    for mi in range(mfmas_m)
+                ]
+                b_sc = [
+                    _mx_scale(BS_smem, kk, b.add(warp_n_off, b.const_i32(ni * t.warp_tile_n)))
+                    for ni in range(mfmas_n)
+                ]
             if after_last_reads is not None and kk == k_atoms - 1:
                 after_last_reads()
             flat = 0
             for mi in range(mfmas_m):
                 for ni in range(mfmas_n):
-                    new_accs[flat] = _emit_mma(
-                        b, op, a_rows[mi], b_cols[ni], new_accs[flat]
-                    )
+                    if _mx:
+                        new_accs[flat] = b.mma(
+                            _mx_op.op_id, a_rows[mi], b_cols[ni], new_accs[flat], a_sc[mi], b_sc[ni]
+                        )
+                    else:
+                        new_accs[flat] = _emit_mma(
+                            b, op, a_rows[mi], b_cols[ni], new_accs[flat]
+                        )
                     flat += 1
                 if after_first_row is not None and kk == k_atoms - 1 and mi == 0:
                     after_first_row()
@@ -2845,11 +2994,30 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         def _other(p):
             return b.sub(c1, p) if isinstance(p, Value) else b.const_i32(1 - p)
 
+        # EXPERIMENT (uncommitted, diagnostic only, WRONG RESULTS): bound the
+        # cost of the K-loop rendezvous. ROCKE_EXP_NO_KBARRIER=1 drops every
+        # split-barrier signal/wait of this loop (each wave still waits for its
+        # own TDM fills); =2 also drops those TENSORcnt waits; =3 (compute
+        # floor) also drops the in-loop TDM refills, so after one prologue
+        # rendezvous the loop is only LDS fragment reads and WMMAs.
+        import os as _os_nokb
+
+        _nokb = _os_nokb.environ.get("ROCKE_EXP_NO_KBARRIER", "")
+
         def _signal() -> None:
-            _tdm_signal(0)
+            if not _nokb:
+                _tdm_signal(0)
+                return
+            b.s_waitcnt(lgkmcnt=0)
+            if _nokb == "1":
+                b.s_wait_tensorcnt(0)
+            b.sched_barrier(0)
 
         def _wait() -> None:
-            b.s_barrier_wait(_WG_WAIT)
+            if not _nokb:
+                b.s_barrier_wait(_WG_WAIT)
+            else:
+                b.sched_barrier(0)
 
         def _top_wait(p) -> None:
             # The pair owning the other half already consumed this phase when
@@ -2859,7 +3027,9 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
 
         def _refill(p, k_cur, refill: bool) -> None:
             with b.scf_if(b.cmp_eq(pair, _parity(p))):
-                if refill:
+                if refill and _nokb == "3":
+                    b.sched_barrier(0)
+                elif refill:
                     emit_load_phase(
                         A_smem,
                         B_smem,
@@ -2885,9 +3055,14 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         # prologue phase here, as if it had refilled half 1 after tile -1.
         emit_load_phase(A_smem, B_smem, k_lo, lds_parity=0)
         emit_load_phase(A_smem, B_smem, b.add(k_lo, c_block_k), lds_parity=1)
-        _tdm_publish(0)
-        with b.scf_if(b.cmp_eq(pair, c1)):
-            _wait()
+        if not _nokb:
+            _tdm_publish(0)
+            with b.scf_if(b.cmp_eq(pair, c1)):
+                _wait()
+        elif _nokb == "1":
+            b.s_wait_tensorcnt(0)
+        elif _nokb == "3":
+            _tdm_drain()
 
         # The loop runs an even number of tiles so every parity is static (a
         # runtime-parity tail spills the steady state at the 256-VGPR budget).
@@ -3136,11 +3311,46 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 fused_epilogue=fused_ep,
             )
 
+    # EXPERIMENT (uncommitted, diagnostic): ROCKE_EXP_CLK=1 stamps each wave's
+    # shader-cycle and realtime counters at start and after the epilogue; lane 0
+    # stores (cyc0, rt0, cyc1, rt1) as i64 past C's M*N elements (the caller
+    # oversizes C). Slot = ((block_y * 1024 + block_x) * waves + wave) * 4.
+    import os as _os_clk
+
+    _clk = bool(_os_clk.environ.get("ROCKE_EXP_CLK"))
+    from ...core.ir import I64
+
+    def _stamp():
+        cyc = b.inline_asm("s_get_shader_cycles_u64 $0", "=s", [], result_type=I64)
+        rt = b.inline_asm(
+            "s_sendmsg_rtn_b64 $0, sendmsg(MSG_RTN_GET_REALTIME)\n\ts_wait_kmcnt 0x0",
+            "=s",
+            [],
+            result_type=I64,
+        )
+        return cyc, rt
+
+    if _clk:
+        _c0, _r0 = _stamp()
+
     if do_work_cond is None:
         emit_compute_and_epilogue()
     else:
         with b.scf_if(do_work_cond):
             emit_compute_and_epilogue()
+
+    if _clk:
+        _c1, _r1 = _stamp()
+        _tid = b.thread_id_x()
+        _waves = spec.block_size // spec.wave_size
+        _wave = b.to_sgpr_u32(b.div(_tid, b.const_i32(spec.wave_size)))
+        _wg = b.add(b.mul(b.block_id_y(), b.const_i32(1024)), b.block_id_x())
+        _slot = b.mul(b.add(b.mul(_wg, b.const_i32(_waves)), _wave), b.const_i32(4))
+        # C is 2-byte storage: M*N elements = M*N/4 i64 slots.
+        _base = b.add(b.div(b.mul(M, N), b.const_i32(4)), _slot)
+        with b.scf_if(b.cmp_eq(b.mod(_tid, b.const_i32(spec.wave_size)), c0)):
+            for _j, _v in enumerate((_c0, _r0, _c1, _r1)):
+                b.global_store(C, b.add(_base, b.const_i32(_j)), _v, align=8)
 
     return b.kernel
 
