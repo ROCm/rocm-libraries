@@ -64,10 +64,6 @@ jobs:
         id: matrix
         run: |
           architectures='{
-            "gfx942": {
-              "runs_on": "linux-gfx942-1gpu-ccs-csp-ossci-rocm",
-              "components": ["hipBLASLt", "hipSPARSELt"]
-            },
             "gfx950": {
               "runs_on": "linux-gfx950-1gpu-ccs-ossci-rocm",
               "components": ["hipBLASLt", "hipSPARSELt"]
