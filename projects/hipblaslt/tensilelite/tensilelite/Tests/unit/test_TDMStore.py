@@ -54,7 +54,6 @@ def _state(**overrides):
   state = {
     "TDMStoreInst": 2,
     "ISA": (12, 5, 0),
-    "BufferStore": True,
     "TileProcessingStrategy": "None",
     "WorkAssignment": "StaticGrid",
     "StreamKAtomic": 0,
@@ -165,7 +164,6 @@ _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
   ({"DestDataType": DataType("i8")}, _OUTPUT),
   ({"DestDataType": DataType("d")}, _OUTPUT),
   ({"DestDataType": DataType("c")}, _OUTPUT),
-  ({"BufferStore": False}, "TDMStoreInst requires BufferStore"),
   ({"GlobalSplitU": 2}, "TDMStoreInst requires GlobalSplitU=1 or -1"),
   (dict(_STREAMK, StreamKAtomic=1), _ATOMIC_SK),
   ({"UseSubtileImpl": True}, "TDMStoreInst does not support UseSubtileImpl"),
