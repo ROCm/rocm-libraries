@@ -276,6 +276,29 @@ struct K1AtomMfmaF32 : K1Mfma // v_mfma_f32_16x16x4_f32: gfx908+
     }
 };
 
+/// xf32 operands rounded to nearest-even TF32 (10 mantissa bits) before the MFMA, which itself
+/// would truncate (a bias toward zero); NaN stays NaN (quiet), inf stays inf. As hipBLASLt (#9176)
+/// and NVIDIA's cvt.rna.tf32.f32 do.
+__device__ inline k1f<2> k1Tf32(k1f<2> v)
+{
+    k1f<2> r;
+#pragma unroll
+    for(int i = 0; i < 2; ++i)
+    {
+        unsigned u = __builtin_bit_cast(unsigned, v[i]);
+        if((u & 0x7f800000u) == 0x7f800000u)
+        {
+            u |= (u & 0x7fffffu) != 0 ? 0x400000u : 0u;
+        }
+        else
+        {
+            u += 0xfffu + ((u >> 13) & 1u);
+        }
+        r[i] = __builtin_bit_cast(float, u & 0xffffe000u);
+    }
+    return r;
+}
+
 struct K1AtomMfmaXf32 : K1Mfma // v_mfma_f32_16x16x8_xf32: gfx942 only
 {
     static constexpr int KA = 8, KPL = 2;
@@ -284,7 +307,7 @@ struct K1AtomMfmaXf32 : K1Mfma // v_mfma_f32_16x16x8_xf32: gfx942 only
     __device__ static acc mma(frag a, frag b, acc c)
     {
 #if defined(__gfx942__)
-        return __builtin_amdgcn_mfma_f32_16x16x8_xf32(a, b, c, 0, 0, 0);
+        return __builtin_amdgcn_mfma_f32_16x16x8_xf32(k1Tf32(a), k1Tf32(b), c, 0, 0, 0);
 #else
         __builtin_trap();
         return c;
@@ -385,7 +408,7 @@ struct K1Mfma32
 #define K1_HAS_MFMA_BF16_908 0
 #endif
 #if defined(__gfx942__)
-#define K1_CALL_32XF32 __builtin_amdgcn_mfma_f32_32x32x4_xf32(a, b, c, 0, 0, 0)
+#define K1_CALL_32XF32 __builtin_amdgcn_mfma_f32_32x32x4_xf32(k1Tf32(a), k1Tf32(b), c, 0, 0, 0)
 #define K1_HAS_XF32 1
 #else
 #define K1_CALL_32XF32 c
