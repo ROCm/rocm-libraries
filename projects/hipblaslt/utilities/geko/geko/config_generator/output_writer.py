@@ -275,6 +275,15 @@ echo " ---- $NAME Done!"
 """
 
 
+def shell_word(path: str | os.PathLike[str]) -> str:
+    """Quote a path as one argument of the generated POSIX shell scripts.
+
+    These scripts run under bash, including Git Bash on Windows. Quoting keeps
+    spaces, apostrophes and Windows backslashes intact for the invoked program.
+    """
+    return shlex.quote(os.fspath(path))
+
+
 def write_run_script(
     filepath: str | Path,
     entity_name: str,
@@ -296,10 +305,10 @@ def write_run_script(
     environment = ""
     if client_path:
         client = Path(client_path).resolve()
-        python = shlex.quote(sys.executable)
+        python = shell_word(sys.executable)
         environment = (
             f"{python} -m tensilelite_configure_client --ensure-client "
-            f"{shlex.quote(str(client))} && "
+            f"{shell_word(client)} && "
         )
         command = f"{python} -m tensilelite run"
 
