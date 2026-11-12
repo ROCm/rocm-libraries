@@ -452,6 +452,9 @@ def load_config(path: Path) -> IngestorConfig:
         reduction=dict(raw.get("reduction") or {}),
         slots=slots,
     )
+    config.engine.trained_catalog_sha256 = _load_trained_catalog_sha256(
+        engine_raw, config.engine.heuristics
+    )
 
     _validate_config(config)
 
@@ -1422,6 +1425,35 @@ def _require_config_shapes(raw: dict) -> None:
             _require_mapping(pack_raw["kernel_template"], f"{where} kernel_template")
 
 
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+
+
+def _load_trained_catalog_sha256(engine_raw: dict, heuristics: dict) -> dict:
+    """Read ``engine.trained_catalog_sha256``: arch -> the `tools/catalog_fingerprint.py`
+    hash of the catalog the ``engine.heuristics.sort_kernel_catalog`` models bound under
+    that arch were trained on (tools/catalog_fingerprint.py prints it). When set, its keys must be
+    exactly those arch keys, so every bound ranker's catalog is gated. Absent is ``{}``,
+    which gates nothing."""
+    raw = engine_raw.get("trained_catalog_sha256")
+    if raw is None:
+        return {}
+    scope = "engine.trained_catalog_sha256"
+    trained = set(heuristics.get("sort_kernel_catalog", {}))
+    _require_mapping(raw, scope)
+    if set(raw) != trained:
+        raise ConfigError(
+            f"{scope} keys {sorted(raw)} must equal the arch keys bound under "
+            f"engine.heuristics.sort_kernel_catalog ({sorted(trained)})."
+        )
+    for arch, digest in raw.items():
+        if not isinstance(digest, str) or not _SHA256.fullmatch(digest):
+            raise ConfigError(
+                f"{scope}.{arch} must be 64 lowercase hex digits "
+                f"(tools/catalog_fingerprint.py); got {digest!r}."
+            )
+    return dict(raw)
+
+
 #: Every key each level of the config understands. Closed on purpose -- see
 #: `_reject_unknown_keys`.
 _KNOWN_TOP = frozenset(
@@ -1451,6 +1483,7 @@ _KNOWN_ENGINE = frozenset(
         "shared_workspace",
         "slug",
         "heuristics",
+        "trained_catalog_sha256",
     }
 )
 #: RFC 0021 §4's per-slot selection members, plus the slot's own ``specialization``.
