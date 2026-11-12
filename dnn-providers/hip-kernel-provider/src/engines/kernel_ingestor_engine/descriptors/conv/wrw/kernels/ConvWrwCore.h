@@ -1570,9 +1570,20 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
     };
     auto issue = [&](bool live) {
         live = live && n < a.n;
-        // Image n's buffers: their batch strides bound them (32-bit offsets within).
-        const k3i4 yr = k3Rsrc4(static_cast<const T*>(a.dy) + n * ys0, a.yImage * sizeof(T));
-        const k3i4 xr = k3Rsrc4(static_cast<const T*>(a.x) + n * xs0, a.xImage * sizeof(T));
+        // Image n's buffers: their batch strides bound them (32-bit offsets within). With
+        // block-based buffers (CONV_K3_PB, images past the 32-bit range) each step's buffers
+        // start at the first element the block can read in it (its first channel, the output
+        // row's first reachable x row and column) and span the host's window (xImage, yImage).
+        long long yOrg = 0, xOrg = 0;
+        if constexpr(CONV_K3_PB != 0)
+        {
+            const int id0 = max(od * a.sd - a.pd, 0), ih0 = max(oh * a.sh - a.ph, 0);
+            const int iw0 = max(chunk * BQ * a.sw - a.pw, 0);
+            yOrg = (g * kg + k0) * ys1 + od * ys2 + oh * ys3 + chunk * BQ * ys4;
+            xOrg = (g * cg + c0) * xs1 + id0 * xs2 + ih0 * xs3 + iw0 * xs4;
+        }
+        const k3i4 yr = k3Rsrc4(static_cast<const T*>(a.dy) + n * ys0 + yOrg, a.yImage * sizeof(T));
+        const k3i4 xr = k3Rsrc4(static_cast<const T*>(a.x) + n * xs0 + xOrg, a.xImage * sizeof(T));
         if constexpr(CL)
         {
 #pragma unroll
@@ -1586,7 +1597,8 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
                 {
                     const int ow = chunk * BQ + qg * KW + w;
                     const bool ok = live && u < A_UNITS && ow < a.wo && k < kg;
-                    const long long off = (g * kg + k) * ys1 + od * ys2 + oh * ys3 + ow * ys4;
+                    const long long off
+                        = (g * kg + k) * ys1 + od * ys2 + oh * ys3 + ow * ys4 - yOrg;
                     k3Load(ra[p * KW + w],
                            yr,
                            ok ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
@@ -1610,7 +1622,8 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
                     {
                         const int iw = chunk * BQ + qg * KW + w + tapW[0];
                         const bool ok = rowOk && iw >= 0 && iw < a.wi;
-                        const long long off = (g * cg + c) * xs1 + id * xs2 + ih * xs3 + iw * xs4;
+                        const long long off
+                            = (g * cg + c) * xs1 + id * xs2 + ih * xs3 + iw * xs4 - xOrg;
                         k3Load(rb[p * KW + w],
                                xr,
                                ok ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
@@ -1632,7 +1645,8 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
                     const int ow = chunk * BQ + qg * KW + w;
                     const int iw = ow * a.sw + dW;
                     const bool ok = rowOk && ow < a.wo && iw >= 0 && iw < a.wi;
-                    const long long off = (g * cg + c) * xs1 + id * xs2 + ih * xs3 + iw * xs4;
+                    const long long off
+                        = (g * cg + c) * xs1 + id * xs2 + ih * xs3 + iw * xs4 - xOrg;
                     k3Load(rb[p * KW + w],
                            xr,
                            ok ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
@@ -1648,7 +1662,7 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
         {
             const int k = k0 + row0 + p * ROWS;
             const bool ok = qOk && k < kg;
-            const long long off = (g * kg + k) * ys1 + yPos;
+            const long long off = (g * kg + k) * ys1 + yPos - yOrg;
             k3Load(ra[p], yr, ok ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
         }
 #pragma unroll
@@ -1662,7 +1676,7 @@ __device__ K3_LOOP_INLINE void k3WrwGeneric(const K3Args& a)
             const int id = od * a.sd + dD, ih = oh * a.sh + dH, iw = ow * a.sw + dW;
             const bool ok = qOk && tok && c < cg && id >= 0 && id < a.di && ih >= 0 && ih < a.hi
                             && iw >= 0 && iw < a.wi;
-            const long long off = (g * cg + c) * xs1 + id * xs2 + ih * xs3 + iw * xs4;
+            const long long off = (g * cg + c) * xs1 + id * xs2 + ih * xs3 + iw * xs4 - xOrg;
             k3Load(rb[p], xr, ok ? static_cast<unsigned>(off) * sizeof(T) : K1_OUT_OF_RANGE);
         }
     };

@@ -531,6 +531,16 @@ std::vector<DeviceCase> deviceCases()
     generic("GenericPaddedChannelsNhwc",
             conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true),
             {10 * 12 * 32, 1, 12 * 32, 32});
+    // One channels-last x image of 2^30 elements (2 GiB in 16-bit, 4 GiB in fp32): the generic
+    // loop's block-based buffers (pb 1), rebased each step. 1x1 stride 4 keeps the CPU
+    // reference short.
+    {
+        DeviceCase largeCl{
+            "LargeImageGenericBlockBuffersNhwc",
+            conv(16384, 8, {256, 256}, {1, 1}, {0, 0}, {0, 0}, {4, 4}, {1, 1}, true, 1, 1)};
+        largeCl.someArchs = true;
+        cases.push_back(largeCl);
+    }
     // Positions 26 apart: not whole vectors, channels-last elements.
     generic("GenericPaddedChannelsNhwcElements",
             conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true),

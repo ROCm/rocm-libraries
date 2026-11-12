@@ -398,7 +398,7 @@ def valid(c, dtype, fma16=False):
             and rows > 0
             and c["bk"] % rows == 0
             and c["bc"] % rows == 0
-            and c["align"] == c["ns"] == c["pb"] == 0
+            and c["align"] == c["ns"] == 0
         )
     elif c["layout"] == CF:
         ok = ok and c["bq"] % c["vec"] == 0 and (fma or c["vec"] % c["sw"] == 0)
@@ -1136,6 +1136,8 @@ def build_generic():
                 c = C(atom, 8, lay, tile, 0, 0, wx, taps, 16 // eb(dtype), xcd, 0, 0)
                 if valid(c, dtype):
                     CATALOG[dtype].extend(with_bpu(c))
+                    # Its block-based buffer twin: images past the 32-bit buffer range.
+                    CATALOG[dtype].extend(with_bpu(dict(c, pb=1)))
                 else:
                     dropped += 1
     return dropped
@@ -1146,20 +1148,18 @@ SPEC_KIND = {0: "R", 6: "C", 1: "P", 2: "G", 5: "D"}
 
 def spec_of(g, cfgs):
     """The specialized classes generic config g declines: every matrix-core config of the dtype
-    (the K3Tiles rows and rings, small-C rows, the DMA ring and the direct loop; not the FMA
-    loops, packed rows (narrow outputs only) or block-based buffers) whose atom runs on one of
-    g's archs, as "<atom_id><kind><layout>.<s>.<sw>.<dw>.<fr>" keys (ConvWrwProblem.hpp).
+    (the K3Tiles rows and rings, small-C rows, the DMA ring and the direct loop, and the
+    block-based buffer forms of rows, rings and small-C rows, in lower case; not the FMA loops
+    or packed rows (narrow outputs only)) whose atom runs on one of g's archs, as
+    "<atom_id><kind><layout>.<s>.<sw>.<dw>.<fr>" keys (ConvWrwProblem.hpp).
     """
     keys = set()
     for c in cfgs:
-        if (
-            c["loop"] not in SPEC_KIND
-            or c["pb"]
-            or not set(archs_of(c)) & set(archs_of(g))
-        ):
+        if c["loop"] not in SPEC_KIND or not set(archs_of(c)) & set(archs_of(g)):
             continue
         kind = "U" if c["loop"] == 1 and c["align"] == 2 else SPEC_KIND[c["loop"]]
-        fr = 0 if kind in "RC" else c["fr"]
+        kind = kind.lower() if c["pb"] else kind
+        fr = 0 if kind.upper() in "RC" else c["fr"]
         keys.add(f"{c['atom_id']}{kind}{c['layout']}.{c['s']}.{c['sw']}.{c['dw']}.{fr}")
     return ";".join(sorted(keys))
 
