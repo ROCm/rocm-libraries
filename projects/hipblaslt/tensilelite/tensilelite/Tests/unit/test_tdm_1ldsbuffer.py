@@ -86,3 +86,11 @@ def test_tdm_rejects_1ldsbuffer_1(tmp_path, monkeypatch, capsys, prefetchGlobalR
                             PrefetchGlobalRead=prefetchGlobalRead, **{"1LDSBuffer": 1})
     assert not sols
     assert _REJECT_REASON in rejects
+
+
+def test_tdm_rejects_1ldsbuffer_forced_by_sia2(tmp_path, monkeypatch, capsys):
+    # SIA2 forces 1LDSBuffer=1 in depthUIteration, after the early TDM check, so
+    # the reject must run on the final value.
+    sols, rejects = _derive(tmp_path, monkeypatch, capsys, ScheduleIterAlg=2, PrefetchGlobalRead=2)
+    assert not sols
+    assert _REJECT_REASON in rejects
