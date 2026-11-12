@@ -1059,6 +1059,18 @@ void ExpectFp8Sched(const std::string& kernel_name, bool is_v_rowmajor)
         EXPECT_NE(kernel_name.find("qr_tdm_fp8_sched"), std::string::npos) << kernel_name;
 }
 
+// Head dims qr_tdm_fp8_sched does not cover run on qr_tdm.
+bool ExpectsFp8QrTdm(bool is_v_rowmajor) { return ExpectsFp8Sched(is_v_rowmajor); }
+
+void ExpectFp8QrTdm(const std::string& kernel_name, bool is_v_rowmajor)
+{
+    if(ExpectsFp8QrTdm(is_v_rowmajor))
+    {
+        EXPECT_NE(kernel_name.find("_qr_tdm_"), std::string::npos) << kernel_name;
+        EXPECT_EQ(kernel_name.find("qr_tdm_fp8_sched"), std::string::npos) << kernel_name;
+    }
+}
+
 // Unlike CHECK_RESULT, a missing instance fails wherever qr_tdm_fp8_sched is expected.
 #define CHECK_FP8_SCHED_RESULT(result, is_v_rowmajor)                           \
     do                                                                          \
@@ -1551,7 +1563,10 @@ class QuantScaleHdim64 : public TestWithParam<QuantScaleHdimParam>
 {
 };
 
-void RunQuantScaleHdim(int hdim, const QuantScaleHdimParam& param, int hdim_v = -1)
+void RunQuantScaleHdim(int hdim,
+                       const QuantScaleHdimParam& param,
+                       int hdim_v  = -1,
+                       bool qr_tdm = false)
 {
     auto [mode, qscale, lse, dims]                                                  = param;
     auto [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str, bias_str, init_sink] = dims;
@@ -1600,6 +1615,14 @@ void RunQuantScaleHdim(int hdim, const QuantScaleHdimParam& param, int hdim_v = 
         stream_config,
         std::nullopt,
         &kernel_name);
+    if(qr_tdm)
+    {
+        if(result == fwd_result::no_instance && ExpectsFp8QrTdm(is_v_rowmajor))
+            FAIL() << "No qr_tdm instance for current parameters";
+        CHECK_RESULT(result);
+        ExpectFp8QrTdm(kernel_name, is_v_rowmajor);
+        return;
+    }
     CHECK_FP8_SCHED_RESULT(result, is_v_rowmajor);
     ExpectFp8Sched(kernel_name, is_v_rowmajor);
 }
@@ -1654,6 +1677,40 @@ INSTANTIATE_TEST_SUITE_P(
                    std::tuple{1, 2, -1, 300, 512, "0", "n", 0})));         // MHA, key tile multiple
 
 TEST_P(QuantScaleHdim256, DataTypeConfig) { RunQuantScaleHdim(256, GetParam()); }
+
+// Head dims qr_tdm_fp8_sched does not cover (32 / 96 / 160 stored as 64 / 128 / 192, and 512) run
+// on qr_tdm, with the rows of head dim 64.
+class QuantScaleQrTdmHdim : public TestWithParam<std::tuple<int, QuantScaleHdimParam>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(
+    TestCkTileFmhaFwd,
+    QuantScaleQrTdmHdim,
+    Combine(Values(32, 96, 160, 512),
+            Combine(ModeValues,
+                    QScaleValues,
+                    Values(false, true),                                       // lse
+                    Values(std::tuple{2, 2, 1, 55, 256, "0", "n", 0},          // GQA, short query
+                           std::tuple{1, 3, -1, 300, 129, "0", "n", 0},        // query/key tails
+                           std::tuple{2, 1, -1, 256, 256, "1", "n", 0},        // causal
+                           std::tuple{1, 2, 1, 256, 700, "t:128,30", "n", 0},  // sliding window
+                           std::tuple{2, 4, 1, 1024, 1024, "t:127,0", "n", 1}, // gpt-oss
+                           std::tuple{2, 4, 2, 1024, 1024, "t:128,30,512", "n", 1}, // sink tokens
+                           std::tuple{1, 2, -1, 1000, 300, "b", "n", 1}, // sink logit, empty rows
+                           std::tuple{2, 2, 1, 300, 1000, "0", "e", 0},  // elementwise bias
+                           std::tuple{1, 2, -1, 256, 700, "t", "e", 1}, // bias, mask and sink logit
+                           std::tuple{1, 2, 1, 300, 1000, "0", "n", 1}, // sink logit without a mask
+                           std::tuple{1, 3, -1, 300, 129, "0", "e", 1}, // bias and sink logit
+                           std::tuple{1, 3, -1, 500, 700, "b:128,30", "e", 0},     // bias, window
+                           std::tuple{1, 2, 1, 256, 1000, "b:128,30,200", "e", 1}, // sink tokens
+                           std::tuple{1, 2, -1, 300, 512, "0", "n", 0}))));        // MHA
+
+TEST_P(QuantScaleQrTdmHdim, DataTypeConfig)
+{
+    const auto& [hdim, param] = GetParam();
+    RunQuantScaleHdim(hdim, param, -1, true);
+}
 
 // Decode-length queries in batch mode on every head dim, GQA and MHA.
 class QuantScaleShortQuery
