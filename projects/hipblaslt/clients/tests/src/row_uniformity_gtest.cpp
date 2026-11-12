@@ -1596,6 +1596,119 @@ namespace
             return std::string(info.param.name);
         });
 
+    struct MXFp6SelectionCase
+    {
+        const char* name;
+        hipDataType type;
+        int64_t     k;
+        bool        tiledB;
+        float       alpha;
+        float       beta;
+        bool        hasKernel;
+    };
+
+    class RowUniformityMXFp6Selection_pre_checkin
+        : public ::testing::TestWithParam<MXFp6SelectionCase>
+    {
+    };
+
+    // The kernels do not bound their loads and stores, so only their predicates keep
+    // another problem away from them: a problem one predicate rejects gets no solution.
+    // Nothing is launched.
+    TEST_P(RowUniformityMXFp6Selection_pre_checkin, OnlyRegisteredProblemsHaveASolution)
+    {
+        const MXFp6SelectionCase& c = GetParam();
+        constexpr int64_t         m = 4096;
+        constexpr int64_t         n = 4096;
+
+        if(!gpuAvailable())
+            GTEST_SKIP() << "No GPU available";
+        int device = 0;
+        int chipId = 0;
+        if(gpuArchName().rfind("gfx950", 0) != 0 || hipGetDevice(&device) != hipSuccess
+           || hipDeviceGetAttribute(&chipId, hipDeviceAttributePciChipId, device) != hipSuccess
+           || chipId != 0x75a3)
+            GTEST_SKIP() << "The MXFP6 128x4 kernels are registered for gfx950 chip 0x75a3 only";
+
+        void*             storage = nullptr;
+        hipblasLtHandle_t handle  = nullptr;
+        ASSERT_EQ(hipMalloc(&storage, 256), hipSuccess);
+        ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+
+        hipblaslt_ext::GemmProblemType problemType(
+            HIPBLAS_OP_T, HIPBLAS_OP_N, c.type, c.type, HIP_R_16BF, HIP_R_16BF, HIPBLAS_COMPUTE_32F);
+        problemType.setOrderA(HIPBLASLT_ORDER_COL256_R128_EXT);
+        if(c.tiledB)
+            problemType.setOrderB(HIPBLASLT_ORDER_COL256_R128_EXT);
+        hipblaslt_ext::GemmEpilogue epilogue;
+        epilogue.setScalingAType(HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT);
+        epilogue.setScalingBType(HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT);
+        hipblaslt_ext::GemmInputs inputs;
+        inputs.setA(storage);
+        inputs.setB(storage);
+        inputs.setC(storage);
+        inputs.setD(storage);
+        inputs.setAlpha(&c.alpha);
+        inputs.setBeta(&c.beta);
+        inputs.setScaleA(storage);
+        inputs.setScaleB(storage);
+
+        hipblaslt_ext::Gemm gemm(
+            handle, HIPBLAS_OP_T, HIPBLAS_OP_N, c.type, c.type, HIP_R_16BF, HIP_R_16BF, HIPBLAS_COMPUTE_32F);
+        hipblaslt_ext::GemmPreference preference;
+        preference.setMaxWorkspaceBytes(kWorkspaceBytes);
+        std::vector<hipblasLtMatmulHeuristicResult_t> picks;
+        EXPECT_EQ(gemm.setProblem(m,
+                                  n,
+                                  c.k,
+                                  1,
+                                  c.k,
+                                  c.k,
+                                  m,
+                                  m,
+                                  c.k * m,
+                                  c.k * n,
+                                  m * n,
+                                  m * n,
+                                  epilogue,
+                                  inputs,
+                                  problemType),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(gemm.algoGetHeuristic(8, preference, picks), HIPBLAS_STATUS_SUCCESS);
+        if(c.hasKernel)
+        {
+            ASSERT_FALSE(picks.empty());
+            EXPECT_EQ(hipblaslt_ext::getSolutionNameFromAlgo(handle, picks[0].algo).rfind("rocke_", 0),
+                      0u);
+        }
+        else
+        {
+            for(auto& pick : picks)
+                ADD_FAILURE() << "Unexpected solution "
+                              << hipblaslt_ext::getSolutionNameFromAlgo(handle, pick.algo);
+        }
+
+        EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(hipFree(storage), hipSuccess);
+    }
+
+    INSTANTIATE_TEST_SUITE_P(
+        RowUniformity,
+        RowUniformityMXFp6Selection_pre_checkin,
+        ::testing::Values(
+            MXFp6SelectionCase{"E2M3_K65536", HIP_R_6F_E2M3, 65536, true, 1.0f, 0.0f, true},
+            MXFp6SelectionCase{"E2M3_K131072", HIP_R_6F_E2M3, 131072, true, 1.0f, 0.0f, false},
+            MXFp6SelectionCase{"E2M3_K32768", HIP_R_6F_E2M3, 32768, true, 1.0f, 0.0f, false},
+            MXFp6SelectionCase{"E2M3_K65536_Alpha2", HIP_R_6F_E2M3, 65536, true, 2.0f, 0.0f, false},
+            MXFp6SelectionCase{"E2M3_K65536_Beta1", HIP_R_6F_E2M3, 65536, true, 1.0f, 1.0f, false},
+            MXFp6SelectionCase{
+                "E3M2_K65536_CanonicalB", HIP_R_6F_E3M2, 65536, false, 1.0f, 0.0f, false},
+            MXFp6SelectionCase{
+                "E2M3_K131584_CanonicalB", HIP_R_6F_E2M3, 131584, false, 1.0f, 0.0f, false}),
+        [](const ::testing::TestParamInfo<MXFp6SelectionCase>& info) {
+            return std::string(info.param.name);
+        });
+
     // Measured non-uniform on gfx950 with the default heuristic path.
     TEST_F(RowUniformity_pre_checkin, Regression_6144x5120x8192)
     {
