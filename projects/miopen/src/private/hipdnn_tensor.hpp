@@ -35,8 +35,9 @@ struct TensorInfo
 // miopenStatusSuccess, or miopenStatusInvalidValue when a getter fails.
 miopenStatus_t ReadTensor(miopenTensorDescriptor_t desc, TensorInfo& out);
 
-// Reads the mode alone. Every mode the forwarding accepts ignores the
-// descriptor's alpha, beta and gamma.
+// Reads the mode alone and discards the descriptor's alpha, beta and gamma.
+// Only the fused convolution path calls it, and that path accepts RELU only,
+// which uses none of them. Batchnorm reads the coefficients itself.
 miopenStatus_t ReadActivationMode(miopenActivationDescriptor_t desc, miopenActivationMode_t& mode);
 
 // Exact comparison is the point: the forwarded ops can express no scaling at
