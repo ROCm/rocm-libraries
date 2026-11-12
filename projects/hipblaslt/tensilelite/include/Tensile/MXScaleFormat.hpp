@@ -13,9 +13,9 @@ namespace TensileLite
     // tiles (HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT). Append only.
     enum class MXScaleFormat : int
     {
-        NoSwizzle       = 0,
-        HostPreSwizzle  = 1,
-        InMemorySwizzle = 2,
+        NoSwizzle           = 0,
+        HostPreSwizzle      = 1,
+        InMemorySwizzle     = 2,
         HostPreSwizzle128x4 = 3,
     };
 }

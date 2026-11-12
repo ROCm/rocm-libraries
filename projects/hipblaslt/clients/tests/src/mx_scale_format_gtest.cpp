@@ -19,9 +19,9 @@ namespace
     using Need   = rocblaslt_mx_scale_need;
     using Layout = TensileLite::MXScaleFormat;
 
-    constexpr int kNoSwizzle       = static_cast<int>(Layout::NoSwizzle);
-    constexpr int kHostPreSwizzle  = static_cast<int>(Layout::HostPreSwizzle);
-    constexpr int kInMemorySwizzle = static_cast<int>(Layout::InMemorySwizzle);
+    constexpr int kNoSwizzle           = static_cast<int>(Layout::NoSwizzle);
+    constexpr int kHostPreSwizzle      = static_cast<int>(Layout::HostPreSwizzle);
+    constexpr int kInMemorySwizzle     = static_cast<int>(Layout::InMemorySwizzle);
     constexpr int kHostPreSwizzle128x4 = static_cast<int>(Layout::HostPreSwizzle128x4);
 
     TEST(MXScaleFormat_smoke, packed_scales_never_take_a_preswizzled_kernel)
@@ -70,8 +70,9 @@ namespace
             EXPECT_FALSE(rocblaslt_mx_scale_layout_ok(need, layout)) << layout;
         EXPECT_FALSE(rocblaslt_mx_scale_layout_ok(Need::Natural, kHostPreSwizzle128x4));
         EXPECT_FALSE(rocblaslt_mx_scale_layout_ok(Need::PreSwizzled, kHostPreSwizzle128x4));
-        EXPECT_EQ(rocblaslt_mx_scale_need_for(Scale::Block_32_UE8M0_128_4_EXT, Scale::Block_32_UE8M0),
-                  Need::Conflict);
+        EXPECT_EQ(
+            rocblaslt_mx_scale_need_for(Scale::Block_32_UE8M0_128_4_EXT, Scale::Block_32_UE8M0),
+            Need::Conflict);
         EXPECT_EQ(rocblaslt_mx_scale_need_for(Scale::Block_32_UE8M0_128_4_EXT,
                                               Scale::Block_32_UE8M0_32_8_EXT),
                   Need::Conflict);

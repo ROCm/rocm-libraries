@@ -16,6 +16,7 @@ from logic_corpus import needs_logic_corpus, require_logic_file
 import tensilelite.LibraryIO as L
 from tensilelite import Contractions as C
 from tensilelite.Common.ValidParameters import validParameters
+from tensilelite.CustomKernels import getCustomKernelConfig
 from tensilelite.SolutionStructs.Validators.MXScaleFormat import validateHostPreSwizzle128x4
 
 pytestmark = pytest.mark.unit
@@ -151,6 +152,30 @@ def test_host_pre_swizzle_128x4_is_handwritten_gfx950_only(fmt, handwritten, isa
     state = {"MXScaleFormat": fmt, "ISA": isa, "Valid": True}
     assert validateHostPreSwizzle128x4(state, handwritten, False) is valid
     assert state["Valid"] is valid
+
+
+def test_custom_kernel_config_keeps_host_pre_swizzle_128x4(tmp_path):
+    (tmp_path / "mx_kernel.s").write_text(
+        ".amdgpu_metadata\n"
+        "---\n"
+        "custom.config:\n"
+        "  InternalSupportParams:\n"
+        "    KernArgsVersion: 0\n"
+        "  MXScaleFormat: HostPreSwizzle128x4\n"
+        "  ProblemType: {MXBlockA: 32, MXBlockB: 32}\n"
+        "  MatrixInstruction: [16, 16, 128, 1]\n"
+        "amdhsa.kernels:\n"
+        "  - .name: mx_kernel\n"
+        "    .max_flat_workgroup_size: 64\n"
+        "    .args:\n"
+        "      - .name: D\n"
+        "        .size: 8\n"
+        "        .offset: 0\n"
+        "        .value_kind: global_buffer\n"
+        "...\n"
+    )
+    config = getCustomKernelConfig("mx_kernel", {}, str(tmp_path))
+    assert config["MXScaleFormat"] == "HostPreSwizzle128x4"
 
 
 @needs_logic_corpus
