@@ -11,6 +11,7 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_plugin_sdk/GpuGenericTargets.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 
 #include "PackedKernelSource.hpp"
 #include "TestDescriptorRoot.hpp"
@@ -116,6 +117,54 @@ TEST(TestPackedGenericArchive, ShardsCarryTheGenericArchiveExactlyWhenTheirArchI
         KpackCodeObject object;
         ASSERT_TRUE(archive.codeObject(packed.tocKey, *selected, object, error)) << error.codeName;
         EXPECT_FALSE(object.empty());
+    }
+}
+
+// HIP_KERNEL_PROVIDER_DISABLE_GENERIC_CODE_OBJECTS: an archive that serves a member only
+// through its generic entry is a miss, reported at ARCH_LOOKUP with the reason, so the caller
+// takes its miss path.
+TEST(TestPackedGenericArchive, TheOptOutTurnsAGenericOnlyArchiveIntoAMiss)
+{
+    const auto shards = packedShards();
+    ASSERT_FALSE(shards.empty()) << "no packed arch shard under " << unitKpackRoot();
+
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter disable(
+        DISABLE_GENERIC_CODE_OBJECTS_ENV, "1");
+    size_t members = 0;
+    for(const auto& shard : shards)
+    {
+        const std::string arch = shard.filename().string();
+        if(!hipdnn_plugin_sdk::genericTargetContains(GENERIC, arch))
+        {
+            continue;
+        }
+        SCOPED_TRACE(arch);
+        ++members;
+
+        PackedKernelSource packed;
+        ASSERT_NO_FATAL_FAILURE(readPackedKernelSource(shard, GENERIC_KDP, packed));
+        const std::vector<std::string> keys = archivesOf(packed.archive);
+        ASSERT_EQ(keys, std::vector<std::string>{GENERIC});
+        EXPECT_EQ(KpackModuleCache::selectArch(keys, arch), nullptr);
+
+        std::string selected;
+        try
+        {
+            static_cast<void>(readVerifiedKpackCodeObject(
+                packed.archive.string(), packed.tocKey, arch, packed.sha256, selected));
+            ADD_FAILURE() << "a generic-only archive was read with generic entries refused";
+        }
+        catch(const KpackModuleLoadFailure& failure)
+        {
+            EXPECT_EQ(failure.stage(), KpackLoadStage::ARCH_LOOKUP);
+            EXPECT_NE(std::string(failure.what()).find(DISABLE_GENERIC_CODE_OBJECTS_ENV),
+                      std::string::npos)
+                << failure.what();
+        }
+    }
+    if(members == 0)
+    {
+        GTEST_SKIP() << "no packed shard is a member of " << GENERIC;
     }
 }
 
