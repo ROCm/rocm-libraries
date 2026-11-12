@@ -28,6 +28,7 @@
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvIgemmProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvTf32Timing.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
@@ -601,6 +602,29 @@ TEST_P(TestGpuConvIgemmTf32, FloatInfinitiesNative)
 {
     SKIP_IF_NO_DEVICES();
     runCase<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::NATIVE, true);
+}
+
+/// Opt-in (K1_TF32_TIMING=<shape CSV>, forward): the best config per math form (exact, xf32,
+/// three-bf16) per shape, TF32 permitted. See ConvTf32Timing.hpp.
+TEST(TestGpuConvIgemmTiming, ByMathForm)
+{
+    SKIP_IF_NO_DEVICES();
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(
+        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
+    conv_tf32_timing::timeByForm(
+        packFor(ConvDirection::FORWARD),
+        ConvDirection::FORWARD,
+        catalog(ConvDirection::FORWARD),
+        "K1_TF32_TIMING",
+        [](const auto& kernel) {
+            if(kernel.getStringMetadata("math") == "bf16x3")
+            {
+                return std::string("bf16x3");
+            }
+            return std::string(kernel.getStringMetadata("atom").find("xf32") != std::string::npos
+                                   ? "xf32"
+                                   : "exact");
+        });
 }
 
 INSTANTIATE_TEST_SUITE_P(,

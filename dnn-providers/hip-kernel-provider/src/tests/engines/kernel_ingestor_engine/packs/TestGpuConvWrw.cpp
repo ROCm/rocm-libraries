@@ -32,6 +32,7 @@
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvIgemmProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvTf32Timing.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvWrwProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
@@ -803,6 +804,19 @@ std::vector<DeviceCase> threeBf16Cases()
         throw std::logic_error("a three-bf16 case names no device case");
     }
     return cases;
+}
+
+/// Opt-in (K3_TF32_TIMING=<shape CSV>): the best exact fp32 and the best three-bf16 config per
+/// shape, TF32 permitted. See ConvTf32Timing.hpp.
+TEST(TestGpuConvWrwTiming, ExactAgainstThreeBf16)
+{
+    SKIP_IF_NO_DEVICES();
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(
+        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
+    conv_tf32_timing::timeByForm(
+        PACK, ConvDirection::BACKWARD_WEIGHTS, catalog(), "K3_TF32_TIMING", [](const auto& kernel) {
+            return std::string(kernel.getIntMetadata("math") == 1 ? "bf16x3" : "exact");
+        });
 }
 
 INSTANTIATE_TEST_SUITE_P(,
