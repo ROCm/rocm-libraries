@@ -1869,7 +1869,16 @@ impl<'a> Isel<'a> {
             // rustgemm: the AGPR pin is an identity here (the allocator picks the file).
             InlineAsmIdentity if op.asm_pin() == Some('a') => self.agpr_pin(op)?,
             InlineAsmIdentity if op.asm_pin() == Some('s') => {
-                // The SGPR pin (`device_ops.fresh_s`): the value in an SGPR, unchanged.
+                // The SGPR pin (`device_ops.fresh_s`): the value in an SGPR, unchanged; a pointer in an SGPR pair.
+                if let Type::Ptr(_) = self.k.ty(op.operands[0]) {
+                    let (lo, hi) = self.d(op.operands[0])?;
+                    if self.is_v(lo) || self.is_v(hi) {
+                        return Err(unsupported("an \"=s,0\" pin of a pointer in VGPRs"));
+                    }
+                    let (lo, hi) = (self.to_s(lo), self.to_s(hi));
+                    self.set(res.unwrap(), Val::D(lo, hi));
+                    return Ok(());
+                }
                 let x = self.w(op.operands[0])?;
                 if self.is_v(x) {
                     return Err(unsupported("an \"=s,0\" pin of a value in VGPRs"));
@@ -7310,6 +7319,31 @@ mod convmem_tests {
     fn text_with(text: &str, from: &str, to: &str) -> String {
         assert!(text.contains(from));
         text.replacen(from, to, 1)
+    }
+
+    /// An `"=s,0"` pin of a pointer (the split-dQ kernels' slab pointers) keeps the pair in SGPRs and emits nothing.
+    #[test]
+    fn an_sgpr_pin_of_a_pointer_is_an_identity() {
+        let params = "    %X : ptr<i32,global>\n    %Y : ptr<i32,global>\n";
+        let body = r#"    %p : ptr<i32,global> = tile.inline_asm ( %X ) { constraints = s:"=s,0", convergent = b:false, sideeffect = b:false, template = s:"" }
+    %x : i32 = memref.global_load_typed ( %p, %tid ) { align = i:4, elem_type = s:"i32" }
+    memref.global_store_typed ( %Y, %tid, %x ) { align = i:4, elem_type = s:"i32" }
+"#;
+        let plain = body.replace("%p : ptr<i32,global> = tile.inline_asm ( %X ) { constraints = s:\"=s,0\", convergent = b:false, sideeffect = b:false, template = s:\"\" }\n", "").replace("( %p,", "( %X,");
+        let pinned = insts(&kernel(params, body));
+        let direct = insts(&kernel(params, &plain));
+        // The pin adds no instruction, and the load's base pair is in SGPRs.
+        assert_eq!(pinned.len(), direct.len());
+        let load = pinned.iter().find(|i| i.op == Opc::GLoadB32).expect("a global load");
+        assert!(load.mods & M_SADDR != 0, "{load:?}");
+        // A pointer that lives in VGPRs (an address made from a lane value) is refused.
+        let lane = r#"    %w : i64 = arith.zext ( %tid )
+    %q : ptr<i32,global> = tile.global_ptr_add ( %X, %w )
+    %p : ptr<i32,global> = tile.inline_asm ( %q ) { constraints = s:"=s,0", convergent = b:false, sideeffect = b:false, template = s:"" }
+    %x : i32 = memref.global_load_typed ( %p, %tid ) { align = i:4, elem_type = s:"i32" }
+    memref.global_store_typed ( %Y, %tid, %x ) { align = i:4, elem_type = s:"i32" }
+"#;
+        assert!(compiled(&kernel(params, lane)).is_err());
     }
 
     #[test]

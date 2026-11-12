@@ -717,8 +717,8 @@ impl Checker<'_> {
                 if res != Some(types[0]) || !matches!(types[0], Type::Scalar(s) if *s != Scalar::I1) && !matches!(types[0], Type::Ptr(_)) {
                     return Err(mismatch());
                 }
-                // An SGPR pin holds one dword (`device_ops.fresh_s`).
-                if op.asm_pin() == Some('s') && !matches!(types[0], Type::Scalar(Scalar::I32 | Scalar::F32)) {
+                // An SGPR pin holds one dword (`device_ops.fresh_s`) or a 64-bit pointer (an SGPR pair).
+                if op.asm_pin() == Some('s') && !matches!(types[0], Type::Scalar(Scalar::I32 | Scalar::F32) | Type::Ptr(_)) {
                     return Err(unsupported(format!("an \"=s,0\" pin of {:?}", types[0])));
                 }
             }
