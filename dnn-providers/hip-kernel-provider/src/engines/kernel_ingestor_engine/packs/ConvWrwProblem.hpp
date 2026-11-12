@@ -332,7 +332,8 @@ DirectPlan directPlanFor(int64_t tiles,
  * runtime (s, sw, dw 0), fr the taps a block (>= 1); layout 1 exactly for problems with
  * vectorChannels, layout 0 for the rest (any strides, read element by element); bq dividing the
  * block's threads, bk and bc whole channel rows a pass; align, ns, wq and pb 0; at most 64
- * loads a thread in flight. Declined
+ * loads a thread in flight; not for filters of at most 9 taps dilated 6 or more on a filter
+ * axis (ASPP-class, where the BLAS path wins). Declined
  * wherever a key of its spec serves the problem (specServes): a specialized config's class.
  */
 std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,

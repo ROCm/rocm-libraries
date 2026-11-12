@@ -47,9 +47,8 @@ In `CONV_WRW` the generic tier is `loop` 8. It has a runtime filter, strides and
 Measured against the BLAS path, 16-bit channels-last:
 - gfx950: 1.5-1.9x faster on 2-D 5x5/7x7 and 3-D 1x5x5.
 - gfx1201: 2.6-3.2x faster on the same shapes, and 1.7x on 1-D k3.
-- 1-D k9 and ASPP d18: 0.6-0.7x on gfx950, and 0.7-0.96x on gfx1201, so BLAS still wins there.
-
-Heuristics should rank BLAS above the generic tier for those last two shapes.
+- 1-D k9: 0.69x on gfx950 and 0.96x on gfx1201, so BLAS still wins there. Heuristics should rank BLAS above the generic tier for it.
+- ASPP-class filters (at most 9 taps, dilation 6 or more): BLAS won on every arch measured (d18 16-bit 0.6-0.7x, d6 fp32 0.6x). The generic tier declines them.
 
 ## What the knobs mean
 

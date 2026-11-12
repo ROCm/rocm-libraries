@@ -503,7 +503,7 @@ std::vector<DeviceCase> deviceCases()
                      false,
                      true});
     // The generic loop (runtime filter, strides, dilation): channels-last 16-bit widths no
-    // specialized config has (5x5, 1x9, 1x5x5, dilation 18), and strided x (padded rows: no
+    // specialized config has (5x5, 1x9, 1x5x5, dilation 4), and strided x (padded rows: no
     // packed layout) in either form.
     const auto generic
         = [&](const std::string& name, const ConvShape& shape, std::vector<int64_t> xStrides = {}) {
@@ -517,8 +517,8 @@ std::vector<DeviceCase> deviceCases()
     generic(
         "Generic1x5x5ThreeDNhwcGrouped",
         conv(32, 32, {3, 9, 11}, {1, 5, 5}, {0, 2, 2}, {0, 2, 2}, {1, 1, 1}, {1, 1, 1}, true, 2));
-    generic("GenericDilation18Nhwc",
-            conv(16, 16, {40, 40}, {3, 3}, {18, 18}, {18, 18}, {1, 1}, {18, 18}, true, 1, 1));
+    generic("GenericDilation4Nhwc",
+            conv(16, 16, {40, 40}, {3, 3}, {4, 4}, {4, 4}, {1, 1}, {4, 4}, true, 1, 1));
     generic("Generic7x7Stride2Nhwc",
             conv(24, 24, {19, 23}, {7, 7}, {3, 3}, {3, 3}, {2, 2}, {1, 1}, true));
     // 24 channels of 10 x 12, rows 16 apart (channels-first elements).

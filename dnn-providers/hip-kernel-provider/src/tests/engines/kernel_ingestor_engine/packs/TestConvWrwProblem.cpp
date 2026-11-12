@@ -2558,6 +2558,29 @@ TEST(TestConvWrwLaunch, TheGenericLoopReadsTheGraphsStridesAndSpans)
     EXPECT_EQ(grouped->args.steps, 2 * 4 * 6);
 }
 
+TEST(TestConvWrwKernelMatch, TheGenericLoopLeavesWidelyDilatedSmallFiltersToBlas)
+{
+    const auto dilated = [](std::vector<int64_t> filter, std::vector<int64_t> dilation) {
+        auto shape = baseShape();
+        shape.input = {30, 64};
+        shape.filter = std::move(filter);
+        shape.dilation = std::move(dilation);
+        shape.prePadding = shape.postPadding = {0, 0};
+        return shape;
+    };
+    // 3x3 (9 taps): dilation 5 admits, 6 declines, on either filter axis.
+    EXPECT_TRUE(admits(genericFields(), "gfx942", dilated({3, 3}, {5, 5})));
+    EXPECT_FALSE(admits(genericFields(), "gfx942", dilated({3, 3}, {6, 6})));
+    EXPECT_FALSE(admits(genericFields(), "gfx942", dilated({3, 3}, {1, 6})));
+    EXPECT_FALSE(admits(genericFields(), "gfx942", dilated({3, 3}, {6, 1})));
+    // A dilation along a one-tap axis reaches nothing.
+    EXPECT_TRUE(admits(genericFields(), "gfx942", dilated({1, 3}, {6, 1})));
+    // 10 taps dilated 6 admit; 9 do not.
+    EXPECT_TRUE(admits(genericFields(), "gfx942", dilated({1, 10}, {1, 6})));
+    EXPECT_TRUE(admits(genericFields(), "gfx942", dilated({2, 5}, {6, 1})));
+    EXPECT_FALSE(admits(genericFields(), "gfx942", dilated({1, 9}, {1, 6})));
+}
+
 TEST(TestConvWrwKernelMatch, TheGenericLoopTakesEveryArchsMatrixAtom)
 {
     auto gfx1201 = genericClFields();

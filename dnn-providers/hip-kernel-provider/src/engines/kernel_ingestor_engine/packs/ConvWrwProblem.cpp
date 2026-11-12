@@ -42,6 +42,9 @@ constexpr int64_t MAX_PASSES = 32;
 constexpr int64_t MAX_PACK_PASSES = 64;
 /// Positions past an output row a block's chunk may reach (bq at most 512).
 constexpr int64_t CHUNK_MARGIN = 512;
+/// The generic loop declines filters of at most this many taps dilated at least this far.
+constexpr int64_t GENERIC_SPARSE_MAX_TAPS = 9;
+constexpr int64_t GENERIC_SPARSE_MIN_DILATION = 6;
 /// The reduce: 256 threads, 64 four-channel quads of dw per block.
 constexpr int64_t REDUCE_QUADS_PER_BLOCK = 64;
 /// The most splits the row reduce takes (measured on gfx942: rows win at 1 and 2 splits, tie
@@ -778,6 +781,21 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         if(config.s != 0 || config.sw != 0 || config.dw != 0 || config.fr < 1
            || threads % config.bq != 0 || config.bk % (threads / config.bq) != 0
            || config.bc % (threads / config.bq) != 0)
+        {
+            return std::nullopt;
+        }
+        // Widely dilated small filters (ASPP-class: at most 9 taps, dilation 6 or more on a
+        // filter axis): each tap gathers a far-apart window and the BLAS path won on every arch
+        // measured, so the generic loop only adds candidates there.
+        int64_t dilation = 1;
+        for(int axis = 0; axis < CONV_NAIVE_SPATIAL_DIMS; ++axis)
+        {
+            if(a.filter[axis] > 1)
+            {
+                dilation = std::max<int64_t>(dilation, a.dilation[axis]);
+            }
+        }
+        if(problem.taps <= GENERIC_SPARSE_MAX_TAPS && dilation >= GENERIC_SPARSE_MIN_DILATION)
         {
             return std::nullopt;
         }
