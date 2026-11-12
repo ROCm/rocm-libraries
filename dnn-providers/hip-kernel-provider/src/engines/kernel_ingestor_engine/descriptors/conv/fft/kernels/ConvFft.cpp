@@ -61,9 +61,19 @@ extern "C" __global__ void __launch_bounds__(CONV_FFT_TB) ConvFftDepthwise(ConvF
     fftDepthwise<CONV_FFT_T, CONV_FFT_TH, CONV_FFT_TW, CONV_FFT_PB>(a);
 }
 
+// The depthwise backward-weights kernel holds two spectra a tile; a config whose two spectra
+// exceed the 64 KiB every target has compiles it as a stub (the pack never launches it: its plan
+// declines that config), so the module's other kernels still build.
+#define CONV_FFT_SPECTRA_BYTES (CONV_FFT_PB * CONV_FFT_TH * (CONV_FFT_TW / 2 + 1) * 8)
+
 extern "C" __global__ void __launch_bounds__(CONV_FFT_TB) ConvFftDepthwiseWgrad(ConvFftArgs a)
 {
+#if 2 * CONV_FFT_SPECTRA_BYTES <= 65536
     fftDepthwiseWgrad<CONV_FFT_T, CONV_FFT_TH, CONV_FFT_TW, CONV_FFT_PB, CONV_FFT_TB>(a);
+#else
+    (void)a;
+    __builtin_trap();
+#endif
 }
 
 extern "C" __global__ void __launch_bounds__(256) ConvFftDepthwiseFold(ConvFftArgs a)
