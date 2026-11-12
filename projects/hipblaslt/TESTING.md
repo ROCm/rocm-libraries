@@ -911,9 +911,9 @@ A client test case can be limited to some architectures in its YAML:
 - **`known_bug_platforms`** in [`known_bugs.yaml`](clients/tests/data/known_bugs.yaml) is an exact,
   case-insensitive list of names without the feature suffix, so `gfx1250` and `gfx1250-strict` are
   separate entries.
-- **`require_solution_chip_id`** is a PCI chip ID, for example `0x75a3`, for a case that sets
-  `allow_no_solution: 1` because its kernels are registered for that device only. On that device a
-  missing solution fails; elsewhere it still skips.
+- **`require_solution_chip_ids`** lists up to four PCI chip IDs, for example `[0x75a0, 0x75a3]`, for
+  a case that sets `allow_no_solution: 1` because its kernels are registered for those devices only.
+  On a listed device a missing solution fails; elsewhere it still skips.
 
 For gfx1250:
 

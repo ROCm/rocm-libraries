@@ -1178,7 +1178,30 @@ namespace
         bool        tiledB;
     };
 
-    class RowUniformityMXFp6_pre_checkin : public ::testing::TestWithParam<MXFp6Case>
+    // The gfx950 chips the MXFP6 128x4 kernels are registered for: MI350X and MI355X.
+    bool onMXFp6RegisteredChip()
+    {
+        int device = 0;
+        int chipId = 0;
+        return gpuArchName().rfind("gfx950", 0) == 0 && hipGetDevice(&device) == hipSuccess
+               && hipDeviceGetAttribute(&chipId, hipDeviceAttributePciChipId, device) == hipSuccess
+               && (chipId == 0x75a0 || chipId == 0x75a3);
+    }
+
+    constexpr const char* kMXFp6ChipSkip
+        = "The MXFP6 128x4 kernels are registered for gfx950 chips 0x75a0 and 0x75a3 only";
+
+    class RowUniformityMXFp6 : public ::testing::TestWithParam<MXFp6Case>
+    {
+    protected:
+        void checkDefaultPick();
+    };
+
+    class RowUniformityMXFp6_smoke : public RowUniformityMXFp6
+    {
+    };
+
+    class RowUniformityMXFp6_pre_checkin : public RowUniformityMXFp6
     {
     };
 
@@ -1210,7 +1233,7 @@ namespace
     // A second run on the same data lowers those two blocks' scales into the small
     // range. Every partial sum is then exact in fp32 in any order, so sampled D must
     // equal the exact dot product rounded to bf16.
-    TEST_P(RowUniformityMXFp6_pre_checkin, DefaultPickIsExactAndRowUniform)
+    void RowUniformityMXFp6::checkDefaultPick()
     {
         const MXFp6Case&  c       = GetParam();
         const bool        e3m2    = c.type == HIP_R_6F_E3M2;
@@ -1230,12 +1253,8 @@ namespace
 
         if(!gpuAvailable())
             GTEST_SKIP() << "No GPU available";
-        int device = 0;
-        int chipId = 0;
-        if(gpuArchName().rfind("gfx950", 0) != 0 || hipGetDevice(&device) != hipSuccess
-           || hipDeviceGetAttribute(&chipId, hipDeviceAttributePciChipId, device) != hipSuccess
-           || chipId != 0x75a3)
-            GTEST_SKIP() << "The MXFP6 128x4 kernels are registered for gfx950 chip 0x75a3 only";
+        if(!onMXFp6RegisteredChip())
+            GTEST_SKIP() << kMXFp6ChipSkip;
 
         std::mt19937                       rng(0x6d786636u);
         std::uniform_int_distribution<int> valueOf{-4, 4};
@@ -1583,16 +1602,36 @@ namespace
         EXPECT_EQ(mismatches, 0) << "sampled outputs differ from the exact sum";
     }
 
+    TEST_P(RowUniformityMXFp6_smoke, DefaultPickIsExactAndRowUniform)
+    {
+        checkDefaultPick();
+    }
+
+    TEST_P(RowUniformityMXFp6_pre_checkin, DefaultPickIsExactAndRowUniform)
+    {
+        checkDefaultPick();
+    }
+
+    // One E2M3 case per B order in the quick tier, so every pull request on a registered
+    // chip runs a kernel of each order; the other cases run before check-in.
+    INSTANTIATE_TEST_SUITE_P(
+        RowUniformity,
+        RowUniformityMXFp6_smoke,
+        ::testing::Values(
+            MXFp6Case{"E2M3_K65536", HIP_R_6F_E2M3, 65536, "rocke_gemm_mx_e2m3_e2m3_", true},
+            MXFp6Case{
+                "E2M3_K65536_CanonicalB", HIP_R_6F_E2M3, 65536, "rocke_gemm_mx_e2m3_e2m3_", false}),
+        [](const ::testing::TestParamInfo<MXFp6Case>& info) {
+            return std::string(info.param.name);
+        });
+
     INSTANTIATE_TEST_SUITE_P(
         RowUniformity,
         RowUniformityMXFp6_pre_checkin,
         ::testing::Values(
-            MXFp6Case{"E2M3_K65536", HIP_R_6F_E2M3, 65536, "rocke_gemm_mx_e2m3_e2m3_", true},
             MXFp6Case{"E3M2_K65536", HIP_R_6F_E3M2, 65536, "rocke_gemm_mx_e3m2_e3m2_", true},
             MXFp6Case{"E2M3_K131584", HIP_R_6F_E2M3, 131584, "rocke_gemm_mx_e2m3_e2m3_", true},
-            MXFp6Case{"E3M2_K131584", HIP_R_6F_E3M2, 131584, "rocke_gemm_mx_e3m2_e3m2_", true},
-            MXFp6Case{
-                "E2M3_K65536_CanonicalB", HIP_R_6F_E2M3, 65536, "rocke_gemm_mx_e2m3_e2m3_", false}),
+            MXFp6Case{"E3M2_K131584", HIP_R_6F_E3M2, 131584, "rocke_gemm_mx_e3m2_e3m2_", true}),
         [](const ::testing::TestParamInfo<MXFp6Case>& info) {
             return std::string(info.param.name);
         });
@@ -1624,12 +1663,8 @@ namespace
 
         if(!gpuAvailable())
             GTEST_SKIP() << "No GPU available";
-        int device = 0;
-        int chipId = 0;
-        if(gpuArchName().rfind("gfx950", 0) != 0 || hipGetDevice(&device) != hipSuccess
-           || hipDeviceGetAttribute(&chipId, hipDeviceAttributePciChipId, device) != hipSuccess
-           || chipId != 0x75a3)
-            GTEST_SKIP() << "The MXFP6 128x4 kernels are registered for gfx950 chip 0x75a3 only";
+        if(!onMXFp6RegisteredChip())
+            GTEST_SKIP() << kMXFp6ChipSkip;
 
         void*             storage = nullptr;
         hipblasLtHandle_t handle  = nullptr;
@@ -1733,12 +1768,8 @@ namespace
         {
             if(!gpuAvailable())
                 GTEST_SKIP() << "No GPU available";
-            int device = 0;
-            int chipId = 0;
-            if(gpuArchName().rfind("gfx950", 0) != 0 || hipGetDevice(&device) != hipSuccess
-               || hipDeviceGetAttribute(&chipId, hipDeviceAttributePciChipId, device) != hipSuccess
-               || chipId != 0x75a3)
-                GTEST_SKIP() << "The MXFP6 128x4 kernels are registered for gfx950 chip 0x75a3 only";
+            if(!onMXFp6RegisteredChip())
+                GTEST_SKIP() << kMXFp6ChipSkip;
 
             // Sized for the registered K, the largest these cases use: 6-bit elements and
             // one scale byte per 32 elements of K.

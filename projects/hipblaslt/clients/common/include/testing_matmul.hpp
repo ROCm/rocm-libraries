@@ -5674,16 +5674,19 @@ void testing_matmul_with_bias(const Arguments& arg,
     returnedAlgoCount = heuristicResult.size();
 
     // A size-threshold sweep may reach shapes the library declines; that is a correct answer.
-    // On the chip a case names in require_solution_chip_id, a solution must exist.
+    // On a chip a case names in require_solution_chip_ids, a solution must exist.
     bool requireSolution = false;
-    if(arg.require_solution_chip_id != 0)
+    if(arg.require_solution_chip_ids[0] != 0)
     {
         int device = 0;
         int chipId = 0;
-        requireSolution = hipGetDevice(&device) == hipSuccess
-                          && hipDeviceGetAttribute(&chipId, hipDeviceAttributePciChipId, device)
-                                 == hipSuccess
-                          && chipId == arg.require_solution_chip_id;
+        if(hipGetDevice(&device) == hipSuccess
+           && hipDeviceGetAttribute(&chipId, hipDeviceAttributePciChipId, device) == hipSuccess
+           && chipId != 0)
+            requireSolution = std::find(std::begin(arg.require_solution_chip_ids),
+                                        std::end(arg.require_solution_chip_ids),
+                                        chipId)
+                              != std::end(arg.require_solution_chip_ids);
     }
     if(arg.allow_no_solution && !requireSolution && returnedAlgoCount == 0)
     {
