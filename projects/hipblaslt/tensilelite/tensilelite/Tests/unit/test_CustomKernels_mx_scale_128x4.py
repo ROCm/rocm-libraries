@@ -8,24 +8,28 @@ every problem it cannot run: the scale format and alpha == 1.
 """
 
 import copy
+import re
+from pathlib import Path
 
 import pytest
-from logic_corpus import needs_logic_corpus, require_logic_file
 
+import tensilelite.BenchmarkProblems as bp
 import tensilelite.LibraryIO as L
 from tensilelite import Contractions as C
 from tensilelite.Common.ValidParameters import validParameters
 from tensilelite.CustomKernels import getCustomKernelConfig
+from tensilelite.SolutionStructs.Problem import ProblemType
 from tensilelite.SolutionStructs.Validators.MXScaleFormat import validateHostPreSwizzle128x4
 
 pytestmark = pytest.mark.unit
 
-# A generated MX GEMM and a non-MX GEMM from the shipped corpus.
-_GENERATED_MX_LOGIC = (
-    "gfx950/gfx950/GridBased/gfx950_Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_GG_HAS_SAB_SAV"
-    "_UserArgs.yaml"
+_FIXTURES = Path(__file__).resolve().parent / "logic_yaml" / "mx_scale_format"
+# A generated MX GEMM and a non-MX GEMM, one solution each.
+_GENERATED_MX_LOGIC = _FIXTURES / (
+    "gfx950_Cijk_Alik_Bljk_F4BS_MXA32_MXB32_BH_BiasSB_GG_HAS_SAB_SAV_UserArgs.yaml"
 )
-_NON_MX_LOGIC = "gfx950/gfx950_id75a3/Equality/gfx950_Cijk_Alik_Bljk_F8F8S_BH_BiasS_HAS_SAV_UserArgs.yaml"
+_NON_MX_LOGIC = _FIXTURES / "gfx950_Cijk_Alik_Bljk_F8F8S_BH_BiasS_HAS_SAV_UserArgs.yaml"
+_INCLUDE = Path(__file__).resolve().parents[3] / "include" / "Tensile"
 
 
 def _flatten(predicate):
@@ -38,10 +42,8 @@ def _predicates(solution, tag):
     return [p.value for p in _flatten(solution.problemPredicate) if p.tag == tag]
 
 
-def _first_solution(rel, assembler, iim):
-    library = L.parseLibraryLogicFile(
-        str(require_logic_file(rel)), assembler, False, False, False, iim, False
-    )
+def _first_solution(path, assembler, iim):
+    library = L.parseLibraryLogicFile(str(path), assembler, False, False, False, iim, False)
     return library.solutions[0]
 
 
@@ -53,6 +55,24 @@ def test_scale_format_ids_are_append_only():
         "HostPreSwizzle128x4": 3,
     }
     assert validParameters["MXScaleFormat"] == ["Auto", *C.MX_SCALE_FORMAT_IDS]
+
+
+def test_scale_format_ids_match_cpp():
+    enum = re.search(
+        r"enum class MXScaleFormat : int\s*\{(.*?)\};",
+        (_INCLUDE / "MXScaleFormat.hpp").read_text(encoding="utf-8"),
+        re.S,
+    )
+    assert enum
+    assert {
+        name: int(value) for name, value in re.findall(r"(\w+)\s*=\s*(\d+)", enum.group(1))
+    } == C.MX_SCALE_FORMAT_IDS
+    first_exact = re.search(
+        r"kFirstExactFormat\s*=\s*(\d+);",
+        (_INCLUDE / "ContractionProblemPredicates.hpp").read_text(encoding="utf-8"),
+    )
+    assert first_exact
+    assert int(first_exact.group(1)) == C.MX_SCALE_FORMAT_IDS["HostPreSwizzle128x4"]
 
 
 @pytest.mark.parametrize(
@@ -85,7 +105,6 @@ def test_assert_alpha_value_is_a_valid_parameter():
     assert validParameters["AssertAlphaValue"] == [1]
 
 
-@needs_logic_corpus
 @pytest.mark.parametrize(
     "fmt, expected", [(None, None), ("NoSwizzle", 0), ("HostPreSwizzle", 1), ("InMemorySwizzle", 2)]
 )
@@ -102,11 +121,38 @@ def test_every_mx_solution_carries_its_scale_format(fmt, expected, assembler, gf
     assert expected < 3
 
 
-@needs_logic_corpus
 def test_non_mx_solutions_carry_no_scale_format(assembler, gfx950_iim):
     struct = _first_solution(_NON_MX_LOGIC, assembler, gfx950_iim)
     solution = C.Solution.FromSolutionStruct(struct, False, False, False, assembler, gfx950_iim)
     assert _predicates(solution, "MXScaleFormat") == []
+
+
+@pytest.mark.parametrize("fmt, valid", [(None, True), ("HostPreSwizzle128x4", False)])
+def test_pre_derived_pool_solution_rejects_host_pre_swizzle_128x4(
+    fmt, valid, assembler, gfx950_iim
+):
+    _, _, data = bp._parsePoolFile(str(_GENERATED_MX_LOGIC))
+    state = copy.deepcopy(data["Solutions"][0])
+    # The legacy selectors make the constructor derive again; current pool states lack them.
+    state.pop("StreamK", None)
+    state.pop("StreamKForceDPOnly", None)
+    assert state["AssignedDerivedParameters"]
+    if fmt is not None:
+        state["MXScaleFormat"] = fmt
+    solution = bp._create_solution_from_state(
+        state,
+        ProblemType(data["ProblemType"], False),
+        False,
+        False,
+        False,
+        assembler,
+        gfx950_iim,
+        str(_GENERATED_MX_LOGIC),
+    )
+    assert solution is not None
+    assert solution["Valid"] is valid
+    if valid:
+        assert solution["AssignedDerivedParameters"]
 
 
 @pytest.mark.parametrize(
