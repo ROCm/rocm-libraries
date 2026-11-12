@@ -490,6 +490,18 @@ typedef enum rocke_opcode
      * shifts. */
     ROCKE_OP_TILE_TRAP,
 
+    /* A gpu_checked_value failure path: store 1 to the kernel's GPU-check word
+     * and return from the kernel (Python IRBuilder.gpu_checked_value). Appended so no
+     * existing index shifts. */
+    ROCKE_OP_TILE_GPU_CHECK_FAILED,
+
+    /* tile.global_addr_of: a global pointer's address as an i64 (appended). */
+    ROCKE_OP_TILE_GLOBAL_ADDR_OF,
+
+    /* tile.buffer_atomic_fadd_f32 (raw_ptr_buffer_atomic_fadd with a cache
+     * policy). Appended so no existing opcode index shifts. */
+    ROCKE_OP_TILE_BUFFER_ATOMIC_FADD_F32,
+
     ROCKE_OP__COUNT
 } rocke_opcode_t;
 
@@ -532,7 +544,37 @@ typedef struct rocke_region
     int cap_ops;
 } rocke_region_t;
 
-/* Kernel parameter ABI options (the Python **attrs on IRBuilder.param). A field
+/* One bound of an integer fact: an int, a relation over earlier parameters
+ * (the intexpr JSON tree rocke.core.intexpr builds, e.g. {"param":"N"} or
+ * {"mul":[{"param":"M"},{"param":"ldc"}]}), or a Value. `value` wins when
+ * non-NULL, then `relation`. A Value bound is a parameter of this kernel on
+ * rocke_b_param (stored as its relation), and one Value with stated facts on
+ * rocke_b_gpu_checked_value. */
+typedef struct rocke_int_bound
+{
+    bool set;
+    int64_t value;
+    const char* relation;
+    rocke_value_t* value_bound;
+} rocke_int_bound_t;
+
+/* The integer facts a declaration states (Python IRBuilder.param's ge / gt / le /
+ * lt / eq / multiple_of): value >= / > / <= / < / == a bound, and value % n ==
+ * 0. At most one of ge/gt and one of le/lt; eq excludes every other word. The
+ * GPU trusts them; Python's KernelLauncher.from_artifact checks them on the
+ * host before each launch, and no other launch path does. */
+typedef struct rocke_int_facts
+{
+    rocke_int_bound_t ge;
+    rocke_int_bound_t gt;
+    rocke_int_bound_t le;
+    rocke_int_bound_t lt;
+    rocke_int_bound_t eq;
+    int64_t multiple_of;
+    bool multiple_of_set;
+} rocke_int_facts_t;
+
+/* Kernel parameter options (the Python keywords of IRBuilder.param). A field
  * is "unset" via the *_set companion flag so defaults match Python (absent key).
  */
 typedef struct rocke_param_opts
@@ -546,7 +588,25 @@ typedef struct rocke_param_opts
     int align;
     bool align_set;
     const char* addr_space; /* NULL => default "global"                     */
+    /* Pointer argument attributes the lowerer emits. An unset nocapture is
+     * emitted (the lowerer's default), so only an explicit false drops it. */
+    bool nocapture;
+    bool nocapture_set;
+    bool nonnull;
+    bool nonnull_set;
+    int64_t dereferenceable; /* bytes, as in dereferenceable(N)            */
+    bool dereferenceable_set;
+    /* An integer parameter's facts; rocke_b_param refuses one it cannot state,
+     * with the Python texts (cpp/core/ir/param_facts.cpp). */
+    rocke_int_facts_t facts;
 } rocke_param_opts_t;
+
+/* The param attr keys rocke_param_opts_t carries, as the portable-IR importers
+ * and both verifiers name them when they refuse any other key (Python
+ * param_facts.PARAM_ATTR_KEYS). */
+#define ROCKE_PARAM_ATTR_KEYS                                                    \
+    "noalias, readonly, writeonly, nocapture, nonnull, align, dereferenceable, " \
+    "addr_space, ge, gt, le, lt, eq, multiple_of"
 
 typedef struct rocke_param
 {
@@ -767,7 +827,9 @@ bool rocke_scheduler_strategy_reason(const char* strategy, char* reason, size_t 
 /* Python's repr() of the str `s` (UTF-8), as an f-string's {s!r} writes it:
  * quoted with ' -- or with " when `s` contains ' and no " -- with the
  * backslash and the quote character escaped, \t \n \r named and every other
- * ASCII control character (0x00-0x1f, 0x7f) as \xNN (lowercase hex). Writes
+ * ASCII control character (0x00-0x1f, 0x7f) as \xNN (lowercase hex); NULL
+ * gives "None", Python's repr(None). The IR printer quotes str attrs inside
+ * lists and region labels with it, so this is the engine's one port. Writes
  * the NUL-terminated text into `out` (truncated to `cap` - 1 characters; NULL
  * / 0 writes nothing) and returns its full length, like snprintf.
  *
@@ -792,7 +854,8 @@ bool rocke_opcode_is_pure(rocke_opcode_t op);
 rocke_value_t* rocke_op_result(rocke_ir_builder_t* b, rocke_op_t* op);
 /* Python @property Op.is_pure: attrs["pure"] override, else opcode purity. */
 bool rocke_op_is_pure(const rocke_op_t* op);
-/* Python @property KernelDef.max_workgroup_size (default 256). */
+/* Python @property KernelDef.max_workgroup_size: the exact workgroup_size attr
+ * when set, else the max_workgroup_size upper bound, else 256. */
 int rocke_kernel_max_workgroup_size(const rocke_kernel_def_t* k);
 
 /* ============================== BUILDER ================================= */
@@ -901,6 +964,20 @@ rocke_value_t* rocke_b_cmp_ne(rocke_ir_builder_t* b, rocke_value_t* a, rocke_val
 /* Python cmp_ult: unsigned a < c ("icmp ult"). Operands are two i32 or two i64
  * values. */
 rocke_value_t* rocke_b_cmp_ult(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c);
+/* Python IRBuilder.gpu_checked_value: always emitted, and it does not trap.
+ * Checks `v` against the facts' ge / gt / le / lt (an int or one Value with
+ * stated facts) and multiple_of on the GPU (compare, scf.if,
+ * tile.gpu_check_failed) and returns `v` marked with them (by =
+ * "gpu_checked_value"). A lane whose value breaks a fact stores 1 to the
+ * kernel's GPU-check word and returns from the kernel, so the launch completes
+ * and every output of it is undefined. Only a host that reads the word after
+ * the launch sees the failure (rocke.runtime does); recipe launch plans refuse
+ * such a kernel for that reason. eq and relations are
+ * refused, as are a value the host already checks and arithmetic on an
+ * unchecked load before the check, with the Python texts. */
+rocke_value_t* rocke_b_gpu_checked_value(rocke_ir_builder_t* b,
+                                         rocke_value_t* v,
+                                         const rocke_int_facts_t* facts);
 /* pred in {olt,ole,ogt,oge,oeq,one,ord,uno} */
 rocke_value_t*
     rocke_b_fcmp(rocke_ir_builder_t* b, const char* pred, rocke_value_t* a, rocke_value_t* c);
@@ -1238,7 +1315,7 @@ rocke_value_t* rocke_b_undef_vec(rocke_ir_builder_t* b, const rocke_type_t* elem
 
 /* ----- ISA-named MMA wrappers (thin wrappers over rocke_b_mma; kept for parity
  * with the legacy Python helpers so emitters can call them by name). All take
- * (a, b, c) and return <c_frag_len x acc_elem>. The scaled MX atom takes the
+ * (src0, src1, src2) and return <dst_frag_len x result_elem>. The scaled MX atom takes the
  * two extra E8M0 scale operands. */
 rocke_value_t* rocke_b_mfma_f32_16x16x16_f16(rocke_ir_builder_t* b,
                                              rocke_value_t* a,
@@ -1507,6 +1584,12 @@ rocke_value_t*
 rocke_value_t* rocke_b_smem_addr_of(rocke_ir_builder_t* b, rocke_value_t* smem);
 rocke_value_t*
     rocke_b_smem_ptr_add(rocke_ir_builder_t* b, rocke_value_t* lds_addr, rocke_value_t* byte_off);
+
+/* The i64 address of ptr[index] in global memory. The TDM descriptor carries a
+ * raw 57-bit global address rather than a pointer, so the element GEP has to be
+ * materialised as an integer. Mirrors ir.py global_addr_of. */
+rocke_value_t*
+    rocke_b_global_addr_of(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* index);
 void rocke_b_async_buffer_load_lds_addr(rocke_ir_builder_t* b,
                                         rocke_value_t* rsrc,
                                         rocke_value_t* lds_addr,
@@ -1680,6 +1763,22 @@ void rocke_b_buffer_store_f32(rocke_ir_builder_t* b,
                               rocke_value_t* voffset,
                               rocke_value_t* soffset,
                               rocke_value_t* value);
+/* rocke.core.ir.CPOL_ATOMIC_CASCADE_DEV: gfx12+ atomic cache-policy immediate
+ * for a device-scope cascade add, th = TH_ATOMIC_CASCADE (4), scope =
+ * SCOPE_DEV (2) in bits [4:3]. gfx11 and gfx9 read the same bits as
+ * glc/slc/dlc, so only gfx12 targets may carry it. */
+#define ROCKE_CPOL_ATOMIC_CASCADE_DEV (4 | (2 << 3))
+/* IRBuilder.buffer_atomic_fadd_f32: f32 atomic add through a buffer resource;
+ * cachepolicy is the raw immediate (0..31; gfx12+: th bits [2:0], scope [4:3]).
+ * Callers must guard invalid offsets (e.g. with scf_if) instead of steering
+ * them out of range: unlike a buffer load, which reads 0 there, a buffer
+ * atomic at the out-of-range sentinel offset faults on gfx1250. */
+void rocke_b_buffer_atomic_fadd_f32(rocke_ir_builder_t* b,
+                                    rocke_value_t* rsrc,
+                                    rocke_value_t* voffset,
+                                    rocke_value_t* soffset,
+                                    rocke_value_t* value,
+                                    int cachepolicy);
 void rocke_b_buffer_store_vN_f32(rocke_ir_builder_t* b,
                                  rocke_value_t* rsrc,
                                  rocke_value_t* voffset,
@@ -1814,8 +1913,26 @@ void rocke_b_cluster_load_async_to_lds(rocke_ir_builder_t* b,
                                        int width_bytes,
                                        int offset_bytes,
                                        int cachepolicy);
+/* gfx1250 TDM LDS padding: the descriptor's pad_interval is 3 bits and
+ * pad_amount 7 bits, both counted in dwords. Must match
+ * rocke.core.ir.TDM_PAD_INTERVAL_MAX / TDM_PAD_AMOUNT_MAX. */
+#define ROCKE_TDM_PAD_INTERVAL_MAX 7
+#define ROCKE_TDM_PAD_AMOUNT_MAX 127
+/* Encode an LDS row pad -- pad_bytes of gap after every interval_bytes of
+ * payload -- as rocke_b_tdm_descriptor_2d's pad_interval / pad_amount (mirrors
+ * rocke.core.ir.encode_tdm_padding). Returns 1, or 0 with the Python
+ * ValueError text in `reason` (when non-NULL) for a pad the fields cannot
+ * express. */
+int rocke_encode_tdm_padding(int64_t interval_bytes,
+                             int64_t pad_bytes,
+                             int* out_pad_interval,
+                             int* out_pad_amount,
+                             char* reason,
+                             size_t reason_cap);
 /* Build the five D# groups for a rank-2 TDM tile transfer (mirrors
- * IRBuilder.tdm_descriptor_2d). ``pad_interval`` < 0 disables LDS padding.
+ * IRBuilder.tdm_descriptor_2d). ``global_ptr`` is a global pointer or the i64
+ * address of one (rocke_b_global_addr_of). ``pad_interval`` < 0 disables LDS
+ * padding.
  * Writes out[0..4] (out[2] == out[3], both the zero v4i32) and returns 1, or
  * sets the builder error and returns 0. */
 int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,

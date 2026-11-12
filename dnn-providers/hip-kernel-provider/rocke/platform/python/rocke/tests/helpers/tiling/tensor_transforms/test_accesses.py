@@ -17,7 +17,11 @@ from __future__ import annotations
 import ast
 import inspect
 import itertools
+import re
+from collections.abc import Callable
 from pathlib import Path
+
+import pytest
 
 from rocke.core.ir import F16, F32, I32, I64, IRBuilder, Value
 from rocke.helpers.tiling import tensor_transforms as tt
@@ -40,7 +44,7 @@ from rocke.helpers.tiling.tensor_transforms.ranges import (
     Side,
     _required_checks,
 )
-from rocke.tests.gpu import current_device_arch
+from rocke.tests.source_tree import require_dsl_docs, require_library_tree
 
 from ._harness import (
     WAVE,
@@ -56,7 +60,12 @@ from .test_emit import _conv, _ConvAccess, _guarded, _halo_xor_case, _run
 
 ROCKE_DIR = Path(__file__).resolve().parents[4]
 TILING_DIR = ROCKE_DIR / "helpers" / "tiling"
-LIBRARY_DIR = ROCKE_DIR.parents[2] / "library"
+
+
+def _package_tree() -> Path:
+    """The ``rocke`` package these tests run from, in a source checkout or installed: a
+    callable, so the scans below take it beside the source-tree helpers."""
+    return ROCKE_DIR
 
 
 def _c(b: IRBuilder, value: int) -> Value:
@@ -73,7 +82,7 @@ def _host(valid: Value, *leaves: tuple[Value, int]) -> bool:
 def _mixed_constants(b: IRBuilder):
     """An origin in ``[0, 65)`` plus a lane in ``[0, 4)`` against a length of 70, at constants
     0 and 12: the upper side is proven at 0 and fails at 12."""
-    origin = b._assume_range(b.block_id_x(), lo=0, hi=65)
+    origin = b._assume_range(b.block_id_x(), ge=0, lt=65)
     x = b.add(origin, b.land(b.thread_id_x(), _c(b, 3)))
     return x, [(x,), (b.add(x, _c(b, 12)),)]
 
@@ -144,7 +153,7 @@ def test_buffer_checked_sides_drop_exactly_the_named_sides_and_refuse_any_other(
 
 
 def _imports_of(path: Path, name: str) -> bool:
-    tree = ast.parse(path.read_text())
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and any(a.name == name for a in node.names):
             return True
@@ -273,9 +282,9 @@ def test_vector_axis_is_a_graph_input_index_not_a_tile_axis_index():
         ValueError,
         "vector along input 1 ('axis1') of width 8 is not contiguous at coordinate 'axis1' "
         "(its elements are 64 apart in memory) -- use a narrower vector, or start it at a "
-        "multiple of 8 (the walk reads that fact from how the coordinate was computed; a "
-        "runtime value the IR cannot show it for is stated with "
-        "runtime_value(..., multiple_of=...))",
+        "multiple of 8 (the walk reads that fact from how the coordinate was computed; for a "
+        "value the IR cannot show it for, state multiple_of on its b.param declaration or "
+        "check it with b.gpu_checked_value(v, multiple_of=...))",
     ):
         emit_accesses(b, graph, tensor, [access], vector_axis=1, vector_width=8)
 
@@ -311,7 +320,6 @@ def test_the_package_door_exports_the_access_entry_and_no_internal_value():
     assert {
         "emit_accesses",
         "Access",
-        "RuntimeValue",
         "BoundCheck",
         "CheckReason",
     } <= exported
@@ -337,13 +345,13 @@ def test_the_package_door_exports_the_access_entry_and_no_internal_value():
 
 
 # The range marker states a fact the IR range walk trusts; only callers that checked (or proved)
-# it may state it. Those callers are the tiling layer's runtime_value, exit_if_tile_outside and
-# slice_tensor, plus the tests of core and of this package.
-_MARKER_CALLERS = {"runtime_value", "exit_if_tile_outside", "slice_tensor"}
+# it may state it. Those callers are core's gpu_checked_value, the tiling layer's
+# exit_if_tile_outside and slice_tensor, and the tests of core and of this package.
+_MARKER_CALLERS = {"gpu_checked_value", "exit_if_tile_outside", "slice_tensor"}
 
 
 def _unchecked_marker_calls(path: Path) -> list[str]:
-    tree = ast.parse(path.read_text())
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     found = []
 
     def visit(node: ast.AST, function: str | None) -> None:
@@ -363,22 +371,54 @@ def _unchecked_marker_calls(path: Path) -> list[str]:
     return found
 
 
-def test_the_range_marker_is_stated_only_by_its_checked_callers():
+# The trees the source scans below read: the rocke package, which every layout has, and a
+# source-only tree, which skips where this layout does not ship it.
+_PACKAGE = pytest.param(_package_tree, id="package")
+
+
+@pytest.mark.parametrize(
+    "tree", [_PACKAGE, pytest.param(require_library_tree, id="library")]
+)
+def test_the_range_marker_is_stated_only_by_its_checked_callers(
+    tree: Callable[[], Path],
+):
+    root = tree()
     allowed_tests = (
         ROCKE_DIR / "tests" / "core",
         ROCKE_DIR.parent.parent / "tests" / "core",
         Path(__file__).parent,
     )
-    roots = [ROCKE_DIR, LIBRARY_DIR]
     unchecked = []
-    for root in roots:
-        for path in sorted(root.rglob("*.py")):
-            if any(path.is_relative_to(t) for t in allowed_tests):
-                continue
-            if "tmp" in path.relative_to(root).parts:
-                continue
-            unchecked.extend(_unchecked_marker_calls(path))
+    for path in sorted(root.rglob("*.py")):
+        if any(path.is_relative_to(t) for t in allowed_tests):
+            continue
+        if "tmp" in path.relative_to(root).parts:
+            continue
+        unchecked.extend(_unchecked_marker_calls(path))
     assert not unchecked, unchecked
+
+
+# A runtime length is a plain Value whose facts are read through stated_facts_of; the wrapper
+# class that once carried a copy of them, and its constructor, are gone. Their names are split
+# here so this file does not match itself.
+_REMOVED_NAMES = re.compile(
+    r"\b(" + "Runtime" + r"Values?|" + "runtime_" + r"value(_of)?)\b"
+)
+
+
+@pytest.mark.parametrize(
+    "tree", [_PACKAGE, pytest.param(require_dsl_docs, id="dsl_docs")]
+)
+def test_the_removed_runtime_length_wrapper_is_named_nowhere(tree: Callable[[], Path]):
+    root = tree()
+    named = []
+    for path in sorted(root.rglob("*")):
+        if path.suffix not in (".py", ".md") or "tmp" in path.relative_to(root).parts:
+            continue
+        for lineno, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if _REMOVED_NAMES.search(line):
+                named.append(f"{path}:{lineno}")
+    assert not named, named
 
 
 def test_emit_accesses_emits_the_shared_coordinate_chain_once():
@@ -417,11 +457,12 @@ def test_a_halo_column_fed_into_an_xor_is_valid_exactly_on_the_lanes_inside_the_
 # --- on the GPU -------------------------------------------------------------------------------
 
 
-def test_gpu_a_conv_input_tile_with_a_halo_and_ragged_edges_is_valid_exactly_where_enumerated():
+def test_gpu_a_conv_input_tile_with_a_halo_and_ragged_edges_is_valid_exactly_where_enumerated(
+    any_gpu: str,
+):
     """A 2 x 5 x 7 x 3 input, a 3 x 3 filter with pad 1: rows past ``N * Ho * Wo`` (the ragged M
     tile), columns past ``Y * X * C`` (the K tail) and halo taps outside ``H`` / ``W`` on both
     sides are invalid; every other access is valid."""
-    current_device_arch()
     n, h, w, c = 2, 5, 7, 3
     graph, tensor = _conv(n, h, w, c)
     m_length, k_length = graph.inputs["m"], graph.inputs["k"]
@@ -438,7 +479,7 @@ def test_gpu_a_conv_input_tile_with_a_halo_and_ragged_edges_is_valid_exactly_whe
         assert all(r.valid is not None for r in results)
         return [r.valid for r in results]
 
-    stored = run_lanes(build, n_blocks=n_blocks)
+    stored = run_lanes(any_gpu, build, n_blocks=n_blocks)
     for blk, t in itertools.product(range(n_blocks), range(WAVE)):
         for j, k in enumerate(constants):
             m, kk = blk * 16 + t // 4, (t % 4) * 8 + k
@@ -461,8 +502,9 @@ def test_an_unguarded_origin_is_refused_and_a_guarded_one_is_accepted():
     with raises(
         ValueError,
         "unmerge of 'm' needs its dividend in [0, 2^31) for magic division, but its range is "
-        "[0, +inf) -- bound the origin with exit_if_tile_outside(b, origin, length), or state a "
-        "trusted range with runtime_value(b, v, at_most=...)",
+        "[0, +inf) -- bound the origin with exit_if_tile_outside(b, origin, length), or state "
+        "its range where it is declared (b.param(name, I32, ge=0, le=...)) or check it on the "
+        "GPU (b.gpu_checked_value(v, ge=0, le=...))",
     ):
         emit_accesses(b, graph, tensor, [(m, 0)])
     b = builder()

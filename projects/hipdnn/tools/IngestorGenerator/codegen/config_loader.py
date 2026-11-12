@@ -43,6 +43,7 @@ from .models import (
     KNOWN_ARCH_BASE_IDS,
     LAUNCH_NAME_PATTERN,
     MIN_LAUNCHES,
+    NATIVE_SYMBOL_NAMESPACE_PATTERN,
     PATH_STEM_PATTERN,
     RESERVED_SLOT_NAME,
     ROCKE_TARGETS,
@@ -71,8 +72,8 @@ class ConfigError(Exception):
 _MERGE_KEY = object()
 
 
-class _DuplicateKeySafeLoader(yaml.SafeLoader):
-    """``SafeLoader`` that refuses a mapping declaring the same key twice.
+class _RejectRepeatedKeys:
+    """Loader mixin that refuses a mapping declaring the same key twice.
 
     Stock construction keeps the last of two equal keys and drops the first
     without a word, so a key repeated while editing a long config silently
@@ -82,6 +83,9 @@ class _DuplicateKeySafeLoader(yaml.SafeLoader):
     precedence within one ``<<`` sequence, stay stock behaviour. Keys are built
     by the stock constructor, so two spellings YAML resolves to one value (``0x10``
     and ``16``) collide, and ``"off"`` and ``off`` (a string and ``False``) do not.
+
+    Only construction is overridden, so the mixin works over either parser:
+    see `_DuplicateKeySafeLoader`.
     """
 
     def __init__(self, stream):
@@ -121,6 +125,23 @@ class _DuplicateKeySafeLoader(yaml.SafeLoader):
                     f"this later value",
                     key_node.start_mark,
                 )
+
+
+class _PyDuplicateKeySafeLoader(_RejectRepeatedKeys, yaml.SafeLoader):
+    """`_RejectRepeatedKeys` over PyYAML's pure-Python parser."""
+
+
+if getattr(yaml, "__with_libyaml__", False):
+
+    class _CDuplicateKeySafeLoader(_RejectRepeatedKeys, yaml.CSafeLoader):
+        """`_RejectRepeatedKeys` over libyaml's parser, which reads a large config
+        an order of magnitude faster. Construction, and so every value and every
+        refused key, is the pure-Python loader's; an error's marks carry the same
+        line and column but no source snippet."""
+
+    _DuplicateKeySafeLoader = _CDuplicateKeySafeLoader
+else:
+    _DuplicateKeySafeLoader = _PyDuplicateKeySafeLoader
 
 
 #: Private, never authored: an expanded kernel dict carries the
@@ -207,8 +228,10 @@ def load_config(path: Path) -> IngestorConfig:
         knobs=_require_sequence(engine_raw.get("knobs"), "engine.knobs"),
         heuristic="none" if slotted else engine_raw.get("heuristic", "native"),
         census_name_symbol=engine_raw.get("census_name_symbol"),
+        native_symbols_from=engine_raw.get("native_symbols_from", ""),
         shared_workspace=engine_raw.get("shared_workspace", ""),
         slug_override=engine_raw.get("slug"),
+        heuristics=_load_heuristics(engine_raw, slotted),
     )
 
     kmd_fields = _read_kmd_fields(raw.get("kmd_fields", []), "kmd_fields")
@@ -450,8 +473,20 @@ def _read_kmd_fields(raw_fields: list, where: str) -> list:
                 name=raw_field["name"],
                 type=raw_field["type"],
                 default_value=raw_field.get("default_value"),
+                builder_default=raw_field.get("builder_default", False),
             )
         )
+        if not isinstance(kmd_fields[-1].builder_default, bool):
+            raise ConfigError(
+                f"{where} entry '{raw_field['name']}' declares builder_default "
+                f"{kmd_fields[-1].builder_default!r}; it must be true or false."
+            )
+        if kmd_fields[-1].builder_default and kmd_fields[-1].is_mandatory:
+            raise ConfigError(
+                f"{where} entry '{raw_field['name']}' declares builder_default "
+                f"without a default_value. builder_default lets a kernel omit the "
+                f"field, which only a KMD default_value can then decide."
+            )
     return kmd_fields
 
 
@@ -733,6 +768,83 @@ def _require_sequence(value, scope: str, what: str = "field names") -> list:
             f"characters, which silently does nothing."
         )
     return list(value)
+
+
+#: The UED roles `uhd_gen promote --role` binds per arch, in the order it accepts them.
+HEURISTIC_ROLES = (
+    "sort_kernel_catalog",
+    "predict_engine",
+    "predict_applicable_kernels",
+)
+
+#: One concrete architecture name. Mirrors `device_probe.ARCH_SHAPE` and its family-word
+#: refusal (tools/device_probe.py), which `codegen` cannot import; a test pins the two.
+_ARCH_TOKEN = re.compile(r"gfx[0-9a-f]{3,}(?:-[a-z]+)*")
+_ARCH_FAMILY_WORD = re.compile(r"-(?:generic|all|dcgpu|dgpu|igpu)(?:-|$)")
+_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+def _is_arch_token(text) -> bool:
+    return (
+        isinstance(text, str)
+        and _ARCH_TOKEN.fullmatch(text) is not None
+        and not _ARCH_FAMILY_WORD.search(text)
+    )
+
+
+def _load_heuristics(engine_raw: dict, slotted: bool) -> dict:
+    """Read ``engine.heuristics``: role -> arch -> UHD ids, as `uhd_gen promote`
+    writes them into the UED. Absent is ``{}``, which emits nothing."""
+    raw = engine_raw.get("heuristics")
+    if raw is None:
+        return {}
+    scope = "engine.heuristics"
+    if slotted:
+        raise ConfigError(
+            f"{scope} is set on a slotted engine; a slotted engine binds its rankers "
+            f"per slot (slots[].ranker), so per-arch engine bindings are not supported."
+        )
+    _require_mapping(raw, scope)
+    heuristics = {}
+    for role, arches in raw.items():
+        if role not in HEURISTIC_ROLES:
+            raise ConfigError(
+                f"{scope} names role {role!r}; expected one of {list(HEURISTIC_ROLES)} "
+                f"(the roles `uhd_gen promote --role` accepts)."
+            )
+        _require_mapping(arches, f"{scope}.{role}")
+        if not arches:
+            raise ConfigError(f"{scope}.{role} is empty; bind at least one arch.")
+        if role == "sort_kernel_catalog" and engine_raw.get("heuristic") == "none":
+            raise ConfigError(
+                f"{scope}.sort_kernel_catalog is set but engine.heuristic is 'none'; "
+                f"the arch entries follow the native 'default' UHD, which 'none' omits."
+            )
+        bound = {}
+        for arch, ids in arches.items():
+            key = f"{scope}.{role}.{arch}"
+            if arch == "default":
+                if role == "sort_kernel_catalog":
+                    raise ConfigError(
+                        f"{key}: the generator owns sort_kernel_catalog.default (the "
+                        f"native UHD from engine.heuristic); bind arch keys only."
+                    )
+            elif not _is_arch_token(arch):
+                raise ConfigError(
+                    f"{scope}.{role} key {arch!r} is not one concrete gfx architecture "
+                    f"name (e.g. gfx942) or 'default'."
+                )
+            ids = _require_sequence(ids, key, "UHD ids")
+            if not ids:
+                raise ConfigError(f"{key} is an empty list; bind at least one UHD id.")
+            for uhd in ids:
+                if not isinstance(uhd, str) or not _UUID.fullmatch(uhd):
+                    raise ConfigError(f"{key} holds {uhd!r}, which is not a UUID.")
+            if len(set(ids)) != len(ids):
+                raise ConfigError(f"{key} repeats a UHD id: {ids!r}.")
+            bound[arch] = ids
+        heuristics[role] = bound
+    return heuristics
 
 
 def _drop_tag_slot(match) -> str:
@@ -1335,13 +1447,15 @@ _KNOWN_ENGINE = frozenset(
         "knobs",
         "heuristic",
         "census_name_symbol",
+        "native_symbols_from",
         "shared_workspace",
         "slug",
+        "heuristics",
     }
 )
 #: RFC 0021 §4's per-slot selection members, plus the slot's own ``specialization``.
 _KNOWN_SLOT = frozenset({"name", "kmd_fields", "knobs", "ranker", "specialization"})
-_KNOWN_KMD_FIELD = frozenset({"name", "type", "default_value"})
+_KNOWN_KMD_FIELD = frozenset({"name", "type", "default_value", "builder_default"})
 _KNOWN_PACK = frozenset(
     {
         "name",
@@ -1720,6 +1834,19 @@ def _check_engine_name_scoped(config: IngestorConfig) -> None:
             f"(FNV-1a) into the global 64-bit engine-id space and requires "
             f"global uniqueness."
         )
+    borrowed = config.engine.native_symbols_from
+    if borrowed != "" and (
+        not isinstance(borrowed, str)
+        or not NATIVE_SYMBOL_NAMESPACE_PATTERN.match(borrowed)
+        or borrowed == config.engine.own_native_symbol_namespace
+    ):
+        raise ConfigError(
+            f"engine.native_symbols_from {borrowed!r} must state ANOTHER engine's "
+            f"dotted native-symbol namespace, exactly as that engine registers it "
+            f"(e.g. 'hipkernel.gfx950_attention_unified_2d', following its slug), "
+            f"matching ^[A-Za-z0-9_.-]+\\.[A-Za-z0-9_]+$. Omit it to name this "
+            f"engine's own ({config.engine.own_native_symbol_namespace!r})."
+        )
     if config.engine.heuristic not in ("native", "none"):
         raise ConfigError(
             f"engine.heuristic '{config.engine.heuristic}' must be 'native' "
@@ -1787,11 +1914,39 @@ def _check_engine_declaration(config: IngestorConfig) -> None:
     )
 
 
-def _check_knobs_int_typed(config: IngestorConfig, where: str = "engine.knobs") -> None:
-    """Pre-mint check #2: every knob names a declared, int-typed KMD field.
-    ``GenericPlanBuilder::getCustomKnobs`` filters to ``int64_t`` alternatives,
-    so the loader silently produces no knob at all for any other type. For a
-    slot, `config` is its `slot_view` and `where` names ``slots[<name>].knobs``."""
+def _check_knobs_addressable(
+    config: IngestorConfig, where: str = "engine.knobs"
+) -> None:
+    """Pre-mint check #2 (unslotted engine): every knob names a declared int- or
+    string-typed KMD field. ``GenericPlanBuilder::getCustomKnobs`` advertises an int
+    field by its own value and a string field by its ordinal, its index in the
+    field's value set (``KernelIngestorStateManager::knobOrdinal``); no other type is
+    pinned there."""
+    declared = config.kmd_field_by_name
+    for knob in config.engine.knobs:
+        kmd_field = declared.get(knob)
+        if kmd_field is None:
+            raise ConfigError(
+                f"{where} names '{knob}', which no kmd_fields entry "
+                f"declares. Every knob must name a declared KMD field."
+            )
+        if not kmd_field.is_int_typed and kmd_field.type != "string":
+            raise ConfigError(
+                f"{where} names '{knob}', declared in kmd_fields with "
+                f"type '{kmd_field.type}'. Only int-typed fields (addressed by "
+                f"value) and string-typed fields (addressed by ordinal) become "
+                f"usable knobs (GenericPlanBuilder::getCustomKnobs). Retype "
+                f"'{knob}' to 'int' or 'string', or remove it from {where}."
+            )
+
+
+def _check_knobs_int_typed(
+    config: IngestorConfig, where: str = "slots[?].knobs"
+) -> None:
+    """Pre-mint check #2 (slot): every knob names a declared, int-typed KMD field.
+    ``GenericPlanBuilder::getCustomKnobs`` filters to ``int64_t`` alternatives, so a
+    slot ranker never sees a string knob. `config` is the slot's `slot_view` and
+    `where` names ``slots[<name>].knobs``."""
     declared = config.kmd_field_by_name
     for knob in config.engine.knobs:
         kmd_field = declared.get(knob)
@@ -2515,7 +2670,7 @@ def _check_slot_declarations(config: IngestorConfig) -> None:
         _reject_repeats(slot.knobs, "knob", f"slots[{slot.name}].knobs")
         _check_knobs_int_typed(view, where=f"slots[{slot.name}].knobs")
     token = config.engine.shared_workspace
-    if token and (
+    if token != "" and (
         not isinstance(token, str)
         or not token.startswith(SHARED_WORKSPACE_TOKEN_PREFIX)
         or token == SHARED_WORKSPACE_TOKEN_PREFIX
@@ -2541,21 +2696,23 @@ def _for_each_kmd_scope(config: IngestorConfig, check) -> None:
 
 
 def _check_pack_discriminators(config: IngestorConfig) -> None:
-    """A multi-pack engine needs a discriminator per pack to name its
-    operation-scoped matcher symbol; a single-pack engine must not declare
+    """A multi-pack engine either names an operation-scoped matcher symbol
+    per pack, each pack declaring its own discriminator, or declares none and
+    shards one catalog across its packs; a single-pack engine must not declare
     one (there is nothing to discriminate -- see the UMD policy)."""
     if config.is_slotted:
         _check_slot_pack_discriminators(config)
     elif config.is_multi_pack:
         missing = [p.name for p in config.packs if not p.discriminator]
-        if missing:
+        if missing and len(missing) != len(config.packs):
             raise ConfigError(
-                f"packs {missing} declare no 'discriminator', but this engine "
-                f"has {len(config.packs)} packs. Every pack needs a "
-                f"discriminator to name its own operation-scoped matcher "
-                f"symbol (e.g. 'add' -> '<engine>.add_match')."
+                f"packs {missing} declare no 'discriminator', but other packs "
+                f"of this engine do. Either every pack names its own "
+                f"operation-scoped matcher symbol (e.g. 'add' -> "
+                f"'<engine>.add_match'), or none does and the packs are shards "
+                f"of one catalog that the engine's graph_match admits alone."
             )
-        names = [p.discriminator for p in config.packs]
+        names = [p.discriminator for p in config.packs if p.discriminator]
         if len(names) != len(set(names)):
             raise ConfigError(f"packs declare duplicate discriminators: {names}.")
     else:
@@ -2751,12 +2908,12 @@ def _validate_config(config: IngestorConfig) -> list[str]:
     if config.is_slotted:
         _check_slot_declarations(config)  # #2, per slot
     else:
-        if config.engine.shared_workspace:
+        if config.engine.shared_workspace != "":
             raise ConfigError(
                 "key 'shared_workspace' requires 'slots': only a slotted engine "
                 "has a shared workspace region (RFC 0021 §6)."
             )
-        _check_knobs_int_typed(config)  # #2
+        _check_knobs_addressable(config)  # #2
     _for_each_kmd_scope(config, _check_kernel_metadata_against_kmd)  # #3
     # After #3, which establishes that every declared type is one of
     # KMD_FIELD_TYPES; the default_value check indexes _METADATA_TYPE_CHECKS by it.

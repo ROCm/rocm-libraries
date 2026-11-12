@@ -28,7 +28,6 @@ exclude: |
     projects/hipfft/.*|
     projects/hiprand/.*|
     projects/hipsolver/.*|
-    projects/hipsparse/.*|
     projects/hipsparselt/.*|
     projects/hiptensor/.*|
     projects/hipthreads/.*|
@@ -90,13 +89,18 @@ repos:
         exclude: &opted_out_but_scanned |
           (?x)
           projects/hipblaslt/.*|
-          shared/tensile/.*
+          projects/hipsparse/.*|
+          shared/tensile/.*|
+          # Vendored AOTriton test sources, kept byte-identical to their pin
+          # (tools/sdpa_conformance/aotriton/VENDOR.md, sync.py --check).
+          projects/hipdnn/tools/sdpa_conformance/aotriton/vendor/.*
       - id: end-of-file-fixer
         exclude: *opted_out_but_scanned
       - id: check-yaml
         exclude: |
           (?x)
           projects/hipblaslt/.*|
+          projects/hipsparse/.*|
           shared/tensile/.*|
           ^projects/hipdnn/\.clang-format$|
           ^projects/miopen/\.clang-format$|
@@ -105,7 +109,13 @@ repos:
           ^dnn-providers/hip-kernel-provider/\.clang-format$|
           ^dnn-providers/integration-tests/\.clang-format$
       - id: check-added-large-files
-        exclude: *opted_out_but_scanned
+        # The opted-out projects above, plus the UHD pipeline's trained model binaries
+        # under a descriptor set's heuristics/. Each is regenerated, never edited by hand.
+        exclude: |
+          (?x)
+          projects/hipblaslt/.*|
+          shared/tensile/.*|
+          ^dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/.*/heuristics/.*/model\.bin$
 
   - repo: https://github.com/psf/black
     rev: 25.12.0
@@ -114,6 +124,13 @@ repos:
         language_version: python3
         exclude: *opted_out_but_scanned
 
+  # MIOpen's generated wrapper sources are formatted with this release
+  # (projects/miopen/script/generate_wrapper_sources.py). A bump must regenerate
+  # them in the same PR and update the pin in the miopen-wrapper-sources hooks
+  # below. The generator takes another release while its output matches, so a
+  # bump that changes no wrapping needs no new MIOpen CI image. MIOpen's hooks
+  # skip PRs that leave projects/miopen alone, so nothing else catches a missed
+  # step.
   - repo: https://github.com/pre-commit/mirrors-clang-format
     rev: v18.1.4
     hooks:
@@ -188,23 +205,27 @@ repos:
       # directories a PR touches, so an always_run hook here would fail every
       # PR outside dnn-providers/integration-tests.
       # The script reads the tree through support_matrix_units.py, which uses
-      # bundle_discovery.py and support_claim_schema.py, so all of them count.
+      # bundle_discovery.py, support_claim_schema.py and
+      # migration-scripts/bundle_utils.py, so all of them count.
       - id: render-support-matrix
         name: Support matrix renders without errors (RFC 0015)
         entry: python dnn-providers/integration-tests/scripts/render_support_matrix.py --output -
         language: python
         pass_filenames: false
-        files: ^dnn-providers/integration-tests/(integration-test-bundles/.*|scripts/(render_support_matrix|support_matrix_\w+|bundle_discovery|support_claim_schema)\.py)$
+        files: ^dnn-providers/integration-tests/(integration-test-bundles/.*|scripts/(render_support_matrix|support_matrix_\w+|bundle_discovery|support_claim_schema)\.py|migration-scripts/bundle_utils\.py)$
 
-      # SUPPORT_MATRIX_OVERVIEW.md *is* committed, so check it for staleness.
-      # It is the by-API-option view, rendered by support_features/feature_matrix.py
-      # through the same support_matrix_units.py collection.
-      - id: check-support-matrix-overview
-        name: Support matrix overview is current (RFC 0015)
-        entry: python dnn-providers/integration-tests/scripts/support_features/feature_matrix.py --check
+      # SUPPORT_MATRIX_OVERVIEW.md is committed but refreshed on its own, not
+      # with each claim change: every claim PR regenerating it made concurrent
+      # claim PRs conflict on it. So, like render-support-matrix, this only
+      # renders and discards, to catch errors in support_features/ and the
+      # sidecars it reads. It goes through the same support_matrix_units.py
+      # collection.
+      - id: render-support-matrix-overview
+        name: Support matrix overview renders without errors (RFC 0015)
+        entry: python dnn-providers/integration-tests/scripts/support_features/feature_matrix.py --output -
         language: python
         pass_filenames: false
-        files: ^dnn-providers/integration-tests/(integration-test-bundles/.*|scripts/(support_features/\w+|support_matrix_\w+|bundle_discovery|support_claim_schema)\.py|SUPPORT_MATRIX_OVERVIEW\.md)$
+        files: ^dnn-providers/integration-tests/(integration-test-bundles/.*|scripts/(support_features/\w+|support_matrix_\w+|bundle_discovery|support_claim_schema)\.py|migration-scripts/bundle_utils\.py)$
 
       - id: gtest-format-miopen
         name: GTest naming conventions (MIOpen)
@@ -215,15 +236,13 @@ repos:
 
       # Only the lines a change adds are checked (git diff against the
       # pre-commit from/to refs in CI, against HEAD otherwise), so the
-      # existing absolute imports do not fail unrelated edits. A package root
-      # with no files in the change simply does not trigger the hook, so this
-      # keeps working while the Tensile -> tensilelite move is in flight.
+      # existing absolute imports do not fail unrelated edits.
       - id: tensilelite-no-absolute-imports
-        name: TensileLite - no new absolute Tensile/tensilelite imports
+        name: TensileLite - no new absolute tensilelite imports
         entry: python projects/hipblaslt/tensilelite/scripts/check_no_absolute_imports.py
         language: python
-        files: ^projects/hipblaslt/tensilelite/(Tensile|tensilelite)/.*\.py$
-        exclude: ^projects/hipblaslt/tensilelite/(Tensile|tensilelite)/Tests/
+        files: ^projects/hipblaslt/tensilelite/tensilelite/.*\.py$
+        exclude: ^projects/hipblaslt/tensilelite/tensilelite/Tests/
 
       # pytest 9 rejects these py.path hook arguments outright, so a conftest
       # carrying one aborts collection before any test runs.
@@ -234,25 +253,72 @@ repos:
         args: [--multiline]
         files: ^projects/hipblaslt/.*conftest\.py$
 
+      # CI checks out only the directories a PR touches, so a PR that changes
+      # only .pre-commit-config.yaml or a provider file has no projects/miopen,
+      # scripts included. The two checks below skip there rather than fail that
+      # PR; MIOpen's component CI job, which provider changes also trigger,
+      # still runs both on the full tree. The skip is Python, not bash, so the
+      # hooks run on Windows too.
+      #
+      # What the generator below cannot replace: the few hand-written stubs in
+      # wrapper.cpp, the wrapper-only functions (hipdnn_forwarding.h, their list
+      # and their stubs), and the provider's hand-written declarations of the
+      # GetWorkSpaceSizeRange entry points.
       - id: miopen-public-private-headers
         name: MIOpen public/private header consistency
-        entry: python projects/miopen/script/check_public_abi.py check-headers
+        entry: >-
+          python -c "import os, subprocess, sys;
+          script = 'projects/miopen/script/check_public_abi.py';
+          present = os.path.isfile(script);
+          present or print('SKIP - projects/miopen is not checked out');
+          sys.exit(subprocess.call([sys.executable, script, 'check-headers']) if present else 0)"
         language: python
-        files: ^(projects/miopen/(include/miopen/miopen\.h|include_wrapper/miopen/hipdnn_forwarding\.h|src/private/(miopen_impl\.h|miopen_private_rename\.h|wrapper\.cpp)|src/convolution_api\.cpp|test/gtest/conv_workspace_size_range\.cpp|test/public_abi/wrapper_only_symbols\.txt)|dnn-providers/miopen-provider/MiopenApi(PrivateRename)?\.hpp)$
+        files: ^(projects/miopen/(include_wrapper/miopen/hipdnn_forwarding\.h|src/(private/wrapper\.cpp|convolution_api\.cpp)|test/public_abi/wrapper_only_symbols\.txt)|dnn-providers/miopen-provider/MiopenApi\.hpp)$
         pass_filenames: false
 
-      # The check above is the only one that can see signature drift in the
-      # split, and it reads C declarations with a hand-rolled parser rather
-      # than a compiler. These are that parser's own tests. They work on string
+      # The wrapper's derived files are generated from include/miopen/miopen.h;
+      # this catches a hand edit or a stale file. The generator prefers the
+      # release pinned for the clang-format hook above, and takes another only
+      # while its output matches the committed files (releases can wrap lines
+      # differently). That release is written twice in this file: the
+      # clang-format hook's rev and the additional_dependencies list that the two
+      # hooks below share. Bump both together; a mismatch shows only when the
+      # output differs.
+      - id: miopen-wrapper-sources
+        name: MIOpen wrapper sources match miopen.h
+        entry: >-
+          python -c "import os, subprocess, sys;
+          script = 'projects/miopen/script/generate_wrapper_sources.py';
+          present = os.path.isfile(script);
+          present or print('SKIP - projects/miopen is not checked out');
+          sys.exit(subprocess.call([sys.executable, script, '--check']) if present else 0)"
+        language: python
+        additional_dependencies: &miopen_clang_format ["clang-format==18.1.4"]
+        files: ^(\.pre-commit-config\.yaml|projects/miopen/(\.clang-format|include/miopen/miopen\.h|include_wrapper/miopen/hipdnn_forwarding\.h|script/(generate_wrapper_sources|check_public_abi)\.py|src/private/(wrapper|wrapper_passthrough)\.cpp|src/private/(miopen_impl|miopen_private_rename)\.h)|dnn-providers/miopen-provider/(\.clang-format|MiopenApiPrivateRename\.hpp))$
+        pass_filenames: false
+
+      # Rewrites those files. Manual only, so it never runs in CI; run it with
+      #   pre-commit run --hook-stage manual miopen-wrapper-sources-regenerate --all-files
+      # to get the pinned clang-format without installing it yourself.
+      - id: miopen-wrapper-sources-regenerate
+        name: Regenerate MIOpen wrapper sources from miopen.h
+        entry: python projects/miopen/script/generate_wrapper_sources.py
+        language: python
+        additional_dependencies: *miopen_clang_format
+        stages: [manual]
+        pass_filenames: false
+
+      # The checks above read C declarations with hand-rolled parsers rather
+      # than a compiler. These are those parsers' own tests. They work on string
       # fixtures, so they run here -- where pre-commit provides pytest in an
       # isolated environment -- rather than in the MIOpen component CI job,
       # which installs no Python packages.
       - id: miopen-public-private-header-check-tests
         name: MIOpen public/private header check self-tests
-        entry: python -m pytest projects/miopen/script/test_check_public_abi.py -q
+        entry: python -m pytest projects/miopen/script/test_check_public_abi.py projects/miopen/script/test_generate_wrapper_sources.py -q
         language: python
         additional_dependencies: ["pytest==8.4.2"]
-        files: ^projects/miopen/script/(check_public_abi|test_check_public_abi)\.py$
+        files: ^projects/miopen/script/(check_public_abi|test_check_public_abi|generate_wrapper_sources|test_generate_wrapper_sources)\.py$
         pass_filenames: false
 
       - id: kpack-pin-sync
@@ -295,6 +361,39 @@ repos:
           )$
         pass_filenames: false
 
+      # Every S/D/C/Z declaration in a /**@{*/ group carries a copy of the
+      # block before /**@{*/, so libclang and clangd see it. Fails when a copy
+      # differs from that block (fix with sync_group_docs.py --write) or when
+      # a preprocessor conditional separates a doc block from its declaration.
+      # Reads the whole header tree, so pass_filenames is false.
+      - id: hipsparse-group-docs
+        name: hipSPARSE grouped documentation is in sync
+        entry: python projects/hipsparse/scripts/sync_group_docs.py
+        language: python
+        files: ^projects/hipsparse/(library/include/.*\.h|scripts/sync_group_docs\.py)$
+        pass_filenames: false
+
+      - id: hipsparse-group-docs-tests
+        name: hipSPARSE documentation script self-tests
+        entry: python -m unittest discover -s projects/hipsparse/scripts -p test_*doc*.py
+        language: python
+        files: ^projects/hipsparse/scripts/(test_)?(sync_group_docs|audit_doc_attachment)\.py$
+        pass_filenames: false
+
+      # rocKE layering ratchet: platform's imports of the library packages
+      # (kernels, builders, dispatch, benchmarks) may only shrink. It audits
+      # the source tree, so the installed rocke_pytest CTest skips it; this
+      # hook is what enforces it. AST-only: no GPU, no rocke import, no engine
+      # build. --noconftest skips the rocKE conftest; no:cacheprovider keeps
+      # .pytest_cache out of the tree.
+      - id: rocke-library-reach
+        name: rocKE platform -> library imports only shrink
+        entry: python -m pytest -p no:cacheprovider --noconftest -q dnn-providers/hip-kernel-provider/rocke/platform/tests/test_library_reach.py
+        language: python
+        additional_dependencies: ["pytest==8.4.2"]
+        files: ^dnn-providers/hip-kernel-provider/rocke/platform/(python|tests|tools|dsl_docs|cpp)/.*\.py$
+        pass_filenames: false
+
   - repo: https://github.com/cheshirekow/cmake-format-precommit
     rev: v0.6.10
     hooks:
@@ -302,6 +401,7 @@ repos:
         exclude: |
           (?x)
           projects/hipblaslt/.*|
+          projects/hipsparse/.*|
           shared/tensile/.*|
           # MIOpen CMake files have not been audited for cmake-lint compliance yet.
           ^projects/miopen/.*

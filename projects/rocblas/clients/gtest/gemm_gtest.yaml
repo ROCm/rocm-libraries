@@ -3600,12 +3600,27 @@ Tests:
   function:
     - gemm: *single_precision
   matrix_size:
-    - { M: 67108863, N: 1, K: 32, lda: 67108863, ldb: 32, ldc: 67108863}
-    - { M: 67108864, N: 1, K: 32, lda: 67108864, ldb: 32, ldc: 67108864}
+    - { M: 67108864, N: 1, K: 32, lda: 67108864, ldb: 32, ldc: 67108864} # index signed int32 overflow
   transA: [ N    ]
   transB: [ N    ]
   alpha: 1
   beta: 1
+  # batched counterpart: gemm_batched_PyTorch_offset_overflow
+
+# A holds M * K == 2^31 elements, so its element index overflows signed int32.
+# For transA == T, lda = K and the overflow comes from column (M) * lda.
+- name: gemm_index_overflow
+  category: nightly
+  function:
+    - gemm: *single_precision
+  arguments:
+    - { transA: N, transB: N, M: 67108864, N: 1, K: 32, lda: 67108864, ldb: 32, ldc: 67108864 }
+    - { transA: N, transB: T, M: 67108864, N: 1, K: 32, lda: 67108864, ldb:  1, ldc: 67108864 }
+    - { transA: T, transB: N, M: 67108864, N: 1, K: 32, lda:       32, ldb: 32, ldc: 67108864 }
+    - { transA: T, transB: T, M: 67108864, N: 1, K: 32, lda:       32, ldb:  1, ldc: 67108864 }
+  alpha: 1
+  beta: 1
+  gpu_arch: '9??'
 
 - name: gemm_ILP64
   category: stress
@@ -3673,7 +3688,7 @@ Tests:
   devices: 4
   repeatability_check: true
 
-- name: hipblaslt_f16
+- name: hipblaslt_force_on_f16
   category: pre_checkin
   function: gemm_ex
   precision: *hpa_half_precision
@@ -3682,8 +3697,9 @@ Tests:
   matrix_size: *medium_matrix_size_range
   use_hipblaslt: 1
   os_flags: LINUX
+  gpu_arch: ['90?'] # non default gfx test for forced hipblaslt
 
-- name: non_hipblaslt_f16
+- name: hipblaslt_force_off_f16
   category: pre_checkin
   function: gemm_ex
   precision: *hpa_half_precision
@@ -3692,7 +3708,8 @@ Tests:
   matrix_size: *medium_matrix_size_range
   use_hipblaslt: 0
   os_flags: LINUX
-
+  gpu_arch: ['90?'] # non default gfx test for forced hipblaslt
+ 
 - name: gemm_ex_h2f #SWDEV-560127
   category: pre_checkin
   function: gemm_ex
@@ -3708,7 +3725,10 @@ Tests:
     - { transA: T, transB: N }
   alpha_beta: *alpha_beta_range
   initialization: hpl
+  # TODO: Enable newer gfx to use gemv over hipblaslt where perf improves
+  use_hipblaslt: 0
   os_flags: LINUX
+  gpu_arch: ['90?']
 
 # Commented out as the category known_bug has currently no good purpose
 # This is category known_bug until the sizes are supported by Tensile,
@@ -3736,7 +3756,7 @@ Tests:
   arguments:
     - { transA: N, transB: N, M: 8454144, N: 3, K: 508, lda: 8454144, ldb: 508, ldc: 8454144, ldd: 8454144 }
   alpha: 1
-  beta: 0
+  beta: 1
   api: [ C_64 ]
   os_flags: LINUX
 

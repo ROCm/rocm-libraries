@@ -1,26 +1,30 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <gtest/gtest.h>
-#include "DataInitialization.hpp"             // isMXTensor / Problem
 #include "ClientProblemFactory.hpp"
-#include "DataInitializationHelpers.hpp"    // detail::* (MX-only, internally guarded)
+#include "DataInitialization.hpp"
+#include "DataInitializationHelpers.hpp"
 #include "ProgramOptions.hpp"
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/KernelLanguageTypes.hpp>
 #include <Tensile/PerformanceMetricTypes.hpp>
+#include <Tensile/ScaleAlphaVec.hpp>
 #include <Tensile/TensorDescriptor.hpp>
 #include <Tensile/Utils.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <gtest/gtest.h>
 #include <limits>
+#include <memory>
 #include <numeric>
 #include <sstream>
 #include <stdexcept>
@@ -100,7 +104,6 @@ namespace
         return problem;
     }
 
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
     TensileLite::Client::po::variables_map makeMinimalClientArgs(int mxScaleFormat)
     {
         using namespace TensileLite::Client;
@@ -156,22 +159,6 @@ namespace
         setOption(args, "output-amaxD", false);
         setOption(args, "use-scaleAB", std::string());
         setOption(args, "use-scaleCD", false);
-        // ClientProblemFactory::m_useBias / m_biasSrc are plain `int` members
-        // with NO default member initializer (see ClientProblemFactory.hpp);
-        // they're only assigned when args.count("use-bias") /
-        // args.count("bias-source") is true. Without these two options,
-        // m_useBias holds whatever garbage was left on the stack/heap when
-        // ClientProblemFactory was constructed. If that garbage is non-zero,
-        // ContractionProblemGemm::setBias() takes a branch that indexes
-        // m_tensors[m_biasSrc].sizes()[batchIdx] with batchIdx left at its
-        // default of 2 for this non-batched dummy problem (m_batchIndices is
-        // empty) -- an out-of-bounds read that segfaults. This is why the
-        // crash only showed up when the test ran in isolation (a fresh
-        // process, as CI's per-test ctest invocation does): the leftover
-        // stack/heap contents differ from running the whole 733-test binary
-        // in one process, where prior tests happened to leave zeroed memory
-        // behind and masked the bug. Setting these explicitly makes the
-        // behavior deterministic regardless of process/memory history.
         setOption(args, "use-bias", 0);
         setOption(args, "bias-source", static_cast<int>(ContractionProblemGemm::TENSOR::D));
         setOption(args, "use-scaleAlphaVec", 0);
@@ -184,10 +171,73 @@ namespace
         setOption(args, "bounds-check", TensileLite::Client::BoundsCheckMode::Disable);
         return args;
     }
-
-#endif
-
 } // namespace
+
+TEST(ClientAlphaMode, ScalarSupportDefaultsToScalarAndAllowsRuntimeOverride)
+{
+    for(int modes : {1, 2, 3, 5, 6, 7})
+        for(int runtimeOverride : {-1, 0, 1})
+        {
+            SCOPED_TRACE(::testing::Message() << "modes=" << modes
+                                             << " override=" << runtimeOverride);
+            auto args = makeMinimalClientArgs(0);
+            setOption(args, "use-scaleAlphaVec", modes);
+            if(runtimeOverride >= 0)
+                setOption(args, "device-scalar-alpha", runtimeOverride != 0);
+            TensileLite::Client::ClientProblemFactory factory(args);
+            ASSERT_EQ(factory.problems().size(), 1u);
+            auto problem = std::dynamic_pointer_cast<ContractionProblemGemm>(factory.problems()[0]);
+            ASSERT_NE(problem, nullptr);
+            const bool scalar = runtimeOverride < 0 ? modes >= 5 : runtimeOverride != 0;
+            EXPECT_EQ(problem->getParams().deviceScalarAlpha(), scalar);
+            EXPECT_EQ(problem->useScaleAlphaVec(),
+                      scalar ? TensileLite::ScaleAlphaVecDeviceScalarBit : modes & 3);
+            EXPECT_EQ(problem->scaleAlphaVec().totalLogicalElements(), scalar ? 1u : 128u);
+        }
+}
+
+TEST(ClientAlphaMode, RejectsReservedScalarOnlyAndUnknownSupportModes)
+{
+    for(int modes : {-1, 4, 8})
+    {
+        auto args = makeMinimalClientArgs(0);
+        setOption(args, "use-scaleAlphaVec", modes);
+        EXPECT_THROW(TensileLite::Client::ClientProblemFactory factory(args), std::invalid_argument);
+    }
+}
+
+TEST(ClientProblemFactoryDefaults, DisablesOmittedOptionalOutputsAndScales)
+{
+    using namespace TensileLite::Client;
+    po::variables_map args;
+    const std::array  omitted{"use-bias",
+                             "bias-source",
+                             "use-e",
+                             "use-scaleCD",
+                             "use-scaleAlphaVec",
+                             "use-gradient",
+                             "output-amaxD"};
+    for(const auto& entry : makeMinimalClientArgs(0))
+        if(std::find(omitted.begin(), omitted.end(), entry.first) == omitted.end())
+            args.insert(entry);
+
+    // Nonzero storage exposes missing defaults regardless of earlier tests.
+    alignas(ClientProblemFactory) std::array<std::byte, sizeof(ClientProblemFactory)> storage;
+    storage.fill(std::byte{0xa5});
+    auto destroy = [](ClientProblemFactory* factory) { std::destroy_at(factory); };
+    std::unique_ptr<ClientProblemFactory, decltype(destroy)> factory(
+        std::construct_at(reinterpret_cast<ClientProblemFactory*>(storage.data()), args), destroy);
+
+    ASSERT_EQ(factory->problems().size(), 1u);
+    const auto& problem = dynamic_cast<const ContractionProblemGemm&>(*factory->problems().front());
+    EXPECT_FALSE(problem.useE());
+    EXPECT_FALSE(problem.useGradient());
+    EXPECT_FALSE(problem.outputAmaxD());
+    EXPECT_EQ(problem.useBias(), 0);
+    EXPECT_EQ(problem.biasSrc(), ContractionProblemGemm::TENSOR::D);
+    EXPECT_FALSE(problem.useScaleCD());
+    EXPECT_EQ(problem.useScaleAlphaVec(), 0);
+}
 
 // =============================================================================
 //   Section 1 - TensileLite::Client::isMXTensor
@@ -453,6 +503,130 @@ TEST(DataInitializationReferenceRecompute, Gfx1250ReusesPreswizzledMXAcrossSolut
 
     EXPECT_FALSE(dataInit.referenceNeedsPerSolutionRecompute(problem, &swizzleSolution));
 }
+
+namespace
+{
+    // Exposes the state DataInitialization keeps to reuse MX inputs across solutions.
+    class MXReuseProbe : public TensileLite::Client::DataInitialization
+    {
+    public:
+        using DataInitialization::DataInitialization;
+
+        bool preswizzledA() const
+        {
+            return m_mxPreswizzledA;
+        }
+        TensorDescriptor const& initDescriptor(int tensor) const
+        {
+            return m_vdata[tensor].pristine.begin()->second.initDescriptor[0];
+        }
+    };
+
+    bool deviceIsGfx950()
+    {
+        hipDeviceProp_t prop{};
+        return hipGetDeviceProperties(&prop, 0) == hipSuccess
+               && std::string(prop.gcnArchName).find("gfx950") != std::string::npos;
+    }
+
+    TensileLite::Client::po::variables_map
+        makeMXLaunchArgs(std::vector<std::vector<size_t>> const& problemSizes)
+    {
+        using TensileLite::Client::InitMode;
+
+        auto args = makeMinimalClientArgs(/*mxScaleFormat=*/1);
+        setOption(args, "problem-size", problemSizes);
+        setOption(args, "mx-a-block", 32);
+        setOption(args, "mx-b-block", 32);
+        setOption(args, "mx-a-free-block", 1);
+        setOption(args, "mx-b-free-block", 1);
+        setOption(args, "uniform-summation-order", 0);
+        setOption(args, "bias-type-args", std::vector<rocisa::DataType>{rocisa::DataType::Float});
+        // Random keeps every scale at 1.0, which makes swizzled and canonical
+        // scales identical; RandomNarrow varies them.
+        for(auto const* name : {"init-a", "init-b", "init-mx-a", "init-mx-b"})
+            setOption(args, name, InitMode::RandomNarrow);
+        return args;
+    }
+
+    void setMXSolution(ContractionSolution& solution, int mxScaleFormat, int miK)
+    {
+        solution.problemType.mxScaleFormat     = mxScaleFormat;
+        solution.sizeMapping.matrixInstruction = {16, 16, miK, 1};
+    }
+
+    std::vector<uint8_t> deviceMXScaleA(std::shared_ptr<TensileLite::ProblemInputs> const& inputs,
+                                        ContractionProblemGemm const&                    problem)
+    {
+        auto const* gemmInputs
+            = dynamic_cast<TensileLite::ContractionInputs const*>(inputs.get());
+        std::vector<uint8_t> bytes(problem.mxsa().totalAllocatedBytes());
+        HIP_CHECK_EXC(
+            hipMemcpy(bytes.data(), gemmInputs->mxsa, bytes.size(), hipMemcpyDeviceToHost));
+        return bytes;
+    }
+}
+
+// From the second problem on, preSolution re-initializes the MX inputs before
+// prepareGPUInputs runs. With validation off, the non-MX tensors must still be
+// initialized for the new problem.
+TEST(DataInitializationMXReuse, LaterProblemsInitializeNonMXInputs)
+{
+    if(!deviceIsGfx950())
+        GTEST_SKIP() << "solution-dependent MX preswizzle only runs on gfx950";
+
+    auto args = makeMXLaunchArgs({{128, 128, 1, 512}, {256, 128, 1, 512}});
+    TensileLite::Client::ClientProblemFactory factory(args);
+    MXReuseProbe                              dataInit(args, factory);
+    ContractionSolution                       solution;
+    setMXSolution(solution, /*mxScaleFormat=*/1, /*miK=*/128);
+
+    for(auto const& problem : factory.problems())
+    {
+        auto const& gemm = dynamic_cast<ContractionProblemGemm const&>(*problem);
+        dataInit.preProblem(problem.get());
+        dataInit.preSolution(&solution);
+        dataInit.prepareGPUInputs(problem.get());
+        EXPECT_EQ(dataInit.initDescriptor(ContractionProblemGemm::TENSOR::C), gemm.c());
+        dataInit.postSolution();
+        dataInit.postProblem();
+    }
+}
+
+// A NoSwizzle solution uploads the canonical scales. The next HostPreSwizzle
+// solution with the same MFMA K must get the swizzled scales back.
+TEST(DataInitializationMXReuse, NoSwizzleSolutionDoesNotLeakIntoNextPreswizzle)
+{
+    if(!deviceIsGfx950())
+        GTEST_SKIP() << "solution-dependent MX preswizzle only runs on gfx950";
+
+    auto args = makeMXLaunchArgs({{128, 128, 1, 512}});
+    TensileLite::Client::ClientProblemFactory factory(args);
+    MXReuseProbe                              dataInit(args, factory);
+    auto*       problem = factory.problems()[0].get();
+    auto const& gemm    = dynamic_cast<ContractionProblemGemm const&>(*problem);
+    ContractionSolution preswizzle;
+    ContractionSolution noSwizzle;
+    setMXSolution(preswizzle, /*mxScaleFormat=*/1, /*miK=*/128);
+    setMXSolution(noSwizzle, /*mxScaleFormat=*/0, /*miK=*/128);
+
+    auto run = [&](ContractionSolution& solution) {
+        dataInit.preSolution(&solution);
+        auto bytes = deviceMXScaleA(dataInit.prepareGPUInputs(problem), gemm);
+        dataInit.postSolution();
+        return bytes;
+    };
+
+    dataInit.preProblem(problem);
+    // The first prepareGPUInputs builds the swizzled scales; the second
+    // solution goes through preSolution's re-init and records its MFMA K.
+    auto const swizzled = run(preswizzle);
+    EXPECT_EQ(run(preswizzle), swizzled);
+    ASSERT_NE(run(noSwizzle), swizzled) << "the layouts must differ for this test to be meaningful";
+    EXPECT_EQ(run(preswizzle), swizzled);
+    EXPECT_TRUE(dataInit.preswizzledA());
+    dataInit.postProblem();
+}
 #endif
 
 // =============================================================================
@@ -621,6 +795,132 @@ TEST(DecodeMXElement, UnsupportedDataTypeReturnsNaN)
     EXPECT_TRUE(std::isnan(dt::decodeMXElement(rocisa::DataType::Half,
                                                scale, data, 0, 0)));
 }
+
+// -----------------------------------------------------------------------------
+// 4.10 detail::naturalMXScaleFromCanonical
+//      Must undo restrideMXScaleBufferKFast, so the swizzled GPU scale can be
+//      built from the canonical copy instead of regenerating the MX data.
+// -----------------------------------------------------------------------------
+TEST(NaturalMXScaleFromCanonical, InvertsKFastRestride)
+{
+    // K = 576 with mxBlock 32: 18 K blocks, padded to 24.
+    size_t const         compactFree = 5, compactKBlocks = 18, paddedKBlocks = 24;
+    std::vector<uint8_t> natural(compactFree * compactKBlocks);
+    std::iota(natural.begin(), natural.end(), uint8_t{1});
+
+    std::vector<uint8_t> canonical(compactFree * paddedKBlocks, 0xAB);
+    std::memcpy(canonical.data(), natural.data(), natural.size());
+    restrideMXScaleBufferKFast(canonical.data(), compactFree, compactKBlocks, paddedKBlocks, 1);
+    ASSERT_NE(std::vector<uint8_t>(canonical.begin(), canonical.begin() + natural.size()), natural);
+
+    EXPECT_EQ(dt::naturalMXScaleFromCanonical(canonical.data(),
+                                              natural.size(),
+                                              /*kFast=*/true,
+                                              compactFree,
+                                              compactKBlocks,
+                                              paddedKBlocks,
+                                              1),
+              natural);
+}
+TEST(NaturalMXScaleFromCanonical, CopiesPrefixWhenNotRestrided)
+{
+    std::vector<uint8_t> canonical(64);
+    std::iota(canonical.begin(), canonical.end(), uint8_t{1});
+    std::vector<uint8_t> const prefix(canonical.begin(), canonical.begin() + 40);
+
+    // K-slow: the canonical copy keeps the natural order, padding at the tail.
+    EXPECT_EQ(dt::naturalMXScaleFromCanonical(canonical.data(), 40, false, 5, 8, 16, 1), prefix);
+    // K-fast without K-block padding: nothing was restrided.
+    EXPECT_EQ(dt::naturalMXScaleFromCanonical(canonical.data(), 40, true, 5, 8, 8, 1), prefix);
+}
+
+// -----------------------------------------------------------------------------
+// 4.11 detail::swizzleNaturalMXScale
+//      Swizzling the natural scales must give exactly what generateMXInput
+//      emits when asked for the layout, for every operand orientation. The
+//      client calls generateMXInput with the data tensor's sizes: {K, MN}
+//      when K is along the rows (TN A, N B), {MN, K} otherwise.
+// -----------------------------------------------------------------------------
+struct SwizzleParam
+{
+    hipDataType   dataType;
+    MXScaleLayout layout;
+    bool          isMatrixA;
+    bool          transposed;
+    size_t        K;
+    size_t        MN;
+};
+class SwizzleNaturalMXScaleTest : public ::testing::TestWithParam<SwizzleParam>
+{
+};
+TEST_P(SwizzleNaturalMXScaleTest, MatchesGenerateMXInputWithLayout)
+{
+    auto const&       p         = GetParam();
+    constexpr int     mxBlock   = 32;
+    constexpr uint8_t sentinel  = 0xAB;
+    bool const        kIsRows   = (p.isMatrixA && p.transposed) || (!p.isMatrixA && !p.transposed);
+    size_t const      rows      = kIsRows ? p.K : p.MN;
+    size_t const      cols      = kIsRows ? p.MN : p.K;
+    size_t const      dataBytes = p.dataType == static_cast<hipDataType>(HIP_R_4F_E2M1)
+                                      ? (rows * cols + 1) / 2
+                                      : rows * cols;
+    size_t const      naturalBytes = ((rows + mxBlock - 1) / mxBlock) * cols;
+
+    auto generate = [&](MXScaleLayout layout, std::vector<uint8_t>& scale) {
+        std::vector<uint8_t> data(dataBytes);
+        scale.assign(4 * naturalBytes + 4096, sentinel);
+        generateMXInput(p.dataType,
+                        HIP_R_8F_UE8M0,
+                        data.data(),
+                        scale.data(),
+                        rows,
+                        cols,
+                        rows,
+                        p.transposed,
+                        p.isMatrixA ? mxBlock : 1,
+                        p.isMatrixA ? 1 : mxBlock,
+                        p.isMatrixA,
+                        layout,
+                        "Bounded",
+                        -1.0f,
+                        1.0f);
+        return data;
+    };
+
+    std::vector<uint8_t> natural, expected;
+    auto const           dataNatural  = generate(MXScaleLayout::None, natural);
+    auto const           dataSwizzled = generate(p.layout, expected);
+    ASSERT_EQ(dataNatural, dataSwizzled);
+    natural.resize(naturalBytes);
+
+    auto const swizzled
+        = dt::swizzleNaturalMXScale(natural, p.layout, rows, cols, mxBlock, kIsRows);
+    ASSERT_LT(swizzled.size(), expected.size());
+    EXPECT_EQ(swizzled, std::vector<uint8_t>(expected.begin(), expected.begin() + swizzled.size()));
+    EXPECT_EQ(expected[swizzled.size()], sentinel)
+        << "generateMXInput wrote more swizzled bytes than swizzleNaturalMXScale returned";
+}
+INSTANTIATE_TEST_SUITE_P(
+    MXScaleLayouts,
+    SwizzleNaturalMXScaleTest,
+    ::testing::ValuesIn([] {
+        std::vector<SwizzleParam> params;
+        for(auto dataType : {HIP_R_8F_E4M3, static_cast<hipDataType>(HIP_R_4F_E2M1)})
+            for(auto layout : {MXScaleLayout::GFX950, MXScaleLayout::GFX1250})
+                for(bool isMatrixA : {true, false})
+                    for(bool transposed : {true, false})
+                        for(auto [K, MN] : {std::pair<size_t, size_t>{512, 128},
+                                            std::pair<size_t, size_t>{576, 96}})
+                            params.push_back({dataType, layout, isMatrixA, transposed, K, MN});
+        return params;
+    }()),
+    [](::testing::TestParamInfo<SwizzleParam> const& info) {
+        auto const& p = info.param;
+        return std::string(p.dataType == HIP_R_8F_E4M3 ? "FP8" : "FP4")
+               + (p.layout == MXScaleLayout::GFX950 ? "_gfx950" : "_gfx1250")
+               + (p.isMatrixA ? "_A" : "_B") + (p.transposed ? "T" : "N") + "_K"
+               + std::to_string(p.K) + "_MN" + std::to_string(p.MN);
+    });
 
 
 // =============================================================================
@@ -819,4 +1119,69 @@ TEST(CopyTensorVoid, CopiesSource)
     ASSERT_EQ(hipStreamSynchronize(nullptr), hipSuccess);
 
     EXPECT_EQ(dst, src);
+}
+
+// =============================================================================
+//   Section 8 — DataInitialization::initArrayTrig over a broadcast dimension
+// =============================================================================
+// A zero-stride batch dimension shares one matrix across batches, so the 3 x 4 x 2 tensor below
+// has 12 allocated elements. Trig must fill them once, from batch 0 (sin of the logical index
+// 0..11); otherwise batch 1 races to overwrite them with sin(12..23).
+TEST(TrigInit, BroadcastDimensionHoldsFirstBatch)
+{
+    using TensileLite::Client::DataInitialization;
+    TensorDescriptor desc("a", rocisa::DataType::Float, {3, 4, 2}, {1, 3, 0});
+    ASSERT_EQ(desc.totalAllocatedElements(), 12u);
+    for(int rep = 0; rep < 20; rep++)
+    {
+        std::vector<float> array(12, 42.0f);
+        DataInitialization::initArrayTrig<float, false, false>(array.data(), desc);
+        for(size_t k = 0; k < array.size(); k++)
+            ASSERT_EQ(array[k], static_cast<float>(std::sin(double(k))))
+                << "rep " << rep << ", element " << k;
+    }
+}
+
+// =============================================================================
+//   Section 9 — DataInitialization::getValue<T, InitMode::RandomNarrow>
+// =============================================================================
+// RandomNarrow assembles random sign/significand bits with an exponent in [-100, 0], so every
+// value must be finite with magnitude below 2 and a biased exponent in [bias - 100, bias].
+// BFloat16 used to pass the assembled bit pattern to BFloat16's value constructor, which treats
+// it as a number (0x3f80 became 16256.0f instead of 1.0f).
+namespace
+{
+    template <typename T>
+    void expectRandomNarrowRange(int expBits, int sigBits, uint32_t (*bitsOf)(T))
+    {
+        using TensileLite::Client::DataInitialization;
+        using TensileLite::Client::InitMode;
+        const int bias = (1 << (expBits - 1)) - 1;
+        for(int i = 0; i < 10000; i++)
+        {
+            T        v    = DataInitialization::getValue<T, InitMode::RandomNarrow>();
+            float    f    = static_cast<float>(v);
+            uint32_t bits = bitsOf(v);
+            int      exp  = (bits >> sigBits) & ((1 << expBits) - 1);
+            ASSERT_TRUE(std::isfinite(f)) << "bits=0x" << std::hex << bits;
+            ASSERT_LT(std::fabs(f), 2.0f) << "bits=0x" << std::hex << bits;
+            ASSERT_GE(exp, bias - 100) << "bits=0x" << std::hex << bits;
+            ASSERT_LE(exp, bias) << "bits=0x" << std::hex << bits;
+        }
+    }
+} // namespace
+
+TEST(RandomNarrowInit, FloatStaysInNarrowRange)
+{
+    expectRandomNarrowRange<float>(8, 23, [](float v) {
+        uint32_t u;
+        std::memcpy(&u, &v, sizeof(u));
+        return u;
+    });
+}
+
+TEST(RandomNarrowInit, BFloat16StaysInNarrowRange)
+{
+    expectRandomNarrowRange<TensileLite::BFloat16>(
+        8, 7, [](TensileLite::BFloat16 v) { return uint32_t(v.data); });
 }

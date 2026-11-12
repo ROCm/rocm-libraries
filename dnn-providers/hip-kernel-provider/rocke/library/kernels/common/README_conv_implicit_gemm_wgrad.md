@@ -45,23 +45,70 @@ On MFMA targets, `epilogue="cshuffle"` is **required** for bf16/fp16 output when
 `split_k > 1`. The direct-atomic path emits zero-filled packed atomics at the
 scattered MFMA layout; the cshuffle path produces genuinely contiguous adjacent
 pairs after the LDS shuffle, which is necessary for correct `<2 x dtype>` packed
-atomics. WMMA has no cshuffle epilogue; on arches whose `ArchTarget` sets
-`memory.has_global_float_atomic_add` (gfx1250) its split-K epilogue places each
-value in its half of the pair itself, so `default` is the split-K epilogue there.
-Other wave32 arches keep `split_k=1`, and no WMMA arch has the two-stage path.
+atomics. On WMMA arches whose `ArchTarget` sets
+`memory.has_global_float_atomic_add` (gfx1250) the `default` split-K epilogue
+places each value in its half of the pair itself, and `cshuffle` pairs through
+LDS from the WMMA fragment; the two-stage path decodes the WMMA fragment
+through `op.dst_layout()`. Other wave32 arches keep `split_k=1` and have no
+two-stage path.
 
 ---
 
 ## Changelog
+
+### Register-prefetch K loop (`prefetch_global_regs`, MFMA)
+
+The plain synchronous K loop waited for each tile's global reads before its
+MFMAs and never had the next tile in flight. `prefetch_global_regs=True` keeps tile
+k+1's reads in VGPRs under tile k's MFMAs and writes them to LDS at the top of
+the next iteration, behind LDS-only barriers. Mirrored in the C++ engine;
+rejected with `async_dma`, `unroll_k`, `prefetch_addr`, stream-K and on WMMA,
+and when a tile needs more than 32 global loads per thread per operand (the
+carried-value limit both engines share).
+
+### Async K loop on WMMA (gfx1250)
+
+The WMMA K loop was single-buffered with no overlap: load, barrier, WMMA,
+barrier. `async_dma` now covers it on gfx1250, mirrored in the C++ engine.
+`pipeline` stays `mem`, and `unroll_k` / `prefetch_addr` stay rejected on WMMA.
+
+- `async_dma` on gfx1250 is a ping-pong over `global_load_async_to_lds`, because
+  gfx1250 has no gfx9 `buffer_load_lds`.
+  - It reuses the synchronous K-outer loaders for the slot partition, and keeps
+    the bank-friendly row pad of 8, since the copy writes a per-lane LDS
+    address.
+  - Each phase waits `s_wait_asynccnt 0` and takes one LDS barrier, then issues
+    the next tile while the current tile's WMMAs run.
+  - The copy has no buffer-resource range check. The loader therefore ANDs that
+    check (byte offset below the tensor size, compared unsigned as the
+    resource does, so an offset at or past 2 GiB is out of range) into the
+    descriptor's `valid`, and zero-fills failing chunks with an LDS store of
+    the tile's element type (fp16 or bf16).
+  - It needs a 4-, 8- or 16-byte chunk on both operands, so an odd channel run
+    is rejected.
+
+### cshuffle epilogue on WMMA (gfx1250)
+
+The WMMA C fragment gives each lane one dW column of 8 rows. The default
+epilogue therefore writes a 16-bit split-K partial as one zero-partner packed
+atomic per element, so every dword takes two atomics. `epilogue="cshuffle"` now
+admits WMMA. It stages the tile through LDS with `CShuffleEpilogue.from_grid_op`,
+the WMMA path the forward and dgrad epilogues already use, and then issues
+genuine `<2 x dtype>` pairs from contiguous runs: half the atomics, still
+coalesced across lanes.
+
+Swapping the WMMA operands instead was tried and dropped. That swap gives each
+lane a contiguous run, but it spreads the 32 lanes of one instruction over 32
+dW rows, and the extra memory transactions outweigh the halved atomic count.
 
 ### Split-K on gfx1250 (WMMA)
 
 - 16-bit and fp32 split-K are enabled on gfx1250 through the WMMA atomic
   epilogue (`_emit_wgrad_split_k_epilogue_wmma`, mirrored in the C++ engine).
   Both engines admit WMMA split-K only where the arch catalog sets
-  `memory.has_global_float_atomic_add`, and only inside the WMMA wgrad subset (`mem` pipeline, `default` epilogue, 16x16x16 or
-  16x16x32 atom).
-- Degree (`WgradSplitPolicy` in `rocke/helpers/split_k.py`): the smaller of a
+  `memory.has_global_float_atomic_add`, and only inside the WMMA wgrad subset
+  (`default` or `cshuffle` epilogue, 16x16x16 or 16x16x32 atom).
+- Degree (`WgradSplitPolicy` in `kernels/common/conv_split_k.py`): the smaller of a
   CTA-fill term and a slice-depth term, under a per-dtype cap. Each packed
   16-bit atomic rounds the running sum in dW, so with same-sign partials the
   error grows with the degree, up to about `degree * 2**-8` for bf16 (7
@@ -69,20 +116,32 @@ Other wave32 arches keep `split_k=1`, and no WMMA arch has the two-stage path.
   degree that keeps that bound under the suite's 5e-2 tolerance
   (`atomic_rounding_degree_cap`); higher degrees miss it on all-positive
   inputs. fp32 takes the general cap of 128.
-- fp16 is not split automatically: its cap is 1, so `--split-k -1` (and every
-  auto caller) runs it unsplit. The fp16 packed atomic does not scale like
-  bf16's on gfx1250. In a degree sweep the best fp16 degree ranged from 16 on
-  a tiny dW down to none at all, where every degree was slower than
-  `split_k=1`. No single cap avoids that loss. The split-K binaries are still
-  built, and an explicit degree launches them for callers whose shape gains.
-  The two-stage f32 path is the planned fp16 reduction.
+- fp16 has its own policy: fill to 1024 CTAs (2048 grouped) with K slices
+  down to 512, up to degree 97. Earlier fp16 was not split automatically
+  (cap 1), because the packed fp16 atomic was lowered as a fenced atomic
+  (`global_wb` / `global_inv` around every add). It is now an agent-scope
+  monotonic `atomicrmw`, like bf16's, and the policy was refitted on a degree
+  sweep of the cached split-K binaries. The cap of 97 is the accuracy bound
+  for fp16's 10 fraction bits (unit roundoff `2**-11`), as bf16's 12 is for
+  its 7: no fp16 degree failed the 5e-2 verification on the sweep, but at 128
+  all-positive inputs can miss it (one 1.0 partial followed by 127 partials of
+  `2**-11` rounds back to 1.0, a 5.8% error). The cap binds only the packed
+  atomic; the f32 workspace (two-stage) degree is resolved as fp32 dW.
 - Reachability: as on gfx950, wgrad has no dispatcher instance list; it is
   served from the AOT cache. The cache grid (`kernels/conv/aot_jobs.py`) builds
   one split-K binary per geometry, and the degree is resolved at launch by
   `select_split_k_wgrad` with the dW dtype (`benchmark_implicit_gemm_conv.py
   --run-from-cache --split-k -1`). A 16-bit dW whose row length (`Z*Y*X*cpg`) is
-  odd cannot use the packed atomic, and WMMA has no two-stage path to fall back
-  on, so such problems run at `split_k=1`.
+  odd cannot use the packed atomic; it reaches split-K through the two-stage
+  kernels (below).
+- Two-stage (f32 workspace) split-K on gfx1250: the Stage 1 scratch epilogue
+  decodes the WMMA result fragment through `op.dst_layout()`, as the WMMA atomic
+  epilogue does, mirrored in the C++ engine. The workspace reduction
+  accumulates in fp32, so the split policy resolves its degree with the fp32
+  cap (`conv_split_k`). The AOT grid builds the two-stage kernels
+  (`ws_replicas` = 8) next to the packed-atomic ones, and from the cache on
+  wave32 bf16 runs them by default too (`--two-stage auto`), since the bf16
+  packed atomic is capped at degree 12 for accuracy.
 - Results are not bit-reproducible across runs once `split_k > 1` (atomic
   ordering), and the caller must zero `dW` before launch.
 - Runbook mapping (`platform/dsl_docs/optimization/optimization_runbook.md`)
@@ -105,7 +164,7 @@ Other wave32 arches keep `split_k=1`, and no WMMA arch has the two-stage path.
   - §13.1 and §13.2 (checklists): "Is split-K needed?" is the policy's
     CTA-fill term against the reduction length (`wg_K`) and the dW tile grid
     (`wg_M`, `wg_N`). Group tiling folds the group into `block_id_z`
-    alongside the K-slice. Output store mapping is the WMMA C layout above.
+    alongside the K-slice. Output store mapping is the WMMA result layout above.
   - §14.1 and §16.1: the 16-bit degree against the atomic's rounding, a
     validator rule scoped to the wrong epilogue, and sweeping every 16-bit
     degree against the best `split_k=1` kernel before setting a cap (fp16
@@ -156,9 +215,9 @@ parameters are required.
 through the packed atomic or the two-stage f32 workspace, is chosen by
 `kernels.common.conv_split_k.resolve_conv_split_k` -- the one resolver the
 dispatcher, the builders and the benchmark share. On arches with a fitted
-split-K cost model (`rocke.helpers.split_k_planner`) it picks the cheapest
+split-K cost model (`kernels.conv.split_k_planner`) it picks the cheapest
 (degree, reduction) under that model; elsewhere it uses the CK formula
-(`select_split_k_wgrad`: `floor((waves_per_cu × num_cus) / base_grid)`,
+(`select_split_k_wgrad`, in the same module: `floor((waves_per_cu × num_cus) / base_grid)`,
 clamped to `[1, wg_K]`). On an arch with a `WgradSplitPolicy` (gfx1250), that
 fallback uses the policy instead; see "Split-K on gfx1250 (WMMA)" below. The
 resolver's `override` argument forces it (the benchmark sets it from
@@ -445,6 +504,87 @@ tiles for large-filter depthwise layers; other narrow-channel shapes fall to the
 split-K kernels. Every
 launch follows the zeroing contract above, and `workspace` launches are timed
 together with their Stage 2 reduce.
+
+### TF32 compute (`ConvDataSpec(mma_dtype="tf32")`)
+
+TF32 is a compute mode, not a storage type. A TF32 wgrad is spelled
+`ConvDataSpec(dtype_a="fp32", dtype_b="fp32", dtype_d="fp32",
+mma_dtype="tf32")`: dY, X and dW stay fp32 in memory and in LDS, and only the
+MMA changes. Spelling `"tf32"` (or `"xf32"`) as a storage dtype is rejected,
+because the byte-sizing gates would size it as a 2-byte type.
+
+Which atom runs is the catalog's answer to `(tf32, tf32, fp32)`:
+
+| target | atoms (`warp_tile`) | per-lane fragment | issued as |
+|---|---|---|---|
+| gfx942 | 16x16x8, 32x32x4 | 2 fp32 | one native `v_mfma_*_xf32` |
+| gfx950 | 16x16x32, 32x32x16 | 8 fp32 | three `v_mfma_*_bf16` (bf16x3) |
+
+What changes in the kernel is small and is gated on `mma_dtype`, so every other
+spec emits byte-identical IR and keeps its name:
+
+- The atom, `has_shape` and the op lookup ask for the MMA dtype; everything that
+  sizes memory (descriptors, pointer types, LDS bytes, load-vector ladders, the
+  epilogues) keeps the storage dtype.
+- The LDS element type is keyed on storage, so the tile stays fp32.
+- Each fragment read from LDS is reinterpreted as `vec<tf32xN>` with a bitcast:
+  no instruction and no rounding. It happens once per fragment, outside the
+  `(mi, ni)` MMA loop. On gfx950 the bf16x3 split of a fragment is shared by
+  every MMA that reuses it.
+- The scheduling hints count physical work: on gfx950, an 8-float fragment is
+  two `ds_read_b128` and a logical MMA is three MFMAs.
+- On gfx950, a warp tile with 384 or more fp32 accumulators per lane is
+  rejected for TF32. With the BF16x3 split temporaries live, such a tile sits at
+  the 512-VGPR ceiling, where the compiler's VGPR-to-AGPR spill path was seen to
+  miscompile a two-stage wgrad kernel (the same IR is correct at `-O1`). The
+  native gfx942 atom is not affected.
+- The kernel name gets a trailing `_tf32`. On gfx950, TF32 and BF16 share the
+  `a32x32x16` shape tag, so without the flag they would collide in the compile
+  cache.
+- The C++ wgrad instance builds TF32 specs too, byte-identical to Python
+  (TF32 configs in the `conv_implicit_gemm_wgrad` parity family).
+
+**M-outer only.** A TF32 spec rejects `lds_k_outer`. That layout feeds its
+operands through `ds_read_b64_tr_b16`, a 16-bit transpose read with no 32-bit
+form, and its pad comes from a 16-bit bank analysis. It also rejects
+`async_dma`, because wgrad's direct global->LDS load needs the K-outer tile. It
+also rejects WMMA targets, which have no TF32 atom. The fragment is read as
+loads of at most four fp32 (`_load_mma_operand`, shared with the forward
+kernel): gfx950's 8-wide fragment is two `<4 x float>` halves joined before the
+bitcast, gfx942's 2-wide one a single `<2 x float>`. No load claims more than
+the 16-byte alignment the LDS pool has. The M-outer tile therefore needs
+`tile_k + pad` to be a multiple of `min(fragment, 4)`: 4 on gfx950, 2 on gfx942.
+The default pad of 8 satisfies it, and so does a pad of 4.
+`default_lds_k_outer`, `default_lds_k_pad` and `default_vector_sizes` take the
+**storage** dtype (`"fp32"`). They then return fp32's answers, which are the only ones TF32 can build.
+
+**Epilogues are unchanged.** dW must be fp32. The split-K atomic is therefore
+the scalar `global_atomic_add_f32`, with either epilogue. The two-stage scratch,
+the stream-K partials and `conv_wgrad_workspace_reduce` are always f32, so
+split-K, two-stage and stream-K (linear, tree, atomic) need no TF32-specific
+change. Grouped and 3-D wgrad need none either.
+
+**Numerics.** The bitcast does not round.
+- **gfx942:** the hardware ignores the low 13 mantissa bits, which is truncation
+  to TF32.
+- **gfx950:** the bf16x3 emulation splits the full fp32 payload into a BF16 high
+  part and a BF16 remainder (with RNE converts). It sums three of the four
+  partial products and drops `lo*lo`. That keeps about 16 mantissa bits, which
+  is more than TF32.
+- **Across targets:** results are not bit-reproducible.
+
+The GPU tests compare against an fp32 reference with TF32 disabled in torch:
+- **gfx950:** bounded at `1e-4` of the peak `|dW|`. A single BF16 pass misses
+  this bound by more than an order of magnitude.
+- **gfx942:** compared against a reference built from inputs truncated with
+  `& 0xFFFFE000`, at `1e-3`.
+
+**Next step.** Two changes would help gfx950, where the bf16x3 split adds VALU
+work per fragment and the fp32 M-outer store is bank-conflicted.
+- Split each element once on the LDS store, into BF16 high and low K-outer
+  planes, and read them back through the existing transpose read. This needs a
+  split op shared by both engines.
+- Give the M-outer fp32 tile its own pad policy.
 
 ## Next steps
 

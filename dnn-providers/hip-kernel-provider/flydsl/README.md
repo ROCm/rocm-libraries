@@ -24,7 +24,13 @@ file per engine:
 [`FlydslSdpaCdnaNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaNative.cpp),
 [`FlydslSdpaCdnaDualwaveNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaDualwaveNative.cpp)
 and
-[`FlydslSdpaCdnaDecodeNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaDecodeNative.cpp),
+[`FlydslSdpaCdnaDecodeNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaCdnaDecodeNative.cpp)
+(and [`FlydslSdpaDropoutMaskNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaDropoutMaskNative.cpp),
+the RNG dump's keep-mask writer's engine, which serves no graph; the dropping engines launch its
+objects, `FlydslSdpaRngDump.hpp`; and
+[`FlydslSdpaHeadPadNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaHeadPadNative.cpp),
+the head-dim padding copy's engine, which serves no graph either; the SDPA engines launch its
+object to copy a head dim that is not a multiple of 8 into a padded buffer, `FlydslSdpaHeadPad.hpp`),
 with what the SDPA engines share in `FlydslSdpaRdnaCommon.hpp` and `FlydslSdpaCdnaCommon.hpp`,
 and the rules RDNA and CDNA apply alike (the mask's bounds, the sink, the scale tensor,
 output aliasing) in `FlydslSdpaShared.hpp`.
@@ -52,11 +58,13 @@ Each `<op>/<target>/` content directory under
 one rocKE's large files use. Git holds only the
 `<op>/<target>.dvc` sidecar, which records the directory's content hash, and the
 human-facing files beside it (`<target>.SOURCE.md` and the op's descriptors).
-Fetch the directories before configuring, from the repository root (TheRock's
-`fetch_sources` pulls every pointer for you):
+The trained heuristic models are DVC outputs on the same remote: each
+`<op>/heuristics/<ued-id>/<role>/<arch>/<metric>/model.bin` has a `model.bin.dvc`
+pointer beside its `heuristic.uhd.json`. Fetch both kinds before configuring, from
+the repository root (TheRock's `fetch_sources` pulls every pointer for you):
 
 ```bash
-dvc pull -r ingestor dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/FlyDSL/*/*.dvc
+dvc pull -r ingestor --recursive dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/FlyDSL
 ```
 
 Reads are anonymous (`.dvc/config`). The provider checks every pointer at configure
@@ -64,7 +72,10 @@ exactly as it checks rocKE's: with `HIPKERNELPROVIDER_ENABLE_FLYDSL` ON, a direc
 that is missing or incomplete gets a warning naming its `dvc pull` command, and its
 target ships no FlyDSL kernels (FlyDSL reports dormant if nothing was pulled); builds
 and tests still run. `-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` makes it an
-error, as release builds and the superbuild CI set. Inside each directory,
+error, as release builds and the superbuild CI set. The scan covers every pointer under
+`FlyDSL/`, so a missing `model.bin` is reported the same way; a model whose file is
+absent is not used, and its engine ranks and estimates as if none were installed for
+that arch. Inside each directory,
 `manifest.json` still records every object's SHA256, which the build checks (below).
 
 ## Where to go
@@ -76,9 +87,12 @@ error, as release builds and the superbuild CI set. Inside each directory,
 
 ## What ships
 
-For RDNA, four engines -- RMSNorm forward and backward, and SDPA prefill and decode, 309
-kernel objects per family -- plus, on gfx12-generic only, AOTriton's gfx1201 attention
-kernel as a fifth (72 more, 381 in all), built once for each of two LLVM generic targets
+For RDNA, four engines -- RMSNorm forward and backward, and SDPA prefill and decode, 581
+kernel objects on gfx11-generic and 461 on gfx12-generic (gfx11's prefill engine also carries
+the 16-bit dropout objects and the pair tiers' bias objects; gfx12 serves those graphs on the
+aiw objects) -- plus, on gfx12-generic only, AOTriton's gfx1201 attention kernel as a fifth
+(256 more), and on both two helper ops, the RNG dump's keep-mask writer and the head-dim padding
+copy (one object each; 583 and 719 in all), built once for each of two LLVM generic targets
 and shipped to every part each covers:
 
 - **`gfx11-generic`** -- RDNA3 / RDNA3.5: gfx1100, gfx1101, gfx1102, gfx1103,
@@ -112,28 +126,44 @@ bias and dbias, other dtypes, non-packed operands, fusion — are enumerated in
 [COVERAGE.md §3](COVERAGE.md), each with the reason the shipped objects cannot
 compute it.
 
-**SDPA forward on RDNA**: two engines, 156 objects. The prefill kernel
-(`hipkernel:flydsl_sdpa_rdna`, 84 objects) and the split-KV decode kernel
-(`hipkernel:flydsl_sdpa_rdna_decode`, 72 objects), bf16 and f16 ×
+**SDPA forward on RDNA**: two engines, 308 objects (428 on gfx11-generic). The prefill kernel
+(`hipkernel:flydsl_sdpa_rdna`, 192 objects, 312 on gfx11-generic) and the split-KV decode kernel
+(`hipkernel:flydsl_sdpa_rdna_decode`, 116 objects), bf16 and f16 ×
 `head_dim` 64, 96, 128 and 256 × causal on and off × with and without an
 additive bias (`attn_mask`, f32 or the query's dtype, broadcast over any axis), plus a generic tier
-that serves every other `head_dim` that is a multiple of 8 up to 256, and a
-decode path (split-KV, the GQA group packed into 16-row tiles, with and without a bias) for decode steps, multi-head latent attention's un-absorbed prefill (Q/K 192, V 128), and decode objects at Q/K 576 / V 512 (absorbed MLA) and 512/512; attention sinks (gpt-oss) at `head_dim` 64 and 128, prefill and decode. Batch, both sequence lengths,
+that serves every other `head_dim` that is a multiple of 8 up to 256, with or without a bias, and a
+decode path (split-KV, the GQA group packed into 16-row tiles, with and without a bias, and a generic tier
+up to 512 without one) for decode steps, multi-head latent attention's un-absorbed prefill (Q/K 192, V 128), and decode objects at Q/K 576 / V 512 (absorbed MLA) and 512/512; attention sinks (gpt-oss), FLOAT or in the query's dtype, at `head_dim` 64 and 128, prefill and decode, with or without a bias. Batch, both sequence lengths,
 head counts (MHA, GQA, MQA), every stride, the scale, the mask bounds (causal at
 either corner, right-side bands, sliding windows) and the LSE output are runtime
 arguments, so each object serves every shape and layout of its class. Inference
-only; not yet served: padding / varlen. Status against common SDPA feature
+only; padding (per-batch lengths under `padding_mask`) is a runtime argument every object reads;
+on gfx11, 96 16-bit prefill dropout objects (the twins at `head_dim` 64, 96, 128 and 256 and the
+generic tiers' dropout builds for every other multiple of 8 up to 256; bf16/f16 × causal, each
+without a bias, with an f32 one or one in the query's dtype), and on both families 12 exact-f32
+ones, apply dropout with AOTriton's Philox mask (on gfx12 the aiw objects below serve 16 bits);
+packed (THD) sequences, compact or with per-batch lengths (cuDNN's form), run on the prefill
+objects (a runtime argument they read; the decode objects decline them). Any `head_dim` pair of
+multiples of 8 up to 256 (V narrower or wider than Q/K) runs on twelve prefill pair tiers
+(64, 128, 256; V's width a runtime argument of its own), and up to 512 on the aiw objects below. Status against common SDPA feature
 requirements and every declined feature with its effort are in
 [COVERAGE.md §5](COVERAGE.md).
 
-**SDPA forward on RDNA4, AOTriton's kernel** (`hipkernel:flydsl_sdpa_aiw`, gfx12-generic, 72
+**SDPA forward on RDNA4, AOTriton's kernel** (`hipkernel:flydsl_sdpa_aiw`, gfx12-generic, 256
 objects): AOTriton's FlyDSL gfx1201 forward, vendored under
 [`kernels_src/kernels/attention_rdna4/`](kernels_src/kernels/attention_rdna4/README.md) with the
 modifications that bring it to the RDNA kernel's coverage (sinks, an additive mask with a
 causal mask or window, f32 masks, V's own head count, a strided LSE). bf16 and f16 × exact
-`head_dim` 64, 128, 256 (plain, a mask in the query's dtype, an f32 mask), sinks at 64 and
-128, MLA 192/128, and padded tiers up to 64, 96, 128, 160, 224 and 256 for any other
-`head_dim` that is a multiple of 8, each with and without a mask or window. Faster than the
+`head_dim` 64, 128, 256 (plain, a mask in the query's dtype, an f32 mask), sinks (FLOAT or the
+query's dtype) at 64 and 128 (alone or with either mask), MLA 192/128, and padded tiers up to 64, 96, 128, 160, 224, 256, 384 and 512 for any other
+`head_dim` that is a multiple of 8 (so up to 512, which no other RDNA engine serves at a prefill
+tile past 256), each plain or with either additive mask, and each with and
+without a causal mask or window. Every object also serves padding (`padding_mask` with
+per-batch `seq_len_q`/`seq_len_kv`, read at runtime) and packed (THD) sequences (ragged Q/O
+and K/V through cumulative token tables; COVERAGE §5.9), the padded tiers any Q/K and V head-dim
+pair (V narrower or wider, the wider within the tile), and 96 dropout objects
+(bf16/f16 × causal × exact 64, 128, 256 without a mask, with either mask or with either read one
+key at a time, and × the padded 96, 160 and 224 tiers without a mask or with either) apply dropout with AOTriton's Philox mask (COVERAGE §5.10). Faster than the
 RDNA kernel on medium and long sequences, slower on short ones; which runs a graph both
 serve is the heuristic's (or autotune's) to decide. `generators/gen_sdpa_aiw.py` builds each
 row through the kernel's own tuning table and records the schedule it chose as knobs.
@@ -144,13 +174,27 @@ kernel (`hipkernel:flydsl_sdpa_cdna_dualwave`, **gfx950** only), and the generic
 split-KV decode objects (`hipkernel:flydsl_sdpa_cdna_decode`): bf16 and f16 at
 `head_dim` 64, 128 and 256, causal and non-causal; both sequence
 lengths, the head counts, every operand's strides (BSHD, BHSD, packed QKV), the
-softmax scale, the causal diagonal, sliding windows and the LSE output are runtime
+softmax scale, the causal diagonal (top-left or bottom-right, with a band of any width),
+sliding windows and the LSE output are runtime
 arguments. A bias in the query's dtype is served at `head_dim` 64, 128 and 256 by the
 generic kernel on all three arches, and at 64 and 128 by gfx950's dual-wave kernel;
-attention sinks at 64 and 128 (prefill and decode); every other `head_dim` that is a
-multiple of 8 up to 256 by bucket objects (gfx90a adds 96, 160, 192 and 224 buckets);
-MLA prefill with V 128 and Q/K up to 256, and absorbed-MLA decode at V 512 (Q/K 576).
-100 objects on gfx950, 102 on gfx942 and on gfx90a. Each class ships a default
+attention sinks (FLOAT or the query's dtype) at 64 and 128 (prefill and decode), with or without a bias; every other
+`head_dim` that is a multiple of 8 up to 256 by bucket objects, with or without a bias
+(gfx90a adds 96, 160, 192 and 224 buckets); an f32 bias, or one broadcast along the keys
+or laid out off the 16-byte rows, by bucket objects that read it one key at a time;
+MLA prefill with V 128 and Q/K up to 256, exact 512/512 prefill (the VAE mid-block's
+attention), every multiple of 8 from 264 to 504 by a 512 bucket that splits O's columns four
+ways, any Q/K and V head dims that differ (each a multiple of 8 up to 512) by pair buckets at 64,
+128, 256 and 512, and absorbed-MLA decode at V 512 (Q/K 576).
+Padding (per-batch lengths, padded rows O = 0 and LSE = −inf) runs on the generic prefill
+and decode objects, packed THD sequences (ragged offsets, compact) on the generic prefill
+objects, and dropout (AOTriton's Philox mask, bit for bit) on 82 generic prefill objects
+on gfx942, 76 on gfx950 and 72 on gfx90a (the exact dropout objects with and without a bias, the
+buckets' 36 dropout builds, and 12 f32); exact f32 on 26 generic prefill objects on gfx942 and
+gfx90a and 24 on gfx950 (every multiple of 8 up to 256, with and without a bias or dropout;
+[COVERAGE.md §7.11](COVERAGE.md)).
+298 objects on gfx950, 302 on gfx942 and 310 on gfx90a, plus the RNG dump's keep-mask writer and
+the head-dim padding copy on each (300, 304 and 312 in all). Each class ships a default
 object and measured companions -- other tiles for short queries and large problems --
 chosen by timing every candidate on the dnn-benchmarking attention graphs
 ([COVERAGE.md §7.6](COVERAGE.md)). It is the first set that carries
@@ -256,6 +300,8 @@ provider tree; everything else is relative to this directory.
 | Path | |
 |---|---|
 | `<content>/<op>/*.json` | descriptors shared by every target of an op: KMD (metadata schema), UED (engine), UHD (heuristic), UDD (dispatch), UMD (matcher) |
+| `<content>/<op>/flydsl_<op>_engine_estimate.uhd.json` | the engine estimate's (`predict_engine`, L1) `default` slot: a native UHD no scorer registers, so the loader disables it and keeps the engine until a trained model is installed for an arch |
+| `<content>/<op>/heuristics/<ued-id>/<role>/<arch>/[<metric>/]` | a trained UHD as `uhd_gen promote` installs it (a metric-less one directly under `<arch>/`): `heuristic.uhd.json` and the `model.bin` it names (in DVC). `gen_descriptors.py` binds each under its role and arch key in the op's UED, with the value promote writes: a list per key for every role (one UHD per metric; `predict_applicable_kernels` holds the candidate generators for future JIT spaces). Promote appends a new arch key where the generator sorts them, so regenerate after promoting; the bindings are unchanged by it. The IngestorGenerator binds the same values from its `engine.heuristics` config |
 | `<content>/<op>/<target>.SOURCE.md` | the target's readable summary: toolchain, input digest, one row per object |
 | `<content>/<op>/<target>/*.hsaco` | the committed code objects |
 | `<content>/<op>/<target>/*.kdp.json` | the target's pack, with one inline `hsaco` UKD per object |
@@ -269,7 +315,7 @@ provider tree; everything else is relative to this directory.
 | `generators/gen_<op>.py` | compile one op's (one engine's) rows into objects + manifest + `<target>.SOURCE.md`: `gen_rmsnorm`, `gen_rmsnorm_bwd`, `gen_sdpa_rdna`, `gen_sdpa_rdna_decode`, `gen_sdpa_aiw`, `gen_sdpa_cdna`, `gen_sdpa_cdna_dualwave`, `gen_sdpa_cdna_decode` |
 | `generators/_parallel.py` | compiles a generator's objects in a pool of worker processes (`FLYDSL_GEN_JOBS`) |
 | `generators/_sdpa_rdna_build.py`, `_sdpa_cdna_build.py` | what each architecture's SDPA generators share |
-| `gen_descriptors.py` | derives descriptors from the objects; `--check` re-verifies |
+| `gen_descriptors.py` | derives descriptors from the objects and binds the trained models installed under `heuristics/`; `--check` re-verifies |
 | `tools/diff_upstream.py` | vendored sources vs. their upstream checkouts, black-normalized |
 | `tools/check_shards.py` | after the pack: every member's shard ships exactly the checked-in objects |
 
@@ -285,9 +331,12 @@ it is generated output inside the per-target folders.**
 
 ```
 <content>/<op>/
-  flydsl_<op>.{kmd,ued,uhd,udd}.json, flydsl_<op>_kernel_match.umd.json
+  flydsl_<op>.{kmd,ued,uhd,udd}.json, flydsl_<op>_kernel_match.umd.json,
+  flydsl_<op>_engine_estimate.uhd.json
                               a fixed handful per op -- however many objects,
                               knobs, targets or arches it gains
+  heuristics/                 trained UHDs, one folder per role, arch and
+                              metric, bound into the UED by gen_descriptors.py
   <target>.SOURCE.md          one per target: the toolchain, the input digest,
                               and one short row per object (name, priority,
                               VGPRs, LDS, SHA256 prefix) -- the diff a review
@@ -334,7 +383,7 @@ Each link is checkable by a command, and [REGEN.md](REGEN.md) gives each command
 upstream FlyDSL @ 89ad52fbbb9e, AITER @ 8253efc40595
    │  tools/diff_upstream.py          — vendored copy == upstream, but for recorded modifications
 kernels_src/
-   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 309/309 gfx11-generic, 381/381 gfx12-generic, 253/253 gfx950, 255/255 gfx942, 255/255 gfx90a
+   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 583/583 gfx11-generic, 719/719 gfx12-generic, 453/453 gfx950, 457/457 gfx942, 465/465 gfx90a
 <content>/<op>/<arch>/*.hsaco + manifest.json
    │  gen_descriptors.py --check      — objects match manifest SHA256 and target; descriptors agree
 <content>/<op>/**/*.json (KDPs of inline hsaco UKDs)

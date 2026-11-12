@@ -50,7 +50,7 @@ call:
 | fp8 dequantize | fp8 Q/K/V times their descales (scalar or `[B, H_kv, 1, 1]`) to FP32, then the float core runs | CPU `forward`, GPU `fprop` + `sdpaDequantRef` |
 | fp8 output scaling | core writes FP32 `O_f`; `amax_o = max \|O_f\|`, `O = O_f * scale_o` in O's dtype | CPU `forward`, GPU `sdpaScaleOutRef` |
 | Paged K/V | CPU: gather pages into dense K/V (`gatherPagedKv`). GPU: the kernel reads pages in place through the table | plans / kernel |
-| Ragged (RFC 0014) | native packed forward (bf16, fp8); every other ragged graph is rewritten to its dense padded form, run dense, and packed back (`RaggedSdpaDensify.hpp`) | both executors |
+| Ragged (RFC 0014) | native forward for bf16 and fp8 over any layout the container accepts, with the `seq_len_q/kv` pair; other ragged graphs (including `Max` / `Sum_exp`) are rewritten to their dense padded form, run dense, and packed back (`RaggedSdpaDensify.hpp`) when the rewrite accepts them (what it declines: RFC 0014 §4.10) | both executors |
 | Philox dropout | the engine's `rng_dump` keep mask is applied as an explicit dropout mask with scale `1 / (1 - p)` | plans (`RngDumpHandoff.hpp` in the harness) |
 
 ### 1.3 What the references share
@@ -84,15 +84,15 @@ listed as an accepted hint (the last row).
 | Diagonal band (`left_bound`, `right_bound`, `diagonal_alignment`; deprecated causal flags) | Yes; bottom-right measured from each batch's live lengths | SEM-001, 003, 004, 005 |
 | Padding (`seq_len_q/kv`, `padding_mask`) | INT32 `[B, 1, 1, 1]`, both; pad rows give `O = 0`, `LSE = -inf` | SEM-008, 010 |
 | Paged K/V (`page_table_k/v`, `max_seq_len_kv`) | K, V or both paged, each with its own block size; table INT32 `[B, 1, ceil(max/block), 1]`; extent inferred as cuDNN does when unset; needs padding | SEM-009 |
-| Ragged tensors (`ragged_offset` on any primary) | native forward for BF16 and FP8 E4M3; everything else (other dtypes, bias, sinks, ragged Q over paged K/V, backward) through the dense rewrite; a `ragged_offset` on a paged K/V container is declined | RFC 0014 |
+| Ragged tensors (`ragged_offset` on any primary) | native forward for BF16 and FP8 E4M3, any container-valid layout, `seq_len_q/kv` bound as lengths; everything else (other dtypes, bias, sinks, `Max` / `Sum_exp`, ragged Q over non-ragged paged K/V, backward) through the dense rewrite; the dense rewrite declines what it cannot rewrite (RFC 0014 §4.10) | RFC 0014, SEM-026 |
 | Attention sink (`sink_token`) | FLOAT `[1, H_q, 1, 1]` | SEM-022 |
 | ALiBi (`alibi_mask`) | cuDNN slopes, `+ (skv - sq) * slope(h)`; top-left causal only (as cuDNN). The frontend accepts other alignments; the references decline them | SEM-021 |
 | Block-sparse mask (`block_mask`) | UINT8, one bit per 128 x 128 tile | SEM-025 |
 | Dropout, explicit mask (`dropout_mask`, `dropout_scale`) | FLOAT `[B or 1, H or 1, Sq, Skv]` | SEM-015 |
 | Dropout, Philox (`dropout_probability`, seed, offset) | only with an `rng_dump` output (the engine's keep mask is applied) | SEM-015 |
 | fp8 Q/K/V descales | scalar or `[B, H_kv, 1, 1]` FLOAT (a paged side needs a scalar on the GPU) | |
-| fp8 softmax / output scaling (`scale_s`, `descale_s`, `scale_o`, `amax_s`, `amax_o`) | one-element FLOAT; `scale_s` with `descale_s`; fp8 inputs only; not with dropout | SEM-024 |
-| Outputs: `stats` (LSE), `Max`, `Sum_exp` | FLOAT `[B, H, Sq, 1]` (packed when ragged) | SEM-011, 023 |
+| fp8 softmax / output scaling (`scale_s`, `descale_s`, `scale_o`, `amax_s`, `amax_o`) | one-element FLOAT; `scale_s` with `descale_s`; fp8 inputs only; not with dropout, except probability 0 without an rng_dump (no dropout, SEM-015) | SEM-024 |
+| Outputs: `stats` (LSE), `Max`, `Sum_exp` | FLOAT `[B, H, Sq, 1]` (ragged: any container-valid layout, e.g. `[H,T]` or `[T,H]`; `Max` and `Sum_exp` served by the dense rewrite, bound by `seq_len_q`) | SEM-011, 023 |
 | `generate_stats`, `mma_core_mode`, `implementation`, the node's `compute_data_type` | accepted; engine hints with no meaning for an FP32 oracle | |
 
 ### 2.2 Backward (`SdpaBackwardAttributes`)
@@ -105,7 +105,7 @@ listed as an accepted hint (the last row).
 | Scale, band, padding, ALiBi | as forward |
 | Bias and `dbias` | `dbias` = unscaled dS summed over every broadcast dim (SEM-014) |
 | Dropout, explicit mask (`dropout_mask`, `dropout_scale`, `dropout_scale_inv`) | cuDNN's composition (SEM-015) |
-| Ragged | through the dense rewrite |
+| Ragged | through the dense rewrite; origins and `seq_len` lengths for every role |
 | Philox dropout | **No**: the backward node has no `rng_dump` (needs an API change, below) |
 
 ### 2.3 Reference-only extensions
@@ -210,7 +210,8 @@ What the generators cover, and the gaps:
 | Max / Sum_exp | no bundle; properties + CPU/GPU parity only | (simple; could be added to the forward generator) |
 | softcap | no; not in the graph API | closed forms, gradcheck, parity |
 | Philox dropout | no oracle by design | the engine's RNG stream is engine-defined; the reference applies the engine's `rng_dump` |
-| backward ALiBi, backward ragged | no bundle | gradcheck + parity; the backward generator rejects them today |
+| backward ALiBi | no bundle | gradcheck + parity; the backward generator rejects it |
+| backward ragged | yes (the backward generator writes ragged bundles) | pack/unpack around dense, as forward |
 
 ### 3.7 Mutation testing
 

@@ -199,7 +199,8 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     }
 
     // Ragged primaries — demonstrating both construction forms:
-    //   Form (a): size-inference (reads ragged_offset[B] * multiplier from aux)
+    //   Form (a): size-inference (the element space follows from the offsets, strides and sequence
+    //             lengths)
     //   Form (b): explicit physicalElementCount
     // The sequence axis is SDPA_SEQ_AXIS (2) because dims are BHSD logical.
 

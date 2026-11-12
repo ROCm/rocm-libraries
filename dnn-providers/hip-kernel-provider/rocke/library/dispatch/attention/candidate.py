@@ -37,12 +37,21 @@ from .common import (
 from .dense_rules import DenseSpace, DenseSupports
 from .unified_rules import TUNING_ALGORITHM, AttentionGeometryVariant, unified_space
 
-# The dense selectors. gfx942 has one candidate whose space covers both bodies;
-# on gfx950 the grid and persistent bodies serve different features, so each
-# is its own algorithm (wide DMA is a second candidate of the persistent one).
+# The dense selectors. gfx942's tuned candidate has a space covering both bodies
+# (its qbminor candidate fixes the grid one); on gfx950 the grid and persistent
+# bodies serve different features, so each is its own algorithm (wide DMA is a
+# second candidate of the persistent one, qbminor a second of the grid one).
 DENSE_ALGORITHM = "attention_dense"
 DENSE_GRID_ALGORITHM = "attention_dense_grid"
 DENSE_PERSIST_ALGORITHM = "attention_dense_persist"
+# Every algorithm that routes through the dense launch path (SDPA's dense
+# gate, ``dispatch.sdpa.bind_dense``, builds its own "which algorithms do I
+# serve" set from this one; so does the attention route-coverage test), so a
+# new dense candidate cannot go unnoticed by only adding a literal nobody
+# re-checks.
+DENSE_ALGORITHMS = frozenset(
+    {DENSE_ALGORITHM, DENSE_GRID_ALGORITHM, DENSE_PERSIST_ALGORITHM}
+)
 
 
 def _tuning_precheck(variant: AttentionGeometryVariant):
@@ -82,16 +91,21 @@ def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
         return spec.build(arch)
 
     def signature(spec):
-        from kernels.common.attention_unified import _3d_signature, _attn_signature
+        from kernels.common.attention_unified import (
+            _tiled_2d_signature,
+            _tiled_3d_signatures,
+        )
 
         if spec.path == "3d":
-            return _3d_signature(
-                spec.kernel_spec.dtype, kv_dtype=spec.kernel_spec.kv_storage_dtype
+            segment, _ = _tiled_3d_signatures(
+                spec.arch,
+                spec.kernel_spec.dtype,
+                kv_dtype=spec.kernel_spec.kv_storage_dtype,
             )
-        return _attn_signature(
+            return segment
+        return _tiled_2d_signature(
+            spec.arch,
             spec.kernel_spec.dtype,
-            include_bt_stride=True,
-            include_qq_bias_stride=True,
             kv_dtype=spec.kernel_spec.kv_storage_dtype,
             emit_lse=bool(getattr(spec.kernel_spec, "emit_lse", False)),
         )
@@ -151,6 +165,7 @@ def make_dense_candidate(
     derived: Optional[
         Callable[[object, Mapping[str, object]], Mapping[str, object]]
     ] = None,
+    axis_names: Optional[frozenset] = None,
 ) -> KernelCandidate:
     """One dense candidate. ``base_spec(req)`` is its default kernel spec (raise
     ``ValueError`` when the request cannot have one); ``supports`` is the
@@ -159,7 +174,9 @@ def make_dense_candidate(
     ``algorithm`` the selector a pin names it by; ``recorded`` names the
     fields ``base_spec`` resolves per problem (see
     :meth:`rocke.dispatch.tuning.KnobSpace.recorded`); ``derived`` recomputes
-    problem fields that depend on the knobs (see :class:`.DenseSpace`)."""
+    problem fields that depend on the knobs (see :class:`.DenseSpace`);
+    ``axis_names`` limits the knobs the candidate takes (``None``: every
+    declared dense axis; empty: its default spec only)."""
 
     def bind_torch(request, spec, tensors, **kwargs):
         from .bindings import bind_dense_attention_torch
@@ -187,6 +204,7 @@ def make_dense_candidate(
             supports=supports,
             recorded_fields=frozenset(recorded),
             derived=derived,
+            axis_names=axis_names,
         ),
         base=base_spec,
         request_errors=_request_errors,

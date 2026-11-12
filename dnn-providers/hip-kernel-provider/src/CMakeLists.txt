@@ -176,6 +176,42 @@ set_target_properties(hip_kernel_provider PROPERTIES
 # ============================================================================
 if(HIPKERNELPROVIDER_ENABLE_TESTS)
 
+    # Bundle filters for the attention engines' external integration checks below and
+    # their GPU-reference targets in integration_tests/. Under YAML categorization the
+    # checks' CTest suites select from each engine's
+    # ../hipkernel_Gfx9*Attention*_test_categories_integration.yaml instead, and
+    # ../descriptor-packaging/tests/test_attention_bundle_filters.py fails on a mismatch.
+    string(JOIN ":" HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
+        "quick_SdpaFwd_Default.*" "standard_SdpaFwd_Default.*"
+        "comprehensive_SdpaFwd_Default.*" "full_SdpaFwd_Default.*")
+    # Plus the dense BSHD stats (LSE) bundles: no other SdpaFwd bundle binds a stats
+    # output Gfx942AttentionDense serves.
+    set(HKP_GFX942_ATTENTION_DENSE_GTEST_FILTER
+        "${HKP_SDPA_FWD_DEFAULT_GTEST_FILTER}:*_SdpaFwd_bshd_*_stats_*")
+
+    # The engine-pinned attention engines, each with an external integration check below,
+    # a GPU-reference target in integration_tests/ and a census in tests/. Six fields per
+    # engine: <arch> <snake slug> <engine local name> <bundle filter variable>, then its
+    # TOML under ../config/ and its categories YAML variable from ../CMakeLists.txt.
+    # test_attention_bundle_filters.py reads the rows to pair each filter with its YAML.
+    set(HKP_PINNED_ATTENTION_ENGINES
+        gfx950 dense Gfx950AttentionDense HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
+            hipkernel_Gfx950Attention.toml
+            HIPKERNELPROVIDER_GFX950_ATTENTION_INTEGRATION_CATEGORIES_YAML
+        gfx950 unified_2d Gfx950AttentionUnified2D HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
+            hipkernel_Gfx950Attention.toml
+            HIPKERNELPROVIDER_GFX950_ATTENTION_INTEGRATION_CATEGORIES_YAML
+        gfx950 unified_3d Gfx950AttentionUnified3D HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
+            hipkernel_Gfx950Attention.toml
+            HIPKERNELPROVIDER_GFX950_ATTENTION_INTEGRATION_CATEGORIES_YAML
+        gfx942 unified_3d Gfx942AttentionUnified3d HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
+            hipkernel_Gfx942AttentionUnified3d.toml
+            HIPKERNELPROVIDER_GFX942_ATTENTION_UNIFIED_3D_INTEGRATION_CATEGORIES_YAML
+        gfx942 dense Gfx942AttentionDense HKP_GFX942_ATTENTION_DENSE_GTEST_FILTER
+            hipkernel_Gfx942AttentionDense.toml
+            HIPKERNELPROVIDER_GFX942_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML
+    )
+
     add_subdirectory(tests)
     add_subdirectory(integration_tests)
 
@@ -250,6 +286,52 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         )
     endif()
 
+    # Graph-capture lanes. Every engine that reports SUPPORTS_GRAPH_CAPTURE and has an
+    # external integration lane below gets a sibling lane, pinned to the same engine, that
+    # runs a few quick bundle suites with --graph-capture: each case the engine verifies is
+    # also captured into a HIP graph, replayed, and verified again. The suites are
+    # GRAPH_CAPTURE_test_categories_integration.yaml under YAML categorization and this
+    # filter otherwise; keep the two in step.
+    set(HKP_GRAPH_CAPTURE_GTEST_FILTER
+        "quick_Batchnorm_Default.*"
+        "quick_BatchnormBackward_Default.*"
+        "quick_Layernorm_Default.*"
+        "quick_RMSNorm_Default.*"
+        "quick_RMSNorm_Variant2.*"
+        "quick_RMSNorm_Variant3.*"
+        "quick_RMSNormBackward_Variant2.*"
+        "quick_SdpaFwd_*.*"
+        "quick_SdpaBackward_Default.*"
+        "-*DISABLED*"
+        "*_SdpaFwd_bhsd_fp16_hd128_causal_gqa4_Small.*"
+        "*_SdpaFwd_bhsd_fp16_hd128_causal_mha_Small.*"
+    )
+
+    # _hkp_add_graph_capture_lane(<stem> <install test file> <lane arguments>...)
+    #   Registers <stem>-graph-capture-external-integration-check. The lane arguments are
+    #   those of the engine's own lane (engine, TOML, reference executor, install routing);
+    #   <install test file> receives the categorized suites, as the engine's own lane's do.
+    function(_hkp_add_graph_capture_lane stem install_test_file)
+        set(_category_args "")
+        if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
+            list(APPEND _category_args
+                TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_GRAPH_CAPTURE_INTEGRATION_CATEGORIES_YAML}"
+                INSTALL_TEST_FILE "${install_test_file}"
+                TEST_NAME_PREFIX ${stem}-graph-capture-external-integration
+            )
+        endif()
+        add_external_integration_test_target(
+            TARGET_NAME    ${stem}-graph-capture-external-integration-check
+            PLUGIN_TARGET  hip_kernel_provider
+            EXTRA_ARGS     --graph-capture
+            GTEST_FILTER   ${HKP_GRAPH_CAPTURE_GTEST_FILTER}
+            ENVIRONMENT    ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+            ${ARGN}
+            ${_category_args}
+        )
+    endfunction()
+
     if(TARGET hipdnn_integration_tests)
         add_external_integration_test_target(
             TARGET_NAME    ${PROJECT_NAME}-external-integration-check
@@ -305,6 +387,12 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                 EXPLICIT_TESTS ${PROJECT_NAME}-external-integration-check
             )
         endif()
+
+        _hkp_add_graph_capture_lane(${PROJECT_NAME} "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+            ENGINE_NAME    HIP_MLOPS_ENGINE
+            INSTALL_SUBDIR hip_kernel_provider
+            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/HIP_MLOPS_ENGINE.toml
+        )
     else()
         message(STATUS "hipdnn_integration_tests not found - skipping external-integration-check")
     endif()
@@ -330,6 +418,11 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
             ${_asm_sdpa_external_category_args}
         )
         message(STATUS "Created ${PROJECT_NAME}-asm-sdpa-external-integration-check target")
+        _hkp_add_graph_capture_lane(${PROJECT_NAME}-asm-sdpa "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+            ENGINE_NAME    ASM_SDPA_ENGINE
+            INSTALL_SUBDIR hip_kernel_provider
+            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/../config/ASM_SDPA_ENGINE.toml
+        )
 
         # Unlike the HIP_MLOPS block above, this target does not re-fold
         # EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider or re-apply
@@ -349,31 +442,35 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         message(STATUS "hipdnn_integration_tests not found - skipping asm-sdpa-external-integration-check")
     endif()
 
-    # The gfx950 dense attention suites are engine-pinned, so their installed entries
-    # belong in the gfx950 shard rather than the common arch-neutral file, for the reason
-    # the gpu_ref registration in src/integration_tests/CMakeLists.txt sets out.
-    # Categorized suites reach the install tree by being appended to INSTALL_TEST_FILE, so
-    # the routing is that file: a per-arch one that hkp_finalize_census_install() folds
-    # into the shard. Truncated here because apply_test_category_labels() appends, and a
-    # stale file would carry entries from a previous configure into this one.
-    set(_hkp_gfx950_external_ctest
-        "${CMAKE_CURRENT_BINARY_DIR}/census_external_gfx950_CTestTestfile.cmake")
-    file(WRITE "${_hkp_gfx950_external_ctest}" "")
-    set_property(GLOBAL PROPERTY
-                 HKP_CENSUS_EXTERNAL_TEST_FILE_gfx950 "${_hkp_gfx950_external_ctest}")
+    # _hkp_census_external_test_file(<out> <arch>)
+    #   The per-arch file an engine-pinned entry's categorized suites are appended to, as
+    #   INSTALL_TEST_FILE, for hkp_finalize_census_install() to fold into <arch>'s shard:
+    #   categorized suites reach the install tree only through that file. Created empty on
+    #   first use in each configure, because apply_test_category_labels() appends and a
+    #   stale file would carry entries from a previous configure into this one.
+    function(_hkp_census_external_test_file out_var arch)
+        get_property(_file GLOBAL PROPERTY HKP_CENSUS_EXTERNAL_TEST_FILE_${arch})
+        if(NOT _file)
+            set(_file "${CMAKE_CURRENT_BINARY_DIR}/census_external_${arch}_CTestTestfile.cmake")
+            file(WRITE "${_file}" "")
+            set_property(GLOBAL PROPERTY HKP_CENSUS_EXTERNAL_TEST_FILE_${arch} "${_file}")
+        endif()
+        set(${out_var} "${_file}" PARENT_SCOPE)
+    endfunction()
 
-    # One engine-pinned external integration entry per gfx950 attention engine, each in
-    # the gfx950 shard and serving the shared SdpaFwd Default sweeps (Unified3D serves only
-    # their decode, seqlen_q 1, cases and declines the rest). Each item is
-    # "<snake slug>|<engine local name>"; the target name and categories variable follow.
+    # One engine-pinned external integration entry per HKP_PINNED_ATTENTION_ENGINES engine,
+    # serving the bundles its filter variable names (the unified 3D engines serve only
+    # their decode, seqlen_q 1, cases and decline the rest).
     #
     # Gated on the same predicate the census uses: the feature flags alone would register
     # an engine-pinned target on a build whose `product` root ships another bundle, where
     # it fails as a missing engine rather than reading as absent. It lives in
     # HkpPackaging.cmake, which only an ingestor build includes -- hence the guard.
     #
-    # Route the installed entry and its TOML into the gfx950 shard, so pruning to another
-    # architecture removes them along with the engine they name. Reserved per engine rather
+    # Route the installed entry and its TOML into the engine's architecture shard, rather
+    # than the common arch-neutral file, so pruning to another architecture removes them
+    # along with the engine they name; the gpu_ref registration in
+    # integration_tests/CMakeLists.txt says why that matters. Reserved per engine rather
     # than earlier so the shard is claimed exactly when something is registered into it.
     # The TOML goes to the reservation as well as TEST_CONFIG; hkp_reserve_census_shard()
     # says why.
@@ -388,60 +485,70 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     # in _category_args: that list is populated only under YAML categorization, so anything
     # folded into it is absent from a legacy-label build, which then enumerates the whole
     # bundle tree pinned to this engine and runs without TEST_ENVIRONMENT (ASAN symbolizer,
-    # HSA_XNACK). The filter matches the gpu_ref registration in
-    # integration_tests/CMakeLists.txt.
-    foreach(_gfx950_engine IN ITEMS
-            "dense|Gfx950AttentionDense"
-            "unified_2d|Gfx950AttentionUnified2D"
-            "unified_3d|Gfx950AttentionUnified3D")
-        string(REPLACE "|" ";" _gfx950_engine "${_gfx950_engine}")
-        list(GET _gfx950_engine 0 _snake)
-        list(GET _gfx950_engine 1 _local)
+    # HSA_XNACK).
+    #
+    # Of these engines only the ones in _graph_capture_attention_engines report
+    # SUPPORTS_GRAPH_CAPTURE, so only they get a graph-capture lane.
+    set(_graph_capture_attention_engines Gfx950AttentionDense)
+    set(_engines ${HKP_PINNED_ATTENTION_ENGINES})
+    while(_engines)
+        list(POP_FRONT _engines _arch _snake _local _filter_var _toml _categories_var)
         string(REPLACE "_" "-" _dash "${_snake}")
-        set(_target ${PROJECT_NAME}-gfx950-attention-${_dash}-external-integration-check)
+        set(_target ${PROJECT_NAME}-${_arch}-attention-${_dash}-external-integration-check)
+        _hkp_census_external_test_file(_shard_ctest ${_arch})
 
         set(_category_args "")
-        if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED
-           AND DEFINED HIPKERNELPROVIDER_GFX950_ATTENTION_INTEGRATION_CATEGORIES_YAML)
+        if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED AND DEFINED ${_categories_var})
             list(APPEND _category_args
-                TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_GFX950_ATTENTION_INTEGRATION_CATEGORIES_YAML}"
-                INSTALL_TEST_FILE "${_hkp_gfx950_external_ctest}"
-                TEST_NAME_PREFIX ${PROJECT_NAME}-gfx950-attention-${_dash}-external-integration
+                TEST_CATEGORIES_YAML "${${_categories_var}}"
+                INSTALL_TEST_FILE "${_shard_ctest}"
+                TEST_NAME_PREFIX ${PROJECT_NAME}-${_arch}-attention-${_dash}-external-integration
             )
         endif()
 
         set(_available FALSE)
         if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-            hkp_product_ships_engine_for_arch(_available "hipkernel:${_local}" gfx950)
+            hkp_product_ships_engine_for_arch(_available "hipkernel:${_local}" ${_arch})
         endif()
         if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
            AND _available
            AND TARGET hipdnn_integration_tests)
-            set(_config "${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950Attention.toml")
-            hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950 FILES "${_config}")
+            set(_config "${CMAKE_CURRENT_SOURCE_DIR}/../config/${_toml}")
+            hkp_reserve_census_shard(_shard_dest ${_arch} FILES "${_config}")
 
             add_external_integration_test_target(
                 TARGET_NAME    ${_target}
                 PLUGIN_TARGET  hip_kernel_provider
                 ENGINE_NAME    "hipkernel:${_local}"
                 INSTALL_SUBDIR hip_kernel_provider
-                INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
-                INSTALL_STAGING_KEY hkp_census_gfx950
+                INSTALL_DESTINATION "${_shard_dest}"
+                INSTALL_STAGING_KEY hkp_census_${_arch}
                 TEST_CONFIG    ${_config}
-                GTEST_FILTER   "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*"
+                GTEST_FILTER   "${${_filter_var}}"
                 ENVIRONMENT    ${TEST_ENVIRONMENT}
                 ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
                 ${_category_args}
             )
             message(STATUS "Created ${_target} target")
+            if(_local IN_LIST _graph_capture_attention_engines)
+                _hkp_add_graph_capture_lane(
+                    ${PROJECT_NAME}-${_arch}-attention-${_dash} "${_shard_ctest}"
+                    ENGINE_NAME    "hipkernel:${_local}"
+                    INSTALL_SUBDIR hip_kernel_provider
+                    INSTALL_DESTINATION "${_shard_dest}"
+                    INSTALL_STAGING_KEY hkp_census_${_arch}
+                    TEST_CONFIG    ${_config}
+                )
+            endif()
         else()
-            message(STATUS "hipkernel:${_local} is not shipped for gfx950 by this configuration - skipping ${_target}")
+            message(STATUS "hipkernel:${_local} is not shipped for ${_arch} by this "
+                           "configuration - skipping ${_target}")
         endif()
-    endforeach()
+    endwhile()
 
     # FlyDSL engines against the shared bundles, checked by the GPU reference executor.
     # One entry per engine and architecture it carries content for, routed into that
-    # architecture's shard like the gfx950 entries above, so pruning an artifact to other
+    # architecture's shard like the attention entries above, so pruning an artifact to other
     # architectures removes it. Gated on FlyDSL content, not GPU_TARGETS: a multi-arch
     # install pairs this build's host artifacts with other builds' shards.
     #
@@ -451,6 +558,9 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     # Each entry's TOML therefore skips every other architecture FlyDSL ships for (the
     # harness has no "only on" form), so on any runner only the entries for its own
     # architecture run.
+    #
+    # Every FlyDSL engine reports SUPPORTS_GRAPH_CAPTURE (GRAPH_CAPTURE_OPS in
+    # flydsl/gen_descriptors.py), so each entry also gets a graph-capture lane.
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND TARGET hipdnn_integration_tests)
         set(_flydsl_engine_ops
             rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_aiw
@@ -493,18 +603,22 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                         "\n[[test_skips]]\narchs = [${_others_toml}]\nfilters = [\"*\"]\n"
                         "reason = \"${_engine}: this entry runs on ${_arch} only\"\n")
                 endif()
+                # A padded or fully masked query row has LSE = -inf in the engine and in the
+                # reference alike (SEM-008), which plain allclose fails. Only the SDPA stats
+                # output is graded with matching infinities; O keeps the default. That
+                # validator is host-only, so these entries also run with
+                # HIPDNN_TEST_VALIDATOR=cpu (below).
+                set(_lane_environment ${TEST_ENVIRONMENT})
+                if(_op MATCHES "^sdpa_")
+                    string(APPEND _toml_text
+                        "\n[[validator_overrides]]\nfilters = [\"*_SdpaFwd*\"]\n"
+                        "tensors = [\"LSE\", \"*::Stats\"]\n"
+                        "validator = \"allclose_matching_infinities\"\n")
+                    list(APPEND _lane_environment "HIPDNN_TEST_VALIDATOR=cpu")
+                endif()
                 file(WRITE "${_toml}" "${_toml_text}")
 
-                # The per-arch file the shard's categorized entries are appended to. The
-                # gfx950 one may already exist from the registration above.
-                get_property(_shard_ctest GLOBAL PROPERTY HKP_CENSUS_EXTERNAL_TEST_FILE_${_arch})
-                if(NOT _shard_ctest)
-                    set(_shard_ctest
-                        "${CMAKE_CURRENT_BINARY_DIR}/census_external_${_arch}_CTestTestfile.cmake")
-                    file(WRITE "${_shard_ctest}" "")
-                    set_property(GLOBAL PROPERTY
-                                 HKP_CENSUS_EXTERNAL_TEST_FILE_${_arch} "${_shard_ctest}")
-                endif()
+                _hkp_census_external_test_file(_shard_ctest ${_arch})
                 # The shard names this TOML, so it is reserved with the shard as well as
                 # passed as TEST_CONFIG; hkp_reserve_census_shard() says why.
                 hkp_reserve_census_shard(_shard_dest ${_arch} FILES "${_toml}")
@@ -526,9 +640,18 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
                     TEST_CONFIG    "${_toml}"
                     REFERENCE_EXECUTOR gpu
                     GTEST_FILTER   "quick_${_bundle}_*.*:standard_${_bundle}_*.*:comprehensive_${_bundle}_*.*:full_${_bundle}_*.*"
-                    ENVIRONMENT    ${TEST_ENVIRONMENT}
+                    ENVIRONMENT    ${_lane_environment}
                     ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
                     ${_category_args}
+                )
+                _hkp_add_graph_capture_lane(
+                    ${PROJECT_NAME}-flydsl-${_op_dash}-${_arch} "${_shard_ctest}"
+                    ENGINE_NAME    "${_engine}"
+                    INSTALL_SUBDIR hip_kernel_provider
+                    INSTALL_DESTINATION "${_shard_dest}"
+                    INSTALL_STAGING_KEY hkp_census_${_arch}
+                    TEST_CONFIG    "${_toml}"
+                    REFERENCE_EXECUTOR gpu
                 )
             endforeach()
         endforeach()
@@ -539,9 +662,9 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     #
     # The first drain sits beside the cross-provider target, far higher up, so it can
     # only carry what was staged before it, and the property is emptied when consumed --
-    # anything here is by definition late. Nothing is today, both gfx950 registrations
-    # routing to their own architecture's shard, but an external target registered below
-    # that first drain would otherwise never reach the install tree.
+    # anything here is by definition late. Nothing is today, every gfx950 and gfx942
+    # registration routing to its own architecture's shard, but an external target
+    # registered below that first drain would otherwise never reach the install tree.
     #
     # Only the YAML path needs it. Without categorization there is no common file to
     # append to and install_provider_ctest_files() below does its own drain, which

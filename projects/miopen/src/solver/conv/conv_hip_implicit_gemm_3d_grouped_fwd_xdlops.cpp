@@ -581,8 +581,7 @@ ConvSolution ConvHipImplicitGemm3DGroupFwdXdlops::GetSolution(
     if(!loader.IsLoaded())
         return ConvSolution{miopenStatusInternalError};
 
-    return loader.GetSolution(
-        CKSolverType::GrpConv3dFwd, ctx, problem, config.kernel_id, config.UseTF32());
+    return loader.GetSolutionTf32Aware(CKSolverType::GrpConv3dFwd, ctx, problem, config.kernel_id);
 }
 
 } // namespace conv

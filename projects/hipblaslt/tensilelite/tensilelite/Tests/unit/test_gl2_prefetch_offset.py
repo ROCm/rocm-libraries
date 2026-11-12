@@ -84,7 +84,9 @@
 #
 # test_gl2_prefetch_codegen runs without a device: it only generates and
 # assembles each config's kernel, so CPU-only runners (including the coverage
-# lane) still exercise GL2Prefetch's codegen paths.
+# lane) still exercise GL2Prefetch's codegen paths. The same test also runs the
+# KernelWriterAssembly hooks (defineVariableSgprs, allocGL2PrefetchAddrVgprs,
+# gl2PrefetchClearIncrement) that this harness does not emit itself.
 #
 # Usage:
 #   pytest test_gl2_prefetch_offset.py -v -s
@@ -99,7 +101,7 @@ import struct
 import tempfile
 import types
 from bisect import bisect_right
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import ceil
 from types import SimpleNamespace
 
@@ -217,6 +219,8 @@ class GL2Config:
     user_args: bool = False   # SupportUserArgs: a batched kernel that may run with ArgType == 3
     arg_type: int = 0         # runtime ArgType; low 8 bits = named domain, bits 8+ = TDM wave id
     sizes_sum_zero: bool = False  # K == 0 (SizesSum = 0): the pointer-array dereference is skipped
+    inc64: bool = False       # PrefetchGL2Inc64Bit: 64-bit (sgpr pair) addr increment.
+    saddr: bool = False       # PrefetchGL2SAddr: sgpr pair base + 32-bit vgpr offset.
 
     @property
     def lc(self):
@@ -603,6 +607,33 @@ CONFIGS = [
               gsu=2, gsuc=True, k_iters=14),
 ]
 
+# ---- PrefetchGL2Inc64Bit: the same footprints with a 64-bit increment, covering
+# every consumer of it -- setIncrement on each layout (TLU, non-TLU, MX, sparse
+# metadata), the GSU chunk offset and stride widening (both chunk layouts),
+# skipPGR on PGR 1 / >1 and the guard, and incrementAddr. ----
+_INC64_CONFIGS = {
+    "ab_fp8_mixed_layout", "abmx_fp8", "a_sparse_tlu_mlayout1",
+    "gsu4_interleaved", "gsu4_contiguous_rem", "gsu2_mx_cluster",
+    "pgr1_nl2", "pgr3_ntlu", "pgr2_guard_taken",
+}
+CONFIGS += [replace(c, name=f"{c.name}_inc64", inc64=True)
+            for c in CONFIGS if c.name in _INC64_CONFIGS]
+
+# ---- PrefetchGL2SAddr: the scalar-base + 32-bit offset address form, covering
+# the 32-bit per-lane offset on each layout (TLU, non-TLU, MX, FP4 bpe, sparse
+# metadata, gl2nl > 1), the base folding the batch and GSU chunk offsets, and
+# skipPGR / incrementAddr on the sgpr base with both increment widths. ----
+_SADDR_CONFIGS = {
+    "ab_fp8_mixed_layout", "abmx_fp8", "ab_fp4_tlu", "ab_ntlu_edge",
+    "a_sparse_nl2", "ab_tlu_nl_ceil", "gsu4_interleaved", "gsu3_contiguous_rem",
+    "pgr1_nl2", "pgr3_ntlu", "pgr2_guard_taken",
+    "abmx_fp8_inc64", "gsu4_contiguous_rem_inc64", "pgr1_nl2_inc64", "pgr3_ntlu_inc64",
+    "userargs_strided", "userargs_ptr_array", "userargs_ptr_k0",
+    "userargs_ptr_array_gsu4_interleaved", "userargs_ptr_array_gsu2_mx",
+}
+CONFIGS += [replace(c, name=f"{c.name}_saddr", saddr=True)
+            for c in CONFIGS if c.name in _SADDR_CONFIGS]
+
 
 def batch_stride_elems(spec, cfg):
     """Per-tensor batch stride in *elements* (the programmed Stride{tc}K). Arbitrary
@@ -658,6 +689,7 @@ def _make_kernel(cfg):
     m_spec = next((t for t in cfg.tensors if t.is_m), None)
     kernel = {
         "ProblemType": {
+            "UseScaleAlphaVec": 0,
             "Batched": cfg.batched,
             "StridedBatched": cfg.batched,
             "IndicesBatch": [2] if cfg.batched else [],
@@ -690,6 +722,8 @@ def _make_kernel(cfg):
         "PrefetchGlobalRead": cfg.pgr,
         "WavefrontSize": WAVESIZE,
         "PrefetchGL2": cfg.pgl,
+        "PrefetchGL2Inc64Bit": cfg.inc64,
+        "PrefetchGL2SAddr": cfg.saddr,
         "GlobalSplitU": cfg.gsu,
     }
     if m_spec is not None:
@@ -737,8 +771,11 @@ def _make_writer(kernel):
 # Kernel assembly generation
 # ---------------------------------------------------------------------------
 
-def build_kernel(cfg):
+def build_kernel(cfg, with_prefetch=False):
     """Build a kernel computing GL2 addresses for all of cfg.tensors at once.
+
+    with_prefetch also emits each stage's issueLoad and a final clearIncrement,
+    for assembling only: the dummy base buffer does not back the whole footprint.
 
     The kernel emits cfg.n_inc+1 "stages": stage 0 is the start address after
     the loop-counter-guarded skipPGR, and each later stage calls incrementAddr
@@ -780,6 +817,8 @@ def build_kernel(cfg):
     shared = ["WorkGroup0", "WorkGroup1", "WorkGroup2", "LoopCounterL"]
     if cfg.n_regions > 1:
         shared += ["WGOUT"]   # per-region output shift = linear_wg_id * n_out
+    if cfg.saddr:
+        shared += ["BaseDelta"]   # GL2PrefetchBase{tc} - Address{tc} (low 32 bits)
     if "A" in subtcs:
         shared += ["StrideAI", "StrideAL", "SizeI"]
     if "B" in subtcs:
@@ -809,7 +848,12 @@ def build_kernel(cfg):
         w.sgprs["GSUSumIdx"] = w.sgprPool.checkOut(2, "GSUSumIdx", preventOverflow=False)
     for t in cfg.tensors:
         w.sgprs[f"Address{t.tc}"] = w.sgprPool.checkOutAligned(2, 2, f"Address{t.tc}", preventOverflow=False)
-        w.sgprs[f"GL2PrefetchInc{t.tc}"] = w.sgprPool.checkOut(1, f"GL2PrefetchInc{t.tc}", preventOverflow=False)
+        n_inc = 2 if cfg.inc64 else 1
+        w.sgprs[f"GL2PrefetchInc{t.tc}"] = w.sgprPool.checkOutAligned(
+            n_inc, n_inc, f"GL2PrefetchInc{t.tc}", preventOverflow=False)
+        if cfg.saddr:
+            w.sgprs[f"GL2PrefetchBase{t.tc}"] = w.sgprPool.checkOutAligned(
+                2, 2, f"GL2PrefetchBase{t.tc}", preventOverflow=False)
         if cfg.batched:    # batch stride Stride{tc}K (index 2 -> 'K')
             w.sgprs[f"Stride{t.tc}K"] = w.sgprPool.checkOut(1, f"Stride{t.tc}K", preventOverflow=False)
 
@@ -836,9 +880,10 @@ def build_kernel(cfg):
             f"{t.tc}: gl2nc {tp['gl2nc']} != expected {tensor_dims(t, cfg)[3]}"
         assert tp["gl2nl"] == tensor_gl2nl(t, cfg), \
             f"{t.tc}: gl2nl {tp['gl2nl']} != expected {tensor_gl2nl(t, cfg)}"
+        n_addr = comp.numAddrVgpr(kernel)
         for i in range(tp["gl2nl"]):
             name = f"GL2PrefetchAddr{t.tc}_{i}"
-            vgpr_sets[name] = w.vgprPool.checkOutAligned(2, 2, name, preventOverflow=False)
+            vgpr_sets[name] = w.vgprPool.checkOutAligned(n_addr, n_addr, name, preventOverflow=False)
         tps.append((t, tp))
 
     # output elements written by one workgroup (used to shift per-wg regions);
@@ -971,13 +1016,30 @@ def build_kernel(cfg):
     def export_tensor(t, tp, region):
         num_loads = tp["gl2nl"]
         base = w.sgprs[f"Address{t.tc}"]
+        if cfg.saddr:
+            # exported offset = (GL2PrefetchBase - Address) + per-lane 32-bit offset
+            delta = w.sgprs["BaseDelta"]
+            epi.add(TextBlock("  s_sub_u32 s%d, s%d, s%d\n"
+                              % (delta, w.sgprs[f"GL2PrefetchBase{t.tc}"], base)))
         k = 0
         for i in range(tp["gl2nl"]):
             addr = vgpr_sets[f"GL2PrefetchAddr{t.tc}_{i}"]
             if derefs_ptr_array(t, cfg):
                 # export the low word (the host subtracts the batch base), or -1 on a wrong high word
-                epi.add(TextBlock("  v_cmp_ne_u32 vcc_lo, 0x%x, v%d\n" % (ptr_array_base(t.tc, 0) >> 32, addr + 1)))
-                epi.add(TextBlock("  v_cndmask_b32 v%d, v%d, -1, vcc_lo\n" % (val, addr)))
+                if cfg.saddr:
+                    # rebuild the 64-bit address; a_hi is free until the store below
+                    sbase = w.sgprs[f"GL2PrefetchBase{t.tc}"]
+                    epi.add(TextBlock("  v_add_co_u32 v%d, vcc_lo, s%d, v%d\n" % (val, sbase, addr)))
+                    epi.add(TextBlock("  v_mov_b32 v%d, s%d\n" % (a_hi, sbase + 1)))
+                    epi.add(TextBlock("  v_add_co_ci_u32 v%d, vcc_lo, v%d, 0, vcc_lo\n" % (a_hi, a_hi)))
+                    hi_vgpr = a_hi
+                else:
+                    epi.add(TextBlock("  v_mov_b32 v%d, v%d\n" % (val, addr)))
+                    hi_vgpr = addr + 1
+                epi.add(TextBlock("  v_cmp_ne_u32 vcc_lo, 0x%x, v%d\n" % (ptr_array_base(t.tc, 0) >> 32, hi_vgpr)))
+                epi.add(TextBlock("  v_cndmask_b32 v%d, v%d, -1, vcc_lo\n" % (val, val)))
+            elif cfg.saddr:
+                epi.add(TextBlock("  v_add_nc_u32 v%d, s%d, v%d\n" % (val, delta, addr)))
             else:
                 epi.add(TextBlock("  v_sub_co_u32 v%d, vcc_lo, v%d, s%d\n" % (val, addr, base)))
             # output element index = region + Serial*num_loads + k
@@ -1005,9 +1067,14 @@ def build_kernel(cfg):
                 epi.add(comp.incrementAddr(w, kernel, tp))
         for t, tp in tps:
             num_loads = tp["gl2nl"]
+            if with_prefetch:
+                epi.add(comp.issueLoad(w, kernel, tp))
             export_tensor(t, tp, region)
             layout.append((t, num_loads, stage, region))
             region += cfg.num_threads * num_loads
+    if with_prefetch:
+        for t, tp in tps:
+            epi.add(comp.clearIncrement(w, kernel, tp))
     epi.add(TextBlock("  s_wait_storecnt 0x0\n"))
     n_out = region
 
@@ -1351,6 +1418,95 @@ def _assemble_for_target(asm, obj_path):
     assert proc.returncode == 0, proc.stderr
 
 
+class _NoPackDataType:
+    """DataType stand-in so defineVariableSgprs skips the pack-sgpr block."""
+    def isHalf(self): return False
+    def isBFloat16(self): return False
+    def isInt8(self): return False
+    def is8bitFloat(self): return False
+
+
+def _cover_kwa_gl2_hooks(cfg):
+    """Run the KernelWriterAssembly GL2 hooks this harness does not emit.
+
+    build_kernel calls GL2PrefetchLoad directly. defineVariableSgprs (the
+    GL2PrefetchInc / GL2PrefetchBase sgprs), allocGL2PrefetchAddrVgprs (the
+    64-bit-vaddr alignment), and gl2PrefetchClearIncrement live on the writer.
+    """
+    from tensilelite.KernelWriter import KernelWriter
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly as KWA
+
+    # The base hooks are the fallback an override replaces. Call them once per
+    # config; they do not depend on cfg.
+    assert KernelWriter.allocGL2PrefetchAddrVgprs(None, {}, {}, {}, 7) == 7
+    assert KernelWriter.gl2PrefetchClearIncrement(None, {}, {}, {}) == ""
+
+    kernel = _make_kernel(cfg)
+    kernel["enableTDMMetadata"] = any(t.is_m for t in cfg.tensors)
+    tPA = {"tensorChar": "A", "gl2nl": 2, "is_sparse": cfg.sparse == 1}
+    tPB = {"tensorChar": "B", "gl2nl": 1}
+    if kernel["ProblemType"]["MXBlockA"]:
+        tPA["MX"] = {"tensorChar": "MXSA", "gl2nl": 1}
+    if kernel["ProblemType"]["MXBlockB"]:
+        tPB["MX"] = {"tensorChar": "MXSB", "gl2nl": 1}
+    if kernel["enableTDMMetadata"]:
+        meta = {"tensorChar": "Metadata", "gl2nl": 1}
+        (tPA if cfg.sparse == 1 else tPB)["tpsMetadata"] = meta
+
+    w = _make_writer(kernel)
+    w.states.mxsa = SimpleNamespace()
+    w.states.mxsb = SimpleNamespace()
+    w.states.m = SimpleNamespace()
+    w.states.rapDropAResidentLoads = False
+    for name in ("allocGL2PrefetchAddrVgprs", "gl2PrefetchClearIncrement", "gl2PrefetchTpList"):
+        setattr(w, name, types.MethodType(getattr(KWA, name), w))
+
+    # Odd start: a 64-bit vaddr rounds up to an even VGPR, a 32-bit saddr offset does not.
+    a_start = w.allocGL2PrefetchAddrVgprs(kernel, tPA, tPB, 5)
+    assert w.states.a.startVgprGL2PrefetchAddr == (5 if cfg.saddr else 6)
+    assert a_start > w.states.a.startVgprGL2PrefetchAddr
+    cleared = str(w.gl2PrefetchClearIncrement(kernel, tPA, tPB))
+    inc = "GL2PrefetchIncA"
+    if cfg.inc64:
+        assert "s[sgpr%s:sgpr%s+1], 0" % (inc, inc) in cleared
+    else:
+        assert "s[sgpr%s], 0" % inc in cleared and "+1" not in cleared
+
+    # defineVariableSgprs walks the whole sgpr prologue. Turn off every block
+    # except PrefetchGL2 so only the inc/base allocation runs.
+    sgpr_kernel = _make_kernel(cfg)
+    sgpr_kernel.update(UseSubtileImpl=True, BufferLoad=False, enableTDMA=False,
+                       enableTDMB=False, _UseSgprForGRO=False, NumWaves=1,
+                       DirectToVgprA=False, DirectToVgprB=False,
+                       DirectToVgprSparseMetadata=False,
+                       _GlobalAccumulation="Off", AdaptiveGemmGSUA=0,
+                       enableTDMMetadata=kernel["enableTDMMetadata"])
+    sgpr_kernel["ProblemType"]["DataType"] = _NoPackDataType()
+    sw = _make_writer(sgpr_kernel)
+    sw.states.freeSgprVarPool = set()
+    sw.states.use64bShadowLimit = False
+    sw.states.use64bShadowLimitMX = False
+    sw.states.staggerUCode = False
+    sw.states.IncLdsBufSwitch = False
+    sw.states.lrvwTileA = sw.states.lrvwTileB = sw.states.lrvwTileMetadata = 1
+    sw.states.nonPostLoopSgpr = []
+    for obj in (sw.states.a, sw.states.b):
+        obj.numSgprGlobalReadIncs = 0
+    sw.states.mxsa = SimpleNamespace(numSgprGlobalReadIncs=0)
+    sw.states.mxsb = SimpleNamespace(numSgprGlobalReadIncs=0)
+    sw.states.m = SimpleNamespace(numSgprGlobalReadIncs=0)
+    for name in ("defineSgpr", "defineSgprIdx", "defineVariableSgprs",
+                 "setSgprToInUseState", "setSgprToFreeState"):
+        setattr(sw, name, types.MethodType(getattr(KWA, name), sw))
+    defined = str(sw.defineVariableSgprs(sgpr_kernel))
+    for tc in ("A", "B"):
+        assert "sgprGL2PrefetchInc%s" % tc in defined
+        assert ("sgprGL2PrefetchBase%s" % tc in defined) == cfg.saddr
+    if cfg.inc64:
+        # numIncSgpr == 2, so the inc register is allocated as a pair.
+        assert "GL2PrefetchIncA" in sw.sgprs
+
+
 @pytest.mark.parametrize("cfg", CONFIGS, ids=lambda c: c.name)
 def test_gl2_prefetch_codegen(cfg, tmp_path):
     """Generate and assemble every config's kernel, on CPU.
@@ -1358,9 +1514,11 @@ def test_gl2_prefetch_codegen(cfg, tmp_path):
     The address check above needs a gfx1250 device, so CPU-only runners (the
     coverage lane among them) skip it. This half keeps every codegen path in
     GL2Prefetch exercised there, and still catches register-model mismatches
-    (build_kernel asserts gl2nc/gl2nl) and assembly the target rejects."""
-    asm, _, _ = build_kernel(cfg)
+    (build_kernel asserts gl2nc/gl2nl) and assembly the target rejects.
+    It also runs the KernelWriterAssembly GL2 hooks for this config's inc64/saddr."""
+    asm, _, _ = build_kernel(cfg, with_prefetch=True)
     _assemble_for_target(asm, str(tmp_path / f"gl2_{cfg.name}.o"))
+    _cover_kwa_gl2_hooks(cfg)
 
 
 # ---------------------------------------------------------------------------

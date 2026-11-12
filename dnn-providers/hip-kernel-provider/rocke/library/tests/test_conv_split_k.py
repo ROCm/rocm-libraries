@@ -26,9 +26,9 @@ from kernels.common.conv_split_k import (
     MAX_WGRAD_WS_BYTES,
     parse_split_k_override,
     resolve_conv_split_k,
+    select_split_k_wgrad,
 )
-from rocke.helpers.split_k import select_split_k_wgrad
-from rocke.helpers.split_k_planner import MAX_GRID_DIM_Z
+from kernels.conv.split_k_planner import MAX_GRID_DIM_Z
 
 # Long reduction into a tiny dW, odd row (no packed atomic): a stem conv, the
 # class a 128-degree ceiling under-splits.
@@ -466,7 +466,7 @@ def test_auto_never_plans_a_workspace_its_replicas_overflow():
 
 
 def test_planner_rejects_a_batch_beyond_grid_z():
-    from rocke.helpers.split_k_planner import (
+    from kernels.conv.split_k_planner import (
         SplitKKernel,
         SplitKProblem,
         select_split_k_plan,
@@ -515,7 +515,7 @@ def test_cost_fit_keeps_each_workspace_replica_count_its_own_option():
     # Two workspace binaries of one main loop that differ only in replica
     # count: each time must stay paired with its own setup traffic.
     from benchmarks.common.split_k_cost_fit import _decisions, _Kernel
-    from rocke.helpers.split_k_planner import (
+    from kernels.conv.split_k_planner import (
         SplitKKernel,
         SplitKProblem,
         SplitKReduction,
@@ -563,7 +563,7 @@ def test_cost_fit_degree_list_parses_ranges():
 def test_cost_fit_round_trip_keeps_the_unsearched_fields():
     # The literal the fit prints must not drop the XCD count or the margin.
     from benchmarks.common.split_k_cost_fit import _model_of, _x_of
-    from rocke.helpers.split_k_planner import split_k_cost_model
+    from kernels.conv.split_k_planner import split_k_cost_model
 
     for cost in (
         split_k_cost_model("gfx950"),
@@ -628,7 +628,6 @@ def test_explicit_atomic_that_cannot_be_built_raises():
 def test_wmma_auto_without_a_reduction_runs_unsplit(dtype):
     # gfx1250 16-bit dW with an odd row (wg_N = 27): no packed pair, and WMMA
     # has no workspace. An auto request runs unsplit; a forced degree raises.
-    # fp16 is never split automatically, so only bf16 asks for a split here.
     p = ConvProblem(N=64, Hi=64, Wi=64, C=3, K=16, Y=3, X=3, pH=1, pW=1)
     kw = {
         "arch": "gfx1250",
@@ -646,12 +645,30 @@ def test_wmma_auto_without_a_reduction_runs_unsplit(dtype):
         resolve_conv_split_k("wgrad", p, split_k=8, **kw)
     with pytest.raises(ValueError, match="packed atomic"):
         resolve_conv_split_k("wgrad", p, override=8, **kw)
-    if dtype == "fp16":
-        assert r.requested == 1
-        return
     assert r.requested > 1  # the policy did ask for a split
     with pytest.raises(ValueError, match="packed atomic"):
         resolve_conv_split_k("wgrad", p, allow_unsplit=False, **kw)
+
+
+def test_wmma_fp16_atomic_degree_is_capped_for_accuracy():
+    # gfx1250 fp16 dW, pointwise C=K=16 over a deep reduction (N*Ho*Wo =
+    # 262144) on one tile: the fill and slice terms ask for far more than the
+    # packed fp16 atomic's accuracy cap (97, see atomic_rounding_degree_cap),
+    # so the automatic atomic degree stops there. The f32 workspace reduction
+    # resolves as fp32 dW and keeps the general cap of 128.
+    p = ConvProblem(N=64, Hi=64, Wi=64, C=16, K=16, Y=1, X=1)
+    kw = {
+        "arch": "gfx1250",
+        "dtype": "fp16",
+        "tile_m": 64,
+        "tile_n": 128,
+        "tile_k": 64,
+        "block_size": 256,
+    }
+    atomic = resolve_conv_split_k("wgrad", p, reduction="atomic", **kw)
+    assert (atomic.split_k, atomic.two_stage) == (97, False)
+    ws = resolve_conv_split_k("wgrad", p, reduction="workspace", **kw)
+    assert (ws.split_k, ws.two_stage) == (128, True)
 
 
 @pytest.mark.parametrize("arch", ["gfx1151", "gfx1201"])
@@ -682,3 +699,27 @@ def test_wmma_auto_without_float_atomics_runs_unsplit(arch):
         resolve_conv_split_k("wgrad", p, allow_unsplit=False, **kw)
     free = resolve_conv_split_k("wgrad", p, **{**kw, "reduction": "auto"})
     assert (free.split_k, free.two_stage) == (1, False)
+
+
+# A deep reduction into a small output: forward splits on gfx1250, dgrad splits
+# everywhere; DENSE splits wgrad.
+DEEP_K = ConvProblem(N=1, Hi=7, Wi=7, C=2048, K=512, Y=3, X=3, pH=1, pW=1)
+
+
+@pytest.mark.parametrize("direction", ["fwd", "wgrad", "dgrad"])
+@pytest.mark.parametrize(
+    "target_id", ["gfx942:sramecc+", "gfx950:xnack-", "gfx1250:sramecc+:xnack-"]
+)
+@pytest.mark.parametrize("problem", [DENSE, DEEP_K], ids=["dense", "deep_k"])
+def test_a_decorated_target_id_resolves_as_its_bare_arch(direction, target_id, problem):
+    kw = {
+        "dtype": "bf16",
+        "tile_m": 64,
+        "tile_n": 64,
+        "tile_k": 32,
+        "block_size": 256,
+    }
+    bare = resolve_conv_split_k(
+        direction, problem, arch=target_id.split(":", 1)[0], **kw
+    )
+    assert resolve_conv_split_k(direction, problem, arch=target_id, **kw) == bare

@@ -86,10 +86,27 @@ void resetFlydslSdpaCdnaDualwaveModuleCache();
 void registerFlydslSdpaCdnaDecodeSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetFlydslSdpaCdnaDecodeModuleCache();
 
+/// @see packs/FlydslSdpaDropoutMaskNative.cpp
+void registerFlydslSdpaDropoutMaskSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslSdpaDropoutMaskModuleCache();
+
+/// @see packs/FlydslSdpaHeadPadNative.cpp
+void registerFlydslSdpaHeadPadSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetFlydslSdpaHeadPadModuleCache();
+
 /// @see packs/Gfx950AttentionDenseNative.cpp
 void registerGfx950AttentionDenseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950AttentionDenseModuleCache();
 
+/// The engine name gfx942_attention_unified3d.ued.json declares. Read here by the pack
+/// table, the pack's own log lines and the census, like GFX950_ATTENTION_DENSE_ENGINE_NAME.
+inline constexpr std::string_view GFX942_ATTENTION_UNIFIED_3D_ENGINE_NAME
+    = "hipkernel:Gfx942AttentionUnified3d";
+
+/// @see packs/Gfx942AttentionUnified3dNative.cpp
+void registerGfx942AttentionUnified3dSymbols(
+    hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx942AttentionUnified3dModuleCache();
 /// The engine name gfx950_attention_unified_2d.ued.json declares, shared the same way.
 inline constexpr std::string_view GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME
     = "hipkernel:Gfx950AttentionUnified2D";
@@ -107,6 +124,14 @@ inline constexpr std::string_view GFX950_ATTENTION_UNIFIED_3D_ENGINE_NAME
 void registerGfx950AttentionUnified3DSymbols(
     hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx950AttentionUnified3DModuleCache();
+/// The engine name gfx942_attention_dense.ued.json declares; see
+/// GFX950_ATTENTION_DENSE_ENGINE_NAME.
+inline constexpr std::string_view GFX942_ATTENTION_DENSE_ENGINE_NAME
+    = "hipkernel:Gfx942AttentionDense";
+
+/// @see packs/Gfx942AttentionDenseNative.cpp
+void registerGfx942AttentionDenseSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx942AttentionDenseModuleCache();
 
 /// @see packs/Gfx1151WmmaAttentionNative.cpp, which serves both engines
 void registerGfx1151WmmaAttentionSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
@@ -114,6 +139,22 @@ void resetGfx1151WmmaAttentionModuleCache();
 void registerGfx1151WmmaAttentionDecodeSymbols(
     hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx1151WmmaAttentionDecodeModuleCache();
+
+/// @see packs/Gfx950ConvDgradNative.cpp (hipkernel:Gfx950ConvDgradAot)
+void registerGfx950ConvDgradAotSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetGfx950ConvDgradAotModuleCache();
+
+/// Sets the per-image byte limit gfx950_conv_dgrad::batchChunks() slices a batch at, in
+/// the provider's own loaded copy of that test seam -- see
+/// Gfx950ConvDgradGeometry.hpp::batchChunkByteLimitForTesting(). A test in another TU
+/// (an integration test that loads this engine as a separate plugin .so) mutating its
+/// own copy of that inline function's local static never reaches the one the plugin's
+/// plan build actually reads; this function runs inside the plugin. FOR TESTS ONLY.
+void setGfx950ConvDgradAotBatchChunkByteLimitForTesting(int64_t limit);
+
+/// The implicit-GEMM kernel launches hipkernel:Gfx950ConvDgradAot has made in this
+/// process, one per batch slice: how a test sees that a plan ran sliced. FOR TESTS ONLY.
+int64_t gfx950ConvDgradAotImplicitLaunchCountForTesting();
 
 /// Drops every pack's cached kpack modules and closes every kpack archive
 /// SharedKpackArchives retains, so the next dispatch re-reads its archive from disk. Leases

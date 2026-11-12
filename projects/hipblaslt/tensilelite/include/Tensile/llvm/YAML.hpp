@@ -166,6 +166,15 @@ namespace TensileLite
                 io.mapOptional(key, obj, ctx);
             }
 
+            /// Omits the key on output when the value is the one an absent key
+            /// would produce. llvm::yaml::IO already behaves this way; this only
+            /// routes the shared traits' call to it.
+            template <typename T>
+            static void mapOptional(IO& io, const char* key, T& obj, T const& defaultValue)
+            {
+                io.mapOptional(key, obj, defaultValue);
+            }
+
             // YAML has no binary scalar, and the indexed library format is only
             // ever written as msgpack, so there is nothing to read here. Always
             // failing keeps the shared MappingTraits compiling for this backend

@@ -395,7 +395,8 @@ namespace TensileLite
                 ("bias-source",               po::value<int>()->default_value(3), "Bias source.")
                 ("use-scaleAB",               po::value<std::string>()->default_value(""), "Use scaleAB.")
                 ("use-scaleCD",               po::value<bool>()->default_value(false), "Use scaleCD.")
-                ("use-scaleAlphaVec",         po::value<int>()->default_value(0), "Use scaleAlphaVec.")
+                ("use-scaleAlphaVec",         po::value<int>()->default_value(0), "Alpha support: 0=host, 1/2/3=M/N/MN vector, 5/6/7=vector plus device scalar.")
+                ("device-scalar-alpha",       po::value<bool>(), "Override the runtime alpha mode; defaults to the scalar bit in use-scaleAlphaVec.")
                 ("bias-type-args",            po::value<std::vector<rocisa::DataType>>()->default_value(std::vector<rocisa::DataType>(1, rocisa::DataType::None), "[]"), "Bias data type args.")
                 ("use-gate-residual",         po::value<bool>()->default_value(false), "Use gate residual.")
                 ("gate-type-args",            po::value<std::vector<rocisa::DataType>>()->default_value(std::vector<rocisa::DataType>(1, rocisa::DataType::None), "[]"), "Gate residual data type args.")
@@ -968,6 +969,19 @@ int main(int argc, const char* argv[])
         });
     }
 
+    // I-cache rotation (explicit --icache-rotate-copies=N): the main --code-object
+    // rotation copies were loaded above (before lazy-load init), but the helper
+    // bundle (Kernels.so) only becomes available in m_modules after
+    // initializeLazyLoading. Mirror it into the rotation slots now so helper
+    // kernels (PostGSU / betaOnly / reduction / conversion) resolve under rotation.
+    {
+        int icacheRotateCopies = args["icache-rotate-copies"].as<int>();
+        if(icacheRotateCopies > 0)
+            forEachDevice(devices, [&](DeviceContext& ctx) {
+                HIP_CHECK_EXC(ctx.adapter->loadHelperKernelExtraCopies(icacheRotateCopies));
+            });
+    }
+
     bool        gpuTimer         = args["use-gpu-timer"].as<bool>();
     bool        runKernels       = !args["selection-only"].as<bool>();
     bool        exitOnError      = args["exit-on-error"].as<bool>();
@@ -1185,6 +1199,12 @@ int main(int argc, const char* argv[])
                                 for(auto const& filename : filenames)
                                     HIP_CHECK_EXC(ctx.adapter->loadCodeObjectFileExtraCopies(
                                         filename, extras));
+                                // Mirror the helper bundle (Kernels.so) into every
+                                // rotation slot so helper kernels (PostGSU / betaOnly /
+                                // reduction / conversion) resolve under rotation instead
+                                // of only from copy 0. The helper is already loaded into
+                                // m_modules by initializeLazyLoading at this point.
+                                HIP_CHECK_EXC(ctx.adapter->loadHelperKernelExtraCopies(extras));
                             });
                         }
 #if defined(__linux__)
@@ -1221,6 +1241,13 @@ int main(int argc, const char* argv[])
                     }
                     if(solution == nullptr)
                         throw std::runtime_error("Could not find a solution");
+
+                    // WorkgroupMappingXCCCheck admits CU-fallback solutions on the basis that
+                    // they launch at WGMXCC=1, as hipBLASLt does; zero keeps the solution's own
+                    // mapping.
+                    if(auto gemm = dynamic_cast<ContractionProblemGemm*>(problem);
+                       gemm && !fusedA2A)
+                        gemm->setParams().setWGMXCC(solution->isFallbackForHW(*hardware) ? 1 : 0);
 
                     {
                         ScopedTimer timer("pre_solution");

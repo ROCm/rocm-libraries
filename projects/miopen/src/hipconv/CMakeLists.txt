@@ -121,6 +121,19 @@ if(NOT HIPCONV_OFFLOAD_LTO)
     set(HIPCONV_DEVICE_COMPILE_OPTIONS -fno-offload-lto)
 endif()
 
+# ASAN's stack instrumentation and the resulting image-layout growth on hipconv's many
+# explicit template instantiations can grow a R_X86_64_PC32 relocation past its +/-2GB
+# range, failing libMIOpen.so's link. hipconv contributes object files/a static archive
+# to that one link, not a link of its own, so only the compile step needs this override.
+# hipconv v0.5.0 (see HIPCONV_VERSION) defines this option natively; this is a stopgap
+# until that sync lands, matching its name/semantics so the sync is a no-op here.
+option(HIPCONV_DISABLE_ASAN
+    "Disable ASAN instrumentation for hipconv only, while the rest of MIOpen keeps full ASAN/TSAN coverage" OFF)
+set(HIPCONV_SANITIZER_COMPILE_OPTIONS "")
+if(HIPCONV_DISABLE_ASAN)
+    set(HIPCONV_SANITIZER_COMPILE_OPTIONS -fno-sanitize=address)
+endif()
+
 # Every arch in the tree is built, whatever this build targets: the set of arch
 # directories is a property of the snapshot, the GPU list is not.
 file(GLOB _hipconv_arch_directories RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} "src/arch/*")
@@ -187,6 +200,9 @@ set_source_files_properties("${_version_cpp}" PROPERTIES GENERATED TRUE)
 add_dependencies(hipconv hipconv_version)
 foreach(_target IN LISTS _arch_targets)
     target_sources(hipconv PRIVATE $<TARGET_OBJECTS:${_target}>)
+    if(HIPCONV_SANITIZER_COMPILE_OPTIONS)
+        target_compile_options(${_target} PRIVATE ${HIPCONV_SANITIZER_COMPILE_OPTIONS})
+    endif()
 endforeach()
 
 target_include_directories(hipconv
@@ -197,7 +213,8 @@ target_include_directories(hipconv
 set_target_properties(hipconv PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(hipconv PUBLIC hip::device)
 target_compile_options(hipconv PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden
-                                       ${HIPCONV_DEVICE_COMPILE_OPTIONS})
+                                       ${HIPCONV_DEVICE_COMPILE_OPTIONS}
+                                       ${HIPCONV_SANITIZER_COMPILE_OPTIONS})
 if(HIPCONV_ENABLE_EXPLICIT_GEMM)
     target_link_libraries(hipconv PUBLIC roc::hipblaslt)
     target_compile_definitions(hipconv PUBLIC HIPCONV_ENABLE_EXPLICIT_GEMM)

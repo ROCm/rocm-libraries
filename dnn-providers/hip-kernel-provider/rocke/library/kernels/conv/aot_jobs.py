@@ -45,8 +45,9 @@ Per direction, on top of that:
   ``CACHE_FWD_SPLIT_K_ARCHS`` targets, the split-K kernel (``split_k`` > 1,
   recorded as 2 with ``two_stage``; fp32 workspace slabs + the Stage 2 fold,
   the degree a kernarg swept at launch) on the small tiles, pipelines and
-  widths of ``CACHE_FWD_SPLIT_K_*``, and its cluster form where the target
-  launches workgroup clusters and the flavor lowers them.
+  widths of ``CACHE_FWD_SPLIT_K_*`` (on MFMA the ``CACHE_FWD_SPLIT_K_MFMA_*``
+  subset), and its cluster form where the target launches workgroup clusters
+  and the flavor lowers them.
 * **wgrad** -- tile_m/tile_n also take 144 and 192, and warp_m/warp_n also
   take 3 and 6 (``CACHE_WGRAD_EXTRA_*``): wgrad's GEMM N is Z*Y*X*cpg, which
   carries a factor of 9 for a 3x3 filter, and the base ladder steps by 2x, so
@@ -61,7 +62,18 @@ Per direction, on top of that:
   two-stage only, load widths derived by the builder), served only to
   depthwise problems whose merged GEMM fits the tile. ``lds_k_outer`` and
   ``prefetch_addr`` follow ``WgradConvSpec.default_lds_k_outer`` /
-  ``default_prefetch_addr`` per geometry.
+  ``default_prefetch_addr`` per geometry. On gfx950 the register-prefetch
+  K loop (``prefetch_global_regs``) is built next to the plain loop of the 8 / 8
+  wide kernels on the ``CACHE_WGRAD_PREFETCH_GLOBAL_REGS_GEOMETRIES`` cover, with
+  the cshuffle epilogue (split_k = 1 and atomic split-K) and two-stage
+  split-K. On wave32 (WMMA, gfx1250) the
+  synchronous default-epilogue kernels (split_k = 1 and atomic split-K) are
+  built on the whole grid; the cshuffle epilogue, two-stage split-K and the
+  ``async_dma`` loop (global_load_async_to_lds) only on the
+  ``CACHE_WGRAD_WMMA_GEOMETRIES`` cover. The async loop is built next to the
+  plain K loop of each non-two-stage configuration, once per geometry with
+  the A / B chunk widths the copy picks recorded in the identity
+  (``async_chunk_a`` / ``_b``).
   Opt-in (``streamk_modes``; ``--compile-all --streamk``): stream-K
   kernels, default epilogue only, ``split_k`` = 1, c = 1. At the widest
   vector width W of the dtype (a = W; b in {W, 1}): one per launch mode
@@ -177,6 +189,137 @@ CACHE_WARP_TILE_MN: Tuple[int, ...] = (16, 32)
 # which have no factor of 9 to chase, and widening all three directions costs
 # several times the disk for no measured gain.
 CACHE_WGRAD_EXTRA_TILE_MN: Tuple[int, ...] = (144, 192)
+
+# ---- wave32 (WMMA) wgrad geometries ---------------------------------------
+# The WMMA wgrad variants beyond the synchronous default epilogue (cshuffle,
+# two-stage split-K, the async K loop) are built on these (tile_m, tile_n,
+# tile_k, warp_m, warp_n) only; the default-epilogue kernels keep the whole
+# ladder above. Profiling the wgrad layers of
+# the reference corpora over a pruned grid (tile_m 32..256 bounded by kpg,
+# tile_n 64..256, tile_k 32/64, 4 or 8 waves), with the cached kernels
+# (split_k = 1 default epilogue, split-K cshuffle), each of these was the
+# fastest geometry of at least one layer, and together they hold the fastest
+# measured time of every layer. The rest of the ladder never won one; the JIT
+# sweep still walks it.
+CACHE_WGRAD_WMMA_GEOMETRIES: Tuple[Tuple[int, int, int, int, int], ...] = (
+    (32, 64, 32, 2, 4),
+    (32, 64, 64, 2, 2),
+    (32, 64, 64, 2, 4),
+    (32, 128, 32, 2, 2),
+    (32, 128, 64, 1, 4),
+    (32, 128, 64, 1, 8),
+    (32, 256, 32, 1, 8),
+    (32, 256, 64, 1, 4),
+    (64, 64, 64, 2, 4),
+    (64, 64, 64, 4, 2),
+    (64, 128, 64, 2, 2),
+    (64, 128, 64, 2, 4),
+    (128, 64, 64, 4, 2),
+    (128, 128, 32, 1, 4),
+    (128, 128, 32, 2, 2),
+    (128, 128, 64, 2, 2),
+    (128, 128, 64, 4, 2),
+    (256, 64, 64, 4, 2),
+    (256, 128, 64, 4, 2),
+)
+# The register-prefetch K loop (WgradConvSpec.prefetch_global_regs) on gfx950: built
+# as an extra kernel next to the plain synchronous loop of the widest-vector
+# (8 / 8) configurations, on these (tile_m, tile_n, tile_k, warp_m, warp_n,
+# warp_tile) only, for every cached pipeline, with the cshuffle epilogue
+# (split_k = 1 and atomic split-K) and two-stage split-K. Profiling the wgrad
+# layers of the reference corpora with the variant built on every such
+# configuration, each of these geometries carried the fastest kernel of at
+# least one layer; the rest never did, and neither did the default-epilogue
+# split_k = 1 kernel.
+CACHE_WGRAD_PREFETCH_GLOBAL_REGS_ARCHS: Tuple[str, ...] = ("gfx950",)
+CACHE_WGRAD_PREFETCH_GLOBAL_REGS_GEOMETRIES: Tuple[
+    Tuple[int, int, int, int, int, int], ...
+] = (
+    (32, 32, 64, 1, 2, 16),
+    (32, 32, 64, 2, 2, 16),
+    (32, 64, 32, 1, 4, 16),
+    (32, 64, 64, 1, 4, 16),
+    (32, 64, 64, 2, 4, 16),
+    (32, 128, 64, 1, 4, 16),
+    (32, 128, 64, 1, 4, 32),
+    (32, 128, 64, 2, 4, 16),
+    (32, 128, 64, 2, 8, 16),
+    (32, 192, 64, 1, 4, 16),
+    (32, 192, 64, 2, 4, 16),
+    (64, 32, 64, 2, 2, 16),
+    (64, 32, 64, 4, 1, 16),
+    (64, 32, 64, 4, 2, 16),
+    (64, 64, 32, 2, 2, 32),
+    (64, 64, 32, 4, 1, 16),
+    (64, 64, 64, 1, 4, 16),
+    (64, 64, 64, 2, 1, 16),
+    (64, 64, 64, 2, 2, 16),
+    (64, 64, 64, 2, 2, 32),
+    (64, 64, 64, 2, 4, 16),
+    (64, 64, 64, 4, 1, 16),
+    (64, 64, 64, 4, 2, 16),
+    (64, 128, 64, 1, 4, 16),
+    (64, 128, 64, 1, 4, 32),
+    (64, 128, 64, 1, 8, 16),
+    (64, 128, 64, 2, 2, 16),
+    (64, 128, 64, 2, 4, 16),
+    (64, 128, 64, 2, 8, 16),
+    (64, 128, 64, 4, 2, 16),
+    (64, 128, 64, 4, 4, 16),
+    (64, 192, 64, 2, 4, 16),
+    (64, 192, 64, 4, 2, 16),
+    (64, 256, 64, 1, 4, 16),
+    (64, 256, 64, 1, 4, 32),
+    (64, 256, 64, 1, 8, 32),
+    (64, 256, 64, 2, 2, 16),
+    (64, 256, 64, 2, 4, 16),
+    (64, 256, 64, 2, 8, 32),
+    (128, 64, 64, 4, 1, 16),
+    (128, 64, 64, 4, 2, 16),
+    (128, 64, 64, 8, 2, 16),
+    (128, 128, 64, 2, 2, 16),
+    (128, 128, 64, 2, 4, 16),
+    (128, 128, 64, 2, 8, 16),
+    (128, 128, 64, 4, 2, 16),
+    (128, 128, 64, 4, 4, 16),
+    (128, 128, 64, 8, 2, 16),
+    (128, 192, 64, 2, 2, 16),
+    (128, 192, 64, 2, 4, 16),
+    (128, 256, 64, 1, 4, 16),
+    (128, 256, 64, 2, 4, 16),
+    (128, 256, 64, 2, 8, 16),
+    (128, 256, 64, 4, 2, 16),
+    (128, 256, 64, 4, 4, 16),
+    (144, 144, 32, 3, 3, 16),
+    (144, 144, 64, 3, 3, 16),
+    (144, 192, 64, 3, 4, 16),
+    (192, 64, 64, 4, 2, 16),
+    (192, 128, 64, 2, 4, 32),
+    (192, 128, 64, 4, 2, 16),
+    (192, 144, 64, 4, 3, 16),
+    (192, 192, 64, 2, 6, 16),
+    (192, 192, 64, 2, 6, 32),
+    (192, 192, 64, 3, 4, 16),
+    (192, 192, 64, 4, 3, 16),
+    (192, 192, 64, 4, 4, 16),
+    (192, 192, 64, 6, 2, 16),
+    (192, 256, 64, 4, 2, 16),
+    (192, 256, 64, 4, 4, 16),
+    (256, 64, 64, 4, 2, 16),
+    (256, 128, 32, 4, 1, 16),
+    (256, 128, 32, 4, 2, 16),
+    (256, 128, 64, 4, 1, 16),
+    (256, 128, 64, 4, 2, 16),
+    (256, 128, 64, 4, 4, 16),
+    (256, 128, 64, 8, 2, 16),
+    (256, 192, 64, 4, 2, 16),
+    (256, 192, 64, 8, 1, 32),
+    (256, 256, 32, 2, 4, 16),
+    (256, 256, 32, 4, 4, 16),
+    (256, 256, 64, 2, 4, 16),
+    (256, 256, 64, 4, 2, 16),
+    (256, 256, 64, 4, 4, 16),
+)
 CACHE_WGRAD_EXTRA_WARP_MN: Tuple[int, ...] = (3, 6)
 # Cap on the f32 accumulator registers each lane holds:
 # (tile_m / warp_m) * (tile_n / warp_n) / wave_size. Above 256 the
@@ -316,15 +459,37 @@ CACHE_FWD_GROUP_MERGE_EXCLUDED_TILE_M: Tuple[int, ...] = (16,)
 # sweep does: one workgroup per merged group cannot fill the device.
 CACHE_WGRAD_SPLIT_KS: Tuple[int, ...] = (1, 2)
 
-# Split-K forward (WMMA only; ImplicitGemmConvSpec.split_k): built for the
-# small-M / deep-K layers it exists for, so only small output tiles, the two
-# WMMA pipelines and the cshuffle epilogue. Recorded as split_k = 2 with
+# dW width of the packed 16-bit split-K atomic (cshuffle) kernels, per arch.
+# One <2 x dtype> pair per lane puts a wave's atomics on consecutive dwords,
+# so each atomic instruction covers two cache lines instead of eight and the
+# split CTAs of one tile contend on far fewer L2 atomic transactions.
+# Unlisted arches keep dW tied to the X width.
+CACHE_WGRAD_ATOMIC_VEC_C: Dict[str, int] = {"gfx950": 2}
+
+# Split-K forward (ImplicitGemmConvSpec.split_k): built for the small-M /
+# deep-K layers it exists for, so only small output tiles, the two WMMA
+# pipelines (or the MFMA subset below) and the cshuffle epilogue. Recorded as split_k = 2 with
 # two_stage set: the degree is a kernarg, swept at launch.
 CACHE_FWD_SPLIT_K_TILE_M: Tuple[int, ...] = (16, 32, 64)
 CACHE_FWD_SPLIT_K_TILE_N: Tuple[int, ...] = (16, 32, 64, 128)
 CACHE_FWD_SPLIT_K_TILE_K: Tuple[int, ...] = (32, 64)
 CACHE_FWD_SPLIT_K_PIPELINES: Tuple[str, ...] = ("mem", "wavelet")
 CACHE_FWD_SPLIT_K_VECS: Tuple[int, ...] = (4, 8)
+# The MFMA (gfx950) split-K forward subset: the small-M / deep-K layers it is
+# for (dilated and strided deep-channel rows, small batch) want few, small
+# output tiles; the plain K-loop pipelines only (see fwd_split_k_reason) and
+# 16-byte vectors.
+CACHE_FWD_SPLIT_K_MFMA_TILE_M: Tuple[int, ...] = (32, 64, 128)
+CACHE_FWD_SPLIT_K_MFMA_TILE_N: Tuple[int, ...] = (32, 64, 128)
+CACHE_FWD_SPLIT_K_MFMA_PIPELINES: Tuple[str, ...] = ("mem", "compv3")
+# 16-byte vectors only: the layers it serves have deep, 8-aligned channels.
+CACHE_FWD_SPLIT_K_MFMA_VECS: Tuple[int, ...] = (8,)
+# Tallest output tile a one-wave (1x1-warp) MFMA split-K kernel is built at.
+# One wave holding 128 rows sits at the register ceiling, and the split adds
+# the slice bounds and the slab base on top: those binaries spill (to scratch
+# at 128x128, SGPRs at 128x32 and 128x64) where their unsplit twins mostly do
+# not, so the 128-row tiles are built with 2 or more waves only.
+CACHE_FWD_SPLIT_K_MFMA_ONE_WAVE_MAX_TILE_M = 64
 # Single-launch cluster split-K forward (ImplicitGemmConvSpec.split_k_cluster):
 # the S slices of one output tile form a (1, 1, S) workgroup cluster and fold
 # their slabs after a cluster barrier, so there is no Stage 2 launch. The
@@ -412,8 +577,54 @@ class BuildJob:
     caps: dict
 
 
-def _dtype_triple(dtype: str) -> Tuple[str, str, str]:
-    return dtype, dtype, dtype
+# The benchmark/cache spelling of TF32: A and B are read as the logical
+# ``tf32`` carrier, D stays fp32. Only the identity layer (KernelIdentity,
+# labels, the early-stop key, the cache filter) uses it; a kernel spec gets
+# fp32 storage plus ``mma_dtype="tf32"`` from :func:`conv_data_spec`.
+TF32_TRIPLE: Tuple[str, str, str] = ("tf32", "tf32", "fp32")
+
+# Logical dtype -> the dtype its tensors are stored in. Byte, vector-width,
+# LDS and K-outer helpers must see this, never the logical ``"tf32"`` (which
+# they would size as a 2-byte type).
+_STORAGE_DTYPE = {"tf32": "fp32"}
+
+
+def dtype_triple(dtype: str) -> Tuple[str, str, str]:
+    """``(dtype_a, dtype_b, dtype_d)`` of a benchmark ``--dtype``."""
+    return TF32_TRIPLE if dtype == "tf32" else (dtype, dtype, dtype)
+
+
+def storage_dtype(dtype: str) -> str:
+    """The dtype a logical (identity-layer) dtype is stored in."""
+    return _STORAGE_DTYPE.get(dtype, dtype)
+
+
+def conv_data_spec(dtype_a: str, dtype_b: Optional[str] = None, dtype_d=None):
+    """The kernel ``ConvDataSpec`` for an identity-layer dtype (or triple).
+
+    The one translation between the two layers: ``"tf32"`` operands become
+    fp32 storage with ``mma_dtype="tf32"``; every other dtype passes through,
+    so the spec of an existing identity is exactly what it was. A TF32 triple
+    must be :data:`TF32_TRIPLE` exactly: TF32 is an operand mode, so the output
+    is spelled ``fp32`` and any other spelling is refused, not rewritten.
+    """
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+    if dtype_b is None and dtype_d is None:
+        dtype_a, dtype_b, dtype_d = dtype_triple(dtype_a)
+    if "tf32" in (dtype_a, dtype_b, dtype_d):
+        if (dtype_a, dtype_b, dtype_d) != TF32_TRIPLE:
+            raise ValueError(
+                f"a tf32 identity is {'/'.join(TF32_TRIPLE)}, got "
+                f"{dtype_a}/{dtype_b}/{dtype_d}"
+            )
+        return ConvDataSpec(
+            dtype_a="fp32",
+            dtype_b="fp32",
+            dtype_d="fp32",
+            mma_dtype="tf32",
+        )
+    return ConvDataSpec(dtype_a=dtype_a, dtype_b=dtype_b, dtype_d=dtype_d)
 
 
 def _grid_axes(direction: Optional[str]) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
@@ -503,6 +714,87 @@ def _fwd_k_loops(pipeline: str) -> List[Tuple[bool, bool]]:
     if pipeline == "mem":
         k_loops.append((False, True))
     return k_loops
+
+
+def _wgrad_k_loops(
+    wave_size: int, pipeline: str, two_stage: bool, target
+) -> List[dict]:
+    """K-loop variants built per wgrad configuration.
+
+    The base loop always. On wave32 (WMMA) next to "mem", except under
+    two-stage, and only on a target with ``global_load_async_to_lds``
+    (gfx1250): the ``async_dma`` loop. :func:`_wgrad_jobs` and
+    :func:`count_jobs` both take the variants from here, so the count stays
+    the number of jobs the walk yields.
+    """
+    loops: List[dict] = [{}]
+    if (
+        wave_size == 32
+        and pipeline == "mem"
+        and not two_stage
+        and target.memory.has_async_global_lds
+    ):
+        loops.append({"async_dma": True})
+    return loops
+
+
+def _wgrad_wmma_cover(mma_family: str, geometry: tuple) -> bool:
+    """Whether a wgrad geometry gets the WMMA variants beyond the plain loop.
+
+    True off WMMA (nothing is restricted there) and, on WMMA, for the
+    :data:`CACHE_WGRAD_WMMA_GEOMETRIES` cover. Outside the cover a WMMA
+    geometry builds only the synchronous default-epilogue kernels.
+    """
+    return mma_family != "wmma" or tuple(geometry[:5]) in CACHE_WGRAD_WMMA_GEOMETRIES
+
+
+def _wgrad_async_chunks(cfg: dict, dtypes, caps: dict, arch: str) -> Optional[dict]:
+    """The gfx1250 async wgrad loaders' chunk widths, for the identity.
+
+    ``{}`` for a synchronous loop; ``None`` when the async loop cannot serve
+    this configuration (the job is skipped). Taken from the builder's own
+    width choice (_wmma_async_vecs) on the probe problem, as the fwd chunks.
+    """
+    if not cfg.get("async_dma"):
+        return {}
+    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+    from kernels.common.conv_implicit_gemm_wgrad import (
+        WgradConvSpec,
+        _wmma_async_available,
+        _wmma_async_vecs,
+    )
+
+    da, db, dd = dtypes
+    try:
+        spec = WgradConvSpec(
+            problem=_probe_problem("wgrad", caps),
+            data=ConvDataSpec(dtype_a=da, dtype_b=db, dtype_d=dd),
+            **cfg,
+        )
+        ok, _ = _wmma_async_available(spec, arch)
+        if not ok:
+            return None
+        a_vec, b_vec = _wmma_async_vecs(spec)
+    except (ValueError, TypeError):
+        return None
+    return dict(async_chunk_a=a_vec, async_chunk_b=b_vec)
+
+
+def _wgrad_vec_c(
+    arch: str, dtype_d: str, epilogue: str, vec_bc: int, split_k: int, two_stage: bool
+) -> int:
+    """dW store width of a wgrad kernel (see ``CACHE_WGRAD_ATOMIC_VEC_C``).
+
+    The default epilogue (and so every two-stage kernel) stores scalar; a
+    cshuffle kernel stores at the X width, except a packed 16-bit split-K
+    atomic on an arch listed in ``CACHE_WGRAD_ATOMIC_VEC_C``.
+    """
+    if epilogue == "default":
+        return 1
+    vc = CACHE_WGRAD_ATOMIC_VEC_C.get(arch)
+    if vc and split_k > 1 and not two_stage and dtype_d in ("fp16", "bf16"):
+        return vc if vec_bc % vc == 0 else vec_bc
+    return vec_bc
 
 
 def _wgrad_two_stages(split_k: int) -> Tuple[bool, ...]:
@@ -651,7 +943,7 @@ def _fwd_jobs(
     parallel enumeration hands each worker one); ``llvm_flavor`` pins the
     identity's flavor (see :func:`_job_flavor`).
     """
-    da, db, dd = _dtype_triple(dtype)
+    da, db, dd = dtype_triple(dtype)
     flavor = _job_flavor(llvm_flavor)
     for (
         tile_m,
@@ -748,16 +1040,35 @@ def _fwd_split_cluster_target(target, flavor: str) -> bool:
 
 
 def _fwd_split_geometry(geometry: tuple) -> bool:
-    """Whether split-K forward kernels are built for ``geometry`` (WMMA only)."""
-    tile_m, tile_n, tile_k, _wm, _wn, _wt, pipeline, epilogue, atom = geometry
+    """Whether split-K forward kernels are built for ``geometry``: the WMMA
+    small tiles, or on MFMA the ``CACHE_FWD_SPLIT_K_MFMA_*`` subset."""
+    tile_m, tile_n, tile_k, warp_m, warp_n, _wt, pipeline, epilogue, atom = geometry
+    if atom.family != "wmma":
+        return (
+            epilogue == "cshuffle"
+            and pipeline in CACHE_FWD_SPLIT_K_MFMA_PIPELINES
+            and tile_m in CACHE_FWD_SPLIT_K_MFMA_TILE_M
+            and tile_n in CACHE_FWD_SPLIT_K_MFMA_TILE_N
+            and tile_k in CACHE_FWD_SPLIT_K_TILE_K
+            and (
+                warp_m * warp_n > 1
+                or tile_m <= CACHE_FWD_SPLIT_K_MFMA_ONE_WAVE_MAX_TILE_M
+            )
+        )
     return (
-        atom.family == "wmma"
-        and epilogue == "cshuffle"
+        epilogue == "cshuffle"
         and pipeline in CACHE_FWD_SPLIT_K_PIPELINES
         and tile_m in CACHE_FWD_SPLIT_K_TILE_M
         and tile_n in CACHE_FWD_SPLIT_K_TILE_N
         and tile_k in CACHE_FWD_SPLIT_K_TILE_K
     )
+
+
+def _fwd_split_vecs(atom) -> Tuple[int, ...]:
+    """The load / store widths split-K forward kernels are built at."""
+    if atom.family != "wmma":
+        return CACHE_FWD_SPLIT_K_MFMA_VECS
+    return CACHE_FWD_SPLIT_K_VECS
 
 
 def _fwd_split_cluster_geometry(geometry: tuple) -> bool:
@@ -828,9 +1139,8 @@ def _fwd_split_jobs(
             )
     if not _fwd_split_geometry(geometry):
         return
-    for vec_ab, vec_c in itertools.product(
-        CACHE_FWD_SPLIT_K_VECS, CACHE_FWD_SPLIT_K_VECS
-    ):
+    vecs = _fwd_split_vecs(atom)
+    for vec_ab, vec_c in itertools.product(vecs, vecs):
         cfg = dict(
             tile_m=tile_m,
             tile_n=tile_n,
@@ -965,7 +1275,6 @@ def _async_chunks(cfg: dict, dtypes, caps: dict, arch: str) -> dict:
     """
     if not cfg.get("async_dma"):
         return {}
-    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
     from kernels.common.conv_implicit_gemm import (
         ImplicitGemmConvSpec,
         async_tile_loaders,
@@ -975,7 +1284,7 @@ def _async_chunks(cfg: dict, dtypes, caps: dict, arch: str) -> dict:
     try:
         spec = ImplicitGemmConvSpec(
             problem=_probe_problem("fwd", caps),
-            data=ConvDataSpec(dtype_a=da, dtype_b=db, dtype_d=dd),
+            data=conv_data_spec(da, db, dd),
             **cfg,
         )
         a_loader, b_loader = async_tile_loaders(spec, arch)
@@ -1020,7 +1329,10 @@ def _wgrad_streamk_builds(
     falls to the split-K kernels.
     """
     variants = _wgrad_streamk_variants(epilogue, streamk_modes, streamk_reductions)
-    w = CACHE_WGRAD_STREAMK_LOAD_BYTES // {"fp16": 2, "bf16": 2, "fp32": 4}[dtype]
+    w = (
+        CACHE_WGRAD_STREAMK_LOAD_BYTES
+        // {"fp16": 2, "bf16": 2, "fp32": 4}[storage_dtype(dtype)]
+    )
     builds = [
         (mode, reduction, vec_a, vec_b)
         for mode, reduction in variants
@@ -1055,7 +1367,7 @@ def _wgrad_jobs(
         WgradConvSpec,
     )
 
-    da, db, dd = _dtype_triple(dtype)
+    da, db, dd = dtype_triple(dtype)
     flavor = _job_flavor(llvm_flavor)
     for (
         tile_m,
@@ -1074,14 +1386,19 @@ def _wgrad_jobs(
     ):
         if not _aot_pipeline("wgrad", pipeline):
             continue
+        in_cover = _wgrad_wmma_cover(
+            mma_family, (tile_m, tile_n, tile_k, warp_m, warp_n)
+        )
+        if epilogue != "default" and not in_cover:
+            continue
         # The K-outer LDS tile, picked per geometry by the predicate the JIT
         # sweep and dispatch use. It is a pure function of arch/dtype/atom, so
         # a shape-generic binary can carry it; leaving it at the spec default
         # (M-outer) caches only the slower layout on gfx950.
         lds_k_outer = WgradConvSpec.default_lds_k_outer(
             arch=arch,
-            dtype_a=da,
-            dtype_b=db,
+            dtype_a=storage_dtype(da),
+            dtype_b=storage_dtype(db),
             warp_tile_m=wt,
             warp_tile_n=wt,
             wave_size=wave_size,
@@ -1097,8 +1414,8 @@ def _wgrad_jobs(
         _k_pad = WgradConvSpec.default_lds_k_pad(
             arch=arch,
             tile_k=tile_k,
-            dtype_a=da,
-            dtype_b=db,
+            dtype_a=storage_dtype(da),
+            dtype_b=storage_dtype(db),
             lds_k_outer=lds_k_outer,
             wave_size=wave_size,
         )
@@ -1108,10 +1425,12 @@ def _wgrad_jobs(
         # every two-stage kernel) stores scalar, so there D is 1 and B takes
         # its own width -- tied to D it could only ever load scalar.
         for vec_a, vec_bc, split_k in itertools.product(_VECS, _VECS, split_ks):
-            vec_c = 1 if epilogue == "default" else vec_bc
             for two_stage, caps in itertools.product(
                 _wgrad_two_stages(split_k), _layout_caps()
             ):
+                if two_stage and not in_cover:
+                    continue
+                vec_c = _wgrad_vec_c(arch, dd, epilogue, vec_bc, split_k, two_stage)
                 grouped = caps["grouped"]
                 cfg = dict(
                     tile_m=tile_m,
@@ -1137,23 +1456,51 @@ def _wgrad_jobs(
                     # Pinned in the spec and the identity alike, so the host
                     # sizes the scratch and Stage 2 from what was compiled.
                     cfg["ws_replicas"] = _DEFAULT_WS_REPLICAS
-                cfg["prefetch_addr"] = _wgrad_prefetch_addr(arch, cfg)
-                yield BuildJob(
-                    identity=KernelIdentity(
-                        arch=arch,
-                        direction="wgrad",
-                        algorithm="implicit_gemm",
-                        llvm_flavor=flavor,
-                        dtype_a=da,
-                        dtype_b=db,
-                        dtype_d=dd,
-                        grouped=grouped,
-                        **cfg,
-                    ),
-                    direction="wgrad",
-                    spec_kwargs=cfg,
-                    caps=caps,
+                k_loops = (
+                    _wgrad_k_loops(wave_size, pipeline, two_stage, target)
+                    if in_cover
+                    else [{}]
                 )
+                for k_loop in k_loops:
+                    kcfg = dict(cfg, **k_loop)
+                    if k_loop.get("async_dma"):
+                        # The async copy picks its own chunk width (recorded
+                        # below), so A / B widths are left unset: built once
+                        # per geometry, on the widest-vector iteration.
+                        if (vec_a, vec_bc) != (_VECS[-1], _VECS[-1]):
+                            continue
+                        kcfg.update(vector_size_a=None, vector_size_b=None)
+                    kcfg["prefetch_addr"] = _wgrad_prefetch_addr(arch, kcfg)
+                    chunks = _wgrad_async_chunks(kcfg, (da, db, dd), caps, arch)
+                    if chunks is None:
+                        continue
+                    kcfgs = [kcfg]
+                    if _wgrad_prefetch_global_regs(arch, kcfg):
+                        # The register-prefetch form of the plain K loop
+                        # (WgradConvSpec.prefetch_global_regs), next to it. It
+                        # replaces the carried-offset loop, so prefetch_addr
+                        # is off.
+                        kcfgs.append(
+                            dict(kcfg, prefetch_addr=False, prefetch_global_regs=True)
+                        )
+                    for kc in kcfgs:
+                        yield BuildJob(
+                            identity=KernelIdentity(
+                                arch=arch,
+                                direction="wgrad",
+                                algorithm="implicit_gemm",
+                                llvm_flavor=flavor,
+                                dtype_a=da,
+                                dtype_b=db,
+                                dtype_d=dd,
+                                grouped=grouped,
+                                **kc,
+                                **chunks,
+                            ),
+                            direction="wgrad",
+                            spec_kwargs=kc,
+                            caps=caps,
+                        )
         # Stream-K kernels (opt-in). Default epilogue only, so the store is
         # scalar and B takes its own width; split_k stays 1 (stream-K owns the
         # K partition). The workspace reduction reuses the two-stage scratch,
@@ -1254,6 +1601,55 @@ def _wgrad_jobs(
             )
 
 
+def _wgrad_prefetch_global_regs_geometry(arch: str, geometry: tuple) -> bool:
+    """Whether a wgrad geometry is in the gfx950 register-prefetch cover.
+
+    ``geometry`` is ``(tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile)``;
+    see :data:`CACHE_WGRAD_PREFETCH_GLOBAL_REGS_GEOMETRIES`.
+    """
+    return (
+        arch in CACHE_WGRAD_PREFETCH_GLOBAL_REGS_ARCHS
+        and tuple(geometry) in CACHE_WGRAD_PREFETCH_GLOBAL_REGS_GEOMETRIES
+    )
+
+
+def _wgrad_prefetch_global_regs_stage(
+    epilogue: str, split_k: int, two_stage: bool
+) -> bool:
+    """Whether a (epilogue, split-K stage) gets the register-prefetch variant:
+    the cshuffle epilogue (split_k = 1 and atomic split-K) and two-stage
+    split-K. Shared by :func:`_wgrad_prefetch_global_regs` and :func:`count_jobs`."""
+    if epilogue == "cshuffle":
+        return not two_stage
+    return split_k > 1 and two_stage
+
+
+def _wgrad_prefetch_global_regs(arch: str, cfg: dict) -> bool:
+    """Whether a wgrad job also gets the register-prefetch K loop.
+
+    Built next to the plain synchronous loop of the widest-vector (8 / 8)
+    configurations of the :data:`CACHE_WGRAD_PREFETCH_GLOBAL_REGS_GEOMETRIES` cover;
+    see WgradConvSpec.prefetch_global_regs.
+    """
+    if cfg.get("async_dma") or cfg.get("unroll_k"):
+        return False
+    if (cfg.get("vector_size_a"), cfg.get("vector_size_b")) != (8, 8):
+        return False
+    geometry = (
+        cfg["tile_m"],
+        cfg["tile_n"],
+        cfg["tile_k"],
+        cfg["warp_m"],
+        cfg["warp_n"],
+        cfg["warp_tile_m"],
+    )
+    return _wgrad_prefetch_global_regs_geometry(
+        arch, geometry
+    ) and _wgrad_prefetch_global_regs_stage(
+        cfg["epilogue"], cfg.get("split_k", 1), cfg.get("two_stage", False)
+    )
+
+
 def _wgrad_prefetch_addr(arch: str, cfg: dict) -> bool:
     """``prefetch_addr`` for a wgrad job, from the policy the JIT sweep uses.
 
@@ -1287,7 +1683,7 @@ def _dgrad_jobs(
 ) -> Iterator[BuildJob]:
     from kernels.common.conv_implicit_gemm_dgrad import DgradConvSpec
 
-    da, db, dd = _dtype_triple(dtype)
+    da, db, dd = dtype_triple(dtype)
     flavor = _job_flavor(llvm_flavor)
     for (
         tile_m,
@@ -1321,7 +1717,7 @@ def _dgrad_jobs(
             # K-outer has no scatter to remove.
             lds_k_outer = DgradConvSpec.default_lds_k_outer(
                 arch=arch,
-                dtype_b=db,
+                dtype_b=storage_dtype(db),
                 warp_tile_n=wt,
                 cpg=vec_bc,
                 wave_size=wave_size,
@@ -1528,8 +1924,12 @@ def job_for_identity(identity: KernelIdentity) -> BuildJob:
             f"not an implicit-GEMM conv identity: {identity.direction}/"
             f"{identity.algorithm}"
         )
-    if not identity.dtype_a == identity.dtype_b == identity.dtype_d:
-        raise LookupError("the AOT grid builds A, B and D in one dtype")
+    if (identity.dtype_a, identity.dtype_b, identity.dtype_d) != dtype_triple(
+        identity.dtype_a
+    ):
+        raise LookupError(
+            "the AOT grid builds A, B and D in one dtype (tf32: tf32/tf32/fp32)"
+        )
     if identity.warp_tile_m != identity.warp_tile_n:
         raise LookupError("the AOT grid builds square warp tiles only")
     target = ArchTarget.from_gfx(identity.arch)
@@ -1638,9 +2038,7 @@ def _spec_is_valid(job: BuildJob, arch: str, dtype: str) -> bool:
     """
     if _aot_excluded(job, arch):
         return False
-    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
-
-    data = ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype)
+    data = conv_data_spec(dtype)
     problem = _probe_problem(job.direction, job.caps)
     try:
         if job.direction == "fwd":
@@ -1700,7 +2098,7 @@ def count_jobs(
     Counted per direction rather than once over a shared grid: wgrad walks a
     wider one (see :func:`_grid_axes`).
     """
-    da, db, _ = _dtype_triple(dtype)
+    da, db, _ = dtype_triple(dtype)
     mma_family = "wmma" if target.wave_size == 32 else "mma"
     vecs = len(_VECS) * len(_VECS)
     layouts = len(_layout_caps())
@@ -1723,13 +2121,31 @@ def count_jobs(
                 if _fwd_merged_geometry(geo):
                     total += len(_FWD_GROUP_MERGES) * len(_fwd_merged_k_loops())
                 if fwd_split and _fwd_split_geometry(geo):
-                    total += len(CACHE_FWD_SPLIT_K_VECS) ** 2
+                    total += len(_fwd_split_vecs(geo[8])) ** 2
                 if fwd_cluster and _fwd_split_cluster_geometry(geo):
                     total += len(CACHE_FWD_SPLIT_K_CLUSTER_DEGREES)
             elif direction == "wgrad":
-                total += (
-                    vecs * sum(len(_wgrad_two_stages(sk)) for sk in split_ks) * layouts
-                )
+                in_cover = _wgrad_wmma_cover(mma_family, geo)
+                if geo[7] != "default" and not in_cover:
+                    continue
+                if in_cover:
+                    stages = sum(len(_wgrad_two_stages(sk)) for sk in split_ks)
+                    # The async loop: once per non-two-stage configuration.
+                    asyncs = len(split_ks) * (
+                        len(_wgrad_k_loops(wave_size, pipeline, False, target)) - 1
+                    )
+                else:
+                    stages, asyncs = len(split_ks), 0
+                total += vecs * stages * layouts + asyncs * layouts
+                if 8 in _VECS and _wgrad_prefetch_global_regs_geometry(
+                    target.gfx, geo[:6]
+                ):
+                    # The register-prefetch variants of the (8, 8) kernel.
+                    total += layouts * sum(
+                        _wgrad_prefetch_global_regs_stage(geo[7], sk, ts)
+                        for sk in split_ks
+                        for ts in _wgrad_two_stages(sk)
+                    )
                 total += merged
                 total += layouts * len(
                     _wgrad_streamk_builds(
@@ -1784,7 +2200,7 @@ def _direction_jobs(
 
 def _geometry_list(target, dtype: str, direction: Optional[str] = None) -> List[tuple]:
     mma_family = "wmma" if target.wave_size == 32 else "mma"
-    da, db, _ = _dtype_triple(dtype)
+    da, db, _ = dtype_triple(dtype)
     return list(_geometries(target, mma_family, da, db, direction))
 
 
@@ -1867,9 +2283,7 @@ def kernel_for_job(job: BuildJob, arch: str, dtype: str):
     rather than failed -- the grid is deliberately over-generated and most
     rejections are ordinary spec-validity rules.
     """
-    from kernels.common._conv_implicit_gemm_common import ConvDataSpec
-
-    data = ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype)
+    data = conv_data_spec(dtype)
     problem = _probe_problem(job.direction, job.caps)
 
     if job.direction == "fwd":

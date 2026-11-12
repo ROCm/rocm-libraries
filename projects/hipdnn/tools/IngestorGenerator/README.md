@@ -376,12 +376,58 @@ echo '*.kdp.json diff=kdp' >> "$(git rev-parse --git-path info/attributes)"
 The splice tool appends rather than interleaves, so its output reads as pure insertion
 under every algorithm.
 
+### Shipping a trained model
+
+`uhd_gen promote` copies a trained model into the bundle's `heuristics/` subtree and adds
+its UHD id to the UED, per arch: `sort_kernel_catalog.<arch>` after `default`, or a new
+role (`predict_engine`, `predict_applicable_kernels`) at the end of the document. The
+generator writes the UED too, so record the same binding in the config, or the next
+regeneration drops it (and the regeneration gate's byte compare fails):
+
+1. Run `uhd_gen promote` on the bundle. It prints the arch and the model's UHD id.
+2. Add them to `engine.heuristics`, in the order promote added them. For a registry-driven
+   engine put them in the manifest's `engine` block (`configs/<bundle>.engine.yaml`) **and**
+   the selection (`configs/<bundle>.yaml`): `registry_enumerator.py` copies the manifest's
+   `engine` into every config it writes, and regeneration gate g4 requires the selection's
+   engine to equal it, so a binding only in the selection fails g4 and the next
+   enumeration drops it.
+
+   ```yaml
+   engine:
+     heuristics:
+       sort_kernel_catalog:
+         gfx942: [4b750e22-2656-46ce-89e7-be9ba588d732]
+   ```
+
+3. Regenerate. The UED comes out byte-identical to the promoted one; nothing else
+   changes, and the reader still resolves the native UHD from `default` only, so the
+   model UHD under `heuristics/` mints and reuses no id.
+4. Add the model's DVC pointer: in its leaf folder
+   (`heuristics/<ued-id>/<role>/<arch>/<metric>/`) run `dvc add model.bin`, append
+   `remote: ingestor` to the new `model.bin.dvc`, and commit the pointer and the `.gitignore`
+   `dvc add` writes beside it, with `heuristic.uhd.json`. One pointer per model, not one for
+   `heuristics/`; the provider's configure scan and `dvc pull -r ingestor` read it. A build
+   that did not pull the model ships without it and warns; one built with
+   `HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON` fails instead.
+
+Roles are the three promote accepts. Keys are one concrete arch (`gfx942`, not `gfx9` or
+`gfx950-dcgpu`); `default` is allowed except under `sort_kernel_catalog`, whose `default`
+is the generator's native UHD (so that role also needs `heuristic: native`). Values are
+what promote writes: a non-empty list of distinct UUIDs for every role -- one model per
+ranking metric for `sort_kernel_catalog` and `predict_engine`, and the candidate generators
+(`predict_applicable_kernels`) for future JIT spaces. A slotted engine refuses the key: its
+rankers are per slot. Without `engine.heuristics` every output is unchanged.
+
 ## Output
 
 The descriptor directory mirrors the authored root, so the emitted tree copies across
 verbatim. `direct_load` emits under `test_descriptors/<set>/<slug>/`, `<set>` being the
 `authored_subpath` the config must name; `packaged` emits under
 `descriptors/<producer>/<bundle>/`, defaulting the subpath to `<kernel_source_kind>/<slug>`.
+`<slug>` is the engine slug, the snake_case of the engine's local name; it names the files.
+The folder is the `authored_subpath` and may differ from it:
+`hipkernel:Gfx942AttentionUnified3d` writes `gfx942_attention_unified3d.*` files into
+`rocKE/gfx942_attention_unified_3d/`.
 
 ```
 <output-dir>/
@@ -395,9 +441,10 @@ verbatim. `direct_load` emits under `test_descriptors/<set>/<slug>/`, `<set>` be
     kernel_dtype_matches_graph.umd.json   # the one shared kernel-scoped matcher
     <slug>.kdp.json                 # single-pack engine: one KDP named after the slug
     <slug>_<pack>.kdp.json          # multi-pack engine: one KDP per pack
-    operation_is_<disc>.umd.json    # multi-pack engine ONLY -- one operation-scoped
-                                     # UMD per pack. A single-pack engine emits ZERO of
-                                     # these; see "UMD policy" below.
+    operation_is_<disc>.umd.json    # multi-pack engine with discriminators ONLY -- one
+                                     # operation-scoped UMD per pack. A single-pack or
+                                     # sharded engine emits ZERO of these; see "UMD
+                                     # policy" below.
   packs/<Name>Native.cpp            # native-symbol stub (graph_match/kernel_match/
                                     # score/dispatch bodies are all `// TODO`)
   tests/Test<Name>Packs.cpp         # COMPLETE pack-shape census -- not a stub
@@ -412,6 +459,12 @@ applicability belongs in the UED's `graph_match`. A **single-pack** engine gets 
 graph-scoped UMDs, its one pack's `matchers[]` naming only the shared kernel-scoped dtype
 matcher; a **multi-pack** engine gets **one** graph-scoped operation-matcher UMD per pack
 (each pack setting a unique `discriminator`), plus that same shared matcher.
+
+A multi-pack engine whose packs declare **no** `discriminator` is one catalog sharded
+across KDP files, for example one pack per dtype so that no file holds the whole catalog.
+It is treated like a single pack: zero graph-scoped UMDs, every shard naming only the
+shared kernel-scoped matcher, and the engine's `graph_match` admitting every shard. Either
+every pack of an engine declares a `discriminator` or none does.
 
 ### Native-symbol stub shape
 
@@ -436,7 +489,7 @@ counts, SDK version and runtime source kind come from the actual output, after
 normalization and deduplication. Packaged runtime source kind is KPACK, not the authored
 builder kind. The file is emitted in the form the provider's `.clang-format` (pre-commit
 pins clang-format 18.1.4) produces, so a copy is not reformatted later;
-`tests/test_packs_formatting.py` checks the shipped gfx950 config against the live file and,
+`tests/test_packs_formatting.py` checks each manifest-backed shipped config against its live file and,
 with `HIPDNN_CLANG_FORMAT` naming a binary, every shipped config against clang-format.
 
 **The census lives in its own binary.** `Test<Name>Packs.cpp` is spliced into
@@ -631,10 +684,12 @@ is `space: slice`):
 
 ```bash
 PY="$PWD/.venv/bin/python"
-SLUG=gfx950_attention_dense
+SLUG=gfx950_attention_dense   # bundle folder and config stem (configs/$SLUG.yaml)
+STEM=gfx950_attention_dense   # descriptor file stem: the engine slug. Not always $SLUG:
+                              # gfx942_attention_unified_3d's files are gfx942_attention_unified3d.*
 SHIPPED="$PWD/../../../../dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE/$SLUG"
 SCRATCH=$(mktemp -d)
-D="descriptors/rocKE/$SLUG/$SLUG"
+D="descriptors/rocKE/$SLUG/$STEM"
 "$PY" -m pytest tests/test_registry_regeneration.py -q
 # Both generate runs below reuse the installed bundle's ids (the gfx950 KDP is a DVC
 # object: fetch it into artifacts/ first, or generation refuses).
@@ -644,14 +699,14 @@ D="descriptors/rocKE/$SLUG/$SLUG"
 # hkp_pack would hydrate differently.  Use it whenever the shipped catalog and
 # the regenerated one come from the same enumerate.spec_fields declaration.
 "$PY" tools/catalog_diff.py --ignore-ids --strict-spec \
-    --shipped "$SHIPPED/artifacts/$SLUG.kdp.json" --shipped-kmd "$SHIPPED/$SLUG.kmd.json" \
+    --shipped "$SHIPPED/artifacts/$STEM.kdp.json" --shipped-kmd "$SHIPPED/$STEM.kmd.json" \
     --regenerated "$SCRATCH/selection/$D.kdp.json" --regenerated-kmd "$SCRATCH/selection/$D.kmd.json"
 "$PY" tools/registry_enumerator.py --manifest "configs/$SLUG.engine.yaml" --out "$SCRATCH/registry.yaml"
 "$PY" generate.py --config "$SCRATCH/registry.yaml" --output-dir "$SCRATCH/registry"
 # --subset only: shipped ⊆ regenerated is the right check for the full registry
 # (the registry may contain more tiles than the shipped selection). Its header
 # names the regenerated-only spec fields it did not compare.
-"$PY" tools/catalog_diff.py --subset --ignore-ids --shipped "$SHIPPED/artifacts/$SLUG.kdp.json" --shipped-kmd "$SHIPPED/$SLUG.kmd.json" \
+"$PY" tools/catalog_diff.py --subset --ignore-ids --shipped "$SHIPPED/artifacts/$STEM.kdp.json" --shipped-kmd "$SHIPPED/$STEM.kmd.json" \
     --regenerated "$SCRATCH/registry/$D.kdp.json" --regenerated-kmd "$SCRATCH/registry/$D.kmd.json"
 ```
 
@@ -684,7 +739,7 @@ on the verifying machine.
 | `tools/registry_enumerator.py` | Which kernels does the rocKE registry offer this engine? Expands an engine manifest into a generator config; reports how a shape corpus falls on its cells (by cell axes; it does not check that a sequence length can be served); prints the space by knob with exact instance counts | `registry_enumerator.py --manifest M --out C [--shapes S] [--strict]`, or `--manifest M --plan-space [--strict]` (`--plan-space` with `--out` or `--shapes` is a usage error). Exit 2 is unusable input, naming the field: a malformed manifest, a duplicate key, a `ground_truth.value_map` whose keys differ from a cell field's values, or a builder value with no `specialization.vocabulary` mapping; `--strict` makes exit 1 mean an instance count over `aot_budget_per_arch` or a `--shapes` GAP; an over-budget build writes nothing |
 | `tools/factorise_config.py` | Compacts an enumerated config into the `variants` form, refusing output that does not re-expand to the input | `factorise_config.py --config C --out S --knobs K1,K2,... [--vocabulary 'field:from=to,...']` |
 | `tools/catalog_diff.py` | Is a regenerated catalog the shipped one? Order-blind; UUID-blind with `--ignore-ids` (needed only for output generated with `--new-ids` or with nothing to reuse); `--expect-ids` requires the shipped ids to be reused, as after a splice or a `generate.py` run that reused the installed bundle's ids; `--subset` requires only that every shipped kernel is present. An entry is its name, whole `kernel_source` (every key, the spec as below) or, for a multi-launch entry, its `sources` map by launch name, `arch`, metadata, priority and version. Without `--strict-spec` (and with `--subset`) the spec comparison is keyed on the shipped fields: the header's `spec fields` line lists the regenerated-only fields it did not compare. A malformed entry or KMD exits 2, as does an `--expect-ids` name present in both catalogs used a different number of times | `catalog_diff.py --shipped K --regenerated K2 [--ignore-ids] [--expect-ids] [--strict-spec \| --subset] [--shipped-kmd M --regenerated-kmd M2]` |
-| `tools/variant_reduce.py` | Which variants of a selection do autotune rankings justify? Reports the ε curve and per-variant reasons and proposes knob-level rules. Rule ids (`R` and six hex digits) are derived from the rule text, so an id is stable while the text is; a `keep X=v only for <cells>` rule's cells, and so its id, can change with `--budget`; a rule no longer proposed exits 2. Exit 1: over budget, or the applied rules together lose more of some graph's best time than the rules' ε (the report names those graphs); 2: unusable input; 3: a failed correctness verdict, timing phases missing for some (round, corpus), or the reduced arm's sweep is incomplete (no `summary.json` or no usable `expected_phases`, no expected timing phase for the arm, an expected phase with no record, a timing phase with no winners). `--out` is never written on 1 or 3; the report is, except for an incomplete sweep, which writes nothing. A sweep of fewer than 2 rounds warns that its noise floor is assumed (`reduction.single_round_epsilon`) | `variant_reduce.py --selection S --kdp INSTALLED_KDP --sweep-output DIR [--arm A] --out S2 --report R [--budget N] [--apply-rules ID,ID]` |
+| `tools/variant_reduce.py` | Which variants of a selection do autotune rankings justify? Reports the ε curve and per-variant reasons and proposes knob-level rules. Rule ids (`R` and six hex digits) are derived from the rule text, so an id is stable while the text is; a `keep X=v only for <cells>` rule's cells, and so its id, can change with `--budget`; a rule no longer proposed exits 2. Exit 1: over budget, or the applied rules together lose more of some graph's best time than the rules' ε (the report names those graphs); a slotted engine is checked per slot, see [Reducing a slotted engine](#reducing-a-slotted-engine); 2: unusable input; 3: a failed correctness verdict, timing phases missing for some (round, corpus), or the reduced arm's sweep is incomplete (no `summary.json` or no usable `expected_phases`, no expected timing phase for the arm, an expected phase with no record, a timing phase with no winners, for a slotted engine in any slot). `--out` is never written on 1 or 3; the report is, except for an incomplete sweep, which writes nothing. A sweep of fewer than 2 rounds warns that its noise floor is assumed (`reduction.single_round_epsilon`) | `variant_reduce.py --selection S --kdp INSTALLED_KDP [--kdp ...] --sweep-output DIR [--arm A] --out S2 --report R [--budget N] [--apply-rules ID,ID]` |
 | `tools/ground_truth.py` | How does hipDNN compare with the kernel owner's numbers? | `ground_truth.py {ingest,graphs,compare}`; see RUNBOOK stages 2 and 6. `graphs` records each graph's semantic identity and its row's digest; `compare` exits 2 when a row or a swept graph no longer matches that record (rerun `graphs`), and otherwise 0 whatever it finds (the report is for review; an accepted exception is a normal outcome); `compare --strict` exits 1 unless every row is within `--margin`, not declined in any timing round, and has a passing correctness verdict (a timing-only sweep, or a row with no usable reference, refuses) |
 | `tools/mine_shapes.py` | Build the attention shape corpus, refusing categoricals it does not recognise. | see `--help` |
 | `tools/field_audit.py` | Which schema fields are never named as an accessor call in the native sources? A lexical inventory bounding the unchecked set | `field_audit.py SCHEMA.fbs SOURCE...`; prints `UNCHECKED: <field>` per unreferenced field and exits 1. Exits 2 on a schema that parses to zero fields, so an unparsed schema cannot read as a clean audit |
@@ -790,7 +845,6 @@ There is no packaging `--profile`, CMake `PROFILES` or external root manifest.
 | `configs/axes_example.yaml` | Pack-level `axes`: one `kernel_template` crossed with value lists, expanded at load time |
 | `configs/variants_example.yaml` | Pack-level `variants`: a shape list crossed per-shape with a named knob set (below) |
 | `configs/gfx1151_wmma_attention.yaml` | The shipped `hipkernel:Gfx1151WmmaAttention` catalog: packaged rocKE runtime-shape kernels under `rocKE/gfx1151_wmma_attention` |
-| `configs/gfx950_attention_dense.profile.yaml` | Not a generator config: the gfx950 dense attention profile that the `tools/` scripts read through `--profile` |
 
 ## Generated variant sets: `variants`
 
@@ -877,11 +931,32 @@ engine:
                                   # Must be a single path stem (^[A-Za-z0-9_][A-Za-z0-9_-]*$).
   knobs: [block_size]             # optional; must all be int-typed kmd_fields
   heuristic: native | none        # optional, default "native"; "none" omits the UHD
+  native_symbols_from: hipkernel.other_engine   # optional: another engine's dotted
+                                  # native-symbol namespace, stated exactly as that
+                                  # engine registers it (`<namespace>.<its slug>`, any
+                                  # '-' folded to '_'; e.g.
+                                  # hipkernel.gfx950_attention_unified_2d). The
+                                  # descriptors name its registered native symbols
+                                  # instead of minting this engine's own (e.g. a
+                                  # test-only engine serving a subset of a shipped
+                                  # catalog). Only an engine's own namespace is derived,
+                                  # so a borrowed one never guesses at the other
+                                  # engine's `slug`. Ignore the emitted native stub
+                                  # then: nothing registers it.
+  heuristics:                     # optional; per-arch model UHDs `uhd_gen promote` bound,
+    sort_kernel_catalog:          # role -> arch -> [UHD id]. See "Shipping a trained
+      gfx942: [<uhd-uuid>]        # model". Not allowed beside `slots`.
 
 kmd_fields:                       # the KMD's fields[] -- one per axis this engine's
   - name: block_size              # kernels vary along
     type: int                     # bool | int | float | string | int_list
     default_value: 64             # omit entirely for a MANDATORY field
+    builder_default: false        # optional, generator-only: true lets a kernel
+                                  # state this field in neither metadata nor
+                                  # kernel_source.spec because the builder's spec
+                                  # dataclass defaults it to default_value too
+                                  # (adding a field to a shipped engine without
+                                  # changing its descriptors). Needs default_value.
   - name: dtype
     type: string
 
@@ -904,7 +979,7 @@ workspace_policy: none | fixed | derived
 packs:
   - name: add
     arch: [gfx942]                # optional; empty means arch-independent
-    discriminator: add             # REQUIRED iff this engine has >1 pack; forbidden
+    discriminator: add             # on every pack or none of a >1-pack engine; forbidden
                                     # for a single-pack engine
     kernels:
       - name: my_engine.f32_block64
@@ -929,6 +1004,8 @@ provider_root: dnn-providers/hip-kernel-provider   # rocke/library is imported f
 source: kernels/gfx950/attention_dense.py   # the builder; no candidate exposes it
 builder: build_attention_dense
 kernel_name_template: attention_dense.{dtype}_d{head_size}_bm{block_m}_bn{block_n}.gfx950
+# launches: {segment: {}, reduce: {role: reduce}}  # optional; copied into every kernel_source.
+#   attention_dense has one launch; configs/gfx942_attention_unified_3d.engine.yaml sets this.
 
 enumerate:
   candidates: dispatch.attention:attention_candidates  # module:function -> KernelCandidate tuple
@@ -947,9 +1024,16 @@ enumerate:
   free_fields: [block_m, block_n] # slice only: fields that may differ from select_spec
   spec_fields: [dtype, head_size] # slice only: spec fields the KDP carries
   max_kernels: 840                # slice only: more is an error
+  # The two keys below serve a rule-driven candidate (attention_dense is not one); see
+  # configs/gfx942_attention_unified_3d.engine.yaml and the text below.
+  # selector_fields: [batch, seqlen_k, kv_block_size]  # optional: cell fields that only steer select_spec
+  # neutral_fields: [num_seqs]    # optional: spec fields proven not to change the kernel
+  # spec_overrides: {kv_cache_policy: stream}  # optional: pin a spec field the candidate picks
+  # cell_keyed_by: [num_queries_per_kv]  # optional: spec attributes of the pick that key a merged cell
   also:                           # optional: more sections in the same pack, each its own
     - pin: {...}                  #   pin/fixed/cells/free_fields/spec_fields/max_kernels;
-      space: full                 #   candidates/request/sweep_level/space inherited unless set
+      space: full                 #   candidates/request/sweep_level/space inherited unless set;
+                                  #   selector_fields/cell_keyed_by inherited, a different list exits 2
 launches:                         # optional: copied onto every kernel's kernel_source
   segment: {}                     #   a KernelModule builder's primary kernel
   reduce: {role: reduce}          #   and each companion, by role
@@ -979,7 +1063,58 @@ fields and name slots the spec lacks are read from the request. A field sits in 
 one `reduction.fields` list; in `space: full`, a varying field in none is held at its
 registry default with a WARN. `reduction:` never reaches a descriptor; a selection's arm
 or flat kernel may carry `default: true`, the variant its cell always keeps. An optional
-`launch_surface:` block feeds `tools/launch_surface.py`.
+`launch_surface:` block feeds `tools/launch_surface.py`. An optional
+`launches: {<name>: {<overrides>}}` mapping is copied verbatim into every generated
+kernel's `kernel_source`, making each one a multi-launch descriptor; its rules are the
+config's `launches` rules below, checked when the generated config loads.
+
+Four optional `enumerate` keys serve a rule-driven candidate, one that returns one spec per
+request and picks a knob from request fields (rocKE's strided split-KV decode picks
+`num_segments` from `batch` and `seqlen_k`, and its spec `block_size` from the request
+field `kv_block_size`, the KV keys per inner-loop step). Without them each request combo
+is a cell, so many cells name the same kernel and `--out` fails on duplicate names.
+
+- `selector_fields` lists cell fields that only steer the candidate's choice. Combos
+  equal in every other cell field merge into one cell, without the selector fields, at
+  the position of its first combo. Its specs are the union of each combo's `select_spec`
+  then `sweep_space` specs, combo by combo in catalog order, first occurrence kept; its
+  default spec is the first combo's `select_spec`. The `space` rules then apply as usual,
+  so a knob the combos vary (`num_segments`) must be a `performance` knob to reach the
+  name. Every combo's own `select_spec` must survive into its cell, or the run exits 2
+  naming the combo. A selector field must be a cell field and must not be a `feature` or
+  `performance` field. `--shapes` keys a shape's cell without the selector fields too: a
+  graph need not set them (a dense hipDNN graph has no `kv_block_size`) nor take a listed
+  value.
+- `neutral_fields` lists spec fields that do not change the compiled kernel. Before
+  merging, each spec's neutral fields take the cell's default spec's value, so specs
+  differing only there are one kernel. The manifest author owns that claim: a field is
+  neutral only if a test proves it IR-neutral. `num_seqs` on the gfx942 split-KV decode
+  grid is proven by rocKE's `test_num_seqs_is_ir_neutral_on_the_decode_grid`
+  (`dnn-providers/hip-kernel-provider/rocke/library/tests/test_attention_tiled_3d_module_gfx942.py`).
+  A neutral field must be a spec field and must not be a `feature` or `performance` field.
+- `spec_overrides` maps spec fields to one value every spec takes, applied first, before
+  `neutral_fields` and the merge. It is a deliberate departure from the candidate's own
+  pick, for a field that changes the kernel but whose other values the catalog chooses not
+  to ship: the gfx942 split-KV decode pins `kv_cache_policy: stream` (why: the header of
+  `configs/gfx942_attention_unified_3d.engine.yaml`). The spec's own validation decides whether
+  the value builds; a value it refuses exits 2 naming the request. An overridden field must
+  be a spec field, and must not be a `feature`, `performance` or neutral field. The g3
+  regeneration gate compares the shipped catalog against the overridden picks.
+- `cell_keyed_by` lists attributes of each combo's `select_spec` (a property is fine)
+  that also key the merged cell, so combos merge only when they agree on them. It serves
+  a kernel that reads some shape values at run time but bakes a value derived from
+  them: the gfx942 split-KV decode reads the head counts as kernel arguments and bakes
+  only the GQA ratio, so `nhead_q`/`nhead_k` are selector fields, `num_query_heads`/
+  `num_kv_heads` neutral (rocKE's `test_head_counts_are_ir_neutral_at_a_fixed_gqa_ratio`),
+  and `cell_keyed_by: [num_queries_per_kv]` keeps one cell per ratio. The merged cell
+  carries the attribute, so the name template and metadata can use it, and `--shapes`
+  keys a shape by its own pick's value. A keyed attribute must not be a cell field, and
+  every spec a cell holds must keep the cell's values, or the run exits 2: a neutral
+  field or sweep spec that moves one would silently file a kernel in the wrong cell.
+
+Without any of the four keys (or with all empty) the output is byte-identical to a manifest
+that never had them. `--plan-space` counts merged cells and prints the combo count beside
+them; duplicate kernel names after merging still exit 2.
 
 A `space: full` section (the primary or an `also`) projects its own varying performance
 knobs; the catalog's projected knobs are the union over sections, and `--plan-space`
@@ -1067,6 +1202,32 @@ name, its kernels within the slot, and only a new slot or a retuned kernel gets 
 scratch bundle (`also_from`) supplies the same ids for a slot added since installation. A slotted
 engine is one bundle, so `--engine-ids-from` (sibling mode) is refused for it. Unslotted output
 is byte-identical to a generator without slots (`tests/test_slots.py` pins it against a golden).
+
+### Reducing a slotted engine
+
+`variant_reduce.py` reduces a slotted selection per slot. A slot's rankings are the `v:3` slot
+records of the sweep's winner shards, keyed by graph, device and slot; its floor, coverage,
+noise floor and ε use that slot's kernels and the `reduction.fields` its own `kmd_fields`
+declare. Its `v:3` program lines are validated against the selection's slots (exit 2 in
+an unslotted sweep, or for a pick naming an unknown slot) and never ranked. A slot's cells lead with the pack, so
+a slot's packs (its discriminators) are floored apart. Pass `--kdp` once per pack; each KDP
+pairs with the pack whose kernel names it holds.
+
+- **Budget.** `reduction.aot_budget_per_arch` and `--budget` bound each pack per arch, the
+  count `generate.py` warns on, not a slot or the engine.
+- **Loss.** `--apply-rules` ids are per slot (a slot's id hashes the slot with the rule text); a
+  slot with no chosen rule keeps all its kernels. The applied rules' loss is checked per
+  slot: it bounds each slot with the other slots at their reference picks, not the whole
+  program, so the final full-corpus sweep stays the program-level check.
+- **Sweep.** A slotted selection needs slot records (`v:3`) and an unslotted one whole-graph
+  records (`v:2`); the other kind is exit 2. A timing phase with no records for a slot is exit 3.
+- **Output.** One selection with every pack kept, each filtered to its slot's kept kernels;
+  `slot`, `arch`, `discriminator`, `default` markers and `reduction:` are preserved, so
+  `generate.py` consumes it unchanged.
+
+The line versions `variant_reduce.py` accepts are pinned to the SDK writer by
+`tests/fixtures/winner_lines_golden.jsonl`, which `tests/test_winner_line_golden.py` and the SDK
+test `TestWinnerLineGolden` both read.
 
 CI covers slots through the validator roots (`hipdnn_validate_descriptors_slotted_*`) and this
 suite; the `uhd_gen` slot tests run locally only (see the uhd_gen README).

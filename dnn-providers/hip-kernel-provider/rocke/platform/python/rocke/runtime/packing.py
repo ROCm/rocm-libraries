@@ -23,6 +23,38 @@ import ctypes
 import struct
 from typing import Any, List, Mapping, Sequence, Tuple
 
+# The scalar kernel-argument types a packer takes, each with its ``struct``
+# format character, its size and its alignment in bytes. A pointer
+# (``ptr<...>``) packs as an 8-byte address.
+SCALAR_ARG_FORMATS: Mapping[str, tuple[str, int, int]] = {
+    "i32": ("i", 4, 4),
+    "i64": ("q", 8, 8),
+    "f32": ("f", 4, 4),
+}
+
+
+def _as_i32_bits(v: int) -> int:
+    """Reinterpret an i32 kernarg as the two's-complement bit pattern
+    ``struct``'s ``'i'`` format packs.
+
+    Some i32 kernargs (e.g. an AMDGPU buffer-descriptor NUM_RECORDS field,
+    such as a conv kernel's ``A_bytes``/``D_bytes``) hold an unsigned byte
+    count the kernel reads back as raw bits, not a signed scalar -- the same
+    reasoning ``_magic_as_i32`` in ``kernels/common/conv_args.py`` applies to
+    magic-number multipliers, and what the ``kernelParams`` path's
+    ``ctypes.c_int32`` already does implicitly. A value that is a genuine
+    negative i32 is already inside ``struct``'s signed range, so wrapping
+    only changes values that could never have been a real negative number.
+    """
+    if v >= (1 << 31):
+        if v >= (1 << 32):
+            # struct.error, not ValueError: callers packing a tensor's byte count
+            # (e.g. benchmark_grouped_conv._run_case) catch struct.error to skip
+            # an over-sized case rather than aborting the whole sweep.
+            raise struct.error(f"i32 kernarg value {v} does not fit in 32 bits")
+        return v - (1 << 32)
+    return v
+
 
 def pack_args(
     signature: Sequence[Mapping[str, Any]], values: Mapping[str, Any]
@@ -42,14 +74,8 @@ def pack_args(
 
     Supported types: ``ptr<..., global>``, ``i32``, ``i64``, ``f32``.
     """
-    # Map manifest type -> (struct format char, size in bytes, align).
     # The Python struct format is built with no implicit padding;
     # we insert explicit ``B`` bytes when alignment requires it.
-    _TY_FMT: Mapping[str, Tuple[str, int, int]] = {
-        "i32": ("i", 4, 4),
-        "i64": ("q", 8, 8),
-        "f32": ("f", 4, 4),
-    }
     fmt_parts: List[str] = ["<"]
     packed: List[Any] = []
     offset = 0
@@ -61,11 +87,13 @@ def pack_args(
         v = values[name]
         if ty.startswith("ptr<"):
             fmt_char, size, align = "Q", 8, 8
-            arg_val: Any = _as_ptr(v)
-        elif ty in _TY_FMT:
-            fmt_char, size, align = _TY_FMT[ty]
+            arg_val: Any = device_pointer(v)
+        elif ty in SCALAR_ARG_FORMATS:
+            fmt_char, size, align = SCALAR_ARG_FORMATS[ty]
             if ty == "f32":
                 arg_val = float(v)
+            elif ty == "i32":
+                arg_val = _as_i32_bits(int(v))
             else:
                 arg_val = int(v)
         else:
@@ -96,14 +124,9 @@ def compile_packer(signature: Sequence[Mapping[str, Any]]):
     reuse it; the effect is proportionally largest where per-launch
     host work is smallest.
     """
-    _TY_FMT: Mapping[str, Tuple[str, int, int]] = {
-        "i32": ("i", 4, 4),
-        "i64": ("q", 8, 8),
-        "f32": ("f", 4, 4),
-    }
     fmt_parts: List[str] = ["<"]
-    # plan: (name, kind) with kind in {"ptr", "f32", "int"} -- the only
-    # per-call work is reading values[name] and coercing by kind.
+    # plan: (name, kind) with kind in {"ptr", "f32", "i32", "int"} -- the
+    # only per-call work is reading values[name] and coercing by kind.
     plan: List[Tuple[str, str]] = []
     offset = 0
     for arg in signature:
@@ -111,9 +134,9 @@ def compile_packer(signature: Sequence[Mapping[str, Any]]):
         ty = str(arg["type"])
         if ty.startswith("ptr<"):
             fmt_char, size, align, kind = "Q", 8, 8, "ptr"
-        elif ty in _TY_FMT:
-            fmt_char, size, align = _TY_FMT[ty]
-            kind = "f32" if ty == "f32" else "int"
+        elif ty in SCALAR_ARG_FORMATS:
+            fmt_char, size, align = SCALAR_ARG_FORMATS[ty]
+            kind = "f32" if ty == "f32" else ("i32" if ty == "i32" else "int")
         else:
             raise ValueError(f"unsupported kernel arg type {ty!r} for {name}")
         pad = (-offset) % align
@@ -132,9 +155,11 @@ def compile_packer(signature: Sequence[Mapping[str, Any]]):
                 raise KeyError(f"missing kernel arg {name!r}")
             v = values[name]
             if kind == "ptr":
-                out.append(_as_ptr(v))
+                out.append(device_pointer(v))
             elif kind == "f32":
                 out.append(float(v))
+            elif kind == "i32":
+                out.append(_as_i32_bits(int(v)))
             else:
                 out.append(int(v))
         return packer_struct.pack(*out)
@@ -172,7 +197,7 @@ def pack_args_kernelparams(
             raise KeyError(f"missing kernel arg {name!r}")
         v = values[name]
         if ty.startswith("ptr<"):
-            out.append(ctypes.c_uint64(_as_ptr(v)))
+            out.append(ctypes.c_uint64(device_pointer(v)))
         elif ty == "i32":
             out.append(ctypes.c_int32(int(v)))
         elif ty == "i64":
@@ -184,7 +209,9 @@ def pack_args_kernelparams(
     return out
 
 
-def _as_ptr(v: Any) -> int:
+def device_pointer(v: Any) -> int:
+    """The device address ``v`` stands for: an int, a torch tensor's
+    ``data_ptr()``, a ``DeviceMem``'s ``ptr()``, or 0 for None."""
     if isinstance(v, int):
         return v
     if hasattr(v, "data_ptr"):

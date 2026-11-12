@@ -249,6 +249,43 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateTensorBoolean)
     EXPECT_EQ(tensor->elementSize(), sizeof(bool));
 }
 
+TEST(TestFlatbufferTensorAttributesUtils, CreateTensorFp8Fnuz)
+{
+    const std::vector<int64_t> dims = {2, 2};
+    const std::vector<int64_t> strides = {2, 1};
+
+    auto e4m3 = createTensor(DataType::FP8_E4M3_FNUZ, dims, strides);
+    auto e5m2 = createTensor(DataType::FP8_E5M2_FNUZ, dims, strides);
+
+    ASSERT_NE(e4m3, nullptr);
+    ASSERT_NE(e5m2, nullptr);
+    EXPECT_EQ(e4m3->dims(), dims);
+    EXPECT_EQ(e5m2->dims(), dims);
+    EXPECT_EQ(e4m3->strides(), strides);
+    EXPECT_EQ(e5m2->strides(), strides);
+    EXPECT_NE(dynamic_cast<Tensor<hipdnn_data_sdk::types::fp8_e4m3_fnuz>*>(e4m3.get()), nullptr);
+    EXPECT_NE(dynamic_cast<Tensor<hipdnn_data_sdk::types::fp8_e5m2_fnuz>*>(e5m2.get()), nullptr);
+}
+
+TEST(TestFlatbufferTensorAttributesUtils, CreateTensorSupportsEveryDataTypeExceptUnset)
+{
+    const std::vector<int64_t> dims = {2, 2};
+    const std::vector<int64_t> strides = {2, 1};
+
+    for(const auto dataType : EnumValuesDataType())
+    {
+        if(dataType == DataType::UNSET)
+        {
+            EXPECT_THROW(createTensor(dataType, dims, strides), std::runtime_error);
+            continue;
+        }
+        std::unique_ptr<ITensor> tensor;
+        EXPECT_NO_THROW(tensor = createTensor(dataType, dims, strides))
+            << EnumNameDataType(dataType);
+        EXPECT_NE(tensor, nullptr) << EnumNameDataType(dataType);
+    }
+}
+
 TEST(TestFlatbufferTensorAttributesUtils, CreateTensorFp4UnpackedByDefault)
 {
     const std::vector<int64_t> dims = {2, 4};
@@ -394,6 +431,8 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorAllDataTypes)
         {DataType::FP6_E2M3, sizeof(hipdnn_data_sdk::types::fp6_e2m3)},
         {DataType::FP6_E3M2, sizeof(hipdnn_data_sdk::types::fp6_e3m2)},
         {DataType::BOOLEAN, sizeof(bool)},
+        {DataType::FP8_E4M3_FNUZ, sizeof(hipdnn_data_sdk::types::fp8_e4m3_fnuz)},
+        {DataType::FP8_E5M2_FNUZ, sizeof(hipdnn_data_sdk::types::fp8_e5m2_fnuz)},
     };
     auto offsets = makeInt32Offsets({0, 4, 8});
 
@@ -434,8 +473,10 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorAppliesMultiplier)
     auto unscaled = createRaggedTensor(DataType::FLOAT, RAGGED_DIMS, RAGGED_STRIDES, offsets);
     auto scaled = createRaggedTensor(DataType::FLOAT, RAGGED_DIMS, RAGGED_STRIDES, offsets, 2);
 
-    EXPECT_EQ(unscaled->raggedIterationInfo()->rowOffsets, (std::vector<int64_t>{0, 2, 4}));
-    EXPECT_EQ(scaled->raggedIterationInfo()->rowOffsets, (std::vector<int64_t>{0, 4, 8}));
+    EXPECT_EQ(unscaled->raggedIterationInfo()->origins, (std::vector<int64_t>{0, 2}));
+    EXPECT_EQ(unscaled->raggedIterationInfo()->lengths, (std::vector<int64_t>{1, 1}));
+    EXPECT_EQ(scaled->raggedIterationInfo()->origins, (std::vector<int64_t>{0, 4}));
+    EXPECT_EQ(scaled->raggedIterationInfo()->lengths, (std::vector<int64_t>{2, 2}));
 }
 
 TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorFromAttributeAndOffset)
@@ -468,7 +509,8 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorFromAttributeAndOffs
     EXPECT_EQ(ragged->dims(), RAGGED_DIMS);
     EXPECT_EQ(ragged->strides(), RAGGED_STRIDES);
     EXPECT_EQ(ragged->raggedOffset(), offsets.get());
-    EXPECT_EQ(ragged->raggedIterationInfo()->rowOffsets, (std::vector<int64_t>{0, 4, 8}));
+    EXPECT_EQ(ragged->raggedIterationInfo()->origins, (std::vector<int64_t>{0, 4}));
+    EXPECT_EQ(ragged->raggedIterationInfo()->lengths, (std::vector<int64_t>{2, 2}));
     EXPECT_EQ(ragged->raggedIterationInfo()->seqAxis, hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS);
 }
 
@@ -486,7 +528,8 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorAddressesLogicalBhsd
     const auto info = tensor->raggedIterationInfo();
     ASSERT_TRUE(info.has_value());
     EXPECT_EQ(info->seqAxis, 2);
-    EXPECT_EQ(info->rowOffsets, (std::vector<int64_t>{0, 8, 20}));
+    EXPECT_EQ(info->origins, (std::vector<int64_t>{0, 8}));
+    EXPECT_EQ(info->lengths, (std::vector<int64_t>{2, 3}));
     EXPECT_EQ(info->seqExtent(0), 2);
     EXPECT_EQ(info->seqExtent(1), 3);
     EXPECT_EQ(tensor->elementCount(), 20u);
@@ -500,20 +543,80 @@ TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorAddressesLogicalBhsd
     EXPECT_EQ(tensor->getIndex(1, 1, 2, 1), 19);
 }
 
-TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorRejectsPhysicalBhsdStrides)
+// Contiguous BHSD strides with these offsets put 5 token rows under a head stride that spans 3, so
+// the heads alias the tokens.
+TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorRejectsAliasingStrides)
 {
     const std::vector<int64_t> dims = {2, 2, 3, 2};
     const std::vector<int64_t> bhsdStrides = {12, 6, 2, 1};
 
-    try
-    {
-        createRaggedTensor(DataType::FLOAT, dims, bhsdStrides, makeInt32Offsets({0, 4, 10}));
-        FAIL() << "Expected createRaggedTensor to reject a non sequence-outermost layout";
-    }
-    catch(const std::invalid_argument& e)
-    {
-        EXPECT_NE(std::string(e.what()).find("sequence-outermost"), std::string::npos) << e.what();
-    }
+    EXPECT_THROW(
+        createRaggedTensor(DataType::FLOAT, dims, bhsdStrides, makeInt32Offsets({0, 4, 10})),
+        std::invalid_argument);
+}
+
+// L9: origins in any order, lengths from the length tensor, offset[B] unused.
+TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorBindsLengthTensor)
+{
+    auto lengths = makeInt32Offsets({2, 3});
+
+    auto tensor = createRaggedTensor(
+        DataType::FLOAT, RAGGED_DIMS, RAGGED_STRIDES, makeInt32Offsets({10, 0, 0}), 1, lengths);
+
+    const auto info = tensor->raggedIterationInfo();
+    ASSERT_TRUE(info.has_value());
+    EXPECT_EQ(info->origins, (std::vector<int64_t>{10, 0}));
+    EXPECT_EQ(info->lengths, (std::vector<int64_t>{2, 3}));
+    EXPECT_EQ(tensor->elementCount(), 10u);
+    EXPECT_EQ(tensor->elementSpace(), 14u);
+}
+
+TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorWithoutLengthsDerivesThemFromOffsets)
+{
+    auto tensor = createRaggedTensor(
+        DataType::FLOAT, RAGGED_DIMS, RAGGED_STRIDES, makeInt32Offsets({0, 4, 10}));
+
+    EXPECT_EQ(tensor->raggedIterationInfo()->lengths, (std::vector<int64_t>{2, 3}));
+}
+
+TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorFromAttributeAndOffsetBindsLengths)
+{
+    constexpr int64_t OFFSET_UID = 7;
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(CreateTensorAttributesDirect(builder,
+                                                1,
+                                                "q",
+                                                DataType::FLOAT,
+                                                &RAGGED_STRIDES,
+                                                &RAGGED_DIMS,
+                                                false,
+                                                TensorValue::NONE,
+                                                0,
+                                                false,
+                                                OFFSET_UID,
+                                                16,
+                                                1));
+    auto tensorAttr = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
+
+    auto tensor = createRaggedTensorFromAttributeAndOffset(
+        *tensorAttr, makeInt32Offsets({4, 8, 14}), makeInt32Offsets({2, 3}));
+
+    const auto info = tensor->raggedIterationInfo();
+    ASSERT_TRUE(info.has_value());
+    EXPECT_EQ(info->origins, (std::vector<int64_t>{4, 8}));
+    EXPECT_EQ(info->lengths, (std::vector<int64_t>{2, 3}));
+}
+
+// A length tensor with the wrong element count is rejected.
+TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorRejectsWrongLengthCount)
+{
+    EXPECT_THROW(createRaggedTensor(DataType::FLOAT,
+                                    RAGGED_DIMS,
+                                    RAGGED_STRIDES,
+                                    makeInt32Offsets({0, 4, 8}),
+                                    1,
+                                    makeInt32Offsets({2, 2, 2})),
+                 std::invalid_argument);
 }
 
 TEST(TestFlatbufferTensorAttributesUtils, CreateRaggedTensorRejectsNonRank4)

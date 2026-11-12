@@ -190,6 +190,7 @@ protected:
 
         if(!run.referenceReady)
         {
+            ASSERT_NO_FATAL_FAILURE(prepareReferenceInputs(run.gpuBundle, run.cpuBundle));
             ASSERT_NO_FATAL_FAILURE(executeCpuGraph(graph, run.cpuBundle));
             run.referenceReady = true;
         }
@@ -383,16 +384,26 @@ protected:
         }
     }
 
+    /// Runs after the GPU graph and before the CPU reference's first run. A suite whose
+    /// reference reads an engine output as its input (SDPA's Philox dropout reads the engine's
+    /// RNG dump as its explicit mask, SEM-015) copies it from @p gpuBundle into @p cpuBundle
+    /// here. Does nothing by default.
+    virtual void prepareReferenceInputs(
+        [[maybe_unused]] hipdnn_test_sdk::utilities::GraphTensorBundle& gpuBundle,
+        [[maybe_unused]] hipdnn_test_sdk::utilities::GraphTensorBundle& cpuBundle)
+    {
+    }
+
+    /// Called with the workspace each GPU execute is about to receive, before the execute.
+    /// A suite whose engine must not depend on the workspace's prior contents overrides this
+    /// to fill it with a pattern; the default leaves the fresh allocation as it is.
+    virtual void prepareWorkspace([[maybe_unused]] void* workspace, [[maybe_unused]] size_t bytes)
+    {
+    }
+
     virtual hipStream_t stream() const
     {
         return _stream;
-    }
-
-    /// Called with the workspace the plan executes with, before execute(). hipDNN hands an
-    /// engine its workspace uninitialized; a suite whose engine must not depend on its
-    /// contents overrides this to fill it with garbage. The default leaves it as allocated.
-    virtual void prepareWorkspace([[maybe_unused]] void* workspace, [[maybe_unused]] size_t bytes)
-    {
     }
 
     // Exposed to subclasses driving Graph staging calls directly (build_operation_graph,

@@ -277,6 +277,9 @@ void GpuFpReferenceSdpa::launchSdpaDequant(const void* in,
                                            int64_t descaleBatchStride,
                                            int64_t descaleHeadStride,
                                            int64_t headsPerKv,
+                                           const int32_t* seqLen,
+                                           int64_t seqLenStride,
+                                           const SdpaPagedSide& paged,
                                            const char* inType)
 {
     const std::vector<std::string> defines
@@ -298,6 +301,12 @@ void GpuFpReferenceSdpa::launchSdpaDequant(const void* in,
     args.descaleBatchStride = static_cast<long long>(descaleBatchStride);
     args.descaleHeadStride = static_cast<long long>(descaleHeadStride);
     args.headsPerKv = static_cast<long long>(headsPerKv);
+    args.seqLen = seqLen;
+    args.seqLenStride = static_cast<long long>(seqLenStride);
+    args.pageTable = paged.table;
+    args.pageTableStrB = static_cast<long long>(paged.strideBatch);
+    args.pageTableStrT = static_cast<long long>(paged.strideTable);
+    args.blockSize = static_cast<long long>(paged.blockSize);
     detail::launchKernelForElements(kernel.function(), elements, &args, sizeof(args));
 }
 

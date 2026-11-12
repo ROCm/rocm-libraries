@@ -1,0 +1,60 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyIRVerifierPass 2>&1
+#
+# The AsmVerifierPass rejects operands that do not match the descriptors of the
+# gfx1250 instructions added to Gfx1250Instructions.def. Errors are reported in
+# function order, before any other output.
+
+#--- v_permlanex16_b32: src0 must be a VGPR
+# CHECK: "st.v_permlanex16_b32"(s2, s0, s1)
+# CHECK: operand src[0] has register type 's', expected 'v'
+st.func @permlanex16_src0_must_be_vgpr() {
+^entry:
+  v1 = "st.v_permlanex16_b32"(s2, s0, s1) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- v_permlanex16_b32: the two lane-select sources must be scalar
+# CHECK: "st.v_permlanex16_b32"(v0, v2, v3)
+# CHECK: operand src[1] has register type 'v', expected 's'
+# CHECK: operand src[2] has register type 'v', expected 's'
+st.func @permlanex16_lane_select_must_be_scalar() {
+^entry:
+  v1 = "st.v_permlanex16_b32"(v0, v2, v3) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- s_bitset0_b32, s_bitset1_b32 and s_addk_co_i32 read their destination, so it must
+#--- also be a source
+# CHECK: Read-write operand validation failed
+# CHECK: Instruction 's_bitset0_b32' has read-write field
+st.func @bitset0_destination_is_read() {
+^entry:
+  s4 = "st.s_bitset0_b32"(3) { issueCycles = 1, latencyCycles = 2 }
+}
+
+# CHECK: Read-write operand validation failed
+# CHECK: Instruction 's_bitset1_b32' has read-write field
+st.func @bitset1_destination_is_read() {
+^entry:
+  s4 = "st.s_bitset1_b32"(s5) { issueCycles = 1, latencyCycles = 2 }
+}
+
+# CHECK: Read-write operand validation failed
+# CHECK: Instruction 's_addk_co_i32' has read-write field
+st.func @addk_destination_is_read() {
+^entry:
+  s3 = "st.s_addk_co_i32"(16) { issueCycles = 1, latencyCycles = 2 }
+}
+
+#--- tensor_store_from_lds: group 1 is 8 SGPRs, group 2 is 4 SGPRs
+# CHECK: "st.tensor_store_from_lds"(s[0:3], s[4:7])
+# CHECK: operand src[1] has register width 4, expected 8
+st.func @tensor_store_group1_must_be_8_sgprs() {
+^entry:
+  "st.tensor_store_from_lds"(s[0:3], s[4:7]) { issueCycles = 1, latencyCycles = 1 }
+}
+
+# CHECK: "st.tensor_store_from_lds"(s[0:3], s[4:11], s[12:13], s[16:19])
+# CHECK: operand src[2] has register width 2, expected 4
+st.func @tensor_store_group2_must_be_4_sgprs() {
+^entry:
+  "st.tensor_store_from_lds"(s[0:3], s[4:11], s[12:13], s[16:19]) { issueCycles = 1, latencyCycles = 1 }
+}

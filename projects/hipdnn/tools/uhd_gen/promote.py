@@ -21,6 +21,8 @@ from .artifact import (
     artifact_digest,
     is_contained_relative_path,
     is_grouped_tree,
+    linear_features_hash,
+    load_linear_artifact,
     verify_tree_artifact,
 )
 from .correctness import REASON, VERDICT, numerical_reason, numerical_verdict
@@ -54,11 +56,17 @@ from .score_transform import SUPPORTED_TRANSFORMS
 logger = logging.getLogger(__name__)
 UHD_SUFFIX = ".uhd.json"
 _ARCH = re.compile(r"^gfx[a-z0-9_-]+$")
-_ADAPTERS = ("static_order", "native", "tree_data", "table", "onnx", "custom_library")
+_ADAPTERS = (
+    "static_order",
+    "native",
+    "tree_data",
+    "table",
+    "linear_data",
+    "onnx",
+    "custom_library",
+)
 #: A model `hash`: the SHA-256 of the file it names, as UhdParser and the adapters spell it.
 _SHA256 = re.compile(r"[0-9a-f]{64}")
-#: Roles whose arch key binds a list of UHDs, one per ranking metric (RFC 0019 §3.1).
-_METRIC_ROLES = ("sort_kernel_catalog", ROLE)
 
 
 class PromoteError(ValueError):
@@ -562,6 +570,22 @@ def _verify_artifact(
     adapter = descriptor["adapter"]
     declared = descriptor[adapter].get("hash")
     try:
+        if adapter == "linear_data":
+            # The runtime checks num_features against the signature length, as for
+            # tree_data, then the model's own bounds.
+            load_linear_artifact(
+                artifact_path,
+                declared,
+                feature_count=len(descriptor["features_signature"]),
+            )
+            data = artifact_path.read_bytes()
+            recorded = linear_features_hash(data)
+            if recorded != descriptor.get("features_hash"):
+                raise ValueError(
+                    f"{artifact_path}: artifact features_hash {recorded!r} differs from "
+                    f"the UHD's {descriptor.get('features_hash')!r}"
+                )
+            return hashlib.sha256(data).hexdigest()
         if adapter != "tree_data":
             digest = artifact_digest(artifact_path)
             if declared is not None and declared != digest:
@@ -1022,9 +1046,13 @@ def _score_metric(document: dict) -> str | None:
     return score.get("metric") if isinstance(score, dict) else None
 
 
-def _role_value(value, role: str, where: str) -> list[str]:
-    """The UHD ids one arch key binds: one id, or for a metric-keyed role a list of them."""
-    if role in _METRIC_ROLES and isinstance(value, list):
+def _role_value(value, where: str) -> list[str]:
+    """The UHD ids one arch key binds: a list (RFC 0019 §3.1); a bare id is a one-element list.
+
+    The scoring roles hold one UHD per ranking metric; the candidate generators
+    (`predict_applicable_kernels`) are a list for the JIT spaces that will consume them.
+    """
+    if isinstance(value, list):
         if not value:
             raise PromoteError(
                 f"{where}: an empty list binds nothing; omit the architecture instead"
@@ -1047,14 +1075,13 @@ def _rebind(
     """The arch key's value once `identity` is bound, and the ids it displaces.
 
     `holder` is the UED, or the slot of a slotted engine, whose `role` map is edited.
-    A metric-keyed role holds one UHD per metric, and the metric lives only in each UHD, so
-    every bound UHD must be installed in this tree to be classified.
+    A role holds one UHD per metric (a metric-less model replaces the metric-less one), and the
+    metric lives only in each UHD, so every bound UHD must be installed in this tree to be
+    classified.
     """
     where = f"{role}.{arch}"
     value = holder.get(role, {}).get(arch)
-    current = [] if value is None else _role_value(value, role, where)
-    if role not in _METRIC_ROLES:
-        return identity, current
+    current = [] if value is None else _role_value(value, where)
 
     def same_metric(ref: str) -> bool:
         if ref == identity:
@@ -1103,7 +1130,7 @@ def _role_references(path: Path, document: dict):
             for arch, value in entries.items():
                 if arch != "default" and not _ARCH.fullmatch(arch):
                     raise PromoteError(f"{where}: invalid architecture {arch!r}")
-                for identity in _role_value(value, role, f"{where}.{arch}"):
+                for identity in _role_value(value, f"{where}.{arch}"):
                     yield path, _role_key(role, slot), arch, identity, slot
 
 
@@ -1190,7 +1217,12 @@ def _validate_descriptor(document: dict, path: Path) -> None:
     ) not in ("min", "max"):
         raise PromoteError(f"{path}: scorer requires objective min or max")
     signature = document.get("features_signature")
-    if "features_signature" in document or adapter in ("tree_data", "table", "onnx"):
+    if "features_signature" in document or adapter in (
+        "tree_data",
+        "table",
+        "linear_data",
+        "onnx",
+    ):
         if not isinstance(signature, list) or not signature:
             raise PromoteError(f"{path}: requires nonempty features_signature")
         for entry in signature:
@@ -1257,6 +1289,20 @@ def _validate_descriptor(document: dict, path: Path) -> None:
                 )
         elif score.get("calibrated") is True:
             raise PromoteError(f"{path}: a calibrated score must name its metric")
+    if adapter == "linear_data":
+        # A log slowdown against the catalog's best (RFC 0019 §7.5): UhdParser refuses any
+        # declaration that calls it a physical, calibrated or inverted score.
+        score = document.get("score", {})
+        if (
+            document["objective"] != "min"
+            or "metric" in score
+            or score.get("calibrated")
+            or score.get("transform", "identity") != "identity"
+        ):
+            raise PromoteError(
+                f"{path}: linear_data requires objective min and no score.metric, "
+                "calibration or transform"
+            )
     body = document[adapter]
     # static_order takes no criteria; refused here as UhdParser refuses them.
     if adapter == "static_order" and "order" in body:

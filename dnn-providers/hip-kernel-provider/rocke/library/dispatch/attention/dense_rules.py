@@ -17,6 +17,7 @@ from functools import lru_cache
 from itertools import product
 from typing import Callable, Iterable, Mapping, Optional, Tuple
 
+from kernels.common.attention_dense_kv_split import kv_split_admits
 from rocke.dispatch.tuning import WavesPerEuSpace
 from rocke.dispatch.tuning.walk import one_knob_at_a_time
 
@@ -113,7 +114,7 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
             "causal_diag_split": lambda s: (
                 bool(s.causal) and int(s.sliding_window) == 0
             ),
-            "kv_segments": lambda s: _kv_segments_in_scope(s),
+            "kv_segments": kv_split_admits,
         },
         policy_knobs=(
             "exp_per_pv_step",
@@ -130,7 +131,17 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
     "gfx942": _DenseTuningArch(
         # persistent is itself an axis here, so the persistent-only knobs stay
         # and the per-spec duplicate check drops them on non-persistent specs.
+        # A variant that pins the block order (qbminor) pins the grid kind with
+        # it: no persistence, no other order, no KV split, so every spec it
+        # offers launches the same kind of grid as its default (block_m stays a
+        # knob and sizes it).
         scope={
+            "persistent": lambda s: s.nonpersist_decode == "auto",
+            "nonpersist_decode": lambda s: s.nonpersist_decode == "auto",
+            # A base that pins its persistent decode (the ingestor's persistent
+            # grid) pins the CTA count with it: the decode's legality was checked
+            # at that count, and the launch passes exactly that many CTAs.
+            "num_persistent": lambda s: s.persist_decode == "auto",
             "interleave": lambda s: bool(s.causal),
             "lds_row_pad": lambda s: int(s.head_size) == 128,
             "lds_k_group_pad": lambda s: int(s.head_size) < 128,
@@ -142,26 +153,15 @@ _DENSE_ARCH: Mapping[str, _DenseTuningArch] = {
             "causal_diag_split": lambda s: (
                 bool(s.causal) and int(s.sliding_window) == 0
             ),
-            "kv_segments": lambda s: _kv_segments_in_scope(s),
+            "kv_segments": lambda s: (
+                kv_split_admits(s) and s.nonpersist_decode == "auto"
+            ),
             "window_wave_skip": lambda s: bool(s.causal) and int(s.sliding_window) > 0,
         },
         policy_knobs=("use_cfvst", "use_exp2_fast", "v_row_pad", "use_v_swizzle"),
         inert=_gfx942_dense_inert_knobs,
     ),
 }
-
-
-def _kv_segments_in_scope(spec) -> bool:
-    """The KV-segment split exists only on the plain default grid."""
-    return not (
-        spec.persistent
-        or int(spec.sliding_window)
-        or spec.use_sinks
-        or spec.emit_lse
-        or spec.ragged
-        or spec.varlen
-        or spec.paged
-    )
 
 
 def dense_kv_segments(work_items: int, num_cus: int, max_segments: int = 8) -> int:
@@ -244,7 +244,7 @@ def resolve_dense_num_persistent(
 
 
 @lru_cache(maxsize=256)
-def _dense_axes_for(base, arch: str) -> Tuple[KnobAxis, ...]:
+def dense_axes_for(base, arch: str) -> Tuple[KnobAxis, ...]:
     """The declared dense axes that apply to ``base``, with concrete values."""
     rules = _dense_arch(arch)
     declared = tuning_axes(arch, "dense")
@@ -367,6 +367,9 @@ class DenseSpace(WavesPerEuSpace):
     derived: Optional[
         Callable[[object, Mapping[str, object]], Mapping[str, object]]
     ] = None
+    # The axes this candidate walks, or None for every declared dense axis in
+    # scope. An empty set leaves the default spec alone.
+    axis_names: Optional[frozenset] = None
 
     def recorded(self, base):
         # A moving bottom-right diagonal on the default grid resolves its query
@@ -384,7 +387,10 @@ class DenseSpace(WavesPerEuSpace):
         return fields
 
     def axes(self, base):
-        return _dense_axes_for(base, self.arch)
+        axes = dense_axes_for(base, self.arch)
+        if self.axis_names is None:
+            return axes
+        return tuple(a for a in axes if a.name in self.axis_names)
 
     def production(self, base, axes, is_valid) -> Iterable[dict]:
         crossed_names = _dense_arch(self.arch).production_crossed
@@ -400,7 +406,10 @@ class DenseSpace(WavesPerEuSpace):
                 yield {**point, **knobs}
 
     def known_knobs(self, base):
-        return axis_knob_names(tuning_axes(self.arch, "dense"))
+        declared = tuning_axes(self.arch, "dense")
+        if self.axis_names is not None:
+            declared = tuple(a for a in declared if a.name in self.axis_names)
+        return axis_knob_names(declared)
 
     def defaults(self, base, kernel):
         # The fields recorded per problem carry their value in the knobs, so the
