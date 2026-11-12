@@ -3,6 +3,7 @@
 
 target_sources(rocroller
     PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/Generator.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Settings.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/Utils.cpp"
 )
