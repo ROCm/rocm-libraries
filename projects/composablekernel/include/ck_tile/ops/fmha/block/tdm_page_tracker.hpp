@@ -115,9 +115,21 @@ struct TdmPageTracker
     }
 
     private:
+    // On the device the block table is read through the constant address space so the load
+    // is a scalar load into an SGPR. A generic load inside the pipeline loop is emitted as a
+    // VMEM load, because the loop's TDM and barrier intrinsics may clobber memory.
+    CK_TILE_HOST_DEVICE index_t load_block_index(index_t page) const
+    {
+#if defined(__HIP_DEVICE_COMPILE__)
+        return cast_pointer_to_constant_address_space(block_indices_)[page];
+#else
+        return block_indices_[page];
+#endif
+    }
+
     CK_TILE_HOST_DEVICE void refresh()
     {
-        const long_index_t phys = static_cast<long_index_t>(block_indices_[cur_page_]);
+        const long_index_t phys = static_cast<long_index_t>(load_block_index(cur_page_));
         // All of this is 64-bit: the reverse term can push the result far below
         // physical_blocks_, and only adding the global offset brings it back.
         // The l2p_offset_ shift is folded back in here so that indexing this
