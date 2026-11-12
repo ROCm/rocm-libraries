@@ -177,7 +177,7 @@ namespace rocsparse
                     if(match)
                     {
                         // Tell all other threads about the matching index
-                        J m = rocsparse::shfl(q, match - 1);
+                        I m = rocsparse::shfl(q, match - 1);
 
                         // Load BSR block from row k into shared memory
                         for(J p = threadIdx.x; p < block_dim; p += DIMX)

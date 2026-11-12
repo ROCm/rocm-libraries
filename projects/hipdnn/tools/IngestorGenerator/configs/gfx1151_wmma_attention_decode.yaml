@@ -26,6 +26,7 @@ engine:
   # 1.2.0: graphs with a runtime pass-by-value scale tensor require it. The
   # native matcher declines override-shape graphs (1.1.0).
   sdk_version: 1.2.0
+  behavior_notes: [supports_graph_capture]
   knobs: []
   heuristic: native
 

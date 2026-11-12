@@ -61,6 +61,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/SynchronizerValidatorReporting_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TensorDescriptor_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestData.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/HashmapEnumLookup_test.cpp"
 )
 
 # MasterSolutionLibraryMapping_test exercises TensileLite::LoadLibraryMapping,
@@ -75,6 +76,7 @@ if(NOT TENSILELITE_ENABLE_YAML)
             # The indexed library layout is msgpack-only: its solution blob is a
             # msgpack BIN, and mapRawBytes has no YAML implementation.
             "${CMAKE_CURRENT_SOURCE_DIR}/IndexedLibraryLoad_test.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/MessagePackWriting_test.cpp"
     )
 endif()
 

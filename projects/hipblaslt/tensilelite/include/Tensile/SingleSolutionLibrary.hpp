@@ -92,6 +92,13 @@ namespace TensileLite
         {
         }
 
+        /// The index of the solution this leaf stands for, without resolving a
+        /// lazy leaf. -1 if it stands for none.
+        int solutionIndex() const
+        {
+            return solution ? solution->index : m_index;
+        }
+
         virtual std::shared_ptr<MySolution> getSolutionByIndex(MyProblem const& problem,
                                                                Hardware const&  hardware,
                                                                const int index) const override
@@ -157,6 +164,8 @@ namespace TensileLite
             bool debug = Debug::Instance().printPredicateEvaluation();
 
             auto solution = resolved();
+            if(solution && !solution->deviceScalarAlphaSupported(problems))
+                return {};
             if(solution)
             {
                 if(debug)
@@ -215,11 +224,7 @@ namespace TensileLite
                     }
                 }
 
-                if(solution->requiredHostWorkspaceSizePerProblem == static_cast<size_t>(-1))
-                {
-                    solution->requiredHostWorkspaceSizePerProblem
-                        = solution->requiredHostSizeGroupedGemmSingle(problems[0], hardware);
-                }
+                solution->ensureRequiredHostWorkspaceSize(problems[0], hardware);
 
                 if(debug)
                     PredicateDebugger::printFooter(std::cout, true);
@@ -284,6 +289,9 @@ namespace TensileLite
             bool debug = Debug::Instance().printPredicateEvaluation();
 
             auto solution    = resolved();
+            if(solution && searchType == SolutionLibrarySearchType::DEFAULT
+               && !solution->deviceScalarAlphaSupported(problems))
+                return {};
             bool useSolution = false;
             if(solution)
             {
@@ -322,7 +330,7 @@ namespace TensileLite
                             useSolution = false;
                     }
                 }
-                else if(searchType == SolutionLibrarySearchType::GEMM_TYPE_ONLY)
+                else if(isGemmTypeOnlySearch(searchType))
                 {
                     if(!isGemmTypeSame((*solution), problems[0]))
                         useSolution = false;
@@ -349,11 +357,7 @@ namespace TensileLite
 
             if(useSolution)
             {
-                if(solution->requiredHostWorkspaceSizePerProblem == static_cast<size_t>(-1))
-                {
-                    solution->requiredHostWorkspaceSizePerProblem
-                        = solution->requiredHostSizeGroupedGemmSingle(problems[0], hardware);
-                }
+                solution->ensureRequiredHostWorkspaceSize(problems[0], hardware);
                 return SolutionSet<MySolution>({solution});
             }
 

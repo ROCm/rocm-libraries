@@ -175,7 +175,7 @@ _force_scaled_wmma: bool = False
 """gfx1250 low-precision scaled-WMMA workaround toggle. Mirror of
 ``rocisa::rocIsa::m_forceScaledWMMA[id]``. Default ``False`` (base
 gfx1250 → plain ``v_wmma_*``); set ``True`` only for
-gfx1250-strict / gfx1250v0. Not reset by ``setKernel``."""
+gfx1250-strict. Not reset by ``setKernel``."""
 
 
 # ---------------------------------------------------------------------------
@@ -548,7 +548,7 @@ def getForceScaledWMMA() -> bool:
 def setForceScaledWMMA(v: bool) -> None:
     """Mirror of ``rocisa::rocIsa::setForceScaledWMMA`` (base.hpp).
 
-    Set true only for gfx1250-strict / gfx1250v0 so low-precision WMMA
+    Set true only for gfx1250-strict so low-precision WMMA
     emits ``v_wmma_scale_*`` with scale=0; base gfx1250 stays plain.
     """
     global _force_scaled_wmma

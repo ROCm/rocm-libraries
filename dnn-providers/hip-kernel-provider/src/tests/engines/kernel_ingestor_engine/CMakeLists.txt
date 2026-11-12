@@ -13,10 +13,19 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwiseAddDispatchHandler.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwiseAddMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestConvFwdPack.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestAttentionDensePersistent.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseMatchers.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseGeometry.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseSignature.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseDispatch.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestAttentionDenseGeometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestAttentionDenseSignature.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestAttentionDenseDispatch.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestAttentionDenseMatchers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionUnified3dGeometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionUnified3dSplitRule.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionUnified3dAdmission.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionUnified3dMatchers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionUnified3dScorer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionUnified3dSignature.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionUnified3dArguments.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified2DMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified2DGeometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified2DSignature.cpp
@@ -26,7 +35,10 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified3DSignature.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified3DDispatch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestUnifiedAttentionGeometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionDenseMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionMatchers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvDgradGeometry.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvDgradMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestIngestorDispatchAliases.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPackLaunchValues.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/TestIngestorPlanHeader.cpp
@@ -34,6 +46,42 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/TestIngestorPlanLaunchContractGoldens.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/TestSerializableSourceKind.cpp
 )
+
+# The gfx942 unified 3D host tests check the engine's C++ restatements of rocKE rules
+# (admission, split rule, kernel arguments) against tables rocKE itself
+# answers. Each table is generated here, in the build tree, from the rocKE source tree and
+# is never committed, so it cannot drift from rocKE. The generators need only the standard
+# library and rocKE's Python, so this runs whether or not the rocKE engine is built. The
+# depfile lists every rocKE module a generator imported: changing any of them regenerates
+# its table, and the test that includes it then checks the C++ against the new answers.
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+set(_gfx942_u3d_packs "${CMAKE_CURRENT_SOURCE_DIR}/packs")
+set(_gfx942_u3d_generated "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(_gfx942_u3d_tables)
+foreach(_table admission:Admission split_rule:SplitRule arguments:Arguments)
+    string(REPLACE ":" ";" _table "${_table}")
+    list(GET _table 0 _script)
+    list(GET _table 1 _name)
+    set(_inc "${_gfx942_u3d_generated}/Gfx942AttentionUnified3d${_name}Table.inc")
+    add_custom_command(
+        OUTPUT "${_inc}"
+        COMMAND "${Python3_EXECUTABLE}" -I
+                "${_gfx942_u3d_packs}/gen_gfx942_attention_unified_3d_table.py"
+                "${_gfx942_u3d_packs}/gen_gfx942_attention_unified_3d_${_script}.py"
+                --out "${_inc}" --depfile "${_inc}.d"
+        DEPENDS "${_gfx942_u3d_packs}/gen_gfx942_attention_unified_3d_table.py"
+                "${_gfx942_u3d_packs}/gen_gfx942_attention_unified_3d_${_script}.py"
+        DEPFILE "${_inc}.d"
+        COMMENT "Generating the gfx942 unified 3D ${_script} table from rocKE"
+        VERBATIM)
+    list(APPEND _gfx942_u3d_tables "${_inc}")
+endforeach()
+# hip_kernel_provider_tests is created in the parent directory, so the custom commands
+# above reach it through this target rather than as its sources.
+add_custom_target(hkp_gfx942_unified_3d_test_tables DEPENDS ${_gfx942_u3d_tables}
+                  COMMENT "gfx942 unified 3D test tables generated from rocKE")
+add_dependencies(hip_kernel_provider_tests hkp_gfx942_unified_3d_test_tables)
+target_include_directories(hip_kernel_provider_tests PRIVATE "${_gfx942_u3d_generated}")
 
 # The schema hash test compares the pinned constant with the hash of the schema file. Line
 # ends are normalised to LF, so a CRLF checkout gives the same hash.
@@ -58,12 +106,17 @@ target_sources(hip_kernel_provider_census_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwisePacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDensePacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseCatalogTiles.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionUnified3dPacks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionUnified3dModelBinding.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified2DPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified2DCatalogTiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified3DPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified3DCatalogTiles.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionDensePacks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionDenseCatalogTiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionDecodePacks.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950ConvDgradAotPacks.cpp
 )
 
 # FlyDSL's suites ride FlyDSL's gate, not the ingestor's: they read a shard only FlyDSL
@@ -81,6 +134,9 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaRdnaEngine.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaCdnaEngine.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaObjects.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaDropout.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaHeadPad.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaAiwClasses.cpp
     )
     # The architectures each op has objects for, so a device case that finds none
     # staged on one of them fails instead of skipping (FlydslNormDeviceTestSupport.hpp).
@@ -88,7 +144,8 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
     # multi-arch build (TheRock RFC 0008) compiles in one architecture's shard and runs on
     # every other, so the test asks at run time whether the device's shard is staged.
     foreach(_flydsl_op rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode
-                       sdpa_rdna sdpa_rdna_decode sdpa_aiw)
+                       sdpa_rdna sdpa_rdna_decode sdpa_aiw sdpa_dropout_mask
+                       sdpa_head_pad)
         string(REPLACE ";" "," _flydsl_archs
                        "${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_${_flydsl_op}}")
         string(TOUPPER "${_flydsl_op}" _flydsl_op_upper)

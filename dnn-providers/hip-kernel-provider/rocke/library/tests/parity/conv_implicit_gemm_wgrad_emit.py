@@ -52,31 +52,90 @@
 #   49 -- gfx1250 WMMA split-K=4, bf16 dW (zero-fill packed bf16 atomic), M-outer
 #   50 -- gfx1250 WMMA split-K=4, fp32 dW (scalar atomic), K-outer
 #   51 -- gfx1250 WMMA split-K=2, fp16 dW, C=24 (partial N tiles)
-#   52-54 -- WMMA split-K both engines must reject: gfx1201 bf16 dW (arch not
-#         enabled), gfx1250 bf16 dW with the cshuffle epilogue (outside the
-#         WMMA wgrad subset), gfx1151 fp32 dW (arch not enabled, any dtype)
-#   (Grouped wgrad reaches the C++ engine only through stream-K, and its tile
-#    loader has no elem_dtype, so no case loads bf16 operands. The stream-K
+#   52-54 -- WMMA split-K: gfx1201 bf16 dW (arch not enabled) and gfx1151 fp32
+#         dW (arch not enabled, any dtype), which both engines must reject, and
+#         gfx1250 bf16 dW with the cshuffle epilogue (M-outer), which both admit
+#         since the WMMA cshuffle epilogue
+#   55 -- gfx1250 async_dma (global_load_async_to_lds ping-pong), K-outer,
+#         split-K=2 fp32 dW, C=24 (partial N tiles: zero-filled chunks) and odd
+#         slices (zero-fill redirect)
+#   56 -- gfx1250 async_dma, K-outer, 64x64x64 2x2 warps, split-K=4 fp32 dW
+#   57 -- both engines must reject: gfx1250 async_dma with C=3 (a one-element
+#         chunk is narrower than the copy)
+#   58-60 -- gfx1250 cshuffle (WMMA fragment through LDS): direct fp16 dW,
+#         split-K bf16 dW (genuine paired atomics), and with async_dma under
+#         split-K at C=24 (partial N tiles)
+#   61 -- both engines must reject: cshuffle split-K on gfx1201 (WMMA split-K
+#         is enabled only on gfx1250)
+#   62 -- both engines must reject: gfx1250 cshuffle split-K fp16 dW whose
+#         store vector is odd (C=3 with a 2x2 filter: wg_N=12 is even, but
+#         the LDS pairing has no partner)
+#   63-65 -- gfx1250 two-stage (f32 workspace) split-K on WMMA, the scratch
+#         epilogue decoding the WMMA C fragment: fp16 dW with an odd dW row
+#         (C=3, wg_N=27, M-outer), bf16 dW 64x64x64 2x2 warps K-outer, and fp16
+#         dW over the async K loop with one scratch slab (ws_replicas=1) at C=24
+#   66 -- both engines must reject: two-stage on gfx1151 (no validated float
+#         global atomics for the scratch adds)
+#   67 -- gfx1250 async_dma with bf16 operands: case 55 with bf16 A/B, so the
+#         out-of-range chunks zero-fill a bf16 LDS tile with bf16 zeros
+#   68 -- both engines must reject: case 55 with an explicit vector_size_a
+#         (the async K loop derives its chunk widths from the channel counts,
+#         so an explicit A/B load-width cap is rejected rather than ignored)
+#   69-70 -- gfx1250 synchronous K loop with explicit A/B load-width caps
+#         (vector_size_a=4, vector_size_b=2 under the auto 8/8): case 55
+#         without async_dma, K-outer (69, vector_axis="col") and M-outer
+#         (70, the transpose-on-store vector_axis="row" loader)
+#   71-72 -- prefetch_addr + compv3 + register_prefetch=True (next tile
+#         prefetched into registers across the MFMAs; config 43 above is
+#         compv3 + prefetch_addr with register_prefetch left at its default
+#         False, so it is NOT this loop): split-K packed fp16 atomic on the
+#         K-outer cshuffle base, and two-stage
+#   73-88 -- TF32 compute (ConvDataSpec(mma_dtype="tf32")), fp32 storage, on
+#         both atoms of gfx950 (BF16x3) and gfx942 (native XF32): 2-D / 3-D,
+#         mem / compv4 / basic / unroll_k, default / cshuffle, split-K atomic,
+#         two-stage, stream-K (grouped dp_sk, persistent atomic), lds_k_pad,
+#         and the K-outer / async_dma refusals (see _tf32_spec)
+#   89-100 -- prefetch_global_regs=True on a base config (see _PGR_BASES): the
+#         register-prefetch K loop across mem/compv3/compv4, M-outer and
+#         K-outer, the cshuffle epilogue with split_k = 1 and the packed fp16 /
+#         bf16 atomic, two-stage into fp16 and bf16 dW, and the 16x16x32 atom
+#         on a 128x128 tile; 96-100 pair it with async_dma, unroll_k,
+#         prefetch_addr, WMMA and stream-K, which both engines must reject.
+#   101-105 -- more prefetch_global_regs=True (see _PGR_BASES): bf16 A/B operands on
+#         the K-outer cshuffle base (101), compv4 two-stage into bf16 dW (102)
+#         and scalar loads (103, vector_size_a = vector_size_b = 1), so the
+#         carried values and their LDS stores are bfloat-typed; then the
+#         staged-load limit on fp16 scalar loads: tile_k = 256 needs 64 loads
+#         per thread per operand, which both engines must reject (104), and
+#         tile_k = 128 needs exactly the 32 allowed (105).
+#   106-107 -- the packed 16-bit split-K atomic at dW width 2 (one <2 x dtype>
+#         pair per lane, lane-contiguous) on the K-outer cshuffle base, fp16
+#         (106) and bf16 (107) dW: the width the gfx950 AOT grid builds them at.
+#   108 -- the same base at split_k = 1 with vector_size_c = 2: the cshuffle
+#         store epilogue must honour the explicit dW width (C = 64 alone
+#         would pick 8) in both engines.
+#   (Grouped wgrad reaches the C++ engine only through stream-K. The
+#    async loop's copy carries no element type, only its zero-fill does. The stream-K
 #    partition and CTA pool are kernargs, so no case varies them. async_dma is
 #    rejected with stream-K, and so is prefetch_addr.)
 #
-# Negative cases (configs 100+) verify that invalid specs are rejected:
-#   100 -- odd C with fp16 split-K (must raise ValueError)
-#   102 -- 16-bit split_k > 1 on RDNA gfx1151 (must raise ValueError)
-#   103 -- two_stage=True with split_k=1 (must raise ValueError)
-#   104 -- streamk with split_k=4 (must raise ValueError)
-#   105 -- streamk on gfx1250 (must raise ValueError)
-#   106 -- streamk with the cshuffle epilogue (must raise ValueError)
-#   107 -- streamk with unroll_k (must raise ValueError)
-#   108 -- streamk atomic reduction into fp16 dW (must raise ValueError)
+# Negative cases (configs 200+) verify that invalid specs are rejected:
+#   200 -- odd C with fp16 split-K (must raise ValueError)
+#   202 -- 16-bit split_k > 1 on RDNA gfx1151 (must raise ValueError)
+#   203 -- two_stage=True with split_k=1 (must raise ValueError)
+#   204 -- streamk with split_k=4 (must raise ValueError)
+#   205 -- streamk on gfx1250 (must raise ValueError)
+#   206 -- streamk with the cshuffle epilogue (must raise ValueError)
+#   207 -- streamk with unroll_k (must raise ValueError)
+#   208 -- streamk atomic reduction into fp16 dW (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
-# 0-54, so run_diff.py stops at the shared END before reaching 100+; these
+# 0-108, so run_diff.py stops at the shared END before reaching 200+; these
 # configs are not exercised by the differential gate.)
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
     build_implicit_gemm_conv_wgrad,
 )
-from kernels.common._conv_implicit_gemm_common import ConvProblem
+from kernels.common._conv_implicit_gemm_common import ConvDataSpec, ConvProblem
 from _emit_common import run_emit
 
 
@@ -102,17 +161,110 @@ _PFA_BASES = {
     # 128x128x64 with C = K = 3, so both operands load scalar: 4 accumulators
     # + 64 carried offsets, past the C++ engine's accumulator cap.
     48: (4, {"problem": ConvProblem(N=8, Hi=56, Wi=56, C=3, K=3, Y=3, X=3)}),
+    # 71-72 opt into the register-prefetch compv3 K loop explicitly: config 43
+    # above is pipeline="compv3" + prefetch_addr with register_prefetch left
+    # at its default False, so it stays on the plain prefetch_addr loop every
+    # other pipeline shares.
+    71: (
+        11,
+        {"split_k": 2, "pipeline": "compv3", "register_prefetch": True},
+    ),  # compv3, packed fp16 atomic
+    72: (15, {"pipeline": "compv3", "register_prefetch": True}),  # compv3, two-stage
+}
+
+
+# prefetch_global_regs configs: index -> (base config index, extra overrides).
+_PGR_BASES = {
+    89: (1, {}),  # mem/cshuffle, M-outer
+    90: (11, {}),  # mem/cshuffle, K-outer
+    91: (11, {"split_k": 2, "pipeline": "compv3"}),  # packed fp16 atomic
+    92: (15, {"pipeline": "compv4"}),  # two-stage, fp16 dW
+    93: (15, {"dtype_d": "bf16"}),  # two-stage, bf16 dW
+    94: (11, {"split_k": 2, "dtype_d": "bf16"}),  # packed bf16 atomic
+    # The 16x16x32 atom on a 128x128 tile, compv3.
+    95: (
+        11,
+        {
+            "tile_m": 128,
+            "tile_n": 128,
+            "warp_tile_m": 16,
+            "warp_tile_n": 16,
+            "warp_tile_k": 32,
+            "pipeline": "compv3",
+        },
+    ),
+    96: (12, {}),  # + async_dma: rejected
+    97: (18, {}),  # + unroll_k: rejected
+    98: (0, {"prefetch_addr": True}),  # + prefetch_addr: rejected
+    99: (5, {}),  # WMMA gfx1151: rejected
+    100: (21, {}),  # stream-K: rejected
+    # bf16 A/B operands: bfloat-typed carried values and LDS stores.
+    101: (11, {"dtype_a": "bf16", "dtype_b": "bf16", "dtype_d": "bf16"}),
+    102: (
+        15,
+        {
+            "dtype_a": "bf16",
+            "dtype_b": "bf16",
+            "dtype_d": "bf16",
+            "pipeline": "compv4",
+            "lds_k_outer": True,
+        },
+    ),
+    103: (
+        11,
+        {
+            "dtype_a": "bf16",
+            "dtype_b": "bf16",
+            "vector_size_a": 1,
+            "vector_size_b": 1,
+        },
+    ),
+    # Scalar loads: 64 loads per thread per operand, over the limit: rejected.
+    104: (11, {"tile_k": 256, "vector_size_a": 1, "vector_size_b": 1}),
+    # Scalar loads at the limit (32 per thread per operand): builds.
+    105: (11, {"tile_k": 128, "vector_size_a": 1, "vector_size_b": 1}),
+}
+
+
+# dW width 2 (vector_size_c = 2): index -> (base, extra overrides).
+_ATOMIC_VEC_C_BASES = {
+    106: (11, {"split_k": 2, "vector_size_c": 2}),  # packed atomic, fp16 dW
+    107: (11, {"split_k": 2, "vector_size_c": 2, "dtype_d": "bf16"}),  # bf16 dW
+    108: (11, {"vector_size_c": 2}),  # split_k = 1 cshuffle store
 }
 
 
 def _spec(idx: int):
     """Return (spec, arch) for config index `idx`.
 
-    For negative cases (idx >= 100) the spec is expected to raise ValueError
+    For negative cases (idx >= 200) the spec is expected to raise ValueError
     when built (run this file with that index to confirm it raises). These are
     illustrative of the validator contract; no differential harness consumes
     them (see the module header).
     """
+    if idx in _ATOMIC_VEC_C_BASES:
+        from dataclasses import replace
+
+        base_idx, extra = _ATOMIC_VEC_C_BASES[idx]
+        spec, arch = _spec(base_idx)
+        extra = dict(extra)
+        if "dtype_d" in extra:
+            extra["data"] = replace(spec.data, dtype_d=extra.pop("dtype_d"))
+        return replace(spec, **extra), arch
+
+    if idx in _PGR_BASES:
+        from dataclasses import replace
+
+        base_idx, extra = _PGR_BASES[idx]
+        spec, arch = _spec(base_idx)
+        extra = dict(extra)
+        dtypes = {
+            k: extra.pop(k) for k in ("dtype_a", "dtype_b", "dtype_d") if k in extra
+        }
+        if dtypes:
+            extra["data"] = replace(spec.data, **dtypes)
+        return replace(spec, prefetch_global_regs=True, **extra), arch
+
     if idx in _PFA_BASES:
         from dataclasses import replace
 
@@ -694,12 +846,168 @@ def _spec(idx: int):
             arch,
         )
 
+    if 55 <= idx <= 57 or idx in (67, 68, 69, 70):
+        # gfx1250 WMMA K loop: the global_load_async_to_lds ping-pong.
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+        p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        p_small = ConvProblem(N=4, Hi=12, Wi=12, C=24, K=32, Y=3, X=3, pH=1, pW=1)
+        p_c3 = ConvProblem(N=4, Hi=12, Wi=12, C=3, K=32, Y=3, X=3, pH=1, pW=1)
+        problem, dtype_d, split_k, big, extra, arch = {
+            55: (p_small, "fp32", 2, False, {"async_dma": True}, "gfx1250"),
+            56: (p, "fp32", 4, True, {"async_dma": True}, "gfx1250"),
+            57: (p_c3, "fp32", 2, False, {"async_dma": True}, "gfx1250"),
+            67: (p_small, "fp32", 2, False, {"async_dma": True}, "gfx1250"),
+            68: (
+                p_small,
+                "fp32",
+                2,
+                False,
+                {"async_dma": True, "vector_size_a": 4},
+                "gfx1250",
+            ),
+            69: (
+                p_small,
+                "fp32",
+                2,
+                False,
+                {"vector_size_a": 4, "vector_size_b": 2},
+                "gfx1250",
+            ),
+            70: (
+                p_small,
+                "fp32",
+                2,
+                False,
+                {"vector_size_a": 4, "vector_size_b": 2, "lds_k_outer": False},
+                "gfx1250",
+            ),
+        }[idx]
+        wave32 = arch == "gfx1250"
+        dtype_ab = "bf16" if idx == 67 else "fp16"
+        kw = dict(
+            problem=problem,
+            data=ConvDataSpec(dtype_a=dtype_ab, dtype_b=dtype_ab, dtype_d=dtype_d),
+            tile_m=64 if big else 32,
+            tile_n=64 if big else 32,
+            tile_k=64 if big else 32,
+            warp_m=2 if big else 1,
+            warp_n=2 if big else 1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=32 if wave32 else 16,
+            wave_size=32 if wave32 else 64,
+            pipeline="mem",
+            epilogue="default",
+            split_k=split_k,
+            lds_k_outer=wave32,
+        )
+        kw.update(extra)
+        return WgradConvSpec(**kw), arch
+
+    if 58 <= idx <= 61:
+        # WMMA cshuffle epilogue.
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+        p64 = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        p24 = ConvProblem(N=4, Hi=12, Wi=12, C=24, K=32, Y=3, X=3, pH=1, pW=1)
+        problem, dtype_d, split_k, extra, arch = {
+            58: (p64, "fp16", 1, {}, "gfx1250"),
+            59: (p64, "bf16", 4, {}, "gfx1250"),
+            60: (p24, "fp16", 2, {"async_dma": True}, "gfx1250"),
+            61: (p64, "fp16", 4, {}, "gfx1201"),
+        }[idx]
+        gfx1250 = arch == "gfx1250"
+        kw = dict(
+            problem=problem,
+            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d=dtype_d),
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=32 if gfx1250 else 16,
+            wave_size=32,
+            pipeline="mem",
+            epilogue="cshuffle",
+            split_k=split_k,
+            lds_k_outer=gfx1250,
+        )
+        kw.update(extra)
+        return WgradConvSpec(**kw), arch
+
+    if idx == 62:
+        # WMMA cshuffle split-K needs an even store vector, as on MFMA.
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+        return (
+            WgradConvSpec(
+                problem=ConvProblem(N=4, Hi=12, Wi=12, C=3, K=32, Y=2, X=2),
+                data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d="fp16"),
+                tile_m=32,
+                tile_n=32,
+                tile_k=32,
+                warp_m=1,
+                warp_n=1,
+                warp_tile_m=16,
+                warp_tile_n=16,
+                warp_tile_k=32,
+                wave_size=32,
+                pipeline="mem",
+                epilogue="cshuffle",
+                split_k=4,
+            ),
+            "gfx1250",
+        )
+
+    if 63 <= idx <= 66:
+        # Two-stage (f32 workspace) split-K on WMMA.
+        from kernels.common._conv_implicit_gemm_common import ConvDataSpec
+
+        p64 = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        p24 = ConvProblem(N=4, Hi=12, Wi=12, C=24, K=32, Y=3, X=3, pH=1, pW=1)
+        p_c3 = ConvProblem(N=4, Hi=12, Wi=12, C=3, K=32, Y=3, X=3, pH=1, pW=1)
+        problem, dtype_d, big, extra, arch = {
+            63: (p_c3, "fp16", False, {}, "gfx1250"),
+            64: (p64, "bf16", True, {"lds_k_outer": True}, "gfx1250"),
+            65: (
+                p24,
+                "fp16",
+                False,
+                {"lds_k_outer": True, "async_dma": True, "ws_replicas": 1},
+                "gfx1250",
+            ),
+            66: (p64, "fp16", False, {}, "gfx1151"),
+        }[idx]
+        gfx1250 = arch == "gfx1250"
+        kw = dict(
+            problem=problem,
+            data=ConvDataSpec(dtype_a="fp16", dtype_b="fp16", dtype_d=dtype_d),
+            tile_m=64 if big else 32,
+            tile_n=64 if big else 32,
+            tile_k=64 if big else 32,
+            warp_m=2 if big else 1,
+            warp_n=2 if big else 1,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=32 if gfx1250 else 16,
+            wave_size=32,
+            pipeline="mem",
+            epilogue="default",
+            split_k=4,
+            two_stage=True,
+        )
+        kw.update(extra)
+        return WgradConvSpec(**kw), arch
+
     # ----------------------------------------------------------------
     # Negative cases: these specs must be REJECTED by the validator.
     # The harness (run_emit) expects a ValueError / SystemExit when
-    # the config index is >= 100 and "expect_fail=True" is set.
+    # the config index is >= 200 and "expect_fail=True" is set.
     # ----------------------------------------------------------------
-    if idx == 100:
+    if idx == 200:
         # Odd C with fp16 split-K -- must raise (packed atomic OOB).
         p = ConvProblem(N=8, Hi=56, Wi=56, C=3, K=64, Y=2, X=2)
         return (
@@ -719,7 +1027,7 @@ def _spec(idx: int):
             ),
             "gfx950",
         )
-    if idx == 102:
+    if idx == 202:
         # 16-bit split_k > 1 on RDNA gfx1151 -- must raise (WMMA split-K is
         # not enabled on gfx1151).
         p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
@@ -741,7 +1049,7 @@ def _spec(idx: int):
             ),
             "gfx1151",
         )
-    if idx == 103:
+    if idx == 203:
         # two_stage=True with split_k=1 -- must raise ValueError.
         p = ConvProblem(N=8, Hi=56, Wi=56, C=64, K=64, Y=3, X=3)
         return (
@@ -762,21 +1070,95 @@ def _spec(idx: int):
             ),
             "gfx950",
         )
-    if 104 <= idx <= 108:
+    if 204 <= idx <= 208:
         from dataclasses import replace
 
         from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 
         base, arch = _streamk_spec(21)
         bad = {
-            104: (dict(split_k=4), arch),
-            105: (dict(), "gfx1250"),
-            106: (dict(epilogue="cshuffle"), arch),
-            107: (dict(unroll_k=True), arch),
-            108: (dict(streamk_reduction="atomic", data=ConvDataSpec()), arch),
+            204: (dict(split_k=4), arch),
+            205: (dict(), "gfx1250"),
+            206: (dict(epilogue="cshuffle"), arch),
+            207: (dict(unroll_k=True), arch),
+            208: (dict(streamk_reduction="atomic", data=ConvDataSpec()), arch),
         }[idx]
         return replace(base, **bad[0]), bad[1]
+    if 73 <= idx <= 88:
+        return _tf32_spec(idx)
     raise SystemExit(f"unknown config index {idx}")
+
+
+# TF32 compute: fp32 dY / X / dW, each LDS fragment bitcast to vec<tf32xN> for
+# the arch's TF32 atom -- BF16x3 emulation on gfx950 (32x32x16, 16x16x32),
+# native XF32 on gfx942 (32x32x4, 16x16x8). 64x64x32 tile, 2x2 warps. Keep in
+# lockstep with make_cfg_tf32() in conv_implicit_gemm_wgrad_emit.c.
+#   73: gfx950 32x32x16, 2-D, mem/default
+#   74: gfx950 16x16x32, 2-D, compv4/cshuffle (the scheduling-hint counts)
+#   75: gfx942 32x32x4, 2-D, compv4/default
+#   76: gfx942 16x16x8, 2-D, mem/cshuffle
+#   77: gfx950 32x32x16, 3-D, mem/default
+#   78: gfx942 16x16x8, 3-D, compv4/default
+#   79: gfx950 16x16x32, split-K=4 (scalar fp32 atomic)
+#   80: gfx942 32x32x4, split-K=4, cshuffle atomic epilogue
+#   81: gfx950 32x32x16, split-K=4 two-stage
+#   82: gfx942 16x16x8, split-K=4 two-stage
+#   83: gfx950 16x16x32, stream-K dp_sk linear, groups=3 (partial M tile)
+#   84: gfx942 32x32x4, stream-K persistent, atomic reduction
+#   85: gfx950 32x32x16, pipeline="basic", lds_k_pad=4 (16 B row stride)
+#   86: gfx942 16x16x8, compv4 unroll_k
+#   87: gfx950 lds_k_outer: rejected by both engines
+#   88: gfx950 async_dma: rejected by both engines
+_TF32 = ConvDataSpec("fp32", "fp32", "fp32", mma_dtype="tf32")
+_TF32_P2 = ConvProblem(N=2, Hi=12, Wi=12, C=32, K=96, Y=3, X=3, pH=1, pW=1)
+_TF32_P3 = ConvProblem(
+    N=1, Di=5, Hi=6, Wi=6, C=16, K=32, Z=3, Y=3, X=3, pD=1, sD=1, dD=1, pH=1, pW=1
+)
+_TF32_PG = ConvProblem(N=2, Hi=10, Wi=10, C=48, K=120, Y=3, X=3, pH=1, pW=1, groups=3)
+
+
+def _tf32_spec(idx: int):
+    p2, p3, pg = _TF32_P2, _TF32_P3, _TF32_PG
+    arch, edge, k, problem, kw = {
+        73: ("gfx950", 32, 16, p2, {}),
+        74: ("gfx950", 16, 32, p2, dict(pipeline="compv4", epilogue="cshuffle")),
+        75: ("gfx942", 32, 4, p2, dict(pipeline="compv4")),
+        76: ("gfx942", 16, 8, p2, dict(epilogue="cshuffle")),
+        77: ("gfx950", 32, 16, p3, {}),
+        78: ("gfx942", 16, 8, p3, dict(pipeline="compv4")),
+        79: ("gfx950", 16, 32, p2, dict(split_k=4)),
+        80: ("gfx942", 32, 4, p2, dict(split_k=4, epilogue="cshuffle")),
+        81: ("gfx950", 32, 16, p2, dict(split_k=4, two_stage=True)),
+        82: ("gfx942", 16, 8, p2, dict(split_k=4, two_stage=True)),
+        83: ("gfx950", 16, 32, pg, dict(streamk="dp_sk", streamk_ctas=6)),
+        84: (
+            "gfx942",
+            32,
+            4,
+            p2,
+            dict(streamk="persistent", streamk_ctas=6, streamk_reduction="atomic"),
+        ),
+        85: ("gfx950", 32, 16, p2, dict(pipeline="basic", lds_k_pad=4)),
+        86: ("gfx942", 16, 8, p2, dict(pipeline="compv4", unroll_k=True)),
+        87: ("gfx950", 32, 16, p2, dict(lds_k_outer=True)),
+        88: ("gfx950", 32, 16, p2, dict(async_dma=True)),
+    }[idx]
+    return (
+        WgradConvSpec(
+            problem=problem,
+            data=_TF32,
+            tile_m=64,
+            tile_n=64,
+            tile_k=32,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=edge,
+            warp_tile_n=edge,
+            warp_tile_k=k,
+            **kw,
+        ),
+        arch,
+    )
 
 
 # (problem kwargs, data dtypes (a/b, d), atom edge, streamk, reduction, ctas, arch)
