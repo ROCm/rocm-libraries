@@ -1170,4 +1170,99 @@ version = 1
     EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error);
 }
 
+// A top-level key the loader does not read is an error: a misspelt section name would otherwise
+// leave its setting out of the file without a word.
+TEST(TestSettingsParser, RejectsATopLevelKeyThatIsNoTable)
+{
+    const std::vector<std::string> bad = {
+        // a misspelt section of each kind
+        "[conv_fwd_tolerence.float]\nsummation_order = 9.0\n",
+        "[[tolerance_override]]\nfilters = [\"*\"]\natol = 1.0\nrtol = 1.0\n",
+        "[[validator_override]]\nfilters = [\"*\"]\ntensors = [\"*\"]\nvalidator = \"rms\"\n"
+        "rms_threshold = 1e-4\n",
+        "[[test_skip]]\nfilters = [\"*\"]\nreason = \"x\"\n",
+    };
+    for(const auto& text : bad)
+    {
+        const TempTomlFile file("[meta]\nversion = 1\n\n" + text);
+        EXPECT_THROW(const TestSettings settings(file.path()), std::runtime_error) << text;
+    }
+    // a key that is no section at all, before the first table (after [meta] it would be its)
+    const TempTomlFile loose("unknown = 1\n\n[meta]\nversion = 1\n");
+    EXPECT_THROW(const TestSettings settings(loose.path()), std::runtime_error);
+}
+
+TEST(TestSettingsParser, AcceptsEveryTopLevelKeyOfTheSchemaInOneFile)
+{
+    const TempTomlFile file(R"([meta]
+version = 1
+
+[[tolerance_overrides]]
+filters = ["*"]
+atol = 1.0
+rtol = 1.0
+
+[[validator_overrides]]
+filters = ["*"]
+tensors = ["*"]
+validator = "allclose"
+
+[[test_skips]]
+filters = ["*"]
+reason = "known"
+
+[conv_fwd_tolerance.float]
+summation_order = 9.0
+)");
+    const TestSettings settings(file.path());
+    EXPECT_EQ(settings.toleranceOverrideCount(), 1u);
+    EXPECT_EQ(settings.validatorOverrideCount(), 1u);
+    EXPECT_EQ(settings.skipEntryCount(), 1u);
+    EXPECT_TRUE(settings.convFwdSummationOrder("float").has_value());
+}
+
+// ---------------------------------------------------------------------------
+// The files the providers ship
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// The per-engine settings files of the tree, named by the compile definitions of this target.
+const std::vector<std::filesystem::path>& shippedEngineFiles()
+{
+    static const std::vector<std::filesystem::path> files = {HIPDNN_ENGINE_TOML_MIOPEN,
+                                                             HIPDNN_ENGINE_TOML_HIPBLASLT,
+                                                             HIPDNN_ENGINE_TOML_ASM_SDPA,
+                                                             HIPDNN_ENGINE_TOML_HIP_MLOPS,
+                                                             HIPDNN_ENGINE_TOML_HIP_FLASH2};
+    return files;
+}
+
+} // namespace
+
+// Every settings file a provider ships loads under the strict loader, top-level keys included.
+TEST(TestShippedEngineSettings, EveryEngineFileLoads)
+{
+    for(const auto& path : shippedEngineFiles())
+    {
+        ASSERT_TRUE(std::filesystem::exists(path)) << path;
+        EXPECT_NO_THROW(const TestSettings settings(path)) << path;
+    }
+}
+
+// MIOpen's file sets the coefficient of its float convolution-forward outputs: 9 leaves its
+// Winograd solvers a headroom of 1.5 (tolerances.md, "Float outputs"). Changing or dropping it
+// fails here and not first as float Winograd failures on a device run.
+TEST(TestShippedEngineSettings, MiopenEngineFileSetsTheFloatSummationOrder)
+{
+    const std::filesystem::path path = HIPDNN_ENGINE_TOML_MIOPEN;
+    ASSERT_TRUE(std::filesystem::exists(path)) << path;
+    const TestSettings settings(path);
+    ASSERT_TRUE(settings.convFwdSummationOrder("float").has_value());
+    EXPECT_DOUBLE_EQ(*settings.convFwdSummationOrder("float"), 9.0);
+    EXPECT_FALSE(settings.convFwdSummationOrder("half").has_value());
+    EXPECT_FALSE(settings.convFwdSummationOrder("bfloat16").has_value());
+}
+
 // NOLINTEND(readability-identifier-naming)

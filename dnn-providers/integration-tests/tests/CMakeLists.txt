@@ -119,6 +119,16 @@ target_include_directories(hipdnn_integration_tests_unit_tests
 target_include_directories(hipdnn_integration_tests_unit_tests SYSTEM PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/third-party/tomlplusplus)
 
+# The settings files the providers ship, which TestShippedEngineSettings loads: the tests catch a
+# change that a device run would show only as failures.
+target_compile_definitions(hipdnn_integration_tests_unit_tests PRIVATE
+    HIPDNN_ENGINE_TOML_MIOPEN="${CMAKE_CURRENT_SOURCE_DIR}/../../miopen-provider/config/MIOPEN_ENGINE.toml"
+    HIPDNN_ENGINE_TOML_HIPBLASLT="${CMAKE_CURRENT_SOURCE_DIR}/../../hipblaslt-provider/config/HIPBLASLT_ENGINE.toml"
+    HIPDNN_ENGINE_TOML_ASM_SDPA="${CMAKE_CURRENT_SOURCE_DIR}/../../hip-kernel-provider/config/ASM_SDPA_ENGINE.toml"
+    HIPDNN_ENGINE_TOML_HIP_MLOPS="${CMAKE_CURRENT_SOURCE_DIR}/../../hip-kernel-provider/config/HIP_MLOPS_ENGINE.toml"
+    HIPDNN_ENGINE_TOML_HIP_FLASH2="${CMAKE_CURRENT_SOURCE_DIR}/../../hip-kernel-provider/src/engines/hip_flash2_engine/config/HIP_FLASH2_ENGINE.toml"
+)
+
 target_link_libraries(hipdnn_integration_tests_unit_tests
     PRIVATE
         hip::host

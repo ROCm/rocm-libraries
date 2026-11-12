@@ -8,9 +8,10 @@
 // A failing comparison prints the atol and rtol it graded with, so the tests read the tolerance
 // the harness actually handed to the comparison from that report. A TOML override is applied by
 // gradingForTensor() to the settings of the harness policy. Production fills that from TestConfig,
-// which this binary initializes once and without a settings file, so the override tests below
-// put a settings file of their own in the policy. gradingForTensor() itself is covered in
-// TestTomlGuards.cpp.
+// which this binary initializes once and without a settings file: most override tests below put a
+// settings file of their own in the policy, and the engine-file tests build a TestConfig of their
+// own from a file and take the policy's settings from productionPolicy(), as a run does.
+// gradingForTensor() itself is covered in TestTomlGuards.cpp.
 
 #include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
@@ -35,9 +36,11 @@
 
 #include "BundleFixtureFiles.hpp"
 #include "HarnessTestSupport.hpp"
+#include "harness/TestConfig.hpp"
 #include "harness/TestSettings.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
+#include "harness/bundle/ProductionPolicy.hpp"
 #include "harness/input-init/FillRecipe.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
 
@@ -93,6 +96,7 @@ struct Spec
     std::string intermediateType = "float"; ///< the type of every virtual tensor
     std::string pointwiseCompute = "float"; ///< the compute type of every pointwise node
     bool inputBlobs = false;
+    std::string inputType; ///< the type of x and w; empty: the graph's own
 
     int64_t outUid() const
     {
@@ -140,6 +144,7 @@ std::string graphJson(const Spec& spec)
     {
         dtype = "float";
     }
+    const std::string inputDtype = spec.inputType.empty() ? dtype : spec.inputType;
     const std::string yDims = "[1, 8, 4, 4]";
     const std::string yStrides = "[128, 16, 4, 1]";
     const bool plain = spec.topology == Topology::PLAIN;
@@ -154,8 +159,8 @@ std::string graphJson(const Spec& spec)
 
     std::vector<std::string> nodes{convNode.str()};
     std::vector<std::string> tensors{
-        tensorJson(X_UID, "x", "[1, 4, 6, 6]", "[144, 36, 6, 1]", dtype, false),
-        tensorJson(W_UID, "w", "[8, 4, 3, 3]", "[36, 9, 3, 1]", dtype, false),
+        tensorJson(X_UID, "x", "[1, 4, 6, 6]", "[144, 36, 6, 1]", inputDtype, false),
+        tensorJson(W_UID, "w", "[8, 4, 3, 3]", "[36, 9, 3, 1]", inputDtype, false),
         tensorJson(Y_UID, "y", yDims, yStrides, plain ? dtype : spec.intermediateType, !plain),
     };
     if(topology3)
@@ -163,9 +168,17 @@ std::string graphJson(const Spec& spec)
         std::string scaleExtra;
         if(spec.scaleSource == ScaleSource::BAKED)
         {
+            std::string valueType = "BFloat16Value";
+            if(spec.isFloat)
+            {
+                valueType = "Float32Value";
+            }
+            else if(spec.isHalf)
+            {
+                valueType = "Float16Value";
+            }
             scaleExtra = std::string(R"(, "value": )") + std::to_string(spec.bakedValue)
-                         + R"(, "value_type": ")" + (spec.isHalf ? "Float16Value" : "BFloat16Value")
-                         + "\"";
+                         + R"(, "value_type": ")" + valueType + "\"";
         }
         nodes.push_back(
             pointwiseJson("mul", "mul", Y_UID, SCALE_UID, MUL_OUT_UID, spec.pointwiseCompute));
@@ -261,6 +274,8 @@ protected:
     testing_support::HarnessMocks _mocks;
     int _bundleCount = 0;
     std::optional<TestSettings> _settings;
+    std::unique_ptr<TestConfig> _engineConfig;
+    const TestSettings* _policySettings = nullptr;
 
     void SetUp() override
     {
@@ -276,6 +291,19 @@ protected:
         const auto path = _tempDir / "settings.toml";
         std::ofstream(path) << toml;
         _settings.emplace(path);
+        _policySettings = &*_settings;
+    }
+
+    /// Grades with the settings of an engine file the way a run gets them: a TestConfig loads the
+    /// file its options name, and productionPolicy() carries what it loaded into the policy.
+    void useEngineFile(const std::string& toml)
+    {
+        const auto path = _tempDir / "engine.toml";
+        std::ofstream(path) << toml;
+        TestConfigOptions options;
+        options.configPath = path;
+        _engineConfig = std::make_unique<TestConfig>(std::move(options));
+        _policySettings = productionPolicy(TensorPlacement::HOST, *_engineConfig).testSettings;
     }
 
     std::shared_ptr<IntegrationTestBundle> loadBundle(const Spec& spec)
@@ -289,7 +317,12 @@ protected:
         {
             // Inputs only, so the bundle has no golden output and the reference grades it.
             const auto base = (dir / name).string();
-            if(spec.isHalf)
+            if(spec.inputType == "float" || spec.isFloat)
+            {
+                writeBlob<float>(base + ".tensor0.bin", K_X_ELEMS, 2.0f);
+                writeBlob<float>(base + ".tensor1.bin", K_W_ELEMS, 0.5f);
+            }
+            else if(spec.isHalf)
             {
                 writeBlob<half>(base + ".tensor0.bin", K_X_ELEMS, 2.0f);
                 writeBlob<half>(base + ".tensor1.bin", K_W_ELEMS, 0.5f);
@@ -327,7 +360,7 @@ protected:
         }
 
         auto policy = testing_support::hostPolicy(VerificationMode::AUTO);
-        policy.testSettings = _settings.has_value() ? &*_settings : nullptr;
+        policy.testSettings = _policySettings;
         IntegrationBundleVerificationHarness harness(_mocks.dependencies(std::move(policy)));
         harness.setBundle(loadBundle(spec), "conv-tolerance-test-bundle");
         prepare(harness.inputFillRecipes());
@@ -653,7 +686,7 @@ TEST_F(TestConvFwdToleranceGradingFixture, FillRecipesGiveTheInputStatistics)
 
 // A blob input is read as the element type of the graph, half or bfloat16: the same constants give
 // the same moments in either. Every tensor of this graph has the output's type, so the case does
-// not tell a blob's own type from the output's.
+// not tell a blob's own type from the output's; GoldenBlobInputsAreScannedAsTheirOwnType does.
 TEST_F(TestConvFwdToleranceGradingFixture, GoldenBlobInputsAreScannedOnTheHost)
 {
     for(const bool isHalf : {true, false})
@@ -667,6 +700,22 @@ TEST_F(TestConvFwdToleranceGradingFixture, GoldenBlobInputsAreScannedOnTheHost)
         scale.weightMeanSquare = 0.25; // w is 0.5 everywhere
         expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), dynamicTolerance(isHalf, scale));
     }
+}
+
+// A golden blob is scanned as the type it holds, not as the type of the graph's output: x and w
+// are float blobs under a half graph, and a scan that read their bytes as half would see other
+// numbers.
+TEST_F(TestConvFwdToleranceGradingFixture, GoldenBlobInputsAreScannedAsTheirOwnType)
+{
+    Spec spec;
+    spec.isHalf = true;
+    spec.inputBlobs = true;
+    spec.inputType = "float";
+    ConvFpropErrorScale scale;
+    scale.accumulationLength = K_ACCUMULATION;
+    scale.inputMeanSquare = 4.0; // x is 2.0 everywhere
+    scale.weightMeanSquare = 0.25; // w is 0.5 everywhere
+    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), dynamicTolerance(true, scale));
 }
 
 // ── A fused multiply: baked constant or filled tensor ───────────────────────
@@ -881,6 +930,91 @@ TEST_F(TestConvFwdToleranceGradingFixture, FloatCoefficientOfTheEngineLeavesHalf
         expectReported(grade(spec, K_FAR_OFF, K_REFERENCE),
                        dynamicTolerance(isHalf, defaultFillScale()));
     }
+}
+
+// A float graph with a baked scale is graded with that scale: the constant is a Float32Value
+// here, and its largest magnitude narrows the band as it does a half one's.
+TEST_F(TestConvFwdToleranceGradingFixture, FloatGraphWithABakedScaleIsGradedWithTheScale)
+{
+    Spec spec;
+    spec.isFloat = true;
+    spec.topology = Topology::VARIANT3;
+    spec.bakedValue = 0.5;
+    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), floatTolerance(defaultFillScale(0.5), 4.0));
+}
+
+// A float graph whose pointwise nodes compute in half is graded with the rounding points of those
+// nodes, as a half or bfloat16 graph is (K = 36, sigma = 2, scale 0.5, bias uniform on [-1, 1]).
+// Every operand and result that is float is converted to half and rounded, and the model's rtol
+// does not cover it: the points, written out here from the model of tolerances.md, are y (2 *
+// 0.5: the multiply scales its error), the baked scale (slope: the size of y), the multiply's
+// result, which the add reads, the bias, the add's result, which the relu reads, and the relu's.
+TEST_F(TestConvFwdToleranceGradingFixture,
+       FloatGraphWithNodesComputingInHalfIsGradedWithTheirPoints)
+{
+    Spec spec;
+    spec.isFloat = true;
+    spec.topology = Topology::VARIANT3;
+    spec.bakedValue = 0.5;
+    spec.pointwiseCompute = "half";
+    const double eps = std::ldexp(1.0, -10);
+    const double afterAdd = std::sqrt(4.0 / 3.0);
+    auto scale = defaultFillScale(0.5);
+    scale.roundingPoints = {{eps, 2.0, 0.5}, // y, an operand of the multiply
+                            {eps, 0.5, 2.0}, // the scale
+                            {eps, 1.0, 1.0}, // the multiply's result
+                            {eps, 1.0, 1.0}, // the multiply's result, an operand of the add
+                            {eps, std::sqrt(1.0 / 3.0), 1.0}, // the bias
+                            {eps, afterAdd, 1.0}, // the add's result
+                            {eps, afterAdd, 1.0}, // the add's result, an operand of the relu
+                            {eps, afterAdd, 1.0}}; // the relu's result, the graph output
+    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), floatTolerance(scale, 4.0));
+}
+
+// The route of an engine's settings file into a run: a TestConfig loads the file, productionPolicy()
+// carries what it loaded into the policy, and the harness grades with the coefficient the file
+// sets. A run that lost the link would grade with the base coefficient.
+TEST_F(TestConvFwdToleranceGradingFixture,
+       EngineFileCoefficientReachesTheGradingThroughTheProductionPolicy)
+{
+    useEngineFile(R"([meta]
+version = 1
+
+[conv_fwd_tolerance.float]
+summation_order = 7.0
+
+[[tolerance_overrides]]
+filters = ["SomeOtherSuite.*"]
+atol = 0.5
+rtol = 0.25
+)");
+    ASSERT_NE(_policySettings, nullptr);
+    Spec spec;
+    spec.isFloat = true;
+    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), floatTolerance(defaultFillScale(), 7.0));
+}
+
+// The same route carries the file's [[tolerance_overrides]]: an entry that matches the test
+// replaces the dynamic tolerance of the float output, whatever coefficient the file sets.
+TEST_F(TestConvFwdToleranceGradingFixture,
+       EngineFileToleranceOverrideReachesTheGradingThroughTheProductionPolicy)
+{
+    useEngineFile(R"([meta]
+version = 1
+
+[conv_fwd_tolerance.float]
+summation_order = 7.0
+
+[[tolerance_overrides]]
+filters = ["TestConvFwdToleranceGradingFixture.EngineFileToleranceOverride*"]
+atol = 0.5
+rtol = 0.25
+)");
+    ASSERT_NE(_policySettings, nullptr);
+    Spec spec;
+    spec.isFloat = true;
+    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), AbsRelTolerance{0.5, 0.25});
+    EXPECT_FALSE(grade(spec, K_REFERENCE + 0.25f, K_REFERENCE).failed);
 }
 
 // [[validator_overrides]] outranks [[tolerance_overrides]]: an rms entry grades the tensor by its

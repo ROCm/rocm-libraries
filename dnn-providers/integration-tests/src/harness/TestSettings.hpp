@@ -4,6 +4,7 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <optional>
@@ -100,7 +101,11 @@ struct ValidatorOverride
 // tolerance of a float convolution-forward output (see ConvFwdDynamicTolerance.hpp); omitted,
 // the harness uses the SDK's default. It must be a finite positive number. Output types other
 // than "float" and keys other than 'summation_order' are load errors. A matching
-// [[tolerance_overrides]] entry still replaces the dynamic tolerance as a whole.
+// [[tolerance_overrides]] entry still replaces the dynamic tolerance as a whole. Only the bundle
+// harness reads the table.
+//
+// A top-level key other than meta, tolerance_overrides, validator_overrides, test_skips and
+// conv_fwd_tolerance is a load error, so a misspelt section name cannot go unnoticed.
 //
 // Filters use GTest-style globs (globMatch with * wildcards).
 // For tolerance_overrides, later entries take precedence over earlier
@@ -138,6 +143,7 @@ public:
     {
         auto table = toml::parse_file(configPath.string());
         validateMetaVersion(table, configPath);
+        rejectUnknownTopLevelKeys(table, configPath);
 
         if(auto* arr = table["tolerance_overrides"].as_array())
         {
@@ -346,6 +352,30 @@ private:
         {
             throw std::runtime_error("TestSettings: unsupported version " + std::to_string(*version)
                                      + " in " + configPath.string() + " (expected 1)");
+        }
+    }
+
+    // A top-level key the loader does not read is a load error, so that a misspelt section name
+    // ([conv_fwd_tolerence.float]) cannot leave its setting silently out of a file.
+    static void rejectUnknownTopLevelKeys(const toml::table& table,
+                                          const std::filesystem::path& configPath)
+    {
+        static constexpr std::array<std::string_view, 5> K_KNOWN = {"meta",
+                                                                    "tolerance_overrides",
+                                                                    "validator_overrides",
+                                                                    "test_skips",
+                                                                    "conv_fwd_tolerance"};
+        for(const auto& entry : table)
+        {
+            const std::string_view key = entry.first.str();
+            if(std::find(K_KNOWN.begin(), K_KNOWN.end(), key) == K_KNOWN.end())
+            {
+                throw std::runtime_error("TestSettings: unknown top-level key '" + std::string(key)
+                                         + "' in " + configPath.string()
+                                         + " (expected meta, tolerance_overrides, "
+                                           "validator_overrides, test_skips or "
+                                           "conv_fwd_tolerance)");
+            }
         }
     }
 
