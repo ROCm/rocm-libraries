@@ -38,9 +38,11 @@ GNS = [64, 16]
 
 
 def threads_of(th, tw, pb):
-    """Threads of a transform block: one a row pair (pb th / 2, or pb / 2 for rows), 64 to 256."""
+    """Threads of a transform block: one a row pair at least (pb th / 2, or pb / 2 for rows), and
+    also 256 (more waves for the same LDS, for the loads, stores and column passes)."""
     pairs = pb // 2 if th == 1 else pb * th // 2
-    return min(256, max(64, (pairs + 63) // 64 * 64))
+    least = min(256, max(64, (pairs + 63) // 64 * 64))
+    return sorted({least, 256})
 
 
 kmd, umd, udd = U("kmd"), U("umd"), U("udd")
@@ -92,8 +94,7 @@ for direction in ("fwd", "bwd", "wrw"):
     i = 0
     for dtype in ("FLOAT", "HALF", "BFLOAT16"):
         for (th, tw), pbs in TILES.items():
-            for pb in pbs:
-                tb = threads_of(th, tw, pb)
+            for pb, tb in [(pb, tb) for pb in pbs for tb in threads_of(th, tw, pb)]:
                 for gn in GNS:
                     name = f"conv_fft.{direction}.{dt[dtype]}.t{th}x{tw}.pb{pb}.tb{tb}.g{gn}"
                     kernels.append(

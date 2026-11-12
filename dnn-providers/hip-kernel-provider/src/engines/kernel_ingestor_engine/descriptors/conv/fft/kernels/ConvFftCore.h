@@ -237,21 +237,30 @@ __device__ void fft2dForward(cfx* spec, const Loader& loader)
 {
     using S = FftShape<TH, TW, PB>;
     float* real = reinterpret_cast<float*>(spec);
-    for(int idx = threadIdx.x; idx < PB * TH * TW; idx += blockDim.x)
-    {
-        const int t = idx / (TH * TW);
-        const int r = (idx / TW) % TH;
-        const int i = idx % TW;
-        real[(t * TH + r) * S::RS + i] = loader.value(t, r, i);
-    }
+    loader.template fill<TH, TW, PB, S::RS>(real);
     __syncthreads();
+    // Rows at or past loader.liveRows() are zero in every tile (a filter's span, a dy window's
+    // height): their spectra are zero, so only the live row pairs run, packed onto the first
+    // threads.
+    const int livePairs = TH == 1 ? 1 : (loader.liveRows() + 1) / 2;
+    const int activePairs = TH == 1 ? S::PAIRS : PB * livePairs;
     const int q = threadIdx.x;
-    const bool active = q < S::PAIRS;
+    const bool active = q < activePairs;
     int ia = 0, ra = 0, ib = 0, rb = 0;
     cfx z[TW];
     if(active)
     {
-        fftPair<TH, PB>(q, ia, ra, ib, rb);
+        if(TH == 1)
+        {
+            fftPair<TH, PB>(q, ia, ra, ib, rb);
+        }
+        else
+        {
+            ia = q / livePairs;
+            ib = ia;
+            ra = 2 * (q % livePairs);
+            rb = ra + 1;
+        }
         const float* a = real + (ia * TH + ra) * S::RS;
         const float* b = real + (ib * TH + rb) * S::RS;
 #pragma unroll
@@ -279,6 +288,13 @@ __device__ void fft2dForward(cfx* spec, const Loader& loader)
     }
     if(TH > 1)
     {
+        const int deadRows = TH - 2 * livePairs;
+        for(int idx = threadIdx.x; idx < PB * deadRows * S::HW; idx += blockDim.x)
+        {
+            const int t = idx / (deadRows * S::HW);
+            const int row = 2 * livePairs + (idx / S::HW) % deadRows;
+            spec[t * S::F + row * S::HW + idx % S::HW] = cfxMake(0.0f, 0.0f);
+        }
         __syncthreads();
         fftColumns<TH, TW, PB>(spec, false);
     }
@@ -331,13 +347,7 @@ __device__ void fft2dInverse(cfx* spec, const Storer& storer)
         }
     }
     __syncthreads();
-    for(int idx = threadIdx.x; idx < PB * TH * TW; idx += blockDim.x)
-    {
-        const int t = idx / (TH * TW);
-        const int r = (idx / TW) % TH;
-        const int i = idx % TW;
-        storer.value(t, r, i, real[(t * TH + r) * S::RS + i]);
-    }
+    storer.template store<TH, TW, PB, S::RS>(real);
 }
 
 // ---- loaders and storers ---------------------------------------------------------------------
@@ -394,6 +404,24 @@ struct FftDataLoader
     int validW;
     const FftTile* tiles;
 
+    __device__ int liveRows() const
+    {
+        return validH;
+    }
+
+    /// The block's real tiles, cooperatively (consecutive threads, consecutive points of a row).
+    template <int TH, int TW, int PB, int RS>
+    __device__ void fill(float* real) const
+    {
+        for(int idx = threadIdx.x; idx < PB * TH * TW; idx += blockDim.x)
+        {
+            const int t = idx / (TH * TW);
+            const int r = (idx / TW) % TH;
+            const int i = idx % TW;
+            real[(t * TH + r) * RS + i] = value(t, r, i);
+        }
+    }
+
     __device__ float value(int t, int row, int i) const
     {
         const FftTile tile = tiles[t];
@@ -448,7 +476,7 @@ __device__ __forceinline__ FftDataLoader<T>
 }
 
 /// Filter taps: instance t is (a, b0 + t); the tile holds tap (r, s) at (r * dilH, s * dilW),
-/// reflected when flip.
+/// reflected when flip. Filled as zeros, then the taps scattered (r s of them, not th tw).
 template <class T>
 struct FftFilterLoader
 {
@@ -458,27 +486,40 @@ struct FftFilterLoader
     int ia;
     int b0;
 
-    __device__ float value(int t, int row, int i) const
+    __device__ int liveRows() const
     {
-        const int b = b0 + t;
-        if(b >= a->cb || row % a->dilH != 0 || row / a->dilH >= a->r || i % a->dilW != 0
-           || i / a->dilW >= a->s)
+        return (a->r - 1) * a->dilH + 1;
+    }
+
+    template <int TH, int TW, int PB, int RS>
+    __device__ void fill(float* real) const
+    {
+        for(int idx = threadIdx.x; idx < PB * TH * RS; idx += blockDim.x)
         {
-            return 0.0f;
+            real[idx] = 0.0f;
         }
-        int r = row / a->dilH;
-        int s = i / a->dilW;
-        if(a->flip)
+        __syncthreads();
+        const int taps = a->r * a->s;
+        for(int idx = threadIdx.x; idx < PB * taps; idx += blockDim.x)
         {
-            r = a->r - 1 - r;
-            s = a->s - 1 - s;
+            const int t = idx / taps;
+            const int r = (idx % taps) / a->s;
+            const int s = idx % a->s;
+            const int b = b0 + t;
+            if(b >= a->cb)
+            {
+                continue;
+            }
+            const int k = a->filtMode == 0 ? g * a->cb + b : g * a->ca + ia;
+            const int c = a->filtMode == 0 ? ia : b;
+            const int sr = a->flip ? a->r - 1 - r : r;
+            const int ss = a->flip ? a->s - 1 - s : s;
+            real[(t * TH + r * a->dilH) * RS + s * a->dilW]
+                = FftElem<T>::load(w[static_cast<long long>(k) * a->filtStr[0]
+                                     + static_cast<long long>(c) * a->filtStr[1]
+                                     + static_cast<long long>(sr) * a->filtStr[2]
+                                     + static_cast<long long>(ss) * a->filtStr[3]]);
         }
-        const int k = a->filtMode == 0 ? g * a->cb + b : g * a->ca + ia;
-        const int c = a->filtMode == 0 ? ia : b;
-        return FftElem<T>::load(
-            w[static_cast<long long>(k) * a->filtStr[0] + static_cast<long long>(c) * a->filtStr[1]
-              + static_cast<long long>(r) * a->filtStr[2]
-              + static_cast<long long>(s) * a->filtStr[3]]);
     }
 };
 
@@ -491,6 +532,18 @@ struct FftOutStorer
     long long chanOff;
     const ConvFftArgs* a;
     const FftTile* tiles;
+
+    template <int TH_, int TW_, int PB, int RS>
+    __device__ void store(const float* real) const
+    {
+        for(int idx = threadIdx.x; idx < PB * TH * TW; idx += blockDim.x)
+        {
+            const int t = idx / (TH * TW);
+            const int r = (idx / TW) % TH;
+            const int i = idx % TW;
+            value(t, r, i, real[(t * TH + r) * RS + i]);
+        }
+    }
 
     __device__ void value(int t, int row, int i, float v) const
     {
@@ -508,8 +561,8 @@ struct FftOutStorer
     }
 };
 
-/// Weight gradient: lag (row, i) of instance t (x channel c0 + t) is tap (row / dilH, i / dilW)
-/// when both divide, reflected when flip.
+/// Weight gradient: tap (r, s) of instance t (x channel c0 + t) is lag (r * dilH, s * dilW),
+/// written reflected when flip. Gathered tap by tap (r s of them, not th tw).
 template <class T, int TH, int TW>
 struct FftWgradStorer
 {
@@ -518,25 +571,28 @@ struct FftWgradStorer
     int k;
     int c0;
 
-    __device__ void value(int t, int row, int i, float v) const
+    template <int TH_, int TW_, int PB, int RS>
+    __device__ void store(const float* real) const
     {
-        const int c = c0 + t;
-        if(c >= a->ca || row % a->dilH != 0 || row / a->dilH >= a->r || i % a->dilW != 0
-           || i / a->dilW >= a->s)
-        {
-            return;
-        }
-        int r = row / a->dilH;
-        int s = i / a->dilW;
-        if(a->flip)
-        {
-            r = a->r - 1 - r;
-            s = a->s - 1 - s;
-        }
         constexpr float scale = 1.0f / static_cast<float>(TH * TW);
-        dst[static_cast<long long>(k) * a->dstStr[0] + static_cast<long long>(c) * a->dstStr[1]
-            + static_cast<long long>(r) * a->dstStr[2] + static_cast<long long>(s) * a->dstStr[3]]
-            = FftElem<T>::store(v * scale);
+        const int taps = a->r * a->s;
+        for(int idx = threadIdx.x; idx < PB * taps; idx += blockDim.x)
+        {
+            const int t = idx / taps;
+            const int r = (idx % taps) / a->s;
+            const int s = idx % a->s;
+            const int c = c0 + t;
+            if(c >= a->ca)
+            {
+                continue;
+            }
+            const int dr = a->flip ? a->r - 1 - r : r;
+            const int ds = a->flip ? a->s - 1 - s : s;
+            dst[static_cast<long long>(k) * a->dstStr[0] + static_cast<long long>(c) * a->dstStr[1]
+                + static_cast<long long>(dr) * a->dstStr[2]
+                + static_cast<long long>(ds) * a->dstStr[3]]
+                = FftElem<T>::store(real[(t * TH + r * a->dilH) * RS + s * a->dilW] * scale);
+        }
     }
 };
 

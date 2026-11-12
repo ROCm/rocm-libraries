@@ -37,8 +37,9 @@
  *        engine's own graph match, kernel match, prepare and launch, against hipDNN's CPU
  *        reference convolution accumulated in double (fprop / dgrad / wgrad).
  *
- * Every config of the shipped catalog whose transform fits the case runs on every case (the
- * admission floor is switched off, so small cases reach every code path), in fp32, fp16 and bf16:
+ * Every config of the shipped catalog whose transform fits the case runs on every case in fp32
+ * (the admission floor is switched off, so small cases reach every code path), and every
+ * transform size and block (256-thread, 64-channel product configs) in fp16 and bf16:
  * MIOpen's FFT shapes (5x5, padding 2, 28 / 14 / 7), odd extents that are no multiple of the tile,
  * 11x11 and 31x31 filters, asymmetric filters with per-axis dilation and groups, 1-D rows (with
  * dilation and groups), depthwise, outputs smaller than one tile, both layouts, both conv modes,
@@ -425,6 +426,13 @@ void runCase(ConvShape shape, ConvDirection direction, long long workspaceCap)
     for(const auto& kernel : catalog(direction))
     {
         if(!matchesKernel(pack, fixture.context(), kernel, *bound))
+        {
+            continue;
+        }
+        // 16-bit tensors change only the loads and stores: run them on every transform size and
+        // block (the 256-thread, 64-channel product configs), fp32 on every config.
+        if(!std::is_same_v<T, float>
+           && (kernel.getIntMetadata("tb") != 256 || kernel.getIntMetadata("gn") != 64))
         {
             continue;
         }
