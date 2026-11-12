@@ -1,5 +1,5 @@
 /******************************************************************************
- * Copyright (C) 2023 Advanced Micro Devices, Inc. All rights
+ * Copyright (C) 2023 - 2026 Advanced Micro Devices, Inc. All rights
  * reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -23,6 +23,8 @@
 
 #ifndef HIPLIBXT_H_
 #define HIPLIBXT_H_
+
+#include <stddef.h>
 
 #define MAX_HIP_DESCRIPTOR_GPUS 64
 

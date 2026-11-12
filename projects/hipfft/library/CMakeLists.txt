@@ -44,6 +44,7 @@ set( hipfft_headers_public
   include/hipfft/hipfft.h
   include/hipfft/hipfftXt.h
   include/hipfft/hipfftMp.h
+  include/hipfft/hiplibxt.h
   ${PROJECT_BINARY_DIR}/include/hipfft/hipfft-version.h
   )
 
