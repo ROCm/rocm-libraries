@@ -231,24 +231,47 @@ For each coordinate the analyzer computes **Tier B**, the set of FP16/BF16
 values the kernel's pinned floating-point path can store. Closed intervals of
 FP32 values are propagated, with exact rational arithmetic, through the score
 scale, `v_exp_f32`, the FP32 denominator sum in any order, the single P cast,
-the PV MFMA, the IEEE reciprocal and the output cast. Rounding, `+`, `*` and
-the casts are monotone on nonnegative arguments, so the endpoint images
+the PV MFMA, the reciprocal `fdiv 1.0, l` and the output cast. Rounding, `+`,
+`*` and the casts are monotone on nonnegative arguments, so the endpoint images
 enclose every reachable state.
 
-The path itself is pinned twice on the CPU. An IR contract lowers both quick
-specs and classifies every floating-point instruction; an ISA contract
-disassembles the compiled code objects. Any instruction outside the model fails
-with "re-derive the path model": Tier B is re-derived for the new path, never
-widened to absorb it.
+The denominator sum uses the `gamma` bound only on a tile with normal-scale
+terms. A fully masked tile after a legal one holds only weights of at most
+`2^-149` and is enclosed explicitly by `[0, 2^-143]`. A fully masked leading
+tile (rows 127, 191 and 255 of the window kernel) sums 64 values near one; the
+first legal tile rescales that state by at most `2^-149`, which leaves the
+denominator unchanged and a residue of at most `2^(h-149)` in the numerator. A
+row with more than one fully masked leading tile, with no legal tile, or with a
+denominator outside `[1/2, 2^9)` has no enclosure: it raises `P4ScopeError`
+instead of being widened.
 
-Tier B rests on three named assumptions, each versioned in the calibration
-entry:
+The path itself is pinned twice on the CPU. An IR contract lowers both quick
+specs and classifies every floating-point instruction, follows each MFMA
+operand back to a stored value or the probability cast, and requires eight
+chained calls per accumulator, from zero for a score and from the rescaled
+accumulator for PV. It also evaluates the KV loop limits and the mask selects
+of the lowered IR for every row: the kernel must visit exactly the modeled
+tiles and keep exactly the keys with `q - W < k <= q`. An ISA contract
+disassembles the compiled code objects: one division with every FP32 FMA
+inside it, the FP16 epilogue as the only fused site, round-to-nearest-even
+modes in the kernel descriptor, no write to the MODE register, and the
+round-to-nearest-even sequence at every BF16 conversion. Any instruction
+outside the model fails with "re-derive the path model": Tier B is re-derived
+for the new path, never widened to absorb it.
+
+Tier B rests on six named assumptions. A-E, A-MFMA and A-F are versioned in
+the calibration entry today. A-QK, A-DIV and A-MODE name premises the same
+enclosure has always used; they add no value to any set and join the entry
+when it is re-ratified.
 
 | Assumption | Statement |
 |---|---|
 | A-E v1 | `v_exp_f32` returns an FP32 value within `ulp32(2^x)` (the spacing above `2^x`) of `2^x` |
-| A-MFMA v1 | a folded MFMA addition of two nonzero values rounds down or up (basis exposures add only exact zeros) |
+| A-MFMA v1 | an MFMA call with at most one nonzero product `p` returns `c + p` rounded down or up (exact when `c = 0`) |
+| A-QK v1 | an MFMA call whose accumulator and products are multiples of `2^e` with total magnitude at most `2^(24+e)` returns their exact sum (the Walsh scores) |
+| A-DIV v1 | the executed `fdiv 1.0, l` returns `RN(1/l)` for every FP32 `l` in `[1/2, 2^9)` |
 | A-F v1 | each FP16 output store is `q(RN32(o R))` or `q(o R)`; every other operation, BF16 stores included, follows the IR |
+| A-MODE v1 | FP32 add, subtract and multiply round to nearest even; the FP16 and BF16 conversions round to nearest even and keep subnormals |
 
 A-F covers an AMDGPU backend behaviour: affected compilers select some
 unflagged `fptrunc(fmul float)` FP16 stores as `v_fma_mix{lo,hi}_f16`, which
@@ -265,19 +288,33 @@ radius, is diagnostic: it names the failure class, never the verdict.
 `analyze_p4_policy` compares raw output bits. A coordinate passes if and only
 if its bits lie in Tier B. Structural coordinates (masked keys, basis
 coordinates past the last key, rows without a legal key) have Tier B `{+0}`
-and must store exactly `+0`; unlike the uniform lane, `-0` fails. Each failing
-coordinate carries the strongest contract it still satisfies:
+and must store exactly `+0`; unlike the uniform lane, `-0` fails. A failing
+value that equals what the IR-exact path stores with one assumption violated
+carries that assumption's label; the other assumption labels are heuristics:
 
 | Label | Meaning |
 |---|---|
 | `invalid` | NaN (including the unwritten prefill) or Inf |
 | `negative` | sign bit set, `-0` included |
 | `structural` | a required `+0` coordinate stores another value |
-| `E2: denorm/rounding mode` | an FP16-subnormal target, stored near it or flushed to `+0` |
+| `assumption A-MODE` | the store of a truncating conversion; or an FP16-subnormal target stored near it or flushed to `+0` |
+| `assumption A-F` | an FP16 store of the exact product truncated toward zero |
+| `assumption A-DIV` | the store of a reciprocal one FP32 step from `RN(1/l)` |
+| `assumption A-QK` | the store of a Walsh score one FP32 step from exact |
 | `assumption A-MFMA` | a folded addition near the target, with the basis exposures clean |
 | `assumption A-E` | explained only by a looser (2-ULP) `v_exp_f32` |
 | `path model` | outside Tier B, inside Tier A: re-pin the path, never widen |
 | `numerical` | outside Tier A |
+
+A CPU contract replaces one primitive at a time by a value its assumption
+excludes and requires every coordinate that leaves Tier B to fail with a named
+label. Only the conversions are visible in the stored bits: a truncating cast
+and a truncated FP16 store move about 6 to 9 percent of the coordinates out of
+Tier B. An exponential two FP32 steps outside its candidate set, a folded
+addition two steps outside the faithful pair, a Walsh score one step off, a
+reciprocal one step off and round-toward-zero FP32 arithmetic leave Tier B at
+no coordinate of the quick matrix (`P4_UNOBSERVED_VIOLATIONS`). That is a
+limit of what the stored bits can show, not evidence for those assumptions.
 
 ### Mutation self-checks
 
@@ -297,6 +334,11 @@ Tier B are disjoint at some coordinate and records the gap. The exception is
 `omit_rescale` on the causal `identity`, `cyclic` and `walsh` cases: their row
 maximum is always in the first visited tile, so the omitted rescale lies inside
 the correct Tier B. `late_max` separates it on the same kernel.
+
+Two mutated rows have no derived enclosure and are left out of the comparison:
+row 0 under `exclude_last_key` (no legal key remains) and row 0 of `identity`
+under `denominator_plus_one` (the phantom key takes the denominator to about
+`e^8`, outside the A-DIV range). Both mutations stay separated on other rows.
 
 The kernel is also launched once with scale `1` instead of `1/sqrt(D)` on the
 `identity` fixture (`basis@0`); that output must fail Tier B.

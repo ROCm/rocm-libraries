@@ -5,8 +5,9 @@
 
 The P4 prediction is derived from a pinned model of the dense kernel's
 floating-point path: the score scale, the masked value, ``v_exp_f32``, the FP32
-denominator reduction, one cast of the probabilities, the PV MFMA, an IEEE
-reciprocal and one output cast. The IR contract here lowers the two quick specs
+denominator reduction, one cast of the probabilities, the PV MFMA, one
+``fdiv 1.0, l`` reciprocal and one output cast. The IR contract here lowers
+the two quick specs
 to LLVM IR on the CPU and classifies every floating-point instruction against
 that model. Any instruction outside it fails with "re-derive the path model":
 the prediction is re-derived for the new path, never widened to absorb it.
@@ -24,6 +25,7 @@ import dataclasses
 import inspect
 import itertools
 import json
+import os
 import re
 import struct
 import subprocess
@@ -40,7 +42,9 @@ import pytest
 from rocke.numeric.bf16 import f32_to_bf16
 
 from ._p4_analytical import (
+    A_DIV_DOMAIN,
     EPILOGUE_ASSUMPTION,
+    F32_SMALLEST_NORMAL,
     F32_SMALLEST_SUBNORMAL,
     LOG2E_F32,
     MASKED_SCORE,
@@ -56,6 +60,7 @@ from ._p4_analytical import (
     P4_QUICK_CASES,
     P4_SEARCH_BASES,
     P4_SEPARATION_ROWS,
+    P4_UNOBSERVED_VIOLATIONS,
     P4_UNSEPARATED,
     SCORE_SCALE,
     SEPARATION_LABELS,
@@ -66,48 +71,71 @@ from ._p4_analytical import (
     P4Fixture,
     P4Label,
     P4Mutation,
+    P4ScopeError,
+    P4Violation,
+    TileClass,
+    accumulator_steps,
     add_faithful,
     add_rn,
     analyze_p4_policy,
     applicable_mutations,
+    applicable_violations,
     cast_bits_hull,
     cast_single_or_double_hull,
     certified_target_bits,
+    certify_target,
     coordinate_class,
+    d_ulp,
+    derived_rows,
     emulate_row,
     epilogue_alternatives,
     epilogue_artifact_for,
     exp2_candidates,
+    exp2_interval,
+    exposure_key,
     f32,
     f32_quantum,
+    fixture_family,
+    floor_log2,
     format_p4_result,
     format_separation,
     gamma,
     head_scale_margin,
     is_f32,
+    masked_prefix,
+    matching_violation,
     mul_rn,
     mutation_separation,
     next_down,
     next_up,
+    ordered_distance,
     p4_diagnostics,
     p4_inputs,
     p4_query_key,
+    p4_quick_case,
     p4_records,
+    prefix_selected_keys,
+    rcp_a_div,
     rcp_rn,
     require_p4_calibration,
     round_f32,
+    rounding_boundaries,
     row_logit,
+    row_scope,
     row_trace,
     score,
     score_numerator,
     sum_any_order,
+    target_rank,
     target_value,
     tier_a_exposure,
     tier_b_exposure,
     tier_b_row,
+    tile_classes,
+    tile_sum,
     visited_tiles,
 )
-from ._p4_capture_audit import audit_captures, format_audit
+from ._p4_capture_audit import audit_case, audit_captures, format_audit
 from ._p4_shared_analytical import (
     UNIFORM_CALIBRATION,
     UNIFORM_QUICK_CASES,
@@ -201,6 +229,9 @@ class PathModel:
     violations: list[str] = field(default_factory=list)
     counts: Counter = field(default_factory=Counter)
     chain_lengths: list[int] = field(default_factory=list)
+    # One ``(kind, calls)`` per chain of MFMA calls on one accumulator: "score"
+    # starts from zero, "pv" from the accumulator rescaled by alpha.
+    mfma_chains: list[tuple[str, int]] = field(default_factory=list)
 
 
 def classify_dense_path(ir: str, dtype: str) -> PathModel:
@@ -218,6 +249,11 @@ def classify_dense_path(ir: str, dtype: str) -> PathModel:
       then ``l = fadd(fmul(l_i, alpha), l_tile)``.
     - The accumulator rescale is ``fmul(o, alpha)``; PV is the dtype's
       32x32x8 MFMA with ``cbsz = abid = blgp = 0``.
+    - Every MFMA belongs to a chain of eight calls on one accumulator. A score
+      chain starts from zero and multiplies two stored operands (K and Q, as
+      loaded); a PV chain starts from the rescaled accumulator and multiplies
+      a stored operand (V) by the probability cast. Operands reach the call
+      through vector packing and bit-preserving casts only.
     - The epilogue is one ``fdiv 1.0, l`` and ``fptrunc(fmul(o, rcp))``.
 
     No floating-point instruction may carry fast-math flags or ``!fpmath``, and
@@ -439,6 +475,100 @@ def classify_dense_path(ir: str, dtype: str) -> PathModel:
         elif not item.text.rstrip().endswith("i32 0, i32 0, i32 0)"):
             violations.append(f"MFMA with nonzero cbsz/abid/blgp: {item.text}")
         counts["mfma"] += 1
+
+    # MFMA chains: what each call accumulates onto and what it multiplies.
+    storage = _CAST_TYPE[dtype]
+    stored_load = re.compile(rf"load (?:<\d+ x {storage}>|{storage}),")
+
+    def assembled_from(name: str, through: tuple[str, ...]) -> list:
+        """The instructions ``name`` is built from, looking through ``through``."""
+        found, stack, seen = [], [name], set()
+        while stack:
+            value = stack.pop()
+            if value in seen:
+                continue
+            seen.add(value)
+            item = instructions.get(value)
+            if item is not None and item.opcode in through:
+                stack.extend(item.operands)
+            else:
+                found.append(item)
+        return found
+
+    def operand_kind(name: str) -> str:
+        parts = assembled_from(name, ("insertelement", "extractelement", "bitcast"))
+        if all(p is not None and stored_load.match(p.text) for p in parts):
+            return "stored"
+        if all(
+            p is not None
+            and p.opcode == "fptrunc"
+            and source(p.operands[0]) in probability_exp2
+            for p in parts
+        ):
+            return "probability"
+        return "unmodeled"
+
+    def accumulator_kind(name: str) -> str:
+        item = instructions.get(source(name))
+        if item is None:
+            return "unmodeled"
+        if item.opcode == _MFMA_ATOM[dtype]:
+            return "chained"
+        if item.opcode == "select" and item.text.count("zeroinitializer") == 2:
+            return "zero"
+        scalars = assembled_from(item.name, ("insertelement",))
+        if len(scalars) == 16 and all(
+            part is not None
+            and part.opcode == "fmul"
+            and any(is_alpha(value) for value in part.operands)
+            and any(opcode(value) == "extractelement" for value in part.operands)
+            for part in scalars
+        ):
+            return "rescaled"
+        return "unmodeled"
+
+    calls = [i for i in instructions.values() if i.opcode == _MFMA_ATOM[dtype]]
+    successor: dict[str, _Instruction] = {}
+    heads = []
+    for item in calls:
+        if len(item.operands) != 3:
+            violations.append(f"MFMA without three value operands: {item.text}")
+            continue
+        if accumulator_kind(item.operands[2]) != "chained":
+            heads.append(item)
+            continue
+        previous = source(item.operands[2])
+        if previous in successor:
+            violations.append(f"MFMA result accumulated twice: {item.text}")
+        successor[previous] = item
+    chain_operands = {
+        "zero": ["stored", "stored"],
+        "rescaled": ["probability", "stored"],
+    }
+    chain_name = {"zero": "score", "rescaled": "pv"}
+    for head in heads:
+        kind = accumulator_kind(head.operands[2])
+        if kind not in chain_operands:
+            violations.append(
+                f"MFMA chain starts from an unmodeled accumulator: {head.text}"
+            )
+            continue
+        length, item = 0, head
+        while item is not None:
+            length += 1
+            operands = sorted(operand_kind(value) for value in item.operands[:2])
+            if operands != chain_operands[kind]:
+                violations.append(
+                    f"{chain_name[kind]} MFMA operands are {operands}, "
+                    f"expected {chain_operands[kind]}: {item.text}"
+                )
+            item = successor.get(item.name)
+        if length != _MFMA_CHAIN:
+            violations.append(
+                f"{chain_name[kind]} MFMA chain of {length} calls, "
+                f"expected {_MFMA_CHAIN}"
+            )
+        model.mfma_chains.append((chain_name[kind], length))
     return model
 
 
@@ -467,6 +597,10 @@ _TILE_BODIES: Mapping[str, int] = {
 }
 _LANE_CHAIN = 32
 _OUTPUT_CASTS = 32  # D = 64 over two 32-wide output tiles, 16 per lane
+# Eight products per call: D / 8 calls per score, block_n / 8 calls per PV tile.
+_MFMA_CHAIN = 8
+# Per tile body: two 32-key score accumulators and two 32-dim PV accumulators.
+_MFMA_CHAINS_PER_BODY = (("pv", _MFMA_CHAIN),) * 2 + (("score", _MFMA_CHAIN),) * 2
 
 
 @pytest.mark.parametrize("case", UNIFORM_QUICK_CASES, ids=lambda case: case.case_id)
@@ -483,6 +617,8 @@ def test_ir_contract_pins_the_dense_path_model(case: UniformCase) -> None:
     assert model.counts["cast_probability"] == _LANE_CHAIN * bodies
     assert model.counts["cast_output"] == _OUTPUT_CASTS
     assert model.counts["output_product"] == _OUTPUT_CASTS
+    assert sorted(model.mfma_chains) == sorted(_MFMA_CHAINS_PER_BODY * bodies)
+    assert model.counts["mfma"] == _MFMA_CHAIN * len(_MFMA_CHAINS_PER_BODY) * bodies
 
 
 def _first_line(ir: str, marker: str) -> str:
@@ -505,9 +641,61 @@ def _append_to_line(marker: str, suffix: str):
     return edit
 
 
+_MFMA_CALL = re.compile(
+    r"= call <16 x float> @llvm\.amdgcn\.mfma[^(]*\("
+    r"(<4 x \w+>) (%[-\w.]+), <4 x \w+> %[-\w.]+, <16 x float> (%[-\w.]+),"
+)
+
+
+def _mfma_calls(ir: str) -> list[tuple[str, re.Match]]:
+    return [
+        (line, match)
+        for line in ir.splitlines()
+        if (match := _MFMA_CALL.search(line)) is not None
+    ]
+
+
+def _unrescaled_pv_accumulator(ir: str) -> str:
+    """The first PV chain accumulates onto the carried ``o``, skipping alpha."""
+    line, match = next(
+        (line, match)
+        for line, match in _mfma_calls(ir)
+        if not match.group(3).startswith(("%cz", "%acc"))
+    )
+    carried = "<16 x float> %o0,"
+    assert "%o0 = phi <16 x float>" in ir and carried not in line
+    return ir.replace(line, line.replace(f"<16 x float> {match.group(3)},", carried), 1)
+
+
+def _restarted_mfma_chain(ir: str) -> str:
+    """The second call of the first score chain restarts from zero."""
+    (_, first), (line, second) = _mfma_calls(ir)[:2]
+    assert second.group(3) != first.group(3)
+    restarted = line.replace(
+        f"<16 x float> {second.group(3)},", f"<16 x float> {first.group(3)},"
+    )
+    return ir.replace(line, restarted, 1)
+
+
+def _converted_mfma_operand(ir: str) -> str:
+    """An MFMA operand passes through an instruction that is not a load, a
+    vector pack or a bit-preserving cast."""
+    line, match = _mfma_calls(ir)[0]
+    kind, name = match.group(1), match.group(2)
+    extra = f"  %p4.operand = select i1 true, {kind} {name}, {kind} {name}\n"
+    edited = line.replace(f"{kind} {name},", f"{kind} %p4.operand,", 1)
+    return ir.replace(line, extra + edited, 1)
+
+
 # Each edit applies to the real lowered IR and must be rejected for its own
 # reason, so the contract above is shown able to fail on every assumption it pins.
 _IR_EDITS = {
+    "pv-unrescaled-accumulator": (
+        _unrescaled_pv_accumulator,
+        "MFMA chain starts from an unmodeled accumulator",
+    ),
+    "mfma-restarted-chain": (_restarted_mfma_chain, "MFMA chain of 1 calls"),
+    "mfma-converted-operand": (_converted_mfma_operand, "MFMA operands are"),
     "contract-flag": (
         _replace_once("= fadd float", "= fadd contract float"),
         "fast-math flags ['contract']",
@@ -602,6 +790,395 @@ def test_ir_contract_rejects_an_unmodeled_reciprocal_intrinsic() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Tile loop and mask predicate, evaluated from the IR.
+#
+# The masked-prefix topology (lemma T) is derived from two premises about the
+# kernel: which KV tiles a query block visits, and which keys the mask keeps
+# (``q - W < k <= q``). Both are integer arithmetic in the lowered IR, so they
+# are evaluated here for every work item and lane of the quick shape instead of
+# being matched as text: the loop limits give the visited tiles, and each mask
+# select gives a key, a row and whether the key is kept.
+# ---------------------------------------------------------------------------
+
+_BLOCK_LABEL = re.compile(r"^([-\w.]+):\s*$")
+_LOOP_PHI = re.compile(
+    r"^phi i32 \[ (\S+), %[-\w.]+ \], \[ (%[-\w.]+), %([-\w.]+) \]$"
+)
+_INT_BINARY = re.compile(
+    r"^(add|sub|mul|sdiv|srem)(?: nsw| nuw| exact)* i32 (\S+), (\S+)$"
+)
+_INT_COMPARE = re.compile(r"^icmp (\w+) i32 (\S+), (\S+)$")
+_INT_SELECT = re.compile(r"^select i1 (\S+), i32 (\S+), i32 (\S+)$")
+_ID_CALL = re.compile(
+    r"^call i32 @llvm\.amdgcn\.(workitem|workgroup)\.id\.([xyz])\(\)$"
+)
+_MASK_SELECT = re.compile(
+    rf"^select i1 (%[-\w.]+), float %[-\w.]+, float {_F32_MASKED}$"
+)
+_COMPARE = {
+    "slt": lambda a, b: a < b,
+    "sle": lambda a, b: a <= b,
+    "sgt": lambda a, b: a > b,
+    "sge": lambda a, b: a >= b,
+    "eq": lambda a, b: a == b,
+    "ne": lambda a, b: a != b,
+}
+
+
+class _Unmodeled(Exception):
+    """The loop schedule uses an instruction the evaluator does not model."""
+
+
+@dataclass(frozen=True)
+class _TileLoop:
+    """One KV loop: its tile index, limits and the mask selects of its body."""
+
+    induction: str
+    start: str
+    bound: str
+    masks: tuple[str, ...]  # the ``icmp`` each mask select tests
+
+
+def _function_blocks(ir: str) -> dict[str, list[str]]:
+    """The basic blocks of the one kernel function, in order."""
+    blocks: dict[str, list[str]] = {}
+    current = None
+    for line in ir.splitlines():
+        if line.startswith("define "):
+            current = None
+            continue
+        label = _BLOCK_LABEL.match(line)
+        if label:
+            current = blocks.setdefault(label.group(1), [])
+        elif current is not None and line.strip() and line.strip() != "}":
+            current.append(line.strip())
+    return blocks
+
+
+def _tile_loops(ir: str) -> tuple[list[_TileLoop], list[str]]:
+    """Parse the KV loops. The function must be straight-line code around
+    them: ``entry``, then ``header, body, latch, exit`` per loop, each body one
+    block (a wave-skip or any other inner control flow is another path)."""
+    blocks = _function_blocks(ir)
+    names = list(blocks)
+    problems: list[str] = []
+    loops: list[_TileLoop] = []
+    if not names or names[0] != "entry" or (len(names) - 1) % 4:
+        return loops, [f"unmodeled control flow: blocks {names}"]
+    definitions = {
+        match.group(1): match.group(2)
+        for lines in blocks.values()
+        for line in lines
+        if (match := _INSTRUCTION.match(line))
+    }
+    for index in range(1, len(names), 4):
+        header, body, latch, _ = names[index : index + 4]
+        phi = compare = None
+        for line in blocks[header]:
+            match = _INSTRUCTION.match(line)
+            if match and phi is None and (found := _LOOP_PHI.match(match.group(2))):
+                phi = (match.group(1), *found.groups())
+            elif match and (found := _INT_COMPARE.match(match.group(2))):
+                compare = (match.group(1), *found.groups())
+        if phi is None or compare is None:
+            problems.append(f"{header}: no tile index or no trip test")
+            continue
+        induction, start, step, back_edge = phi
+        test, predicate, left, bound = compare
+        if predicate != "slt" or left != induction:
+            problems.append(f"{header}: trip test is not `{induction} < bound`")
+        branch = f"br i1 {test}, label %{body}, label %{names[index + 3]}"
+        if blocks[header][-1] != branch:
+            problems.append(f"{header}: unmodeled branch {blocks[header][-1]}")
+        if back_edge != latch or definitions.get(step) != f"add nsw i32 {induction}, 1":
+            problems.append(f"{latch}: the tile index does not advance by one")
+        if blocks[latch][-1] != f"br label %{header}":
+            problems.append(f"{latch}: unmodeled branch {blocks[latch][-1]}")
+        if blocks[body][-1] != f"br label %{latch}":
+            problems.append(f"{body}: the tile body is not one block")
+        masks = []
+        for line in blocks[body]:
+            match = _INSTRUCTION.match(line)
+            if match and (found := _MASK_SELECT.match(match.group(2))):
+                masks.append(found.group(1))
+        loops.append(_TileLoop(induction, start, bound, tuple(masks)))
+    return loops, problems
+
+
+def _evaluate(
+    definitions: Mapping[str, str], token: str, env: Mapping[str, int], memo: dict
+) -> int:
+    """The value of an integer SSA token under ``env`` (kernel arguments, the
+    work-item and work-group ids and, inside a body, the tile index)."""
+    if re.fullmatch(r"-?\d+", token):
+        return int(token)
+    if token in env:
+        return env[token]
+    if token in memo:
+        return memo[token]
+    text = definitions.get(token)
+    if text is None:
+        raise _Unmodeled(f"{token} has no integer definition")
+    if found := _INT_BINARY.match(text):
+        operation, left, right = found.groups()
+        a = _evaluate(definitions, left, env, memo)
+        b = _evaluate(definitions, right, env, memo)
+        if operation in ("sdiv", "srem"):
+            if b == 0:
+                raise _Unmodeled(f"division by zero in {token}")
+            quotient = abs(a) // abs(b) * (1 if (a < 0) == (b < 0) else -1)
+            value = quotient if operation == "sdiv" else a - b * quotient
+        else:
+            value = {"add": a + b, "sub": a - b, "mul": a * b}[operation]
+    elif found := _INT_COMPARE.match(text):
+        predicate, left, right = found.groups()
+        value = int(
+            _COMPARE[predicate](
+                _evaluate(definitions, left, env, memo),
+                _evaluate(definitions, right, env, memo),
+            )
+        )
+    elif found := _INT_SELECT.match(text):
+        condition, left, right = found.groups()
+        chosen = left if _evaluate(definitions, condition, env, memo) else right
+        value = _evaluate(definitions, chosen, env, memo)
+    elif found := _ID_CALL.match(text):
+        value = env[".".join(found.groups())]
+    else:
+        raise _Unmodeled(f"{token} = {text}")
+    memo[token] = value
+    return value
+
+
+@dataclass
+class IrSchedule:
+    """What the lowered kernel does per query row: the tiles it visits, the
+    keys each visited tile scores, and the keys its mask selects keep."""
+
+    tiles: dict[int, tuple[int, ...]] = field(default_factory=dict)
+    scored: dict[tuple[int, int], set[int]] = field(default_factory=dict)
+    masked: dict[tuple[int, int], set[int]] = field(default_factory=dict)
+    violations: list[str] = field(default_factory=list)
+
+
+def ir_tile_schedule(ir: str, case: UniformCase, block_m: int) -> IrSchedule:
+    """Evaluate the KV loop limits and the mask selects for every work item
+    and lane of ``case``. A work item is a ``block_m``-row query block; each
+    of its ``block_m / 32`` waves holds 32 rows in 64 lanes, and each lane
+    scores 32 of a tile's 64 keys."""
+    schedule = IrSchedule()
+    loops, problems = _tile_loops(ir)
+    schedule.violations.extend(problems)
+    if problems:
+        return schedule
+    definitions = {
+        match.group(1): match.group(2)
+        for line in ir.splitlines()
+        if (match := _INSTRUCTION.match(line))
+    }
+    arguments = {
+        "%batch": case.batch,
+        "%seqlen_q": case.seqlen_q,
+        "%seqlen_kv": case.seqlen_k,
+        "%num_query_heads": case.nhead_q,
+        "%num_kv_heads": case.nhead_k,
+    }
+    blocks = case.seqlen_q // block_m
+    # The query block is one work-group axis; which one is the kernel's grid
+    # layout, so both candidates are walked and every row must agree.
+    groups = {
+        (block if axis == "x" else 0, block if axis == "z" else 0)
+        for axis in "xz"
+        for block in range(blocks)
+    }
+    problems_seen: set[str] = set()
+    for x, z in sorted(groups):
+        for thread in range(block_m // 32 * 64):
+            env = {
+                **arguments,
+                "workitem.x": thread,
+                "workgroup.x": x,
+                "workgroup.y": 0,
+                "workgroup.z": z,
+            }
+            try:
+                _evaluate_lane(schedule, definitions, loops, env, case.head_dim)
+            except _Unmodeled as error:
+                problems_seen.add(f"unmodeled loop schedule: {error}")
+    schedule.violations.extend(sorted(problems_seen))
+    return schedule
+
+
+def _evaluate_lane(
+    schedule: IrSchedule,
+    definitions: Mapping[str, str],
+    loops: list[_TileLoop],
+    env: Mapping[str, int],
+    block_n: int,
+) -> None:
+    outer: dict = {}
+    visited: list[int] = []
+    rows: set[int] = set()
+    scored: dict[int, set[int]] = {}
+    masked: dict[int, set[int]] = {}
+    for loop in loops:
+        start = _evaluate(definitions, loop.start, env, outer)
+        bound = _evaluate(definitions, loop.bound, env, outer)
+        for tile in range(start, bound):
+            visited.append(tile)
+            if not loop.masks:
+                raise _Unmodeled(f"tile {tile} of {loop.induction} runs without a mask")
+            inner: dict = {}
+            tile_env = {**env, loop.induction: tile}
+            for condition in loop.masks:
+                found = _INT_COMPARE.match(definitions.get(condition, ""))
+                if not found or found.group(1) not in ("sle", "sgt"):
+                    raise _Unmodeled(f"mask test {definitions.get(condition)}")
+                predicate, left, right = found.groups()
+                key = _evaluate(definitions, left, tile_env, inner)
+                limit = _evaluate(definitions, right, env, outer)  # tile-free
+                if predicate == "sle":
+                    rows.add(limit)
+                else:
+                    window = _INT_BINARY.match(definitions.get(right, ""))
+                    if not window or window.group(1) != "sub":
+                        raise _Unmodeled(f"window bound {definitions.get(right)}")
+                    rows.add(_evaluate(definitions, window.group(2), env, outer))
+                if not tile * block_n <= key < (tile + 1) * block_n:
+                    raise _Unmodeled(f"mask key {key} is outside tile {tile}")
+                scored.setdefault(tile, set()).add(key)
+                if not _COMPARE[predicate](key, limit):
+                    masked.setdefault(tile, set()).add(key)
+    if len(rows) != 1:
+        raise _Unmodeled(f"a lane masks against rows {sorted(rows)}")
+    (row,) = rows
+    if schedule.tiles.setdefault(row, tuple(visited)) != tuple(visited):
+        raise _Unmodeled(f"row {row} visits different tiles in different lanes")
+    for tile in visited:
+        schedule.scored.setdefault((row, tile), set()).update(scored.get(tile, ()))
+        schedule.masked.setdefault((row, tile), set()).update(masked.get(tile, ()))
+
+
+def schedule_violations(ir: str, case: UniformCase) -> list[str]:
+    """Compare the IR's tile loop and mask with the model's
+    :func:`visited_tiles` and ``legal_interval`` on every row of ``case``."""
+    quick = p4_quick_case(case, P4Fixture.IDENTITY)
+    schedule = ir_tile_schedule(ir, case, quick.block_m)
+    violations = list(schedule.violations)
+    if violations:
+        return violations
+    if sorted(schedule.tiles) != list(range(case.seqlen_q)):
+        return [f"the lanes cover rows {sorted(schedule.tiles)[:4]}..., not every row"]
+    for row in range(case.seqlen_q):
+        tiles = visited_tiles(quick, row)
+        if schedule.tiles[row] != tiles:
+            violations.append(
+                f"row {row} visits tiles {schedule.tiles[row]}, modeled {tiles}"
+            )
+            continue
+        first, last = legal_interval(case, row)
+        for tile in tiles:
+            keys = set(range(tile * quick.block_n, (tile + 1) * quick.block_n))
+            if schedule.scored[(row, tile)] != keys:
+                violations.append(f"row {row} tile {tile} does not score 64 keys")
+            kept = keys - schedule.masked[(row, tile)]
+            legal = {key for key in keys if first <= key <= last}
+            if kept != legal:
+                violations.append(
+                    f"row {row} tile {tile} keeps keys {sorted(kept ^ legal)[:4]} "
+                    "differently from the modeled mask"
+                )
+    return violations
+
+
+@pytest.mark.parametrize("case", UNIFORM_QUICK_CASES, ids=lambda case: case.case_id)
+def test_ir_tile_loop_and_mask_are_the_modeled_ones(case: UniformCase) -> None:
+    """The premises of lemma T, read from the lowered IR: for every query row
+    the kernel visits exactly the modeled tiles, scores all 64 keys of each
+    and masks exactly the keys outside ``q - W < k <= q``. The resolved spec
+    does not skip fully masked tiles per wave, which would drop their rescale."""
+    assert not _resolve_tuning_spec(case).kernel_spec.window_wave_skip
+    violations = schedule_violations(_lowered_quick_case(case), case)
+    assert not violations, f"{_REDERIVE}: " + "; ".join(violations[:6])
+
+
+def _first_mask_test(ir: str, predicate: str) -> str:
+    conditions = {
+        match.group(1)
+        for line in ir.splitlines()
+        if (found := _INSTRUCTION.match(line))
+        and (match := _MASK_SELECT.match(found.group(2)))
+    }
+    return next(
+        line
+        for line in ir.splitlines()
+        if (found := _INSTRUCTION.match(line))
+        and found.group(1) in conditions
+        and found.group(2).startswith(f"icmp {predicate} ")
+    )
+
+
+def _strict_causal_mask(ir: str) -> str:
+    """One mask select keeps ``k < q`` instead of ``k <= q``."""
+    line = _first_mask_test(ir, "sle")
+    return ir.replace(line, line.replace("icmp sle", "icmp slt"), 1)
+
+
+def _extra_tile(ir: str) -> str:
+    """The first KV loop runs one tile past its bound."""
+    line = next(
+        line for line in ir.splitlines() if "%cmp." in line and "icmp slt" in line
+    )
+    return ir.replace(line, line.replace("icmp slt", "icmp sle"), 1)
+
+
+def _double_step(ir: str) -> str:
+    line = next(
+        line for line in ir.splitlines() if "%iv.next." in line and " = add" in line
+    )
+    return ir.replace(line, line.removesuffix(", 1") + ", 2", 1)
+
+
+_SCHEDULE_EDITS = {
+    "strict-causal-mask": (_strict_causal_mask, "mask test icmp slt"),
+    "extra-tile": (_extra_tile, "trip test is not"),
+    "double-step": (_double_step, "does not advance by one"),
+}
+
+
+@pytest.mark.parametrize("edit", sorted(_SCHEDULE_EDITS))
+@pytest.mark.parametrize("case", UNIFORM_QUICK_CASES, ids=lambda case: case.case_id)
+def test_ir_schedule_contract_rejects_each_change(case: UniformCase, edit: str) -> None:
+    apply, reason = _SCHEDULE_EDITS[edit]
+    ir = _lowered_quick_case(case)
+    edited = apply(ir)
+    assert edited != ir
+    violations = schedule_violations(edited, case)
+    assert any(reason in item for item in violations), violations[:3]
+
+
+def test_ir_schedule_contract_rejects_a_wrong_bound_or_window() -> None:
+    """Changes the evaluator must catch by value, not by shape: a causal loop
+    that stops one tile early, and a window one key too narrow."""
+    causal, window = UNIFORM_QUICK_CASES
+    ir = _lowered_quick_case(causal)
+    (limit,) = re.findall(r"= add nsw i32 %mul\d+, 2\n\s*%lt\d+ = icmp slt", ir)
+    early = ir.replace(limit, limit.replace(", 2\n", ", 1\n"), 1)
+    assert any("visits tiles" in item for item in schedule_violations(early, causal))
+
+    ir = _lowered_quick_case(window)
+    condition = _first_mask_test(ir, "sgt")
+    bound = condition.rsplit(", ", 1)[1]
+    line = next(
+        line for line in ir.splitlines() if line.strip().startswith(f"{bound} = sub")
+    )
+    assert line.endswith(f", {window.window}")
+    narrower = line.removesuffix(str(window.window)) + str(window.window - 1)
+    narrow = ir.replace(line, narrower, 1)
+    assert any("keeps keys" in item for item in schedule_violations(narrow, window))
+
+
+# ---------------------------------------------------------------------------
 # ISA contract (A-F): the FP16 output epilogue is the only fused site.
 #
 # Affected AMDGPU LLVM revisions select ``fptrunc(fmul float)`` without
@@ -610,7 +1187,8 @@ def test_ir_contract_rejects_an_unmodeled_reciprocal_intrinsic() -> None:
 # #236759 makes the fold require ``contract``. The classifier follows each
 # 16-bit half of the epilogue registers into the four-half output stores, so a
 # store element is "single", "double" or "unknown". FP32 FMAs are allowed only
-# inside the one correctly rounded division ``fdiv 1.0, l``.
+# inside the expansion of the one division ``fdiv 1.0, l``; that the expansion
+# returns ``RN(1 / l)`` is assumption A-DIV, not something this contract shows.
 # ---------------------------------------------------------------------------
 
 _ISA_REGISTER = re.compile(r"^v(\d+)$|^v\[(\d+):(\d+)\]$")
@@ -659,6 +1237,7 @@ class EpilogueIsa:
 
     divisions: int = 0
     fma_outside_division: list[str] = field(default_factory=list)
+    mode_writes: list[str] = field(default_factory=list)
     mix_sites: int = 0
     unmodeled_mix: list[str] = field(default_factory=list)
     stores: list[tuple[str, ...]] = field(default_factory=list)
@@ -685,6 +1264,14 @@ def classify_epilogue_isa(text: str) -> EpilogueIsa:
     ]
     ends = [i for i, (name, _) in enumerate(instructions) if name == "v_div_fixup_f32"]
     model.divisions = len(ends)
+    # A write to the MODE register changes the rounding or denormal mode the
+    # wave started with (A-MODE); only the division expansion may do so.
+    inside = range(min(starts), ends[0] + 1) if len(ends) == 1 and starts else ()
+    model.mode_writes = [
+        f"{name} {', '.join(operands)}"
+        for index, (name, operands) in enumerate(instructions)
+        if name.startswith("s_setreg") and index not in inside
+    ]
     if len(ends) != 1 or not starts:
         return model
     start, end = min(starts), ends[0]
@@ -850,6 +1437,237 @@ def test_isa_classifier_rejects_an_unmodeled_fusion(extra: str, finding: str) ->
     assert getattr(classify_epilogue_isa(_isa_excerpt(*lines)), finding)
 
 
+def test_isa_classifier_reports_a_mode_register_write() -> None:
+    """A-MODE: the wave keeps the modes of its kernel descriptor. A write to
+    the MODE register outside the division expansion is reported; one inside
+    it (a compiler that enables denormals around the refinement) is not."""
+    store = _ISA_STORES[frozenset({0, 1})]
+    write = "s_setreg_imm32_b32 0x3, 0xf0"
+    outside = classify_epilogue_isa(_isa_excerpt(*_ISA_DIVISION, write, *store))
+    assert outside.mode_writes == ["s_setreg_imm32_b32 0x3, 0xf0"]
+    early = classify_epilogue_isa(_isa_excerpt(write, *_ISA_DIVISION, *store))
+    assert early.mode_writes
+    division = (*_ISA_DIVISION[:3], write, *_ISA_DIVISION[3:])
+    inside = classify_epilogue_isa(_isa_excerpt(*division, *store))
+    assert not inside.mode_writes and inside.divisions == 1
+
+
+# A-MODE (c): gfx942 has no BF16 conversion instruction, so ``fptrunc float to
+# bfloat`` is an integer sequence the compiler chooses. From LLVM 19 it rounds
+# to nearest even: ``x + 0x7fff + ((x >> 16) & 1)``, upper 16 bits kept; LLVM
+# 18 and earlier kept the upper 16 bits of ``x`` unrounded. The ROCm 7.1.0
+# compiler emits, per conversion,
+#
+#     v_bfe_u32     t, x, 16, 1
+#     v_add3_u32    t, t, x, s[0x7fff]
+#     v_or_b32      n, 0x400000, x        (quieted NaN)
+#     v_cmp_u_f32   vcc, x, x
+#     v_cndmask_b32 r, t, n, vcc
+#
+# and packs the upper halves of two results with ``v_perm_b32 .., s[0x7060302]``.
+_ROUND_BIAS = "0x7fff"
+_PACK_HIGH_HALVES = "0x7060302"
+
+
+@dataclass
+class Bf16Isa:
+    """The FP32-to-BF16 conversions of one disassembled kernel: how many
+    values go through the rounding sequence, and whether each pack of two
+    upper halves takes rounded values ("rounded") or something else
+    ("unrounded": a truncating or unrecognized conversion)."""
+
+    rounded: int = 0
+    packs: list[str] = field(default_factory=list)
+
+
+def classify_bf16_conversions(text: str) -> Bf16Isa:
+    model = Bf16Isa()
+    scalars: dict[str, str] = {}
+    low_bit: dict[int, int] = {}  # VGPR holding (x >> 16) & 1 -> VGPR x
+    rounded: set[int] = set()
+    for name, operands in _isa_instructions(text):
+        if name in ("s_mov_b32", "s_movk_i32") and len(operands) == 2:
+            scalars[operands[0]] = operands[1]
+            continue
+        if not name.startswith("v_") or not operands:
+            continue
+        destination = _isa_registers(operands[0]) or []
+        sources = [(_isa_registers(item) or [None])[0] for item in operands[1:]]
+        keep: set[int] = set()
+        if name == "v_bfe_u32" and operands[2:] == ["16", "1"]:
+            for register in destination:
+                rounded.discard(register)
+            low_bit[destination[0]] = sources[0]
+            continue
+        if name == "v_add3_u32":
+            bias = [item for item in operands[1:] if scalars.get(item) == _ROUND_BIAS]
+            values = [item for item in sources if item is not None]
+            if len(bias) == 1 and any(
+                low_bit.get(bit) == value
+                for bit in values
+                for value in values
+                if bit != value
+            ):
+                model.rounded += 1
+                keep.update(destination)
+        elif name.startswith("v_cndmask_b32") and any(
+            item in rounded for item in sources[:2]
+        ):
+            keep.update(destination)
+        elif name.startswith("v_mov_b32") and sources[0] in rounded:
+            keep.update(destination)
+        elif name == "v_perm_b32" and scalars.get(operands[3]) == _PACK_HIGH_HALVES:
+            both = all(item in rounded for item in sources[:2])
+            model.packs.append("rounded" if both else "unrounded")
+        for register in destination:
+            low_bit.pop(register, None)
+            if register in keep:
+                rounded.add(register)
+            else:
+                rounded.discard(register)
+    return model
+
+
+_ISA_BF16_ROUNDED = (
+    "s_movk_i32 s15, 0x7fff",
+    "s_mov_b32 s17, 0x7060302",
+    "v_bfe_u32 v36, v33, 16, 1",
+    "v_add3_u32 v36, v36, v33, s15",
+    "v_or_b32_e32 v37, 0x400000, v33",
+    "v_cmp_u_f32_e32 vcc, v33, v33",
+    "v_cndmask_b32_e32 v33, v36, v37, vcc",
+    "v_bfe_u32 v34, v35, 16, 1",
+    "v_add3_u32 v34, v34, v35, s15",
+    "v_or_b32_e32 v38, 0x400000, v35",
+    "v_cmp_u_f32_e32 vcc, v35, v35",
+    "v_cndmask_b32_e32 v35, v34, v38, vcc",
+    "v_perm_b32 v50, v35, v33, s17",
+)
+
+
+def test_bf16_classifier_reads_the_rounding_sequence_and_rejects_a_bare_shift() -> None:
+    model = classify_bf16_conversions(_isa_excerpt(*_ISA_BF16_ROUNDED))
+    assert (model.rounded, model.packs) == (2, ["rounded"])
+    # The same pack of two values that never went through the sequence: the
+    # truncating conversion of older compilers.
+    truncating = [
+        line
+        for line in _ISA_BF16_ROUNDED
+        if not line.startswith(("v_bfe", "v_add3", "v_or", "v_cmp", "v_cndmask"))
+    ]
+    model = classify_bf16_conversions(_isa_excerpt(*truncating))
+    assert (model.rounded, model.packs) == (0, ["unrounded"])
+    # A bias other than 0x7fff, or a low bit taken from another value, is not
+    # the rounding sequence.
+    for old, new in (
+        ("s_movk_i32 s15, 0x7fff", "s_movk_i32 s15, 0x8000"),
+        ("v_bfe_u32 v36, v33, 16, 1", "v_bfe_u32 v36, v40, 16, 1"),
+        ("v_bfe_u32 v36, v33, 16, 1", "v_bfe_u32 v36, v33, 15, 1"),
+    ):
+        lines = [new if line == old else line for line in _ISA_BF16_ROUNDED]
+        model = classify_bf16_conversions(_isa_excerpt(*lines))
+        assert model.packs == ["unrounded"], new
+    # A rounded value overwritten before the pack is not rounded any more.
+    lines = list(_ISA_BF16_ROUNDED)
+    lines.insert(-1, "v_mul_f32_e32 v33, v64, v48")
+    assert classify_bf16_conversions(_isa_excerpt(*lines)).packs == ["unrounded"]
+
+
+@dataclass(frozen=True)
+class KernelModes:
+    """The floating-point modes a wave starts with, from ``compute_pgm_rsrc1``
+    of the kernel descriptor: FP32 and FP16/FP64 rounding (0 is
+    round-to-nearest-even) and denormal handling (3 is no flush)."""
+
+    round_32: int
+    round_16_64: int
+    denorm_32: int
+    denorm_16_64: int
+
+
+_ELF_SECTION = struct.Struct("<IIQQQQIIQQ")
+_ELF_SYMBOL = struct.Struct("<IBBHQQ")
+_ELF_SYMBOL_TABLES = (2, 11)  # SHT_SYMTAB, SHT_DYNSYM
+_KERNEL_DESCRIPTOR_SIZE = 64
+_COMPUTE_PGM_RSRC1_OFFSET = 48
+
+
+def kernel_descriptor_modes(hsaco: bytes, kernel_name: str) -> KernelModes:
+    """Read the mode fields of ``<kernel_name>.kd`` from a 64-bit little-endian
+    ELF code object."""
+    if hsaco[:6] != b"\x7fELF\x02\x01":
+        raise ValueError("not a 64-bit little-endian ELF code object")
+    section_offset = struct.unpack_from("<Q", hsaco, 0x28)[0]
+    entry_size, count = struct.unpack_from("<HH", hsaco, 0x3A)
+    sections = [
+        _ELF_SECTION.unpack_from(hsaco, section_offset + index * entry_size)
+        for index in range(count)
+    ]
+    wanted = f"{kernel_name}.kd".encode()
+    for _, kind, _, _, offset, size, link, _, _, _ in sections:
+        if kind not in _ELF_SYMBOL_TABLES:
+            continue
+        strings = sections[link][4]
+        for at in range(offset, offset + size, _ELF_SYMBOL.size):
+            name, _, _, index, value, length = _ELF_SYMBOL.unpack_from(hsaco, at)
+            start = strings + name
+            if hsaco[start : hsaco.index(b"\0", start)] != wanted:
+                continue
+            if length != _KERNEL_DESCRIPTOR_SIZE or not 0 < index < count:
+                raise ValueError(f"malformed kernel descriptor symbol {wanted!r}")
+            address, file_offset = sections[index][3], sections[index][4]
+            descriptor = file_offset + value - address
+            (rsrc1,) = struct.unpack_from(
+                "<I", hsaco, descriptor + _COMPUTE_PGM_RSRC1_OFFSET
+            )
+            return KernelModes(
+                round_32=rsrc1 >> 12 & 3,
+                round_16_64=rsrc1 >> 14 & 3,
+                denorm_32=rsrc1 >> 16 & 3,
+                denorm_16_64=rsrc1 >> 18 & 3,
+            )
+    raise ValueError(f"no kernel descriptor {wanted!r} in the code object")
+
+
+def _synthetic_code_object(kernel_name: str, rsrc1: int) -> bytes:
+    """A minimal ELF64 holding only ``<kernel_name>.kd`` with ``rsrc1``."""
+    strings = b"\0" + f"{kernel_name}.kd".encode() + b"\0"
+    descriptor = bytearray(_KERNEL_DESCRIPTOR_SIZE)
+    struct.pack_into("<I", descriptor, _COMPUTE_PGM_RSRC1_OFFSET, rsrc1)
+    address = 0x800
+    symbols = _ELF_SYMBOL.pack(0, 0, 0, 0, 0, 0) + _ELF_SYMBOL.pack(
+        1, 0x11, 0, 1, address, _KERNEL_DESCRIPTOR_SIZE
+    )
+    header = bytearray(64)
+    header[:6] = b"\x7fELF\x02\x01"
+    body = bytes(descriptor) + symbols + strings
+    offsets = (64, 64 + len(descriptor), 64 + len(descriptor) + len(symbols))
+    sections = (
+        _ELF_SECTION.pack(0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+        + _ELF_SECTION.pack(0, 1, 2, address, offsets[0], len(descriptor), 0, 0, 64, 0)
+        + _ELF_SECTION.pack(0, 2, 0, 0, offsets[1], len(symbols), 3, 1, 8, 24)
+        + _ELF_SECTION.pack(0, 3, 0, 0, offsets[2], len(strings), 0, 0, 1, 0)
+    )
+    struct.pack_into("<Q", header, 0x28, 64 + len(body))
+    struct.pack_into("<HH", header, 0x3A, _ELF_SECTION.size, 4)
+    return bytes(header) + body + sections
+
+
+def test_kernel_descriptor_modes_decode_compute_pgm_rsrc1() -> None:
+    """The four mode fields sit at bits 13:12, 15:14, 17:16 and 19:18. The
+    first value is what the ROCm 7.1.0 compiler writes for a kernel without a
+    denormal attribute: round-to-nearest, denormals kept, in both groups."""
+    hsaco = _synthetic_code_object("kernel", 0x00AF031E)
+    assert kernel_descriptor_modes(hsaco, "kernel") == KernelModes(0, 0, 3, 3)
+    fields = 1 << 12 | 2 << 14 | 3 << 16 | 0 << 18
+    hsaco = _synthetic_code_object("kernel", fields)
+    assert kernel_descriptor_modes(hsaco, "kernel") == KernelModes(1, 2, 3, 0)
+    with pytest.raises(ValueError, match="no kernel descriptor"):
+        kernel_descriptor_modes(hsaco, "other")
+    with pytest.raises(ValueError, match="ELF"):
+        kernel_descriptor_modes(b"not an object", "kernel")
+
+
 def test_isa_classifier_does_not_guess_an_unknown_element() -> None:
     store = list(_ISA_STORES[frozenset({0, 1})])
     store[1] = "v_cvt_f16_f32_e32 v33, v40"  # not a product of the reciprocal
@@ -884,7 +1702,14 @@ def test_quick_code_objects_fuse_only_the_fp16_epilogue(
     - Every ``v_fma_mix*`` is ``R * o + 0`` feeding an output store; BF16 has
       none. FP16 stores are classified element by element. No mix instruction
       at all is the fixed compiler (LLVM PR #236759) and is accepted.
-    - A named artifact (by HSACO digest) must show its recorded lanes."""
+    - A named artifact (by HSACO digest) must show its recorded lanes.
+    - A-MODE: the kernel descriptor starts every wave in round-to-nearest-even
+      for FP32 and FP16, with FP16 denormals kept, and no instruction outside
+      the division writes the MODE register. The FP32 denormal mode is
+      printed, not required: no verdict depends on it (lemma D).
+    - A-MODE: every ``fptrunc float to bfloat`` of the BF16 kernel is the
+      round-to-nearest-even integer sequence, and every pack of upper halves
+      takes rounded values. A compiler with another sequence is not guessed."""
     import hashlib
 
     from kernels.gfx942.attention_dense import build_attention_dense
@@ -897,19 +1722,31 @@ def test_quick_code_objects_fuse_only_the_fp16_epilogue(
         backend="python",
         capture_ir_text=False,
     )
-    model = classify_epilogue_isa(_disassemble(artifact.hsaco, tmp_path))
+    disassembly = _disassemble(artifact.hsaco, tmp_path)
+    model = classify_epilogue_isa(disassembly)
+    modes = kernel_descriptor_modes(artifact.hsaco, artifact.kernel_name)
     digest = hashlib.sha256(artifact.hsaco).hexdigest()
     named = epilogue_artifact_for(case.dtype, digest)
     print(
         f"{case.case_id}: sha256={digest} artifact={named} mix={model.mix_sites} "
-        f"single_lanes={model.single_lanes}"
+        f"single_lanes={model.single_lanes} modes={modes}"
     )
+    assert (modes.round_32, modes.round_16_64) == (0, 0), f"{_REDERIVE}: {modes}"
+    assert modes.denorm_16_64 == 3, f"{_REDERIVE}: {modes}"
+    assert not model.mode_writes, f"{_REDERIVE}: {model.mode_writes}"
     assert model.divisions == 1, f"{_REDERIVE}: {model.divisions} divisions"
     assert not model.fma_outside_division, f"{_REDERIVE}: {model.fma_outside_division}"
     assert not model.unmodeled_mix, f"{_REDERIVE}: {model.unmodeled_mix}"
     assert len(model.stores) == _OUTPUT_CASTS // 4
     if case.dtype == "bf16":
         assert model.mix_sites == 0
+        path = classify_dense_path(_lowered_quick_case(case), case.dtype)
+        casts = path.counts["cast_probability"] + path.counts["cast_output"]
+        conversions = classify_bf16_conversions(disassembly)
+        print(f"{case.case_id}: bf16 conversions={conversions.rounded} of {casts}")
+        assert conversions.rounded == casts, f"{_REDERIVE}: BF16 conversions"
+        assert conversions.packs.count("rounded") * 2 == casts, conversions.packs
+        assert "unrounded" not in conversions.packs, f"{_REDERIVE}: BF16 pack"
         return
     assert model.single_lanes is not None, model.stores
     assert model.mix_sites == len(model.single_lanes) * len(model.stores)
@@ -1638,6 +2475,501 @@ def test_head_scales_keep_their_committed_separation(family: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Premises of the Tier B theorem: the rank distance, target certification, the
+# exactness ranges, the tile classes, the masked prefix and the reciprocal
+# domain. Each is a finite property of the committed quick matrix.
+# ---------------------------------------------------------------------------
+
+_INFINITY_BITS = {"fp16": 0x7C00, "bf16": 0x7F80}
+_FRACTION_MASK = {"fp16": 0x03FF, "bf16": 0x007F}
+# Per format: (largest subnormal, smallest normal) and (last value of a binade,
+# the power of two above it).
+_FORMAT_EDGES = {
+    "fp16": ((0x03FF, 0x0400), (0x3BFF, 0x3C00)),
+    "bf16": ((0x007F, 0x0080), (0x3F7F, 0x3F80)),
+}
+
+
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+def test_target_ulp_distance_is_the_rank_difference(dtype: str) -> None:
+    """The encoding of a nonnegative finite value is its rank: values increase
+    with it, adjacent values are at distance one across a binade edge and
+    across the subnormal/normal transition, and a negative value, an infinity
+    or a NaN has no rank."""
+    infinity = _INFINITY_BITS[dtype]
+    values = [target_value(bits, dtype) for bits in range(infinity)]
+    assert values[0] == 0
+    assert all(low < high for low, high in itertools.pairwise(values))
+    assert target_rank(0, dtype) == 0 and target_rank(infinity - 1, dtype) == (
+        infinity - 1
+    )
+    for low, high in _FORMAT_EDGES[dtype]:
+        assert d_ulp(low, high, dtype) == d_ulp(high, low, dtype) == 1
+    assert d_ulp(0, 1, dtype) == 1 and d_ulp(5, 5, dtype) == 0
+    assert ordered_distance((3, 7), (9, 12)) == d_ulp(7, 9, dtype) == 2
+    assert ordered_distance((9, 12), (3, 7)) == 2
+    assert ordered_distance((3, 9), (9, 12)) == 0
+    for bits in (0x8000, 0x8001, infinity, infinity + 1, 0x10000, -1):
+        with pytest.raises(ValueError, match="nonnegative finite"):
+            target_rank(bits, dtype)
+
+
+@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
+def test_every_enclosure_endpoint_has_a_rank(case: P4Case) -> None:
+    """Every Tier B endpoint and Tier A center is a nonnegative finite value,
+    so each bit difference taken on them (the Tier A radius, the separation
+    gaps, the head-scale margin) is the rank distance."""
+    infinity = _INFINITY_BITS[case.dtype]
+    for exposure in P4_EXPOSURES:
+        low, high = tier_b_exposure(case, exposure)
+        center = tier_a_exposure(case, exposure)[0]
+        for bits in (low, high, center):
+            assert int(bits.max()) < infinity, exposure
+        assert np.all(low <= high), exposure
+
+
+def test_irrational_targets_clear_both_rounding_boundaries() -> None:
+    """T0: an irrational target is certified against the two rounding
+    boundaries adjacent to its bits, by more than ``10**-40`` at 50 digits.
+    The boundaries are the midpoints to the two neighbors: twice as far above
+    a power of two as below it, equidistant at the smallest normal (subnormals
+    share the spacing of the first normal binade), and only the upper one
+    exists at ``+0``."""
+    for dtype, ((subnormal, normal), (_, power)) in _FORMAT_EDGES.items():
+        below, above = rounding_boundaries(power, dtype)
+        center = target_value(power, dtype)
+        assert above - center == 2 * (center - below)
+        below, above = rounding_boundaries(normal, dtype)
+        center = target_value(normal, dtype)
+        assert below == (target_value(subnormal, dtype) + center) / 2
+        assert above - center == center - below
+        assert rounding_boundaries(0, dtype) == (None, target_value(1, dtype) / 2)
+    # The FP16 normal/subnormal rounding boundary of T1.
+    assert rounding_boundaries(0x0400, "fp16")[0] == (
+        Fraction(1, 1 << 14) - Fraction(1, 1 << 25)
+    )
+
+    classes = {
+        (case.dtype, exponent, item)
+        for case in P4_QUICK_CASES
+        for exposure in P4_EXPOSURES
+        for exponent, item in tier_a_exposure(case, exposure)[2]
+    }
+    required = Fraction(1, 10**40)
+    irrational = binade_edges = subnormals = 0
+    for dtype, exponent, item in classes:
+        record = certify_target(dtype, exponent, item)
+        if record.rational:
+            assert record.margin is None and record.lower_boundary is None
+            continue
+        irrational += 1
+        assert record.bits > 0
+        below, above = rounding_boundaries(record.bits, dtype)
+        assert (record.lower_boundary, record.upper_boundary) == (below, above)
+        assert below < target_value(record.bits, dtype) < above
+        assert record.required == required < record.margin <= (above - below) / 2
+        fraction = record.bits & _FRACTION_MASK[dtype]
+        binade_edges += fraction == 0 and record.bits > _FORMAT_EDGES[dtype][0][1]
+        subnormals += dtype == "fp16" and record.bits < 0x0400
+    # The matrix exercises both asymmetric geometries.
+    assert irrational > 100 and binade_edges and subnormals
+    dtype, exponent, item = next(
+        entry
+        for entry in sorted(classes, key=str)
+        if not certify_target(*entry).rational
+    )
+    assert certify_target(dtype, exponent, item, 70).required == Fraction(1, 10**60)
+
+
+# Per family: the range of ``log2 |a_h b_h'|`` over every pairing of a Q head
+# with a K head (wrong-head reads included), and what the 64-term contraction
+# adds to it (64 equal products for Walsh, one product otherwise).
+_SCORE_EXPONENTS = {"periodic": ((2, 8), 0), "walsh": ((-4, 0), 6)}
+
+
+@pytest.mark.parametrize("family", sorted(P4_HEAD_SCALES))
+def test_score_exactness_ranges_of_the_committed_scales(family: str) -> None:
+    """X1 and X2: every Q and K entry is ``2**e`` with ``-2 <= e <= 6``; every
+    operand product is ``2**r`` with ``r`` in the family's range; every partial
+    sum ``z 2**r``, ``|z| <= 64``, of a Walsh score is zero or a normal FP32
+    number; every accumulator is ``2**rho`` with ``2 <= rho <= 8``; and its
+    product with each modeled score scale is exact."""
+    q_scales, k_scales = P4_HEAD_SCALES[family]
+    for value in (*q_scales, *k_scales):
+        exponent = floor_log2(abs(value))
+        assert abs(value) == Fraction(2) ** exponent and -2 <= exponent <= 6
+    (lowest, highest), contraction = _SCORE_EXPONENTS[family]
+    exponents = {floor_log2(abs(a * b)) for a in q_scales for b in k_scales}
+    assert (min(exponents), max(exponents)) == (lowest, highest)
+
+    assert SCORE_SCALE == LOG2E_F32 / 8
+    assert Fraction(1, 8) <= SCORE_SCALE < Fraction(1, 4)
+    scales = (SCORE_SCALE, round_f32(f32(1.0) * LOG2E_F32), f32(1.0 / 8.0))
+    for exponent in exponents:
+        unit = Fraction(2) ** exponent
+        if family == "walsh":
+            for count in range(-64, 65):
+                partial = count * unit
+                assert is_f32(partial)
+                assert count == 0 or abs(partial) >= F32_SMALLEST_NORMAL
+        rho = exponent + contraction
+        assert 2 <= rho <= 8
+        accumulator = Fraction(2) ** rho
+        for scale in scales:
+            assert round_f32(accumulator * scale) == accumulator * scale
+            assert round_f32(-accumulator * scale) == -accumulator * scale
+        magnitude = accumulator * SCORE_SCALE
+        assert Fraction(2) ** (rho - 3) <= magnitude < Fraction(2) ** (rho - 2)
+
+    # The generated tensors realize exactly these accumulators, for the correct
+    # heads and for each wrong-head read.
+    for case in P4_QUICK_CASES:
+        if case.dtype != "fp16" or fixture_family(case.fixture) != family:
+            continue
+        inputs = [p4_query_key(case)]
+        inputs += [
+            _mutated_query_key(case, mutation)[:2]
+            for mutation in (P4Mutation.Q_HEAD_ROTATE, P4Mutation.K_HEAD_ROTATE)
+        ]
+        for q, k in inputs:
+            for value in _dot_products(q, k) - {Fraction(0)}:
+                rho = floor_log2(abs(value))
+                assert abs(value) == Fraction(2) ** rho
+                assert lowest + contraction <= rho <= highest + contraction
+
+
+@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
+def test_pv_products_are_exact_and_in_range(case: P4Case) -> None:
+    """X3: a legal weight lies in ``[2**-12, 1 + 2**-23]`` and its PV product
+    ``q_T(p) 2**h`` in ``[2**-12, 2**3]``, a normal FP32 number. A masked
+    weight gives the product ``+0``, or ``2**h`` in a fully masked leading
+    tile, where the weight is ``E(0)`` and casts to one."""
+    from ._p4_analytical import _scaled_cast
+
+    unit_hull = exp2_interval(Fraction(0))
+    floor_weight = Fraction(1, 1 << 12)
+    zero = F32Interval.point(Fraction(0))
+    for row in range(case.base.seqlen_q):
+        classes = tile_classes(case, row)
+        first, last = legal_interval(case.base, row)
+        for head in range(case.base.nhead_q):
+            exponent = case.head_scale_exponents[head]
+            for tile_class, step in zip(classes, row_trace(case, head, row).steps):
+                for offset, weight in enumerate(step.weights):
+                    product = _scaled_cast(case.dtype, weight, exponent)
+                    if first <= step.tile * case.block_n + offset <= last:
+                        assert floor_weight <= weight.lo and weight.hi <= unit_hull.hi
+                        assert floor_weight <= product.lo and product.hi <= 8
+                    elif tile_class is TileClass.MASKED_PREFIX:
+                        assert weight == unit_hull
+                        assert product == F32Interval.point(Fraction(2) ** exponent)
+                    else:
+                        assert weight.hi <= F32_SMALLEST_SUBNORMAL and product == zero
+
+
+@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
+def test_mutated_pv_products_stay_fp32_normal(case: P4Case) -> None:
+    """A mutated kernel's weights leave the correct range (a wrong scale gives
+    weights near ``2**-93``), so its enclosure asserts what exactness needs:
+    every nonzero PV product endpoint is a normal FP32 number."""
+    from ._p4_analytical import _scaled_cast
+
+    for mutation in applicable_mutations(case):
+        for row in derived_rows(case, P4_SEPARATION_ROWS, mutation):
+            for head in range(case.base.nhead_q):
+                exponent = case.head_scale_exponents[head]
+                for step in row_trace(case, head, row, mutation).steps:
+                    for weight in set(step.weights):
+                        product = _scaled_cast(case.dtype, weight, exponent)
+                        for value in (product.lo, product.hi):
+                            assert value == 0 or value >= F32_SMALLEST_NORMAL
+
+
+_L = TileClass.LEGAL
+_M0 = TileClass.MASKED_PREFIX
+_M1 = TileClass.MASKED_AFTER_LEGAL
+
+
+def _expected_tiles(case: P4Case, row: int) -> tuple[tuple[int, ...], tuple]:
+    """Lemma T: the visited tiles of ``row`` and their classes, written out for
+    the two quick kernels (causal ``block_m = 128``; window 64, ``block_m = 64``)."""
+    block = row // 64
+    if case.mask == "causal":
+        tiles = (0, 1) if block < 2 else (0, 1, 2, 3)
+        return tiles, tuple(_L if tile <= block else _M1 for tile in tiles)
+    if block == 0:
+        return (0,), (_L,)
+    return (block - 1, block), (_M0 if row % 64 == 63 else _L, _L)
+
+
+@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
+def test_tile_classes_match_the_masked_prefix_topology(case: P4Case) -> None:
+    """Lemma T over every row and exposure: at most one fully masked leading
+    tile, present exactly on rows 127, 191 and 255 of the window kernel; there
+    every folded coordinate, and every coordinate of the basis exposure on
+    that tile, selects one of its keys, and no other coordinate does."""
+    prefix_rows = []
+    for row in range(case.base.seqlen_q):
+        tiles, classes = _expected_tiles(case, row)
+        assert visited_tiles(case, row) == tiles, row
+        assert tile_classes(case, row) == classes, row
+        assert row_scope(case, row, None) is None
+        prefix = masked_prefix(case, row)
+        assert len(prefix) <= 1
+        if prefix:
+            prefix_rows.append(row)
+        for exposure in P4_EXPOSURES:
+            selected = {
+                prefix_selected_keys(case, exposure, row, dim)
+                for dim in range(case.base.head_dim)
+            }
+            on_prefix = prefix and exposure in ("folded", f"basis@{64 * prefix[0]}")
+            assert selected == ({1} if on_prefix else {0}), (row, exposure)
+    assert prefix_rows == ([127, 191, 255] if case.mask == "window" else [])
+
+
+@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
+def test_tile_sums_follow_the_tile_class(case: P4Case) -> None:
+    """The ``gamma`` bound is applied only to tiles with normal-scale terms. A
+    legal tile holds a weight of at least ``2**-12``; a fully masked leading
+    tile holds 64 copies of ``E(0)``; a fully masked tile after a legal one
+    holds only weights in ``[0, 2**-149]``, its sum is enclosed by
+    ``[0, 2**-143]`` without the bound, and the combine returns ``RN(l alpha)``."""
+    masked = F32Interval(Fraction(0), F32_SMALLEST_SUBNORMAL)
+    unit_hull = exp2_interval(Fraction(0))
+    seen: Counter = Counter()
+    for row in range(case.base.seqlen_q):
+        classes = tile_classes(case, row)
+        for head in range(case.base.nhead_q):
+            trace = row_trace(case, head, row)
+            for index, (tile_class, step) in enumerate(zip(classes, trace.steps)):
+                seen[tile_class] += 1
+                total = tile_sum(tile_class, step.weights)
+                if tile_class is _M1:
+                    assert set(step.weights) == {masked} and step.alpha == unit_hull
+                    assert total == F32Interval(Fraction(0), Fraction(1, 1 << 143))
+                    assert trace.denominators[index] == mul_rn(
+                        trace.denominators[index - 1], step.alpha
+                    )
+                    continue
+                assert total == sum_any_order(step.weights)
+                if tile_class is _M0:
+                    assert set(step.weights) == {unit_hull}
+                else:
+                    assert any(w.lo >= Fraction(1, 1 << 12) for w in step.weights)
+    causal = case.mask == "causal"
+    assert seen[_M1] == (128 * case.base.nhead_q if causal else 0)
+    assert seen[_M0] == (0 if causal else 3 * case.base.nhead_q)
+
+
+def test_tile_sum_refuses_a_normal_weight_in_a_masked_tile() -> None:
+    masked = F32Interval(Fraction(0), F32_SMALLEST_SUBNORMAL)
+    one = F32Interval.point(Fraction(1))
+    assert tile_sum(_M1, [masked] * 64) == F32Interval(
+        Fraction(0), Fraction(1, 1 << 143)
+    )
+    with pytest.raises(P4ScopeError, match="normal-scale weight"):
+        tile_sum(_M1, [masked, one])
+    # The looser exponential used only for attribution: still explicit.
+    loose = F32Interval(Fraction(0), 2 * F32_SMALLEST_SUBNORMAL)
+    assert tile_sum(_M1, [loose] * 64) == F32Interval(
+        Fraction(0), Fraction(1, 1 << 142)
+    )
+    # A mutation's extra normal-scale key puts the tile back under the bound.
+    assert tile_sum(_M1, [masked] * 64, [one]) == sum_any_order([*[masked] * 64, one])
+
+
+@pytest.mark.parametrize(
+    "case", [case for case in P4_QUICK_CASES if case.mask == "window"], ids=_quick_id
+)
+def test_masked_prefix_leaves_only_the_lemma_m_residue(case: P4Case) -> None:
+    """Lemma M, recomputed from the propagated endpoints on the three prefix
+    rows: (0) after the prefix ``l`` is the ``gamma_63`` sum of 64 ``E(0)``
+    terms and a selecting coordinate holds ``2**h``; (1) the rescale by
+    ``alpha`` in ``[0, 2**-149]`` leaves less than ``2**-142``, which the legal
+    tile absorbs; (2) a coordinate with no legal product keeps a residue of at
+    most ``2**(h-149)`` and stores ``+0``; (3) a later legal product ``pi``
+    gives ``pi`` or its FP32 successor."""
+    from ._p4_analytical import _scaled_cast
+
+    step = Fraction(1, 1 << 23)
+    prefix_sum = F32Interval(
+        round_f32(64 * (1 - step) * (1 - gamma(63)), "ru"),
+        round_f32(64 * (1 + step) * (1 + gamma(63)), "rd"),
+    )
+    assert 63 < prefix_sum.lo and prefix_sum.hi < 65
+    masked = F32Interval(Fraction(0), F32_SMALLEST_SUBNORMAL)
+    for row in (127, 191, 255):
+        assert tile_classes(case, row) == (_M0, _L)
+        for head in range(case.base.nhead_q):
+            exponent = case.head_scale_exponents[head]
+            scale = Fraction(2) ** exponent
+            trace = row_trace(case, head, row)
+            legal = trace.steps[1]
+            assert trace.denominators[0] == prefix_sum
+            assert legal.alpha == masked
+            assert mul_rn(prefix_sum, legal.alpha).hi < Fraction(1, 1 << 142)
+            assert trace.denominator == tile_sum(_L, legal.weights)
+            residue = F32Interval(Fraction(0), scale * F32_SMALLEST_SUBNORMAL)
+            for exposure in P4_EXPOSURES:
+                low, high = tier_b_exposure(case, exposure)
+                for dim in range(case.base.head_dim):
+                    if not prefix_selected_keys(case, exposure, row, dim):
+                        continue
+                    (_, after_prefix), (rescaled, final) = accumulator_steps(
+                        case, exposure, row, head, dim
+                    )
+                    assert after_prefix == F32Interval.point(scale)
+                    assert rescaled == residue
+                    if exposure == "folded":
+                        product = _scaled_cast(case.dtype, legal.weights[dim], exponent)
+                        assert product.lo >= Fraction(1, 1 << 12)
+                        assert final == F32Interval(product.lo, next_up(product.hi))
+                    else:
+                        assert final == residue
+                        assert low[0, row, head, dim] == high[0, row, head, dim] == 0
+
+
+def test_reciprocal_is_modeled_only_on_the_a_div_domain() -> None:
+    low, high = A_DIV_DOMAIN
+    assert (low, high) == (Fraction(1, 2), Fraction(512))
+    inside = F32Interval(low, next_down(high))
+    assert rcp_a_div(inside) == rcp_rn(inside)
+    for outside in (
+        F32Interval(next_down(low), Fraction(1)),
+        F32Interval(Fraction(1), high),
+        F32Interval.point(Fraction(2981)),
+    ):
+        with pytest.raises(P4ScopeError, match="A-DIV domain"):
+            rcp_a_div(outside)
+
+
+@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
+def test_denominators_stay_in_the_a_div_domain(case: P4Case) -> None:
+    """Lemma L: from the first legal tile on, every denominator of the correct
+    quick matrix lies in ``[1/2, 2**9)``, the domain of A-DIV, so the
+    reciprocal is at most 2."""
+    low, high = A_DIV_DOMAIN
+    for row in range(case.base.seqlen_q):
+        first_legal = tile_classes(case, row).index(_L)
+        for head in range(case.base.nhead_q):
+            trace = row_trace(case, head, row)
+            for denominator in trace.denominators[first_legal:]:
+                assert low <= denominator.lo and denominator.hi < high
+            assert trace.reciprocal == rcp_rn(trace.denominator)
+            assert trace.reciprocal.hi <= 2
+
+
+def _underived_rows(case: P4Case, mutation: P4Mutation) -> dict[int, str]:
+    """The sampled rows whose mutated enclosure is not derived, and why.
+
+    Excluding the last key leaves causal row 0 without a key, which lemma M
+    does not cover. A phantom logit-0 key added to a row whose only key has
+    logit -8 has weight ``e**8``, which takes the denominator out of the A-DIV
+    domain."""
+    if mutation is P4Mutation.EXCLUDE_LAST_KEY:
+        return {0: "fully masked leading tiles"}
+    if (
+        mutation is P4Mutation.DENOMINATOR_PLUS_ONE
+        and case.fixture is P4Fixture.IDENTITY
+    ):
+        return {0: "A-DIV domain"}
+    return {}
+
+
+@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
+def test_mutated_rows_outside_the_derivation_make_no_claim(case: P4Case) -> None:
+    """A mutated enclosure must establish lemma M and the A-DIV domain for its
+    own recurrence. On the sampled rows every mutation does, except the two
+    rows listed above: those raise instead of producing a set, and the
+    separation and the mutated analysis leave them out."""
+    for mutation in applicable_mutations(case):
+        expected = _underived_rows(case, mutation)
+        refused = {
+            row: reason
+            for row in P4_SEPARATION_ROWS
+            if (reason := row_scope(case, row, mutation)) is not None
+        }
+        assert set(refused) == set(expected), mutation.value
+        for row, reason in refused.items():
+            assert expected[row] in reason
+            with pytest.raises(P4ScopeError):
+                for head in range(case.base.nhead_q):
+                    tier_b_row(case, "basis@0", row, head, mutation=mutation)
+        kept = tuple(row for row in P4_SEPARATION_ROWS if row not in refused)
+        assert derived_rows(case, P4_SEPARATION_ROWS, mutation) == kept
+        if not refused:
+            continue
+        observation = _tier_b_observation(case)
+        with pytest.raises(ValueError, match="at least one query"):
+            analyze_p4_policy(case, observation, mutation=mutation, rows=tuple(refused))
+        result = analyze_p4_policy(
+            case, observation, mutation=mutation, rows=(*refused, 1)
+        )
+        judged = sum(group.coordinates for group in result.groups["basis@0"].values())
+        assert judged == case.base.nhead_q * case.base.head_dim
+
+
+def test_row_trace_fails_closed_outside_lemma_m() -> None:
+    """The correct semantics are never filtered: a shape with two fully masked
+    leading tiles has no enclosure until its residue bound is derived."""
+    window = next(
+        case
+        for case in P4_QUICK_CASES
+        if case.mask == "window" and case.fixture is P4Fixture.IDENTITY
+    )
+    wide = dataclasses.replace(window, block_m=128)
+    assert visited_tiles(wide, 255) == (1, 2, 3)
+    assert tile_classes(wide, 255) == (_M0, _M0, _L)
+    assert len(masked_prefix(wide, 255)) == 2
+    assert derived_rows(wide, (254, 255), None) == (254, 255)
+    with pytest.raises(P4ScopeError, match="2 fully masked leading tiles"):
+        row_trace(wide, 0, 255)
+    assert tile_classes(wide, 254) == (_M0, _L, _L)
+    assert row_scope(wide, 254, None) is None
+
+
+@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
+def test_exposed_atoms_hold_at_most_one_nonzero_product(case: P4Case) -> None:
+    """Lemma P, premises P1 and P2, and the product counts of lemma B1.
+
+    PV: for every exposure, KV head and output dimension, V is nonzero at no
+    more than one key of a tile (hence of each group of eight keys an MFMA
+    call covers), that key is the one the model reads, and its value is
+    ``2**h``. QK: a periodic score has at most one nonzero product over its
+    eight atoms; every atom of a Walsh score has eight."""
+    tiles = case.base.seqlen_k // case.block_n
+    scales = np.ldexp(1.0, np.array(case.head_scale_exponents)).astype(np.float32)
+    for exposure in P4_EXPOSURES:
+        v = p4_inputs(case, exposure)[2][0]  # [Sk, Hkv, D]
+        nonzero = v != 0
+        per_tile = nonzero.reshape(tiles, case.block_n, *nonzero.shape[1:]).sum(axis=1)
+        per_call = nonzero.reshape(tiles * 8, 8, *nonzero.shape[1:]).sum(axis=1)
+        assert per_tile.max() <= 1 and per_call.max() <= 1, exposure
+        for tile in range(tiles):
+            for dim in range(case.base.head_dim):
+                key = exposure_key(case, exposure, dim, tile)
+                selected = nonzero[tile * 64 : (tile + 1) * 64, :, dim]
+                if key is None:
+                    assert not selected.any()
+                else:
+                    assert selected[key - tile * 64].all() and selected.sum() == len(
+                        scales
+                    )
+                    np.testing.assert_array_equal(v[key, :, dim], scales)
+
+    q, k = p4_query_key(case)
+    for head in range(case.base.nhead_q):
+        products = q[0, :, head, None, :] * k[0, None, :, head, :]  # [Sq, Sk, D]
+        per_atom = (products != 0).reshape(*products.shape[:2], 8, 8).sum(axis=-1)
+        if case.fixture is P4Fixture.WALSH:
+            assert np.all(per_atom == 8)
+        else:
+            assert per_atom.max() <= 1 and per_atom.sum(axis=-1).max() <= 1
+
+
+
+# ---------------------------------------------------------------------------
 # Mutation separation (T5, DT4, invariant I5).
 # ---------------------------------------------------------------------------
 
@@ -1847,7 +3179,8 @@ def test_mutant_paths_lie_inside_their_tier_b(case: P4Case) -> None:
     """I2 for the mutated semantics: a mutated kernel's IR-exact and
     randomized-semantic realizations (A-F epilogue choices included) lie in the
     mutated Tier B. Without this, a disjoint pair of enclosures would not imply
-    that the mutant's output is rejected."""
+    that the mutant's output is rejected. A row whose mutated enclosure is not
+    derived makes no claim and is left out."""
     rng = np.random.default_rng(_RNG_SEED)
     modes = (
         {"mode": EmulationMode.IR_EXACT},
@@ -1855,7 +3188,7 @@ def test_mutant_paths_lie_inside_their_tier_b(case: P4Case) -> None:
     )
     for mutation in applicable_mutations(case):
         for exposure in _MUTANT_EXPOSURES:
-            for row in _MUTANT_ROWS:
+            for row in derived_rows(case, _MUTANT_ROWS, mutation):
                 for head in range(case.base.nhead_q):
                     low, high = tier_b_row(case, exposure, row, head, mutation=mutation)
                     for mode in modes:
@@ -1962,6 +3295,12 @@ def _normal(center: int, radius: int) -> bool:
     return radius > 0 and center >= 0x0400
 
 
+def _unmatched(exposure: str, query: int, head: int, dim: int, bits: int) -> bool:
+    """No single violated assumption stores ``bits`` at this coordinate, so its
+    label comes from the heuristics."""
+    return matching_violation(_LABEL_CASE, exposure, query, head, dim, bits) is None
+
+
 def _label_input(label: P4Label) -> tuple[str, tuple[int, int, int, int], int]:
     """An exposure, coordinate and stored bits that must carry ``label``."""
     from ._p4_analytical import _genuine_addition
@@ -1977,33 +3316,50 @@ def _label_input(label: P4Label) -> tuple[str, tuple[int, int, int, int], int]:
     if label is P4Label.INVALID:
         where, *_ = _find("basis@0", range(256), lambda q, h, d, lo, hi, c, r: r > 0)
         return "basis@0", where, 0x7E00  # the adapter's unwritten-output prefill
-    if label is P4Label.E2:
+    if label is P4Label.A_MODE:  # the heuristic: near an FP16-subnormal target
         where, _, high, *_ = _find(
-            "basis@0", range(256), lambda q, h, d, lo, hi, c, r: r > 0 and c < 0x0400
+            "basis@0",
+            range(256),
+            lambda q, h, d, lo, hi, c, r: r > 0
+            and c < 0x0400
+            and _unmatched("basis@0", q, h, d, hi + 1),
         )
         return "basis@0", where, high + 1
+    if label is P4Label.A_F:  # the store of the exact product, truncated
+        for query in range(1, 64):
+            for head in range(4):
+                low, _ = tier_b_row(_LABEL_CASE, "basis@0", query, head)
+                stored, _ = epilogue_alternatives(
+                    _LABEL_CASE, "basis@0", query, head, P4Violation.F_TRUNCATED
+                )
+                for dim in np.nonzero(stored < low)[0]:
+                    return "basis@0", (0, query, head, int(dim)), int(stored[dim])
+        raise AssertionError("no truncated FP16 store leaves Tier B")
     if label is P4Label.A_MFMA:
         where, _, high, *_ = _find(
             "folded",
             range(64, 256),
             lambda q, h, d, lo, hi, c, r: _normal(c, r)
-            and _genuine_addition(_LABEL_CASE, q, h, d),
+            and _genuine_addition(_LABEL_CASE, q, h, d)
+            and _unmatched("folded", q, h, d, hi + 1),
         )
         return "folded", where, high + 1
     if label is P4Label.A_E:
 
+        def loosened(q, h, d, lo):
+            relaxed_low, relaxed_high = _relaxed("basis@0", q, h)
+            return int(relaxed_low[d] if relaxed_low[d] < lo else relaxed_high[d])
+
         def widened(q, h, d, lo, hi, c, r):
             relaxed_low, relaxed_high = _relaxed("basis@0", q, h)
-            return _normal(c, r) and (relaxed_low[d] < lo or relaxed_high[d] > hi)
+            return (
+                _normal(c, r)
+                and (relaxed_low[d] < lo or relaxed_high[d] > hi)
+                and _unmatched("basis@0", q, h, d, loosened(q, h, d, lo))
+            )
 
         where, low, _, _, _ = _find("basis@0", range(128, 160), widened)
-        relaxed_low, relaxed_high = _relaxed("basis@0", where[1], where[2])
-        dim = where[3]
-        return (
-            "basis@0",
-            where,
-            int(relaxed_low[dim] if relaxed_low[dim] < low else relaxed_high[dim]),
-        )
+        return "basis@0", where, loosened(where[1], where[2], where[3], low)
 
     def outside(step: int):
         def predicate(q, h, d, lo, hi, c, r):
@@ -2012,6 +3368,7 @@ def _label_input(label: P4Label) -> tuple[str, tuple[int, int, int, int], int]:
                 _normal(c, r)
                 and lo == hi == c
                 and bits > _relaxed("basis@0", q, h)[1][d]
+                and _unmatched("basis@0", q, h, d, bits)
             )
 
         return predicate
@@ -2024,13 +3381,23 @@ def _label_input(label: P4Label) -> tuple[str, tuple[int, int, int, int], int]:
     return "basis@0", where, center + radius + 1
 
 
-@pytest.mark.parametrize("label", P4_FAILURE_LABELS, ids=lambda label: label.name)
+# No single-step violation of these assumptions leaves Tier B on the quick
+# matrix (``P4_UNOBSERVED_VIOLATIONS``), so no stored value can carry them here.
+_UNPRODUCIBLE_LABELS = (P4Label.A_DIV, P4Label.A_QK)
+
+
+@pytest.mark.parametrize(
+    "label",
+    [label for label in P4_FAILURE_LABELS if label not in _UNPRODUCIBLE_LABELS],
+    ids=lambda label: label.name,
+)
 def test_each_failure_label_is_produced_and_fails(label: P4Label) -> None:
     """Policy: one synthetic coordinate per taxonomy label (§5) fails with that
     label and nothing else, starting from outputs that pass. One ULP outside an
     unambiguous Tier B fails as "path model"; the exact-zero sentinels (a
     nonzero masked coordinate, a negative value, NaN, the unwritten prefill)
-    fail as structural, negative and invalid."""
+    fail as structural, negative and invalid; a truncated FP16 store fails as
+    assumption A-F."""
     exposure, coordinate, bits = _label_input(label)
     observation = _with_bits(
         _tier_b_observation(_LABEL_CASE), exposure, coordinate, bits
@@ -2053,10 +3420,10 @@ def test_negative_zero_and_infinity_are_not_zero_or_finite() -> None:
 
 
 def test_mode_labels_need_a_value_the_mode_can_produce() -> None:
-    """At an FP16-subnormal target a flushed ``+0`` or a nearby value is E2, but
+    """At an FP16-subnormal target a flushed ``+0`` or a nearby value is A-MODE, but
     a far value (such as a wrong scale stores) is numerical; a far folded
     value is numerical, not A-MFMA."""
-    exposure, coordinate, _ = _label_input(P4Label.E2)
+    exposure, coordinate, _ = _label_input(P4Label.A_MODE)
     _, _, _, center, radius = _find(
         exposure,
         range(coordinate[1], coordinate[1] + 1),
@@ -2065,7 +3432,7 @@ def test_mode_labels_need_a_value_the_mode_can_produce() -> None:
     folded, folded_at, _ = _label_input(P4Label.A_MFMA)
     folded_center = int(tier_a_exposure(_LABEL_CASE, folded)[0][folded_at])
     for where, at, bits, label in (
-        (exposure, coordinate, 0x0000, P4Label.E2),
+        (exposure, coordinate, 0x0000, P4Label.A_MODE),
         (exposure, coordinate, center + radius + 64, P4Label.NUMERICAL),
         (folded, folded_at, folded_center + 64, P4Label.NUMERICAL),
     ):
@@ -2139,6 +3506,124 @@ def test_records_cover_every_coordinate_and_serialize() -> None:
     assert 0 < diagnostics["artifact_exact"] <= diagnostics["path_compared"]
     unnamed = p4_diagnostics(case, observation, rows=(0,))
     assert unnamed.artifact is None and unnamed.artifact_exact is None
+
+
+# ---------------------------------------------------------------------------
+# Assumption-failure contract: a violated assumption is reported, never
+# absorbed.
+# ---------------------------------------------------------------------------
+
+# Block, tile and window edges, and row 207, where the two FP16 epilogue
+# roundings differ. Setting the environment variable below sweeps every row.
+_VIOLATION_ROWS = (0, 63, 64, 127, 128, 207, 255)
+_FULL_VIOLATION_SWEEP = "ROCKE_P4_FULL_VIOLATION_SWEEP"
+
+
+def _violation_observation(
+    case: P4Case, violation: P4Violation, rows: tuple[int, ...]
+) -> UniformObservation:
+    """What the IR-exact path stores on ``rows`` with one assumption violated."""
+    exposures = []
+    for exposure in P4_EXPOSURES:
+        bits = np.zeros(case.output_shape, dtype=np.uint16)
+        for row in rows:
+            for head in range(case.base.nhead_q):
+                bits[0, row, head] = epilogue_alternatives(
+                    case, exposure, row, head, violation
+                )[0]
+        exposures.append((exposure, bits))
+    return UniformObservation(tuple(exposures))
+
+
+def test_every_violation_names_its_assumption() -> None:
+    from ._p4_analytical import _VIOLATION_LABEL
+
+    assert set(_VIOLATION_LABEL) == set(P4Violation)
+    for violation, label in _VIOLATION_LABEL.items():
+        assumption = violation.value.split("_")[1].upper()
+        assert label.value == f"assumption A-{assumption}", violation.value
+    assert P4_UNOBSERVED_VIOLATIONS < set(P4Violation)
+    covered = set()
+    for case in P4_QUICK_CASES:
+        violations = applicable_violations(case)
+        assert len(violations) == len(set(violations))
+        assert (P4Violation.QK_UP in violations) == (case.fixture is P4Fixture.WALSH)
+        assert (P4Violation.F_TRUNCATED in violations) == (case.dtype == "fp16")
+        covered.update(violations)
+    assert covered == set(P4Violation)
+
+
+@pytest.mark.parametrize("case", P4_QUICK_CASES, ids=_quick_id)
+def test_violated_assumptions_fail_and_are_never_absorbed(case: P4Case) -> None:
+    """For each named assumption, the IR-exact path with that one primitive
+    replaced by an excluded value (``P4Violation``):
+
+    - Tier B and the exponential candidate sets are the same before and after
+      the violating output is judged: no tolerance absorbs it;
+    - every coordinate where the stored value leaves Tier B fails, labeled
+      with a named assumption, and the capture audit reports the same
+      coordinates as unexplained;
+    - a violation that leaves Tier B nowhere is listed in
+      ``P4_UNOBSERVED_VIOLATIONS``: the stored bits cannot show it, which says
+      nothing about the assumption.
+
+    ``pytest -s`` prints the number of coordinates each violation moves out of
+    Tier B."""
+    from ._p4_analytical import _VIOLATION_LABEL, _VIOLATION_REACH
+
+    every_row = tuple(range(case.base.seqlen_q))
+    rows = every_row if os.environ.get(_FULL_VIOLATION_SWEEP) else _VIOLATION_ROWS
+    before = {
+        exposure: [bits.copy() for bits in tier_b_exposure(case, exposure)]
+        for exposure in P4_EXPOSURES
+    }
+    candidates = {x: exp2_candidates(x) for x in (Fraction(0), MASKED_SCORE)}
+    conversion_labels = {P4Label.A_F, P4Label.A_MODE} & {
+        _VIOLATION_LABEL[violation] for violation in applicable_violations(case)
+    }
+    judged = len(rows) * len(P4_EXPOSURES) * case.base.nhead_q * case.base.head_dim
+    for violation in applicable_violations(case):
+        observation = _violation_observation(case, violation, rows)
+        outside = set()
+        reach = 0
+        for exposure, stored in observation.exposures:
+            low, high = (bits.astype(np.int64) for bits in before[exposure])
+            for row in rows:
+                bits = stored[0, row].astype(np.int64)
+                distance = np.maximum(low[0, row] - bits, bits - high[0, row])
+                reach = max(reach, int(distance.max()))
+                outside.update(
+                    (exposure, row, int(head), int(dim))
+                    for head, dim in zip(*np.nonzero(distance > 0))
+                )
+        result = analyze_p4_policy(case, observation, rows=rows)
+        failures = {
+            name: count
+            for name, count in result.labels.items()
+            if count and name != P4Label.PASS.value
+        }
+        print(
+            f"{_quick_id(case)} {violation.value}: {len(outside)} of {judged} "
+            f"coordinates leave Tier B (reach {reach}); labels {failures}"
+        )
+        assert reach <= _VIOLATION_REACH, violation.value
+        assert (not outside) == (violation in P4_UNOBSERVED_VIOLATIONS), violation.value
+        assert sum(failures.values()) == len(outside), violation.value
+        assert bool(result.violations) == bool(outside)
+        if outside:
+            # A truncated FP16 store is A-F; where a truncating cast stores
+            # the same bits it is attributed to A-F as well, else to A-MODE.
+            assert _VIOLATION_LABEL[violation].value in failures, violation.value
+            assert set(failures) <= {label.value for label in conversion_labels}
+        audit = audit_case(
+            case, dict(observation.exposures), artifact=_AUDIT_ARTIFACT, rows=rows
+        )
+        assert set(audit.outside_tier_b) == outside, violation.value
+        assert outside <= {where for where, _ in audit.unexplained}, violation.value
+    for exposure in P4_EXPOSURES:
+        for cached, saved in zip(tier_b_exposure(case, exposure), before[exposure]):
+            np.testing.assert_array_equal(cached, saved)
+    assert {x: exp2_candidates(x) for x in candidates} == candidates
 
 
 # ---------------------------------------------------------------------------
