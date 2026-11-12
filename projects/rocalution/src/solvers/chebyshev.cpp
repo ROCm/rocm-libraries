@@ -35,6 +35,7 @@
 #include "../utils/log.hpp"
 #include "../utils/math_functions.hpp"
 
+#include <cmath>
 #include <complex>
 #include <math.h>
 #include <utility>
@@ -69,6 +70,7 @@ namespace rocalution
         // between them contains 0, such as for the bounds of LocalMatrix::Gershgorin(), whose
         // lower bound is at most 0 and whose upper bound is at least 0. Only real bounds are
         // replaced; complex bounds can have real parts of both signs without containing 0.
+        bool contains_zero;
         if(std::imag(lambda_min) == 0 && std::imag(lambda_max) == 0)
         {
             if(std::real(lambda_min) > std::real(lambda_max))
@@ -81,9 +83,9 @@ namespace rocalution
                 ValueType lower = lambda_max / static_cast<ValueType>(30);
 
                 LOG_VERBOSE_INFO(2,
-                                 "*** warning: Chebyshev::Set() lambda_min = "
+                                 "*** warning: Chebyshev::Set() the lower bound "
                                      << lambda_min
-                                     << " is not positive, using lambda_max / 30 = " << lower);
+                                     << " is not positive, using the upper bound / 30 = " << lower);
 
                 lambda_min = lower;
             }
@@ -92,20 +94,42 @@ namespace rocalution
                 ValueType upper = lambda_min / static_cast<ValueType>(30);
 
                 LOG_VERBOSE_INFO(2,
-                                 "*** warning: Chebyshev::Set() lambda_max = 0 with a negative "
-                                 "lambda_min, using lambda_min / 30 = "
+                                 "*** warning: Chebyshev::Set() the upper bound is 0 with a "
+                                 "negative lower bound, using the lower bound / 30 = "
                                      << upper);
 
                 lambda_max = upper;
             }
+
+            // Also true for NaN
+            contains_zero = !(std::real(lambda_min) > 0 || std::real(lambda_max) < 0);
+        }
+        else
+        {
+            const ValueType zero = static_cast<ValueType>(0);
+
+            contains_zero
+                = lambda_min == zero || lambda_max == zero || lambda_min + lambda_max == zero;
+
+            if(!contains_zero)
+            {
+                // Of the bounds scaled to length 1, so that it cannot underflow or overflow
+                const auto product = std::conj(lambda_min / std::abs(lambda_min))
+                                     * (lambda_max / std::abs(lambda_max));
+
+                contains_zero = std::imag(product) == 0 && std::real(product) <= 0;
+            }
         }
 
-        // 0 lies on the segment from lambda_min to lambda_max
-        const auto product = std::conj(lambda_min) * lambda_max;
-        if(std::imag(product) == 0 && std::real(product) <= 0)
+        bool is_finite
+            = std::isfinite(std::real(lambda_min)) && std::isfinite(std::imag(lambda_min))
+              && std::isfinite(std::real(lambda_max)) && std::isfinite(std::imag(lambda_max));
+
+        if(contains_zero || !is_finite)
         {
-            LOG_INFO("Chebyshev::Set() the segment from lambda_min = "
-                     << lambda_min << " to lambda_max = " << lambda_max << " contains 0");
+            LOG_INFO("Chebyshev::Set() the bounds " << lambda_min << " and " << lambda_max
+                                                    << " are not finite or their segment "
+                                                       "contains 0");
             FATAL_ERROR(__FILE__, __LINE__);
         }
 

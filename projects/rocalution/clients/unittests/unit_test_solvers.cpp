@@ -3093,33 +3093,23 @@ TYPED_TEST(solvers, chebyshev_replaces_a_lower_bound_that_is_not_positive)
     }
 }
 
-TYPED_TEST(solvers, chebyshev_does_not_depend_on_the_order_of_the_bounds)
+TYPED_TEST(solvers, chebyshev_rejects_bounds_that_are_not_finite_or_whose_segment_contains_0)
 {
     using T          = typename TypeParam::value_type;
-    const Csr<T> ref = spd<T>(8);
-    const Vec<T> b   = rhs<T>(8);
-    const Vec<T> x0  = start<T>(8);
-    auto         A   = this->make(ref);
+    const double inf = std::numeric_limits<double>::infinity();
+    const double nan = std::numeric_limits<double>::quiet_NaN();
 
-    Chebyshev<T> solver;
-    solver.Set(10.0, 1.0);
-    solver.Init(0.0, 0.0, 1e8, 4);
-    set_up(solver, method<Chebyshev<T>>("Chebyshev"), *A, nullptr);
-
-    const Outcome<T> out = solve(solver, *A, b, x0);
-    EXPECT_EQ(out.iterations, 4);
-    expect_near(out.x,
-                chebyshev_iterate(dense(ref), b, x0, 4, identity<T>, 1.0, 10.0),
-                loose_tol<T>(1e-10));
-}
-
-TYPED_TEST(solvers, chebyshev_rejects_bounds_whose_segment_contains_0)
-{
-    using T = typename TypeParam::value_type;
-
-    // The bounds of LocalMatrix::Gershgorin() for a matrix of zeros
-    Chebyshev<T> solver;
-    EXPECT_FATAL_ERROR(solver.Set(0.0, 0.0), "chebyshev\\.cpp");
+    // (0, 0) are the bounds of LocalMatrix::Gershgorin() for a matrix of zeros
+    for(const auto& [lambda_min, lambda_max] : {std::make_pair(0.0, 0.0),
+                                                std::make_pair(nan, 10.0),
+                                                std::make_pair(1.0, nan),
+                                                std::make_pair(1.0, inf),
+                                                std::make_pair(-inf, inf)})
+    {
+        SCOPED_TRACE("Set(" + std::to_string(lambda_min) + ", " + std::to_string(lambda_max) + ")");
+        Chebyshev<T> solver;
+        EXPECT_FATAL_ERROR(solver.Set(lambda_min, lambda_max), "chebyshev\\.cpp");
+    }
 }
 
 TYPED_TEST(solvers, chebyshev_iterates_follow_the_chebyshev_recurrence)
@@ -3728,9 +3718,67 @@ namespace
     class solvers_complex : public TypedBackendTest<P>
     {
     };
+
+    // Chebyshev with the bounds lambda_min and lambda_max reaches a relative residual of
+    // 1e-5 on the diagonal system with the eigenvalues lambda. The error is then at most
+    // 1e-5 |b| / min |lambda|, below 1e-4 for the systems of the tests.
+    template <typename T>
+    void expect_chebyshev_solves_diagonal(Backend       backend,
+                                          const Vec<T>& lambda,
+                                          T             lambda_min,
+                                          T             lambda_max)
+    {
+        using R     = real_t<T>;
+        const int n = static_cast<int>(lambda.size());
+        Csr<T>    ref(n);
+        Vec<T>    b(n), x(n);
+        for(int i = 0; i < n; ++i)
+        {
+            ref.add(i, lambda[i]);
+            ref.end_row();
+            b[i] = T(1, static_cast<R>(i % 3));
+            x[i] = b[i] / lambda[i];
+        }
+        auto A = make_local_matrix(backend, ref);
+
+        Chebyshev<T> solver;
+        solver.Set(lambda_min, lambda_max);
+        solver.Init(0.0, 1e-5, 1e8, 100);
+        set_up(solver, method<Chebyshev<T>>("Chebyshev"), *A, nullptr);
+
+        const Outcome<T> out = solve(solver, *A, b, Vec<T>(n, 0));
+        EXPECT_EQ(out.status, 2);
+        for(int i = 0; i < n; ++i)
+        {
+            EXPECT_LT(std::abs(out.x[i] - x[i]), 1e-4) << "i = " << i;
+        }
+    }
 }
 
 TYPED_TEST_SUITE(solvers_complex, HostOnly<testing::Types<cfloat, cdouble>>, TypedName);
+
+TYPED_TEST(solvers_complex, chebyshev_replaces_real_bounds_of_complex_type)
+{
+    using T = typename TypeParam::value_type;
+    using R = real_t<T>;
+
+    // Bounds such as those of LocalMatrix::Gershgorin() for a Hermitian matrix, also
+    // swapped. Without the replacement, the iteration does not converge.
+    Vec<T> lambda;
+    for(int i = 1; i <= 10; ++i)
+    {
+        lambda.push_back(static_cast<R>(i));
+    }
+    for(const auto& [lambda_min, lambda_max] :
+        {std::make_pair(0.0, 10.0), std::make_pair(10.0, -1.0)})
+    {
+        SCOPED_TRACE("Set(" + std::to_string(lambda_min) + ", " + std::to_string(lambda_max) + ")");
+        expect_chebyshev_solves_diagonal(TypeParam::backend,
+                                         lambda,
+                                         T(static_cast<R>(lambda_min)),
+                                         T(static_cast<R>(lambda_max)));
+    }
+}
 
 TYPED_TEST(solvers_complex, chebyshev_keeps_complex_bounds_whose_segment_does_not_contain_0)
 {
@@ -3742,30 +3790,13 @@ TYPED_TEST(solvers_complex, chebyshev_keeps_complex_bounds_whose_segment_does_no
     const T   lambda_min(static_cast<R>(-0.1), static_cast<R>(2));
     const T   lambda_max(static_cast<R>(4), static_cast<R>(2));
     const int n = 16;
-    Csr<T>    ref(n);
-    Vec<T>    b(n), x(n);
+    Vec<T>    lambda;
     for(int i = 0; i < n; ++i)
     {
-        const T lambda
-            = lambda_min + (lambda_max - lambda_min) * static_cast<R>(i) / static_cast<R>(n - 1);
-        ref.add(i, lambda);
-        ref.end_row();
-        b[i] = T(1, static_cast<R>(i % 3));
-        x[i] = b[i] / lambda;
+        lambda.push_back(lambda_min
+                         + (lambda_max - lambda_min) * static_cast<R>(i) / static_cast<R>(n - 1));
     }
-    auto A = make_local_matrix(TypeParam::backend, ref);
-
-    Chebyshev<T> solver;
-    solver.Set(lambda_min, lambda_max);
-    solver.Init(0.0, 1e-5, 1e8, 100);
-    set_up(solver, method<Chebyshev<T>>("Chebyshev"), *A, nullptr);
-
-    const Outcome<T> out = solve(solver, *A, b, Vec<T>(n, 0));
-    EXPECT_EQ(out.status, 2);
-    for(int i = 0; i < n; ++i)
-    {
-        EXPECT_LT(std::abs(out.x[i] - x[i]), 1e-3) << "i = " << i;
-    }
+    expect_chebyshev_solves_diagonal(TypeParam::backend, lambda, lambda_min, lambda_max);
 }
 
 TYPED_TEST(solvers_complex, chebyshev_rejects_complex_bounds_whose_segment_contains_0)
@@ -3773,10 +3804,14 @@ TYPED_TEST(solvers_complex, chebyshev_rejects_complex_bounds_whose_segment_conta
     using T = typename TypeParam::value_type;
     using R = real_t<T>;
 
-    // The segment from -1+i to 2-2i passes through 0
-    const T      lambda_min(static_cast<R>(-1), static_cast<R>(1));
-    const T      lambda_max(static_cast<R>(2), static_cast<R>(-2));
-    Chebyshev<T> solver;
-    EXPECT_FATAL_ERROR(solver.Set(lambda_min, lambda_max), "chebyshev\\.cpp");
+    // The segment from -1+i to 2-2i passes through 0, the one from 0 to 1+i ends there
+    for(const auto& [lambda_min, lambda_max] :
+        {std::make_pair(T(static_cast<R>(-1), static_cast<R>(1)),
+                        T(static_cast<R>(2), static_cast<R>(-2))),
+         std::make_pair(T(0), T(static_cast<R>(1), static_cast<R>(1)))})
+    {
+        Chebyshev<T> solver;
+        EXPECT_FATAL_ERROR(solver.Set(lambda_min, lambda_max), "chebyshev\\.cpp");
+    }
 }
 #endif
