@@ -907,33 +907,89 @@ ConfigFields threeBf16Fields()
     return f;
 }
 
-TEST(TestConvIgemmNchwThreeBf16, OnlyUnderTf32PermissionForFloatGraphs)
+/// The base problem in @p dataType, parsed, on gfx1100.
+std::optional<conv_igemm_nchw::NchwProblem> problemOf(DataType dataType,
+                                                      ConvShape shape = baseShape())
 {
+    shape.dataType = dataType;
+    auto properties = testDeviceProperties();
+    properties.gcnArchName = "gfx1100";
+    const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::BACKWARD_DATA)),
+                               properties);
+    return conv_igemm_nchw::parseNchwProblem(fixture.context());
+}
+
+conv_igemm_nchw::NchwConfig threeBf16Config()
+{
+    conv_igemm_nchw::NchwConfig config;
+    config.atom = "wmma11_bf16";
+    config.atomId = 8;
+    config.bmq = 64;
+    config.bn = 32;
+    config.bk = 32;
+    config.wm = 2;
+    config.wn = 1;
+    config.wp = 4;
+    config.vec = 8;
+    config.stride = 4;
+    config.taps = 2;
+    config.stages = 1;
+    config.halo = 8;
+    config.math = 1;
+    return config;
+}
+
+TEST(TestConvIgemmNchwThreeBf16, OnlyUnderTf32PermissionForFloatProblems)
+{
+    const auto fp32 = problemOf(DataType::FLOAT);
+    ASSERT_TRUE(fp32.has_value());
     {
         const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter off(
             "HIP_KERNEL_PROVIDER_CONV_TF32", "");
-        EXPECT_FALSE(admits(threeBf16Fields(), "gfx1100", baseShape(), "FLOAT"));
+        EXPECT_FALSE(conv_igemm_nchw::nchwLaunchFor(*fp32, threeBf16Config()).has_value());
     }
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter on(
         "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
-    EXPECT_TRUE(admits(threeBf16Fields(), "gfx1100", baseShape(), "FLOAT"));
-    EXPECT_FALSE(admits(threeBf16Fields(), "gfx1100", baseShape(), "BFLOAT16"));
-    EXPECT_FALSE(admits(threeBf16Fields(), "gfx1100", baseShape(), "HALF"));
+    EXPECT_TRUE(conv_igemm_nchw::nchwLaunchFor(*fp32, threeBf16Config()).has_value());
+    // 16-bit problems take the bf16 configs themselves.
+    const auto bf16 = problemOf(DataType::BFLOAT16);
+    ASSERT_TRUE(bf16.has_value());
+    EXPECT_FALSE(conv_igemm_nchw::nchwLaunchFor(*bf16, threeBf16Config()).has_value());
     // One refusal per field three-bf16 adds.
-    auto two = threeBf16Fields();
+    auto two = threeBf16Config();
     two.math = 2;
-    EXPECT_FALSE(admits(two, "gfx1100", baseShape(), "FLOAT"));
-    auto half = threeBf16Fields();
+    EXPECT_FALSE(conv_igemm_nchw::nchwLaunchFor(*fp32, two).has_value());
+    auto half = threeBf16Config();
     half.atom = "wmma11_f16";
     half.atomId = 7;
-    EXPECT_FALSE(admits(half, "gfx1100", baseShape(), "FLOAT"));
-    auto fma = fmaFields();
-    fma.math = 1;
-    EXPECT_FALSE(admits(fma, "gfx1100", baseShape(), "FLOAT"));
-    // The math-0 twin is a bf16 config: not for an fp32 graph.
-    auto plain = threeBf16Fields();
-    plain.math = 0;
-    EXPECT_FALSE(admits(plain, "gfx1100", baseShape(), "FLOAT"));
+    EXPECT_FALSE(conv_igemm_nchw::nchwLaunchFor(*fp32, half).has_value());
+    // Through the kernel match, the gate too: the 1-D base problem is not a class it pays for.
+    EXPECT_FALSE(admits(threeBf16Fields(), "gfx1100", baseShape(), "FLOAT"));
+}
+
+TEST(TestConvIgemmNchwThreeBf16, PaysOnlyForRdna3dStridedTaps)
+{
+    ConvShape cube = baseShape();
+    cube.input = {9, 9, 9};
+    cube.filter = {3, 3, 3};
+    cube.prePadding = cube.postPadding = {1, 1, 1};
+    cube.stride = {2, 2, 2};
+    cube.dilation = {1, 1, 1};
+    const auto problem = problemOf(DataType::FLOAT, cube);
+    ASSERT_TRUE(problem.has_value());
+    EXPECT_TRUE(conv_igemm_nchw::threeBf16Pays(*problem, "gfx1100"));
+    EXPECT_TRUE(conv_igemm_nchw::threeBf16Pays(*problem, "gfx1201"));
+    for(const char* arch : {"gfx90a", "gfx942", "gfx950", "gfx908"})
+    {
+        EXPECT_FALSE(conv_igemm_nchw::threeBf16Pays(*problem, arch)) << arch;
+    }
+    auto unit = cube;
+    unit.stride = {1, 1, 1};
+    const auto unitProblem = problemOf(DataType::FLOAT, unit);
+    ASSERT_TRUE(unitProblem.has_value());
+    EXPECT_FALSE(conv_igemm_nchw::threeBf16Pays(*unitProblem, "gfx1201"));
+    const auto flat = problemOf(DataType::FLOAT);
+    EXPECT_FALSE(conv_igemm_nchw::threeBf16Pays(*flat, "gfx1201"));
 }
 
 TEST(TestConvIgemmNchwThreeBf16, TheLaunchIsTheTripledProblemsWithItsSplit)
@@ -981,8 +1037,11 @@ TEST(TestConvIgemmNchwThreeBf16, TheLaunchIsTheTripledProblemsWithItsSplit)
     EXPECT_EQ(launch->plan.bytes, launch->plan.a.splitBytes() + launch->plan.b.splitBytes());
     // The fp32 output tile in LDS: bn (bmq stride + 4) floats.
     EXPECT_GE(conv_igemm_nchw::ldsBytesOf(config, 2), int64_t{32} * (64 * 4 + 4) * 4);
+    // The math-0 twin is a bf16 config: on the fp32 problem it does not launch (16-byte vectors
+    // of 4-byte elements), and never with a split.
     config.math = 0;
-    EXPECT_FALSE(conv_igemm_nchw::nchwLaunchFor(*problem, config)->split);
+    const auto plain = conv_igemm_nchw::nchwLaunchFor(*problem, config);
+    EXPECT_TRUE(!plain.has_value() || !plain->split);
 }
 
 TEST(TestConvIgemmNchwAtoms, IdsFollowTheTable)

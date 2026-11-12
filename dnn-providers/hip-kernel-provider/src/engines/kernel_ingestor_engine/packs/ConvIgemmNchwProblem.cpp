@@ -277,11 +277,16 @@ std::optional<NchwProblem> threeBf16ProblemOf(const NchwProblem& problem)
     return t;
 }
 
-bool threeBf16Pays(const NchwProblem& /*problem*/, std::string_view gcnArchName)
+bool threeBf16Pays(const NchwProblem& problem, std::string_view gcnArchName)
 {
+    // Timed against the best exact config on 12 top fp32 K7 shapes (PLAN.md): 0.05-0.74x on
+    // gfx950, gfx942 and gfx90a; on gfx1201 (exact on FMA) 1.07x and 1.46x for 3-D 3x3x3 at
+    // stride 2 and 0.15-0.79x elsewhere. Admitted only there.
     const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
-    return arch == "gfx90a" || arch == "gfx942" || arch == "gfx950" || arch.rfind("gfx11", 0) == 0
-           || arch.rfind("gfx12", 0) == 0;
+    const auto& a = problem.base.args;
+    const bool rdna = arch.rfind("gfx11", 0) == 0 || arch.rfind("gfx12", 0) == 0;
+    return rdna && problem.base.spatialRank == 3 && a.stride[0] >= 2 && a.stride[1] >= 2
+           && a.stride[2] >= 2 && a.filter[0] * a.filter[1] * a.filter[2] >= 27;
 }
 
 namespace

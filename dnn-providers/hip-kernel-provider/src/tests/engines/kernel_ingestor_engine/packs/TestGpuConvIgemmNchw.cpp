@@ -523,11 +523,19 @@ TEST(TestGpuConvIgemmNchwTiming, ExactAgainstThreeBf16)
         });
 }
 
-/// Without TF32 permission no three-bf16 config is admitted; with it, fp32 graphs admit some on
-/// every arch with bf16 matrix cores, and 16-bit graphs none.
+/// Without TF32 permission no three-bf16 config is admitted; with it, fp32 graphs admit some
+/// where threeBf16Pays (RDNA, 3-D 3x3x3 at stride 2), and 16-bit graphs none.
 TEST(TestConvIgemmNchwCatalog, ThreeBf16OnlyUnderTf32Permission)
 {
-    const auto shape = deviceCases().front().shape;
+    ConvShape shape;
+    for(const auto& deviceCase : deviceCases())
+    {
+        if(deviceCase.name == "ThreeD3x3x3S2")
+        {
+            shape = deviceCase.shape;
+        }
+    }
+    ASSERT_EQ(shape.filter.size(), 3u);
     for(const char* arch : {"gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1201", "gfx908"})
     {
         for(const auto dataType : {DataType::FLOAT, DataType::BFLOAT16})
@@ -558,8 +566,13 @@ TEST(TestConvIgemmNchwCatalog, ThreeBf16OnlyUnderTf32Permission)
             }
             const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter on(
                 conv_tf32_test::TF32_ENV, "1");
-            const bool expected = dataType == DataType::FLOAT && std::string(arch) != "gfx908";
+            const auto problem = conv_igemm_nchw::parseNchwProblem(fixture.context());
+            ASSERT_TRUE(problem.has_value());
+            const bool expected
+                = dataType == DataType::FLOAT && conv_igemm_nchw::threeBf16Pays(*problem, arch);
             EXPECT_EQ(admitted() > 0, expected);
+            EXPECT_EQ(expected,
+                      dataType == DataType::FLOAT && std::string(arch).rfind("gfx1", 0) == 0);
         }
     }
 }
