@@ -10,7 +10,7 @@ from rocisa.instruction import SMovB32, SMovB64, SOrB32, SAndB32, SLShiftLeftB32
 from rocisa.container import sgpr, vgpr, RegisterContainer, ContinuousRegister, MemTokenData, TENSORModifiers
 from rocisa.functions import scalarMultiply64Bpe
 from math import log2, ceil, prod
-from ..Common.MxScaleLayout import mxFreeTile, mulScaleRows, mxTdmMSplitStride, mxTdmTileM
+from ..Common.MxScaleLayout import mxFreeTile, mulScaleRows, mxTdmMSplitStride, mxTdmTileM, mxSegmentSplit
 # from ..KernelWriterAssembly import KernelWriterAssembly
 
 
@@ -254,7 +254,7 @@ class TensorDataMoverLoad(TensorDataMover):
                 mxDU = kernel["DepthU"] // kernel["ProblemType"][f"MXBlock{subTc}"]
                 numMxKGroups = mxDU // mxUnit
                 mxTile = mxFreeTile(kernel, tc)
-                if numMxKGroups >= numComp:
+                if numMxKGroups >= numComp and not mxSegmentSplit(kernel, tc):
                     # K-splitting: offset by stride to next k_group
                     scale = numMxKGroups // numComp
                     mod.add(SMulI32(sgpr(waveOffsetSgprIdx), sgpr(waveOffsetSgprIdx), (mxUnit * numMxKGroups // numComp), f"woffset = wCompId * mxUnit({mxUnit}) * numMxKGroups({numMxKGroups}) // numComp({numComp})"))

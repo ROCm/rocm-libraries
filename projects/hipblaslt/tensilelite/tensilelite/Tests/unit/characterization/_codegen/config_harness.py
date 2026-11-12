@@ -280,7 +280,7 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
     ``problem_fingerprint`` selects a stable problem-group identity and takes
     precedence over the positional ``problem_index``.
     """
-    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
@@ -372,7 +372,8 @@ def assert_cluster_barrier_balanced(src, base):
     copies of which exactly one runs.
     """
     n_signal, n_wait = _count_cluster_barriers(src)
-    per_tile_arrive = "label_PersistentMC_SkipNextTileArrive:" in src
+    # Persistent clusters require a close-site arrive, independent of its exit label.
+    per_tile_arrive = "label_PersistentLoopClose:" in src
     expected = n_signal if per_tile_arrive else n_signal + 1
     assert n_wait == expected, (
         f"Kernel {base!r}: unexpected cluster barrier balance: "

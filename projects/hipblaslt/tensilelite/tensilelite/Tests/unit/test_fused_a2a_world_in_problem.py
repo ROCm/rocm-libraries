@@ -10,7 +10,7 @@ import tensilelite.ClientWriter as CW
 import tensilelite.SolutionLibrary as SL
 from tensilelite.Contractions import ProblemType as ContractionsProblemType
 from tensilelite.SolutionStructs.Problem import Problem, ProblemSizes, ProblemType
-from tensilelite.TensileMergeLibrary import fixSizeInconsistencies
+from tensilelite.merge_library import fixSizeInconsistencies
 
 pytestmark = pytest.mark.unit
 
@@ -244,14 +244,14 @@ class TestLibLogicToYamlWorld:
         return ProblemSizes(problemType, yaml.load(written, yaml.CSafeLoader)).exacts
 
     def test_fused_logic_row_becomes_an_exact_dict(self):
-        from tensilelite.TensileLibLogicToYaml import formProblemSize
+        from tensilelite.lib_logic_to_yaml import formProblemSize
         logic = [(self._ROW + [4, 2048], [0, 1.0]), (self._ROW + [8, 1024], [1, 2.0])]
         data = formProblemSize(logic, 1, dict(_problemType().state))
         p = self._reload(_problemType(), data)[0]
         assert (list(p.sizes), p.world, p.a2aExtent) == (self._ROW, 8, 1024)
 
     def test_benchmark_exact_dict_keeps_its_fields(self):
-        from tensilelite.TensileLibLogicToYaml import formProblemSize
+        from tensilelite.lib_logic_to_yaml import formProblemSize
         exact = {"sizes": [3072, 512, 1, 2048], "world": 2, "a2aExtent": 2048}
         data = formProblemSize(None, 0, {}, problemSizes=[{"Exact": exact}])
         p = self._reload(_problemType(), data)[0]

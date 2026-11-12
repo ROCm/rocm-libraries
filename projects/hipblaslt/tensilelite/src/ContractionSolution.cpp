@@ -2830,8 +2830,11 @@ namespace TensileLite
         if(!enableCluster || sizeMapping.isPersistent())
             return true;
 
+        // The limit counts clusters. grid.y is already a whole number of
+        // clusters, and clusterDim.z is 1, so grid.z is the cluster count in z.
         dim3 grid = clusterLaunchGrid(problem, hardware);
-        return grid.z <= KernelInvocation::MaxClusterGridDimZ;
+        return divideUp(grid.y, sizeMapping.clusterDim.y) <= KernelInvocation::MaxClusterGridDimYZ
+               && grid.z <= KernelInvocation::MaxClusterGridDimYZ;
     }
 
     namespace
@@ -8727,5 +8730,18 @@ namespace TensileLite
         return stream << " shiftPtrElemA=" << st.shiftPtrElemA
                       << " shiftPtrElemB=" << st.shiftPtrElemB << " depthUorMT0=" << st.depthUorMT0
                       << " depthUorMT1=" << st.depthUorMT1;
+    }
+
+    std::ostream& operator<<(std::ostream& stream, GL2PrefetchSAddrCheckPacket const& st)
+    {
+        return stream << " tluA=" << st.tluA << " tluB=" << st.tluB << " depthUA=" << st.depthUA
+                      << " depthUB=" << st.depthUB << " clusterMT0=" << st.clusterMT0
+                      << " clusterMT1=" << st.clusterMT1 << " depthU=" << st.depthU
+                      << " matrixInstK=" << st.matrixInstK << " mxBlockA=" << st.mxBlockA
+                      << " mxBlockB=" << st.mxBlockB << " mxBlockFreeA=" << st.mxBlockFreeA
+                      << " mxBlockFreeB=" << st.mxBlockFreeB << " metadata=" << st.metadata
+                      << " tluMetadata=" << st.tluMetadata
+                      << " depthUMetadata=" << st.depthUMetadata
+                      << " clusterMTMetadata=" << st.clusterMTMetadata;
     }
 } // namespace TensileLite

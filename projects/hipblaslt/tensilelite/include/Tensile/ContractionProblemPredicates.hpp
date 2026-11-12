@@ -42,6 +42,7 @@
 #include <cstddef>
 #include <limits>
 #include <mutex>
+#include <numeric>
 #include <sstream>
 #include <vector>
 
@@ -1531,6 +1532,213 @@ namespace TensileLite
                     std::ostringstream details;
                     details << "C:" << problem.c().strides()[1] << "*"
                             << problem.c().elementBytes() << "*" << value << "<2^32";
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
+            // PrefetchGL2SAddr holds each lane's offset into the GL2 prefetch
+            // footprint in one VGPR, computed in elements before the bpe scaling,
+            // so the element and the byte offset must both fit in 32 bits. MX
+            // scales and TLU metadata step by the whole free size per row, so for a
+            // K-contiguous A or B they can overflow while the data offset fits.
+            struct GL2PrefetchSAddrOffsetLimitCheck
+                : public Predicate_CRTP<GL2PrefetchSAddrOffsetLimitCheck, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                GL2PrefetchSAddrCheckPacket value;
+
+                GL2PrefetchSAddrOffsetLimitCheck() = default;
+                GL2PrefetchSAddrOffsetLimitCheck(GL2PrefetchSAddrCheckPacket value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "GL2PrefetchSAddrOffsetLimitCheck";
+                }
+
+                // Last row of the perpendicular extent plus the last coalesced
+                // element. The kernel clamps both extents to the tensor edge along
+                // a free dimension, but not the perpendicular one along K.
+                static size_t maxOffsetElements(TensorDescriptor const& tensor,
+                                                bool                    tlu,
+                                                size_t                  depthU,
+                                                size_t                  clusterMT)
+                {
+                    size_t perp = tlu ? depthU : std::min(clusterMT, tensor.sizes()[1]);
+                    size_t coal = tlu ? std::min(clusterMT, tensor.sizes()[0]) : depthU;
+                    if(perp == 0 || coal == 0)
+                        return 0;
+                    return (perp - 1) * tensor.strides()[1] + (coal - 1);
+                }
+
+                // Scales are stored K-block-major whatever the data layout: a row
+                // holds mxUnit scales for each of the ceil(Size / MXBlockFree)
+                // scale rows, and the tile spans DepthU / MatrixInstK rows. The
+                // coalesced index stops at the cluster's scale rows and the edge.
+                static size_t maxScaleOffsetElements(size_t freeSize,
+                                                     size_t depthU,
+                                                     size_t matrixInstK,
+                                                     size_t mxBlock,
+                                                     size_t mxBlockFree,
+                                                     size_t clusterMT)
+                {
+                    if(mxBlock == 0 || matrixInstK == 0 || freeSize == 0 || clusterMT == 0)
+                        return 0;
+                    size_t perp = depthU / matrixInstK;
+                    if(perp == 0)
+                        return 0;
+                    size_t mxTile = std::max<size_t>(1, mxBlockFree);
+                    size_t mxUnit = std::max<size_t>(1, matrixInstK / mxBlock);
+                    size_t pitch  = (freeSize + mxTile - 1) / mxTile * mxUnit;
+                    // Scale rows one cluster can touch, including a tile that
+                    // starts partway through a row (see mxTdmTileM).
+                    size_t maxPhase = mxTile - std::gcd(clusterMT, mxTile);
+                    size_t cluster  = (maxPhase + clusterMT + mxTile - 1) / mxTile * mxUnit;
+                    size_t coal     = std::min(cluster, pitch - mxUnit + 1);
+                    return (perp - 1) * pitch + (coal - 1);
+                }
+
+                static bool fits32(size_t elements, float elementBytes)
+                {
+                    const uint64_t TWO_POW_32 = 4294967296;
+                    return elements < TWO_POW_32
+                           && multiplyElementSize(elements, elementBytes) < TWO_POW_32;
+                }
+
+                // The kernel walks the sparse operand with the compressed strides.
+                static TensorDescriptor const& tensorA(ContractionProblemGemm const& problem)
+                {
+                    return problem.sparse() == 1 ? problem.compressed() : problem.a();
+                }
+
+                static TensorDescriptor const& tensorB(ContractionProblemGemm const& problem)
+                {
+                    return problem.sparse() == 2 ? problem.compressed() : problem.b();
+                }
+
+                size_t maxOffsetA(ContractionProblemGemm const& problem) const
+                {
+                    return maxOffsetElements(
+                        tensorA(problem), value.tluA, value.depthUA, value.clusterMT0);
+                }
+
+                size_t maxOffsetB(ContractionProblemGemm const& problem) const
+                {
+                    return maxOffsetElements(
+                        tensorB(problem), value.tluB, value.depthUB, value.clusterMT1);
+                }
+
+                size_t maxOffsetMXSA(ContractionProblemGemm const& problem) const
+                {
+                    return maxScaleOffsetElements(problem.freeSizeA(0),
+                                                  value.depthU,
+                                                  value.matrixInstK,
+                                                  value.mxBlockA,
+                                                  value.mxBlockFreeA,
+                                                  value.clusterMT0);
+                }
+
+                size_t maxOffsetMXSB(ContractionProblemGemm const& problem) const
+                {
+                    return maxScaleOffsetElements(problem.freeSizeB(0),
+                                                  value.depthU,
+                                                  value.matrixInstK,
+                                                  value.mxBlockB,
+                                                  value.mxBlockFreeB,
+                                                  value.clusterMT1);
+                }
+
+                bool checksMetadata(ContractionProblemGemm const& problem) const
+                {
+                    return value.metadata && problem.sparse() != 0;
+                }
+
+                size_t maxOffsetMetadata(ContractionProblemGemm const& problem) const
+                {
+                    if(!checksMetadata(problem))
+                        return 0;
+                    return maxOffsetElements(problem.metadata(),
+                                             value.tluMetadata,
+                                             value.depthUMetadata,
+                                             value.clusterMTMetadata);
+                }
+
+                // A problem without scales has no scale tensor; E8M0 is one byte.
+                static float scaleBytes(TensorDescriptor const& scales)
+                {
+                    return scales.dimensions() > 0 ? scales.elementBytes() : 1.0f;
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return fits32(maxOffsetA(problem), problem.a().elementBytes())
+                           && fits32(maxOffsetB(problem), problem.b().elementBytes())
+                           && fits32(maxOffsetMXSA(problem), scaleBytes(problem.mxsa()))
+                           && fits32(maxOffsetMXSB(problem), scaleBytes(problem.mxsb()))
+                           && (!checksMetadata(problem)
+                               || fits32(maxOffsetMetadata(problem),
+                                         problem.metadata().elementBytes()));
+                }
+
+                virtual std::string toString() const override
+                {
+                    return concatenate(this->type(),
+                                       "(TLUA:",
+                                       value.tluA,
+                                       ", TLUB:",
+                                       value.tluB,
+                                       ", DUA:",
+                                       value.depthUA,
+                                       ", DUB:",
+                                       value.depthUB,
+                                       ", ClusterMT0:",
+                                       value.clusterMT0,
+                                       ", ClusterMT1:",
+                                       value.clusterMT1,
+                                       ", DU:",
+                                       value.depthU,
+                                       ", MIK:",
+                                       value.matrixInstK,
+                                       ", MXBlockA:",
+                                       value.mxBlockA,
+                                       ", MXBlockB:",
+                                       value.mxBlockB,
+                                       ", MXBlockFreeA:",
+                                       value.mxBlockFreeA,
+                                       ", MXBlockFreeB:",
+                                       value.mxBlockFreeB,
+                                       ", Metadata:",
+                                       value.metadata,
+                                       ", TLUMetadata:",
+                                       value.tluMetadata,
+                                       ", DUMetadata:",
+                                       value.depthUMetadata,
+                                       ", ClusterMTMetadata:",
+                                       value.clusterMTMetadata,
+                                       ")");
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool               rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "A:" << maxOffsetA(problem) << "*" << problem.a().elementBytes()
+                            << "<2^32, B:" << maxOffsetB(problem) << "*"
+                            << problem.b().elementBytes()
+                            << "<2^32, MXSA:" << maxOffsetMXSA(problem) << "*"
+                            << scaleBytes(problem.mxsa())
+                            << "<2^32, MXSB:" << maxOffsetMXSB(problem) << "*"
+                            << scaleBytes(problem.mxsb()) << "<2^32";
+                    if(checksMetadata(problem))
+                        details << ", Metadata:" << maxOffsetMetadata(problem) << "<2^32";
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }

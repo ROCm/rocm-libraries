@@ -101,14 +101,14 @@ TEST(TestGfx942AttentionUnified3dMatchers, AcceptsAnyBatchAndKvLength)
 TEST(TestGfx942AttentionUnified3dMatchers, AcceptsBshdBhsdMixedAndPaddedKvViews)
 {
     auto spec = base();
-    spec.kStrides = bshdStrides(spec.numKvHeads, spec.seqLenKv, spec.headSize);
-    spec.vStrides = bhsdStrides(spec.numKvHeads, spec.seqLenKv, spec.headSize);
+    spec.kStrides = sdpaStrides(SdpaLayout::BSHD, spec.numKvHeads, spec.seqLenKv, spec.headSize);
+    spec.vStrides = sdpaStrides(SdpaLayout::BHSD, spec.numKvHeads, spec.seqLenKv, spec.headSize);
     EXPECT_TRUE(graphMatches(spec)) << "K BSHD, V BHSD";
 
     // A KV cache allocated for 1024 tokens with 512 valid: the batch and head strides
     // span the capacity, the logical Skv is 512.
     constexpr int64_t CAPACITY = 1024;
-    spec.kStrides = bhsdStrides(spec.numKvHeads, CAPACITY, spec.headSize);
+    spec.kStrides = sdpaStrides(SdpaLayout::BHSD, spec.numKvHeads, CAPACITY, spec.headSize);
     spec.vStrides = spec.kStrides;
     EXPECT_TRUE(graphMatches(spec)) << "capacity-padded BHSD";
 
@@ -205,7 +205,7 @@ TEST(TestGfx942AttentionUnified3dMatchers, DeclinesNonPositiveStrides)
     for(const int64_t bad : {0, -1})
     {
         auto spec = base();
-        auto strides = bhsdStrides(spec.numKvHeads, spec.seqLenKv, spec.headSize);
+        auto strides = sdpaStrides(SdpaLayout::BHSD, spec.numKvHeads, spec.seqLenKv, spec.headSize);
         strides[1] = bad;
         spec.vStrides = strides;
         EXPECT_FALSE(graphMatches(spec)) << bad;

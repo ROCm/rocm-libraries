@@ -761,11 +761,12 @@ applicability bug: the engine is fixed, or the provider's tier YAML quarantines 
 comment and its ticket (RFC 0022 §6). Before #14346 only 11 of them had a verdict; the rest reported
 SKIP whatever the engine did.
 
-*Non-normative:* on gfx942 (2026-11-04) ASM_SDPA_ENGINE declines 15 of the 21 and accepts six, which
-`ASM_SDPA_ENGINE_test_categories_integration.yaml` quarantines: PRB-U01 and PRB-U03 (ALMIOPEN-3039)
-and PRB-U13 (ALMIOPEN-3038), whose declines #14684 adds; PRB-T04 and PRB-T04n, an O dtype that differs
-from Q's (ALMIOPEN-3050); PRB-R05, `dropout_scale_inv` without a mask (ALMIOPEN-3051). Run alone, each
-of the six fails: "Engine ASM_SDPA_ENGINE accepted expected-rejection bundle".
+*Non-normative:* on gfx942 (2026-11-04) ASM_SDPA_ENGINE declined 15 of the 21 and accepted six. #14684
+adds the declines for PRB-U01 and PRB-U03 (ALMIOPEN-3039) and PRB-U13 (ALMIOPEN-3038). The other three,
+which `ASM_SDPA_ENGINE_test_categories_integration.yaml` quarantines, are PRB-T04 and PRB-T04n, an O
+dtype that differs from Q's (ALMIOPEN-3050), and PRB-R05, `dropout_scale_inv` without a mask
+(ALMIOPEN-3051). Run alone, each of the three fails: "Engine ASM_SDPA_ENGINE accepted
+expected-rejection bundle".
 
 **Regressions** sit in the lowest level that affords them, shrunk only when the defect does not
 depend on the shape; a regression whose reference is shared with the engines also has a G-C case.
@@ -810,11 +811,10 @@ in their levels and the engine TOML skips the three ids: other engines still exe
 names the defect and its ticket, and REG-18c and X07 bf16 keep executing. This gives less false
 coverage than moving them out of the levels, which would hide the class from every engine.
 
-*Non-normative:* ASM_SDPA_ENGINE, the one implementing engine today, accepts the written DEF cases
-and H61 and computes them wrongly. Its TOML skips them, one entry per defect with its ticket
-(DEF-01 ALMIOPEN-3036, DEF-02 ALMIOPEN-3037, DEF-04 ALMIOPEN-3039, DEF-05 and H61
-ALMIOPEN-3038, DEF-06 ALMIOPEN-3043). #14684 (DEF-01, -02, -04, -05) and #14688 (DEF-06) add the
-declines and delete those entries.
+*Non-normative:* ASM_SDPA_ENGINE, the one implementing engine today, accepted the written DEF cases
+and H61 and computed them wrongly. #14684 adds the declines for DEF-01, -02, -04 and -05 (and the
+odd-stride H61 layouts) and deletes their TOML skips. DEF-06 (ALMIOPEN-3043) is still skipped until
+#14688 adds its decline and deletes the entry.
 
 ### 4.3 Products deliberately not run
 

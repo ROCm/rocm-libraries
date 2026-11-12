@@ -1,5 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
+{# The provider's clang-format ColumnLimit. This file is copied verbatim, so a statement
+   a config can lengthen is emitted as clang-format lays it out at this width: on one
+   line when it fits, wrapped as clang-format wraps it when it does not. #}
+{% set column_limit = 100 %}
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
@@ -108,13 +112,11 @@ const std::map<std::string, ExpectedInventory>& expectedByArch()
 /// The runtime source kind every kernel must declare at the loader. A packaged bundle
 /// is lowered to a kpack archive first, so the authored builder kind is not what
 /// arrives.
-{# The provider's clang-format (ColumnLimit 100) joins these two statements whenever
-   they fit on one line, so emit that form directly: the file is copied verbatim. #}
 {% set source_kind = {'embedded_source': 'EMBEDDED_SOURCE',
                       'kpack': 'KPACK',
                       'hsaco_file': 'HSACO_FILE'}[emitted.source_kind] %}
 {% set kind_line = 'constexpr ingestor::KernelSourceKind EXPECTED_SOURCE_KIND = ingestor::KernelSourceKind::' ~ source_kind ~ ';' %}
-{% if kind_line | length <= 100 %}
+{% if kind_line | length <= column_limit %}
 {{ kind_line }}
 {% else %}
 constexpr ingestor::KernelSourceKind EXPECTED_SOURCE_KIND
@@ -246,7 +248,7 @@ TEST_F(Test{{ config.engine.pascal_name }}Packs, DeclaresTheConfiguredSdkVersion
 {
 {% set sdk_version = 'hipdnn_data_sdk::utilities::Version{std::string("' ~ (emitted.sdk_version | cpp_escape) ~ '")}' %}
 {% set sdk_line = '    EXPECT_EQ(_set->engine.sdkVersion, ' ~ sdk_version ~ ');' %}
-{% if sdk_line | length <= 100 %}
+{% if sdk_line | length <= column_limit %}
 {{ sdk_line }}
 {% else %}
     EXPECT_EQ(_set->engine.sdkVersion,
@@ -258,11 +260,19 @@ TEST_F(Test{{ config.engine.pascal_name }}Packs, ExposesTheConfiguredKnobs)
 {
     ASSERT_EQ(_set->engine.knobs.size(), {{ config.engine.knobs | length }}U);
 {% for knob in config.engine.knobs %}
-    EXPECT_NE(std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "{{ knob | cpp_escape }}"),
+{% set find_knob = 'std::find(_set->engine.knobs.begin(), _set->engine.knobs.end(), "' ~ (knob | cpp_escape) ~ '")' %}
+{% if ('    EXPECT_NE(' ~ find_knob ~ ',') | length <= column_limit %}
+    EXPECT_NE({{ find_knob }},
               _set->engine.knobs.end());
+{% else %}
+    EXPECT_NE(
+        {{ find_knob }},
+        _set->engine.knobs.end());
+{% endif %}
 {% endfor %}
 }
 
+{% set registered = 'ingestor::ScoreRegistry::isRegistered("' ~ (config.score_symbol | cpp_escape) ~ '")' %}
 {% if config.engine.has_heuristic %}
 /// The engine ships a ranking model, so its score symbol must be REGISTERED, not merely
 /// named: a descriptor naming an unregistered one is dropped, and the engine then ranks
@@ -271,7 +281,12 @@ TEST_F(Test{{ config.engine.pascal_name }}Packs, RanksThroughItsRegisteredScoreS
 {
     ASSERT_TRUE(_set->heuristic.has_value());
     EXPECT_EQ(_set->heuristic->nativeSymbol, "{{ config.score_symbol | cpp_escape }}");
-    EXPECT_TRUE(ingestor::ScoreRegistry::isRegistered("{{ config.score_symbol | cpp_escape }}"));
+{% if ('    EXPECT_TRUE(' ~ registered ~ ');') | length <= column_limit %}
+    EXPECT_TRUE({{ registered }});
+{% else %}
+    EXPECT_TRUE(
+        {{ registered }});
+{% endif %}
 }
 {% else %}
 /// heuristic: none. The engine ranks on priority then descriptor id, so it ships no UHD
@@ -280,7 +295,12 @@ TEST_F(Test{{ config.engine.pascal_name }}Packs, RanksThroughItsRegisteredScoreS
 TEST_F(Test{{ config.engine.pascal_name }}Packs, ShipsNoHeuristicAndRegistersNoScoreSymbol)
 {
     EXPECT_FALSE(_set->heuristic.has_value());
-    EXPECT_FALSE(ingestor::ScoreRegistry::isRegistered("{{ config.score_symbol | cpp_escape }}"));
+{% if ('    EXPECT_FALSE(' ~ registered ~ ');') | length <= column_limit %}
+    EXPECT_FALSE({{ registered }});
+{% else %}
+    EXPECT_FALSE(
+        {{ registered }});
+{% endif %}
 }
 {% endif %}
 

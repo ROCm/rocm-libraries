@@ -33,6 +33,7 @@ What's hard, and how we handle it:
 from __future__ import annotations
 
 import enum
+import math
 import os
 import warnings
 from collections.abc import Iterator
@@ -88,6 +89,7 @@ from .mma_operand import (
 )
 from .tf32 import tf32_mma_target_error, tf32_op_error
 
+from .mfma import validate_mfma
 from .llvm_profile import (
     LLVM_EMISSION_ALIASES,
     LLVM_EMISSION_FLAVORS,
@@ -667,6 +669,10 @@ _INTRINSIC_DECLS: Dict[str, str] = {
     "raw.ptr.buffer.store.i32": (
         "declare void @llvm.amdgcn.raw.ptr.buffer.store.i32("
         "i32, ptr addrspace(8) nocapture writeonly, i32, i32, i32 immarg)"
+    ),
+    "raw.ptr.buffer.atomic.fadd.f32": (
+        "declare float @llvm.amdgcn.raw.ptr.buffer.atomic.fadd.f32("
+        "float, ptr addrspace(8) nocapture, i32, i32, i32 immarg)"
     ),
     "raw.ptr.buffer.store.v2i32": (
         "declare void @llvm.amdgcn.raw.ptr.buffer.store.v2i32("
@@ -1372,6 +1378,50 @@ def _escape_llvm_asm_string(s: str) -> str:
         else:
             out.append(f"\\{o:02X}")
     return "".join(out)
+
+
+# Bytes per element for LDS vector alignment. Shared by the smem load and
+# store handlers so the two cannot drift: they did, and the load's copy was
+# missing the 8-bit floats.
+_SMEM_ELEM_BYTES = {
+    "i8": 1,
+    "u8": 1,
+    "fp8e4m3": 1,
+    "bf8e5m2": 1,
+    "f16": 2,
+    "bf16": 2,
+    "i32": 4,
+    "tf32": 4,
+    "f32": 4,
+    "i64": 8,
+    "f64": 8,
+}
+
+
+def _smem_vec_align(t: SmemType, vec: int, elem_bytes: int) -> int:
+    """Alignment an LDS vector access can actually guarantee, in bytes.
+
+    The natural alignment of a ``vec``-wide access is ``vec * elem_bytes``, but
+    that only holds if every address the access can land on is that aligned.
+    An LDS tile is indexed ``(..., row, col)`` with ``col`` a multiple of
+    ``vec``, so the address advances by the innermost dimension per row. When
+    that dimension is not a multiple of ``vec`` -- which is exactly what a
+    bank-conflict pad such as ``lds_k_pad`` does -- alternate rows start off
+    the natural boundary.
+
+    ``gcd(vec, innermost)`` is the largest element count every row start is
+    guaranteed to be a multiple of, so it bounds the claim. Outer strides are
+    products that include the innermost dimension, so they never bind tighter
+    and do not need to be considered.
+
+    An alignment attribute is an assertion to LLVM, not a formatting detail:
+    overstating it is undefined behaviour even where the hardware tolerates the
+    access. Understating it only costs instruction selection.
+    """
+    shape = getattr(t, "shape", None)
+    if not shape:
+        return vec * elem_bytes
+    return math.gcd(int(vec), int(shape[-1])) * elem_bytes
 
 
 def _smem_storage_type(t: SmemType) -> str:
@@ -3648,25 +3698,43 @@ class _Lowerer:
         spin.emit(f"  br i1 {hit}, label %{done.label}, label %{spin.label}")
         spin.terminated = True
 
-    def _op_memref_global_atomic_add_pk_bf16(self, op: Op) -> None:
-        """Lower the packed-bf16 atomic add via a generic ``atomicrmw fadd``
-        on a ``<2 x bfloat>``.
+    def _lower_pk_atomic_add(
+        self,
+        op: Op,
+        elem_llvm_type: str,
+        scope: str | None = None,
+        op_name: str = "global_atomic_add_pk_bf16",
+    ) -> None:
+        """Lower a packed (bf16 or fp16) atomic add via a generic
+        ``atomicrmw fadd`` on a ``<2 x elem_llvm_type>``.
 
-        There is NO ``llvm.amdgcn.global.atomic.fadd.v2bf16`` intrinsic in
-        the shipping ROCm LLVM (only the image variant exists), so the prior
-        intrinsic-call lowering failed to compile. The AMDGPU backend selects
-        the native ``global_atomic_pk_add_bf16`` HW instruction from a generic
-        ``atomicrmw fadd <2 x bfloat>`` when the fine/remote-memory model
-        metadata is attached (same contract as the f32 path -- device-local
-        HBM). GEP into the bf16 buffer first (idx may be i64 after the wide
-        C-scatter address fix, so match its width).
+        There is NO ``llvm.amdgcn.global.atomic.fadd.v2bf16`` intrinsic in the
+        shipping ROCm LLVM (only the image variant exists), and the legacy
+        ``llvm.amdgcn.global.atomic.fadd.v2f16`` intrinsic is auto-upgraded to
+        an agent-scope ``seq_cst`` atomicrmw that brackets every atomic with
+        an L2 writeback (``buffer_wbl2``) and invalidate (``buffer_inv``). The
+        AMDGPU backend instead selects the native ``global_atomic_pk_add_*``
+        HW instruction from a generic ``atomicrmw fadd`` under the
+        fine/remote-memory model metadata (same contract as the f32 path --
+        device-local HBM), honouring the op's ``ordering`` attribute. GEP
+        uses the idx operand's own width (idx may be i64 after the wide
+        C-scatter address fix).
+
+        ``scope`` picks the LLVM ``syncscope``: ``None`` emits no clause
+        (LLVM's default, system scope); ``"agent"`` pins the GPU-agent scope
+        the HIP engine's ``__builtin_amdgcn_global_atomic_fadd_v2*`` builtins
+        already compile to, so both engines agree on ISA. The split-K
+        reduction buffer these atomics write into is device-local HBM, so
+        agent scope -- not system -- is the right one for a single-GPU
+        kernel; it is pinned explicitly rather than left to default so a
+        future change to the default can't silently widen it again.
         """
         ptr, idx, val = op.operands
-        self._require_global_header_ptr("global_atomic_add_pk_bf16", ptr)
+        self._require_global_header_ptr(op_name, ptr)
         idx_ty = _llvm_type(idx.type)
         gep = self._fresh("gep")
         self._current().emit(
-            f"  {gep} = getelementptr inbounds bfloat, ptr addrspace(1) "
+            f"  {gep} = getelementptr inbounds {elem_llvm_type}, ptr addrspace(1) "
             f"{self._operand(ptr)}, {idx_ty} {self._operand(idx)}"
         )
         ordering = op.attrs.get("ordering", "monotonic")
@@ -3676,37 +3744,18 @@ class _Lowerer:
             ", !amdgpu.no.remote.memory !1"
             ", !amdgpu.ignore.denormal.mode !1"
         )
+        sync = _llvm_syncscope(scope) if scope else ""
         self._current().emit(
             f"  {op.result.name} = atomicrmw fadd ptr addrspace(1) {gep}, "
-            f"<2 x bfloat> {self._operand(val)} {ordering}{md}"
+            f"<2 x {elem_llvm_type}> {self._operand(val)}{sync} {ordering}{md}"
         )
+
+    def _op_memref_global_atomic_add_pk_bf16(self, op: Op) -> None:
+        self._lower_pk_atomic_add(op, "bfloat")
 
     def _op_memref_global_atomic_add_pk_f16(self, op: Op) -> None:
-        """Lower the packed-fp16 atomic add to its AMDGCN intrinsic.
-
-        Mirrors ``_op_memref_global_atomic_add_pk_bf16`` for fp16: a generic
-        ``atomicrmw fadd <2 x half>`` (agent scope, monotonic) with the
-        device-local memory-model metadata, which the backend selects as the
-        native ``global_atomic_pk_add_f16``. The legacy
-        ``llvm.amdgcn.global.atomic.fadd.v2f16`` intrinsic it replaces is
-        lowered on gfx1250 as a fenced atomic: a ``global_wb`` / ``global_inv``
-        pair and full counter drains around every single add, which
-        serialised the split-K epilogues.
-        """
-        ptr, idx, val = op.operands
-        self._require_global_header_ptr("global_atomic_add_pk_f16", ptr)
-        gep = self._fresh("gep")
-        self._current().emit(
-            f"  {gep} = getelementptr inbounds half, ptr addrspace(1) "
-            f"{self._operand(ptr)}, i32 {self._operand(idx)}"
-        )
-        self._needs_fp_atomic_md = True
-        self._current().emit(
-            f"  {op.result.name} = atomicrmw fadd ptr addrspace(1) {gep}, "
-            f'<2 x half> {self._operand(val)} syncscope("agent") monotonic'
-            ", !amdgpu.no.fine.grained.memory !1"
-            ", !amdgpu.no.remote.memory !1"
-            ", !amdgpu.ignore.denormal.mode !1"
+        self._lower_pk_atomic_add(
+            op, "half", scope="agent", op_name="global_atomic_add_pk_f16"
         )
 
     def _op_memref_global_load_vN(self, op: Op) -> None:
@@ -3919,23 +3968,18 @@ class _Lowerer:
         elem_ty = _llvm_type(op.result.type.elem)  # type: ignore[attr-defined]
         # Element byte size drives the vector alignment. 16-bit
         # (f16 / bf16): 2 bytes; 32-bit (f32 / i32): 4 bytes; 64-bit
-        # (i64 / f64): 8 bytes.
-        elem_bytes = {
-            "i8": 1,
-            "u8": 1,
-            "f16": 2,
-            "bf16": 2,
-            "i32": 4,
-            "tf32": 4,
-            "f32": 4,
-            "i64": 8,
-            "f64": 8,
-        }.get(
+        # (i64 / f64): 8 bytes; the 8-bit floats are 1 byte each. fp8e4m3/bf8e5m2
+        # were missing from this map, so they fell to the default of 2 and a
+        # 16-element fp8 read claimed `align 32` for a 16-byte access -- an
+        # overclaim no padding choice could avoid.
+        elem_bytes = _SMEM_ELEM_BYTES.get(
             op.result.type.elem.name,
             2,  # type: ignore[attr-defined]
         )
         # New 96-bit widths guarantee only element alignment, including FP8.
-        align = 12 // vec if vec in (3, 6, 12) else vec * elem_bytes
+        align = (
+            12 // vec if vec in (3, 6, 12) else _smem_vec_align(stype, vec, elem_bytes)
+        )
         # gfx1250: mark 8-wide (128-bit) LDS loads volatile to block the WMMA-aware
         # pass from substituting ds_load_tr16_b128 (transposed) in place of the plain
         # sequential ds_read_b128.  Only 8-wide loads feed the 16x16x32 WMMA fragment
@@ -4151,6 +4195,7 @@ class _Lowerer:
         return True
 
     def _op_tile_mfma_f32_16x16x16_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.16x16x16f16")
         self._current().emit(
@@ -4162,6 +4207,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x32_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.16x16x32.f16")
         self._current().emit(
@@ -4173,6 +4219,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x16_bf16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.16x16x16bf16.1k")
         # bitcast <4 x bfloat> -> <4 x i16> for the `_1k` intrinsic.
@@ -4193,6 +4240,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x32_bf16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.16x16x32.bf16")
         self._current().emit(
@@ -4210,6 +4258,7 @@ class _Lowerer:
         self._emit_xf32(op, "mfma.f32.32x32x4.xf32", 16)
 
     def _emit_xf32(self, op: Op, intrinsic: str, count: int) -> None:
+        validate_mfma(op)
         error = tf32_mma_target_error(_mma_op_id(op), self._backend.arch)
         if error:
             raise ValueError(error)
@@ -4230,6 +4279,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f64_16x16x4_f64(self, op: Op) -> None:
+        validate_mfma(op)
         c = op.operands[2]
         self._need("mfma.f64.16x16x4f64")
         a_arg = self._mma_operand(op, "a", F64)
@@ -4243,6 +4293,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f64_4x4x4_f64(self, op: Op) -> None:
+        validate_mfma(op)
         c = op.operands[2]
         self._need("mfma.f64.4x4x4f64")
         a_arg = self._mma_operand(op, "a", F64)
@@ -4265,6 +4316,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x4_f32(self, op: Op) -> None:
+        validate_mfma(op)
         c = op.operands[2]
         self._need("mfma.f32.16x16x4f32")
         a_arg = self._mma_operand(op, "a", F32)
@@ -4278,6 +4330,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_32x32x2_f32(self, op: Op) -> None:
+        validate_mfma(op)
         c = op.operands[2]
         self._need("mfma.f32.32x32x2f32")
         a_arg = self._mma_operand(op, "a", F32)
@@ -4291,6 +4344,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_32x32x8_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.32x32x8f16")
         self._current().emit(
@@ -4302,6 +4356,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_32x32x8_bf16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.32x32x8bf16.1k")
         a_cast = self._fresh("mfma_a_i16")
@@ -4321,6 +4376,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_32x32x16_bf16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.32x32x16.bf16")
         self._current().emit(
@@ -4332,21 +4388,25 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_16x16x32_fp8(self, op: Op) -> None:
+        validate_mfma(op)
         self._lower_mfma_fp8_bf8(
             op, dtype="fp8", out_vec=4, intrinsic="16x16x32.fp8.fp8"
         )
 
     def _op_tile_mfma_f32_16x16x32_bf8(self, op: Op) -> None:
+        validate_mfma(op)
         self._lower_mfma_fp8_bf8(
             op, dtype="bf8", out_vec=4, intrinsic="16x16x32.bf8.bf8"
         )
 
     def _op_tile_mfma_f32_32x32x16_fp8(self, op: Op) -> None:
+        validate_mfma(op)
         self._lower_mfma_fp8_bf8(
             op, dtype="fp8", out_vec=16, intrinsic="32x32x16.fp8.fp8"
         )
 
     def _op_tile_mfma_f32_32x32x16_bf8(self, op: Op) -> None:
+        validate_mfma(op)
         self._lower_mfma_fp8_bf8(
             op, dtype="bf8", out_vec=16, intrinsic="32x32x16.bf8.bf8"
         )
@@ -4455,6 +4515,7 @@ class _Lowerer:
 
         Reference: CK Tile ``BlockGemmMxARegBSmemCRegV1::operator()``.
         """
+        validate_mfma(op)
         a, b, c, a_scale, b_scale = op.operands
         cbsz, blgp = self._f8f6f4_16x16x128_selectors(op, a, b)
         self._emit_f8f6f4_16x16x128(
@@ -4480,6 +4541,7 @@ class _Lowerer:
         computed 0 must never replace the literal here. The attributes
         ``a_format`` and ``b_format`` work as for the MX op.
         """
+        validate_mfma(op)
         a, b, c = op.operands
         cbsz, blgp = self._f8f6f4_16x16x128_selectors(op, a, b)
         self._emit_f8f6f4_16x16x128(
@@ -4502,6 +4564,7 @@ class _Lowerer:
         per lane) and are bit-cast to ``<8 x i32>``. The result is
         ``<4 x float>``.
         """
+        validate_mfma(op)
         a, b, c = op.operands
         self._emit_f8f6f4_16x16x128(op, a, b, c, "0", "0", "a_fp8_128", "b_fp8_128")
 
@@ -4660,6 +4723,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_32x32x16_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.32x32x16.f16")
         self._current().emit(
@@ -4671,6 +4735,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_4x4x4_f16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.4x4x4f16")
         self._current().emit(
@@ -4682,6 +4747,7 @@ class _Lowerer:
         )
 
     def _op_tile_mfma_f32_4x4x4_bf16(self, op: Op) -> None:
+        validate_mfma(op)
         a, b, c = op.operands
         self._need("mfma.f32.4x4x4bf16.1k")
         # bitcast <4 x bfloat> -> <4 x i16> for the `_1k` intrinsic.
@@ -5452,6 +5518,23 @@ class _Lowerer:
             f"  {op.result.name} = ptrtoint ptr addrspace(3) {base_ptr} to i64"
         )
 
+    def _op_tile_global_addr_of(self, op: Op) -> None:
+        # Not `inbounds`: the address feeds a TDM descriptor, and a clipped fill
+        # can legitimately point past the allocation -- early refill's second
+        # prologue fill does when K < tile_k, with a zero extent. An inbounds
+        # GEP past the object is poison, which the mover's clipping cannot undo;
+        # a plain GEP is defined for any index.
+        ptr, index = op.operands
+        elem_ty = _llvm_type(ptr.type.pointee)  # type: ignore[attr-defined]
+        gep = self._fresh("gaddr_gep")
+        self._current().emit(
+            f"  {gep} = getelementptr {elem_ty}, ptr addrspace(1) "
+            f"{self._operand(ptr)}, {_llvm_type(index.type)} {self._operand(index)}"
+        )
+        self._current().emit(
+            f"  {op.result.name} = ptrtoint ptr addrspace(1) {gep} to i64"
+        )
+
     def _op_tile_smem_ptr_add(self, op: Op) -> None:
         base, off = op.operands
         if base.name in self._lds_prov:
@@ -6046,9 +6129,10 @@ class _Lowerer:
 
     def _op_tile_gpu_check_failed(self, op: Op) -> None:
         """Store 1 to the kernel's GPU-check word, then return from the kernel,
-        which ends the block like ``cf.return``. Not a trap: on Windows the
-        trap handler parks a trapped wave and the launch never returns, while
-        a returned lane lets the launch complete."""
+        which ends the block like ``cf.return``. Not a trap: a taken trap does
+        not let the process carry on (``tile.trap`` in
+        ``dsl_docs/reference/op_vocabulary.md``), while a returned lane lets
+        the launch complete."""
         error = _gpu_check_failed_op_error(op)
         if error:
             raise ValueError(error)
@@ -6454,6 +6538,31 @@ class _Lowerer:
             f"i32 {self._operand(voffset)}, "
             f"i32 {self._operand(soffset)}, "
             f"i32 0)"
+        )
+
+    def _op_tile_buffer_atomic_fadd_f32(self, op: Op) -> None:
+        """f32 buffer atomic add; the pre-add result is unused (no-return form).
+
+        The ``cachepolicy`` attr is the intrinsic's immediate and must be an
+        integer in 0..31 (the builder always sets it); a missing, non-integer
+        or out-of-range value from hand-built or imported IR is rejected rather
+        than coerced.
+        """
+        rsrc, voffset, soffset, val = op.operands
+        cp = op.attrs.get("cachepolicy")
+        if isinstance(cp, bool) or not isinstance(cp, int) or not 0 <= cp <= 0x1F:
+            raise ValueError(
+                f"{op.name}: cachepolicy attr must be an integer in 0..31, got {cp!r}"
+            )
+        self._need("raw.ptr.buffer.atomic.fadd.f32")
+        r = self._fresh("bafadd")
+        self._current().emit(
+            f"  {r} = call float @llvm.amdgcn.raw.ptr.buffer.atomic.fadd.f32("
+            f"float {self._operand(val)}, "
+            f"ptr addrspace(8) {self._operand(rsrc)}, "
+            f"i32 {self._operand(voffset)}, "
+            f"i32 {self._operand(soffset)}, "
+            f"i32 {cp})"
         )
 
     def _op_tile_buffer_store_vN_f32(self, op: Op) -> None:

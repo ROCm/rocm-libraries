@@ -101,8 +101,33 @@ extern "C" {
  *    changes its size.
  * 10: rocke_param_opts_t gained nocapture, nonnull and dereferenceable (each
  *     with a *_set flag) and the integer facts (rocke_int_facts_t) at its
- *     end, which changes its size. */
-#define ROCKE_ABI_VERSION 10
+ *     end, which changes its size.
+ * 11: rocke_implicit_gemm_conv_wgrad_spec_t gained register_prefetch in its
+ *     old tail padding: size unchanged, but an old caller leaves that byte
+ *     unset.
+ * 12: indexed matrix sources, independent destination, and source-owned scales
+ *     replace the flat MMA fields and role enum. Indexed queries supplement the
+ *     result-aware A/B/C queries; native consumers must rebuild. ABI11 libraries
+ *     do not share this combined layout and must be refused.
+ * 13: rocke_gemm_trait_spec_t gained the gfx1250 TDM and K-loop fields (tdm,
+ *     tdm_depth, ab_load_elem_bytes and its _set flag, split_barrier,
+ *     tdm_alternate_issuers, tdm_early_refill), which changes its size and the
+ *     layout of every GEMM spec that embeds it.
+ * 14: rocke_implicit_gemm_conv_spec_t, rocke_dgrad_conv_spec_t and
+ *     rocke_implicit_gemm_conv_wgrad_spec_t gained mma_dtype (TF32 compute)
+ *     mid-struct, and rocke_coalesced_tile_loader_t and
+ *     rocke_async_tile_loader_t gained elem_dtype, which changes their layout
+ *     and size.
+ * 15: rocke_direct_conv_wgrad_spec_t gained image_per_block through
+ *     uniform_wave at its end, which changes its size.
+ * 16: rocke_implicit_gemm_conv_wgrad_spec_t gained prefetch_global_regs in
+ *     its old tail padding: size unchanged, but an old caller leaves that byte
+ *     unset.
+ * 17: rocke_attention_tiled_2d_spec_t gained lse_head_major and
+ *     rocke_unified_attention_3d_tiled_spec_t gained emit_lse, each a bool in
+ *     its old tail padding: sizes unchanged, but an old caller leaves that byte
+ *     unset. */
+#define ROCKE_ABI_VERSION 17
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

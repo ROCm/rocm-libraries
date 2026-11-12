@@ -65,14 +65,14 @@ for what is actually exercised vs. manual/diagnostic/demo.
 
 | Layer | Python (pytest-collected) | C++ / cross-language |
 |---|---|---|
-| `core/` | `test_ir_serialize.py`, `dsl_optimization/` (constant-fold, unroll, barrier) | `ir_serialize_roundtrip.cpp` (**CTest**); `smoke.cpp` (optional build-only target, **not** registered); `ir_lower_cli.cpp` (manual CLI tool) |
+| `core/` | `test_ir_serialize.py`, `dsl_optimization/` (constant-fold, unroll, barrier) | `ir_serialize_roundtrip.cpp` (**CTest**); `test_gemm_spec_dict_binding_parity.py` (source-only: the GEMM spec dicts against the binding's key reads, run from the source tree as the `rocke_gemm_spec_dict_binding_parity` **CTest**); `smoke.cpp` (optional build-only target, **not** registered); `ir_lower_cli.cpp` (manual CLI tool) |
 | `helpers/` | (covered today via `test_rocke.py` TestHelpers; dedicated split is a follow-up) | - |
 | `instances/` | `test_rocke_multiarch.py`, `test_gfx1250_*`, `test_moe_*`, `test_wmma_schedule.py`, `test_rocke_gfx950_smoke.py` | `tiled_attention_2d_reentrancy.cpp` (**CTest**); `parity/` 47 `*_emit.py`/`*_emit.c` pairs + `run_parity.py` (driven by the byte-identity gate, **not** pytest); `differential/` drivers `run_diff.py`, `fuzz_diff.py`, `ir_artifact_diff.py`, `numeric.py`; `jit_demo.cpp`, `gemm_jit_demo.cpp` (manual demos, **not** built/registered) |
 | `runtime/` | (covered via `test_rocke.py`; dedicated split is a follow-up) | - |
 | `dispatch/` | `dispatch_tests/{gemm,attention,conv,moe,norm}` | - |
 | `analysis/` | (covered via `test_rocke.py`) | - |
 | `benchmark/` | `test_occupancy_targets.py` (the occupancy model on every target rocKE lowers for; gfx908 checked against llc) | - |
-| `support/` | tests of the `rocke.tests` helpers: `test_gpu.py`, `test_ir_validity.py`, `test_arch_marks.py`, `test_universal_gemm.py` | - |
+| `support/` | tests of the `rocke.tests` helpers: `test_gpu.py`, `test_ir_validity.py`, `test_arch_marks.py`, `test_universal_gemm.py`, `test_llc.py` | - |
 | `tools/` | `test_arch_domain_artifact.py` (source-only structure/generator units), `test_run_all.py`, tool-sidecar units | `rocke_arch_domain_reproducibility` (**CTest**, artifact reproduction through the host toolchain) |
 | (root) | `test_rocke.py` (multi-layer monolith), `test_rocke_ci_static.py` | - |
 
@@ -97,7 +97,9 @@ do not all edit one central file:
 | `tests/cmake/PortableIrTests.cmake` | Portable-IR native tests and the replay CLI |
 | `tests/cmake/InstanceTests.cmake` | Instance-layer native tests |
 | `tests/cmake/TestCategoryLabels.cmake` | Provider YAML category application after every test is registered |
-| `platform/CMakeLists.txt` | Installed Python and library CTest entries; not build-tree C++ ownership |
+| `platform/CMakeLists.txt` | Installed Python CTest entries; includes `library/tests/ctest_lists.cmake`; not build-tree C++ ownership |
+| `library/tests/ctest_lists.cmake` | Installed library CTest entries (each library suite enrols its own pytest files) |
+| `library/cpp/tests/CMakeLists.txt` | Library C++ mirror host tests (`rocke_wgrad_streamk_host`, `rocke_conv_direct_dw_dgrad_host`) |
 
 Add a native target to its concern-owned fragment. Do not put registration back
 in the orchestrator, and do not create a generic catch-all fragment. Keep unusual
@@ -316,7 +318,7 @@ then obtains each native parity executable from CTest, as listed in
 (`ROCKE_UNSIGNED_INT_OPS_CLI`). Both pytest passes receive those paths, so the
 storage IR/HIP parity, serialization, C++ builder type-rule parity, nontemporal
 HIP-source parity and unsigned integer op C API parity tests run automatically.
-The installed `rocke_pytest` ctest sets `ROCKE_UNSIGNED_INT_OPS_CLI` itself.
+The installed `rocke_pytest_*` ctest entries set `ROCKE_UNSIGNED_INT_OPS_CLI` themselves.
 `--config` selects the native test configuration (default `Release`). A build
 or fixture-discovery failure stops the runner instead of silently skipping
 coverage.
@@ -411,6 +413,9 @@ and the [convolution guide](../../library/tests/conv_reference/docs/conv-test-re
 publication requirements, and coverage limits.
 
 The convolution gradient host contract joins `rocke_library_conv_pytest`.
+The conv IR golden, platform-regression, split-K, `ceil_div` and conv
+doc-example (`test_verify_dsl_docs_conv.py`) host tests run as their own entry,
+`rocke_library_conv_ir_pytest`.
 `rocke_library_gpu_pytest` also runs the dgrad and wgrad cases in
 `conv_reference/gradient_cases.py` on each of gfx942/gfx950 against live NumPy
 oracles, with three executions per case.
