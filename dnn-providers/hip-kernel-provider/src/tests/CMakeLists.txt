@@ -482,6 +482,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(_hkp_catalog_tiles_cases_gfx942_unified_2d
         EveryShippedKernelsGeometryIsOneTheEngineLaunches
         EveryCellShipsItsHeadSizesDefaultGeometry
+        EveryCellRockeServesWithItsProductionStackShipsIt
         EveryShippedKernelIsBottomRightCausalWithoutAWindow)
     set(_hkp_model_binding_cases_gfx942_unified_3d
         TheBoundL2KernelRankerLoads
