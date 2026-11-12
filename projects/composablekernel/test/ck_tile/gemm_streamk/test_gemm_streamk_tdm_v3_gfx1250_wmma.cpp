@@ -179,9 +179,10 @@ TYPED_TEST_SUITE(TestCkTileStreamKTdmV3Gfx1250, StreamKTdmV3Configs);
 
 TYPED_TEST(TestCkTileStreamKTdmV3Gfx1250, SplitAndMixedTileCases) { this->RunSplitCases(); }
 
-// A single active workgroup on a 1-tile problem sets sk_ctas == 1 and dp_tiles == 0,
-// covering the 1-CTA full-tile path in StreamKKernel::StreamKGemm (store_tile directly to C).
-// Emulator-safe (1 workgroup, no cross-CTA wait), so it also runs in GFX1250_STREAMK_SMOKE.
+// Three output tiles with one K iteration per tile on two workgroups puts all three tiles in
+// Stream-K (sk_tiles == 3, sk_ctas == 2) with zero partial-tile segments, covering the full-tile
+// path in StreamKKernel::StreamKGemm (store directly to C). Safe for GFX1250_STREAMK_SMOKE because
+// no tile needs a cross-workgroup wait.
 TEST(StreamKTdmV3EdgeCases, OneCtaFullTile)
 {
     using Config4W  = StreamKTdmV3Config<Row,
@@ -209,8 +210,8 @@ TEST(StreamKTdmV3EdgeCases, OneCtaFullTile)
                                          TdmStore,
                                          Unpadded>;
 
-    run_streamk_tdm_v3_case<Config4W>(128, 128, 256, 1);
-    run_streamk_tdm_v3_case<Config16W>(256, 256, 256, 1);
+    run_streamk_tdm_v3_case<Config4W>(128, 3 * 128, 64, 2, StreamKTdmSplit::FullTile);
+    run_streamk_tdm_v3_case<Config16W>(256, 3 * 256, 64, 2, StreamKTdmSplit::FullTile);
 }
 
 #if !GFX1250_STREAMK_SMOKE
