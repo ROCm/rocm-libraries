@@ -250,14 +250,16 @@ fn recompute(f: &mut MFunc) -> usize {
             if !rw[r] {
                 continue;
             }
-            let deeper = deeper_of(r);
-            // Its other uses must come before the first one in a deeper loop, or the value is live through the loop anyway.
-            let first_deeper = deeper.iter().map(|&u| at(u)).min();
+            // Where it lands, through the chains that read it too.
+            let sites = sites_of(&rw, r);
+            // Its other uses must come before the first one in a deeper loop that reads it itself, or the value is live
+            // through the loop anyway (a chain's own first use is not the loop's: measured slower, below).
+            let first_deeper = deeper_of(r).iter().map(|&u| at(u)).min();
             let early = first_deeper.is_some_and(|fd| uses_of[r].iter().all(|&u| depth(u.0) > depth(def_at[r].expect("defined once").0) || at(u) < fd));
             let mut ok = early;
             if ok {
                 let ls = leaves(&rw, r);
-                ok = sites_of(&rw, r).iter().all(|&(ub, uk)| ls.iter().all(|&s| live_at(s, 2 * at((ub, uk)))));
+                ok = sites.iter().all(|&(ub, uk)| ls.iter().all(|&s| live_at(s, 2 * at((ub, uk)))));
                 if trace && !ok {
                     eprintln!("remat: v{r} dropped: a leaf is not live at a use ({ls:?})");
                 }
@@ -392,7 +394,7 @@ mod tests {
         let r = Opnd::R;
         let tid = reg(&mut f, Class::V, 1, Some(0));
         let t = reg(&mut f, Class::V, 1, None);
-        let mut entry = vec![MInst::new(Opc::Copy, [r(t)], [r(tid)])];
+        let mut entry = vec![MInst::new(Opc::VAddNcU32, [r(t)], [Opnd::Imm(1), r(tid)])];
         let addrs: Vec<VRef> = (0..n)
             .map(|i| {
                 let a = reg(&mut f, Class::V, 1, None);
@@ -431,8 +433,8 @@ mod tests {
         assert_eq!(effects(&f, 3), before, "the same stores");
         let live_after = regalloc::pressure(&f).unwrap().vgprs;
         assert!(live_after + 8 <= live_before, "{live_before} -> {live_after}");
-        // One recomputation per address in the loop, none left in front of it.
-        assert_eq!(f.blocks[0].insts.iter().filter(|i| i.op == Opc::VAddNcU32).count(), 0);
+        // One recomputation per address in the loop, none left in front of it but the base's.
+        assert_eq!(f.blocks[0].insts.iter().filter(|i| i.op == Opc::VAddNcU32).count(), 1);
         assert_eq!(f.blocks[1].insts.iter().filter(|i| i.op == Opc::VAddNcU32).count(), 12);
     }
 
@@ -443,7 +445,7 @@ mod tests {
         // The late use comes after the first one in the loop, so the value is live through it anyway.
         assert_eq!(run(&mut f), 3);
         assert_eq!(effects(&f, 3), before);
-        assert_eq!(f.blocks[0].insts.iter().filter(|i| i.op == Opc::VAddNcU32).count(), 1);
+        assert_eq!(f.blocks[0].insts.iter().filter(|i| i.op == Opc::VAddNcU32).count(), 2);
     }
 
     #[test]
@@ -482,6 +484,25 @@ mod tests {
         let count = |b: usize, op: Opc| f.blocks[b].insts.iter().filter(|i| i.op == op).count();
         assert_eq!((count(0, Opc::VAddCoU32), count(0, Opc::VAddCoCiU32)), (0, 0), "dead chain and its definition gone");
         assert_eq!((count(1, Opc::VAddCoU32), count(1, Opc::VAddCoCiU32)), (1, 0));
+    }
+
+    /// The spiller too recomputes addresses made from a VGPR (the thread id's sums) on gfx950, where on gfx1151 it spills them.
+    #[test]
+    fn the_spiller_recomputes_values_from_vgprs_on_gfx950() {
+        use crate::rir::regalloc::{allocate_spilling, Limits};
+        use crate::rir::spill::SpillConfig;
+        let cfg = SpillConfig { lds_size: 256, wg_size: 32, lds_slots: 64, agpr_slots: 0 };
+        let limits = Limits { vgprs: 8, sgprs: 20 };
+        let f = kernel(12, false);
+        let want = effects(&f, 3);
+        let mut g = f.clone();
+        let on = allocate_spilling(&mut g, limits, cfg).expect("allocates");
+        assert_eq!(effects(&g, 3), want);
+        let mut h = f.clone();
+        h.target = Target::Gfx1151;
+        let off = allocate_spilling(&mut h, limits, cfg).expect("allocates");
+        assert_eq!(effects(&h, 3), want);
+        assert!(on.spill.remat >= 6 && off.spill.remat == 0, "{:?} against {:?}", on.spill, off.spill);
     }
 
     #[test]

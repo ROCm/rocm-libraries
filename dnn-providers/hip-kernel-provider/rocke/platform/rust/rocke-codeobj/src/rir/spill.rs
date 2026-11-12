@@ -839,6 +839,12 @@ impl Spiller {
         let mut remat_of: Vec<u32> = vec![NO_REMAT; nv];
         let mut remat: Vec<MInst> = Vec::new();
         for c in chosen {
+            if super::debug_flag("tracepressure") {
+                match c {
+                    Choice::Spill(list, size, heat) => eprintln!("spill: web of {size} dwords ({} registers, first v{}), weighted accesses {heat}", list.len(), list[0].0),
+                    Choice::Remat(v, at) => eprintln!("spill: recompute v{v} (defined at block {} inst {})", at.0, at.1),
+                }
+            }
             match c {
                 Choice::Spill(list, size, heat) => {
                     let slot = if class == Class::S {
