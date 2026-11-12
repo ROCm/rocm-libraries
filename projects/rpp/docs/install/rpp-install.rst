@@ -12,11 +12,11 @@ ROCm Performance Primitives (RPP) supports HIP and CPU-only backends. The CPU ba
 
 .. note::
 
-    Audio augmentations are always enabled. The HIP (GPU) spectrogram loads
-    ``librocfft.so.0`` with ``dlopen`` on first use, so rocFFT must be installed to use it.
-    rocFFT is packaged as a soft dependency (``Recommends`` on Debian, ``Suggests`` on RPM),
-    and every other RPP function works without it. For more information, see
-    :doc:`./rpp-build`.
+    Audio augmentations are always enabled. The HIP spectrogram needs the rocFFT
+    runtime. rocFFT is a ``Recommends`` dependency on Debian and a ``Suggests``
+    dependency on RPM, so the package manager might not install it. If rocFFT is
+    missing, the HIP spectrogram returns ``RPP_ERROR_NOT_IMPLEMENTED``. Every
+    other RPP function works without it. For more information, see :doc:`./rpp-build`.
 
 Before you begin, verify that your system is supported. For more information,
 see :ref:`ROCm Core SDK components <rocm:release-components>`.
