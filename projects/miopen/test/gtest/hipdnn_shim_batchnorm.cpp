@@ -1680,6 +1680,32 @@ bool RecordTuningGap(const std::string& case_name, const hs::CallResult& result,
     return served;
 }
 
+// Training, backward, and inference without the estimates (which runs training),
+// each a call MIOpen serves under the current policy and the hipDNN path declines.
+// The case names are prefix + "_train", "_bwd" and "_infer".
+void ExpectTrainingPolicyGap(miopen::Handle& handle, const std::string& prefix, const char* reason)
+{
+    {
+        SCOPED_TRACE("train");
+        TrainData d;
+        if(RecordTuningGap(prefix + "_train", TrainUnderPolicy(handle, d), reason))
+            CheckTrain(handle, d, true, false);
+    }
+    {
+        SCOPED_TRACE("bwd");
+        BwdData d;
+        if(RecordTuningGap(prefix + "_bwd", BwdUnderPolicy(handle, d), reason))
+            CheckBwd(handle, d);
+    }
+    {
+        SCOPED_TRACE("infer");
+        InferData d;
+        const auto result = InferUnderPolicy(handle, d, false);
+        if(RecordTuningGap(prefix + "_infer", result, reason))
+            CheckInferWithoutEstimates(handle, d);
+    }
+}
+
 // The provider sets only None or Search on its handle, so it cannot run the
 // policies that also write or clean the perf db. The shim declines them for
 // training and backward, and for inference without the estimated stats, which
@@ -1688,27 +1714,7 @@ TEST(GPU_HipdnnShimBNGaps_FP32, DbUpdatePolicyIsDeclined)
 {
     auto&& handle = get_handle();
     const ScopedHandleTuningPolicy policy(handle, miopenTuningPolicyDbUpdate);
-    const char* reason = "tuning policy";
-
-    {
-        SCOPED_TRACE("train");
-        TrainData d;
-        if(RecordTuningGap("tuning_policy_dbupdate_train", TrainUnderPolicy(handle, d), reason))
-            CheckTrain(handle, d, true, false);
-    }
-    {
-        SCOPED_TRACE("bwd");
-        BwdData d;
-        if(RecordTuningGap("tuning_policy_dbupdate_bwd", BwdUnderPolicy(handle, d), reason))
-            CheckBwd(handle, d);
-    }
-    {
-        SCOPED_TRACE("infer");
-        InferData d;
-        const auto result = InferUnderPolicy(handle, d, false);
-        if(RecordTuningGap("tuning_policy_dbupdate_infer", result, reason))
-            CheckInferWithoutEstimates(handle, d);
-    }
+    ExpectTrainingPolicyGap(handle, "tuning_policy_dbupdate", "tuning policy");
 }
 
 // MIOpen lets a Search handle win over MIOPEN_FIND_ENFORCE, but the provider sets
@@ -1723,25 +1729,10 @@ TEST(GPU_HipdnnShimBNGaps_FP32, SearchPolicyUnderFindEnforceIsDeclined)
     const ScopedHandleTuningPolicy policy(handle, miopenTuningPolicySearch);
     const char* reason = "MIOPEN_FIND_ENFORCE";
 
-    const ScopedFindEnforce find_enforce("DB_CLEAN");
     {
-        SCOPED_TRACE("train");
-        TrainData d;
-        if(RecordTuningGap("find_enforce_db_clean_train", TrainUnderPolicy(handle, d), reason))
-            CheckTrain(handle, d, true, false);
-    }
-    {
-        SCOPED_TRACE("bwd");
-        BwdData d;
-        if(RecordTuningGap("find_enforce_db_clean_bwd", BwdUnderPolicy(handle, d), reason))
-            CheckBwd(handle, d);
-    }
-    {
-        SCOPED_TRACE("infer");
-        InferData d;
-        const auto result = InferUnderPolicy(handle, d, false);
-        if(RecordTuningGap("find_enforce_db_clean_infer", result, reason))
-            CheckInferWithoutEstimates(handle, d);
+        SCOPED_TRACE("DB_CLEAN");
+        const ScopedFindEnforce find_enforce("DB_CLEAN");
+        ExpectTrainingPolicyGap(handle, "find_enforce_db_clean", reason);
     }
 
     const std::pair<const char*, const char*> others[] = {
