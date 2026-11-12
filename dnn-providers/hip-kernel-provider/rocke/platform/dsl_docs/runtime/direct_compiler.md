@@ -232,14 +232,17 @@ fixed rules:
   keeps at least the same occupancy. On gfx950, unrolled code that spills no
   more but loses occupancy is also kept when a cost model, counting each block
   by the trips of the loops around it, gives it a fifth fewer cycles at its
-  occupancy than the rolled code at its own. In a kernel without MFMAs it is
-  also kept when it keeps three quarters of the waves: the cost model lets the
-  other waves hide each trip's load wait, and a small grid has none.
+  occupancy than the rolled code at its own.
 - When nothing fits the registers without spilling, the compile tries again
   without merging repeated LDS loads (merged loads live longer) and with each
   WMMA moved up to its operands. It spills only when that does not fit either.
 - A result that fits only by packing register tuples first is compared with a
   compile without that packing, and the one with more occupancy is kept.
+- On gfx950, a kernel without MFMAs that unrolled a loop and runs fewer waves
+  than the hardware allows is compiled again without merging repeated LDS
+  loads (the unrolled copies of two loops reading one table share their loads,
+  which then stay live across all of them), and the compile with more waves is
+  kept if it spills no more.
 
 These choices depend only on the input. They are why two kernels of a similar
 size can take very different compile times.
@@ -322,6 +325,7 @@ Switches for both targets:
 | `nolicm` | No loop-invariant code motion. |
 | `noalias` | Ignores the `noalias` facts: every pair of global accesses stays in order. |
 | `nounroll` | No automatic unrolling. Loops the IR marks `unroll = true` still unroll. |
+| `noglobalfold` | Leaves the constants of unrolled copies in their global addresses (no offset folding). |
 | `noldsreuse` | Every LDS allocation gets its own space. |
 | `nohashcons` | Parses repeated constants as written. |
 | `nopeephole`, `nopeephole_<family>` | Skips the proven peephole rules, or one family of them. |

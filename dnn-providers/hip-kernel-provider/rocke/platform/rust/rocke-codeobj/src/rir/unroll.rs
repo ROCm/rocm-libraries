@@ -141,7 +141,7 @@ pub fn unroll_optimized(
     ws.facts.merged_loads = facts.merged_loads;
     opt::sweep(kernel, &mut ws)?;
     let folded = fold_select_offsets(kernel, &ws.facts);
-    if fold_global_offsets(kernel, &ws.facts) || folded {
+    if (!super::debug_flag("noglobalfold") && fold_global_offsets(kernel, &ws.facts)) || folded {
         opt::sweep(kernel, &mut ws)?;
     }
     unshare_offsets(kernel, &mut ws.facts);

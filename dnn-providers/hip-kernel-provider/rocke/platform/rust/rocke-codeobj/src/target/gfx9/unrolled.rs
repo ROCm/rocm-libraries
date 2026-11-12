@@ -57,14 +57,13 @@ pub fn keeps(unrolled: &MFunc, u: &CompileStats, rolled: &MFunc, r: &CompileStat
     if u.waves >= r.waves {
         return true;
     }
-    // Without MFMAs a loop's trips wait on their loads, and a kernel that is not the size of the machine (a
-    // reduction over partial results) has no other waves to hide that: `cost` assumes the waves it is given, so it
-    // takes the waiting for cheap. Unrolled, all loads are in flight at once, as LLVM's code is, for up to a
-    // quarter fewer waves.
-    if !has_mfma(unrolled) && u.waves * 4 >= r.waves * 3 {
-        return true;
-    }
     !crate::rir::debug_flag("nounrollcost") && cost(unrolled, u.waves) * 5 <= cost(rolled, r.waves) * 4
+}
+
+/// Whether a gfx950 compile (`f`, statistics `s`) unrolled a loop, issues no MFMA and runs fewer waves than the
+/// target allows.
+pub fn lost_waves_without_mfma(f: &MFunc, s: &CompileStats, target: crate::target::Target) -> bool {
+    target == crate::target::Target::Gfx950 && s.unrolled > 0 && s.waves < target.info().max_waves && !has_mfma(f)
 }
 
 /// Whether `f` issues an MFMA.
@@ -153,7 +152,6 @@ fn constant_before(f: &MFunc, head: usize, reg: Opnd) -> Option<i64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::target::gfx9::gen_isa::Gfx9Op;
     use crate::target::Target;
 
     fn s(n: u16) -> Opnd {
@@ -228,21 +226,34 @@ mod tests {
         assert_eq!(crate::rir::unroll::unroll_loops_with(&mut kernel, &mut lds, Some(AUTO)).expect("walks"), 0);
     }
 
+    /// The split-KV attention reduce kernel (seg64, d128): two 64-trip loops over the same LDS table, each trip a
+    /// global load and an FMA, no MFMA.
+    const SPLITKV_REDUCE: &str = include_str!("testdata/splitkv_reduce_seg64.ir");
+
     #[test]
-    fn a_kernel_without_mfmas_keeps_unrolled_code_that_loses_a_quarter_of_its_waves() {
+    fn the_split_kv_reduce_unrolls_and_keeps_all_its_waves() {
+        let compiled = crate::rir::compile_any_target(SPLITKV_REDUCE, Target::Gfx950).unwrap_or_else(|e| panic!("{e}"));
+        let s = &compiled.stats;
+        assert_eq!(s.unrolled, 2, "both 64-trip loops unroll");
+        // Merged LDS loads (the second loop reads the first's table) would hold 64 values across the unrolled loads: more
+        // VGPRs and a lost wave; without merging, all loads are in flight at once.
+        assert_eq!(s.waves, Target::Gfx950.info().max_waves, "{s:?}");
+        assert!(s.vgprs <= 40 && s.spill.scratch_dwords == 0, "{s:?}");
+    }
+
+    #[test]
+    fn only_unrolled_gfx950_code_without_mfmas_that_runs_fewer_waves_is_retried() {
         let func = |op: Opc| MFunc {
             blocks: vec![MBlock { insts: vec![MInst::new(op, [s(4)], [s(4), Opnd::Imm(1)])], loop_depth: 0 }],
             target: Target::Gfx950,
             ..MFunc::default()
         };
-        let stats = |waves| CompileStats { waves, ..CompileStats::default() };
-        let (plain, mfma) = (func(Opc::SAddI32), func(Opc::Gfx9(Gfx9Op::VMfma16x16x32F16)));
-        assert!(!has_mfma(&plain) && has_mfma(&mfma));
-        assert!(keeps(&plain, &stats(6), &plain, &stats(8)), "6 of 8 waves");
-        assert!(!has_mfma(&plain) && keeps(&plain, &stats(8), &plain, &stats(8)));
-        // 5 of 8 waves: the cost model decides, and equal code does not cost a fifth less.
-        assert!(!keeps(&plain, &stats(5), &plain, &stats(8)));
-        // With MFMAs the cost model decides at 7 of 8 waves too.
-        assert!(!keeps(&mfma, &stats(7), &mfma, &stats(8)));
+        let stats = |waves, unrolled| CompileStats { waves, unrolled, ..CompileStats::default() };
+        let (plain, mfma) = (func(Opc::SAddI32), func(Opc::Gfx9(crate::target::gfx9::gen_isa::Gfx9Op::VMfma16x16x32F16)));
+        assert!(lost_waves_without_mfma(&plain, &stats(7, 1), Target::Gfx950));
+        assert!(!lost_waves_without_mfma(&plain, &stats(8, 1), Target::Gfx950), "all waves");
+        assert!(!lost_waves_without_mfma(&plain, &stats(7, 0), Target::Gfx950), "nothing unrolled");
+        assert!(!lost_waves_without_mfma(&mfma, &stats(7, 1), Target::Gfx950), "an MFMA kernel");
+        assert!(!lost_waves_without_mfma(&plain, &stats(7, 1), Target::Gfx1151), "gfx1151");
     }
 }

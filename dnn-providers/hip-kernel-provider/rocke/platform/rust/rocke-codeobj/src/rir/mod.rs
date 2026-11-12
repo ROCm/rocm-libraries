@@ -1276,6 +1276,15 @@ fn compile_retrying(
                 result => result,
             }
         }
+        // gfx950, a kernel without MFMAs that unrolled a loop and lost waves for it: merged LDS loads (copies of
+        // one loop reading what another reads) live across all the unrolled loads and keep them from being in
+        // flight together; the compile without merging keeps the waves.
+        Ok(first) if crate::target::gfx9::unrolled::lost_waves_without_mfma(&first.func, &first.stats, target) => {
+            match compile_with(text, false, false, parse, auto, unrolled, threads, target, None) {
+                Ok(other) if other.stats.waves > first.stats.waves && spilled(&other.stats) <= spilled(&first.stats) => Ok(other),
+                _ => Ok(first),
+            }
+        }
         Ok(packed) if packed.tight => match compile_with(text, false, false, parse, auto, unrolled, threads, target, None) {
             Ok(other) if other.stats.waves > packed.stats.waves => Ok(other),
             _ => Ok(packed),
