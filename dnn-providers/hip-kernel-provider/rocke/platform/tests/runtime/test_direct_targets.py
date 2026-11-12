@@ -10,7 +10,7 @@ from __future__ import annotations
 import struct
 
 import pytest
-from rocke.core.ir import F32, IRBuilder, PtrType
+from rocke.core.ir import F32, I32, IRBuilder, PtrType
 from rocke.helpers.compile import compile_kernel
 from rocke.runtime import code_object
 from rocke.runtime.code_object import CodeObjectError, DirectUnsupported
@@ -120,7 +120,9 @@ def _asm_kernel():
     x = b.param("X", PtrType(F32, "global"), noalias=True, readonly=True, align=16)
     y = b.param("Y", PtrType(F32, "global"), noalias=True, writeonly=True, align=16)
     tid = b.thread_id_x()
-    moved = b.inline_asm("v_mov_b32_sdwa $0, $1 dst_sel:WORD_1", "=v,v", [b.global_load_f32(x, tid)], F32)
+    moved = b.inline_asm(
+        "v_mov_b32_sdwa $0, $1 dst_sel:WORD_1", "=v,v", [b.global_load_f32(x, tid)], F32
+    )
     b.global_store(y, tid, moved, align=4)
     return b.kernel
 
@@ -146,6 +148,65 @@ def test_compile_kernel_falls_back_to_comgr_for_what_direct_refuses() -> None:
     assert other.code_object_backend == "comgr" and "gfx942" in other.direct_fallback
 
 
+def _escaping_constant_kernel(hoisted: bool):
+    """A constant first made in a loop body and read after the loop (a builder
+    that caches constants across scopes); ``hoisted`` makes it before the loop."""
+    b = IRBuilder("direct_const_scope")
+    b.kernel.attrs["max_workgroup_size"] = 64
+    x = b.param("X", PtrType(I32, "global"), noalias=True, readonly=True, align=16)
+    y = b.param("Y", PtrType(I32, "global"), noalias=True, writeonly=True, align=16)
+    tid = b.thread_id_x()
+    lo, hi, step = b.const_i32(0), b.const_i32(4), b.const_i32(1)
+    c = b.const_i32(1234) if hoisted else None
+    with b.scf_for(lo, hi, step, iv_name="k") as k:
+        c = b.const_i32(1234) if c is None else c
+        b.global_store(y, b.add(tid, b.mul(k, c)), tid, align=4)
+    b.global_store(y, tid, b.select(b.cmp_lt(tid, b.const_i32(9)), tid, c), align=4)
+    b.ret()
+    return b.kernel
+
+
+def test_a_constant_read_after_its_loop_compiles_as_if_made_before_it() -> None:
+    """The LLVM lowering inlines constants, so a constant made in a loop body may be reused after it;
+    the direct parser scopes names by region and moves such a constant to the kernel's start.
+    """
+    _require_direct_library()
+    from rocke.core.ir_serialize import serialize
+
+    escaping = serialize(_escaping_constant_kernel(hoisted=False))
+    hsaco = code_object.build_direct_rocke_ir_hsaco(escaping, isa=GFX950)[0]
+    assert _e_flags(hsaco) == 0x54F
+    # same instructions as the constant made first (the hoisted text names it differently, so compare sizes)
+    hoisted = serialize(_escaping_constant_kernel(hoisted=True))
+    assert len(code_object.build_direct_rocke_ir_hsaco(hoisted, isa=GFX950)[0]) == len(
+        hsaco
+    )
+
+
+def test_an_unencodable_dpp_xor_mask_is_an_error_not_a_swizzle() -> None:
+    _require_direct_library()
+    from rocke.core.ir_serialize import serialize
+
+    def kernel(mask: int):
+        b = IRBuilder(f"direct_dpp_mask{mask}")
+        b.kernel.attrs["max_workgroup_size"] = 64
+        x = b.param("X", PtrType(I32, "global"), noalias=True, readonly=True, align=16)
+        y = b.param("Y", PtrType(I32, "global"), noalias=True, writeonly=True, align=16)
+        tid = b.thread_id_x()
+        b.global_store(
+            y,
+            tid,
+            b.warp_shuffle_xor_dpp(b.global_load(x, tid, I32, align=4), mask),
+            align=4,
+        )
+        b.ret()
+        return serialize(b.kernel)
+
+    code_object.build_direct_rocke_ir_hsaco(kernel(15), isa=GFX950)
+    with pytest.raises(Exception, match="no register-only DPP encoding"):
+        code_object.build_direct_rocke_ir_hsaco(kernel(4), isa=GFX950)
+
+
 def test_a_kernels_direct_levers_apply_to_its_compile_only(monkeypatch) -> None:
     """``attrs["direct_levers"]`` joins ROCKE_DIRECT_LEVERS for that one compile, as setting it would."""
     import os
@@ -158,7 +219,9 @@ def test_a_kernels_direct_levers_apply_to_its_compile_only(monkeypatch) -> None:
     assert via_attr.code_object_backend == "direct", via_attr.direct_fallback
     assert "ROCKE_DIRECT_LEVERS" not in os.environ
     monkeypatch.setenv("ROCKE_DIRECT_LEVERS", "litreuse,litshare")
-    via_env = compile_kernel(_scale_kernel(), arch="gfx950", code_object_backend="direct")
+    via_env = compile_kernel(
+        _scale_kernel(), arch="gfx950", code_object_backend="direct"
+    )
     assert via_attr.hsaco == via_env.hsaco
     # The environment's levers stay when the kernel names its own.
     tagged = _scale_kernel()
@@ -182,7 +245,9 @@ def _scoped_scale_kernel(levers):
     y = b.param("Y", PtrType(F32, "global"), noalias=True, writeonly=True, align=16)
     with b.lever_scope(levers):
         tid = b.thread_id_x()
-        b.global_store(y, tid, b.fmul(b.global_load_f32(x, tid), b.const_f32(2.0)), align=4)
+        b.global_store(
+            y, tid, b.fmul(b.global_load_f32(x, tid), b.const_f32(2.0)), align=4
+        )
     return b.kernel
 
 
@@ -212,7 +277,9 @@ def test_lever_scopes_leave_the_llvm_lowering_alone() -> None:
     from rocke.core.lower_llvm import lower_kernel_to_llvm
 
     plain = lower_kernel_to_llvm(_scale_kernel(), arch="gfx950", llvm_flavor="llvm22")
-    scoped = lower_kernel_to_llvm(_scoped_scale_kernel("nofence,litreuse"), arch="gfx950", llvm_flavor="llvm22")
+    scoped = lower_kernel_to_llvm(
+        _scoped_scale_kernel("nofence,litreuse"), arch="gfx950", llvm_flavor="llvm22"
+    )
     assert plain == scoped
 
 
@@ -221,13 +288,19 @@ def test_a_scope_over_every_op_is_the_kernels_levers(monkeypatch) -> None:
     _require_direct_library()
     monkeypatch.delenv("ROCKE_DIRECT_LEVERS", raising=False)
     levers = "litreuse,litshare,minmax,vmemfirst"
-    scoped = compile_kernel(_scoped_scale_kernel(levers), arch="gfx950", code_object_backend="direct")
+    scoped = compile_kernel(
+        _scoped_scale_kernel(levers), arch="gfx950", code_object_backend="direct"
+    )
     assert scoped.code_object_backend == "direct", scoped.direct_fallback
     monkeypatch.setenv("ROCKE_DIRECT_LEVERS", levers)
-    via_env = compile_kernel(_scale_kernel(), arch="gfx950", code_object_backend="direct")
+    via_env = compile_kernel(
+        _scale_kernel(), arch="gfx950", code_object_backend="direct"
+    )
     assert scoped.hsaco == via_env.hsaco
     off = ",".join("-" + x for x in levers.split(","))
-    undone = compile_kernel(_scoped_scale_kernel(off), arch="gfx950", code_object_backend="direct")
+    undone = compile_kernel(
+        _scoped_scale_kernel(off), arch="gfx950", code_object_backend="direct"
+    )
     monkeypatch.delenv("ROCKE_DIRECT_LEVERS")
     plain = compile_kernel(_scale_kernel(), arch="gfx950", code_object_backend="direct")
     assert undone.hsaco == plain.hsaco
