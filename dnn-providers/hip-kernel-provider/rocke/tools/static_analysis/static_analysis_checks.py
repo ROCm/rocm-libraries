@@ -2,7 +2,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# advisory_checks.py -- NON-BLOCKING static analysis for ALL rocke Python:
+# static_analysis_checks.py -- NON-BLOCKING static analysis for ALL rocke Python:
 #   pyright  -- type checking
 #   radon    -- software metrics (cyclomatic complexity, maintainability index,
 #               Halstead, raw line counts)
@@ -11,8 +11,9 @@
 # ALWAYS exits 0: findings are reported, never enforced -- even if a tool is
 # missing or crashes. Wired as pre-push hooks (rocke-pyright / rocke-radon /
 # rocke-vulture) in the repo-root .pre-commit-config.yaml, using the active Python
-# environment without installing tools. pyright settings live in
-# rocke/pyrightconfig.json; the radon and vulture settings are below.
+# environment without installing tools. pyright settings live next to this file, in
+# pyrightconfig.json; the radon and vulture settings are below. Pinned versions of
+# the tools: requirements.txt, also next to this file.
 #
 # Paths outside rocke are ignored; no paths = every tracked rocke .py file, as
 # listed by `git ls-files` (git, not this script, knows what is source and what
@@ -26,8 +27,8 @@
 # Direct (the tool must be importable by this python). Use this form, not
 # `pre-commit run --all-files`, for all of rocke: pre-commit splits a long file
 # list into several runs, each printing its own report.
-#   python tools/advisory_checks.py radon library/kernels/gfx942/attention_tiled_2d.py
-#   python tools/advisory_checks.py vulture          # all of rocke, one report
+#   python tools/static_analysis/static_analysis_checks.py radon library/kernels/gfx942/attention_tiled_2d.py
+#   python tools/static_analysis/static_analysis_checks.py vulture   # all of rocke, one report
 
 from __future__ import annotations
 
@@ -41,8 +42,10 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-ROCKE = Path(__file__).resolve().parents[1]  # tools -> rocke
+ROCKE = Path(__file__).resolve().parents[2]  # static_analysis -> tools -> rocke
 GUIDE = ROCKE / "docs" / "static-analysis.md"
+# Relative to ROCKE, so a test that repoints ROCKE at a scratch tree finds its own copy.
+PYRIGHT_CONFIG = Path("tools") / "static_analysis" / "pyrightconfig.json"
 
 # Variables that tell git which repository to use. Git exports GIT_DIR to a hook
 # that runs from a linked worktree; with it set and no GIT_WORK_TREE, git takes
@@ -105,9 +108,9 @@ def _rocke_files(paths: list[str]) -> list[Path]:
     return files
 
 
-def run_pyright(files: list[Path], whole: bool) -> None:
-    # The file names go on stdin, not the command line: all of rocke is ~1,650
-    # names (~86,000 characters), past Windows' 32,767-character command-line
+def run_pyright(files: list[Path]) -> None:
+    # The file names go on stdin, not the command line: all of rocke is ~1,900
+    # names (~98,000 characters), past Windows' 32,767-character command-line
     # limit. They are rocke-relative (the cwd), one per line. A list on stdin
     # replaces the config's `include`, so pyrightconfig.json holds none; pyright
     # splits the list on any whitespace, so a file name with a space would break it,
@@ -118,15 +121,26 @@ def run_pyright(files: list[Path], whole: bool) -> None:
         "-m",
         "pyright",
         "--project",
-        str(ROCKE),
+        str(ROCKE / PYRIGHT_CONFIG),
         "--outputjson",
         "-",
     ]
+    # rocke/ is an import root (`library.kernels...`). While the config sat in rocke/
+    # pyright had it on its import path without being told; with the config in
+    # tools/static_analysis/ it does not, and the same code is then analysed with
+    # different module names (~150 of ~30,000 reports change today). PYTHONPATH
+    # is how a Python tool is told, and it reaches the interpreter pyright asks for
+    # its search paths.
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(ROCKE), *([env["PYTHONPATH"]] if env.get("PYTHONPATH") else [])]
+    )
     # UTF-8 both ways: Node reads the names and writes the JSON as UTF-8, while
     # text=True would use the locale's code page (cp1252 on Windows).
     proc = subprocess.run(
         cmd,
         cwd=ROCKE,
+        env=env,
         input=names,
         capture_output=True,
         encoding="utf-8",
@@ -155,7 +169,7 @@ def run_pyright(files: list[Path], whole: bool) -> None:
     )
 
 
-def run_vulture(files: list[Path], whole: bool) -> None:
+def run_vulture(files: list[Path]) -> None:
     from vulture import Vulture
 
     # Always scan ALL of rocke in one pass, so a platform method called only
@@ -166,15 +180,11 @@ def run_vulture(files: list[Path], whole: bool) -> None:
     # report would be empty without saying so.
     scanned = sorted({*_all_files(), *files})
     # In-process, not `python -m vulture <every file>`: that command line is
-    # ~86,000 characters even with rocke-relative names (1,649 files), past
+    # ~98,000 characters even with rocke-relative names (1,887 files), past
     # Windows' 32,767 limit, so the scan could never start.
     vulture = Vulture()
     vulture.scavenge(scanned)
-    reported = {
-        f
-        for f in (scanned if whole else files)
-        if "tests" not in f.relative_to(ROCKE).parts
-    }
+    reported = {f for f in files if "tests" not in f.relative_to(ROCKE).parts}
     shown = 0
     for item in vulture.get_unused_code(min_confidence=VULTURE_MIN_CONFIDENCE):
         if item.filename in reported:
@@ -234,7 +244,7 @@ def _print_hot(hot: list[tuple[str, Any, Path]]) -> None:
         print(f"  ... and {len(hot) - CC_TOP_N} more")
 
 
-def run_radon(files: list[Path], whole: bool) -> None:
+def run_radon(files: list[Path]) -> None:
     from radon.complexity import cc_visit
     from radon.metrics import h_visit, mi_visit
     from radon.raw import analyze
@@ -271,8 +281,6 @@ def run_radon(files: list[Path], whole: bool) -> None:
         _print_hot(hot)
 
 
-# main() calls every runner as (files, whole). Only run_vulture needs `whole`;
-# run_pyright and run_radon accept it and ignore it.
 RUNNERS = {"pyright": run_pyright, "radon": run_radon, "vulture": run_vulture}
 
 
@@ -301,7 +309,6 @@ def main() -> int:
     args = ap.parse_args()
     _tolerate_unencodable_output()
 
-    whole = not args.paths
     try:
         # Inside the guard: listing all of rocke runs git, which can fail too.
         files = _rocke_files(args.paths)
@@ -312,7 +319,7 @@ def main() -> int:
             f" -- how to read this report: {_show(GUIDE)}",
             flush=True,
         )
-        RUNNERS[args.tool](files, whole)
+        RUNNERS[args.tool](files)
     except ImportError as e:
         print(f"{args.tool}: not installed for {sys.executable} ({e}); skipped")
     except (Exception, SystemExit) as e:  # advisory: never block a push

@@ -418,7 +418,7 @@ repos:
       # This also runs the repo's other hooks at push time (none sets a stage).
       # --install-hooks downloads their repositories now; without it the first
       # push does, and fails when offline.
-      # Settings: rocke/pyrightconfig.json and rocke/tools/advisory_checks.py.
+      # Settings: rocke/tools/static_analysis/ (the wrapper and pyrightconfig.json).
       # Reading the reports: rocke/docs/static-analysis.md.
       - id: rocke-pyright
         name: rocKE advisory - pyright type check (non-blocking)
@@ -426,7 +426,7 @@ repos:
           bash -c '
           for py in python python3; do
             if "$py" -c "import sys; sys.exit(sys.version_info < (3, 10))" >/dev/null 2>&1; then
-              exec "$py" dnn-providers/hip-kernel-provider/rocke/tools/advisory_checks.py "$@"
+              exec "$py" dnn-providers/hip-kernel-provider/rocke/tools/static_analysis/static_analysis_checks.py "$@"
             fi
           done
           echo "rocKE advisory ($1): no Python 3.10+ on PATH; skipped."

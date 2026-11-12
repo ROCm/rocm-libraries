@@ -96,14 +96,15 @@ jobs:
           CHANGED_FILES_FILE: ${{ steps.prep.outputs.changed_files_file }}
         run: |
           # Runs only when the wrapper, its tests or its wiring change.
-          if grep -qE '^(dnn-providers/hip-kernel-provider/rocke/(tools/advisory_checks\.py|pyrightconfig\.json|library/tests/(test_advisory_checks\.py|pytest\.ini))|\.pre-commit-config\.yaml|\.github/workflows/pre-commit\.yml)$' "$CHANGED_FILES_FILE"; then
+          if grep -qE '^(dnn-providers/hip-kernel-provider/rocke/(tools/static_analysis/(static_analysis_checks\.py|pyrightconfig\.json|requirements\.txt)|library/tests/(test_static_analysis_checks\.py|pytest\.ini))|\.pre-commit-config\.yaml|\.github/workflows/pre-commit\.yml)$' "$CHANGED_FILES_FILE"; then
             git sparse-checkout add dnn-providers/hip-kernel-provider/rocke
             # Own venv, so the pinned tools below do not replace the pre-commit
-            # that the pre-commit action runs as the gate in the next step.
+            # that the pre-commit action runs as the gate in the next step. The
+            # analyzers' versions are written down once, in requirements.txt.
             python -m venv "$RUNNER_TEMP/rocke-advisory-venv"
             venv_python="$RUNNER_TEMP/rocke-advisory-venv/bin/python"
-            "$venv_python" -m pip install pytest==8.4.2 pre-commit==4.3.0 pyright==1.1.414 radon==6.0.1 vulture==2.16
-            "$venv_python" -m pytest --noconftest -q -rs dnn-providers/hip-kernel-provider/rocke/library/tests/test_advisory_checks.py
+            "$venv_python" -m pip install pytest==8.4.2 pre-commit==4.3.0 -r dnn-providers/hip-kernel-provider/rocke/tools/static_analysis/requirements.txt
+            "$venv_python" -m pytest --noconftest -q -rs dnn-providers/hip-kernel-provider/rocke/library/tests/test_static_analysis_checks.py
           else
             grep_status=$?
             if [ "$grep_status" -ne 1 ]; then

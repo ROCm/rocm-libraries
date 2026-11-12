@@ -45,7 +45,7 @@ Optionally install the analyzers ahead of time in your development environment,
 then keep that environment active when pushing:
 
 ```bash
-python -m pip install pyright==1.1.414 radon==6.0.1 vulture==2.16
+python -m pip install -r dnn-providers/hip-kernel-provider/rocke/tools/static_analysis/requirements.txt
 python -m pyright --version
 ```
 
@@ -59,14 +59,17 @@ Run them by hand. For chosen files, go through pre-commit:
 pre-commit run rocke-radon --hook-stage pre-push --files <paths>
 ```
 
-For all of rocke (radon and pyright take tens of seconds there, vulture a few),
-call the wrapper with no paths, from the repository root:
+For all of rocke, call the wrapper with no paths, from the repository root:
 
 ```bash
-python dnn-providers/hip-kernel-provider/rocke/tools/advisory_checks.py pyright
+python dnn-providers/hip-kernel-provider/rocke/tools/static_analysis/static_analysis_checks.py pyright
 ```
 
-This gives one report. Do not use `pre-commit run --all-files` for it: pre-commit
+This gives one report. On a shared host it took pyright 1.5 to 2.5 minutes and
+vulture 15 to 20 seconds. Radon had not finished after 13 minutes: one 1.2 MB test
+file, `library/tests/test_attention_bwd_refusals.py`, takes it more than two
+minutes by itself (the other large files take about a second), so give radon the
+files you changed. Do not use `pre-commit run --all-files` for it: pre-commit
 splits a long file list into several runs to stay under the operating system's
 command-line limit, each printing its own partial report, and vulture rescans all
 of rocke every time.
@@ -81,9 +84,9 @@ pre-commit run --hook-stage pre-push --from-ref origin/develop --to-ref HEAD
 | Setting | Where |
 |---|---|
 | which files are checked | no paths: every tracked `.py` under rocke (`git ls-files`), no list to maintain; pyright also skips hidden directories and `node_modules` |
-| pyright rules and import roots | `rocke/pyrightconfig.json` |
-| radon report thresholds, vulture confidence | top of `rocke/tools/advisory_checks.py` |
-| Suggested tool versions | Optional installation command above |
+| pyright rules and import roots | `rocke/tools/static_analysis/pyrightconfig.json` |
+| radon report thresholds, vulture confidence | top of `rocke/tools/static_analysis/static_analysis_checks.py` |
+| Suggested tool versions | `rocke/tools/static_analysis/requirements.txt` |
 
 Absolute numbers on existing code are mostly a map of where complexity lives.
 What matters in a PR is whether *your change* made a number worse. Run the
@@ -247,7 +250,8 @@ in this kernel alone).
 and the compiled `rocke_engine` module may not be installed in your active
 environment, so their types are unknown and checks on them are skipped. A
 missing *rocke* module usually means a file adds a directory to `sys.path` at
-runtime; add that directory to `extraPaths` in `pyrightconfig.json`.
+runtime; add that directory to `extraPaths` in
+`tools/static_analysis/pyrightconfig.json` (paths there are relative to that file).
 
 **Silencing one line:** `# pyright: ignore[reportArgumentType]`. Name the rule,
 so the comment does not hide other errors on that line.
