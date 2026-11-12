@@ -30,7 +30,6 @@ from bisect import bisect_left
 import copy
 import io
 import math
-import os
 
 from rocisa.instruction import SBitcmp1B32
 
@@ -5673,8 +5672,7 @@ class LogicalScheduler:
             keepValuBehindLeader(module)
             # C1 still places scale refreshes in C0, so C0 is final only here.
             if (label == "MAINLOOP_C1" and self.config.dualPeriodScale
-                    and self._mainloopC0Schedule is not None
-                    and os.environ.get("TENSILE_MXFP8_BARRIER_READ") == "1"):
+                    and self._mainloopC0Schedule is not None):
                 readInOpeningBarrierGap(self._mainloopC0Schedule)
                 readInOpeningBarrierGap(module)
         return module
