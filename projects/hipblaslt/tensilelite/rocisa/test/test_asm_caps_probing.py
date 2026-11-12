@@ -10,7 +10,7 @@ import sys
 
 import pytest
 
-pytestmark = pytest.mark.skipif(
+_shell_assembler = pytest.mark.skipif(
     os.name != "posix", reason="stands in for the assembler with shell scripts"
 )
 
@@ -32,7 +32,8 @@ if interval:
     signal.setitimer(signal.ITIMER_REAL, interval, interval)
 for isa in isas:
     ti.init(isa, sys.argv[3], debug)
-signal.setitimer(signal.ITIMER_REAL, 0)
+if interval:
+    signal.setitimer(signal.ITIMER_REAL, 0)
 print(json.dumps({str(isa): dict(ti.getIsaInfo(isa).asmCaps) for isa in isas}, sort_keys=True))
 """
 
@@ -52,7 +53,7 @@ def _probe(assembler, isas, debug=False, interval=0):
         ],
         # Under nohup the runner ignores SIGHUP and its children inherit that, so
         # restore it for the probe, whose assembler may have to die of it.
-        preexec_fn=lambda: signal.signal(signal.SIGHUP, signal.SIG_DFL),
+        preexec_fn=(lambda: signal.signal(signal.SIGHUP, signal.SIG_DFL)) if os.name == "posix" else None,
         capture_output=True,
         text=True,
     )
@@ -90,6 +91,7 @@ def test_batched_probes_answer_like_one_at_a_time(assembler):
 
 
 @pytest.mark.parametrize("isa", [(9, 4, 2), (12, 0, 1)], ids=["gfx942", "gfx1201"])
+@_shell_assembler
 def test_probing_an_isa_takes_a_few_assembler_runs(tmp_path, assembler, isa):
     log = tmp_path / "runs.log"
     script = _script(tmp_path / "bin" / "amdclang++", f'echo run >> "{log}"\nexec "{assembler}" "$@"\n')
@@ -100,6 +102,7 @@ def test_probing_an_isa_takes_a_few_assembler_runs(tmp_path, assembler, isa):
 
 
 @pytest.mark.parametrize("failure", ["unnamed-error", "killed"])
+@_shell_assembler
 def test_unreadable_batches_are_probed_one_source_at_a_time(tmp_path, assembler, failure):
     # Every probe is one line, so a run of several is a batch. Fail it in a way
     # that names no rejected line: an error without one, or a signal.
@@ -114,6 +117,7 @@ def test_unreadable_batches_are_probed_one_source_at_a_time(tmp_path, assembler,
     assert _probe(script, _ISAS[1:2]) == _probe(assembler, _ISAS[1:2], debug=True)
 
 
+@_shell_assembler
 def test_probes_interrupted_by_a_signal_still_get_the_answer(tmp_path):
     # Python's signal handlers don't restart interrupted system calls, so a
     # timer going off while a probe waits for the assembler fails the wait with
@@ -128,6 +132,7 @@ def test_probes_interrupted_by_a_signal_still_get_the_answer(tmp_path):
 
 
 @pytest.mark.parametrize("isa", [(9, 4, 2), (11, 0, 0)], ids=["gfx942", "gfx1100"])
+@_shell_assembler
 def test_rejected_isa_stops_probing_after_the_empty_source(tmp_path, isa):
     # Rejecting every source is what an assembler that doesn't know the ISA does.
     # The empty source's command line rejects them all, so only probes with

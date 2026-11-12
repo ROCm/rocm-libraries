@@ -176,7 +176,7 @@ std::pair<int, std::string>
 
     std::string result;
     char        buffer[128];
-    DWORD       readBytes = 0;
+    bool        childExited = false;
     while(true)
     {
         // See how many bytes are waiting (non‐blocking)
@@ -190,8 +190,19 @@ std::pair<int, std::string>
         // If no data is pending, check if the child has exited
         if(available == 0)
         {
-            if(WaitForSingleObject(state.piProcInfo.hProcess, 0) == WAIT_OBJECT_0)
-                break; // child is done and no more output
+            if(childExited)
+                break;
+            DWORD waitResult = WaitForSingleObject(state.piProcInfo.hProcess, 0);
+            if(waitResult == WAIT_FAILED)
+                throw std::runtime_error("Waiting for the child failed with error "
+                                         + std::to_string(GetLastError()));
+            if(waitResult == WAIT_OBJECT_0)
+            {
+                // The child may have written after PeekNamedPipe saw an empty
+                // pipe. Check again after observing its exit to drain that output.
+                childExited = true;
+                continue;
+            }
             Sleep(1); // back off briefly to avoid spinning
             continue; // retry
         }
