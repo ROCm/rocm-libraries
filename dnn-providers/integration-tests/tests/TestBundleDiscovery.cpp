@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <map>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -1384,6 +1385,82 @@ TEST_F(TestBundleDiscoveryFixture, DuplicateSweepCaseIdThrows)
          {"dup_case_nchw", "half", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
 
     EXPECT_THROW(discoverBundles(_tempDir), std::runtime_error);
+}
+
+TEST_F(TestBundleDiscoveryFixture, SweepCaseScanEqualsTheParsedIdCount)
+{
+    const std::vector<std::string> manifests{
+        R"json({"cases":[]})json",
+        "{ \"cases\" : [ ] }\n",
+        R"json({"template":"graph.template.json","cases":[{"id":"a"},{"id":"b"},{"id":"c"}]})json",
+        R"json({
+  "note": "{[}],\"\\",
+  "cases": [
+    {"id": "a{", "values": {"tensors": [{"uid": 0, "dims": [1, 2]}, {"uid": 1}]}},
+    {"id": "b]\"", "values": {"x": {"y": {}}}},
+    {"id": "c,\\"}
+  ],
+  "after": {"k": [1, {"m": 2}]}
+}
+)json",
+        R"json({"nested":{"cases":[{"id":"z1"},{"id":"z2"}]},"cases":[{"id":"a"}]})json",
+        R"json({"label":"cases","cases":[{"id":"a"},{"id":"b"}],"tail":["cases",1]})json"};
+
+    for(size_t index = 0; index < manifests.size(); ++index)
+    {
+        const auto sweepPath = _tempDir / ("sweep" + std::to_string(index) + ".json");
+        std::ofstream(sweepPath, std::ios::binary) << manifests[index];
+        const auto expected = readSweepCaseIds(sweepPath).size();
+
+        const auto scanned = detail::countSweepCasesWithoutParsing(manifests[index]);
+        ASSERT_TRUE(scanned.has_value()) << manifests[index];
+        EXPECT_EQ(*scanned, expected) << manifests[index];
+        EXPECT_EQ(countSweepCases(sweepPath), expected) << manifests[index];
+    }
+}
+
+TEST_F(TestBundleDiscoveryFixture, SweepCaseScanFallsBackOnShapesItDoesNotAccept)
+{
+    const std::vector<std::string> manifests{R"json([])json",
+                                             R"json({})json",
+                                             R"json({"other":[{"id":"a"}]})json",
+                                             R"json({"cases":{}})json",
+                                             R"json({"cases":"a"})json",
+                                             R"json({"cases":[1]})json",
+                                             R"json({"cases":["a"]})json",
+                                             R"json({"cases":[[]]})json",
+                                             R"json({"cases":[{"id":"a"}],"cases":[]})json",
+                                             R"json({"cases":1,"cases":[{"id":"a"}]})json",
+                                             R"json({"cases":[{"id":"a"})json",
+                                             R"json({"cases":[{"id":"a}]})json",
+                                             R"json({"cases":[]} {})json",
+                                             R"json({"ca\u0073es":[{"id":"a"}]})json",
+                                             ""};
+
+    size_t throwingManifests = 0;
+    for(size_t index = 0; index < manifests.size(); ++index)
+    {
+        EXPECT_FALSE(detail::countSweepCasesWithoutParsing(manifests[index]).has_value())
+            << manifests[index];
+
+        const auto sweepPath = _tempDir / ("sweep" + std::to_string(index) + ".json");
+        std::ofstream(sweepPath, std::ios::binary) << manifests[index];
+        std::optional<size_t> parsedCount;
+        try
+        {
+            parsedCount = readSweepCaseIds(sweepPath).size();
+        }
+        catch(const std::runtime_error&)
+        {
+            ++throwingManifests;
+            EXPECT_THROW(countSweepCases(sweepPath), std::runtime_error) << manifests[index];
+            continue;
+        }
+        EXPECT_EQ(countSweepCases(sweepPath), *parsedCount) << manifests[index];
+    }
+    EXPECT_GT(throwingManifests, 0u);
+
+    EXPECT_THROW(countSweepCases(_tempDir / "missing" / "sweep.json"), std::runtime_error);
 }
 
 // resolvePlaceholder falls back to the case-level `values` map when a
@@ -3570,6 +3647,70 @@ TEST(TestPruneAbsentTensors, RemovesTheTensorsAndNullsTheirPortsOnly)
     EXPECT_EQ(detail::pruneAbsentTensors(graph, {SINK, STATS}), expected);
     EXPECT_EQ(detail::pruneAbsentTensors(fx::templateOfGraph(supersetGraph()), {SINK}),
               fx::templateOfGraph(sdpa_utils::optionalSdpaFwdGraphJson(true, false)));
+}
+
+namespace
+{
+
+// One full discovery of the checked-in bundle tree, shared by every test of the suite.
+class TestCheckedInBundleTree : public ::testing::Test
+{
+protected:
+    static std::filesystem::path bundleRoot()
+    {
+        return std::filesystem::path(__FILE__).parent_path() / ".." / "integration-test-bundles";
+    }
+
+    static void SetUpTestSuite()
+    {
+        if(std::filesystem::is_directory(bundleRoot()))
+        {
+            s_discovered = discoverBundles(bundleRoot());
+        }
+    }
+
+    static void TearDownTestSuite()
+    {
+        s_discovered.reset();
+    }
+
+    void SetUp() override
+    {
+        if(!s_discovered)
+        {
+            GTEST_SKIP() << "No checked-in bundle tree at " << bundleRoot().string();
+        }
+    }
+
+    static inline std::optional<std::vector<DiscoveredBundle>> s_discovered;
+};
+
+} // namespace
+
+TEST_F(TestCheckedInBundleTree, SweepCaseScanEqualsTheParsedIdCountForEveryManifest)
+{
+    std::map<std::filesystem::path, size_t> discoveredCaseCounts;
+    for(const auto& bundle : *s_discovered)
+    {
+        if(bundle.isTemplateSweepCase())
+        {
+            ++discoveredCaseCounts[bundle.jsonPath];
+        }
+    }
+
+    const auto sweepDirs = findSweepDirectories(bundleRoot());
+    ASSERT_FALSE(sweepDirs.empty());
+    size_t scannedCases = 0;
+    for(const auto& sweepDir : sweepDirs)
+    {
+        const auto sweepPath = sweepDir / "sweep.json";
+        const auto found = discoveredCaseCounts.find(sweepPath);
+        const size_t expected = found == discoveredCaseCounts.end() ? 0 : found->second;
+        const auto scanned = countSweepCases(sweepPath);
+        EXPECT_EQ(scanned, expected) << sweepPath.string();
+        scannedCases += scanned;
+    }
+    EXPECT_GT(scannedCases, 0u);
 }
 
 // NOLINTEND(readability-identifier-naming)

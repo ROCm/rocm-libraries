@@ -11,6 +11,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <unordered_map>
 #include <unordered_set>
@@ -529,6 +530,181 @@ inline std::vector<std::string> readSweepCaseIds(const std::filesystem::path& sw
     }
 
     return caseIds;
+}
+
+namespace detail
+{
+
+inline bool isJsonWhitespace(char c)
+{
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+// Counts the elements of the top-level "cases" array of a sweep manifest in one byte
+// pass, without a DOM. Returns nullopt when the scan does not accept the shape: the
+// text is not one complete object, or "cases" is missing, is not an array, occurs more
+// than once, or holds an element that is not an object. The scan compares raw key
+// bytes, so an escaped spelling of "cases" also gives nullopt.
+inline std::optional<size_t> countSweepCasesWithoutParsing(std::string_view json)
+{
+    constexpr int OBJECT_DEPTH = 1;
+    constexpr int CASES_ARRAY_DEPTH = 2;
+
+    size_t position = 0;
+    while(position < json.size() && isJsonWhitespace(json[position]))
+    {
+        ++position;
+    }
+    if(position == json.size() || json[position] != '{')
+    {
+        return std::nullopt;
+    }
+
+    int depth = 0;
+    bool inString = false;
+    bool escaped = false;
+    size_t stringStart = 0;
+    bool lastStringIsCasesKey = false;
+    bool expectCasesArray = false;
+    bool casesKeySeen = false;
+    bool inCasesArray = false;
+    bool casesArraySeen = false;
+    bool rootClosed = false;
+    size_t caseCount = 0;
+
+    for(; position < json.size(); ++position)
+    {
+        const char c = json[position];
+        if(inString)
+        {
+            if(escaped)
+            {
+                escaped = false;
+            }
+            else if(c == '\\')
+            {
+                escaped = true;
+            }
+            else if(c == '"')
+            {
+                inString = false;
+                if(depth == OBJECT_DEPTH)
+                {
+                    lastStringIsCasesKey
+                        = json.substr(stringStart, position - stringStart) == "cases";
+                }
+            }
+            continue;
+        }
+        if(isJsonWhitespace(c))
+        {
+            continue;
+        }
+        if(rootClosed)
+        {
+            return std::nullopt;
+        }
+
+        if(inCasesArray && depth == CASES_ARRAY_DEPTH)
+        {
+            if(c == '{')
+            {
+                ++caseCount;
+                ++depth;
+            }
+            else if(c == ']')
+            {
+                --depth;
+                inCasesArray = false;
+            }
+            else if(c != ',')
+            {
+                return std::nullopt;
+            }
+            continue;
+        }
+
+        if(depth == OBJECT_DEPTH)
+        {
+            const bool startsCasesArray = c == '[' && expectCasesArray;
+            const bool endsCasesKey = c == ':' && lastStringIsCasesKey;
+            lastStringIsCasesKey = false;
+            expectCasesArray = false;
+            if(endsCasesKey)
+            {
+                if(casesKeySeen)
+                {
+                    return std::nullopt;
+                }
+                casesKeySeen = true;
+                expectCasesArray = true;
+                continue;
+            }
+            if(startsCasesArray)
+            {
+                inCasesArray = true;
+                casesArraySeen = true;
+            }
+        }
+
+        switch(c)
+        {
+        case '{':
+        case '[':
+            ++depth;
+            break;
+        case '}':
+        case ']':
+            if(depth == 0)
+            {
+                return std::nullopt;
+            }
+            --depth;
+            rootClosed = depth == 0;
+            break;
+        case '"':
+            inString = true;
+            stringStart = position + 1;
+            break;
+        default:
+            break;
+        }
+    }
+
+    if(inString || !rootClosed || !casesArraySeen)
+    {
+        return std::nullopt;
+    }
+    return caseCount;
+}
+
+} // namespace detail
+
+// The number of cases[] entries in a sweep manifest. A structural scan gives the count
+// without a full parse. Manifests that the scan does not accept go through
+// readSweepCaseIds(), which throws for a malformed manifest.
+inline size_t countSweepCases(const std::filesystem::path& sweepPath)
+{
+    std::ifstream stream(sweepPath, std::ios::binary);
+    if(!stream)
+    {
+        throw std::runtime_error("Could not open sweep manifest: " + sweepPath.string());
+    }
+    std::string content;
+    stream.seekg(0, std::ios::end);
+    const auto size = static_cast<std::streamoff>(stream.tellg());
+    if(size > 0)
+    {
+        content.resize(static_cast<size_t>(size));
+        stream.seekg(0, std::ios::beg);
+        stream.read(content.data(), static_cast<std::streamsize>(size));
+        content.resize(static_cast<size_t>(stream.gcount()));
+    }
+    if(const auto count = detail::countSweepCasesWithoutParsing(content))
+    {
+        return *count;
+    }
+    return readSweepCaseIds(sweepPath).size();
 }
 
 // Converts one sweep root into registerable logical tests. The suite name comes
