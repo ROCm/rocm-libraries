@@ -7,11 +7,11 @@ suffix). `check_names.py` enforces that schema against `miopen_gtest --gtest_lis
 ## hipDNN shim surface
 
 A test belongs to the hipDNN backend-swap surface if its full gtest name contains the
-token `HipdnnShim`. Parameterized tests get it from the instantiation prefix, e.g.
-`INSTANTIATE_TEST_SUITE_P(HipdnnShim, GPU_ConvFwdApi_FP32, ...)`. Non-parameterized tests
-carry it directly in the suite name instead, e.g. `TEST_F(GPU_HipdnnShimConvFwdApi_FP32, ...)`,
-since `check_names.py`'s prefix check only applies to the `Smoke`/`Standard`/`Full`/`Perf`/
-`Unit` token used by parameterized instantiations.
+token `HipdnnShim`. Every shim test carries it in its suite name, e.g.
+`INSTANTIATE_TEST_SUITE_P(Smoke, GPU_HipdnnShimBNFwdTrain_FP32, ...)` or
+`TEST_F(GPU_HipdnnShimConvFwdApi_FP32, ...)`. It cannot go in an instantiation's prefix,
+because `check_names.py` requires that prefix to be one of `Smoke`/`Standard`/`Full`/`Perf`/
+`Unit`.
 
 The token is deliberately specific: it is a filter, so a generic word like `Forwarding`
 would sooner or later pull in an unrelated test and silently double its runtime.
