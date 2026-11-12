@@ -71,15 +71,6 @@ constexpr std::array<std::string_view, 17> kForwardingEntries{
     "miopenBatchNormBackwardActivation",
 };
 
-std::string ToLower(std::string_view value)
-{
-    std::string lowered(value);
-    std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
-    return lowered;
-}
-
 std::string_view Trim(std::string_view value)
 {
     const auto is_space = [](char c) { return std::isspace(static_cast<unsigned char>(c)) != 0; };
@@ -155,6 +146,15 @@ unsigned long long LogLevel()
 int AsMiopenLevel(unsigned long long level) { return static_cast<int>(level); }
 
 } // namespace
+
+std::string ToLower(std::string_view value)
+{
+    std::string lowered(value);
+    std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return lowered;
+}
 
 ForwardingMode ParseForwardingMode(const char* value, std::ostream& diagnostics)
 {

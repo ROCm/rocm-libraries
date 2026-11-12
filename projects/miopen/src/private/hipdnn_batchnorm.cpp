@@ -12,6 +12,7 @@
 #include "hipdnn_graph.hpp"
 #include "hipdnn_tensor.hpp"
 #include "hipdnn_types.hpp"
+#include "routing.hpp"
 
 #include "miopen_impl.h"
 
@@ -19,7 +20,6 @@
 #include <hipdnn_frontend.hpp>
 
 #include <algorithm>
-#include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -245,32 +245,41 @@ miopenStatus_t CheckScaleFactors(const void* alpha, const void* beta, miopenStat
     return miopenStatusSuccess;
 }
 
-// True when MIOPEN_FIND_ENFORCE asks for DbUpdate, SearchDbUpdate or DbClean,
-// the actions a Search policy does not include.
-bool FindEnforceOverridesSearch()
+// The policy that MIOPEN_FIND_ENFORCE names. MIOpen's FindEnforceAction values
+// are miopenTuningPolicy_t's, by name or by number. None when unset or unparsable.
+miopenTuningPolicy_t FindEnforcePolicy()
 {
     const char* raw = std::getenv("MIOPEN_FIND_ENFORCE");
     if(raw == nullptr)
-        return false;
-    std::string value = raw;
-    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
-        return static_cast<char>(std::tolower(c));
-    });
-    if(value == "db_update" || value == "search_db_update" || value == "db_clean")
-        return true;
+        return miopenTuningPolicyNone;
+    const std::string value = ToLower(raw);
+    if(value == "db_update")
+        return miopenTuningPolicyDbUpdate;
+    if(value == "search")
+        return miopenTuningPolicySearch;
+    if(value == "search_db_update")
+        return miopenTuningPolicySearchDbUpdate;
+    if(value == "db_clean")
+        return miopenTuningPolicyDbClean;
     // Parsed as MIOpen and the provider parse it: std::stoul skips leading
     // whitespace and ignores trailing characters. MIOpen throws for a value it
-    // cannot parse and the provider treats it as unset, so it is not declined here.
+    // cannot parse and the provider treats it as unset, so it is None here.
     try
     {
         const unsigned long action = std::stoul(value);
-        // DbUpdate, SearchDbUpdate and DbClean in MIOpen's FindEnforceAction.
-        return action == 2 || action == 4 || action == 5;
+        if(action >= miopenTuningPolicyNone && action <= miopenTuningPolicyDbClean)
+            return static_cast<miopenTuningPolicy_t>(action);
     }
     catch(const std::exception&)
     {
-        return false;
     }
+    return miopenTuningPolicyNone;
+}
+
+// The policies the provider can set on its own handle.
+bool ProviderCanApply(miopenTuningPolicy_t policy)
+{
+    return policy == miopenTuningPolicyNone || policy == miopenTuningPolicySearch;
 }
 
 // The provider runs MIOpen on a handle of its own, so a tuning policy set on the
@@ -301,12 +310,12 @@ miopenStatus_t CheckTuningPolicy(miopenHandle_t handle, BnProblem& problem)
         return RecordFailure(status, "could not read the handle's tuning policy");
     if(problem.bnMode == miopenBNPerActivation)
         policy = miopenTuningPolicyNone;
-    if(policy != miopenTuningPolicyNone && policy != miopenTuningPolicySearch)
+    if(!ProviderCanApply(policy))
         return RecordFailure(miopenStatusUnsupportedOp,
                              "hipDNN batchnorm cannot apply the handle's tuning policy; "
                              "only miopenTuningPolicyNone and miopenTuningPolicySearch "
                              "are forwarded");
-    if(policy == miopenTuningPolicySearch && FindEnforceOverridesSearch())
+    if(policy == miopenTuningPolicySearch && !ProviderCanApply(FindEnforcePolicy()))
         return RecordFailure(miopenStatusUnsupportedOp,
                              "hipDNN batchnorm cannot apply miopenTuningPolicySearch while "
                              "MIOPEN_FIND_ENFORCE asks for DB_UPDATE, SEARCH_DB_UPDATE or "
