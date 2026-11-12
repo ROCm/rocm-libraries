@@ -883,14 +883,82 @@ fn branch_delta(block_word: &[u32], at: usize, target: usize) -> Result<i64, Com
     Ok(delta)
 }
 
-/// Encodes all blocks, resolving branch targets to word offsets.
+/// Encodes all blocks, resolving branch targets to word offsets. A branch past the 16-bit word offset is an
+/// error here; `assemble_relaxed` makes it a jump.
 pub fn assemble(f: &MFunc) -> Result<Vec<u8>, CompileError> {
-    let (mut words, block_word, branches) = encode_blocks(f)?;
-    for (at, target) in branches {
-        let delta = branch_delta(&block_word, at, target)?;
-        words[at] = words[at] & 0xffff_0000 | (delta as u32 & 0xffff);
+    Ok(assemble_relaxed(f, None)?.0)
+}
+
+/// `assemble`; with the SGPR pair `spare` (an even register no instruction uses), a branch past the 16-bit word
+/// offset becomes a PC-relative jump, as LLVM's branch relaxation does: `s_getpc_b64 s[spare:+1]`,
+/// `s_add_u32`/`s_addc_u32` of the 64-bit byte distance from the PC after the `s_getpc_b64`, `s_setpc_b64`. A
+/// conditional branch becomes the opposite condition over that jump. The jump clobbers SCC (so does LLVM's).
+/// Returns the code and whether any branch was relaxed.
+pub fn assemble_relaxed(f: &MFunc, spare: Option<u16>) -> Result<(Vec<u8>, bool), CompileError> {
+    let (words, block_word, branches) = encode_blocks(f)?;
+    let near = |from: i64, to: i64| (-32768..32768).contains(&(to - (from + 1)));
+    let mut far = vec![false; branches.len()];
+    if branches.iter().all(|&(at, target)| near(at as i64, block_word[target] as i64)) {
+        let mut words = words;
+        for (at, target) in branches {
+            let delta = branch_delta(&block_word, at, target)?;
+            words[at] = words[at] & 0xffff_0000 | (delta as u32 & 0xffff);
+        }
+        return Ok((words.iter().flat_map(|w| w.to_le_bytes()).collect(), false));
     }
-    Ok(words.iter().flat_map(|w| w.to_le_bytes()).collect())
+    let Some(spare) = spare else { return Err(bad("branch out of range")) };
+    if spare % 2 != 0 || spare + 1 > LAST_SGPR {
+        return Err(bad(format!("no SGPR pair for a relaxed branch at s{spare}")));
+    }
+    // Words a branch grows by when relaxed: the jump is six words, a conditional branch keeps one more.
+    let extra = |at: usize| if words[at] >> 16 & 0x7f == 0x2 { 5 } else { 6 };
+    // The new word offset of original word `w`, with the relaxed branches before it grown.
+    let moved = |far: &[bool], w: usize| -> i64 {
+        w as i64 + branches.iter().zip(far).filter(|((at, _), f)| **f && *at < w).map(|((at, _), _)| extra(*at) as i64).sum::<i64>()
+    };
+    loop {
+        let mut changed = false;
+        for (i, &(at, target)) in branches.iter().enumerate() {
+            if !far[i] && !near(moved(&far, at), moved(&far, block_word[target] as usize)) {
+                far[i] = true;
+                changed = true;
+            }
+        }
+        if !changed {
+            break;
+        }
+    }
+    let mut out: Vec<u32> = Vec::with_capacity(words.len() + 8 * far.iter().filter(|f| **f).count());
+    let mut next = 0usize;
+    for (i, &(at, target)) in branches.iter().enumerate() {
+        out.extend_from_slice(&words[next..at]);
+        next = at + 1;
+        let (here, to) = (out.len() as i64, moved(&far, block_word[target] as usize));
+        if !far[i] {
+            out.push(words[at] & 0xffff_0000 | ((to - (here + 1)) as u32 & 0xffff));
+            continue;
+        }
+        let unconditional = words[at] >> 16 & 0x7f == 0x2;
+        if !unconditional {
+            // The opposite condition (scc0/scc1, vccz/vccnz, execz/execnz differ in bit 0) skips the jump.
+            out.push((words[at] & 0xffff_0000) ^ 1 << 16 | 6);
+        }
+        // The PC after s_getpc_b64 is the address of the s_add_u32.
+        let pc = out.len() as i64 + 1;
+        let distance = (to - pc) * 4;
+        let (lo, hi) = (distance as u32, (distance >> 32) as u32);
+        let s = spare as u32;
+        out.extend_from_slice(&[
+            0xbe80_1c00 | s << 16,            // s_getpc_b64 s[spare:spare+1]
+            0x8000_ff00 | s << 16 | s,        // s_add_u32 sN, sN, lit
+            lo,
+            0x8200_ff00 | (s + 1) << 16 | (s + 1), // s_addc_u32 sN+1, sN+1, lit
+            hi,
+            0xbe80_1d00 | s,                  // s_setpc_b64 s[spare:spare+1]
+        ]);
+    }
+    out.extend_from_slice(&words[next..]);
+    Ok((out.iter().flat_map(|w| w.to_le_bytes()).collect(), true))
 }
 
 /// Text listing with gfx950 mnemonics, byte offsets and encodings.
@@ -903,7 +971,8 @@ pub fn listing(f: &MFunc) -> Result<String, CompileError> {
         for inst in &block.insts {
             let mut inst = inst.clone();
             if inst.is_branch() {
-                inst.imm = branch_delta(&block_word, at, inst.imm as usize)? & 0xffff;
+                // A branch `assemble_relaxed` makes a jump shows its unrelaxed (wrapped) distance.
+                inst.imm = (block_word[inst.imm as usize] as i64 - (at as i64 + 1)) & 0xffff;
             }
             let words = encode_words(&inst)?;
             let gfx11 = inst_text(f, &inst);
@@ -934,6 +1003,46 @@ mod tests {
 
     fn words(inst: MInst) -> Result<Vec<u32>, String> {
         encode_words(&inst).map_err(|e| e.message)
+    }
+
+    /// A function of `blocks` (each a run of `s_nop`s, with the given branch first in block 0 or last in the last).
+    fn branchy(first: Vec<MInst>, nops: usize, last: Vec<MInst>) -> MFunc {
+        let nop = |n: usize| vec![MInst::new(Opc::SNop, [], []); n];
+        let blocks = [first, nop(nops), last].map(|insts| MBlock { insts, loop_depth: 0 });
+        MFunc { blocks: blocks.to_vec(), ..MFunc::default() }
+    }
+
+    fn le_words(code: &[u8]) -> Vec<u32> {
+        code.chunks(4).map(|w| u32::from_le_bytes(w.try_into().unwrap())).collect()
+    }
+
+    #[test]
+    fn a_branch_past_the_offset_range_becomes_a_pc_relative_jump() {
+        let end = || vec![MInst::new(Opc::SEndpgm, [], [])];
+        let far = 40_000;
+        // Forward, conditional: the opposite branch skips six words, the jump is relative to the s_add_u32.
+        let f = branchy(vec![MInst::new(Opc::SCbranchScc1, [], []).with_imm(2)], far, end());
+        assert!(assemble(&f).is_err_and(|e| e.message.contains("out of range")));
+        assert!(assemble_relaxed(&f, Some(65)).is_err());
+        let (code, relaxed) = assemble_relaxed(&f, Some(64)).unwrap();
+        let w = le_words(&code);
+        assert!(relaxed);
+        assert_eq!(w.len(), 7 + far + 1);
+        // s_cbranch_scc0 6; s_getpc_b64 s[64:65]; s_add_u32 s64, s64, lit; s_addc_u32 s65, s65, lit; s_setpc_b64 s[64:65]
+        assert_eq!(w[..7], [0xbf84_0006, 0xbec0_1c00, 0x8040_ff40, (7 + far as u32 - 2) * 4, 0x8241_ff41, 0, 0xbe80_1d40]);
+        // Backward, unconditional: the 64-bit distance is negative.
+        let f = branchy(end(), far, vec![MInst::new(Opc::SBranch, [], []).with_imm(0)]);
+        let w = le_words(&assemble_relaxed(&f, Some(2)).unwrap().0);
+        let at = w.len() - 6;
+        assert_eq!(w[at], 0xbe82_1c00);
+        let back = -((at as i64 + 1) * 4);
+        assert_eq!((w[at + 2], w[at + 4]), (back as u32, 0xffff_ffff));
+        assert_eq!(w[at + 5], 0xbe80_1d02);
+        // A function that fits is encoded as `assemble` does.
+        let f = branchy(vec![MInst::new(Opc::SCbranchScc1, [], []).with_imm(2)], 100, end());
+        let (code, relaxed) = assemble_relaxed(&f, Some(64)).unwrap();
+        assert!(!relaxed);
+        assert_eq!(code, assemble(&f).unwrap());
     }
 
     /// Encodings llvm-mc -mcpu=gfx950 -show-encoding gives (g950a's
