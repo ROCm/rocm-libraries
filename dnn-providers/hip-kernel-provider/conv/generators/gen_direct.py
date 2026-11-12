@@ -414,6 +414,10 @@ add(
         RW("mfma16_f32", F333, 8, 1, 2, 2, 2, 8, 4, epi=0),
     ],
 )
+# gfx942 (MI325X) takes the fp32 rows tile alone: 1.05-1.17x over every fp32 halo tile on 9 of 11
+# 2-D 3x3 shapes, fwd and bwd. Its 16-bit rows (0.80-1.08x, ping-pong never best) and every
+# 3x3x3 rows tile lost there.
+add("FLOAT", ["gfx942"], [RW("mfma16_f32", F33, 8, 2, 2, 2, 2, 8, 4, epi=0)])
 # 32-wide K blocks (4 x 1 waves): K = 32 layers (nnunet 3-D) waste half a 64-wide block.
 BN32_F32 = [
     M("mfma16_f32", F333, 256, 32, 16, 4, 1, 4, ring=0),

@@ -440,6 +440,21 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
         const int cbytes = cc * BC * static_cast<int>(sizeof(T));
         const int ln = olane();
         const int dword = (ln % SUB) * (4 / static_cast<int>(sizeof(T)));
+        // Per call (one channel chunk): each sub-instruction's lane column within the run, its
+        // lane byte offset from the run's first pixel (column, granule, dword), and whether its
+        // granule is past the channels. The run's pixel goes into the scalar offset below.
+        int lxj[SUB], lofj[SUB];
+        bool cokj[SUB];
+#pragma unroll
+        for(int j = 0; j < SUB; ++j)
+        {
+            const int q = j * SPAN + ln / SUB; // granule within the run
+            const int lx = q / G;
+            const int gran = static_cast<int>(static_cast<unsigned>(q % G - lx) & (G - 1));
+            lxj[j] = lx;
+            lofj[j] = (lx * a.c + gran * GE + dword) * static_cast<int>(sizeof(T));
+            cokj[j] = gran * GE < a.c - cc * BC;
+        }
         int wv = wave;
         asm volatile("" : "+s"(wv)); // per-call scalar decode, not hoisted
 #pragma unroll
@@ -452,20 +467,22 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
                 continue;
             const int h = i / XG, xg = i - h * XG;
             const int ih = tc.oh0 - a.ph + h;
+            const bool hok = static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi);
+            const int col0 = tc.ow0 - a.pw + xg * XPI; // the run's first column
+            // The run's first pixel in bytes, uniform: into soffset when it is in the image (a
+            // run left of the image keeps the negative part in the lane offset; a row outside
+            // the image adds nothing, so its out-of-range lanes stay out of range).
+            const int base = (ih * a.wi + col0) * a.c * static_cast<int>(sizeof(T));
+            const int sbase = hok && base > 0 ? base : 0;
+            const int vbase = hok ? base - sbase : 0;
 #pragma unroll
             for(int j = 0; j < SUB; ++j)
             {
-                const int q = j * SPAN + ln / SUB; // granule within the run
-                const int lx = q / G;
-                const int gran = static_cast<int>(static_cast<unsigned>(q % G - lx) & (G - 1));
-                const bool cok = gran * GE < a.c - cc * BC;
-                const int iw = tc.ow0 - a.pw + xg * XPI + lx;
-                const bool ok = (static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi))
-                                & (static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi)) & cok;
-                const unsigned off
-                    = ok ? static_cast<unsigned>(((ih * a.wi + iw) * a.c + gran * GE + dword)
-                                                 * static_cast<int>(sizeof(T)))
-                         : K1_OUT_OF_RANGE;
+                const int lx = lxj[j];
+                const int iw = col0 + lx;
+                const bool ok
+                    = hok & (static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi)) & cokj[j];
+                const unsigned off = ok ? static_cast<unsigned>(lofj[j] + vbase) : K1_OUT_OF_RANGE;
                 if(HW % XPI == 0 || xg * XPI + lx < HW)
                     __builtin_amdgcn_raw_ptr_buffer_load_lds(
                         xr,
@@ -473,7 +490,7 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
                                                                   + j * SPAN),
                         4,
                         off,
-                        cbytes,
+                        cbytes + sbase,
                         0,
                         0);
             }
@@ -939,6 +956,21 @@ __device__ __attribute__((always_inline)) void k2ConvRows3d(const K2Args& a)
         const int cbytes = cc * BC * static_cast<int>(sizeof(T));
         const int ln = olane();
         const int dword = (ln % SUB) * (4 / static_cast<int>(sizeof(T)));
+        // Per call (one channel chunk): each sub-instruction's lane column within the run, its
+        // lane byte offset from the run's first pixel (column, granule, dword), and whether its
+        // granule is past the channels. The run's pixel goes into the scalar offset below.
+        int lxj[SUB], lofj[SUB];
+        bool cokj[SUB];
+#pragma unroll
+        for(int j = 0; j < SUB; ++j)
+        {
+            const int q = j * SPAN + ln / SUB; // granule within the run
+            const int lx = q / G;
+            const int gran = static_cast<int>(static_cast<unsigned>(q % G - lx) & (G - 1));
+            lxj[j] = lx;
+            lofj[j] = (lx * a.c + gran * GE + dword) * static_cast<int>(sizeof(T));
+            cokj[j] = gran * GE < a.c - cc * BC;
+        }
         int wv = wave;
         asm volatile("" : "+s"(wv)); // per-call scalar decode, not hoisted
 #pragma unroll
@@ -951,21 +983,22 @@ __device__ __attribute__((always_inline)) void k2ConvRows3d(const K2Args& a)
                 continue;
             const int h = i / XG, xg = i - h * XG;
             const int ih = tc.oh0 - a.ph + h;
+            const bool hok = (static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi)) & pok;
+            const int col0 = tc.ow0 - a.pw + xg * XPI; // the run's first column
+            // The run's first pixel in bytes, uniform: into soffset when it is in the image (a
+            // run left of the image keeps the negative part in the lane offset; a row outside
+            // the image adds nothing, so its out-of-range lanes stay out of range).
+            const int base = ((prow + ih) * a.wi + col0) * a.c * static_cast<int>(sizeof(T));
+            const int sbase = hok && base > 0 ? base : 0;
+            const int vbase = hok ? base - sbase : 0;
 #pragma unroll
             for(int j = 0; j < SUB; ++j)
             {
-                const int q = j * SPAN + ln / SUB; // granule within the run
-                const int lx = q / G;
-                const int gran = static_cast<int>(static_cast<unsigned>(q % G - lx) & (G - 1));
-                const bool cok = gran * GE < a.c - cc * BC;
-                const int iw = tc.ow0 - a.pw + xg * XPI + lx;
-                const bool ok = (static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi))
-                                & (static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi)) & cok
-                                & pok;
-                const unsigned off = ok ? static_cast<unsigned>(
-                                              (((prow + ih) * a.wi + iw) * a.c + gran * GE + dword)
-                                              * static_cast<int>(sizeof(T)))
-                                        : K1_OUT_OF_RANGE;
+                const int lx = lxj[j];
+                const int iw = col0 + lx;
+                const bool ok
+                    = hok & (static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi)) & cokj[j];
+                const unsigned off = ok ? static_cast<unsigned>(lofj[j] + vbase) : K1_OUT_OF_RANGE;
                 if(HW % XPI == 0 || xg * XPI + lx < HW)
                     __builtin_amdgcn_raw_ptr_buffer_load_lds(
                         xr,
@@ -973,7 +1006,7 @@ __device__ __attribute__((always_inline)) void k2ConvRows3d(const K2Args& a)
                                                                   + j * SPAN),
                         4,
                         off,
-                        cbytes,
+                        cbytes + sbase,
                         0,
                         0);
             }
