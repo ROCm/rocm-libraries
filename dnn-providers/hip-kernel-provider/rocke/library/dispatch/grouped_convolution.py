@@ -1496,7 +1496,7 @@ def format_instance_list(lst: InstanceList) -> str:
 #: a hand-tuned family preference (e.g. the windowed depthwise kernel sorting
 #: first in its catalog) that label order does not reproduce, and
 #: re-deriving it needs fresh measurement this change does not make. wgrad's
-#: catalog (``final_wgrad_instances_1pct.txt``) carries no such hand-tuned
+#: catalog (``instances_wgrad_v2.txt``) carries no such hand-tuned
 #: order of its own -- it is the output of a generation sweep, not a curated
 #: priority list -- so it defaults to the same unordered-set treatment as
 #: dgrad rather than inventing one.

@@ -1154,11 +1154,12 @@ def test_instance_list_tool_adds_labels_and_rebuilds_lists(tmp_path, capsys):
 # ---------------------------------------------------------------------------
 
 
-def test_wgrad_catalog_has_446_instances_across_all_8_families():
-    """``final_wgrad_instances_1pct.txt``'s whole catalog, with nothing
-    silently dropped: one of each of the 8 wgrad kernel families."""
+def test_wgrad_catalog_has_394_instances_across_all_8_families():
+    """``instances_wgrad_v2.txt``'s whole catalog (390) plus the 4 narrow-vector
+    two-stage instances kept for small-cpg/kpg coverage, with nothing silently
+    dropped: one of each of the 8 wgrad kernel families."""
     insts = gc.registered_conv_grouped_instances(_ARCH, direction="wgrad")
-    assert len(insts) == 446
+    assert len(insts) == 394
     assert {i.identity.algorithm for i in insts} == {
         "direct_wgrad",
         "direct_wgrad_dw",
@@ -1169,7 +1170,7 @@ def test_wgrad_catalog_has_446_instances_across_all_8_families():
         "direct_wgrad_tiled",
         "implicit_gemm",
     }
-    assert len(gc.conv_grouped_candidates("wgrad")) == 446
+    assert len(gc.conv_grouped_candidates("wgrad")) == 394
 
 
 def test_a_wgrad_request_resolves_for_each_of_the_8_families():

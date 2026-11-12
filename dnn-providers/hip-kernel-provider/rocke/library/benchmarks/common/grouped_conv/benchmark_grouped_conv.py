@@ -781,7 +781,11 @@ def _run_case(args, cache, problem, dtype: str, sel, sink: list | None = None) -
             # Scoped to this instance alone (unlike `sizes`, which is shared-scratch-wide
             # across every admitted instance): the struct.error guard below must judge the
             # instance that actually raised, not the largest instance anywhere in the sweep.
-            inst_sizes = {in_name: In_t.nbytes, "w": W_t.nbytes, out_name: Out_t.nbytes}
+            inst_sizes = {
+                in_name: In_t.nbytes,
+                (second_name if second_name else "w"): second_t.nbytes,
+                out_name: Out_t.nbytes,
+            }
             inst_sizes.update(plan.workspaces)
             entries = [cache.get(step.identity) for step in plan.steps]
             if any(e is None for e in entries):

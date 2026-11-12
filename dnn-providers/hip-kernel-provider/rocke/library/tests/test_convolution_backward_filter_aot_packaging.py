@@ -85,6 +85,7 @@ _IMPLICIT_FLAGS = (
     "lds_k_outer",
     "grouped",
     "prefetch_addr",
+    "prefetch_regs",
     "two_stage",
     "async_dma",
     "unroll_k",
@@ -147,8 +148,8 @@ def catalog():
     return [(ident, _spec(ident)) for ident in identities]
 
 
-def test_wgrad_catalog_has_446_instances_across_all_8_families(catalog):
-    assert len(catalog) == 446
+def test_wgrad_catalog_has_394_instances_across_all_8_families(catalog):
+    assert len(catalog) == 394
     algorithms = {ident.algorithm for ident, _ in catalog}
     assert algorithms == {"implicit_gemm"} | set(AOT_WGRAD_DIRECT_ALGORITHMS) - {
         "direct_wgrad_fold",
@@ -173,7 +174,7 @@ def test_the_catalog_converts_and_reproduces_its_identities(catalog):
 
 def test_two_stage_instances_are_valid_specs(catalog):
     two_stage = [spec for _, spec in catalog if spec.two_stage]
-    assert len(two_stage) == 220
+    assert len(two_stage) == 58
     for spec in two_stage:
         assert not spec.is_direct
         ok, why = supports_gfx950_conv_wgrad_aot(spec)
