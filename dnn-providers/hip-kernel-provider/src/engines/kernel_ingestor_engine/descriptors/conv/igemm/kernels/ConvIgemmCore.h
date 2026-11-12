@@ -286,24 +286,24 @@ struct K1AtomMfmaF32 : K1Mfma // v_mfma_f32_16x16x4_f32: gfx908+
 /// xf32 operands rounded to nearest-even TF32 (10 mantissa bits) before the MFMA, which itself
 /// would truncate (a bias toward zero); NaN stays NaN (quiet), inf stays inf. As hipBLASLt (#9176)
 /// and NVIDIA's cvt.rna.tf32.f32 do.
+__device__ inline float k1Tf32(float v)
+{
+    unsigned u = __builtin_bit_cast(unsigned, v);
+    if((u & 0x7f800000u) == 0x7f800000u)
+    {
+        u |= (u & 0x7fffffu) != 0 ? 0x400000u : 0u;
+    }
+    else
+    {
+        u += 0xfffu + ((u >> 13) & 1u);
+    }
+    return __builtin_bit_cast(float, u & 0xffffe000u);
+}
+// Element by element into a new vector: a loop writing a vector's elements was miscompiled
+// (every element took element 0's result).
 __device__ inline k1f<2> k1Tf32(k1f<2> v)
 {
-    k1f<2> r;
-#pragma unroll
-    for(int i = 0; i < 2; ++i)
-    {
-        unsigned u = __builtin_bit_cast(unsigned, v[i]);
-        if((u & 0x7f800000u) == 0x7f800000u)
-        {
-            u |= (u & 0x7fffffu) != 0 ? 0x400000u : 0u;
-        }
-        else
-        {
-            u += 0xfffu + ((u >> 13) & 1u);
-        }
-        r[i] = __builtin_bit_cast(float, u & 0xffffe000u);
-    }
-    return r;
+    return k1f<2>{k1Tf32(v[0]), k1Tf32(v[1])};
 }
 
 struct K1AtomMfmaXf32 : K1Mfma // v_mfma_f32_16x16x8_xf32: gfx942 only
