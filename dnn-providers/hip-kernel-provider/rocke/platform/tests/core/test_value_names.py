@@ -22,26 +22,13 @@ builder, with the same names and the same messages.
 
 from __future__ import annotations
 
-import os
 import re
 
 import pytest
 from rocke.core.ir import F32, I32, IRBuilder, PtrType
-from rocke.core.ir_serialize import serialize
-from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.tests.engines import lower_with_both_engines
 
 _ARCH = "gfx90a"
-
-
-def _engine():
-    """The C++ engine binding; a strict both-engine run fails without it."""
-    try:
-        import rocke_engine
-    except ImportError as exc:
-        if os.environ.get("ROCKE_CPP_STRICT") == "1":
-            raise
-        pytest.skip(f"rocke_engine extension not built: {exc}")
-    return rocke_engine
 
 
 def _not_identifier(what: str, name: str) -> str:
@@ -101,12 +88,8 @@ def test_a_hint_ending_in_digits_does_not_run_into_the_counter():
 
 def test_both_engines_define_each_name_once():
     kernel = _two_zero_vectors().kernel
-    python_llvm = _lower_kernel_to_llvm_python(kernel, arch=_ARCH, llvm_flavor="llvm20")
-    cpp_llvm = _engine().lower_serialized_ir(
-        serialize(kernel), arch=_ARCH, flavor="llvm20"
-    )
-    assert cpp_llvm == python_llvm
-    defined = re.findall(r"^\s*(%[\w.]+) =", python_llvm, flags=re.MULTILINE)
+    llvm = lower_with_both_engines(kernel, _ARCH, llvm_flavor="llvm20")
+    defined = re.findall(r"^\s*(%[\w.]+) =", llvm, flags=re.MULTILINE)
     assert len(defined) == len(set(defined))
     assert "%cz16_5" in defined and "%cz1_65" in defined
 
