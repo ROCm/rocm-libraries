@@ -231,13 +231,6 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         return nullptr;
     }
 
-    /// The register tiles of the next K step, read one step ahead.
-    struct Carry
-    {
-        ATile a;
-        BTile b;
-    };
-
     struct Run
     {
         // The operands as bytes and the problem, from the DRAM windows' views.
@@ -696,7 +689,8 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         /// B's second half, which follows the first half's WMMAs.
         template <index_t Steps, index_t StaticParity>
         CK_TILE_DEVICE void TileHalfB(AccRegs& acc,
-                                      Carry& carry,
+                                      ATile& a_tile,
+                                      BTile& b_tile,
                                       index_t k0,
                                       index_t parity,
                                       index_t buffer,
@@ -705,27 +699,27 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             static_for<0, Steps, 1>{}([&](auto s) {
                 constexpr index_t step = decltype(s)::value;
                 constexpr bool last    = step + 1 == Steps;
-                const ATile cur        = carry.a;
-                const BTile cur_b      = carry.b;
+                const ATile cur        = a_tile;
+                const BTile cur_b      = b_tile;
                 if constexpr(!last)
                 {
-                    carry.a = block_gemm.LocalPrefetchA(buffer, step + 1);
-                    block_gemm.template LocalPrefetchB<0, kHalf>(carry.b, buffer, step + 1);
+                    a_tile = block_gemm.LocalPrefetchA(buffer, step + 1);
+                    block_gemm.template LocalPrefetchB<0, kHalf>(b_tile, buffer, step + 1);
                 }
                 else
                 {
                     Refill<StaticParity>(k0);
-                    carry.a = block_gemm.LocalPrefetchA(next_buffer, 0);
-                    block_gemm.template LocalPrefetchB<0, kHalf>(carry.b, next_buffer, 0);
+                    a_tile = block_gemm.LocalPrefetchA(next_buffer, 0);
+                    block_gemm.template LocalPrefetchB<0, kHalf>(b_tile, next_buffer, 0);
                 }
                 constexpr bool signal = kHasCluster && step + 2 == Steps;
                 s_wait_dscnt_pinned<kReadsPerStep>();
                 block_gemm.template operator()<true, 0, kHalf>(acc, cur, cur_b);
                 if constexpr(!last)
-                    block_gemm.template LocalPrefetchB<kHalf, kHalf>(carry.b, buffer, step + 1);
+                    block_gemm.template LocalPrefetchB<kHalf, kHalf>(b_tile, buffer, step + 1);
                 else
                 {
-                    block_gemm.template LocalPrefetchB<kHalf, kHalf>(carry.b, next_buffer, 0);
+                    block_gemm.template LocalPrefetchB<kHalf, kHalf>(b_tile, next_buffer, 0);
                     SignalBeforeLate<Steps>();
                     Late(k0, parity);
                 }
@@ -739,7 +733,8 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         /// half 1's WMMAs; B half 1.
         template <index_t Steps, index_t StaticParity>
         CK_TILE_DEVICE void TileHalfBLate(AccRegs& acc,
-                                          Carry& carry,
+                                          ATile& a_tile,
+                                          BTile& b_tile,
                                           index_t k0,
                                           index_t parity,
                                           index_t buffer,
@@ -748,15 +743,15 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             static_for<0, Steps, 1>{}([&](auto s) {
                 constexpr index_t step     = decltype(s)::value;
                 constexpr bool last        = step + 1 == Steps;
-                const ATile cur            = carry.a;
-                const BTile cur_b          = carry.b;
+                const ATile cur            = a_tile;
+                const BTile cur_b          = b_tile;
                 const index_t src_buf      = last ? next_buffer : buffer;
                 constexpr index_t src_step = last ? 0 : step + 1;
                 constexpr bool signal      = kHasCluster && step + 2 == Steps;
                 s_wait_dscnt_pinned<kWait0>();
                 if constexpr(last)
                     Refill<StaticParity>(k0);
-                carry.a = block_gemm.LocalPrefetchA(src_buf, src_step);
+                a_tile = block_gemm.LocalPrefetchA(src_buf, src_step);
                 block_gemm.template operator()<true, 0, kHalf>(acc, cur, cur_b);
                 if constexpr(last)
                 {
@@ -764,17 +759,18 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                     Late(k0, parity);
                 }
                 s_wait_dscnt_pinned<kWait1>();
-                block_gemm.template LocalPrefetchB<0, kHalf>(carry.b, src_buf, src_step);
+                block_gemm.template LocalPrefetchB<0, kHalf>(b_tile, src_buf, src_step);
                 block_gemm.template operator()<true, kHalf, kHalf, signal ? kSignalWmmas : -1>(
                     acc, cur, cur_b, [&] { Signal(); });
-                block_gemm.template LocalPrefetchB<kHalf, kHalf>(carry.b, src_buf, src_step);
+                block_gemm.template LocalPrefetchB<kHalf, kHalf>(b_tile, src_buf, src_step);
             });
         }
 
         /// local_prefetch 1, B whole.
         template <index_t Steps, index_t StaticParity>
         CK_TILE_DEVICE void TileFull(AccRegs& acc,
-                                     Carry& carry,
+                                     ATile& a_tile,
+                                     BTile& b_tile,
                                      index_t k0,
                                      index_t parity,
                                      index_t buffer,
@@ -783,18 +779,18 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             static_for<0, Steps, 1>{}([&](auto s) {
                 constexpr index_t step = decltype(s)::value;
                 constexpr bool last    = step + 1 == Steps;
-                const ATile cur        = carry.a;
-                const BTile cur_b      = carry.b;
+                const ATile cur        = a_tile;
+                const BTile cur_b      = b_tile;
                 if constexpr(!last)
                 {
-                    carry.a = block_gemm.LocalPrefetchA(buffer, step + 1);
-                    block_gemm.template LocalPrefetchB<0, kRn>(carry.b, buffer, step + 1);
+                    a_tile = block_gemm.LocalPrefetchA(buffer, step + 1);
+                    block_gemm.template LocalPrefetchB<0, kRn>(b_tile, buffer, step + 1);
                 }
                 else
                 {
                     Refill<StaticParity>(k0);
-                    carry.a = block_gemm.LocalPrefetchA(next_buffer, 0);
-                    block_gemm.template LocalPrefetchB<0, kRn>(carry.b, next_buffer, 0);
+                    a_tile = block_gemm.LocalPrefetchA(next_buffer, 0);
+                    block_gemm.template LocalPrefetchB<0, kRn>(b_tile, next_buffer, 0);
                     SignalBeforeLate<Steps>();
                     Late(k0, parity);
                 }
@@ -833,7 +829,8 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         /// One K tile at k0 in buffer parity: StaticParity is its parity when known at compile
         /// time (the GL2 short-row choice), Steps its K step count.
         template <index_t Steps, index_t StaticParity>
-        CK_TILE_DEVICE void Tile(AccRegs& acc, Carry& carry, index_t k0, index_t parity) const
+        CK_TILE_DEVICE void
+        Tile(AccRegs& acc, ATile& a_tile, BTile& b_tile, index_t k0, index_t parity) const
         {
             const index_t buffer      = BufferBase(parity);
             const index_t next_buffer = BufferBase(1 - parity);
@@ -843,11 +840,13 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                 TileDirect<Steps, StaticParity>(acc, k0, parity, buffer);
             }
             else if constexpr(kHalfBLate)
-                TileHalfBLate<Steps, StaticParity>(acc, carry, k0, parity, buffer, next_buffer);
+                TileHalfBLate<Steps, StaticParity>(
+                    acc, a_tile, b_tile, k0, parity, buffer, next_buffer);
             else if constexpr(kHalfB)
-                TileHalfB<Steps, StaticParity>(acc, carry, k0, parity, buffer, next_buffer);
+                TileHalfB<Steps, StaticParity>(
+                    acc, a_tile, b_tile, k0, parity, buffer, next_buffer);
             else
-                TileFull<Steps, StaticParity>(acc, carry, k0, parity, buffer, next_buffer);
+                TileFull<Steps, StaticParity>(acc, a_tile, b_tile, k0, parity, buffer, next_buffer);
         }
 
         CK_TILE_DEVICE void Main(AccRegs& acc)
@@ -865,11 +864,13 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             if constexpr(kLocalPrefetch)
                 WaitNextTile();
             static_for<0, kNumAcc, 1>{}([&](auto i) { acc[i] = CVec{}; });
-            Carry carry{};
+            // The register tiles of the next K step, read one step ahead.
+            ATile a_tile{};
+            BTile b_tile{};
             if constexpr(kLocalPrefetch)
             {
-                carry.a = block_gemm.LocalPrefetchA(BufferBase(0), 0);
-                block_gemm.template LocalPrefetchB<0, kRn>(carry.b, BufferBase(0), 0);
+                a_tile = block_gemm.LocalPrefetchA(BufferBase(0), 0);
+                block_gemm.template LocalPrefetchB<0, kRn>(b_tile, BufferBase(0), 0);
             }
             const index_t full_tiles = integer_divide_nonnegative<kTileK>(K);
             constexpr index_t kOdd   = Traits::kOddTiles;
@@ -879,7 +880,7 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             index_t start = 0;
             if constexpr(kOdd == 1)
             {
-                Tile<kKSteps, 0>(acc, carry, 0, 0);
+                Tile<kKSteps, 0>(acc, a_tile, b_tile, 0, 0);
                 start = kTileK;
             }
             constexpr index_t kFirst = kOdd == 1 ? 1 : 0;
@@ -888,13 +889,13 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                                            : (Traits::kHasTail ? full_tiles * kTileK : K);
             for(index_t k0 = start; k0 < loop_end; k0 += 2 * kTileK)
             {
-                Tile<kKSteps, kFirst>(acc, carry, k0, kFirst);
-                Tile<kKSteps, 1 - kFirst>(acc, carry, k0 + kTileK, 1 - kFirst);
+                Tile<kKSteps, kFirst>(acc, a_tile, b_tile, k0, kFirst);
+                Tile<kKSteps, 1 - kFirst>(acc, a_tile, b_tile, k0 + kTileK, 1 - kFirst);
             }
             if constexpr(kOdd < 0)
             {
                 if(integer_modulo_nonnegative<2>(full_tiles))
-                    Tile<kKSteps, 0>(acc, carry, loop_end, 0);
+                    Tile<kKSteps, 0>(acc, a_tile, b_tile, loop_end, 0);
             }
             if constexpr(Traits::kHasTail)
             {
@@ -906,7 +907,8 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                 constexpr index_t kTailParity = kOdd < 0 ? 0 : kOdd;
                 Tile<Traits::kTailSteps, kTailParity>(
                     acc,
-                    carry,
+                    a_tile,
+                    b_tile,
                     full_tiles * kTileK,
                     kOdd < 0 ? integer_modulo_nonnegative<2>(full_tiles) : kTailParity);
             }
