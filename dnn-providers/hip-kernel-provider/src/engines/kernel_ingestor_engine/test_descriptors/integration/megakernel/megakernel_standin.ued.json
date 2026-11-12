@@ -1,0 +1,9 @@
+{
+  "version": "1.0",
+  "id": "4b7e2a90-61c3-5d08-9f1e-c2a8d35b7e12",
+  "name": "hipkernel:megakernel_standin",
+  "graph_match": {
+    "native": "megakernel.match_custom_op"
+  },
+  "metadata": "3d9a1c55-0e7b-5f40-8c2d-7a51b0e94c11"
+}

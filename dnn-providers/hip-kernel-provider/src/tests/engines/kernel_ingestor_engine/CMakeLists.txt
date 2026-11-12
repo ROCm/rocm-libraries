@@ -42,6 +42,7 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1250ConvDgradGeometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1250ConvDgradMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestIngestorDispatchAliases.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestMegakernelMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPackLaunchValues.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/TestIngestorPlanHeader.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/serialization/TestIngestorPlanCodec.cpp
@@ -84,6 +85,11 @@ add_custom_target(hkp_gfx942_unified_3d_test_tables DEPENDS ${_gfx942_u3d_tables
                   COMMENT "gfx942 unified 3D test tables generated from rocKE")
 add_dependencies(hip_kernel_provider_tests hkp_gfx942_unified_3d_test_tables)
 target_include_directories(hip_kernel_provider_tests PRIVATE "${_gfx942_u3d_generated}")
+
+# The megakernel pack builds only with its family on; its matcher cases compile with it.
+if(ENABLE_MEGAKERNEL_ENGINE)
+    target_compile_definitions(hip_kernel_provider_tests PRIVATE ENABLE_MEGAKERNEL_ENGINE=1)
+endif()
 
 # The schema hash test compares the pinned constant with the hash of the schema file. Line
 # ends are normalised to LF, so a CRLF checkout gives the same hash.

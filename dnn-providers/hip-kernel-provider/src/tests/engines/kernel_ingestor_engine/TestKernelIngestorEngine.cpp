@@ -669,6 +669,9 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.flydsl_sdpa_dropout_mask.dispatch",
         "hipkernel.flydsl_sdpa_head_pad.dispatch",
 #endif
+#ifdef ENABLE_MEGAKERNEL_ENGINE
+        "megakernel.dispatch",
+#endif
     };
     EXPECT_EQ(packDispatchSymbols.size(), ingestorPacks().size())
         << "add the dispatch symbol of each new pack to this list";

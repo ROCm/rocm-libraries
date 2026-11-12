@@ -113,7 +113,7 @@ def test_a_kdp_that_is_not_the_one_the_lock_generates_fails(tmp_path):
 
 
 def test_a_bundle_not_pulled_from_dvc_passes(tmp_path):
-    """Configure warns about a missing DVC output; the pack has nothing to check."""
+    """With no artifacts/ (not pulled), the pack has nothing to check."""
     lock, _ = _bundle(tmp_path)
     for path in (tmp_path / "artifacts").iterdir():
         path.unlink()
