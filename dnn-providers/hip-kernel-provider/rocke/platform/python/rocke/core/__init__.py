@@ -34,7 +34,11 @@ Modules:
   - ``lower_llvm`` : `lower_kernel_to_llvm(kernel, *, arch) -> str` AMDGPU LLVM IR
                      -- the production path, comgr-friendly.
   - ``ir_golden``  : `check_golden(path, run)` all-flavor comparator for
-                     flavor-keyed IR sha256 golden fixtures.
+                     flavor-keyed IR sha256 golden fixtures, and the shared
+                     writer / CLI (`write_golden_shards`, `golden_main`).
+  - ``backend``    : python/cpp/both lowering selection
+                     (`lower_universal_gemm`, `lower_family`, `import_engine`,
+                     `name_of`, `GemmLowerResult`, `Backend*` errors).
   - ``lower_hip``  : `lower_kernel_to_hip(kernel) -> str` raw HIP C++
                      that mirrors the SSA IR one-to-one (compiles via
                      hipcc; useful for IR inspection and ISA diffs).
@@ -93,7 +97,11 @@ from .backend import (
     BackendCoverageGap,
     BackendError,
     BackendMismatch,
+    GemmLowerResult,
+    import_engine,
+    lower_family,
     lower_universal_gemm,
+    name_of,
     resolve_backend,
 )
 from .facts import StatedFacts, stated_facts_of
@@ -159,7 +167,11 @@ __all__ = [
     "BackendCoverageGap",
     "BackendError",
     "BackendMismatch",
+    "GemmLowerResult",
+    "import_engine",
+    "lower_family",
     "lower_universal_gemm",
+    "name_of",
     "resolve_backend",
     "print_ir",
     "StatedFacts",

@@ -11,7 +11,7 @@ from tensilelite.SolutionStructs.Naming import (
     getKernelCompileKey,
     getKernelNameMin,
 )
-from tensilelite.TensileCreateLibrary.Run import (
+from tensilelite.create_library.run import (
     groupKernelRecords,
     passPostKernelInfoToSolution,
 )
@@ -154,7 +154,7 @@ def test_wgmxcc_names_follow_codegen_categories():
 
 
 def test_distinct_compile_keys_cannot_share_an_artifact(monkeypatch):
-    import tensilelite.TensileCreateLibrary.Run as run
+    import tensilelite.create_library.run as run
 
     kernels = [_kernel(), _kernel()]
     kernels[1]["ISA"] = (9, 4, 2)
@@ -232,7 +232,7 @@ def test_thread_tile_distinguishes_non_matrix_kernels():
 
 
 def test_collection_preserves_all_placement_aliases():
-    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
 
     kernels = [_kernel(), _kernel()]
     kernels[1]["codeObjectFile"] = "other"

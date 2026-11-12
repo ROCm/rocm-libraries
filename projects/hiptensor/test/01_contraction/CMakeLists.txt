@@ -23,9 +23,11 @@
  # THE SOFTWARE.
  #
  ###############################################################################
- set(ContractionCommonSources ${HIPTENSOR_COMMON_TEST_SOURCES}
+ add_hiptensor_test_objects(hiptensor_contraction_test_objects
  ${CMAKE_CURRENT_SOURCE_DIR}/contraction_resource.cpp
  ${CMAKE_CURRENT_SOURCE_DIR}/contraction_test.cpp)
+ set(ContractionCommonSources ${HIPTENSOR_COMMON_TEST_SOURCES}
+ $<TARGET_OBJECTS:hiptensor_contraction_test_objects>)
 
 # Bilinear M1N1K1 tests
 set (BilinearContractionTestSources ${ContractionCommonSources}
@@ -133,9 +135,11 @@ add_hiptensor_test(complex_scale_contraction_test_m6n6k6 ${ComplexScaleContracti
 
 
 # Trinary contraction common sources
-set(TrinaryContractionCommonSources ${HIPTENSOR_COMMON_TEST_SOURCES}
+add_hiptensor_test_objects(hiptensor_trinary_contraction_test_objects
 ${CMAKE_CURRENT_SOURCE_DIR}/trinary_contraction_resource.cpp
 ${CMAKE_CURRENT_SOURCE_DIR}/trinary_contraction_test.cpp)
+set(TrinaryContractionCommonSources ${HIPTENSOR_COMMON_TEST_SOURCES}
+$<TARGET_OBJECTS:hiptensor_trinary_contraction_test_objects>)
 
 # Trinary Bilinear contraction tests
 set (TrinaryBilinearContractionTestSources ${TrinaryContractionCommonSources}

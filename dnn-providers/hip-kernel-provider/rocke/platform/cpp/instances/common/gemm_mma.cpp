@@ -66,7 +66,7 @@ static void rocke__mfma_atom_widths(const rocke_gemm_universal_spec_t* spec,
  * Python routes (storage_dtype, warp_tile key) -> the matching ISA-named builder
  * method. We reproduce the exact branch order. The storage dtype is resolved the
  * same way Python's _storage_dtype does: io_ir_type(spec.data.dtype_a) (the
- * homogeneous-dtype / fp32-acc / RCR validation is performed elsewhere; here we
+ * storage-dtype / fp32-acc / RCR validation is performed elsewhere; here we
  * only need the IR storage type to select the f16/bf16 atom family, matching the
  * Python `dtype == F16` / `dtype == BF16` comparisons).
  * ====================================================================== */
@@ -130,18 +130,18 @@ rocke_value_t* rocke_gemm_emit_zero_acc(rocke_ir_builder_t* b,
 }
 
 /* ====================================================================== *
- * _atom_frag_lengths(op) -> (a_frag_len, b_frag_len, c_frag_len)
+ * _atom_frag_lengths(op) -> (src0.frag_len, src1.frag_len, dst.frag_len)
  *
- * Pure read of the resolved MmaOp fragment lengths.
+ * Pure read of the resolved MmaOp multiplicand and result fragment lengths.
  * ====================================================================== */
 void rocke_gemm_atom_frag_lengths(const rocke_mmaop_t* op, int* a_frag, int* b_frag, int* c_frag)
 {
     if(a_frag)
-        *a_frag = op->a_frag_len;
+        *a_frag = op->srcs[0].frag_len;
     if(b_frag)
-        *b_frag = op->b_frag_len;
+        *b_frag = op->srcs[1].frag_len;
     if(c_frag)
-        *c_frag = op->c_frag_len;
+        *c_frag = op->dst.frag_len;
 }
 
 /* ====================================================================== *
@@ -160,13 +160,12 @@ rocke_value_t* rocke_gemm_emit_mma(rocke_ir_builder_t* b,
 }
 
 /* ====================================================================== *
- * _emit_zero_acc_op(b, op): zero accumulator sized from op.c_frag_len and
- * typed from op.c_dtype.
- *   return b.zero_vec(dtype_to_ir_type(op.c_dtype), op.c_frag_len)
+ * _emit_zero_acc_op(b, op): zero input accumulator typed and sized from srcs[2].
+ *   return b.zero_vec(dtype_to_ir_type(op.srcs[2].dtype), op.srcs[2].frag_len)
  * ====================================================================== */
 rocke_value_t* rocke_gemm_emit_zero_acc_op(rocke_ir_builder_t* b, const rocke_mmaop_t* op)
 {
-    return rocke_b_zero_vec(b, rocke_dtype_to_ir_type(op->c_dtype), op->c_frag_len);
+    return rocke_b_zero_vec(b, rocke_dtype_to_ir_type(op->srcs[2].dtype), op->srcs[2].frag_len);
 }
 
 /* ====================================================================== *
@@ -191,8 +190,13 @@ int rocke_gemm_choose_load_vec(const rocke_gemm_universal_spec_t* spec)
 {
     const rocke_gemm_tile_spec_t* t = &spec->tile;
     int vec = 0;
+    /* The picker caps the vector at 16/elem_bytes, so passing the real A/B
+     * width is what lets a 1-byte operand use all 16 bytes.
+     * trait.ab_load_elem_bytes overrides it. */
+    int elem_bytes = spec->trait.ab_load_elem_bytes_set ? spec->trait.ab_load_elem_bytes
+                                                        : rocke_gemm_elem_bytes(spec);
     rocke_status_t st = rocke_choose_load_vec(
-        t->tile_m, t->tile_n, t->tile_k, spec->block_size, rocke_gemm_elem_bytes(spec), &vec);
+        t->tile_m, t->tile_n, t->tile_k, spec->block_size, elem_bytes, &vec);
     if(st != ROCKE_OK)
         return 0; /* Python raises ValueError; unreachable for a valid spec. */
     return vec;

@@ -65,7 +65,7 @@ extern "C" {
 *  @param[in]
 *  transA      matrix operation type.
 *  @param[in]
-*  alpha       scalar \f$\alpha\f$.
+*  alpha       scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA      descriptor of the sparse HYB matrix. Currently, only
 *              \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -75,7 +75,7 @@ extern "C" {
 *  x           array of \p n elements (\f$op(A) == A\f$) or \p m elements
 *              (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
 *  @param[in]
-*  beta        scalar \f$\beta\f$.
+*  beta        scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  y           array of \p m elements (\f$op(A) == A\f$) or \p n elements
 *              (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
@@ -137,7 +137,7 @@ hipsparseStatus_t hipsparseShybmv(hipsparseHandle_t         handle,
 *  @param[in]
 *  transA      matrix operation type.
 *  @param[in]
-*  alpha       scalar \f$\alpha\f$.
+*  alpha       scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA      descriptor of the sparse HYB matrix. Currently, only
 *              \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -147,7 +147,7 @@ hipsparseStatus_t hipsparseShybmv(hipsparseHandle_t         handle,
 *  x           array of \p n elements (\f$op(A) == A\f$) or \p m elements
 *              (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
 *  @param[in]
-*  beta        scalar \f$\beta\f$.
+*  beta        scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  y           array of \p m elements (\f$op(A) == A\f$) or \p n elements
 *              (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
@@ -208,7 +208,7 @@ hipsparseStatus_t hipsparseDhybmv(hipsparseHandle_t         handle,
 *  @param[in]
 *  transA      matrix operation type.
 *  @param[in]
-*  alpha       scalar \f$\alpha\f$.
+*  alpha       scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA      descriptor of the sparse HYB matrix. Currently, only
 *              \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -218,7 +218,7 @@ hipsparseStatus_t hipsparseDhybmv(hipsparseHandle_t         handle,
 *  x           array of \p n elements (\f$op(A) == A\f$) or \p m elements
 *              (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
 *  @param[in]
-*  beta        scalar \f$\beta\f$.
+*  beta        scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  y           array of \p m elements (\f$op(A) == A\f$) or \p n elements
 *              (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
@@ -279,7 +279,7 @@ hipsparseStatus_t hipsparseChybmv(hipsparseHandle_t         handle,
 *  @param[in]
 *  transA      matrix operation type.
 *  @param[in]
-*  alpha       scalar \f$\alpha\f$.
+*  alpha       scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA      descriptor of the sparse HYB matrix. Currently, only
 *              \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -289,7 +289,7 @@ hipsparseStatus_t hipsparseChybmv(hipsparseHandle_t         handle,
 *  x           array of \p n elements (\f$op(A) == A\f$) or \p m elements
 *              (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
 *  @param[in]
-*  beta        scalar \f$\beta\f$.
+*  beta        scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  y           array of \p m elements (\f$op(A) == A\f$) or \p n elements
 *              (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).

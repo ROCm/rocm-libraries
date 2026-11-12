@@ -47,7 +47,7 @@ endif()
 # already shipped at 4.x, so aligning it down to the umbrella version would
 # be a backwards version move and would break downstream
 # find_package(hipcub 4.x) consumers.
-set(VERSION_STRING "5.0.0")
+set(VERSION_STRING "5.1.0")
 # Set the CCCL-compatible version.
 set(HIPCUB_CCCL_VERSION_MAJOR 3)
 set(HIPCUB_CCCL_VERSION_MINOR 0)
@@ -94,7 +94,6 @@ include(CMakeDependentOption)
 
 # Build options
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
-option(BUILD_CODE_COVERAGE "Enable code coverage" OFF)
 option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Download non-ROCm dependencies and do not search for packages" OFF)
 option(DOWNLOAD_CUB "Download CUB and thrust. Do not search for CUB package" OFF)
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
@@ -103,6 +102,17 @@ option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 option(BUILD_OFFLOAD_COMPRESS "Build hipCUB with offload compression" ON)
 option(BUILD_COMPUTE_SANITIZER "Build tests with cuda's compute sanitizer enabled" OFF)
 cmake_dependent_option(USE_SYSTEM_LIB "Use installed hipCUB when building tests" OFF BUILD_TEST OFF)
+option(HIPCUB_ENABLE_COVERAGE "Build hipCUB with code coverage enabled" OFF)
+if(DEFINED BUILD_CODE_COVERAGE)
+    message(DEPRECATION "BUILD_CODE_COVERAGE is deprecated and will be removed soon; use HIPCUB_ENABLE_COVERAGE instead.")
+    set(HIPCUB_ENABLE_COVERAGE ${BUILD_CODE_COVERAGE} CACHE BOOL "" FORCE)
+    unset(BUILD_CODE_COVERAGE CACHE)
+    unset(BUILD_CODE_COVERAGE)
+endif()
+
+if(DEFINED CODE_COVERAGE)
+    message(DEPRECATION "CODE_COVERAGE is deprecated and has been removed; use HIPCUB_ENABLE_COVERAGE instead.")
+endif()
 
 # Fetch a legacy implementation of hipCUB and use that instead. This option
 # should REALLY not be used and must be removed as soon as possible.
@@ -148,7 +158,7 @@ check_fetch_method(ROCPRIM_FETCH_METHOD)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # Set a default build type if none was specified
-if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES AND NOT BUILD_CODE_COVERAGE)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES AND NOT HIPCUB_ENABLE_COVERAGE)
   message(STATUS "Setting build type to 'Release' as none was specified.")
   set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Choose the type of build." FORCE)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "" "Debug" "Release" "MinSizeRel" "RelWithDebInfo")
@@ -304,14 +314,14 @@ if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
   endif()
 endif()
 
-if(BUILD_CODE_COVERAGE)
+if(HIPCUB_ENABLE_COVERAGE)
   add_compile_options(
     $<$<COMPILE_LANGUAGE:CXX>:-O0>
-    $<$<COMPILE_LANGUAGE:CXX>:-fprofile-instr-generate>
-    $<$<COMPILE_LANGUAGE:CXX>:-fcoverage-mapping>
+    "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fprofile-instr-generate>"
+    "$<$<COMPILE_LANGUAGE:CXX>:SHELL:-Xarch_host -fcoverage-mapping>"
   )
   add_link_options(
-    $<$<COMPILE_LANGUAGE:CXX>:-fprofile-instr-generate>
+    "$<$<LINK_LANGUAGE:CXX>:SHELL:-Xarch_host -fprofile-instr-generate>"
   )
 endif()
 

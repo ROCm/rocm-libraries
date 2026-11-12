@@ -36,6 +36,8 @@ if is_asan():
     # Only device ASAN requires XNACK; host ASAN preserves the caller's setting.
     if "host-asan" not in os.getenv("ARTIFACT_GROUP", ""):
         environ_vars["HSA_XNACK"] = "1"
+    # Disable OpenMP parallelism: it provides limited speedups and introduces
+    # high overhead in ASAN builds.
     environ_vars["OMP_NUM_THREADS"] = "1"
 
 # ---------------------------------------------------------------------------

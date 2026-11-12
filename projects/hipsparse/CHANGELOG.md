@@ -18,6 +18,7 @@ Documentation for hipSPARSE is available at
 ### Resolved issues
 * Fixed missing documentation in IDEs, clangd and libclang-based binding generators. Every S/D/C/Z variant of a routine family now carries the family's documentation instead of only the first variant. Documentation for generic API functions and the `hipsparseStatus_t` and `hipsparseCsr2CscAlg_t` types is now attached to their declarations. Corrected the documentation of `hipsparseXgtsv2_bufferSizeExt`, `hipsparseXgebsr2gebsc_bufferSize`, `hipsparseXgebsr2gebsc`, `hipsparseXpruneDense2csr_bufferSizeExt`, `hipsparseXcsric02`, `hipsparseXbsric02`, `hipsparseXcsrsv2_solve`, and `hipsparseXgpsvInterleavedBatch`.
 * Fixed an integer overflow in `hipsparseXcsr2hyb` when processing matrices whose padded ELL part exceeds `INT32_MAX` (~2.1 billion) elements. The overflow caused the ELL element count to wrap to an incorrect value, resulting in undersized ELL device allocations and out-of-bounds device writes during CSR-to-HYB conversion.
+* Fixed `hipsparseSpGEMM_workEstimation`, `hipsparseSpGEMM_compute`, and the `hipsparseSpGEMMreuse` routines, which returned the untransposed product when `opA` or `opB` was not `HIPSPARSE_OPERATION_NON_TRANSPOSE`. They now return `HIPSPARSE_STATUS_NOT_SUPPORTED`, which matches the documentation.
 
 ## hipSPARSE 4.8.0 for ROCm 10.1
 

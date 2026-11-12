@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import uuid
 from pathlib import Path
 
@@ -23,8 +24,11 @@ from codegen.generator import (
     _dump,
     build_kdp,
     build_kdp_documents,
+    build_kernel_match_umd,
     build_kmd,
+    build_udd,
     build_ued,
+    build_uhd,
     emitted_inventory,
     mint_ids,
     resolve_ids,
@@ -272,6 +276,34 @@ class TestVariantDeduplication:
 
         with pytest.raises(ValueError, match="neither its metadata nor"):
             build_kdp(config, pack, mint_ids(config))
+
+    def test_a_builder_default_field_may_be_stated_in_neither_layer(
+        self, scale_add_config
+    ):
+        """A field declared ``builder_default`` shares its default with the builder's
+        dataclass, so a kernel stating it nowhere emits without it: the KMD default is
+        the catalog key and the binary is built from the same value. This is how an
+        existing engine gains a field without changing its shipped descriptors."""
+        import copy
+
+        config = copy.deepcopy(scale_add_config)
+        pack = config.packs[0]
+        optional = next((f for f in config.kmd_fields if not f.is_mandatory), None)
+        if optional is None:
+            pytest.skip("fixture engine declares no optional KMD field")
+        optional.builder_default = True
+
+        silent = copy.deepcopy(pack.kernels[0])
+        silent.name = pack.kernels[0].name + "_left_to_the_builder_default"
+        silent.metadata.pop(optional.name, None)
+        if silent.kernel_source.spec:
+            silent.kernel_source.spec.pop(optional.name, None)
+        pack.kernels = [silent]
+
+        kdp = build_kdp(config, pack, mint_ids(config))
+        (emitted,) = kdp["kernelDescriptors"]
+        assert optional.name not in emitted["metadata"]
+        assert "builder_default" not in json.dumps(build_kmd(config, mint_ids(config)))
 
     def test_a_knob_the_spec_pins_needs_no_metadata_entry(
         self, gfx950_attention_dense_config
@@ -929,6 +961,74 @@ class TestAPackEmptiedByDeduplicationIsRefused:
         assert inventory["total_descriptor_count"] == 2
 
 
+class TestBorrowedNativeSymbols:
+    """An engine naming ``native_symbols_from`` points every descriptor at the other
+    engine's registered symbols, and keeps its own name, slug and document ids."""
+
+    def test_every_symbol_reference_names_the_other_engine(self):
+        config = make_minimal_config(
+            engine=make_engine(
+                name="hipkernel:TestSeed", native_symbols_from="hipkernel.test"
+            )
+        )
+        ids = mint_ids(config)
+        assert build_ued(config, ids)["name"] == "hipkernel:TestSeed"
+        assert build_ued(config, ids)["graph_match"] == {
+            "native": "hipkernel.test.graph_match"
+        }
+        assert build_udd(config, ids)["dispatch_symbol"] == "hipkernel.test.dispatch"
+        assert build_uhd(config, ids)["native"] == {"symbol": "hipkernel.test.score"}
+        assert (
+            build_kernel_match_umd(config, ids)["match_symbol"]
+            == "hipkernel.test.kernel_match"
+        )
+
+
+class TestShardedCatalog:
+    """Packs that declare no discriminator are one catalog split across KDP files:
+    the engine's graph_match admits every pack, so none carries an operation-scoped
+    matcher and the native stub registers none."""
+
+    @staticmethod
+    def _sharded():
+        return make_minimal_config(
+            packs=[
+                make_pack(name="alpha", kernels=[make_kernel(name="on_alpha")]),
+                make_pack(
+                    name="beta",
+                    kernels=[
+                        make_kernel(
+                            name="on_beta",
+                            metadata={"block_size": 128, "dtype": "FLOAT"},
+                        )
+                    ],
+                ),
+            ]
+        )
+
+    def test_every_shard_is_its_own_kdp_naming_only_the_kernel_matcher(self):
+        config = self._sharded()
+        ids = mint_ids(config)
+        documents = build_kdp_documents(config, ids)
+        assert [config.kdp_stem(pack) for pack, _ in documents] == [
+            "test_alpha",
+            "test_beta",
+        ]
+        for _, document in documents:
+            assert document["matchers"] == [ids["kernel_match"]]
+        assert not any(
+            key[0] == "operation_umd" for key in ids if isinstance(key, tuple)
+        )
+
+    def test_the_stubs_register_and_expect_no_operation_matcher(self, generator):
+        config = self._sharded()
+        native = generator._render_template("native.cpp.j2", config)
+        assert "OperationMatches" not in native
+        census = generator._render_template("test_packs.cpp.j2", config)
+        assert "CarriesNoGraphScopedMatcher" in census
+        assert "CarriesOneGraphScopedMatcherPerPack" not in census
+
+
 class TestEmittedInventory:
     """The context's view of what SHIPS, not what was authored: a census rendered from
     the authored count reports a shortfall whenever generation expressions overlap."""
@@ -1133,15 +1233,29 @@ class TestEmittedInventory:
 
     @staticmethod
     def _census_row(rendered: str, arch: str) -> str:
-        """The body of ``arch``'s rendered ``ExpectedInventory``, scoped to the ONE row
-        the census selects and compares by set equality."""
+        """The bodies of the name arrays ``arch``'s rendered ``ExpectedInventory`` builds
+        its sets from, scoped to the ONE row the census selects and compares by set
+        equality."""
         match = re.search(
-            r'\{"' + re.escape(arch) + r'",\s*\n\s*ExpectedInventory\{(.*?)\n\s*\}\},',
+            r'\{"' + re.escape(arch) + r'",\s*ExpectedInventory\{'
+            r"nameSet\((\w+)\),\s*nameSet\((\w+)\)\}\},",
             rendered,
-            re.DOTALL,
         )
         assert match, f"no census row rendered for {arch}"
-        return match.group(1)
+        bodies = []
+        for array in match.groups():
+            body = re.search(
+                r"constexpr std::array<const char\*, (\d+)> "
+                + array
+                + r" = \{\n(.*?)^\};",
+                rendered,
+                re.DOTALL | re.MULTILINE,
+            )
+            assert body, f"census row {arch} names no array {array}"
+            # The declared size is the element count: one name per line.
+            assert int(body.group(1)) == body.group(2).count("\n"), array
+            bodies.append(body.group(2))
+        return "".join(bodies)
 
     @staticmethod
     def _assert_every_inventory_row_is_rendered(generator, config):
@@ -1915,6 +2029,53 @@ class TestStableIds:
             "descriptors must be LF on every platform, or an unchanged bundle "
             "differs from its git blob and its DVC object"
         )
+
+    def test_regenerating_keeps_a_promoted_ranker_appended_after_the_fallback(
+        self, generator, scale_add_config, tmp_path
+    ):
+        """uhd_gen's promote step appends a trained ranker's id after the native
+        fallback in ``sort_kernel_catalog.default`` (a one- or two-element list,
+        see ``prior_ids.py``'s ``EngineDocs.uhd``). Nothing in this generator can
+        regenerate a trained ranker, so a round trip over an unchanged config must
+        carry the promoted id through rather than collapse back to the fallback
+        alone."""
+        assert scale_add_config.engine.has_heuristic
+        shipped_root = tmp_path / "shipped"
+        generator.render(scale_add_config, shipped_root)
+        directory = shipped_root / scale_add_config.descriptor_dir
+
+        (ued_path,) = directory.glob("*.ued.json")
+        ued = json.loads(ued_path.read_text(encoding="utf-8"))
+        fallback_id = ued["sort_kernel_catalog"]["default"]
+        assert isinstance(fallback_id, str), "only one ranker before promotion"
+
+        promoted_id = str(uuid.uuid4())
+        promoted_doc = {
+            "version": "1.0",
+            "id": promoted_id,
+            "name": "promoted ranker",
+            "adapter": "native",
+            "objective": "max",
+            "native": {"symbol": "hipkernel.scale_add.promoted_score"},
+        }
+        (directory / f"{promoted_id}.uhd.json").write_text(
+            json.dumps(promoted_doc, indent=2) + "\n", encoding="utf-8"
+        )
+        ued["sort_kernel_catalog"]["default"] = [fallback_id, promoted_id]
+        ued_path.write_text(json.dumps(ued, indent=2) + "\n", encoding="utf-8")
+
+        regenerated_root = tmp_path / "regenerated"
+        render_resolved(
+            generator, scale_add_config, regenerated_root, ids_from=directory
+        )
+        (regenerated_ued_path,) = (
+            regenerated_root / scale_add_config.descriptor_dir
+        ).glob("*.ued.json")
+        regenerated_ued = json.loads(regenerated_ued_path.read_text(encoding="utf-8"))
+        assert regenerated_ued["sort_kernel_catalog"]["default"] == [
+            fallback_id,
+            promoted_id,
+        ], "regenerating must not drop the promoted model back to the fallback"
 
     def test_adding_a_kernel_changes_only_the_added_kernels_id(
         self, generator, scale_add_config, tmp_path
@@ -2721,7 +2882,7 @@ class TestStableIds:
                 for name, block in (("p", 512), ("q", 1024))
             ],
         )
-        with pytest.raises(ValueError, match="(?i)multi-pack|single-pack"):
+        with pytest.raises(ValueError, match="(?i)without operation matchers"):
             resolve_ids(multi, tmp_path / "m", engine_ids_from=[bundles.home_dir])
 
     def test_a_satellite_must_sit_in_the_homes_family_folder(self, generator, tmp_path):
@@ -3507,6 +3668,7 @@ class TestHeuristicBindings:
             "predict_applicable_kernels",
         ]
         assert ued["predict_engine"] == {"gfx950": [self.MODEL, self.OTHER]}
+        assert ued["predict_applicable_kernels"] == {"default": [self.OTHER]}
         assert ued["sort_kernel_catalog"] == {
             "default": ued["sort_kernel_catalog"]["default"]
         }
@@ -3535,6 +3697,51 @@ class TestHeuristicBindings:
             "uhd": doc["sort_kernel_catalog"]["default"],
         }
         assert _dump(build_ued(config, ids)) == promoted
+
+    @staticmethod
+    def _promote():
+        """uhd_gen's promote module, so a binding is checked against promote itself and not
+        a copy of its output: a change in what promote writes fails here. Skips without
+        uhd_gen's requirements unless the build requires them (HIPDNN_REQUIRE_UHD_GEN_TESTS),
+        as uhd_gen's own suites do."""
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+        if os.environ.get("HIPDNN_REQUIRE_UHD_GEN_TESTS"):
+            from uhd_gen import promote
+
+            return promote
+        return pytest.importorskip("uhd_gen.promote")
+
+    @pytest.mark.parametrize(
+        "role, arch, metric",
+        [
+            ("sort_kernel_catalog", "gfx942", "tflops"),
+            ("predict_engine", "gfx950", "tflops"),
+            ("predict_engine", "default", "tflops"),
+            ("predict_applicable_kernels", "default", None),
+        ],
+    )
+    def test_a_binding_is_what_promote_writes(
+        self, tmp_path, configs_dir, role, arch, metric
+    ):
+        """The README's flow end to end: promote binds a model, its binding is recorded in
+        the config as written, and loading and regenerating gives back the same value.
+        """
+        import yaml
+
+        from codegen.config_loader import load_config
+
+        promote = self._promote()
+        raw = yaml.safe_load((configs_dir / "scale_add.yaml").read_text())
+        path = tmp_path / "scale_add.yaml"
+        path.write_text(yaml.safe_dump(raw, sort_keys=False))
+        config = load_config(path)
+        ids = mint_ids(config)
+        written, _ = promote._rebind(
+            build_ued(config, ids), role, arch, self.MODEL, metric, {}
+        )
+        raw["engine"]["heuristics"] = {role: {arch: written}}
+        path.write_text(yaml.safe_dump(raw, sort_keys=False))
+        assert build_ued(load_config(path), ids)[role][arch] == written
 
     def test_regeneration_keeps_bytes_and_ids_around_a_heuristics_tree(
         self, generator, scale_add_config, tmp_path

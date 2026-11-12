@@ -6253,7 +6253,11 @@ def _build_gfx942_4warp_gqa_lean(
             dim = b.add(b.mul(b.const_i32(nt), b.const_i32(32)), r)
             q_inseq = b.add(qbase, b.add(wq, c))
             oi = b.add(b.mul(b.add(qstart, b.add(wq, c)), hq_p), qhead)
-            val = b.cast_f32_to(b.fmul(b.vec_extract(accs_f[nt], i), recip), dtype)
+            # A row whose diagonal is left of key 0 (qlen > klen) sees no key:
+            # every score was masked, so m/l/acc hold no softmax. Its O is 0.
+            no_key = b.cmp_lt(b.add(context_off, q_inseq), b.const_i32(0))
+            o = b.select(no_key, zf, b.fmul(b.vec_extract(accs_f[nt], i), recip))
+            val = b.cast_f32_to(o, dtype)
             with b.scf_if(b.cmp_lt(q_inseq, qlen)):
                 b.global_store(C, b.add(b.mul(oi, b.const_i32(HD)), dim), val, align=2)
     b.ret()
@@ -6848,7 +6852,11 @@ def build_gfx942_4warp_gqa(
             else:
                 q_inseq = b.add(qbase, b.add(wq, c))
                 oi = b.add(b.mul(b.add(qstart, b.add(wq, c)), hq_p), qhead)
-            val = b.cast_f32_to(b.fmul(b.vec_extract(accs_f[nt], i), recip), dtype)
+            # A row whose diagonal is left of key 0 (qlen > klen) sees no key:
+            # every score was masked, so m/l/acc hold no softmax. Its O is 0.
+            no_key = b.cmp_lt(b.add(context_off, q_inseq), b.const_i32(0))
+            o = b.select(no_key, zf, b.fmul(b.vec_extract(accs_f[nt], i), recip))
+            val = b.cast_f32_to(o, dtype)
             with b.scf_if(b.cmp_lt(q_inseq, qlen)):
                 b.global_store(C, b.add(b.mul(oi, b.const_i32(HD)), dim), val, align=2)
     b.ret()

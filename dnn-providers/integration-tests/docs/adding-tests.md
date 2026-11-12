@@ -124,7 +124,7 @@ compiled.
 
 ```bash
 build/bin/hipdnn_integration_tests --capture-bundles /tmp/captured \
-    --gtest_filter='Smoke/IntegrationGpuResampleBackwardFp16.Correctness/*'
+    --gtest_filter='Smoke/IntegrationGpuMoeGroupedMatmulFp16.Correctness/*'
 
 find /tmp/captured -name '*.json' ! -name '*.meta.json' | while read -r graph; do
     python3 dnn-providers/integration-tests/migration-scripts/import_graph.py \
@@ -561,10 +561,10 @@ python3 scripts/harvest_support_claims.py --run <id> --arch gfx942 --platform li
   to its own bytes. If any sidecar or log is refused, it writes nothing.
 - `claim_failures` and `failed_in_use` are listed for you to read. They are never
   written as claims.
-- **`--write` also re-renders `SUPPORT_MATRIX_OVERVIEW.md`** (with
-  `support_features/feature_matrix.py`), so commit it with
-  the sidecars. If that render fails, the sidecars stay written, the script
-  exits 1 and prints the command that regenerates the overview.
+- **`--write` does not touch `SUPPORT_MATRIX_OVERVIEW.md`**, and neither should
+  you: the overview is refreshed on its own, so that open claim PRs do not all
+  conflict on it. After your harvest PR merges, refresh it in a PR of its own
+  (see [Support Matrix](support-matrix.md)).
 
 Then continue with [Confirm, review, commit](#confirm-review-commit).
 
@@ -616,9 +616,14 @@ Edit the engine's `config/<ENGINE_NAME>.toml`
   with `validator = "rms"` for those tensors only.
 - **An output is correctly infinite on both sides** (a fully masked SDPA row's
   log-sum-exp) → `[[validator_overrides]]` with
-  `validator = "allclose_matching_infinities"` for those tensors only. It runs
-  on the host only. The comparison must run on the host (`--validator cpu` or
-  `HIPDNN_TEST_VALIDATOR=cpu`). If it does not, the tensor fails.
+  `validator = "allclose_matching_infinities"` for those tensors only. In a C++
+  graph test it runs on the host only. The comparison must run on the host
+  (`--validator cpu` or `HIPDNN_TEST_VALIDATOR=cpu`). If it does not, the tensor
+  fails. A bundle test grades it on the host; on the device this applies only
+  to `FLOAT`, `HALF`, `BFLOAT16` and `DOUBLE` (an FP8 output is graded
+  host-only, same as a C++ graph test), and a `DOUBLE` output that fails the
+  device check only on double-precision drift is re-graded by the host's
+  float arithmetic.
 
 Do not use a skip to hide a regression on a claimed cell, unless you also
 retract the claim. The claim makes that regression visible.
@@ -655,16 +660,50 @@ This code creates the check target. From the YAML, it also creates one CTest
 suite for each tier. Each suite runs
 `hipdnn_integration_tests --test-article <plugin> --test-engine <ENGINE> --test-config <toml> --gtest_filter=<tier patterns>`.
 Every lane names `--test-engine`, so every lane enforces support claims. The
-function also accepts `REFERENCE_EXECUTOR`, `GTEST_FILTER`, `ENVIRONMENT`,
+function also accepts `REFERENCE_EXECUTOR`, `GTEST_FILTER`, `EXTRA_ARGS`, `ENVIRONMENT`,
 `ENVIRONMENT_MODIFICATION`, `FIXTURES_REQUIRED`, `INSTALL_TEST_FILE` and
 `INSTALL_ENVIRONMENT`. `GTEST_FILTER` applies to the check target and to a lane
-without a tier YAML. It does not apply to the tier suites. If you omit
+without a tier YAML. It does not apply to the tier suites. `EXTRA_ARGS` passes
+further arguments, such as `--graph-capture`, to the check target, the CTest
+test and every tier suite, in the build tree and the install tree. If you omit
 `TEST_CATEGORIES_YAML`, the lane is one CTest test with no tier labels. If the
 package is not available, the lane is skipped at configure time.
 
 A new lane also needs its engine TOML and tier YAML
 ([formats](file-formats.md#per-engine-test-config--configengine_nametoml)).
 Copy the files of an existing provider and keep the same tier shape.
+
+A single-arch hip-kernel-provider rocKE attention engine pinned against the
+`SdpaFwd` bundles does not call the function itself. Add a row to
+`HKP_PINNED_ATTENTION_ENGINES` in
+`dnn-providers/hip-kernel-provider/src/CMakeLists.txt`; the row registers the
+lane, its GPU-reference target and its census for the one arch it names. A
+hand-written companion census suite (`Test<Engine>CatalogTiles` or
+`Test<Engine>ModelBinding`) also needs its `_hkp_<stem>_cases_<arch>_<snake slug>`
+entry in `dnn-providers/hip-kernel-provider/src/tests/CMakeLists.txt`, `<stem>` as
+`_hkp_companion_suites` there pairs it with the suite. `ASM_SDPA_ENGINE`
+and the FlyDSL SDPA engines still call the function directly.
+
+### Add a graph-capture lane
+
+An engine that reports `SUPPORTS_GRAPH_CAPTURE` also needs a graph-capture
+lane: a second lane pinned to the same engine, with `EXTRA_ARGS --graph-capture`
+and a tier YAML that names a few quick bundle suites the engine serves. Its
+`standard`, `comprehensive` and `full` tiers run the same short list, and it has
+no `quick` or `ffm-quick` tier. Without the lane, nothing in CI
+captures the engine's `execute()`, so a change that makes it unsafe to capture
+fails no test.
+
+- In hip-kernel-provider, call `_hkp_add_graph_capture_lane()` in
+  `src/CMakeLists.txt` next to the engine's own lane, with the same engine,
+  TOML and install routing. For an `HKP_PINNED_ATTENTION_ENGINES` engine, add
+  its local name to `_graph_capture_attention_engines` instead. Every FlyDSL
+  engine already has one. The suites are
+  `GRAPH_CAPTURE_test_categories_integration.yaml`. If the engine serves none
+  of them, add a suite it serves to that file and to
+  `HKP_GRAPH_CAPTURE_GTEST_FILTER`.
+- In hipblaslt-provider, the lane is next to the engine's own lane in
+  `CMakeLists.txt`, and its suites are `test_categories_graph_capture.yaml`.
 
 ## C++ tests: the CMake rule
 

@@ -35,7 +35,7 @@ from dispatch.attention import (
     ATTENTION_DIM_VOCABULARY,
     AttentionRequest,
     AttentionSpec,
-    _problem,
+    attention_problem,
     _request_errors,
     attention_candidates,
 )
@@ -108,7 +108,7 @@ def _make_example_candidate(*, priority: int = 7) -> KernelCandidate:
             return False, f"example requires gfx942 (got {req.arch!r})"
         if req.dtype != "fp16":
             return False, f"example is fp16-only (got {req.dtype!r})"
-        problem = _problem(req)
+        problem = attention_problem(req)
         if problem.select_path() != "2d":
             return False, "problem routes to 3D, not 2D"
         return True, "ok"
@@ -118,7 +118,7 @@ def _make_example_candidate(*, priority: int = 7) -> KernelCandidate:
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, AttentionRequest)
-        problem = _problem(req)
+        problem = attention_problem(req)
         return AttentionSpec(
             path="2d",
             head_size=problem.head_size,

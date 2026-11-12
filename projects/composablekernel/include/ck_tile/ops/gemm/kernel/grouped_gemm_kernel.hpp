@@ -148,7 +148,7 @@ struct GroupedGemmKernel
 
     static constexpr index_t kBlockSize = GemmPipeline::BlockSize;
     // Same detection as the base kernel: equals GemmPipeline::UsePersistentKernel when the
-    // pipeline defines it, false otherwise (the TDM pipelines do not define it).
+    // pipeline defines it, false otherwise.
     static constexpr bool UsePersistentKernel = Base::PersistentKernel;
 
     /// @brief True for the gfx125 TDM pipelines (see UniversalGemmKernel::kIsTdmPipeline).
@@ -306,9 +306,8 @@ struct GroupedGemmKernel
     {
         if constexpr(kIsTdmPipeline)
         {
-            // Base::IsSupportedArgument returns true unconditionally for TDM pipelines, so the
-            // TDM-specific constraints are checked here, before querying the device, so invalid
-            // arguments are rejected deterministically on any host.
+            // The TDM-specific constraints are checked here, before querying the device, so that
+            // invalid arguments are rejected deterministically on any host.
             for(const auto& karg : kargs)
             {
                 const auto& g = karg.group_karg;

@@ -15,7 +15,7 @@ from dispatch.attention import (
     attention_execution_candidates,
 )
 from dispatch.attention import bindings as attention_bindings
-from dispatch.attention.common import AttentionTuningSpec, _problem
+from dispatch.attention.common import AttentionTuningSpec, attention_problem
 from kernels.common.attention_dense_spec import AttentionDenseSpec
 
 
@@ -246,7 +246,7 @@ class TestRegistrySplit(unittest.TestCase):
         self.assertNotIn("sinks", captured)
 
     def test_explicit_binding_validates_every_paged_input_class(self):
-        problem = _problem(_req())
+        problem = attention_problem(_req())
         valid = _paged_tensors()
         self.assertEqual(
             attention_bindings.validate_tuning_attention_tensors(problem, valid),
@@ -309,7 +309,7 @@ class TestRegistrySplit(unittest.TestCase):
             attention_bindings.validate_tuning_attention_tensors(problem, tensors)
 
     def test_explicit_binding_can_skip_only_metadata_content_sync(self):
-        problem = _problem(_req())
+        problem = attention_problem(_req())
         tensors = _paged_tensors()
         tensors["block_table"] = _Tensor(
             (1, 64), "torch.int32", [[999] + list(range(1, 64))]
@@ -322,7 +322,7 @@ class TestRegistrySplit(unittest.TestCase):
         )
 
     def test_explicit_binding_ignores_invalid_unused_table_columns(self):
-        problem = _problem(_req())
+        problem = attention_problem(_req())
         tensors = _paged_tensors()
         tensors["seqused_k"] = _Tensor((1,), "torch.int32", [16])
         tensors["block_table"] = _Tensor(
@@ -337,7 +337,7 @@ class TestRegistrySplit(unittest.TestCase):
 
     def test_explicit_binding_rejects_cpu_and_semantic_mismatches(self):
         request = _req()
-        problem = _problem(request)
+        problem = attention_problem(request)
         tensors = _paged_tensors()
         for tensor in tensors.values():
             tensor.device = "cpu"
@@ -384,7 +384,7 @@ class TestRegistrySplit(unittest.TestCase):
         self.assertTrue(runtime_spec.kernel_spec.use_i64_kv_addr)
         self.assertEqual(runtime_spec.num_kv_blocks, 65537)
         self.assertEqual(runtime_spec.tuning_id, spec.tuning_id)
-        self.assertEqual(binding.grid, runtime_spec.launch_grid(_problem(req)))
+        self.assertEqual(binding.grid, runtime_spec.launch_grid(attention_problem(req)))
 
     def test_explicit_binding_rejects_additive_bias(self):
         candidate = next(
@@ -405,7 +405,7 @@ class TestRegistrySplit(unittest.TestCase):
             side_effect=fake_run,
         ):
             tensors = _paged_tensors()
-            tensors["problem"] = replace(_problem(req), use_additive_bias=True)
+            tensors["problem"] = replace(attention_problem(req), use_additive_bias=True)
             with self.assertRaisesRegex(ValueError, "do not support additive bias"):
                 candidate.bound_torch(req, spec, tensors)
 
@@ -447,7 +447,7 @@ class TestRegistrySplit(unittest.TestCase):
             bias_spec = replace(
                 spec, kernel_spec=replace(spec.kernel_spec, use_additive_bias=True)
             )
-            problem = _problem(req)
+            problem = attention_problem(req)
             for case, prob, tspec in (
                 (
                     "bias_problem_plain_spec",

@@ -7,6 +7,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_config_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/MockEngineConfig.hpp>
 #include <hipdnn_test_sdk/utilities/MockGraph.hpp>
@@ -253,6 +254,21 @@ TEST(TestHipMlopsEngine, GetDetailsReturnsSerializedEngineDetails)
 
     const EngineDetailsWrapper engineDetails(result.ptr, result.size);
     EXPECT_EQ(engineDetails.engineId(), 1);
+}
+
+TEST(TestHipMlopsEngine, GetDetailsReportsGraphCaptureSupport)
+{
+    const HipMlopsEngine engine(1);
+    Handle dummyHandle;
+    const MockGraph mockGraph;
+
+    hipdnnPluginConstData_t result;
+    engine.getDetails(dummyHandle, mockGraph, result);
+
+    const EngineDetailsWrapper engineDetails(result.ptr, result.size);
+    EXPECT_THAT(
+        engineDetails.behaviorNotes(),
+        ::testing::Contains(static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)));
 }
 
 TEST(TestHipMlopsEngine, GetDetailsOnlyUsesFirstPlanBuilderCustomKnobs)

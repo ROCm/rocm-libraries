@@ -1,4 +1,4 @@
-# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --wmma-queue-depth=8 --wmma-queue-cover-cycles=16 --wmma-batch-size=4 --ds-spread --debug-pass StinkyDAGSchedulerPass --print-output 2>&1
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyDAGSchedulerPass --wmma-queue-cover-cycles=16 --wmma-batch-size=4 --ds-spread --debug-pass StinkyDAGSchedulerPass --print-output 2>&1
 #
 # A barrier issues as soon as its threshold is met and its ds_stores are done. It does not wait
 # for an extra tail of WMMAs; the WMMAs already queued hide the barrier stall:

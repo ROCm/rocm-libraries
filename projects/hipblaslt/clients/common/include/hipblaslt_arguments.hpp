@@ -1064,3 +1064,6 @@ namespace ArgumentsHelper
 #endif
 
 #undef APPLY
+
+// Validate explicit operand compute types and derive unset ones from compute_type.
+std::tuple<hipDataType, hipDataType> derive_unset_compute_input_type(const Arguments& arg);
