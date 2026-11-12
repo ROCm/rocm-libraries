@@ -598,9 +598,10 @@ TEST_F(TestBundleDiscoveryFixture, ScanFilesByExtensionIsGenericAndSorted)
 TEST(TestHasAncestorIn, MatchesIsDescendantOfOnEveryPair)
 {
     const std::vector<std::filesystem::path> paths{
-        "a",       "a/b",      "a/b/c",        "a/bc",      "a/bc/d",    "a/./b/c",    "a/../a/b",
-        "a//b/c",  "a/b/",     "a/b/c/",       ".",         "../x/a",    "/r/a",       "/r/a/b",
-        "/r/a/bc", "/r/./a/b", "/r/a/../a/b/", "/r//a/b/c", "/r/a/b/..", "/r/x/../a/b"};
+        "a",        "a/b",      "a/b/c",        "a/bc",      "a/bc/d",    "a/./b/c",     "a/../a/b",
+        "a//b/c",   "a/b/",     "a/b/c/",       ".",         "../x/a",    "/r/a",        "/r/a/b",
+        "/r/a/bc",  "/r/./a/b", "/r/a/../a/b/", "/r//a/b/c", "/r/a/b/..", "/r/x/../a/b", "C:\\r",
+        "C:\\r\\a", "C:r",      "C:/r/a",       "D:\\r"};
     const std::vector<std::vector<std::filesystem::path>> ancestorSets{{"a"},
                                                                        {"a/b"},
                                                                        {"a/b/"},
@@ -617,7 +618,11 @@ TEST(TestHasAncestorIn, MatchesIsDescendantOfOnEveryPair)
                                                                        {"/r/a/b", "/r/x"},
                                                                        {"/r/a/b/c", "a/b"},
                                                                        {"/r/./a//b/"},
-                                                                       {""}};
+                                                                       {""},
+                                                                       {"C:"},
+                                                                       {"C:\\"},
+                                                                       {"C:\\r"},
+                                                                       {"D:", "x"}};
 
     size_t matches = 0;
     size_t misses = 0;

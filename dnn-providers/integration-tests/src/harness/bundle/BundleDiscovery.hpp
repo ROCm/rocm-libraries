@@ -14,6 +14,7 @@
 #include <system_error>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -120,8 +121,10 @@ inline bool hasAncestorIn(const std::filesystem::path& path,
         }
         current = std::move(parent);
     }
-    // An empty ancestor has no elements, so isDescendantOf matches every path.
-    return normalizedAncestors.count(std::filesystem::path{}) != 0;
+    // The walk stops at the root path, for example "/" or "C:\" on Windows. The element
+    // sequence of `path` also starts with its root name ("C:") and with the empty sequence.
+    return normalizedAncestors.count(current.root_name()) != 0
+           || normalizedAncestors.count(std::filesystem::path{}) != 0;
 }
 
 inline std::set<std::filesystem::path>
