@@ -75,10 +75,59 @@ pub(super) fn reset() {
     CHANGED.with(|c| c.set(0));
 }
 
+/// Drops the VALU instructions whose results nothing reads, until none is left: the carry chain of a
+/// 64-bit sum made for its low half alone (the LDS-DMA address of every row of a tile) is an example.
+/// Returns how many went.
+fn drop_dead_valu(f: &mut MFunc) -> usize {
+    let mut base = vec![0usize; f.vregs.len() + 1];
+    for (r, info) in f.vregs.iter().enumerate() {
+        base[r + 1] = base[r] + info.size as usize;
+    }
+    let mut dropped = 0;
+    loop {
+        let mut used = vec![false; base[f.vregs.len()]];
+        for inst in f.blocks.iter().flat_map(|b| &b.insts) {
+            for v in inst.uses.iter().filter_map(Opnd::vref) {
+                used[base[v.reg as usize] + v.off as usize..][..v.n as usize].fill(true);
+            }
+        }
+        let dead = |inst: &MInst| {
+            inst.op != Opc::Copy
+                && matches!(inst.op.fmt(), Fmt::Vop1 | Fmt::Vop2 | Fmt::Vop3 | Fmt::Vop3b)
+                && inst.op.flags() == F_USE_EXEC
+                && !inst.defs.is_empty()
+                && inst.defs.iter().all(|d| match d {
+                    Opnd::R(v) => f.vregs[v.reg as usize].fixed.is_none() && used[base[v.reg as usize] + v.off as usize..][..v.n as usize].iter().all(|&u| !u),
+                    _ => false,
+                })
+        };
+        let mut gone = 0;
+        for block in f.blocks.iter_mut() {
+            let before = block.insts.len();
+            block.insts.retain(|i| !dead(i));
+            gone += before - block.insts.len();
+        }
+        if gone == 0 {
+            return dropped;
+        }
+        dropped += gone;
+    }
+}
+
 /// Recomputes the candidates before their uses in deeper loops; returns how
-/// many definitions went.
+/// many recomputations it made (dead VALU instructions it dropped first count too).
 pub fn run(f: &mut MFunc) -> usize {
-    if f.target != Target::Gfx950 || f.blocks.iter().all(|b| b.loop_depth == 0) {
+    if f.target != Target::Gfx950 {
+        return 0;
+    }
+    let dead = drop_dead_valu(f);
+    let made = recompute(f);
+    CHANGED.with(|c| c.set(c.get() + dead));
+    made + dead
+}
+
+fn recompute(f: &mut MFunc) -> usize {
+    if f.blocks.iter().all(|b| b.loop_depth == 0) {
         return 0;
     }
     let nv = f.vregs.len();
@@ -94,16 +143,35 @@ pub fn run(f: &mut MFunc) -> usize {
             }
         }
     }
-    // Candidates: one-dword VGPRs defined once by a pure VALU instruction.
+    // Registers every reference of which is to the first dword (a 64-bit sum made for its low half alone), and
+    // those anything reads.
+    let mut wide = vec![false; nv];
+    let mut read = vec![false; nv];
+    for inst in f.blocks.iter().flat_map(|b| &b.insts) {
+        for v in inst.defs.iter().chain(inst.uses.iter()).filter_map(Opnd::vref) {
+            wide[v.reg as usize] |= v.off != 0 || v.n != 1;
+        }
+        for v in inst.uses.iter().filter_map(Opnd::vref) {
+            read[v.reg as usize] = true;
+        }
+    }
+    // Candidates: one-dword VGPRs defined once by a pure VALU instruction (whose carry, when it has one, nothing reads).
     let mut rw = vec![false; nv];
     for r in 0..nv {
         let info = &f.vregs[r];
-        if info.class != Class::V || info.size != 1 || info.fixed.is_some() || defs[r] != 1 {
+        if info.class != Class::V || (info.size != 1 && wide[r]) || info.fixed.is_some() || defs[r] != 1 {
             continue;
         }
         let Some((b, k)) = def_at[r] else { continue };
         let inst = &f.blocks[b].insts[k];
-        rw[r] = inst.defs.len() == 1 && super::spill::pure_def(inst, Class::V, &f.vregs, &defs, true);
+        let carry_dead = match inst.defs[..] {
+            [Opnd::R(d)] => d.reg as usize == r,
+            [Opnd::R(d), Opnd::R(c)] => d.reg as usize == r && f.vregs[c.reg as usize].class == Class::S && !read[c.reg as usize] && defs[c.reg as usize] == 1,
+            _ => false,
+        };
+        let mut one = inst.clone();
+        one.defs = inst.defs[..1].into();
+        rw[r] = carry_dead && super::spill::pure_def(&one, Class::V, &f.vregs, &defs, true);
     }
     // Every reading instruction of each candidate (once), by (block, index).
     let mut uses_of: Vec<Vec<(usize, usize)>> = vec![Vec::new(); nv];
@@ -120,6 +188,12 @@ pub fn run(f: &mut MFunc) -> usize {
     let trace = super::debug_flag("tracepressure");
     if trace {
         eprintln!("remat: {} structural candidates", rw.iter().filter(|&&c| c).count());
+        let mut by_op = std::collections::BTreeMap::new();
+        for r in (0..nv).filter(|&r| rw[r]) {
+            let (b, k) = def_at[r].expect("defined once");
+            *by_op.entry(format!("{:?}", f.blocks[b].insts[k].op)).or_insert(0) += 1;
+        }
+        eprintln!("remat: candidates by opcode {by_op:?}");
     }
     let depth = |b: usize| f.blocks[b].loop_depth;
     let at = |(b, k): (usize, usize)| first[b] + k;
@@ -158,7 +232,7 @@ pub fn run(f: &mut MFunc) -> usize {
         let mut seen = vec![r];
         while let Some(c) = todo.pop() {
             for &u in &uses_of[c] {
-                if let [Opnd::R(d)] = f.blocks[u.0].insts[u.1].defs[..] {
+                if let Some(Opnd::R(d)) = f.blocks[u.0].insts[u.1].defs.first().copied() {
                     let d = d.reg as usize;
                     if rw[d] && !seen.contains(&d) {
                         seen.push(d);
@@ -212,7 +286,7 @@ pub fn run(f: &mut MFunc) -> usize {
             }
             let (db, _) = def_at[r].expect("defined once");
             let all = uses_of[r].iter().all(|&(ub, uk)| {
-                depth(ub) > depth(db) || matches!(f.blocks[ub].insts[uk].defs[..], [Opnd::R(d)] if gone[d.reg as usize])
+                depth(ub) > depth(db) || matches!(f.blocks[ub].insts[uk].defs.first(), Some(Opnd::R(d)) if gone[d.reg as usize])
             });
             if !all {
                 gone[r] = false;
@@ -232,13 +306,14 @@ pub fn run(f: &mut MFunc) -> usize {
             def_of[r] = Some(f.blocks[b].insts[k].clone());
         }
     }
+    let vinfo = f.vregs.clone();
     let mut new_regs: Vec<VRegInfo> = Vec::new();
-    let mut removed = 0;
     // The recomputation of `r` in front of the current instruction, after those of what it reads.
     fn emit(
         r: usize,
         nv: usize,
         def_of: &[Option<MInst>],
+        vinfo: &[VRegInfo],
         new_regs: &mut Vec<VRegInfo>,
         made: &mut Vec<(u32, u32)>,
         out: &mut Vec<MInst>,
@@ -250,13 +325,19 @@ pub fn run(f: &mut MFunc) -> usize {
         for u in 0..clone.uses.len() {
             let Opnd::R(v) = clone.uses[u] else { continue };
             if (v.reg as usize) < nv && def_of[v.reg as usize].is_some() {
-                let t = emit(v.reg as usize, nv, def_of, new_regs, made, out);
+                let t = emit(v.reg as usize, nv, def_of, vinfo, new_regs, made, out);
                 clone.uses[u] = Opnd::R(VRef { reg: t, off: v.off, n: v.n });
             }
         }
         let t = (nv + new_regs.len()) as u32;
         new_regs.push(VRegInfo { class: Class::V, size: 1, align: 1, fixed: None });
-        clone.defs = [Opnd::R(VRef { reg: t, off: 0, n: 1 })].into();
+        let mut defs: Vec<Opnd> = vec![Opnd::R(VRef { reg: t, off: 0, n: 1 })];
+        // The carry nothing reads gets a register of its own.
+        if let Some(&Opnd::R(c)) = clone.defs.get(1) {
+            defs.push(Opnd::R(VRef { reg: (nv + new_regs.len()) as u32, off: c.off, n: c.n }));
+            new_regs.push(vinfo[c.reg as usize]);
+        }
+        clone.defs = defs[..].into();
         out.push(clone);
         made.push((r as u32, t));
         t
@@ -265,9 +346,8 @@ pub fn run(f: &mut MFunc) -> usize {
         let old = std::mem::take(&mut block.insts);
         let mut out = Vec::with_capacity(old.len());
         for mut inst in old {
-            if let [Opnd::R(d)] = inst.defs[..] {
+            if let Some(Opnd::R(d)) = inst.defs.first().copied() {
                 if (d.reg as usize) < nv && gone[d.reg as usize] {
-                    removed += 1;
                     continue;
                 }
             }
@@ -277,7 +357,7 @@ pub fn run(f: &mut MFunc) -> usize {
                 let r = v.reg as usize;
                 // Only a use deeper than the definition is recomputed (its definition's instruction stays for the others).
                 if r < nv && rw[r] && depth_of_def(&def_at, r, &block_depths) < block_depths[b] {
-                    let t = emit(r, nv, &def_of, &mut new_regs, &mut made, &mut out);
+                    let t = emit(r, nv, &def_of, &vinfo, &mut new_regs, &mut made, &mut out);
                     inst.uses[u] = Opnd::R(VRef { reg: t, off: v.off, n: v.n });
                 }
             }
@@ -287,9 +367,8 @@ pub fn run(f: &mut MFunc) -> usize {
     }
     let new_regs_len = new_regs.len();
     f.vregs.extend(new_regs);
-    let moved = new_regs_len;
-    CHANGED.with(|c| c.set(c.get() + moved));
-    removed
+    CHANGED.with(|c| c.set(c.get() + new_regs_len));
+    new_regs_len
 }
 
 fn depth_of_def(def_at: &[Option<(usize, usize)>], r: usize, depths: &[u32]) -> u32 {
@@ -376,6 +455,33 @@ mod tests {
         let before = f.blocks[0].insts.len();
         assert_eq!(run(&mut f), 0);
         assert_eq!(f.blocks[0].insts.len(), before);
+    }
+
+    #[test]
+    fn a_64_bit_sum_read_for_its_low_half_alone_is_computed_in_the_loop_without_its_carry_chain() {
+        let mut f = kernel(2, false);
+        let r = Opnd::R;
+        let s2 = |f: &mut MFunc| {
+            f.vregs.push(VRegInfo { class: Class::S, size: 2, align: 2, fixed: None });
+            VRef { reg: f.vregs.len() as u32 - 1, off: 0, n: 2 }
+        };
+        f.vregs.push(VRegInfo { class: Class::V, size: 2, align: 1, fixed: None });
+        let wide = f.vregs.len() as u32 - 1;
+        let (carry, carry2) = (s2(&mut f), s2(&mut f));
+        let t = VRef { reg: 1, off: 0, n: 1 };
+        // wide.lo = 272 + t with a carry; wide.hi = 0 + 0 + carry (nothing reads it); the loop reads wide.lo.
+        f.blocks[0].insts.insert(2, MInst::new(Opc::VAddCoU32, [r(VRef { reg: wide, off: 0, n: 1 }), r(carry)], [Opnd::Imm(272), r(t)]));
+        f.blocks[0].insts.insert(3, MInst::new(Opc::VAddCoCiU32, [r(VRef { reg: wide, off: 1, n: 1 }), r(carry2)], [Opnd::Imm(0), Opnd::Imm(0), r(carry)]));
+        let x = f.vregs.len() as u32;
+        f.vregs.push(VRegInfo { class: Class::V, size: 1, align: 1, fixed: None });
+        f.blocks[1].insts.insert(0, MInst::new(Opc::VAddF32, [r(VRef { reg: x, off: 0, n: 1 })], [r(VRef { reg: wide, off: 0, n: 1 }), r(VRef { reg: 4, off: 0, n: 1 })]));
+        f.blocks[1].insts.insert(1, MInst::new(Opc::Copy, [r(VRef { reg: 4, off: 0, n: 1 })], [r(VRef { reg: x, off: 0, n: 1 })]));
+        let before = effects(&f, 3);
+        assert!(run(&mut f) > 0);
+        assert_eq!(effects(&f, 3), before);
+        let count = |b: usize, op: Opc| f.blocks[b].insts.iter().filter(|i| i.op == op).count();
+        assert_eq!((count(0, Opc::VAddCoU32), count(0, Opc::VAddCoCiU32)), (0, 0), "dead chain and its definition gone");
+        assert_eq!((count(1, Opc::VAddCoU32), count(1, Opc::VAddCoCiU32)), (1, 0));
     }
 
     #[test]

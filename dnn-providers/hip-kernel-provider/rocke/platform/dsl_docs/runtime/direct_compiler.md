@@ -253,9 +253,12 @@ fixed rules:
   A one-dword VGPR value that one VALU instruction makes from constants,
   scalars and VGPRs defined once is made again in front of each use in a deeper
   loop, when the VGPRs it reads are live there anyway and its other uses come
-  before the loop's first one. The retried compile is kept if it spills less or,
-  spilling no more, runs more waves. The spiller does the same for what it
-  must spill, now also from such VGPRs.
+  before the loop's first one (a 64-bit sum made for its low half alone, the
+  LDS-DMA address of every row of a tile, counts: its dead carry chain is
+  dropped first). The retried compile is kept if it spills less or, spilling no
+  more, runs more waves or, with both alike, issues at least 3% fewer
+  instructions (blocks weighted by 8 to the power of their loop depth). The
+  spiller does the same for what it must spill, now also from such VGPRs.
 
 These choices depend only on the input. They are why two kernels of a similar
 size can take very different compile times.
@@ -353,6 +356,7 @@ Switches for both targets:
 | `nolicm` | No loop-invariant code motion. |
 | `noalias` | Ignores the `noalias` facts: every pair of global accesses stays in order. |
 | `nounroll` | No automatic unrolling. Loops the IR marks `unroll = true` still unroll. |
+| `rematforce` | gfx950: keeps the remat retry whenever it compiles. |
 | `noremat` | gfx950: no retry with loop-invariant addresses recomputed in loops, and the spiller recomputes values only from constants and scalars. |
 | `tracepressure` | Prints the pressure of load sinking alone and of each window to stderr, the registers live at the busiest point by defining opcode (`ROCKE_DIRECT_TRACE_FILE=path` also writes the function with its pressure per instruction), and what the remat retry did. |
 | `noglobalfold` | Leaves the constants of unrolled copies in their global addresses (no offset folding). |

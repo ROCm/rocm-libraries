@@ -308,7 +308,7 @@ pub(super) fn pure_def(inst: &MInst, class: Class, vregs: &[VRegInfo], defs: &[u
     }
     let pure = match inst.op {
         Opc::Copy | Opc::VMovB32 => true,
-        op => matches!(op.fmt(), Fmt::Vop1 | Fmt::Vop2 | Fmt::Vop3) && op.flags() == F_USE_EXEC,
+        op => matches!(op.fmt(), Fmt::Vop1 | Fmt::Vop2 | Fmt::Vop3 | Fmt::Vop3b) && op.flags() == F_USE_EXEC,
     };
     pure && inst.uses.iter().all(|o| match o {
         Opnd::Imm(_) => true,
@@ -729,7 +729,7 @@ impl Spiller {
         // (coverage, register, recomputed, freed); a candidate whose
         // recomputation reads registers is settled once their use positions
         // are known.
-        let vsources = f.target == crate::target::Target::Gfx950 && !super::debug_flag("noremat_v");
+        let vsources = f.target == crate::target::Target::Gfx950 && !super::debug_flag("noremat");
         let mut cands: Vec<(u64, u32, bool, u32)> = Vec::new();
         let mut sourced: Vec<usize> = Vec::new();
         for r in 0..nv as u32 {

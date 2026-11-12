@@ -1235,10 +1235,25 @@ pub(crate) fn compile_parsed_by_on(
         return first;
     }
     match (first, second) {
-        (Ok(a), Ok(b)) => Ok(if spilled(&b.stats) < spilled(&a.stats) || (spilled(&b.stats) == spilled(&a.stats) && b.stats.waves > a.stats.waves) { b } else { a }),
+        (Ok(a), Ok(b)) => Ok(if debug_flag("rematforce") || keeps_remat(&b, &a) { b } else { a }),
         (Err(_), Ok(b)) => Ok(b),
         (first, _) => first,
     }
+}
+
+/// Whether the compile with loop-invariant values recomputed (`recomputed`) is kept over `plain`: it spills less,
+/// or spills no more and runs more waves, or both are alike and it issues at least 3% fewer instructions, each
+/// block weighted by 8 to the power of its loop depth (the dead address chains and AGPR moves it saves).
+fn keeps_remat(recomputed: &CompiledKernel, plain: &CompiledKernel) -> bool {
+    let (r, p) = (&recomputed.stats, &plain.stats);
+    if spilled(r) != spilled(p) {
+        return spilled(r) < spilled(p);
+    }
+    if r.waves != p.waves {
+        return r.waves > p.waves;
+    }
+    let weighted = |k: &CompiledKernel| k.func.blocks.iter().map(|b| b.insts.len() as u64 * 8u64.pow(b.loop_depth.min(4))).sum::<u64>();
+    weighted(recomputed) * 100 <= weighted(plain) * 97
 }
 
 /// `compile_parsed_by_on` before its retry with `remat`.
