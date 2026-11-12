@@ -43,6 +43,7 @@
 #include <Tensile/CachingLibrary.hpp>
 #include <Tensile/ContractionProblem_fwd.hpp>
 #include <Tensile/DataTypes.hpp>
+#include <Tensile/MXScaleFormat.hpp>
 #include <Tensile/Predicates.hpp>
 #include <Tensile/Task.hpp>
 #include <Tensile/Utils.hpp>
@@ -359,6 +360,30 @@ namespace TensileLite
         size_t shiftPtrElemB;
         size_t depthUorMT0;
         size_t depthUorMT1;
+    };
+
+    struct GL2PrefetchSAddrCheckPacket
+    {
+        bool   tluA;
+        bool   tluB;
+        size_t depthUA;
+        size_t depthUB;
+        // MacroTile times ClusterDim on that side: the cluster prefetches every
+        // tile it consumes, not just its own.
+        size_t clusterMT0;
+        size_t clusterMT1;
+        // MX scales: MXBlock 0 means the kernel prefetches no scales on that side.
+        size_t depthU;
+        size_t matrixInstK;
+        size_t mxBlockA;
+        size_t mxBlockB;
+        size_t mxBlockFreeA;
+        size_t mxBlockFreeB;
+        // Sparse metadata, prefetched only when it is loaded through TDM.
+        bool   metadata;
+        bool   tluMetadata;
+        size_t depthUMetadata;
+        size_t clusterMTMetadata;
     };
 
     // None selects ordinary GEMM; DataParallel and StreamK use persistent workgroups.
@@ -1507,16 +1532,13 @@ namespace TensileLite
             rocisa::DataType mxTypeA        = rocisa::DataType::E8;
             rocisa::DataType mxTypeB        = rocisa::DataType::E8;
 
-            // In-device MX scale layout expected by the kernel. Mirrors the
+            // In-device MX scale layout expected by the kernel: a MXScaleFormat
+            // value, stored as an int so it round-trips through msgpack and YAML
+            // logic files without an explicit enum schema. Mirrors the
             // MXScaleFormat solution parameter (see tensilelite/Common/ValidParameters.py).
-            // Encoded as a small int so it round-trips through msgpack and YAML
-            // logic files without an explicit enum schema:
-            //   0 = NoSwizzle       (default; canonical row/column layout)
-            //   1 = HostPreSwizzle  (gfx950 subtile host-preswizzled layout)
-            //   2 = InMemorySwizzle (gfx1250 TDM-populated swizzled layout)
             // The host (DataInitialization) consults this to decide whether to
             // apply the K-dimension swizzle on the MX scale tensor before upload.
-            int mxScaleFormat = 0;
+            int mxScaleFormat = static_cast<int>(MXScaleFormat::NoSwizzle);
         };
 
         struct LinearModel
@@ -1578,8 +1600,9 @@ namespace TensileLite
         size_t skKGranularity() const
         {
             constexpr size_t scaleSwizzleK = 256;
-            if(problemType.mxScaleFormat != 1 || sizeMapping.depthU == 0
-               || sizeMapping.depthU >= scaleSwizzleK || scaleSwizzleK % sizeMapping.depthU != 0)
+            if(problemType.mxScaleFormat != static_cast<int>(MXScaleFormat::HostPreSwizzle)
+               || sizeMapping.depthU == 0 || sizeMapping.depthU >= scaleSwizzleK
+               || scaleSwizzleK % sizeMapping.depthU != 0)
                 return 1;
             return scaleSwizzleK / sizeMapping.depthU;
         }
@@ -1672,4 +1695,6 @@ namespace TensileLite
     TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                                    stream,
                              ContractionSolution::ProjectedPerformance const& spm);
     TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, BufferLoadCheckPacket const& st);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                      stream,
+                                                    GL2PrefetchSAddrCheckPacket const& st);
 } // namespace TensileLite

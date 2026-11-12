@@ -91,6 +91,23 @@ Fused convolution plans (convolution, bias and activation) select their solver t
 fusion API, which benchmarking does not change. `MIOPEN_FIND_MODE_FUSION` (default `FAST`) sets
 their find mode; PyTorch has no equivalent fused path.
 
+> [!NOTE]
+> The MIOpen provider does not report the `SUPPORTS_GRAPH_CAPTURE` behavior note, and the hipDNN
+> capture tests skip it. A convolution plan picks its algorithm with MIOpen Find on its first
+> execute. With the default find mode (`DYNAMIC_HYBRID`) and an empty find-db, that Find benchmarks
+> inside a stream capture and the capture fails. Capture works in these cases:
+>
+> - `MIOPEN_FIND_MODE=FAST` is set.
+> - The user find-db already has the entry from an earlier process.
+> - The plan ran eagerly before the capture. For some convolutions (seen on weight-gradient),
+>   MIOpen frees a temporary Find buffer on a later call. Run the plan more than once, with a
+>   short pause or a synchronization between runs, before the capture, or use `FAST`.
+>
+> Fused convolution, bias and activation plans (find mode `FAST` by default) and batchnorm
+> inference plans were captured on their first execute. This is a conditional workaround, not
+> support. See
+> [Capture hipDNN graphs in a hipGraph](../../../projects/hipdnn/docs/user-guides/how-to/capture-hipgraph.rst).
+
 **Caching**:
 - Benchmark results are cached in MIOpen's performance database
 - Default location: `~/.config/miopen/` on Linux
