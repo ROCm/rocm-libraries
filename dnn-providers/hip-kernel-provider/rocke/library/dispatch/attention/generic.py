@@ -4,9 +4,13 @@
 """Multi-arch attention candidates: the two unified paths and D256 decode.
 
 This module holds the candidates whose ``Capability`` names more than one arch.
-That is a different claim from "portable": each one still lists its arches
-explicitly, because there is no family wildcard (section 8.1, step 7). A new
-target inherits nothing here until someone opts it in.
+That is a different claim from "portable": D256 decode lists its arches
+explicitly, because there is no family wildcard (section 8.1, step 7), and a new
+target inherits nothing from it until someone opts it in. Naming a generic target
+is not a wildcard either: ``listed_arch_for`` admits the processors whose rows
+point at it, which are the generic's target under their own names. The two
+unified paths are the documented exception and declare every target that holds
+facts of its own (see ``_UNIFIED_CAPABILITY``).
 """
 
 from __future__ import annotations
@@ -20,7 +24,7 @@ from kernels.common.attention_unified import (
     supports_native_unified_attention_3d_tiled,
     supports_native_unified_attention_tiled,
 )
-from rocke.core.arch import known_arches
+from rocke.core.arch import arches_with_own_facts
 from rocke.dispatch.core import (
     Capability,
     CandidateRegistry,
@@ -38,7 +42,7 @@ from .common import (
     AttentionRequest,
     AttentionSpec,
     FAMILY,
-    _problem,
+    attention_problem,
     _request_errors,
     _selector_matches,
 )
@@ -52,8 +56,11 @@ from .common import (
 # are therefore the second documented exception to wave-size consistency,
 # alongside norm2d. Narrowing them to the wave64 MFMA targets would drop the
 # gfx1250 and RDNA coverage that the scalar and WMMA backends actually provide.
+# A processor whose row points at a generic target is served through that
+# generic's entry (listed_arch_for), so only targets with facts of their own are
+# listed.
 _UNIFIED_CAPABILITY = Capability(
-    arches=known_arches(),
+    arches=arches_with_own_facts(),
     dtypes=UNIFIED_DTYPES,
     shapes=(
         ShapeRange("hdim_q", allowed=UNIFIED_HEAD_SIZES),
@@ -71,6 +78,16 @@ _UNIFIED_LSE_CAPABILITY = dataclasses.replace(
     _UNIFIED_CAPABILITY, supports_features=ATTENTION_FEATURES | {"lse"}
 )
 
+# The two generic unified-path algorithms this module registers, named so a
+# caller outside this package (the SDPA gate) does not have to reconstruct
+# ``f"unified_{path}"`` itself.
+UNIFIED_2D_ALGORITHM = "unified_2d"
+UNIFIED_3D_ALGORITHM = "unified_3d"
+_UNIFIED_PATH_ALGORITHMS = {"2d": UNIFIED_2D_ALGORITHM, "3d": UNIFIED_3D_ALGORITHM}
+
+# The D256 bf16 decode candidate's algorithm (see _make_d256_decode_candidate).
+D256_DECODE_ALGORITHM = "d256_decode"
+
 
 def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
     spec_id = f"unified_{path}"
@@ -84,7 +101,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
-        problem = _problem(req)
+        problem = attention_problem(req)
         # The scalar gate is the coverage check; it refuses LSE (the scalar
         # kernel writes none), so ask it about the LSE-off problem and let the
         # path's own gate rule on LSE below.
@@ -122,7 +139,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, AttentionRequest)
-        problem = _problem(req)
+        problem = attention_problem(req)
         return AttentionSpec(
             path=path,
             head_size=problem.head_size,
@@ -141,7 +158,7 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
     candidate = KernelCandidate(
         name=name,
         family=FAMILY,
-        algorithm=f"unified_{path}",
+        algorithm=_UNIFIED_PATH_ALGORITHMS[path],
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=priority,
@@ -179,7 +196,7 @@ def _make_d256_decode_candidate() -> KernelCandidate:
         ok, why = _selector_matches(req, candidate)
         if not ok:
             return False, why
-        problem = _problem(req)
+        problem = attention_problem(req)
         ok, why = supports_native_unified_attention(problem, arch=req.arch)
         if not ok:
             return False, why
@@ -196,7 +213,7 @@ def _make_d256_decode_candidate() -> KernelCandidate:
         if not ok:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, AttentionRequest)
-        problem = _problem(req)
+        problem = attention_problem(req)
         return AttentionSpec(
             path="3d",
             head_size=problem.head_size,
@@ -213,7 +230,7 @@ def _make_d256_decode_candidate() -> KernelCandidate:
     candidate = KernelCandidate(
         name=name,
         family=FAMILY,
-        algorithm="d256_decode",
+        algorithm=D256_DECODE_ALGORITHM,
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
         priority=5,

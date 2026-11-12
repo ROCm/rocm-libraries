@@ -13,9 +13,10 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
 
+#include <cstddef>
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <string>
@@ -75,6 +76,13 @@ struct VerificationRun
     // The first executeAndValidate call computes the CPU reference and sets this flag.
     bool referenceReady = false;
 };
+
+/// Runs the CPU reference executor on a serialized graph. Defined in
+/// IntegrationGraphVerificationReference.cpp so the executor's templates are compiled
+/// once per executable rather than in every translation unit that includes this header.
+void executeCpuReferenceGraph(void* graphBuffer,
+                              size_t size,
+                              const std::unordered_map<int64_t, void*>& variantPack);
 
 // NOLINTBEGIN (portability-template-virtual-member-function)
 template <typename DataType, typename TestCaseType>
@@ -182,6 +190,7 @@ protected:
 
         if(!run.referenceReady)
         {
+            ASSERT_NO_FATAL_FAILURE(prepareReferenceInputs(run.gpuBundle, run.cpuBundle));
             ASSERT_NO_FATAL_FAILURE(executeCpuGraph(graph, run.cpuBundle));
             run.referenceReady = true;
         }
@@ -375,6 +384,23 @@ protected:
         }
     }
 
+    /// Runs after the GPU graph and before the CPU reference's first run. A suite whose
+    /// reference reads an engine output as its input (SDPA's Philox dropout reads the engine's
+    /// RNG dump as its explicit mask, SEM-015) copies it from @p gpuBundle into @p cpuBundle
+    /// here. Does nothing by default.
+    virtual void prepareReferenceInputs(
+        [[maybe_unused]] hipdnn_test_sdk::utilities::GraphTensorBundle& gpuBundle,
+        [[maybe_unused]] hipdnn_test_sdk::utilities::GraphTensorBundle& cpuBundle)
+    {
+    }
+
+    /// Called with the workspace each GPU execute is about to receive, before the execute.
+    /// A suite whose engine must not depend on the workspace's prior contents overrides this
+    /// to fill it with a pattern; the default leaves the fresh allocation as it is.
+    virtual void prepareWorkspace([[maybe_unused]] void* workspace, [[maybe_unused]] size_t bytes)
+    {
+    }
+
     virtual hipStream_t stream() const
     {
         return _stream;
@@ -396,6 +422,11 @@ private:
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
         ASSERT_GE(workspaceSize, 0) << result.err_msg;
         hipdnn_data_sdk::utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+        if(workspaceSize > 0)
+        {
+            ASSERT_NO_FATAL_FAILURE(
+                prepareWorkspace(workspace.get(), static_cast<size_t>(workspaceSize)));
+        }
 
         auto variantPack = bundle.toDeviceVariantPack();
         result = graph.execute(handle, variantPack, workspace.get());
@@ -412,7 +443,7 @@ private:
         auto [serializedGraph, serErr] = graph.to_binary();
         ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
-        hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
+        executeCpuReferenceGraph(
             serializedGraph.data(), serializedGraph.size(), bundle.toHostVariantPack());
     }
 

@@ -70,6 +70,44 @@ miopenConvolutionABBackwardWeightsGetWorkSpaceSize(const miopenAlphaBetaCase_t a
                                                    const miopenConvolutionDescriptor_t convDesc,
                                                    size_t* buffer_size);
 
+/* The three miopenConvolution*GetWorkSpaceSizeRange entry points report the
+ * smallest and largest workspace any applicable solver needs for a problem.
+ *
+ * They are exported but deliberately not part of miopen.h, so the public/private
+ * split does not rename them: with MIOPEN_ENABLE_HIPDNN_WRAPPER=ON they stay on
+ * libMIOpen_private.so under these names. They are declared once here so that
+ * the compiler checks MIOpen's definitions and callers against the same
+ * prototype. The hipDNN provider cannot include this header, so it keeps its own
+ * copy, which check_public_abi.py check-headers compares with the definitions.
+ * The parameters carry no top-level const, which does not change the type.
+ */
+MIOPEN_EXPORT extern "C" miopenStatus_t
+miopenConvolutionForwardGetWorkSpaceSizeRange(miopenHandle_t handle,
+                                              miopenTensorDescriptor_t wDesc,
+                                              miopenTensorDescriptor_t xDesc,
+                                              miopenConvolutionDescriptor_t convDesc,
+                                              miopenTensorDescriptor_t yDesc,
+                                              size_t* minWorkspaceSize,
+                                              size_t* maxWorkspaceSize);
+
+MIOPEN_EXPORT extern "C" miopenStatus_t
+miopenConvolutionBackwardDataGetWorkSpaceSizeRange(miopenHandle_t handle,
+                                                   miopenTensorDescriptor_t dyDesc,
+                                                   miopenTensorDescriptor_t wDesc,
+                                                   miopenConvolutionDescriptor_t convDesc,
+                                                   miopenTensorDescriptor_t dxDesc,
+                                                   size_t* minWorkspaceSize,
+                                                   size_t* maxWorkspaceSize);
+
+MIOPEN_EXPORT extern "C" miopenStatus_t
+miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange(miopenHandle_t handle,
+                                                      miopenTensorDescriptor_t dyDesc,
+                                                      miopenTensorDescriptor_t xDesc,
+                                                      miopenConvolutionDescriptor_t convDesc,
+                                                      miopenTensorDescriptor_t dwDesc,
+                                                      size_t* minWorkspaceSize,
+                                                      size_t* maxWorkspaceSize);
+
 #ifdef __cplusplus
 }
 #endif

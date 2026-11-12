@@ -2,11 +2,14 @@
 // SPDX-License-Identifier: MIT
 /* Target-independent dtype names. Mirrors rocke.core.dtypes:
  * normalize_dtype -> rocke_normalize_dtype, dtype_info -> rocke_dtype_info
- * (NULL on a miss) and rocke_require_dtype_info (raises).
+ * (NULL on a miss) and rocke_require_dtype_info (raises), dtype_names ->
+ * rocke_dtype_names.
  * No architecture, IR builder, or lowering dependencies; the engine exception
  * types (rocke/error.hpp) carry the raising lookup's refusal.
  */
 #include "rocke/dtypes.h"
+
+#include <string>
 
 #include <string.h>
 
@@ -200,4 +203,18 @@ const rocke_dtype_info_t* rocke_require_dtype_info(const char* name)
     if(!info)
         throw ckc::ValueError(ckc::format_error("unknown dtype '%s'", name ? name : "(null)"));
     return info;
+}
+
+std::string rocke_dtype_names(rocke_dtype_category_t category)
+{
+    std::string names;
+    for(const auto& info : k_dtype_info)
+    {
+        if(info.category != category)
+            continue;
+        if(!names.empty())
+            names += ", ";
+        names += info.name;
+    }
+    return names;
 }

@@ -401,7 +401,7 @@ public:
 #ifdef GOOGLE_TEST
             allocator::check_guards(this->data(), size_t(this->m) * size_t(this->n));
 #endif
-            allocator::free(this->data());
+            allocator::free_noexcept(this->data());
         }
     };
 

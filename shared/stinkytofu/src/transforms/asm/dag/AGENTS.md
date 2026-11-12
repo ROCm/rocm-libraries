@@ -36,15 +36,17 @@ When two rules want different things, the higher level wins. `PlacementLevel` in
 | --- | --- | --- |
 | L1 | `Barrier` | The barrier lands where it is planned. |
 | L2 | `LastDs` | The last ds before a barrier issues in time for that barrier. |
-| L3 | `WmmaQueue` | The WMMA queue stays busy: no window is wasted (the refill). |
-| L4 | `Prefetch` | Prefetches and global loads issue at their planned window. |
+| L3 | `Prefetch` | Prefetches and global loads issue at their planned window. |
+| L4 | `WmmaQueue` | The WMMA queue stays busy: no window is wasted (the refill). |
 | L5 | `DsPacer` | ds loads are spread over the region (`DsSpreadPacer`). |
 | L6 | `Filler` | SALU and VALU fill whatever slots are left. |
 
 Consequences:
 
 - A lower level never vetoes a higher one. The ds pacer (L5) must not delay the last ds
-  before a barrier (L2). A filler (L6) must not take a prefetch's window (L4).
+  before a barrier (L2). A filler (L6) must not take a prefetch's window (L3).
+- A prefetch goes before the refill. Refill first measured 1.8% slower on `mxf8_tn_medium`,
+  the only perf yaml it changes.
 - A barrier issues when its WMMA threshold is met. Do not hold it for an extra tail of
   WMMAs after the threshold. The threshold includes the last WMMA a feeding ds_load depends
   on and that load's drain (`depThreshold`). Two exclusive groups whose claim windows
@@ -123,7 +125,7 @@ Each concern has one model. Query it; do not build a second copy beside it.
 | --- | --- |
 | `s_wait_alu` waits and hazards | `WaitAluTracker` (`query`, `untilFree`, `requiredGap`, `commit`), the same scoreboard `InsertWaitAluPass` uses. |
 | ds pacing | `DsSpreadPacer` and the ds credit queue (`dsReadInflight_`). |
-| WMMA queue and cover | `outstandingWmmas()`, `wmmaQueueDepth()`, `queuedCoverCycles()`. |
+| WMMA queue and cover | `outstandingWmmas()`, `effectiveWmmaQueueDepth()`, `queuedCoverCycles()`. |
 | Barrier placement | The barrier thresholds (`barrierWmmaThresholds_`). |
 | Prefetch placement | `prefetchEarliestWmma_` and `needByWindow_`. |
 
@@ -151,7 +153,8 @@ are ready.
 
 ## Before you send the change
 
-Build and run the StinkyTofu ctest suite.
+For a refactor, prove that the generated assembly is identical (rule 6). How to do that is in
+[`harness/ab.md`](../../../../harness/ab.md).
 
 Read the related docs:
 

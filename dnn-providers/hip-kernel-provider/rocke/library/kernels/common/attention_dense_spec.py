@@ -10,6 +10,7 @@ subclasses in the owning kernel modules.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field, fields as _dataclass_fields
 from types import MappingProxyType
 
@@ -46,6 +47,55 @@ DEFAULT_DENSE_TILE_GEOMETRY = DENSE_TILE_GEOMETRIES["default"]
 # check 4 for why the SIGNED bound binds even though the buffer-resource
 # num_records field is unsigned in hardware.
 INT32_LIMIT = 2**31
+
+# Softmax scales both dense kernels compute correctly: a chosen margin, not a hardware
+# limit. gfx950's reason and known limit are noted in its kernel module, above
+# _EMPTY_ROW_MAX_GRID. gfx942 multiplies each fp32 score by scale * log2(e) and masks
+# with -1e30, so a larger scale can push a visible score below the mask (the row max
+# goes to a masked key) or past FLT_MAX (NaN). The hipDNN packs check the same range
+# as 0x1p-64F / 0x1p4F (isSupportedScale, AttentionDenseNative.cpp); change them
+# together. test_attention_dense_scale.py pins both bounds.
+DENSE_MIN_SCALE = 2.0**-64
+DENSE_MAX_SCALE = 2.0**4
+
+
+def check_dense_scale(scale: float) -> None:
+    """Raise unless ``scale`` is in ``[DENSE_MIN_SCALE, DENSE_MAX_SCALE]``.
+
+    NaN and +-inf are invalid input (``ValueError``); a finite scale outside the
+    range, zero and negatives included, is a kernel limit (``NotImplementedError``).
+    Every dense runner calls this before it builds a kernel."""
+    if not math.isfinite(scale):
+        raise ValueError(f"scale must be finite, got {scale!r}")
+    if not DENSE_MIN_SCALE <= scale <= DENSE_MAX_SCALE:
+        raise NotImplementedError(
+            "NOT_YET_IMPLEMENTED: the dense attention kernels support a softmax "
+            f"scale in [2**-64, 2**4], got {scale!r}"
+        )
+
+
+def partial_tile_reason(spec: "AttentionDenseSpec") -> str:
+    """Say which sequence length leaves a partial tile on a ``ragged`` spec.
+
+    The dense base-spec factories set ``ragged`` for an ordinary graph whose
+    lengths are not tile multiples (Sq == Skv == 384 at block_m 256, say), so a
+    refusal that only says "ragged" reads as a varlen problem. This names the
+    length and the tile instead.
+    """
+    parts = []
+    if spec.seqlen_q % spec.block_m:
+        parts.append(
+            f"seqlen_q {spec.seqlen_q} is not a multiple of block_m {spec.block_m}"
+        )
+    if spec.seqlen_kv % spec.block_n:
+        parts.append(
+            f"seqlen_kv {spec.seqlen_kv} is not a multiple of block_n {spec.block_n}"
+        )
+    return "; ".join(parts) or (
+        f"ragged=True at seqlen_q {spec.seqlen_q} and seqlen_kv {spec.seqlen_kv}, "
+        f"which are already multiples of block_m {spec.block_m} and block_n "
+        f"{spec.block_n}"
+    )
 
 
 @dataclass(frozen=True)
@@ -164,7 +214,11 @@ class AttentionDenseSpec:
             if self.varlen:
                 raise ValueError("ragged is not supported with varlen")
             if self.sliding_window > 0:
-                raise ValueError("ragged is not supported with sliding_window")
+                raise ValueError(
+                    "sliding_window needs whole tiles: "
+                    f"{partial_tile_reason(self)} (the partial-tile path has no "
+                    "window mask)"
+                )
         else:
             if self.seqlen_q % self.block_m != 0:
                 raise ValueError(
@@ -393,6 +447,45 @@ class AttentionDenseSpec:
         """
         return ()
 
+    @property
+    def runtime_shape(self) -> bool:
+        """Whether the body reads the problem shape only from its kernel params.
+        False here, matching the base contract that the whole shape is baked; each
+        arch spec that owns a runtime-shape body overrides it."""
+        return False
+
+    @property
+    def fastdiv_divisors(self) -> tuple[str, ...]:
+        """The runtime divisors the persistent work decode divides by on every
+        grid-stride iteration, in kernarg order. Empty off the runtime-shape
+        persistent grid (the non-persistent grid divides once per CTA).
+
+        Each one gets a host-computed magic multiplier and shift
+        (:func:`~kernels.common.attention_dense_decode.fastdiv_kernargs`), so the
+        in-loop divide stays a mul-hi, an add and a shift instead of the backend's
+        software integer division. Each decode class declares its own
+        (``PersistDecode.fastdiv_divisors``); a decode without the kv head as a digit
+        lists ``gqa`` for ``hkv = hq / gqa``.
+
+        A function of the resolved decode order only, never of the shape, so it is
+        fixed by the cache key: the key carries the resolved order on the persistent
+        grid (``attention_dense_cache_key``)."""
+        if not (self.persistent and self.runtime_shape):
+            return ()
+        return PERSIST_DECODES[self.resolved_persist_decode].fastdiv_divisors
+
+    @property
+    def runtime_kernarg_fields(self) -> tuple[str, ...]:
+        """The full runtime-kernarg ABI after ``scale``: :attr:`runtime_param_fields`,
+        then a ``<divisor>_magic`` / ``<divisor>_shift`` i32 pair per
+        :attr:`fastdiv_divisors` entry. The body's param declarations, the arch's
+        ``attention_dense_signature`` and ``attention_dense_runtime_args`` all read
+        this one tuple. The fast-division pairs are derived values, not spec fields,
+        so they play no part in the cache key."""
+        return self.runtime_param_fields + tuple(
+            f"{d}_{part}" for d in self.fastdiv_divisors for part in ("magic", "shift")
+        )
+
     def _layout_name_parts(self) -> tuple[str, ...]:
         return ()
 
@@ -533,6 +626,14 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
        emitted through ``const_i32`` (no range check) and the voffset feeding it is
        signed i32 arithmetic, so the signed bound is the binding one on both paths.
 
+       The UNIT differs per operand and is not cosmetic. K/V always go through a
+       buffer resource, so they are bounded in bytes. Q is bounded in bytes only
+       when ``ragged`` (the buffer-resource path, whose voffset is ``addr * 2``)
+       and in elements otherwise (``global_load_vN`` takes an element index). O is
+       element-addressed in every mode, despite ``_emit_o_store`` naming its
+       address argument ``q_row_byte``. Bounding ragged Q in elements lets a spec
+       between 2**30 and 2**31 elements through to a byte offset that overflows.
+
     Order matters between 2 and 4: a negative extent makes the products in 4
     vacuously true, so the sign check has to run first.
 
@@ -575,7 +676,17 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
             f"limit ({INT32_LIMIT} B)"
         )
     qo_elems = spec.batch * spec.seqlen_q * spec.num_query_heads * spec.head_size
-    if qo_elems >= INT32_LIMIT:
+    if spec.ragged:
+        # A ragged Q goes through a buffer resource whose num_records AND voffset
+        # are both i32 BYTES, so the ceiling is half the element count the
+        # element-offset paths get. O stays element-addressed even here.
+        qo_bytes = qo_elems * 2
+        if qo_bytes >= INT32_LIMIT:
+            return False, (
+                f"Q/O extent is {qo_bytes} B, at or past the 32-bit "
+                f"buffer-resource limit ({INT32_LIMIT} B)"
+            )
+    elif qo_elems >= INT32_LIMIT:
         return False, (
             f"Q/O extent is {qo_elems} elements, at or past the 32-bit addressing "
             f"limit ({INT32_LIMIT})"
@@ -586,8 +697,12 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
 __all__ = [
     "AttentionDenseSpec",
     "DEFAULT_DENSE_TILE_GEOMETRY",
+    "DENSE_MAX_SCALE",
+    "DENSE_MIN_SCALE",
     "DENSE_TILE_GEOMETRIES",
     "INT32_LIMIT",
     "attention_dense_cache_key",
+    "check_dense_scale",
     "check_dense_spec_preflight",
+    "partial_tile_reason",
 ]

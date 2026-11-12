@@ -289,7 +289,7 @@ instance.
 The classifier this maps onto is **resolve, then classify** over five inputs (`causal_mask`,
 `causal_mask_bottom_right`, `left_bound`, `right_bound`, `diagonal_alignment`). Its canonical form
 is `asm_sdpa_engine/plans/SdpaPlanUtils.hpp::getMaskType`, which the gfx950 `attention_dense`
-pack's `maskTypeFor` (`Gfx950AttentionDenseNative.cpp`) calls. `resolveDiagonalBand` first folds
+pack's `maskFor` (`AttentionDenseNative.cpp`) calls. `resolveDiagonalBand` first folds
 the deprecated booleans into the band as if their setter ran before every bound and alignment
 setter: either one turns an unbounded right bound into `R' = 0`, `causal_mask_bottom_right` forces
 BOTTOM_RIGHT, and `causal_mask` keeps the stored alignment. Both booleans set, or any bound below

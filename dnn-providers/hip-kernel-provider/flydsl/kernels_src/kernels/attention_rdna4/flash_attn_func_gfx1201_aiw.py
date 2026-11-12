@@ -121,6 +121,7 @@ import flydsl.compiler as flyc
 import flydsl.expr as fx
 from flydsl._mlir import ir
 from flydsl._mlir.dialects import llvm as _llvm
+from flydsl._mlir.dialects import scf as _scf
 from flydsl.compiler.kernel_function import CompilationContext
 from flydsl.expr import (
     const_expr,
@@ -166,6 +167,54 @@ def _pointer_load(result_type: ir.Type, ptr: ir.Value) -> ir.Value:
 
 def _pointer_store(value: ir.Value, ptr: ir.Value):
     return _llvm.StoreOp(fmha.llvm_value(value), fmha.llvm_value(ptr))
+
+
+# Modification 11: the sink_stride argument's bit that marks an f32 sink. Set, the sink is
+# f32 (cuDNN's and hipDNN's reference's dtype); clear, it is in the query's dtype. The low
+# 32 bits are the head stride in elements.
+SINK_F32_BIT = 32
+# Modification 12: the bit that marks a 16-bit sink in the other 16-bit dtype than the
+# query's (a bf16 sink with an f16 query, or an f16 sink with a bf16 one). Clear, a 16-bit
+# sink is in the query's dtype.
+SINK_OTHER_16BIT_BIT = 33
+
+
+def _load_sink_logit(sink, sink_stride, head, elem_numeric_cls):
+    """Query head ``head``'s attention-sink logit, as f32 (modifications 11, 12): two
+    16-bit loads at the element -- an f32 sink's low and high halves, a 16-bit sink's one
+    element twice -- so neither dtype's load reaches past it, without a branch; a 16-bit
+    sink is the query's dtype or, with ``SINK_OTHER_16BIT_BIT``, the other one. All widen
+    exactly."""
+    packed = fx.Int64(sink_stride)
+    wide = fx.Int32(packed >> fx.Int64(SINK_F32_BIT)) & fx.Int32(1)
+    stride = packed & fx.Int64(0xFFFFFFFF)
+    first = fx.Int64(fx.Int64(head) * stride) << fx.Int64(wide)
+    base = fmha.pointer_to_llvm_ptr(sink)
+    low = elem_numeric_cls(
+        _pointer_load(
+            elem_numeric_cls.ir_type,
+            buffer_ops.get_element_ptr(base, first, elem_type=elem_numeric_cls.ir_type),
+        )
+    )
+    high = fx.Int32(
+        fx.Int16(
+            _pointer_load(
+                fx.Int16.ir_type,
+                buffer_ops.get_element_ptr(
+                    base, first + fx.Int64(wide), elem_type=fx.Int16.ir_type
+                ),
+            )
+        )
+    ) & fx.Int32(0xFFFF)
+    low_bits = fx.Int32(low.bitcast(fx.Int16)) & fx.Int32(0xFFFF)
+    as_f32 = ((high << fx.Int32(16)) | low_bits).bitcast(fx.Float32)
+    # A 16-bit sink: the query's dtype, or the other one (modification 12), both exact.
+    other = fx.Int32(packed >> fx.Int64(SINK_OTHER_16BIT_BIT)) & fx.Int32(1)
+    other_cls = fx.Float16 if elem_numeric_cls is fx.BFloat16 else fx.BFloat16
+    as_query = fx.Float32(low.to(fx.Float32))
+    as_other = fx.Float32(low.bitcast(other_cls).to(fx.Float32))
+    narrow = (other != fx.Int32(0)).select(as_other, as_query)
+    return (wide != fx.Int32(0)).select(as_f32, narrow)
 
 
 # Causal alignment as a *window* sentinel, AOTriton's `WindowValue`. These
@@ -1310,6 +1359,66 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
                 v_ap, fetch_v(start_k), v_row_in_batch, col
             )
 
+        def _lds_zero_unseen(tile_start):
+            """The staged V tile's elements at keys no row of this Q block sees, set to 0
+            in LDS (modification 14): keys outside [_v_lo_i32, _v_lo_i32 +
+            _v_span_u32). A masked tile's P is 0 there, and 0 * NaN or 0 * inf would
+            otherwise reach O. A pass of its own between two barriers, in 8-byte pieces
+            (4 keys of one column transposed, 4 columns of one key row-major), read,
+            masked and written back: little is live beside it, where a select on the
+            staged vectors spilled the 256-wide objects."""
+            rel_base = fx.Int32(tile_start) - _v_lo_i32
+            v4_type = Vec.make_type(4, elem_dtype)
+            if const_expr(V_TRANSPOSED):
+                per_row = BLOCK_N // 4
+                units = VO_CHUNK_COLS * per_row
+            else:
+                per_row = VO_CHUNK_COLS // 4
+                units = BLOCK_N * per_row
+            for i in range_constexpr((units + BLOCK_SIZE - 1) // BLOCK_SIZE):
+                u = tid + fx.Index(i * BLOCK_SIZE)
+                if const_expr((i + 1) * BLOCK_SIZE > units):
+                    # A thread past the tile redoes its last piece, the same write.
+                    u = fx.Index((u < fx.Index(units)).select(u, fx.Index(units - 1)))
+                row = u // fx.Index(per_row)
+                piece = (u % fx.Index(per_row)) * fx.Index(4)
+                idx = fx.Int32(v_ap.lds_index(row, piece))
+                words = Vec(fx.ptr_load(lds_kv + idx, result_type=v4_type)).bitcast(
+                    fx.Int32
+                )
+                kept = []
+                if const_expr(V_TRANSPOSED):
+                    rel0 = rel_base + fx.Int32(piece)
+                    for w in range_constexpr(2):
+                        lo_ok = fx.Uint32(rel0 + fx.Int32(2 * w)) < _v_span_u32
+                        hi_ok = fx.Uint32(rel0 + fx.Int32(2 * w + 1)) < _v_span_u32
+                        mask = lo_ok.select(fx.Int32(0xFFFF), fx.Int32(0)) | (
+                            hi_ok.select(fx.Int32(-65536), fx.Int32(0))
+                        )
+                        kept.append(words[w] & mask)
+                else:
+                    keep = fx.Uint32(rel_base + fx.Int32(row)) < _v_span_u32
+                    for w in range_constexpr(2):
+                        kept.append(keep.select(words[w], fx.Int32(0)))
+                fx.ptr_store(
+                    Vec.from_elements(kept, fx.Int32).bitcast(elem_dtype),
+                    lds_kv + idx,
+                )
+
+        def _zero_unseen_in_tile(tile_start):
+            """_lds_zero_unseen and its barrier, run only when the tile holds a key
+            outside the block's: a uniform branch, so a masked tile that holds none --
+            every diagonal tile of a causal launch whose tiles align with the rows --
+            pays one compare."""
+            tile_i32 = fx.Int32(tile_start)
+            holds_unseen = (tile_i32 < _v_lo_i32) | (
+                fx.Uint32(tile_i32 + fx.Int32(BLOCK_N) - _v_lo_i32) > _v_span_u32
+            )
+            if_op = _scf.IfOp(fx.as_ir_value(holds_unseen))
+            with common_utils._if_then(if_op):
+                _lds_zero_unseen(tile_start)
+                gpu.barrier()
+
         def coop_store_v_lds(vecs):
             if const_expr(V_TRANSPOSED):
                 fmha.publish_transposed(v_ap, v_tr, lds_kv, vecs)
@@ -1466,6 +1575,19 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
             _l_col0, _f_col0 = _regions.left_col0, _regions.full_col0
             _r_col0, _m_col0 = _regions.right_col0, _regions.masked_col0
             _n_masked = fx.Index(_n_l + _n_r)
+            # The keys some row of this block sees, [_v_lo_i32, + _v_span_u32): the
+            # live columns above, within the sequence's keys (modification 14). Only
+            # the masked tiles read them, and those exist only when it is not empty.
+            _v_q_last = common_utils.smin(
+                fx.Int32(start_q) + fx.Int32(BLOCK_M), seqlen_q_i32
+            ) - fx.Int32(1)
+            _v_lo_i32 = common_utils.smax(fx.Int32(start_q) - _wl_i32, fx.Int32(0))
+            _v_hi_i32 = common_utils.smin(
+                _v_q_last + _wr_i32, seqlen_k_i32 - fx.Int32(1)
+            ) + fx.Int32(1)
+            _v_span_u32 = fx.Uint32(
+                common_utils.smax(_v_hi_i32 - _v_lo_i32, fx.Int32(0))
+            )
         else:
             # No mask beyond the KV tail: one full region, then one partial
             # tile. `kv_upper` is rounded *up* to a whole BLOCK_N because the
@@ -1920,9 +2042,17 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
                 p_vals = []
                 local_sum = fx.as_ir_value(c_zero_f)
                 for r in range_constexpr(NUM_S_VALS):
-                    diff = fastmath.add(s_raw[r], neg_m)
                     if const_expr(M_NATURAL):
+                        diff = fastmath.add(s_raw[r], neg_m)
                         diff = fastmath.mul(diff, c_log2e)
+                    else:
+                        # Not contracted with the scale's multiply (modification 13):
+                        # fused, `fma(s, c, -m)` keeps the rounding error of the product
+                        # the max was taken over, so the max key's exponent is not 0 --
+                        # NaN at raw scores near 3e11, and P = 1 - 2^-8 in bf16 at a sharp
+                        # softmax (AOTriton's test_large_bf16_nan_values and
+                        # test_sm_scale_magnitude).
+                        diff = fastmath.add_uncontracted(s_raw[r], neg_m)
                     p = rocdl.exp2(ir.F32Type.get(), fx.as_ir_value(diff))
                     p_vals.append(p)
                     local_sum = fastmath.add(local_sum, p)
@@ -1985,7 +2115,7 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
 
                         if const_expr(dtype_str == "bf16"):
                             p_packs_st.append(
-                                fmha.bf16_trunc_pack_v8(p_slice, elem_dtype)
+                                fmha.bf16_round_nonan_pack_v8(p_slice, elem_dtype)
                             )
                         else:
                             elem_list = []
@@ -2063,14 +2193,22 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
                         if const_expr(has_next):
                             cur_v_packs = next_v_packs
 
+            # A masked tile of a causal or windowed build zeroes the staged V at the keys
+            # no row of the block sees, behind one more barrier (modification 14). Full
+            # tiles and builds without a mask stage as before.
+            def _publish_v(vecs):
+                coop_store_v_lds(vecs)
+                gpu.barrier()
+                if const_expr(_MASK_STEPS and CAUSAL):
+                    _zero_unseen_in_tile(kv_block_start)
+
             if const_expr(VO_CHUNKS == 1):
                 # Unchunked: keep the original shape exactly. Wrapping this in a
                 # 1-trip chunk loop cost 4 VGPRs (190 -> 194), which crosses an
                 # allocation-granularity boundary and drops occupancy 8 -> 7
                 # waves/SIMD, measured at -4% on BLOCK_DMODEL 128.
                 if const_expr(V_PREFETCH_DIST):
-                    coop_store_v_lds(_v_vecs_cur)
-                    gpu.barrier()
+                    _publish_v(_v_vecs_cur)
                     # Issue the next tile's V here, not after GEMM2: this way
                     # the load flies over GEMM2 instead of only over the loop
                     # back-edge. (The baseline kernel issues it after GEMM2;
@@ -2078,14 +2216,12 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
                     # for both schedules.)
                     _v_vecs_next = coop_load_v_global(next_kv_start, 0)
                 else:
-                    coop_store_v_lds(coop_load_v_global(kv_block_start, 0))
-                    gpu.barrier()
+                    _publish_v(coop_load_v_global(kv_block_start, 0))
                 _gemm2_chunk(0)
             else:
                 _v_hold = _v_vecs_cur
                 for vchunk in range_constexpr(VO_CHUNKS):
-                    coop_store_v_lds(_v_hold)
-                    gpu.barrier()
+                    _publish_v(_v_hold)
                     if const_expr(vchunk + 1 < VO_CHUNKS):
                         _v_hold = coop_load_v_global(kv_block_start, vchunk + 1)
                     else:
@@ -2198,18 +2334,8 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
         _f32_ty_sink = ir.F32Type.get()
         _o_keep = [None] * ROW_SUBTILES
         if const_expr(HAS_SINK):
-            _sink_raw = fx.Float32(
-                fx.as_dsl_value(
-                    _pointer_load(
-                        elem_type,
-                        buffer_ops.get_element_ptr(
-                            fmha.pointer_to_llvm_ptr(SINK),
-                            fx.Int64(head_q) * fx.Int64(sink_stride),
-                            elem_type=elem_type,
-                        ),
-                    )
-                ).to(fx.Float32)
-            )
+            # In f32 or the query's dtype (modification 11).
+            _sink_raw = _load_sink_logit(SINK, sink_stride, head_q, elem_numeric_cls)
             _c_log2e_sink = fx.Float32(_LOG2E)
             loop_results = list(loop_results)
             for qt in range_constexpr(ROW_SUBTILES):
@@ -2402,6 +2528,88 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
                         d_col = fx.Index(D_OFFSET) + d_col
                     fmha.write_v8(o_ap, write_o, q_rows_in_tile[qt], d_col, o_trunc)
 
+    # Modification 10 (hipDNN vendoring): padded rows filled, by a kernel of its
+    # own in the same object. A row past its sequence's length but inside
+    # Max_seqlen_q is written as O = 0 and LSE = -inf, hipDNN's reference
+    # contract (cuDNN >= 9.14), sink builds included: a padded row is not a
+    # keyless row. The main kernel never stores such a row; hipDNN's native
+    # launches this one beside it, by its symbol, for padded graphs only (never
+    # packed: there the rows past a sequence are the next sequence's). Inside the
+    # main kernel the same stores cost a VGPR whatever their form, and at
+    # head_dim 128 that VGPR cut occupancy (19% slower). One workgroup per
+    # (head, 16 rows, sequence): 64 threads per row, 8 columns each, so V's head
+    # dim up to 512; the LSE through its own strides only (hipDNN's form).
+    PADFILL_THREADS = 256
+    PADFILL_ROWS = 16
+
+    @flyc.kernel(known_block_size=[PADFILL_THREADS, 1, 1])
+    def flash_attn_aiw_padfill_kernel(
+        O: fx.Pointer,  # noqa: E741
+        LSE: fx.Pointer,
+        seqlens: fx.Pointer,
+        max_seqlen_q: fx.Int32,
+        hdim_vo: fx.Int32,
+        stride_o_batch: fx.Int64,
+        stride_o_head: fx.Int64,
+        stride_o_seq: fx.Int64,
+        lse_stride_b: fx.Int64,
+        lse_stride_h: fx.Int64,
+        lse_stride_s: fx.Int64,
+    ):
+        head = fx.Int64(gpu.block_idx.x)
+        tile = fx.Int64(gpu.block_idx.y)
+        seq = fx.Int32(gpu.block_idx.z)
+        tid = fx.Int64(gpu.thread_idx.x)
+        chunk = tid % fx.Int64(64)
+        group = tid // fx.Int64(64)
+        # This sequence's length, clamped to [0, Max_seqlen_q] as the main kernel
+        # clamps it; with no array, every row is live and nothing is written.
+        length = fmha.cond_load(
+            fx.Int64(fx.ptrtoint(seqlens)) != fx.Int64(0),
+            fmha.seqinfo_addr(seqlens, seq),
+            fx.Int32(max_seqlen_q),
+        )
+        length = (length < fx.Int32(0)).select(fx.Int32(0), length)
+        length = (length > fx.Int32(max_seqlen_q)).select(
+            fx.Int32(max_seqlen_q), length
+        )
+        col = chunk * fx.Int64(8)
+        has_lse = fx.Int64(fx.ptrtoint(LSE)) != fx.Int64(0)
+        for i in range_constexpr(PADFILL_ROWS // 4):
+            row = (
+                tile * fx.Int64(PADFILL_ROWS)
+                + group * fx.Int64(PADFILL_ROWS // 4)
+                + fx.Int64(i)
+            )
+            pad = (row >= fx.Int64(length)) & (row < fx.Int64(max_seqlen_q))
+            if pad & (col < fx.Int64(hdim_vo)):
+                _pointer_store(
+                    Vec.filled(8, 0.0, elem_numeric_cls).ir_value(),
+                    buffer_ops.get_element_ptr(
+                        fmha.pointer_to_llvm_ptr(O),
+                        fx.Int64(
+                            fx.Int64(seq) * stride_o_batch
+                            + head * stride_o_head
+                            + row * stride_o_seq
+                            + col
+                        ),
+                        elem_type=elem_numeric_cls.ir_type,
+                    ),
+                )
+            if pad & (chunk == fx.Int64(0)) & has_lse:
+                _pointer_store(
+                    fx.as_ir_value(fx.Float32(float("-inf"))),
+                    buffer_ops.get_element_ptr(
+                        fmha.pointer_to_llvm_ptr(LSE),
+                        fx.Int64(
+                            fx.Int64(seq) * lse_stride_b
+                            + head * lse_stride_h
+                            + row * lse_stride_s
+                        ),
+                        elem_type=ir.F32Type.get(),
+                    ),
+                )
+
     @flyc.jit
     def launch_flash_attn_aiw(
         Q: fx.Pointer,
@@ -2588,6 +2796,28 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
             block=(BLOCK_SIZE, 1, 1),
             stream=stream,
         )
+        # Modification 10: the padded-row fill, launched here so the object carries
+        # it. This Python path is the generator's compile-only one and passes a
+        # Max_seqlen_q of 0, which fills nothing; hipDNN's native launches it by
+        # its symbol with the real one.
+        padfill = flash_attn_aiw_padfill_kernel(
+            O,
+            LSE,
+            seqinfo_q0,
+            fx.Int32(0),
+            hdim_vo,
+            stride_o_batch,
+            stride_o_head,
+            stride_o_seq,
+            lse_stride_b,
+            lse_stride_h,
+            lse_stride_s,
+        )
+        padfill.launch(
+            grid=(fx.Index(num_head_q), fx.Index(1), nseq_idx),
+            block=(PADFILL_THREADS, 1, 1),
+            stream=stream,
+        )
 
     _fmha_compile_hints = {
         "FAST_FP_MATH": FAST_FP_MATH,
@@ -2766,7 +2996,16 @@ def build_flash_attn_func_aiw_module_primary(meta, knobs):
                 _sb1,
                 _sb2,
                 abi.ptr_arg(sink) if sink is not None else abi.NULL_PTR,
-                int(sink.stride(0)) if sink is not None else 0,
+                (
+                    int(sink.stride(0))
+                    | (int(sink.element_size() == 4) << SINK_F32_BIT)
+                    | (
+                        int(sink.element_size() == 2 and sink.dtype != Q.dtype)
+                        << SINK_OTHER_16BIT_BIT
+                    )
+                    if sink is not None
+                    else 0
+                ),
                 _sb3,
                 int(V.shape[1]),
                 *_lse_st,
