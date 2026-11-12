@@ -21,7 +21,9 @@
     "px",
     "pf",
     "nbi",
-    "nbo"
+    "nbo",
+    "tw",
+    "bpu"
   ],
   "behavior_notes": [
     "runtime_compilation"

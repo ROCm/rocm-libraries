@@ -1,8 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// The small-group convolution kernels (CONV_GROUP_FWD, CONV_GROUP_BWD), compiled by HIPRTC per
-// catalog config. The pack defines:
+// The small-group convolution kernels (CONV_GROUP_FWD, CONV_GROUP_BWD, CONV_GROUP_WRW), compiled
+// by HIPRTC per catalog config. The pack defines:
 //   CONV_GROUP_T        element type: float, _Float16, or unsigned short (bf16 bits)
 //   CONV_GROUP_ATOM     the 16x16 matrix-core atom (a K1 atom type), or
 //   CONV_GROUP_FMA      1: the FMA kernel, with CONV_GROUP_CG (channels a group), _OC (output
@@ -15,6 +15,10 @@
 //   CONV_GROUP_PF       1: phase-fused backward data at stride 2 (k4ConvMmaPhased)
 //   CONV_GROUP_WIDE     1: wide groups (k4ConvMmaWide), CONV_GROUP_NBI blocks a group,
 //                       CONV_GROUP_NBO output blocks a workgroup
+//   CONV_GROUP_WRW      1: backward weights (k4WrwMma; k4WrwFma under CONV_GROUP_FMA,
+//                       k4WrwMmaWide under CONV_GROUP_WIDE with _NBI, _NBO), with
+//                       CONV_GROUP_TW dy columns a tile and the partials' reduce
+//                       (ConvGroupWrwReduce); _R, _S, _ST, _TH, _CB, _CF as above
 //   K1_BUFFER           0 (the K1 header's buffer loads are not used here)
 
 #ifndef K1_BUFFER
@@ -22,7 +26,67 @@
 #endif
 #include "ConvGroupCore.h"
 
-#if defined(CONV_GROUP_FMA) && CONV_GROUP_FMA
+#if defined(CONV_GROUP_WRW) && CONV_GROUP_WRW && defined(CONV_GROUP_FMA) && CONV_GROUP_FMA
+// Backward weights on FMA: CONV_GROUP_CG channels a group, CONV_GROUP_PX positions a segment.
+extern "C" __global__ void __launch_bounds__(256) ConvGroup(K4WrwArgs a)
+{
+    k4WrwFma<CONV_GROUP_T,
+             CONV_GROUP_R,
+             CONV_GROUP_S,
+             CONV_GROUP_ST,
+             CONV_GROUP_TH,
+             CONV_GROUP_TW,
+             CONV_GROUP_CB,
+             CONV_GROUP_CG,
+             CONV_GROUP_PX,
+             CONV_GROUP_CF>(a);
+}
+
+extern "C" __global__ void __launch_bounds__(256) ConvGroupWrwReduce(K4WrwReduceArgs a)
+{
+    k4WrwReduce<CONV_GROUP_T>(a);
+}
+#elif defined(CONV_GROUP_WRW) && CONV_GROUP_WRW && defined(CONV_GROUP_WIDE) && CONV_GROUP_WIDE
+// Backward weights for wide groups: CONV_GROUP_NBI blocks a group, CONV_GROUP_NBO dy blocks a
+// workgroup.
+extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE) ConvGroup(K4WrwArgs a)
+{
+    k4WrwMmaWide<CONV_GROUP_T,
+                 CONV_GROUP_ATOM,
+                 CONV_GROUP_R,
+                 CONV_GROUP_S,
+                 CONV_GROUP_ST,
+                 CONV_GROUP_TH,
+                 CONV_GROUP_TW,
+                 CONV_GROUP_NBI,
+                 CONV_GROUP_NBO,
+                 CONV_GROUP_CF>(a);
+}
+
+extern "C" __global__ void __launch_bounds__(256) ConvGroupWrwReduce(K4WrwReduceArgs a)
+{
+    k4WrwReduce<CONV_GROUP_T>(a);
+}
+#elif defined(CONV_GROUP_WRW) && CONV_GROUP_WRW
+// Backward weights: CONV_GROUP_TW output columns a tile (TH rows); the reduce shares the module.
+extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE) ConvGroup(K4WrwArgs a)
+{
+    k4WrwMma<CONV_GROUP_T,
+             CONV_GROUP_ATOM,
+             CONV_GROUP_R,
+             CONV_GROUP_S,
+             CONV_GROUP_ST,
+             CONV_GROUP_TH,
+             CONV_GROUP_TW,
+             CONV_GROUP_CB,
+             CONV_GROUP_CF>(a);
+}
+
+extern "C" __global__ void __launch_bounds__(256) ConvGroupWrwReduce(K4WrwReduceArgs a)
+{
+    k4WrwReduce<CONV_GROUP_T>(a);
+}
+#elif defined(CONV_GROUP_FMA) && CONV_GROUP_FMA
 extern "C" __global__ void __launch_bounds__(256) ConvGroup(K4Args a)
 {
     k4ConvFma<CONV_GROUP_T,
