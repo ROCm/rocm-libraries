@@ -79,12 +79,15 @@ hiprtcResult hiprtcCreateProgram(hiprtcProgram* prog,
     return result;
 }
 
+// The newest slot holding @p prog: a destroyed program's address is reused by a later one, so
+// an older slot can hold a stale name for the same handle.
 static void nameOf(hiprtcProgram prog, char* out)
 {
     out[0] = '\0';
     pthread_mutex_lock(&g_lock);
-    for(int i = 0; i < MAX_PROGRAMS; ++i)
+    for(int k = 1; k <= MAX_PROGRAMS; ++k)
     {
+        const int i = (g_next - k + MAX_PROGRAMS) % MAX_PROGRAMS;
         if(g_progs[i] == prog)
         {
             memcpy(out, g_names[i], NAME_LEN);
@@ -92,6 +95,30 @@ static void nameOf(hiprtcProgram prog, char* out)
         }
     }
     pthread_mutex_unlock(&g_lock);
+}
+
+typedef hiprtcResult (*DestroyFn)(hiprtcProgram*);
+
+hiprtcResult hiprtcDestroyProgram(hiprtcProgram* prog)
+{
+    static DestroyFn real = NULL;
+    if(real == NULL)
+    {
+        real = (DestroyFn)nextSymbol("hiprtcDestroyProgram");
+    }
+    if(prog != NULL)
+    {
+        pthread_mutex_lock(&g_lock);
+        for(int i = 0; i < MAX_PROGRAMS; ++i)
+        {
+            if(g_progs[i] == *prog)
+            {
+                g_progs[i] = NULL;
+            }
+        }
+        pthread_mutex_unlock(&g_lock);
+    }
+    return real(prog);
 }
 
 static void writeJsonString(FILE* f, const char* s)
