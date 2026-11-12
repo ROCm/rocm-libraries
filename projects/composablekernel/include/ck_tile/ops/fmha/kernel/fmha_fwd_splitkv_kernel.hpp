@@ -58,9 +58,22 @@ struct FmhaFwdSplitKVKernel
     using FmhaMask         = ck_tile::remove_cvref_t<typename FmhaPipeline::FmhaMask>;
     static constexpr bool kHasMask = FmhaMask::IsMasking;
 
+    static constexpr bool kUsesTdmAffineDramPath =
+        detail::uses_tdm_affine_dram_path_v<FmhaPipeline>;
+
+    // see FmhaFwdKernel::kKVCoherence
+#if defined(__gfx125__)
+    static constexpr auto kKVCoherence = detail::uses_kv_nt_ht_hint_v<FmhaPipeline>
+                                             ? amd_buffer_coherence_enum::NT_HT
+                                             : amd_buffer_coherence_enum::coherence_default;
+#else
+    static constexpr auto kKVCoherence = amd_buffer_coherence_enum::coherence_default;
+#endif
+
+    // with a mask, only the TDM pipelines merge (seqlen_q == 1, see SplitKVAttentionMask)
     static_assert(!kMergeNumHeadGroupsSeqLenQ ||
                   (kMergeNumHeadGroupsSeqLenQ && BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
-                   !kHasMask));
+                   (!kHasMask || kUsesTdmAffineDramPath)));
 
     // clang-format off
     template <typename T> struct t2s;
@@ -600,6 +613,21 @@ struct FmhaFwdSplitKVKernel
         return ck_tile::max(FmhaPipeline::GetSmemSize(), EpiloguePipeline::GetSmemSize());
     }
 
+    template <typename Mask>
+    CK_TILE_DEVICE static Mask MakeMask(const Kargs& kargs)
+    {
+        if constexpr(Mask::IsMasking)
+            return ck_tile::make_generic_attention_mask_from_lr_window<Mask>(
+                kargs.window_size_left,
+                kargs.window_size_right,
+                kargs.sink_size,
+                kargs.seqlen_q,
+                kargs.seqlen_k,
+                kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT);
+        else
+            return Mask{kargs.seqlen_q, kargs.seqlen_k};
+    }
+
     CK_TILE_DEVICE void operator()(Kargs kargs) const
     {
         // allocate LDS
@@ -1001,17 +1029,12 @@ struct FmhaFwdSplitKVKernel
             return make_tile_window(lse_acc_dram, lse_acc_dram_window_lengths, {i_m0});
         }();
 
-        FmhaMask mask = [&]() {
-            if constexpr(kHasMask)
-                return ck_tile::make_generic_attention_mask_from_lr_window<FmhaMask>(
-                    kargs.window_size_left,
-                    kargs.window_size_right,
-                    kargs.sink_size,
-                    kargs.seqlen_q,
-                    kargs.seqlen_k,
-                    kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT);
+        FmhaMask mask = [&, i_split_ = i_split]() {
+            if constexpr(kUsesTdmAffineDramPath)
+                return FmhaMask{
+                    MakeMask<typename FmhaMask::Mask>(kargs), kargs.num_splits, i_split_};
             else
-                return FmhaMask{kargs.seqlen_q, kargs.seqlen_k};
+                return MakeMask<FmhaMask>(kargs);
         }();
 
         // WA i_batch capture structure binding before c++20
@@ -1063,7 +1086,48 @@ struct FmhaFwdSplitKVKernel
         BlockIndices block_indices{i_batch, i_nhead, i_nhead_k};
 
         auto o_acc_tile = [&, i_split_ = i_split]() {
-            if constexpr(kDoFp8StaticQuant)
+            if constexpr(kUsesTdmAffineDramPath)
+            {
+                // TDM copies boxes from affine views: no padding, merging or page navigator.
+                // Merged rows have seqlen_q == 1, one q head apart.
+                const auto q_dram_tdm = make_naive_tensor_view<address_space_enum::global>(
+                    q_ptr,
+                    make_tuple(kMergeNumHeadGroupsSeqLenQ ? kargs.nhead_ratio_qk : kargs.seqlen_q,
+                               kargs.hdim_q),
+                    make_tuple(kMergeNumHeadGroupsSeqLenQ ? kargs.nhead_stride_q : kargs.stride_q,
+                               1),
+                    number<FmhaPipeline::kAlignmentQ>{},
+                    number<1>{});
+                const auto k_dram_tdm =
+                    make_naive_tensor_view<address_space_enum::global,
+                                           memory_operation_enum::set,
+                                           kKVCoherence>(k_ptr,
+                                                         make_tuple(kargs.seqlen_k, kargs.hdim_q),
+                                                         make_tuple(kargs.stride_k, 1),
+                                                         number<FmhaPipeline::kAlignmentK>{},
+                                                         number<1>{});
+                const auto v_dram_tdm =
+                    make_naive_tensor_view<address_space_enum::global,
+                                           memory_operation_enum::set,
+                                           kKVCoherence>(v_ptr,
+                                                         make_tuple(kargs.seqlen_k, kargs.hdim_v),
+                                                         make_tuple(kargs.stride_v, 1),
+                                                         number<FmhaPipeline::kAlignmentV>{},
+                                                         number<1>{});
+
+                return FmhaPipeline{}(
+                    make_tile_window(q_dram_tdm, q_dram_window.get_window_lengths(), {i_m0, 0}),
+                    make_tile_window(k_dram_tdm, k_dram_window_lengths, {0, 0}),
+                    make_tile_window(v_dram_tdm, v_dram_window_lengths, {0, 0}),
+                    bias_dram_window,
+                    lse_acc_dram_window,
+                    mask,
+                    position_encoding,
+                    kargs.scale_s,
+                    smem_ptr,
+                    sink_value);
+            }
+            else if constexpr(kDoFp8StaticQuant)
             {
                 return FmhaPipeline{}(q_dram_window,
                                       identity{}, // q_element_func

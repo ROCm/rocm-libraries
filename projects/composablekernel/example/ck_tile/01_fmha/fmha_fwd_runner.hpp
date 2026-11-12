@@ -103,73 +103,6 @@ auto get_elimit<FmhaFwdMxFp4>(std::string /*init_method*/)
     return ck_tile::make_tuple(rtol, atol);
 }
 
-int num_splits_heuristic(int batch_nhead_mblocks, int num_SMs, int max_splits)
-{
-    // If we have enough to almost fill the SMs, then just use 1 split
-    if(batch_nhead_mblocks >= 0.8f * num_SMs)
-    {
-        return 1;
-    }
-    max_splits           = std::min({max_splits, num_SMs});
-    float max_efficiency = 0.f;
-    std::vector<float> efficiency;
-    efficiency.reserve(max_splits);
-    for(int num_splits = 1; num_splits <= max_splits; num_splits++)
-    {
-        float n_waves = float(batch_nhead_mblocks * num_splits) / num_SMs;
-        float eff     = n_waves / ceil(n_waves);
-        // printf("num_splits = %d, eff = %f\n", num_splits, eff);
-        if(eff > max_efficiency)
-        {
-            max_efficiency = eff;
-        }
-        efficiency.push_back(eff);
-    }
-    for(int num_splits = 1; num_splits <= max_splits; num_splits++)
-    {
-        if(efficiency[num_splits - 1] >= 0.85 * max_efficiency)
-        {
-            // printf("num_splits chosen = %d\n", num_splits);
-            return num_splits;
-        }
-    }
-    return 1;
-}
-
-int override_num_splits_if_necessary(
-    int batch, int nhead, int max_seqlen_q, int hdim_v, float p_drop, int num_splits)
-{
-    (void)hdim_v;
-    int device;
-    auto status = hipGetDevice(&device);
-    if(status != hipSuccess)
-    {
-        return num_splits;
-    }
-
-    hipDeviceProp_t props{};
-    status = hipGetDeviceProperties(&props, device);
-    if(status != hipSuccess)
-    {
-        return num_splits;
-    }
-
-    // tile size should match the generate.py
-    const int kM0 = 64;
-
-    const int num_m_blocks = ck_tile::integer_divide_ceil(max_seqlen_q, kM0);
-
-    if(num_splits < 1 && p_drop == 0.0f)
-    {
-        // props.multiProcessorCount for >=gfx10 is the number of WGPs (each has 2 CUs)
-        const int num_blocks_per_SM = props.warpSize == 32 ? 4 : 2;
-        return num_splits_heuristic(
-            batch * nhead * num_m_blocks, props.multiProcessorCount * num_blocks_per_SM, 128);
-    }
-
-    return num_splits;
-}
-
 template <typename SMPLComputeDataType>
 void copy_attention_scores_with_sink(const ck_tile::HostTensor<SMPLComputeDataType>& s_host_ref,
                                      const ck_tile::HostTensor<SMPLComputeDataType>& sink_host,
@@ -670,22 +603,81 @@ fwd_result fmha_fwd_run(mode_enum mode,
              ? batch * std::max(1, ck_tile::integer_divide_ceil(max_seqlen_k, page_block_size))
              : 0);
 
+    const auto init_traits = [&](auto& traits) {
+        traits.hdim_q        = hdim_q;
+        traits.hdim_v        = hdim_v;
+        traits.data_type     = data_type;
+        traits.is_v_rowmajor = is_v_rowmajor;
+
+        if constexpr(std::is_same_v<fmha_fwd_appendkv_traits, std::decay_t<decltype(traits)>>)
+        {
+            traits.rope_type = (0 < rotary_dim ? (is_rotary_interleaved ? rope_enum::interleaved
+                                                                        : rope_enum::half_rotated)
+                                               : rope_enum::none);
+        }
+        else // fmha_fwd_traits or fmha_splitkv_traits
+        {
+            traits.is_group_mode       = (mode == mode_enum::group);
+            traits.has_logits_soft_cap = 0.f < logits_soft_cap;
+            traits.mask_type           = mask.type;
+            traits.bias_type           = bias.type;
+            traits.has_sink            = (mask.sink > 0 || init_sink_value != 0) ? true : false;
+            traits.has_lse             = lse;
+
+            if constexpr(std::is_same_v<fmha_fwd_traits, std::decay_t<decltype(traits)>>)
+            {
+                traits.has_dropout = (p_drop > 0.0f);
+                traits.qscale_type = qscale.type;
+            }
+            else if constexpr(std::is_same_v<fmha_fwd_pagedkv_traits,
+                                             std::decay_t<decltype(traits)>>)
+            {
+                traits.use_pagedkv = (0 < page_block_size);
+            }
+            else if constexpr(std::is_same_v<fmha_batch_prefill_traits,
+                                             std::decay_t<decltype(traits)>>)
+            {
+                traits.has_dropout = (p_drop > 0.0f);
+                traits.qscale_type = qscale.type;
+                traits.kv_memory_layout =
+                    ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT;
+                traits.kv_lookup_table =
+                    ck_tile::BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D;
+                traits.page_size = page_block_size;
+            }
+        }
+    };
+
     // legalize num_splits according to other options
+#if CK_TILE_FMHA_FWD_SPLITKV_API
     if(num_splits < 1)
     {
-        int nhead_merged        = nhead;
-        int max_seqlen_q_merged = max_seqlen_q;
-        // When max_seqlen_q == 1 and multiple head groups are merged (kMergeNumHeadGroupsSeqLenQ)
-        // then more splits are required
-        if(bias.type == bias_enum::no_bias && mask.type == mask_enum::no_mask &&
-           max_seqlen_q == 1 && nhead_k < nhead)
+        // fmha_fwd_splitkv_args cannot express padding; paged KV and dropout stay unsplit
+        if(has_group_padding || has_batch_padding || 0 < page_block_size || 0.f < p_drop)
         {
-            nhead_merged        = nhead_k;
-            max_seqlen_q_merged = max_seqlen_q * (nhead / nhead_k);
+            num_splits = 1;
         }
-        num_splits = override_num_splits_if_necessary(
-            batch, nhead_merged, max_seqlen_q_merged, hdim_v, p_drop, num_splits);
+        else
+        {
+            fmha_fwd_splitkv_traits traits;
+            init_traits(traits);
+            fmha_fwd_splitkv_args args{};
+            args.seqlen_q          = max_seqlen_q;
+            args.seqlen_k          = max_seqlen_k;
+            args.batch             = batch;
+            args.max_seqlen_q      = max_seqlen_q;
+            args.hdim_q            = hdim_q;
+            args.hdim_v            = hdim_v;
+            args.nhead_q           = nhead;
+            args.nhead_k           = nhead_k;
+            args.window_size_left  = mask.left;
+            args.window_size_right = mask.right;
+            args.sink_size         = mask.sink;
+            args.mask_type         = static_cast<ck_tile::index_t>(mask.type);
+            num_splits             = fmha_fwd_splitkv_get_num_splits(traits, args);
+        }
     }
+#endif
     if(128 < num_splits)
     {
         std::cerr << "num_splits greater than 128 is not supported" << std::endl;
@@ -1251,51 +1243,6 @@ fwd_result fmha_fwd_run(mode_enum mode,
 
     std::cout << std::flush;
 
-    const auto init_traits = [&](auto& traits) {
-        traits.hdim_q        = hdim_q;
-        traits.hdim_v        = hdim_v;
-        traits.data_type     = data_type;
-        traits.is_v_rowmajor = is_v_rowmajor;
-
-        if constexpr(std::is_same_v<fmha_fwd_appendkv_traits, std::decay_t<decltype(traits)>>)
-        {
-            traits.rope_type = (0 < rotary_dim ? (is_rotary_interleaved ? rope_enum::interleaved
-                                                                        : rope_enum::half_rotated)
-                                               : rope_enum::none);
-        }
-        else // fmha_fwd_traits or fmha_splitkv_traits
-        {
-            traits.is_group_mode       = (mode == mode_enum::group);
-            traits.has_logits_soft_cap = 0.f < logits_soft_cap;
-            traits.mask_type           = mask.type;
-            traits.bias_type           = bias.type;
-            traits.has_sink            = (mask.sink > 0 || init_sink_value != 0) ? true : false;
-            traits.has_lse             = lse;
-
-            if constexpr(std::is_same_v<fmha_fwd_traits, std::decay_t<decltype(traits)>>)
-            {
-                traits.has_dropout = (p_drop > 0.0f);
-                traits.qscale_type = qscale.type;
-            }
-            else if constexpr(std::is_same_v<fmha_fwd_pagedkv_traits,
-                                             std::decay_t<decltype(traits)>>)
-            {
-                traits.use_pagedkv = (0 < page_block_size);
-            }
-            else if constexpr(std::is_same_v<fmha_batch_prefill_traits,
-                                             std::decay_t<decltype(traits)>>)
-            {
-                traits.has_dropout = (p_drop > 0.0f);
-                traits.qscale_type = qscale.type;
-                traits.kv_memory_layout =
-                    ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT;
-                traits.kv_lookup_table =
-                    ck_tile::BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D;
-                traits.page_size = page_block_size;
-            }
-        }
-    };
-
     // Pack-GQA: print status (dimensions already computed earlier for buffer allocation)
     if(pack_gqa_nhead != nhead)
     {
@@ -1646,6 +1593,12 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     (use_cache_batch_idx ? cache_batch_idx_buf.GetDeviceBuffer() : nullptr);
 
                 args.num_splits = num_splits;
+                // the kernel reads each group's seqlen_q, so the grid and the head merging
+                // choice need the longest one rather than the total
+                if(mode == mode_enum::group)
+                {
+                    args.max_seqlen_q = max_seqlen_q;
+                }
 
                 args.stride_o_acc         = stride_o_acc;
                 args.nhead_stride_lse_acc = nhead_stride_lse_acc;

@@ -1856,6 +1856,52 @@ float fmha_fwd_splitkv(fmha_fwd_splitkv_traits,
                        fmha_fwd_splitkv_args,
                        const ck_tile::stream_config&);
 
+// The num_splits for fmha_fwd_splitkv(). 1 means splitting does not pay off: call fmha_fwd()
+// instead, as fmha_fwd_splitkv() still runs the combine kernel for one split.
+int fmha_fwd_splitkv_get_num_splits(fmha_fwd_splitkv_traits, fmha_fwd_splitkv_args);
+
+inline int
+num_splits_heuristic(int batch_nhead_mblocks, int num_SMs, int num_n_blocks, int max_splits)
+{
+    // If we have enough to almost fill the SMs, then just use 1 split
+    if(batch_nhead_mblocks >= 0.8f * num_SMs)
+    {
+        return 1;
+    }
+    max_splits           = std::min({max_splits, num_SMs, num_n_blocks});
+    float max_efficiency = 0.f;
+    std::vector<float> efficiency;
+    efficiency.reserve(max_splits);
+    // A split count that leaves the number of n blocks per split unchanged only adds empty splits.
+    auto is_split_eligible = [&num_n_blocks](int num_splits) {
+        return num_splits == 1 || ck_tile::integer_divide_ceil(num_n_blocks, num_splits) !=
+                                      ck_tile::integer_divide_ceil(num_n_blocks, num_splits - 1);
+    };
+    for(int num_splits = 1; num_splits <= max_splits; num_splits++)
+    {
+        if(!is_split_eligible(num_splits))
+        {
+            efficiency.push_back(0.f);
+            continue;
+        }
+        float n_waves = float(batch_nhead_mblocks * num_splits) / num_SMs;
+        float eff     = n_waves / ceil(n_waves);
+        if(eff > max_efficiency)
+        {
+            max_efficiency = eff;
+        }
+        efficiency.push_back(eff);
+    }
+    for(int num_splits = 1; num_splits <= max_splits; num_splits++)
+    {
+        if(is_split_eligible(num_splits) && efficiency[num_splits - 1] >= 0.85 * max_efficiency)
+        {
+            return num_splits;
+        }
+    }
+    return 1;
+}
+
 struct fmha_fwd_appendkv_traits
 {
     int hdim_q;

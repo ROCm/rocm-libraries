@@ -5,6 +5,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_kvcache_layout_enum.hpp"
+#include "ck_tile/ops/fmha/block/block_masking.hpp"
 #include "ck_tile/ops/fmha/block/block_rotary_embedding.hpp"
 #include "ck_tile/ops/fmha/pipeline/tile_fmha_traits.hpp"
 
@@ -300,6 +301,20 @@ struct BlockFmhaFwdSplitKVPipelineProblem
     static constexpr bool kMergeNumHeadGroupsSeqLenQ = Traits::kMergeNumHeadGroupsSeqLenQ;
     static constexpr index_t kBlockPerCu             = Traits::kBlockPerCu;
     static constexpr bool kHasSink                   = Traits::kHasSink;
+};
+
+// A BlockFmhaPipelineProblem for the split-KV kernel with a qr_tdm pipeline, which handles
+// uneven splits for every instance.
+template <typename FwdProblem_, bool kMergeNumHeadGroupsSeqLenQ_>
+struct BlockFmhaFwdSplitKVTdmPipelineProblem : FwdProblem_
+{
+    using FmhaMask =
+        SplitKVAttentionMask<typename FwdProblem_::FmhaMask, kMergeNumHeadGroupsSeqLenQ_>;
+
+    static constexpr bool kDoFp8StaticQuant          = false;
+    static constexpr bool kIsPagedKV                 = false;
+    static constexpr bool kHasUnevenSplits           = true;
+    static constexpr bool kMergeNumHeadGroupsSeqLenQ = kMergeNumHeadGroupsSeqLenQ_;
 };
 
 // extract tile size attributes to remove dependency on traits

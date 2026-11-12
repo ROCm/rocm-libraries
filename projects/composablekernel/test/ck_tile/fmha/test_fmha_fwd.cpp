@@ -3458,6 +3458,117 @@ TEST_P(SplitKV, DataTypeConfig)
     CHECK_RESULT(result);
 }
 
+// gfx125 merges the q heads of a GQA group when seqlen_q is 1; the four splits share the three KV
+// tiles of the window, so the last one is empty. The window starts inside a tile, so the
+// per-element mask runs on the merged rows. 16 and 17 merged rows fall on both sides of the d128
+// switch from the 16-row tile to the 64-row tile.
+class SplitKVMaskedMergedHeads
+    : public TestWithParam<std::tuple<bool, std::tuple<int, int>, std::tuple<int, int>, bool>>
+{
+};
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SplitKVMaskedMergedHeads);
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         SplitKVMaskedMergedHeads,
+                         Combine(EnableTestIf(std::is_same_v<DataTypeConfig, FmhaFwdFp16> ||
+                                              std::is_same_v<DataTypeConfig, FmhaFwdBf16>),
+                                 Values(std::tuple{64, -1}, std::tuple{128, -1}),
+                                 Values(std::tuple{64, 8}, std::tuple{16, 1}, std::tuple{17, 1}),
+                                 Bool())); // lse
+
+TEST_P(SplitKVMaskedMergedHeads, DataTypeConfig)
+{
+    auto [_, hdims, nheads, lse] = GetParam();
+    auto [hdim_q, hdim_v]        = hdims;
+    auto [nhead, nhead_k]        = nheads;
+
+    auto result = fmha_fwd_run<DataTypeConfig>(mode_enum::batch,
+                                               1, // batch
+                                               nhead,
+                                               nhead_k,
+                                               {1},
+                                               {1001},
+                                               hdim_q,
+                                               hdim_v,
+                                               0,                 // seqlen_knew
+                                               {-1},              // seqlen_qpads
+                                               {-1},              // seqlen_kpads
+                                               {},                // q_eff_lens_per_batch
+                                               {},                // kv_eff_lens_per_batch
+                                               0,                 // rotary_dim
+                                               true,              // i_perm
+                                               true,              // o_perm
+                                               0,                 // scale_s
+                                               0,                 // logits_soft_cap
+                                               def_is_v_rowmajor, // is_v_rowmajor
+                                               lse,               // lse
+                                               0,                 // page_block_size
+                                               false,             // use_cache_batch_idx
+                                               "n",               // bias_str
+                                               0.0f,              // p_drop
+                                               0,                 // drop_seed
+                                               0,                 // drop_offset
+                                               false,             // drop_prefs
+                                               "b:127,0",         // mask_str
+                                               qscale_str,
+                                               true, // is_rotary_interleaved
+                                               4,    // num_splits
+                                               COMMON_ARGS);
+    ASSERT_EQ(result, fwd_result::success);
+}
+
+TEST(TestCkTileFmhaFwd, SplitKVNumSplits)
+{
+    if constexpr(ck_tile::is_any_of<DataTypeConfig, FmhaFwdFp16, FmhaFwdBf16>::value)
+    {
+        if(!ck_tile::is_gfx125_supported())
+            GTEST_SKIP() << "only gfx1250 has split-KV instances that split by default";
+
+        // decode with a 2048-key window: 32 KV tiles of 64 keys
+        auto num_splits = [](auto&& update) {
+            fmha_fwd_splitkv_traits t{};
+            t.hdim_q        = 128;
+            t.hdim_v        = 128;
+            t.data_type     = std::is_same_v<DataTypeConfig, FmhaFwdBf16> ? "bf16" : "fp16";
+            t.is_v_rowmajor = true;
+            t.mask_type     = mask_enum::mask_bottom_right;
+            t.bias_type     = bias_enum::no_bias;
+            t.has_lse       = true;
+            fmha_fwd_splitkv_args a{};
+            a.seqlen_q          = 1;
+            a.max_seqlen_q      = 1;
+            a.seqlen_k          = 32768;
+            a.batch             = 1;
+            a.hdim_q            = 128;
+            a.hdim_v            = 128;
+            a.nhead_q           = 128;
+            a.nhead_k           = 8;
+            a.window_size_left  = 2047;
+            a.window_size_right = 0;
+            update(t, a);
+            return fmha_fwd_splitkv_get_num_splits(t, a);
+        };
+        const auto none = [](auto&, auto&) {};
+
+        // at most sqrt(4 * 32) splits
+        EXPECT_GT(num_splits(none), 1);
+        EXPECT_LE(num_splits(none), 11);
+        EXPECT_GT(
+            num_splits([](auto& t, auto& a) { t.hdim_q = t.hdim_v = a.hdim_q = a.hdim_v = 64; }),
+            1);
+        EXPECT_GT(num_splits([](auto&, auto& a) { a.window_size_left = 319; }), 1); // 5 tiles
+        EXPECT_EQ(num_splits([](auto&, auto& a) { a.window_size_left = 255; }), 1); // 4 tiles
+        EXPECT_EQ(num_splits([](auto&, auto& a) { a.seqlen_q = a.max_seqlen_q = 2; }), 1);
+        EXPECT_EQ(num_splits([](auto&, auto& a) { a.batch = 1024; }), 1); // enough blocks
+        EXPECT_EQ(num_splits([](auto& t, auto&) { t.is_group_mode = true; }), 1);
+        EXPECT_EQ(num_splits([](auto& t, auto&) { t.bias_type = bias_enum::elementwise_bias; }), 1);
+        EXPECT_EQ(num_splits([](auto& t, auto&) { t.has_sink = true; }), 1);
+        int block_table = 0;
+        EXPECT_EQ(num_splits([&](auto&, auto& a) { a.block_table_ptr = &block_table; }), 1);
+    }
+}
+
 #endif // CK_TILE_FMHA_FWD_SPLITKV_API
 
 #if CK_TILE_FMHA_FWD_APPENDKV_API
