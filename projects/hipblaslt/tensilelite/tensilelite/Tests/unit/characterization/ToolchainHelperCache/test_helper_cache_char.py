@@ -27,7 +27,8 @@ pytestmark = pytest.mark.unit
 
 def _fake_compiler():
     ver = types.SimpleNamespace(major=6, minor=2, patch=0)
-    return types.SimpleNamespace(version=ver, rocm_version=ver, default_args=[])
+    path = Path("amdclang++")
+    return types.SimpleNamespace(version=ver, rocm_version=ver, path=path, default_args=[path])
 
 
 def _make_include_dir(d):
@@ -61,7 +62,7 @@ def test_compute_cache_key_asan_differs(tmp_path):
     kern = _make_kernel(tmp_path)
     base = _computeCacheKey(str(kern), str(inc), ["gfx942"], _fake_compiler())
     asan = _fake_compiler()
-    asan.default_args = ["-fsanitize=address"]
+    asan.default_args.append("-fsanitize=address")
     assert _computeCacheKey(str(kern), str(inc), ["gfx942"], asan) != base
 
 
