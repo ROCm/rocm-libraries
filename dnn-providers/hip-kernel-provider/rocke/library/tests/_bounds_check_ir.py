@@ -33,12 +33,26 @@ def walk_ops(region):
             yield from walk_ops(sub)
 
 
+# Ops that read global memory as ``(base_ptr, element_index, ...)``. The async
+# DMA family lives under ``tile.`` rather than ``memref.``, so a prefix match on
+# ``memref.global_load`` alone silently finds nothing on the gfx1250 DTLA and
+# software-pipeline paths, whose V operand is staged by
+# ``global_load_async_to_lds``. Both families put the base pointer at operand 0
+# and the element index at operand 1.
+_GLOBAL_LOAD_PREFIXES = ("memref.global_load", "tile.global_load_async_to_lds")
+
+
 def global_loads(kernel, param):
-    """Every ``memref.global_load`` in ``kernel`` whose base pointer is ``param``."""
+    """Every global read in ``kernel`` whose base pointer is ``param``.
+
+    Covers the ``memref.global_load*`` family and the gfx1250 async
+    global-to-LDS DMA, so a kernel that stages an operand asynchronously is
+    checked rather than skipped.
+    """
     return [
         op
         for op in walk_ops(kernel.body)
-        if op.name.startswith("memref.global_load")
+        if op.name.startswith(_GLOBAL_LOAD_PREFIXES)
         and op.operands[0].name == f"%{param}"
     ]
 

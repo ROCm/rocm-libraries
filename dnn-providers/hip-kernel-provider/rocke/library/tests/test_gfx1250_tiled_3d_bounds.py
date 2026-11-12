@@ -34,24 +34,32 @@ from kernels.gfx1250.attention_tiled_3d import (
     build_unified_attention_3d_tiled,
 )
 
-from ._bounds_check_ir import clamped_to_last_of, global_loads
+from ._bounds_check_ir import clamped_to_last_of, global_loads, walk_ops
 
-# (tag, block_size, spec overrides) -- one per structurally distinct KV path.
+# (tag, block_size, spec overrides, stages V through the async DMA) -- one per
+# structurally distinct KV path. The DTLA and software-pipeline paths stage V
+# with ``tile.global_load_async_to_lds`` instead of a ``memref.global_load``,
+# which is exactly the difference that made an earlier version of the V check
+# silently inspect nothing on those two.
 _VARIANTS = (
-    ("single-wave bs16", 16, {}),
-    ("multi-wave bs16", 16, {"num_waves": 4, "use_wide_lds_reads": False}),
+    ("single-wave bs16", 16, {}, False),
+    ("multi-wave bs16", 16, {"num_waves": 4, "use_wide_lds_reads": False}, False),
     (
         "dtla bs16",
         16,
         {"use_dtla_prefetch": True, "use_wide_lds_reads": False},
+        True,
     ),
     (
         "sw-pipeline bs16",
         16,
         {"use_sw_pipeline": True, "use_wide_lds_reads": False},
+        True,
     ),
-    ("single-wave bs32", 32, {}),
+    ("single-wave bs32", 32, {}, False),
 )
+
+_ASYNC_V_OP = "tile.global_load_async_to_lds"
 
 
 def _kernel(block_size: int, **overrides):
@@ -74,17 +82,32 @@ def _kernel(block_size: int, **overrides):
 
 class TestGfx1250Tiled3dBoundsReads(unittest.TestCase):
     def _kernels(self):
-        for tag, bs, overrides in _VARIANTS:
-            yield tag, _kernel(bs, **overrides), bs
+        for tag, bs, overrides, async_v in _VARIANTS:
+            yield tag, _kernel(bs, **overrides), bs, async_v
 
-    def test_variants_build(self):
-        # Guards the variant table itself: a renamed or retired lever would
-        # otherwise make the bounds assertions below vacuous.
-        tags = [tag for tag, _, _ in self._kernels()]
-        self.assertEqual(len(tags), len(_VARIANTS))
+    def test_each_variant_builds_a_distinct_kernel(self):
+        # Guards the variant table itself. A lever that is renamed, retired or
+        # silently ignored collapses two rows onto the same kernel, which would
+        # leave the bounds assertions below passing while covering one path
+        # fewer. Comparing the count of tags against the table cannot catch
+        # that: it is true by construction.
+        names = [k.name for _, k, _, _ in self._kernels()]
+        self.assertEqual(len(set(names)), len(_VARIANTS), names)
+
+    def test_async_staging_levers_are_live(self):
+        # The DTLA and software-pipeline rows exist to cover the async-DMA V
+        # path. If either lever stops emitting the async op, those rows no
+        # longer test anything the plain rows do not, so pin the op per row.
+        for tag, k, _, async_v in self._kernels():
+            with self.subTest(variant=tag):
+                n = sum(1 for op in walk_ops(k.body) if op.name == _ASYNC_V_OP)
+                if async_v:
+                    self.assertTrue(n, f"{tag}: expected async V staging, found none")
+                else:
+                    self.assertFalse(n, f"{tag}: unexpected async V staging")
 
     def test_block_table_reads_clamped_to_last_page(self):
-        for tag, k, bs in self._kernels():
+        for tag, k, bs, _ in self._kernels():
             with self.subTest(variant=tag):
                 loads = global_loads(k, "block_tables_ptr")
                 self.assertTrue(loads, f"{tag}: no block-table read found")
@@ -95,10 +118,14 @@ class TestGfx1250Tiled3dBoundsReads(unittest.TestCase):
                     )
 
     def test_kv_reads_go_through_the_clamped_block_table(self):
-        for tag, k, bs in self._kernels():
+        for tag, k, bs, _ in self._kernels():
             for param in ("key_cache_ptr", "value_cache_ptr"):
                 with self.subTest(variant=tag, param=param):
-                    for op in global_loads(k, param):
+                    loads = global_loads(k, param)
+                    # An empty list would assert nothing: the loop below is
+                    # only meaningful if the reads were actually found.
+                    self.assertTrue(loads, f"{tag}: no {param} read found")
+                    for op in loads:
                         self.assertTrue(
                             clamped_to_last_of(op.operands[1], "seq_lens_ptr", bs),
                             f"{tag}: {param} read not bounded by the last page",
