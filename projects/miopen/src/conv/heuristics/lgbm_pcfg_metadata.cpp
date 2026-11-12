@@ -42,7 +42,7 @@ constexpr int kMaxArgCount = 255;
 // Cap on the memory one solver section may decode to (columns, candidate args,
 // descriptors, strings, bucket entries). The compressed bytes do not bound this:
 // a constant column or a shared string prefix costs a few bytes and expands to
-// megabytes. The largest shipped section decodes to about 16 MB; 128 MiB leaves
+// megabytes. The largest shipped section decodes to about 18 MB; 128 MiB leaves
 // room to grow while keeping a corrupt section from exhausting memory.
 constexpr std::uint64_t kMaxDecodedBytes = std::uint64_t{1} << 27;
 
