@@ -428,6 +428,20 @@ void FillTrueStats(BwdData& d, double eps)
     }
 }
 
+// MIOpen silently runs training when the estimated stats are null, so the output
+// is x normalized with its own batch stats: the inference reference given those
+// stats as its estimates.
+void CheckInferWithoutEstimates(miopen::Handle& handle, InferData& d)
+{
+    const BatchStats stats = ComputeBatchStats(d.input);
+    for(std::size_t ci = 0; ci < stats.mean.size(); ++ci)
+    {
+        d.estMean.data[ci]     = static_cast<float>(stats.mean[ci]);
+        d.estVariance.data[ci] = static_cast<float>(stats.variance[ci]);
+    }
+    CheckInfer(handle, d);
+}
+
 // The test data seeds each tensor from its lengths, so dy holds the same values as
 // x. Backward with the true stats of x then cancels to a residue of order
 // epsilon / variance: rounding noise, which the compare fails on in both modes.
@@ -1190,9 +1204,6 @@ TEST(GPU_HipdnnShimBNClippedActivation_FP32, MatchesCpuReference)
     }
 }
 
-// MIOpen silently runs training when the estimated stats are null, so the output
-// is x normalized with its own batch stats: the inference reference given those
-// stats as its estimates.
 TEST(GPU_HipdnnShimBNInferWithoutEstimates_FP32, RunsTraining)
 {
     auto&& handle = get_handle();
@@ -1204,13 +1215,7 @@ TEST(GPU_HipdnnShimBNInferWithoutEstimates_FP32, RunsTraining)
     if(result.status != miopenStatusSuccess)
         return;
 
-    const BatchStats stats = ComputeBatchStats(d.input);
-    for(std::size_t ci = 0; ci < stats.mean.size(); ++ci)
-    {
-        d.estMean.data[ci]     = static_cast<float>(stats.mean[ci]);
-        d.estVariance.data[ci] = static_cast<float>(stats.variance[ci]);
-    }
-    CheckInfer(handle, d);
+    CheckInferWithoutEstimates(handle, d);
 }
 
 // The provider recomputes the stats itself only for plain backward at an epsilon
@@ -1360,6 +1365,16 @@ hs::CallResult BwdUnderPolicy(miopen::Handle& handle,
     return hs::CaptureCall([&] { return BwdV1(handle, d, true); });
 }
 
+hs::CallResult InferUnderPolicy(miopen::Handle& handle,
+                                InferData& d,
+                                bool with_estimates,
+                                const BN2DTestCase& test_case = TuningCase())
+{
+    d.SetUpImpl(test_case, miopenBNSpatial, miopenTensorNCHW, false);
+    SetActivation(d.activ_mode, d.activ_alpha, d.activ_beta, miopenActivationPASTHRU);
+    return hs::CaptureCall([&] { return InferV1(handle, d, with_estimates); });
+}
+
 // MIOpen tunes the spatial training and backward solvers when the handle asks for
 // Search. The provider runs on a handle of its own, so the shim carries Search
 // over as the plan's benchmarking knob, under which the provider sets Search on
@@ -1400,8 +1415,7 @@ TEST(GPU_HipdnnShimBNTuning_FP32, SearchPolicyIsServed)
     {
         SCOPED_TRACE("infer");
         InferData d;
-        d.SetUpImpl(SearchCase(), miopenBNSpatial, miopenTensorNCHW, false);
-        const auto result = hs::CaptureCall([&] { return InferV1(handle, d, true); });
+        const auto result = InferUnderPolicy(handle, d, true, SearchCase());
         if(ExpectServed("tuning_policy_infer", result))
             CheckInfer(handle, d);
     }
@@ -1611,10 +1625,9 @@ TEST(GPU_HipdnnShimBNGaps_FP32, DbUpdatePolicyIsDeclined)
     {
         SCOPED_TRACE("infer");
         InferData d;
-        d.SetUpImpl(TuningCase(), miopenBNSpatial, miopenTensorNCHW, false);
-        const auto result = hs::CaptureCall([&] { return InferV1(handle, d, false); });
+        const auto result = InferUnderPolicy(handle, d, false);
         if(hs::RecordGapOutcome("tuning_policy_dbupdate_infer", result, reason))
-            CheckInfer(handle, d);
+            CheckInferWithoutEstimates(handle, d);
     }
 }
 
@@ -1645,10 +1658,9 @@ TEST(GPU_HipdnnShimBNGaps_FP32, SearchPolicyUnderFindEnforceIsDeclined)
     {
         SCOPED_TRACE("infer");
         InferData d;
-        d.SetUpImpl(TuningCase(), miopenBNSpatial, miopenTensorNCHW, false);
-        const auto result = hs::CaptureCall([&] { return InferV1(handle, d, false); });
+        const auto result = InferUnderPolicy(handle, d, false);
         if(hs::RecordGapOutcome("find_enforce_db_clean_infer", result, reason))
-            CheckInfer(handle, d);
+            CheckInferWithoutEstimates(handle, d);
     }
 }
 
