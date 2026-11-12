@@ -1259,6 +1259,54 @@
     reorderGRInstForDTVB: false
     tailLoopOptA: false
     tailLoopOptB: false
+  - DepthU: 256
+    EnableMatrixInstruction: false
+    ISA: [11, 5, 1]
+    MatrixInstruction: []
+    PrefetchGlobalRead: 2
+    ScheduleIterAlg: 1
+    SolutionIndex: 4
+    ThreadTile: [1, 4]
+    Valid: true
+    WaveSplitK: true
+    WavefrontSize: 32
+    WorkGroup: [4, 1, 16]
+  - DepthU: 256
+    EnableMatrixInstruction: false
+    ISA: [11, 5, 1]
+    MatrixInstruction: []
+    PrefetchGlobalRead: 1
+    ScheduleIterAlg: 1
+    SolutionIndex: 5
+    ThreadTile: [1, 8]
+    Valid: true
+    WaveSplitK: true
+    WavefrontSize: 32
+    WorkGroup: [4, 1, 16]
+  - DepthU: 256
+    EnableMatrixInstruction: false
+    ISA: [11, 5, 1]
+    MatrixInstruction: []
+    PrefetchGlobalRead: 1
+    ScheduleIterAlg: 1
+    SolutionIndex: 6
+    ThreadTile: [1, 4]
+    Valid: true
+    WaveSplitK: true
+    WavefrontSize: 32
+    WorkGroup: [8, 1, 16]
+  - DepthU: 512
+    EnableMatrixInstruction: false
+    ISA: [11, 5, 1]
+    MatrixInstruction: []
+    PrefetchGlobalRead: 2
+    ScheduleIterAlg: 1
+    SolutionIndex: 7
+    ThreadTile: [1, 4]
+    Valid: true
+    WaveSplitK: true
+    WavefrontSize: 32
+    WorkGroup: [2, 1, 32]
 - [2, 3, 0, 1]
 - - - [256, 17821, 1, 2048]
     - [0, 72.2]
@@ -1268,6 +1316,20 @@
     - [2, 89.8]
   - - [2560, 357, 1, 10240]
     - [3, 63.4]
+  - - [4, 300, 1, 256]
+    - [4, 10.4]
+  - - [4, 8400, 1, 256]
+    - [5, 53.3]
+  - - [4, 8500, 4, 256]
+    - [5, 67.6]
+  - - [256, 8, 1, 256]
+    - [4, 8.7]
+  - - [768, 4, 1, 768]
+    - [6, 44.6]
+  - - [14336, 1, 1, 4096]
+    - [7, 93.2]
+  - - [128256, 1, 1, 4096]
+    - [7, 97.3]
 - null
 - null
 - DeviceEfficiency
