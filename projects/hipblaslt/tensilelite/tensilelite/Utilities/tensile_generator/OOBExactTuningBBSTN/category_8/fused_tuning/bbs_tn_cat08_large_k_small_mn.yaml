@@ -1,0 +1,649 @@
+GlobalParameters:
+  SyncsPerBenchmark: 1
+  NumElementsToValidate: 0
+  NumElementsToValidateWinner: -1
+  KernelTime: False
+  BoundsCheck: 0
+  # PrintSolutionRejectionReason: True
+  ValidationMaxToPrint: 4      # maximum number of mismatches to print
+  ValidationPrintValids: False # print matches too
+  PruneSparseMode: 0
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeD: 2
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+  # PrintTensorC: 1
+  # PrintTensorD: 1
+  # PrintTensorRef: 1
+  NumWarmups: 10
+  EnqueuesPerSync: 10
+  MinFlopsPerSync: 150000000000000   # integer only (1.5e14 parses as a string); ~50 ms per sync
+  MaxEnqueuesPerSync: 1000
+  SleepPercent: 50
+  # PrintWinnersOnly: True
+  Architecture: gfx1250
+  # KeepBuildTmp: True
+  PrintLevel: 2
+  SkipSlowSolutionRatio: 0.75
+  RotatingBufferSize: 384
+
+
+BenchmarkProblems:
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate:  True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      UseBias: 1
+      Batched: True
+      UseScaleAlphaVec: 1
+      Activation: True
+      ActivationType: hipblaslt_all
+      ActivationComputeDataType: s
+      SupportUserArgs: True
+
+    # Each size must sit in exactly one BenchmarkProblemSizeGroup: LibraryLogic
+    # compares a later group's GFLOPS against the earlier group's GFLOPS/MHz, so
+    # the last group listing a size always wins it.
+    - # BenchmarkProblemSizeGroup - 8a. Large K, smaller M and N: K >= 300k
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - TDMInst: [3]
+        - TDMPlusLdsBuf: [-1]
+        - HalfPLR: [0, 1]
+        - TDMIterateMode: [-1]
+        - TDMSplit: [False]
+        - PrefetchGL2: [2]
+        - LDSSegmentInterleave: [-1]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMXSA: [-1]
+        - LdsPadMXSB: [-1]
+        - LdsBlockSizePerPadMXSA: [-1]
+        - LdsBlockSizePerPadMXSB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - InitCIterWmma: [1]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - CompactLoopStore: [False]
+        - PreloadKernArgs: [True]
+        # Every M in this file is a multiple of 16, and the Equality library
+        # only serves these exact sizes.
+        - AssertFree0ElementMultiple: [8]
+        # Group 1: the 10/23 winners' tiles, plus Origami kernels. The Origami
+        # entries copy the dev 10/27 library solutions (tile, HalfPLR,
+        # PrefetchGL2, SourceSwap, vector widths, LDS layout, mapping), so
+        # Stream-K with each kernel's own mapping rebuilds the dev winners.
+        # Group 2: Stream-K, data parallel and split-K. WorkGroupMapping,
+        # WorkGroupMappingXCC (other than -1), StaggerU and GlobalSplitU are
+        # kernel arguments, so sweeping them adds benchmark time, not kernels.
+        - Groups:
+          -
+            - MatrixInstruction:
+              - [16, 16, 32, 1,  1,  8, 6,  2, 2]   # 256x192
+              - [16, 16, 32, 1,  1,  6, 8,  2, 2]   # 192x256
+              - [16, 16, 32, 1,  1,  8, 8,  2, 2]   # 256x256
+              - [16, 16, 32, 1,  1,  7, 7,  2, 2]   # 224x224
+              - [16, 16, 32, 1,  1, 13, 3,  1, 4]   # 208x192
+              - [16, 16, 32, 1,  1,  3, 13, 4, 1]   # 192x208
+              DepthU: 128
+            - MatrixInstruction: [16, 16, 32, 1,  1,  8, 8,  2, 2]   # 256x256
+              DepthU: 128
+              TDMIterateMode: 1
+              HalfPLR: 1
+            - MatrixInstruction:
+              - [16, 16, 32, 1,  1, 15, 4,  1, 4]   # 240x256
+              - [16, 16, 32, 1,  1, 13, 4,  1, 4]   # 208x256
+              DepthU: 128
+              HalfPLR: 2
+            - <<: &origami   # style shared by every Origami big-tile kernel
+                DepthU: 128
+                TDMIterateMode: 0
+                TDMPlusLdsBuf: 0
+                TransposeLDS: 1
+                LDSTrInst: True
+                LdsPadA: 8
+                LdsPadB: 8
+                GlobalReadVectorWidthA: 1
+                GlobalReadVectorWidthB: 1
+                UseSgprForGRO: -1
+                ForceDisableShadowInit: False
+                ClusterLocalRead: 0
+                SwInstructionPrefetch: -1
+              # 256x288: dev 10/27 winner for 2304x7712
+              MatrixInstruction: [16, 16, 32, 1, 1, 8, 9, 2, 2]
+              HalfPLR: 1
+              PrefetchGL2: 0
+              SourceSwap: True
+              VectorWidthA: 8
+              VectorWidthB: 1
+              StoreVectorWidth: 8
+              LdsBlockSizePerPadA: 1024
+              LdsBlockSizePerPadB: 256
+              LDSSegmentInterleave: 0
+              SuppressNoLoadLoop: True
+              TemporalHintD: 1
+              WorkGroupMapping: -1
+              WorkGroupMappingXCC: 4
+            - <<: *origami   # 224x352: dev 10/27 winner for 2464x3600
+              MatrixInstruction: [16, 16, 32, 1, 1, 7, 11, 2, 2]
+              HalfPLR: 0
+              PrefetchGL2: 1
+              SourceSwap: True
+              VectorWidthA: 1
+              VectorWidthB: 1
+              StoreVectorWidth: 1
+              LdsBlockSizePerPadA: 256
+              LdsBlockSizePerPadB: 256
+              LDSSegmentInterleave: 0
+              WorkGroupMapping: -6
+              WorkGroupMappingXCC: 4
+            - <<: *origami   # 256x320: dev 10/27 winner for 8064x608
+              MatrixInstruction: [16, 16, 32, 1, 1, 4, 20, 4, 1]
+              HalfPLR: 3
+              PrefetchGL2: 2
+              SourceSwap: True
+              VectorWidthA: 4
+              VectorWidthB: 4
+              StoreVectorWidth: 4
+              LdsBlockSizePerPadA: 1024
+              LdsBlockSizePerPadB: 1024
+              LDSSegmentInterleave: 0
+              SuppressNoLoadLoop: True
+              TemporalHintD: 1
+              WorkGroupMapping: -24
+              WorkGroupMappingXCC: 16
+            - <<: *origami   # 352x256: dev 10/27 winner for 592x8000
+              MatrixInstruction: [16, 16, 32, 1, 1, 11, 8, 2, 2]
+              HalfPLR: 2
+              PrefetchGL2: 2
+              SourceSwap: False
+              VectorWidthA: 1
+              VectorWidthB: 4
+              StoreVectorWidth: 8
+              LdsBlockSizePerPadA: 256
+              LdsBlockSizePerPadB: 1024
+              LDSSegmentInterleave: 0
+              SuppressNoLoadLoop: True
+              WorkGroupMapping: -16
+              WorkGroupMappingXCC: 32
+            - <<: *origami   # 288x288: dev 10/27 winner for 4912x4032 and 1392x1680
+              MatrixInstruction: [16, 16, 32, 1, 1, 9, 9, 2, 2]
+              HalfPLR: 0
+              PrefetchGL2: 0
+              SourceSwap: False
+              VectorWidthA: 1
+              VectorWidthB: 1
+              StoreVectorWidth: 8
+              LdsBlockSizePerPadA: 256
+              LdsBlockSizePerPadB: 256
+              LDSSegmentInterleave: 0
+              WorkGroupMapping: -8
+              WorkGroupMappingXCC: 8
+            - <<: *origami   # 176x320: dev 10/27 winner for 1888x7216; one data-parallel wave (94%)
+              MatrixInstruction: [16, 16, 32, 1, 1, 11, 5, 1, 4]
+              HalfPLR: 0
+              PrefetchGL2: 0
+              SourceSwap: False
+              VectorWidthA: 1
+              VectorWidthB: 1
+              StoreVectorWidth: 8
+              LdsBlockSizePerPadA: 256
+              LdsBlockSizePerPadB: 256
+              LDSSegmentInterleave: 0
+              WorkGroupMapping: 24
+              WorkGroupMappingXCC: 8
+            - <<: *origami   # 352x224: Origami library; 4912x4032 in one wave (98%, also 2x2 cluster), 1392x1680 with GSU 8
+              MatrixInstruction: [16, 16, 32, 1, 1, 11, 7, 2, 2]
+              HalfPLR: 0
+              PrefetchGL2: 1
+              SourceSwap: True
+              VectorWidthA: 1
+              VectorWidthB: 1
+              StoreVectorWidth: 1
+              LdsBlockSizePerPadA: 256
+              LdsBlockSizePerPadB: 256
+              LDSSegmentInterleave: 0
+              TemporalHintA: 1
+              WorkGroupMapping: 48
+              WorkGroupMappingXCC: 4
+            - <<: *origami   # 288x256: Origami library; 2304x7712 in one wave with a 2x2 cluster (94%)
+              MatrixInstruction: [16, 16, 32, 1, 1, 18, 4, 1, 4]
+              HalfPLR: 2
+              PrefetchGL2: 2
+              SourceSwap: True
+              VectorWidthA: 2
+              VectorWidthB: 4
+              StoreVectorWidth: 2
+              LdsBlockSizePerPadA: 512
+              LdsBlockSizePerPadB: 1024
+              LDSSegmentInterleave: 0
+              SuppressNoLoadLoop: True
+              TemporalHintD: 1
+              WorkGroupMapping: -1
+              WorkGroupMappingXCC: 4
+            - <<: *origami   # 304x256: Origami library; 592x8000 with GSU 4 (95%)
+              MatrixInstruction: [16, 16, 32, 1, 1, 19, 4, 1, 4]
+              HalfPLR: 2
+              PrefetchGL2: 2
+              SourceSwap: True
+              VectorWidthA: 1
+              VectorWidthB: 4
+              StoreVectorWidth: 1
+              LdsBlockSizePerPadA: 256
+              LdsBlockSizePerPadB: 1024
+              LDSSegmentInterleave: 1
+              SuppressNoLoadLoop: True
+              TemporalHintA: 1
+              TemporalHintB: 1
+              WorkGroupMapping: -4
+              WorkGroupMappingXCC: 2
+            - <<: *origami   # 256x304: Origami library; 8064x608 with GSU 4 (98%)
+              MatrixInstruction: [16, 16, 32, 1, 1, 4, 19, 4, 1]
+              HalfPLR: 1
+              PrefetchGL2: 2
+              SourceSwap: False
+              VectorWidthA: 4
+              VectorWidthB: 1
+              StoreVectorWidth: 8
+              LdsBlockSizePerPadA: 1024
+              LdsBlockSizePerPadB: 256
+              LDSSegmentInterleave: 0
+              SuppressNoLoadLoop: True
+              TemporalHintA: 1
+              WorkGroupMapping: 4
+              WorkGroupMappingXCC: 4
+            - <<: *origami   # 384x224: Origami library; Stream-K with little edge waste on 4912x4032 and 1888x7216
+              MatrixInstruction: [16, 16, 32, 1, 1, 6, 14, 4, 1]
+              HalfPLR: 2
+              PrefetchGL2: 2
+              SourceSwap: True
+              VectorWidthA: 2
+              VectorWidthB: 2
+              StoreVectorWidth: 2
+              LdsBlockSizePerPadA: 512
+              LdsBlockSizePerPadB: 512
+              LDSSegmentInterleave: 0
+              SuppressNoLoadLoop: True
+              TemporalHintA: 1
+              WorkGroupMapping: -16
+              WorkGroupMappingXCC: 8
+            - <<: *origami   # 256x352: Origami library; Stream-K with little edge waste on 2304x7712
+              MatrixInstruction: [16, 16, 32, 1, 1, 8, 11, 2, 2]
+              HalfPLR: 1
+              PrefetchGL2: 1
+              SourceSwap: True
+              VectorWidthA: 4
+              VectorWidthB: 1
+              StoreVectorWidth: 4
+              LdsBlockSizePerPadA: 1024
+              LdsBlockSizePerPadB: 256
+              LDSSegmentInterleave: 0
+              SuppressNoLoadLoop: True
+              WorkGroupMapping: -6
+              WorkGroupMappingXCC: 1
+            - <<: *origami   # 288x320: Origami library; largest DepthU 128 tile, splits M of 2304x7712 and 8064x608 exactly
+              MatrixInstruction: [16, 16, 32, 1, 1, 9, 10, 2, 2]
+              HalfPLR: 2
+              PrefetchGL2: 2
+              SourceSwap: True
+              VectorWidthA: 1
+              VectorWidthB: 2
+              StoreVectorWidth: 1
+              LdsBlockSizePerPadA: 256
+              LdsBlockSizePerPadB: 512
+              LDSSegmentInterleave: 0
+              SuppressNoLoadLoop: True
+              WorkGroupMapping: -32
+              WorkGroupMappingXCC: 32
+            - <<: *origami   # 320x288: Origami library; largest DepthU 128 tile, splits N of 4912x4032 exactly
+              MatrixInstruction: [16, 16, 32, 1, 1, 10, 9, 2, 2]
+              HalfPLR: 1
+              PrefetchGL2: 2
+              SourceSwap: True
+              VectorWidthA: 2
+              VectorWidthB: 1
+              StoreVectorWidth: 2
+              LdsBlockSizePerPadA: 512
+              LdsBlockSizePerPadB: 256
+              LDSSegmentInterleave: 0
+              SuppressNoLoadLoop: True
+              TemporalHintA: 1
+              WorkGroupMapping: 2
+              WorkGroupMappingXCC: 16
+          -
+            # Stream-K; StreamK: 3 translates to these two selectors. WorkGroupMapping 0
+            # with WorkGroupMappingXCC -1 lets Origami pick the mapping and StaggerU per
+            # size at run time.
+            - TileProcessingStrategy: StreamK
+              WorkAssignment: StaticGrid
+              StreamKFixupTreeReduction: [0, 1]
+              WorkGroupMapping: 0
+              WorkGroupMappingXCC: -1
+            # Stream-K with each kernel's own mapping.
+            - TileProcessingStrategy: StreamK
+              WorkAssignment: StaticGrid
+            # Stream-K with StaggerU 32 and each kernel's own mapping and SourceSwap.
+            # PrefetchGL2 > 0 turns StaggerU off, so PrefetchGL2 is 0 here too.
+            - TileProcessingStrategy: StreamK
+              WorkAssignment: StaticGrid
+              StaggerU: 32
+              StaggerUStride: 256
+              PrefetchGL2: 0
+            # Stream-K with the tensilelite defaults the OOTB kernels use; six of the
+            # seven 10/23 winners in this group came from it.
+            - TileProcessingStrategy: StreamK
+              WorkAssignment: StaticGrid
+              WorkGroupMapping: 8
+              StaggerU: 32
+              StaggerUStride: 256
+              PrefetchGL2: 0
+              SourceSwap: False
+              ForceDisableShadowInit: False
+              UseSgprForGRO: -1
+            # Data parallel; a 2x2 cluster shares A/B loads through TDM multicast.
+            - GlobalSplitU: 1
+              ClusterDim: [[1, 1], [2, 2]]
+            # Split-K. These sizes have 30-330 output tiles for 256 CUs, so a split
+            # of 2-8 fills the waves; GSU>1 and GSU=-1 stay off clusters.
+            - GlobalSplitU: [-1, 2, 3, 4, 6, 8, 16]
+              ClusterDim: [[1, 1]]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [2304, 7712, 1, 830352] # -18.18%
+          - Exact: [2464, 3600, 1, 738624] # +42.32%
+          - Exact: [8064, 608, 1, 615504] # -19.76%
+          - Exact: [592, 8000, 1, 540688] # -7.48%
+          - Exact: [4912, 4032, 1, 535472] # -21.33%
+          - Exact: [1888, 7216, 1, 428720] # -1.41%
+          - Exact: [1392, 1680, 1, 319312] # -12.63%
+        - BiasTypeArgs: [s]
+
+    - # BenchmarkProblemSizeGroup - 8b. Large K, smaller M and N: K < 100k
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - TDMInst: [3]
+        - TDMPlusLdsBuf: [-1]
+        - HalfPLR: [0, 1]
+        - TDMIterateMode: [-1]
+        - TDMSplit: [False]
+        - PrefetchGL2: [2]
+        - LDSSegmentInterleave: [-1]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMXSA: [-1]
+        - LdsPadMXSB: [-1]
+        - LdsBlockSizePerPadMXSA: [-1]
+        - LdsBlockSizePerPadMXSB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - InitCIterWmma: [1]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - CompactLoopStore: [False]
+        - PreloadKernArgs: [True]
+        - AssertFree0ElementMultiple: [8]
+        # Same layout as 8a. These problems run in 0.07-1.7 ms, so each solution
+        # costs ~1.3 s for all three sizes and the list can be wider.
+        # DepthU 256 only fits the 320KB LDS when MT0+MT1 <= ~304; 128x160 at
+        # DepthU 256 is the MAIDAS tile for 1472x3232.
+        - Groups:
+          -
+            - MatrixInstruction:
+              - [16, 16, 32, 1,  1,  4, 5,  2, 2]   # 128x160
+              - [16, 16, 32, 1,  1,  5, 4,  2, 2]   # 160x128
+              DepthU: [128, 256]
+            - MatrixInstruction:
+              - [16, 16, 32, 1,  1,  6, 6,  2, 2]   # 192x192
+              - [16, 16, 32, 1,  1,  6, 8,  2, 2]   # 192x256
+              - [16, 16, 32, 1,  1,  8, 6,  2, 2]   # 256x192
+              - [16, 16, 32, 1,  1,  8, 8,  2, 2]   # 256x256
+              - [16, 16, 32, 1,  1,  7, 5,  2, 2]   # 224x160
+              - [16, 16, 32, 1,  1, 13, 3,  1, 4]   # 208x192
+              - [16, 16, 32, 1,  1,  3, 13, 4, 1]   # 192x208
+              - [16, 16, 32, 1,  1,  7, 7,  2, 2]   # 224x224
+              DepthU: 128
+            - MatrixInstruction: [16, 16, 32, 1,  1,  8, 8,  2, 2]   # 256x256
+              DepthU: 128
+              TDMIterateMode: 1
+              HalfPLR: 1
+            - MatrixInstruction:
+              - [16, 16, 32, 1,  1, 15, 4,  1, 4]   # 240x256
+              - [16, 16, 32, 1,  1, 13, 4,  1, 4]   # 208x256
+              DepthU: 128
+              HalfPLR: 2
+            - <<: *origami   # 256x192: dev 10/27 winner for 7104x1648
+              MatrixInstruction: [16, 16, 32, 1, 1, 8, 6, 2, 2]
+              HalfPLR: 1
+              PrefetchGL2: 0
+              SourceSwap: True
+              VectorWidthA: 8
+              VectorWidthB: 2
+              StoreVectorWidth: 8
+              LdsBlockSizePerPadA: 1024
+              LdsBlockSizePerPadB: 512
+              LDSSegmentInterleave: 1
+              SuppressNoLoadLoop: True
+              TemporalHintD: 1
+              StaggerU: 2
+              StaggerUStride: 256
+              WorkGroupMapping: 24
+              WorkGroupMappingXCC: 4
+            - <<: *origami   # 272x256: dev 10/27 winner for 6256x2704; one data-parallel wave (95%)
+              MatrixInstruction: [16, 16, 32, 1, 1, 17, 4, 1, 4]
+              HalfPLR: 2
+              PrefetchGL2: 2
+              SourceSwap: True
+              VectorWidthA: 1
+              VectorWidthB: 4
+              StoreVectorWidth: 1
+              LdsBlockSizePerPadA: 256
+              LdsBlockSizePerPadB: 1024
+              LDSSegmentInterleave: 0
+              SuppressNoLoadLoop: True
+              TemporalHintD: 1
+              WorkGroupMapping: -16
+              WorkGroupMappingXCC: 4
+            - <<: *origami   # 384x208: dev 10/27 winner for 1472x3232; one wave with GSU 4 (93%)
+              MatrixInstruction: [16, 16, 32, 1, 1, 6, 13, 4, 1]
+              HalfPLR: 1
+              PrefetchGL2: 2
+              SourceSwap: False
+              VectorWidthA: 2
+              VectorWidthB: 1
+              StoreVectorWidth: 8
+              LdsBlockSizePerPadA: 512
+              LdsBlockSizePerPadB: 256
+              LDSSegmentInterleave: 0
+              SuppressNoLoadLoop: True
+              WorkGroupMapping: -16
+              WorkGroupMappingXCC: 16
+            - <<: *origami   # 256x272: Origami library; 6256x2704 in one wave (95%)
+              MatrixInstruction: [16, 16, 32, 1, 1, 4, 17, 4, 1]
+              HalfPLR: 1
+              PrefetchGL2: 2
+              SourceSwap: False
+              VectorWidthA: 4
+              VectorWidthB: 1
+              StoreVectorWidth: 8
+              LdsBlockSizePerPadA: 1024
+              LdsBlockSizePerPadB: 256
+              LDSSegmentInterleave: 0
+              SuppressNoLoadLoop: True
+              TemporalHintB: 1
+              WorkGroupMapping: -6
+              WorkGroupMappingXCC: 16
+            - <<: *origami   # 352x256: dev 10/27 winner for 592x8000
+              MatrixInstruction: [16, 16, 32, 1, 1, 11, 8, 2, 2]
+              HalfPLR: 2
+              PrefetchGL2: 2
+              SourceSwap: False
+              VectorWidthA: 1
+              VectorWidthB: 4
+              StoreVectorWidth: 8
+              LdsBlockSizePerPadA: 256
+              LdsBlockSizePerPadB: 1024
+              LDSSegmentInterleave: 0
+              SuppressNoLoadLoop: True
+              WorkGroupMapping: -16
+              WorkGroupMappingXCC: 32
+            - <<: *origami   # 288x288: dev 10/27 winner for 4912x4032 and 1392x1680
+              MatrixInstruction: [16, 16, 32, 1, 1, 9, 9, 2, 2]
+              HalfPLR: 0
+              PrefetchGL2: 0
+              SourceSwap: False
+              VectorWidthA: 1
+              VectorWidthB: 1
+              StoreVectorWidth: 8
+              LdsBlockSizePerPadA: 256
+              LdsBlockSizePerPadB: 256
+              LDSSegmentInterleave: 0
+              WorkGroupMapping: -8
+              WorkGroupMappingXCC: 8
+            - <<: *origami   # 256x352: Origami library; Stream-K with little edge waste on 7104x1648 and 6256x2704
+              MatrixInstruction: [16, 16, 32, 1, 1, 8, 11, 2, 2]
+              HalfPLR: 1
+              PrefetchGL2: 1
+              SourceSwap: True
+              VectorWidthA: 4
+              VectorWidthB: 1
+              StoreVectorWidth: 4
+              LdsBlockSizePerPadA: 1024
+              LdsBlockSizePerPadB: 256
+              LDSSegmentInterleave: 0
+              SuppressNoLoadLoop: True
+              WorkGroupMapping: -6
+              WorkGroupMappingXCC: 1
+            - <<: *origami   # 288x320: Origami library; largest DepthU 128 tile
+              MatrixInstruction: [16, 16, 32, 1, 1, 9, 10, 2, 2]
+              HalfPLR: 2
+              PrefetchGL2: 2
+              SourceSwap: True
+              VectorWidthA: 1
+              VectorWidthB: 2
+              StoreVectorWidth: 1
+              LdsBlockSizePerPadA: 256
+              LdsBlockSizePerPadB: 512
+              LDSSegmentInterleave: 0
+              SuppressNoLoadLoop: True
+              WorkGroupMapping: -32
+              WorkGroupMappingXCC: 32
+            - <<: *origami   # 320x288: Origami library; largest DepthU 128 tile
+              MatrixInstruction: [16, 16, 32, 1, 1, 10, 9, 2, 2]
+              HalfPLR: 1
+              PrefetchGL2: 2
+              SourceSwap: True
+              VectorWidthA: 2
+              VectorWidthB: 1
+              StoreVectorWidth: 2
+              LdsBlockSizePerPadA: 512
+              LdsBlockSizePerPadB: 256
+              LDSSegmentInterleave: 0
+              SuppressNoLoadLoop: True
+              TemporalHintA: 1
+              WorkGroupMapping: 2
+              WorkGroupMappingXCC: 16
+          -
+            - TileProcessingStrategy: StreamK
+              WorkAssignment: StaticGrid
+              StreamKFixupTreeReduction: [0, 1]
+              WorkGroupMapping: 0
+              WorkGroupMappingXCC: -1
+            - TileProcessingStrategy: StreamK
+              WorkAssignment: StaticGrid
+            - TileProcessingStrategy: StreamK
+              WorkAssignment: StaticGrid
+              StaggerU: 32
+              StaggerUStride: 256
+              PrefetchGL2: 0
+            - TileProcessingStrategy: StreamK
+              WorkAssignment: StaticGrid
+              WorkGroupMapping: 8
+              StaggerU: 32
+              StaggerUStride: 256
+              PrefetchGL2: 0
+              SourceSwap: False
+              ForceDisableShadowInit: False
+              UseSgprForGRO: -1
+            # 7104x1648 fits one wave with 256x192 and a 2x1 cluster, or 224x224
+            # and a 2x2 cluster.
+            - GlobalSplitU: 1
+              ClusterDim: [[1, 1], [2, 2], [1, 2], [2, 1]]
+            # MultipleBufferSingleKernel reduces inside the GEMM kernel, saving the
+            # separate reduction kernel on the ~0.1 ms K=10448 problem.
+            - GlobalSplitU: [-1, 2, 3, 4, 6]
+              GlobalSplitUAlgorithm: [MultipleBuffer, MultipleBufferSingleKernel]
+              ClusterDim: [[1, 1]]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [7104, 1648, 1, 80048] # +1.27%
+          - Exact: [6256, 2704, 1, 68128] # -21.25%
+          - Exact: [1472, 3232, 1, 10448] # +70.42%
+        - ActivationArgs:
+          - [Enum: none]
+        - BiasTypeArgs: [s]
+
+LibraryLogic:
+   ScheduleName: "gfx1250"
+   DeviceNames: ["Device 73f0"]
+   ArchitectureName: "gfx1250"
+   LibraryType: "Equality"
+
+# LibraryClient:
