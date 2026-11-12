@@ -27,7 +27,7 @@ _JOBS = min(16, os.cpu_count() or 1)
 
 @pytest.fixture(scope="module", autouse=True)
 def _rocke_on_path():
-    """Bind rocKE for this module only (see test_enumerate_conv_aot_instances)."""
+    """Bind rocKE for this module only: restore sys.path after it."""
     before = list(sys.path)
     tool._bind_rocke(_ROCKE)
     yield
@@ -159,10 +159,8 @@ def test_main_refuses_a_listed_helper(tmp_path, committed, monkeypatch, capsys):
 
 
 def test_main_refuses_a_forward_kernel(tmp_path, monkeypatch, capsys):
-    import enumerate_conv_aot_instances as fwd
-
     forward = next(
-        i for i in fwd.read_rocke_catalog("fwd") if i["algorithm"] == "implicit_gemm"
+        i for i in tool.read_rocke_catalog("fwd") if i["algorithm"] == "implicit_gemm"
     )
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", forward["llvm_flavor"])
     monkeypatch.setattr(tool, "read_rocke_catalog", lambda direction: [forward])

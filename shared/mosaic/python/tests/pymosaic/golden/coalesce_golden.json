@@ -1,0 +1,58 @@
+[
+  {
+    "name": "cm_4x8",
+    "shape": [4,8],
+    "stride": [1,4],
+    "coalesce_shape": 32,
+    "coalesce_stride": 1
+  },
+  {
+    "name": "cm_2x3x4",
+    "shape": [2,3,4],
+    "stride": [1,2,6],
+    "coalesce_shape": 24,
+    "coalesce_stride": 1
+  },
+  {
+    "name": "rm_4x8",
+    "shape": [4,8],
+    "stride": [8,1],
+    "coalesce_shape": [4,8],
+    "coalesce_stride": [8,1]
+  },
+  {
+    "name": "padded_4x8",
+    "shape": [4,8],
+    "stride": [16,1],
+    "coalesce_shape": [4,8],
+    "coalesce_stride": [16,1]
+  },
+  {
+    "name": "partial_2x4x8",
+    "shape": [2,4,8],
+    "stride": [1,2,16],
+    "coalesce_shape": [8,8],
+    "coalesce_stride": [1,16]
+  },
+  {
+    "name": "nested_blocked",
+    "shape": [[2,2],[2,2]],
+    "stride": [[1,2],[4,8]],
+    "coalesce_shape": 16,
+    "coalesce_stride": 1
+  },
+  {
+    "name": "mixed_2x2_3",
+    "shape": [[2,2],3],
+    "stride": [[1,2],4],
+    "coalesce_shape": 12,
+    "coalesce_stride": 1
+  },
+  {
+    "name": "strided_single",
+    "shape": [4],
+    "stride": [2],
+    "coalesce_shape": 4,
+    "coalesce_stride": 2
+  }
+]

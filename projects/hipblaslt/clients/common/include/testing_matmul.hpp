@@ -1069,6 +1069,12 @@ void dumpBuffer(const char* title, hipDataType To, HipHostBuffer& buf, size_t M,
     return;
 }
 
+// Length of one bias vector, before any padding or stride between batches.
+inline int64_t bias_vector_length(hipblaslt_bias_source source, int64_t m, int64_t n)
+{
+    return source == hipblaslt_bias_source::b ? n : m;
+}
+
 // Returns why fast_check cannot verify this configuration, or an empty string when it can.
 inline std::string fast_check_unsupported_reason(const Arguments&     arg,
                                                  hipblasLtBatchMode_t batchMode,
@@ -1133,9 +1139,7 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
     if(!arg.gradient && arg.bias_vector && arg.bias_source == hipblaslt_bias_source::b)
         return "fast_check supports a bias with one value per row of D (bias_source a or d), not "
                "bias_source b";
-    // A bias gradient from B has one value per column of D; every other bias, one per row.
-    const int64_t bias_length
-        = arg.gradient && arg.bias_source == hipblaslt_bias_source::b ? arg.N[0] : arg.M[0];
+    const int64_t bias_length = bias_vector_length(arg.bias_source, arg.M[0], arg.N[0]);
     if(arg.bias_vector && arg.bias_stride > 0 && arg.bias_stride < bias_length)
         return "fast_check requires bias_stride to be at least the bias vector's length, "
                + std::to_string(bias_length);
@@ -1553,7 +1557,9 @@ void check(hipStream_t                   stream,
             hipblaslt_error += norm_error;
             if(arg.norm_check_assert)
             {
-                CHECK_SUCCESS(norm_check(norm_error, To, arg.compute_type, arg.a_type, arg.b_type));
+                CHECK_SUCCESS(
+                    can_compare
+                    && norm_check(worst_error, To, arg.compute_type, arg.a_type, arg.b_type));
             }
             if(!can_compare)
             {
@@ -1589,35 +1595,42 @@ void check(hipStream_t                   stream,
                 }
                 if(!arg.gradient && arg.use_e)
                 {
-                    double norm_error = 0.0;
-                    norm_error        = std::abs(norm_check_general('F',
-                                                             M[gemmIdx],
-                                                             N[gemmIdx],
-                                                             lde[gemmIdx],
-                                                             stride_e[gemmIdx],
-                                                             hE_gold[gemmIdx].buf(),
-                                                             hE[gemmIdx].buf(),
-                                                             num_batches[gemmIdx],
-                                                             Taux));
-                    hipblaslt_error += norm_error;
-                    if(arg.norm_check_assert)
+                    for(int batch = 0; batch < num_batches[gemmIdx]; batch++)
                     {
-                        CHECK_SUCCESS(
-                            norm_check(norm_error, Taux, arg.compute_type, arg.a_type, arg.b_type));
+                        const auto   offset = batch * stride_e[gemmIdx] * realDataTypeSize(Taux);
+                        const double batch_error
+                            = std::abs(norm_check_general('F',
+                                                          M[gemmIdx],
+                                                          N[gemmIdx],
+                                                          lde[gemmIdx],
+                                                          0,
+                                                          hE_gold[gemmIdx].as<char>() + offset,
+                                                          hE[gemmIdx].as<char>() + offset,
+                                                          1,
+                                                          Taux));
+                        hipblaslt_error += batch_error;
+                        if(arg.norm_check_assert)
+                        {
+                            CHECK_SUCCESS(
+                                norm_check_general_supports(Taux)
+                                && norm_check(
+                                    batch_error, Taux, arg.compute_type, arg.a_type, arg.b_type));
+                        }
                     }
                 }
                 if(arg.gradient && arg.bias_vector)
                 {
-                    double norm_error = 0.0;
-                    norm_error        = std::abs(norm_check_general('F',
-                                                             M[gemmIdx],
-                                                             1,
-                                                             M[gemmIdx],
-                                                             M[gemmIdx],
-                                                             hBias_gold[gemmIdx].buf(),
-                                                             hBias[gemmIdx].buf(),
-                                                             num_batches[gemmIdx],
-                                                             Tbias));
+                    const int64_t bias_length
+                        = bias_vector_length(arg.bias_source, M[gemmIdx], N[gemmIdx]);
+                    const double norm_error = std::abs(norm_check_general('F',
+                                                                          bias_length,
+                                                                          1,
+                                                                          bias_length,
+                                                                          bias_length,
+                                                                          hBias_gold[gemmIdx].buf(),
+                                                                          hBias[gemmIdx].buf(),
+                                                                          num_batches[gemmIdx],
+                                                                          Tbias));
                     hipblaslt_error += norm_error;
                     if(arg.norm_check_assert)
                     {
@@ -2447,14 +2460,10 @@ void testing_matmul_with_bias(const Arguments& arg,
         {
             if(arg.bias_vector)
             {
-                if(arg.bias_source == hipblaslt_bias_source::a
-                   || arg.bias_source == hipblaslt_bias_source::d)
-                    size_bias[i] = M[i];
-                else if(arg.bias_source == hipblaslt_bias_source::b)
-                    size_bias[i] = N[i];
-
                 size_bias[i] = hipblaslt_bench::rotating_bias_elements(
-                    size_bias[i], arg.bias_stride, num_batches[i]);
+                    bias_vector_length(arg.bias_source, M[i], N[i]),
+                    arg.bias_stride,
+                    num_batches[i]);
             }
             else
             {
