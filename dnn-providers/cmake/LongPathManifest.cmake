@@ -1,6 +1,8 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
+# Keep byte-identical with projects/hipdnn/cmake/LongPathManifest.cmake and dnn-providers/cmake/LongPathManifest.cmake.
+
 # Path of the long-path-aware application manifest that sits next to this module.
 set(_HIPDNN_LONG_PATH_MANIFEST
     "${CMAKE_CURRENT_LIST_DIR}/hipdnn-long-path-aware.manifest"
@@ -28,6 +30,7 @@ function(hipdnn_apply_long_path_manifest)
     endif()
 
     _hipdnn_collect_targets_recursive("${CMAKE_CURRENT_SOURCE_DIR}" targets)
+    set(tagged FALSE)
     foreach(target IN LISTS targets)
         get_target_property(target_type ${target} TYPE)
         get_target_property(is_imported ${target} IMPORTED)
@@ -35,7 +38,30 @@ function(hipdnn_apply_long_path_manifest)
         if(target_type STREQUAL "EXECUTABLE" AND NOT is_imported AND NOT already_applied)
             target_sources(${target} PRIVATE "${_HIPDNN_LONG_PATH_MANIFEST}")
             set_target_properties(${target} PROPERTIES HIPDNN_LONG_PATH_MANIFEST_APPLIED TRUE)
+            set(tagged TRUE)
             message(VERBOSE "hipdnn long-path manifest: ${target}")
         endif()
     endforeach()
+
+    # Only clang++ with the GNU frontend targeting MSVC needs mt.exe on PATH: its lld-link runs
+    # mt.exe to merge the manifest. MSVC-frontend builds run the manifest tool through CMAKE_MT,
+    # and MinGW merges no manifest. The cache entry is cleared so that a PATH that changes between
+    # configures is honored.
+    if(tagged
+       AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang"
+       AND CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "GNU"
+       AND CMAKE_CXX_SIMULATE_ID STREQUAL "MSVC")
+        unset(HIPDNN_MT_EXE CACHE)
+        find_program(
+            HIPDNN_MT_EXE
+            NAMES mt.exe
+            NO_CMAKE_PATH NO_CMAKE_ENVIRONMENT_PATH NO_CMAKE_SYSTEM_PATH
+        )
+        if(NOT HIPDNN_MT_EXE)
+            message(
+                FATAL_ERROR
+                "lld-link needs mt.exe on PATH to embed the long-path manifest. Add the Windows SDK bin directory (for example C:/Program Files (x86)/Windows Kits/10/bin/<version>/x64) to PATH. See projects/hipdnn/docs/Building.md."
+            )
+        endif()
+    endif()
 endfunction()
