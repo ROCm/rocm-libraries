@@ -4779,6 +4779,7 @@ def _run_3d_tiled_on_stream(
     else:
         num_segments = _num_segments(problem, _launch_arch)
         cache_key = _tiled_3d_cache_key(problem, _launch_arch)
+    _check_3d_workspace_addr_width(problem, num_segments)
     # The spec saw problem.num_kv_blocks, which a caller can leave stale, so
     # check the real paged cache. gfx1250's 3D spec makes no i64 decision.
     if kv_cache_layout is None and _launch_arch in ("gfx942", "gfx950"):
@@ -5590,6 +5591,52 @@ def _attention_3d_workspace_specs(
             device,
         ),
     )
+
+
+def _3d_workspace_max_index(problem: UnifiedAttentionProblem, num_segments: int) -> int:
+    """Largest element index the 3D pipeline forms into the segment workspace.
+
+    ``segm_output`` is ``[total_q, num_query_heads, num_segments, head_size]``
+    and dominates ``segm_{max,expsum}``, which share its three outer axes and
+    drop ``head_size``. Both kernels address it with the i32 strides built in
+    their ``segm_output`` / ``segm_ml`` descriptors, so the reach of the
+    contiguous layout is ``numel - 1``.
+    """
+    return (
+        problem.total_q * problem.num_query_heads * num_segments * problem.head_size
+    ) - 1
+
+
+def _check_3d_workspace_addr_width(
+    problem: UnifiedAttentionProblem, num_segments: int
+) -> None:
+    """Refuse a split-KV launch whose segment workspace overruns i32 addressing.
+
+    The segment kernel stores ``segm_output`` (and the reduce reads it back)
+    through i32 element offsets, so an index at or past ``2**31`` wraps
+    negative and the store lands outside the allocation: an illegal access,
+    not a wrong number. Measured on gfx942: a workspace of exactly ``2**31``
+    elements reaches index ``2**31 - 1`` and runs clean, one query token more
+    faults with ``hipErrorIllegalAddress``. The bound is therefore on the
+    index, not the element count, and it is the same rule
+    ``_validate_additive_bias`` applies to the bias tensor.
+
+    Declining here keeps the failure on the host with a reason the caller can
+    act on. The segment count is a tuning choice, so halving it halves the
+    workspace; default dispatch does not reach this size on any measured
+    shape.
+    """
+    max_idx = _3d_workspace_max_index(problem, num_segments)
+    if max_idx >= _I32_LIMIT:
+        nbytes = (max_idx + 1) * 4
+        raise NotImplementedError(
+            f"split-KV 3D segment workspace max element index {max_idx} "
+            f"exceeds the kernels' i32 addressing (< 2**31): "
+            f"total_q={problem.total_q} x num_query_heads="
+            f"{problem.num_query_heads} x num_segments={num_segments} x "
+            f"head_size={problem.head_size} is {nbytes / 2**30:.2f} GiB of f32. "
+            "Lower num_segments or split the launch"
+        )
 
 
 def attention_3d_workspace_nbytes(
