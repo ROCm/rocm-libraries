@@ -139,7 +139,7 @@ def _kdp(folders: dict, op: str) -> dict:
 
 def test_the_engine_is_one_ued_and_each_slot_is_its_op() -> None:
     folders = _split()
-    assert sorted(map(str, folders)) == sorted(
+    assert sorted(folder.as_posix() for folder in folders) == sorted(
         [
             "sdpa_bwd_split",
             *SLOT_OPS,

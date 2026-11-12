@@ -107,7 +107,7 @@ inline bool elementsDoNotOverlap(const data_objects::TensorAttributes& tensor,
     std::vector<std::pair<int64_t, int64_t>> axes; // (stride, extent)
     for(flatbuffers::uoffset_t axis = 0; axis < dims->size(); ++axis)
     {
-        if(dims->Get(axis) > 1 && !(ignoreBatch && axis == 0))
+        if(dims->Get(axis) > 1 && (!ignoreBatch || axis != 0))
         {
             axes.emplace_back(strides->Get(axis), dims->Get(axis));
         }

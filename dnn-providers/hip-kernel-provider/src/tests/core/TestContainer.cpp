@@ -440,7 +440,7 @@ TEST(TestContainer, GetEngineNameRejectsANullNameArgument)
 
 // The provider's schema guard's opt-in list (GraphSchema.hpp): the built-in engines claim graph
 // schema 1.4.0 (each of them gates ragged tensors, declared alignments and offset multipliers),
-// and the six FlyDSL SDPA engines claim 1.4.0 too, the SDK's newest (their UEDs' sdk_version,
+// and the eight FlyDSL SDPA engines (six forward, two backward) claim 1.4.0 too, the SDK's newest (their UEDs' sdk_version,
 // their matchers reviewed against every field up to it). The gfx950 rocKE conv dgrad engine
 // claims 1.3.0: its graph matcher gates alignment (multiples of 16 bytes) and declines ragged
 // tensors. Every other engine stays at or below the 1.2.0 baseline, so ragged, aligned and
@@ -458,7 +458,9 @@ TEST(TestContainer, PinsEveryEnginesDeclaredGraphSchema)
         {"hipkernel:flydsl_sdpa_aiw", "1.4.0"},
         {"hipkernel:flydsl_sdpa_cdna", "1.4.0"},
         {"hipkernel:flydsl_sdpa_cdna_dualwave", "1.4.0"},
-        {"hipkernel:flydsl_sdpa_cdna_decode", "1.4.0"}};
+        {"hipkernel:flydsl_sdpa_cdna_decode", "1.4.0"},
+        {"hipkernel:flydsl_sdpa_bwd_merged", "1.4.0"},
+        {"hipkernel:flydsl_sdpa_bwd_split", "1.4.0"}};
     Container container;
     auto& manager = container.getEngineManager();
     const auto baseline = providerBaselineGraphSchema();
