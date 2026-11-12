@@ -48,17 +48,12 @@ std::size_t minOffloadVariantsFromEnv();
 std::size_t resolveTotalThreads(std::size_t pending, std::size_t cpus) noexcept;
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-/// Moves hipkernel:Gfx942AttentionDense ahead of hipkernel:Gfx942AttentionUnified2D when both
-/// are in @p engineIds and Unified2D comes first, by rotating Dense into Unified2D's place:
-/// every other id keeps its position relative to the rest, and a list holding neither or
-/// already in order is untouched.
-///
-/// Both engines serve a dense bottom-right-causal graph at Sq == Skv, and hipDNN ranks every
-/// engine that has no rule of its own (sortEngineIds) in the order a provider lists them, which
-/// for this provider is its engine map's hash order. Dense is the faster of the two on every
-/// shared shape the ground truth holds, so the order is stated here instead of left to that
-/// hash.
-void orderDenseAttentionBeforeUnified2D(std::vector<int64_t>& engineIds);
+/// Applies each of ENGINE_ORDER_RULES (IngestorPacks.hpp), in the table's order, to
+/// @p engineIds: when the rule's two engines are both in the list and the other one comes
+/// first, the preferred one is rotated into the other's place. Every other id keeps its
+/// position relative to the rest, and a list holding neither engine, or already in order, is
+/// untouched.
+void applyEngineOrderRules(std::vector<int64_t>& engineIds);
 #endif
 
 /// The provider's engine manager. Adds threaded applicability for staged (ingestor) engines:
@@ -81,11 +76,11 @@ public:
                    const hipdnn_data_sdk::utilities::Version& maxGraphSchema
                    = providerBaselineGraphSchema());
 
-    /// Same ids, in the same order, as the base class's loop (with
-    /// orderDenseAttentionBeforeUnified2D applied), and an engine that throws is skipped the
-    /// same way: it is inapplicable and the others are still reported. But for the provider's
-    /// schema guard: an engine whose declared schema is below the graph's floor
-    /// (graphSchemaFloor) declines it without running.
+    /// Same ids, in the same order, as the base class's loop (with applyEngineOrderRules applied
+    /// to every path's result), and an engine that throws is skipped the same way: it is
+    /// inapplicable and the others are still reported. But for the provider's schema guard: an
+    /// engine whose declared schema is below the graph's floor (graphSchemaFloor) declines it
+    /// without running.
     std::vector<int64_t> getApplicableEngineIds(Handle& handle, const IGraph& opGraph);
 
     std::size_t stagedEngineCount() const noexcept;
@@ -101,6 +96,10 @@ private:
     bool admits(int64_t engineId, const hipdnn_data_sdk::utilities::Version& floor) const;
 
     std::unordered_map<int64_t, hipdnn_data_sdk::utilities::Version> _maxGraphSchema;
+
+    /// The applicable ids of one call, in the order the call's path produces them, before the
+    /// provider's engine order rules (applyEngineOrderRules) are applied.
+    std::vector<int64_t> collectApplicableEngineIds(Handle& handle, const IGraph& opGraph);
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
     using StagedEngine = hipdnn_plugin_sdk::ingestor::IStagedApplicability<Handle>;

@@ -102,23 +102,25 @@ std::size_t ApplicabilityManager::stagedEngineCount() const noexcept
 }
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-void orderDenseAttentionBeforeUnified2D(std::vector<int64_t>& engineIds)
+void applyEngineOrderRules(std::vector<int64_t>& engineIds)
 {
-    const auto denseId = hipdnn_data_sdk::utilities::engineNameToId(
-        kernel_ingestor_engine::GFX942_ATTENTION_DENSE_ENGINE_NAME);
-    const auto unifiedId = hipdnn_data_sdk::utilities::engineNameToId(
-        kernel_ingestor_engine::GFX942_ATTENTION_UNIFIED_2D_ENGINE_NAME);
-    const auto dense = std::find(engineIds.begin(), engineIds.end(), denseId);
-    const auto unified = std::find(engineIds.begin(), engineIds.end(), unifiedId);
-    if(dense == engineIds.end() || unified == engineIds.end() || dense < unified)
+    for(const auto& rule : kernel_ingestor_engine::ENGINE_ORDER_RULES)
     {
-        return;
+        const auto preferredId = hipdnn_data_sdk::utilities::engineNameToId(rule.preferred);
+        const auto otherId = hipdnn_data_sdk::utilities::engineNameToId(rule.other);
+        const auto preferred = std::find(engineIds.begin(), engineIds.end(), preferredId);
+        const auto other = std::find(engineIds.begin(), engineIds.end(), otherId);
+        if(preferred == engineIds.end() || other == engineIds.end() || preferred < other)
+        {
+            continue;
+        }
+        // The preferred engine moves to the other's slot; the other and whatever sat between
+        // them shift one place later in the order they had.
+        std::rotate(other, preferred, preferred + 1);
     }
-    // Dense moves to Unified2D's slot; Unified2D and whatever sat between them shift one place
-    // later in the order they had.
-    std::rotate(unified, dense, dense + 1);
 }
 #endif
+
 hipdnn_data_sdk::utilities::Version ApplicabilityManager::maxGraphSchema(int64_t engineId) const
 {
     const auto it = _maxGraphSchema.find(engineId);
@@ -149,59 +151,62 @@ bool ApplicabilityManager::admits(int64_t engineId,
 std::vector<int64_t> ApplicabilityManager::getApplicableEngineIds(Handle& handle,
                                                                   const IGraph& opGraph)
 {
+    auto ids = collectApplicableEngineIds(handle, opGraph);
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+    applyEngineOrderRules(ids);
+#endif
+    return ids;
+}
+
+std::vector<int64_t> ApplicabilityManager::collectApplicableEngineIds(Handle& handle,
+                                                                      const IGraph& opGraph)
+{
     // The provider's schema guard: an engine that has not opted in to the graph's schema never
     // sees it, on whichever path the call takes. The staged path applies it per engine, so the
     // engines it admits keep their threaded finish.
     const auto floor = graphSchemaFloor(opGraph);
-    std::vector<int64_t> ids;
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
     // Fewer than two staged engines can never have two pending, so they keep the sequential loop.
     if(_stagedCount >= 2)
     {
-        ids = getApplicableEngineIdsStaged(handle, opGraph, floor);
-        orderDenseAttentionBeforeUnified2D(ids);
-        return ids;
+        return getApplicableEngineIdsStaged(handle, opGraph, floor);
     }
 #endif
     const bool guarded = std::any_of(engines().begin(), engines().end(), [&](const auto& entry) {
         return !understands(entry.first, floor);
     });
-    if(guarded)
+    if(!guarded)
     {
-        // The base class's sequential loop, in its order, over the engines the guard admits:
-        // one that throws a std::exception is skipped with a warning and the others are still
-        // reported.
-        for(const auto& [id, engine] : engines())
+        return Base::getApplicableEngineIds(handle, opGraph);
+    }
+
+    // The base class's sequential loop, in its order, over the engines the guard admits: one
+    // that throws a std::exception is skipped with a warning and the others are still
+    // reported.
+    std::vector<int64_t> ids;
+    for(const auto& [id, engine] : engines())
+    {
+        if(!admits(id, floor))
         {
-            if(!admits(id, floor))
-            {
-                continue;
-            }
-            bool isApplicable = false;
-            try
-            {
-                isApplicable = engine->isApplicable(handle, opGraph);
-            }
-            catch(const std::exception& e)
-            {
-                HIPDNN_PLUGIN_LOG_WARN("applicability manager: engine "
-                                       << hipdnn_data_sdk::utilities::formatEngineIdHex(id)
-                                       << " threw from its applicability check and is skipped: "
-                                       << e.what());
-            }
-            if(isApplicable)
-            {
-                ids.push_back(id);
-            }
+            continue;
+        }
+        bool isApplicable = false;
+        try
+        {
+            isApplicable = engine->isApplicable(handle, opGraph);
+        }
+        catch(const std::exception& e)
+        {
+            HIPDNN_PLUGIN_LOG_WARN("applicability manager: engine "
+                                   << hipdnn_data_sdk::utilities::formatEngineIdHex(id)
+                                   << " threw from its applicability check and is skipped: "
+                                   << e.what());
+        }
+        if(isApplicable)
+        {
+            ids.push_back(id);
         }
     }
-    else
-    {
-        ids = Base::getApplicableEngineIds(handle, opGraph);
-    }
-#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-    orderDenseAttentionBeforeUnified2D(ids);
-#endif
     return ids;
 }
 

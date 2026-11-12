@@ -5,6 +5,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <array>
 #include <string_view>
 #include <vector>
 
@@ -141,6 +142,33 @@ inline constexpr std::string_view GFX942_ATTENTION_UNIFIED_2D_ENGINE_NAME
 void registerGfx942AttentionUnified2DSymbols(
     hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetGfx942AttentionUnified2DModuleCache();
+
+/// A preference between two engines that accept the same graph: when both are in a call's
+/// applicable list, @p preferred is listed ahead of @p other.
+struct EngineOrderRule
+{
+    std::string_view preferred;
+    std::string_view other;
+};
+
+/// The preferences the provider states, applied by the ApplicabilityManager to every list it
+/// returns. hipDNN ranks an engine that has no rule of its own (sortEngineIds) in the order a
+/// provider lists it, which for this provider is its engine map's hash order, so the order of
+/// two engines serving the same graph would otherwise depend on the hash.
+///
+/// Each pair is a dense-attention engine and the paged unified-attention 2D engine of the same
+/// arch. Both accept a dense BSHD SDPA graph of head size 64 or 128 whenever seqlen_q equals
+/// seqlen_kv (a top-left and a bottom-right causal mask coincide there), and gfx950's dense
+/// engine also serves an unmasked or top-left graph at seqlen_q < seqlen_kv, which gfx950's 2D
+/// engine accepts too. The dense engine is the one built for the dense layout: the 2D engine
+/// serves it as a paged cache, through an identity block table it stages in the plan's
+/// workspace and copies to the device on every launch. On gfx942 the dense engine is also the
+/// faster of the two on every shared shape the ground truth holds; gfx950's order is the same
+/// structural preference, not a measured one.
+inline constexpr std::array<EngineOrderRule, 2> ENGINE_ORDER_RULES{{
+    {GFX942_ATTENTION_DENSE_ENGINE_NAME, GFX942_ATTENTION_UNIFIED_2D_ENGINE_NAME},
+    {GFX950_ATTENTION_DENSE_ENGINE_NAME, GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME},
+}};
 
 /// @see packs/Gfx1151WmmaAttentionNative.cpp, which serves both engines
 void registerGfx1151WmmaAttentionSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
