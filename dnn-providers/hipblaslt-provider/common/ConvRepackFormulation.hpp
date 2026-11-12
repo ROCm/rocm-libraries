@@ -58,8 +58,10 @@ std::optional<ConvGemmPlanCalls> im2colGemmCalls(const ConvProblem& problem,
 
 /// The plan for @p problem: a direct row (directGemmCalls) when one applies; for a 1x1
 /// channels-first backward weights of several images, batched partials or a channels-last
-/// staging (@p layout); IM2COL otherwise; or nullopt when none does. @p splitReduction: a
-/// backward weights whose GEMMs leave too few output tiles to fill a GPU (fewer than
+/// staging (@p layout); IM2COL otherwise; or nullopt when none does. A long reduction into a
+/// small output (backward weights; forward and backward data into a 16-bit y or dx) runs as
+/// chunks with fp32 partials summed in order and rounded once. @p splitReduction: such
+/// a reduction whose GEMMs leave too few output tiles to fill a GPU (fewer than
 /// SPLIT_TARGET_TILES) runs its reduction as enough fp32 partials to fill one, summed in order
 /// and rounded once -- a choice for the benchmarking builder, which times it against the default.
 std::optional<ConvGemmPlanCalls> convGemmCalls(const ConvProblem& problem,

@@ -962,6 +962,7 @@ struct ReductionAxis
 /// images and chunks are parallel work. Each call batches the longest of the three axes and the
 /// calls loop the other two. Plans with one GEMM stage only; @p plan unchanged when the chain does
 /// not qualify or the partials do not fit @p maxWorkspaceBytes.
+/// Forward and backward data qualify with one GEMM straight into a 16-bit y or dx.
 /// The chunks a split reduction cuts a reduction of @p k into: enough that @p tiles output tiles
 /// per chunk reach SPLIT_TARGET_TILES, each chunk at least CHUNK_PIXELS long and the count
 /// dividing k; 1 when no such count above 1 exists.
@@ -983,10 +984,6 @@ ConvGemmPlanCalls batchReductionChains(const ConvProblem& problem,
                                        size_t maxWorkspaceBytes,
                                        bool splitReduction)
 {
-    if(problem.direction != ConvDirection::BACKWARD_WEIGHTS)
-    {
-        return plan;
-    }
     ConvGemmStage* gemmStage = nullptr;
     for(auto& stage : plan.stages)
     {
@@ -1006,6 +1003,17 @@ ConvGemmPlanCalls batchReductionChains(const ConvProblem& problem,
     }
     const auto& calls = gemmStage->calls;
     const GemmCall& first = calls.front();
+    // Forward and backward data: a single GEMM straight into a 16-bit y or dx only. A library
+    // may split its long reduction and round the parts to the output type between them
+    // (hipBLASLt on gfx11 does), so the partials here are fp32, summed in order and rounded
+    // once. An fp32 output, or an fp32 column matrix, is left as it is.
+    if(problem.direction != ConvDirection::BACKWARD_WEIGHTS
+       && (calls.size() != 1 || first.d.dataType == data_objects::DataType::FLOAT
+           || first.d.uid
+                  != (problem.direction == ConvDirection::FORWARD ? problem.y.uid : problem.x.uid)))
+    {
+        return plan;
+    }
     const auto images = static_cast<int64_t>(calls.size());
     const int64_t aStep = images > 1 ? calls[1].a.offset - first.a.offset : 0;
     const int64_t bStep = images > 1 ? calls[1].b.offset - first.b.offset : 0;
