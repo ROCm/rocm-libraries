@@ -3,49 +3,47 @@
 
 #pragma once
 
-#include <string>
-
 // One entry from chooseSolutionIndexParameters, in that function's order.
-// streamK and the non-temporal bits are kept so a checked-in kernel is not
-// substituted for a rocRoller kernel that was not captured.
+// unroll is the prefetchInFlight parameter_selection.cpp generates the tile
+// with. The non-temporal bits are kept for diagnostics; they only set cache
+// bits on the loads, so one checked-in kernel serves either value.
 struct RocRollerSelectedTile
 {
-    int  m = 0;
-    int  n = 0;
-    int  k = 0;
+    int  m                = 0;
+    int  n                = 0;
+    int  k                = 0;
     bool workgroupMapping = false;
     bool streamK          = false;
     bool nonTemporalA     = false;
     bool nonTemporalB     = false;
+    int  unroll           = 0;
 };
 
-// Does a checked-in rocRoller kernel name describe exactly this ranked tile?
-// `prefix` runs through the trailing "_Float_". The caller builds it.
-inline bool rocRollerKernelNameMatchesTile(const std::string&           kernel,
-                                           const std::string&           prefix,
-                                           const RocRollerSelectedTile& tile)
+// What a checked-in rocRoller kernel declares in its custom.config: the
+// macrotile, the unroll, whether it takes a workgroup-mapping kernarg, and
+// whether it is a Stream-K kernel. Operand types, transposes, MX scale block
+// and scale layout are the kernel's predicates, which the caller evaluates.
+struct RocRollerKernelFields
 {
-    if(kernel.find(prefix) == std::string::npos)
-        return false;
+    int  tileM            = 0;
+    int  tileN            = 0;
+    int  tileK            = 0;
+    int  unroll           = 0;
+    bool workgroupMapping = false;
+    bool streamK          = false;
+};
 
-    // Captured kernels use natural scales. Preswizzled support would also need
-    // to match these tokens against the problem's scale format.
-    if(kernel.find("_PSTA_") != std::string::npos || kernel.find("_PTA_") != std::string::npos
-       || kernel.find("_PSTB_") != std::string::npos || kernel.find("_PTB_") != std::string::npos)
+// Is this kernel the one rocRoller generates for this ranked tile? A kernel
+// that declares no unroll is never a match.
+inline bool rocRollerKernelMatchesTile(const RocRollerKernelFields& kernel,
+                                       const RocRollerSelectedTile& tile)
+{
+    if(kernel.unroll <= 0 || kernel.unroll != tile.unroll)
         return false;
-
-    // Include delimiters so a tile extent cannot match part of a larger number.
-    const std::string wgt = "_WGT_" + std::to_string(tile.m) + "x" + std::to_string(tile.n) + "x"
-                            + std::to_string(tile.k) + "_UR_";
-    if(kernel.find(wgt) == std::string::npos)
+    if(kernel.tileM != tile.m || kernel.tileN != tile.n || kernel.tileK != tile.k)
         return false;
-
-    // genKernelName places SK immediately before the workgroup tile token.
-    const bool hasSk = kernel.find("_SK" + wgt) != std::string::npos;
-    if(hasSk != tile.streamK)
+    if(kernel.streamK != tile.streamK)
         return false;
-
     // StreamK disables workgroup mapping even when the ranked tile requests it.
-    const bool hasWgm = kernel.find("_WGM_") != std::string::npos;
-    return hasWgm == (tile.workgroupMapping && !tile.streamK);
+    return kernel.workgroupMapping == (tile.workgroupMapping && !tile.streamK);
 }
