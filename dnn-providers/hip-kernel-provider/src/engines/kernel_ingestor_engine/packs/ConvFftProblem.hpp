@@ -100,8 +100,15 @@ size_t workspaceCapBytes();
 /// most 1 / ADMIT_RATIO of the direct convolution's multiply-accumulates (counted in real
 /// multiply-accumulates, 4 per complex one), and the problem has at least ADMIT_MIN_MACS of them.
 /// FFT pays transforms and a frequency-domain workspace on top of its product, so it only wins
-/// where the filter is large against the tile.
+/// where the filter is large against the tile. Calibrated on gfx950 (engine bench of every
+/// config, every engine): fp32 dense wins from 5x5 (1.8x) and 1 x 7 (1.3x) up.
 inline constexpr double ADMIT_RATIO = 4.0;
+
+/// The floor for fp16 / bf16 tensors: the product stays fp32 (no reduced-precision product)
+/// while the direct engines run 16-bit matrix cores at several times the fp32 rate, so FFT
+/// needs a far larger advantage: on gfx950 it ties at 11x11 (advantage ~25) and loses at 7x7
+/// (~7-10).
+inline constexpr double ADMIT_RATIO_16BIT = 16.0;
 inline constexpr int64_t ADMIT_MIN_MACS = int64_t{1} << 26;
 
 /// False when HIP_KERNEL_PROVIDER_CONV_FFT_FLOOR=0: every config whose transform fits the filter
@@ -115,9 +122,14 @@ bool admissionFloorEnabled();
 double fftAdvantage(const FftProblem& problem, const Config& config);
 
 /// The admission floor of the depthwise path (same meaning as ADMIT_RATIO, transforms counted):
-/// depthwise direct kernels are bound by memory and latency rather than arithmetic, so a smaller
-/// arithmetic advantage pays.
-inline constexpr double ADMIT_RATIO_DEPTHWISE = 2.0;
+/// depthwise direct kernels are bound by memory and latency rather than arithmetic, so parity
+/// in arithmetic pays: on gfx950 a 13x13 depthwise layer (advantage 1.1) runs 2x faster than
+/// the direct engines forward and 24x in backward weights; 7x7 (0.45) is left to them.
+inline constexpr double ADMIT_RATIO_DEPTHWISE = 1.0;
+
+/// The admission floor that applies to @p problem: ADMIT_RATIO_DEPTHWISE for the depthwise path,
+/// else ADMIT_RATIO for fp32 tensors and ADMIT_RATIO_16BIT for fp16 / bf16.
+double admissionRatio(const FftProblem& problem);
 
 /// True for the depthwise path: one input and one output channel a group.
 inline bool isDepthwise(const FftProblem& problem)

@@ -195,6 +195,15 @@ bool admissionFloorEnabled()
     return value == nullptr || std::string_view(value) != "0";
 }
 
+double admissionRatio(const FftProblem& problem)
+{
+    if(isDepthwise(problem))
+    {
+        return ADMIT_RATIO_DEPTHWISE;
+    }
+    return problem.base.dataType == data_objects::DataType::FLOAT ? ADMIT_RATIO : ADMIT_RATIO_16BIT;
+}
+
 double fftAdvantage(const FftProblem& problem, const Config& config)
 {
     const int oh = config.th == 1 ? 1 : config.th - problem.spanH() + 1;
@@ -311,7 +320,7 @@ std::optional<Plan> planFor(const FftProblem& problem,
     }
     if(admissionFloorEnabled()
        && (problem.base.multiplyAccumulates < ADMIT_MIN_MACS
-           || fftAdvantage(problem, config) < (depthwise ? ADMIT_RATIO_DEPTHWISE : ADMIT_RATIO)))
+           || fftAdvantage(problem, config) < admissionRatio(problem)))
     {
         return std::nullopt;
     }

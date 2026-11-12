@@ -317,6 +317,20 @@ TEST(TestConvFftKernel, TheAdmissionFloorRefusesSmallFiltersAndSmallProblems)
     tiny.c = 4;
     tiny.k = 4;
     EXPECT_FALSE(admits(Fields{}, tiny)); // 2^21 multiply-accumulates
+    // 16-bit tensors need a larger advantage (the product stays fp32): 11x11 in 32x32 tiles
+    // (advantage 25) is admitted, 7x7 (12) is not.
+    auto half11 = largeShape();
+    half11.dataType = DataType::HALF;
+    auto halfFields = Fields{};
+    halfFields.dtype = "HALF";
+    EXPECT_TRUE(admits(halfFields, half11));
+    auto half7 = half11;
+    half7.filter = {7, 7};
+    half7.prePadding = half7.postPadding = {3, 3};
+    EXPECT_FALSE(admits(halfFields, half7));
+    auto float7 = half7;
+    float7.dataType = DataType::FLOAT;
+    EXPECT_TRUE(admits(Fields{}, float7));
     // The floor's switch: every fitting config, for tests and calibration.
     const ScopedEnvironmentVariableSetter off("HIP_KERNEL_PROVIDER_CONV_FFT_FLOOR", "0");
     EXPECT_TRUE(admits(Fields{}, small));
@@ -439,7 +453,14 @@ TEST(TestConvFftPlan, DepthwiseFusesAndPartitionsBackwardWeights)
     auto narrow = f;
     narrow.gn = 16;
     EXPECT_FALSE(planOf(dw, ConvDirection::FORWARD, narrow).has_value());
-    // The depthwise floor counts the transforms: a 3x3 depthwise layer is refused.
+    // The depthwise floor counts the transforms: 13x13 in 32x32 tiles (advantage 1.1) is
+    // admitted, a 3x3 depthwise layer is refused.
+    auto dw13 = dw;
+    dw13.filter = {13, 13};
+    dw13.prePadding = dw13.postPadding = {6, 6};
+    auto f32 = Fields{};
+    f32.th = f32.tw = 32;
+    EXPECT_TRUE(planOf(dw13, ConvDirection::FORWARD, f32).has_value());
     auto small = dw;
     small.filter = {3, 3};
     small.prePadding = small.postPadding = {1, 1};
