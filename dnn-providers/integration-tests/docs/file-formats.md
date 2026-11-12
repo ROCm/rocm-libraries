@@ -85,6 +85,10 @@ segment is sanitized (any character other than `[A-Za-z0-9_]` becomes `_`):
 The tier directory is therefore always the suite prefix (`quick_*`, `standard_*`,
 …), which the tier YAML files match on. If two bundles sanitize to the same full
 name, registration aborts with `Bundle name collision` and names both paths.
+A run does not parse the `sweep.json` of a folder that its `--gtest_filter` cannot
+select. Thus a name collision or a malformed `sweep.json` in that folder can stay
+undetected in that run. A run that can select the folder aborts, and so does an
+unfiltered run.
 Keep every bundle under a tier directory. If a graph is directly in the data
 root, discovery aborts: the binary exits 1 with `Bundle content must live in a
 sub-folder of the data root, not at the root itself`. A graph under any other
