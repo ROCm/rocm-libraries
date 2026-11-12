@@ -254,6 +254,14 @@ if(HIPKERNELPROVIDER_ENABLE_CONV)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/ConvGroupNative.cpp
     )
     target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_CONV=1)
+    # One definition per served family (conv/ConvContent.cmake): IngestorPacks.cpp
+    # registers a family's native pack only when its catalogs ship in this build. The
+    # pack sources above still compile for every family, since families share them.
+    foreach(_conv_family IN LISTS HIPKERNELPROVIDER_CONV_FAMILIES)
+        string(TOUPPER "${_conv_family}" _conv_family_upper)
+        target_compile_definitions(hip_kernel_provider_impl
+            PUBLIC HIPDNN_ENGINE_CONV_${_conv_family_upper}=1)
+    endforeach()
     include("${PROJECT_SOURCE_DIR}/src/cmake/KernelEmbedding.cmake")
     set(HKP_CONV_KERNEL_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/descriptors/conv/naive/kernels/ConvNaive.cpp"

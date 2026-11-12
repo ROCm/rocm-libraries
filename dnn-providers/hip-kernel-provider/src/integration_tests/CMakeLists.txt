@@ -129,10 +129,19 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # The conv engine group's engines, end to end. The definition is set directly for the
     # same reason as the ingestor's below: this target does not link the provider.
     if(HIPKERNELPROVIDER_ENABLE_CONV)
-        target_sources(hip_kernel_provider_integration_tests PRIVATE
-            kernel_ingestor_engine/IntegrationGpuConvNaive.cpp
-            kernel_ingestor_engine/IntegrationConvCoverageCensus.cpp
-        )
+        # Naive's suite needs naive's catalogs; the coverage census reads every family's
+        # engines, so it needs every family's (conv/ConvContent.cmake).
+        if("naive" IN_LIST HIPKERNELPROVIDER_CONV_FAMILIES)
+            target_sources(hip_kernel_provider_integration_tests PRIVATE
+                kernel_ingestor_engine/IntegrationGpuConvNaive.cpp)
+        endif()
+        if(HIPKERNELPROVIDER_CONV_ALL_FAMILIES_SERVED)
+            target_sources(hip_kernel_provider_integration_tests PRIVATE
+                kernel_ingestor_engine/IntegrationConvCoverageCensus.cpp)
+        else()
+            message(STATUS "conv: coverage census not built -- not every conv family is "
+                           "served (${HIPKERNELPROVIDER_CONV_UNSERVED_FAMILIES})")
+        endif()
         target_compile_definitions(hip_kernel_provider_integration_tests PRIVATE HIPDNN_ENGINE_CONV=1)
         # The coverage census reads its map beside the binary, in the build tree and the
         # install tree alike.
