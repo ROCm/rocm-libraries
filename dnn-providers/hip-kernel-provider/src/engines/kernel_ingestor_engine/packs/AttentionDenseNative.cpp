@@ -1577,6 +1577,18 @@ public:
                             + std::string(_contract.symbol)
                             + " contract has no additive bias form");
                 }
+                // attentionDenseBinding() bounded each stride; the reach over this problem's
+                // extents is bounded here, since a binding that did not come from the graph
+                // match may pair any strides with any shape, and the kernel wraps its i32 index.
+                const auto largest = largestAdditiveBiasIndex(problem, binding.bias->strides);
+                if(!largest.has_value() || *largest > MAX_BIAS_INDEX)
+                {
+                    throw hipdnn_plugin_sdk::HipdnnPluginException(
+                        HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                        std::string(_arch.label)
+                            + " attention_dense: the bound bias strides reach element 2^31 or "
+                              "beyond; the kernel addresses the bias with 32-bit element offsets");
+                }
                 contract = _arch.biasContract;
             }
         }

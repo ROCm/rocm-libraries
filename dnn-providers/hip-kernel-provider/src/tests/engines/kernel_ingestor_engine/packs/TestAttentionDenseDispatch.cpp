@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -631,6 +632,9 @@ constexpr const char* BIAS_MARKER = "disagree on the additive bias";
 /// The fragment only the out-of-range bias stride refusal carries.
 constexpr const char* BIAS_STRIDE_RANGE_MARKER = "is outside [0, 2^31)";
 
+/// The fragment only the bias reach refusal carries.
+constexpr const char* BIAS_REACH_MARKER = "reach element 2^31";
+
 /// The four further tokens a graph with a bias binds.
 std::vector<std::string> biasTokens()
 {
@@ -742,9 +746,10 @@ TEST(TestGfx950AttentionDenseDispatch, RefusesToPrepareWhenAnyOneBiasTokenIsMiss
     }
 }
 
-/// graph_match binds every bias stride in [0, 2^31). prepare() checks again, so a binding
-/// it did not produce cannot wrap an i32 kernarg: each stride token at -1 or 2^31 is
-/// refused by name, and at 0 or 2^31 - 1 accepted.
+/// graph_match binds every bias stride in [0, 2^31) and bounds the reach they give over the
+/// graph's extents. prepare() checks both again, so a binding it did not produce cannot wrap
+/// an i32 kernarg: each stride token at -1 or 2^31 is refused by name, and at 0 or the
+/// largest stride whose reach still fits accepted; one more is refused for its reach.
 TEST(TestGfx950AttentionDenseDispatch, RefusesToPrepareABiasStrideOutsideTheI32Range)
 {
     const Graph graph(GFX950_ATTENTION_DENSE, servedBiasGraph());
@@ -769,8 +774,21 @@ TEST(TestGfx950AttentionDenseDispatch, RefusesToPrepareABiasStrideOutsideTheI32R
             EXPECT_NE(failure.find(token), std::string::npos) << failure;
         }
         // The boundary values themselves are accepted: the binding is read and
-        // prepare() goes on to the loader, which fails only for want of the archive.
-        for(const int64_t value : {int64_t{0}, int64_t{std::numeric_limits<int32_t>::max()}})
+        // prepare() goes on to the loader, which fails only for want of the archive. The
+        // largest stride is the one whose reach, (Skv - 1) plus (extent - 1) * stride per
+        // axis, is 2^31 - 1 with the other two strides as the graph binds them.
+        const auto axis = static_cast<size_t>(&token - strideTokens.data());
+        const std::array<int64_t, 3> extents{BATCH, HEADS, SEQ};
+        std::array<int64_t, 3> others{SEQ * SEQ, 0, SEQ};
+        others[axis] = 0;
+        int64_t reachWithoutAxis = SEQ - 1;
+        for(size_t i = 0; i < others.size(); ++i)
+        {
+            reachWithoutAxis += (extents[i] - 1) * others[i];
+        }
+        const int64_t largest
+            = (std::numeric_limits<int32_t>::max() - reachWithoutAxis) / (extents[axis] - 1);
+        for(const int64_t value : {int64_t{0}, largest})
         {
             SCOPED_TRACE(token + " = " + std::to_string(value));
             BoundTokens tampered = bound;
@@ -779,9 +797,41 @@ TEST(TestGfx950AttentionDenseDispatch, RefusesToPrepareABiasStrideOutsideTheI32R
             const std::string failure
                 = prepareFailure(graph, tampered, makeBiasKernel(/*bias=*/true));
             EXPECT_EQ(failure.find(BIAS_STRIDE_RANGE_MARKER), std::string::npos) << failure;
+            EXPECT_EQ(failure.find(BIAS_REACH_MARKER), std::string::npos) << failure;
             EXPECT_NE(failure.find("does not exist"), std::string::npos) << failure;
         }
+        SCOPED_TRACE(token + " = " + std::to_string(largest + 1));
+        BoundTokens tooFar = bound;
+        tooFar[token] = largest + 1;
+        const std::string pastIt = prepareFailure(graph, tooFar, makeBiasKernel(/*bias=*/true));
+        EXPECT_NE(pastIt.find(BIAS_REACH_MARKER), std::string::npos) << pastIt;
     }
+}
+
+/// The v1 handler is registered only for plans saved before the head counts became runtime
+/// arguments, and has no bias form: a bias graph prepared on it is refused by name, before
+/// any code object is loaded, rather than launched with the wrong argument list.
+TEST(TestGfx950AttentionDenseDispatch, RefusesToPrepareABiasPlanOnTheLegacyHandler)
+{
+    const auto& arch = GFX950_ATTENTION_DENSE;
+    registerNativeIngestorSymbols();
+    const auto* legacy = hipdnn_plugin_sdk::ingestor::DispatchRegistry<Handle>::resolve(
+        std::string("hipkernel.gfx950_attention_dense.dispatch.v1"));
+    ASSERT_NE(legacy, nullptr);
+
+    const Graph graph(arch, servedBiasGraph());
+    std::string failure;
+    try
+    {
+        legacy->prepare(graph.context(), bindingsFor(graph), makeBiasKernel(/*bias=*/true));
+    }
+    catch(const std::exception& error)
+    {
+        failure = error.what();
+    }
+    ASSERT_FALSE(failure.empty()) << "prepare() cannot succeed without the archive";
+    EXPECT_NE(failure.find("has no additive bias form"), std::string::npos) << failure;
+    EXPECT_EQ(failure.find("does not exist"), std::string::npos) << failure;
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

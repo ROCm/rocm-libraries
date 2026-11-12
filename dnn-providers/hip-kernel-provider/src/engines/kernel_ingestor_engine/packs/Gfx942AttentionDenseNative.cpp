@@ -224,6 +224,9 @@ constexpr attention_dense::AttentionDenseArch gfx942Arch()
 }
 
 constexpr attention_dense::AttentionDenseArch GFX942_ARCH = gfx942Arch();
+static_assert(GFX942_ARCH.isConsistent(),
+              "gfx942Arch(): a served feature's token is unspelled, or the bias hook and the bias "
+              "contract do not come together (their tokens, name and kernel-argument form)");
 
 std::optional<BoundTokens> gfx942AttentionDenseGraphMatches(const MatchContext& context)
 {
