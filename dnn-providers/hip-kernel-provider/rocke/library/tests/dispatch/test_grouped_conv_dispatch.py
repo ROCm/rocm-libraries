@@ -793,19 +793,7 @@ def test_fwd_default_pick_follows_the_list_files_on_disk_priority_order():
 
 @pytest.mark.parametrize(
     "shape",
-    [
-        s
-        for s in _SHAPES
-        if s.startswith("depthwise")
-        # depthwise11x11 is a 11x11 depthwise shape the AOT-packaged
-        # fwd dispatcher (gfx950_fwd.json, trimmed to the 233/dtype
-        # instances the AOT catalog ships) carries no direct_depthwise
-        # candidate for; it falls back to implicit_gemm, same as every
-        # other non-depthwise shape. Covered instead by
-        # test_fwd_default_pick_follows_the_list_files_on_disk_priority_order,
-        # which asserts on whatever the on-disk order actually admits.
-        and s != "depthwise11x11"
-    ],
+    [s for s in _SHAPES if s.startswith("depthwise")],
 )
 def test_depthwise_shapes_default_to_the_direct_depthwise_kernel(shape):
     """A depthwise-shaped request must not fall back to a generic IGEMM tile

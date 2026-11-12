@@ -223,16 +223,13 @@ def main(argv=None) -> int:
 
     rocke_catalog = read_rocke_catalog("dgrad")
     excludes = read_excludes(args.excludes)
-    rocke_labels = {identity_label(i) for i in rocke_catalog}
-    stale = set(excludes) - rocke_labels
-    if stale:
-        print(
-            f"{args.excludes}: exclude(s) not in rocKE's gfx950 dgrad catalog: "
-            f"{sorted(stale)}",
-            file=sys.stderr,
+    listed = rocke_catalog
+    if excludes:
+        listed = _common.apply_excludes(
+            listed, excludes, args.excludes, "rocKE's gfx950 dgrad catalog"
         )
-        return 1
-    listed = [i for i in rocke_catalog if identity_label(i) not in excludes]
+        if listed is None:
+            return 1
     rc = check_flavor(listed)
     if rc:
         return rc

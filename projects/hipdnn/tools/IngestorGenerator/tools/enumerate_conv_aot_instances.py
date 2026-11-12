@@ -50,6 +50,11 @@ DTYPES = ("fp16", "bf16")
 INSTANCE_LIST = "gfx950_conv_fwd_aot_{dtype}.instances.json"
 
 _HERE = Path(__file__).resolve().parent
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
+
+import conv_aot_common as _common  # noqa: E402
+
 DEFAULT_OUTPUT_DIR = _HERE.parent / "configs"
 
 #: rocKE's own forward dispatcher instance list, relative to --rocke-root: the
@@ -131,16 +136,9 @@ def read_rocke_catalog(direction: str) -> list:
     return [i.to_dict() for i in load_instance_list(path).identities]
 
 
-def read_excludes(path: Path) -> dict:
-    """``label -> reason`` of :data:`EXCLUDES`-style instances; ``{}`` when
-    ``path`` does not exist."""
-    if not path.exists():
-        return {}
-    entries = json.loads(path.read_text())
-    out = {}
-    for entry in entries:
-        out[entry["label"]] = entry["reason"]
-    return out
+#: ``label -> reason`` of :data:`EXCLUDES`-style instances; ``{}`` when ``path``
+#: does not exist. Shared with the dgrad tool (``conv_aot_common.py``).
+read_excludes = _common.read_excludes
 
 
 def sweep_hashes(dtype: str, jobs: int) -> set:
@@ -256,26 +254,11 @@ def main(argv=None) -> int:
             listed = read_dispatcher_instances(args.rocke_root)
             excludes = read_excludes(args.excludes)
             if excludes:
-                labels = {identity_label(identity) for identity in listed}
-                stale = set(excludes) - labels
-                if stale:
-                    print(
-                        f"{args.excludes}: exclude(s) not in rocKE's gfx950 fwd "
-                        f"dispatcher: {sorted(stale)}",
-                        file=sys.stderr,
-                    )
+                listed = _common.apply_excludes(
+                    listed, excludes, args.excludes, "rocKE's gfx950 fwd dispatcher"
+                )
+                if listed is None:
                     return 1
-                kept = []
-                for identity in listed:
-                    reason = excludes.get(identity_label(identity))
-                    if reason is None:
-                        kept.append(identity)
-                    else:
-                        print(
-                            f"excluded {identity_label(identity)}: {reason}",
-                            file=sys.stderr,
-                        )
-                listed = kept
     except ValueError as error:
         print(error, file=sys.stderr)
         return 1
