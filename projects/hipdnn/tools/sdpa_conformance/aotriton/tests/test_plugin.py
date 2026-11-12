@@ -403,6 +403,7 @@ def test_autouse_device_fixture_is_a_noop_without_cuda(run, monkeypatch):
         ("AOTRITON_TORCH_ONLY_USE_CPU", "1"),
         ("PROBE_UNSUPPORTED", "1"),
         ("IGNORE_BACKWARD_IMPORT", "1"),
+        ("AOTRITON_UT_ARCH", "gfx1100@0.15b"),
     ],
 )
 def test_refused_knobs_abort_at_configure(pytester, monkeypatch, knob, value):
