@@ -167,7 +167,8 @@ namespace rocRoller
 
             bool drawMappings = Settings::getInstance()->get(Settings::LogGraphMapperConnections);
 
-            if(Settings::getInstance()->get(Settings::LogGraphs))
+            if(Settings::getInstance()->get(Settings::LogGraphs)
+               && Log::logger().should_log(LogLevel::Debug))
                 Log::debug("KernelGraph::transform: {}, post: {}",
                            transformation->name(),
                            newGraph.toDOT(drawMappings, transformString));
