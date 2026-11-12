@@ -2322,6 +2322,38 @@ the source, leak into the version label, and make wheels non-reproducible;
 tarball builders know their commit and can pass it. See the findings at the end
 of this section.
 
+#### Q123 amendment — Review fixes accepted 2026-11-12
+
+Supersedes Q123's dirty-digest construction and its `safe.directory` rationale,
+not the lookup, whole-repository scope, stamping or comparison rules.
+
+- Disable fsmonitor with `-c core.fsmonitor=` on every resolver Git command,
+  including the ownership probe. An unrelated containing repository's config
+  can execute hooks before the copy is rejected. Empty also works on older Git,
+  which treats `false` as a hook pathname. This is not a general config sandbox.
+- Disable external diff/textconv. Hash sorted raw tracked-change records and
+  streamed tracked contents, including modes, deletions, symlink targets and
+  gitlinks. Human patch formatting must not alter the fingerprint.
+- Hash nonignored untracked entries using only Git-relative path, `lstat` file
+  type, size and integer `st_mtime_ns`; do not read contents or follow links.
+  Keep whole-rocm-libraries scope because paired native sources and dependencies
+  live outside TensileLite. This removes repeated reads of large untracked
+  files, not Git's scan/enumeration cost or changed tracked-content reads.
+- Accept same-metadata untracked collisions and copied-checkout timestamp
+  differences. `st_mtime_ns` is available on Linux and Windows, but observed
+  precision depends on the filesystem. Use the integer directly, never a float.
+  No persistent cache or substitute source ID is introduced.
+- Keep sdists link-free. Tests build the real sdist from source symlink/hardlink
+  fixtures, verify regular members and correct contents, then extract/build the
+  stamped wheel with native and emulated Python 3.10.8 interfaces. Retain older
+  Python's `_safe_extractall` rejection of archive links.
+
+Rationale: stable build pairing does not require a byte-level attestation of
+untracked dumps. Metadata avoids that repeated I/O while recording their presence
+and typical edits. Tracked changes retain content-sensitive identities. These
+fixes belong in #11016; no TheRock implementation change is required. The source
+resolver docstring and PackagingIdentityPlan decision 3 document the limits.
+
 ### Q124 — Which ROCm identity does each installation form provide?
 
 **Decision: Accepted (decision 4).**
