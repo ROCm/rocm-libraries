@@ -901,7 +901,6 @@ class CustomKernel:
                  'macrotile',
                  'threads',
                  'grid',
-                 'occupancy',
                  'workspaceType',
                  'workspaceSizePerElemC',
                  'workspaceSizePerElemBias',
@@ -925,6 +924,13 @@ class CustomKernel:
                    workspaceSizePerElemBias=d.get('workspaceSizePerElemBias', 0),
                    generated=d.get('generated', False),
                    uniformSummationOrder=d.get('uniformSummationOrder', False))
+
+    def state(self):
+        rv = {key: state(getattr(self, key)) for key in self.StateKeys}
+        # Emitted only when recorded so kernels without it serialize unchanged.
+        if getattr(self, 'occupancy', 0):
+            rv['occupancy'] = self.occupancy
+        return rv
 
     def __init__(self, **kwargs):
         for (key, value) in list(kwargs.items()):
