@@ -2066,17 +2066,36 @@ struct ResampleBwdOptions
     ResampleMode mode = ResampleMode::MAXPOOL;
     PaddingMode paddingMode = PaddingMode::ZERO_PAD;
     DataType indexType = DataType::INT32;
+    // Bundles may lay dy, index and dx out NHWC/NDHWC rather than packed in dims
+    // order. Keep in sync between buildResampleBwdGraph() and
+    // expectIndexIsForwardArgmax(), which must build its own scratch x with the
+    // same strides the derivation builds dx's scratch x with.
+    bool nhwcStrides = false;
 };
+
+// Packed-in-dims-order strides when nhwcStrides is false, matching every test
+// below until this field is set; channel-last strides (NHWC for 4D, NDHWC for 5D)
+// when it is true.
+std::vector<int64_t> resampleBwdStrides(const std::vector<int64_t>& dims, bool nhwcStrides)
+{
+    using hipdnn_data_sdk::utilities::generateStrides;
+    using hipdnn_data_sdk::utilities::TensorLayout;
+
+    if(!nhwcStrides)
+    {
+        return generateStrides(dims);
+    }
+    return generateStrides(
+        dims, dims.size() == 5 ? TensorLayout::NDHWC.strideOrder : TensorLayout::NHWC.strideOrder);
+}
 
 GraphResult buildResampleBwdGraph(const ResampleBwdOptions& opts)
 {
-    using hipdnn_data_sdk::utilities::generateStrides;
-
     GraphResult r;
     auto& b = r.builder;
 
-    const auto dyStrides = generateStrides(opts.dyDims);
-    const auto dxStrides = generateStrides(opts.dxDims);
+    const auto dyStrides = resampleBwdStrides(opts.dyDims, opts.nhwcStrides);
+    const auto dxStrides = resampleBwdStrides(opts.dxDims, opts.nhwcStrides);
 
     std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
     tensors.push_back(
@@ -2136,9 +2155,8 @@ InputTensorMap fillResampleBwdInputs(const GraphResult& gr)
 // NEG_INF_PAD only in-bounds elements competing.
 void expectIndexIsForwardArgmax(InputTensorMap& inputs, const ResampleBwdOptions& opts)
 {
-    using hipdnn_data_sdk::utilities::generateStrides;
-
-    hipdnn_data_sdk::utilities::Tensor<float> x(opts.dxDims, generateStrides(opts.dxDims));
+    hipdnn_data_sdk::utilities::Tensor<float> x(opts.dxDims,
+                                                resampleBwdStrides(opts.dxDims, opts.nhwcStrides));
     x.fillWithRandomValues(-1.0f, 1.0f, kResampleIndexSeed);
     auto& index = typedTensor<int32_t>(inputs, 2);
 
@@ -2238,6 +2256,77 @@ TEST(TestFillInputs, ResampleBwdMaxpoolIndexIsForwardArgmax3d)
     opts.postPadding = {0, 0, 0};
     opts.stride = {1, 2, 2};
     opts.window = {2, 2, 2};
+    const auto gr = buildResampleBwdGraph(opts);
+    auto inputs = fillResampleBwdInputs(gr);
+    expectIndexIsForwardArgmax(inputs, opts);
+}
+
+// Unlike the default shape above, dy(0, 0)'s window has exactly one in-bounds
+// element (x(0, 0, 0, 0)), and with the pinned seed that element's fill is
+// negative. Zero-padding's implicit 0 outranks it, so the derived index is -1
+// there; a hard-coded NEG_INF_PAD would instead pick the lone in-bounds element
+// (index 0) and fail expectIndexIsForwardArgmax's per-element check.
+TEST(TestFillInputs, ResampleBwdZeroPadIndexIsMinusOneWhenPaddingOutranksSoleValidElement)
+{
+    ResampleBwdOptions opts;
+    opts.dxDims = {1, 1, 5, 5};
+    opts.dyDims = {1, 1, 3, 3};
+    opts.prePadding = {1, 1};
+    opts.postPadding = {1, 1};
+    opts.stride = {2, 2};
+    opts.window = {2, 2};
+    const auto gr = buildResampleBwdGraph(opts);
+    auto inputs = fillResampleBwdInputs(gr);
+    expectIndexIsForwardArgmax(inputs, opts);
+
+    auto& index = typedTensor<int32_t>(inputs, 2);
+    EXPECT_EQ(index.getHostValue(std::vector<int64_t>{0, 0, 0, 0}), -1);
+}
+
+// Same shape and seed as above, under NEG_INF_PAD: the sole in-bounds element at
+// dy(0, 0) is the only candidate, so its index wins regardless of its sign. A
+// hard-coded ZERO_PAD would instead yield -1 there and fail the same check.
+TEST(TestFillInputs, ResampleBwdNegInfPadPicksSoleValidElementOverPadding)
+{
+    ResampleBwdOptions opts;
+    opts.dxDims = {1, 1, 5, 5};
+    opts.dyDims = {1, 1, 3, 3};
+    opts.prePadding = {1, 1};
+    opts.postPadding = {1, 1};
+    opts.stride = {2, 2};
+    opts.window = {2, 2};
+    opts.paddingMode = PaddingMode::NEG_INF_PAD;
+    const auto gr = buildResampleBwdGraph(opts);
+    auto inputs = fillResampleBwdInputs(gr);
+    expectIndexIsForwardArgmax(inputs, opts);
+
+    auto& index = typedTensor<int32_t>(inputs, 2);
+    EXPECT_EQ(index.getHostValue(std::vector<int64_t>{0, 0, 0, 0}), 0);
+}
+
+// 15 of the 39 shipped Default bundle cases lay dy, index and dx out NHWC/NDHWC.
+// The derivation's indexView must be built from the index tensor's own strides;
+// a mutant that rebuilt it from dims-only (packed) strides instead would pass
+// every test above, which stays packed throughout.
+TEST(TestFillInputs, ResampleBwdMaxpoolIndexIsForwardArgmax2dNhwc)
+{
+    ResampleBwdOptions opts;
+    opts.nhwcStrides = true;
+    const auto gr = buildResampleBwdGraph(opts);
+    auto inputs = fillResampleBwdInputs(gr);
+    expectIndexIsForwardArgmax(inputs, opts);
+}
+
+TEST(TestFillInputs, ResampleBwdMaxpoolIndexIsForwardArgmax3dNdhwc)
+{
+    ResampleBwdOptions opts;
+    opts.dxDims = {1, 2, 3, 4, 4};
+    opts.dyDims = {1, 2, 2, 2, 2};
+    opts.prePadding = {0, 0, 0};
+    opts.postPadding = {0, 0, 0};
+    opts.stride = {1, 2, 2};
+    opts.window = {2, 2, 2};
+    opts.nhwcStrides = true;
     const auto gr = buildResampleBwdGraph(opts);
     auto inputs = fillResampleBwdInputs(gr);
     expectIndexIsForwardArgmax(inputs, opts);

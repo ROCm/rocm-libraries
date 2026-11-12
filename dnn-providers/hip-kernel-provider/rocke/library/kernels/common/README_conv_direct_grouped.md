@@ -80,7 +80,7 @@ the filter rows with one weight row and a sliding window of input rows in
 registers, an output tile of `block_h x block_w`, and a grid split over output
 rows too. Its footprint is linear in the filter width, so it avoids the
 register spills and the steep compile cost the row-streaming kernel has at these
-sizes. See `platform/dsl_docs/instances/convolution.md`.
+sizes. See [`../conv/docs/convolution.md`](../conv/docs/convolution.md).
 
 ### cpg = 1 — Column-streamed depthwise (`DirectDepthwiseColSpec`)
 
@@ -270,8 +270,8 @@ default off, so every forward kernel is unchanged; the C++ engine's
 `block_h` must be > 0 on every AOT binary: the image height is a kernarg, and
 the "whole image" of a JIT build is a cached tile height
 (`dgrad_fused_block_h`) with `row_guard` / `row_exit`. Full semantics:
-`platform/dsl_docs/instances/convolution.md` ("Generic Kernel dgrad: fused
-weights").
+[`../conv/docs/convolution.md`](../conv/docs/convolution.md) ("Generic Kernel
+dgrad: fused weights").
 
 ### Dgrad AOT cache variants (gfx950)
 
@@ -292,12 +292,12 @@ dgrad --variants <variant> --verify` runs them on a shape.
 
 The weight pre-pass pipeline (`direct_grouped_dgrad_mfma`) stays in the
 cache next to them. The case studies are in
-`platform/python/rocke/examples/gfx950/conv_dgrad/`.
+`library/builders/gfx950/conv_dgrad/`.
 
 For **depthwise** (`cpg = 1`) use `DirectDepthwiseSpec` and `build_direct_depthwise`
 (backward data: `DirectDepthwiseDgradWindowedSpec` /
 `build_direct_depthwise_dgrad_windowed` at stride 1, see
-`platform/dsl_docs/instances/convolution.md`):
+[`../conv/docs/convolution.md`](../conv/docs/convolution.md)):
 
 ```python
 from kernels.common.conv_direct_grouped import (
@@ -870,10 +870,10 @@ For a backward-weights pass on gfx942 use the implicit-GEMM wgrad kernel
 ## Dual-Engine Parity
 
 Every kernel in this file exists in both the Python engine (this module) and
-the C++ engine (`cpp/instances/common/conv_direct_grouped_*.cpp`), for every
-dtype (`fp16`, `bf16`, `fp32` and `tf32`), and the two **must emit the same
-LLVM-IR bytes**. A change to any builder here has to be mirrored into its C++
-peer in the same change, and proven with:
+the C++ engine (`library/cpp/instances/common/conv_direct_grouped_*.cpp`), for
+every dtype (`fp16`, `bf16`, `fp32` and `tf32`), and the two **must emit the
+same LLVM-IR bytes**. A change to any builder here has to be mirrored into its
+C++ peer in the same change, and proven with:
 
 ```bash
 cd platform && export ROCKE=$(pwd) PYTHONPATH=$ROCKE/python

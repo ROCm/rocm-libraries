@@ -9,6 +9,8 @@
 #include "plans/SdpaPlanUtils.hpp"
 
 #include <cmath>
+#include <exception>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -566,6 +568,7 @@ static Rejection
     const auto& tensorMap = opGraph.getTensorMap();
     HIP_KERNEL_RETURN_IF_REJECTED(plan_utils::checkCommonUnsupportedFeatures(attrs, tensorMap));
     HIP_KERNEL_RETURN_IF_REJECTED(checkFwdUnsupportedFeatures(attrs));
+    HIP_KERNEL_RETURN_IF_REJECTED(plan_utils::checkAttnScale(attrs, tensorMap));
 
     const auto* qTensor = tensorMap.at(attrs.q_tensor_uid());
     const auto* kTensor = tensorMap.at(attrs.k_tensor_uid());
