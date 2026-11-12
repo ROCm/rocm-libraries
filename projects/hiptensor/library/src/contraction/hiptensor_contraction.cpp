@@ -70,8 +70,7 @@ static bool hasModesOf(std::vector<int32_t> const& modeCV, std::vector<int32_t> 
     return std::is_permutation(modeCV.cbegin(), modeCV.cend(), modeDV.cbegin(), modeDV.cend());
 }
 
-// C and D must give each mode the same value: always the same extent, and the
-// same stride when they share one buffer.
+// C and D must give each mode the same value, here its extent.
 // The lookup is by mode because C may list its modes in another order than D.
 static bool matchesPerMode(std::vector<std::size_t> const& valuesC,
                            std::vector<int32_t> const&     modeCV,
@@ -89,18 +88,59 @@ static bool matchesPerMode(std::vector<std::size_t> const& valuesC,
     return true;
 }
 
-// A packed tensor has no gaps, so its last element sits at position
-// "number of elements - 1". The complex path relies on this: it sizes its
-// buffers by the number of elements.
+// C is laid out like D when each mode has the same stride in both, so that an
+// element sits at the same position in C and in D. A mode of extent 1 never
+// moves a position, so its stride is free and isn't compared.
+static bool hasLayoutOf(hiptensorTensorDescriptor_t const descC,
+                        std::vector<int32_t> const&       modeCV,
+                        hiptensorTensorDescriptor_t const descD,
+                        std::vector<int32_t> const&       modeDV)
+{
+    auto const lengthsC = hiptensor::getTensorLengths(descC);
+    auto const stridesC = hiptensor::getTensorStrides(descC);
+    auto const stridesD = hiptensor::getTensorStrides(descD);
+    for(std::size_t i = 0; i < modeCV.size(); i++)
+    {
+        auto it = std::find(modeDV.cbegin(), modeDV.cend(), modeCV[i]);
+        if(it == modeDV.cend()
+           || (lengthsC[i] > 1 && stridesC[i] != stridesD[std::distance(modeDV.cbegin(), it)]))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// A packed tensor has no gaps and no two elements at one position: taken in
+// order of stride, each mode's stride is the number of elements of the modes
+// before it. A mode of extent 1 never moves a position, so its stride is free.
+// The complex path relies on packed tensors: it sizes its buffers by the
+// number of elements.
 static bool isPacked(std::vector<std::size_t> const& lengths,
                      std::vector<std::size_t> const& strides)
 {
-    std::size_t lastPosition = 0;
+    std::vector<std::size_t> order;
     for(std::size_t i = 0; i < lengths.size(); i++)
     {
-        lastPosition += (lengths[i] - 1) * strides[i];
+        if(lengths[i] != 1)
+        {
+            order.push_back(i);
+        }
     }
-    return lastPosition + 1 == hiptensor::elementsFromLengths(lengths);
+    std::sort(order.begin(), order.end(), [&strides](std::size_t i, std::size_t j) {
+        return strides[i] < strides[j];
+    });
+
+    std::size_t packedStride = 1;
+    for(auto i : order)
+    {
+        if(strides[i] != packedStride)
+        {
+            return false;
+        }
+        packedStride *= lengths[i];
+    }
+    return true;
 }
 
 // The complex path sizes its buffers by the number of elements and doesn't
@@ -126,10 +166,7 @@ static char const* complexLayoutProblem(hiptensorComputeDescriptor_t descCompute
             return "Complex contraction needs packed tensors";
         }
     }
-    if(!matchesPerMode(hiptensor::getTensorStrides(descAdded),
-                       modeAdded,
-                       hiptensor::getTensorStrides(descResult),
-                       modeResult))
+    if(!hasLayoutOf(descAdded, modeAdded, descResult, modeResult))
     {
         return "Complex contraction needs the added tensor laid out like the result";
     }
@@ -484,10 +521,10 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
     // same position, so every mode needs the same stride in both. Otherwise the
     // kernel reads elements of C that it has already overwritten.
     if(C == D
-       && !matchesPerMode(hiptensor::getTensorStrides(plan->mOpDesc->mDescC),
-                          plan->mOpDesc->mModeC,
-                          hiptensor::getTensorStrides(plan->mOpDesc->mDescD),
-                          plan->mOpDesc->mModeD))
+       && !hasLayoutOf(plan->mOpDesc->mDescC,
+                       plan->mOpDesc->mModeC,
+                       plan->mOpDesc->mDescD,
+                       plan->mOpDesc->mModeD))
     {
         auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
         snprintf(msg, sizeof(msg), "In-place contraction needs C and D to have the same strides");
@@ -1665,10 +1702,10 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
     // same position, so every mode needs the same stride in both. Otherwise the
     // kernel reads elements of D that it has already overwritten.
     if(D == E
-       && !matchesPerMode(hiptensor::getTensorStrides(plan->mOpDesc->mDescD),
-                          plan->mOpDesc->mModeD,
-                          hiptensor::getTensorStrides(plan->mOpDesc->mDescE),
-                          plan->mOpDesc->mModeE))
+       && !hasLayoutOf(plan->mOpDesc->mDescD,
+                       plan->mOpDesc->mModeD,
+                       plan->mOpDesc->mDescE,
+                       plan->mOpDesc->mModeE))
     {
         auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
         snprintf(msg, sizeof(msg), "In-place contraction needs D and E to have the same strides");
