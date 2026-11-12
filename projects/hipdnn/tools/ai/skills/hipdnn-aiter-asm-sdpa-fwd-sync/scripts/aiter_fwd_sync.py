@@ -126,7 +126,9 @@ _SHARED_REFS = tuple(
 # Upstream code read to detect ABI, dispatch and codegen changes; never copied.
 # In csrc/cpp_itfs/mha_fwd.cu only the ASM functions are listed: fmha_fwd_ck()
 # and the CK fallback in mha_fwd() are out of scope. aiter/ops/mha.py decides in
-# Python, before csrc/ is reached, which cases may use the ASM v3 kernels.
+# Python, before csrc/ is reached, which cases may use the ASM v3 kernels; a
+# "pyfunction" region also holds the helpers the function calls, such as
+# is_fmha_v3_fp8() and _fmha_kv_byte_extent_ge_u32(), so they need no entry.
 REFERENCES: dict[str, tuple[Ref, ...]] = {
     "fmha_v3_fwd": _SHARED_REFS
     + (
@@ -194,13 +196,6 @@ REFERENCES: dict[str, tuple[Ref, ...]] = {
                 ("_flash_attn_forward", "batch mode"),
                 ("_flash_attn_varlen_forward", "group (varlen) mode"),
             )
-        ),
-        Ref(
-            "aiter/ops/mha.py",
-            "pyfunction",
-            "_fmha_kv_byte_extent_ge_u32",
-            3,
-            "K/V row byte-extent limit the Python ASM v3 gates apply",
         ),
     ),
     "fmha_fwd_bf16": _SHARED_REFS
@@ -611,17 +606,56 @@ def _python_def(node: ast.AST, name: str) -> ast.AST | None:
 
 
 def _python_function(text: str, dotted: str) -> str | None:
-    """The source of a Python function by its dotted name, decorators included."""
+    """The source of a Python function by its dotted name, decorators included,
+    followed by the source of every function it calls that the file defines in a
+    scope enclosing it, transitively and in file order. A dispatch gate's verdict
+    depends on the helpers it calls, so a change confined to one must show too."""
     try:
-        node: ast.AST | None = ast.parse(text)
+        tree = ast.parse(text)
     except (SyntaxError, ValueError):
         return None
+    node: ast.AST | None = tree
+    scopes: list[ast.AST] = []
     for part in dotted.split("."):
+        scopes.append(node)
         node = _python_def(node, part)
         if node is None:
             return None
-    first = min([node.lineno] + [d.lineno for d in node.decorator_list])
-    return "\n".join(text.split("\n")[first - 1 : node.end_lineno])
+
+    # Python resolves a free name in the enclosing functions and then the module;
+    # class bodies are not enclosing scopes.
+    def resolve(name: str, enclosing: list[ast.AST]) -> tuple[ast.AST, list] | None:
+        for depth in range(len(enclosing) - 1, -1, -1):
+            scope = enclosing[depth]
+            if isinstance(scope, ast.ClassDef):
+                continue
+            found = _python_def(scope, name)
+            if isinstance(found, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                return found, enclosing[: depth + 1]
+        return None
+
+    included = {id(node): node}
+    pending = [(node, scopes)]
+    while pending:
+        function, enclosing = pending.pop()
+        for call in ast.walk(function):
+            if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)):
+                continue
+            found = resolve(call.func.id, enclosing)
+            if found is not None and id(found[0]) not in included:
+                included[id(found[0])] = found[0]
+                pending.append(found)
+
+    lines = text.split("\n")
+
+    def source(function: ast.AST) -> str:
+        first = min([function.lineno] + [d.lineno for d in function.decorator_list])
+        return "\n".join(lines[first - 1 : function.end_lineno])
+
+    helpers = sorted(
+        (f for f in included.values() if f is not node), key=lambda f: f.lineno
+    )
+    return "\n\n".join(source(f) for f in [node, *helpers]) + "\n"
 
 
 def extract_region(text: str, ref: Ref) -> str | None:
@@ -1212,6 +1246,32 @@ def cmd_plan(args: argparse.Namespace, upstream: Upstream, root: Path) -> int:
                     "header_mismatch_across_archs",
                     f"{name}: header {ours} differs from {', '.join(differ)}; the "
                     "vendored codegen.py needs one header per CSV name across archs",
+                )
+        # The engine holds one copy of a module's mirrored host code (argument
+        # struct, packing, grid, dispatch) and launches every arch's objects with
+        # it, so porting a reference change re-targets archs this plan leaves
+        # alone. Their objects stay built for the host code they are pinned to.
+        if any(
+            f["kind"] in ("reference_changed", "reference_missing")
+            for f in findings.items
+        ):
+            unplanned = sorted(
+                arch_dir.parent.name
+                for arch_dir in kernels.glob(f"gfx*/{module}")
+                if module_key(arch_dir.parent.name, module) not in planned
+                and pins["modules"]
+                .get(module_key(arch_dir.parent.name, module), {})
+                .get("abi_commit")
+                != commit
+            )
+            if unplanned:
+                findings.add(
+                    3,
+                    "host_code_shared_with_unplanned_archs",
+                    f"{', '.join(unplanned)} also vendor {module}, and the engine "
+                    "launches them with the same host code; porting these reference "
+                    "changes changes their launch too: add them to --arch, or do not "
+                    "port the changes",
                 )
         plan["tier"] = findings.tier
         plan["findings"] = findings.items

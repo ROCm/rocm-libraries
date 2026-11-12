@@ -102,15 +102,26 @@ float fmha_fwd_ck(mha_fwd_args a, const stream_config& s)
 }
 """
 
-# AITER's Python entry points each define their own can_impl_fmha_v3_fwd().
+# AITER's Python entry points each define their own can_impl_fmha_v3_fwd(), which
+# calls a nested is_fmha_v3_fp8() of the same caller and the module-level extent
+# helper. _fmha_bwd_extent_ge_u32() is defined but not called by either gate.
 MHA_PY = """\
 def _fmha_kv_byte_extent_ge_u32(max_seqlen_k, k, v):
     return max_seqlen_k * k.stride(-3) >= (1 << 32)
 
 
+def _fmha_bwd_extent_ge_u32(max_seqlen_k, k):
+    return max_seqlen_k * k.stride(-2) >= (1 << 32)
+
+
 def _flash_attn_forward(q, k, v, hdim_q):
+    def is_fmha_v3_fp8():
+        return q.dtype == "fp8" and hdim_q == 128
+
     def can_impl_fmha_v3_fwd():
         ret = hdim_q == 128
+        ret = ret or is_fmha_v3_fp8()
+        ret = ret and not _fmha_kv_byte_extent_ge_u32(4096, k, v)
         return ret
 
     if can_impl_fmha_v3_fwd():
@@ -119,8 +130,13 @@ def _flash_attn_forward(q, k, v, hdim_q):
 
 
 def _flash_attn_varlen_forward(q, k, v, cu_seqlens_q):
+    def is_fmha_v3_fp8():
+        return q.dtype == "fp8"
+
     def can_impl_fmha_v3_fwd():
         ret = cu_seqlens_q is not None
+        ret = ret or is_fmha_v3_fp8()
+        ret = ret and not _fmha_kv_byte_extent_ge_u32(4096, k, v)
         return ret
 
     if can_impl_fmha_v3_fwd():
@@ -556,6 +572,72 @@ def test_python_gate_change_in_either_copy_is_reported(
     ]
     assert f"+        {gate_change[1]}" in changed[0]["diff"]
     assert outside_change[1] not in changed[0]["diff"]
+
+
+@pytest.mark.parametrize(
+    "helper_change, callers",
+    [
+        (
+            ('"fp8" and hdim_q == 128', '"fp8" and hdim_q in (128, 256)'),
+            ["_flash_attn_forward"],
+        ),
+        (
+            ("k.stride(-3) >= (1 << 32)", "k.stride(-3) >= (1 << 31)"),
+            ["_flash_attn_forward", "_flash_attn_varlen_forward"],
+        ),
+        (("k.stride(-2) >= (1 << 32)", "k.stride(-2) >= (1 << 31)"), []),
+    ],
+    ids=["nested-helper", "module-helper", "uncalled-function"],
+)
+def test_python_gate_reports_a_change_confined_to_a_helper_it_calls(
+    sync, env, helper_change, callers
+):
+    """A gate's verdict depends on the helpers it calls. A change to one is reported
+    under every gate that calls it, apply keeps the host-code commit, and a change
+    to a function no gate calls is not reported."""
+    aiter, tree, kernels, cache, report = env
+    base = base_upstream(aiter)
+    vendor(kernels, "gfx942", [ROW_HD128, ROW_FP8], roots=("MI300", "MI308"))
+    aiter.write("aiter/ops/mha.py", MHA_PY.replace(*helper_change))
+    target = aiter.commit("v0.2.0")
+
+    plan(sync, env, "v0.2.0", "--baseline", base)
+    changed = of_kind(report, "reference_changed")
+    assert [f["detail"].split(": ")[0] for f in changed] == [
+        f"aiter/ops/mha.py::{caller}.can_impl_fmha_v3_fwd" for caller in callers
+    ]
+    for finding in changed:
+        added = [line for line in finding["diff"].splitlines() if line[:1] == "+"]
+        assert any(helper_change[1] in line for line in added)
+    assert apply(sync, env) == 0
+    assert pin(kernels)["abi_commit"] == (base if callers else target)
+
+
+def test_host_code_change_names_the_archs_the_plan_leaves_alone(sync, env):
+    """The engine launches every arch's objects with one copy of the mirrored host
+    code, so a reference change planned for one arch reaches the others."""
+    aiter, tree, kernels, cache, report = env
+    base_upstream(aiter)
+    aiter.module("gfx950", [ROW_HD128])
+    base = aiter.commit("v0.1.1")
+    vendor(kernels, "gfx942", [ROW_HD128], roots=("MI300", "MI308"))
+    vendor(kernels, "gfx950", [ROW_HD128])
+    aiter.write(
+        "csrc/include/mha_fwd.h",
+        MHA_FWD_H.replace("p2 _p0;", "p2 _p0;\n    int nsplit;"),
+    )
+    aiter.commit("v0.2.0")
+
+    plan(sync, env, "v0.2.0", "--baseline", base, arch="gfx950")
+    shared = of_kind(
+        report, "host_code_shared_with_unplanned_archs", "gfx950/fmha_v3_fwd"
+    )
+    assert [(f["tier"], "gfx942" in f["detail"]) for f in shared] == [(3, True)]
+
+    plan(sync, env, "v0.2.0", "--baseline", base, arch="gfx942,gfx950")
+    for key in ("gfx942/fmha_v3_fwd", "gfx950/fmha_v3_fwd"):
+        assert "reference_changed" in kinds(report, key)
+        assert "host_code_shared_with_unplanned_archs" not in kinds(report, key)
 
 
 def test_renamed_reference_keeps_the_host_code_baseline(sync, env, monkeypatch):

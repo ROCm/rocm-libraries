@@ -35,7 +35,9 @@ Run it on each new AITER release, or when a GPU arch needs forward kernels.
 Each module's pin records two AITER commits:
 
 - `commit`: where the vendored objects and CSVs came from. `apply` sets it.
-- `abi_commit`: the AITER code the engine mirrors by hand: the kernel argument structs, their packing, the launch grid and block size, the dispatch rules, the MI308 detection, and `hsa/codegen.py`, from which the vendored `asm/asm_kernels/codegen.py` is derived. The dispatch rules live in the C++ host code (`csrc/cpp_itfs/mha_fwd.cu`) and in AITER's Python dispatch gate, `can_impl_fmha_v3_fwd` in `aiter/ops/mha.py` (a batch and a varlen copy). Plans diff that upstream code from this commit, so a change stays in every later report until it is ported. `apply` advances it only when none of that code changed or went missing. After porting a change, run `mark-ported --module <module>`.
+- `abi_commit`: the AITER code the engine mirrors by hand: the kernel argument structs, their packing, the launch grid and block size, the dispatch rules, the MI308 detection, and `hsa/codegen.py`, from which the vendored `asm/asm_kernels/codegen.py` is derived. The dispatch rules live in the C++ host code (`csrc/cpp_itfs/mha_fwd.cu`) and in AITER's Python dispatch gate, `can_impl_fmha_v3_fwd` in `aiter/ops/mha.py` (a batch and a varlen copy, each with the helpers it calls, such as `is_fmha_v3_fp8`). Plans diff that upstream code from this commit, so a change stays in every later report until it is ported. `apply` advances it only when none of that code changed or went missing. After porting a change, run `mark-ported --module <module>`.
+
+The engine holds one copy of that host code and launches every arch's objects with it, so a ported change reaches every arch that vendors the module. A plan that leaves such an arch out reports `host_code_shared_with_unplanned_archs`.
 
 While `abi_commit` lags `commit`, plans report `abi_unported` at tier 3.
 

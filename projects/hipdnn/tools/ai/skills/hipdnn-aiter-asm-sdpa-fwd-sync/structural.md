@@ -27,15 +27,17 @@ The report diffs AITER's host code from the module's host-code commit (`abi_comm
 
 Port the change field by field. Update the size assert from the new upstream struct, and the offset checks in `TestSdpaFwdKernelArgs.cpp` for every field the change touches. `TestSdpaFwdKernelArgs.cpp` and `TestSdpaFwdPlanGridMath.cpp` must pass, with expected values taken from upstream, never from the old engine. A kernel argument change applies to every object of the module, so all its kernels need GPU validation on every arch that ships them.
 
+The engine has one `fmha_fwd_v3_args`, one `buildFwdKernelArgs` and one `computeFwdLaunchParams` for every arch, so a ported change reaches every arch that vendors the module, not only the archs in the plan. The plan reports `host_code_shared_with_unplanned_archs` for each arch it leaves out. Either add those archs to the same plan, so their objects move to the new ABI with the host code, or do not port the change. Agree which with the user. Rules gated on the arch in the engine (`bf16_cvt`, the MI300/MI308 split, hd192x128 on gfx942, hd256 on gfx950) reach only their arch.
+
 `asm/SgprPadding.hpp` is shared with the backward kernel arguments, which this skill does not touch. A padding change therefore needs a backward review too. Stop and agree it with the user before editing that file.
 
 When every `reference_changed` diff of a module is ported, run `mark-ported --module <module>` (`<module>` is `<arch>/<module-name>`). Until then the pin keeps the older host-code commit and every later plan repeats the diffs, so a change deferred to another PR is not lost.
 
 ## Python dispatch gate (`reference_changed`, tier 3)
 
-AITER also decides in Python whether a call reaches the ASM forward kernels: `can_impl_fmha_v3_fwd` in `aiter/ops/mha.py`, with one copy for batch mode and one for varlen (group) mode. The report diffs both from `abi_commit`. A case the gate rejects goes to CK, so port each new kernel limit as a decline in `SdpaFwdPlanBuilder::isApplicable`, as [new-values.md](new-values.md) describes for `fmha_fwd_v3()`.
+AITER also decides in Python whether a call reaches the ASM forward kernels: `can_impl_fmha_v3_fwd` in `aiter/ops/mha.py`, with one copy for batch mode and one for varlen (group) mode. The report diffs both from `abi_commit`, each together with every function the gate calls that `mha.py` defines, transitively: the caller's nested `is_fmha_v3_fp8` (fp8 archs, head dims and descale shapes) and the module-level `_fmha_kv_byte_extent_ge_u32`. A change confined to a helper is reported under each gate that calls it. A case the gate rejects goes to CK, so port each new kernel limit as a decline in `SdpaFwdPlanBuilder::isApplicable`, as [new-values.md](new-values.md) describes for `fmha_fwd_v3()`.
 
-- The engine mirrors the hd192x128 K/V row-extent decline (2^32 bytes) on gfx942 and gfx950. Both gate copies compute the extent in the helper `_fmha_kv_byte_extent_ge_u32`, which the report diffs too.
+- The engine mirrors the hd192x128 K/V row-extent decline (2^32 bytes) on gfx942 and gfx950. Both gate copies compute the extent in `_fmha_kv_byte_extent_ge_u32`.
 - The engine does not port the fp8 rule that `nhead_q / nhead_k` be a power of two. The gfx950 fp8 rows are excluded, and the gfx942 fp8 objects divide by the GQA ratio in full. Port the rule before enabling the gfx950 fp8 rows.
 
 ## New arch (`new_arch`, `cmake_arch_missing`)

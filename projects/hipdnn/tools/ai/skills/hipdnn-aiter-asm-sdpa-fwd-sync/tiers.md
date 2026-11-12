@@ -25,9 +25,10 @@
 | `reference_changed` (selection key, mask mapping) | 2 | AITER's `get_kernel_name_key()` or `get_cfg_mask_type()` changed; the diff is in the report | new-values |
 | `reference_changed` (`hsa/codegen.py`) | 2 | AITER's registry codegen changed; the vendored `codegen.py` is a derived copy. The diff is in the report and repeats until `mark-ported` | new-values |
 | `reference_changed` (`fmha_fwd_v3`) | 3 | AITER's ASM dispatch changed: which cases it sends to CK, and the block size it launches with; the diff is in the report | new-values (declines), structural (block size) |
-| `reference_changed` (`can_impl_fmha_v3_fwd`, `_fmha_kv_byte_extent_ge_u32`) | 3 | AITER's Python dispatch gate in `aiter/ops/mha.py` changed, in its batch or varlen copy or in the K/V byte-extent helper they call: which cases it sends to CK; the diff is in the report | new-values (declines), structural |
+| `reference_changed` (`can_impl_fmha_v3_fwd`) | 3 | AITER's Python dispatch gate in `aiter/ops/mha.py` changed, in its batch or varlen copy or in a helper it calls (`is_fmha_v3_fp8`, `_fmha_kv_byte_extent_ge_u32`): which cases it sends to CK; the diff is in the report | new-values (declines), structural |
 | `reference_changed` (argument struct, padding structs, packing, grid, object path, MI308 detection) | 3 | The kernel ABI or launch changed upstream; the diff is in the report | structural |
 | `abi_unported` | 3 | The engine still mirrors older AITER code than the vendored objects need; `reference_changed` lists what is left to port | structural |
+| `host_code_shared_with_unplanned_archs` | 3 | The module has a `reference_changed` or `reference_missing`, and other archs vendor it but are not in the plan. The engine launches them with the same host code, so porting the change reaches them too | structural |
 | `new_arch`, `new_module` | 3 | An arch or module the tree has never held | structural |
 | `cmake_arch_missing`, `cmake_module_missing` | 3 | The engine build does not know the arch or module | structural |
 | `header_changed`, `csv_removed_upstream` | 3 | A CSV gained, lost or reordered columns, or disappeared | structural |
