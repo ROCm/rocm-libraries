@@ -91,7 +91,7 @@ struct StreamKKernel
         "Persistent flag from TilePartitioner must match Persistent flag from UniversalGemm.");
 
     /// The named barriers this kernel arms for GemmPipeline; void when it uses none. Declared here
-    /// because the launched kernel, not the wrapped UniversalGemmKernel, owns the barrier array.
+    /// because the launched kernel, not the wrapped UniversalGemmKernel, owns the barriers.
     using barrier_pipeline = typename UniversalGemmKernel::barrier_pipeline;
     /// Stands in for the barrier token when the pipeline uses no named barriers.
     using NoBarriers = typename UniversalGemmKernel::NoBarriers;

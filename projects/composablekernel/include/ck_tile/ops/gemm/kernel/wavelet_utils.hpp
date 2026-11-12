@@ -68,9 +68,9 @@ inline constexpr bool is_wavelet_pipeline = []() {
         return false;
 }();
 
-// The named barrier pipeline a GEMM pipeline synchronises over, or void when it uses none. The
-// hardware allows one named barrier array per kernel, so the kernel running such a pipeline
-// declares it as its own `barrier_pipeline` and arms it with init().
+// The named barrier pipeline a GEMM pipeline synchronises over, or void when it uses none. A
+// kernel may use only one named barrier pipeline, so the kernel running such a pipeline declares
+// it as its own `barrier_pipeline` and arms it with init().
 template <typename Pipeline>
 using barrier_pipeline_of_t = typename impl::pipeline_barrier_pipeline<Pipeline>::type;
 
