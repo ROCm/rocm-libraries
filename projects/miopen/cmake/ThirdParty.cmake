@@ -180,7 +180,14 @@ endif()
 # INTERFACE_SOURCES.  Drop it from the imported target only if the file
 # doesn't exist on disk.  Once the artifact is fixed upstream, the file
 # will be present and the property is left untouched.
+#
+# A copy fetched above is an ALIAS, which set_property() cannot modify. Under
+# clang-cl its natvis entries are generator expressions for a file in its own
+# source tree, so there is nothing to drop; skip it.
 if(TARGET nlohmann_json::nlohmann_json)
+    get_target_property(_njson_aliased nlohmann_json::nlohmann_json ALIASED_TARGET)
+endif()
+if(TARGET nlohmann_json::nlohmann_json AND NOT _njson_aliased)
     get_target_property(_njson_srcs nlohmann_json::nlohmann_json INTERFACE_SOURCES)
     if(_njson_srcs)
         set(_njson_filtered "${_njson_srcs}")
