@@ -107,6 +107,7 @@ WrwConfig configOf(const KernelDefinition& kernel)
     config.ns = kernel.getIntMetadata("ns");
     config.wq = kernel.getIntMetadata("wq");
     config.dws = kernel.getIntMetadata("dws");
+    config.pb = kernel.getIntMetadata("pb");
     config.bpu = kernel.getIntMetadata("bpu");
     return config;
 }

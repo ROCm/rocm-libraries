@@ -195,6 +195,7 @@ conv_wrw::WrwConfig configOf(const hipdnn_plugin_sdk::ingestor::KernelDefinition
     c.ns = kernel.getIntMetadata("ns");
     c.wq = kernel.getIntMetadata("wq");
     c.dws = kernel.getIntMetadata("dws");
+    c.pb = kernel.getIntMetadata("pb");
     return c;
 }
 
@@ -296,6 +297,8 @@ struct DeviceCase
     bool matrix16Only = false;
     /// No gfx906 (FMA) configs.
     bool noGfx906 = false;
+    /// Served only where a few configs ship (block-based buffers): skipped where none does.
+    bool someArchs = false;
 };
 
 ConvShape conv(int64_t c,
@@ -478,6 +481,16 @@ std::vector<DeviceCase> deviceCases()
          false,
          false,
          true});
+    // One x image past 2 GiB in 16-bit (64 channels of 4100 x 4200; past 4 GiB in fp32): only
+    // the block-based buffer configs (pb 1) serve it, each block's 32 (16-bit) or 16 (fp32)
+    // channel planes within the 32-bit range. One output channel keeps the CPU reference short.
+    cases.push_back({"LargeImageBlockBuffers",
+                     conv(64, 1, {4100, 4200}, {3, 3}, {0, 0}, {0, 0}, {2, 2}, {1, 1}, false, 1, 1),
+                     false,
+                     false,
+                     false,
+                     true,
+                     true});
     cases.push_back({"ThreeD5x5x5FewChannels",
                      conv(8, 24, {6, 7, 9}, {5, 5, 5}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}),
                      false,
@@ -551,6 +564,14 @@ void runCase(const DeviceCase& deviceCase)
     const GraphFixture fixture(buildGraph(spec), device);
     const auto bound = matchesGraph(PACK, fixture.context());
     ASSERT_TRUE(bound.has_value()) << "the engine refused a case it should serve";
+    // Cases only a few configs serve skip before building their (large) tensors.
+    if(deviceCase.someArchs
+       && std::none_of(catalog().begin(), catalog().end(), [&](const auto& kernel) {
+              return matchesKernel(PACK, fixture.context(), kernel, *bound);
+          }))
+    {
+        GTEST_SKIP() << "no catalog config for this case on " << device.gcnArchName;
+    }
 
     Tensor<T> x(spec.x.dims, spec.x.strides);
     Tensor<T> w(spec.w.dims, spec.w.strides);
@@ -666,7 +687,8 @@ void runCase(const DeviceCase& deviceCase)
     const bool fmaOrFp32 = shape.dataType == DataType::FLOAT || gfx906;
     if(ran == 0
        && (!expectServed(device.gcnArchName, shape.dataType)
-           || (deviceCase.matrix16Only && fmaOrFp32) || (deviceCase.noGfx906 && gfx906)))
+           || (deviceCase.matrix16Only && fmaOrFp32) || (deviceCase.noGfx906 && gfx906)
+           || deviceCase.someArchs))
     {
         GTEST_SKIP() << "no catalog config for this case on " << device.gcnArchName;
     }
@@ -716,9 +738,9 @@ TEST(TestConvWrwCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its integer knobs: within one dtype (what
     // one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 21> KNOBS{
-        "atom_id", "loop", "layout", "bk",  "bc",  "bq",    "fr", "s",   "sw", "dw", "wk",
-        "wc",      "tk",   "tc",     "vec", "xcd", "align", "ns", "bpu", "wq", "dws"};
+    static constexpr std::array<const char*, 22> KNOBS{
+        "atom_id", "loop", "layout", "bk",  "bc",  "bq",    "fr", "s",   "sw", "dw",  "wk",
+        "wc",      "tk",   "tc",     "vec", "xcd", "align", "ns", "bpu", "wq", "dws", "pb"};
     std::set<std::vector<int64_t>> seen[3];
     for(const auto& kernel : catalog())
     {

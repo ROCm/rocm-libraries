@@ -106,6 +106,7 @@ INTS = [
     "bpu",
     "wq",
     "dws",
+    "pb",
 ]
 STRINGS = ["direction", "dtype", "atom"]
 FIELDS = STRINGS + INTS
@@ -693,7 +694,7 @@ def C(atom, loop, layout, tile, s, sw, dw, fr, vec, xcd, align, ns):
         bpu=0,
         wq=0,
     )
-    return dict(c, dws=dws_of(c))
+    return dict(c, dws=dws_of(c), pb=0)
 
 
 def D(atom, tile, s, dw, fr, ns):
@@ -722,6 +723,7 @@ def D(atom, tile, s, dw, fr, ns):
         bpu=1,
         wq=wq,
         dws=0,
+        pb=0,
     )
 
 
@@ -1017,8 +1019,32 @@ def build_fmardna():
     return dropped
 
 
+# Block-based buffers (pb 1): channels-first images past the 32-bit buffer range (3-D
+# ConvTranspose3d / volumes of 64 channels at 257^3). A block's bc x channel planes must fit the
+# range, so the tiles take 32 (16-bit) or 16 (fp32) input channels. Measured on 257^3 3x3x3
+# stride 2 (gfx950 / gfx1201): (atom, loop, filter rows, tile).
+PB_CONFIGS = [
+    ({"HALF": "mfma32x16_f16", "BFLOAT16": "mfma32x16_bf16"}, 1, 3, (64, 32, 2, 1, 32)),
+    ({"FLOAT": "mfma16_f32"}, 1, 1, (32, 16, 2, 1, 64)),
+    ({"HALF": "wmma12_f16", "BFLOAT16": "wmma12_bf16"}, 0, 3, (64, 32, 4, 2, 32)),
+    ({"HALF": "wmma11_f16", "BFLOAT16": "wmma11_bf16"}, 0, 3, (64, 32, 4, 2, 32)),
+]
+
+
+def build_pb():
+    dropped = 0
+    for atoms, xcd, fr, tile in PB_CONFIGS:
+        for dtype, atom in atoms.items():
+            c = C(atom, 0, CF, tile, 3, 2, 1, fr, 16 // eb(dtype), xcd, 0, 0)
+            if valid(c, dtype):
+                CATALOG[dtype].extend(dict(x, pb=1) for x in with_bpu(c))
+            else:
+                dropped += 1
+    return dropped
+
+
 def build():
-    dropped = build_direct() + build_unaligned_k() + build_smallc()
+    dropped = build_direct() + build_unaligned_k() + build_smallc() + build_pb()
     for atoms, tiles, xcd, layouts, loop2, only in FAMILIES:
         for dtype, atom in atoms.items():
             vec = 16 // eb(dtype)
@@ -1175,9 +1201,14 @@ def emit():
         packs = {}
         # The gfx906 and RDNA FMA configs follow the dtype's list, in their own packs that
         # list only those archs.
+        # The gfx906 list splits in two packs (fma906, fma906b) under the size cap.
+        half906 = (len(CATALOG906[dtype]) + 1) // 2
         tagged = (
             [(c, family_of(c)) for c in cfgs]
-            + [(c, "fma906") for c in CATALOG906[dtype]]
+            + [
+                (c, "fma906" if j < half906 else "fma906b")
+                for j, c in enumerate(CATALOG906[dtype])
+            ]
             + [(c, "fmardna") for c in CATALOGRDNA.get(dtype, [])]
         )
         for i, (c, fam) in enumerate(tagged):
@@ -1194,6 +1225,7 @@ def emit():
                 f"conv_wrw.{dt}.{c['atom']}.l{c['loop']}.{lay}.{c['bk']}x{c['bc']}x{c['bq']}"
                 f".{thr}.fr{c['fr']}s{c['s']}sw{c['sw']}dw{c['dw']}"
                 f".v{c['vec']}.x{c['xcd']}a{c['align']}n{c['ns']}b{c['bpu']}"
+                + (".pb" if c["pb"] else "")
             )
             pack.append(
                 {
@@ -1218,6 +1250,7 @@ def emit():
                     "name": f"hipkernel:conv_wrw_{dt}_{fam}",
                     "arch": {
                         "fma906": FMA906_ARCHS,
+                        "fma906b": FMA906_ARCHS,
                         "fmardna": FMARDNA_ARCHS,
                         "cdnapk": CDNA[:3],
                     }.get(fam, []),

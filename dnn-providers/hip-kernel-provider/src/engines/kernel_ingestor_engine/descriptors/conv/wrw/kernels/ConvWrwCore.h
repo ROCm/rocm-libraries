@@ -43,6 +43,12 @@
 #ifndef CONV_K3_DWS
 #define CONV_K3_DWS 0
 #endif
+// CONV_K3_PB 1 (channels-first K3Tiles): the x and dy buffers start at the block's first
+// channel, not at the image, and span its bk (dy) or bc (x) channel planes, so an image may
+// exceed the 32-bit buffer range as long as a block's channel planes do not.
+#ifndef CONV_K3_PB
+#define CONV_K3_PB 0
+#endif
 // The loops are inlined into the kernel entry; with the direct store's second epilogue the
 // compiler may otherwise outline the larger ones into a called function.
 #if CONV_K3_DWS
@@ -403,11 +409,25 @@ struct K3Tiles
     int aOff[A_PASSES], aLds[A_PASSES], aPos[A_PASSES];
     int bOff[B_PASSES], bLds[B_PASSES], bPos[B_PASSES], bF[B_PASSES];
     unsigned aOk, bOk; // bit p: pass p in range
+    /// Block-based buffers (CONV_K3_PB): the dy and x elements before the block's first
+    /// channel within an image, and the elements its buffers span.
+    static constexpr bool PB = CONV_K3_PB != 0;
+    static_assert(!PB || LAYOUT == K3_NCHW, "K3 block-based buffers are channels-first");
+    long long yBase, xBase;
+    int yWin, xWin;
 
     __device__ void init(const K3Args& a, int tid, int g, int k0, int c0, int kg, int cg)
     {
         aOk = 0;
         bOk = 0;
+        if constexpr(PB)
+        {
+            yBase = static_cast<long long>(g * kg + k0) * a.ys[1];
+            xBase = static_cast<long long>(g * cg + c0) * a.xs[1];
+            const long long yLeft = a.yImage - yBase, xLeft = a.xImage - xBase;
+            yWin = static_cast<int>(yLeft < BK * a.ys[1] ? yLeft : BK * a.ys[1]);
+            xWin = static_cast<int>(xLeft < BC * a.xs[1] ? xLeft : BC * a.xs[1]);
+        }
 #pragma unroll
         for(int p = 0; p < A_PASSES; ++p)
         {
@@ -418,7 +438,7 @@ struct K3Tiles
                 const int row = u / (BQ / VEC), qv = u % (BQ / VEC);
                 k = k0 + row;
                 aPos[p] = qv * VEC;
-                aOff[p] = (g * kg + k) * static_cast<int>(a.ys[1]) + aPos[p];
+                aOff[p] = (PB ? row : g * kg + k) * static_cast<int>(a.ys[1]) + aPos[p];
                 aLds[p] = row * LDA + qv * VEC;
             }
             else if constexpr(TR)
@@ -453,7 +473,7 @@ struct K3Tiles
                 c = c0 + cl;
                 bF[p] = rowc / BC;
                 bPos[p] = v * VEC;
-                bOff[p] = (g * cg + c) * static_cast<int>(a.xs[1]) + bPos[p];
+                bOff[p] = (PB ? cl : g * cg + c) * static_cast<int>(a.xs[1]) + bPos[p];
                 bLds[p] = ((bF[p] * SW) * BC + cl) * LDB + v * (VEC / SW);
             }
             else if constexpr(TR)
@@ -525,10 +545,13 @@ struct K3Tiles
                          const int (&xRow)[FR])
     {
         Step& s = st[P];
-        const k3i4 yr = k3Rsrc4(static_cast<const T*>(a.dy) + n * a.yImage, a.yImage * sizeof(T));
-        const k3i4 xr = k3Rsrc4(static_cast<const T*>(a.x) + n * a.xImage, a.xImage * sizeof(T));
+        const k3i4 yr = k3Rsrc4(static_cast<const T*>(a.dy) + n * a.yImage + (PB ? yBase : 0),
+                                (PB ? yWin : a.yImage) * sizeof(T));
+        const k3i4 xr = k3Rsrc4(static_cast<const T*>(a.x) + n * a.xImage + (PB ? xBase : 0),
+                                (PB ? xWin : a.xImage) * sizeof(T));
         const int iw0 = q0 * SW - a.pw;
-        const int yElems = static_cast<int>(a.yImage), xElems = static_cast<int>(a.xImage);
+        const int yElems = PB ? yWin : static_cast<int>(a.yImage);
+        const int xElems = PB ? xWin : static_cast<int>(a.xImage);
         const int ys4 = static_cast<int>(a.ys[4]), xs4 = static_cast<int>(a.xs[4]);
         s.q0 = q0;
         s.yRow = yRow;
@@ -714,7 +737,8 @@ struct K3Tiles
     __device__ void storeEdge(const K3Args& a, T* As, T* Bs, int tid) const
     {
         const Step& s = st[P];
-        const int yElems = static_cast<int>(a.yImage), xElems = static_cast<int>(a.xImage);
+        const int yElems = PB ? yWin : static_cast<int>(a.yImage);
+        const int xElems = PB ? xWin : static_cast<int>(a.xImage);
         const int iw0 = s.q0 * SW - a.pw;
 #pragma unroll
         for(int p = 0; p < A_PASSES; ++p)
