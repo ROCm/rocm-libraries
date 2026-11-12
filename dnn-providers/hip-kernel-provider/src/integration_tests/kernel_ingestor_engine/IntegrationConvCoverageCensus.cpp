@@ -45,7 +45,8 @@
  *       row records) serve it here, on the architectures the row records;
  *   (c) every fwd/bwd graph some engine serves has a served wrw twin (same tensors), except
  *       twins the map records as known gaps for this architecture, or, on an architecture
- *       without a column, as known gaps on any architecture; and naive wrw serves
+ *       without a column, as known gaps on any architecture or served only by naive
+ *       (whose budget depends on the device); and naive wrw serves
  *       every scaled pair whose fwd/bwd original naive serves (the naive engines are the
  *       structural floor);
  *   (d) each gated engine serves the graph just below its limit on the architectures the
@@ -536,16 +537,13 @@ std::optional<Tier>
 }
 
 /// Whether the twin row is a recorded known gap on this architecture: listed for it, or, on
-/// an architecture the row records no tier for, listed for any architecture. Whether a twin is
-/// served can depend on the device (the naive engines' budget scales with its compute units),
-/// so an architecture without a column cannot tell a known gap from a new one.
+/// an architecture the row records no tier for, listed for any architecture or served by the
+/// naive engines alone wherever it is served. Whether naive serves a twin depends on the
+/// device (its budget scales with the compute units), so an architecture without a column
+/// cannot tell such a gap from a new one.
 bool knownGap(const nlohmann::json& map, const nlohmann::json& row, const std::string& arch)
 {
-    if(!row.contains("known_gap"))
-    {
-        return false;
-    }
-    const auto& gaps = row.at("known_gap");
+    const auto gaps = row.value("known_gap", nlohmann::json::array());
     if(std::find(gaps.begin(), gaps.end(), arch) != gaps.end())
     {
         return true;
@@ -554,7 +552,8 @@ bool knownGap(const nlohmann::json& map, const nlohmann::json& row, const std::s
     {
         return false;
     }
-    return !gaps.empty();
+    const auto& tiers = row.at("tier").get_ref<const std::string&>();
+    return !gaps.empty() || tiers.find_first_of("hb") == std::string::npos;
 }
 
 /// Whether a twin's service may rest on the explicit-GEMM engines alone: the map records it
