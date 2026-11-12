@@ -601,6 +601,87 @@ TEST(TestConvDirectKernelMatch, RowsConfigsRunOnGfx950WithWholeGranules)
     EXPECT_FALSE(admits(f, "gfx950", filterShape({3, 3, 3}, {1, 1, 1})));
 }
 
+/// A gfx90a rows config: the ping-pong tile on the 16x16x16 atoms, 16-channel chunks (39 KiB).
+ConfigFields rowsGfx9Fields()
+{
+    auto f = rowsFields();
+    f.atom = "mfma16_f16";
+    f.archs = "gfx90a";
+    f.bc = 16;
+    f.pp = 1;
+    f.epi = 0;
+    return f;
+}
+
+TEST(TestConvDirectKernelMatch, RowsConfigsRunOnGfx90aWithinItsLds)
+{
+    const auto f = rowsGfx9Fields();
+    EXPECT_EQ(conv_direct::rowsLdsBytes(*conv_direct::configOf(kernelOf(f, "HALF"))),
+              2 * (2 * 8 + 2) * (2 * 16 + 2) * 16 * 2);
+    EXPECT_TRUE(admits(f, "gfx90a:sramecc+:xnack-"));
+    EXPECT_FALSE(admits(f, "gfx950"));
+    auto bf = f;
+    bf.atom = "mfma16_bf16";
+    EXPECT_TRUE(admits(bf, "gfx90a", baseShape(), "BFLOAT16"));
+    auto exact = f;
+    exact.atom = "mfma16_f32";
+    exact.bc = 8;
+    exact.vec = 4;
+    EXPECT_TRUE(admits(exact, "gfx90a", baseShape(), "FLOAT"));
+}
+
+TEST(TestConvDirectKernelMatch, RowsConfigsDeclineHaloStagesPastTheDeviceLds)
+{
+    EXPECT_EQ(conv_direct::ldsLimitOf("gfx950:sramecc+:xnack-"), 160 * 1024);
+    EXPECT_EQ(conv_direct::ldsLimitOf("gfx942"), 64 * 1024);
+    EXPECT_EQ(conv_direct::ldsLimitOf("gfx90a"), 64 * 1024);
+    // gfx950's widest tile (153 KiB) on a 64 KiB part: declined by LDS alone.
+    auto wide = rowsGfx9Fields();
+    wide.bc = 64;
+    EXPECT_EQ(conv_direct::rowsLdsBytes(*conv_direct::configOf(kernelOf(wide, "HALF"))), 156672);
+    EXPECT_FALSE(admits(wide, "gfx90a"));
+    auto fits = wide;
+    fits.bc = 16;
+    EXPECT_TRUE(admits(fits, "gfx90a"));
+    // Doubling the chunk to 32 channels (77 KiB) passes 64 KiB; fp32 doubles the same tile.
+    auto edge = rowsGfx9Fields();
+    edge.bc = 32;
+    EXPECT_EQ(conv_direct::rowsLdsBytes(*conv_direct::configOf(kernelOf(edge, "HALF"))), 78336);
+    EXPECT_FALSE(admits(edge, "gfx90a"));
+    auto exact = rowsGfx9Fields();
+    exact.atom = "mfma16_f32";
+    exact.vec = 4;
+    EXPECT_FALSE(admits(exact, "gfx90a", baseShape(), "FLOAT")) << "fp32 c16: 78 KiB";
+    exact.bc = 8;
+    EXPECT_TRUE(admits(exact, "gfx90a", baseShape(), "FLOAT"));
+    // gfx950 keeps its 160 KiB.
+    auto big = rowsFields();
+    EXPECT_TRUE(admits(big, "gfx950"));
+    big.bc = 128;
+    EXPECT_FALSE(admits(big, "gfx950"));
+}
+
+TEST(TestConvDirectKernelMatch, RowsConfigsTakeTheirOwnDimensionCount)
+{
+    auto rows3d = rowsFields();
+    rows3d.kd = 3;
+    const auto cube = filterShape({3, 3, 3}, {1, 1, 1});
+    EXPECT_TRUE(admits(rows3d, "gfx950", cube));
+    auto rows3dGfx9 = rowsGfx9Fields();
+    rows3dGfx9.kd = 3;
+    EXPECT_TRUE(admits(rows3dGfx9, "gfx90a", cube));
+    // A 3x3x3 config is not a 2-D one, and a 2-D config (kd 1) declines a 3-D problem even when
+    // the filter is 1 x 3 x 3: the 2-D kernel walks no planes.
+    EXPECT_FALSE(admits(rows3d, "gfx950"));
+    const auto flat3d = filterShape({1, 3, 3}, {0, 1, 1});
+    ConfigFields mma;
+    mma.atom = "mfma16x32_f16";
+    mma.archs = "gfx950";
+    mma.kd = 1;
+    ASSERT_TRUE(admits(mma, "gfx950", flat3d)) << "the halo-tile kernel takes 1x3x3 in 3-D";
+    EXPECT_FALSE(admits(rowsFields(), "gfx950", flat3d));
+}
+
 TEST(TestConvDirectKernelMatch, RowsConfigsDeclineEachMalformedField)
 {
     ASSERT_TRUE(admits(rowsFields(), "gfx950"));
@@ -619,7 +700,7 @@ TEST(TestConvDirectKernelMatch, RowsConfigsDeclineEachMalformedField)
              f.bn = 64;
          }},
         {"epi", [](ConfigFields& f) { f.epi = 2; }},
-        {"kd", [](ConfigFields& f) { f.kd = 3; }},
+        {"kd (no 2x3x3 filter)", [](ConfigFields& f) { f.kd = 2; }},
         {"ring", [](ConfigFields& f) { f.ring = 1; }},
         {"bl", [](ConfigFields& f) { f.bl = 1; }},
         {"split", [](ConfigFields& f) { f.split = 1; }},
@@ -800,6 +881,34 @@ TEST(TestConvDirectPlan, RowsTilesAreFixedAndTheGridIsOneBlockPerUnitAtMost)
     huge.input = {4096, 4096};
     huge.c = 128;
     EXPECT_FALSE(planOf(huge, rowsFields(), "HALF", 256).has_value());
+}
+
+TEST(TestConvDirectPlan, Rows3dTilesWalkEveryOutputPlane)
+{
+    auto shape = filterShape({3, 3, 3}, {1, 1, 1});
+    shape.channelsLast = true;
+    shape.dataType = DataType::HALF;
+    shape.c = 64;
+    shape.k = 128;
+    shape.input = {5, 40, 70};
+    auto rows3d = rowsFields();
+    rows3d.kd = 3;
+    const auto plan = planOf(shape, rows3d, "HALF", 1024);
+    ASSERT_TRUE(plan.has_value());
+    const auto& a = plan->args;
+    EXPECT_EQ(a.dout, 5);
+    EXPECT_EQ(a.di, 5);
+    EXPECT_EQ(a.tilesH, 3);
+    EXPECT_EQ(a.tilesW, 3);
+    EXPECT_EQ(a.tilesD, 1);
+    // Tiles: 3 x 3 per plane, 5 planes, 2 images, one 128-column block.
+    EXPECT_EQ(plan->grid[0], 3u * 3u * 5u * static_cast<unsigned>(shape.n));
+    // Taps x rows x columns of the formatted weights: 27 taps.
+    EXPECT_EQ(plan->weightElems, 27LL * 64 * 128);
+    // One input image (all planes) past the 32-bit buffer offsets.
+    auto huge = shape;
+    huge.input = {64, 1024, 1024};
+    EXPECT_FALSE(planOf(huge, rows3d, "HALF", 1024).has_value());
 }
 
 TEST(TestConvDirectPlan, ADeviceWithoutUnitsIsDeclined)
