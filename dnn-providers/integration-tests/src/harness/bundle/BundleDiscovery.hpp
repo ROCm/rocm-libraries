@@ -7,6 +7,7 @@
 #include <cctype>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -734,24 +735,46 @@ inline std::vector<DiscoveredBundle> discoverSweepCases(const std::filesystem::p
     return bundles;
 }
 
-// Recursively discovers all registerable bundle tests under the data root.
+// A sweep root that discovery counted but did not parse, because its suite was not
+// accepted.
+struct UnparsedSweep
+{
+    std::filesystem::path sweepDir;
+    std::string suiteName;
+    size_t caseCount = 0;
+};
+
+// The registerable bundle tests of a discovery, and the sweep roots it did not parse.
+struct BundleDiscoveryResult
+{
+    std::vector<DiscoveredBundle> bundles;
+    std::vector<UnparsedSweep> unparsedSweeps;
+};
+
+// Recursively discovers registerable bundle tests under the data root.
 //
 // Direct bundles: every graph .json accepted by isGraphFile() becomes one test.
-// Template sweeps: every sweep root becomes one test per cases[].id, and all JSON
-// below the sweep root is skipped by direct graph discovery.
+// Template sweeps: every sweep root whose suite name `mayParseSuite` accepts becomes
+// one test per cases[].id. Any other sweep root goes into unparsedSweeps with its case
+// count from countSweepCases(), and registers no test. All JSON below a sweep root is
+// skipped by direct graph discovery.
 //
 // Graceful handling:
 //   - leaf folders without a graph .json warn and skip, so partial DVC pulls or
 //     empty customer folders do not prevent other tests from registering.
 //
 // Hard errors:
-//   - a malformed sweep manifest (unparseable, missing cases[], or a non-string
-//     or duplicate case id) throws: a checked-in manifest must be coherent, so a
-//     broken sweep fails the run rather than silently dropping its cases.
-//   - generated GTest name collisions throw and name both diagnostic paths.
-inline std::vector<DiscoveredBundle> discoverBundles(const std::filesystem::path& bundleDir)
+//   - a malformed manifest of a parsed sweep root (unparseable, missing cases[], or a
+//     non-string or duplicate case id) throws: a checked-in manifest must be coherent,
+//     so a broken sweep fails the run rather than silently dropping its cases. For a
+//     sweep root that is not parsed, only the faults that countSweepCases() finds throw.
+//   - generated GTest name collisions among the registered tests throw and name both
+//     diagnostic paths.
+inline BundleDiscoveryResult
+    discoverBundles(const std::filesystem::path& bundleDir,
+                    const std::function<bool(const std::string& suiteName)>& mayParseSuite)
 {
-    std::vector<DiscoveredBundle> bundles;
+    BundleDiscoveryResult result;
     std::unordered_map<std::string, std::filesystem::path> nameToPath;
 
     const auto sweepDirs = findSweepDirectories(bundleDir);
@@ -768,11 +791,19 @@ inline std::vector<DiscoveredBundle> discoverBundles(const std::filesystem::path
                                      + diagnosticPath.string());
         }
         nameToPath[fullName] = diagnosticPath;
-        bundles.push_back(std::move(bundle));
+        result.bundles.push_back(std::move(bundle));
     };
 
     for(const auto& sweepDir : sweepDirs)
     {
+        const auto sweepPath = sweepDir / "sweep.json";
+        auto suiteName = deriveSuiteName(relativeToRoot(sweepDir, bundleDir), sweepPath);
+        if(!mayParseSuite(suiteName))
+        {
+            const auto caseCount = countSweepCases(sweepPath);
+            result.unparsedSweeps.push_back({sweepDir, std::move(suiteName), caseCount});
+            continue;
+        }
         for(auto& bundle : discoverSweepCases(sweepDir, bundleDir))
         {
             registerBundle(std::move(bundle));
@@ -795,7 +826,14 @@ inline std::vector<DiscoveredBundle> discoverBundles(const std::filesystem::path
         registerBundle({jsonPath, derived.suiteName, derived.testName, std::nullopt});
     }
 
-    return bundles;
+    return result;
+}
+
+// Discovers every registerable bundle test under the data root and parses every sweep
+// manifest. The rules are those of the overload above with every suite accepted.
+inline std::vector<DiscoveredBundle> discoverBundles(const std::filesystem::path& bundleDir)
+{
+    return discoverBundles(bundleDir, [](const std::string&) { return true; }).bundles;
 }
 
 } // namespace hipdnn_integration_tests::bundle

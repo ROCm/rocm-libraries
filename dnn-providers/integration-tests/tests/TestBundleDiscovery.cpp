@@ -258,6 +258,45 @@ protected:
         std::ofstream(dir / "sweep.json") << sweepJson.dump(2);
     }
 
+    static void createSweepWithCases(const std::filesystem::path& dir,
+                                     const std::vector<std::string>& caseIds,
+                                     bool withSupportClaims)
+    {
+        std::vector<SweepCaseSpec> cases;
+        cases.reserve(caseIds.size());
+        for(const auto& id : caseIds)
+        {
+            cases.push_back(
+                {id, "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}});
+        }
+        createTemplateSweep(dir, cases);
+        if(withSupportClaims)
+        {
+            std::ofstream(dir / "support.json") << "{}";
+        }
+    }
+
+    // Sweeps and direct bundles over every tier, with and without support claims, and an
+    // empty leaf folder.
+    static void createMixedTierTree(const std::filesystem::path& root)
+    {
+        createSweepWithCases(root / "quick" / "Matmul" / "A", {"c1", "c2"}, true);
+        createSweepWithCases(root / "quick" / "SdpaFwd" / "bhsd_fp16_hd64", {"s1"}, false);
+        createSweepWithCases(
+            root / "quick" / "SdpaFwd" / "bhsd_fp16_hd128_causal_gqa4_Small", {"g1", "g2"}, true);
+        createSweepWithCases(
+            root / "standard" / "SdpaBackward" / "P", {"prbu01_a", "prbu02_b", "other"}, true);
+        createSweepWithCases(root / "standard" / "RMSNorm" / "R", {"r1", "r2"}, true);
+        createSweepWithCases(
+            root / "comprehensive" / "SdpaFwdPlan" / "Q", {"q1", "q2", "q3"}, true);
+        createSweepWithCases(root / "full" / "Matmul" / "F", {"f1"}, false);
+
+        createMinimalBundle(root / "quick" / "Matmul" / "direct", "Small");
+        std::ofstream(root / "quick" / "Matmul" / "direct" / "Small.support.json") << "{}";
+        createMinimalBundle(root / "full" / "Conv" / "direct", "Big");
+        std::filesystem::create_directories(root / "quick" / "Empty" / "leaf");
+    }
+
     static const DiscoveredBundle* findByTest(const std::vector<DiscoveredBundle>& bundles,
                                               const std::string& testName)
     {
@@ -1585,7 +1624,7 @@ TEST_F(TestBundleDiscoveryFixture, SelectBundlesToLoadCountsExcludedClaimsWhenOb
     BundleRegistrationStats stats;
     SupportClaimCoverage coverage;
     const auto selected = detail::selectBundlesToLoad(
-        discovered, "case_a.*", /*writing=*/false, /*observing=*/true, stats, coverage);
+        discovered, {}, "case_a.*", /*writing=*/false, /*observing=*/true, stats, coverage);
 
     ASSERT_EQ(selected.size(), 1u);
     EXPECT_EQ(selected.front().suiteName, "case_a");
@@ -1613,7 +1652,7 @@ TEST_F(TestBundleDiscoveryFixture, SelectBundlesToLoadLeavesCoverageAloneWhenNot
     BundleRegistrationStats stats;
     SupportClaimCoverage coverage;
     const auto selected = detail::selectBundlesToLoad(
-        discovered, "case_a.*", /*writing=*/false, /*observing=*/false, stats, coverage);
+        discovered, {}, "case_a.*", /*writing=*/false, /*observing=*/false, stats, coverage);
 
     EXPECT_EQ(selected.size(), 1u);
     EXPECT_EQ(stats.excludedByFilter, 1u);
@@ -1633,12 +1672,191 @@ TEST_F(TestBundleDiscoveryFixture, SelectBundlesToLoadKeepsEveryBundleWhenWritin
     BundleRegistrationStats stats;
     SupportClaimCoverage coverage;
     const auto selected = detail::selectBundlesToLoad(
-        discovered, "case_a.*", /*writing=*/true, /*observing=*/false, stats, coverage);
+        discovered, {}, "case_a.*", /*writing=*/true, /*observing=*/false, stats, coverage);
 
     EXPECT_EQ(selected.size(), 2u);
     EXPECT_EQ(stats.discovered, 2u);
     EXPECT_EQ(stats.excludedByFilter, 0u);
     EXPECT_EQ(coverage.graphsFound, 0u);
+}
+
+namespace
+{
+
+const std::string HIP_MLOPS_LANE_FILTER
+    = "quick_*:standard_*:Smoke/*:Quick/*:Standard/*-*DISABLED*";
+const std::string ASM_SDPA_LANE_FILTER
+    = "quick_*Sdpa*:standard_*Sdpa*:Smoke/*Sdpa*-*DISABLED*:*_SdpaBackward_*.prbu01_*:"
+      "*_SdpaBackward_*.prbu03_*:*_SdpaBackward_*.prbu13_*:*_SdpaBackward_*.prbt04_*:"
+      "*_SdpaBackward_*.prbt04n_*:*_SdpaBackward_*.prbr05_*";
+const std::string FLYDSL_SDPA_LANE_FILTER
+    = "quick_SdpaFwd_*.*:standard_SdpaFwd_*.*-*DISABLED*:"
+      "*_SdpaFwd_bhsd_fp16_hd128_causal_gqa4_Small.*:*_SdpaFwd_bhsd_fp16_hd128_causal_mha_Small.*";
+
+struct SelectionOutcome
+{
+    std::vector<std::string> selected;
+    BundleRegistrationStats stats;
+    size_t graphsFound = 0;
+    size_t graphsWithClaims = 0;
+};
+
+SelectionOutcome selectionOutcome(std::vector<DiscoveredBundle> bundles,
+                                  const std::vector<UnparsedSweep>& unparsedSweeps,
+                                  const std::string& filter,
+                                  bool observing)
+{
+    SelectionOutcome outcome;
+    SupportClaimCoverage coverage;
+    for(const auto& bundle : detail::selectBundlesToLoad(std::move(bundles),
+                                                         unparsedSweeps,
+                                                         filter,
+                                                         /*writing=*/false,
+                                                         observing,
+                                                         outcome.stats,
+                                                         coverage))
+    {
+        outcome.selected.push_back(bundle.fullName() + "|" + bundle.jsonPath.string() + "|"
+                                   + (bundle.isTemplateSweepCase() ? bundle.sweep->caseId : ""));
+    }
+    outcome.graphsFound = coverage.graphsFound;
+    outcome.graphsWithClaims = coverage.graphsWithClaims;
+    return outcome;
+}
+
+BundleDiscoveryResult discoverForFilter(const std::filesystem::path& root,
+                                        const std::string& filter)
+{
+    return discoverBundles(root, [&filter](const std::string& suiteName) {
+        return gtestFilterMaySelectSuite(filter, suiteName);
+    });
+}
+
+// Compares selection after a filtered discovery with selection after the full one, with and
+// without observing. Returns how many sweep roots the filtered discovery did not parse.
+size_t expectFilteredSelectionMatchesFull(const std::filesystem::path& root,
+                                          const std::vector<DiscoveredBundle>& full,
+                                          const std::string& filter)
+{
+    const auto filtered = discoverForFilter(root, filter);
+    for(const bool observing : {false, true})
+    {
+        const auto expected = selectionOutcome(full, {}, filter, observing);
+        const auto actual
+            = selectionOutcome(filtered.bundles, filtered.unparsedSweeps, filter, observing);
+        EXPECT_EQ(actual.selected.size(), expected.selected.size()) << "filter '" << filter << "'";
+        EXPECT_TRUE(actual.selected == expected.selected) << "filter '" << filter << "'";
+        EXPECT_EQ(actual.stats.discovered, expected.stats.discovered)
+            << "filter '" << filter << "'";
+        EXPECT_EQ(actual.stats.excludedByFilter, expected.stats.excludedByFilter)
+            << "filter '" << filter << "'";
+        EXPECT_EQ(actual.graphsFound, expected.graphsFound) << "filter '" << filter << "'";
+        EXPECT_EQ(actual.graphsWithClaims, expected.graphsWithClaims)
+            << "filter '" << filter << "'";
+    }
+    return filtered.unparsedSweeps.size();
+}
+
+} // namespace
+
+TEST_F(TestBundleDiscoveryFixture, FilteredDiscoverySelectsAndCountsLikeFullDiscovery)
+{
+    createMixedTierTree(_tempDir);
+    const auto full = discoverBundles(_tempDir);
+    ASSERT_EQ(full.size(), 16u);
+
+    size_t filtersWithUnparsedSweeps = 0;
+    for(const auto& filter : {std::string("*"),
+                              std::string(""),
+                              std::string("quick_*"),
+                              std::string("quick_Matmul_*.*"),
+                              HIP_MLOPS_LANE_FILTER,
+                              ASM_SDPA_LANE_FILTER,
+                              FLYDSL_SDPA_LANE_FILTER,
+                              std::string("*-quick_Matmul_A.*")})
+    {
+        filtersWithUnparsedSweeps
+            += expectFilteredSelectionMatchesFull(_tempDir, full, filter) != 0 ? 1 : 0;
+    }
+    EXPECT_GT(filtersWithUnparsedSweeps, 0u);
+}
+
+TEST_F(TestBundleDiscoveryFixture, FilterThatSelectsNothingStillCountsEveryCase)
+{
+    createMixedTierTree(_tempDir);
+    const auto total = discoverBundles(_tempDir).size();
+
+    const std::string filter = "NoSuchSuite.*";
+    const auto filtered = discoverForFilter(_tempDir, filter);
+    ASSERT_EQ(filtered.unparsedSweeps.size(), 7u);
+
+    BundleRegistrationStats stats;
+    SupportClaimCoverage coverage;
+    const auto selected = detail::selectBundlesToLoad(filtered.bundles,
+                                                      filtered.unparsedSweeps,
+                                                      filter,
+                                                      /*writing=*/false,
+                                                      /*observing=*/false,
+                                                      stats,
+                                                      coverage);
+    EXPECT_TRUE(selected.empty());
+    EXPECT_EQ(stats.discovered, total);
+    EXPECT_EQ(stats.excludedByFilter, total);
+}
+
+TEST_F(TestBundleDiscoveryFixture, SelectBundlesToLoadRejectsUnparsedSweepsWhenWriting)
+{
+    createMinimalBundle(_tempDir / "case_a", "graph");
+    const std::vector<UnparsedSweep> unparsed{{_tempDir / "quick" / "S", "quick_S", 1}};
+
+    BundleRegistrationStats stats;
+    SupportClaimCoverage coverage;
+    EXPECT_THROW(detail::selectBundlesToLoad(discoverBundles(_tempDir),
+                                             unparsed,
+                                             "*",
+                                             /*writing=*/true,
+                                             /*observing=*/false,
+                                             stats,
+                                             coverage),
+                 std::logic_error);
+}
+
+TEST_F(TestBundleDiscoveryFixture, MalformedManifestThrowsOnlyWhenTheFilterCanSelectItsSuite)
+{
+    createTemplateSweep(
+        _tempDir / "quick" / "Bad" / "Dup",
+        {{"dup_case_nchw", "float", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}},
+         {"dup_case_nchw", "half", {2, 3, 4, 5}, {60, 20, 5, 1}, {1, 3, 1, 1}, {3, 1, 1, 1}}});
+    createSweepWithCases(_tempDir / "quick" / "Good" / "G", {"g1"}, false);
+
+    const auto filtered = discoverForFilter(_tempDir, "quick_Good_*.*");
+    ASSERT_EQ(filtered.unparsedSweeps.size(), 1u);
+    EXPECT_EQ(filtered.unparsedSweeps.front().suiteName, "quick_Bad_Dup");
+    EXPECT_EQ(filtered.unparsedSweeps.front().caseCount, 2u);
+    EXPECT_EQ(filtered.bundles.size(), 1u);
+
+    EXPECT_THROW(discoverBundles(_tempDir), std::runtime_error);
+    EXPECT_THROW(discoverForFilter(_tempDir, "quick_Bad_*.*"), std::runtime_error);
+}
+
+TEST_F(TestBundleDiscoveryFixture, NameCollisionThrowsWhenTheFilterCanSelectTheSuite)
+{
+    createSweepWithCases(_tempDir / "quick" / "Op-A" / "S", {"c1"}, false);
+    createSweepWithCases(_tempDir / "quick" / "Op_A" / "S", {"c1"}, false);
+
+    EXPECT_THROW(discoverForFilter(_tempDir, "quick_Op_A_S.*"), std::runtime_error);
+    EXPECT_NO_THROW(discoverForFilter(_tempDir, "standard_*"));
+}
+
+TEST(TestHasNoDiscoveredBundles, IsTrueOnlyWithoutBundlesAndWithoutUnparsedSweeps)
+{
+    const DiscoveredBundle bundle{"quick/S/graph.json", "quick_S", "graph", std::nullopt};
+    const UnparsedSweep sweep{"quick/T", "quick_T", 3};
+
+    EXPECT_TRUE(detail::hasNoDiscoveredBundles({}));
+    EXPECT_FALSE(detail::hasNoDiscoveredBundles({{bundle}, {}}));
+    EXPECT_FALSE(detail::hasNoDiscoveredBundles({{}, {sweep}}));
+    EXPECT_FALSE(detail::hasNoDiscoveredBundles({{bundle}, {sweep}}));
 }
 
 // Reuses the baked-value-plus-runtime-pass-by-value corruption from
@@ -2109,7 +2327,7 @@ TEST_F(TestBundleDiscoveryFixture, RegistrationDoesNotCountAnExpectedRejectionCa
         << R"({"version": 1, "claims": {"E": [{"cases": ["claimed_fp32_nchw"],
                 "support": {"gfx942": ["linux"]}}]}})";
 
-    const detail::DiscoveredBundleSet set{_tempDir, discoverBundles(_tempDir)};
+    const detail::DiscoveredBundleSet set{_tempDir, discoverBundles(_tempDir), {}};
     ASSERT_EQ(set.bundles.size(), 2u);
 
     const auto before = supportClaimCoverage();
@@ -3657,7 +3875,7 @@ namespace
 {
 
 // One full discovery of the checked-in bundle tree, shared by every test of the suite.
-class TestCheckedInBundleTree : public ::testing::Test
+class StandardCheckedInBundleTree : public ::testing::Test
 {
 protected:
     static std::filesystem::path bundleRoot()
@@ -3691,7 +3909,7 @@ protected:
 
 } // namespace
 
-TEST_F(TestCheckedInBundleTree, SweepCaseScanEqualsTheParsedIdCountForEveryManifest)
+TEST_F(StandardCheckedInBundleTree, SweepCaseScanEqualsTheParsedIdCountForEveryManifest)
 {
     std::map<std::filesystem::path, size_t> discoveredCaseCounts;
     for(const auto& bundle : *s_discovered)
@@ -3715,6 +3933,17 @@ TEST_F(TestCheckedInBundleTree, SweepCaseScanEqualsTheParsedIdCountForEveryManif
         scannedCases += scanned;
     }
     EXPECT_GT(scannedCases, 0u);
+}
+
+TEST_F(StandardCheckedInBundleTree, FilteredDiscoverySelectsAndCountsLikeFullDiscovery)
+{
+    for(const auto& filter : {HIP_MLOPS_LANE_FILTER,
+                              ASM_SDPA_LANE_FILTER,
+                              FLYDSL_SDPA_LANE_FILTER,
+                              std::string("quick_*")})
+    {
+        expectFilteredSelectionMatchesFull(bundleRoot(), *s_discovered, filter);
+    }
 }
 
 // NOLINTEND(readability-identifier-naming)
