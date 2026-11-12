@@ -12,8 +12,21 @@
 // whole number of dilation steps no row is shared, and the window is reloaded
 // per output row (see kRowsReusable).
 //
+// LANE_ON_DILATION_GRID selects the variant ConvDirectDepthwiseFwd2DDilated runs.
+// With a dilated filter at stride 1, adjacent output rows (columns) read disjoint
+// input rows (columns), so a lane walking adjacent outputs reloads its whole
+// window for every output row. In this variant a lane walks outputs kRowStep
+// rows and kColStep columns apart instead: the smallest step after which they
+// read the same input rows (columns), which at stride 1 is the dilation. Each
+// further output row then loads only kRowShift new rows, the outputs of a lane
+// share window columns, and the window holds only the rows and columns on the
+// dilation grid. With PAIR_COLUMNS the outputs of a lane stay adjacent along W
+// and a window row holds the column of each (output, tap) pair instead; the
+// solver uses it for 1xK filters, which have no rows to share.
+//
 // Compile-time parameters are supplied by the solver: IO_DTYPE, FILTER_H/W,
-// PAD_H/W, STRIDE_H/W, DILATION_H/W, OUT_PER_LANE, ROW_CHUNK, WORKGROUP_SIZE.
+// PAD_H/W, STRIDE_H/W, DILATION_H/W, OUT_PER_LANE, ROW_CHUNK, WORKGROUP_SIZE,
+// LANE_ON_DILATION_GRID, PAIR_COLUMNS.
 
 #ifndef IO_DTYPE
 #define IO_DTYPE __half
@@ -51,6 +64,12 @@
 #ifndef WORKGROUP_SIZE
 #define WORKGROUP_SIZE 256
 #endif
+#ifndef LANE_ON_DILATION_GRID
+#define LANE_ON_DILATION_GRID 0
+#endif
+#ifndef PAIR_COLUMNS
+#define PAIR_COLUMNS 0
+#endif
 
 #ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_runtime.h>
@@ -72,6 +91,41 @@ constexpr int kOutPerLane = OUT_PER_LANE;
 constexpr int kRowChunk   = ROW_CHUNK;
 constexpr int kWeightSize = kFilterH * kFilterW;
 
+#if LANE_ON_DILATION_GRID
+
+constexpr int Gcd(int a, int b) { return b == 0 ? a : Gcd(b, a % b); }
+
+// Output rows a lane walks are kRowStep apart; between two of them the window
+// moves by kRowShift rows, counted in dilation steps.
+constexpr int kRowStep  = kDilationH / Gcd(kStrideH, kDilationH);
+constexpr int kRowShift = kRowStep * kStrideH / kDilationH;
+
+// Output columns of a lane are kColStep apart. Window column s holds input
+// column ColOffset(s) of the lane's span, and tap fw of output o reads window
+// column ColSlot(o, fw).
+#if PAIR_COLUMNS
+constexpr int kColStep  = 1;
+constexpr int kColSlots = kOutPerLane * kFilterW;
+constexpr int ColOffset(int s) { return (s / kFilterW) * kStrideW + (s % kFilterW) * kDilationW; }
+constexpr int ColSlot(int o, int fw) { return o * kFilterW + fw; }
+#else
+constexpr int kColStep  = kDilationW / Gcd(kStrideW, kDilationW);
+constexpr int kColShift = kColStep * kStrideW / kDilationW;
+constexpr int kColSlots = (kOutPerLane - 1) * kColShift + kFilterW;
+constexpr int ColOffset(int s) { return s * kDilationW; }
+constexpr int ColSlot(int o, int fw) { return o * kColShift + fw; }
+#endif
+
+// Input columns a lane's window spans.
+constexpr int kSpanW = ColOffset(kColSlots - 1) + 1;
+
+// Window rows form a ring of kFilterH slots keyed by row, in dilation steps from
+// the first input row of the lane's first output row. The rows of one output
+// are kFilterH consecutive keys, so the ring is collision-free.
+constexpr int RowSlot(int j) { return j % kFilterH; }
+
+#else
+
 // Input columns a lane touches: its kOutPerLane outputs start kStrideW apart and
 // each spans (kFilterW - 1) * kDilationW + 1 columns.
 constexpr int kInSpanW = (kOutPerLane - 1) * kStrideW + (kFilterW - 1) * kDilationW + 1;
@@ -85,6 +139,8 @@ constexpr int kWinSlots = (kFilterH - 1) * kDilationH + 1;
 // row oh, which needs kStrideH to be a whole number of dilation steps.
 constexpr bool kRowsReusable = (kStrideH % kDilationH) == 0;
 constexpr int kRowShift      = kRowsReusable ? kStrideH / kDilationH : kFilterH;
+
+#endif
 
 __device__ inline float to_float(__half v) { return __half2float(v); }
 __device__ inline float to_float(__hip_bfloat16 v) { return __bfloat162float(v); }
@@ -107,6 +163,135 @@ extern "C" __global__ void __launch_bounds__(WORKGROUP_SIZE)
                                 int oH,
                                 int oW)
 {
+#if LANE_ON_DILATION_GRID
+    // Flat tile index over (n, c, row tile, column tile). A column tile covers
+    // kOutPerLane * kColStep output columns, split into kColStep lanes whose
+    // outputs interleave; a row tile likewise covers kRowChunk * kRowStep output
+    // rows, split into kRowStep lanes.
+    const int tiles_w   = (oW + kOutPerLane * kColStep - 1) / (kOutPerLane * kColStep) * kColStep;
+    const int row_tiles = (oH + kRowChunk * kRowStep - 1) / (kRowChunk * kRowStep) * kRowStep;
+    const int per_image = tiles_w * row_tiles;
+    // The tile count is a product of four tensor dimensions, and the solver's
+    // AllTensorsLengthsFitIntoInt() check only bounds them individually, so the
+    // product is carried in 64 bits. The derived indices below stay 32-bit.
+    const long long total = static_cast<long long>(per_image) * N * C;
+    const long long step  = static_cast<long long>(gridDim.x) * WORKGROUP_SIZE;
+
+    for(long long tile = static_cast<long long>(blockIdx.x) * WORKGROUP_SIZE + threadIdx.x;
+        tile < total;
+        tile += step)
+    {
+        const int nc  = static_cast<int>(tile / per_image);
+        const int t   = static_cast<int>(tile - static_cast<long long>(nc) * per_image);
+        const int c   = nc % C;
+        const int rt  = t / tiles_w;
+        const int ct  = t - rt * tiles_w;
+        const int ow0 = ct / kColStep * kOutPerLane * kColStep + ct % kColStep;
+        const int oh0 = rt / kRowStep * kRowChunk * kRowStep + rt % kRowStep;
+        const int iwb = ow0 * kStrideW - kPadW;
+
+        float taps[kFilterH][kFilterW];
+        const IO_DTYPE* wptr = weights + static_cast<size_t>(c) * kWeightSize;
+#pragma unroll
+        for(int fh = 0; fh < kFilterH; ++fh)
+        {
+#pragma unroll
+            for(int fw = 0; fw < kFilterW; ++fw)
+                taps[fh][fw] = to_float(wptr[fh * kFilterW + fw]);
+        }
+
+        const size_t image_in  = static_cast<size_t>(nc) * iH * iW;
+        const size_t image_out = static_cast<size_t>(nc) * oH * oW;
+
+        // The whole column span is interior, so the row loads need no
+        // per-element bounds test. The stores below are guarded individually.
+        const bool wide = (iwb >= 0) && (iwb + kSpanW <= iW);
+
+        float win[kFilterH][kColSlots];
+
+        auto load_row = [&](int slot, int ih) {
+#pragma unroll
+            for(int s = 0; s < kColSlots; ++s)
+                win[slot][s] = 0.0f;
+            if(ih < 0 || ih >= iH)
+                return;
+            const IO_DTYPE* row = input + image_in + static_cast<size_t>(ih) * iW;
+            if(wide)
+            {
+#pragma unroll
+                for(int s = 0; s < kColSlots; ++s)
+                    win[slot][s] = to_float(row[iwb + ColOffset(s)]);
+            }
+            else
+            {
+#pragma unroll
+                for(int s = 0; s < kColSlots; ++s)
+                {
+                    const int iw = iwb + ColOffset(s);
+                    if(iw >= 0 && iw < iW)
+                        win[slot][s] = to_float(row[iw]);
+                }
+            }
+        };
+
+        const int ih0 = oh0 * kStrideH - kPadH;
+#pragma unroll
+        for(int fh = 0; fh < kFilterH; ++fh)
+            load_row(RowSlot(fh), ih0 + fh * kDilationH);
+
+#pragma unroll
+        for(int r = 0; r < kRowChunk; ++r)
+        {
+            const int oh = oh0 + r * kRowStep;
+            if(oh >= oH)
+                break;
+
+            float acc[kOutPerLane];
+#pragma unroll
+            for(int o = 0; o < kOutPerLane; ++o)
+                acc[o] = 0.0f;
+
+            const int base = r * kRowShift;
+#pragma unroll
+            for(int fh = 0; fh < kFilterH; ++fh)
+            {
+                const int slot = RowSlot(base + fh);
+#pragma unroll
+                for(int o = 0; o < kOutPerLane; ++o)
+                {
+#pragma unroll
+                    for(int fw = 0; fw < kFilterW; ++fw)
+                        acc[o] = fmaf(taps[fh][fw], win[slot][ColSlot(o, fw)], acc[o]);
+                }
+            }
+
+            IO_DTYPE* out = output + image_out + static_cast<size_t>(oh) * oW + ow0;
+#pragma unroll
+            for(int o = 0; o < kOutPerLane; ++o)
+            {
+                if(ow0 + o * kColStep < oW)
+                    from_float(acc[o], out[o * kColStep]);
+            }
+
+            // Fetch the rows the lane's next output row gains: filter row fh of
+            // that row is row fh + kRowShift of this one, so only the last
+            // kRowShift rows are new (all of them once kRowShift reaches
+            // kFilterH). Skip it on the last row of the chunk and past the last
+            // output row, where no iteration follows to read what was fetched.
+            if(r + 1 < kRowChunk && oh + kRowStep < oH)
+            {
+                const int next = base + kRowShift;
+#pragma unroll
+                for(int fh = 0; fh < kFilterH; ++fh)
+                {
+                    if(fh < kFilterH - kRowShift)
+                        continue;
+                    load_row(RowSlot(next + fh), ih0 + (next + fh) * kDilationH);
+                }
+            }
+        }
+    }
+#else
     // Flat tile index over (n, c, row-block, column-block). Flattening instead
     // of mapping (n, c) onto gridDim.y keeps workgroups full for the small
     // spatial sizes typical of the deeper layers of a detection network.
@@ -238,4 +423,5 @@ extern "C" __global__ void __launch_bounds__(WORKGROUP_SIZE)
             }
         }
     }
+#endif
 }
