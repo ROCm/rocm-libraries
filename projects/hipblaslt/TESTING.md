@@ -947,8 +947,8 @@ red sanitizer run does not block a merge.
 ([`.github/workflows/hipblaslt-asan-ci.yml`](../../.github/workflows/hipblaslt-asan-ci.yml)) triggers
 on pull requests touching either library, either test driver, the suppression file, or the workflow,
 nightly at 07:00 UTC, and on manual dispatch.
-It builds through TheRock with host-only ASAN (`-DTHEROCK_SANITIZER=HOST_ASAN`, mirroring TheRock's
-`linux-release-host-asan` preset), runs quick tests for relevant PRs, and runs standard tests
+It builds through TheRock using its `linux-release-host-asan` preset directly for host-only
+ASAN, runs quick tests for relevant PRs, and runs standard tests
 nightly on gfx942 and gfx950. Both architectures test hipBLASLt and hipSPARSELt.
 Manual dispatch accepts the test type as a workflow input.
 The selected type is passed to the test runners for every architecture.
@@ -971,6 +971,11 @@ Host-only AddressSanitizer does not require GPU page-fault retry (XNACK), so thi
 it. The shared test launcher preserves the caller's XNACK setting for host-ASAN artifacts and sets
 `HSA_XNACK=1` for full-ASAN artifacts. The suppression file is the thing to look at first when a
 leak report appears that seems to come from outside hipBLASLt.
+
+Both [`test_hipblaslt.py`](../../test/therock/test_hipblaslt.py) and
+[`test_hipsparselt.py`](../../test/therock/test_hipsparselt.py) set `OMP_NUM_THREADS=1`
+for host and device ASAN runs. OpenMP provides limited speedups in these test clients
+and introduces high overhead in ASAN builds.
 
 **How to build it yourself.** For a standalone hipBLASLt build, `-DHIPBLASLT_ENABLE_ASAN=ON` or
 `-DHIPBLASLT_ENABLE_TSAN=ON`, with `-DTENSILELITE_ENABLE_HOST_ASAN=ON` for the TensileLite host

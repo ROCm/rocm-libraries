@@ -30,5 +30,8 @@
     ]
   },
   "metadata": "68946940-ac32-5de0-85fe-92a8e85157dc",
-  "knobs": []
+  "knobs": [],
+  "behavior_notes": [
+    "supports_graph_capture"
+  ]
 }

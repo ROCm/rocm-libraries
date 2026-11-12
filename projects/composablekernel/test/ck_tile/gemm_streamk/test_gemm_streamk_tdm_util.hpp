@@ -60,6 +60,7 @@ struct StreamKTdmConfig
 enum struct StreamKTdmSplit
 {
     None,      // data-parallel tiles only
+    FullTile,  // Stream-K active, full tiles only (no cross-workgroup partial reduction)
     Partial,   // some workgroup stores a partial tile
     MultiTile, // and some workgroup runs segments of two tiles back to back
     Any
@@ -236,6 +237,11 @@ struct StreamKTdmHarness
         if(split == Split::None)
         {
             EXPECT_EQ(partitioner.get_sk_tiles(), 0);
+        }
+        if(split == Split::FullTile)
+        {
+            EXPECT_GT(partitioner.get_sk_tiles(), 0);
+            EXPECT_EQ(partial, 0);
         }
         // A data-parallel launch cannot validate cross-workgroup reduction.
         if(split == Split::Partial || split == Split::MultiTile)
