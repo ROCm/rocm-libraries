@@ -15,6 +15,10 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * `HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT` scale mode (`1018`, `--scaleA`/`--scaleB` in `hipblaslt-bench`) and `HIPBLASLT_ORDER_COL256_R128_EXT` matrix order (`104`) for MXFP6 (`HIP_R_6F_E2M3`, `HIP_R_6F_E3M2`) GEMMs whose A, and optionally B, is pre-tiled and whose E8M0 scales are shuffled in tiles of 128 rows by 4 K blocks. Both scale modes are set together with the order on A, with `opA = T` and `opB = N`; B uses the same order or `HIPBLASLT_ORDER_COL`.
 * rocKE MXFP6 GEMM kernels for that scale mode and order, registered for gfx950 PCI chip IDs `0x75a0` and `0x75a3`: E2M3 and E3M2, TN, `m = n = 4096` with `K = 65536` or `131584`, bf16 C and D, alpha `1` and beta `0`; with B in `HIPBLASLT_ORDER_COL`, E2M3 at `K = 65536` only. `hipblasLtMatmulAlgoGetHeuristic` does not return them; the extension API's heuristic does, and `hipblasLtMatmul` runs the algo it returns.
 
+### Changed
+
+* In a build without rocRoller (`HIPBLASLT_ENABLE_ROCROLLER=OFF`), a GEMM that hipBLASLt routes to rocRoller now runs the checked-in kernel for the configuration the rocRoller build would pick, or gets no algorithm. Previously it could run the kernel of a lower-ranked configuration or, through the `hipblaslt_ext` API, a TensileLite kernel. This applies to `hipblasLtMatmul`, `hipblasLtMatmulAlgoGetHeuristic` and the `hipblaslt_ext` API. These GEMMs now ignore the uniform summation order request (`HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT` and `hipblasLtSetUniformSummationOrder`), as GEMMs served by rocRoller already do: a Stream-K kernel that used to be refused with `HIPBLAS_STATUS_INVALID_VALUE` now runs, and the rows of its output may not be bitwise identical.
+
 ### Resolved issues
 
 * Fixed `hipblaslt-bench` and `hipblaslt-test` rejecting a compute-input type override for A alone and accepting an unsupported override for B alone.

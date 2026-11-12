@@ -5736,6 +5736,14 @@ static bool gemmDataUsesRocRoller(rocblaslt_handle                        handle
 }
 #endif
 
+// rocRoller's JIT path does not read uniform summation order. A GEMM that
+// useRocRoller() routes is served the same way with rocRoller off, so the
+// checked-in rocRoller kernel is selected and launched without it.
+static void ignoreUniformSummationOrder(TensileLite::ContractionProblemGemm& problem)
+{
+    problem.setParams().setUniformSummationOrder(false);
+}
+
 static bool readsStreamKFlags(const TensileLite::ContractionSolution& solution)
 {
     // A handwritten rocRoller Stream-K custom kernel has sizeMapping.isStreamK()
@@ -6030,6 +6038,11 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             algo = &heuristicResult.algo;
         }
         updateTensileData(prob, *data);
+#ifndef HIPBLASLT_USE_ROCROLLER
+        const bool routedToRocRoller = useRocRoller(handle, prob);
+        if(routedToRocRoller)
+            ignoreUniformSummationOrder(data->problem);
+#endif
 
         // The solution at the index looked up last, so an index that re-selection
         // and tuning leave alone is looked up once.
@@ -6391,6 +6404,10 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             // describes the scratch problem, whose D and possibly C point
             // elsewhere. That also resets the hint a re-selection pinned.
             updateTensileData(prob, *data);
+#ifndef HIPBLASLT_USE_ROCROLLER
+            if(routedToRocRoller)
+                ignoreUniformSummationOrder(data->problem);
+#endif
             if(atQueryHint >= 0)
                 data->problem.setParams().setSmCountTarget(atQueryHint);
         }
@@ -6843,6 +6860,10 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
                 return st;
             data->algoIndex = *solutionIndex;
 
+#ifndef HIPBLASLT_USE_ROCROLLER
+            if(gemmDataUsesRocRoller(handle, data))
+                ignoreUniformSummationOrder(data->problem);
+#endif
             if(data->problem.getParams().uniformSummationOrder() == 1)
                 warnUniformSummationOrderBypass(__func__, tuning != nullptr);
 
@@ -7738,6 +7759,7 @@ static rocblaslt_status
     library->materializeAllSolutions();
 
     auto tensileProblem = ConstructTensileProblem(prob);
+    ignoreUniformSummationOrder(tensileProblem);
 
     // A kernel that declares no unroll is not a rocRoller kernel this walk can
     // serve; the match would refuse it anyway.
@@ -8521,6 +8543,10 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle             handle,
 #endif
     std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
     updateTensileData(prob, *data);
+#ifndef HIPBLASLT_USE_ROCROLLER
+    if(useRocRoller(handle, prob))
+        ignoreUniformSummationOrder(data->problem);
+#endif
     rocblaslt::RocTuningV2* tuning = nullptr;
     return isSolutionSupported(handle,
                                data->problem,
@@ -8564,6 +8590,10 @@ rocblaslt_status isSolutionSupportedInPlace(rocblaslt_handle                   h
 
     std::shared_ptr<TensileDataGemm> data = std::static_pointer_cast<TensileDataGemm>(gemmData);
     updateTensileData(prob, *data);
+#ifndef HIPBLASLT_USE_ROCROLLER
+    if(useRocRoller(handle, prob))
+        ignoreUniformSummationOrder(data->problem);
+#endif
 
     // All that the check below sets on the problem.
     const auto params    = data->problem.getParams();
@@ -8642,6 +8672,11 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle              handle,
         auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
         if(!data)
             return rocblaslt_status_invalid_pointer;
+
+#ifndef HIPBLASLT_USE_ROCROLLER
+        if(gemmDataUsesRocRoller(handle, data))
+            ignoreUniformSummationOrder(data->problem);
+#endif
 
         auto checkSupportForTypeTag = [&](auto tag) -> rocblaslt_status {
             using T = std::remove_pointer_t<decltype(tag)>;
