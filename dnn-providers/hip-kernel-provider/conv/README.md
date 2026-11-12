@@ -72,7 +72,7 @@ switches, because hipDNN cannot yet report a plan's numerical notes or let a cal
 These engines follow cuDNN's semantics, where the compute type is the least precision a plan
 must keep: they serve FLOAT and unset compute types, and HALF on fp16. Once per-engine notes
 land, each engine reports its note, is offered under those compute types as cuDNN offers it,
-and its switch is removed (`~/old-asic-hipdnn/compute-type/PLAN.md` holds the checklist).
+and its switch is removed.
 
 ## Layout
 
