@@ -64,6 +64,12 @@ _rocblaslt_handle::_rocblaslt_handle()
     // ASIC revision
     asic_rev = properties.asicRevision;
 
+    // TODO(ROCM-33832): uniform summation order disables StaggerU, which slows RDNA
+    // GEMMs, so RDNA defaults it off. Remove once RDNA is as fast with it on.
+    const std::string arch = properties.gcnArchName;
+    if(arch.find("gfx11") != std::string::npos || arch.find("gfx120") != std::string::npos)
+        uniform_summation_order = 0;
+
 #ifdef HIPBLASLT_USE_ROCROLLER
     rocroller_create_handle(&rocroller_handle);
 #endif

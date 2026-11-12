@@ -179,6 +179,47 @@ def test_a_malformed_column_is_rejected_not_emptied() -> None:
             arch_domain.ArchDomain("llvm22", doc)
 
 
+def _column_with_processors(processors: object) -> dict:
+    return {"schema": arch_domain.SCHEMA, "keys": {}, "processors": processors}
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [{"accepted": "false"}, {"accepted": 0}, {"accepted": None}, {}, True],
+    ids=["string", "integer", "null", "no_answer", "not_an_object"],
+)
+def test_a_processor_answer_that_is_not_a_boolean_is_rejected(entry) -> None:
+    """``{"accepted": "false"}`` must not read as acceptance: the column is
+    refused when it is read, so no compile routing or generated C++ table can
+    act on it."""
+    with pytest.raises(ValueError) as error:
+        arch_domain.ArchDomain("llvm22", _column_with_processors({"gfx1154": entry}))
+    assert str(error.value) == (
+        f"arch-domain column for llvm22 records processor 'gfx1154' as {entry!r}; "
+        "expected an object whose `accepted` is true or false. Regenerate it with "
+        "tools/gen_arch_domain.py."
+    )
+
+
+def test_a_processors_field_that_is_not_an_object_is_rejected() -> None:
+    with pytest.raises(ValueError, match=r"has a `processors` list, not a JSON object"):
+        arch_domain.ArchDomain("llvm22", _column_with_processors(["gfx1154"]))
+
+
+def test_a_recorded_processor_answer_is_returned_as_recorded() -> None:
+    """A recorded answer is that boolean; a processor with no entry is None."""
+    table = arch_domain.ArchDomain(
+        "llvm22",
+        _column_with_processors(
+            {"gfx1154": {"accepted": False}, "gfx11-generic": {"accepted": True}}
+        ),
+    )
+    assert table.accepts_processor("gfx1154") is False
+    assert table.accepts_processor("gfx11-generic") is True
+    assert table.accepts_processor("gfx1100") is None
+    assert table.processors() == ("gfx1154", "gfx11-generic")
+
+
 def test_every_committed_column_declares_the_schema_it_is() -> None:
     """The check above is only worth having if the real columns pass it."""
     for flavor in _committed_flavors():
@@ -518,8 +559,8 @@ def _aliased_negative_declare() -> tuple[str, str, tuple[str, ...], str]:
     and every one of them is a measured negative on that arch.
 
     Found from the committed tables rather than named, so the test keeps
-    meaning something when the data moves. At llvm23 the pair is
-    ``mfma.scale.f32.16x16x128.f8f6f4`` / ``mfma.f32.16x16x128.fp8.hero``.
+    meaning something when the data moves. No committed table has an aliased
+    declare today, so the tests that need one skip until one does.
     """
     from rocke.core.lower_llvm import _decls_for_flavor
 
@@ -608,6 +649,13 @@ def test_an_aliased_declare_no_alias_accounts_for_is_a_refusal(
 
 
 BINDINGS = PLATFORM / "cpp" / "bindings"
+# Library families bind from library/cpp/bindings (rocke_library_engine); the
+# same rules hold there. Scanned when the sibling tree is present.
+BINDING_SOURCES = [
+    d
+    for d in (BINDINGS, PLATFORM.parent / "library" / "cpp" / "bindings")
+    if d.is_dir()
+]
 
 
 @_needs_sources
@@ -625,7 +673,8 @@ def test_no_binding_lowers_without_a_diagnostic_buffer() -> None:
     """
     offenders = [
         f"{path.name}:{n}"
-        for path in sorted(BINDINGS.glob("*.cpp"))
+        for bindings in BINDING_SOURCES
+        for path in sorted(bindings.glob("*.cpp"))
         for n, line in enumerate(path.read_text().splitlines(), 1)
         if "rocke_lower_kernel_to_llvm(" in line
     ]
@@ -644,12 +693,13 @@ def test_every_binding_lowering_converts_a_refusal() -> None:
     Two bindings that lowered through a family convenience wrapper, rather than
     calling the lowerer themselves, did exactly that, and the err-less-entry scan
     above could not see them. This one looks at every call whose name ends in
-    ``to_llvm`` and requires a conversion in the same function.
+    ``to_llvm`` and requires a conversion in the same function. Headers are
+    scanned too: the Winograd bindings lower in ``winograd_glue.hpp``.
     """
     call = re.compile(r"rocke_\w*to_llvm\w*\(")
     handled = re.compile(r"take_lowered\(|take_ll\(|throw_if_arch_domain\(")
     offenders = []
-    for path in sorted(BINDINGS.glob("*.cpp")):
+    for path in sorted(p for d in BINDING_SOURCES for p in d.glob("*.[ch]pp")):
         text = path.read_text()
         for m in call.finditer(text):
             end = text.find("\n}\n", m.end())
@@ -658,6 +708,76 @@ def test_every_binding_lowering_converts_a_refusal() -> None:
                 line = text.count("\n", 0, m.start()) + 1
                 offenders.append(f"{path.name}:{line}")
     assert not offenders, f"no refusal conversion after the lowering at {offenders}"
+
+
+@_needs_sources
+@pytest.mark.skipif(not BINDINGS.is_dir(), reason="installed layout omits cpp/")
+def test_every_lowering_helper_converts_a_refusal() -> None:
+    """The scan above trusts ``take_lowered`` / ``take_ll`` by name, so every
+    definition of one must itself hand the status to ``throw_if_arch_domain``.
+
+    ``winograd_glue.hpp`` kept a private ``take_lowered`` that formatted every
+    failure as a ``RuntimeError``, so a Winograd refusal never reached Python as
+    ``ArchDomainError`` while the scan above counted it as converted.
+    """
+    definition = re.compile(r"std::string\s+(take_lowered|take_ll)\s*\(")
+    found = []
+    offenders = []
+    for path in sorted(p for d in BINDING_SOURCES for p in d.glob("*.[ch]pp")):
+        text = path.read_text()
+        for m in definition.finditer(text):
+            end = text.find("\n}\n", m.end())
+            body = text[m.end() : end if end != -1 else len(text)]
+            where = f"{path.name}:{text.count(chr(10), 0, m.start()) + 1}"
+            found.append(where)
+            if "throw_if_arch_domain(" not in body:
+                offenders.append(where)
+    assert found, "no take_lowered / take_ll definition found"
+    assert not offenders, f"helpers that drop the refusal: {offenders}"
+
+
+@_needs_sources
+@pytest.mark.skipif(not BINDINGS.is_dir(), reason="installed layout omits cpp/")
+def test_every_binding_module_registers_the_refusal() -> None:
+    """``throw_if_arch_domain`` throws ``ArchDomainRefusal``; only a module that
+    registers it turns that into ``ArchDomainError`` (a NotImplementedError).
+    Without its own registration a module's refusal becomes ``ArchDomainError``
+    only when ``rocke_engine``'s global translator happens to be loaded in the
+    process, and ``RuntimeError`` otherwise: that import-order dependence is
+    what ``rocke_library_engine`` had for every conv and Winograd refusal once
+    those bindings moved out of ``rocke_engine``."""
+    registered = re.compile(
+        r"register_(?:local_)?exception<ArchDomainRefusal>\(\s*m,\s*"
+        r'"ArchDomainError",\s*PyExc_NotImplementedError\)'
+    )
+    modules = [
+        path
+        for d in BINDING_SOURCES
+        for path in sorted(d.glob("*.cpp"))
+        if "PYBIND11_MODULE(" in path.read_text()
+    ]
+    missing = [
+        str(d) for d in BINDING_SOURCES if not any(p.parent == d for p in modules)
+    ]
+    assert not missing, f"no PYBIND11_MODULE source found in {missing}"
+    offenders = [p.name for p in modules if not registered.search(p.read_text())]
+    assert not offenders, f"modules that never register ArchDomainError: {offenders}"
+
+
+@pytest.mark.parametrize("module", ["rocke_engine", "rocke_library_engine"])
+def test_every_binding_module_raises_a_refusal_as_python_does(module: str) -> None:
+    """The cpp backend's refusal is the same kind of exception as the Python
+    lowerer's: a NotImplementedError, the convention for a kernel the lowerer
+    declines for its target (how hsaco_parity counts a refusal)."""
+    engine = pytest.importorskip(module)
+    refused = getattr(engine, "ArchDomainError", None)
+    assert refused is not None, f"{module} has no ArchDomainError"
+    assert issubclass(refused, NotImplementedError)
+
+
+def test_the_python_refusal_is_a_not_implemented_error() -> None:
+    """The Python lowerer's side of the same convention."""
+    assert issubclass(ArchDomainError, NotImplementedError)
 
 
 def test_the_post_pass_honours_the_off_switch(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -25,19 +25,31 @@ from kernels.conv.direct_variants import (
     DIRECT_DGRAD_PATCH_WMMA,
     DIRECT_DGRAD_SMALLC_WMMA,
     DIRECT_DGRAD_WMMA,
+    DIRECT_DW_FWD_WMMA,
+    DIRECT_FWD_GSTREAM_WMMA,
     DIRECT_FWD_SMALLC_WMMA,
     DIRECT_FWD_SMALLK_WMMA,
+    DIRECT_FWD_TAPOUTER_WMMA,
     DIRECT_FWD_WMMA,
     DIRECT_WAVE_PARAMETRIC,
+    direct_entry_wave_reason,
     direct_mfma_knobs_reason,
     direct_spec_for_problem,
+    direct_spec_takes_target_wave,
 )
 from rocke.core.arch import ArchTarget
 from rocke.runtime.packing import compile_packer
 
 _ARCH = "gfx950"
 # Variants the grid builds only for wave32 targets.
-_WAVE32_ONLY_FWD = {DIRECT_FWD_WMMA, DIRECT_FWD_SMALLC_WMMA, DIRECT_FWD_SMALLK_WMMA}
+_WAVE32_ONLY_FWD = {
+    DIRECT_FWD_WMMA,
+    DIRECT_FWD_SMALLC_WMMA,
+    DIRECT_FWD_SMALLK_WMMA,
+    DIRECT_DW_FWD_WMMA,
+    DIRECT_FWD_GSTREAM_WMMA,
+    DIRECT_FWD_TAPOUTER_WMMA,
+}
 _WAVE32_ONLY = {
     DIRECT_DGRAD_WMMA,
     DIRECT_DGRAD_PATCH_WMMA,
@@ -65,7 +77,14 @@ def _problem(**kw) -> DirectConvProblem:
 # The column-streamed depthwise kernel bounds its output rows against p_Ho
 # instead of streaming them by input row, so it is the one padding-generic
 # forward kernel.
-_PADDING_GENERIC_FWD = {"direct_depthwise_col"}
+# The small-channel MFMA forward kernels (gfx950) bound their windows by the
+# runtime extents and take the stems' / layers' own padding ("valid" stems,
+# 1x7 with column padding).
+_PADDING_GENERIC_FWD = {
+    "direct_depthwise_col",
+    "direct_fwd_smallc_mfma",
+    "direct_fwd_smallk_mfma",
+}
 
 
 def test_forward_entries_only_use_same_padding(jobs):
@@ -88,6 +107,8 @@ def test_forward_entries_only_use_same_padding(jobs):
 
 
 def test_only_the_nongrouped_kernel_is_dilated(jobs):
+    """On gfx950 (``_ARCH``) the non-grouped kernel is the one direct variant
+    with dilated rows; the gfx1250 WMMA variants add their own."""
     dilated = [
         j.identity for j in jobs if j.identity.dilation_h * j.identity.dilation_w > 1
     ]
@@ -157,6 +178,9 @@ def test_every_capability_row_is_built(jobs):
             # No tuning for this arch at all (see the gfx1250 test below).
             assert not any(True for _ in _knob_grid(variant, _ARCH, "fp16"))
             continue
+        if not any(True for _ in _knob_grid(variant, _ARCH, "fp16")):
+            # A wave32-only wgrad variant (see the gfx1250 wgrad tests below).
+            continue
         for c in caps_list:
             assert (variant, c.KH, c.PAD, c.stride, c.cpg, c.kpg) in built, (variant, c)
 
@@ -168,12 +192,21 @@ def test_wave32_only_capability_rows_are_built_on_gfx1250():
         directions=("dgrad",),
     )
     built = {
-        (j.identity.algorithm, j.identity.filter_h, j.identity.pad_h)
+        (
+            j.identity.algorithm,
+            j.identity.filter_h,
+            j.identity.pad_h,
+            j.identity.stride_h,
+            j.identity.cpg,
+            j.identity.kpg,
+        )
         for j in jobs
         if j.identity.algorithm == DIRECT_DGRAD_WMMA
     }
+    # Packed small groups (stride 1 and 2) bake their channel counts.
     for c in dks.DIRECT_CAPABILITIES[DIRECT_DGRAD_WMMA][1]:
-        assert (DIRECT_DGRAD_WMMA, c.KH, c.PAD) in built, c
+        key = (DIRECT_DGRAD_WMMA, c.KH, c.PAD, c.stride, c.cpg, c.kpg)
+        assert key in built, c
 
 
 def test_wave32_only_fwd_capability_rows_are_built_on_gfx1250():
@@ -215,9 +248,10 @@ class _InMemoryEntriesCache(KernelCache):
     metadata file per job is over ten thousand small files, and writing then
     parsing them outlasts the per-test timeout on slow filesystems (Windows
     CI). The tests that build their own cache cover the on-disk layout.
+    ``extra_meta`` is added to every entry's metadata.
     """
 
-    def __init__(self, root, arch, identities):
+    def __init__(self, root, arch, identities, extra_meta=None):
         super().__init__(root, arch)
         key = hashlib.sha256(b"placeholder").hexdigest()
         # The binary's symbol is the first identity's, as when each is put.
@@ -228,6 +262,7 @@ class _InMemoryEntriesCache(KernelCache):
                 "blob": key,
                 "hsaco_bytes": self._blob.stat().st_size,
                 "kernel_name": self.blob_kernel_name(key),
+                **(extra_meta or {}),
             }
             for ident in identities
         }
@@ -453,6 +488,104 @@ def test_windowed_depthwise_dgrad_binary_is_found_by_identity():
     assert any(j.spec_kwargs.get("mfma") for j in cells)
     for job in cells:
         assert dks.direct_job_for_identity(job.identity).identity == job.identity
+
+
+def test_windowed_depthwise_dgrad_wmma_cached_scope(jobs):
+    """gfx1250 caches the Toeplitz form on the wave32 WMMA: 'same'-padded 5x5
+    and 7x7 (9x9 exceeds the wave32 fragment budget), with the taller 28- and
+    32-row tiles on top of the MFMA grid's; the gfx950 MFMA grid keeps its
+    own row tiles. Every WMMA binary is built at wave size 32."""
+    from kernels.conv.direct_aot_jobs import DW_WIN_MFMA_BLOCK_H, DW_WIN_WMMA_BLOCK_H
+
+    wmma = [
+        j
+        for j in dks.enumerate_direct_jobs(
+            arch="gfx1250",
+            target=ArchTarget.from_gfx("gfx1250"),
+            directions=("dgrad",),
+        )
+        if j.identity.algorithm == _WIN and j.spec_kwargs.get("mfma")
+    ]
+    assert {(j.identity.filter_h, j.identity.pad_h) for j in wmma} == {(5, 2), (7, 3)}
+    assert {j.spec_kwargs["block_h"] for j in wmma} == set(
+        DW_WIN_MFMA_BLOCK_H + DW_WIN_WMMA_BLOCK_H
+    )
+    for job in wmma:
+        assert job.identity.wave_size == 32
+        spec = dks.make_spec(
+            _WIN,
+            dks.probe_problem(
+                dks.DirectCaps(**job.caps), dks.DIRECT_DTYPE, _WIN, job.spec_kwargs
+            ),
+            job.spec_kwargs,
+            job.identity.wave_size,
+        )
+        assert spec.wave_size == 32, job.identity.label()
+    mfma = [
+        j for j in jobs if j.identity.algorithm == _WIN and j.spec_kwargs.get("mfma")
+    ]
+    assert {j.spec_kwargs["block_h"] for j in mfma} == set(DW_WIN_MFMA_BLOCK_H)
+
+
+def _windowed_cell_jobs(arch: str, KH: int, PAD: int):
+    """The windowed depthwise dgrad jobs of one 'same'-padded filter cell."""
+    target = ArchTarget.from_gfx(arch)
+    return [
+        job
+        for caps in dks.DIRECT_CAPABILITIES[_WIN][1]
+        if (caps.KH, caps.PAD) == (KH, PAD)
+        for _, job in dks._caps_jobs(
+            arch, target.wave_size, _WIN, "dgrad", caps, dks.DIRECT_DTYPE
+        )[1]
+    ]
+
+
+def test_windowed_toeplitz_build_records_its_wave_size():
+    """The Toeplitz form's spec takes the target's wave size, so its build
+    records it like the wave-parametric variants' (direct_spec_takes_target_wave
+    is the one rule for the spec, the record and the cache guard): 32 for the
+    gfx1250 WMMA binaries, 64 for the gfx950 MFMA ones. The VALU form keeps
+    its logical wave64 spec default and records nothing."""
+    from kernels.conv.direct_aot_jobs import direct_kernel_for_job
+
+    for arch, wave in (("gfx1250", 32), ("gfx950", 64)):
+        jobs = _windowed_cell_jobs(arch, 5, 2)
+        toeplitz = [j for j in jobs if j.spec_kwargs.get("mfma")]
+        valu = [j for j in jobs if not j.spec_kwargs.get("mfma")]
+        assert toeplitz and valu, arch
+        for job in toeplitz[:2] + valu[:2]:
+            assert direct_spec_takes_target_wave(_WIN, job.spec_kwargs) == bool(
+                job.spec_kwargs.get("mfma")
+            )
+            _, meta = direct_kernel_for_job(job, arch, dks.DIRECT_DTYPE)
+            expected = {"spec_wave_size": wave} if job.spec_kwargs.get("mfma") else {}
+            assert meta == expected, job.identity.label()
+
+
+def test_legacy_windowed_wmma_entries_are_not_launched(tmp_path):
+    """The cache guard covers the Toeplitz form too: a gfx1250 entry without
+    the recorded wave size is rejected with a rebuild hint, and an entry that
+    records wave size 32 is offered. The VALU form's entries need no record."""
+    jobs = _windowed_cell_jobs(_WAVE32_ARCH, 5, 2)
+    toeplitz = [j for j in jobs if j.spec_kwargs.get("mfma")]
+    assert toeplitz
+    problem = _problem(H=28, W=28, groups=64, cpg=1, kpg=1, KH=5, KW=5, PAD=2)
+
+    legacy = _wave32_cache(tmp_path / "legacy", toeplitz, None)
+    plans, rejected = dks.direct_plans(legacy, problem, "dgrad", _WAVE32_ARCH)
+    assert plans == []
+    assert rejected and all("--compile-all" in why for _, why in rejected)
+    recorded = _wave32_cache(tmp_path / "recorded", toeplitz, 32)
+    plans, _ = dks.direct_plans(recorded, problem, "dgrad", _WAVE32_ARCH)
+    assert plans and _variants(plans) == {_WIN}
+    for plan in plans:
+        (step,) = plan.steps
+        waves = json.loads(plan.identity.knobs)["block_waves"]
+        assert step.block == (waves * 32, 1, 1), plan.identity.label()
+    assert (
+        direct_entry_wave_reason(_WIN, 32, {"kernel_name": "k"}, {"mfma": False})
+        is None
+    )
 
 
 _4C = "direct_grouped_dgrad_4c"
@@ -954,6 +1087,37 @@ def test_large_batch_is_split_into_launches(cache):
         assert values["A"] == 0x1000 + 4 * in_img
         assert values["A_bytes"] == 4 * in_img
         assert values["p_N"] == 4
+
+
+@pytest.mark.parametrize("dtype", ["fp32", "tf32"])
+def test_large_fp32_batch_views_use_4_byte_elements(tmp_path, dtype):
+    """fp32 / tf32 store 4-byte elements, so the per-chunk windows of the
+    same batch advance twice as far as fp16's and it takes three launches."""
+    jobs = dks.enumerate_direct_jobs(
+        arch=_ARCH,
+        target=ArchTarget.from_gfx(_ARCH),
+        directions=("fwd",),
+        dtype=dtype,
+    )
+    cache = _InMemoryEntriesCache(tmp_path, _ARCH, [j.identity for j in jobs])
+    problem = _problem(N=8, H=768, W=768, groups=1, cpg=256, kpg=128, dtype=dtype)
+    assert dks._batch_chunks(problem) == [3, 3, 2]
+    plans = _nongrouped(dks.direct_plans(cache, problem, "fwd", _ARCH)[0])
+    assert plans
+    in_img = 4 * 768 * 768 * 256
+    out_img = 4 * 768 * 768 * 128
+    for plan in plans:
+        assert [st.views for st in plan.steps] == [
+            ((0, 3 * in_img), None, (0, 3 * out_img)),
+            ((3 * in_img, 3 * in_img), None, (3 * out_img, 3 * out_img)),
+            ((6 * in_img, 2 * in_img), None, (6 * out_img, 2 * out_img)),
+        ]
+        values = dks.launch_values(
+            plan.steps[2], {"x": 0x1000, "w": 0x2000, "y": 0x3000}, {"w": 1 << 20}
+        )
+        assert values["A"] == 0x1000 + 6 * in_img
+        assert values["D_bytes"] == 2 * out_img
+        assert values["p_N"] == 2
 
 
 def test_nongrouped_grid_skips_spilling_tiles(jobs):
@@ -1659,7 +1823,8 @@ def test_run_from_cache_batch_chunks_are_balanced():
     assert (_TENSOR_LIMIT - 1) // per_image == 15
     chunks = _batch_chunks(big, "fwd")
     assert chunks == [11, 10, 10]
-    assert _batch_chunks(big, "wgrad") == [31]
+    # wgrad reduces over N: its chunks accumulate into one dW.
+    assert _batch_chunks(big, "wgrad") == [11, 10, 10]
     assert _batch_chunks(replace(big, N=15), "fwd") == [15]
     assert _batch_chunks(replace(big, N=16), "dgrad") == [8, 8]
     # A prime N past the limit no longer degrades to one image per launch.
@@ -1677,6 +1842,124 @@ def test_run_from_cache_batch_chunks_are_balanced():
         assert (p_i["w"], s_i["w"]) == (ptrs["w"], sizes["w"])
         n0 += n
     assert _chunk_buffers(ptrs, sizes, inputs, "y", [31], 0) == (ptrs, sizes)
+
+
+def test_run_from_cache_wgrad_chunks_accumulate_into_one_dw():
+    """A wgrad problem past the 2 GiB limit runs as batch chunks on slices of
+    dY and X that all add into the whole dW, zeroed once; only the one-step
+    plans that accumulate into dW (no fold, reduce or scratch) are offered."""
+    from types import SimpleNamespace
+
+    _need_benchmark_direct_conv()
+    from benchmarks.common.benchmark_direct_conv import (
+        _accumulates_dw,
+        _chunk_buffers,
+        _wgrad_chunk_plans,
+    )
+
+    per_image = 1 << 27
+    chunks = [11, 10, 10]
+    inputs = {"dy": None, "x": None}
+    ptrs = {"dy": 0x1000_0000_0000, "x": 0x2000_0000_0000, "dw": 0x3000}
+    sizes = {"dy": 31 * per_image, "x": 31 * per_image, "dw": 4096}
+    n0 = 0
+    for i, n in enumerate(chunks):
+        p_i, s_i = _chunk_buffers(ptrs, sizes, inputs, "dw", chunks, i)
+        for name in ("dy", "x"):
+            assert p_i[name] == ptrs[name] + n0 * per_image
+            assert s_i[name] == n * per_image
+        assert (p_i["dw"], s_i["dw"]) == (ptrs["dw"], sizes["dw"])
+        n0 += n
+
+    def plan(label, steps=1, workspaces=None, zeroed=()):
+        return SimpleNamespace(
+            label=label,
+            identity=label,
+            steps=(None,) * steps,
+            workspaces=workspaces or {},
+            zeroed=zeroed,
+        )
+
+    atomic = plan("atomic")
+    two_stage = plan(
+        "two_stage", steps=2, workspaces={"ws_wgrad": 64}, zeroed=("ws_wgrad",)
+    )
+    folded = plan("folded", steps=2, workspaces={"ws": 64})
+    assert _accumulates_dw(atomic)
+    assert not _accumulates_dw(two_stage) and not _accumulates_dw(folded)
+    plans = [atomic, two_stage, folded]
+    per_chunk = {pl.label: [pl] * len(chunks) for pl in plans}
+    kept, rejected = _wgrad_chunk_plans(plans, [], per_chunk, chunks)
+    assert kept == [atomic]
+    assert {r[0] for r in rejected} == {"two_stage", "folded"}
+    assert all("accumulates into dW" in why for _, why in rejected)
+    # One launch: every plan stays.
+    assert _wgrad_chunk_plans(plans, [], per_chunk, [31]) == (plans, [])
+
+
+def test_measure_plans_skips_a_plan_whose_kernargs_do_not_fit(monkeypatch, capsys):
+    """A kernarg past its packed width (a byte extent over 2^31 on an i32
+    field) skips that plan; the sweep goes on with the next one."""
+    import struct
+    from types import SimpleNamespace
+
+    _need_benchmark_direct_conv()
+    from benchmarks.common import benchmark_direct_conv as bdc
+
+    monkeypatch.setattr(dks, "launch_values", lambda st, ptrs, sizes: {"A": 0})
+
+    class Launcher:
+        def __init__(self, fits):
+            self.fits = fits
+
+        def bind(self, values, config):
+            if not self.fits:
+                raise struct.error("'i' format requires -2147483648 <= number")
+            return lambda: None
+
+    class Modules:
+        def launcher(self, *, hsaco_path, kernel_name, signature):
+            return Launcher(kernel_name != "too_big")
+
+    measured = []
+
+    class Stop:
+        def measure(self, run, **kw):
+            measured.append(run)
+            return None
+
+        def report(self, label):
+            pass
+
+    def plan(label, kernel_name):
+        step = SimpleNamespace(
+            hsaco_path=None, kernel_name=kernel_name, signature=None, grid=(1, 1, 1)
+        )
+        step.block = (64, 1, 1)
+        return SimpleNamespace(label=label, steps=(step,), zeroed=())
+
+    plans = [plan("big", "too_big"), plan("fits", "fits")]
+    results, rc = bdc._measure_plans(
+        args=SimpleNamespace(fast_rank=False, warmup=1, iters=1),
+        plans=plans,
+        modules=Modules(),
+        rt=None,
+        ptrs={},
+        sizes={},
+        inputs={},
+        out_name="dw",
+        Out_t=None,
+        ref_out=None,
+        flop=1.0,
+        bytes_xfer=1.0,
+        stop=Stop(),
+        u8=None,
+        chunks=[1],
+        per_chunk={pl.label: [pl] for pl in plans},
+    )
+    assert (results, rc) == ([], 0)
+    assert len(measured) == 1
+    assert "[skip] big: kernarg does not fit" in capsys.readouterr().out
 
 
 def test_run_from_cache_plans_each_chunk_size():
@@ -1769,15 +2052,13 @@ def test_wave32_forward_builds_the_depthwise_kernels_at_its_wave_size(wave32_job
 
 
 def _wave32_cache(tmp_path, jobs, spec_wave_size):
-    """The wave32 jobs with placeholder binaries. ``spec_wave_size`` is the
+    """The wave32 jobs with placeholder binaries, held in memory (thousands
+    of jobs: see :class:`_InMemoryEntriesCache`). ``spec_wave_size`` is the
     wave size the build recorded (``None``: an entry that predates the record)."""
-    c = KernelCache(tmp_path, _WAVE32_ARCH)
-    for job in jobs:
-        meta = {"kernel_name": job.identity.label()}
-        if spec_wave_size is not None:
-            meta["spec_wave_size"] = spec_wave_size
-        c.put(job.identity, b"placeholder", meta)
-    return c
+    extra = {} if spec_wave_size is None else {"spec_wave_size": spec_wave_size}
+    return _InMemoryEntriesCache(
+        tmp_path, _WAVE32_ARCH, [j.identity for j in jobs], extra
+    )
 
 
 def test_wave32_build_records_its_wave_size(wave32_jobs):
@@ -1825,3 +2106,314 @@ def test_wave32_plans_launch_wave32_blocks(tmp_path, wave32_jobs, groups):
         (step,) = plan.steps
         waves = json.loads(plan.identity.knobs)["block_waves"]
         assert step.block == (waves * 32, 1, 1), plan.identity.label()
+
+
+# ---------------------------------------------------------------------------
+# gfx1250 (wave32) wgrad: image-per-block, small-C stems and depthwise, all
+# two-stage (replicated fp32 scratch + a cached reduce helper)
+# ---------------------------------------------------------------------------
+
+_W32 = "gfx1250"
+_W32_WGRAD = (
+    "direct_wgrad",
+    "direct_wgrad_small_c",
+    "direct_depthwise_wgrad",
+)
+
+
+@pytest.fixture(scope="module")
+def w32_jobs():
+    return dks.enumerate_direct_jobs(
+        arch=_W32, target=ArchTarget.from_gfx(_W32), directions=("wgrad",)
+    )
+
+
+@pytest.fixture(scope="module")
+def w32_cache(tmp_path_factory, w32_jobs):
+    """Every gfx1250 wgrad job with a placeholder binary, held in memory (see
+    :class:`_InMemoryEntriesCache`). The tests that take it only read it, so
+    the module shares one."""
+    return _InMemoryEntriesCache(
+        tmp_path_factory.mktemp("w32_cache"), _W32, [j.identity for j in w32_jobs]
+    )
+
+
+def test_w32_wgrad_rows_are_built_with_their_reduce_helpers(w32_jobs):
+    from kernels.conv.direct_variants import DIRECT_WGRAD_REDUCE
+
+    built = {
+        (j.identity.algorithm, j.identity.filter_h, j.identity.pad_h)
+        + (j.identity.stride_h, j.identity.cpg, j.identity.kpg)
+        for j in w32_jobs
+    }
+    for variant in _W32_WGRAD:
+        for c in dks.DIRECT_CAPABILITIES[variant][1]:
+            row = (variant, c.KH, c.PAD, c.stride, c.cpg, c.kpg)
+            if variant == "direct_wgrad" and c.KH > 3:
+                # The image kernel's accumulators and fragments of a 5x5 tap
+                # set already pass its VGPR budget: wave32 serves 3x3 only.
+                assert row not in built, row
+                continue
+            assert row in built, row
+    replicas = {
+        json.loads(j.identity.knobs).get("ws_replicas", 1)
+        for j in w32_jobs
+        if j.identity.algorithm in _W32_WGRAD
+    }
+    helpers = {
+        json.loads(j.identity.knobs)["ws_replicas"]
+        for j in w32_jobs
+        if j.identity.algorithm == DIRECT_WGRAD_REDUCE
+    }
+    assert helpers == replicas - {1}
+    for job in w32_jobs:
+        # Every job reads back off its identity (what --compile-all rebuilds).
+        assert dks.direct_job_for_identity(job.identity) == job
+
+
+def test_grid_caches_variant_matches_the_enumerated_jobs(w32_jobs):
+    """``grid_caches_variant`` (what the depthwise wgrad numeric test gates
+    on) answers exactly what the enumeration builds."""
+    from kernels.conv.direct_aot_jobs import grid_caches_variant
+
+    built = {j.identity.algorithm for j in w32_jobs}
+    for variant in _W32_WGRAD:
+        assert grid_caches_variant(variant, _W32) == (variant in built), variant
+
+
+@pytest.mark.parametrize(
+    "arch, cached",
+    [
+        ("gfx1151", True),
+        ("gfx1201", True),
+        ("gfx1250", True),
+        ("gfx950", False),
+        ("gfx942", False),
+        ("gfx_unknown", False),
+    ],
+)
+def test_grid_caches_depthwise_wgrad_on_the_wave32_targets(arch, cached):
+    from kernels.conv.direct_aot_jobs import grid_caches_variant
+
+    assert grid_caches_variant("direct_depthwise_wgrad", arch) is cached
+
+
+def test_w32_wgrad_grid_skips_the_spilling_16_wave_register_staged_tiles(w32_jobs):
+    """A block of more than 8 waves caps a wave at 256 VGPRs, which the
+    register-staged multi-tile image body needs more than: those direct-epilogue
+    fallbacks would spill, so they are not cached. The TDM-staged fallback of
+    the same tiling fits and is still cached."""
+    from kernels.conv import direct_aot_jobs as A
+
+    image = [
+        json.loads(j.identity.knobs)
+        for j in w32_jobs
+        if j.identity.algorithm == "direct_wgrad"
+        and json.loads(j.identity.knobs).get("image_per_block")
+    ]
+    assert image
+
+    def big_tiled(k):
+        return (
+            k["waves_k"] * k["waves_c"] > A.WGRAD_W32_UNCAPPED_WAVES
+            and k["wave_tiles_k"] * k["wave_tiles_c"] > 1
+        )
+
+    assert not [k for k in image if big_tiled(k) and k["tdm_stages"] == 0]
+    tdm = [k for k in image if big_tiled(k) and k["tdm_stages"]]
+    assert tdm and not any(k["lds_epilogue"] for k in tdm)
+    # The filter is narrow: 8-wave register-staged multi-tile bodies and
+    # 16-wave single-tile ones are still built.
+    assert any(
+        k["waves_k"] * k["waves_c"] == A.WGRAD_W32_UNCAPPED_WAVES
+        and k["wave_tiles_k"] * k["wave_tiles_c"] > 1
+        and k["tdm_stages"] == 0
+        for k in image
+    )
+    assert any(
+        k["waves_k"] * k["waves_c"] > A.WGRAD_W32_UNCAPPED_WAVES
+        and k["wave_tiles_k"] * k["wave_tiles_c"] == 1
+        and k["tdm_stages"] == 0
+        for k in image
+    )
+
+
+@pytest.mark.parametrize(
+    "problem,variant",
+    [
+        (_problem(groups=1, cpg=64, kpg=64), "direct_wgrad"),
+        (_problem(groups=4, cpg=32, kpg=32, PAD=0), "direct_wgrad"),
+        (
+            DirectConvProblem(
+                N=2, H=64, W=64, groups=1, cpg=3, kpg=64, KH=7, KW=7, PAD=3, stride=2
+            ),
+            "direct_wgrad_small_c",
+        ),
+        (
+            DirectConvProblem(
+                N=2, H=32, W=32, groups=96, cpg=1, kpg=1, KH=3, KW=3, PAD=1, stride=2
+            ),
+            "direct_depthwise_wgrad",
+        ),
+    ],
+)
+def test_w32_two_stage_wgrad_plans(w32_cache, problem, variant):
+    """A two-stage kernel writes the zeroed scratch, the reduce helper folds it
+    into dW, and both steps pack against their signatures."""
+    from kernels.conv.direct_variants import direct_wgrad_reduce_dims
+
+    plans, _ = dks.direct_plans(w32_cache, problem, "wgrad", _W32)
+    plans = [p for p in plans if p.identity.algorithm == variant]
+    assert plans
+    wg_m, wg_n, groups = direct_wgrad_reduce_dims(variant, problem)
+    names = ("dy", "x", "dw", "ws_wgrad")
+    ptrs = {n: 0x1000 * (i + 1) for i, n in enumerate(names)}
+    sizes = {n: 1 << 20 for n in names}
+    for plan in plans:
+        replicas = json.loads(plan.identity.knobs).get("ws_replicas", 1)
+        if replicas == 1:
+            (step,) = plan.steps
+            assert step.buffers == ("dy", "x", "dw")
+            continue
+        conv, fold = plan.steps
+        assert conv.buffers == ("dy", "x", "ws_wgrad")
+        assert fold.buffers == ("ws_wgrad", None, "dw")
+        assert plan.zeroed == ("ws_wgrad",)
+        assert plan.workspaces["ws_wgrad"] == 4 * groups * replicas * wg_m * wg_n
+        assert dict(fold.scalars) == {"wg_M": wg_m, "wg_N": wg_n, "groups": groups}
+        for step in plan.steps:
+            compile_packer(step.signature)(dks.launch_values(step, ptrs, sizes))
+            assert all(g > 0 for g in step.grid)
+
+
+def test_w32_depthwise_wgrad_channels_are_runtime(w32_cache):
+    """One depthwise binary serves every channel count its lane width divides."""
+    seen = []
+    for groups in (96, 384, 1536):
+        problem = DirectConvProblem(
+            N=2, H=16, W=16, groups=groups, cpg=1, kpg=1, KH=7, KW=7, PAD=3, stride=1
+        )
+        plans, _ = dks.direct_plans(w32_cache, problem, "wgrad", _W32)
+        seen.append({p.identity for p in plans if "depthwise" in p.identity.algorithm})
+    assert seen[0] and seen[0] == seen[1] == seen[2]
+
+
+def test_w32_small_c_serves_only_its_stems(w32_cache):
+    stem = dict(N=2, H=64, W=64, groups=1, cpg=3, KH=3, KW=3, PAD=1, stride=2)
+    plans, _ = dks.direct_plans(
+        w32_cache, DirectConvProblem(kpg=32, **stem), "wgrad", _W32
+    )
+    assert any(p.identity.algorithm == "direct_wgrad_small_c" for p in plans)
+    # A K the cache has no stem row for (channels are baked).
+    plans, _ = dks.direct_plans(
+        w32_cache, DirectConvProblem(kpg=40, **stem), "wgrad", _W32
+    )
+    assert not any(p.identity.algorithm == "direct_wgrad_small_c" for p in plans)
+
+
+@pytest.mark.parametrize(
+    "cpg, kpg, PAD, stride",
+    [(4, 320, 1, 1), (4, 512, 1, 1), (3, 32, 1, 1), (3, 64, 1, 1), (3, 32, 0, 2)],
+)
+def test_w32_small_c_serves_the_3x3_stems(w32_cache, cpg, kpg, PAD, stride):
+    """The 3x3 stems with 3 and 4 input channels have small-C binaries."""
+    problem = DirectConvProblem(
+        N=2, H=64, W=64, groups=1, cpg=cpg, kpg=kpg, KH=3, KW=3, PAD=PAD, stride=stride
+    )
+    plans, _ = dks.direct_plans(w32_cache, problem, "wgrad", _W32)
+    assert any(p.identity.algorithm == "direct_wgrad_small_c" for p in plans)
+
+
+def test_w32_small_c_16_wave_tile_has_no_uniform_wave(w32_jobs):
+    """The 16-wave vec_x=4 / sub_steps=4 small-C tile is cached with the
+    uniform wave index off (with it on, that binary returns a zero dW)."""
+    knobs = [
+        json.loads(j.identity.knobs)
+        for j in w32_jobs
+        if j.identity.algorithm == "direct_wgrad_small_c"
+    ]
+    tile = [
+        k
+        for k in knobs
+        if (k["waves_k"], k["waves_c"], k["vec_x"], k["sub_steps"]) == (4, 4, 4, 4)
+    ]
+    assert tile
+    assert not any(k["uniform_wave"] for k in tile)
+
+
+@pytest.mark.parametrize("variant", [DIRECT_FWD_WMMA, DIRECT_FWD_SMALLK_WMMA])
+def test_direct_wmma_fwd_rect_and_per_axis_pad_jobs_round_trip(variant):
+    """The 1 x R, rectangular and per-axis-padded WMMA forward rows (the 1x7
+    small-K one too) come back from their identity, name and all, as
+    ``reproduce_kernel`` rebuilds them."""
+    from benchmarks.common.reproduce_kernel import job_and_builder
+    from kernels.conv import direct_aot_jobs as daj
+    from kernels.conv.kernel_identity import KernelIdentity
+
+    arch = "gfx1250"
+    target = ArchTarget.from_gfx(arch)
+    direction, rows = daj.DIRECT_CAPABILITIES[variant]
+    rows = [c for c in rows if c.kw or c.pad_w >= 0]
+    assert rows, variant
+    n = 0
+    for caps in rows:
+        _, cell = daj._caps_jobs(
+            arch, target.wave_size, variant, direction, caps, "fp16"
+        )
+        for _, job in cell:
+            ident = job.identity
+            assert (ident.filter_h, ident.pad_h) != (ident.filter_w, ident.pad_w)
+            label = ident.label()
+            assert KernelIdentity.from_label(label) == ident, label
+            assert daj.direct_job_for_identity(ident) == job
+            assert job_and_builder(KernelIdentity.from_label(label))[0] == job
+            n += 1
+    assert n > 0
+
+
+def test_direct_job_for_identity_still_rejects_per_axis_pad_elsewhere():
+    """Per-axis padding stays rejected for a variant without it."""
+    from kernels.conv import direct_aot_jobs as daj
+
+    ident = daj._identity(
+        _ARCH,
+        64,
+        "direct_grouped",
+        "direct_fwd",
+        daj.DirectCaps(KH=3, PAD=1, stride=1, cpg=16, kpg=16),
+        dict(block_q=16, block_groups=2, double_buffer=True),
+        "fp16",
+    )
+    daj.direct_job_for_identity(ident)
+    with pytest.raises(LookupError):
+        daj.direct_job_for_identity(replace(ident, pad_w=0))
+
+
+def test_per_axis_pad_variants_drive_both_gates():
+    """PER_AXIS_PAD_VARIANTS is the one list of variants with a column
+    padding of their own: every grid row with a non-square filter or a
+    per-axis padding belongs to one of them, the AOT identity lookup reads
+    the same tuple, and the cache selection lets exactly those variants past
+    its one-padding rule."""
+    from kernels.conv import direct_aot_jobs as daj
+    from kernels.conv import direct_variants as dv
+
+    assert daj.PER_AXIS_PAD_VARIANTS is dv.PER_AXIS_PAD_VARIANTS
+    per_axis_rows = {
+        variant
+        for variant, (_, rows) in daj.DIRECT_CAPABILITIES.items()
+        for c in rows
+        if c.kw or c.pad_w >= 0
+    }
+    assert per_axis_rows == set(dv.PER_AXIS_PAD_VARIANTS)
+    problem = _problem(groups=1, cpg=64, kpg=64, pad_w=0)
+    checked = 0
+    for variant, (_, rows) in daj.DIRECT_CAPABILITIES.items():
+        knobs = next(iter(_knob_grid(variant, "gfx1250", "fp16", rows[0])), None)
+        if knobs is None:  # no knob grid on this arch
+            continue
+        _, why = direct_spec_for_problem(variant, problem, knobs, "gfx1250", 32)
+        one_padding = why.startswith("one padding for both axes (only ")
+        assert one_padding == (variant not in dv.PER_AXIS_PAD_VARIANTS), (variant, why)
+        checked += 1
+    assert checked > len(dv.PER_AXIS_PAD_VARIANTS)

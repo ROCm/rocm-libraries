@@ -17,8 +17,11 @@ See ``dsl_docs/architecture/multi_arch_data_layout.md``.
 
 from __future__ import annotations
 
+import copy
 import json
 import re
+import warnings
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum, IntEnum
 from functools import lru_cache
@@ -27,6 +30,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 # Re-export for callers using the original architecture entry point.
 from ..dtypes import normalize_dtype
+from ..llvm_profile import measured_flavor_for_llvm
+from ..storage import MatrixFragmentLayout
+from . import domain as arch_domain
+from .mfma_scale import (
+    eight_bit_matrix_format_pairs,
+    matrix_operand_layout,
+    narrow_matrix_format_pairs,
+)
 
 _DATA_FILE = Path(__file__).parent / "data" / "arch_specs.json"
 
@@ -153,12 +164,101 @@ def _load_doc() -> dict:
         return json.load(fh)
 
 
+def _resolve_row(
+    arches: dict[str, dict], generic_targets: dict[str, tuple[str, ...]], gfx: str
+) -> dict:
+    """The raw row whose facts ``gfx`` uses: its own, or the one it points at.
+
+    A row either holds facts or is a pointer, ``{"facts_of": <generic>}`` plus an
+    optional ``_comment``. Every member of a supported generic target has a row,
+    so rocKE supports it by name; a member whose recorded facts are all its
+    generic's is a pointer, so those facts keep one home: the generic target that
+    ``generic_targets`` lists it under. A pointer must name exactly that generic,
+    and the generic must hold facts itself (one level), so every fact is written
+    once and found in one step.
+    """
+    row = arches[gfx]
+    if "facts_of" not in row:
+        return row
+    source = row["facts_of"]
+    own_facts = sorted(key for key in row if key not in ("facts_of", "_comment"))
+    if own_facts:
+        raise ValueError(
+            f"{_DATA_FILE.name} row {gfx!r} has 'facts_of' and its own facts "
+            f"{own_facts} -- a row either holds facts or names the row that does"
+        )
+    if source not in arches:
+        raise ValueError(
+            f"{_DATA_FILE.name} row {gfx!r} takes its facts from {source!r}, "
+            f"which is not a row"
+        )
+    if "facts_of" in arches[source]:
+        raise ValueError(
+            f"{_DATA_FILE.name} row {gfx!r} takes its facts from {source!r}, "
+            f"which itself takes them from {arches[source]['facts_of']!r} -- "
+            f"reference the row that holds the facts"
+        )
+    listed_under = next(
+        (generic for generic, members in generic_targets.items() if gfx in members),
+        None,
+    )
+    if source != listed_under:
+        where = repr(listed_under) if listed_under else "no generic target"
+        raise ValueError(
+            f"{_DATA_FILE.name} row {gfx!r} takes its facts from {source!r}, "
+            f"but generic_targets lists {gfx!r} under {where} -- a row may take "
+            f"its facts only from the generic target that lists it"
+        )
+    return arches[source]
+
+
 @lru_cache(maxsize=1)
-def _load_specs() -> Dict[str, dict]:
+def _load_pointers() -> dict[str, str]:
+    """Each pointer row's gfx id and the generic target it takes its facts from.
+
+    Every pointer is validated (:func:`_resolve_row`) before it is returned, so
+    this is the one place ``facts_of`` is read: no reader sees a malformed
+    pointer, whichever loader it reaches first.
+    """
     arches = _load_doc()["arches"]
-    for gfx, spec in arches.items():
-        spec["mma"] = _expand_mma_rows(gfx, spec["mma"])
-    return arches
+    generic_targets = _load_generic_targets()
+    pointers: dict[str, str] = {}
+    for gfx, row in arches.items():
+        if "facts_of" in row:
+            _resolve_row(arches, generic_targets, gfx)
+            pointers[gfx] = row["facts_of"]
+    return pointers
+
+
+@lru_cache(maxsize=1)
+def _load_specs() -> dict[str, dict]:
+    """Every arch row by gfx id, resolved: no returned row is a pointer.
+
+    The whole file is validated on first load. Fact rows have their MMA
+    declarations expanded; a pointer row becomes an independent copy of the
+    expanded row it points at (so a caller that edits one target never edits
+    another), keeping its own ``_comment``. The cached JSON document is not
+    modified. Key order follows the file, which the first-hit op_id lookups
+    rely on.
+    """
+    arches = _load_doc()["arches"]
+    pointers = _load_pointers()
+    expanded = {
+        gfx: {**row, "mma": _expand_mma_rows(gfx, row["mma"])}
+        for gfx, row in arches.items()
+        if gfx not in pointers
+    }
+    resolved: dict[str, dict] = {}
+    for gfx, row in arches.items():
+        if gfx in expanded:
+            resolved[gfx] = expanded[gfx]
+            continue
+        facts = copy.deepcopy(expanded[pointers[gfx]])
+        facts.pop("_comment", None)
+        if "_comment" in row:
+            facts["_comment"] = row["_comment"]
+        resolved[gfx] = facts
+    return resolved
 
 
 @lru_cache(maxsize=1)
@@ -201,10 +301,11 @@ class LayoutMap:
     Attributes
     ----------
     role
-        ``"acc"`` (accumulator C/D, coords are ``(row, col)``), ``"a"`` (A
-        operand, coords are ``(row, k)``) or ``"b"`` (B operand, coords are
-        ``(k, col)``), ``"a_scale"`` (``(row, K-group)``), or
-        ``"b_scale"`` (``(K-group, col)``). Scale slots count logical elements,
+        Catalog roles are ``"src0"`` (A, coords ``(row, k)``), ``"src1"``
+        (B, coords ``(k, col)``), ``"src2"`` (accumulator input) and ``"dst"``
+        (result), whose coords are ``(row, col)``. ``"scale_src0"`` and
+        ``"scale_src1"`` use ``(row, K-group)`` and ``(K-group, col)``.
+        Scale slots count logical elements,
         independently of the backend register carrier.
     frag_len
         Number of fragment slots per lane for this role (the per-lane vector
@@ -335,13 +436,97 @@ def _normalize_mma_scales(
 
 
 @dataclass(frozen=True)
+class MmaScaleOperand:
+    """Scale value format and granularity for one matrix source.
+
+    ``dtype`` is one of ``e8m0``, ``e4m3``, or ``e5m3``; ``fp8e4m3`` is an
+    alias for ``e4m3``. It describes the scale values independently of the
+    source dtype and the backend's packed register carrier. ``block_size``
+    is the number of source elements along K sharing one scale value. Only
+    16 and 32 are valid: SCALE and SCALE16 use 32 and 16, respectively.
+    """
+
+    dtype: MmaScaleDType | str
+    block_size: MmaScaleBlockK | int
+    frag_len: int = 0
+    layout: LayoutMap | None = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        try:
+            dtype = MmaScaleDType(self.dtype)
+        except ValueError:
+            raise ValueError("MMA scale dtype must be e8m0, e4m3, or e5m3") from None
+        if type(self.block_size) not in (
+            int,
+            MmaScaleBlockK,
+        ) or self.block_size not in (16, 32):
+            raise ValueError(
+                "MMA scale block_size must be an integer equal to 16 or 32"
+            )
+        object.__setattr__(self, "dtype", dtype)
+        object.__setattr__(self, "block_size", MmaScaleBlockK(self.block_size))
+        if type(self.frag_len) is not int or self.frag_len < 0:
+            raise ValueError(f"invalid scale fragment length: {self.frag_len!r}")
+        if self.layout is not None and (
+            not self.frag_len or self.layout.frag_len != self.frag_len
+        ):
+            raise ValueError("scale layout does not match its fragment metadata")
+
+
+@dataclass(frozen=True)
+class MmaDst:
+    """Metadata for the matrix ``dst`` operand.
+
+    A zero ``frag_len`` leaves the width unspecified; ``IRBuilder.mma`` resolves
+    it from the atom's catalog entry. The selected instruction determines the
+    supported result dtype.
+    """
+
+    dtype: str
+    frag_len: int = 0
+    layout: Optional[LayoutMap] = field(default=None, repr=False, compare=False)
+
+    def require_layout(self, name: str, op: "MmaOp") -> LayoutMap:
+        if self.layout is None:
+            raise NotImplementedError(
+                f"no verified {name!r} layout map for MMA op_id {op.op_id!r} "
+                f"({op.m}x{op.n}x{op.k}); add one to "
+                f"_MMA_FRAGMENT_INFO before consuming it"
+            )
+        return self.layout
+
+
+@dataclass(frozen=True)
+class MmaSrc:
+    """Metadata for one matrix ``src``, with an optional scale operand."""
+
+    dtype: str
+    frag_len: int = 0
+    layout: Optional[LayoutMap] = field(default=None, repr=False, compare=False)
+    scale: Optional[MmaScaleOperand] = None
+
+    def require_layout(self, name: str, op: "MmaOp") -> LayoutMap:
+        if self.layout is None:
+            raise NotImplementedError(
+                f"no verified {name!r} layout map for MMA op_id {op.op_id!r} "
+                f"({op.m}x{op.n}x{op.k}); add one to "
+                f"_MMA_FRAGMENT_INFO before consuming it"
+            )
+        return self.layout
+
+
+@dataclass(frozen=True)
 class MmaOp:
     """A single supported matrix-multiply-accumulate atom on a target.
 
-    ``op_id`` identifies a concrete operand contract. Scaled WMMA IDs extend
-    the target/accumulator/shape/input convention with A/B scale types and a
-    shared K-group size. The backend reads metadata, not the ID spelling.
+    ``op_id`` identifies a concrete operand contract. The backend reads
+    metadata, not the ID spelling; LLVM intrinsic text belongs to the ISA layer.
 
+    ``srcs`` contains ``src0``, ``src1``, and ``src2`` in machine order. The
+    first two are multiplicands, ``src2`` is the accumulator input, and ``dst``
+    is the matrix result.
+    Optional scale operands belong to the source they scale; they are not extra
+    matrix fragments in ``srcs``.
     The ``*_frag_len`` fields and the layout-map accessors describe the
     *physical* register fragmentation of the atom: how many values of each
     operand a single lane holds, and where (in the logical M/N/K tile) each of
@@ -359,67 +544,78 @@ class MmaOp:
     """
 
     family: str  # "mma" | "wmma" | "wmma_scaled"
-    a_dtype: str
-    b_dtype: str
-    c_dtype: str
+    srcs: Tuple[MmaSrc, MmaSrc, MmaSrc]
+    dst: MmaDst
     m: int
     n: int
     k: int
     op_id: str
-    a_frag_len: int = 0
-    b_frag_len: int = 0
-    c_frag_len: int = 0
     wave_size: int = 64
-    # Layout maps are kept off the public field list (repr=False, compare=False)
-    # so two MmaOps with the same shape still compare equal regardless of the
-    # closure identity of their maps.
-    _a_layout: Optional[LayoutMap] = field(default=None, repr=False, compare=False)
-    _b_layout: Optional[LayoutMap] = field(default=None, repr=False, compare=False)
-    _c_layout: Optional[LayoutMap] = field(default=None, repr=False, compare=False)
-
-    # All absent means unscaled. The K-group size applies to both inputs;
-    # scale types describe values, not the backend's packed register carrier.
-    a_scale_dtype: MmaScaleDType | str | None = None
-    b_scale_dtype: MmaScaleDType | str | None = None
-    scale_block_k: MmaScaleBlockK | None = None
-
-    a_scale_frag_len: int = 0
-    b_scale_frag_len: int = 0
-    _a_scale_layout: Optional[LayoutMap] = field(
-        default=None, repr=False, compare=False
-    )
-    _b_scale_layout: Optional[LayoutMap] = field(
-        default=None, repr=False, compare=False
-    )
 
     # ``None`` means natively encoded. See the class docstring; read through
     # :attr:`is_native` when all you need is "does the hardware do this".
     emulation: Optional[MmaEmulation] = None
 
     def __post_init__(self) -> None:
-        a, b, block_k = _normalize_mma_scales(
-            self.a_scale_dtype, self.b_scale_dtype, self.scale_block_k
-        )
-        object.__setattr__(self, "a_scale_dtype", a)
-        object.__setattr__(self, "b_scale_dtype", b)
-        object.__setattr__(self, "scale_block_k", block_k)
-        for role in ("a_scale", "b_scale"):
-            count = getattr(self, f"{role}_frag_len")
-            layout = getattr(self, f"_{role}_layout")
-            if type(count) is not int or count < 0 or (block_k is None and count):
-                raise ValueError(f"invalid {role} fragment length: {count!r}")
-            if layout is not None and (
-                not count
-                or layout.role != role
-                or layout.frag_len != count
-                or layout.wave_size != self.wave_size
-            ):
-                raise ValueError(f"{role} layout does not match its fragment metadata")
+        if len(self.srcs) != 3:
+            raise ValueError(f"MMA op {self.op_id!r} requires exactly 3 matrix sources")
+        for i, src in enumerate(self.srcs):
+            if src.scale is not None and src.scale.layout is not None:
+                layout = src.scale.layout
+                if layout.role != f"scale_src{i}" or layout.wave_size != self.wave_size:
+                    raise ValueError("scale layout does not match its source metadata")
+        if self.family == "wmma_scaled":
+            _normalize_mma_scales(
+                self.a_scale_dtype, self.b_scale_dtype, self.scale_block_k
+            )
 
     @property
     def shape(self) -> Tuple[int, int, int]:
         return (self.m, self.n, self.k)
 
+    def src(self, index: int) -> MmaSrc:
+        if not 0 <= index < len(self.srcs):
+            raise IndexError(f"MMA src index {index} is outside [0, {len(self.srcs)})")
+        return self.srcs[index]
+
+    def src_layout(self, index: int) -> LayoutMap:
+        return self.src(index).require_layout(f"src{index}", self)
+
+    def dst_layout(self) -> LayoutMap:
+        return self.dst.require_layout("dst", self)
+
+    # A/B/C project the three sources, matching the query arguments. Result
+    # consumers use dst explicitly, including when its dtype or maps differ.
+    @property
+    def a_dtype(self) -> str:
+        return self.srcs[0].dtype
+
+    @property
+    def b_dtype(self) -> str:
+        return self.srcs[1].dtype
+
+    @property
+    def c_dtype(self) -> str:
+        return self.srcs[2].dtype
+
+    @property
+    def dst_dtype(self) -> str:
+        """The independent instruction result dtype."""
+        return self.dst.dtype
+
+    @property
+    def a_frag_len(self) -> int:
+        return self.srcs[0].frag_len
+
+    @property
+    def b_frag_len(self) -> int:
+        return self.srcs[1].frag_len
+
+    @property
+    def c_frag_len(self) -> int:
+        return self.srcs[2].frag_len
+
+    # --- physical-layout compatibility accessors -------------------------
     @property
     def is_native(self) -> bool:
         """True when the hardware encodes this atom directly (no expansion)."""
@@ -428,36 +624,69 @@ class MmaOp:
     # --- physical-layout accessors ---------------------------------------
     def a_layout(self) -> LayoutMap:
         """The A-operand ``(row, k)`` lane/slot -> coordinate map."""
-        return self._require_layout(self._a_layout, "a")
+        return self.src_layout(0)
 
     def b_layout(self) -> LayoutMap:
         """The B-operand ``(k, col)`` lane/slot -> coordinate map."""
-        return self._require_layout(self._b_layout, "b")
+        return self.src_layout(1)
 
     def c_layout(self) -> LayoutMap:
-        """The accumulator (C/D) ``(row, col)`` lane/slot -> coordinate map."""
-        return self._require_layout(self._c_layout, "c")
+        """Accumulator input ``(row, col)`` lane/slot -> coordinate map."""
+        return self.src_layout(2)
 
-    def a_scale_layout(self) -> LayoutMap:
-        """A scale ``(row, K-group)`` coordinates for each logical scale slot."""
-        return self._require_layout(self._a_scale_layout, "a_scale")
+    @property
+    def a_scale_dtype(self) -> MmaScaleDType | None:
+        return self.srcs[0].scale.dtype if self.srcs[0].scale else None
 
-    def b_scale_layout(self) -> LayoutMap:
-        """B scale ``(K-group, col)`` coordinates for each logical scale slot."""
-        return self._require_layout(self._b_scale_layout, "b_scale")
+    @property
+    def b_scale_dtype(self) -> MmaScaleDType | None:
+        return self.srcs[1].scale.dtype if self.srcs[1].scale else None
 
-    # Convenience aliases for the accumulator (the most-used map).
-    def acc_layout(self) -> LayoutMap:
-        return self.c_layout()
+    @property
+    def scale_block_k(self) -> MmaScaleBlockK | None:
+        """Shared block size for consumers requiring a complete A/B contract."""
+        a, b = self.srcs[0].scale, self.srcs[1].scale
+        if a is None and b is None:
+            return None
+        if a is None or b is None or a.block_size != b.block_size:
+            raise ValueError("MMA sources do not have a shared scale block size")
+        return a.block_size
 
-    def _require_layout(self, layout: Optional[LayoutMap], role: str) -> LayoutMap:
-        if layout is None:
+    def has_ab_layouts(self) -> bool:
+        """Whether both operand maps are registered, so a kernel can load A and B.
+
+        A catalog row can name an instruction before its lane maps are verified;
+        a validator that admits such an atom hands the builder an op it cannot
+        consume.
+        """
+        return self.srcs[0].layout is not None and self.srcs[1].layout is not None
+
+    @property
+    def a_scale_frag_len(self) -> int:
+        return self.srcs[0].scale.frag_len if self.srcs[0].scale else 0
+
+    @property
+    def b_scale_frag_len(self) -> int:
+        return self.srcs[1].scale.frag_len if self.srcs[1].scale else 0
+
+    def src_scale_layout(self, index: int) -> LayoutMap:
+        scale = self.src(index).scale
+        if scale is None or scale.layout is None:
             raise NotImplementedError(
-                f"no verified {role!r} layout map for MMA op_id {self.op_id!r} "
+                f"no verified 'scale_src{index}' layout map for MMA op_id {self.op_id!r} "
                 f"({self.m}x{self.n}x{self.k}); add one to "
                 f"_MMA_FRAGMENT_INFO before consuming it"
             )
-        return layout
+        return scale.layout
+
+    def a_scale_layout(self) -> LayoutMap:
+        return self.src_scale_layout(0)
+
+    def b_scale_layout(self) -> LayoutMap:
+        return self.src_scale_layout(1)
+
+    def acc_layout(self) -> LayoutMap:
+        return self.src_layout(2)
 
 
 # ---------------------------------------------------------------------------
@@ -475,7 +704,7 @@ class MmaOp:
 # single LayoutMap covers all slots of the fragment.
 
 
-def _mfma_acc_16x16(builder, lane, slot):
+def _mfma_row_col_16x16(builder, lane, slot):
     """MFMA 16x16 accumulator: slot ``i`` -> ``(m_blk*4 + i, lane % 16)``.
 
     Mirrors ``MfmaAtom.lane_to_output`` for the (16, 16) case with
@@ -488,7 +717,7 @@ def _mfma_acc_16x16(builder, lane, slot):
     return row, n_in_atom
 
 
-def _mfma_acc_32x32(builder, lane, slot):
+def _mfma_row_col_32x32(builder, lane, slot):
     """MFMA 32x32 accumulator (``c_per_lane == 16``).
 
     Mirrors ``MfmaAtom.lane_to_output`` for the (32, 32) case:
@@ -506,65 +735,6 @@ def _mfma_acc_32x32(builder, lane, slot):
         builder.const_i32(ri),
     )
     return row, n_in_atom
-
-
-def _mfma_a_16x16(builder, lane, slot):
-    """MFMA 16x16x16 A operand: lane holds row ``lane % 16``, K ``k_blk*4 + slot``.
-
-    Per ``MfmaAtom.f16_16x16x16``: ``m_in_atom = lane % 16``,
-    ``k_blk = lane // 16``, and the lane's ``<4 x half>`` covers
-    ``K = [k_blk*4 : k_blk*4 + 4]``. Returns ``(row, k)``.
-    """
-    c16 = builder.const_i32(16)
-    m_in_atom = builder.mod(lane, c16)
-    k_blk = builder.div(lane, c16)
-    k = builder.add(builder.mul(k_blk, builder.const_i32(4)), builder.const_i32(slot))
-    return m_in_atom, k
-
-
-def _mfma_b_16x16(builder, lane, slot):
-    """MFMA 16x16x16 B operand: lane holds col ``lane % 16``, K ``k_blk*4 + slot``.
-
-    Symmetric to :func:`_mfma_a_16x16`; the B fragment is laid out by column.
-    Returns ``(k, col)``.
-    """
-    c16 = builder.const_i32(16)
-    n_in_atom = builder.mod(lane, c16)
-    k_blk = builder.div(lane, c16)
-    k = builder.add(builder.mul(k_blk, builder.const_i32(4)), builder.const_i32(slot))
-    return k, n_in_atom
-
-
-def _mfma_a_16x16x8_xf32(builder, lane, slot):
-    c = builder.const_i32(16)
-    axis = builder.mod(lane, c)
-    group = builder.div(lane, c)
-    k = builder.add(builder.mul(group, builder.const_i32(2)), builder.const_i32(slot))
-    return axis, k
-
-
-def _mfma_b_16x16x8_xf32(builder, lane, slot):
-    c = builder.const_i32(16)
-    axis = builder.mod(lane, c)
-    group = builder.div(lane, c)
-    k = builder.add(builder.mul(group, builder.const_i32(2)), builder.const_i32(slot))
-    return k, axis
-
-
-def _mfma_a_32x32x4_xf32(builder, lane, slot):
-    c = builder.const_i32(32)
-    axis = builder.mod(lane, c)
-    group = builder.div(lane, c)
-    k = builder.add(builder.mul(group, builder.const_i32(2)), builder.const_i32(slot))
-    return axis, k
-
-
-def _mfma_b_32x32x4_xf32(builder, lane, slot):
-    c = builder.const_i32(32)
-    axis = builder.mod(lane, c)
-    group = builder.div(lane, c)
-    k = builder.add(builder.mul(group, builder.const_i32(2)), builder.const_i32(slot))
-    return k, axis
 
 
 def _mfma_a_16x16x4(builder, lane, slot):
@@ -615,10 +785,10 @@ def _mfma_b_32x32x2_f32(builder, lane, slot):
     return k, n_in_atom
 
 
-def _mfma_acc_16x16x4_f64(builder, lane, slot):
+def _mfma_row_col_16x16x4_f64(builder, lane, slot):
     """MFMA 16x16x4 f64 accumulator: slot ``i`` -> ``(i*4 + lane // 16, lane % 16)``.
 
-    Unlike ``_mfma_acc_16x16``, consecutive slots of a lane are 4 rows apart.
+    Unlike ``_mfma_row_col_16x16``, consecutive slots of a lane are 4 rows apart.
     """
     c16 = builder.const_i32(16)
     n_in_atom = builder.mod(lane, c16)
@@ -641,7 +811,7 @@ def _mfma_b_4x4x4_f64(builder, lane, slot):
     return row, n_in_blk
 
 
-def _mfma_acc_4x4x4_f64(builder, lane, slot):
+def _mfma_row_col_4x4x4_f64(builder, lane, slot):
     """MFMA 4x4x4 f64 accumulator (4 blocks, one scalar per lane).
 
     Blocks are stacked along rows: lane ``16*m + 4*blk + n`` holds
@@ -655,90 +825,46 @@ def _mfma_acc_4x4x4_f64(builder, lane, slot):
     return row, n_in_blk
 
 
-def _mfma_a_32x32x8(builder, lane, slot):
-    """MFMA 32x32x8 A operand: row ``lane % 32``, K ``k_blk*4 + slot``.
+def _mfma_operand_map(rows: int, k_per_lane: int):
+    """The A and B lane maps of a dense MFMA whose A has ``rows`` rows.
 
-    Per ``MfmaAtom.f16_32x32x8``: ``m_in_atom = lane % 32``,
-    ``k_blk = lane // 32`` (0 or 1), lane ``<4 x half>`` covers
-    ``K = [k_blk*4 : k_blk*4 + 4]``. Returns ``(row, k)``.
+    Lane ``l`` holds row ``l % rows`` of A (column ``l % rows`` of B), and its
+    ``k_per_lane`` slots hold the contiguous K run that starts at
+    ``(l // rows) * k_per_lane``::
+
+        16x16x16 i8 (rows 16, k_per_lane 4):
+          lanes  0..15 -> K 0..3     lanes 16..31 -> K 4..7
+          lanes 32..47 -> K 8..11    lanes 48..63 -> K 12..15
+
+    Each lane's K run is one contiguous block: for the K-packed CDNA3 16x16x32
+    f16 atom this packing is hardware-verified to 1e-3, while the flat-concat
+    alternative (``[k_blk*4 : k_blk*4+4] + [k_blk*4+16 : k_blk*4+20]``) validates
+    only to 1e-2. Every f16, bf16, xf32, fp8, bf8 and i8 MFMA uses this map; the
+    f32 and f64 atoms, one element per lane, use :func:`_mfma_a_16x16x4` and
+    :func:`_mfma_a_32x32x2_f32` and their B twins.
+
+    Returns ``(a_map, b_map)``: ``a_map`` gives ``(row, k)``, ``b_map`` gives
+    ``(k, col)``. The C++ twin is ``_mfma_operand_a`` / ``_mfma_operand_b`` in
+    ``cpp/core/arch/data.cpp``.
     """
-    c32 = builder.const_i32(32)
-    m_in_atom = builder.mod(lane, c32)
-    k_blk = builder.div(lane, c32)
-    k = builder.add(builder.mul(k_blk, builder.const_i32(4)), builder.const_i32(slot))
-    return m_in_atom, k
+
+    def a_map(builder, lane, slot):
+        c_rows = builder.const_i32(rows)
+        row = builder.mod(lane, c_rows)
+        k_blk = builder.div(lane, c_rows)
+        k = builder.add(
+            builder.mul(k_blk, builder.const_i32(k_per_lane)), builder.const_i32(slot)
+        )
+        return row, k
+
+    def b_map(builder, lane, slot):
+        col, k = a_map(builder, lane, slot)
+        return k, col
+
+    return a_map, b_map
 
 
-def _mfma_b_32x32x8(builder, lane, slot):
-    """MFMA 32x32x8 B operand: col ``lane % 32``, K ``k_blk*4 + slot``."""
-    c32 = builder.const_i32(32)
-    n_in_atom = builder.mod(lane, c32)
-    k_blk = builder.div(lane, c32)
-    k = builder.add(builder.mul(k_blk, builder.const_i32(4)), builder.const_i32(slot))
-    return k, n_in_atom
-
-
-def _mfma_a_16x16x32(builder, lane, slot):
-    """MFMA 16x16x32 A operand: row ``lane % 16``, K ``k_blk*8 + slot``.
-
-    Per ``MfmaAtom.f16_16x16x32`` (the K-packed CDNA3 atom, hardware-verified to
-    1e-3): ``m_in_atom = lane % 16``, ``k_blk = lane // 16`` (0..3), and the
-    lane's ``<8 x half>`` covers the *contiguous* block
-    ``K = [k_blk*8 : k_blk*8 + 8]``. The flat-concat alternative
-    (``[k_blk*4 : k_blk*4+4] + [k_blk*4+16 : k_blk*4+20]``) compiles and
-    validates only to 1e-2 -- this contiguous packing is the correct one.
-    Returns ``(row, k)``.
-    """
-    c16 = builder.const_i32(16)
-    m_in_atom = builder.mod(lane, c16)
-    k_blk = builder.div(lane, c16)
-    k = builder.add(builder.mul(k_blk, builder.const_i32(8)), builder.const_i32(slot))
-    return m_in_atom, k
-
-
-def _mfma_b_16x16x32(builder, lane, slot):
-    """MFMA 16x16x32 B operand: col ``lane % 16``, K ``k_blk*8 + slot``.
-
-    Symmetric to :func:`_mfma_a_16x16x32` (B laid out by column). Returns
-    ``(k, col)``.
-    """
-    c16 = builder.const_i32(16)
-    n_in_atom = builder.mod(lane, c16)
-    k_blk = builder.div(lane, c16)
-    k = builder.add(builder.mul(k_blk, builder.const_i32(8)), builder.const_i32(slot))
-    return k, n_in_atom
-
-
-def _mfma_a_32x32x16(builder, lane, slot):
-    """MFMA 32x32x16 A operand: row ``lane % 32``, K ``k_blk*8 + slot``.
-
-    The K=16 sibling of :func:`_mfma_a_32x32x8` (per ``MfmaAtom.f16_32x32x16``):
-    ``m_in_atom = lane % 32``, ``k_blk = lane // 32`` (0 or 1), and the lane's
-    ``<8 x half>`` covers the contiguous block ``K = [k_blk*8 : k_blk*8 + 8]`` --
-    the same CDNA3 K-packing rule the verified 16x16x32 atom uses (contiguous,
-    not flat-concat). Returns ``(row, k)``.
-    """
-    c32 = builder.const_i32(32)
-    m_in_atom = builder.mod(lane, c32)
-    k_blk = builder.div(lane, c32)
-    k = builder.add(builder.mul(k_blk, builder.const_i32(8)), builder.const_i32(slot))
-    return m_in_atom, k
-
-
-def _mfma_b_32x32x16(builder, lane, slot):
-    """MFMA 32x32x16 B operand: col ``lane % 32``, K ``k_blk*8 + slot``.
-
-    Symmetric to :func:`_mfma_a_32x32x16` (B laid out by column). Returns
-    ``(k, col)``.
-    """
-    c32 = builder.const_i32(32)
-    n_in_atom = builder.mod(lane, c32)
-    k_blk = builder.div(lane, c32)
-    k = builder.add(builder.mul(k_blk, builder.const_i32(8)), builder.const_i32(slot))
-    return k, n_in_atom
-
-
-def _wmma_acc_16x16(builder, lane, slot):
+def _wmma_row_col_16x16(builder, lane, slot):
     """WMMA 16x16x16 accumulator (wave32, hardware-verified gfx1151).
 
     ``<8 x float>`` per lane; slot ``i`` -> ``(row 2*i + lane // 16,
@@ -774,7 +900,7 @@ def _wmma_b_16x16(builder, lane, slot):
 # fragment: slot j (0..3) is one i32 holding the four int8 K-values
 # [4j, 4j+1, 4j+2, 4j+3]. The lane map therefore returns the K *base* of the
 # slot (4*j); the kernel/staging code packs the four consecutive K bytes from
-# there. The accumulator is identical to f16 WMMA (_wmma_acc_16x16), only the
+# there. The accumulator is identical to f16 WMMA (_wmma_row_col_16x16), only the
 # element type is i32 instead of f32.
 def _wmma_a_16x16_iu8(builder, lane, slot):
     """iu8 WMMA A operand (wave32): lane ``l`` holds row ``l % 16``; A fragment
@@ -818,7 +944,7 @@ def _wmma_b_16x16_iu4(builder, lane, slot):
 # accumulator is column-distributed (CDNA/MFMA-style): lanes index columns,
 # registers index rows. The WMMA attention numeric suite exercises these maps on
 # gfx1200/gfx1201 hardware; examples/gfx1201/wmma_probe.py probes single atoms.
-def _wmma_gfx12_acc_16x16(builder, lane, slot):
+def _wmma_gfx12_row_col_16x16(builder, lane, slot):
     """RDNA4 WMMA 16x16x16 accumulator (wave32): ``<8 x float>`` per lane;
     slot ``i`` -> ``(row (lane // 16) * 8 + i, col lane % 16)``. Returns
     ``(row, col)``."""
@@ -859,25 +985,25 @@ def _wmma_gfx12_b_16x16(builder, lane, slot):
 # column-distributed layout as gfx12 (<8 x float>, slot i -> row (l//16)*8 + i,
 # col l%16), since the output tile is still 16x16. These maps are the
 # *hypothesis* verified empirically by examples/gfx1250/wmma_probe.py.
+# The gfx1250 WMMA 16x16x4 fp32 A and B maps are CK-sourced (wmma_gfx12.hpp
+# parameters); not validated on hardware. Lane l holds row l % 16 of A (column
+# l % 16 of B) and the two K values 2 * (l // 16) + slot, so lanes 0-15 carry K
+# 0..1 and lanes 16-31 carry K 2..3.
 def _wmma_gfx1250_a_16x16x4_f32(builder, lane, slot):
-    """gfx1250 WMMA 16x16x4 fp32 A operand (wave32): kABKLane=2, kAK1PerLane=2.
-    row = lane // 2 (M index 0..15); K = (lane % 2) * 2 + slot (slot ∈ {0,1}).
-    Returns ``(row, k)``."""
-    c2 = builder.const_i32(2)
-    row = builder.div(lane, c2)
-    k_lane = builder.mod(lane, c2)
-    k = builder.add(builder.mul(k_lane, c2), builder.const_i32(slot))
+    """gfx1250 WMMA 16x16x4 fp32 A operand (wave32): row = lane % 16;
+    K = 2 * (lane // 16) + slot (slot in {0, 1}). Returns ``(row, k)``."""
+    c2, c16 = builder.const_i32(2), builder.const_i32(16)
+    row = builder.mod(lane, c16)
+    k = builder.add(builder.mul(builder.div(lane, c16), c2), builder.const_i32(slot))
     return row, k
 
 
 def _wmma_gfx1250_b_16x16x4_f32(builder, lane, slot):
-    """gfx1250 WMMA 16x16x4 fp32 B operand (wave32): kABKLane=2, kAK1PerLane=2.
-    col = lane // 2 (N index 0..15); K = (lane % 2) * 2 + slot (slot ∈ {0,1}).
-    Returns ``(k, col)``."""
-    c2 = builder.const_i32(2)
-    col = builder.div(lane, c2)
-    k_lane = builder.mod(lane, c2)
-    k = builder.add(builder.mul(k_lane, c2), builder.const_i32(slot))
+    """gfx1250 WMMA 16x16x4 fp32 B operand (wave32): col = lane % 16;
+    K = 2 * (lane // 16) + slot (slot in {0, 1}). Returns ``(k, col)``."""
+    c2, c16 = builder.const_i32(2), builder.const_i32(16)
+    col = builder.mod(lane, c16)
+    k = builder.add(builder.mul(builder.div(lane, c16), c2), builder.const_i32(slot))
     return k, col
 
 
@@ -903,6 +1029,71 @@ def _wmma_gfx1250_b_16x16x32(builder, lane, slot):
     return k, col
 
 
+def _wmma_gfx1250_a_16x16x64_f8(builder, lane, slot):
+    """gfx1250 WMMA 16x16x64 fp8/bf8 A operand (wave32): lane ``l`` holds row
+    ``l % 16``; the ``<8 x i32>`` fragment slot ``i`` is the dword covering
+    K=``(l // 16) * 32 + i * 4`` (four low-bit bytes per slot, K-contiguous).
+    Same lane math as the K=32 f16/bf16 map with the per-lane K span doubled
+    from 16 elements to 32. Returns ``(row, k)``."""
+    c16 = builder.const_i32(16)
+    row = builder.mod(lane, c16)
+    k_half = builder.div(lane, c16)
+    k = builder.add(
+        builder.mul(k_half, builder.const_i32(32)), builder.const_i32(slot * 4)
+    )
+    return row, k
+
+
+def _wmma_gfx1250_b_16x16x64_f8(builder, lane, slot):
+    """gfx1250 WMMA 16x16x64 fp8/bf8 B operand (wave32): lane ``l`` holds col
+    ``l % 16``; the ``<8 x i32>`` fragment slot ``i`` is the dword covering
+    K=``(l // 16) * 32 + i * 4`` (four low-bit bytes per slot, K-contiguous).
+    Returns ``(k, col)``."""
+    c16 = builder.const_i32(16)
+    col = builder.mod(lane, c16)
+    k_half = builder.div(lane, c16)
+    k = builder.add(
+        builder.mul(k_half, builder.const_i32(32)), builder.const_i32(slot * 4)
+    )
+    return k, col
+
+
+def _wmma_gfx1250_a_16x16x128_f8(builder, lane, slot):
+    """gfx1250 WMMA 16x16x128 8-bit A operand (wave32): lane ``l`` holds row
+    ``l % 16``; the ``<16 x i32>`` fragment slot ``i`` is the dword covering
+    K=``(l // 16) * 64 + i * 4`` (four bytes per slot, K-contiguous). Same lane
+    math as the K=64 fp8 map with the per-lane K span doubled from 32 bytes to
+    64. Returns ``(row, k)``.
+
+    The K order is the GEMM's, not necessarily the instruction's: A and B share
+    it, and a dot product is the same under any K permutation applied to both,
+    so a GEMM only needs the two maps to agree. Verified that way on gfx1250
+    silicon (random asymmetric integer A/B reproduce ``C = A @ B.T`` exactly in
+    all 256 accumulator cells, which a row/col swap would fail). Do not reuse
+    it where the K order itself matters (mixed formats, block scales)."""
+    c16 = builder.const_i32(16)
+    row = builder.mod(lane, c16)
+    k_half = builder.div(lane, c16)
+    k = builder.add(
+        builder.mul(k_half, builder.const_i32(64)), builder.const_i32(slot * 4)
+    )
+    return row, k
+
+
+def _wmma_gfx1250_b_16x16x128_f8(builder, lane, slot):
+    """gfx1250 WMMA 16x16x128 8-bit B operand (wave32): lane ``l`` holds col
+    ``l % 16``; the ``<16 x i32>`` fragment slot ``i`` is the dword covering
+    K=``(l // 16) * 64 + i * 4`` (four low-bit bytes per slot, K-contiguous).
+    Returns ``(k, col)``."""
+    c16 = builder.const_i32(16)
+    col = builder.mod(lane, c16)
+    k_half = builder.div(lane, c16)
+    k = builder.add(
+        builder.mul(k_half, builder.const_i32(64)), builder.const_i32(slot * 4)
+    )
+    return k, col
+
+
 def _wmma_gfx1250_a_scale(builder, lane, slot):
     row = builder.mod(lane, builder.const_i32(16))
     return row, builder.const_i32(slot)
@@ -913,22 +1104,173 @@ def _wmma_gfx1250_b_scale(builder, lane, slot):
     return builder.const_i32(slot), col
 
 
+def integer_mma_op_ids(op_id: str, bits: int) -> Tuple[str, str, str, str]:
+    """The op_ids of one integer matrix instruction, one per operand signedness.
+
+    The instruction takes the signedness of A and B as flags, so each
+    combination is its own catalog row: ``op_id`` for signed A and B, then
+    ``op_id`` with ``_u<bits>_i<bits>`` (A unsigned), ``_i<bits>_u<bits>`` (B
+    unsigned) and ``_u<bits>_u<bits>`` appended, for example
+    ``wmma_gfx12_i32_16x16x16_iu8_u8_i8``.
+    """
+    return (
+        op_id,
+        f"{op_id}_u{bits}_i{bits}",
+        f"{op_id}_i{bits}_u{bits}",
+        f"{op_id}_u{bits}_u{bits}",
+    )
+
+
+def _f8f6f4_op_ids(op_id: str, pairs) -> dict[str, tuple[str, str]]:
+    """``{op_id + "_<a>_<b>": (a, b)}`` for each (A, B) format pair of ``pairs``."""
+    return {f"{op_id}_{a}_{b}": (a, b) for a, b in pairs}
+
+
+def narrow_f8f6f4_op_ids(op_id: str) -> dict[str, tuple[str, str]]:
+    """The op_ids of one f8f6f4 instruction, one per format pair it owns.
+
+    Each (A, B) pair of
+    :func:`~rocke.core.arch.mfma_scale.narrow_matrix_format_pairs` (a 6-bit or
+    4-bit operand) is its own catalog row: ``op_id`` with ``_<a>_<b>`` appended
+    in canonical dtype names, for example
+    ``wmma_gfx1250_f32_16x16x128_f8f6f4_fp8e4m3_fp4e2m1``. Returns
+    ``{op_id: (a, b)}`` in pair order.
+    """
+    return _f8f6f4_op_ids(op_id, narrow_matrix_format_pairs())
+
+
+# The op_id the gfx950 fp8 x fp8 f8f6f4 MFMA at 16x16x128 had before the
+# catalog listed the instruction's other formats; a hand-written handler lowers
+# it.
+GFX950_FP8_16X16X128_OP_ID = "mfma_f32_16x16x128_fp8"
+
+
+def gfx950_eight_bit_f8f6f4_op_ids(
+    shape: tuple[int, int, int],
+) -> dict[str, tuple[str, str]]:
+    """The op_ids of the gfx950 f8f6f4 MFMA at ``shape`` ``(16, 16, 128)`` or
+    ``(32, 32, 64)`` for each pair of
+    :func:`~rocke.core.arch.mfma_scale.eight_bit_matrix_format_pairs`.
+
+    Each is ``mfma_f32_<M>x<N>x<K>_f8f6f4`` with ``_<a>_<b>`` appended, for
+    example ``mfma_f32_32x32x64_f8f6f4_fp8e4m3_bf8e5m2``, except fp8 x fp8 at
+    16x16x128, which is :data:`GFX950_FP8_16X16X128_OP_ID`. Returns
+    ``{op_id: (a, b)}`` in pair order.
+    """
+    m, n, k = shape
+    return {
+        (
+            GFX950_FP8_16X16X128_OP_ID
+            if (shape, a, b) == ((16, 16, 128), "fp8e4m3", "fp8e4m3")
+            else op_id
+        ): (a, b)
+        for op_id, (a, b) in _f8f6f4_op_ids(
+            f"mfma_f32_{m}x{n}x{k}_f8f6f4", eight_bit_matrix_format_pairs()
+        ).items()
+    }
+
+
+def _lane_map_from_fragment_layout(layout: MatrixFragmentLayout, role: str):
+    """The ``(builder, lane, slot) -> coords`` lane map of ``layout`` for operand
+    ``role`` (``"a"`` or ``"b"``).
+
+    Lane ``l`` slot ``s`` sits at index ``l % lanes_per_group`` (the row of A,
+    the column of B) and K ``(l // lanes_per_group) * chunk_elements + c``,
+    where ``c = (s // chunk_elements) * lane_groups * chunk_elements +
+    s % chunk_elements`` is a constant per slot -- the same coordinates
+    :meth:`MatrixFragmentLayout.coord` gives. A returns ``(row, k)``, B
+    ``(k, col)``. The C++ twin is ``_fragment_layout_a`` / ``_fragment_layout_b``
+    in ``cpp/core/arch/data.cpp``.
+    """
+    if role not in ("a", "b"):
+        raise ValueError(f"a fragment layout maps operand 'a' or 'b', got {role!r}")
+    chunk_elements = layout.chunk_elements
+    run_stride = layout.lane_groups * chunk_elements
+
+    def placement(builder, lane, slot):
+        chunk, element = divmod(slot, chunk_elements)
+        c_lanes = builder.const_i32(layout.lanes_per_group)
+        index = builder.mod(lane, c_lanes)
+        k = builder.add(
+            builder.mul(builder.div(lane, c_lanes), builder.const_i32(chunk_elements)),
+            builder.const_i32(chunk * run_stride + element),
+        )
+        return (index, k) if role == "a" else (k, index)
+
+    return placement
+
+
+def _f8f6f4_operand_maps(a: str, b: str, words: int, lane_groups: int, lanes: int):
+    """The A and B lane maps of an f8f6f4 instruction reading ``a`` x ``b``."""
+    return (
+        _lane_map_from_fragment_layout(
+            matrix_operand_layout(a, words, lane_groups, lanes), "a"
+        ),
+        _lane_map_from_fragment_layout(
+            matrix_operand_layout(b, words, lane_groups, lanes), "b"
+        ),
+    )
+
+
+@dataclass(frozen=True)
+class _FragOperand:
+    """Physical fragment metadata for one machine operand position."""
+
+    frag_len: int
+    fn: _LaneCoordFn = None
+
+
 @dataclass(frozen=True)
 class _FragInfo:
-    """Per-op_id fragment metadata: per-lane vector lengths, wave size, and the
-    (optional) lane/slot coordinate functions for matrices and scales."""
+    """Per-op_id physical metadata for ``srcs[0..2]`` and ``dst``."""
 
-    a_frag_len: int
-    b_frag_len: int
-    c_frag_len: int
+    srcs: Tuple[_FragOperand, _FragOperand, _FragOperand]
+    dst: _FragOperand
     wave_size: int
-    a_fn: _LaneCoordFn = None
-    b_fn: _LaneCoordFn = None
-    c_fn: _LaneCoordFn = None
     a_scale_frag_len: int = 0
     b_scale_frag_len: int = 0
     a_scale_fn: _LaneCoordFn = None
     b_scale_fn: _LaneCoordFn = None
+
+    def __post_init__(self) -> None:
+        if len(self.srcs) != 3:
+            raise ValueError("MMA fragment metadata requires exactly 3 sources")
+
+
+def _shared_src2_dst_frag_info(
+    src0_frag_len: int,
+    src1_frag_len: int,
+    row_col_frag_len: int,
+    wave_size: int,
+    src0_fn: _LaneCoordFn = None,
+    src1_fn: _LaneCoordFn = None,
+    row_col_fn: _LaneCoordFn = None,
+    a_scale_frag_len: int = 0,
+    b_scale_frag_len: int = 0,
+    a_scale_fn: _LaneCoordFn = None,
+    b_scale_fn: _LaneCoordFn = None,
+) -> _FragInfo:
+    """Build metadata whose ``src2`` and ``dst`` layouts currently match.
+
+    ``src2`` and ``dst`` get separate descriptors even when the current ISA
+    gives them the same fragment width and row/column coordinate function.
+    This is a catalog-construction convenience, not a constraint on
+    :class:`_FragInfo`; distinct contracts use that type directly.
+    """
+
+    return _FragInfo(
+        srcs=(
+            _FragOperand(src0_frag_len, src0_fn),
+            _FragOperand(src1_frag_len, src1_fn),
+            _FragOperand(row_col_frag_len, row_col_fn),
+        ),
+        dst=_FragOperand(row_col_frag_len, row_col_fn),
+        wave_size=wave_size,
+        a_scale_frag_len=a_scale_frag_len,
+        b_scale_frag_len=b_scale_frag_len,
+        a_scale_fn=a_scale_fn,
+        b_scale_fn=b_scale_fn,
+    )
 
 
 # op_id -> physical fragment metadata. Frag lengths are populated for every
@@ -936,194 +1278,415 @@ class _FragInfo:
 # layout-map functions are populated for the atoms whose lane math is verified.
 # Adding a new atom is one row here.
 _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
-    "mfma_f32_32x32x4_xf32": _FragInfo(
-        2, 2, 16, 64, _mfma_a_32x32x4_xf32, _mfma_b_32x32x4_xf32, _mfma_acc_32x32
+    "mfma_f32_32x32x4_xf32": _shared_src2_dst_frag_info(
+        2, 2, 16, 64, *_mfma_operand_map(32, 2), _mfma_row_col_32x32
     ),
-    "mfma_f32_16x16x8_xf32": _FragInfo(
-        2, 2, 4, 64, _mfma_a_16x16x8_xf32, _mfma_b_16x16x8_xf32, _mfma_acc_16x16
+    "mfma_f32_16x16x8_xf32": _shared_src2_dst_frag_info(
+        2, 2, 4, 64, *_mfma_operand_map(16, 2), _mfma_row_col_16x16
     ),
     # --- MFMA fp32 (wave64) -----------------------------------------------
     # A/B are scalar float per lane (a_frag_len=b_frag_len=1); accumulator
     # shares the standard 16x16 / 32x32 layout (c_frag_len=4 / 16).
-    "mfma_f32_16x16x4_f32": _FragInfo(
-        1, 1, 4, 64, _mfma_a_16x16x4, _mfma_b_16x16x4, _mfma_acc_16x16
+    "mfma_f32_16x16x4_f32": _shared_src2_dst_frag_info(
+        1, 1, 4, 64, _mfma_a_16x16x4, _mfma_b_16x16x4, _mfma_row_col_16x16
     ),
-    "mfma_f32_32x32x2_f32": _FragInfo(
-        1, 1, 16, 64, _mfma_a_32x32x2_f32, _mfma_b_32x32x2_f32, _mfma_acc_32x32
+    "mfma_f32_32x32x2_f32": _shared_src2_dst_frag_info(
+        1, 1, 16, 64, _mfma_a_32x32x2_f32, _mfma_b_32x32x2_f32, _mfma_row_col_32x32
     ),
     # --- MFMA fp64 (wave64) -----------------------------------------------
     # A/B are scalar double per lane in the same layout as fp32 16x16x4; the
     # accumulator has its own f64 layout (c_frag_len=4).
-    "mfma_f64_16x16x4_f64": _FragInfo(
-        1, 1, 4, 64, _mfma_a_16x16x4, _mfma_b_16x16x4, _mfma_acc_16x16x4_f64
+    "mfma_f64_16x16x4_f64": _shared_src2_dst_frag_info(
+        1, 1, 4, 64, _mfma_a_16x16x4, _mfma_b_16x16x4, _mfma_row_col_16x16x4_f64
     ),
     # 4x4x4 is four independent 4x4x4 blocks stacked along rows (16x4 A, B and
     # C/D). A matches the 16x16x4 A map.
-    "mfma_f64_4x4x4_f64": _FragInfo(
-        1, 1, 1, 64, _mfma_a_16x16x4, _mfma_b_4x4x4_f64, _mfma_acc_4x4x4_f64
+    "mfma_f64_4x4x4_f64": _shared_src2_dst_frag_info(
+        1, 1, 1, 64, _mfma_a_16x16x4, _mfma_b_4x4x4_f64, _mfma_row_col_4x4x4_f64
     ),
     # --- MFMA f16 (wave64) ------------------------------------------------
-    "mfma_f32_16x16x16_f16": _FragInfo(
-        4, 4, 4, 64, _mfma_a_16x16, _mfma_b_16x16, _mfma_acc_16x16
+    "mfma_f32_16x16x16_f16": _shared_src2_dst_frag_info(
+        4, 4, 4, 64, *_mfma_operand_map(16, 4), _mfma_row_col_16x16
     ),
-    "mfma_f32_16x16x32_f16": _FragInfo(
-        8, 8, 4, 64, _mfma_a_16x16x32, _mfma_b_16x16x32, _mfma_acc_16x16
+    "mfma_f32_16x16x32_f16": _shared_src2_dst_frag_info(
+        8, 8, 4, 64, *_mfma_operand_map(16, 8), _mfma_row_col_16x16
     ),
-    "mfma_f32_32x32x8_f16": _FragInfo(
-        4, 4, 16, 64, _mfma_a_32x32x8, _mfma_b_32x32x8, _mfma_acc_32x32
+    "mfma_f32_32x32x8_f16": _shared_src2_dst_frag_info(
+        4, 4, 16, 64, *_mfma_operand_map(32, 4), _mfma_row_col_32x32
     ),
-    "mfma_f32_32x32x16_f16": _FragInfo(
-        8, 8, 16, 64, _mfma_a_32x32x16, _mfma_b_32x32x16, _mfma_acc_32x32
+    "mfma_f32_32x32x16_f16": _shared_src2_dst_frag_info(
+        8, 8, 16, 64, *_mfma_operand_map(32, 8), _mfma_row_col_32x32
     ),
-    "mfma_f32_4x4x4_f16": _FragInfo(4, 4, 4, 64),
-    "mfma_f32_4x4x4_bf16": _FragInfo(4, 4, 4, 64),
+    "mfma_f32_4x4x4_f16": _shared_src2_dst_frag_info(4, 4, 4, 64),
+    "mfma_f32_4x4x4_bf16": _shared_src2_dst_frag_info(4, 4, 4, 64),
     # --- MFMA bf16 (wave64) ----------------------------------------------
-    "mfma_f32_16x16x16_bf16": _FragInfo(
-        4, 4, 4, 64, _mfma_a_16x16, _mfma_b_16x16, _mfma_acc_16x16
+    "mfma_f32_16x16x16_bf16": _shared_src2_dst_frag_info(
+        4, 4, 4, 64, *_mfma_operand_map(16, 4), _mfma_row_col_16x16
     ),
-    "mfma_f32_16x16x32_bf16": _FragInfo(
-        8, 8, 4, 64, _mfma_a_16x16x32, _mfma_b_16x16x32, _mfma_acc_16x16
+    "mfma_f32_16x16x32_bf16": _shared_src2_dst_frag_info(
+        8, 8, 4, 64, *_mfma_operand_map(16, 8), _mfma_row_col_16x16
     ),
-    "mfma_f32_32x32x8_bf16": _FragInfo(
-        4, 4, 16, 64, _mfma_a_32x32x8, _mfma_b_32x32x8, _mfma_acc_32x32
+    "mfma_f32_32x32x8_bf16": _shared_src2_dst_frag_info(
+        4, 4, 16, 64, *_mfma_operand_map(32, 4), _mfma_row_col_32x32
     ),
-    "mfma_f32_32x32x16_bf16": _FragInfo(
-        8, 8, 16, 64, _mfma_a_32x32x16, _mfma_b_32x32x16, _mfma_acc_32x32
+    "mfma_f32_32x32x16_bf16": _shared_src2_dst_frag_info(
+        8, 8, 16, 64, *_mfma_operand_map(32, 8), _mfma_row_col_32x32
     ),
     # --- MFMA fp8 / bf8 (wave64) -----------------------------------------
     # fp8/bf8 share the f16 operand lane layout (a_per_lane=8, same K-packing);
     # only the element type / intrinsic mangling differ.
-    "mfma_f32_16x16x32_fp8": _FragInfo(
-        8, 8, 4, 64, _mfma_a_16x16x32, _mfma_b_16x16x32, _mfma_acc_16x16
+    "mfma_f32_16x16x32_fp8": _shared_src2_dst_frag_info(
+        8, 8, 4, 64, *_mfma_operand_map(16, 8), _mfma_row_col_16x16
     ),
-    "mfma_f32_16x16x32_bf8": _FragInfo(
-        8, 8, 4, 64, _mfma_a_16x16x32, _mfma_b_16x16x32, _mfma_acc_16x16
+    "mfma_f32_16x16x32_bf8": _shared_src2_dst_frag_info(
+        8, 8, 4, 64, *_mfma_operand_map(16, 8), _mfma_row_col_16x16
     ),
-    "mfma_f32_32x32x16_fp8": _FragInfo(
-        8, 8, 16, 64, _mfma_a_32x32x16, _mfma_b_32x32x16, _mfma_acc_32x32
+    "mfma_f32_32x32x16_fp8": _shared_src2_dst_frag_info(
+        8, 8, 16, 64, *_mfma_operand_map(32, 8), _mfma_row_col_32x32
     ),
-    "mfma_f32_32x32x16_bf8": _FragInfo(
-        8, 8, 16, 64, _mfma_a_32x32x16, _mfma_b_32x32x16, _mfma_acc_32x32
+    "mfma_f32_32x32x16_bf8": _shared_src2_dst_frag_info(
+        8, 8, 16, 64, *_mfma_operand_map(32, 8), _mfma_row_col_32x32
     ),
-    # --- MFMA MX (wave64), frag lengths only -----------------------------
-    # Unscaled fp8 K=128 hero atom (lowers through the f8f6f4 scale-MFMA
-    # intrinsic; there is no dense plain fp8 K=128). A/B are 32 fp8 bytes per
-    # lane (<8 x i32> at the intrinsic boundary), accumulator <4 x float> --
-    # same fragment widths as the f8f6f4 sibling below. Registered here so the
-    # op_id resolves to correct fragment lengths (this table is the SSOT that
-    # ir.IRBuilder.mma consults) even before it is added to the JSON catalog,
-    # instead of hitting the zero-length _frag_info fallback.
-    "mfma_f32_16x16x128_fp8": _FragInfo(32, 32, 4, 64),
-    "mfma_f32_16x16x128_fp4fp6fp8": _FragInfo(32, 32, 4, 64),
-    "mfma_scale_f32_16x16x128_f8f6f4": _FragInfo(32, 32, 4, 64),
+    # --- MFMA mixed fp8 x bf8 (wave64) -----------------------------------
+    "mfma_f32_16x16x32_fp8_bf8": _shared_src2_dst_frag_info(
+        8, 8, 4, 64, *_mfma_operand_map(16, 8), _mfma_row_col_16x16
+    ),
+    "mfma_f32_16x16x32_bf8_fp8": _shared_src2_dst_frag_info(
+        8, 8, 4, 64, *_mfma_operand_map(16, 8), _mfma_row_col_16x16
+    ),
+    "mfma_f32_32x32x16_fp8_bf8": _shared_src2_dst_frag_info(
+        8, 8, 16, 64, *_mfma_operand_map(32, 8), _mfma_row_col_32x32
+    ),
+    "mfma_f32_32x32x16_bf8_fp8": _shared_src2_dst_frag_info(
+        8, 8, 16, 64, *_mfma_operand_map(32, 8), _mfma_row_col_32x32
+    ),
+    # --- MFMA bf16 without the _1k suffix (wave64; two bf16 per lane) -----
+    "mfma_f32_16x16x8_bf16": _shared_src2_dst_frag_info(
+        2, 2, 4, 64, *_mfma_operand_map(16, 2), _mfma_row_col_16x16
+    ),
+    "mfma_f32_32x32x4_bf16": _shared_src2_dst_frag_info(
+        2, 2, 16, 64, *_mfma_operand_map(32, 2), _mfma_row_col_32x32
+    ),
+    # --- MFMA i8 -> i32 (wave64) -------------------------------------------
+    "mfma_i32_16x16x16_i8": _shared_src2_dst_frag_info(
+        4, 4, 4, 64, *_mfma_operand_map(16, 4), _mfma_row_col_16x16
+    ),
+    "mfma_i32_32x32x8_i8": _shared_src2_dst_frag_info(
+        4, 4, 16, 64, *_mfma_operand_map(32, 4), _mfma_row_col_32x32
+    ),
+    "mfma_i32_16x16x32_i8": _shared_src2_dst_frag_info(
+        8, 8, 4, 64, *_mfma_operand_map(16, 8), _mfma_row_col_16x16
+    ),
+    "mfma_i32_32x32x16_i8": _shared_src2_dst_frag_info(
+        8, 8, 16, 64, *_mfma_operand_map(32, 8), _mfma_row_col_32x32
+    ),
+    "mfma_i32_16x16x64_i8": _shared_src2_dst_frag_info(
+        16, 16, 4, 64, *_mfma_operand_map(16, 16), _mfma_row_col_16x16
+    ),
+    "mfma_i32_32x32x32_i8": _shared_src2_dst_frag_info(
+        16, 16, 16, 64, *_mfma_operand_map(32, 16), _mfma_row_col_32x32
+    ),
+    # --- K=128 f8f6f4 builder ops (wave64), frag lengths only ---------------
+    # The unscaled all-format op and the MX op have no catalog row: A/B are 32
+    # bytes per lane (<8 x i32> at the intrinsic boundary), accumulator
+    # <4 x float>. Registered here so the op_id resolves to correct fragment
+    # lengths (this table is the SSOT that ir.IRBuilder.mma consults).
+    "mfma_f32_16x16x128_fp4fp6fp8": _shared_src2_dst_frag_info(32, 32, 4, 64),
+    "mfma_scale_f32_16x16x128_f8f6f4": _shared_src2_dst_frag_info(32, 32, 4, 64),
     # --- WMMA f16 / bf16 (wave32, RDNA) ----------------------------------
-    "wmma_f32_16x16x16_f16": _FragInfo(
-        16, 16, 8, 32, _wmma_a_16x16, _wmma_b_16x16, _wmma_acc_16x16
+    "wmma_f32_16x16x16_f16": _shared_src2_dst_frag_info(
+        16, 16, 8, 32, _wmma_a_16x16, _wmma_b_16x16, _wmma_row_col_16x16
     ),
     # bf16 shares the f16 fragment layout (same 16x16x16 lane math; only the
     # element type / intrinsic mangling differ — operands lower as <16 x i16>).
-    "wmma_f32_16x16x16_bf16": _FragInfo(
-        16, 16, 8, 32, _wmma_a_16x16, _wmma_b_16x16, _wmma_acc_16x16
+    "wmma_f32_16x16x16_bf16": _shared_src2_dst_frag_info(
+        16, 16, 8, 32, _wmma_a_16x16, _wmma_b_16x16, _wmma_row_col_16x16
+    ),
+    # --- WMMA f16 -> f16, bf16 -> bf16 (wave32, RDNA3/3.5) ----------------------
+    # A and B as for f16 -> f32. The instruction keeps its eight results per
+    # lane in the even halves of a <16 x half> (<16 x i16>) register; the
+    # catalog row counts the eight logical results, which sit where the f32
+    # accumulator's eight slots do (public matrix instruction calculator, op_sel
+    # 0), so the result takes the f32 accumulator map.
+    "wmma_f16_16x16x16_f16": _shared_src2_dst_frag_info(
+        16, 16, 8, 32, _wmma_a_16x16, _wmma_b_16x16, _wmma_row_col_16x16
+    ),
+    "wmma_bf16_16x16x16_bf16": _shared_src2_dst_frag_info(
+        16, 16, 8, 32, _wmma_a_16x16, _wmma_b_16x16, _wmma_row_col_16x16
     ),
     # --- WMMA iu8 (wave32, RDNA3/3.5) ------------------------------------------
     # A/B fragments are <4 x i32> (16 int8 packed 4-per-i32); accumulator is
     # <8 x i32> with the same lane math as the f16 WMMA accumulator.
-    "wmma_i32_16x16x16_iu8": _FragInfo(
-        4, 4, 8, 32, _wmma_a_16x16_iu8, _wmma_b_16x16_iu8, _wmma_acc_16x16
-    ),
+    # Each signedness combination (integer_mma_op_ids) has the same fragments.
+    **{
+        op_id: _shared_src2_dst_frag_info(
+            4, 4, 8, 32, _wmma_a_16x16_iu8, _wmma_b_16x16_iu8, _wmma_row_col_16x16
+        )
+        for op_id in integer_mma_op_ids("wmma_i32_16x16x16_iu8", 8)
+    },
     # --- WMMA iu4 (wave32, RDNA3/3.5) ------------------------------------------
     # A/B fragments are <2 x i32> (16 int4 packed 8-per-i32); accumulator is
     # <8 x i32> with the same lane math as the f16 WMMA accumulator.
-    "wmma_i32_16x16x16_iu4": _FragInfo(
-        2, 2, 8, 32, _wmma_a_16x16_iu4, _wmma_b_16x16_iu4, _wmma_acc_16x16
-    ),
+    **{
+        op_id: _shared_src2_dst_frag_info(
+            2, 2, 8, 32, _wmma_a_16x16_iu4, _wmma_b_16x16_iu4, _wmma_row_col_16x16
+        )
+        for op_id in integer_mma_op_ids("wmma_i32_16x16x16_iu4", 4)
+    },
     # --- WMMA f16 / bf16 (wave32, RDNA4 / gfx12) -------------------------------
     # No cross-half duplication: A/B are <8 x half> per lane; column-distributed
     # accumulator. Lane maps verified by examples/gfx1201/wmma_probe.py.
-    "wmma_gfx12_f32_16x16x16_f16": _FragInfo(
-        8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_acc_16x16
+    "wmma_gfx12_f32_16x16x16_f16": _shared_src2_dst_frag_info(
+        8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_row_col_16x16
     ),
-    "wmma_gfx12_f32_16x16x16_bf16": _FragInfo(
-        8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_acc_16x16
+    "wmma_gfx12_f32_16x16x16_bf16": _shared_src2_dst_frag_info(
+        8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_row_col_16x16
+    ),
+    # --- WMMA fp8 / bf8 -> f32, i8 -> i32, f16 -> f16, bf16 -> bf16 (gfx12) --
+    # Eight values per lane on the f16 atom's maps: A row lane % 16 with the K
+    # run (lane // 16) * 8 + slot, B the same by column, and the accumulator
+    # (or 16-bit result) slot i at row (lane // 16) * 8 + i. The public matrix
+    # instruction calculator gives these A and B maps exactly for the 8-bit
+    # ops; for the two 16-bit-output ops, as for the f16 atom itself, it orders
+    # K within a lane differently but identically for A and B, which leaves the
+    # product unchanged. The result map is exact for all seven.
+    "wmma_gfx12_f32_16x16x16_fp8_fp8": _shared_src2_dst_frag_info(
+        8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_row_col_16x16
+    ),
+    "wmma_gfx12_f32_16x16x16_fp8_bf8": _shared_src2_dst_frag_info(
+        8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_row_col_16x16
+    ),
+    "wmma_gfx12_f32_16x16x16_bf8_fp8": _shared_src2_dst_frag_info(
+        8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_row_col_16x16
+    ),
+    "wmma_gfx12_f32_16x16x16_bf8_bf8": _shared_src2_dst_frag_info(
+        8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_row_col_16x16
+    ),
+    **{
+        op_id: _shared_src2_dst_frag_info(
+            8,
+            8,
+            8,
+            32,
+            _wmma_gfx12_a_16x16,
+            _wmma_gfx12_b_16x16,
+            _wmma_gfx12_row_col_16x16,
+        )
+        for op_id in integer_mma_op_ids("wmma_gfx12_i32_16x16x16_iu8", 8)
+    },
+    # --- WMMA i4 -> i32 (wave32, gfx12), every signedness combination --------
+    # Eight (K 16) or sixteen (K 32) i4 per lane, packed in one or two words:
+    # lane l holds row l % 16 of A (column l % 16 of B) and the contiguous K
+    # run starting at (l // 16) * 8 or (l // 16) * 16, slots counted in i4
+    # values from the low bits of the first word. The public matrix instruction
+    # calculator gives these maps exactly. The K-32 map is the one the gfx1250
+    # 16x16x32 atoms use; the result map is the gfx12 accumulator's.
+    **{
+        op_id: _shared_src2_dst_frag_info(
+            8,
+            8,
+            8,
+            32,
+            _wmma_gfx12_a_16x16,
+            _wmma_gfx12_b_16x16,
+            _wmma_gfx12_row_col_16x16,
+        )
+        for op_id in integer_mma_op_ids("wmma_gfx12_i32_16x16x16_iu4", 4)
+    },
+    **{
+        op_id: _shared_src2_dst_frag_info(
+            16,
+            16,
+            8,
+            32,
+            _wmma_gfx1250_a_16x16x32,
+            _wmma_gfx1250_b_16x16x32,
+            _wmma_gfx12_row_col_16x16,
+        )
+        for op_id in integer_mma_op_ids("wmma_gfx12_i32_16x16x32_iu4", 4)
+    },
+    "wmma_gfx12_f16_16x16x16_f16": _shared_src2_dst_frag_info(
+        8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_row_col_16x16
+    ),
+    "wmma_gfx12_bf16_16x16x16_bf16": _shared_src2_dst_frag_info(
+        8, 8, 8, 32, _wmma_gfx12_a_16x16, _wmma_gfx12_b_16x16, _wmma_gfx12_row_col_16x16
     ),
     # --- WMMA fp32 (wave32, gfx1250, CDNA) --------------------------------
-    # K=4 atom: A/B are <2 x fp32> per lane (a_frag_len=b_frag_len=2).
-    # kABKLane=2, kAK1PerLane=2: row=lane//2, K=(lane%2)*2+slot (slot ∈ {0,1}).
-    # Accumulator is the gfx12 column-distributed <8 x float> (c_frag_len=8).
-    # Intrinsic: __builtin_amdgcn_wmma_f32_16x16x4_f32 (verified in CK Tile
-    # wmma_gfx12.hpp lines 355-373; amdgcn_mma_base kABKPerLane=2, kCMPerLane=8).
-    "wmma_gfx1250_f32_16x16x4_f32": _FragInfo(
+    # K=4 atom: A/B are <2 x fp32> per lane (a_frag_len=b_frag_len=2): row (or
+    # column) lane % 16, K = 2 * (lane // 16) + slot. CK-sourced
+    # (wmma_gfx12.hpp parameters); not validated on hardware. Accumulator is
+    # the gfx12 column-distributed <8 x float> (c_frag_len=8).
+    "wmma_gfx1250_f32_16x16x4_f32": _shared_src2_dst_frag_info(
         2,
         2,
         8,
         32,
         _wmma_gfx1250_a_16x16x4_f32,
         _wmma_gfx1250_b_16x16x4_f32,
-        _wmma_gfx12_acc_16x16,
+        _wmma_gfx12_row_col_16x16,
     ),
     # --- WMMA f16 / bf16 (wave32, gfx1250, CDNA) ----------------------
     # K=32 atom: A/B are <16 x half> per lane (K split across lane-halves, 16
     # each); accumulator is the same 16x16 column-distributed <8 x float> as
     # gfx12. Lane maps verified by examples/gfx1250/wmma_probe.py.
-    "wmma_gfx1250_f32_16x16x32_f16": _FragInfo(
+    "wmma_gfx1250_f32_16x16x32_f16": _shared_src2_dst_frag_info(
         16,
         16,
         8,
         32,
         _wmma_gfx1250_a_16x16x32,
         _wmma_gfx1250_b_16x16x32,
-        _wmma_gfx12_acc_16x16,
+        _wmma_gfx12_row_col_16x16,
     ),
     # gfx1250 FP8/BF8 K=64 WMMA. A/B carry 32 low-bit bytes per lane presented
     # as <8 x i32>; accumulator is the same 16x16 column-distributed <8 x float>
-    # as the f16/bf16 K=32 atom. The block-scaled GEMM kernel computes operand
-    # offsets directly (no LayoutMap), so only frag lengths + wave size are
-    # registered here; the accumulator map is shared with the f16 path.
-    "wmma_gfx1250_f32_16x16x64_fp8_fp8": _FragInfo(
+    # as the f16/bf16 K=32 atom, so the accumulator map is shared with the f16
+    # path. The A/B maps are slot-granular over the <8 x i32> carrier: slot i is
+    # the dword holding K .. K+3, so a frag_len-slot walk spans 32 K-elements.
+    # The block-scaled GEMM kernel predates these maps and still computes its
+    # operand offsets directly; it is unaffected by their presence.
+    "wmma_gfx1250_f32_16x16x64_fp8_fp8": _shared_src2_dst_frag_info(
         8,
         8,
         8,
         32,
-        None,
-        None,
-        _wmma_gfx12_acc_16x16,
+        _wmma_gfx1250_a_16x16x64_f8,
+        _wmma_gfx1250_b_16x16x64_f8,
+        _wmma_gfx12_row_col_16x16,
     ),
-    "wmma_gfx1250_f32_16x16x64_fp8_bf8": _FragInfo(
+    "wmma_gfx1250_f32_16x16x64_fp8_bf8": _shared_src2_dst_frag_info(
         8,
         8,
         8,
         32,
-        None,
-        None,
-        _wmma_gfx12_acc_16x16,
+        _wmma_gfx1250_a_16x16x64_f8,
+        _wmma_gfx1250_b_16x16x64_f8,
+        _wmma_gfx12_row_col_16x16,
     ),
-    "wmma_gfx1250_f32_16x16x64_bf8_fp8": _FragInfo(
+    "wmma_gfx1250_f32_16x16x64_bf8_fp8": _shared_src2_dst_frag_info(
         8,
         8,
         8,
         32,
-        None,
-        None,
-        _wmma_gfx12_acc_16x16,
+        _wmma_gfx1250_a_16x16x64_f8,
+        _wmma_gfx1250_b_16x16x64_f8,
+        _wmma_gfx12_row_col_16x16,
     ),
-    "wmma_gfx1250_f32_16x16x64_bf8_bf8": _FragInfo(
+    "wmma_gfx1250_f32_16x16x64_bf8_bf8": _shared_src2_dst_frag_info(
         8,
         8,
         8,
         32,
-        None,
-        None,
-        _wmma_gfx12_acc_16x16,
+        _wmma_gfx1250_a_16x16x64_f8,
+        _wmma_gfx1250_b_16x16x64_f8,
+        _wmma_gfx12_row_col_16x16,
     ),
-    "wmma_gfx1250_f32_16x16x32_bf16": _FragInfo(
+    # The same fp8 / bf8 pairs at K 128: 64 values of A and of B per lane,
+    # counted in logical values; the accumulator map as at K 64. No A or B
+    # lane map until one is checked against an independent source.
+    **{
+        f"wmma_gfx1250_f32_16x16x128_{a}_{b}": _shared_src2_dst_frag_info(
+            64, 64, 8, 32, None, None, _wmma_gfx12_row_col_16x16
+        )
+        for a in ("fp8", "bf8")
+        for b in ("fp8", "bf8")
+    },
+    # Except fp8 x fp8, which the gfx1250 fp8 GEMM runs on: it carries the
+    # GEMM's A/B maps (see _wmma_gfx1250_a_16x16x128_f8), so like the K=64 rows
+    # it counts the dword slots of its <16 x i32> carrier, 16 per lane.
+    "wmma_gfx1250_f32_16x16x128_fp8_fp8": _shared_src2_dst_frag_info(
+        16,
+        16,
+        8,
+        32,
+        _wmma_gfx1250_a_16x16x128_f8,
+        _wmma_gfx1250_b_16x16x128_f8,
+        _wmma_gfx12_row_col_16x16,
+    ),
+    "wmma_gfx1250_f32_16x16x32_bf16": _shared_src2_dst_frag_info(
         16,
         16,
         8,
         32,
         _wmma_gfx1250_a_16x16x32,
         _wmma_gfx1250_b_16x16x32,
-        _wmma_gfx12_acc_16x16,
+        _wmma_gfx12_row_col_16x16,
     ),
+    # bf16 x bf16 with an fp32 accumulator and a bf16 result: sixteen A and B
+    # values and eight results per lane. No lane maps until one is checked
+    # against an independent source.
+    "wmma_gfx1250_bf16f32_16x16x32_bf16": _shared_src2_dst_frag_info(16, 16, 8, 32),
+    # 16-bit results, fp8 / bf8 -> f16 and i8 -> i32, counted in logical
+    # elements per lane: sixteen f16 / bf16 values of A and of B (K 32), 32 or
+    # 64 fp8 / bf8 values (K 64 or K 128), 32 i8 values (K 64), and eight
+    # results. No lane maps until one is checked against an independent source.
+    "wmma_gfx1250_f16_16x16x32_f16": _shared_src2_dst_frag_info(16, 16, 8, 32),
+    "wmma_gfx1250_bf16_16x16x32_bf16": _shared_src2_dst_frag_info(16, 16, 8, 32),
+    **{
+        f"wmma_gfx1250_f16_16x16x{k}_{a}_{b}": _shared_src2_dst_frag_info(
+            k // 2, k // 2, 8, 32
+        )
+        for k in (64, 128)
+        for a in ("fp8", "bf8")
+        for b in ("fp8", "bf8")
+    },
+    **{
+        op_id: _shared_src2_dst_frag_info(32, 32, 8, 32)
+        for op_id in integer_mma_op_ids("wmma_gfx1250_i32_16x16x64_iu8", 8)
+    },
+    # --- WMMA f8f6f4 16x16x128 and f4 32x16x128 (wave32, gfx1250) -------------
+    # Each format pair with a 6-bit or 4-bit operand: 64 values of A and of B
+    # per lane in the f8f6f4 operand layout of its own format (16 words, two
+    # groups of 16 lanes; CK's runs), and the gfx12 accumulator, the same as
+    # the scaled f8f6f4 ops'. f4 32x16x128: 128 fp4 values of A and 64 of B per
+    # lane, sixteen results; no lane maps until one is checked against an
+    # independent source.
+    **{
+        op_id: _shared_src2_dst_frag_info(
+            64,
+            64,
+            8,
+            32,
+            *_f8f6f4_operand_maps(a, b, 16, 2, 16),
+            _wmma_gfx12_row_col_16x16,
+        )
+        for op_id, (a, b) in narrow_f8f6f4_op_ids(
+            "wmma_gfx1250_f32_16x16x128_f8f6f4"
+        ).items()
+    },
+    "wmma_gfx1250_f32_32x16x128_f4": _shared_src2_dst_frag_info(128, 64, 16, 32),
+    # --- MFMA f8f6f4 16x16x128 and 32x32x64 (wave64, gfx950) ------------------
+    # Each format pair with a 6-bit or 4-bit operand: 32 values of A and of B
+    # per lane in the f8f6f4 operand layout of its own format (8 words; four
+    # groups of 16 lanes at 16x16x128, two groups of 32 at 32x32x64, as the
+    # public CDNA4 ISA operand tables give), and the f32 accumulator of the
+    # shape.
+    **{
+        op_id: _shared_src2_dst_frag_info(
+            32, 32, 4, 64, *_f8f6f4_operand_maps(a, b, 8, 4, 16), _mfma_row_col_16x16
+        )
+        for op_id, (a, b) in narrow_f8f6f4_op_ids("mfma_f32_16x16x128_f8f6f4").items()
+    },
+    **{
+        op_id: _shared_src2_dst_frag_info(
+            32, 32, 16, 64, *_f8f6f4_operand_maps(a, b, 8, 2, 32), _mfma_row_col_32x32
+        )
+        for op_id, (a, b) in narrow_f8f6f4_op_ids("mfma_f32_32x32x64_f8f6f4").items()
+    },
+    # The same instructions for each 8-bit x 8-bit format pair, fp8 x fp8 at
+    # 16x16x128 under GFX950_FP8_16X16X128_OP_ID.
+    **{
+        op_id: _shared_src2_dst_frag_info(
+            32, 32, 4, 64, *_f8f6f4_operand_maps(a, b, 8, 4, 16), _mfma_row_col_16x16
+        )
+        for op_id, (a, b) in gfx950_eight_bit_f8f6f4_op_ids((16, 16, 128)).items()
+    },
+    **{
+        op_id: _shared_src2_dst_frag_info(
+            32, 32, 16, 64, *_f8f6f4_operand_maps(a, b, 8, 2, 32), _mfma_row_col_32x32
+        )
+        for op_id, (a, b) in gfx950_eight_bit_f8f6f4_op_ids((32, 32, 64)).items()
+    },
 }
 
 
@@ -1133,14 +1696,14 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
 for _row in (row for spec in _load_specs().values() for row in spec["mma"]):
     if _row["family"] == "wmma_scaled":
         _scale_frag_len = 128 // _row["scale_block_k"]
-        _MMA_FRAGMENT_INFO[_row["op_id"]] = _FragInfo(
+        _MMA_FRAGMENT_INFO[_row["op_id"]] = _shared_src2_dst_frag_info(
             16,
             16,
             8,
             32,
             None,
             None,
-            _wmma_gfx12_acc_16x16,
+            _wmma_gfx12_row_col_16x16,
             a_scale_frag_len=_scale_frag_len,
             b_scale_frag_len=_scale_frag_len,
             a_scale_fn=_wmma_gfx1250_a_scale,
@@ -1190,14 +1753,14 @@ def _mfma_scaled_scale_b(builder, lane, slot):
 
 _MMA_FRAGMENT_INFO.update(
     {
-        f"mfma_gfx950_f32_32x32x64_{a}_{b}_scale_e8m0_e8m0_k32": _FragInfo(
+        f"mfma_gfx950_f32_32x32x64_{a}_{b}_scale_e8m0_e8m0_k32": _shared_src2_dst_frag_info(
             32,
             32,
             16,
             64,
             _mfma_scaled_f8_a if a in ("fp8", "bf8") else _mfma_scaled_a,
             _mfma_scaled_f8_b if b in ("fp8", "bf8") else _mfma_scaled_b,
-            _mfma_acc_32x32,
+            _mfma_row_col_32x32,
             1,
             1,
             _mfma_scaled_scale_a,
@@ -1221,7 +1784,7 @@ def _frag_info(op_id: str) -> _FragInfo:
     if info is None:
         # Unknown atoms still load (e.g. a future JSON-only op_id); they carry
         # zero frag lengths and no maps until registered here.
-        return _FragInfo(0, 0, 0, 64)
+        return _shared_src2_dst_frag_info(0, 0, 0, 64)
     return info
 
 
@@ -1287,12 +1850,11 @@ def _prefer_native(ops: List[MmaOp]) -> List[MmaOp]:
 
 
 class MmaCatalog:
-    """The arch-selected MMA atoms, with optional exact A/B scale filtering.
+    """Query indexed matrix operands and an optional complete A/B scale contract.
 
-    ``scales=(a_dtype, b_dtype, block_k)`` selects the complete scale contract.
-    Scale dtypes accept ``MmaScaleDType`` members or their string spellings.
-    ``None`` leaves scales unconstrained; ``(None, None, None)`` selects unscaled
-    atoms. Exact selection and largest-K ties must be unambiguous.
+    ``scales=None`` leaves scaling unconstrained; ``(None, None, None)``
+    selects unscaled sources. Exact selection and largest-K ties must be unique.
+    Legacy A/B/C queries default the destination dtype to the src2 dtype.
     """
 
     def __init__(self, ops: List[MmaOp]) -> None:
@@ -1306,33 +1868,54 @@ class MmaCatalog:
         self,
         *,
         family: str = "mma",
-        a_dtype: str,
-        b_dtype: str,
-        c_dtype: str,
+        src_dtypes: Optional[Tuple[str, str, str]] = None,
+        dst_dtype: Optional[str] = None,
         scales: tuple[str | None, str | None, int | None] | None = None,
+        a_dtype: Optional[str] = None,
+        b_dtype: Optional[str] = None,
+        c_dtype: Optional[str] = None,
         m: Optional[int] = None,
         n: Optional[int] = None,
     ) -> List[MmaOp]:
+        if src_dtypes is None:
+            if a_dtype is None or b_dtype is None or c_dtype is None:
+                raise TypeError("enumerate requires src_dtypes or a/b/c_dtype")
+            src_dtypes = (a_dtype, b_dtype, c_dtype)
         if scales is not None:
             if len(scales) != 3:
                 raise ValueError("scales must contain exactly 3 entries")
             scales = _normalize_mma_scales(*scales)
-        a, b, c = (
-            normalize_dtype(a_dtype),
-            normalize_dtype(b_dtype),
-            normalize_dtype(c_dtype),
-        )
+        if len(src_dtypes) != 3:
+            raise ValueError("src_dtypes must contain exactly 3 entries")
+        src_keys = tuple(normalize_dtype(dtype) for dtype in src_dtypes)
+        for i, legacy in enumerate((a_dtype, b_dtype, c_dtype)):
+            if legacy is not None and normalize_dtype(legacy) != src_keys[i]:
+                raise ValueError("conflicting indexed and legacy matrix dtypes")
+        # Preserve the historical three-dtype query by defaulting dst to src2.
+        # Indexed callers can state a distinct result.
+        dst_key = normalize_dtype(src_dtypes[2] if dst_dtype is None else dst_dtype)
         out = []
         for op in self._ops:
             if op.family != family:
                 continue
-            if (op.a_dtype, op.b_dtype, op.c_dtype) != (a, b, c):
-                continue
             if (
-                scales is not None
-                and (op.a_scale_dtype, op.b_scale_dtype, op.scale_block_k) != scales
+                tuple(src.dtype for src in op.srcs) != src_keys
+                or op.dst.dtype != dst_key
             ):
                 continue
+            if scales is not None:
+                a, b, block_k = scales
+                expected = ((a, block_k), (b, block_k))
+                actual = tuple(
+                    (
+                        (src.scale.dtype, src.scale.block_size)
+                        if src.scale
+                        else (None, None)
+                    )
+                    for src in op.srcs[:2]
+                )
+                if actual != expected:
+                    continue
             if m is not None and op.m != m:
                 continue
             if n is not None and op.n != n:
@@ -1344,9 +1927,11 @@ class MmaCatalog:
         self,
         *,
         family: str = "mma",
-        a_dtype: str,
-        b_dtype: str,
-        c_dtype: str,
+        src_dtypes: tuple[str, str, str] | None = None,
+        a_dtype: str | None = None,
+        b_dtype: str | None = None,
+        c_dtype: str | None = None,
+        dst_dtype: Optional[str] = None,
         scales: tuple[str | None, str | None, int | None] | None = None,
         m: int,
         n: int,
@@ -1356,9 +1941,11 @@ class MmaCatalog:
             op.shape == (m, n, k)
             for op in self.enumerate(
                 family=family,
+                src_dtypes=src_dtypes,
                 a_dtype=a_dtype,
                 b_dtype=b_dtype,
                 c_dtype=c_dtype,
+                dst_dtype=dst_dtype,
                 scales=scales,
                 m=m,
                 n=n,
@@ -1369,9 +1956,11 @@ class MmaCatalog:
         self,
         *,
         family: str = "mma",
-        a_dtype: str,
-        b_dtype: str,
-        c_dtype: str,
+        src_dtypes: tuple[str, str, str] | None = None,
+        a_dtype: str | None = None,
+        b_dtype: str | None = None,
+        c_dtype: str | None = None,
+        dst_dtype: Optional[str] = None,
         scales: tuple[str | None, str | None, int | None] | None = None,
         m: int,
         n: int,
@@ -1381,9 +1970,11 @@ class MmaCatalog:
             op
             for op in self.enumerate(
                 family=family,
+                src_dtypes=src_dtypes,
                 a_dtype=a_dtype,
                 b_dtype=b_dtype,
                 c_dtype=c_dtype,
+                dst_dtype=dst_dtype,
                 scales=scales,
                 m=m,
                 n=n,
@@ -1412,9 +2003,11 @@ class MmaCatalog:
         self,
         *,
         family: str = "mma",
-        a_dtype: str,
-        b_dtype: str,
-        c_dtype: str,
+        src_dtypes: tuple[str, str, str] | None = None,
+        a_dtype: str | None = None,
+        b_dtype: str | None = None,
+        c_dtype: str | None = None,
+        dst_dtype: Optional[str] = None,
         scales: tuple[str | None, str | None, int | None] | None = None,
         m: int,
         n: int,
@@ -1422,9 +2015,11 @@ class MmaCatalog:
     ) -> Optional[MmaOp]:
         candidates = self.enumerate(
             family=family,
+            src_dtypes=src_dtypes,
             a_dtype=a_dtype,
             b_dtype=b_dtype,
             c_dtype=c_dtype,
+            dst_dtype=dst_dtype,
             scales=scales,
             m=m,
             n=n,
@@ -1509,21 +2104,21 @@ class ArchTarget:
 
 
 @lru_cache(maxsize=1)
-def _op_id_c_dtype() -> Dict[str, str]:
-    """``op_id -> normalized accumulator dtype``, aggregated across every arch
+def _op_id_dst_dtype() -> Dict[str, str]:
+    """``op_id -> normalized dst dtype``, aggregated across every arch
     row in the JSON catalog.
 
-    An ``op_id`` names a specific atom, so its accumulator dtype is invariant
+    An ``op_id`` names a specific atom, so its ``dst`` dtype is invariant
     across the arches that list it. This lets a caller that only has a bare
     ``op_id`` string (e.g. :meth:`rocke.core.ir.IRBuilder.mma`) recover the
-    accumulator dtype from the SSOT without holding an :class:`ArchTarget`.
+    ``dst`` dtype from the SSOT without holding an :class:`ArchTarget`.
     Op_ids that are frag-registered but not yet in the JSON catalog are absent
-    (callers should treat a miss as the default f32 accumulator).
+    (callers should treat a miss as the default f32 ``dst``).
 
     The **first** catalog hit for an op_id wins, matching the C implementation
-    (``rocke_arch_mma_op_id_c_dtype`` in ``query.cpp``, which returns the first
+    (``rocke_arch_mma_op_id_dst_dtype`` in ``query.cpp``, which returns the first
     registry hit). If a later arch lists the same op_id with a *different*
-    accumulator dtype we raise instead of silently overwriting: that would be
+    ``dst`` dtype we raise instead of silently overwriting: that would be
     SSOT drift (the invariant above is broken) and must be fixed in the catalog,
     not masked. Raising here also keeps the Python and C engines deterministic
     and byte-identical rather than diverging on catalog ordering.
@@ -1532,16 +2127,17 @@ def _op_id_c_dtype() -> Dict[str, str]:
     for row in _load_specs().values():
         for o in row["mma"]:
             op_id = o["op_id"]
-            c = normalize_dtype(o["c"])
+            _, dst_row = _mma_operand_rows(o)
+            c = normalize_dtype(dst_row["dtype"])
             prev = out.get(op_id)
             if prev is None:
                 out[op_id] = c  # first hit wins
             elif prev != c:
                 raise ValueError(
                     f"arch SSOT drift in {_DATA_FILE.name}: op_id {op_id!r} has "
-                    f"inconsistent accumulator dtype across arches "
+                    f"inconsistent dst dtype across arches "
                     f"({prev!r} vs {c!r}). An op_id names a specific atom, so its "
-                    f"accumulator dtype must be invariant across the arches that "
+                    f"dst dtype must be invariant across the arches that "
                     f"list it; fix the catalog so every row agrees."
                 )
     return out
@@ -1556,7 +2152,7 @@ def _op_id_emulated_tf32_operands() -> Dict[str, Tuple[int, int, int]]:
     borrows from the physical atom it expands into, and the accumulator is
     ``vec<f32xM>``. Read from the catalog rather than restated, so a new emulated
     row needs no verifier edit. Same first-hit and raise-on-drift contract as
-    :func:`_op_id_c_dtype` -- an op_id names a specific atom, so its fragments
+    :func:`_op_id_dst_dtype` -- an op_id names a specific atom, so its fragments
     must be invariant across the arches that list it. Mirrored by
     ``rocke_arch_mma_op_id_emulated_operands`` in ``query.cpp``.
     """
@@ -1566,10 +2162,14 @@ def _op_id_emulated_tf32_operands() -> Dict[str, Tuple[int, int, int]]:
             emulation = o.get("emulation")
             if emulation is None:
                 continue
-            if (normalize_dtype(o["a"]), normalize_dtype(o["b"])) != ("tf32", "tf32"):
+            srcs, _ = _mma_operand_rows(o)
+            if tuple(normalize_dtype(src["dtype"]) for src in srcs[:2]) != (
+                "tf32",
+                "tf32",
+            ):
                 continue
             info = _frag_info(emulation["physical_op_id"])
-            lens = (info.a_frag_len, info.b_frag_len, info.c_frag_len)
+            lens = (info.srcs[0].frag_len, info.srcs[1].frag_len, info.srcs[2].frag_len)
             if not all(lens):
                 # _frag_info answers zeros for an op_id it does not know, and the
                 # verifier would then demand vec<tf32x0>. Refuse here, where the
@@ -1607,7 +2207,7 @@ def _op_id_physical_op_id() -> Dict[str, str]:
     only a logical op_id string (e.g. :meth:`rocke.core.ir.IRBuilder.mma`) needs
     it to size a fragment the emulated atom borrows rather than owns. Natively
     encoded rows contribute nothing. Same first-hit and raise-on-drift contract
-    as :func:`_op_id_c_dtype` — an op_id names a specific atom, so the
+    as :func:`_op_id_dst_dtype` — an op_id names a specific atom, so the
     instruction it expands into must be invariant across the arches listing it.
     Mirrored by ``rocke_arch_mma_op_id_physical_op_id`` in ``query.cpp``.
     """
@@ -1662,6 +2262,61 @@ def _op_id_family() -> Dict[str, str]:
     return out
 
 
+def _mma_operand_rows(o: dict) -> tuple[list[dict], dict]:
+    """Validate duplicate and structural matrix metadata before either reader.
+
+    Legacy JSON C names src2; only an omitted dst defaults to that source.
+    Destination format support is checked separately when IR is built.
+    """
+    op_id = o["op_id"]
+
+    def matrix_row(row: object, role: str) -> dict:
+        if not isinstance(row, dict) or not isinstance(row.get("dtype"), str):
+            raise ValueError(
+                f"MMA catalog op {op_id!r} {role} must define a string dtype"
+            )
+        return dict(row)
+
+    if "srcs" in o:
+        rows = o["srcs"]
+        if not isinstance(rows, (list, tuple)) or len(rows) != 3:
+            raise ValueError(
+                f"MMA catalog op {op_id!r} must define exactly 3 matrix sources"
+            )
+        src_rows = [matrix_row(row, f"src{i}") for i, row in enumerate(rows)]
+        for i, legacy in enumerate(("a", "b", "c")):
+            if legacy in o:
+                legacy_row = matrix_row({"dtype": o[legacy]}, legacy)
+                if normalize_dtype(legacy_row["dtype"]) != normalize_dtype(
+                    src_rows[i]["dtype"]
+                ):
+                    raise ValueError("conflicting indexed and legacy matrix dtypes")
+    else:
+        src_rows = [matrix_row({"dtype": o.get(key)}, key) for key in ("a", "b", "c")]
+    destination = o["dst"] if "dst" in o else src_rows[2]
+    # Published legacy rows may spell a distinct result as a dtype string.
+    if isinstance(destination, str):
+        destination = {"dtype": destination}
+    dst_row = matrix_row(destination, "dst")
+    if "a_scale_dtype" in o or "b_scale_dtype" in o or "scale_block_k" in o:
+        a, b, block_k = _normalize_mma_scales(
+            o.get("a_scale_dtype"), o.get("b_scale_dtype"), o.get("scale_block_k")
+        )
+        src_rows = [dict(row) for row in src_rows]
+        for i, dtype in enumerate((a, b)):
+            legacy_scale = (
+                MmaScaleOperand(dtype, block_k) if dtype is not None else None
+            )
+            if "scale" in src_rows[i]:
+                scale = src_rows[i]["scale"]
+                indexed_scale = MmaScaleOperand(**scale) if scale is not None else None
+                if indexed_scale != legacy_scale:
+                    raise ValueError("conflicting indexed and legacy scale metadata")
+            if legacy_scale is not None:
+                src_rows[i]["scale"] = {"dtype": dtype, "block_size": block_k}
+    return src_rows, dst_row
+
+
 def _build_mma_op(o: dict) -> MmaOp:
     """Construct an :class:`MmaOp` from one catalog JSON row, attaching the
     physical fragment lengths and layout maps registered for its op_id."""
@@ -1678,39 +2333,76 @@ def _build_mma_op(o: dict) -> MmaOp:
             return None
         return LayoutMap(role=role, frag_len=frag_len, wave_size=info.wave_size, fn=fn)
 
-    a_dtype, b_dtype = normalize_dtype(o["a"]), normalize_dtype(o["b"])
-    if emulation is not None and (
-        a_dtype != emulation.recipe.operand_dtype
-        or b_dtype != emulation.recipe.operand_dtype
-    ):
-        raise ValueError(
-            f"MMA emulation recipe {str(emulation.recipe)!r} emulates "
-            f"{emulation.recipe.operand_dtype} operands; row {op_id!r} has "
-            f"{a_dtype}/{b_dtype}"
+    src_rows, dst_row = _mma_operand_rows(o)
+    if emulation is not None:
+        a_dtype, b_dtype = (normalize_dtype(row["dtype"]) for row in src_rows[:2])
+        if (
+            a_dtype != emulation.recipe.operand_dtype
+            or b_dtype != emulation.recipe.operand_dtype
+        ):
+            raise ValueError(
+                f"MMA emulation recipe {str(emulation.recipe)!r} emulates "
+                f"{emulation.recipe.operand_dtype} operands; row {op_id!r} has "
+                f"{a_dtype}/{b_dtype}"
+            )
+
+    def _source(
+        row: dict,
+        role: str,
+        frag_len: int,
+        fn: _LaneCoordFn,
+        scale_len: int = 0,
+        scale_fn: _LaneCoordFn = None,
+    ) -> MmaSrc:
+        scale_row = row.get("scale")
+        scale = (
+            MmaScaleOperand(
+                dtype=scale_row["dtype"],
+                block_size=scale_row["block_size"],
+                frag_len=scale_len,
+                layout=_mk(f"scale_{role}", scale_len, scale_fn),
+            )
+            if scale_row is not None
+            else None
         )
+        return MmaSrc(
+            dtype=normalize_dtype(row["dtype"]),
+            frag_len=frag_len,
+            layout=_mk(role, frag_len, fn),
+            scale=scale,
+        )
+
     return MmaOp(
         family=o["family"],
-        a_dtype=a_dtype,
-        b_dtype=b_dtype,
-        c_dtype=normalize_dtype(o["c"]),
+        srcs=(
+            _source(
+                src_rows[0],
+                "src0",
+                info.srcs[0].frag_len,
+                info.srcs[0].fn,
+                info.a_scale_frag_len,
+                info.a_scale_fn,
+            ),
+            _source(
+                src_rows[1],
+                "src1",
+                info.srcs[1].frag_len,
+                info.srcs[1].fn,
+                info.b_scale_frag_len,
+                info.b_scale_fn,
+            ),
+            _source(src_rows[2], "src2", info.srcs[2].frag_len, info.srcs[2].fn),
+        ),
+        dst=MmaDst(
+            dtype=normalize_dtype(dst_row["dtype"]),
+            frag_len=info.dst.frag_len,
+            layout=_mk("dst", info.dst.frag_len, info.dst.fn),
+        ),
         m=o["m"],
         n=o["n"],
         k=o["k"],
         op_id=op_id,
-        a_frag_len=info.a_frag_len,
-        b_frag_len=info.b_frag_len,
-        c_frag_len=info.c_frag_len,
         wave_size=info.wave_size,
-        _a_layout=_mk("a", info.a_frag_len, info.a_fn),
-        _b_layout=_mk("b", info.b_frag_len, info.b_fn),
-        _c_layout=_mk("c", info.c_frag_len, info.c_fn),
-        a_scale_dtype=o.get("a_scale_dtype"),
-        b_scale_dtype=o.get("b_scale_dtype"),
-        scale_block_k=o.get("scale_block_k"),
-        a_scale_frag_len=info.a_scale_frag_len,
-        b_scale_frag_len=info.b_scale_frag_len,
-        _a_scale_layout=_mk("a_scale", info.a_scale_frag_len, info.a_scale_fn),
-        _b_scale_layout=_mk("b_scale", info.b_scale_frag_len, info.b_scale_fn),
         emulation=emulation,
     )
 
@@ -1825,6 +2517,21 @@ def known_arches() -> Tuple[str, ...]:
     return tuple(sorted(_load_specs()))
 
 
+def arches_with_own_facts() -> tuple[str, ...]:
+    """Every known arch whose ``arch_specs.json`` row holds its own facts, sorted.
+
+    A row that takes its facts from a generic target (``facts_of``) is left out:
+    its target is the generic's under another name, and :func:`listed_arch_for`
+    admits it wherever the generic is listed. Every known arch is therefore
+    either in this tuple or covered by an entry of it, and each distinct set of
+    facts appears once. Declare these as a candidate's arches, or iterate them,
+    when the claim is "every target": iterating :func:`known_arches` instead
+    repeats each generic's work once per member that points at it.
+    """
+    pointers = _load_pointers()
+    return tuple(gfx for gfx in known_arches() if gfx not in pointers)
+
+
 def target_id_from_isa(isa: str) -> str:
     """Extract the target ID from a COMGR ISA name.
 
@@ -1838,15 +2545,74 @@ def target_id_from_isa(isa: str) -> str:
     It also accepts a target ID without the ISA prefix.
 
     The result starts at the last ``gfx`` in the input. If there is no
-    ``gfx``, the input is returned unchanged. This does not validate the name.
+    ``gfx``, the input is returned unchanged. This does not validate the name;
+    :func:`parse_target_id` does.
     """
 
     start = isa.rfind("gfx")
     return isa[start:] if start >= 0 else isa
 
 
-def _processor_from_target_id(target_id: str) -> str:
-    """Extract the processor token before any profile or feature suffix."""
+# The whole of a value parse_target_id accepts: an optional AMDHSA triple with an
+# empty or "unknown" environment field, a processor, then feature suffixes.
+_TARGET_ID = re.compile(
+    r"(?:amdgcn-amd-amdhsa-(?:unknown)?-)?"
+    r"(gfx[0-9a-z]+(?:-[0-9a-z]+)*(?::[0-9a-z_]+[+-])*)"
+)
+
+
+def parse_target_id(value: str) -> str:
+    """Return the target ID that ``value`` names, refusing any other form.
+
+    ``value`` is either an AMDHSA ISA name, as a code object's ``amdhsa.target``
+    note records it, or a bare target ID. All of it must be, in order:
+
+    - optionally the triple ``amdgcn-amd-amdhsa-`` with an empty or ``unknown``
+      environment field and its closing ``-`` (``amdgcn-amd-amdhsa--`` or
+      ``amdgcn-amd-amdhsa-unknown-``; compilers write either);
+    - a processor: ``gfx`` then lower-case letters and digits, with ``-``
+      separated parts for names such as ``gfx11-generic`` or ``gfx9-4-generic``;
+    - zero or more feature suffixes, each ``:`` then a name then ``+`` or ``-``
+      (``:sramecc+:xnack-``).
+
+    Returns the target ID with its feature suffixes, without the triple:
+    ``amdgcn-amd-amdhsa-unknown-gfx942:xnack-`` gives ``gfx942:xnack-``.
+    :func:`processor_from_target_id` then gives the processor.
+
+    Raises ``ValueError`` naming the value for anything else: an empty value, an
+    other environment field (``amdgcn-amd-amdhsa-linux-gfx950``), a processor
+    name in the wrong place (``notgfx950``, ``amdgcn-amd-amdhsa-unknown-:gfx950``)
+    or a feature without its sign (``gfx950:xnack``). Unlike
+    :func:`target_id_from_isa`, it never guesses a processor out of a malformed
+    value. It does not check that rocKE, the compiler or a device supports the
+    target.
+    """
+
+    match = _TARGET_ID.fullmatch(value)
+    if match is None:
+        # The value is quoted by hand, not with !r, so rocke_parse_target_id in
+        # the C++ engine writes the same text byte for byte.
+        raise ValueError(
+            f"'{value}' is not a target ID: expected an optional "
+            "amdgcn-amd-amdhsa-- or amdgcn-amd-amdhsa-unknown- prefix, a processor "
+            "such as gfx942 or gfx11-generic, then any :feature+ or :feature- "
+            "suffixes"
+        )
+    return match.group(1)
+
+
+def processor_from_target_id(target_id: str) -> str:
+    """Return the processor of a target ID, without profile or feature suffixes.
+
+    ``gfx942:sramecc+:xnack-`` gives ``gfx942`` and ``gfx1250-strict`` gives
+    ``gfx1250``; catalog names such as ``gfx11-generic`` stay whole, and a
+    member of a generic target stays itself (``gfx1100`` stays ``gfx1100``;
+    :func:`generic_arch_from_target_id` gives its generic). Any other name is
+    cut to its leading ``gfx`` token of lower-case letters and digits; a name
+    that does not start with ``gfx`` is returned up to its first ``:``. This
+    does not validate the name; validate it first with :func:`parse_target_id`
+    when it comes from outside rocKE.
+    """
 
     target_without_features = target_id.split(":", 1)[0]
     arches = known_arches()
@@ -1872,11 +2638,10 @@ def base_arch_from_target_id(target_id: str) -> str:
     Removes features after ``:`` and profile suffixes such as ``-strict``:
     ``gfx1250-strict`` becomes ``gfx1250`` and ``gfx942:xnack-`` becomes
     ``gfx942``. Names already in :func:`known_arches`, including
-    ``gfx11-generic``, are preserved. A concrete processor in one of LLVM's
-    documented generic compatibility domains (``generic_targets``: gfx1100 ->
-    ``gfx11-generic``, gfx1200 -> ``gfx12-generic``) uses that generic rocKE
-    catalog row unless rocKE has a more-specific row; exact rows such as
-    ``gfx1151`` and ``gfx1201`` therefore take precedence.
+    ``gfx11-generic`` and every member of a catalogued generic target
+    (``gfx1100``, ``gfx1200``), are preserved. A processor in one of LLVM's
+    documented generic compatibility domains (``generic_targets``) that has no
+    row of its own uses that generic rocKE catalog row.
 
     Any other unknown name is reduced to its leading ``gfx`` token when
     possible. This does not check support; :meth:`ArchTarget.from_gfx` requires
@@ -1884,7 +2649,7 @@ def base_arch_from_target_id(target_id: str) -> str:
     """
 
     target_without_features = target_id.split(":", 1)[0]
-    processor = _processor_from_target_id(target_id)
+    processor = processor_from_target_id(target_id)
     if processor in known_arches():
         return processor
     for generic, members in _load_generic_targets().items():
@@ -1897,7 +2662,7 @@ def base_arch_from_target_id(target_id: str) -> str:
 
 
 def compiler_target_from_target_id(target_id: str) -> str:
-    """Derive the target name that the compile helpers pass to COMGR or hipcc.
+    """Derive the compiler target name for ``target_id``.
 
     Removes profile suffixes such as ``-strict`` from the processor token, but
     keeps features after ``:``. Catalog selection remains independent, so a
@@ -1905,17 +2670,86 @@ def compiler_target_from_target_id(target_id: str) -> str:
     rocKE catalog row. For example, ``gfx1250-strict`` becomes ``gfx1250``,
     while ``gfx942:sramecc+:xnack-`` stays unchanged.
 
-    This only converts the string. COMGR or hipcc checks whether the target
-    and its features are supported when compilation runs.
+    This only converts the string. :func:`compiler_target_for_flavor` decides
+    which name a given compiler is passed.
     """
 
     target_without_features, separator, features = target_id.partition(":")
-    processor = _processor_from_target_id(target_id)
+    processor = processor_from_target_id(target_id)
     if target_without_features.startswith(f"{processor}-"):
         target_without_features = processor
     if separator:
         return f"{target_without_features}:{features}"
     return target_without_features
+
+
+def compiler_target_for_flavor(target_id: str, *, llvm_flavor: str) -> str:
+    """The compiler target to pass to the ``llvm_flavor`` compiler for ``target_id``.
+
+    Starts from :func:`compiler_target_from_target_id` (profile removed,
+    features kept) and checks its processor against what the ``llvm_flavor``
+    compiler was measured to accept (``processors`` in that flavor's
+    arch-domain column):
+
+    * accepted, or never measured (no committed column, or a name with no
+      ``arch_specs.json`` row): the processor itself, and the compiler has the
+      last word;
+    * not accepted, and its row points at a generic target (``facts_of``) the
+      compiler accepts: that generic target, whose code objects load on the
+      processor, with a ``UserWarning`` that says so (Python's default warning
+      filter shows it once per process for each processor and flavor);
+    * not accepted otherwise: ``ValueError``.
+
+    Features after ``:`` are kept either way. Catalog selection is independent
+    of this name: the processor lowers through its own row whichever name it is
+    compiled for. Pass the flavor of the compiler that actually runs.
+    """
+    processor, separator, features = compiler_target_from_target_id(
+        target_id
+    ).partition(":")
+    name = _processor_the_compiler_accepts(processor, llvm_flavor)
+    return f"{name}{separator}{features}"
+
+
+def compiler_target_for_llvm_major(target_id: str, llvm_major: int | None) -> str:
+    """The compiler target to pass to the LLVM ``llvm_major`` compiler for ``target_id``.
+
+    Pass the major of the compiler that will run (the one COMGR loads, or
+    hipcc's clang), never an emission override such as ``ROCKE_LLVM_FLAVOR``.
+    A major in a qualified lane routes through that lane's measured processor
+    answers (:func:`compiler_target_for_flavor`). A major newer than every
+    lane, or ``None`` for a compiler whose version is unknown, was never
+    measured: the processor keeps its name
+    (:func:`compiler_target_from_target_id`), and whether that compiler takes
+    it is left to the compiler.
+    """
+    flavor = None if llvm_major is None else measured_flavor_for_llvm(llvm_major)
+    if flavor is None:
+        return compiler_target_from_target_id(target_id)
+    return compiler_target_for_flavor(target_id, llvm_flavor=flavor)
+
+
+def _processor_the_compiler_accepts(processor: str, llvm_flavor: str) -> str:
+    """``processor``, or the generic target to compile it as (see
+    :func:`compiler_target_for_flavor`)."""
+    column = arch_domain.load(llvm_flavor)
+    if column is None or column.accepts_processor(processor) is not False:
+        return processor
+    generic = _load_pointers().get(processor)
+    if generic is not None and column.accepts_processor(generic) is not False:
+        warnings.warn(
+            f"the {llvm_flavor} compiler does not accept the processor "
+            f"{processor!r}; compiling for {generic!r} instead, the generic "
+            f"target its arch_specs.json row points at, whose code objects load "
+            f"on {processor!r}",
+            stacklevel=3,
+        )
+        return generic
+    raise ValueError(
+        f"the {llvm_flavor} compiler does not accept the processor {processor!r}, "
+        f"and its arch_specs.json row points at no generic target that compiler "
+        f"accepts -- compile with an LLVM flavor whose compiler accepts {processor!r}"
+    )
 
 
 def generic_arch_from_target_id(target_id: str) -> Optional[str]:
@@ -1936,6 +2770,26 @@ def generic_arch_from_target_id(target_id: str) -> Optional[str]:
         if base_arch == generic or base_arch in members:
             return generic
     return None
+
+
+def listed_arch_for(arch: str, listed: Iterable[str]) -> Optional[str]:
+    """The entry of ``listed`` that covers ``arch``, or ``None`` when none does.
+
+    That is ``arch`` itself when it is listed, else the generic target its
+    ``arch_specs.json`` row points at (``facts_of``) when that is listed. A list
+    that names ``gfx11-generic`` therefore covers every gfx11 processor whose row
+    points there, and a processor the list names still matches itself first.
+    A row that holds its own facts, and a name with no row, match only
+    themselves.
+
+    Use the returned entry, not ``arch``, to look up anything the list's owner
+    keyed by its entries (a per-target table, a candidate name).
+    """
+    entries = tuple(listed)
+    if arch in entries:
+        return arch
+    generic = _load_pointers().get(arch)
+    return generic if generic in entries else None
 
 
 def arch_from_isa(isa: str) -> str:

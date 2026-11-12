@@ -10,6 +10,7 @@
 #include <string>
 
 #include "harness/Benchmark.hpp"
+#include "harness/Capture.hpp"
 #include "harness/TestConfig.hpp"
 
 namespace hipdnn_integration_tests::bundle
@@ -124,6 +125,10 @@ struct HarnessPolicy
     /// the rung is chosen, so a broken claim still fails, and a claim is never
     /// confirmed by a run that verified nothing.
     bool skipGraphValidation = false;
+    /// --write-support-claims: an authoring run, which observes every graph and writes
+    /// claims instead of verifying anything. Read here, like the other run-wide bits,
+    /// so a test can drive an authoring run without the TestConfig singleton.
+    bool writeSupportClaims = false;
 
     TensorPlacement placement = TensorPlacement::DEVICE;
 
@@ -135,6 +140,12 @@ struct HarnessPolicy
 
     /// Set by --benchmark: time each verified graph with these settings.
     std::optional<BenchmarkSettings> benchmark;
+    /// Set by --benchmark-reference: time the reference and report it per test.
+    bool benchmarkReference = false;
+
+    /// Set by --graph-capture: capture each verified graph and replay it with these
+    /// settings.
+    std::optional<CaptureSettings> graphCapture;
 
     bool useDevice() const
     {

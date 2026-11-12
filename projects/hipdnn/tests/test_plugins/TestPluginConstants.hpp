@@ -243,4 +243,14 @@ inline const std::string& testAutotunePluginPath()
     return s_testAutotunePluginPath;
 }
 #endif
+
+// Consumed only by the cuDNN v8 compatibility layer integration tests in the frontend test target.
+#ifdef TEST_CUDNN_COMPATIBILITY_V8_PLUGIN_NAME
+inline const std::string& testCudnnCompatibilityV8PluginPath()
+{
+    static const std::string s_testCudnnCompatibilityV8PluginPath
+        = getTestCustomFilepathForPlugin(TEST_CUDNN_COMPATIBILITY_V8_PLUGIN_NAME);
+    return s_testCudnnCompatibilityV8PluginPath;
+}
+#endif
 } // namespace hipdnn_tests::plugin_constants

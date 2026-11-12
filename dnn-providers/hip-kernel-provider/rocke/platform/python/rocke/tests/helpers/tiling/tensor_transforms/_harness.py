@@ -3,8 +3,8 @@
 
 """Shared helpers for the bound-check, access-entry and run tests of tensor_transforms.
 
-- ``runtime_length`` -- a runtime length as the tiling layer's ``runtime_value`` returns it: a
-  kernel parameter behind a range marker stating its facts, read back as a ``RuntimeValue``.
+- ``runtime_length`` -- a runtime length: a kernel parameter declared with its facts
+  (``KernelLauncher.from_artifact`` checks them before each launch), a plain ``Value``.
 - ``RuntimeTensor`` -- a tensor description with runtime lengths (the entries read only
   ``lengths``, ``strides`` and ``dtype``).
 - ``gfx90a_isa`` -- the disassembled gfx90a ISA of a kernel (compiled offline; no GPU needed).
@@ -26,9 +26,6 @@ from typing import Any
 import pytest
 
 from rocke.core.ir import I1, I32, I64, IRBuilder, PtrType, Value
-from rocke.helpers.tiling.tensor_transforms import RuntimeValue
-from rocke.helpers.tiling.tensor_transforms.walk import runtime_value_of
-from rocke.tests.gpu import current_device_arch
 
 WAVE = 64
 
@@ -50,21 +47,17 @@ def runtime_length(
     at_least: int = 0,
     at_most: int = (1 << 31) - 1,
     multiple_of: int = 1,
-) -> RuntimeValue:
-    """A kernel parameter ``name`` stated ``at_least <= value <= at_most`` (a multiple of
-    ``multiple_of``), the way the tiling layer's ``runtime_value`` states a length it checked.
-    """
-    marked = b._assume_range(
-        b.param(name, I32), lo=at_least, hi=at_most + 1, multiple_of=multiple_of
-    )
-    return runtime_value_of(marked)
+) -> Value:
+    """A kernel parameter ``name`` declared ``at_least <= value <= at_most`` (a multiple of
+    ``multiple_of``): the facts a runtime length's numbers are read from."""
+    return b.param(name, I32, ge=at_least, le=at_most, multiple_of=multiple_of)
 
 
 @dataclass(frozen=True)
 class RuntimeTensor:
     """A tensor description whose lengths may be runtime lengths."""
 
-    lengths: tuple[int | RuntimeValue, ...]
+    lengths: tuple[int | Value, ...]
     strides: tuple[int, ...]
     dtype: Any
 
@@ -132,6 +125,7 @@ def isa_count(isa: str, pattern: str) -> int:
 
 
 def run_lanes(
+    arch: str,
     build: Callable[[IRBuilder], Sequence[Value]],
     *,
     scalars: Mapping[str, int] | None = None,
@@ -139,9 +133,10 @@ def run_lanes(
     n_blocks: int = 1,
     per_block: bool = False,
 ):
-    """Run a kernel whose lanes store the values ``build`` returns, compiled for the GPU
-    present; return them as an int64 array ``[block, lane, slot]`` (``[block, slot]`` with
-    ``per_block``). A block is ``WAVE`` (64) threads whatever the GPU's wave size.
+    """Run a kernel whose lanes store the values ``build`` returns, compiled for ``arch``, the
+    current GPU's arch (the ``any_gpu`` fixture's value, which marks the test ``gpu``); return
+    them as an int64 array ``[block, lane, slot]`` (``[block, slot]`` with ``per_block``). A
+    block is ``WAVE`` (64) threads whatever the GPU's wave size.
 
     ``scalars`` are i32 kernel parameters (declared by the test with ``runtime_length`` or
     ``b.param``, in this order, before ``build`` returns); ``buffers`` are read-only i32 arrays,
@@ -150,7 +145,6 @@ def run_lanes(
     import numpy as np
 
     from rocke.helpers.compile import compile_kernel
-    from rocke.helpers.spec import SignatureBuilder
     from rocke.runtime.hip_module import Runtime
     from rocke.runtime.host_buffers import as_u8_buffer
     from rocke.runtime.launcher import (
@@ -170,19 +164,8 @@ def run_lanes(
         b.param(name, PtrType(I32, "global"), readonly=True, noalias=True)
     values = build(b)
     slots = store_values(b, values, per_block=per_block)
-    signature = SignatureBuilder()
-    for param in b.kernel.params:
-        if param.name in buffers:
-            signature = signature.ptr(param.name, "i32")
-        elif param.name != "out":
-            signature = signature.scalar(param.name, "i32")
-    signature = signature.ptr("out", "i64")
-    artifact = compile_kernel(b.kernel, arch=current_device_arch())
-    launcher = KernelLauncher(
-        hsaco=artifact.hsaco,
-        kernel_name=artifact.kernel_name,
-        signature=signature.build(),
-    )
+    # The artifact door checks every parameter fact before the launch.
+    launcher = KernelLauncher.from_artifact(compile_kernel(b.kernel, arch=arch))
     rows = n_blocks if per_block else n_blocks * WAVE
     host = np.zeros(rows * slots, dtype=np.int64)
     rt = Runtime()

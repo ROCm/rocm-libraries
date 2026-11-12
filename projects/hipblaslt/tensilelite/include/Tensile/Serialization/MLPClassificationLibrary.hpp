@@ -48,10 +48,20 @@ namespace TensileLite
             static void mapping(IO& io, Scaler& scaler)
             {
                 std::vector<float> mean, scale;
+                if(iot::outputting(io))
+                {
+                    mean.assign(scaler.mean.begin(), scaler.mean.end());
+                    scale.assign(scaler.scale.begin(), scaler.scale.end());
+                }
+
                 iot::mapRequired(io, "mean", mean);
                 iot::mapRequired(io, "scale", scale);
-                scaler.mean.assign(mean.begin(), mean.end());
-                scaler.scale.assign(scale.begin(), scale.end());
+
+                if(!iot::outputting(io))
+                {
+                    scaler.mean.assign(mean.begin(), mean.end());
+                    scaler.scale.assign(scale.begin(), scale.end());
+                }
             }
 
             const static bool flow = false;
@@ -82,9 +92,17 @@ namespace TensileLite
             static void mapping(IO& io, DenseLayer& l)
             {
                 std::vector<float> W, B;
+                if(iot::outputting(io))
+                {
+                    W = l.weights();
+                    B.assign(l.B.begin(), l.B.end());
+                }
+
                 iot::mapRequired(io, "weight", W);
                 iot::mapRequired(io, "bias", B);
-                l = DenseLayer(W, B);
+
+                if(!iot::outputting(io))
+                    l = DenseLayer(W, B);
             }
 
             const static bool flow = false;
@@ -161,6 +179,13 @@ namespace TensileLite
                 if(iot::outputting(io))
                 {
                     model = std::dynamic_pointer_cast<MLPNet>(lib.model);
+                    if(!model)
+                    {
+                        // setError records the message; it does not unwind.
+                        // Returning keeps *model below from dereferencing null.
+                        iot::setError(io, "[MLPClassificationLibrary] Empty model");
+                        return;
+                    }
                 }
                 else
                 {
@@ -168,7 +193,10 @@ namespace TensileLite
                     lib.model = model;
                 }
                 iot::mapRequired(io, "mlp", *model);
-                if(!model->valid(true))
+                // Only on the read path: a library that already loaded is being
+                // re-encoded, and throwing out of a trait would leave the output
+                // half-built instead of reporting through the error list.
+                if(!iot::outputting(io) && !model->valid(true))
                     throw std::runtime_error("ERROR: MLP library not in a valid state.");
 
                 using ProblemFeatures

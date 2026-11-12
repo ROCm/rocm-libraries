@@ -80,6 +80,8 @@ inline std::vector<ConvShapeCase> getSmall1dConvCases()
         {{2, 1, 8}, {1, 1, 3}, {1}, {1}, {0}, 1, "MultiBatch1d"},
         // 1D grouped (2 groups)
         {{1, 4, 8}, {4, 2, 3}, {1}, {1}, {0}, 2, "Grouped2x1d"},
+        // 1D grouped with a channel multiplier (C=4, K=8, G=2): the only K != C grouped 1D case
+        {{1, 4, 8}, {8, 2, 3}, {1}, {1}, {0}, 2, "GroupedChanMult1d"},
         // 1D pointwise (kernel=1)
         {{1, 3, 8}, {2, 3, 1}, {1}, {1}, {0}, 1, "Pointwise1d"},
     };
@@ -95,6 +97,9 @@ inline std::vector<ConvShapeCase> getSmall2dConvCases()
         {{1, 3, 8, 8}, {6, 3, 3, 3}, {1, 1}, {1, 1}, {1, 1}, 1, "MultiChanPad"},
         // 2-group convolution with multi-batch
         {{2, 4, 8, 8}, {4, 2, 3, 3}, {1, 1}, {1, 1}, {0, 0}, 2, "Grouped2Batch2"},
+        // 2-group convolution with a channel multiplier (C=4, K=8): the only K != C grouped 2D
+        // case, so a K/C mix-up in the per-group channel index fails
+        {{1, 4, 6, 6}, {8, 2, 3, 3}, {1, 1}, {1, 1}, {0, 0}, 2, "GroupedChanMult2d"},
         // Stride=2 downsampling
         {{1, 1, 8, 8}, {2, 1, 3, 3}, {2, 2}, {1, 1}, {0, 0}, 1, "Stride2"},
         // Dilation=2 (expanded receptive field)
@@ -139,6 +144,8 @@ inline std::vector<ConvShapeCase> getSmall3dConvCases()
 
 // ============================================================================
 // Medium shapes — Standard tier (PR gate)
+// Trimmed per P3 (identical compiled code): group/depthwise/pointwise/padding classes only change
+// runtime loop bounds and are already covered by the Smoke shapes.
 // ============================================================================
 
 // Medium 1D shapes [fwd, wgrad] — dgrad uses getMedium1dDgradCases() instead
@@ -147,16 +154,12 @@ inline std::vector<ConvShapeCase> getMedium1dConvCases()
     return {
         // Multi-batch multi-channel with padding
         {{4, 16, 64}, {32, 16, 3}, {1}, {1}, {1}, 1, "MediumMultiChan1d"},
-        // Grouped 4-group with larger spatial
-        {{8, 32, 128}, {32, 8, 5}, {1}, {1}, {2}, 4, "Grouped4x1d"},
         // Stride=2 downsampling
         {{4, 8, 256}, {16, 8, 7}, {2}, {1}, {3}, 1, "Stride2Med1d"},
         // Depthwise 1D (8 channels)
         {{4, 8, 64}, {8, 1, 3}, {1}, {1}, {1}, 8, "Depthwise8x1d"},
         // Dilation=2 with padding
         {{2, 4, 32}, {8, 4, 3}, {1}, {2}, {2}, 1, "Dilation2Med1d"},
-        // Large kernel pointwise (1x1)
-        {{8, 64, 128}, {128, 64, 1}, {1}, {1}, {0}, 1, "Pointwise64to128x1d"},
     };
 }
 
@@ -165,30 +168,16 @@ inline std::vector<ConvShapeCase> getMedium1dDgradCases()
 {
     return {
         {{8, 64, 128}, {128, 64, 3}, {1}, {1}, {1}, 1, "WaveNet64Ch"},
-        {{4, 32, 256}, {32, 32, 5}, {1}, {1}, {2}, 1, "Kernel5Pad2"},
-        {{8, 128, 64}, {128, 16, 3}, {1}, {1}, {1}, 8, "Grouped8x1d"},
         {{4, 16, 512}, {16, 16, 7}, {2}, {1}, {3}, 1, "Stride2Kernel7"},
-        {{8, 32, 128}, {32, 1, 3}, {1}, {1}, {1}, 32, "Depthwise32x1d"},
-        {{4, 64, 64}, {128, 64, 1}, {1}, {1}, {0}, 1, "Pointwise64Ch"},
     };
 }
 
-// Medium 2D shapes: ResNet/ResNeXt/Inception-like, suitable for fp32 + fp16 [fwd, dgrad, wgrad]
+// Medium 2D shapes: ResNet-like strided and dilated convolutions [fwd, dgrad, wgrad]
 inline std::vector<ConvShapeCase> getMedium2dConvCases()
 {
     return {
-        // ResNeXt-32x4d bottleneck (32 groups, 4 channels/group)
-        {{8, 128, 14, 14}, {256, 4, 3, 3}, {1, 1}, {1, 1}, {1, 1}, 32, "ResNeXt32x4d"},
         // ResNet stem layer: 7x7 kernel, stride=2
         {{8, 3, 28, 28}, {64, 3, 7, 7}, {2, 2}, {1, 1}, {3, 3}, 1, "ResNetStem7x7"},
-        // 8-group convolution
-        {{8, 64, 14, 14}, {64, 8, 3, 3}, {1, 1}, {1, 1}, {1, 1}, 8, "Grouped8"},
-        // MobileNet-style depthwise (16 channels)
-        {{4, 16, 48, 48}, {16, 1, 3, 3}, {1, 1}, {1, 1}, {1, 1}, 16, "MobileNetDW16"},
-        // 4-group convolution (C=4, K=16, C/G=1 per group, but K/G=4 output channels per group)
-        {{4, 4, 48, 48}, {16, 1, 3, 3}, {1, 1}, {1, 1}, {1, 1}, 4, "Grouped4Chan"},
-        // Odd channel count grouped (7 groups)
-        {{8, 7, 14, 14}, {63, 1, 3, 3}, {1, 1}, {1, 1}, {1, 1}, 7, "OddChanGrouped7"},
         // Dilation=2 at medium scale
         {{4, 32, 28, 28}, {32, 32, 3, 3}, {1, 1}, {2, 2}, {2, 2}, 1, "Dilation2MedScale"},
     };
@@ -202,26 +191,12 @@ inline std::vector<ConvShapeCase> getMedium3dConvCases()
         {{2, 16, 8, 8, 8}, {32, 16, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 1, "Standard16Ch3d"},
         // Non-cube spatial dimensions (4x14x14)
         {{1, 16, 4, 14, 14}, {16, 16, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 1, "NonCube3d"},
-        // Large 5x5x5 kernel
-        {{2, 16, 8, 8, 8}, {32, 16, 5, 5, 5}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, 1, "Kernel5x5x5"},
-        // 3D depthwise at medium scale (MobileNet pattern)
-        {{4, 16, 8, 8, 8}, {16, 1, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 16, "Depthwise16x3d"},
-        // 3D pointwise channel expansion (1x1x1 bottleneck)
-        {{4, 16, 8, 8, 8},
-         {32, 16, 1, 1, 1},
-         {1, 1, 1},
-         {1, 1, 1},
-         {0, 0, 0},
-         1,
-         "Pointwise16to32x3d"},
-        // 8-group 3D — from MIOpen grouped conv3d (N=128,C=32,K=32,28³,G=8)
-        {{4, 32, 8, 8, 8}, {32, 4, 3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 8, "Grouped8x3d"},
     };
 }
 
 // ============================================================================
 // Large shapes — split into edge cases (Comprehensive / nightly) and
-// stress tests (Full / weekly) for tiered CI execution.
+// stress tests (Full / prerelease) for tiered CI execution.
 //
 // Edge cases: odd channels, tiny output, prime K, asymmetric filters — shapes
 //             that exercise corner cases at larger-than-medium scale.

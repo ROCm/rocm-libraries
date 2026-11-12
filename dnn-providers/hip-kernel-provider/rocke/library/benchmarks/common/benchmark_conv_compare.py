@@ -38,7 +38,8 @@ The two scripts' entries have distinct identities, so one directory can hold
 both caches. The Winograd sweep runs out of the same directory when its own
 cache is there too (``benchmark_winograd_aot.py --compile-all --cache-dir
 kernel_cache``), on the 3x3 stride-1 forward cases; without that cache, on a
-JIT comparison or with ``--skip-winograd`` it is left out.
+JIT comparison, with ``--skip-winograd`` or for ``--dtype fp32`` / ``tf32``
+(Winograd is fp16 / bf16 only) it is left out.
 
 The ``--top`` / ``--warmup`` / ``--iters`` / ``--jobs`` / ``--verify`` /
 ``--dtype`` / ``--direction`` / ``--run-from-cache`` / ``--early-stop`` /
@@ -294,6 +295,8 @@ def _build_implicit_only_args(args) -> list[str]:
         a += ["--split-k", str(args.split_k)]
     if args.split_k_prune is not None:
         a += ["--split-k-prune", str(args.split_k_prune)]
+    if args.two_stage != "auto":
+        a += ["--two-stage", args.two_stage]
     if args.streamk == "off" and (
         args.streamk_reductions is not None or args.streamk_ctas != -1
     ):
@@ -353,8 +356,12 @@ def _winograd_skip_reason(args) -> str:
         return "the Winograd sweep runs from an AOT cache (--run-from-cache)"
     if args.direction not in (None, "fwd"):
         return "Winograd runs the forward direction only"
-    from benchmarks.common.benchmark_winograd_aot import cache_index
+    from benchmarks.common.benchmark_winograd_aot import IOS, cache_index
 
+    # IOS is the child's --dtype choices: any other forced dtype would make
+    # it exit 2, so the comparison skips the Winograd leg instead.
+    if args.dtype is not None and args.dtype not in IOS:
+        return f"Winograd runs {'/'.join(IOS)} only (--dtype {args.dtype})"
     index = cache_index(args.run_from_cache, args.arch)
     if not index.is_file():
         return (
@@ -545,9 +552,9 @@ def main() -> int:
     parser.add_argument(
         "--dtype",
         default=None,
-        choices=["fp16", "bf16"],
+        choices=["fp16", "bf16", "fp32", "tf32"],
         help="operand dtype forwarded to both scripts (default: fp16, or the "
-        "MIOpenDriver command's)",
+        "MIOpenDriver command's).",
     )
     parser.add_argument(
         "--direction",
@@ -706,6 +713,17 @@ def main() -> int:
         help=(
             "prune split-K sweep when perf drops by PCT%% relative to the best so far. "
             "Only effective with --split-k 0. Forwarded to implicit-GEMM only."
+        ),
+    )
+    implicit_grp.add_argument(
+        "--two-stage",
+        default="auto",
+        choices=["auto", "always", "never"],
+        dest="two_stage",
+        help=(
+            "two-stage (f32 workspace) wgrad split-K kernels: auto, always or "
+            "never, as benchmark_implicit_gemm_conv.py takes it. "
+            "Forwarded to implicit-GEMM only."
         ),
     )
     implicit_grp.add_argument(
