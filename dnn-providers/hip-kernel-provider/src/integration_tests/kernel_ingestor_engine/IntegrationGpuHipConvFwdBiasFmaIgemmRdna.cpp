@@ -4,11 +4,13 @@
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HKP_TEST_HIP_CONV_FWD_BIAS_FMA_IGEMM_RDNA)
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <memory>
 #include <ostream>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -19,6 +21,7 @@
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_plugin_sdk/ArchMatch.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedTestCacheDir.hpp>
 
 #include "../IntegrationGraphVerificationHarness.hpp"
@@ -43,6 +46,19 @@ namespace
 {
 
 constexpr const char* ENGINE_NAME = "hipkernel:hip_conv_fwd_bias_fma_igemm_rdna";
+
+// The targets the bundle declares in configs/hip_conv_fwd_bias_fma_igemm_rdna.yaml;
+// the engine is not offered on any other device.
+constexpr std::array<std::string_view, 10> RDNA_TARGETS{"gfx1100",
+                                                        "gfx1101",
+                                                        "gfx1102",
+                                                        "gfx1103",
+                                                        "gfx1150",
+                                                        "gfx1151",
+                                                        "gfx1152",
+                                                        "gfx1153",
+                                                        "gfx1200",
+                                                        "gfx1201"};
 
 constexpr int64_t X_UID = 1;
 constexpr int64_t W_UID = 2;
@@ -264,6 +280,28 @@ class IntegrationGpuHipConvFwdBiasFmaIgemmRdna
     : public test_utilities::IntegrationGraphVerificationHarness<float, BiasCase>
 {
 protected:
+    void SetUp() override
+    {
+        test_utilities::IntegrationGraphVerificationHarness<float, BiasCase>::SetUp();
+        if(HasFatalFailure() || IsSkipped())
+        {
+            return;
+        }
+        hipDeviceProp_t properties{};
+        ASSERT_EQ(hipGetDeviceProperties(&properties, _deviceId), hipSuccess);
+        const std::string_view arch = properties.gcnArchName;
+        const bool rdna = std::any_of(
+            RDNA_TARGETS.begin(), RDNA_TARGETS.end(), [arch](std::string_view target) {
+                return hipdnn_plugin_sdk::archMatches(
+                    arch, target, hipdnn_plugin_sdk::ArchMatchMode::PREFIX);
+            });
+        if(!rdna)
+        {
+            GTEST_SKIP() << ENGINE_NAME << " ships for the gfx11 and gfx12 RDNA targets only, not "
+                         << arch;
+        }
+    }
+
     hipdnn_test_sdk::utilities::ScopedTestCacheDir _cacheDir{
         "hip-conv-fwd-bias-fma-igemm-rdna",
         hipdnn_test_sdk::utilities::ScopedTestCacheDir::Scope::TEST};
