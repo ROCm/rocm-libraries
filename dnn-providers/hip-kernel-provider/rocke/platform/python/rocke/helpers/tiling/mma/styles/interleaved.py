@@ -25,6 +25,20 @@ from ...traits import MmaTraits
 from .base import AtomNumbers, LayoutStyle
 
 
+def _interleaved_atom(traits: MmaTraits) -> AtomNumbers:
+    """The atom quantities of ``traits``, refusing an atom whose lane holds several M blocks of A in
+    its registers (``a_m_register_blocks > 1``): the interleaved construction models one.
+    """
+    blocks = traits.layout_params.a_m_register_blocks
+    if blocks > 1:
+        raise NotImplementedError(
+            f"InterleavedStyle cannot lay out {traits.op_id!r}: each lane holds {blocks} M blocks "
+            "of A in registers, which the interleaved construction does not model -- TODO: not "
+            "implemented yet; use the canonical style"
+        )
+    return AtomNumbers.from_traits(traits)
+
+
 class InterleavedStyle(LayoutStyle):
     name = "interleaved"
 
@@ -47,7 +61,7 @@ class InterleavedStyle(LayoutStyle):
         (d, ka, j) -- free-atom major, K-atom, K-within -- the MMA-ready (SOA) order the driver slices.
         The delta is the mandatory in-register reorder, the price of the wide LDS read.
         """
-        atom = AtomNumbers.from_traits(traits)
+        atom = _interleaved_atom(traits)
         lanes_per_axis = (free_lanes, atom.k_lanes)  # axis 0 = free, axis 1 = K
         base = make_tile_desc(
             shape=[free_sub * free_lanes, k_sub * atom.k],
@@ -110,7 +124,7 @@ class InterleavedStyle(LayoutStyle):
         lanes span a contiguous n run), which against an N-stride-1 C is 'with the grain'. The P level is
         OMITTED when 1 so the 16x16 encoding is byte-identical to the single-patch case.
         """
-        atom = AtomNumbers.from_traits(traits)
+        atom = _interleaved_atom(traits)
         wave_m, wave_n = m_sub * atom.m, n_sub * atom.n
         patches, rows, inner = atom.c_patches, atom.c_lane_rows, atom.c_inner
         m_levels = ([patches] if patches > 1 else []) + [rows, inner, m_sub]

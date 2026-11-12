@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
 """Full Stream-K GEMM benchmark sweep driven through the Dispatcher bridge.
 
 Same 3-phase architecture as ``gemm_full_benchmark.py`` -- Stream-K is a
@@ -56,8 +60,8 @@ from gemm_utils import (  # noqa: E402
     _resolve_arch,
     add_streamk_args,
     expand_sweep,
-    parse_streamk_budgets,
     setup_multiple_gemm_dispatchers,
+    streamk_budgets_arg,
     streamk_work_units,
     unique_by_name,
 )
@@ -323,8 +327,8 @@ def main():
     )
     add_vector_fallback_arg(parser)
     args = parser.parse_args()
+    budget_pcts = streamk_budgets_arg(parser, args)
     args.arch = _resolve_arch(args.arch)
-    budget_pcts = parse_streamk_budgets(parser, args)
 
     config_paths = resolve_configs(args)
     devices = resolve_devices(args.devices)

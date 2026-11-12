@@ -254,12 +254,12 @@ class TestBatchedDriverUnits(unittest.TestCase):
         parser = argparse.ArgumentParser()
         gu.add_streamk_args(parser)
         args = parser.parse_args(["--budget-pct", "100, 50,", "--reduction-strategy", "tree"])
-        self.assertEqual(gu.parse_streamk_budgets(parser, args), [100, 50])
+        self.assertEqual(gu.streamk_budgets_arg(parser, args), [100, 50])
         self.assertEqual(args.reduction_strategy, "tree")
-        self.assertEqual(gu.parse_streamk_budgets(parser, parser.parse_args([])), [100])
+        self.assertEqual(gu.streamk_budgets_arg(parser, parser.parse_args([])), [100])
         for bad in ("0", "101", "", "50,x"):
             with self.assertRaises(SystemExit), mock.patch("sys.stderr"):
-                gu.parse_streamk_budgets(parser, parser.parse_args(["--budget-pct", bad]))
+                gu.streamk_budgets_arg(parser, parser.parse_args(["--budget-pct", bad]))
 
     def test_streamk_driver_shares_the_units(self):
         """The single-problem Stream-K driver runs each kernel batch once per budget."""

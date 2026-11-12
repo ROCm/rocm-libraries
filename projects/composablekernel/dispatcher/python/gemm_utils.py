@@ -1528,8 +1528,12 @@ class GpuGemmRunner:
     def run(
         self, A: np.ndarray, B: np.ndarray, problem: GemmProblem
     ) -> GemmResult:
-        M, N, K = problem.M, problem.N, problem.K
+        return self.run_encoded(*self.encode_inputs(A, B), problem)
 
+    def encode_inputs(
+        self, A: np.ndarray, B: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """The host A/B buffers run() hands the kernel for logical A and B."""
         # Caller passes logical A (MxK) and B (KxN) row-major. The compiled
         # kernel dictates both the element dtype and the memory layout of each
         # operand (encoded in its name, e.g. gemm_bf16_rcr_...). The C ABI sizes
@@ -1543,14 +1547,21 @@ class GpuGemmRunner:
         # Likewise column-major C (MxN) lands in memory as NxM row-major, so we
         # allocate (N,M) and transpose the result back to logical MxN.
         dtype = _dtype_from_kernel_name(self._kernel_name)
-        la, lb, lc = _layout_from_kernel_name(self._kernel_name)
-        C_shape = (M, N) if lc == "r" else (N, M)
-
+        la, lb, _ = _layout_from_kernel_name(self._kernel_name)
         # A/B host buffers in the kernel's element dtype and layout; the kernels
         # of a sweep worker's shape reuse them (see _sweep_inputs).
-        A_h, B_h = _encode_ab_cached(
+        return _encode_ab_cached(
             A, B, dtype, la, lb, self._use_ocp, self._kernel_name
         )
+
+    def run_encoded(
+        self, A_h: np.ndarray, B_h: np.ndarray, problem: GemmProblem
+    ) -> GemmResult:
+        """run() on host buffers that encode_inputs() made."""
+        M, N, K = problem.M, problem.N, problem.K
+        dtype = _dtype_from_kernel_name(self._kernel_name)
+        lc = _layout_from_kernel_name(self._kernel_name)[2]
+        C_shape = (M, N) if lc == "r" else (N, M)  # column-major C: see above
 
         # The C buffer's element size must equal sizeof(CDataType): fp8/bf8
         # accumulate into fp16, int8 into int32, otherwise the input dtype.
@@ -2901,7 +2912,7 @@ STREAMK_BUDGET_ENV = "CK_TILE_STREAMK_BUDGET_PCT"
 
 def add_streamk_args(parser) -> None:
     """--reduction-strategy and --budget-pct of the full-benchmark drivers that run
-    Stream-K kernels; read --budget-pct back with parse_streamk_budgets()."""
+    Stream-K kernels; read --budget-pct back with streamk_budgets_arg()."""
     parser.add_argument(
         "--reduction-strategy",
         choices=STREAMK_REDUCTION_STRATEGIES,
@@ -2912,21 +2923,18 @@ def add_streamk_args(parser) -> None:
     parser.add_argument(
         "--budget-pct",
         default="100",
-        help="Comma-list of Stream-K workgroup budgets, in percent of the kernel's "
-        "default (CUs x occupancy, 100); each Stream-K kernel x problem runs once per "
-        "value (e.g. 100,75,50,25), any other kernel once",
+        help="Comma-list of distinct integer Stream-K workgroup budgets in 1..100, in "
+        "percent of the kernel's default (CUs x occupancy, 100); each Stream-K kernel "
+        "x problem runs once per value (e.g. 100,75,50,25), any other kernel once",
     )
 
 
-def parse_streamk_budgets(parser, args) -> List[int]:
-    """The --budget-pct values; a parser error unless all are integers in 1..100."""
+def streamk_budgets_arg(parser, args) -> List[int]:
+    """The --budget-pct values (parse_streamk_budgets); a parser error if invalid."""
     try:
-        pcts = [int(p) for p in str(args.budget_pct).split(",") if p.strip()]
-    except ValueError:
-        pcts = []
-    if not pcts or any(not 0 < p <= 100 for p in pcts):
-        parser.error("--budget-pct values must be integers in 1..100")
-    return pcts
+        return parse_streamk_budgets(args.budget_pct)
+    except ValueError as exc:
+        parser.error(str(exc))
 
 
 def streamk_work_units(problems, pairs, built_kernels, batch_size, budget_pcts, dims):
@@ -2957,6 +2965,18 @@ def unique_by_name(configs: List[GemmKernelConfig]) -> List[GemmKernelConfig]:
     for c in configs:
         first.setdefault(c.name, c)
     return list(first.values())
+
+
+def parse_streamk_budgets(text) -> List[int]:
+    """A ``--budget-pct`` comma list: distinct percents in 1..100, in order.
+    Raises ValueError otherwise."""
+    try:
+        pcts = [int(p) for p in str(text).split(",") if p.strip()]
+    except ValueError:
+        pcts = []
+    if not pcts or any(not 0 < p <= 100 for p in pcts) or len(set(pcts)) < len(pcts):
+        raise ValueError(f"--budget-pct {text!r}: expected distinct values in 1..100")
+    return pcts
 
 
 def expand_sweep(

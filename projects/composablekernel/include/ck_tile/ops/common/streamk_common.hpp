@@ -310,6 +310,9 @@ struct StreamKReductionOps
         return WarpGemm::WarpGemmAttribute::Impl::kCM1PerLane;
     }
 
+    template <typename T>
+    using HasWmmaCBlock = decltype(T::kCMBlock, T::kCNBlock);
+
     /**
      * @brief Returns distribution used for reading from and writing to partials.
      * @return The distribution.
@@ -325,8 +328,24 @@ struct StreamKReductionOps
         constexpr index_t m_warp = BlockGemmShape::BlockWarps::at(number<0>{});
         constexpr index_t n_warp = BlockGemmShape::BlockWarps::at(number<1>{});
 
-        constexpr index_t warp_inst_m = WarpGemm::kM / WarpGemmImpl::kAMBlock;
-        constexpr index_t warp_inst_n = WarpGemm::kN / WarpGemmImpl::kBNBlock;
+        // Multi-instruction WMMA warp tiles (e.g. 32x32 built from 16x16 instructions) repeat the
+        // per-instruction C layout kCMBlock x kCNBlock times; MFMA's kAMBlock/kBNBlock (e.g. 4x64
+        // and 64x4) instead describe lane groups within one wave and already match WarpGemm::kM/kN.
+        constexpr index_t c_m_block = [] {
+            if constexpr(is_detected<HasWmmaCBlock, WarpGemmImpl>::value)
+                return WarpGemmImpl::kCMBlock;
+            else
+                return 1;
+        }();
+        constexpr index_t c_n_block = [] {
+            if constexpr(is_detected<HasWmmaCBlock, WarpGemmImpl>::value)
+                return WarpGemmImpl::kCNBlock;
+            else
+                return 1;
+        }();
+
+        constexpr index_t warp_inst_m = WarpGemm::kM / c_m_block;
+        constexpr index_t warp_inst_n = WarpGemm::kN / c_n_block;
 
         constexpr index_t m_iter_per_warp = TilePartitioner::MPerBlock / (m_warp * warp_inst_m);
         constexpr index_t n_iter_per_warp = TilePartitioner::NPerBlock / (n_warp * warp_inst_n);

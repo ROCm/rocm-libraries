@@ -67,7 +67,7 @@ from batched_gemm_utils import (  # noqa: E402
 from gemm_utils import (  # noqa: E402
     STREAMK_BUDGET_ENV,
     add_streamk_args,
-    parse_streamk_budgets,
+    streamk_budgets_arg,
     streamk_work_units,
     unique_by_name,
 )
@@ -349,7 +349,7 @@ def main():
     # so reject non-positive values up front with a clear message.
     if args.batch_size <= 0:
         parser.error("--batch-size must be a positive integer (kernels per subprocess)")
-    budget_pcts = parse_streamk_budgets(parser, args)
+    budget_pcts = streamk_budgets_arg(parser, args)
 
     config_paths = resolve_configs(args)
     devices = resolve_devices(args.devices)

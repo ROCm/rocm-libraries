@@ -5,7 +5,9 @@
 
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
+#include <vector>
 
 #include "harness/BundleMetadata.hpp"
 
@@ -19,7 +21,12 @@ using hipdnn_integration_tests::checkVramRequirement;
 using hipdnn_integration_tests::EnforcementLevel;
 using hipdnn_integration_tests::loadBundleMetadata;
 using hipdnn_integration_tests::metaJsonPath;
+using hipdnn_integration_tests::OutputLiveRows;
 using hipdnn_integration_tests::parseBundleMetadataJson;
+using hipdnn_integration_tests::parseTensorAliases;
+using hipdnn_integration_tests::TensorAlias;
+using hipdnn_integration_tests::TensorStartOffset;
+using hipdnn_integration_tests::toJson;
 using hipdnn_test_sdk::utilities::claimScratchDirectory;
 using hipdnn_test_sdk::utilities::isMetaJsonFile;
 
@@ -210,6 +217,22 @@ TEST(TestLoadBundleMetadata, IgnoresUnknownFields)
     auto meta = loadBundleMetadata(bundle.bundleJsonPath());
     ASSERT_TRUE(meta.has_value());
     EXPECT_EQ(meta->generatorVersion, "1.0.0");
+}
+
+TEST(TestLoadBundleMetadata, IgnoresAnArchsKeyLikeAnyUnknownField)
+{
+    const TempBundle bundle(R"({"format_version": 1, "archs": ["gfx942"]})");
+    const auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    ASSERT_TRUE(meta.has_value());
+    EXPECT_EQ(meta->formatVersion, 1);
+
+    for(const auto* archs :
+        {R"(["gfx942"])", R"("gfx942")", "[]", "null", "{}", R"(["gfx942:sramecc+:xnack-"])"})
+    {
+        EXPECT_NO_THROW(parseBundleMetadataJson(
+            nlohmann::json::parse(std::string(R"({"format_version": 2, "archs": )") + archs + "}")))
+            << archs;
+    }
 }
 
 TEST(TestLoadBundleMetadata, HandlesPartialMetadata)
@@ -569,7 +592,7 @@ TEST(TestLoadBundleMetadata, EnforcementLevelNonStringThrows)
 
 TEST(TestLoadBundleMetadata, ErrorNamesTheMetaJsonFile)
 {
-    const TempBundle bundle(R"({"format_version": 2})");
+    const TempBundle bundle(R"({"format_version": 3})");
     try
     {
         loadBundleMetadata(bundle.bundleJsonPath());
@@ -601,7 +624,7 @@ TEST(TestParseBundleMetadataJson, ThrowsOnMalformedObjects)
                             R"("metadata")",
                             R"({})",
                             R"({"format_version": "1"})",
-                            R"({"format_version": 2})",
+                            R"({"format_version": 3})",
                             R"({"format_version": 1, "enforcement_level": "FULL"})",
                             R"({"format_version": 1, "enforcement_level": null})"})
     {
@@ -628,12 +651,12 @@ TEST(TestParseBundleMetadataJson, ErrorNamesTheSource)
 TEST(TestParseBundleMetadataJson, ParsesNumericInputsKeys)
 {
     auto meta = parseBundleMetadataJson(nlohmann::json::parse(R"({"format_version": 1,
-            "inputs": {"0": {"fill": "zeros"}, "12": {"fill": "ones"}}})"),
+            "inputs": {"0": {"seed": 1}, "12": {"seed": 2}}})"),
                                         "case_0");
     ASSERT_TRUE(meta.inputs.has_value());
     ASSERT_EQ(meta.inputs->size(), 2u);
-    EXPECT_EQ(meta.inputs->at(0)["fill"], "zeros");
-    EXPECT_EQ(meta.inputs->at(12)["fill"], "ones");
+    EXPECT_EQ(meta.inputs->at(0)["seed"], 1);
+    EXPECT_EQ(meta.inputs->at(12)["seed"], 2);
 }
 
 // inputs keys are tensor UIDs. A key that is not entirely an integer used to be
@@ -709,10 +732,418 @@ TEST(TestParseBundleMetadataJson, NonBooleanFlagsThrowNamingTheFlag)
     }
 }
 
+// ---------------------------------------------------------------------------
+// format_version 2 and input fill specs
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// The BundleMetadataError message for `text`, or "" when it parses.
+std::string metadataError(const std::string& text)
+{
+    try
+    {
+        parseBundleMetadataJson(nlohmann::json::parse(text), "case_0");
+    }
+    catch(const BundleMetadataError& e)
+    {
+        return e.what();
+    }
+    return {};
+}
+
+} // namespace
+
+TEST(TestParseBundleMetadataJson, AcceptsFormatVersion2)
+{
+    const auto meta = parseBundleMetadataJson(nlohmann::json::parse(
+        R"({"format_version": 2, "inputs": {"1": {"kind": "free", "lo": 0, "hi": 2},
+                                           "2": {"kind": "fixed", "value": 1}}})"));
+    EXPECT_EQ(meta.formatVersion, 2);
+    ASSERT_TRUE(meta.inputs.has_value());
+    EXPECT_EQ(meta.inputs->size(), 2u);
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnFormatVersion3)
+{
+    const auto error = metadataError(R"({"format_version": 3})");
+    EXPECT_NE(error.find("unsupported format_version 3"), std::string::npos) << error;
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnUnknownFillKind)
+{
+    const auto error
+        = metadataError(R"({"format_version": 1, "inputs": {"7": {"kind": "vaules"}}})");
+    EXPECT_NE(error.find("case_0 input 7"), std::string::npos) << error;
+    EXPECT_NE(error.find("vaules"), std::string::npos) << error;
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnNonStringFillKind)
+{
+    for(const auto* kind : {"1", "null", "true", R"(["free"])"})
+    {
+        const auto error = metadataError(
+            std::string(R"({"format_version": 1, "inputs": {"7": {"kind": )") + kind + "}}}");
+        EXPECT_NE(error.find("case_0 input 7"), std::string::npos) << kind << ": " << error;
+    }
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnInputSpecThatIsNotAnObject)
+{
+    const auto error = metadataError(R"({"format_version": 1, "inputs": {"7": "free"}})");
+    EXPECT_NE(error.find("case_0 input 7"), std::string::npos) << error;
+}
+
+TEST(TestParseBundleMetadataJson, SeedOnlyInputStillLoads)
+{
+    const auto meta = parseBundleMetadataJson(
+        nlohmann::json::parse(R"({"format_version": 1, "inputs": {"7": {"seed": 5}}})"));
+    ASSERT_TRUE(meta.inputs.has_value());
+    EXPECT_EQ(meta.inputs->at(7).at("seed").get<int>(), 5);
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnValuesKindInFormatVersion1)
+{
+    const auto error = metadataError(
+        R"({"format_version": 1, "inputs": {"7": {"kind": "values", "values": [64, 32]}}})");
+    EXPECT_NE(error.find("kind values needs format_version 2"), std::string::npos) << error;
+}
+
+TEST(TestParseBundleMetadataJson, AcceptsValuesKindInFormatVersion2)
+{
+    const auto meta = parseBundleMetadataJson(nlohmann::json::parse(
+        R"({"format_version": 2, "inputs": {"7": {"kind": "values", "values": [64, 32], "repeat": true}}})"));
+    EXPECT_EQ(meta.formatVersion, 2);
+    ASSERT_TRUE(meta.inputs.has_value());
+    EXPECT_EQ(meta.inputs->at(7).at("kind").get<std::string>(), "values");
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnMalformedValuesSpecInFormatVersion2)
+{
+    for(const auto* spec : {R"({"kind": "values", "values": []})",
+                            R"({"kind": "values", "values": ["64"]})",
+                            R"({"kind": "values", "values": [9223372036854775808]})",
+                            R"({"kind": "values", "values": [1], "repeat": "no"})",
+                            R"({"kind": "values", "values": [1], "count": 4})"})
+    {
+        const auto error
+            = metadataError(std::string(R"({"format_version": 2, "inputs": {"7": )") + spec + "}}");
+        EXPECT_NE(error.find("case_0 input 7"), std::string::npos) << spec << ": " << error;
+    }
+}
+
+TEST(TestLoadBundleMetadata, UnknownFillKindInAFileThrows)
+{
+    const TempBundle bundle(R"({"format_version": 1, "inputs": {"7": {"kind": "vaules"}}})");
+    EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
+}
+
 TEST(TestLoadBundleMetadata, NonBooleanFlagFromAFileThrows)
 {
     const TempBundle bundle(R"({"format_version": 1, "no_gpu_reference": "yes"})");
     EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
+}
+
+// ---------------------------------------------------------------------------
+// aliases
+// ---------------------------------------------------------------------------
+
+TEST(TestParseBundleMetadataJson, AliasesParseInFormatVersion2)
+{
+    const auto meta = parseBundleMetadataJson(nlohmann::json::parse(
+        R"({"format_version": 2, "aliases": [{"uid": 3, "of": 2, "byte_offset": 0},
+                                              {"uid": 5, "of": 2, "byte_offset": 16}]})"));
+    ASSERT_EQ(meta.aliases.size(), 2u);
+    EXPECT_EQ(meta.aliases[0], (TensorAlias{3, 2, 0}));
+    EXPECT_EQ(meta.aliases[1], (TensorAlias{5, 2, 16}));
+}
+
+TEST(TestParseBundleMetadataJson, AliasesAbsentLeavesTheListEmpty)
+{
+    const auto meta = parseBundleMetadataJson(nlohmann::json::parse(R"({"format_version": 2})"));
+    EXPECT_TRUE(meta.aliases.empty());
+}
+
+TEST(TestParseBundleMetadataJson, AliasesRoundTripThroughJson)
+{
+    const std::vector<TensorAlias> aliases = {{3, 2, 0}, {5, 2, 16}};
+    EXPECT_EQ(parseTensorAliases(toJson(aliases)), aliases);
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnAliasesInFormatVersion1)
+{
+    const auto error = metadataError(
+        R"({"format_version": 1, "aliases": [{"uid": 3, "of": 2, "byte_offset": 0}]})");
+    EXPECT_NE(error.find("case_0: aliases needs format_version 2"), std::string::npos) << error;
+}
+
+// The version check wins over any problem in the value.
+TEST(TestParseBundleMetadataJson, ThrowsOnMalformedAliasesInFormatVersion1)
+{
+    for(const auto* aliases : {"[]", "3", R"([{"uid": 3}])"})
+    {
+        SCOPED_TRACE(aliases);
+        const auto error
+            = metadataError(std::string(R"({"format_version": 1, "aliases": )") + aliases + "}");
+        EXPECT_NE(error.find("case_0: aliases needs format_version 2"), std::string::npos) << error;
+    }
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnMalformedAliases)
+{
+    struct Case
+    {
+        const char* aliases;
+        const char* rule;
+    };
+    const std::vector<Case> cases = {
+        {R"({"uid": 3, "of": 2, "byte_offset": 0})", "aliases is not an array"},
+        {"[]", "aliases is empty"},
+        {"[3]", "aliases[0] is not an object"},
+        {R"([{"uid": 3, "of": 2}])", R"(aliases[0] (view 3, owner 2) lacks "byte_offset")"},
+        {R"([{"uid": 3, "byte_offset": 0}])", R"(aliases[0] (view 3) lacks "of")"},
+        {R"([{"of": 2, "byte_offset": 0}])", R"(aliases[0] (owner 2) lacks "uid")"},
+        {R"([{"uid": "3", "of": 2, "byte_offset": 0}])",
+         R"(aliases[0] (owner 2): "uid" is not a 64-bit signed integer)"},
+        {R"([{"uid": 3, "of": 2.5, "byte_offset": 0}])",
+         R"(aliases[0] (view 3): "of" is not a 64-bit signed integer)"},
+        {R"([{"uid": 3, "of": 2, "byte_offset": 9223372036854775808}])",
+         R"(aliases[0] (view 3, owner 2): "byte_offset" is not a 64-bit signed integer)"},
+        {R"([{"uid": 3, "of": 2, "byte_offset": 0, "stride": 1}])",
+         R"(aliases[0] (view 3, owner 2) has unknown key "stride")"},
+        {R"([{"uid": 3, "of": 2, "byte_offset": -4}])",
+         "alias view 3 of owner 2: byte_offset -4 is negative"},
+        {R"([{"uid": 3, "of": 3, "byte_offset": 0}])",
+         "alias view 3 of owner 3: the view and the owner are one tensor"},
+        {R"([{"uid": 3, "of": 2, "byte_offset": 0}, {"uid": 3, "of": 1, "byte_offset": 0}])",
+         "alias view 3 of owner 1: the view appears in more than one entry"},
+        {R"([{"uid": 3, "of": 2, "byte_offset": 0}, {"uid": 4, "of": 3, "byte_offset": 0}])",
+         "alias view 3 of owner 2: the view is also the owner of view 4"},
+    };
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(c.aliases);
+        const auto error
+            = metadataError(std::string(R"({"format_version": 2, "aliases": )") + c.aliases + "}");
+        EXPECT_NE(error.find(std::string("case_0: ") + c.rule), std::string::npos) << error;
+    }
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnAFillKindForAView)
+{
+    const auto error = metadataError(
+        R"({"format_version": 2, "aliases": [{"uid": 3, "of": 2, "byte_offset": 0}],
+            "inputs": {"3": {"kind": "fixed", "value": 1}}})");
+    EXPECT_NE(
+        error.find("case_0: alias view 3 of owner 2: the view's inputs entry sets a fill kind"),
+        std::string::npos)
+        << error;
+}
+
+TEST(TestParseBundleMetadataJson, SeedOnlyInputForAViewLoads)
+{
+    const auto meta = parseBundleMetadataJson(nlohmann::json::parse(
+        R"({"format_version": 2, "aliases": [{"uid": 3, "of": 2, "byte_offset": 0}],
+            "inputs": {"3": {"seed": 7}, "2": {"kind": "fixed", "value": 1}}})"));
+    ASSERT_EQ(meta.aliases.size(), 1u);
+    ASSERT_TRUE(meta.inputs.has_value());
+    EXPECT_EQ(meta.inputs->at(3).at("seed").get<int>(), 7);
+}
+
+TEST(TestLoadBundleMetadata, AliasesInAVersion1FileThrows)
+{
+    const TempBundle bundle(
+        R"({"format_version": 1, "aliases": [{"uid": 3, "of": 2, "byte_offset": 0}]})");
+    EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
+}
+
+// ---------------------------------------------------------------------------
+// start_offsets
+// ---------------------------------------------------------------------------
+
+TEST(TestParseBundleMetadataJson, StartOffsetsParseInFormatVersion2)
+{
+    const auto meta = parseBundleMetadataJson(nlohmann::json::parse(
+        R"({"format_version": 2, "start_offsets": [{"uid": 3, "start_offset": 2},
+                                                    {"uid": 7, "start_offset": 255}]})"));
+    ASSERT_EQ(meta.startOffsets.size(), 2u);
+    EXPECT_EQ(meta.startOffsets[0], (TensorStartOffset{3, 2}));
+    EXPECT_EQ(meta.startOffsets[1], (TensorStartOffset{7, 255}));
+}
+
+TEST(TestParseBundleMetadataJson, StartOffsetsAbsentLeavesTheListEmpty)
+{
+    const auto meta = parseBundleMetadataJson(nlohmann::json::parse(R"({"format_version": 2})"));
+    EXPECT_TRUE(meta.startOffsets.empty());
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnStartOffsetsInFormatVersion1)
+{
+    const auto error = metadataError(
+        R"({"format_version": 1, "start_offsets": [{"uid": 3, "start_offset": 2}]})");
+    EXPECT_NE(error.find("case_0: start_offsets needs format_version 2"), std::string::npos)
+        << error;
+}
+
+// The version check wins over any problem in the value.
+TEST(TestParseBundleMetadataJson, ThrowsOnMalformedStartOffsetsInFormatVersion1)
+{
+    for(const auto* startOffsets :
+        {"[]", "3", R"([{"uid": 3}])", R"([{"uid": 3, "start_offset": 0}])"})
+    {
+        SCOPED_TRACE(startOffsets);
+        const auto error = metadataError(std::string(R"({"format_version": 1, "start_offsets": )")
+                                         + startOffsets + "}");
+        EXPECT_NE(error.find("case_0: start_offsets needs format_version 2"), std::string::npos)
+            << error;
+    }
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnMalformedStartOffsets)
+{
+    struct Case
+    {
+        const char* startOffsets;
+        const char* rule;
+    };
+    const std::vector<Case> cases = {
+        {R"({"uid": 3, "start_offset": 2})", "start_offsets is not an array"},
+        {"[]", "start_offsets is empty"},
+        {"[3]", "start_offsets[0] is not an object"},
+        {R"([{"uid": 3}])", R"(start_offsets[0] (tensor 3) lacks "start_offset")"},
+        {R"([{"start_offset": 2}])", R"(start_offsets[0] lacks "uid")"},
+        {R"([{"uid": "3", "start_offset": 2}])",
+         R"(start_offsets[0]: "uid" is not a 64-bit signed integer)"},
+        {R"([{"uid": 3, "start_offset": 2.5}])",
+         R"(start_offsets[0] (tensor 3): "start_offset" is not a 64-bit signed integer)"},
+        {R"([{"uid": 3, "start_offset": 9223372036854775808}])",
+         R"(start_offsets[0] (tensor 3): "start_offset" is not a 64-bit signed integer)"},
+        {R"([{"uid": 3, "start_offset": 2, "alignment": 1}])",
+         R"(start_offsets[0] (tensor 3) has unknown key "alignment")"},
+        {R"([{"uid": 3, "start_offset": 0}])",
+         "start offset of tensor 3: start_offset 0 is not in the range 1 to 255"},
+        {R"([{"uid": 3, "start_offset": -1}])",
+         "start offset of tensor 3: start_offset -1 is not in the range 1 to 255"},
+        {R"([{"uid": 3, "start_offset": 256}])",
+         "start offset of tensor 3: start_offset 256 is not in the range 1 to 255"},
+        {R"([{"uid": 3, "start_offset": 2}, {"uid": 3, "start_offset": 4}])",
+         "start offset of tensor 3: the tensor appears in more than one entry"},
+    };
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(c.startOffsets);
+        const auto error = metadataError(std::string(R"({"format_version": 2, "start_offsets": )")
+                                         + c.startOffsets + "}");
+        EXPECT_NE(error.find(std::string("case_0: ") + c.rule), std::string::npos) << error;
+    }
+}
+
+TEST(TestLoadBundleMetadata, StartOffsetsInAVersion1FileThrows)
+{
+    const TempBundle bundle(
+        R"({"format_version": 1, "start_offsets": [{"uid": 3, "start_offset": 2}]})");
+    EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
+}
+
+TEST(TestLoadBundleMetadata, StartOffsetsInAVersion2FileLoad)
+{
+    const TempBundle bundle(
+        R"({"format_version": 2, "start_offsets": [{"uid": 3, "start_offset": 1}]})");
+    const auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    ASSERT_TRUE(meta.has_value());
+    EXPECT_EQ(meta->startOffsets, (std::vector<TensorStartOffset>{{3, 1}}));
+}
+
+// ---------------------------------------------------------------------------
+// live_rows
+// ---------------------------------------------------------------------------
+
+TEST(TestParseBundleMetadataJson, LiveRowsParseInFormatVersion2)
+{
+    const auto meta = parseBundleMetadataJson(nlohmann::json::parse(
+        R"({"format_version": 2, "live_rows": [{"uid": 9, "axis": 2, "lengths": 14},
+                                                {"uid": 10, "like": 1}]})"));
+    ASSERT_EQ(meta.liveRows.size(), 2u);
+    EXPECT_EQ(meta.liveRows[0], (OutputLiveRows{9, 2, 14, std::nullopt}));
+    EXPECT_EQ(meta.liveRows[1], (OutputLiveRows{10, std::nullopt, std::nullopt, 1}));
+}
+
+TEST(TestParseBundleMetadataJson, LiveRowsAbsentLeavesTheListEmpty)
+{
+    const auto meta = parseBundleMetadataJson(nlohmann::json::parse(R"({"format_version": 2})"));
+    EXPECT_TRUE(meta.liveRows.empty());
+}
+
+// The version check wins over any problem in the value.
+TEST(TestParseBundleMetadataJson, ThrowsOnLiveRowsInFormatVersion1)
+{
+    for(const auto* liveRows :
+        {R"([{"uid": 9, "axis": 2, "lengths": 14}])", "[]", "3", R"([{"uid": 9}])"})
+    {
+        SCOPED_TRACE(liveRows);
+        const auto error
+            = metadataError(std::string(R"({"format_version": 1, "live_rows": )") + liveRows + "}");
+        EXPECT_NE(error.find("case_0: live_rows needs format_version 2"), std::string::npos)
+            << error;
+    }
+}
+
+TEST(TestParseBundleMetadataJson, ThrowsOnMalformedLiveRows)
+{
+    struct Case
+    {
+        const char* liveRows;
+        const char* rule;
+    };
+    const std::vector<Case> cases = {
+        {R"({"uid": 9, "like": 1})", "live_rows is not an array"},
+        {"[]", "live_rows is empty"},
+        {"[9]", "live_rows[0] is not an object"},
+        {R"([{"axis": 2, "lengths": 14}])", R"(live_rows[0] lacks "uid")"},
+        {R"([{"uid": "9", "like": 1}])", R"(live_rows[0]: "uid" is not a 64-bit signed integer)"},
+        {R"([{"uid": 9, "axis": 2.0, "lengths": 14}])",
+         R"(live_rows[0] (output 9): "axis" is not a 64-bit signed integer)"},
+        {R"([{"uid": 9, "axis": 2, "lengths": "14"}])",
+         R"(live_rows[0] (output 9): "lengths" is not a 64-bit signed integer)"},
+        {R"([{"uid": 9, "like": true}])",
+         R"(live_rows[0] (output 9): "like" is not a 64-bit signed integer)"},
+        {R"([{"uid": 9, "like": 1, "seq_axis": 2}])",
+         R"(live_rows[0] (output 9) has unknown key "seq_axis")"},
+        {R"([{"uid": 9}])", R"(live_rows[0] (output 9) needs exactly one of "lengths" and "like")"},
+        {R"([{"uid": 9, "axis": 2}])",
+         R"(live_rows[0] (output 9) needs exactly one of "lengths" and "like")"},
+        {R"([{"uid": 9, "axis": 2, "lengths": 14, "like": 1}])",
+         R"(live_rows[0] (output 9) needs exactly one of "lengths" and "like")"},
+        {R"([{"uid": 9, "lengths": 14}])",
+         R"(live_rows[0] (output 9) has "lengths" and lacks "axis")"},
+        {R"([{"uid": 9, "axis": 2, "like": 1}])",
+         R"(live_rows[0] (output 9) has "like" and "axis")"},
+        {R"([{"uid": 9, "like": 1}, {"uid": 9, "axis": 2, "lengths": 14}])",
+         "live rows of output 9: the output appears in more than one entry"},
+    };
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(c.liveRows);
+        const auto error = metadataError(std::string(R"({"format_version": 2, "live_rows": )")
+                                         + c.liveRows + "}");
+        EXPECT_NE(error.find(std::string("case_0: ") + c.rule), std::string::npos) << error;
+    }
+}
+
+TEST(TestLoadBundleMetadata, LiveRowsInAVersion1FileThrows)
+{
+    const TempBundle bundle(R"({"format_version": 1, "live_rows": [{"uid": 9, "like": 1}]})");
+    EXPECT_THROW(loadBundleMetadata(bundle.bundleJsonPath()), BundleMetadataError);
+}
+
+TEST(TestLoadBundleMetadata, LiveRowsInAVersion2FileLoad)
+{
+    const TempBundle bundle(
+        R"({"format_version": 2, "live_rows": [{"uid": 9, "axis": 1, "lengths": 3}]})");
+    const auto meta = loadBundleMetadata(bundle.bundleJsonPath());
+    ASSERT_TRUE(meta.has_value());
+    EXPECT_EQ(meta->liveRows, (std::vector<OutputLiveRows>{{9, 1, 3, std::nullopt}}));
 }
 
 // NOLINTEND(readability-identifier-naming)

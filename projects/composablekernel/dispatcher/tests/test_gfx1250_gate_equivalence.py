@@ -39,7 +39,11 @@ except ImportError:  # pragma: no cover - TE tree not present
     te = None
 
 from arch_filter import ArchFilter  # noqa: E402
-from codegen_common import CommonTypeMappings, valid_warp_configs  # noqa: E402
+from codegen_common import (  # noqa: E402
+    CommonTypeMappings,
+    comp_tdm_v3_reject_reason,
+    valid_warp_configs,
+)
 
 try:
     import gemm_utils  # noqa: E402
@@ -61,7 +65,7 @@ PIPELINES = (
 GATED_PIPELINES = ("comp_async", "comp_tdm", "comp_tdm_v2", "comp_tdm_pc", "comp_tdm_v3")
 EPILOGUES = ("cshuffle", "default", "tdm")
 SCHEDULERS = ("intrawave", "interwave")
-LAYOUTS = ("rcr", "rrr", "crr", "ccr")
+LAYOUTS = ("rcr", "rrr", "crr", "ccr", "rcc", "rrc", "crc", "ccc")
 PADS = tuple(itertools.product((False, True), repeat=3))
 DTYPES = ("fp16", "bf16", "fp8", "bf8")
 
@@ -204,6 +208,32 @@ class TestGfx1250GateEquivalence(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.filt = ArchFilter(ARCH)
+
+    def test_v3_rule_parity(self):
+        for dtype_a, dtype_b, waves, layout, tile_k in itertools.product(
+            DTYPES + ("fp32",),
+            DTYPES + ("fp32",),
+            ((2, 2, 1), (4, 4, 1), (4, 2, 1)),
+            LAYOUTS + ("",),
+            (None, 64, 96, 192),
+        ):
+            with self.subTest(
+                dtypes=(dtype_a, dtype_b), waves=waves, layout=layout, tile_k=tile_k
+            ):
+                self.assertEqual(
+                    te.gfx1250_tdm_v3_reject_reason(
+                        "comp_tdm_v3",
+                        dtype_a,
+                        dtype_b,
+                        *waves,
+                        layout=layout,
+                        tile_k=tile_k,
+                        warp_tile_k=32,
+                    ),
+                    comp_tdm_v3_reject_reason(
+                        dtype_a, dtype_b, waves, layout, tile_k, 32
+                    ),
+                )
 
     def _baseline_ok(self, layout, dtype, t, pads):
         """compv3 legal on both sides: the tile passes every rule that is not

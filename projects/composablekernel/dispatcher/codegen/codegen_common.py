@@ -1470,8 +1470,10 @@ COMP_TDM_PC_WARP_K_REJECT_REASON = (
 # (tile_engine/ops/gemm/gemm_validation_utils.py; tests/test_gfx1250_gate_equivalence.py
 # pins the two copies): the CShuffle epilogue outside Stream-K, the 2x2x1 and 4x4x1
 # wave maps ([4, 4, 1] for this pipeline only, the shared table is unchanged), fp8/bf8
-# A/B with layout rcr or fp16/bf16 A/B with any A/B layout, plain, batched and Stream-K
-# GEMM only. Its kernels build with the post-RA machine scheduler on, as the Tile Engine
+# A/B with layout rcr or fp16/bf16 A/B with any A/B layout and row-major C, plain,
+# batched and Stream-K GEMM only. These rules stay mirrored because TE cannot import
+# the dispatcher and new shared infrastructure must not live in deprecated TE.
+# Its kernels build with the post-RA machine scheduler on, as the Tile Engine
 # gemm_universal build and the comp_tdm_v3 gtests do.
 COMP_TDM_V3 = "comp_tdm_v3"
 TDM_PIPELINE_EPILOGUE = {COMP_TDM_V3: "cshuffle"}
@@ -1529,6 +1531,8 @@ def comp_tdm_v3_reject_reason(
             f"comp_tdm_v3 with 8-bit A/B supports layout {COMP_TDM_V3_8BIT_LAYOUT!r} "
             f"only, got {layout!r}"
         )
+    if layout[2:3] not in ("", "r"):
+        return "comp_tdm_v3 supports row-major C only"
     return ""
 
 # Stream-K (StreamKKernel). Atomic reduction adds every workgroup's partial tile into C
