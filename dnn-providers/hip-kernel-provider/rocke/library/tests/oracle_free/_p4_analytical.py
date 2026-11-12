@@ -59,12 +59,13 @@ F32_MIN_EXPONENT = -126
 F32_MAX_EXPONENT = 127
 F32_UNIT_ROUNDOFF = Fraction(1, 1 << 24)
 F32_SMALLEST_SUBNORMAL = Fraction(1, 1 << 149)
+F32_SMALLEST_NORMAL = Fraction(1, 1 << 126)
 _F32_OVERFLOW = Fraction(1 << (F32_MAX_EXPONENT + 1))
 # Strictly below every FP32 spacing, so ``x +- _NUDGE`` never crosses two grid
 # points; used to step to a neighbor.
 _NUDGE = Fraction(1, 1 << 300)
 
-_ROUNDING_MODES = frozenset({"rn", "rd", "ru"})
+_ROUNDING_MODES = frozenset({"rn", "rd", "ru", "rz"})
 
 
 def floor_log2(value: Fraction) -> int:
@@ -96,9 +97,11 @@ def f32_quantum(value: Fraction) -> Fraction:
 def round_f32(value: Fraction, mode: str = "rn") -> Fraction:
     """Round an exact rational to FP32 and return the result's exact value.
 
-    ``mode`` is ``"rn"`` (nearest, ties to even), ``"rd"`` (toward -inf) or
-    ``"ru"`` (toward +inf). Subnormals are kept (gradual underflow). Overflow
-    raises: no P4 quantity comes near the FP32 range limit."""
+    ``mode`` is ``"rn"`` (nearest, ties to even), ``"rd"`` (toward -inf),
+    ``"ru"`` (toward +inf) or ``"rz"`` (toward zero; no part of the path model,
+    used only by the assumption-violating emulations). Subnormals are kept
+    (gradual underflow). Overflow raises: no P4 quantity comes near the FP32
+    range limit."""
     if mode not in _ROUNDING_MODES:
         raise ValueError(f"mode must be one of {sorted(_ROUNDING_MODES)}")
     value = Fraction(value)
@@ -110,6 +113,8 @@ def round_f32(value: Fraction, mode: str = "rn") -> Fraction:
         count = steps.numerator // steps.denominator
     elif mode == "ru":
         count = -((-steps.numerator) // steps.denominator)
+    elif mode == "rz":
+        count = int(steps)  # Fraction.__trunc__ rounds toward zero
     else:
         count = round(steps)  # Fraction.__round__ ties to even
     result = count * quantum
@@ -197,10 +202,11 @@ def mul_rn(left: F32Interval, right: F32Interval) -> F32Interval:
 
 
 def rcp_rn(value: F32Interval) -> F32Interval:
-    """Image of the correctly rounded reciprocal ``RN(1 / l)`` on ``l > 0``.
+    """Image of the mathematical map ``l -> RN(1 / l)`` on ``l > 0``.
 
-    This is the dense epilogue's ``fdiv 1.0, l`` (no ``!fpmath``), not the
-    approximate ``v_rcp_f32``."""
+    These are the IR semantics of the dense epilogue's ``fdiv 1.0, l`` (no
+    ``!fpmath``). That the executed division returns this value is assumption
+    A-DIV, not a property of this function: see :func:`rcp_a_div`."""
     if value.lo <= 0:
         raise ValueError("reciprocal requires a positive interval")
     return F32Interval(round_f32(1 / value.hi, "rn"), round_f32(1 / value.lo, "rn"))
@@ -231,10 +237,13 @@ def sum_any_order(terms: Iterable[F32Interval]) -> F32Interval:
 
     For ``n`` nonnegative FP32 terms with exact sum ``S``, every recursive or
     tree summation returns ``S (1 + theta)`` with ``|theta| <= gamma_{n-1}``.
-    Gradual underflow keeps FP32 addition exact when the result is subnormal,
-    and a term flushed to zero is the member ``0`` of its interval when the
-    interval starts at ``0``. The result is itself FP32, so the real bounds are
-    snapped inward: up for the lower end, down for the upper end."""
+    The one-addition error model behind the bound holds when the rounded sum
+    is normal, and also for a subnormal sum under gradual underflow, where the
+    addition is exact. It does not hold for a subnormal sum under a flushing
+    mode, so the P4 recurrence applies this function only to a tile that
+    holds a normal-scale term (:func:`tile_sum`). The result is itself FP32,
+    so the real bounds are snapped inward: up for the lower end, down for the
+    upper end."""
     items = list(terms)
     if not items:
         return F32Interval.point(Fraction(0))
@@ -481,6 +490,43 @@ def exp2_nearest(argument: Fraction) -> Fraction:
     return nearest
 
 
+class P4ScopeError(ArithmeticError):
+    """A row leaves the domain on which the P4 enclosure is derived.
+
+    The enclosure is then undefined rather than widened: the correct quick
+    matrix must never raise this, and a mutated row that does makes no claim."""
+
+
+# ---------------------------------------------------------------------------
+# The reciprocal (assumption A-DIV).
+#
+# The IR is ``fdiv float 1.0, l`` without fast-math flags or ``!fpmath``, whose
+# IR semantics are ``RN(1 / l)``. gfx942 has no FP32 divide instruction: the
+# backend expands the ``fdiv`` into a scaled ``v_rcp_f32`` refinement sequence
+# ending in ``v_div_fixup_f32``, and no cited source states that the sequence
+# is correctly rounded. A-DIV names that premise on the range the denominator
+# is proved to reach (lemma L); outside it the enclosure is not derived.
+# ---------------------------------------------------------------------------
+
+DIV_ASSUMPTION = "A-DIV v1: FDIV(1, l) = RN(1 / l) for every FP32 l in [1/2, 2**9)"
+A_DIV_DOMAIN = (Fraction(1, 2), Fraction(1 << 9))  # closed below, open above
+
+
+def rcp_a_div(denominator: F32Interval) -> F32Interval:
+    """Image of the executed reciprocal ``fdiv 1.0, l`` under A-DIV v1.
+
+    Raises :class:`P4ScopeError` when the denominator interval leaves the
+    A-DIV domain, so no reciprocal is modeled where the assumption says
+    nothing."""
+    low, high = A_DIV_DOMAIN
+    if not (low <= denominator.lo and denominator.hi < high):
+        raise P4ScopeError(
+            f"denominator [{float(denominator.lo)!r}, {float(denominator.hi)!r}] "
+            f"is outside the A-DIV domain [{float(low)!r}, {float(high)!r})"
+        )
+    return rcp_rn(denominator)
+
+
 def target_value(bits: int, dtype: str) -> Fraction:
     """Exact value of nonnegative raw FP16/BF16 bits."""
     if dtype not in _TARGET_FORMAT:
@@ -497,10 +543,37 @@ def target_value(bits: int, dtype: str) -> Fraction:
 
 
 _TARGET_FORMAT = {"fp16": (10, 5, 15), "bf16": (7, 8, 127)}
+_FINITE_MASK = {"fp16": 0x7C00, "bf16": 0x7F80}
+_SIGN_BIT = 0x8000
+
+
+def target_rank(bits: int, dtype: str) -> int:
+    """Rank of a nonnegative finite FP16/BF16 value: its 16-bit encoding.
+
+    With the sign bit clear the encoding order is the numerical order, so
+    ``+0`` has rank 0 and consecutive values have consecutive ranks, across a
+    binade edge and across the subnormal/normal transition alike. A negative
+    value (``-0`` included), an infinity and a NaN have no rank."""
+    bits = int(bits)
+    finite = _FINITE_MASK[dtype]
+    if not 0 <= bits <= 0xFFFF or bits & _SIGN_BIT or bits & finite == finite:
+        raise ValueError(f"{bits:#06x} is not a nonnegative finite {dtype} value")
+    return bits
+
+
+def d_ulp(first: int, second: int, dtype: str) -> int:
+    """Target-ULP distance: the rank difference of two FP16/BF16 values.
+
+    Every count of target ULPs in P4 (the Tier A radius, the separation
+    margins, the head-scale search) is a value of this distance; no real-valued
+    ULP size is used."""
+    return abs(target_rank(first, dtype) - target_rank(second, dtype))
 
 
 def ordered_distance(first: tuple[int, int], second: tuple[int, int]) -> int:
-    """Target-ULP gap between two bit ranges of nonnegative values; 0 if they meet."""
+    """Smallest :func:`d_ulp` between members of two rank intervals; 0 if they
+    meet. Each argument is the ``(low, high)`` bits of nonnegative finite
+    values, so the gap is the rank difference of the nearest endpoints."""
     if first[1] < second[0]:
         return second[0] - first[1]
     if second[1] < first[0]:
@@ -813,6 +886,117 @@ def visited_tiles(
     return tuple(sorted(visited))
 
 
+class TileClass(str, Enum):
+    """What one visited KV tile holds for one row (§ tile classes).
+
+    ``LEGAL`` has a legal key: its weights are normal-scale and its masked keys
+    weigh at most ``2**-149``. ``MASKED_PREFIX`` is fully masked with no legal
+    tile before it: every weight is ``E(0)``, near one, and the first legal
+    tile rescales that state by at most ``2**-149`` (lemma M).
+    ``MASKED_AFTER_LEGAL`` is fully masked after a legal tile: every weight is
+    at most ``2**-149``."""
+
+    LEGAL = "L"
+    MASKED_PREFIX = "M0"
+    MASKED_AFTER_LEGAL = "M1"
+
+
+@cache
+def tile_classes(
+    case: P4Case, query: int, mutation: P4Mutation | None = None
+) -> tuple[TileClass, ...]:
+    """The class of every visited tile of ``query``, in loop order, computed
+    from the legal key interval of the correct or mutated semantics."""
+    first, last = legal_interval(case.base, query, _BOUNDARY_MUTATION.get(mutation))
+    classes: list[TileClass] = []
+    seen_legal = False
+    for tile in visited_tiles(case, query, mutation):
+        start = tile * case.block_n
+        if first <= last and first < start + case.block_n and last >= start:
+            seen_legal = True
+            classes.append(TileClass.LEGAL)
+        elif seen_legal:
+            classes.append(TileClass.MASKED_AFTER_LEGAL)
+        else:
+            classes.append(TileClass.MASKED_PREFIX)
+    return tuple(classes)
+
+
+def masked_prefix(
+    case: P4Case, query: int, mutation: P4Mutation | None = None
+) -> tuple[int, ...]:
+    """The fully masked leading tiles of ``query`` (class M0), in loop order;
+    their number is ``rho`` of lemma T."""
+    tiles = visited_tiles(case, query, mutation)
+    classes = tile_classes(case, query, mutation)
+    return tuple(
+        tile
+        for tile, tile_class in zip(tiles, classes)
+        if tile_class is TileClass.MASKED_PREFIX
+    )
+
+
+def prefix_selected_keys(
+    case: P4Case,
+    exposure: str,
+    query: int,
+    dim: int,
+    mutation: P4Mutation | None = None,
+) -> int:
+    """``r`` of lemma T: how many keys the exposed coordinate selects inside the
+    masked prefix of ``query``."""
+    return sum(
+        exposure_key(case, exposure, dim, tile) is not None
+        for tile in masked_prefix(case, query, mutation)
+    )
+
+
+def masked_prefix_scope(
+    case: P4Case, query: int, mutation: P4Mutation | None = None
+) -> str | None:
+    """Why ``query`` is outside lemma M, or ``None`` when it is covered.
+
+    Lemma M is derived for at most one fully masked leading tile followed by a
+    legal tile. More leading masked tiles, or a row with no legal tile at all,
+    need their own residue bound and are not enclosed."""
+    classes = tile_classes(case, query, mutation)
+    prefix = sum(item is TileClass.MASKED_PREFIX for item in classes)
+    if prefix > 1:
+        return f"row {query} has {prefix} fully masked leading tiles (lemma M: 1)"
+    if TileClass.LEGAL not in classes:
+        return f"row {query} visits no tile with a legal key"
+    return None
+
+
+def tile_sum(
+    tile_class: TileClass,
+    weights: Sequence[F32Interval],
+    phantom: Sequence[F32Interval] = (),
+) -> F32Interval:
+    """Enclose the FP32 sum of one tile's weights, by tile class.
+
+    ``LEGAL`` and ``MASKED_PREFIX`` tiles hold normal-scale terms, the regime
+    of the ``gamma`` bound (:func:`sum_any_order`). A ``MASKED_AFTER_LEGAL``
+    tile holds only masked terms, each ``[0, 2**-149]`` under A-E (a looser
+    exponential used for attribution widens that to a few subnormal steps):
+    the bound is not used there and the sum is enclosed explicitly by zero and
+    the exact sum of the upper ends, ``[0, 2**-143]`` for 64 keys, which is
+    what gradual underflow computes and holds ``+0`` for a flushing mode.
+    ``phantom`` terms (a mutation's extra normal-scale key) put any tile back
+    in the ``gamma`` regime."""
+    if tile_class is TileClass.MASKED_AFTER_LEGAL and not phantom:
+        total = Fraction(0)
+        for weight in weights:
+            if weight.lo != 0 or weight.hi >= F32_SMALLEST_NORMAL:
+                raise P4ScopeError(
+                    "a fully masked tile holds a normal-scale weight: "
+                    f"[{float(weight.lo)!r}, {float(weight.hi)!r}]"
+                )
+            total += weight.hi
+        return F32Interval(Fraction(0), total)
+    return sum_any_order((*weights, *phantom))
+
+
 # ``scale`` is 1 instead of 1/8, or LOG2E is not applied.
 _MUTATED_SCORE_SCALE = {
     P4Mutation.OMIT_SQRT_D: round_f32(f32(1.0) * LOG2E_F32),
@@ -853,9 +1037,13 @@ class TileStep:
 
 @dataclass(frozen=True)
 class RowTrace:
-    """Reachable FP32 state of one (row, head) after the KV loop."""
+    """Reachable FP32 state of one (row, head) after the KV loop.
+
+    ``denominators[i]`` is the reachable ``l`` after ``steps[i]``; the last one
+    is ``denominator``."""
 
     steps: tuple[TileStep, ...]
+    denominators: tuple[F32Interval, ...]
     denominator: F32Interval
     reciprocal: F32Interval
 
@@ -871,16 +1059,26 @@ def row_trace(
     """Propagate the row's running max, weights and denominator.
 
     The running max is exact (``max`` does not round). Each ``v_exp_f32`` is its
-    candidate interval; each tile's 64 weights are summed in any order
-    (``gamma_63``), then ``l = RN(RN(l alpha) + l_tile)``. ``OMIT_RESCALE``
-    fixes ``alpha = 1``; ``DENOMINATOR_PLUS_ONE`` adds a logit-0 key's weight to
-    the last tile's sum, never to the accumulator. ``e_ulps`` loosens A-E for
-    failure attribution only."""
+    candidate interval; each tile's 64 weights are summed by tile class
+    (:func:`tile_sum`: ``gamma_63`` in any order, or the explicit masked
+    enclosure), then ``l = RN(RN(l alpha) + l_tile)``, and the reciprocal is
+    taken under A-DIV. ``OMIT_RESCALE`` fixes ``alpha = 1``;
+    ``DENOMINATOR_PLUS_ONE`` adds a logit-0 key's weight to the last tile's
+    sum, never to the accumulator. ``e_ulps`` loosens A-E for failure
+    attribution only.
+
+    Raises :class:`P4ScopeError` for a row outside lemma M or whose
+    denominator leaves the A-DIV domain."""
+    outside = masked_prefix_scope(case, query, mutation)
+    if outside is not None:
+        raise P4ScopeError(f"{case.case_id}: {outside}")
     running_max = MASKED_SCORE
     denominator = F32Interval.point(Fraction(0))
     steps: list[TileStep] = []
+    denominators: list[F32Interval] = []
     tiles = visited_tiles(case, query, mutation)
-    for tile in tiles:
+    classes = tile_classes(case, query, mutation)
+    for tile, tile_class in zip(tiles, classes):
         start = tile * case.block_n
         scores = [
             score(case, head, query, key, mutation)
@@ -894,13 +1092,18 @@ def row_trace(
         weights = tuple(
             exp2_interval(round_f32(value - new_max, "rn"), e_ulps) for value in scores
         )
-        terms = weights
+        phantom: tuple[F32Interval, ...] = ()
         if mutation is P4Mutation.DENOMINATOR_PLUS_ONE and tile == tiles[-1]:
-            terms += (exp2_interval(round_f32(-new_max, "rn"), e_ulps),)
-        denominator = add_rn(mul_rn(denominator, alpha), sum_any_order(terms))
+            phantom = (exp2_interval(round_f32(-new_max, "rn"), e_ulps),)
+        denominator = add_rn(
+            mul_rn(denominator, alpha), tile_sum(tile_class, weights, phantom)
+        )
         steps.append(TileStep(tile, alpha, weights))
+        denominators.append(denominator)
         running_max = new_max
-    return RowTrace(tuple(steps), denominator, rcp_rn(denominator))
+    return RowTrace(
+        tuple(steps), tuple(denominators), denominator, rcp_a_div(denominator)
+    )
 
 
 def exposure_key(case: P4Case, exposure: str, dim: int, tile: int) -> int | None:
@@ -930,7 +1133,7 @@ MFMA_ROUNDING = ("faithful", "rn")
 
 
 @cache
-def _output_interval(
+def _accumulator_steps(
     case: P4Case,
     head: int,
     query: int,
@@ -938,27 +1141,65 @@ def _output_interval(
     mfma: str,
     mutation: P4Mutation | None,
     e_ulps: int,
-) -> F32Interval:
-    """The reachable accumulator ``o`` after the KV loop, before the epilogue.
+) -> tuple[tuple[F32Interval, F32Interval], ...]:
+    """Per visited tile, the reachable accumulator after the rescale
+    ``RN(o alpha)`` and after the tile's PV atoms.
 
     Per tile ``o = MFMA(RN(o alpha), product)``. With one nonzero product per
-    output per tile, the MFMA performs at most one real addition; it is exact
-    when the accumulator is zero, else faithful (or RN when pinned)."""
+    output per tile (lemma P), the tile performs at most one real addition; it
+    is exact when the accumulator is zero, else faithful (or RN when pinned).
+    After a masked prefix the rescaled value is the residue of lemma M."""
     if mfma not in MFMA_ROUNDING:
         raise ValueError(f"mfma must be one of {MFMA_ROUNDING}")
     trace = row_trace(case, head, query, mutation, e_ulps)
     accumulator = F32Interval.point(Fraction(0))
+    steps = []
     for step, product in zip(trace.steps, products):
-        accumulator = mul_rn(accumulator, step.alpha)
+        rescaled = accumulator = mul_rn(accumulator, step.alpha)
         if product is None or product.hi == 0:
-            continue
-        if accumulator.hi == 0:
+            pass
+        elif accumulator.hi == 0:
             accumulator = product
         elif mfma == "faithful":
             accumulator = add_faithful(accumulator, product)
         else:
             accumulator = add_rn(accumulator, product)
-    return accumulator
+        steps.append((rescaled, accumulator))
+    return tuple(steps)
+
+
+def _exposed_products(
+    case: P4Case, exposure: str, dim: int, head: int, trace: RowTrace
+) -> tuple[F32Interval | None, ...]:
+    """Per visited tile, the PV product ``q_T(p~) 2**h`` of the key the exposed
+    coordinate selects there, or ``None`` when it selects none."""
+    exponent = case.head_scale_exponents[head]
+    products: list[F32Interval | None] = []
+    for step in trace.steps:
+        key = exposure_key(case, exposure, dim, step.tile)
+        if key is None:
+            products.append(None)
+        else:
+            weight = step.weights[key - step.tile * case.block_n]
+            products.append(_scaled_cast(case.dtype, weight, exponent))
+    return tuple(products)
+
+
+def accumulator_steps(
+    case: P4Case,
+    exposure: str,
+    query: int,
+    head: int,
+    dim: int,
+    *,
+    mfma: str = "faithful",
+    mutation: P4Mutation | None = None,
+) -> tuple[tuple[F32Interval, F32Interval], ...]:
+    """The numerator recurrence of one exposed coordinate, tile by tile: the
+    reachable ``RN(o alpha)`` and the reachable ``o`` after the tile."""
+    trace = row_trace(case, head, query, mutation)
+    products = _exposed_products(case, exposure, dim, head, trace)
+    return _accumulator_steps(case, head, query, products, mfma, mutation, 1)
 
 
 def tier_b_row(
@@ -975,21 +1216,14 @@ def tier_b_row(
     under the correct or a ``mutation``'s semantics. The epilogue is the A-F
     hull for both, so a mutant is judged with the same compiler latitude."""
     trace = row_trace(case, head, query, mutation, e_ulps)
-    exponent = case.head_scale_exponents[head]
     low = np.zeros(case.base.head_dim, dtype=np.uint16)
     high = np.zeros(case.base.head_dim, dtype=np.uint16)
     for dim in range(case.base.head_dim):
-        products = []
-        for step in trace.steps:
-            key = exposure_key(case, exposure, dim, step.tile)
-            if key is None:
-                products.append(None)
-            else:
-                weight = step.weights[key - step.tile * case.block_n]
-                products.append(_scaled_cast(case.dtype, weight, exponent))
-        accumulator = _output_interval(
-            case, head, query, tuple(products), mfma, mutation, e_ulps
+        products = _exposed_products(case, exposure, dim, head, trace)
+        steps = _accumulator_steps(
+            case, head, query, products, mfma, mutation, e_ulps
         )
+        accumulator = steps[-1][1]
         low[dim], high[dim] = cast_single_or_double_hull(
             accumulator, trace.reciprocal, case.dtype
         )
@@ -1080,21 +1314,56 @@ def coordinate_class(
     )
 
 
+@dataclass(frozen=True)
+class CertifiedTarget:
+    """``q_T(y*)`` and what certifies it (T0).
+
+    A rational target is rounded exactly and has no boundary record. An
+    irrational one carries the two rounding boundaries adjacent to its bits
+    (``lower_boundary`` is ``None`` at ``+0``, where only the upper one
+    applies) and ``margin``, the distance of the evaluated value to the nearer
+    of them, which exceeds ``required``."""
+
+    bits: int
+    rational: bool
+    lower_boundary: Fraction | None = None
+    upper_boundary: Fraction | None = None
+    margin: Fraction | None = None
+    required: Fraction | None = None
+
+
+def rounding_boundaries(bits: int, dtype: str) -> tuple[Fraction | None, Fraction]:
+    """The two rounding boundaries adjacent to a nonnegative finite target
+    value: the midpoints to its lower and upper neighbors. At a power of two
+    the upper one is twice as far as the lower one, which is why the two
+    boundaries, and not one ULP size, are what a target is certified against.
+    ``+0`` has no lower boundary among nonnegative values."""
+    center = target_value(target_rank(bits, dtype), dtype)
+    below = (target_value(bits - 1, dtype) + center) / 2 if bits else None
+    above = (target_value(target_rank(bits + 1, dtype), dtype) + center) / 2
+    return below, above
+
+
 @cache
-def certified_target_bits(
+def certify_target(
     dtype: str, exponent: int, item: CoordinateClass, digits: int = 50
-) -> int:
+) -> CertifiedTarget:
     """``q_T(2**h (m_c e^c + m_0) / (n_c e^c + n_0))``, certified (T0).
 
     Rational when ``c = 0`` or the coordinate's class mix is proportional to the
-    row's; otherwise irrational (Lindemann-Weierstrass), so never on a
-    midpoint, and a ``digits``-digit value with a margin certifies the bits."""
+    row's, and then rounded exactly. Otherwise irrational
+    (Lindemann-Weierstrass), so never on a rounding boundary: the
+    ``digits``-digit value must lie more than ``10**-(digits - 10)`` from each
+    boundary adjacent to its bits (``10**-40`` at 50 digits). Every target is at
+    most ``2**3``, so the evaluation error is orders below that margin."""
     if item.is_zero:
-        return 0
+        return CertifiedTarget(0, True)
     scale = Fraction(2) ** exponent
     if item.logit == 0 or item.m_c * item.n_0 == item.m_0 * item.n_c:
         exact = scale * Fraction(item.m_c + item.m_0, item.n_c + item.n_0)
-        return target_bits(exact.numerator, exact.denominator, dtype)
+        return CertifiedTarget(
+            target_bits(exact.numerator, exact.denominator, dtype), True
+        )
     with localcontext() as context:
         context.prec = digits
         growth = (Decimal(item.logit.numerator) / Decimal(item.logit.denominator)).exp()
@@ -1103,15 +1372,21 @@ def certified_target_bits(
             * scale
         )
     bits = target_bits(value.numerator, value.denominator, dtype)
-    center = target_value(bits, dtype)
-    below = (target_value(bits - 1, dtype) + center) / 2 if bits else Fraction(0)
-    above = (target_value(bits + 1, dtype) + center) / 2
-    margin = value * Fraction(1, 10 ** (digits - 10))
-    if not below + margin < value < above - margin:
+    below, above = rounding_boundaries(bits, dtype)
+    margin = above - value if below is None else min(value - below, above - value)
+    required = Fraction(1, 10 ** (digits - 10))
+    if margin <= required:
         raise ArithmeticError(
             f"target {float(value)!r} is not certified at {digits} digits"
         )
-    return bits
+    return CertifiedTarget(bits, False, below, above, margin, required)
+
+
+def certified_target_bits(
+    dtype: str, exponent: int, item: CoordinateClass, digits: int = 50
+) -> int:
+    """The bits of :func:`certify_target`."""
+    return certify_target(dtype, exponent, item, digits).bits
 
 
 def tier_a_bounds(
@@ -1174,6 +1449,70 @@ class EmulationMode(str, Enum):
     RANDOMIZED_SEMANTIC = "randomized_semantic"
 
 
+class P4Violation(str, Enum):
+    """The IR-exact path with exactly one primitive replaced by a value its
+    named assumption excludes.
+
+    These realizations are diagnostic. They are never enclosed: an output that
+    leaves Tier B this way must fail and be attributed to the assumption, and
+    one that stays inside Tier B shows that P4 cannot observe the primitive,
+    which is no evidence for the assumption."""
+
+    # A-E: every v_exp_f32 result two FP32 steps outside its candidate hull.
+    E_LOW = "a_e_low"
+    E_HIGH = "a_e_high"
+    # A-MFMA: a genuine folded addition two FP32 steps outside {RD, RU}.
+    MFMA_LOW = "a_mfma_low"
+    MFMA_HIGH = "a_mfma_high"
+    # A-QK: a Walsh score accumulator one FP32 step from the exact dot product.
+    QK_DOWN = "a_qk_down"
+    QK_UP = "a_qk_up"
+    # A-DIV: the FP32 neighbor of RN(1 / l).
+    DIV_LOW = "a_div_low"
+    DIV_HIGH = "a_div_high"
+    # A-F: an FP16 store of the exact product truncated toward zero.
+    F_TRUNCATED = "a_f_truncated"
+    # A-MODE: FP32 add, subtract and multiply rounded toward zero; or the
+    # FP32-to-target conversion (probability cast and epilogue) truncating.
+    MODE_RZ_ARITHMETIC = "a_mode_rz_arithmetic"
+    MODE_TRUNCATING_CAST = "a_mode_truncating_cast"
+
+
+_EXP2_VIOLATION = {P4Violation.E_LOW: -2, P4Violation.E_HIGH: 2}
+_MFMA_VIOLATION = {P4Violation.MFMA_LOW: ("rd", -2), P4Violation.MFMA_HIGH: ("ru", 2)}
+_QK_VIOLATION = {P4Violation.QK_DOWN: -1, P4Violation.QK_UP: 1}
+_DIV_VIOLATION = {P4Violation.DIV_LOW: -1, P4Violation.DIV_HIGH: 1}
+
+
+def applicable_violations(case: P4Case) -> tuple[P4Violation, ...]:
+    """The violations ``case`` can express: only the Walsh contraction has a
+    dense score atom, and only FP16 has the A-F epilogue."""
+    return tuple(
+        violation
+        for violation in P4Violation
+        if not (violation in _QK_VIOLATION and case.fixture is not P4Fixture.WALSH)
+        and not (
+            violation is P4Violation.F_TRUNCATED
+            and case.dtype not in _SINGLE_ROUNDING_DTYPES
+        )
+    )
+
+
+def _grid_steps(value: Fraction, count: int) -> Fraction:
+    """``value`` moved ``count`` FP32 grid steps, not below zero for a
+    nonnegative value."""
+    floor = Fraction(0) if value >= 0 else None
+    for _ in range(abs(count)):
+        value = next_up(value) if count > 0 else next_down(value)
+    return value if floor is None else max(value, floor)
+
+
+def _truncated_target_bits(value: Fraction, dtype: str) -> int:
+    """FP16/BF16 bits of a nonnegative rational rounded toward zero."""
+    bits = _exact_target_bits(value, dtype)
+    return bits - 1 if target_value(bits, dtype) > value else bits
+
+
 def emulate_row(
     case: P4Case,
     exposure: str,
@@ -1184,6 +1523,7 @@ def emulate_row(
     rng: np.random.Generator | None = None,
     artifact: str | None = None,
     mutation: P4Mutation | None = None,
+    violation: P4Violation | None = None,
 ) -> np.ndarray:
     """Output bits of one row from an FP32 emulation of the dense path.
 
@@ -1192,7 +1532,8 @@ def emulate_row(
     ``P4_EPILOGUE_ARTIFACTS``) rounds once. ``RANDOMIZED_SEMANTIC`` draws from
     ``rng`` a member of the reachable set, used to test that Tier B encloses
     it. ``mutation`` emulates the mutated kernel, whose realizations its own
-    Tier B must enclose. Records report the IR and artifact agreement
+    Tier B must enclose. ``violation`` breaks one named assumption on a
+    deterministic mode. Records report the IR and artifact agreement
     separately, so an exponential diagnosis is not confounded by the
     compiler's epilogue."""
     mode = EmulationMode(mode)
@@ -1202,32 +1543,49 @@ def emulate_row(
         raise ValueError("artifact is required by, and only by, artifact_exact")
     if artifact is not None and artifact not in P4_EPILOGUE_ARTIFACTS:
         raise ValueError(f"no epilogue artifact named {artifact!r}")
+    if violation is not None and rng is not None:
+        raise ValueError("a violation applies to a deterministic mode only")
     single_lanes = (
         P4_EPILOGUE_ARTIFACTS[artifact].single_lanes if artifact else frozenset()
     )
-    accumulator, reciprocal = _emulate_path(case, exposure, query, head, rng, mutation)
+    accumulator, reciprocal = _emulate_path(
+        case, exposure, query, head, rng, mutation, violation
+    )
     bits = []
     for dim, value in enumerate(accumulator):
         if mode is EmulationMode.RANDOMIZED_SEMANTIC:
             single = bool(rng.integers(2))
         else:
             single = dim % 4 in single_lanes
-        bits.append(_store_bits(value, reciprocal, case.dtype, single=single))
+        bits.append(
+            _store_bits(
+                value, reciprocal, case.dtype, single=single, violation=violation
+            )
+        )
     return np.array(bits, dtype=np.uint16)
 
 
 def epilogue_alternatives(
-    case: P4Case, exposure: str, query: int, head: int
+    case: P4Case,
+    exposure: str,
+    query: int,
+    head: int,
+    violation: P4Violation | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """The IR-exact row's stored bits under double and single epilogue rounding.
 
     Every A-F realization of the IR-exact path stores, at each coordinate, one
-    of the two. They are equal for BF16, which A-F keeps double-rounded."""
-    accumulator, reciprocal = _emulate_path(case, exposure, query, head, None, None)
+    of the two. They are equal for BF16, which A-F keeps double-rounded. With
+    ``violation`` they are the two stores of that violating path."""
+    accumulator, reciprocal = _emulate_path(
+        case, exposure, query, head, None, None, violation
+    )
     double, single = (
         np.array(
             [
-                _store_bits(value, reciprocal, case.dtype, single=s)
+                _store_bits(
+                    value, reciprocal, case.dtype, single=s, violation=violation
+                )
                 for value in accumulator
             ],
             dtype=np.uint16,
@@ -1238,14 +1596,157 @@ def epilogue_alternatives(
 
 
 def _store_bits(
-    value: np.float32, reciprocal: np.float32, dtype: str, *, single: bool
+    value: np.float32,
+    reciprocal: np.float32,
+    dtype: str,
+    *,
+    single: bool,
+    violation: P4Violation | None = None,
 ) -> int:
     """``q_T(RN32(o R))``, or under A-F for FP16 ``q_T(o R)`` when ``single``."""
-    if single and dtype in _SINGLE_ROUNDING_DTYPES:
-        return _exact_target_bits(
-            Fraction(float(value)) * Fraction(float(reciprocal)), dtype
+    exact = Fraction(float(value)) * Fraction(float(reciprocal))
+    fused = dtype in _SINGLE_ROUNDING_DTYPES
+    truncating = violation is P4Violation.MODE_TRUNCATING_CAST
+    if fused and (single or violation is P4Violation.F_TRUNCATED):
+        if truncating or violation is P4Violation.F_TRUNCATED:
+            return _truncated_target_bits(exact, dtype)
+        return _exact_target_bits(exact, dtype)
+    if violation is P4Violation.MODE_RZ_ARITHMETIC:
+        product = np.float32(float(round_f32(exact, "rz")))
+    else:
+        product = np.float32(value * reciprocal)
+    if truncating:
+        return _truncated_target_bits(Fraction(float(product)), dtype)
+    return _cast_bits(product, dtype)
+
+
+@dataclass(frozen=True)
+class _EmulatedTile:
+    """One visited tile of an emulated row: the rescale and the 64 weights."""
+
+    tile: int
+    alpha: np.float32
+    weights: tuple[np.float32, ...]
+
+
+def _emulate_tiles(
+    case: P4Case,
+    query: int,
+    head: int,
+    rng: np.random.Generator | None,
+    mutation: P4Mutation | None,
+    violation: P4Violation | None,
+) -> tuple[tuple[_EmulatedTile, ...], np.float32]:
+    """The exposure-independent part of the path: each tile's rescale factor
+    and weights, and the reciprocal of the final denominator.
+
+    Without ``rng``: the documented lane order and ``E = RN(2**x)``. With
+    ``rng``: a random summation tree per tile and an ``E`` candidate per call.
+    ``violation`` replaces one primitive (:class:`P4Violation`)."""
+    toward_zero = violation is P4Violation.MODE_RZ_ARITHMETIC
+
+    def rounded(exact: Fraction) -> np.float32:
+        return np.float32(float(round_f32(exact, "rz")))
+
+    def add(left: np.float32, right: np.float32) -> np.float32:
+        if toward_zero:
+            return rounded(Fraction(float(left)) + Fraction(float(right)))
+        return np.float32(left + right)
+
+    def sub(left: np.float32, right: np.float32) -> np.float32:
+        if toward_zero:
+            return rounded(Fraction(float(left)) - Fraction(float(right)))
+        return np.float32(left - right)
+
+    def mul(left: np.float32, right: np.float32) -> np.float32:
+        if toward_zero:
+            return rounded(Fraction(float(left)) * Fraction(float(right)))
+        return np.float32(left * right)
+
+    exp2_steps = _EXP2_VIOLATION.get(violation, 0)
+
+    def exp2(argument: np.float32) -> np.float32:
+        exact = Fraction(float(argument))
+        if rng is not None:
+            candidates = exp2_candidates(exact)
+            return np.float32(float(candidates[int(rng.integers(len(candidates)))]))
+        if not exp2_steps:
+            return np.float32(float(exp2_nearest(exact)))
+        candidates = exp2_candidates(exact)
+        edge = candidates[0] if exp2_steps < 0 else candidates[-1]
+        return np.float32(float(_grid_steps(edge, exp2_steps)))
+
+    qk_steps = (
+        _QK_VIOLATION.get(violation, 0) if case.fixture is P4Fixture.WALSH else 0
+    )
+
+    def score_of(key: int) -> Fraction:
+        value = score(case, head, query, key, mutation)
+        if not qk_steps or value == MASKED_SCORE:
+            return value
+        numerator = score_numerator(case, head, query, key, mutation)
+        return _score_of(
+            _grid_steps(numerator, qk_steps),
+            _MUTATED_SCORE_SCALE.get(mutation, SCORE_SCALE),
         )
-    return _cast_bits(np.float32(value * reciprocal), dtype)
+
+    running_max = np.float32(float(MASKED_SCORE))
+    denominator = np.float32(0.0)
+    emulated: list[_EmulatedTile] = []
+    tiles = visited_tiles(case, query, mutation)
+    for tile in tiles:
+        start = tile * case.block_n
+        scores = np.array(
+            [float(score_of(key)) for key in range(start, start + case.block_n)],
+            dtype=np.float32,
+        )
+        new_max = np.float32(max(running_max, np.max(scores)))
+        if mutation is P4Mutation.OMIT_RESCALE:
+            alpha = np.float32(1.0)
+        else:
+            alpha = exp2(sub(running_max, new_max))
+        weights = [exp2(sub(value, new_max)) for value in scores]
+        phantom = []
+        if mutation is P4Mutation.DENOMINATOR_PLUS_ONE and tile == tiles[-1]:
+            phantom.append(exp2(sub(np.float32(0.0), new_max)))
+        if rng is None:
+            halves = []
+            for order in _LANE_ORDER:
+                total = np.float32(0.0)
+                for index in order:
+                    total = add(total, weights[index])
+                halves.append(total)
+            tile_total = add(halves[0], halves[1])
+            for extra in phantom:
+                tile_total = add(tile_total, extra)
+        else:
+            items = list(weights) + phantom
+            while len(items) > 1:
+                left = items.pop(int(rng.integers(len(items))))
+                right = items.pop(int(rng.integers(len(items))))
+                items.append(np.float32(left + right))
+            tile_total = items[0]
+        denominator = add(mul(denominator, alpha), tile_total)
+        emulated.append(_EmulatedTile(tile, alpha, tuple(weights)))
+        running_max = new_max
+    reciprocal = np.float32(np.float32(1.0) / denominator)
+    if violation in _DIV_VIOLATION:
+        reciprocal = np.float32(
+            float(_grid_steps(Fraction(float(reciprocal)), _DIV_VIOLATION[violation]))
+        )
+    return tuple(emulated), reciprocal
+
+
+@cache
+def _emulated_tiles(
+    case: P4Case,
+    query: int,
+    head: int,
+    mutation: P4Mutation | None,
+    violation: P4Violation | None,
+) -> tuple[tuple[_EmulatedTile, ...], np.float32]:
+    """The deterministic row state, shared by the five exposures of a row."""
+    return _emulate_tiles(case, query, head, None, mutation, violation)
 
 
 def _emulate_path(
@@ -1255,83 +1756,59 @@ def _emulate_path(
     head: int,
     rng: np.random.Generator | None,
     mutation: P4Mutation | None,
+    violation: P4Violation | None = None,
 ) -> tuple[np.ndarray, np.float32]:
     """FP32 accumulator row and reciprocal before the output epilogue.
 
     Without ``rng``: the documented lane order, ``E = RN(2**x)`` and an RN MFMA
     accumulate. With ``rng``: a random summation tree per tile, an ``E``
     candidate per call and a directed rounding per MFMA addition."""
-    exponent = case.head_scale_exponents[head]
-    scale = np.float32(2.0**exponent)
-
-    def exp2(argument: np.float32) -> np.float32:
-        exact = Fraction(float(argument))
-        if rng is None:
-            return np.float32(float(exp2_nearest(exact)))
-        candidates = exp2_candidates(exact)
-        return np.float32(float(candidates[int(rng.integers(len(candidates)))]))
-
-    running_max = np.float32(float(MASKED_SCORE))
-    denominator = np.float32(0.0)
+    if rng is None:
+        tiles, reciprocal = _emulated_tiles(case, query, head, mutation, violation)
+    else:
+        tiles, reciprocal = _emulate_tiles(case, query, head, rng, mutation, None)
+    toward_zero = violation is P4Violation.MODE_RZ_ARITHMETIC
+    truncating = violation is P4Violation.MODE_TRUNCATING_CAST
+    mfma_mode, mfma_steps = _MFMA_VIOLATION.get(violation, (None, 0))
+    scale = np.float32(2.0 ** case.head_scale_exponents[head])
     accumulator = np.zeros(case.base.head_dim, dtype=np.float32)
-    tiles = visited_tiles(case, query, mutation)
-    for tile in tiles:
-        start = tile * case.block_n
-        scores = np.array(
-            [
-                float(score(case, head, query, key, mutation))
-                for key in range(start, start + case.block_n)
-            ],
-            dtype=np.float32,
-        )
-        new_max = np.float32(max(running_max, np.max(scores)))
-        if mutation is P4Mutation.OMIT_RESCALE:
-            alpha = np.float32(1.0)
+    for item in tiles:
+        start = item.tile * case.block_n
+        if toward_zero:
+            alpha = Fraction(float(item.alpha))
+            accumulator = np.array(
+                [
+                    float(round_f32(Fraction(float(value)) * alpha, "rz"))
+                    for value in accumulator
+                ],
+                dtype=np.float32,
+            )
         else:
-            alpha = exp2(np.float32(running_max - new_max))
-        weights = [exp2(np.float32(value - new_max)) for value in scores]
-        phantom = []
-        if mutation is P4Mutation.DENOMINATOR_PLUS_ONE and tile == tiles[-1]:
-            phantom.append(exp2(np.float32(-new_max)))
-        if rng is None:
-            halves = []
-            for order in _LANE_ORDER:
-                total = np.float32(0.0)
-                for index in order:
-                    total = np.float32(total + weights[index])
-                halves.append(total)
-            tile_sum = np.float32(halves[0] + halves[1])
-            for extra in phantom:
-                tile_sum = np.float32(tile_sum + extra)
-        else:
-            items = list(weights) + phantom
-            while len(items) > 1:
-                left = items.pop(int(rng.integers(len(items))))
-                right = items.pop(int(rng.integers(len(items))))
-                items.append(np.float32(left + right))
-            tile_sum = items[0]
-        denominator = np.float32(np.float32(denominator * alpha) + tile_sum)
-        accumulator = (accumulator * alpha).astype(np.float32)
+            accumulator = (accumulator * item.alpha).astype(np.float32)
         for dim in range(case.base.head_dim):
-            key = exposure_key(case, exposure, dim, tile)
+            key = exposure_key(case, exposure, dim, item.tile)
             if key is None:
                 continue
-            cast = target_value(
-                _cast_bits(weights[key - start], case.dtype), case.dtype
-            )
-            product = np.float32(float(cast)) * scale
+            weight = item.weights[key - start]
+            if truncating:
+                bits = _truncated_target_bits(Fraction(float(weight)), case.dtype)
+            else:
+                bits = _cast_bits(weight, case.dtype)
+            product = np.float32(float(target_value(bits, case.dtype))) * scale
             if product == 0:
                 continue
             if accumulator[dim] == 0:
                 accumulator[dim] = product
-            elif rng is None:
+            elif rng is None and mfma_mode is None:
                 accumulator[dim] = np.float32(accumulator[dim] + product)
             else:
                 exact = Fraction(float(accumulator[dim])) + Fraction(float(product))
-                mode = ("rd", "ru")[int(rng.integers(2))]
-                accumulator[dim] = np.float32(float(round_f32(exact, mode)))
-        running_max = new_max
-    return accumulator, np.float32(np.float32(1.0) / denominator)
+                if rng is None:
+                    value = _grid_steps(round_f32(exact, mfma_mode), mfma_steps)
+                else:
+                    value = round_f32(exact, ("rd", "ru")[int(rng.integers(2))])
+                accumulator[dim] = np.float32(float(value))
+    return accumulator, reciprocal
 
 
 # ---------------------------------------------------------------------------
@@ -1632,12 +2109,16 @@ def mutation_separation(
     rows: Iterable[int] | None = P4_SEPARATION_ROWS,
 ) -> Separation:
     """Evaluate T5 for one mutation over every exposure; ``rows=None`` uses
-    every row."""
+    every row. A row the mutated semantics put outside lemma M has no mutated
+    enclosure and proves nothing; T5 needs one separating coordinate, so
+    leaving it out lower-bounds the gap."""
     mutation = P4Mutation(mutation)
     if mutation not in applicable_mutations(case):
         raise ValueError(f"mutation {mutation.value} does not apply to {case.case_id}")
     best = Separation(mutation, 0, None, None)
-    queries = range(case.base.seqlen_q) if rows is None else tuple(rows)
+    queries = derived_rows(
+        case, range(case.base.seqlen_q) if rows is None else rows, mutation
+    )
     for exposure in P4_EXPOSURES:
         for query in queries:
             for head in range(case.base.nhead_q):
@@ -1652,6 +2133,31 @@ def mutation_separation(
                         mutation, int(gaps[dim]), exposure, (0, query, head, dim)
                     )
     return best
+
+
+def row_scope(case: P4Case, query: int, mutation: P4Mutation | None) -> str | None:
+    """Why the enclosure of ``query`` is not derived under ``mutation`` for some
+    head (outside lemma M, or a denominator outside the A-DIV domain), or
+    ``None`` when every head is covered."""
+    try:
+        for head in range(case.base.nhead_q):
+            row_trace(case, head, query, mutation)
+    except P4ScopeError as error:
+        return str(error)
+    return None
+
+
+def derived_rows(
+    case: P4Case, rows: Iterable[int], mutation: P4Mutation | None
+) -> tuple[int, ...]:
+    """The rows of ``rows`` whose enclosure under ``mutation`` is derived for
+    every head (:func:`row_scope`). The correct semantics are never filtered:
+    a correct row outside the derivation must fail closed in
+    :func:`row_trace`."""
+    rows = tuple(rows)
+    if mutation is None:
+        return rows
+    return tuple(query for query in rows if row_scope(case, query, mutation) is None)
 
 
 def format_separation(case: P4Case, separation: Separation) -> str:
@@ -1671,14 +2177,31 @@ def format_separation(case: P4Case, separation: Separation) -> str:
 # Analyzer: the Tier B verdict, the failure taxonomy and diagnostics.
 # ---------------------------------------------------------------------------
 
-MFMA_ASSUMPTION = "A-MFMA v1: a folded MFMA addition is RD or RU of the exact sum"
+MFMA_ASSUMPTION = (
+    "A-MFMA v1: an MFMA atom with at most one nonzero product p returns RD or "
+    "RU of c + p"
+)
+QK_ASSUMPTION = (
+    "A-QK v1: an MFMA atom whose accumulator and eight products are multiples "
+    "of 2**e with total magnitude at most 2**(24 + e) returns their exact sum"
+)
+MODE_ASSUMPTION = (
+    "A-MODE v1: FP32 add, subtract and multiply round to nearest even; the "
+    "FP32-to-FP16 and FP32-to-BF16 conversions round to nearest even and keep "
+    "subnormals"
+)
 P4_ASSUMPTIONS = ("A-E v1", "A-MFMA v1", "A-F v1")
 # Looser v_exp_f32 bound used only to attribute a failure to A-E.
 _RELAXED_EXP2_ULPS = 2
 
 
 class P4Label(str, Enum):
-    """Strongest contract an observed coordinate satisfies, checked in this order.
+    """What an observed coordinate is judged to be.
+
+    A value outside Tier B that equals the store of a single violated
+    assumption (:class:`P4Violation`) carries that assumption's label. The
+    other assumption labels are heuristics, checked in the order below. No
+    label is a pass, and none enlarges Tier B.
 
     A zero-gap mutation (the fixture lacks sensitivity) is a CPU-side label,
     ``P4_UNSEPARATED``, not an output label."""
@@ -1687,7 +2210,12 @@ class P4Label(str, Enum):
     INVALID = "invalid"  # NaN (including the unwritten prefill) or Inf
     NEGATIVE = "negative"  # sign bit set, -0 included
     STRUCTURAL = "structural"  # a required +0 coordinate stores another pattern
-    E2 = "E2: denorm/rounding mode"  # FP16-subnormal target: near it, or +0
+    # A truncating conversion or round-toward-zero arithmetic; or, at an
+    # FP16-subnormal target, a value near it or a flushed +0.
+    A_MODE = "assumption A-MODE"
+    A_F = "assumption A-F"  # an FP16 store that is neither epilogue rounding
+    A_DIV = "assumption A-DIV"  # the reciprocal is a neighbor of RN(1 / l)
+    A_QK = "assumption A-QK"  # a Walsh score accumulator is inexact
     A_MFMA = "assumption A-MFMA"  # folded addition near target, basis clean
     A_E = "assumption A-E"  # explained only by a looser v_exp_f32
     PATH_MODEL = "path model"  # outside Tier B, inside Tier A: re-pin, never widen
@@ -1695,8 +2223,42 @@ class P4Label(str, Enum):
 
 
 P4_FAILURE_LABELS = tuple(label for label in P4Label if label is not P4Label.PASS)
-_FINITE_MASK = {"fp16": 0x7C00, "bf16": 0x7F80}
-_SIGN_BIT = 0x8000
+_VIOLATION_LABEL: Mapping[P4Violation, P4Label] = MappingProxyType(
+    {
+        P4Violation.E_LOW: P4Label.A_E,
+        P4Violation.E_HIGH: P4Label.A_E,
+        P4Violation.MFMA_LOW: P4Label.A_MFMA,
+        P4Violation.MFMA_HIGH: P4Label.A_MFMA,
+        P4Violation.QK_DOWN: P4Label.A_QK,
+        P4Violation.QK_UP: P4Label.A_QK,
+        P4Violation.DIV_LOW: P4Label.A_DIV,
+        P4Violation.DIV_HIGH: P4Label.A_DIV,
+        P4Violation.F_TRUNCATED: P4Label.A_F,
+        P4Violation.MODE_RZ_ARITHMETIC: P4Label.A_MODE,
+        P4Violation.MODE_TRUNCATING_CAST: P4Label.A_MODE,
+    }
+)
+# Violations whose stores stay inside Tier B at every coordinate of the quick
+# matrix (all 1,310,720 coordinates of each case, both epilogue roundings):
+# the stored bits cannot show them. This records P4's sensitivity to the
+# primitive; it is no evidence for the assumption. The conversions are the
+# observable ones: a truncating cast, and for FP16 a truncated store.
+P4_UNOBSERVED_VIOLATIONS = frozenset(
+    {
+        P4Violation.E_LOW,
+        P4Violation.E_HIGH,
+        P4Violation.MFMA_LOW,
+        P4Violation.MFMA_HIGH,
+        P4Violation.QK_DOWN,
+        P4Violation.QK_UP,
+        P4Violation.DIV_LOW,
+        P4Violation.DIV_HIGH,
+        P4Violation.MODE_RZ_ARITHMETIC,
+    }
+)
+# No violation stores a value farther than this many target ULPs outside
+# Tier B (a contract checks it), so a farther value is not compared to them.
+_VIOLATION_REACH = 3
 _FP16_SMALLEST_NORMAL_BITS = 0x0400
 
 
@@ -1752,6 +2314,25 @@ def _genuine_addition(case: P4Case, query: int, head: int, dim: int) -> bool:
     return nonzero >= 2
 
 
+@cache
+def _violation_alternatives(
+    case: P4Case, exposure: str, query: int, head: int, violation: P4Violation
+) -> tuple[np.ndarray, np.ndarray]:
+    return epilogue_alternatives(case, exposure, query, head, violation)
+
+
+def matching_violation(
+    case: P4Case, exposure: str, query: int, head: int, dim: int, bits: int
+) -> P4Violation | None:
+    """The first violation, in declaration order, whose IR-exact path stores
+    ``bits`` at this coordinate under either epilogue rounding."""
+    for violation in applicable_violations(case):
+        double, single = _violation_alternatives(case, exposure, query, head, violation)
+        if bits in (int(double[dim]), int(single[dim])):
+            return violation
+    return None
+
+
 def _attribute(
     case: P4Case,
     exposure: str,
@@ -1759,25 +2340,32 @@ def _attribute(
     head: int,
     dim: int,
     bits: int,
+    outside: int,
     center: int,
     radius: int,
     basis_clean: bool,
     relaxed: Callable[[], tuple[np.ndarray, np.ndarray]],
 ) -> P4Label:
-    """Label a nonnegative finite value outside the correct Tier B.
+    """Label a nonnegative finite value ``outside`` target ULPs outside the
+    correct Tier B.
 
-    A mode or assumption label needs a value its failure can produce: E2 a
-    value inside Tier A or a flushed ``+0`` at an FP16-subnormal target, A-MFMA
-    a value inside Tier A. A far value there is numerical, not a mode.
-    ``relaxed()`` returns the row's Tier B under a 2-ULP exponential, computed
-    at most once per row."""
-    near = abs(bits - center) <= radius
+    A value that a single violated assumption stores carries that assumption.
+    Otherwise a mode or assumption label needs a value its failure can
+    produce: A-MODE a value inside Tier A or a flushed ``+0`` at an
+    FP16-subnormal target, A-MFMA a value inside Tier A. A far value there is
+    numerical, not a mode. ``relaxed()`` returns the row's Tier B under a
+    2-ULP exponential, computed at most once per row."""
+    if outside <= _VIOLATION_REACH:
+        violation = matching_violation(case, exposure, query, head, dim, bits)
+        if violation is not None:
+            return _VIOLATION_LABEL[violation]
+    near = d_ulp(bits, center, case.dtype) <= radius
     if (
         case.dtype == "fp16"
         and 0 < center < _FP16_SMALLEST_NORMAL_BITS
         and (near or bits == 0)
     ):
-        return P4Label.E2
+        return P4Label.A_MODE
     if (
         near
         and exposure == "folded"
@@ -1834,7 +2422,9 @@ def analyze_p4_policy(
     and carries the strongest contract it still satisfies (``P4Label``). With
     ``mutation`` the observation is judged against the mutated Tier B and must
     be rejected; failures are then only labeled invalid, negative, structural
-    or numerical. ``rows`` restricts the judgment to those query rows.
+    or numerical. ``rows`` restricts the judgment to those query rows; a
+    mutated judgment also leaves out the rows whose mutated enclosure is not
+    derived (:func:`derived_rows`).
 
     Observed values are only compared: nothing here can enlarge Tier B or the
     exponential candidate sets (I6)."""
@@ -1842,15 +2432,17 @@ def analyze_p4_policy(
     if selected is not None and selected not in applicable_mutations(case):
         raise ValueError(f"mutation {selected.value} does not apply to {case.case_id}")
     _validate_observation(case.base, observation, require_complete=require_complete)
-    queries = tuple(range(case.base.seqlen_q)) if rows is None else tuple(rows)
+    every_row = tuple(range(case.base.seqlen_q))
+    queries = derived_rows(case, every_row if rows is None else rows, selected)
     if not queries:
         raise ValueError("rows must select at least one query")
+    whole = queries == every_row
     exponents = np.array(case.head_scale_exponents)
 
     # Pass 1: membership masks per exposure.
     judged: dict[str, tuple] = {}
     for exposure, raw in observation.exposures:
-        if rows is None:
+        if whole:
             low, high = tier_b_exposure(case, exposure, selected)
         else:
             low, high = tier_b_bounds(case, exposure, rows=queries, mutation=selected)
@@ -1907,19 +2499,24 @@ def analyze_p4_policy(
         return relaxed_rows[key]
 
     for exposure, judgment in judged.items():
-        bits, _, _, center, radius, _, labels, outside = judgment
+        bits, low, high, center, radius, _, labels, outside = judgment
         for batch, row, head, dim in zip(*np.nonzero(outside)):
             query = queries[row]
             if selected is not None:
                 label = P4Label.NUMERICAL
             else:
+                stored = int(bits[batch, row, head, dim])
                 label = _attribute(
                     case,
                     exposure,
                     query,
                     int(head),
                     int(dim),
-                    int(bits[batch, row, head, dim]),
+                    stored,
+                    max(
+                        int(low[batch, row, head, dim]) - stored,
+                        stored - int(high[batch, row, head, dim]),
+                    ),
                     int(center[batch, row, head, dim]),
                     int(radius[batch, row, head, dim]),
                     basis_clean(batch, row, head),
