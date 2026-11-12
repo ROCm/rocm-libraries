@@ -882,6 +882,18 @@ inline bool fits_the_view(const ConvParams& par, const Config& cfg)
         return false;
     }
 
+    // Offsets into one group's formatted weights are ints counting 2-byte units
+    // (transpose_weights_kernel, WeightsLoader).
+    const int64_t formatted_weights_per_group =
+        static_cast<int64_t>(kp.kparts) * kp.per_xcd_blocks * cfg.block_k() *
+        direct_transpose_weights::make_divisible(reduction_chan,
+                                                 direct_transpose_weights::C_divisor) *
+        cfg.kd * par.kh * par.kw * (cfg.elem_bytes / 2);
+    if(formatted_weights_per_group > INT32_MAX)
+    {
+        return false;
+    }
+
     // Buffer-window size gate: partitions large-tensor from baseline configs.
     //
     // Buffer offsets and NUM_RECORDS are 32-bit. A baseline config folds only the
@@ -973,7 +985,8 @@ inline size_t custom_weights_tensor_size(const Config& cfg, const ConvParams& pa
                                            /*target_per_xcd=*/maximum(1, 512 / cfg.block_k()),
                                            /*pad_threshold=*/cfg.k_divisible ? blocks_k : 7);
     const int K_padded  = kp.kparts * kp.per_xcd_blocks * cfg.block_k();
-    const int C_padded  = direct_transpose_weights::make_divisible(reduction_chan, 64);
+    const int C_padded  = direct_transpose_weights::make_divisible(
+        reduction_chan, direct_transpose_weights::C_divisor);
     return static_cast<size_t>(par.groups) * K_padded * C_padded * cfg.kd * par.kh * par.kw *
            elem_size;
 }

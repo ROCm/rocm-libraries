@@ -32,10 +32,11 @@ inline AxisPhase axis_phase(int size, int k, int pad, int stride, int dilation, 
     return {f, taps, std::max(u1 - u0 + 1, 0), stride * u0 + f - pad, taps - 1 - u0};
 }
 
-// A dgrad's phases: the product of its strides.
+// A dgrad's phases: the product of its strides, each capped at MAX_PHASES + 1 to avoid overflow.
 inline int stride_phases(const ConvParams& layer)
 {
-    return layer.stride_h * layer.stride_w * (layer.dims == 3 ? layer.stride_d : 1);
+    const auto cap = [](int stride) { return std::min(stride, MAX_PHASES + 1); };
+    return cap(layer.stride_h) * cap(layer.stride_w) * (layer.dims == 3 ? cap(layer.stride_d) : 1);
 }
 
 // Whether a dgrad runs as phases: strided, or on positions outer.

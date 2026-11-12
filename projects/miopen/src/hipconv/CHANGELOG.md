@@ -132,9 +132,13 @@
   exactly the input loads it issued.
 * `direct` (CDNA 5) closes a race on the input ring it stages in LDS.
 * `direct` (CDNA 5) no longer crashes on layers with large padding.
+* `grouped_wgrad` (CDNA 5) 3 × 3 wgrad in fp16, bf16 and tf32 no longer races a Tensor Data Mover
+  load into LDS with the same wave's earlier LDS stores and loads, which could corrupt dW.
 * A Debug build compiles and links, with or without UBSan in `CMAKE_CXX_FLAGS_DEBUG`, and the
   build-time generators no longer need `libamdhip64` to run. Device code compiles at `-O3` in
   every build type, with no debug info beyond the line tables that `HIPCONV_LINE_TABLES` enables.
+* `direct` and `direct_l1` (CDNA 4) reject an fprop or dgrad layer whose weights per group take
+  4 GiB or more. Before, both accepted such a layer and the launch faulted.
 
 ## v0.4.0 - 2026-10-06
 

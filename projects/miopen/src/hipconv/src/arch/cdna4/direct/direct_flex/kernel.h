@@ -1431,9 +1431,9 @@ public:
                 return false;
             // A strided dgrad's phases take taps at the stride; no layer measured dilates too.
             const bool strided = stride_phases(layer) > 1;
-            const int dilation =
-                layer.dilation_h * layer.dilation_w * (depth ? layer.dilation_d : 1);
-            if(strided && (dilation > 1 || stride_phases(layer) > MAX_PHASES))
+            const bool dilated =
+                layer.dilation_h > 1 || layer.dilation_w > 1 || (depth && layer.dilation_d > 1);
+            if(strided && (dilated || stride_phases(layer) > MAX_PHASES))
                 return false;
             if(phased(layer) && !phases_fit(cfg_, layer))
                 return false;

@@ -750,7 +750,7 @@ public:
         const int64_t out_size_per_batch =
             sizeof_data_type(par.output_type) * p * q * par.groups * gk;
         const int64_t weights_size_per_group =
-            gk * par.kh * par.kw * gc * sizeof_data_type(par.weight_type);
+            static_cast<int64_t>(gk) * par.kh * par.kw * gc * sizeof_data_type(par.weight_type);
         // We have ">=" in the following because num_records = all 1's disables OOB check
         constexpr int64_t record_limit = (int64_t{1} << 32) - 1;
         if(in_size_per_batch * cfg_.tile_size_n >= record_limit)
