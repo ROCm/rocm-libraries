@@ -286,10 +286,6 @@ class SchedulerConfig:
     # scale cadence.  The preloop correspondingly seeds a complete n+1 A/B
     # epoch so the first steady-state wrap has a producer.
     uniformPgrEpoch: bool = False
-    # Maximum number of atomic A/B VMEM requests in each non-frontier uniform
-    # epoch cohort, and in the partition-zero overwrite cohort.  The chunk is
-    # not reduced to a partition's MFMA count.
-    uniformEpochVmemCohortSize: int = 5
     # Physical traversal of the 2-D partition grid.  "m-major" preserves the
     # legacy order (M varies fastest).  "n-major" visits the 2x2 grid as
     # c00,c01,c10,c11 (N varies fastest).
@@ -404,8 +400,6 @@ class SchedulerConfig:
                 "uniformPgrEpoch currently requires PrefetchGlobalRead=2"
             assert self.prefetchNextPartition, \
                 "uniformPgrEpoch requires partition-directed prefetch"
-        assert self.uniformEpochVmemCohortSize >= 1, \
-            "uniformEpochVmemCohortSize must be >= 1"
 
         assert self.scaleReuse >= 1, f"scaleReuse must be >= 1, got {self.scaleReuse}"
         # Dual-period MXFP8: the scale epoch (256 K) spans scaleReuse data
@@ -463,6 +457,18 @@ class SchedulerConfig:
         self._prefixN = self._build_prefix(self._partitionSizesN)
         assert self.partitionOrder in ("m-major", "n-major"), \
             f"partitionOrder must be m-major or n-major, got {self.partitionOrder}"
+        if self.uniformPgrEpoch:
+            # The derived cohort exists to make the epoch span the slots
+            # without saturating the last one.  State that as the contract so
+            # a future change to either side has to keep it.  Needs the
+            # partition sizes, hence its position here.
+            slots = self.numPartitions * self.numSubIterK
+            atoms = self.uniformEpochVmemAtoms
+            cohort = self.uniformEpochVmemCohortSize
+            assert cohort >= 1, "uniform epoch cohort must be >= 1"
+            assert (atoms - 1) // cohort <= slots - 1, \
+                (f"uniform epoch cohort {cohort} overflows the last of "
+                 f"{slots} slots with {atoms} atoms")
 
         # plr=-1 auto-derives from pgr (legacy: 0 when pgr==0, else 1).
         if self.plr == -1:
@@ -552,6 +558,39 @@ class SchedulerConfig:
     @property
     def numPartitions(self) -> int:
         return self.numPartitionsM * self.numPartitionsN
+
+    @property
+    def uniformEpochVmemAtoms(self) -> int:
+        """Atomic VMEM requests one uniform epoch issues.
+
+        A and B contribute one request per `gr*.mn` tiles; the two scale
+        tensors contribute one each, since a scale dword covers the whole
+        epoch.  This is the closed form of what _distribute_grs explodes the
+        epoch's GR entries into.
+        """
+        atoms = (-(-self.numMFMATilesM // self.grA.mn)
+                 + -(-self.numMFMATilesN // self.grB.mn))
+        return atoms + (2 if self.hasScale else 0)
+
+    @property
+    def uniformEpochVmemCohortSize(self) -> int:
+        """Atomic A/B VMEM requests per non-frontier cohort.
+
+        _distribute_grs sends atom i to slot `i // cohort`, so the epoch
+        spans every slot exactly when the cohort is the atom count divided
+        over the slots.  A larger cohort leaves late slots empty and piles
+        the epoch into the early ones; a smaller one overflows the last slot,
+        because the slot index saturates.
+
+        The same width selects the partition-zero overwrite cohort, so it
+        also decides how many current-epoch local reads get hoisted ahead of
+        the first future write -- and hoisted reads serialize against the
+        MFMAs they were previously interleaved with.  Deriving the width
+        rather than fixing it keeps that hoist no larger than the overwrite
+        it has to protect.
+        """
+        slots = self.numPartitions * self.numSubIterK
+        return max(1, -(-self.uniformEpochVmemAtoms // slots))
 
     def partition_coords(self, pi: int) -> Tuple[int, int]:
         """Return (M-partition, N-partition) in configured execution order."""
