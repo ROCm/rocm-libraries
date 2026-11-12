@@ -3,12 +3,14 @@
 
 """Packaging adapter for the shape-generic AOT backward-data convolution engines.
 
-Two engines share it, one per architecture (:data:`TARGETS`):
-``hipkernel:Gfx950ConvDgradAot`` (wave64) and ``hipkernel:Gfx1250ConvDgradAot``
-(wave32). Each has one flat descriptor spec (:class:`Gfx950ConvDgradAotSpec`,
+Three engines share it, one per architecture (:data:`TARGETS`):
+``hipkernel:Gfx950ConvDgradAot`` and ``hipkernel:Gfx942ConvDgradAot`` (wave64) and
+``hipkernel:Gfx1250ConvDgradAot`` (wave32). Each has one flat descriptor spec
+(:class:`Gfx950ConvDgradAotSpec`, :class:`Gfx942ConvDgradAotSpec`,
 :class:`Gfx1250ConvDgradAotSpec`, every field an ``int`` or ``str``) per rocKE
 ``KernelIdentity`` of its dgrad AOT sweeps, built exactly as the sweeps build it, so
 the packaged IR is the swept kernel's byte for byte apart from its symbol name. The
+gfx942 spec is the gfx950 one plus the streaming depthwise channels per lane; the
 gfx1250 spec is the gfx950 one plus the knobs of its own pipelines.
 
 The contract is 2-D cross-correlation, NHWK dY, KYXC W, NHWC dX, uniform fp16/bf16,
@@ -21,14 +23,14 @@ fp32 accumulation, symmetric padding. Three families are packaged:
   dY-halo, tap-outer K loop and patch forms serve only the problems they compute. The
   ABI is the 44-argument dgrad block of ``kernels.common.conv_abi``.
 * **Direct** (``kernel_family`` 1), the dgrad pipelines of rocKE's direct sweep. On
-  both architectures ``depthwise_dgrad`` and ``depthwise_dgrad_win`` (the direct dgrad
-  ABI). On gfx950 ``grouped_dgrad_fused`` and ``grouped_dgrad_4c`` (one forward kernel
-  over the transposed problem reading the original weights), and the MFMA pipelines
-  ``grouped_dgrad_mfma`` / ``dgrad_mfma_rtc`` (weight transforms into the workspace,
-  then a forward kernel over the transposed problem). On gfx1250 the wave32 WMMA
-  pipelines ``dgrad_wmma``, ``dgrad_smallc_wmma`` and ``dgrad_patch_wmma`` (one
-  launch each, the direct dgrad ABI).
-* **MFMA helpers** (``kernel_family`` 2, gfx950): the weight transforms the MFMA
+  every architecture ``depthwise_dgrad`` and ``depthwise_dgrad_win`` (the direct
+  dgrad ABI). On gfx950 and gfx942 ``grouped_dgrad_fused`` and ``grouped_dgrad_4c``
+  (one forward kernel over the transposed problem reading the original weights), and
+  the MFMA pipelines ``grouped_dgrad_mfma`` / ``dgrad_mfma_rtc`` (weight transforms
+  into the workspace, then a forward kernel over the transposed problem). On gfx1250
+  the wave32 WMMA pipelines ``dgrad_wmma``, ``dgrad_smallc_wmma`` and
+  ``dgrad_patch_wmma`` (one launch each, the direct dgrad ABI).
+* **MFMA helpers** (``kernel_family`` 2, gfx950 and gfx942): the weight transforms the MFMA
   pipelines launch. They are packaged so the pipeline's handler can load them, and
   never serve a problem on their own.
 
@@ -197,6 +199,27 @@ TARGETS = {
             "direct_dgrad_reorganize",
         ),
     ),
+    "gfx942": ConvDgradAotTarget(
+        arch="gfx942",
+        engine="hipkernel:Gfx942ConvDgradAot",
+        wave_size=64,
+        llvm_flavor=DEFAULT_LLVM_FLAVORS["gfx942"],
+        # gfx950's pipelines and direct algorithms; its instances leave every
+        # gfx950-only instruction (16x16x32 MFMA, ds_read_tr) off.
+        pipelines=("mem", "compv3", "compv4"),
+        direct_algorithms=(
+            "direct_depthwise_dgrad",
+            "direct_depthwise_dgrad_win",
+            "direct_grouped_dgrad_mfma",
+            "direct_dgrad_mfma_rtc",
+            "direct_grouped_dgrad_fused",
+            "direct_grouped_dgrad_4c",
+            "direct_dgrad_transpose_rtc",
+            "direct_dgrad_reorganize_rtc",
+            "direct_dgrad_transpose",
+            "direct_dgrad_reorganize",
+        ),
+    ),
     "gfx1250": ConvDgradAotTarget(
         arch="gfx1250",
         engine="hipkernel:Gfx1250ConvDgradAot",
@@ -337,6 +360,12 @@ GFX1250_DGRAD_DIRECT_KNOBS = {
     DIRECT_VARIANT_SMALLC_WMMA: {**_WMMA_KNOBS, "out_h": "out_h", "out_w": "out_w"},
     DIRECT_VARIANT_PATCH_WMMA: {**_WMMA_KNOBS, "r_blk": "r_blk", "tile_w": "tile_w"},
 }
+#: gfx942's knob table: gfx950's, with the streaming depthwise pipeline's
+#: channels per lane as on gfx1250.
+GFX942_DGRAD_DIRECT_KNOBS = {
+    **AOT_DGRAD_DIRECT_KNOBS,
+    DIRECT_VARIANT_DEPTHWISE: GFX1250_DGRAD_DIRECT_KNOBS[DIRECT_VARIANT_DEPTHWISE],
+}
 #: Knobs whose 0 is a value rather than "not stated": no LDS padding, and the
 #: unset occupancy hint.
 _ZERO_IS_A_VALUE = ("lds_pad", "waves_per_eu")
@@ -388,6 +417,8 @@ _KNOB_DEFAULTS = {
     "xcd_tiles": 0,
     "stage_rows": 0,
 }
+#: gfx942's block knobs: gfx950's, then the streaming depthwise channels per lane.
+_GFX942_KNOB_DEFAULTS = {**_KNOB_DEFAULTS, "cpl": 0}
 #: gfx1250's block knobs: gfx950's, then the ones its own pipelines add.
 _GFX1250_KNOB_DEFAULTS = {
     **_KNOB_DEFAULTS,
@@ -1076,6 +1107,20 @@ class Gfx950ConvDgradAotSpec(ConvDgradAotSpec):
 
 
 @dataclass(frozen=True)
+class Gfx942ConvDgradAotSpec(ConvDgradAotSpec):
+    """An instance of hipkernel:Gfx942ConvDgradAot: the shared fields, then the
+    streaming depthwise pipeline's channels per lane
+    (:data:`GFX942_DGRAD_DIRECT_KNOBS`)."""
+
+    ARCH: ClassVar[str] = "gfx942"
+    DIRECT_KNOBS: ClassVar[dict] = GFX942_DGRAD_DIRECT_KNOBS
+    KNOB_DEFAULTS: ClassVar[dict] = _GFX942_KNOB_DEFAULTS
+
+    # Streaming depthwise: channels per lane.
+    cpl: int = 0
+
+
+@dataclass(frozen=True)
 class Gfx1250ConvDgradAotSpec(ConvDgradAotSpec):
     """An instance of hipkernel:Gfx1250ConvDgradAot: the shared fields, then the
     knobs of gfx1250's own pipelines (:data:`GFX1250_DGRAD_DIRECT_KNOBS`). Its
@@ -1108,7 +1153,12 @@ class Gfx1250ConvDgradAotSpec(ConvDgradAotSpec):
 
 #: The spec class of each packaged engine, by architecture.
 SPEC_CLASSES: dict[str, type[ConvDgradAotSpec]] = {
-    cls.ARCH: cls for cls in (Gfx950ConvDgradAotSpec, Gfx1250ConvDgradAotSpec)
+    cls.ARCH: cls
+    for cls in (
+        Gfx950ConvDgradAotSpec,
+        Gfx942ConvDgradAotSpec,
+        Gfx1250ConvDgradAotSpec,
+    )
 }
 
 
@@ -1973,7 +2023,7 @@ def _require_packaged_flavor(target: ConvDgradAotTarget) -> None:
     """Refuse to package under an LLVM older than the catalog's.
 
     The catalog's instances are the kernels the rocKE sweep measured, lowered for
-    the target's flavor (gfx950 ``llvm22``, gfx1250 ``llvm24``) and compiled by a
+    the target's flavor (gfx950 and gfx942 ``llvm22``, gfx1250 ``llvm24``) and compiled by a
     COMGR of that LLVM or newer. A pack step that resolves an older COMGR -- the ROCm
     the build found, rather than the one the sweep ran -- lowers for its flavor and
     gets that LLVM's code generation: the same configuration, but compiled to more
@@ -2039,6 +2089,14 @@ def supports_gfx950_conv_dgrad_aot(
     return supports_conv_dgrad_aot(spec, arch=arch)
 
 
+def supports_gfx942_conv_dgrad_aot(
+    spec: Gfx942ConvDgradAotSpec, *, arch: str = "gfx942"
+) -> tuple[bool, str]:
+    """The support predicate hkp_pack resolves for
+    :func:`build_gfx942_conv_dgrad_aot`: :func:`supports_conv_dgrad_aot`."""
+    return supports_conv_dgrad_aot(spec, arch=arch)
+
+
 def supports_gfx1250_conv_dgrad_aot(
     spec: Gfx1250ConvDgradAotSpec, *, arch: str = "gfx1250"
 ) -> tuple[bool, str]:
@@ -2052,6 +2110,14 @@ def build_gfx950_conv_dgrad_aot(
 ) -> KernelDef:
     """The typed ``(spec, *, arch)`` entry point hkp_pack calls for an instance of
     hipkernel:Gfx950ConvDgradAot."""
+    return _build_conv_dgrad_aot(spec, arch)
+
+
+def build_gfx942_conv_dgrad_aot(
+    spec: Gfx942ConvDgradAotSpec, *, arch: str = "gfx942"
+) -> KernelDef:
+    """The typed ``(spec, *, arch)`` entry point hkp_pack calls for an instance of
+    hipkernel:Gfx942ConvDgradAot."""
     return _build_conv_dgrad_aot(spec, arch)
 
 

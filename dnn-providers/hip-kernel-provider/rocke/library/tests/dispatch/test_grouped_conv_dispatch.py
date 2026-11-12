@@ -338,7 +338,7 @@ def test_default_llvm_flavor_is_the_registered_one():
         assert _req(arch=arch).normalized()["llvm_flavor"] == (
             gc.DEFAULT_LLVM_FLAVORS[arch]
         )
-    assert _req(arch="gfx942").resolved_llvm_flavor() == gc.DEFAULT_LLVM_FLAVOR
+    assert _req(arch="gfx90a").resolved_llvm_flavor() == gc.DEFAULT_LLVM_FLAVOR
     named = _req(arch="gfx1250", llvm_flavor="llvm23")
     assert named.resolved_llvm_flavor() == "llvm23"
     assert named.normalized()["llvm_flavor"] == "llvm23"
