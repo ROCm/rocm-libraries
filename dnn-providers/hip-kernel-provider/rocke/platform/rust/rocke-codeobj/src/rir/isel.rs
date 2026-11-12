@@ -1873,7 +1873,16 @@ impl<'a> Isel<'a> {
             // rustgemm: the AGPR pin is an identity here (the allocator picks the file).
             InlineAsmIdentity if op.asm_pin() == Some('a') => self.agpr_pin(op)?,
             InlineAsmIdentity if op.asm_pin() == Some('s') => {
-                // The SGPR pin (`device_ops.fresh_s`): the value in an SGPR, unchanged.
+                // The SGPR pin (`device_ops.fresh_s`): the value in an SGPR, unchanged; a pointer in an SGPR pair.
+                if let Type::Ptr(_) = self.k.ty(op.operands[0]) {
+                    let (lo, hi) = self.d(op.operands[0])?;
+                    if self.is_v(lo) || self.is_v(hi) {
+                        return Err(unsupported("an \"=s,0\" pin of a pointer in VGPRs"));
+                    }
+                    let (lo, hi) = (self.to_s(lo), self.to_s(hi));
+                    self.set(res.unwrap(), Val::D(lo, hi));
+                    return Ok(());
+                }
                 let x = self.w(op.operands[0])?;
                 if self.is_v(x) {
                     return Err(unsupported("an \"=s,0\" pin of a value in VGPRs"));
@@ -1949,7 +1958,7 @@ impl<'a> Isel<'a> {
             // It only orders instructions, so emitting nothing is correct.
             IglpOpt => {}
             LAtomicAdd => self.lds_atomic_add(op)?,
-            DppXor | QuadPerm | MovDpp8 => {
+            DppXor | QuadPerm | DppRowMirror | MovDpp8 => {
                 let (opc, ctrl) = match op.kind {
                     DppXor => match op.int_attr("xor_mask") {
                         Some(mask @ 1..=15) if self.t.target == Target::Gfx950 => match isel_hooks::xor_shuffle(mask as u32) {
@@ -1962,6 +1971,10 @@ impl<'a> Isel<'a> {
                     QuadPerm => match op.int_attr("ctrl") {
                         Some(ctrl @ 0..=255) => (Opc::VMovB32Dpp, dpp16_ctrl(ctrl as u32, true)),
                         _ => return Err(unsupported("tile.quad_perm ctrl outside 0..255")),
+                    },
+                    DppRowMirror => match op.int_attr("ctrl") {
+                        Some(ctrl @ 0x140..=0x141) => (Opc::VMovB32Dpp, dpp16_ctrl(ctrl as u32, true)),
+                        _ => return Err(unsupported("tile.dpp_row_mirror ctrl is not 0x140 or 0x141")),
                     },
                     _ => match op.int_attr("sel") {
                         Some(sel) => {
@@ -3164,6 +3177,9 @@ impl<'a> Isel<'a> {
             Scalar::F32 => (Opc::GAtomicAddF32, Opc::GAtomicAddF32Rtn),
             Scalar::F16 if self.t.target == Target::Gfx950 && *self.k.ty(value) == Type::Vec(Scalar::F16, 2) => {
                 crate::target::gfx9::conv_ops::pk_add_f16()
+            }
+            Scalar::BF16 if self.t.target == Target::Gfx950 && *self.k.ty(value) == Type::Vec(Scalar::BF16, 2) => {
+                crate::target::gfx9::conv_ops::pk_add_bf16()
             }
             other => return Err(unsupported(format!("memref.global_atomic_add of {other:?}"))),
         };
@@ -7386,22 +7402,50 @@ mod convmem_tests {
         text.replacen(from, to, 1)
     }
 
+    /// An `"=s,0"` pin of a pointer (the split-dQ kernels' slab pointers) keeps the pair in SGPRs and emits nothing.
+    #[test]
+    fn an_sgpr_pin_of_a_pointer_is_an_identity() {
+        let params = "    %X : ptr<i32,global>\n    %Y : ptr<i32,global>\n";
+        let body = r#"    %p : ptr<i32,global> = tile.inline_asm ( %X ) { constraints = s:"=s,0", convergent = b:false, sideeffect = b:false, template = s:"" }
+    %x : i32 = memref.global_load_typed ( %p, %tid ) { align = i:4, elem_type = s:"i32" }
+    memref.global_store_typed ( %Y, %tid, %x ) { align = i:4, elem_type = s:"i32" }
+"#;
+        let plain = body.replace("%p : ptr<i32,global> = tile.inline_asm ( %X ) { constraints = s:\"=s,0\", convergent = b:false, sideeffect = b:false, template = s:\"\" }\n", "").replace("( %p,", "( %X,");
+        let pinned = insts(&kernel(params, body));
+        let direct = insts(&kernel(params, &plain));
+        // The pin adds no instruction, and the load's base pair is in SGPRs.
+        assert_eq!(pinned.len(), direct.len());
+        let load = pinned.iter().find(|i| i.op == Opc::GLoadB32).expect("a global load");
+        assert!(load.mods & M_SADDR != 0, "{load:?}");
+        // A pointer that lives in VGPRs (an address made from a lane value) is refused.
+        let lane = r#"    %w : i64 = arith.zext ( %tid )
+    %q : ptr<i32,global> = tile.global_ptr_add ( %X, %w )
+    %p : ptr<i32,global> = tile.inline_asm ( %q ) { constraints = s:"=s,0", convergent = b:false, sideeffect = b:false, template = s:"" }
+    %x : i32 = memref.global_load_typed ( %p, %tid ) { align = i:4, elem_type = s:"i32" }
+    memref.global_store_typed ( %Y, %tid, %x ) { align = i:4, elem_type = s:"i32" }
+"#;
+        assert!(compiled(&kernel(params, lane)).is_err());
+    }
+
     #[test]
     fn dpp_moves_carry_their_control_words() {
         let params = "    %X : ptr<i32,global>\n    %Y : ptr<i32,global>\n";
         let body = r#"    %x : i32 = memref.global_load_typed ( %X, %tid ) { align = i:4, elem_type = s:"i32" }
     %a : i32 = tile.dpp_xor ( %x ) { xor_mask = i:1 }
     %b : i32 = tile.quad_perm ( %a ) { ctrl = i:177 }
-    %c : i32 = tile.mov_dpp8 ( %b ) { sel = i:14570689 }
+    %m : i32 = tile.dpp_row_mirror ( %b ) { ctrl = i:320 }
+    %h : i32 = tile.dpp_row_mirror ( %m ) { ctrl = i:321 }
+    %c : i32 = tile.mov_dpp8 ( %h ) { sel = i:14570689 }
     memref.global_store_typed ( %Y, %tid, %c ) { align = i:4, elem_type = s:"i32" }
 "#;
         let text = kernel(params, body);
         let insts = insts(&text);
         let dpp: Vec<i64> = all(&insts, Opc::VMovB32Dpp).iter().map(|i| i.imm).collect();
-        assert_eq!(dpp, [dpp16_ctrl(0x161, true) as i64, dpp16_ctrl(177, true) as i64]);
+        assert_eq!(dpp, [0x161, 177, 0x140, 0x141].map(|c| dpp16_ctrl(c, true) as i64));
         assert_eq!(all(&insts, Opc::VMovB32Dpp8)[0].imm, 0xde_54c1);
         assert!(compiled(&text_with(&text, "xor_mask = i:1", "xor_mask = i:16")).is_err());
         assert!(compiled(&text_with(&text, "ctrl = i:177", "ctrl = i:256")).is_err());
+        assert!(compiled(&text_with(&text, "ctrl = i:320", "ctrl = i:322")).is_err());
     }
 
     /// Encodings checked against `llvm-mc -arch=amdgcn -mcpu=gfx1151 -show-encoding`.

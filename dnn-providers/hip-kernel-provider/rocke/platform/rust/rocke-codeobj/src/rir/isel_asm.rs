@@ -24,6 +24,9 @@
 use super::*;
 use crate::target::gfx9::gen_isa as t;
 
+/// The KiB of LDS (past any allocation: gfx950 has 160 KiB) that the DMA loads of a template are tagged with.
+const UNTRACKED_DMA_KIB: u32 = 254;
+
 /// One constraint of the string, outputs first.
 #[derive(Clone, Copy, Debug)]
 enum Constraint {
@@ -176,7 +179,7 @@ impl Isel<'_> {
     pub(super) fn inline_asm(&mut self, op: &Op) -> Result<(), CompileError> {
         let template = op.str_attr("template").unwrap_or("").to_string();
         let (constraints, clobbers) = parse_constraints(op.str_attr("constraints").unwrap_or(""))?;
-        if let Some(c) = clobbers.iter().find(|c| !matches!(c.as_str(), "memory" | "scc" | "vcc")) {
+        if let Some(c) = clobbers.iter().find(|c| !matches!(c.as_str(), "memory" | "scc" | "vcc" | "m0")) {
             return Err(unsupported(format!("inline asm clobber {c:?}")));
         }
         let fence = clobbers.iter().any(|c| c == "memory");
@@ -348,6 +351,7 @@ impl Isel<'_> {
             match text {
                 "exec" => return Ok(s.exec()),
                 "vcc" => return Ok(s.vcc()),
+                "m0" => return Ok(Opnd::P(Phys::M0, 1)),
                 _ => {}
             }
             // A raw VGPR name: only inside a fixed output (`{v[a:b]}`), as that output's dwords.
@@ -497,6 +501,26 @@ impl Isel<'_> {
             self.emit(inst.with_imm(offset));
             return Ok(None);
         }
+        // `global_load_lds_dword[x4] voffset, saddr`: an LDS DMA through M0 (the template's own `s_mov_b32 m0`),
+        // kept out of the compiler's LDS-wait tracking as LLVM does for an opaque block: the kernel's explicit
+        // `s_waitcnt`s order it, so its tag is a KiB range no allocation uses.
+        if let Some(width) = mnemonic.strip_prefix("global_load_lds_dword") {
+            let opc = match width {
+                "" => Opc::Gfx9(t::Gfx9Op::GLoadLdsB32),
+                "x4" => Opc::Gfx9(t::Gfx9Op::GLoadLdsB128),
+                _ => return Err(unsupported(format!("inline asm {mnemonic}"))),
+            };
+            let [voffset, saddr] = operands else {
+                return Err(unsupported(format!("inline asm {mnemonic} with {} operands", operands.len())));
+            };
+            if !mods.is_empty() {
+                return Err(unsupported(format!("inline asm {mnemonic} modifiers {mods:?}")));
+            }
+            let (voffset, saddr) = (opnd(self, voffset)?, opnd(self, saddr)?);
+            let tag = crate::target::gfx9::lds_dma::tag(UNTRACKED_DMA_KIB * 1024, 1024);
+            self.emit(MInst::new(opc, [], [voffset, saddr]).with_mods(M_SADDR).with_mem(tag));
+            return Ok(None);
+        }
         if let Some(width) = mnemonic.strip_prefix("global_load_dword").or_else(|| mnemonic.strip_prefix("global_store_dword")) {
             let store = mnemonic.starts_with("global_store");
             let opc = match (store, width) {
@@ -586,5 +610,29 @@ mod tests {
         assert_eq!(opcode_of("v_cmp_lt_u32_e64", 3).map(|o| matches!(o, Opc::VCmp(_))), Some(true));
         assert_eq!(opcode_of("s_addc_u32", 3), Some(Opc::SAddcU32));
         assert_eq!(opcode_of("v_readfirstlane_b32", 2), Some(Opc::VReadfirstlaneB32));
+    }
+
+    /// rocKE's DMA-ring asm (`_attention_bwd_ring._ASM_X4`): M0 from an SGPR, a wait state, `global_load_lds_dwordx4`
+    /// through a 32-bit VGPR offset and an SGPR pair. It compiles on gfx950 to the instructions llvm-mc encodes.
+    #[test]
+    fn the_dma_ring_asm_is_an_lds_dma_through_m0() {
+        let text = "ckdsl.ir v1\nkernel @ring {\n  attrs { max_workgroup_size = i:64 }\n  params {\n    %X : ptr<bf16,global>\n    %Y : ptr<i32,global>\n  }\n  region @entry {\n    \
+                    %tid : i32 = gpu.thread_id (  ) { axis = s:\"x\" }\n    %c4 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:4 }\n    \
+                    %voff : i32 = arith.shl ( %tid, %c4 )\n    %lds : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:40960 }\n    \
+                    tile.inline_asm ( %voff, %lds, %X ) { constraints = s:\"v,s,s,~{m0},~{memory}\", sideeffect = b:true, template = s:\"s_mov_b32 m0, $1\\n\\ts_nop 0\\n\\tglobal_load_lds_dwordx4 $0, $2\" }\n    \
+                    tile.inline_asm ( %voff, %lds, %X ) { constraints = s:\"v,s,s,~{m0},~{memory}\", sideeffect = b:true, template = s:\"s_mov_b32 m0, $1\\n\\ts_nop 0\\n\\tglobal_load_lds_dword $0, $2\" }\n    \
+                    memref.global_store_typed ( %Y, %tid, %tid ) { align = i:4, elem_type = s:\"i32\" }\n    cf.return (  )\n  }\n}\n";
+        let listing = crate::rir::compile_any_target(text, crate::target::Target::Gfx950).unwrap_or_else(|e| panic!("{e}")).listing();
+        let at = |name: &str| listing.lines().position(|l| l.trim_start().starts_with(name)).unwrap_or_else(|| panic!("{name}:\n{listing}"));
+        let lines: Vec<&str> = listing.lines().collect();
+        for (mnemonic, opcode) in [("global_load_lds_dwordx4", 0x7d), ("global_load_lds_dword ", 0x2a)] {
+            let i = at(mnemonic);
+            let words: Vec<u32> = lines[i].rsplit(": ").next().unwrap().split_whitespace().map(|w| u32::from_str_radix(w, 16).unwrap()).collect();
+            // GLOBAL (segment 2), the saddr form: no `off` in the saddr field.
+            assert_eq!((words[0] >> 26, words[0] >> 14 & 3, words[0] >> 18 & 0x7f), (0x37, 2, opcode), "{}", lines[i]);
+            assert_ne!(words[1] >> 16 & 0x7f, 0x7f, "saddr is a register pair: {}", lines[i]);
+            // M0 is written before it, with a wait state between (the template's own).
+            assert!(lines[..i].iter().rev().take(4).any(|l| l.contains("s_mov_b32 m0")), "{listing}");
+        }
     }
 }

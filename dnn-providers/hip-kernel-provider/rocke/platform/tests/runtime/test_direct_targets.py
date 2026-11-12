@@ -7,7 +7,11 @@ and compile_kernel then builds the kernel with COMGR."""
 
 from __future__ import annotations
 
+import os
+import shutil
 import struct
+import subprocess
+import tempfile
 
 import pytest
 from rocke.core.ir import F32, IRBuilder, PtrType
@@ -36,6 +40,29 @@ _PERMLANE = _PROBE.replace(
     "BODY",
     "    %p : i32 = tile.permlane64 ( %tid )\n    %e : f32 = arith.bitcast ( %p )\n",
 )
+
+
+_LOWERED = """ckdsl.ir v1
+kernel @lowered_probe {
+  attrs { max_workgroup_size = i:64 }
+  params {
+    %Y : ptr<bf16,global>
+    %Z : ptr<i32,global>
+  }
+  region @entry {
+    %tid : i32 = gpu.thread_id (  ) { axis = s:"x" }
+    %c2 : i32 = arith.constant (  ) { ity = s:"i32", value = i:2 }
+    %i : i32 = arith.mul ( %tid, %c2 )
+    %v : vec<bf16x2> = memref.global_load_vN ( %Y, %i ) { align = i:4, elem_type = s:"bf16", vec = i:2 }
+    %old : vec<bf16x2> = memref.global_atomic_add_pk_bf16 ( %Y, %i, %v ) { elem_type = s:"bf16", ordering = s:"monotonic", vec = i:2 }
+    %w : i32 = arith.bitcast ( %old )
+    %m : i32 = tile.dpp_row_mirror ( %w ) { ctrl = i:320 }
+    %h : i32 = tile.dpp_row_mirror ( %m ) { ctrl = i:321 }
+    memref.global_store_typed ( %Z, %tid, %h ) { align = i:4, elem_type = s:"i32" }
+    cf.return (  )
+  }
+}
+"""
 
 
 def _require_direct_library() -> None:
@@ -91,6 +118,31 @@ def test_unsupported_targets_and_operations_are_direct_unsupported() -> None:
     assert not isinstance(raised.value, DirectUnsupported)
 
 
+def test_packed_bf16_atomic_and_dpp_row_mirror_lower_on_gfx950() -> None:
+    _require_direct_library()
+    hsaco, _timings, _info, _diagnostics = code_object.build_direct_rocke_ir_hsaco(
+        _LOWERED, isa=GFX950
+    )
+    assert _e_flags(hsaco) == 0x54F
+    objdump = shutil.which("llvm-objdump") or "/opt/rocm/llvm/bin/llvm-objdump"
+    if not os.path.exists(objdump):
+        return
+    with tempfile.NamedTemporaryFile(suffix=".hsaco") as f:
+        f.write(hsaco)
+        f.flush()
+        text = subprocess.run(
+            [objdump, "-d", "--mcpu=gfx950", f.name],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+    assert "global_atomic_pk_add_bf16" in text
+    assert "row_mirror" in text and "row_half_mirror" in text
+    # gfx1151 has no packed bf16 atomic.
+    with pytest.raises(DirectUnsupported):
+        code_object.build_direct_rocke_ir_hsaco(_LOWERED)
+
+
 def test_sessions_compile_for_their_target() -> None:
     _require_direct_library()
     plain = code_object.build_direct_rocke_ir_hsaco(_SUPPORTED, isa=GFX950)[0]
@@ -120,7 +172,9 @@ def _asm_kernel():
     x = b.param("X", PtrType(F32, "global"), noalias=True, readonly=True, align=16)
     y = b.param("Y", PtrType(F32, "global"), noalias=True, writeonly=True, align=16)
     tid = b.thread_id_x()
-    moved = b.inline_asm("v_mov_b32_sdwa $0, $1 dst_sel:WORD_1", "=v,v", [b.global_load_f32(x, tid)], F32)
+    moved = b.inline_asm(
+        "v_mov_b32_sdwa $0, $1 dst_sel:WORD_1", "=v,v", [b.global_load_f32(x, tid)], F32
+    )
     b.global_store(y, tid, moved, align=4)
     return b.kernel
 
@@ -158,7 +212,9 @@ def test_a_kernels_direct_levers_apply_to_its_compile_only(monkeypatch) -> None:
     assert via_attr.code_object_backend == "direct", via_attr.direct_fallback
     assert "ROCKE_DIRECT_LEVERS" not in os.environ
     monkeypatch.setenv("ROCKE_DIRECT_LEVERS", "litreuse,litshare")
-    via_env = compile_kernel(_scale_kernel(), arch="gfx950", code_object_backend="direct")
+    via_env = compile_kernel(
+        _scale_kernel(), arch="gfx950", code_object_backend="direct"
+    )
     assert via_attr.hsaco == via_env.hsaco
     # The environment's levers stay when the kernel names its own.
     tagged = _scale_kernel()
@@ -182,7 +238,9 @@ def _scoped_scale_kernel(levers):
     y = b.param("Y", PtrType(F32, "global"), noalias=True, writeonly=True, align=16)
     with b.lever_scope(levers):
         tid = b.thread_id_x()
-        b.global_store(y, tid, b.fmul(b.global_load_f32(x, tid), b.const_f32(2.0)), align=4)
+        b.global_store(
+            y, tid, b.fmul(b.global_load_f32(x, tid), b.const_f32(2.0)), align=4
+        )
     return b.kernel
 
 
@@ -212,7 +270,9 @@ def test_lever_scopes_leave_the_llvm_lowering_alone() -> None:
     from rocke.core.lower_llvm import lower_kernel_to_llvm
 
     plain = lower_kernel_to_llvm(_scale_kernel(), arch="gfx950", llvm_flavor="llvm22")
-    scoped = lower_kernel_to_llvm(_scoped_scale_kernel("nofence,litreuse"), arch="gfx950", llvm_flavor="llvm22")
+    scoped = lower_kernel_to_llvm(
+        _scoped_scale_kernel("nofence,litreuse"), arch="gfx950", llvm_flavor="llvm22"
+    )
     assert plain == scoped
 
 
@@ -221,13 +281,19 @@ def test_a_scope_over_every_op_is_the_kernels_levers(monkeypatch) -> None:
     _require_direct_library()
     monkeypatch.delenv("ROCKE_DIRECT_LEVERS", raising=False)
     levers = "litreuse,litshare,minmax,vmemfirst"
-    scoped = compile_kernel(_scoped_scale_kernel(levers), arch="gfx950", code_object_backend="direct")
+    scoped = compile_kernel(
+        _scoped_scale_kernel(levers), arch="gfx950", code_object_backend="direct"
+    )
     assert scoped.code_object_backend == "direct", scoped.direct_fallback
     monkeypatch.setenv("ROCKE_DIRECT_LEVERS", levers)
-    via_env = compile_kernel(_scale_kernel(), arch="gfx950", code_object_backend="direct")
+    via_env = compile_kernel(
+        _scale_kernel(), arch="gfx950", code_object_backend="direct"
+    )
     assert scoped.hsaco == via_env.hsaco
     off = ",".join("-" + x for x in levers.split(","))
-    undone = compile_kernel(_scoped_scale_kernel(off), arch="gfx950", code_object_backend="direct")
+    undone = compile_kernel(
+        _scoped_scale_kernel(off), arch="gfx950", code_object_backend="direct"
+    )
     monkeypatch.delenv("ROCKE_DIRECT_LEVERS")
     plain = compile_kernel(_scale_kernel(), arch="gfx950", code_object_backend="direct")
     assert undone.hsaco == plain.hsaco

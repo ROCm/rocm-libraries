@@ -14,7 +14,7 @@
 use crate::rir::mir::{Fmt, Opc};
 
 /// FNV-1a 64 of the description (line endings as LF) this file was generated from.
-pub const DESCRIPTION_DIGEST: u64 = 0xab912eb75fbf1138;
+pub const DESCRIPTION_DIGEST: u64 = 0xcf496b7147502b5c;
 
 // ----- operand codes -----
 
@@ -492,7 +492,7 @@ impl EncVop3pMai {
 // ----- per-opcode facts -----
 
 /// The opcodes with a gfx950 row, in description order (the `VCmp` family excluded).
-pub const ALL: [Opc; 332] = [
+pub const ALL: [Opc; 334] = [
     Opc::SMovB32, Opc::SMovB64, Opc::SNotB32, Opc::SNotB64, Opc::SAndSaveexecB64, Opc::SAddU32,
     Opc::SSubU32, Opc::SAddI32, Opc::SSubI32, Opc::SAddcU32, Opc::SSubbU32, Opc::SLshlB32,
     Opc::SLshlB64, Opc::SLshrB32, Opc::SLshrB64, Opc::SAshrI32, Opc::SAshrI64, Opc::SLshl1AddU32,
@@ -540,15 +540,15 @@ pub const ALL: [Opc; 332] = [
     Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf8Fp8), Opc::Gfx9(Gfx9Op::VMfma16x16x32Bf8Bf8), Opc::Gfx9(Gfx9Op::VMfma16x16x128F8f6f4), Opc::Gfx9(Gfx9Op::VMfma16x16x4F32), Opc::Gfx9(Gfx9Op::VMfma32x32x2F32), Opc::Gfx9(Gfx9Op::VMfma16x16x4F64),
     Opc::Gfx9(Gfx9Op::VMfma4x4x4F64), Opc::Gfx9(Gfx9Op::VMfmaScale32x32x64F8f6f4), Opc::Gfx9(Gfx9Op::BufLoadLdsB32), Opc::Gfx9(Gfx9Op::BufLoadLdsB128), Opc::Gfx9(Gfx9Op::GLoadLdsB32), Opc::Gfx9(Gfx9Op::GLoadLdsB128),
     Opc::Gfx9(Gfx9Op::DsReadB64TrB16), Opc::Gfx9(Gfx9Op::DsReadB64TrB8), Opc::Gfx9(Gfx9Op::VCvtF32Fp8), Opc::Gfx9(Gfx9Op::VCvtF32Bf8), Opc::Gfx9(Gfx9Op::VCvtPkF32Fp8), Opc::Gfx9(Gfx9Op::VCvtPkF32Bf8),
-    Opc::Gfx9(Gfx9Op::VCvtPkFp8F32), Opc::Gfx9(Gfx9Op::VCvtPkBf8F32), Opc::Gfx9(Gfx9Op::GAtomicPkAddF16), Opc::Gfx9(Gfx9Op::GAtomicPkAddF16Rtn), Opc::Gfx9(Gfx9Op::SGetregB32), Opc::Gfx9(Gfx9Op::SSleep),
-    Opc::Gfx9(Gfx9Op::SMemrealtime), Opc::Gfx9(Gfx9Op::GAtomicAddX2), Opc::Gfx9(Gfx9Op::GAtomicAddX2Rtn), Opc::Gfx9(Gfx9Op::VCvtScalef32PkBf16Fp4), Opc::Gfx9(Gfx9Op::KeepAlive), Opc::Gfx9(Gfx9Op::VAddU32Dpp),
-    Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp8F32), Opc::Gfx9(Gfx9Op::VCvtScalef32PkBf8F32), Opc::Gfx9(Gfx9Op::VMfmaScale16x16x128F8f6f4), Opc::Gfx9(Gfx9Op::VMaximum3F32), Opc::Gfx9(Gfx9Op::VBitop3B32), Opc::Gfx9(Gfx9Op::VBfiB32),
-    Opc::Gfx9(Gfx9Op::SBufLoadB32), Opc::Gfx9(Gfx9Op::SDcacheInv), Opc::Gfx9(Gfx9Op::VMovB32DppOld), Opc::Gfx9(Gfx9Op::VMaxU32DppOld), Opc::Gfx9(Gfx9Op::VCvtF64F32), Opc::Gfx9(Gfx9Op::VCvtF32F64),
-    Opc::Gfx9(Gfx9Op::VRsqF64), Opc::Gfx9(Gfx9Op::VSqrtF32), Opc::Gfx9(Gfx9Op::VBcntU32B32), Opc::Gfx9(Gfx9Op::SFf1I32B32), Opc::Gfx9(Gfx9Op::SMemtime), Opc::Gfx9(Gfx9Op::DsOrB32Raw),
-    Opc::Gfx9(Gfx9Op::DsWriteB32Raw), Opc::Gfx9(Gfx9Op::DsReadB32Raw), Opc::Gfx9(Gfx9Op::DsLoad2addrB32), Opc::Gfx9(Gfx9Op::VAddF32Dpp), Opc::Gfx9(Gfx9Op::VMulF32Dpp), Opc::Gfx9(Gfx9Op::VMaxF32Dpp),
-    Opc::Gfx9(Gfx9Op::VMaxU32Dpp), Opc::Gfx9(Gfx9Op::WaitRelease), Opc::Gfx9(Gfx9Op::VMaxI32Dpp), Opc::Gfx9(Gfx9Op::VMinI32Dpp), Opc::Gfx9(Gfx9Op::VMinU32Dpp), Opc::Gfx9(Gfx9Op::VMin3I32),
-    Opc::Gfx9(Gfx9Op::VMin3U32), Opc::Gfx9(Gfx9Op::VMax3I32), Opc::Gfx9(Gfx9Op::VMax3U32), Opc::Gfx9(Gfx9Op::VMed3U32), Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp4F32), Opc::Gfx9(Gfx9Op::DsReadB96),
-    Opc::Gfx9(Gfx9Op::DsReadB96TrB6), Opc::Gfx9(Gfx9Op::DsReadB64TrB4),
+    Opc::Gfx9(Gfx9Op::VCvtPkFp8F32), Opc::Gfx9(Gfx9Op::VCvtPkBf8F32), Opc::Gfx9(Gfx9Op::GAtomicPkAddF16), Opc::Gfx9(Gfx9Op::GAtomicPkAddBf16), Opc::Gfx9(Gfx9Op::GAtomicPkAddF16Rtn), Opc::Gfx9(Gfx9Op::GAtomicPkAddBf16Rtn),
+    Opc::Gfx9(Gfx9Op::SGetregB32), Opc::Gfx9(Gfx9Op::SSleep), Opc::Gfx9(Gfx9Op::SMemrealtime), Opc::Gfx9(Gfx9Op::GAtomicAddX2), Opc::Gfx9(Gfx9Op::GAtomicAddX2Rtn), Opc::Gfx9(Gfx9Op::VCvtScalef32PkBf16Fp4),
+    Opc::Gfx9(Gfx9Op::KeepAlive), Opc::Gfx9(Gfx9Op::VAddU32Dpp), Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp8F32), Opc::Gfx9(Gfx9Op::VCvtScalef32PkBf8F32), Opc::Gfx9(Gfx9Op::VMfmaScale16x16x128F8f6f4), Opc::Gfx9(Gfx9Op::VMaximum3F32),
+    Opc::Gfx9(Gfx9Op::VBitop3B32), Opc::Gfx9(Gfx9Op::VBfiB32), Opc::Gfx9(Gfx9Op::SBufLoadB32), Opc::Gfx9(Gfx9Op::SDcacheInv), Opc::Gfx9(Gfx9Op::VMovB32DppOld), Opc::Gfx9(Gfx9Op::VMaxU32DppOld),
+    Opc::Gfx9(Gfx9Op::VCvtF64F32), Opc::Gfx9(Gfx9Op::VCvtF32F64), Opc::Gfx9(Gfx9Op::VRsqF64), Opc::Gfx9(Gfx9Op::VSqrtF32), Opc::Gfx9(Gfx9Op::VBcntU32B32), Opc::Gfx9(Gfx9Op::SFf1I32B32),
+    Opc::Gfx9(Gfx9Op::SMemtime), Opc::Gfx9(Gfx9Op::DsOrB32Raw), Opc::Gfx9(Gfx9Op::DsWriteB32Raw), Opc::Gfx9(Gfx9Op::DsReadB32Raw), Opc::Gfx9(Gfx9Op::DsLoad2addrB32), Opc::Gfx9(Gfx9Op::VAddF32Dpp),
+    Opc::Gfx9(Gfx9Op::VMulF32Dpp), Opc::Gfx9(Gfx9Op::VMaxF32Dpp), Opc::Gfx9(Gfx9Op::VMaxU32Dpp), Opc::Gfx9(Gfx9Op::WaitRelease), Opc::Gfx9(Gfx9Op::VMaxI32Dpp), Opc::Gfx9(Gfx9Op::VMinI32Dpp),
+    Opc::Gfx9(Gfx9Op::VMinU32Dpp), Opc::Gfx9(Gfx9Op::VMin3I32), Opc::Gfx9(Gfx9Op::VMin3U32), Opc::Gfx9(Gfx9Op::VMax3I32), Opc::Gfx9(Gfx9Op::VMax3U32), Opc::Gfx9(Gfx9Op::VMed3U32),
+    Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp4F32), Opc::Gfx9(Gfx9Op::DsReadB96), Opc::Gfx9(Gfx9Op::DsReadB96TrB6), Opc::Gfx9(Gfx9Op::DsReadB64TrB4),
 ];
 
 /// gfx950 mnemonic of an opcode.
@@ -833,6 +833,7 @@ pub fn mnemonic(op: Opc) -> Option<&'static str> {
         Opc::Gfx9(Gfx9Op::VCvtPkFp8F32) => Some("v_cvt_pk_fp8_f32"),
         Opc::Gfx9(Gfx9Op::VCvtPkBf8F32) => Some("v_cvt_pk_bf8_f32"),
         Opc::Gfx9(Gfx9Op::GAtomicPkAddF16) | Opc::Gfx9(Gfx9Op::GAtomicPkAddF16Rtn) => Some("global_atomic_pk_add_f16"),
+        Opc::Gfx9(Gfx9Op::GAtomicPkAddBf16) | Opc::Gfx9(Gfx9Op::GAtomicPkAddBf16Rtn) => Some("global_atomic_pk_add_bf16"),
         Opc::Gfx9(Gfx9Op::SGetregB32) => Some("s_getreg_b32"),
         Opc::Gfx9(Gfx9Op::SSleep) => Some("s_sleep"),
         Opc::Gfx9(Gfx9Op::SMemrealtime) => Some("s_memrealtime"),
@@ -980,7 +981,8 @@ pub fn unit(op: Opc) -> Unit {
         | Opc::BufStoreD16HiB16 | Opc::Gfx9(Gfx9Op::BufferInv) | Opc::Gfx9(Gfx9Op::BufferWbl2)
         | Opc::Gfx9(Gfx9Op::BufLoadLdsB32) | Opc::Gfx9(Gfx9Op::BufLoadLdsB128) | Opc::Gfx9(Gfx9Op::GLoadLdsB32)
         | Opc::Gfx9(Gfx9Op::GLoadLdsB128) | Opc::Gfx9(Gfx9Op::GAtomicPkAddF16)
-        | Opc::Gfx9(Gfx9Op::GAtomicPkAddF16Rtn) | Opc::Gfx9(Gfx9Op::GAtomicAddX2)
+        | Opc::Gfx9(Gfx9Op::GAtomicPkAddBf16) | Opc::Gfx9(Gfx9Op::GAtomicPkAddF16Rtn)
+        | Opc::Gfx9(Gfx9Op::GAtomicPkAddBf16Rtn) | Opc::Gfx9(Gfx9Op::GAtomicAddX2)
         | Opc::Gfx9(Gfx9Op::GAtomicAddX2Rtn) => Unit::Vmem,
         Opc::Copy | Opc::ImplicitDef | Opc::PackF16 | Opc::SchedBarrier | Opc::Gfx9(Gfx9Op::KeepAlive)
         | Opc::Gfx9(Gfx9Op::WaitRelease) => Unit::Pseudo,
@@ -1169,12 +1171,13 @@ pub fn lat(op: Opc) -> Lat {
         | Opc::BufLoadB64 | Opc::BufLoadB128 | Opc::BufLoadU16 | Opc::BufLoadD16B16 | Opc::BufLoadD16HiB16
         | Opc::Gfx9(Gfx9Op::BufLoadLdsB32) | Opc::Gfx9(Gfx9Op::BufLoadLdsB128) | Opc::Gfx9(Gfx9Op::GLoadLdsB32)
         | Opc::Gfx9(Gfx9Op::GLoadLdsB128) | Opc::Gfx9(Gfx9Op::GAtomicPkAddF16Rtn)
-        | Opc::Gfx9(Gfx9Op::GAtomicAddX2Rtn) => Lat::VmemLoad,
+        | Opc::Gfx9(Gfx9Op::GAtomicPkAddBf16Rtn) | Opc::Gfx9(Gfx9Op::GAtomicAddX2Rtn) => Lat::VmemLoad,
         Opc::GStoreB16 | Opc::GStoreB32 | Opc::GStoreB64 | Opc::GStoreB96 | Opc::GStoreB128
         | Opc::GStoreD16HiB16 | Opc::GAtomicAddU32 | Opc::GAtomicAddF32 | Opc::ScratchStoreB32
         | Opc::ScratchStoreB64 | Opc::ScratchStoreB96 | Opc::ScratchStoreB128 | Opc::GStoreB8
         | Opc::GStoreD16HiB8 | Opc::BufStoreB16 | Opc::BufStoreB32 | Opc::BufStoreB64 | Opc::BufStoreB128
-        | Opc::BufStoreD16HiB16 | Opc::Gfx9(Gfx9Op::GAtomicPkAddF16) | Opc::Gfx9(Gfx9Op::GAtomicAddX2) => Lat::VmemStore,
+        | Opc::BufStoreD16HiB16 | Opc::Gfx9(Gfx9Op::GAtomicPkAddF16) | Opc::Gfx9(Gfx9Op::GAtomicPkAddBf16)
+        | Opc::Gfx9(Gfx9Op::GAtomicAddX2) => Lat::VmemStore,
         Opc::Copy | Opc::ImplicitDef | Opc::SchedBarrier | Opc::Gfx9(Gfx9Op::KeepAlive)
         | Opc::Gfx9(Gfx9Op::WaitRelease) => Lat::Pseudo,
         Opc::PackF16 => Lat::PseudoValu,
@@ -1282,7 +1285,7 @@ pub struct Info {
 
 /// `Info` of each opcode in `ALL` order, then the compare family's fields that do not
 /// depend on its code.
-static INFO: [Info; 333] = [
+static INFO: [Info; 335] = [
     Info { code: 0x000, vop3: 0x000, flags: 0x00000, fmt: Fmt::Sop1, form: Form::Plain, table: true },
     Info { code: 0x001, vop3: 0x001, flags: 0x00000, fmt: Fmt::Sop1, form: Form::B64, table: true },
     Info { code: 0x004, vop3: 0x004, flags: 0x00001, fmt: Fmt::Sop1, form: Form::Plain, table: true },
@@ -1568,7 +1571,9 @@ static INFO: [Info; 333] = [
     Info { code: 0x2a2, vop3: 0x2a2, flags: 0x01010, fmt: Fmt::Vop3, form: Form::Plain, table: true },
     Info { code: 0x2a3, vop3: 0x2a3, flags: 0x01010, fmt: Fmt::Vop3, form: Form::Plain, table: true },
     Info { code: 0x04e, vop3: 0x04e, flags: 0x00040, fmt: Fmt::Global, form: Form::Plain, table: true },
+    Info { code: 0x052, vop3: 0x052, flags: 0x00040, fmt: Fmt::Global, form: Form::Plain, table: true },
     Info { code: 0x04e, vop3: 0x04e, flags: 0x00060, fmt: Fmt::Global, form: Form::Plain, table: true },
+    Info { code: 0x052, vop3: 0x052, flags: 0x00060, fmt: Fmt::Global, form: Form::Plain, table: true },
     Info { code: 0x011, vop3: 0x011, flags: 0x00000, fmt: Fmt::Sopk, form: Form::Plain, table: true },
     Info { code: 0x00e, vop3: 0x00e, flags: 0x40000, fmt: Fmt::Sopp, form: Form::Plain, table: true },
     Info { code: 0x025, vop3: 0x025, flags: 0x40100, fmt: Fmt::Smem, form: Form::Nobase, table: true },
@@ -1907,54 +1912,56 @@ fn index(op: Opc) -> Option<usize> {
         Opc::Gfx9(Gfx9Op::VCvtPkFp8F32) => Some(282),
         Opc::Gfx9(Gfx9Op::VCvtPkBf8F32) => Some(283),
         Opc::Gfx9(Gfx9Op::GAtomicPkAddF16) => Some(284),
-        Opc::Gfx9(Gfx9Op::GAtomicPkAddF16Rtn) => Some(285),
-        Opc::Gfx9(Gfx9Op::SGetregB32) => Some(286),
-        Opc::Gfx9(Gfx9Op::SSleep) => Some(287),
-        Opc::Gfx9(Gfx9Op::SMemrealtime) => Some(288),
-        Opc::Gfx9(Gfx9Op::GAtomicAddX2) => Some(289),
-        Opc::Gfx9(Gfx9Op::GAtomicAddX2Rtn) => Some(290),
-        Opc::Gfx9(Gfx9Op::VCvtScalef32PkBf16Fp4) => Some(291),
-        Opc::Gfx9(Gfx9Op::KeepAlive) => Some(292),
-        Opc::Gfx9(Gfx9Op::VAddU32Dpp) => Some(293),
-        Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp8F32) => Some(294),
-        Opc::Gfx9(Gfx9Op::VCvtScalef32PkBf8F32) => Some(295),
-        Opc::Gfx9(Gfx9Op::VMfmaScale16x16x128F8f6f4) => Some(296),
-        Opc::Gfx9(Gfx9Op::VMaximum3F32) => Some(297),
-        Opc::Gfx9(Gfx9Op::VBitop3B32) => Some(298),
-        Opc::Gfx9(Gfx9Op::VBfiB32) => Some(299),
-        Opc::Gfx9(Gfx9Op::SBufLoadB32) => Some(300),
-        Opc::Gfx9(Gfx9Op::SDcacheInv) => Some(301),
-        Opc::Gfx9(Gfx9Op::VMovB32DppOld) => Some(302),
-        Opc::Gfx9(Gfx9Op::VMaxU32DppOld) => Some(303),
-        Opc::Gfx9(Gfx9Op::VCvtF64F32) => Some(304),
-        Opc::Gfx9(Gfx9Op::VCvtF32F64) => Some(305),
-        Opc::Gfx9(Gfx9Op::VRsqF64) => Some(306),
-        Opc::Gfx9(Gfx9Op::VSqrtF32) => Some(307),
-        Opc::Gfx9(Gfx9Op::VBcntU32B32) => Some(308),
-        Opc::Gfx9(Gfx9Op::SFf1I32B32) => Some(309),
-        Opc::Gfx9(Gfx9Op::SMemtime) => Some(310),
-        Opc::Gfx9(Gfx9Op::DsOrB32Raw) => Some(311),
-        Opc::Gfx9(Gfx9Op::DsWriteB32Raw) => Some(312),
-        Opc::Gfx9(Gfx9Op::DsReadB32Raw) => Some(313),
-        Opc::Gfx9(Gfx9Op::DsLoad2addrB32) => Some(314),
-        Opc::Gfx9(Gfx9Op::VAddF32Dpp) => Some(315),
-        Opc::Gfx9(Gfx9Op::VMulF32Dpp) => Some(316),
-        Opc::Gfx9(Gfx9Op::VMaxF32Dpp) => Some(317),
-        Opc::Gfx9(Gfx9Op::VMaxU32Dpp) => Some(318),
-        Opc::Gfx9(Gfx9Op::WaitRelease) => Some(319),
-        Opc::Gfx9(Gfx9Op::VMaxI32Dpp) => Some(320),
-        Opc::Gfx9(Gfx9Op::VMinI32Dpp) => Some(321),
-        Opc::Gfx9(Gfx9Op::VMinU32Dpp) => Some(322),
-        Opc::Gfx9(Gfx9Op::VMin3I32) => Some(323),
-        Opc::Gfx9(Gfx9Op::VMin3U32) => Some(324),
-        Opc::Gfx9(Gfx9Op::VMax3I32) => Some(325),
-        Opc::Gfx9(Gfx9Op::VMax3U32) => Some(326),
-        Opc::Gfx9(Gfx9Op::VMed3U32) => Some(327),
-        Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp4F32) => Some(328),
-        Opc::Gfx9(Gfx9Op::DsReadB96) => Some(329),
-        Opc::Gfx9(Gfx9Op::DsReadB96TrB6) => Some(330),
-        Opc::Gfx9(Gfx9Op::DsReadB64TrB4) => Some(331),
-        Opc::VCmp(_) => Some(332),
+        Opc::Gfx9(Gfx9Op::GAtomicPkAddBf16) => Some(285),
+        Opc::Gfx9(Gfx9Op::GAtomicPkAddF16Rtn) => Some(286),
+        Opc::Gfx9(Gfx9Op::GAtomicPkAddBf16Rtn) => Some(287),
+        Opc::Gfx9(Gfx9Op::SGetregB32) => Some(288),
+        Opc::Gfx9(Gfx9Op::SSleep) => Some(289),
+        Opc::Gfx9(Gfx9Op::SMemrealtime) => Some(290),
+        Opc::Gfx9(Gfx9Op::GAtomicAddX2) => Some(291),
+        Opc::Gfx9(Gfx9Op::GAtomicAddX2Rtn) => Some(292),
+        Opc::Gfx9(Gfx9Op::VCvtScalef32PkBf16Fp4) => Some(293),
+        Opc::Gfx9(Gfx9Op::KeepAlive) => Some(294),
+        Opc::Gfx9(Gfx9Op::VAddU32Dpp) => Some(295),
+        Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp8F32) => Some(296),
+        Opc::Gfx9(Gfx9Op::VCvtScalef32PkBf8F32) => Some(297),
+        Opc::Gfx9(Gfx9Op::VMfmaScale16x16x128F8f6f4) => Some(298),
+        Opc::Gfx9(Gfx9Op::VMaximum3F32) => Some(299),
+        Opc::Gfx9(Gfx9Op::VBitop3B32) => Some(300),
+        Opc::Gfx9(Gfx9Op::VBfiB32) => Some(301),
+        Opc::Gfx9(Gfx9Op::SBufLoadB32) => Some(302),
+        Opc::Gfx9(Gfx9Op::SDcacheInv) => Some(303),
+        Opc::Gfx9(Gfx9Op::VMovB32DppOld) => Some(304),
+        Opc::Gfx9(Gfx9Op::VMaxU32DppOld) => Some(305),
+        Opc::Gfx9(Gfx9Op::VCvtF64F32) => Some(306),
+        Opc::Gfx9(Gfx9Op::VCvtF32F64) => Some(307),
+        Opc::Gfx9(Gfx9Op::VRsqF64) => Some(308),
+        Opc::Gfx9(Gfx9Op::VSqrtF32) => Some(309),
+        Opc::Gfx9(Gfx9Op::VBcntU32B32) => Some(310),
+        Opc::Gfx9(Gfx9Op::SFf1I32B32) => Some(311),
+        Opc::Gfx9(Gfx9Op::SMemtime) => Some(312),
+        Opc::Gfx9(Gfx9Op::DsOrB32Raw) => Some(313),
+        Opc::Gfx9(Gfx9Op::DsWriteB32Raw) => Some(314),
+        Opc::Gfx9(Gfx9Op::DsReadB32Raw) => Some(315),
+        Opc::Gfx9(Gfx9Op::DsLoad2addrB32) => Some(316),
+        Opc::Gfx9(Gfx9Op::VAddF32Dpp) => Some(317),
+        Opc::Gfx9(Gfx9Op::VMulF32Dpp) => Some(318),
+        Opc::Gfx9(Gfx9Op::VMaxF32Dpp) => Some(319),
+        Opc::Gfx9(Gfx9Op::VMaxU32Dpp) => Some(320),
+        Opc::Gfx9(Gfx9Op::WaitRelease) => Some(321),
+        Opc::Gfx9(Gfx9Op::VMaxI32Dpp) => Some(322),
+        Opc::Gfx9(Gfx9Op::VMinI32Dpp) => Some(323),
+        Opc::Gfx9(Gfx9Op::VMinU32Dpp) => Some(324),
+        Opc::Gfx9(Gfx9Op::VMin3I32) => Some(325),
+        Opc::Gfx9(Gfx9Op::VMin3U32) => Some(326),
+        Opc::Gfx9(Gfx9Op::VMax3I32) => Some(327),
+        Opc::Gfx9(Gfx9Op::VMax3U32) => Some(328),
+        Opc::Gfx9(Gfx9Op::VMed3U32) => Some(329),
+        Opc::Gfx9(Gfx9Op::VCvtScalef32PkFp4F32) => Some(330),
+        Opc::Gfx9(Gfx9Op::DsReadB96) => Some(331),
+        Opc::Gfx9(Gfx9Op::DsReadB96TrB6) => Some(332),
+        Opc::Gfx9(Gfx9Op::DsReadB64TrB4) => Some(333),
+        Opc::VCmp(_) => Some(334),
         #[allow(unreachable_patterns)]
         _ => None,
     }
@@ -2078,8 +2085,12 @@ pub enum Gfx9Op {
     VCvtPkBf8F32,
     /// global_atomic_pk_add_f16
     GAtomicPkAddF16,
+    /// global_atomic_pk_add_bf16
+    GAtomicPkAddBf16,
     /// global_atomic_pk_add_f16
     GAtomicPkAddF16Rtn,
+    /// global_atomic_pk_add_bf16
+    GAtomicPkAddBf16Rtn,
     /// s_getreg_b32
     SGetregB32,
     /// s_sleep
@@ -2176,7 +2187,7 @@ pub enum Gfx9Op {
 
 impl Gfx9Op {
     /// Every one of them, in description order.
-    pub const ALL: [Gfx9Op; 97] = [
+    pub const ALL: [Gfx9Op; 99] = [
         Gfx9Op::VPkFmaF32, Gfx9Op::VPkMulF32, Gfx9Op::VPkAddF32, Gfx9Op::VPkMovB32, Gfx9Op::VMovB64,
         Gfx9Op::VLshlAddU64, Gfx9Op::VCvtPkF16F32, Gfx9Op::VCvtPkBf16F32, Gfx9Op::VPermlane16SwapB32, Gfx9Op::VPermlane32SwapB32,
         Gfx9Op::BufferInv, Gfx9Op::BufferWbl2, Gfx9Op::VAccvgprReadB32, Gfx9Op::VAccvgprWriteB32, Gfx9Op::VAccvgprMovB32,
@@ -2187,16 +2198,16 @@ impl Gfx9Op {
         Gfx9Op::VMfma4x4x4F64, Gfx9Op::VMfmaScale32x32x64F8f6f4, Gfx9Op::BufLoadLdsB32, Gfx9Op::BufLoadLdsB128, Gfx9Op::GLoadLdsB32,
         Gfx9Op::GLoadLdsB128, Gfx9Op::DsReadB64TrB16, Gfx9Op::DsReadB64TrB8, Gfx9Op::VCvtF32Fp8, Gfx9Op::VCvtF32Bf8,
         Gfx9Op::VCvtPkF32Fp8, Gfx9Op::VCvtPkF32Bf8, Gfx9Op::VCvtPkFp8F32, Gfx9Op::VCvtPkBf8F32, Gfx9Op::GAtomicPkAddF16,
-        Gfx9Op::GAtomicPkAddF16Rtn, Gfx9Op::SGetregB32, Gfx9Op::SSleep, Gfx9Op::SMemrealtime, Gfx9Op::GAtomicAddX2,
-        Gfx9Op::GAtomicAddX2Rtn, Gfx9Op::VCvtScalef32PkBf16Fp4, Gfx9Op::KeepAlive, Gfx9Op::VAddU32Dpp, Gfx9Op::VCvtScalef32PkFp8F32,
-        Gfx9Op::VCvtScalef32PkBf8F32, Gfx9Op::VMfmaScale16x16x128F8f6f4, Gfx9Op::VMaximum3F32, Gfx9Op::VBitop3B32, Gfx9Op::VBfiB32,
-        Gfx9Op::SBufLoadB32, Gfx9Op::SDcacheInv, Gfx9Op::VMovB32DppOld, Gfx9Op::VMaxU32DppOld, Gfx9Op::VCvtF64F32,
-        Gfx9Op::VCvtF32F64, Gfx9Op::VRsqF64, Gfx9Op::VSqrtF32, Gfx9Op::VBcntU32B32, Gfx9Op::SFf1I32B32,
-        Gfx9Op::SMemtime, Gfx9Op::DsOrB32Raw, Gfx9Op::DsWriteB32Raw, Gfx9Op::DsReadB32Raw, Gfx9Op::DsLoad2addrB32,
-        Gfx9Op::VAddF32Dpp, Gfx9Op::VMulF32Dpp, Gfx9Op::VMaxF32Dpp, Gfx9Op::VMaxU32Dpp, Gfx9Op::WaitRelease,
-        Gfx9Op::VMaxI32Dpp, Gfx9Op::VMinI32Dpp, Gfx9Op::VMinU32Dpp, Gfx9Op::VMin3I32, Gfx9Op::VMin3U32,
-        Gfx9Op::VMax3I32, Gfx9Op::VMax3U32, Gfx9Op::VMed3U32, Gfx9Op::VCvtScalef32PkFp4F32, Gfx9Op::DsReadB96,
-        Gfx9Op::DsReadB96TrB6, Gfx9Op::DsReadB64TrB4,
+        Gfx9Op::GAtomicPkAddBf16, Gfx9Op::GAtomicPkAddF16Rtn, Gfx9Op::GAtomicPkAddBf16Rtn, Gfx9Op::SGetregB32, Gfx9Op::SSleep,
+        Gfx9Op::SMemrealtime, Gfx9Op::GAtomicAddX2, Gfx9Op::GAtomicAddX2Rtn, Gfx9Op::VCvtScalef32PkBf16Fp4, Gfx9Op::KeepAlive,
+        Gfx9Op::VAddU32Dpp, Gfx9Op::VCvtScalef32PkFp8F32, Gfx9Op::VCvtScalef32PkBf8F32, Gfx9Op::VMfmaScale16x16x128F8f6f4, Gfx9Op::VMaximum3F32,
+        Gfx9Op::VBitop3B32, Gfx9Op::VBfiB32, Gfx9Op::SBufLoadB32, Gfx9Op::SDcacheInv, Gfx9Op::VMovB32DppOld,
+        Gfx9Op::VMaxU32DppOld, Gfx9Op::VCvtF64F32, Gfx9Op::VCvtF32F64, Gfx9Op::VRsqF64, Gfx9Op::VSqrtF32,
+        Gfx9Op::VBcntU32B32, Gfx9Op::SFf1I32B32, Gfx9Op::SMemtime, Gfx9Op::DsOrB32Raw, Gfx9Op::DsWriteB32Raw,
+        Gfx9Op::DsReadB32Raw, Gfx9Op::DsLoad2addrB32, Gfx9Op::VAddF32Dpp, Gfx9Op::VMulF32Dpp, Gfx9Op::VMaxF32Dpp,
+        Gfx9Op::VMaxU32Dpp, Gfx9Op::WaitRelease, Gfx9Op::VMaxI32Dpp, Gfx9Op::VMinI32Dpp, Gfx9Op::VMinU32Dpp,
+        Gfx9Op::VMin3I32, Gfx9Op::VMin3U32, Gfx9Op::VMax3I32, Gfx9Op::VMax3U32, Gfx9Op::VMed3U32,
+        Gfx9Op::VCvtScalef32PkFp4F32, Gfx9Op::DsReadB96, Gfx9Op::DsReadB96TrB6, Gfx9Op::DsReadB64TrB4,
     ];
 
     /// The shared flags (`Opc::flags`).
@@ -2253,7 +2264,9 @@ impl Gfx9Op {
             Gfx9Op::VCvtPkFp8F32 => 0x01010,
             Gfx9Op::VCvtPkBf8F32 => 0x01010,
             Gfx9Op::GAtomicPkAddF16 => 0x00040,
+            Gfx9Op::GAtomicPkAddBf16 => 0x00040,
             Gfx9Op::GAtomicPkAddF16Rtn => 0x00060,
+            Gfx9Op::GAtomicPkAddBf16Rtn => 0x00060,
             Gfx9Op::SGetregB32 => 0x00000,
             Gfx9Op::SSleep => 0x40000,
             Gfx9Op::SMemrealtime => 0x40100,
@@ -2356,7 +2369,9 @@ impl Gfx9Op {
             Gfx9Op::VCvtPkFp8F32 => "v_cvt_pk_fp8_f32",
             Gfx9Op::VCvtPkBf8F32 => "v_cvt_pk_bf8_f32",
             Gfx9Op::GAtomicPkAddF16 => "global_atomic_pk_add_f16",
+            Gfx9Op::GAtomicPkAddBf16 => "global_atomic_pk_add_bf16",
             Gfx9Op::GAtomicPkAddF16Rtn => "global_atomic_pk_add_f16",
+            Gfx9Op::GAtomicPkAddBf16Rtn => "global_atomic_pk_add_bf16",
             Gfx9Op::SGetregB32 => "s_getreg_b32",
             Gfx9Op::SSleep => "s_sleep",
             Gfx9Op::SMemrealtime => "s_memrealtime",
@@ -3216,7 +3231,7 @@ const SIG_115: Sig = Sig {
     defs: &[],
     uses: &[Operand { role: Role::Vaddr, class: Class::V, dwords: 2 }],
     imm: Imm::Off12cpol,
-    mods: 0x0,
+    mods: 0x100,
 };
 const SIG_116: Sig = Sig {
     defs: &[Operand { role: Role::Vdst, class: Class::V, dwords: 2 }],
@@ -3429,7 +3444,7 @@ pub fn signature(op: Opc) -> Option<&'static Sig> {
         Opc::GStoreB128 => Some(&SIG_68),
         Opc::GLoadD16B16 | Opc::GLoadD16HiB16 => Some(&SIG_69),
         Opc::GAtomicAddU32 => Some(&SIG_70),
-        Opc::GAtomicAddF32 | Opc::Gfx9(Gfx9Op::GAtomicPkAddF16) => Some(&SIG_71),
+        Opc::GAtomicAddF32 | Opc::Gfx9(Gfx9Op::GAtomicPkAddF16) | Opc::Gfx9(Gfx9Op::GAtomicPkAddBf16) => Some(&SIG_71),
         Opc::ScratchLoadB32 => Some(&SIG_72),
         Opc::ScratchLoadB64 => Some(&SIG_73),
         Opc::ScratchLoadB96 => Some(&SIG_74),
@@ -3439,7 +3454,7 @@ pub fn signature(op: Opc) -> Option<&'static Sig> {
         Opc::ScratchStoreB96 => Some(&SIG_78),
         Opc::ScratchStoreB128 => Some(&SIG_79),
         Opc::GAtomicAddU32Rtn => Some(&SIG_80),
-        Opc::GAtomicAddF32Rtn | Opc::Gfx9(Gfx9Op::GAtomicPkAddF16Rtn) => Some(&SIG_81),
+        Opc::GAtomicAddF32Rtn | Opc::Gfx9(Gfx9Op::GAtomicPkAddF16Rtn) | Opc::Gfx9(Gfx9Op::GAtomicPkAddBf16Rtn) => Some(&SIG_81),
         Opc::BufLoadB32 => Some(&SIG_82),
         Opc::BufLoadB64 => Some(&SIG_83),
         Opc::BufLoadB128 => Some(&SIG_84),

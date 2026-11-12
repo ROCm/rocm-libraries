@@ -704,8 +704,8 @@ impl Checker<'_> {
                 if res != Some(types[0]) || !matches!(types[0], Type::Scalar(s) if *s != Scalar::I1) && !matches!(types[0], Type::Ptr(_)) {
                     return Err(mismatch());
                 }
-                // An SGPR pin holds one dword (`device_ops.fresh_s`).
-                if op.asm_pin() == Some('s') && !matches!(types[0], Type::Scalar(Scalar::I32 | Scalar::F32)) {
+                // An SGPR pin holds one dword (`device_ops.fresh_s`) or a 64-bit pointer (an SGPR pair).
+                if op.asm_pin() == Some('s') && !matches!(types[0], Type::Scalar(Scalar::I32 | Scalar::F32) | Type::Ptr(_)) {
                     return Err(unsupported(format!("an \"=s,0\" pin of {:?}", types[0])));
                 }
             }
@@ -855,7 +855,7 @@ impl Checker<'_> {
             GlobalAtomicAdd => {
                 arity(1, 3)?;
                 let value = types[2];
-                let packed = *value == Type::Vec(Scalar::F16, 2);
+                let packed = matches!(value, Type::Vec(Scalar::F16 | Scalar::BF16, 2));
                 if !matches!(types[0], Type::Ptr(_)) || !index(types[1]) || !(matches!(value, Type::Scalar(_)) || packed) || res != Some(value) {
                     return Err(mismatch());
                 }
@@ -1291,7 +1291,7 @@ impl Checker<'_> {
                     }
                 }
             }
-            DppXor | QuadPerm | MovDpp8 => {
+            DppXor | QuadPerm | DppRowMirror | MovDpp8 => {
                 arity(1, 1)?;
                 let t = types[0];
                 if !(*t == i32t || (op.kind == MovDpp8 && *t == f32t)) || res != Some(t) {
@@ -1300,6 +1300,7 @@ impl Checker<'_> {
                 let (key, range) = match op.kind {
                     DppXor => ("xor_mask", 1..=15),
                     QuadPerm => ("ctrl", 0..=255),
+                    DppRowMirror => ("ctrl", 0x140..=0x141),
                     _ => ("sel", i64::MIN..=i64::MAX),
                 };
                 match self.int(op, key)? {
