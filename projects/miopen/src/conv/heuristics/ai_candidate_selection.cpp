@@ -1000,11 +1000,14 @@ std::vector<std::vector<float>> CandidateSelectionModel::EncodeKernelConfigs(
         }
     }
 
-    auto embeddings = EncodeKernelConfigsWithFdeep(encoder_inputs, arch_, solver_);
+    auto encoded_configs = EncodeKernelConfigsWithFdeep(encoder_inputs, arch_, solver_);
     if(encoder_rows.size() == encoded_candidates.size())
-        return embeddings;
+        return encoded_configs;
 
-    std::vector<std::vector<float>> encoded_configs(
+    // Scatter the encoder outputs back to their candidate positions; sentinels stay all-NaN.
+    // A single named return variable keeps NRVO applicable (-Wnrvo is an error in CI).
+    auto embeddings = std::move(encoded_configs);
+    encoded_configs.assign(
         encoded_candidates.size(),
         std::vector<float>(embeddings.front().size(), std::numeric_limits<float>::quiet_NaN()));
     for(std::size_t k = 0; k < encoder_rows.size(); ++k)
