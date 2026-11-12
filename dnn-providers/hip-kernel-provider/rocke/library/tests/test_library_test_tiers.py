@@ -1544,6 +1544,8 @@ def test_source_runner_reports_incomplete_when_optional_gate_skips(monkeypatch, 
 
 
 def test_source_runner_preserves_library_ir_gates(monkeypatch):
+    if not run_all.PLATFORM_TOOLS.is_dir():
+        pytest.skip("source-only platform IR-gate tools are not installed")
     calls = []
 
     def record(command, **kwargs):

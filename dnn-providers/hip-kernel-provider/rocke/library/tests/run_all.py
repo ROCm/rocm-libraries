@@ -40,6 +40,12 @@ if __package__:
     from ._explicit_gate_policy import selection_is_partial as _selection_is_partial
     from ._worker_process import available_cpus, run_bounded_to_stream, stop_all
 else:
+    # Script execution puts this directory on sys.path automatically, but tools
+    # that load the runner with importlib do not. Bootstrap its private support
+    # modules from the runner's own installed/source directory in both cases.
+    _RUNNER_DIR = Path(__file__).resolve().parent
+    if str(_RUNNER_DIR) not in sys.path:
+        sys.path.insert(0, str(_RUNNER_DIR))
     from _explicit_gate_policy import preflight_is_disabled as _preflight_is_disabled
     from _explicit_gate_policy import selection_is_partial as _selection_is_partial
     from _worker_process import available_cpus, run_bounded_to_stream, stop_all
