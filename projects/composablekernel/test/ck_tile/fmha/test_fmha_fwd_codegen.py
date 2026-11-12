@@ -500,6 +500,54 @@ endforeach()
             self.assertGreater(seen[("qr_tdm", False)], 0)
 
     @unittest.skipUnless(shutil.which("cmake"), "cmake is required")
+    def test_cmake_fp8_qr_tdm_rule_scope(self):
+        # fp8-family qr_tdm sources build in expert scheduling mode without gfx1250 packed fp32;
+        # qr_tdm_fp8_sched and bf16 sources keep their own options. Names come from codegen.
+        helper = (_FMHA_EXAMPLE_DIR / "cmake") / "fmha_fwd_source_flags.cmake"
+        _, fp8 = get_fwd_blobs(
+            ["gfx1250"], "*fp8*", 0, [32, 64, 96, 128, 160, 192, 256, 512], "simplified"
+        )
+        _, bf16 = get_fwd_blobs(
+            ["gfx1250"], "*_bf16_*_qr_tdm_*", 0, [128], "simplified"
+        )
+        kernels = fp8 + bf16
+        fp8_family = ("fp8", "fp8bf16", "mxfp8", "mxfp8bf16")
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory) / "flags.cmake"
+            script.write_text(
+                f'include("{helper}")\n'
+                + "\n".join(
+                    f'ck_tile_fmha_fwd_get_source_compile_options("{k.filename}" flags)\n'
+                    f'message("{i}:${{flags}}")'
+                    for i, k in enumerate(kernels)
+                )
+            )
+            process = subprocess.run(
+                ["cmake", "-P", str(script)],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=300,
+            )
+        lines = process.stderr.strip().splitlines()
+        self.assertEqual(len(lines), len(kernels))
+        seen = Counter()
+        for i, (k, line) in enumerate(zip(kernels, lines)):
+            self.assertTrue(line.startswith(f"{i}:"))
+            flags = line.split(":", 1)[1].split(";")
+            fp8_tdm = k.F_pipeline.tag == "qr_tdm" and k.F_dtype in fp8_family
+            seen[(k.F_dtype, k.F_pipeline.tag)] += 1
+            with self.subTest(source=k.filename):
+                self.assertEqual("-packed-fp32-single-sgpr-ops" in flags, fp8_tdm)
+                if fp8_tdm:
+                    self.assertIn("-amdgpu-expert-scheduling-mode", flags)
+        # Positive names for every fp8 data type, negative names on both sides.
+        for dtype in fp8_family:
+            self.assertGreater(seen[(dtype, "qr_tdm")], 0)
+            self.assertGreater(seen[(dtype, "qr_tdm_fp8_sched")], 0)
+        self.assertGreater(seen[("bf16", "qr_tdm")], 0)
+
+    @unittest.skipUnless(shutil.which("cmake"), "cmake is required")
     def test_cmake_source_flags_follow_gfx125_family_targets(self):
         helper = (_FMHA_EXAMPLE_DIR / "cmake") / "fmha_fwd_source_flags.cmake"
         source = (
@@ -2433,6 +2481,59 @@ int main() {
                 features = dict(
                     dtype="fp8",
                     hdim=64,
+                    mode="batch",
+                    pipeline=pipeline,
+                    qscale="pertensor" if qscale == pertensor else "blockscale",
+                    dpad="t" if padded else "f",
+                    dvpad="t" if padded else "f",
+                    spad="f" if pipeline == "qr_tdm" else "t",
+                )
+                if pipeline == "qr_tdm_fp8_sched":
+                    features["packgqa"] = "f"
+                self.assertEqual(
+                    dispatch.run(
+                        dtype="fp8",
+                        hdim_q=hdim_q,
+                        hdim_v=hdim_v,
+                        qscale=qscale,
+                        block_scale_size_q=block_scale_size,
+                        block_scale_size_kv=block_scale_size,
+                        nhead_k=8,
+                    ),
+                    [dispatch.expected_id(**features)],
+                )
+
+    def test_fp8_qr_tdm_serves_head_dims_and_sched_rejects(self):
+        # qr_tdm takes the head dims qr_tdm_fp8_sched lacks and the calls it rejects; the
+        # sched head dims still reach sched first.
+        pool, kernels = get_fwd_blobs(
+            ["gfx1250"],
+            "fmha_fwd_d*_fp8_[bg]*_nlogits_nbias_nmask_nlse_ndropout_nskip_*_nsink*",
+            0,
+            [32, 64, 96, 128, 160, 192, 256, 512],
+            "simplified",
+        )
+        dispatch = _CompiledDispatcher(
+            self, pool, kernels, filter_fn=lambda trait: True
+        )
+        pertensor, blockscale = 1, 2
+        for hdim_q, hdim_v, bucket, qscale, block_scale_size, pipeline, padded in (
+            (32, 32, 32, pertensor, 0, "qr_tdm", True),
+            (96, 96, 96, pertensor, 0, "qr_tdm", True),
+            (160, 160, 160, pertensor, 0, "qr_tdm", True),
+            (512, 512, 512, pertensor, 0, "qr_tdm", False),
+            (128, 128, 128, pertensor, 0, "qr_tdm_fp8_sched", False),
+            (192, 128, 192, pertensor, 0, "qr_tdm_fp8_sched", False),
+            (256, 256, 256, pertensor, 0, "qr_tdm_fp8_sched", False),
+            # Q scale blocks that split sched's M128 tile fall back to qr_tdm.
+            (128, 128, 128, blockscale, 64, "qr_tdm", False),
+            (192, 128, 192, blockscale, 64, "qr_tdm", False),
+            (256, 256, 256, blockscale, 64, "qr_tdm", False),
+        ):
+            with self.subTest(hdim_q=hdim_q, hdim_v=hdim_v, qscale=qscale):
+                features = dict(
+                    dtype="fp8",
+                    hdim=bucket,
                     mode="batch",
                     pipeline=pipeline,
                     qscale="pertensor" if qscale == pertensor else "blockscale",
