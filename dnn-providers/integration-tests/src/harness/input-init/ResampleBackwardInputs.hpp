@@ -16,12 +16,13 @@ namespace hipdnn_integration_tests
 {
 
 /// Overwrites the filled index input of a max-pooling resample backward node with the
-/// argmax indices a forward produces. A random fill gives indices that no forward
-/// emits: negative, or past the end of the dx window they select. The forward runs on
-/// a scratch x, shaped like dx and filled uniformly in [-1, 1] from `seed`, under the
-/// node's pre-padding, stride, window and padding mode, as the CPU reference forward
-/// computes them. A window whose maximum is a zero-padding element gets index -1, as
-/// in the forward, and routes its gradient to no dx element.
+/// argmax indices a forward produces. A random INT32 fill in [-1, 1] truncates to
+/// indices near 0: in range, but unrelated to the window maxima a forward would
+/// select. The forward runs on a scratch x, shaped like dx and filled uniformly in
+/// [-1, 1] from `seed`, under the node's pre-padding, stride, window and padding
+/// mode, as the CPU reference forward computes them. A window whose maximum is a
+/// zero-padding element gets index -1, as in the forward, and routes its gradient to
+/// no dx element.
 ///
 /// `seed` must be the same for every bundle of one graph, so the device and reference
 /// bundles get the same indices.
