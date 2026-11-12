@@ -1335,16 +1335,18 @@ TEST(TestConvWinogradWrwKernelMatch, FmaRunsEverywhereWithinEachDtypesErrorBand)
     }
 }
 
-TEST(TestConvWinogradWrwKernelMatch, ReadsItsOwnLayoutAndStagesOthersToNchw)
+TEST(TestConvWinogradWrwKernelMatch, ChannelsFirstConfigsServeEveryLayout)
 {
+    // The transforms read channels-first; channels-last graphs are transposed in. NHWC configs
+    // are refused.
     auto nhwc = wrwFma();
     nhwc.layout = "NHWC";
     auto channelsLast = baseShape();
     channelsLast.channelsLast = true;
     EXPECT_TRUE(admitsWrw(wrwFma(), "gfx942"));
+    EXPECT_TRUE(admitsWrw(wrwFma(), "gfx942", channelsLast));
+    EXPECT_FALSE(admitsWrw(nhwc, "gfx942", channelsLast));
     EXPECT_FALSE(admitsWrw(nhwc, "gfx942"));
-    EXPECT_TRUE(admitsWrw(nhwc, "gfx942", channelsLast));
-    EXPECT_FALSE(admitsWrw(wrwFma(), "gfx942", channelsLast));
 }
 
 TEST(TestConvWinogradWrwKernelMatch, Fp32FourByThreeFromFiveHundredTwelveProducts)
@@ -1681,22 +1683,45 @@ TEST(TestConvWinogradWrwPlan, SlicesTheBatchUnderTheWorkspaceLimit)
     EXPECT_FALSE(wrwPlan(shape, wrwFma()).has_value());
 }
 
-TEST(TestConvWinogradWrwPlan, StagesMixedLayoutsToChannelsFirst)
+TEST(TestConvWinogradWrwPlan, StagesChannelsLastByTransposeAndMixedByCopy)
 {
-    auto spec = specFor(baseShape(), ConvDirection::BACKWARD_WEIGHTS);
-    spec.y.strides = packedStrides(spec.y.dims, true);
     auto properties = testDeviceProperties();
     properties.multiProcessorCount = 64;
-    const GraphFixture fixture(buildGraph(spec), properties);
-    const auto problem = parseWinogradProblem(fixture.context(), ConvDirection::BACKWARD_WEIGHTS);
-    ASSERT_TRUE(problem.has_value());
-    const auto plan = conv_winograd::planFor(
-        *problem, *conv_winograd::configOf(wrwKernelOf(wrwFma(), "FLOAT")), properties);
-    ASSERT_TRUE(plan.has_value());
-    EXPECT_TRUE(plan->in.needed);
-    EXPECT_TRUE(plan->out.needed);
-    EXPECT_EQ(plan->in.bytes, size_t{2 * 4 * 7 * 6 * 4});
-    EXPECT_EQ(plan->out.bytes, size_t{2 * 6 * 7 * 6 * 4});
+    const auto planOf = [&](const ConvGraphSpec& spec) {
+        const GraphFixture fixture(buildGraph(spec), properties);
+        const auto problem
+            = parseWinogradProblem(fixture.context(), ConvDirection::BACKWARD_WEIGHTS);
+        return conv_winograd::planFor(
+            *problem, *conv_winograd::configOf(wrwKernelOf(wrwFma(), "FLOAT")), properties);
+    };
+    // Channels-first: read in place.
+    const auto nchw = planOf(specFor(baseShape(), ConvDirection::BACKWARD_WEIGHTS));
+    ASSERT_TRUE(nchw.has_value());
+    EXPECT_FALSE(nchw->in.needed);
+    EXPECT_FALSE(nchw->out.needed);
+    // Packed channels-last: the tiled transpose, dims (N, H x W, C), 64 x 64 tiles per image.
+    auto channelsLast = baseShape();
+    channelsLast.channelsLast = true;
+    const auto nhwc = planOf(specFor(channelsLast, ConvDirection::BACKWARD_WEIGHTS));
+    ASSERT_TRUE(nhwc.has_value());
+    EXPECT_TRUE(nhwc->in.needed && nhwc->in.transpose);
+    EXPECT_TRUE(nhwc->out.needed && nhwc->out.transpose);
+    EXPECT_EQ(nhwc->in.copy.dims[0], 2);
+    EXPECT_EQ(nhwc->in.copy.dims[1], 7 * 6);
+    EXPECT_EQ(nhwc->in.copy.dims[2], 4);
+    EXPECT_EQ(nhwc->out.copy.dims[2], 6);
+    EXPECT_EQ(nhwc->in.transposeBlocks[0], 1u);
+    EXPECT_EQ(nhwc->in.transposeBlocks[1], 1u);
+    EXPECT_EQ(nhwc->in.transposeBlocks[2], 2u);
+    EXPECT_EQ(nhwc->in.bytes, size_t{2 * 4 * 7 * 6 * 4});
+    // Mixed layouts: the element-wise copy.
+    auto spec = specFor(baseShape(), ConvDirection::BACKWARD_WEIGHTS);
+    spec.y.strides = packedStrides(spec.y.dims, true);
+    const auto mixed = planOf(spec);
+    ASSERT_TRUE(mixed.has_value());
+    EXPECT_TRUE(mixed->in.needed && !mixed->in.transpose);
+    EXPECT_TRUE(mixed->out.needed && !mixed->out.transpose);
+    EXPECT_EQ(mixed->out.bytes, size_t{2 * 6 * 7 * 6 * 4});
 }
 
 } // namespace

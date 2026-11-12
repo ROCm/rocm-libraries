@@ -587,10 +587,11 @@ std::vector<WrwCase> wrwCases()
     auto deepNhwc = deep;
     deepNhwc.channelsLast = true;
     cases.push_back({"NhwcManyTilesSplit", deepNhwc});
-    // A 1 MiB workspace limit: the batch runs in slices that add onto the partials.
+    // A small workspace limit: the batch runs in slices that add onto the partials (2 MiB for
+    // channels-last, whose transposed x and dy copies take part of it).
     auto sliced = dense(40, 72, {12, 14}, 1, true);
     sliced.n = 9;
-    cases.push_back({"NhwcSlicedBatch", sliced, false, 1});
+    cases.push_back({"NhwcSlicedBatch", sliced, false, 2});
     auto slicedNchw = sliced;
     slicedNchw.channelsLast = false;
     slicedNchw.groups = 2;

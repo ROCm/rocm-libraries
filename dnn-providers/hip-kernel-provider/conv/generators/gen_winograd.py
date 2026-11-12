@@ -261,7 +261,8 @@ CATALOG = {
 }
 
 
-# Backward weights, F(3,r) (m = r: 2, 4 or 6), x and dy read in either packed layout. The GEMM per
+# Backward weights, F(3,r) (m = r: 2, 4 or 6), x and dy read channels-first (packed channels-last
+# ones transposed in, any other layout copied). The GEMM per
 # Winograd position: (out channels, in channels, tiles per step) and tm x tn = the FMA thread tile
 # ("any": fp32 operands; f16math 1: fp16 operands through v_dot2_f32_f16) or a wave's 16x16 atoms
 # (MFMA "gfx9": fp32 or fp16; "gfx950" 16x16x32 and WMMA "gfx11" / "gfx12": fp16).
@@ -282,7 +283,7 @@ def wrw(arch, tiles, rs=(2, 4, 6), f16math=0):
             f16math=f16math,
         )
         for r in rs
-        for lay in ("NCHW", "NHWC")
+        for lay in ("NCHW",)
         for bm, bn, bk, tm, tn in tiles
     ]
 

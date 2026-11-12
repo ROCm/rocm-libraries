@@ -492,10 +492,12 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
             const bool atom = config.arch == "gfx9" || config.arch == "gfx950"
                               || config.arch == "gfx11" || config.arch == "gfx12";
             const int bm = config.gemmBm, bn = config.gemmBn, bk = config.gemmBk;
-            if((config.m != 2 && config.m != 4 && config.m != 6) || config.llcPlan || config.bk != 0
-               || config.bt != 0 || config.ccv != 0 || (!fma && !atom) || bm < 1 || bn < 1 || bk < 4
-               || 64 % bk != 0 || config.tm < 1 || config.tn < 1 || bm % config.tm != 0
-               || bn % config.tn != 0)
+            // The transforms read packed channels-first operands (channels-last ones are transposed
+            // in): NCHW configs only.
+            if((config.m != 2 && config.m != 4 && config.m != 6) || config.layout != Layout::NCHW
+               || config.llcPlan || config.bk != 0 || config.bt != 0 || config.ccv != 0
+               || (!fma && !atom) || bm < 1 || bn < 1 || bk < 4 || 64 % bk != 0 || config.tm < 1
+               || config.tn < 1 || bm % config.tm != 0 || bn % config.tn != 0)
             {
                 return std::nullopt;
             }
@@ -667,14 +669,9 @@ std::optional<Plan> planWrw(const WinogradProblem& problem,
 {
     const auto& w = problem.wrw;
     const auto& base = problem.base.args;
-    const Layout layout = config.layout;
-    // x and dy packed in the config's layout are read in place; anything but the other packed
-    // layout is staged to channels-first.
-    if(problem.activations != layout
-       && !(problem.activations == Layout::OTHER && layout == Layout::NCHW))
-    {
-        return std::nullopt;
-    }
+    // x and dy packed channels-first are read in place; packed channels-last ones go through the
+    // tiled transpose, anything else through the element-wise copy.
+    const Layout layout = Layout::NCHW;
     const bool fma = config.arch == "any";
     const bool fp32 = problem.base.dataType == data_objects::DataType::FLOAT;
     Plan plan;
@@ -724,6 +721,21 @@ std::optional<Plan> planWrw(const WinogradProblem& problem,
             = activationCopy(base.yStrides, n, w.k, w.ho, w.wo, layout, true, problem.elementBytes);
         plan.out.bytes = static_cast<size_t>(n * dyImage * eb);
         place(plan.out);
+        if(problem.activations == Layout::NHWC)
+        {
+            // Packed channels-last: the tiled transpose instead of the element-wise copy.
+            const auto tiled = [&](conv_winograd::Staging& staging, long long c, long long hw) {
+                staging.transpose = true;
+                staging.copy.dims[0] = n;
+                staging.copy.dims[1] = hw;
+                staging.copy.dims[2] = c;
+                staging.transposeBlocks[0] = static_cast<unsigned int>(divUp(hw, 64));
+                staging.transposeBlocks[1] = static_cast<unsigned int>(divUp(c, 64));
+                staging.transposeBlocks[2] = static_cast<unsigned int>(n);
+            };
+            tiled(plan.in, w.c, static_cast<long long>(w.hi) * w.wi);
+            tiled(plan.out, w.k, static_cast<long long>(w.ho) * w.wo);
+        }
     }
 
     // Splits over the tiles: enough blocks for about 2048 threads per unit (one split where
@@ -802,9 +814,8 @@ std::optional<Plan> planWrw(const WinogradProblem& problem,
         blocks[2] = static_cast<unsigned int>(std::max<long long>(1, z));
         return true;
     };
-    // K5XformBlock: NCHW 64 tiles x 4 channels, NHWC 16 x 16.
-    const long long tb = layout == Layout::NCHW ? 64 : 16;
-    const long long cb = 256 / tb;
+    // k5wTransform: 64 tiles x 4 channels.
+    const long long tb = 64, cb = 4;
     if(!grid(plan.inputBlocks, ldt / tb, divUp(cg, cb), groups)
        || !grid(plan.filterBlocks, ldt / tb, divUp(kg, cb), groups)
        || !grid(plan.gemmBlocks, blocks * splits, 1, 1)
@@ -1414,10 +1425,9 @@ public:
         options.add("CONV_WINO_VARIANT", std::to_string(variantCode));
         options.add("CONV_WINO_DIR",
                     std::string(resolved->problem.direction == ConvDirection::FORWARD ? "0" : "1"));
-        options.add("CONV_WINO_LAYOUT",
-                    std::string((multipass || wrw) && config.layout == conv_winograd::Layout::NHWC
-                                    ? "1"
-                                    : "0"));
+        options.add(
+            "CONV_WINO_LAYOUT",
+            std::string(multipass && config.layout == conv_winograd::Layout::NHWC ? "1" : "0"));
         options.add("CONV_WINO_M", std::to_string(config.m));
         options.add("CONV_WINO_GEMM_BM", std::to_string(config.gemmBm));
         options.add("CONV_WINO_GEMM_BN", std::to_string(config.gemmBn));
@@ -1517,6 +1527,18 @@ public:
                 build("ConvWinogradWrwX", signatureOf<K5WrwArgs>(), 256, plan.inputBlocks));
             kernels.push_back(
                 build("ConvWinogradWrwOut", signatureOf<K5WrwArgs>(), 256, plan.outputBlocks));
+            if(plan.in.transpose)
+            {
+                // 4 x transpose, 5 dy transpose.
+                kernels.push_back(build("ConvWinogradWrwTranspose",
+                                        signatureOf<K5CopyArgs>(),
+                                        256,
+                                        plan.in.transposeBlocks));
+                kernels.push_back(build("ConvWinogradWrwTranspose",
+                                        signatureOf<K5CopyArgs>(),
+                                        256,
+                                        plan.out.transposeBlocks));
+            }
             break;
         default:
             break;
@@ -1582,14 +1604,25 @@ public:
             // then dW.
             const void* xs = x;
             const void* dys = y;
+            const auto stage = [&](const conv_winograd::Staging& staging, size_t index, void* src) {
+                if(!staging.transpose)
+                {
+                    copy(staging, src, base + staging.workspaceOffset);
+                    return;
+                }
+                K5CopyArgs t = staging.copy;
+                t.src = src;
+                t.dst = base + staging.workspaceOffset;
+                dispatch.kernelForStream(index, stream).launch(stream, t);
+            };
             if(plan.in.needed)
             {
-                copy(plan.in, x, base + plan.in.workspaceOffset);
+                stage(plan.in, 4, x);
                 xs = base + plan.in.workspaceOffset;
             }
             if(plan.out.needed)
             {
-                copy(plan.out, y, base + plan.out.workspaceOffset);
+                stage(plan.out, 5, y);
                 dys = base + plan.out.workspaceOffset;
             }
             K5WrwArgs args = plan.wrw;

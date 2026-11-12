@@ -63,8 +63,8 @@ struct K5GemmArgs
 };
 
 /// Backward weights (ConvWinogradWrw.h), F(3,r): x (N, C, HI, WI) and dy (N, K, HO, WO), both
-/// packed NCHW or NHWC, into dw (K, C/G, 3, 3) at any strides; 3x3 stride 1 correlation with
-/// top/left padding (ph, pw).
+/// packed NCHW (other layouts staged), into dw (K, C/G, 3, 3) at any strides; 3x3 stride 1
+/// correlation with top/left padding (ph, pw).
 struct K5WrwArgs
 {
     const void* x;

@@ -19,7 +19,7 @@
 // Passes (P = (r+2)^2 positions, T = tiles of the batch slice, padded with zero tiles to L, a
 // multiple of 64; per group cg = C/G in channels, kg = K/G out channels; Op = the GEMM operand
 // type, rounded once after the fp32 transform):
-//   1. x transform   x  -> V[g][p][cg][L]  (Op)
+//   1. x transform   x  -> V[g][p][cg][L]  (Op; x and dy channels-first, packed NHWC transposed in)
 //   2. dy transform  dy -> U[g][p][kg][L]  (Op)
 //   3. GEMM          Part[s][g][p][kg][cg] (fp32) = sum over split s's tile range of U V^T: both
 //                    operands tile-contiguous, so every atom reads contiguous k runs; batch
@@ -199,30 +199,20 @@ __device__ inline bool k5wTile(const K5WrwArgs& a, int t, int& img, int& tr, int
     return true;
 }
 
-template <int LAYOUT>
-__device__ inline long long k5wOffset(int img, int ch, int channels, int h, int w, int hs, int ws)
-{
-    return LAYOUT == K5_NCHW ? ((static_cast<long long>(img) * channels + ch) * hs + h) * ws + w
-                             : ((static_cast<long long>(img) * hs + h) * ws + w) * channels + ch;
-}
-
 // ---------------------------------------------------------------------------------------------
-// Passes 1 and 2: the transforms. A block covers TB tiles x CB channels of one group (as K5's
-// multipass input transform: NCHW tile-fast, NHWC channel-fast through LDS) and writes rows of
-// tiles; tiles from T to L are written as zeros. X: the (r+2)^2 x patch; else the r x r dy tile.
+// Passes 1 and 2: the transforms, on packed channels-first x and dy (packed channels-last ones are
+// transposed in first, k5wTranspose). A block covers 64 tiles x 4 channels of one group, tile-fast,
+// and writes rows of tiles; tiles from T to L are written as zeros. X: the (r+2)^2 x patch; else
+// the r x r dy tile.
 
-template <class T, class Op, int R, int LAYOUT, bool X>
+template <class T, class Op, int R, bool X>
 __device__ void k5wTransform(const K5WrwArgs& a)
 {
-    constexpr int A = R + 2, P = A * A, N = X ? A : R;
-    typedef K5XformBlock<LAYOUT> B;
+    constexpr int A = R + 2, P = A * A, N = X ? A : R, TB = 64, CB = 4;
     const int cg = (X ? a.c : a.k) / a.groups;
     const int g = blockIdx.z;
-    const int t0 = blockIdx.x * B::TB, c0 = blockIdx.y * B::CB;
     const int tid = threadIdx.x;
-    const int tl = LAYOUT == K5_NCHW ? tid % B::TB : tid / B::CB;
-    const int cl = LAYOUT == K5_NCHW ? tid / B::TB : tid % B::CB;
-    const int t = t0 + tl, c = c0 + cl;
+    const int t = blockIdx.x * TB + tid % TB, c = blockIdx.y * CB + tid / TB;
     int img = 0, tr = 0, tc = 0;
     const bool valid = c < cg && k5wTile(a, t, img, tr, tc);
 
@@ -232,9 +222,10 @@ __device__ void k5wTransform(const K5WrwArgs& a)
         d[p] = 0.0f;
     if(valid)
     {
-        const T* src = static_cast<const T*>(X ? a.x : a.dy);
-        const int channels = X ? a.c : a.k, ch = g * cg + c;
         const int hs = X ? a.hi : a.ho, ws = X ? a.wi : a.wo;
+        const int channels = X ? a.c : a.k;
+        const T* src = static_cast<const T*>(X ? a.x : a.dy)
+                       + (static_cast<long long>(img) * channels + g * cg + c) * hs * ws;
         const int h0 = tr * R - (X ? a.ph : 0), w0 = tc * R - (X ? a.pw : 0);
         float e[N * N];
 #pragma unroll
@@ -244,10 +235,9 @@ __device__ void k5wTransform(const K5WrwArgs& a)
             for(int j = 0; j < N; ++j)
             {
                 const int h = h0 + i, w = w0 + j;
-                e[i * N + j]
-                    = h >= 0 && h < hs && w >= 0 && w < ws
-                          ? K5Elem<T>::load(src[k5wOffset<LAYOUT>(img, ch, channels, h, w, hs, ws)])
-                          : 0.0f;
+                e[i * N + j] = h >= 0 && h < hs && w >= 0 && w < ws
+                                   ? K5Elem<T>::load(src[static_cast<long long>(h) * ws + w])
+                                   : 0.0f;
             }
         }
         float tmp[A * N];
@@ -273,40 +263,12 @@ __device__ void k5wTransform(const K5WrwArgs& a)
 
     Op* V = static_cast<Op*>(X ? a.v : a.u);
     const long long ps = static_cast<long long>(cg) * a.ldt;
-    const long long gbase = static_cast<long long>(g) * P * ps;
-    if constexpr(LAYOUT == K5_NCHW)
+    if(c < cg && t < a.ldt)
     {
-        if(c < cg && t < a.ldt)
-        {
+        Op* row = V + static_cast<long long>(g) * P * ps + static_cast<long long>(c) * a.ldt + t;
 #pragma unroll
-            for(int p = 0; p < P; ++p)
-                V[gbase + p * ps + static_cast<long long>(c) * a.ldt + t] = K5Elem<Op>::store(d[p]);
-        }
-    }
-    else
-    {
-        // Through LDS in groups of positions (F(3,6)'s 64 would pass 64 KiB at once).
-        constexpr int PG = P > 36 ? P / 2 : P;
-        __shared__ float s[PG * B::CB * (B::TB + 1)];
-        const int tl2 = tid % B::TB, cl2 = tid / B::TB;
-        const int t2 = t0 + tl2, c2 = c0 + cl2;
-#pragma unroll
-        for(int p0 = 0; p0 < P; p0 += PG)
-        {
-            if(p0 > 0)
-                __syncthreads();
-#pragma unroll
-            for(int p = 0; p < PG; ++p)
-                s[(p * B::CB + cl) * (B::TB + 1) + tl] = d[p0 + p];
-            __syncthreads();
-            if(t2 < a.ldt && c2 < cg)
-            {
-#pragma unroll
-                for(int p = 0; p < PG; ++p)
-                    V[gbase + (p0 + p) * ps + static_cast<long long>(c2) * a.ldt + t2]
-                        = K5Elem<Op>::store(s[(p * B::CB + cl2) * (B::TB + 1) + tl2]);
-            }
-        }
+        for(int p = 0; p < P; ++p)
+            row[p * ps] = K5Elem<Op>::store(d[p]);
     }
 }
 
@@ -573,6 +535,39 @@ __device__ void k5wGemm(const K5WrwArgs& a)
                 }
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Packed NHWC -> NCHW (x or dy staged for the channels-first transforms): per image a 64 x 64
+// tile of (pixel, channel) through LDS, 64-element runs read along channels and written along
+// pixels. K5CopyArgs: dims {N, H x W, C}.
+
+template <class T>
+__device__ void k5wTranspose(const K5CopyArgs& a)
+{
+    __shared__ T tile[64][65];
+    const long long hw = a.dims[1], ch = a.dims[2];
+    const long long p0 = static_cast<long long>(blockIdx.x) * 64,
+                    c0 = static_cast<long long>(blockIdx.y) * 64;
+    const long long img = blockIdx.z;
+    const T* src = static_cast<const T*>(a.src) + img * hw * ch;
+    T* dst = static_cast<T*>(a.dst) + img * hw * ch;
+    const int tx = threadIdx.x % 64, ty = threadIdx.x / 64;
+#pragma unroll
+    for(int r = 0; r < 16; ++r)
+    {
+        const long long p = p0 + ty + 4 * r, c = c0 + tx;
+        if(p < hw && c < ch)
+            tile[ty + 4 * r][tx] = src[p * ch + c];
+    }
+    __syncthreads();
+#pragma unroll
+    for(int r = 0; r < 16; ++r)
+    {
+        const long long c = c0 + ty + 4 * r, p = p0 + tx;
+        if(p < hw && c < ch)
+            dst[c * hw + p] = tile[tx][ty + 4 * r];
     }
 }
 

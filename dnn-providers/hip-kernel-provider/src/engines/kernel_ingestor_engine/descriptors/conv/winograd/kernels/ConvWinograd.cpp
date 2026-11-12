@@ -202,7 +202,8 @@ extern "C" __global__ void __launch_bounds__((CONV_WINO_COOP_CFG::THREADS))
 
 #elif CONV_WINO_VARIANT == 6
 
-// Backward weights, F(3,r) with r = CONV_WINO_M (2, 4 or 6), layout CONV_WINO_LAYOUT (x and dy).
+// Backward weights, F(3,r) with r = CONV_WINO_M (2, 4 or 6), on packed channels-first x and dy
+// (channels-last ones transposed in by ConvWinogradWrwTranspose).
 // CONV_WINO_WRW_OPT, the GEMM operands: 0 fp32, 1 the I/O type (fp16 graphs' F(3,2)).
 // CONV_WINO_WRW_ATOM: 0 FMA (fp32, or v_dot2_f32_f16 on fp16 operands), 1 MFMA 16x16 (f32, f16),
 // 3 WMMA gfx11, 4 WMMA gfx12, 5 MFMA 16x16x32 (gfx950, f16). GEMM block CONV_WINO_GEMM_BM (out channels) x
@@ -243,14 +244,19 @@ extern "C" __global__ void __launch_bounds__((CONV_WINO_COOP_CFG::THREADS))
      * (CONV_WINO_GEMM_BN / (CONV_WINO_WRW_A::DIM * CONV_WINO_TN)) * CONV_WINO_WRW_A::WAVE)
 #endif
 
+extern "C" __global__ void __launch_bounds__(256) ConvWinogradWrwTranspose(K5CopyArgs a)
+{
+    k5wTranspose<CONV_WINO_T>(a);
+}
+
 extern "C" __global__ void __launch_bounds__(256) ConvWinogradWrwX(K5WrwArgs a)
 {
-    k5wTransform<CONV_WINO_T, CONV_WINO_WRW_OP, CONV_WINO_M, CONV_WINO_LAYOUT, true>(a);
+    k5wTransform<CONV_WINO_T, CONV_WINO_WRW_OP, CONV_WINO_M, true>(a);
 }
 
 extern "C" __global__ void __launch_bounds__(256) ConvWinogradWrwDy(K5WrwArgs a)
 {
-    k5wTransform<CONV_WINO_T, CONV_WINO_WRW_OP, CONV_WINO_M, CONV_WINO_LAYOUT, false>(a);
+    k5wTransform<CONV_WINO_T, CONV_WINO_WRW_OP, CONV_WINO_M, false>(a);
 }
 
 extern "C" __global__ void __launch_bounds__(CONV_WINO_WRW_THREADS) ConvWinogradWrwGemm(K5WrwArgs a)

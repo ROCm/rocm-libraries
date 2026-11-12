@@ -118,6 +118,9 @@ bool configRunsOn(const Config& config, std::string_view gcnArchName);
 struct Staging
 {
     bool needed = false;
+    /// Backward weights: a packed NHWC operand transposed to NCHW (copy.dims: N, H x W, C).
+    bool transpose = false;
+    unsigned int transposeBlocks[3] = {1, 1, 1};
     K5CopyArgs copy{};
     size_t workspaceOffset = 0;
     size_t bytes = 0;
