@@ -52,64 +52,37 @@ on correctness alone. There is no shape-to-config routing table: the catalog's d
   a problem when any two of in/wei/out share a type, and no optimized MIOpen solver takes one.
   Mixed-type convolution is unsupported here for now.
 
-## Layout
+## Lower-precision plans (testing only)
 
-| Piece | Path, relative to the provider root |
-|---|---|
-| This overview | `conv/` |
-| Descriptors, per family | `src/engines/kernel_ingestor_engine/descriptors/conv/<family>/`. The engine descriptors (UED, UDD, KMD, UMD) are in git; the generated instance catalogs (`*.kdp.json`) are in DVC, one `<catalog>.kdp.json.dvc` pointer each (naive's hand-written KDPs stay in git). |
-| Descriptor generators | `conv/generators/gen_*.py`, one per family; `conv/generators/regen_all.py` runs them all. [REGEN.md](REGEN.md) is how to regenerate and upload. |
-| Which families a build serves | `conv/ConvContent.cmake` |
-| Kernel sources | `src/engines/kernel_ingestor_engine/descriptors/conv/<family>/kernels/`, beside the descriptors that name them. An embedded source must sit at its descriptor's folder plus `source_file`, which `descriptor-packaging/tools/hkp_verify_embedded_sources.py` checks at build time. |
-| Native packs (matching, workload rule, dispatch) | `src/engines/kernel_ingestor_engine/packs/Conv<Family>*.cpp` |
-| Kernel embedding (`HKP_CONV_KERNEL_SOURCES`, `HKP_CONV_KERNEL_KEYS`) | `src/engines/kernel_ingestor_engine/CMakeLists.txt` |
-| Tests | `src/tests/engines/kernel_ingestor_engine/packs/TestConv<Family>*.cpp` |
+Every engine computes as precisely as the graph asks unless a switch below is set: fp32 accumulation
+of exact products and one final rounding. Plans that compute less precisely run only behind
+temporary testing switches, read when a plan is admitted, because hipDNN cannot yet report a plan's
+numerical notes or let a caller exclude one (draft PR #15493). Unset (the default), no such plan
+is admitted.
 
-## Building
+| Variable | Covers | cuDNN note |
+|---|---|---|
+| `HIP_KERNEL_PROVIDER_CONV_TF32` | Every hip-kernel-provider conv engine that has a TF32 form (below). | `TENSOR_CORE` |
+| `HIPBLASLT_PROVIDER_CONV_TF32` | The hipblaslt-provider's explicit-GEMM `HIPBLASLT_CONV_TF32_ENGINE` and `ROCBLAS_CONV_TF32_ENGINE` (`hipblaslt-provider/docs/OperationSupport.md`). | `TENSOR_CORE` |
+| `HIPDNN_CONV_ALLOW_REDUCED_PRECISION_REDUCTION` | The hipblaslt-provider's `ROCBLAS_CONV_RPR_ENGINE` and `HIPBLASLT_CONV_RPR_ENGINE` (below). | `REDUCED_PRECISION_REDUCTION` |
 
-Off by default. Enable with `-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON -DHIPKERNELPROVIDER_ENABLE_CONV=ON`.
-With the option OFF, the packs are not compiled, the kernels are not embedded and the
-`conv/` descriptor folder is not packed (`HKP_DESCRIPTOR_FAMILIES` in
-`descriptor-packaging/cmake/HkpPackaging.cmake`).
+The final form follows cuDNN, and these switches are not part of it:
 
-Fetch the catalogs before configuring (reads are anonymous):
+- an engine whose plans compute less precisely reports its numerical note (table above);
+- the caller excludes such engines with `Graph::deselect_numeric_notes`;
+- `HIPDNN_TF32_OVERRIDE=0` turns TF32 off process-wide, and a matching process-wide switch turns
+  reduced-precision reduction off.
 
-```bash
-# From the repository root.
-dvc pull -r ingestor dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/conv/*/*.kdp.json.dvc
-```
+The compute type is the least precision a plan must keep: these engines serve FLOAT and unset
+compute types (and HALF on fp16 for the reduced-precision-reduction engines), as cuDNN offers
+them. Neither the per-engine note reporting nor `deselect_numeric_notes` exists yet. When they
+land, the switches go away.
 
-A family whose catalogs are missing is **not served**: configure warns (an error with
-`-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON`), the family's folder is withdrawn from the
-pack, its native pack is not registered and its engine suites are not built
-(`conv/ConvContent.cmake`). The other families build and ship as usual.
-
-Plans built from these engines cannot be saved and loaded: plan serialization covers kpack
-code objects only, and these kernels are compiled from embedded source.
-
-## TF32 (testing only)
-
-Two environment variables, read when a plan is admitted, permit TF32-class math for fp32
-convolutions. Both are **temporary testing switches**. Unset (the default), every fp32 plan
-these providers admit is exact fp32.
-
-| Variable | Covers |
-|---|---|
-| `HIP_KERNEL_PROVIDER_CONV_TF32` | Every hip-kernel-provider conv engine that has a TF32 form (below). |
-| `HIPBLASLT_PROVIDER_CONV_TF32` | The hipblaslt-provider's explicit-GEMM `HIPBLASLT_CONV_TF32_ENGINE` and `ROCBLAS_CONV_TF32_ENGINE` (`hipblaslt-provider/docs/OperationSupport.md`). |
+### TF32
 
 With the switch set, the provider admits a TF32-class config only for an fp32 graph. It sits
 beside the exact configs, and autotune chooses among them. A TF32 config is never admitted for
 fp16, bf16 or mixed graphs. It is never admitted without the switch.
-
-The final form follows cuDNN, and these switches are not part of it:
-
-- an engine that may use TF32 reports the `TENSOR_CORE` numerical note;
-- the caller excludes such engines with `Graph::deselect_numeric_notes`;
-- `HIPDNN_TF32_OVERRIDE=0` turns TF32 off process-wide.
-
-Neither the per-engine note reporting nor `deselect_numeric_notes` exists yet. When they land,
-the switches go away.
 
 TF32 forms:
 
@@ -149,6 +122,52 @@ so have none:
 - `CONV_WINOGRAD` (K5): 0.21-0.58x. That form was multipass: the split after the fp32
   transforms, and a bf16 matrix-core batched GEMM. Its fp32 configs are VALU. A paying form
   needs the split inside the fused cooperative kernel.
+
+### Reduced-precision reduction
+
+With `HIPDNN_CONV_ALLOW_REDUCED_PRECISION_REDUCTION=1`, the hipblaslt-provider registers
+`ROCBLAS_CONV_RPR_ENGINE` and `HIPBLASLT_CONV_RPR_ENGINE`. Their one form: a 1x1, unit-stride,
+unpadded fp16 backward weights of several channels-first images as one GEMM per image adding into
+the fp16 dw (MIOpen's `GemmWrw1x1_stride1`), so dw is rounded once per image instead of once. It
+wins where the exact plans' fp32 partials are slow, mostly RDNA (gfx1100, gfx1201); elsewhere
+autotune keeps the exact engines. fp16 only: bf16 has no reduced form. With the switch unset no
+such engine is registered, and the plan builder declines on every call. The form is checked
+against an fp64 reference within the half tolerance widened for the per-image roundings.
+
+## Layout
+
+| Piece | Path, relative to the provider root |
+|---|---|
+| This overview | `conv/` |
+| Descriptors, per family | `src/engines/kernel_ingestor_engine/descriptors/conv/<family>/`. The engine descriptors (UED, UDD, KMD, UMD) are in git; the generated instance catalogs (`*.kdp.json`) are in DVC, one `<catalog>.kdp.json.dvc` pointer each (naive's hand-written KDPs stay in git). |
+| Descriptor generators | `conv/generators/gen_*.py`, one per family; `conv/generators/regen_all.py` runs them all. [REGEN.md](REGEN.md) is how to regenerate and upload. |
+| Which families a build serves | `conv/ConvContent.cmake` |
+| Kernel sources | `src/engines/kernel_ingestor_engine/descriptors/conv/<family>/kernels/`, beside the descriptors that name them. An embedded source must sit at its descriptor's folder plus `source_file`, which `descriptor-packaging/tools/hkp_verify_embedded_sources.py` checks at build time. |
+| Native packs (matching, workload rule, dispatch) | `src/engines/kernel_ingestor_engine/packs/Conv<Family>*.cpp` |
+| Kernel embedding (`HKP_CONV_KERNEL_SOURCES`, `HKP_CONV_KERNEL_KEYS`) | `src/engines/kernel_ingestor_engine/CMakeLists.txt` |
+| Tests | `src/tests/engines/kernel_ingestor_engine/packs/TestConv<Family>*.cpp` |
+
+## Building
+
+Off by default. Enable with `-DHIPDNN_ENABLE_KERNEL_INGESTOR=ON -DHIPKERNELPROVIDER_ENABLE_CONV=ON`.
+With the option OFF, the packs are not compiled, the kernels are not embedded and the
+`conv/` descriptor folder is not packed (`HKP_DESCRIPTOR_FAMILIES` in
+`descriptor-packaging/cmake/HkpPackaging.cmake`).
+
+Fetch the catalogs before configuring (reads are anonymous):
+
+```bash
+# From the repository root.
+dvc pull -r ingestor dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/conv/*/*.kdp.json.dvc
+```
+
+A family whose catalogs are missing is **not served**: configure warns (an error with
+`-DHIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON`), the family's folder is withdrawn from the
+pack, its native pack is not registered and its engine suites are not built
+(`conv/ConvContent.cmake`). The other families build and ship as usual.
+
+Plans built from these engines cannot be saved and loaded: plan serialization covers kpack
+code objects only, and these kernels are compiled from embedded source.
 
 ## Adding an engine family
 

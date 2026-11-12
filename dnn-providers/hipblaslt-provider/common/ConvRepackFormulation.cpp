@@ -1204,4 +1204,60 @@ std::optional<ConvGemmPlanCalls>
         maxWorkspaceBytes);
 }
 
+std::optional<ConvGemmPlanCalls> reducedPrecisionGemmCalls(const ConvProblem& problem)
+{
+    if(problem.dataType != data_objects::DataType::HALF)
+    {
+        return std::nullopt;
+    }
+    const auto shape = oneByOneWeightsOf(problem);
+    // One GEMM already reduces over every image exactly: nothing for a reduced form to gain.
+    if(!shape.has_value() || directGemmCalls(problem).has_value())
+    {
+        return std::nullopt;
+    }
+    const int64_t kg = problem.kPerGroup();
+    const int64_t cg = problem.cPerGroup();
+    ConvGemmStage stage;
+    for(int64_t image = 0; image < problem.n; ++image)
+    {
+        // dw_g (kg x cg) += dy_n,g (kg x pixels) x_n,g^T (pixels x cg), batched over the groups.
+        const MatrixView dy{problem.y.uid,
+                            problem.dataType,
+                            kg,
+                            shape->pixels,
+                            problem.y.strides[1],
+                            shape->yPixelStride,
+                            kg * problem.y.strides[1],
+                            problem.y.offset + image * problem.y.strides[0]};
+        const MatrixView x{problem.x.uid,
+                           problem.dataType,
+                           shape->pixels,
+                           cg,
+                           shape->xPixelStride,
+                           problem.x.strides[1],
+                           cg * problem.x.strides[1],
+                           problem.x.offset + image * problem.x.strides[0]};
+        const MatrixView w{problem.w.uid,
+                           problem.dataType,
+                           kg,
+                           cg,
+                           problem.w.strides[0],
+                           problem.w.strides[1],
+                           kg * problem.w.strides[0],
+                           problem.w.offset};
+        auto call = gemmForViews(dy, x, w, problem.groups);
+        if(!call.has_value())
+        {
+            return std::nullopt;
+        }
+        call->accumulate = image > 0;
+        stage.calls.push_back(*call);
+    }
+    ConvGemmPlanCalls plan;
+    plan.row = ConvGemmRow::ONE_BY_ONE;
+    plan.stages.push_back(std::move(stage));
+    return plan;
+}
+
 } // namespace hipblaslt_plugin
