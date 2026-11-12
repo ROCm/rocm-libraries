@@ -39,3 +39,4 @@ jobs:
       gitleaks_config_path: .github/scan_tools_configs/gitleaks.toml
       trivy_config_path: .github/scan_tools_configs/trivy.yml
       zizmor_config_path: .github/scan_tools_configs/zizmor.yml
+      timeout_minutes: 60
