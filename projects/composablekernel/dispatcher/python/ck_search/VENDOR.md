@@ -57,7 +57,9 @@ above), `db.py`, `driver.py`, `measure.py`, `halving.py`, `knobspace.py`,
 - `listed_tpe.py`: optional TPE acquisition over every listed candidate,
   with randomized ties and the unchanged upstream density/prior/protocol.
   Select with `options={"candidate_pool": "listed"}` for `tpe`; the default
-  sampled pool and upstream trial parity remain unchanged.
+  sampled pool and upstream trial parity remain unchanged. Its option
+  `gamma_schedule="sqrt"` takes the best `ceil(sqrt(n))` of `n` observations
+  as the good set; the default `"linear"` keeps upstream's `ceil(gamma * n)`.
 - `coupled_tpe.py`: opt-in `coupled_tpe` strategy combining univariate-to-multivariate
   shrinkage Parzen estimation (log-geometric ordinal kernels and dimension-scaled
   Aitchison-Aitken categorical kernels), expected-improvement linear quantile weights,

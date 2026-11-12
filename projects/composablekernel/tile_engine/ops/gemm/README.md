@@ -624,7 +624,8 @@ The following controls leave the PR14938 defaults unchanged. Evaluate each
 experimental policy on the target workload and device before enabling it.
 
 Default-mode output is not byte-identical: `summary.json` also records `phase_s`
-and `confirmation` (empty in fixed mode), `run.json` records `warm_start_sha256`,
+and `confirmation` (empty in fixed mode), `run.json` records `warm_start_sha256`
+and each problem's `history_start` (empty without a history),
 and its context records `timing_environment`. These are additive diagnostics;
 the default search and fixed-confirmation policies are unchanged.
 
@@ -636,6 +637,8 @@ the default search and fixed-confirmation policies are unchanged.
 | Build-aware TPE/GP/coupled proposals | `build_aware: {"rank_fraction": 0.1, "explore_probability": 0.2}` | Highest acquisition score |
 | TPE-containing portfolio | `strategy: "portfolio"`, `portfolio_members: ["hill", "gp", "de", "tpe"]` | Portfolio members `hill,gp,de` |
 | TPE over the full candidate list | `strategy: "tpe"`, `tpe_candidate_pool: "listed"` | Sampled acquisition pool |
+| Small-budget listed TPE | Listed TPE with `tpe_n_startup: 8`, `tpe_gamma_schedule: "sqrt"` | 10 startup trials; good set `ceil(0.25 n)` |
+| History start points | `warm_start.history_file`, `history_top_k` (default `5`) | Warm pairs only |
 | Coupled multivariate TPE + trust region | `strategy: "coupled_tpe"` | Univariate sampled TPE |
 
 `tpe_candidate_pool: "listed"` scores every catalog member before selecting
@@ -662,6 +665,74 @@ Without warm starts it was 3.193% versus 3.481%; 16-trial results also did
 not improve. These fixed-catalog results support an opt-in warm-start
 experiment, not a default change or a universal speedup claim. Compare
 against GP as well: its mean quality was better at the 64-trial budget.
+
+`tpe_n_startup` sets TPE's number of startup trials (default 10).
+`tpe_gamma_schedule: "sqrt"` (listed pool only) takes the best
+`ceil(sqrt(n))` of `n` observations as TPE's good set instead of
+`ceil(0.25 n)`. With warm pairs, `tpe_n_startup` must exceed
+`warm_start.top_k` (the limit, whatever the pairs file yields): a startup of
+warm pairs alone kept the model near them in replay. History start points
+are not counted by this rule. They and the warm pairs run first and
+stratified trials only fill what is left of `tpe_n_startup`, so with five of
+each the startup has no stratified trial and `tpe_n_startup: 8` does not
+change it.
+
+`warm_start.history_file` reads what earlier runs measured on **other**
+problems and tries the `history_top_k` most promising kernels first. The
+file is JSON lines; only `result` events with status `ok` are read
+(`problem`, `kernel`, `latency_ms`), so the `trials.jsonl` files of earlier
+runs are a history as they are. A line that is not JSON, such as the cut-off
+last line of an interrupted run, rejects the file; the error names the line:
+
+```bash
+cat run_a/trials.jsonl run_b/trials.jsonl > history.jsonl
+```
+
+```json
+{"strategy": "tpe", "tpe_candidate_pool": "listed", "tpe_n_startup": 8,
+ "tpe_gamma_schedule": "sqrt",
+ "warm_start": {"pairs_file": "picks.json", "history_file": "history.jsonl"}}
+```
+
+Each pick is the kernel that most lowers the mean, over the history's
+problems, of the lowest log latency ratio to that problem's best among the
+picks and the warm pairs. A kernel counts only where it was measured, only
+kernels eligible for the current problem are picked, and the problem's own
+entries are ignored. The picks run before the warm pairs and count as
+trials. `run.json` lists them per problem (`history_start`) and hashes the
+file (`warm_start_sha256`). A problem without usable history searches as it
+does without the setting. Every strategy that takes warm starts accepts it.
+
+Offline replay of the recorded measurements of the study above (the same 144
+kernels, six shapes and one MI355X/gfx950 GPU; 100 search seeds; history =
+the first 16, 32 or 64 trials of a sampled-TPE run of each of the other five
+shapes) gave this mean excess latency at 16 / 32 / 64 trials:
+
+| Search | No warm pairs | Five warm pairs |
+|---|---|---|
+| Listed TPE | 9.63 / 3.09 / 1.29% | 6.94 / 2.95 / 0.89% |
+| Small-budget listed TPE | 7.72 / 2.98 / 0.31% | 5.03 / 1.24 / 0.32% |
+| History + listed TPE | 5.24 / 1.00 / 0.30% | 4.05 / 0.32 / 0.30% |
+| History + small-budget listed TPE | 3.63 / 0.57 / 0.29% | 3.74 / 0.30 / 0.29% |
+
+These numbers are replay only: no GPU run has used these settings. The
+table pools 100 search seeds, the paragraph on listed TPE above 20, hence
+its different listed-TPE values. The six shapes form about three landscapes,
+and five of them had a related shape in their history. History from another
+day, toolchain or catalog, build failures and the confirmation stage were
+not replayed, and about 0.3% is the floor of this scoring. The sqrt schedule
+was chosen on these six shapes and re-checked only with new search seeds.
+The means hide a tail: at 16 trials about a third of the history +
+small-budget runs still had more than 5% excess latency, and single runs
+were up to 13 points worse than listed TPE. Small-budget listed TPE alone
+showed no gain at 32 trials without warm pairs.
+
+The settings are opt-in, not defaults; the `listed_tpe_small_budget`,
+`transfer_listed` and `transfer_listed_small_budget` comparison arms measure
+them on the target workload. Their baseline has warm pairs, so they do not
+cover the first column, and with five warm pairs and five start points
+`transfer_listed_small_budget` differs from `transfer_listed` by the sqrt
+schedule only.
 
 `strategy: "coupled_tpe"` addresses two failure modes of factorized catalog TPE
 under coupled GPU parameters (`pipeline`, `tile_m/n/k`, `wave_m/n`, `warp_tile`):
@@ -747,9 +818,17 @@ python compare_search.py prepare --baseline search.json \
 
 This only writes configs and a manifest; it **does not start GPU jobs**.
 The baseline must be TPE with warm pairs, no prior, fixed confirmation and no
-experimental controls. Each seed has ten arms, deterministically shuffled:
-`baseline`, `listed_tpe`, `broad_prior`, `diverse_warm`, `confirmation_control`, `race`,
+experimental controls. Each seed has twelve arms, deterministically shuffled:
+`baseline`, `listed_tpe`, `listed_tpe_small_budget`, `coupled_tpe`,
+`broad_prior`, `diverse_warm`, `confirmation_control`, `race`,
 `build_aware`, `portfolio_control`, `portfolio_tpe`, and `combined`.
+`--history history.jsonl` (results of earlier runs on other problems) adds
+`transfer_listed` and `transfer_listed_small_budget`. `listed_tpe` is the
+control of `listed_tpe_small_budget` and `transfer_listed`, and
+`transfer_listed` that of `transfer_listed_small_budget`. The two
+`*_small_budget` arms are left out when the baseline's `warm_start.top_k` is
+8 or more, which their `tpe_n_startup: 8` must exceed. The manifest's
+`left_out` gives the reason for every arm that was not written.
 The fixed-confirmation control and race share a maximum of
 `max(9, baseline.fresh_calls)` calls per finalist. Portfolio membership has its
 own control, so changing the search family is not mistaken for adding TPE.
@@ -795,7 +874,9 @@ The CSV keeps each seed separate, includes failures/missing runs, counts
 exhaustive fallbacks, and refuses changed settings/inputs/domains/execution contexts
 or a purported full prior with missing eligible entries. Context checks include
 the recorded source commit/content hashes and host-cache mode; each problem must
-have the same actual warm-start count as its control. Warm candidate identities
+have the same actual warm-start count as its control. A run whose history gave
+no problem a start point is refused (it would repeat its control);
+`history_problems` counts the problems that got one. Warm candidate identities
 and prior inputs may intentionally differ by arm, but each arm's inputs must
 match its prepared hashes. These checks cover recorded provenance, not unrecorded
 device state such as clocks.
