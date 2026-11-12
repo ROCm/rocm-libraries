@@ -26,9 +26,8 @@ std::filesystem::path getCurrentModuleDirectory()
 {
     try
     {
-        return std::filesystem::weakly_canonical(std::filesystem::absolute(
-            hipdnn_data_sdk::utilities::getLoadedLibraryDirectoryForAddress(
-                reinterpret_cast<const void*>(&getCurrentModuleDirectory))));
+        return hipdnn_data_sdk::utilities::getLoadedLibraryDirectoryForAddress(
+            reinterpret_cast<const void*>(&getCurrentModuleDirectory));
     }
     catch(const std::runtime_error& ex)
     {
