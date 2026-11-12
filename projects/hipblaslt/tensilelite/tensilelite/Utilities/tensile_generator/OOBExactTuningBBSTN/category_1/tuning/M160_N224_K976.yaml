@@ -1,0 +1,118 @@
+# OOB BBS TN exact tuning, category 1, M=160 N=224 K=976 (pure GEMM, lda=ldb=1024): group 1 = winner, group 2 = previous logic kernel.
+# EnqueuesPerSync 1000 / NumWarmups 300 / NumBenchmarks 5.
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  SleepPercent: 0
+  EnqueuesPerSync: 1000
+  NumWarmups: 300
+  KernelTime: true
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeC: 3
+  DataInitTypeD: 3
+  DataInitTypeScaleAlphaVec: 3
+  DataInitSeed: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: false
+  PreciseKernelTime: false
+  Device: 0
+  SkipSlowSolutionRatio: 0.0
+  KeepBuildTmp: false
+  RotatingBufferSize: 384
+  UseEffLike: false
+  SyncsPerBenchmark: 1
+  NumBenchmarks: 5
+  CpuThreads: 32
+  PrintSolutionRejectionReason: true
+BenchmarkProblems:
+- - OperationType: GEMM
+    DataType: B
+    DestDataType: B
+    ComputeDataType: S
+    HighPrecisionAccumulate: true
+    TransposeA: true
+    TransposeB: false
+    UseBeta: true
+    Batched: true
+    UseBias: 0
+    Activation: false
+    UseScaleAlphaVec: 0
+  - InitialSolutionParameters: null
+    BenchmarkCommonParameters:
+    - KernelLanguage: [Assembly]
+    ForkParameters:
+    - DirectToLdsMetadata: [0]
+    - DtlPlusLdsBuf: [0]
+    - ExpandPointerSwap: [false]
+    - GlobalReadVectorWidthA: [1]
+    - GlobalReadVectorWidthB: [1]
+    - InitCIterWmma: [1]
+    - LdsBlockSizePerPadMXSA: [0]
+    - LdsBlockSizePerPadMXSB: [0]
+    - LdsBlockSizePerPadMetadata: [0]
+    - LdsPadMXSA: [0]
+    - LdsPadMXSB: [0]
+    - LocalReadVectorWidthA: [8]
+    - LocalReadVectorWidthB: [8]
+    - MXLoadInst: [TDM]
+    - MXScaleFormat: [InMemorySwizzle]
+    - MaxLDS: [327680]
+    - MbskPrefetchMethod: [0]
+    - MinGRIncPerMfma: [1]
+    - PrefetchGlobalRead: [2]
+    - ScheduleGROverBarrier: [0]
+    - ScheduleIterAlg: [4]
+    - StaggerU: [0]
+    - StaggerUStride: [0]
+    - TDMInst: [3]
+    - ThreadTile:
+      - [1, 1]
+    - TransposeLDS: [1]
+    - UseCustomMainLoopSchedule: [0]
+    - WavefrontSize: [32]
+    - TileProcessingStrategy: [None]
+    - GlobalSplitU: [1]
+    - GlobalSplitUAlgorithm: [MultipleBuffer]
+    - VectorWidthA: [1]
+    - VectorWidthB: [1]
+    - LdsBlockSizePerPadA: [1024]
+    - LdsBlockSizePerPadB: [1024]
+    - LdsPadA: [8]
+    - LdsPadB: [8]
+    - LDSSegmentInterleave: [0]
+    - HalfPLR: [0]
+    - TDMIterateMode: [0]
+    - MIArchVgpr: [true]
+    - AdaptiveGemm: [1]
+    - ClusterDim:
+      - [4, 2]
+    - ClusterAIDMapping: [-1]
+    - LDSSegmentBRotate: [0]
+    - ActivationFuncCall: [true]
+    - ClusterLocalRead: [1]
+    - PrefetchLocalRead: [1]
+    - Groups:
+      - - SourceSwap: false
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 512
+          StoreVectorWidth: -1
+          CompactLoopStore: false
+        - SourceSwap: true
+          MatrixInstruction: [16, 16, 32, 1, 1, 1, 1, 1, 1]
+          WorkGroup: [32, 1, 1]
+          DepthU: 512
+          StoreVectorWidth: 1
+          CompactLoopStore: true
+    BenchmarkJoinParameters: null
+    BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [160, 224, 1, 976, 160, 160, 1024, 1024]
+LibraryLogic:
+  ScheduleName: gfx1250
+  DeviceNames: [Device 73f0]
+  ArchitectureName: gfx1250
+  LibraryType: Equality
