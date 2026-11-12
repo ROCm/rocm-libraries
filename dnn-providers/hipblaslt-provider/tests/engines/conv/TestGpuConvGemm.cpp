@@ -1027,8 +1027,10 @@ void runRprCase(ConvCase convCase, Backend backend)
     ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
     ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
     w.markDeviceModified();
-    static_cast<void>(x.rawHostData());
-    static_cast<void>(y.rawHostData());
+    for(auto* tensor : {&x, &w, &y})
+    {
+        static_cast<void>(tensor->rawHostData());
+    }
 
     std::vector<int64_t> spatial(shape.input.begin(), shape.input.end());
     const auto positions = allIndices(spatial);
