@@ -37,7 +37,7 @@ def fwd(
     seed_out=None,
     off_out=None,
     esm=None,
-    scale=0.5
+    scale=0.5,
 ):
     empty = torch.empty(0, dtype=torch.uint64)
     return flash.attn_fwd(
@@ -141,6 +141,74 @@ def test_window_is_inverse_of_aotriton_window_for(fake_sdpa, mode_record):
     i, j = 6, torch.arange(20)
     visible = (j - i <= mask.right) & (j - i > -mask.left)
     assert j[visible].tolist() == list(range(i - 4, i + 2 + 1))
+
+
+TL, BR = flash.WindowValue.TOP_LEFT_ALIGNED, flash.WindowValue.BOTTOM_RIGHT_ALIGNED
+
+
+def aotriton_keep(window, sq, sk):
+    """AOTriton's window predicate (``_common_test.resolve_window``): query i keeps key j iff
+    i - L <= j <= i + R; a numeric bound is shifted by p * (sk - sq), sentinels are not.
+    """
+    left, right = window[:2]
+    p = window[2] if len(window) == 3 else 0
+    d = sk - sq
+    L = sq if left in (TL, BR) else left - p * d
+    R = 0 if right == TL else d if right == BR else right + p * d
+    i, j = torch.arange(sq)[:, None], torch.arange(sk)[None, :]
+    return (j >= i - L) & (j <= i + R)
+
+
+# AOTriton's principal-diagonal windows (PD_WINDOWS without (-1, 3), and FA_WINDOWS as translated
+# for p = 1) and sentinel forms, at both p; plus the forms valid at one p only and 2-tuples (p = 0).
+BOTH_P_WINDOWS = [(BR, 0), (8, 0), (0, 8), (4, 4), (BR, BR), (BR, 4), (0, 0), (1, 0)]
+BOTH_P_WINDOWS += [(0, 1), (8, 2), (0, 80), (TL, TL), (TL, 3)]
+EXPRESSIBLE_WINDOWS = [w + (p,) for w in BOTH_P_WINDOWS for p in (0, 1)]
+EXPRESSIBLE_WINDOWS += [(8, TL, 0), (8, BR, 1), (16, 3), (BR, 0), (TL, BR)]
+SHAPES = [(33, 80), (64, 64), (80, 33), (1, 77)]  # q < k, q == k, q > k, decode
+
+
+@pytest.mark.parametrize("window", EXPRESSIBLE_WINDOWS, ids=str)
+def test_a_window_mask_keeps_exactly_the_keys_aotriton_keeps(
+    fake_sdpa, mode_record, window
+):
+    q, k, v, o, M = dense()
+    fwd(q, k, v, M, o, causal=window)
+    mask = fake_sdpa.calls[-1][1]["mask"]
+    for sq, sk in SHAPES:
+        assert torch.equal(
+            flash._band_keep(mask, sq, sk, "cpu"), aotriton_keep(window, sq, sk)
+        ), (mask, sq, sk)
+
+
+@pytest.mark.parametrize(
+    "window",
+    # (-1, 3) excludes the diagonal (AOTriton's PD_WINDOWS); negative bounds; a numeric left
+    # beside a right sentinel of the other diagonal.
+    [(-1, 3), (-1, 3, 0), (-1, 3, 1), (4, -2, 1), (BR, -1, 0), (8, BR, 0), (8, TL, 1)],
+    ids=str,
+)
+def test_a_window_hipdnn_cannot_express_declines_before_any_hipdnn_call(
+    fake_sdpa, mode_record, window
+):
+    q, k, v, o, M = dense()
+    with pytest.raises(fake_sdpa.EngineDeclined) as forward:
+        fwd(q, k, v, M, o, causal=window)
+    with pytest.raises(fake_sdpa.EngineDeclined) as backward:
+        bwd(q, k, v, o, M, causal=window)
+    assert (forward.value.direction, backward.value.direction) == ("fwd", "bwd")
+    assert forward.value.reason.startswith(f"adapter: window {window!r}")
+    assert fake_sdpa.calls == [] and mode_record == []
+
+
+@pytest.mark.parametrize("window", [(4, 4, 2), (4, 4, -1), (4, 4, 0, 1)], ids=str)
+def test_a_principal_diagonal_outside_0_and_1_is_an_error(
+    fake_sdpa, mode_record, window
+):
+    q, k, v, o, M = dense()
+    with pytest.raises(AssertionError, match="principal diagonal|causal value"):
+        fwd(q, k, v, M, o, causal=window)
+    assert fake_sdpa.calls == []
 
 
 def test_dense_stats_view_writes_through(fake_sdpa, mode_record):
@@ -345,6 +413,7 @@ def varlen_fwd(
     seq1q=None,
     seq1k=None,
     lse_layout="HT",
+    causal=False,
 ):
     empty = torch.empty(0, dtype=torch.uint64)
     return flash.attn_fwd_varlen(
@@ -368,10 +437,43 @@ def varlen_fwd(
         empty,
         empty,
         None,
-        False,
+        causal,
         torch.empty(0, dtype=torch.int32),
         varlen_type,
         lse_layout,
+    )
+
+
+def varlen_bwd(q, k, v, o, L, seq0, max_s, *, causal):
+    empty = torch.empty(0, dtype=torch.uint64)
+    return flash.attn_bwd_varlen(
+        q,
+        k,
+        v,
+        seq0,
+        seq0,
+        max_s,
+        max_s,
+        None,
+        None,
+        torch.empty(0, 0, 0, 0),
+        0.5,
+        o,
+        torch.zeros_like(o),
+        torch.empty_like(q),
+        torch.empty_like(k),
+        torch.empty_like(v),
+        torch.empty(0, 0, 0, 0),
+        None,
+        L,
+        None,
+        0.0,
+        empty,
+        empty,
+        0,
+        causal,
+        "compact",
+        "HT",
     )
 
 
@@ -462,7 +564,7 @@ def test_lse_layouts_view_the_compact_buffer(fake_sdpa, mode_record, layout, pad
         M,
         torch.zeros_like(q),
         *args,
-        lse_layout=layout
+        lse_layout=layout,
     )
     stats = fake_sdpa.calls[-1][1]["stats"]
     assert stats.shape[0] == (B if padded else 1) and stats.shape[3] == 1
@@ -479,36 +581,7 @@ def test_lse_layouts_view_the_compact_buffer(fake_sdpa, mode_record, layout, pad
 def test_varlen_backward_passes_same_varlen_and_stats(fake_sdpa, mode_record):
     q, k, v, o = packed()
     L = torch.zeros(2, 12)
-    empty = torch.empty(0, dtype=torch.uint64)
-    flash.attn_bwd_varlen(
-        q,
-        k,
-        v,
-        i32(0, 5, 12),
-        i32(0, 5, 12),
-        7,
-        7,
-        None,
-        None,
-        torch.empty(0, 0, 0, 0),
-        0.5,
-        o,
-        torch.zeros_like(o),
-        torch.empty_like(q),
-        torch.empty_like(k),
-        torch.empty_like(v),
-        torch.empty(0, 0, 0, 0),
-        None,
-        L,
-        None,
-        0.0,
-        empty,
-        empty,
-        0,
-        True,
-        "compact",
-        "HT",
-    )
+    varlen_bwd(q, k, v, o, L, i32(0, 5, 12), 7, causal=True)
     call = fake_sdpa.calls[-1]
     assert call[0] == "bwd" and call[1]["bias"] is None and call[1]["dbias"] is None
     assert call[1]["mask"].alignment == "tl" and call[1]["varlen"].pos_q.tolist() == [
@@ -518,6 +591,26 @@ def test_varlen_backward_passes_same_varlen_and_stats(fake_sdpa, mode_record):
     ]
     assert tuple(call[1]["stats"].shape) == (1, 2, 12, 1)
     assert mode_record == []
+
+
+def test_a_principal_diagonal_window_reaches_every_entry_point(fake_sdpa, mode_record):
+    q, k, v, o, M = dense()
+    fwd(q, k, v, M, o, causal=(8, 2, 1))
+    bwd(q, k, v, o, M, causal=(8, 2, 1))
+    q, k, v, o = packed()
+    M = torch.zeros(2, 12)
+    varlen_fwd(
+        "compact", q, k, v, M, o, i32(0, 5, 12), i32(0, 5, 12), 7, 7, causal=(8, 2, 1)
+    )
+    varlen_bwd(q, k, v, o, M, i32(0, 5, 12), 7, causal=(8, 2, 1))
+    got = [(name, c["mask"], c["varlen"] is None) for name, c in fake_sdpa.calls]
+    mask = fake_sdpa.Mask("br", 9, 2)
+    assert got == [
+        ("fwd", mask, True),
+        ("bwd", mask, True),
+        ("fwd", mask, False),
+        ("bwd", mask, False),
+    ]
 
 
 # ------------------------------------------------------------------ reference fallback
