@@ -403,7 +403,7 @@ Each link is checkable by a command, and [REGEN.md](REGEN.md) gives each command
 upstream FlyDSL @ 89ad52fbbb9e, AITER @ 8253efc40595
    │  tools/diff_upstream.py          — vendored copy == upstream, but for recorded modifications
 kernels_src/
-   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 1,084/1,084 gfx11-generic, 719/719 gfx12-generic, 3,139/3,139 gfx950,
+   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 1,084/1,084 gfx11-generic, 719/719 gfx12-generic, 3,155/3,155 gfx950,
    │                                    457/457 gfx942, 465/465 gfx90a (SDPA backward rows that ship a pin: REGEN.md)
 <content>/<op>/<arch>/*.hsaco + manifest.json
    │  gen_descriptors.py --check      — objects match manifest SHA256 and target; descriptors agree

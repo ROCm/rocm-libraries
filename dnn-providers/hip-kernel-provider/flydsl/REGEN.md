@@ -124,7 +124,7 @@ Each target has its own ops; pick one row and set `ARCH` and `OPS` from it:
 |---|---|---|
 | `gfx11-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_dropout_mask sdpa_head_pad sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq` | 1,084 (90 + 63 + 312 + 116 + 1 + 1 + 33 + 238 + 230; the dQ op also writes 3 standalone reduce objects, its manifest's `companions`, which the comparison below does not count) |
 | `gfx12-generic` | `rmsnorm rmsnorm_bwd sdpa_rdna sdpa_rdna_decode sdpa_aiw sdpa_dropout_mask sdpa_head_pad` | 719 (90 + 63 + 192 + 116 + 256 + 1 + 1) |
-| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq sdpa_bwd_merged` | 3,139 (90 + 63 + 248 + 26 + 24 + 1 + 1 + 86 + 1,329 + 962 + 309) |
+| `gfx950` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_dualwave sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq sdpa_bwd_merged` | 3,155 (90 + 63 + 248 + 26 + 24 + 1 + 1 + 86 + 1,329 + 962 + 325) |
 | `gfx942` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad` | 457 (90 + 63 + 278 + 24 + 1 + 1) |
 | `gfx90a` | `rmsnorm rmsnorm_bwd sdpa_cdna sdpa_cdna_decode sdpa_dropout_mask sdpa_head_pad` | 465 (90 + 63 + 286 + 24 + 1 + 1) |
 
@@ -193,6 +193,12 @@ repository does not include and is not publicly reproducible; it writes the `_in
 Regenerating the shipped pins is the public path above and needs none of it. A gfx11 object is not gated like a gfx950 one: it must be its pin byte for byte (a row of the nondeterministic list ships its pin), with no exception rows, and the dQ generator also writes the three standalone reduce objects (`companions` of its manifest).
 
 `tools/sdpa_bwd_tables_from_sweep.py` installs a pruned catalogue: a pin whose object another pin of the same arch and op also pins, with a Spec equal apart from `floor` and a served head-dim range that contains its own, is not installed (equal ranges keep the smaller hash). The tables and the reference CSV hold the pins that remain, and the tool prints the dropped rows. The tool installs no nondeterministic list.
+
+**Tree-built pins.** A row added in this tree, with no sweep object, is pinned by its own build: build it in N = 8 fresh processes at the regeneration conditions
+(`FLYDSL_GEN_JOBS=28`; all builds must agree on the object, the main-function digest, the resource row and a clean R-MIR scan), write one row per object (`hash`, `spec`, the object's `sha256`, the main kernel's resource row,
+`rmir_scan` `clean` and, for a combined object, its main-function `function_sha256`) and run `python tools/sdpa_bwd_tables_from_sweep.py --tree-pins <file>`. The tool adds the rows to the installed pins and writes the table block, the reference CSV and
+`tests/data/sdpa_bwd_pin_functions.csv` together; none is edited by hand. The reference `sha256` of a tree-built combined row is the combined object's, and `sdpa_bwd_s1.py --from-content` names such a pin by its function digest rather than copying the object.
+A row that builds differently across the sample is a nondeterministic row: list it by the policy above before it ships.
 
 **Nondeterministic builds.** LLVM's IR optimisation is nondeterministic for some kernels, and the 16-bit dQ and dK/dV modules are compiled for a second fast-math target, so the same bug shows as a different object or as `dual_object`. One list, `tests/data/sdpa_bwd_nondeterministic.csv` (both arches; columns in `generators/_sdpa_bwd_nondet.py`), and one policy, the "Nondeterministic builds" section of the `generators/_sdpa_bwd_cdna_build.py` docstring:
 

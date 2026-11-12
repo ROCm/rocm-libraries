@@ -32,7 +32,7 @@
  * @brief A census of what hipkernel:flydsl_sdpa_bwd_merged actually loads, read from the shard
  *        the census entry names rather than from anything built in-process.
  *
- * The merged table is 309 objects: 189 without a bias and 120 with one. The 44 bias objects
+ * The merged table is 325 objects: 189 without a bias and 136 with one. The 60 bias objects
  * that store dB carry the dBias reduce kernel as a second symbol of the same code object; a
  * store_db=0 object never writes dB and carries no reduce kernel. Every object is a
  * multi-launch pack: its `sources` hold the merged kernel and the tail-zero kernel, one of
@@ -65,9 +65,9 @@ constexpr const char* MERGED_LAUNCH = "merged";
 constexpr const char* REDUCE_LAUNCH = "dbias_reduce";
 constexpr const char* TAILZERO_LAUNCH = "tailzero";
 
-constexpr size_t MERGED_ROWS = 309;
-constexpr size_t BIAS_ROWS = 120;
-constexpr size_t REDUCE_ROWS = 44;
+constexpr size_t MERGED_ROWS = 325;
+constexpr size_t BIAS_ROWS = 136;
+constexpr size_t REDUCE_ROWS = 60;
 
 TEST(TestFlydslSdpaBwdPacks, IsOnePackWithAGraphMatchAndOneKernelScopedMatcher)
 {

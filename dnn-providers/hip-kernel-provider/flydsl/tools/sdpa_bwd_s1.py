@@ -793,17 +793,19 @@ def reference_dir_from_content(
     try:
         for row in rows:
             source = shipped.get(row["sha256"])
-            if source is not None:
+            # A pin the content never holds is named by its function digest even when its sha256 is a shipped combined object
+            # (a tree-built combined pin, ``sdpa_bwd_tables_from_sweep.py --tree-pins``): the object is not the one-kernel pin.
+            if (
+                pins.holds_no_shipped_object(Spec.parse(row["spec"]))
+                and functions.get(row["hash"], {}).get("spec") == row["spec"]
+            ):
+                named += 1
+            elif source is not None:
                 dest = tmp / f"{row['hash']}.hsaco"
                 shutil.copyfile(source, dest)
                 if sha256_file(dest) != row["sha256"]:
                     raise fail(f"{source}: its sha256 is not the manifest's")
                 written += 1
-            elif (
-                pins.holds_no_shipped_object(Spec.parse(row["spec"]))
-                and functions.get(row["hash"], {}).get("spec") == row["spec"]
-            ):
-                named += 1
             else:
                 raise fail(
                     f"{row['hash']} ({row['spec']}): no shipped object has the pin's sha256 "

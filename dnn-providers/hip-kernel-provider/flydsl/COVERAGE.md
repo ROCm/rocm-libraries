@@ -2267,7 +2267,7 @@ belongs to one engine (tile routing, bias staging, workspace bounds) is that eng
 
 | Engine | Launches | Ops (objects) |
 |---|---|---|
-| `hipkernel:flydsl_sdpa_bwd_merged` | one: dK, dV, dQ and, on a bias graph, dBias in one grid, with no prep kernel | `sdpa_bwd_merged` (309) |
+| `hipkernel:flydsl_sdpa_bwd_merged` | one: dK, dV, dQ and, on a bias graph, dBias in one grid, with no prep kernel | `sdpa_bwd_merged` (325) |
 | `hipkernel:flydsl_sdpa_bwd_split` | three, in order, one per slot: prep (Delta and the statistics), dK/dV, dQ (and dBias) | `sdpa_bwd_prep` (86), `sdpa_bwd_dkdv` (1,329), `sdpa_bwd_dq` (962); `sdpa_bwd_split` carries the descriptors only |
 
 Neither engine's plans can be serialized: the merged engine's dispatch handler does not
@@ -2333,7 +2333,7 @@ are not exercised at that size.
 
 ### 9.2 f32 bias, unaligned bias pitch, separate V heads and row-broadcast bias
 
-The split engine serves four graph families the merged engine declines, so a graph that
+The split engine serves five graph families the merged engine declines, so a graph that
 PyTorch's forward serves also trains. Each has its own rows; no input is converted.
 
 | Graph | Split engine | Merged engine |
@@ -2342,6 +2342,7 @@ PyTorch's forward serves also trains. Each has its own rows; no input is convert
 | 16-bit bias whose row pitch is not a multiple of 16 bytes | served by dQ rows that read the bias directly | declines [bias] (BI-8) |
 | `Hk != Hv`, `Hq` a multiple of both (SH-1), no bias, not fp32, not ragged | served by dK-only and dV-only dK/dV rows and a V-head dQ row | declines [shape] |
 | Row-broadcast bias with a `Sq` that is not a multiple of the query tile, bf16 head dim 64 with dropout | served | the one bias object that keeps its pre-clamp bytes declines it; every other merged bias object serves it |
+| A bias with dBias, with or without baked dropout, at head dim 160 (bf16, f16) or on the padded 32 tile (below head dim 32) | served | declines: merged holds no dB-storing row for these cells (f16 160 has no merged bias row at all; bf16 160 and the padded 32 tile hold only `store_db=0` rows), so a graph that asks for dBias finds none |
 | dBias whose stride is not a multiple of 16 bytes (BI-9) | declines [layout] | declines [layout] |
 
 A graph the forward engines serve can still decline in the backward: one whose stats tensor declares 4 or 8 bytes of alignment, which the forward accepts and the backward requires 16 (SS-3).
@@ -2356,7 +2357,7 @@ gfx11-generic, for f16 and bf16, with and without baked dropout.
 
 New table rows: gfx950 79 (dQ 16-bit direct 7, dQ f32 bias 16, dK/dV f32 bias 8, dK-only 16, dV-only 16, dQ V-head 16),
 gfx11-generic 72 (the same without the 16-bit direct rows), and one V-head tail-zero object per arch
-(`tailzero_hv`; its f16 and bf16 entries name the same bytes). The tables hold 2,691 gfx950 rows and 504 gfx11-generic rows.
+(`tailzero_hv`; its f16 and bf16 entries name the same bytes). The tables hold 2,707 gfx950 rows and 504 gfx11-generic rows.
 
 A graph at other head dims is declined by the ingestor, with a coverage line in the engine's log. Head dims
 outside the rows above, with an f32 bias or `Hk != Hv`, are graphs the forward serves and the backward does not
