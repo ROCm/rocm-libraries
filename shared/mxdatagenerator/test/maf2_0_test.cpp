@@ -210,6 +210,23 @@ namespace
         }
     }
 
+    // With both flags set, unit scale wins (as in toString), so the unused normal-scale
+    // parameters are not validated either: unit scales and N(0, 1) data are generated.
+    TEST(Maf2_0Mode, UnitScaleOverridesInvalidNormalParameters)
+    {
+        DataGeneratorOptions opts;
+        Maf2_0               mode;
+        mode.normalScale         = true;
+        mode.unitScaleNormalData = true;
+        mode.scaleStdDev         = -1.0;
+        opts.initMode            = DataInitMode(mode);
+        opts.blockScaling        = 32;
+        DataGenerator<ocp_e2m1_mxfp4> dgen;
+        ASSERT_NO_THROW(dgen.generate({64}, {1}, opts));
+        for(const auto byte : dgen.getScaleBytes())
+            EXPECT_EQ(byte, scaleOneByte<ocp_e2m1_mxfp4>());
+    }
+
     // Leading dimension 7 is not a multiple of rows 6, so the 35-element buffer is not a whole
     // number of scale-block runs; the tail would stay unwritten, so the layout is rejected.
     TEST(Maf2_0Mode, PartialRowLayoutThrows)

@@ -2127,7 +2127,8 @@ namespace DGen
                && (mode.n < 0 || mode.n > (1 << 20)))
                 throw std::invalid_argument(
                     "DataGenerator::generate_data_maf2_0: n must be in [0, 2^20]");
-            if(mode.normalScale
+            // Unit scale takes precedence over normal scales, so only validate what is drawn.
+            if(mode.normalScale && !mode.unitScaleNormalData
                && !(mode.scaleStdDev > 0.0 && std::isfinite(mode.scaleStdDev)
                     && std::isfinite(mode.scaleMean)))
                 throw std::invalid_argument("DataGenerator::generate_data_maf2_0: scaleStdDev must "
