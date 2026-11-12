@@ -379,7 +379,14 @@ def _make_gfx942_attention_dense_qbminor_candidate() -> KernelCandidate:
         base_spec=_qbminor_base_spec,
         supports=_supports,
         features=frozenset(
-            {"causal", "causal_bottom_right", "sliding_window", "sinks", "lse"}
+            {
+                "causal",
+                "causal_bottom_right",
+                "sliding_window",
+                "sinks",
+                "lse",
+                "attn_bias",
+            }
         ),
         recorded=frozenset({"waves_per_eu"}),
     )

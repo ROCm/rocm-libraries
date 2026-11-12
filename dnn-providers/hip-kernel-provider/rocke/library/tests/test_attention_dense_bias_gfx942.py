@@ -1097,6 +1097,22 @@ def test_the_bias_fields_are_not_tuning_knobs():
     assert ids[True] and ids[True] <= ids[False]
 
 
+def test_the_ingestor_grid_serves_a_bias_and_the_aot_grids_refuse_it():
+    from dispatch.attention import attention_candidates, attention_tuning_spec
+
+    spec = attention_tuning_spec(_request(), "gfx942_dense_qbminor").kernel_spec
+    assert spec.use_additive_bias and not spec.persistent
+    assert spec.nonpersist_decode == "qb_minor" and spec.kv_segments == 1
+    aot = {
+        c.spec_id: c.admits(_request())
+        for c in attention_candidates()
+        if c.spec_id.endswith("_aot") and c.spec_id.startswith("gfx942_dense")
+    }
+    assert aot, "no gfx942 AOT grid candidates found"
+    for spec_id, (ok, why) in aot.items():
+        assert not ok and "cannot serve features ['attn_bias']" in why, spec_id
+
+
 def test_a_bias_request_sweeps_bias_specs_the_kernel_serves():
     from dispatch.attention import attention_candidates
     from rocke.dispatch.tuning import walk

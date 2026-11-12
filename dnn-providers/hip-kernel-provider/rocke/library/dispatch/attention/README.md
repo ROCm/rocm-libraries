@@ -341,9 +341,10 @@ Selection pins a spec the same way for dense and unified:
   one the hipDNN ingestor pins); the persistent ones do not
   declare `attn_bias`. It is a problem field (`DENSE_ARCH_PROBLEM_FIELDS`), so
   sweeps never vary it. gfx942 dense serves it through the tuned candidate
-  (`gfx942_dense`) alone (`gfx942_dense_qbminor` and the AOT grids do not declare
-  `attn_bias`), on the default and the persistent grid alike: the factory never
-  turns on the KV-segment split for a bias request, and the kernel refuses the K
+  (`gfx942_dense`) and the grid candidate the hipDNN ingestor pins
+  (`gfx942_dense_qbminor`); the persistent `*_aot` grids do not declare
+  `attn_bias`. The tuned candidate serves it on the default and the persistent
+  grid alike: the factory never turns on the KV-segment split for a bias request, and the kernel refuses the K
   double-buffer / V register-prefetch pipeline. gfx942's bias load width
   (`use_bias_x4`) is a problem field too: the kernel's policy resolves it, and no
   tuning id names it. The caller passes the `[B|1, Hq|1, Sq|1, Skv]` bias to
