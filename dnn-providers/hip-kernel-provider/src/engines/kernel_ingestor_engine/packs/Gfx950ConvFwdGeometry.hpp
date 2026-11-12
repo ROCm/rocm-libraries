@@ -452,32 +452,6 @@ struct ImplicitGemmCapabilities
     bool grouped;
 };
 
-/// The capabilities of a binary compiled for @p build with the given tile, or
-/// std::nullopt when no load width fits the tile (rocKE would not have built it).
-inline std::optional<ImplicitGemmCapabilities> implicitGemmCapabilities(const Problem& build,
-                                                                        int64_t tileM,
-                                                                        int64_t tileN,
-                                                                        int64_t tileK,
-                                                                        int64_t warpM,
-                                                                        int64_t warpN,
-                                                                        bool cshuffleEpilogue)
-{
-    if(build.groups <= 0 || build.c % build.groups != 0 || build.k % build.groups != 0)
-    {
-        return std::nullopt;
-    }
-    const auto tileWidth = tileLoadWidth(tileM, tileN, tileK, warpM * warpN * 64);
-    if(!tileWidth)
-    {
-        return std::nullopt;
-    }
-    return ImplicitGemmCapabilities{
-        std::min(defaultVectorWidth(build.c / build.groups), *tileWidth),
-        cshuffleEpilogue ? defaultVectorWidth(build.k / build.groups) : 1,
-        isPointwise(build),
-        build.groups > 1};
-}
-
 /// Whether a binary with @p capabilities computes @p problem. The forward subset of
 /// rocKE's KernelCache.supports_problem: the baked load width divides C / groups and the
 /// store width K / groups (a wider access would straddle a group's slab), a grouped

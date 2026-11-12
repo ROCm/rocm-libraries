@@ -640,9 +640,12 @@ _DIRECT_COUNTS = {
     "direct_depthwise_win": 759,
 }
 #: Forward direct identities per dtype the packaged launch refuses as an instance: the
-#: split-C fold, the second launch of each split-C instance.
+#: split-C fold (the second launch of each split-C instance), and the two MFMA
+#: small-channel direct families, not yet in AOT_DIRECT_ALGORITHMS.
 _REFUSED_DIRECT_COUNTS = {
     "direct_split_reduce": 4,
+    "direct_fwd_smallc_mfma": 222,
+    "direct_fwd_smallk_mfma": 44,
 }
 #: Identities per (dtype, algorithm) the IR and serving tests sample, spread evenly
 #: over the sweep's order (capabilities outermost, then knobs). std and spatial are
@@ -657,7 +660,9 @@ def _direct_spec(identity: KernelIdentity) -> Gfx950ConvFwdAotSpec:
 
 def test_unmodeled_direct_identities_are_refused(all_direct_jobs):
     """The split-C fold is the second launch of a split-C instance, not an instance of
-    its own, so the adapter refuses it with its reason."""
+    its own, so the adapter refuses it with its reason; an algorithm outside
+    AOT_DIRECT_ALGORITHMS is refused with the generic "has no packaged launch"
+    reason instead."""
     refused: dict = {}
     for dtype, job in all_direct_jobs:
         if _packaged(job.identity):
@@ -668,7 +673,10 @@ def test_unmodeled_direct_identities_are_refused(all_direct_jobs):
             continue
         spec, reason = gfx950_conv_fwd_aot_spec_for_identity(job.identity)
         assert spec is None, job.identity.label()
-        assert reason == AOT_REFUSED_SPLIT_REDUCE
+        if key == "direct_split_reduce":
+            assert reason == AOT_REFUSED_SPLIT_REDUCE
+        else:
+            assert reason.startswith(f"direct algorithm {key!r} has no packaged launch")
     assert refused == {
         (dtype, algorithm): count
         for dtype in ("fp16", "bf16")

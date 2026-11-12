@@ -1321,12 +1321,20 @@ def resolve_ids(
                         f"{kdp.path}: slot {kdp.slot!r} is not a slot of the UED "
                         f"{engine.ued['id']} (slots: {sorted(engine.slots)})"
                     )
-                home_udd = engine.slots[kdp.slot].udd if engine.slots else engine.udd
-                if kdp.dispatch != home_udd["id"]:
-                    raise ValueError(
-                        f"{kdp.path}: dispatch {kdp.dispatch} is not the home's UDD "
-                        f"{home_udd['id']}"
-                    )
+                if engine.slots:
+                    # A slot has exactly one dispatch handler (RFC 0021 §4): every KDP
+                    # naming it must agree on the slot's own UDD.
+                    home_udd = engine.slots[kdp.slot].udd
+                    if kdp.dispatch != home_udd["id"]:
+                        raise ValueError(
+                            f"{kdp.path}: dispatch {kdp.dispatch} is not the home's "
+                            f"UDD {home_udd['id']}"
+                        )
+                # An unslotted engine's packs may each name their own dispatch (e.g.
+                # "split_c"), each with its own UDD: `read_prior_bundle` has already
+                # resolved every KDP's `dispatch` to a real UDD under this bundle
+                # (prior_ids._check_each_dispatch_resolves), so there is nothing further
+                # to check here beyond that resolution.
                 if sibling_roots and kdp.operation_umd_id is not None:
                     raise ValueError(
                         f"{kdp.path} carries a graph-scope operation matcher, which "

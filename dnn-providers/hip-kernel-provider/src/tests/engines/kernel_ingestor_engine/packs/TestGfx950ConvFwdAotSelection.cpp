@@ -215,8 +215,9 @@ KernelDefinition directSampleKernel()
     return kernel;
 }
 
-/// A windowed direct_depthwise_win instance (the shipped catalog's largest family, 248 of
-/// 233*2 instances), pure depthwise (cpg == kpg == 1), compiled for the same 3x3 filter.
+/// A windowed direct_depthwise_win instance (90 of the shipped catalog's 466 instances;
+/// implicit_gemm, at 178, is the largest family), pure depthwise (cpg == kpg == 1),
+/// compiled for the same 3x3 filter.
 KernelDefinition winSampleKernel()
 {
     auto kernel
@@ -376,9 +377,9 @@ TEST(TestGfx950ConvFwdAotSelection, KeepsEveryServingDirectInstance)
 
 TEST(TestGfx950ConvFwdAotSelection, KeepsAServingWinInstanceAlongsideImplicitGemm)
 {
-    // TESTB-8: the candidate-filter tests here only ever named the generic "direct"
-    // sample; direct_depthwise_win is the shipped catalog's largest family (248 of
-    // 233*2 instances) and was never exercised here by name.
+    // The candidate-filter tests here only ever named the generic "direct"
+    // sample; direct_depthwise_win (90 of the shipped catalog's 466 instances)
+    // was never exercised here by name.
     std::vector<KernelDefinition> kernels{winSampleKernel()};
     for(const auto& sample : aotSample())
     {
@@ -466,7 +467,7 @@ TEST(TestGfx950ConvFwdAotSelection, PreparedKernelsAndTheBoundProblemDecideAsThe
             std::vector<size_t> selectedSampleIndices;
             for(size_t position = 0; position < plainServing.size(); ++position)
             {
-                const size_t originalIndex
+                const auto originalIndex
                     = static_cast<size_t>(plainServing[position] - plain.data());
                 if(kept[position] && originalIndex >= 1 && originalIndex <= aotSample().size())
                 {

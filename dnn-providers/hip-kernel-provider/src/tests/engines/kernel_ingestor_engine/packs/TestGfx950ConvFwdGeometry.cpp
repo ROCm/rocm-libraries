@@ -729,8 +729,8 @@ TEST(TestGfx950ConvFwdGeometry, WindowedDirectRequiresGroupsAMultipleOfTheMfmaCh
     // The shipped direct_depthwise_win knobs (block_h=12, block_waves=8, prefetch_rows=2,
     // w_fold=2); cpg == kpg == 1 is the pure-depthwise arm, where every wave still owns
     // DIRECT_WINDOWED_MFMA_CH (8) one-hot MFMA lanes but only the first is masked against
-    // problem.groups -- the bug ca935e1cc8b fixed had no CPU-visible failure before this
-    // test, only the GPU correctness suite's DirectDepthwise cases (TESTB-3).
+    // problem.groups -- a bug with no CPU-visible failure before this test, only the
+    // GPU correctness suite's DirectDepthwise cases.
     const DirectInstance pureDepthwiseWin{{3, 3, 1, 1, 1, 1, 1, 1},
                                           DirectVariant::WIN,
                                           0,

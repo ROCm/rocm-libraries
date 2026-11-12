@@ -1506,8 +1506,9 @@ private:
 
     /// Plans the benchmark of a slotted engine's program (RFC 0021 §7) when one is due: some
     /// slot's catalog is not covered by a winner record, or the program record is not valid.
-    /// While a knob filter or workspace limit is active only an uncovered slot makes it due, and
-    /// nothing is recorded, since the records would describe a narrowed catalog.
+    /// While a knob filter, workspace limit or shortlist limit is active only an uncovered slot
+    /// makes it due, and nothing is recorded, since the records would describe a narrowed
+    /// catalog.
     /// @return false, leaving @p executionContext untouched, when nothing needs measuring.
     bool setSlotProgramBenchmark(const IGraph& opGraph,
                                  const MatchContext& context,
@@ -1515,7 +1516,8 @@ private:
                                  const SlotCandidates& selection,
                                  TContext& executionContext) const
     {
-        const bool narrowed = !settings.knobFilter.empty() || settings.workspaceLimit.has_value();
+        const bool narrowed = !settings.knobFilter.empty() || settings.workspaceLimit.has_value()
+                              || settings.shortlistLimit.has_value();
         const WinnerKey baseKey{
             hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey{opGraph},
             DeviceKey{context.deviceProperties}};
@@ -1590,8 +1592,8 @@ private:
         HIPDNN_PLUGIN_LOG_INFO("ingestor: engine '"
                                << _engine.name << "' will benchmark its slot program: "
                                << timedKernels << " kernel(s) in uncovered slot(s)"
-                               << (narrowed ? "; a knob filter or workspace limit is active, "
-                                              "so no records will be written"
+                               << (narrowed ? "; a knob filter, workspace limit or shortlist "
+                                              "limit is active, so no records will be written"
                                             : ""));
 
         typename SlotProgramBenchmark<THandle>::RecordFn record;
@@ -2051,32 +2053,6 @@ private:
                                             + "' must be set to an integer value");
         }
         return setting.valueAs<IntValue>().value() != 0;
-    }
-
-    std::vector<const KernelDefinition*>
-        applyKnobFilter(const std::vector<const KernelDefinition*>& catalog,
-                        const KnobFilter& filter) const
-    {
-        if(filter.empty())
-        {
-            return catalog;
-        }
-
-        std::vector<const KernelDefinition*> filtered;
-        filtered.reserve(catalog.size());
-        for(const KernelDefinition* kernel : catalog)
-        {
-            // Pins match through the engine's ordinal domain, so non-integer fields are pinnable.
-            const bool matchesEverySetKnob
-                = std::all_of(filter.begin(), filter.end(), [this, kernel](const auto& setting) {
-                      return _stateManager.knobMatches(*kernel, setting.first, setting.second);
-                  });
-            if(matchesEverySetKnob)
-            {
-                filtered.push_back(kernel);
-            }
-        }
-        return filtered;
     }
 
     /// Reorders @p candidates (already filtered down from some catalog) to the relative

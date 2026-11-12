@@ -147,6 +147,27 @@ class TestIdSummary:
         assert "minted 0, retired 0" in second.stdout
         assert "none found" not in second.stdout
 
+    def test_a_split_c_unslotted_bundles_per_pack_dispatch_is_reused(self, tmp_path):
+        """An unslotted engine whose packs each name their own ``dispatch`` (split_c
+        here) has more than one home UDD; regenerating against a prior bundle of such
+        an engine must not reject a KDP for naming its own pack's UDD instead of a
+        single shared one."""
+        config = TOOL_ROOT / "configs" / "gfx950_conv_fwd_aot_seed.yaml"
+        out = tmp_path / "out"
+        first = run_cli("--config", str(config), "--output-dir", str(out))
+        assert first.returncode == 0, first.stderr
+
+        second = run_cli(
+            "--config",
+            str(config),
+            "--ids-from",
+            str(out / "descriptors" / "rocKE" / "gfx950_conv_fwd_aot_seed"),
+            "--output-dir",
+            str(tmp_path / "out2"),
+        )
+        assert second.returncode == 0, second.stderr
+        assert "minted 0, retired 0" in second.stdout
+
 
 class TestInstalledEngineDir:
     """``INSTALLED_ENGINE_DIR`` is found by walking up from the script: the first

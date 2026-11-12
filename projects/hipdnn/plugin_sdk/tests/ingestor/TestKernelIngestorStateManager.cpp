@@ -119,8 +119,8 @@ std::shared_ptr<const void> countingPrepare(const KernelDefinition& /*kernel*/)
 } // namespace prepare_test
 
 /// RAII: registers a KernelPrepareFn under a kernel-scoped matcher's own symbol, the way
-/// hipkernel:Gfx950ConvFwdAot registers its AOT_KERNEL_MATCHER's preparer (TESTB-2: this
-/// mechanism had zero coverage in the SDK's own tests before this).
+/// hipkernel:Gfx950ConvFwdAot registers its AOT_KERNEL_MATCHER's preparer -- this
+/// mechanism had zero coverage in the SDK's own tests before this.
 class ScopedKernelPrepare
 {
 public:

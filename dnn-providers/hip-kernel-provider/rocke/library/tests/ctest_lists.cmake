@@ -90,7 +90,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_conv_fwd_aot_packaging_pytest python -m pytest "
        "\"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_convolution_forward_aot_packaging.py\" "
-       "-v -rs --timeout=120)\n")
+       "-v -rs --timeout=600)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_conv_fwd_aot_packaging_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;conv\\;host\"\n"

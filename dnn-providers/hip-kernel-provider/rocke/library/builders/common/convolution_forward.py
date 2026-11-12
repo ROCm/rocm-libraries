@@ -427,9 +427,8 @@ def _direct_error(spec: Gfx950ConvFwdSpec) -> str:
     """Integration guard for the direct depthwise family; "" when accepted.
 
     Runs after :func:`_problem_error`, so geometry is already positive and
-    byte counts fit the ABI. rocKE's validators, which :func:`_direct_valid`
-    runs afterwards, also refuse every shape without an odd filter and
-    "same" padding; the coverage rule here still guards the width.
+    byte counts fit the ABI. rocKE's own validators are not run on this path; the
+    coverage rule here guards the width.
     """
     if not (spec.groups == spec.C == spec.K):
         return (
@@ -482,18 +481,6 @@ def _direct_error(spec: Gfx950ConvFwdSpec) -> str:
         if extent > _MAX_GRID_DIM:
             return f"direct grid {axis} = {extent} exceeds {_MAX_GRID_DIM}"
     return ""
-
-
-def _direct_valid(spec: Gfx950ConvFwdSpec, arch: str) -> tuple[bool, str]:
-    """rocKE's own validators for the selected direct kernel."""
-    try:
-        instance = spec.to_direct_spec()
-        instance.validate()
-        if spec.direct_variant == DIRECT_VARIANT_SPATIAL:
-            return _direct.is_valid_depthwise_spatial_spec(instance, arch=arch)
-        return _direct.is_valid_depthwise_spec(instance, arch=arch)
-    except (TypeError, ValueError, ZeroDivisionError) as exc:
-        return False, str(exc)
 
 
 def _base_spec_for_request(
