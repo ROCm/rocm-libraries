@@ -33,6 +33,7 @@ import re
 import sys
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
@@ -452,17 +453,80 @@ def loaded_compiler_info() -> CompilerInfo | None:
         return info
 
 
+def _describe_loaded_compiler(info: CompilerInfo | None) -> str:
+    """``info.describe()``, or why there is no loaded compiler to describe."""
+    return "COMGR could not be loaded" if info is None else info.describe()
+
+
 def _require_compiler_info() -> CompilerInfo:
     """Require version evidence before automatic lowering or compilation."""
     info = loaded_compiler_info()
     if info is None or info.llvm_version is None:
-        reason = "COMGR could not be loaded" if info is None else info.describe()
         raise ComgrError(
-            f"Cannot determine LLVM flavor: {reason}. "
+            f"Cannot determine LLVM flavor: {_describe_loaded_compiler(info)}. "
             "Select a queryable COMGR library for compilation, or set an explicit "
             "LLVM flavor for offline IR emission."
         )
     return info
+
+
+def require_options_accepted(options: Sequence[str] | None, *, needed_by: str) -> None:
+    """Refuse ``-mllvm`` options the loaded compiler does not accept.
+
+    Must run before COMGR sees ``options``: LLVM's option parser exits the
+    whole process on an option it does not know. The answers come from the
+    measured table in :mod:`rocke.runtime.compiler_options`; ``needed_by``
+    names what is being compiled, for the error. An option list without
+    ``-mllvm`` is accepted without loading COMGR.
+
+    The answers are looked up by the loaded compiler's LLVM version, so a
+    ``-mllvm`` option with no queryable COMGR loaded raises
+    :class:`ComgrError` naming ``needed_by`` and the options. A malformed
+    option list raises ``ValueError``
+    (:func:`~rocke.runtime.compiler_options.backend_options`).
+    """
+    from .compiler_options import backend_options, require_accepted
+
+    options = list(options or ())
+    names = backend_options(options)
+    if not names:
+        return
+    compiler = loaded_compiler_info()
+    if compiler is None or compiler.llvm_version is None:
+        raise ComgrError(
+            f"{needed_by} needs the compiler option(s) {list(names)}. Whether the "
+            "loaded compiler accepts them is looked up by its LLVM version, and "
+            f"that is unknown: {_describe_loaded_compiler(compiler)}. Load a COMGR "
+            "library whose version can be queried (ROCKE_COMGR_LIB selects one)."
+        )
+    require_accepted(options, compiler=compiler, needed_by=needed_by)
+
+
+def comgr_child_env(base: Mapping[str, str] | None = None) -> dict[str, str]:
+    """The environment for a child process that must compile with this
+    process's COMGR.
+
+    Starts from ``base`` (default: this process's environment) and sets
+    ``ROCKE_COMGR_LIB`` to the COMGR library this process loaded, so the child
+    cannot resolve another one (for example the system library where this
+    process loaded torch's), and ``AMD_COMGR_CACHE=0``, so COMGR's on-disk
+    cache cannot hand the child an object another process compiled. Raises
+    :class:`ComgrError` when no COMGR loads in this process.
+    """
+    info = loaded_compiler_info()
+    # The loader's own path for the mapped file when it reports one; the name
+    # this process asked the loader for otherwise.
+    lib_path = info and (info.comgr_path or info.requested_comgr)
+    if not lib_path:
+        raise ComgrError(
+            "no COMGR library is loaded in this process to give a child process "
+            f"({_describe_loaded_compiler(info)}); set "
+            "ROCKE_COMGR_LIB to an explicit library"
+        )
+    env = dict(os.environ if base is None else base)
+    env["ROCKE_COMGR_LIB"] = lib_path
+    env["AMD_COMGR_CACHE"] = "0"
+    return env
 
 
 def _assert_ir_flavor_matches_lib(ir_text: str) -> None:
@@ -667,10 +731,10 @@ def _build_in_fresh_process(
     """Compile one module in a new Python process that compiles nothing else.
 
     The child (:mod:`rocke.runtime._comgr_fresh_process`) loads the comgr
-    library this process resolved (passed as ``ROCKE_COMGR_LIB``, so a
-    torch-bundled library is kept even though the child does not import torch),
-    imports this rocke package (its root is put first on ``PYTHONPATH``) and
-    runs with comgr's own on-disk cache off (``AMD_COMGR_CACHE=0``).
+    library this process loaded and runs with comgr's own on-disk cache off
+    (:func:`comgr_child_env`; a torch-bundled library is kept even though the
+    child does not import torch), and imports this rocke package (its root is
+    put first on ``PYTHONPATH``).
     Raises :class:`ComgrError` with the child's message for a compile error and
     :class:`ComgrProcessDied` when the child dies.
     """
@@ -679,15 +743,8 @@ def _build_in_fresh_process(
     import tempfile
 
     # The parent's own checks first: the same library, the same flavor gate.
-    lib = _resolve_lib()
     _assert_ir_flavor_matches_lib(ir_text)
-    env = dict(os.environ)
-    lib_path = getattr(lib, "_name", None) or resolved_lib_path()
-    if lib_path:
-        env["ROCKE_COMGR_LIB"] = lib_path
-    # The child compiles the module itself: comgr's on-disk cache could hand
-    # back an object some other process compiled with another history.
-    env["AMD_COMGR_CACHE"] = "0"
+    env = comgr_child_env()
     pkg_root = os.path.dirname(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     )
@@ -821,7 +878,11 @@ def build_hsaco_from_llvm_ir(
     A process that compiles one module gives the code the strategy is written
     for (its own assertion expects those counts to be zero) and the same code
     object every time. The default keeps the in-process compile.
+
+    A ``-mllvm`` option the loaded compiler does not accept raises before
+    COMGR is called (:func:`require_options_accepted`).
     """
+    require_options_accepted(options, needed_by="this COMGR compile")
     if fresh_process:
         options = list(options or ["-O3"])
         return _build_in_fresh_process(ir_text, isa=isa, options=options)
@@ -844,7 +905,8 @@ def build_hsaco_from_llvm_modules(
 
     Internal-linkage globals (rocKE's LDS pools) are renamed by the linker
     when two modules spell the same name; two external definitions of one
-    name -- two kernels sharing a symbol -- fail the link.
+    name -- two kernels sharing a symbol -- fail the link. ``options`` are
+    checked as in :func:`build_hsaco_from_llvm_ir`.
     """
     ir_texts = tuple(ir_texts)
     if len(ir_texts) < 2:
@@ -852,6 +914,7 @@ def build_hsaco_from_llvm_modules(
             "build_hsaco_from_llvm_modules links two or more modules; use "
             "build_hsaco_from_llvm_ir for one"
         )
+    require_options_accepted(options, needed_by="this COMGR compile")
     return _build_hsaco(ir_texts, isa=isa, options=options)
 
 
