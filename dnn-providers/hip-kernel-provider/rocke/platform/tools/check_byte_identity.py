@@ -32,6 +32,9 @@ from _hostcaps import available_cpus
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parents[0] if HERE.name != "tools" else HERE.parent  # tools -> rocKE
 RUN_DIFF = ROCKE / "tests" / "instances" / "differential" / "run_diff.py"
+# Library-owned C++ mirrors (library/cpp, added by platform/CMakeLists.txt when
+# the sibling tree exists). Absent from a platform-only copy of this tree.
+LIBRARY_CPP_INSTANCES = ROCKE.parent / "library" / "cpp" / "instances"
 # The parity family that carries the llvm23-gated gfx1250 ops.
 GFX1250_FAMILY = "gfx1250_lowering"
 # Families whose every config uses an llvm23-gated op (their kernels move data
@@ -88,6 +91,12 @@ def main() -> int:
 
     build_root = Path(args.build_root)
     archive = build_root / "librocke_core.a"
+    # Library families' emitters link the library archive ahead of the engine.
+    with_library = LIBRARY_CPP_INSTANCES.is_dir() and any(
+        LIBRARY_CPP_INSTANCES.rglob("*.cpp")
+    )
+    library_archive = build_root / "librocke_library.a"
+    targets = ["rocke_core", *(["rocke_library_core"] if with_library else [])]
 
     print("== building engine archive (fresh) ==")
     print(f"   source : {ROCKE}")
@@ -110,7 +119,7 @@ def main() -> int:
             "--build",
             str(build_root),
             "--target",
-            "rocke_core",
+            *targets,
             # This process's share, not the machine's size. `os.cpu_count()`
             # reports the host, so on a scheduler-pinned node it asked ninja
             # for 384 compile jobs against an affinity of 2 -- which is how a
@@ -125,6 +134,11 @@ def main() -> int:
         print(f"FATAL: archive not produced: {archive}", file=sys.stderr)
         return 1
     print(f"   archive: {archive}")
+    if with_library:
+        if not library_archive.exists():
+            print(f"FATAL: archive not produced: {library_archive}", file=sys.stderr)
+            return 1
+        print(f"   library: {library_archive}")
 
     # Freshness/provenance: print the build-id stamped into the archive. Off the
     # emission path, so this never affects the .ll contract. Best-effort.
@@ -183,6 +197,7 @@ def main() -> int:
                 str(RUN_DIFF),
                 "--archive",
                 str(archive),
+                *(["--library-archive", str(library_archive)] if with_library else []),
                 "--json",
                 dashboard,
                 *(only_args if only is None else only),

@@ -39,7 +39,7 @@ if(TARGET example_moe_gemm2_xdl_fp8_padding_kvec8)
     target_compile_definitions(example_moe_gemm2_xdl_fp8_padding_kvec8 PRIVATE MOE_PAD_NK MOE_KVEC=8)
 endif()
 
-list(APPEND gpu_list gfx942 gfx950 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx1170 gfx1171 gfx11-7-generic gfx1200 gfx1201 gfx11-generic gfx12-generic gfx1250)
+list(APPEND gpu_list gfx942 gfx950 gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 gfx1170 gfx1171 gfx11-7-generic gfx1200 gfx1201 gfx11-generic gfx12-generic gfx1250 gfx1251)
 
 set(target 0)
 foreach(gpu IN LISTS GPU_TARGETS)

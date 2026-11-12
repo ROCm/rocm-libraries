@@ -38,7 +38,7 @@ import tempfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 
@@ -458,7 +458,7 @@ class GemmKernelConfig:
         if any(self.vector_sizes):
             return self.vector_sizes
         return _codegen_common().gemm_native_vector_sizes(
-            **self._vector_args(), epilogue=self.epilogue
+            **self._vector_args(), epilogue=self.epilogue, pipeline=self.pipeline
         )
 
     def with_vector_sizes(
@@ -468,15 +468,23 @@ class GemmKernelConfig:
 
         Returns ``(config, reject_reason)``; the reason is None when legal.
         """
-        if not any(requested):
-            return replace(self, vector_size_a=0, vector_size_b=0, vector_size_c=0), None
-        vec, reason = _codegen_common().resolve_gemm_vector_sizes(
-            **self._vector_args(),
-            requested=requested,
-            pipeline=self.pipeline,
-            epilogue=self.epilogue,
-            variant=self.variant,
-        )
+        cc = _codegen_common()
+        vec, reason = (0, 0, 0), None
+        if any(requested):
+            vec, reason = cc.resolve_gemm_vector_sizes(
+                **self._vector_args(),
+                requested=requested,
+                pipeline=self.pipeline,
+                epilogue=self.epilogue,
+                variant=self.variant,
+                reduction_strategy=self.reduction_strategy,
+            )
+        if not reason and not any(vec) and self.variant == "stream_k":
+            # Native widths (unset, or requested ones that resolve to native) skip
+            # resolution's checks; Stream-K's C check still applies.
+            reason = cc.streamk_c_reject_reason(
+                self.reduction_strategy, 0, self.dtype_c, self.layout[2]
+            )
         if reason:
             reason = (
                 f"{self.tile_str} {self.pipeline}/{self.epilogue} "
@@ -1520,8 +1528,12 @@ class GpuGemmRunner:
     def run(
         self, A: np.ndarray, B: np.ndarray, problem: GemmProblem
     ) -> GemmResult:
-        M, N, K = problem.M, problem.N, problem.K
+        return self.run_encoded(*self.encode_inputs(A, B), problem)
 
+    def encode_inputs(
+        self, A: np.ndarray, B: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        """The host A/B buffers run() hands the kernel for logical A and B."""
         # Caller passes logical A (MxK) and B (KxN) row-major. The compiled
         # kernel dictates both the element dtype and the memory layout of each
         # operand (encoded in its name, e.g. gemm_bf16_rcr_...). The C ABI sizes
@@ -1535,14 +1547,21 @@ class GpuGemmRunner:
         # Likewise column-major C (MxN) lands in memory as NxM row-major, so we
         # allocate (N,M) and transpose the result back to logical MxN.
         dtype = _dtype_from_kernel_name(self._kernel_name)
-        la, lb, lc = _layout_from_kernel_name(self._kernel_name)
-        C_shape = (M, N) if lc == "r" else (N, M)
-
+        la, lb, _ = _layout_from_kernel_name(self._kernel_name)
         # A/B host buffers in the kernel's element dtype and layout; the kernels
         # of a sweep worker's shape reuse them (see _sweep_inputs).
-        A_h, B_h = _encode_ab_cached(
+        return _encode_ab_cached(
             A, B, dtype, la, lb, self._use_ocp, self._kernel_name
         )
+
+    def run_encoded(
+        self, A_h: np.ndarray, B_h: np.ndarray, problem: GemmProblem
+    ) -> GemmResult:
+        """run() on host buffers that encode_inputs() made."""
+        M, N, K = problem.M, problem.N, problem.K
+        dtype = _dtype_from_kernel_name(self._kernel_name)
+        lc = _layout_from_kernel_name(self._kernel_name)[2]
+        C_shape = (M, N) if lc == "r" else (N, M)  # column-major C: see above
 
         # The C buffer's element size must equal sizeof(CDataType): fp8/bf8
         # accumulate into fp16, int8 into int32, otherwise the input dtype.
@@ -2793,13 +2812,14 @@ def _gfx1250_pipeline_supported(
         dtype_a=dtype,
         dtype_b=dtype,
         layout=layout,
-        variant_supported=variant in ("standard", "batched", "preshuffle"),
+        variant_supported=variant in ("standard", "batched", "preshuffle", "stream_k"),
         variant_name=variant,
         persistent=bool(persistent),
         pads=(bool(pad_m), bool(pad_n), bool(pad_k)),
         batched=variant == "batched",
         tile_mn=tile_mn,
         warp_k=wave_k,
+        streamk=variant == "stream_k",
     )
     return not reason
 
@@ -2863,6 +2883,21 @@ def _arch_filter_accepts(
     )
 
 
+# Stream-K reduction strategies the codegen can emit (atomic/linear/tree).
+STREAMK_REDUCTION_STRATEGIES = ("atomic", "linear", "tree")
+
+
+def unique_by_name(configs: List[GemmKernelConfig]) -> List[GemmKernelConfig]:
+    """Drop configs whose ``.name`` (the kernel identity) repeats an earlier one.
+
+    First occurrence wins and input order is kept.
+    """
+    first: Dict[str, GemmKernelConfig] = {}
+    for c in configs:
+        first.setdefault(c.name, c)
+    return list(first.values())
+
+
 def expand_sweep(
     config_path: str,
     arch: Optional[str] = None,
@@ -2878,6 +2913,7 @@ def expand_sweep(
     mabd_cli_overrides: Optional[Dict[str, Any]] = None,
     vector_sizes: Optional[List[Tuple[int, int, int]]] = None,
     rejects: Optional[Dict[str, int]] = None,
+    reduction_strategies: Optional[Union[str, List[str]]] = None,
 ) -> List[GemmKernelConfig]:
     """Expand a Tile Engine GEMM JSON sweep config into GemmKernelConfig list.
 
@@ -2908,6 +2944,17 @@ def expand_sweep(
     only. Each base config is emitted once per distinct resolved triple; a
     triple that is illegal for the tile is dropped and its reason counted in
     ``rejects`` (when given).
+
+    ``reduction_strategies`` (``variant='stream_k'`` only; one name or a list)
+    replaces the config's ``streamk_config.reduction_strategy`` list before
+    expansion, so an override never multiplies the sweep by the config's own
+    strategies. An unknown strategy name raises ``ValueError`` before any
+    codegen/build.
+
+    Applying it before expansion also checks each fixed vector width against the
+    strategy that runs it: a C width that is illegal for atomic is legal for
+    linear and tree. The argument with another variant, and Stream-K with a
+    column-major C (which no strategy supports), raise ``ValueError`` too.
     """
     # Multi-ABD is fp16-only end-to-end (codegen, ctypes lib, and GpuMultiABDRunner
     # all assume fp16). Reject other dtypes here -- before any codegen/build -- so
@@ -2969,7 +3016,29 @@ def expand_sweep(
     # variants keep a single dummy value so the product is unaffected.
     if variant == "stream_k":
         sk = cfg.get("streamk_config", {})
-        reductions = _expand_values(sk.get("reduction_strategy"), ["atomic"])
+        if isinstance(reduction_strategies, str):
+            reduction_strategies = [reduction_strategies]
+        reductions = reduction_strategies or _expand_values(
+            sk.get("reduction_strategy"), ["atomic"]
+        )
+        unknown = sorted(set(reductions) - set(STREAMK_REDUCTION_STRATEGIES))
+        if unknown:
+            raise ValueError(
+                f"unknown Stream-K reduction strategy {unknown}; "
+                f"expected one of {STREAMK_REDUCTION_STRATEGIES}"
+            )
+        # The C layout rule holds for every strategy, so a column-major C has no
+        # Stream-K kernel at all: say why instead of returning an empty sweep.
+        c_reason = _codegen_common().streamk_c_reject_reason(
+            None, 0, _output_dtype(dtype), layout[2]
+        )
+        if c_reason:
+            raise ValueError(
+                f"{c_reason}, got layout {layout!r}; "
+                f"expected one of {_codegen_common().STREAMK_GEMM_LAYOUTS}"
+            )
+    elif reduction_strategies:
+        raise ValueError(f"reduction_strategies is Stream-K only, not {variant!r}")
     else:
         reductions = ["atomic"]
 
@@ -3057,7 +3126,6 @@ def expand_sweep(
         md_combos = [("PassThrough", 0)]
 
     configs: List[GemmKernelConfig] = []
-    seen: set = set()
     for (
         tm,
         tn,
@@ -3146,11 +3214,14 @@ def expand_sweep(
             tm // m_div, tn // n_div, wtm, wtn
         ):
             continue
-        # Stream-K supports only the cshuffle epilogue, and the codegen skips
-        # anything else (unified_gemm_codegen.py, GemmVariant.STREAM_K branch).
-        # Without this gate expand_sweep hands back configs whose header is
-        # never emitted, which surfaces downstream as a spurious build failure.
-        if variant == "stream_k" and epi != "cshuffle":
+        # The codegen emits a Stream-K kernel only for the (pipeline, epilogue,
+        # reduction) triples streamk_trait_reject_reason accepts (unified_gemm_codegen.py,
+        # GemmVariant.STREAM_K branch). Without this gate expand_sweep hands back configs
+        # whose header is never emitted, which surfaces downstream as a spurious build
+        # failure.
+        if variant == "stream_k" and _codegen_common().streamk_trait_reject_reason(
+            pipe, epi, red, pads=(bool(pm), bool(pn), bool(pk))
+        ):
             continue
 
         for (m_na, m_nb, m_nd, m_aop, m_bop, m_cdeop) in mabd_combos:
@@ -3208,8 +3279,6 @@ def expand_sweep(
                         if rejects is not None:
                             rejects[reason] = rejects.get(reason, 0) + 1
                         continue
-                    if cv.name in seen:
-                        continue
                     if val is None:
                         # After the vector-width rejects, as in the codegen.
                         val = _cu.validate_kernel_config(
@@ -3229,7 +3298,6 @@ def expand_sweep(
                     if not val:
                         # Keep counting the later widths' rejects, as the codegen does.
                         continue
-                    seen.add(cv.name)
                     configs.append(cv)
 
-    return configs
+    return unique_by_name(configs)

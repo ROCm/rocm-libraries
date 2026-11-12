@@ -9,6 +9,8 @@
  * PORTED SYMBOLS (this phase):
  *   - rocke_apply_softcap_log2        (apply_softcap_log2)
  *   - rocke_binary_search_seq_idx     (binary_search_seq_idx)
+ *   - rocke_binary_search_seq_idx_dyn (binary_search_seq_idx, runtime trip count)
+ *   - rocke_binary_search_seq_idx_trip_count (binary_search_seq_idx_trip_count)
  *   - rocke_mfma_16x16x16_for_dtype   (mfma_16x16x16_for_dtype)
  *   - rocke_wave64_reduce_max         (wave64_reduce_max)
  *   - rocke_wave64_reduce_sum         (wave64_reduce_sum)
@@ -70,6 +72,21 @@ rocke_value_t* rocke_binary_search_seq_idx(rocke_ir_builder_t* b,
                                            int block_q,
                                            int iterations,
                                            bool per_token);
+
+/* The same search with a runtime trip count, for kernels that serve any batch. */
+rocke_value_t* rocke_binary_search_seq_idx_dyn(rocke_ir_builder_t* b,
+                                               rocke_value_t* cu_q,
+                                               rocke_value_t* q_block_global_idx,
+                                               rocke_value_t* num_seqs,
+                                               int block_q,
+                                               rocke_value_t* iterations,
+                                               bool per_token);
+
+/* binary_search_seq_idx_trip_count: max(1, bit_length(num_seqs)) from the exponent
+ * of (float)num_seqs. Exact below 2^24 sequences; past that it may add one no-op
+ * iteration. */
+rocke_value_t* rocke_binary_search_seq_idx_trip_count(rocke_ir_builder_t* b,
+                                                      rocke_value_t* num_seqs);
 
 #ifdef __cplusplus
 } /* extern "C" */

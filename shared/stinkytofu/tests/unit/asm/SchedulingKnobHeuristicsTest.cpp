@@ -63,6 +63,8 @@ TEST(SchedulingKnobHeuristics, DegenerateFallsBackToStaticDefaults) {
         EXPECT_EQ(resolved.reduceClusterBarrierPerLoop, defaults.reduceClusterBarrierPerLoop);
         EXPECT_FALSE(resolved.reduceClusterBarrierPerLoop);
         EXPECT_EQ(resolved.reduceClusterBarrierPerLoopSource, SchedulingKnobSource::StaticDefault);
+        EXPECT_EQ(resolved.queueFillSafetyMarginCycles, 32);
+        EXPECT_EQ(resolved.queueFillSafetyMarginCyclesSource, SchedulingKnobSource::StaticDefault);
     }
 
     EXPECT_EQ(staticSchedulingKnobDefaults(kGfx1250).clusterBarrierRule3SignalLeadCycles,
@@ -86,6 +88,8 @@ TEST(SchedulingKnobHeuristics, PolicyUsedWhenMainLoopHasBothCounts) {
     EXPECT_FALSE(resolved.reduceClusterBarrierPerLoop);
     EXPECT_EQ(resolved.reduceClusterBarrierPerLoop, proposed.reduceClusterBarrierPerLoop);
     EXPECT_EQ(resolved.reduceClusterBarrierPerLoopSource, SchedulingKnobSource::Policy);
+    EXPECT_EQ(resolved.queueFillSafetyMarginCycles, 32);
+    EXPECT_EQ(resolved.queueFillSafetyMarginCyclesSource, SchedulingKnobSource::Policy);
 }
 
 TEST(SchedulingKnobHeuristics, Rule3LeadUses200WhenSumWmmaLatencyExceeds500) {
@@ -215,6 +219,7 @@ TEST(SchedulingKnobHeuristics, LogResolvedSchedulingKnobsFormat) {
     EXPECT_NE(line.find("sumWmmaLat=120"), std::string::npos);
     EXPECT_NE(line.find("rule3SignalLeadCycles=100(static)"), std::string::npos);
     EXPECT_NE(line.find("reduceClusterBarrierPerLoop=0(static)"), std::string::npos);
+    EXPECT_NE(line.find("queueFillSafetyMarginCycles=0(static)"), std::string::npos);
 }
 
 TEST(SchedulingKnobHeuristics, LogResolvedSchedulingKnobsIfDebugHonorsDebugOnly) {
