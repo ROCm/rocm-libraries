@@ -1155,9 +1155,10 @@ namespace
         return 0;
     }
 
-    // MXScaleFormat id (tensilelite Contractions.py) of
-    // HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT, the only layout that sets it.
-    constexpr int kMXScaleFormatHostPreSwizzle128x4 = 3;
+    // MXScaleFormat id of HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT, the only
+    // layout that sets it.
+    constexpr int kMXScaleFormatHostPreSwizzle128x4
+        = static_cast<int>(TensileLite::MXScaleFormat::HostPreSwizzle128x4);
 
     inline int benchScaleAFormat(const TensileLite::ContractionProblemGemm& problem)
     {
