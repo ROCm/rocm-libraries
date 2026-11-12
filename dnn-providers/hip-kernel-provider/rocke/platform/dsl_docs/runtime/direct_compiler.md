@@ -202,7 +202,7 @@ Paths are under [`rust/rocke-codeobj/src`](../../rust/rocke-codeobj/src/).
 | Validate | Checks every op's operands, results, types and attributes, and the limits: region nesting, vector width, LDS per workgroup, workgroup size, uniformity. | `rir/validate.rs` |
 | LDS layout | Places the kernel's LDS allocations; allocations whose lifetimes do not overlap share space. | `rir/analysis.rs` |
 | Optimize | Simplification and constant folding, common-subexpression elimination (repeated LDS loads included), loop-invariant code motion, known-bits facts (a bounds test with the same answer in every workgroup, for example), unrolling the loops the IR marks `unroll = true`, and the `noalias` and `readonly` facts of kernel arguments. | `rir/opt.rs`, `rir/unroll.rs`, `rir/alias.rs` |
-| Automatic unrolling | Unrolls small loops with a constant trip count that the IR leaves rolled, under a size bound. gfx950 also unrolls a loop whose only wait on a carried value is an empty register pin (`tile.inline_asm` without a template). | `rir/unroll.rs`, `target/gfx9/unrolled.rs` |
+| Automatic unrolling | Unrolls small loops with a constant trip count that the IR leaves rolled, under a size bound. gfx950 also unrolls a loop whose only wait on a carried value is an empty register pin (`tile.inline_asm` without a template), and, in a kernel without `tile.mma`, loops of up to 64 trips and 2048 ops of copies (the split-KV attention reduce kernels sum 64 partial results per lane: every copy's load is then in flight at once). The constant of each unrolled copy's global address moves into the access's offset field, a multiple of 4096 bytes of it staying in the scalar base, so copies within one window share one 64-bit scalar address. | `rir/unroll.rs`, `target/gfx9/unrolled.rs` |
 | Target IR passes | gfx950: adjacent `if` blocks of one condition fuse and their stores widen, and a repeated load takes the first load's result: within one straight-line run, and for memory of a `noalias readonly` argument also past barriers and from an enclosing region. gfx1151: long FMA accumulator chains issue round-robin. | `target/gfx9/widen.rs`, `target/gfx9/ro_loads.rs`, `rir/fma_chains.rs` |
 | LDS swizzle | Remaps LDS addresses to avoid bank conflicts; wave32 only. | `rir/lds_swizzle.rs` |
 | Uniformity | Classifies every value as wave-uniform (SGPRs) or per lane (VGPRs). | `rir/analysis.rs` |
@@ -238,6 +238,11 @@ fixed rules:
   WMMA moved up to its operands. It spills only when that does not fit either.
 - A result that fits only by packing register tuples first is compared with a
   compile without that packing, and the one with more occupancy is kept.
+- On gfx950, a kernel without MFMAs that unrolled a loop and runs fewer waves
+  than the hardware allows is compiled again without merging repeated LDS
+  loads (the unrolled copies of two loops reading one table share their loads,
+  which then stay live across all of them), and the compile with more waves is
+  kept if it spills no more.
 
 These choices depend only on the input. They are why two kernels of a similar
 size can take very different compile times.
@@ -335,6 +340,7 @@ Switches for both targets:
 | `nolicm` | No loop-invariant code motion. |
 | `noalias` | Ignores the `noalias` facts: every pair of global accesses stays in order. |
 | `nounroll` | No automatic unrolling. Loops the IR marks `unroll = true` still unroll. |
+| `noglobalfold` | Leaves the constants of unrolled copies in their global addresses (no offset folding). |
 | `noldsreuse` | Every LDS allocation gets its own space. |
 | `nohashcons` | Parses repeated constants as written. |
 | `nopeephole`, `nopeephole_<family>` | Skips the proven peephole rules, or one family of them. |

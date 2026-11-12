@@ -97,7 +97,7 @@ pub fn prepare(f: &mut MFunc) {
     if f.lever_anywhere("minmax") {
         minmax::run(f);
     }
-    if f.lever_anywhere("minmax3") {
+    if f.lever_anywhere("minmax3") || f.lever_anywhere("fmax3") {
         minmax3::run(f);
     }
     zero_acc::run(f);

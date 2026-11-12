@@ -36,6 +36,12 @@ pub struct Auto {
     /// Whether an empty register pin (`tile.inline_asm` without a template)
     /// that reads a carried value keeps the loop rolled, as a load does.
     pub pins_wait: bool,
+    /// `(max_trips, max_ops)` for a kernel with no `tile.mma`, when given:
+    /// its loops are latency bound (a reduction over a few dozen partial
+    /// results, each iteration a load and an add), and the copies put all
+    /// their loads in flight at once, as LLVM's unroller does for them.
+    /// Rolled, each trip waits for its own load.
+    pub scalar: Option<(i64, usize)>,
 }
 
 impl Auto {
@@ -45,7 +51,7 @@ impl Auto {
     /// four times as much it allows copies that simplify; 16384 ops of
     /// copies keep the largest unrolled loop body measured within the reach
     /// of a 16-bit branch offset.
-    pub const DEFAULT: Auto = Auto { max_trips: 32, max_ops: 512, max_total_ops: 1 << 14, pins_wait: true };
+    pub const DEFAULT: Auto = Auto { max_trips: 32, max_ops: 512, max_total_ops: 1 << 14, pins_wait: true, scalar: None };
 }
 
 /// Unrolls every eligible loop, innermost first. Cloned LDS allocations
@@ -74,6 +80,10 @@ fn unroll_walk(
     if !has_unrollable_loop(&kernel.body, auto.is_some()) {
         return Ok((0, FxHashSet::default()));
     }
+    let auto = auto.map(|a| match a.scalar {
+        Some((max_trips, max_ops)) if !has_op(&kernel.body, OpKind::Mma) => Auto { max_trips, max_ops, ..a },
+        _ => a,
+    });
     let mut consts = FxHashMap::default();
     collect_consts(&kernel.body, &mut consts);
     let mut body = std::mem::take(&mut kernel.body);
@@ -130,7 +140,8 @@ pub fn unroll_optimized(
     ws.keep_lds_loads = keep_lds_loads;
     ws.facts.merged_loads = facts.merged_loads;
     opt::sweep(kernel, &mut ws)?;
-    if fold_select_offsets(kernel, &ws.facts) {
+    let folded = fold_select_offsets(kernel, &ws.facts);
+    if (!super::debug_flag("noglobalfold") && fold_global_offsets(kernel, &ws.facts)) || folded {
         opt::sweep(kernel, &mut ws)?;
     }
     unshare_offsets(kernel, &mut ws.facts);
@@ -433,6 +444,104 @@ fn fold_select_offsets(kernel: &mut Kernel, facts: &Facts) -> bool {
     changed
 }
 
+/// The field of a global access's immediate offset: signed 13 bits (4096 bytes below to 4095 above).
+const GLOBAL_OFFSET_WINDOW: i64 = 4096;
+
+/// Moves the constant of a global access's address into its immediate offset.
+/// `opt::legalize_addresses` ran before the unrolling, when each copy's
+/// constant was still the loop's counter, so every copy addresses
+/// `ptr + sext(u + k) * size` with its own `k`, a 64-bit scalar add chain of its
+/// own. As `x + k` (no wrap) the access reads `ptr + sext(u) * size` at offset
+/// `k * size`: the multiple of 4096 bytes of `k * size` stays in the sum (as in
+/// `fold_select_offsets`), so the copies within one window share their base
+/// and differ only in the offset. Only a `k` and an offset that are not
+/// negative are taken (the sum then never wraps where `u + k` did not).
+fn fold_global_offsets(kernel: &mut Kernel, facts: &Facts) -> bool {
+    let mut defs: FxHashMap<ValueId, Op> = FxHashMap::default();
+    let mut stack = vec![&kernel.body];
+    while let Some(region) = stack.pop() {
+        for op in &region.ops {
+            if matches!(op.kind, OpKind::Add | OpKind::Sext | OpKind::Shl | OpKind::GlobalPtrAdd) && op.results.len() == 1 {
+                defs.insert(op.results[0], op.clone());
+            }
+            stack.extend(op.regions.iter());
+        }
+    }
+    let mut changed = false;
+    let mut body = std::mem::take(&mut kernel.body);
+    let mut stack = vec![&mut body];
+    while let Some(region) = stack.pop() {
+        let ops = std::mem::take(&mut region.ops);
+        let mut out = Vec::with_capacity(ops.len());
+        for mut op in ops {
+            if matches!(op.kind, OpKind::GLoad | OpKind::GStore) {
+                if let Some(rewrite) = global_rebase(kernel, facts, &defs, &op, &mut out) {
+                    op.operands[0] = rewrite.0;
+                    op.set_attr("offset", Attr::Int(rewrite.1));
+                    changed = true;
+                }
+            }
+            out.push(op);
+        }
+        region.ops = out;
+        stack.extend(region.ops.iter_mut().flat_map(|op| op.regions.iter_mut()));
+    }
+    kernel.body = body;
+    changed
+}
+
+/// The address and offset a global access takes with its constant in the offset (`fold_global_offsets`); the ops
+/// computing the address go to `out`.
+fn global_rebase(kernel: &mut Kernel, facts: &Facts, defs: &FxHashMap<ValueId, Op>, op: &Op, out: &mut Vec<Op>) -> Option<(ValueId, i64)> {
+    let add = defs.get(op.operands.first()?).filter(|d| d.kind == OpKind::GlobalPtrAdd && d.operands.len() == 2)?;
+    let shl = defs.get(&add.operands[1]).filter(|d| d.kind == OpKind::Shl && d.operands.len() == 2)?;
+    let sext = defs.get(&shl.operands[0]).filter(|d| d.kind == OpKind::Sext && d.operands.len() == 1)?;
+    let sum = defs.get(&sext.operands[0]).filter(|d| d.kind == OpKind::Add && d.operands.len() == 2 && d.attr("wrap").is_none())?;
+    let shift = facts.int(shl.operands[1])?;
+    let (u, k) = match (facts.int(sum.operands[0]), facts.int(sum.operands[1])) {
+        (_, Some(k)) => (sum.operands[0], k),
+        (Some(k), None) => (sum.operands[1], k),
+        _ => return None,
+    };
+    let offset = op.int_attr("offset").unwrap_or(0);
+    if !(0..=12).contains(&shift) || k <= 0 || offset < 0 {
+        return None;
+    }
+    let size = 1i64 << shift;
+    let total = k * size + offset;
+    // The part of `total` in whole windows moves into the sum, no more than `k` elements of it.
+    let high = (total.div_euclid(GLOBAL_OFFSET_WINDOW) * GLOBAL_OFFSET_WINDOW / size).min(k);
+    let rest = total - high * size;
+    if !(0..GLOBAL_OFFSET_WINDOW).contains(&rest) {
+        return None;
+    }
+    let ptr = add.operands[0];
+    let loc = op.loc.clone();
+    let mut x = u;
+    if high > 0 {
+        let c = constant(kernel, high, out, &loc);
+        let n = kernel.new_value("%gadd", Type::Scalar(Scalar::I32));
+        out.push(Op { kind: OpKind::Add, results: [n].into(), operands: [u, c].into_iter().collect(), attrs: Vec::new(), regions: Vec::new(), block_args: Vec::new(), loc: loc.clone() });
+        x = n;
+    }
+    let wide = kernel.new_value("%gsext", Type::Scalar(Scalar::I64));
+    out.push(Op { kind: OpKind::Sext, results: [wide].into(), operands: [x].into_iter().collect(), attrs: Vec::new(), regions: Vec::new(), block_args: Vec::new(), loc: loc.clone() });
+    let scaled = kernel.new_value("%gshl", Type::Scalar(Scalar::I64));
+    let mut shl_op = shl.clone();
+    shl_op.results = [scaled].into();
+    shl_op.operands = [wide, shl.operands[1]].into_iter().collect();
+    shl_op.loc = loc.clone();
+    out.push(shl_op);
+    let pty = kernel.ty(add.results[0]).clone();
+    let addr = kernel.new_value("%gptr", pty);
+    let mut add_op = add.clone();
+    add_op.results = [addr].into();
+    add_op.operands = [ptr, scaled].into_iter().collect();
+    add_op.loc = loc;
+    out.push(add_op);
+    Some((addr, rest))
+}
+
 /// Gives `to` the facts of `from`.
 fn copy_facts(facts: &mut Facts, from: ValueId, to: ValueId) {
     let len = facts.konst.len().max(facts.range.len()).max(to.0 as usize + 1);
@@ -530,6 +639,11 @@ fn loads_wait_on_carried(op: &Op, pins_wait: bool) -> bool {
     all.iter().any(|o| {
         o.kind.is_removable() && !o.kind.is_pure() && (pins_wait || !pin(o)) && o.operands.iter().any(|v| tainted.contains(v))
     })
+}
+
+/// Whether `region` or a region nested in it holds an op of kind `kind`.
+fn has_op(region: &Region, kind: OpKind) -> bool {
+    region.ops.iter().any(|op| op.kind == kind || op.regions.iter().any(|r| has_op(r, kind)))
 }
 
 /// A loop in `ops` or in a region nested in them.
@@ -1098,6 +1212,70 @@ mod tests {
     }
 
     /// `unroll_optimized` on `optimize`'s result, as `compile` runs it.
+    /// A global load at `n + i * 64 + tid` of the loop's iteration `i`.
+    fn global_load(base: &str) -> String {
+        format!(
+            "        %st : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:64 }}\n        \
+             %step : i32 = arith.mul ( %i, %st )\n        %a : i32 = arith.add ( {base}, %step )\n        \
+             %idx : i32 = arith.add ( %a, %tid )\n        \
+             %v : f32 = memref.global_load_typed ( %X, %idx ) {{ align = i:4, elem_type = s:\"f32\" }}\n        \
+             %s : f32 = arith.fadd ( %v, %acc )\n"
+        )
+    }
+
+    /// `(offset, address)` of each global load.
+    fn global_loads(region: &Region) -> Vec<(i64, ValueId)> {
+        let mut out = Vec::new();
+        let mut stack = vec![region];
+        while let Some(region) = stack.pop() {
+            for op in &region.ops {
+                if op.kind == OpKind::GLoad {
+                    out.push((op.int_attr("offset").unwrap_or(0), op.operands[0]));
+                }
+                stack.extend(op.regions.iter());
+            }
+        }
+        out.reverse();
+        out
+    }
+
+    #[test]
+    fn unrolled_global_loads_share_a_base_per_window_of_offsets() {
+        // 20 copies, 256 bytes apart: the first 16 fill the 4096-byte window of the base, the rest the next.
+        let (k, n) = late(&rolled(20, "", &global_load("%n")));
+        let loads = global_loads(&k.body);
+        assert_eq!((n, loads.len()), (1, 20));
+        let offsets: Vec<i64> = loads.iter().map(|l| l.0).collect();
+        let mut want: Vec<i64> = (0..20).map(|i| i * 256 % 4096).collect();
+        let mut offsets = offsets;
+        (offsets.sort_unstable(), want.sort_unstable());
+        assert_eq!(offsets, want);
+        let mut bases: Vec<ValueId> = loads.iter().map(|l| l.1).collect();
+        bases.sort();
+        bases.dedup();
+        assert_eq!(bases.len(), 2, "one base per window of offsets");
+    }
+
+    #[test]
+    fn a_negative_step_leaves_global_addresses_as_they_are() {
+        let body = global_load("%n").replace("value = i:64", "value = i:-64");
+        let (k, n) = late(&rolled(4, "", &body));
+        assert_eq!(n, 1);
+        assert!(global_loads(&k.body).iter().all(|l| l.0 == 0), "negative constants stay in the base");
+    }
+
+    #[test]
+    fn loops_without_mma_unroll_to_the_scalar_trip_count() {
+        let text = rolled(64, "", &masked_load("%base", 16));
+        let (k, n) = auto_unrolled(&text, Auto::DEFAULT);
+        assert_eq!((n, count_kind(&k.body, OpKind::For)), (0, 1), "64 trips are past the shared limit");
+        let long = Auto { scalar: Some((64, 2048)), ..Auto::DEFAULT };
+        let (k, n) = auto_unrolled(&text, long);
+        assert_eq!((n, count_kind(&k.body, OpKind::For), count_kind(&k.body, OpKind::BufferLoadScalar)), (1, 0, 64));
+        let (k, n) = auto_unrolled(&rolled(65, "", &masked_load("%base", 16)), long);
+        assert_eq!((n, count_kind(&k.body, OpKind::For)), (0, 1), "65 trips are past the scalar limit");
+    }
+
     fn late(text: &str) -> (Kernel, usize) {
         let mut k = super::super::parse::parse(text).unwrap_or_else(|e| panic!("{e}"));
         let (mut lds, _) = super::super::analysis::lds_layout(&k);
