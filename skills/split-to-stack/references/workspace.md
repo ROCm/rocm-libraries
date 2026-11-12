@@ -1,0 +1,10 @@
+# Workspace (read by the agents that write `$WT`, refs or builds: the orchestrator, Updater, Linearizer, Builder)
+
+Do all mutating work that needs a checkout in a dedicated scratch worktree so the user's checkout and its dirty state are never touched: `WT=$(mktemp -d)`; `git worktree add --detach "$WT" <start>`. Create each helper ref inside it with `git -C "$WT" switch -c <ref> <start>`. Never check out S or the target in `$WT`.
+- Every git command that reads or changes `$WT` runs as `git -C "$WT" …`. Never `cd` into `$WT` or the repo root, with one exception: commands that have no `-C` (`gh stack`, `pre-commit`, builds, tests) run as a subshell `(cd "$WT" && …)`; never in the user's checkout, except the approved `gh stack` commands of the Setup sync and Phase 9, which run in `$CO`. Before running hooks, check that `git -C "$WT" rev-parse --show-toplevel` equals `$WT`.
+- Every file edit uses an absolute path under `$WT`. Never edit files in the user's checkout.
+- Keep build directories **outside** `$WT` (under `$RUN/build`, or a symlink there to a `mktemp -d` directory: a large build does not belong inside `.git/`), so removing the worktree is never blocked by build output.
+- The orchestrator creates `$WT` as an empty `mktemp -d` directory and passes it; the Updater runs `git worktree add --detach "$WT" <start>` in it. A replacement agent never creates a second one (`resume.md`).
+- `build_stack.py` writes branch trees with plumbing and a private index, from stored objects without any filter or line-ending conversion (`hash-object --no-filters`): it needs no worktree, and writes only objects and, with `--refs`, the `$BR(NN)` branches. Never check files out to "help" it.
+- Writes to `$WT`, the `$SPLIT/*` refs and the `$BR(NN)` branches are serial: one agent at a time, handed over explicitly by the orchestrator. Read-only agents may run in parallel.
+- Before the Builder creates or moves a `$BR(NN)` branch, check that no `$BR(NN)` is checked out in any worktree (`git worktree list --porcelain`); `build_stack.py` refuses otherwise.

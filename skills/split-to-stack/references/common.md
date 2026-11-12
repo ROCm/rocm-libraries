@@ -14,10 +14,10 @@
 | `$SPLIT` | helper-branch prefix, see Naming. |
 | `$WT` | the scratch worktree. |
 | `$CO` | the invoking checkout: the worktree the user ran the skill from, recorded in `run.md` at start. |
-| `$BASE_REMOTE`, `$PUSH_REMOTE` | the remote of the repository the PRs target, and the remote the stack's branches live in. See Remotes. |
+| `$BASE_REMOTE`, `$PUSH_REMOTE` | the remote of the repository the PRs target, and the remote the stack's branches live in (resolved by the orchestrator, `orchestrator.md`). |
 | `$RUN` | the run directory. |
 | `$BR(NN)` | the final branch of group NN: `users/<you>/<suffix>`. |
-| `<you>` | the namespace the person running the skill already uses for their branches (`users/<you>/`), see Naming. |
+| `<you>` | the namespace the person running the skill already uses for their branches (`users/<you>/`), resolved by the orchestrator (`orchestrator.md`) and recorded in `run.md`. |
 
 ## Base `B`
 
@@ -27,31 +27,15 @@
 - If the user declined the update: `git merge-base --all S T`. Exactly one commit is B. More than one (criss-cross history): stop, show the candidates, and recommend updating (0e), which makes B unambiguous.
 The Survey only *estimates* B (for the "Nothing to split" check); the Updater computes the real B before hook pass 2 and records it.
 
-## Remotes
-
-The orchestrator resolves two remotes at start and records them in `run.md`; no command names any other remote. Match remote URLs to repositories by `owner/name`, ignoring protocol and `.git`; no match or several matches: ask.
-- `$BASE_REMOTE`: the remote of the repository the PRs target (`gh pr view --json baseRepository`; without a PR, the repository `gh repo view` resolves). The target is fetched from it.
-- `$PUSH_REMOTE`: the remote of the repository the stack's branches live in (`headRepository`; without a PR, the branch's upstream remote). The Setup sync, `--check-remote` and every push use it.
-
-When they are the same, every `gh stack` command gets `--remote "$PUSH_REMOTE"` (without it, gh stack prompts when several remotes exist). When they differ, the run is in **fork mode**, detected automatically and stated in the proposal: GitHub stacks need every branch in the base repository, so gh stack is not used and publishing follows the fork-mode rules in `publish-and-cleanup.md`.
-
 ## Naming
 
-- **`<you>`.** It is the namespace the user already uses for branches, which is not always their GitHub login. If the branch checked out in `$CO` is `users/<x>/…` and is the user's (its open PR's author is `gh api user --jq .login`; without a PR, its tip commit's author name or email is `git config user.name` or `git config user.email`), use `<x>`. Otherwise ask the user. `git config split-to-stack.user <x>` overrides both. Record it in `run.md`.
 - **Final branches** are `users/<you>/<suffix>`, written `$BR(NN)`. `<suffix>` is a short, descriptive, unique, kebab-case name chosen by the Planner, optionally with a common topic prefix and the position in the stack (for example `cache-03-evict-on-resize`). The split branches exist under exactly one name each; there are no second, scratch copies.
 - **Helper branches** are ordinary local branches: `$SPLIT/00-updated` (only if S' differs from S) and `$SPLIT/00-linear` (only if Phase 1 was not a no-op), with `SPLIT=<source branch name with its remote prefix removed>-split`. Remove a leading remote name (`<remote>/`) from the source before deriving names. The `-split/` prefix avoids the leaf-versus-directory ref collision with the source branch itself.
-- Validate every name with `git check-ref-format --branch`. Before creating anything, check that neither a ref `$SPLIT` (leaf) nor any `$SPLIT/*` ref exists. The final names are checked by `check_plan.py --prefix users/<you>/ --check-remote "$PUSH_REMOTE"` before the user approves the plan: it fails if a `$BR(NN)` exists locally (unless this run set it) or on the remote, or if two suffixes cannot coexist (`feat` and `feat/more`). If something exists, handle it as in **Resume** (SKILL.md) or choose another name.
+- Validate every name with `git check-ref-format --branch`. Before creating anything, check that neither a ref `$SPLIT` (leaf) nor any `$SPLIT/*` ref exists. The final names are checked by `check_plan.py --prefix users/<you>/ --check-remote "$PUSH_REMOTE"` before the user approves the plan: it fails if a `$BR(NN)` exists locally (unless this run set it) or on the remote, or if two suffixes cannot coexist (`feat` and `feat/more`). If something exists, handle it as in `resume.md` or choose another name.
 
 ## Workspace
 
-Do all mutating work that needs a checkout in a dedicated scratch worktree so the user's checkout and its dirty state are never touched: `WT=$(mktemp -d)`; `git worktree add --detach "$WT" <start>`. Create each helper ref inside it with `git -C "$WT" switch -c <ref> <start>`. Never check out S or the target in `$WT`.
-- Every git command that reads or changes `$WT` runs as `git -C "$WT" …`. Never `cd` into `$WT` or the repo root, with one exception: commands that have no `-C` (`gh stack`, `pre-commit`, builds, tests) run as a subshell `(cd "$WT" && …)`; never in the user's checkout, except the approved `gh stack` commands of the Setup sync and Phase 9, which run in `$CO`. Before running hooks, check that `git -C "$WT" rev-parse --show-toplevel` equals `$WT`.
-- Every file edit uses an absolute path under `$WT`. Never edit files in the user's checkout.
-- Keep build directories **outside** `$WT` (under `$RUN/build`, or a symlink there to a `mktemp -d` directory: a large build does not belong inside `.git/`), so removing the worktree is never blocked by build output.
-- The orchestrator creates `$WT` as an empty `mktemp -d` directory and passes it; the Updater runs `git worktree add --detach "$WT" <start>` in it. A replacement agent never creates a second one (see Resume in SKILL.md).
-- `build_stack.py` writes branch trees with plumbing and a private index, from stored objects without any filter or line-ending conversion (`hash-object --no-filters`): it needs no worktree, and writes only objects and, with `--refs`, the `$BR(NN)` branches. Never check files out to "help" it.
-- Writes to `$WT`, the `$SPLIT/*` refs and the `$BR(NN)` branches are serial: one agent at a time, handed over explicitly by the orchestrator. Read-only agents may run in parallel.
-- Before the Builder creates or moves a `$BR(NN)` branch, check that no `$BR(NN)` is checked out in any worktree (`git worktree list --porcelain`); `build_stack.py` refuses otherwise.
+`$WT` is the scratch worktree of S'. The agents that write `$WT`, refs or builds (orchestrator, Updater, Linearizer, Builder) follow `workspace.md`; every other agent only reads `$WT`, as Searching says, and never writes it.
 
 ## Scope and speed
 
