@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
+import shutil
+import subprocess
 
 import pytest
 
@@ -146,6 +148,28 @@ def test_output_writer_formatters_and_sections(tmp_path: Path) -> None:
     assert "weights:" in txt
 
 
+@pytest.mark.parametrize(
+    ("path", "word"),
+    [
+        (PurePosixPath("/opt/build/tensilelite-client"), "/opt/build/tensilelite-client"),
+        (PurePosixPath("/tmp/with space/it's"), "'/tmp/with space/it'\"'\"'s'"),
+        (PureWindowsPath("C:/build/tensilelite-client.exe"), "'C:\\build\\tensilelite-client.exe'"),
+    ],
+)
+def test_shell_word_quotes_paths_for_bash(path, word: str) -> None:
+    assert ow.shell_word(path) == word
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="requires bash to execute generated scripts")
+@pytest.mark.parametrize("name", ["plain", "with space", "it's", r"C:\build\client.exe"])
+def test_shell_word_round_trips_through_bash(name: str) -> None:
+    result = subprocess.run(
+        ["bash", "-c", f"printf %s {ow.shell_word(name)}"],
+        capture_output=True, text=True, check=True,
+    )
+    assert result.stdout == name
+
+
 def test_output_writer_scripts_and_orchestrator(tmp_path: Path) -> None:
     run_all = tmp_path / "run_all.sh"
     ow.init_run_all_script(run_all)
@@ -163,7 +187,7 @@ def test_output_writer_scripts_and_orchestrator(tmp_path: Path) -> None:
     ow.write_run_script(script, "e1", hip, client_path=client)
     assert script.is_file()
     script_text = script.read_text(encoding="utf-8")
-    assert f"--ensure-client {client}" in script_text
+    assert f"--ensure-client {ow.shell_word(client.resolve())} && " in script_text
     assert "-m tensilelite run" in script_text
     assert "PYTHONPATH" not in script_text
     assert "--prebuilt-client" not in script_text

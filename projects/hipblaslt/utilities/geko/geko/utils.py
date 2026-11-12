@@ -146,8 +146,20 @@ def build_tensilelite_client(
         build_dir = default_build_dir
 
     build_dir = Path(build_dir).resolve()
-    executable = "tensilelite-client.exe" if sys.platform == "win32" else "tensilelite-client"
-    client_path = build_dir / "tensilelite" / "client" / executable
+    if not find_spec("invoke"):
+        raise RuntimeError(
+            "'invoke' package not found. It is required by tensilelite's "
+            "build system. Install it via the tensilelite setup "
+            "(hipBLASLt/tensilelite/requirements.txt) or: pip install invoke"
+        )
+
+    # Query the source build's output before the editable package is installed.
+    client_path = Path(subprocess.check_output(
+        ["invoke", "client-path", "--build-dir", str(build_dir)],
+        cwd=tensilelite_path,
+        env=_rocm_subprocess_env(),
+        text=True,
+    ).strip())
     hash_file_path = build_dir / "hash.txt"
 
     build = True
@@ -162,13 +174,6 @@ def build_tensilelite_client(
         build = False
 
     if build:
-        if not find_spec("invoke"):
-            raise RuntimeError(
-                "'invoke' package not found. It is required by tensilelite's "
-                "build system. Install it via the tensilelite setup "
-                "(hipBLASLt/tensilelite/requirements.txt) or: pip install invoke"
-            )
-
         shutil.rmtree(build_dir, ignore_errors=True)
 
         logger.info(f"Building tensilelite client in '{build_dir}'")
