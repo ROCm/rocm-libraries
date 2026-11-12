@@ -544,24 +544,27 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
 
         // ---------------------------------------------------------------- Gl2Prefetcher
 
-        /// `value`, or limit - 1 past a partial tile's end.
-        template <bool Edge>
-        CK_TILE_DEVICE static index_t LastInside(index_t value, index_t limit)
+        /// Bytes between A's or B's rows, from the DRAM window's descriptor as the TDM loads take
+        /// them.
+        template <bool IsA>
+        CK_TILE_DEVICE index_t DramRowBytes() const
         {
-            if constexpr(Edge)
-                return value < limit ? value : limit - 1;
-            else
-                return value;
+            return integer_divide_nonnegative<kKPerByte>(
+                DramWindow<IsA>().get_bottom_tensor_view().get_tensor_descriptor().calculate_offset(
+                    make_multi_index(1, 0)));
         }
 
-        /// PrefetchGL2: the cluster's A/B and scale lines of the tile at k_ahead, split over
-        /// every thread of the cluster, one 256 B line each. AheadParity is the parity of the
-        /// prefetched tile's index: with 128 B rows one line holds an even tile and the next one,
-        /// so the data lines are only prefetched for even tiles. Branch-free: any branch in the
-        /// loop body makes LLVM drain the LDS read pipeline. Past the end of K the last tile is
-        /// prefetched again.
+        /// The GL2 prefetch of what the cluster's TDM loads of the tile at k_ahead read, as
+        /// tile_window::prefetch_for_tdm with DataCachePrefetchKind::L2 but for the whole cluster
+        /// at once: A's and B's data and scale lines are split over every thread of the cluster,
+        /// one 256 B line each, with SE_NT coherence. A line out of a partial tile is clamped to
+        /// the last line inside instead of predicated off, and one prefetch per round covers
+        /// every category: any branch in the loop body makes LLVM drain the LDS read pipeline.
+        /// AheadParity is the parity of the prefetched tile's index: with 128 B rows one line
+        /// holds an even tile and the next one, so the data lines are only prefetched for even
+        /// tiles. Past the end of K the last tile is prefetched again.
         template <index_t AheadParity>
-        CK_TILE_DEVICE void Prefetch(index_t k_ahead) const
+        CK_TILE_DEVICE void prefetch_for_tdm_cluster(index_t k_ahead) const
         {
             if constexpr(kGl2Distance != 0)
             {
@@ -605,17 +608,18 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                         // instantiates the divide.
                         constexpr index_t lines = is_a ? data_lines : data_lines;
                         const index_t row0      = is_a ? cluster_m0 : cluster_n0;
-                        const index_t row       = LastInside<edge>(
-                            row0 + integer_divide_nonnegative<lines>(index), is_a ? M : N);
+                        const index_t unclamped = row0 + integer_divide_nonnegative<lines>(index);
+                        const index_t row = edge ? min(unclamped, (is_a ? M : N) - 1) : unclamped;
                         const index_t offset =
                             k_byte + integer_modulo_nonnegative<lines>(index) * line;
-                        const uint8_t* base = Bytes(DramWindow<is_a>());
+                        const index_t row_bytes = DramRowBytes<is_a>();
+                        const uint8_t* base     = Bytes(DramWindow<is_a>());
                         if constexpr(wide)
                             return base + (static_cast<uint64_t>(static_cast<uint32_t>(row)) *
-                                               static_cast<uint32_t>(packed_k) +
+                                               static_cast<uint32_t>(row_bytes) +
                                            static_cast<uint32_t>(offset));
                         else
-                            return base + static_cast<uint32_t>(row * packed_k + offset);
+                            return base + static_cast<uint32_t>(row * row_bytes + offset);
                     }
                     else
                     {
@@ -629,8 +633,9 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
                             k_step + integer_divide_nonnegative<lines_per_row>(index);
                         const index_t offset =
                             mn0 * 4 + integer_modulo_nonnegative<lines_per_row>(index) * line;
+                        const index_t unclamped = row * row_bytes + offset;
                         const index_t element =
-                            LastInside<clamp>(row * row_bytes + offset, k_atoms * row_bytes);
+                            clamp ? min(unclamped, k_atoms * row_bytes - 1) : unclamped;
                         return Bytes(ScaleDramWindow<is_a>()) + static_cast<uint32_t>(element);
                     }
                 };
@@ -675,7 +680,8 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
         CK_TILE_DEVICE void PrefetchAhead(index_t k0) const
         {
             if constexpr(kGl2Distance != 0)
-                Prefetch<(StaticParity + kGl2Distance) % 2>(k0 + kGl2Distance * kTileK);
+                prefetch_for_tdm_cluster<(StaticParity + kGl2Distance) % 2>(k0 +
+                                                                            kGl2Distance * kTileK);
         }
 
         /// Arrives on the cluster barrier: this wave has read the tile's buffer.
@@ -916,8 +922,9 @@ struct MxGemmPipelineAgBgCrCompTDMScheduled
             Issue(0, 0);
             // With one tile, buffer 1 gets tile 0 again and is never read.
             Issue(ClampK(kTileK), 1);
-            static_for<2, (kGl2Distance > 2 ? kGl2Distance : 2), 1>{}(
-                [&](auto ahead) { Prefetch<decltype(ahead)::value % 2>(ahead * kTileK); });
+            static_for<2, (kGl2Distance > 2 ? kGl2Distance : 2), 1>{}([&](auto ahead) {
+                prefetch_for_tdm_cluster<decltype(ahead)::value % 2>(ahead * kTileK);
+            });
             if constexpr(kLocalPrefetch)
                 wait_next_tile();
             static_for<0, kNumAcc, 1>{}([&](auto i) { acc[i] = CVec{}; });
