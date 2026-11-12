@@ -249,11 +249,18 @@ class TestGraphExecuteTimedExt:
 class TestCheckTensorUidsSet:
     """Tests for Graph.checkTensorUidsSet()."""
 
-    def test_uids_set_after_graph_construction(self):
-        """Tensors created via Graph.pointwise() have auto-assigned UIDs."""
+    def test_uids_not_set_before_assignment(self):
+        """Tensors without explicit UIDs fail the UID check."""
         graph = _build_pointwise_add_graph([8, 16], [8, 16])
-        result = graph.checkTensorUidsSet()
-        assert result.is_good(), f"checkTensorUidsSet failed: {result.get_message()}"
+        assert graph.checkTensorUidsSet().is_bad()
+
+    def test_uids_set_after_manual_assignment(self):
+        """Setting UIDs on all tensors passes the check."""
+        graph = _build_pointwise_add_graph([8, 16], [8, 16])
+        assert graph.checkTensorUidsSet().is_bad()
+        for uid, name in enumerate(("a", "b", "out"), start=1):
+            graph.getTensorsByName()[name].set_uid(uid)
+        assert graph.checkTensorUidsSet().is_good()
 
 
 class TestGetTensorsByUidAndName:
@@ -262,10 +269,12 @@ class TestGetTensorsByUidAndName:
     def test_get_tensors_by_uid_returns_all_tensors(self):
         """getTensorsByUid() returns a dict with an entry per tensor in the graph."""
         graph = _build_pointwise_add_graph([8, 16], [8, 16])
+        for uid, name in enumerate(("a", "b", "out"), start=1):
+            graph.getTensorsByName()[name].set_uid(uid)
         tensors_by_uid = graph.getTensorsByUid()
-        # pointwise add has 2 inputs + 1 output = 3 tensors
         assert isinstance(tensors_by_uid, dict)
         assert len(tensors_by_uid) == 3
+        assert all(t.get_uid() == uid for uid, t in tensors_by_uid.items())
 
     def test_get_tensors_by_name_returns_named_tensors(self):
         """getTensorsByName() returns a dict keyed by tensor name."""
@@ -277,13 +286,13 @@ class TestGetTensorsByUidAndName:
         assert "out" in tensors_by_name
 
     def test_uid_and_name_maps_are_consistent(self):
-        """Both maps contain the same tensor objects."""
+        """Both maps reference the same set of tensors by UID."""
         graph = _build_pointwise_add_graph([4, 8], [4, 8])
+        for uid, name in enumerate(("a", "b", "out"), start=1):
+            graph.getTensorsByName()[name].set_uid(uid)
         by_uid = graph.getTensorsByUid()
         by_name = graph.getTensorsByName()
-        uid_objects = set(id(t) for t in by_uid.values())
-        name_objects = set(id(t) for t in by_name.values())
-        assert uid_objects == name_objects
+        assert {t.get_uid() for t in by_name.values()} == set(by_uid)
 
 
 @pytest.mark.gpu
@@ -296,8 +305,8 @@ class TestGraphBuild:
         handle = hipdnn.create_handle()
         result = graph.build(handle)
         assert result.is_good(), f"build() failed: {result.get_message()}"
-        # Graph should be ready for execution
-        assert graph.get_execution_plan_count() >= 1
+        plan_bytes = graph.to_compiled_plan_binary()
+        assert isinstance(plan_bytes, bytes) and len(plan_bytes) > 0
 
     def test_build_with_invalid_graph_fails(self):
         """build() on an empty graph returns a bad error."""
@@ -321,10 +330,10 @@ class TestCompiledPlanSerialization:
         assert isinstance(plan_bytes, bytes)
         assert len(plan_bytes) > 0
 
-        # Restore on a fresh graph
-        graph2, _, _, _ = build_pointwise_add_graph(n=1, c=1, h=2, w=2)
-        result = graph2.from_compiled_plan_binary(handle, plan_bytes)
-        assert result.is_good(), f"from_compiled_plan_binary failed: {result.get_message()}"
+        # Restore on a fresh graph and verify round-trip
+        restored = hipdnn.Graph()
+        assert restored.from_compiled_plan_binary(handle, plan_bytes).is_good()
+        assert restored.to_compiled_plan_binary() == plan_bytes
 
     def test_to_compiled_plan_binary_without_build_raises(self):
         """Calling to_compiled_plan_binary() before build() raises RuntimeError."""
@@ -358,3 +367,25 @@ class TestOverrideShapeEnabled:
         g.set_override_shape_enabled(True)
         g.set_override_shape_enabled(False)
         assert not g.is_override_shape_enabled()
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not _sdpa_available, reason="HIPDNN_ENABLE_SDPA not compiled in")
+class TestOverrideExecution:
+    """Tests for execute() with shape/stride overrides."""
+
+    def test_execute_override_without_enabled_flag_fails(self):
+        """Override execution on a graph built without set_override_shape_enabled fails."""
+        graph, a, b, out = build_pointwise_add_graph(n=1, c=1, h=2, w=2)
+        handle = hipdnn.create_handle()
+        assert graph.build(handle).is_good()
+
+        result = graph.execute(
+            handle,
+            {},
+            0,
+            override_uids=[a.get_uid()],
+            override_shapes=[[1, 1, 2, 2]],
+            override_strides=[[4, 4, 2, 1]],
+        )
+        assert result.is_bad() and "set_override_shape_enabled" in result.get_message()

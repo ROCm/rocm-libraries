@@ -381,10 +381,12 @@ void graphBindings(nb::module_& m)
             nb::arg("handle"),
             nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
             nb::arg("policy") = BuildPlanPolicy::HEURISTICS_CHOICE,
-            "One-shot graph build: validates, builds the operation graph, creates "
-            "execution plans from the given heuristic modes, and finalizes with the "
-            "given policy. Equivalent to calling validate(), build_operation_graph(), "
-            "create_execution_plans(), and build_plans() in sequence.")
+            "One-shot graph build: validates, builds the operation graph, runs "
+            "check_support(), creates execution plans from the given heuristic modes, "
+            "and finalizes with the given policy. Equivalent to calling validate(), "
+            "build_operation_graph(), check_support(), create_execution_plans(), and "
+            "build_plans() in sequence. Returns an Error after add_engine_*() specs "
+            "have been added, since those require the plan-spec autotune path instead.")
         .def(
             "get_workspace_size",
             [](const graph::Graph& g) {
@@ -930,7 +932,7 @@ void graphBindings(nb::module_& m)
              &graph::Graph::is_override_shape_enabled,
              "Query whether runtime shape override mode is enabled.")
         .def(
-            "execute_with_overrides",
+            "execute",
             [](const graph::Graph& g,
                const nb::object& handle,
                const nb::dict& variantPack,
@@ -958,11 +960,7 @@ void graphBindings(nb::module_& m)
                                     overrideShapes,
                                     overrideStrides);
                 }
-                if(err.is_bad())
-                {
-                    throw std::runtime_error("Execute with shape overrides failed: "
-                                             + err.get_message());
-                }
+                return err;
             },
             nb::arg("handle"),
             nb::arg("variant_pack"),
