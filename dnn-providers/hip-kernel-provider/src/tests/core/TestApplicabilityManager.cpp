@@ -41,7 +41,10 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/ingestor/StagedApplicability.hpp>
+
+#include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
 #endif
 
 using namespace hip_kernel_provider::core;
@@ -1475,6 +1478,121 @@ TEST_F(TestApplicabilityManager, TwoCallersShareOnePoolAndEachGetTheSequentialAn
         EXPECT_LE(pool.threadCount(), 4u);
     }
     EXPECT_EQ(ApplicabilityPool::liveThreads(), baseline);
+}
+
+// ---------------------------------------------------------------------------
+// Dense attention ahead of Unified2D
+//
+// Both serve a dense bottom-right-causal graph at Sq == Skv, and hipDNN keeps a provider's
+// order between engines it has no rule for, so the provider states which comes first.
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+int64_t denseAttentionId()
+{
+    return hipdnn_data_sdk::utilities::engineNameToId(
+        hip_kernel_provider::kernel_ingestor_engine::GFX942_ATTENTION_DENSE_ENGINE_NAME);
+}
+
+int64_t unified2DId()
+{
+    return hipdnn_data_sdk::utilities::engineNameToId(
+        hip_kernel_provider::kernel_ingestor_engine::GFX942_ATTENTION_UNIFIED_2D_ENGINE_NAME);
+}
+
+std::ptrdiff_t position(const std::vector<int64_t>& ids, int64_t id)
+{
+    return std::find(ids.begin(), ids.end(), id) - ids.begin();
+}
+
+} // namespace
+
+TEST(TestDenseAttentionOrder, DenseComesBeforeUnified2DInEveryArrangement)
+{
+    constexpr int64_t BEFORE = 0x41;
+    constexpr int64_t BETWEEN = 0x42;
+    constexpr int64_t AFTER = 0x43;
+    std::vector<int64_t> arrangement{
+        BEFORE, BETWEEN, AFTER, denseAttentionId(), unified2DId()};
+    std::sort(arrangement.begin(), arrangement.end());
+    do
+    {
+        auto ids = arrangement;
+        orderDenseAttentionBeforeUnified2D(ids);
+
+        EXPECT_LT(position(ids, denseAttentionId()), position(ids, unified2DId()));
+        // Nothing else moves relative to anything else.
+        const auto others = [](std::vector<int64_t> list) {
+            list.erase(std::remove_if(list.begin(),
+                                      list.end(),
+                                      [](int64_t id) {
+                                          return id == denseAttentionId() || id == unified2DId();
+                                      }),
+                       list.end());
+            return list;
+        };
+        EXPECT_EQ(others(ids), others(arrangement));
+    } while(std::next_permutation(arrangement.begin(), arrangement.end()));
+}
+
+TEST(TestDenseAttentionOrder, LeavesAnOrderThatNeedsNoChangeAlone)
+{
+    for(const std::vector<int64_t>& original :
+        std::vector<std::vector<int64_t>>{{},
+                                          {0x41, 0x42},
+                                          {0x41, unified2DId(), 0x42},
+                                          {denseAttentionId(), 0x41},
+                                          {denseAttentionId(), 0x41, unified2DId()}})
+    {
+        auto ids = original;
+        orderDenseAttentionBeforeUnified2D(ids);
+        EXPECT_EQ(ids, original);
+    }
+}
+
+TEST_F(TestApplicabilityManager, ListsDenseAttentionAheadOfUnified2DWhateverTheRegistrationOrder)
+{
+    for(const bool denseRegisteredFirst : {true, false})
+    {
+        for(const bool staged : {false, true})
+        {
+            SCOPED_TRACE(std::string(denseRegisteredFirst ? "dense first" : "unified first")
+                         + (staged ? ", staged path" : ", sequential path"));
+            WorkerBudget budget{8};
+            ApplicabilityPool pool{budget};
+            ApplicabilityManager manager{pool};
+            addHandWritten(manager, HAND_YES, true);
+            const std::array<int64_t, 2> order = denseRegisteredFirst
+                                                     ? std::array<int64_t, 2>{denseAttentionId(),
+                                                                              unified2DId()}
+                                                     : std::array<int64_t, 2>{unified2DId(),
+                                                                              denseAttentionId()};
+            for(const auto id : order)
+            {
+                if(staged)
+                {
+                    addStaged(manager, decided(id, true));
+                }
+                else
+                {
+                    addHandWritten(manager, id, true);
+                }
+            }
+            if(staged)
+            {
+                // The staged walk needs a second staged engine to be taken.
+                addStaged(manager, decided(DECIDED_YES, true));
+            }
+
+            const auto outcome = run(manager, "");
+            ASSERT_FALSE(outcome.threw) << outcome.thrown.message;
+            ASSERT_EQ(outcome.ids.size(), staged ? 4u : 3u);
+            EXPECT_LT(position(outcome.ids, denseAttentionId()),
+                      position(outcome.ids, unified2DId()));
+        }
+    }
 }
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

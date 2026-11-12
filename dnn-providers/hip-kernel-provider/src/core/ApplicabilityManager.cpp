@@ -14,6 +14,10 @@
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include "engines/kernel_ingestor_engine/IngestorPacks.hpp"
+#endif
+
 namespace hip_kernel_provider::core
 {
 
@@ -92,17 +96,38 @@ std::size_t ApplicabilityManager::stagedEngineCount() const noexcept
     return _stagedCount;
 }
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+void orderDenseAttentionBeforeUnified2D(std::vector<int64_t>& engineIds)
+{
+    const auto denseId = hipdnn_data_sdk::utilities::engineNameToId(
+        kernel_ingestor_engine::GFX942_ATTENTION_DENSE_ENGINE_NAME);
+    const auto unifiedId = hipdnn_data_sdk::utilities::engineNameToId(
+        kernel_ingestor_engine::GFX942_ATTENTION_UNIFIED_2D_ENGINE_NAME);
+    const auto dense = std::find(engineIds.begin(), engineIds.end(), denseId);
+    const auto unified = std::find(engineIds.begin(), engineIds.end(), unifiedId);
+    if(dense == engineIds.end() || unified == engineIds.end() || dense < unified)
+    {
+        return;
+    }
+    // Dense moves to Unified2D's slot; Unified2D and whatever sat between them shift one place
+    // later in the order they had.
+    std::rotate(unified, dense, dense + 1);
+}
+#endif
+
 std::vector<int64_t> ApplicabilityManager::getApplicableEngineIds(Handle& handle,
                                                                   const IGraph& opGraph)
 {
+    std::vector<int64_t> ids;
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
     // Fewer than two staged engines can never have two pending, so they keep the base loop.
-    if(_stagedCount >= 2)
-    {
-        return getApplicableEngineIdsStaged(handle, opGraph);
-    }
+    ids = _stagedCount >= 2 ? getApplicableEngineIdsStaged(handle, opGraph)
+                            : Base::getApplicableEngineIds(handle, opGraph);
+    orderDenseAttentionBeforeUnified2D(ids);
+#else
+    ids = Base::getApplicableEngineIds(handle, opGraph);
 #endif
-    return Base::getApplicableEngineIds(handle, opGraph);
+    return ids;
 }
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR

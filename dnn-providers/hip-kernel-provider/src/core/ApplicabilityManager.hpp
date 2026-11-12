@@ -44,6 +44,20 @@ std::size_t minOffloadVariantsFromEnv();
 /// MAX_APPLICABILITY_THREADS). Never less than 1.
 std::size_t resolveTotalThreads(std::size_t pending, std::size_t cpus) noexcept;
 
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+/// Moves hipkernel:Gfx942AttentionDense ahead of hipkernel:Gfx942AttentionUnified2D when both
+/// are in @p engineIds and Unified2D comes first, by rotating Dense into Unified2D's place:
+/// every other id keeps its position relative to the rest, and a list holding neither or
+/// already in order is untouched.
+///
+/// Both engines serve a dense bottom-right-causal graph at Sq == Skv, and hipDNN ranks every
+/// engine that has no rule of its own (sortEngineIds) in the order a provider lists them, which
+/// for this provider is its engine map's hash order. Dense is the faster of the two on every
+/// shared shape the ground truth holds, so the order is stated here instead of left to that
+/// hash.
+void orderDenseAttentionBeforeUnified2D(std::vector<int64_t>& engineIds);
+#endif
+
 /// The provider's engine manager. Adds threaded applicability for staged (ingestor) engines:
 /// with at least two of them registered, a call whose pending engines have enough variants left
 /// to walk finishes all but the largest on pool threads. Below that, every call is the base
@@ -59,8 +73,9 @@ public:
     /// Hides the base: the manager tracks which engines are staged. Register through this type.
     void addEngine(std::unique_ptr<Engine> engine, std::string_view name = {});
 
-    /// Same ids, in the same order, as the base class's loop, and an engine that throws is
-    /// skipped the same way: it is inapplicable and the others are still reported.
+    /// Same ids, in the same order, as the base class's loop (with
+    /// orderDenseAttentionBeforeUnified2D applied), and an engine that throws is skipped the
+    /// same way: it is inapplicable and the others are still reported.
     std::vector<int64_t> getApplicableEngineIds(Handle& handle, const IGraph& opGraph);
 
     std::size_t stagedEngineCount() const noexcept;
