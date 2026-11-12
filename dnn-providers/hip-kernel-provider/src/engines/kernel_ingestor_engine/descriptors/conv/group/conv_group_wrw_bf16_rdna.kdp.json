@@ -37,7 +37,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 472
     },
@@ -69,7 +70,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 471
     },
@@ -101,7 +103,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 470
     },
@@ -133,7 +136,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 469
     },
@@ -165,7 +169,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 468
     },
@@ -197,7 +202,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 467
     },
@@ -229,7 +235,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 466
     },
@@ -261,7 +268,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 465
     },
@@ -293,7 +301,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 464
     },
@@ -325,7 +334,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 463
     },
@@ -357,7 +367,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 462
     },
@@ -389,7 +400,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 461
     },
@@ -421,7 +433,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 460
     },
@@ -453,7 +466,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 459
     },
@@ -485,7 +499,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 458
     },
@@ -517,7 +532,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 457
     },
@@ -549,7 +565,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 456
     },
@@ -581,7 +598,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 455
     },
@@ -613,7 +631,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 454
     },
@@ -645,7 +664,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 453
     },
@@ -677,7 +697,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 452
     },
@@ -709,7 +730,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 451
     },
@@ -741,7 +763,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 450
     },
@@ -773,7 +796,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 449
     },
@@ -805,7 +829,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 448
     },
@@ -837,7 +862,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 447
     },
@@ -869,7 +895,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 446
     },
@@ -901,7 +928,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 445
     },
@@ -933,7 +961,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 444
     },
@@ -965,7 +994,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 443
     },
@@ -997,7 +1027,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 442
     },
@@ -1029,7 +1060,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 441
     },
@@ -1061,7 +1093,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 440
     },
@@ -1093,7 +1126,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 439
     },
@@ -1125,7 +1159,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 438
     },
@@ -1157,7 +1192,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 437
     },
@@ -1189,7 +1225,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 436
     },
@@ -1221,7 +1258,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 435
     },
@@ -1253,7 +1291,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 434
     },
@@ -1285,7 +1324,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 433
     },
@@ -1317,7 +1357,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 432
     },
@@ -1349,7 +1390,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 431
     },
@@ -1381,7 +1423,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 430
     },
@@ -1413,7 +1456,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 429
     },
@@ -1445,7 +1489,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 428
     },
@@ -1477,7 +1522,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 427
     },
@@ -1509,7 +1555,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 426
     },
@@ -1541,7 +1588,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 425
     },
@@ -1573,7 +1621,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 424
     },
@@ -1605,7 +1654,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 423
     },
@@ -1637,7 +1687,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 422
     },
@@ -1669,7 +1720,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 421
     },
@@ -1701,7 +1753,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 420
     },
@@ -1733,7 +1786,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 419
     },
@@ -1765,7 +1819,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 418
     },
@@ -1797,7 +1852,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 417
     },
@@ -1829,7 +1885,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 416
     },
@@ -1861,7 +1918,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 415
     },
@@ -1893,7 +1951,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 414
     },
@@ -1925,7 +1984,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 413
     },
@@ -1957,7 +2017,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 412
     },
@@ -1989,7 +2050,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 411
     },
@@ -2021,7 +2083,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 410
     },
@@ -2053,7 +2116,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 409
     },
@@ -2085,7 +2149,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 408
     },
@@ -2117,7 +2182,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 407
     },
@@ -2149,7 +2215,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 406
     },
@@ -2181,7 +2248,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 405
     },
@@ -2213,7 +2281,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 404
     },
@@ -2245,7 +2314,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 403
     },
@@ -2277,7 +2347,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 402
     },
@@ -2309,7 +2380,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 401
     },
@@ -2341,7 +2413,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 400
     },
@@ -2373,7 +2446,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 399
     },
@@ -2405,7 +2479,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 398
     },
@@ -2437,7 +2512,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 397
     },
@@ -2469,7 +2545,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 396
     },
@@ -2501,7 +2578,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 395
     },
@@ -2533,7 +2611,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 394
     },
@@ -2565,7 +2644,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 393
     },
@@ -2597,7 +2677,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 392
     },
@@ -2629,7 +2710,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 391
     },
@@ -2661,7 +2743,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 390
     },
@@ -2693,7 +2776,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 389
     },
@@ -2725,7 +2809,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 388
     },
@@ -2757,7 +2842,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 387
     },
@@ -2789,7 +2875,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 386
     },
@@ -2821,7 +2908,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 385
     },
@@ -2853,7 +2941,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 384
     },
@@ -2885,7 +2974,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 383
     },
@@ -2917,7 +3007,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 382
     },
@@ -2949,7 +3040,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 381
     },
@@ -2981,7 +3073,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 380
     },
@@ -3013,7 +3106,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 379
     },
@@ -3045,7 +3139,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 378
     },
@@ -3077,7 +3172,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 377
     },
@@ -3109,7 +3205,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 376
     },
@@ -3141,7 +3238,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 375
     },
@@ -3173,7 +3271,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 374
     },
@@ -3205,7 +3304,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 373
     },
@@ -3237,7 +3337,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 372
     },
@@ -3269,7 +3370,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 371
     },
@@ -3301,7 +3403,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 370
     },
@@ -3333,7 +3436,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 369
     },
@@ -3365,7 +3469,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 368
     },
@@ -3397,7 +3502,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 367
     },
@@ -3429,7 +3535,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 366
     },
@@ -3461,7 +3568,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 365
     },
@@ -3493,7 +3601,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 364
     },
@@ -3525,7 +3634,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 363
     },
@@ -3557,7 +3667,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 362
     },
@@ -3589,7 +3700,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 361
     },
@@ -3621,7 +3733,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 360
     },
@@ -3653,7 +3766,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 359
     },
@@ -3685,7 +3799,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 358
     },
@@ -3717,7 +3832,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 357
     },
@@ -3749,7 +3865,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 356
     },
@@ -3781,7 +3898,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 355
     },
@@ -3813,7 +3931,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 354
     },
@@ -3845,7 +3964,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 353
     },
@@ -3877,7 +3997,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 352
     },
@@ -3909,7 +4030,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 351
     },
@@ -3941,7 +4063,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 350
     },
@@ -3973,7 +4096,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 349
     },
@@ -4005,7 +4129,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 348
     },
@@ -4037,7 +4162,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 347
     },
@@ -4069,7 +4195,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 346
     },
@@ -4101,7 +4228,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 345
     },
@@ -4133,7 +4261,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 344
     },
@@ -4165,7 +4294,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 343
     },
@@ -4197,7 +4327,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 342
     },
@@ -4229,7 +4360,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 341
     },
@@ -4261,7 +4393,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 340
     },
@@ -4293,7 +4426,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 339
     },
@@ -4325,7 +4459,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 338
     },
@@ -4357,7 +4492,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 337
     },
@@ -4389,7 +4525,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 336
     },
@@ -4421,7 +4558,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 335
     },
@@ -4453,7 +4591,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 334
     },
@@ -4485,7 +4624,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 333
     },
@@ -4517,7 +4657,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 332
     },
@@ -4549,7 +4690,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 331
     },
@@ -4581,7 +4723,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 330
     },
@@ -4613,7 +4756,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 329
     },
@@ -4645,7 +4789,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 328
     },
@@ -4677,7 +4822,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 327
     },
@@ -4709,7 +4855,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 326
     },
@@ -4741,7 +4888,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 325
     },
@@ -4773,7 +4921,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 324
     },
@@ -4805,7 +4954,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 323
     },
@@ -4837,7 +4987,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 322
     },
@@ -4869,7 +5020,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 321
     },
@@ -4901,7 +5053,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 320
     },
@@ -4933,7 +5086,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 319
     },
@@ -4965,7 +5119,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 318
     },
@@ -4997,7 +5152,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 317
     },
@@ -5029,7 +5185,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 316
     },
@@ -5061,7 +5218,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 315
     },
@@ -5093,7 +5251,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 314
     },
@@ -5125,7 +5284,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 313
     },
@@ -5157,7 +5317,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 312
     },
@@ -5189,7 +5350,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 311
     },
@@ -5221,7 +5383,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 310
     },
@@ -5253,7 +5416,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 309
     },
@@ -5285,7 +5449,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 308
     },
@@ -5317,7 +5482,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 307
     },
@@ -5349,7 +5515,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 306
     },
@@ -5381,7 +5548,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 305
     },
@@ -5413,7 +5581,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 304
     },
@@ -5445,7 +5614,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 303
     },
@@ -5477,7 +5647,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 302
     },
@@ -5509,7 +5680,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 301
     },
@@ -5541,7 +5713,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 300
     },
@@ -5573,7 +5746,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 299
     },
@@ -5605,7 +5779,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 298
     },
@@ -5637,7 +5812,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 297
     },
@@ -5669,7 +5845,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 296
     },
@@ -5701,7 +5878,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 295
     },
@@ -5733,7 +5911,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 294
     },
@@ -5765,7 +5944,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 293
     },
@@ -5797,7 +5977,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 292
     },
@@ -5829,7 +6010,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 291
     },
@@ -5861,7 +6043,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 290
     },
@@ -5893,7 +6076,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 289
     },
@@ -5925,7 +6109,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 288
     },
@@ -5957,7 +6142,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 287
     },
@@ -5989,7 +6175,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 286
     },
@@ -6021,7 +6208,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 285
     },
@@ -6053,7 +6241,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 284
     },
@@ -6085,7 +6274,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 283
     },
@@ -6117,7 +6307,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 282
     },
@@ -6149,7 +6340,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 281
     },
@@ -6181,7 +6373,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 280
     },
@@ -6213,7 +6406,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 279
     },
@@ -6245,7 +6439,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 278
     },
@@ -6277,7 +6472,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 277
     },
@@ -6309,7 +6505,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 276
     },
@@ -6341,7 +6538,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 275
     },
@@ -6373,7 +6571,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 274
     },
@@ -6405,7 +6604,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 273
     },
@@ -6437,7 +6637,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 272
     },
@@ -6469,7 +6670,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 271
     },
@@ -6501,7 +6703,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 270
     },
@@ -6533,7 +6736,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 269
     },
@@ -6565,7 +6769,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 268
     },
@@ -6597,7 +6802,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 267
     },
@@ -6629,7 +6835,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 266
     },
@@ -6661,7 +6868,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 265
     },
@@ -6693,7 +6901,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 264
     },
@@ -6725,7 +6934,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 263
     },
@@ -6757,7 +6967,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 262
     },
@@ -6789,7 +7000,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 261
     },
@@ -6821,7 +7033,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 260
     },
@@ -6853,7 +7066,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 259
     },
@@ -6885,7 +7099,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 258
     },
@@ -6917,7 +7132,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 257
     },
@@ -6949,7 +7165,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 256
     },
@@ -6981,7 +7198,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 255
     },
@@ -7013,7 +7231,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 254
     },
@@ -7045,7 +7264,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 253
     },
@@ -7077,7 +7297,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 252
     },
@@ -7109,7 +7330,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 251
     },
@@ -7141,7 +7363,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 250
     },
@@ -7173,7 +7396,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 249
     },
@@ -7205,7 +7429,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 248
     },
@@ -7237,7 +7462,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 247
     },
@@ -7269,7 +7495,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 246
     },
@@ -7301,7 +7528,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 245
     },
@@ -7333,7 +7561,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 244
     },
@@ -7365,7 +7594,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 243
     },
@@ -7397,7 +7627,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 242
     },
@@ -7429,7 +7660,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 241
     },
@@ -7461,7 +7693,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 240
     },
@@ -7493,7 +7726,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 239
     },
@@ -7525,7 +7759,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 238
     },
@@ -7557,7 +7792,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 237
     },
@@ -7589,7 +7825,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 236
     },
@@ -7621,7 +7858,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 235
     },
@@ -7653,7 +7891,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 234
     },
@@ -7685,7 +7924,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 233
     },
@@ -7717,7 +7957,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 232
     },
@@ -7749,7 +7990,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 231
     },
@@ -7781,7 +8023,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 230
     },
@@ -7813,7 +8056,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 229
     },
@@ -7845,7 +8089,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 228
     },
@@ -7877,7 +8122,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 227
     },
@@ -7909,7 +8155,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 226
     },
@@ -7941,7 +8188,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 225
     },
@@ -7973,7 +8221,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 224
     },
@@ -8005,7 +8254,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 223
     },
@@ -8037,7 +8287,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 222
     },
@@ -8069,7 +8320,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 221
     },
@@ -8101,7 +8353,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 220
     },
@@ -8133,7 +8386,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 219
     },
@@ -8165,7 +8419,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 218
     },
@@ -8197,7 +8452,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 217
     },
@@ -8229,7 +8485,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 216
     },
@@ -8261,7 +8518,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 215
     },
@@ -8293,7 +8551,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 214
     },
@@ -8325,7 +8584,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 213
     },
@@ -8357,7 +8617,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 212
     },
@@ -8389,7 +8650,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 211
     },
@@ -8421,7 +8683,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 210
     },
@@ -8453,7 +8716,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 209
     },
@@ -8485,7 +8749,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 208
     },
@@ -8517,7 +8782,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 207
     },
@@ -8549,7 +8815,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 206
     },
@@ -8581,7 +8848,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 205
     },
@@ -8613,7 +8881,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 204
     },
@@ -8645,7 +8914,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 203
     },
@@ -8677,7 +8947,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 202
     },
@@ -8709,7 +8980,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 201
     },
@@ -8741,7 +9013,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 200
     },
@@ -8773,7 +9046,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 199
     },
@@ -8805,7 +9079,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 198
     },
@@ -8837,7 +9112,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 197
     },
@@ -8869,7 +9145,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 196
     },
@@ -8901,7 +9178,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 195
     },
@@ -8933,7 +9211,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 194
     },
@@ -8965,7 +9244,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 193
     },
@@ -8997,7 +9277,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 192
     },
@@ -9029,7 +9310,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 191
     },
@@ -9061,7 +9343,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 190
     },
@@ -9093,7 +9376,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 189
     },
@@ -9125,7 +9409,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 188
     },
@@ -9157,7 +9442,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 187
     },
@@ -9189,7 +9475,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 186
     },
@@ -9221,7 +9508,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 185
     },
@@ -9253,7 +9541,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 184
     },
@@ -9285,7 +9574,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 183
     },
@@ -9317,7 +9607,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 182
     },
@@ -9349,7 +9640,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 181
     },
@@ -9381,7 +9673,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 180
     },
@@ -9413,7 +9706,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 179
     },
@@ -9445,7 +9739,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 178
     },
@@ -9477,7 +9772,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 177
     },
@@ -9509,7 +9805,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 176
     },
@@ -9541,7 +9838,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 175
     },
@@ -9573,7 +9871,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 174
     },
@@ -9605,7 +9904,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 173
     },
@@ -9637,7 +9937,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 172
     },
@@ -9669,7 +9970,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 171
     },
@@ -9701,7 +10003,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 170
     },
@@ -9733,7 +10036,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 169
     },
@@ -9765,7 +10069,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 168
     },
@@ -9797,7 +10102,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 167
     },
@@ -9829,7 +10135,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 166
     },
@@ -9861,7 +10168,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 165
     },
@@ -9893,7 +10201,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 164
     },
@@ -9925,7 +10234,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 163
     },
@@ -9957,7 +10267,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 162
     },
@@ -9989,7 +10300,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 161
     },
@@ -10021,7 +10333,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 160
     },
@@ -10053,7 +10366,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 159
     },
@@ -10085,7 +10399,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 158
     },
@@ -10117,7 +10432,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 157
     },
@@ -10149,7 +10465,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 156
     },
@@ -10181,7 +10498,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 155
     },
@@ -10213,7 +10531,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 154
     },
@@ -10245,7 +10564,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 153
     },
@@ -10277,7 +10597,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 152
     },
@@ -10309,7 +10630,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 151
     },
@@ -10341,7 +10663,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 150
     },
@@ -10373,7 +10696,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 149
     },
@@ -10405,7 +10729,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 148
     },
@@ -10437,7 +10762,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 147
     },
@@ -10469,7 +10795,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 146
     },
@@ -10501,7 +10828,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 145
     },
@@ -10533,7 +10861,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 144
     },
@@ -10565,7 +10894,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 143
     },
@@ -10597,7 +10927,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 142
     },
@@ -10629,7 +10960,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 141
     },
@@ -10661,7 +10993,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 140
     },
@@ -10693,7 +11026,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 139
     },
@@ -10725,7 +11059,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 138
     },
@@ -10757,7 +11092,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 137
     },
@@ -10789,7 +11125,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 136
     },
@@ -10821,7 +11158,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 135
     },
@@ -10853,7 +11191,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 134
     },
@@ -10885,7 +11224,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 133
     },
@@ -10917,7 +11257,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 132
     },
@@ -10949,7 +11290,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 131
     },
@@ -10981,7 +11323,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 130
     },
@@ -11013,7 +11356,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 129
     },
@@ -11045,7 +11389,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 128
     },
@@ -11077,7 +11422,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 127
     },
@@ -11109,7 +11455,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 126
     },
@@ -11141,7 +11488,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 125
     },
@@ -11173,7 +11521,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 124
     },
@@ -11205,7 +11554,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 123
     },
@@ -11237,7 +11587,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 122
     },
@@ -11269,7 +11620,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 121
     },
@@ -11301,7 +11653,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 120
     },
@@ -11333,7 +11686,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 119
     },
@@ -11365,7 +11719,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 118
     },
@@ -11397,7 +11752,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 117
     },
@@ -11429,7 +11785,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 116
     },
@@ -11461,7 +11818,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 115
     },
@@ -11493,7 +11851,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 114
     },
@@ -11525,7 +11884,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 113
     },
@@ -11557,7 +11917,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 112
     },
@@ -11589,7 +11950,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 111
     },
@@ -11621,7 +11983,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 110
     },
@@ -11653,7 +12016,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 109
     },
@@ -11685,7 +12049,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 108
     },
@@ -11717,7 +12082,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 107
     },
@@ -11749,7 +12115,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 106
     },
@@ -11781,7 +12148,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 105
     },
@@ -11813,7 +12181,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 104
     },
@@ -11845,7 +12214,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 103
     },
@@ -11877,7 +12247,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 102
     },
@@ -11909,7 +12280,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 101
     },
@@ -11941,7 +12313,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 100
     },
@@ -11973,7 +12346,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 99
     },
@@ -12005,7 +12379,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 98
     },
@@ -12037,7 +12412,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 97
     },
@@ -12069,7 +12445,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 96
     },
@@ -12101,7 +12478,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 95
     },
@@ -12133,7 +12511,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 94
     },
@@ -12165,7 +12544,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 93
     },
@@ -12197,7 +12577,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 92
     },
@@ -12229,7 +12610,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 91
     },
@@ -12261,7 +12643,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 90
     },
@@ -12293,7 +12676,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 89
     },
@@ -12325,7 +12709,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 88
     },
@@ -12357,7 +12742,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 87
     },
@@ -12389,7 +12775,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 86
     },
@@ -12421,7 +12808,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 85
     },
@@ -12453,7 +12841,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 84
     },
@@ -12485,7 +12874,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 83
     },
@@ -12517,7 +12907,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 82
     },
@@ -12549,7 +12940,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 81
     },
@@ -12581,7 +12973,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 80
     },
@@ -12613,7 +13006,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 79
     },
@@ -12645,7 +13039,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 78
     },
@@ -12677,7 +13072,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 77
     },
@@ -12709,7 +13105,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 76
     },
@@ -12741,7 +13138,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 75
     },
@@ -12773,7 +13171,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 74
     },
@@ -12805,7 +13204,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 73
     },
@@ -12837,7 +13237,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 72
     },
@@ -12869,7 +13270,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 71
     },
@@ -12901,7 +13303,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 70
     },
@@ -12933,7 +13336,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 69
     },
@@ -12965,7 +13369,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 68
     },
@@ -12997,7 +13402,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 67
     },
@@ -13029,7 +13435,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 66
     },
@@ -13061,7 +13468,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 65
     },
@@ -13093,7 +13501,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 64
     },
@@ -13125,7 +13534,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 63
     },
@@ -13157,7 +13567,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 62
     },
@@ -13189,7 +13600,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 61
     },
@@ -13221,7 +13633,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 60
     },
@@ -13253,7 +13666,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 59
     },
@@ -13285,7 +13699,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 58
     },
@@ -13317,7 +13732,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 57
     },
@@ -13349,7 +13765,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 56
     },
@@ -13381,7 +13798,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 55
     },
@@ -13413,7 +13831,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 54
     },
@@ -13445,7 +13864,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 53
     },
@@ -13477,7 +13897,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 52
     },
@@ -13509,7 +13930,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 51
     },
@@ -13541,7 +13963,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 50
     },
@@ -13573,7 +13996,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 49
     },
@@ -13605,7 +14029,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 48
     },
@@ -13637,7 +14062,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 47
     },
@@ -13669,7 +14095,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 46
     },
@@ -13701,7 +14128,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 45
     },
@@ -13733,7 +14161,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 44
     },
@@ -13765,7 +14194,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 43
     },
@@ -13797,7 +14227,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 42
     },
@@ -13829,7 +14260,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 41
     },
@@ -13861,7 +14293,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 40
     },
@@ -13893,7 +14326,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 39
     },
@@ -13925,7 +14359,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 38
     },
@@ -13957,7 +14392,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 37
     },
@@ -13989,7 +14425,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 36
     },
@@ -14021,7 +14458,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 35
     },
@@ -14053,7 +14491,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 34
     },
@@ -14085,7 +14524,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 33
     },
@@ -14117,7 +14557,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 32
     },
@@ -14149,7 +14590,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 31
     },
@@ -14181,7 +14623,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 30
     },
@@ -14213,7 +14656,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 29
     },
@@ -14245,7 +14689,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 28
     },
@@ -14277,7 +14722,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 27
     },
@@ -14309,7 +14755,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 26
     },
@@ -14341,7 +14788,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 25
     },
@@ -14373,7 +14821,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 24
     },
@@ -14405,7 +14854,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 23
     },
@@ -14437,7 +14887,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 22
     },
@@ -14469,7 +14920,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 21
     },
@@ -14501,7 +14953,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 20
     },
@@ -14533,7 +14986,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 19
     },
@@ -14565,7 +15019,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 18
     },
@@ -14597,7 +15052,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 17
     },
@@ -14629,7 +15085,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 16
     },
@@ -14661,7 +15118,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 15
     },
@@ -14693,7 +15151,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 14
     },
@@ -14725,7 +15184,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 13
     },
@@ -14757,7 +15217,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 12
     },
@@ -14789,7 +15250,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 11
     },
@@ -14821,7 +15283,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 10
     },
@@ -14853,7 +15316,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 9
     },
@@ -14885,7 +15349,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 8
     },
@@ -14917,7 +15382,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 7
     },
@@ -14949,7 +15415,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 6
     },
@@ -14981,7 +15448,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 5
     },
@@ -15013,7 +15481,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 4
     },
@@ -15045,7 +15514,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": 3
     },
@@ -15077,7 +15547,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 2
     },
@@ -15109,7 +15580,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": 1
     },
@@ -15141,7 +15613,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": 0
     },
@@ -15173,7 +15646,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": -1
     },
@@ -15205,7 +15679,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": -2
     },
@@ -15237,7 +15712,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": -3
     },
@@ -15269,7 +15745,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": -4
     },
@@ -15301,7 +15778,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": -5
     },
@@ -15333,7 +15811,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": -6
     },
@@ -15365,7 +15844,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": -7
     },
@@ -15397,7 +15877,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": -8
     },
@@ -15429,7 +15910,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": -9
     },
@@ -15461,7 +15943,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": -10
     },
@@ -15493,7 +15976,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": -11
     },
@@ -15525,7 +16009,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": -12
     },
@@ -15557,7 +16042,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": -13
     },
@@ -15589,7 +16075,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": -14
     },
@@ -15621,7 +16108,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": -15
     },
@@ -15653,7 +16141,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": -16
     },
@@ -15685,7 +16174,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": -17
     },
@@ -15717,7 +16207,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": -18
     },
@@ -15749,7 +16240,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": -19
     },
@@ -15781,7 +16273,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": -20
     },
@@ -15813,7 +16306,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": -21
     },
@@ -15845,7 +16339,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": -22
     },
@@ -15877,7 +16372,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": -23
     },
@@ -15909,7 +16405,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": -24
     },
@@ -15941,7 +16438,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 32,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": -25
     },
@@ -15973,7 +16471,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": -26
     },
@@ -16005,7 +16504,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": -27
     },
@@ -16037,7 +16537,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": -28
     },
@@ -16069,7 +16570,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": -29
     },
@@ -16101,7 +16603,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": -30
     },
@@ -16133,7 +16636,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 56,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": -31
     },
@@ -16165,7 +16669,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": -32
     },
@@ -16197,7 +16702,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": -33
     },
@@ -16229,7 +16735,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": -34
     },
@@ -16261,7 +16768,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": -35
     },
@@ -16293,7 +16801,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": -36
     },
@@ -16325,7 +16834,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 16,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": -37
     },
@@ -16357,7 +16867,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": -38
     },
@@ -16389,7 +16900,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": -39
     },
@@ -16421,7 +16933,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": -40
     },
@@ -16453,7 +16966,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": -41
     },
@@ -16485,7 +16999,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": -42
     },
@@ -16517,7 +17032,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 28,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": -43
     },
@@ -16549,7 +17065,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": -44
     },
@@ -16581,7 +17098,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": -45
     },
@@ -16613,7 +17131,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": -46
     },
@@ -16645,7 +17164,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": -47
     },
@@ -16677,7 +17197,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": -48
     },
@@ -16709,7 +17230,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 14,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": -49
     },
@@ -16741,7 +17263,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": -50
     },
@@ -16773,7 +17296,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 4
+        "bpu": 4,
+        "math": 0
       },
       "priority": -51
     },
@@ -16805,7 +17329,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": -52
     },
@@ -16837,7 +17362,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 8
+        "bpu": 8,
+        "math": 0
       },
       "priority": -53
     },
@@ -16869,7 +17395,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": -54
     },
@@ -16901,7 +17428,8 @@
         "nbi": 0,
         "nbo": 0,
         "tw": 7,
-        "bpu": 16
+        "bpu": 16,
+        "math": 0
       },
       "priority": -55
     }

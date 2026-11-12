@@ -19,10 +19,19 @@
 //                       k4WrwMmaWide under CONV_GROUP_WIDE with _NBI, _NBO), with
 //                       CONV_GROUP_TW dy columns a tile and the partials' reduce
 //                       (ConvGroupWrwReduce); _R, _S, _ST, _TH, _CB, _CF as above
+//   CONV_GROUP_TO       three-bf16 (with CONV_GROUP_T bf16 and CONV_GROUP_P 3): the output
+//                       type, float (default CONV_GROUP_T); the wrw reduce writes it
+//   CONV_GROUP_P        three-bf16: 3 input and filter parts (default 1)
 //   K1_BUFFER           0 (the K1 header's buffer loads are not used here)
 
 #ifndef K1_BUFFER
 #define K1_BUFFER 0
+#endif
+#ifndef CONV_GROUP_TO
+#define CONV_GROUP_TO CONV_GROUP_T
+#endif
+#ifndef CONV_GROUP_P
+#define CONV_GROUP_P 1
 #endif
 #include "ConvGroupCore.h"
 
@@ -44,7 +53,7 @@ extern "C" __global__ void __launch_bounds__(256) ConvGroup(K4WrwArgs a)
 
 extern "C" __global__ void __launch_bounds__(256) ConvGroupWrwReduce(K4WrwReduceArgs a)
 {
-    k4WrwReduce<CONV_GROUP_T>(a);
+    k4WrwReduce<CONV_GROUP_TO>(a);
 }
 #elif defined(CONV_GROUP_WRW) && CONV_GROUP_WRW && defined(CONV_GROUP_WIDE) && CONV_GROUP_WIDE
 // Backward weights for wide groups: CONV_GROUP_NBI blocks a group, CONV_GROUP_NBO dy blocks a
@@ -65,7 +74,7 @@ extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE) ConvGrou
 
 extern "C" __global__ void __launch_bounds__(256) ConvGroupWrwReduce(K4WrwReduceArgs a)
 {
-    k4WrwReduce<CONV_GROUP_T>(a);
+    k4WrwReduce<CONV_GROUP_TO>(a);
 }
 #elif defined(CONV_GROUP_WRW) && CONV_GROUP_WRW
 // Backward weights: CONV_GROUP_TW output columns a tile (TH rows); the reduce shares the module.
@@ -84,7 +93,7 @@ extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE) ConvGrou
 
 extern "C" __global__ void __launch_bounds__(256) ConvGroupWrwReduce(K4WrwReduceArgs a)
 {
-    k4WrwReduce<CONV_GROUP_T>(a);
+    k4WrwReduce<CONV_GROUP_TO>(a);
 }
 #elif defined(CONV_GROUP_FMA) && CONV_GROUP_FMA
 extern "C" __global__ void __launch_bounds__(256) ConvGroup(K4Args a)
@@ -128,7 +137,9 @@ extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE) ConvGrou
                   CONV_GROUP_WP,
                   CONV_GROUP_NBI,
                   CONV_GROUP_NBO,
-                  CONV_GROUP_CF>(a);
+                  CONV_GROUP_CF,
+                  CONV_GROUP_TO,
+                  CONV_GROUP_P>(a);
 }
 #elif defined(CONV_GROUP_PF) && CONV_GROUP_PF
 extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE) ConvGroup(K4Args a)
@@ -155,7 +166,9 @@ extern "C" __global__ void __launch_bounds__(4 * CONV_GROUP_ATOM::WAVE) ConvGrou
               CONV_GROUP_TH,
               CONV_GROUP_WP,
               CONV_GROUP_CB,
-              CONV_GROUP_CF>(a);
+              CONV_GROUP_CF,
+              CONV_GROUP_TO,
+              CONV_GROUP_P>(a);
 }
 #endif
 

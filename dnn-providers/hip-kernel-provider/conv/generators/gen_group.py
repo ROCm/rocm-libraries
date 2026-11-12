@@ -35,6 +35,7 @@ FIELDS = [
     "nbo",
     "tw",
     "bpu",
+    "math",
 ]
 KNOBS = [f for f in FIELDS if f not in ("direction", "dtype")]
 STRINGS = {"direction", "dtype", "atom"}
@@ -44,8 +45,16 @@ ATOMS = {
     "HALF": ["mfma16_f16", "wmma11_f16", "wmma12_f16"],
     "BFLOAT16": ["mfma16_bf16", "mfma16_bf16_908", "wmma11_bf16", "wmma12_bf16"],
     "FLOAT": ["mfma16_f32"],
+    # Three-bf16 (math 1, TF32 permission only): fp32 graphs on the bf16 atoms, the kernel
+    # multiplying three bf16 parts of each operand into fp32 accumulators and writing fp32.
+    # gfx908 (mfma16_bf16_908) gets none.
+    "F32X3": ["mfma16_bf16", "wmma11_bf16", "wmma12_bf16"],
 }
-EB = {"HALF": 2, "BFLOAT16": 2, "FLOAT": 4}
+EB = {"HALF": 2, "BFLOAT16": 2, "FLOAT": 4, "F32X3": 2}
+# The element type in the metadata, the name tag, and the output element bytes.
+DTYPE = {"HALF": "HALF", "BFLOAT16": "BFLOAT16", "FLOAT": "FLOAT", "F32X3": "FLOAT"}
+DT = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16", "F32X3": "f32x3"}
+OUT_EB = {"HALF": 2, "BFLOAT16": 2, "FLOAT": 4, "F32X3": 4}
 # (th, wp, cb): output rows, 16-column fragments and 16-channel blocks a workgroup.
 # One-block tiles (cb 1) are RDNA's best for 16 channels a group (gfx1201 1.2x, stride-2
 # forward 1.5x over the cb 2 tiles).
@@ -177,7 +186,8 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
     kernels = []
     strides = (1, 2)
     for dtype, atoms in ATOMS.items():
-        dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
+        dt = DT[dtype]
+        x3 = dtype == "F32X3"
         i = 0
         for atom in atoms:
             for t, r, s in FILTERS:
@@ -193,7 +203,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                         for cf in (0, 1)
                         for tile in TILES
                         if cf == 0 or tile in CF_TILES
-                    ] + (pfs if tag == "bwd" and st == 2 else []):
+                    ] + (pfs if tag == "bwd" and st == 2 and not x3 else []):
                         # Backward data runs stride phases: ceil(R / st) taps at unit stride.
                         kr, ks, kst = (
                             (r, s, st)
@@ -207,6 +217,14 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                             ):
                                 continue
                         elif lds(EB[dtype], kr, ks, kst, th, 16 * wp, cb) > 64 * 1024:
+                            continue
+                        # A channels-first tile parks its output in the halo.
+                        if (
+                            cf
+                            and not pf
+                            and th * 16 * cb * (16 * wp + 1) * OUT_EB[dtype]
+                            > lds(EB[dtype], kr, ks, kst, th, 16 * wp, cb)
+                        ):
                             continue
                         c = dict(
                             atom=atom,
@@ -226,6 +244,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                             nbo=0,
                             tw=0,
                             bpu=0,
+                            math=1 if x3 else 0,
                         )
                         f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
                         name = f"conv_group.{tag}.{dt}.{atom}.{f}.s{st}.t{th}x{wp}x{cb}"
@@ -242,7 +261,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                                 },
                                 "metadata": {
                                     "direction": direction,
-                                    "dtype": dtype,
+                                    "dtype": DTYPE[dtype],
                                     **c,
                                 },
                                 "priority": 1000 - i,
@@ -251,13 +270,18 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                         i += 1
     # Wide-group configs: every matrix-core atom.
     for dtype, atoms in ATOMS.items():
-        dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
+        dt = DT[dtype]
+        x3 = dtype == "F32X3"
         i = 0
         for atom in atoms:
             for t, r, s in FILTERS:
                 for st in strides:
                     for nbi, tiles in WIDE_TILES.items():
-                        pft = WIDE_PF_TILES[nbi] if tag == "bwd" and st == 2 else []
+                        pft = (
+                            WIDE_PF_TILES[nbi]
+                            if tag == "bwd" and st == 2 and not x3
+                            else []
+                        )
                         for th, wp, nbo, pf in [x + (0,) for x in tiles] + [
                             x + (1,) for x in pft
                         ]:
@@ -281,7 +305,11 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                                         continue
                                     if (
                                         cf
-                                        and th * 16 * nbo * (16 * wp + 1) * EB[dtype]
+                                        and th
+                                        * 16
+                                        * nbo
+                                        * (16 * wp + 1)
+                                        * OUT_EB[dtype]
                                         > halo
                                     ):
                                         continue
@@ -303,6 +331,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                                     nbo=nbo,
                                     tw=0,
                                     bpu=0,
+                                    math=1 if x3 else 0,
                                 )
                                 f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
                                 name = (
@@ -323,7 +352,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                                         },
                                         "metadata": {
                                             "direction": direction,
-                                            "dtype": dtype,
+                                            "dtype": DTYPE[dtype],
                                             **c,
                                         },
                                         "priority": 700 - i,
@@ -365,6 +394,7 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                             nbo=0,
                             tw=0,
                             bpu=0,
+                            math=0,
                         )
                         f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
                         name = (
@@ -391,19 +421,24 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
                         )
                         i += 1
     total += len(kernels)
-    w(
-        f"conv_group_{tag}.kdp.json",
-        {
-            "version": "1.0",
-            "id": U("kdp." + tag),
-            "name": f"hipkernel:conv_group_{tag}",
-            "arch": [],
-            "matchers": [umd],
-            "engine": ued,
-            "dispatch": udd,
-            "kernelDescriptors": kernels,
-        },
-    )
+    # The three-bf16 configs in a pack of their own.
+    for suffix, members in (
+        ("", [k for k in kernels if k["metadata"]["math"] == 0]),
+        ("_f32x3", [k for k in kernels if k["metadata"]["math"] == 1]),
+    ):
+        w(
+            f"conv_group_{tag}{suffix}.kdp.json",
+            {
+                "version": "1.0",
+                "id": U("kdp." + tag + suffix),
+                "name": f"hipkernel:conv_group_{tag}{suffix}",
+                "arch": [],
+                "matchers": [umd],
+                "engine": ued,
+                "dispatch": udd,
+                "kernelDescriptors": members,
+            },
+        )
 
 # Backward weights (CONV_GROUP_WRW, k4WrwMma): (th, tw, cb) dy tile rows, columns and 16-channel
 # blocks, each at bpu workgroups a dispatch unit (the split planner's target; host-side only, so
@@ -415,6 +450,7 @@ WRW_ATOMS = {
     "HALF": ["mfma16_f16", "wmma11_f16", "wmma12_f16"],
     "BFLOAT16": ["mfma16_bf16", "mfma16_bf16_908", "wmma11_bf16", "wmma12_bf16"],
     "FLOAT": ["mfma16_f32"],
+    "F32X3": ["mfma16_bf16", "wmma11_bf16", "wmma12_bf16"],
 }
 WRW_TILES = [
     (8, 16, 1),
@@ -439,6 +475,7 @@ WRW_WIDE_ATOMS = {
     "HALF": ["mfma16_f16"],
     "BFLOAT16": ["mfma16_bf16", "mfma16_bf16_908"],
     "FLOAT": ["mfma16_f32"],
+    "F32X3": ["mfma16_bf16"],
 }
 WRW_WIDE_TILES = [
     (8, 16, 1),
@@ -491,7 +528,7 @@ w(
 )
 kernels = []
 for dtype, atoms in WRW_ATOMS.items():
-    dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
+    dt = DT[dtype]
     i = 0
     for atom in atoms:
         for t, r, s in FILTERS:
@@ -519,6 +556,7 @@ for dtype, atoms in WRW_ATOMS.items():
                                 nbo=0,
                                 tw=tw,
                                 bpu=bpu,
+                                math=1 if dtype == "F32X3" else 0,
                             )
                             f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
                             name = (
@@ -537,7 +575,7 @@ for dtype, atoms in WRW_ATOMS.items():
                                     },
                                     "metadata": {
                                         "direction": "WRW",
-                                        "dtype": dtype,
+                                        "dtype": DTYPE[dtype],
                                         **c,
                                     },
                                     "priority": 1000 - i,
@@ -545,7 +583,7 @@ for dtype, atoms in WRW_ATOMS.items():
                             )
                             i += 1
 for dtype, atoms in WRW_WIDE_ATOMS.items():
-    dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[dtype]
+    dt = DT[dtype]
     i = 0
     for atom in atoms:
         for t, r, s in FILTERS:
@@ -577,6 +615,7 @@ for dtype, atoms in WRW_WIDE_ATOMS.items():
                                     nbo=nbo,
                                     tw=tw,
                                     bpu=bpu,
+                                    math=1 if dtype == "F32X3" else 0,
                                 )
                                 f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
                                 name = (
@@ -595,7 +634,7 @@ for dtype, atoms in WRW_WIDE_ATOMS.items():
                                         },
                                         "metadata": {
                                             "direction": "WRW",
-                                            "dtype": dtype,
+                                            "dtype": DTYPE[dtype],
                                             **c,
                                         },
                                         "priority": 700 - i,
@@ -629,6 +668,7 @@ for t, r, s in FILTERS:
                             nbo=0,
                             tw=tw,
                             bpu=bpu,
+                            math=0,
                         )
                         f = f"{r}x{s}" if t == 1 else f"{t}x{r}x{s}"
                         name = (
@@ -660,6 +700,7 @@ def wrw_file(kernel):
     # One pack a dtype and atom family (each under the repo's 500 KB file limit).
     m = kernel["metadata"]
     dt = {"FLOAT": "f32", "HALF": "f16", "BFLOAT16": "bf16"}[m["dtype"]]
+    dt += "x3" if m["math"] == 1 else ""
     atom = m["atom"]
     family = (
         "fma"

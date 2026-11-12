@@ -29,6 +29,8 @@
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvGroupProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvTf32TestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvTf32Timing.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
@@ -406,8 +408,19 @@ bool served(const ConvShape& shape, ConvDirection direction)
     return true;
 }
 
+/// The configs a run takes: the graph's own element type, or (fp32 under TF32 permission) the
+/// three-bf16 ones.
+enum class Math
+{
+    NATIVE,
+    THREE_BF16,
+};
+
 template <typename T>
-void runCase(ConvShape shape, ConvDirection direction)
+void runCase(ConvShape shape,
+             ConvDirection direction,
+             Math math = Math::NATIVE,
+             bool infinities = false)
 {
     shape.dataType = dataTypeOf<T>();
     const auto spec = specFor(shape, direction);
@@ -430,6 +443,10 @@ void runCase(ConvShape shape, ConvDirection direction)
     const bool weights = direction == ConvDirection::BACKWARD_WEIGHTS;
     (forward || weights ? x : y).fillTensorWithRandomValues(-1.0f, 1.0f, SEED);
     (weights ? y : w).fillTensorWithRandomValues(-1.0f, 1.0f, SEED + 1);
+    if(infinities)
+    {
+        conv_tf32_test::plantInfinities(forward || weights ? x : y);
+    }
     Tensor<T>& written = forward ? y : weights ? w : x;
 
     const bool reflect = shape.mode == ConvMode::CONVOLUTION;
@@ -491,13 +508,16 @@ void runCase(ConvShape shape, ConvDirection direction)
             reductionLength *= extent;
         }
     }
-    const float accumulationBound = 2e-6f * static_cast<float>(reductionLength);
+    const float accumulationBound
+        = (math == Math::THREE_BF16 ? conv_tf32_test::THREE_BF16_BOUND : 2e-6f)
+          * static_cast<float>(reductionLength);
 
     const auto& handler = dispatchHandler(pack);
     int ran = 0;
     for(const auto& kernel : catalog(direction))
     {
-        if(!matchesKernel(pack, fixture.context(), kernel, *bound))
+        if(!matchesKernel(pack, fixture.context(), kernel, *bound)
+           || (kernel.getIntMetadata("math") == 1) != (math == Math::THREE_BF16))
         {
             continue;
         }
@@ -535,7 +555,7 @@ void runCase(ConvShape shape, ConvDirection direction)
             const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
             const float tolerance
                 = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
-            if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
+            if(!conv_tf32_test::matches(got, want, tolerance) && ++mismatches <= 5)
             {
                 ADD_FAILURE() << "at linear index " << offsetOf(index, written.strides())
                               << ": got " << got << ", want " << want << ", tolerance "
@@ -543,6 +563,15 @@ void runCase(ConvShape shape, ConvDirection direction)
             }
         });
         EXPECT_EQ(mismatches, 0);
+    }
+    if(math == Math::THREE_BF16)
+    {
+        // The three-bf16 subset need not cover every case (the catalog test checks it serves).
+        if(ran == 0)
+        {
+            GTEST_SKIP() << "no three-bf16 config serves this case";
+        }
+        return;
     }
     // Backward data past stride 2 is not served; backward weights needs an atom for 16-bit types.
     if(served(shape, direction))
@@ -587,7 +616,128 @@ INSTANTIATE_TEST_SUITE_P(,
                                                                                    : "Wrw");
                          });
 
+/// The three-bf16 fp32 configs (TF32 permission) at three-bf16's bound; and, for wide groups,
+/// with +inf and -inf in the kernel's input (each must reach the output as itself, NaN where
+/// both meet). Small groups multiply the block-diagonal expansion's zeros by every channel of a
+/// block, so an infinity turns its neighbour groups' outputs NaN in the exact configs as well:
+/// a K4 behavior outside TF32, not tested here.
+class TestGpuConvGroupThreeBf16
+    : public ::testing::TestWithParam<std::tuple<DeviceCase, ConvDirection>>
+{
+};
+
+TEST_P(TestGpuConvGroupThreeBf16, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!conv_tf32_test::hasThreeBf16(currentDeviceProperties().gcnArchName))
+    {
+        GTEST_SKIP() << "no three-bf16 configs on this device";
+    }
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(conv_tf32_test::TF32_ENV,
+                                                                           "1");
+    runCase<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::THREE_BF16);
+}
+
+TEST_P(TestGpuConvGroupThreeBf16, FloatInfinities)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto& shape = std::get<0>(GetParam()).shape;
+    if(!conv_tf32_test::hasThreeBf16(currentDeviceProperties().gcnArchName)
+       || shape.c / shape.groups <= 16)
+    {
+        GTEST_SKIP() << "no three-bf16 configs on this device, or small groups";
+    }
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(conv_tf32_test::TF32_ENV,
+                                                                           "1");
+    runCase<float>(shape, std::get<1>(GetParam()), Math::THREE_BF16, true);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvGroupThreeBf16,
+                         ::testing::Combine(::testing::ValuesIn(deviceCases()),
+                                            ::testing::Values(ConvDirection::FORWARD,
+                                                              ConvDirection::BACKWARD_DATA,
+                                                              ConvDirection::BACKWARD_WEIGHTS)),
+                         [](const auto& info) {
+                             const auto direction = std::get<1>(info.param);
+                             return std::get<0>(info.param).name
+                                    + (direction == ConvDirection::FORWARD         ? "Fwd"
+                                       : direction == ConvDirection::BACKWARD_DATA ? "Bwd"
+                                                                                   : "Wrw");
+                         });
+
+/// Opt-in (GROUP_TF32_TIMING=<shape CSV>, its direction column choosing the pack): the best
+/// exact and the best three-bf16 config per shape, TF32 permitted. See ConvTf32Timing.hpp.
+TEST(TestGpuConvGroupTiming, ExactAgainstThreeBf16)
+{
+    SKIP_IF_NO_DEVICES();
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(conv_tf32_test::TF32_ENV,
+                                                                           "1");
+    for(const auto direction :
+        {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS})
+    {
+        conv_tf32_timing::timeByForm(
+            packFor(direction),
+            direction,
+            catalog(direction),
+            "GROUP_TF32_TIMING",
+            [](const auto& kernel) {
+                return std::string(kernel.getIntMetadata("math") == 1 ? "bf16x3" : "exact");
+            },
+            direction == ConvDirection::FORWARD         ? "@fwd"
+            : direction == ConvDirection::BACKWARD_DATA ? "@bwd"
+                                                        : "@wrw");
+    }
+}
+
 // ---- Host-only: the graph gates, one decline per field, and the kernel gates ----
+
+/// Without TF32 permission no three-bf16 config is admitted; with it, fp32 graphs admit some in
+/// every direction on every arch with bf16 matrix cores (not gfx908), and bf16 graphs none.
+TEST(TestConvGroupCatalog, ThreeBf16OnlyUnderTf32Permission)
+{
+    // ResNeXt-like: 4 channels a group.
+    auto shape = dense(64, 64, {12, 13}, {3, 3}, {1, 1}, true);
+    shape.groups = 16;
+    for(const auto direction :
+        {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS})
+    {
+        for(const char* arch : {"gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1201", "gfx908"})
+        {
+            for(const auto dataType : {DataType::FLOAT, DataType::BFLOAT16})
+            {
+                SCOPED_TRACE(std::string(arch) + (dataType == DataType::FLOAT ? " fp32" : " bf16")
+                             + " direction " + std::to_string(static_cast<int>(direction)));
+                shape.dataType = dataType;
+                auto device = testDeviceProperties();
+                device.gcnArchName = arch;
+                device.warpSize = std::string(arch).rfind("gfx1", 0) == 0 ? 32 : 64;
+                const auto pack = packFor(direction);
+                const GraphFixture fixture(buildGraph(specFor(shape, direction)), device);
+                const auto bound = matchesGraph(pack, fixture.context());
+                ASSERT_TRUE(bound.has_value());
+                const auto admitted = [&] {
+                    int count = 0;
+                    for(const auto& kernel : catalog(direction))
+                    {
+                        count += kernel.getIntMetadata("math") == 1
+                                 && matchesKernel(pack, fixture.context(), kernel, *bound);
+                    }
+                    return count;
+                };
+                {
+                    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter off(
+                        conv_tf32_test::TF32_ENV, "");
+                    EXPECT_EQ(admitted(), 0);
+                }
+                const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter on(
+                    conv_tf32_test::TF32_ENV, "1");
+                const bool expected = dataType == DataType::FLOAT && std::string(arch) != "gfx908";
+                EXPECT_EQ(admitted() > 0, expected);
+            }
+        }
+    }
+}
 
 std::optional<conv_group::GroupProblem>
     parsed(ConvShape shape, ConvDirection direction, DataType dataType = DataType::HALF)

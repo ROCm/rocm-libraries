@@ -78,6 +78,10 @@
     {
       "name": "bpu",
       "type": "int"
+    },
+    {
+      "name": "math",
+      "type": "int"
     }
   ]
 }

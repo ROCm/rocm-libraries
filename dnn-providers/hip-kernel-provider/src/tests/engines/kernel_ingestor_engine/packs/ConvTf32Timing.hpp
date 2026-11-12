@@ -97,13 +97,15 @@ inline int64_t bytesOf(const conv_naive_test::TensorSpec& tensor)
 }
 
 /// Times every config @p kernels holds that the pack admits for each shape of the CSV named by
-/// @p env (skips when unset), grouped by @p formOf(kernel); prints the best per form.
+/// @p env (skips when unset), grouped by @p formOf(kernel); prints the best per form, each
+/// shape's name followed by @p suffix (a direction, where one CSV is timed in several).
 inline void timeByForm(
     const PackSymbols& pack,
     conv_naive::ConvDirection direction,
     const std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>& kernels,
     const char* env,
-    const std::function<std::string(const hipdnn_plugin_sdk::ingestor::KernelDefinition&)>& formOf)
+    const std::function<std::string(const hipdnn_plugin_sdk::ingestor::KernelDefinition&)>& formOf,
+    const std::string& suffix = "")
 {
     const char* path = std::getenv(env);
     if(path == nullptr || *path == '\0')
@@ -111,8 +113,9 @@ inline void timeByForm(
         GTEST_SKIP() << "set " << env << " to a shape CSV to time";
     }
     const auto& handler = dispatchHandler(pack);
-    for(const auto& [name, shape] : shapesOf(path))
+    for(const auto& [shapeName, shape] : shapesOf(path))
     {
+        const std::string name = shapeName + suffix;
         const auto spec = conv_naive_test::specFor(shape, direction);
         const GraphFixture fixture(conv_naive_test::buildGraph(spec), currentDeviceProperties());
         const auto bound = matchesGraph(pack, fixture.context());
