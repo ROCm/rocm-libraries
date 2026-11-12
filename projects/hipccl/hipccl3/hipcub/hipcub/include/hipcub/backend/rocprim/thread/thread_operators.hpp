@@ -49,6 +49,18 @@ BEGIN_HIPCUB_NAMESPACE
 
 #if HIPCUB_USE_LEGACY_API
 // Restored for backward compatibility with code written against older hipCUB (e.g. hipcomp-core).
+// Deprecated: new code should use hip::maximum<> instead.
+struct HIPCUB_DEPRECATED_BECAUSE("Use hip::maximum instead") Max
+{
+    template<class T, class U>
+    HIPCUB_HOST_DEVICE inline constexpr typename std::common_type<T, U>::type
+        operator()(T&& t, U&& u) const
+    {
+        return (((u) > (t)) ? (u) : (t));
+    }
+};
+
+// Restored for backward compatibility with code written against older hipCUB (e.g. hipcomp-core).
 // Deprecated: new code should use hip::minimum<> instead.
 struct HIPCUB_DEPRECATED_BECAUSE("Use hip::minimum instead") Min
 {
