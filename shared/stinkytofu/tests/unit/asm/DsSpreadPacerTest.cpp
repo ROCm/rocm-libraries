@@ -22,6 +22,10 @@ void setDrain(Loads& v, int drain) {
     for (auto& l : v) l.drain = drain;
 }
 
+void setOpener(Loads& v, unsigned opener) {
+    for (auto& l : v) l.opener = opener;
+}
+
 // Issues the pending loads while their stage has room in the batch at `wmmaIssued`; returns how
 // many went.
 int issueBatch(DsSpreadPacer& p, int wmmaIssued, std::deque<unsigned>& pending, int cap = 1000) {
@@ -373,6 +377,177 @@ TEST(DsSpreadPacer, AStageTheLdsRateCanNotFinishByItsEndIsReported) {
             EXPECT_TRUE(p.rateLimited().empty()) << "cycles=" << cycles;
         }
     }
+}
+
+// 16 loads planned over [8, 40) in batches of 4: 8 batches, 2 per batch. Issuing at WMMA 16
+// without moving the start is two batches behind the even line, so the batch takes its 2 plus
+// the catch-up of 2. The opening barrier issuing at 16 compresses the stage to [16, 40): 6
+// batches, 3 then 3, and the stage is not behind.
+TEST(DsSpreadPacer, ALateOpenerCompressesTheStageAndDropsTheFalseCatchUp) {
+    Loads v;
+    add(v, 16, 0, 8, 40);
+    setOpener(v, 7);
+    DsSpreadPacer late;
+    late.plan(v, 64, 4, 2);
+    auto caughtUp = ids(v);
+    EXPECT_EQ(issueBatch(late, 16, caughtUp), 4);
+
+    DsSpreadPacer moved;
+    moved.plan(v, 64, 4, 2);
+    moved.noteOpen(7, 16);
+    auto pending = ids(v);
+    EXPECT_EQ(moved.behind(pending.front(), 16), 0);
+    EXPECT_EQ(issueBatch(moved, 16, pending), 3);
+    EXPECT_EQ(issueBatch(moved, 20, pending), 3);
+}
+
+TEST(DsSpreadPacer, AnOnTimeOpenerKeepsThePlannedBatches) {
+    Loads v;
+    add(v, 16, 0, 8, 40);
+    setOpener(v, 7);
+    DsSpreadPacer p;
+    p.plan(v, 64, 4, 2);
+    p.noteOpen(7, 8);
+    auto pending = ids(v);
+    EXPECT_EQ(issueBatch(p, 8, pending), 2);
+    EXPECT_EQ(issueBatch(p, 12, pending), 2);
+}
+
+TEST(DsSpreadPacer, ADifferentOpenerDoesNotMoveTheStage) {
+    Loads v;
+    add(v, 16, 0, 8, 40);
+    setOpener(v, 7);
+    DsSpreadPacer p;
+    p.plan(v, 64, 4, 2);
+    p.noteOpen(99, 16);
+    auto pending = ids(v);
+    EXPECT_EQ(issueBatch(p, 16, pending), 4);
+}
+
+TEST(DsSpreadPacer, MixedOpenersKeepThePlannedStart) {
+    // The same planned window fed by two barriers stays one stage. Neither barrier may move it,
+    // because that would also move the loads waiting behind the other one.
+    Loads v;
+    add(v, 8, 0, 8, 40);
+    add(v, 8, 100, 8, 40);
+    for (auto& l : v) l.opener = l.nodeId < 100 ? 7u : 9u;
+    DsSpreadPacer p;
+    p.plan(v, 64, 4, 2);
+    p.noteOpen(7, 16);
+    p.noteOpen(9, 16);
+    auto pending = ids(v);
+    EXPECT_EQ(issueBatch(p, 16, pending), 4);
+}
+
+TEST(DsSpreadPacer, AStageThatAlreadyIssuedKeepsItsStart) {
+    // One load issued on the plan, then the opener is late. The batches stay as planned: at
+    // WMMA 16 the stage is behind and takes the plain share (catch-up 0), not the 3 a compressed
+    // stage would take.
+    Loads v;
+    add(v, 16, 0, 8, 40);
+    setOpener(v, 7);
+    DsSpreadPacer p;
+    p.plan(v, 64, 4, 0);
+    auto pending = ids(v);
+    EXPECT_EQ(issueBatch(p, 8, pending, 1), 1);
+    p.noteOpen(7, 16);
+    EXPECT_EQ(issueBatch(p, 16, pending), 2);
+}
+
+TEST(DsSpreadPacer, AnOpenerPastThePlannedEndReleasesTheStage) {
+    // The planned end is WMMA 20. The opener issues at 24, so the stage has no span left and
+    // every remaining load is due in that one batch.
+    Loads v;
+    add(v, 8, 0, 8, 20);
+    setOpener(v, 7);
+    DsSpreadPacer p;
+    p.plan(v, 64, 4, 0);
+    p.noteOpen(7, 24);
+    auto pending = ids(v);
+    EXPECT_EQ(issueBatch(p, 24, pending), 8);
+}
+
+// 16 loads over [8, 40): the fill after a queue reset held every load until WMMA 16. The stage
+// counts its batches from there, as for a late opener: 6 batches, 3 then 3, and not behind.
+TEST(DsSpreadPacer, AStageHeldByTheQueueFillStartsWhereTheFillEnded) {
+    Loads v;
+    add(v, 16, 0, 8, 40);
+    DsSpreadPacer p;
+    p.plan(v, 64, 4, 2);
+    p.noteHeldUntil(16);
+    auto pending = ids(v);
+    EXPECT_EQ(p.behind(pending.front(), 16), 0);
+    EXPECT_EQ(issueBatch(p, 16, pending), 3);
+    EXPECT_EQ(issueBatch(p, 20, pending), 3);
+}
+
+TEST(DsSpreadPacer, PlannedIssueWindowModelsAQueueFillWithoutMutatingThePlan) {
+    Loads v;
+    add(v, 16, 0, 8, 40);
+    DsSpreadPacer p;
+    p.plan(v, 64, 4, 2);
+
+    // The hold restarts the unopened stage at 16: six batches, three loads in each of the first
+    // four. Ordinal 3 therefore moves from its original second batch (12) to the new one (20).
+    EXPECT_EQ(p.plannedIssueWindow(/*nodeId=*/3), 12);
+    EXPECT_EQ(p.plannedIssueWindow(/*nodeId=*/3, /*heldUntil=*/16), 20);
+
+    // The read-only estimate did not change the live pacer.
+    auto pending = ids(v);
+    EXPECT_EQ(issueBatch(p, 8, pending), 2);
+}
+
+TEST(DsSpreadPacer, PlannedIssueWindowStartsAnOpenStageFromTheHeldBatch) {
+    Loads v;
+    add(v, 8, 0, 0, 32);
+    DsSpreadPacer p;
+    p.plan(v, 32, 4, 0);
+    auto pending = ids(v);
+    EXPECT_EQ(issueBatch(p, 0, pending), 1);
+
+    // The stage has already opened, so a later fill does not move its start. It does prevent
+    // remaining loads from issuing before window 8; ordinal 1 is released in that batch.
+    EXPECT_EQ(p.plannedIssueWindow(/*nodeId=*/1, /*heldUntil=*/8), 8);
+}
+
+TEST(DsSpreadPacer, TheQueueFillLeavesAStageThatIssuedOrHasNotOpened) {
+    // [8, 40) issued a load on the plan and keeps its batches (behind at 16: its share of 2, no
+    // catch-up). [24, 40) opens after the fill ended and keeps its 4 batches of 2; moved to 16 it
+    // would have 6 and take 1 at 24.
+    Loads v;
+    add(v, 16, 0, 8, 40);
+    add(v, 8, 100, 24, 40);
+    DsSpreadPacer p;
+    p.plan(v, 64, 4, 0);
+    std::deque<unsigned> early{0}, rest, late;
+    for (unsigned id = 1; id < 16; ++id) rest.push_back(id);
+    for (unsigned id = 100; id < 108; ++id) late.push_back(id);
+    EXPECT_EQ(issueBatch(p, 8, early), 1);
+    p.noteHeldUntil(16);
+    EXPECT_EQ(issueBatch(p, 16, rest), 2);
+    EXPECT_EQ(issueBatch(p, 24, late), 2);
+}
+
+TEST(DsSpreadPacer, AStageIsDueAtItsEndWithLoadsLeft) {
+    Loads v;
+    add(v, 2, 0, 8, 20);
+    DsSpreadPacer p;
+    p.plan(v, 64, 4, 0);
+    EXPECT_FALSE(p.due(0, 19));
+    EXPECT_TRUE(p.due(0, 20));
+    auto pending = ids(v);
+    EXPECT_EQ(issueBatch(p, 20, pending), 2);
+    EXPECT_FALSE(p.due(0, 20)) << "every load of the stage has issued";
+}
+
+TEST(DsSpreadPacer, TheRegionEndIsNeverDue) {
+    // A stage closed by the region end has no barrier to make: nothing is held there.
+    Loads v;
+    add(v, 2, 0);
+    DsSpreadPacer p;
+    p.plan(v, 32, 4, 0);
+    EXPECT_FALSE(p.due(0, 31));
+    EXPECT_FALSE(p.due(0, 32));
 }
 
 TEST(DsSpreadPacer, TheRateLimitedWarningNamesTheStageTheRateAndTheShortfall) {

@@ -1,8 +1,9 @@
 # RUN: %stinkytofu-opt --arch gfx1250:xnack- %s --SwInstructionPrefetchRelStaticPass --AccumulateInstructionSizeDebugPass 2>&1
 #
-# Same cases as sw_instruction_prefetch_rel_static.stir, but for a target ID with XNACK off.
-# The prefetch still lands on the grid; the s_wait_xcnt 0 that guards against replay does not,
-# so every offset from the prefetch onward sits 4 B earlier than in that file.
+# Cases from sw_instruction_prefetch_rel_static.stir, but for a target ID with XNACK off.
+# The prefetch still lands on the grid; the s_wait_xcnt 0 that guards against replay does not.
+# With XNACK on, a prefetch reached by an open replay group gets that wait; of these cases only
+# @smem_then_smem_no_xcnt has one, so only its offsets differ from the XNACK-on output.
 #
 # Grid: P(0) = 128*255 = 32640, step = 32*128 = 4096.
 
@@ -16,8 +17,7 @@ st.func @below_p0() {
   v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
 }
 
-#--- P(0)=32640: 8 B WMMA anchor. No drain, so the prefetch itself starts at 32632
-# (4 B earlier than with the wait) and the total is 32648 instead of 32652.
+#--- P(0)=32640: 8 B WMMA anchor. No drain; the prefetch starts at 32632.
 # CHECK-LABEL: [.align 32632 padding=
 # CHECK-NOT: s_wait_xcnt
 # CHECK: {{.*}}total=32640 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
@@ -43,4 +43,21 @@ st.func @at_p2_k2_buffer_store() {
   v0 = "st.v_add_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
   "st.asm_directive"(".align", "40820")
   "st.buffer_store_b128"(v[624:627], v525, s[16:19], 0) { issueCycles = 1, latencyCycles = 1, mod.mubuf = { offen = true, offset12 = 608, glc = false, slc = false, nt = false, lds = false, scope = "SCOPE_CU" } }
+}
+
+#--- P(0)=32640: an SMEM group is open at the 8 B s_load anchor. With XNACK on this gets a
+# wait and the total is 32656; here the prefetch starts at 32632 and the total is 32652.
+# CHECK-LABEL: function "smem_then_smem_no_xcnt"
+# CHECK: {{.*}}total=8 bytes{{.*}}s_load_b64
+# CHECK-NOT: s_wait_xcnt
+# CHECK: {{.*}}total=32640 bytes{{.*}}s_prefetch_inst_pc_rel{{.*}}(0, null, 31)
+# CHECK: {{.*}}total=32648 bytes{{.*}}s_load_b64
+# CHECK: [AccumulateInstructionSizePass] total size = 32652 bytes
+
+st.func @smem_then_smem_no_xcnt() {
+^entry:
+  s[8:9] = "st.s_load_b64"(s[0:1]) { issueCycles = 1, latencyCycles = 30 }
+  "st.asm_directive"(".align", "32632")
+  s[10:11] = "st.s_load_b64"(s[0:1]) { issueCycles = 1, latencyCycles = 30 }
+  v3 = "st.v_add_f32"(v4, v5) { issueCycles = 1, latencyCycles = 5 }
 }

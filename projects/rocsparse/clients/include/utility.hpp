@@ -34,6 +34,7 @@
 #ifdef ROCSPARSE_DEBUGGING
 #include "rocsparse_clients_test_hip_debug_wrappers.hpp"
 #endif
+#include "rocsparse_clients_log.hpp"
 #include "rocsparse_matrix.hpp"
 #include "rocsparse_test.hpp"
 #include <hip/hip_runtime_api.h>
@@ -219,7 +220,8 @@ public:
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
-        rocsparse_destroy_handle(this->handle);
+        rocsparse_clients_log_rocsparse_error("rocsparse_destroy_handle",
+                                              rocsparse_destroy_handle(this->handle));
     }
 
     // Allow rocsparse_local_handle to be used anywhere rocsparse_handle is expected
@@ -297,8 +299,12 @@ public:
 
     hipStream_t get_stream()
     {
-        hipStream_t stream;
-        rocsparse_get_stream(*this, &stream);
+        hipStream_t            stream{};
+        const rocsparse_status status = rocsparse_get_stream(*this, &stream);
+        if(status != rocsparse_status_success)
+        {
+            throw status;
+        }
         return stream;
     }
 
@@ -330,7 +336,8 @@ public:
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
-        rocsparse_destroy_mat_descr(this->descr);
+        rocsparse_clients_log_rocsparse_error("rocsparse_destroy_mat_descr",
+                                              rocsparse_destroy_mat_descr(this->descr));
     }
 
     // Allow rocsparse_local_mat_descr to be used anywhere rocsparse_mat_descr is expected
@@ -364,7 +371,8 @@ public:
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
-        rocsparse_destroy_mat_info(this->info);
+        rocsparse_clients_log_rocsparse_error("rocsparse_destroy_mat_info",
+                                              rocsparse_destroy_mat_info(this->info));
     }
 
     // Sometimes useful to reset local info
@@ -372,7 +380,9 @@ public:
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
-        rocsparse_destroy_mat_info(this->info);
+        rocsparse_clients_log_rocsparse_error("rocsparse_destroy_mat_info",
+                                              rocsparse_destroy_mat_info(this->info));
+        this->info                    = nullptr;
         const rocsparse_status status = rocsparse_create_mat_info(&this->info);
         if(status != rocsparse_status_success)
         {
@@ -411,7 +421,8 @@ public:
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
-        rocsparse_destroy_color_info(this->info);
+        rocsparse_clients_log_rocsparse_error("rocsparse_destroy_color_info",
+                                              rocsparse_destroy_color_info(this->info));
     }
 
     // Sometimes useful to reset local info
@@ -419,7 +430,9 @@ public:
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
-        rocsparse_destroy_color_info(this->info);
+        rocsparse_clients_log_rocsparse_error("rocsparse_destroy_color_info",
+                                              rocsparse_destroy_color_info(this->info));
+        this->info                    = nullptr;
         const rocsparse_status status = rocsparse_create_color_info(&this->info);
         if(status != rocsparse_status_success)
         {
@@ -476,7 +489,8 @@ public:
     {
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
-        rocsparse_destroy_hyb_mat(this->hyb);
+        rocsparse_clients_log_rocsparse_error("rocsparse_destroy_hyb_mat",
+                                              rocsparse_destroy_hyb_mat(this->hyb));
     }
 
     // Allow rocsparse_local_hyb_mat to be used anywhere rocsparse_hyb_mat is expected
@@ -519,7 +533,8 @@ public:
 
         if(this->descr != nullptr)
         {
-            rocsparse_destroy_spvec_descr(this->descr);
+            rocsparse_clients_log_rocsparse_error("rocsparse_destroy_spvec_descr",
+                                                  rocsparse_destroy_spvec_descr(this->descr));
         }
     }
 
@@ -874,7 +889,8 @@ public:
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(this->descr != nullptr)
-            rocsparse_destroy_spmat_descr(this->descr);
+            rocsparse_clients_log_rocsparse_error("rocsparse_destroy_spmat_descr",
+                                                  rocsparse_destroy_spmat_descr(this->descr));
     }
 
     // Allow rocsparse_local_spmat to be used anywhere rocsparse_spmat_descr is expected
@@ -924,7 +940,8 @@ public:
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(this->descr != nullptr)
-            rocsparse_destroy_dnvec_descr(this->descr);
+            rocsparse_clients_log_rocsparse_error("rocsparse_destroy_dnvec_descr",
+                                                  rocsparse_destroy_dnvec_descr(this->descr));
     }
 
     // Allow rocsparse_local_dnvec to be used anywhere rocsparse_dnvec_descr is expected
@@ -978,7 +995,8 @@ public:
         ROCSPARSE_CLIENTS_ROUTINE_TRACE;
 
         if(this->descr != nullptr)
-            rocsparse_destroy_dnmat_descr(this->descr);
+            rocsparse_clients_log_rocsparse_error("rocsparse_destroy_dnmat_descr",
+                                                  rocsparse_destroy_dnmat_descr(this->descr));
     }
 
     // Allow rocsparse_local_dnmat to be used anywhere rocsparse_dnmat_descr is expected
@@ -1016,12 +1034,15 @@ namespace rocsparse_clients
     {
     private:
         hipStream_t m_stream;
-        hipEvent_t  m_start, m_stop;
+        hipEvent_t  m_start{};
+        hipEvent_t  m_stop{};
 
     public:
         timer(hipStream_t stream);
-        void  start();
-        float stop();
+        timer(const timer&) = delete;
+        timer& operator=(const timer&) = delete;
+        void   start();
+        float  stop();
         ~timer();
     };
 
@@ -1052,8 +1073,7 @@ namespace rocsparse_clients
         const int32_t n_sub_calls  = arguments.iters_inner;
         const int32_t n_calls      = arguments.iters;
 
-        hipStream_t stream;
-        rocsparse_get_stream(handle, &stream);
+        const hipStream_t stream = handle.get_stream();
 
         for(int32_t iter = 0; iter < n_cold_calls; ++iter)
         {
@@ -1061,7 +1081,7 @@ namespace rocsparse_clients
             if(status != rocsparse_status_success)
             {
                 std::cerr << "error " << __FUNCTION__ << ": cold call failed." << std::endl;
-                exit(rocsparse_status_invalid_value);
+                throw status;
             }
         }
 
@@ -1071,12 +1091,22 @@ namespace rocsparse_clients
         for(int32_t iter = 0; iter < n_calls; ++iter)
         {
             t.start();
+            rocsparse_status hot_status = rocsparse_status_success;
             for(int32_t sub_iter = 0; sub_iter < n_sub_calls; ++sub_iter)
             {
-                std::ignore = func(handle, std::forward<ARG>(arg)...);
+                const rocsparse_status status = func(handle, std::forward<ARG>(arg)...);
+                if(status != rocsparse_status_success)
+                {
+                    hot_status = status;
+                }
             }
             const double t_microseconds = (t.stop() * 1000);
-            gpu_time[iter]              = t_microseconds / n_sub_calls;
+            if(hot_status != rocsparse_status_success)
+            {
+                std::cerr << "error " << __FUNCTION__ << ": timed call failed." << std::endl;
+                throw hot_status;
+            }
+            gpu_time[iter] = t_microseconds / n_sub_calls;
         }
 
         std::sort(gpu_time.begin(), gpu_time.end());

@@ -56,6 +56,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -85,9 +86,18 @@ from generators._manifest import inputs_digest  # noqa: E402
 # Descriptor schema version, as the loader spells it: UKD_VERSION_MAJOR = 1,
 # UKD_VERSION_MINOR = 0 (DescriptorLoader.hpp:288-289).
 DESCRIPTOR_VERSION = "1.0"
-# Ops whose engines read a runtime pass-by-value scalar (the SDPA softmax scale, the
-# RMSNorm epsilon), and the graph schema that introduced such tensors
-# (PluginVersionConstants.hpp, K_PASS_BY_VALUE_MIN_API_VERSION).
+# The graph schema each engine's matcher understands, its UED's `sdk_version`: the ingestor
+# declines a graph whose schema floor (hipDNN's PluginVersionConstants.hpp,
+# computeMinimumEnginePluginApiVersion) is above it before the matcher runs. An op absent
+# here stays at the baseline (1.0.0).
+#
+# * RMSNorm reads a runtime pass-by-value epsilon: K_PASS_BY_VALUE_MIN_API_VERSION, 1.2.0.
+# * The SDPA engines read and gate every field the schema has added through
+#   K_RAGGED_OFFSET_MULTIPLIER_MIN_VERSION, 1.4.0, which is K_MAX_SUPPORTED_API_VERSION:
+#   overridable shapes (1.1.0, declined), runtime pass-by-value tensors (1.2.0), ragged
+#   tensors and declared alignments (1.3.0), ragged offset multipliers (1.4.0). COVERAGE.md's
+#   "Graph schema" lists the gate for each; TestFlydslSdpaObjects pins the claim against the
+#   SDK's maximum, so an SDK that adds a version fails it until those fields are reviewed.
 SDPA_OPS = (
     "sdpa_rdna",
     "sdpa_rdna_decode",
@@ -96,8 +106,31 @@ SDPA_OPS = (
     "sdpa_cdna_decode",
     "sdpa_aiw",
 )
-PASS_BY_VALUE_OPS: tuple[str, ...] = ("rmsnorm",) + SDPA_OPS
 PASS_BY_VALUE_SDK_VERSION = "1.2.0"
+SDPA_SDK_VERSION = "1.4.0"
+SDK_VERSION_BY_OP: dict[str, str] = {
+    "rmsnorm": PASS_BY_VALUE_SDK_VERSION,
+    **{op: SDPA_SDK_VERSION for op in SDPA_OPS},
+}
+# Ops whose engines carry `supports_graph_capture` (capture-safe with default settings,
+# benchmarking off). Capture and graph replay are bit-exact on gfx950 (CDNA ops), on
+# gfx1152 (sdpa_rdna, sdpa_rdna_decode) and on gfx1201 (the RDNA ops and sdpa_aiw). The
+# note is engine-level: capture legality is a property of the shared host dispatch path
+# (GenericPlan -> pack launch()), so it holds for every target an engine's objects ship
+# for. A launch() enqueues only kernels and async memsets on the handle's stream -- the
+# SDPA head-pad copies, the dropout-mask and RNG-dump kernels, sdpa_aiw's fill kernel and the
+# zero-bias and by-value-seed memsets included -- with no allocation, no synchronization
+# and no host read of device data.
+GRAPH_CAPTURE_OPS: tuple[str, ...] = (
+    "rmsnorm",
+    "rmsnorm_bwd",
+    "sdpa_cdna",
+    "sdpa_cdna_dualwave",
+    "sdpa_cdna_decode",
+    "sdpa_rdna",
+    "sdpa_rdna_decode",
+    "sdpa_aiw",
+)
 
 MANIFEST_NAME = "manifest.json"
 
@@ -119,10 +152,11 @@ SHAPE_KNOBS = {"N", "head_dim", "head_dim_v"}
 #
 # Per op: `N` is RMSNorm's row width; `head_dim`, `head_dim_v` and `causal` are what
 # an SDPA graph asks for, and on CDNA so is the kernel family, which the target arch
-# fixes. `has_bias`, `has_sink` and the bias forms (`bias_f32`, `bias_q`,
-# `bias_kstrided`) are fixed by whether and how the graph adds a bias or a sink. The
+# fixes. `has_bias`, `has_sink`, `has_dropout` and the bias forms (`bias_f32`, `bias_q`,
+# `bias_kstrided`) are fixed by whether and how the graph adds a bias or a sink, or drops
+# attention probabilities. The
 # tier bounds and capability flags (`n_max`, `head_dim_max`, `any_diagonal`,
-# `kv_align`) say which graphs an object can serve: the matcher gates on them, and
+# `kv_align`, `qk_mask`, `v_mask`) say which graphs an object can serve: the matcher gates on them, and
 # autotune compares the objects they distinguish as separate catalog entries.
 GRAPH_DETERMINED_FIELDS = {
     "N",
@@ -135,6 +169,7 @@ GRAPH_DETERMINED_FIELDS = {
     "head_dim_v",
     "head_dim_max",
     "qk_mask",
+    "v_mask",
     "causal",
     "any_diagonal",
     "kv_align",
@@ -143,7 +178,9 @@ GRAPH_DETERMINED_FIELDS = {
     "bias_q",
     "bias_kstrided",
     "has_sink",
+    "has_dropout",
     "merge_symbol",
+    "fill_symbol",
     "kernel",
 }
 
@@ -170,6 +207,84 @@ TUNING_FIELDS = {
     "v_prefetch_dist",
     "kv_addr_hoist",
 }
+
+# Every engine carries an engine estimate (RFC 0019 §3.1 `predict_engine`, L1): the
+# expected tflops of the engine's own pick, which engine selection reads before any
+# catalog is enumerated. An engine without one is ordered by static rules whatever the
+# graph, and FlyDSL's engines compete for graphs: on gfx1201 sdpa_rdna, sdpa_rdna_decode
+# and sdpa_aiw each match nearly every graph of the others' corpora.
+#
+# The estimate's `default` slot. No scorer is registered under its symbol, so the loader
+# disables the estimate and keeps the engine (RFC 0019 §11.2), exactly as an engine with no
+# estimate behaves; a trained model installed for an arch (below) is bound under that
+# arch's key and takes precedence there.
+ENGINE_ESTIMATE_METRIC = "tflops"
+
+# Trained models live beside the op's descriptors where `uhd_gen promote` installs them,
+# `heuristics/<ued-id>/<role>/<arch>/<metric>/` (a metric-less model directly under
+# `<role>/<arch>/`), and the UED binds each under its role and arch key. The generator owns
+# the UED, so it derives those bindings from what is installed: a regeneration keeps every
+# trained model, and `--check` accepts a tree with models in it. A model under a gfx key
+# wins over `default` on that arch (RFC 0020 §4.6), so the native ranker and the estimate
+# slot stay the fallback everywhere else.
+#
+# `uhd_gen promote` is the reference for every binding: the roles it accepts, where it
+# installs, and the form it writes (uhd_gen/promote.py `_rebind`). Every role binds a list per
+# arch key, one UHD per ranking metric -- `predict_applicable_kernels`, the candidate
+# generators for future JIT spaces, included. The IngestorGenerator emits the same form from
+# its `engine.heuristics` config (#15101).
+HEURISTICS_DIR = "heuristics"
+_ROLES = ("sort_kernel_catalog", "predict_engine", "predict_applicable_kernels")
+_ARCH_KEY = re.compile(r"default|gfx[0-9a-f]+")
+
+
+def installed_models(
+    op_dir: Path, ued_id: str
+) -> dict[str, dict[str, list[tuple[str | None, str]]]]:
+    """Role -> arch key -> [(metric or None, UHD id)] of the trained models installed for an op.
+
+    Refuses a model filed anywhere but its own engine's, role's, arch's and (if it has one)
+    metric's folder, one trained against another engine, and two models one key would bind
+    for the same metric -- the loader would disable that metric there (RFC 0019 §3.1).
+    """
+    root = op_dir / HEURISTICS_DIR
+    installed: dict[str, dict[str, list[tuple[str | None, str]]]] = {}
+    for path in sorted(root.rglob("*.uhd.json")) if root.is_dir() else []:
+        parts = path.relative_to(root).parts
+        if len(parts) not in (4, 5) or parts[0] != ued_id:
+            raise HkpPackError(
+                f"{path}: a trained model is installed at "
+                f"{HEURISTICS_DIR}/{ued_id}/<role>/<arch>/[<metric>/]"
+            )
+        role, arch = parts[1], parts[2]
+        folder_metric = parts[3] if len(parts) == 5 else None
+        if role not in _ROLES or not _ARCH_KEY.fullmatch(arch):
+            raise HkpPackError(
+                f"{path}: '{role}/{arch}' is not a role and arch key uhd_gen promote "
+                f"binds ({', '.join(_ROLES)}; default or gfx<id>)"
+            )
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        metric = (doc.get("score") or {}).get("metric")
+        if metric != folder_metric:
+            raise HkpPackError(
+                f"{path}: filed under metric {folder_metric!r} but its score.metric is "
+                f"{metric!r}; promote files a model under its metric, a metric-less one "
+                "directly under the arch"
+            )
+        trained = ((doc.get("trained_against") or {}).get("ued") or {}).get("id")
+        if trained != ued_id:
+            raise HkpPackError(
+                f"{path}: trained against UED {trained!r}, not this engine's {ued_id}"
+            )
+        models = installed.setdefault(role, {}).setdefault(arch, [])
+        if any(existing == metric for existing, _ in models):
+            raise HkpPackError(
+                f"{path}: a second {metric or '(metric-less)'} model for {role}/{arch}; "
+                "the loader would disable that metric on that key"
+            )
+        models.append((metric, doc["id"]))
+    return installed
+
 
 # uuid5 from a name, so ids are stable across regenerations and adding a
 # thirteenth instance cannot disturb the twelve already shipped. The namespace
@@ -311,17 +426,24 @@ class OpDescriptors:
     entry rather than two rival engines.
     """
 
-    def __init__(self, op: str, fields: dict[str, str]) -> None:
+    def __init__(
+        self,
+        op: str,
+        fields: dict[str, str],
+        installed: dict[str, dict[str, list[tuple[str | None, str]]]] | None = None,
+    ) -> None:
         self.op = op
         self.stem = f"flydsl_{op}"
         self.symbols = f"hipkernel.{self.stem}"
         self.fields = fields
+        self.installed = installed or {}
 
         self.kmd_id = _uuid(f"kmd/{op}")
         self.uhd_id = _uuid(f"uhd/{op}")
         self.udd_id = _uuid(f"udd/{op}")
         self.ued_id = _uuid(f"ued/{op}")
         self.umd_id = _uuid(f"umd/{op}/kernel")
+        self.estimate_uhd_id = _uuid(f"uhd/{op}/predict_engine")
 
     def documents(self) -> dict[str, dict[str, Any]]:
         ued: dict[str, Any] = {
@@ -329,12 +451,10 @@ class OpDescriptors:
             "id": self.ued_id,
             "name": f"hipkernel:{self.stem}",
         }
-        # The graph schema the engine's matcher understands: the ingestor declines any
-        # graph whose schema floor is above it. Runtime pass-by-value scalars (1.2.0) are
-        # read by the engines whose scale or epsilon may be one; the rest stay at the
-        # baseline.
-        if self.op in PASS_BY_VALUE_OPS:
-            ued["sdk_version"] = PASS_BY_VALUE_SDK_VERSION
+        # The graph schema the engine's matcher understands (SDK_VERSION_BY_OP): the
+        # ingestor declines any graph whose schema floor is above it.
+        if self.op in SDK_VERSION_BY_OP:
+            ued["sdk_version"] = SDK_VERSION_BY_OP[self.op]
         kmd_fields = []
         for name, type_token in self.fields.items():
             field: dict[str, Any] = {"name": name, "type": type_token}
@@ -345,6 +465,82 @@ class OpDescriptors:
             if name == "block_threads":
                 field["default_value"] = 256
             kmd_fields.append(field)
+
+        engine: dict[str, Any] = {
+            **ued,
+            "graph_match": {"native": f"{self.symbols}.graph_match"},
+        }
+        # Role -> arch key -> [(metric, UHD id)]: the UHD that orders the engine's kernel
+        # catalog on every arch, and the engine estimate's slot.
+        roles: dict[str, dict[str, list[tuple[str | None, str]]]] = {
+            "sort_kernel_catalog": {"default": [(None, self.uhd_id)]},
+            "predict_engine": {
+                "default": [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
+            },
+        }
+        for role, by_arch in self.installed.items():
+            for arch, models in by_arch.items():
+                slot = roles.setdefault(role, {}).setdefault(arch, [])
+                for metric, model_id in models:
+                    # A trained model takes its metric's place, as promote's rebinding does.
+                    slot[:] = [entry for entry in slot if entry[0] != metric]
+                    slot.append((metric, model_id))
+        # The UHD pipeline keys every role of an engine one way: once a ranker is bound for
+        # an arch, it trains an estimate for that arch only if `predict_engine` binds the
+        # arch too. So each such arch gets the estimate's slot, which the loader disables
+        # just as it does under `default`. The ranker map is left alone: it is an input of
+        # the selector revision every trained estimate is checked against, and this role
+        # is not.
+        for arch in roles["sort_kernel_catalog"]:
+            roles["predict_engine"].setdefault(
+                arch, [(ENGINE_ESTIMATE_METRIC, self.estimate_uhd_id)]
+            )
+        # Each value as `uhd_gen promote` writes it, so promoting into this UED and
+        # regenerating bind the same values (promote appends a new arch key; this sorts): a
+        # key a trained model is bound under is a list (one UHD per metric), as promote's
+        # rebinding leaves it; a key only the generator fills (the native ranker, the
+        # estimate's slot) stays the bare id it writes.
+        trained = {
+            model
+            for by_arch in self.installed.values()
+            for models in by_arch.values()
+            for _, model in models
+        }
+
+        def bound(ids: list[tuple[str | None, str]]) -> str | list[str]:
+            models = [model for _, model in ids]
+            if trained.intersection(models):
+                return models
+            return models[0] if len(models) == 1 else models
+
+        for role, by_arch in roles.items():
+            engine[role] = {
+                arch: bound(ids)
+                for arch, ids in sorted(
+                    by_arch.items(), key=lambda item: (item[0] != "default", item[0])
+                )
+            }
+        estimate = {
+            f"{self.stem}_engine_estimate.uhd.json": {
+                "version": DESCRIPTOR_VERSION,
+                "id": self.estimate_uhd_id,
+                "name": f"flydsl {self.op} engine estimate",
+                "provenance": (
+                    "Default slot for the engine estimate: a trained model installed "
+                    "under heuristics/ for an arch takes precedence there. No scorer is "
+                    "registered under this symbol, so on any other arch the loader "
+                    "disables the estimate and keeps the engine."
+                ),
+                "adapter": "native",
+                "objective": "max",
+                "score": {"metric": ENGINE_ESTIMATE_METRIC},
+                "native": {"symbol": f"{self.symbols}.engine_estimate"},
+            }
+        }
+        engine["metadata"] = self.kmd_id
+        engine["knobs"] = [f for f in self.fields if f in TUNING_FIELDS]
+        if self.op in GRAPH_CAPTURE_OPS:
+            engine["behavior_notes"] = ["supports_graph_capture"]
 
         return {
             f"{self.stem}.kmd.json": {
@@ -369,14 +565,8 @@ class OpDescriptors:
                 "name": f"flydsl {self.op} dispatch",
                 "dispatch_symbol": f"{self.symbols}.dispatch",
             },
-            f"{self.stem}.ued.json": {
-                **ued,
-                "graph_match": {"native": f"{self.symbols}.graph_match"},
-                # The UHD that orders the engine's kernel catalog, on every arch.
-                "sort_kernel_catalog": {"default": self.uhd_id},
-                "metadata": self.kmd_id,
-                "knobs": [f for f in self.fields if f in TUNING_FIELDS],
-            },
+            f"{self.stem}.ued.json": engine,
+            **estimate,
             f"{self.stem}_kernel_match.umd.json": {
                 "version": DESCRIPTOR_VERSION,
                 "id": self.umd_id,
@@ -510,7 +700,7 @@ def _arch_documents(
 
 
 def build_documents(
-    entries: list[KernelEntry], arch: str
+    entries: list[KernelEntry], arch: str, content_dir: Path = CONTENT_DIR
 ) -> dict[Path, dict[str, dict[str, Any]]]:
     """Every document for `arch`, grouped by the folder (relative to the content
     root) it is written into."""
@@ -520,7 +710,8 @@ def build_documents(
 
     folders: dict[Path, dict[str, dict[str, Any]]] = {}
     for op_name, op_entries in sorted(by_op.items()):
-        op = OpDescriptors(op_name, _fields_for_op(op_entries))
+        installed = installed_models(content_dir / op_name, _uuid(f"ued/{op_name}"))
+        op = OpDescriptors(op_name, _fields_for_op(op_entries), installed)
         folders[Path(op_name)] = op.documents()
         folders[Path(op_name) / arch] = _arch_documents(op_entries, op, arch)
     return folders
@@ -610,7 +801,7 @@ def main() -> int:
 
     try:
         entries = collect(args.content_dir, args.arch)
-        folders = build_documents(entries, args.arch)
+        folders = build_documents(entries, args.arch, args.content_dir)
     except (
         FileNotFoundError,
         ValueError,

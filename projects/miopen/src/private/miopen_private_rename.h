@@ -1,37 +1,22 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 //
-// Symbol-rename header for the MIOpen public/private library split. It is
-// force-included (via the compiler's -include flag) into every translation
-// unit of the private implementation library (MIOpen_private) when the split
-// is enabled with MIOPEN_ENABLE_HIPDNN_WRAPPER. Each #define below renames a
-// public C entry point to its _impl form, so the private library
-// exports the implementation under _impl names and the public symbol surface
-// in libMIOpen.so is left free for the wrapper (src/private/wrapper.cpp) to
-// define as thin forwarding stubs.
+// GENERATED FILE. Do not edit.
+// Source: projects/miopen/include/miopen/miopen.h
+// Regenerate: python3 projects/miopen/script/generate_wrapper_sources.py
 //
-// The header contains only preprocessor #defines, so it is safe to
-// force-include across all private sources (C++, HIP, and assembled kernels)
-// without pulling in any declarations. The MIOpen source tree is otherwise
-// untouched, keeping the whole rename gated behind the build flag.
+// Symbol-rename header for the MIOpen public/private library split. When
+// MIOPEN_ENABLE_HIPDNN_WRAPPER is on, it is force-included (-include) into every
+// translation unit of the private library (MIOpen_private). Each #define renames
+// a public C entry point to its _impl form, which frees the public names in
+// libMIOpen.so for the wrapper (wrapper.cpp, wrapper_passthrough.cpp) to define
+// as forwarding stubs.
 //
-// This header is intentionally NOT installed.
-//
-// HAND-MAINTAINED. Whenever a MIOPEN_EXPORT function is added to, removed
-// from, or has its signature changed in include/miopen/miopen.h, four
-// artifacts must be updated in lockstep:
-//
-//   1. include/miopen/miopen.h            the public declaration
-//   2. src/private/miopen_private_rename.h  this file: the #define
-//   3. src/private/miopen_impl.h          the _impl declaration the wrapper
-//                                         (and, later, the hipDNN provider)
-//                                         compiles against
-//   4. src/private/wrapper.cpp            the forwarding stub
-//
-// The name half of this invariant is enforced by script/check_public_abi.py in
-// CI: an added or dropped public symbol turns the baseline gate red. The
-// signature half is NOT enforced anywhere -- these are extern "C" declarations,
-// so a drifted signature links cleanly and misbehaves at run time.
+// It holds only #defines, so it is safe to force-include into every private
+// source (C++, HIP, and assembled kernels), and the rest of the MIOpen source
+// stays untouched. It is not installed: the hipDNN provider force-includes its
+// own generated copy of this list
+// (dnn-providers/miopen-provider/MiopenApiPrivateRename.hpp).
 #pragma once
 
 #ifndef MIOPEN_BUILDING_PRIVATE

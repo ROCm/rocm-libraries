@@ -32,8 +32,9 @@ from pathlib import Path
 from enum import Enum
 from glob import glob
 
-from .SolutionStructs.Problem import ProblemType, ProblemSizesMock, ProblemSizesMockDummy
+from .SolutionStructs.Problem import ProblemType, ProblemSizesMock, ProblemSizesMockDummy, isFusedA2A
 from .SolutionStructs import ActivationArgs, BiasTypeArgs, FactorDimArgs, GateTypeArgs
+from .Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar
 from .Toolchain.Component import Assembler
 
 import rocisa
@@ -46,7 +47,7 @@ from .Common.Architectures import (ARCH_CAP_OVERRIDES, archNamesByIsa, baseArchN
                                    capOverrideKeyOf, isaToGfx)
 from .Common.GlobalParameters import globalParameters
 from .Common.TimingInstrumentation import timing_context
-from .TensileCreateLibrary import copyStaticFiles, libraryDir
+from .create_library import copyStaticFiles, libraryDir
 from .ParallelExecution import detectAvailableGpus, runClientParallel
 from .Contractions import FreeIndex, BatchIndex
 from .Contractions import ProblemType as ContractionsProblemType
@@ -170,7 +171,7 @@ def main(config, assembler: Assembler, cCompiler: str, isaInfoMap, outputPath: P
         logic.schedule, logic.problemType, logic.exactLogic, logic.library
     functions.append((scheduleName, problemType))
     functionNames.append("tensile_%s" % (problemType))
-    problemSizes = ProblemSizesMock(exactLogic) if exactLogic else ProblemSizesMockDummy()
+    problemSizes = ProblemSizesMock(exactLogic, problemType) if exactLogic else ProblemSizesMockDummy()
     if len(problemType["BiasDataTypeList"]) > 0:
       biasTypeArgs = BiasTypeArgs(problemType, [problemType["BiasDataTypeList"][0]])
     else:
@@ -261,7 +262,25 @@ def runNewClient(scriptPath, clientParametersPath, cxxCompiler: str, cCompiler: 
     printWarning("ClientWriter Benchmark Process exited with error: {}".format(e))
 
 
-def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: str, cCompiler: str, outputPath, configPaths=None):
+def _deviceScalarAlphaConfig(configPath, scalar, primary):
+  """Reuse the library/code objects, keeping alternate-mode results separate."""
+  path = Path(configPath)
+  suffix = "_DeviceScalarAlpha" + str(scalar)
+  modePath = path.with_name(path.stem + suffix + path.suffix)
+  lines = []
+  for line in path.read_text().splitlines(keepends=True):
+    if line.startswith("device-scalar-alpha="):
+      line = f"device-scalar-alpha={scalar}\n"
+    elif not primary and line.startswith("results-file="):
+      results = Path(line.split("=", 1)[1].strip())
+      results = results.with_name(results.stem + suffix + results.suffix)
+      line = f"results-file={results}\n"
+    lines.append(line)
+  modePath.write_text("".join(lines))
+  return str(modePath)
+
+
+def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: str, cCompiler: str, outputPath, configPaths=None, deviceScalarAlphaModes=None):
   buildPath = ensurePath(outputPath / "build")
   timingEnabled = globalParameters.get("TimingInstrumentation", False)
   parallelGpus = globalParameters.get("ParallelGpuExecution", 1)
@@ -272,6 +291,20 @@ def runClient(libraryLogicPath, forBenchmark, enableTileSelection, cxxCompiler: 
     configPaths.append(os.path.join(buildPath, "../source/ClientParameters.ini"))
     if enableTileSelection:
       configPaths.append(os.path.join(buildPath, "../source/ClientParameters_Granularity.ini"))
+
+  if deviceScalarAlphaModes is not None:
+    # Each mode launches the same kernels. Only the first mode feeds LibraryLogic;
+    # the other result files are correctness evidence, not additional tuning rows.
+    returncode = 0
+    for index, scalar in enumerate(deviceScalarAlphaModes):
+      print1(f"# Running client with DeviceScalarAlpha={scalar}")
+      modePaths = [_deviceScalarAlphaConfig(path, scalar, index == 0) for path in configPaths]
+      # Run configs separately so a passing run cannot hide an earlier failure.
+      for modePath in modePaths:
+        modeExit = runClient(libraryLogicPath, forBenchmark, enableTileSelection,
+                             cxxCompiler, cCompiler, outputPath, configPaths=[modePath])
+        returncode = returncode or modeExit
+    return returncode
 
   # Determine number of GPUs to use
   if parallelGpus == 0:
@@ -360,6 +393,10 @@ def getBuildClientLibraryScript(buildPath, libraryLogicPath, cxxCompiler, target
 
   if globalParameters["DisableAsmComments"]:
     callCreateLibraryCmd += " --disable-asm-comments"
+
+  if any(isFusedA2A(LibraryIO.rawLibraryLogic(LibraryIO.readYAML(f))[4])
+         for f in glob(os.path.join(libraryLogicPath, "*.yaml"))):
+    callCreateLibraryCmd += " --enable-gemm-a2a-fusion"
 
   callCreateLibraryCmd += " --architecture=" + targetGfx
   callCreateLibraryCmd += " --code-object-version=" + globalParameters["CodeObjectVersion"]
@@ -598,6 +635,10 @@ def problemSizeParams(problemType, problem, factorDim):
         gatestrides[index.d] = sc[1]
       rv.append(('gate-strides', ",".join(map(str, gatestrides))))
 
+    if problemType.fusedGemmA2A:
+      rv.append(('world', problem.world))
+      rv.append(('fused-a2a-extent', problem.a2aExtent))
+
     return rv
 
 def dataInitParams(problemType):
@@ -701,6 +742,9 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('use-scaleAB',   problemType.useScaleAB)
         param('use-scaleCD',   problemType.useScaleCD)
         param('use-scaleAlphaVec',   problemType.useScaleAlphaVec)
+        # An optional BenchmarkFinalParameters sweep overrides this default
+        # without generating a second set of kernels.
+        param('device-scalar-alpha', scaleAlphaSupportsDeviceScalar(problemType.useScaleAlphaVec))
         param('swizzle-tensor-a', problemType.swizzleTensorA)
         param('swizzle-tensor-b', problemType.swizzleTensorB)
         param('fused-gemm-a2a', problemType.fusedGemmA2A)
@@ -808,6 +852,7 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
            numElementsToValidate = max(globalParameters["NumElementsToValidateWinner"], globalParameters["NumElementsToValidate"])
         param("num-elements-to-validate", numElementsToValidate)
         param("check-synchronizer",       globalParameters["CheckSynchronizer"])
+        param("validate-after-enqueues",  globalParameters["ValidateAfterEnqueues"])
         param("num-enqueues-per-sync",    globalParameters["EnqueuesPerSync"])
         param("max-enqueues-per-sync",    globalParameters["MaxEnqueuesPerSync"])
         param("num-syncs-per-benchmark",  globalParameters["SyncsPerBenchmark"])
@@ -838,6 +883,9 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param("rotating-buffer-mode",     globalParameters["RotatingMode"])
         param("icache-rotate-copies",     globalParameters["IcacheRotateCopies"])
         param("icache-rotate-size",       globalParameters["IcacheRotateSize"])
+        if problemType.fusedGemmA2A:
+            for world in globalParameters["WorldFilter"]:
+                param("world-filter", world)
         if globalParameters["RocProfCounter"]:
             for counter in globalParameters["RocProfCounter"]:
                 param("rocprof-counter", counter)
