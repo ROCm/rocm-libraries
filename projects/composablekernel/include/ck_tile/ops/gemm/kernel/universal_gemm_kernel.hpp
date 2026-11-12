@@ -506,8 +506,8 @@ struct UniversalGemmKernel
 
     template <typename T>
     using has_plain_gemm_only = decltype(T::kPlainGemmOnly);
-    /// True for a pipeline tested only in the plain GEMM kernel (comp_tdm_v3). The kernels that
-    /// derive from or wrap this one static_assert against it.
+    /// True for a pipeline tested only in the plain, batched and Stream-K GEMM kernels
+    /// (comp_tdm_v3). The other kernels that derive from or wrap this one static_assert against it.
     static constexpr bool kIsPlainGemmOnlyPipeline = []() {
         if constexpr(is_detected<has_plain_gemm_only, GemmPipeline>{})
             return GemmPipeline::kPlainGemmOnly;

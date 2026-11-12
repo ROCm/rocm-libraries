@@ -31,7 +31,13 @@ struct StreamKTilePartitionerBase
                                                 ? memory_operation_enum::atomic_add
                                                 : memory_operation_enum::set;
 
-    StreamKTilePartitionerBase(index_t m, index_t n, index_t k, index_t max_number_wgs);
+    /**
+     * @param batch_count  The number of GEMMs of identical shape (batched GEMM). Their output tiles
+     * are numbered batch-major in one tile space, so the data-parallel and Stream-K work is shared
+     * over batch x tiles. One (the default) is a single GEMM.
+     */
+    StreamKTilePartitionerBase(
+        index_t m, index_t n, index_t k, index_t max_number_wgs, index_t batch_count = 1);
 
     /**
      * @brief Calculates the total space needed for the partials buffer.
@@ -131,6 +137,16 @@ struct StreamKTilePartitionerBase
                                                     index_t cta_idx) const noexcept;
 
     /**
+     * @brief Splits a 1D tile index over batch x tiles into the batch index and the tile index
+     * within that batch's C tensor.
+     *
+     * @param tile_idx  The 1D tile index over all batches.
+     * @return          The batch index and the 1D tile index within the batch.
+     */
+    CK_TILE_DEVICE auto
+    get_batch_tile_index(index_t tile_idx) const noexcept -> tuple<index_t, index_t>;
+
+    /**
      * @brief Calculates the workgroup's 2D tile index in the C tensor given the 1D tile index.
      *
      * @param tile_idx  The 1D tile index in the C tensor for the workgroup.
@@ -161,9 +177,14 @@ struct StreamKTilePartitionerBase
     CK_TILE_HOST_DEVICE index_t get_workspace_size(index_t acc_element_bytes) const noexcept;
 
     /**
-     * @brief Returns the number of macro tiles in the C tensor.
+     * @brief Returns the number of macro tiles in the C tensors of all batches.
      */
     CK_TILE_HOST_DEVICE index_t get_num_tiles() const noexcept;
+
+    /**
+     * @brief Returns the number of macro tiles in the C tensor of one batch.
+     */
+    CK_TILE_HOST_DEVICE index_t get_tiles_per_batch() const noexcept;
 
     /**
      * @brief Returns the maximum number of active workgroups; this is assumed to be number of CUs *
@@ -250,6 +271,7 @@ struct StreamKTilePartitionerBase
     remap_xcd(index_t block_1d_id, index_t total_num_tiles, index_t num_xcds = 8) noexcept;
 
     protected:
+    index_t tiles_per_batch_;
     index_t num_tiles_;
     index_t max_active_wgs_;
     index_t dp_tiles_;
@@ -308,7 +330,8 @@ struct StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, true>
     StreamKTilePartitioner(ck_tile::index_t m,
                            ck_tile::index_t n,
                            ck_tile::index_t k,
-                           ck_tile::index_t max_active_wgs);
+                           ck_tile::index_t max_active_wgs,
+                           ck_tile::index_t batch_count = 1);
 
     public:
     static constexpr bool PERSISTENT = true;
@@ -355,7 +378,8 @@ struct StreamKTilePartitioner<BlockGemmShapeType, ReductionStrategyType, false>
     StreamKTilePartitioner(ck_tile::index_t m,
                            ck_tile::index_t n,
                            ck_tile::index_t k,
-                           ck_tile::index_t max_number_wgs);
+                           ck_tile::index_t max_number_wgs,
+                           ck_tile::index_t batch_count = 1);
 
     public:
     static constexpr bool PERSISTENT = false;
