@@ -23755,6 +23755,9 @@ class KernelWriterAssembly(KernelWriter):
           # and both components write the same LDS byte. 0 is still correct
           # when scaleRows*mxDU < numComp: extra comps share LDS+0 (dim0 idle).
           dataBytes = mxTdmTileM(mt, mxTileLds) * du // numComp * int(bpe * 4) // (4 * dim1Divisor)
+      if tP.get("isSwizzledTDM") and TensorDataMoverLoad.swizzledCompRows(
+          mt, kernel["MatrixInstM"] if tP["tile01Idx"] == 0 else kernel["MatrixInstN"], numComp)[1]:
+        dataBytes = 0  # replicated swizzled tile: every component writes LDS+0 (see swizzledCompRows)
       mod.add(self.tdmWaveLdsAddr(kernel, tc, numComp, dataBytes,
                                   ldsConstOffset, ldsBlockSizePerPad, ldsPadSize,
                                   waveOffsetSgprIdx, tmpPadSgprIdx))
@@ -23782,7 +23785,9 @@ class KernelWriterAssembly(KernelWriter):
       # F4 packs two elements per byte: like the generic path (sizeShifter), the descriptor counts
       # bytes (data_size=1B), so element extents along K are halved. MI_N is even, so exact.
       swzUnitShift = 1 if dtype.isFloat4() else 0
-      swzRows   = (mt // swzMiN) // numComp               # nO rows per component
+      # nO rows per component; an uneven split (e.g. MT=16 over 2 components) replicates the whole
+      # tile in every component instead (see TensorDataMoverLoad.swizzledCompRows).
+      swzRows, swzReplicate = TensorDataMoverLoad.swizzledCompRows(mt, swzMiN, numComp)
       # VW>1 pad: iterate-mode deposits one nO-tile per iteration and pads the LDS write
       # stride, and the pad_interval field (which cannot encode the 4096B nO block) is
       # disabled. dim1 stays the full nO extent (walk clamp); tile1 drops to 1 (one nO per
@@ -23804,7 +23809,7 @@ class KernelWriterAssembly(KernelWriter):
         mod.add(SMovB32(sgpr(sIdx), swzTile0 >> swzUnitShift, "swizzled B: dim0 = tile0 = MI_N*DepthU (desc units)"))
         mod.add(comp.setTensorDim0(descSgprName(1), sIdx, self, 0))
         mod.add(self._swizzledTdmRemainRows(kernel, tP, mt, sIdx, rowTmp,
-                                            (compShift, waveIdxSgpr, compOffset, swzRows)))
+                                            (compShift, waveIdxSgpr, compOffset, 0 if swzReplicate else swzRows)))
         mod.add(comp.setTensorDim1(descSgprName(1), sIdx, self, 0, False))
         if isTdmIter:
           self._emitSwizzleTdmIterateInit(mod, kernel, tc, dtype, descSgprName,
