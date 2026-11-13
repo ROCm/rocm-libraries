@@ -3,13 +3,19 @@
 
 // The matrix-core partial kernel of the depthwise backward weights (CONV_DW_VARIANT 2):
 // hipconv's Hankel construction on 4x4x4 MFMA with 16 channels as the instruction's 16 blocks,
-// reimplemented. Channels-last, 16-bit, unit stride and dilation, compile-time filter.
+// reimplemented. Channels-last, 16-bit, unit dilation, compile-time filter and stride S (1 or 2,
+// both axes).
 //
 // For input row y, channel c and a 4-column step q of the output tile:
-//   A[s][k] = x[y][q + k + s - pw]      (Hankel: the shift s on the column)
-//   B[k][r] = dy[y + ph - r][q + k]     (the filter rows' dy rows as columns)
-//   C[s][r] += sum_k A[s][k] B[k][r]    = dw[c][r][s] over this row and step
+//   A[s][k] = x[y][S (q + k) + s - pw]      (Hankel: the shift s on the column)
+//   B[k][r] = dy[(y + ph - r) / S][q + k]   (the filter rows' dy rows as columns; zero where S
+//                                           does not divide y + ph - r)
+//   C[s][r] += sum_k A[s][k] B[k][r]        = dw[c][r][s] over this row and step
 // Filters wider or taller than 4 tile into 4 x 4 tap groups (each its own accumulator).
+//
+// At stride 2 the x row is staged in two phase rows (its even and its odd columns), so A[s][k]
+// = phase (s % 2) at k + s / 2: again a shift along one row, and the operand read stays one
+// 64-bit window per lane.
 //
 // A block: 4 waves x CONV_DW_NWG groups of 16 channels, a partition of output rows (one image
 // segment at a time), every CONV_DW_Q-column tile of those rows. Per step it stages CONV_DW_G
@@ -33,6 +39,9 @@
 #ifndef CONV_DW_NWG
 #define CONV_DW_NWG 1
 #endif
+#ifndef CONV_DW_S
+#define CONV_DW_S 1
+#endif
 
 namespace hankel
 {
@@ -40,19 +49,26 @@ constexpr int KH = CONV_DW_KH, KW = CONV_DW_KW, Q = CONV_DW_Q, G = CONV_DW_G;
 constexpr int NWG = CONV_DW_NWG; // 16-channel groups a wave
 constexpr int RG = (KH + 3) / 4, SG = (KW + 3) / 4;
 constexpr int CB = 64 * NWG; // channels a block
+constexpr int S = CONV_DW_S; // stride, both axes
 constexpr int THREADS = 256;
 static_assert(CONV_DW_KD == 1, "2-D filters");
 static_assert(Q % 4 == 0 && Q >= 4, "whole 4-column steps");
-constexpr int XG = Q / 4 + SG; // four-column words of the x row a tile reads
+static_assert(S == 1 || S == 2, "unit or 2 stride");
+static_assert(S == 1 || SG <= 2, "stride 2 reads two words a tap group");
+// Four-column words of an x (phase) row a tile reads: the tile's Q columns and what its taps
+// reach past them (KW - 1 columns; at stride 2, (KW - 1) / 2 a phase row, rounded to the words
+// a 64-bit window can start in).
+constexpr int XG = S == 1 ? Q / 4 + SG : Q / 4 + (SG - 1) / 2 + 1;
 constexpr int DG = Q / 4; // of a dy row
 constexpr int XW = (XG + 7) / 8 * 8, DW = (DG + 7) / 8 * 8;
 constexpr int XP = 4 * XW + 4, DP = 4 * DW + 4; // row pitches (halves)
 constexpr int SS = (CB * DP + 63) / 64 * 64 + 16; // ring slot stride (halves)
 constexpr int SLOTS = KH + G - 1; // ring slots; slot SLOTS is zeros
-constexpr int XU = XG * (CB / 8), DU = DG * (CB / 8); // staging units: 4 columns x 8 channels
+// Staging units: 4 x columns x 8 channels. At stride 2 a phase row's XG words take 2 XG units.
+constexpr int XU = S * XG * (CB / 8), DU = DG * (CB / 8);
 constexpr int XPT = (G * XU + THREADS - 1) / THREADS, DPT = (G * DU + THREADS - 1) / THREADS;
 /// The LDS the kernel declares (bytes); the host gates it against the device's.
-constexpr int LDS_BYTES = (G * CB * XP + (SLOTS + 1) * SS) * 2;
+constexpr int LDS_BYTES = (G * S * CB * XP + (SLOTS + 1) * SS) * 2;
 
 typedef _Float16 h4 __attribute__((ext_vector_type(4)));
 typedef short s4 __attribute__((ext_vector_type(4)));
@@ -139,12 +155,38 @@ struct Stage
             }
         }
     }
+
+    /// Stride 2: writes the unit's even columns (0, 2) to phase row 0 and its odd columns (1, 3)
+    /// to phase row 1, `phase` halves after it: per channel one 32-bit half word of each.
+    __device__ void storePhases(u16* const (&dst)[G], int pitch, int phase, int tid) const
+    {
+#pragma unroll
+        for(int u = 0; u < N; ++u)
+        {
+            const int all = tid + u * THREADS, gr = all / UNITS, unit = all % UNITS;
+            if(gr >= G || dst[gr] == nullptr)
+            {
+                continue;
+            }
+            const int g = unit / (CB / 8), cv = (unit % (CB / 8)) * 8;
+#pragma unroll
+            for(int e = 0; e < 8; ++e)
+            {
+                const unsigned sel = e % 2 == 0 ? 0x05040100u : 0x07060302u;
+                const int at = (cv + e) * pitch + 4 * swz(cv + e, g / 2) + 2 * (g % 2);
+                *reinterpret_cast<unsigned*>(dst[gr] + at)
+                    = __builtin_amdgcn_perm(v[u][2][e / 2], v[u][0][e / 2], sel);
+                *reinterpret_cast<unsigned*>(dst[gr] + phase + at)
+                    = __builtin_amdgcn_perm(v[u][3][e / 2], v[u][1][e / 2], sel);
+            }
+        }
+    }
 };
 
 template <bool BF16>
 __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
 {
-    __shared__ __attribute__((aligned(16))) u16 xs[G][CB * XP];
+    __shared__ __attribute__((aligned(16))) u16 xs[G][S * CB * XP];
     __shared__ __attribute__((aligned(16))) u16 ring[(SLOTS + 1) * SS];
     const int tid = static_cast<int>(threadIdx.x), wave = tid / 64, lane = tid % 64;
     const int cBlocks = (a.c + CB - 1) / CB;
@@ -162,8 +204,10 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
     {
         offW[w] = 4 * swz(b, w);
     }
-    const bool hi2 = i >= 2;
-    const unsigned ab = 2 * (i & 1);
+    // Stride 1: the lane's A starts i halves into the window. Stride 2: in phase row i % 2,
+    // (i / 2) halves in, plus 2 halves for an odd tap group (sg / 2 words in).
+    const bool hi2 = S == 1 && i >= 2;
+    const unsigned ab = S == 1 ? 2 * (i & 1) : 2 * (i >> 1);
 
     for(int e = tid; e < SS; e += THREADS)
     {
@@ -192,8 +236,14 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
         const u16* dyImg = dy + (long)n * a.ho * a.wo * a.c;
         for(int q0 = 0; q0 < a.wo; q0 += Q)
         {
-            // The input rows whose taps reach [o0, o1): y = oy - ph + r.
-            const int y0 = o0 - a.ph, y1 = o1 - a.ph + KH - 1;
+            // The input rows whose taps reach [o0, o1): y = S oy - ph + r. Output row oy enters
+            // the ring at its first input row, S oy - ph.
+            const int y0 = o0 * S - a.ph, y1 = (o1 - 1) * S - a.ph + KH;
+            auto entering = [&](int yy, int& oy) {
+                const int num = yy + a.ph; // >= S o0 >= 0
+                oy = num / S;
+                return yy < y1 && num % S == 0 && oy >= o0 && oy < o1;
+            };
             auto loadStep = [&](int y) {
                 const u16* xr[G];
                 const u16* dr[G];
@@ -201,13 +251,14 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
 #pragma unroll
                 for(int g = 0; g < G; ++g)
                 {
-                    const int yy = y + g, oy = yy + a.ph;
+                    const int yy = y + g;
+                    int oy = 0;
                     xo[g] = yy < y1 && yy >= 0 && yy < a.hi;
-                    dyo[g] = yy < y1 && oy >= o0 && oy < o1;
+                    dyo[g] = entering(yy, oy);
                     xr[g] = xImg + (long)(xo[g] ? yy : 0) * a.wi * a.c;
                     dr[g] = dyImg + (long)(dyo[g] ? oy : 0) * a.wo * a.c;
                 }
-                sx.load(xr, xo, q0 - a.pw, a.wi, a.c, c0, tid);
+                sx.load(xr, xo, q0 * S - a.pw, a.wi, a.c, c0, tid);
                 sd.load(dr, dyo, q0, a.wo, a.c, c0, tid);
             };
             auto storeStep = [&](int y) {
@@ -216,11 +267,19 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
 #pragma unroll
                 for(int g = 0; g < G; ++g)
                 {
-                    const int yy = y + g, oy = yy + a.ph;
+                    const int yy = y + g;
+                    int oy = 0;
                     xd[g] = xs[g];
-                    dd[g] = yy < y1 && oy >= o0 && oy < o1 ? ring + (oy % SLOTS) * SS : nullptr;
+                    dd[g] = entering(yy, oy) ? ring + (oy % SLOTS) * SS : nullptr;
                 }
-                sx.store(xd, XP, tid);
+                if constexpr(S == 1)
+                {
+                    sx.store(xd, XP, tid);
+                }
+                else
+                {
+                    sx.storePhases(xd, XP, CB * XP, tid);
+                }
                 sd.store(dd, DP, tid);
             };
             __syncthreads(); // the previous tile's reads are done
@@ -241,25 +300,28 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
                     {
                         continue; // a padding row's window is zeros
                     }
-                    // The lane's B rows r = 4 rg + i: dy row yy + ph - r, or the zero slot.
+                    // The lane's B rows r = 4 rg + i: dy row (yy + ph - r) / S, or the zero slot.
                     const u16* bSlot[RG];
 #pragma unroll
                     for(int rg = 0; rg < RG; ++rg)
                     {
-                        const int r = 4 * rg + i, oy = yy + a.ph - r;
-                        const bool ok = r < KH && oy >= o0 && oy < o1;
+                        const int r = 4 * rg + i, num = yy + a.ph - r, oy = num / S;
+                        const bool ok = r < KH && num >= o0 * S && num % S == 0 && oy < o1;
                         bSlot[rg] = ring + (ok ? oy % SLOTS : SLOTS) * SS + b * DP;
                     }
 #pragma unroll
                     for(int cg = 0; cg < NWG; ++cg)
                     {
-                        const u16* aRow = xs[g] + (b + 64 * cg) * XP;
+                        const u16* aRow
+                            = xs[g] + (S == 1 ? 0 : (i & 1) * CB * XP) + (b + 64 * cg) * XP;
 #pragma unroll
                         for(int qq = 0; qq < Q; qq += 4)
                         {
-                            unsigned d[2 * (SG + 1)];
+                            // The words the tap groups' windows start in, and the next.
+                            constexpr int WORDS = S == 1 ? SG + 1 : (SG - 1) / 2 + 2;
+                            unsigned d[2 * WORDS];
 #pragma unroll
-                            for(int k = 0; k <= SG; ++k)
+                            for(int k = 0; k < WORDS; ++k)
                             {
                                 const u64 w
                                     = *reinterpret_cast<const u64*>(aRow + offW[qq / 4 + k]);
@@ -267,14 +329,17 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
                                 d[2 * k + 1] = static_cast<unsigned>(w >> 32);
                             }
                             u64 av[SG], bv[RG];
-                            // A: the 4 halves from the lane's shift i: whole dwords (i / 2),
-                            // then a 2-byte align.
+                            // A: the 4 halves from the lane's shift: whole dwords, then a 2-byte
+                            // align. Stride 1: word sg, i halves in. Stride 2: word sg / 2,
+                            // 2 (sg % 2) + i / 2 halves in.
 #pragma unroll
                             for(int sg = 0; sg < SG; ++sg)
                             {
-                                const unsigned e0 = hi2 ? d[2 * sg + 1] : d[2 * sg];
-                                const unsigned e1 = hi2 ? d[2 * sg + 2] : d[2 * sg + 1];
-                                const unsigned e2 = hi2 ? d[2 * sg + 3] : d[2 * sg + 2];
+                                const int w0 = S == 1 ? sg : sg / 2;
+                                const bool hi = S == 1 ? hi2 : sg % 2 == 1;
+                                const unsigned e0 = hi ? d[2 * w0 + 1] : d[2 * w0];
+                                const unsigned e1 = hi ? d[2 * w0 + 2] : d[2 * w0 + 1];
+                                const unsigned e2 = hi ? d[2 * w0 + 3] : d[2 * w0 + 2];
                                 av[sg] = (u64)__builtin_amdgcn_alignbyte(e1, e0, ab)
                                          | ((u64)__builtin_amdgcn_alignbyte(e2, e1, ab) << 32);
                             }

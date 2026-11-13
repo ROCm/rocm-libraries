@@ -46,7 +46,7 @@
  * reduction, folded in a fixed order), reimplemented on vector ALU so it runs on every
  * architecture, both layouts, 1-D to 3-D and every element type in exact fp32 arithmetic. On
  * CDNA the hankel configs run the construction itself on 4x4x4 MFMA (16-bit, channels-last,
- * unit stride; ConvDepthwiseHankelWrw.h). Every kernel config is admitted on correctness alone;
+ * stride 1 or 2; ConvDepthwiseHankelWrw.h). Every kernel config is admitted on correctness alone;
  * autotune (UHD later) ranks them.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
@@ -171,6 +171,18 @@ bool isHankel(const WrwConfig& config)
     return config.variant == "hankel";
 }
 
+/// The vector tile's lanes along the channels (ConvDepthwiseValuWrw.cpp, vtile::channelLanes).
+int64_t vtileChannelLanes(int64_t channels, int64_t cv)
+{
+    const int64_t need = divUp(channels, cv);
+    int64_t lanes = 1;
+    while(lanes < need && lanes < 64)
+    {
+        lanes *= 2;
+    }
+    return lanes;
+}
+
 /// Partial blocks per partition: channel blocks.
 int64_t blocksPerPartitionOf(const WrwProblem& problem, const WrwConfig& config)
 {
@@ -178,6 +190,10 @@ int64_t blocksPerPartitionOf(const WrwProblem& problem, const WrwConfig& config)
     if(isHankel(config))
     {
         return divUp(a.c, 64 * config.nwg);
+    }
+    if(config.variant == "vtile")
+    {
+        return divUp(a.c, vtileChannelLanes(a.c, config.cv) * config.cv);
     }
     // The VALU kernels walk output channels.
     const int64_t channels = a.c * problem.mult;
@@ -189,16 +205,19 @@ int64_t blocksPerPartitionOf(const WrwProblem& problem, const WrwConfig& config)
 
 int64_t hankelLdsBytes(const WrwConfig& config)
 {
-    // ConvDepthwiseHankelWrw.h: G x-row buffers of 64 nwg channel rows, and KH + G - 1 ring
-    // slots plus a zero slot of 64 nwg dy rows (+ 16 halves to spread the slots over banks).
-    const int64_t rg = divUp(config.kw, 4);
-    const int64_t xWords = divUp(config.q / 4 + rg, 8) * 8;
+    // ConvDepthwiseHankelWrw.h: G x-row buffers (s phase rows each) of 64 nwg channel rows, and
+    // KH + G - 1 ring slots plus a zero slot of 64 nwg dy rows (+ 16 halves to spread the slots
+    // over banks).
+    const int64_t sg = divUp(config.kw, 4);
+    const int64_t stride = std::max<int64_t>(config.s, 1);
+    const int64_t xg = stride == 1 ? config.q / 4 + sg : config.q / 4 + (sg - 1) / 2 + 1;
+    const int64_t xWords = divUp(xg, 8) * 8;
     const int64_t dyWords = divUp(config.q / 4, 8) * 8;
     const int64_t channels = 64 * config.nwg;
     const int64_t xPitch = 4 * xWords + 4, dyPitch = 4 * dyWords + 4;
     const int64_t slot = divUp(channels * dyPitch, 64) * 64 + 16;
     const int64_t slots = config.kh + config.g - 1;
-    return (config.g * channels * xPitch + (slots + 1) * slot) * 2;
+    return (config.g * stride * channels * xPitch + (slots + 1) * slot) * 2;
 }
 
 bool hankelAdmits(const WrwProblem& problem, const WrwConfig& config, std::string_view gcnArchName)
@@ -219,7 +238,12 @@ bool hankelAdmits(const WrwProblem& problem, const WrwConfig& config, std::strin
     {
         return false;
     }
-    if(a.sh != 1 || a.sw != 1 || a.dh != 1 || a.dw_ != 1 || a.c % 8 != 0)
+    // Stride 2 reads at most two words a tap group: filters up to 8 wide.
+    if((config.s != 1 && config.s != 2) || (config.s == 2 && config.kw > 8))
+    {
+        return false;
+    }
+    if(a.sh != config.s || a.sw != config.s || a.dh != 1 || a.dw_ != 1 || a.c % 8 != 0)
     {
         return false;
     }
@@ -233,6 +257,25 @@ bool hankelAdmits(const WrwProblem& problem, const WrwConfig& config, std::strin
     return hankelLdsBytes(config) <= ldsLimit;
 }
 
+bool vtileAdmits(const WrwProblem& problem, const WrwConfig& config, int xAlign, int dyAlign)
+{
+    const auto& a = problem.args;
+    if(config.mult != 1 || problem.mult != 1 || problem.layout != DepthwiseLayout::CHANNELS_LAST
+       || problem.ndims != 2 || a.kd != 1 || config.kd != 1 || a.kh != config.kh
+       || a.kw != config.kw || a.sw != 1 || a.dw_ != 1)
+    {
+        return false;
+    }
+    if((config.cv != 1 && config.cv != 2 && config.cv != 4 && config.cv != 8)
+       || (config.strip != 2 && config.strip != 4 && config.strip != 8) || a.c % config.cv != 0)
+    {
+        return false;
+    }
+    const int64_t vectorBytes
+        = config.cv * (problem.base.dataType == data_objects::DataType::FLOAT ? 4 : 2);
+    return xAlign % vectorBytes == 0 && dyAlign % vectorBytes == 0;
+}
+
 void partitionFor(WrwProblem& problem, int64_t computeUnits, const WrwConfig& config)
 {
     auto& a = problem.args;
@@ -240,8 +283,14 @@ void partitionFor(WrwProblem& problem, int64_t computeUnits, const WrwConfig& co
     const int64_t blocksPerPartition = blocksPerPartitionOf(problem, config);
     const int64_t wanted
         = std::max<int64_t>(1, computeUnits) * (isHankel(config) ? config.bpc : BLOCKS_PER_CU);
-    const int64_t partitions
-        = std::clamp<int64_t>(divUp(wanted, blocksPerPartition), 1, static_cast<int64_t>(a.rows));
+    // A vector tile's block splits a partition's rows over its row lanes: at least four rows a
+    // lane, or the lanes idle and the partial sums outgrow the work.
+    const int64_t rowsAtLeast
+        = config.variant == "vtile"
+              ? 4 * (BLOCK / vtileChannelLanes(a.c, std::max<int64_t>(config.cv, 1)))
+              : 1;
+    const int64_t partitions = std::clamp<int64_t>(
+        divUp(wanted, blocksPerPartition), 1, std::max<int64_t>(1, a.rows / rowsAtLeast));
     a.rowsPerPartition = static_cast<int>(divUp(a.rows, partitions));
     a.partitions = static_cast<int>(divUp(a.rows, a.rowsPerPartition));
 }
@@ -288,6 +337,25 @@ constexpr std::string_view DW_TOKEN = "conv_depthwise_valu_wrw.dw.uid";
 constexpr std::string_view DTYPE_TOKEN = "conv_depthwise_valu_wrw.dtype";
 constexpr std::string_view FLOPS_TOKEN = "conv_depthwise_valu_wrw.flops";
 
+/// The byte alignment the graph declares for tensor @p uid's pointer, at most 16; 0 when the
+/// tensor is missing.
+int pointerAlignment(const MatchContext& context, int64_t uid)
+{
+    const auto& tensors = context.graph.getTensorMap();
+    const auto found = tensors.find(uid);
+    if(found == tensors.end() || found->second == nullptr)
+    {
+        return 0;
+    }
+    const int64_t declared = found->second->alignment();
+    int align = 16;
+    while(align > 1 && declared % align != 0)
+    {
+        align /= 2;
+    }
+    return align;
+}
+
 std::string elementTypeFor(const std::string& dtype)
 {
     if(dtype == "FLOAT")
@@ -320,6 +388,9 @@ conv_depthwise_valu_wrw::WrwConfig configOf(const KernelDefinition& kernel)
     config.nwg = kernel.getIntMetadata("nwg");
     config.bpc = kernel.getIntMetadata("bpc");
     config.mult = kernel.getIntMetadata("mult");
+    config.s = kernel.getIntMetadata("s");
+    config.cv = kernel.getIntMetadata("cv");
+    config.strip = kernel.getIntMetadata("strip");
     return config;
 }
 
@@ -347,7 +418,8 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
 /// Kernel-scoped applicability: the config computes this problem correctly and launches. The
 /// floor serves every problem; a register tile needs its compile-time filter (depth 1 for 1-D
 /// and 2-D); the matrix-core (hankel) configs pass hankelAdmits, and only they may set the
-/// q, g, nwg and bpc fields. The partitions are sized from the device's units, so a device that
+/// q, g, nwg, bpc and s fields; the vector tiles pass vtileAdmits, and only they may set cv and
+/// strip. The partitions are sized from the device's units, so a device that
 /// reports none is declined.
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& /*bound*/,
@@ -371,7 +443,14 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
     // The matrix-core fields are the hankel variant's alone.
-    if(!hankel && (config.q != 0 || config.g != 0 || config.nwg != 0 || config.bpc != 0))
+    if(!hankel
+       && (config.q != 0 || config.g != 0 || config.nwg != 0 || config.bpc != 0 || config.s != 0))
+    {
+        return false;
+    }
+    // The vector-tile fields are the vtile variant's alone.
+    const bool vtile = config.variant == "vtile";
+    if(!vtile && (config.cv != 0 || config.strip != 0))
     {
         return false;
     }
@@ -387,6 +466,16 @@ bool kernelMatches(const MatchContext& context,
     {
         if(!conv_depthwise_valu_wrw::hankelAdmits(
                *problem, config, context.deviceProperties.gcnArchName))
+        {
+            return false;
+        }
+    }
+    else if(vtile)
+    {
+        if(!conv_depthwise_valu_wrw::vtileAdmits(*problem,
+                                                 config,
+                                                 pointerAlignment(context, problem->xUid),
+                                                 pointerAlignment(context, problem->dyUid)))
         {
             return false;
         }
@@ -503,14 +592,15 @@ public:
                     std::string(problem->layout == DepthwiseLayout::CHANNELS_FIRST ? "1" : "0"));
         const bool tile = config.variant == "tile";
         const bool hankel = config.variant == "hankel";
-        options.add("CONV_DW_VARIANT", std::string(hankel ? "2" : tile ? "1" : "0"));
+        const bool vtile = config.variant == "vtile";
+        options.add("CONV_DW_VARIANT", std::string(vtile ? "3" : hankel ? "2" : tile ? "1" : "0"));
         options.add("CONV_DW_FLIP", std::string(problem->flipFilter ? "1" : "0"));
         // Defined only for a multiplier, so the multiplier-1 programs compile as before.
         if(config.mult != 1)
         {
             options.add("CONV_DW_MULT", std::to_string(config.mult));
         }
-        if(tile || hankel)
+        if(tile || hankel || vtile)
         {
             options.add("CONV_DW_KD", std::to_string(config.kd));
             options.add("CONV_DW_KH", std::to_string(config.kh));
@@ -521,6 +611,16 @@ public:
             options.add("CONV_DW_Q", std::to_string(config.q));
             options.add("CONV_DW_G", std::to_string(config.g));
             options.add("CONV_DW_NWG", std::to_string(config.nwg));
+            // Defined only for stride 2, so the unit-stride programs compile as before.
+            if(config.s != 1)
+            {
+                options.add("CONV_DW_S", std::to_string(config.s));
+            }
+        }
+        if(vtile)
+        {
+            options.add("CONV_DW_CV", std::to_string(config.cv));
+            options.add("CONV_DW_STRIP", std::to_string(config.strip));
         }
 
         auto partial = buildIngestorKernelCode(

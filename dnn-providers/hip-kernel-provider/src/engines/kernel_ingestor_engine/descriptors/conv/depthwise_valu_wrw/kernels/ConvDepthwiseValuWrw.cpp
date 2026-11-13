@@ -22,6 +22,10 @@
 //                        stride and dilation, compile-time CONV_DW_KH x CONV_DW_KW, on 4x4x4
 //                        MFMA; CONV_DW_Q columns a tile, CONV_DW_G rows a step, CONV_DW_NWG
 //                        16-channel groups a wave
+//                    3 = vector tile (channels-last, unit width stride and dilation, compile-time
+//                        CONV_DW_KH x CONV_DW_KW, multiplier 1): a thread owns CONV_DW_CV
+//                        consecutive channels (one vector load a column) and every tap's sum of
+//                        each in registers, walking its rows in strips of CONV_DW_STRIP columns
 //   CONV_DW_FLIP     1 reflects the filter (true convolution)
 //   CONV_DW_MULT     depth multiplier (default 1): mult output channels per input channel, output
 //                    channel k reading input channel k / mult (variants 0 and 1)
@@ -254,6 +258,181 @@ __device__ inline void accumulateStrips(float (&sum)[TAPS],
 }
 #endif
 
+#if CONV_DW_VARIANT == 3
+#ifndef CONV_DW_CV
+#define CONV_DW_CV 4
+#endif
+#ifndef CONV_DW_STRIP
+#define CONV_DW_STRIP 8
+#endif
+namespace vtile
+{
+constexpr int CV = CONV_DW_CV, KH = CONV_DW_KH, KW = CONV_DW_KW, TAPS = KH * KW;
+constexpr int STRIPW = CONV_DW_STRIP, SPAN = STRIPW + KW - 1;
+static_assert(CONV_DW_LAYOUT == 0 && CONV_DW_KD == 1 && MULT == 1,
+              "2-D channels-last, no multiplier");
+static_assert(CV == 1 || CV == 2 || CV == 4 || CV == 8, "vector of channels");
+
+/// CV consecutive channels of one column: one vector load.
+struct alignas(CV * sizeof(ElementType)) Vec
+{
+    ElementType v[CV];
+};
+
+/// Lanes a block puts side by side along the channels: the channel vectors, rounded up to a
+/// power of two, at most a wave of 64 (the rest of the block's lanes split the rows).
+__device__ inline int channelLanes(int channels)
+{
+    const int need = (channels + CV - 1) / CV;
+    int lanes = 1;
+    while(lanes < need && lanes < 64)
+    {
+        lanes *= 2;
+    }
+    return lanes;
+}
+
+/// One strip of output columns [ox0, ox0 + STRIPW) of output row (n, oy): dy's columns and, per
+/// filter row, the SPAN x columns under them in registers. TAIL: the strip runs past the row
+/// (its dead columns' products are skipped, so an inf / NaN in x never meets a column the
+/// convolution does not have).
+template <bool TAIL>
+__device__ inline void strip(float (&sum)[TAPS][CV],
+                             const ElementType* x,
+                             const ElementType* dyRow,
+                             int n,
+                             int oy,
+                             int ox0,
+                             int c,
+                             const ConvDepthwiseValuWrwArgs& a)
+{
+    float g[STRIPW][CV];
+#pragma unroll
+    for(int t = 0; t < STRIPW; ++t)
+    {
+        const int ox = TAIL ? min(ox0 + t, a.wo - 1) : ox0 + t;
+        const Vec value = *reinterpret_cast<const Vec*>(dyRow + (long)ox * a.c);
+#pragma unroll
+        for(int e = 0; e < CV; ++e)
+        {
+            g[t][e] = toFloat(value.v[e]);
+        }
+    }
+#pragma unroll
+    for(int r = 0; r < KH; ++r)
+    {
+        const int iy = oy * a.sh - a.ph + r * a.dh;
+        const bool rowInside = iy >= 0 && iy < a.hi;
+        const ElementType* xRow
+            = x + (((long)n * a.hi + min(max(iy, 0), a.hi - 1)) * a.wi) * a.c + c;
+        float v[SPAN][CV];
+#pragma unroll
+        for(int j = 0; j < SPAN; ++j)
+        {
+            const int ix = ox0 - a.pw + j;
+            const bool inside = rowInside && ix >= 0 && ix < a.wi;
+            const Vec value
+                = *reinterpret_cast<const Vec*>(xRow + (long)min(max(ix, 0), a.wi - 1) * a.c);
+#pragma unroll
+            for(int e = 0; e < CV; ++e)
+            {
+                v[j][e] = inside ? toFloat(value.v[e]) : 0.0f;
+            }
+        }
+#pragma unroll
+        for(int t = 0; t < STRIPW; ++t)
+        {
+            if(TAIL && ox0 + t >= a.wo)
+            {
+                break;
+            }
+#pragma unroll
+            for(int kx = 0; kx < KW; ++kx)
+            {
+#pragma unroll
+                for(int e = 0; e < CV; ++e)
+                {
+                    sum[r * KW + kx][e] += g[t][e] * v[t + kx][e];
+                }
+            }
+        }
+    }
+}
+
+__device__ void partial(const ConvDepthwiseValuWrwArgs& a)
+{
+    const auto* x = static_cast<const ElementType*>(a.x);
+    const auto* dy = static_cast<const ElementType*>(a.dy);
+    const int tid = static_cast<int>(threadIdx.x);
+    const int lanesC = channelLanes(a.c), lanesR = BLOCK / lanesC;
+    const int chunks = (a.c + lanesC * CV - 1) / (lanesC * CV);
+    const int partition = static_cast<int>(blockIdx.x) / chunks;
+    const int c = (static_cast<int>(blockIdx.x) % chunks) * lanesC * CV + (tid % lanesC) * CV;
+    const int lane = tid / lanesC;
+    // Channels a whole number of vectors (host gate): a vector is all inside or all outside.
+    const bool live = c < a.c;
+    int first = 0;
+    int last = 0;
+    partitionRows(a, partition, first, last);
+    float sum[TAPS][CV];
+#pragma unroll
+    for(int t = 0; t < TAPS; ++t)
+    {
+#pragma unroll
+        for(int e = 0; e < CV; ++e)
+        {
+            sum[t][e] = 0.0f;
+        }
+    }
+    if(live)
+    {
+        for(int row = first + lane; row < last; row += lanesR)
+        {
+            // 2-D: rows are n x ho.
+            const int oy = row % a.ho;
+            const int n = row / a.ho;
+            const ElementType* dyRow = dy + ((long)n * a.ho + oy) * a.wo * a.c + c;
+            int ox0 = 0;
+            for(; ox0 + STRIPW <= a.wo; ox0 += STRIPW)
+            {
+                strip<false>(sum, x, dyRow, n, oy, ox0, c, a);
+            }
+            if(ox0 < a.wo)
+            {
+                strip<true>(sum, x, dyRow, n, oy, ox0, c, a);
+            }
+        }
+    }
+    // The row lanes' sums of a channel, added in lane order through LDS, one tap at a time.
+    __shared__ float lanes[BLOCK * CV];
+#pragma unroll
+    for(int t = 0; t < TAPS; ++t)
+    {
+#pragma unroll
+        for(int e = 0; e < CV; ++e)
+        {
+            lanes[tid * CV + e] = sum[t][e];
+        }
+        __syncthreads();
+        if(lane == 0 && live)
+        {
+#pragma unroll
+            for(int e = 0; e < CV; ++e)
+            {
+                float total = 0.0f;
+                for(int l = 0; l < lanesR; ++l)
+                {
+                    total += lanes[(l * lanesC + tid) * CV + e];
+                }
+                a.partial[((long)partition * a.c + c + e) * TAPS + t] = total;
+            }
+        }
+        __syncthreads();
+    }
+}
+} // namespace vtile
+#endif
+
 } // namespace
 
 #if CONV_DW_VARIANT == 2
@@ -266,6 +445,8 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
 #if CONV_DW_VARIANT == 2
     static_assert(hankel::THREADS == BLOCK, "one block size");
     hankel::partial<__is_same(ElementType, __bf16)>(a);
+#elif CONV_DW_VARIANT == 3
+    vtile::partial(a);
 #else
     const auto* x = static_cast<const ElementType*>(a.x);
     const auto* dy = static_cast<const ElementType*>(a.dy);
@@ -447,7 +628,7 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
     }
 #endif
 #endif
-#endif // CONV_DW_VARIANT == 2
+#endif // CONV_DW_VARIANT == 2 / 3
 }
 
 /// dw[c, tap] = the partitions' sums in partition order, rounded once; reflected for true

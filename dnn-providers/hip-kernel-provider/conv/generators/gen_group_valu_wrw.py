@@ -86,6 +86,24 @@ TILES_MMA = {
     F1: {"pass": [(4, 4, 8, 2), (8, 8, 4, 2), (8, 8, 8, 2), (8, 16, 4, 2)]},
     F5: {"pass": [(1, 4, 4, 2)]},
 }
+# Depthwise (one input and one output channel a group, cb = kb = 1), channels-first, every
+# architecture: a wave owns one channel's filter, its lanes along the output row. At least two
+# output columns a lane (the kernel's 16-bit windows are whole dwords).
+F5S2 = (5, 5, 2, 1, 2)
+F7 = (7, 7, 1, 1, 3)
+DW_TILES = {
+    F3: {
+        "pass": [(1, 1, 2, 2), (1, 1, 4, 2), (1, 1, 8, 2), (1, 1, 2, 4)],
+        "ring": [(1, 1, 2, 2), (1, 1, 4, 2)],
+    },
+    F3S2: {"pass": [(1, 1, 2, 2), (1, 1, 4, 2), (1, 1, 2, 4)]},
+    F5: {
+        "pass": [(1, 1, 2, 2), (1, 1, 4, 2)],
+        "ring": [(1, 1, 2, 2), (1, 1, 4, 2)],
+    },
+    F5S2: {"pass": [(1, 1, 2, 2), (1, 1, 4, 2)]},
+    F7: {"pass": [(1, 1, 4, 2), (1, 1, 8, 2)], "ring": [(1, 1, 4, 2)]},
+}
 RDNA = ["gfx1100", "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151", "gfx1152"]
 RDNA += ["gfx1200", "gfx1201"]
 # group -> (archs, tiles, layouts)
@@ -141,7 +159,7 @@ write(
 DTYPES = (("FLOAT", "f32"), ("HALF", "f16"), ("BFLOAT16", "bf16"))
 total = 0
 # The kernels hold cb kb fr fs fp32 sums a lane (ConvGroupValuWrwProblem.hpp: at most 160).
-for tiles_of in (TILES, TILES_MMA):
+for tiles_of in (TILES, TILES_MMA, DW_TILES):
     for (fr, fs, _, _, _), forms in tiles_of.items():
         for tiles in forms.values():
             for cb, kb, _, _ in tiles:
@@ -149,9 +167,12 @@ for tiles_of in (TILES, TILES_MMA):
 
 for group, (archs, tiles_of, layouts) in PACKS.items():
     kernels = []
-    for fil, forms in tiles_of.items():
+    sets = [(tiles_of, layouts), (DW_TILES, ("nchw",))]
+    for fil, forms, set_layouts in (
+        (f, fo, ls) for t, ls in sets for f, fo in t.items()
+    ):
         fr, fs, sw, dw, pw = fil
-        for layout in layouts:
+        for layout in set_layouts:
             for form, tiles in forms.items():
                 ring = 1 if form == "ring" else 0
                 if ring and layout != "nchw":
