@@ -133,7 +133,7 @@ void stedcj_initData(const rocblas_handle handle,
         // two rows below it, in a chain with eigenvalues in [0, 6]: the two poles of the top merge
         // are a few ulps apart, and the component of z of the second one is tiny, so that the pair
         // must be deflated (as in LAPACK xLAED2) for the secular equation to be well posed
-        else if(pair > 0)
+        else if(pair > 0 && n >= 4)
         {
             const S c = std::pow(S(10), -S(pair / 100));
             const S lambda = -3;
