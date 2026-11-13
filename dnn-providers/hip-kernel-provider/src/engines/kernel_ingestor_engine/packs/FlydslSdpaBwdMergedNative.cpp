@@ -125,6 +125,9 @@ constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.flydsl_sdpa_bwd_merged.d
 constexpr std::string_view REDUCE_DISPATCH_SYMBOL
     = "hipkernel.flydsl_sdpa_bwd_merged_reduce.dispatch";
 
+/// The `dtype` spelling of the f16 rows, whose table ships no tile-160 object.
+constexpr std::string_view F16_DTYPE = "f16";
+
 /// The merged kernel's launch name in a row's `sources`.
 constexpr std::string_view MERGED_LAUNCH = "merged";
 
@@ -290,13 +293,21 @@ std::optional<BoundTokens> flydslSdpaBwdMergedGraphMatches(const MatchContext& c
     }
     const auto& problem = std::get<bwd::SdpaBwdProblem>(matched);
 
+    const auto dtype = flydsl_sdpa::kernelDataTypeName(problem.dtype);
+    if(!dtype.has_value())
+    {
+        native::logDecline(
+            ENGINE_NAME, "data_type", "the matcher served a dtype this engine has no spelling for");
+        return std::nullopt;
+    }
     // The merged table (`_instances.py`, `sdpa_bwd_merged`) builds exact objects at tiles 32 to
     // 256 and, at tile 32 only, padded objects: a head size is served when both dims are at
     // most 32 (an exact or padded tile-32 object) or both equal one of the exact tiles 64 to
-    // 256. kernel_match keeps its per-row check.
+    // 256. f16 has no tile-160 object. kernel_match keeps its per-row check.
     const int64_t largest = std::max(problem.headDimQk, problem.headDimV);
+    const bool noF16Object = *dtype == F16_DTYPE && largest == 160;
     const bool exactTile = problem.headDimQk == problem.headDimV && largest >= 64 && largest <= 256
-                           && largest % 32 == 0;
+                           && largest % 32 == 0 && !noF16Object;
     if(largest > 32 && !exactTile)
     {
         native::logDecline(
@@ -304,8 +315,8 @@ std::optional<BoundTokens> flydslSdpaBwdMergedGraphMatches(const MatchContext& c
             "head_size",
             "head dims Qk " + std::to_string(problem.headDimQk) + ", V "
                 + std::to_string(problem.headDimV)
-                + " are covered by no merged object (<= 32, or equal at 64, 96, 128, 160, "
-                  "192, 224 or 256)");
+                + " are covered by no merged object (<= 32, or equal at 64, 96, 128, "
+                + (*dtype == F16_DTYPE ? "" : "160, ") + "192, 224 or 256)");
         return std::nullopt;
     }
     // BI-8: every merged bias object stages the bias through LDS.
@@ -325,13 +336,6 @@ std::optional<BoundTokens> flydslSdpaBwdMergedGraphMatches(const MatchContext& c
         return std::nullopt;
     }
 
-    const auto dtype = flydsl_sdpa::kernelDataTypeName(problem.dtype);
-    if(!dtype.has_value())
-    {
-        native::logDecline(
-            ENGINE_NAME, "data_type", "the matcher served a dtype this engine has no spelling for");
-        return std::nullopt;
-    }
     int64_t graphClass = CLASS_PLAIN;
     if(problem.biasUid != bwd::NO_UID)
     {
