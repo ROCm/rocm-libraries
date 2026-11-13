@@ -1015,8 +1015,8 @@ namespace rocalution
       * structure is the same, by UpdateValuesCSR(), by any operation that changes the
       * structure of the matrix, by a conversion to another format and by a move to
       * another backend. CloneFrom() does not copy the analysis of the source. Without
-      * a prior call, the first Apply() or ApplyAdd() modifies the internal state of the
-      * matrix, so concurrent calls on the same matrix are not safe.
+      * a prior call, the first Apply() or ApplyAdd() on the accelerator runs the analysis
+      * and prints a warning.
       * \par Example
       * \code{.cpp}
       * LocalMatrix<T> A;
