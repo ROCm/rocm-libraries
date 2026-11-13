@@ -190,10 +190,8 @@ void CheckGetFeaturesND_MapValues(const std::map<std::string, float>& features,
     expected["conv_stride_w"] = static_cast<float>(
         miopen::solver::ProblemInterpreter::GetAdjustedConvolutionStrideW(problem));
 
-    if(is3d)
-    {
-        expected["dilation_d"] = static_cast<float>(problem.GetDilationD());
-    }
+    // dilation_d is supplied in both 2D and 3D (see GetFeaturesND), so check it unconditionally.
+    expected["dilation_d"] = static_cast<float>(problem.GetDilationD());
     expected["dilation_h"] = static_cast<float>(problem.GetDilationH());
     expected["dilation_w"] = static_cast<float>(problem.GetDilationW());
 
