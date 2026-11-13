@@ -357,6 +357,27 @@ std::optional<std::string>
 std::optional<bool>
     candidateAdditiveBias(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel);
 
+/**
+ * @brief Refuses a binding and a launch contract that disagree on the additive bias.
+ *
+ * A binding that carries a bias must be prepared under the contract whose kernel takes the
+ * bias pointer and strides (RUNTIME_HEAD_COUNTS_WITH_BIAS), and only then. The other
+ * contracts pass no bias, so a bias binding under one would launch a kernel that silently
+ * ignores it (a wrong result, not a crash), and a bias contract without a binding has no
+ * pointer to pass. prepare() and restoreLaunch() derive each of the two from the other, so
+ * this holds today; it is checked once before the geometry is applied, so a change to either
+ * derivation fails the plan instead of the launch.
+ *
+ * @param archLabel  The arch's label, for the message.
+ * @param kernelName The kernel's name, for the message.
+ * @throws HipdnnPluginException with INTERNAL_ERROR (a defect of the caller, not a property
+ *         of the graph) naming which side carries the bias.
+ */
+void requireBiasBindingMatchesContract(const AttentionDenseBinding& binding,
+                                       const AttentionDenseContract& contract,
+                                       std::string_view archLabel,
+                                       std::string_view kernelName);
+
 /// The launch shape of @p launch, for AttentionDensePersistent.hpp's grid functions.
 AttentionDenseGridShape gridShape(const AttentionDenseLaunchInputs& launch);
 

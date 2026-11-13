@@ -831,6 +831,117 @@ TEST_P(TestAttentionDenseBiasDispatch, RefusesToPrepareABiasStrideOutsideTheI32R
     }
 }
 
+namespace
+{
+
+using attention_dense::AttentionDenseAbi;
+using attention_dense::AttentionDenseContract;
+
+/// What requireBiasBindingMatchesContract does with a binding and a contract: SUCCESS and an
+/// empty message when it accepts them, else the status and text it throws.
+struct ContractCheck
+{
+    hipdnnPluginStatus_t status = HIPDNN_PLUGIN_STATUS_SUCCESS;
+    std::string message;
+};
+
+ContractCheck checkBiasAgainstContract(const AttentionDenseTestArch& arch,
+                                       const AttentionDenseBinding& binding,
+                                       const AttentionDenseContract& contract)
+{
+    try
+    {
+        attention_dense::requireBiasBindingMatchesContract(
+            binding, contract, arch.label, "test_kernel");
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        return {error.getStatus(), error.getMessage()};
+    }
+    return {};
+}
+
+AttentionDenseBinding biasBinding()
+{
+    AttentionDenseBinding binding;
+    binding.bias = AttentionDenseBias{BIAS_UID, {7, 3, 5}};
+    return binding;
+}
+
+/// The contracts that pass no bias (the arch's plain one, and the baked-head-count form a
+/// legacy handler launches) and the one that does, each under the arch's own name.
+struct ArchContracts
+{
+    std::string legacySymbol;
+    AttentionDenseContract plain;
+    AttentionDenseContract legacy;
+    AttentionDenseContract bias;
+};
+
+ArchContracts contractsOf(const AttentionDenseTestArch& arch)
+{
+    ArchContracts contracts;
+    contracts.legacySymbol = std::string(arch.dispatchSymbol) + ".v1";
+    contracts.plain = {arch.plainContractSymbol, AttentionDenseAbi::RUNTIME_HEAD_COUNTS};
+    contracts.legacy = {contracts.legacySymbol, AttentionDenseAbi::BAKED_HEAD_COUNTS};
+    contracts.bias = {arch.biasContractSymbol, AttentionDenseAbi::RUNTIME_HEAD_COUNTS_WITH_BIAS};
+    return contracts;
+}
+
+} // namespace
+
+/// The binding-versus-contract check is a pure function, because makePreparedAttentionDense,
+/// the one place that calls it, runs only after a code object has loaded and prepare() cannot
+/// get that far here. A plan is consistent exactly when its binding has a bias and its
+/// contract passes the bias arguments, or neither does.
+TEST_P(TestAttentionDenseBiasDispatch, AcceptsABindingThatAgreesWithItsContractOnTheBias)
+{
+    const auto contracts = contractsOf(arch());
+
+    const auto biased = checkBiasAgainstContract(arch(), biasBinding(), contracts.bias);
+    EXPECT_EQ(biased.status, HIPDNN_PLUGIN_STATUS_SUCCESS) << biased.message;
+
+    for(const auto* plain : {&contracts.plain, &contracts.legacy})
+    {
+        const auto result = checkBiasAgainstContract(arch(), AttentionDenseBinding{}, *plain);
+        EXPECT_EQ(result.status, HIPDNN_PLUGIN_STATUS_SUCCESS)
+            << plain->symbol << ": " << result.message;
+    }
+}
+
+/// A bias binding under a contract that passes no bias arguments would launch a kernel that
+/// adds nothing: a wrong result with no fault. It is refused as an internal error (the
+/// graph is fine; the code that paired the two is not), naming the contract and the bias.
+TEST_P(TestAttentionDenseBiasDispatch, RefusesABiasBindingUnderAContractWithoutBiasArguments)
+{
+    const auto contracts = contractsOf(arch());
+    for(const auto* plain : {&contracts.plain, &contracts.legacy})
+    {
+        SCOPED_TRACE(plain->symbol);
+        const auto result = checkBiasAgainstContract(arch(), biasBinding(), *plain);
+        EXPECT_EQ(result.status, HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR) << result.message;
+        EXPECT_NE(result.message.find(std::string(plain->symbol)), std::string::npos)
+            << result.message;
+        EXPECT_NE(result.message.find("passes no bias arguments"), std::string::npos)
+            << result.message;
+        EXPECT_NE(result.message.find("ignore"), std::string::npos) << result.message;
+        EXPECT_NE(result.message.find("uid " + std::to_string(BIAS_UID)), std::string::npos)
+            << result.message;
+    }
+}
+
+/// The reverse: the contract passes a bias pointer and strides, and the plan has no bias to
+/// pass them from (launch() would find no buffer for the uid).
+TEST_P(TestAttentionDenseBiasDispatch, RefusesABiasContractWithoutABiasBinding)
+{
+    const auto contracts = contractsOf(arch());
+    const auto result = checkBiasAgainstContract(arch(), AttentionDenseBinding{}, contracts.bias);
+    EXPECT_EQ(result.status, HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR) << result.message;
+    EXPECT_NE(result.message.find(std::string(contracts.bias.symbol)), std::string::npos)
+        << result.message;
+    EXPECT_NE(result.message.find("binds no additive bias"), std::string::npos) << result.message;
+}
+
 INSTANTIATE_TEST_SUITE_P(,
                          TestAttentionDenseBiasDispatch,
                          ::testing::ValuesIn(biasServingArches()),

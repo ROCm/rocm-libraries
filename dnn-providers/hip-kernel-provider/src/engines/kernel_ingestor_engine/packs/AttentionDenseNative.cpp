@@ -1060,6 +1060,27 @@ std::optional<bool> candidateAdditiveBias(const KernelDefinition& kernel)
     return *value == 1;
 }
 
+void requireBiasBindingMatchesContract(const AttentionDenseBinding& binding,
+                                       const AttentionDenseContract& contract,
+                                       std::string_view archLabel,
+                                       std::string_view kernelName)
+{
+    const bool contractAddsBias = contract.abi == AttentionDenseAbi::RUNTIME_HEAD_COUNTS_WITH_BIAS;
+    if(binding.bias.has_value() == contractAddsBias)
+    {
+        return;
+    }
+    const std::string where = std::string(archLabel) + " attention_dense: kernel '"
+                              + std::string(kernelName) + "' is prepared under "
+                              + std::string(contract.symbol) + ", which ";
+    throw hipdnn_plugin_sdk::HipdnnPluginException(
+        HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+        binding.bias.has_value()
+            ? where + "passes no bias arguments, but the plan binds an additive bias (uid "
+                  + std::to_string(binding.bias->uid) + "): the kernel would ignore it"
+            : where + "passes a bias pointer and strides, but the plan binds no additive bias");
+}
+
 AttentionDenseGridShape gridShape(const AttentionDenseLaunchInputs& launch)
 {
     AttentionDenseGridShape shape;
@@ -1438,6 +1459,11 @@ std::unique_ptr<PreparedDispatch>
                                const AttentionDenseArch& arch,
                                const AttentionDenseContract& contract)
 {
+    // Both callers derive the contract and the binding's bias from one another (a bias
+    // binding is prepared under the bias contract, a saved plan's bias is read only under
+    // that contract's name); this is the one place that holds a future change to it.
+    requireBiasBindingMatchesContract(launch.binding, contract, arch.label, kernelName);
+
     const auto& problem = launch.problem;
     const auto geometry = arch.geometry(
         launch.blockM, problem.seqLenQ, problem.numQueryHeads, problem.batch, kernelName);
