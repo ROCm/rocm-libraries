@@ -5,11 +5,14 @@
 // problem it must say so with HIPBLAS_STATUS_NOT_SUPPORTED, which callers can act on, rather than
 // HIPBLAS_STATUS_INTERNAL_ERROR.
 
+#include "scoped_env.hpp"
+
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt.h>
 
 #include <cstdint>
+#include <cstdlib>
 
 #include "../../../library/src/amd_detail/rocblaslt/src/include/solution_lookup_miss_for_test.hpp"
 
@@ -35,7 +38,7 @@ namespace
     };
 
     // Column-major FP32 D = A * B with square kSize matrices and no workspace. The buffers hold
-    // no data: the tests check statuses only.
+    // zeros: the tests check statuses only.
     class NullAlgoMatmul : public ::testing::Test
     {
     protected:
@@ -56,7 +59,10 @@ namespace
                       HIPBLAS_STATUS_SUCCESS);
             ASSERT_EQ(hipblasLtMatmulPreferenceCreate(&pref), HIPBLAS_STATUS_SUCCESS);
             for(float** buffer : {&a, &b, &d})
+            {
                 ASSERT_EQ(hipMalloc(buffer, kSize * kSize * sizeof(float)), hipSuccess);
+                ASSERT_EQ(hipMemset(*buffer, 0, kSize * kSize * sizeof(float)), hipSuccess);
+            }
         }
 
         void TearDown() override
@@ -105,10 +111,29 @@ namespace
 
     TEST_F(NullAlgoMatmul, smoke_NoAlgorithmIsNotSupported)
     {
+        if(heuristicCount() == 0)
+            GTEST_SKIP() << "the loaded library has no FP32 algorithm for the control problem";
         ASSERT_EQ(nullAlgoMatmul(), HIPBLAS_STATUS_SUCCESS) << "control, with normal lookups";
 
         const LookupMiss miss(rocblaslt_testing_solution_lookup_miss_all);
         EXPECT_EQ(heuristicCount(), 0);
         EXPECT_EQ(nullAlgoMatmul(), HIPBLAS_STATUS_NOT_SUPPORTED);
+    }
+
+    TEST_F(NullAlgoMatmul, smoke_NoAlgorithmIsLogged)
+    {
+        // The logger reads its environment once per process, so the call runs in a newly
+        // started copy of this binary and the test matches the copy's stderr.
+        GTEST_FLAG_SET(death_test_style, "threadsafe");
+        const test_env::ScopedEnv level("HIPBLASLT_LOG_LEVEL", "1");
+        const test_env::ScopedEnv mask("HIPBLASLT_LOG_MASK", nullptr);
+        const test_env::ScopedEnv file("HIPBLASLT_LOG_FILE", nullptr);
+        EXPECT_EXIT(
+            {
+                const LookupMiss miss(rocblaslt_testing_solution_lookup_miss_all);
+                std::exit(nullAlgoMatmul() == HIPBLAS_STATUS_NOT_SUPPORTED ? 0 : 1);
+            },
+            ::testing::ExitedWithCode(0),
+            "no algorithm supports this problem: arch=.* m=64 n=64 k=64 .*type_a=f32_r");
     }
 } // namespace
