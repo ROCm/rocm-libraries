@@ -336,7 +336,7 @@ class Compiler(Component):
             "--offload-device-only",
             "-x", "hip", "-O3",
             "-Xoffload-linker", f"--build-id={build_id_kind}",
-            "-std=c++17",
+            "-std=c++20",
         ]
 
         if asan_build:

@@ -319,7 +319,7 @@ def test_retarget_assembly_source_leaves_matching_target_untouched(tmp_path):
 def test_compiler_default_args_plain(fixed_version):
     comp = C.Compiler(Path("/x/amdclang++"), build_id_kind="sha1")
     assert "--build-id=sha1" in comp.default_args
-    assert "-std=c++17" in comp.default_args
+    assert "-std=c++20" in comp.default_args
     assert "-fsanitize=address" not in comp.default_args
     assert "--save-temps" not in comp.default_args
 

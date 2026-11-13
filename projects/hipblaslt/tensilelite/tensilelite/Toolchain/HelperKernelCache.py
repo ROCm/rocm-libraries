@@ -54,7 +54,9 @@ def _computeCacheKey(kernelPath, includeDir, cmdlineArchs, compiler):
     h.update(f"{v.major}.{v.minor}.{v.patch}".encode())
     rv = compiler.rocm_version
     h.update(f"{rv.major}.{rv.minor}.{rv.patch}".encode())
-    h.update(b"asan" if "-fsanitize=address" in compiler.default_args else b"no-asan")
+    # Include option values, but exclude the launcher and compiler executable.
+    compilerArgs = compiler.default_args[compiler.default_args.index(compiler.path) + 1:]
+    h.update("\0".join(str(a) for a in compilerArgs).encode())
     return h.hexdigest()
 
 

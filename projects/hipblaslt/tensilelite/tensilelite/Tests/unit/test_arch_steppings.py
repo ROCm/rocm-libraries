@@ -3305,8 +3305,8 @@ def test_the_two_steppings_do_not_share_a_cache_entry(tmp_path, monkeypatch):
     inc.mkdir()
     (inc / "Kernels.h").write_text("")
 
-    compiler = MagicMock()
-    compiler.default_args = []
+    compiler = MagicMock(path=Path("amdclang++"))
+    compiler.default_args = [compiler.path]
 
     keys = {
         HKC._computeCacheKey(tmp_path / "Kernels.cpp", inc, [arch], compiler)
