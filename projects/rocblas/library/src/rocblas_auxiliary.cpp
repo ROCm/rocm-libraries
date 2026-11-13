@@ -227,6 +227,60 @@ catch(...)
 }
 
 /*******************************************************************************
+ * ! \brief get floating-point emulation strategy
+ ******************************************************************************/
+extern "C" rocblas_status rocblas_get_emulation_strategy(rocblas_handle              handle,
+                                                         rocblas_emulation_strategy* strategy)
+try
+{
+    if(!handle)
+        return rocblas_status_invalid_handle;
+    if(!strategy)
+        return rocblas_status_invalid_pointer;
+    *strategy = handle->emulation_strategy;
+    if(handle->layer_mode & rocblas_layer_mode_log_trace)
+    {
+        rocblas_internal_logger logger;
+        logger.log_trace(handle, "rocblas_get_emulation_strategy", int(*strategy));
+    }
+    return rocblas_status_success;
+}
+catch(...)
+{
+    return exception_to_rocblas_status();
+}
+
+/*******************************************************************************
+ * ! \brief set floating-point emulation strategy
+ ******************************************************************************/
+extern "C" rocblas_status rocblas_set_emulation_strategy(rocblas_handle             handle,
+                                                         rocblas_emulation_strategy strategy)
+try
+{
+    if(!handle)
+        return rocblas_status_invalid_handle;
+    if(handle->layer_mode & rocblas_layer_mode_log_trace)
+    {
+        rocblas_internal_logger logger;
+        logger.log_trace(handle, "rocblas_set_emulation_strategy", int(strategy));
+    }
+    switch(strategy)
+    {
+    case rocblas_emulation_strategy_default:
+    case rocblas_emulation_strategy_performant:
+    case rocblas_emulation_strategy_eager:
+        handle->emulation_strategy = strategy;
+        return rocblas_status_success;
+    default:
+        return rocblas_status_invalid_value;
+    }
+}
+catch(...)
+{
+    return exception_to_rocblas_status();
+}
+
+/*******************************************************************************
  * ! \brief set math mode
  ******************************************************************************/
 extern "C" rocblas_status rocblas_set_math_mode(rocblas_handle handle, rocblas_math_mode mode)

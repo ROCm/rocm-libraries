@@ -33,6 +33,7 @@
 #include <unistd.h>
 #endif
 
+#include "../../library/src/include/hipblaslt_emulation.hpp"
 #include "client_utility.hpp"
 
 #include <cstdlib>
@@ -236,6 +237,11 @@ bool rocblas_client_global_filters(const Arguments& args)
 #ifndef BUILD_WITH_TENSILE
     if(args.initialization == rocblas_initialization::denorm2)
         return false; // source gemms don't support
+#endif
+
+#if !ROCBLAS_HIPBLASLT_HAS_FP_EMULATION
+    if(args.emulation > 0)
+        return false; // this build cannot request hipBLASLt fixed-point emulation
 #endif
 
     return true;

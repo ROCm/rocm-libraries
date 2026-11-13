@@ -412,6 +412,14 @@ public:
     // default math_mode is default_math
     rocblas_math_mode math_mode = rocblas_default_math;
 
+    // ROCBLAS_EMULATE_DOUBLE_PRECISION / ROCBLAS_EMULATE_SINGLE_PRECISION, read when the handle is
+    // created: true requests hipBLASLt fixed-point emulation for f64_r / f32_r GEMM.
+    bool emulate_double_precision = false;
+    bool emulate_single_precision = false;
+
+    // set by rocblas_set_emulation_strategy
+    rocblas_emulation_strategy emulation_strategy = rocblas_emulation_strategy_default;
+
     // logging streams
     std::unique_ptr<rocblas_internal_ostream> log_trace_os;
     std::unique_ptr<rocblas_internal_ostream> log_bench_os;
@@ -489,6 +497,16 @@ public:
     size_t get_available_workspace()
     {
         return (device_memory_size - device_memory_in_use);
+    }
+
+    size_t get_device_memory_in_use() const
+    {
+        return device_memory_in_use;
+    }
+
+    rocblas_device_memory_ownership get_device_memory_owner() const
+    {
+        return device_memory_owner;
     }
 
     // Get the solution fitness query

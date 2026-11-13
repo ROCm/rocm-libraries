@@ -156,6 +156,9 @@ void Arguments::init()
 
     use_hipblaslt = -1;
 
+    emulation          = 0;
+    emulation_strategy = 0;
+
     cleanup    = true;
     size_query = false;
 }

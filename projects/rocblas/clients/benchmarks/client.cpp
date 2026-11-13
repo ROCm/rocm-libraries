@@ -1554,6 +1554,21 @@ try
          value<int32_t>(&arg.use_hipblaslt)->default_value(-1),
          "Whether to use hipblaslt (default: -1, always: 1, never: 0)")
 
+        ("emulation",
+         value<int32_t>(&arg.emulation)->default_value(0),
+         "Request hipBLASLt fixed-point emulation of f64_r/f32_r GEMM by setting "
+         "ROCBLAS_EMULATE_DOUBLE_PRECISION and ROCBLAS_EMULATE_SINGLE_PRECISION for the handle "
+         "(default: 0 = no request, the environment applies as it is; 1 = request emulation). "
+         "With the default strategy, hipBLASLt runs native GEMM where it predicts emulation to be "
+         "slower; add --emulation_strategy 2 to emulate regardless of estimated performance.")
+
+        ("emulation_strategy",
+         value<int32_t>(&arg.emulation_strategy)->default_value(0),
+         "Emulation strategy of the handle, as rocblas_set_emulation_strategy (default: 0). "
+         "0 = leave it to HIPBLAS_EMULATION_STRATEGY (performant if unset); "
+         "1 = performant: emulate only where hipBLASLt predicts it to be faster; "
+         "2 = eager: emulate regardless of estimated performance impact, where supported")
+
         ("function_filter",
          value<std::string>(&filter),
          "Simple strstr filter on function name only without wildcards")

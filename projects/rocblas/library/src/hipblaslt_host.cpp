@@ -33,8 +33,14 @@
 #include <iostream>
 
 #include "hipblaslt_host.hpp"
+#include <algorithm>
+#include <atomic>
+#include <cctype>
+#include <cerrno>
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
+
+#include "hipblaslt_emulation.hpp"
 
 namespace
 {
@@ -114,6 +120,68 @@ namespace
             rocblas_cerr << std::endl << msg << std::endl;
         }
     }
+
+#if ROCBLAS_HIPBLASLT_HAS_FP_EMULATION
+    // ROCBLAS_EMULATION_WORKSPACE_MAX_BYTES: a whole non-negative byte count (decimal, 0x hex or
+    // leading-0 octal). Any other value is ignored with a warning, leaving the default limit.
+    struct emulation_max_bytes_env
+    {
+        bool   set   = false;
+        size_t value = 0;
+    };
+
+    emulation_max_bytes_env read_emulation_max_bytes_env()
+    {
+        emulation_max_bytes_env result;
+        const char*             env = getenv("ROCBLAS_EMULATION_WORKSPACE_MAX_BYTES");
+        if(!env || !*env)
+            return result;
+        const char* p = env;
+        while(isspace(static_cast<unsigned char>(*p)))
+            p++;
+        char* end                  = const_cast<char*>(p);
+        errno                      = 0;
+        const unsigned long long v = (*p == '-' || *p == '+') ? 0 : strtoull(p, &end, 0);
+        while(isspace(static_cast<unsigned char>(*end)))
+            end++;
+        if(end != p && !*end && errno != ERANGE)
+        {
+            result.set   = true;
+            result.value = v;
+        }
+        else
+        {
+            rocblas_cerr << "rocBLAS warning: ignoring ROCBLAS_EMULATION_WORKSPACE_MAX_BYTES=\""
+                         << env << "\", which is not a byte count; using the default limit."
+                         << std::endl;
+        }
+        return result;
+    }
+
+    // Limit for growing the pool for emulation: ROCBLAS_EMULATION_WORKSPACE_MAX_BYTES if set
+    // (0 = no growth), else a quarter of the headroom clamped to [256 MiB, 8 GiB]. The headroom
+    // keeps the default pool size plus 64 MiB free, because growing reallocates the pool.
+    size_t emulation_workspace_limit(rocblas_handle handle)
+    {
+        static const emulation_max_bytes_env env = read_emulation_max_bytes_env();
+        if(env.set && !env.value)
+            return 0;
+        auto   saved_device_id = handle->push_device_id();
+        size_t free_hbm = 0, total_hbm = 0;
+        if(hipMemGetInfo(&free_hbm, &total_hbm) != hipSuccess)
+            return 0;
+        const size_t reserve
+            = static_cast<size_t>(handle->getDefaultDeviceMemorySize()) + (size_t{64} << 20);
+        const size_t headroom = free_hbm > reserve ? free_hbm - reserve : 0;
+        const size_t limit
+            = env.set ? env.value : std::clamp(headroom / 4, size_t{256} << 20, size_t{8} << 30);
+        return std::min(limit, headroom);
+    }
+
+    // One warning per reason per process (file scope: the caller is a template).
+    std::atomic<unsigned> warned_emulation_cannot_grow{0}; // one bit per reason
+    std::atomic<bool>     warned_emulation_capped{false};
+#endif
 
 #define CHECK_SOLUTION_FOUND(SOL_COUNT)                                                 \
     do                                                                                  \
@@ -594,6 +662,18 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
     size_t                      workspaceSize = 0;
     rocblas_status              status        = rocblas_status_success;
     const bool explicit_solution = explicit_hipblaslt_solution_index(algo, solution_index);
+#if ROCBLAS_HIPBLASLT_HAS_FP_EMULATION
+    // Holds the handle's emulation strategy; the matmul descriptor only references it.
+    struct emulation_desc_owner
+    {
+        hipblasLtEmulationDesc_t desc{};
+        ~emulation_desc_owner()
+        {
+            if(desc)
+                hipblasLtEmulationDescDestroy(desc);
+        }
+    } emulationDesc;
+#endif
     try
     {
 
@@ -708,12 +788,170 @@ rocblas_status runContractionProblemHipBlasLT(const RocblasContractionProblem<Ti
                     matD, HIPBLASLT_MATRIX_LAYOUT_OFFSET, &offset_d, sizeof(offset_d)));
             }
         }
-        THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmulDescCreate(
-            &matmulDesc, hipblaslt_compute_type_for<Ti, Tc>(prob.handle), hipblaslt_scaletype<Ti>));
+        hipblasComputeType_t compute_type = hipblaslt_compute_type_for<Ti, Tc>(prob.handle);
+#if ROCBLAS_HIPBLASLT_HAS_FP_EMULATION
+        // GEMMs hipBLASLt can emulate: real FP64/FP32, one strided GEMM, no explicit solution
+        // index. Each block below adds its own trigger: the rocBLAS request here, a non-default
+        // strategy, and hipBLASLt's workspace query. hipBLASLt's HIPBLAS_EMULATE_* can request
+        // emulation without the rocBLAS request, so the last two must not depend on it.
+        constexpr bool emulation_types = std::is_same<Ti, double>{} || std::is_same<Ti, float>{};
+        static_assert(!emulation_types || (std::is_same<To, Ti>{} && std::is_same<Tc, Ti>{}),
+                      "FP64/FP32 emulation assumes To == Tc == Ti");
+        const bool emulation_scope
+            = emulation_types && prob.strided_batch && batchCount == 1 && !explicit_solution;
+        if constexpr(emulation_types)
+        {
+            // xf32 keeps its compute type
+            if(emulation_scope && compute_type == hipblaslt_compute_type<Tc>
+               && (std::is_same<Ti, double>{} ? prob.handle->emulate_double_precision
+                                              : prob.handle->emulate_single_precision))
+                compute_type = std::is_same<Ti, double>{} ? HIPBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT
+                                                          : HIPBLAS_COMPUTE_32F_EMULATED_FIXEDPOINT;
+        }
+#endif
+        THROW_IF_HIPBLASLT_ERROR(
+            hipblasLtMatmulDescCreate(&matmulDesc, compute_type, hipblaslt_scaletype<Ti>));
         THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
             matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSA, &transA, sizeof(int32_t)));
         THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
             matmulDesc, HIPBLASLT_MATMUL_DESC_TRANSB, &transB, sizeof(int32_t)));
+
+#if ROCBLAS_HIPBLASLT_HAS_FP_EMULATION
+        // Pass a non-default handle strategy to hipBLASLt, before the workspace query uses it.
+        if constexpr(emulation_types)
+        {
+            if(emulation_scope
+               && prob.handle->emulation_strategy != rocblas_emulation_strategy_default)
+            {
+                // rocblas_emulation_strategy values match hipblasEmulationStrategy_t
+                const int32_t strategy = static_cast<int32_t>(prob.handle->emulation_strategy);
+                THROW_IF_HIPBLASLT_ERROR(hipblasLtEmulationDescCreate(&emulationDesc.desc));
+                THROW_IF_HIPBLASLT_ERROR(
+                    hipblasLtEmulationDescSetAttribute(emulationDesc.desc,
+                                                       HIPBLASLT_EMULATION_DESC_STRATEGY,
+                                                       &strategy,
+                                                       sizeof(strategy)));
+                THROW_IF_HIPBLASLT_ERROR(
+                    hipblasLtMatmulDescSetAttribute(matmulDesc,
+                                                    HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR,
+                                                    &emulationDesc.desc,
+                                                    sizeof(emulationDesc.desc)));
+            }
+        }
+#endif
+
+        // Offer what the pool has left (read above), rounded down to 64 B: allocations round up
+        // to 64 B, so an unaligned remainder could not be allocated and hipBLASLt would be skipped.
+        const size_t pool_budget = max_workspace_size & ~size_t{63};
+        max_workspace_size       = pool_budget;
+
+#if ROCBLAS_HIPBLASLT_HAS_FP_EMULATION
+        // Emulation needs more than the pool remainder (2 GiB at 4096^3 FP64) and runs native below
+        // its minimum, so offer the size it asks for when the pool may grow.
+        if constexpr(emulation_types)
+        {
+            // Pointer-array batched calls are never emulated, and the query cannot tell them apart.
+            // An explicit solution index keeps its own workspace sizing.
+            if(emulation_scope)
+            {
+                const size_t emul_ws = hipblasLtEmulationWorkspaceSize(handle,
+                                                                       matmulDesc,
+                                                                       hipblaslt_datatype<Ti>,
+                                                                       static_cast<int64_t>(prob.m),
+                                                                       static_cast<int64_t>(prob.n),
+                                                                       static_cast<int64_t>(prob.k),
+                                                                       1);
+                // 0 means emulation does not apply here; leave the budget untouched.
+                if(emul_ws > pool_budget)
+                {
+                    // The allocator aborts if asked to grow while device memory is checked out.
+                    bool may_grow = rocblas_is_managing_device_memory(prob.handle)
+                                    && prob.handle->get_device_memory_in_use() == 0;
+                    if(may_grow)
+                    {
+                        // Growing does hipFree + hipMalloc, which a capture cannot record. The null
+                        // stream is queried too: that fails during another stream's global capture.
+                        hipStreamCaptureStatus capture = hipStreamCaptureStatusActive;
+                        may_grow = hipStreamIsCapturing(prob.handle->get_stream(), &capture)
+                                       == hipSuccess
+                                   && capture == hipStreamCaptureStatusNone;
+                    }
+
+                    if(!may_grow)
+                    {
+                        const auto   owner  = prob.handle->get_device_memory_owner();
+                        const size_t needed = prob.handle->get_device_memory_in_use()
+                                              + roundup_device_memory_size(emul_ws);
+                        const char* reason;
+                        const char* remedy;
+                        unsigned    bit;
+                        if(owner == rocblas_device_memory_ownership::user_owned)
+                        {
+                            bit    = 1;
+                            reason = "it was set by rocblas_set_workspace";
+                            remedy = "Passing rocblas_set_workspace a workspace of at least ";
+                        }
+                        else if(owner == rocblas_device_memory_ownership::user_managed)
+                        {
+                            bit    = 2;
+                            reason = "its size was set by ROCBLAS_DEVICE_MEMORY_SIZE or "
+                                     "rocblas_set_device_memory_size";
+                            remedy = "Setting ROCBLAS_DEVICE_MEMORY_SIZE or "
+                                     "rocblas_set_device_memory_size to at least ";
+                        }
+                        else if(prob.handle->get_device_memory_in_use() != 0)
+                        {
+                            bit    = 4;
+                            reason = "the calling function holds rocBLAS device memory";
+                            remedy = "Setting ROCBLAS_DEVICE_MEMORY_SIZE or "
+                                     "rocblas_set_device_memory_size to at least ";
+                        }
+                        else
+                        {
+                            bit    = 8;
+                            reason = "the stream is being captured, or its capture state could "
+                                     "not be read";
+                            remedy = "Running a call of this size before the capture, or setting "
+                                     "ROCBLAS_DEVICE_MEMORY_SIZE or calling "
+                                     "rocblas_set_device_memory_size before the capture with at "
+                                     "least ";
+                        }
+                        if(!(warned_emulation_cannot_grow.fetch_or(bit) & bit))
+                            rocblas_cerr << "rocBLAS warning: fixed-point emulation wants "
+                                         << emul_ws
+                                         << " bytes of workspace but the device memory pool "
+                                            "cannot grow ("
+                                         << reason << "); running with " << pool_budget
+                                         << " bytes. Emulation runs slower with less workspace, "
+                                            "and below its minimum hipBLASLt runs native GEMM "
+                                            "instead. "
+                                         << remedy << needed
+                                         << " bytes covers this call; larger calls may need more."
+                                         << std::endl;
+                    }
+                    else if(const size_t limit = emulation_workspace_limit(prob.handle);
+                            emul_ws > limit)
+                    {
+                        max_workspace_size = std::max(pool_budget, limit);
+                        if(!warned_emulation_capped.exchange(true))
+                            rocblas_cerr
+                                << "rocBLAS warning: fixed-point emulation wants " << emul_ws
+                                << " bytes of workspace; running with " << max_workspace_size
+                                << " bytes (limit " << limit
+                                << "). Emulation runs slower with less workspace, and below its "
+                                   "minimum hipBLASLt runs native GEMM instead. "
+                                   "ROCBLAS_EMULATION_WORKSPACE_MAX_BYTES sets this limit "
+                                   "(0 turns growth off)."
+                                << std::endl;
+                    }
+                    else
+                    {
+                        max_workspace_size = emul_ws;
+                    }
+                }
+            }
+        }
+#endif
 
         THROW_IF_HIPBLASLT_ERROR(hipblasLtMatmulPreferenceCreate(&pref));
         THROW_IF_HIPBLASLT_ERROR(
