@@ -631,7 +631,7 @@ public:
             // Only where the tiles pass wo, so the other programs compile as before.
             if(problem->args.wo % config.q != 0)
             {
-                options.add("CONV_DW_COLMASK", "1");
+                options.add("CONV_DW_COLMASK", std::string("1"));
             }
         }
         if(vtile)
