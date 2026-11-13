@@ -749,6 +749,37 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
         return launch;
     }
 
+    // A 1x1 filter at unit stride and no padding over packed channels-first images reads every
+    // image plane (depth x height x width) as one contiguous run in x and dy alike: the
+    // specialized loops take it as one row of that many positions, so their position chunks
+    // run across row ends (resnext's 16-wide rows filled half of each 32-position chunk).
+    if(config.loop != LOOP_GENERIC && problem.channelsFirst)
+    {
+        const auto& p = problem.base.args;
+        bool pointwise = p.inSpatial[0] * p.inSpatial[1] > 1;
+        for(int axis = 0; axis < CONV_NAIVE_SPATIAL_DIMS; ++axis)
+        {
+            pointwise = pointwise && p.filter[axis] == 1 && p.stride[axis] == 1
+                        && p.prePadding[axis] == 0 && p.inSpatial[axis] == p.outSpatial[axis];
+        }
+        const auto plane
+            = pack_features::checkedProduct({p.inSpatial[0], p.inSpatial[1], p.inSpatial[2]});
+        if(pointwise && plane.has_value() && *plane <= INT_LIMIT / 4)
+        {
+            WrwProblem flat = problem;
+            auto& f = flat.base.args;
+            for(int axis = 0; axis < CONV_NAIVE_SPATIAL_DIMS; ++axis)
+            {
+                f.inSpatial[axis] = f.outSpatial[axis] = axis == 2 ? *plane : 1;
+                f.dilation[axis] = 1;
+            }
+            // Packed channels-first strides of the one-row planes (n, c, d, h, w).
+            f.xStrides[2] = f.xStrides[3] = *plane;
+            f.yStrides[2] = f.yStrides[3] = *plane;
+            return wrwLaunchFor(flat, config, device);
+        }
+    }
+
     // The atom: known, its id, on this device, taking the graph's element type. "fma" is the
     // FMA ring's, which takes fp32 only (16-bit runs on the matrix cores everywhere).
     const auto atomId = atomIdOf(config.atom);

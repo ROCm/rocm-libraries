@@ -534,7 +534,11 @@ EXTRA_TILES = {
     # the output rows' 64 x 64 tile is 3.4x faster), deeplab 1x1 on the rows (gfx11 too:
     # 1.3-2.2x over the ring's tiles on gfx1101).
     ("wmma12", ("5x5",)): [(64, 32, 4, 2, 32)],
-    ("wmma", ("1x1r0",)): [(128, 64, 4, 2, 32)],
+    ("wmma", ("1x1r0",)): [(128, 64, 4, 2, 32), (128, 128, 4, 2, 32)],
+    # gfx950 channels-first pointwise on the output rows, wide tiles (fp16, best config before
+    # -> after; MIOpen): deeplab c256 k1024 128^2 0.38 -> 0.23 ms (0.38), c2048 k256 65^2 0.44
+    # -> 0.22 (0.38), resnext c1024 n128 16^2 0.71 -> 0.22 (0.16).
+    ("mfma32x16", ("1x1r0",)): [(256, 128, 4, 2, 32), (128, 128, 2, 2, 64)],
     # Packed rows, measured (fp16, n128): gfx950 resnet50 c512 7^2 / 14^2 s2, inception c288
     # 35^2 s2; gfx1201 the same and resnet50 c256 14^2 (its 128 x 32 tile at 64 positions ran
     # within 1% of the 64 x 64 one: not shipped); gfx11 (gfx1101) the WMMA tiles again, 2.4x.
@@ -575,6 +579,14 @@ RING_CF_TILES = {
         (64, 64, 2, 2, 72)
     ],
     ("mfma32x16", ("3x3d4", "3x3d12", "3x3d24")): [(128, 64, 4, 2, 80)],
+    # Channels-first pointwise on RDNA's ring: wide tiles for a long reduction behind a big
+    # output (deeplab 1x1 c1024 k2048 128^2: gfx1100 71.0 -> 23.7 ms, MIOpen 36.0; c256 k1024
+    # 5.43 -> 2.97 / 5.04; gfx1201 3.33 -> 2.21 / 2.31).
+    ("wmma", ("1x1",)): [
+        (128, 64, 4, 2, 64),
+        (128, 128, 4, 2, 32),
+        (64, 128, 2, 4, 64),
+    ],
 }
 # Dilated 3x3 ring rows on the 16-bit 32 x 32 atoms of gfx908 to gfx942 (xcd 0) also at 4 blocks per
 # dispatch unit: gfx942 MI325X 128^2 d24 4.01 against 5.56 ms at 2, d36 4.58 / 4.73, 65^2 d12
@@ -1282,6 +1294,15 @@ def build():
                             and not any(v["bpu"] == 4 for v in variants)
                         ):
                             variants = variants + [dict(c, bpu=4)]
+                        # RDNA channels-first pointwise: also one block per dispatch unit
+                        # (gfx1100 deeplab c256 k1024 128^2: 2.97 ms at 1 against 3.87 at 2).
+                        if (
+                            tag in ("1x1", "1x1r0")
+                            and c["layout"] == CF
+                            and c["atom"].startswith("wmma")
+                            and not any(v["bpu"] == 1 for v in variants)
+                        ):
+                            variants = variants + [dict(c, bpu=1)]
                         CATALOG[dtype].extend(variants)
                     else:
                         dropped += 1
