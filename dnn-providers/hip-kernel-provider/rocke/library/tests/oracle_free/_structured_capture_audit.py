@@ -1,18 +1,22 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Replayable audit of saved structured-logit GPU captures, coordinate by coordinate.
+"""Exact-path audit of structured-logit GPU outputs, coordinate by coordinate.
 
-The GPU lane writes the raw output bits of each quick case as
+Tier B membership alone cannot explain an output: the Tier B of an affected
+FP16 coordinate already held both epilogue roundings before assumption A-F
+named them. This audit asks the sharper question. At every coordinate the
+stored bits must equal one member of the exact union {IR-exact, single-rounded
+epilogue} of the IR-exact path, and, when the code object is a named artifact,
+the coordinates where the two differ must follow that artifact's per-site
+rule. Membership in Tier B is checked separately. Unexplained coordinates are
+reported, never absorbed into an enclosure.
+
+The GPU lane runs ``audit_case`` on every launch and fails on an unexplained
+coordinate. It also writes the raw output bits of each quick case as
 ``<case_id>.npz`` (one array per exposure) when
-``ROCKE_ORACLE_FREE_CALIBRATION_OUT`` is set. Tier B membership alone cannot
-explain such a capture: the Tier B of an affected FP16 coordinate already held
-both epilogue roundings before assumption A-F named them. This audit asks the
-sharper question. At every coordinate the stored bits must equal one member of
-the exact union {IR-exact, single-rounded epilogue} of the IR-exact path, and
-the coordinates where the two differ must follow the named artifact's
-per-site rule. Membership in Tier B is checked separately. Unexplained
-coordinates are reported, never absorbed into an enclosure.
+``ROCKE_ORACLE_FREE_CALIBRATION_OUT`` is set, and this module replays the same
+audit on such captures.
 
 Usage, from ``rocke/library`` with ``rocke`` importable::
 
@@ -53,18 +57,24 @@ class CaseAudit:
     """Every coordinate of one case judged against the exact epilogue union.
 
     ``ir_mismatches`` differ from the IR-exact emulation and
-    ``artifact_mismatches`` from the named artifact's. ``lane_rule`` counts,
-    per ``d mod 4``, the coordinates whose single and double roundings differ
-    as ``(stored single, stored double)``: the only coordinates that can
-    confirm or refute a position rule."""
+    ``artifact_mismatches`` from the named artifact's; without a named
+    artifact there is no per-site rule and ``artifact_mismatches`` is empty.
+    ``lane_rule`` counts, per ``d mod 4``, the coordinates whose single and
+    double roundings differ as ``(stored single, stored double)``: the only
+    coordinates that can confirm or refute a position rule."""
 
     case_id: str
+    artifact: str | None
     coordinates: int
     ir_mismatches: tuple[Coordinate, ...]
     artifact_mismatches: tuple[Coordinate, ...]
     unexplained: tuple[tuple[Coordinate, int], ...]
     outside_tier_b: tuple[Coordinate, ...]
     lane_rule: Mapping[int, tuple[int, int]]
+
+    @property
+    def explained(self) -> bool:
+        return not (self.unexplained or self.outside_tier_b or self.artifact_mismatches)
 
 
 @dataclass(frozen=True)
@@ -76,10 +86,7 @@ class CaptureAudit:
 
     @property
     def explained(self) -> bool:
-        return not self.problems and all(
-            not (item.unexplained or item.outside_tier_b or item.artifact_mismatches)
-            for item in self.cases.values()
-        )
+        return not self.problems and all(item.explained for item in self.cases.values())
 
 
 def load_capture(
@@ -109,14 +116,23 @@ def audit_case(
     case: StructuredCase,
     capture: Mapping[str, np.ndarray],
     *,
-    artifact: str,
+    artifact: str | None,
     rows: Iterable[int] | None = None,
 ) -> CaseAudit:
-    """Judge every coordinate of ``rows`` (default: all) of one capture."""
-    single_lanes = STRUCTURED_EPILOGUE_ARTIFACTS[artifact].single_lanes
+    """Judge every coordinate of ``rows`` (default: all) of one capture.
+
+    With ``artifact=None`` the code object is not a named one: every
+    coordinate must still be in the exact union, and no per-site rule is
+    applied."""
+    if artifact is not None and artifact not in STRUCTURED_EPILOGUE_ARTIFACTS:
+        raise ValueError(f"no epilogue artifact named {artifact!r}")
     queries = tuple(range(case.base.seqlen_q)) if rows is None else tuple(rows)
     lane = np.arange(case.base.head_dim) % 4
-    single_site = np.isin(lane, sorted(single_lanes))
+    single_site = (
+        None
+        if artifact is None
+        else np.isin(lane, sorted(STRUCTURED_EPILOGUE_ARTIFACTS[artifact].single_lanes))
+    )
     ir_mismatches: list[Coordinate] = []
     artifact_mismatches: list[Coordinate] = []
     unexplained: list[tuple[Coordinate, int]] = []
@@ -132,7 +148,11 @@ def audit_case(
             for head in range(case.base.nhead_q):
                 observed = capture[exposure][0, query, head]
                 double, single = epilogue_alternatives(case, exposure, query, head)
-                expected = np.where(single_site, single, double)
+                off_rule = (
+                    np.zeros(observed.shape, dtype=bool)
+                    if single_site is None
+                    else observed != np.where(single_site, single, double)
+                )
                 coordinates += observed.size
                 differs = single != double
                 for value in range(4):
@@ -144,7 +164,7 @@ def audit_case(
                 )
                 for found, mask in (
                     (ir_mismatches, observed != double),
-                    (artifact_mismatches, observed != expected),
+                    (artifact_mismatches, off_rule),
                     (outside, ~inside),
                 ):
                     found.extend(
@@ -158,6 +178,7 @@ def audit_case(
                 )
     return CaseAudit(
         case.case_id,
+        artifact,
         coordinates,
         tuple(ir_mismatches),
         tuple(artifact_mismatches),
@@ -211,33 +232,39 @@ def audit_captures(
     )
 
 
+def format_case_audit(item: CaseAudit, *, limit: int = 8) -> str:
+    """One case's counts, then up to ``limit`` coordinates of each kind."""
+    rule = " ".join(
+        f"d%4={value}:single={single}/double={double}"
+        for value, (single, double) in item.lane_rule.items()
+    )
+    lines = [
+        f"{item.case_id}: artifact={item.artifact or 'unnamed'} "
+        f"coordinates={item.coordinates} "
+        f"ir_exact_mismatches={len(item.ir_mismatches)} "
+        f"artifact_exact_mismatches={len(item.artifact_mismatches)} "
+        f"unexplained={len(item.unexplained)} "
+        f"outside_tier_b={len(item.outside_tier_b)}; {rule}"
+    ]
+    for label, found in (
+        ("ir_exact mismatch", item.ir_mismatches),
+        ("artifact_exact mismatch", item.artifact_mismatches),
+        ("unexplained", item.unexplained),
+        ("outside Tier B", item.outside_tier_b),
+    ):
+        for entry in found[:limit]:
+            lines.append(f"  {label}: {entry}")
+        if len(found) > limit:
+            lines.append(f"  ... {len(found) - limit} more {label}")
+    return "\n".join(lines)
+
+
 def format_audit(audit: CaptureAudit, *, limit: int = 8) -> str:
     compiler = STRUCTURED_EPILOGUE_ARTIFACTS[audit.artifact].compiler
     captures = [str(path) for path in audit.directories]
     lines = [f"artifact={audit.artifact} ({compiler}); captures={captures}"]
     lines.extend(f"PROBLEM {problem}" for problem in audit.problems)
-    for case_id, item in audit.cases.items():
-        rule = " ".join(
-            f"d%4={value}:single={single}/double={double}"
-            for value, (single, double) in item.lane_rule.items()
-        )
-        lines.append(
-            f"{case_id}: coordinates={item.coordinates} "
-            f"ir_exact_mismatches={len(item.ir_mismatches)} "
-            f"artifact_exact_mismatches={len(item.artifact_mismatches)} "
-            f"unexplained={len(item.unexplained)} "
-            f"outside_tier_b={len(item.outside_tier_b)}; {rule}"
-        )
-        for label, found in (
-            ("ir_exact mismatch", item.ir_mismatches),
-            ("artifact_exact mismatch", item.artifact_mismatches),
-            ("unexplained", item.unexplained),
-            ("outside Tier B", item.outside_tier_b),
-        ):
-            for entry in found[:limit]:
-                lines.append(f"  {label}: {entry}")
-            if len(found) > limit:
-                lines.append(f"  ... {len(found) - limit} more {label}")
+    lines.extend(format_case_audit(item, limit=limit) for item in audit.cases.values())
     lines.append("explained" if audit.explained else "NOT EXPLAINED")
     return "\n".join(lines)
 

@@ -6,7 +6,9 @@
 Each quick case launches its fixture under the four basis exposures and the
 folded exposure, twice, through a raw-bit adapter. Every stored coordinate must
 lie in the Tier B set derived on the CPU from the pinned arithmetic path; no
-measured value enters that set.
+measured value enters that set. Every stored coordinate must also equal what
+the IR-exact path stores, with the output store rounded twice or once
+(assumption A-F), so a deviation that stays inside Tier B still fails.
 
 The only skip is a processor that is not gfx942, through the shared
 ``rocke.tests.gpu.current_device_arch_in`` gate, so ``ROCKE_REQUIRE_GFX942=1``
@@ -44,6 +46,7 @@ from ._structured_analytical import (
     structured_records,
     require_structured_calibration,
 )
+from ._structured_capture_audit import audit_case, format_case_audit
 from ._structured_shapes import Observation, encode_bits
 from ._structured_subject import (
     ResolvedDenseSubject,
@@ -162,7 +165,8 @@ def _capture_records(
 
 @pytest.mark.parametrize("case", STRUCTURED_QUICK_CASES, ids=lambda case: case.case_id)
 def test_structured_logits(case: StructuredCase) -> None:
-    """Gate a ratified case: deterministic, and every coordinate in Tier B.
+    """Gate a ratified case: deterministic, every coordinate in Tier B and on
+    the exact path.
 
     Mutation self-checks and record capture run before the gate, so an
     unratified case still records what ratification needs."""
@@ -201,10 +205,12 @@ def test_structured_logits(case: StructuredCase) -> None:
             case, StructuredMutation.OMIT_SQRT_D
         )
 
-    # The IR-exact and the launched artifact's epilogue agreement are recorded
-    # separately (A-F); neither enters the verdict.
+    # The exact path, on every row. A code object named in the artifact table
+    # must follow that artifact's per-site epilogue rule; any other must still
+    # store the double- or the single-rounded value at every coordinate.
     code_object = _code_object(subject)
     artifact = epilogue_artifact_for(case.dtype, code_object["hsaco_sha256"])
+    exact = audit_case(case, dict(observation.exposures), artifact=artifact)
     _capture_records(
         case,
         structured_records(
@@ -226,3 +232,7 @@ def test_structured_logits(case: StructuredCase) -> None:
     assert deterministic, f"{case.case_id}: repeated launches differ; {summary}"
     assert control.compared > 0, f"{case.case_id}: nothing compared; {summary}"
     assert not control.violations, f"{case.case_id}: {summary}"
+    assert exact.explained, (
+        f"stored bits leave the exact path of HSACO {code_object['hsaco_sha256']} "
+        f"({code_object['compiler']}); {format_case_audit(exact)}"
+    )

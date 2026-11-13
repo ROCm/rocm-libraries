@@ -328,9 +328,10 @@ class EpilogueArtifact:
     evidence: str
 
 
-# Only an artifact named here is emulated exactly (``artifact_exact``); the
-# verdict never depends on this table: Tier B allows either rounding at every
-# FP16 site.
+# Only an artifact named here is emulated exactly (``artifact_exact``). Tier B
+# never depends on this table: it allows either rounding at every FP16 site.
+# The GPU lane's exact-path check does: a launched code object named here must
+# follow its per-site rule, and any other one may round either way per site.
 STRUCTURED_EPILOGUE_ARTIFACTS: Mapping[str, EpilogueArtifact] = MappingProxyType(
     {
         "rocm-7.13.0": EpilogueArtifact(
