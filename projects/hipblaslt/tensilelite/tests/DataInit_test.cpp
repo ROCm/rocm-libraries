@@ -32,8 +32,8 @@
 #include <string>
 #include <type_traits>
 #include <vector>
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include <hip/hip_runtime.h>
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
 #include <mxDataGenerator/dataTypeInfo.hpp>
 #include <mxDataGenerator/ocp_e2m1_mxfp4.hpp>
 #include <mxDataGenerator/ocp_e2m3_mxfp6.hpp>
@@ -493,28 +493,251 @@ TEST(DataInitializationInputEpoch, PerSolutionEpochRequiresPreSolution)
     // A different solution that preSolution() has not seen is still rejected.
     EXPECT_THROW(dataInit.inputEpoch(&otherSolution), std::logic_error);
 }
+#endif
 
-TEST(DataInitializationReferenceRecompute, Gfx1250ReusesPreswizzledMXAcrossSolutions)
+// =============================================================================
+//   Section 3b - prepareCPUInputs / prepareGPUInputs copy the current problem's extent
+//
+//   The copies only cover the current problem's tensors, not the run's largest one. With
+//   problem-independent data (Random) every GPU call after the first takes the fast path and
+//   copies no inputs, so the first copy must still fill the whole buffers: a later, larger
+//   problem reads them as they are. With problem-dependent data (SerialDim0) every call copies;
+//   its values depend on the coordinate, so a copy that misses part of a problem's extent
+//   leaves an earlier problem's values there, which the independent expectation catches.
+//   Sizes start below the run's maximum, shrink, then grow to it.
+//   Each problem is then reset as before a second solution: the host data has not changed, so
+//   the upload to the GPU's pristine copy is skipped, and the debug mode (verify-upload-skip)
+//   reads that copy back and throws if it differs from the host data.
+// =============================================================================
+class DataInitializationCopyExtentTest
+    : public ::testing::TestWithParam<TensileLite::Client::InitMode>
 {
-    hipDeviceProp_t prop{};
-    ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess);
-    if(std::string(prop.gcnArchName).find("gfx1250") == std::string::npos)
-        GTEST_SKIP() << "gfx1250-specific reuse behavior is only observable on gfx1250";
+};
 
-    auto problem = makeProblem(rocisa::DataType::Float8,
-                               rocisa::DataType::Float8,
-                               /*mxBlockA=*/32,
-                               /*mxBlockB=*/32);
-    auto args = makeMinimalClientArgs(/*mxScaleFormat=*/1);
+TEST_P(DataInitializationCopyExtentTest, GpuInputsMatchCpuInputsWhenProblemsShrinkAndGrow)
+{
+    using TensileLite::Client::InitMode;
+
+    int deviceCount = 0;
+    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount <= 0)
+        GTEST_SKIP() << "No HIP device";
+
+    auto args = makeMinimalClientArgs(/*mxScaleFormat=*/0);
+    for(auto const* name : {"type",
+                            "a-type",
+                            "b-type",
+                            "c-type",
+                            "d-type",
+                            "compute-input-type-A",
+                            "compute-input-type-B"})
+        setOption(args, name, rocisa::DataType::Float);
+    setOption(args,
+              "problem-size",
+              std::vector<std::vector<size_t>>{
+                  {96, 80, 1, 72}, {16, 24, 1, 8}, {200, 136, 2, 120}, {40, 40, 1, 40}});
+    for(auto const* name : {"init-a", "init-b", "init-c"})
+        setOption(args, name, GetParam());
+    setOption(args, "verify-upload-skip", true);
+
     TensileLite::Client::ClientProblemFactory factory(args);
     TensileLite::Client::DataInitialization   dataInit(args, factory);
+    ASSERT_EQ(factory.problems().size(), 4u);
 
-    ContractionSolution swizzleSolution;
-    swizzleSolution.problemType.mxScaleFormat = 1;
+    for(size_t k = 0; k < factory.problems().size(); k++)
+    {
+        auto const& problem = dynamic_cast<ContractionProblemGemm const&>(*factory.problems()[k]);
+        // The client prepares the reference (CPU) inputs before the GPU ones.
+        auto cpu = std::dynamic_pointer_cast<TensileLite::ContractionInputs>(
+            dataInit.prepareCPUInputs(&problem));
+        for(char const* call : {"problem", "solution reset"})
+        {
+            std::shared_ptr<TensileLite::ContractionInputs> gpu;
+            ASSERT_NO_THROW(gpu = std::dynamic_pointer_cast<TensileLite::ContractionInputs>(
+                                dataInit.prepareGPUInputs(&problem)))
+                << call << " of problem " << k;
+            ASSERT_TRUE(cpu && gpu);
 
-    EXPECT_FALSE(dataInit.referenceNeedsPerSolutionRecompute(problem, &swizzleSolution));
+            std::pair<void const*, void const*> const inputs[]
+                = {{cpu->a, gpu->a}, {cpu->b, gpu->b}, {cpu->c, gpu->c}};
+            for(size_t i = 0; i < std::size(inputs); i++)
+            {
+                auto const&          desc  = problem.tensors()[i];
+                size_t               bytes = desc.totalAllocatedBytes();
+                std::vector<uint8_t> fromGpu(bytes);
+                ASSERT_EQ(hipMemcpy(fromGpu.data(), inputs[i].second, bytes, hipMemcpyDeviceToHost),
+                          hipSuccess);
+                EXPECT_EQ(std::memcmp(fromGpu.data(), inputs[i].first, bytes), 0)
+                    << "tensor " << desc.getName() << " after the " << call << " of problem " << k;
+                if(GetParam() == InitMode::SerialDim0)
+                {
+                    // Packed tensors: every element of the extent is written.
+                    std::vector<float> expected(desc.totalAllocatedElements());
+                    DataInitialization::initArraySerialDim<float>(expected.data(), 0, desc);
+                    EXPECT_EQ(std::memcmp(expected.data(), inputs[i].first, bytes), 0)
+                        << "CPU tensor " << desc.getName() << " of problem " << k;
+                    EXPECT_EQ(std::memcmp(expected.data(), fromGpu.data(), bytes), 0)
+                        << "GPU tensor " << desc.getName() << " after the " << call
+                        << " of problem " << k;
+                }
+            }
+        }
+    }
+
+    // With problem-dependent data (SerialDim0) every reset takes the slow path, whose uploads
+    // are skipped and verified; Random takes the fast path, which uploads nothing.
+    testing::internal::CaptureStdout();
+    dataInit.finalizeReport();
+    std::string const report = testing::internal::GetCapturedStdout();
+    if(GetParam() == InitMode::SerialDim0)
+        EXPECT_EQ(report.find("Verified 0 "), std::string::npos) << report;
+    EXPECT_NE(report.find("skipped GPU input uploads against the host data"), std::string::npos)
+        << report;
 }
 
+INSTANTIATE_TEST_SUITE_P(InitModes,
+                         DataInitializationCopyExtentTest,
+                         ::testing::Values(TensileLite::Client::InitMode::Random,
+                                           TensileLite::Client::InitMode::SerialDim0),
+                         [](::testing::TestParamInfo<TensileLite::Client::InitMode> const& info) {
+                             return TensileLite::Client::ToString(info.param);
+                         });
+
+// =============================================================================
+//   Section 3c - batched-pointer arrays follow the bounds-check padding
+//
+//   prepareGPUInputs uploads, per tensor, an array with the start pointer of each batch
+//   (inputs->batchA..D), and skips the upload when the array was built from the same start
+//   pointer and batch geometry. The start pointer includes the bounds-check padding, which
+//   depends on the problem and, with GuardPageAll, flips between the two runs of one solution
+//   (GuardPageFront: no padding, GuardPageBack: the tensor ends at the guard page) without a new
+//   problem, input epoch or buffer. Each problem is run like the client runs two solutions
+//   (GuardPageAll: Front, Back, Front, Back). After every call the arrays must hold the pointers
+//   of that call's tensors; the debug mode (verify-upload-skip) reads back every skipped array
+//   and throws if it is stale. NaN mode keeps its padding for the whole problem, so its later
+//   runs skip the upload. GuardPageFront has no padding, so the start pointer stays the same
+//   across problems and only the batch geometry tells them apart: the second problem has other
+//   batch strides, the last one only another batch count.
+// =============================================================================
+class DataInitializationBatchedPointersTest
+    : public ::testing::TestWithParam<TensileLite::Client::BoundsCheckMode>
+{
+};
+
+TEST_P(DataInitializationBatchedPointersTest, FollowBoundsCheckRunsAndProblems)
+{
+    using TensileLite::Client::BoundsCheckMode;
+
+    int deviceCount = 0;
+    if(hipGetDeviceCount(&deviceCount) != hipSuccess || deviceCount <= 0)
+        GTEST_SKIP() << "No HIP device";
+
+    auto args = makeMinimalClientArgs(/*mxScaleFormat=*/0);
+    for(auto const* name : {"type",
+                            "a-type",
+                            "b-type",
+                            "c-type",
+                            "d-type",
+                            "compute-input-type-A",
+                            "compute-input-type-B"})
+        setOption(args, name, rocisa::DataType::Float);
+    // Sizes (i, j, batch, l): the second problem has other batch strides and paddings, the last
+    // one the third's strides with more batches.
+    setOption(args,
+              "problem-size",
+              std::vector<std::vector<size_t>>{
+                  {64, 48, 3, 40}, {32, 24, 5, 16}, {64, 48, 3, 40}, {64, 48, 5, 40}});
+    setOption(args, "bounds-check", GetParam());
+    setOption(args, "verify-upload-skip", true);
+
+    TensileLite::Client::ClientProblemFactory factory(args);
+    TensileLite::Client::DataInitialization   dataInit(args, factory);
+    ASSERT_EQ(factory.problems().size(), 4u);
+
+    TensileLite::Client::TimingEvents const noEvents({}, 0, 0);
+    for(size_t k = 0; k < factory.problems().size(); k++)
+    {
+        auto const& problem = dynamic_cast<ContractionProblemGemm const&>(*factory.problems()[k]);
+        ASSERT_EQ(problem.batchIndices().size(), 1u);
+        auto const   batchIndex = problem.batchIndices()[0];
+        size_t const batchCount = problem.batchSize(0);
+        dataInit.prepareCPUInputs(&problem);
+
+        void const* frontA = nullptr;
+        for(size_t run = 0; run < 4; run++)
+        {
+            bool const back = GetParam() == BoundsCheckMode::GuardPageAll && run % 2 == 1;
+            std::shared_ptr<TensileLite::ContractionInputs> gpu;
+            ASSERT_NO_THROW(gpu = std::dynamic_pointer_cast<TensileLite::ContractionInputs>(
+                                dataInit.prepareGPUInputs(&problem)))
+                << "run " << run << " of problem " << k;
+            ASSERT_TRUE(gpu);
+            if(!back)
+                frontA = frontA ? frontA : gpu->a;
+            // GuardPageAll's two runs use different start pointers, the same in both solutions.
+            EXPECT_EQ(gpu->a == frontA, !back) << "run " << run << " of problem " << k;
+
+            struct
+            {
+                void const*        start;
+                void const* const* batch;
+                size_t             index;
+            } const tensors[] = {{gpu->a, gpu->batchA, batchIndex.a},
+                                 {gpu->b, gpu->batchB, batchIndex.b},
+                                 {gpu->c, gpu->batchC, batchIndex.c},
+                                 {gpu->d, gpu->batchD, batchIndex.d}};
+            for(size_t i = 0; i < std::size(tensors); i++)
+            {
+                auto const&        desc = problem.tensors()[i];
+                std::vector<void*> onGpu(batchCount);
+                ASSERT_EQ(hipMemcpy(onGpu.data(),
+                                    tensors[i].batch,
+                                    batchCount * sizeof(void*),
+                                    hipMemcpyDeviceToHost),
+                          hipSuccess);
+                for(size_t b = 0; b < batchCount; b++)
+                {
+                    auto const* expected = static_cast<uint8_t const*>(tensors[i].start)
+                                           + b * desc.strides()[tensors[i].index] * sizeof(float);
+                    EXPECT_EQ(onGpu[b], expected) << "tensor " << desc.getName() << " batch " << b
+                                                  << ", run " << run << " of problem " << k;
+                }
+            }
+
+            // End of a run, then of a solution after its second run.
+            dataInit.validateWarmups({0}, noEvents, noEvents);
+            if(run % 2 == 1)
+                dataInit.postSolution();
+        }
+    }
+
+    testing::internal::CaptureStdout();
+    dataInit.finalizeReport();
+    std::string const report = testing::internal::GetCapturedStdout();
+    if(GetParam() != BoundsCheckMode::GuardPageAll)
+        EXPECT_EQ(report.find("Verified 0 skipped GPU batched-pointer uploads"), std::string::npos)
+            << report;
+    EXPECT_NE(report.find("skipped GPU batched-pointer uploads"), std::string::npos) << report;
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    BoundsCheckModes,
+    DataInitializationBatchedPointersTest,
+    ::testing::Values(TensileLite::Client::BoundsCheckMode::NaN,
+                      TensileLite::Client::BoundsCheckMode::GuardPageFront,
+                      TensileLite::Client::BoundsCheckMode::GuardPageAll),
+    [](::testing::TestParamInfo<TensileLite::Client::BoundsCheckMode> const& info) {
+        switch(info.param)
+        {
+        case TensileLite::Client::BoundsCheckMode::NaN:
+            return "NaN";
+        case TensileLite::Client::BoundsCheckMode::GuardPageFront:
+            return "GuardPageFront";
+        default:
+            return "GuardPageAll";
+        }
+    });
+
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
 namespace
 {
     // Exposes the state DataInitialization keeps to reuse MX inputs across solutions.
