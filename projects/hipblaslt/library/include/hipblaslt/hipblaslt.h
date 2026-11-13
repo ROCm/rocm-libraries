@@ -1463,7 +1463,8 @@ hipblasStatus_t
  *  algo                    Handle for matrix multiplication algorithm to be
  * used. See \ref hipblasLtMatmulAlgo_t. When NULL, an implicit heuristics query
  * with default search preferences will be performed to determine the actual
- * algorithm to use.
+ * algorithm to use. If no algorithm supports the problem, the call returns
+ * HIPBLAS_STATUS_NOT_SUPPORTED.
  *  @param[in]
  *  workspace               Pointer to the workspace buffer allocated in the GPU
  * memory. Pointer must be 16B aligned (that is, the lowest 4 bits of the address must

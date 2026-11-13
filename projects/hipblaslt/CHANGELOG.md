@@ -18,6 +18,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 ### Resolved issues
 
 * Fixed `hipblaslt-bench` and `hipblaslt-test` rejecting a compute-input type override for A alone and accepting an unsupported override for B alone.
+* `hipblasLtMatmul` with a null algo returned `HIPBLAS_STATUS_INTERNAL_ERROR` when no algorithm supports the problem. It now returns `HIPBLAS_STATUS_NOT_SUPPORTED`, and logs the problem with `HIPBLASLT_LOG_LEVEL` set to 1 (error) or higher.
 * Fixed `hipblasLtMatmul` and `hipblaslt_ext::Gemm::initialize` accepting an algo for a grouped GEMM solution, and `hipblaslt_ext::GroupedGemm::initialize` accepting one for a non-grouped solution. They now return `HIPBLAS_STATUS_INVALID_VALUE`.
 
 ## hipBLASLt 1.5.0 for ROCm 10.2.0

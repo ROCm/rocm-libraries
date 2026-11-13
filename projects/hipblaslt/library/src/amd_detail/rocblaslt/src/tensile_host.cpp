@@ -41,6 +41,7 @@
 #include "rocblaslt_fused_a2a_peers.hpp"
 #include "candidate_preparation.hpp"
 #include "get_all_search_type_for_test.hpp"
+#include "solution_lookup_miss_for_test.hpp"
 #include "rocblaslt_mat_utils.hpp"
 #include "rocblaslt_secure_env.hpp"
 #include "tensile_host.hpp"
@@ -6012,8 +6013,41 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
             int returnAlgoCount = 0;
             status = getBestSolutions(
                 prob, handle, gemmData, 1, &heuristicResult, &returnAlgoCount, prob.workspaceSize);
-            if(returnAlgoCount == 0)
+            if(status != rocblaslt_status_success)
                 return rocblaslt_status_not_implemented;
+            if(returnAlgoCount == 0)
+            {
+                log_error(__func__,
+                          "no algorithm supports this problem: arch",
+                          deviceProp ? deviceProp->gcnArchName : "unknown",
+                          "m",
+                          prob.m,
+                          "n",
+                          prob.n,
+                          "k",
+                          prob.k,
+                          "batch_count",
+                          prob.batch_count,
+                          "trans_a",
+                          hipblasOperation_to_string(prob.trans_a),
+                          "trans_b",
+                          hipblasOperation_to_string(prob.trans_b),
+                          "type_a",
+                          hip_datatype_to_string(prob.a_type),
+                          "type_b",
+                          hip_datatype_to_string(prob.b_type),
+                          "type_c",
+                          hip_datatype_to_string(prob.c_type),
+                          "type_d",
+                          hip_datatype_to_string(prob.d_type),
+                          "compute_type",
+                          rocblaslt_compute_type_string(prob.compute_type),
+                          "epilogue",
+                          rocblaslt_epilogue_to_string(prob.epilogue),
+                          "workspace_size",
+                          prob.workspaceSize);
+                return rocblaslt_status_not_supported;
+            }
             algo = &heuristicResult.algo;
         }
         updateTensileData(prob, *data);
@@ -7800,6 +7834,23 @@ static rocblaslt_status
     return rocblaslt_status_success;
 }
 
+namespace
+{
+    std::atomic<int> g_solutionLookupMissForTest{rocblaslt_testing_solution_lookup_miss_none};
+
+    rocblaslt_testing_solution_lookup_miss solutionLookupMissForTest()
+    {
+        return static_cast<rocblaslt_testing_solution_lookup_miss>(
+            g_solutionLookupMissForTest.load(std::memory_order_relaxed));
+    }
+}
+
+extern "C" HIPBLASLT_EXPORT void
+    rocblaslt_testing_set_solution_lookup_miss_for_test(rocblaslt_testing_solution_lookup_miss miss)
+{
+    g_solutionLookupMissForTest.store(miss, std::memory_order_relaxed);
+}
+
 rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                   rocblaslt_handle                   handle,
                                   std::shared_ptr<void>              gemmData,
@@ -7874,6 +7925,8 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
                                  &fallbackRuledOut);
         ruledOut  = solutions.empty() && (ruledOut || fallbackRuledOut);
     }
+    if(solutionLookupMissForTest() != rocblaslt_testing_solution_lookup_miss_none)
+        solutions.clear();
     if(layoutRuledOut)
         *layoutRuledOut = ruledOut;
 
@@ -7927,6 +7980,11 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
 {
     g_lastGetAllSearchType.store(static_cast<int>(searchType), std::memory_order_relaxed);
     log_api(__func__, "Entering function");
+    if(solutionLookupMissForTest() == rocblaslt_testing_solution_lookup_miss_all)
+    {
+        heuristicResults.clear();
+        return rocblaslt_status_success;
+    }
 
     std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>
                                            library;
