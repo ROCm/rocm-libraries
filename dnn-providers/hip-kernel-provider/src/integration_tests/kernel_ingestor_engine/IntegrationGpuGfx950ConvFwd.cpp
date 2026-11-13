@@ -174,53 +174,6 @@ std::string selectedKernel(const LogRecorderBase& recorder)
     return selected;
 }
 
-class ScopedPluginLogCapture
-{
-public:
-    explicit ScopedPluginLogCapture(void* userHandle)
-        : _userHandle(userHandle)
-    {
-        const auto read = getGlobalLogLevel(_previousLevel);
-        EXPECT_EQ(read.code, ErrorCode::OK) << read.err_msg;
-        const auto registered = setCallback(HIPDNN_SEV_INFO);
-        EXPECT_EQ(registered.code, ErrorCode::OK) << registered.err_msg;
-        _registered = registered.code == ErrorCode::OK;
-        const auto level = setGlobalLogLevel(HIPDNN_SEV_INFO);
-        EXPECT_EQ(level.code, ErrorCode::OK) << level.err_msg;
-    }
-
-    ~ScopedPluginLogCapture()
-    {
-        if(_registered)
-        {
-            static_cast<void>(setCallback(HIPDNN_SEV_OFF));
-        }
-        static_cast<void>(setGlobalLogLevel(_previousLevel));
-    }
-
-    ScopedPluginLogCapture(const ScopedPluginLogCapture&) = delete;
-    ScopedPluginLogCapture& operator=(const ScopedPluginLogCapture&) = delete;
-
-    IsolatedLogRecorder& recorder() const
-    {
-        return _recorder;
-    }
-
-private:
-    Error setCallback(hipdnnSeverity_t level) const
-    {
-        return setUserLogCallback(IsolatedLogRecorder::getIsolatedUserRecordingCallback(),
-                                  level,
-                                  LogCallbackMode::SYNC,
-                                  _userHandle);
-    }
-
-    hipdnnSeverity_t _previousLevel = HIPDNN_SEV_OFF;
-    void* _userHandle;
-    bool _registered = false;
-    mutable IsolatedLogRecorder _recorder = IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
-};
-
 } // namespace
 
 class IntegrationGpuGfx950ConvFwd
