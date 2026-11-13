@@ -68,6 +68,7 @@ INSTANCE_UUID_NAMESPACE = _common.INSTANCE_UUID_NAMESPACE
 PRODUCT_ENGINE = "hipkernel:Gfx950ConvFwdAot"
 
 _UUID = _common._UUID
+_kernels = _common._kernels
 
 #: Identity fields the packaged forward launch takes from the identity
 #: (``AOT_IMPLICIT_GEMM_CARRIED`` of the rocKE adapter). Every other field must hold
