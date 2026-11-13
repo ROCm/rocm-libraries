@@ -15,9 +15,9 @@
 //
 // Non-finite x (parity with the reference): a product whose dy operand is not one of the
 // convolution's is never accumulated, so an inf / NaN in x never meets a (row, column) pairing the
-// convolution does not have. The staging marks a step whose x rows hold a non-finite element (one
-// block-wide vote with the step's barrier); only such a step multiplies carefully, so finite data
-// runs the plain loop. Careful columns: past wo the lane's A halves are zeroed (CONV_DW_COLMASK, set
+// convolution does not have. The staging marks a step whose x rows hold a non-finite element (an
+// LDS flag of three rotating slots, set between the step's two barriers and cleared two steps
+// ahead); only such a step multiplies carefully, so finite data runs the plain loop. Careful columns: past wo the lane's A halves are zeroed (CONV_DW_COLMASK, set
 // by the host when wo is not whole tiles; otherwise the tiles never pass wo). Careful rows: a lane
 // whose filter row r has no dy row here (outside the image or partition, or at stride 2 the other
 // parity) keeps its accumulator instead of the product's.
@@ -150,12 +150,13 @@ struct Stage
         }
     }
 
-    /// Whether a staged element is inf or NaN (all exponent bits set).
+    /// Whether a staged element is inf or NaN: the largest magnitude's bits (sign cleared, a
+    /// packed 16-bit max a dword) reach the all-ones exponent.
     template <bool BF16>
     __device__ int nonFinite() const
     {
-        constexpr unsigned EXP = BF16 ? 0x7f80u : 0x7c00u;
-        unsigned any = 0;
+        typedef unsigned short us2 __attribute__((ext_vector_type(2)));
+        us2 most = {0, 0};
 #pragma unroll
         for(int u = 0; u < N; ++u)
 #pragma unroll
@@ -163,10 +164,11 @@ struct Stage
 #pragma unroll
                 for(int e = 0; e < 4; ++e)
                 {
-                    const unsigned w = v[u][j][e];
-                    any |= ((w & EXP) == EXP) | (((w >> 16) & EXP) == EXP);
+                    most = __builtin_elementwise_max(
+                        most, __builtin_bit_cast(us2, v[u][j][e] & 0x7fff7fffu));
                 }
-        return static_cast<int>(any);
+        constexpr unsigned short EXP = BF16 ? 0x7f80 : 0x7c00;
+        return (most.x >= EXP) | (most.y >= EXP);
     }
 
     /// Writes channel-major rows dst[gr][ch * pitch + column]: per channel one 64-bit word of
@@ -251,6 +253,14 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
     {
         ring[SLOTS * SS + e] = 0;
     }
+    // Per staged step, whether its x rows hold an inf / NaN: slot stores % 3.
+    __shared__ int nonFiniteStep[3];
+    if(tid < 3)
+    {
+        nonFiniteStep[tid] = 0;
+    }
+    int stores = 0;
+    int cur = 0;
     f4 acc[NWG][RG][SG];
 #pragma unroll
     for(int cg = 0; cg < NWG; ++cg)
@@ -319,13 +329,24 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
                     sx.storePhases(xd, XP, CB * XP, tid);
                 }
                 sd.store(dd, DP, tid);
+                cur = stores % 3;
+                if(sx.template nonFinite<BF16>() != 0)
+                {
+                    nonFiniteStep[cur] = 1;
+                }
+                ++stores;
             };
             __syncthreads(); // the previous tile's reads are done
             loadStep(y0);
             storeStep(y0);
-            bool careful = __syncthreads_or(sx.template nonFinite<BF16>()) != 0;
+            __syncthreads();
             for(int y = y0; y < y1; y += G)
             {
+                const bool careful = nonFiniteStep[cur] != 0;
+                if(tid == 0)
+                {
+                    nonFiniteStep[stores % 3] = 0; // the next store's slot, read two steps ago
+                }
                 if(y + G < y1)
                 {
                     loadStep(y + G);
@@ -432,7 +453,7 @@ __device__ void partial(const ConvDepthwiseValuWrwArgs& a)
                 {
                     storeStep(y + G);
                 }
-                careful = __syncthreads_or(y + G < y1 ? sx.template nonFinite<BF16>() : 0) != 0;
+                __syncthreads();
             }
         }
     }
