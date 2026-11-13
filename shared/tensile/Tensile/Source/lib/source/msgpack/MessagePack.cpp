@@ -110,7 +110,7 @@ namespace Tensile
                 return nullptr;
             }
         }
-        catch(std::runtime_error const& exc)
+        catch(std::exception const& exc)
         {
             if(Debug::Instance().printDataInit())
                 std::cout << "Error loading msgpack data:\n" << exc.what() << std::endl;
@@ -141,7 +141,7 @@ namespace Tensile
 
             return rv;
         }
-        catch(std::runtime_error const& exc)
+        catch(std::exception const& exc)
         {
             if(Debug::Instance().printDataInit())
                 std::cout << "Error loading msgpack data:\n" << exc.what() << std::endl;
@@ -177,7 +177,7 @@ namespace Tensile
 
             return rv;
         }
-        catch(std::runtime_error const& exc)
+        catch(std::exception const& exc)
         {
             if(Debug::Instance().printDataInit())
                 std::cout << "Error loading msgpack data:" << std::endl << exc.what() << std::endl;

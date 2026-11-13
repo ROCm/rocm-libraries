@@ -64,7 +64,7 @@ namespace TensileLite
                 return nullptr;
             }
         }
-        catch(std::runtime_error const& exc)
+        catch(std::exception const& exc)
         {
             if(Debug::Instance().printDataInit())
                 std::cout << "Error loading " << filename << " (YAML):" << std::endl
@@ -95,7 +95,7 @@ namespace TensileLite
                 throw std::runtime_error(yin.error().message());
             }
         }
-        catch(std::runtime_error const& exc)
+        catch(std::exception const& exc)
         {
             if(Debug::Instance().printDataInit())
                 std::cout << "Error loading YAML data:" << std::endl << exc.what() << std::endl;
