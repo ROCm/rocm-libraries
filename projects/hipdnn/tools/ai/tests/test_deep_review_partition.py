@@ -5,6 +5,7 @@ orient-gate)."""
 
 import importlib.util
 import os
+import re
 import subprocess
 from pathlib import Path
 from types import ModuleType
@@ -495,27 +496,36 @@ def test_impact_scope_is_the_ingestor_paths_and_plugin_sdk_headers(part):
     assert {r[0] for r in part.concern_scope("IMPACT", rows)} == set(inside)
 
 
-def test_packets_impact_lane_takes_ingestor_files_only(part, tmp_path, capsys):
-    # catches: IMPACT not registered as a concern lane, or scoped to every changed file
+@pytest.mark.parametrize(
+    ("lane", "trigger"),
+    [
+        (
+            "IMPACT",
+            "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/GpuGenericTargets.hpp",
+        ),
+        ("APPL", "projects/hipdnn/flatbuffers_sdk/schemas/tensor_attributes.fbs"),
+    ],
+)
+def test_packets_concern_lane_takes_trigger_files_only(
+    part, tmp_path, capsys, lane, trigger
+):
+    # catches: the lane not registered as a concern lane, or scoped to every changed file
     for sub in ("a", "b"):
         (tmp_path / sub).mkdir()
-    header = (
-        "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/GpuGenericTargets.hpp"
-    )
     other = "projects/hipdnn/backend/a.cpp"
-    rd = make_round(tmp_path / "a", [(3, 1, header), (2, 0, other)])
+    rd = make_round(tmp_path / "a", [(3, 1, trigger), (2, 0, other)])
     run(part, "areas", rd)
     run(part, "plan", rd)
-    run(part, "packets", rd, "--lanes", "IMPACT")
-    packet = (rd / "packets" / "IMPACT.md").read_text()
-    assert header in packet and other not in packet
+    run(part, "packets", rd, "--lanes", lane)
+    packet = (rd / "packets" / f"{lane}.md").read_text()
+    assert trigger in packet and other not in packet
     rd = make_round(tmp_path / "b", [(2, 0, other)])
     run(part, "areas", rd)
     run(part, "plan", rd)
     capsys.readouterr()
-    run(part, "packets", rd, "--lanes", "IMPACT")
-    assert not (rd / "packets" / "IMPACT.md").exists()
-    assert "IMPACT: no changed file in scope, N/A" in capsys.readouterr().out
+    run(part, "packets", rd, "--lanes", lane)
+    assert not (rd / "packets" / f"{lane}.md").exists()
+    assert f"{lane}: no changed file in scope, N/A" in capsys.readouterr().out
 
 
 def test_appl_scope_is_providers_engine_headers_and_schemas(part):
@@ -524,8 +534,10 @@ def test_appl_scope_is_providers_engine_headers_and_schemas(part):
         "projects/hipdnn/flatbuffers_sdk/schemas/tensor_attributes.fbs",
         "dnn-providers/hip-kernel-provider/src/core/GraphSchema.hpp",
         "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp",
+        "dnn-providers/miopen-provider/src/a.cpp",
     )
     outside = (
+        "projects/hipdnn/flatbuffers_sdk/include/a.hpp",
         "projects/hipdnn/backend/src/a.cpp",
         "projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp",
     )
@@ -533,25 +545,15 @@ def test_appl_scope_is_providers_engine_headers_and_schemas(part):
     assert {r[0] for r in part.concern_scope("APPL", rows)} == set(inside)
 
 
-def test_packets_appl_lane_takes_trigger_files_only(part, tmp_path, capsys):
-    # catches: APPL not registered as a concern lane, or scoped to every changed file
-    for sub in ("a", "b"):
-        (tmp_path / sub).mkdir()
-    schema = "projects/hipdnn/flatbuffers_sdk/schemas/tensor_attributes.fbs"
-    other = "projects/hipdnn/backend/a.cpp"
-    rd = make_round(tmp_path / "a", [(3, 1, schema), (2, 0, other)])
-    run(part, "areas", rd)
-    run(part, "plan", rd)
-    run(part, "packets", rd, "--lanes", "APPL")
-    packet = (rd / "packets" / "APPL.md").read_text()
-    assert schema in packet and other not in packet
-    rd = make_round(tmp_path / "b", [(2, 0, other)])
-    run(part, "areas", rd)
-    run(part, "plan", rd)
-    capsys.readouterr()
-    run(part, "packets", rd, "--lanes", "APPL")
-    assert not (rd / "packets" / "APPL.md").exists()
-    assert "APPL: no changed file in scope, N/A" in capsys.readouterr().out
+def test_leak_sweep_allowlist_covers_every_report_lane(part):
+    # catches: a report lane missing from the LEAK sweep's finding-ID allow-list, so its
+    # finding IDs are flagged as leaks
+    leaks = SCRIPT.parent.parent / "lanes" / "leaks.md"
+    match = re.search(
+        r"^\^\(([A-Z|]+)\)\[0-9\]\*-p\?\[0-9\]\+\$$", leaks.read_text(), re.M
+    )
+    assert match, "finding-ID allow-list line not found in leaks.md"
+    assert sorted(match.group(1).split("|")) == sorted(part.REPORT_LANES)
 
 
 def test_appl_lane_id_is_a_provisional_id(part):

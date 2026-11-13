@@ -9,9 +9,9 @@ Applicability means `isApplicable`, a matcher or `graph_match`, and a plan build
 A property counts only if it reaches the changed engine. All three layers must pass:
 
 1. **Plugin version.** The plugin's advertised `HIPDNN_PLUGIN_API_VERSION` must clear the graph's floor
-   (`projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp`, `computeMinimumEnginePluginApiVersion`).
-   Floors: 1.1 override shapes (the plugin must also export the override-execute symbol), 1.2 runtime pass-by-value, 1.3 ragged
-   and non-default `alignment`, 1.4 ragged offset multiplier.
+   (`projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp`, `computeMinimumEnginePluginApiVersion`;
+   per-property floors are in the checklist below). An override-shape plugin must also export the override-execute symbol. The
+   host-side plugin-version filter in the hipDNN backend is outside this lane's trigger; changes to it belong to `CORR` or `API`.
 2. **Provider schema guard.** In hip-kernel-provider, `src/core/GraphSchema.hpp` and `ApplicabilityManager` skip an engine whose
    declared schema is below the graph floor.
 3. **Engine-declared version.** Ingestor engines declare `sdk_version` in the UED; `GenericPlanBuilder::understandsGraph`
@@ -39,7 +39,8 @@ no guard: it does not run on the raw backend API, deserialized or JSON graphs, o
    implementation path does not visibly handle is an applicability finding, not a `CORR` handoff.
    Tier it by its worst plausible outcome, mark the kernel side `[INFERENCE]` in **Proof**, and put
    the device check that would settle it under **Approval requests**. Never lower the tier because
-   the kernel cannot be read.
+   the kernel cannot be read. Such a finding's verdict stays `UNVERIFIED` until the device check under **Approval requests**
+   runs.
 
 ## Hazard classes
 
@@ -97,8 +98,8 @@ A reachable claim at `IMPORTANT` or above carries its graph mutation and the thr
 
 ## Hazard knowledge directory
 
-When `dispatch-context.md` or the dispatch `Overrides:` names a hazard knowledge directory, read its README, its property
-checklist and the page for the changed provider. Cite matching history (PR numbers) in findings and say whether a finding matches
+When the `Hazard knowledge:` field of `dispatch-context.md` (or the dispatch `Overrides:`) names a directory, read its README, its
+property checklist and the page for the changed provider. Cite matching history (PR numbers) in findings and say whether a finding matches
 an open candidate row there by ID. Otherwise run from this brief and write `Knowledge: none supplied` under **Coverage** (a
 non-file line, free of `|`).
 

@@ -205,9 +205,10 @@ Agents:    <maximum concurrent agents>
 Cores:     <CPU cores for builds and tests>
 Mutation:  <host-provided recipe or wrapper command for mutating a built tree> | none
 Scope:     <user's scope notes, e.g. areas being deprecated; "do not file findings in <area>"> | none
+Hazard knowledge: <directory of engine-applicability hazard notes, distinct from $KNOWLEDGE> | none
 ```
 
-`Agents:`, `Cores:`, `Mutation:` and `Scope:` are inputs from the user or the host; the skill assumes no values. Dispatch each lane, scout, verifier and the
+`Agents:`, `Cores:`, `Mutation:`, `Scope:` and `Hazard knowledge:` are inputs from the user or the host; the skill assumes no values. Dispatch each lane, scout, verifier and the
 writer as its own fresh agent with shell and write access; fill this template as its first
 message. Agents see only their dispatch: each begins by reading `dispatch-context.md`.
 
