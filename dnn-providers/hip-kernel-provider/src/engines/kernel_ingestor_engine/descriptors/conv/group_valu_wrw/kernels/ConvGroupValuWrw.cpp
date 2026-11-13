@@ -481,6 +481,7 @@ __device__ inline void passDot2(float (&acc)[CB][KB][FR][FS],
     }
 }
 
+#if GVW_RING
 /// The row-ring path (GVW_RING). One input row of CB channels as loaded (dwords for dot2, else
 /// elements), its window with the neighbours' halos, and the multiplies of one output row.
 #if GVW_DOT2
@@ -800,6 +801,7 @@ __device__ inline void ringSteps(float (&acc)[CB][KB][FR][FS],
         }
     }
 }
+#endif // GVW_RING
 
 /// Grid (tiles, splits), NW waves a workgroup. See the file comment.
 extern "C" __global__ void __launch_bounds__(GVW_NW* GVW_WAVE)
@@ -851,6 +853,7 @@ extern "C" __global__ void __launch_bounds__(GVW_NW* GVW_WAVE)
                 for(int s = 0; s < FS; ++s)
                     acc[c][k][r][s] = 0.0f;
 
+#if GVW_RING
     if constexpr(RING)
     {
         const int itemBegin = split * a.itemsPerSplit;
@@ -925,6 +928,7 @@ extern "C" __global__ void __launch_bounds__(GVW_NW* GVW_WAVE)
         }
     }
     else
+#endif
         for(int pr = rowBegin + wave * rpw; pr < rowEnd; pr += NW * rpw)
         {
             // The pass's first image: a 64-bit base the lanes' 32-bit offsets start from.
