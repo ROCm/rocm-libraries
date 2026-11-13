@@ -224,8 +224,9 @@ typedef unsigned int __attribute__((ext_vector_type(4))) DwU4;
 /// x reads. 32-bit form: a buffer load at a byte offset; an element that is not
 /// valid (v false) reads zero from the hardware (offset past the end): no
 /// select, no 64-bit address. 64-bit form: the global load of a clamped address
-/// and a select.
-template <typename T, typename I>
+/// and a select. BUF false keeps the global form at 32-bit indices too (the
+/// floors: measured slower through buffers, see the cores).
+template <typename T, typename I, bool BUF = true>
 struct DwX
 {
     const T* a;
@@ -253,7 +254,7 @@ struct DwX
     }
 };
 template <typename T>
-struct DwX<T, int>
+struct DwX<T, int, true>
 {
     __amdgpu_buffer_rsrc_t r;
     __device__ DwX(const T* x, const ValuParams& p)
@@ -298,8 +299,8 @@ struct DwX<T, int>
 /// y writes. 32-bit form: an unconditional buffer store; an output that is not
 /// valid goes past the end and is dropped (no exec-masked store block that
 /// would pull the output's whole FMA chain into it). 64-bit form: the guarded
-/// store.
-template <typename T, typename I>
+/// store. BUF false: the guarded store at 32-bit indices too.
+template <typename T, typename I, bool BUF = true>
 struct DwY
 {
     T* d;
@@ -314,7 +315,7 @@ struct DwY
     }
 };
 template <typename T>
-struct DwY<T, int>
+struct DwY<T, int, true>
 {
     __amdgpu_buffer_rsrc_t r;
     __device__ DwY(T* y, const ValuParams& p)
@@ -382,8 +383,9 @@ __device__ inline void v2_wstrip_nhwc_body(const T* __restrict__ A,
         acc[j] = 0.0f;
 
     const T* wbase = Wt + (long)k * p.kh * p.kw;
-    const DwX<T, I> X(A, p);
-    const DwY<T, I> Y(D, p);
+    // The floors keep global loads and guarded stores (buffers measured 2-9% slower here).
+    const DwX<T, I, false> X(A, p);
+    const DwY<T, I, false> Y(D, p);
 
     for(int ky = 0; ky < p.kh; ++ky)
     {
@@ -460,8 +462,8 @@ __device__ inline void v2_nchw_body(const T* __restrict__ A,
     float acc = 0.0f;
     const T* wbase = Wt + (long)k * p.kh * p.kw;
     const I a_chanrow = ((I)n * p.C + k) * p.Hi; // ((n*C+k)*Hi)
-    const DwX<T, I> X(A, p);
-    const DwY<T, I> Y(D, p);
+    const DwX<T, I, false> X(A, p);
+    const DwY<T, I, false> Y(D, p);
 
     for(int ky = 0; ky < p.kh; ++ky)
     {
@@ -529,8 +531,8 @@ __device__ inline void v2_wstrip_ndhwc_body(const T* __restrict__ A,
         acc[j] = 0.0f;
 
     const T* wbase = Wt + (long)k * p.kd * p.kh * p.kw;
-    const DwX<T, I> X(A, p);
-    const DwY<T, I> Y(D, p);
+    const DwX<T, I, false> X(A, p);
+    const DwY<T, I, false> Y(D, p);
 
     for(int kz = 0; kz < p.kd; ++kz)
     {
@@ -611,8 +613,8 @@ __device__ inline void v2_ncdhw_body(const T* __restrict__ A,
     float acc = 0.0f;
     const T* wbase = Wt + (long)k * p.kd * p.kh * p.kw;
     const I a_chan = (I)n * p.C + k; // (n*C+k) — channel plane base
-    const DwX<T, I> X(A, p);
-    const DwY<T, I> Y(D, p);
+    const DwX<T, I, false> X(A, p);
+    const DwY<T, I, false> Y(D, p);
 
     for(int kz = 0; kz < p.kd; ++kz)
     {
