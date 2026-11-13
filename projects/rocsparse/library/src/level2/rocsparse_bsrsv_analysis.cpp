@@ -151,7 +151,7 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
         if(trm != nullptr
            && trm->has_indextypes(rocsparse::get_indextype<I>(), rocsparse::get_indextype<J>()))
         {
-            // Copy or create the pivot before storing the alias. copy_pivot_info_async
+            // Copy the donor's pivot before storing the alias. copy_pivot_info_async
             // can fail after it has already reset the destination to "no pivot". If the
             // alias were stored first, a retry would find this slot, leave donor null,
             // and keep that reset pivot, so a structural zero from the donor would be lost.
@@ -162,24 +162,21 @@ rocsparse_status rocsparse::bsrsv_analysis_template(rocsparse_handle          ha
                 RETURN_IF_ROCSPARSE_ERROR(bsrsv_info->drop_zero_pivot_if_indextype_async(
                     donor->get_indextype(), handle->stream));
                 RETURN_IF_ROCSPARSE_ERROR(bsrsv_info->copy_pivot_info_async(donor, handle->stream));
+                info->set_bsrsv_info(trans, descr->fill_mode, trm);
+                return rocsparse_status_success;
             }
-            else
+
+            // Otherwise the stored pivot holds the structural zeros, and only the
+            // analysis writes them. The pivot is shared by every fill mode, so an
+            // analysis of another width may have replaced it with one of another
+            // index type. Keep it only when it has type J, and rebuild below
+            // otherwise.
+            if(bsrsv_info->get_position() != nullptr
+               && bsrsv_info->get_indextype() == rocsparse::get_indextype<J>())
             {
-                // Reuse of this slot's own analysis keeps the pivot, including a
-                // structural zero. The pivot is shared by every fill mode, so an
-                // analysis of another width may have left a different index type.
-                // Drop that first: create_position_async does not retype a buffer
-                // that already exists.
-                RETURN_IF_ROCSPARSE_ERROR(bsrsv_info->drop_zero_pivot_if_indextype_async(
-                    rocsparse::get_indextype<J>(), handle->stream));
-                if(bsrsv_info->get_position() == nullptr)
-                {
-                    RETURN_IF_ROCSPARSE_ERROR(bsrsv_info->create_zero_pivot_async(
-                        rocsparse::get_indextype<J>(), handle->stream));
-                }
+                info->set_bsrsv_info(trans, descr->fill_mode, trm);
+                return rocsparse_status_success;
             }
-            info->set_bsrsv_info(trans, descr->fill_mode, trm);
-            return rocsparse_status_success;
         }
     }
 
