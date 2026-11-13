@@ -9,7 +9,7 @@ Every output tensor of a bundle is compared element by element with its oracle
 
 One element outside the band fails the tensor. This document says where
 `atol` and `rtol` come from, and explains the dynamic tolerance that grades
-float, half and bfloat16 convolution outputs: forward, backward data (dgrad)
+half, bfloat16 and float convolution outputs: forward, backward data (dgrad)
 and backward weights (wrw).
 
 ## Where the numbers come from
@@ -21,7 +21,7 @@ applies:
 |---|---|---|
 | A `[[validator_overrides]]` entry | The tensors its glob names | The engine's TOML (see [File Formats](file-formats.md)) |
 | A `[[tolerance_overrides]]` entry | The tests its glob names | The engine's TOML |
-| The convolution dynamic tolerance | float, half and bfloat16 outputs of a graph with one `ConvolutionFwd`, `ConvolutionBwd` or `ConvolutionWrw` node that accumulates in float, and float intermediates | `src/harness/tolerance/ConvDynamicTolerance.hpp` |
+| The convolution dynamic tolerance | half, bfloat16 and float outputs of a graph with one `ConvolutionFwd`, `ConvolutionBwd` or `ConvolutionWrw` node that accumulates in float, whose pointwise nodes and intermediates are half, bfloat16, float or double | `src/harness/tolerance/ConvDynamicTolerance.hpp` |
 | The per-op default | Everything else; the loosest node of the graph wins, and the same value is used for `atol` and `rtol` | `TestTolerances.hpp` through `src/harness/tolerance/ToleranceResolver.hpp` |
 
 TOML overrides describe how far one engine may drift. They are never applied
@@ -31,70 +31,57 @@ is checked against a reference executor with the per-op default.
 
 ## The convolution dynamic tolerance
 
+The sections up to "When an engine needs more" are written for the forward
+direction; backward data and backward weights use the same model with the
+operands and `K` of their own direction and their own constants (see
+"Backward data and backward weights").
+
+Where this document names the conv-fwd test-plan bundles, it means those of
+ROCm/rocm-libraries#14424 (the Variant3 to Variant6 graphs and the F-, L-, S-
+and X-series cases). They are not in this tree; the case names and counts that
+refer to them describe the data of a run on a merge of that branch with this one.
+
 ### Why a fixed number does not work
 
-The per-op default is one number used as both `atol` and `rtol`:
+The per-op default for half and bfloat16 convolution forward is 0.1 for both
+`atol` and `rtol`. At a typical output that is 17.5 % of the output at
+`K` = 16 (`K` is the number of products summed per output), 11 % at 1,152
+and about 10 % from `K` of about 1,000 on: 10 to 25 bfloat16 rounding steps,
+and over 100 half steps.
 
-| Direction | float | half and bfloat16 |
-|---|---|---|
-| forward | 1e-5 | 0.1 |
-| backward data | 8.5e-6 | 0.02 |
-| backward weights | 2e-4 | 0.2 |
+The worst-case bound in the test SDK, `calculateConvFpropTolerance()`, scales
+with the problem, but assumes an output can be as large as
+`K * max|x| * max|w|`. Its callers use the one number as both `atol` and
+`rtol`. With inputs of both signs a real output grows only as `sqrt(K)`, so
+the band the bound makes, which grows as `K` relative to a typical output, is
+wider than that output from `K` of about 100 on for bfloat16 (about 800 for
+half), and passes almost anything.
 
-For half and bfloat16 forward, 0.1 is 17.5 % of a typical output at `K` = 16
-(`K` is the number of products summed per output), 11 % at 1,152 and about
-10 % from `K` of about 1,000 on: 10 to 25 bfloat16 rounding steps, and over
-100 half steps. Backward weights at 0.2 is twice that.
-
-For float the fixed numbers are too tight. A float sum of `K` products in one
-order differs from the same sum in another order by a random walk of roundings
-that grows as `sqrt(K)` relative to the output, so from a reduction of a few
-hundred products on, correct float outputs fail a fixed `1e-5`. In the
-calibration data below, 24 % of the correct float forward outputs, 23 % of the
-backward-data ones and 6 % of the backward-weights ones fail their per-op
-default; so do 1 to 10 % of the correct half and bfloat16 backward outputs.
-
-The worst-case bound in the test SDK, `calculateConvFpropTolerance()` (and its
-backward siblings `calculateConvDgradTolerance()` and
-`calculateConvWrwTolerance()`), scales with the problem, but assumes an output
-can be as large as `K * max|x| * max|w|`. Its callers use the one number as both
-`atol` and `rtol`. With inputs of both signs a real output grows only as
-`sqrt(K)`, so the band the bound makes, which grows as `K` relative to a typical
-output, is wider than that output from `K` of about 100 on for bfloat16 (about
-800 for half), and passes almost anything.
+For float the per-op default is 1e-5 for both, not 0.1, and the comparison
+goes the other way at long reductions: see "Float against the fixed 1e-5".
 
 ### The model
 
-For an output stored as float, half or bfloat16, computed with float
-accumulation, and graded against a float-accumulating reference:
+For an output stored as half or bfloat16, computed with float accumulation,
+and graded against a float-accumulating reference (float adds a summation term
+to `rtol` and takes a coefficient: see "Float outputs"):
 
 ```text
-s = m * sqrt(K) * u32
-|impl_i - ref_i| <= (2 * eps + s) * |ref_i|            rtol
-                  + (s + lambda * eps) * sigma         atol
+|impl_i - ref_i| <= 2 * eps * |ref_i|                      rtol
+                  + (sqrt(K) * u32 + lambda * eps) * sigma  atol
+                  + sum over rounding points of s * eps_p * m
                   + minNormal
 ```
 
 | Symbol | Meaning |
 |---|---|
-| `K` | Products summed per output element; see the table below. |
-| `sigma` | The root mean square of an output element, `sqrt(K * E[a^2] * E[b^2] + K * (K - 1) * E[a]^2 * E[b]^2)` for the two tensors `a` and `b` whose products the convolution sums, times the product, over the fused multiplies, of the largest magnitude of the tensor each one applies. The moments come from how the inputs were filled (see below). For zero-mean inputs it is `sqrt(K * E[a^2] * E[b^2])`. |
-| `eps` | Machine epsilon of the output type: 2^-23 for float, 2^-7 for bfloat16, 2^-10 for half. |
+| `K` | Products summed per output: the weight tensor's channel dimension (C / groups) times the filter volume (forward; see "Backward data and backward weights" for the other directions). |
+| `sigma` | The typical output magnitude, `sqrt(K * mean(x^2) * mean(w^2) + K * (K - 1) * mean(x)^2 * mean(w)^2)`, times the product, over the fused multiplies, of the largest magnitude of the tensor each one applies. The moments come from how the inputs were filled (see below); for zero-mean inputs the second term is 0. |
+| `eps` | Machine epsilon of the output type: 2^-7 for bfloat16, 2^-10 for half. |
 | `u32` | Unit roundoff of float, 2^-24. |
-| `lambda`, `m` | Calibrated per direction and output type; see the table below. |
+| `lambda` | Forward: 0 for bfloat16, 12 for half (calibrated, see below). Backward data and backward weights have their own. |
 | `minNormal` | The smallest normal number of the output type. |
-
-| Direction | `a`, `b` | `K` |
-|---|---|---|
-| forward | `x`, `w` | `C / groups` times the filter volume: every weight dimension but the first. |
-| backward data | `dy`, `w` | The output channels of one group times, per spatial dimension, the filter taps that reach one `dx` element: `ceil(R / (s / gcd(s, d)))` for filter extent `R`, stride `s` and dilation `d`. Padding and the border only remove taps. |
-| backward weights | `x`, `dy` | The batch size times the spatial volume of `dy`. Products that read padding are zero, so for taps at the border this is an upper bound. |
-
-| Direction | float `lambda`, `m` | half `lambda`, `m` | bfloat16 `lambda`, `m` |
-|---|---|---|---|
-| forward | 32, 4 | 12, 1 | 0, 1 |
-| backward data | 32, 4 | 12, 1 | 6, 1 |
-| backward weights | 32, 4 | 36, 1 | 24, 1 |
+| `eps_p`, `m`, `s` | One rounding point: the epsilon of the type rounded to, the root mean square of the value rounded, and the largest factor by which an error in it reaches the output. |
 
 Each term is one way two correct implementations differ:
 
@@ -102,115 +89,155 @@ Each term is one way two correct implementations differ:
   result once to the output type. Two correct roundings of nearly equal values
   differ by at most one unit in the last place, and `eps * |ref_i|` is one to
   two of those units. The factor 2 is a margin over that bound, 2 to 4 units;
-  the largest bfloat16 error in the forward calibration data was one rounding
-  step. For a float output it covers the last roundings of the accumulation.
-- **Summation order** (`s`, on `sigma` and on `|ref_i|`). Two float sums of the
-  same `K` products in a different order differ by a random walk of rounding
-  errors, about `u32 * sqrt(K)` times the size of the partial sums. For
-  zero-mean inputs the partial sums are about `sigma`, which decides an output
-  near zero; for inputs with a nonzero mean they grow toward the element
-  itself, hence the same term on `|ref_i|`. The reference sums in index order,
-  whose error alone has a standard deviation of about `0.4 * u32 * sqrt(K) *
-  sigma`, and an output has up to millions of elements, so for float, where
-  nothing larger hides it, `m` is 4; for half and bfloat16 it stays 1, as
-  calibrated for forward.
-- **Intermediates and products** (`lambda * eps * sigma`). Some kernels keep
-  partial results in the output type (half Winograd transforms, the split
-  reductions of backward-weights kernels), and every kernel rounds each product
-  once. Each adds a fixed number of roundings of values the size of a typical
-  output. Float shows it at the shortest reductions, where 2 or 3 products
-  differ by up to 8 float steps of a typical output.
+  the largest bfloat16 error in the calibration data was one rounding step.
+- **Summation order** (`sqrt(K) * u32 * sigma`). Two float sums of the same `K`
+  products in a different order differ by a random walk of rounding errors,
+  about `u32 * sqrt(K) * sigma`. This is what decides an output near zero,
+  where the relative term is small.
+- **Intermediates in the io type** (`lambda * eps * sigma`). Some half kernels
+  keep partial results in half (for example Winograd transforms). bfloat16
+  showed none.
 - **Denormals** (`minNormal`). Hardware may flush denormal results to zero.
+- **Roundings of intermediates** (the sum over the rounding points). A value
+  rounded to half or bfloat16 before the output, which the reference does not
+  round; see "Rounding points".
 
 Why `lambda` is a constant, not a function of `K`: a fixed number of
-roundings of intermediates the size of the output adds an error proportional to
-`eps * sigma`, whatever `K` is. Summing in half throughout would instead grow as
-`sqrt(K)`, and float accumulation of half-rounded blocks is again constant. The
-measured half errors of forward shrink somewhat at large `K`, and those of
-backward weights in half and bfloat16 grow with it (about as `K^(1/4)`), but
-both follow which solvers MIOpen picks and how it splits a reduction, not a
-rounding law, so the tolerance does not model them. A `lambda` that grows as
-`K^(1/4)` would narrow the bfloat16 backward-weights band at `K` = 1,152 from
-20 % to about 12 % of a typical output; it is not used.
+half-precision roundings of intermediates the size of the output adds an
+error proportional to `eps * sigma`, whatever `K` is. Summing in half
+throughout would instead grow as `sqrt(K)`, and float accumulation of
+half-rounded blocks is again constant. The measured half errors do shrink
+somewhat at large `K`, but that follows which solvers MIOpen picks for which
+shapes, not a rounding law, so the tolerance does not model it.
 
-For half and bfloat16 `sigma` grows as `sqrt(K)` exactly as the output does,
-and `s` is far below `eps`, so the band is a fixed fraction of the output at
-every reduction length. For float the summation term dominates and the band
-grows as `sqrt(K)` relative to the output, as the error does. At a typical
-output (`|ref|` = `sigma`) the band, divided by `sigma`, is `atol / sigma +
-rtol`. For inputs uniform in [-1, 1] it is, for each way of setting the
-tolerance (the per-op default and the worst-case bound are used as both `atol`
-and `rtol`, as their callers do):
+`sigma` grows as `sqrt(K)` exactly as the output does, so the band is a fixed
+fraction of the output at every reduction length. At a typical output
+(`|ref|` = `sigma`) the band, divided by `sigma`, is `atol / sigma + rtol`.
+For inputs uniform in [-1, 1] it is, for each way of setting the tolerance
+(the worst-case bound is used as both `atol` and `rtol`, as its callers do):
 
-| Direction | Output | K | per-op default | worst-case bound | dynamic |
-|---|---|---|---|---|---|
-| forward | float | 16 | 1.75e-5 | 1.07e-4 | 5.96e-6 |
-| forward | float | 1,152 | 1.09e-5 | 0.344 | 2.02e-5 |
-| forward | float | 65,536 | 1.01e-5 | 17.2 | 1.26e-4 |
-| forward | half | 16 | 0.175 | 0.027 | 0.014 |
-| forward | half | 1,152 | 0.109 | 1.6 | 0.014 |
-| forward | half | 65,536 | 0.101 | 82 | 0.014 |
-| forward | bfloat16 | 16 | 0.175 | 0.22 | 0.016 |
-| forward | bfloat16 | 1,152 | 0.109 | 10.1 | 0.016 |
-| forward | bfloat16 | 65,536 | 0.101 | 535 | 0.016 |
-| backward data | float | 1,152 | 9.25e-6 | 0.344 | 2.02e-5 |
-| backward data | half | 1,152 | 0.022 | 1.6 | 0.014 |
-| backward data | bfloat16 | 1,152 | 0.022 | 10.1 | 0.063 |
-| backward weights | float | 1,152 | 2.18e-4 | 0.344 | 2.02e-5 |
-| backward weights | half | 1,152 | 0.218 | 1.6 | 0.037 |
-| backward weights | bfloat16 | 1,152 | 0.218 | 10.1 | 0.203 |
+| Output | K | fixed 0.1 | worst-case bound | dynamic |
+|---|---|---|---|---|
+| bfloat16 | 16 | 0.175 | 0.22 | 0.016 |
+| bfloat16 | 1,152 | 0.109 | 10.1 | 0.016 |
+| bfloat16 | 65,536 | 0.101 | 535 | 0.016 |
+| half | 16 | 0.175 | 0.027 | 0.014 |
+| half | 1,152 | 0.109 | 1.6 | 0.014 |
+| half | 65,536 | 0.101 | 82 | 0.014 |
 
 The worst-case column prices `calculateConvFpropTolerance<T, T, float>()`, as
-the sample passes it, at the same `K` for every direction. With `double`
-compute, as the GPU reference tests pass it, forward bfloat16 is 9.8 and 518 and
-half 1.2 and 65 at the two larger `K`.
+the sample passes it. With `double` compute, as the GPU reference tests pass
+it, bfloat16 is 9.8 and 518 and half 1.2 and 65 at the two larger `K`.
 
-Where the dynamic band is wider than the per-op default (float from `K` of a
-few hundred on, bfloat16 backward data), the default fails correct output;
-see the calibration below.
+The worst-case bound is tighter than the dynamic tolerance only for half at
+`K` of 6 or less. In the calibration data it also failed 22 of the 10,434
+correct half and bfloat16 outputs graded (12 distinct cases): 2 of the 5,091
+of the fit seeds and 2 of the 3,394 of the held-out seeds on gfx942 (one half
+and one bfloat16 each), and 18 of the 1,949 on gfx90a.
 
 The functions are `calculateConvFpropOutputTolerance<T>()`,
 `calculateConvDgradOutputTolerance<T>()` and
 `calculateConvWrwOutputTolerance<T>()` in
 `projects/hipdnn/test_sdk/include/hipdnn_test_sdk/utilities/DynamicTolerancesConv.hpp`.
 
+### Rounding points: intermediates below float
+
+The model rounds once, the final result. A fused graph can round a value to
+half or bfloat16 earlier, and an oracle that does not follow it. In develop's
+Variant2 bundles (convolution, bias add, relu) the convolution's result is a
+float virtual tensor and the add computes in the case's type through its
+`compute_data_type`: the engine converts the result to that type before the
+add and rounds the sum again, while the CPU reference adds in double and
+rounds once. On the gfx942 data the engine's output matched an emulation with
+those roundings at every element of the 144 bfloat16 outputs; the CPU
+reference matched the emulation without them at 99.96 % or more of the
+elements of each output. A rounded value that a later node cancels leaves a
+difference no relative term of the output sees: bfloat16 results 1 and
+1.0078125 differ by one step, and after adding -1 they are 0 and 0.0078125.
+
+Every place between the convolution and the output where a value is rounded
+to half or bfloat16 is a rounding point:
+
+- a tensor one node writes and another reads, stored as half or bfloat16
+  (virtual or not): it is rounded to its own type;
+- an operand of a pointwise node that computes in half or bfloat16, when the
+  operand is stored as another type: the node converts it, and rounds;
+- the result of such a node, when it is stored as another type than the node
+  computes in.
+
+A graph output that no node reads is rounded once, to its type: that is
+`rtol`, not a point. The exception is the result of a node that computes in half
+or bfloat16 and stores it in another type: it is rounded in the compute type
+first, and that rounding is a point whether or not a node reads the result.
+Float and double intermediates add no point.
+
+A value `v` rounded to a type with epsilon `eps_p` moves by at most half a unit
+in the last place, `eps_p / 2 * |v|` at most. The elements of a tensor reach
+about twice their root mean square `m`, so one point contributes `eps_p * m`
+at its own place, and the error reaches the output multiplied by the slope
+`s` of the nodes in between: 1 through `ADD`, `SUBTRACT` and the modes assumed
+to have a slope of about 1, and the largest magnitude of the scale through
+a `MUL`. The error in the scale operand of a `MUL` that is itself rounded
+reaches the output multiplied by the size `m` of the convolution's side of
+the multiply. Where several nodes read a tensor and their results go to
+different outputs, the slope is the largest of them. Where the results meet
+again, one error travels both paths and the contributions add: for
+`ADD(MUL(y, s), y)` with `max|s|` = 3 the slope of `y` is 3 + 1 = 4.
+The points add (they do not combine as a root of squares: with five points
+the sum is at most 2.2 times larger, and the data does not tell the two apart):
+
+```text
+atol += sum over the points of  s * eps_p * m
+```
+
+The magnitude `m` follows the graph from the convolution's `sigma` (without
+the scales). A value is a factor times the convolution's result plus a
+remainder that does not depend on it. A `MUL` multiplies both by the largest
+magnitude of the scale. An `ADD`, a `SUBTRACT` and every other mode with
+several operands add the factors (two paths from the convolution carry the
+same error, so they add) and the mean squares of the remainders (independent
+operands add in quadrature; the root mean square of a graph input comes from
+its recipe, as for the convolution): `sqrt(a^2 + b^2)` for an operand from
+the convolution's side and an independent one. A mode with one operand leaves
+the value as it is. The magnitude of an operand is worked out only when a
+point needs it, so no input is looked up, or scanned on the host, for a graph
+without one.
+The coefficient 1 comes from that bound and is not fitted: the data needs at
+most 0.115 of the term (see "Calibration of the rounding points").
+
 ### What the harness feeds it
 
 `convErrorScale()` applies the model only when the graph has exactly one
 convolution node (`ConvolutionFwd`, `ConvolutionBwd` or `ConvolutionWrw`), with
-float compute type, and its two operands (`x` and `w`, `dy` and `w`, or `x` and
-`dy`) are graph inputs: not virtual, and not written by another node. For
-backward data, the channels of `dx` must be a multiple of the weight's, the
-resulting group count must divide the weight's output channels, and stride and
-dilation need one entry of at least 1 per filter dimension. Every pointwise node
-must compute in float, and every intermediate must be stored as float: a tensor
-that one node writes and another reads (the convolution's result, the pointwise
-results), virtual or not; an unset type does not count as float. A result that
-no node reads is a graph output and is rounded once, as the model assumes. The
-model has one rounding, of the final result to the output type; an intermediate
-stored or computed in half or bfloat16 adds roundings it does not describe
-(ALMIOPEN-3239 tracks that), so such a graph uses the per-op default. A bundle
-whose intermediates take the case's data type is outside the model in half and
-bfloat16. A `MUL` node with one
+float compute type, and its two operands (`x` and `w` forward, `dy` and `w`
+backward data, `x` and `dy` backward weights) are graph
+inputs: not virtual, and not written by another node. Every pointwise node
+must compute in half, bfloat16, float or double, and every intermediate must
+be stored as one of these: a tensor that one node writes and another reads
+(the convolution's result, the pointwise results), virtual or not; an unset
+type is none of them. A result that no node reads is a graph output and is
+rounded once, as the model assumes, unless a node computing below float
+stored it in another type (see "Rounding points"). A value stored or computed in half or
+bfloat16 is a rounding point (see "Rounding points"); float and double add
+none. A `MUL` node with one
 operand from the convolution and the other a graph input (in either operand
 order) scales `sigma` by that input's largest magnitude, and the scales of
 several multiplies multiply; a `MUL` of anything else (the result with itself,
 two inputs) leaves the model. The other pointwise modes are not examined: each
 is assumed to change an error by at most its slope, about 1, so it leaves
-`sigma` unchanged. The conv test-plan bundles the calibration used have
+`sigma` unchanged. The conv-fwd test-plan bundles the calibration used have
 `ADD` and `MUL`, and as activations
 `RELU_FWD` (plain, with an upper or a lower clip, or leaky), `IDENTITY`,
 `SIGMOID_FWD`, `TANH_FWD`, `SOFTPLUS_FWD`, `ELU_FWD`, `SWISH_FWD`, `GELU_FWD`
-and `GELU_APPROX_TANH_FWD` after a forward convolution, and the backward modes
-of the same functions after a backward-data one: 506 of the 1,132 half and
-bfloat16 `ConvolutionFwdPointwise` cases use an activation other than
-`RELU_FWD`. At the parameters those bundles set (softplus and swish beta 1, elu
-alpha 1) the largest slope among them is about 1.13 (gelu). A mode with another
-gain, such as `DIV` or `RECIPROCAL`, would be graded as if it had none. Nodes
-that are neither the convolution nor pointwise are ignored. The scale is one
-value for the whole graph, not one per output; those graphs have at most one
-multiply. A graph outside what is described here and an input whose statistics
-are not available (a NaN or an infinity in golden data or in a fill recipe, an
+and `GELU_APPROX_TANH_FWD`: 506 of their 1,132 half and bfloat16
+`ConvolutionFwdPointwise` cases use an activation other than `RELU_FWD`. At the
+parameters those bundles set (softplus and swish beta 1, elu alpha 1) the largest
+slope among them is about 1.13 (gelu). A mode with another gain, such as `DIV`
+or `RECIPROCAL`, would be graded as if it had none. Nodes that are neither the
+convolution nor pointwise are ignored. The scale is one value for the whole
+graph, not one per output; those graphs have at most one multiply.
+A graph outside what is described here, an input whose statistics are not
+available (a NaN or an infinity in golden data or in a fill recipe, an
 unreadable baked value) use the per-op default.
 
 A graph input's statistics come from, in this order:
@@ -221,17 +248,19 @@ A graph input's statistics come from, in this order:
   instead): `v^2`, `|v|` and `v`;
 - the fill recipe, for a tensor the harness fills: `(lo^2 + lo*hi + hi^2) / 3`
   and `(lo + hi) / 2` for a uniform draw on `[lo, hi]`, `v^2` and `v` for a
-  fixed value, the moments of the list for a value list, so no tensor is read;
+  fixed value, the mean square and mean of the list for a value list, so no
+  tensor is read;
 - a scan on the host, for an input loaded from golden blobs, which is
   already there.
 
 With zero-mean inputs partial sums cancel and the output grows as `sqrt(K)`.
 With a nonzero mean on both operands (a constant fill, or uniform on `[0, a]`)
-they do not, and the output grows as `K * E[a] * E[b]`; `sigma` includes that
-term, so the band keeps its size relative to the output. Without it the
-backward-weights cases of the plan's constant-fill class `F21const` need a
-half `lambda` of 77 instead of 36. A nonzero mean on one operand only adds
-nothing: the other operand's signs still cancel.
+they do not: the output grows as `K * mean(x) * mean(w)`, and the second term
+of `sigma` follows it. Without that term `sigma` would be 3, 25 and 190 times
+smaller than the root mean square of the output for uniform on `[0, 1]` at
+`K` = 16, 1,152 and 65,536, and the constant-fill backward-weights cases of the
+plan's `F21const` class would need a `lambda` of 77 instead of 36. A nonzero
+mean on one operand only adds nothing: the other operand's signs still cancel.
 
 ### Where the tolerance can exceed the output
 
@@ -252,7 +281,7 @@ cases the `atol` is at least a tenth of the range, and the largest half tanh
 the graph's output, so it does not cap `atol` at it. Treat a half pass behind
 a bounded activation as weak evidence for these long reductions.
 
-### Calibration: forward, half and bfloat16
+### Calibration
 
 Data: every half and bfloat16 `ConvolutionFwd` and `ConvolutionFwdPointwise`
 case of the conv-fwd test-plan bundles that MIOpen runs, with outputs up to 4 M
@@ -300,13 +329,15 @@ The MI308X run (filter `*_ConvolutionFwd*.*_bf16_*:*_ConvolutionFwd*.*_fp16_*-*.
 MIOpen engine) selected 2,826 cases: 1,803 passed, 7 failed and 1,016 were
 skipped (848 the engine does not rank, 168 quarantined in the TOML).
 
-The fused convolution graphs `ConvolutionFwdPointwise` Variant2 to Variant6
-(a bias or an activation, or both, after the convolution; only Variant3
-multiplies, by the scale) have no engine run in this table: on gfx942 the
-MIOpen engine ranks no engine for any of their half and bfloat16 cases, so the
-0.5 scale of Variant3 has been graded only in host unit tests with mocked
-engine output. The first engine and
-architecture that executes them should add the headroom of those outputs here.
+The fused convolution graphs `ConvolutionFwdPointwise` Variant3 to Variant6
+(an activation, or a bias and an activation, after the convolution; only
+Variant3 multiplies, by the scale) have no engine run in this table: the
+MIOpen engine ranked no engine for any of their half and bfloat16 cases, so
+the 0.5 scale of Variant3 has been graded only in host unit tests with mocked
+engine output. The first engine and architecture that executes them should
+add the headroom of those outputs here. Variant2 (a bias add, with or without
+a relu) runs on gfx942 through the fused CK solvers; its calibration is under
+"Calibration of the rounding points".
 
 On gfx942 every failure in those runs is an output MIOpen computes wrongly
 (values with the wrong sign), which also fails the fixed 0.1: the 3D
@@ -361,19 +392,274 @@ of one filter position over all input channels) is caught in 29 % against
 62 % for the fixed 0.1; a missing input channel is still caught in all of
 them.
 
-### Calibration: backward data, backward weights, and float
+### Calibration of the rounding points
+
+Data: every `ConvolutionFwd*` case of develop's conv-fwd bundles that MIOpen
+runs (all levels, the X3 cases left out), and the same with the test-plan
+bundles merged in, on gfx942 (the bundles' own seeds and 2 reseeded sets) and
+gfx90a (the own seeds and 1 reseeded set). Every output was compared with the
+harness reference and with a float64 recomputation from the same inputs, with
+the rounding points recomputed from the graph; outputs that fail even the
+fixed 0.1 are MIOpen defects and left out. Only the Variant2 graphs (bias add,
+then relu) have rounding points: on gfx942 their add computes in the case's
+type over float tensors, through the fused CK solvers. No case with a point ran
+on gfx90a.
+
+| Output | Data | Outputs with points | Fail without the term | Fail with it | Smallest headroom | Coefficient the data needs |
+|---|---|---|---|---|---|---|
+| bfloat16 | develop bundles, 3 seed sets | 144 per set | 110, 126, 105 | 0 | 2.60 | at most 0.096 |
+| bfloat16 | test-plan bundles, 3 seed sets | 62 per set | 49, 49, 47 | 0 | 2.41 | at most 0.115 |
+| half | develop bundles, 3 seed sets | 144 per set | 0 | 0 | 4.92 | none |
+| half | test-plan bundles, 3 seed sets | 65 per set | 0 | 0 | 3.03 | none |
+
+The coefficient the data needs is the largest error left after the other terms,
+over the term itself, per output. It is at most 0.115 over every output with
+points, so the coefficient 1, which comes from the bound above, has a margin of
+about 9 over what the data needs. The term is for bfloat16: half passed without
+it, and its headroom is 14 % larger with it.
+
+Detection, on the 432 bfloat16 and 432 half outputs with points of develop's
+bundles (3 seed sets; counts of outputs detected, out of 432 unless stated),
+injecting each bug into the exact result and grading it against the real
+reference. The fixed 0.1 is what such a graph was graded with before the model
+covered it:
+
+| Injected bug | bfloat16: fixed 0.1 | bfloat16: dynamic | half: fixed 0.1 | half: dynamic |
+|---|---|---|---|---|
+| One filter tap missing | 388 | 392 | 388 | 428 of 430 |
+| One input channel missing | 432 | 432 | 432 | 432 |
+| Bias missing | 432 | 432 | 432 | 432 |
+| Accumulator in the io type | 0 | 46 of 430 | 0 | 0 |
+| One element off by 4 rounding steps | 0 | 182 | 0 | 0 |
+
+On the test-plan bundles, outputs with points are graded a little looser
+than the fixed 0.1 against the largest bugs: of 186 bfloat16 outputs, an
+input shifted is detected in 183 (the fixed 0.1: 186), a missing channel in
+168 of 171 (171 of 171).
+
+The C++ implementation then ran through the harness on the same cases (the
+bundles' own seeds and the reseeded sets) and added no failure to the earlier
+head on either architecture:
+
+| Bundles | Hardware | Seed sets | Passed | Failed |
+|---|---|---|---|---|
+| develop's | gfx942 | 3 | 1,003 of 1,219 each (216 skipped: no engine ranks them) | 0 |
+| develop's | gfx90a | 2 | 138 of 1,219 each | 0 |
+| with the test-plan bundles | gfx942 | 3 | 2,849 to 2,850 of 4,739 | 20 to 21, the same cases as before |
+| with the test-plan bundles | gfx90a | 2 | 2,108 to 2,109 of 4,739 | 8 to 9, the same cases as before |
+
+All 144 bfloat16 and 144 half Variant2 cases of develop's bundles that the
+engine ranks pass on gfx942 under the model, among them the 4 quick and 28
+standard ones; they are graded against the CPU reference, which does not apply the
+add's compute type, while the engine does (see "Rounding points"). The failures
+that remain are outputs MIOpen computes wrongly: the 3D channels-last `F16fast`
+and `F16chan` cases, and, on gfx942, the half Variant2 cases whose intermediates
+are half (`F25first`, `F25full`, `F25scalar`), which also fail the fixed
+0.1.
+
+### Float outputs
+
+A float output is graded with the same model (ALMIOPEN-3249), under the same
+conditions as half and bfloat16. The output has no `lambda` term, and the order
+of the float summation sets both bands: summation error grows as
+`c * sqrt(K) * u32` times the size of the partial sums, which are about
+`sigma` for an output near zero and about `|ref|` or more for a large one, so
+
+```text
+|impl_i - ref_i| <= (2 * eps + c * sqrt(K) * u32) * |ref_i|     rtol
+                  + c * sqrt(K) * u32 * sigma                   atol
+                  + the rounding points + minNormal
+```
+
+with `eps` = 2^-23. The half and bfloat16 bands are unchanged: their `c` is 1,
+and the relative summation term, under 1 % of their `rtol`, is left out.
+
+`c` is not a constant of the model: how large the summation-order error is
+depends on the solver MIOpen picks, and the tolerance is computed before the
+engine runs. In the calibration data (the float `ConvolutionFwd` and
+`ConvolutionFwdPointwise` cases of develop's and the test-plan bundles, on gfx942
+and gfx90a, 6 input seed sets on gfx942 and 5 on gfx90a; outputs MIOpen computes
+wrongly (an error of 0.1 or more, which no band of this section passes) and the
+denormal cases left out) the
+solver is in MIOpen's log. Per output, the `c` it needs is the largest error
+left after
+`2 * eps * |ref|`, over `sqrt(K) * u32 * (sigma + |ref|)`. The largest, per
+solver family, over the outputs whose test ran that one family (the non-zero-mean
+cases, which need the relative term, are in the data and do not change these
+maxima):
+
+| Solver family | Outputs | Largest `c` needed |
+|---|---|---|
+| Winograd (`ConvBinWinograd*`, `ConvWinoRage*`) | 1,178 | gfx942 5.68, gfx90a 5.40 |
+| CK fused (`ConvCKIgemmGrpFwd*Fused`) | 2,874 | gfx942 2.46 |
+| rocBLAS GEMM | 424 | gfx942 2.35, gfx90a 2.11 |
+| Implicit GEMM, xdlops | 3,779 | gfx942 2.31, gfx90a 2.31 |
+| Naive direct | 2,023 | gfx942 1.77, gfx90a 1.77 |
+
+### Float against the fixed 1e-5
+
+The default that a float convolution-forward output had was `atol = rtol =
+1e-5` (`conv::getToleranceFwd<float>()`; the 0.1 of the sections above is the
+half and bfloat16 value). The new band is not simply tighter or looser: the
+fixed band grows as `sqrt(K)` at a typical output (`1e-5 * (1 + |ref|)`, and
+`|ref|` grows as `sqrt(K)`), the dynamic one as `K` (`sigma` and the summation
+error both grow as `sqrt(K)`). For inputs uniform in [-1, 1] (`sigma = sqrt(K / 9)`),
+the band at a typical output (`|ref| = sigma`) and the `atol` at an output near
+zero, the fixed value first, then `c` = 4 (the base) and `c` = 9 (MIOpen's), with
+the ratio to the fixed one in brackets:
+
+| K | Typical output: fixed 1e-5 | c = 4 | c = 9 | Output near zero: fixed 1e-5 | c = 4 | c = 9 |
+|---|---|---|---|---|---|---|
+| 36 | 3.0e-5 | 6.2e-6 (0.21) | 1.3e-5 (0.45) | 1e-5 | 2.9e-6 (0.29) | 6.4e-6 (0.64) |
+| 144 | 5.0e-5 | 2.4e-5 (0.48) | 5.3e-5 (1.05) | 1e-5 | 1.1e-5 (1.14) | 2.6e-5 (2.6) |
+| 1,152 | 1.2e-4 | 1.9e-4 (1.5) | 4.2e-4 (3.4) | 1e-5 | 9.2e-5 (9.2) | 2.1e-4 (21) |
+| 18,432 | 4.6e-4 | 2.9e-3 (6.4) | 6.6e-3 (14) | 1e-5 | 1.5e-3 (146) | 3.3e-3 (330) |
+
+So the dynamic band is tighter than the fixed one at short reductions and
+wider from `K` of about 540 (`c` = 4) or 130 (`c` = 9) at a typical output,
+and from about 126 or 56 at an output near zero. It is wider on purpose:
+long reductions need it. Of the correct float outputs in the calibration data
+(a correct output has an error within 0.1, see above), the fixed 1e-5 fails
+1,561 of the 10,451 distinct (case, seed, architecture) outputs, counted from the
+largest errors and the sampled elements of each output, so at least that many:
+none of the 2,237 outputs of develop's bundles, whose reductions are at most 512
+long, and 1,561 of the 8,214 of the test-plan bundles, with `K` from 128 to 93,312:
+1,470 of the 1,704 outputs with `K` above 512, and 91 of the 6,510 with `K`
+of 512 or less.
+
+What the wider band gives up is detection at long reductions: at `K` = 18,432
+a float output that is wrong by less than 6.5e-5 of its size at a typical element
+(1.5e-4 at `c` = 9) passes, where the fixed 1e-5 band caught a defect of 1.0e-5.
+Float detection was measured on the dump data with the bugs of the half and
+bfloat16 table, scored on the outputs whose bug-free result passes the
+tolerance: a missing filter tap, a missing input channel, a shifted input and a
+missing bias are caught in every output at 1e-5, at `c` = 9 (a missing tap:
+10,312 to 10,316 of 10,316) and at `c` = 4 (non-Winograd outputs); one element
+off by 4 ULP is caught by none (at most 4 of 9,133 at `c` = 4). Truncation was
+not injected for float, and defects between 4 ULP and a missing tap were not
+measured, so the band widths above remain the bound on what it can see. At a
+typical output the base band is tighter than the fixed one up to `K` of about
+540, and MIOpen's up to about 130.
+
+### The base coefficient and the engine's
+
+The base coefficient, which the SDK uses for an engine that sets nothing, is 4:
+the smallest whole number that leaves a headroom of at least 1.5 (the floor used
+for MIOpen's value below) over the largest need of any solver family but
+Winograd, 2.46 on CK fused solvers on gfx942. At 4 that headroom is 1.63. 3
+would be enough to pass the data (1.22) but is too thin for hardware nobody has
+measured. For Winograd the same constant fails up to 5 correct outputs in a run
+(one seed, one bundle set, one architecture); no theory term tells the two
+apart, and the harness does not know the solver.
+
+One coefficient scales both the `atol` and the `rtol` summation terms, and
+that is a measured choice. Splitting them (the `rtol` term with a coefficient
+`rho * c`, `rho` below 1) was fitted on the per-output need of the same data:
+for `rho` = 0.5 the largest need of a non-Winograd solver is 2.67 and Winograd's
+6.10, so the base stays 4 (a headroom of 1.50) and MIOpen's must go from 9 to
+10, and the band at a typical output narrows 1.3 times at the base and 1.2
+times at MIOpen's value. For `rho` = 0.25 the non-zero-mean cases (a fill that
+is not centred on zero, where the partial sums follow `|ref|` and not
+`sigma`) need 4.4, and for `rho` = 0 they need 23.7, so the base would have
+to rise to 7 and 36. A split gains 1.3 times at most, and only by going below
+the floor of 1.5 at the base; it gains 1.2 times at MIOpen's value; and with
+less `rho` the cases that need `|ref|` break the floor. It is not worth a
+second number. A term on `max(sigma, |ref|)` or on their root of squares was
+not fitted: the data keeps the six worst elements of each output and not all of
+them, and on those the `max` form needs at least 8.4 for Winograd against 5.7,
+a gain of 1.4 at most at a typical element and less if another element needs
+more. The term is kept as one coefficient on the sum of `sigma` and `|ref|`.
+
+An engine whose solvers err more sets its own in its TOML, next to
+`[[tolerance_overrides]]`:
+
+```toml
+[conv_fwd_tolerance.float]
+summation_order = 9.0
+```
+
+`summation_order` is `c`. It must be a finite positive number: a file with
+another value, with another output type (the table is per output type, so that
+the half `lambda` can take the same shape later) or with another key does not
+load, and neither does one with a top-level table other than `[meta]`,
+`[[tolerance_overrides]]`, `[[validator_overrides]]`, `[[test_skips]]` and
+`[conv_fwd_tolerance]` (a misspelt section name is an error, not a missing
+setting). It replaces the base coefficient for that engine's float outputs and
+changes nothing for half and bfloat16. A `[[tolerance_overrides]]` entry that
+matches a test still replaces the dynamic tolerance whole, as for half and
+bfloat16. Only the bundle harness reads the table; the C++ graph harness does
+not grade with the dynamic tolerance.
+
+MIOpen's file sets 9. Its worst solver family, Winograd, needs 5.68 on gfx942
+and 5.40 on gfx90a, so 9 leaves it a headroom of 1.58 and 1.67: at least 1.5,
+a little above the 1.44 of half and bfloat16. The same 9 makes the other
+families' bands wider than they need: their headroom is 3.6 or more.
+
+
+### Backward data and backward weights
+
+Backward data (`ConvolutionBwd`, dgrad) and backward weights (`ConvolutionWrw`,
+wrw) use the model of the sections above, the float form included (see "Float
+outputs"), with two differences: the two operands and `K` of their own
+direction, and their own `lambda` and summation-order coefficient `c`. An
+engine's `[conv_fwd_tolerance.float]` coefficient applies to forward only.
+
+| Direction | Operands | `K` |
+|---|---|---|
+| forward | `x`, `w` | `C / groups` times the filter volume: every weight dimension but the first. |
+| backward data | `dy`, `w` | The output channels of one group times, per spatial dimension, the filter taps that reach one `dx` element: `ceil(R / (s / gcd(s, d)))` for filter extent `R`, stride `s` and dilation `d`. Padding and the border only remove taps. |
+| backward weights | `x`, `dy` | The batch size times the spatial volume of `dy`. Products that read padding are zero, so for taps at the border this is an upper bound. |
+
+| Direction | float `lambda`, `c` | half `lambda`, `c` | bfloat16 `lambda`, `c` |
+|---|---|---|---|
+| forward | 0, 4 (the engine may set `c`) | 12, 1 | 0, 1 |
+| backward data | 32, 4 | 12, 1 | 6, 1 |
+| backward weights | 32, 4 | 36, 1 | 24, 1 |
+
+Why float backward has a `lambda`: at the shortest reductions (backward data
+with 2 or 3 output channels and a 1x1 filter, backward weights whose 18x18
+filter overhangs a 16x16 image) the 2 or 3 products of a correct output differ
+from the reference's by up to 8 float steps of a typical output. Neither the
+summation term, which is near zero at that `K`, nor `rtol` covers them;
+covering them with `c` alone takes `c` of about 15 for backward data and 21 for
+backward weights, three times wider at large `K`.
+
+Why backward weights in half and bfloat16 need a larger `lambda`: their
+measured error grows with `K`, about as `K^(1/4)`, as when a split reduction
+keeps partial results in the io type. `lambda` stays a constant (the largest
+the data needs); a `lambda` that grows as `K^(1/4)` would narrow the bfloat16
+backward-weights band at `K` = 1,152 from 20 % to about 12 % of a typical
+output, and is not used.
+
+At a typical output (`|ref|` = `sigma`, inputs uniform in [-1, 1], `K` =
+1,152) the band, divided by `sigma`, is, for each way of setting the tolerance
+(the per-op default and the worst-case bound used as both `atol` and `rtol`):
+
+| Direction | Output | per-op default | worst-case bound | dynamic |
+|---|---|---|---|---|
+| backward data | float | 9.25e-6 | 0.344 | 2.02e-5 |
+| backward data | half | 0.022 | 1.6 | 0.014 |
+| backward data | bfloat16 | 0.022 | 10.1 | 0.063 |
+| backward weights | float | 2.18e-4 | 0.344 | 2.02e-5 |
+| backward weights | half | 0.218 | 1.6 | 0.037 |
+| backward weights | bfloat16 | 0.218 | 10.1 | 0.203 |
+
+Where the dynamic band is wider than the per-op default (float backward data,
+bfloat16 backward data), the default fails correct output; see the
+calibration below.
+
+### Calibration: backward data and backward weights
 
 Data: the float, half and bfloat16 cases MIOpen runs of the conv-dgrad
 test-plan bundles (`ConvolutionBwd`, `ConvolutionBwdPointwise`), of the same
 problems posed as backward weights (x the shape of dx, dw the shape of w;
 calibration bundles not in the tree) together with the backward-weights
-bundles in the tree, and of the float cases of the conv-fwd test-plan bundles,
-at all four levels, with outputs up to 4 M elements, on an MI325X and MI308X
-(gfx942). Each output was compared with the harness reference and with a
-float64 recomputation from the same inputs. The fit used 3 input seeds, the
-validation 2 more. The mixed-type class `F20` (half inputs, float dx) was left
-out: MIOpen faults on it on gfx942 (an illegal memory access that poisons the
-rest of the process).
+bundles in the tree, at all four levels, with outputs up to 4 M elements, on
+an MI325X and MI308X (gfx942). Each output was compared with the harness
+reference and with a float64 recomputation from the same inputs. The fit used
+3 input seeds, the validation 2 more. The mixed-type class `F20` (half inputs,
+float dx) was left out: MIOpen faults on it on gfx942 (an illegal memory
+access that poisons the rest of the process).
 
 Outputs MIOpen computes wrongly are not data for the fit: an output whose
 error against the float64 result exceeds a quarter of `sigma`, or that holds a
@@ -384,7 +670,6 @@ NaN or an infinity. That leaves out 211 cases: the mixed-layout class `F15`
 
 | Direction | Output | Correct outputs (fit / validation) | Fail the per-op default | Fail the dynamic tolerance | Smallest headroom (fit / validation) | Median headroom |
 |---|---|---|---|---|---|---|
-| forward | float | 2,631 / 1,754 | 1,066 | 0 | 1.62 / 1.55 | 5.7 |
 | backward data | float | 2,205 / 1,470 | 856 | 0 | 2.37 / 2.62 | 6.3 |
 | backward data | half | 2,343 / 1,562 | 170 | 0 | 1.53 / 1.78 | 6.4 |
 | backward data | bfloat16 | 2,106 / 1,404 | 211 | 0 | 1.97 / 1.56 | 4.8 |
@@ -395,12 +680,12 @@ NaN or an infinity. That leaves out 211 cases: the mixed-layout class `F15`
 Headroom here is exact: the smallest factor by which the whole band
 `atol + rtol * |ref_i|` could shrink, over every element of the output, before
 the output fails. The constants are, for each direction and type, the
-narrowest band on a grid of `lambda` and `m` whose smallest headroom on the fit
+narrowest band on a grid of `lambda` and `c` whose smallest headroom on the fit
 data is at least 1.5.
 
 - float: the shortest reductions set `lambda` (backward data with 2 or 3
   output channels and a 1x1 filter: up to 8 float steps of a typical output),
-  the longest set `m` (the reference's sequential sum).
+  the longest set `c` (the reference's sequential sum).
 - half: backward data needs what forward does (`lambda` 12). Backward weights
   needs 36; its error grows with `K` (about as `K^(1/4)`), as when a split
   reduction keeps partial results in the io type.
@@ -427,8 +712,6 @@ price of failing correct outputs (table above):
 | backward weights, float | inputs rounded to tf32 / to bfloat16 | 98 % / 99 % | 99 % / 99 % |
 | backward weights, half | one batch sample / one dy row missing | 98 % / 95 % | 99 % / 98 % |
 | backward weights, bfloat16 | one batch sample / one dy row missing | 99 % / 95 % | 99 % / 87 % |
-| forward, float | one filter tap / one input channel missing | 99 % / 99 % | 99 % / 99 % |
-| forward, float | inputs rounded to tf32 / to bfloat16 | 99 % / 99 % | 99 % / 99 % |
 
 An accumulator in the io type is what the `lambda` of half and of bfloat16
 backward weights allows for, so it is not detected there. With a bfloat16

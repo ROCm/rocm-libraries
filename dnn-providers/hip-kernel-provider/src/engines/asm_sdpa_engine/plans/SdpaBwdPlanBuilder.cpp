@@ -14,6 +14,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
@@ -520,6 +521,11 @@ bool SdpaBwdPlanBuilder::isApplicable(
         HIP_KERNEL_RETURN_FALSE_IF(
             !hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(scaleIt->second),
             "scale tensor must be pass-by-value (compile-time constant or runtime)");
+    }
+
+    if(!plan_utils::isAttnScaleApplicable(attrs, opGraph.getTensorMap(), HIP_KERNEL_LOG_PREFIX))
+    {
+        return false;
     }
 
     // --- Validate required tensors ---

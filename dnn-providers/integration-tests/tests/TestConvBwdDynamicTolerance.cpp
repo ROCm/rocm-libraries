@@ -3,6 +3,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cmath>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -290,7 +291,7 @@ TEST(TestConvBwdDynamicTolerance, DgradWithAZeroStrideIsNotModeled)
 }
 
 // A backward activation reads the dgrad result and the forward input; its slope is at most 1,
-// so it leaves the scale alone. The result it reads is float, as the model needs.
+// so it leaves the scale alone. The result it reads is float: no rounding point.
 TEST(TestConvBwdDynamicTolerance, DgradFollowedByABackwardActivationIsModeled)
 {
     GraphSpec spec;
@@ -298,14 +299,24 @@ TEST(TestConvBwdDynamicTolerance, DgradFollowedByABackwardActivationIsModeled)
     const auto scale = dgradScale(spec);
     ASSERT_TRUE(scale.has_value());
     EXPECT_DOUBLE_EQ(scale->outputScale, 1.0);
+    EXPECT_TRUE(scale->roundingPoints.empty());
 }
 
-TEST(TestConvBwdDynamicTolerance, DgradResultStoredInHalfAndReadByAnActivationIsNotModeled)
+// The dgrad result stored in half before the activation reads it is rounded there: a rounding
+// point at the size of that result. dy is 3 and w 0.5 everywhere, so with K = 16 * 3 * 3 = 144
+// products of 1.5 the result is 216, its root mean square, and relu passes an error on with
+// slope 1.
+TEST(TestConvBwdDynamicTolerance, DgradResultStoredInHalfAndReadByAnActivationIsARoundingPoint)
 {
     GraphSpec spec;
     spec.fusedReluBackward = true;
     spec.resultType = DataType::HALF;
-    EXPECT_FALSE(errorScale(spec).has_value());
+    const auto scale = dgradScale(spec);
+    ASSERT_TRUE(scale.has_value());
+    ASSERT_EQ(scale->roundingPoints.size(), 1u);
+    EXPECT_DOUBLE_EQ(scale->roundingPoints[0].epsilon, std::ldexp(1.0, -10));
+    EXPECT_DOUBLE_EQ(scale->roundingPoints[0].magnitude, 216.0);
+    EXPECT_DOUBLE_EQ(scale->roundingPoints[0].slope, 1.0);
 }
 
 TEST(TestConvBwdDynamicTolerance, DyWrittenByAnotherNodeIsNotModeled)

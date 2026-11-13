@@ -5,8 +5,8 @@
 
 The SDPA graph template and the golden bundles live in the hipDNN part of the
 monorepo, outside rocke. An installed test tree carries a copy under ``hipdnn/``
-beside this module (``platform/CMakeLists.txt`` installs it when it configures
-from a monorepo checkout); a source checkout reads the monorepo. The tests that
+beside this module (the rocKE umbrella ``CMakeLists.txt`` installs it for an
+embedded build); a source checkout reads the monorepo. The tests that
 read them skip when neither exists, unless ``--rocke-require-hipdnn-assets`` is
 given (the installed CTest entry passes it whenever it installed the copy).
 """
@@ -57,13 +57,19 @@ def golden_bundle_root() -> Path | None:
 
 
 def sdpa_fwd_golden_graphs() -> list[Path]:
-    """The checked-in SdpaFwd graphs (not their meta, support or sweep files)."""
+    """The checked-in SdpaFwd graphs (not their meta, support or sweep files).
+
+    A sweep (graph.template.json + sweep.json) can sit in any bundle directory; its template
+    holds ${case.*} placeholders, not a graph, so it is skipped wherever it is.
+    """
     bundles = golden_bundle_root()
     if bundles is None:
         return []
     return sorted(
         p
         for p in bundles.glob("*/SdpaFwd*/**/*.json")
-        if not p.name.endswith(("meta.json", "support.json", "sweep.json"))
+        if not p.name.endswith(
+            ("meta.json", "support.json", "sweep.json", "template.json")
+        )
         and "Default" not in p.parts
     )

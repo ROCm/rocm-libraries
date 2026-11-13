@@ -1242,6 +1242,13 @@ int main(int argc, const char* argv[])
                     if(solution == nullptr)
                         throw std::runtime_error("Could not find a solution");
 
+                    // WorkgroupMappingXCCCheck admits CU-fallback solutions on the basis that
+                    // they launch at WGMXCC=1, as hipBLASLt does; zero keeps the solution's own
+                    // mapping.
+                    if(auto gemm = dynamic_cast<ContractionProblemGemm*>(problem);
+                       gemm && !fusedA2A)
+                        gemm->setParams().setWGMXCC(solution->isFallbackForHW(*hardware) ? 1 : 0);
+
                     {
                         ScopedTimer timer("pre_solution");
                         listeners.preSolution(solution.get());

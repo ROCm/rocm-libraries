@@ -9,27 +9,38 @@
 namespace hipdnn_integration_tests::bundle
 {
 
+ClaimMode claimMode(const TestConfig& config)
+{
+    return config.enforceSupportClaims() ? ClaimMode::ENFORCE : ClaimMode::WARN;
+}
+
 ClaimMode claimMode()
 {
-    return TestConfig::get().enforceSupportClaims() ? ClaimMode::ENFORCE : ClaimMode::WARN;
+    return claimMode(TestConfig::get());
+}
+
+HarnessPolicy productionPolicy(TensorPlacement placement, const TestConfig& config)
+{
+    HarnessPolicy policy;
+    policy.mode = config.getVerificationMode();
+    policy.validator = config.getValidatorDevice();
+    policy.claims = claimMode(config);
+    policy.skipGraphValidation = config.skipGraphValidation();
+    policy.writeSupportClaims = config.writeSupportClaims();
+    policy.placement = placement;
+    policy.arch = config.getCurrentArch();
+    policy.platform = currentPlatform();
+    policy.deviceVramMb = config.getCurrentDeviceVramMb();
+    policy.benchmark = config.benchmarkSettings();
+    policy.testSettings = config.testSettings();
+    policy.graphCapture = config.graphCaptureSettings();
+    policy.benchmarkReference = config.benchmarkReference();
+    return policy;
 }
 
 HarnessPolicy productionPolicy(TensorPlacement placement)
 {
-    HarnessPolicy policy;
-    policy.mode = TestConfig::get().getVerificationMode();
-    policy.validator = TestConfig::get().getValidatorDevice();
-    policy.claims = claimMode();
-    policy.skipGraphValidation = TestConfig::get().skipGraphValidation();
-    policy.writeSupportClaims = TestConfig::get().writeSupportClaims();
-    policy.placement = placement;
-    policy.arch = TestConfig::get().getCurrentArch();
-    policy.platform = currentPlatform();
-    policy.deviceVramMb = TestConfig::get().getCurrentDeviceVramMb();
-    policy.benchmark = TestConfig::get().benchmarkSettings();
-    policy.testSettings = TestConfig::get().testSettings();
-    policy.graphCapture = TestConfig::get().graphCaptureSettings();
-    return policy;
+    return productionPolicy(placement, TestConfig::get());
 }
 
 } // namespace hipdnn_integration_tests::bundle

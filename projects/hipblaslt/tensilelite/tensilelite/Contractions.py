@@ -678,6 +678,33 @@ class ProblemPredicate(Properties.Predicate):
         if 'BufferStore' in state and state['BufferStore'] == True:
             rv += [cls('BufferStoreOffsetLimitCheck', value=state['MacroTile1'])]
 
+        # PrefetchGL2SAddr keeps each lane's prefetch offset in 32 bits. The cluster
+        # prefetches all ClusterDim tiles it consumes, so the free extent is
+        # MacroTile * ClusterDim. See Components/GL2Prefetch.py for the footprint.
+        if state.get('PrefetchGL2', 0) > 0 and state.get('PrefetchGL2SAddr', False):
+            pt = state['ProblemType']
+            clusterDim = state.get('ClusterDim', [1, 1])
+            metadataIdx = 1 if pt.get('Sparse', 0) == 2 else 0
+            metadata = bool(state.get('enableTDMMetadata', False))
+            rv += [cls('GL2PrefetchSAddrOffsetLimitCheck', value={
+                'TLUA': bool(pt['TLUA']),
+                'TLUB': bool(pt['TLUB']),
+                'DepthUA': state.get('_DepthUA', state['DepthU']),
+                'DepthUB': state.get('_DepthUB', state['DepthU']),
+                'ClusterMT0': state['MacroTile0'] * clusterDim[0],
+                'ClusterMT1': state['MacroTile1'] * clusterDim[1],
+                'DepthU': state['DepthU'],
+                'MatrixInstK': state.get('MatrixInstK', 0),
+                'MXBlockA': pt.get('MXBlockA', 0) or 0,
+                'MXBlockB': pt.get('MXBlockB', 0) or 0,
+                'MXBlockFreeA': max(1, pt.get('MXBlockFreeA', 1) or 1),
+                'MXBlockFreeB': max(1, pt.get('MXBlockFreeB', 1) or 1),
+                'Metadata': metadata,
+                'TLUMetadata': bool(pt.get('TLUMetadata', False)) if metadata else False,
+                'DepthUMetadata': state.get('_DepthUMetadata', state['DepthU']) if metadata else 0,
+                'ClusterMTMetadata': state['MacroTileMetadata'] * clusterDim[metadataIdx] if metadata else 0,
+            })]
+
         if '_GlobalAccumulation' in state and state['_GlobalAccumulation'] != None and not isPersistent(state):
             value = MIN_K_FOR_GSU
             rv += [cls('GlobalSplitUCheckMinK', value=[value, state["GlobalSplitU"]])]
@@ -1062,6 +1089,7 @@ class Solution:
         # but it describes the in-device MX scale layout the kernel expects, which
         # the host (DataInitialization) needs to know to pick an upload layout.
         # Plumb it onto problemType so the host can read it post-solution-pick.
+        # The values are TensileLite::MXScaleFormat (include/Tensile/MXScaleFormat.hpp).
         rv.problemType.mxScaleFormat = {"NoSwizzle": 0,
                                         "HostPreSwizzle": 1,
                                         "InMemorySwizzle": 2}.get(d.get("MXScaleFormat", "NoSwizzle"), 0)

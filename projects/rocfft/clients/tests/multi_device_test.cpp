@@ -52,9 +52,9 @@ static const std::vector<std::vector<size_t>> multi_gpu_sizes = {
     {1, 1, 256},
     {1, 256, 1},
 };
-static const std::vector<size_t>        multi_gpu_batch_range = {4, 1};
-static std::vector<std::vector<size_t>> ioffset_range_zero    = {{0, 0}};
-static std::vector<std::vector<size_t>> ooffset_range_zero    = {{0, 0}};
+static constexpr size_t                 min_non_unit_batch = 4;
+static std::vector<std::vector<size_t>> ioffset_range_zero = {{0, 0}};
+static std::vector<std::vector<size_t>> ooffset_range_zero = {{0, 0}};
 
 enum SplitType
 {
@@ -74,7 +74,13 @@ enum SplitType
     // considered number of devices
     IMPLICIT_HIPFFT,
     // different I/O devices but no decomposition
-    DIFFERENT_IO_DEVICES
+    DIFFERENT_IO_DEVICES,
+    // split only the batch dimension, each output brick on the same device as the input
+    // brick of same batch range, listed in a shuffled order (out-of-place only)
+    BATCH_COLOCATED,
+    // split only the batch dimension, each output brick on a different device than the
+    // input brick of same batch range (out-of-place only)
+    BATCH_RELOCATED
 };
 
 std::vector<fft_params> param_generator_multi_gpu(const SplitType type)
@@ -90,6 +96,17 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type)
 
     static const std::vector<std::vector<size_t>> stride_range = {{1}};
 
+    std::vector<size_t> batch_range = {min_non_unit_batch, 1};
+    if(mp_lib == fft_params::fft_mp_lib_mpi)
+    {
+        // with MPI, batch splits need a brick per rank, otherwise
+        // tests aren't generated and coverage is sacrificed
+        if(type == BATCH_COLOCATED || type == BATCH_RELOCATED)
+            batch_range = {std::max(min_non_unit_batch, total_num_devices)};
+        else if(type == IMPLICIT_HIPFFT && total_num_devices > min_non_unit_batch)
+            batch_range[0] = total_num_devices;
+    }
+
     // gather cases to test as single-device params, then distribute
     // to multiple GPUs
     std::vector<fft_params> params_single = param_generator_base(
@@ -97,7 +114,7 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type)
         trans_type_range_full,
         multi_gpu_sizes,
         precision_range_sp_dp,
-        multi_gpu_batch_range,
+        batch_range,
         generate_types,
         stride_generator(stride_range),
         stride_generator(stride_range),
@@ -206,6 +223,20 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type)
                 while(start_global_dev_id_input == start_global_dev_id_output)
                     start_global_dev_id_output = dev_rng(gen);
                 break;
+            case BATCH_COLOCATED:
+                // in-place already covered by IMPLICIT_HIPFFT
+                if(p.nbatch < 2 || p.placement == fft_placement_inplace)
+                    continue;
+                input_grid[0] = output_grid[0]
+                    = std::min(p.nbatch, static_cast<size_t>(total_num_devices));
+                break;
+            case BATCH_RELOCATED:
+                if(p.nbatch < 2 || p.placement == fft_placement_inplace)
+                    continue;
+                input_grid[0] = output_grid[0]
+                    = std::min(p.nbatch, static_cast<size_t>(total_num_devices));
+                start_global_dev_id_output = 1;
+                break;
             default:
                 throw std::invalid_argument("param_generator_multi_gpu: unkonwn split type");
             }
@@ -224,6 +255,8 @@ std::vector<fft_params> param_generator_multi_gpu(const SplitType type)
                 gpus_per_rank, input_grid, mp_ranks, start_global_dev_id_input);
             p_dist.distribute_field<fft_io::fft_io_out>(
                 gpus_per_rank, output_grid, mp_ranks, start_global_dev_id_output);
+            if(type == BATCH_COLOCATED)
+                std::shuffle(p_dist.ofields[0].bricks.begin(), p_dist.ofields[0].bricks.end(), gen);
 
             if(mp_ranks > 1)
             {
@@ -298,6 +331,18 @@ INSTANTIATE_TEST_SUITE_P(multi_gpu_different_io_devices,
                          ::testing::ValuesIn(param_generator_multi_gpu(DIFFERENT_IO_DEVICES)),
                          accuracy_test::TestName);
 
+// embarrassingly-parallel transforms: batch-only split, shuffled output bricks
+INSTANTIATE_TEST_SUITE_P(multi_gpu_batch_colocated,
+                         accuracy_test,
+                         ::testing::ValuesIn(param_generator_multi_gpu(BATCH_COLOCATED)),
+                         accuracy_test::TestName);
+
+// batch-only split that cannot be paired brickwise, requiring data movement
+INSTANTIATE_TEST_SUITE_P(multi_gpu_batch_relocated,
+                         accuracy_test,
+                         ::testing::ValuesIn(param_generator_multi_gpu(BATCH_RELOCATED)),
+                         accuracy_test::TestName);
+
 TEST(multi_gpu_validate, catch_validation_errors)
 {
     if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
@@ -306,8 +351,13 @@ TEST(multi_gpu_validate, catch_validation_errors)
         GTEST_SKIP();
     }
 
-    const auto all_split_types
-        = {SLOW_INOUT, SLOW_IN, SLOW_OUT, SLOW_IN_FAST_OUT, PENCIL_3D, IMPLICIT_HIPFFT};
+    const auto all_split_types = {SLOW_INOUT,
+                                  SLOW_IN,
+                                  SLOW_OUT,
+                                  SLOW_IN_FAST_OUT,
+                                  PENCIL_3D,
+                                  IMPLICIT_HIPFFT,
+                                  BATCH_COLOCATED};
 
     for(auto type : all_split_types)
     {
@@ -429,12 +479,72 @@ static const auto multi_gpu_tokens = {
     "complex_forward_len_8_8_8_single_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_4_4_8_stride_128_32_8_1_dev_0_brick_lower_0_0_4_0_upper_1_4_8_8_stride_128_32_8_1_dev_1_brick_lower_0_4_0_0_upper_1_8_4_8_stride_128_32_8_1_dev_2_brick_lower_0_4_4_0_upper_1_8_8_8_stride_128_32_8_1_dev_3_ofield_brick_lower_0_0_0_0_upper_1_2_8_8_stride_128_64_8_1_dev_0_brick_lower_0_2_0_0_upper_1_4_8_8_stride_128_64_8_1_dev_1_brick_lower_0_4_0_0_upper_1_6_8_8_stride_128_64_8_1_dev_2_brick_lower_0_6_0_0_upper_1_8_8_8_stride_128_64_8_1_dev_3",
     // same, with JIT load/store callbacks
     "complex_forward_len_8_8_8_single_op_batch_1_ifield_brick_lower_0_0_0_0_upper_1_4_4_8_stride_128_32_8_1_dev_0_brick_lower_0_0_4_0_upper_1_4_8_8_stride_128_32_8_1_dev_1_brick_lower_0_4_0_0_upper_1_8_4_8_stride_128_32_8_1_dev_2_brick_lower_0_4_4_0_upper_1_8_8_8_stride_128_32_8_1_dev_3_ofield_brick_lower_0_0_0_0_upper_1_2_8_8_stride_128_64_8_1_dev_0_brick_lower_0_2_0_0_upper_1_4_8_8_stride_128_64_8_1_dev_1_brick_lower_0_4_0_0_upper_1_6_8_8_stride_128_64_8_1_dev_2_brick_lower_0_6_0_0_upper_1_8_8_8_stride_128_64_8_1_dev_3_JITCB",
+    // lone input and output bricks on the same, non-current device
+    "complex_forward_len_256_double_ip_batch_4_ifield_brick_lower_0_0_upper_4_256_stride_256_1_dev_1_ofield_brick_lower_0_0_upper_4_256_stride_256_1_dev_1",
+    "real_forward_len_256_256_single_op_batch_2_ifield_brick_lower_0_0_0_upper_2_256_256_stride_65536_256_1_dev_1_ofield_brick_lower_0_0_0_upper_2_256_129_stride_33024_129_1_dev_1_JITCB",
+    "real_inverse_len_256_double_op_batch_4_ifield_brick_lower_0_0_upper_4_129_stride_129_1_dev_1_ofield_brick_lower_0_0_upper_4_256_stride_256_1_dev_1",
+    // same, with a Bluestein length requiring work memory
+    "complex_forward_len_10007_single_op_batch_2_ifield_brick_lower_0_0_upper_2_10007_stride_10007_1_dev_1_ofield_brick_lower_0_0_upper_2_10007_stride_10007_1_dev_1",
     // clang-format on
 };
+
+// Single-process multi-device distributions of 2D and 3D transforms with a
+// Bluestein (prime 10007) length on the contiguous or a non-contiguous axis:
+// one side is split on the slowest axis, the other on the fastest axis, the
+// latter never being in the real domain.
+static std::vector<std::string> multi_gpu_bluestein_tokens()
+{
+    std::vector<std::string> tokens;
+    if(mp_lib != fft_params::fft_mp_lib_none || gpus_per_rank < 2)
+        return tokens;
+
+    const std::vector<std::vector<size_t>> lengths
+        = {{16, 10007}, {10007, 16}, {10007, 16, 16}, {16, 10007, 16}, {16, 16, 10007}};
+    for(const auto& length : lengths)
+    {
+        // split axes (indices in fields, i.e. batch first) on input and output
+        for(const auto& [in_split, out_split] : {std::pair<size_t, size_t>{1, length.size()},
+                                                 std::pair<size_t, size_t>{length.size(), 1}})
+        {
+            for(const auto transform_type : trans_type_range_full)
+            {
+                for(const auto placement : {fft_placement_notinplace, fft_placement_inplace})
+                {
+                    for(const size_t nbatch : {min_non_unit_batch, size_t{1}})
+                    {
+                        fft_params p;
+                        p.length         = length;
+                        p.precision      = fft_precision_single;
+                        p.nbatch         = nbatch;
+                        p.transform_type = transform_type;
+                        p.placement      = placement;
+                        p.validate();
+
+                        // do not split the contiguous axis in the real domain
+                        if(p.is_real() && (p.is_forward() ? in_split : out_split) == length.size())
+                            continue;
+
+                        // as many bricks as devices, but no empty brick
+                        std::vector<unsigned int> in_grid(length.size() + 1, 1);
+                        std::vector<unsigned int> out_grid(length.size() + 1, 1);
+                        in_grid[in_split]   = std::min(gpus_per_rank, p.ilength()[in_split - 1]);
+                        out_grid[out_split] = std::min(gpus_per_rank, p.olength()[out_split - 1]);
+                        p.distribute_field<fft_io::fft_io_in>(gpus_per_rank, in_grid);
+                        p.distribute_field<fft_io::fft_io_out>(gpus_per_rank, out_grid);
+                        tokens.push_back(p.token());
+                    }
+                }
+            }
+        }
+    }
+    return tokens;
+}
 
 std::vector<fft_params> param_generator_multi_gpu_adhoc()
 {
     auto all_params = param_generator_token(test_prob, multi_gpu_tokens);
+    for(auto& p : param_generator_token(test_prob, multi_gpu_bluestein_tokens()))
+        all_params.push_back(std::move(p));
 
     // check if fields use more bricks than we can support
     auto too_many_bricks = [=](const std::vector<fft_params::fft_field>& fields, size_t maxBricks) {
@@ -494,6 +604,58 @@ INSTANTIATE_TEST_SUITE_P(multi_gpu_adhoc_token,
                          ::testing::ValuesIn(param_generator_multi_gpu_adhoc()),
                          accuracy_test::TestName);
 
+// A distributed Bluestein (prime 10007) plan must not silently fall back to
+// running the whole transform on one device. Detect that fallback by checking
+// every device's work buffer stays below the single-device size.
+class multi_gpu_workbuf : public accuracy_test
+{
+};
+// no instance without multiple devices
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(multi_gpu_workbuf);
+
+TEST_P(multi_gpu_workbuf, distribute_bluestein_workspace)
+{
+    try
+    {
+        const auto& dist  = GetParam();
+        const auto  token = dist.token();
+
+        // Reference: the same logical transform on a single device.  Its
+        // work buffer is what one device needs to run the whole transform.
+        fft_params base = dist;
+        base.ifields.clear();
+        base.ofields.clear();
+        rocfft_params ref{base};
+        ASSERT_EQ(ref.setup_structs(), fft_status_success) << "reference plan: " << token;
+        const size_t single_whole
+            = *std::max_element(ref.workbuffersizes.begin(), ref.workbuffersizes.end());
+        ASSERT_GT(single_whole, 0u) << "reference plan needs no work buffer: " << token;
+
+        rocfft_params dist_params{dist};
+        ASSERT_EQ(dist_params.setup_structs(), fft_status_success) << "distributed plan: " << token;
+        const size_t max_per_device = *std::max_element(dist_params.workbuffersizes.begin(),
+                                                        dist_params.workbuffersizes.end());
+
+        // A device reaching the single-device size means the whole transform
+        // ran on it, i.e. the gather/scatter fallback was taken instead of a
+        // real multi-device decomposition.
+        EXPECT_LT(max_per_device, single_whole)
+            << "multi-device plan appears to have fallen back to single-device "
+               "gather/scatter: a device requires a work buffer of size "
+            << byte_size_to_str(max_per_device)
+            << " while the single-device plan requires as much or less, i.e., "
+            << byte_size_to_str(single_whole);
+    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS;
+}
+
+// same (pseudo-)random selection as the multi_gpu_adhoc_token accuracy tests
+INSTANTIATE_TEST_SUITE_P(bluestein,
+                         multi_gpu_workbuf,
+                         ::testing::ValuesIn(param_generator_token(test_prob,
+                                                                   multi_gpu_bluestein_tokens())),
+                         multi_gpu_workbuf::TestName);
+
 std::vector<fft_params> param_generator_some_continuous_brick()
 {
     if(mp_lib == fft_params::fft_mp_lib_none && mp_ranks != 1)
@@ -510,7 +672,7 @@ std::vector<fft_params> param_generator_some_continuous_brick()
                                                           trans_type_range_full,
                                                           multi_gpu_sizes,
                                                           precision_range_sp_dp,
-                                                          multi_gpu_batch_range,
+                                                          {min_non_unit_batch, 1},
                                                           generate_types,
                                                           stride_generator({{1}}),
                                                           stride_generator({{1}}),

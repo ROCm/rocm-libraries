@@ -5,6 +5,11 @@
 
 #include "harness/bundle/HarnessPolicy.hpp"
 
+namespace hipdnn_integration_tests
+{
+class TestConfig;
+} // namespace hipdnn_integration_tests
+
 namespace hipdnn_integration_tests::bundle
 {
 
@@ -17,11 +22,18 @@ namespace hipdnn_integration_tests::bundle
 /// place production actually assembles one.
 HarnessPolicy productionPolicy(TensorPlacement placement);
 
+/// The same for a configuration other than the process-wide one, which a unit test builds from
+/// the options it wants to look at (see TestConfig's constructor).
+HarnessPolicy productionPolicy(TensorPlacement placement, const TestConfig& config);
+
 /// The CLI flag, as the one value the harness reads.
 ///
 /// Exposed rather than kept private to productionPolicy() because main.cpp needs the
 /// same answer for the summary header, and a header that disagreed with the mode the
 /// run actually used would be worse than no header.
 ClaimMode claimMode();
+
+/// The same for a configuration other than the process-wide one.
+ClaimMode claimMode(const TestConfig& config);
 
 } // namespace hipdnn_integration_tests::bundle

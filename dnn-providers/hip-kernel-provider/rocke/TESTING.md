@@ -71,13 +71,14 @@ all its own ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)).
 
 ## 2. How we answer them — the oracle types
 
-Four kinds of test oracle, in decreasing order of strength. The names are the
+Five kinds of test oracle, in decreasing order of strength. The names are the
 standard ones from the testing literature; naming them matters because each proves
 something *different*, and conflating them is how false confidence creeps in.
 
 | Oracle type | Question it answers | Mechanism in rocKE | Serves |
 |---|---|---|---|
 | **Reference oracle** | Is the math correct? | Run on GPU, compare to an independent reference (numpy / torch) | Kernel correctness (A) |
+| **Oracle-free (closed-form / property)** | Is the math correct, without a reference implementation? | Run on GPU on inputs whose exact output follows from first principles (e.g. zero-Q attention: uniform probabilities over the legal keys); check the stored bits exactly or against a modeled error bound, and re-run the check under deliberately wrong rules that must be rejected | Kernel correctness (A), on the constructed inputs |
 | **Regression / characterization** | Did the output change? | sha256 of canonical IR vs. a pinned baseline | Platform output stability (B) |
 | **Differential / pseudo-oracle** | Do the two implementations agree? | **Byte-identity** of emitted IR, Python engine vs C++ engine | Platform equivalence (B) |
 | **Implicit oracle** | Did it crash / NaN / hang? | Signal death, non-finite output, timeout | Both A and B |
@@ -92,8 +93,11 @@ Two notes that matter:
   special case of it.
 - **Agreement is not correctness.** The differential oracle is a *pseudo-oracle*
   (two implementations checking each other because no cheap true oracle exists).
-  Two implementations can agree on a wrong answer. Only the reference oracle
-  establishes ground truth — and only on real hardware.
+  Two implementations can agree on a wrong answer. Only the reference oracle and
+  the oracle-free checks establish ground truth — and only on real hardware. The
+  oracle-free checks trade input generality for independence: they cover only
+  the inputs they construct, but there is no reference implementation to share
+  a bug with the kernel.
 
 ---
 
@@ -204,6 +208,16 @@ the strategy's biggest holes live (see
   `library/tests/conv_reference/gradient_cases.py` on gfx942 and gfx950
   against live NumPy oracles. The [coverage guide](docs/conv-coverage-roadmap.md)
   distinguishes production-selected instances from explicit kernel configurations.
+
+- The [oracle-free attention lane](library/tests/oracle_free/README.md)
+  (`rocke_oracle_free_pytest`, quick tier) launches the shipped gfx942 dense
+  kernel, at whatever configuration dispatch resolves, on zero-Q inputs whose
+  outputs are uniform probabilities over the legal keys. It requires every
+  stored bit to equal the correctly rounded closed form (a proven zero-ULP
+  result for single-pass dense attention), on GQA causal and sliding-window
+  cases, and fails if any one-key or denominator mutation of the mask rule, or a
+  head-0 broadcast, goes unrejected. It needs NumPy and HIP only; its CPU
+  contracts run in `rocke_library_attention_cpu_pytest`.
 
 - **Nothing else in this document proves the math is right.** Byte-identity
   ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)) and golden IR
@@ -343,7 +357,11 @@ and by both engines is green in both. The **emitted-IR validity gate**,
 question: it lowers every case in the representative corpus
 ([`rocke_ir_parity_harness.cases()`](platform/tests/instances/rocke_ir_parity_harness.py),
 the same corpus §4.2 hashes) and pushes each module through `clang` to a linked
-hsaco.
+hsaco. Library families keep their representative cases beside their own golden
+(convolution: [`library/tests/test_conv_ir_golden.py`](library/tests/test_conv_ir_golden.py));
+`--cases <file>` points this gate, and the arch-domain gate below, at such a
+corpus, and [`library/tests/run_all.py`](library/tests/run_all.py) runs both over
+every library corpus.
 
 Three design points, each of them load-bearing:
 
@@ -520,8 +538,9 @@ and selected library host/GPU suites. Build-tree C++ test registration is
 orchestrated by
 [`platform/tests/CMakeLists.txt`](platform/tests/CMakeLists.txt) and owned by its
 [concern-specific fragments](platform/tests/README.md#cmake-registration-ownership)
-under `platform/tests/cmake/`. Installed Python and library CTest registration
-remains in [`platform/CMakeLists.txt`](platform/CMakeLists.txt). The provider's
+under `platform/tests/cmake/`. Installed Python CTest registration remains in
+[`platform/CMakeLists.txt`](platform/CMakeLists.txt), which includes the library
+suites' own list, [`library/tests/ctest_lists.cmake`](library/tests/ctest_lists.cmake). The provider's
 external test-category YAML and TheRock's tier selection determine which
 registered tests actually execute. Check the selected list in the job log or
 with CTest's verbose listing. Registration alone does not establish CI coverage.
@@ -541,6 +560,14 @@ uses an independently qualified bundle to run its enrolled cases without Torch.
 The published convolution lane uses the same workflow for its forward cohort.
 Inspect collection and GPU comparison counts separately from host-test passes;
 directory coverage alone does not establish GPU correctness.
+
+**Embedded host-test assets.** The rocKE umbrella CMake project, not the
+standalone `platform/` project, stages external assets used by installed library
+tests. The hipDNN SDPA assets and provider geometry headers are optional and
+independent. Missing content preserves the tests' skip behavior; staged SDPA
+assets make the installed test require them. The umbrella resolves the asset
+repository from `ROCM_LIBRARIES_ROOT`, with a source-relative fallback for an
+in-repository build. Standalone platform builds have no external-asset dependency.
 
 **Harness lane bridge.** The differential harness numbers its lanes `L1…L6` (L1
 `verify`, L3 `ll` = the byte-identity gate, L5 the golden anchor, L6 numeric). Read

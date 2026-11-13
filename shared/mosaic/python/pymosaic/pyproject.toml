@@ -1,0 +1,46 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pymosaic"
+version = "0.1.0"
+description = "Host-side, JIT-backed mosaic layouts for Python (runtime values, compile-time structure)"
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+license = { text = "MIT" }
+dependencies = [
+    "nanobind>=2.0",
+    "ninja",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+# The package lives at python/pymosaic/pymosaic; this pyproject is its root.
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["pymosaic*"]
+
+[tool.setuptools.package-data]
+# The C++ template plus the vendored mosaic headers (copied from the
+# repo-root include/ by setup.py at build time) ship inside the wheel so
+# the JIT can resolve <mosaic/*.hpp> after a plain `pip install`.
+pymosaic = [
+    "_template.cpp.in",
+    "_include/mosaic/*.hpp",
+    "_include/mosaic/**/*.hpp",
+]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W"]
+ignore = ["E501", "E701", "E731", "E741", "F841", "F401"]
