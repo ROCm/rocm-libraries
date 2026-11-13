@@ -376,6 +376,15 @@ repos:
         files: ^projects/hipsparse/scripts/(test_)?(sync_group_docs|audit_doc_attachment)\.py$
         pass_filenames: false
 
+      # String fixtures, so this runs in pre-commit rather than after an
+      # instrumented coverage build. A failure there would skip the upload.
+      - id: rocsparse-coverage-merge-tests
+        name: rocSPARSE coverage merge self-tests
+        entry: python -m unittest discover -s projects/rocsparse/scripts -p test_merge_coverage_info.py
+        language: python
+        files: ^projects/rocsparse/scripts/(merge_coverage_info|test_merge_coverage_info)\.py$
+        pass_filenames: false
+
   - repo: https://github.com/cheshirekow/cmake-format-precommit
     rev: v0.6.10
     hooks:

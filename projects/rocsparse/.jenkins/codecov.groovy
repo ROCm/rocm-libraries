@@ -46,21 +46,25 @@ def runCI =
         // runCoverageCommand launches both unit-test binaries before coverage.
         // Calls placed before it in this closure are not executed.
         def gfilter = "*quick*:*pre_checkin*"
-        commonGroovy.runCoverageCommand(platform, project, gfilter, "release-debug", false)
+        commonGroovy.runCoverageCommand(platform, project, gfilter, "release-debug")
     }
 
     // Each coverage node archives its lcov files. The postprocess stage unions them
-    // across architectures and uploads a single report per flag.
+    // across architectures and uploads a single report per flag. The unit report is a
+    // literal path: if coverage_split deletes it, rocJenkins may fail this node's
+    // whole archive. Postprocess then sees fewer full reports than nodes were
+    // scheduled and refuses the upload.
     prj.testArtifacts = [
         'build/release-debug/coverage-report/coverage-upload.info',
         'build/release-debug/coverage-report/coverage-unit-upload.info',
     ]
+    def coverageNodeCount = nodes.dockerArray.size()
     prj.postprocess =
     {
         project, artifactDir->
 
         def postprocessGroovy = load "${project.paths.project_src_prefix}/.jenkins/common.groovy"
-        postprocessGroovy.runCoverageMergeUpload(project, artifactDir)
+        postprocessGroovy.runCoverageMergeUpload(project, artifactDir, coverageNodeCount)
     }
 
     buildProject(prj, formatCheck, nodes.dockerArray, compileCommand, testCommand, null)

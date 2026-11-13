@@ -518,15 +518,6 @@ if(BUILD_CODE_COVERAGE)
     )
   endif()
 
-  if(Python3_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_merge_coverage_info.py")
-    add_custom_target(coverage_script_test
-      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_merge_coverage_info.py
-      COMMENT "merge_coverage_info tests"
-      VERBATIM
-    )
-    add_dependencies(coverage_analysis coverage_script_test)
-  endif()
-
   add_custom_target(
     coverage
     DEPENDS coverage_analysis

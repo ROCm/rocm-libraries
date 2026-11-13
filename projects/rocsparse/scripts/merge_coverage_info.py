@@ -32,7 +32,10 @@ counts are the max across inputs.
 ``BRDA`` ids from ``llvm-cov`` are positional within a line. They line up
 across reports when both reports come from the same sources and the same
 build configuration. When the ids on a line differ, that line's branch
-records are dropped and a warning is printed. Line records are kept.
+records are dropped and a warning is printed. Line records are kept. The
+drop lasts for later inputs in the same run. The written file has no marker
+for it, so a later run can add branch records for that line again.
+``--strict`` exits non-zero when any line was dropped.
 
 ``SF:`` paths are rewritten to start at the last ``projects/rocsparse/``
 component, so two Jenkins workspaces with different absolute prefixes refer
@@ -121,17 +124,17 @@ def _merge_line(record: FileRecord, line_number: int, count: int, checksum):
 
 
 def _merge_branch(record: FileRecord, key: tuple, taken):
-    previous = record.branches.get(key, None)
-    if key not in record.branches or previous is None:
+    previous = record.branches.get(key)
+    if previous is None:
         record.branches[key] = taken
     elif taken is not None:
         record.branches[key] = max(previous, taken)
 
 
-def _warn_branch_sets(
+def _mismatched_branch_lines(
     source_path: str, current: FileRecord, incoming: FileRecord, warnings: list
 ):
-    """Warn when positional BRDA ids on a line are not the same set."""
+    """Return the lines whose positional BRDA ids differ, appending a warning for each."""
 
     def keys_by_line(record: FileRecord) -> dict:
         grouped = {}
@@ -264,7 +267,7 @@ def _merge_record(
     if current is None:
         destination[source_path] = incoming
         return
-    mismatched = _warn_branch_sets(source_path, current, incoming, warnings)
+    mismatched = _mismatched_branch_lines(source_path, current, incoming, warnings)
     current.dropped_branch_lines.update(mismatched)
     current.dropped_branch_lines.update(incoming.dropped_branch_lines)
     for name, start_line in incoming.functions.items():
@@ -333,7 +336,11 @@ def format_lcov(records: dict) -> str:
 
 
 def merge_files(inputs: list, anchor: str) -> tuple:
-    """Union ``inputs`` and return ``(lcov text, warnings, file count, lines found, lines hit)``."""
+    """Union ``inputs``.
+
+    Returns ``(lcov text, warnings, file count, lines found, lines hit,
+    dropped branch lines)``.
+    """
     combined = {}
     warnings = []
     for path in inputs:
@@ -345,11 +352,12 @@ def merge_files(inputs: list, anchor: str) -> tuple:
         sum(1 for count, _checksum in record.lines.values() if count > 0)
         for record in combined.values()
     )
-    return text, warnings, len(combined), lines_found, lines_hit
+    dropped = sum(len(record.dropped_branch_lines) for record in combined.values())
+    return text, warnings, len(combined), lines_found, lines_hit, dropped
 
 
 def parse_args(argv: list) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument(
         "-o",
         "--output",
@@ -361,6 +369,11 @@ def parse_args(argv: list) -> argparse.Namespace:
         default=DEFAULT_ANCHOR,
         help=f"path component SF: entries are rewritten to start at (default: {DEFAULT_ANCHOR})",
     )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="exit non-zero when any line's branch records were dropped",
+    )
     parser.add_argument("inputs", nargs="+", help="lcov files to union")
     args = parser.parse_args(argv)
     if not args.anchor:
@@ -370,7 +383,7 @@ def parse_args(argv: list) -> argparse.Namespace:
 
 def main(argv: list) -> int:
     args = parse_args(argv)
-    text, warnings, file_count, lines_found, lines_hit = merge_files(
+    text, warnings, file_count, lines_found, lines_hit, dropped = merge_files(
         args.inputs, args.anchor
     )
     for warning in warnings:
@@ -382,10 +395,14 @@ def main(argv: list) -> int:
         raise SystemExit(
             f"merge_coverage_info: cannot write {output}: {error}"
         ) from error
+    dropped_label = "dropped branch line" if dropped == 1 else "dropped branch lines"
     print(
         f"merge_coverage_info: {len(args.inputs)} inputs, {file_count} files,"
-        f" {lines_hit} lines hit, {lines_found} lines found"
+        f" {lines_hit} lines hit, {lines_found} lines found,"
+        f" {dropped} {dropped_label}"
     )
+    if args.strict and dropped:
+        return 1
     return 0
 
 

@@ -40,7 +40,7 @@ def _section(source: str, body: str) -> str:
 
 
 class MergeCoverageInfoTest(unittest.TestCase):
-    def run_merge(self, *texts: str):
+    def run_merge(self, *texts: str, extra=()):
         with tempfile.TemporaryDirectory() as directory:
             directory_path = Path(directory)
             inputs = []
@@ -50,12 +50,13 @@ class MergeCoverageInfoTest(unittest.TestCase):
                 inputs.append(str(path))
             output = directory_path / "out.info"
             completed = subprocess.run(
-                [sys.executable, str(SCRIPT), "-o", str(output), *inputs],
+                [sys.executable, str(SCRIPT), "-o", str(output), *extra, *inputs],
                 capture_output=True,
                 text=True,
                 check=False,
             )
             produced = output.read_text(encoding="utf-8") if output.exists() else ""
+            self.last_stdout = completed.stdout
             return completed.returncode, produced, completed.stderr
 
     def test_union_takes_the_max_hit_and_keeps_lines_from_either_side(self):
@@ -224,6 +225,70 @@ class MergeCoverageInfoTest(unittest.TestCase):
         self.assertIn("LF:2\n", produced)
         self.assertIn("LH:1\n", produced)
         self.assertNotIn("LF:100", produced)
+        self.assertIn("0 dropped branch lines", self.last_stdout)
+
+    def test_union_is_independent_of_input_order(self):
+        wave64 = _section(
+            SOURCE,
+            "FN:10,foo\nFN:20,bar\nFNDA:7,foo\nFNDA:0,bar\nDA:4,1\n"
+            "BRDA:4,0,0,5\nBRDA:4,0,1,-\nBRDA:4,0,2,2",
+        )
+        wave32 = _section(
+            SOURCE,
+            "FN:10,foo\nFN:20,bar\nFNDA:0,foo\nFNDA:0,bar\nDA:4,1\n"
+            "BRDA:4,0,0,-\nBRDA:4,0,1,3\nBRDA:4,0,2,6",
+        )
+        code, forward, stderr = self.run_merge(wave64, wave32)
+        self.assertEqual(code, 0, stderr)
+        code, backward, stderr = self.run_merge(wave32, wave64)
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(forward, backward)
+        for record in (
+            "FNDA:7,foo\n",
+            "FNH:1\n",
+            "BRDA:4,0,0,5\n",
+            "BRDA:4,0,1,3\n",
+            "BRDA:4,0,2,6\n",
+            "BRH:3\n",
+        ):
+            self.assertIn(record, forward)
+
+    def test_same_size_branch_id_mismatch_is_dropped(self):
+        left = _section(SOURCE, "DA:4,1\nBRDA:4,0,0,1\nBRDA:4,0,1,-")
+        right = _section(SOURCE, "DA:4,1\nBRDA:4,0,0,1\nBRDA:4,1,0,2")
+        code, produced, stderr = self.run_merge(left, right)
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("dropped these BRDA records", stderr)
+        self.assertNotIn("BRDA:", produced)
+        self.assertIn("DA:4,1\n", produced)
+        self.assertIn("1 dropped branch line", self.last_stdout)
+
+    def test_sf_before_end_of_record_is_rejected(self):
+        text = f"SF:{SOURCE}\n" + _section(SOURCE, "DA:1,1")
+        code, _produced, stderr = self.run_merge(text)
+        self.assertNotEqual(code, 0)
+        self.assertIn("SF: before end_of_record", stderr)
+
+    def test_strict_rejects_a_branch_drop_and_still_writes_the_file(self):
+        left = _section(SOURCE, "DA:4,5\nBRDA:4,0,0,5\nBRDA:4,1,0,0")
+        right = _section(
+            SOURCE,
+            "DA:4,7\nBRDA:4,0,0,5\nBRDA:4,1,0,0\nBRDA:4,2,1,7\nBRDA:4,3,1,0",
+        )
+        code, produced, stderr = self.run_merge(left, right, extra=("--strict",))
+        self.assertNotEqual(code, 0)
+        self.assertIn("dropped these BRDA records", stderr)
+        self.assertIn("DA:4,7\n", produced)
+        self.assertNotIn("BRDA:", produced)
+        self.assertIn("1 dropped branch line", self.last_stdout)
+
+    def test_strict_accepts_a_clean_merge(self):
+        code, produced, stderr = self.run_merge(
+            _section(SOURCE, "DA:1,1"), extra=("--strict",)
+        )
+        self.assertEqual(code, 0, stderr)
+        self.assertIn("DA:1,1\n", produced)
+        self.assertIn("0 dropped branch lines", self.last_stdout)
 
 
 if __name__ == "__main__":
