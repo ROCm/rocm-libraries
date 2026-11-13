@@ -52,6 +52,21 @@ namespace TensileLite
         }
     };
 
+    template <>
+    struct CacheKey<TensorDescriptor>
+    {
+        enum
+        {
+            implemented = true
+        };
+
+        // The fields Comparison<TensorDescriptor> compares.
+        static void append(std::string& key, TensorDescriptor const& tensor)
+        {
+            AppendCacheKeys(key, tensor.dataType(), tensor.sizes(), tensor.strides());
+        }
+    };
+
 } // namespace TensileLite
 
 namespace std

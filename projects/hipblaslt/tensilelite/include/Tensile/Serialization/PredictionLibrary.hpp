@@ -172,6 +172,11 @@ namespace TensileLite
                     }
                     // Once per library load. rank_configs reads the flags.
                     origami::memoize_non_temporal_availability(lib.origami_config_list);
+
+#ifdef TENSILELITE_HAS_TILEWRIGHT
+                    if(ctx != nullptr && Debug::Instance().useTilewright())
+                        lib.loadTilewright(ctx->filename);
+#endif
                 }
             }
             const static bool flow = false;

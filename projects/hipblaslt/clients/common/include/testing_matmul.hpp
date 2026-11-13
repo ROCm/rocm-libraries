@@ -974,6 +974,31 @@ auto _sigmoid = [](auto in, auto /*arg1*/, auto /*arg2*/) -> decltype(in) {
 
 // -1 inherits the handle. A value on the test argument is this problem's request
 // and wins over the bench-wide CLI knob.
+// The workspace of a process with workspace_per_process: one device buffer for all its problems,
+// grown to the largest size one asks for and kept until the process exits.
+inline hipError_t hipblaslt_process_workspace(size_t bytes, void** buffer)
+{
+    static void*  kept     = nullptr;
+    static size_t capacity = 0;
+    if(bytes > capacity)
+    {
+        if(kept != nullptr)
+        {
+            hipError_t freed = hipFree(kept);
+            if(freed != hipSuccess)
+                return freed;
+            kept     = nullptr;
+            capacity = 0;
+        }
+        hipError_t allocated = hipMalloc(&kept, bytes);
+        if(allocated != hipSuccess)
+            return allocated;
+        capacity = bytes;
+    }
+    *buffer = kept;
+    return hipSuccess;
+}
+
 inline int32_t resolved_uniform_summation_order(const Arguments& arg)
 {
     if(arg.uniform_summation_order >= 0)
@@ -4833,7 +4858,14 @@ void testing_matmul_with_bias(const Arguments& arg,
         tuningVec.push_back(hipblaslt_ext::GemmTuning());
     }
 
-    if(arg.algo_method == 2)
+    std::vector<int> listedIndices;
+    for(int32_t i = 0; i < HIPBLASLT_MAX_SOLUTION_INDEX_LIST && arg.solution_index_list[i] != -1;
+        i++)
+    {
+        listedIndices.push_back(arg.solution_index_list[i]);
+    }
+
+    if(listedIndices.empty() && arg.algo_method == 2)
     {
         heuristicResult.clear();
         heuristicTuningIndex.clear();
@@ -5211,20 +5243,37 @@ void testing_matmul_with_bias(const Arguments& arg,
             verifyMixedValidityContract();
         }
     }
-    else if(arg.algo_method == 1)
+    else if(!listedIndices.empty() || arg.algo_method == 1)
     {
         std::vector<hipblasLtMatmulHeuristicResult_t> tmpAlgo;
-        EXPECT_HIPBLAS_STATUS(hipblaslt_ext::getAllAlgos(handle,
-                                                         gemmType,
-                                                         transA,
-                                                         transB,
-                                                         arg.a_type,
-                                                         arg.b_type,
-                                                         arg.c_type,
-                                                         arg.d_type,
-                                                         arg.compute_type,
-                                                         tmpAlgo),
-                              HIPBLAS_STATUS_SUCCESS);
+        if(!listedIndices.empty())
+        {
+            // Indices the library does not hold are dropped; the others keep
+            // their list order.
+            if(hipblaslt_ext::getAlgosFromIndex(handle, listedIndices, tmpAlgo)
+               != HIPBLAS_STATUS_SUCCESS)
+            {
+                hipblaslt_cerr << "solution_index_list: " << listedIndices.size() - tmpAlgo.size()
+                               << " of " << listedIndices.size() << " solution indices not found"
+                               << std::endl;
+            }
+        }
+        else
+        {
+            EXPECT_HIPBLAS_STATUS(hipblaslt_ext::getAllAlgos(handle,
+                                                             gemmType,
+                                                             transA,
+                                                             transB,
+                                                             arg.a_type,
+                                                             arg.b_type,
+                                                             arg.c_type,
+                                                             arg.d_type,
+                                                             arg.compute_type,
+                                                             tmpAlgo),
+                                  HIPBLAS_STATUS_SUCCESS);
+        }
+        const int32_t requestLimit
+            = listedIndices.empty() ? requestAlgoCount : std::numeric_limits<int32_t>::max();
         returnedAlgoCount = tmpAlgo.size();
         heuristicResult.clear();
         heuristicTuningIndex.clear();
@@ -5289,7 +5338,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     }
                     CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
                     requestCount += addRequest;
-                    if(requestCount >= requestAlgoCount)
+                    if(requestCount >= requestLimit)
                     {
                         break;
                     }
@@ -5327,7 +5376,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     }
                     CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
                     requestCount += addRequest;
-                    if(requestCount >= requestAlgoCount)
+                    if(requestCount >= requestLimit)
                     {
                         break;
                     }
@@ -5407,7 +5456,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
                 CHECK_RETURNED_WORKSPACE_SIZE(workspace_size, max_workspace_size);
                 requestCount += addRequest;
-                if(requestCount >= requestAlgoCount)
+                if(requestCount >= requestLimit)
                 {
                     break;
                 }
@@ -5672,8 +5721,13 @@ void testing_matmul_with_bias(const Arguments& arg,
     // A placed workspace replaces the normal one, which placement runs never use: placement
     // requires fast_check, and fast_check refuses timing runs.
     const bool placeWorkspace = !strcmp(arg.placement, "workspace");
-    dWorkspace                = std::make_unique<device_vector<unsigned char>>(
-        placeWorkspace ? 0 : workspace_size * block_count, 1, HMM);
+    // With workspace_per_process every launch of a non-grouped GEMM gets the whole
+    // user_allocated_workspace, from the buffer the process keeps.
+    const bool processWorkspace = arg.workspace_per_process && !do_grouped_gemm && !placeWorkspace;
+    if(processWorkspace)
+        workspace_size = max_workspace_size;
+    dWorkspace = std::make_unique<device_vector<unsigned char>>(
+        placeWorkspace || processWorkspace ? 0 : workspace_size * block_count, 1, HMM);
     CHECK_DEVICE_ALLOCATION(dWorkspace->memcheck());
 
     // The workspace the checked solutions use. A placed workspace moves for each solution, so
@@ -5681,6 +5735,8 @@ void testing_matmul_with_bias(const Arguments& arg,
     std::unique_ptr<PlacedRegion> placedWorkspace;
     void*                         workspacePtr   = static_cast<unsigned char*>(*dWorkspace);
     size_t                        workspaceBytes = workspace_size;
+    if(processWorkspace)
+        CHECK_DEVICE_ALLOCATION(hipblaslt_process_workspace(workspace_size, &workspacePtr));
     if(placeWorkspace)
     {
         std::string why;
@@ -6841,6 +6897,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         hipblaslt_bench::SearchConfig searchCfg;
         searchCfg.cold_calls      = number_cold_calls;
         searchCfg.skip_slow_ratio = arg.skip_slow_solution_ratio;
+        searchCfg.screen_prepass  = arg.skip_screen_prepass;
         searchCfg.flush_grid      = gpu_block3;
 
         std::shared_ptr<EfficiencyMonitor>        perf_monitor;
@@ -6879,7 +6936,9 @@ void testing_matmul_with_bias(const Arguments& arg,
             hipblaslt_cout << std::setprecision(2) << "Skip solution: " << sol
                            << " (best warm-up = " << best_warm_time / number_cold_calls
                            << " us , warm-up = " << warm_time / number_cold_calls
-                           << " us, skip ratio = " << arg.skip_slow_solution_ratio << ")"
+                           << " us, skip ratio = " << arg.skip_slow_solution_ratio
+                           << ", solution index = "
+                           << hipblaslt_ext::getIndexFromAlgo(heuristicResult[sol].algo) << ")"
                            << std::endl;
             cotenant.reset();
         };
@@ -7296,7 +7355,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                 CHECK_HIPBLASLT_ERROR(
                                     gemmVec[b].initialize(heuristicResult[sol].algo,
                                                           tuningVec[heuristicTuningIndex[sol]],
-                                                          *dWorkspace));
+                                                          workspacePtr));
                             }
                             startCotenant();
                         })
@@ -7344,7 +7403,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                            ddd[b],
                                            matD[0],
                                            &heuristicResult[sol].algo,
-                                           *dWorkspace,
+                                           workspacePtr,
                                            workspace_size,
                                            stream);
                 };
@@ -7395,7 +7454,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                         (*dDp)[0].as<char>() + b * size_D[0] * realDataTypeSize(To),
                         matD[0],
                         &heuristicResult[sol].algo,
-                        *dWorkspace,
+                        workspacePtr,
                         workspace_size,
                         stream);
                 };

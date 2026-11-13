@@ -205,6 +205,74 @@ namespace TensileLite
                                         rhs.getParams().deviceScalarAlpha());
         }
     };
+
+    template <>
+    struct CacheKey<ContractionProblemGemm>
+    {
+        enum
+        {
+            implemented = true
+        };
+
+        // Must append every field Comparison<ContractionProblemGemm> compares, in its order
+        // (CachingLibrary_test reads both from this header and checks it).
+        static void append(std::string& key, ContractionProblemGemm const& problem)
+        {
+            AppendCacheKeys(key,
+                            problem.operationIdentifier(),
+                            problem.highPrecisionAccumulate(),
+                            problem.kernelLanguage(),
+                            problem.deterministicMode(),
+                            problem.a(),
+                            problem.b(),
+                            problem.c(),
+                            problem.d(),
+                            problem.e(),
+                            problem.computeInputTypeA(),
+                            problem.computeInputTypeB(),
+                            problem.workspaceSize(),
+                            problem.stridedBatched(),
+                            problem.groupedGemm(),
+                            problem.performanceMetric(),
+                            problem.activationType(),
+                            problem.activationComputeType(),
+                            problem.activationNoGuard(),
+                            problem.useGradient(),
+                            problem.useBias(),
+                            problem.biasSrc(),
+                            problem.useE(),
+                            problem.useGateResidual(),
+                            problem.useScaleAB(),
+                            problem.useScaleCD(),
+                            problem.useScaleAlphaVec(),
+                            problem.outputAmaxD(),
+                            problem.f32XdlMathOp(),
+                            problem.swizzleTensorA(),
+                            problem.swizzleTensorB(),
+                            problem.fusedGemmA2A(),
+                            problem.fusedA2AExtent(),
+                            problem.world(),
+                            problem.mxBlockA(),
+                            problem.mxBlockB(),
+                            problem.mxBlockFreeA(),
+                            problem.mxBlockFreeB(),
+                            problem.mxTypeA(),
+                            problem.mxTypeB(),
+                            problem.getParams().smCountTarget(),
+                            problem.getParams().streamKTileSchedulingMode(),
+                            problem.getParams().uniformSummationOrder(),
+                            problem.bias().dataType(),
+                            problem.getParams().activationEnum(),
+                            problem.amaxd().dataType(),
+                            problem.beta() == 0.0,
+                            problem.getParams().gsu(),
+                            problem.getParams().fallbackStatus(),
+                            problem.scaleBlockSizeA(),
+                            problem.scaleZeroPointA(),
+                            problem.int4EncodingA(),
+                            problem.getParams().deviceScalarAlpha());
+        }
+    };
 } // namespace TensileLite
 
 namespace std

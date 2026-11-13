@@ -211,6 +211,62 @@ if(TENSILELITE_ENABLE_HOST)
             ZLIB::ZLIB
     )
 
+    if(HIPBLASLT_ENABLE_TILEWRIGHT AND TARGET roc::tilewright)
+        # tilewright is not installed with TensileLite, so an installed static
+        # TensileLite could not satisfy its references for downstream links.
+        if(NOT BUILD_SHARED_LIBS AND NOT CMAKE_SKIP_INSTALL_RULES)
+            message(STATUS "tensilelite-host: built without tilewright (an installed static TensileLite cannot carry it)")
+        else()
+            target_link_libraries(tensilelite-host PUBLIC $<BUILD_INTERFACE:roc::tilewright>)
+            target_compile_definitions(tensilelite-host PUBLIC $<BUILD_INTERFACE:TENSILELITE_HAS_TILEWRIGHT>)
+            set_property(GLOBAL PROPERTY TENSILELITE_HAS_TILEWRIGHT TRUE)
+        endif()
+    endif()
+
+    # The code a solution selection runs, placed together in the shared host
+    # library: every function of it, of tilewright and of origami in a section
+    # of its own, and the functions cmake/host_selection_order.txt lists first
+    # (lld's --symbol-ordering-file). A selection whose code is not cached then
+    # misses fewer pages and lines of code. Only where the linker takes the
+    # option; elsewhere the layout stays the default one. The linker check is
+    # cached: after switching linkers in a build directory, clear
+    # TENSILELITE_LINKER_ORDERS_SYMBOLS from the cache. A source path that
+    # holds a comma keeps the default layout, since the linker option would be
+    # split there.
+    option(TENSILELITE_ORDER_SELECTION_CODE
+        "Place the host library's selection code together (linkers with --symbol-ordering-file)." ON)
+    set(_tensilelite_order "${CMAKE_CURRENT_SOURCE_DIR}/cmake/host_selection_order.txt")
+    if(TENSILELITE_ORDER_SELECTION_CODE AND BUILD_SHARED_LIBS AND NOT WIN32
+       AND NOT _tensilelite_order MATCHES ",")
+        include(CheckLinkerFlag)
+        check_linker_flag(CXX "LINKER:--symbol-ordering-file=${_tensilelite_order}"
+            TENSILELITE_LINKER_ORDERS_SYMBOLS)
+        if(TENSILELITE_LINKER_ORDERS_SYMBOLS)
+            target_compile_options(tensilelite-host PRIVATE -ffunction-sections)
+            foreach(_tensilelite_ordered roc::tilewright roc::origami)
+                if(NOT TARGET ${_tensilelite_ordered})
+                    continue()
+                endif()
+                get_target_property(_tensilelite_target ${_tensilelite_ordered} ALIASED_TARGET)
+                if(NOT _tensilelite_target)
+                    set(_tensilelite_target ${_tensilelite_ordered})
+                endif()
+                get_target_property(_tensilelite_imported ${_tensilelite_target} IMPORTED)
+                if(NOT _tensilelite_imported)
+                    target_compile_options(${_tensilelite_target} PRIVATE -ffunction-sections)
+                endif()
+            endforeach()
+            target_link_options(tensilelite-host
+                PRIVATE
+                    "LINKER:--symbol-ordering-file=${_tensilelite_order}"
+                    "LINKER:--no-warn-symbol-ordering"
+            )
+            set_property(TARGET tensilelite-host APPEND PROPERTY LINK_DEPENDS "${_tensilelite_order}")
+            # Read by the test that checks that every listed function exists.
+            set_property(TARGET tensilelite-host PROPERTY TENSILELITE_SELECTION_ORDER "${_tensilelite_order}")
+        endif()
+    endif()
+
     if(TENSILELITE_ENABLE_MXDATAGENERATOR)
         target_link_libraries(tensilelite-host
             PRIVATE $<BUILD_INTERFACE:roc::mxDataGeneratorPreSwizzle>)

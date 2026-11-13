@@ -27,11 +27,13 @@
 #pragma once
 
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <mutex>
 #include <sstream>
+#include <string>
 #include <type_traits>
 #include <vector>
 
@@ -311,6 +313,36 @@ namespace TensileLite
     /**
  * @}
  */
+    /// `filePrefix` without the CU-count and chip-ID parts the library build puts
+    /// before the architecture: library files with equal keys hold the same
+    /// problem type for the same architecture.
+    inline std::string libraryProblemTypeKey(std::string const& filePrefix)
+    {
+        auto const archPos = filePrefix.rfind('_');
+        if(archPos == std::string::npos)
+            return filePrefix;
+
+        std::string head = filePrefix.substr(0, archPos);
+        auto        drop = [&head](std::string const& tag, bool hex) {
+            auto const pos = head.rfind('_');
+            if(pos == std::string::npos)
+                return;
+            auto const part = head.substr(pos + 1);
+            if(part.size() <= tag.size() || part.compare(0, tag.size(), tag) != 0)
+                return;
+            for(size_t i = tag.size(); i < part.size(); i++)
+            {
+                unsigned char const c = part[i];
+                if(!(hex ? (std::isxdigit(c) || c == '-') : std::isdigit(c)))
+                    return;
+            }
+            head.resize(pos);
+        };
+        drop("ID", true);
+        drop("CU", false);
+        return head + filePrefix.substr(archPos);
+    }
+
 } // namespace TensileLite
 
 /**

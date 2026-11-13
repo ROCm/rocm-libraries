@@ -617,6 +617,80 @@ namespace TensileLite
     // Source compatibility for consumers using the former launch type.
     using StreamKSettings = PersistentLaunchSettings;
 
+    /**
+     * Everything the persistent launch reads on a device that keeps the
+     * default persistent settings (hasDefaultPersistentSettings()), for a
+     * kernel for which ContractionSolution::followsDefaultPersistentLaunch()
+     * holds. resolvePersistentSettings() takes this path only for a launch
+     * that does not ask for uniform summation order.
+     */
+    // The debug settings resolveDefaultPersistentLaunch() reads.
+    struct DefaultPersistentLaunchDebug
+    {
+        int  streamK5ForceMode         = -1;
+        bool printStreamKModeSelection = false;
+        bool printPropertyEvaluation   = false;
+
+        // Whether these are the settings of an environment that sets none.
+        bool unset() const
+        {
+            return streamK5ForceMode == -1 && !printStreamKModeSelection
+                   && !printPropertyEvaluation;
+        }
+    };
+
+    struct DefaultPersistentLaunchInputs
+    {
+        size_t           m = 0, n = 0, k = 0, batch = 1;
+        bool             transA = false, transB = false;
+        rocisa::DataType aType{}, bType{}, computeInputType{};
+        size_t           tiles          = 0;
+        size_t           itersPerTile   = 0;
+        size_t           workspaceSize  = 0;
+        int              smCountTarget  = 0;
+        int              schedulingMode = 0;
+
+        // ContractionSolution::persistentLaunchConfig() of the kernel.
+        origami::config_t const* kernel  = nullptr;
+        size_t                   threads = 1;
+        // As the kernel declares it, before any clamp.
+        int            occupancy      = 0;
+        WorkAssignment workAssignment = WorkAssignment::StaticGrid;
+        // False for persistent DataParallel.
+        bool        streamK    = false;
+        bool        atomic     = false;
+        char const* kernelName = "";
+
+        origami::hardware_t const* hardware     = nullptr;
+        size_t                     computeUnits = 0;
+
+        // The Hybrid sub-mode, when the caller already resolved it.
+        bool const* effectiveDynamic = nullptr;
+
+        // Uniform summation order, and what it reads of the kernel:
+        // InternalArgsSupport::perTileExtraIters and whether
+        // ContractionSolution::uniformSummationOrderKernelObstacle() objects.
+        bool uniformSummationOrder = false;
+        bool perTileExtraIters     = false;
+        bool usoStaticObstacle     = false;
+
+        DefaultPersistentLaunchDebug debug;
+    };
+
+    struct DefaultPersistentLaunch
+    {
+        WorkAssignment       effectiveWorkAssignment = WorkAssignment::StaticGrid;
+        origami::reduction_t reduction               = origami::reduction_t::none;
+        size_t               grid                    = 0;
+        size_t               selectedGrid            = 0;
+    };
+
+    TENSILELITEHOST_EXPORT bool hasDefaultPersistentSettings(Hardware const& hardware);
+
+    // The settings of Debug::Instance(), the ones resolvePersistentSettings()
+    // passes.
+    TENSILELITEHOST_EXPORT DefaultPersistentLaunchDebug defaultPersistentLaunchDebug();
+
     struct GSUSettings
     {
         size_t globalAccumulation = 0;
@@ -1186,6 +1260,11 @@ namespace TensileLite
         // matching load and GSU-mask layout.
         bool                 deviceScalarAlphaSupported(Problem const& problem) const;
         bool                 deviceScalarAlphaSupported(std::vector<Problem> const& problems) const;
+        // The token of the first static uniform-summation-order obstacle of a
+        // Stream-K launch that the kernel decides alone, without a problem's
+        // packed free indices (see uniformSummationOrderLaunchObstacle()), or
+        // null when none objects. It points at a string literal.
+        char const*          uniformSummationOrderKernelObstacle() const;
         size_t               partialTileSize(size_t skGrid) const;
 
         // Compute the StreamK launch-parameter DECISIONS for this solution on the
@@ -1206,6 +1285,13 @@ namespace TensileLite
         // snapshot resolved from sizeMapping's execution policy.
         PersistentLaunchSettings resolvePersistentSettings(Problem const& problem,
                                                            Hardware const& hardware) const;
+
+        // The kernel's part of when resolvePersistentSettings() goes through
+        // resolveDefaultPersistentLaunch().
+        bool followsDefaultPersistentLaunch() const;
+        // Throws for a persistent DataParallel kernel whose compute type has
+        // no size.
+        origami::config_t persistentLaunchConfig() const;
 
         // Constant-time policy/version guards used during dispatch.
         void validatePersistentLoopArgsVersion() const;
@@ -1654,6 +1740,12 @@ namespace TensileLite
         StreamKSettings resolveStreamKSettings(Problem const&  problem,
                                                Hardware const& hardware,
                                                bool const* effectiveDynamicHint = nullptr) const;
+
+        bool decidesDefaultPersistentLaunch(Problem const& problem, Hardware const& hardware) const;
+        DefaultPersistentLaunch resolveDefaultLaunch(Problem const&  problem,
+                                                     Hardware const& hardware,
+                                                     size_t          tiles,
+                                                     bool const*     effectiveDynamicHint) const;
 
         // Reasons checkUniformSummationOrder() would refuse this launch.
         // Empty means the launch is row-uniform. requireSynchronizer is the

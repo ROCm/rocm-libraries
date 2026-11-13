@@ -325,6 +325,7 @@ try
     std::vector<int64_t>  lda, ldb, ldc, ldd, lde;
     std::vector<int64_t>  stride_a, stride_b, stride_c, stride_d, stride_e;
     std::vector<uint32_t> gsu_vector, wgm_vector;
+    std::vector<int64_t>  solution_index_list;
     arg.init(); // set all defaults
     const char* tuningEnv          = getenv("HIPBLASLT_TUNING_FILE");
     const char* tuningMaxWorkSpace = getenv("HIPBLASLT_TUNING_USER_MAX_WORKSPACE");
@@ -582,6 +583,12 @@ try
          value<int32_t>(&arg.solution_index)->default_value(-1),
          "Used with --algo_method 2.  Specify solution index to use in benchmark.")
 
+        ("solution_index_list",
+         valueVec<int64_t>(&solution_index_list),
+         "Benchmark these solution indices in this order, with the "
+         "skip_slow_solution_ratio screen across them. Give the option once per index, in "
+         "that order. Overrides --algo_method and --requested_solution.")
+
         ("requested_solution",
          value<int32_t>(&arg.requested_solution_num)->default_value(tuningEnv? -1 : 1),
          "Requested solution num. Set to -1 to get all solutions. Only valid when algo_method is set to heuristic.")
@@ -692,6 +699,11 @@ try
          value<size_t>(&arg.user_allocated_workspace)->default_value(tuningEnv && tuningMaxWorkSpace ? atoi(tuningMaxWorkSpace) : 128 * 1024 * 1024),
          "Set fixed workspace memory size (bytes) instead of using hipblaslt managed memory")
 
+        ("workspace_per_process",
+         bool_switch(&arg.workspace_per_process)->default_value(false),
+         "Give every launch of a non-grouped GEMM the --workspace bytes, from one buffer the "
+         "process keeps for all its problems")
+
         ("log_function_name",
          bool_switch(&log_function_name)->default_value(false),
          "Function name precedes other items.")
@@ -723,6 +735,11 @@ try
           "Specifies a ratio to skip slow solution when warm up stage. "
           "Skip condition: (current solution's warm up time * ratio) > best solution's warm up time. "
           "Ratio range: 0 ~ 1. 0 means no skip.")
+
+        ("skip_screen_prepass",
+          value<bool>(&arg.skip_screen_prepass)->default_value(false),
+          "Warm up all solutions before timing any, so --skip_slow_solution_ratio compares "
+          "each solution against the best warm-up of all solutions, independent of their order.")
 
         ("splitk",
          valueVec<uint32_t>(&gsu_vector),
@@ -894,6 +911,23 @@ try
     {
         hipblaslt_cerr << "Invalid algo method: " << algo_method_str << std::endl;
         return 1;
+    }
+
+    if(solution_index_list.size() > HIPBLASLT_MAX_SOLUTION_INDEX_LIST)
+    {
+        hipblaslt_cerr << "Too many solution indices, maximum is: "
+                       << HIPBLASLT_MAX_SOLUTION_INDEX_LIST << std::endl;
+        return 1;
+    }
+    for(size_t i = 0; i < solution_index_list.size(); i++)
+    {
+        if(solution_index_list[i] < 0
+           || solution_index_list[i] > std::numeric_limits<int32_t>::max())
+        {
+            hipblaslt_cerr << "Solution indices must be in range [0, INT32_MAX]." << std::endl;
+            return 1;
+        }
+        arg.solution_index_list[i] = static_cast<int32_t>(solution_index_list[i]);
     }
 
     int max_gsu = 0;

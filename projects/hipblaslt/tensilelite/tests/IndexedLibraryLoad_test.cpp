@@ -1195,7 +1195,8 @@ TEST_F(PlaceholderIndexedShardTest, FailedAdoptLeavesHandOffForRetry)
     auto solution = cold.getSolutionByIndex(problem, device, index);
     ASSERT_NE(solution, nullptr);
     EXPECT_EQ(cold.attempts.load(), 2);
-    EXPECT_EQ(cold.library, masterTree) << "the retry did not adopt the master's tree";
+    EXPECT_EQ(cold.library, withoutCache(masterTree))
+        << "the retry did not adopt the master's tree";
     EXPECT_EQ(master->indexLoadedLibraries.count(kShardPrefix), 0u);
     ASSERT_EQ(master->solutionSources.size(), 1u);
     EXPECT_EQ(master->solutionSources.begin()->second, masterCache);

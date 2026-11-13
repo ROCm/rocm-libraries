@@ -73,6 +73,7 @@ void Arguments::init()
     memset(stride_e, 0, sizeof(int64_t) * MAX_SUPPORTED_NUM_PROBLEMS);
 
     user_allocated_workspace = 128 * 1024 * 1024;
+    workspace_per_process    = false;
 
     M[0] = 128;
     N[0] = 128;
@@ -106,6 +107,10 @@ void Arguments::init()
     algo                   = 0;
     solution_index         = -1;
     requested_solution_num = 1;
+    for(int32_t i = 0; i < HIPBLASLT_MAX_SOLUTION_INDEX_LIST; i++)
+    {
+        solution_index_list[i] = -1;
+    }
 
     a_type              = HIP_R_16F;
     b_type              = HIP_R_16F;
@@ -179,6 +184,7 @@ void Arguments::init()
     use_gpu_timer            = false;
     skip_slow_solution_ratio = 0.0;
     uniform_summation_order  = -1;
+    skip_screen_prepass      = false;
 
     // tuning
     gsu_vector[0] = 0;
@@ -258,12 +264,11 @@ void Arguments::validate(std::istream& ifs)
     if(strcmp(trailer, "HIPblaslT"))
         validation_error("trailer");
 
+    // Byte i of a field holds (sig ^ i) & 0xff, as hipblaslt_gentest.py writes it.
     auto check_func = [sig = 0u](const char* name, const auto& value) mutable {
-        static_assert(sizeof(value) <= 256,
-                      "Fatal error: Arguments field is too large (greater than 256 bytes).");
         for(size_t i = 0; i < sizeof(value); ++i)
         {
-            if(reinterpret_cast<const unsigned char*>(&value)[i] ^ sig ^ i)
+            if((reinterpret_cast<const unsigned char*>(&value)[i] ^ sig ^ i) & 0xff)
                 validation_error(name);
         }
         sig = (sig + 89) % 256;

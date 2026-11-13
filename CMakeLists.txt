@@ -41,6 +41,7 @@ set(DEFAULT_COMPONENTS
     mxdatagenerator
     rocroller
     origami
+    tilewright
     # projects
     hipblas-common
     hipblaslt
@@ -191,6 +192,14 @@ if("mosaic" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
         COMPONENT mosaic
         PREFIX_PATH shared
         EXPECT_TARGET roc::mosaic
+    )
+endif()
+
+if("tilewright" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT tilewright
+        PREFIX_PATH shared
+        EXPECT_TARGET roc::tilewright
     )
 endif()
 

@@ -48,6 +48,9 @@ namespace TensileLite
             {
                 iot::mapRequired(io, "property", lib.property);
                 iot::mapRequired(io, "map", lib.map);
+                if(!iot::outputting(io))
+                    lib.keyIsOperationIdentifier
+                        = lib.property && lib.property->type() == "OperationIdentifier";
             }
 
             const static bool flow = false;
