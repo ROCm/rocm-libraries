@@ -2,7 +2,7 @@
  * SPDX-License-Identifier: MIT
  *
  * The refusal text of each gfx1250 direct wgrad case, shared by both engines'
- * tests: platform/tests/instances/conv_direct_wgrad_refusals_host.cpp
+ * tests: library/cpp/tests/conv_direct_wgrad_refusals_host.cpp
  * #includes it and library/tests/test_direct_wgrad_refusals.py parses it. Each
  * reason must appear verbatim in the validator's message. One entry per line,
  * a plain string literal (no escapes), so both sides read the same text.

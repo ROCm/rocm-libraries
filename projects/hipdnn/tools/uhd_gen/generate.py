@@ -9,9 +9,14 @@ import hashlib
 import json
 import logging
 import math
+import os
+import queue
 import shutil
+import signal
 import subprocess
 import tempfile
+import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -129,10 +134,27 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
         default=3600.0,
         metavar="SECONDS",
         help="Longest one hipdnn_bench run (one graph on one device; one metric for L1) may "
-        "take. A run that outlasts it is killed and its graph is recorded as failed, "
+        "take; a --bench-batch run is killed once it goes this long without finishing a "
+        "graph. A run that outlasts it is killed and its graph is recorded as failed, "
         "counting against --max-graph-failures (default: 3600)",
     )
-    parser.add_argument("--plugin-dir")
+    parser.add_argument(
+        "--bench-batch",
+        type=int,
+        default=1,
+        metavar="N",
+        help=f"Engine-level ({ROLE}) collection: graphs one hipdnn_bench process measures "
+        "in turn (--graph-list), so engine and provider setup -- MIOpen loading its "
+        "kernel libraries, for one -- is paid once per N graphs instead of once per "
+        "graph. Each graph still gets its own plan and buffers. Graphs a batch leaves "
+        "unanswered (a crash or timeout) or fails are measured again one per process, so "
+        "a failure is still pinned to its graph (default: 1, one process per graph)",
+    )
+    parser.add_argument(
+        "--plugin-dir",
+        help="Engine plugin directory, or one plugin library so the bench loads only the "
+        "plugin that provides the engine",
+    )
     parser.add_argument(
         "--device",
         action="append",
@@ -648,27 +670,127 @@ def _descriptor(tree: Path, suffix: str, identity: str) -> tuple[Path, dict]:
     return matches[0]
 
 
-def _text(output) -> str:
-    """A captured stream as text: what a timed-out child leaves may be bytes or absent."""
-    if output is None:
-        return ""
-    return output.decode("utf-8", "replace") if isinstance(output, bytes) else output
+# Seconds the output pipes may stay open once the bench has finished or been killed. A process
+# that left the bench's process tree can still hold them, and a run must return anyway.
+_PIPE_DRAIN_SECONDS = 5.0
+# Longest single wait for the bench's output or exit: an interruption is handled between
+# waits, and a blocked wait on Windows does not see Ctrl+C until it returns.
+_WAIT_SLICE_SECONDS = 0.5
 
 
-def _run_json(
+def _kill_tree(process: subprocess.Popen) -> None:
+    """Kill `process` and every process it started: a `--bench` wrapper that does not `exec`
+    leaves the bench as its child, and either may have started helpers that hold the pipes.
+    """
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+            capture_output=True,
+            check=False,
+        )
+    else:
+        try:
+            # `_run_bench` starts the bench in a session of its own, whose id is its pid.
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    process.kill()
+
+
+def _communicate(
+    process: subprocess.Popen, timeout: float | None, per_line: bool
+) -> tuple[bool, str, str]:
+    """Read `process`'s streams to their end, killing its process tree once `timeout` seconds
+    pass: since it started, or with `per_line` since it last wrote a line to stdout. Returns
+    whether it was killed, and the output read until then. An interruption (Ctrl+C) kills the
+    tree too: on POSIX the bench runs in a session of its own and does not receive it.
+    """
+    lines: queue.Queue = queue.Queue()
+    errors: list[str] = []
+
+    def pump_stdout() -> None:
+        try:
+            for line in process.stdout:
+                lines.put(line)
+        finally:
+            lines.put(None)
+
+    pumps = [
+        threading.Thread(target=pump_stdout, daemon=True),
+        threading.Thread(
+            target=lambda: errors.append(process.stderr.read()), daemon=True
+        ),
+    ]
+    for pump in pumps:
+        pump.start()
+    output: list[str] = []
+    deadline = None if timeout is None else time.monotonic() + timeout
+
+    def wait_slice() -> float | None:
+        """Seconds to block next (at most `_WAIT_SLICE_SECONDS`), or None once the deadline
+        has passed."""
+        if deadline is None:
+            return _WAIT_SLICE_SECONDS
+        remaining = deadline - time.monotonic()
+        return None if remaining <= 0 else min(remaining, _WAIT_SLICE_SECONDS)
+
+    killed = False
+    try:
+        while True:
+            wait = wait_slice()
+            if wait is None:
+                killed = True
+                break
+            try:
+                line = lines.get(timeout=wait)
+            except queue.Empty:
+                continue
+            if line is None:
+                break
+            output.append(line)
+            if per_line and timeout is not None:
+                deadline = time.monotonic() + timeout
+        while not killed:
+            wait = wait_slice()
+            if wait is None:
+                killed = True
+                break
+            try:
+                process.wait(timeout=wait)
+                break
+            except subprocess.TimeoutExpired:
+                continue
+    except BaseException:
+        _kill_tree(process)
+        raise
+    if killed:
+        _kill_tree(process)
+    drained = time.monotonic() + _PIPE_DRAIN_SECONDS
+    for pump in pumps:
+        pump.join(max(0.0, drained - time.monotonic()))
+    process.wait()
+    return killed, "".join(output), "".join(errors)
+
+
+def _run_bench(
     command: list[str],
     environment: dict,
     log_dir: Path,
     ordinal: int,
     commands: list,
     timeout: float | None = None,
-) -> dict:
-    """Run one bench command and return its one JSON response.
+    record: dict | None = None,
+    *,
+    per_line: bool = False,
+) -> tuple[int | None, str, str]:
+    """Run one bench command; return its (exit status, stdout, stderr), None for a run
+    killed after `timeout` seconds (with `per_line`, seconds without a line of stdout: a
+    `--graph-list` run writes one per graph). Both streams are kept under `log_dir`, and the
+    command, with `record` merged in, is appended to `commands`.
 
     A run gets an empty `HIPDNN_CACHE_DIR` of its own, inside the one `environment` names: a
     benchmark winner record outranks the engine's own pick, and a run can write one, so a
-    record one run left must not decide the next run's kernel. A run that outlasts `timeout`
-    seconds is killed and refused like any other failed run.
+    record one run left must not decide the next run's kernel.
     """
     entry = {
         "argv": command,
@@ -681,6 +803,7 @@ def _run_json(
                 "HIP_VISIBLE_DEVICES",
             )
         },
+        **(record or {}),
     }
     cache_root = environment.get("HIPDNN_CACHE_DIR")
     scratch = None
@@ -689,38 +812,48 @@ def _run_json(
         Path(cache_root).mkdir(parents=True, exist_ok=True)
         scratch = tempfile.TemporaryDirectory(prefix="run-", dir=cache_root)
         run_environment = {**environment, "HIPDNN_CACHE_DIR": scratch.name}
-    timed_out = False
     try:
-        try:
-            result = subprocess.run(
-                command,
-                env=run_environment,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                check=False,
-                timeout=timeout,
-            )
-            returncode, stdout, stderr = (
-                result.returncode,
-                result.stdout,
-                result.stderr,
-            )
-        except subprocess.TimeoutExpired as expired:
-            timed_out = True
-            returncode = None
-            stdout, stderr = _text(expired.stdout), _text(expired.stderr)
+        process = subprocess.Popen(
+            command,
+            env=run_environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            # A session of its own, so a timeout can kill the bench with everything it started.
+            start_new_session=os.name != "nt",
+        )
+        killed, stdout, stderr = _communicate(process, timeout, per_line)
+        returncode = None if killed else process.returncode
     finally:
         if scratch is not None:
             scratch.cleanup()
     entry["returncode"] = returncode
-    if timed_out:
+    if returncode is None:
         entry["timed_out_after_seconds"] = timeout
     commands.append(entry)
     log_dir.mkdir(parents=True, exist_ok=True)
     (log_dir / f"{ordinal:06d}.stdout.json").write_text(stdout, encoding="utf-8")
     (log_dir / f"{ordinal:06d}.stderr.txt").write_text(stderr, encoding="utf-8")
-    if timed_out:
+    return returncode, stdout, stderr
+
+
+def _run_json(
+    command: list[str],
+    environment: dict,
+    log_dir: Path,
+    ordinal: int,
+    commands: list,
+    timeout: float | None = None,
+) -> dict:
+    """Run one bench command (`_run_bench`) and return its one JSON response. A run that
+    outlasts `timeout` seconds is killed and refused like any other failed run.
+    """
+    returncode, stdout, stderr = _run_bench(
+        command, environment, log_dir, ordinal, commands, timeout
+    )
+    if returncode is None:
         raise ValueError(
             f"hipdnn_bench timed out after {timeout:g} s (see --bench-timeout): "
             f"{stderr.strip()}"
@@ -973,6 +1106,13 @@ def collect_immediate_graph(
         commands,
         timeout=timeout,
     )
+    return _immediate_rows(response, metric, command[command.index("--engine-id") + 1])
+
+
+def _immediate_rows(
+    response: dict, metric: str, engine_id: str
+) -> tuple[list[dict], set[str]]:
+    """The training row of one immediate measurement and the feature names it publishes."""
     if response.get("metric") != metric:
         raise ValueError(
             f"immediate measurement was taken for metric {response.get('metric')!r}, "
@@ -980,9 +1120,84 @@ def collect_immediate_graph(
         )
     graph_key(response)
     row = normalize_row(response)
-    if str(row["engine"]) != command[command.index("--engine-id") + 1]:
+    if str(row["engine"]) != engine_id:
         raise ValueError("immediate measurement returned another engine")
     return [row], set(json.loads(row["features"]))
+
+
+def collect_immediate_batch(
+    command: list[str],
+    graphs: list[Path],
+    environment: dict,
+    log_dir: Path,
+    commands: list,
+    *,
+    metric: str,
+    timeout: float | None = None,
+) -> list[tuple[list[dict], set[str]] | ValueError]:
+    """`collect_immediate_graph` for each of `graphs`, through one hipdnn_bench process.
+
+    `command` is the bench and its options without `--graph`. The process gets the graphs
+    as a `--graph-list` and `timeout` seconds per graph: it is killed once it goes that long
+    without answering one. A graph it leaves unanswered (it crashed or stalled on that graph
+    or an earlier one) or answers with a failure (an earlier graph may have left the device
+    or the handle broken) is measured again alone, so a graph is recorded as failed only
+    when it fails in a process of its own. Returns, in order, each graph's rows and published
+    names, or the error that failed it.
+    """
+    if "--knob" in command or "enumerate" in command or "--graph" in command:
+        raise ValueError("L1 collection cannot pin knobs or enumerate candidates")
+    ordinal = len(commands)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    graph_list = log_dir / f"{ordinal:06d}.graphs.txt"
+    graph_list.write_text("".join(f"{graph}\n" for graph in graphs), encoding="utf-8")
+    _, stdout, _ = _run_bench(
+        [
+            *command,
+            "--graph-list",
+            str(graph_list),
+            "--collect-immediate",
+            "--ranking-metric",
+            metric,
+            "--json",
+        ],
+        environment,
+        log_dir,
+        ordinal,
+        commands,
+        timeout=timeout,
+        record={"graphs": [str(graph) for graph in graphs]},
+        per_line=True,
+    )
+    answered: dict[str, dict] = {}
+    for line in stdout.splitlines():
+        try:
+            response = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(response, dict) and isinstance(response.get("graph_path"), str):
+            answered.setdefault(response["graph_path"], response)
+    engine_id = command[command.index("--engine-id") + 1]
+    results: list[tuple[list[dict], set[str]] | ValueError] = []
+    for graph in graphs:
+        response = answered.get(str(graph))
+        try:
+            if response is None or response.get("skip_reason") is not None:
+                results.append(
+                    collect_immediate_graph(
+                        [*command, "--graph", str(graph)],
+                        environment,
+                        log_dir,
+                        commands,
+                        metric=metric,
+                        timeout=timeout,
+                    )
+                )
+            else:
+                results.append(_immediate_rows(response, metric, engine_id))
+        except ValueError as error:
+            results.append(error)
+    return results
 
 
 def _catalog_label(
@@ -1119,9 +1334,15 @@ def _measure(
     rows = {source: [] for source in sources}
     commands, graph_inputs, failed_graphs = [], [], []
     published = set()
+
+    def skip(graph: Path, graph_input: dict, error: ValueError) -> None:
+        # A failing graph is skipped whole (every device and metric, so all corpora cover
+        # one problem set); `run_generate`'s failure budget catches systematic failures.
+        failed_graphs.append({**graph_input, "error": str(error)})
+        logger.warning("graph %s skipped: %s", graph, error)
+
+    prepared = []
     for graph_index, graph in enumerate(graphs):
-        graph_rows = {source: [] for source in sources}
-        graph_names = set()
         payload = graph.read_bytes()
         # The bench detects the format by content, not extension; keep the source's form.
         binary = not payload.lstrip().startswith(b"{")
@@ -1135,8 +1356,6 @@ def _measure(
             "sha256": hashlib.sha256(payload).hexdigest(),
         }
         graph_inputs.append(graph_input)
-        # A failing graph is skipped whole (every device and metric, so all corpora cover
-        # one problem set); `run_generate`'s failure budget catches systematic failures.
         try:
             if immediate and not binary:
                 graph_document = json.loads(payload.decode("utf-8"))
@@ -1157,61 +1376,92 @@ def _measure(
                 # A serialized graph carries its own id, which the bench preserves and
                 # reports as `graph_id`.
                 saved_graph.write_bytes(payload)
-            command = [
-                bench,
-                "--graph",
-                str(saved_graph),
-                "--engine-id",
-                str(args.engine_id),
-            ]
-            if args.plugin_dir:
-                command.extend(["--plugin-dir", str(Path(args.plugin_dir).resolve())])
-            for knob in args.knob:
-                command.extend(["--knob", knob])
-            for device in args.device or [environment.get("HIP_VISIBLE_DEVICES")]:
-                run_env = dict(environment)
-                if device is not None:
-                    run_env["HIP_VISIBLE_DEVICES"] = device
-                for source in sources:
-                    if immediate:
-                        collected, names = collect_immediate_graph(
-                            command,
-                            run_env,
-                            stage / "commands",
-                            commands,
-                            metric=source,
-                            timeout=args.bench_timeout,
-                        )
-                    else:
-                        collected, names = collect_graph(
-                            command,
-                            run_env,
-                            stage / "commands",
-                            commands,
-                            addressing_table=ordinals,
-                            engine_descriptor_id=ued["id"],
-                            timeout=args.bench_timeout,
-                        )
-                    graph_rows[source].extend(collected)
-                    graph_names.update(names)
         except ValueError as error:
-            failed_graphs.append({**graph_input, "error": str(error)})
-            logger.warning("graph %s skipped: %s", graph, error)
+            skip(graph, graph_input, error)
             continue
-        if immediate and not args.collect_only and not any(rows.values()):
-            # The id an opaque engine reads does not vary by graph, so check it on the
-            # first graph rather than after the corpus. Collect-only trains nothing.
-            requested = _requested_uhd_ids(args.uhd_ids, list(sources))
+        prepared.append((graph, saved_graph, graph_input))
+
+    command = [bench, "--engine-id", str(args.engine_id)]
+    if args.plugin_dir:
+        command.extend(["--plugin-dir", str(Path(args.plugin_dir).resolve())])
+    for knob in args.knob:
+        command.extend(["--knob", knob])
+
+    def measure_one(saved_graph: Path, run_env: dict, source):
+        try:
+            if immediate:
+                return collect_immediate_graph(
+                    [*command, "--graph", str(saved_graph)],
+                    run_env,
+                    stage / "commands",
+                    commands,
+                    metric=source,
+                    timeout=args.bench_timeout,
+                )
+            return collect_graph(
+                [*command, "--graph", str(saved_graph)],
+                run_env,
+                stage / "commands",
+                commands,
+                addressing_table=ordinals,
+                engine_descriptor_id=ued["id"],
+                timeout=args.bench_timeout,
+            )
+        except ValueError as error:
+            return error
+
+    batch = args.bench_batch if immediate else 1
+    for start in range(0, len(prepared), batch):
+        chunk = prepared[start : start + batch]
+        graph_rows = [{source: [] for source in sources} for _ in chunk]
+        graph_names = [set() for _ in chunk]
+        errors: dict[int, ValueError] = {}
+        for device in args.device or [environment.get("HIP_VISIBLE_DEVICES")]:
+            run_env = dict(environment)
+            if device is not None:
+                run_env["HIP_VISIBLE_DEVICES"] = device
             for source in sources:
-                if graph_rows[source]:
-                    _declared_uhd_id(
-                        json.loads(graph_rows[source][0]["binding"]),
-                        source,
-                        requested.get(source),
+                # A graph that failed once is not measured again on another device/metric.
+                live = [index for index in range(len(chunk)) if index not in errors]
+                if len(live) > 1:
+                    outcomes = collect_immediate_batch(
+                        command,
+                        [chunk[index][1] for index in live],
+                        run_env,
+                        stage / "commands",
+                        commands,
+                        metric=source,
+                        timeout=args.bench_timeout,
                     )
-        for source in sources:
-            rows[source].extend(graph_rows[source])
-        published.update(graph_names)
+                else:
+                    outcomes = [
+                        measure_one(chunk[index][1], run_env, source) for index in live
+                    ]
+                for index, outcome in zip(live, outcomes):
+                    if isinstance(outcome, ValueError):
+                        errors[index] = outcome
+                        continue
+                    collected, names = outcome
+                    graph_rows[index][source].extend(collected)
+                    graph_names[index].update(names)
+        for index, (graph, _, graph_input) in enumerate(chunk):
+            if index in errors:
+                skip(graph, graph_input, errors[index])
+                continue
+            if immediate and not args.collect_only and not any(rows.values()):
+                # The id an opaque engine reads does not vary by graph, so check it on the
+                # first graph rather than after the corpus. Collect-only trains nothing.
+                requested = _requested_uhd_ids(args.uhd_ids, list(sources))
+                for source in sources:
+                    if graph_rows[index][source]:
+                        _declared_uhd_id(
+                            json.loads(graph_rows[index][source][0]["binding"]),
+                            source,
+                            requested.get(source),
+                        )
+            for source in sources:
+                rows[source].extend(graph_rows[index][source])
+            published.update(graph_names[index])
     regimes = corpus_regimes(graphs)
     for source in sources:
         for row in rows[source]:
@@ -1728,6 +1978,13 @@ def _check_generate_arguments(
         )
     if args.shard and not args.collect_only:
         raise ValueError("--shard slices a collection; it needs --collect-only")
+    if args.bench_batch < 1:
+        raise ValueError("--bench-batch must be at least 1")
+    if args.bench_batch > 1 and not immediate:
+        raise ValueError(
+            f"--bench-batch batches engine-level ({ROLE}) collection; a catalog sweep "
+            "already measures every candidate of its graph in one hipdnn_bench run"
+        )
     if args.collect_only and args.dataset:
         raise ValueError(
             "--collect-only measures --graphs; it cannot also read --dataset"

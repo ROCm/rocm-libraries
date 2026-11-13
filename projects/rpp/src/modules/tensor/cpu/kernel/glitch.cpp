@@ -58,6 +58,11 @@ inline void compute_src_loc(int row, int col, Rpp32s* locArray, RpptDescPtr srcD
     locArray[2] = yB * srcDescPtr->strides.hStride + xB * channelValue;
 }
 
+inline Rpp32s compute_fully_shifted_width(RpptChannelOffsets offsets, RpptROI roi) {
+    return roi.xywhROI.roiWidth -
+           std::max(0, std::max(std::max(offsets.r.x, offsets.g.x), offsets.b.x));
+}
+
 RppStatus glitch_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u* dstPtr,
                                    RpptDescPtr dstDescPtr, RpptChannelOffsets* rgbOffsets,
                                    RpptROIPtr roiTensorPtrSrc, RpptRoiType roiType,
@@ -84,13 +89,14 @@ RppStatus glitch_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u*
         dstPtrChannel = dstPtrImage;
 
         Rpp32s vectorIncrement, alignedLength;
+        Rpp32s fullyShiftedWidth = compute_fully_shifted_width(rgbOffsets[batchCount], roi);
 
         if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
             (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp8u* dstPtrRow;
             dstPtrRow = dstPtrChannel;
             vectorIncrement = 8;
-            alignedLength = (roi.xywhROI.roiWidth & ~(vectorIncrement - 1)) - vectorIncrement;
+            alignedLength = (fullyShiftedWidth & ~(vectorIncrement - 1)) - vectorIncrement;
             for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
                 Rpp8u* dstRowPtrTempR = dstPtrRow;
                 Rpp8u* dstRowPtrTempG = dstPtrRow + dstDescPtr->strides.cStride;
@@ -127,7 +133,7 @@ RppStatus glitch_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u*
             dstPtrRow = dstPtrChannel;
             vectorIncrement = 16;
             Rpp32u vectorIncrementPkd = 48;
-            alignedLength = (roi.xywhROI.roiWidth & ~(vectorIncrement - 1)) - vectorIncrement;
+            alignedLength = (fullyShiftedWidth & ~(vectorIncrement - 1)) - vectorIncrement;
             for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
                 Rpp8u* dstPtrTemp = dstPtrRow;
                 int vectorLoopCount = 0;
@@ -162,7 +168,7 @@ RppStatus glitch_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u*
             Rpp8u* dstPtrRow;
             dstPtrRow = dstPtrChannel;
             vectorIncrement = 32;
-            alignedLength = (roi.xywhROI.roiWidth & ~(vectorIncrement - 1)) - vectorIncrement;
+            alignedLength = (fullyShiftedWidth & ~(vectorIncrement - 1)) - vectorIncrement;
             for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
                 Rpp8u* dstPtrTemp = dstPtrRow;
                 int vectorLoopCount = 0;
@@ -199,7 +205,7 @@ RppStatus glitch_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u*
             dstPtrRow = dstPtrChannel;
             Rpp32s vectorIncrement = 10;
             Rpp32s vectorIncrementPkd = 30;
-            Rpp32s alignedLength = ((roi.xywhROI.roiWidth / vectorIncrement) - 1) * vectorIncrement;
+            Rpp32s alignedLength = ((fullyShiftedWidth / vectorIncrement) - 1) * vectorIncrement;
             for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
                 Rpp8u* dstPtrTemp = dstPtrRow;
                 int vectorLoopCount = 0;
@@ -254,13 +260,14 @@ RppStatus glitch_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp
         dstPtrChannel = dstPtrImage;
 
         Rpp32s vectorIncrement, alignedLength;
+        Rpp32s fullyShiftedWidth = compute_fully_shifted_width(rgbOffsets[batchCount], roi);
 
         if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
             (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp32f* dstPtrRow;
             dstPtrRow = dstPtrChannel;
             vectorIncrement = 8;
-            alignedLength = (roi.xywhROI.roiWidth & ~(vectorIncrement - 1)) - vectorIncrement;
+            alignedLength = (fullyShiftedWidth & ~(vectorIncrement - 1)) - vectorIncrement;
             for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
                 Rpp32f* dstRowPtrTempR = dstPtrRow;
                 Rpp32f* dstRowPtrTempG = dstPtrRow + dstDescPtr->strides.cStride;
@@ -297,7 +304,7 @@ RppStatus glitch_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp
             dstPtrRow = dstPtrChannel;
             vectorIncrement = 8;
             Rpp32u vectorIncrementPkd = 24;
-            alignedLength = (roi.xywhROI.roiWidth & ~(vectorIncrement - 1)) - vectorIncrement;
+            alignedLength = (fullyShiftedWidth & ~(vectorIncrement - 1)) - vectorIncrement;
 
             for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
                 Rpp32f* dstPtrTemp = dstPtrRow;
@@ -333,7 +340,7 @@ RppStatus glitch_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp
             Rpp32f* dstPtrRow;
             dstPtrRow = dstPtrChannel;
             Rpp32s vectorIncrement = 8;
-            alignedLength = (roi.xywhROI.roiWidth & ~(vectorIncrement - 1)) - vectorIncrement;
+            alignedLength = (fullyShiftedWidth & ~(vectorIncrement - 1)) - vectorIncrement;
 
             for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
                 Rpp32f* dstPtrTemp = dstPtrRow;
@@ -370,8 +377,7 @@ RppStatus glitch_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDescPtr, Rpp
             vectorIncrement = 2;  // 1 increment per channel (R, G, B) => 2 channels at a time
             Rpp32s vectorIncrementPkd =
                 6;  // 3 channels per pixel (R, G, B) × 2 pixels at a time => 6
-            alignedLength = (((roi.xywhROI.roiWidth) / vectorIncrementPkd) * vectorIncrementPkd) -
-                            vectorIncrementPkd;
+            alignedLength = ((fullyShiftedWidth / vectorIncrement) - 1) * vectorIncrement;
             for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
                 Rpp32f* dstPtrTemp = dstPtrRow;
                 int vectorLoopCount = 0;
@@ -527,13 +533,14 @@ RppStatus glitch_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s*
         dstPtrChannel = dstPtrImage;
 
         Rpp32s vectorIncrement, alignedLength;
+        Rpp32s fullyShiftedWidth = compute_fully_shifted_width(rgbOffsets[batchCount], roi);
 
         if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC) &&
             (dstDescPtr->layout == RpptLayout::NCHW)) {
             Rpp8s* dstPtrRow;
             dstPtrRow = dstPtrChannel;
             vectorIncrement = 8;
-            alignedLength = (roi.xywhROI.roiWidth & ~(vectorIncrement - 1)) - vectorIncrement;
+            alignedLength = (fullyShiftedWidth & ~(vectorIncrement - 1)) - vectorIncrement;
             for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
                 Rpp8s* dstRowPtrTempR = dstPtrRow;
                 Rpp8s* dstRowPtrTempG = dstPtrRow + dstDescPtr->strides.cStride;
@@ -570,7 +577,7 @@ RppStatus glitch_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s*
             dstPtrRow = dstPtrChannel;
             vectorIncrement = 16;
             Rpp32u vectorIncrementPkd = 48;
-            alignedLength = (roi.xywhROI.roiWidth & ~(vectorIncrement - 1)) - vectorIncrement;
+            alignedLength = (fullyShiftedWidth & ~(vectorIncrement - 1)) - vectorIncrement;
             for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
                 Rpp8s* dstPtrTemp = dstPtrRow;
                 int vectorLoopCount = 0;
@@ -606,7 +613,7 @@ RppStatus glitch_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s*
             dstPtrRow = dstPtrChannel;
             vectorIncrement = 32;
             alignedLength =
-                (((roi.xywhROI.roiWidth) / vectorIncrement) * vectorIncrement) - vectorIncrement;
+                (((fullyShiftedWidth) / vectorIncrement) * vectorIncrement) - vectorIncrement;
 
             for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
                 Rpp8s* dstPtrTemp = dstPtrRow;
@@ -645,7 +652,7 @@ RppStatus glitch_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s*
             vectorIncrement = 10;
             Rpp32s vectorIncrementPkd = 30;
             alignedLength =
-                (((roi.xywhROI.roiWidth) / vectorIncrement) * vectorIncrement) - vectorIncrement;
+                (((fullyShiftedWidth) / vectorIncrement) * vectorIncrement) - vectorIncrement;
             for (int dstLocRow = 0; dstLocRow < roi.xywhROI.roiHeight; dstLocRow++) {
                 Rpp8s* dstPtrTemp = dstPtrRow;
                 int vectorLoopCount = 0;

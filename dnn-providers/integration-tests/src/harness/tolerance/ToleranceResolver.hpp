@@ -24,9 +24,9 @@
 // far our checked-in golden data may. Reference validation calls defaultTolerance()
 // and can never be loosened by an engine's config. See ALMIOPEN-2216 for the
 // DynamicTolerances upgrade path. The engine harness (compareAgainst() in
-// IntegrationBundleVerificationHarness.cpp) grades float, half and bfloat16 convolution
-// engine outputs (forward, backward data, backward weights) with ConvDynamicTolerance.hpp
-// instead of calling these defaults; reference validation still uses them.
+// IntegrationBundleVerificationHarness.cpp) grades half, bfloat16 and float convolution engine
+// outputs (forward, backward data, backward weights) with ConvDynamicTolerance.hpp instead of
+// calling these defaults; reference validation still uses them.
 
 namespace hipdnn_integration_tests::tolerance
 {

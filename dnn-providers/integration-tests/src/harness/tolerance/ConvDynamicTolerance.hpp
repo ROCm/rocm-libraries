@@ -4,9 +4,12 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <functional>
+#include <limits>
+#include <map>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -24,19 +27,22 @@
 #include "harness/input-init/FillRecipe.hpp"
 
 // The dynamic tolerance for convolution outputs (forward, backward data and backward weights)
-// stored as float, half or bfloat16.
+// stored as half, bfloat16 or float.
 //
-// The fixed per-op defaults (TestTolerances.hpp conv::getToleranceFwd/Bwd/Wrw, one value for
-// both atol and rtol) do not scale with the problem: for half and bfloat16 they are far looser
-// than the output's own rounding, and for float they sit below the summation error of long
-// reductions. This computes the tolerance from the graph and the input statistics instead; the
+// The fixed per-op defaults (TestTolerances.hpp conv::getToleranceFwd/Bwd/Wrw, one value for both
+// atol and rtol) do not scale with the problem: for half and bfloat16 they are far looser than the
+// output's own rounding at small reductions and unrelated to the error at large ones, and for
+// float far tighter than the order of a float summation needs from a reduction length of a few
+// hundred on. This computes the tolerance from the graph and the input statistics instead. The
 // model and its calibration are in docs/tolerances.md.
 //
-// It applies only to a graph whose convolution and pointwise nodes compute in float and whose
-// intermediates (the tensors one node writes and another reads, virtual or not) are float: the
-// model has one rounding, of the final result to the output type, and the roundings of
-// intermediates stored in half or bfloat16 are not modelled (ALMIOPEN-3239). Such a graph keeps
-// the per-op default.
+// It applies to a graph whose convolution accumulates in float and whose pointwise nodes and
+// intermediates (the tensors one node writes and another reads, virtual or not) are half,
+// bfloat16, float or double: the roundings to half or bfloat16 between the convolution and the
+// output are rounding points that widen atol (ALMIOPEN-3239). A graph with a type the model does
+// not know keeps the per-op default. A float forward output is graded with the summation-order
+// coefficient the engine's TOML sets, or the default of the SDK (ALMIOPEN-3249); backward data
+// and backward weights use their calibrated constants.
 
 namespace hipdnn_integration_tests::tolerance
 {
@@ -189,14 +195,47 @@ inline std::optional<InputMoments>
     return InputMoments{sums.sumOfSquares / n, sums.maxAbs, sums.sum / n};
 }
 
-/// The error scale of the one convolution of a graph, by direction: forward, backward data
-/// (dgrad) or backward weights (wrw).
-using ConvErrorScale = std::variant<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale,
-                                    hipdnn_test_sdk::utilities::conv::ConvDgradErrorScale,
-                                    hipdnn_test_sdk::utilities::conv::ConvWrwErrorScale>;
-
 namespace detail
 {
+
+/// Machine epsilon of an element type the model can round to; nullopt for any other, an unset
+/// type included.
+inline std::optional<double> epsilonOf(hipdnn_flatbuffers_sdk::data_objects::DataType type)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    switch(type)
+    {
+    case DataType::FLOAT:
+        return static_cast<double>(std::numeric_limits<float>::epsilon());
+    case DataType::DOUBLE:
+        return std::numeric_limits<double>::epsilon();
+    case DataType::HALF:
+        return static_cast<double>(std::numeric_limits<hipdnn_data_sdk::types::half>::epsilon());
+    case DataType::BFLOAT16:
+        return static_cast<double>(
+            std::numeric_limits<hipdnn_data_sdk::types::bfloat16>::epsilon());
+    default:
+        return std::nullopt;
+    }
+}
+
+/// An element type with fewer bits than float: a value stored or computed in it is rounded.
+inline bool isNarrowerThanFloat(hipdnn_flatbuffers_sdk::data_objects::DataType type)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    return type == DataType::HALF || type == DataType::BFLOAT16;
+}
+
+/// The tensors a pointwise node reads, in_0 first; unset operands stay empty.
+inline std::array<std::optional<int64_t>, 3>
+    operandsOf(const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwise)
+{
+    std::array<std::optional<int64_t>, 3> operands;
+    operands[0] = pointwise.in_0_tensor_uid();
+    operands[1] = pointwise.in_1_tensor_uid();
+    operands[2] = pointwise.in_2_tensor_uid();
+    return operands;
+}
 
 /// The convolution node of a graph, whichever its direction. `first` and `second` are the two
 /// tensors whose products it sums: x and w forward, dy and w for dgrad, x and dy for wrw.
@@ -330,45 +369,78 @@ inline std::optional<uint64_t> convAccumulationLength(
 
 } // namespace detail
 
+/// The error scale of the one convolution of a graph, by direction: forward, backward data
+/// (dgrad) or backward weights (wrw).
+using ConvErrorScale = std::variant<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale,
+                                    hipdnn_test_sdk::utilities::conv::ConvDgradErrorScale,
+                                    hipdnn_test_sdk::utilities::conv::ConvWrwErrorScale>;
+
 /// The error scale of a graph with exactly one convolution node (ConvolutionFwd, ConvolutionBwd
-/// or ConvolutionWrw) that accumulates in float, whose two operands (x and w forward, dy and w
-/// for dgrad, x and dy for wrw) are graph inputs (not virtual, not produced by another node).
+/// or ConvolutionWrw) that accumulates in float, whose two operands (x and w forward, dy and w for
+/// dgrad, x and dy for wrw) are graph inputs (not virtual, not produced by another node). For
+/// dgrad, dx's channels must be a multiple of the weight's, the group count that gives must
+/// divide the weight's output channels, and stride and dilation need one entry of at least 1 per
+/// filter dimension.
+///
 /// Every multiply whose one operand comes from the convolution and the other is a graph input
 /// contributes that operand's max |v| as an output scale; the scales of several multiplies
-/// multiply. The other pointwise modes are not examined: each is assumed to change an error by at
-/// most its slope, about 1, and so leaves it alone. The activations of the conv test-plan bundles
-/// (relu with its clips, identity, sigmoid, tanh, softplus, elu, swish, both gelus, at the
-/// bundles' parameters, and the backward modes of the same functions behind a dgrad) have a slope
-/// of at most about 1.13; a mode with another gain (DIV, RECIPROCAL) is not detected. Nodes that
-/// are neither convolution nor pointwise are ignored. The scale is one value for the whole graph:
-/// it does not say which output a multiply sits on.
+/// multiply. The other pointwise modes are not examined for their gain: each is assumed to change
+/// an error by at most its slope, about 1, and so leaves it alone. The activations of the conv
+/// test-plan bundles (relu with its clips, identity, sigmoid, tanh, softplus, elu, swish, both
+/// gelus, at the bundles' parameters, and their backward modes behind a dgrad) have a slope of at
+/// most about 1.13; a mode with another gain (DIV, RECIPROCAL) is not detected. Nodes that are
+/// neither convolution nor pointwise are ignored. The scale is one value for the whole graph: it
+/// does not say which output a multiply sits on.
 ///
-/// The tolerance is sized by the convolution's output, not by the graph's. For half, behind an
-/// activation that bounds its output (sigmoid, tanh, a clipped relu) the atol can exceed the
-/// range of that output, and then no output can fail it: in the conv-fwd test-plan bundles the
-/// full-tier fp16 sigmoid case L19_1d_i1024_n1c64k64_f1024_fp16_cl_sigmoid (K = 65,536) has atol
-/// 1.0014 against [0, 1], and 43 of the 268 half bounded-activation cases have an atol above the
-/// fixed 0.1. bfloat16 and float are not affected.
+/// The roundings below float. The graph is walked from the convolution to its outputs, and every
+/// place where a value is rounded to half or bfloat16 becomes a RoundingPoint:
+///  - a tensor one node writes and another reads, stored as half or bfloat16 (virtual or not);
+///  - an operand of a pointwise node whose compute type is half or bfloat16, when the operand
+///    is stored as another type (the node converts it, and rounds);
+///  - the result of such a node, when it is stored as another type than the node computes in,
+///    whether or not a node reads it: a graph output that is one of these results is rounded
+///    twice, and the first rounding is a point.
+/// Any other result that no node reads is a graph output: its one rounding to its own type is the
+/// model's rtol, not a point.
+///
+/// The magnitude at a point is a root mean square. A value is modeled as a factor times the
+/// convolution's result plus a remainder that does not depend on it. A multiply multiplies both by
+/// the scale's max |v|. An add, a subtract and every other mode with several operands add the
+/// factors (two paths from the convolution carry the same error, so they add) and the remainders'
+/// mean squares (independent inputs add in quadrature); a mode with one operand leaves the value
+/// as it is. The slope from a point to an output is the sum, over the paths between the two, of
+/// the product of the scales' max |v| of the multiplies on the path (1 through every other mode);
+/// of several outputs, the largest. A tensor that two nodes read whose results meet again, as
+/// ADD(MUL(y, s), y) does, so gets max|s| + 1 and not max|s|. The slope of a multiply's scale
+/// operand is the magnitude of the convolution's result side.
 ///
 /// A graph input's moments are those of its baked value when it bakes one, else the lookup's. A
-/// moment that is not finite makes the inputs unavailable, whichever source it came from.
+/// moment that is not finite makes the inputs unavailable, whichever source it came from. The
+/// moments of an input other than the convolution's operands and a multiply's scale are asked for
+/// only when a rounding point needs the magnitude of a value that depends on it.
 ///
-/// nullopt when the graph is outside the model: no or several convolutions, a non-float
-/// accumulator, a pointwise node computing in a type other than float, an intermediate (a tensor
-/// one node writes and another reads, virtual or not: the convolution's result and the pointwise
-/// results) stored as a type other than float, an operand that is not a graph input, a multiply
-/// that does not pair the convolution's result with one graph input, dims or parameters for which
-/// K is not defined or is 0, or inputs whose moments are not available. An unset type counts as
-/// not float. The model has one rounding, of the final result to the output type; the roundings
-/// of intermediates stored in half or bfloat16 are not modelled (ALMIOPEN-3239).
+/// nullopt when the graph is outside the model: no or several convolutions, a convolution that
+/// does not accumulate in float, a pointwise node computing in a type other than half, bfloat16,
+/// float or double, an intermediate stored as another type than these (an unset type counts as
+/// none of them), an operand of the convolution that is not a graph input, dims or parameters for
+/// which K is not defined or is 0, a multiply that does not pair the convolution's result with one
+/// graph input, a nonfinite magnitude, or inputs whose moments are not available.
 inline std::optional<ConvErrorScale>
     convErrorScale(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
                    const InputMomentsLookup& momentsFor)
 {
     namespace data = hipdnn_flatbuffers_sdk::data_objects;
     namespace sdk = hipdnn_test_sdk::utilities::conv;
+    using hipdnn_test_sdk::utilities::conv::RoundingPoint;
 
     std::optional<detail::ConvNode> conv;
+    // The pointwise nodes, in the order the graph lists them.
+    struct PointwiseNode
+    {
+        const data::PointwiseAttributes* attrs;
+        data::DataType compute;
+    };
+    std::vector<PointwiseNode> pointwise;
     // Every tensor some node writes, as opposed to a graph input.
     std::set<int64_t> produced;
     // Every tensor some node reads.
@@ -389,14 +461,15 @@ inline std::optional<ConvErrorScale>
         }
         else if(node.attributes_type() == data::NodeAttributes::PointwiseAttributes)
         {
-            if(node.compute_data_type() != data::DataType::FLOAT)
+            if(!detail::epsilonOf(node.compute_data_type()).has_value())
             {
                 return std::nullopt;
             }
-            const auto* pointwise = node.attributes_as_PointwiseAttributes();
-            produced.insert(pointwise->out_0_tensor_uid());
-            consumed.insert(pointwise->in_0_tensor_uid());
-            for(const auto operand : {pointwise->in_1_tensor_uid(), pointwise->in_2_tensor_uid()})
+            const auto* attrs = node.attributes_as_PointwiseAttributes();
+            pointwise.push_back({attrs, node.compute_data_type()});
+            produced.insert(attrs->out_0_tensor_uid());
+            consumed.insert(attrs->in_0_tensor_uid());
+            for(const auto operand : {attrs->in_1_tensor_uid(), attrs->in_2_tensor_uid()})
             {
                 if(operand.has_value())
                 {
@@ -411,16 +484,25 @@ inline std::optional<ConvErrorScale>
     }
 
     const auto& attrs = wrapper.getTensorMap();
+    const auto typeOf = [&](int64_t uid) -> std::optional<data::DataType> {
+        const auto it = attrs.find(uid);
+        if(it == attrs.end())
+        {
+            return std::nullopt;
+        }
+        return it->second->data_type();
+    };
     // An intermediate, one node writes and another reads, is rounded to its own type, virtual or
-    // not. The graph's outputs, which no node reads, are rounded once and are the model's.
+    // not, and the model has to know that type. The graph's outputs, which no node reads, are
+    // rounded once and are the model's.
     for(const auto uid : produced)
     {
         if(consumed.count(uid) == 0)
         {
             continue;
         }
-        const auto it = attrs.find(uid);
-        if(it == attrs.end() || it->second->data_type() != data::DataType::FLOAT)
+        const auto type = typeOf(uid);
+        if(!type.has_value() || !detail::epsilonOf(*type).has_value())
         {
             return std::nullopt;
         }
@@ -430,6 +512,9 @@ inline std::optional<ConvErrorScale>
     {
         return std::nullopt;
     }
+    // What the variant of the direction is built from at the end.
+    double outputScale = 1.0;
+    std::vector<RoundingPoint> roundingPoints;
 
     const auto graphInputMoments = [&](int64_t uid) -> std::optional<InputMoments> {
         const auto it = attrs.find(uid);
@@ -460,40 +545,325 @@ inline std::optional<ConvErrorScale>
         return std::nullopt;
     }
 
-    double outputScale = 1.0;
-    for(uint32_t i = 0; i < wrapper.nodeCount(); ++i)
+    // The pointwise node that writes each tensor.
+    std::map<int64_t, size_t> writer;
+    for(size_t n = 0; n < pointwise.size(); ++n)
     {
-        const auto& node = wrapper.getNode(i);
-        if(node.attributes_type() != data::NodeAttributes::PointwiseAttributes)
-        {
-            continue;
-        }
-        const auto* pointwise = node.attributes_as_PointwiseAttributes();
-        if(pointwise->operation() != data::PointwiseMode::MUL)
-        {
-            continue;
-        }
-        // One operand carries the convolution's result (possibly after other pointwise
-        // nodes), the other is the scale; which of in_0 and in_1 is which does not matter.
-        if(!pointwise->in_1_tensor_uid().has_value())
-        {
-            return std::nullopt;
-        }
-        const int64_t first = pointwise->in_0_tensor_uid();
-        const int64_t second = *pointwise->in_1_tensor_uid();
-        const bool firstProduced = produced.count(first) != 0;
-        if(firstProduced == (produced.count(second) != 0))
-        {
-            return std::nullopt;
-        }
-        const auto moments = graphInputMoments(firstProduced ? second : first);
-        if(!moments)
-        {
-            return std::nullopt;
-        }
-        outputScale *= moments->maxAbs;
+        writer[pointwise[n].attrs->out_0_tensor_uid()] = n;
     }
 
+    // What the walk learns of each pointwise node, by its index in `pointwise`.
+    struct NodeInfo
+    {
+        // A multiply: the tensor that carries the convolution's result (possibly after other
+        // pointwise nodes), the largest magnitude of the scale, and the operand slot of the scale.
+        bool isScale = false;
+        int64_t carried = 0;
+        double scaleMax = 1.0;
+        size_t scaleSlot = 0;
+        // How much of an error in each operand reaches the node's result: the scale's largest
+        // magnitude for the carried operand of a multiply, 1 otherwise. The scale operand of a
+        // multiply is the exception: an error in the scale is multiplied by the size of
+        // `carried`, which is worked out when a rounding point needs it.
+        std::array<double, 3> gain = {1.0, 1.0, 1.0};
+    };
+    std::vector<NodeInfo> info(pointwise.size());
+    // The pointwise nodes in dependency order.
+    std::vector<size_t> walk;
+    std::set<int64_t> written = {conv->result};
+    std::vector<bool> walked(pointwise.size(), false);
+    for(bool progressed = true; progressed;)
+    {
+        progressed = false;
+        for(size_t n = 0; n < pointwise.size(); ++n)
+        {
+            if(walked[n])
+            {
+                continue;
+            }
+            const auto* pw = pointwise[n].attrs;
+            const auto operands = detail::operandsOf(*pw);
+            const bool ready = std::all_of(operands.begin(), operands.end(), [&](const auto& uid) {
+                return !uid.has_value() || produced.count(*uid) == 0 || written.count(*uid) != 0;
+            });
+            if(!ready)
+            {
+                continue;
+            }
+            walked[n] = true;
+            progressed = true;
+
+            if(pw->operation() == data::PointwiseMode::MUL)
+            {
+                // One operand carries the convolution's result (possibly after other pointwise
+                // nodes), the other is the scale; which of in_0 and in_1 is which does not matter.
+                if(!pw->in_1_tensor_uid().has_value())
+                {
+                    return std::nullopt;
+                }
+                const int64_t first = pw->in_0_tensor_uid();
+                const int64_t second = *pw->in_1_tensor_uid();
+                const bool firstProduced = produced.count(first) != 0;
+                if(firstProduced == (produced.count(second) != 0))
+                {
+                    return std::nullopt;
+                }
+                const int64_t scaleUid = firstProduced ? second : first;
+                const auto moments = graphInputMoments(scaleUid);
+                if(!moments)
+                {
+                    return std::nullopt;
+                }
+                outputScale *= moments->maxAbs;
+                auto& node = info[n];
+                node.isScale = true;
+                node.carried = firstProduced ? first : second;
+                node.scaleMax = moments->maxAbs;
+                node.scaleSlot = firstProduced ? 1 : 0;
+                node.gain[firstProduced ? 0 : 1] = moments->maxAbs;
+            }
+            written.insert(pw->out_0_tensor_uid());
+            walk.push_back(n);
+        }
+    }
+    if(walk.size() != pointwise.size())
+    {
+        return std::nullopt;
+    }
+
+    // The typical magnitude of a tensor, from the statistics of the inputs it depends on; none
+    // when one of them has none. A value is modeled as `coherent` times the convolution's result
+    // plus a remainder of mean square `independentSquare`: a multiply multiplies both by the
+    // scale; an add, and every other mode with several operands, adds the factors (two paths from
+    // the convolution carry the same error) and the remainders (independent inputs add in
+    // quadrature); a mode with one operand leaves the value as it is. Worked out when a point asks
+    // for it, together with the magnitudes it depends on, so that no input is looked up for
+    // nothing. The walk above is complete, so the graph has no cycle and this ends.
+    struct Magnitude
+    {
+        double coherent = 0.0;
+        double independentSquare = 0.0;
+    };
+    // The root mean square of the convolution's result (see the test SDK's model).
+    const auto products = static_cast<double>(*accumulationLength);
+    const double meanProduct = firstMoments->mean * secondMoments->mean;
+    const double sigma = std::sqrt(products * firstMoments->meanSquare * secondMoments->meanSquare
+                                   + products * (products - 1.0) * meanProduct * meanProduct);
+    const auto rootMeanSquare = [&](const Magnitude& m) {
+        const double coherent = m.coherent == 0.0 ? 0.0 : m.coherent * sigma;
+        return std::sqrt(coherent * coherent + m.independentSquare);
+    };
+    std::map<int64_t, std::optional<Magnitude>> magnitudes;
+    const auto magnitudeOf = [&](int64_t target) -> std::optional<Magnitude> {
+        std::vector<int64_t> pending = {target};
+        while(!pending.empty())
+        {
+            const int64_t uid = pending.back();
+            if(magnitudes.count(uid) != 0)
+            {
+                pending.pop_back();
+                continue;
+            }
+            if(uid == conv->result)
+            {
+                magnitudes[uid] = Magnitude{1.0, 0.0};
+                continue;
+            }
+            if(produced.count(uid) == 0)
+            {
+                const auto moments = graphInputMoments(uid);
+                magnitudes[uid]
+                    = moments ? std::optional<Magnitude>(Magnitude{0.0, moments->meanSquare})
+                              : std::nullopt;
+                continue;
+            }
+            const size_t n = writer.at(uid);
+            const auto& node = info[n];
+            std::vector<int64_t> reads;
+            if(node.isScale)
+            {
+                reads.push_back(node.carried);
+            }
+            else
+            {
+                for(const auto& operand : detail::operandsOf(*pointwise[n].attrs))
+                {
+                    if(operand.has_value())
+                    {
+                        reads.push_back(*operand);
+                    }
+                }
+            }
+            const size_t waiting = pending.size();
+            for(const auto read : reads)
+            {
+                if(magnitudes.count(read) == 0)
+                {
+                    pending.push_back(read);
+                }
+            }
+            if(pending.size() != waiting)
+            {
+                continue;
+            }
+            std::optional<Magnitude> result = Magnitude{};
+            for(const auto read : reads)
+            {
+                const auto& operand = magnitudes.at(read);
+                if(!operand.has_value())
+                {
+                    result.reset();
+                    break;
+                }
+                result->coherent += operand->coherent;
+                result->independentSquare += operand->independentSquare;
+            }
+            if(result.has_value() && node.isScale)
+            {
+                result->coherent *= node.scaleMax;
+                result->independentSquare *= node.scaleMax * node.scaleMax;
+            }
+            magnitudes[uid] = result;
+        }
+        return magnitudes.at(target);
+    };
+
+    // How much of an error in operand k of a node reaches its result.
+    const auto gainOf = [&](size_t n, size_t k) -> std::optional<double> {
+        const auto& node = info[n];
+        if(node.isScale && k == node.scaleSlot)
+        {
+            const auto carried = magnitudeOf(node.carried);
+            return carried.has_value() ? std::optional<double>(rootMeanSquare(*carried))
+                                       : std::nullopt;
+        }
+        return node.gain[k];
+    };
+
+    // The slope from each tensor to a graph output, which is a tensor no node reads: 1 at the
+    // output itself, and for any other tensor the sum, over the nodes that read it (a node that
+    // reads it twice counts twice), of the slope of the node's result times the node's gain. The
+    // slopes of paths that meet again add. Of several outputs, the largest.
+    std::map<int64_t, double> slope;
+    for(const auto output : produced)
+    {
+        if(consumed.count(output) != 0)
+        {
+            continue;
+        }
+        std::map<int64_t, double> toOutput = {{output, 1.0}};
+        for(auto it = walk.rbegin(); it != walk.rend(); ++it)
+        {
+            const auto* pw = pointwise[*it].attrs;
+            const auto result = toOutput.find(pw->out_0_tensor_uid());
+            if(result == toOutput.end())
+            {
+                continue;
+            }
+            const double fromResult = result->second;
+            const auto operands = detail::operandsOf(*pw);
+            for(size_t k = 0; k < operands.size(); ++k)
+            {
+                if(operands[k].has_value() && produced.count(*operands[k]) != 0)
+                {
+                    toOutput[*operands[k]] += fromResult * info[*it].gain[k];
+                }
+            }
+        }
+        for(const auto& [uid, s] : toOutput)
+        {
+            auto& largest = slope[uid];
+            largest = std::max(largest, s);
+        }
+    }
+    const auto slopeOf = [&](int64_t uid) {
+        const auto it = slope.find(uid);
+        return it == slope.end() ? 1.0 : it->second;
+    };
+
+    const auto addPoint
+        = [&](data::DataType type, const std::optional<Magnitude>& m, double s) -> bool {
+        const auto eps = detail::epsilonOf(type);
+        if(!eps.has_value() || !m.has_value())
+        {
+            return false;
+        }
+        const double magnitude = rootMeanSquare(*m);
+        if(!std::isfinite(magnitude) || !std::isfinite(s))
+        {
+            return false;
+        }
+        roundingPoints.push_back(RoundingPoint{*eps, magnitude, s});
+        return true;
+    };
+
+    for(const auto n : walk)
+    {
+        const auto& node = pointwise[n];
+        if(!detail::isNarrowerThanFloat(node.compute))
+        {
+            continue;
+        }
+        const auto* pw = node.attrs;
+        const double out = slopeOf(pw->out_0_tensor_uid());
+        const auto operands = detail::operandsOf(*pw);
+        for(size_t k = 0; k < operands.size(); ++k)
+        {
+            if(!operands[k].has_value())
+            {
+                continue;
+            }
+            const auto type = typeOf(*operands[k]);
+            if(!type.has_value() || !detail::epsilonOf(*type).has_value())
+            {
+                return std::nullopt;
+            }
+            if(*type == node.compute)
+            {
+                continue;
+            }
+            // The node converts this operand to its compute type, and rounds it.
+            double operandSlope = 0.0;
+            if(produced.count(*operands[k]) != 0)
+            {
+                operandSlope = slopeOf(*operands[k]);
+            }
+            else
+            {
+                const auto gain = gainOf(n, k);
+                if(!gain.has_value())
+                {
+                    return std::nullopt;
+                }
+                operandSlope = out * *gain;
+            }
+            if(!addPoint(node.compute, magnitudeOf(*operands[k]), operandSlope))
+            {
+                return std::nullopt;
+            }
+        }
+        // The result is rounded to the compute type; storing it as another type rounds it again,
+        // which the storage rule below counts for an intermediate.
+        const auto outType = typeOf(pw->out_0_tensor_uid());
+        if(outType.has_value() && detail::epsilonOf(*outType).has_value()
+           && *outType != node.compute
+           && !addPoint(node.compute, magnitudeOf(pw->out_0_tensor_uid()), out))
+        {
+            return std::nullopt;
+        }
+    }
+    for(const auto uid : produced)
+    {
+        if(consumed.count(uid) == 0)
+        {
+            continue;
+        }
+        const auto type = *typeOf(uid);
+        if(detail::isNarrowerThanFloat(type) && !addPoint(type, magnitudeOf(uid), slopeOf(uid)))
+        {
+            return std::nullopt;
+        }
+    }
     switch(conv->type)
     {
     case data::NodeAttributes::ConvolutionFwdAttributes:
@@ -501,6 +871,7 @@ inline std::optional<ConvErrorScale>
                                         firstMoments->meanSquare,
                                         secondMoments->meanSquare,
                                         outputScale,
+                                        std::move(roundingPoints),
                                         firstMoments->mean,
                                         secondMoments->mean};
     case data::NodeAttributes::ConvolutionBwdAttributes:
@@ -508,6 +879,7 @@ inline std::optional<ConvErrorScale>
                                         firstMoments->meanSquare,
                                         secondMoments->meanSquare,
                                         outputScale,
+                                        std::move(roundingPoints),
                                         firstMoments->mean,
                                         secondMoments->mean};
     default:
@@ -515,33 +887,36 @@ inline std::optional<ConvErrorScale>
                                       firstMoments->meanSquare,
                                       secondMoments->meanSquare,
                                       outputScale,
+                                      std::move(roundingPoints),
                                       firstMoments->mean,
                                       secondMoments->mean};
     }
 }
 
-/// Whether convOutputTolerance() models an output stored as this type: float, half and
-/// bfloat16. A caller asks before it pays for the statistics of the graph's inputs.
+/// Whether convOutputTolerance() models an output stored as this type: half, bfloat16 and
+/// float. A caller asks before it pays for the statistics of the graph's inputs.
 inline bool hasDynamicToleranceFor(hipdnn_flatbuffers_sdk::data_objects::DataType outputType)
 {
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
-    return outputType == DataType::FLOAT || outputType == DataType::HALF
-           || outputType == DataType::BFLOAT16;
+    return outputType == DataType::HALF || outputType == DataType::BFLOAT16
+           || outputType == DataType::FLOAT;
 }
 
 namespace detail
 {
 
 template <typename OutputType>
-hipdnn_test_sdk::utilities::conv::AbsRelTolerance convOutputToleranceAs(const ConvErrorScale& scale)
+hipdnn_test_sdk::utilities::conv::AbsRelTolerance convOutputToleranceAs(
+    const ConvErrorScale& scale,
+    const hipdnn_test_sdk::utilities::conv::ConvFpropCoefficients& coefficients)
 {
     namespace sdk = hipdnn_test_sdk::utilities::conv;
     return std::visit(
-        [](const auto& s) -> sdk::AbsRelTolerance {
+        [&](const auto& s) -> sdk::AbsRelTolerance {
             using Scale = std::decay_t<decltype(s)>;
             if constexpr(std::is_same_v<Scale, sdk::ConvFpropErrorScale>)
             {
-                return sdk::calculateConvFpropOutputTolerance<OutputType>(s);
+                return sdk::calculateConvFpropOutputTolerance<OutputType>(s, coefficients);
             }
             else if constexpr(std::is_same_v<Scale, sdk::ConvDgradErrorScale>)
             {
@@ -558,20 +933,24 @@ hipdnn_test_sdk::utilities::conv::AbsRelTolerance convOutputToleranceAs(const Co
 } // namespace detail
 
 /// The dynamic tolerance for one output tensor, or nullopt when its type is not modeled
-/// (see hasDynamicToleranceFor()).
+/// (see hasDynamicToleranceFor()). `coefficients` are the ones the engine sets for forward
+/// convolutions ([conv_fwd_tolerance] in its TOML); an unset one keeps the default of the output
+/// type. Backward data and backward weights use their calibrated constants.
 inline std::optional<hipdnn_test_sdk::utilities::conv::AbsRelTolerance>
     convOutputTolerance(const ConvErrorScale& scale,
-                        hipdnn_flatbuffers_sdk::data_objects::DataType outputType)
+                        hipdnn_flatbuffers_sdk::data_objects::DataType outputType,
+                        const hipdnn_test_sdk::utilities::conv::ConvFpropCoefficients& coefficients
+                        = {})
 {
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
     switch(outputType)
     {
-    case DataType::FLOAT:
-        return detail::convOutputToleranceAs<float>(scale);
     case DataType::HALF:
-        return detail::convOutputToleranceAs<hipdnn_data_sdk::types::half>(scale);
+        return detail::convOutputToleranceAs<hipdnn_data_sdk::types::half>(scale, coefficients);
     case DataType::BFLOAT16:
-        return detail::convOutputToleranceAs<hipdnn_data_sdk::types::bfloat16>(scale);
+        return detail::convOutputToleranceAs<hipdnn_data_sdk::types::bfloat16>(scale, coefficients);
+    case DataType::FLOAT:
+        return detail::convOutputToleranceAs<float>(scale, coefficients);
     default:
         return std::nullopt;
     }

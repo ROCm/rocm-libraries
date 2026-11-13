@@ -968,7 +968,7 @@ class TestBorrowedNativeSymbols:
     def test_every_symbol_reference_names_the_other_engine(self):
         config = make_minimal_config(
             engine=make_engine(
-                name="hipkernel:TestSeed", native_symbols_from="hipkernel:Test"
+                name="hipkernel:TestSeed", native_symbols_from="hipkernel.test"
             )
         )
         ids = mint_ids(config)

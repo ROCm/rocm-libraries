@@ -99,12 +99,12 @@ extern "C" {
  *    signature.
  * 9: rocke_block_scale_gemm_spec_t lost per_input_row at its end, which
  *    changes its size.
- * 10: rocke_implicit_gemm_conv_wgrad_spec_t gained register_prefetch in its
- *     old tail padding: size unchanged, but an old caller leaves that byte
- *     unset.
- * 11: rocke_param_opts_t gained nocapture, nonnull and dereferenceable (each
+ * 10: rocke_param_opts_t gained nocapture, nonnull and dereferenceable (each
  *     with a *_set flag) and the integer facts (rocke_int_facts_t) at its
  *     end, which changes its size.
+ * 11: rocke_implicit_gemm_conv_wgrad_spec_t gained register_prefetch in its
+ *     old tail padding: size unchanged, but an old caller leaves that byte
+ *     unset.
  * 12: indexed matrix sources, independent destination, and source-owned scales
  *     replace the flat MMA fields and role enum. Indexed queries supplement the
  *     result-aware A/B/C queries; native consumers must rebuild. ABI11 libraries

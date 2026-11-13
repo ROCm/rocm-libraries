@@ -1,16 +1,17 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// How the bundle harness grades a half or bfloat16 convolution-forward output: the selection in
-// IntegrationBundleVerificationHarness::compareAgainst() between the dynamic tolerance and the
-// per-op default, and where the dynamic tolerance gets its input statistics.
+// How the bundle harness grades a half, bfloat16 or float convolution-forward output: the
+// selection in IntegrationBundleVerificationHarness::compareAgainst() between the dynamic
+// tolerance and the per-op default, and where the dynamic tolerance gets its input statistics.
 //
 // A failing comparison prints the atol and rtol it graded with, so the tests read the tolerance
 // the harness actually handed to the comparison from that report. A TOML override is applied by
 // gradingForTensor() to the settings of the harness policy. Production fills that from TestConfig,
-// which this binary initializes once and without a settings file, so the override tests below
-// put a settings file of their own in the policy. gradingForTensor() itself is covered in
-// TestTomlGuards.cpp.
+// which this binary initializes once and without a settings file: most override tests below put a
+// settings file of their own in the policy, and the engine-file tests build a TestConfig of their
+// own from a file and take the policy's settings from productionPolicy(), as a run does.
+// gradingForTensor() itself is covered in TestTomlGuards.cpp.
 
 #include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
@@ -35,9 +36,11 @@
 
 #include "BundleFixtureFiles.hpp"
 #include "HarnessTestSupport.hpp"
+#include "harness/TestConfig.hpp"
 #include "harness/TestSettings.hpp"
 #include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
+#include "harness/bundle/ProductionPolicy.hpp"
 #include "harness/input-init/FillRecipe.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
 
@@ -73,6 +76,7 @@ enum class Topology
 {
     PLAIN, ///< conv -> y
     VARIANT3, ///< conv -> mul(y, scale) -> add(bias) -> relu -> out, as the Variant3 bundles
+    VARIANT2, ///< conv -> add(bias) -> relu -> out, as develop's Variant2 bundles
 };
 
 enum class ScaleSource
@@ -84,6 +88,7 @@ enum class ScaleSource
 struct Spec
 {
     bool isHalf = true;
+    bool isFloat = false; ///< a float graph; isHalf then does not matter
     Topology topology = Topology::PLAIN;
     ScaleSource scaleSource = ScaleSource::BAKED;
     double bakedValue = 0.5;
@@ -91,6 +96,7 @@ struct Spec
     std::string intermediateType = "float"; ///< the type of every virtual tensor
     std::string pointwiseCompute = "float"; ///< the compute type of every pointwise node
     bool inputBlobs = false;
+    std::string inputType; ///< the type of x and w; empty: the graph's own
 
     int64_t outUid() const
     {
@@ -133,10 +139,16 @@ std::string pointwiseJson(const char* name,
 
 std::string graphJson(const Spec& spec)
 {
-    const std::string dtype = spec.isHalf ? "half" : "bfloat16";
+    std::string dtype = spec.isHalf ? "half" : "bfloat16";
+    if(spec.isFloat)
+    {
+        dtype = "float";
+    }
+    const std::string inputDtype = spec.inputType.empty() ? dtype : spec.inputType;
     const std::string yDims = "[1, 8, 4, 4]";
     const std::string yStrides = "[128, 16, 4, 1]";
     const bool plain = spec.topology == Topology::PLAIN;
+    const bool topology3 = spec.topology == Topology::VARIANT3;
 
     std::ostringstream convNode;
     convNode << R"({"compute_data_type": ")" << spec.convCompute
@@ -147,18 +159,26 @@ std::string graphJson(const Spec& spec)
 
     std::vector<std::string> nodes{convNode.str()};
     std::vector<std::string> tensors{
-        tensorJson(X_UID, "x", "[1, 4, 6, 6]", "[144, 36, 6, 1]", dtype, false),
-        tensorJson(W_UID, "w", "[8, 4, 3, 3]", "[36, 9, 3, 1]", dtype, false),
+        tensorJson(X_UID, "x", "[1, 4, 6, 6]", "[144, 36, 6, 1]", inputDtype, false),
+        tensorJson(W_UID, "w", "[8, 4, 3, 3]", "[36, 9, 3, 1]", inputDtype, false),
         tensorJson(Y_UID, "y", yDims, yStrides, plain ? dtype : spec.intermediateType, !plain),
     };
-    if(!plain)
+    if(topology3)
     {
         std::string scaleExtra;
         if(spec.scaleSource == ScaleSource::BAKED)
         {
+            std::string valueType = "BFloat16Value";
+            if(spec.isFloat)
+            {
+                valueType = "Float32Value";
+            }
+            else if(spec.isHalf)
+            {
+                valueType = "Float16Value";
+            }
             scaleExtra = std::string(R"(, "value": )") + std::to_string(spec.bakedValue)
-                         + R"(, "value_type": ")" + (spec.isHalf ? "Float16Value" : "BFloat16Value")
-                         + "\"";
+                         + R"(, "value_type": ")" + valueType + "\"";
         }
         nodes.push_back(
             pointwiseJson("mul", "mul", Y_UID, SCALE_UID, MUL_OUT_UID, spec.pointwiseCompute));
@@ -168,9 +188,19 @@ std::string graphJson(const Spec& spec)
             "relu", "relu_fwd", ADD_OUT_UID, std::nullopt, OUT_UID, spec.pointwiseCompute));
         tensors.push_back(tensorJson(
             SCALE_UID, "scale", "[1, 1, 1, 1]", "[1, 1, 1, 1]", dtype, false, scaleExtra));
-        tensors.push_back(tensorJson(OUT_UID, "out", yDims, yStrides, dtype, false));
         tensors.push_back(
             tensorJson(MUL_OUT_UID, "mul_out", yDims, yStrides, spec.intermediateType, true));
+    }
+    else if(!plain)
+    {
+        nodes.push_back(
+            pointwiseJson("add", "add", Y_UID, BIAS_UID, ADD_OUT_UID, spec.pointwiseCompute));
+        nodes.push_back(
+            pointwiseJson("relu", "relu_fwd", ADD_OUT_UID, std::nullopt, OUT_UID, "float"));
+    }
+    if(!plain)
+    {
+        tensors.push_back(tensorJson(OUT_UID, "out", yDims, yStrides, dtype, false));
         tensors.push_back(
             tensorJson(BIAS_UID, "bias", "[1, 8, 1, 1]", "[8, 1, 1, 1]", dtype, false));
         tensors.push_back(
@@ -192,9 +222,13 @@ std::string graphJson(const Spec& spec)
     return graph.str();
 }
 
-void writeConstant(void* destination, size_t count, bool isHalf, float value)
+void writeConstant(void* destination, size_t count, bool isHalf, bool isFloat, float value)
 {
-    if(isHalf)
+    if(isFloat)
+    {
+        std::fill_n(static_cast<float*>(destination), count, value);
+    }
+    else if(isHalf)
     {
         std::fill_n(static_cast<half*>(destination), count, static_cast<half>(value));
     }
@@ -240,6 +274,8 @@ protected:
     testing_support::HarnessMocks _mocks;
     int _bundleCount = 0;
     std::optional<TestSettings> _settings;
+    std::unique_ptr<TestConfig> _engineConfig;
+    const TestSettings* _policySettings = nullptr;
 
     void SetUp() override
     {
@@ -255,6 +291,19 @@ protected:
         const auto path = _tempDir / "settings.toml";
         std::ofstream(path) << toml;
         _settings.emplace(path);
+        _policySettings = &*_settings;
+    }
+
+    /// Grades with the settings of an engine file the way a run gets them: a TestConfig loads the
+    /// file its options name, and productionPolicy() carries what it loaded into the policy.
+    void useEngineFile(const std::string& toml)
+    {
+        const auto path = _tempDir / "engine.toml";
+        std::ofstream(path) << toml;
+        TestConfigOptions options;
+        options.configPath = path;
+        _engineConfig = std::make_unique<TestConfig>(std::move(options));
+        _policySettings = productionPolicy(TensorPlacement::HOST, *_engineConfig).testSettings;
     }
 
     std::shared_ptr<IntegrationTestBundle> loadBundle(const Spec& spec)
@@ -268,7 +317,12 @@ protected:
         {
             // Inputs only, so the bundle has no golden output and the reference grades it.
             const auto base = (dir / name).string();
-            if(spec.isHalf)
+            if(spec.inputType == "float" || spec.isFloat)
+            {
+                writeBlob<float>(base + ".tensor0.bin", K_X_ELEMS, 2.0f);
+                writeBlob<float>(base + ".tensor1.bin", K_W_ELEMS, 0.5f);
+            }
+            else if(spec.isHalf)
             {
                 writeBlob<half>(base + ".tensor0.bin", K_X_ELEMS, 2.0f);
                 writeBlob<half>(base + ".tensor1.bin", K_W_ELEMS, 0.5f);
@@ -289,23 +343,24 @@ protected:
     {
         using ::testing::_;
         const bool isHalf = spec.isHalf;
+        const bool isFloat = spec.isFloat;
         const int64_t outUid = spec.outUid();
         testing_support::engineWrites(
             _mocks.engineRunner,
             [=](VariantPack& pack, float value) {
-                writeConstant(pack.at(outUid), K_OUT_ELEMS, isHalf, value);
+                writeConstant(pack.at(outUid), K_OUT_ELEMS, isHalf, isFloat, value);
             },
             engineValue);
         for(auto* reference : {&_mocks.cpuReference, &_mocks.gpuReference})
         {
             ON_CALL(*reference, execute(_, _, _))
                 .WillByDefault([=](void*, size_t, const VariantPack& pack) {
-                    writeConstant(pack.at(outUid), K_OUT_ELEMS, isHalf, referenceValue);
+                    writeConstant(pack.at(outUid), K_OUT_ELEMS, isHalf, isFloat, referenceValue);
                 });
         }
 
         auto policy = testing_support::hostPolicy(VerificationMode::AUTO);
-        policy.testSettings = _settings.has_value() ? &*_settings : nullptr;
+        policy.testSettings = _policySettings;
         IntegrationBundleVerificationHarness harness(_mocks.dependencies(std::move(policy)));
         harness.setBundle(loadBundle(spec), "conv-tolerance-test-bundle");
         prepare(harness.inputFillRecipes());
@@ -382,15 +437,17 @@ protected:
     }
 
     /// The band of the model in tolerances.md, written out here and not taken from the library:
-    /// with s = sqrt(K) * u32, (2 * eps + s) * |ref| + (s + lambda * eps) * sigma + minNormal.
+    /// 2 * eps * |ref| + (sqrt(K) * u32 + lambda * eps) * sigma + minNormal.
     static double documentedBand(bool isHalf, double sigma, double reference)
     {
         const double eps = std::ldexp(1.0, isHalf ? -10 : -7);
         const double lambda = isHalf ? 12.0 : 0.0;
         const double minNormal = std::ldexp(1.0, isHalf ? -14 : -126);
-        const double s = std::sqrt(static_cast<double>(K_ACCUMULATION)) * std::ldexp(1.0, -24);
-        const double atol = (s + lambda * eps) * sigma + minNormal;
-        return atol + (2.0 * eps + s) * std::abs(reference);
+        const double u32 = std::ldexp(1.0, -24);
+        const double atol
+            = (std::sqrt(static_cast<double>(K_ACCUMULATION)) * u32 + lambda * eps) * sigma
+              + minNormal;
+        return atol + 2.0 * eps * std::abs(reference);
     }
 
     /// The value the output type stores for `value`.
@@ -527,29 +584,88 @@ TEST_F(TestConvFwdToleranceGradingFixture, ConvolutionComputingInHalfKeepsTheDef
                    AbsRelTolerance{fixedDefault, fixedDefault});
 }
 
-// The model has one rounding, of the final result to the output type. Intermediates stored in
-// the output type, or computed in it, are more roundings: the graph keeps the default.
-TEST_F(TestConvFwdToleranceGradingFixture, IntermediatesInTheOutputTypeKeepTheDefaultTolerance)
+// The Variant3 graph with every intermediate stored in the output type: the convolution's
+// result y, the multiply's result and the add's result are each rounded to it (K = 36, x and w
+// uniform on [-1, 1] so sigma = 2, the scale 0.5, the bias uniform on [-1, 1]). The points are
+// written out here from the model of tolerances.md, not taken from the library: eps * magnitude
+// * slope with y (2 * 0.5: the multiply scales its error), the multiply's result (1) and the
+// add's result (sqrt(1 + 1/3)), which the relu passes on as it is.
+TEST_F(TestConvFwdToleranceGradingFixture,
+       IntermediatesStoredInTheOutputTypeAreGradedWithTheirPoints)
 {
     for(const bool isHalf : {true, false})
     {
-        for(const bool storedNotComputed : {true, false})
-        {
-            Spec spec;
-            spec.isHalf = isHalf;
-            spec.topology = Topology::VARIANT3;
-            const std::string lowPrecision = isHalf ? "half" : "bfloat16";
-            (storedNotComputed ? spec.intermediateType : spec.pointwiseCompute) = lowPrecision;
-            SCOPED_TRACE(lowPrecision + (storedNotComputed ? " stored" : " computed"));
-            const auto bundle = loadBundle(spec);
-            const auto fixedDefault = static_cast<double>(tolerance::defaultTolerance(
-                bundle->graphWrapper(),
-                isHalf ? hipdnn_flatbuffers_sdk::data_objects::DataType::HALF
-                       : hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16));
-            expectReported(grade(spec, K_FAR_OFF, K_REFERENCE),
-                           AbsRelTolerance{fixedDefault, fixedDefault});
-        }
+        Spec spec;
+        spec.isHalf = isHalf;
+        spec.topology = Topology::VARIANT3;
+        spec.intermediateType = isHalf ? "half" : "bfloat16";
+        SCOPED_TRACE(spec.intermediateType);
+        const double eps = std::ldexp(1.0, isHalf ? -10 : -7);
+        auto scale = defaultFillScale(0.5);
+        scale.roundingPoints = {{eps, 2.0, 0.5}, {eps, 1.0, 1.0}, {eps, std::sqrt(4.0 / 3.0), 1.0}};
+        expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), dynamicTolerance(isHalf, scale));
     }
+}
+
+// The same graph with float tensors and pointwise nodes computing in the output type: every
+// operand that is float is converted and rounded, as is every result stored in another type
+// than the node computes in. The scale and the bias are stored in the output type and need no
+// rounding; the graph output is rounded once, by the output type.
+TEST_F(TestConvFwdToleranceGradingFixture,
+       PointwiseNodesComputingInTheOutputTypeAreGradedWithTheirPoints)
+{
+    for(const bool isHalf : {true, false})
+    {
+        Spec spec;
+        spec.isHalf = isHalf;
+        spec.topology = Topology::VARIANT3;
+        spec.pointwiseCompute = isHalf ? "half" : "bfloat16";
+        SCOPED_TRACE(spec.pointwiseCompute);
+        const double eps = std::ldexp(1.0, isHalf ? -10 : -7);
+        const double afterAdd = std::sqrt(4.0 / 3.0);
+        auto scale = defaultFillScale(0.5);
+        scale.roundingPoints = {{eps, 2.0, 0.5}, // y, an operand of the multiply
+                                {eps, 1.0, 1.0}, // the multiply's result
+                                {eps, 1.0, 1.0}, // the multiply's result, an operand of the add
+                                {eps, afterAdd, 1.0}, // the add's result
+                                {eps, afterAdd, 1.0}}; // the add's result, an operand of the relu
+        expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), dynamicTolerance(isHalf, scale));
+    }
+}
+
+// develop's Variant2 graph: the convolution's result and the add's result are float tensors, the
+// add computes in the output's type through its compute type, and the relu computes in float.
+// The add converts the convolution's result (sigma = 2) to the type and rounds its own result
+// (sqrt(sigma^2 + 1/3), the bias uniform on [-1, 1]): two points, which the CI failures of the
+// bfloat16 cases at four rounding steps from the reference needed.
+TEST_F(TestConvFwdToleranceGradingFixture, AddComputingInTheOutputTypeOverFloatTensorsHasTwoPoints)
+{
+    for(const bool isHalf : {true, false})
+    {
+        Spec spec;
+        spec.isHalf = isHalf;
+        spec.topology = Topology::VARIANT2;
+        spec.pointwiseCompute = isHalf ? "half" : "bfloat16";
+        SCOPED_TRACE(spec.pointwiseCompute);
+        const double eps = std::ldexp(1.0, isHalf ? -10 : -7);
+        auto scale = defaultFillScale();
+        scale.roundingPoints = {{eps, 2.0, 1.0}, {eps, std::sqrt(4.0 + 1.0 / 3.0), 1.0}};
+        expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), dynamicTolerance(isHalf, scale));
+    }
+}
+
+// An intermediate of a type the model does not know keeps the per-op default for both atol and
+// rtol.
+TEST_F(TestConvFwdToleranceGradingFixture, IntermediateOfAnUnknownTypeKeepsTheDefaultTolerance)
+{
+    Spec spec;
+    spec.topology = Topology::VARIANT3;
+    spec.intermediateType = "int32";
+    const auto bundle = loadBundle(spec);
+    const auto fixedDefault = static_cast<double>(tolerance::defaultTolerance(
+        bundle->graphWrapper(), hipdnn_flatbuffers_sdk::data_objects::DataType::HALF));
+    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE),
+                   AbsRelTolerance{fixedDefault, fixedDefault});
 }
 
 // ── Where the input statistics come from ────────────────────────────────────
@@ -570,7 +686,7 @@ TEST_F(TestConvFwdToleranceGradingFixture, FillRecipesGiveTheInputStatistics)
 
 // A blob input is read as the element type of the graph, half or bfloat16: the same constants give
 // the same moments in either. Every tensor of this graph has the output's type, so the case does
-// not tell a blob's own type from the output's.
+// not tell a blob's own type from the output's; GoldenBlobInputsAreScannedAsTheirOwnType does.
 TEST_F(TestConvFwdToleranceGradingFixture, GoldenBlobInputsAreScannedOnTheHost)
 {
     for(const bool isHalf : {true, false})
@@ -586,6 +702,24 @@ TEST_F(TestConvFwdToleranceGradingFixture, GoldenBlobInputsAreScannedOnTheHost)
         scale.weightMean = 0.5;
         expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), dynamicTolerance(isHalf, scale));
     }
+}
+
+// A golden blob is scanned as the type it holds, not as the type of the graph's output: x and w
+// are float blobs under a half graph, and a scan that read their bytes as half would see other
+// numbers.
+TEST_F(TestConvFwdToleranceGradingFixture, GoldenBlobInputsAreScannedAsTheirOwnType)
+{
+    Spec spec;
+    spec.isHalf = true;
+    spec.inputBlobs = true;
+    spec.inputType = "float";
+    ConvFpropErrorScale scale;
+    scale.accumulationLength = K_ACCUMULATION;
+    scale.inputMeanSquare = 4.0; // x is 2.0 everywhere
+    scale.weightMeanSquare = 0.25; // w is 0.5 everywhere
+    scale.inputMean = 2.0;
+    scale.weightMean = 0.5;
+    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), dynamicTolerance(true, scale));
 }
 
 // ── A fused multiply: baked constant or filled tensor ───────────────────────
@@ -706,6 +840,185 @@ rtol = 0.25
 )");
     const Spec spec;
     expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), dynamicTolerance(true, defaultFillScale()));
+}
+
+// ── Float outputs ───────────────────────────────────────────────────────────
+
+namespace
+{
+
+AbsRelTolerance floatTolerance(const ConvFpropErrorScale& scale, std::optional<double> coefficient)
+{
+    hipdnn_test_sdk::utilities::conv::ConvFpropCoefficients coefficients;
+    coefficients.summationOrder = coefficient;
+    return hipdnn_test_sdk::utilities::conv::calculateConvFpropOutputTolerance<float>(scale,
+                                                                                      coefficients);
+}
+
+constexpr const char* K_ENGINE_COEFFICIENT_TOML = R"([meta]
+version = 1
+
+[conv_fwd_tolerance.float]
+summation_order = 9.0
+)";
+
+} // namespace
+
+// A float output is graded with the dynamic tolerance and, when the engine sets nothing, the base
+// coefficient of the SDK (4).
+TEST_F(TestConvFwdToleranceGradingFixture, FloatOutputIsGradedWithTheBaseCoefficient)
+{
+    Spec spec;
+    spec.isFloat = true;
+    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), floatTolerance(defaultFillScale(), 4.0));
+}
+
+// The engine's TOML coefficient replaces the base one.
+TEST_F(TestConvFwdToleranceGradingFixture, FloatOutputIsGradedWithTheCoefficientOfTheEngine)
+{
+    useTomlSettings(K_ENGINE_COEFFICIENT_TOML);
+    Spec spec;
+    spec.isFloat = true;
+    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), floatTolerance(defaultFillScale(), 9.0));
+}
+
+// An engine value 1.5 bands from the reference (at the base coefficient) fails with no setting
+// and passes under the engine's wider coefficient; one inside the base band passes either way.
+TEST_F(TestConvFwdToleranceGradingFixture, EngineCoefficientDecidesAFloatOutputBetweenTheBands)
+{
+    const auto base = floatTolerance(defaultFillScale(), 4.0);
+    const auto wide = floatTolerance(defaultFillScale(), 9.0);
+    const auto reference = static_cast<double>(K_REFERENCE);
+    const double baseBand = base.atol + base.rtol * reference;
+    const double wideBand = wide.atol + wide.rtol * reference;
+    ASSERT_LT(1.6 * baseBand, wideBand);
+    const auto between = static_cast<float>(reference + 1.5 * baseBand);
+    const auto inside = static_cast<float>(reference + 0.5 * baseBand);
+    ASSERT_GT(static_cast<double>(between) - reference, baseBand);
+    ASSERT_LT(static_cast<double>(inside) - reference, baseBand);
+
+    Spec spec;
+    spec.isFloat = true;
+    EXPECT_TRUE(grade(spec, between, K_REFERENCE).failed);
+    EXPECT_FALSE(grade(spec, inside, K_REFERENCE).failed);
+
+    useTomlSettings(K_ENGINE_COEFFICIENT_TOML);
+    EXPECT_FALSE(grade(spec, between, K_REFERENCE).failed);
+    EXPECT_FALSE(grade(spec, inside, K_REFERENCE).failed);
+}
+
+// An explicit [[tolerance_overrides]] entry outranks the dynamic tolerance whatever coefficient
+// the engine sets.
+TEST_F(TestConvFwdToleranceGradingFixture, TomlToleranceOverrideOutranksTheFloatCoefficient)
+{
+    useTomlSettings(std::string(K_ENGINE_COEFFICIENT_TOML) + R"(
+[[tolerance_overrides]]
+filters = ["TestConvFwdToleranceGradingFixture.TomlToleranceOverrideOutranksTheFloat*"]
+atol = 0.5
+rtol = 0.25
+)");
+    Spec spec;
+    spec.isFloat = true;
+    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), AbsRelTolerance{0.5, 0.25});
+    EXPECT_FALSE(grade(spec, K_REFERENCE + 0.25f, K_REFERENCE).failed);
+}
+
+// The coefficient is read for a float output only: half and bfloat16 keep their own.
+TEST_F(TestConvFwdToleranceGradingFixture, FloatCoefficientOfTheEngineLeavesHalfAndBfloat16Alone)
+{
+    useTomlSettings(K_ENGINE_COEFFICIENT_TOML);
+    for(const bool isHalf : {true, false})
+    {
+        Spec spec;
+        spec.isHalf = isHalf;
+        expectReported(grade(spec, K_FAR_OFF, K_REFERENCE),
+                       dynamicTolerance(isHalf, defaultFillScale()));
+    }
+}
+
+// A float graph with a baked scale is graded with that scale: the constant is a Float32Value
+// here, and its largest magnitude narrows the band as it does a half one's.
+TEST_F(TestConvFwdToleranceGradingFixture, FloatGraphWithABakedScaleIsGradedWithTheScale)
+{
+    Spec spec;
+    spec.isFloat = true;
+    spec.topology = Topology::VARIANT3;
+    spec.bakedValue = 0.5;
+    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), floatTolerance(defaultFillScale(0.5), 4.0));
+}
+
+// A float graph whose pointwise nodes compute in half is graded with the rounding points of those
+// nodes, as a half or bfloat16 graph is (K = 36, sigma = 2, scale 0.5, bias uniform on [-1, 1]).
+// Every operand and result that is float is converted to half and rounded, and the model's rtol
+// does not cover it: the points, written out here from the model of tolerances.md, are y (2 *
+// 0.5: the multiply scales its error), the baked scale (slope: the size of y), the multiply's
+// result, which the add reads, the bias, the add's result, which the relu reads, and the relu's.
+TEST_F(TestConvFwdToleranceGradingFixture,
+       FloatGraphWithNodesComputingInHalfIsGradedWithTheirPoints)
+{
+    Spec spec;
+    spec.isFloat = true;
+    spec.topology = Topology::VARIANT3;
+    spec.bakedValue = 0.5;
+    spec.pointwiseCompute = "half";
+    const double eps = std::ldexp(1.0, -10);
+    const double afterAdd = std::sqrt(4.0 / 3.0);
+    auto scale = defaultFillScale(0.5);
+    scale.roundingPoints = {{eps, 2.0, 0.5}, // y, an operand of the multiply
+                            {eps, 0.5, 2.0}, // the scale
+                            {eps, 1.0, 1.0}, // the multiply's result
+                            {eps, 1.0, 1.0}, // the multiply's result, an operand of the add
+                            {eps, std::sqrt(1.0 / 3.0), 1.0}, // the bias
+                            {eps, afterAdd, 1.0}, // the add's result
+                            {eps, afterAdd, 1.0}, // the add's result, an operand of the relu
+                            {eps, afterAdd, 1.0}}; // the relu's result, the graph output
+    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), floatTolerance(scale, 4.0));
+}
+
+// The route of an engine's settings file into a run: a TestConfig loads the file, productionPolicy()
+// carries what it loaded into the policy, and the harness grades with the coefficient the file
+// sets. A run that lost the link would grade with the base coefficient.
+TEST_F(TestConvFwdToleranceGradingFixture,
+       EngineFileCoefficientReachesTheGradingThroughTheProductionPolicy)
+{
+    useEngineFile(R"([meta]
+version = 1
+
+[conv_fwd_tolerance.float]
+summation_order = 7.0
+
+[[tolerance_overrides]]
+filters = ["SomeOtherSuite.*"]
+atol = 0.5
+rtol = 0.25
+)");
+    ASSERT_NE(_policySettings, nullptr);
+    Spec spec;
+    spec.isFloat = true;
+    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), floatTolerance(defaultFillScale(), 7.0));
+}
+
+// The same route carries the file's [[tolerance_overrides]]: an entry that matches the test
+// replaces the dynamic tolerance of the float output, whatever coefficient the file sets.
+TEST_F(TestConvFwdToleranceGradingFixture,
+       EngineFileToleranceOverrideReachesTheGradingThroughTheProductionPolicy)
+{
+    useEngineFile(R"([meta]
+version = 1
+
+[conv_fwd_tolerance.float]
+summation_order = 7.0
+
+[[tolerance_overrides]]
+filters = ["TestConvFwdToleranceGradingFixture.EngineFileToleranceOverride*"]
+atol = 0.5
+rtol = 0.25
+)");
+    ASSERT_NE(_policySettings, nullptr);
+    Spec spec;
+    spec.isFloat = true;
+    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), AbsRelTolerance{0.5, 0.25});
+    EXPECT_FALSE(grade(spec, K_REFERENCE + 0.25f, K_REFERENCE).failed);
 }
 
 // [[validator_overrides]] outranks [[tolerance_overrides]]: an rms entry grades the tensor by its

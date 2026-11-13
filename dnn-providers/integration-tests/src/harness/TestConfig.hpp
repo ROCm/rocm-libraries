@@ -168,6 +168,7 @@ struct TestConfigOptions
     bool writeSupportClaims = false;
     std::optional<BenchmarkSettings> benchmark;
     std::optional<CaptureSettings> graphCapture;
+    bool benchmarkReference = false;
 };
 
 // Singleton class for storing CLI-based test configuration.
@@ -198,85 +199,15 @@ public:
         {
             throw std::runtime_error("TestConfig::initialize() called more than once");
         }
-        instance._articlePath = std::move(opts.articlePath);
-        instance._engineName = std::move(opts.engineName);
-        instance._failOnUnsupported = opts.failOnUnsupported;
-        instance._skipGraphValidation = opts.skipGraphValidation;
-        instance._referenceExecutorType = opts.referenceExecutorType;
+        instance.apply(std::move(opts));
+    }
 
-        // If CLI didn't provide a value, check env var once at init
-        if(!instance._referenceExecutorType.has_value())
-        {
-            auto val = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_REFERENCE_EXECUTOR");
-            if(!val.empty())
-            {
-                std::transform(val.begin(), val.end(), val.begin(), [](unsigned char c) {
-                    return static_cast<char>(std::tolower(c));
-                });
-                if(val == "gpu")
-                {
-                    instance._referenceExecutorType = ReferenceExecutorType::GPU;
-                }
-                else if(val == "cpu")
-                {
-                    instance._referenceExecutorType = ReferenceExecutorType::CPU;
-                }
-                else
-                {
-                    throw std::runtime_error("Invalid HIPDNN_TEST_REFERENCE_EXECUTOR value '" + val
-                                             + "'; expected 'cpu' or 'gpu'");
-                }
-            }
-        }
-
-        if(opts.configPath.has_value())
-        {
-            instance._testSettings.emplace(*opts.configPath);
-        }
-
-        instance._enforceSupportClaims = opts.enforceSupportClaims;
-        instance._writeSupportClaims = opts.writeSupportClaims;
-        instance._benchmark = opts.benchmark;
-        instance._graphCapture = opts.graphCapture;
-
-        // Golden bundle configuration — default is ON; env var can override.
-        instance._allowBundles = opts.allowBundles;
-        auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_ALLOW_BUNDLES");
-        if(envVal == "0" || envVal == "false")
-        {
-            instance._allowBundles = false;
-        }
-        else if(envVal == "1" || envVal == "true")
-        {
-            instance._allowBundles = true;
-        }
-
-        // Bundles are the only thing that carries a support claim, so a write run
-        // with bundle registration off would walk zero graphs, write zero files and
-        // still exit 0 — a silent no-op that reads as success. This sits after the
-        // env override so that neither an omitted --allow-bundles nor a stray
-        // HIPDNN_TEST_ALLOW_BUNDLES=0 in the environment can reintroduce it.
-        if(instance._writeSupportClaims)
-        {
-            instance._allowBundles = true;
-        }
-
-        instance._goldenDataDir = resolveGoldenDataDir(std::move(opts.goldenDataDir));
-        instance._verificationMode = resolveVerificationMode(opts.verificationMode);
-        instance._validatorDevice = resolveValidatorDevice(opts.validatorDevice);
-        instance._captureDir = std::move(opts.captureDir);
-
-        // Detect device 0's gfx arch and VRAM once at startup. Used by
-        // [[test_skips]] and golden-ref metadata guards (arch/VRAM checks).
-        // todo: In future allow the test runner to use any specified device.
-        instance._currentArch = hipdnn_test_sdk::utilities::currentDeviceArch();
-        instance._currentDeviceVramMb = hipdnn_test_sdk::utilities::currentDeviceTotalVramMb();
-
-        // Detect platform once at startup (always succeeds; PlatformUtils.hpp
-        // refuses to compile on unsupported OSes).
-        instance._currentPlatform = currentPlatform();
-
-        instance._initialized = true;
+    // A configuration of its own, not the process-wide one: for unit tests that look at what a
+    // set of options produces (a settings file, say) without touching the state that every other
+    // suite of the binary shares.
+    explicit TestConfig(TestConfigOptions opts)
+    {
+        apply(std::move(opts));
     }
 
     // Whether initialize() has run. Every other accessor throws before that, so
@@ -481,6 +412,13 @@ public:
         return _captureDir.value();
     }
 
+    /// Set by --benchmark-reference: time the reference of each bundle test.
+    bool benchmarkReference() const
+    {
+        throwIfNotInitialized();
+        return _benchmarkReference;
+    }
+
     /// Set by --benchmark: how to time each verified graph. Empty when off.
     const std::optional<BenchmarkSettings>& benchmarkSettings() const
     {
@@ -497,6 +435,91 @@ public:
 
 private:
     TestConfig() = default;
+
+    // Everything initialize() does once it has checked that nothing did before.
+    void apply(TestConfigOptions opts)
+    {
+        _articlePath = std::move(opts.articlePath);
+        _engineName = std::move(opts.engineName);
+        _failOnUnsupported = opts.failOnUnsupported;
+        _skipGraphValidation = opts.skipGraphValidation;
+        _referenceExecutorType = opts.referenceExecutorType;
+
+        // If CLI didn't provide a value, check env var once at init
+        if(!_referenceExecutorType.has_value())
+        {
+            auto val = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_REFERENCE_EXECUTOR");
+            if(!val.empty())
+            {
+                std::transform(val.begin(), val.end(), val.begin(), [](unsigned char c) {
+                    return static_cast<char>(std::tolower(c));
+                });
+                if(val == "gpu")
+                {
+                    _referenceExecutorType = ReferenceExecutorType::GPU;
+                }
+                else if(val == "cpu")
+                {
+                    _referenceExecutorType = ReferenceExecutorType::CPU;
+                }
+                else
+                {
+                    throw std::runtime_error("Invalid HIPDNN_TEST_REFERENCE_EXECUTOR value '" + val
+                                             + "'; expected 'cpu' or 'gpu'");
+                }
+            }
+        }
+
+        if(opts.configPath.has_value())
+        {
+            _testSettings.emplace(*opts.configPath);
+        }
+
+        _enforceSupportClaims = opts.enforceSupportClaims;
+        _writeSupportClaims = opts.writeSupportClaims;
+        _benchmark = opts.benchmark;
+        _graphCapture = opts.graphCapture;
+        _benchmarkReference = opts.benchmarkReference;
+
+        // Golden bundle configuration — default is ON; env var can override.
+        _allowBundles = opts.allowBundles;
+        auto envVal = hipdnn_data_sdk::utilities::getEnv("HIPDNN_TEST_ALLOW_BUNDLES");
+        if(envVal == "0" || envVal == "false")
+        {
+            _allowBundles = false;
+        }
+        else if(envVal == "1" || envVal == "true")
+        {
+            _allowBundles = true;
+        }
+
+        // Bundles are the only thing that carries a support claim, so a write run
+        // with bundle registration off would walk zero graphs, write zero files and
+        // still exit 0 — a silent no-op that reads as success. This sits after the
+        // env override so that neither an omitted --allow-bundles nor a stray
+        // HIPDNN_TEST_ALLOW_BUNDLES=0 in the environment can reintroduce it.
+        if(_writeSupportClaims)
+        {
+            _allowBundles = true;
+        }
+
+        _goldenDataDir = resolveGoldenDataDir(std::move(opts.goldenDataDir));
+        _verificationMode = resolveVerificationMode(opts.verificationMode);
+        _validatorDevice = resolveValidatorDevice(opts.validatorDevice);
+        _captureDir = std::move(opts.captureDir);
+
+        // Detect device 0's gfx arch and VRAM once at startup. Used by
+        // [[test_skips]] and golden-ref metadata guards (arch/VRAM checks).
+        // todo: In future allow the test runner to use any specified device.
+        _currentArch = hipdnn_test_sdk::utilities::currentDeviceArch();
+        _currentDeviceVramMb = hipdnn_test_sdk::utilities::currentDeviceTotalVramMb();
+
+        // Detect platform once at startup (always succeeds; PlatformUtils.hpp
+        // refuses to compile on unsupported OSes).
+        _currentPlatform = currentPlatform();
+
+        _initialized = true;
+    }
 
     void throwIfNotInitialized() const
     {
@@ -516,6 +539,7 @@ private:
     std::optional<std::filesystem::path> _captureDir;
     std::optional<BenchmarkSettings> _benchmark;
     std::optional<CaptureSettings> _graphCapture;
+    bool _benchmarkReference = false;
     std::string _currentArch;
     std::size_t _currentDeviceVramMb = 0;
     std::string _currentPlatform;

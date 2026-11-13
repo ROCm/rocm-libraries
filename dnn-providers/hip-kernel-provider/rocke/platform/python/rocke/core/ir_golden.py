@@ -22,36 +22,59 @@ fail until it receives a profile document or an explicit shared-profile alias,
 with no edit to the golden test. This module is
 shipped so ``library/`` goldens can share it (the dependency stays
 ``library -> platform``).
+
+It also holds the writer side every representative-IR corpus shares: lowering
+one case (:func:`lower_golden_case`), running a corpus at one flavor
+(:func:`run_golden_cases`), assembling the profile-keyed document
+(:func:`golden_document`), writing it as shards (:func:`write_golden_shards`)
+and the ``--write`` / ``--check`` command line (:func:`golden_main`). A corpus
+module (the platform harness, ``library/tests/test_conv_ir_golden.py``) keeps
+only its cases and thin wrappers over these.
 """
 
 from __future__ import annotations
 
+import argparse
+import hashlib
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
 from .llvm_profile import LLVM_EMISSION_ALIASES, LLVM_EMISSION_FLAVORS, LLVM_FLAVORS
+from .lower_llvm import _lower_kernel_to_llvm_python
 
 #: Lanes every golden must represent directly or through an alias. Same object as
 #: :data:`LLVM_FLAVORS`, never a copy.
 GOLDEN_FLAVORS = LLVM_FLAVORS
 GOLDEN_PROFILE_FLAVORS = LLVM_EMISSION_FLAVORS
 GOLDEN_ALIASES = LLVM_EMISSION_ALIASES
+#: Schema tag every representative-IR golden document and shard carries.
+GOLDEN_SCHEMA = "ck.dsl.ir_golden_sha256/v2"
 
 __all__ = [
     "GOLDEN_ALIASES",
     "GOLDEN_FLAVORS",
     "GOLDEN_PROFILE_FLAVORS",
+    "GOLDEN_SCHEMA",
     "check_golden",
     "check_golden_flavors",
     "compare",
+    "golden_document",
+    "golden_main",
     "golden_shard",
     "golden_subdocument",
+    "ir_sha256",
     "load_golden",
+    "lower_golden_case",
+    "run_golden_cases",
+    "write_golden_shards",
 ]
 
 _SECTIONS = ("cases", "expected_failures")
+
+# ``lower(case, flavor) -> (record, llvm_text)``, as :func:`lower_golden_case`.
+_LowerCase = Callable[[Mapping[str, Any], str], tuple[dict[str, Any], str]]
 
 
 def golden_shard(case_id: str) -> str:
@@ -231,3 +254,224 @@ def check_golden(
         prefix = "" if len(wanted) == 1 else f"[{fl}] "
         errors.extend(prefix + e for e in compare(base, run(fl)))
     return errors
+
+
+def ir_sha256(text: str) -> str:
+    """Return the hex SHA-256 of ``text`` (UTF-8), the hash a golden records."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def lower_golden_case(
+    case: Mapping[str, Any], flavor: str
+) -> tuple[dict[str, Any], str]:
+    """Lower one corpus case at ``flavor``; return its golden record and the .ll.
+
+    ``case`` carries ``family``, ``arch`` and a zero-argument ``build``. The
+    NATIVE Python lowerer is pinned (not the backend-dispatched
+    ``lower_kernel_to_llvm``, whose default ``cpp`` path silently falls back to
+    Python) with an EXPLICIT llvm flavor, so the recorded sha is a function of
+    the committed IR alone -- independent of whether ``rocke_engine`` is built
+    or which LLVM version the loaded COMGR compiler reports.
+    """
+    kernel = case["build"]()
+    llvm = _lower_kernel_to_llvm_python(kernel, arch=case["arch"], llvm_flavor=flavor)
+    return {
+        "status": "ok",
+        "family": case["family"],
+        "arch": case["arch"],
+        "kernel_name": getattr(kernel, "name", "<unknown>"),
+        "sha256": ir_sha256(llvm),
+        "bytes": len(llvm.encode("utf-8")),
+    }, llvm
+
+
+def run_golden_cases(
+    cases: Iterable[Mapping[str, Any]],
+    flavor: str,
+    *,
+    lower: _LowerCase = lower_golden_case,
+    shards: set[str] | None = None,
+    ir_dir: Path | None = None,
+    ir_name: Callable[[str], str] | None = None,
+) -> dict[str, Any]:
+    """Lower every case (or only those in ``shards``) at ``flavor``.
+
+    Returns one flavor's golden sub-document: ``cases`` maps each case id to
+    its record, and a case that raises is recorded under
+    ``expected_failures`` with its exception type and message. With
+    ``ir_dir``, each lowered module is also written there as
+    ``ir_name(case_id)``.
+    """
+    if ir_dir is not None and ir_name is None:
+        raise ValueError("run_golden_cases: ir_dir needs ir_name")
+    results: dict[str, Any] = {}
+    failures: dict[str, Any] = {}
+    if ir_dir:
+        ir_dir.mkdir(parents=True, exist_ok=True)
+    for case in cases:
+        cid = case["case_id"]
+        if shards is not None and golden_shard(cid) not in shards:
+            continue
+        try:
+            rec, llvm = lower(case, flavor)
+            results[cid] = rec
+            if ir_dir:
+                (ir_dir / ir_name(cid)).write_text(llvm)
+        except Exception as e:  # noqa: BLE001 -- recorded as an expected failure
+            failures[cid] = {"type": type(e).__name__, "message": str(e)}
+    return {"cases": results, "expected_failures": failures}
+
+
+def golden_document(run: Callable[[str], Mapping[str, Any]]) -> dict[str, Any]:
+    """Return the profile-keyed golden document: ``run(flavor)`` for each of
+    :data:`GOLDEN_PROFILE_FLAVORS`, with the schema and lane aliases."""
+    return {
+        "schema": GOLDEN_SCHEMA,
+        "aliases": GOLDEN_ALIASES,
+        "flavors": {fl: run(fl) for fl in GOLDEN_PROFILE_FLAVORS},
+    }
+
+
+def write_golden_shards(
+    golden_dir: Path,
+    doc: Mapping[str, Any],
+    shards: set[str] | None = None,
+) -> None:
+    """Write ``doc`` to ``golden_dir`` as one ``<shard>.json`` per family.
+
+    With ``shards``, only those files are rewritten (a shard left with no cases
+    is deleted); the rest are untouched. Without it every shard is rewritten
+    and shard files for families that no longer exist are deleted.
+    """
+    golden_dir = Path(golden_dir)
+    by_shard: dict[str, dict] = {}
+    for fl, sub in doc["flavors"].items():
+        for section in _SECTIONS:
+            for cid, rec in sub[section].items():
+                shard = by_shard.setdefault(
+                    golden_shard(cid),
+                    {
+                        "schema": doc["schema"],
+                        "aliases": doc["aliases"],
+                        "flavors": {
+                            f: {"cases": {}, "expected_failures": {}}
+                            for f in doc["flavors"]
+                        },
+                    },
+                )
+                shard["flavors"][fl][section][cid] = rec
+    golden_dir.mkdir(parents=True, exist_ok=True)
+    stale = {p.stem for p in golden_dir.glob("*.json")} - set(by_shard)
+    if shards is not None:
+        stale &= shards
+    for name in sorted(stale):
+        (golden_dir / f"{name}.json").unlink()
+    for name, shard in sorted(by_shard.items()):
+        (golden_dir / f"{name}.json").write_text(
+            json.dumps(shard, indent=2, sort_keys=True) + "\n"
+        )
+
+
+def golden_main(
+    *,
+    cases: Callable[[], Iterable[Mapping[str, Any]]],
+    write_golden: Callable[[Path, set[str] | None], Mapping[str, Any]],
+    check_golden: Callable[[Path, str | None], list[str]],
+    default_golden: Path | None = None,
+    dump: Callable[[Path | None, str | None], Mapping[str, Any]] | None = None,
+    label: str = "IR parity",
+    argv: list[str] | None = None,
+) -> None:
+    """The ``--write`` / ``--check`` command line of a representative-IR golden.
+
+    ``write_golden(dir, shards)`` blesses ``dir`` and returns the document it
+    wrote; ``check_golden(path, flavor)`` returns the drift (empty == OK).
+
+    With ``default_golden``, ``--write`` and ``--check`` take that directory
+    when given no path, and a bare run checks it. Otherwise ``--write`` and
+    ``--check`` need a path, and a bare run prints ``dump(ir_dir, flavor)``
+    (``--ir-dir``, ``--flavor``; ``flavor`` is None when not given) as JSON.
+    Exits 1 on drift.
+    """
+    if default_golden is None and dump is None:
+        raise TypeError("golden_main needs default_golden or dump")
+    ap = argparse.ArgumentParser()
+    path_kw: dict[str, Any] = {"type": Path}
+    if default_golden is not None:
+        path_kw.update(nargs="?", const=default_golden)
+    where = " (default: the checked-in fixture)" if default_golden is not None else ""
+    ap.add_argument(
+        "--write",
+        help=f"(re-)bless the profile-keyed golden shard directory{where}: run "
+        f"every case under each of {GOLDEN_PROFILE_FLAVORS} and write one "
+        "<family>.json shard per family, with lane aliases. Run only from a "
+        "verified-good tree; re-blessing should accompany a reviewed, expected "
+        "output change.",
+        **path_kw,
+    )
+    ap.add_argument(
+        "--only",
+        help="with --write, re-bless only these comma-separated families "
+        "(shard names, the first case_id segment) and leave other shards alone.",
+    )
+    ap.add_argument(
+        "--check",
+        help="compare a fresh run against EVERY golden sub-doc (narrow it with "
+        "--flavor); exit 1 on any drift. Accepts a golden file or shard "
+        f"directory{where}.",
+        **path_kw,
+    )
+    if dump is not None:
+        ap.add_argument(
+            "--flavor",
+            choices=GOLDEN_FLAVORS,
+            help="check (or dump) just this llvm flavor instead of all of them; "
+            "for --ir-dir it overrides the autodetected flavor.",
+        )
+        ap.add_argument("--ir-dir", type=Path)
+    else:
+        ap.add_argument(
+            "--flavor",
+            choices=GOLDEN_FLAVORS,
+            help="check just this llvm flavor instead of all of them.",
+        )
+    ns = ap.parse_args(argv)
+
+    if ns.only is not None and not ns.write:
+        ap.error("--only requires --write")
+    if ns.write:
+        if ns.write.suffix == ".json" or ns.write.is_file():
+            ap.error(
+                f"--write takes the golden shard directory, not a file: {ns.write}"
+            )
+        shards = None
+        if ns.only is not None:
+            shards = {s.strip() for s in ns.only.split(",") if s.strip()}
+            if not shards:
+                ap.error("--only: no families given")
+            known = {golden_shard(c["case_id"]) for c in cases()}
+            known |= {p.stem for p in ns.write.glob("*.json")}
+            if shards - known:
+                ap.error(f"--only: unknown families {sorted(shards - known)}")
+        doc = write_golden(ns.write, shards)
+        for fl, sub in doc["flavors"].items():
+            print(
+                f"wrote {fl}: {len(sub['cases'])} ok, "
+                f"{len(sub['expected_failures'])} failures"
+            )
+        print(f"-> {ns.write}")
+        return
+
+    golden = ns.check or default_golden
+    if golden is None:
+        doc = dump(ns.ir_dir, ns.flavor)
+        print(json.dumps(doc, indent=2, sort_keys=True))
+        return
+
+    checked = ns.flavor or ", ".join(GOLDEN_FLAVORS)
+    errors = check_golden(golden, ns.flavor)
+    if errors:
+        for e in errors:
+            print(f"IR DRIFT: {e}")
+        raise SystemExit(1)
+    print(f"{label} OK [{checked}] vs {golden}")

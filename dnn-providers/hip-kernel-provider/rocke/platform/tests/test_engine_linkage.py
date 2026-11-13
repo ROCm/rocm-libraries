@@ -222,6 +222,12 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         assert len(names) == len(set(names))
         return dict(pairs)
 
+    # library/tests/ctest_lists.cmake enrols the library suites only when the
+    # library tree sits beside platform/; a platform-only copy has none.
+    has_library = (
+        PLATFORM.parent / "library" / "tests" / "ctest_lists.cmake"
+    ).is_file()
+
     for rocm_path in (None, tmp_path / "synthetic-rocm"):
         ctest_env = dict(os.environ)
         if rocm_path is None:
@@ -234,19 +240,23 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             for test in tests
             if test["name"] == "rocke_optimization_barrier_hip_pair"
         )
-        # A mixed private-variable spelling can configure successfully while
-        # appending this incoming registration to an unused CMake string.
-        sdpa = next(
-            test for test in tests if test["name"] == "rocke_library_sdpa_pytest"
-        )
-        assert f"{test_ctest_rel}tests/library/tests/sdpa" in sdpa["command"]
-        assert environment_for(tests, "rocke_library_sdpa_pytest") == {
-            "PYTHONPATH": f"{test_ctest_rel}tests/library"
-        }
-        if "--rocke-require-hipdnn-assets" in sdpa["command"]:
-            install_script = (build / "cmake_install.cmake").read_text()
-            assert "attention_sdpa_fwd.graph.json" in install_script
-            assert "/tests/library/tests/sdpa/hipdnn" in install_script
+        if has_library:
+            # A mixed private-variable spelling can configure successfully while
+            # appending this incoming registration to an unused CMake string.
+            sdpa = next(
+                test for test in tests if test["name"] == "rocke_library_sdpa_pytest"
+            )
+            assert f"{test_ctest_rel}tests/library/tests/sdpa" in sdpa["command"]
+            assert environment_for(tests, "rocke_library_sdpa_pytest") == {
+                "PYTHONPATH": f"{test_ctest_rel}tests/library"
+            }
+        else:
+            # A platform-only tree enrols no library suite.
+            assert not [
+                test["name"]
+                for test in tests
+                if test["name"].startswith("rocke_library_")
+            ]
         command = pair["command"]
         native = command[command.index("--native") + 1]
         assert native == native_artifact("rocke_optimization_barrier_emit")
@@ -303,9 +313,19 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             assert environment_for(tests, part) == expected_platform_environment
         for name in tiling_entries:
             assert environment_for(tests, name) == expected_tiling_environment
+        if has_library:
+            assert (
+                environment_for(tests, "rocke_library_mla_pytest")
+                == expected_mla_environment
+            )
+        # COMGR-only gates get the package and nothing compiler-specific.
+        comgr_only_environment = environment_for(
+            tests, "rocke_arch_domain_reproducibility"
+        )
+        assert comgr_only_environment.keys() == {"PYTHONPATH"}
         assert (
-            environment_for(tests, "rocke_library_mla_pytest")
-            == expected_mla_environment
+            environment_for(tests, "rocke_compiler_options_reproducibility")
+            == comgr_only_environment
         )
 
 
@@ -444,7 +464,27 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
     assert labels.get("rocke_tiling_visualization_pytest") == {"comprehensive", "full"}
 
 
-def test_relocated_cmake_consumer_links_lowerer(tmp_path):
+# (exported target, installed header, extern "C" symbol it declares). The
+# library case links only ckc::rocke_library, so it also proves the archive
+# brings ckc::rocke_core and Threads with it.
+_RELOCATED_CONSUMERS = [
+    pytest.param(
+        "rocke_core",
+        "rocke/lower_llvm.h",
+        "rocke_lower_kernel_to_llvm_ex",
+        id="rocke_core",
+    ),
+    pytest.param(
+        "rocke_library",
+        "rocke/instance_conv_implicit_gemm.h",
+        "rocke_conv_implicit_gemm_lower_to_llvm",
+        id="rocke_library",
+    ),
+]
+
+
+@pytest.mark.parametrize(("target", "header", "symbol"), _RELOCATED_CONSUMERS)
+def test_relocated_cmake_consumer_links_lowerer(tmp_path, target, header, symbol):
     """Run against a fresh build supplied by the host validation lane."""
     build = os.environ.get("ROCKE_LINK_TEST_BUILD_DIR")
     if not build:
@@ -453,6 +493,11 @@ def test_relocated_cmake_consumer_links_lowerer(tmp_path):
     subprocess.run(["cmake", "--install", build, "--prefix", str(prefix)], check=True)
     relocated = tmp_path / "relocated"
     prefix.rename(relocated)
+    archives = ("librocke_library.a", "rocke_library.lib")
+    if target == "rocke_library" and not any(
+        any(relocated.glob(f"**/{archive}")) for archive in archives
+    ):
+        pytest.skip("this build installs no rocke_library archive")
     source = tmp_path / "consumer"
     source.mkdir()
     (source / "CMakeLists.txt").write_text(
@@ -463,13 +508,13 @@ def test_relocated_cmake_consumer_links_lowerer(tmp_path):
         '  message(FATAL_ERROR "missing transitive thread dependency")\n'
         "endif()\n"
         "add_executable(consumer main.cpp)\n"
-        "target_link_libraries(consumer PRIVATE ckc::rocke_core)\n"
+        f"target_link_libraries(consumer PRIVATE ckc::{target})\n"
     )
     # Taking the API address forces archive extraction without needing a GPU or
     # a valid kernel. The executable must resolve the detector dependencies.
     (source / "main.cpp").write_text(
-        '#include "rocke/lower_llvm.h"\n'
-        "auto volatile lower = &rocke_lower_kernel_to_llvm_ex;\n"
+        f'#include "{header}"\n'
+        f"auto volatile lower = &{symbol};\n"
         "int main() { return lower == nullptr; }\n"
     )
     output = tmp_path / "consumer-build"

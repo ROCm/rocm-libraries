@@ -26,13 +26,18 @@
 #include "hipblaslt_data.hpp"
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_test.hpp"
+#include "scoped_env.hpp"
 #include "testing_matmul.hpp"
 #include "testing_matmul_batch_offset.hpp"
+#include <algorithm>
 #include <cctype>
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #include <gtest/gtest-spi.h>
 
@@ -162,6 +167,108 @@ namespace
             return hipblaslt_bench_options::verification_failures() - before;
         }
     };
+
+    TEST(BenchVerify, smoke_BiasGradientNormLength)
+    {
+        struct Case
+        {
+            hipblaslt_bias_source source;
+            int64_t               m, n;
+            size_t                length;
+        };
+        for(const auto& test : {Case{hipblaslt_bias_source::b, 2, 5, 5},
+                                Case{hipblaslt_bias_source::b, 5, 2, 2},
+                                Case{hipblaslt_bias_source::a, 2, 5, 2},
+                                Case{hipblaslt_bias_source::d, 2, 5, 2}})
+        {
+            SCOPED_TRACE(::testing::Message()
+                         << "source=" << int(test.source) << " M=" << test.m << " N=" << test.n);
+            BenchVerifyD d(test.m, test.n, 1, HIPBLASLT_BATCH_MODE_STRIDED);
+            Arguments    arg{};
+            arg.init();
+            arg.unit_check        = 0;
+            arg.norm_check        = 1;
+            arg.allclose_check    = 0;
+            arg.norm_check_assert = true;
+            arg.gradient          = true;
+            arg.bias_vector       = true;
+            arg.bias_source       = test.source;
+            arg.a_type = arg.b_type = HIP_R_32F;
+            arg.compute_type        = HIPBLAS_COMPUTE_32F;
+
+            // M > N must fail deterministically if the check reads M values. Reserve that
+            // space explicitly and put mismatched sentinels beyond the logical bias vector.
+            const size_t                 capacity = std::max(test.m, test.n);
+            std::vector<HipHostBuffer>   gold, result, unused;
+            std::vector<HipDeviceBuffer> device, no_device;
+            gold.emplace_back(HIP_R_32F, capacity);
+            result.emplace_back(HIP_R_32F, capacity);
+            device.emplace_back(HIP_R_32F, capacity);
+            for(size_t i = 0; i < capacity; ++i)
+            {
+                gold[0].as<float>()[i]   = 1.0f;
+                result[0].as<float>()[i] = i < test.length ? 1.0f : 1000.0f;
+            }
+
+            for(bool corrupt : {false, true})
+            {
+                SCOPED_TRACE(corrupt);
+                // For M < N, the last value is beyond the prefix that an M-value check sees.
+                result[0].as<float>()[test.length - 1] = corrupt ? 2.0f : 1.0f;
+                ASSERT_EQ(synchronize(device[0], result[0]), hipSuccess);
+                std::vector<double> tol{0};
+                double              norm_error = 0, atol = 0, rtol = 0, max_ulp = 0, avg_ulp = 0;
+                ::testing::TestPartResultArray failures;
+                {
+                    ::testing::ScopedFakeTestPartResultReporter reporter(
+                        ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD,
+                        &failures);
+                    check(nullptr,
+                          arg,
+                          1,
+                          {test.m},
+                          {test.n},
+                          {test.m},
+                          {test.m},
+                          {test.m * test.n},
+                          {test.m * test.n},
+                          {1},
+                          {test.length},
+                          d.gold,
+                          d.result,
+                          no_device,
+                          unused,
+                          unused,
+                          no_device,
+                          unused,
+                          unused,
+                          no_device,
+                          gold,
+                          result,
+                          device,
+                          tol,
+                          norm_error,
+                          atol,
+                          rtol,
+                          max_ulp,
+                          avg_ulp,
+                          HIP_R_32F,
+                          HIP_R_32F,
+                          HIP_R_32F,
+                          HIP_R_32F);
+                }
+                EXPECT_EQ(failures.size(), corrupt ? 1 : 0);
+                if(corrupt)
+                {
+                    if(failures.size() == 1)
+                        EXPECT_TRUE(failures.GetTestPartResult(0).fatally_failed());
+                    EXPECT_GT(norm_error, 0.1);
+                }
+                else
+                    EXPECT_EQ(norm_error, 0);
+            }
+        }
+    }
 
     // ROCM-32137: one wrong element in the last batch fails both checks.
     TEST(BenchVerify, smoke_WrongLaterBatchCountsBothChecks)
@@ -843,6 +950,73 @@ namespace
         RUN_TEST_ON_THREADS_STREAMS(matmul_testing{}(GetParam()));
     }
     INSTANTIATE_TEST_CATEGORIES(matmul_test);
+
+    // ----------------------------------------------------------------------------
+    // MX scale layout on the TensileLite path
+    // ----------------------------------------------------------------------------
+
+    // HIPBLASLT_USE_ROCROLLER=0 keeps block-scaled problems on TensileLite, where
+    // packed scales used to run a HostPreSwizzle kernel and fail the norm check.
+    struct tensile_mx_layout_testing : hipblaslt_test_valid
+    {
+        void operator()(const Arguments& arg)
+        {
+            test_env::ScopedEnv rocRoller("HIPBLASLT_USE_ROCROLLER", "0");
+            testing_matmul(arg);
+        }
+    };
+
+    struct tensile_mx_layout_test
+        : RocBlasLt_Test<tensile_mx_layout_test, tensile_mx_layout_testing>
+    {
+        static bool type_filter(const Arguments& arg)
+        {
+            return type_filter_functor{}(arg);
+        }
+
+        static bool function_filter(const Arguments& arg)
+        {
+            return !strcmp(arg.function, "tensile_mx_layout");
+        }
+
+        static std::string name_suffix(const Arguments& arg)
+        {
+            return matmul_test::name_suffix(arg);
+        }
+    };
+
+    TEST_P(tensile_mx_layout_test, matmul)
+    {
+        if(GetParam().scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
+        {
+            tensile_mx_layout_testing{}(GetParam());
+            return;
+        }
+
+        // Packed scales either find a kernel that reads them, and then must match
+        // the reference, or find none. Today every gfx950 kernel for these FP8 and
+        // FP4 types is HostPreSwizzle, so they find none.
+        ::testing::TestPartResultArray results;
+        {
+            ::testing::ScopedFakeTestPartResultReporter reporter(
+                ::testing::ScopedFakeTestPartResultReporter::INTERCEPT_ONLY_CURRENT_THREAD,
+                &results);
+            tensile_mx_layout_testing{}(GetParam());
+        }
+        const bool noKernel
+            = results.size() == 1 && results.GetTestPartResult(0).fatally_failed()
+              && std::strstr(results.GetTestPartResult(0).message(), "NO solution found!")
+                     != nullptr;
+        if(noKernel)
+            return;
+        for(int i = 0; i < results.size(); i++)
+        {
+            const auto& r = results.GetTestPartResult(i);
+            if(r.failed())
+                ADD_FAILURE_AT(r.file_name() ? r.file_name() : "", r.line_number()) << r.message();
+        }
+    }
+    INSTANTIATE_TEST_CATEGORIES(tensile_mx_layout_test);
 
 #ifdef HIPBLASLT_USE_ROCROLLER
     // ----------------------------------------------------------------------------

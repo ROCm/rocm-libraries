@@ -5,6 +5,16 @@
 [meta]
 version = 1
 
+# -- Convolution-forward dynamic tolerance --
+# Coefficient c of the summation-order terms (c * sqrt(K) * u32 on sigma in atol, and on |ref| in
+# rtol) for float outputs. The base value of the harness (4) leaves a headroom of at least 1.5
+# over every solver family measured except Winograd, whose float error is 2 to 3 times larger
+# (up to 5.68 in units of sqrt(K) * u32 * (sigma + |ref|) on the calibration data, gfx942 and
+# gfx90a). 9 leaves Winograd a headroom of at least 1.5.
+# See dnn-providers/integration-tests/docs/tolerances.md, "Float outputs".
+[conv_fwd_tolerance.float]
+summation_order = 9.0
+
 # -- Tolerance Overrides --
 # Override default tolerances for specific tests or groups of tests.
 # Each entry requires:
@@ -52,11 +62,12 @@ rtol = 0.3
 
 # 3D fp32 conv forward accumulates a ~432-term dot product in fp32 on both GPU
 # and CPU reference, giving an ~1-2e-5 absolute error floor independent of
-# output magnitude. The default 1e-5 atol dips below it for small-magnitude
+# output magnitude. The former default atol of 1e-5 dipped below it for small-magnitude
 # outputs, flaking IntegrationGpuConvFwd3dFp32 (~19% on Windows gfx1151). Raise
 # atol to 5e-5 (rtol unchanged at the 1e-5 default) for the 3D fp32 forward
 # cases only; 5e-5 clears the floor while staying ~50x below the worst-case
-# bound (~2.5e-3).
+# bound (~2.5e-3). Like any matching entry, it replaces the dynamic tolerance
+# of those cases whole.
 # 3D fp32 conv forward override for the bundle cases. Case ids come from
 # reference-data-scripts/generate_conv_fwd_bundles.py:
 # <items>_3d_i<spatial>_n<N>c<C>k<K>_f<filter>_fp32_<layout>.
