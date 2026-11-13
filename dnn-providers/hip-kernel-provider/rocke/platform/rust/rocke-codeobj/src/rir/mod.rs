@@ -28,6 +28,7 @@ pub mod peephole;
 pub mod post;
 pub mod print;
 pub mod reassoc;
+mod ring_form;
 pub mod regalloc;
 mod reload;
 pub(crate) mod remat;

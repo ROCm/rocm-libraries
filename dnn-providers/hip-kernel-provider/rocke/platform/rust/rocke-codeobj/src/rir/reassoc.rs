@@ -20,124 +20,12 @@
 //! distinct, `DEPTH` levels), so nothing else is duplicated.
 
 use super::ast::*;
+use super::ring_form::{collect, Cx, Def, Emit, Form, Limits, Mono};
 
 const ATOMS: usize = 6;
 const DEPTH: u32 = 12;
-
-#[derive(Clone)]
-pub(super) struct Def {
-    pub(super) kind: OpKind,
-    pub(super) operands: Vec<ValueId>,
-    pub(super) konst: Option<i64>,
-}
-
-/// A linear form: (leaf, coefficient) terms sorted by leaf, coefficients and constant modulo 2^32.
-#[derive(Clone, Debug, PartialEq)]
-struct Form {
-    terms: Vec<(ValueId, u32)>,
-    konst: u32,
-}
-
-impl Form {
-    fn leaf(v: ValueId) -> Form {
-        Form { terms: vec![(v, 1)], konst: 0 }
-    }
-
-    fn add(mut self, other: &Form, sign: u32) -> Form {
-        for &(v, c) in &other.terms {
-            let c = c.wrapping_mul(sign);
-            match self.terms.iter_mut().find(|t| t.0 == v) {
-                Some(t) => t.1 = t.1.wrapping_add(c),
-                None => self.terms.push((v, c)),
-            }
-        }
-        self.terms.retain(|t| t.1 != 0);
-        self.terms.sort_by_key(|t| t.0 .0);
-        self.konst = self.konst.wrapping_add(other.konst.wrapping_mul(sign));
-        self
-    }
-
-    fn scale(mut self, k: u32) -> Form {
-        for t in &mut self.terms {
-            t.1 = t.1.wrapping_mul(k);
-        }
-        self.terms.retain(|t| t.1 != 0);
-        self.konst = self.konst.wrapping_mul(k);
-        self
-    }
-}
-
-struct Cx<'a> {
-    defs: &'a [Option<Def>],
-    types: &'a Kernel,
-}
-
-impl Cx<'_> {
-    fn konst(&self, v: ValueId) -> Option<u32> {
-        self.defs.get(v.0 as usize)?.as_ref()?.konst.map(|k| k as u32)
-    }
-
-    fn form(&self, v: ValueId, depth: u32) -> Option<Form> {
-        if *self.types.ty(v) != Type::Scalar(Scalar::I32) {
-            return None;
-        }
-        let Some(Some(d)) = self.defs.get(v.0 as usize) else { return Some(Form::leaf(v)) };
-        if let Some(k) = d.konst {
-            return Some(Form { terms: Vec::new(), konst: k as u32 });
-        }
-        if depth == 0 {
-            return Some(Form::leaf(v));
-        }
-        let sub = |x: ValueId| self.form(x, depth - 1);
-        let f = match (d.kind, d.operands.as_slice()) {
-            (OpKind::Add, &[a, b]) => sub(a)?.add(&sub(b)?, 1),
-            (OpKind::Sub, &[a, b]) => sub(a)?.add(&sub(b)?, u32::MAX),
-            (OpKind::Mul, &[a, b]) => match (self.konst(a), self.konst(b)) {
-                (_, Some(k)) => sub(a)?.scale(k),
-                (Some(k), _) => sub(b)?.scale(k),
-                _ => Form::leaf(v),
-            },
-            (OpKind::Shl, &[a, b]) => match self.konst(b) {
-                Some(k) if k < 32 => sub(a)?.scale(1u32 << k),
-                _ => Form::leaf(v),
-            },
-            _ => Form::leaf(v),
-        };
-        (f.terms.len() <= ATOMS).then_some(f)
-    }
-}
-
-pub(super) fn collect(region: &Region, defs: &mut [Option<Def>], home: &mut [u32], loops: &mut Vec<(u32, u32)>, at: u32) {
-    for op in &region.ops {
-        let konst = (op.kind == OpKind::Constant).then(|| op.int_attr("value")).flatten();
-        for r in &op.results {
-            if let Some(slot) = defs.get_mut(r.0 as usize) {
-                *slot = Some(Def { kind: op.kind, operands: op.operands.iter().copied().collect(), konst });
-                home[r.0 as usize] = at;
-            }
-        }
-        let inner = if op.kind == OpKind::For {
-            loops.push((at, 0));
-            let id = loops.len() as u32 - 1;
-            for v in &op.block_args {
-                if let Some(h) = home.get_mut(v.0 as usize) {
-                    *h = id;
-                }
-            }
-            id
-        } else {
-            at
-        };
-        for r in &op.regions {
-            collect(r, defs, home, loops, inner);
-        }
-        if op.kind == OpKind::For {
-            // The last loop number inside this one.
-            let last = loops.len() as u32 - 1;
-            loops[inner as usize].1 = last;
-        }
-    }
-}
+/// Linear forms over at most `ATOMS` leaves: a product of two non-constants is a leaf, a larger form is refused.
+const LIMITS: Limits = Limits { products: false, terms: ATOMS, leaf_on_overflow: false };
 
 struct Rw<'a> {
     defs: Vec<Option<Def>>,
@@ -148,59 +36,15 @@ struct Rw<'a> {
     rewritten: usize,
 }
 
+impl Emit for Rw<'_> {
+    const PREFIX: &'static str = "%rsa";
+
+    fn tables(&mut self) -> (&mut Kernel, &mut Vec<Option<Def>>, &mut Vec<u32>) {
+        (&mut *self.kernel, &mut self.defs, &mut self.home)
+    }
+}
+
 impl Rw<'_> {
-    fn value(&mut self) -> ValueId {
-        let v = self.kernel.new_value("%rsa", Type::Scalar(Scalar::I32));
-        self.defs.push(None);
-        self.home.push(0);
-        v
-    }
-
-    fn konst(&mut self, k: u32, out: &mut Vec<Op>) -> ValueId {
-        let v = self.value();
-        out.push(Op {
-            kind: OpKind::Constant,
-            results: [v].into(),
-            operands: Operands::new(),
-            attrs: vec![("ity".into(), Attr::Str("i32".into())), ("value".into(), Attr::Int(k as i32 as i64))],
-            regions: Vec::new(),
-            block_args: Vec::new(),
-            loc: None,
-        });
-        v
-    }
-
-    fn bin(&mut self, kind: OpKind, a: ValueId, b: ValueId, out: &mut Vec<Op>) -> ValueId {
-        let v = self.value();
-        out.push(Op {
-            kind,
-            results: [v].into(),
-            operands: [a, b].into(),
-            attrs: vec![("wrap".into(), Attr::Str("modular".into()))],
-            regions: Vec::new(),
-            block_args: Vec::new(),
-            loc: None,
-        });
-        v
-    }
-
-    fn sum(&mut self, terms: &[(ValueId, u32)], out: &mut Vec<Op>) -> Option<ValueId> {
-        let mut acc: Option<ValueId> = None;
-        for &(v, c) in terms {
-            let t = if c == 1 {
-                v
-            } else {
-                let k = self.konst(c, out);
-                self.bin(OpKind::Mul, v, k, out)
-            };
-            acc = Some(match acc {
-                None => t,
-                Some(a) => self.bin(OpKind::Add, a, t, out),
-            });
-        }
-        acc
-    }
-
     fn region(&mut self, region: &mut Region, at: u32) {
         let ops = std::mem::take(&mut region.ops);
         let mut out = Vec::with_capacity(ops.len());
@@ -239,13 +83,13 @@ impl Rw<'_> {
     /// The soffset `s` as `(invariant + variant) + constant` for loop `l`, or None when it has no constant part, no
     /// leaf, is already `x + constant` with `x` free of constants, or is not a linear form.
     fn rebuild(&mut self, s: ValueId, l: u32, out: &mut Vec<Op>) -> Option<ValueId> {
-        let form = Cx { defs: &self.defs, types: &*self.kernel }.form(s, DEPTH)?;
+        let form = Cx { defs: &self.defs, kernel: &*self.kernel, limits: LIMITS }.form(s, DEPTH)?;
         if form.konst == 0 || form.terms.is_empty() {
             return None;
         }
         if let Some(Some(d)) = self.defs.get(s.0 as usize) {
             if let (OpKind::Add, &[x, c]) = (d.kind, d.operands.as_slice()) {
-                let cx = Cx { defs: &self.defs, types: &*self.kernel };
+                let cx = Cx { defs: &self.defs, kernel: &*self.kernel, limits: LIMITS };
                 if cx.konst(c).is_some() && cx.form(x, DEPTH).is_some_and(|f| f.konst == 0) {
                     return None;
                 }
@@ -253,9 +97,9 @@ impl Rw<'_> {
         }
         let last = self.loops[l as usize].1;
         let inside = |v: ValueId, home: &[u32]| home.get(v.0 as usize).is_some_and(|&h| (l..=last).contains(&h));
-        let (var, inv): (Vec<_>, Vec<_>) = form.terms.iter().copied().partition(|&(v, _)| inside(v, &self.home));
-        let a = self.sum(&inv, out);
-        let b = self.sum(&var, out);
+        let (var, inv): (Vec<_>, Vec<_>) = form.terms.iter().partition(|t| t.0.iter().any(|&v| inside(ValueId(v), &self.home)));
+        let a = self.sum(inv, out);
+        let b = self.sum(var, out);
         let base = match (a, b) {
             (Some(a), Some(b)) => self.bin(OpKind::Add, a, b, out),
             (Some(x), None) | (None, Some(x)) => x,
@@ -468,7 +312,7 @@ impl Rw<'_> {
         let ops = std::mem::take(&mut region.ops);
         let mut out = Vec::with_capacity(ops.len());
         // Earlier DMAs of this body: (soffset value, its variant terms, invariant terms, constant).
-        let mut seen: Vec<(ValueId, Vec<(ValueId, u32)>, Vec<(ValueId, u32)>, u32)> = Vec::new();
+        let mut seen: Vec<(ValueId, Vec<(Mono, u32)>, Vec<(Mono, u32)>, u32)> = Vec::new();
         for mut op in ops {
             let inner = if op.kind == OpKind::For {
                 self.next_loop += 1;
@@ -482,10 +326,10 @@ impl Rw<'_> {
             if op.kind == OpKind::BufferLoadLds && at != 0 {
                 let s = op.operands[3];
                 let last = self.loops[at as usize].1;
-                let form = Cx { defs: &self.defs, types: &*self.kernel }.form(s, DEPTH);
+                let form = Cx { defs: &self.defs, kernel: &*self.kernel, limits: LIMITS }.form(s, DEPTH);
                 if let Some(form) = form {
                     let inside = |v: ValueId| self.home.get(v.0 as usize).is_some_and(|&h| (at..=last).contains(&h));
-                    let (var, inv): (Vec<_>, Vec<_>) = form.terms.iter().copied().partition(|&(v, _)| inside(v));
+                    let (var, inv): (Vec<_>, Vec<_>) = form.terms.iter().cloned().partition(|t| t.0.iter().any(|&v| inside(ValueId(v))));
                     // Lever `soffsharek`: only differences that are constants (no new invariant leaves in the resource).
                     let konly = super::op_lever(&op, "soffsharek");
                     if konly || super::op_lever(&op, "soffshare") {
@@ -783,7 +627,7 @@ mod tests {
         let mut home = vec![0u32; n];
         let mut loops = vec![(0u32, 0u32)];
         collect(&k.body, &mut defs, &mut home, &mut loops, 0);
-        let cx = Cx { defs: &defs, types: k };
+        let cx = Cx { defs: &defs, kernel: k, limits: LIMITS };
         let mut out = Vec::new();
         rir::analysis::preorder(&k.body, |op| {
             if op.kind == OpKind::BufferLoadLds {
@@ -829,7 +673,7 @@ mod tests {
         let mut home = vec![0u32; n];
         let mut loops = vec![(0u32, 0u32)];
         collect(&k.body, &mut defs, &mut home, &mut loops, 0);
-        let cx = Cx { defs: &defs, types: k };
+        let cx = Cx { defs: &defs, kernel: k, limits: LIMITS };
         let def = |v: ValueId| defs[v.0 as usize].clone().expect("defined");
         let mut out = Vec::new();
         rir::analysis::preorder(&k.body, |op| {
@@ -936,7 +780,7 @@ mod tests {
         let mut home = vec![0u32; n];
         let mut loops = vec![(0u32, 0u32)];
         collect(&k.body, &mut defs, &mut home, &mut loops, 0);
-        let cx = Cx { defs: &defs, types: k };
+        let cx = Cx { defs: &defs, kernel: k, limits: LIMITS };
         let mut out = Vec::new();
         rir::analysis::preorder(&k.body, |op| {
             if op.kind == OpKind::BufferLoadLds {
