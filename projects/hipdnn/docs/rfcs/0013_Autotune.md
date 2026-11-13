@@ -3,7 +3,7 @@
 - **Authors**: Chris Miserva
 - **Status**: Implemented
 - **Status notes**: `autotune()`, plan-spec collection, and config file output shipped in #8264 (`frontend/include/hipdnn_frontend/autotune/`, `Graph.hpp`). #11099 added `Graph::autotuneExhaustiveSweep()` and an exact-match engine ranking cache, which this RFC does not describe in detail. Python bindings shipped in #10881.
-- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
+- **Last verified**: 2026-11-13 against `develop` (7d8674e8542)
 
 ## Table of Contents
 
@@ -325,15 +325,16 @@ Error add_all_engines(const std::vector<HeuristicMode>& modes = {HeuristicMode::
 
 ```cpp
 // Returns the estimated maximum workspace size across all added plan specs.
-// Pre-compile estimate from engine config metadata; actual post-compile workspace
-// may differ (compilation can change requirements). Not guaranteed >= actual.
+// Pre-compile estimate from the engine configs. Under the plugin contract an engine-config
+// workspace is at least the workspace of any plan finalized from it, so the actual
+// post-compile workspace does not exceed it; an engine that breaks the contract can.
 // Call after add_engine_*(), before allocating workspace for autotune/execute.
 // Returns an error if no plan specs have been added.
 Error get_estimated_max_workspace_size(int64_t& maxSize) const;
 ```
 
 **Workspace sizing**:
-1. **Plan-spec path**: `get_estimated_max_workspace_size()` returns a pre-compile estimate. For an engine that exposes the benchmarking knob it covers the EXHAUSTIVE priming configuration (the larger of the default and the knob-on estimate), so a workspace of this size is enough for priming. It is reported in every autotune mode and can exceed what a non-priming plan needs; pass an explicit workspace if you want less. Allocate this size and pass it to the general `autotune()` overload. All plan specs are compiled regardless of their estimated workspace size; `autotune()` does not pre-filter by estimate. After compilation, plans whose actual workspace exceeds the provided `workspaceSize` are skipped (not executed). To avoid compiling engines with large workspace estimates, filter `EngineConfigInfo` entries before calling `add_engine_configs()` (see example below).
+1. **Plan-spec path**: `get_estimated_max_workspace_size()` returns a pre-compile estimate. For an engine that exposes the benchmarking knob it covers the EXHAUSTIVE priming configuration (the larger of the default and the knob-on estimate), so a workspace of this size is enough for priming. It is reported in every autotune mode and can exceed what a non-priming plan needs; pass an explicit workspace if you want less. Allocate this size and pass it to the general `autotune()` overload. All plan specs are compiled regardless of their estimated workspace size; `autotune()` does not pre-filter by estimate. After compilation, plans whose actual workspace exceeds the provided `workspaceSize` are skipped (not executed). A compiled plan larger than its estimate means its engine broke the plugin contract that bounds a plan's workspace by its engine config's. To avoid compiling engines with large workspace estimates, filter `EngineConfigInfo` entries before calling `add_engine_configs()` (see example below).
 2. **Compiled-plan path**: Use `get_autotune_workspace_size()` for the accurate post-compile maximum.
 3. After autotuning, `execute()` only needs the winner's `workspaceSize`, which may be smaller.
 
@@ -436,24 +437,36 @@ Each row is a separate plan spec. All share the fixed `REDUCTION_MODE=1`, while 
 #### 6.2.7 Filtering
 
 ```cpp
-// Store a workspace threshold. Plans whose workspace exceeds this limit are excluded
-// during build_plans() and autotune(). Last-write-wins: a subsequent call replaces
-// the previous threshold. Has no effect on plans that have already been compiled
-// and evaluated.
+// Store a workspace threshold. Plans whose engine-config workspace exceeds this limit, or
+// cannot be read while the limit is set, are filtered: check_support(), build_plans(),
+// build_plan_at_index() and autotune() skip them. A plan that finalizes over the limit
+// despite its engine config is rejected after it finalizes. Last-write-wins: a subsequent
+// call replaces the previous threshold. The limit persists until the caller changes it and
+// applies to plans created later. A plan an earlier evaluation barred stays barred when the
+// limit is relaxed, until the plans are recreated (create_execution_plans(),
+// create_execution_plan_ext(), rebuilding the operation graph, deserialization or plan-spec autotune()).
 Graph& deselect_workspace_greater_than(int64_t workspace);
 
-// Store engine names for exclusion. Plans matching these engines are excluded during
-// build_plans() and autotune(). Accumulates across calls (set union with previous calls).
+// Store engine names for exclusion. Plans matching these engines are filtered. Accumulates
+// across calls (set union with previous calls) and persists until the Graph is destroyed.
 Graph& deselect_engines(const std::vector<std::string>& engine_names);
 
-// Store engine IDs for exclusion. Plans matching these engines are excluded during
-// build_plans() and autotune(). Accumulates across calls (set union with previous calls).
+// Store engine IDs for exclusion. Plans matching these engines are filtered. Accumulates
+// across calls (set union with previous calls) and persists until the Graph is destroyed.
 Graph& deselect_engines(const std::vector<int64_t>& engine_ids);
+
+// Note filters (RFC 0025 §2). Each appends to a list, and an engine passes when it reports
+// every selected note and none of the deselected ones, in each family. Plans of failing
+// engines are filtered like those above. An empty argument is a no-op.
+Graph& select_numeric_notes(const std::vector<NumericalNote>& notes);
+Graph& deselect_numeric_notes(const std::vector<NumericalNote>& notes);
+Graph& select_behavior_notes(const std::vector<BehaviorNote>& notes);
+Graph& deselect_behavior_notes(const std::vector<BehaviorNote>& notes);
 ```
 
-All filtering methods return `Graph&` for method chaining. They store criteria on the graph without modifying plan specs or compiled plans. The stored criteria are evaluated during `build_plans()` (compiled-plan path) or during `autotune()` when it compiles plan specs (plan-spec path). On the compiled-plan path, call `deselect_*()` before `build_plans()` for the criteria to take effect. Matching plans are excluded from compilation (engine name/ID) or from execution (workspace threshold). The workspace threshold is checked after compilation, since workspace size is only known post-compile.
+All filtering methods return `Graph&` for method chaining. They store criteria on the graph without modifying plan specs or compiled plans, and the criteria persist until changed: no create or build call resets them, and a criterion set before plans exist applies to the plans created later. One evaluation judges them at every call site. `check_support()` answers "is this supported with these filters?": it succeeds when any created plan passes, in ranked order, and otherwise returns `GRAPH_EXECUTION_PLAN_CREATION_FAILED`; it finalizes and marks nothing. `build_plans(HEURISTICS_CHOICE)` builds the best plan that passes the filters, walking past filtered plans without finalizing them, and returns the same code when none passes. `build_plans(ALL)` evaluates every plan's filters before finalizing any plan and skips filtered ones; it returns OK whenever a plan is active after the call, so a filter set after a build never undoes that build. `build_plan_at_index()` returns the same code for a filtered index. On the compiled-plan path `autotune()` applies filters set after `build_plans(ALL)`; on the plan-spec path it judges each spec by its compiled engine config before priming or finalizing, so the limit applies to the engine-config workspace, not to the pre-compile estimate. The workspace threshold is checked against the engine-config workspace, which the plugin contract makes at least the workspace of any plan finalized from it; a finalized plan over the threshold despite its config is rejected after it finalizes. A filter that removes the finalized active plan is reported, but the plan is never disabled and stays executable. A plan an earlier evaluation barred stays barred when a filter is relaxed or cleared, until `create_execution_plans()`.
 
-> **Stable indices (compiled-plan path)**: on the compiled-plan path, `deselect_*` methods do not remove entries from the underlying compiled-plan collection. `get_execution_plan_count()` returns the total number of plans including excluded ones. Indices remain valid after deselect calls. Attempting to execute an excluded plan (via `execute()` or `execute_plan_at_index()`) returns `INVALID_VALUE`. This matches cuDNN's behavior, where plans are marked as "barred" without removal (see also § A.3 point 5). The plan-spec path has no equivalent stable-index contract (specs are compiled on demand).
+> **Stable indices (compiled-plan path)**: on the compiled-plan path, `deselect_*` methods do not remove entries from the underlying compiled-plan collection. `get_execution_plan_count()` returns the total number of plans including excluded ones. Indices remain valid after deselect calls. The build and autotune paths mark a plan a filter removes as barred, and `check_support()` marks nothing. Attempting to execute a barred plan (via `execute()` or `execute_plan_at_index()`) returns `INVALID_VALUE`. This matches cuDNN's behavior, where plans are marked as "barred" without removal (see also § A.3 point 5). The plan-spec path has no equivalent stable-index contract (specs are compiled on demand).
 >
 > Independently of retention, an excluded candidate is still **reported** on both paths in the `autotune()` `results` vector as a failed (`succeeded = false`) entry naming the exclusion reason. See § 6.3.1 for the full per-candidate result-coverage contract.
 
@@ -482,7 +495,7 @@ Error autotune(hipdnnHandle_t handle,
                const AutotuneStorageConfig& storageConfig = {},
                std::vector<AutotuneResult>* results = nullptr);
 ```
-Works with both paths. `workspaceSize` must be >= 0 (negative values return `INVALID_VALUE`). All plan specs are compiled regardless of estimated workspace size. Workspace sizes of compiled plans are typically the same or smaller than estimated, but can be larger. Plans whose actual (post-compile) workspace exceeds `workspaceSize` are skipped with a warning log if the pre-compile estimate indicated the plan would fit. Skipped plans (like every other non-benchmarked candidate) are captured in `AutotuneResult` (with both the estimated and actual workspace sizes); see § 6.3.1 for the full per-candidate result-coverage contract. To avoid compiling engines with large estimated workspace sizes, pre-filter `EngineConfigInfo` before `add_engine_configs()` (see § 6.2.3).
+Works with both paths. `workspaceSize` must be >= 0 (negative values return `INVALID_VALUE`). All plan specs are compiled regardless of estimated workspace size. A compiled plan's workspace does not exceed its engine-config estimate unless its engine breaks the plugin contract; the estimate can be larger, because it covers the priming configuration. Plans whose actual (post-compile) workspace exceeds `workspaceSize` are skipped with a warning log if the pre-compile estimate indicated the plan would fit. Skipped plans (like every other non-benchmarked candidate) are captured in `AutotuneResult` (with both the estimated and actual workspace sizes); see § 6.3.1 for the full per-candidate result-coverage contract. To avoid compiling engines with large estimated workspace sizes, pre-filter `EngineConfigInfo` before `add_engine_configs()` (see § 6.2.3).
 
 **cuDNN-compatible overloads; forwarding overloads matching cuDNN's signature:**
 ```cpp
@@ -522,7 +535,7 @@ When a non-null `results` pointer is supplied, `autotune()` reports **exactly on
 | Disposition | `succeeded` | `errorMessage` contains | `workspaceSize` |
 |---|---|---|---|
 | Benchmarked (winner or ranked) | `true` | (empty) | compiled workspace |
-| Excluded by `deselect_engines()` / `deselect_workspace_greater_than()` (barred) | `false` | "Plan barred" | compiled if known, else `-1` |
+| Excluded by an engine filter (`deselect_engines()`, a note filter, `deselect_workspace_greater_than()`) or an earlier evaluation (barred) | `false` | "Plan barred: <skip reason>" | compiled if known, else `-1` |
 | Excluded by `config.engineIdFilter` | `false` | "engineIdFilter" | compiled if known, else `-1` |
 | Compiled workspace exceeds the call's `workspaceSize` ceiling (skipped) | `false` | "exceeds limit" | compiled workspace |
 | Failed to compile (plan-spec path) | `false` | "failed compile" | `-1` (never compiled) |
@@ -540,7 +553,7 @@ When a non-null `results` pointer is supplied, `autotune()` reports **exactly on
 
 If both or neither path's artifacts are present, `autotune()` returns an error. The two paths are mutually exclusive per Graph instance (see § 6.2.3).
 
-**`create_execution_plan_ext()` limitation**: Clears compiled plans on each call, so only one plan can exist at a time. Multi-plan autotuning on the compiled-plan path requires `create_execution_plans()` → `build_plans(ALL)`.
+**`create_execution_plan_ext()` limitation**: Clears compiled plans on each call, so only one plan can exist at a time. Multi-plan autotuning on the compiled-plan path requires `create_execution_plans()` → `build_plans(ALL)`. The engine filters persist and apply to the plan it creates.
 
 **Error conditions**: `autotune()` returns an error (with error log) when:
 
@@ -550,7 +563,7 @@ If both or neither path's artifacts are present, `autotune()` returns an error. 
 - `variantPack` fails tensor UID validation (`INVALID_VALUE`): all non-virtual tensor UIDs required by the graph must be present. Missing UIDs are reported in the error message.
 - Workspace pointer null but plans require workspace
 - No autotuning candidates (no plan specs and no compiled plans)
-- No candidates remain after filtering: `engineIdFilter` and/or `deselect_*` criteria exclude every candidate. (Returns `INVALID_VALUE`; `*results` is still populated with one failed entry per excluded candidate and the error message is the composition summary; see § 6.3.1.) The summary lists only the exclusion categories that can be non-zero at the exit point.
+- No candidates remain after filtering: `engineIdFilter` and/or the engine filters (`deselect_*`, `select_*_notes`) exclude every candidate. (Returns `INVALID_VALUE`; `*results` is still populated with one failed entry per excluded candidate and the error message is the composition summary; see § 6.3.1.) The summary lists only the exclusion categories that can be non-zero at the exit point.
 - EXHAUSTIVE mode requested on compiled-plan path
 - `RUN_UNTIL_STABLE` parameter validation fails (see `AutotuneConfig` constraints in § 6.1)
 
@@ -1343,9 +1356,10 @@ Status tags: **existing** = already in hipDNN, unchanged; **RFC** = new, propose
 | `graph.create_execution_plans({HeurMode_t::A})` | `graph.get_engine_configs(configs)` (plan-spec) or `graph.create_execution_plans({HeuristicMode::FALLBACK})` (compiled-plan) | **RFC** / **existing** | Plan-spec: exposes engine list for inspection. Compiled-plan: as in cuDNN |
 | `graph.check_support()` | _(inside `autotune()`)_ (plan-spec) or `graph.check_support()` (compiled-plan) | **RFC** / **existing** | Plan-spec: unsupported engines filtered at compilation. Compiled-plan: as in cuDNN |
 | `graph.build_plans(BuildPlanPolicy_t::ALL)` | `graph.add_engine_configs(configs)` (plan-spec) or `graph.build_plans(BuildPlanPolicy::ALL)` (compiled-plan) | **RFC** / **existing** | Plan-spec: stores without compiling (`add_all_engines()` as shortcut). Compiled-plan: compiles all, `autotune()` benchmarks directly |
-| `graph.deselect_workspace_greater_than(n)` | `graph.deselect_workspace_greater_than(n)` | **RFC** | Stores workspace threshold, evaluated during `build_plans()`/`autotune()`. Get-filter-add recommended on plan-spec path |
-| `graph.deselect_engines(barred)` | `graph.deselect_engines(barred)` | **RFC** | Filters by engine name or ID |
-| `graph.get_autotune_workspace_size()` | `graph.get_estimated_max_workspace_size(maxSize)` (plan-spec) or `graph.get_autotune_workspace_size()` (compiled-plan) | **RFC** / **RFC** | Plan-spec: pre-compile estimate (not guaranteed accurate). Compiled-plan: queries pre-compiled plans |
+| `graph.deselect_workspace_greater_than(n)` | `graph.deselect_workspace_greater_than(n)` | **RFC** | Stores the workspace threshold; `check_support()`, `build_plans()`, `build_plan_at_index()` and `autotune()` judge it on the engine-config workspace. Persists until changed; a plan barred by an earlier evaluation stays barred until the plans are recreated (`create_execution_plans()`, `create_execution_plan_ext()`, rebuilding the operation graph, deserialization or plan-spec `autotune()`) |
+| `graph.deselect_engines(barred)` | `graph.deselect_engines(barred)` | **RFC** | Filters by engine name or ID; accumulates and persists (cuDNN replaces its list and matches name substrings) |
+| `graph.select_behavior_notes(notes)`, `graph.deselect_behavior_notes(notes)`, `graph.select_numeric_notes(notes)`, `graph.deselect_numeric_notes(notes)` | Same | **RFC** | Filter by the notes an engine reports; accumulate and persist; a plan barred by an earlier evaluation stays barred until the plans are recreated (`create_execution_plans()`, `create_execution_plan_ext()`, rebuilding the operation graph, deserialization or plan-spec `autotune()`) ([RFC 0025](./0025_NumericalNotes.md) §2) |
+| `graph.get_autotune_workspace_size()` | `graph.get_estimated_max_workspace_size(maxSize)` (plan-spec) or `graph.get_autotune_workspace_size()` (compiled-plan) | **RFC** / **RFC** | Plan-spec: pre-compile estimate from the engine configs (an upper bound on a compiled plan's workspace under the plugin contract). Compiled-plan: queries pre-compiled plans |
 | `graph.autotune(handle, variant_pack, workspace)` | `graph.autotune(handle, variant_pack, workspace, ...)` | **RFC** | Three tiers (see § 6.3) |
 | `graph.execute(handle, variant_pack, workspace)` | `graph.execute(handle, variant_pack, workspace)` | **existing** | Identical |
 | `graph.get_execution_plan_count()` | `graph.get_execution_plan_count()` | **RFC** | Number of compiled plans; cuDNN manual-loop compatibility |
@@ -1441,9 +1455,9 @@ graph.autotune(handle, variant_pack, workspace, workspaceSize,
 
 hipDNN provides both approaches:
 - **Get-filter-add** (plan-spec path, recommended): `get_engine_configs()` -> filter -> `add_engine_configs()`. See "With Engine Filtering" in § A.1.
-- **Dedicated methods** (see § 6.2.7): `deselect_workspace_greater_than()` and `deselect_engines()` for cuDNN API parity, required on the compiled-plan path.
+- **Dedicated methods** (see § 6.2.7): `deselect_workspace_greater_than()`, `deselect_engines()` and the four note filters for cuDNN API parity, required on the compiled-plan path.
 
-> hipDNN's `deselect_*` methods store criteria that are evaluated during `build_plans()` and `autotune()`, matching cuDNN's deferred evaluation pattern. Plans are excluded without removal: `get_execution_plan_count()` returns the total including excluded plans, and indices remain stable. Attempting to execute an excluded plan returns `INVALID_VALUE`.
+> hipDNN's filter methods store criteria that persist and are evaluated by `check_support()`, `build_plans()`, `build_plan_at_index()` and `autotune()`, as in cuDNN. Plans are excluded without removal: `get_execution_plan_count()` returns the total including excluded plans, and indices remain stable. Attempting to execute a barred plan returns `INVALID_VALUE`; an evaluation never bars the finalized active plan.
 
 **6. hipDNN extended autotune features**
 

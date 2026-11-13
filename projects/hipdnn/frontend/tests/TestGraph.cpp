@@ -159,8 +159,7 @@ public:
         plan.barred = barred;
         // Distinct non-null sentinel handles per engine; never dereferenced, only
         // used to make the descriptors test as "valid" past the validity check.
-        // NOLINTNEXTLINE(performance-no-int-to-ptr)
-        auto engineConfigHandle = reinterpret_cast<hipdnnBackendDescriptor_t>(0xE0 + engineId);
+        auto engineConfigHandle = engineConfigHandleFor(engineId);
         auto executionPlanHandle = executionPlanHandleFor(engineId);
         plan.engineConfigDesc
             = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(engineConfigHandle);
@@ -174,6 +173,26 @@ public:
     {
         // NOLINTNEXTLINE(performance-no-int-to-ptr)
         return reinterpret_cast<hipdnnBackendDescriptor_t>(0xF0 + engineId);
+    }
+
+    /// Engine config descriptor handle injectValidCompiledPlan() assigns to `engineId`.
+    static hipdnnBackendDescriptor_t engineConfigHandleFor(int64_t engineId)
+    {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        return reinterpret_cast<hipdnnBackendDescriptor_t>(0xE0 + engineId);
+    }
+
+    /// Mark the plan at `index` barred, as an earlier evaluation leaves it.
+    void setPlanBarredForTest(size_t index)
+    {
+        _compiledPlans[index].barred = true;
+    }
+
+    /// Install a deserialized plan as the single active plan, as deserialize() does.
+    void installDeserializedPlanForTest()
+    {
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
+        installDeserializedExecutionPlan(reinterpret_cast<hipdnnBackendDescriptor_t>(0xD0));
     }
 
     /// Make the plan at `index` the active, not yet finalized plan, as
@@ -496,6 +515,284 @@ protected:
                 *static_cast<int64_t*>(ptr) = workspaceSize;
                 return HIPDNN_STATUS_SUCCESS;
             });
+    }
+
+    // ---- Engine filter mocks ----
+    // The mocked backend answers about engines from these tables, keyed by engine ID. A test
+    // names the engines it cares about. An engine without notes reports none, and an
+    // engine-config workspace read for an engine without an entry fails the test, so a filter
+    // that reads more than it must is caught.
+    std::vector<int64_t> _rankedEngineIds;
+    std::unordered_map<hipdnnBackendDescriptor_t, int64_t> _engineIdByDesc;
+    std::unordered_map<int64_t, std::vector<hipdnnBackendNumericalNote_t>> _numericalNotes;
+    std::unordered_map<int64_t, std::vector<hipdnnBackendBehaviorNote_t>> _behaviorNotes;
+    std::unordered_set<int64_t> _failingNoteEngines;
+    std::unordered_map<int64_t, int64_t> _engineConfigWorkspace;
+    std::unordered_set<int64_t> _unreadableWorkspaceEngines;
+    // One entry per read, in order.
+    std::vector<int64_t> _numericalNoteReads;
+    std::vector<int64_t> _behaviorNoteReads;
+    std::vector<int64_t> _engineConfigWorkspaceReads;
+    std::array<char, 64> _engineDescs{};
+    size_t _nextEngineDesc = 0;
+
+    int64_t engineIdOf(hipdnnBackendDescriptor_t descriptor) const
+    {
+        const auto entry = _engineIdByDesc.find(descriptor);
+        return entry == _engineIdByDesc.end() ? -1 : entry->second;
+    }
+
+    template <typename BackendNote>
+    hipdnnStatus_t
+        answerNoteQuery(const std::unordered_map<int64_t, std::vector<BackendNote>>& notesByEngine,
+                        std::vector<int64_t>& reads,
+                        hipdnnBackendDescriptor_t descriptor,
+                        int64_t requestedCount,
+                        int64_t* elementCount,
+                        void* elements)
+    {
+        const int64_t engineId = engineIdOf(descriptor);
+        if(requestedCount == 0)
+        {
+            reads.push_back(engineId);
+        }
+        if(_failingNoteEngines.count(engineId) > 0)
+        {
+            return HIPDNN_STATUS_INTERNAL_ERROR;
+        }
+
+        const auto entry = notesByEngine.find(engineId);
+        const int64_t noteCount
+            = entry == notesByEngine.end() ? 0 : static_cast<int64_t>(entry->second.size());
+        if(elements != nullptr && entry != notesByEngine.end())
+        {
+            std::copy_n(entry->second.begin(),
+                        std::min(requestedCount, noteCount),
+                        static_cast<BackendNote*>(elements));
+        }
+        *elementCount = noteCount;
+        return HIPDNN_STATUS_SUCCESS;
+    }
+
+    hipdnnStatus_t answerEngineQuery(hipdnnBackendDescriptor_t descriptor,
+                                     hipdnnBackendAttributeName_t attribute,
+                                     int64_t requestedCount,
+                                     int64_t* elementCount,
+                                     void* elements)
+    {
+        if(attribute == HIPDNN_ATTR_ENGINEHEUR_RESULTS)
+        {
+            const auto available = static_cast<int64_t>(_rankedEngineIds.size());
+            const auto count
+                = requestedCount == 0 ? available : std::min(requestedCount, available);
+            auto* configs = static_cast<hipdnnBackendDescriptor_t*>(elements);
+            for(int64_t i = 0; requestedCount > 0 && i < count; ++i)
+            {
+                _engineIdByDesc[configs[i]] = _rankedEngineIds[static_cast<size_t>(i)];
+            }
+            *elementCount = count;
+            return HIPDNN_STATUS_SUCCESS;
+        }
+        if(attribute == HIPDNN_ATTR_ENGINECFG_ENGINE)
+        {
+            auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(
+                &_engineDescs[_nextEngineDesc++ % _engineDescs.size()]);
+            _engineIdByDesc[engineDesc] = engineIdOf(descriptor);
+            *static_cast<hipdnnBackendDescriptor_t*>(elements) = engineDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        }
+        if(attribute == HIPDNN_ATTR_ENGINE_GLOBAL_INDEX)
+        {
+            *static_cast<int64_t*>(elements) = engineIdOf(descriptor);
+            return HIPDNN_STATUS_SUCCESS;
+        }
+        if(attribute == HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE)
+        {
+            return answerNoteQuery(_numericalNotes,
+                                   _numericalNoteReads,
+                                   descriptor,
+                                   requestedCount,
+                                   elementCount,
+                                   elements);
+        }
+        if(attribute == HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE)
+        {
+            return answerNoteQuery(_behaviorNotes,
+                                   _behaviorNoteReads,
+                                   descriptor,
+                                   requestedCount,
+                                   elementCount,
+                                   elements);
+        }
+        if(attribute == HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE)
+        {
+            const int64_t engineId = engineIdOf(descriptor);
+            _engineConfigWorkspaceReads.push_back(engineId);
+            if(_unreadableWorkspaceEngines.count(engineId) > 0)
+            {
+                return HIPDNN_STATUS_INTERNAL_ERROR;
+            }
+            const auto entry = _engineConfigWorkspace.find(engineId);
+            if(entry == _engineConfigWorkspace.end())
+            {
+                ADD_FAILURE() << "Unexpected engine config workspace read for engine " << engineId;
+                return HIPDNN_STATUS_INTERNAL_ERROR;
+            }
+            *static_cast<int64_t*>(elements) = entry->second;
+            return HIPDNN_STATUS_SUCCESS;
+        }
+        return HIPDNN_STATUS_SUCCESS;
+    }
+
+    void installEngineFilterMocks()
+    {
+        // The catch-all expectations come first: an expectation added later takes precedence,
+        // so a test states only the plans and queries it cares about.
+        EXPECT_CALL(*_mockBackend, backendFinalize(_))
+            .Times(AnyNumber())
+            .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+        EXPECT_CALL(*_mockBackend, backendGetAttribute(_, _, _, _, _, _))
+            .Times(AnyNumber())
+            .WillRepeatedly([this](hipdnnBackendDescriptor_t descriptor,
+                                   hipdnnBackendAttributeName_t attribute,
+                                   hipdnnBackendAttributeType_t,
+                                   int64_t requestedCount,
+                                   int64_t* elementCount,
+                                   void* elements) {
+                return answerEngineQuery(
+                    descriptor, attribute, requestedCount, elementCount, elements);
+            });
+        ON_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
+            .WillByDefault([this](hipdnnBackendDescriptor_t descriptor,
+                                  hipdnnBackendAttributeName_t attribute,
+                                  hipdnnBackendAttributeType_t,
+                                  int64_t,
+                                  const void* elements) {
+                if(attribute == HIPDNN_ATTR_ENGINE_GLOBAL_INDEX)
+                {
+                    _engineIdByDesc[descriptor] = *static_cast<const int64_t*>(elements);
+                }
+                else if(attribute == HIPDNN_ATTR_ENGINECFG_ENGINE)
+                {
+                    _engineIdByDesc[descriptor]
+                        = engineIdOf(*static_cast<const hipdnnBackendDescriptor_t*>(elements));
+                }
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    }
+
+    // A built operation graph, so engine notes can be read, with one unfinalized plan per
+    // engine ID in order and the first plan active.
+    void prepareFilterGraph(hipdnn_frontend::GraphTestUtils& graph,
+                            const std::vector<int64_t>& engineIds,
+                            int64_t workspaceSize = -1)
+    {
+        installEngineFilterMocks();
+        createBasicBatchnormGraph(graph);
+        const auto built = graph.build_operation_graph(_handle);
+        EXPECT_TRUE(built.is_good()) << built.get_message();
+        for(const int64_t engineId : engineIds)
+        {
+            graph.injectValidCompiledPlan(engineId, workspaceSize, /*barred=*/false);
+            _engineIdByDesc[GraphTestUtils::engineConfigHandleFor(engineId)] = engineId;
+        }
+        graph.setActivePlanForTest(0);
+    }
+
+    // A built operation graph whose heuristic ranks `rankedEngineIds`; the test creates the
+    // plans.
+    void prepareRankedGraph(hipdnn_frontend::GraphTestUtils& graph,
+                            const std::vector<int64_t>& rankedEngineIds)
+    {
+        installEngineFilterMocks();
+        _rankedEngineIds = rankedEngineIds;
+        createBasicBatchnormGraph(graph);
+        const auto built = graph.build_operation_graph(_handle);
+        EXPECT_TRUE(built.is_good()) << built.get_message();
+    }
+
+    // Plan 0 (engine 10) is built and active, as a successful build_plans() leaves it; plan 1
+    // (engine 20) is not built.
+    void prepareBuiltGraph(hipdnn_frontend::GraphTestUtils& graph)
+    {
+        prepareFilterGraph(graph, {10, 20});
+        graph.setActivePlanFinalizedForTest(0);
+    }
+
+    // Four plans, each removed by a different filter: engine 10 by deselect_engines(), 20 by
+    // the numerical note filter, 30 by the behavior note filter, 40 by the engine-config
+    // workspace limit. No plan may be finalized.
+    void prepareNoSurvivorGraph(hipdnn_frontend::GraphTestUtils& graph)
+    {
+        prepareFilterGraph(graph, {10, 20, 30, 40});
+        _numericalNotes[30] = {HIPDNN_NUMERICAL_NOTE_TENSOR_CORE};
+        _numericalNotes[40] = {HIPDNN_NUMERICAL_NOTE_TENSOR_CORE};
+        _behaviorNotes[40] = {HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION};
+        _engineConfigWorkspace[40] = 500;
+        graph.deselect_engines(std::vector<int64_t>{10});
+        graph.select_numeric_notes({NumericalNote::TENSOR_CORE});
+        graph.select_behavior_notes({BehaviorNote::RUNTIME_COMPILATION});
+        graph.deselect_workspace_greater_than(100);
+        for(const int64_t engineId : {10, 20, 30, 40})
+        {
+            mockPlanFinalize(engineId, HIPDNN_STATUS_SUCCESS, Exactly(0));
+        }
+    }
+
+    static void expectNoSurvivorMessage(const std::string& message)
+    {
+        EXPECT_NE(message.find("engine 10: deselect_engines"), std::string::npos) << message;
+        EXPECT_NE(message.find("engine 20: numerical note filter"), std::string::npos) << message;
+        EXPECT_NE(message.find("engine 30: behavior note filter"), std::string::npos) << message;
+        EXPECT_NE(message.find("engine 40: workspace 500 exceeds limit 100"), std::string::npos)
+            << message;
+    }
+
+    // Every execute succeeds and every profiling query reports 1 ms, so benchmarking yields
+    // a valid measurement.
+    void mockSuccessfulBenchmarkExecution()
+    {
+        EXPECT_CALL(*_mockBackend, backendExecute(_, _, _))
+            .Times(AnyNumber())
+            .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
+        EXPECT_CALL(*_mockBackend,
+                    backendGetAttribute(
+                        _, HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT, HIPDNN_TYPE_FLOAT, 1, nullptr, _))
+            .Times(AnyNumber())
+            .WillRepeatedly([](hipdnnBackendDescriptor_t,
+                               hipdnnBackendAttributeName_t,
+                               hipdnnBackendAttributeType_t,
+                               int64_t,
+                               int64_t*,
+                               void* out) {
+                *static_cast<float*>(out) = 1.0f;
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    }
+
+    static std::unordered_map<int64_t, void*> testVariantPack()
+    {
+        return {{1, reinterpret_cast<void*>(0x1)},
+                {2, reinterpret_cast<void*>(0x2)},
+                {3, reinterpret_cast<void*>(0x3)},
+                {4, reinterpret_cast<void*>(0x4)},
+                {5, reinterpret_cast<void*>(0x5)}};
+    }
+
+    // The active plan still runs: it is not barred and its workspace and execution work.
+    void expectActivePlanExecutable(hipdnn_frontend::GraphTestUtils& graph,
+                                    int64_t expectedWorkspace)
+    {
+        EXPECT_NE(graph.getActiveExecutionPlanPtr(), nullptr);
+
+        int64_t workspaceSize = -1;
+        const auto workspaceResult = graph.get_workspace_size(workspaceSize);
+        EXPECT_TRUE(workspaceResult.is_good()) << workspaceResult.get_message();
+        EXPECT_EQ(workspaceSize, expectedWorkspace);
+
+        auto variantPack = testVariantPack();
+        const auto executeResult = graph.execute(_handle, variantPack, nullptr);
+        EXPECT_TRUE(executeResult.is_good()) << executeResult.get_message();
     }
 };
 
@@ -11020,7 +11317,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceRepeatedCallOnFinalizedPlanReturnsIt
     EXPECT_EQ(*graph.selectedEngineIdForTest(), 10);
 }
 
-TEST_F(TestGraph, BuildPlansHeuristicsChoiceAllPlansFailMessageOmitsSkippedCandidates)
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceAllPlansFailMessageListsAlreadyBarredCandidate)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     hipdnn_frontend::GraphTestUtils graph;
@@ -11040,7 +11337,10 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceAllPlansFailMessageOmitsSkippedCandi
     EXPECT_NE(result.err_msg.find("failure of engine 10"), std::string::npos) << result.err_msg;
     EXPECT_NE(result.err_msg.find("engine 30: "), std::string::npos) << result.err_msg;
     EXPECT_NE(result.err_msg.find("failure of engine 30"), std::string::npos) << result.err_msg;
-    EXPECT_EQ(result.err_msg.find("engine 20"), std::string::npos) << result.err_msg;
+    // A plan an earlier evaluation barred is skipped without being finalized, and its skip
+    // reason is listed with the finalize failures.
+    EXPECT_NE(result.err_msg.find("engine 20: barred by an earlier evaluation"), std::string::npos)
+        << result.err_msg;
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
     EXPECT_FALSE(graph.isExecutionPlanFinalized());
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true, false}));
@@ -11093,18 +11393,19 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceFallbackSkipsDeselectedEngine)
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true, false}));
 }
 
-TEST_F(TestGraph, BuildPlansHeuristicsChoiceFallbackSkipsCandidateOverWorkspaceLimit)
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceFallbackSkipsCandidateOverEngineConfigWorkspaceLimit)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20, 30});
     graph.deselect_workspace_greater_than(100);
-    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/-1, /*barred=*/false);
-    graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/-1, /*barred=*/false);
-    graph.injectValidCompiledPlan(/*engineId=*/30, /*workspaceSize=*/-1, /*barred=*/false);
-    graph.setActivePlanForTest(0);
+    _engineConfigWorkspace[10] = 50;
+    _engineConfigWorkspace[20] = 500;
+    _engineConfigWorkspace[30] = 50;
 
     mockPlanFinalize(10, HIPDNN_STATUS_PLUGIN_ERROR, Exactly(1), "execution context lost");
-    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
+    // The engine config of plan 20 reports more than the limit, so it is never finalized.
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
     mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/50);
 
     auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
@@ -11120,14 +11421,13 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceFallbackAcceptsCandidateAtWorkspaceL
 {
     ::testing::FLAGS_gmock_verbose = "error";
     hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20, 30});
     graph.deselect_workspace_greater_than(100);
-    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/-1, /*barred=*/false);
-    graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/-1, /*barred=*/false);
-    graph.injectValidCompiledPlan(/*engineId=*/30, /*workspaceSize=*/-1, /*barred=*/false);
-    graph.setActivePlanForTest(0);
+    // The limit bars only workspaces strictly greater than it, so equal is accepted.
+    _engineConfigWorkspace[10] = 50;
+    _engineConfigWorkspace[20] = 100;
 
     mockPlanFinalize(10, HIPDNN_STATUS_PLUGIN_ERROR, Exactly(1), "execution context lost");
-    // The limit bars only workspaces strictly greater than it, so equal is accepted.
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/100);
     mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
@@ -11162,26 +11462,26 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceFallbackSkipsAlreadyBarredCandidate)
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true, false}));
 }
 
-TEST_F(TestGraph, BuildPlansHeuristicsChoiceActivePlanOverWorkspaceLimitDoesNotFallBack)
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceTopPlanOverEngineConfigWorkspaceBuildsNextSurvivor)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
     graph.deselect_workspace_greater_than(100);
-    graph.injectValidCompiledPlan(/*engineId=*/10, /*workspaceSize=*/-1, /*barred=*/false);
-    graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/-1, /*barred=*/false);
-    graph.setActivePlanForTest(0);
+    _engineConfigWorkspace[10] = 500;
+    _engineConfigWorkspace[20] = 50;
 
-    // The active plan finalizes, so no fallback applies even though its workspace is over
-    // the limit.
-    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
-    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    // The engine config of the top plan reports more than the limit: the plan is never
+    // finalized and the next plan serves.
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/40);
 
     auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
-    ASSERT_TRUE(result.is_bad());
-    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
-    EXPECT_NE(result.err_msg.find("exceeds deselect limit"), std::string::npos) << result.err_msg;
-    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
-    EXPECT_FALSE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 20);
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, false}));
 }
 
@@ -11346,6 +11646,1384 @@ TEST_F(TestGraph, BuildPlansAllSkipsPlanWithOtherFailure)
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
     ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
     EXPECT_EQ(*graph.selectedEngineIdForTest(), 20);
+}
+
+// ============================================================================
+// Engine filters: note filters, evaluation, persistence
+//
+// Every engine filter (deselect_engines, the note filters, deselect_workspace_greater_than)
+// is judged by one evaluation: a plan is filtered when its engine is deselected, it fails
+// the note filters, its engine-config workspace exceeds the limit or cannot be read, or an
+// earlier evaluation barred it. Filters persist; check_support() answers "is this supported
+// with these filters?" and the build paths build the best plan that passes them.
+// ============================================================================
+
+TEST_F(TestGraph, BuildPlansAllDeselectNondeterministicBarsReportingEngine)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    _numericalNotes[10] = {HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC};
+    graph.deselect_numeric_notes({NumericalNote::NONDETERMINISTIC});
+
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
+
+    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, false}));
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+}
+
+TEST_F(TestGraph, BuildPlansAllSelectKeepsOnlyEnginesReportingEverySelectedNote)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20, 30});
+    _numericalNotes[10] = {HIPDNN_NUMERICAL_NOTE_TENSOR_CORE};
+    _numericalNotes[20]
+        = {HIPDNN_NUMERICAL_NOTE_TENSOR_CORE, HIPDNN_NUMERICAL_NOTE_STRICT_NAN_PROP};
+    _numericalNotes[30] = {HIPDNN_NUMERICAL_NOTE_STRICT_NAN_PROP};
+    graph.select_numeric_notes({NumericalNote::TENSOR_CORE, NumericalNote::STRICT_NAN_PROP});
+
+    // Only engine 20 reports both selected notes.
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
+    mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, false, true}));
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+}
+
+TEST_F(TestGraph, BuildPlansAllNoteFiltersOfBothFamiliesBarEngineFailingEither)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20, 30});
+    _numericalNotes[10] = {HIPDNN_NUMERICAL_NOTE_TENSOR_CORE};
+    _numericalNotes[30] = {HIPDNN_NUMERICAL_NOTE_TENSOR_CORE};
+    _behaviorNotes[10] = {HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION};
+    _behaviorNotes[20] = {HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION};
+    graph.select_numeric_notes({NumericalNote::TENSOR_CORE});
+    graph.select_behavior_notes({BehaviorNote::RUNTIME_COMPILATION});
+
+    // Engine 20 fails the numerical filter, engine 30 the behavior filter.
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true, true}));
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceDeselectedTopPlanBuildsNextSurvivor)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    graph.deselect_engines(std::vector<int64_t>{10});
+
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 20);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, false}));
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceNoteFilteredTopPlanBuildsNextSurvivor)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    _numericalNotes[10] = {HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC};
+    graph.deselect_numeric_notes({NumericalNote::NONDETERMINISTIC});
+
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 20);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, false}));
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceAlreadyBarredTopPlanBuildsNextSurvivor)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    graph.setPlanBarredForTest(0);
+
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 20);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, false}));
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceWalkSkipsFilteredCandidateAfterFinalizeFailure)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20, 30});
+    graph.deselect_engines(std::vector<int64_t>{20});
+
+    mockPlanFinalize(10, HIPDNN_STATUS_PLUGIN_ERROR, Exactly(1), "execution context lost");
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 2u);
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 30);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true, false}));
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceSafetyNetRejectsPlanFinalizedOverLimitAndBuildsNext)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    graph.deselect_workspace_greater_than(100);
+    _engineConfigWorkspace[10] = 50;
+    _engineConfigWorkspace[20] = 50;
+
+    // The engine config of plan 10 reports 50, yet the plan finalizes with 500: the plan is
+    // rejected after it finalized and the next plan serves.
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/40);
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    // The call succeeds, so the WARN is the only sign of the plugin contract breach.
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "engine 10"));
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 20);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, false}));
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceSafetyNetRejectingEveryPlanReturnsNoSurvivorCode)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    graph.deselect_workspace_greater_than(100);
+    _engineConfigWorkspace[10] = 50;
+    _engineConfigWorkspace[20] = 50;
+
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_NE(result.err_msg.find("engine 10: finalized workspace 500 exceeds limit 100 "
+                                  "(engine config reported 50)"),
+              std::string::npos)
+        << result.err_msg;
+    EXPECT_NE(result.err_msg.find("engine 20: finalized workspace 500 exceeds limit 100 "
+                                  "(engine config reported 50)"),
+              std::string::npos)
+        << result.err_msg;
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    EXPECT_FALSE(graph.isExecutionPlanFinalized());
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, true}));
+}
+
+TEST_F(TestGraph, BuildPlansAllSafetyNetRejectsPlanFinalizedOverLimit)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    graph.deselect_workspace_greater_than(100);
+    _engineConfigWorkspace[10] = 50;
+    _engineConfigWorkspace[20] = 50;
+
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/40);
+
+    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, false}));
+}
+
+TEST_F(TestGraph, BuildPlansAllSafetyNetRejectingEveryPlanReturnsNoSurvivorCode)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    graph.deselect_workspace_greater_than(100);
+    _engineConfigWorkspace[10] = 50;
+    _engineConfigWorkspace[20] = 50;
+
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
+
+    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_NE(result.err_msg.find("finalized workspace 500 exceeds limit 100"), std::string::npos)
+        << result.err_msg;
+    EXPECT_FALSE(graph.isExecutionPlanFinalized());
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, true}));
+}
+
+TEST_F(TestGraph, BuildPlanAtIndexSafetyNetRejectsPlanFinalizedOverLimit)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    graph.deselect_workspace_greater_than(100);
+    _engineConfigWorkspace[10] = 50;
+
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    auto result = graph.build_plan_at_index(0);
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_NE(result.err_msg.find("finalized workspace 500 exceeds limit 100"), std::string::npos)
+        << result.err_msg;
+    EXPECT_FALSE(graph.isExecutionPlanFinalized());
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, false}));
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceAfterBuildDoesNotWalkPastNewFilterOnActivePlan)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareBuiltGraph(graph);
+    graph.deselect_engines(std::vector<int64_t>{10});
+
+    // The backend refuses to finalize the built plan again; that error is returned, no filter
+    // is evaluated and no other plan is tried.
+    mockPlanFinalize(10, HIPDNN_STATUS_BAD_PARAM, Exactly(1), "already finalized", 16);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_NE(result.err_msg.find("already finalized"), std::string::npos) << result.err_msg;
+    EXPECT_NE(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
+    expectActivePlanExecutable(graph, 16);
+}
+
+TEST_F(TestGraph, CheckSupportAfterBuildMarksNothingAndKeepsActivePlanExecutable)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareBuiltGraph(graph);
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 16);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    graph.deselect_engines(std::vector<int64_t>{10});
+    EXPECT_TRUE(graph.check_support().is_good());
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
+    expectActivePlanExecutable(graph, 16);
+
+    graph.deselect_engines(std::vector<int64_t>{20});
+    auto result = graph.check_support();
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
+    expectActivePlanExecutable(graph, 16);
+}
+
+TEST_F(TestGraph, AutotuneAfterBuildReportsFilteredActivePlanBarredWithoutMarkingIt)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareBuiltGraph(graph);
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 16);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 8);
+    graph.deselect_engines(std::vector<int64_t>{10, 20});
+
+    auto variantPack = testVariantPack();
+    std::vector<AutotuneResult> results;
+    auto result = graph.autotune(_handle, variantPack, nullptr, AutotuneConfig{}, {}, &results);
+
+    // Nothing is benchmarkable. The finalized active plan is reported barred but not marked;
+    // the other plan is marked.
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    ASSERT_EQ(results.size(), 2u);
+    for(const auto& r : results)
+    {
+        EXPECT_FALSE(r.succeeded);
+        EXPECT_NE(r.errorMessage.find("Plan barred: deselect_engines"), std::string::npos)
+            << r.errorMessage;
+    }
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true}));
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    expectActivePlanExecutable(graph, 16);
+}
+
+TEST_F(TestGraph, BuildPlansAllAfterBuildLeavesFilteredActivePlanActiveAndUnbarred)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareBuiltGraph(graph);
+    graph.deselect_engines(std::vector<int64_t>{10});
+
+    // The filtered active plan is skipped, not finalized again and not marked; the other plan
+    // finalizes but does not replace it.
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 16);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", 8);
+
+    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
+    expectActivePlanExecutable(graph, 16);
+}
+
+TEST_F(TestGraph, BuildPlansAllAfterBuildWithEveryPlanFilteredSucceedsAndKeepsTheActivePlan)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareBuiltGraph(graph);
+    graph.deselect_engines(std::vector<int64_t>{10, 20});
+
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 16);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    // A built plan exists after the call, so it succeeds; the filtered active plan is logged
+    // as skipped, not marked, and stays executable.
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true}));
+    expectActivePlanExecutable(graph, 16);
+}
+
+TEST_F(TestGraph, BuildPlanAtIndexOnFilteredActivePlanReturnsNoSurvivorCodeAndKeepsItActive)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareBuiltGraph(graph);
+    graph.deselect_engines(std::vector<int64_t>{10});
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 16);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    auto result = graph.build_plan_at_index(0);
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
+    expectActivePlanExecutable(graph, 16);
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceWithoutFilterTouchesOnlyTopPlanAndReadsNothing)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20, 30});
+    _numericalNotes[10] = {HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC};
+
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    EXPECT_TRUE(_numericalNoteReads.empty());
+    EXPECT_TRUE(_behaviorNoteReads.empty());
+    EXPECT_TRUE(_engineConfigWorkspaceReads.empty());
+}
+
+TEST_F(TestGraph, CheckSupportNoSurvivorListsEverySkipReason)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareNoSurvivorGraph(graph);
+
+    auto result = graph.check_support();
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    expectNoSurvivorMessage(result.err_msg);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false, false, false}));
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceNoSurvivorListsEverySkipReason)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareNoSurvivorGraph(graph);
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    expectNoSurvivorMessage(result.err_msg);
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    EXPECT_FALSE(graph.isExecutionPlanFinalized());
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, true, true, true}));
+}
+
+TEST_F(TestGraph, BuildPlansAllNoSurvivorListsEverySkipReason)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareNoSurvivorGraph(graph);
+
+    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    expectNoSurvivorMessage(result.err_msg);
+    EXPECT_FALSE(graph.isExecutionPlanFinalized());
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, true, true, true}));
+}
+
+TEST_F(TestGraph, BuildPlanAtIndexNoSurvivorNamesTheSkipReasonOfItsIndex)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareNoSurvivorGraph(graph);
+
+    const std::vector<std::string> reasons = {"deselect_engines",
+                                              "numerical note filter",
+                                              "behavior note filter",
+                                              "workspace 500 exceeds limit 100"};
+    for(size_t index = 0; index < reasons.size(); ++index)
+    {
+        auto result = graph.build_plan_at_index(static_cast<int64_t>(index));
+        ASSERT_TRUE(result.is_bad());
+        EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+        EXPECT_NE(result.err_msg.find(reasons[index]), std::string::npos) << result.err_msg;
+    }
+}
+
+TEST_F(TestGraph, AutotuneNoSurvivorReturnsInvalidValueWithEveryPlanReportedBarred)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareNoSurvivorGraph(graph);
+
+    auto variantPack = testVariantPack();
+    std::vector<AutotuneResult> results;
+    auto result = graph.autotune(_handle, variantPack, nullptr, AutotuneConfig{}, {}, &results);
+
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    ASSERT_EQ(results.size(), 4u);
+    for(const auto& r : results)
+    {
+        EXPECT_FALSE(r.succeeded);
+        EXPECT_NE(r.errorMessage.find("Plan barred: "), std::string::npos) << r.errorMessage;
+    }
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, true, true, true}));
+}
+
+TEST_F(TestGraph, BuildPlansAllWithoutFilterAndEveryFinalizeFailingKeepsBackendError)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+
+    mockPlanFinalize(10, HIPDNN_STATUS_PLUGIN_ERROR, Exactly(1), "execution context lost");
+    mockPlanFinalize(20, HIPDNN_STATUS_PLUGIN_ERROR, Exactly(1), "execution context lost");
+
+    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
+}
+
+TEST_F(TestGraph, BuildPlanAtIndexDeselectedEngineReturnsNoSurvivorCode)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    graph.deselect_engines(std::vector<int64_t>{20});
+
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/8);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    auto removed = graph.build_plan_at_index(1);
+    ASSERT_TRUE(removed.is_bad());
+    EXPECT_EQ(removed.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true}));
+    EXPECT_FALSE(graph.isExecutionPlanFinalized());
+
+    auto kept = graph.build_plan_at_index(0);
+    EXPECT_TRUE(kept.is_good()) << kept.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+}
+
+TEST_F(TestGraph, BuildPlanAtIndexNoteFilteredEngineReadsNotesOfTheIndexedEngineOnly)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20, 30});
+    _numericalNotes[20] = {HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC};
+    graph.deselect_numeric_notes({NumericalNote::NONDETERMINISTIC});
+
+    for(const int64_t engineId : {10, 20, 30})
+    {
+        mockPlanFinalize(engineId, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    }
+
+    auto result = graph.build_plan_at_index(1);
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_EQ(_numericalNoteReads, (std::vector<int64_t>{20}));
+    EXPECT_TRUE(_behaviorNoteReads.empty());
+}
+
+TEST_F(TestGraph, BuildPlanAtIndexOverEngineConfigWorkspaceLimitReturnsNoSurvivorCode)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    graph.deselect_workspace_greater_than(100);
+    _engineConfigWorkspace[20] = 500;
+
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    auto result = graph.build_plan_at_index(1);
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_EQ(_engineConfigWorkspaceReads, (std::vector<int64_t>{20}));
+}
+
+TEST_F(TestGraph, BuildPlanAtIndexAfterBuildPlansAllReturnsNoSurvivorCodeForNewFilter)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/8);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/8);
+    ASSERT_TRUE(graph.build_plans(BuildPlanPolicy::ALL).is_good());
+
+    graph.deselect_engines(std::vector<int64_t>{20});
+    auto result = graph.build_plan_at_index(1);
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true}));
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+}
+
+TEST_F(TestGraph, CheckSupportWithLowerSurvivingPlanReturnsOk)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    graph.deselect_engines(std::vector<int64_t>{10});
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    auto result = graph.check_support();
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
+}
+
+TEST_F(TestGraph, CheckSupportFailsWhenDeselectEnginesBarsEveryPlan)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    graph.deselect_engines(std::vector<int64_t>{10, 20});
+
+    auto result = graph.check_support();
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+}
+
+TEST_F(TestGraph, CheckSupportFailsWhenEveryEngineConfigWorkspaceExceedsLimit)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    graph.deselect_workspace_greater_than(100);
+    _engineConfigWorkspace[10] = 500;
+    _engineConfigWorkspace[20] = 600;
+
+    auto result = graph.check_support();
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_NE(result.err_msg.find("engine 10: workspace 500 exceeds limit 100"), std::string::npos)
+        << result.err_msg;
+    EXPECT_NE(result.err_msg.find("engine 20: workspace 600 exceeds limit 100"), std::string::npos)
+        << result.err_msg;
+}
+
+TEST_F(TestGraph, CheckSupportFailsWhenDeselectEnginesBarsTheOnlyNoteSurvivor)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    _numericalNotes[20] = {HIPDNN_NUMERICAL_NOTE_TENSOR_CORE};
+    graph.select_numeric_notes({NumericalNote::TENSOR_CORE});
+    graph.deselect_engines(std::vector<int64_t>{20});
+
+    auto result = graph.check_support();
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_NE(result.err_msg.find("engine 10: numerical note filter"), std::string::npos)
+        << result.err_msg;
+    EXPECT_NE(result.err_msg.find("engine 20: deselect_engines"), std::string::npos)
+        << result.err_msg;
+}
+
+TEST_F(TestGraph, CheckSupportSkipsPlanWithUnreadableWorkspaceAndPassesOnNextPlan)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    graph.deselect_workspace_greater_than(100);
+    _unreadableWorkspaceEngines.insert(10);
+    _engineConfigWorkspace[20] = 50;
+
+    auto result = graph.check_support();
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+}
+
+TEST_F(TestGraph, CheckSupportWithOnlyCandidateUnreadableWorkspaceReturnsNoSurvivorWithReason)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10});
+    graph.deselect_workspace_greater_than(100);
+    _unreadableWorkspaceEngines.insert(10);
+
+    auto result = graph.check_support();
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_NE(result.err_msg.find("workspace unknown"), std::string::npos) << result.err_msg;
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceWalksPastPlanWithUnreadableWorkspace)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    graph.deselect_workspace_greater_than(100);
+    _unreadableWorkspaceEngines.insert(10);
+    _engineConfigWorkspace[20] = 50;
+
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/40);
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, false}));
+}
+
+TEST_F(TestGraph, BuildPlanAtIndexOnPlanWithUnreadableWorkspaceReturnsNoSurvivorCode)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10});
+    graph.deselect_workspace_greater_than(100);
+    _unreadableWorkspaceEngines.insert(10);
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    auto result = graph.build_plan_at_index(0);
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_NE(result.err_msg.find("workspace unknown"), std::string::npos) << result.err_msg;
+}
+
+TEST_F(TestGraph, CheckSupportWithOnlyStickyBarredPlanSetEvaluatesInsteadOfReturningBackendError)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    graph.setPlanBarredForTest(0);
+
+    // The active plan is barred, yet plan 20 passes, so the graph is supported.
+    auto result = graph.check_support();
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+}
+
+TEST_F(TestGraph, CheckSupportWithNoFilterIsUnchangedAndReadsNothing)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    _numericalNotes[10] = {HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC};
+
+    auto result = graph.check_support();
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_TRUE(_numericalNoteReads.empty());
+    EXPECT_TRUE(_behaviorNoteReads.empty());
+    EXPECT_TRUE(_engineConfigWorkspaceReads.empty());
+
+    hipdnn_frontend::GraphTestUtils emptyGraph;
+    EXPECT_EQ(emptyGraph.check_support().code, ErrorCode::HIPDNN_BACKEND_ERROR);
+}
+
+TEST_F(TestGraph, CheckSupportPassImpliesBuildPlansHeuristicsChoiceSucceeds)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    graph.deselect_engines(std::vector<int64_t>{10});
+    graph.deselect_workspace_greater_than(100);
+    _engineConfigWorkspace[20] = 50;
+
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/40);
+
+    ASSERT_TRUE(graph.check_support().is_good());
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+}
+
+TEST_F(TestGraph, FiltersSetBeforeCreateExecutionPlansApplyToTheCreatedPlans)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareRankedGraph(graph, {10, 20, 30, 40});
+    // Engine 10 is deselected, 20 fails the note filter, 30's engine config is over the limit.
+    _numericalNotes[20] = {HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC};
+    _engineConfigWorkspace[30] = 500;
+    _engineConfigWorkspace[40] = 50;
+    graph.deselect_engines(std::vector<int64_t>{10});
+    graph.deselect_numeric_notes({NumericalNote::NONDETERMINISTIC});
+    graph.deselect_workspace_greater_than(100);
+
+    ASSERT_TRUE(graph.create_execution_plans().is_good());
+    EXPECT_TRUE(graph.check_support().is_good());
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 40);
+    EXPECT_EQ(graph.getActivePlanIndex(), 3u);
+}
+
+TEST_F(TestGraph, FiltersSetBeforeBuildApplyToThePlansItCreates)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    installEngineFilterMocks();
+    _rankedEngineIds = {10, 20, 30, 40};
+    createBasicBatchnormGraph(graph);
+    _numericalNotes[20] = {HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC};
+    _engineConfigWorkspace[30] = 500;
+    _engineConfigWorkspace[40] = 50;
+    graph.deselect_engines(std::vector<int64_t>{10});
+    graph.deselect_numeric_notes({NumericalNote::NONDETERMINISTIC});
+    graph.deselect_workspace_greater_than(100);
+
+    auto result = graph.build(_handle);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 40);
+}
+
+TEST_F(TestGraph, FiltersSurviveASecondCreateExecutionPlans)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareRankedGraph(graph, {10, 20});
+    graph.deselect_engines(std::vector<int64_t>{10});
+
+    ASSERT_TRUE(graph.create_execution_plans().is_good());
+    ASSERT_TRUE(graph.create_execution_plans().is_good());
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 20);
+}
+
+TEST_F(TestGraph, CreateExecutionPlanExtOnEngineRemovedByFilterFailsCheckSupportAndBuildPlans)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareRankedGraph(graph, {10, 20});
+    graph.deselect_engines(std::vector<int64_t>{10});
+
+    ASSERT_TRUE(graph.create_execution_plan_ext(10, {}).is_good());
+
+    auto supported = graph.check_support();
+    ASSERT_TRUE(supported.is_bad());
+    EXPECT_EQ(supported.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+
+    auto built = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(built.is_bad());
+    EXPECT_EQ(built.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_FALSE(graph.isExecutionPlanFinalized());
+}
+
+TEST_F(TestGraph, AutotuneWithNoteFilterSetAfterPlansCreatedReportsNoteFilteredPlanBarred)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20}, /*workspaceSize=*/512);
+    _numericalNotes[20] = {HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC};
+    graph.deselect_numeric_notes({NumericalNote::NONDETERMINISTIC});
+
+    auto variantPack = testVariantPack();
+    std::vector<AutotuneResult> results;
+    void* workspace = reinterpret_cast<void*>(0x1000);
+    auto result = graph.autotune(
+        _handle, variantPack, workspace, int64_t{1024}, AutotuneConfig{}, {}, &results);
+    ASSERT_TRUE(result.is_good()) << result.err_msg;
+
+    const auto barred = std::find_if(
+        results.begin(), results.end(), [](const AutotuneResult& r) { return r.engineId == 20; });
+    ASSERT_NE(barred, results.end());
+    EXPECT_FALSE(barred->succeeded);
+    EXPECT_NE(barred->errorMessage.find("Plan barred: numerical note filter"), std::string::npos)
+        << barred->errorMessage;
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true}));
+}
+
+TEST_F(TestGraph, AutotuneWithDeselectedEngineSetAfterPlansCreatedReportsPlanBarred)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20}, /*workspaceSize=*/512);
+    graph.deselect_engines(std::vector<int64_t>{20});
+
+    auto variantPack = testVariantPack();
+    std::vector<AutotuneResult> results;
+    void* workspace = reinterpret_cast<void*>(0x1000);
+    auto result = graph.autotune(
+        _handle, variantPack, workspace, int64_t{1024}, AutotuneConfig{}, {}, &results);
+    ASSERT_TRUE(result.is_good()) << result.err_msg;
+
+    const auto barred = std::find_if(
+        results.begin(), results.end(), [](const AutotuneResult& r) { return r.engineId == 20; });
+    ASSERT_NE(barred, results.end());
+    EXPECT_FALSE(barred->succeeded);
+    EXPECT_NE(barred->errorMessage.find("Plan barred: deselect_engines"), std::string::npos)
+        << barred->errorMessage;
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true}));
+}
+
+// Plan-spec path: the note filters and the engine-config workspace are judged on the compiled
+// engine config before any priming or finalizing. The limit applies to that value, not to the
+// spec's pre-compile estimate (which includes the priming configuration).
+TEST_F(TestGraph, AutotunePlanSpecNoteFilteredSpecIsReportedBarredBeforeFinalize)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {});
+    graph.injectPlanSpec(61, /*workspaceSize=*/512);
+    graph.injectPlanSpec(62, /*workspaceSize=*/512, /*supportsExhaustive=*/true);
+    _numericalNotes[62] = {HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC};
+    graph.deselect_numeric_notes({NumericalNote::NONDETERMINISTIC});
+
+    mockSuccessfulBenchmarkExecution();
+
+    auto variantPack = testVariantPack();
+    std::vector<AutotuneResult> results;
+    auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
+    AutotuneConfig config;
+    config.mode = TuneMode::EXHAUSTIVE;
+    auto result
+        = graph.autotune(_handle, variantPack, workspace, int64_t{100000}, config, {}, &results);
+    ASSERT_TRUE(result.is_good()) << result.err_msg;
+
+    const auto barred = std::find_if(
+        results.begin(), results.end(), [](const AutotuneResult& r) { return r.engineId == 62; });
+    ASSERT_NE(barred, results.end());
+    EXPECT_FALSE(barred->succeeded);
+    EXPECT_NE(barred->errorMessage.find("Plan barred: numerical note filter"), std::string::npos)
+        << barred->errorMessage;
+    // Never finalized, so no compiled workspace; the estimate is kept.
+    EXPECT_EQ(barred->workspaceSize, -1);
+    EXPECT_EQ(barred->estimatedWorkspaceSize, 512);
+    EXPECT_TRUE(barred->supportsExhaustive);
+    EXPECT_FALSE(barred->ranExhaustive);
+    EXPECT_TRUE(barred->exhaustiveNotRunReason.empty());
+}
+
+TEST_F(TestGraph, AutotunePlanSpecJudgesTheLimitByTheCompiledEngineConfigNotTheEstimate)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {});
+    // Spec 61: the estimate is over the limit but the compiled config fits.
+    // Spec 62: the estimate fits but the compiled config is over the limit.
+    graph.injectPlanSpec(61, /*workspaceSize=*/5000);
+    graph.injectPlanSpec(62, /*workspaceSize=*/100);
+    _engineConfigWorkspace[61] = 800;
+    _engineConfigWorkspace[62] = 2000;
+    graph.deselect_workspace_greater_than(1000);
+
+    mockSuccessfulBenchmarkExecution();
+
+    auto variantPack = testVariantPack();
+    std::vector<AutotuneResult> results;
+    auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
+    auto result = graph.autotune(
+        _handle, variantPack, workspace, int64_t{100000}, AutotuneConfig{}, {}, &results);
+    ASSERT_TRUE(result.is_good()) << result.err_msg;
+
+    const auto find = [&results](int64_t engineId) {
+        return std::find_if(results.begin(), results.end(), [engineId](const AutotuneResult& r) {
+            return r.engineId == engineId;
+        });
+    };
+    const auto fitting = find(61);
+    const auto overLimit = find(62);
+    ASSERT_NE(fitting, results.end());
+    ASSERT_NE(overLimit, results.end());
+    EXPECT_TRUE(fitting->succeeded);
+    EXPECT_FALSE(overLimit->succeeded);
+    EXPECT_NE(overLimit->errorMessage.find("Plan barred: workspace 2000 exceeds limit 1000"),
+              std::string::npos)
+        << overLimit->errorMessage;
+    EXPECT_EQ(overLimit->workspaceSize, -1);
+}
+
+TEST_F(TestGraph, AutotunePlanSpecSafetyNetBarsPlanFinalizedOverLimitDespiteItsConfig)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {});
+    graph.injectPlanSpec(61, /*workspaceSize=*/100);
+    _engineConfigWorkspace[61] = 50;
+    graph.deselect_workspace_greater_than(100);
+
+    // The config reports 50, yet the plan finalizes with 500.
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE, HIPDNN_TYPE_INT64, 1, nullptr, _))
+        .Times(AnyNumber())
+        .WillRepeatedly([](hipdnnBackendDescriptor_t,
+                           hipdnnBackendAttributeName_t,
+                           hipdnnBackendAttributeType_t,
+                           int64_t,
+                           int64_t*,
+                           void* out) {
+            *static_cast<int64_t*>(out) = 500;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    auto variantPack = testVariantPack();
+    std::vector<AutotuneResult> results;
+    auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
+    auto result = graph.autotune(
+        _handle, variantPack, workspace, int64_t{100000}, AutotuneConfig{}, {}, &results);
+
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_FALSE(results.front().succeeded);
+    EXPECT_NE(results.front().errorMessage.find("Plan barred: finalized workspace 500 exceeds "
+                                                "limit 100 (engine config reported 50)"),
+              std::string::npos)
+        << results.front().errorMessage;
+    EXPECT_EQ(results.front().workspaceSize, 500);
+}
+
+TEST_F(TestGraph, AutotunePlanSpecAtZeroLimitBarsSpecWithConfigWorkspaceAndBenchmarksTheRest)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {});
+    graph.injectPlanSpec(61, /*workspaceSize=*/100);
+    graph.injectPlanSpec(62, /*workspaceSize=*/0);
+    _engineConfigWorkspace[61] = 1;
+    _engineConfigWorkspace[62] = 0;
+    graph.deselect_workspace_greater_than(0);
+
+    mockSuccessfulBenchmarkExecution();
+    auto variantPack = testVariantPack();
+    std::vector<AutotuneResult> results;
+    auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
+    auto result = graph.autotune(
+        _handle, variantPack, workspace, int64_t{100000}, AutotuneConfig{}, {}, &results);
+    ASSERT_TRUE(result.is_good()) << result.err_msg;
+
+    ASSERT_EQ(results.size(), 2u);
+    const auto find = [&](int64_t engineId) {
+        return std::find_if(results.begin(), results.end(), [engineId](const AutotuneResult& r) {
+            return r.engineId == engineId;
+        });
+    };
+    ASSERT_NE(find(61), results.end());
+    EXPECT_FALSE(find(61)->succeeded);
+    EXPECT_NE(find(61)->errorMessage.find("Plan barred"), std::string::npos)
+        << find(61)->errorMessage;
+    EXPECT_EQ(find(61)->workspaceSize, -1);
+    ASSERT_NE(find(62), results.end());
+    EXPECT_TRUE(find(62)->succeeded) << find(62)->errorMessage;
+}
+
+TEST_F(TestGraph, AutotunePlanSpecSafetyNetBarsPlanFinalizedOverAZeroLimitDespiteItsConfig)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {});
+    graph.injectPlanSpec(61, /*workspaceSize=*/0);
+    _engineConfigWorkspace[61] = 0;
+    graph.deselect_workspace_greater_than(0);
+
+    // The config reports 0, yet the plan finalizes with 500.
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE, HIPDNN_TYPE_INT64, 1, nullptr, _))
+        .Times(AnyNumber())
+        .WillRepeatedly([](hipdnnBackendDescriptor_t,
+                           hipdnnBackendAttributeName_t,
+                           hipdnnBackendAttributeType_t,
+                           int64_t,
+                           int64_t*,
+                           void* out) {
+            *static_cast<int64_t*>(out) = 500;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    auto variantPack = testVariantPack();
+    std::vector<AutotuneResult> results;
+    auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
+    auto result = graph.autotune(
+        _handle, variantPack, workspace, int64_t{100000}, AutotuneConfig{}, {}, &results);
+
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_FALSE(results.front().succeeded);
+    EXPECT_NE(results.front().errorMessage.find("finalized workspace 500 exceeds limit 0"),
+              std::string::npos)
+        << results.front().errorMessage;
+    EXPECT_EQ(results.front().workspaceSize, 500);
+}
+
+TEST_F(TestGraph, AutotunePlanSpecWithFailedNoteReadReturnsTheErrorAndBenchmarksNothing)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {});
+    graph.injectPlanSpec(61, /*workspaceSize=*/100);
+    graph.deselect_numeric_notes({NumericalNote::NONDETERMINISTIC});
+    _failingNoteEngines.insert(61);
+
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _)).Times(0);
+    auto variantPack = testVariantPack();
+    std::vector<AutotuneResult> results;
+    auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
+    auto result = graph.autotune(
+        _handle, variantPack, workspace, int64_t{100000}, AutotuneConfig{}, {}, &results);
+
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_NE(result.err_msg.find("numerical note"), std::string::npos) << result.err_msg;
+}
+
+TEST_F(TestGraph, BuildPlanAtIndexSafetyNetRejectsPlanFinalizedOverAZeroLimit)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    graph.deselect_workspace_greater_than(0);
+    _engineConfigWorkspace[10] = 0;
+
+    // The config reports 0, yet the plan finalizes with 500.
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/500);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    auto result = graph.build_plan_at_index(0);
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_NE(result.err_msg.find("finalized workspace 500 exceeds limit 0"), std::string::npos)
+        << result.err_msg;
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, false}));
+}
+
+TEST_F(TestGraph, AutotunePlanSpecWithUnreadableEngineConfigWorkspaceReportsSpecBarred)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {});
+    graph.injectPlanSpec(61, /*workspaceSize=*/100);
+    _unreadableWorkspaceEngines.insert(61);
+    graph.deselect_workspace_greater_than(1000);
+
+    mockSuccessfulBenchmarkExecution();
+    auto variantPack = testVariantPack();
+    std::vector<AutotuneResult> results;
+    auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
+    graph.autotune(
+        _handle, variantPack, workspace, int64_t{100000}, AutotuneConfig{}, {}, &results);
+
+    ASSERT_EQ(results.size(), 1u);
+    EXPECT_FALSE(results.front().succeeded);
+    EXPECT_NE(results.front().errorMessage.find("workspace unknown"), std::string::npos)
+        << results.front().errorMessage;
+}
+
+TEST_F(TestGraph, AutotuneWithFailedNoteReadReturnsTheErrorAndBenchmarksNothing)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20}, /*workspaceSize=*/512);
+    graph.deselect_numeric_notes({NumericalNote::NONDETERMINISTIC});
+    _failingNoteEngines.insert(10);
+
+    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _)).Times(0);
+    auto variantPack = testVariantPack();
+    std::vector<AutotuneResult> results;
+    void* workspace = reinterpret_cast<void*>(0x1000);
+    auto result = graph.autotune(
+        _handle, variantPack, workspace, int64_t{1024}, AutotuneConfig{}, {}, &results);
+
+    ASSERT_TRUE(result.is_bad());
+    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_NE(result.err_msg.find("numerical note"), std::string::npos) << result.err_msg;
+}
+
+TEST_F(TestGraph, BuildOperationGraphDropsTheVerdictsReadSoFar)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10});
+    graph.deselect_numeric_notes({NumericalNote::NONDETERMINISTIC});
+
+    EXPECT_TRUE(graph.check_support().is_good());
+    EXPECT_EQ(_numericalNoteReads, (std::vector<int64_t>{10}));
+
+    // Rebuilding the operation graph discards the plans; the engine's notes may differ now.
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+    graph.injectValidCompiledPlan(10, /*workspaceSize=*/-1, /*barred=*/false);
+    graph.setActivePlanForTest(0);
+    _numericalNotes[10] = {HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC};
+
+    EXPECT_TRUE(graph.check_support().is_bad());
+    EXPECT_EQ(_numericalNoteReads, (std::vector<int64_t>{10, 10}));
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceFailedNoteReadReturnsErrorAndReadsAgainOnRetry)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    graph.deselect_numeric_notes({NumericalNote::NONDETERMINISTIC});
+    _failingNoteEngines.insert(10);
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    auto failed = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(failed.is_bad());
+    EXPECT_EQ(failed.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_NE(failed.err_msg.find("numerical note"), std::string::npos) << failed.err_msg;
+    EXPECT_EQ(_numericalNoteReads, (std::vector<int64_t>{10}));
+    EXPECT_FALSE(graph.isExecutionPlanFinalized());
+
+    // The failed read was not cached: a retry reads again, and now succeeds.
+    _failingNoteEngines.clear();
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
+    auto retried = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(retried.is_good()) << retried.get_message();
+    EXPECT_EQ(_numericalNoteReads, (std::vector<int64_t>{10, 10}));
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+}
+
+TEST_F(TestGraph, BuildPlansAllFailedNoteReadOnSecondEngineFinalizesNoPlanAndRetrySucceeds)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    graph.deselect_numeric_notes({NumericalNote::NONDETERMINISTIC});
+    _failingNoteEngines.insert(20);
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    // Every note is read before any plan is finalized, so the failing read leaves nothing
+    // half-built.
+    auto failed = graph.build_plans(BuildPlanPolicy::ALL);
+    ASSERT_TRUE(failed.is_bad());
+    EXPECT_EQ(failed.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+    EXPECT_FALSE(graph.isExecutionPlanFinalized());
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
+
+    _failingNoteEngines.clear();
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
+    auto retried = graph.build_plans(BuildPlanPolicy::ALL);
+    ASSERT_TRUE(retried.is_good()) << retried.get_message();
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+}
+
+TEST_F(TestGraph, NoteFilterCallDropsTheVerdictsReadSoFar)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    _numericalNotes[20] = {HIPDNN_NUMERICAL_NOTE_TENSOR_CORE};
+    graph.deselect_numeric_notes({NumericalNote::NONDETERMINISTIC});
+
+    // Engine 10 passes; check_support() stops there. A repeat reads nothing new.
+    EXPECT_TRUE(graph.check_support().is_good());
+    EXPECT_TRUE(graph.check_support().is_good());
+    EXPECT_EQ(_numericalNoteReads, (std::vector<int64_t>{10}));
+
+    // A new note filter drops the verdicts: engine 10 is read again, now fails, and engine 20
+    // is read and passes.
+    graph.select_numeric_notes({NumericalNote::TENSOR_CORE});
+    EXPECT_TRUE(graph.check_support().is_good());
+    EXPECT_EQ(_numericalNoteReads, (std::vector<int64_t>{10, 10, 20}));
+}
+
+TEST_F(TestGraph, CreateExecutionPlansDropsTheVerdictsReadSoFar)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareRankedGraph(graph, {10, 20});
+    graph.deselect_numeric_notes({NumericalNote::NONDETERMINISTIC});
+
+    ASSERT_TRUE(graph.create_execution_plans().is_good());
+    EXPECT_TRUE(graph.check_support().is_good());
+    EXPECT_EQ(_numericalNoteReads, (std::vector<int64_t>{10}));
+
+    ASSERT_TRUE(graph.create_execution_plans().is_good());
+    EXPECT_TRUE(graph.check_support().is_good());
+    EXPECT_EQ(_numericalNoteReads, (std::vector<int64_t>{10, 10}));
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoicePreferredEngineFailingNoteFilterIsReplaced)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20, 30});
+    // The preferred engine's plan is the active plan, as create_execution_plans() arranges it.
+    graph.set_preferred_engine_id_ext(int64_t{30});
+    graph.setActivePlanForTest(2);
+    _numericalNotes[30] = {HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC};
+    graph.deselect_numeric_notes({NumericalNote::NONDETERMINISTIC});
+
+    mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 10);
+    ASSERT_TRUE(graph.get_preferred_engine_id_ext().has_value());
+    EXPECT_EQ(*graph.get_preferred_engine_id_ext(), 30);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false, true}));
+}
+
+TEST_F(TestGraph, DeserializedPlanIsNeverFilteredByCheckSupportOrExecute)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.installDeserializedPlanForTest();
+    graph.deselect_engines(std::vector<int64_t>{-1, 0, 10});
+    graph.deselect_numeric_notes({NumericalNote::NONDETERMINISTIC});
+    graph.select_behavior_notes({BehaviorNote::RUNTIME_COMPILATION});
+    graph.deselect_workspace_greater_than(0);
+
+    // The plan has no engine config to judge, so no filter applies and nothing is read.
+    EXPECT_TRUE(graph.check_support().is_good());
+    EXPECT_NE(graph.getActiveExecutionPlanPtr(), nullptr);
+    auto variantPack = testVariantPack();
+    auto result = graph.execute(_handle, variantPack, nullptr);
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+}
+
+TEST_F(TestGraph, BuildPlansAllOnDeserializedPlanSucceedsWithoutFinalizingIt)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.installDeserializedPlanForTest();
+
+    // A deserialized plan is finalized at load and has no engine config: build_plans(ALL)
+    // neither rebuilds it nor touches its engine config, and succeeds with it active.
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _)).Times(AnyNumber());
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_, HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_CONFIG, _, _, _))
+        .Times(0);
+
+    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_NE(graph.getActiveExecutionPlanPtr(), nullptr);
+}
+
+TEST_F(TestGraph, DeselectBehaviorNotesAppendsEveryCallAndEmptyCallIsNoOp)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20, 30});
+    _behaviorNotes[10] = {HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION};
+    _behaviorNotes[20] = {HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE};
+    graph.deselect_behavior_notes({BehaviorNote::RUNTIME_COMPILATION});
+    graph.deselect_behavior_notes({BehaviorNote::SUPPORTS_GRAPH_CAPTURE});
+    graph.deselect_behavior_notes({});
+
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(30, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/16);
+
+    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, true, false}));
+    EXPECT_EQ(graph.getActivePlanIndex(), 2u);
+}
+
+TEST_F(TestGraph, WorkspaceLimitZeroKeepsOnlyEnginesWithNoWorkspace)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    graph.deselect_workspace_greater_than(0);
+    _engineConfigWorkspace[10] = 1;
+    _engineConfigWorkspace[20] = 0;
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", /*workspaceSize=*/0);
+
+    auto removed = graph.build_plan_at_index(0);
+    ASSERT_TRUE(removed.is_bad());
+    EXPECT_EQ(removed.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_NE(removed.err_msg.find("workspace 1 exceeds limit 0"), std::string::npos)
+        << removed.err_msg;
+
+    auto kept = graph.build_plan_at_index(1);
+    EXPECT_TRUE(kept.is_good()) << kept.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+}
+
+TEST_F(TestGraph, CheckSupportWithWorkspaceLimitZeroFiltersOnlyPlansWithWorkspace)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    _engineConfigWorkspace[10] = 1;
+    _engineConfigWorkspace[20] = 0;
+
+    hipdnn_frontend::GraphTestUtils withWorkspace;
+    prepareFilterGraph(withWorkspace, {10});
+    withWorkspace.deselect_workspace_greater_than(0);
+    auto filtered = withWorkspace.check_support();
+    ASSERT_TRUE(filtered.is_bad());
+    EXPECT_EQ(filtered.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_NE(filtered.err_msg.find("workspace 1 exceeds limit 0"), std::string::npos)
+        << filtered.err_msg;
+
+    hipdnn_frontend::GraphTestUtils withoutWorkspace;
+    prepareFilterGraph(withoutWorkspace, {20});
+    withoutWorkspace.deselect_workspace_greater_than(0);
+    auto kept = withoutWorkspace.check_support();
+    EXPECT_TRUE(kept.is_good()) << kept.get_message();
 }
 
 // ============================================================================
@@ -11786,14 +13464,14 @@ TEST_F(TestGraph, AutotunePlanSpecExhaustiveFinalizeFailureRetainsPrimingReason)
         << r.exhaustiveNotRunReason;
 }
 
-// Plan-spec path: a spec barred by deselect_engines() (engine-ID) and specs
-// barred by deselect_workspace_greater_than() (compiled workspace over the
-// deselect threshold) both surface as barredResults, and each carries the
-// correct workspace-size pair:
+// Plan-spec path: a spec barred by deselect_engines() (engine-ID) and specs whose
+// finalized plan exceeds the deselect_workspace_greater_than() threshold although their
+// engine config reported less (the safety net) both surface as barredResults, and each
+// carries the correct workspace-size pair:
 //   - engine-deselected spec: never compiled, so workspaceSize == -1 (the
 //     "not applicable" sentinel) and estimatedWorkspaceSize == the spec estimate.
-//   - workspace-deselected spec: compiled, so workspaceSize == the real compiled
-//     size and estimatedWorkspaceSize == the spec estimate (the two differ).
+//   - safety-net spec: finalized, so workspaceSize == the real finalized size and
+//     estimatedWorkspaceSize == the spec estimate (the two differ).
 // A benchmarkable spec keeps the run OK so the barred entries surface in *results
 // alongside the winner, and the composition summary reports "3 deselected".
 TEST_F(TestGraph, AutotunePlanSpecDeselectBarredResultsRecordBothWorkspaceSizes)
@@ -11820,11 +13498,11 @@ TEST_F(TestGraph, AutotunePlanSpecDeselectBarredResultsRecordBothWorkspaceSizes)
 
     // Insertion order drives compile order. The engine-deselected spec is
     // removed in the spec-filter loop and never compiled, so the compile-order
-    // workspace queries are: fit, then the two workspace-deselect specs.
+    // workspace queries are: fit, then the two safety-net specs.
     graph.injectPlanSpec(fitEngineId, fitEstimate);
     // The barred specs are exhaustive-capable: their capability must surface on the
     // barred results. The engine-deselect bar is a pre-priming site and the
-    // workspace-deselect bar is a post-priming site; STANDARD mode here means no
+    // safety-net bar is a post-finalize site; STANDARD mode here means no
     // priming runs, so ranExhaustive stays false on all of them.
     graph.injectPlanSpec(engineDeselectId, engineDeselectEstimate, /*supportsExhaustive=*/true);
     graph.injectPlanSpec(
@@ -11835,8 +13513,24 @@ TEST_F(TestGraph, AutotunePlanSpecDeselectBarredResultsRecordBothWorkspaceSizes)
     graph.deselect_engines(std::vector<int64_t>{engineDeselectId});
     graph.deselect_workspace_greater_than(deselectThreshold);
 
-    // Compiled workspace per plan in compile order: fit (within), then the two
-    // workspace-deselect specs (over the deselect threshold).
+    // Every engine config reports a workspace within the threshold, so the limit passes
+    // each spec before finalizing and only the finalized size can bar one.
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE, HIPDNN_TYPE_INT64, 1, nullptr, _))
+        .Times(AnyNumber())
+        .WillRepeatedly([](hipdnnBackendDescriptor_t,
+                           hipdnnBackendAttributeName_t,
+                           hipdnnBackendAttributeType_t,
+                           int64_t,
+                           int64_t*,
+                           void* out) {
+            *static_cast<int64_t*>(out) = 100;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    // Finalized workspace per plan in compile order: fit (within), then the two
+    // safety-net specs (over the deselect threshold).
     EXPECT_CALL(*_mockBackend,
                 backendGetAttribute(
                     _, HIPDNN_ATTR_EXECUTION_PLAN_WORKSPACE_SIZE, HIPDNN_TYPE_INT64, 1, nullptr, _))
@@ -11861,22 +13555,7 @@ TEST_F(TestGraph, AutotunePlanSpecDeselectBarredResultsRecordBothWorkspaceSizes)
         });
 
     // The fitting plan is benchmarked through the mocked backend.
-    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _))
-        .Times(AnyNumber())
-        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
-    EXPECT_CALL(*_mockBackend,
-                backendGetAttribute(
-                    _, HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT, HIPDNN_TYPE_FLOAT, 1, nullptr, _))
-        .Times(AnyNumber())
-        .WillRepeatedly([](hipdnnBackendDescriptor_t,
-                           hipdnnBackendAttributeName_t,
-                           hipdnnBackendAttributeType_t,
-                           int64_t,
-                           int64_t*,
-                           void* out) {
-            *static_cast<float*>(out) = 1.0f;
-            return HIPDNN_STATUS_SUCCESS;
-        });
+    mockSuccessfulBenchmarkExecution();
 
     const std::unordered_map<int64_t, void*> pack = {{1, reinterpret_cast<void*>(0x1)},
                                                      {2, reinterpret_cast<void*>(0x2)},
@@ -11887,12 +13566,12 @@ TEST_F(TestGraph, AutotunePlanSpecDeselectBarredResultsRecordBothWorkspaceSizes)
     const AutotuneConfig config; // STANDARD mode: no EXHAUSTIVE priming
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
 
-    std::vector<AutotuneResult> results;
     // A runtime ceiling well above every compiled size, so only the deselect
-    // filters (engine-ID and workspace-greater-than) bar plans. The
-    // deselect-workspace check runs before the runtime guard, so the
-    // workspace-deselected specs surface as barred (not workspace-skipped).
+    // filters (engine-ID and workspace-greater-than) bar plans. The deselect-workspace
+    // safety net runs before the runtime guard, so the over-threshold specs surface as
+    // barred (not workspace-skipped).
     const int64_t runtimeCeiling = 100000;
+    std::vector<AutotuneResult> results;
     auto result = graph.autotune(_handle, pack, workspace, runtimeCeiling, config, {}, &results);
 
     // The fitting plan succeeded, so autotune returns OK.
@@ -11945,14 +13624,17 @@ TEST_F(TestGraph, AutotunePlanSpecDeselectBarredResultsRecordBothWorkspaceSizes)
     EXPECT_FALSE(engineDeselected->ranExhaustive);
     EXPECT_TRUE(engineDeselected->exhaustiveNotRunReason.empty());
 
-    // Workspace-deselected: compiled, so workspaceSize is the real compiled size
-    // and the estimate is the spec estimate; the two differ.
+    // Safety-net barred: finalized, so workspaceSize is the real finalized size and
+    // the estimate is the spec estimate; the two differ.
     for(const auto* r : {workspaceDeselectedA, workspaceDeselectedB})
     {
         EXPECT_FALSE(r->succeeded);
         EXPECT_EQ(r->rank, -1);
         EXPECT_EQ(r->compiledPlanIndex, -1);
-        EXPECT_NE(r->errorMessage.find("Plan barred"), std::string::npos) << r->errorMessage;
+        EXPECT_NE(r->errorMessage.find("Plan barred: finalized workspace 8192 exceeds limit 2000 "
+                                       "(engine config reported 100)"),
+                  std::string::npos)
+            << r->errorMessage;
         EXPECT_EQ(r->workspaceSize, overCompiled);
         EXPECT_NE(r->estimatedWorkspaceSize, r->workspaceSize);
         // Capability carried on this post-priming bar; STANDARD mode so no priming ran.
@@ -12257,22 +13939,7 @@ TEST_F(TestGraph, AutotunePlanSpecEngineIdFilterExcludedReported)
             return HIPDNN_STATUS_SUCCESS;
         });
 
-    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _))
-        .Times(AnyNumber())
-        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
-    EXPECT_CALL(*_mockBackend,
-                backendGetAttribute(
-                    _, HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT, HIPDNN_TYPE_FLOAT, 1, nullptr, _))
-        .Times(AnyNumber())
-        .WillRepeatedly([](hipdnnBackendDescriptor_t,
-                           hipdnnBackendAttributeName_t,
-                           hipdnnBackendAttributeType_t,
-                           int64_t,
-                           int64_t*,
-                           void* out) {
-            *static_cast<float*>(out) = 1.0f;
-            return HIPDNN_STATUS_SUCCESS;
-        });
+    mockSuccessfulBenchmarkExecution();
 
     const std::unordered_map<int64_t, void*> pack = {{1, reinterpret_cast<void*>(0x1)},
                                                      {2, reinterpret_cast<void*>(0x2)},
@@ -12970,22 +14637,7 @@ TEST_F(TestGraph, AutotuneSkipsPlanWhoseCompiledWorkspaceGrowsPastLimit)
     // The fitting plan is benchmarked: its execution and profiling go through the
     // mocked backend. Execute succeeds; the profiling elapsed-ms query returns a
     // positive time so the benchmark produces a valid measurement.
-    EXPECT_CALL(*_mockBackend, backendExecute(_, _, _))
-        .Times(AnyNumber())
-        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
-    EXPECT_CALL(*_mockBackend,
-                backendGetAttribute(
-                    _, HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT, HIPDNN_TYPE_FLOAT, 1, nullptr, _))
-        .Times(AnyNumber())
-        .WillRepeatedly([](hipdnnBackendDescriptor_t,
-                           hipdnnBackendAttributeName_t,
-                           hipdnnBackendAttributeType_t,
-                           int64_t,
-                           int64_t*,
-                           void* out) {
-            *static_cast<float*>(out) = 1.0f;
-            return HIPDNN_STATUS_SUCCESS;
-        });
+    mockSuccessfulBenchmarkExecution();
 
     const std::unordered_map<int64_t, void*> pack = {{1, reinterpret_cast<void*>(0x1)},
                                                      {2, reinterpret_cast<void*>(0x2)},
@@ -13724,15 +15376,6 @@ struct WinnerLastRecorder
             });
     }
 };
-
-std::unordered_map<int64_t, void*> winnerLastVariantPack()
-{
-    return {{1, reinterpret_cast<void*>(0x1)},
-            {2, reinterpret_cast<void*>(0x2)},
-            {3, reinterpret_cast<void*>(0x3)},
-            {4, reinterpret_cast<void*>(0x4)},
-            {5, reinterpret_cast<void*>(0x5)}};
-}
 } // namespace
 
 // The caller's output buffers must hold the winner's output when autotune() returns, so the
@@ -13761,7 +15404,7 @@ TEST_F(TestGraph, AutotuneExecutesTheWinnerLastWhenTheWinnerIsNotTheLastTimedPla
     config.warmupIterations = 0;
 
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, winnerLastVariantPack(), nullptr, config, {}, &results);
+    auto result = graph.autotune(_handle, testVariantPack(), nullptr, config, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
@@ -13810,7 +15453,7 @@ TEST_F(TestGraph, AutotuneExecutesTheWinnerChosenByACustomRankingFunction)
     };
 
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, winnerLastVariantPack(), nullptr, config, {}, &results);
+    auto result = graph.autotune(_handle, testVariantPack(), nullptr, config, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     EXPECT_EQ(graph.getActivePlanIndex(), 1u);
@@ -13856,8 +15499,8 @@ TEST_F(TestGraph, AutotuneReturnsTheErrorOfAFailedFinalWinnerExecuteAndKeepsTheW
     storageConfig.filePath = storagePath;
 
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(
-        _handle, winnerLastVariantPack(), nullptr, config, storageConfig, &results);
+    auto result
+        = graph.autotune(_handle, testVariantPack(), nullptr, config, storageConfig, &results);
     const bool storageWritten = std::filesystem::exists(storagePath);
     std::filesystem::remove(storagePath);
 
@@ -13899,7 +15542,7 @@ TEST_F(TestGraph, AutotuneReturnsTheErrorOfAFailedSyncAfterTheFinalWinnerExecute
     config.warmupIterations = 0;
 
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, winnerLastVariantPack(), nullptr, config, {}, &results);
+    auto result = graph.autotune(_handle, testVariantPack(), nullptr, config, {}, &results);
 
     ASSERT_EQ(recorder.executedPlans.size(), 3u);
     EXPECT_TRUE(result.is_bad());
@@ -14085,7 +15728,7 @@ TEST_F(TestGraph, AutotuneExecutesTheWinnerAfterAStalledRestartPass)
     config.warmupIterations = 0;
 
     std::vector<AutotuneResult> results;
-    auto result = graph.autotune(_handle, winnerLastVariantPack(), nullptr, config, {}, &results);
+    auto result = graph.autotune(_handle, testVariantPack(), nullptr, config, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.get_message();
     ASSERT_EQ(stallArmCount, 1);
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
@@ -14165,7 +15808,7 @@ TEST_F(TestGraph, ExhaustiveSweepExecutesTheWinnerLast)
     std::vector<AutotuneResult> results;
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
     auto result = graph.autotuneExhaustiveSweep(
-        _handle, winnerLastVariantPack(), workspace, int64_t{1024}, config, {}, &results);
+        _handle, testVariantPack(), workspace, int64_t{1024}, config, {}, &results);
     ASSERT_TRUE(result.is_good()) << result.get_message();
 
     ASSERT_EQ(compiledPlanHandles.size(), 2u);
@@ -14262,13 +15905,8 @@ TEST_F(TestGraph, ExhaustiveSweepReturnsTheErrorOfAFailedFinalWinnerExecuteAndCa
 
     std::vector<AutotuneResult> results;
     auto* const workspace = reinterpret_cast<void*>(0xC0FFEE);
-    auto result = graph.autotuneExhaustiveSweep(_handle,
-                                                winnerLastVariantPack(),
-                                                workspace,
-                                                int64_t{1024},
-                                                config,
-                                                storageConfig,
-                                                &results);
+    auto result = graph.autotuneExhaustiveSweep(
+        _handle, testVariantPack(), workspace, int64_t{1024}, config, storageConfig, &results);
     const bool storageWritten = std::filesystem::exists(storagePath);
     std::filesystem::remove(storagePath);
 

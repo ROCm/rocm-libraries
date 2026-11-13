@@ -344,19 +344,33 @@ void graphBindings(nb::module_& m)
             },
             nb::arg("engine_id"),
             "Get numerical notes for an engine applicable to the built operation graph.")
-        .def("check_support", &graph::Graph::check_support)
+        .def("check_support",
+             &graph::Graph::check_support,
+             "Check that the graph is supported. With no engine filter set, checks that an "
+             "execution plan exists. With a filter set (deselect_engines, a note filter, "
+             "deselect_workspace_greater_than), returns OK when at least one created plan "
+             "passes the filters, in ranked order, and otherwise an error with code "
+             "GRAPH_EXECUTION_PLAN_CREATION_FAILED that lists each skip reason, or the error "
+             "of a failed note read. Finalizes nothing and marks nothing.")
         .def("build_plans",
              &graph::Graph::build_plans,
              nb::arg("policy") = BuildPlanPolicy::HEURISTICS_CHOICE,
-             "Finalize execution plans. HEURISTICS_CHOICE compiles the active plan (the "
-             "preferred engine's plan when it is among the ranked candidates, otherwise the "
-             "top-ranked plan). If that plan fails to finalize for any reason, the other "
-             "ranked plans are tried, from the top of the list; the first that finalizes "
-             "becomes active. Candidates barred by deselect_engines() or over the "
-             "deselect_workspace_greater_than() limit are skipped. If no plan finalizes, an "
-             "error listing every attempted engine and its failure is returned and the active "
-             "plan is unchanged. An active plan that finalizes but is over the workspace limit "
-             "is an error. ALL compiles every plan, skipping any that fail.")
+             "Finalize execution plans. Every engine filter applies (deselect_engines, the "
+             "note filters, deselect_workspace_greater_than against the engine-config "
+             "workspace); a plan a filter removes is never finalized. HEURISTICS_CHOICE "
+             "compiles the active plan (the preferred engine's plan when it is among the "
+             "ranked candidates, otherwise the top-ranked plan). If a filter removes it or "
+             "it fails to finalize for any reason, the other ranked plans are tried, from "
+             "the top of the list; the first that passes the filters and finalizes becomes "
+             "active, so a filter can replace the preferred engine. A plan that finalizes "
+             "over the workspace limit despite its engine config is rejected and the walk "
+             "moves on. If no plan is built, an error with code "
+             "GRAPH_EXECUTION_PLAN_CREATION_FAILED lists every skipped or failed engine and "
+             "its reason, and the active plan is unchanged. A repeated HEURISTICS_CHOICE call "
+             "returns the backend's already-finalized error and leaves the active plan "
+             "unchanged. ALL evaluates every plan's filters, then compiles "
+             "the plans that pass, skipping any that fail; it succeeds whenever a plan is "
+             "active afterwards, even if a new filter removes that plan.")
         .def(
             "get_workspace_size",
             [](const graph::Graph& g) {
@@ -573,17 +587,51 @@ void graphBindings(nb::module_& m)
              &graph::Graph::deselect_workspace_greater_than,
              nb::arg("workspace"),
              nb::rv_policy::reference_internal,
-             "Bar plans whose compiled workspace exceeds this many bytes.")
+             "Bar plans whose engine-config workspace exceeds this many bytes, or whose "
+             "engine-config workspace cannot be read while the limit is set. Replaces the "
+             "previous limit; a negative value means no limit. The limit persists, applies to "
+             "plans created later, and is not reset by creating plans. A plan an earlier "
+             "evaluation barred stays barred when a filter is relaxed or cleared, until the "
+             "plans are recreated (create_execution_plans(), create_execution_plan_ext(), "
+             "rebuilding the operation graph, deserialization or plan-spec autotune()).")
         .def("deselect_engines",
              nb::overload_cast<const std::vector<std::string>&>(&graph::Graph::deselect_engines),
              nb::arg("engine_names"),
              nb::rv_policy::reference_internal,
-             "Bar plans belonging to these engine names.")
+             "Bar plans belonging to these engine names. Accumulates across calls, persists "
+             "until the Graph is destroyed, and applies to plans created later.")
         .def("deselect_engines",
              nb::overload_cast<const std::vector<int64_t>&>(&graph::Graph::deselect_engines),
              nb::arg("engine_ids"),
              nb::rv_policy::reference_internal,
-             "Bar plans belonging to these engine IDs.")
+             "Bar plans belonging to these engine IDs. Accumulates across calls, persists "
+             "until the Graph is destroyed, and applies to plans created later.")
+        .def("select_numeric_notes",
+             &graph::Graph::select_numeric_notes,
+             nb::arg("notes"),
+             nb::rv_policy::reference_internal,
+             "Keep only engines that report every one of these NumericalNotes. Appends to "
+             "the selected notes; an empty list is a no-op. Engines are read only when a "
+             "note filter is set. Returns the graph (cuDNN returns None). Persists until the "
+             "Graph is destroyed and applies to plans created later.")
+        .def("deselect_numeric_notes",
+             &graph::Graph::deselect_numeric_notes,
+             nb::arg("notes"),
+             nb::rv_policy::reference_internal,
+             "Drop engines that report any of these NumericalNotes. Appends to the "
+             "deselected notes. See select_numeric_notes for the match rule and lifetime.")
+        .def("select_behavior_notes",
+             &graph::Graph::select_behavior_notes,
+             nb::arg("notes"),
+             nb::rv_policy::reference_internal,
+             "Keep only engines that report every one of these BehaviorNotes (hipDNN's own "
+             "members). See select_numeric_notes for the match rule and lifetime.")
+        .def("deselect_behavior_notes",
+             &graph::Graph::deselect_behavior_notes,
+             nb::arg("notes"),
+             nb::rv_policy::reference_internal,
+             "Drop engines that report any of these BehaviorNotes. See select_numeric_notes "
+             "for the match rule and lifetime.")
         .def("autotune",
              &autotunePy,
              nb::arg("handle"),

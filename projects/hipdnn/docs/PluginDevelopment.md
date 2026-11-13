@@ -415,6 +415,10 @@ public:
 - `global.benchmarking`: Enable benchmarking for kernel selection
 - `global.workspace_size_limit`: Limit workspace memory (when applicable)
 
+#### Engine-config workspace contract
+
+The engine-config workspace query (`getMaxWorkspaceSize` in `IEngine`, `hipdnnEnginePluginGetWorkspaceSize` in the C API) **must** return at least the workspace of any plan the engine finalizes from that config. The frontend filters by this value before it finalizes a plan (`deselect_workspace_greater_than()`), so a smaller value lets a plan through that is then rejected after it finalizes; the frontend also sizes its estimate from it.
+
 #### Implementing `global.benchmarking`
 
 The generic kernel ingestor engine (`hipdnn_plugin_sdk::ingestor`) implements the global benchmarking knob: setting `global.benchmarking=1` makes it build one candidate plan per catalog entry left after the knob filter and `global.workspace_size_limit` at plan build, time each on the device on the first `execute()`, and memoize the ranking per (graph content, device). The ranking survives the plan that measured it, and persists across processes when disk caching is enabled; a record is served only when it covers every kernel applicable to the graph, so a run whose filters remove a kernel benchmarks again each time. Per-field knobs plus `add_engine_sweep()` remain the way to sweep one metadata dimension and reach every kernel a declared field distinguishes; the two mechanisms are complementary. On a cold benchmarked build a kernel's preparation cost is paid once per candidate, and preparation errors surface at plan build; [Environment Configuration](./Environment.md#hipdnn_force_benchmarking) covers when a benchmarked record skips this. A provider adopting the ingestor needs no benchmarking code of its own: carry one `hipdnn_plugin_sdk::ingestor::IngestorSettings ingestorSettings` member on its `TSettings` type and a handle exposing `hipStream_t getStream() const`, and `GenericPlanBuilder` handles advertisement, knob reading, the `HIPDNN_FORCE_BENCHMARKING` override, and the composite plan.

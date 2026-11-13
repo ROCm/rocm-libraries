@@ -712,7 +712,7 @@ TEST_F(IntegrationKnobsApi, GetMaxWorkspaceSizeWithKnobs)
                                         nullptr,
                                         &workspaceSize),
               HIPDNN_STATUS_SUCCESS);
-    EXPECT_EQ(workspaceSize, 1024); // Test plugin returns 1024
+    EXPECT_EQ(workspaceSize, 2048); // Test plugin returns 2048
 }
 
 // =============================================================================

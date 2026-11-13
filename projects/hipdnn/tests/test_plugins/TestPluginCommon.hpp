@@ -884,7 +884,7 @@ public:
             }
 
             getInstance()->onWorkspaceSizeQuery(*engineConfig);
-            *workspaceSize = 1024;
+            *workspaceSize = 2048;
 
             LOG_API_SUCCESS(apiName, "workspaceSize=" << *workspaceSize);
         });

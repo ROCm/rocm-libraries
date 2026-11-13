@@ -64,6 +64,9 @@ protected:
     bool _policyOrderReversesRanking = false;
     std::unordered_set<hipdnnBackendDescriptor_t> _policyOrderedHeuristics;
     std::unordered_map<hipdnnBackendDescriptor_t, int64_t> _engineIdsByConfig;
+    // Engine-config workspace the mocked backend reports per engine; an engine without an
+    // entry reports 0.
+    std::unordered_map<int64_t, int64_t> _engineConfigWorkspaceByEngineId;
     int64_t _lastStampedEngineId = -1;
 
     void installRankedEnginePlanMocks()
@@ -123,9 +126,10 @@ protected:
                                             ? static_cast<int64_t>(_rankedEngineIds.size())
                                             : requestedElementCount;
                     }
-                    if(_policyOrderReversesRanking && arrayOfElements != nullptr)
+                    if(arrayOfElements != nullptr)
                     {
-                        const bool reversed = _policyOrderedHeuristics.count(descriptor) != 0;
+                        const bool reversed = _policyOrderReversesRanking
+                                              && _policyOrderedHeuristics.count(descriptor) != 0;
                         auto* configs = static_cast<hipdnnBackendDescriptor_t*>(arrayOfElements);
                         const auto filled = std::min(static_cast<size_t>(requestedElementCount),
                                                      _rankedEngineIds.size());
@@ -149,6 +153,19 @@ protected:
                         &_engineDescs[_nextEngineDesc++ % _engineDescs.size()]);
                     _engineIdsByDesc[engineDesc] = engineId;
                     *static_cast<hipdnnBackendDescriptor_t*>(arrayOfElements) = engineDesc;
+                    return HIPDNN_STATUS_SUCCESS;
+                }
+                if(attribute == HIPDNN_ATTR_ENGINECFG_WORKSPACE_SIZE)
+                {
+                    const auto config = _engineIdsByConfig.find(descriptor);
+                    int64_t workspace = 0;
+                    if(config != _engineIdsByConfig.end())
+                    {
+                        const auto entry = _engineConfigWorkspaceByEngineId.find(config->second);
+                        workspace
+                            = entry == _engineConfigWorkspaceByEngineId.end() ? 0 : entry->second;
+                    }
+                    *static_cast<int64_t*>(arrayOfElements) = workspace;
                     return HIPDNN_STATUS_SUCCESS;
                 }
                 if(attribute == HIPDNN_ATTR_ENGINE_GLOBAL_INDEX)
@@ -580,8 +597,8 @@ TEST_F(TestCudnnShimNoteTriageBackend, DeselectEngineIndicesAfterPlanCreationBar
     auto err = graph.build_plan_at_index(0);
 
     EXPECT_TRUE(err.is_bad());
-    EXPECT_EQ(err.get_code(), fe::error_code_t::INVALID_VALUE);
-    EXPECT_NE(err.get_message().find("barred"), std::string::npos);
+    EXPECT_EQ(err.get_code(), fe::error_code_t::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_NE(err.get_message().find("deselect_engines"), std::string::npos);
 }
 
 // Every index-taking call resolves an engine index through the same order, whatever
@@ -631,10 +648,9 @@ TEST_F(TestCudnnShimNoteTriageBackend, EngineIndicesFollowOneOrderAcrossHeuristi
     EXPECT_EQ(graph.get_workspace_size_plan_at_index(1), -1);
 }
 
-// Regression: create_execution_plans() pins the active plan before the shim's
-// filters run, and native build_plans(HEURISTICS_CHOICE) inspects only that
-// plan — so barring the top-ranked engine used to turn a satisfiable build into
-// an INVALID_VALUE failure. cuDNN narrows the candidate set instead.
+// Barring the top-ranked engine narrows the candidates, as in cuDNN: create_execution_plans()
+// pins the top plan as active, and native build_plans(HEURISTICS_CHOICE) walks past it to the
+// next plan the filters leave.
 TEST_F(TestCudnnShimNoteTriageBackend, DeselectBehaviorNoteOnTopEngineNarrowsToSurvivingPlan)
 {
     installRegisteredEnginePlanMocks();
@@ -700,6 +716,49 @@ TEST_F(TestCudnnShimNoteTriageBackend, DeselectTopEngineIndexNarrowsToSurvivingP
     EXPECT_EQ(planName, hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_NAME);
     EXPECT_EQ(graph.get_workspace_size_plan_at_index(0), -1);
     EXPECT_EQ(graph.get_workspace_size_plan_at_index(1), 0);
+}
+
+// A shim filter bars the top plan, the next plan's engine config is over the workspace limit,
+// and the third plan builds: native HEURISTICS_CHOICE walks past both.
+TEST_F(TestCudnnShimNoteTriageBackend, ShimFilterBarsTopPlanNextPlanOverLimitThirdPlanBuilds)
+{
+    _rankedEngineIds = {hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID,
+                        hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID,
+                        hipdnn_data_sdk::utilities::HIP_MLOPS_ENGINE_ID};
+    _engineConfigWorkspaceByEngineId[hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID] = 500;
+    _engineConfigWorkspaceByEngineId[hipdnn_data_sdk::utilities::HIP_MLOPS_ENGINE_ID] = 50;
+    installRankedEnginePlanMocks();
+
+    fe::graph::Graph graph;
+    ASSERT_NO_FATAL_FAILURE(createPlans(graph));
+    ASSERT_EQ(_executionPlanDescs.size(), 3u);
+
+    EXPECT_EQ(&graph.deselect_engines(std::vector<int64_t>{0}), &graph);
+    EXPECT_EQ(&graph.deselect_workspace_greater_than(100), &graph);
+
+    auto err = graph.build_plans(fe::BuildPlanPolicy_t::HEURISTICS_CHOICE);
+
+    EXPECT_TRUE(err.is_good()) << err.get_message();
+    EXPECT_EQ(graph.get_workspace_size_plan_at_index(0), -1);
+    EXPECT_EQ(graph.get_workspace_size_plan_at_index(1), -1);
+    EXPECT_EQ(graph.get_workspace_size_plan_at_index(2), 0);
+}
+
+TEST_F(TestCudnnShimNoteTriageBackend, CheckSupportWithEveryPlanOverTheWorkspaceLimitFails)
+{
+    _engineConfigWorkspaceByEngineId[hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID] = 500;
+    _engineConfigWorkspaceByEngineId[hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID] = 600;
+    installRegisteredEnginePlanMocks();
+
+    fe::graph::Graph graph;
+    ASSERT_NO_FATAL_FAILURE(createPlans(graph));
+    EXPECT_EQ(&graph.deselect_workspace_greater_than(100), &graph);
+
+    auto err = graph.check_support();
+
+    EXPECT_TRUE(err.is_bad());
+    EXPECT_EQ(err.get_code(), fe::error_code_t::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_NE(err.get_message().find("workspace 500 exceeds limit 100"), std::string::npos);
 }
 
 // Control for the two narrowing cases above: with nothing barred the shim must
