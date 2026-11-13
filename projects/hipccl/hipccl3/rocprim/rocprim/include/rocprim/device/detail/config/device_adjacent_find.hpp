@@ -630,20 +630,20 @@ constexpr auto adjacent_find_config_picker()
                        comp_target<gen::cdna4, target_arch::gfx950, gpu::mi355x, rep::amdgcn>>,
         adjacent_find_config_params>
 {
-    // CONFIG: {'input_type': 'rocprim::int128_t', 'block_size_x': 1024, 'ipt': 8}
+    // CONFIG: {'input_type': 'rocprim::int128_t', 'block_size_x': 1024, 'ipt': 4}
     if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 8)
                  && (sizeof(input_type) <= 16))
     {
         return adjacent_find_config_params{
-            {1024, 8}
+            {1024, 4}
         };
     }
-    // CONFIG: {'input_type': 'int64_t', 'block_size_x': 512, 'ipt': 16}
+    // CONFIG: {'input_type': 'int64_t', 'block_size_x': 1024, 'ipt': 8}
     if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 4)
                  && (sizeof(input_type) <= 8))
     {
         return adjacent_find_config_params{
-            {512, 16}
+            {1024, 8}
         };
     }
     // CONFIG: {'input_type': 'int', 'block_size_x': 1024, 'ipt': 16}
@@ -662,11 +662,11 @@ constexpr auto adjacent_find_config_picker()
             {512, 32}
         };
     }
-    // CONFIG: {'input_type': 'int8_t', 'block_size_x': 1024, 'ipt': 8}
+    // CONFIG: {'input_type': 'int8_t', 'block_size_x': 256, 'ipt': 32}
     if constexpr((!rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) <= 1))
     {
         return adjacent_find_config_params{
-            {1024, 8}
+            {256, 32}
         };
     }
     // CONFIG: {'input_type': 'double', 'block_size_x': 1024, 'ipt': 8}
@@ -677,12 +677,12 @@ constexpr auto adjacent_find_config_picker()
             {1024, 8}
         };
     }
-    // CONFIG: {'input_type': 'float', 'block_size_x': 1024, 'ipt': 16}
+    // CONFIG: {'input_type': 'float', 'block_size_x': 512, 'ipt': 16}
     if constexpr((rocprim::is_floating_point<input_type>::value) && (sizeof(input_type) > 2)
                  && (sizeof(input_type) <= 4))
     {
         return adjacent_find_config_params{
-            {1024, 16}
+            {512, 16}
         };
     }
     // CONFIG: {'input_type': 'rocprim::half', 'block_size_x': 1024, 'ipt': 16}

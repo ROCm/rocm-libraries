@@ -564,66 +564,66 @@ constexpr auto adjacent_difference_inplace_config_picker()
                        comp_target<gen::cdna4, target_arch::gfx950, gpu::mi355x, rep::amdgcn>>,
         adjacent_difference_config_params>
 {
-    // CONFIG: {'value_type': 'rocprim::int128_t', 'block_size_x': 1024, 'ipt': 3}
+    // CONFIG: {'value_type': 'rocprim::int128_t', 'block_size_x': 512, 'ipt': 2}
     if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 8)
                  && (sizeof(value_type) <= 16))
     {
         return adjacent_difference_config_params{
-            {1024, 3}
+            {512, 2}
         };
     }
-    // CONFIG: {'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 1}
+    // CONFIG: {'value_type': 'int64_t', 'block_size_x': 256, 'ipt': 3}
     if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
                  && (sizeof(value_type) <= 8))
     {
         return adjacent_difference_config_params{
-            {256, 1}
+            {256, 3}
         };
     }
-    // CONFIG: {'value_type': 'int', 'block_size_x': 128, 'ipt': 23}
+    // CONFIG: {'value_type': 'int', 'block_size_x': 256, 'ipt': 7}
     if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
                  && (sizeof(value_type) <= 4))
     {
         return adjacent_difference_config_params{
-            {128, 23}
+            {256, 7}
         };
     }
-    // CONFIG: {'value_type': 'short', 'block_size_x': 256, 'ipt': 29}
+    // CONFIG: {'value_type': 'short', 'block_size_x': 64, 'ipt': 31}
     if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 1)
                  && (sizeof(value_type) <= 2))
     {
         return adjacent_difference_config_params{
-            {256, 29}
+            {64, 31}
         };
     }
-    // CONFIG: {'value_type': 'int8_t', 'block_size_x': 1024, 'ipt': 5}
+    // CONFIG: {'value_type': 'int8_t', 'block_size_x': 128, 'ipt': 31}
     if constexpr((!rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 1))
     {
         return adjacent_difference_config_params{
-            {1024, 5}
+            {128, 31}
         };
     }
-    // CONFIG: {'value_type': 'double', 'block_size_x': 1024, 'ipt': 7}
+    // CONFIG: {'value_type': 'double', 'block_size_x': 256, 'ipt': 2}
     if constexpr((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 4)
                  && (sizeof(value_type) <= 8))
     {
         return adjacent_difference_config_params{
-            {1024, 7}
+            {256, 2}
         };
     }
-    // CONFIG: {'value_type': 'float', 'block_size_x': 256, 'ipt': 1}
+    // CONFIG: {'value_type': 'float', 'block_size_x': 512, 'ipt': 5}
     if constexpr((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) > 2)
                  && (sizeof(value_type) <= 4))
     {
         return adjacent_difference_config_params{
-            {256, 1}
+            {512, 5}
         };
     }
-    // CONFIG: {'value_type': 'rocprim::half', 'block_size_x': 1024, 'ipt': 17}
+    // CONFIG: {'value_type': 'rocprim::half', 'block_size_x': 64, 'ipt': 31}
     if constexpr((rocprim::is_floating_point<value_type>::value) && (sizeof(value_type) <= 2))
     {
         return adjacent_difference_config_params{
-            {1024, 17}
+            {64, 31}
         };
     }
     // Default case if none of the conditions match

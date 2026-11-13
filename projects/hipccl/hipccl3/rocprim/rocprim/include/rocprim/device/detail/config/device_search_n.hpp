@@ -620,21 +620,21 @@ constexpr auto search_n_config_picker()
                        comp_target<gen::cdna4, target_arch::gfx950, gpu::mi355x, rep::amdgcn>>,
         search_n_config_params>
 {
-    // CONFIG: {'data_type': 'rocprim::int128_t', 'block_size_x': 512, 'ipt': 1, 'threshold': 8}
+    // CONFIG: {'data_type': 'rocprim::int128_t', 'block_size_x': 256, 'ipt': 1, 'threshold': 4}
     if constexpr((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) > 8)
                  && (sizeof(data_type) <= 16))
     {
         return search_n_config_params{
-            {512, 1},
-            8
+            {256, 1},
+            4
         };
     }
-    // CONFIG: {'data_type': 'int64_t', 'block_size_x': 1024, 'ipt': 2, 'threshold': 8}
+    // CONFIG: {'data_type': 'int64_t', 'block_size_x': 256, 'ipt': 2, 'threshold': 8}
     if constexpr((!rocprim::is_floating_point<data_type>::value) && (sizeof(data_type) > 4)
                  && (sizeof(data_type) <= 8))
     {
         return search_n_config_params{
-            {1024, 2},
+            {256, 2},
             8
         };
     }
