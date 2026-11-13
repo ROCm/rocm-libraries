@@ -18968,6 +18968,7 @@ class KernelWriterAssembly(KernelWriter):
           vectorWidths = vectorWidths_1
           elements     = elements_1
       pureRestore = None
+      pureFlagHeld = False
       if isPurePass:
         module.add(pureLabel)
         module.addComment1("Pure-gemm store pass: beta, bias, scaleAlphaVec and activation compiled out")
@@ -19709,7 +19710,12 @@ class KernelWriterAssembly(KernelWriter):
 
       if pureAtTrees and not isPurePass and gsuLimitIdx == gsuLimit - 1:
         module.add(self.pureGemmEpilogueBranch(pureFlagSgpr, pureLabel))
-        self.sgprPool.checkIn(pureFlagSgpr)
+        if arrivalFixup:
+          # The last arriving part runs writePartials, then falls back through SK_Store into
+          # this branch, so writePartials (generated below) must not reuse the flag sgpr.
+          pureFlagHeld = True
+        else:
+          self.sgprPool.checkIn(pureFlagSgpr)
 
       # Generate beta modules for each global write mode
       activationLabelListBackup = activationLabelList
@@ -19827,6 +19833,10 @@ class KernelWriterAssembly(KernelWriter):
         if liveAcrossPartials is not None:
           self._assertStillCheckedOut(liveAcrossPartials, "writePartials (StreamK arrival fixup)")
         module.add(processingComponent.writePartials(self, kernel, skPartialsLabel, vectorWidths_1, elements_1, tmpVgpr.idx, cvtVgprStruct, endLabel))
+
+      if pureFlagHeld:
+        self.sgprPool.checkIn(pureFlagSgpr)
+        pureFlagHeld = False
 
       if activationLabelList and arrivalFixup:
         self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetActivation)
