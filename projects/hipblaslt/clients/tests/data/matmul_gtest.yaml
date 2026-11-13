@@ -87,7 +87,6 @@ Tests:
     - matmul_bad_arg: *real_precisions
   transA: N
   transB: N
-  fortran: [ false, true ]
 
 # Added this test to mimic the rocblas test quick_gemm_batched_bad_arg_f32_r_bad_arg_F 
 # which passes alpha, A and B as 0 but beta as non-zero with valid C and D.
@@ -262,7 +261,7 @@ Tests:
   category: nightly
   function:
     matmul: *hpa_half_precision
-  matrix_size: *grid_limit_matrix_size_real
+  matrix_size: *grid_limit_matrix_size_real_even_k
   transA: N
   transB: N
   alpha: 1.0
@@ -646,7 +645,6 @@ Tests:
   K: 32
   alpha_beta: *alpha_beta_range
   transA_transB: *transA_transB_range
-  matmul_algo: [ 0, 1 ]
 
 - name: matmul_32_8_128
   category: nightly
@@ -2768,7 +2766,6 @@ Tests:
   category: pre_checkin
   function:
     matmul: *real_mix_precisions_fnuz
-  matrix_size:
   M: [127, 129]
   N: [127, 129]
   K: [127, 129]

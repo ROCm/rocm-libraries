@@ -299,6 +299,9 @@ namespace
     // One cotenant workgroup per CU, reserving all of its LDS, so no GEMM
     // or probe-only workgroup fits beside it.
     constexpr int kWholeCuOccupancy = 1;
+    // Keep the cotenant off the test stream's hardware queue, so GEMMs and
+    // probes launched beside it are not queued behind it.
+    constexpr bool kDistinctPriority = true;
     // Opt-in for the manual exact-count test.
     constexpr const char* kEnvCotenantProbe = "HIPBLASLT_TEST_COTENANT_PROBE";
     // Readings per phase.
@@ -376,7 +379,7 @@ namespace
         {
             try
             {
-                cotenant->emplace(held, kWholeCuOccupancy, stream);
+                cotenant->emplace(held, kWholeCuOccupancy, stream, kDistinctPriority);
             }
             catch(const std::runtime_error& e)
             {
