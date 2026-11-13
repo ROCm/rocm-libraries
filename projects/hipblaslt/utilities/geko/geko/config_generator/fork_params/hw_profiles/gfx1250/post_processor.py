@@ -307,6 +307,56 @@ class _GFX1250SourceSwapCoupling:
         return fork_params, coupled
 
 
+def _source_swap_values(
+    fork_params: Dict[str, ForkParameter],
+    entry: Dict[str, ForkParameter],
+) -> List[bool]:
+    """The SourceSwap values an MI group entry can be built with.
+
+    A SourceSwap carried by the entry itself wins over the flat parameter. An
+    absent, inactive (commented-out) or empty parameter leaves Tensile's
+    default, False; a scalar value counts as a one-element list.
+    """
+    fp = entry.get("SourceSwap") or fork_params.get("SourceSwap")
+    if fp is None or not fp.active:
+        return [False]
+    values = fp.values if isinstance(fp.values, list) else [fp.values]
+    return [bool(v) for v in values] or [False]
+
+
+def _source_swapped_macro_tile(mi: Sequence[int], macro_tile: Tuple[int, int]) -> Tuple[int, int]:
+    """``(MT0, MT1)`` of the same MI built with ``SourceSwap=True``.
+
+    SourceSwap on a non-square MI swaps the instruction's effective M and N
+    (TensileLite ``effectiveMatrixInstMN``), while MIBlock, MIWaveTile and
+    MIWaveGroup keep their physical values. ``Solution.py`` forms
+    ``MacroTile0 = MIWaveGroup[0] * MatrixInstM * MatrixInstBM * MIWaveTile[0]``
+    (and the N-side analogue) from the effective extents, so MT0 scales by
+    ``N / M`` and MT1 by ``M / N``: ``[32,16,128,1,1,8,4,2,2]`` is 512x128
+    unswapped and 256x256 swapped. A square MI is unchanged.
+    """
+    m, n = mi[0], mi[1]
+    if m == n:
+        return macro_tile
+    mt0, mt1 = macro_tile
+    return mt0 * n // m, mt1 * m // n
+
+
+def _buildable_macro_tiles(
+    fork_params: Dict[str, ForkParameter],
+    entry: Dict[str, ForkParameter],
+) -> List[Tuple[int, int]]:
+    """Every macro tile an MI group entry builds across its SourceSwap values."""
+    mi = entry["MatrixInstruction"].values
+    unswapped = mi_macro_tile(entry)
+    tiles: List[Tuple[int, int]] = []
+    for swap in _source_swap_values(fork_params, entry):
+        tile = _source_swapped_macro_tile(mi, unswapped) if swap else unswapped
+        if tile not in tiles:
+            tiles.append(tile)
+    return tiles
+
+
 class _GFX1250ClusterDimCoupling:
     """Move ClusterDim into the MI groups, with the shapes each MI's grid admits.
 
@@ -315,6 +365,16 @@ class _GFX1250ClusterDimCoupling:
     MI with shapes chosen for none of them. Each MI group entry is instead
     repeated once per shape that :func:`select_cluster_dims` keeps for its tile
     grid at this size, and the flat parameter is dropped.
+
+    The macro tile is the one the kernel actually builds. ``SourceSwap=True``
+    on a non-square MI transposes it (see :func:`_source_swapped_macro_tile`),
+    and the best shape of a size differs with it: at 4096x3072,
+    ``[32,16,128,1,1,8,4,2,2]`` prefers ``[2, 8]`` as 512x128 but
+    ``[4, 4]`` as 256x256. An entry that carries its own single SourceSwap
+    (as _GFX1250SourceSwapCoupling leaves them) is ranked on its own tile.
+    When SourceSwap is still a flat parameter that can be True, the shapes
+    selected for each buildable tile are merged, so the swapped kernel can
+    still draw its own best shape.
 
     The execution policy stays a separate group, so some pairs remain that
     Tensile rejects: persistent StreamK takes only ``[Cs, 1]`` shapes and
@@ -334,9 +394,12 @@ class _GFX1250ClusterDimCoupling:
             return fork_params, mi_groups
         coupled = []
         for entry in mi_groups:
-            macro_tile = mi_macro_tile(entry)
-            grid = tile_grid(ctx.M, ctx.N, macro_tile)
-            for shape in select_cluster_dims(fp.values, grid, macro_tile):
+            shapes = set()
+            for macro_tile in _buildable_macro_tiles(fork_params, entry):
+                grid = tile_grid(ctx.M, ctx.N, macro_tile)
+                shapes.update(select_cluster_dims(fp.values, grid, macro_tile))
+            # Same order select_cluster_dims returns: by size, then by Cs.
+            for shape in sorted(shapes, key=lambda s: (s[0] * s[1], s[0])):
                 coupled.append({**entry, "ClusterDim": self._make_param("ClusterDim", [list(shape)])})
         del fork_params["ClusterDim"]
         return fork_params, coupled
