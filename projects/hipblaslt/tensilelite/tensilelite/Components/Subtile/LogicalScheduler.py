@@ -1034,6 +1034,9 @@ class LogicalScheduler:
         # (tensor, atom tile start) -> half its GR issues in, or None when the
         # body keeps the uniform epoch cohorts.  Set by place_LRs.
         self._halfLoadHalf: Optional[Dict[Tuple[str, int], int]] = None
+        # (wrap LR, its tiles before balancing, inserted partition-0 LR) while
+        # _balance_half_disjoint_reads has moved tiles; None otherwise.
+        self._balancedRead: Optional[Tuple['LRPlacement', 'MFMATileRange', 'LRPlacement']] = None
 
     @property
     def halfDisjoint(self) -> bool:
@@ -1201,6 +1204,7 @@ class LogicalScheduler:
           placed so far across partitions. Skips redundant K-prefetch when
           the same data was already loaded by an earlier partition.
         """
+        self._balancedRead = None
         if self.config.plr == 0 and not self.config.prefetchNextPartition:
             return self._place_LRs_PLR0()
 
@@ -1315,26 +1319,27 @@ class LogicalScheduler:
         ts, te = moved
         k = wrapA.tiles
         wrapA.tiles = MFMATileRange(k.subIterK_start, k.subIterK_end, k.tileId_start, ts)
-        partitions[0][0].lrs.insert(0, LRPlacement(
+        balanced = LRPlacement(
             tensor='A', mtIteration=0,
             tiles=MFMATileRange(k.subIterK_start, k.subIterK_end, ts, te),
-            subIterK_slot=0, partition=0, targetPartition=0, balancedCurrentCell=True))
+            subIterK_slot=0, partition=0, targetPartition=0, balancedCurrentCell=True)
+        partitions[0][0].lrs.insert(0, balanced)
+        self._balancedRead = (wrapA, k, balanced)
 
     def _unbalance_half_disjoint_reads(self, partitions):
-        """Undo _balance_half_disjoint_reads when the half-disjoint plan is not taken."""
-        moved = [lr for lr in partitions[0][0].lrs if lr.balancedCurrentCell]
-        if not moved:
+        """Undo _balance_half_disjoint_reads when the half-disjoint plan is not taken.
+
+        Restores the exact wrap LR that was shortened, wherever in the second half it sits.
+        """
+        if self._balancedRead is None:
             return
-        lr = moved[0]
-        partitions[0][0].lrs.remove(lr)
-        for slot in partitions[-1]:
-            for wrap in slot.lrs:
-                if (wrap.tensor == 'A' and wrap.mtIteration == 1
-                        and wrap.tiles.tileId_end == lr.tiles.tileId_start):
-                    t = wrap.tiles
-                    wrap.tiles = MFMATileRange(t.subIterK_start, t.subIterK_end,
-                                               t.tileId_start, lr.tiles.tileId_end)
-                    return
+        wrapA, origTiles, balanced = self._balancedRead
+        lrs = partitions[0][0].lrs
+        idx = next((i for i, lr in enumerate(lrs) if lr is balanced), None)
+        assert idx is not None, "balanced partition-0 read missing at unbalance"
+        del lrs[idx]
+        wrapA.tiles = origTiles
+        self._balancedRead = None
 
     def _plan_half_disjoint_loads(self, partitions):
         """Return the load half of every A/B GR atom, or None.

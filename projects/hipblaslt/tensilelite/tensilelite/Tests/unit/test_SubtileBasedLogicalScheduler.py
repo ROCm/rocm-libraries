@@ -5248,6 +5248,42 @@ class TestHalfDisjointBalance:
         s.build_ngll()
         s.build_nll()
 
+    @staticmethod
+    def _unbalanced_8x10(monkeypatch, balance):
+        """8x10 LR layout when the half-disjoint plan is refused, with or without balancing."""
+        monkeypatch.setattr(LogicalScheduler, "_plan_half_disjoint_loads",
+                            lambda self, parts: None)
+        if not balance:
+            monkeypatch.setattr(LogicalScheduler, "_balance_half_disjoint_reads",
+                                lambda self, parts: None)
+        s = LogicalScheduler(TestHalfDisjointLds._cfg(8, 10, grB=1, grSA=8, size_n=6))
+        return s, s.build(stop_after=Pass.LR)
+
+    def test_refused_plan_restores_the_wrap_prefetch(self, monkeypatch):
+        _, plain = self._unbalanced_8x10(monkeypatch, balance=False)
+        monkeypatch.undo()
+        s, undone = self._unbalanced_8x10(monkeypatch, balance=True)
+        assert not s.halfDisjoint
+        assert s._balancedRead is None
+        assert self._lrs(undone) == self._lrs(plain)
+
+    def test_unbalance_restores_a_wrap_read_outside_the_last_partition(self, monkeypatch):
+        s, parts = self._unbalanced_8x10(monkeypatch, balance=False)
+        monkeypatch.undo()
+        wrap = next(lr for slot in parts[-1] for lr in slot.lrs
+                    if lr.tensor == "A" and lr.mtIteration == 1)
+        donor = next(pi for pi in range(len(parts) // 2, len(parts) - 1) if parts[pi])
+        for slot in parts[-1]:
+            slot.lrs[:] = [lr for lr in slot.lrs if lr is not wrap]
+        parts[donor][0].lrs.append(wrap)
+        before = self._lrs(parts)
+        s._balance_half_disjoint_reads(parts)
+        assert s._balancedRead is not None and s._balancedRead[0] is wrap
+        assert self._lrs(parts) != before
+        s._unbalance_half_disjoint_reads(parts)
+        assert self._lrs(parts) == before
+        assert s._balancedRead is None
+
 
 class TestDeferBalancedCurrentCellWait:
     """Balanced current-cell reads leave the partition-0 prefix and wait at their consumer."""
