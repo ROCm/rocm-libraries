@@ -31,6 +31,7 @@
 #include <unordered_map>
 
 #include <Tensile/ContractionProblem.hpp>
+#include <Tensile/ProviderRows.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 
 #include <Tensile/AMDGPU_Detail.hpp>
@@ -212,7 +213,8 @@ namespace TensileLite
             }
         };
 
-        using Caches            = CacheMap<TopSolutionsEntry, AMDGPU, MyProblem>;
+        // findTopSolutions results depend on the rows the walk was allowed to visit.
+        using Caches            = CacheMap<TopSolutionsEntry, ProviderRows, AMDGPU, MyProblem>;
         using CachesGroupedGemm = CacheMap<TopSolutionsEntry, AMDGPU, std::vector<MyProblem>>;
 
         CachingLibrary(std::shared_ptr<Library> subLibrary)
@@ -306,9 +308,10 @@ namespace TensileLite
             try
             {
                 auto const& amdgpu = dynamic_cast<AMDGPU const&>(hardware);
+                const auto  rows   = currentProviderRows();
 
                 // One lookup returns the solutions and their already-returned-all bit together.
-                auto cached = m_caches.find(problem, amdgpu);
+                auto cached = m_caches.find(problem, amdgpu, rows);
                 if(cached.solutions.size() >= numSolutions || cached.alreadyRetAll)
                     return std::move(cached.solutions);
 
@@ -319,7 +322,8 @@ namespace TensileLite
                     m_caches.addIfPreferred(TopSolutionsEntry{solutions, alreadyRetAll},
                                             preferIncoming,
                                             problem,
-                                            amdgpu);
+                                            amdgpu,
+                                            rows);
                 }
 
                 return solutions;

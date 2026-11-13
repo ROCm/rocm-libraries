@@ -29,7 +29,11 @@ if(HIPBLASLT_ENABLE_JIT)
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-msgpack.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-library.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-builder.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-problem-type.cpp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-problem-type.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-component.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-backend.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-replay-backend.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt-jit-mode.cpp")
 endif()
 
 # TheRock configures with testing on and rejects find_package(Catch2): Catch2

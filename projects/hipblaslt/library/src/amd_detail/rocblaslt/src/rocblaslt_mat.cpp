@@ -24,6 +24,12 @@
  *
  * ************************************************************************ */
 
+#include <functional>
+#ifdef HIPBLASLT_ENABLE_JIT
+#include "../../hipblaslt-jit-gemm-internal.hpp"
+#include <cstring>
+#endif
+
 #include "check_numerics_matrix.hpp"
 #include "alpha_mode_logging.hpp"
 #include "check_synchronizer.hpp"
@@ -298,21 +304,23 @@ rocblaslt_status rocblaslt_matmul_impl(const rocblaslt_handle       handle,
     return st;
 }
 
-rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle           handle,
-                                                rocblaslt_matmul_desc            matmul_descr,
-                                                const void*                      A,
-                                                const void*                      B,
-                                                const void*                      C,
-                                                void*                            D,
-                                                rocblaslt_matrix_layout          matA,
-                                                rocblaslt_matrix_layout          matB,
-                                                rocblaslt_matrix_layout          matC,
-                                                rocblaslt_matrix_layout          matD,
-                                                const void*                      alpha,
-                                                const void*                      beta,
-                                                rocblaslt::RocGemmProblemTypeV2& problemtype,
-                                                std::shared_ptr<void>&           gemmData,
-                                                size_t&                          gemmCount)
+rocblaslt_status rocblaslt_gemm_create_cpp_impl(
+    const rocblaslt_handle                                                     handle,
+    rocblaslt_matmul_desc                                                      matmul_descr,
+    const void*                                                                A,
+    const void*                                                                B,
+    const void*                                                                C,
+    void*                                                                      D,
+    rocblaslt_matrix_layout                                                    matA,
+    rocblaslt_matrix_layout                                                    matB,
+    rocblaslt_matrix_layout                                                    matC,
+    rocblaslt_matrix_layout                                                    matD,
+    const void*                                                                alpha,
+    const void*                                                                beta,
+    rocblaslt::RocGemmProblemTypeV2&                                           problemtype,
+    std::shared_ptr<void>&                                                     gemmData,
+    size_t&                                                                    gemmCount,
+    const std::function<rocblaslt_status(const RocblasltContractionProblem&)>& capture = {})
 {
     int64_t m, n, k, lda, ldb, ldc, ldd, lde;
     int64_t batch_stride_a, batch_stride_b, batch_stride_c, batch_stride_d, batch_stride_e;
@@ -486,7 +494,7 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl(const rocblaslt_handle          
         return rocblaslt_status_invalid_value;
     }
 #endif
-    return gemmCreate(problem, gemmData, gemmCount);
+    return capture ? capture(problem) : gemmCreate(problem, gemmData, gemmCount);
 }
 
 rocblaslt_status
@@ -1820,3 +1828,65 @@ std::string rocblaslt_get_solution_name_from_algo(rocblaslt_handle             h
 {
     return getSolutionNameFromAlgoIndex(handle, algo);
 }
+
+#ifdef HIPBLASLT_ENABLE_JIT
+hipblaslt_ext::experimental::jit::detail::GemmRequest::GemmRequest(
+    const RocblasltContractionProblem& source)
+    : problem(source)
+{
+    const auto bytes = static_cast<size_t>(
+        TensileLite::DataTypeInfo::Get(hipDataType_to_tensile_type(alphaBetaScalarType(
+                                           source.scale_type, source.compute_type, source.a_type)))
+            .elementSize);
+    if(source.alpha)
+        std::memcpy(alpha.data(), source.alpha, bytes);
+    if(source.beta)
+        std::memcpy(beta.data(), source.beta, bytes);
+    problem.alpha = source.alpha ? alpha.data() : nullptr;
+    problem.beta  = source.beta ? beta.data() : nullptr;
+}
+
+rocblaslt_status hipblaslt_ext::experimental::jit::detail::createGemmRequest(
+    rocblaslt_handle                    handle,
+    rocblaslt_matmul_desc               desc,
+    const void*                         alpha,
+    const void*                         A,
+    rocblaslt_matrix_layout             matA,
+    const void*                         B,
+    rocblaslt_matrix_layout             matB,
+    const void*                         beta,
+    const void*                         C,
+    rocblaslt_matrix_layout             matC,
+    void*                               D,
+    rocblaslt_matrix_layout             matD,
+    std::shared_ptr<const GemmRequest>& request)
+{
+    request.reset();
+    if(!handle || !desc || !matA || !matB || !matC || !matD)
+        return rocblaslt_status_invalid_pointer;
+    if(matC->type != matD->type)
+        return rocblaslt_status_invalid_value;
+    rocblaslt::RocGemmProblemTypeV2 type;
+    std::shared_ptr<void>           unused;
+    size_t                          count = 0;
+    return rocblaslt_gemm_create_cpp_impl(handle,
+                                          desc,
+                                          A,
+                                          B,
+                                          C,
+                                          D,
+                                          matA,
+                                          matB,
+                                          matC,
+                                          matD,
+                                          alpha,
+                                          beta,
+                                          type,
+                                          unused,
+                                          count,
+                                          [&](const RocblasltContractionProblem& problem) {
+                                              request = std::make_shared<GemmRequest>(problem);
+                                              return rocblaslt_status_success;
+                                          });
+}
+#endif
