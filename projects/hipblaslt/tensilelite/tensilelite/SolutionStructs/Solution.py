@@ -5328,6 +5328,21 @@ class Solution(collections.abc.Mapping):
           if isStreamK(state):
             reject(state, printRejectionReason, f"SwizzleTensor{tc} with TDM does not support StreamK yet")
             return
+          # The swizzled read and host swizzle assume both operands are K-major (TN). Other layouts are
+          # also caught by the generic TDM TileMajor rule today; reject here so that does not stay implicit.
+          if not (state["ProblemType"]["TransposeA"] and not state["ProblemType"]["TransposeB"]):
+            reject(state, printRejectionReason, f"SwizzleTensor{tc} with TDM supports TN only")
+            return
+          # LocalSplitU splits K across wave groups; the swizzled per-wave LDS read offsets do not
+          # account for it (validates wrong, while the same non-swizzled kernel passes).
+          if state["LocalSplitU"] > 1:
+            reject(state, printRejectionReason, f"SwizzleTensor{tc} with TDM does not support LocalSplitU>1 (got {state['LocalSplitU']})")
+            return
+          # Sparse metadata/compressed-K handling is not threaded through the swizzled layout
+          # (validates wrong, while the same non-swizzled kernel passes).
+          if state["ProblemType"]["Sparse"]:
+            reject(state, printRejectionReason, f"SwizzleTensor{tc} with TDM does not support Sparse")
+            return
       # Default GlobalReadVectorWidthA
       if state["EnableMatrixInstruction"]:
         if state["GlobalReadVectorWidthA"] < 0:
