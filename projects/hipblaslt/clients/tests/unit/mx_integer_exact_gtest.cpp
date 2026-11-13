@@ -200,6 +200,86 @@ TEST(HostUnitMXIntegerExact, smoke_PartialKBlockKeepsItsColumnScale)
         }
 }
 
+// With a padded leading dimension the reference covers the generator's whole stride * cols
+// buffer, as the other initializations' references do. Each element, at its padded offset,
+// matches the packed data and the scale the generator maps it to: one per block of 32 within
+// each run of rows elements of the buffer.
+TEST(HostUnitMXIntegerExact, smoke_PaddedLeadingDimensionKeepsTheLayout)
+{
+    struct Shape
+    {
+        size_t rows, cols, stride;
+    };
+    for(Shape shape : {Shape{64, 4, 96}, Shape{33, 4, 66}})
+        for(hipDataType type : {HIP_R_6F_E2M3, HIP_R_6F_E3M2, HIP_R_8F_E4M3, HIP_R_8F_E5M2})
+            for(bool isMatrixA : {true, false})
+            {
+                const size_t count        = shape.stride * shape.cols;
+                const size_t blocksPerRun = (shape.rows + 31) / 32;
+                const size_t scaleCount   = count / shape.rows * blocksPerRun;
+                const bool   fp6          = type == HIP_R_6F_E2M3 || type == HIP_R_6F_E3M2;
+                std::vector<uint8_t> data(fp6 ? fp6Bytes(count) : count);
+                std::vector<uint8_t> scale(scaleCount + 64);
+                // Transposed A and non-transposed B, both K-contiguous.
+                std::vector<float> ref = generateMXInput(type,
+                                                         HIP_R_8U,
+                                                         data.data(),
+                                                         scale.data(),
+                                                         shape.rows,
+                                                         shape.cols,
+                                                         shape.stride,
+                                                         /*isTranspose=*/isMatrixA,
+                                                         isMatrixA ? 32 : 1,
+                                                         isMatrixA ? 1 : 32,
+                                                         isMatrixA,
+                                                         MXScaleLayout::None,
+                                                         "integer_exact");
+                ASSERT_EQ(ref.size(), count) << "rows " << shape.rows << " stride " << shape.stride;
+                for(size_t idx = 0; idx < count; idx++)
+                {
+                    const size_t s = idx / shape.rows * blocksPerRun + idx % shape.rows / 32;
+                    ASSERT_LT(s, scaleCount);
+                    const float element
+                        = fp6 ? decodeFp6(type, fp6At(data, idx)) : decodeFp8(type, data[idx]);
+                    const float expected = element * std::ldexp(1.f, int(scale[s]) - 127);
+                    ASSERT_EQ(ref[idx], expected)
+                        << "offset " << idx << " (k " << idx % shape.stride << ", column "
+                        << idx / shape.stride << ") rows " << shape.rows << " stride "
+                        << shape.stride << " type " << int(type) << " isMatrixA=" << isMatrixA;
+                }
+            }
+}
+
+// When stride * cols is not a multiple of rows, the generator has no scales for the elements
+// past its last whole run of rows, so integer_exact refuses the shape before writing.
+TEST(HostUnitMXIntegerExact, smoke_PaddedLeadingDimensionWithoutWholeRunsIsRefused)
+{
+    const size_t rows = 64, cols = 3, stride = 96;
+    for(hipDataType type : {HIP_R_6F_E2M3, HIP_R_8F_E4M3})
+        for(bool isMatrixA : {true, false})
+        {
+            std::vector<uint8_t> data(stride * cols, 0xA5), scale(stride * cols / 32 + 64, 0xA5);
+            EXPECT_THROW(generateMXInput(type,
+                                         HIP_R_8U,
+                                         data.data(),
+                                         scale.data(),
+                                         rows,
+                                         cols,
+                                         stride,
+                                         /*isTranspose=*/isMatrixA,
+                                         isMatrixA ? 32 : 1,
+                                         isMatrixA ? 1 : 32,
+                                         isMatrixA,
+                                         MXScaleLayout::None,
+                                         "integer_exact"),
+                         std::runtime_error)
+                << "type " << int(type) << " isMatrixA=" << isMatrixA;
+            EXPECT_TRUE(std::all_of(data.begin(), data.end(), [](uint8_t b) { return b == 0xA5; }));
+            EXPECT_TRUE(
+                std::all_of(scale.begin(), scale.end(), [](uint8_t b) { return b == 0xA5; }));
+        }
+}
+
 // The 128x4 scale shuffle the MXFP6 kernels read: the reference must match the shuffled scales.
 TEST(HostUnitMXIntegerExact, smoke_Fp6Tile128x4ReferencesMatchTheShuffledScales)
 {
