@@ -11,7 +11,9 @@ set(HIPBLASLT_HOST_UNIT_TEST_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/bench_options_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/bench_verify_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/cblas_reference_gtest.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mx_scale_format_predicate_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mx_scale_setup_gtest.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mx_tile128x4_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/parser_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rocroller_kernel_match_gtest.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/scaling_format_gtest.cpp
