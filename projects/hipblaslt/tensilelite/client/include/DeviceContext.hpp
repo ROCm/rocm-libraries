@@ -86,16 +86,16 @@ namespace TensileLite
         // 2, 4, ..., 14. `xgmiEngines` is the node's NumSdmaXgmiEngines.
         inline uint32_t sdmaRotateEngine(uint32_t engine, int steps, uint32_t xgmiEngines)
         {
-            if(steps != 0 && xgmiEngines != 14)
-                throw std::runtime_error(
-                    "[fused-a2a] --fused-a2a-sdma-rotate=" + std::to_string(steps)
-                    + " requires 14 xGMI SDMA engines; the node has " + std::to_string(xgmiEngines)
-                    + ". Use --fused-a2a-sdma-rotate=0.");
             if(engine < 2 || engine > 14 || engine % 2 != 0)
                 throw std::runtime_error(
                     "[fused-a2a] a remote peer queue requires an even xGMI SDMA engine in "
                     "2..14; got "
                     + std::to_string(engine) + ".");
+            if(steps != 0 && xgmiEngines != 14)
+                throw std::runtime_error(
+                    "[fused-a2a] --fused-a2a-sdma-rotate=" + std::to_string(steps)
+                    + " requires 14 xGMI SDMA engines; the node has " + std::to_string(xgmiEngines)
+                    + ". Use --fused-a2a-sdma-rotate=0.");
             if(steps == 0)
                 return engine;
             return 2 + 2 * ((((int)engine - 2) / 2 + steps % 7 + 7) % 7);

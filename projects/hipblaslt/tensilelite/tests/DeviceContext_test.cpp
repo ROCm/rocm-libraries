@@ -10,6 +10,7 @@
 
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 using TensileLite::Client::DeviceContext;
@@ -109,6 +110,20 @@ TEST(DeviceContext, SdmaRotateRejectsOddAndPcieEnginesAtAnyRotate)
     EXPECT_THROW(sdmaRotateEngine(7, 0, 6), std::runtime_error);
     EXPECT_THROW(sdmaRotateEngine(0, 0, 14), std::runtime_error);
     EXPECT_EQ(sdmaRotateEngine(6, 0, 6), 6u);
+}
+
+TEST(DeviceContext, SdmaRotateReportsAnUnusableEngineFirst)
+{
+    using TensileLite::Client::sdmaRotateEngine;
+    try
+    {
+        sdmaRotateEngine(3, -1, 6);
+        FAIL();
+    }
+    catch(const std::runtime_error& e)
+    {
+        EXPECT_EQ(std::string(e.what()).find("--fused-a2a-sdma-rotate=0"), std::string::npos);
+    }
 }
 
 TEST(DeviceContext, SdmaRotateRequiresFourteenXgmiEngines)

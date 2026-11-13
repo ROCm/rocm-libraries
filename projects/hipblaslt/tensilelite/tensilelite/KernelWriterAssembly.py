@@ -9340,6 +9340,8 @@ class KernelWriterAssembly(KernelWriter):
     return module
 
   def a2aBatchSpan(self, kernel, tPB):
+    """[A2ABlockLo, A2ABlockLo + A2ABlockCount) := this work-group's batch: whole token blocks
+    whose work-groups add up to about FusedNumCu. Its size does not affect forward progress."""
     module = Module("a2aBatchSpan")
     layout = fusedA2AKernArgLayout()
     numCu  = self.sgprPool.checkOut(1, tag="a2aBatchSpan_numCu", preventOverflow=False)
@@ -10221,15 +10223,18 @@ class KernelWriterAssembly(KernelWriter):
         if self.isConstUnitStride(unrollStride):
           module.add(SMovB32(dst=sgpr(s), src=sgpr("A2AKLocal"),
                              comment="elements per %s shard" % tc))
+          factor = sgpr(idxName)
         else:
-          module.add(SMulI32(dst=sgpr(s), src0=sgpr("A2AKLocal"), src1=unrollStride,
-                             comment="elements per %s shard" % tc))
+          module.add(SMulI32(dst=sgpr(s), src0=sgpr("A2AKLocal"), src1=sgpr(idxName),
+                             comment="shard index * k_local"))
+          factor = unrollStride
       else:
-        module.add(SMulI32(dst=sgpr(s), src0=self.sizeRef(tP["tileIdx"]),
+        module.add(SMulI32(dst=sgpr(s), src0=sgpr(idxName),
                            src1=self.strideRef(tc, tP["tileIdx"]),
-                           comment="elements per %s shard" % tc))
+                           comment="shard index * %s row stride" % tc))
+        factor = self.sizeRef(tP["tileIdx"])
       module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(s + 2), sgpr(s + 3), sgpr(s),
-                                                     sgpr(idxName),
+                                                     factor,
                                                      comment="shard offset in elements"))
       module.add(scalarMultiply64Bpe(s + 2, s + 2, float(tP["bpeGR"]), s,
                                      comment="shard offset"))
