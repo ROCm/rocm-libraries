@@ -117,6 +117,7 @@ Public entry-point changes must keep the five artifacts listed at the top of `sc
 - `driver/README.md`, `docs/reference/env_variables.rst`, `docs/how-to/debug-log.rst`: reproduction and diagnostics. Edit navigation template `docs/sphinx/_toc.yml.in`, not generated `_toc.yml`.
 - `CONTRIBUTING.md`, `.github/pull_request_template.md`, `CHANGELOG.md`: contribution expectations and release notes.
 - `Jenkinsfile`, `vars/utils.groovy`: Jenkins hardware/datatype lanes and `rocm/miopen-dev` image publishing. `../../.github/workflows/component-ci-miopen.yml`: GitHub PR build variants, clang-tidy, naming, header, and ABI gates. `../../.github/workflows/miopen-wrapper-flag-on.yml`: manual-dispatch wrapper-ON lane (`wrapper_abi_check`, installed-header check, parity registration); it does not gate PRs.
+- The HIP package CI naming check and packaged GPU-free dbsync runner build rocjitsu with Ninja. See `test/gtest/README.md` for dbsync validation.
 
 ## Runtime/Tooling Preferences
 
