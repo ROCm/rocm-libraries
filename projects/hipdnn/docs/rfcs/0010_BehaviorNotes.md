@@ -3,7 +3,7 @@
 - Contributors: TBD
 - **Status**: Implemented
 - **Status notes**: Shipped in #7171: backend `HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE`, `EngineDetails.behavior_notes`, `Graph::get_behavior_notes_for_engine()`, and Python bindings. #10226 renumbered the frontend `BehaviorNote` enum to cuDNN values and added note filtering in the cuDNN compatibility shim only.
-- **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
+- **Last verified**: 2026-11-10 against `develop` (1c63e26254a)
 
 ## Table of Contents
 
@@ -57,7 +57,7 @@ The engine path is:
 
 1. `EngineHeuristicDescriptor` asks `EnginePluginResourceManager::getApplicableEngineIds()` for candidate engine IDs.
 2. `EngineHeuristicDescriptor::getEngineConfigs()` creates `EngineConfigDescriptor` objects.
-3. `EngineDescriptor::finalize()` validates engine applicability. The first engine-name, knob-info, or behavior-note attribute query fetches plugin `EngineDetails`.
+3. `EngineDescriptor::finalize()` validates engine applicability. The first engine-name, knob-info, behavior-note, or numerical-note attribute query fetches plugin `EngineDetails`.
 4. `Graph::create_execution_plans()` selects a single engine config.
 
 `EngineDetails` is the correct metadata boundary for behavior notes because plugins already use it to report per-engine details such as knobs.
@@ -140,7 +140,7 @@ Implement `HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE` on `EngineDescriptor`.
 
 Backend behavior:
 
-- `EngineDescriptor::ensureDetailsLoaded()` reads and caches behavior notes on the first engine-name, knob-info, or behavior-note query. Count-only queries also load metadata. A failed load publishes no partial metadata and can be retried.
+- `EngineDescriptor::ensureDetailsLoaded()` reads and caches behavior notes on the first engine-name, knob-info, behavior-note, or numerical-note query. Count-only queries also load metadata. A failed load publishes no partial metadata and can be retried.
 - `getAttribute()` supports `HIPDNN_ATTR_ENGINE_BEHAVIOR_NOTE` with `HIPDNN_TYPE_BEHAVIOR_NOTE`.
 - Count-only query works with `requestedElementCount == 0` and `arrayOfElements == nullptr`.
 - A second query copies values when `requestedElementCount >= elementCount`.
@@ -192,7 +192,7 @@ Bind:
 - `SerializedExecutionPlan` remains unchanged.
 - Per-engine query is the first API because it fits hipDNN's current single-selected-plan model.
 - Filtering by notes is a future frontend selection feature, not part of this RFC.
-- Numerical notes are not part of this RFC. They can reuse the same pattern later.
+- Numerical notes are not part of this RFC; [RFC 0025](./0025_NumericalNotes.md) applies the same pattern to them and records where it differs.
 
 ### 6.1 Included Behavior Notes
 
@@ -334,7 +334,7 @@ Python tests:
 
 The cuDNN compatibility shim (`frontend/include/hipdnn_compatibility/cudnn/detail/graph_wrapper.h`) provides `select_behavior_notes()`, `deselect_behavior_notes()`, `get_behavior_notes()`, and `get_behavior_notes_for_plan_at_index()`. `get_behavior_notes()` and `get_behavior_notes_for_plan_at_index()` call `get_behavior_notes_for_engine()`. The native `hipdnn_frontend::graph::Graph` does not provide these four functions.
 
-The frontend defines a `NumericalNote` enum for cuDNN API parity. hipDNN does not report numerical notes: `EngineDescriptor` returns `HIPDNN_STATUS_NOT_SUPPORTED` for `HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE`. Numerical-note support can use the same per-engine metadata pattern.
+Numerical notes follow the same per-engine metadata pattern; see [RFC 0025](./0025_NumericalNotes.md).
 
 ## 11. Glossary
 

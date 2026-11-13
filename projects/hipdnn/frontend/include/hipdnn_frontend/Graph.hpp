@@ -2615,6 +2615,112 @@ public:
     }
 
     /**
+     * @brief Get numerical notes for an engine applicable to this graph.
+     *
+     * @param engineId Backend global engine ID to query
+     * @param notes Output numerical notes; cleared on entry. A backend that
+     *        answers NOT_SUPPORTED yields {NONDETERMINISTIC}.
+     * @return ErrorCode::OK on success; ErrorCode::INVALID_VALUE if the graph
+     *         has not been built; ErrorCode::HIPDNN_BACKEND_ERROR on other failure
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    Error get_numerical_notes_for_engine(int64_t engineId, std::vector<NumericalNote>& notes) const
+    {
+        notes.clear();
+
+        if(!hasReadyGraphDesc())
+        {
+            return {ErrorCode::INVALID_VALUE,
+                    "Graph has not been built, build the operation graph first. Cannot get "
+                    "numerical notes for engine."};
+        }
+
+        detail::ScopedHipdnnBackendDescriptor engineDesc;
+        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineDescriptorForGraph(
+            engineDesc, _graphDesc->get(), engineId));
+
+        // A backend that predates numerical notes answers NOT_SUPPORTED. Its
+        // engines are treated as nondeterministic, the conservative default; the
+        // backend error it recorded is drained so it does not outlive the query.
+        const auto reportNondeterministic = [&notes]() {
+            std::array<char, 1024> drained{};
+            detail::hipdnnBackend()->getLastErrorString(drained.data(), drained.size());
+            notes = {NumericalNote::NONDETERMINISTIC};
+            return Error{ErrorCode::OK, ""};
+        };
+
+        int64_t noteCount = 0;
+        const auto countStatus
+            = detail::hipdnnBackend()->backendGetAttribute(engineDesc.get(),
+                                                           HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE,
+                                                           HIPDNN_TYPE_NUMERICAL_NOTE,
+                                                           0,
+                                                           &noteCount,
+                                                           nullptr);
+        if(countStatus == HIPDNN_STATUS_NOT_SUPPORTED)
+        {
+            return reportNondeterministic();
+        }
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(countStatus,
+                                         "Failed to get numerical note count from engine "
+                                         "descriptor.");
+
+        if(noteCount < 0)
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Backend returned a negative numerical note count: "
+                        + std::to_string(noteCount)};
+        }
+
+        if(noteCount == 0)
+        {
+            return {ErrorCode::OK, ""};
+        }
+
+        const auto expectedNoteCount = noteCount;
+        std::vector<hipdnnBackendNumericalNote_t> backendNotes(static_cast<size_t>(noteCount));
+        const auto readStatus
+            = detail::hipdnnBackend()->backendGetAttribute(engineDesc.get(),
+                                                           HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE,
+                                                           HIPDNN_TYPE_NUMERICAL_NOTE,
+                                                           noteCount,
+                                                           &noteCount,
+                                                           backendNotes.data());
+        if(readStatus == HIPDNN_STATUS_NOT_SUPPORTED)
+        {
+            return reportNondeterministic();
+        }
+        HIPDNN_RETURN_ON_BACKEND_FAILURE(readStatus,
+                                         "Failed to get numerical notes from engine descriptor.");
+
+        if(noteCount != expectedNoteCount)
+        {
+            return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                    "Backend returned a numerical note count of " + std::to_string(noteCount)
+                        + " after reporting " + std::to_string(expectedNoteCount) + "."};
+        }
+
+        notes.reserve(backendNotes.size());
+        for(auto note : backendNotes)
+        {
+            // A note this frontend does not recognize is dropped rather than
+            // surfaced: a newer backend may define notes past this frontend's
+            // range, and reporting them would require inventing a meaning.
+            if(const auto mapped = fromHipdnnNumericalNote(note); mapped.has_value())
+            {
+                notes.push_back(*mapped);
+            }
+            else
+            {
+                HIPDNN_FE_LOG_INFO(
+                    "Skipping numerical note unknown to this frontend: " << static_cast<int>(note));
+            }
+        }
+
+        return {ErrorCode::OK, ""};
+    }
+
+    /**
      * @brief Create execution plans using heuristics
      *
      * Queries the backend for available engines and selects based on the

@@ -107,10 +107,12 @@ public:
     EngineRecord(std::int64_t id,
                  std::int64_t index,
                  std::vector<cudnnBackendBehaviorNote_t> behaviorNotes,
+                 std::vector<cudnnBackendNumericalNote_t> numericalNotes,
                  std::optional<std::string> name)
         : _id(id)
         , _index(index)
         , _behaviorNotes(std::move(behaviorNotes))
+        , _numericalNotes(std::move(numericalNotes))
         , _name(std::move(name))
     {
     }
@@ -182,9 +184,11 @@ public:
         return _name;
     }
 
-    std::vector<cudnnBackendNumericalNote_t> numericalNotes() const
+    // Only notes with a cuDNN counterpart.
+    const std::vector<cudnnBackendNumericalNote_t>& numericalNotes() const
     {
-        return v8::numericalNotes(_id);
+        loadNotes();
+        return _numericalNotes;
     }
 
 private:
@@ -222,6 +226,8 @@ private:
         std::call_once(_notesOnce, [this] {
             std::vector<cudnnBackendBehaviorNote_t> notes = readCudnnBehaviorNotes(
                 _hipdnnEngine, "reading the behavior notes of engine " + std::to_string(_id));
+            std::vector<cudnnBackendNumericalNote_t> numericalNotes = readCudnnNumericalNotes(
+                _hipdnnEngine, "reading the numerical notes of engine " + std::to_string(_id));
             // The name is informational, so a backend without it is not an error.
             std::string name;
             std::optional<std::string> engineName;
@@ -233,6 +239,7 @@ private:
                 engineName = std::move(name);
             }
             _behaviorNotes = std::move(notes);
+            _numericalNotes = std::move(numericalNotes);
             _name = std::move(engineName);
         });
     }
@@ -246,6 +253,7 @@ private:
     mutable std::vector<EngineKnob> _knobs;
     mutable std::once_flag _notesOnce;
     mutable std::vector<cudnnBackendBehaviorNote_t> _behaviorNotes;
+    mutable std::vector<cudnnBackendNumericalNote_t> _numericalNotes;
     mutable std::optional<std::string> _name;
 };
 
@@ -522,12 +530,14 @@ inline std::shared_ptr<const ConfigRecord>
     makeLoadedConfigRecord(std::int64_t id,
                            std::int64_t index,
                            std::vector<cudnnBackendBehaviorNote_t> behaviorNotes,
+                           std::vector<cudnnBackendNumericalNote_t> numericalNotes,
                            KnobChoices knobChoices,
                            KnobChoices requested,
                            std::optional<std::string> name)
 {
     return std::make_shared<const ConfigRecord>(
-        std::make_shared<const EngineRecord>(id, index, std::move(behaviorNotes), std::move(name)),
+        std::make_shared<const EngineRecord>(
+            id, index, std::move(behaviorNotes), std::move(numericalNotes), std::move(name)),
         std::move(requested),
         std::move(knobChoices),
         std::vector<::hipdnn_frontend::KnobSetting>{});

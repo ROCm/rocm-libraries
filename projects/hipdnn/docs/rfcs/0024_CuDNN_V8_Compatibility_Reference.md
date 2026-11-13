@@ -278,7 +278,7 @@ Evidence: FALLBACK-only check at
 | `CUDNN_ATTR_ENGINE_OPERATION_GRAPH` :266 | `=` | forwarded |
 | `CUDNN_ATTR_ENGINE_GLOBAL_INDEX` :279 | `=`, but the value is a 64-bit hash of the engine name | dense `0..N-1` index ↔ hipDNN ID. The engines are those returned by hipDNN's FALLBACK heuristic whose default config finalizes, sorted by **signed** engine ID; enumerated lazily on the first engine query of a graph (needs a HIP device) and cached per graph (RFC §3.5). At `EngineBuilder::build()`, a negative index → `BAD_PARAM`, an index past the count → `NOT_SUPPORTED` |
 | `CUDNN_ATTR_ENGINE_KNOB_INFO` :315 (get) | `=`; get allocates new descriptors | read at `EngineBuilder::build()`; `getSupportedKnobs()` lists the projected knobs |
-| `CUDNN_ATTR_ENGINE_NUMERICAL_NOTE` (EP.h:167, F.h:56) | NS | never queried; synthesized: `NONDETERMINISTIC` unless the engine claims determinism; nothing else (RFC §3.5) |
+| `CUDNN_ATTR_ENGINE_NUMERICAL_NOTE` (EP.h:167, F.h:56) | `=`; get-only | read from hipDNN; an engine that declares none is reported `NONDETERMINISTIC` (RFC §3.5, [RFC 0025](./0025_NumericalNotes.md)); mapped to hipDNN's by name |
 | `CUDNN_ATTR_ENGINE_BEHAVIOR_NOTE` (EP.h:193, F.h:84) | `=`; enumerators differ | read from hipDNN, mapped by name; only `RUNTIME_COMPILATION` exists on both sides |
 | `CUDNN_ATTR_ENGINE_LAYOUT_INFO`, `SM_COUNT_TARGET`, `DEVICEPROP` | NS (`SM_COUNT_TARGET` `≈` `CU_COUNT_TARGET_EXT`) | not read by the builders |
 | `CUDNN_ATTR_KNOB_INFO_TYPE` / `MAXIMUM_VALUE` / `MINIMUM_VALUE` / `STRIDE` :126-150 | `=`; `TYPE` is a string, T! | projected through the v9 compatibility layer's `detail/knob_wrapper.h`; a knob with no cuDNN type, or whose valid values cannot be expressed as min / max / stride, is hidden; when two projectable knobs of one engine map to the same cuDNN type, both are hidden |
@@ -289,7 +289,7 @@ Evidence: FALLBACK-only check at
 | `CUDNN_ATTR_ENGINECFG_WORKSPACE_SIZE` | `=`, get-only | not read by the builders (the plan's workspace size is) |
 | `CUDNN_ATTR_ENGINECFG_INTERMEDIATE_INFO` | NS | not read by the builders |
 
-Evidence: `projects/hipdnn/backend/src/descriptors/EngineDescriptor.cpp:180-188` (numerical note,
+Evidence: `projects/hipdnn/backend/src/descriptors/EngineDescriptor.cpp:201-206` (numerical note served;
 layout info, CU count, device properties → `NOT_SUPPORTED`);
 `projects/hipdnn/backend/src/descriptors/EngineConfigDescriptor.cpp:103-108` (`KNOB_CHOICES` get →
 `NOT_SUPPORTED`).
@@ -337,7 +337,7 @@ by the v9 compatibility layer's existing switch
 | Convolution mode | same names |
 | Heuristic modes | hipDNN's backend has only `FALLBACK`. The compatibility layer has no converter between `cudnnBackendHeurMode_t` and `HeurMode_t`; the v8 heuristics accept every `cudnnBackendHeurMode_t` mode, run FALLBACK, and send A, B and INSTANT (as A) as a policy order (§1.3) |
 | Behavior notes | shared: `RUNTIME_COMPILATION`. cuDNN-only: `REQUIRES_FILTER_INT8x32_REORDER`, `REQUIRES_BIAS_INT8x32_REORDER`, `SUPPORTS_CUDA_GRAPH_NATIVE_API`, `CUBLASLT_DEPENDENCY`. hipDNN-only: `REQUIRES_LAYOUT_TRANSFORM`, `SUPPORTS_GRAPH_CAPTURE`, `EXTERNAL_LIBRARY_DEPENDENCY`, `SUPPORTS_EXECUTION_PLAN_SERIALIZATION` |
-| Numerical notes | **MISSING** in hipDNN |
+| Numerical notes | same names; in-tree engines report only `NONDETERMINISTIC` ([RFC 0025](./0025_NumericalNotes.md)) |
 | Reduce-tensor ops | same names |
 | Resample modes | hipDNN lacks `NEAREST`, `BILINEAR`. cuDNN's `AVGPOOL`, an alias of `AVGPOOL_INCLUDE_PADDING`, has no hipDNN name; the compatibility layer declares it as the same alias |
 | Padding modes | hipDNN lacks `EDGE_VAL_PAD`; adds `NOT_SET` |
@@ -501,7 +501,7 @@ pins the last column.
 | `EngineConfig_v8` | `ENGINECFG`, `KNOB_CHOICE` ×COUNTS: `KNOB_CHOICE_KNOB_TYPE` (KNOB_TYPE), `KNOB_CHOICE_KNOB_VALUE` (INT64), `ENGINECFG_ENGINE`, `ENGINECFG_KNOB_CHOICES` (BACKEND_DESCRIPTOR) | `ConfigRecord`: engine, knob choices | knob-free: the engine's default `ENGINECFG`; with knob choices: its own `ENGINECFG`, built and finalized at `EngineConfigBuilder::build()` |
 | `ExecutionPlan_v8` | `EXECUTION_PLAN`, temporaries `ENGINE`, `KNOB_CHOICE`: `ENGINE_CONFIG` (set and get), `KERNEL_CACHE`, `HANDLE` (`loadFromJson` only), `JSON_REPRESENTATION` (CHAR, set and get), Get `WORKSPACE_SIZE`; Get on config `ENGINECFG_ENGINE`, `ENGINECFG_KNOB_CHOICES`; Get on engine `GLOBAL_INDEX`, `NUMERICAL_NOTE`, `BEHAVIOR_NOTE`; Get on knob `KNOB_TYPE`, `KNOB_VALUE` | `PlanRecord`: config record, plan, workspace size, tag, notes; a loaded plan's config record holds the JSON's engine index, ID, name, notes, knobs and requested knob choices | the finalized `EXECUTION_PLAN`, built or deserialized |
 | `VariantPack_v8` | `VARIANT_PACK`: `DATA_POINTERS` (VOID_PTR×n), `UNIQUE_IDS` (INT64×n), `WORKSPACE` (VOID_PTR) | `VariantPackRecord` | the finalized `VARIANT_PACK` |
-| Filters | temporary `ENGINE`: Get `ENGINECFG_ENGINE`, `ENGINE_NUMERICAL_NOTE` / `ENGINE_BEHAVIOR_NOTE` (`Filters.h:47-90`) | — | `hasNumericalNote` reads the engine's ID only; `hasBehaviorNote` reads `ENGINE_BEHAVIOR_NOTE` |
+| Filters | temporary `ENGINE`: Get `ENGINECFG_ENGINE`, `ENGINE_NUMERICAL_NOTE` / `ENGINE_BEHAVIOR_NOTE` (`Filters.h:47-90`) | — | `hasNumericalNote` reads `ENGINE_NUMERICAL_NOTE`, `hasBehaviorNote` reads `ENGINE_BEHAVIOR_NOTE`; a failed query answers false |
 | Errata | temporary `TENSOR`: Get the conv op's X/W, X/DW or DX/W tensors, then `TENSOR_DIMENSIONS` | — | reads the operation record's tensor records |
 | find/get plan, cache | `cudnnBackendExecute`, `cudnnGetStream`, CUDA events | — | `cudnnBackendExecute` passthrough; hipDNN profiling-control descriptor for timing; no `cudnnGetStream` |
 

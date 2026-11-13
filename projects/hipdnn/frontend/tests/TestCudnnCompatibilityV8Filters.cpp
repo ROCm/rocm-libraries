@@ -66,6 +66,7 @@ TEST_F(TestCudnnCompatibilityV8Filters, QuantizedLoopSeesRejectedSet)
     const std::int64_t deterministic = hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID;
     const std::vector<std::int64_t> ids = {9, deterministic, 10};
     installHeuristicResults(ids);
+    installNumericalNotes(deterministic, {});
     fe::OperationGraph_v8 graph = convGraph();
     fe::EngineConfigList engineConfigsList = engineConfigs(graph);
     fe::EngineConfigList filtered;
@@ -81,7 +82,8 @@ TEST_F(TestCudnnCompatibilityV8Filters, QuantizedLoopSeesRejectedSet)
               (std::vector<std::int64_t>{denseIndex(ids, 9), denseIndex(ids, 10)}));
 }
 
-TEST_F(TestCudnnCompatibilityV8Filters, TensorCoreNoteNeverReported)
+// An engine that declares no numerical notes is reported NONDETERMINISTIC by hipDNN.
+TEST_F(TestCudnnCompatibilityV8Filters, UndeclaredEngineReportsNondeterministicOnly)
 {
     installEngines(2);
     fe::OperationGraph_v8 graph = convGraph();
@@ -93,6 +95,58 @@ TEST_F(TestCudnnCompatibilityV8Filters, TensorCoreNoteNeverReported)
         EXPECT_FALSE(fe::hasNumericalNote<CUDNN_NUMERICAL_NOTE_TENSOR_CORE>(raw));
         EXPECT_FALSE(fe::hasNumericalNote<CUDNN_NUMERICAL_NOTE_DOWN_CONVERT_INPUTS>(raw));
     }
+}
+
+TEST_F(TestCudnnCompatibilityV8Filters, NumericalNoteMapped)
+{
+    installEngines(3);
+    installNumericalNotes(0, {HIPDNN_NUMERICAL_NOTE_TENSOR_CORE, HIPDNN_NUMERICAL_NOTE_FFT});
+    installNumericalNotes(1, {});
+    fe::OperationGraph_v8 graph = convGraph();
+    const fe::EngineConfigList configs = engineConfigs(graph);
+    ASSERT_EQ(configs.size(), 3U);
+
+    EXPECT_TRUE(fe::hasNumericalNote<CUDNN_NUMERICAL_NOTE_TENSOR_CORE>(
+        configs[0]->get_backend_descriptor()));
+    EXPECT_TRUE(
+        fe::hasNumericalNote<CUDNN_NUMERICAL_NOTE_FFT>(configs[0]->get_backend_descriptor()));
+    EXPECT_FALSE(fe::hasNumericalNote<CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC>(
+        configs[0]->get_backend_descriptor()));
+    // An explicit empty list is a claim, not the absent field.
+    EXPECT_FALSE(fe::hasNumericalNote<CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC>(
+        configs[1]->get_backend_descriptor()));
+    EXPECT_TRUE(fe::hasNumericalNote<CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC>(
+        configs[2]->get_backend_descriptor()));
+}
+
+// A value this layer has no cuDNN counterpart for is dropped, never aliased onto a note.
+TEST_F(TestCudnnCompatibilityV8Filters, UnknownNumericalNoteIsDropped)
+{
+    installEngines(1);
+    installNumericalNotes(
+        0, {static_cast<hipdnnBackendNumericalNote_t>(77), HIPDNN_NUMERICAL_NOTE_WINOGRAD});
+    fe::OperationGraph_v8 graph = convGraph();
+    const fe::EngineConfigList configs = engineConfigs(graph);
+    ASSERT_EQ(configs.size(), 1U);
+
+    EXPECT_TRUE(
+        fe::hasNumericalNote<CUDNN_NUMERICAL_NOTE_WINOGRAD>(configs[0]->get_backend_descriptor()));
+    EXPECT_FALSE(fe::hasNumericalNote<CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC>(
+        configs[0]->get_backend_descriptor()));
+}
+
+// A failed query answers false, as upstream's helpers do, so the engine passes a filter that
+// rejects NONDETERMINISTIC.
+TEST_F(TestCudnnCompatibilityV8Filters, FailedNumericalNoteQueryAnswersFalse)
+{
+    installEngines(1);
+    fe::OperationGraph_v8 graph = convGraph();
+    const fe::EngineConfigList configs = engineConfigs(graph);
+    ASSERT_EQ(configs.size(), 1U);
+    failNumericalNoteQueries(HIPDNN_STATUS_INTERNAL_ERROR);
+
+    EXPECT_FALSE(fe::hasNumericalNote<CUDNN_NUMERICAL_NOTE_NONDETERMINISTIC>(
+        configs[0]->get_backend_descriptor()));
 }
 
 TEST_F(TestCudnnCompatibilityV8Filters, BehaviorNoteMapped)

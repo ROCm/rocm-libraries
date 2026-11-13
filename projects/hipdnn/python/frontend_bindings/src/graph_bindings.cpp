@@ -321,6 +321,29 @@ void graphBindings(nb::module_& m)
             },
             nb::arg("engine_id"),
             "Get behavior notes for an engine applicable to the built operation graph.")
+        .def(
+            "get_numerical_notes_for_engine",
+            [](graph::Graph& g, int64_t engineId) {
+                std::vector<NumericalNote> notes;
+                auto err = g.get_numerical_notes_for_engine(engineId, notes);
+                if(err.is_bad())
+                {
+                    throw std::runtime_error("Failed to get numerical notes for engine: "
+                                             + err.get_message());
+                }
+                std::vector<NumericalNote> knownNotes;
+                knownNotes.reserve(notes.size());
+                for(auto note : notes)
+                {
+                    if(isKnownNumericalNote(note))
+                    {
+                        knownNotes.push_back(note);
+                    }
+                }
+                return knownNotes;
+            },
+            nb::arg("engine_id"),
+            "Get numerical notes for an engine applicable to the built operation graph.")
         .def("check_support", &graph::Graph::check_support)
         .def("build_plans",
              &graph::Graph::build_plans,
