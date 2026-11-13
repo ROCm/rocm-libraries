@@ -25,6 +25,7 @@
  * ************************************************************************ */
 
 #include "check_numerics_matrix.hpp"
+#include "alpha_mode_logging.hpp"
 #include "check_synchronizer.hpp"
 #include "definitions.h"
 #include "handle.h"
@@ -658,6 +659,20 @@ rocblaslt_status
                                           num_batches_a,
                                           num_rows_a,
                                           lda);
+        if(validArgs == rocblaslt_status_continue)
+            validArgs = validateFp6Tile128x4Args(matA[i]->type,
+                                                 matB[i]->type,
+                                                 matmul_descr[i]->op_A,
+                                                 matmul_descr[i]->op_B,
+                                                 matA[i]->order,
+                                                 matB[i]->order,
+                                                 matmul_descr[i]->scaleAType,
+                                                 matmul_descr[i]->scaleBType,
+                                                 m,
+                                                 n,
+                                                 k,
+                                                 lda,
+                                                 ldb);
         if(validArgs != rocblaslt_status_continue)
             return validArgs;
 
@@ -967,7 +982,7 @@ rocblaslt_status rocblaslt_matmul(rocblaslt_handle             handle,
             workspace,
             "workSpaceSizeInBytes",
             workspaceSizeInBytes,
-            (matmul_descr->pointermode) ? "alphaVector" : "alpha",
+            rocblaslt::traceAlphaLabel(matmul_descr->pointermode),
             alpha_scalar, 
             "beta",
             beta_scalar,
@@ -1097,6 +1112,21 @@ rocblaslt_status rocblaslt_gemm_create_cpp_impl_2(const rocblaslt_handle handle,
             b,
             opA == HIPBLAS_OP_N ? m : k,
             lda);
+    if(status == rocblaslt_status_continue)
+        status = validateFp6Tile128x4Args(
+            type_a,
+            type_b,
+            opA,
+            opB,
+            problemtype.order_a,
+            problemtype.order_b,
+            static_cast<RocblasltContractionProblem::ScalingFormat>(rocEpilogue.scaling_a_type),
+            static_cast<RocblasltContractionProblem::ScalingFormat>(rocEpilogue.scaling_b_type),
+            m,
+            n,
+            k,
+            lda,
+            ldb);
 
     void *      bias = nullptr, *scaleAlphaVec = nullptr, *E = nullptr;
     int64_t     lde = 0, batch_stride_e = 0;
@@ -1330,7 +1360,9 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                                          size_t&                   gemmCount)
 {
     // internalArg0[11] is launch-wide; each record still owns its scalar pointer.
-    const bool deviceScalarAlpha = inputs[0].deviceScalarAlpha;
+    if(inputs.size() < m.size())
+        return rocblaslt_status_invalid_value;
+    const bool deviceScalarAlpha = !inputs.empty() && inputs[0].deviceScalarAlpha;
     for(const auto& input : inputs)
         if(input.deviceScalarAlpha != deviceScalarAlpha)
             return rocblaslt_status_invalid_value;
@@ -1455,6 +1487,23 @@ rocblaslt_status rocblaslt_groupedgemm_create_cpp_impl_2(const rocblaslt_handle 
                                           b[i],
                                           opA == HIPBLAS_OP_N ? m[i] : k[i],
                                           lda[i]);
+        if(validArgs == rocblaslt_status_continue)
+            validArgs
+                = validateFp6Tile128x4Args(type_a,
+                                           type_b,
+                                           opA,
+                                           opB,
+                                           orderA,
+                                           orderB,
+                                           static_cast<RocblasltContractionProblem::ScalingFormat>(
+                                               rocEpilogue[iIdx].scaling_a_type),
+                                           static_cast<RocblasltContractionProblem::ScalingFormat>(
+                                               rocEpilogue[iIdx].scaling_b_type),
+                                           m[i],
+                                           n[i],
+                                           k[i],
+                                           lda[i],
+                                           ldb[i]);
         if(validArgs != rocblaslt_status_continue)
             return validArgs;
 

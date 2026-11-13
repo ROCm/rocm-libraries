@@ -12,19 +12,32 @@ with and carries round the loop). A test adds the queries specific to its
 kernel in a subclass.
 
 It reads the one kernel of a module as the rocke lowering prints it; it is not a
-general LLVM IR parser.
+general LLVM IR parser. :func:`intrinsic_calls` finds the calls of one intrinsic.
 """
 
 from __future__ import annotations
 
 import re
 
-__all__ = ["KernelIR"]
+__all__ = ["KernelIR", "intrinsic_calls"]
 
 _DEFINITION = re.compile(r"^\s*(%[\w.]+) = (.*)$")
 _LABEL = re.compile(r"^([\w.]+):")
 _CALLEE = re.compile(r"@([\w.]+)\((.*)\)")
 _INCOMING = re.compile(r"\[\s*([^,\]]+?)\s*,\s*(%[\w.]+)\s*\]")
+
+
+def intrinsic_calls(llvm_text: str, intrinsic: str) -> list[str]:
+    """The call lines of ``intrinsic`` (named with or without its ``@``) in ``llvm_text``, with or
+    without LLVM's overload type suffixes (``.v8i32``, ``.f16``): another intrinsic that merely
+    starts with the same name, such as its ``.tied`` twin, does not count."""
+    name = re.escape(intrinsic.removeprefix("@"))
+    pattern = re.compile(rf"@{name}(\.v?\d*(?:i|f|bf)\d+)*\(")
+    return [
+        line
+        for line in llvm_text.splitlines()
+        if "call" in line and pattern.search(line)
+    ]
 
 
 class KernelIR:

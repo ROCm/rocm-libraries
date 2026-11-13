@@ -32,9 +32,15 @@ bool to_int(std::string_view s, int& out)
 bool to_bool(std::string_view s, bool& out)
 {
     if(s == "true" || s == "1")
-        return out = true, true;
+    {
+        out = true;
+        return true;
+    }
     if(s == "false" || s == "0")
-        return out = false, true;
+    {
+        out = false;
+        return true;
+    }
     return false;
 }
 

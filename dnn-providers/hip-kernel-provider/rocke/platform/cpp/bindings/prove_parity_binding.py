@@ -56,6 +56,21 @@ _COMPLETE_TABLES = frozenset(
     }
 )
 
+# Library families (library/cpp) bind into rocke_library_engine, built beside
+# rocke_engine from the same engine archive. Absent in a platform-only build.
+try:
+    import rocke_library_engine  # noqa: E402
+except ImportError:
+    rocke_library_engine = None
+
+
+def _entry_point(name):
+    """A family's binding entry point, from whichever module carries it."""
+    for module in (rocke_engine, rocke_library_engine):
+        if module is not None and hasattr(module, name):
+            return getattr(module, name)
+    raise AttributeError(f"no binding module carries {name!r}")
+
 
 def _assert_build_id_match():
     """Cross-check the loaded .so's build-id against the emit dir's BUILD_ID.
@@ -2010,7 +2025,7 @@ def main():
         f"{'family':<40}{'nonempty':<10}{'match':<8}{'mismatch':<10}{'empty':<7}status"
     )
     for fam, lower_name, cfgs, fam_arch in FAMILIES:
-        lower = getattr(rocke_engine, lower_name)
+        lower = _entry_point(lower_name)
         n_nonempty = n_match = n_mismatch = n_empty = 0
         details = []
         for idx, cfg in enumerate(cfgs):

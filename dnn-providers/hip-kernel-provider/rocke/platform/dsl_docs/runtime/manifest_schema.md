@@ -32,7 +32,7 @@ Every manifest carries:
 | `engine_build_id`    | string  | content hash of the engine that produced the artifact (`"unknown"` if the `rocke_engine` binding isn't importable) |
 | `engine_version`     | string  | version of the engine that produced the artifact (`"unknown"` fallback) |
 
-The `engine_build_id` / `engine_version` fields stamp the engine provenance (from the C++ engine's `rocke_build_id()` / `rocke_engine_version()`, exposed via the `rocke_engine` binding) so a consumer such as the rocke-provider can fail loud on a stale or mixed bundle instead of silently mixing artifacts. They are artifact stamps only and never enter the emitted IR. Helpers: `helpers/manifest.py::engine_build_id()` / `engine_version()`.
+The `engine_build_id` / `engine_version` fields stamp the engine provenance (from the C++ engine's `rocke_build_id()` / `rocke_engine_version()`, exposed via the `rocke_engine` binding) so a consumer such as the rocke-provider can fail loud on a stale or mixed bundle instead of silently mixing artifacts. They are artifact stamps only and never enter the emitted IR. Helpers: `helpers/manifest.py::engine_build_id()` / `engine_version()`. The build id hashes the engine's C++ sources and, when the sibling `library/cpp` tree is present, the library-owned C++ mirrors (e.g. conv) too, so an edit to either changes it (`cmake/rocke_build_id.cmake`, mirrored by `portable_ir/src/online.py::source_build_id`).
 
 ## Per-Kind Fields
 

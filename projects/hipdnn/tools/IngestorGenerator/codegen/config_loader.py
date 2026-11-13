@@ -43,6 +43,7 @@ from .models import (
     KNOWN_ARCH_BASE_IDS,
     LAUNCH_NAME_PATTERN,
     MIN_LAUNCHES,
+    NATIVE_SYMBOL_NAMESPACE_PATTERN,
     PATH_STEM_PATTERN,
     RESERVED_SLOT_NAME,
     ROCKE_TARGETS,
@@ -228,7 +229,6 @@ def load_config(path: Path) -> IngestorConfig:
         heuristic="none" if slotted else engine_raw.get("heuristic", "native"),
         census_name_symbol=engine_raw.get("census_name_symbol"),
         native_symbols_from=engine_raw.get("native_symbols_from", ""),
-        native_symbols_from_slug=engine_raw.get("native_symbols_from_slug"),
         shared_workspace=engine_raw.get("shared_workspace", ""),
         slug_override=engine_raw.get("slug"),
         heuristics=_load_heuristics(engine_raw, slotted),
@@ -451,6 +451,9 @@ def load_config(path: Path) -> IngestorConfig:
         specialization=dict(specialization_raw),
         reduction=dict(raw.get("reduction") or {}),
         slots=slots,
+    )
+    config.engine.trained_catalog_sha256 = _load_trained_catalog_sha256(
+        engine_raw, config.engine.heuristics
     )
 
     _validate_config(config)
@@ -1422,6 +1425,35 @@ def _require_config_shapes(raw: dict) -> None:
             _require_mapping(pack_raw["kernel_template"], f"{where} kernel_template")
 
 
+_SHA256 = re.compile(r"[0-9a-f]{64}")
+
+
+def _load_trained_catalog_sha256(engine_raw: dict, heuristics: dict) -> dict:
+    """Read ``engine.trained_catalog_sha256``: arch -> the `tools/catalog_fingerprint.py`
+    hash of the catalog the ``engine.heuristics.sort_kernel_catalog`` models bound under
+    that arch were trained on (tools/catalog_fingerprint.py prints it). When set, its keys must be
+    exactly those arch keys, so every bound ranker's catalog is gated. Absent is ``{}``,
+    which gates nothing."""
+    raw = engine_raw.get("trained_catalog_sha256")
+    if raw is None:
+        return {}
+    scope = "engine.trained_catalog_sha256"
+    trained = set(heuristics.get("sort_kernel_catalog", {}))
+    _require_mapping(raw, scope)
+    if set(raw) != trained:
+        raise ConfigError(
+            f"{scope} keys {sorted(raw)} must equal the arch keys bound under "
+            f"engine.heuristics.sort_kernel_catalog ({sorted(trained)})."
+        )
+    for arch, digest in raw.items():
+        if not isinstance(digest, str) or not _SHA256.fullmatch(digest):
+            raise ConfigError(
+                f"{scope}.{arch} must be 64 lowercase hex digits "
+                f"(tools/catalog_fingerprint.py); got {digest!r}."
+            )
+    return dict(raw)
+
+
 #: Every key each level of the config understands. Closed on purpose -- see
 #: `_reject_unknown_keys`.
 _KNOWN_TOP = frozenset(
@@ -1448,10 +1480,10 @@ _KNOWN_ENGINE = frozenset(
         "heuristic",
         "census_name_symbol",
         "native_symbols_from",
-        "native_symbols_from_slug",
         "shared_workspace",
         "slug",
         "heuristics",
+        "trained_catalog_sha256",
     }
 )
 #: RFC 0021 §4's per-slot selection members, plus the slot's own ``specialization``.
@@ -1836,22 +1868,17 @@ def _check_engine_name_scoped(config: IngestorConfig) -> None:
             f"global uniqueness."
         )
     borrowed = config.engine.native_symbols_from
-    if borrowed and (
+    if borrowed != "" and (
         not isinstance(borrowed, str)
-        or not ENGINE_NAME_PATTERN.match(borrowed)
-        or borrowed == config.engine.name
+        or not NATIVE_SYMBOL_NAMESPACE_PATTERN.match(borrowed)
+        or borrowed == config.engine.own_native_symbol_namespace
     ):
         raise ConfigError(
-            f"engine.native_symbols_from {borrowed!r} must name ANOTHER engine, "
-            f"scoped 'namespace:local' like engine.name: the engine whose registered "
-            f"native symbols this engine's descriptors name. Omit it to name this "
-            f"engine's own."
-        )
-    if config.engine.native_symbols_from_slug and not borrowed:
-        raise ConfigError(
-            "engine.native_symbols_from_slug is only meaningful alongside "
-            "engine.native_symbols_from: it states the borrowed engine's own "
-            "slug_override, which only matters when symbols are borrowed."
+            f"engine.native_symbols_from {borrowed!r} must state ANOTHER engine's "
+            f"dotted native-symbol namespace, exactly as that engine registers it "
+            f"(e.g. 'hipkernel.gfx950_attention_unified_2d', following its slug), "
+            f"matching ^[A-Za-z0-9_.-]+\\.[A-Za-z0-9_]+$. Omit it to name this "
+            f"engine's own ({config.engine.own_native_symbol_namespace!r})."
         )
     if config.engine.heuristic not in ("native", "none"):
         raise ConfigError(
@@ -2676,7 +2703,7 @@ def _check_slot_declarations(config: IngestorConfig) -> None:
         _reject_repeats(slot.knobs, "knob", f"slots[{slot.name}].knobs")
         _check_knobs_int_typed(view, where=f"slots[{slot.name}].knobs")
     token = config.engine.shared_workspace
-    if token and (
+    if token != "" and (
         not isinstance(token, str)
         or not token.startswith(SHARED_WORKSPACE_TOKEN_PREFIX)
         or token == SHARED_WORKSPACE_TOKEN_PREFIX
@@ -2914,7 +2941,7 @@ def _validate_config(config: IngestorConfig) -> list[str]:
     if config.is_slotted:
         _check_slot_declarations(config)  # #2, per slot
     else:
-        if config.engine.shared_workspace:
+        if config.engine.shared_workspace != "":
             raise ConfigError(
                 "key 'shared_workspace' requires 'slots': only a slotted engine "
                 "has a shared workspace region (RFC 0021 §6)."

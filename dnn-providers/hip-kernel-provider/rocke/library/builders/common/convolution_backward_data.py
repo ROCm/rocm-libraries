@@ -1,13 +1,15 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Packaging adapter for the gfx950 shape-generic AOT backward-data convolution.
+"""Packaging adapter for the shape-generic AOT backward-data convolution engines.
 
-This is the dgrad sibling of the ``Gfx950ConvFwdAot*`` pieces of
-:mod:`builders.common.convolution_forward`: one flat descriptor spec
-(:class:`Gfx950ConvDgradAotSpec`, every field an ``int`` or ``str``) per rocKE
-``KernelIdentity`` of the dgrad AOT sweeps, built exactly as the sweeps build it, so
-the packaged IR is the swept kernel's byte for byte apart from its symbol name.
+Two engines share it, one per architecture (:data:`TARGETS`):
+``hipkernel:Gfx950ConvDgradAot`` (wave64) and ``hipkernel:Gfx1250ConvDgradAot``
+(wave32). Each has one flat descriptor spec (:class:`Gfx950ConvDgradAotSpec`,
+:class:`Gfx1250ConvDgradAotSpec`, every field an ``int`` or ``str``) per rocKE
+``KernelIdentity`` of its dgrad AOT sweeps, built exactly as the sweeps build it, so
+the packaged IR is the swept kernel's byte for byte apart from its symbol name. The
+gfx1250 spec is the gfx950 one plus the knobs of its own pipelines.
 
 The contract is 2-D cross-correlation, NHWK dY, KYXC W, NHWC dX, uniform fp16/bf16,
 fp32 accumulation, symmetric padding. Three families are packaged:
@@ -18,32 +20,38 @@ fp32 accumulation, symmetric padding. Three families are packaged:
   GEMM over the filter. A binary may bake its filter, stride and dilation, and the
   dY-halo, tap-outer K loop and patch forms serve only the problems they compute. The
   ABI is the 44-argument dgrad block of ``kernels.common.conv_abi``.
-* **Direct** (``kernel_family`` 1), every dgrad pipeline of rocKE's direct sweep:
-  ``depthwise_dgrad`` and ``depthwise_dgrad_win`` (the direct dgrad ABI),
-  ``grouped_dgrad_fused`` and ``grouped_dgrad_4c`` (one forward kernel over the
-  transposed problem reading the original weights), and the MFMA pipelines
+* **Direct** (``kernel_family`` 1), the dgrad pipelines of rocKE's direct sweep. On
+  both architectures ``depthwise_dgrad`` and ``depthwise_dgrad_win`` (the direct dgrad
+  ABI). On gfx950 ``grouped_dgrad_fused`` and ``grouped_dgrad_4c`` (one forward kernel
+  over the transposed problem reading the original weights), and the MFMA pipelines
   ``grouped_dgrad_mfma`` / ``dgrad_mfma_rtc`` (weight transforms into the workspace,
-  then a forward kernel over the transposed problem).
-* **MFMA helpers** (``kernel_family`` 2): the weight transforms the MFMA pipelines
-  launch. They are packaged so the pipeline's handler can load them, and never serve a
-  problem on their own.
+  then a forward kernel over the transposed problem). On gfx1250 the wave32 WMMA
+  pipelines ``dgrad_wmma``, ``dgrad_smallc_wmma`` and ``dgrad_patch_wmma`` (one
+  launch each, the direct dgrad ABI).
+* **MFMA helpers** (``kernel_family`` 2, gfx950): the weight transforms the MFMA
+  pipelines launch. They are packaged so the pipeline's handler can load them, and
+  never serve a problem on their own.
 
-:func:`gfx950_conv_dgrad_aot_plan` is the launch of one instance on one problem --
+:func:`conv_dgrad_aot_plan` is the launch of one instance on one problem --
 rocKE's own offer (``identity_supports_problem``, ``direct_spec_for_problem``) plus the
 launch bounds, then its steps, workspace and dX zero-fill -- and is what the native
-pack (``Gfx950ConvDgradGeometry.hpp``) ports; the two are compared by
-:meth:`Gfx950ConvDgradPlan.digest`.
+pack (``ConvDgradAotGeometry.hpp``) ports; the two are compared by
+:meth:`ConvDgradAotPlan.digest`.
 
 ``instance_id`` is ``KernelIdentity.stable_hash()``.
 """
 
 from __future__ import annotations
 
+import functools
+import itertools
 import json
+import math
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
+from typing import ClassVar
 
-from dispatch.grouped_convolution import ConvGroupedRequest
+from dispatch.grouped_convolution import DEFAULT_LLVM_FLAVORS, ConvGroupedRequest
 from kernels.common import conv_direct_grouped as _direct
 from kernels.common import conv_implicit_gemm_dgrad as _dgrad
 from kernels.common._conv_implicit_gemm_common import ConvDataSpec, ConvProblem
@@ -51,20 +59,15 @@ from kernels.common.conv_abi import conv_args_signature, conv_direct_args_signat
 from kernels.common.conv_args import ConvArgs
 from rocke.core.ir import KernelDef
 
-_ARCH = "gfx950"
 _INT32_MAX = (1 << 31) - 1
 #: Grid y and z (and every axis of the direct compute grids, as for forward).
 _MAX_GRID_DIM = 65535
 #: A dispatch's x extent in work-items is 32-bit.
 _MAX_DISPATCH_ITEMS = (1 << 32) - 1
 _MAX_BLOCK_THREADS = 1024
-_WAVE_SIZE = 64
 _DTYPES = ("fp16", "bf16")
 #: ``KernelIdentity.stable_hash()`` is a SHA-1 hex digest.
 _INSTANCE_ID_LENGTH = 40
-#: The LLVM flavor the catalog's instances were swept, hashed and measured under
-#: (every label of ``gfx950_conv_dgrad_aot.labels.txt`` ends in it).
-PACKAGED_LLVM_FLAVOR = "llvm22"
 
 #: ``kernel_family`` values; the metadata field is also an integer engine knob.
 KERNEL_FAMILY_IMPLICIT_GEMM = 0
@@ -84,6 +87,9 @@ DIRECT_VARIANT_MFMA = "grouped_dgrad_mfma"
 DIRECT_VARIANT_MFMA_RTC = "dgrad_mfma_rtc"
 DIRECT_VARIANT_FUSED = "grouped_dgrad_fused"
 DIRECT_VARIANT_4C = "grouped_dgrad_4c"
+DIRECT_VARIANT_WMMA = "dgrad_wmma"
+DIRECT_VARIANT_SMALLC_WMMA = "dgrad_smallc_wmma"
+DIRECT_VARIANT_PATCH_WMMA = "dgrad_patch_wmma"
 HELPER_VARIANT_TRANSPOSE = "transpose"
 HELPER_VARIANT_REORGANIZE = "reorganize"
 HELPER_VARIANT_TRANSPOSE_RTC = "transpose_rtc"
@@ -95,6 +101,9 @@ _DIRECT_VARIANTS = (
     DIRECT_VARIANT_MFMA_RTC,
     DIRECT_VARIANT_FUSED,
     DIRECT_VARIANT_4C,
+    DIRECT_VARIANT_WMMA,
+    DIRECT_VARIANT_SMALLC_WMMA,
+    DIRECT_VARIANT_PATCH_WMMA,
 )
 _HELPER_VARIANTS = (
     HELPER_VARIANT_TRANSPOSE,
@@ -115,6 +124,9 @@ AOT_DGRAD_DIRECT_ALGORITHMS = {
     "direct_dgrad_mfma_rtc": (KERNEL_FAMILY_DIRECT, DIRECT_VARIANT_MFMA_RTC),
     "direct_grouped_dgrad_fused": (KERNEL_FAMILY_DIRECT, DIRECT_VARIANT_FUSED),
     "direct_grouped_dgrad_4c": (KERNEL_FAMILY_DIRECT, DIRECT_VARIANT_4C),
+    "direct_dgrad_wmma": (KERNEL_FAMILY_DIRECT, DIRECT_VARIANT_WMMA),
+    "direct_dgrad_smallc_wmma": (KERNEL_FAMILY_DIRECT, DIRECT_VARIANT_SMALLC_WMMA),
+    "direct_dgrad_patch_wmma": (KERNEL_FAMILY_DIRECT, DIRECT_VARIANT_PATCH_WMMA),
     "direct_dgrad_transpose_rtc": (
         KERNEL_FAMILY_DGRAD_HELPER,
         HELPER_VARIANT_TRANSPOSE_RTC,
@@ -134,8 +146,73 @@ _ALGORITHM_OF_VARIANT = {
     for algorithm, (_, variant) in AOT_DGRAD_DIRECT_ALGORITHMS.items()
 }
 
-#: Pipelines the dgrad AOT sweep builds (``basic`` is an alias it skips).
-_PIPELINES = ("mem", "compv3", "compv4")
+
+@dataclass(frozen=True)
+class ConvDgradAotTarget:
+    """One architecture's packaged dgrad engine.
+
+    ``llvm_flavor`` is the LLVM flavor its catalog's instances were swept, hashed and
+    measured under (every label of its catalog ends in it; the dispatcher's
+    ``DEFAULT_LLVM_FLAVORS`` entry of the arch), ``pipelines`` the
+    implicit-GEMM pipelines its dgrad AOT sweep builds, and ``direct_algorithms``
+    the direct and helper algorithms of :data:`AOT_DGRAD_DIRECT_ALGORITHMS` it
+    packages.
+    """
+
+    arch: str
+    engine: str
+    wave_size: int
+    llvm_flavor: str
+    pipelines: tuple[str, ...]
+    direct_algorithms: tuple[str, ...]
+
+    @property
+    def direct_variants(self) -> tuple[str, ...]:
+        """The ``direct_variant`` values its direct and helper instances carry."""
+        return tuple(
+            AOT_DGRAD_DIRECT_ALGORITHMS[algorithm][1]
+            for algorithm in self.direct_algorithms
+        )
+
+
+#: The packaged dgrad engines, by architecture.
+TARGETS = {
+    "gfx950": ConvDgradAotTarget(
+        arch="gfx950",
+        engine="hipkernel:Gfx950ConvDgradAot",
+        wave_size=64,
+        llvm_flavor=DEFAULT_LLVM_FLAVORS["gfx950"],
+        # ``basic`` is an alias the sweep skips.
+        pipelines=("mem", "compv3", "compv4"),
+        direct_algorithms=(
+            "direct_depthwise_dgrad",
+            "direct_depthwise_dgrad_win",
+            "direct_grouped_dgrad_mfma",
+            "direct_dgrad_mfma_rtc",
+            "direct_grouped_dgrad_fused",
+            "direct_grouped_dgrad_4c",
+            "direct_dgrad_transpose_rtc",
+            "direct_dgrad_reorganize_rtc",
+            "direct_dgrad_transpose",
+            "direct_dgrad_reorganize",
+        ),
+    ),
+    "gfx1250": ConvDgradAotTarget(
+        arch="gfx1250",
+        engine="hipkernel:Gfx1250ConvDgradAot",
+        wave_size=32,
+        llvm_flavor=DEFAULT_LLVM_FLAVORS["gfx1250"],
+        # The WMMA pipelines; wavelet adds load waves to the workgroup.
+        pipelines=("mem", "wavelet"),
+        direct_algorithms=(
+            "direct_depthwise_dgrad",
+            "direct_depthwise_dgrad_win",
+            "direct_dgrad_wmma",
+            "direct_dgrad_smallc_wmma",
+            "direct_dgrad_patch_wmma",
+        ),
+    ),
+}
 _EPILOGUES = ("default", "cshuffle")
 _VECTOR_WIDTHS = (1, 2, 4, 8)
 
@@ -229,6 +306,37 @@ AOT_DGRAD_DIRECT_KNOBS = {
     HELPER_VARIANT_TRANSPOSE_RTC: {},
     HELPER_VARIANT_REORGANIZE_RTC: {"fold_k32": "fold_k32"},
 }
+#: The knobs every gfx1250 WMMA dgrad pipeline takes.
+_WMMA_KNOBS = {
+    "ck": "ck",
+    "prefetch": "prefetch",
+    "sched": "sched",
+    "stages": "stages",
+    "tiles_c": "tiles_c",
+    "tiles_p": "tiles_p",
+    "waves_c": "waves_c",
+    "waves_p": "waves_p",
+}
+#: gfx1250's knob table: the depthwise pipelines as on gfx950, the streaming
+#: depthwise one with its channels per lane, and the WMMA pipelines.
+GFX1250_DGRAD_DIRECT_KNOBS = {
+    DIRECT_VARIANT_DEPTHWISE: {
+        **AOT_DGRAD_DIRECT_KNOBS[DIRECT_VARIANT_DEPTHWISE],
+        "cpl": "cpl",
+    },
+    DIRECT_VARIANT_DEPTHWISE_WIN: AOT_DGRAD_DIRECT_KNOBS[DIRECT_VARIANT_DEPTHWISE_WIN],
+    DIRECT_VARIANT_WMMA: {
+        **_WMMA_KNOBS,
+        "pack_groups": "pack_groups",
+        "split_barrier": "split_barrier",
+        # Images per tile; the field is not the implicit-GEMM tile_n.
+        "tile_n": "batch_tile",
+        "tile_w": "tile_w",
+        "wave_epilogue": "wave_epilogue",
+    },
+    DIRECT_VARIANT_SMALLC_WMMA: {**_WMMA_KNOBS, "out_h": "out_h", "out_w": "out_w"},
+    DIRECT_VARIANT_PATCH_WMMA: {**_WMMA_KNOBS, "r_blk": "r_blk", "tile_w": "tile_w"},
+}
 #: Knobs whose 0 is a value rather than "not stated": no LDS padding, and the
 #: unset occupancy hint.
 _ZERO_IS_A_VALUE = ("lds_pad", "waves_per_eu")
@@ -245,7 +353,12 @@ _BOOL_KNOBS = (
     "stage_out",
     "xcd_tiles",
     "stage_rows",
+    "prefetch",
+    "split_barrier",
+    "wave_epilogue",
 )
+#: Knobs rocKE spells as a string; the descriptor holds "" where it is unset.
+_STRING_KNOBS = ("sched",)
 #: The block knobs after the capabilities, with the value each holds where its
 #: variant does not use it (the KMD default).
 _KNOB_DEFAULTS = {
@@ -275,6 +388,27 @@ _KNOB_DEFAULTS = {
     "xcd_tiles": 0,
     "stage_rows": 0,
 }
+#: gfx1250's block knobs: gfx950's, then the ones its own pipelines add.
+_GFX1250_KNOB_DEFAULTS = {
+    **_KNOB_DEFAULTS,
+    "cpl": 0,
+    "ck": 0,
+    "prefetch": 0,
+    "sched": "",
+    "stages": 0,
+    "tiles_c": 0,
+    "tiles_p": 0,
+    "waves_c": 0,
+    "waves_p": 0,
+    "pack_groups": 0,
+    "split_barrier": 0,
+    "batch_tile": 0,
+    "tile_w": 0,
+    "wave_epilogue": 0,
+    "out_h": 0,
+    "out_w": 0,
+    "r_blk": 0,
+}
 #: Geometry an implicit-GEMM instance may state, because the tilde kernel can be
 #: compiled for one filter, stride and dilation instead of reading them from its
 #: sub-GEMM records. 0 keeps the runtime behaviour; a stated value is a promise the
@@ -287,15 +421,23 @@ _IMPLICIT_BAKEABLE = (
     "dilation_h",
     "dilation_w",
 )
+
+
 #: Fields appended after the implicit-GEMM ones. An implicit-GEMM instance leaves
 #: each at this value (the KMD default), apart from _IMPLICIT_BAKEABLE; a direct or
 #: helper instance leaves the knobs its variant does not use at it.
-_FAMILY_DEFAULTS = {
-    "kernel_family": KERNEL_FAMILY_IMPLICIT_GEMM,
-    "direct_variant": DIRECT_VARIANT_NONE,
-    **{name: 0 for name in _DIRECT_CAPABILITY_FIELDS if name not in _IMPLICIT_BAKEABLE},
-    **_KNOB_DEFAULTS,
-}
+def _family_defaults(knob_defaults: dict) -> dict:
+    return {
+        "kernel_family": KERNEL_FAMILY_IMPLICIT_GEMM,
+        "direct_variant": DIRECT_VARIANT_NONE,
+        **{
+            name: 0
+            for name in _DIRECT_CAPABILITY_FIELDS
+            if name not in _IMPLICIT_BAKEABLE
+        },
+        **knob_defaults,
+    }
+
 
 #: (cpg, kpg) of the dense (groups == 1) MFMA rows; the sweep probes them with one
 #: group (``direct_kernel_sweep._DENSE_MFMA_DGRAD_CHANNELS``).
@@ -324,8 +466,8 @@ def _align_up(value: int, alignment: int) -> int:
 
 
 @dataclass(frozen=True)
-class Gfx950ConvDgradProblem:
-    """One backward-data problem as hipkernel:Gfx950ConvDgradAot matches it.
+class ConvDgradAotProblem:
+    """One backward-data problem as a dgrad AOT engine matches it.
 
     ``Hi``/``Wi`` are the dX (forward input) extents, which the graph states: several
     input extents give one output extent under a stride, so they cannot be derived
@@ -414,7 +556,7 @@ class Gfx950ConvDgradProblem:
         )
 
 
-def _problem_error(problem: Gfx950ConvDgradProblem) -> str:
+def _problem_error(problem: ConvDgradAotProblem) -> str:
     """The graph contract's problem checks; "" when accepted."""
     for name in ("N", "Hi", "Wi", "C", "K", "Y", "X", "sH", "sW", "dH", "dW"):
         value = getattr(problem, name)
@@ -445,7 +587,7 @@ def _problem_error(problem: Gfx950ConvDgradProblem) -> str:
     if problem.Ho <= 0 or problem.Wo <= 0:
         return "convolution has nonpositive output (dY) spatial dimensions"
     # A batch whose dY or dX exceeds the 32-bit ABI runs as batch slices
-    # (gfx950_conv_dgrad_aot_batch_chunks), so one image of each, and the filter,
+    # (conv_dgrad_aot_batch_chunks), so one image of each, and the filter,
     # must fit; the whole tensors stay addressable by a 64-bit offset.
     for label, size in zip(("dY", "W", "dX"), problem.tensor_bytes(1)):
         if size > _INT32_MAX:
@@ -462,19 +604,22 @@ def _problem_error(problem: Gfx950ConvDgradProblem) -> str:
 # ---------------------------------------------------------------------------
 
 
-def aot_dgrad_direct_fields_from_knobs(variant: str, knobs: dict) -> dict:
+def aot_dgrad_direct_fields_from_knobs(variant: str, knobs: dict, table: dict) -> dict:
     """The instance fields a direct or helper identity's ``knobs`` set.
 
-    A variant's knobs are what it *may* set, not what it must: the windowed
-    depthwise pipeline alone has a dot2 and an MFMA mode that take different ones,
-    and the sweep states only the mode's. An unlisted knob is still refused -- it
-    would otherwise be dropped silently and the instance would be packaged for a
-    kernel nobody asked for. An omitted one keeps its _KNOB_DEFAULTS value.
+    ``table`` is the engine's knob table (:attr:`ConvDgradAotSpec.DIRECT_KNOBS`). A
+    variant's knobs are what it *may* set, not what it must: the windowed depthwise
+    pipeline alone has a dot2 and an MFMA mode that take different ones, and the sweep
+    states only the mode's. An unlisted knob is still refused -- it would otherwise be
+    dropped silently and the instance would be packaged for a kernel nobody asked for.
+    An omitted one keeps its KMD default.
 
-    Raises ``ValueError`` for a knob the variant does not take, or a bool knob that
-    is not a bool.
+    Raises ``ValueError`` for a knob the variant does not take, or a knob of the
+    wrong type.
     """
-    mapping = AOT_DGRAD_DIRECT_KNOBS[variant]
+    if variant not in table:
+        raise ValueError(f"no packaged dgrad launch takes variant {variant!r}")
+    mapping = table[variant]
     unknown = sorted(set(knobs) - set(mapping))
     if unknown:
         raise ValueError(
@@ -489,6 +634,9 @@ def aot_dgrad_direct_fields_from_knobs(variant: str, knobs: dict) -> dict:
             if type(value) is not bool:
                 raise ValueError(f"knob {key} must be a bool, got {value!r}")
             value = int(value)
+        elif field_name in _STRING_KNOBS:
+            if type(value) is not str or not value:
+                raise ValueError(f"knob {key} must be a nonempty string, got {value!r}")
         elif type(value) is not int:
             raise ValueError(f"knob {key} must be an integer, got {value!r}")
         values[field_name] = value
@@ -499,43 +647,60 @@ def aot_dgrad_direct_instance_fields(identity) -> dict:
     """The direct fields of the instance packaged from a dgrad direct or helper identity.
 
     ``identity`` is read duck-typed (a ``KernelIdentity``, which this layer cannot
-    import): its ``algorithm``, compiled filter, stride, padding, dilation, channel
-    counts and ``knobs`` JSON. Raises ``ValueError`` for an algorithm without a
-    packaged launch or knobs that are not exactly its variant's. The caller states
-    the placeholders and checks the result with :func:`supports_gfx950_conv_dgrad_aot`.
+    import): its ``arch``, ``algorithm``, compiled filter, stride, padding, dilation,
+    channel counts and ``knobs`` JSON. Raises ``ValueError`` for an architecture or
+    algorithm without a packaged launch or knobs that are not exactly its variant's.
+    The caller states the placeholders and checks the result with
+    :func:`supports_conv_dgrad_aot`.
     """
-    family_variant = AOT_DGRAD_DIRECT_ALGORITHMS.get(identity.algorithm)
-    if family_variant is None:
+    spec_class = SPEC_CLASSES.get(identity.arch)
+    if spec_class is None:
+        raise ValueError(f"no packaged dgrad engine for arch {identity.arch!r}")
+    packaged = spec_class.target().direct_algorithms
+    if identity.algorithm not in packaged:
         raise ValueError(
-            f"direct algorithm {identity.algorithm!r} has no packaged dgrad launch "
-            f"(supported: {sorted(AOT_DGRAD_DIRECT_ALGORITHMS)})"
+            f"direct algorithm {identity.algorithm!r} has no packaged dgrad launch on "
+            f"{identity.arch} (supported: {sorted(packaged)})"
         )
-    family, variant = family_variant
+    family, variant = AOT_DGRAD_DIRECT_ALGORITHMS[identity.algorithm]
     fields_ = {"kernel_family": family, "direct_variant": variant}
     fields_.update(
         {name: getattr(identity, name) for name in _DIRECT_CAPABILITY_FIELDS}
     )
     fields_.update(
         aot_dgrad_direct_fields_from_knobs(
-            variant, json.loads(identity.knobs) if identity.knobs else {}
+            variant,
+            json.loads(identity.knobs) if identity.knobs else {},
+            spec_class.DIRECT_KNOBS,
         )
     )
     return fields_
 
 
 @dataclass(frozen=True)
-class Gfx950ConvDgradAotSpec:
-    """One shape-generic backward-data instance.
+class ConvDgradAotSpec:
+    """One shape-generic backward-data instance, of the engine of :attr:`ARCH`.
 
     Booleans are ints (0/1), so every field is a descriptor ``int`` or ``string``.
     The leading fields are the implicit-GEMM identity's (``DgradConvSpec``'s tuning,
     ``lds_k_outer`` and ``max_sub_gemms``). The trailing ones describe a direct or
     helper instance: ``kernel_family``, ``direct_variant``, the compiled filter,
     stride, padding, dilation and channel counts, and the variant's knobs
-    (:data:`AOT_DGRAD_DIRECT_KNOBS`). A direct or helper instance holds the direct
-    identity's placeholders in the implicit-GEMM fields; an implicit-GEMM instance
-    leaves every trailing field at its KMD default.
+    (:attr:`DIRECT_KNOBS`). A direct or helper instance holds the direct identity's
+    placeholders in the implicit-GEMM fields; an implicit-GEMM instance leaves every
+    trailing field at its KMD default.
+
+    Instantiate an architecture's subclass (:data:`SPEC_CLASSES`), not this one.
     """
+
+    #: The architecture of the engine the spec packages for (:data:`TARGETS`).
+    ARCH: ClassVar[str] = ""
+    #: Per direct or helper variant, the identity's knob keys and the field each
+    #: is carried in.
+    DIRECT_KNOBS: ClassVar[dict] = AOT_DGRAD_DIRECT_KNOBS
+    #: The block knobs after the capabilities, with the value each holds where its
+    #: variant does not use it (the KMD default).
+    KNOB_DEFAULTS: ClassVar[dict] = _KNOB_DEFAULTS
 
     dtype: str
     tile_m: int
@@ -609,6 +774,11 @@ class Gfx950ConvDgradAotSpec:
 
     # ---- family ----
 
+    @classmethod
+    def target(cls) -> ConvDgradAotTarget:
+        """The engine this spec packages for."""
+        return TARGETS[cls.ARCH]
+
     @property
     def is_direct(self) -> bool:
         """A direct conv kernel or a helper (no implicit-GEMM tile)."""
@@ -656,7 +826,7 @@ class Gfx950ConvDgradAotSpec:
         if not self.is_direct:
             raise ValueError("an implicit-GEMM instance has no direct knobs")
         knobs = {}
-        for key, field_name in AOT_DGRAD_DIRECT_KNOBS[self.direct_variant].items():
+        for key, field_name in self.DIRECT_KNOBS[self.direct_variant].items():
             value = getattr(self, field_name)
             if field_name in _BOOL_KNOBS:
                 knobs[key] = bool(value)
@@ -665,17 +835,18 @@ class Gfx950ConvDgradAotSpec:
             # Otherwise the instance did not state it -- a knob its mode does not
             # apply (the windowed depthwise MFMA form takes no block_w) -- so it is
             # left out and rocKE's own default stands. Passing 0 would be a value,
-            # and its spec rejects one.
+            # and its spec rejects one (an unset string knob is "", for the same
+            # reason).
         return knobs
 
     def kernel_symbol_prefix(self) -> str:
         # rocKE appends the probe problem and tuning to this (not for the helpers,
         # whose symbol is exactly this); the instance id alone makes it unique.
         if self.is_helper:
-            return f"hkp_conv_dgrad_helper_aot_gfx950_{self.instance_id[:24]}"
+            return f"hkp_conv_dgrad_helper_aot_{self.ARCH}_{self.instance_id[:24]}"
         if self.is_direct:
-            return f"hkp_conv_dgrad_dw_aot_gfx950_{self.instance_id[:24]}"
-        return f"hkp_conv_dgrad_aot_gfx950_{self.instance_id[:24]}"
+            return f"hkp_conv_dgrad_dw_aot_{self.ARCH}_{self.instance_id[:24]}"
+        return f"hkp_conv_dgrad_aot_{self.ARCH}_{self.instance_id[:24]}"
 
     # ---- the sweep's build ----
 
@@ -683,24 +854,24 @@ class Gfx950ConvDgradAotSpec:
         """The rocKE ``KernelIdentity`` this instance was packaged from.
 
         Implicit GEMM: every field the packaging does not carry is at its
-        KernelIdentity default, which is exactly what supports_gfx950_conv_dgrad_aot
+        KernelIdentity default, which is exactly what supports_conv_dgrad_aot
         enforces, so this reconstructs the identity (its ``stable_hash()`` is the
         ``instance_id``). Direct and helper instances: the identity
         ``direct_aot_jobs`` builds, up to the spelling of the knobs JSON (a bool knob
         left at false may or may not have been stated), so it decides what the
         binary serves but is not hashed.
 
-        ``llvm_flavor`` is the catalog's, :data:`PACKAGED_LLVM_FLAVOR`.
+        ``llvm_flavor`` is the catalog's (:attr:`ConvDgradAotTarget.llvm_flavor`).
         """
         from kernels.conv.kernel_identity import KernelIdentity
 
         common = {
-            "arch": _ARCH,
+            "arch": self.ARCH,
             "dtype_a": self.dtype,
             "dtype_b": self.dtype,
             "dtype_d": self.dtype,
             "wave_size": self.wave_size,
-            "llvm_flavor": PACKAGED_LLVM_FLAVOR,
+            "llvm_flavor": self.target().llvm_flavor,
         }
         if self.is_direct:
             return KernelIdentity(
@@ -852,8 +1023,8 @@ class Gfx950ConvDgradAotSpec:
     def rocke_direct_spec(self, problem: _direct.DirectConvProblem):
         """The rocKE kernel spec of this direct or helper instance on ``problem``,
         as ``direct_kernel_sweep.make_spec`` makes it; only the name differs (the
-        helpers have no name field: :func:`build_gfx950_conv_dgrad_aot` renames
-        their kernel). For the MFMA pipeline this is its compute pass, a forward
+        helpers have no name field: :func:`_build_conv_dgrad_aot` renames their
+        kernel). For the MFMA pipeline this is its compute pass, a forward
         ``DirectConvSpec`` on the transposed problem."""
         if not self.is_direct:
             raise ValueError("an implicit-GEMM instance has no direct spec")
@@ -897,8 +1068,52 @@ class Gfx950ConvDgradAotSpec:
         return self.to_instance_spec().kernel_name()
 
 
+@dataclass(frozen=True)
+class Gfx950ConvDgradAotSpec(ConvDgradAotSpec):
+    """An instance of hipkernel:Gfx950ConvDgradAot: exactly the shared fields."""
+
+    ARCH: ClassVar[str] = "gfx950"
+
+
+@dataclass(frozen=True)
+class Gfx1250ConvDgradAotSpec(ConvDgradAotSpec):
+    """An instance of hipkernel:Gfx1250ConvDgradAot: the shared fields, then the
+    knobs of gfx1250's own pipelines (:data:`GFX1250_DGRAD_DIRECT_KNOBS`). Its
+    MFMA-only fields stay at their defaults: no gfx1250 variant takes them."""
+
+    ARCH: ClassVar[str] = "gfx1250"
+    DIRECT_KNOBS: ClassVar[dict] = GFX1250_DGRAD_DIRECT_KNOBS
+    KNOB_DEFAULTS: ClassVar[dict] = _GFX1250_KNOB_DEFAULTS
+
+    # Streaming depthwise: channels per lane.
+    cpl: int = 0
+    # WMMA pipelines (DirectDgradWmmaSpec, DgradSmallcWmmaSpec, DgradPatchWmmaSpec).
+    ck: int = 0
+    prefetch: int = 0
+    sched: str = ""
+    stages: int = 0
+    tiles_c: int = 0
+    tiles_p: int = 0
+    waves_c: int = 0
+    waves_p: int = 0
+    pack_groups: int = 0
+    split_barrier: int = 0
+    batch_tile: int = 0
+    tile_w: int = 0
+    wave_epilogue: int = 0
+    out_h: int = 0
+    out_w: int = 0
+    r_blk: int = 0
+
+
+#: The spec class of each packaged engine, by architecture.
+SPEC_CLASSES: dict[str, type[ConvDgradAotSpec]] = {
+    cls.ARCH: cls for cls in (Gfx950ConvDgradAotSpec, Gfx1250ConvDgradAotSpec)
+}
+
+
 def gfx950_conv_dgrad_aot_helper_fields(
-    spec: Gfx950ConvDgradAotSpec,
+    spec: ConvDgradAotSpec,
 ) -> list[dict]:
     """The helper instances an MFMA instance's pipeline launches, in launch order,
     as the KMD field values that identify each in the catalog (with the instance's
@@ -933,7 +1148,7 @@ def gfx950_conv_dgrad_aot_helper_fields(
     return helpers
 
 
-def _uses_coalesced_weights(spec: Gfx950ConvDgradAotSpec) -> bool:
+def _uses_coalesced_weights(spec: ConvDgradAotSpec) -> bool:
     """``kernels.conv.direct_variants.direct_uses_coalesced_weights``."""
     return spec.waves_k > 1 or bool(spec.runtime_k_loop)
 
@@ -943,7 +1158,7 @@ def _uses_coalesced_weights(spec: Gfx950ConvDgradAotSpec) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _direct_validate(spec: Gfx950ConvDgradAotSpec, rocke_spec, arch: str):
+def _direct_validate(spec: ConvDgradAotSpec, rocke_spec, arch: str):
     """rocKE's validator for ``rocke_spec``, as ``direct_kernel_sweep.validate_spec``
     runs it (the helpers have none)."""
     if spec.is_helper:
@@ -958,7 +1173,7 @@ def _direct_validate(spec: Gfx950ConvDgradAotSpec, rocke_spec, arch: str):
         return False, str(exc)
 
 
-def _mfma_knobs_reason(spec: Gfx950ConvDgradAotSpec, kpg: int) -> str:
+def _mfma_knobs_reason(spec: ConvDgradAotSpec, kpg: int) -> str:
     """``direct_kernel_sweep._mfma_knobs_reason`` for a problem with ``kpg``.
 
     The runtime-channel pipeline bakes its K-atom count rather than deriving it
@@ -994,15 +1209,17 @@ def _persistent_cells_reason(rocke_spec) -> str:
     return ""
 
 
-def _direct_error(spec: Gfx950ConvDgradAotSpec) -> str:
+def _direct_error(spec: ConvDgradAotSpec) -> str:
     """The direct and helper instance contract, before rocKE's validators."""
     for name, value in _DIRECT_PLACEHOLDERS.items():
         actual = getattr(spec, name)
         if actual != value or type(actual) is not type(value):
             return f"a direct instance must set {name} to {value!r}, got {actual!r}"
-    if spec.wave_size != _WAVE_SIZE:
-        return f"wave_size must be {_WAVE_SIZE} on {_ARCH}"
-    expected = _DIRECT_VARIANTS if not spec.is_helper else _HELPER_VARIANTS
+    target = spec.target()
+    if spec.wave_size != target.wave_size:
+        return f"wave_size must be {target.wave_size} on {target.arch}"
+    family = _HELPER_VARIANTS if spec.is_helper else _DIRECT_VARIANTS
+    expected = tuple(v for v in target.direct_variants if v in family)
     if spec.direct_variant not in expected:
         return (
             f"direct_variant must be one of {expected} for kernel_family "
@@ -1018,19 +1235,34 @@ def _direct_error(spec: Gfx950ConvDgradAotSpec) -> str:
     # cpg == kpg == 0 is rocKE's "runtime channel counts" (DirectCaps): the
     # runtime-channel MFMA pipeline takes them as kernargs and bakes only its
     # channel *tile* counts, so one binary per filter serves every channel count.
-    # Either both are runtime or neither is.
-    if (spec.cpg == 0) != (spec.kpg == 0):
-        return "cpg and kpg are both runtime (0) or both baked"
-    if spec.cpg == 0 and not spec.is_runtime_channels:
-        return (
-            f"only the runtime-channel pipeline takes runtime channel counts; "
-            f"{spec.direct_variant} bakes them"
-        )
+    # The native matcher (ConvDgradAotGeometry.hpp, parseAotInstance) admits: a
+    # small-C or patch stem bakes its few input channels (cpg >= 1) and reads K
+    # either way; the dense WMMA pipeline takes both from the problem or bakes both
+    # (its packed groups); every other kernel bakes both unless it is a
+    # runtime-channel one, which takes both.
+    if spec.direct_variant in (DIRECT_VARIANT_SMALLC_WMMA, DIRECT_VARIANT_PATCH_WMMA):
+        if spec.cpg == 0:
+            return f"a {spec.direct_variant} stem bakes its input channels (cpg >= 1)"
+    else:
+        if (spec.cpg == 0) != (spec.kpg == 0):
+            return "cpg and kpg are both runtime (0) or both baked"
+        if spec.direct_variant != DIRECT_VARIANT_WMMA and (spec.cpg == 0) != (
+            spec.is_runtime_channels
+        ):
+            return (
+                f"only the runtime-channel pipeline takes runtime channel counts, "
+                f"and it takes them; {spec.direct_variant} "
+                f"{'takes' if spec.is_runtime_channels else 'bakes'} them"
+            )
     if spec.filter_h != spec.filter_w:
         return "the direct sweep builds square filters only"
-    if spec.dilation_h != 1 or spec.dilation_w != 1:
+    if spec.direct_variant == DIRECT_VARIANT_WMMA:
+        if spec.dilation_h == 0 or spec.dilation_w == 0:
+            return "dilation_h/dilation_w must be positive"
+    elif spec.dilation_h != 1 or spec.dilation_w != 1:
         return (
-            "the direct dgrad kernels have no dilation (dilation_h == dilation_w == 1)"
+            f"the {spec.direct_variant} kernels have no dilation "
+            f"(dilation_h == dilation_w == 1)"
         )
     if spec.is_helper:
         # The helper identity zeroes stride and padding (its code reads neither).
@@ -1043,11 +1275,11 @@ def _direct_error(spec: Gfx950ConvDgradAotSpec) -> str:
             return "the direct dgrad kernels compile one stride and one padding"
     if spec.is_depthwise and (spec.cpg, spec.kpg) != (1, 1):
         return "a depthwise dgrad instance compiles cpg == kpg == 1"
-    used = set(AOT_DGRAD_DIRECT_KNOBS[spec.direct_variant].values())
-    for name, default in _KNOB_DEFAULTS.items():
+    used = set(spec.DIRECT_KNOBS[spec.direct_variant].values())
+    for name, default in spec.KNOB_DEFAULTS.items():
         value = getattr(spec, name)
-        if type(value) is not int:
-            return f"{name} must be an integer, got {value!r}"
+        if type(value) is not type(default):
+            return f"{name} must be a {type(default).__name__}, got {value!r}"
         if name not in used:
             if value != default:
                 return (
@@ -1057,6 +1289,8 @@ def _direct_error(spec: Gfx950ConvDgradAotSpec) -> str:
         elif name in _BOOL_KNOBS:
             if value not in (0, 1):
                 return f"{name} must be 0 or 1"
+        elif name in _STRING_KNOBS:
+            continue
         elif not 0 <= value <= _INT32_MAX:
             # 0 is a knob the variant takes and this instance left out, or one whose
             # own zero means something (lds_pad, waves_per_eu). Whether the value
@@ -1070,14 +1304,19 @@ def _direct_error(spec: Gfx950ConvDgradAotSpec) -> str:
     return ""
 
 
-def supports_gfx950_conv_dgrad_aot(
-    spec: Gfx950ConvDgradAotSpec, *, arch: str = _ARCH
+def supports_conv_dgrad_aot(
+    spec: ConvDgradAotSpec, *, arch: str | None = None
 ) -> tuple[bool, str]:
-    """Whether ``spec`` is a packageable instance; rocKE's validators decide last."""
-    if arch != _ARCH:
-        return False, f"this adapter requires arch={_ARCH}, got {arch!r}"
-    if not isinstance(spec, Gfx950ConvDgradAotSpec):
-        return False, "expected Gfx950ConvDgradAotSpec"
+    """Whether ``spec`` is a packageable instance of its engine (on ``arch``, by
+    default the spec's own); rocKE's validators decide last."""
+    if not isinstance(spec, ConvDgradAotSpec) or spec.ARCH not in TARGETS:
+        return (
+            False,
+            f"expected one of {sorted(c.__name__ for c in SPEC_CLASSES.values())}",
+        )
+    if arch is not None and arch != spec.ARCH:
+        return False, f"a {type(spec).__name__} requires arch={spec.ARCH}, got {arch!r}"
+    arch = spec.ARCH
     if spec.dtype not in _DTYPES:
         return False, "the packaged dgrad contract supports fp16 or bf16 only"
     if spec.layout != "NHWC":
@@ -1104,7 +1343,7 @@ def supports_gfx950_conv_dgrad_aot(
             return _direct_validate(spec, spec.to_direct_spec(), arch)
         except (TypeError, ValueError, ZeroDivisionError) as exc:
             return False, str(exc)
-    for name, default in _FAMILY_DEFAULTS.items():
+    for name, default in _family_defaults(spec.KNOB_DEFAULTS).items():
         value = getattr(spec, name)
         if value != default or type(value) is not type(default):
             return False, (
@@ -1125,11 +1364,12 @@ def supports_gfx950_conv_dgrad_aot(
         value = getattr(spec, name)
         if type(value) is not int or not 0 < value <= _INT32_MAX:
             return False, f"{name} must be a positive signed 32-bit integer"
-    if spec.wave_size != _WAVE_SIZE:
-        return False, f"wave_size must be {_WAVE_SIZE} on {_ARCH}"
-    if spec.pipeline not in _PIPELINES:
+    if spec.wave_size != spec.target().wave_size:
+        return False, f"wave_size must be {spec.target().wave_size} on {arch}"
+    pipelines = spec.target().pipelines
+    if spec.pipeline not in pipelines:
         return False, (
-            f"the packaged dgrad contract supports pipelines {_PIPELINES}, "
+            f"the packaged dgrad contract supports pipelines {pipelines} on {arch}, "
             f"got {spec.pipeline!r}"
         )
     if spec.epilogue not in _EPILOGUES:
@@ -1182,8 +1422,8 @@ BUFFER_SUB_GEMM = "sub_gemm"
 BUFFER_WS_T = "ws_t"
 BUFFER_WS_COA = "ws_coa"
 
-#: The integer codes :meth:`Gfx950ConvDgradPlan.serialize` writes; the native pack
-#: (Gfx950ConvDgradGeometry.hpp) serializes its plan with the same ones, so the two
+#: The integer codes :meth:`ConvDgradAotPlan.serialize` writes; the native pack
+#: (ConvDgradAotGeometry.hpp) serializes its plan with the same ones, so the two
 #: can be compared by digest.
 PLAN_KERNEL_CODES = {
     KERNEL_SELF: 0,
@@ -1222,7 +1462,7 @@ _U64 = (1 << 64) - 1
 
 
 @dataclass(frozen=True)
-class Gfx950ConvDgradStep:
+class ConvDgradAotStep:
     """One kernel launch of a plan.
 
     ``kernel`` is :data:`KERNEL_SELF` or a helper's ``direct_variant``; ``buffers``
@@ -1249,8 +1489,8 @@ class Gfx950ConvDgradStep:
 
 
 @dataclass(frozen=True)
-class Gfx950ConvDgradPlan:
-    """Everything hipkernel:Gfx950ConvDgradAot does to run one instance on one
+class ConvDgradAotPlan:
+    """Everything a dgrad AOT engine does to run one instance on one
     problem, in order: zero dX when ``zero_dx``, upload every step's record table,
     then launch ``steps``.
 
@@ -1260,8 +1500,8 @@ class Gfx950ConvDgradPlan:
     of the one workspace.
     """
 
-    launched: Gfx950ConvDgradProblem
-    steps: tuple[Gfx950ConvDgradStep, ...]
+    launched: ConvDgradAotProblem
+    steps: tuple[ConvDgradAotStep, ...]
     workspaces: tuple[tuple[str, int, int], ...] = ()
     zero_dx: bool = False
 
@@ -1308,7 +1548,7 @@ class Gfx950ConvDgradPlan:
         return h
 
 
-def gfx950_conv_dgrad_aot_step_signature(abi: str, dtype: str) -> list[dict]:
+def conv_dgrad_aot_step_signature(abi: str, dtype: str) -> list[dict]:
     """The launch signature of a step of ABI ``abi`` (``kernels.common.conv_abi``)."""
     from kernels.common.conv_abi import conv_direct_transform_signature
 
@@ -1323,9 +1563,9 @@ def gfx950_conv_dgrad_aot_step_signature(abi: str, dtype: str) -> list[dict]:
     raise ValueError(f"unknown step ABI {abi!r}")
 
 
-def gfx950_conv_dgrad_aot_launch_problem(
-    problem: Gfx950ConvDgradProblem,
-) -> Gfx950ConvDgradProblem:
+def conv_dgrad_aot_launch_problem(
+    problem: ConvDgradAotProblem,
+) -> ConvDgradAotProblem:
     """The problem the implicit-GEMM kernels run ``problem`` as.
 
     A dgrad whose width folds into its channels (``fold_width``: ``f`` divides the
@@ -1360,14 +1600,42 @@ def _launch_values(conv_args, bytes_: tuple[int, int, int], **extra) -> tuple:
 def _covered(extent: int, runs) -> bool:
     """Whether the ``(offset, stride, count, width)`` runs -- ``width`` consecutive
     positions from each of ``offset + stride * t``, ``t < count`` -- cover every
-    position in ``[0, extent)``."""
-    hit = bytearray(extent)
+    position in ``[0, extent)``.
+
+    Decided from the runs alone, in time and memory independent of ``extent``. Inside
+    its span ``[offset, offset + stride * (count - 1) + width)`` a run covers exactly
+    the positions ``p`` with ``(p - offset) % stride < width``. The span ends cut
+    ``[0, extent)`` into segments, each under a fixed set of runs whose union repeats
+    with the lcm of their strides, so one period of a segment (or the whole segment,
+    if shorter) decides it. ``coversExtent`` in Gfx950ConvDgradGeometry.hpp is the
+    C++ twin.
+    """
+    spans = []  # (lo, hi, offset, period, width)
     for offset, stride, count, width in runs:
-        for t in range(count):
-            start = offset + stride * t
-            for pos in range(max(start, 0), min(start + width, extent)):
-                hit[pos] = 1
-    return all(hit)
+        if count <= 0 or width <= 0:
+            continue
+        if stride < 0:
+            offset, stride = offset + stride * (count - 1), -stride
+        hi = offset + stride * (count - 1) + width
+        if count == 1 or stride <= width:
+            spans.append((offset, hi, offset, 1, 1))
+        else:
+            spans.append((offset, hi, offset, stride, width))
+    cuts = {0, extent}
+    for lo, hi, *_ in spans:
+        cuts.update(min(max(v, 0), extent) for v in (lo, hi))
+    cuts = sorted(cuts)
+    for a, b in itertools.pairwise(cuts):
+        active = [s for s in spans if s[0] <= a and b <= s[1]]
+        period = 1
+        for _, _, _, stride, _ in active:
+            period = math.lcm(period, stride)
+            if period >= b - a:
+                break
+        for pos in range(a, min(b, a + period)):
+            if not any((pos - o) % st < w for _, _, o, st, w in active):
+                return False
+    return True
 
 
 def _dx_fully_written(problem: ConvProblem, sub_gemms, patch: bool) -> bool:
@@ -1409,8 +1677,8 @@ def _grid_reason(grid, block: int, x_cap: int) -> str:
     return ""
 
 
-def gfx950_conv_dgrad_aot_batch_chunks(
-    problem: Gfx950ConvDgradProblem,
+def conv_dgrad_aot_batch_chunks(
+    problem: ConvDgradAotProblem,
 ) -> list[tuple[int, int]]:
     """``[(n0, n), ...]``: the batch slices one implicit-GEMM launch each covers
     (the benchmark's ``_batch_chunks``).
@@ -1436,18 +1704,26 @@ def gfx950_conv_dgrad_aot_batch_chunks(
     return [(n0, min(step, problem.N - n0)) for n0 in range(0, problem.N, step)]
 
 
+@functools.lru_cache(maxsize=None)
+def _launch_block_size(spec: ConvDgradAotSpec) -> int:
+    """The workgroup size of an implicit-GEMM instance: its compute waves, and for the
+    wavelet pipeline its load waves. Cached: the rocKE spec is built on the instance's
+    probe problem, which resolves its sweep job, and a plan is asked for per problem."""
+    return spec.to_instance_spec().launch_block_size
+
+
 def _implicit_plan(
-    spec: Gfx950ConvDgradAotSpec, problem: Gfx950ConvDgradProblem
-) -> tuple[Gfx950ConvDgradPlan | None, str]:
+    spec: ConvDgradAotSpec, problem: ConvDgradAotProblem
+) -> tuple[ConvDgradAotPlan | None, str]:
     """rocKE's offer for an implicit-GEMM binary (``identity_supports_problem`` on
     the launched problem) and the launch of its benchmark (``_extras_and_grid``,
     ``_cached_bind_batch``), plus the bounds the 32-bit launch needs."""
     from kernels.conv.kernel_identity import dgrad_sub_gemms, identity_supports_problem
 
-    launched = gfx950_conv_dgrad_aot_launch_problem(problem)
+    launched = conv_dgrad_aot_launch_problem(problem)
     identity = spec.to_identity()
-    threads = spec.warp_m * spec.warp_n * spec.wave_size
-    chunks = gfx950_conv_dgrad_aot_batch_chunks(launched)
+    threads = _launch_block_size(spec)
+    chunks = conv_dgrad_aot_batch_chunks(launched)
     dy_image, _, dx_image = launched.tensor_bytes(1)
     steps = []
     table_bytes = 0
@@ -1488,7 +1764,7 @@ def _implicit_plan(
         if len(chunks) > 1:
             views = ((n0 * dy_image, n * dy_image), None, (n0 * dx_image, n * dx_image))
         steps.append(
-            Gfx950ConvDgradStep(
+            ConvDgradAotStep(
                 KERNEL_SELF,
                 ABI_IMPLICIT,
                 grid,
@@ -1503,7 +1779,7 @@ def _implicit_plan(
         table_bytes += 4 * len(table)
         zero_dx = zero_dx or not _dx_fully_written(p, sub_gemms, bool(spec.patch))
     return (
-        Gfx950ConvDgradPlan(
+        ConvDgradAotPlan(
             launched=launched,
             steps=tuple(steps),
             workspaces=((BUFFER_SUB_GEMM, 0, table_bytes),),
@@ -1514,8 +1790,8 @@ def _implicit_plan(
 
 
 def _direct_plan(
-    spec: Gfx950ConvDgradAotSpec, problem: Gfx950ConvDgradProblem
-) -> tuple[Gfx950ConvDgradPlan | None, str]:
+    spec: ConvDgradAotSpec, problem: ConvDgradAotProblem
+) -> tuple[ConvDgradAotPlan | None, str]:
     """``direct_kernel_sweep.plan_for`` for a dgrad direct instance: rocKE's offer
     (``identity_supports_problem``, then ``direct_spec_for_problem``'s per-shape
     re-validation), its steps and scratch, plus the launch bounds rocKE does not
@@ -1540,7 +1816,7 @@ def _direct_plan(
         return None, why
     knobs = spec.direct_knobs()
     rocke_spec, why = direct_spec_for_problem(
-        spec.algorithm, direct, knobs, _ARCH, spec.wave_size
+        spec.algorithm, direct, knobs, spec.ARCH, spec.wave_size
     )
     if rocke_spec is None:
         return None, why
@@ -1570,7 +1846,7 @@ def _direct_plan(
         why = _grid_reason(grid, block[0], x_cap)
         if why:
             return None, why
-        step = Gfx950ConvDgradStep(
+        step = ConvDgradAotStep(
             KERNEL_SELF,
             abi,
             grid,
@@ -1578,7 +1854,7 @@ def _direct_plan(
             (BUFFER_DY, BUFFER_W, BUFFER_DX),
             _launch_values(args, tensors),
         )
-        return Gfx950ConvDgradPlan(launched=problem, steps=(step,)), "ok"
+        return ConvDgradAotPlan(launched=problem, steps=(step,)), "ok"
 
     # MFMA pipeline: W -> ws_t (transpose), optionally ws_t -> ws_coa (reorganize),
     # then a forward pass over the transposed problem.
@@ -1603,7 +1879,7 @@ def _direct_plan(
         if why:
             return None, f"{helper}: {why}"
         steps.append(
-            Gfx950ConvDgradStep(
+            ConvDgradAotStep(
                 AOT_DGRAD_DIRECT_ALGORITHMS[helper][1],
                 ABI_TRANSFORM_RTC if runtime_channels else ABI_TRANSFORM,
                 grid,
@@ -1618,7 +1894,7 @@ def _direct_plan(
     if why:
         return None, f"compute pass: {why}"
     steps.append(
-        Gfx950ConvDgradStep(
+        ConvDgradAotStep(
             KERNEL_SELF,
             ABI_DIRECT_FWD,
             grid,
@@ -1631,22 +1907,22 @@ def _direct_plan(
         )
     )
     return (
-        Gfx950ConvDgradPlan(
+        ConvDgradAotPlan(
             launched=problem, steps=tuple(steps), workspaces=tuple(workspaces)
         ),
         "ok",
     )
 
 
-def gfx950_conv_dgrad_aot_plan(
-    spec: Gfx950ConvDgradAotSpec, problem: Gfx950ConvDgradProblem
-) -> tuple[Gfx950ConvDgradPlan | None, str]:
+def conv_dgrad_aot_plan(
+    spec: ConvDgradAotSpec, problem: ConvDgradAotProblem
+) -> tuple[ConvDgradAotPlan | None, str]:
     """The launch of instance ``spec`` on ``problem``, or ``(None, why)`` when the
     instance does not compute it.
 
     The served predicate is rocKE's own offer, as its sweeps make it: implicit GEMM
     through ``identity_supports_problem`` on the problem it launches (folded, see
-    :func:`gfx950_conv_dgrad_aot_launch_problem`), which holds the dY-halo, tap-outer
+    :func:`conv_dgrad_aot_launch_problem`), which holds the dY-halo, tap-outer
     K loop and patch kernels to the problems they compute; the direct pipelines
     through ``identity_supports_problem`` and ``direct_spec_for_problem``. On top come
     the launch bounds of the 32-bit dispatch.
@@ -1667,21 +1943,21 @@ def gfx950_conv_dgrad_aot_plan(
         return None, f"{type(exc).__name__}: {exc}"
 
 
-def gfx950_conv_dgrad_aot_serves(
-    spec: Gfx950ConvDgradAotSpec, problem: Gfx950ConvDgradProblem
+def conv_dgrad_aot_serves(
+    spec: ConvDgradAotSpec, problem: ConvDgradAotProblem
 ) -> tuple[bool, str]:
     """Whether instance ``spec`` computes ``problem`` (a plan exists)."""
-    plan, why = gfx950_conv_dgrad_aot_plan(spec, problem)
+    plan, why = conv_dgrad_aot_plan(spec, problem)
     return plan is not None, why
 
 
-def gfx950_conv_dgrad_aot_runtime_candidates(
-    problem: Gfx950ConvDgradProblem, specs: Sequence[Gfx950ConvDgradAotSpec]
-) -> list[Gfx950ConvDgradAotSpec]:
-    """The instances of ``specs`` hipkernel:Gfx950ConvDgradAot offers for
+def conv_dgrad_aot_runtime_candidates(
+    problem: ConvDgradAotProblem, specs: Sequence[ConvDgradAotSpec]
+) -> list[ConvDgradAotSpec]:
+    """The instances of ``specs`` their dgrad AOT engine offers for
     ``problem``: every serving one, in the order of ``specs``. The catalog is small,
     so there is no widest-vector filter; the ranker chooses."""
-    return [spec for spec in specs if gfx950_conv_dgrad_aot_serves(spec, problem)[0]]
+    return [spec for spec in specs if conv_dgrad_aot_serves(spec, problem)[0]]
 
 
 # ---------------------------------------------------------------------------
@@ -1693,38 +1969,39 @@ def _flavor_rank(flavor: str) -> int:
     return int(flavor.removeprefix("llvm"))
 
 
-def _require_packaged_flavor() -> None:
+def _require_packaged_flavor(target: ConvDgradAotTarget) -> None:
     """Refuse to package under an LLVM older than the catalog's.
 
     The catalog's instances are the kernels the rocKE sweep measured, lowered for
-    :data:`PACKAGED_LLVM_FLAVOR` and compiled by a COMGR of that LLVM or newer. A
-    pack step that resolves an older COMGR -- the ROCm the build found, rather than
-    the one the sweep ran -- lowers for its flavor and gets that LLVM's code
-    generation: the same configuration, but compiled to more registers and slower
-    code, shipped without a word. Point ``HIPKERNELPROVIDER_ROCKE_COMGR_LIB`` at a
-    COMGR of LLVM 22 or newer (and ``HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR`` at
-    ``llvm22`` to lower exactly as the sweep did).
+    the target's flavor (gfx950 ``llvm22``, gfx1250 ``llvm24``) and compiled by a
+    COMGR of that LLVM or newer. A pack step that resolves an older COMGR -- the ROCm
+    the build found, rather than the one the sweep ran -- lowers for its flavor and
+    gets that LLVM's code generation: the same configuration, but compiled to more
+    registers and slower code, shipped without a word. Point
+    ``HIPKERNELPROVIDER_ROCKE_COMGR_LIB`` at a COMGR of that LLVM or newer (and
+    ``HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR`` at the flavor to lower exactly as the
+    sweep did; that pin is build-wide, so a build packing both engines pins the
+    newer, ``llvm24``).
     """
     from rocke.core.lower_llvm import _resolve_llvm_flavor
 
     flavor = _resolve_llvm_flavor()
-    if _flavor_rank(flavor) < _flavor_rank(PACKAGED_LLVM_FLAVOR):
+    if _flavor_rank(flavor) < _flavor_rank(target.llvm_flavor):
         raise ValueError(
-            f"hipkernel:Gfx950ConvDgradAot packages {PACKAGED_LLVM_FLAVOR} kernels, "
-            f"but this process lowers to {flavor} (an older COMGR): set "
-            f"HIPKERNELPROVIDER_ROCKE_COMGR_LIB to a COMGR of LLVM 22 or newer"
+            f"{target.engine} packages {target.llvm_flavor} kernels, but this "
+            f"process lowers to {flavor} (an older COMGR): set "
+            f"HIPKERNELPROVIDER_ROCKE_COMGR_LIB to a COMGR of LLVM "
+            f"{_flavor_rank(target.llvm_flavor)} or newer"
         )
 
 
-def build_gfx950_conv_dgrad_aot(
-    spec: Gfx950ConvDgradAotSpec, *, arch: str = _ARCH
-) -> KernelDef:
-    """The typed ``(spec, *, arch)`` entry point hkp_pack calls for an instance.
+def _build_conv_dgrad_aot(spec: ConvDgradAotSpec, arch: str) -> KernelDef:
+    """Build an instance of either engine.
 
     Dispatches on the family as the sweeps do: implicit GEMM through
     ``build_implicit_gemm_conv_dgrad`` (``kernel_sweep.build_kernel``), the direct
     and helper kernels through ``direct_kernel_sweep._build_kernel``'s builders. A
-    helper's kernel is renamed to :meth:`Gfx950ConvDgradAotSpec.kernel_symbol_prefix`
+    helper's kernel is renamed to :meth:`ConvDgradAotSpec.kernel_symbol_prefix`
     (its builder names it after the probe problem, which fp16 and bf16 share).
 
     The direct builder is rocKE's own dispatch over its sweep algorithms, as the
@@ -1732,10 +2009,10 @@ def build_gfx950_conv_dgrad_aot(
     stale -- it is what left the windowed depthwise unbuildable while the catalog
     already packaged it.
     """
-    ok, reason = supports_gfx950_conv_dgrad_aot(spec, arch=arch)
+    ok, reason = supports_conv_dgrad_aot(spec, arch=arch)
     if not ok:
         raise ValueError(f"invalid packaged AOT dgrad instance: {reason}")
-    _require_packaged_flavor()
+    _require_packaged_flavor(spec.target())
     if not spec.is_direct and spec.to_identity().stable_hash() != spec.instance_id:
         raise ValueError(
             f"instance {spec.instance_id} is not the identity its fields describe "
@@ -1754,15 +2031,47 @@ def build_gfx950_conv_dgrad_aot(
     return _dgrad.build_implicit_gemm_conv_dgrad(spec.to_instance_spec(), arch=arch)
 
 
+def supports_gfx950_conv_dgrad_aot(
+    spec: Gfx950ConvDgradAotSpec, *, arch: str = "gfx950"
+) -> tuple[bool, str]:
+    """The support predicate hkp_pack resolves for :func:`build_gfx950_conv_dgrad_aot`
+    (``supports_`` + the builder's name): :func:`supports_conv_dgrad_aot`."""
+    return supports_conv_dgrad_aot(spec, arch=arch)
+
+
+def supports_gfx1250_conv_dgrad_aot(
+    spec: Gfx1250ConvDgradAotSpec, *, arch: str = "gfx1250"
+) -> tuple[bool, str]:
+    """The support predicate hkp_pack resolves for
+    :func:`build_gfx1250_conv_dgrad_aot`: :func:`supports_conv_dgrad_aot`."""
+    return supports_conv_dgrad_aot(spec, arch=arch)
+
+
+def build_gfx950_conv_dgrad_aot(
+    spec: Gfx950ConvDgradAotSpec, *, arch: str = "gfx950"
+) -> KernelDef:
+    """The typed ``(spec, *, arch)`` entry point hkp_pack calls for an instance of
+    hipkernel:Gfx950ConvDgradAot."""
+    return _build_conv_dgrad_aot(spec, arch)
+
+
+def build_gfx1250_conv_dgrad_aot(
+    spec: Gfx1250ConvDgradAotSpec, *, arch: str = "gfx1250"
+) -> KernelDef:
+    """The typed ``(spec, *, arch)`` entry point hkp_pack calls for an instance of
+    hipkernel:Gfx1250ConvDgradAot."""
+    return _build_conv_dgrad_aot(spec, arch)
+
+
 # ---------------------------------------------------------------------------
 # Profile hooks
 # ---------------------------------------------------------------------------
 
 
-def gfx950_conv_dgrad_aot_problem_for_request(
+def conv_dgrad_aot_problem_for_request(
     request: ConvGroupedRequest,
-) -> Gfx950ConvDgradProblem:
-    """The problem hipkernel:Gfx950ConvDgradAot would match for ``request``.
+) -> ConvDgradAotProblem:
+    """The problem the dgrad engine of ``request.arch`` would match for ``request``.
 
     Instances are chosen per problem by capability, so there is no single spec to
     resolve; this is the graph side of that match (the profile's ``dispatch``).
@@ -1771,8 +2080,8 @@ def gfx950_conv_dgrad_aot_problem_for_request(
     """
     if not isinstance(request, ConvGroupedRequest):
         raise TypeError("expected ConvGroupedRequest")
-    if request.arch != _ARCH:
-        raise ValueError(f"this adapter requires arch={_ARCH}")
+    if request.arch not in TARGETS:
+        raise ValueError(f"no packaged dgrad engine for arch {request.arch!r}")
     if request.direction != "dgrad":
         raise ValueError("this engine serves backward-data convolution only")
     if any(
@@ -1788,7 +2097,7 @@ def gfx950_conv_dgrad_aot_problem_for_request(
         raise ValueError("the packaged dgrad contract supports 2D convolution only")
     if getattr(request, "vec_size_c", None) is not None:
         raise ValueError("the packaged contract takes no vector-width override")
-    problem = Gfx950ConvDgradProblem(
+    problem = ConvDgradAotProblem(
         N=request.N,
         Hi=request.Hi,
         Wi=request.Wi,
@@ -1812,20 +2121,20 @@ def gfx950_conv_dgrad_aot_problem_for_request(
     return problem
 
 
-def supports_gfx950_conv_dgrad_aot_problem(
-    problem: Gfx950ConvDgradProblem, *, arch: str = _ARCH
+def supports_conv_dgrad_aot_problem(
+    problem: ConvDgradAotProblem, *, arch: str
 ) -> tuple[bool, str]:
-    """The graph contract of hipkernel:Gfx950ConvDgradAot (the profile's predicate)."""
-    if arch != _ARCH:
-        return False, f"this adapter requires arch={_ARCH}, got {arch!r}"
-    if not isinstance(problem, Gfx950ConvDgradProblem):
-        return False, "expected Gfx950ConvDgradProblem"
+    """The graph contract of the dgrad engine of ``arch`` (the profile's predicate)."""
+    if arch not in TARGETS:
+        return False, f"no packaged dgrad engine for arch {arch!r}"
+    if not isinstance(problem, ConvDgradAotProblem):
+        return False, "expected ConvDgradAotProblem"
     error = _problem_error(problem)
     return (False, error) if error else (True, "ok")
 
 
 def sub_gemm_buffer_for(
-    problem: Gfx950ConvDgradProblem, tile_m: int, tile_n: int, tile_k: int
+    problem: ConvDgradAotProblem, tile_m: int, tile_n: int, tile_k: int
 ) -> list[int]:
     """The ``sub_gemm_buf`` an implicit-GEMM instance of tile ``(tile_m, tile_n,
     tile_k)`` reads for ``problem``: golden vectors for the native packer."""

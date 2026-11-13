@@ -10,6 +10,7 @@
 
 #include "definitions.h"
 #include "handle.h"
+#include "mx_scale_format.hpp"
 #include "rocblaslt.h"
 #include "rocblaslt_mat_utils.hpp"
 #include "tensile_host.hpp"
@@ -144,20 +145,17 @@ namespace
         return mxBlockSize(desc->scaleAType);
     }
 
-    // Whether a kernel's in-device scale layout (Tensile MXScaleFormat) is the one the
-    // caller's scale mode provides: pre-swizzled for the _EXT mode, unswizzled otherwise.
+    // Whether a kernel's in-device scale layout (Tensile MXScaleFormat) is one the
+    // caller's scale modes provide.
     bool scaleFormatMatches(rocblaslt_handle             handle,
                             rocblaslt_matmul_desc        desc,
                             const rocblaslt_matmul_algo& algo)
     {
-        if(!isMX(desc))
+        const auto need = rocblaslt_mx_scale_need_for(desc->scaleAType, desc->scaleBType);
+        if(need == rocblaslt_mx_scale_need::Any)
             return true;
-        constexpr int kHostPreSwizzle = 1;
-        int           format          = getMXScaleFormatFromAlgoIndex(handle, algo);
-        if(format < 0)
-            return false;
-        return (desc->scaleAType == ScalingFormat::Block_32_UE8M0_32_8_EXT)
-               == (format == kHostPreSwizzle);
+        const int format = getMXScaleFormatFromAlgoIndex(handle, algo);
+        return format >= 0 && rocblaslt_mx_scale_layout_ok(need, format);
     }
 
     size_t recordBytes(int groupCount, bool mx)
@@ -749,8 +747,7 @@ rocblaslt_status
         if(status != rocblaslt_status_success)
             return status;
 
-        // Ask for extra candidates: some may not fit the bound problems, and with MX some
-        // expect the other scale layout.
+        // Ask for extra candidates: some may not fit the bound problems.
         const int candidateCount = isMX(desc) ? std::max(4 * requestedAlgoCount, 32)
                                               : std::max(requestedAlgoCount, 8);
         std::vector<rocblaslt_matmul_heuristic_result> candidates;
@@ -781,8 +778,6 @@ rocblaslt_status
             if(*returnAlgoCount >= requestedAlgoCount)
                 break;
             size_t ws = 0;
-            if(!scaleFormatMatches(handle, desc, candidate.algo))
-                continue;
             if(rocblaslt_is_algo_supported_cpp(handle,
                                                rocblaslt::RocGemmType::ROCBLASLT_GROUPED_GEMM,
                                                boundData,

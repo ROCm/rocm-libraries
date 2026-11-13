@@ -40,6 +40,14 @@
       "type": "int"
     },
     {
+      "name": "has_dropout",
+      "type": "int"
+    },
+    {
+      "name": "fill_symbol",
+      "type": "string"
+    },
+    {
       "name": "block_m",
       "type": "int"
     },

@@ -345,6 +345,7 @@ class TestTapOuterKIdentity(unittest.TestCase):
         for name in (
             "ws_replicas",
             "prefetch_addr",
+            "prefetch_global_regs",
             "patch",
             "tap_outer_k",
             "dy_halo",

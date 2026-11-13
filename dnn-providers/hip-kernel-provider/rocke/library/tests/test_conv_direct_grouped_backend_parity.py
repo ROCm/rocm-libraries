@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Dual-engine parity of the public ``lower_conv_direct_grouped`` entry point.
 
-``rocke.core.backend.lower_conv_direct_grouped`` flattens a
+``kernels.conv.engine_bridge.lower_conv_direct_grouped`` flattens a
 ``DirectConv16cSpec`` / ``DirectConv4cSpec`` / ``DirectConvSpec`` into a dict
 (``conv_direct_grouped_spec_to_dict``) for the C++ binding. Every spec field
 that changes the emitted kernel must survive that flattening -- the problem
@@ -21,7 +21,7 @@ explicit ``backend`` on every call, and holds their refusals to the same text;
 byte-identity on the Python-built fp32 / tf32 kernels.
 
 CPU only (no kernel launch). The binding and lowerer halves skip when the
-``rocke_engine`` extension is not importable.
+``rocke_library_engine`` extension is not importable.
 
 Run:
   PYTHONPATH=<engine build>/cpp/bindings:rocke/platform/python:rocke/library \\
@@ -59,17 +59,19 @@ from kernels.common.conv_implicit_gemm import (
     ImplicitGemmConvSpec,
     build_implicit_gemm_conv,
 )
-from rocke.core import backend as bk
-from rocke.core.backend import (
+from kernels.conv.engine_bridge import (
     conv_direct_grouped_spec_to_dict,
     lower_conv_direct_grouped,
+    lower_conv_direct_nongrouped,
+    lower_conv_implicit_gemm,
 )
+from rocke.core import backend as bk
 
-_HAS_ENGINE = importlib.util.find_spec("rocke_engine") is not None
+_HAS_ENGINE = importlib.util.find_spec("rocke_library_engine") is not None
 
 #: The refusal of groups * cpg = groups * kpg = 2^31 (channel_totals_reason).
 _TOTALS_2_31 = "groups * cpg = 2147483648 and groups * kpg = 2147483648 must fit in i32"
-_SKIP = "" if _HAS_ENGINE else "rocke_engine extension not importable"
+_SKIP = "" if _HAS_ENGINE else "rocke_library_engine extension not importable"
 
 
 def _p4(dtype, N=2, H=13, W=17, groups=32, K=3):
@@ -524,10 +526,10 @@ def _lower(family, spec, arch, backend):
     (``conv_implicit_gemm``, ``conv_direct_nongrouped`` or a
     ``conv_direct_grouped`` kind), with an explicit ``backend``."""
     if family == "conv_implicit_gemm":
-        return bk.lower_conv_implicit_gemm(spec, arch=arch, backend=backend)
+        return lower_conv_implicit_gemm(spec, arch=arch, backend=backend)
     if family == "conv_direct_nongrouped":
-        return bk.lower_conv_direct_nongrouped(spec, arch=arch, backend=backend)
-    return bk.lower_conv_direct_grouped(spec, kind=family, arch=arch, backend=backend)
+        return lower_conv_direct_nongrouped(spec, arch=arch, backend=backend)
+    return lower_conv_direct_grouped(spec, kind=family, arch=arch, backend=backend)
 
 
 def _f32_cases():

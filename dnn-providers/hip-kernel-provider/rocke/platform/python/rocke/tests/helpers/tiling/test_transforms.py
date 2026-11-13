@@ -14,15 +14,22 @@ import dataclasses
 
 import pytest
 
+from rocke.core.ir import F16, F32
 from rocke.helpers.tiling.encoding import WarpDistributionEncoding
-from rocke.helpers.tiling.mma.warp_encoding import a_warp_encoding, b_warp_encoding
+from rocke.helpers.tiling.mma.warp_encoding import (
+    a_warp_encoding,
+    b_warp_encoding,
+    canonical_layouts,
+)
 from rocke.helpers.tiling.register_mapper import RegisterMapper
 from rocke.helpers.tiling.traits import load_mma_traits
 from rocke.helpers.tiling.transforms import (
+    as_forward_map,
     classify_transform,
     describe_edge,
     interleave_idx,
     k_distribution,
+    mma_pair_compatible,
     mma_pair_k_aligned,
     reorder_between,
 )
@@ -157,7 +164,7 @@ def test_describe_edge_declared_relabel_must_be_consistent() -> None:
 def test_mma_pair_k_aligned_accepts_canonical() -> None:
     tr = _traits()
     a, b = a_warp_encoding(tr), b_warp_encoding(tr)
-    d = mma_pair_k_aligned(a, b)
+    d = mma_pair_k_aligned(a, b, a_canon=a, b_canon=b)
     assert d.severity == "ok", d.message
 
 
@@ -171,7 +178,7 @@ def test_mma_pair_k_aligned_rejects_k_misaligned() -> None:
     )  # reorders which K sits in which register slot
     if k_distribution(a_k_scrambled) == k_distribution(a):
         pytest.skip("swap did not perturb the K projection for this atom")
-    d = mma_pair_k_aligned(a_k_scrambled, b)
+    d = mma_pair_k_aligned(a_k_scrambled, b, a_canon=a, b_canon=b)
     assert d.severity in ("warning", "error")  # the driver rejects either
     # a register-axis swap keeps the K SET per lane but changes its order -> reorder-fixable warning
     # (names transform_fragment); if it also changed the set it would be a hard "different K sets" error.
@@ -183,34 +190,107 @@ def test_k_distribution_a_equals_b_for_aligned_atom() -> None:
     assert k_distribution(a_warp_encoding(tr)) == k_distribution(b_warp_encoding(tr))
 
 
-def test_mma_pair_k_aligned_accepts_rectangular_per_atom() -> None:
-    # A rectangular wave tile (64x32x32 -> m_sub=4, n_sub=2) tiles more M-atoms in A than N-atoms in
-    # B, so the WHOLE-fragment K-lists differ in length (A repeats atom-K 4x, B 2x). The per-atom gate
-    # must accept it (every issued 16x16x16 atom pairs the same K); the whole-fragment default rejects.
+def test_mma_pair_k_aligned_accepts_a_rectangular_wave_tile() -> None:
+    # A rectangular wave tile (64x32x32 -> 4 M atoms, 2 N atoms) holds more A registers than B
+    # registers per lane, yet every A row meets every B column at the same instruction K: the check
+    # reads that off the wave tile's canonical layouts and accepts it.
     from rocke.helpers.tiling.kernels.tiling_gemm_interleaved_demo import (
         _wave_descs_interleaved,
     )
 
     a, b, _ = _wave_descs_interleaved(4, 2, 2)
-    d_atom = mma_pair_k_aligned(a.layout, b.layout, a_free_atoms=4, b_free_atoms=2)
-    assert d_atom.severity == "ok", d_atom.message
-    d_whole = mma_pair_k_aligned(
-        a.layout, b.layout
-    )  # default 1,1 -> whole-fragment, rejects rectangular
-    assert d_whole.severity != "ok"
+    a_canon, b_canon, _ = canonical_layouts(_traits(), (4, 2, 2))
+    d = mma_pair_k_aligned(a.layout, b.layout, a_canon=a_canon, b_canon=b_canon)
+    assert d.severity == "ok", d.message
 
 
-def test_mma_pair_k_aligned_per_atom_still_rejects_k_mismatch() -> None:
-    # The per-atom relaxation must NOT mask a genuine K divergence. Pairing A's 4-atom reduction against a
-    # B told it has 1 atom (its whole 2-atom K-list as one signature) yields unequal atom signatures --
-    # the gate rejects, proving the relaxation only forgives the free-dim repeat, never the K.
-    from rocke.helpers.tiling.kernels.tiling_gemm_interleaved_demo import (
-        _wave_descs_interleaved,
+def test_mma_pair_k_aligned_rejects_k_that_depends_on_the_free_row() -> None:
+    # Swapping two K labels on the odd M rows of A and the odd N rows of B keeps each operand sound
+    # and keeps A and B equal slot for slot, but C[0, 1] then multiplies A's K 0 with B's K 1: every
+    # A row meets every B column, so K must not depend on the row.
+    tr = _traits()
+    a_canon, b_canon = a_warp_encoding(tr), b_warp_encoding(tr)
+
+    def odd_rows_swap_k01(layout):
+        return {
+            slot: (row, {0: 1, 1: 0}.get(k, k)) if row % 2 else (row, k)
+            for slot, (row, k) in as_forward_map(layout).items()
+        }
+
+    a, b = odd_rows_swap_k01(a_canon), odd_rows_swap_k01(b_canon)
+    assert as_forward_map(a) == as_forward_map(b)  # equal slot for slot
+    for check in (mma_pair_k_aligned, mma_pair_compatible):
+        d = check(a, b, a_canon=a_canon, b_canon=b_canon)
+        assert d.severity == "error", d.message
+        assert d.message == (
+            "A's K labels depend on its M row: instruction K 0 holds K 0 in M 0 but K 1 in M 1; "
+            "the instruction multiplies every M row at one instruction K with the same K of the "
+            "other operand -- no in-register reorder of one operand fixes it"
+        )
+
+
+def _canonical_pair():
+    """The canonical A and B layouts of one 16x16x16 f16 MFMA, and A's forward map."""
+    tr = _traits()
+    a_canon, b_canon = a_warp_encoding(tr), b_warp_encoding(tr)
+    return a_canon, b_canon, as_forward_map(a_canon)
+
+
+def test_mma_pair_k_aligned_names_a_reorder_of_a_when_one_fixes_it() -> None:
+    # Swapping the K labels of lane 0's first two registers leaves every row of A holding the K
+    # labels B pairs with it, out of order: an in-register reorder of A fixes it.
+    a_canon, b_canon, a_map = _canonical_pair()
+    swapped = dict(a_map)
+    swapped[(0, 0)], swapped[(0, 1)] = a_map[(0, 1)], a_map[(0, 0)]
+    d = mma_pair_k_aligned(swapped, b_canon, a_canon=a_canon, b_canon=b_canon)
+    assert d.severity == "warning"
+    assert d.message == (
+        "A.K != B.K at instruction K 0 (A lane 0 register 0 holds K 1, B holds K 0); every row "
+        "of A holds the K labels B pairs with it -> reconcilable by an in-register reorder of A "
+        "(transform_fragment it first)"
     )
 
-    a, b, _ = _wave_descs_interleaved(4, 2, 2)
-    d = mma_pair_k_aligned(a.layout, b.layout, a_free_atoms=4, b_free_atoms=1)
-    assert d.severity != "ok"
+
+def test_mma_pair_k_aligned_refuses_different_k_sets() -> None:
+    # Each lane of this instruction holds a disjoint group of four K. Moving A's K labels on by one
+    # group gives every lane K that B never pairs with it there.
+    a_canon, b_canon, a_map = _canonical_pair()
+    moved = {slot: (row, (k + 4) % 16) for slot, (row, k) in a_map.items()}
+    d = mma_pair_k_aligned(moved, b_canon, a_canon=a_canon, b_canon=b_canon)
+    assert d.severity == "error"
+    assert d.message == (
+        "A.K and B.K hold different K sets (lane 0, M 0: A [4, 5, 6, 7] vs B [0, 1, 2, 3] at the "
+        "same instruction K) -- no in-register reorder reconciles them"
+    )
+
+
+def test_mma_pair_k_aligned_refuses_an_operand_of_another_wave_tile() -> None:
+    # A two-atom A against the one-atom canonical: the canonical is not this operand's.
+    a_canon, b_canon, _ = _canonical_pair()
+    a_two_atoms, _, _ = canonical_layouts(_traits(), (2, 1, 1))
+    d = mma_pair_k_aligned(a_two_atoms, b_canon, a_canon=a_canon, b_canon=b_canon)
+    assert d.severity == "error"
+    assert d.message == (
+        "A holds 512 (lane, register) positions but its canonical layout holds 256 -- pass "
+        "canonical_layouts(traits, subtiles) of this wave tile"
+    )
+
+
+def test_mma_pair_k_aligned_refuses_replicas_that_disagree() -> None:
+    # This wave32 instruction holds every A value in two lanes (0 and 16 hold M 0). Giving lane 16's
+    # copy of instruction K 0 another K label makes the replicas disagree.
+    tr = _traits("wmma_f32_16x16x16_f16_w32")
+    a_canon, b_canon = a_warp_encoding(tr), b_warp_encoding(tr)
+    a_map = as_forward_map(a_canon)
+    assert a_map[(0, 0)] == a_map[(16, 0)] == (0, 0)
+    replicas = dict(a_map)
+    replicas[(16, 0)] = (0, 1)
+    d = mma_pair_k_aligned(replicas, b_canon, a_canon=a_canon, b_canon=b_canon)
+    assert d.severity == "error"
+    assert d.message == (
+        "A's replicas of M 0 disagree on K: instruction K 0 holds K 0 in one and K 1 in another; "
+        "every replica must hold the same values -- no in-register reorder of one operand fixes it"
+    )
 
 
 def test_interleaved_style_operand_desc_is_distinct() -> None:
@@ -224,17 +304,17 @@ def test_interleaved_style_operand_desc_is_distinct() -> None:
 
     canon = TileMma(
         (32, 32, 32),
-        a="f16",
-        b="f16",
-        c="f32",
+        a=F16,
+        b=F16,
+        c=F32,
         target="gfx90a",
         tiling=Tiling(atom_shape=(16, 16, 16)),
     )
     inter = TileMma(
         (32, 32, 32),
-        a="f16",
-        b="f16",
-        c="f32",
+        a=F16,
+        b=F16,
+        c=F32,
         target="gfx90a",
         tiling=Tiling(atom_shape=(16, 16, 16)),
         style=InterleavedStyle(),

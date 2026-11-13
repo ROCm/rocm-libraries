@@ -45,8 +45,9 @@ Per direction, on top of that:
   ``CACHE_FWD_SPLIT_K_ARCHS`` targets, the split-K kernel (``split_k`` > 1,
   recorded as 2 with ``two_stage``; fp32 workspace slabs + the Stage 2 fold,
   the degree a kernarg swept at launch) on the small tiles, pipelines and
-  widths of ``CACHE_FWD_SPLIT_K_*``, and its cluster form where the target
-  launches workgroup clusters and the flavor lowers them.
+  widths of ``CACHE_FWD_SPLIT_K_*`` (on MFMA the ``CACHE_FWD_SPLIT_K_MFMA_*``
+  subset), and its cluster form where the target launches workgroup clusters
+  and the flavor lowers them.
 * **wgrad** -- tile_m/tile_n also take 144 and 192, and warp_m/warp_n also
   take 3 and 6 (``CACHE_WGRAD_EXTRA_*``): wgrad's GEMM N is Z*Y*X*cpg, which
   carries a factor of 9 for a 3x3 filter, and the base ladder steps by 2x, so
@@ -61,7 +62,11 @@ Per direction, on top of that:
   two-stage only, load widths derived by the builder), served only to
   depthwise problems whose merged GEMM fits the tile. ``lds_k_outer`` and
   ``prefetch_addr`` follow ``WgradConvSpec.default_lds_k_outer`` /
-  ``default_prefetch_addr`` per geometry. On wave32 (WMMA, gfx1250) the
+  ``default_prefetch_addr`` per geometry. On gfx950 the register-prefetch
+  K loop (``prefetch_global_regs``) is built next to the plain loop of the 8 / 8
+  wide kernels on the ``CACHE_WGRAD_PREFETCH_GLOBAL_REGS_GEOMETRIES`` cover, with
+  the cshuffle epilogue (split_k = 1 and atomic split-K) and two-stage
+  split-K. On wave32 (WMMA, gfx1250) the
   synchronous default-epilogue kernels (split_k = 1 and atomic split-K) are
   built on the whole grid; the cshuffle epilogue, two-stage split-K and the
   ``async_dma`` loop (global_load_async_to_lds) only on the
@@ -217,6 +222,104 @@ CACHE_WGRAD_WMMA_GEOMETRIES: Tuple[Tuple[int, int, int, int, int], ...] = (
     (256, 64, 64, 4, 2),
     (256, 128, 64, 4, 2),
 )
+# The register-prefetch K loop (WgradConvSpec.prefetch_global_regs) on gfx950: built
+# as an extra kernel next to the plain synchronous loop of the widest-vector
+# (8 / 8) configurations, on these (tile_m, tile_n, tile_k, warp_m, warp_n,
+# warp_tile) only, for every cached pipeline, with the cshuffle epilogue
+# (split_k = 1 and atomic split-K) and two-stage split-K. Profiling the wgrad
+# layers of the reference corpora with the variant built on every such
+# configuration, each of these geometries carried the fastest kernel of at
+# least one layer; the rest never did, and neither did the default-epilogue
+# split_k = 1 kernel.
+CACHE_WGRAD_PREFETCH_GLOBAL_REGS_ARCHS: Tuple[str, ...] = ("gfx950",)
+CACHE_WGRAD_PREFETCH_GLOBAL_REGS_GEOMETRIES: Tuple[
+    Tuple[int, int, int, int, int, int], ...
+] = (
+    (32, 32, 64, 1, 2, 16),
+    (32, 32, 64, 2, 2, 16),
+    (32, 64, 32, 1, 4, 16),
+    (32, 64, 64, 1, 4, 16),
+    (32, 64, 64, 2, 4, 16),
+    (32, 128, 64, 1, 4, 16),
+    (32, 128, 64, 1, 4, 32),
+    (32, 128, 64, 2, 4, 16),
+    (32, 128, 64, 2, 8, 16),
+    (32, 192, 64, 1, 4, 16),
+    (32, 192, 64, 2, 4, 16),
+    (64, 32, 64, 2, 2, 16),
+    (64, 32, 64, 4, 1, 16),
+    (64, 32, 64, 4, 2, 16),
+    (64, 64, 32, 2, 2, 32),
+    (64, 64, 32, 4, 1, 16),
+    (64, 64, 64, 1, 4, 16),
+    (64, 64, 64, 2, 1, 16),
+    (64, 64, 64, 2, 2, 16),
+    (64, 64, 64, 2, 2, 32),
+    (64, 64, 64, 2, 4, 16),
+    (64, 64, 64, 4, 1, 16),
+    (64, 64, 64, 4, 2, 16),
+    (64, 128, 64, 1, 4, 16),
+    (64, 128, 64, 1, 4, 32),
+    (64, 128, 64, 1, 8, 16),
+    (64, 128, 64, 2, 2, 16),
+    (64, 128, 64, 2, 4, 16),
+    (64, 128, 64, 2, 8, 16),
+    (64, 128, 64, 4, 2, 16),
+    (64, 128, 64, 4, 4, 16),
+    (64, 192, 64, 2, 4, 16),
+    (64, 192, 64, 4, 2, 16),
+    (64, 256, 64, 1, 4, 16),
+    (64, 256, 64, 1, 4, 32),
+    (64, 256, 64, 1, 8, 32),
+    (64, 256, 64, 2, 2, 16),
+    (64, 256, 64, 2, 4, 16),
+    (64, 256, 64, 2, 8, 32),
+    (128, 64, 64, 4, 1, 16),
+    (128, 64, 64, 4, 2, 16),
+    (128, 64, 64, 8, 2, 16),
+    (128, 128, 64, 2, 2, 16),
+    (128, 128, 64, 2, 4, 16),
+    (128, 128, 64, 2, 8, 16),
+    (128, 128, 64, 4, 2, 16),
+    (128, 128, 64, 4, 4, 16),
+    (128, 128, 64, 8, 2, 16),
+    (128, 192, 64, 2, 2, 16),
+    (128, 192, 64, 2, 4, 16),
+    (128, 256, 64, 1, 4, 16),
+    (128, 256, 64, 2, 4, 16),
+    (128, 256, 64, 2, 8, 16),
+    (128, 256, 64, 4, 2, 16),
+    (128, 256, 64, 4, 4, 16),
+    (144, 144, 32, 3, 3, 16),
+    (144, 144, 64, 3, 3, 16),
+    (144, 192, 64, 3, 4, 16),
+    (192, 64, 64, 4, 2, 16),
+    (192, 128, 64, 2, 4, 32),
+    (192, 128, 64, 4, 2, 16),
+    (192, 144, 64, 4, 3, 16),
+    (192, 192, 64, 2, 6, 16),
+    (192, 192, 64, 2, 6, 32),
+    (192, 192, 64, 3, 4, 16),
+    (192, 192, 64, 4, 3, 16),
+    (192, 192, 64, 4, 4, 16),
+    (192, 192, 64, 6, 2, 16),
+    (192, 256, 64, 4, 2, 16),
+    (192, 256, 64, 4, 4, 16),
+    (256, 64, 64, 4, 2, 16),
+    (256, 128, 32, 4, 1, 16),
+    (256, 128, 32, 4, 2, 16),
+    (256, 128, 64, 4, 1, 16),
+    (256, 128, 64, 4, 2, 16),
+    (256, 128, 64, 4, 4, 16),
+    (256, 128, 64, 8, 2, 16),
+    (256, 192, 64, 4, 2, 16),
+    (256, 192, 64, 8, 1, 32),
+    (256, 256, 32, 2, 4, 16),
+    (256, 256, 32, 4, 4, 16),
+    (256, 256, 64, 2, 4, 16),
+    (256, 256, 64, 4, 2, 16),
+    (256, 256, 64, 4, 4, 16),
+)
 CACHE_WGRAD_EXTRA_WARP_MN: Tuple[int, ...] = (3, 6)
 # Cap on the f32 accumulator registers each lane holds:
 # (tile_m / warp_m) * (tile_n / warp_n) / wave_size. Above 256 the
@@ -356,15 +459,37 @@ CACHE_FWD_GROUP_MERGE_EXCLUDED_TILE_M: Tuple[int, ...] = (16,)
 # sweep does: one workgroup per merged group cannot fill the device.
 CACHE_WGRAD_SPLIT_KS: Tuple[int, ...] = (1, 2)
 
-# Split-K forward (WMMA only; ImplicitGemmConvSpec.split_k): built for the
-# small-M / deep-K layers it exists for, so only small output tiles, the two
-# WMMA pipelines and the cshuffle epilogue. Recorded as split_k = 2 with
+# dW width of the packed 16-bit split-K atomic (cshuffle) kernels, per arch.
+# One <2 x dtype> pair per lane puts a wave's atomics on consecutive dwords,
+# so each atomic instruction covers two cache lines instead of eight and the
+# split CTAs of one tile contend on far fewer L2 atomic transactions.
+# Unlisted arches keep dW tied to the X width.
+CACHE_WGRAD_ATOMIC_VEC_C: Dict[str, int] = {"gfx950": 2}
+
+# Split-K forward (ImplicitGemmConvSpec.split_k): built for the small-M /
+# deep-K layers it exists for, so only small output tiles, the two WMMA
+# pipelines (or the MFMA subset below) and the cshuffle epilogue. Recorded as split_k = 2 with
 # two_stage set: the degree is a kernarg, swept at launch.
 CACHE_FWD_SPLIT_K_TILE_M: Tuple[int, ...] = (16, 32, 64)
 CACHE_FWD_SPLIT_K_TILE_N: Tuple[int, ...] = (16, 32, 64, 128)
 CACHE_FWD_SPLIT_K_TILE_K: Tuple[int, ...] = (32, 64)
 CACHE_FWD_SPLIT_K_PIPELINES: Tuple[str, ...] = ("mem", "wavelet")
 CACHE_FWD_SPLIT_K_VECS: Tuple[int, ...] = (4, 8)
+# The MFMA (gfx950) split-K forward subset: the small-M / deep-K layers it is
+# for (dilated and strided deep-channel rows, small batch) want few, small
+# output tiles; the plain K-loop pipelines only (see fwd_split_k_reason) and
+# 16-byte vectors.
+CACHE_FWD_SPLIT_K_MFMA_TILE_M: Tuple[int, ...] = (32, 64, 128)
+CACHE_FWD_SPLIT_K_MFMA_TILE_N: Tuple[int, ...] = (32, 64, 128)
+CACHE_FWD_SPLIT_K_MFMA_PIPELINES: Tuple[str, ...] = ("mem", "compv3")
+# 16-byte vectors only: the layers it serves have deep, 8-aligned channels.
+CACHE_FWD_SPLIT_K_MFMA_VECS: Tuple[int, ...] = (8,)
+# Tallest output tile a one-wave (1x1-warp) MFMA split-K kernel is built at.
+# One wave holding 128 rows sits at the register ceiling, and the split adds
+# the slice bounds and the slab base on top: those binaries spill (to scratch
+# at 128x128, SGPRs at 128x32 and 128x64) where their unsplit twins mostly do
+# not, so the 128-row tiles are built with 2 or more waves only.
+CACHE_FWD_SPLIT_K_MFMA_ONE_WAVE_MAX_TILE_M = 64
 # Single-launch cluster split-K forward (ImplicitGemmConvSpec.split_k_cluster):
 # the S slices of one output tile form a (1, 1, S) workgroup cluster and fold
 # their slabs after a cluster barrier, so there is no Stage 2 launch. The
@@ -655,6 +780,23 @@ def _wgrad_async_chunks(cfg: dict, dtypes, caps: dict, arch: str) -> Optional[di
     return dict(async_chunk_a=a_vec, async_chunk_b=b_vec)
 
 
+def _wgrad_vec_c(
+    arch: str, dtype_d: str, epilogue: str, vec_bc: int, split_k: int, two_stage: bool
+) -> int:
+    """dW store width of a wgrad kernel (see ``CACHE_WGRAD_ATOMIC_VEC_C``).
+
+    The default epilogue (and so every two-stage kernel) stores scalar; a
+    cshuffle kernel stores at the X width, except a packed 16-bit split-K
+    atomic on an arch listed in ``CACHE_WGRAD_ATOMIC_VEC_C``.
+    """
+    if epilogue == "default":
+        return 1
+    vc = CACHE_WGRAD_ATOMIC_VEC_C.get(arch)
+    if vc and split_k > 1 and not two_stage and dtype_d in ("fp16", "bf16"):
+        return vc if vec_bc % vc == 0 else vec_bc
+    return vec_bc
+
+
 def _wgrad_two_stages(split_k: int) -> Tuple[bool, ...]:
     """Two-stage variants for a split-K degree.
 
@@ -898,16 +1040,35 @@ def _fwd_split_cluster_target(target, flavor: str) -> bool:
 
 
 def _fwd_split_geometry(geometry: tuple) -> bool:
-    """Whether split-K forward kernels are built for ``geometry`` (WMMA only)."""
-    tile_m, tile_n, tile_k, _wm, _wn, _wt, pipeline, epilogue, atom = geometry
+    """Whether split-K forward kernels are built for ``geometry``: the WMMA
+    small tiles, or on MFMA the ``CACHE_FWD_SPLIT_K_MFMA_*`` subset."""
+    tile_m, tile_n, tile_k, warp_m, warp_n, _wt, pipeline, epilogue, atom = geometry
+    if atom.family != "wmma":
+        return (
+            epilogue == "cshuffle"
+            and pipeline in CACHE_FWD_SPLIT_K_MFMA_PIPELINES
+            and tile_m in CACHE_FWD_SPLIT_K_MFMA_TILE_M
+            and tile_n in CACHE_FWD_SPLIT_K_MFMA_TILE_N
+            and tile_k in CACHE_FWD_SPLIT_K_TILE_K
+            and (
+                warp_m * warp_n > 1
+                or tile_m <= CACHE_FWD_SPLIT_K_MFMA_ONE_WAVE_MAX_TILE_M
+            )
+        )
     return (
-        atom.family == "wmma"
-        and epilogue == "cshuffle"
+        epilogue == "cshuffle"
         and pipeline in CACHE_FWD_SPLIT_K_PIPELINES
         and tile_m in CACHE_FWD_SPLIT_K_TILE_M
         and tile_n in CACHE_FWD_SPLIT_K_TILE_N
         and tile_k in CACHE_FWD_SPLIT_K_TILE_K
     )
+
+
+def _fwd_split_vecs(atom) -> Tuple[int, ...]:
+    """The load / store widths split-K forward kernels are built at."""
+    if atom.family != "wmma":
+        return CACHE_FWD_SPLIT_K_MFMA_VECS
+    return CACHE_FWD_SPLIT_K_VECS
 
 
 def _fwd_split_cluster_geometry(geometry: tuple) -> bool:
@@ -978,9 +1139,8 @@ def _fwd_split_jobs(
             )
     if not _fwd_split_geometry(geometry):
         return
-    for vec_ab, vec_c in itertools.product(
-        CACHE_FWD_SPLIT_K_VECS, CACHE_FWD_SPLIT_K_VECS
-    ):
+    vecs = _fwd_split_vecs(atom)
+    for vec_ab, vec_c in itertools.product(vecs, vecs):
         cfg = dict(
             tile_m=tile_m,
             tile_n=tile_n,
@@ -1265,12 +1425,12 @@ def _wgrad_jobs(
         # every two-stage kernel) stores scalar, so there D is 1 and B takes
         # its own width -- tied to D it could only ever load scalar.
         for vec_a, vec_bc, split_k in itertools.product(_VECS, _VECS, split_ks):
-            vec_c = 1 if epilogue == "default" else vec_bc
             for two_stage, caps in itertools.product(
                 _wgrad_two_stages(split_k), _layout_caps()
             ):
                 if two_stage and not in_cover:
                     continue
+                vec_c = _wgrad_vec_c(arch, dd, epilogue, vec_bc, split_k, two_stage)
                 grouped = caps["grouped"]
                 cfg = dict(
                     tile_m=tile_m,
@@ -1314,23 +1474,33 @@ def _wgrad_jobs(
                     chunks = _wgrad_async_chunks(kcfg, (da, db, dd), caps, arch)
                     if chunks is None:
                         continue
-                    yield BuildJob(
-                        identity=KernelIdentity(
-                            arch=arch,
+                    kcfgs = [kcfg]
+                    if _wgrad_prefetch_global_regs(arch, kcfg):
+                        # The register-prefetch form of the plain K loop
+                        # (WgradConvSpec.prefetch_global_regs), next to it. It
+                        # replaces the carried-offset loop, so prefetch_addr
+                        # is off.
+                        kcfgs.append(
+                            dict(kcfg, prefetch_addr=False, prefetch_global_regs=True)
+                        )
+                    for kc in kcfgs:
+                        yield BuildJob(
+                            identity=KernelIdentity(
+                                arch=arch,
+                                direction="wgrad",
+                                algorithm="implicit_gemm",
+                                llvm_flavor=flavor,
+                                dtype_a=da,
+                                dtype_b=db,
+                                dtype_d=dd,
+                                grouped=grouped,
+                                **kc,
+                                **chunks,
+                            ),
                             direction="wgrad",
-                            algorithm="implicit_gemm",
-                            llvm_flavor=flavor,
-                            dtype_a=da,
-                            dtype_b=db,
-                            dtype_d=dd,
-                            grouped=grouped,
-                            **kcfg,
-                            **chunks,
-                        ),
-                        direction="wgrad",
-                        spec_kwargs=kcfg,
-                        caps=caps,
-                    )
+                            spec_kwargs=kc,
+                            caps=caps,
+                        )
         # Stream-K kernels (opt-in). Default epilogue only, so the store is
         # scalar and B takes its own width; split_k stays 1 (stream-K owns the
         # K partition). The workspace reduction reuses the two-stage scratch,
@@ -1429,6 +1599,55 @@ def _wgrad_jobs(
                 spec_kwargs=cfg,
                 caps=dict(grouped=True, group_merge=gm),
             )
+
+
+def _wgrad_prefetch_global_regs_geometry(arch: str, geometry: tuple) -> bool:
+    """Whether a wgrad geometry is in the gfx950 register-prefetch cover.
+
+    ``geometry`` is ``(tile_m, tile_n, tile_k, warp_m, warp_n, warp_tile)``;
+    see :data:`CACHE_WGRAD_PREFETCH_GLOBAL_REGS_GEOMETRIES`.
+    """
+    return (
+        arch in CACHE_WGRAD_PREFETCH_GLOBAL_REGS_ARCHS
+        and tuple(geometry) in CACHE_WGRAD_PREFETCH_GLOBAL_REGS_GEOMETRIES
+    )
+
+
+def _wgrad_prefetch_global_regs_stage(
+    epilogue: str, split_k: int, two_stage: bool
+) -> bool:
+    """Whether a (epilogue, split-K stage) gets the register-prefetch variant:
+    the cshuffle epilogue (split_k = 1 and atomic split-K) and two-stage
+    split-K. Shared by :func:`_wgrad_prefetch_global_regs` and :func:`count_jobs`."""
+    if epilogue == "cshuffle":
+        return not two_stage
+    return split_k > 1 and two_stage
+
+
+def _wgrad_prefetch_global_regs(arch: str, cfg: dict) -> bool:
+    """Whether a wgrad job also gets the register-prefetch K loop.
+
+    Built next to the plain synchronous loop of the widest-vector (8 / 8)
+    configurations of the :data:`CACHE_WGRAD_PREFETCH_GLOBAL_REGS_GEOMETRIES` cover;
+    see WgradConvSpec.prefetch_global_regs.
+    """
+    if cfg.get("async_dma") or cfg.get("unroll_k"):
+        return False
+    if (cfg.get("vector_size_a"), cfg.get("vector_size_b")) != (8, 8):
+        return False
+    geometry = (
+        cfg["tile_m"],
+        cfg["tile_n"],
+        cfg["tile_k"],
+        cfg["warp_m"],
+        cfg["warp_n"],
+        cfg["warp_tile_m"],
+    )
+    return _wgrad_prefetch_global_regs_geometry(
+        arch, geometry
+    ) and _wgrad_prefetch_global_regs_stage(
+        cfg["epilogue"], cfg.get("split_k", 1), cfg.get("two_stage", False)
+    )
 
 
 def _wgrad_prefetch_addr(arch: str, cfg: dict) -> bool:
@@ -1902,7 +2121,7 @@ def count_jobs(
                 if _fwd_merged_geometry(geo):
                     total += len(_FWD_GROUP_MERGES) * len(_fwd_merged_k_loops())
                 if fwd_split and _fwd_split_geometry(geo):
-                    total += len(CACHE_FWD_SPLIT_K_VECS) ** 2
+                    total += len(_fwd_split_vecs(geo[8])) ** 2
                 if fwd_cluster and _fwd_split_cluster_geometry(geo):
                     total += len(CACHE_FWD_SPLIT_K_CLUSTER_DEGREES)
             elif direction == "wgrad":
@@ -1918,6 +2137,15 @@ def count_jobs(
                 else:
                     stages, asyncs = len(split_ks), 0
                 total += vecs * stages * layouts + asyncs * layouts
+                if 8 in _VECS and _wgrad_prefetch_global_regs_geometry(
+                    target.gfx, geo[:6]
+                ):
+                    # The register-prefetch variants of the (8, 8) kernel.
+                    total += layouts * sum(
+                        _wgrad_prefetch_global_regs_stage(geo[7], sk, ts)
+                        for sk in split_ks
+                        for ts in _wgrad_two_stages(sk)
+                    )
                 total += merged
                 total += layouts * len(
                     _wgrad_streamk_builds(
@@ -2048,6 +2276,30 @@ def _probe_problem(direction: str, caps: Optional[dict] = None):
     )
 
 
+def spec_for_job(job: BuildJob, dtype: str):
+    """The kernel spec ``job`` builds (its direction's implicit-GEMM spec at
+    the canonical probe problem); nothing is built. Raises like the spec's
+    constructor on an invalid configuration."""
+    data = conv_data_spec(dtype)
+    problem = _probe_problem(job.direction, job.caps)
+    if job.direction == "fwd":
+        from kernels.common.conv_implicit_gemm import ImplicitGemmConvSpec as Spec
+    elif job.direction == "wgrad":
+        from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec as Spec
+    elif job.direction == "dgrad":
+        from kernels.common.conv_implicit_gemm_dgrad import DgradConvSpec as Spec
+    else:
+        raise ValueError(f"unknown direction {job.direction!r}")
+    return Spec(problem=problem, data=data, **job.spec_kwargs)
+
+
+def spec_launch_block_size(spec) -> int:
+    """Workgroup size of ``spec``'s kernel: ``launch_block_size`` where a
+    pipeline appends extra waves (wavelet); wgrad has no such pipeline and
+    exposes ``block_size`` alone."""
+    return getattr(spec, "launch_block_size", spec.block_size)
+
+
 def kernel_for_job(job: BuildJob, arch: str, dtype: str):
     """Build one job's kernel IR. Returns ``(kernel, meta)``; nothing compiled.
 
@@ -2055,40 +2307,20 @@ def kernel_for_job(job: BuildJob, arch: str, dtype: str):
     rather than failed -- the grid is deliberately over-generated and most
     rejections are ordinary spec-validity rules.
     """
-    data = conv_data_spec(dtype)
-    problem = _probe_problem(job.direction, job.caps)
-
+    spec = spec_for_job(job, dtype)
     if job.direction == "fwd":
-        from kernels.common.conv_implicit_gemm import (
-            ImplicitGemmConvSpec,
-            build_implicit_gemm_conv,
-        )
-
-        spec = ImplicitGemmConvSpec(problem=problem, data=data, **job.spec_kwargs)
-        kernel = build_implicit_gemm_conv(spec, arch=arch)
+        from kernels.common.conv_implicit_gemm import build_implicit_gemm_conv as build
     elif job.direction == "wgrad":
         from kernels.common.conv_implicit_gemm_wgrad import (
-            WgradConvSpec,
-            build_implicit_gemm_conv_wgrad,
+            build_implicit_gemm_conv_wgrad as build,
         )
-
-        spec = WgradConvSpec(problem=problem, data=data, **job.spec_kwargs)
-        kernel = build_implicit_gemm_conv_wgrad(spec, arch=arch)
-    elif job.direction == "dgrad":
-        from kernels.common.conv_implicit_gemm_dgrad import (
-            DgradConvSpec,
-            build_implicit_gemm_conv_dgrad,
-        )
-
-        spec = DgradConvSpec(problem=problem, data=data, **job.spec_kwargs)
-        kernel = build_implicit_gemm_conv_dgrad(spec, arch=arch)
     else:
-        raise ValueError(f"unknown direction {job.direction!r}")
-
+        from kernels.common.conv_implicit_gemm_dgrad import (
+            build_implicit_gemm_conv_dgrad as build,
+        )
+    kernel = build(spec, arch=arch)
     meta = {
         "spec_kernel_name": spec.kernel_name(),
-        # launch_block_size only exists where a pipeline appends extra waves
-        # (wavelet); wgrad has no such pipeline and exposes block_size alone.
-        "block_size": getattr(spec, "launch_block_size", spec.block_size),
+        "block_size": spec_launch_block_size(spec),
     }
     return kernel, meta

@@ -14,7 +14,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from kernels.common._sdpa_seqlen import sdpa_cu_seqlens, sdpa_seqlens
+from kernels.common._sdpa_seqlen import sdpa_cu_seqlens, sdpa_seqlens, validate_lengths
 
 
 def test_valid_lengths_pass_through():
@@ -159,3 +159,38 @@ def test_one_sided_lengths_rejected(q, kv):
 def test_both_unset_is_a_noop():
     assert sdpa_cu_seqlens(None, None, batch=2) == (None, None)
     assert sdpa_seqlens(None, None, batch=2, s_q_max=8, s_kv_max=8) == (None, None)
+
+
+# --- validate_lengths: the SDPA bindings' own per-tensor rule --------------
+#
+# ``dispatch.sdpa.bind_unified._lengths`` calls ``validate_lengths`` directly
+# (not through ``sdpa_seqlens``) to check ``seq_len_q`` / ``seq_len_kv``
+# against the request's own extent before binding a launch. These mirror the
+# cases ``tests/sdpa/test_unified_sdpa_binding.py::
+# test_invalid_seq_len_is_refused_before_launch`` pins on a GPU-capable (torch)
+# run, so the same rule is also checked here with no GPU and no torch.
+_BAD_LENGTHS = [
+    ("seq_len_q", [2, 1], 1, r"seq_len_q: every length must satisfy 0 <= len <= 1"),
+    ("seq_len_q", [-1, 1], 1, "seq_len_q: every length must be >= 0"),
+    ("seq_len_q", [1, 1, 1], 1, "seq_len_q: expected 2 per-batch lengths, got 3"),
+    (
+        "seq_len_kv",
+        [17, 16],
+        16,
+        r"seq_len_kv: every length must satisfy 0 <= len <= 16",
+    ),
+    ("seq_len_kv", [-1, 16], 16, "seq_len_kv: every length must be >= 0"),
+    ("seq_len_kv", [16], 16, "seq_len_kv: expected 2 per-batch lengths, got 1"),
+]
+
+
+@pytest.mark.parametrize(
+    "name,values,s_max,match",
+    _BAD_LENGTHS,
+    ids=[f"{n}={v}" for n, v, _, _ in _BAD_LENGTHS],
+)
+def test_bind_unified_bad_lengths_are_rejected_by_validate_lengths(
+    name, values, s_max, match
+):
+    with pytest.raises(ValueError, match=match):
+        validate_lengths(values, batch=2, s_max=s_max, name=name)
