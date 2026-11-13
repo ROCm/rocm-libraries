@@ -15280,6 +15280,14 @@ class KernelWriterAssembly(KernelWriter):
       miN      = kernel["MatrixInstM"] if tP["tile01Idx"] == 0 else kernel["MatrixInstN"]  # tile free-dim MI (M for A, N for B)
       kOStride = (kernel["WavefrontSize"] // miN) * miN * innerK
       inc      = (kernel["MIInputPerThread%s" % tc] // innerK) * kOStride
+      if self.states.inTailLoop:
+        # The tail loop is a runtime loop: one emitted body runs once per remaining MI-K step, so a
+        # compile-time immediate would re-read the same K block every trip. Advance the address VGPR
+        # instead (like the normal reader); nothing reads it after the tail loop.
+        incBytes = int(round(inc * tP["bpeDS"]))
+        module.add(VAddU32(dst=vgpr("LocalReadAddr%s" % tc), src0=incBytes, src1=vgpr("LocalReadAddr%s" % tc),
+                           comment="lr%s += %u (swizzledTDM tail K-step, bytes)" % (tc, incBytes)))
+        return module
       tP["localReadOffset"] += inc
       module.addComment0("lr%s localReadOffset -> %d (swizzledTDM K-sub-iter inc)" % (tc, tP["localReadOffset"]))
       return module
@@ -25281,6 +25289,22 @@ class KernelWriterAssembly(KernelWriter):
     isSparseTrack: bool = (kernel["ProblemType"]["Sparse"] == 1 and tP["isA"]) or \
                           (kernel["ProblemType"]["Sparse"] == 2 and tP["isB"])
     isMetadata: bool = tP["isM"]
+
+    if tP.get("isSwizzledTDM"):
+      # Swizzled A/B: dim0 is one nO row's contiguous DepthU slice, MI*DepthU elements (see the
+      # swizzled branch of initTDMDescriptor). The [kO,kM,nI,kI] layout makes a K prefix a memory
+      # prefix, so the tail clamps dim0 to the row's valid extent MI*alignUp(SizeL%DepthU, swzK):
+      # the host zero-pads K up to swzK, and TDM zero-fills the rest instead of reading the next
+      # nO row. Waves split nO rows, not K, so no per-wave K offset applies.
+      swzMi = kernel["MatrixInstM"] if tP["tile01Idx"] == 0 else kernel["MatrixInstN"]
+      swzK = tP["swizzleK"]
+      with self.allocTmpSgpr(1, tag="resetTDMDescriptorForTail_swzTmpSgpr") as tmpSgpr:
+        mod.add(SAndB32(sgpr(tmpSgpr.idx), sgpr("SizeL"), (du - 1), "swizzled tail: K rem = SizeL % DepthU"))
+        mod.add(SAddU32(sgpr(tmpSgpr.idx), sgpr(tmpSgpr.idx), swzK - 1, "swizzled tail: rem + swzK-1"))
+        mod.add(SAndB32(sgpr(tmpSgpr.idx), sgpr(tmpSgpr.idx), hex(0xFFFFFFFF & ~(swzK - 1)), "swizzled tail: alignUp(rem, swzK)"))
+        mod.add(SMulI32(sgpr(tmpSgpr.idx), sgpr(tmpSgpr.idx), swzMi, f"swizzled tail: dim0 = MI({swzMi}) * alignUp(rem, swzK)"))
+        mod.add(comp.resetTensorDimForTail(descSgprName(1), tmpSgpr.idx, 1, self))
+      return mod
 
     with self.allocTmpSgpr(1, tag="resetTDMDescriptorForTail_tmpSgpr") as tmpSgpr:
       mod.add(SAndB32(sgpr(tmpSgpr.idx), sgpr("SizeL"), (du - 1)))
