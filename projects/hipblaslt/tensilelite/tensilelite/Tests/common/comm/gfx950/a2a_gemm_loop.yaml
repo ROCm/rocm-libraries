@@ -59,6 +59,9 @@ BenchmarkProblems:
           # Token counts that do not fill MT1; 300 also gives fewer token blocks than peer queues.
           - Exact: {sizes: [3072, 2000, 1, 4096], world: 4}
           - Exact: {sizes: [3072, 300, 1, 4096], world: 8}
+          # 64 and 65 token blocks in one copy group: the second packing pass with one and two blocks.
+          - Exact: {sizes: [1024, 16384, 1, 4096], world: 2}
+          - Exact: {sizes: [512, 16640, 1, 4096], world: 2}
     - # BenchmarkProblemSizeGroup
       InitialSolutionParameters:
       BenchmarkCommonParameters:
