@@ -491,6 +491,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set_source_files_properties(
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dModelBinding.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseModelBinding.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx1250ConvDgradAotModelBinding.cpp"
         PROPERTIES COMPILE_DEFINITIONS
             "HKP_REQUIRE_DVC_DESCRIPTORS=$<BOOL:${HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS}>")
     set(_hkp_catalog_tiles_cases_gfx950_dense EveryShippedKernelsTileIsOneTheEngineLaunches)
@@ -622,6 +623,34 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         message(STATUS
             "hkp: this configuration does not ship hipkernel:Gfx950ConvDgradAot for "
             "gfx950, so its census is not registered.")
+    endif()
+
+    # ... and its gfx1250 sibling, hipkernel:Gfx1250ConvDgradAot.
+    hkp_product_ships_engine_for_arch(_hkp_gfx1250_conv_dgrad_aot
+                                      "hipkernel:Gfx1250ConvDgradAot" gfx1250)
+    if(_hkp_gfx1250_conv_dgrad_aot)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx1250
+            SUITES TestGfx1250ConvDgradAotPacks
+            EXPECTED_CASES ${_hkp_generated_packs_cases}
+        )
+        # Its trained ranker, as the ModelBinding companion above checks the attention
+        # engine's: the bound model loads and scores every shipped kernel.
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx1250
+            SUITES TestGfx1250ConvDgradAotModelBinding
+            EXPECTED_CASES
+                TheBoundL2KernelRankerLoads
+                TheBoundL2KernelRankerScoresEveryShippedKernel
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx1250ConvDgradAot for "
+            "gfx1250, so its census is not registered.")
     endif()
 
 endif()

@@ -1,14 +1,13 @@
 #include "algorithm.h"
-#include "conv_kernel_table.h"
 
 #include <array>
 
 using hipconv::ConvAlgorithm;
-using hipconv::ConvKernelSpan;
+using hipconv::ConvKernelGroup;
 using hipconv::ConvParams;
 
-extern const ConvKernelSpan pointwise_kernels;
-extern const ConvKernelSpan patch_embed_fp16bf16_kernels;
+extern const ConvKernelGroup pointwise_kernels;
+extern const ConvKernelGroup patch_embed_kernels;
 
 namespace
 {
@@ -25,9 +24,9 @@ bool is_applicable(const ConvParams& par)
     return unit_filter || patch;
 }
 
-constexpr std::array<const ConvKernelSpan*, 2> kernel_groups = {
+constexpr std::array<const ConvKernelGroup*, 2> kernel_groups = {
     &pointwise_kernels,
-    &patch_embed_fp16bf16_kernels,
+    &patch_embed_kernels,
 };
 
 } // namespace

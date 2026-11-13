@@ -2276,6 +2276,30 @@ def _probe_problem(direction: str, caps: Optional[dict] = None):
     )
 
 
+def spec_for_job(job: BuildJob, dtype: str):
+    """The kernel spec ``job`` builds (its direction's implicit-GEMM spec at
+    the canonical probe problem); nothing is built. Raises like the spec's
+    constructor on an invalid configuration."""
+    data = conv_data_spec(dtype)
+    problem = _probe_problem(job.direction, job.caps)
+    if job.direction == "fwd":
+        from kernels.common.conv_implicit_gemm import ImplicitGemmConvSpec as Spec
+    elif job.direction == "wgrad":
+        from kernels.common.conv_implicit_gemm_wgrad import WgradConvSpec as Spec
+    elif job.direction == "dgrad":
+        from kernels.common.conv_implicit_gemm_dgrad import DgradConvSpec as Spec
+    else:
+        raise ValueError(f"unknown direction {job.direction!r}")
+    return Spec(problem=problem, data=data, **job.spec_kwargs)
+
+
+def spec_launch_block_size(spec) -> int:
+    """Workgroup size of ``spec``'s kernel: ``launch_block_size`` where a
+    pipeline appends extra waves (wavelet); wgrad has no such pipeline and
+    exposes ``block_size`` alone."""
+    return getattr(spec, "launch_block_size", spec.block_size)
+
+
 def kernel_for_job(job: BuildJob, arch: str, dtype: str):
     """Build one job's kernel IR. Returns ``(kernel, meta)``; nothing compiled.
 
@@ -2283,40 +2307,20 @@ def kernel_for_job(job: BuildJob, arch: str, dtype: str):
     rather than failed -- the grid is deliberately over-generated and most
     rejections are ordinary spec-validity rules.
     """
-    data = conv_data_spec(dtype)
-    problem = _probe_problem(job.direction, job.caps)
-
+    spec = spec_for_job(job, dtype)
     if job.direction == "fwd":
-        from kernels.common.conv_implicit_gemm import (
-            ImplicitGemmConvSpec,
-            build_implicit_gemm_conv,
-        )
-
-        spec = ImplicitGemmConvSpec(problem=problem, data=data, **job.spec_kwargs)
-        kernel = build_implicit_gemm_conv(spec, arch=arch)
+        from kernels.common.conv_implicit_gemm import build_implicit_gemm_conv as build
     elif job.direction == "wgrad":
         from kernels.common.conv_implicit_gemm_wgrad import (
-            WgradConvSpec,
-            build_implicit_gemm_conv_wgrad,
+            build_implicit_gemm_conv_wgrad as build,
         )
-
-        spec = WgradConvSpec(problem=problem, data=data, **job.spec_kwargs)
-        kernel = build_implicit_gemm_conv_wgrad(spec, arch=arch)
-    elif job.direction == "dgrad":
-        from kernels.common.conv_implicit_gemm_dgrad import (
-            DgradConvSpec,
-            build_implicit_gemm_conv_dgrad,
-        )
-
-        spec = DgradConvSpec(problem=problem, data=data, **job.spec_kwargs)
-        kernel = build_implicit_gemm_conv_dgrad(spec, arch=arch)
     else:
-        raise ValueError(f"unknown direction {job.direction!r}")
-
+        from kernels.common.conv_implicit_gemm_dgrad import (
+            build_implicit_gemm_conv_dgrad as build,
+        )
+    kernel = build(spec, arch=arch)
     meta = {
         "spec_kernel_name": spec.kernel_name(),
-        # launch_block_size only exists where a pipeline appends extra waves
-        # (wavelet); wgrad has no such pipeline and exposes block_size alone.
-        "block_size": getattr(spec, "launch_block_size", spec.block_size),
+        "block_size": spec_launch_block_size(spec),
     }
     return kernel, meta

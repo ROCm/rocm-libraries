@@ -1145,8 +1145,8 @@ struct ReduceCommon : public testing::TestWithParam<TestCase>
 
         auto ws_sizeInBytes =
             reduceDesc.GetWorkspaceSize(get_handle(), inputTensor.desc, outputTensor.desc);
-        auto workspace_nelem = (indices_nelem == 0) ? ws_sizeInBytes / sizeof(T)
-                                                    : (ws_sizeInBytes + sizeof(T) - 1) / sizeof(T);
+        // the size in bytes is not always a multiple of sizeof(T): round up
+        auto workspace_nelem = (ws_sizeInBytes + sizeof(T) - 1) / sizeof(T);
 
         std::vector<std::size_t> wsLengths = {static_cast<std::size_t>(workspace_nelem), 1};
         auto workspaceTensor               = tensor<T>{wsLengths};

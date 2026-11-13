@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 
 // builtin max is not constexpr, so we define our own. These are plain constexpr
@@ -29,8 +30,24 @@ inline constexpr int divup(int x, int y)
     return (x + y - 1) / y;
 }
 
+inline constexpr size_t divup(size_t x, size_t y)
+{
+    return (x + y - 1) / y;
+}
+
+// Unlike the forms above, x may come within y of the type's maximum.
+inline constexpr uint32_t divup(uint32_t x, uint32_t y)
+{
+    return x / y + (x % y != 0);
+}
+
 // Return the least multiple of divisor greater than or equal to x.
 inline constexpr int make_divisible(int x, int divisor)
+{
+    return divup(x, divisor) * divisor;
+}
+
+inline constexpr size_t make_divisible(size_t x, size_t divisor)
 {
     return divup(x, divisor) * divisor;
 }
@@ -107,4 +124,19 @@ constexpr auto linear_index_to_coord(T idx, std::array<T, N> const& shape) -> st
     }
     j[0] = idx;
     return j;
+}
+
+// Must ensure that b >= 1
+template <std::integral T>
+constexpr auto mod(T a, T b) -> T
+{
+    if constexpr(std::is_unsigned_v<T>)
+    {
+        return a % b;
+    }
+    else
+    {
+        T r = a % b;
+        return r < 0 ? r + b : r;
+    }
 }

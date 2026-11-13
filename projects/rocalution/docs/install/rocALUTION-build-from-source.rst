@@ -24,7 +24,7 @@ Prerequisites
 You need the following to build rocALUTION:
 
 * `git <https://git-scm.com/>`__
-* `CMake <https://cmake.org/>`__ (version 3.19 or later)
+* `CMake <https://cmake.org/>`__ (version 3.21 or later)
 * `ROCm CMake <https://github.com/ROCm/rocm-cmake>`__ (version 0.11.0 or later)
 * `GoogleTest <https://github.com/google/googletest>`__ (only to build the tests)
 * A ROCm installation providing the ``amdclang++`` compiler
@@ -190,8 +190,10 @@ and build the library and clients.
 Build rocALUTION using individual make commands
 ===============================================
 
-The rocALUTION library contains both host and device code, so specify the HIP
-compiler during the CMake configuration process.
+The rocALUTION library contains both host and device code. The device code is
+compiled with CMake's HIP language support, by ``amdclang++`` from ``ROCM_PATH``
+unless ``CMAKE_HIP_COMPILER`` or ``HIPCXX`` selects another HIP compiler. The
+host code can be compiled with any C++ compiler, set with ``CXX``.
 
 .. note::
 
@@ -199,7 +201,7 @@ compiler during the CMake configuration process.
 
 .. note::
 
-   You need CMake 3.19 or later to build rocALUTION.
+   You need CMake 3.21 or later to build rocALUTION.
 
 Set ``ROCM_PATH`` to your ROCm installation directory. The following example uses
 ROCm 7.14:
@@ -234,7 +236,7 @@ You can also configure the following optional CMake directives:
      - Default
      - Description
    * - ``SUPPORT_HIP``
-     - ``ON`` when HIP is found
+     - ``ON`` when a HIP compiler is found
      - Enable HIP support.
    * - ``SUPPORT_OMP``
      - ``ON``
@@ -254,8 +256,9 @@ You can also configure the following optional CMake directives:
 
 .. note::
 
-   ``SUPPORT_HIP`` is enabled only if HIP is found during configuration. If HIP
-   is not found, the build completes successfully as a CPU-only library and
+   ``SUPPORT_HIP`` is enabled only if a HIP compiler is found during
+   configuration. If it is not found, the build completes successfully as a
+   CPU-only library and
    prints ``HIP not found. Compiling WITHOUT HIP support.`` Check the
    configuration output to confirm that HIP support is enabled.
 

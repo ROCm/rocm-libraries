@@ -844,6 +844,9 @@ TEST(TestSdpaFwdNode, PreValidateSinkShapeAndType)
 // way); with FLOAT set, the same graph validates.
 TEST(TestSdpaFwdNode, GraphValidateRejectsUntypedSinkInAHalfGraph)
 {
+#ifndef HIPDNN_ENABLE_SDPA
+    GTEST_SKIP() << "Skipping test, hipDNN built without SDPA enabled";
+#else
     for(const bool setFloat : {false, true})
     {
         Graph graph;
@@ -883,6 +886,7 @@ TEST(TestSdpaFwdNode, GraphValidateRejectsUntypedSinkInAHalfGraph)
                 << err.err_msg;
         }
     }
+#endif // HIPDNN_ENABLE_SDPA
 }
 
 TEST(TestSdpaFwdNode, GetNodeTypeReturnsSdpaFwd)
