@@ -1753,3 +1753,34 @@ BenchmarkProblems:
       - ProblemSizes:
         - Exact: [383, 127, 1, 128]
         - Exact: [384, 125, 2, 128, 400, 400, 128, 128]
+  ########################################
+  # Bias, ScaleAlphaVec and hipblaslt_all with ActivationFuncCall at store vector widths 8 and 1: the activation
+  # subroutine runs between the conversions and the staging of the TDM block at every level.
+  ########################################
+  - - {OperationType: GEMM, DataType: b, DestDataType: b, ComputeDataType: s, HighPrecisionAccumulate: true,
+      UseBeta: true, Batched: true, TransposeA: true, TransposeB: false, UseBias: 1,
+      UseScaleAlphaVec: 1, Activation: true, ActivationType: hipblaslt_all}
+    - InitialSolutionParameters: null
+      BenchmarkCommonParameters:
+      - KernelLanguage: [Assembly]
+      ForkParameters:
+      - MatrixInstruction:
+        - [16, 16, 32, 1, 1, 8, 8, 2, 2]
+      - WavefrontSize: [32]
+      - DepthU: [64]
+      - PrefetchGlobalRead: [2]
+      - ScheduleIterAlg: [3]
+      - TDMInst: [3]
+      - StoreVectorWidth: [-1, 1]
+      - AdaptiveGemm: [0]
+      - ActivationFuncCall: [true]
+      - TDMStoreInst: [0, 1, 2, 3]
+      BenchmarkJoinParameters: null
+      BenchmarkFinalParameters:
+      - ProblemSizes:
+        - Exact: [511, 512, 1, 128]
+        - Exact: [511, 509, 2, 128, 520, 520, 128, 128]
+      - BiasTypeArgs: [s]
+      - ActivationArgs:
+        - - {Enum: relu}
+        - - {Enum: gelu}
