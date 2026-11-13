@@ -2656,7 +2656,10 @@ the best score without selecting for launch).
 
 Items 1 and 2 are built. `IEngine::getPrediction()` answers A and B for one named metric
 (`heuristics/uhd/EnginePredictor.hpp`), and the backend implements the quick and thorough policies as
-`SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB`. A caller names the metric through
+`SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB`. The quick policy is part of the built-in
+default policy order (`Config`, `ModeA`, `StaticOrdering`; RFC 0007 §5.3.2), so default engine
+selection ranks by L1 estimates wherever an engine ships one; the thorough policy is opt-in. A caller
+names the metric through
 `HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT`, `Graph::set_ranking_metric()`, or
 `HIPDNN_HEUR_RANKING_METRIC` ([Environment variables](../Environment.md)). Item 3 is the models' to meet:
 no in-tree engine ships a calibrated model.

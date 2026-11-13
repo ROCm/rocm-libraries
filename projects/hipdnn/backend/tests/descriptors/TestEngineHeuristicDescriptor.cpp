@@ -788,20 +788,27 @@ TEST_F(TestGpuEngineHeuristicDescriptor, GetPolicyOrderWhenNotSet)
     ASSERT_NO_THROW(heur->finalize());
 
     // With no descriptor-level override and no env var, resolveHeuristicPolicyOrder
-    // returns the built-in default, Config then StaticOrdering; a heuristic mode adds
+    // returns the built-in default, Config, ModeA, then StaticOrdering; a heuristic mode adds
     // nothing. Keep in step with EngineHeuristicDescriptor::resolveHeuristicPolicyOrder.
+    using hipdnn_data_sdk::utilities::policyNameToId;
+    const std::vector<int64_t> expected{
+        policyNameToId("SelectionHeuristic::Config"),
+        policyNameToId(hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME),
+        policyNameToId("SelectionHeuristic::StaticOrdering"),
+    };
     int64_t count = 999;
     ASSERT_NO_THROW(heur->getAttribute(
         HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT, HIPDNN_TYPE_INT64, 0, &count, nullptr));
-    ASSERT_EQ(count, 2);
+    ASSERT_EQ(count, static_cast<int64_t>(expected.size()));
 
-    std::vector<int64_t> buffer(2);
-    ASSERT_NO_THROW(heur->getAttribute(
-        HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT, HIPDNN_TYPE_INT64, 2, &count, buffer.data()));
-    ASSERT_EQ(count, 2);
-    EXPECT_EQ(buffer[0], hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::Config"));
-    EXPECT_EQ(buffer[1],
-              hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::StaticOrdering"));
+    std::vector<int64_t> buffer(expected.size());
+    ASSERT_NO_THROW(heur->getAttribute(HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT,
+                                       HIPDNN_TYPE_INT64,
+                                       static_cast<int64_t>(buffer.size()),
+                                       &count,
+                                       buffer.data()));
+    ASSERT_EQ(count, static_cast<int64_t>(expected.size()));
+    EXPECT_EQ(buffer, expected);
 }
 
 // The backend never synthesizes prediction policies from a heuristic mode.
@@ -1468,7 +1475,11 @@ protected:
     // Finalizes under the built-in prediction policy and checks that every candidate is
     // predicted in the descriptor's metric and that the predictions decide the order. Any
     // prediction request outside the expectations (another metric, engine or kind) fails.
-    void expectRankedByPredictions(const char* policyName, bool requestsConfigurations)
+    // With @p viaDefaultOrder the policy order is left unset, so the built-in default must
+    // reach the policy before StaticOrdering, which this fixture always lets succeed.
+    void expectRankedByPredictions(const char* policyName,
+                                   bool requestsConfigurations,
+                                   bool viaDefaultOrder = false)
     {
         namespace fb = hipdnn_flatbuffers_sdk::data_objects;
         const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter policyGuard(
@@ -1501,8 +1512,11 @@ protected:
             .WillRepeatedly(Return(_predictionPlugin.get()));
         EXPECT_CALL(*_mockHeuristicPluginResourceManager, getHeuristicHandleForPolicyId(policyId))
             .WillRepeatedly(Return(_predictionHandle.get()));
-        ASSERT_NO_THROW(heur->setAttribute(
-            HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT, HIPDNN_TYPE_INT64, 1, &policyId));
+        if(!viaDefaultOrder)
+        {
+            ASSERT_NO_THROW(heur->setAttribute(
+                HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT, HIPDNN_TYPE_INT64, 1, &policyId));
+        }
         EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
             .WillRepeatedly(Return(std::vector<int64_t>{1, 2, 3}));
 
@@ -1589,4 +1603,11 @@ TEST_F(TestGpuPredictionPolicyWiring, ModeAPredictsEachCandidateInTheRankingMetr
 TEST_F(TestGpuPredictionPolicyWiring, ModeBPredictsEachCandidateInTheRankingMetric)
 {
     expectRankedByPredictions(hipdnn_data_sdk::utilities::MODE_B_POLICY_NAME, true);
+}
+
+// With no policy order configured, selection ranks engines by their L1 predictions (ModeA),
+// ahead of the static fallback.
+TEST_F(TestGpuPredictionPolicyWiring, DefaultPolicyOrderRanksByEnginePredictions)
+{
+    expectRankedByPredictions(hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME, false, true);
 }

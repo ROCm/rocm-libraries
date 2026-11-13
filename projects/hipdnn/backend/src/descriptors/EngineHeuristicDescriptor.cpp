@@ -91,21 +91,24 @@ std::vector<int64_t> EngineHeuristicDescriptor::resolveHeuristicPolicyOrder()
                                  _policyOrder.size());
         return _policyOrder;
     }
-    // 3. Default policy list — Config first so HIPDNN_HEUR_CONFIG_PATH
-    // rules win when set; StaticOrdering is the last-resort fallback and always succeeds
-    // when there is at least one candidate. Vendor heuristic plugins may be inserted via env
-    // or descriptor attribute above.
+    // 3. Default policy list — Config first so HIPDNN_HEUR_CONFIG_PATH rules and the
+    // exact-match autotune cache win when they apply; ModeA next, ranking applicable engines
+    // by their engine-level (L1) prediction in the ranking metric (RFC 0019 §11.2), and
+    // declining when no engine has a usable one; StaticOrdering last, the model-free
+    // fallback that always succeeds when there is at least one candidate. Vendor heuristic
+    // plugins and ModeB may be requested via env or descriptor attribute above.
     //
     // StaticOrdering ranks engines (RFC 0007); it is unrelated to RFC 0019's `static_order`
-    // UHD adapter, which ranks kernels inside one engine. Prediction policies (ModeA/ModeB)
-    // are not injected here: callers request them through the policy order (RFC 0007 §5.3.2).
+    // UHD adapter, which ranks kernels inside one engine.
     std::vector<int64_t> policyIds = {
         hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::Config"),
+        hipdnn_data_sdk::utilities::policyNameToId(hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME),
         hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::StaticOrdering"),
     };
     HIPDNN_BACKEND_LOG_WARN(
         "No heuristic policy order configured, falling back to built-in defaults "
-        "[SelectionHeuristic::Config, SelectionHeuristic::StaticOrdering]. "
+        "[SelectionHeuristic::Config, SelectionHeuristic::ModeA, "
+        "SelectionHeuristic::StaticOrdering]. "
         "Set HIPDNN_HEUR_POLICY_ORDER or the descriptor attribute to silence "
         "this warning.");
     return policyIds;

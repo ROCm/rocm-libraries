@@ -260,6 +260,12 @@ else ``HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT``, else ``tflops``; an engine w
 model for it is unscored rather than ranked by another metric. If all predictions are
 unusable, the policy declines and the next policy in the order runs.
 
+When no policy order is set -- ``HeuristicMode::FALLBACK``, the frontend default, sets
+none -- the backend's built-in default applies: ``SelectionHeuristic::Config``,
+``SelectionHeuristic::ModeA``, then ``SelectionHeuristic::StaticOrdering``, the same
+order ``HeuristicMode::A`` requests. Default engine selection therefore ranks engines
+by their graph-level predictions and selects as before wherever no engine has one.
+
 Heuristic results carry the engine ID, the ranking metric and, for scored
 configurations, the owned knob tuple. Plan construction preserves those settings to
 execute the scored configuration. Graph-level selections use the chosen engine's
