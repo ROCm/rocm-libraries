@@ -72,7 +72,7 @@ int run_bench_test(Arguments&         arg,
     // disable unit_check in client benchmark, it is only used in gtest unit test
     arg.unit_check = 0;
 
-    hipblaslt_bench_options::apply_strict_verification(arg);
+    hipblaslt_bench_options::apply_to(arg);
 
     // enable timing check,otherwise no performance data collected
     arg.timing = 1;
@@ -769,10 +769,11 @@ try
 
         ("uniform_summation_order",
          value<std::string>(&hipblaslt_bench_options::uniform_summation_order_str())->default_value(""),
-         "Set the HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT extension attribute. "
+         "Set the handle-level uniform summation order request for every API method. "
          "Accepts off|0, on|1 (case-insensitive). When on, the matmul returns "
          "HIPBLAS_STATUS_INVALID_VALUE if no configuration honoring the guarantee exists. "
-         "When omitted the bench leaves the attribute unset so the library default (on) applies.")
+         "A YAML case's explicit 0 or 1 overrides the command-line value. "
+         "When neither specifies a value, the library default for the device applies.")
 
         ("help,h", "produces this help message")
 

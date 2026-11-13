@@ -11,6 +11,7 @@ ConfigMatcher::ConfigMatcher(const Config& cfg)
     int_field("waves_m", cfg.waves_m);
     int_field("waves_n", cfg.waves_n);
     bool_field("row_pad", cfg.row_pad, /*default=*/false);
+    int_field("elem_bytes", cfg.elem_bytes, /*default=*/2);
 }
 
 } // namespace hipconv::cdna4::patch_embed

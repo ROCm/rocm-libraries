@@ -1,9 +1,10 @@
 """Parity configs for the tiled attention families of prove_parity_binding.py.
 
 Each table mirrors ``library/tests/parity/<family>_emit.{py,c}`` index for
-index (the C emitter is what the binding compares against). The 3D tables set
-``emit_lse`` on the configs whose reduce the emitter builds with LSE
-(``_REDUCE_LSE``). The platform layer keeps its own copy: it must not import
+index (the C emitter is what the binding compares against). In the 3D tables
+``emit_lse`` turns LSE on for the segment and, by default, the reduce;
+``reduce_emit_lse`` sets the reduce alone (the emitter's reduce-only
+``_REDUCE_LSE`` configs). The platform layer keeps its own copy: it must not import
 ``library`` (one-way dependency, library -> platform). prove_parity_binding
 fails a family unless its C emitter reports "unknown config index N" for the
 first index N past the table, and a row that drifts from the emitter shows up
@@ -1435,6 +1436,13 @@ GFX950_ATTENTION_TILED_2D = [
         "use_register_pv": True,
         "tile_size": 32,
     },
+]
+# idx72-74: lse_layout="head_major" at each store site (idx64-66 + head-major).
+GFX950_ATTENTION_TILED_2D += [
+    {**GFX950_ATTENTION_TILED_2D[i], "lse_layout": "head_major"} for i in (64, 65, 66)
+]
+# idx75-79: K/V page copies (i64 page base, pages from the wave, one 64-token page per tile).
+GFX950_ATTENTION_TILED_2D += [
     {
         "head_size": 128,
         "block_size": 16,
@@ -1817,7 +1825,7 @@ GFX942_ATTENTION_TILED_3D = [
         "sliding_window": 0,
         "has_softcap": False,
         "kv_storage_dtype": None,
-        "emit_lse": True,
+        "reduce_emit_lse": True,
     },
     {
         "head_size": 64,
@@ -1830,7 +1838,7 @@ GFX942_ATTENTION_TILED_3D = [
         "sliding_window": 0,
         "has_softcap": False,
         "kv_storage_dtype": None,
-        "emit_lse": True,
+        "reduce_emit_lse": True,
     },
     {
         "head_size": 128,
@@ -2274,7 +2282,7 @@ GFX950_ATTENTION_TILED_3D = [
         "sliding_window": 0,
         "has_softcap": False,
         "kv_storage_dtype": None,
-        "emit_lse": True,
+        "reduce_emit_lse": True,
     },
     {
         "head_size": 64,
@@ -2283,6 +2291,22 @@ GFX950_ATTENTION_TILED_3D = [
         "num_kv_heads": 8,
         "dtype": "fp16",
         "num_segments": 8,
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "kv_storage_dtype": None,
+        "reduce_emit_lse": True,
+    },
+    {
+        # Segment AND reduce with emit_lse: the real catalog pairing, where
+        # the segment's own kernel name also gains the trailing "lse". Same
+        # fields as config 1.
+        "head_size": 128,
+        "block_size": 32,
+        "num_query_heads": 16,
+        "num_kv_heads": 16,
+        "dtype": "bf16",
+        "num_segments": 16,
         "use_sinks": False,
         "sliding_window": 0,
         "has_softcap": False,

@@ -1156,8 +1156,13 @@ _CONFIGS[64] = {**_CONFIGS[55], "emit_lse": True}
 _CONFIGS[65] = {**_CONFIGS[32], "emit_lse": True}
 _CONFIGS[66] = {**_CONFIGS[3], "emit_lse": True}
 _CONFIGS[67] = {**_CONFIGS[5], "use_alibi": True, "emit_lse": True}
+# --- idx72-74: lse_layout="head_major" at each store site (idx64-66 + head-major).
+# idx71 is cfg71 above (bf16 D192 one warp); these three sit after it.
+_CONFIGS[72] = {**_CONFIGS[64], "lse_layout": "head_major"}
+_CONFIGS[73] = {**_CONFIGS[65], "lse_layout": "head_major"}
+_CONFIGS[74] = {**_CONFIGS[66], "lse_layout": "head_major"}
 # i64 K/V, two pages per tile, one page per copy (page copies, i64 page base).
-_CONFIGS[72] = dict(
+_CONFIGS[75] = dict(
     head_size=128,
     block_size=16,
     num_query_heads=32,
@@ -1170,14 +1175,14 @@ _CONFIGS[72] = dict(
     use_i64_kv_addr=True,
 )
 # cfg71 with i64 K/V (mid-row copies, i64 page base).
-_CONFIGS[73] = {**_CONFIGS[71], "use_i64_kv_addr": True}
+_CONFIGS[76] = {**_CONFIGS[71], "use_i64_kv_addr": True}
 # i64 K/V with each wave's page from the wave: whole-row copies spanning pages
 # (cfg68) and mid-row copies (cfg59).
-_CONFIGS[74] = {**_CONFIGS[68], "use_i64_kv_addr": True}
-_CONFIGS[75] = {**_CONFIGS[59], "use_i64_kv_addr": True}
+_CONFIGS[77] = {**_CONFIGS[68], "use_i64_kv_addr": True}
+_CONFIGS[78] = {**_CONFIGS[59], "use_i64_kv_addr": True}
 # cfg48 with one 64-token page per tile: the page base stays in soffset
 # without prefetching (grouped KV2 carries no page ids).
-_CONFIGS[76] = {**_CONFIGS[48], "block_size": 64}
+_CONFIGS[79] = {**_CONFIGS[48], "block_size": 64}
 
 
 def _spec(idx: int) -> UnifiedAttention2DTiledSpec:

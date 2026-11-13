@@ -1201,7 +1201,16 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->has_tile_size = true;
         s->tile_size = 32;
         break;
-    case 72: /* i64 K/V, two pages per tile, one page per copy (page copies, i64 page base). */
+
+    /* --- idx72-74: lse_layout="head_major" at each store site (64-66 + head-major). */
+    /* idx71 is cfg71 above (bf16 D192 one warp); these three sit after it. */
+    case 72:
+    case 73:
+    case 74:
+        make_spec(idx - 8, s);
+        s->lse_head_major = true;
+        break;
+    case 75: /* i64 K/V, two pages per tile, one page per copy (page copies, i64 page base). */
         s->head_size = 128;
         s->block_size = 16;
         s->num_query_heads = 32;
@@ -1214,19 +1223,19 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->tile_size = 32;
         s->use_i64_kv_addr = true;
         break;
-    case 73: /* cfg71 with i64 K/V (mid-row copies, i64 page base). */
+    case 76: /* cfg71 with i64 K/V (mid-row copies, i64 page base). */
         make_spec(71, s);
         s->use_i64_kv_addr = true;
         break;
-    case 74: /* cfg68 with i64 K/V (pages from the wave, whole-row copies). */
+    case 77: /* cfg68 with i64 K/V (pages from the wave, whole-row copies). */
         make_spec(68, s);
         s->use_i64_kv_addr = true;
         break;
-    case 75: /* cfg59 with i64 K/V (pages from the wave, mid-row copies). */
+    case 78: /* cfg59 with i64 K/V (pages from the wave, mid-row copies). */
         make_spec(59, s);
         s->use_i64_kv_addr = true;
         break;
-    case 76: /* cfg48 with one 64-token page per tile (page base in soffset). */
+    case 79: /* cfg48 with one 64-token page per tile (page base in soffset). */
         make_spec(48, s);
         s->block_size = 64;
         break;

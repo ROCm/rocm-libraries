@@ -235,7 +235,7 @@ struct Arguments
     int32_t rotating;
     bool    use_gpu_timer;
     float   skip_slow_solution_ratio;
-    // -1 inherits the handle. 0/1 set HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT.
+    // Uniform-order request for the client handle: -1=unspecified, 0=off, 1=on.
     int32_t uniform_summation_order;
     // tuning
     int32_t gsu_vector[MAX_SUPPORTED_NUM_PROBLEMS]; // This is for client
