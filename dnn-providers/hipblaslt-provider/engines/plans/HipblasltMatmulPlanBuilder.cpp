@@ -378,13 +378,14 @@ bool HipblasltMatmulPlanBuilder::isApplicable(
 
         checkComputeTypes(opGraph, std::get<1>(nodeAttrs), std::get<2>(nodeAttrs));
 
-        // Graph-property checks above need no device; the arch query comes after them.
-        REJECT_IF_WORKAROUND_ISSUE_9962(handle);
-
+        // Graph-property checks, including the epilogue mapping in MatmulParams, need no
+        // device; the arch query comes after them.
         MatmulParams params(std::get<0>(nodeAttrs),
                             std::get<1>(nodeAttrs),
                             std::get<2>(nodeAttrs),
                             opGraph.getTensorMap());
+        REJECT_IF_WORKAROUND_ISSUE_9962(handle);
+
         MatmulPlan const plan(handle, std::move(params));
         return true;
     }
