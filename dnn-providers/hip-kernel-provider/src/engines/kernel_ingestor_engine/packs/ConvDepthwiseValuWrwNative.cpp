@@ -220,8 +220,17 @@ int64_t hankelLdsBytes(const WrwConfig& config)
     return (config.g * stride * channels * xPitch + (slots + 1) * slot) * 2;
 }
 
-bool hankelAdmits(const WrwProblem& problem, const WrwConfig& config, std::string_view gcnArchName)
+bool hankelAdmits(const WrwProblem& problem,
+                  const WrwConfig& config,
+                  std::string_view gcnArchName,
+                  int xAlign,
+                  int dyAlign)
 {
+    // 16-byte loads of x and dy (8 channels a column).
+    if(xAlign % 16 != 0 || dyAlign % 16 != 0)
+    {
+        return false;
+    }
     const auto arch = hipdnn_plugin_sdk::stripArchFeatures(gcnArchName);
     const bool f16 = problem.base.dataType == data_objects::DataType::HALF;
     const bool bf16 = problem.base.dataType == data_objects::DataType::BFLOAT16;
@@ -464,8 +473,11 @@ bool kernelMatches(const MatchContext& context,
     }
     else if(hankel)
     {
-        if(!conv_depthwise_valu_wrw::hankelAdmits(
-               *problem, config, context.deviceProperties.gcnArchName))
+        if(!conv_depthwise_valu_wrw::hankelAdmits(*problem,
+                                                  config,
+                                                  context.deviceProperties.gcnArchName,
+                                                  pointerAlignment(context, problem->xUid),
+                                                  pointerAlignment(context, problem->dyUid)))
         {
             return false;
         }
@@ -615,6 +627,11 @@ public:
             if(config.s != 1)
             {
                 options.add("CONV_DW_S", std::to_string(config.s));
+            }
+            // Only where the tiles pass wo, so the other programs compile as before.
+            if(problem->args.wo % config.q != 0)
+            {
+                options.add("CONV_DW_COLMASK", "1");
             }
         }
         if(vtile)

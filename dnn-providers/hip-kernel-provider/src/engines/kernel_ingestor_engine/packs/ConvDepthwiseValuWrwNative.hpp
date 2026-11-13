@@ -83,9 +83,14 @@ int64_t hankelLdsBytes(const WrwConfig& config);
  *        channels-last, 1-D or 2-D; the config's filter; the config's stride s (1 or 2) on both
  *        axes; unit dilation; channels a
  *        whole number of 8-channel vectors; q a multiple of 4 from 4 to 64, g 1 to 4, nwg 1, 2
- *        or 4, bpc 1, 2, 4 or 8; the LDS within the device's (160 KiB on gfx950, else 64 KiB).
+ *        or 4, bpc 1, 2, 4 or 8; the LDS within the device's (160 KiB on gfx950, else 64 KiB);
+ *        x and dy pointers declared 16-byte aligned (@p xAlign, @p dyAlign bytes).
  */
-bool hankelAdmits(const WrwProblem& problem, const WrwConfig& config, std::string_view gcnArchName);
+bool hankelAdmits(const WrwProblem& problem,
+                  const WrwConfig& config,
+                  std::string_view gcnArchName,
+                  int xAlign,
+                  int dyAlign);
 
 /**
  * @brief Whether the vector-tile config @p config serves @p problem: channels-last, 1-D or 2-D,
