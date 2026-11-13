@@ -232,7 +232,7 @@ namespace TensileLite
                 ("swizzle-tensor-a",         po::value<bool>()->default_value(false), "Swizzle input tensor A.")
                 ("swizzle-tensor-b",         po::value<bool>()->default_value(false), "Swizzle input tensor B.")
                 ("fused-gemm-a2a",           po::value<bool>()->default_value(false), "Fuse an all-to-all PUSH into the GEMM epilogue.")
-                ("split-devices",          po::value<int>()->default_value(1), "Split each problem across N consecutive devices (device-idx .. device-idx+N-1), one stream each, and run the slices concurrently. Devices 0..N-2 get size/N, the last device gets the rest. --split-dim M: A is split, B replicated, each device keeps its own output slice. --split-dim N: B is split, A replicated. Each device keeps its own output slice; the slices are read back and validated after the timed run. Reported time is the slowest device; reported GFlops are for the full problem. Needs the all-solutions run (no --best-solution). For partitioned GPUs (e.g. NPS2: N=2). 1 = off.")
+                ("split-devices",          po::value<int>()->default_value(1), "Split each problem across N consecutive devices (device-idx .. device-idx+N-1), one stream each, and run the slices concurrently. Devices 0..N-2 get size/N, the last device gets the rest. --split-dim M: A is split, B replicated. --split-dim N: B is split, A replicated. Each device writes its slice into its own full-size D at the slice's final offset (nothing goes to a peer); the slices are read back and validated after the timed run. Reported time is the slowest device; reported GFlops are for the full problem. Needs the all-solutions run (no --best-solution). For partitioned GPUs (e.g. NPS2: N=2). 1 = off.")
                 ("split-dim",              po::value<std::string>()->default_value("M"), "Dimension --split-devices splits: M or N.")
                 ("mx-scale-format",          po::value<int>()->default_value(0), "MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
                 ("activation-compute-type",  po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Activation compute type.")
@@ -1032,6 +1032,50 @@ int main(int argc, const char* argv[])
 
     reporters->report(ResultKey::ProblemCount, problemFactory.problems().size());
 
+    // --split-devices: every device holds a full-size D and writes its slice at the slice's final
+    // offset with the full strides, into its own memory. Nothing is written to a peer; an
+    // all-gather would copy each slice region into the peers' D at the same offset.
+    std::vector<std::vector<std::shared_ptr<void>>> fullOutputs; // [device][rotating slot]
+    auto attachFullOutput = [&](ContractionProblem* problem, size_t firstSlot, size_t endSlot) {
+        if(problemFactory.numSlices() < 2)
+            return;
+        auto const* full = dynamic_cast<ContractionProblemGemm const*>(problem);
+        if(full == nullptr)
+            throw std::runtime_error("--split-devices needs a plain GEMM problem");
+        const size_t bytes = static_cast<size_t>(full->d().totalAllocatedElements()
+                                                 * full->d().elementBytes());
+        fullOutputs.resize(devices.size());
+        for(size_t d = 0; d < devices.size(); d++)
+        {
+            const int    id     = devices[d]->deviceId;
+            ScopedDevice device(id);
+            auto&        slots = fullOutputs[d];
+            while(slots.size() < endSlot)
+            {
+                void* p = nullptr;
+                HIP_CHECK_EXC(hipMalloc(&p, bytes));
+                HIP_CHECK_EXC(hipMemset(p, 0, bytes));
+                slots.emplace_back(p, [id](void* q) {
+                    int previous = 0;
+                    static_cast<void>(hipGetDevice(&previous));
+                    static_cast<void>(hipSetDevice(id));
+                    static_cast<void>(hipFree(q));
+                    static_cast<void>(hipSetDevice(previous));
+                });
+            }
+            const size_t offsetBytes = static_cast<size_t>(
+                problemFactory.sliceOffsetInD(problem, d) * full->d().elementBytes());
+            for(size_t r = firstSlot; r < endSlot; r++)
+            {
+                auto& inputs = dynamic_cast<ContractionInputs&>(*devices[d]->inputArr[r]);
+                void* dest   = static_cast<char*>(slots[r].get()) + offsetBytes;
+                if(inputs.c == inputs.d)
+                    inputs.c = dest;
+                inputs.d = dest;
+            }
+        }
+    };
+
     bool  useUserArgs = args["use-user-args"].as<bool>();
     void* dUA         = nullptr;
     void* dUAHost     = nullptr;
@@ -1090,6 +1134,13 @@ int main(int argc, const char* argv[])
                 size_t maxRotatingBufferNum = std::max(warmupInvocations, syncs * enq);
 
                 {
+                    // Nothing may still be writing into the previous problem's outputs.
+                    forEachDevice(devices,
+                                  [](DeviceContext&) { static_cast<void>(hipDeviceSynchronize()); });
+                    fullOutputs.clear();
+                }
+
+                {
                     ScopedTimer timer("rotating_buffer_preparation");
                     forEachDeviceIndexed(devices, [&](DeviceContext& ctx, size_t d) {
                         ctx.inputArr = ctx.dataInit->prepareRotatingGPUOutput(
@@ -1099,6 +1150,7 @@ int main(int argc, const char* argv[])
                             ctx.stream);
                         static_cast<void>(hipDeviceSynchronize());
                     });
+                    attachFullOutput(problem, 0, device0->inputArr.size());
                 }
 
                 // I-cache rotation auto-load: when --icache-rotate-copies=-1,
@@ -1230,6 +1282,7 @@ int main(int argc, const char* argv[])
                                             ctx.inputArr[0] = ctx.dataInit->prepareGPUInputs(
                                                 problemFactory.sliceProblem(problem, d));
                                         });
+                                    attachFullOutput(problem, 0, 1);
                                 }
                                 resetInput = true;
 

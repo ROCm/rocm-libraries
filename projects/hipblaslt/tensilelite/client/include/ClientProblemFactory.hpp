@@ -62,6 +62,10 @@ namespace TensileLite
             ClientProblemFactory const& sliceFactory(size_t device) const;
 
 
+            // --split-devices: each device writes its slice into its own full-size D. The element
+            // offset of device `device`'s slice inside that D for the problem `full` (0 when off).
+            size_t sliceOffsetInD(ContractionProblem const* full, size_t device) const;
+
             size_t workspaceSize() const
             {
                 return m_maxWorkspaceSize;
