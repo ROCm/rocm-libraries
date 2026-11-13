@@ -1010,13 +1010,17 @@ size_t rocke_py_str_repr(const char* s, char* out, size_t cap)
             put('\\');
             put(ch == '\t' ? 't' : ch == '\n' ? 'n' : 'r');
         }
-        else if(ch < 0x20 || ch == 0x7f)
+        else if(ch < 0x20 || ch == 0x7f
+                || (ch == 0xc2 && ((p[1] >= 0x80 && p[1] <= 0xa0) || p[1] == 0xad)))
         {
+            /* ASCII controls, and the Latin-1 code points str.isprintable()
+             * rejects (U+0080..U+00A0, U+00AD: UTF-8 C2 80..C2 A0, C2 AD). */
+            const unsigned char cp = ch == 0xc2 ? *++p : ch;
             static const char hex[] = "0123456789abcdef";
             put('\\');
             put('x');
-            put(hex[ch >> 4]);
-            put(hex[ch & 0xf]);
+            put(hex[cp >> 4]);
+            put(hex[cp & 0xf]);
         }
         else
         {

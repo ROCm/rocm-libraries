@@ -39,6 +39,11 @@
  *       build one target-neutral MMA of op_id on i32 zero operands; print its
  *       result type, or "error: <message>" when the builder refuses the call
  *       (tests/core/test_mma_frag_tables.py runs it for every op_id).
+ *
+ *   --py-str-repr
+ *       for each stdin line of hex-encoded UTF-8 text, print the hex of
+ *       rocke_py_str_repr's text (tests/core/test_py_str_repr.py compares it
+ *       with Python's repr() for every code point U+0001..U+02FF).
  */
 #include "rocke/ir.h"
 
@@ -726,6 +731,60 @@ static int print_scalar_bits()
     return 0;
 }
 
+/* --py-str-repr: hex UTF-8 in, hex repr out, one line each. */
+static int print_py_str_reprs()
+{
+    char line[4096];
+    while(fgets(line, sizeof(line), stdin) != NULL)
+    {
+        std::string text;
+        for(size_t i = 0; line[i] != '\0' && line[i] != '\n' && line[i + 1] != '\0'; i += 2)
+        {
+            char byte[3] = {line[i], line[i + 1], '\0'};
+            text += (char)strtol(byte, NULL, 16);
+        }
+        std::string out(rocke_py_str_repr(text.c_str(), NULL, 0), '\0');
+        rocke_py_str_repr(text.c_str(), &out[0], out.size() + 1);
+        for(unsigned char c : out)
+            printf("%02x", c);
+        printf("\n");
+    }
+    return 0;
+}
+
+/* rocke_py_str_repr against literals CPython's repr() prints (the full
+ * U+0001..U+02FF sweep is tests/core/test_py_str_repr.py). */
+static int test_py_str_repr()
+{
+    const char* cases[][2] = {
+        {"abc", "'abc'"},
+        {"it's", "\"it's\""},
+        {"'\"", "'\\'\"'"},
+        {"a\\b", "'a\\\\b'"},
+        {"\t\n\r\x1f\x7f", "'\\t\\n\\r\\x1f\\x7f'"},
+        {"\xc2\x80", "'\\x80'"}, /* U+0080 */
+        {"\xc2\x85", "'\\x85'"}, /* U+0085 NEL */
+        {"\xc2\xa0", "'\\xa0'"}, /* U+00A0 NBSP */
+        {"\xc2\xa1", "'\xc2\xa1'"}, /* U+00A1 printable */
+        {"\xc2\xad", "'\\xad'"}, /* U+00AD soft hyphen */
+        {"\xc3\xbf", "'\xc3\xbf'"}, /* U+00FF printable */
+        {"\xc4\x80", "'\xc4\x80'"}, /* U+0100 printable */
+        {"x\xc2\x9fy'", "\"x\\x9fy'\""}, /* U+009F, with a quote */
+    };
+    for(const auto& c : cases)
+    {
+        char buf[64];
+        size_t n = rocke_py_str_repr(c[0], buf, sizeof(buf));
+        CHECK(n == strlen(c[1]));
+        CHECK(strcmp(buf, c[1]) == 0);
+    }
+    char small[4];
+    CHECK(rocke_py_str_repr("\xc2\xa0", small, sizeof(small)) == 6); /* '\xa0' */
+    CHECK(strcmp(small, "'\\x") == 0);
+    CHECK(rocke_py_str_repr(NULL, NULL, 0) == 4);
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if(argc == 3 && strcmp(argv[1], "--unsigned") == 0)
@@ -740,6 +799,8 @@ int main(int argc, char** argv)
         return print_bitcast(argv[2]);
     if(argc == 3 && strcmp(argv[1], "--mma") == 0)
         return print_mma(argv[2]);
+    if(argc == 2 && strcmp(argv[1], "--py-str-repr") == 0)
+        return print_py_str_reprs();
     CHECK(argc == 1);
     CHECK(test_unsigned_ops() == 0);
     CHECK(test_packed_only_values() == 0);
@@ -749,6 +810,7 @@ int main(int argc, char** argv)
     CHECK(test_ir_type_of_dtype() == 0);
     CHECK(test_mma_refusals() == 0);
     CHECK(test_scalar_kinds_are_covered() == 0);
+    CHECK(test_py_str_repr() == 0);
     printf("rocke_ir_types: ok\n");
     return 0;
 }
