@@ -33,6 +33,7 @@
 #include <hipblaslt_benchmark/benchmark_stats.hpp>
 #include <iomanip>
 #include <istream>
+#include <limits>
 #include <ostream>
 #include <regex>
 #include <set>
@@ -54,7 +55,9 @@ void hipblaslt_bench_options::apply_strict_verification(Arguments& arg)
 
 void Arguments::init()
 {
-    // match python in hipblaslt_common.py
+    // Fields without an assignment below default to zero, false or empty in
+    // hipblaslt_common.yaml.
+    *this = Arguments{};
 
     strcpy(function, "matmul");
     strcpy(name, "hipblaslt-bench");
