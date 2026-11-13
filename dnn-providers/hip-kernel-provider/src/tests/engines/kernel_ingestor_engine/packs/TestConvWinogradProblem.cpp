@@ -709,6 +709,18 @@ TEST(TestConvWinogradKernelMatch, FusedRunsEverywhereAndStagesNhwc)
     prefetch.pf = 1;
     EXPECT_TRUE(admits(prefetch, "gfx1201"));
     EXPECT_TRUE(admits(prefetch, "gfx906"));
+    // 8 x 16 micro-tiles are tagged with their RDNA family and run only there.
+    auto wide = fused();
+    wide.arch = "gfx12";
+    wide.bt = 64;
+    wide.ccv = 2;
+    wide.tn = 16;
+    EXPECT_TRUE(admits(wide, "gfx1201"));
+    EXPECT_FALSE(admits(wide, "gfx1100"));
+    EXPECT_FALSE(admits(wide, "gfx906"));
+    wide.arch = "gfx11";
+    EXPECT_TRUE(admits(wide, "gfx1100"));
+    EXPECT_FALSE(admits(wide, "gfx1201"));
 }
 
 TEST(TestConvWinogradKernelMatch, WmmaOnlyOnItsFamilyAndOnlyForSixteenBitTypes)
@@ -1068,6 +1080,12 @@ TEST(TestConvWinogradKernelMatch, RefusesInconsistentRegisterVariantFields)
          [] {
              auto f = fused();
              f.f16math = 1;
+             return f;
+         }},
+        {"FusedArchGfx9",
+         [] {
+             auto f = fused();
+             f.arch = "gfx9";
              return f;
          }},
         {"WmmaF16Math",

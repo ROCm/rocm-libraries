@@ -178,7 +178,11 @@ struct K5F2Cfg
     static constexpr int RPP = (TM / 4) * TYN, LDM = BT + 1;
     static constexpr int RAW
         = DMA ? A * A * ((NTASK + 63) / 64 * 64) : 0; // raw patch staging (dwords)
-    static constexpr int LDS = (2 * BUF + RAW > P * RPP * LDM ? 2 * BUF + RAW : P * RPP * LDM);
+    // Epilogue staging in QS parts of the micro-tile's row quads where all of them would pass
+    // 64 KiB (8 x 16 micro-tiles).
+    static constexpr int QS = P * RPP * LDM * 4 > 65536 && (TM / 4) % 2 == 0 ? 2 : 1;
+    static constexpr int RPPL = RPP / QS;
+    static constexpr int LDS = (2 * BUF + RAW > P * RPPL * LDM ? 2 * BUF + RAW : P * RPPL * LDM);
 };
 
 // PFD (prefetch depth): 1 loads chunk ch + 1 while chunk ch's Hadamard runs; 2 loads chunk ch + 2
@@ -800,33 +804,38 @@ __device__ void k5FusedConv2(const K5Args& a)
             }
         }
 
-        // Epilogue: 4 passes; pass e stages out channels k0 + rr*4 + e (rr < RPP) for every bin.
+        // Epilogue: passes (qp, e) stage out channels k0 + rr * 4 + e for every bin, rr over the
+        // QS-th part qp of the row quads q (QN each) of the micro-tile.
         float* Ms = reinterpret_cast<float*>(lds);
+        constexpr int QS = C::QS, RPPL = C::RPPL, QN = TM / 4 / QS;
 #pragma unroll
-        for(int e = 0; e < 4; ++e)
+        for(int pe = 0; pe < 4 * QS; ++pe)
         {
-            if(e > 0)
+            const int e = pe % 4, qp = pe / 4;
+            if(pe > 0)
                 __syncthreads();
 #pragma unroll
             for(int q = 0; q < TM / 4; ++q)
             {
-                const int rr = q * TYN + ty;
+                if(QS > 1 && q / QN != qp)
+                    continue;
+                const int rr = (q % QN) * TYN + ty;
 #pragma unroll
                 for(int j = 0; j < TN; ++j)
-                    Ms[(bin * RPP + rr) * LDM + ((j / 4) * TXN + tx) * 4 + j % 4]
+                    Ms[(bin * RPPL + rr) * LDM + ((j / 4) * TXN + tx) * 4 + j % 4]
                         = acc[q * 4 + e][j];
             }
             __syncthreads();
-            for(int pi = tid; pi < RPP * BT; pi += THREADS)
+            for(int pi = tid; pi < RPPL * BT; pi += THREADS)
             {
                 const int rr = pi / BT, tl = pi % BT;
-                const int k = k0 + rr * 4 + e, t = t0 + tl;
+                const int k = k0 + (qp * QN * TYN + rr) * 4 + e, t = t0 + tl;
                 if(k >= cgo || t >= a.tiles)
                     continue;
                 float mm[P], tmp[M * A], y[M * M];
 #pragma unroll
                 for(int p = 0; p < P; ++p)
-                    mm[p] = Ms[(p * RPP + rr) * LDM + tl];
+                    mm[p] = Ms[(p * RPPL + rr) * LDM + tl];
 #pragma unroll
                 for(int j = 0; j < A; ++j)
                     K5Wino<M>::at(mm + j, A, tmp + j, A);

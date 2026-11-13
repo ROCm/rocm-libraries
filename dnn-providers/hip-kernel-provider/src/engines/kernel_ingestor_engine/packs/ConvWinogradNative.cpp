@@ -551,10 +551,13 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
             break;
         case Variant::FUSED:
         {
+            // "any", or an RDNA family for the micro-tiles that need more than gfx9's 128
+            // registers at two waves per SIMD (8 x 16).
             if((config.m != 2 && config.m != 3) || config.layout != Layout::NCHW || config.llcPlan
-               || config.arch != "any" || config.tm < 4 || config.tn < 4 || config.tm % 4 != 0
-               || config.tn % 4 != 0 || config.bk < config.tm || config.bt < config.tn
-               || config.bk % config.tm != 0 || config.bt % config.tn != 0 || config.ccv < 1)
+               || (config.arch != "any" && config.arch != "gfx11" && config.arch != "gfx12")
+               || config.tm < 4 || config.tn < 4 || config.tm % 4 != 0 || config.tn % 4 != 0
+               || config.bk < config.tm || config.bt < config.tn || config.bk % config.tm != 0
+               || config.bt % config.tn != 0 || config.ccv < 1)
             {
                 return std::nullopt;
             }
@@ -659,6 +662,8 @@ bool configRunsOn(const Config& config, std::string_view gcnArchName)
                    || arch == "gfx942" || arch == "gfx950";
         }
         return arch.size() > 5 && arch.substr(0, 5) == config.arch;
+    case Variant::FUSED:
+        return config.arch == "any" || (arch.size() > 5 && arch.substr(0, 5) == config.arch);
     case Variant::WMMA:
     case Variant::WREG:
         return arch.size() > 5 && arch.substr(0, 5) == config.arch;
