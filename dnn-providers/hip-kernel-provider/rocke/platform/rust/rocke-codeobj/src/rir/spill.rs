@@ -302,7 +302,8 @@ fn spilled(o: &Opnd, slot_of: &[Option<u32>]) -> Option<(VRef, u32)> {
 /// a VGPR, single-definition SGPRs, so it can be repeated where those are
 /// live. Scalar candidates are moves of constants only: anything else might
 /// clobber SCC where the copy lands.
-fn pure_def(inst: &MInst, class: Class, vregs: &[VRegInfo], defs: &[u32]) -> bool {
+/// With `vsrc` (lever `rematv`), also one that reads single-definition VGPRs (`choose` then checks they hold).
+fn pure_def(inst: &MInst, class: Class, vregs: &[VRegInfo], defs: &[u32], vsrc: bool) -> bool {
     if inst.mods != 0 || inst.defs.len() != 1 {
         return false;
     }
@@ -315,7 +316,7 @@ fn pure_def(inst: &MInst, class: Class, vregs: &[VRegInfo], defs: &[u32]) -> boo
     };
     pure && inst.uses.iter().all(|o| match o {
         Opnd::Imm(_) => true,
-        Opnd::R(s) => vregs[s.reg as usize].class == Class::S && defs[s.reg as usize] == 1,
+        Opnd::R(s) => (vregs[s.reg as usize].class == Class::S || (vsrc && class == Class::V)) && defs[s.reg as usize] == 1,
         Opnd::P(..) => false,
     })
 }
@@ -677,6 +678,7 @@ impl Spiller {
         target: u32,
     ) -> Vec<Choice> {
         let nv = f.vregs.len();
+        let vsrc = super::kernel_lever("rematv");
         let groups = regalloc::coalesce(f, live);
         let mut parent = groups.parent.clone();
         let root: Vec<(u32, u8)> = (0..nv as u32).map(|v| regalloc::find(&mut parent, v)).collect();
@@ -758,7 +760,7 @@ impl Spiller {
             let pure = members[r as usize] == 1
                 && size == 1
                 && defs[r as usize] == 1
-                && def_inst[r as usize].is_some_and(|(b, k)| pure_def(&f.blocks[b as usize].insts[k as usize], class, &f.vregs, defs));
+                && def_inst[r as usize].is_some_and(|(b, k)| pure_def(&f.blocks[b as usize].insts[k as usize], class, &f.vregs, defs, vsrc));
             let reads = pure && def_inst[r as usize].is_some_and(|(b, k)| f.blocks[b as usize].insts[k as usize].uses.iter().any(|o| matches!(o, Opnd::R(_))));
             if reads {
                 sourced.push(cands.len());
@@ -772,13 +774,52 @@ impl Spiller {
                 wanted[cands[c].1 as usize] = true;
             }
             let uses_at = UsePositions::new(f, nv, &wanted);
+            // A VGPR source defined once outside every loop keeps its value to every use; recomputing at the uses
+            // then only lengthens its range, which pays when several recomputed values share it (`vsrc`).
+            let extendable = |s: &VRef| {
+                vsrc && f.vregs[s.reg as usize].class == Class::V
+                    && def_inst[s.reg as usize].is_some_and(|(b, _)| f.blocks[b as usize].loop_depth == 0)
+            };
+            let mut shared: std::collections::HashMap<u32, u32> = Default::default();
+            for &c in &sourced {
+                let (b, k) = def_inst[cands[c].1 as usize].expect("defined once");
+                for o in f.blocks[b as usize].insts[k as usize].uses.iter() {
+                    if let Opnd::R(s) = o {
+                        if extendable(s) {
+                            *shared.entry(s.reg).or_default() += 1;
+                        }
+                    }
+                }
+            }
             for &c in &sourced {
                 let r = cands[c].1;
                 let (b, k) = def_inst[r as usize].expect("defined once");
                 cands[c].2 = f.blocks[b as usize].insts[k as usize].uses.iter().all(|o| match o {
-                    Opnd::R(s) => uses_at.of(r).iter().all(|&i| live_at(*s, 2 * i)),
+                    Opnd::R(s) => {
+                        uses_at.of(r).iter().all(|&i| live_at(*s, 2 * i)) || (extendable(s) && shared.get(&s.reg).is_some_and(|&n| n >= 3))
+                    }
                     _ => true,
                 });
+            }
+        }
+        // A value that is the source of another recomputed value is not itself recomputed (the clones would read a
+        // register with no definition left).
+        if vsrc {
+            let mut is_src = vec![false; nv];
+            for &c in &sourced {
+                if cands[c].2 {
+                    let (b, k) = def_inst[cands[c].1 as usize].expect("defined once");
+                    for o in f.blocks[b as usize].insts[k as usize].uses.iter() {
+                        if let Opnd::R(s) = o {
+                            is_src[s.reg as usize] = true;
+                        }
+                    }
+                }
+            }
+            for c in cands.iter_mut() {
+                if c.2 && is_src[c.1 as usize] {
+                    c.2 = false;
+                }
             }
         }
         // A recomputation is one instruction per use; a spill access is
@@ -808,6 +849,18 @@ impl Spiller {
                     (0..nv as u32).filter(|&v| root[v as usize].0 == r).map(|v| (v, root[v as usize].1)).collect();
                 out.push(Choice::Spill(list, groups.gsize[r as usize], cost[r as usize]));
             }
+        }
+        if vsrc {
+            // A recomputation that reads a register this round spills would read it with no reload: leave it live.
+            let spilled: std::collections::HashSet<u32> = out
+                .iter()
+                .filter_map(|c| if let Choice::Spill(list, ..) = c { Some(list.iter().map(|&(v, _)| v)) } else { None })
+                .flatten()
+                .collect();
+            out.retain(|c| match c {
+                Choice::Remat(_, (b, k)) => !f.blocks[*b].insts[*k].uses.iter().any(|o| o.vref().is_some_and(|s| spilled.contains(&s.reg))),
+                _ => true,
+            });
         }
         out
     }

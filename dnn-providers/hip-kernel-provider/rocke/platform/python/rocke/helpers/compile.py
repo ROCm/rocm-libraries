@@ -143,6 +143,12 @@ DIRECT_LEVERS_ATTR = "direct_levers"
 DIRECT_SCOPES_ATTR = "direct_scopes"
 SCOPE_OP_ATTR = "rocke.scope"
 DIRECT_DEFAULT_LEVERS = ("acqfence", "bufoffany", "fmax3")
+# Levers the direct backend adds for attention kernels (names starting ``rocke_attention_dense``) on top of the defaults:
+# ``cmpreassoc`` (a causal mask's per-element constants stay immediates of one base), ``rematv`` (spilling
+# recomputes hoisted address offsets), ``valcoal`` / ``packtuple`` (the row-sum tuples take no copies and pack
+# into ``v_pk_add_f32``). Dense attention b2_s2048 on MI355X, rust / best COMGR geomean over 37 kernels: 1.108 ->
+# 1.034 (the two 256x128 causal d128 kernels 2.1x -> 1.14x). ``packfar`` measured 2% slower and is not here.
+DIRECT_ATTENTION_LEVERS = ("cmpreassoc", "rematv", "valcoal", "packtuple")
 _DIRECT_DEFAULTS_ENV = "ROCKE_DIRECT_DEFAULT_LEVERS"
 
 
@@ -428,6 +434,15 @@ def direct_default_levers() -> List[str]:
     return _lever_names(env) if env is not None else list(DIRECT_DEFAULT_LEVERS)
 
 
+def _attention_levers(kernel: KernelDef) -> List[str]:
+    """``DIRECT_ATTENTION_LEVERS`` for a dense attention kernel, unless ``ROCKE_DIRECT_DEFAULT_LEVERS`` is set (it
+    replaces every default, ``""`` leaving the plain direct object)."""
+    if os.environ.get(_DIRECT_DEFAULTS_ENV) is not None:
+        return []
+    is_attention = str(getattr(kernel, "name", "")).startswith("rocke_attention_dense")
+    return list(DIRECT_ATTENTION_LEVERS) if is_attention else []
+
+
 def parse_direct_scopes(text: str) -> Dict[str, List[str]]:
     """``attrs["direct_scopes"]`` (``"<scope>:<lever>+<lever>;..."``) as
     scope name -> lever names (``-name`` turns a kernel lever off)."""
@@ -504,8 +519,10 @@ def _compile_kernel_direct(
     # The backend's defaults and the kernel's own levers (``attrs["direct_levers"]``)
     # join the environment's for this compile; named op scopes become ``dlevers``
     # before the lifting (a lifted asm statement keeps its scope).
-    levers = direct_default_levers() + _lever_names(
-        kernel.attrs.get(DIRECT_LEVERS_ATTR)
+    levers = (
+        direct_default_levers()
+        + _attention_levers(kernel)
+        + _lever_names(kernel.attrs.get(DIRECT_LEVERS_ATTR))
     )
     source = direct_source(kernel)
     # Inline-asm idioms the direct compiler lowers as IR ops, on a copy

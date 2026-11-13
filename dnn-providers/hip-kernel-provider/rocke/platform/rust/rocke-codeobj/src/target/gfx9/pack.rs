@@ -78,6 +78,9 @@ struct Packer {
     rename: FxHashMap<u32, (u32, u8)>,
 }
 
+/// The plan entry of results that are a tuple's halves (`Packer::pair`).
+const NO_PAIR: u32 = u32::MAX;
+
 /// One packed source: the 64-bit operand (or the plan's pair `Joined(j)`
 /// once it exists) and its lane selects.
 struct Source {
@@ -191,6 +194,18 @@ impl Packer {
         pair
     }
 
+    /// A two-dword VGPR tuple that exactly two instructions write (its halves), never early, not precolored.
+    fn whole_pair(&self, reg: u32) -> bool {
+        let info = self.f_vregs[reg as usize];
+        info.class == Class::V
+            && info.size == 2
+            && info.fixed.is_none()
+            && self.defs[reg as usize] == 2
+            && !self.early[reg as usize]
+            && !self.rename.contains_key(&reg)
+            && self.even_tuple(reg)
+    }
+
     /// Whether the tuple `reg` starts at an even register: VGPR tuples always
     /// do on gfx950 (`legalize`), SGPR tuples by their alignment.
     fn even_tuple(&self, reg: u32) -> bool {
@@ -248,7 +263,18 @@ impl Packer {
         if i1.mods != i2.mods || i1.mods & !neg != 0 || i1.mods & extra != 0 || i1.defs.len() != 1 || i2.defs.len() != 1 {
             return None;
         }
-        let (d1, d2) = (self.free(i1.defs[0])?, self.free(i2.defs[0])?);
+        // The results are the two halves, in order, of one tuple that only these two write (a vector operation's
+        // result): the packed instruction writes the tuple itself.
+        let whole = match (i1.defs[0].vref(), i2.defs[0].vref()) {
+            (Some(a), Some(b)) if a.reg == b.reg && (a.off, a.n, b.off, b.n) == (0, 1, 1, 1) && crate::rir::lever_at(&self.scopes, i1.scope, "packtuple") => {
+                Some(a.reg).filter(|&t| self.whole_pair(t))
+            }
+            _ => None,
+        };
+        let (d1, d2) = match whole {
+            Some(t) => (t, t),
+            None => (self.free(i1.defs[0])?, self.free(i2.defs[0])?),
+        };
         if i2.uses.iter().any(|u| u.vref().is_some_and(|v| v.reg == d1)) || i1.uses.len() != i2.uses.len() {
             return None;
         }
@@ -260,7 +286,8 @@ impl Packer {
             if swap {
                 b_uses.swap(0, 1);
             }
-            let mut plan = vec![(d1, d2)];
+            // The first entry is the results' pair: none to make when they are a tuple's halves already.
+            let mut plan = vec![if whole.is_some() { (NO_PAIR, NO_PAIR) } else { (d1, d2) }];
             let srcs: Option<Vec<Source>> = (0..n).map(|k| self.source(k, i1.uses[k], b_uses[k], &mut plan)).collect();
             let Some(srcs) = srcs else { continue };
             // One scalar at most: a second would be copied to a VGPR the
@@ -277,7 +304,7 @@ impl Packer {
                 continue;
             }
             // Commit: the plan's pairs (the results first), the alignments.
-            let pairs: Vec<u32> = plan.into_iter().map(|(lo, hi)| self.join(lo, hi)).collect();
+            let pairs: Vec<u32> = plan.into_iter().map(|(lo, hi)| if lo == NO_PAIR { d1 } else { self.join(lo, hi) }).collect();
             let mut uses = Uses::new();
             let mut sel = 0;
             for s in srcs {
@@ -353,6 +380,32 @@ mod tests {
         let pk = &code[2];
         assert_eq!((pk.op, pk.defs[0], &pk.uses[..], pk.imm), (Opc::Gfx9(Gfx9Op::VPkMulF32), r(res, 0, 2), &[r(src, 0, 2), r(src, 0, 2)][..], 0));
         assert_eq!(&code[3].uses[..], &[r(res, 0, 1), r(res, 1, 1)][..]);
+    }
+
+    #[test]
+    fn results_that_are_a_tuples_halves_are_written_in_place() {
+        // r3 = (r1 + r2)[lane 0, 1] with r1, r2, r3 pairs: one packed add whose destination is r3.
+        let insts = vec![
+            MInst::new(Opc::VAddF32, [r(3, 0, 1)], [r(1, 0, 1), r(2, 0, 1)]),
+            MInst::new(Opc::VAddF32, [r(3, 1, 1)], [r(1, 1, 1), r(2, 1, 1)]),
+            MInst::new(Opc::GStoreB32, [], [r(3, 0, 1), r(3, 1, 1)]),
+        ];
+        let mut f = func(&[(V, 1), (V, 2), (V, 2), (V, 2)], insts.clone());
+        crate::rir::with_levers(&["packtuple"], || run(&mut f));
+        let code = &f.blocks[0].insts;
+        assert_eq!(code.len(), 2, "{code:?}");
+        assert_eq!((code[0].op, code[0].defs[0], &code[0].uses[..]), (Opc::Gfx9(Gfx9Op::VPkAddF32), r(3, 0, 2), &[r(1, 0, 2), r(2, 0, 2)][..]));
+        assert_eq!(f.vregs.len(), 4, "no pair was made");
+        // Without the lever the halves stay two scalar adds.
+        let mut f = func(&[(V, 1), (V, 2), (V, 2), (V, 2)], insts.clone());
+        run(&mut f);
+        assert_eq!(f.blocks[0].insts.len(), 3);
+        // A third write of the tuple keeps the instructions as they are.
+        let mut more = insts;
+        more.insert(2, MInst::new(Opc::VMovB32, [r(3, 0, 1)], [Opnd::Imm(0)]));
+        let mut f = func(&[(V, 1), (V, 2), (V, 2), (V, 2)], more);
+        crate::rir::with_levers(&["packtuple"], || run(&mut f));
+        assert!(f.blocks[0].insts.iter().all(|i| !matches!(i.op, Opc::Gfx9(_))), "{:?}", f.blocks[0].insts);
     }
 
     #[test]

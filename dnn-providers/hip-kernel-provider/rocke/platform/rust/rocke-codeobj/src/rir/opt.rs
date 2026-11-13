@@ -3360,7 +3360,7 @@ fn optimize_with(kernel: &mut Kernel, lds: &mut FxHashMap<ValueId, u32>, mut ws:
     sweep(kernel, &mut ws)?;
     compact(kernel, &mut ws, lds);
     // rustgemm lever `sreassoc`: LDS DMA soffsets as (leaves) + constant, before LICM / CSE share the leaves.
-    if super::kernel_lever("sreassoc") || super::scoped_anywhere(kernel, "sreassoc") {
+    if super::kernel_lever("sreassoc") || super::scoped_anywhere(kernel, "sreassoc") || super::kernel_lever("cmpreassoc") || super::scoped_anywhere(kernel, "cmpreassoc") {
         super::reassoc::run(kernel);
     }
     // rustgemm lever `m0share`: an LDS DMA next to one at a constant LDS distance reads its M0 value.

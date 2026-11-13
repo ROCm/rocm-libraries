@@ -1,6 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+//! Lever `cmpreassoc` (below) rebuilds compare operands the same way.
+//!
 //! rustgemm lever `sreassoc`: the constant part of an LDS DMA's scalar offset is added last.
 //!
 //! rocKE's MXFP6 GEMM computes each K tile's buffer `soffset` as a nest such as
@@ -216,6 +218,17 @@ impl Rw<'_> {
                 if let Some(v) = self.rebuild(op.operands[3], at, &mut out) {
                     op.operands[3] = v;
                     self.rewritten += 1;
+                }
+            }
+            // Lever `cmpreassoc`: both sides of an i32 compare in a loop as (leaves) + constant, so that the
+            // constants of a row of masks (a causal mask's column index per accumulator element) stay immediates of
+            // one shared base instead of each hoisting a register of its own out of the loop.
+            if op.kind == OpKind::Cmp && at != 0 && op.operands.len() == 2 && super::op_lever(&op, "cmpreassoc") {
+                for k in 0..2 {
+                    if let Some(v) = self.rebuild(op.operands[k], at, &mut out) {
+                        op.operands[k] = v;
+                        self.rewritten += 1;
+                    }
                 }
             }
             out.push(op);
@@ -636,6 +649,67 @@ mod tests {
         let after: Vec<Form> = soffset_forms(&k);
         assert_eq!(before, after);
         assert!(before.iter().all(|f| f.terms.len() == 3) && before[0].konst == 0 && before[1].konst == 32 * 512, "{before:?}");
+    }
+
+    /// A loop whose body compares `col + (lane + k)` (col per trip) with a row for `per` constants `k`, as a causal mask
+    /// does for each accumulator element, and counts the true ones.
+    fn mask_kernel(per: usize) -> String {
+        let mut body = String::new();
+        for k in 0..per {
+            body += &format!(
+                "        %ck{k} : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:{} }}\n        \
+                 %o{k} : i32 = arith.add ( %lane, %ck{k} )\n        \
+                 %t{k} : i32 = arith.add ( %col, %o{k} )\n        \
+                 %le{k} : i1 = arith.cmp ( %t{k}, %row ) {{ pred = s:\"le\" }}\n        \
+                 %s{k} : i32 = arith.select ( %le{k}, %c1, %c0 )\n        \
+                 %a{} : i32 = arith.add ( %a{k}, %s{k} )\n",
+                k * 3 + 1,
+                k + 1
+            );
+        }
+        format!(
+            "ckdsl.ir v1\nkernel @maskk {{\n  attrs {{ max_workgroup_size = i:64 }}\n  params {{\n    %Y : ptr<i32,global>\n    \
+             %row : i32\n    %n : i32\n  }}\n  region @entry {{\n    \
+             %tid : i32 = gpu.thread_id (  ) {{ axis = s:\"x\" }}\n    \
+             %c0 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:0 }}\n    \
+             %c1 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:1 }}\n    \
+             %c4 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:4 }}\n    \
+             %c128 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:128 }}\n    \
+             %lane : i32 = arith.mul ( %tid, %c4 )\n    \
+             %r : i32 = scf.for ( %c0, %n, %c1, %c0 ) {{ iter_args = l:[ {{ name = s:\"%a0\", type = s:\"i32\" }} ], iv = s:\"%kt\", \
+             iv_type = s:\"i32\", num_iter_args = i:1, unroll = b:false }}\n      \
+             region @body {{\n        %it : i32 = arith.mul ( %kt, %c128 )\n        %col : i32 = arith.add ( %it, %tid )\n{body}        \
+             scf.yield ( %a{per} ) {{ num = i:1 }}\n      }}\n    \
+             memref.global_store_typed ( %Y, %tid, %r ) {{ align = i:4, elem_type = s:\"i32\" }}\n    \
+             cf.return (  )\n  }}\n}}\n"
+        )
+    }
+
+    #[test]
+    fn cmpreassoc_keeps_the_constants_of_a_row_of_compares_out_of_registers() {
+        let build = |levers: &[&str]| rir::with_levers(levers, || rir::compile_any_target(&mask_kernel(24), Target::Gfx950).unwrap_or_else(|e| panic!("{e}")));
+        let (base, lever) = (build(&[]), build(&["cmpreassoc"]));
+        assert!(base.hsaco != lever.hsaco);
+        // Without the lever each `lane + k` is hoisted into a register of its own; with it, one base per trip.
+        assert!(lever.stats.vgprs + 12 <= base.stats.vgprs, "vgprs {} -> {}", base.stats.vgprs, lever.stats.vgprs);
+        // The rewrite is exact: the same compares on the same sums.
+        let mut k = rir::parse::parse(&mask_kernel(3)).unwrap_or_else(|e| panic!("{e}"));
+        let n = rir::with_levers(&["cmpreassoc"], || super::run(&mut k));
+        // Each compare's left side has a constant part (k * 3 + 1); the right side has none.
+        assert_eq!(n, 3);
+    }
+
+    #[test]
+    fn rematv_recomputes_a_row_of_hoisted_offsets_instead_of_spilling_them() {
+        // 24 `lane + k` values live through the loop in 20 VGPRs: spilled without the lever, recomputed with it.
+        let build = |levers: &[&str]| {
+            rir::with_levers(levers, || rir::compile_any_target_limited(&mask_kernel(24), Target::Gfx950, 20).unwrap_or_else(|e| panic!("{e}")))
+        };
+        let (base, lever) = (build(&[]), build(&["rematv"]));
+        let moved = |s: &rir::regalloc::SpillStats| s.lds_dwords + s.scratch_dwords + s.agpr_dwords;
+        assert!(moved(&base.stats.spill) > 0, "{:?}", base.stats.spill);
+        assert!(lever.stats.spill.remat > base.stats.spill.remat, "{:?} vs {:?}", base.stats.spill, lever.stats.spill);
+        assert!(moved(&lever.stats.spill) < moved(&base.stats.spill), "{:?} vs {:?}", base.stats.spill, lever.stats.spill);
     }
 
     /// Two DMAs of one wave-uniform LDS part into the 1 KiB allocations %A and %B (records `records`; the second
