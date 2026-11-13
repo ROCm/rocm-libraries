@@ -33,50 +33,108 @@ extern "C" {
 #endif
 
 /*! \ingroup aux_module
- *  \brief Copy data between two dense matrices.
+ *  \brief Copy a dense matrix into another dense matrix, optionally scaling it.
  *  \details
- *  \p rocsparse_dnmat_copy_data copies the data from a \p X dense matrix to a \p Y dense matrix.
+ *  \p rocsparse_dnmat_copy_data copies the \f$m \times n\f$ dense matrix \f$X\f$ into the
+ *  \f$m \times n\f$ dense matrix \f$Y\f$, optionally multiplying it by a scaling factor
+ *  \f$\alpha\f$:
  *  \f[
- *    Y =  \alpha \cdot X,
+ *    Y := \alpha \cdot X,
  *  \f]
- *  where \p alpha is a scalar.
+ *  or \f$Y := X\f$ when \p alpha is null. \f$X\f$ and \f$Y\f$ must have the same dimensions: the
+ *  same number of rows \f$m\f$ and the same number of columns \f$n\f$. They do not need to be
+ *  square.
  *
- *  \note Dense matrix orders (\ref rocsparse_order) can be arbitrary.
- *  The number of rows and the number of columns must be the same.
- *  All the data types, i.e. from \p alpha, \p X and \p Y are the same.
+ *  \f$X\f$ and \f$Y\f$ can be in row or column order (\ref rocsparse_order), and can have
+ *  different orders and leading dimensions. When the orders differ, \f$Y\f$ holds the same matrix
+ *  as \f$X\f$, stored in the order of \f$Y\f$.
  *
- *  \note Complete strided batch operation are supported. The batch_count of the operation is given by the batch_count of the matrix \p Y,
- *  meaning that batch_count values for \p alpha and \p X must be either the same or one, i.e. the following operations are supported\f$0 \le k \lt batch_count\f$
- *  \f[
- *    Y_k =  \alpha_k \cdot X_k,
- *  \f]
- *  \f[
- *    Y_k =  \alpha_k \cdot X,
- *  \f]
- *  or
- *  \f[
- *    Y_k =  \alpha \cdot X_k, or
- *  \f]
- *  \f[
- *    Y_k =  \alpha \cdot X.
- *  \f]
+ *  \p alpha is not a plain scalar but a dense vector descriptor, so that a batched copy can use
+ *  a different scaling factor for each batch. The factor of batch \f$k\f$ is the single value at
+ *  index \f$k\f$ times the batch stride. Values that are not at those indices are not read. For
+ *  example, the device values \f$1, 2, 3, 4\f$ with a batch count of 4 and a batch stride of 1
+ *  scale the four batches by \f$1\f$, \f$2\f$, \f$3\f$, and \f$4\f$. A batch stride greater than
+ *  1 skips the entries between those indices. A batch stride of 0 uses the value at index 0 for
+ *  every batch. To scale by a single value, create \p alpha with
+ *  \ref rocsparse_dnvec_descr_create_scalar, which records whether the value is in host or device
+ *  memory. To scale each batch by its own value, create \p alpha with
+ *  \ref rocsparse_create_dnvec_descr over device memory and set its batch count and batch stride
+ *  with \ref rocsparse_dnvec_set_strided_batch. The pointer mode of the handle does not apply to
+ *  \p alpha.
  *
+ *  \p rocsparse_dnmat_copy_data supports strided batched computation. The number of batches
+ *  \f$b\f$ is the batch count of \f$Y\f$, and for \f$k = 0, 1, \ldots, b - 1\f$ there are four
+ *  supported batch modes:
+ *  \f[
+ *    Y_k = \alpha_k \cdot X_k \\
+ *    Y_k = \alpha_k \cdot X \\
+ *    Y_k = \alpha \cdot X_k \\
+ *    Y_k = \alpha \cdot X
+ *  \f]
+ *  The batch mode is determined by the batch count and batch stride of \f$X\f$ (set with
+ *  \ref rocsparse_dnmat_set_strided_batch) and of \p alpha (set with
+ *  \ref rocsparse_dnvec_set_strided_batch). A batch count of 1 with a batch stride of 0 uses the
+ *  same matrix or factor for every batch; otherwise the batch count must be \f$b\f$:
+ *
+ *  <table>
+ *  <tr><th>Batch mode                        <th>Batch count of \f$X\f$ <th>Batch stride of \f$X\f$ <th>Batch count of \f$\alpha\f$ <th>Batch stride of \f$\alpha\f$
+ *  <tr><td>\f$Y_k = \alpha_k \cdot X_k\f$</td><td>\f$b\f$</td>           <td>any</td>                <td>\f$b\f$</td>                 <td>any</td>
+ *  <tr><td>\f$Y_k = \alpha_k \cdot X\f$</td>  <td>\f$1\f$</td>           <td>\f$0\f$</td>            <td>\f$b\f$</td>                 <td>any</td>
+ *  <tr><td>\f$Y_k = \alpha \cdot X_k\f$</td>  <td>\f$b\f$</td>           <td>any</td>                <td>\f$1\f$</td>                 <td>\f$0\f$</td>
+ *  <tr><td>\f$Y_k = \alpha \cdot X\f$</td>    <td>\f$1\f$</td>           <td>\f$0\f$</td>            <td>\f$1\f$</td>                 <td>\f$0\f$</td>
+ *  </table>
+ *
+ *  A null \p alpha behaves like a factor of one in every batch. When \p alpha is in host memory
+ *  (\ref rocsparse_pointer_mode_host), its first value is used for every batch, whatever its batch
+ *  count, so only the last two modes are available; per-batch factors need \p alpha in device
+ *  memory.
+ *
+ *  \f$X\f$, \f$Y\f$ and \p alpha must all have the same data type. Mixed precisions are not
+ *  supported.
+ *
+ *  \par Uniform Precisions:
+ *  <table>
+ *  <tr><th>alpha / X / Y
+ *  <tr><td>rocsparse_datatype_f16_r
+ *  <tr><td>rocsparse_datatype_bf16_r
+ *  <tr><td>rocsparse_datatype_f32_r
+ *  <tr><td>rocsparse_datatype_f64_r
+ *  <tr><td>rocsparse_datatype_f32_c
+ *  <tr><td>rocsparse_datatype_f64_c
+ *  <tr><td>rocsparse_datatype_i8_r
+ *  <tr><td>rocsparse_datatype_u8_r
+ *  <tr><td>rocsparse_datatype_i32_r
+ *  <tr><td>rocsparse_datatype_u32_r
+ *  </table>
+ *
+ *  \note
+ *  This function is non blocking and executed asynchronously with respect to the host.
+ *  It may return before the actual computation has finished.
  *
  *  @param[in]
  *  handle      handle to the rocSPARSE library context queue.
  *  @param[in]
- *  alpha       optional, scale the operation if not null.
+ *  alpha       optional dense vector holding the scaling factor, or one factor per batch.
+ *              Pass null to copy without scaling.
  *  @param[in]
- *  X           source matrix.
+ *  X           source \f$m \times n\f$ dense matrix.
  *  @param[inout]
- *  Y           target matrix.
+ *  Y           destination \f$m \times n\f$ dense matrix. Its values are overwritten.
  *  @param[out]
  *  p_error      error descriptor created if the returned status is not \ref rocsparse_status_success. A null pointer can be passed if an error descriptor is not required.
  *
  *  \retval rocsparse_status_success the operation completed successfully.
- *  \retval rocsparse_status_invalid_pointer if \p Y, or \p X is invalid.
- *  \retval rocsparse_status_invalid_value if dimensions or data types are invalid.
+ *  \retval rocsparse_status_invalid_handle the library context was not initialized.
+ *  \retval rocsparse_status_invalid_pointer if \p X or \p Y is a null pointer.
+ *  \retval rocsparse_status_invalid_value if \p X and \p Y do not have the same number of rows
+ *          and the same number of columns, or if the batch count and batch stride of \p X or of
+ *          \p alpha match none of the batch modes above.
+ *  \retval rocsparse_status_not_implemented if \p X, \p Y and \p alpha do not all have the same
+ *          data type.
+ *
  *  \par Example
+ *  This example copies a \f$3 \times 2\f$ matrix stored in column order into a matrix stored in
+ *  row order, scaling it by \f$\alpha = 2\f$ held in host memory.
  *  \snippet example_rocsparse_dnmat_copy_data.cpp doc example
  */
 ROCSPARSE_EXPORT rocsparse_status rocsparse_dnmat_copy_data(rocsparse_handle            handle,

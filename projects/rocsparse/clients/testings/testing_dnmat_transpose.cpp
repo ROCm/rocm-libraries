@@ -148,7 +148,7 @@ void testing_dnmat_transpose_bad_arg(const Arguments& arg)
 
                 {
                     device_dense_matrix<T> dsource(3, 2, s_order);
-                    device_dense_matrix<T> dtarget(2, 2, t_order);
+                    device_dense_matrix<T> dtarget(2, 3, t_order);
                     rocsparse_local_dnmat  SOURCE(dsource);
                     rocsparse_local_dnmat  TARGET(dtarget);
                     rocsparse_dnmat_descr  source = SOURCE;
