@@ -73,6 +73,18 @@ int64_t elementBytes(hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
     return dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT ? 4 : 2;
 }
 
+/// The kernel's 32-bit index form (dwTensorsFit32 in ConvDepthwiseValuCores.h): x and y below
+/// 2^31 bytes and the launched threads below 2^31. The tile variants (microtile, fused, LDS) have
+/// only that form; the floors serve larger tensors.
+bool fitsIndex32(const DepthwiseValuProblem& problem, const DepthwiseLaunch& launch)
+{
+    const auto& a = problem.args;
+    const int64_t bytes = elementBytes(problem.base.dataType);
+    return int64_t{a.n} * a.c * a.di * a.hi * a.wi * bytes < INT_LIMIT
+           && int64_t{a.n} * a.c * a.dOut * a.ho * a.wo * bytes < INT_LIMIT
+           && launch.grid * launch.gridY * launch.gridZ * launch.block < INT_LIMIT;
+}
+
 } // namespace
 
 std::optional<DepthwiseLayout> depthwiseLayoutOf(const ConvNaiveArgs& a)
@@ -379,6 +391,13 @@ std::optional<DepthwiseLaunch> launchFor(const DepthwiseValuProblem& problem,
         return std::nullopt;
     }
     if(launch.grid < 1 || launch.grid > INT_LIMIT || launch.block < 1 || launch.block > 1024)
+    {
+        return std::nullopt;
+    }
+    const bool tileCore = tile.variant == DepthwiseVariant::MICROTILE
+                          || tile.variant == DepthwiseVariant::FUSED
+                          || tile.variant == DepthwiseVariant::LDS;
+    if(tileCore && !fitsIndex32(problem, launch))
     {
         return std::nullopt;
     }

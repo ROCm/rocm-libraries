@@ -267,6 +267,53 @@ TEST(TestConvDepthwiseValuProblem, LaunchCoversTheProblemPerVariant)
     EXPECT_FALSE(launchFor(*nchw, rowtile).has_value());
 }
 
+// The tile variants (microtile, fused, LDS) have only the 32-bit index form: they decline once x
+// or y reaches 2^31 bytes, where the floors (a 64-bit body) and the rowtile (rebased per row)
+// still serve.
+TEST(TestConvDepthwiseValuProblem, TileVariantsDeclineTensorsPastThe32BitForm)
+{
+    auto shape = depthwise(64, true);
+    shape.input = {1024, 1024};
+    shape.dataType = hipdnn_flatbuffers_sdk::data_objects::DataType::HALF;
+    // x and y: n * 64 * 2^20 halves = n * 2^27 bytes.
+    shape.n = 15;
+    const auto below = parse(shape, ConvDirection::FORWARD);
+    shape.n = 16;
+    const auto at = parse(shape, ConvDirection::FORWARD);
+    ASSERT_TRUE(below.has_value());
+    ASSERT_TRUE(at.has_value());
+
+    DepthwiseTile microtile;
+    microtile.variant = DepthwiseVariant::MICROTILE;
+    microtile.kh = microtile.kw = 3;
+    microtile.th = 2;
+    microtile.tw = 4;
+    DepthwiseTile fused;
+    fused.variant = DepthwiseVariant::FUSED;
+    fused.kh = fused.kw = 3;
+    fused.bh = fused.bw = 8;
+    fused.bk = 32;
+    fused.rh = fused.rw = 2;
+    DepthwiseTile lds = fused;
+    lds.variant = DepthwiseVariant::LDS;
+    for(const auto& tile : {microtile, fused, lds})
+    {
+        EXPECT_TRUE(launchFor(*below, tile).has_value()) << static_cast<int>(tile.variant);
+        EXPECT_FALSE(launchFor(*at, tile).has_value()) << static_cast<int>(tile.variant);
+    }
+    DepthwiseTile floor;
+    floor.wstrip = 4;
+    DepthwiseTile rowtile;
+    rowtile.variant = DepthwiseVariant::ROWTILE;
+    rowtile.kh = rowtile.kw = 3;
+    rowtile.th = rowtile.tw = 4;
+    rowtile.vec = 2;
+    for(const auto& tile : {floor, rowtile})
+    {
+        EXPECT_TRUE(launchFor(*at, tile).has_value()) << static_cast<int>(tile.variant);
+    }
+}
+
 TEST(TestConvDepthwiseValuProblem, LaunchDeclinesABlockOverTheLimit)
 {
     const auto problem = parse(depthwise(), ConvDirection::FORWARD);

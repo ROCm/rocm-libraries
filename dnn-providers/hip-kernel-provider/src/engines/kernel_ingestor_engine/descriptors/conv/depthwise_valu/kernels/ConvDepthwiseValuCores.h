@@ -20,9 +20,13 @@
 //     together; a branch per load waits for each one alone. The LDS staging loops run a
 //     compile-time trip count (the block size is the config's), fully unrolled, so a thread's
 //     halo loads issue back to back.
-//   - Index math is 32-bit when x and y are below 2^31 bytes (and the launched threads below
-//     2^31), with the thread decode by unsigned 32-bit division; larger tensors run the same
-//     cores with 64-bit indices, clamped global loads and guarded stores.
+//   - Index widths. Index math is 32-bit when x and y are below 2^31 bytes and the launched
+//     threads below 2^31 (dwTensorsFit32), with the thread decode by unsigned 32-bit division.
+//     Larger tensors: the floors switch at run time to a second body with 64-bit indices,
+//     clamped global loads and guarded stores; the tile cores (microtile, fused, LDS) have no
+//     such body and the kernel match declines them (launchFor), since a second body sets the
+//     register count of every launch (fused 7x7 16x16x32: 177 VGPRs with it, 77 without, on
+//     gfx950). The rowtile core rebases per row and has one body for every size.
 //   - In the 32-bit form the tile cores (microtile, fused, LDS) read x and write y through
 //     whole-tensor buffer resources (DwX, DwY) at 32-bit byte offsets: an element outside the
 //     image reads hardware zero and an output past the edge is stored past the end and dropped,
@@ -183,11 +187,6 @@ __device__ inline bool dwTensorsFit32(const ValuParams& p)
     return (long)p.N * p.C * p.Di * p.Hi * p.Wi * eb < lim
            && (long)p.N * p.C * p.Do * p.Ho * p.Wo * eb < lim
            && (long)gridDim.x * gridDim.y * gridDim.z * blockDim.x < lim;
-}
-template <typename T>
-__device__ inline bool dwImagesFit32(const ValuParams& p)
-{
-    return dwTensorsFit32<T>(p);
 }
 
 #if HKP_ARCH_GFX11 || HKP_ARCH_GFX12
@@ -740,10 +739,8 @@ __device__ inline void v3a_microtile_core_nhwc(const T* __restrict__ A,
                                                T* __restrict__ D,
                                                ValuParams p)
 {
-    if(dwTensorsFit32<T>(p))
-        v3a_microtile_nhwc_body<T, KH, KW, TH, TW, int>(A, Wt, D, p);
-    else
-        v3a_microtile_nhwc_body<T, KH, KW, TH, TW, long>(A, Wt, D, p);
+    // 32-bit indices only (see "Index widths" at the top): larger tensors run on the floors.
+    v3a_microtile_nhwc_body<T, KH, KW, TH, TW, int>(A, Wt, D, p);
 }
 
 // Stages the halo'd [LD][LH][LW][BK] channels-last block (LD = 1 in 2-D) of the image starting at
@@ -934,12 +931,9 @@ __device__ inline void v4_fused_core_nhwc(const T* __restrict__ A,
     static_assert(BW % RW == 0, "v4_fused: BW must be divisible by RW");
     static_assert((BH + KH - 1) * (BW + KW - 1) * BK * static_cast<int>(sizeof(T)) <= 65536,
                   "v4_fused: LDS tile exceeds 64 KB");
-    // One LDS tile for both index widths (a __shared__ array per instantiation would be two).
     __shared__ __attribute__((aligned(16))) T tile[(BH + KH - 1) * (BW + KW - 1) * BK];
-    if(dwImagesFit32<T>(p))
-        v4_fused_nhwc_body<T, KH, KW, BH, BW, BK, RH, RW, int>(A, Wt, D, p, tile);
-    else
-        v4_fused_nhwc_body<T, KH, KW, BH, BW, BK, RH, RW, long>(A, Wt, D, p, tile);
+    // 32-bit indices only (see "Index widths" at the top): larger tensors run on the floors.
+    v4_fused_nhwc_body<T, KH, KW, BH, BW, BK, RH, RW, int>(A, Wt, D, p, tile);
 }
 
 // ---- v3b lds-direct: LDS block stage, tap loop reads from LDS ----
@@ -1036,10 +1030,8 @@ __device__ inline void v3b_lds_core_nhwc(const T* __restrict__ A,
     static_assert((BH + KH - 1) * (BW + KW - 1) * BK * static_cast<int>(sizeof(T)) <= 65536,
                   "v3b_lds: LDS tile exceeds 64 KB");
     __shared__ __attribute__((aligned(16))) T tile[(BH + KH - 1) * (BW + KW - 1) * BK];
-    if(dwImagesFit32<T>(p))
-        v3b_lds_nhwc_body<T, KH, KW, BH, BW, BK, RH, RW, int>(A, Wt, D, p, tile);
-    else
-        v3b_lds_nhwc_body<T, KH, KW, BH, BW, BK, RH, RW, long>(A, Wt, D, p, tile);
+    // 32-bit indices only (see "Index widths" at the top): larger tensors run on the floors.
+    v3b_lds_nhwc_body<T, KH, KW, BH, BW, BK, RH, RW, int>(A, Wt, D, p, tile);
 }
 
 // ---- v3b (3D) lds-direct over NDHWC: LDS block stage, tap loop reads from LDS ----
@@ -1183,10 +1175,8 @@ __device__ inline void v3b_lds_core_ndhwc(const T* __restrict__ A,
                   "v3b_lds_3d: LDS tile exceeds 64 KB");
     __shared__
         __attribute__((aligned(16))) T tile[(BD + KD - 1) * (BH + KH - 1) * (BW + KW - 1) * BK];
-    if(dwImagesFit32<T>(p))
-        v3b_lds_ndhwc_body<T, KD, KH, KW, BD, BH, BW, BK, RD, RH, RW, int>(A, Wt, D, p, tile);
-    else
-        v3b_lds_ndhwc_body<T, KD, KH, KW, BD, BH, BW, BK, RD, RH, RW, long>(A, Wt, D, p, tile);
+    // 32-bit indices only (see "Index widths" at the top): larger tensors run on the floors.
+    v3b_lds_ndhwc_body<T, KD, KH, KW, BD, BH, BW, BK, RD, RH, RW, int>(A, Wt, D, p, tile);
 }
 
 // ---- v3b (NCHW) — channel-first LDS plane tile + register micro-tile ----
@@ -1338,10 +1328,8 @@ __device__ inline void v3b_lds_core_nchw(const T* __restrict__ A,
 {
     static_assert(BH % RH == 0 && BW % RW == 0, "the micro-tile must divide the block tile");
     __shared__ float tile[BK][BH + KH - 1][BW + KW]; // a pad column: HW + 1
-    if(dwImagesFit32<T>(p))
-        v3b_lds_nchw_body<T, KH, KW, BH, BW, BK, RH, RW, int>(A, Wt, D, p, tile);
-    else
-        v3b_lds_nchw_body<T, KH, KW, BH, BW, BK, RH, RW, long>(A, Wt, D, p, tile);
+    // 32-bit indices only (see "Index widths" at the top): larger tensors run on the floors.
+    v3b_lds_nchw_body<T, KH, KW, BH, BW, BK, RH, RW, int>(A, Wt, D, p, tile);
 }
 
 // ---- v5 — backward data as a gather; any stride, dilation and padding ----
