@@ -1162,6 +1162,26 @@ TEST(Maf1_0Init, BroadcastDimensionHoldsFirstBatch)
     }
 }
 
+// Overlapping nonzero strides: with sizes {3, 4, 2} and strides {1, 3, 6} batch 1 starts inside
+// batch 0, so indices 6 and 12 (and others) share an element. The fill must be deterministic, with
+// the later logical index winning, not a race between OpenMP workers.
+TEST(Maf1_0Init, OverlappingStridesKeepTheLastIndex)
+{
+    using TensileLite::Client::DataInitialization;
+    std::vector<size_t> const sizes{3, 4, 2};
+    std::vector<size_t> const strides{1, 3, 6};
+    std::vector<double>       expected(18, 42.0);
+    for(size_t idx = 0; idx < 24; idx++)
+        expected[idx % 3 + (idx / 3) % 4 * 3 + idx / 12 * 6] = std::sin(double(idx));
+    for(int rep = 0; rep < 20; rep++)
+    {
+        std::vector<double> array(18, 42.0);
+        DataInitialization::initArrayMaf1_0(
+            array.data(), sizes, strides, ContractionProblemGemm::TENSOR::A);
+        ASSERT_EQ(array, expected) << "rep " << rep;
+    }
+}
+
 // Each value is rounded once from double. sin(11446) = -0.923828140... lies just past the BF16
 // midpoint -0.923828125, which is where rounding to float first lands (and would then tie to
 // even, -0.921875).
