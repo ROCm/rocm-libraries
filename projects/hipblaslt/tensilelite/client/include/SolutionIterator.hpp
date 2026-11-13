@@ -122,7 +122,8 @@ namespace TensileLite
         protected:
             SolutionIterator(std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library,
                              std::shared_ptr<Hardware> hardware,
-                             bool                      printWinnerOnly);
+                             bool                      printWinnerOnly,
+                             bool                      printRejectedPredicates);
 
             virtual bool checkSolution(ContractionSolution&    solution,
                                        ContractionProblemGemm& problem,
@@ -133,6 +134,10 @@ namespace TensileLite
             std::shared_ptr<Hardware>                                      m_hardware;
             ContractionProblem*                                            m_problem;
             bool                                                           m_printWinnerOnly;
+            // Log the predicate evaluation (debugEval) of rejected solutions at
+            // Verbose. Off by default: debugEval re-evaluates and formats every
+            // predicate of each rejected solution.
+            bool                                                           m_printRejectedPredicates;
         };
 
         class AllSolutionsIterator : public SolutionIterator
@@ -153,6 +158,7 @@ namespace TensileLite
                 int                                                            firstSolutionIdx,
                 int                                                            numSolutions,
                 bool                                                           printWinnerOnly,
+                bool                                                           printRejectedPredicates,
                 RunCriteria runCriteria = RunCriteria());
 
             virtual void preProblem(ContractionProblem* const problem) override;
@@ -189,7 +195,8 @@ namespace TensileLite
             BestSolutionIterator(
                 std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library,
                 std::shared_ptr<Hardware>                                      hardware,
-                bool                                                           printWinnerOnly);
+                bool                                                           printWinnerOnly,
+                bool                                                           printRejectedPredicates);
 
             virtual void preProblem(ContractionProblem* const problem) override;
             virtual void postProblem() override;
@@ -217,7 +224,8 @@ namespace TensileLite
                 double                                                         predictionThreshold,
                 int                                                            numSolutions,
                 bool                                                           requireSelectedSolution,
-                bool                                                           printWinnerOnly);
+                bool                                                           printWinnerOnly,
+                bool                                                           printRejectedPredicates);
 
             virtual void preProblem(ContractionProblem* const problem) override;
             virtual void postProblem() override;
