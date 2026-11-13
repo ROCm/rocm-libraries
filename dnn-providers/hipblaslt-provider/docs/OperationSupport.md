@@ -88,7 +88,8 @@ A stand-alone Matmul through `rocblas_gemm_strided_batched_ex`, with no fused op
 > backend.
 
 Single-node convolution graphs, forward, backward data and backward weights:
-- Data types: FP32, FP16, BF16, the same for all three tensors; compute type unset, FP32, FP16 or BF16, accumulated in FP32
+- Data types: FP32, FP16, BF16, the same for all three tensors; compute type unset or FP32,
+  or FP16 for FP16 tensors (cuDNN's set), accumulated in FP32
 - 1-D, 2-D and 3-D (rank 3 to 5), any x and y strides, groups (including depthwise), padding (including asymmetric), stride,
   dilation, cross-correlation and true convolution
 
@@ -107,6 +108,13 @@ TF32 (temporary switch): with `HIPBLASLT_PROVIDER_CONV_TF32=1` set when the prov
 for them: hipBLASLt is asked for `HIPBLAS_COMPUTE_32F_FAST_TF32` and falls back to FP32 when it has no algorithm; rocBLAS runs
 under `rocblas_xf32_xdl_math_op`, which it applies only on gfx942. TF32 is a permission, never reported. Without the switch
 the engines do not exist, because hipDNN has no way yet for a graph to permit or exclude TF32.
+
+Reduced-precision reduction (temporary switch): with `HIPDNN_CONV_ALLOW_REDUCED_PRECISION_REDUCTION=1` set when the
+provider loads, it also registers `ROCBLAS_CONV_RPR_ENGINE` and `HIPBLASLT_CONV_RPR_ENGINE`. They serve one form: a 1x1,
+unit-stride, unpadded FP16 backward weights of several channels-first images, as one GEMM per image adding into the FP16 dw
+(beta 1, MIOpen's `GemmWrw1x1_stride1`), so dw is rounded to FP16 once per image instead of once (cuDNN's
+`REDUCED_PRECISION_REDUCTION`). No workspace. BF16 has no reduced form. Compute type unset, FP32 or FP16. Without the switch
+the engines do not exist; the plan builder also checks the switch on every call.
 
 Declined:
 - A filter whose (channel, spatial) axes nest in neither KCRS nor KRSC order

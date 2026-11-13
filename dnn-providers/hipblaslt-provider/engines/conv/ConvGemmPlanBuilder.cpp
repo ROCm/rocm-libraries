@@ -20,6 +20,7 @@
 #include "HipdnnEnginePluginHandle.hpp"
 #include "common/ConvRepackFormulation.hpp"
 #include "engines/conv/BenchmarkedPlan.hpp"
+#include "engines/conv/ConvReducedPrecision.hpp"
 #include "engines/conv/ConvRepackPlan.hpp"
 
 namespace hipblaslt_plugin
@@ -61,12 +62,14 @@ bool narrowPartials(ConvGemmPlanBuilder::NarrowPartials policy)
 ConvGemmPlanBuilder::ConvGemmPlanBuilder(PlanFactory factory,
                                          size_t maxRepackWorkspaceBytes,
                                          bool tf32,
+                                         bool reducedPrecisionReduction,
                                          bool splitReduction,
                                          ColumnLayout layout,
                                          NarrowPartials narrowPartials)
     : _factory(std::move(factory))
     , _maxRepackWorkspaceBytes(maxRepackWorkspaceBytes)
     , _tf32(tf32)
+    , _reducedPrecisionReduction(reducedPrecisionReduction)
     , _splitReduction(splitReduction)
     , _layout(layout)
     , _narrowPartials(narrowPartials)
@@ -85,6 +88,16 @@ std::optional<ConvGemmPlanCalls> ConvGemmPlanBuilder::callsFor(
         if(!problem.has_value())
         {
             continue;
+        }
+        if(_reducedPrecisionReduction)
+        {
+            // Read per call rather than at registration, so no plan of these engines is built
+            // without the switch.
+            if(!convReducedPrecisionEnginesEnabled())
+            {
+                return std::nullopt;
+            }
+            return reducedPrecisionGemmCalls(*problem);
         }
         auto calls = convGemmCalls(*problem,
                                    _maxRepackWorkspaceBytes,

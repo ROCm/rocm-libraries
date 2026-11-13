@@ -18,6 +18,7 @@
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
+#include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipblasltHandleFactory.hpp"
@@ -28,6 +29,7 @@
 #include "engines/conv/BenchmarkedPlan.hpp"
 #include "engines/conv/ConvGemmPlanBuilder.hpp"
 #include "engines/conv/ConvGemmTestGraphs.hpp"
+#include "engines/conv/ConvReducedPrecision.hpp"
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
 #include "engines/hipblaslt/HipblasltGemmPlan.hpp"
 #endif
@@ -55,6 +57,7 @@ using namespace hipblaslt_plugin;
 using namespace hipblaslt_plugin::test;
 using hipdnn_data_sdk::utilities::Tensor;
 using hipdnn_test_sdk::utilities::CpuFpReferenceConvolution;
+using hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter;
 
 using Half = hipdnn_data_sdk::types::half;
 using BFloat16 = hipdnn_data_sdk::types::bfloat16;
@@ -506,7 +509,7 @@ void runCase(ConvCase convCase,
         cap = *banding;
     }
     const ConvGemmPlanBuilder builder(
-        factoryFor(backend), cap, tf32, splitReduction, layout, narrow);
+        factoryFor(backend), cap, tf32, false, splitReduction, layout, narrow);
     if(!builder.isApplicable(*handle, graph.graph()))
     {
         // The only decline a backend may add to the formulation's is finding no algorithm for
@@ -1251,6 +1254,169 @@ TEST(TestConvGemmRocblasLimits, DeclinesABf16GemvRocblasRoundsPerProduct)
     }
 }
 #endif
+
+/// Reduced-precision-reduction cases (reducedPrecisionGemmCalls): 1x1 fp16 backward weights of
+/// several channels-first images, grouped, 3-D, unnested images, and a long reduction over many
+/// images, where each image's rounding into dw adds up.
+std::vector<ConvCase> rprCases()
+{
+    std::vector<ConvCase> cases;
+    const auto add = [&cases](const std::string& name, ConvGemmShape shape) {
+        cases.push_back({name, std::move(shape), ConvDirection::BACKWARD_WEIGHTS});
+    };
+    ConvGemmShape base;
+    base.n = 8;
+    base.c = 24;
+    base.k = 40;
+    base.input = {9, 11};
+    add("Nchw", base);
+    auto grouped = base;
+    grouped.groups = 4;
+    add("GroupedNchw", grouped);
+    auto threeD = base;
+    threeD.input = {3, 5, 6};
+    threeD.filter = {1, 1, 1};
+    threeD.prePadding = threeD.postPadding = {0, 0, 0};
+    threeD.stride = threeD.dilation = {1, 1, 1};
+    add("Ncdhw", threeD);
+    auto padded = base;
+    padded.imagePadding = 5;
+    add("UnnestedImagesNchw", padded);
+    auto deep = base;
+    deep.n = 64;
+    deep.c = 8;
+    deep.k = 16;
+    deep.input = {32, 32};
+    add("ManyImagesNchw", deep);
+    return cases;
+}
+
+/**
+ * The fp64 dw of a 1x1 backward weights, checked against the fp16 dw @p backend wrote under the
+ * reduced-precision-reduction tolerance: Adam Dickin's model (rocm-libraries #15481) for one
+ * output rounding, |got - want| <= 2 eps |want| + (sqrt(K) u32 + 12 eps) sigma + minNormal,
+ * widened by 3 eps sqrt(R) sigma for the R = N roundings of the running sum into fp16. K = N *
+ * pixels products, sigma = sqrt(K E[x^2] E[dy^2]) = sqrt(K) / 3 for inputs in [-1, 1].
+ */
+void runRprCase(ConvCase convCase, Backend backend)
+{
+    auto& shape = convCase.shape;
+    shape.dataType = conv_data_objects::DataType::HALF;
+    const ConvGemmGraph graph(shape, convCase.direction);
+    hipdnnEnginePluginHandle_t rawHandle = nullptr;
+    HipblasltHandleFactory::createHipblasltHandle(&rawHandle);
+    const std::unique_ptr<HipdnnEnginePluginHandle, void (*)(HipdnnEnginePluginHandle*)> handle(
+        rawHandle, [](HipdnnEnginePluginHandle* owned) {
+            HipblasltHandleFactory::destroyHipblasltHandle(owned);
+            delete owned;
+        });
+    const ConvGemmPlanBuilder builder(factoryFor(backend), MAX_REPACK_WORKSPACE_BYTES, false, true);
+    ScopedEnvironmentVariableSetter env(CONV_RPR_ENV_NAME);
+    ASSERT_FALSE(builder.isApplicable(*handle, graph.graph()))
+        << "a reduced-precision-reduction plan without the switch";
+    env.setValue("1");
+    if(!builder.isApplicable(*handle, graph.graph()))
+    {
+        ASSERT_EQ(backend, Backend::HIPBLASLT) << "only hipBLASLt declines a formulated GEMM";
+        GTEST_SKIP() << "hipBLASLt has no fp16-out algorithm on this device for these GEMMs";
+    }
+    HipdnnEnginePluginExecutionContext context;
+    builder.buildPlan(*handle, graph.graph(), context);
+    ASSERT_EQ(context.plan().getWorkspaceSize(*handle), 0u);
+
+    auto xStrides = convPackedStrides(shape.xDims(), false);
+    auto yStrides = convPackedStrides(shape.yDims(), false);
+    xStrides[0] += shape.imagePadding;
+    yStrides[0] += shape.imagePadding;
+    Tensor<Half> x(shape.xDims(), xStrides);
+    Tensor<Half> w(shape.wDims(), convPackedStrides(shape.wDims(), false));
+    Tensor<Half> y(shape.yDims(), yStrides);
+    x.fillTensorWithRandomValues(-1.0f, 1.0f, 21);
+    y.fillTensorWithRandomValues(-1.0f, 1.0f, 22);
+    w.fillWithSentinelValue();
+    hipStream_t stream = nullptr;
+    ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
+    handle->setStream(stream);
+    const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers{
+        hipdnnPluginDeviceBuffer_t{CONV_X_UID, x.rawDeviceData()},
+        hipdnnPluginDeviceBuffer_t{CONV_W_UID, w.rawDeviceData()},
+        hipdnnPluginDeviceBuffer_t{CONV_Y_UID, y.rawDeviceData()}};
+    context.plan().execute(*handle, buffers.data(), static_cast<uint32_t>(buffers.size()), nullptr);
+    ASSERT_EQ(hipStreamSynchronize(stream), hipSuccess);
+    ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
+    w.markDeviceModified();
+    for(auto* tensor : {&x, &w, &y})
+    {
+        static_cast<void>(tensor->rawHostData());
+    }
+
+    std::vector<int64_t> spatial(shape.input.begin(), shape.input.end());
+    const auto positions = allIndices(spatial);
+    const int64_t cg = shape.c / shape.groups;
+    const int64_t kg = shape.k / shape.groups;
+    const double k = static_cast<double>(shape.n) * static_cast<double>(positions.size());
+    const double eps = 0x1p-10;
+    const double sigma = std::sqrt(k) / 3.0;
+    const double atol = (std::sqrt(k) * 0x1p-24 + 12.0 * eps
+                         + 3.0 * eps * std::sqrt(static_cast<double>(shape.n)))
+                            * sigma
+                        + 0x1p-14;
+    int64_t mismatches = 0;
+    double worst = 0.0;
+    for(int64_t outK = 0; outK < shape.k; ++outK)
+    {
+        const int64_t group = outK / kg;
+        for(int64_t inC = 0; inC < cg; ++inC)
+        {
+            double want = 0.0;
+            for(int64_t image = 0; image < shape.n; ++image)
+            {
+                for(const auto& position : positions)
+                {
+                    std::vector<int64_t> xi{image, group * cg + inC};
+                    std::vector<int64_t> yi{image, outK};
+                    xi.insert(xi.end(), position.begin(), position.end());
+                    yi.insert(yi.end(), position.begin(), position.end());
+                    want += static_cast<double>(static_cast<float>(x.getHostValue(xi)))
+                            * static_cast<double>(static_cast<float>(y.getHostValue(yi)));
+                }
+            }
+            std::vector<int64_t> wi(shape.wDims().size(), 0);
+            wi[0] = outK;
+            wi[1] = inC;
+            const double got = static_cast<double>(static_cast<float>(w.getHostValue(wi)));
+            const double tolerance = 2.0 * eps * std::fabs(want) + atol;
+            worst = std::max(worst, std::fabs(got - want) / tolerance);
+            if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
+            {
+                ADD_FAILURE() << backendName(backend) << ": dw[" << outK << "][" << inC << "] got "
+                              << got << ", want " << want << ", tolerance " << tolerance;
+            }
+        }
+    }
+    EXPECT_EQ(mismatches, 0);
+    ::testing::Test::RecordProperty("worst_error_over_tolerance", std::to_string(worst));
+}
+
+class TestGpuConvGemmReducedPrecision
+    : public ::testing::TestWithParam<std::tuple<ConvCase, Backend>>
+{
+};
+
+TEST_P(TestGpuConvGemmReducedPrecision, Fp16)
+{
+    SKIP_IF_NO_DEVICES();
+    runRprCase(std::get<0>(GetParam()), std::get<1>(GetParam()));
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvGemmReducedPrecision,
+                         ::testing::Combine(::testing::ValuesIn(rprCases()),
+                                            ::testing::ValuesIn(enabledBackends())),
+                         [](const auto& info) {
+                             return std::get<0>(info.param).name + "_"
+                                    + backendName(std::get<1>(info.param));
+                         });
 
 /// A value in [-1, 1) with 8 significant bits (exact in fp16, bf16 and fp32) for element @p index
 /// of a tensor seeded @p seed: what the large tests fill and what their reference reads back.

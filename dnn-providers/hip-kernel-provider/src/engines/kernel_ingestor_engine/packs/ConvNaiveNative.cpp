@@ -280,8 +280,14 @@ public:
         auto code = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, kernel, options, kernelSignature());
 
-        const int64_t blocks = std::clamp<int64_t>(
-            (problem->args.total + BLOCK_SIZE - 1) / BLOCK_SIZE, 1, MAX_GRID_BLOCKS);
+        // Backward weights: one block per dw element (the block shares its reduction); else one
+        // thread per output element.
+        const int64_t blocks
+            = std::clamp<int64_t>(direction == ConvDirection::BACKWARD_WEIGHTS
+                                      ? problem->args.total
+                                      : (problem->args.total + BLOCK_SIZE - 1) / BLOCK_SIZE,
+                                  1,
+                                  MAX_GRID_BLOCKS);
         code.setBlockSize(BLOCK_SIZE, 1, 1);
         code.setGridSize(static_cast<unsigned int>(blocks), 1, 1);
 

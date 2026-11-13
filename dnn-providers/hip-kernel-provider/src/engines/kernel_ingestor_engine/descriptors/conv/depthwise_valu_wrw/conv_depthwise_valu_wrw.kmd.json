@@ -42,6 +42,10 @@
     {
       "name": "bpc",
       "type": "int"
+    },
+    {
+      "name": "mult",
+      "type": "int"
     }
   ]
 }

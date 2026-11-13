@@ -136,13 +136,15 @@ def F(f, bc, tm, tn, nt, vec, ring=1, pipe=0):
 
 
 def RW(atom, f, pw, fn, wp, wq, wk, bc, vec, pp=0, epi=1, math=0):
-    """Filter-row reuse kernel (ConvDirectRows.h): gfx950 LDS DMA, 2-D only."""
+    """Filter-row reuse kernel (ConvDirectRows.h): LDS DMA (16-byte on gfx950, dword elsewhere),
+    16x16 MFMA atoms; 2-D, or 3-D (each output plane walks its depth taps' input planes).
+    """
     return dict(
         kind="rows",
         atom=atom,
         atom_id=ATOMS.index(atom),
         math=math,
-        kd=1,
+        kd=f[0],
         r=f[1],
         s=f[2],
         bm=wp * pw,
@@ -188,8 +190,25 @@ def x16(dt):
     return {"HALF": "f16", "BFLOAT16": "bf16"}[dt]
 
 
+# Rows tiles for the 64 KiB MFMA parts (dword LDS DMA): the ping-pong tile won every shape of
+# 256+ channels on gfx90a (1.04-1.12x over the halo tile); the two PP0 tiles take 192-384.
+ROWS_GFX9 = ["gfx90a"]
+
 for dt in ("HALF", "BFLOAT16"):
     e = x16(dt)
+    add(
+        dt,
+        ROWS_GFX9,
+        [
+            RW(f"mfma16_{e}", F33, 8, 4, 2, 2, 2, 16, 8, pp=1, epi=0),
+            RW(f"mfma16_{e}", F33, 4, 4, 2, 1, 2, 32, 8),
+            RW(f"mfma16_{e}", F33, 8, 2, 2, 2, 2, 16, 8),
+            # 3x3x3: the 96-wide ping-pong tile won Wan VAE's 96-channel layers (1.07-1.14x over
+            # the halo tile), pw4 fn4 its 384-channel 3x62x106 (1.08x); 192+ wide stay on K2.
+            RW(f"mfma16_{e}", F333, 8, 3, 2, 2, 2, 16, 8, pp=1, epi=0),
+            RW(f"mfma16_{e}", F333, 4, 4, 2, 2, 2, 16, 8, pp=1, epi=0),
+        ],
+    )
     # gfx942
     add(
         dt,
@@ -223,6 +242,10 @@ for dt in ("HALF", "BFLOAT16"):
             RW(f"mfma16x32_{e}", F77, 8, 2, 2, 2, 2, 32, 8),
             RW(f"mfma16x32_{e}", F17, 8, 4, 2, 2, 2, 32, 8),
             RW(f"mfma16x32_{e}", F71, 8, 2, 2, 2, 2, 32, 8),
+            # 3x3x3 (Wan VAE, nnunet bf16): 1.03-1.79x over the halo tile, fwd and bwd.
+            RW(f"mfma16x32_{e}", F333, 8, 2, 2, 3, 2, 32, 8),
+            RW(f"mfma16x32_{e}", F333, 8, 2, 2, 2, 2, 64, 8),
+            RW(f"mfma16x32_{e}", F333, 8, 4, 2, 2, 2, 64, 8),
         ],
     )
     add(
@@ -250,6 +273,17 @@ for dt in ("HALF", "BFLOAT16"):
             M(f"mfma16_{e}", F333, 128, 128, 16, 2, 2, 8, ring=0),
         ],
     )
+    if dt == "BFLOAT16":
+        # 192-wide K blocks (2 x 4 waves of 64 x 48, 16-channel steps): K = 192 and 384 layers
+        # (wan VAE) stage each input halo once per 192 output channels at 4 waves per SIMD.
+        add(
+            dt,
+            ["gfx90a"],
+            [
+                M(f"mfma16_{e}", F333, 128, 192, 16, 2, 4, 8, ring=0),
+                M(f"mfma16_{e}", F33, 128, 192, 16, 2, 4, 8),
+            ],
+        )
     # gfx11 / gfx12
     for fam in ("11", "12"):
         a = f"wmma{fam}_{e}"
@@ -368,6 +402,22 @@ add(
         RW("mfma16_f32", F71, 8, 2, 2, 2, 2, 16, 4, epi=0),
     ],
 )
+add(
+    "FLOAT",
+    ROWS_GFX9,
+    [
+        RW("mfma16_f32", F33, 8, 2, 2, 2, 2, 8, 4, epi=0),
+        RW("mfma16_f32", F33, 8, 2, 2, 2, 2, 8, 4, pp=1, epi=0),
+        # 3x3x3 fp32 (Wan VAE, nnunet): 1.29-1.79x over every fp32 halo-tile config on gfx90a;
+        # fn 1 for 32-channel outputs.
+        RW("mfma16_f32", F333, 8, 2, 2, 2, 2, 8, 4, pp=1, epi=0),
+        RW("mfma16_f32", F333, 8, 1, 2, 2, 2, 8, 4, epi=0),
+    ],
+)
+# gfx942 (MI325X) takes the fp32 rows tile alone: 1.05-1.17x over every fp32 halo tile on 9 of 11
+# 2-D 3x3 shapes, fwd and bwd. Its 16-bit rows (0.80-1.08x, ping-pong never best) and every
+# 3x3x3 rows tile lost there.
+add("FLOAT", ["gfx942"], [RW("mfma16_f32", F33, 8, 2, 2, 2, 2, 8, 4, epi=0)])
 # 32-wide K blocks (4 x 1 waves): K = 32 layers (nnunet 3-D) waste half a 64-wide block.
 BN32_F32 = [
     M("mfma16_f32", F333, 256, 32, 16, 4, 1, 4, ring=0),
@@ -429,6 +479,14 @@ add(
     ],
 )
 add("FLOAT", ["gfx942"], [M("mfma16_bf16", F33, 128, 128, 32, 2, 2, 8, **X3)])
+add(
+    "FLOAT",
+    ROWS_GFX9,
+    [
+        RW("mfma16_bf16", F33, 8, 4, 2, 2, 2, 16, 8, pp=1, epi=0, **X3),
+        RW("mfma16_bf16", F33, 8, 2, 2, 2, 2, 16, 8, epi=0, **X3),
+    ],
+)
 add(
     "FLOAT",
     ["gfx950"],
@@ -545,6 +603,12 @@ for direction, tag in (("FWD", "fwd"), ("BWD", "bwd")):
             )
             mathTag = "bf16x3" if c["math"] else "native"
             if c["rows"]:
+                # ConvDirectRows.h's two halo stages; the pack gates the same (rowsLdsBytes).
+                eb = 4 if c["atom"] == "mfma16_f32" else 2
+                lds = 2 * (c["wp"] * c["pw"] + c["r"] - 1) * (c["wq"] * 16 + c["s"] - 1)
+                lds *= c["bc"] * eb
+                limit = 160 * 1024 if archs <= {"gfx950"} else 64 * 1024
+                assert lds <= limit, (c, archs, lds)
                 name = (
                     f"conv_direct.{tag}.{dt}.{c['kd']}x{c['r']}x{c['s']}.{c['atom']}.{mathTag}.rows"
                     f".p{c['pw']}f{c['fn']}.w{c['wp']}x{c['wq']}x{c['wk']}c{c['bc']}.v{c['vec']}"

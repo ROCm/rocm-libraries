@@ -17,6 +17,7 @@
 
 #include "HipdnnEnginePluginExecutionContext.hpp"
 #include "HipdnnEnginePluginHandle.hpp"
+#include "engines/conv/ConvReducedPrecision.hpp"
 #include "engines/conv/ConvTf32.hpp"
 #include "mocks/MockHipdnnEnginePluginExecutionContext.hpp"
 
@@ -50,11 +51,16 @@ TEST(TestHipblasltEnginePluginApi, GetAllEngineIdsValid)
 #ifdef HIPBLASLTPROVIDER_ENABLE_CONV
     // The TF32 twins only behind their temporary switch.
     const bool tf32Engines = hipblaslt_plugin::convTf32EnginesEnabled();
+    const bool rprEngines = hipblaslt_plugin::convReducedPrecisionEnginesEnabled();
 #ifdef HIPBLASLTPROVIDER_ENABLE_HIPBLASLT
     expected.push_back(HIPBLASLT_CONV_ENGINE_ID);
     if(tf32Engines)
     {
         expected.push_back(HIPBLASLT_CONV_TF32_ENGINE_ID);
+    }
+    if(rprEngines)
+    {
+        expected.push_back(HIPBLASLT_CONV_RPR_ENGINE_ID);
     }
 #endif
 #ifdef HIPBLASLTPROVIDER_ENABLE_ROCBLAS
@@ -62,6 +68,10 @@ TEST(TestHipblasltEnginePluginApi, GetAllEngineIdsValid)
     if(tf32Engines)
     {
         expected.push_back(ROCBLAS_CONV_TF32_ENGINE_ID);
+    }
+    if(rprEngines)
+    {
+        expected.push_back(ROCBLAS_CONV_RPR_ENGINE_ID);
     }
 #endif
 #endif

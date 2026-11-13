@@ -1,0 +1,20 @@
+{
+  "version": "1.0",
+  "id": "5d325d1e-63a7-5f5f-9bd8-dfae72553c13",
+  "name": "hipkernel:CONV_FFT_FWD",
+  "graph_match": {
+    "native": "hipkernel.conv_fft_fwd.graph_match"
+  },
+  "metadata": "dda33818-91ee-5583-a60a-5208e67641f5",
+  "knobs": [
+    "th",
+    "tw",
+    "pb",
+    "tb",
+    "gn",
+    "tm"
+  ],
+  "behavior_notes": [
+    "runtime_compilation"
+  ]
+}

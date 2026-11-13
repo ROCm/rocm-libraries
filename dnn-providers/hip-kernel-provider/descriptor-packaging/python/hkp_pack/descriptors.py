@@ -1274,8 +1274,10 @@ def load_flat_input(
     HkpPackError on any malformed / missing-field / unknown-type /
     dangling-reference descriptor that IS type-tagged.
 
-    `exclude_folders` names top-level child folders of the root that are not
-    content in this build: nothing under one is read, validated or shipped.
+    `exclude_folders` names folders of the root that are not content in this
+    build: nothing under one is read, validated or shipped. An entry is a
+    top-level child folder (`rocKE`) or a `/`-separated path below the root
+    (`conv/igemm`, a family whose DVC-stored catalogs were not pulled).
     A name matches case-insensitively, as the reserved `kpack/` folder does,
     and one naming no folder is ignored (a root need not carry every family).
     `disabled_kinds` names `kernel_source` kinds this build has no producer
@@ -1301,17 +1303,32 @@ def load_flat_input(
 
     # Case-insensitive for the same reason as the `kpack/` guard below: the packed
     # tree is also consumed on Windows, where `rocKE` and `rocke` are one directory.
-    excluded = {name.lower() for name in exclude_folders}
-    for name in sorted(p.name for p in root.iterdir() if p.is_dir()):
-        if name.lower() in excluded:
-            log(f"excluding disabled family folder {name}/")
+    excluded = {
+        tuple(part.lower() for part in name.replace("\\", "/").split("/") if part)
+        for name in exclude_folders
+    }
+    excluded.discard(())
+    for folder in sorted(
+        p
+        for p in root.rglob("*")
+        if p.is_dir()
+        and tuple(x.lower() for x in p.relative_to(root).parts) in excluded
+    ):
+        log(f"excluding disabled family folder {folder.relative_to(root).as_posix()}/")
+
+    def _is_excluded(rel_path):
+        lowered = tuple(part.lower() for part in rel_path.parts)
+        return any(
+            len(lowered) > len(prefix) and lowered[: len(prefix)] == prefix
+            for prefix in excluded
+        )
 
     descriptors = []
     for jp in sorted(root.rglob("*.json")):
         rel_path = jp.relative_to(root)
         # A disabled family folder is not content in this build: its files are never
         # read, so they can neither ship nor fail validation.
-        if len(rel_path.parts) > 1 and rel_path.parts[0].lower() in excluded:
+        if _is_excluded(rel_path):
             continue
         # A dot-prefixed segment at any depth, or a dot-prefixed filename. The
         # source root is user-supplied and plausibly a checkout, so `.git/`,

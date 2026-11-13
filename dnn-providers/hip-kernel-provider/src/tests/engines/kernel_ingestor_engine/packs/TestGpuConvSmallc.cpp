@@ -32,15 +32,19 @@
 
 /**
  * @file TestGpuConvSmallc.cpp
- * @brief The small-input-channel forward convolution kernels (CONV_SMALLC_FWD) on the device,
- *        through the engine's own graph match, kernel match, prepare and launch, against hipDNN's
- *        CPU reference convolution.
+ * @brief The small-input-channel convolution kernels (CONV_SMALLC_FWD, and CONV_SMALLC_BWD:
+ *        stride-1 backward data with few output-gradient channels) on the device, through the
+ *        engine's own graph match, kernel match, prepare and launch, against hipDNN's CPU
+ *        reference convolution (fprop / dgrad).
  *
  * Every config of the installed catalog that the kernel match admits on this device runs on every
  * case, in fp32, fp16 and bf16: each instantiated geometry (7x7, 3x3 and 4x4 at their strides;
  * 3x7x7, 1x7x7, 3x3x3), channel counts 1 to 4 (fewer than a config's bound pads with
  * zeros), output channels that are not tile multiples, padding 0 to 3, odd extents, both layouts,
- * several tiles per image, and true convolution (the pre-pass reflects the filter).
+ * several tiles per image, and true convolution (the pre-pass reflects the filter). Both
+ * epilogues run (LDS slots; registers on channels-fastest outputs, with aligned vector and scalar
+ * channel runs). Backward cases: dy of 1 to 4 channels, dx channels not tile multiples, padding
+ * below, at and past the filter (negative forward padding), 2-D and 3-D, both layouts, both modes.
  */
 namespace
 {
@@ -58,10 +62,11 @@ using hipdnn_test_sdk::utilities::CpuFpReferenceConvolution;
 using Half = hipdnn_data_sdk::types::half;
 using BFloat16 = hipdnn_data_sdk::types::bfloat16;
 
-PackSymbols packFor()
+PackSymbols packFor(ConvDirection direction)
 {
     return {"",
-            "hipkernel.conv_smallc_fwd.graph_match",
+            direction == ConvDirection::BACKWARD_DATA ? "hipkernel.conv_smallc_bwd.graph_match"
+                                                      : "hipkernel.conv_smallc_fwd.graph_match",
             "",
             "hipkernel.conv_smallc.kernel_match",
             "",
@@ -74,7 +79,8 @@ PackSymbols packFor()
 /// The shipped catalog, as kernel definitions: read from the production
 /// descriptor tree beside the provider (the unit tests' own descriptor root holds only test
 /// sets), so these cases run exactly the configs that ship.
-std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> catalog()
+std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> catalog(ConvDirection direction
+                                                                   = ConvDirection::FORWARD)
 {
     static const auto s_catalogs = [] {
         // The provider's resolved tree, else the copy beside this binary's tree (the tests link
@@ -93,10 +99,11 @@ std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> catalog()
             roots.push_back(dir / "lib" / "hipdnn_plugins" / "engines"
                             / HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR);
         }
-        std::array<std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>, 1> catalogs;
+        std::array<std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>, 2> catalogs;
         for(size_t i = 0; i < catalogs.size(); ++i)
         {
-            const std::string file = "conv_smallc_fwd.kdp.json";
+            const std::string file
+                = i == 0 ? "conv_smallc_fwd.kdp.json" : "conv_smallc_bwd.kdp.json";
             std::filesystem::path found;
             for(const auto& root : roots)
             {
@@ -148,7 +155,7 @@ std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> catalog()
         }
         return catalogs;
     }();
-    return s_catalogs[0];
+    return s_catalogs[direction == ConvDirection::BACKWARD_DATA ? 1 : 0];
 }
 
 void forEachIndex(const std::vector<int64_t>& dims,
@@ -240,6 +247,7 @@ struct DeviceCase
 {
     std::string name;
     ConvShape shape;
+    ConvDirection direction = ConvDirection::FORWARD;
 };
 
 ConvShape stem(int64_t c,
@@ -277,6 +285,9 @@ std::vector<DeviceCase> deviceCases()
     cases.push_back({"Nchw3x3S2Pad0", stem(3, 32, {29, 35}, {3, 3}, {2, 2}, {0, 0}, false)});
     cases.push_back({"Nchw3x3S1C4", stem(4, 20, {19, 37}, {3, 3}, {1, 1}, {1, 1}, false)});
     cases.push_back({"Nhwc3x3S1C2", stem(2, 18, {17, 18}, {3, 3}, {1, 1}, {2, 2}, true)});
+    // Channels-fastest y with K a multiple of 4: the register epilogue's vector stores (and the
+    // scalar tail of a partial channel block).
+    cases.push_back({"Nhwc3x3S1C4K40", stem(4, 40, {19, 37}, {3, 3}, {1, 1}, {1, 1}, true)});
     cases.push_back({"Nhwc4x4S4", stem(3, 48, {36, 44}, {4, 4}, {4, 4}, {0, 0}, true)});
     cases.push_back(
         {"Ncdhw3x7x7S122", stem(3, 64, {6, 30, 30}, {3, 7, 7}, {1, 2, 2}, {1, 3, 3}, false)});
@@ -292,16 +303,39 @@ std::vector<DeviceCase> deviceCases()
     auto convolution = stem(3, 40, {21, 19}, {7, 7}, {2, 2}, {3, 3}, true);
     convolution.mode = ConvMode::CONVOLUTION;
     cases.push_back({"Nhwc7x7S2ConvolutionMode", convolution});
+
+    // Backward data: stem(c = dx channels, k = dy channels, dx extents, ...).
+    const auto bwd = ConvDirection::BACKWARD_DATA;
+    cases.push_back({"BwdNhwc3x3K3", stem(72, 3, {37, 29}, {3, 3}, {1, 1}, {1, 1}, true), bwd});
+    cases.push_back(
+        {"BwdNhwc3x3K3C130", stem(130, 3, {21, 19}, {3, 3}, {1, 1}, {1, 1}, true), bwd});
+    cases.push_back({"BwdNhwc3x3K4Pad0", stem(40, 4, {21, 33}, {3, 3}, {1, 1}, {0, 0}, true), bwd});
+    cases.push_back({"BwdNchw3x3K3", stem(33, 3, {19, 23}, {3, 3}, {1, 1}, {1, 1}, false), bwd});
+    cases.push_back({"BwdNhwc3x3K1", stem(24, 1, {17, 20}, {3, 3}, {1, 1}, {1, 1}, true), bwd});
+    auto past = stem(36, 2, {18, 21}, {3, 3}, {1, 1}, {3, 2}, true);
+    past.postPadding = {0, 1}; // pre-padding past the filter: negative forward padding
+    cases.push_back({"BwdNhwc3x3PadPastFilter", past, bwd});
+    cases.push_back(
+        {"BwdNdhwc3x3x3K3", stem(40, 3, {5, 18, 22}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, true), bwd});
+    cases.push_back(
+        {"BwdNcdhw3x3x3K4", stem(20, 4, {4, 9, 11}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, false), bwd});
+    auto bwdConvolution = stem(48, 3, {23, 17}, {3, 3}, {1, 1}, {1, 1}, true);
+    bwdConvolution.mode = ConvMode::CONVOLUTION;
+    cases.push_back({"BwdNhwc3x3ConvolutionMode", bwdConvolution, bwd});
+    auto bwdMany = stem(128, 3, {70, 90}, {3, 3}, {1, 1}, {1, 1}, true);
+    bwdMany.n = 3;
+    cases.push_back({"BwdNhwc3x3ManyTiles", bwdMany, bwd});
     return cases;
 }
 
 template <typename T>
-void runCase(ConvShape shape)
+void runCase(ConvShape shape, ConvDirection direction)
 {
+    const bool backward = direction == ConvDirection::BACKWARD_DATA;
     shape.dataType = dataTypeOf<T>();
-    const auto spec = specFor(shape, ConvDirection::FORWARD);
+    const auto spec = specFor(shape, direction);
     const GraphFixture fixture(buildGraph(spec), currentDeviceProperties());
-    const auto pack = packFor();
+    const auto pack = packFor(direction);
     const auto bound = matchesGraph(pack, fixture.context());
     ASSERT_TRUE(bound.has_value()) << "the engine refused a case it should serve";
 
@@ -309,7 +343,10 @@ void runCase(ConvShape shape)
     Tensor<T> w(spec.w.dims, spec.w.strides);
     Tensor<T> y(spec.y.dims, spec.y.strides);
     constexpr unsigned int SEED = 1234;
-    x.fillTensorWithRandomValues(-1.0f, 1.0f, SEED);
+    // The kernel reads x forward and dy backward, and writes the other one.
+    Tensor<T>& in = backward ? y : x;
+    Tensor<T>& out = backward ? x : y;
+    in.fillTensorWithRandomValues(-1.0f, 1.0f, SEED);
     w.fillTensorWithRandomValues(-1.0f, 1.0f, SEED + 1);
 
     const bool reflect = shape.mode == ConvMode::CONVOLUTION;
@@ -318,15 +355,28 @@ void runCase(ConvShape shape)
     {
         reflectFilter(w, reflectedW);
     }
-    Tensor<T> reference(y.dims(), y.strides());
-    CpuFpReferenceConvolution::fprop(x,
-                                     reflect ? reflectedW : w,
-                                     reference,
-                                     shape.stride,
-                                     shape.dilation,
-                                     shape.prePadding,
-                                     shape.postPadding);
-    int64_t reductionLength = shape.c;
+    Tensor<T> reference(out.dims(), out.strides());
+    if(backward)
+    {
+        CpuFpReferenceConvolution::dgrad<T, T, T, double>(reference,
+                                                          reflect ? reflectedW : w,
+                                                          y,
+                                                          shape.stride,
+                                                          shape.dilation,
+                                                          shape.prePadding,
+                                                          shape.postPadding);
+    }
+    else
+    {
+        CpuFpReferenceConvolution::fprop(x,
+                                         reflect ? reflectedW : w,
+                                         reference,
+                                         shape.stride,
+                                         shape.dilation,
+                                         shape.prePadding,
+                                         shape.postPadding);
+    }
+    int64_t reductionLength = backward ? shape.k : shape.c;
     for(const auto extent : shape.filter)
     {
         reductionLength *= extent;
@@ -335,7 +385,7 @@ void runCase(ConvShape shape)
 
     const auto& handler = dispatchHandler(pack);
     int ran = 0;
-    for(const auto& kernel : catalog())
+    for(const auto& kernel : catalog(direction))
     {
         if(!matchesKernel(pack, fixture.context(), kernel, *bound))
         {
@@ -351,7 +401,7 @@ void runCase(ConvShape shape)
         {
             ASSERT_EQ(hipMalloc(&workspace, workspaceBytes), hipSuccess);
         }
-        y.fillWithSentinelValue();
+        out.fillWithSentinelValue();
         const std::array<hipdnnPluginDeviceBuffer_t, 3> buffers{
             hipdnnPluginDeviceBuffer_t{X_UID, x.rawDeviceData()},
             hipdnnPluginDeviceBuffer_t{W_UID, w.rawDeviceData()},
@@ -364,31 +414,32 @@ void runCase(ConvShape shape)
         {
             ASSERT_EQ(hipFree(workspace), hipSuccess);
         }
-        y.markDeviceModified();
+        out.markDeviceModified();
 
-        const auto* actual = static_cast<const T*>(y.rawHostData());
+        const auto* actual = static_cast<const T*>(out.rawHostData());
         const auto* expected = static_cast<const T*>(reference.rawHostData());
         int64_t mismatches = 0;
-        forEachIndex(y.dims(), [&](const std::vector<int64_t>& index) {
-            const float got = static_cast<float>(actual[offsetOf(index, y.strides())]);
+        forEachIndex(out.dims(), [&](const std::vector<int64_t>& index) {
+            const float got = static_cast<float>(actual[offsetOf(index, out.strides())]);
             const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
             const float tolerance
                 = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
             if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
             {
-                ADD_FAILURE() << "at linear index " << offsetOf(index, y.strides()) << ": got "
+                ADD_FAILURE() << "at linear index " << offsetOf(index, out.strides()) << ": got "
                               << got << ", want " << want << ", tolerance " << tolerance;
             }
         });
         EXPECT_EQ(mismatches, 0);
     }
-    // fp32 has FMA configs everywhere; 16-bit has MMA configs on the matrix-core GPUs (no bf16
-    // ones on gfx908).
+    // Forward fp32 has FMA configs everywhere; 16-bit has MMA configs on the matrix-core GPUs (no
+    // bf16 ones on gfx908). Backward ships to the matrix-core GPUs only (fp32 by MFMA on CDNA,
+    // by FMA on gfx11 / gfx12).
     const auto arch = std::string(currentDeviceProperties().gcnArchName);
     const bool mma = (arch.rfind("gfx9", 0) == 0 && arch.rfind("gfx906", 0) != 0)
                      || arch.rfind("gfx11", 0) == 0 || arch.rfind("gfx12", 0) == 0;
     const bool bf16On908 = arch.rfind("gfx908", 0) == 0 && std::is_same_v<T, BFloat16>;
-    if(std::is_same_v<T, float> || (mma && !bf16On908))
+    if((std::is_same_v<T, float> && (!backward || mma)) || (mma && !bf16On908))
     {
         EXPECT_GE(ran, 1) << "no catalog config serves this case";
     }
@@ -401,19 +452,19 @@ class TestGpuConvSmallc : public ::testing::TestWithParam<DeviceCase>
 TEST_P(TestGpuConvSmallc, Float)
 {
     SKIP_IF_NO_DEVICES();
-    runCase<float>(GetParam().shape);
+    runCase<float>(GetParam().shape, GetParam().direction);
 }
 
 TEST_P(TestGpuConvSmallc, Half)
 {
     SKIP_IF_NO_DEVICES();
-    runCase<Half>(GetParam().shape);
+    runCase<Half>(GetParam().shape, GetParam().direction);
 }
 
 TEST_P(TestGpuConvSmallc, BFloat16)
 {
     SKIP_IF_NO_DEVICES();
-    runCase<BFloat16>(GetParam().shape);
+    runCase<BFloat16>(GetParam().shape, GetParam().direction);
 }
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -425,11 +476,26 @@ INSTANTIATE_TEST_SUITE_P(,
 
 TEST(TestConvSmallcCatalog, EveryConfigParses)
 {
-    ASSERT_FALSE(catalog().empty());
-    for(const auto& kernel : catalog())
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        ASSERT_FALSE(catalog(direction).empty());
+        for(const auto& kernel : catalog(direction))
+        {
+            SCOPED_TRACE(kernel.name);
+            EXPECT_TRUE(conv_smallc::configOf(kernel).has_value());
+        }
+    }
+}
+
+TEST(TestConvSmallcCatalog, BackwardConfigsAreUnitStride)
+{
+    for(const auto& kernel : catalog(ConvDirection::BACKWARD_DATA))
     {
         SCOPED_TRACE(kernel.name);
-        EXPECT_TRUE(conv_smallc::configOf(kernel).has_value());
+        const auto config = conv_smallc::configOf(kernel);
+        ASSERT_TRUE(config.has_value());
+        EXPECT_EQ(config->sd * config->sh * config->sw, 1);
+        EXPECT_EQ(kernel.getStringMetadata("direction"), "BWD");
     }
 }
 

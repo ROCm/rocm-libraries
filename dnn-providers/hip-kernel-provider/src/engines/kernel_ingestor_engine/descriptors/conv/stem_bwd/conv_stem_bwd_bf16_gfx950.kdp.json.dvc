@@ -1,0 +1,6 @@
+outs:
+- md5: 4534926fdfdf010caf20b487021e006b
+  size: 43852
+  hash: md5
+  path: conv_stem_bwd_bf16_gfx950.kdp.json
+  remote: ingestor

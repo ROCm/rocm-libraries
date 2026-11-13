@@ -81,9 +81,10 @@ struct ConvProblem
  * @brief The convolution a single-node graph of @p direction describes, or nullopt when the
  *        graph is not a well-formed convolution these engines read.
  *
- * Gates every field of the graph, the node and the operands: one node, no override shapes, an
- * fp32-or-narrower compute type, a set convolution mode, three distinct real device tensors of
- * one element type among FLOAT, HALF and BFLOAT16, rank 3 to 5, positive extents, non-negative
+ * Gates every field of the graph, the node and the operands: one node, no override shapes, a
+ * compute type cuDNN accepts for the element type (unset or FP32; FP16 too for FP16), a set
+ * convolution mode, three distinct real device tensors of one element type among FLOAT, HALF
+ * and BFLOAT16, rank 3 to 5, positive extents, non-negative
  * strides, matching channel and group counts, and y exactly the extent the parameters produce.
  */
 std::optional<ConvProblem>

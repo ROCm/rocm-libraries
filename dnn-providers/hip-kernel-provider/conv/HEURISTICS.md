@@ -20,11 +20,13 @@ No single engine is meant to win everywhere. Each one targets a regime, and most
 |---|---|---|---|---|
 | `CONV_IGEMM_FWD/BWD` (K1) | Dense and grouped implicit GEMM, the general workhorse; compute-bound shapes; NCHW via direct channels-first epilogue (`cf`) or staging | fwd, bwd-data | gfx908-gfx950 (MFMA), gfx11/gfx12 (WMMA), FMA everywhere | 1648 |
 | `CONV_IGEMM_NCHW_BWD` (K7) | NCHW bwd-data in place: strided pointwise, patchify, 1-D/vocoder ConvTranspose, dilated rows, 3-D stride 2. Weak on large compute-bound GEMMs (K1 wins there). | bwd-data | MFMA, WMMA, FMA | 1839 |
-| `CONV_DIRECT_FWD/BWD` (K2) | Stride-1 halo-tile direct conv, 3x3 / 5x5 / 7x7 / 1x7 / 3x3x3. The `rows` kind is the gfx950 dense 3x3 path (hipconv-class). | fwd, bwd-data (stride 1) | MFMA, WMMA, FMA | 442 |
+| `CONV_DIRECT_FWD/BWD` (K2) | Stride-1 halo-tile direct conv, 3x3 / 5x5 / 7x7 / 1x7 / 3x3x3. The `rows` kind (hipconv-class filter-row reuse) is the large-channel dense path on gfx950 and gfx90a, 2-D and 3x3x3; on gfx90a its ping-pong tiles win from about 256 channels (16-bit) and at every channel count in fp32, while the halo tile keeps 96-192-channel 16-bit layers. | fwd, bwd-data (stride 1) | MFMA, WMMA, FMA | 490 |
 | `CONV_WINOGRAD_FWD/BWD` (K5) | 3x3 stride 1 (stride 2 by phases). `coop` is the cooperative WMMA/MFMA F(2,3), and F(3,2) for stride 2; the fused VALU and register variants target gfx906, grouped, and fp32 on RDNA (including 24-wide K blocks). | fwd, bwd-data | all | 324 |
-| `CONV_WRW` (K3) | Backward weights. Several loops: row ring, output rows (any stride), height-stride phased ring, gfx950 direct (hipconv `direct_wgrad` class), small-C rows for stems, and FMA rows for exact fp32 on RDNA. At one split, configs with `dws` 1 write dw directly with no reduce. | wrw | MFMA, WMMA, FMA | 3913 |
+| `CONV_FFT_FWD/BWD/WRW` | Large filters: dense 5x5 and up with many channels (fp32 especially; 16-bit from about 11x11), 1-D filters of 15+ taps, large-kernel depthwise (31x31: RepLKNet / SLaK class). Configs vary the transform size (`th` x `tw`: 16, 32, 64 square, 1 x 32 / 1 x 64 rows: the tile must hold the dilated filter; larger tiles for larger filters and images), the transform block (`pb` tiles; `tb` threads, the least that covers the row pairs or 256) and the product tile (`gn` 64 or 16 output channels, `tm` 4 or 8 tiles a thread). Numerical note FFT. | fwd, bwd-data, wrw (stride 1) | all (FMA; no matrix cores) | 198 fwd, 198 bwd, 132 wrw |
+| `CONV_WRW` (K3) | Backward weights. Several loops: row ring, output rows (any stride), height-stride phased ring, gfx950 direct (hipconv `direct_wgrad` class), small-C rows for stems, and FMA rows for exact fp32 on RDNA. At one split, configs with `dws` 1 write dw directly with no reduce. A generic tier (`loop` 8) covers the filter widths, strides and dilations no specialized config has, and x/dy in any strides (see "Two tiers" below). | wrw | MFMA, WMMA, FMA | 4755 |
 | `CONV_GROUP_FWD/BWD` (K4) | Small-group grouped conv (2 ≤ C/g ≤ 16, ResNeXt and RegNet): one 16x16 MMA serves 16/(C/g) groups through a block-diagonal filter. Wide groups (17 ≤ C/g ≤ 64) pad each group to 16-channel blocks. K1's `fuse` knob is its implicit-GEMM alternative. | fwd (s1, s2), bwd-data (s1; s2 by phases) | MFMA, WMMA; fp32 by FMA on RDNA | 2042 |
-| `CONV_STEM_BWD` | Bwd-data for stems with C ≤ 4 (7x7 s2, 3x3 s2, patchify) | bwd-data | MFMA, WMMA, FMA | 3186 |
+| `CONV_GROUP_WRW` (K4) | Backward weights for small groups (2 ≤ C/g ≤ 16): the same block-diagonal 16x16 MMA, dy positions of a th x tw tile flattened into the atom's k-steps (any plane width), x and dy read in place; deterministic split reduce. Groups of 24 and 32 (`nbi` 2, MFMA only) as dense per-group block products. K3 (`CONV_WRW`) is its implicit-GEMM alternative; groups past 32 channels stay with K3. | wrw (any stride on rows and columns per config: s1, s2; any depth stride) | MFMA, WMMA; fp32 also by FMA (all archs, the only fp32 path on RDNA) | 3132 |
+| `CONV_STEM_BWD` | Bwd-data for stems with C ≤ 4 (7x7 s2, 3x3 s2, patchify) | bwd-data | MFMA, WMMA, FMA | 1187 |
 | `CONV_SMALLC_FWD` | Forward stems with C ≤ 4 | fwd | MFMA, WMMA, FMA | 606 |
 | `CONV_DEPTHWISE_MFMA_FWD/BWD` | Depthwise on matrix cores (gfx950 hipconv class), NHWC and NCHW | fwd, bwd-data (s1); fwd (s2) | gfx908-gfx950 | 640 |
 | `CONV_DEPTHWISE_ROWS_FWD/BWD` | Depthwise by channel rows: 1-D/vocoder depthwise, dilated, strided ConvTranspose1d | fwd, bwd-data | all (VALU) | 222 |
@@ -33,7 +35,22 @@ No single engine is meant to win everywhere. Each one targets a regime, and most
 | `CONV_NAIVE_FWD/BWD/WRW` | Correctness floor: serves every graph | all | all | 9 |
 | `ROCBLAS_CONV_ENGINE`, `HIPBLASLT_CONV_ENGINE` (hipblaslt-provider) | Explicit GEMM (im2col/col2im) | all | all | BLAS-internal |
 
-The config counts are the full catalog. A graph admits only the configs whose gates accept it. For example, K7 admits about 28-50 per graph and `CONV_STEM_BWD` about 8-24.
+The config counts are the full catalog. A graph admits only the configs whose gates accept it. For example, K7 admits about 28-50 per graph and `CONV_STEM_BWD` about 4-9 (at most 21).
+
+### Two tiers
+
+An engine's configs come in two tiers:
+- **Specialized** configs fix the geometry at compile time (filter width, stride, dilation, sometimes filter height) and serve the hot shapes. There can be many of them.
+- **Generic** configs take the geometry at runtime. There are few of them, and each is admitted only where no specialized config's class serves the graph. They exist to beat the BLAS/naive fallback on the long tail, not to compete with the specialized tier.
+
+In `CONV_WRW` the generic tier is `loop` 8. It has a runtime filter, strides and dilation, `fr` taps per block, and reads x and dy through their strides, so padded or sliced activations are served too. Each generic config carries a `spec` string: the specialized classes the catalog serves on its architectures (`<atom_id><kind><layout>.<s>.<sw>.<dw>.<fr>`). The host declines the generic config wherever one of those classes serves the graph. A graph that a specialized matrix-core config serves therefore never sees the generic configs. The FMA loops (exact fp32) are not counted as specialized.
+
+Measured against the BLAS path, 16-bit channels-last:
+- gfx950: 1.5-1.9x faster on 2-D 5x5/7x7 and 3-D 1x5x5.
+- gfx1201: 2.6-3.2x faster on the same shapes, and 1.7x on 1-D k3.
+- 1-D k9: 0.69x on gfx950 and 0.96x on gfx1201, so BLAS still wins there. Heuristics should rank BLAS above the generic tier for it.
+- ASPP-class filters (at most 9 taps, dilation 6 or more): BLAS won on every arch measured (d18 16-bit 0.6-0.7x, d6 fp32 0.6x). The generic tier declines them.
+- RDNA fp32 runs the generic tier's FMA form, because RDNA has no fp32 matrix core. On gfx1201, against BLAS, it was faster on 5x5 (1.6x), 1-D k9 (1.4x), 3x3 stride 3 (4.2x) and 5x5x5 (3.5x). It was slower on stems and patchify-class width strides (4.2-7.9x behind), so it declines fewer than 8 input channels per group and width strides of 4 or more.
 
 ## What the knobs mean
 

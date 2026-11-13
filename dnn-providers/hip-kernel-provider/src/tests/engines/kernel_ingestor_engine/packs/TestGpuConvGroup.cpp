@@ -29,16 +29,20 @@
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvGroupProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvTf32TestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvTf32Timing.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
  * @file TestGpuConvGroup.cpp
- * @brief The small-group convolution kernels (CONV_GROUP_FWD, CONV_GROUP_BWD) on the device,
+ * @brief The small-group convolution kernels (CONV_GROUP_FWD, CONV_GROUP_BWD, CONV_GROUP_WRW) on
+ *        the device,
  *        through the engines' own graph match, kernel match, prepare and launch, against
  *        hipDNN's CPU reference convolution; and their graph and kernel gates on the host.
  *
  * Every config of the installed catalog that the kernel match admits on this device runs on
- * every case, forward and backward data, in fp32, fp16 and bf16: groups of 2, 4, 8 and 16
+ * every case, forward, backward data and backward weights (groups up to 16 channels), in fp32,
+ * fp16 and bf16: groups of 2, 4, 8 and 16
  * channels and wide groups of 24 to 56 (padded to whole 16-channel blocks), both layouts (channels-first staged and, cf configs, in place), 2-D and 3-D (ResNeXt3D's 3x3x3 and 1x3x3 filters), stride 2 (backward
  * data by stride phases, depth included), asymmetric padding, extents that are not tile
  * multiples, several channel blocks, and true convolution (the expansion reflects the filter).
@@ -62,8 +66,9 @@ using BFloat16 = hipdnn_data_sdk::types::bfloat16;
 PackSymbols packFor(ConvDirection direction)
 {
     return {"",
-            direction == ConvDirection::FORWARD ? "hipkernel.conv_group_fwd.graph_match"
-                                                : "hipkernel.conv_group_bwd.graph_match",
+            direction == ConvDirection::FORWARD         ? "hipkernel.conv_group_fwd.graph_match"
+            : direction == ConvDirection::BACKWARD_DATA ? "hipkernel.conv_group_bwd.graph_match"
+                                                        : "hipkernel.conv_group_wrw.graph_match",
             "",
             "hipkernel.conv_group.kernel_match",
             "",
@@ -95,22 +100,28 @@ std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> catalog(ConvDirection
             roots.push_back(dir / "lib" / "hipdnn_plugins" / "engines"
                             / HIPKERNELPROVIDER_DESCRIPTOR_SUBDIR);
         }
-        std::array<std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>, 2> catalogs;
+        std::array<std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition>, 3> catalogs;
         for(size_t i = 0; i < catalogs.size(); ++i)
         {
-            const std::string file = i == 0 ? "conv_group_fwd.kdp.json" : "conv_group_bwd.kdp.json";
-            std::filesystem::path found;
+            // A direction's packs: conv_group_<tag>.kdp.json, or (backward weights, split by
+            // element type and atom family) conv_group_wrw_<suffix>.kdp.json.
+            const std::string tag = i == 0 ? "fwd" : i == 1 ? "bwd" : "wrw";
+            const auto isPack = [&](const std::string& name) {
+                return name == "conv_group_" + tag + ".kdp.json"
+                       || (name.rfind("conv_group_" + tag + "_", 0) == 0 && name.size() > 9
+                           && name.substr(name.size() - 9) == ".kdp.json");
+            };
+            std::vector<std::filesystem::path> found;
             for(const auto& root : roots)
             {
                 std::error_code error;
                 for(auto it = std::filesystem::recursive_directory_iterator(root, error);
-                    !error && found.empty()
-                    && it != std::filesystem::recursive_directory_iterator();
+                    !error && it != std::filesystem::recursive_directory_iterator();
                     it.increment(error))
                 {
-                    if(it->path().filename() == file)
+                    if(isPack(it->path().filename().string()))
                     {
-                        found = it->path();
+                        found.push_back(it->path());
                     }
                 }
                 if(!found.empty())
@@ -120,37 +131,45 @@ std::vector<hipdnn_plugin_sdk::ingestor::KernelDefinition> catalog(ConvDirection
             }
             if(found.empty())
             {
-                throw std::runtime_error("no " + file + " beside the provider or this test binary");
+                throw std::runtime_error("no conv_group_" + tag
+                                         + " pack beside the provider or this test binary");
             }
-            std::ifstream stream(found);
-            const auto pack = nlohmann::json::parse(stream);
-            for(const auto& descriptor : pack.at("kernelDescriptors"))
+            std::sort(found.begin(), found.end());
+            for(const auto& path : found)
             {
-                hipdnn_plugin_sdk::ingestor::KernelDefinition kernel;
-                kernel.name = descriptor.at("name").get<std::string>();
-                kernel.source.kind = hipdnn_plugin_sdk::ingestor::KernelSourceKind::EMBEDDED_SOURCE;
-                kernel.source.sourceFile
-                    = descriptor.at("kernel_source").at("source_file").get<std::string>();
-                kernel.source.entryPoint
-                    = descriptor.at("kernel_source").at("entry_point").get<std::string>();
-                for(const auto& [key, value] : descriptor.at("metadata").items())
+                std::ifstream stream(path);
+                const auto pack = nlohmann::json::parse(stream);
+                for(const auto& descriptor : pack.at("kernelDescriptors"))
                 {
-                    if(value.is_string())
+                    hipdnn_plugin_sdk::ingestor::KernelDefinition kernel;
+                    kernel.name = descriptor.at("name").get<std::string>();
+                    kernel.source.kind
+                        = hipdnn_plugin_sdk::ingestor::KernelSourceKind::EMBEDDED_SOURCE;
+                    kernel.source.sourceFile
+                        = descriptor.at("kernel_source").at("source_file").get<std::string>();
+                    kernel.source.entryPoint
+                        = descriptor.at("kernel_source").at("entry_point").get<std::string>();
+                    for(const auto& [key, value] : descriptor.at("metadata").items())
                     {
-                        kernel.metadata[key] = value.get<std::string>();
+                        if(value.is_string())
+                        {
+                            kernel.metadata[key] = value.get<std::string>();
+                        }
+                        else
+                        {
+                            kernel.metadata[key] = value.get<int64_t>();
+                        }
                     }
-                    else
-                    {
-                        kernel.metadata[key] = value.get<int64_t>();
-                    }
+                    kernel.priority = descriptor.at("priority").get<int64_t>();
+                    catalogs[i].push_back(std::move(kernel));
                 }
-                kernel.priority = descriptor.at("priority").get<int64_t>();
-                catalogs[i].push_back(std::move(kernel));
             }
         }
         return catalogs;
     }();
-    return s_catalogs[direction == ConvDirection::FORWARD ? 0 : 1];
+    return s_catalogs[direction == ConvDirection::FORWARD         ? 0
+                      : direction == ConvDirection::BACKWARD_DATA ? 1
+                                                                  : 2];
 }
 
 void forEachIndex(const std::vector<int64_t>& dims,
@@ -354,6 +373,27 @@ std::vector<DeviceCase> deviceCases()
 /// Whether this device has a K4 atom for the case's element type, and the direction serves it.
 bool served(const ConvShape& shape, ConvDirection direction)
 {
+    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(currentDeviceProperties().gcnArchName);
+    if(direction == ConvDirection::BACKWARD_WEIGHTS)
+    {
+        // Small groups: a matrix-core atom for the element type, and fp32 also on FMA everywhere.
+        // Wide groups (17 to 32 channels): the MFMA atoms.
+        const auto element = shape.dataType == DataType::FLOAT  ? "f32"
+                             : shape.dataType == DataType::HALF ? "f16"
+                                                                : "bf16";
+        const int64_t cg = shape.c / shape.groups;
+        if(cg > 16)
+        {
+            return cg <= 32
+                   && (shape.dataType == DataType::FLOAT
+                           ? conv_igemm::atomRunsOn("mfma16_f32", arch)
+                       : shape.dataType == DataType::HALF
+                           ? conv_igemm::atomRunsOn("mfma16_f16", arch)
+                           : conv_igemm::atomRunsOn("mfma16_bf16", arch)
+                                 || conv_igemm::atomRunsOn("mfma16_bf16_908", arch));
+        }
+        return shape.dataType == DataType::FLOAT || conv_wrw::runsMatrixAtomFor(element, arch);
+    }
     if(direction == ConvDirection::BACKWARD_DATA
        && std::any_of(shape.stride.begin(), shape.stride.end(), [](int64_t s) { return s > 2; }))
     {
@@ -361,7 +401,6 @@ bool served(const ConvShape& shape, ConvDirection direction)
     }
     // fp32 runs everywhere for small groups (the FMA configs where no fp32 16x16 atom exists);
     // wide groups need the fp32 atom.
-    const auto arch = hipdnn_plugin_sdk::stripArchFeatures(currentDeviceProperties().gcnArchName);
     if(shape.dataType == DataType::FLOAT && shape.c / shape.groups > 16)
     {
         return conv_igemm::atomRunsOn("mfma16_f32", arch);
@@ -369,14 +408,31 @@ bool served(const ConvShape& shape, ConvDirection direction)
     return true;
 }
 
+/// The configs a run takes: the graph's own element type, or (fp32 under TF32 permission) the
+/// three-bf16 ones.
+enum class Math
+{
+    NATIVE,
+    THREE_BF16,
+};
+
 template <typename T>
-void runCase(ConvShape shape, ConvDirection direction)
+void runCase(ConvShape shape,
+             ConvDirection direction,
+             Math math = Math::NATIVE,
+             bool infinities = false)
 {
     shape.dataType = dataTypeOf<T>();
     const auto spec = specFor(shape, direction);
     const GraphFixture fixture(buildGraph(spec), currentDeviceProperties());
     const auto pack = packFor(direction);
     const auto bound = matchesGraph(pack, fixture.context());
+    if(direction == ConvDirection::BACKWARD_WEIGHTS && shape.c / shape.groups > 32)
+    {
+        // Groups past 32 channels are K3's.
+        EXPECT_FALSE(bound.has_value());
+        return;
+    }
     ASSERT_TRUE(bound.has_value()) << "the engine refused a case it should serve";
 
     Tensor<T> x(spec.x.dims, spec.x.strides);
@@ -384,9 +440,14 @@ void runCase(ConvShape shape, ConvDirection direction)
     Tensor<T> y(spec.y.dims, spec.y.strides);
     constexpr unsigned int SEED = 1234;
     const bool forward = direction == ConvDirection::FORWARD;
-    (forward ? x : y).fillTensorWithRandomValues(-1.0f, 1.0f, SEED);
-    w.fillTensorWithRandomValues(-1.0f, 1.0f, SEED + 1);
-    Tensor<T>& written = forward ? y : x;
+    const bool weights = direction == ConvDirection::BACKWARD_WEIGHTS;
+    (forward || weights ? x : y).fillTensorWithRandomValues(-1.0f, 1.0f, SEED);
+    (weights ? y : w).fillTensorWithRandomValues(-1.0f, 1.0f, SEED + 1);
+    if(infinities)
+    {
+        conv_tf32_test::plantInfinities(forward || weights ? x : y);
+    }
+    Tensor<T>& written = forward ? y : weights ? w : x;
 
     const bool reflect = shape.mode == ConvMode::CONVOLUTION;
     Tensor<T> reflectedW(spec.w.dims, spec.w.strides);
@@ -396,7 +457,23 @@ void runCase(ConvShape shape, ConvDirection direction)
     }
     const Tensor<T>& filterForReference = reflect ? reflectedW : w;
     Tensor<T> reference(written.dims(), written.strides());
-    if(forward)
+    if(weights)
+    {
+        // True convolution: dw of the reflected filter, reflected back.
+        Tensor<T> raw(written.dims(), written.strides());
+        CpuFpReferenceConvolution::wgrad(x,
+                                         reflect ? raw : reference,
+                                         y,
+                                         shape.stride,
+                                         shape.dilation,
+                                         shape.prePadding,
+                                         shape.postPadding);
+        if(reflect)
+        {
+            reflectFilter(raw, reference);
+        }
+    }
+    else if(forward)
     {
         CpuFpReferenceConvolution::fprop(x,
                                          filterForReference,
@@ -416,19 +493,31 @@ void runCase(ConvShape shape, ConvDirection direction)
                                          shape.prePadding,
                                          shape.postPadding);
     }
-    // Each output sums (taps x reduction channels) products of values in [-1, 1].
+    // Each output sums (taps x reduction channels) products of values in [-1, 1]; backward
+    // weights (images x output positions) of them.
     int64_t reductionLength = (forward ? shape.c : shape.k) / shape.groups;
     for(const auto extent : shape.filter)
     {
         reductionLength *= extent;
     }
-    const float accumulationBound = 2e-6f * static_cast<float>(reductionLength);
+    if(weights)
+    {
+        reductionLength = shape.n;
+        for(const auto extent : shape.output())
+        {
+            reductionLength *= extent;
+        }
+    }
+    const float accumulationBound
+        = (math == Math::THREE_BF16 ? conv_tf32_test::THREE_BF16_BOUND : 2e-6f)
+          * static_cast<float>(reductionLength);
 
     const auto& handler = dispatchHandler(pack);
     int ran = 0;
     for(const auto& kernel : catalog(direction))
     {
-        if(!matchesKernel(pack, fixture.context(), kernel, *bound))
+        if(!matchesKernel(pack, fixture.context(), kernel, *bound)
+           || (kernel.getIntMetadata("math") == 1) != (math == Math::THREE_BF16))
         {
             continue;
         }
@@ -466,7 +555,7 @@ void runCase(ConvShape shape, ConvDirection direction)
             const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
             const float tolerance
                 = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
-            if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
+            if(!conv_tf32_test::matches(got, want, tolerance) && ++mismatches <= 5)
             {
                 ADD_FAILURE() << "at linear index " << offsetOf(index, written.strides())
                               << ": got " << got << ", want " << want << ", tolerance "
@@ -475,7 +564,16 @@ void runCase(ConvShape shape, ConvDirection direction)
         });
         EXPECT_EQ(mismatches, 0);
     }
-    // Backward data past stride 2 is not served.
+    if(math == Math::THREE_BF16)
+    {
+        // The three-bf16 subset need not cover every case (the catalog test checks it serves).
+        if(ran == 0)
+        {
+            GTEST_SKIP() << "no three-bf16 config serves this case";
+        }
+        return;
+    }
+    // Backward data past stride 2 is not served; backward weights needs an atom for 16-bit types.
     if(served(shape, direction))
     {
         EXPECT_GE(ran, 1) << "no catalog config serves this case";
@@ -508,6 +606,53 @@ INSTANTIATE_TEST_SUITE_P(,
                          TestGpuConvGroup,
                          ::testing::Combine(::testing::ValuesIn(deviceCases()),
                                             ::testing::Values(ConvDirection::FORWARD,
+                                                              ConvDirection::BACKWARD_DATA,
+                                                              ConvDirection::BACKWARD_WEIGHTS)),
+                         [](const auto& info) {
+                             const auto direction = std::get<1>(info.param);
+                             return std::get<0>(info.param).name
+                                    + (direction == ConvDirection::FORWARD         ? "Fwd"
+                                       : direction == ConvDirection::BACKWARD_DATA ? "Bwd"
+                                                                                   : "Wrw");
+                         });
+
+/// The three-bf16 fp32 configs (TF32 permission; wide groups, forward and backward data) at
+/// three-bf16's bound, and with +inf and -inf in the kernel's input (each must reach the output
+/// as itself, NaN where both meet). Small-group cases admit none and skip.
+class TestGpuConvGroupThreeBf16
+    : public ::testing::TestWithParam<std::tuple<DeviceCase, ConvDirection>>
+{
+};
+
+TEST_P(TestGpuConvGroupThreeBf16, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    if(!conv_tf32_test::hasThreeBf16(currentDeviceProperties().gcnArchName))
+    {
+        GTEST_SKIP() << "no three-bf16 configs on this device";
+    }
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(conv_tf32_test::TF32_ENV,
+                                                                           "1");
+    runCase<float>(std::get<0>(GetParam()).shape, std::get<1>(GetParam()), Math::THREE_BF16);
+}
+
+TEST_P(TestGpuConvGroupThreeBf16, FloatInfinities)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto& shape = std::get<0>(GetParam()).shape;
+    if(!conv_tf32_test::hasThreeBf16(currentDeviceProperties().gcnArchName))
+    {
+        GTEST_SKIP() << "no three-bf16 configs on this device";
+    }
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(conv_tf32_test::TF32_ENV,
+                                                                           "1");
+    runCase<float>(shape, std::get<1>(GetParam()), Math::THREE_BF16, true);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvGroupThreeBf16,
+                         ::testing::Combine(::testing::ValuesIn(deviceCases()),
+                                            ::testing::Values(ConvDirection::FORWARD,
                                                               ConvDirection::BACKWARD_DATA)),
                          [](const auto& info) {
                              return std::get<0>(info.param).name
@@ -515,7 +660,90 @@ INSTANTIATE_TEST_SUITE_P(,
                                                                                          : "Bwd");
                          });
 
+/// Opt-in (GROUP_TF32_TIMING=<shape CSV>, its direction column choosing the pack): the best
+/// exact and the best three-bf16 config per shape, TF32 permitted. See ConvTf32Timing.hpp.
+TEST(TestGpuConvGroupTiming, ExactAgainstThreeBf16)
+{
+    SKIP_IF_NO_DEVICES();
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(conv_tf32_test::TF32_ENV,
+                                                                           "1");
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        conv_tf32_timing::timeByForm(
+            packFor(direction),
+            direction,
+            catalog(direction),
+            "GROUP_TF32_TIMING",
+            [](const auto& kernel) {
+                return std::string(kernel.getIntMetadata("math") == 1 ? "bf16x3" : "exact");
+            },
+            direction == ConvDirection::FORWARD ? "@fwd" : "@bwd");
+    }
+}
+
 // ---- Host-only: the graph gates, one decline per field, and the kernel gates ----
+
+/// Without TF32 permission no three-bf16 config is admitted; with it, fp32 wide-group graphs
+/// admit some forward and backward data on every arch with bf16 matrix cores (not gfx908), and
+/// bf16 graphs, small groups and backward weights none.
+TEST(TestConvGroupCatalog, ThreeBf16OnlyUnderTf32Permission)
+{
+    // RegNet-like wide groups (32 channels), and ResNeXt-like small ones (4).
+    auto wide = dense(64, 64, {12, 13}, {3, 3}, {1, 1}, true);
+    wide.groups = 2;
+    auto small = wide;
+    small.groups = 16;
+    for(const auto& item :
+        std::vector<std::pair<ConvDirection, ConvShape>>{{ConvDirection::FORWARD, wide},
+                                                         {ConvDirection::BACKWARD_DATA, wide},
+                                                         {ConvDirection::FORWARD, small},
+                                                         {ConvDirection::BACKWARD_DATA, small},
+                                                         {ConvDirection::BACKWARD_WEIGHTS, wide}})
+    {
+        const auto direction = item.first;
+        const auto& shape = item.second;
+        for(const char* arch : {"gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1201", "gfx908"})
+        {
+            for(const auto dataType : {DataType::FLOAT, DataType::BFLOAT16})
+            {
+                SCOPED_TRACE(std::string(arch) + (dataType == DataType::FLOAT ? " fp32" : " bf16")
+                             + " direction " + std::to_string(static_cast<int>(direction))
+                             + " groups " + std::to_string(shape.groups));
+                auto graphShape = shape;
+                graphShape.dataType = dataType;
+                auto device = testDeviceProperties();
+                device.gcnArchName = arch;
+                device.warpSize = std::string(arch).rfind("gfx1", 0) == 0 ? 32 : 64;
+                // The wrw launch planner sizes its grid from the units.
+                device.multiProcessorCount = 64;
+                const auto pack = packFor(direction);
+                const GraphFixture fixture(buildGraph(specFor(graphShape, direction)), device);
+                const auto bound = matchesGraph(pack, fixture.context());
+                ASSERT_TRUE(bound.has_value());
+                const auto admitted = [&] {
+                    int count = 0;
+                    for(const auto& kernel : catalog(direction))
+                    {
+                        count += kernel.getIntMetadata("math") == 1
+                                 && matchesKernel(pack, fixture.context(), kernel, *bound);
+                    }
+                    return count;
+                };
+                {
+                    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter off(
+                        conv_tf32_test::TF32_ENV, "");
+                    EXPECT_EQ(admitted(), 0);
+                }
+                const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter on(
+                    conv_tf32_test::TF32_ENV, "1");
+                const bool expected = dataType == DataType::FLOAT && std::string(arch) != "gfx908"
+                                      && shape.groups == wide.groups
+                                      && direction != ConvDirection::BACKWARD_WEIGHTS;
+                EXPECT_EQ(admitted() > 0, expected);
+            }
+        }
+    }
+}
 
 std::optional<conv_group::GroupProblem>
     parsed(ConvShape shape, ConvDirection direction, DataType dataType = DataType::HALF)
@@ -801,6 +1029,9 @@ TEST(TestConvGroupCatalog, KernelGatesFilterStrideChannelTileAtomAndLds)
         // Wide-group knobs on a small-group graph.
         EXPECT_TRUE(declines("nbi", int64_t{2}));
         EXPECT_TRUE(declines("nbo", int64_t{1}));
+        // Backward-weights knobs.
+        EXPECT_TRUE(declines("tw", int64_t{16}));
+        EXPECT_TRUE(declines("bpu", int64_t{4}));
         // Packed channels-first activations: the cf twin is admitted, with a smaller workspace
         // (nothing staged), and the staged config still is.
         auto first = resnext();
@@ -922,7 +1153,7 @@ TEST(TestConvGroupCatalog, WideKernelGatesBlocksTileAndForm)
 
 TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
 {
-    static constexpr std::array<const char*, 15> KNOBS{"atom",
+    static constexpr std::array<const char*, 18> KNOBS{"atom",
                                                        "t",
                                                        "r",
                                                        "s",
@@ -936,14 +1167,79 @@ TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
                                                        "px",
                                                        "pf",
                                                        "nbi",
-                                                       "nbo"};
-    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+                                                       "nbo",
+                                                       "tw",
+                                                       "bpu",
+                                                       "math"};
+    for(const auto direction :
+        {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA, ConvDirection::BACKWARD_WEIGHTS})
     {
         std::vector<std::string> tuples;
         for(const auto& kernel : catalog(direction))
         {
             SCOPED_TRACE(kernel.name);
-            const int bytes = kernel.getStringMetadata("dtype") == "FLOAT" ? 4 : 2;
+            // Three-bf16 configs (math 1) stage bf16.
+            const int bytes
+                = kernel.getStringMetadata("dtype") == "FLOAT" && kernel.getIntMetadata("math") == 0
+                      ? 4
+                      : 2;
+            std::string tuple = kernel.getStringMetadata("dtype");
+            for(const char* knob : KNOBS)
+            {
+                const std::string name(knob);
+                tuple += "|"
+                         + (name == "atom" ? kernel.getStringMetadata(name)
+                                           : std::to_string(kernel.getIntMetadata(name)));
+            }
+            EXPECT_EQ(std::count(tuples.begin(), tuples.end(), tuple), 0);
+            tuples.push_back(tuple);
+            if(direction == ConvDirection::BACKWARD_WEIGHTS)
+            {
+                EXPECT_EQ(kernel.getStringMetadata("direction"), "WRW");
+                EXPECT_LE(conv_group::groupWrwLdsBytes(
+                              bytes,
+                              static_cast<int>(kernel.getIntMetadata("r")),
+                              static_cast<int>(kernel.getIntMetadata("s")),
+                              static_cast<int>(kernel.getIntMetadata("stride")),
+                              static_cast<int>(kernel.getIntMetadata("th")),
+                              static_cast<int>(kernel.getIntMetadata("tw")),
+                              static_cast<int>(kernel.getIntMetadata(
+                                  kernel.getIntMetadata("nbi") != 0 ? "nbo" : "cb")),
+                              static_cast<int>(kernel.getIntMetadata("nbi"))),
+                          64 * 1024);
+                if(kernel.getIntMetadata("nbi") != 0)
+                {
+                    EXPECT_EQ(kernel.getIntMetadata("cb"), 0);
+                    EXPECT_EQ(kernel.getIntMetadata("nbi") % kernel.getIntMetadata("nbo"), 0);
+                }
+                else
+                {
+                    EXPECT_EQ(kernel.getIntMetadata("nbo"), 0);
+                }
+                for(const char* unused : {"wp", "oc", "pf"})
+                {
+                    EXPECT_EQ(kernel.getIntMetadata(unused), 0) << unused;
+                }
+                // FMA configs: compiled for a group width, row segments dividing the columns,
+                // fp32; matrix-core configs carry neither knob.
+                if(kernel.getStringMetadata("atom") == "fma")
+                {
+                    EXPECT_EQ(kernel.getStringMetadata("dtype"), "FLOAT");
+                    EXPECT_GE(kernel.getIntMetadata("cg"), 2);
+                    EXPECT_GE(kernel.getIntMetadata("px"), 1);
+                    EXPECT_EQ(kernel.getIntMetadata("tw") % kernel.getIntMetadata("px"), 0);
+                }
+                else
+                {
+                    EXPECT_EQ(kernel.getIntMetadata("cg"), 0);
+                    EXPECT_EQ(kernel.getIntMetadata("px"), 0);
+                }
+                EXPECT_GE(kernel.getIntMetadata("bpu"), 1);
+                EXPECT_LE(kernel.getIntMetadata("bpu"), 16);
+                continue;
+            }
+            EXPECT_EQ(kernel.getIntMetadata("tw"), 0);
+            EXPECT_EQ(kernel.getIntMetadata("bpu"), 0);
             // Backward data runs stride phases: ceil(R / stride) taps at unit stride.
             const int stride = static_cast<int>(kernel.getIntMetadata("stride"));
             const bool forward = direction == ConvDirection::FORWARD;
@@ -998,18 +1294,406 @@ TEST(TestConvGroupCatalog, EveryConfigFitsItsLdsAndKnobsTellConfigsApart)
                 EXPECT_EQ(kernel.getIntMetadata("cg"), 0);
             }
             EXPECT_LE(kernel.getIntMetadata("stride"), 2);
-            std::string tuple = kernel.getStringMetadata("dtype");
-            for(const char* knob : KNOBS)
-            {
-                const std::string name(knob);
-                tuple += "|"
-                         + (name == "atom" ? kernel.getStringMetadata(name)
-                                           : std::to_string(kernel.getIntMetadata(name)));
-            }
-            EXPECT_EQ(std::count(tuples.begin(), tuples.end(), tuple), 0);
-            tuples.push_back(tuple);
         }
     }
+}
+
+// ---- Backward weights: graph gates and kernel gates ----
+
+std::optional<conv_group::GroupWrwProblem> parsedWrw(const ConvGraphSpec& spec)
+{
+    const GraphFixture fixture(buildGraph(spec));
+    return conv_group::parseGroupWrwProblem(fixture.context());
+}
+
+std::optional<conv_group::GroupWrwProblem> parsedWrw(ConvShape shape,
+                                                     DataType dataType = DataType::HALF)
+{
+    shape.dataType = dataType;
+    return parsedWrw(specFor(shape, ConvDirection::BACKWARD_WEIGHTS));
+}
+
+TEST(TestConvGroupWrwProblem, ServesSmallGroupsBothLayoutsAnyDepthStride)
+{
+    const auto last = parsedWrw(resnext());
+    ASSERT_TRUE(last.has_value());
+    EXPECT_EQ(last->cg, 4);
+    EXPECT_EQ(last->filterT, 1);
+    EXPECT_EQ(last->filterR, 3);
+    EXPECT_EQ(last->stride, 1);
+    EXPECT_TRUE(last->wrw.channelsLast);
+    auto first = resnext();
+    first.channelsLast = false;
+    const auto firstParsed = parsedWrw(first);
+    ASSERT_TRUE(firstParsed.has_value());
+    EXPECT_TRUE(firstParsed->wrw.channelsFirst);
+    auto strided = resnext();
+    strided.stride = {2, 2};
+    ASSERT_TRUE(parsedWrw(strided).has_value());
+    EXPECT_EQ(parsedWrw(strided)->stride, 2);
+    // 3-D: any depth stride (the kernel's runtime), 3 or 1 taps deep.
+    auto deep = dense(64, 64, {7, 6, 7}, {3, 3, 3}, {1, 1, 1}, true);
+    deep.groups = 16;
+    deep.stride = {3, 1, 1};
+    const auto deepParsed = parsedWrw(deep);
+    ASSERT_TRUE(deepParsed.has_value());
+    EXPECT_EQ(deepParsed->filterT, 3);
+    EXPECT_EQ(deepParsed->stride, 1);
+    // Groups of 2 and 16.
+    auto g2 = dense(32, 32, {5, 7}, {3, 3}, {1, 1}, true);
+    g2.groups = 16;
+    EXPECT_EQ(parsedWrw(g2)->cg, 2);
+    auto g16 = dense(64, 64, {5, 7}, {3, 3}, {1, 1}, false);
+    g16.groups = 4;
+    EXPECT_EQ(parsedWrw(g16)->cg, 16);
+    EXPECT_EQ(parsedWrw(g16)->nbi, 0);
+    // Wide groups: 24 to 64 channels (a multiple of 8), padded to whole 16-channel blocks.
+    auto w32 = dense(64, 64, {5, 7}, {3, 3}, {1, 1}, false);
+    w32.groups = 2;
+    EXPECT_EQ(parsedWrw(w32)->cg, 32);
+    EXPECT_EQ(parsedWrw(w32)->nbi, 2);
+    auto w24 = dense(48, 48, {5, 7}, {3, 3}, {1, 1}, true);
+    w24.groups = 2;
+    EXPECT_EQ(parsedWrw(w24)->nbi, 2);
+}
+
+TEST(TestConvGroupWrwProblem, DeclinesEveryUnservedGraph)
+{
+    auto ungrouped = resnext();
+    ungrouped.groups = 1;
+    EXPECT_FALSE(parsedWrw(ungrouped).has_value());
+    auto ungrouped16 = dense(16, 16, {12, 13}, {3, 3}, {1, 1}, true);
+    EXPECT_FALSE(parsedWrw(ungrouped16).has_value()); // one group of 16: K3's dense case
+    auto wide28 = dense(56, 56, {12, 13}, {3, 3}, {1, 1}, true);
+    wide28.groups = 2; // 28 channels a group, not a multiple of 8
+    EXPECT_FALSE(parsedWrw(wide28).has_value());
+    auto depthwise = resnext();
+    depthwise.groups = 64;
+    EXPECT_FALSE(parsedWrw(depthwise).has_value());
+    auto wider = dense(256, 256, {12, 13}, {3, 3}, {1, 1}, true);
+    wider.groups = 2; // 128 channels a group
+    EXPECT_FALSE(parsedWrw(wider).has_value());
+    auto wide40 = dense(80, 80, {12, 13}, {3, 3}, {1, 1}, true);
+    wide40.groups = 2; // 40 channels a group, past 32 (K3's)
+    EXPECT_FALSE(parsedWrw(wide40).has_value());
+    auto wide20 = dense(40, 40, {12, 13}, {3, 3}, {1, 1}, true);
+    wide20.groups = 2; // 20 channels a group, not whole 16-byte vectors
+    EXPECT_FALSE(parsedWrw(wide20).has_value());
+    auto threes = dense(48, 48, {12, 13}, {3, 3}, {1, 1}, true);
+    threes.groups = 16; // 3 channels a group
+    EXPECT_FALSE(parsedWrw(threes).has_value());
+    auto multiplier = dense(64, 128, {12, 13}, {3, 3}, {1, 1}, true);
+    multiplier.groups = 16;
+    EXPECT_FALSE(parsedWrw(multiplier).has_value());
+    auto ragged = dense(40, 40, {12, 13}, {3, 3}, {1, 1}, true);
+    ragged.groups = 10; // 4 channels a group, channels not whole 16-channel blocks
+    EXPECT_FALSE(parsedWrw(ragged).has_value());
+    auto dilatedD = dense(64, 64, {4, 6, 7}, {3, 3, 3}, {1, 1, 1}, true);
+    dilatedD.groups = 16;
+    dilatedD.dilation = {2, 1, 1};
+    EXPECT_FALSE(parsedWrw(dilatedD).has_value());
+    auto dilatedH = resnext();
+    dilatedH.dilation = {2, 1};
+    EXPECT_FALSE(parsedWrw(dilatedH).has_value());
+    auto dilatedW = resnext();
+    dilatedW.dilation = {1, 2};
+    EXPECT_FALSE(parsedWrw(dilatedW).has_value());
+    auto uneven = resnext();
+    uneven.stride = {1, 2};
+    EXPECT_FALSE(parsedWrw(uneven).has_value());
+    // x channels-last, dy channels-first: the kernel reads both in one layout.
+    auto mixed = resnext();
+    mixed.dataType = DataType::HALF;
+    auto spec = specFor(mixed, ConvDirection::BACKWARD_WEIGHTS);
+    auto firstShape = mixed;
+    firstShape.channelsLast = false;
+    spec.y.strides = specFor(firstShape, ConvDirection::BACKWARD_WEIGHTS).y.strides;
+    EXPECT_FALSE(parsedWrw(spec).has_value());
+    // Not a backward-weights graph.
+    auto forward = resnext();
+    forward.dataType = DataType::HALF;
+    const GraphFixture fixture(buildGraph(specFor(forward, ConvDirection::FORWARD)));
+    EXPECT_FALSE(conv_group::parseGroupWrwProblem(fixture.context()).has_value());
+}
+
+TEST(TestConvGroupCatalog, WrwKernelGatesEveryField)
+{
+    const auto device = [](const std::string& arch, int units) {
+        auto properties = testDeviceProperties();
+        properties.gcnArchName = arch;
+        properties.multiProcessorCount = units;
+        return properties;
+    };
+    auto shape = resnext(); // 64 channels, groups of 4, channels-last
+    shape.dataType = DataType::HALF;
+    const auto spec = specFor(shape, ConvDirection::BACKWARD_WEIGHTS);
+    const GraphFixture fixture(buildGraph(spec), device("gfx942:sramecc+:xnack-", 304));
+    const auto pack = packFor(ConvDirection::BACKWARD_WEIGHTS);
+    const auto bound = matchesGraph(pack, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    const auto& kernels = catalog(ConvDirection::BACKWARD_WEIGHTS);
+    const auto base = std::find_if(kernels.begin(), kernels.end(), [](const auto& kernel) {
+        return kernel.getStringMetadata("dtype") == "HALF"
+               && kernel.getStringMetadata("atom") == "mfma16_f16"
+               && kernel.getIntMetadata("t") == 1 && kernel.getIntMetadata("stride") == 1
+               && kernel.getIntMetadata("cf") == 0 && kernel.getIntMetadata("cb") == 1;
+    });
+    ASSERT_NE(base, kernels.end());
+    EXPECT_TRUE(matchesKernel(pack, fixture.context(), *base, *bound));
+    const auto& handler = dispatchHandler(pack);
+    EXPECT_GT(handler.workspaceBytes(fixture.context(), *bound, *base), 0u);
+    const auto declines = [&](const char* field, const auto& value) {
+        auto kernel = *base;
+        kernel.metadata[field] = value;
+        return !matchesKernel(pack, fixture.context(), kernel, *bound);
+    };
+    EXPECT_TRUE(declines("direction", std::string("FWD"))); // a forward config carries no tw
+    EXPECT_TRUE(declines("direction", std::string("DATA")));
+    EXPECT_TRUE(declines("dtype", std::string("FLOAT")));
+    EXPECT_TRUE(declines("atom", std::string("wmma11_f16"))); // not on gfx942
+    EXPECT_TRUE(declines("atom", std::string("mfma16_bf16"))); // another element type
+    EXPECT_TRUE(declines("atom", std::string("mfma32_f16"))); // not a 16x16 atom
+    EXPECT_TRUE(declines("atom", std::string("mfma16_xf32"))); // TF32
+    EXPECT_TRUE(declines("atom", std::string("fma"))); // an FMA config names its group width
+    EXPECT_TRUE(declines("t", int64_t{3})); // a 2-D graph's filter is one tap deep
+    EXPECT_TRUE(declines("r", int64_t{5}));
+    EXPECT_TRUE(declines("s", int64_t{1}));
+    EXPECT_TRUE(declines("stride", int64_t{2}));
+    EXPECT_TRUE(declines("th", int64_t{0}));
+    EXPECT_TRUE(declines("tw", int64_t{0}));
+    EXPECT_TRUE(declines("tw", int64_t{4000})); // a tile past 64 KB of LDS
+    EXPECT_TRUE(declines("cb", int64_t{3}));
+    EXPECT_TRUE(declines("cb", int64_t{8})); // 64 channels are not 8 blocks of 16
+    EXPECT_TRUE(declines("cf", int64_t{1})); // channels-last graph
+    EXPECT_TRUE(declines("cf", int64_t{2}));
+    EXPECT_TRUE(declines("wp", int64_t{1}));
+    EXPECT_TRUE(declines("cg", int64_t{4}));
+    EXPECT_TRUE(declines("oc", int64_t{4}));
+    EXPECT_TRUE(declines("px", int64_t{1}));
+    EXPECT_TRUE(declines("pf", int64_t{1}));
+    EXPECT_TRUE(declines("nbi", int64_t{2}));
+    EXPECT_TRUE(declines("nbo", int64_t{1}));
+    EXPECT_TRUE(declines("bpu", int64_t{0}));
+    EXPECT_TRUE(declines("bpu", int64_t{17}));
+    // A device that reports no dispatch units: no split plan.
+    const GraphFixture unknown(buildGraph(spec), device("gfx942:sramecc+:xnack-", 0));
+    EXPECT_FALSE(matchesKernel(pack, unknown.context(), *base, *bound));
+    // The cf twin serves the channels-first graph, not this one; the channels-last config not
+    // that one.
+    auto first = resnext();
+    first.channelsLast = false;
+    first.dataType = DataType::HALF;
+    const GraphFixture firstFixture(buildGraph(specFor(first, ConvDirection::BACKWARD_WEIGHTS)),
+                                    device("gfx942:sramecc+:xnack-", 304));
+    const auto firstBound = matchesGraph(pack, firstFixture.context());
+    ASSERT_TRUE(firstBound.has_value());
+    auto inPlace = *base;
+    inPlace.metadata["cf"] = int64_t{1};
+    EXPECT_TRUE(matchesKernel(pack, firstFixture.context(), inPlace, *firstBound));
+    EXPECT_FALSE(matchesKernel(pack, firstFixture.context(), *base, *firstBound));
+    auto cf2 = *base;
+    cf2.metadata["cf"] = int64_t{2};
+    EXPECT_FALSE(matchesKernel(pack, firstFixture.context(), cf2, *firstBound));
+    // A tile extent past 32 bits.
+    EXPECT_TRUE(declines("th", (int64_t{1} << 32) + 1));
+    // cb 3: 96 channels are 2 tiles of 3 blocks, but a wave takes whole blocks or a block whole
+    // waves.
+    auto ninetySix = dense(96, 96, {12, 13}, {3, 3}, {1, 1}, true);
+    ninetySix.groups = 24;
+    ninetySix.dataType = DataType::HALF;
+    const GraphFixture wideFixture(buildGraph(specFor(ninetySix, ConvDirection::BACKWARD_WEIGHTS)),
+                                   device("gfx942:sramecc+:xnack-", 304));
+    const auto wideBound = matchesGraph(pack, wideFixture.context());
+    ASSERT_TRUE(wideBound.has_value());
+    EXPECT_TRUE(matchesKernel(pack, wideFixture.context(), *base, *wideBound));
+    auto cb3 = *base;
+    cb3.metadata["cb"] = int64_t{3};
+    EXPECT_FALSE(matchesKernel(pack, wideFixture.context(), cb3, *wideBound));
+    // A forward graph's configs and this direction's are kept apart.
+    EXPECT_FALSE(
+        matchesGraph(pack,
+                     GraphFixture(buildGraph(specFor(shape, ConvDirection::FORWARD))).context())
+            .has_value());
+}
+
+TEST(TestConvGroupCatalog, WrwFmaKernelGatesGroupWidthUnitsAndSegments)
+{
+    auto shape = resnext(); // 4 channels a group
+    shape.dataType = DataType::FLOAT;
+    auto properties = testDeviceProperties();
+    properties.gcnArchName = "gfx1201";
+    properties.multiProcessorCount = 32;
+    const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::BACKWARD_WEIGHTS)),
+                               properties);
+    const auto pack = packFor(ConvDirection::BACKWARD_WEIGHTS);
+    const auto bound = matchesGraph(pack, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    const auto& kernels = catalog(ConvDirection::BACKWARD_WEIGHTS);
+    const auto base = std::find_if(kernels.begin(), kernels.end(), [](const auto& kernel) {
+        return kernel.getStringMetadata("atom") == "fma" && kernel.getIntMetadata("cg") == 4
+               && kernel.getIntMetadata("t") == 1 && kernel.getIntMetadata("stride") == 1
+               && kernel.getIntMetadata("cf") == 0 && kernel.getIntMetadata("tw") == 16
+               && kernel.getIntMetadata("px") == 4;
+    });
+    ASSERT_NE(base, kernels.end());
+    EXPECT_TRUE(matchesKernel(pack, fixture.context(), *base, *bound));
+    const auto declines = [&](const char* field, const auto& value) {
+        auto kernel = *base;
+        kernel.metadata[field] = value;
+        return !matchesKernel(pack, fixture.context(), kernel, *bound);
+    };
+    EXPECT_TRUE(declines("cg", int64_t{8})); // compiled for another group width
+    EXPECT_TRUE(declines("cg", int64_t{3}));
+    EXPECT_TRUE(declines("cg", int64_t{0}));
+    EXPECT_TRUE(declines("px", int64_t{0}));
+    EXPECT_TRUE(declines("px", int64_t{3})); // segments not dividing the tile's columns
+    EXPECT_TRUE(declines("cb", int64_t{0}));
+    // 16 channels a group at cb 2: whole channel tiles and a halo within LDS, but 512 (k, c)
+    // units past 256 threads.
+    auto g16 = dense(64, 64, {12, 13}, {3, 3}, {1, 1}, true);
+    g16.groups = 4;
+    g16.dataType = DataType::FLOAT;
+    const GraphFixture g16Fixture(buildGraph(specFor(g16, ConvDirection::BACKWARD_WEIGHTS)),
+                                  properties);
+    const auto g16Bound = matchesGraph(pack, g16Fixture.context());
+    ASSERT_TRUE(g16Bound.has_value());
+    auto cg16 = *base;
+    cg16.metadata["cg"] = int64_t{16};
+    EXPECT_TRUE(matchesKernel(pack, g16Fixture.context(), cg16, *g16Bound));
+    cg16.metadata["cb"] = int64_t{2};
+    EXPECT_FALSE(matchesKernel(pack, g16Fixture.context(), cg16, *g16Bound));
+    EXPECT_TRUE(declines("wp", int64_t{1}));
+    EXPECT_TRUE(declines("oc", int64_t{4}));
+    EXPECT_TRUE(declines("dtype", std::string("HALF")));
+    EXPECT_TRUE(declines("tw", int64_t{4000})); // a tile past 64 KB of LDS
+    // A matrix-core config carries no FMA knobs.
+    const auto mma = std::find_if(kernels.begin(), kernels.end(), [](const auto& kernel) {
+        return kernel.getStringMetadata("atom") == "mfma16_f32";
+    });
+    ASSERT_NE(mma, kernels.end());
+    auto withCg = *mma;
+    withCg.metadata["cg"] = int64_t{4};
+    auto withPx = *mma;
+    withPx.metadata["px"] = int64_t{4};
+    properties.gcnArchName = "gfx942:sramecc+:xnack-";
+    const GraphFixture cdna(buildGraph(specFor(shape, ConvDirection::BACKWARD_WEIGHTS)),
+                            properties);
+    const auto cdnaBound = matchesGraph(pack, cdna.context());
+    ASSERT_TRUE(cdnaBound.has_value());
+    EXPECT_FALSE(matchesKernel(pack, cdna.context(), withCg, *cdnaBound));
+    EXPECT_FALSE(matchesKernel(pack, cdna.context(), withPx, *cdnaBound));
+}
+
+TEST(TestConvGroupCatalog, WrwWideKernelGatesBlocksAndForm)
+{
+    auto shape = dense(64, 64, {12, 13}, {3, 3}, {1, 1}, true);
+    shape.groups = 2; // 32 channels a group: 2 blocks
+    shape.dataType = DataType::HALF;
+    auto properties = testDeviceProperties();
+    properties.gcnArchName = "gfx942:sramecc+:xnack-";
+    properties.multiProcessorCount = 304;
+    const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::BACKWARD_WEIGHTS)),
+                               properties);
+    const auto pack = packFor(ConvDirection::BACKWARD_WEIGHTS);
+    const auto bound = matchesGraph(pack, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    const auto& kernels = catalog(ConvDirection::BACKWARD_WEIGHTS);
+    const auto base = std::find_if(kernels.begin(), kernels.end(), [](const auto& kernel) {
+        return kernel.getStringMetadata("dtype") == "HALF"
+               && kernel.getStringMetadata("atom") == "mfma16_f16"
+               && kernel.getIntMetadata("nbi") == 2 && kernel.getIntMetadata("nbo") == 1
+               && kernel.getIntMetadata("t") == 1 && kernel.getIntMetadata("stride") == 1
+               && kernel.getIntMetadata("cf") == 0;
+    });
+    ASSERT_NE(base, kernels.end());
+    EXPECT_TRUE(matchesKernel(pack, fixture.context(), *base, *bound));
+    const auto declines = [&](const char* field, const auto& value) {
+        auto kernel = *base;
+        kernel.metadata[field] = value;
+        return !matchesKernel(pack, fixture.context(), kernel, *bound);
+    };
+    EXPECT_TRUE(declines("nbi", int64_t{4})); // the groups span 2 blocks
+    EXPECT_TRUE(declines("nbi", int64_t{0})); // a small-group config
+    EXPECT_TRUE(declines("nbo", int64_t{3})); // not whole dy tiles of a group
+    EXPECT_TRUE(declines("nbo", int64_t{0}));
+    EXPECT_TRUE(declines("cb", int64_t{1}));
+    EXPECT_TRUE(declines("cg", int64_t{32}));
+    EXPECT_TRUE(declines("px", int64_t{4}));
+    EXPECT_TRUE(declines("atom", std::string("fma")));
+    EXPECT_TRUE(declines("atom", std::string("wmma12_f16")));
+    EXPECT_TRUE(declines("atom", std::string("mfma32_f16"))); // not a 16x16 atom
+    EXPECT_TRUE(declines("cf", int64_t{1}));
+    // A small-group config declines the wide graph; the wide config a small graph.
+    const auto small = std::find_if(kernels.begin(), kernels.end(), [](const auto& kernel) {
+        return kernel.getStringMetadata("dtype") == "HALF"
+               && kernel.getStringMetadata("atom") == "mfma16_f16"
+               && kernel.getIntMetadata("nbi") == 0 && kernel.getIntMetadata("t") == 1
+               && kernel.getIntMetadata("stride") == 1 && kernel.getIntMetadata("cf") == 0;
+    });
+    ASSERT_NE(small, kernels.end());
+    EXPECT_FALSE(matchesKernel(pack, fixture.context(), *small, *bound));
+    auto resnextShape = resnext();
+    resnextShape.dataType = DataType::HALF;
+    const GraphFixture smallFixture(
+        buildGraph(specFor(resnextShape, ConvDirection::BACKWARD_WEIGHTS)), properties);
+    const auto smallBound = matchesGraph(pack, smallFixture.context());
+    ASSERT_TRUE(smallBound.has_value());
+    EXPECT_TRUE(matchesKernel(pack, smallFixture.context(), *small, *smallBound));
+    EXPECT_FALSE(matchesKernel(pack, smallFixture.context(), *base, *smallBound));
+}
+
+TEST(TestConvGroupWrwLaunch, SplitsFillTheDeviceAndPartialsSizeTheWorkspace)
+{
+    auto shape = dense(128, 128, {56, 56}, {3, 3}, {1, 1}, false);
+    shape.groups = 32;
+    shape.n = 16;
+    const auto problem = parsedWrw(shape);
+    ASSERT_TRUE(problem.has_value());
+    auto properties = testDeviceProperties();
+    properties.gcnArchName = "gfx950";
+    properties.multiProcessorCount = 256;
+    const auto launch = conv_group::groupWrwLaunch(*problem, 8, 16, 1, 4, properties);
+    ASSERT_TRUE(launch.has_value());
+    const auto& args = launch->args;
+    EXPECT_EQ(args.tilesW, 4);
+    EXPECT_EQ(args.tilesH, 7);
+    EXPECT_EQ(args.tiles, 16LL * 7 * 4);
+    EXPECT_EQ(args.partialElems, 128LL * 4 * 9);
+    // 8 channel tiles: splits towards 4 workgroups a unit, at least 4 tiles a split.
+    EXPECT_GE(args.splits, 1);
+    EXPECT_LE(static_cast<long long>(args.splits) * 4, args.tiles);
+    EXPECT_EQ(launch->grid, 8u * static_cast<unsigned>(args.splits));
+    EXPECT_EQ(launch->reduce.slots, args.splits);
+    EXPECT_EQ(launch->workspaceBytes % 256, 0u);
+    EXPECT_GE(launch->workspaceBytes,
+              static_cast<size_t>(args.splits) * static_cast<size_t>(args.partialElems) * 4);
+    // dw packed K C T R S: the reduce's strides.
+    EXPECT_EQ(launch->reduce.sK, 4 * 9);
+    EXPECT_EQ(launch->reduce.sC, 9);
+    EXPECT_EQ(launch->reduce.sS, 1);
+    // No units, no plan; channels not a multiple of the tile's.
+    properties.multiProcessorCount = 0;
+    EXPECT_FALSE(conv_group::groupWrwLaunch(*problem, 8, 16, 1, 4, properties).has_value());
+    properties.multiProcessorCount = 256;
+    EXPECT_FALSE(conv_group::groupWrwLaunch(*problem, 8, 16, 16, 4, properties).has_value());
+}
+
+TEST(TestConvGroupComputeType, ServesCudnnsComputeTypesPerElementType)
+{
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        expectCudnnComputeTypes(
+            resnext(),
+            {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16},
+            [direction](const ConvShape& s) {
+                const GraphFixture fixture(buildGraph(specFor(s, direction)));
+                return conv_group::parseGroupProblem(fixture.context(), direction).has_value();
+            });
+    }
+    expectCudnnComputeTypes(
+        resnext(), {DataType::FLOAT, DataType::HALF, DataType::BFLOAT16}, [](const ConvShape& s) {
+            return parsedWrw(specFor(s, ConvDirection::BACKWARD_WEIGHTS)).has_value();
+        });
 }
 
 } // namespace

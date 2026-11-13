@@ -67,7 +67,9 @@ struct K5Wmma
     }
     __device__ static k5f8 mma(frag a, frag b, k5f8 c)
     {
-#if defined(__GFX12__) && K5_WAVE32
+        // The WMMA families, not __GFX12__ / __GFX11__: those also cover gfx1250 and gfx1170,
+        // which lack these builtins.
+#if HKP_ARCH_GFX12 && K5_WAVE32
         if constexpr(GFX12)
         {
             if constexpr(__is_same(T, k5_half))
@@ -75,7 +77,7 @@ struct K5Wmma
             else
                 return __builtin_amdgcn_wmma_f32_16x16x16_bf16_w32_gfx12(a, b, c);
         }
-#elif defined(__GFX11__) && K5_WAVE32
+#elif HKP_ARCH_GFX11 && K5_WAVE32
         if constexpr(!GFX12)
         {
             if constexpr(__is_same(T, k5_half))

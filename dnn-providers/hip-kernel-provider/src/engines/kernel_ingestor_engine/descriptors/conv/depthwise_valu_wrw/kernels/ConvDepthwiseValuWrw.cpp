@@ -23,6 +23,10 @@
 //                        MFMA; CONV_DW_Q columns a tile, CONV_DW_G rows a step, CONV_DW_NWG
 //                        16-channel groups a wave
 //   CONV_DW_FLIP     1 reflects the filter (true convolution)
+//   CONV_DW_MULT     depth multiplier (default 1): mult output channels per input channel, output
+//                    channel k reading input channel k / mult (variants 0 and 1)
+//
+// The kernels walk output channels c (a.c x mult of them): dy and dw by c, x by c / mult.
 
 #include "ConvDepthwiseValuWrwArgs.h"
 
@@ -47,6 +51,9 @@
 #ifndef CONV_DW_KW
 #define CONV_DW_KW 3
 #endif
+#ifndef CONV_DW_MULT
+#define CONV_DW_MULT 1
+#endif
 
 using ElementType = CONV_DW_TYPE;
 
@@ -54,6 +61,14 @@ namespace
 {
 
 constexpr int BLOCK = 256;
+constexpr int MULT = CONV_DW_MULT;
+static_assert(MULT >= 1 && (MULT == 1 || CONV_DW_VARIANT != 2), "depth multiplier");
+
+/// Output channels (dy's and dw's): the input channels times the multiplier.
+__device__ inline int outChannels(const ConvDepthwiseValuWrwArgs& a)
+{
+    return a.c * MULT;
+}
 #if CONV_DW_LAYOUT == 0
 /// Channels-last: channels per block (consecutive lanes, so loads coalesce) and lanes that
 /// split the partition's rows (floor: the taps) between them.
@@ -138,7 +153,7 @@ __device__ inline void accumulateTaps(float (&sum)[TAPS],
                 if(rowInside && ix >= 0 && ix < a.wi)
                 {
                     sum[(kz * CONV_DW_KH + ky) * CONV_DW_KW + kx]
-                        += g * toFloat(x[offsetOf(n, c, iz, iy, ix, a.c, a.di, a.hi, a.wi)]);
+                        += g * toFloat(x[offsetOf(n, c / MULT, iz, iy, ix, a.c, a.di, a.hi, a.wi)]);
                 }
             }
         }
@@ -169,8 +184,10 @@ __device__ inline void accumulateStrips(float (&sum)[TAPS],
     const int oy = row % a.ho;
     const int oz = (row / a.ho) % a.dOut;
     const int n = row / (a.ho * a.dOut);
-    const long cs = CONV_DW_LAYOUT == 0 ? a.c : 1; // element stride of a column
-    const ElementType* dyRow = dy + offsetOf(n, c, oz, oy, 0, a.c, a.dOut, a.ho, a.wo);
+    // Element strides of a column of x and of dy.
+    const long cs = CONV_DW_LAYOUT == 0 ? a.c : 1;
+    const long csy = CONV_DW_LAYOUT == 0 ? outChannels(a) : 1;
+    const ElementType* dyRow = dy + offsetOf(n, c, oz, oy, 0, outChannels(a), a.dOut, a.ho, a.wo);
     // Filter rows (kz, ky) outside x read a clamped row and count zero: no branches, so every
     // load of a strip issues before its first FMA.
     constexpr int FROWS = CONV_DW_KD * CONV_DW_KH;
@@ -187,7 +204,7 @@ __device__ inline void accumulateStrips(float (&sum)[TAPS],
             rowInside[kz * CONV_DW_KH + ky] = iz >= 0 && iz < a.di && iy >= 0 && iy < a.hi;
             xRows[kz * CONV_DW_KH + ky] = x
                                           + offsetOf(n,
-                                                     c,
+                                                     c / MULT,
                                                      min(max(iz, 0), a.di - 1),
                                                      min(max(iy, 0), a.hi - 1),
                                                      0,
@@ -204,7 +221,7 @@ __device__ inline void accumulateStrips(float (&sum)[TAPS],
         for(int t = 0; t < STRIP; ++t)
         {
             const int ox = min(ox0 + t, a.wo - 1);
-            const float value = toFloat(dyRow[ox * cs]);
+            const float value = toFloat(dyRow[ox * csy]);
             g[t] = ox0 + t < a.wo ? value : 0.0f;
         }
         const int ix0 = ox0 - a.pw;
@@ -257,7 +274,8 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
 #if CONV_DW_LAYOUT == 0
     // Grid: partitions x channel blocks. Lane `lane` of a channel takes taps (floor) or rows
     // (tile) lane, lane + LANES, ...
-    const int chunks = (a.c + CHANNELS - 1) / CHANNELS;
+    const int channels = outChannels(a);
+    const int chunks = (channels + CHANNELS - 1) / CHANNELS;
     const int partition = static_cast<int>(blockIdx.x) / chunks;
     const int c = (static_cast<int>(blockIdx.x) % chunks) * CHANNELS + tid % CHANNELS;
     const int lane = tid / CHANNELS;
@@ -271,7 +289,7 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
         const int ky = (tap / a.kw) % a.kh;
         const int kz = tap / (a.kw * a.kh);
         float sum = 0.0f;
-        if(c < a.c)
+        if(c < channels)
         {
             for(int row = first; row < last; ++row)
             {
@@ -291,11 +309,12 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
                     {
                         continue;
                     }
-                    sum += toFloat(dy[offsetOf(n, c, oz, oy, ox, a.c, a.dOut, a.ho, a.wo)])
-                           * toFloat(x[offsetOf(n, c, iz, iy, ix, a.c, a.di, a.hi, a.wi)]);
+                    sum += toFloat(
+                               dy[offsetOf(n, c, oz, oy, ox, outChannels(a), a.dOut, a.ho, a.wo)])
+                           * toFloat(x[offsetOf(n, c / MULT, iz, iy, ix, a.c, a.di, a.hi, a.wi)]);
                 }
             }
-            a.partial[((long)partition * a.c + c) * a.taps + tap] = sum;
+            a.partial[((long)partition * channels + c) * a.taps + tap] = sum;
         }
     }
 #else
@@ -306,14 +325,14 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
     {
         sum[t] = 0.0f;
     }
-    if(c < a.c && a.sw == 1 && a.dw_ == 1)
+    if(c < channels && a.sw == 1 && a.dw_ == 1)
     {
         for(int row = first + lane; row < last; row += LANES)
         {
             accumulateStrips(sum, x, dy, row, c, 0, STRIP, a);
         }
     }
-    else if(c < a.c)
+    else if(c < channels)
     {
         for(int row = first + lane; row < last; row += LANES)
         {
@@ -322,7 +341,8 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
             const int n = row / (a.ho * a.dOut);
             for(int ox = 0; ox < a.wo; ++ox)
             {
-                const float g = toFloat(dy[offsetOf(n, c, oz, oy, ox, a.c, a.dOut, a.ho, a.wo)]);
+                const float g
+                    = toFloat(dy[offsetOf(n, c, oz, oy, ox, outChannels(a), a.dOut, a.ho, a.wo)]);
                 accumulateTaps(sum, x, g, n, c, oz, oy, ox, a);
             }
         }
@@ -333,14 +353,14 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
     {
         lanes[lane][tid % CHANNELS] = sum[t];
         __syncthreads();
-        if(lane == 0 && c < a.c)
+        if(lane == 0 && c < channels)
         {
             float total = 0.0f;
             for(int l = 0; l < LANES; ++l)
             {
                 total += lanes[l][tid % CHANNELS];
             }
-            a.partial[((long)partition * a.c + c) * TAPS + t] = total;
+            a.partial[((long)partition * channels + c) * TAPS + t] = total;
         }
         __syncthreads();
     }
@@ -349,8 +369,9 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
     // Channels-first. Grid: partitions x channels; the block's threads stride over the
     // partition's positions (width fastest, so loads coalesce) and add up per tap in LDS.
     __shared__ float scratch[BLOCK];
-    const int partition = static_cast<int>(blockIdx.x) / a.c;
-    const int c = static_cast<int>(blockIdx.x) % a.c;
+    const int channels = outChannels(a);
+    const int partition = static_cast<int>(blockIdx.x) / channels;
+    const int c = static_cast<int>(blockIdx.x) % channels;
     int first = 0;
     int last = 0;
     partitionRows(a, partition, first, last);
@@ -374,14 +395,14 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
             const int ix = ox * a.sw - a.pw + kx * a.dw_;
             if(iz >= 0 && iz < a.di && iy >= 0 && iy < a.hi && ix >= 0 && ix < a.wi)
             {
-                sum += toFloat(dy[offsetOf(n, c, oz, oy, ox, a.c, a.dOut, a.ho, a.wo)])
-                       * toFloat(x[offsetOf(n, c, iz, iy, ix, a.c, a.di, a.hi, a.wi)]);
+                sum += toFloat(dy[offsetOf(n, c, oz, oy, ox, outChannels(a), a.dOut, a.ho, a.wo)])
+                       * toFloat(x[offsetOf(n, c / MULT, iz, iy, ix, a.c, a.di, a.hi, a.wi)]);
             }
         }
         const float total = blockSum(sum, scratch);
         if(tid == 0)
         {
-            a.partial[((long)partition * a.c + c) * a.taps + tap] = total;
+            a.partial[((long)partition * channels + c) * a.taps + tap] = total;
         }
     }
 #else
@@ -410,7 +431,8 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
             const int oy = row % a.ho;
             const int oz = (row / a.ho) % a.dOut;
             const int n = row / (a.ho * a.dOut);
-            const float g = toFloat(dy[offsetOf(n, c, oz, oy, ox, a.c, a.dOut, a.ho, a.wo)]);
+            const float g
+                = toFloat(dy[offsetOf(n, c, oz, oy, ox, outChannels(a), a.dOut, a.ho, a.wo)]);
             accumulateTaps(sum, x, g, n, c, oz, oy, ox, a);
         }
     }
@@ -420,7 +442,7 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
         const float total = blockSum(sum[t], scratch);
         if(tid == 0)
         {
-            a.partial[((long)partition * a.c + c) * TAPS + t] = total;
+            a.partial[((long)partition * channels + c) * TAPS + t] = total;
         }
     }
 #endif
@@ -434,7 +456,7 @@ extern "C" __global__ void __launch_bounds__(BLOCK)
     ConvDepthwiseValuWrwFold(ConvDepthwiseValuWrwArgs a)
 {
     const long index = (long)blockIdx.x * BLOCK + threadIdx.x;
-    const long count = (long)a.c * a.taps;
+    const long count = (long)a.c * MULT * a.taps; // output channels x taps
     if(index >= count)
     {
         return;

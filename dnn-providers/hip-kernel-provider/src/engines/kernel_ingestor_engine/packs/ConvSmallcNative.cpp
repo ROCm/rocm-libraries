@@ -46,7 +46,9 @@
  *        the whole flattened (c, t, r, s) reduction as a handful of 16x16 MMA steps
  *        (descriptors/conv/smallc/kernels/ConvSmallcCore.h). Any layout, any compile-time filter,
  *        stride and dilation; every config is admitted on correctness alone and ranked by
- *        autotune.
+ *        autotune. CONV_SMALLC_BWD runs stride-1 backward data with few output-gradient channels
+ *        (network output layers: dx of many channels from dy of 1-4) on the same kernels, as the
+ *        forward convolution over dy with the filter transposed and reflected.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -145,9 +147,15 @@ int Config::kpl() const
     return static_cast<int>((taps + ka - 1) / ka * ka);
 }
 
-std::optional<SmallcProblem> parseSmallcProblem(const MatchContext& context)
+std::optional<SmallcProblem> parseSmallcProblem(const MatchContext& context,
+                                                ConvDirection direction)
 {
-    auto base = conv_naive::parseConvNaiveProblem(context, ConvDirection::FORWARD);
+    if(direction != ConvDirection::FORWARD && direction != ConvDirection::BACKWARD_DATA)
+    {
+        return std::nullopt;
+    }
+    const bool backward = direction == ConvDirection::BACKWARD_DATA;
+    auto base = conv_naive::parseConvNaiveProblem(context, direction);
     if(!base.has_value())
     {
         return std::nullopt;
@@ -190,18 +198,30 @@ std::optional<SmallcProblem> parseSmallcProblem(const MatchContext& context)
         {
             return std::nullopt;
         }
-    }
-    // One input image within the kernel's 32-bit buffer offsets (its window loads); the span
-    // covers every element an image's strides reach.
-    long long span = 1;
-    const long long extents[5] = {a.n, a.c, a.inSpatial[0], a.inSpatial[1], a.inSpatial[2]};
-    for(int i = 1; i < 5; ++i)
-    {
-        if(a.xStrides[i] < 0)
+        // Backward data runs as a forward convolution over dy only at unit stride.
+        if(backward && a.stride[axis] != 1)
         {
             return std::nullopt;
         }
-        span += (extents[i] - 1) * a.xStrides[i];
+    }
+    // The kernel's input and output: x and y forward; dy and dx backward.
+    const long long inChannels = backward ? a.k : a.c;
+    const long long outChannels = backward ? a.c : a.k;
+    const long long* inExtents = backward ? a.outSpatial : a.inSpatial;
+    const long long* outExtents = backward ? a.inSpatial : a.outSpatial;
+    const long long* inStrides = backward ? a.yStrides : a.xStrides;
+    const long long* outStrides = backward ? a.xStrides : a.yStrides;
+    // One input image within the kernel's 32-bit buffer offsets (its window loads); the span
+    // covers every element an image's strides reach.
+    long long span = 1;
+    const long long extents[5] = {a.n, inChannels, inExtents[0], inExtents[1], inExtents[2]};
+    for(int i = 1; i < 5; ++i)
+    {
+        if(inStrides[i] < 0)
+        {
+            return std::nullopt;
+        }
+        span += (extents[i] - 1) * inStrides[i];
     }
     if(span * elementBytes >= INT_LIMIT)
     {
@@ -209,24 +229,39 @@ std::optional<SmallcProblem> parseSmallcProblem(const MatchContext& context)
     }
 
     SmallcProblem problem;
+    problem.backward = backward;
     problem.elementBytes = elementBytes;
     auto& args = problem.args;
     args.n = static_cast<int>(a.n);
-    args.c = static_cast<int>(a.c);
-    args.k = static_cast<int>(a.k);
-    args.di = static_cast<int>(a.inSpatial[0]);
-    args.hi = static_cast<int>(a.inSpatial[1]);
-    args.wi = static_cast<int>(a.inSpatial[2]);
-    args.dout = static_cast<int>(a.outSpatial[0]);
-    args.ho = static_cast<int>(a.outSpatial[1]);
-    args.wo = static_cast<int>(a.outSpatial[2]);
-    args.pd = static_cast<int>(a.prePadding[0]);
-    args.ph = static_cast<int>(a.prePadding[1]);
-    args.pw = static_cast<int>(a.prePadding[2]);
+    args.c = static_cast<int>(inChannels);
+    args.k = static_cast<int>(outChannels);
+    args.di = static_cast<int>(inExtents[0]);
+    args.hi = static_cast<int>(inExtents[1]);
+    args.wi = static_cast<int>(inExtents[2]);
+    args.dout = static_cast<int>(outExtents[0]);
+    args.ho = static_cast<int>(outExtents[1]);
+    args.wo = static_cast<int>(outExtents[2]);
+    int pads[3];
+    for(int axis = 0; axis < 3; ++axis)
+    {
+        // Backward: dx row i reads dy rows i + pre - f dil, i.e. the forward window from
+        // i - ((filter - 1) dil - pre) over the reflected filter.
+        const long long pad = backward
+                                  ? (a.filter[axis] - 1) * a.dilation[axis] - a.prePadding[axis]
+                                  : a.prePadding[axis];
+        if(pad < -INT_LIMIT || pad > INT_LIMIT)
+        {
+            return std::nullopt;
+        }
+        pads[axis] = static_cast<int>(pad);
+    }
+    args.pd = pads[0];
+    args.ph = pads[1];
+    args.pw = pads[2];
     for(int i = 0; i < 5; ++i)
     {
-        args.xs[i] = a.xStrides[i];
-        args.ys[i] = a.yStrides[i];
+        args.xs[i] = inStrides[i];
+        args.ys[i] = outStrides[i];
     }
     problem.base = std::move(*base);
     return problem;
@@ -262,7 +297,7 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
         config.wave = info->wave;
     }
     int atomId = 0;
-    const std::array<std::pair<const char*, int*>, 18> ints{{{"atom_id", &atomId},
+    const std::array<std::pair<const char*, int*>, 19> ints{{{"atom_id", &atomId},
                                                              {"cmax", &config.cmax},
                                                              {"kd", &config.kd},
                                                              {"r", &config.r},
@@ -279,7 +314,8 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
                                                              {"wq", &config.wq},
                                                              {"wn", &config.wn},
                                                              {"wave", &config.wave},
-                                                             {"ka", &config.ka}}};
+                                                             {"ka", &config.ka},
+                                                             {"ep", &config.ep}}};
     const int atomWave = config.wave, atomKa = config.ka;
     for(const auto& [name, target] : ints)
     {
@@ -316,6 +352,11 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
             return std::nullopt;
         }
     }
+    // Epilogue: 0 (LDS slots) or 1 (registers, MMA only).
+    if(config.ep < 0 || config.ep > 1 || (config.fma && config.ep != 0))
+    {
+        return std::nullopt;
+    }
     if(config.fma)
     {
         // 256 threads cover the tile exactly: NG = BN / FN channel groups x FM-column runs.
@@ -341,11 +382,18 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
 std::optional<Plan> planFor(const SmallcProblem& problem, const Config& config)
 {
     const auto& a = problem.base.args;
-    // The config's channel bound, filter, stride and dilation are the graph's.
-    if(a.c > config.cmax || a.filter[0] != config.kd || a.filter[1] != config.r
+    // The config's channel bound (the kernel's input channels: dy's backward), filter, stride
+    // and dilation are the graph's.
+    if(problem.args.c > config.cmax || a.filter[0] != config.kd || a.filter[1] != config.r
        || a.filter[2] != config.s || a.stride[0] != config.sd || a.stride[1] != config.sh
        || a.stride[2] != config.sw || a.dilation[0] != config.dd || a.dilation[1] != config.dh
        || a.dilation[2] != config.dw)
+    {
+        return std::nullopt;
+    }
+    // The register epilogue stores a lane's adjacent channels: only for channels-fastest output
+    // (other layouts keep the LDS-slot epilogue's runs along the width).
+    if(config.ep == 1 && problem.args.ys[1] != 1)
     {
         return std::nullopt;
     }
@@ -353,13 +401,13 @@ std::optional<Plan> planFor(const SmallcProblem& problem, const Config& config)
     plan.args = problem.args;
     auto& args = plan.args;
     const long long columns = config.blockColumns();
-    const long long columnBlocks = (a.k + columns - 1) / columns;
+    const long long columnBlocks = (args.k + columns - 1) / columns;
     // Tile rows: wm fragments of fm rows (MMA), wm rows (FMA).
     const long long th = config.fma ? config.wm : static_cast<long long>(config.wm) * config.fm;
     const long long tw = static_cast<long long>(config.wq) * 16;
-    const long long tilesH = (a.outSpatial[1] + th - 1) / th;
-    const long long tilesW = (a.outSpatial[2] + tw - 1) / tw;
-    const long long gridX = tilesH * tilesW * a.outSpatial[0] * a.n;
+    const long long tilesH = (args.ho + th - 1) / th;
+    const long long tilesW = (args.wo + tw - 1) / tw;
+    const long long gridX = tilesH * tilesW * args.dout * a.n;
     plan.weightElems = columnBlocks * columns * config.kpl();
     if(columnBlocks > MAX_GRID_Y || gridX > INT_LIMIT || plan.weightElems > INT_LIMIT)
     {
@@ -386,6 +434,7 @@ using conv_smallc::SmallcProblem;
 
 // The contract with the installed descriptor files, which restate these same strings.
 constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.conv_smallc_fwd.graph_match";
+constexpr std::string_view BWD_GRAPH_MATCHER_SYMBOL = "hipkernel.conv_smallc_bwd.graph_match";
 constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.conv_smallc.kernel_match";
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.conv_smallc.dispatch";
 constexpr std::string_view FORMAT_ENTRY_POINT = "ConvSmallcFormat";
@@ -398,9 +447,10 @@ constexpr std::string_view Y_TOKEN = "conv_smallc.y.uid";
 constexpr std::string_view DTYPE_TOKEN = "conv_smallc.dtype";
 constexpr std::string_view FLOPS_TOKEN = "conv_smallc.flops";
 
-std::optional<BoundTokens> graphMatches(const MatchContext& context)
+/// The graph's tokens in @p direction: x, w and y in forward roles (x is dx backward).
+std::optional<BoundTokens> graphMatchesIn(const MatchContext& context, ConvDirection direction)
 {
-    const auto problem = conv_smallc::parseSmallcProblem(context);
+    const auto problem = conv_smallc::parseSmallcProblem(context, direction);
     if(!problem.has_value())
     {
         return std::nullopt;
@@ -417,6 +467,16 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context)
         bound[std::string(FLOPS_TOKEN)] = *flops;
     }
     return bound;
+}
+
+std::optional<BoundTokens> graphMatches(const MatchContext& context)
+{
+    return graphMatchesIn(context, ConvDirection::FORWARD);
+}
+
+std::optional<BoundTokens> graphMatchesBwd(const MatchContext& context)
+{
+    return graphMatchesIn(context, ConvDirection::BACKWARD_DATA);
 }
 
 bool shipsTo(std::string_view archs, std::string_view gcnArchName)
@@ -453,11 +513,13 @@ std::optional<Admitted> admitted(const MatchContext& context, const KernelDefini
     const auto config = conv_smallc::configOf(kernel);
     const auto dtype = conv_smallc::stringField(kernel, "dtype");
     const auto direction = conv_smallc::stringField(kernel, "direction");
-    if(!config.has_value() || !dtype.has_value() || direction != "FWD")
+    if(!config.has_value() || !dtype.has_value() || (direction != "FWD" && direction != "BWD"))
     {
         return std::nullopt;
     }
-    auto problem = conv_smallc::parseSmallcProblem(context);
+    // The config's direction is the graph's: the parse refuses a graph of the other one.
+    auto problem = conv_smallc::parseSmallcProblem(
+        context, direction == "BWD" ? ConvDirection::BACKWARD_DATA : ConvDirection::FORWARD);
     if(!problem.has_value() || *dtype != data_objects::EnumNameDataType(problem->base.dataType)
        || !conv_igemm::atomRunsOn(config->atom, context.deviceProperties.gcnArchName)
        || !shipsTo(config->archs, context.deviceProperties.gcnArchName)
@@ -475,8 +537,9 @@ std::optional<Admitted> admitted(const MatchContext& context, const KernelDefini
     return Admitted{std::move(*problem), *config, *plan};
 }
 
-/// Kernel-scoped applicability: the config's dtype, channel bound, filter, stride and dilation
-/// are the graph's; its atom runs on this device and its ship list names it; the launch fits.
+/// Kernel-scoped applicability: the config's direction, dtype, channel bound, filter, stride and
+/// dilation are the graph's; its epilogue suits the output layout; its atom runs on this device
+/// and its ship list names it; the launch fits.
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& /*bound*/,
                    const KernelDefinition& kernel)
@@ -602,6 +665,11 @@ public:
         {
             options.add(std::string("CONV_SMALLC_") + name, std::to_string(value));
         }
+        // Set only when not the default, so ep 0 configs compile exactly as before.
+        if(config.ep != 0)
+        {
+            options.add("CONV_SMALLC_EP", std::to_string(config.ep));
+        }
         auto conv = buildIngestorKernelCode(
             _kernelCompiler, _kpackLoader, context, kernel, options, signatureOf<SmallcArgs>());
         conv.setBlockSize(static_cast<unsigned int>(config.blockThreads()), 1, 1);
@@ -641,7 +709,10 @@ public:
         const auto stream = handle.getStream();
         const auto& a = run.problem.base.args;
         const auto& config = run.config;
+        const bool backward = run.problem.backward;
 
+        // Backward: the kernel's output channel n is the graph's c and its reduction channel
+        // the graph's k (filter strides swapped), over the reflected filter.
         SmallcFormatArgs fmt{};
         fmt.w = w;
         fmt.wf = workspace;
@@ -649,22 +720,26 @@ public:
         {
             fmt.wStrides[i] = a.wStrides[i];
         }
-        fmt.k = static_cast<int>(a.k);
-        fmt.c = static_cast<int>(a.c);
+        if(backward)
+        {
+            std::swap(fmt.wStrides[0], fmt.wStrides[1]);
+        }
+        fmt.k = run.problem.args.k;
+        fmt.c = run.problem.args.c;
         fmt.kd = config.kd;
         fmt.r = config.r;
         fmt.s = config.s;
         fmt.sp = config.sp();
         fmt.kpl = config.kpl();
         fmt.kpad = run.plan.args.kpad;
-        fmt.flip = a.flipFilter != 0 ? 1 : 0;
+        fmt.flip = (a.flipFilter != 0) != backward ? 1 : 0;
         fmt.bn = config.fma ? config.blockColumns() : 0;
         dispatch.format(stream).launch(stream, fmt);
 
         SmallcArgs args = run.plan.args;
-        args.x = x;
+        args.x = backward ? y : x;
         args.w = workspace;
-        args.y = y;
+        args.y = backward ? x : y;
         dispatch.conv(stream).launch(stream, args);
     }
 
@@ -692,6 +767,7 @@ const ConvSmallcDispatchHandler& convSmallcDispatchHandler()
 void registerConvSmallcSymbols(SymbolScope<Handle>& scope)
 {
     scope.add(std::string(GRAPH_MATCHER_SYMBOL), &graphMatches);
+    scope.add(std::string(BWD_GRAPH_MATCHER_SYMBOL), &graphMatchesBwd);
     scope.add(std::string(KERNEL_MATCHER_SYMBOL), &kernelMatches);
     scope.add(std::string(DISPATCH_SYMBOL), &convSmallcDispatchHandler());
 }

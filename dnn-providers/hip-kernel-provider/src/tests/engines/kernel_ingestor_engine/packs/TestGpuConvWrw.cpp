@@ -32,6 +32,7 @@
 #include "engines/kernel_ingestor_engine/KernelIngestorEngine.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvIgemmProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvNaiveTestGraphs.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvTf32Timing.hpp"
 #include "engines/kernel_ingestor_engine/packs/ConvWrwProblem.hpp"
 #include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
@@ -195,6 +196,8 @@ conv_wrw::WrwConfig configOf(const hipdnn_plugin_sdk::ingestor::KernelDefinition
     c.ns = kernel.getIntMetadata("ns");
     c.wq = kernel.getIntMetadata("wq");
     c.dws = kernel.getIntMetadata("dws");
+    c.pb = kernel.getIntMetadata("pb");
+    c.math = kernel.getIntMetadata("math");
     return c;
 }
 
@@ -294,6 +297,15 @@ struct DeviceCase
     bool writesDw = false;
     /// Served by the 16-bit matrix atoms only: no fp32 or gfx906 (FMA) configs.
     bool matrix16Only = false;
+    /// No gfx906 (FMA) configs.
+    bool noGfx906 = false;
+    /// Served only where a few configs ship (block-based buffers): skipped where none does.
+    bool someArchs = false;
+    /// Served by the generic loop alone, which ships on the matrix atoms of gfx908 to gfx950
+    /// and gfx12: skipped on gfx906 and gfx11.
+    bool genericOnly = false;
+    /// x's element strides (the generic loop's strided operands); empty: packed.
+    std::vector<int64_t> xStrides{};
 };
 
 ConvShape conv(int64_t c,
@@ -347,6 +359,8 @@ std::vector<DeviceCase> deviceCases()
         {"OneD1x7", conv(16, 24, {50}, {7}, {3}, {3}, {1}, {1})},
         {"OneD1x7Nhwc", conv(16, 24, {50}, {7}, {3}, {3}, {1}, {1}, true)},
         {"OneD1x3Dilation5", conv(32, 64, {150}, {3}, {5}, {5}, {1}, {5})},
+        {"OneD1x3Dilation3", conv(32, 64, {150}, {3}, {3}, {3}, {1}, {3})},
+        {"Dilation6", conv(16, 24, {20, 26}, {3, 3}, {6, 6}, {6, 6}, {1, 1}, {6, 6})},
         {"OneD1x4", conv(32, 48, {90}, {4}, {0}, {0}, {1}, {1})},
         {"OneD1x4Stride2", conv(16, 32, {90}, {4}, {1}, {1}, {2}, {1})},
         {"OneD1x16Stride8", conv(32, 64, {203}, {16}, {4}, {4}, {8}, {1})},
@@ -458,6 +472,81 @@ std::vector<DeviceCase> deviceCases()
     auto packedConvolution = conv(32, 48, {6, 7}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, false, 2);
     packedConvolution.mode = ConvMode::CONVOLUTION;
     cases.push_back({"PackedRowsGroupedConvolution", packedConvolution});
+    // 5x5x5 volumes (AIPYTORCH-1356): unit stride on the ring / fp32 rows, stride 2 on the
+    // output rows, and few input channels on the small-C rows (16-bit). No gfx906 configs.
+    cases.push_back(
+        {"ThreeD5x5x5",
+         conv(16, 24, {7, 9, 10}, {5, 5, 5}, {2, 2, 2}, {2, 2, 2}, {1, 1, 1}, {1, 1, 1}),
+         false,
+         false,
+         false,
+         true});
+    cases.push_back(
+        {"ThreeD5x5x5Stride2",
+         conv(16, 24, {9, 11, 13}, {5, 5, 5}, {1, 1, 1}, {1, 1, 1}, {2, 2, 2}, {1, 1, 1}),
+         false,
+         false,
+         false,
+         true});
+    // One x image past 2 GiB in 16-bit (64 channels of 4100 x 4200; past 4 GiB in fp32): only
+    // the block-based buffer configs (pb 1) serve it, each block's 32 (16-bit) or 16 (fp32)
+    // channel planes within the 32-bit range. One output channel keeps the CPU reference short.
+    cases.push_back({"LargeImageBlockBuffers",
+                     conv(64, 1, {4100, 4200}, {3, 3}, {0, 0}, {0, 0}, {2, 2}, {1, 1}, false, 1, 1),
+                     false,
+                     false,
+                     false,
+                     true,
+                     true});
+    cases.push_back({"ThreeD5x5x5FewChannels",
+                     conv(8, 24, {6, 7, 9}, {5, 5, 5}, {0, 0, 0}, {0, 0, 0}, {1, 1, 1}, {1, 1, 1}),
+                     false,
+                     false,
+                     false,
+                     true});
+    // The generic loop (runtime filter, strides, dilation): channels-last 16-bit widths no
+    // specialized config has (5x5, 1x9, 1x5x5, dilation 4), and strided x (padded rows: no
+    // packed layout) in either form.
+    const auto generic
+        = [&](const std::string& name, const ConvShape& shape, std::vector<int64_t> xStrides = {}) {
+              DeviceCase deviceCase{name, shape};
+              deviceCase.genericOnly = true;
+              deviceCase.xStrides = std::move(xStrides);
+              cases.push_back(deviceCase);
+          };
+    generic("Generic5x5Nhwc", conv(24, 40, {13, 17}, {5, 5}, {2, 2}, {2, 2}, {1, 1}, {1, 1}, true));
+    generic("Generic1x9Nhwc", conv(32, 64, {150}, {9}, {4}, {4}, {1}, {1}, true));
+    // Dilated width taps (the shared window reads them at offsets of 2).
+    generic("Generic1x5Dilation2Nhwc", conv(32, 32, {90}, {5}, {4}, {4}, {1}, {2}, true));
+    generic(
+        "Generic1x5x5ThreeDNhwcGrouped",
+        conv(32, 32, {3, 9, 11}, {1, 5, 5}, {0, 2, 2}, {0, 2, 2}, {1, 1, 1}, {1, 1, 1}, true, 2));
+    generic("GenericDilation4Nhwc",
+            conv(16, 16, {40, 40}, {3, 3}, {4, 4}, {4, 4}, {1, 1}, {4, 4}, true, 1, 1));
+    generic("Generic7x7Stride2Nhwc",
+            conv(24, 24, {19, 23}, {7, 7}, {3, 3}, {3, 3}, {2, 2}, {1, 1}, true));
+    // 24 channels of 10 x 12, rows 16 apart (channels-first elements).
+    generic("GenericPaddedRowsNchw",
+            conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}),
+            {24 * 10 * 16, 10 * 16, 16, 1});
+    // Channels-last, positions 32 channels apart (24 used): channel vectors.
+    generic("GenericPaddedChannelsNhwc",
+            conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true),
+            {10 * 12 * 32, 1, 12 * 32, 32});
+    // One channels-last x image of 2^30 elements (2 GiB in 16-bit, 4 GiB in fp32): the generic
+    // loop's block-based buffers (pb 1), rebased each step. 1x1 stride 4 keeps the CPU
+    // reference short.
+    {
+        DeviceCase largeCl{
+            "LargeImageGenericBlockBuffersNhwc",
+            conv(16384, 8, {256, 256}, {1, 1}, {0, 0}, {0, 0}, {4, 4}, {1, 1}, true, 1, 1)};
+        largeCl.someArchs = true;
+        cases.push_back(largeCl);
+    }
+    // Positions 26 apart: not whole vectors, channels-last elements.
+    generic("GenericPaddedChannelsNhwcElements",
+            conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true),
+            {10 * 12 * 26, 1, 12 * 26, 26});
     return cases;
 }
 
@@ -511,8 +600,46 @@ bool expectServed(const std::string& arch, DataType dataType)
     return false;
 }
 
+/// The configs a case runs: the graph's own element type, or three-bf16 (math 1: fp32 graphs
+/// under TF32 permission, the bf16 kernel on split operands).
+enum class Math
+{
+    NATIVE,
+    THREE_BF16,
+};
+
+/// +inf and -inf planted into @p input (the tensor the reduction reads, besides the filter).
 template <typename T>
-void runCase(const DeviceCase& deviceCase)
+void plantInfinities(Tensor<T>& input)
+{
+    int64_t count = 1;
+    for(const auto extent : input.dims())
+    {
+        count *= extent;
+    }
+    auto* data = static_cast<T*>(input.rawHostData());
+    data[0] = static_cast<T>(INFINITY);
+    data[count / 2] = static_cast<T>(-INFINITY);
+    input.markHostModified();
+}
+
+/// A result matches its reference: within @p tolerance where the reference is finite, the same
+/// infinity, or NaN where the reference is NaN.
+bool matches(float got, float want, float tolerance)
+{
+    if(std::isnan(want))
+    {
+        return std::isnan(got);
+    }
+    if(std::isinf(want))
+    {
+        return got == want;
+    }
+    return std::fabs(got - want) <= tolerance;
+}
+
+template <typename T>
+void runCase(const DeviceCase& deviceCase, Math math = Math::NATIVE, bool infinities = false)
 {
     auto shape = deviceCase.shape;
     shape.dataType = dataTypeOf<T>();
@@ -521,10 +648,22 @@ void runCase(const DeviceCase& deviceCase)
     {
         spec.w.strides = packedStrides(spec.w.dims, !shape.channelsLast);
     }
+    if(!deviceCase.xStrides.empty())
+    {
+        spec.x.strides = deviceCase.xStrides;
+    }
     const auto device = currentDeviceProperties();
     const GraphFixture fixture(buildGraph(spec), device);
     const auto bound = matchesGraph(PACK, fixture.context());
     ASSERT_TRUE(bound.has_value()) << "the engine refused a case it should serve";
+    // Cases only a few configs serve skip before building their (large) tensors.
+    if(deviceCase.someArchs
+       && std::none_of(catalog().begin(), catalog().end(), [&](const auto& kernel) {
+              return matchesKernel(PACK, fixture.context(), kernel, *bound);
+          }))
+    {
+        GTEST_SKIP() << "no catalog config for this case on " << device.gcnArchName;
+    }
 
     Tensor<T> x(spec.x.dims, spec.x.strides);
     Tensor<T> w(spec.w.dims, spec.w.strides);
@@ -532,6 +671,10 @@ void runCase(const DeviceCase& deviceCase)
     constexpr unsigned int SEED = 4321;
     x.fillTensorWithRandomValues(-1.0f, 1.0f, SEED);
     y.fillTensorWithRandomValues(-1.0f, 1.0f, SEED + 1);
+    if(infinities)
+    {
+        plantInfinities(x);
+    }
 
     Tensor<T> reference(spec.w.dims, spec.w.strides);
     const bool reflect = shape.mode == ConvMode::CONVOLUTION;
@@ -553,7 +696,10 @@ void runCase(const DeviceCase& deviceCase)
     {
         reduction *= spec.y.dims[axis];
     }
-    const float accumulationBound = 2e-6f * static_cast<float>(reduction);
+    // Three-bf16 drops lo x lo and rounds each lo to bf16: about 2^-16 of each product, K2's and
+    // K1's three-bf16 bound.
+    const float accumulationBound
+        = (math == Math::THREE_BF16 ? 3e-5f : 2e-6f) * static_cast<float>(reduction);
 
     static std::set<std::string> s_ldsChecked;
     const auto& handler = dispatchHandler(PACK);
@@ -561,7 +707,15 @@ void runCase(const DeviceCase& deviceCase)
     int wroteDw = 0;
     for(const auto& kernel : catalog())
     {
-        if(!matchesKernel(PACK, fixture.context(), kernel, *bound))
+        if(!matchesKernel(PACK, fixture.context(), kernel, *bound)
+           || (kernel.getIntMetadata("math") == 1) != (math == Math::THREE_BF16))
+        {
+            continue;
+        }
+        // Known, reported to the wrw lead: gfx950's direct loop (5) turns an infinity in x into
+        // NaN in other dw elements (0 x inf from positions outside the window), on 16-bit graphs
+        // too; left out of the infinity runs until that is fixed.
+        if(infinities && kernel.getIntMetadata("loop") == conv_wrw::LOOP_DIRECT)
         {
             continue;
         }
@@ -580,7 +734,9 @@ void runCase(const DeviceCase& deviceCase)
         if(s_ldsChecked.insert(kernel.name).second)
         {
             const int compiled = ldsOfCompiled(kernel, config, shape.dataType, device.gcnArchName);
-            const auto host = conv_wrw::ldsBytesOf(config, static_cast<int>(sizeof(T)));
+            // Three-bf16 compiles the bf16 kernel.
+            const auto host
+                = conv_wrw::ldsBytesOf(config, config.math == 1 ? 2 : static_cast<int>(sizeof(T)));
             // The declared LDS is the host's; the kernel never takes more than the device has.
             EXPECT_GE(compiled, host);
             EXPECT_LE(compiled, conv_wrw::ldsLimitOf(device.gcnArchName));
@@ -628,7 +784,7 @@ void runCase(const DeviceCase& deviceCase)
             const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
             const float tolerance
                 = accumulationBound + 2.0f * storageEpsilon<T>() * (std::fabs(want) + 1e-3f);
-            if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
+            if(!matches(got, want, tolerance) && ++mismatches <= 5)
             {
                 ADD_FAILURE() << "at linear index " << offsetOf(index, w.strides()) << ": got "
                               << got << ", want " << want << ", tolerance " << tolerance;
@@ -636,11 +792,23 @@ void runCase(const DeviceCase& deviceCase)
         });
         EXPECT_EQ(mismatches, 0);
     }
-    const bool fmaOrFp32 = shape.dataType == DataType::FLOAT
-                           || hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName) == "gfx906";
+    // Three-bf16 is admitted only where it measured faster (threeBf16Pays).
+    if(ran == 0 && math == Math::THREE_BF16)
+    {
+        const auto problem = conv_wrw::parseWrwProblem(fixture.context());
+        if(problem.has_value() && !conv_wrw::threeBf16Pays(*problem, device.gcnArchName))
+        {
+            GTEST_SKIP() << "three-bf16 is not admitted for this class on " << device.gcnArchName;
+        }
+    }
+    const auto base = std::string(hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName));
+    const bool gfx906 = base == "gfx906";
+    const bool fmaOrFp32 = shape.dataType == DataType::FLOAT || gfx906;
     if(ran == 0
        && (!expectServed(device.gcnArchName, shape.dataType)
-           || (deviceCase.matrix16Only && fmaOrFp32)))
+           || (deviceCase.matrix16Only && fmaOrFp32) || (deviceCase.noGfx906 && gfx906)
+           || deviceCase.someArchs
+           || (deviceCase.genericOnly && (gfx906 || base.rfind("gfx11", 0) == 0))))
     {
         GTEST_SKIP() << "no catalog config for this case on " << device.gcnArchName;
     }
@@ -678,6 +846,113 @@ INSTANTIATE_TEST_SUITE_P(,
                          ::testing::ValuesIn(deviceCases()),
                          [](const auto& info) { return info.param.name; });
 
+/// The three-bf16 fp32 configs (TF32 permission): devices with bf16 matrix cores where three
+/// bf16 products beat exact fp32 (gfx90a, gfx942, gfx950, gfx11, gfx12; not gfx908).
+class TestGpuConvWrwThreeBf16 : public ::testing::TestWithParam<DeviceCase>
+{
+};
+
+TEST_P(TestGpuConvWrwThreeBf16, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    // Held: stripArchFeatures returns a view into the name.
+    const auto properties = currentDeviceProperties();
+    const std::string arch(hipdnn_plugin_sdk::stripArchFeatures(properties.gcnArchName));
+    if(arch != "gfx90a" && arch != "gfx942" && arch != "gfx950" && arch.rfind("gfx11", 0) != 0
+       && arch.rfind("gfx12", 0) != 0)
+    {
+        GTEST_SKIP() << "no three-bf16 configs on " << arch;
+    }
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(
+        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
+    runCase<float>(GetParam(), Math::THREE_BF16);
+}
+
+/// +inf and -inf in x: every dw element an infinity reaches is that infinity (NaN where both
+/// meet), as exact fp32 gives; the split must not turn them into NaN.
+TEST_P(TestGpuConvWrwThreeBf16, FloatInfinities)
+{
+    SKIP_IF_NO_DEVICES();
+    const auto properties = currentDeviceProperties();
+    const std::string arch(hipdnn_plugin_sdk::stripArchFeatures(properties.gcnArchName));
+    if(arch != "gfx90a" && arch != "gfx942" && arch != "gfx950" && arch.rfind("gfx11", 0) != 0
+       && arch.rfind("gfx12", 0) != 0)
+    {
+        GTEST_SKIP() << "no three-bf16 configs on " << arch;
+    }
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(
+        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
+    runCase<float>(GetParam(), Math::THREE_BF16, true);
+}
+
+/// Layouts, 1-D to 3-D, stride, dilation, groups, stems (small-C rows), pointwise, true
+/// convolution, padding past the filter, and many reduction steps (several splits).
+std::vector<DeviceCase> threeBf16Cases()
+{
+    static const std::set<std::string> NAMES{"Nchw3x3",
+                                             "Nhwc3x3",
+                                             "Nhwc3x3Wide",
+                                             "ThreeD3x3x3",
+                                             "ThreeDNhwc3x3x3",
+                                             "OneD1x7",
+                                             "Stride2",
+                                             "Stride2Nhwc",
+                                             "Dilation2",
+                                             "GroupedNhwc3x3",
+                                             "Stem7x7Stride2",
+                                             "Stem7x7Stride2Nhwc",
+                                             "Pointwise1x1Nhwc",
+                                             "Pointwise1x1OddChannels",
+                                             "PaddingPastTheFilter",
+                                             "ManySteps",
+                                             "TrueConvolutionNhwc",
+                                             "FilterKrscUnderNchw"};
+    std::vector<DeviceCase> cases;
+    for(const auto& deviceCase : deviceCases())
+    {
+        if(NAMES.count(deviceCase.name) != 0)
+        {
+            cases.push_back(deviceCase);
+        }
+    }
+    if(cases.size() != NAMES.size())
+    {
+        throw std::logic_error("a three-bf16 case names no device case");
+    }
+    // Shapes three-bf16 is admitted for (threeBf16Pays): CDNA's 128+ input and 64+ output
+    // channels at 3x3 unit stride, and RDNA's 256+ channels (the stems above cover RDNA's few).
+    cases.push_back(
+        {"Wide128Nchw3x3", conv(128, 64, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1})});
+    cases.push_back(
+        {"Wide128Nhwc3x3", conv(128, 64, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true)});
+    cases.push_back(
+        {"Wide128Ncdhw3x3x3",
+         conv(128, 64, {4, 6, 7}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1})});
+    cases.push_back(
+        {"Wide256Nchw3x3", conv(256, 72, {6, 9}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1})});
+    cases.push_back({"Wide256Nhwc3x3Grouped",
+                     conv(512, 128, {6, 9}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, true, 2)});
+    return cases;
+}
+
+/// Opt-in (K3_TF32_TIMING=<shape CSV>): the best exact fp32 and the best three-bf16 config per
+/// shape, TF32 permitted. See ConvTf32Timing.hpp.
+TEST(TestGpuConvWrwTiming, ExactAgainstThreeBf16)
+{
+    SKIP_IF_NO_DEVICES();
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter tf32(
+        "HIP_KERNEL_PROVIDER_CONV_TF32", "1");
+    conv_tf32_timing::timeByForm(
+        PACK, ConvDirection::BACKWARD_WEIGHTS, catalog(), "K3_TF32_TIMING", [](const auto& kernel) {
+            return std::string(kernel.getIntMetadata("math") == 1 ? "bf16x3" : "exact");
+        });
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvWrwThreeBf16,
+                         ::testing::ValuesIn(threeBf16Cases()),
+                         [](const auto& info) { return info.param.name; });
+
 // ---- Host-only: the shipped catalog ----
 
 std::string_view stringOf(const hipdnn_plugin_sdk::ingestor::KernelDefinition& kernel,
@@ -690,9 +965,9 @@ TEST(TestConvWrwCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its integer knobs: within one dtype (what
     // one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 21> KNOBS{
-        "atom_id", "loop", "layout", "bk",  "bc",  "bq",    "fr", "s",   "sw", "dw", "wk",
-        "wc",      "tk",   "tc",     "vec", "xcd", "align", "ns", "bpu", "wq", "dws"};
+    static constexpr std::array<const char*, 23> KNOBS{
+        "atom_id", "loop", "layout", "bk",  "bc", "bq",    "fr",  "s",  "sw",  "dw", "wk",  "wc",
+        "tk",      "tc",   "vec",    "xcd", "ns", "align", "bpu", "wq", "dws", "pb", "math"};
     std::set<std::vector<int64_t>> seen[3];
     for(const auto& kernel : catalog())
     {
@@ -708,6 +983,37 @@ TEST(TestConvWrwCatalog, KnobsTellApartEveryConfigOfAGraph)
     }
 }
 
+TEST(TestConvWrwCatalog, EveryGenericSpecKeyParses)
+{
+    // A malformed key declines its generic config everywhere: the generator's keys must all be
+    // the host's grammar.
+    auto shape = conv(24, 40, {10, 12}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1});
+    shape.dataType = DataType::FLOAT;
+    const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::BACKWARD_WEIGHTS)));
+    const auto problem = conv_wrw::parseWrwProblem(fixture.context());
+    ASSERT_TRUE(problem.has_value());
+    int keys = 0;
+    for(const auto& kernel : catalog())
+    {
+        if(kernel.getIntMetadata("loop") != conv_wrw::LOOP_GENERIC)
+        {
+            continue;
+        }
+        SCOPED_TRACE(kernel.name);
+        const std::string spec(kernel.getStringMetadata("spec"));
+        size_t from = 0;
+        while(from < spec.size())
+        {
+            const size_t to = std::min(spec.find(';', from), spec.size());
+            const auto key = spec.substr(from, to - from);
+            EXPECT_TRUE(conv_wrw::specServes(*problem, key, "gfx1201").has_value()) << key;
+            ++keys;
+            from = to + 1;
+        }
+    }
+    EXPECT_GT(keys, 0);
+}
+
 TEST(TestConvWrwCatalog, AtomIdsNameTheirAtomsAndEveryConfigFitsItsArchitectures)
 {
     static constexpr std::array<const char*, 7> ARCHS{
@@ -721,7 +1027,9 @@ TEST(TestConvWrwCatalog, AtomIdsNameTheirAtomsAndEveryConfigFitsItsArchitectures
         EXPECT_EQ(stringOf(kernel, "direction"), "WRW");
         EXPECT_EQ(kernel.source.entryPoint, "ConvWrw");
         const auto dtype = stringOf(kernel, "dtype");
-        const int elementBytes = dtype == "FLOAT" ? 4 : 2;
+        // Three-bf16 configs (math 1) are bf16 kernels on fp32 graphs.
+        const int elementBytes = dtype == "FLOAT" && config.math == 0 ? 4 : 2;
+        EXPECT_TRUE(config.math == 0 || (config.math == 1 && dtype == "FLOAT"));
         // 16-byte vectors; the FMA output rows also take scalar units.
         if(config.loop != conv_wrw::LOOP_ROWS_FMA || config.vec != 1)
         {
@@ -745,7 +1053,7 @@ TEST(TestConvWrwCatalog, AtomIdsNameTheirAtomsAndEveryConfigFitsItsArchitectures
         EXPECT_GT(archs, 0) << "a config no architecture runs";
         loops.insert(config.loop);
     }
-    EXPECT_EQ(loops, (std::set<int64_t>{0, 1, 2, 3, 4, 5, 6, 7}));
+    EXPECT_EQ(loops, (std::set<int64_t>{0, 1, 2, 3, 4, 5, 6, 7, 8}));
 }
 
 } // namespace

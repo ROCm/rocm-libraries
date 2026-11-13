@@ -48,13 +48,16 @@ public:
     /// @p maxRepackWorkspaceBytes bounds the repack workspace of a plan (convGemmCalls); tests
     /// lower it to exercise image slicing on small shapes. @p tf32 lets every fp32 GEMM run as
     /// TF32 where the backend can (GemmCall::tf32), and declines convolutions with no fp32 GEMM:
-    /// the builder of a TF32 engine (ConvTf32.hpp). @p splitReduction makes the split reduction
-    /// (convGemmCalls) the default plan rather than only a benchmarking candidate, and
-    /// @p layout does the same for a layout candidate; tests use them to check those plans.
-    /// @p narrowPartials: see NarrowPartials.
+    /// the builder of a TF32 engine (ConvTf32.hpp). @p reducedPrecisionReduction builds only
+    /// reducedPrecisionGemmCalls plans, and only while the switch is set: the builder of a
+    /// reduced-precision-reduction engine (ConvReducedPrecision.hpp). @p splitReduction makes
+    /// the split reduction (convGemmCalls) the default plan rather than only a benchmarking
+    /// candidate, and @p layout does the same for a layout candidate; tests use them to check
+    /// those plans. @p narrowPartials: see NarrowPartials.
     explicit ConvGemmPlanBuilder(PlanFactory factory,
                                  size_t maxRepackWorkspaceBytes = MAX_REPACK_WORKSPACE_BYTES,
                                  bool tf32 = false,
+                                 bool reducedPrecisionReduction = false,
                                  bool splitReduction = false,
                                  ColumnLayout layout = ColumnLayout::FOLLOW_Y,
                                  NarrowPartials narrowPartials = NarrowPartials::NEVER);
@@ -85,6 +88,7 @@ private:
     PlanFactory _factory;
     size_t _maxRepackWorkspaceBytes;
     bool _tf32;
+    bool _reducedPrecisionReduction;
     bool _splitReduction;
     ColumnLayout _layout;
     NarrowPartials _narrowPartials;

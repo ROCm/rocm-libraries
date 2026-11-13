@@ -47,7 +47,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
 
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
 option(HIPKERNELPROVIDER_ENABLE_ROCKE "Build rocKE engine and smoke tests" OFF)
-option(HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS "Fail configure, instead of warning, when a DVC-stored rocKE or FlyDSL descriptor is not pulled" OFF)
+option(HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS "Fail configure, instead of warning, when a DVC-stored rocKE, FlyDSL or conv descriptor is not pulled" OFF)
 # A TheRock build compiles the committed serialization headers by default.
 if(DEFINED THEROCK_SUBPROJECT_TARGET)
     set(_hkp_generate_serialize_default OFF)
@@ -76,6 +76,10 @@ option(HIPKERNELPROVIDER_ENABLE_FLYDSL
 # HIPDNN_ENABLE_KERNEL_INGESTOR OFF it builds nothing.
 option(HIPKERNELPROVIDER_ENABLE_CONV
        "Build the conv engine group (naive convolution) for the kernel ingestor" OFF)
+# Off by default: compiles a sample of conv configs for RDNA chips and their LLVM generic
+# targets with the ROCm clang (minutes, no GPU). Run with `ctest -L conv_generic_compile`.
+option(HIPKERNELPROVIDER_CONV_GENERIC_COMPILE_TEST
+       "Register the conv RDNA generic-target compile check (CTest label conv_generic_compile)" OFF)
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
 option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
 
@@ -376,9 +380,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(HIPKERNELPROVIDER_PRODUCTION_DESCRIPTOR_SOURCE_ROOT
         "${CMAKE_CURRENT_SOURCE_DIR}/src/engines/kernel_ingestor_engine/descriptors")
 
-    # Large rocKE bundle files (KDPs, kernel objects, heuristic models) and FlyDSL's
-    # per-target content directories (objects, manifest, KDP) are DVC outputs, each a file
-    # with a <file>.dvc pointer or a folder with a <folder>.dvc pointer. For each enabled
+    # Large rocKE bundle files (KDPs, kernel objects, heuristic models), FlyDSL's
+    # per-target content directories (objects, manifest, KDP) and the conv engine
+    # families' generated instance catalogs (conv/<family>/*.kdp.json) are DVC outputs,
+    # each a file with a <file>.dvc pointer or a folder with a <folder>.dvc pointer. For
+    # each enabled
     # producer, warn when one is missing or differs from its pointer (file size, or folder
     # file count) so the shipped bundle is not silently left out; tests still configure
     # and run. REQUIRE_DVC_DESCRIPTORS turns the warning into an error for release builds.
@@ -394,6 +400,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     endif()
     if(HIPKERNELPROVIDER_ENABLE_FLYDSL)
         list(APPEND _dvc_producers FlyDSL)
+    endif()
+    if(HIPKERNELPROVIDER_ENABLE_CONV)
+        list(APPEND _dvc_producers conv)
     endif()
     foreach(_producer IN LISTS _dvc_producers)
         file(GLOB_RECURSE _dvc_pointers "${_dvc_root}/${_producer}/*.dvc")
@@ -563,6 +572,16 @@ endif()
 set(HIPKERNELPROVIDER_FLYDSL_ACTIVE FALSE CACHE INTERNAL
     "The FlyDSL engines and tests are compiled (the production root has FlyDSL content)")
 
+# What src/ gates each conv engine family's registration and device tests on:
+# conv/ConvContent.cmake fills these from the catalogs the production root holds. Reset
+# here so a build with the conv group off carries no stale list.
+set(HIPKERNELPROVIDER_CONV_FAMILIES "" CACHE INTERNAL
+    "Conv engine families whose catalogs this build packs")
+set(HIPKERNELPROVIDER_CONV_UNSERVED_FAMILIES "" CACHE INTERNAL
+    "Conv engine families of the source tree whose catalogs this build does not have")
+set(HIPKERNELPROVIDER_CONV_ALL_FAMILIES_SERVED FALSE CACHE INTERNAL
+    "Every conv engine family is served")
+
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     if(NOT TARGET rocm::rocm_kpack)
         find_package(rocm-kpack CONFIG REQUIRED)
@@ -574,6 +593,12 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # it OFF the hip producer packs alone, rocKE descriptors prune, and the rocKE
     # wheel toolchain is never asserted. The rocKE block above must still precede
     # this one, since that assertion reads cache variables rocke/ sets.
+    # The conv families whose catalogs were not pulled are withdrawn from every pack
+    # (HKP_WITHDRAWN_FOLDERS), so this must run before hkp_add_packaging() wires them.
+    if(HIPKERNELPROVIDER_ENABLE_CONV)
+        include("${CMAKE_CURRENT_SOURCE_DIR}/conv/ConvContent.cmake")
+    endif()
+
     list(APPEND CMAKE_MODULE_PATH
          "${CMAKE_CURRENT_SOURCE_DIR}/descriptor-packaging/cmake")
     include(HkpPackaging)

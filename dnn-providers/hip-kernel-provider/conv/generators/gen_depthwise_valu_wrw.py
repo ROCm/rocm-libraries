@@ -13,13 +13,25 @@ def w(name, obj):
     (out / name).write_text(json.dumps(obj, indent=2) + "\n")
 
 
-FIELDS = ["dtype", "layout", "variant", "kd", "kh", "kw", "q", "g", "nwg", "bpc"]
+FIELDS = [
+    "dtype",
+    "layout",
+    "variant",
+    "kd",
+    "kh",
+    "kw",
+    "q",
+    "g",
+    "nwg",
+    "bpc",
+    "mult",
+]
 STRINGS = {"dtype", "layout", "variant"}
 # The matrix-core fields (q output columns a tile, g input rows a step, nwg 16-channel groups a
 # wave, bpc blocks per dispatch unit) are 0 for the VALU variants.
 NO_MMA = dict(q=0, g=0, nwg=0, bpc=0)
-CONFIGS = [dict(variant="floor", kd=0, kh=0, kw=0, **NO_MMA)] + [
-    dict(variant="tile", kd=kd, kh=kh, kw=kw, **NO_MMA)
+CONFIGS = [dict(variant="floor", kd=0, kh=0, kw=0, **NO_MMA, mult=1)] + [
+    dict(variant="tile", kd=kd, kh=kh, kw=kw, **NO_MMA, mult=1)
     for kd, kh, kw in (
         (1, 3, 3),
         (1, 5, 5),
@@ -29,6 +41,9 @@ CONFIGS = [dict(variant="floor", kd=0, kh=0, kw=0, **NO_MMA)] + [
         (3, 3, 3),
     )
 ]
+# Depth multiplier 2 (two output channels per input channel; VALU variants only): the floor and
+# the common 2-D tiles.
+CONFIGS += [dict(c, mult=2) for c in CONFIGS if c["kd"] in (0, 1) and c["kh"] != 1]
 # Matrix core (gfx908 fp16, gfx90a / gfx942 / gfx950 fp16 and bf16; channels-last 16-bit, unit
 # stride): the schedules that won somewhere on gfx950's ConvNeXt / EfficientNet / MobileNet
 # shapes (q, g, nwg, bpc).
@@ -43,7 +58,7 @@ HANKEL_SCHEDULES = (
     (16, 1, 2, 2),
 )
 HANKEL = [
-    dict(variant="hankel", kd=1, kh=k, kw=k, q=q, g=g, nwg=nwg, bpc=bpc)
+    dict(variant="hankel", kd=1, kh=k, kw=k, q=q, g=g, nwg=nwg, bpc=bpc, mult=1)
     for k in (3, 5, 7)
     for q, g, nwg, bpc in HANKEL_SCHEDULES
 ]
@@ -87,7 +102,7 @@ w(
         "name": "hipkernel:CONV_DEPTHWISE_VALU_WRW",
         "graph_match": {"native": "hipkernel.conv_depthwise_valu_wrw.graph_match"},
         "metadata": kmd,
-        "knobs": ["variant", "q", "g", "nwg", "bpc"],
+        "knobs": ["variant", "q", "g", "nwg", "bpc", "mult"],
         "behavior_notes": ["runtime_compilation"],
     },
 )
@@ -101,6 +116,7 @@ for layout in ("NHWC", "NCHW"):
                 else f"{c['kd']}x{c['kh']}x{c['kw']}"
             )
             tag = "floor" if c["variant"] == "floor" else f"tile_k{k}"
+            tag += f".m{c['mult']}" if c["mult"] != 1 else ""
             name = f"conv_depthwise_valu_wrw.{dt}.{layout.lower()}.{tag}"
             kernels.append(
                 {
