@@ -203,9 +203,10 @@ static void maf1_0_fill_trig(T*       A,
 {
     if(batch_count == 0 || M == 0 || N == 0)
         return;
-    // Same extent as maf2_0_fill_normal below: later batches only when stride >= lda (stride 0
-    // broadcasts one matrix). Overlapping batches are written in order, so the last one wins.
-    const size_t   batches = stride >= lda ? batch_count : 1;
+    // Same extent as maf2_0_fill_normal below. Stride 0 broadcasts one matrix; any other stride,
+    // including one below lda (interleaved batches), has batch_count matrices. Batches that share
+    // memory are written in order, so the last one wins.
+    const size_t   batches = stride != 0 ? batch_count : 1;
     const size_t   extent  = M + lda * (N - 1);
     const size_t   size_64 = extent + (batches - 1) * stride;
     const bool     use_cos = abc != ABC_dims::A;
@@ -242,8 +243,9 @@ static uint32_t maf2_0_seed(ABC_dims abc, size_t batch_index)
 }
 
 // Fills every element up to the last one used, ld padding between columns and batches included:
-// M + lda*(N-1), plus (batch_count-1)*stride when stride >= lda (stride 0 broadcasts one matrix).
-// For those strides this is the extent TensileLite fills, so both projects draw the same data.
+// M + lda*(N-1) + (batch_count-1)*stride (stride 0 broadcasts one matrix; a stride below lda
+// interleaves the batches). This is the extent TensileLite fills, so both projects draw the same
+// data.
 // Values are N(0, 1) drawn in double precision on the host, then copied to the device.
 // T(double) rounds to nearest even (FP16 and FP8 directly from double, FP8 saturating finite values
 // to the largest finite value); hip_bfloat16 has no double constructor, so it rounds to float
@@ -254,8 +256,7 @@ static void maf2_0_fill_normal(
 {
     if(batch_count == 0 || M == 0 || N == 0)
         return;
-    const size_t size_64
-        = M + lda * (N - 1) + (stride >= lda ? size_t(batch_count - 1) * stride : 0);
+    const size_t   size_64 = M + lda * (N - 1) + size_t(batch_count - 1) * stride;
     std::vector<T> h(size_64);
     const int      num_threads = std::min(kMaf2_0MaxThreads, omp_get_max_threads());
 #pragma omp parallel num_threads(num_threads)
