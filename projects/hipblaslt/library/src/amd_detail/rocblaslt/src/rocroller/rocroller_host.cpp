@@ -18,6 +18,8 @@
 #include "handle.h"
 #include "utility.hpp"
 
+#include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
+
 using namespace rocRoller;
 
 std::string rocRollerShortKernelNameFromEncodedSolutionIndex(int encodedSolutionIndex)
@@ -336,6 +338,22 @@ rocblaslt_status
 }
 
 /**
+ * Whether the handle's device has the block scaling that kernelType asks for. Without it
+ * every candidate kernel fails to generate, each after seconds of work.
+ */
+static bool supportsBlockScaling(rocblaslt_handle handle, const KernelType& kernelType)
+{
+    if(!isBlockScaling(kernelType.scaleTypeA.format)
+       && !isBlockScaling(kernelType.scaleTypeB.format))
+        return true;
+
+    auto target = GPUArchitectureTarget::fromString(handle->properties.gcnArchName,
+                                                    handle->properties.asicRevision);
+    return GPUArchitectureLibrary::getInstance()->HasCapability(target,
+                                                                GPUCapability::HasBlockScaling32);
+}
+
+/**
  * @brief Find the best rocRoller kernels for a given problem
  *
  * This mimics the functionality of getBestSolutions in tensile_host.cpp
@@ -398,8 +416,13 @@ rocblaslt_status
         return rocblaslt_status_invalid_value;
     }
 
-    auto solutionIndexParameters
-        = chooseSolutionIndexParameters(kernelType, prob, requestedAlgoCount);
+    std::vector<SolutionIndexParameters> solutionIndexParameters;
+    if(supportsBlockScaling(handle, kernelType))
+        solutionIndexParameters
+            = chooseSolutionIndexParameters(kernelType, prob, requestedAlgoCount);
+    else
+        log_info(
+            __func__, "no block-scaled rocRoller kernels for ", handle->properties.gcnArchName);
 
     int i = 0;
     for(auto const& solutionIndexParameter : solutionIndexParameters)
