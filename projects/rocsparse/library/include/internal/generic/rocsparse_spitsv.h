@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -97,6 +97,17 @@ extern "C" {
 *
 *  \note
 *  This routine does not support batched computation.
+*
+*  \note
+*  For a matrix with at least one row, no non-zero entries and a unit diagonal, \f$y = \alpha x\f$ is exact
+*  after one iteration. Nothing is done if \p host_nmaxiter[0] is not positive. Otherwise, without
+*  \p host_tol, \f$y\f$ is set to \f$\alpha x\f$ and \p host_nmaxiter[0] is left unchanged, as for a
+*  non-empty matrix: \p host_history[0] is the initial residual and the next \p host_nmaxiter[0] - 1
+*  entries are zero. With \p host_tol, the iteration is done only if
+*  \f$\Vert \alpha x - y_0 \Vert_{\infty}\f$ exceeds \p host_tol[0], \p host_nmaxiter[0] is set to 1
+*  if it is done and to 0 otherwise. \p host_history[0] is the initial residual and, if the
+*  iteration is done and \p host_nmaxiter[0] was at least 2, \p host_history[1] is zero, as for a
+*  non-empty matrix.
 *
 *  @param[in]
 *  handle        handle to the rocSPARSE library context queue.
