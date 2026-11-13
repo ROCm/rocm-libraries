@@ -724,6 +724,7 @@ __device__ inline void v3a_microtile_core_nhwc(const T* __restrict__ A,
 template <typename T, int LD, int LH, int LW, int BK, int NT, typename I>
 __device__ inline void dwStageChannelsLast(T* __restrict__ tile,
                                            const DwX<T, I>& X,
+                                           const T* __restrict__ A, // x (gfx94x element stage)
                                            I nBase, // the image's first element
                                            const ValuParams& p,
                                            int id0,
@@ -732,14 +733,17 @@ __device__ inline void dwStageChannelsLast(T* __restrict__ tile,
                                            int k_base)
 {
     // 16-byte channel vectors when C and BK hold whole vectors (a uniform branch). On gfx94x a
-    // block of one vector per pixel (16-bit, BK 8: the 3-D LDS config) stages 12-18 % slower
-    // as vectors (lang-compare MI325X; gfx950 neutral, gfx1201 1.4-1.5x faster), so it keeps
-    // the element stage there.
+    // block of one vector per pixel (16-bit, BK 8: the 3-D LDS config) keeps the element stage
+    // with global loads, as before the buffer accessors: on MI325X that config stages 12-18 %
+    // slower as vectors and 26 % slower as buffer element loads (lang-compare shape 10; gfx950
+    // is neutral, gfx1201 1.4-1.5x faster with vectors).
     constexpr int VEC = 16 / static_cast<int>(sizeof(T));
 #if defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__)
     constexpr int MIN_VECS_PER_PIXEL = 2;
+    constexpr bool GLOBAL_ELEMENTS = true;
 #else
     constexpr int MIN_VECS_PER_PIXEL = 1;
+    constexpr bool GLOBAL_ELEMENTS = false;
 #endif
     if constexpr(BK % VEC == 0 && BK / VEC >= MIN_VECS_PER_PIXEL)
     {
@@ -796,7 +800,11 @@ __device__ inline void dwStageChannelsLast(T* __restrict__ tile,
         const int pz = t / LH;
         const int id = id0 + pz, ih = ih0 + py, iw = iw0 + px, kk = k_base + kc;
         in[it] = dwIn(id, p.Di) & dwIn(ih, p.Hi) & dwIn(iw, p.Wi) & (kk < p.C);
-        v[it] = X.raw(nBase + (((I)id * p.Hi + ih) * p.Wi + iw) * p.C + kk, in[it]);
+        const I e = nBase + (((I)id * p.Hi + ih) * p.Wi + iw) * p.C + kk;
+        if constexpr(GLOBAL_ELEMENTS)
+            v[it] = DwX<T, I, false>(A, p).raw(e, in[it]);
+        else
+            v[it] = X.raw(e, in[it]);
     }
 #pragma unroll
     for(int it = 0; it < ITERS; ++it)
@@ -840,7 +848,7 @@ __device__ inline void v4_fused_nhwc_body(const T* __restrict__ A,
     const DwX<T, I> X(A, p);
     const DwY<T, I> Y(D, p);
     dwStageChannelsLast<T, 1, LH, LW, BK, (BH / RH) * (BW / RW) * BK, I>(
-        tile, X, (I)n * p.Hi * p.Wi * p.C, p, 0, ih0, iw0, k_base);
+        tile, X, A, (I)n * p.Hi * p.Wi * p.C, p, 0, ih0, iw0, k_base);
     dwLdsBarrier();
 
     const int tid = threadIdx.x;
@@ -952,7 +960,7 @@ __device__ inline void v3b_lds_nhwc_body(const T* __restrict__ A,
     const DwX<T, I> X(A, p);
     const DwY<T, I> Y(D, p);
     dwStageChannelsLast<T, 1, LH, LW, BK, (BH / RH) * (BW / RW) * BK, I>(
-        tile, X, (I)n * p.Hi * p.Wi * p.C, p, 0, ih0, iw0, k_base);
+        tile, X, A, (I)n * p.Hi * p.Wi * p.C, p, 0, ih0, iw0, k_base);
     dwLdsBarrier();
 
     const int tid = threadIdx.x;
@@ -1071,7 +1079,7 @@ __device__ inline void v3b_lds_ndhwc_body(const T* __restrict__ A,
     const DwX<T, I> X(A, p);
     const DwY<T, I> Y(D, p);
     dwStageChannelsLast<T, LD, LH, LW, BK, (BD / RD) * (BH / RH) * (BW / RW) * BK, I>(
-        tile, X, (I)n * p.Di * p.Hi * p.Wi * p.C, p, id0, ih0, iw0, k_base);
+        tile, X, A, (I)n * p.Di * p.Hi * p.Wi * p.C, p, id0, ih0, iw0, k_base);
     dwLdsBarrier();
 
     const int tid = threadIdx.x;
