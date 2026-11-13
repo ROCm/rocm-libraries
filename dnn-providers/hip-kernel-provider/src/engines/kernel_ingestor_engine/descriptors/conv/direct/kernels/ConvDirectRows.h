@@ -22,6 +22,10 @@
 // 16 j .. 16 j + 15 (lane l: granule 16 j + l / 4, dword l % 4) from the same fetch addresses.
 // Two stages, separate LDS objects, so the compiler tracks each DMA against its own stage.
 //
+// Batch unfold (UN > 1, 2-D, 16-byte DMA only): an MFMA's 16 columns are 16 / UN columns of each
+// of UN consecutive images (maps whose width is a multiple of 8 but not of 16: 24, 40, ...); a
+// halo row holds the UN images' halo rows side by side, the tile walk steps over image groups.
+//
 // Tiles: blocks walk tiles (channel block fastest, then column tile, row tile, image) in an
 // XCD-contiguous order. With fewer blocks than tiles (the planner launches one block per CU),
 // the last chunk of a tile prefetches chunk 0 of the block's next tile.
@@ -38,8 +42,8 @@
 // neighbouring planes), each tap's R filter rows as in 2-D.
 //
 // Envelope: stride 1, dilation 1, groups 1, KD 1 (2-D) or KD x R x S (3-D), any padding;
-// reduction channels a multiple of 16 / sizeof(T); per-image input < 2 GiB; formatted weights
-// < 2 GiB.
+// reduction channels a multiple of 16 / sizeof(T); per-image input < 2 GiB (UN images < 2 GiB
+// unfolded); formatted weights < 2 GiB.
 #pragma once
 
 // 16-byte LDS DMA (buffer_load_dwordx4 ... lds) is a CDNA4 feature; gfx950 is CDNA4's only
@@ -338,15 +342,21 @@ template <class T,
           int BC,
           int PP,
           int EPI,
-          class TO = T>
+          class TO = T,
+          int UN = 1>
 __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
 {
     constexpr int WAVE = 64;
     constexpr int DIM = 16;
     constexpr int KA = Atom::KA, KPL = Atom::KPL;
-    constexpr int BP = WP * PW, BQ = WQ * DIM, BN = WK * FN * DIM;
+    // UN > 1 (batch unfold): an MFMA's 16 columns are QI = 16 / UN columns of each of UN
+    // consecutive images, so narrow maps (40, 24, ...) fill the atom; the halo row holds the UN
+    // images' halo rows side by side, HWI pixels each.
+    static_assert(UN >= 1 && DIM % UN == 0, "batch unfold");
+    constexpr int QI = DIM / UN, BQI = WQ * QI, HWI = BQI + S - 1;
+    constexpr int BP = WP * PW, BN = WK * FN * DIM;
     constexpr int NW = WP * WQ * WK;
-    constexpr int HH = BP + R - 1, HW = BQ + S - 1;
+    constexpr int HH = BP + R - 1, HW = UN * HWI;
     constexpr int GE = 16 / static_cast<int>(sizeof(T)); // elements per granule
     constexpr int G = BC / GE; // granules per pixel per chunk
     constexpr int ROWG = HW * G;
@@ -392,7 +402,8 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
     // share of the logical tiles proportional to its block count; its blocks take them
     // round-robin, so concurrent blocks of one XCD work on neighbouring tiles (shared L2).
     const int kBlocks = (a.k + BN - 1) / BN;
-    const long long total = static_cast<long long>(a.tilesW) * a.tilesH * a.n * kBlocks;
+    const int imgGroups = UN == 1 ? a.n : (a.n + UN - 1) / UN;
+    const long long total = static_cast<long long>(a.tilesW) * a.tilesH * imgGroups * kBlocks;
     const int gsz = static_cast<int>(gridDim.x);
     const int xcd = static_cast<int>(blockIdx.x) % K1_XCDS;
     const int local = static_cast<int>(blockIdx.x) / K1_XCDS;
@@ -413,9 +424,9 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
         const int tq = t % a.tilesW;
         t /= a.tilesW;
         const int tp = t % a.tilesH;
-        c.img = t / a.tilesH;
+        c.img = t / a.tilesH * UN;
         c.oh0 = tp * BP;
-        c.ow0 = tq * BQ;
+        c.ow0 = tq * BQI;
         return c;
     };
     const long long imgElems = static_cast<long long>(a.hi) * a.wi * a.c;
@@ -429,7 +440,10 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
         = [&](Raw16 * st, const Tile& tc, int cc, int i0, int i1) __attribute__((always_inline))
     {
         const T* xi = static_cast<const T*>(a.x) + tc.img * imgElems;
-        const __amdgpu_buffer_rsrc_t xr = k1Rsrc(xi, imgBytes);
+        // UN > 1: the tile's images in one buffer (the planner keeps UN images under 2 GiB);
+        // the last group's missing images read as zero.
+        const int imgs = UN == 1 ? 1 : (a.n - tc.img < UN ? a.n - tc.img : UN);
+        const __amdgpu_buffer_rsrc_t xr = k1Rsrc(xi, UN == 1 ? imgBytes : imgBytes * imgs);
         const int cbytes = cc * BC * static_cast<int>(sizeof(T));
         const int ln = olane();
         const int lx = ln / G;
@@ -448,12 +462,31 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
                 continue;
             const int h = i / XG, xg = i - h * XG;
             const int ih = tc.oh0 - a.ph + h;
-            const int iw = iwl + xg * XPI;
-            const bool ok = (static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi))
-                            & (static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi)) & cok;
-            const unsigned off = ok ? static_cast<unsigned>(((ih * a.wi + iw) * a.c + gofs)
-                                                            * static_cast<int>(sizeof(T)))
-                                    : K1_OUT_OF_RANGE;
+            unsigned off;
+            if constexpr(UN == 1)
+            {
+                const int iw = iwl + xg * XPI;
+                const bool ok = (static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi))
+                                & (static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi)) & cok;
+                off = ok ? static_cast<unsigned>(((ih * a.wi + iw) * a.c + gofs)
+                                                 * static_cast<int>(sizeof(T)))
+                         : K1_OUT_OF_RANGE;
+            }
+            else
+            {
+                // Halo column x: image u, its column xx.
+                const int x = xg * XPI + lx;
+                const int u = x / HWI;
+                const int iw = tc.ow0 - a.pw + (x - u * HWI);
+                const bool ok = (static_cast<unsigned>(ih) < static_cast<unsigned>(a.hi))
+                                & (static_cast<unsigned>(iw) < static_cast<unsigned>(a.wi)) & cok
+                                & (u < imgs);
+                off = ok ? static_cast<unsigned>(
+                               u * imgBytes
+                               + static_cast<long long>((ih * a.wi + iw) * a.c + gofs)
+                                     * static_cast<int>(sizeof(T)))
+                         : K1_OUT_OF_RANGE;
+            }
             if(HW % XPI == 0 || xg * XPI + lx < HW)
                 __builtin_amdgcn_raw_ptr_buffer_load_lds(
                     xr,
@@ -472,6 +505,9 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
     auto dma
         = [&](Raw16 * st, const Tile& tc, int cc, int i0, int i1) __attribute__((always_inline))
     {
+#if defined(__HIP_DEVICE_COMPILE__)
+        static_assert(UN == 1, "batch unfold takes the 16-byte LDS DMA");
+#endif
         constexpr int SUB = K2R_DMA_SUB;
         constexpr int SPAN = WAVE / SUB; // granules per instruction
         const T* xi = static_cast<const T*>(a.x) + tc.img * imgElems;
@@ -578,7 +614,8 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
             Frag xin[NR];
             {
                 const int l = olane();
-                const int x = wq * DIM + l % DIM + s;
+                const int lc = l % DIM;
+                const int x = UN == 1 ? wq * DIM + lc + s : (lc / QI) * HWI + wq * QI + lc % QI + s;
                 const int ch = kk + Atom::template kBase<KPL>(l);
                 const int slot = x * G + ((ch / GE + x) % G);
                 const T* base = reinterpret_cast<const T*>(cur) + slot * GE + ch % GE;
@@ -636,15 +673,17 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
     {
         TO* y = static_cast<TO*>(a.y);
         const int l = olane();
-        const int ow = tc.ow0 + wq * DIM + l % DIM;
+        const int lc = l % DIM;
+        const int ow = UN == 1 ? tc.ow0 + wq * DIM + lc : tc.ow0 + wq * QI + lc % QI;
+        const int img = UN == 1 ? tc.img : tc.img + lc / QI;
         const bool vec = (a.k & 3) == 0;
 #pragma unroll
         for(int p = 0; p < PW; ++p)
         {
             const int oh = tc.oh0 + wp * PW + p;
-            if(oh >= a.ho || ow >= a.wo)
+            if(oh >= a.ho || ow >= a.wo || (UN > 1 && img >= a.n))
                 continue;
-            TO* yp = y + ((static_cast<long long>(tc.img) * a.ho + oh) * a.wo + ow) * a.k;
+            TO* yp = y + ((static_cast<long long>(img) * a.ho + oh) * a.wo + ow) * a.k;
 #pragma unroll
             for(int j = 0; j < FN; ++j)
             {
@@ -706,11 +745,12 @@ __device__ __attribute__((always_inline)) void k2ConvRows(const K2Args& a)
                 Raw16 v = slot[xx * GP + (c8 ^ ((xx / XR) & (GP - 1)))];
                 if((xx >> 3) & 1)
                     v = __builtin_shufflevector(v, v, 2, 3, 0, 1);
-                const int ow = tc.ow0 + wq * DIM + xx;
+                const int ow = UN == 1 ? tc.ow0 + wq * DIM + xx : tc.ow0 + wq * QI + xx % QI;
+                const int img = UN == 1 ? tc.img : tc.img + xx / QI;
                 const int n = nb + c8 * (16 / static_cast<int>(sizeof(TO)));
-                if(oh < a.ho && ow < a.wo && n < a.k)
+                if(oh < a.ho && ow < a.wo && n < a.k && (UN == 1 || img < a.n))
                     *reinterpret_cast<Raw16*>(
-                        y + ((static_cast<long long>(tc.img) * a.ho + oh) * a.wo + ow) * a.k + n)
+                        y + ((static_cast<long long>(img) * a.ho + oh) * a.wo + ow) * a.k + n)
                         = v;
             }
         }
