@@ -36,6 +36,52 @@ std::vector<prediction_result_t> select_topk_configs(const problem_t& problem,
   return topk_configs;
 }
 
+// gfx1250 maps WGM only.  Its persistent kernels reread WorkGroup0 from the hardware id after the
+// WGMXCC remap, and the chunked, K-Coherent and StaggerU remaps are untested there, so all of them
+// stay off (WGMXCC 1, chunk 0, split-K 0).  WGM is the positive slab width whose first wave puts
+// the fewest estimated A/B DRAM bytes on one L2 domain, priced with the same footprint proxy and
+// hit-rate model as compute_memory_latency_cdna5 (gemm::estimate_l2_hit_cdna5, which reads
+// context.wgm.wgm; the selector sets it per candidate); ties keep WGM 1.
+// The footprint is an approximation, so WGM 1 stays unless another width is estimated to be
+// strictly cheaper.
+// Cache hints and tensor-DMA are not read: every operand is priced as temporal.
+// ClusterAIDMapping (TensileLite's kernel-side choice of which AID / L2 domain computes which
+// output tile) is not modeled and its host / Origami plumbing was removed: tiles follow the
+// hardware dispatch placement (dispatch_xcd).  If AID remapping returns, per-domain tile
+// assignment must change here and in the footprint of compute_memory_latency_cdna5.
+static workgroup_mapping_t select_workgroup_mapping_gfx1250(const problem_t& problem,
+                                                            const hardware_t& hardware,
+                                                            const config_t& config) {
+  // predict_workgroup_mapping on gfx1250 runs this selector for a StreamK auto mapping, and the
+  // context constructor calls it.  The context therefore gets a config with a fixed mapping (which
+  // predict_workgroup_mapping returns as is, no nested pick); nothing else of the context reads
+  // config.workgroup_mapping or the presence of TensileLite params, and context.wgm is
+  // overwritten per candidate below.
+  config_t context_config = config;
+  context_config.workgroup_mapping = 1;
+  if (!context_config.has_tensile_params()) context_config.tensile();
+  gemm::context_t context(problem, hardware, context_config);
+  const size_t grid_n              = std::max<size_t>(context.grid_n, 1);
+  const operand_traffic_t& traffic = context.traffic;
+
+  workgroup_mapping_t best{0, 0, 1, 1};
+  double best_bytes = std::numeric_limits<double>::max();
+  for (int wgm : {1, 2, 4, 8, 16, 32, 64}) {
+    // Once the previous slab already spanned every column, wider slabs map the same tiles.
+    if (wgm > 1 && static_cast<size_t>(wgm / 2) >= grid_n) break;
+    context.wgm.wgm = wgm;
+    const gemm::cache_hit_rates_t hit =
+        gemm::estimate_l2_hit_cdna5(problem, hardware, config, context);
+    const double bytes = (1.0 - std::get<0>(hit)) * traffic.a_iter_bytes * traffic.a_cl_share +
+                         (1.0 - std::get<1>(hit)) * traffic.b_iter_bytes * traffic.b_cl_share;
+    if (bytes < best_bytes * (1.0 - 1e-9)) {
+      best_bytes = bytes;
+      best.wgm   = wgm;
+    }
+  }
+  return best;
+}
+
 /**
  * @brief Selects the best workgroup mapping parameters (maximizing cache hits) given fixed macro
  * tile sizes.
@@ -65,6 +111,9 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
 
   // Early Exit: problem sizes are invalid
   if (M < 1 || N < 1 || K < 1 || batch < 1) { return workgroup_mapping_t{0, 0, 0}; }
+
+  if (hardware.arch == hardware_t::architecture_t::gfx1250)
+    return select_workgroup_mapping_gfx1250(problem, hardware, config);
 
   // Default values
   // Honor the caller's CU budget (problem.num_cus); 0 means use all CUs.
@@ -449,6 +498,9 @@ staggerU_t select_staggerU(const problem_t& problem,
   // Early Exit: problem sizes are invalid
   if (M < 1 || N < 1 || K < 1 || batch < 1) { return staggerU_t{0, 0, 0}; }
 
+  // gfx1250 runs no StaggerU remap (see select_workgroup_mapping_gfx1250).
+  if (hardware.arch == hardware_t::architecture_t::gfx1250) return staggerU_t{0, 0, 0};
+
   // Default values
   // Honor the caller's CU budget (problem.num_cus); 0 means use all CUs.
   size_t numCUs       = resolve_num_cus(problem.num_cus, hardware.N_CU);
@@ -572,7 +624,7 @@ staggerU_t select_staggerU(const problem_t& problem,
   // 0.95 is a heuristic to make sure we don't exceed L2 capacity and if we are not
   // underestimating the working set. The effect of a false prediction is more severe
   // than not predicting at all.
-  if (working_set > 0.95 * hardware.L2_capacity) return staggerU_t{0, 0, 0};
+  if (working_set > 0.95 * hardware.l2_domain_capacity()) return staggerU_t{0, 0, 0};
   // Early Exit: L2 value is already max_staggerU
   if (L2_value == max_staggerU)
     return staggerU_t{L2_mapping, max_staggerU, out_staggerUStrideShift};
