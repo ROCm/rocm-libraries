@@ -3324,7 +3324,7 @@ namespace
             out = capture.str();
         }
 
-        const std::string line = "tuning-cache: mode=online path=" + m_path;
+        const std::string line     = "tuning-cache: mode=online path=" + m_path;
         const std::string settings = " K=" + std::to_string(kOnlineTopK)
                                      + " R=" + std::to_string(kOnlineRepeats) + " cold=0";
         const size_t at = out.find(line);

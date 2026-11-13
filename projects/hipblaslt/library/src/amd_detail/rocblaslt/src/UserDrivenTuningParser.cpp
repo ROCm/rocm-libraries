@@ -311,7 +311,8 @@ namespace TensileLite
         if(tuning.mode() == TuningMode::Online)
         {
             const auto& tuner = rocblaslt::OnlineTuner::getInstance();
-            msg << " K=" << tuner.topK() << " R=" << tuner.repeats() << " cold=" << tuner.coldCalls();
+            msg << " K=" << tuner.topK() << " R=" << tuner.repeats()
+                << " cold=" << tuner.coldCalls();
         }
 
         if(status == TuningLoadStatus::NoPath)
