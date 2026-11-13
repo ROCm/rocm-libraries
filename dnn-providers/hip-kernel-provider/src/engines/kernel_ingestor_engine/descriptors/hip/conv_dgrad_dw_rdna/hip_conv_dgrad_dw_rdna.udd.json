@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "b0245cef-5e7c-41b5-829b-0e4faf183e40",
+  "name": "hip_conv_dgrad_dw_rdna dispatch",
+  "dispatch_symbol": "hipkernel.hip_conv_dgrad_dw_rdna.dispatch"
+}
