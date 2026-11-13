@@ -161,7 +161,7 @@ jobs:
       # Run both suites as gfx1250-strict.
       HSA_DISABLE_GFX12_STRICT: "0"
       # The pinned ROCm SDK nightly; the install and the compiler check both read it.
-      ROCM_SDK_VERSION: ${{ inputs.rocm_sdk_version || '10.3.0a20261110' }}
+      ROCM_SDK_VERSION: ${{ inputs.rocm_sdk_version || '10.3.0a20261113' }}
       GTEST_PRINT_TIME: "0"
       PYTHONUNBUFFERED: "1"
       # Every test and build log goes through this before it reaches the job log or a file:
