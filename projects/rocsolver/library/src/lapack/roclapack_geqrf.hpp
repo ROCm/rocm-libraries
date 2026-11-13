@@ -79,7 +79,7 @@ void rocsolver_geqrf_getMemorySize(const I m,
         // requirements for calling GEQR2 with sub blocks; for the last block, geqr2 may be called
         // with up to n - j_last columns where j_last = ceil((dim - SWITCHSIZE) / jb) * jb
         I dim = std::min(m, n);
-        I j_last = ((dim - GEQxF_GEQx2_SWITCHSIZE + jb - 1) / jb) * jb;
+        I j_last = roundup(dim - GEQxF_GEQx2_SWITCHSIZE, jb);
         rocsolver_geqr2_getMemorySize<BATCHED, T>(m, std::max(jb, n - j_last), batch_count,
                                                   size_scalars, &w1, &s2, &s1);
         *size_Abyx_norms_trfact = std::max(s2, *size_Abyx_norms_trfact);
@@ -228,7 +228,7 @@ void rocsolver_geqrf_getMemorySize(const I m,
         // requirements for calling GEQR2 with sub blocks; for the last block, geqr2 may be called
         // with up to n - j_last columns where j_last = ceil((dim - SWITCHSIZE) / jb) * jb
         I dim = std::min(m, n);
-        I j_last = ((dim - GEQxF_GEQx2_SWITCHSIZE + jb - 1) / jb) * jb;
+        I j_last = roundup(dim - GEQxF_GEQx2_SWITCHSIZE, jb);
         rocsolver_geqr2_getMemorySize<BATCHED, T>(m, std::max(jb, n - j_last), batch_count,
                                                   size_scalars, &w1, &s2, &s1);
         *size_Abyx_norms_trfact = std::max(s2, *size_Abyx_norms_trfact);
