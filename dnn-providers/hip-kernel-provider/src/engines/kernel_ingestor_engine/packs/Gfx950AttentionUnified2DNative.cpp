@@ -77,7 +77,9 @@ constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_unified
 // KMD fields (14-field schema). Fields a shipped variant holds at one value across the whole
 // catalog (waves_per_eu, kv_storage_dtype, the sink/alibi/qq-bias/softcap switches) are absent:
 // a variant that moved one of them would have to add it here first, or the candidates collide
-// on the catalog key and the loader drops one.
+// on the catalog key and the loader drops one. `num_seqs` is declared but not read: the kernel
+// takes the batch as a kernarg and derives its cu_q search trip count from it, so no batch is
+// baked.
 constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view HEAD_SIZE_FIELD = "head_size";
 constexpr std::string_view NUM_QUERY_HEADS_FIELD = "num_query_heads";
@@ -85,12 +87,13 @@ constexpr std::string_view NUM_KV_HEADS_FIELD = "num_kv_heads";
 constexpr std::string_view BLOCK_SIZE_FIELD = "block_size";
 constexpr std::string_view MASK_TYPE_FIELD = "mask_type";
 constexpr std::string_view SLIDING_WINDOW_FIELD = "sliding_window";
-constexpr std::string_view NUM_SEQS_FIELD = "num_seqs";
 constexpr std::string_view TILE_SIZE_FIELD = "tile_size";
 constexpr std::string_view NUM_WARPS_FIELD = "num_warps";
 constexpr std::string_view BLOCK_M_PER_WARP_FIELD = "block_m_per_warp";
 constexpr std::string_view USE_MFMA_32X32_FIELD = "use_mfma_32x32";
 constexpr std::string_view USE_TRANSPOSED_QK_32X32_FIELD = "use_transposed_qk_32x32";
+/// 1 for an LSE-on kernel, which also writes the stats output head-major ([B, Hq, Sq, 1]).
+constexpr std::string_view EMIT_LSE_FIELD = "emit_lse";
 
 /// The geometry cold selection prefers: narrow 16x16, 4 warps x 16 rows, a 64-token KV tile.
 constexpr int64_t BASELINE_TILE_SIZE = 64;
@@ -108,6 +111,8 @@ constexpr std::string_view MASK_TOKEN = "gfx950_attention_unified_2d.mask_type";
 constexpr std::string_view SLIDING_WINDOW_TOKEN = "gfx950_attention_unified_2d.sliding_window";
 /// The softmax scale, f32, bound as its bit pattern (BoundTokens carry int64_t).
 constexpr std::string_view SCALE_BITS_TOKEN = "gfx950_attention_unified_2d.scale_bits";
+/// The stats output's uid, or NO_STATS for a graph that asks for none.
+constexpr std::string_view STATS_TOKEN = "gfx950_attention_unified_2d.stats.uid";
 
 // ---------------------------------------------------------------------------
 // Matching helpers
@@ -150,6 +155,7 @@ constexpr unified_attention::BoundTokenNames TOKEN_NAMES{Q_TOKEN,
                                                          MASK_TOKEN,
                                                          SLIDING_WINDOW_TOKEN,
                                                          SCALE_BITS_TOKEN,
+                                                         STATS_TOKEN,
                                                          "gfx950 attention_unified_2d"};
 
 /**
@@ -220,7 +226,7 @@ std::optional<BoundTokens> gfx950AttentionUnified2DGraphMatches(const MatchConte
     }
 
     const auto matched = unified_attention::matchAttributes(
-        *operands->attributes, problem, GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME);
+        context, *operands->attributes, problem, GFX950_ATTENTION_UNIFIED_2D_ENGINE_NAME);
     if(!matched.has_value())
     {
         return std::nullopt;
@@ -229,7 +235,7 @@ std::optional<BoundTokens> gfx950AttentionUnified2DGraphMatches(const MatchConte
     // coincide only at Sq == Skv, but they are distinct kernel bodies and the catalog carries
     // both.
     return unified_attention::bindGraph(
-        *operands->attributes, matched->mask, matched->scale, TOKEN_NAMES);
+        *operands->attributes, matched->mask, matched->scale, matched->stats, TOKEN_NAMES);
 }
 
 /// What a candidate bakes, read from its completed metadata and judged buildable.
@@ -241,12 +247,13 @@ struct AttentionUnified2DCandidate
     int64_t blockSize = 0;
     int64_t maskType = 0;
     int64_t slidingWindow = 0;
-    int64_t numSeqs = 0;
     int64_t tileSize = 0;
     int64_t numWarps = 0;
     int64_t blockMPerWarp = 0;
     bool useMfma32x32 = false;
     bool useTransposedQk32x32 = false;
+    /// Also writes the stats output; its kernarg list ends in lse_ptr.
+    bool emitLse = false;
 };
 
 /**
@@ -266,15 +273,19 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
     const auto blockSize = integerMetadata(kernel, BLOCK_SIZE_FIELD);
     const auto maskType = integerMetadata(kernel, MASK_TYPE_FIELD);
     const auto slidingWindow = integerMetadata(kernel, SLIDING_WINDOW_FIELD);
-    const auto numSeqs = integerMetadata(kernel, NUM_SEQS_FIELD);
     const auto tileSize = integerMetadata(kernel, TILE_SIZE_FIELD);
     const auto numWarps = integerMetadata(kernel, NUM_WARPS_FIELD);
     const auto blockMPerWarp = integerMetadata(kernel, BLOCK_M_PER_WARP_FIELD);
     const auto useMfma32x32 = integerMetadata(kernel, USE_MFMA_32X32_FIELD);
     const auto useTransposedQk32x32 = integerMetadata(kernel, USE_TRANSPOSED_QK_32X32_FIELD);
+    const auto emitLse = integerMetadata(kernel, EMIT_LSE_FIELD);
     if(!headSize || !numQueryHeads || !numKvHeads || !blockSize || !maskType || !slidingWindow
-       || !numSeqs || !tileSize || !numWarps || !blockMPerWarp || !useMfma32x32
-       || !useTransposedQk32x32)
+       || !tileSize || !numWarps || !blockMPerWarp || !useMfma32x32 || !useTransposedQk32x32
+       || !emitLse)
+    {
+        return std::nullopt;
+    }
+    if(*emitLse != 0 && *emitLse != 1)
     {
         return std::nullopt;
     }
@@ -293,9 +304,7 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
     {
         return std::nullopt;
     }
-    // A capacity of 0 or less would make the kernel run its unspecialized 32-iteration
-    // search; the catalog always states one, so a record without it is malformed.
-    if(*numSeqs <= 0 || *useMfma32x32 < 0 || *useMfma32x32 > 1 || *useTransposedQk32x32 < 0
+    if(*useMfma32x32 < 0 || *useMfma32x32 > 1 || *useTransposedQk32x32 < 0
        || *useTransposedQk32x32 > 1)
     {
         return std::nullopt;
@@ -318,12 +327,12 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
                                        *blockSize,
                                        *maskType,
                                        *slidingWindow,
-                                       *numSeqs,
                                        *tileSize,
                                        *numWarps,
                                        *blockMPerWarp,
                                        *useMfma32x32 != 0,
-                                       *useTransposedQk32x32 != 0};
+                                       *useTransposedQk32x32 != 0,
+                                       *emitLse != 0};
 }
 
 /**
@@ -335,10 +344,10 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
  * what this checks against the graph:
  *
  *   - dtype, head_size, num_query_heads, num_kv_heads, the mask kind and sliding window;
- *   - block_size, which must divide seqlen_kv (the identity cache is whole blocks);
- *   - the batch CAPACITY (`num_seqs`): the kernel's binary search resolves at most
- *     2^iters - 1 sequences, so a larger batch reads another sequence's lengths without a
- *     fault.
+ *   - block_size, which must divide seqlen_kv (the identity cache is whole blocks).
+ *
+ * The batch is not bounded here: the kernel derives its cu_q search trip count from the
+ * `num_seqs` kernarg, so one binary serves every batch the identity table can index.
  */
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& bound,
@@ -394,15 +403,18 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
 
-    // The identity cache must be whole blocks of THIS candidate's size, and small enough for
-    // the table the kernel indexes in 32 bits.
-    if(!gfx950Unified2DWorkspaceLayout(problem.batch, problem.seqLenKv, candidate->blockSize)
-            .has_value())
+    // Only an LSE-on kernel serves a graph that asks for stats, and only such a graph: the
+    // LSE store is baked in, with its trailing lse_ptr.
+    const auto stats = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, STATS_TOKEN);
+    if(!stats.has_value() || candidate->emitLse != (*stats != unified_attention::NO_STATS))
     {
         return false;
     }
 
-    return problem.batch <= gfx950Unified2DBatchCapacity(candidate->numSeqs);
+    // The identity cache must be whole blocks of THIS candidate's size, and small enough for
+    // the table the kernel indexes in 32 bits.
+    return gfx950Unified2DWorkspaceLayout(problem.batch, problem.seqLenKv, candidate->blockSize)
+        .has_value();
 }
 
 /// Scores for the cold ranking. The baseline geometry scores `BASELINE_SCORE`; every
@@ -456,8 +468,9 @@ double scoreKernel(const MatchContext& /*context*/,
 // Dispatch
 // ---------------------------------------------------------------------------
 
-/// The kernel signature for all variants in this engine: 10 pointers, 6 scalars and the two
-/// strides (`_attn_signature(include_bt_stride=True, include_qq_bias_stride=True)`).
+/// The kernel signature for all variants in this engine: 10 pointers, 6 scalars, the two
+/// strides (`_attn_signature(include_bt_stride=True, include_qq_bias_stride=True)`) and the
+/// runtime shape kernargs (`RUNTIME_KERNARG_FIELDS`: head counts and window).
 ///
 /// NAMES ARE LOAD-BEARING. requireSignatureMatch compares kind and size always, but names
 /// only when BOTH sides carry one. Kind and size alone cannot tell the ten pointers apart, nor
@@ -469,31 +482,42 @@ double scoreKernel(const MatchContext& /*context*/,
 /// dispatch rather than silently weakening the check.
 ///
 /// Offsets mirror the packed kernarg layout. They are not compared -- they exist so the
-/// mismatch diagnostic prints the real layout beside the recorded one.
-std::vector<KernelArgument> unified2DKernelSignature()
+/// mismatch diagnostic prints the real layout beside the recorded one. An LSE-on kernel
+/// (@p emitLse) appends lse_ptr.
+std::vector<KernelArgument> unified2DKernelSignature(bool emitLse = false)
 {
     constexpr auto PTR = static_cast<uint32_t>(sizeof(void*));
     constexpr auto I32 = static_cast<uint32_t>(sizeof(int32_t));
     constexpr auto F32 = static_cast<uint32_t>(sizeof(float));
 
-    return {KernelArgument{"global_buffer", PTR, 0, "output_ptr"},
-            KernelArgument{"global_buffer", PTR, 8, "query_ptr"},
-            KernelArgument{"global_buffer", PTR, 16, "key_cache_ptr"},
-            KernelArgument{"global_buffer", PTR, 24, "value_cache_ptr"},
-            KernelArgument{"global_buffer", PTR, 32, "sink_ptr"},
-            KernelArgument{"global_buffer", PTR, 40, "block_tables_ptr"},
-            KernelArgument{"global_buffer", PTR, 48, "seq_lens_ptr"},
-            KernelArgument{"global_buffer", PTR, 56, "alibi_slopes_ptr"},
-            KernelArgument{"global_buffer", PTR, 64, "qq_bias_ptr"},
-            KernelArgument{"global_buffer", PTR, 72, "query_start_len_ptr"},
-            KernelArgument{"by_value", F32, 80, "scale"},
-            KernelArgument{"by_value", F32, 84, "k_scale"},
-            KernelArgument{"by_value", F32, 88, "v_scale"},
-            KernelArgument{"by_value", F32, 92, "out_scale"},
-            KernelArgument{"by_value", F32, 96, "softcap"},
-            KernelArgument{"by_value", I32, 100, "num_seqs"},
-            KernelArgument{"by_value", I32, 104, "block_table_stride"},
-            KernelArgument{"by_value", I32, 108, "qq_bias_stride_0"}};
+    std::vector<KernelArgument> arguments{
+        KernelArgument{"global_buffer", PTR, 0, "output_ptr"},
+        KernelArgument{"global_buffer", PTR, 8, "query_ptr"},
+        KernelArgument{"global_buffer", PTR, 16, "key_cache_ptr"},
+        KernelArgument{"global_buffer", PTR, 24, "value_cache_ptr"},
+        KernelArgument{"global_buffer", PTR, 32, "sink_ptr"},
+        KernelArgument{"global_buffer", PTR, 40, "block_tables_ptr"},
+        KernelArgument{"global_buffer", PTR, 48, "seq_lens_ptr"},
+        KernelArgument{"global_buffer", PTR, 56, "alibi_slopes_ptr"},
+        KernelArgument{"global_buffer", PTR, 64, "qq_bias_ptr"},
+        KernelArgument{"global_buffer", PTR, 72, "query_start_len_ptr"},
+        KernelArgument{"by_value", F32, 80, "scale"},
+        KernelArgument{"by_value", F32, 84, "k_scale"},
+        KernelArgument{"by_value", F32, 88, "v_scale"},
+        KernelArgument{"by_value", F32, 92, "out_scale"},
+        KernelArgument{"by_value", F32, 96, "softcap"},
+        KernelArgument{"by_value", I32, 100, "num_seqs"},
+        KernelArgument{"by_value", I32, 104, "block_table_stride"},
+        KernelArgument{"by_value", I32, 108, "qq_bias_stride_0"},
+        KernelArgument{"by_value", I32, 112, "num_query_heads"},
+        KernelArgument{"by_value", I32, 116, "num_kv_heads"},
+        KernelArgument{"by_value", I32, 120, "sliding_window"}};
+    if(emitLse)
+    {
+        // After the runtime kernargs, 8-byte aligned (read off the compiled LSE kernel).
+        arguments.push_back(KernelArgument{"global_buffer", PTR, 128, "lse_ptr"});
+    }
+    return arguments;
 }
 
 /// The compiled kernel plus everything launch() needs, owning nothing that points back into
@@ -505,12 +529,14 @@ public:
                                      UnifiedAttentionBinding binding,
                                      UnifiedAttentionProblem problem,
                                      Gfx950Unified2DWorkspaceLayout layout,
-                                     std::vector<unsigned char> workspaceImage)
+                                     std::vector<unsigned char> workspaceImage,
+                                     int64_t slidingWindow)
         : _code(std::move(code))
         , _binding(binding)
         , _problem(problem)
         , _layout(layout)
         , _workspaceImage(std::move(workspaceImage))
+        , _slidingWindow(slidingWindow)
     {
     }
 
@@ -539,12 +565,19 @@ public:
         return _workspaceImage;
     }
 
+    /// The variant's window, which the kernel reads as a kernarg.
+    int64_t slidingWindow() const
+    {
+        return _slidingWindow;
+    }
+
 private:
     IngestorKernelCode _code;
     UnifiedAttentionBinding _binding;
     UnifiedAttentionProblem _problem;
     Gfx950Unified2DWorkspaceLayout _layout;
     std::vector<unsigned char> _workspaceImage;
+    int64_t _slidingWindow = 0;
 };
 
 /// The graph's problem, read from the bound Q and K uids. A null tensor means a bound uid
@@ -586,15 +619,6 @@ Gfx950Unified2DWorkspaceLayout requireLayout(const AttentionUnified2DCandidate& 
                                              const KernelDefinition& kernel)
 {
     const std::string name = toString(kernel.kernelId);
-    const auto capacity = gfx950Unified2DBatchCapacity(candidate.numSeqs);
-    if(problem.batch > capacity)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "gfx950 attention_unified_2d: kernel '" + name + "' serves at most "
-                + std::to_string(capacity) + " sequences and the graph has "
-                + std::to_string(problem.batch));
-    }
     const auto layout
         = gfx950Unified2DWorkspaceLayout(problem.batch, problem.seqLenKv, candidate.blockSize);
     if(!layout.has_value())
@@ -651,6 +675,16 @@ public:
         }
 
         const auto candidate = requireCandidate(kernel);
+        // kernelMatches pairs them; a caller that skipped it would launch the wrong kernarg
+        // list.
+        if(candidate.emitLse != (binding.stats != unified_attention::NO_STATS))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "gfx950 attention_unified_2d: kernel '" + toString(kernel.kernelId)
+                    + (candidate.emitLse ? "' writes stats, but the graph asks for none"
+                                         : "' writes no stats, but the graph asks for them"));
+        }
         const auto problem = boundProblem(context, binding);
         const auto layout = requireLayout(candidate, problem, kernel);
 
@@ -666,8 +700,8 @@ public:
                     + "' cannot stage paged-KV metadata for this graph");
         }
 
-        auto code
-            = buildIngestorKernelCode(_kpackLoader, context, kernel, unified2DKernelSignature());
+        auto code = buildIngestorKernelCode(
+            _kpackLoader, context, kernel, unified2DKernelSignature(candidate.emitLse));
 
         // Grid from the SELECTED CANDIDATE'S geometry and the GRAPH PROBLEM, not from
         // descriptor shape metadata: the binary takes its shape at runtime.
@@ -683,7 +717,7 @@ public:
         code.setGridSize(geometry.gridX, geometry.gridY, geometry.gridZ);
 
         return std::make_unique<PreparedGfx950AttentionUnified2D>(
-            std::move(code), binding, problem, layout, std::move(*image));
+            std::move(code), binding, problem, layout, std::move(*image), candidate.slidingWindow);
     }
 
     void launch(const Handle& handle,
@@ -742,25 +776,60 @@ public:
         const int32_t noQqBiasStride = 0;
 
         const auto& p = preparedUnified.problem();
-        preparedUnified.kernelForStream(stream).launch(stream,
-                                                       o.ptr,
-                                                       q.ptr,
-                                                       k.ptr,
-                                                       v.ptr,
-                                                       unused,
-                                                       blockTables,
-                                                       seqLens,
-                                                       unused,
-                                                       unused,
-                                                       queryStartLen,
-                                                       binding.scale,
-                                                       neutralScale,
-                                                       neutralScale,
-                                                       neutralScale,
-                                                       noSoftcap,
-                                                       static_cast<int32_t>(p.batch),
-                                                       static_cast<int32_t>(layout.blocksPerSeq),
-                                                       noQqBiasStride);
+        if(binding.stats != unified_attention::NO_STATS)
+        {
+            // The LSE-on kernel: the same arguments, then the stats output.
+            const auto stats = hipdnn_plugin_sdk::findDeviceBuffer(
+                binding.stats, deviceBuffers, numDeviceBuffers);
+            preparedUnified.kernelForStream(stream).launch(
+                stream,
+                o.ptr,
+                q.ptr,
+                k.ptr,
+                v.ptr,
+                unused,
+                blockTables,
+                seqLens,
+                unused,
+                unused,
+                queryStartLen,
+                binding.scale,
+                neutralScale,
+                neutralScale,
+                neutralScale,
+                noSoftcap,
+                static_cast<int32_t>(p.batch),
+                static_cast<int32_t>(layout.blocksPerSeq),
+                noQqBiasStride,
+                static_cast<int32_t>(p.numQueryHeads),
+                static_cast<int32_t>(p.numKvHeads),
+                static_cast<int32_t>(preparedUnified.slidingWindow()),
+                stats.ptr);
+            return;
+        }
+        preparedUnified.kernelForStream(stream).launch(
+            stream,
+            o.ptr,
+            q.ptr,
+            k.ptr,
+            v.ptr,
+            unused,
+            blockTables,
+            seqLens,
+            unused,
+            unused,
+            queryStartLen,
+            binding.scale,
+            neutralScale,
+            neutralScale,
+            neutralScale,
+            noSoftcap,
+            static_cast<int32_t>(p.batch),
+            static_cast<int32_t>(layout.blocksPerSeq),
+            noQqBiasStride,
+            static_cast<int32_t>(p.numQueryHeads),
+            static_cast<int32_t>(p.numKvHeads),
+            static_cast<int32_t>(preparedUnified.slidingWindow()));
     }
 
 private:

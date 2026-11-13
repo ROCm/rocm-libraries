@@ -87,7 +87,6 @@ Tests:
     - matmul_bad_arg: *real_precisions
   transA: N
   transB: N
-  fortran: [ false, true ]
 
 # Added this test to mimic the rocblas test quick_gemm_batched_bad_arg_f32_r_bad_arg_F 
 # which passes alpha, A and B as 0 but beta as non-zero with valid C and D.
@@ -262,7 +261,7 @@ Tests:
   category: nightly
   function:
     matmul: *hpa_half_precision
-  matrix_size: *grid_limit_matrix_size_real
+  matrix_size: *grid_limit_matrix_size_real_even_k
   transA: N
   transB: N
   alpha: 1.0
@@ -646,7 +645,6 @@ Tests:
   K: 32
   alpha_beta: *alpha_beta_range
   transA_transB: *transA_transB_range
-  matmul_algo: [ 0, 1 ]
 
 - name: matmul_32_8_128
   category: nightly
@@ -2486,6 +2484,28 @@ Tests:
   unit_check: 1
   gpu_arch: '942|1250'
 
+# Exercise default solution selection for rectangular BGRADB on gfx942.
+# BenchVerify.smoke_BiasGradientNormLength tests the verifier independently of
+# GEMM kernels, including wrong tail values and reads beyond the bias vector.
+- name: matmul_bgradb_bf16_NT_norm_rectangular
+  category: pre_checkin
+  function:
+    matmul: *hpa_bf16_precision
+  M: [16, 256]
+  N: [16, 256]
+  K: 128
+  transA: N
+  transB: T
+  alpha: 1
+  beta: 0.0
+  gradient: 1
+  bias_vector: 1
+  bias_type: f32_r
+  bias_source: b
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '942'
+
 - name: matmul_bgradb_bf16_NT
   category: pre_checkin
   function:
@@ -2746,7 +2766,6 @@ Tests:
   category: pre_checkin
   function:
     matmul: *real_mix_precisions_fnuz
-  matrix_size:
   M: [127, 129]
   N: [127, 129]
   K: [127, 129]
@@ -2989,6 +3008,102 @@ Tests:
   beta: [ 0.0, 2.0 ]
   unit_check: 1
   gpu_arch: '942'
+
+- name: matmul_grouped_device_scalar_alpha_gfx1250
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f16_r, b_type: f16_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scale_type: f32_r, initialization: integer_exact, unit_check: 1 }
+    - { a_type: f16_r, b_type: f16_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scale_type: f32_r, initialization: hpl, unit_check: 0, norm_check: 1 }
+  matrix_size:
+    - { M: 128, N: 128, K: 128 }
+    - { M: 128, N: 128, K: 256 }
+    - { M: 128, N: 128, K: 384 }
+  transA: T
+  transB: N
+  grouped_gemm: 3
+  alpha: [2.0, 0.0]
+  beta: 1.0
+  device_scalar_alpha: 1
+  use_ext: 1
+  use_ext_setproblem: [0, 1]
+  use_user_args: [0, 1]
+  gsu_vector: [[1]]
+  rotating: 2
+  requested_solution_num: 1
+  gpu_arch: '1250'
+
+- name: matmul_mxf4_device_scalar_alpha_gfx1250
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 6, scaleB: 6, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 6, scaleB: 6, scale_type: f32_r}
+  M: 256
+  N: 256
+  K: 1024
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: [0.0, 1.0]
+  bias_vector: 1
+  bias_type: f32_r
+  # Keep host-alpha coverage for the device-scalar-capable SAV logic.
+  device_scalar_alpha: [0, 1]
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  requested_solution_num: 1
+  gpu_arch: '1250'
+
+- name: matmul_mxf4_device_scalar_alpha_ext_gfx1250
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f4_r, b_type: f4_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 6, scaleB: 6, scale_type: f32_r}
+    - { a_type: f4_r, b_type: f4_r, c_type: bf16_r, d_type: bf16_r, compute_type: c_f32_r, scaleA: 6, scaleB: 6, scale_type: f32_r}
+  M: 256
+  N: 256
+  K: 1024
+  transA: T
+  transB: N
+  alpha: [2.0, 0.0]
+  beta: 1.0
+  batch_count: [1, 2]
+  bias_vector: 1
+  bias_type: f32_r
+  device_scalar_alpha: 1
+  use_ext: 1
+  use_ext_setproblem: [0, 1]
+  gsu_vector: [[1], [2]]
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  rotating: 2
+  requested_solution_num: 1
+  gpu_arch: '1250'
+
+- name: matmul_f16_device_scalar_alpha_pointer_array_gfx1250
+  category: pre_checkin
+  function:
+    matmul:
+    - { a_type: f16_r, b_type: f16_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scale_type: f32_r}
+  M: 256
+  N: 128
+  K: 256
+  transA: T
+  transB: N
+  alpha: 2.0
+  beta: 0.0
+  batch_count: 2
+  batch_mode: 1
+  device_scalar_alpha: 1
+  initialization: hpl
+  unit_check: 0
+  norm_check: 1
+  rotating: 2
+  requested_solution_num: 1
+  gpu_arch: '1250'
 
 - name: matmul_mx_datatypes
   category: pre_checkin

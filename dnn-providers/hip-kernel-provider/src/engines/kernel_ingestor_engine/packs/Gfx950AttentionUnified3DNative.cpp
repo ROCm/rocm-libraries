@@ -102,6 +102,8 @@ constexpr std::string_view MASK_TYPE_FIELD = "mask_type";
 constexpr std::string_view SLIDING_WINDOW_FIELD = "sliding_window";
 constexpr std::string_view NUM_SEGMENTS_FIELD = "num_segments";
 constexpr std::string_view USE_DECODE_GRID_FIELD = "use_decode_grid";
+/// 1 for an LSE-on kernel, whose reduce also writes the stats output.
+constexpr std::string_view EMIT_LSE_FIELD = "emit_lse";
 
 /// head_size 256 is rocKE's d256_decode cohort: bf16 only.
 constexpr int64_t D256_HEAD_SIZE = 256;
@@ -117,6 +119,8 @@ constexpr std::string_view MASK_TOKEN = "gfx950_attention_unified_3d.mask_type";
 constexpr std::string_view SLIDING_WINDOW_TOKEN = "gfx950_attention_unified_3d.sliding_window";
 /// The softmax scale, f32, bound as its bit pattern (BoundTokens carry int64_t).
 constexpr std::string_view SCALE_BITS_TOKEN = "gfx950_attention_unified_3d.scale_bits";
+/// The stats output's uid, or NO_STATS for a graph that asks for none.
+constexpr std::string_view STATS_TOKEN = "gfx950_attention_unified_3d.stats.uid";
 
 // ---------------------------------------------------------------------------
 // Matching helpers
@@ -185,6 +189,7 @@ constexpr unified_attention::BoundTokenNames TOKEN_NAMES{Q_TOKEN,
                                                          MASK_TOKEN,
                                                          SLIDING_WINDOW_TOKEN,
                                                          SCALE_BITS_TOKEN,
+                                                         STATS_TOKEN,
                                                          "gfx950 attention_unified_3d"};
 
 /**
@@ -250,15 +255,18 @@ std::optional<BoundTokens> gfx950AttentionUnified3DGraphMatches(const MatchConte
     }
 
     const auto matched = unified_attention::matchAttributes(
-        *operands->attributes, problem, GFX950_ATTENTION_UNIFIED_3D_ENGINE_NAME);
+        context, *operands->attributes, problem, GFX950_ATTENTION_UNIFIED_3D_ENGINE_NAME);
     if(!matched.has_value())
     {
         return std::nullopt;
     }
     // All three mask kinds are served; NO_MASK by the bottom-right causal kernel (see
     // decodeMaskKey), which the bind records as the key kernelMatches compares.
-    return unified_attention::bindGraph(
-        *operands->attributes, decodeMaskKey(matched->mask), matched->scale, TOKEN_NAMES);
+    return unified_attention::bindGraph(*operands->attributes,
+                                        decodeMaskKey(matched->mask),
+                                        matched->scale,
+                                        matched->stats,
+                                        TOKEN_NAMES);
 }
 
 /// What a candidate bakes, read from its completed metadata and judged buildable.
@@ -271,6 +279,8 @@ struct AttentionUnified3DCandidate
     int64_t maskType = 0;
     int64_t slidingWindow = 0;
     int64_t numSegments = 0;
+    /// The reduce also writes the stats output; its kernarg list ends in lse_ptr.
+    bool emitLse = false;
 };
 
 /**
@@ -298,8 +308,13 @@ std::optional<AttentionUnified3DCandidate> candidateFor(const KernelDefinition& 
     const auto slidingWindow = integerMetadata(kernel, SLIDING_WINDOW_FIELD);
     const auto numSegments = integerMetadata(kernel, NUM_SEGMENTS_FIELD);
     const auto useDecodeGrid = integerMetadata(kernel, USE_DECODE_GRID_FIELD);
+    const auto emitLse = integerMetadata(kernel, EMIT_LSE_FIELD);
     if(!headSize || !numQueryHeads || !numKvHeads || !blockSize || !maskType || !slidingWindow
-       || !numSegments || !useDecodeGrid)
+       || !numSegments || !useDecodeGrid || !emitLse)
+    {
+        return std::nullopt;
+    }
+    if(*emitLse != 0 && *emitLse != 1)
     {
         return std::nullopt;
     }
@@ -325,7 +340,8 @@ std::optional<AttentionUnified3DCandidate> candidateFor(const KernelDefinition& 
                                        *blockSize,
                                        *maskType,
                                        *slidingWindow,
-                                       *numSegments};
+                                       *numSegments,
+                                       *emitLse != 0};
 }
 
 /**
@@ -404,6 +420,14 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
 
+    // Only an LSE-on kernel serves a graph that asks for stats, and only such a graph: the
+    // reduce's LSE store is baked in, with its trailing lse_ptr.
+    const auto stats = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, STATS_TOKEN);
+    if(!stats.has_value() || candidate->emitLse != (*stats != unified_attention::NO_STATS))
+    {
+        return false;
+    }
+
     // The identity cache must be whole blocks of THIS candidate's size, and the scratch
     // small enough for the kernels' 32-bit indexing.
     return gfx950Unified3DWorkspaceLayout(problem.batch,
@@ -448,7 +472,8 @@ double scoreKernel(const MatchContext& /*context*/,
 // ---------------------------------------------------------------------------
 
 /// The segment kernel's signature: 12 pointers (the three scratch outputs first), 4 f32
-/// scalars and three i32 (`_3d_signature`).
+/// scalars, three i32 and the runtime shape kernargs (`_tiled_3d_signatures`: head counts and
+/// window).
 ///
 /// NAMES ARE LOAD-BEARING. requireSignatureMatch compares kind and size always, but names
 /// only when BOTH sides carry one; kind and size alone cannot tell the twelve pointers
@@ -479,21 +504,35 @@ std::vector<KernelArgument> unified3DSegmentSignature()
             KernelArgument{"by_value", F32, 108, "softcap"},
             KernelArgument{"by_value", I32, 112, "num_seqs"},
             KernelArgument{"by_value", I32, 116, "block_table_stride"},
-            KernelArgument{"by_value", I32, 120, "qq_bias_stride_0"}};
+            KernelArgument{"by_value", I32, 120, "qq_bias_stride_0"},
+            KernelArgument{"by_value", I32, 124, "num_query_heads"},
+            KernelArgument{"by_value", I32, 128, "num_kv_heads"},
+            KernelArgument{"by_value", I32, 132, "sliding_window"}};
 }
 
-/// The reduce kernel's signature: the output then the three scratch arrays it folds, and
-/// seq_lens (`_reduce_signature`). Names load-bearing as above; keep them identical to
-/// build_unified_attention_reduce_tiled's `b.param` calls.
-std::vector<KernelArgument> unified3DReduceSignature()
+/// The reduce kernel's signature: the output then the three scratch arrays it folds,
+/// seq_lens and the runtime query head count (`_tiled_3d_signatures`). Names load-bearing as
+/// above; keep them identical to build_unified_attention_reduce_tiled's `b.param` calls. An
+/// LSE-on reduce (@p emitLse) appends lse_ptr.
+std::vector<KernelArgument> unified3DReduceSignature(bool emitLse = false)
 {
     constexpr auto PTR = static_cast<uint32_t>(sizeof(void*));
+    constexpr auto I32 = static_cast<uint32_t>(sizeof(int32_t));
 
-    return {KernelArgument{"global_buffer", PTR, 0, "output_ptr"},
-            KernelArgument{"global_buffer", PTR, 8, "segm_output_ptr"},
-            KernelArgument{"global_buffer", PTR, 16, "segm_max_ptr"},
-            KernelArgument{"global_buffer", PTR, 24, "segm_expsum_ptr"},
-            KernelArgument{"global_buffer", PTR, 32, "seq_lens_ptr"}};
+    std::vector<KernelArgument> arguments{
+        KernelArgument{"global_buffer", PTR, 0, "output_ptr"},
+        KernelArgument{"global_buffer", PTR, 8, "segm_output_ptr"},
+        KernelArgument{"global_buffer", PTR, 16, "segm_max_ptr"},
+        KernelArgument{"global_buffer", PTR, 24, "segm_expsum_ptr"},
+        KernelArgument{"global_buffer", PTR, 32, "seq_lens_ptr"},
+        KernelArgument{"by_value", I32, 40, "num_query_heads"}};
+    if(emitLse)
+    {
+        // The LSE-on reduce (UnifiedAttentionReduceTiledSpec.emit_lse) appends it after the
+        // runtime head count, 8-byte aligned (read off the compiled LSE reduce).
+        arguments.push_back(KernelArgument{"global_buffer", PTR, 48, "lse_ptr"});
+    }
+    return arguments;
 }
 
 /// Both compiled kernels plus everything launch() needs, owning nothing that points back
@@ -506,13 +545,15 @@ public:
                                      UnifiedAttentionBinding binding,
                                      UnifiedAttentionProblem problem,
                                      Gfx950Unified3DWorkspaceLayout layout,
-                                     std::vector<unsigned char> workspaceImage)
+                                     std::vector<unsigned char> workspaceImage,
+                                     int64_t slidingWindow)
         : _segment(std::move(segment))
         , _reduce(std::move(reduce))
         , _binding(binding)
         , _problem(problem)
         , _layout(layout)
         , _workspaceImage(std::move(workspaceImage))
+        , _slidingWindow(slidingWindow)
     {
     }
 
@@ -546,6 +587,12 @@ public:
         return _workspaceImage;
     }
 
+    /// The variant's window, which the kernel reads as a kernarg.
+    int64_t slidingWindow() const
+    {
+        return _slidingWindow;
+    }
+
 private:
     IngestorKernelCode _segment;
     IngestorKernelCode _reduce;
@@ -553,6 +600,7 @@ private:
     UnifiedAttentionProblem _problem;
     Gfx950Unified3DWorkspaceLayout _layout;
     std::vector<unsigned char> _workspaceImage;
+    int64_t _slidingWindow = 0;
 };
 
 /// The graph's problem, read from the bound Q and K uids. A null tensor means a bound uid
@@ -669,6 +717,16 @@ public:
         }
 
         const auto candidate = requireCandidate(kernel);
+        // kernelMatches pairs them; a caller that skipped it would launch the wrong reduce
+        // kernarg list.
+        if(candidate.emitLse != (binding.stats != unified_attention::NO_STATS))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                "gfx950 attention_unified_3d: kernel '" + toString(kernel.kernelId)
+                    + (candidate.emitLse ? "' writes stats, but the graph asks for none"
+                                         : "' writes no stats, but the graph asks for them"));
+        }
         const auto problem = boundProblem(context, binding);
         const auto layout = requireLayout(candidate, problem, kernel);
 
@@ -695,7 +753,7 @@ public:
         if(reduceDefinition.source.kind == hipdnn_plugin_sdk::ingestor::KernelSourceKind::KPACK)
         {
             requireSignatureMatch(reduceDefinition.source.signature,
-                                  unified3DReduceSignature(),
+                                  unified3DReduceSignature(candidate.emitLse),
                                   reduceDefinition.source.symbol,
                                   hipdnn_plugin_sdk::ingestor::describeDescriptor(
                                       "kernel",
@@ -705,7 +763,7 @@ public:
         auto segment = buildIngestorKernelCode(
             _kpackLoader, context, segmentDefinition, unified3DSegmentSignature());
         auto reduce = buildIngestorKernelCode(
-            _kpackLoader, context, reduceDefinition, unified3DReduceSignature());
+            _kpackLoader, context, reduceDefinition, unified3DReduceSignature(candidate.emitLse));
 
         const auto geometry = gfx950Unified3DLaunchGeometry(problem.numQueryHeads,
                                                             problem.numKvHeads,
@@ -718,8 +776,13 @@ public:
         reduce.setBlockSize(geometry.blockX, 1, 1);
         reduce.setGridSize(geometry.reduceGridX, geometry.reduceGridY, 1);
 
-        return std::make_unique<PreparedGfx950AttentionUnified3D>(
-            std::move(segment), std::move(reduce), binding, problem, layout, std::move(*image));
+        return std::make_unique<PreparedGfx950AttentionUnified3D>(std::move(segment),
+                                                                  std::move(reduce),
+                                                                  binding,
+                                                                  problem,
+                                                                  layout,
+                                                                  std::move(*image),
+                                                                  candidate.slidingWindow);
     }
 
     void launch(const Handle& handle,
@@ -802,9 +865,32 @@ public:
             noSoftcap,
             static_cast<int32_t>(p.batch),
             static_cast<int32_t>(layout.identity.blocksPerSeq),
-            noQqBiasStride);
-        preparedUnified.reduceForStream(stream).launch(
-            stream, o.ptr, segmOutput, segmMax, segmExpsum, seqLens);
+            noQqBiasStride,
+            static_cast<int32_t>(p.numQueryHeads),
+            static_cast<int32_t>(p.numKvHeads),
+            static_cast<int32_t>(preparedUnified.slidingWindow()));
+        if(binding.stats != unified_attention::NO_STATS)
+        {
+            // The LSE-on reduce: the same arguments, then the stats output.
+            const auto stats = hipdnn_plugin_sdk::findDeviceBuffer(
+                binding.stats, deviceBuffers, numDeviceBuffers);
+            preparedUnified.reduceForStream(stream).launch(stream,
+                                                           o.ptr,
+                                                           segmOutput,
+                                                           segmMax,
+                                                           segmExpsum,
+                                                           seqLens,
+                                                           static_cast<int32_t>(p.numQueryHeads),
+                                                           stats.ptr);
+            return;
+        }
+        preparedUnified.reduceForStream(stream).launch(stream,
+                                                       o.ptr,
+                                                       segmOutput,
+                                                       segmMax,
+                                                       segmExpsum,
+                                                       seqLens,
+                                                       static_cast<int32_t>(p.numQueryHeads));
     }
 
 private:

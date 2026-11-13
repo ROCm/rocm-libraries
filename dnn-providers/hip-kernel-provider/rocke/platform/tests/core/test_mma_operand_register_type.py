@@ -34,8 +34,10 @@ from rocke.core.ir import (
     IRBuilder,
     KernelDef,
     PtrType,
+    VectorType,
 )
 from rocke.core.lower_hip import lower_kernel_to_hip
+from rocke.core.mma_operand import mma_operand_needs_reinterpret
 from rocke.tests.engines import (
     assert_both_engines_reject,
     assert_both_engines_reject_hip,
@@ -82,6 +84,27 @@ def _zeros(elem, count):
 
 
 _F32_MFMAS = [("mfma_f32_16x16x4_f32", 4), ("mfma_f32_32x32x2_f32", 16)]
+
+
+@pytest.mark.parametrize("role", ["a", "b"])
+@pytest.mark.parametrize("count", [4.0, True, False, "4", None])
+@pytest.mark.parametrize("field", ["operand", "register", "both"])
+def test_mma_register_bridge_rejects_non_integer_vector_counts(role, count, field):
+    op_id = "wmma_i32_16x16x16_iu8"
+    valid = VectorType(I32, 4)
+    malformed = VectorType(I32, count)
+    operand = malformed if field in ("operand", "both") else valid
+    register = malformed if field in ("register", "both") else valid
+    # Equal malformed types must not bypass validation through the fast path.
+    rejected = "operand" if field == "both" else field
+    with pytest.raises(ValueError) as caught:
+        mma_operand_needs_reinterpret(
+            op_id, role, operand, register, ArchTarget.from_gfx("gfx1151")
+        )
+    assert str(caught.value) == (
+        f"MMA operand {role} of {op_id!r} requires an integer "
+        f"{rejected} vector count, got {count!r}"
+    )
 
 
 @pytest.mark.parametrize(("op_id", "accumulator_count"), _F32_MFMAS)
@@ -252,6 +275,8 @@ def test_an_operand_of_another_number_format_fails(
     arch, op_id, a_operand, b_operand, accumulator, message
 ):
     kernel = _mma_kernel(arch, op_id, a_operand, b_operand, accumulator, F32)
+    if op_id in ("mfma_f32_16x16x4_f32", "mfma_f32_32x32x2_f32"):
+        message = "MFMA requires src0 and src1 to be f32"
     assert_both_engines_reject(kernel, arch, ValueError, message)
     _assert_hip_rejects(kernel, arch, op_id, message)
 
@@ -288,6 +313,7 @@ def test_an_f32_operand_of_another_width_fails_in_every_lowering():
         _zeros(F32, 4),
         F32,
     )
+    message = "MFMA requires src0 and src1 to be f32"
     assert_both_engines_reject(kernel, "gfx942", ValueError, message)
     _assert_hip_rejects(kernel, "gfx942", "mfma_f32_16x16x4_f32", message)
 

@@ -63,6 +63,7 @@ inline constexpr std::string_view MASK_TOKEN = "gfx950_attention_unified_2d.mask
 inline constexpr std::string_view SLIDING_WINDOW_TOKEN
     = "gfx950_attention_unified_2d.sliding_window";
 inline constexpr std::string_view SCALE_BITS_TOKEN = "gfx950_attention_unified_2d.scale_bits";
+inline constexpr std::string_view STATS_TOKEN = "gfx950_attention_unified_2d.stats.uid";
 
 using namespace unified_attention;
 
@@ -87,7 +88,8 @@ inline std::optional<BoundTokens> matchGraph(const GraphSpec& spec)
 
 /// The fields the engine's KMD declares, as a completed catalog record carries them. The
 /// defaults are the shipped baseline kernel for the default graph (bf16, D128, Hq 8 / Hkv 2,
-/// top-left causal, block 16, T64, 4 warps x 16 rows, capacity 511).
+/// top-left causal, block 16, T64, 4 warps x 16 rows, num_seqs 511). The engine does not read
+/// num_seqs -- the batch is a kernarg -- but the KMD still declares it.
 struct KernelSpec
 {
     std::string dtype = "BF16";
@@ -103,6 +105,8 @@ struct KernelSpec
     int64_t blockMPerWarp = 16;
     int64_t useMfma32x32 = 0;
     int64_t useTransposedQk32x32 = 0;
+    /// 1 for an LSE-on kernel, which serves only graphs that ask for stats.
+    int64_t emitLse = 0;
     /// The descriptor id's final byte. Only the ranking cases vary it.
     unsigned idByte = 0xa1;
 };
@@ -124,6 +128,7 @@ inline hipdnn_plugin_sdk::ingestor::MetadataValues metadataOf(const KernelSpec& 
         {std::string("block_m_per_warp"), spec.blockMPerWarp},
         {std::string("use_mfma_32x32"), spec.useMfma32x32},
         {std::string("use_transposed_qk_32x32"), spec.useTransposedQk32x32},
+        {std::string("emit_lse"), spec.emitLse},
     };
 }
 
@@ -172,7 +177,7 @@ inline double scoreOf(const GraphSpec& graphSpec, const KernelSpec& kernelSpec)
     return scorer(graph.context(), bound.value_or(BoundTokens{}), makeKernel(kernelSpec));
 }
 
-/// The 18-argument ABI the rocKE builder declares, under the names it gives them.
+/// The 21-argument ABI the rocKE builder declares, under the names it gives them.
 inline std::vector<KernelArgument> pythonAbi()
 {
     constexpr uint32_t POINTER_BYTES = 8;
@@ -198,7 +203,10 @@ inline std::vector<KernelArgument> pythonAbi()
             scalar("softcap"),
             scalar("num_seqs"),
             scalar("block_table_stride"),
-            scalar("qq_bias_stride_0")};
+            scalar("qq_bias_stride_0"),
+            scalar("num_query_heads"),
+            scalar("num_kv_heads"),
+            scalar("sliding_window")};
 }
 
 /// A KPACK descriptor for this engine naming an archive that is not there, recording

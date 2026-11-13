@@ -7,11 +7,13 @@
 #include <string>
 
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_test_sdk/utilities/RaggedLengthUids.hpp>
 
 #include "harness/BundleMetadata.hpp"
 #include "harness/IReferenceExecutors.hpp"
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/TestConfig.hpp"
+#include "harness/bundle/LiveRows.hpp"
 #include "harness/bundle/OutputComparison.hpp"
 #include "harness/bundle/VariantPackBuilder.hpp"
 #include "harness/reference-validation/ReferenceOpCoverage.hpp"
@@ -63,7 +65,11 @@ OutputTensors BundleReferenceValidationHarness::allocateOutputs() const
 {
     auto wrapper = _bundle->graphWrapper();
     return detail::allocateSentinelOutputs(
-        wrapper.getTensorMap(), _bundle->outputTensorUids, _tensors, useDevice());
+        wrapper.getTensorMap(),
+        _bundle->outputTensorUids,
+        _tensors,
+        hipdnn_test_sdk::utilities::raggedLengthUids(wrapper.getGraph()),
+        useDevice());
 }
 
 // Only an executor that actually wants device pointers gets them; the enum a
@@ -119,6 +125,13 @@ void BundleReferenceValidationHarness::TestBody()
             << "\n  Remove that entry so the bundle is validated against its golden data."
             << "\n  bundle: " << _bundlePath;
         return;
+    }
+
+    if(!_bundle->metadata.aliases.empty())
+    {
+        FAIL() << "aliases cannot be used with golden tensor data, which stores each tensor "
+                  "apart\n  bundle: "
+               << _bundlePath;
     }
 
     // Read here, after the known-gap check above, so a bundle that never runs never
@@ -192,11 +205,12 @@ void BundleReferenceValidationHarness::TestBody()
 
     // defaultTolerance(), never resolveTolerance(): a TOML override belongs to an
     // engine and must not loosen the gate on our own data. For the same reason this
-    // path never selects a non-default validator — allclose always.
+    // path selects allclose, with one exception below.
     //
-    // The one relaxation is same-signed infinities in an SDPA forward stats (LSE) output: a row
-    // with no live key (fully masked, or padding past seq_len_q) has LSE = -inf by contract
+    // An SDPA forward stats (LSE) output matches same-signed infinities: a row with no live
+    // key (fully masked, or padding past seq_len_q) has LSE = -inf by contract
     // (SdpaSemanticsRegister.md SEM-010), so -inf on both sides is agreement, not a defect.
+    // compareTensor() matches them for every floating-point allclose output.
     std::set<std::string> sdpaStatsLabels;
     const auto& tensorMap = wrapper.getTensorMap();
     for(uint32_t i = 0; i < wrapper.nodeCount(); ++i)
@@ -225,8 +239,29 @@ void BundleReferenceValidationHarness::TestBody()
                                     + std::string(referenceLabel(_referenceType))
                                     + "): " + _bundlePath.string();
 
+    LiveRowMap liveRows;
+    try
+    {
+        liveRows = resolveLiveRows(_bundle->metadata.liveRows, wrapper, [&](int64_t uid) {
+            const auto tensor = _tensors.find(uid);
+            if(tensor != _tensors.end())
+            {
+                return tensor->second.get();
+            }
+            const auto output = referenceOutputs.find(uid);
+            return output != referenceOutputs.end() ? output->second.get() : nullptr;
+        });
+    }
+    catch(const std::exception& e)
+    {
+        ADD_FAILURE() << "metadata live_rows cannot be applied: " << e.what()
+                      << "\n  bundle: " << _bundlePath;
+        return;
+    }
+
     // Golden data is loaded on the host, so by default the comparison runs there
     // whichever reference produced the output being judged; --validator can move it.
+    // hostOnlySite is left at its default, which falls back to the site above.
     for(const auto& mismatch :
         bundle::compareOutputs(wrapper,
                                _bundle->outputTensorUids,
@@ -234,7 +269,8 @@ void BundleReferenceValidationHarness::TestBody()
                                goldenFor,
                                toleranceFor,
                                resolveValidationSite(_validator, ValidationSite::HOST),
-                               contextLine))
+                               contextLine,
+                               liveRows))
     {
         ADD_FAILURE() << mismatch.report;
     }

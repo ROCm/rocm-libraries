@@ -49,3 +49,44 @@ def split_kv_reduce_spec(reduce_type, segment, *, emit_lse: bool = False):
         waves_per_eu=segment.waves_per_eu,
         **({} if emit_lse is False else {"emit_lse": emit_lse}),
     )
+
+
+# The reduce builder assumes one wave64 owns ``head_size // 64`` output dims per thread.
+REDUCE_THREADS = 64
+
+
+def tiled_reduce_unsupported_reason(spec, *, arch: str):
+    """Why the tiled split-KV reduce kernel cannot be built for ``spec`` on ``arch``.
+
+    Returns ``None`` when it can. The one copy of the rules both arches'
+    ``supports_tiled_reduce_spec`` apply: ``arch`` must be a wave64 attention
+    target (the kernel is one 64-thread CTA whose ``wave64_reduce_max/sum``
+    butterfly assumes a single wave64), ``dtype`` fp16/bf16, ``head_size`` a
+    positive multiple of 64, and the one f32 LDS factor per segment must fit
+    ``arch``'s LDS.
+    """
+    from rocke.core.arch.target import ArchTarget
+
+    from .attention_arch import validate_tiled_attention_arch
+
+    arch_ok, arch_reason = validate_tiled_attention_arch(arch)
+    if not arch_ok:
+        return f"tiled reduce kernel: {arch_reason}"
+    if spec.dtype not in ("fp16", "bf16"):
+        return f"tiled reduce kernel currently supports fp16/bf16 (got {spec.dtype!r})"
+    if spec.head_size <= 0 or spec.head_size % REDUCE_THREADS != 0:
+        return (
+            "tiled reduce kernel needs head_size divisible by "
+            f"{REDUCE_THREADS} (got {spec.head_size})"
+        )
+    # ``arch`` passed validate_tiled_attention_arch, so it has a catalog row.
+    target = ArchTarget.from_gfx(arch)
+    lds_bytes = split_kv_reduce_lds_bytes(spec.num_segments)
+    if not target.fits_lds(lds_bytes):
+        return (
+            f"tiled reduce kernel caches one f32 LDS factor per segment; "
+            f"num_segments={spec.num_segments} needs {lds_bytes} B, over {arch}'s "
+            f"{target.lds_capacity_bytes} B LDS (at most "
+            f"{split_kv_reduce_max_segments(target.lds_capacity_bytes)})"
+        )
+    return None

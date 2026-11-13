@@ -676,6 +676,7 @@ Arguments:
   - scaleD: c_bool
   - scaleE: c_bool
   - scaleAlpha_vector: c_bool
+  - device_scalar_alpha: c_bool
   - amaxScaleA: c_bool
   - amaxScaleB: c_bool
   - amaxD: c_bool
@@ -796,7 +797,6 @@ Defaults:
   algo: 0
   solution_index: -1
   requested_solution_num: 1
-  workspace_size: 0
   initialization: rand_int
   category: nightly
   known_bug_platforms: ''
@@ -820,6 +820,7 @@ Defaults:
   scaleD: false
   scaleE: false
   scaleAlpha_vector: false
+  device_scalar_alpha: false
   amaxScaleA: false
   amaxScaleB: false
   amaxD: false

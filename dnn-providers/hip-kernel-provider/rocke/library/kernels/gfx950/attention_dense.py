@@ -81,7 +81,6 @@ the experiment's ``plan.md`` for their measured results.
 """
 
 import hashlib
-import math
 from contextlib import nullcontext as _nullcontext
 from dataclasses import dataclass, field, fields as _dataclass_fields
 from types import MappingProxyType
@@ -95,6 +94,7 @@ from kernels.common.attention_dense_spec import (
     AttentionDenseSpec as _AttentionDenseSpecBase,
     DENSE_TILE_GEOMETRIES,
     attention_dense_cache_key,
+    check_dense_scale,
     check_dense_spec_preflight,
 )
 from kernels.common.attention_dense_decode import (
@@ -124,6 +124,7 @@ from kernels.common._lse_store import (
     dense_row_has_key,
     lse_store,
     validate_dense_lse,
+    validate_varlen_keys,
     zero_keyless_row,
 )
 
@@ -150,27 +151,23 @@ _DEFAULT_LDS_K_ROW_PAD = 8
 #   only +32 fully clears the V-read conflicts (matches flyDSL's SMEM_V_PAD).
 # Lazy-rescale re-anchor threshold in the log2 domain: skip the O/l rescale when
 # every lane's (tile_max - running_max) <= this. exp2(8)=256 bounds P (times the
-# ordinary kernel's small fma rounding residue; see _MAX_SCALE), so the spec
-# rejects anything larger.
+# ordinary kernel's small fma rounding residue; see the scale-range note below), so
+# the spec rejects anything larger.
 _DEFAULT_LAZY_RESCALE_THRESHOLD = 8.0
 # sched_barrier mask: 11 instruction-class bits (__builtin_amdgcn_sched_barrier).
 _SCHED_BARRIER_MASK_MAX = 0x7FF
 _PV_LOOP_ORDERS = frozenset({"d_major", "k_major"})
 _IGLP_OFF = -1
-# Accepted softmax-scale range, a chosen safety margin (not a hardware limit).
-# The ordinary kernel takes the row max on unscaled scores (valid only for
-# scale > 0) and computes exp2(fma(s, qk_scale, -m)) with m = fl(max * qk_scale).
+# Why this kernel is exact in the shared scale range [DENSE_MIN_SCALE,
+# DENSE_MAX_SCALE] (kernels.common.attention_dense_spec). The ordinary kernel
+# takes the row max on unscaled scores (valid only for scale > 0) and computes
+# exp2(fma(s, qk_scale, -m)) with m = fl(max * qk_scale).
 # For the row-max element that argument is the product's rounding residue, at
 # most half an ulp of max * qk_scale, so a large scale or score lets it grow
 # until P overflows (first in the fp16 cast before the PV MFMA). At scale 2**4
 # and |raw score| <= 1e6 the residue is at most 1, so P stays within about
 # 2**9 even on top of the lazy-rescale threshold. The bounds also keep the
 # -2**99 mask sentinel exact, finite and far below real scores after the scale.
-# Scales outside [2**-64, 2**4], including NaN, +-inf and scale <= 0, are
-# rejected rather than mis-computed. The hipDNN matcher mirrors this range as
-# the literals 0x1p-64F / 0x1p4F in Gfx950AttentionDenseNative.cpp
-# (gfx950AttentionDenseGraphMatches) and its gtest; change them together.
-# TestScaleValidation pins both bounds to those literals.
 #
 # KNOWN LIMITATION (ordinary grid only): nothing bounds the raw score, so the
 # residue above is bounded only by the size of the log2-domain row max m, not by
@@ -184,12 +181,11 @@ _IGLP_OFF = -1
 # the output stays finite at any magnitude. If this limit is ever hit, apply the
 # persistent grid's form here: multiply each fp32 score by qk_scale after the QK
 # MFMA and use exp2(s - m). That costs the ordinary path a little speed.
-_MIN_SCALE = 2.0**-64
-_MAX_SCALE = 2.0**4
+
 # A row with no visible key (a window past the end of the keys) is masked in every tile,
 # so its running max stays at the mask sentinel: -2**99 * qk_scale on the grid body, i.e.
-# <= -2**35 for scale >= _MIN_SCALE, and -1e30 on the persistent body (scores are scaled
-# before the mask). Real maxima are far above both thresholds.
+# <= -2**35 for scale >= DENSE_MIN_SCALE, and -1e30 on the persistent body (scores are
+# scaled before the mask). Real maxima are far above both thresholds.
 _EMPTY_ROW_MAX_GRID = -(2.0**33)
 _EMPTY_ROW_MAX_PERSIST = -1e29
 
@@ -936,7 +932,8 @@ def build_attention_dense(
         segment_params = declare_segment_params(b)
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
 
-    # native v_exp_f32 (softmax arg bounded; see _MAX_SCALE) or the guarded exp2
+    # native v_exp_f32 (softmax arg bounded; see the scale-range note above
+    # _EMPTY_ROW_MAX_GRID) or the guarded exp2
     _exp2 = b.exp2_fast if spec.use_exp2_fast else b.exp2
 
     tid = b.thread_id_x()
@@ -1087,13 +1084,28 @@ def build_attention_dense(
     zero_soff = b.const_i32(0)
     K_lds_addr = b.smem_addr_of(K_lds)
     V_lds_addr = b.smem_addr_of(V_lds)
+
+    # Per-(batch, token) K/V byte stride = Hkv*D*2, shared by the packed and
+    # contiguous bounds below. Runtime under runtime_shape (one binary serves every
+    # head count), baked otherwise. Emitted fresh at each buffer_rsrc so the baked
+    # case keeps its exact two-const node count.
+    def _kv_elem_bytes_ir():
+        return (
+            b.mul(_stride_k(), b.const_i32(2))
+            if spec.runtime_shape
+            else b.const_i32(Hkv * D * 2)
+        )
+
     # Emit a SEPARATE num_records IR node per buffer_rsrc (NOT one shared node):
     # develop emits two here, so sharing one silently breaks byte-identity (the
     # attention_dense representative-IR golden).
     #
-    # Gated on ``spec.paged``, not on ``spec.runtime_shape``: the two branches bound
-    # two DIFFERENT buffers, so this is not the removable bookkeeping split that the
-    # batch/seqlen param declaration was.
+    # Gated on ``spec.paged`` and ``varlen``, not on ``spec.runtime_shape``: the
+    # branches bound DIFFERENT extents (the whole page cache, the end of this
+    # workgroup's packed sequence, the contiguous batch*seqlen_kv rows), so this is
+    # not the removable bookkeeping split that the batch/seqlen param declaration
+    # was. Paged stays first: the spec rejects paged varlen, and a page cache is
+    # addressed through block_tables, never through packed offsets.
     if spec.paged:
         # The paged bound is the WHOLE page cache. Pages are addressed through
         # block_tables at page_id*block_size, so any page id the table can name must
@@ -1104,22 +1116,37 @@ def build_attention_dense(
         _kv_cache_elems = spec.num_kv_blocks * spec.block_size * Hkv * D * 2
         k_rsrc = b.buffer_rsrc(k, b.const_i32(_kv_cache_elems))
         v_rsrc = b.buffer_rsrc(v, b.const_i32(_kv_cache_elems))
+    elif varlen:
+        # Packed K/V: bound each workgroup by the end of ITS sequence,
+        # cu_seqlens_kv[bt + 1] (kv_seq1, loaded above). The spec maxima
+        # batch*seqlen_kv overshoot the packed rows whenever a sequence is shorter
+        # than the maximum, so two loads read past the allocation under them: the
+        # last sequence's one-tile-ahead prefetch and a sliding-window start tile
+        # past a sequence's keys. The descriptor is raw (stride 0), so the hardware
+        # range-checks each lane's byte voffset against num_records. Every K/V DMA
+        # lane moves one dword; a lane at or past the bound reads no memory and
+        # writes 0 into its LDS slot. The bound is a whole number of rows, so the cut
+        # falls exactly at row kv_seq1, which also stops those loads from reading
+        # the next sequence's rows. Rows that have keys never see a zeroed row: the
+        # tiles they consume end at (seqlen_kv_b // BN) * BN <= seqlen_kv_b, the
+        # prefetched tile is never consumed, and a window start tile past the keys
+        # feeds only q-blocks that have no key (their P@V now runs over zero V
+        # rows, not the next sequence's).
+        #
+        # kv_seq1 <= batch*seqlen_kv for a well-formed cu_seqlens_kv, and the preflight
+        # keeps batch*seqlen_kv*Hkv*D*2 < 2**31, so the i32 product cannot overflow.
+        k_row_bytes = _kv_elem_bytes_ir()
+        k_num_records = b.mul(kv_seq1, k_row_bytes)
+        k_rsrc = b.buffer_rsrc(k, k_num_records)
+        v_row_bytes = _kv_elem_bytes_ir()
+        v_num_records = b.mul(kv_seq1, v_row_bytes)
+        v_rsrc = b.buffer_rsrc(v, v_num_records)
     else:
         # Contiguous K/V: num_records must track THIS launch's real extent, since
         # under runtime_shape one kernel serves every seqlen and a baked bound would
         # drop valid reads for a larger one. For the baked sub-modes the product is
         # exactly the B*Skv this used to bake -- run_attention_dense_torch fills the
         # params from the same spec -- so only the emitted IR changes.
-        # Per-(batch, token) K/V byte stride = Hkv*D*2. Runtime under runtime_shape
-        # (one binary serves every head count), baked otherwise. Emitted fresh at each
-        # buffer_rsrc so the baked branch keeps its exact two-const node count.
-        def _kv_elem_bytes_ir():
-            return (
-                b.mul(_stride_k(), b.const_i32(2))
-                if spec.runtime_shape
-                else b.const_i32(Hkv * D * 2)
-            )
-
         k_rsrc = b.buffer_rsrc(
             k, b.mul(b.mul(batch_p, seqlen_kv_p), _kv_elem_bytes_ir())
         )
@@ -1268,7 +1295,7 @@ def build_attention_dense(
             # multiply on the row max) and into the exp2 argument as one FMA,
             # so the scale adds no per-score instruction. Needs qk_scale > 0
             # (max commutes with the scale); the runner enforces the
-            # [_MIN_SCALE, _MAX_SCALE] range.
+            # [DENSE_MIN_SCALE, DENSE_MAX_SCALE] range.
             s_reg.append([b.vec_extract(acc, i) for i in range(16)])
         return s_reg
 
@@ -1393,7 +1420,7 @@ def build_attention_dense(
         bound: the compiler may pair two exp-argument FMAs into one v_pk_fma_f32, so a
         step can issue fewer VALU ops than named."""
         # fma(s, qk_scale, -m) is not bounded for huge scores: see the KNOWN
-        # LIMITATION note at _MAX_SCALE.
+        # LIMITATION note above _EMPTY_ROW_MAX_GRID.
         neg_m = b.fneg(m_new)
         slots = [(nsub, i) for nsub in range(N_SUB) for i in range(16)]
         p_vals = [[None] * 16 for _ in range(N_SUB)]
@@ -1514,7 +1541,7 @@ def build_attention_dense(
 
     m0, alpha0, _skip0 = softmax_max(s0, m_init)
     # tile-0 softmax exp + relayout only; PV lags by one tile (fused into the loop).
-    neg_m0 = b.fneg(m0)  # same unbounded-score limitation; see _MAX_SCALE
+    neg_m0 = b.fneg(m0)  # unbounded-score limitation: see above _EMPTY_ROW_MAX_GRID
     p0_vals = [
         [_exp2(b.fma(s0[nsub][i], qk_scale, neg_m0)) for i in range(16)]
         for nsub in range(N_SUB)
@@ -1745,7 +1772,8 @@ def build_attention_dense(
         # A row whose band holds no key never sees a real score, so its running max is
         # still at the mask sentinel and its P is the exp2(0) = 1 of a fully masked tile
         # (the mean of V), not zero. Real maxima are bounded far above the threshold
-        # (see _MAX_SCALE), so a max at the threshold means "no visible key": store zeros.
+        # (see _EMPTY_ROW_MAX_GRID), so a max at the threshold means "no visible key":
+        # store zeros.
         # Under runtime_shape the runtime band can bump an empty row's max, so this
         # heuristic is unreliable there -- those rows are zeroed in the O store instead
         # via row_has_key below, the integer bit-mask the LSE path uses.
@@ -1927,7 +1955,8 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
     # argument, as on the grid body: the row max is taken on unscaled scores
     # and each probability is exp2(fma(s, qk_scale, -m)), one VALU op per score
     # instead of a multiply and a subtract. The row sum is a pairwise <2 x f32>
-    # tree. Same unbounded-score limitation as the grid body (see _MAX_SCALE).
+    # tree. Same unbounded-score limitation as the grid body (see the KNOWN LIMITATION
+    # note above _EMPTY_ROW_MAX_GRID).
     # The window phases keep scaling each score before the max.
     FOLD_SCALE = SW == 0
     # Without a window, at D128, the next tile's K load is issued right after
@@ -3121,6 +3150,7 @@ def run_attention_dense_torch(
     kv_lens=None,
     sinks=None,
     validate_paged: bool = True,
+    validate_varlen: bool = True,
     lse=None,
 ):
     """High-level framework entry: compile (cached) + launch the dense prefill
@@ -3128,9 +3158,9 @@ def run_attention_dense_torch(
     tensors ([B, S, H, D] for q/out, [B, Skv, Hkv, D] for k/v); ``scale`` is the
     softmax scale (1/sqrt(D)) and is supported in ``[2**-64, 2**4]`` (the
     ordinary kernel takes the row max on unscaled scores and folds the scale
-    into an fma; see ``_MAX_SCALE``). A NaN or infinite scale raises
-    ``ValueError``; a finite scale outside the range raises
-    ``NotImplementedError``. Returns ``out``.
+    into an fma; see the scale-range note above ``_EMPTY_ROW_MAX_GRID``). A NaN
+    or infinite scale raises ``ValueError``; a finite scale outside the range
+    raises ``NotImplementedError``. Returns ``out``.
     torch is imported lazily by the launcher — this module stays torch-free at
     import time.
 
@@ -3144,6 +3174,13 @@ def run_attention_dense_torch(
     The enabled varlen path checks cumulative offsets on the host (a device
     sync): Q lengths must be block_m multiples, KV lengths positive block_n
     multiples, and both must be within their spec maxima.
+    A varlen launch without LSE checks only what this body would get wrong, also on
+    the host: every KV sequence must be nonempty and, with a sliding window, no
+    sequence may leave query rows without a key (this body zeroes such rows only with
+    LSE). Tile alignment and the spec maxima are not checked without LSE, nor are the
+    first and last offsets or their order. This check reads both offset tensors (a
+    device->host sync): pass ``validate_varlen=False`` to skip it on a hot or
+    graph-captured path. It does not apply with LSE, whose checks always run.
 
     Arbitrary (non-256-multiple) sequence lengths are served WITHOUT host
     padding by the in-kernel ragged path: build ``spec`` with ``ragged=True``
@@ -3180,13 +3217,7 @@ def run_attention_dense_torch(
     ok, why = supports_attention_dense(spec, arch=arch)
     if not ok:
         raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
-    if not math.isfinite(scale):
-        raise ValueError(f"scale must be finite, got {scale!r}")
-    if not _MIN_SCALE <= scale <= _MAX_SCALE:
-        raise NotImplementedError(
-            "NOT_YET_IMPLEMENTED: the gfx950 dense kernel supports a softmax "
-            f"scale in [2**-64, 2**4], got {scale!r}"
-        )
+    check_dense_scale(scale)
     if spec.varlen and (cu_seqlens_q is None or cu_seqlens_kv is None):
         raise ValueError(
             "varlen=True requires cu_seqlens_q and cu_seqlens_kv (int32 [batch+1]); "
@@ -3275,6 +3306,8 @@ def run_attention_dense_torch(
         if not sinks.is_cuda:
             raise ValueError("sinks must be a CUDA tensor")
 
+    if spec.varlen and not spec.emit_lse and validate_varlen:
+        validate_varlen_keys(spec, cu_seqlens_q, cu_seqlens_kv)
     validate_dense_lse(
         spec,
         q,

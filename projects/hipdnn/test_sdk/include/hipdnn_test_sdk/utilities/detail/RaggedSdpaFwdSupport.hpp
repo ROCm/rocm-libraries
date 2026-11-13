@@ -11,6 +11,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/RaggedTokenBoundaries.hpp>
 
@@ -47,13 +48,13 @@ inline bool hasRaggedSdpaPrimary(
     return false;
 }
 
-/// RFC-0014 requires ragged_offset_multiplier >= 1, and logical [B, H, S, D] dims with
-/// token-major (BSHD) strides (see isTokenMajorRaggedLayout).
+/// RFC-0014 requires ragged_offset_multiplier >= 1, and logical [B, H, S, D] dims with strides the
+/// ragged container can address for some origins and lengths (see hasValidRaggedStrides).
 inline bool isSupportedRaggedSdpaLayout(
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attributes)
 {
     return attributes.ragged_offset_multiplier() >= 1
-           && isTokenMajorRaggedLayout(
+           && hasValidRaggedStrides(
                hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(
                    attributes.dims()),
                hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(
@@ -128,14 +129,17 @@ inline hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT unpackRaggedOffse
 /// type checks, which depend on each builder's registered types. It never throws, and it returns
 /// false for a node that breaks any rule below. Shape consistency (batch and head counts, per-batch
 /// lengths, LSE and descale dims) is not checked here; the references throw on it at execute time.
-///  - Q/K/V/O (and a packed LSE) must each have an INT32 ragged_offset aux with a multiplier >= 1
-///    and use logical [B, H, S, D] dims with token-major (BSHD) strides.
-///  - seq_len_q/kv must be absent. Lengths come from ragged_offset alone.
-///  - No alibi or padding mask, additive attention bias, dropout, paged KV cache or block-sparse
-///    attention. The ragged references have no inputs for them.
+///  - Q/K/V/O (and a ragged LSE) must each have an INT32 ragged_offset aux with a multiplier >= 1
+///    and use logical [B, H, S, D] dims with container-valid strides (any role, any layout the
+///    ragged container accepts: packed, head-major, padded, shifted origins).
+///  - seq_len_q/kv, when present, are both present, INT32, one value per batch (as
+///    isSupportedSdpaPadding); they bound the per-batch lengths. A padding_mask without them is
+///    declined.
+///  - No alibi, additive attention bias, dropout, paged KV cache or block-sparse attention. The
+///    ragged references have no inputs for them.
 ///  - Only Q/K/V descales, which must be FLOAT. A pass-by-value descale must be one element.
 ///  - The scale must be one element. An ordinary scale tensor must be FLOAT.
-///  - No max / sum-exp outputs. An optional LSE must be FLOAT; it is dense [B, H, Sq, 1] or packed.
+///  - No max / sum-exp outputs. An optional LSE must be FLOAT; it is dense [B, H, Sq, 1] or ragged.
 inline bool isSupportedRaggedSdpaFwdNode(
     const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attributes,
     const std::unordered_map<int64_t,
@@ -158,14 +162,12 @@ inline bool isSupportedRaggedSdpaFwdNode(
         }
     }
 
-    if(attributes.seq_len_q_tensor_uid().has_value()
-       || attributes.seq_len_kv_tensor_uid().has_value())
+    if(!isSupportedSdpaPadding(attributes, tensorMap))
     {
         return false;
     }
 
-    if(attributes.alibi_mask() || attributes.padding_mask()
-       || attributes.attn_mask_tensor_uid().has_value())
+    if(attributes.alibi_mask() || attributes.attn_mask_tensor_uid().has_value())
     {
         return false;
     }
@@ -260,9 +262,11 @@ inline bool isSupportedRaggedSdpaFwdNode(
 }
 
 /// Unpacked tensors and resolved parameters of a ragged SDPA forward node. Q/K/V/O are logical
-/// [B, H, S, D] tensors packed token by token. Each has an INT32 ragged_offset aux [B + 1, 1, 1, 1]
-/// whose entries, times the tensor's ragged_offset_multiplier, are element offsets of each batch.
-/// The optional LSE [B, H, Sq, 1] is packed if it has its own ragged_offset aux, else dense.
+/// [B, H, S, D] tensors. Each has an INT32 ragged_offset aux [B + 1, 1, 1, 1] whose entries, times
+/// the tensor's ragged_offset_multiplier, are element offsets of each batch's origin. The
+/// optional seq_len_q/kv tensors give the per-batch lengths of Q/O/LSE and K/V; without them the
+/// lengths come from the offset blocks. The optional LSE [B, H, Sq, 1] is ragged if it has its
+/// own ragged_offset aux, else dense.
 struct RaggedSdpaFwdParams
 {
     /// Precondition: isSupportedRaggedSdpaFwdNode(attributes, tensorMap) is true.
@@ -282,6 +286,10 @@ struct RaggedSdpaFwdParams
         , raggedOffsetKTensor(ragged_sdpa_detail::unpackRaggedOffset(kTensor, tensorMap))
         , raggedOffsetVTensor(ragged_sdpa_detail::unpackRaggedOffset(vTensor, tensorMap))
         , raggedOffsetOTensor(ragged_sdpa_detail::unpackRaggedOffset(oTensor, tensorMap))
+        , seqLenQTensor(
+              ragged_sdpa_detail::unpackOptional(tensorMap, attributes.seq_len_q_tensor_uid()))
+        , seqLenKvTensor(
+              ragged_sdpa_detail::unpackOptional(tensorMap, attributes.seq_len_kv_tensor_uid()))
         , scaleTensor(foldSdpaScale(attributes.scale_tensor_uid().has_value()
                                         ? tensorMap.at(attributes.scale_tensor_uid().value())
                                         : nullptr,
@@ -313,6 +321,10 @@ struct RaggedSdpaFwdParams
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT raggedOffsetKTensor;
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT raggedOffsetVTensor;
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT raggedOffsetOTensor;
+    // INT32 [B, 1, 1, 1] per-batch lengths of Q/O/LSE and of K/V; absent: lengths come from the
+    // ragged_offset blocks.
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> seqLenQTensor;
+    std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> seqLenKvTensor;
     // Folded scale operand (scale tensor, else baked attn_scale_value), resolved at execute time.
     // Absent means 1.0 (no scaling), as in cuDNN.
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> scaleTensor;
@@ -320,7 +332,7 @@ struct RaggedSdpaFwdParams
     int64_t rightBound;
     bool topLeftAlignment;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> lseTensor;
-    // Set only for a packed LSE. Absent means a dense [B, H, Sq, 1] LSE.
+    // Set only for a ragged LSE. Absent means a dense [B, H, Sq, 1] LSE.
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> raggedOffsetLseTensor;
     // Optional FLOAT Q/K/V descales: scalar [1] or per KV head [B, H_kv, 1, 1].
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> descaleQTensor;
