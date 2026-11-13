@@ -136,6 +136,7 @@ export HIPDNN_DESCRIPTOR_PATH=/opt/vendor-a/descriptors:/opt/vendor-b/descriptor
 
 **Notes:**
 - On Linux, all three variables are ignored in a secure execution environment, for the same reason as `HIPDNN_PLUGIN_DIR`: a descriptor can name a shared library (`custom_library`) that the provider then loads. Windows has no equivalent execution mode, so they are always honored there.
+- A descriptor directory that cannot be read is skipped and logged at `ERROR`, which appears only when `HIPDNN_LOG_LEVEL` enables errors.
 
 #### HIPDNN_DISABLE_ENGINES
 

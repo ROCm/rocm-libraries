@@ -3,7 +3,7 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
-## (Unreleased) rocSPARSE 5.3.0
+## (Unreleased) rocSPARSE 5.2.0
 
 ### Changed
 * `rocsparse_spmv` and `rocsparse_v2_spmv` with the default algorithm (`rocsparse_spmv_alg_default`) now select the nnz-split algorithm when the CSR-adaptive row-block partition is a poor fit. This applies to non-transposed CSR and to transposed and conjugate-transposed CSC, for general and symmetric matrices. The partition is a poor fit when row blocks spanning many mostly empty rows cover a substantial share of the matrix, or when many row blocks are runs of short rows between long rows that hold far fewer non-zeros than a full block. An empty prefix or suffix that the adaptive algorithm already skips does not cause the switch to the nnz-split algorithm. Half-precision (`f16` and `bf16`) matrices and the transposed CSR and non-transposed CSC defaults keep their previous algorithm, and explicit algorithm selections, including `rocsparse_spmv_alg_csr_adaptive`, still use the requested algorithm.
@@ -53,7 +53,7 @@ Documentation for rocSPARSE is available at
 ### Removed
 * Removed the GoogleTest superbuild in `deps/CMakeLists.txt`, together with `deps/external-gtest.cmake` and `cmake/get-cli-arguments.cmake`.
 
-## (Unreleased) rocSPARSE 5.2.0
+## rocSPARSE 5.1.0 for ROCm 10.2
 
 ### Added
 * Added the `rocsparse_spsort` and `rocsparse_spsort_buffer_size` generic routines, which sort a sparse matrix in place or into a separate target matrix. COO matrices are sorted by row or by column, and CSR and CSC matrices have the indices within each row or column sorted. The values are reordered with the indices. Uniform strided batched matrices are supported, including broadcasting a single source matrix to every sample of the target matrix.

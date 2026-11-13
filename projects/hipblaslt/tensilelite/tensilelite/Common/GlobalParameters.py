@@ -117,7 +117,7 @@ globalParameters["SolutionSelectionAlg"] = (
 )
 globalParameters["GenerateSourcesAndExit"] = False  # Exit after kernel source generation.
 globalParameters["ExitOnFails"] = (
-    1  # 1: Exit after benchmark run if failures detected.  2: Exit during benchmark run.
+    1  # 1: Exit after benchmark run (or a failed LibraryClient run) if failures detected.  2: Exit during benchmark run.
 )
 globalParameters["CpuThreads"] = (
     -1
@@ -228,7 +228,7 @@ globalParameters["UniformSummationOrder"] = -1
 # This is intentionally independent of ProblemType.StridedBatched so universal
 # strided kernels can exercise their ArgType==3 general-batched path.
 globalParameters["BatchMode"] = 0
-# Read the shared Synchronizer buffer back after each solution's first warmup
+# Read the shared Synchronizer buffer back after each run iteration's launches
 # and fail the run if a kernel left it nonzero; residue is otherwise silent,
 # corrupting a later launch rather than the one that left it. Only StreamK,
 # GSU MultipleBufferSingleKernel, and output-amax solutions are scanned.
@@ -535,6 +535,7 @@ defaultBenchmarkCommonParameters = [
     {"MaxLDS": [-1]},
     {"VectorWidthA": [-1]},
     {"VectorWidthB": [-1]},
+    {"LDSTrStoreShuffle": [0]},
     {"VectorStore": [-1]},
     {"StoreVectorWidth": [-1]},
     {"GlobalReadVectorWidthA": [-1]},
