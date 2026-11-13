@@ -3714,6 +3714,12 @@ namespace
     // and recorded like any other stream.
     TEST_F(TuningOnline_pre_checkin, AProblemOnTheLegacyStreamIsExploredAndRecorded)
     {
+#ifdef CODE_COVERAGE
+        // clang's coverage runtime (libclang_rt.profile) intercepts HIP launches and calls
+        // hipStreamGetDevice on the launch stream, which fails for hipStreamLegacy.
+        // StreamKNullStream is excluded from coverage runs for the same reason.
+        GTEST_SKIP() << "the coverage runtime cannot launch on hipStreamLegacy";
+#endif
         OnlineProblem problem;
         ASSERT_TRUE(problem.create());
         if(problem.distinctCandidates() < 2)
