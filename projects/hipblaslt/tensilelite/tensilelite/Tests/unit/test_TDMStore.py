@@ -106,6 +106,13 @@ _GSU_ALGORITHMS = [("MultipleBuffer", 0), ("SingleBuffer", 0), ("MultipleBufferS
                    ("MultipleBufferSingleKernel", 1)]
 
 
+@pytest.mark.parametrize("aga", [0, 1])
+def test_accepts_static_gsu_with_mbsk(aga):
+  """GlobalSplitU>1 with MultipleBufferSingleKernel: the last workgroup of a tile stores the reduced tile to D."""
+  assert tdmStoreRejectReason(_state(GlobalSplitU=2, GlobalSplitUAlgorithm="MultipleBufferSingleKernel",
+                                     AdaptiveGemmGSUA=aga)) is None
+
+
 @pytest.mark.parametrize("algorithm, aga", _GSU_ALGORITHMS)
 def test_accepts_dynamic_gsu(algorithm, aga):
   """GlobalSplitU=-1 with every algorithm and AdaptiveGemmGSUA: its GSU == 1 branch stores D directly."""
@@ -162,7 +169,7 @@ _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
   ({"DestDataType": DataType("i8")}, _OUTPUT),
   ({"DestDataType": DataType("d")}, _OUTPUT),
   ({"DestDataType": DataType("c")}, _OUTPUT),
-  ({"GlobalSplitU": 2}, "TDMStoreInst requires GlobalSplitU=1 or -1"),
+  ({"GlobalSplitU": 2}, "TDMStoreInst requires GlobalSplitU=1 or -1, or MultipleBufferSingleKernel"),
   ({"UseSubtileImpl": True}, "TDMStoreInst does not support UseSubtileImpl"),
   ({"CompactLoopStore": True}, "TDMStoreInst does not support CompactLoopStore"),
   ({"FusedGemmA2A": True}, "TDMStoreInst does not support FusedGemmA2A"),
@@ -198,9 +205,9 @@ def test_levels_match_the_valid_values_and_add_one_path_each():
     assert TDM_STORE_PATHS[level][:-1] == TDM_STORE_PATHS[level - 1]
 
 
-def _blocks(level, edge=True, atomic=False, accumulation=None, vectorWidths=(8, 1), bpe=2):
-  return tdmStoreBlocks({"TDMStoreInst": level, "_GlobalAccumulation": accumulation}, edge, atomic, bpe,
-                        list(vectorWidths))
+def _blocks(level, edge=True, atomic=False, accumulation=None, vectorWidths=(8, 1), bpe=2, mpm=0):
+  return tdmStoreBlocks({"TDMStoreInst": level, "_GlobalAccumulation": accumulation, "MbskPrefetchMethod": mpm},
+                        edge, atomic, bpe, list(vectorWidths))
 
 
 # The store blocks generateBetaModules gets with StoreVectorWidth 8: AdaptiveGemm=0 keeps the
@@ -226,7 +233,6 @@ def test_each_level_picks_blocks_of_the_store_width_cascade(svw, adaptive):
 
 @pytest.mark.parametrize("accumulation, atomic", [
   ("MultipleBuffer", False),
-  ("MultipleBufferSingleKernel", False),
   ("SingleBuffer", True),
   (None, True),
 ])
@@ -238,13 +244,16 @@ def test_partial_and_atomic_stores_keep_buffer_store(accumulation, atomic):
 @pytest.mark.parametrize("accumulation", [None, "PartialsBuffer", "MultipleBuffer", "MultipleBufferSingleKernel",
                                           "SingleBuffer"])
 @pytest.mark.parametrize("atomic", [False, True])
-def test_stores_final_d_predicate(accumulation, atomic):
-  """A block writes D's final elements unless it is atomic or a GSU workspace store, and tdmStoreBlocks lets
-  such a block, of 16-bit or fp32 elements, store through the TDM block."""
-  final = not atomic and accumulation in (None, "PartialsBuffer")
-  assert storesFinalD({"_GlobalAccumulation": accumulation}, atomic) == final
+@pytest.mark.parametrize("mpm", [0, 1])
+def test_stores_final_d_predicate(accumulation, atomic, mpm):
+  """A block writes D's final elements unless it is atomic or a GSU workspace store, the reduced tile of
+  MultipleBufferSingleKernel with MbskPrefetchMethod 0 only, and tdmStoreBlocks lets such a block, of 16-bit or
+  fp32 elements, store through the TDM block."""
+  final = not atomic and (accumulation in (None, "PartialsBuffer")
+                          or (accumulation == "MultipleBufferSingleKernel" and mpm == 0))
+  assert storesFinalD({"_GlobalAccumulation": accumulation, "MbskPrefetchMethod": mpm}, atomic) == final
   for bpe in (2, 4):
-    assert bool(_blocks(3, atomic=atomic, accumulation=accumulation, bpe=bpe)) == final, bpe
+    assert bool(_blocks(3, atomic=atomic, accumulation=accumulation, bpe=bpe, mpm=mpm)) == final, bpe
 
 
 @pytest.mark.parametrize("level", _LEVELS)
@@ -254,8 +263,7 @@ def test_fp32_final_store_uses_the_tdm_block(level):
   assert _blocks(level, edge=False, vectorWidths=(8,), bpe=4) == _blocks(level, edge=False, vectorWidths=(8,))
 
 
-@pytest.mark.parametrize("accumulation, atomic", [("MultipleBuffer", False), ("MultipleBufferSingleKernel", False),
-                                                  (None, True)])
+@pytest.mark.parametrize("accumulation, atomic", [("MultipleBuffer", False), (None, True)])
 def test_gsu_partials_keep_buffer_store_at_fp32(accumulation, atomic):
   """GSU>1 partials, at the compute type, and atomic stores keep buffer_store."""
   assert _blocks(3, accumulation=accumulation, atomic=atomic, bpe=4) == set()
@@ -263,6 +271,13 @@ def test_gsu_partials_keep_buffer_store_at_fp32(accumulation, atomic):
 
 def test_streamk_final_store_uses_the_tdm_block():
   assert _blocks(2, accumulation="PartialsBuffer") == {8, 1}
+
+
+def test_mbsk_reduced_tile_uses_the_tdm_block():
+  """MultipleBufferSingleKernel stores the reduced tile to D: the blocks of a final store with MbskPrefetchMethod
+  0, where one workgroup reduces the tile at a GSU of at most 2, and none with MbskPrefetchMethod 1."""
+  assert _blocks(2, accumulation="MultipleBufferSingleKernel") == {8, 1}
+  assert _blocks(2, accumulation="MultipleBufferSingleKernel", mpm=1) == set()
 
 
 @pytest.mark.parametrize("dest, bpe", [("h", 2), ("s", 4)])
@@ -697,9 +712,10 @@ def test_eight_byte_d_stages_two_registers_per_element(gp_gfx1250, gfx1250_iim, 
 
 @pytest.mark.parametrize("algorithm, aga", _GSU_ALGORITHMS)
 def test_dynamic_gsu_with_epilogue_vectors_at_level_3(gp_gfx1250, gfx1250_iim, assembler, capsys, algorithm, aga):
-  """GlobalSplitU=-1 with bias and ScaleAlphaVec, for every algorithm and AdaptiveGemmGSUA: the GSU == 1 branch
-  and the OptNLL store go through the TDM block, and no block of the GSU > 1 branch does; that branch keeps
-  its buffer_store or buffer atomics. AtomicDest runs without the vectors, which develop rejects with it (the
+  """GlobalSplitU=-1 with bias and ScaleAlphaVec, for every algorithm and AdaptiveGemmGSUA: the GSU == 1 branch,
+  the OptNLL store and, with MultipleBufferSingleKernel and MbskPrefetchMethod 0, the TDM copy of the reduced tile
+  go through the TDM block, beside the buffer_store copy of the reduced tile; the partials and atomics of the
+  GSU > 1 branch keep buffer_store or buffer atomics. AtomicDest runs without the vectors, which develop rejects with it (the
   epilogue would run per GSU slice), and with the even AssertFree0ElementMultiple of packed bf16 atomics."""
   extra = {"AssertFree0ElementMultiple": 2} if algorithm == "AtomicDest" else \
     {"ProblemType": {"UseBias": 1, "UseScaleAlphaVec": 1}}
@@ -712,10 +728,61 @@ def test_dynamic_gsu_with_epilogue_vectors_at_level_3(gp_gfx1250, gfx1250_iim, a
     assert sorted(direct["tdm"]) == sorted(direct["then"]) and direct["nonEdgeTdm"] == 1 and not direct["buffer"]
   optNLL = [path for path in stores if path[0].startswith("OptNLL")]
   assert optNLL and all(stores[path]["tdm"] == [8] for path in optNLL), optNLL
-  partials = [path for path in stores if not path[0].startswith(("GSU1", "OptNLL"))]
-  assert partials and not any(stores[path]["tdm"] or stores[path]["nonEdgeTdm"] for path in partials), partials
+  reduced = [path for path in stores if path[0] == "MBSK"]
+  copies = [path for path in stores if path[0] == "MBSKBuffer"]
+  tdmReduced = sol["MbskPrefetchMethod"] == 0
+  assert bool(reduced) == (algorithm == "MultipleBufferSingleKernel"), reduced
+  assert bool(copies) == (bool(reduced) and tdmReduced), copies
+  assert all((sorted(stores[path]["tdm"]) == sorted(stores[path]["then"]) and stores[path]["nonEdgeTdm"] == 1)
+             == tdmReduced and not stores[path]["buffer"] for path in reduced), reduced
+  assert not any(stores[path]["tdm"] or stores[path]["nonEdgeTdm"] for path in copies), copies
+  partials = [path for path in stores if not path[0].startswith(("GSU1", "OptNLL", "MBSK"))]
+  assert reduced or partials
+  assert not any(stores[path]["tdm"] or stores[path]["nonEdgeTdm"] for path in partials), partials
   assert sum(len(stores[path]["tdm"]) + stores[path]["nonEdgeTdm"] for path in stores) == asm.count("tensor_store_from_lds ")
-  assert any(stores[path]["stores"] for path in partials) or re.search(r"^\s*buffer_atomic\S* ", asm, re.M)
+  assert reduced or any(stores[path]["stores"] for path in partials) or re.search(r"^\s*buffer_atomic\S* ", asm, re.M)
+
+
+@pytest.mark.parametrize("level", [1, 2, 3])
+def test_mbsk_reduced_tile_at_each_level(gp_gfx1250, gfx1250_iim, assembler, capsys, level):
+  """Static GlobalSplitU=2 with MultipleBufferSingleKernel and MbskPrefetchMethod 0: the TDM copy of the reduced
+  tile takes the TDM blocks the GSU == 1 store takes at the level, OptNLL_MBSK's being NonEdge, with its descriptor
+  from SrdTD and D staged at the size of D; the buffer_store copy, which a GSU above 2 takes, stores every block
+  with buffer_store to SrdTD, and one GSU check picks the copy. OptNLL_MBSK, which runs at GSU 1 only, without a
+  reduction, keeps its store."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level, GlobalSplitU=2,
+                       GlobalSplitUAlgorithm="MultipleBufferSingleKernel", MbskPrefetchMethod=0)
+  assert sol.get("Valid"), capsys.readouterr().out
+  stores = _stores(asm)
+  for beta in "01":
+    reduced, direct, copy = stores[("MBSK", beta)], stores[("GSU1", beta)], stores[("MBSKBuffer", beta)]
+    assert (reduced["tdm"], reduced["nonEdgeTdm"], reduced["buffer"]) == (direct["tdm"], direct["nonEdgeTdm"], 0)
+    assert copy["then"] == reduced["then"] and copy["nonEdge"] and not copy["tdm"] and not copy["nonEdgeTdm"]
+    assert copy["stores"] and not copy["buffer"]
+  assert stores[("OptNLL_MBSK", "0")]["tdm"] == ([8] if level == 3 else [])
+  assert not any(path[0] == "OptNLL_MBSKBuffer" for path in stores)
+  assert asm.count("64-bit byte offset from SrdTD") == sum(len(stores[("MBSK", beta)]["tdm"])
+                                                          + stores[("MBSK", beta)]["nonEdgeTdm"] for beta in "01")
+  assert re.search(r"^\s*buffer_store\S* .*sgprSrdTD", asm, re.M)
+  assert asm.count("GSU > 2: each wave reduces on its own") == 1
+  assert {line.split()[0] for line in asm.splitlines() if "stage D element" in line} == {"ds_store_b128"}
+
+
+def test_mbsk_reduced_tile_keeps_buffer_store_with_prefetch_method_1(gp_gfx1250, gfx1250_iim, assembler, capsys):
+  """MbskPrefetchMethod 1: each wave takes the last decrement of its own synchronizer slot and reduces on its own,
+  so the reduced tile keeps buffer_store, with no TDM copy and no GSU check; the GSU == 1 store and OptNLL_MBSK,
+  which runs at GSU 1 only, keep the block."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=3, GlobalSplitU=2,
+                       GlobalSplitUAlgorithm="MultipleBufferSingleKernel", MbskPrefetchMethod=1)
+  assert sol.get("Valid"), capsys.readouterr().out
+  stores = _stores(asm)
+  assert stores[("MBSK", "0")]["stores"] and not any(path[0] == "MBSKBuffer" for path in stores)
+  tdm = [(path, stores[path]["tdm"], stores[path]["nonEdgeTdm"]) for path in stores
+         if path[0] == "MBSK" and (stores[path]["tdm"] or stores[path]["nonEdgeTdm"])]
+  assert not tdm, tdm
+  assert stores[("OptNLL_MBSK", "0")]["tdm"] == [8]
+  assert stores[("GSU1", "0")]["nonEdgeTdm"] == 1
+  assert "64-bit byte offset from SrdTD" not in asm and "each wave reduces on its own" not in asm
 
 
 def test_automatic_store_remap_vector_width(gp_gfx1250, gfx1250_iim, assembler, capsys):
@@ -1106,7 +1173,7 @@ def test_store_vector_width_1_levels_1_and_2_store_the_one_masked_block(gp_gfx12
 def test_solution_rejects_with_the_reason(gp_gfx1250, gfx1250_iim, assembler, capsys):
   sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=1, GlobalSplitU=2)
   assert not sol.get("Valid") and asm is None
-  assert "TDMStoreInst requires GlobalSplitU=1 or -1" in capsys.readouterr().out
+  assert "TDMStoreInst requires GlobalSplitU=1 or -1, or MultipleBufferSingleKernel" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("dest", ["B", "H"])

@@ -2735,14 +2735,14 @@ class GlobalWriteBatchWriter:
               if orphanSkipLabel is not None:
                 storeCodeModule.add(orphanSkipLabel)
               self.storesIssued += 1
+        elif tdmStore:
+          tdmStagedElements.append((sumIdx, addrCalc.coordOffset0, addrCalc.coordOffset1))
         elif self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":#GSUGSU
           # elt0/batch0 still forceinitrow0 when rowInc==0.
           tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'TD', addrCalc, sumIdx, self.tmpS01, self.edge, elementIdx, self.batchIdx,
                                                    overrideAfterPrimerRows=_emitOverrideRows, comment="store TD not StoreRemapVectorWidth")
           storeCodeModule.add(tmpStoreCode)
           self.storesIssued += 1
-        elif tdmStore:
-          tdmStagedElements.append((sumIdx, addrCalc.coordOffset0, addrCalc.coordOffset1))
         else:
           # Regular store path. If UseSubtileImpl NonEdge, guard against OOB wave groups.
           skipLabel = None

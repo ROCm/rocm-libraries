@@ -547,9 +547,11 @@ BenchmarkProblems:
           - Exact: [505, 509, 2, 256, 520, 520, 256, 256]
           - Exact: [505, 509, 2, 1600, 520, 520, 1600, 1600]
   ########################################
-  # GlobalSplitU=-1 with MultipleBufferSingleKernel, AdaptiveGemmGSUA 0 and 1: the GSU == 1 branch
-  # stores through the TDM block, and the GSU > 1 branch keeps its buffer_store. K=128 runs GSU 1
-  # and the single-tile K=512 sizes GSU > 1.
+  # GlobalSplitU=-1 and 2 with MultipleBufferSingleKernel, AdaptiveGemmGSUA 0 and 1 and MbskPrefetchMethod
+  # 0 and 1: the GSU == 1 branch goes through the TDM block, and with MbskPrefetchMethod 0 so does the
+  # store of the reduced tile at GSU <= 2, from a TDM copy beside the buffer_store copy a larger GSU
+  # takes; the partials keep their buffer_store. At GlobalSplitU=-1 K=128 runs GSU 1 and the single-tile
+  # K=512 sizes GSU > 1.
   ########################################
   -
     - *problem_type_bf16
@@ -565,13 +567,14 @@ BenchmarkProblems:
         - ScheduleIterAlg: [3]
         - TDMInst: [3]
         - StoreVectorWidth: [-1]
-        - GlobalSplitU: [-1]
+        - GlobalSplitU: [-1, 2]
+        - MbskPrefetchMethod: [0, 1]
         - Groups:
           - - GlobalSplitUAlgorithm: [MultipleBufferSingleKernel]
               AdaptiveGemmGSUA: [0]
             - GlobalSplitUAlgorithm: [MultipleBufferSingleKernel]
               AdaptiveGemmGSUA: [1]
-        - TDMStoreInst: [0, 2, 3]
+        - TDMStoreInst: [0, 1, 2, 3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -1891,13 +1894,14 @@ BenchmarkProblems:
       - ScheduleIterAlg: [3]
       - TDMInst: [3]
       - StoreVectorWidth: [-1]
-      - GlobalSplitU: [-1]
+      - GlobalSplitU: [-1, 2]
+      - MbskPrefetchMethod: [0, 1]
       - Groups:
         - - GlobalSplitUAlgorithm: [MultipleBufferSingleKernel]
             AdaptiveGemmGSUA: [0]
           - GlobalSplitUAlgorithm: [MultipleBufferSingleKernel]
             AdaptiveGemmGSUA: [1]
-      - TDMStoreInst: [0, 2, 3]
+      - TDMStoreInst: [0, 1, 2, 3]
       BenchmarkJoinParameters: null
       BenchmarkFinalParameters:
       - ProblemSizes:

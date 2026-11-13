@@ -17933,8 +17933,11 @@ class KernelWriterAssembly(KernelWriter):
          and (kernel["GlobalSplitU"] > 1 or kernel["GlobalSplitU"] == -1):
         continue
       betaModule = Module("Beta_%u"%betaIdx)
-      tdmVectorWidths = tdmStoreBlocks(kernel, edge, atomic, self.states.bpeCexternal, vectorWidths)
-      tdmNonEdge = edge and bool(tdmStoreBlocks(kernel, False, atomic, self.states.bpeCexternal, vectorWidths))
+      tdmVectorWidths = tdmStoreBlocks(kernel, edge, atomic, self.states.bpeCexternalGSU1, vectorWidths)
+      tdmNonEdge = edge and bool(tdmStoreBlocks(kernel, False, atomic, self.states.bpeCexternalGSU1, vectorWidths))
+      if globalWriteMode == "MBSKBuffer":
+        # The buffer_store copy of the reduced tile, for a GSU at which each wave reduces on its own.
+        tdmVectorWidths, tdmNonEdge = [], False
 
       for fdIdx in reversed(range(len(factorDims))):
         factorDim = factorDims[fdIdx]
@@ -19831,6 +19834,20 @@ class KernelWriterAssembly(KernelWriter):
         globalWriteModes = ["GSU1"]
         hasMultipleGlobalWriteModes = False
 
+      # The TDM block stores a tile that every wave of the workgroup staged. MultipleBufferSingleKernel reduces a
+      # tile with all waves of one workgroup only with MbskPrefetchMethod 0 and a GSU of at most gsuThreshold; for a
+      # larger GSU each wave takes the last decrement of its own synchronizer slot. A reduced tile that takes the
+      # block therefore gets a buffer_store copy, and the GSU picks the copy at run time.
+      mbskBufferLabels = {}
+      if kernel["MbskPrefetchMethod"] == 0 and tdmStoreBlocks(
+          {"TDMStoreInst": kernel["TDMStoreInst"], "_GlobalAccumulation": "MultipleBufferSingleKernel",
+           "MbskPrefetchMethod": 0}, edge, atomic, self.states.bpeCexternalGSU1, vectorWidths):
+        # OptNLL_MBSK runs at GSU 1 only, without a reduction, and keeps its single store.
+        if "MBSK" in globalWriteModes:
+          mbskBufferLabels["MBSK"] = Label(self.labels.getNameInc("GW_MBSKBuffer"), "buffer_store copy of the reduced tile")
+          globalWriteModes.insert(globalWriteModes.index("MBSK") + 1, "MBSKBuffer")
+        hasMultipleGlobalWriteModes = hasMultipleGlobalWriteModes or bool(mbskBufferLabels)
+
       gateTreeLabels = {}
       for globalWriteMode in globalWriteModes:
         if self.states.useGateResidual:
@@ -19865,6 +19882,8 @@ class KernelWriterAssembly(KernelWriter):
             if globalWriteMode == "MBSK":
               module.add(labelMBSK)
               kernel["_GlobalAccumulation"] = "MultipleBufferSingleKernel"
+            elif globalWriteMode == "MBSKBuffer":
+              kernel["_GlobalAccumulation"] = "MultipleBufferSingleKernel"
             elif globalWriteMode == "MB":
               module.add(labelMB)
               kernel["_GlobalAccumulation"] = "MultipleBuffer"
@@ -19872,6 +19891,16 @@ class KernelWriterAssembly(KernelWriter):
                 self.states.useBias = DataDirection.NONE
               kernel["ActivationFuncCall"] = False
               activationLabelList = {}
+
+        if globalWriteMode in mbskBufferLabels:
+          with self.allocTmpSgpr(1, tag="mbskBufferGsu") as tmpGsu:
+            module.add(SAndB32(dst=sgpr(tmpGsu.idx), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
+            module.add(SCmpGtI32(src0=sgpr(tmpGsu.idx), src1=gsuComponent.gsuThreshold,
+                                 comment="GSU > %u: each wave reduces on its own" % gsuComponent.gsuThreshold))
+          module.add(self.longBranchScc1(label=mbskBufferLabels[globalWriteMode], posNeg=1,
+                                         comment="buffer_store copy of the reduced tile"))
+        elif globalWriteMode == "MBSKBuffer":
+          module.add(mbskBufferLabels["MBSK"])
 
         # A MultipleBuffer write only stores raw partial sums to the workspace;
         # beta*C is applied afterwards by the conversion kernel. Kernels compiled

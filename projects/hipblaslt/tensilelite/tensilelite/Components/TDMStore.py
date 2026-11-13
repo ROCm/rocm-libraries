@@ -78,8 +78,9 @@ def tdmStoreRejectReason(state):
   Solution rejects TDMStoreInst without the HasTDM assembler capability before it asks this. The TDM
   block stages the converted D tile in LDS and stores it once, after the last store batch, with one
   tensor_store_from_lds per wave. That needs fp32 D, fp64 or complex float D from accumulators of their type, int32 or
-  int8 D from int32 accumulators, or bf16, fp16, fp8 or bf8 D converted from fp32 accumulators, written directly to D, by a GlobalSplitU=1 kernel or by a persistent kernel, which
-  stores each tile it completes, and no LDS data kept from one persistent tile to the next.
+  int8 D from int32 accumulators, or bf16, fp16, fp8 or bf8 D converted from fp32 accumulators, written directly to D, by a GlobalSplitU=1 kernel, by
+  the workgroup that reduces a MultipleBufferSingleKernel tile (below), or by a persistent kernel,
+  which stores each tile it completes, and no LDS data kept from one persistent tile to the next.
   With PrefetchAcrossPersistent the next tile's loads write the main-loop buffers during the epilogue,
   so the staged tile lies after them (_TDMStoreOverMainLoop is False) and its LDS accesses carry the
   epilogue's memory token. ReuseAcrossPersistent keeps A in VGPRs from one tile to the next, so the
@@ -89,8 +90,17 @@ def tdmStoreRejectReason(state):
   M or N, which the staged tile follows in LDS, and scalars such as ScaleC and ScaleD; it may not write or
   reduce per-element outputs (hasEpilogueSideEffects). GroupedGemm sets the sizes, strides and addresses
   the block reads for each group.
-  A GlobalSplitU=-1 kernel, with any GlobalSplitUAlgorithm and AdaptiveGemmGSUA, uses the block only
-  when the runtime GSU is 1; the partials and atomics of its GSU>1 branch keep buffer_store.
+  A GlobalSplitU=-1 kernel, with any GlobalSplitUAlgorithm and AdaptiveGemmGSUA, uses the block when
+  the runtime GSU is 1; the partials and atomics of its GSU>1 branch keep buffer_store. The reduced tile of a
+  MultipleBufferSingleKernel GSU>1 branch goes to SrdTD, which addresses D while SrdD addresses the workspace, at
+  the size of D. The block stores a tile that every wave of the workgroup staged, so the reduced tile takes it
+  only where one workgroup reduces the tile with all its waves: with MbskPrefetchMethod 0 and a runtime GSU of at
+  most gsuThreshold (2), where the workgroup of GSUSumIdx GSU-1 waits for the others. For a larger GSU, and with
+  MbskPrefetchMethod 1, each wave takes the last decrement of its own synchronizer slot and reduces on its own.
+  With MbskPrefetchMethod 0 globalWriteElements therefore generates the reduced tile twice, through the block and
+  through buffer_store, and the runtime GSU picks the copy; with MbskPrefetchMethod 1 the reduced tile keeps
+  buffer_store. A static GlobalSplitU > 1 shares its kernel with GlobalSplitU=-1 and a split-K setting overrides
+  it, so the copy is picked at run time for it as well.
   StoreRemapVectorWidth applies to the blocks that keep buffer_store; a TDM block stages D itself and
   skips the remap.
   """
@@ -107,8 +117,9 @@ def tdmStoreRejectReason(state):
                                     or not (pt["DestDataType"].isSingle() or (converted and pt["HighPrecisionAccumulate"]))):
     return "TDMStoreInst supports fp32 D, fp64 and complex float D from accumulators of their type, int32 and int8 D " \
            "from int32 accumulators, and bf16, fp16, fp8 and bf8 D converted from fp32 accumulators"
-  if not isPersistent(state) and state["GlobalSplitU"] not in (1, -1):
-    return "TDMStoreInst requires GlobalSplitU=1 or -1"
+  if not isPersistent(state) and state["GlobalSplitU"] not in (1, -1) \
+     and state["GlobalSplitUAlgorithm"] != "MultipleBufferSingleKernel":
+    return "TDMStoreInst requires GlobalSplitU=1 or -1, or MultipleBufferSingleKernel"
   if state["UseSubtileImpl"]:
     return "TDMStoreInst does not support UseSubtileImpl"
   if state["CompactLoopStore"]:
@@ -146,7 +157,11 @@ def tdmStoreLdsBytes(state):
 
 
 def storesFinalD(kernel, atomic):
-  """Whether a store block writes D's final elements: not atomically and not to a GSU workspace."""
+  """Whether a store block writes D's final elements: not atomically and not to a GSU workspace. The
+  MultipleBufferSingleKernel store writes the reduced tile to D; it counts with MbskPrefetchMethod 0, whose kernel
+  also keeps a buffer_store copy of it (tdmStoreRejectReason)."""
+  if kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
+    return not atomic and kernel.get("MbskPrefetchMethod") == 0
   return not atomic and kernel["_GlobalAccumulation"] in (None, "PartialsBuffer")
 
 
@@ -201,7 +216,7 @@ def emitTDMStoreSetup(gwb) -> Module:
   module.add(VAddU32(dst=vgpr(base), src0=vgpr(base), src1=vgpr(kw.vgprs.coord0), comment="+ coord0"))
   module.add(SMulI32(dst=sgpr(gwb.tmpS01), src0=sgpr("WorkGroup0"), src1=mt0, comment="wg0*MT0"))
   module.add(VSubU32(dst=vgpr(base), src0=vgpr(base), src1=sgpr(gwb.tmpS01), comment="- wg0*MT0"))
-  module.add(VLShiftLeftB32(dst=vgpr(base), shiftHex=int(log2(kw.states.bpeCexternal)), src=vgpr(base), comment="* bpe"))
+  module.add(VLShiftLeftB32(dst=vgpr(base), shiftHex=int(log2(kw.states.bpeCexternalGSU1)), src=vgpr(base), comment="* bpe"))
   if gwb.kernel["_TDMStoreLdsOffset"]:
     module.add(VAddU32(dst=vgpr(base), src0=gwb.kernel["_TDMStoreLdsOffset"], src1=vgpr(base), comment="+ LDS offset of the staged tile"))
   return module
@@ -209,7 +224,7 @@ def emitTDMStoreSetup(gwb) -> Module:
 
 def _tdmStoreLdsAddress(gwb, module: Module, coordOffset0, coordOffset1):
   """Return the VGPR and DS offset of element (coordOffset0, coordOffset1) of the staged tile."""
-  offset = (coordOffset1 * gwb.kernel["MacroTile0"] + coordOffset0) * gwb.parentWriter.states.bpeCexternal
+  offset = (coordOffset1 * gwb.kernel["MacroTile0"] + coordOffset0) * gwb.parentWriter.states.bpeCexternalGSU1
   if offset <= 0xFFFF:
     return gwb.tdmStoreLdsBase, offset
   # The DS instruction offset has 16 bits.
@@ -236,7 +251,7 @@ def emitTDMStoreLoadCElement(gwb, addrCalc, data, vc0) -> Module:
   """
   module = Module("TDMStoreLoadCElement")
   kw = gwb.parentWriter
-  bpl = kw.states.bpeCexternal * gwb.gwvw
+  bpl = kw.states.bpeCexternalGSU1 * gwb.gwvw
   addr, offset = _tdmStoreLdsAddress(gwb, module, addrCalc.coordOffset0, addrCalc.coordOffset1)
   comment = "load C element (%u, %u)" % (addrCalc.coordOffset0, addrCalc.coordOffset1)
   memToken = MemTokenData([_stagedTileToken(gwb)])
@@ -267,10 +282,10 @@ def emitTDMStoreStaging(gwb, stagedElements) -> Module:
   from .PackData import formatting
   module = Module("TDMStoreStaging")
   kw = gwb.parentWriter
-  bps = kw.states.bpeCexternal * gwb.gwvw
+  bps = kw.states.bpeCexternalGSU1 * gwb.gwvw
   width = min(bps, 32)
   numRegs = max(1, width // kw.states.bpr)
-  regsPerElement = max(1, kw.states.bpeCexternal // kw.states.bpr)
+  regsPerElement = max(1, kw.states.bpeCexternalGSU1 // kw.states.bpr)
   for sumIdx, coordOffset0, coordOffset1 in stagedElements:
     addr, offset = _tdmStoreLdsAddress(gwb, module, coordOffset0, coordOffset1)
     for piece in range(bps // width):
@@ -285,7 +300,7 @@ def _tdmStoreDescriptor(gwb, module: Module, tdm, g0, g1, tmp, tc):
   """Fill the descriptor of this wave's columns of the tile of tensor tc (C or D) and of the staged tile.
 
   Each wave covers ceil(MacroTile1/numWaves) consecutive columns: tile MT0 x those columns, M-contiguous
-  from the LDS address of its first column, global address Srd<tc> + (column*Stride<tc> + wg0*MT0)*bpe,
+  from the LDS address of its first column, global address Srd<tc> (SrdTD for the reduced tile of MultipleBufferSingleKernel) + (column*Stride<tc> + wg0*MT0)*bpe,
   and tensor_dim0/1 the part of the tile inside SizeI and SizeJ. The first of the four tmp SGPRs is left
   at the first column of the wave. When MacroTile1 is not a multiple of the number of waves, the columns
   of the last waves reach past the tile, so tensor_dim1 ends at the column bound min(SizeJ, (wg1+1)*MT1),
@@ -295,11 +310,12 @@ def _tdmStoreDescriptor(gwb, module: Module, tdm, g0, g1, tmp, tc):
   assert len(gwb.kernel["PackedC0IndicesX"]) == 1 and len(gwb.kernel["PackedC1IndicesX"]) == 1, \
     "the TDM block assumes one free index per operand"
   kw = gwb.parentWriter
-  bpe = kw.states.bpeCexternal
+  bpe = kw.states.bpeCexternalGSU1
   mt0 = gwb.kernel["MacroTile0"]
   ws = gwb.kernel["WavefrontSize"]
   colsPerWave = _waveColumns(gwb.kernel)
   stride1 = "Stride%s%s" % (tc, kw.states.indexChars[gwb.kernel["PackedC1IndicesX"][0]])
+  srd = "SrdTD" if tc == "D" and gwb.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel" else "Srd" + tc
   sizeI = kw.sizeRef(gwb.kernel["ProblemType"]["Index0"])
   sizeJ = kw.sizeRef(gwb.kernel["ProblemType"]["Index1"])
   col, dim, offLo, offHi = tmp.idx, tmp.idx + 1, tmp.idx + 2, tmp.idx + 3
@@ -317,8 +333,8 @@ def _tdmStoreDescriptor(gwb, module: Module, tdm, g0, g1, tmp, tc):
   module.add(SMulI32(dst=sgpr(dim), src0=sgpr("WorkGroup0"), src1=mt0, comment="wg0*MT0"))
   module.add(SAddU32(dst=sgpr(offLo), src0=sgpr(offLo), src1=sgpr(dim), comment="+ wg0*MT0"))
   module.add(SAddCU32(dst=sgpr(offHi), src0=sgpr(offHi), src1=0, comment="carry"))
-  module.add(SLShiftLeftB64(dst=sgpr(offLo, 2), src=sgpr(offLo, 2), shiftHex=int(log2(bpe)), comment="64-bit byte offset from Srd%s" % tc))
-  module.add(tdm.setGlobalAddr(g0, "Srd%s" % tc))
+  module.add(SLShiftLeftB64(dst=sgpr(offLo, 2), src=sgpr(offLo, 2), shiftHex=int(log2(bpe)), comment="64-bit byte offset from %s" % srd))
+  module.add(tdm.setGlobalAddr(g0, srd))
   module.add(SAddU32(dst=sgpr(g0 + 2), src0=sgpr(g0 + 2), src1=sgpr(offLo), comment="global address lo"))
   module.add(SAddCU32(dst=sgpr(g0 + 3), src0=sgpr(g0 + 3), src1=sgpr(offHi), comment="global address hi"))
   module.add(SSubU32(dst=sgpr(dim), src0=sizeI, src1=sgpr(dim), comment="tensor_dim0 = SizeI - wg0*MT0"))
