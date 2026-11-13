@@ -936,6 +936,12 @@ constexpr int64_t MAX_BATCHED_OUTPUT = int64_t{1} << 20;
 /// Output elements up to which a long reduction is also cut into chunks: few enough tiles that
 /// the libraries' own split of k leaves the GPU idle (3 x 32, 32 x 451).
 constexpr int64_t MAX_CHUNKED_OUTPUT = int64_t{1} << 16;
+/// Shortest reduction a forward or backward data GEMM into a 16-bit output runs as fp32
+/// partials (narrowPartials). hipBLASLt on gfx1100 rounds its own split's parts to the output
+/// at 524288 terms (ratio 11 against the once-rounded tolerance) and stays within it up to
+/// 65536 (ratio <= 1.6, as rocBLAS without a split); the fp32-output kernels the partials need
+/// cost 1.1-4x there below it (14x14 c1024 3x3: 42 -> 168 us).
+constexpr int64_t MIN_NARROW_PARTIALS_K = int64_t{1} << 16;
 
 /// @p call's a and b advanced @p count elements along the reduction (k).
 void advanceReduction(GemmCall& call, int64_t count)
@@ -1010,7 +1016,8 @@ ConvGemmPlanCalls batchReductionChains(const ConvProblem& problem,
     // (hipBLASLt on gfx11 does), so the partials here are fp32, summed in order and rounded
     // once. An fp32 output, or an fp32 column matrix, is left as it is.
     if(problem.direction != ConvDirection::BACKWARD_WEIGHTS
-       && (!narrowPartials || calls.size() != 1 || first.d.dataType == data_objects::DataType::FLOAT
+       && (!narrowPartials || calls.size() != 1 || first.k < MIN_NARROW_PARTIALS_K
+           || first.d.dataType == data_objects::DataType::FLOAT
            || first.d.uid
                   != (problem.direction == ConvDirection::FORWARD ? problem.y.uid : problem.x.uid)))
     {

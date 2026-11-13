@@ -338,19 +338,19 @@ TEST(TestConvRepackFormulation, LongReductionIntoSmallWeightsSplitsIntoChunks)
 
 TEST(TestConvRepackFormulation, LongReductionIntoA16BitOutputSumsFp32Partials)
 {
-    // One output pixel over 16384 terms: forward, a filter as large as its 32 x 32 image of 16
-    // channels; backward data, a 1x1 dx of one channel from 16384 output channels. Into a bf16 or
-    // half output the reduction runs as 4 chunks of 4096 whose fp32 partials a cast sums in
+    // One output pixel over 65536 terms: forward, a filter as large as its 64 x 64 image of 16
+    // channels; backward data, a 1x1 dx of one channel from 65536 output channels. Into a bf16 or
+    // half output the reduction runs as 16 chunks of 4096 whose fp32 partials a cast sums in
     // order (narrowPartials); an fp32 output, or the default, keeps the single GEMM.
     ConvGemmShape forward;
     forward.n = 1;
     forward.c = forward.k = 16;
-    forward.input = {32, 32};
-    forward.filter = {32, 32};
+    forward.input = {64, 64};
+    forward.filter = {64, 64};
     ConvGemmShape backward;
     backward.n = 1;
     backward.c = 1;
-    backward.k = 16384;
+    backward.k = 65536;
     backward.input = {1, 1};
     for(const auto& [base, direction, outUid] :
         {std::tuple{forward, ConvDirection::FORWARD, CONV_Y_UID},
@@ -368,7 +368,7 @@ TEST(TestConvRepackFormulation, LongReductionIntoA16BitOutputSumsFp32Partials)
             const auto single = convGemmCalls(problem);
             ASSERT_TRUE(single.has_value());
             ASSERT_EQ(single->stages.at(0).calls.size(), 1u);
-            EXPECT_EQ(single->stages.at(0).calls[0].k, 16384);
+            EXPECT_EQ(single->stages.at(0).calls[0].k, 65536);
             const auto calls = convGemmCalls(
                 problem, MAX_REPACK_WORKSPACE_BYTES, ColumnLayout::FOLLOW_Y, false, true);
             ASSERT_TRUE(calls.has_value());
@@ -380,23 +380,34 @@ TEST(TestConvRepackFormulation, LongReductionIntoA16BitOutputSumsFp32Partials)
             if(narrow)
             {
                 EXPECT_EQ(call.k, 4096);
-                EXPECT_EQ(call.batchCount, 4);
+                EXPECT_EQ(call.batchCount, 16);
                 EXPECT_NE(call.d.uid, outUid);
                 ASSERT_EQ(stage.after.size(), 1u);
                 const auto* sum = stepArgs<StridedCastArgs>(stage.after[0]);
                 ASSERT_NE(sum, nullptr);
-                EXPECT_EQ(sum->batches, 4);
+                EXPECT_EQ(sum->batches, 16);
                 EXPECT_EQ(stage.after[0].dstUid, outUid);
                 EXPECT_EQ(stage.after[0].dataType, dataType);
             }
             else
             {
-                EXPECT_EQ(call.k, 16384);
+                EXPECT_EQ(call.k, 65536);
                 EXPECT_EQ(call.d.uid, outUid);
                 EXPECT_TRUE(stage.after.empty());
             }
         }
     }
+    // Below 65536 terms the single GEMM stays even with narrowPartials.
+    ConvGemmShape shorter = forward;
+    shorter.dataType = conv_data_objects::DataType::BFLOAT16;
+    shorter.input = shorter.filter = {32, 32};
+    const auto kept = convGemmCalls(parse(shorter, ConvDirection::FORWARD),
+                                    MAX_REPACK_WORKSPACE_BYTES,
+                                    ColumnLayout::FOLLOW_Y,
+                                    false,
+                                    true);
+    ASSERT_TRUE(kept.has_value());
+    EXPECT_EQ(kept->stages.at(0).calls.at(0).k, 16384);
 }
 
 TEST(TestConvRepackFormulation, SplitReductionFillsTheGpuWithFp32Partials)
