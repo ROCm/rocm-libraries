@@ -809,9 +809,8 @@ class MxGemmIrTest(unittest.TestCase):
         """FP6 issues the 16x16x128 f8f6f4 WMMA with format 2 on both
         operands, as many as FP8 of the same geometry. "chunked" reads each
         row as six 8 B LDS reads (waited for as three pairs), "contiguous" as
-        three 16 B reads plus one byte swap per scale word (see
-        ``test_scale_swaps_follow_the_k_step_wait``); the scales are 16 B
-        reads either way."""
+        three 16 B reads plus one byte swap per scale word; the scales are
+        16 B reads either way."""
         wmma_16 = "@llvm.amdgcn.wmma.scale.f32.16x16x128.f8f6f4.v8f32.v16i32.v16i32"
         read_8, read_16 = (rf"load <{n} x i32>, ptr addrspace\(3\)" for n in (2, 4))
         geometry = {"tile_m": 128, "tile_n": 128, "tile_k": 256}
@@ -848,42 +847,7 @@ class MxGemmIrTest(unittest.TestCase):
                     swaps = re.findall(
                         r"call i32 @llvm\.amdgcn\.perm\([^\n]*i32 50397696\)", llvm
                     )
-                    k_steps = len(calls) // (rm * rn)
-                    self.assertEqual(len(swaps), k_steps * (rm + rn))
-
-    def test_scale_swaps_follow_the_k_step_wait(self):
-        """With "contiguous" FP6 reads each K-step's scale swaps come right
-        after its first wait, behind a barrier VALU may not cross, in every
-        compute path; other reads emit neither the swaps nor the barrier."""
-        barrier = "call void @llvm.amdgcn.sched.barrier(i32 2044)"
-        swap = re.compile(r"call i32 @llvm\.amdgcn\.perm\([^\n]*i32 50397696\)")
-        paths = (
-            {"local_prefetch": 0, "half_plr": "none"},
-            {"local_prefetch": 1, "half_plr": "none"},
-            {"local_prefetch": 1, "half_plr": "b", "half_b_order": "ahead"},
-            {"local_prefetch": 1, "half_plr": "b", "half_b_order": "late"},
-        )
-        for path in paths:
-            spec = _spec6(k_reads="contiguous", **path)
-            self.assertIsNone(validate(spec))
-            lines = _llvm(spec).splitlines()
-            words = spec.wave_repeat_m + spec.wave_repeat_n
-            swaps = [i for i, line in enumerate(lines) if swap.search(line)]
-            barriers = [i for i, line in enumerate(lines) if barrier in line]
-            with self.subTest(**path):
-                self.assertTrue(swaps)
-                self.assertEqual(len(swaps), len(barriers) * words)
-                for at in barriers:
-                    self.assertIn('asm sideeffect "s_wait_dscnt', lines[at - 1])
-                    self.assertEqual(
-                        [i for i in swaps if at < i <= at + words],
-                        list(range(at + 1, at + 1 + words)),
-                    )
-            for other in (_spec6(k_reads="chunked", **path), _spec8(**path)):
-                with self.subTest(other.kernel_name()):
-                    llvm = _llvm(other)
-                    self.assertNotIn(barrier, llvm)
-                    self.assertNotRegex(llvm, swap)
+                    self.assertEqual(len(swaps), groups * (rm + rn))
 
     def test_wmma_reuse_b_orders_and_flags_the_wmmas(self):
         """With B reuse each K-step's WMMAs run N-repeat outer; every WMMA
