@@ -23,6 +23,9 @@
  * THE SOFTWARE.
  *
  *******************************************************************************/
+#include <algorithm>
+#include <cstdint>
+#include <initializer_list>
 #include <set>
 #include <unordered_map>
 
@@ -59,6 +62,144 @@ static bool hasSharedBatchMode(std::vector<int32_t> const& modeA,
         }
     }
     return false;
+}
+
+// C is added to the result element by element, so each element of D
+// needs exactly one element of C with the same modes.
+// Therefore C's modes must be D's modes, each once, in any order.
+// Without this check a mode that C lacks is silently given length 1.
+static bool hasModesOf(std::vector<int32_t> const& modeCV, std::vector<int32_t> const& modeDV)
+{
+    return std::is_permutation(modeCV.cbegin(), modeCV.cend(), modeDV.cbegin(), modeDV.cend());
+}
+
+// C and D must give each mode the same value, here its extent.
+// The lookup is by mode because C may list its modes in another order than D.
+static bool matchesPerMode(std::vector<std::size_t> const& valuesC,
+                           std::vector<int32_t> const&     modeCV,
+                           std::vector<std::size_t> const& valuesD,
+                           std::vector<int32_t> const&     modeDV)
+{
+    for(std::size_t i = 0; i < modeCV.size(); i++)
+    {
+        auto it = std::find(modeDV.cbegin(), modeDV.cend(), modeCV[i]);
+        if(it == modeDV.cend() || valuesC[i] != valuesD[std::distance(modeDV.cbegin(), it)])
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// C is laid out like D when each mode has the same stride in both, so that an
+// element sits at the same position in C and in D. A mode of extent 1 never
+// moves a position, so its stride is free and isn't compared.
+static bool hasLayoutOf(hiptensorTensorDescriptor_t const descC,
+                        std::vector<int32_t> const&       modeCV,
+                        hiptensorTensorDescriptor_t const descD,
+                        std::vector<int32_t> const&       modeDV)
+{
+    auto const lengthsC = hiptensor::getTensorLengths(descC);
+    auto const stridesC = hiptensor::getTensorStrides(descC);
+    auto const stridesD = hiptensor::getTensorStrides(descD);
+    for(std::size_t i = 0; i < modeCV.size(); i++)
+    {
+        auto it = std::find(modeDV.cbegin(), modeDV.cend(), modeCV[i]);
+        if(it == modeDV.cend()
+           || (lengthsC[i] > 1 && stridesC[i] != stridesD[std::distance(modeDV.cbegin(), it)]))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// A packed tensor has no gaps and no two elements at one position: taken in
+// order of stride, each mode's stride is the number of elements of the modes
+// before it. A mode of extent 1 never moves a position, so its stride is free.
+// The complex path relies on packed tensors: it sizes its buffers by the
+// number of elements.
+static bool isPacked(std::vector<std::size_t> const& lengths,
+                     std::vector<std::size_t> const& strides)
+{
+    std::vector<std::size_t> order;
+    for(std::size_t i = 0; i < lengths.size(); i++)
+    {
+        if(lengths[i] != 1)
+        {
+            order.push_back(i);
+        }
+    }
+    std::sort(order.begin(), order.end(), [&strides](std::size_t i, std::size_t j) {
+        return strides[i] < strides[j];
+    });
+
+    std::size_t packedStride = 1;
+    for(auto i : order)
+    {
+        if(strides[i] != packedStride)
+        {
+            return false;
+        }
+        packedStride *= lengths[i];
+    }
+    return true;
+}
+
+// The number of bytes from a tensor's first element to the end of its
+// last one.
+static std::size_t byteSpan(hiptensorTensorDescriptor_t const desc)
+{
+    auto const lengths = hiptensor::getTensorLengths(desc);
+    auto const strides = hiptensor::getTensorStrides(desc);
+    if(hiptensor::elementsFromLengths(lengths) == 0)
+    {
+        return 0;
+    }
+    std::size_t lastPosition = 0;
+    for(std::size_t i = 0; i < lengths.size(); i++)
+    {
+        lastPosition += (lengths[i] - 1) * strides[i];
+    }
+    return (lastPosition + 1) * hiptensor::hiptensorDataTypeSize(desc->mType);
+}
+
+// Two byte ranges overlap when each one begins before the other ends.
+static bool overlaps(void const* c, std::size_t sizeC, void const* d, std::size_t sizeD)
+{
+    auto const beginC = reinterpret_cast<std::uintptr_t>(c);
+    auto const beginD = reinterpret_cast<std::uintptr_t>(d);
+    return beginC < beginD + sizeD && beginD < beginC + sizeC;
+}
+
+// The complex path sizes its buffers by the number of elements and doesn't
+// use the added tensor's own layout. So every tensor must be packed, and
+// the added tensor (C, or D of a trinary contraction) must be laid out like
+// the result. Returns what's wrong, or nullptr when the layouts are
+// supported or the contraction isn't complex.
+static char const* complexLayoutProblem(hiptensorComputeDescriptor_t descCompute,
+                                        std::initializer_list<hiptensorTensorDescriptor_t> tensors,
+                                        hiptensorTensorDescriptor_t descAdded,
+                                        std::vector<int32_t> const& modeAdded,
+                                        hiptensorTensorDescriptor_t descResult,
+                                        std::vector<int32_t> const& modeResult)
+{
+    if(descCompute != HIPTENSOR_COMPUTE_DESC_C32F && descCompute != HIPTENSOR_COMPUTE_DESC_C64F)
+    {
+        return nullptr;
+    }
+    for(auto desc : tensors)
+    {
+        if(!isPacked(hiptensor::getTensorLengths(desc), hiptensor::getTensorStrides(desc)))
+        {
+            return "Complex contraction needs packed tensors";
+        }
+    }
+    if(!hasLayoutOf(descAdded, modeAdded, descResult, modeResult))
+    {
+        return "Complex contraction needs the added tensor laid out like the result";
+    }
+    return nullptr;
 }
 
 // Convert between vectors of void ptrs stored in opaque API objects
@@ -229,6 +370,31 @@ hiptensorStatus_t hiptensorCreateContraction(const hiptensorHandle_t            
         return HIPTENSOR_STATUS_NOT_SUPPORTED;
     }
 
+    // C must match D mode for mode. A C with other modes or extents would
+    // otherwise be accepted here and later read with lengths it doesn't have.
+    if(descC != nullptr && !hasModesOf(modeCV, modeDV))
+    {
+        snprintf(msg, sizeof(msg), "C must have the same modes as D");
+        logger->logError("hiptensorCreateContraction", msg);
+        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+    }
+
+    if(descC != nullptr
+       && !matchesPerMode(
+           hiptensor::getTensorLengths(descC), modeCV, hiptensor::getTensorLengths(descD), modeDV))
+    {
+        snprintf(msg, sizeof(msg), "Each mode must have the same extent in C and D");
+        logger->logError("hiptensorCreateContraction", msg);
+        return HIPTENSOR_STATUS_INVALID_VALUE;
+    }
+
+    if(char const* problem = complexLayoutProblem(
+           descCompute, {descA, descB, descC, descD}, descC, modeCV, descD, modeDV))
+    {
+        logger->logError("hiptensorCreateContraction", problem);
+        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+    }
+
     *desc = new hiptensorOperationDescriptor();
 
     bool hasUnaryOp = (opA != HIPTENSOR_OP_IDENTITY) || (opB != HIPTENSOR_OP_IDENTITY)
@@ -376,6 +542,33 @@ hiptensorStatus_t hiptensorContract(const hiptensorHandle_t handle,
                  (int)currentDevice.getDeviceId(),
                  (int)handle->getDevice().getDeviceId(),
                  hiptensorGetErrorString(errorCode));
+        logger->logError("hiptensorContraction", msg);
+        return errorCode;
+    }
+
+    // With C and D in one buffer, each element must be read and written at the
+    // same position, so every mode needs the same stride in both. Otherwise the
+    // kernel reads elements of C that it has already overwritten.
+    if(C == D
+       && !hasLayoutOf(plan->mOpDesc->mDescC,
+                       plan->mOpDesc->mModeC,
+                       plan->mOpDesc->mDescD,
+                       plan->mOpDesc->mModeD))
+    {
+        auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
+        snprintf(msg, sizeof(msg), "In-place contraction needs C and D to have the same strides");
+        logger->logError("hiptensorContraction", msg);
+        return errorCode;
+    }
+
+    // A C that shares only part of D's memory is read after the kernel
+    // has overwritten it. C may share memory with D only as the same
+    // buffer.
+    if(plan->mOpDesc->mDescC != nullptr && C != D
+       && overlaps(C, byteSpan(plan->mOpDesc->mDescC), D, byteSpan(plan->mOpDesc->mDescD)))
+    {
+        auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
+        snprintf(msg, sizeof(msg), "C and D must not overlap unless they are the same buffer");
         logger->logError("hiptensorContraction", msg);
         return errorCode;
     }
@@ -1010,6 +1203,33 @@ hiptensorStatus_t hiptensorCreateContractionTrinary(
         return HIPTENSOR_STATUS_NOT_SUPPORTED;
     }
 
+    // D must match E mode for mode. A D with other modes or extents would
+    // otherwise be accepted here and later read with lengths it doesn't have.
+    if(descD != nullptr && !hasModesOf(modeDV, modeEV))
+    {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "D must have the same modes as E");
+        logger->logError("hiptensorCreateContractionTrinary", msg);
+        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+    }
+
+    if(descD != nullptr
+       && !matchesPerMode(
+           hiptensor::getTensorLengths(descD), modeDV, hiptensor::getTensorLengths(descE), modeEV))
+    {
+        char msg[256];
+        snprintf(msg, sizeof(msg), "Each mode must have the same extent in D and E");
+        logger->logError("hiptensorCreateContractionTrinary", msg);
+        return HIPTENSOR_STATUS_INVALID_VALUE;
+    }
+
+    if(char const* problem = complexLayoutProblem(
+           descCompute, {descA, descB, descC, descD, descE}, descD, modeDV, descE, modeEV))
+    {
+        logger->logError("hiptensorCreateContractionTrinary", problem);
+        return HIPTENSOR_STATUS_NOT_SUPPORTED;
+    }
+
     *desc = new hiptensorOperationDescriptor();
 
     bool hasUnaryOp = (opA != HIPTENSOR_OP_IDENTITY) || (opB != HIPTENSOR_OP_IDENTITY)
@@ -1515,6 +1735,33 @@ hiptensorStatus_t hiptensorContractTrinary(const hiptensorHandle_t handle,
                  (int)currentDevice.getDeviceId(),
                  (int)handle->getDevice().getDeviceId(),
                  hiptensorGetErrorString(errorCode));
+        logger->logError("hiptensorContractTrinary", msg);
+        return errorCode;
+    }
+
+    // With D and E in one buffer, each element must be read and written at the
+    // same position, so every mode needs the same stride in both. Otherwise the
+    // kernel reads elements of D that it has already overwritten.
+    if(D == E
+       && !hasLayoutOf(plan->mOpDesc->mDescD,
+                       plan->mOpDesc->mModeD,
+                       plan->mOpDesc->mDescE,
+                       plan->mOpDesc->mModeE))
+    {
+        auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
+        snprintf(msg, sizeof(msg), "In-place contraction needs D and E to have the same strides");
+        logger->logError("hiptensorContractTrinary", msg);
+        return errorCode;
+    }
+
+    // A D that shares only part of E's memory is read after
+    // the kernel has overwritten it. D may share memory with E only
+    // as the same buffer.
+    if(plan->mOpDesc->mDescD != nullptr && D != E
+       && overlaps(D, byteSpan(plan->mOpDesc->mDescD), E, byteSpan(plan->mOpDesc->mDescE)))
+    {
+        auto errorCode = HIPTENSOR_STATUS_NOT_SUPPORTED;
+        snprintf(msg, sizeof(msg), "D and E must not overlap unless they are the same buffer");
         logger->logError("hiptensorContractTrinary", msg);
         return errorCode;
     }

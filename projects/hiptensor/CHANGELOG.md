@@ -14,6 +14,9 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 ### Changed
 * Changed `hiptensorPermute` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` when the output tensor's data type differs from the input tensor's. Previously the mismatch passed validation and the call failed with `HIPTENSOR_STATUS_INTERNAL_ERROR` because no kernel matched.
 * Changed `hiptensorElementwiseTrinaryExecute` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` when the data type of D differs from that of C, matching `hiptensorElementwiseBinaryExecute`. Previously the mismatch failed later with `HIPTENSOR_STATUS_INTERNAL_ERROR`.
+* Changed `hiptensorCreateContraction` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` when C doesn't carry exactly the modes of D, and `HIPTENSOR_STATUS_INVALID_VALUE` when a mode has a different extent in C and in D. `hiptensorCreateContractionTrinary` applies the same rule to D and E. Previously the mismatch passed validation.
+* Changed `hiptensorContract` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` for an in-place contraction, where C and D are the same buffer, when C and D have different strides. `hiptensorContractTrinary` applies the same rule to D and E. Both also return `HIPTENSOR_STATUS_NOT_SUPPORTED` when the two tensors overlap without being the same buffer. Previously both returned wrong results with `HIPTENSOR_STATUS_SUCCESS`.
+* Changed `hiptensorCreateContraction` to return `HIPTENSOR_STATUS_NOT_SUPPORTED` for a complex contraction when a tensor isn't packed or when C is laid out differently from D. `hiptensorCreateContractionTrinary` applies the same rule to D and E. Previously both cases returned wrong results with `HIPTENSOR_STATUS_SUCCESS`.
 * Changed the `hiptensor::hiptensor` CMake target to propagate `hip::host` instead of `hip::device`. Code that links hipTensor is no longer compiled as HIP for every GPU target by default. Projects that compile their own HIP kernels must link `hip::device` themselves.
 
 ### Optimized
@@ -21,6 +24,8 @@ Full documentation for hipTensor is available at [rocm.docs.amd.com/projects/hip
 
 ### Resolved issues
 * Fixed `hiptensorElementwiseBinaryExecute` and `hiptensorReduce` treating the alpha, beta, and gamma scalars as 0 when the compute descriptor is `HIPTENSOR_COMPUTE_DESC_16BF`.
+* Fixed `hiptensorContract` returning wrong results with `HIPTENSOR_STATUS_SUCCESS` when the operands of a contraction were not all packed column-major in the canonical mode order, for example when a tensor listed its modes in a different order.
+* Fixed bilinear `hiptensorContract` reading C with D's layout when C and D are laid out differently.
 
 ## hipTensor 2.5.0 for ROCm 10.2
 

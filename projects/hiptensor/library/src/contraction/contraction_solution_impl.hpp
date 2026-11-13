@@ -27,6 +27,7 @@
 #pragma once
 
 #include <algorithm>
+#include <initializer_list>
 #include <numeric>
 
 #include "contraction_solution.hpp"
@@ -54,14 +55,29 @@ namespace hiptensor
                              std::vector<std::size_t> const& b_ns_ks_lengths,
                              std::vector<std::size_t> const& b_ns_ks_strides,
                              std::vector<int32_t> const&     b_ns_ks_modes,
+                             std::vector<std::size_t> const& ds_ms_ns_lengths,
+                             std::vector<std::size_t> const& ds_ms_ns_strides,
+                             std::vector<int32_t> const&     ds_ms_ns_modes,
                              std::vector<std::size_t> const& e_ms_ns_lengths,
                              std::vector<std::size_t> const& e_ms_ns_strides,
                              std::vector<int32_t> const&     e_ms_ns_modes);
 
-    bool isColMajorLayout(std::vector<std::size_t> const& strides,
-                          std::vector<std::size_t> const& lengths);
+    // True if the (normalized) tensor is packed column-major, ignoring modes of length 0 or 1.
+    bool isPackedColMajorLayout(std::vector<std::size_t> const& strides,
+                                std::vector<std::size_t> const& lengths);
     std::vector<std::size_t>
         applyCKColMajorStridesOptimizationForContraction(std::vector<std::size_t> const& lengths);
+
+    // The lengths of one normalized tensor and the strides CK will use for it.
+    struct NormalizedLayout
+    {
+        std::vector<std::size_t> const& lengths;
+        std::vector<std::size_t>&       strides;
+    };
+
+    // Replaces the strides with CK ColMajor strides if every tensor is packed
+    // col-major; otherwise keeps the true strides of all of them.
+    void applyCKColMajorStridesToAllOrNone(std::initializer_list<NormalizedLayout> tensors);
 
     template <typename DeviceOp, typename Enabler = void>
     class ContractionSolutionImpl;
@@ -145,6 +161,9 @@ namespace hiptensor
                                        b_ns_ks_lengths,
                                        b_ns_ks_strides,
                                        b_ns_ks_modes,
+                                       ds_ms_ns_lengths,
+                                       ds_ms_ns_strides,
+                                       ds_ms_ns_modes,
                                        e_ms_ns_lengths,
                                        e_ms_ns_strides,
                                        e_ms_ns_modes);
@@ -154,19 +173,10 @@ namespace hiptensor
                 return std::vector<ck::index_t>(v.begin(), v.end());
             };
 
-            //Apply CK ColMajor strides for col major layout
-            if(isColMajorLayout(a_ms_ks_strides, a_ms_ks_lengths))
-                normal_a_ms_ks_strides
-                    = applyCKColMajorStridesOptimizationForContraction(normal_a_ms_ks_lengths);
-            if(isColMajorLayout(b_ns_ks_strides, b_ns_ks_lengths))
-                normal_b_ns_ks_strides
-                    = applyCKColMajorStridesOptimizationForContraction(normal_b_ns_ks_lengths);
-            if(isColMajorLayout(ds_ms_ns_strides, ds_ms_ns_lengths))
-                normal_ds_ms_ns_strides
-                    = applyCKColMajorStridesOptimizationForContraction(normal_ds_ms_ns_lengths);
-            if(isColMajorLayout(e_ms_ns_strides, e_ms_ns_lengths))
-                normal_e_ms_ns_strides
-                    = applyCKColMajorStridesOptimizationForContraction(normal_e_ms_ns_lengths);
+            applyCKColMajorStridesToAllOrNone({{normal_a_ms_ks_lengths, normal_a_ms_ks_strides},
+                                               {normal_b_ns_ks_lengths, normal_b_ns_ks_strides},
+                                               {normal_ds_ms_ns_lengths, normal_ds_ms_ns_strides},
+                                               {normal_e_ms_ns_lengths, normal_e_ms_ns_strides}});
 
             // Initialize the argument pointer
             if constexpr(std::is_same_v<typename Traits::AOp, ck::tensor_operation::element_wise::PassThrough> 
@@ -323,6 +333,9 @@ namespace hiptensor
                                        b_ns_ks_lengths,
                                        b_ns_ks_strides,
                                        b_ns_ks_modes,
+                                       {}, // no C in a scale contraction
+                                       {},
+                                       {},
                                        e_ms_ns_lengths,
                                        e_ms_ns_strides,
                                        e_ms_ns_modes);
@@ -332,16 +345,9 @@ namespace hiptensor
                 return std::vector<ck::index_t>(v.begin(), v.end());
             };
 
-            //Apply CK ColMajor strides for col major layout
-            if(isColMajorLayout(a_ms_ks_strides, a_ms_ks_lengths))
-                normal_a_ms_ks_strides
-                    = applyCKColMajorStridesOptimizationForContraction(normal_a_ms_ks_lengths);
-            if(isColMajorLayout(b_ns_ks_strides, b_ns_ks_lengths))
-                normal_b_ns_ks_strides
-                    = applyCKColMajorStridesOptimizationForContraction(normal_b_ns_ks_lengths);
-            if(isColMajorLayout(e_ms_ns_strides, e_ms_ns_lengths))
-                normal_e_ms_ns_strides
-                    = applyCKColMajorStridesOptimizationForContraction(normal_e_ms_ns_lengths);
+            applyCKColMajorStridesToAllOrNone({{normal_a_ms_ks_lengths, normal_a_ms_ks_strides},
+                                               {normal_b_ns_ks_lengths, normal_b_ns_ks_strides},
+                                               {normal_e_ms_ns_lengths, normal_e_ms_ns_strides}});
 
             // Initialize the argument pointer
             if constexpr(

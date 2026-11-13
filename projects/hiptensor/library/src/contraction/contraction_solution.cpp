@@ -26,10 +26,41 @@
 
 #include "contraction_solution.hpp"
 #include "hash.hpp"
-#include "hiptensor_options.hpp"
 
 namespace hiptensor
 {
+    namespace
+    {
+        // Reorders a tensor shaped like the result (C or D) into the normalized M|N order.
+        // resultModes is the target order and is the same for C and D, as CK requires;
+        // modes, lengths and strides are the tensor's own, so each one keeps pointing
+        // at its real memory. A mode the tensor does not have gets length 1 and
+        // repeats the previous stride.
+        void normalizeLikeResult(std::vector<int32_t> const&     resultModes,
+                                 std::vector<int32_t> const&     modes,
+                                 std::vector<std::size_t> const& lengths,
+                                 std::vector<std::size_t> const& strides,
+                                 std::vector<std::size_t>&       normalLengths,
+                                 std::vector<std::size_t>&       normalStrides)
+        {
+            for(std::size_t i = 0; i < resultModes.size(); i++)
+            {
+                auto it = std::find(modes.cbegin(), modes.cend(), resultModes[i]);
+                if(it != modes.cend())
+                {
+                    auto offset      = std::distance(modes.cbegin(), it);
+                    normalLengths[i] = lengths[offset];
+                    normalStrides[i] = strides[offset];
+                }
+                else
+                {
+                    normalLengths[i] = 1;
+                    normalStrides[i] = (i > 0) ? normalStrides[i - 1] : 1;
+                }
+            }
+        }
+    } // namespace
+
     std::array<std::vector<std::size_t>, 8>
         normalizeTensorModes(std::vector<std::size_t> const& a_ms_ks_lengths,
                              std::vector<std::size_t> const& a_ms_ks_strides,
@@ -37,6 +68,9 @@ namespace hiptensor
                              std::vector<std::size_t> const& b_ns_ks_lengths,
                              std::vector<std::size_t> const& b_ns_ks_strides,
                              std::vector<int32_t> const&     b_ns_ks_modes,
+                             std::vector<std::size_t> const& ds_ms_ns_lengths,
+                             std::vector<std::size_t> const& ds_ms_ns_strides,
+                             std::vector<int32_t> const&     ds_ms_ns_modes,
                              std::vector<std::size_t> const& e_ms_ns_lengths,
                              std::vector<std::size_t> const& e_ms_ns_strides,
                              std::vector<int32_t> const&     e_ms_ns_modes)
@@ -47,6 +81,8 @@ namespace hiptensor
         std::vector<std::size_t> normal_b_ns_ks_lengths(MaxNumDimsK + MaxNumDimsN, 1);
         std::vector<std::size_t> normal_b_ns_ks_strides(MaxNumDimsK + MaxNumDimsN, 1);
         std::vector<int32_t>     normal_b_ns_ks_modes(MaxNumDimsK + MaxNumDimsN, -1);
+        std::vector<std::size_t> normal_ds_ms_ns_lengths(MaxNumDimsM + MaxNumDimsN, 1);
+        std::vector<std::size_t> normal_ds_ms_ns_strides(MaxNumDimsM + MaxNumDimsN, 1);
         std::vector<std::size_t> normal_e_ms_ns_lengths(MaxNumDimsM + MaxNumDimsN, 1);
         std::vector<std::size_t> normal_e_ms_ns_strides(MaxNumDimsM + MaxNumDimsN, 1);
         std::vector<int32_t>     normal_e_ms_ns_modes(MaxNumDimsM + MaxNumDimsN, -1);
@@ -129,21 +165,30 @@ namespace hiptensor
                   normal_b_ns_ks_modes.cbegin() + MaxNumDimsN,
                   contraction_result_modes.begin() + MaxNumDimsM);
 
-        for(int i = 0; i < contraction_result_modes.size(); i++)
+        normalizeLikeResult(contraction_result_modes,
+                            e_ms_ns_modes,
+                            e_ms_ns_lengths,
+                            e_ms_ns_strides,
+                            normal_e_ms_ns_lengths,
+                            normal_e_ms_ns_strides);
+
+        // C (ds_*) is normalized with its own modes: it may be laid out differently
+        // from D (e_*), and reading it with D's strides gives wrong results.
+        // Only a contraction without C mirrors D. A C that is present carries D's
+        // modes and extents; hiptensorCreateContraction rejects any other.
+        if(ds_ms_ns_lengths.empty())
         {
-            auto it = std::find(
-                e_ms_ns_modes.cbegin(), e_ms_ns_modes.cend(), contraction_result_modes[i]);
-            if(it != e_ms_ns_modes.cend())
-            {
-                auto offset               = std::distance(e_ms_ns_modes.cbegin(), it);
-                normal_e_ms_ns_lengths[i] = e_ms_ns_lengths[offset];
-                normal_e_ms_ns_strides[i] = e_ms_ns_strides[offset];
-            }
-            else
-            {
-                normal_e_ms_ns_lengths[i] = 1;
-                normal_e_ms_ns_strides[i] = normal_e_ms_ns_strides[i - 1];
-            }
+            normal_ds_ms_ns_lengths = normal_e_ms_ns_lengths;
+            normal_ds_ms_ns_strides = normal_e_ms_ns_strides;
+        }
+        else
+        {
+            normalizeLikeResult(contraction_result_modes,
+                                ds_ms_ns_modes,
+                                ds_ms_ns_lengths,
+                                ds_ms_ns_strides,
+                                normal_ds_ms_ns_lengths,
+                                normal_ds_ms_ns_strides);
         }
 
         return {
@@ -151,31 +196,34 @@ namespace hiptensor
             normal_a_ms_ks_strides,
             normal_b_ns_ks_lengths,
             normal_b_ns_ks_strides,
-            normal_e_ms_ns_lengths,
-            normal_e_ms_ns_strides,
+            normal_ds_ms_ns_lengths,
+            normal_ds_ms_ns_strides,
             normal_e_ms_ns_lengths,
             normal_e_ms_ns_strides,
         };
     }
 
-    bool isColMajorLayout(std::vector<std::size_t> const& strides,
-                          std::vector<std::size_t> const& lengths)
+    bool isPackedColMajorLayout(std::vector<std::size_t> const& strides,
+                                std::vector<std::size_t> const& lengths)
     {
-        if(strides.empty())
+        if(strides.size() != lengths.size())
         {
-            using hiptensor::HiptensorOptions;
-            auto& options = HiptensorOptions::instance();
-            return options->isColMajorStrides();
+            return false;
         }
 
-        if(strides.size() > 0 && strides[0] != 1)
-            return false;
-        for(int i = 1; i < static_cast<int>(strides.size()); i++)
+        // Only modes with more than one index move an offset; the strides of
+        // length-0 and length-1 modes are free. Normalization pads every tensor
+        // with length-1 modes, so comparing them would mark packed tensors as
+        // unpacked. Results stay correct (true strides are kept) but the
+        // contraction misses the faster CK col-major path.
+        std::size_t packedStride = 1;
+        for(std::size_t i = 0; i < lengths.size(); i++)
         {
-            if(strides[i] != strides[i - 1] * lengths[i - 1])
+            if(lengths[i] > 1 && strides[i] != packedStride)
             {
                 return false;
             }
+            packedStride *= std::max<std::size_t>(lengths[i], 1);
         }
         return true;
     }
@@ -183,6 +231,11 @@ namespace hiptensor
     std::vector<std::size_t>
         applyCKColMajorStridesOptimizationForContraction(std::vector<std::size_t> const& lengths)
     {
+        // A normalized tensor holds two groups of modes (M and K, N and K, or M and N).
+        // The split at size() / 2 is right only when all groups have the same size.
+        static_assert(MaxNumDimsM == MaxNumDimsN && MaxNumDimsN == MaxNumDimsK,
+                      "CK col-major strides need MaxNumDimsM == MaxNumDimsN == MaxNumDimsK");
+
         std::vector<std::size_t> strides(lengths.size(), 1);
         // Assign second half of strides
         int stride = 1;
@@ -199,6 +252,28 @@ namespace hiptensor
             stride *= lengths[s];
         }
         return strides;
+    }
+
+    // CK ColMajor strides are computed from lengths alone and renumber the
+    // elements. The renumbering is consistent only if every tensor is packed
+    // col-major in its normalized mode order, so tensors sharing an index
+    // (A/D: M, A/B: K, B/D: N) still pair the same elements. Apply it to all
+    // tensors or to none; otherwise keep the true strides.
+    void applyCKColMajorStridesToAllOrNone(std::initializer_list<NormalizedLayout> tensors)
+    {
+        bool allPacked = true;
+        for(auto const& tensor : tensors)
+        {
+            allPacked = allPacked && isPackedColMajorLayout(tensor.strides, tensor.lengths);
+        }
+
+        if(allPacked)
+        {
+            for(auto const& tensor : tensors)
+            {
+                tensor.strides = applyCKColMajorStridesOptimizationForContraction(tensor.lengths);
+            }
+        }
     }
 
     ContractionSolution::ContractionSolution(
