@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: MIT
 """Run the installed rocjitsu-quick MIOpen category on a requested architecture.
 
-Consumes an installed prefix (OUTPUT_ARTIFACTS_DIR, THEROCK_BIN_DIR) and a
-prepared emulator. Never fetches, installs, configures or builds. TEST_TYPE
+Consumes an installed prefix (OUTPUT_ARTIFACTS_DIR, THEROCK_BIN_DIR) and its
+packaged emulator. Never fetches, installs, configures or builds. TEST_TYPE
 never widens the packaged selection. Every GPU operation runs under rocjitsu.
 """
 
@@ -23,7 +23,12 @@ from pathlib import Path
 
 from rocjitsu_cpu import available_cpu_count, execution_command, run_cpu_shards
 from rocjitsu_reports import merge_reports
-from rocjitsu_selection import build_filter, listed_tests
+from rocjitsu_selection import (
+    build_filter,
+    listed_tests,
+    target_version,
+    validate_targets,
+)
 
 
 CATEGORY = "rocjitsu-quick"
@@ -83,29 +88,76 @@ finally:
 """
 
 
-def target_version(arch: str) -> int:
-    """Decode AMD's gfx major/minor/revision name into its KFD version number."""
-    match = re.fullmatch(r"gfx([1-9][0-9]?)([0-9a-f])([0-9a-f])", arch)
-    if not match:
-        raise ValueError(f"Invalid AMDGPU architecture: {arch!r}")
-    major, minor, revision = match.groups()
-    return int(major) * 10000 + int(minor, 16) * 100 + int(revision, 16)
+def resolve_arch(arch, targets, env, *, overrides=False):
+    """Select only exact registered CI targets; explicit experiments may opt out."""
+    if arch is not None:
+        target_version(arch)
+        if arch not in targets and not overrides:
+            raise ValueError(
+                f"Unregistered rocjitsu target {arch}; supply both "
+                "--rocjitsu-bin and --rocjitsu-config for a local experiment"
+            )
+        return arch
+    raw_targets = env.get("AMDGPU_TARGETS", "").strip()
+    if raw_targets:
+        source = "AMDGPU_TARGETS"
+        requested = {
+            part.strip() for part in re.split("[,;]", raw_targets) if part.strip()
+        }
+        candidates = requested & targets.keys()
+    else:
+        source = "AMDGPU_FAMILIES"
+        requested = {
+            part.strip()
+            for part in re.split("[,;]", env.get(source, ""))
+            if part.strip()
+        }
+        candidates = {
+            target_arch
+            for target_arch, target in targets.items()
+            if target["family"] in requested
+        }
+    if len(candidates) != 1:
+        raise ValueError(
+            f"Expected one policy-supported rocjitsu target from {source}; "
+            f"requested {sorted(requested)}, matched {sorted(candidates)}. "
+            "Supply an exact --arch to disambiguate."
+        )
+    return candidates.pop()
 
 
-def prepared_paths(arch: str) -> tuple[Path, Path, Path]:
-    target_version(arch)
-    work = Path("rocjitsu-work") / arch
-    return (
-        work.resolve(),
-        (work / "build/tools/rocjitsu/rocjitsu").resolve(),
-        (work / "prepared-config.json").resolve(),
+def runtime_paths(dist, arch, targets, rocjitsu_bin=None, rocjitsu_config=None):
+    """Discover installed artifacts, never a source or prepared build tree."""
+    if bool(rocjitsu_bin) != bool(rocjitsu_config):
+        raise ValueError(
+            "--rocjitsu-bin and --rocjitsu-config must be supplied together"
+        )
+    if rocjitsu_bin is not None:
+        launcher, config = rocjitsu_bin.resolve(), rocjitsu_config.resolve()
+    else:
+        if arch not in targets:
+            raise ValueError(f"No packaged rocjitsu profile registered for {arch}")
+        launcher = dist / "bin/rocjitsu"
+        config = dist / "share/rocjitsu/configs" / targets[arch]["profile"]
+    artifact_hint = (
+        "Install/fetch the rocjitsu run artifacts or supply both prebuilt overrides."
     )
+    if not launcher.is_file() or not os.access(launcher, os.X_OK):
+        raise RuntimeError(
+            f"rocjitsu launcher missing or not executable: {launcher}. {artifact_hint}"
+        )
+    if not config.is_file():
+        raise RuntimeError(f"rocjitsu config missing: {config}. {artifact_hint}")
+    return launcher, config
 
 
 def validated_config(config: Path, arch: str, dispatch_threads: int) -> dict:
     data = json.loads(config.read_text())
-    vm = data.get("vm", {})
-    device = vm.get("gpu", {}).get("device", {})
+    vm = data.get("vm") if isinstance(data, dict) else None
+    gpu = vm.get("gpu") if isinstance(vm, dict) else None
+    device = gpu.get("device") if isinstance(gpu, dict) else None
+    if not isinstance(device, dict):
+        raise ValueError(f"rocjitsu configuration does not target {arch}: {config}")
     # Pinned profiles express the target via gfx_target_version, not vm.target.
     # An explicit target must agree; an absent version may never default to arch.
     if (
@@ -123,13 +175,16 @@ def validated_config(config: Path, arch: str, dispatch_threads: int) -> dict:
 
 def load_policy(path: Path) -> dict:
     policy = json.loads(path.read_text())
-    if policy.get("category") != CATEGORY or not isinstance(
-        policy.get("representative_cases"), dict
+    if (
+        not isinstance(policy, dict)
+        or policy.get("category") != CATEGORY
+        or not isinstance(policy.get("representative_cases"), dict)
     ):
         raise ValueError(
             f"Expected exported {CATEGORY} representative-case policy: {path}"
         )
-    return policy["representative_cases"]
+    validate_targets(policy.get("targets"))
+    return policy
 
 
 def suite_metadata(test_dir: Path, reports: Path):
@@ -382,7 +437,7 @@ def summarize_report(report: Path, arch: str):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--arch", required=True, help="Exact AMDGPU target, e.g. gfx950"
+        "--arch", help="Exact AMDGPU target (default: unambiguous CI target/family)"
     )
     parser.add_argument(
         "--rocjitsu-bin", type=Path, help="Real prebuilt rocjitsu launcher"
@@ -403,10 +458,46 @@ def main():
         "--gpu-timeout", type=int, default=2400, help="Seconds for the GPU phase"
     )
     args = parser.parse_args()
+    # An exact CLI/CI target identifies its old verdict even if policy loading fails.
+    requested = (
+        {args.arch}
+        if args.arch is not None
+        else {
+            part.strip()
+            for part in re.split("[,;]", os.environ.get("AMDGPU_TARGETS", ""))
+            if part.strip()
+        }
+    )
+    if len(requested) == 1:
+        startup_arch = next(iter(requested))
+        try:
+            target_version(startup_arch)
+        except ValueError:
+            parser.error(f"Invalid AMDGPU target: {startup_arch}")
+        (
+            Path("rocjitsu-work") / startup_arch / "reports" / f"{REPORT_NAME}.xml"
+        ).unlink(missing_ok=True)
+    if bool(args.rocjitsu_bin) != bool(args.rocjitsu_config):
+        parser.error("--rocjitsu-bin and --rocjitsu-config must be supplied together")
+    policy = load_policy(Path(__file__).with_name("rocjitsu_policy.json"))
     try:
-        workdir, default_bin, default_config = prepared_paths(args.arch)
+        args.arch = resolve_arch(
+            args.arch,
+            policy["targets"],
+            os.environ,
+            overrides=args.rocjitsu_bin is not None,
+        )
     except ValueError as error:
         parser.error(str(error))
+    workdir = (Path("rocjitsu-work") / args.arch).resolve()
+    # Invalidate family-resolved verdicts before artifact/launch validation.
+    reports = workdir / "reports"
+    reports.mkdir(parents=True, exist_ok=True)
+    report = reports / f"{REPORT_NAME}.xml"
+    report.unlink(missing_ok=True)
+    dist = Path(
+        os.environ.get("OUTPUT_ARTIFACTS_DIR", Path(__file__).resolve().parents[3])
+    ).resolve()
     cpu_count = available_cpu_count()
     dispatch_threads = (
         args.dispatch_threads
@@ -417,28 +508,11 @@ def main():
         parser.error(f"--dispatch-threads must be between 1 and {min(16, cpu_count)}")
     if args.cpu_timeout <= 0 or args.gpu_timeout <= 0:
         parser.error("--cpu-timeout and --gpu-timeout must be positive")
-    if bool(args.rocjitsu_bin) != bool(args.rocjitsu_config):
-        parser.error("--rocjitsu-bin and --rocjitsu-config must be supplied together")
-    rocjitsu = args.rocjitsu_bin.resolve() if args.rocjitsu_bin else default_bin
-    config = args.rocjitsu_config.resolve() if args.rocjitsu_config else default_config
-    # Configuration/artifact/launch failures must not reuse an earlier verdict.
-    reports = workdir / "reports"
-    reports.mkdir(parents=True, exist_ok=True)
-    report = reports / f"{REPORT_NAME}.xml"
-    report.unlink(missing_ok=True)
-    prepare_hint = (
-        f"Prepare rocjitsu for {args.arch} first, or supply both prebuilt overrides."
+    rocjitsu, config = runtime_paths(
+        dist, args.arch, policy["targets"], args.rocjitsu_bin, args.rocjitsu_config
     )
-    if not rocjitsu.is_file() or not os.access(rocjitsu, os.X_OK):
-        raise RuntimeError(
-            f"rocjitsu launcher missing or not executable: {rocjitsu}. {prepare_hint}"
-        )
-    if not config.is_file():
-        raise RuntimeError(f"rocjitsu config missing: {config}. {prepare_hint}")
     config_data = validated_config(config, args.arch, dispatch_threads)
-    representative_cases = load_policy(Path(__file__).with_name("rocjitsu_policy.json"))
-
-    dist = Path(os.environ.get("OUTPUT_ARTIFACTS_DIR", "./build")).resolve()
+    representative_cases = policy["representative_cases"]
     bin_dir = Path(os.environ.get("THEROCK_BIN_DIR", str(dist / "bin"))).resolve()
     gtest = bin_dir / "miopen_gtest"
     test_dir = bin_dir / "MIOpen"

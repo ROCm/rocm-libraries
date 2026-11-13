@@ -68,11 +68,15 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ### Added
 * [CI] Added a MIOpen-owned `rocjitsu-quick` category sharing the FFM baseline and
   additional Smoke/CPU coverage. The installed architecture-aware runner consumes
-  PR-built MIOpen/CK artifacts through the native TheRock gfx1250 CPU component;
-  a single target registry enables adding further architectures after qualification.
-  Static exclusions and adaptive coverage policy live in `test_categories.yaml`.
+  PR-built MIOpen/CK artifacts through a thin TheRock CPU component for gfx1250.
+  Static exclusions, adaptive policy and target/profile selection live in
+  `test_categories.yaml`. The runner uses built rocjitsu artifacts, not test-time
+  source compilation; additional architectures need only configuration changes
+  after qualification.
   CPU checks run in isolated parallel shards, followed by GPU checks at up to
   16 simulator dispatch workers; merged reports require every selected identity.
+  Exact-target configuration failures invalidate prior merged verdicts before
+  loading the exported policy.
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
   RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
   filters up to 7x7 and is selected through Find mode.

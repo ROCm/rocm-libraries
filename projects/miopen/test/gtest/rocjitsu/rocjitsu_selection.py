@@ -198,6 +198,43 @@ def build_filter(base_filter, names, representative_cases):
     return result_filter, selected, exclusions
 
 
+def target_version(arch: str) -> int:
+    """Decode AMD's gfx major/minor/revision name into its KFD version number."""
+    match = re.fullmatch(r"gfx([1-9][0-9]?)([0-9a-f])([0-9a-f])", arch)
+    if not match:
+        raise ValueError(f"Invalid AMDGPU architecture: {arch!r}")
+    major, minor, revision = match.groups()
+    return int(major) * 10000 + int(minor, 16) * 100 + int(revision, 16)
+
+
+def validate_targets(targets):
+    """Reject unusable policy entries before selecting an installed profile."""
+    if not isinstance(targets, dict) or not targets:
+        raise ValueError("rocjitsu targets must be a nonempty architecture map")
+    for arch, target in targets.items():
+        if not isinstance(arch, str):
+            raise ValueError(f"Invalid AMDGPU architecture: {arch!r}")
+        target_version(arch)
+        if not isinstance(target, dict) or set(target) != {"family", "profile"}:
+            raise ValueError(f"rocjitsu target {arch} must define family and profile")
+        family, profile = target["family"], target["profile"]
+        if not isinstance(family, str) or not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9_-]*", family
+        ):
+            raise ValueError(f"Invalid rocjitsu family for {arch}: {family!r}")
+        if (
+            not isinstance(profile, str)
+            or not profile.endswith(".json")
+            or not all(
+                re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", part)
+                for part in profile.split("/")
+            )
+        ):
+            raise ValueError(
+                f"Invalid relative rocjitsu profile for {arch}: {profile!r}"
+            )
+
+
 def export_policy(source_yaml, destination_json):
     """Export configure-time YAML; the installed selector needs only stdlib."""
     import yaml
@@ -212,6 +249,7 @@ def export_policy(source_yaml, destination_json):
                 for item in (entry if isinstance(entry, list) else [entry])
             ]
     category["category"] = "rocjitsu-quick"
+    validate_targets(category.get("targets"))
     # Missing adaptive policy is a configuration error, not a runtime fallback.
     policies = category["representative_cases"]
     for key, strategy in (

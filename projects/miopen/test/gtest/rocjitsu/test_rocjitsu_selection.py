@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 from fnmatch import fnmatchcase
+from copy import deepcopy
 import itertools
 import json
 from pathlib import Path
@@ -38,6 +39,60 @@ class SelectionTests(unittest.TestCase):
             + "-"
             + ":".join(cls.category["exclude"])
         )
+
+    def test_export_rejects_unusable_targets_and_escaping_profile_paths(self):
+        import yaml
+
+        malformed = [
+            None,
+            [],
+            {},
+            {1250: {"family": "gfx125X-dcgpu", "profile": "profile.json"}},
+            {"gfx1250-strict": {"family": "gfx125X-dcgpu", "profile": "profile.json"}},
+            {"gfx1250": []},
+            {"gfx1250": {"family": "gfx125X-dcgpu"}},
+            {
+                "gfx1250": {
+                    "family": "gfx125X-dcgpu",
+                    "profile": "profile.json",
+                    "typo": 1,
+                }
+            },
+        ]
+        for family in (None, "", [], "gfx125X-dcgpu;other", "../gfx125X-dcgpu"):
+            malformed.append({"gfx1250": {"family": family, "profile": "profile.json"}})
+        for profile in (
+            None,
+            "",
+            [],
+            "../outside.json",
+            "dir/../outside.json",
+            "/outside.json",
+            "./profile.json",
+            "dir//profile.json",
+            "C:\\profile.json",
+            "dir\\profile.json",
+            "profile.txt",
+            "dir/",
+            "dir/.json",
+        ):
+            malformed.append(
+                {"gfx1250": {"family": "gfx125X-dcgpu", "profile": profile}}
+            )
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "categories.yaml"
+            destination = Path(directory) / "policy.json"
+            for targets in malformed:
+                with self.subTest(targets=targets):
+                    category = deepcopy(self.category)
+                    category["targets"] = targets
+                    source.write_text(
+                        yaml.safe_dump(
+                            {"test_categories": {"rocjitsu-quick": category}}
+                        )
+                    )
+                    with self.assertRaises(ValueError):
+                        export_policy(source, destination)
 
     def test_ordinary_quick_and_ffm_keep_their_independent_cost_boundaries(self):
         import yaml

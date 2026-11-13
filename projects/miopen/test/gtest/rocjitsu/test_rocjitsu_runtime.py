@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 import signal
+import shutil
 import sys
 import tempfile
 import unittest
@@ -18,14 +19,16 @@ from run_rocjitsu import (
     CATEGORY,
     SUITE,
     load_policy,
+    resolve_arch,
+    runtime_paths,
     run_logged,
     split_execution_commands,
     suite_environment,
     suite_metadata,
-    target_version,
     validated_config,
 )
 from rocjitsu_cpu import available_cpu_count, run_cpu_shards
+from rocjitsu_selection import export_policy, target_version
 
 
 def matches(command, name):
@@ -39,12 +42,20 @@ def matches(command, name):
 
 
 class RuntimeContractTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        with tempfile.TemporaryDirectory() as directory:
+            policy = Path(directory) / "policy.json"
+            export_policy(Path(__file__).parent.parent / "test_categories.yaml", policy)
+            cls.policy = load_policy(policy)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.directory = Path(self.temp.name)
+        self.targets = deepcopy(self.policy["targets"])
 
-    def test_config_requires_exact_target_version_for_both_supported_architectures(
+    def test_config_requires_exact_target_version_for_registered_and_override_arches(
         self,
     ):
         for arch, version in (("gfx1250", 120500), ("gfx950", 90500)):
@@ -63,10 +74,6 @@ class RuntimeContractTests(unittest.TestCase):
                     },
                 }
                 config = self.directory / "config.json"
-                config.write_text(json.dumps(profile))
-                # A matching profile must remain usable while mismatched and
-                # absent target metadata below must fail, not default to arch.
-                validated_config(config, arch, 4)
                 for bad_version in (None, "120500", True, 90000):
                     bad = deepcopy(profile)
                     bad["vm"]["gpu"]["device"]["gfx_target_version"] = bad_version
@@ -96,9 +103,182 @@ class RuntimeContractTests(unittest.TestCase):
             with self.subTest(arch=arch), self.assertRaises(ValueError):
                 target_version(arch)
 
+    def test_ci_selection_uses_unique_exact_target_before_family(self):
+        for value in ("gfx1250", " gfx950,gfx1250;gfx1100 ", "gfx1250;gfx1250"):
+            with self.subTest(value=value):
+                self.assertEqual(
+                    resolve_arch(
+                        None,
+                        self.targets,
+                        {"AMDGPU_TARGETS": value, "AMDGPU_FAMILIES": "unrelated"},
+                    ),
+                    "gfx1250",
+                )
+        for value in ("gfx125X-dcgpu", "unrelated; gfx125X-dcgpu,gfx125X-dcgpu"):
+            with self.subTest(value=value):
+                self.assertEqual(
+                    resolve_arch(None, self.targets, {"AMDGPU_FAMILIES": value}),
+                    "gfx1250",
+                )
+
+    def test_ci_selection_rejects_missing_unknown_and_strict_inputs(self):
+        for env in (
+            {},
+            {"AMDGPU_FAMILIES": "gfx125X-dcgpu-strict"},
+            {"AMDGPU_FAMILIES": "gfx1250"},
+            {"AMDGPU_TARGETS": "gfx1250-strict"},
+            {"AMDGPU_TARGETS": "gfx950", "AMDGPU_FAMILIES": "gfx125X-dcgpu"},
+            {"AMDGPU_TARGETS": "gfx1250:gfx950"},
+            {"HSA_OVERRIDE_GFX_VERSION": "12.5.0"},
+        ):
+            with self.subTest(env=env), self.assertRaisesRegex(
+                ValueError, "Expected one policy-supported"
+            ):
+                resolve_arch(None, self.targets, env)
+
+    def test_new_targets_and_family_variants_require_unambiguous_selection(self):
+        self.targets["gfx950"] = {"family": "gfx950-dcgpu", "profile": "gfx950.json"}
+        for env in (
+            {"AMDGPU_TARGETS": "gfx1250,gfx950"},
+            {"AMDGPU_FAMILIES": "gfx125X-dcgpu;gfx950-dcgpu"},
+        ):
+            with self.subTest(env=env), self.assertRaisesRegex(ValueError, "matched"):
+                resolve_arch(None, self.targets, env)
+        self.assertEqual(
+            resolve_arch("gfx1250", self.targets, {"AMDGPU_TARGETS": "gfx1250;gfx950"}),
+            "gfx1250",
+        )
+        self.targets["gfx1251"] = {
+            "family": "gfx125X-dcgpu",
+            "profile": "gfx1251.json",
+        }
+        with self.assertRaisesRegex(ValueError, "Expected one policy-supported"):
+            resolve_arch(None, self.targets, {"AMDGPU_FAMILIES": "gfx125X-dcgpu"})
+        self.assertEqual(
+            resolve_arch(None, self.targets, {"AMDGPU_TARGETS": "gfx1251"}),
+            "gfx1251",
+        )
+
+    def test_explicit_unregistered_target_requires_paired_real_overrides(self):
+        with self.assertRaisesRegex(ValueError, "Unregistered rocjitsu target gfx950"):
+            resolve_arch("gfx950", self.targets, {})
+        self.assertEqual(
+            resolve_arch("gfx950", self.targets, {}, overrides=True), "gfx950"
+        )
+        for arch in ("gfx1250-strict", "../gfx1250"):
+            with self.subTest(arch=arch), self.assertRaises(ValueError):
+                resolve_arch(arch, self.targets, {}, overrides=True)
+        launcher = self.directory / "launcher"
+        config = self.directory / "local.json"
+        for supplied in ((launcher, None), (None, config)):
+            with self.subTest(supplied=supplied), self.assertRaisesRegex(
+                ValueError, "must be supplied together"
+            ):
+                runtime_paths(self.directory, "gfx950", self.targets, *supplied)
+        with self.assertRaisesRegex(RuntimeError, "launcher missing or not executable"):
+            runtime_paths(self.directory, "gfx950", self.targets, launcher, config)
+        launcher.write_text("#!/bin/sh\nexit 0\n")
+        launcher.chmod(0o755)
+        with self.assertRaisesRegex(RuntimeError, "config missing"):
+            runtime_paths(self.directory, "gfx950", self.targets, launcher, config)
+        config.write_text('{"vm":{"gpu":{"device":{"gfx_target_version":90500}}}}')
+        _, found_config = runtime_paths(
+            self.directory, "gfx950", self.targets, launcher, config
+        )
+        with self.assertRaisesRegex(ValueError, "does not target gfx1250"):
+            validated_config(found_config, "gfx1250", 4)
+
+    def test_installed_package_requires_executable_launcher_and_policy_profile(self):
+        launcher = self.directory / "bin/rocjitsu"
+        launcher.parent.mkdir()
+        profiles = self.directory / "share/rocjitsu/configs"
+        profiles.mkdir(parents=True)
+        profile = profiles / self.targets["gfx1250"]["profile"]
+        # A previous prepared tree must not satisfy installed artifact discovery.
+        old_launcher = self.directory / "build/tools/rocjitsu/rocjitsu"
+        old_launcher.parent.mkdir(parents=True)
+        old_launcher.write_text("#!/bin/sh\nexit 0\n")
+        old_launcher.chmod(0o755)
+        with self.assertRaisesRegex(RuntimeError, "launcher missing or not executable"):
+            runtime_paths(self.directory, "gfx1250", self.targets)
+        launcher.write_text("#!/bin/sh\nexit 0\n")
+        with self.assertRaisesRegex(RuntimeError, "launcher missing or not executable"):
+            runtime_paths(self.directory, "gfx1250", self.targets)
+        launcher.chmod(0o755)
+        (profiles / "other.json").write_text("{}")
+        with self.assertRaisesRegex(RuntimeError, "config missing"):
+            runtime_paths(self.directory, "gfx1250", self.targets)
+        profile.write_text('{"vm":{"gpu":{"device":{"gfx_target_version":90500}}}}')
+        _, config = runtime_paths(self.directory, "gfx1250", self.targets)
+        with self.assertRaisesRegex(ValueError, "does not target gfx1250"):
+            validated_config(config, "gfx1250", 4)
+        profile.write_text(
+            '{"vm":{"gpu":{"num_gpus":4,"device":{"gfx_target_version":120500}}}}'
+        )
+        normalized = validated_config(config, "gfx1250", 4)
+        self.assertEqual(normalized["vm"]["gpu"]["num_gpus"], 1)
+
+    def test_malformed_configuration_fails_as_target_error(self):
+        config = self.directory / "config.json"
+        for data in (
+            [],
+            None,
+            {},
+            {"vm": None},
+            {"vm": {"gpu": []}},
+            {"vm": {"gpu": {"device": None}}},
+        ):
+            with self.subTest(data=data):
+                config.write_text(json.dumps(data))
+                with self.assertRaisesRegex(ValueError, "does not target gfx1250"):
+                    validated_config(config, "gfx1250", 4)
+
+    def test_failed_policy_loading_invalidates_only_the_requested_verdict(self):
+        runner = self.directory / "installed-runner"
+        runner.mkdir()
+        for filename in (
+            "run_rocjitsu.py",
+            "rocjitsu_cpu.py",
+            "rocjitsu_reports.py",
+            "rocjitsu_selection.py",
+        ):
+            shutil.copy2(Path(__file__).with_name(filename), runner / filename)
+        policy = runner / "rocjitsu_policy.json"
+        report = (
+            self.directory
+            / "rocjitsu-work/gfx1250/reports/miopen_gtest_rocjitsu-quick.xml"
+        )
+        report.parent.mkdir(parents=True)
+        unrelated = (
+            self.directory
+            / "rocjitsu-work/gfx950/reports/miopen_gtest_rocjitsu-quick.xml"
+        )
+        unrelated.parent.mkdir(parents=True)
+        unrelated.write_text('<testsuites tests="1" passed="1"/>')
+        for arguments in (["--arch", "gfx1250"], []):
+            for content in (None, "{", '{"category":"quick"}'):
+                with self.subTest(arguments=arguments, policy=content):
+                    policy.unlink(missing_ok=True)
+                    if content is not None:
+                        policy.write_text(content)
+                    report.write_text('<testsuites tests="1" passed="1"/>')
+                    result = subprocess.run(
+                        [sys.executable, str(runner / "run_rocjitsu.py"), *arguments],
+                        cwd=self.directory,
+                        env={**os.environ, "AMDGPU_TARGETS": "gfx1250"},
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    )
+                    self.assertEqual(result.returncode, 1)
+                    self.assertFalse(report.exists())
+                    self.assertTrue(unrelated.exists())
+
     def test_wrong_or_missing_exported_category_cannot_fall_back(self):
         path = self.directory / "policy.json"
         for policy in (
+            [],
+            None,
             {"category": "quick", "representative_cases": {}},
             {"representative_cases": {}},
             {"category": CATEGORY},
@@ -111,6 +291,13 @@ class RuntimeContractTests(unittest.TestCase):
         path.unlink()
         with self.assertRaises(FileNotFoundError):
             load_policy(path)
+        policy = deepcopy(self.policy)
+        for targets in (None, {}, [], {"gfx1250": {"family": "gfx125X-dcgpu"}}):
+            with self.subTest(targets=targets):
+                policy["targets"] = targets
+                path.write_text(json.dumps(policy))
+                with self.assertRaises(ValueError):
+                    load_policy(path)
 
     def test_cpu_gpu_partition_does_not_reintroduce_unselected_cpu_cases(self):
         inventory = [

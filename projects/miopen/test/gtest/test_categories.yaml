@@ -583,6 +583,10 @@ test_categories:
 
   rocjitsu-quick:
     description: "Cost-bounded Smoke/CPU and FFM baseline for rocjitsu emulation"
+    targets:
+      gfx1250:
+        family: gfx125X-dcgpu
+        profile: gfx1250_mi455x_kmd_4gpu.json
     test_patterns:
       - *ffm_positive_patterns
       - "Smoke/*"
