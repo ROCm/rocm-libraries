@@ -473,6 +473,7 @@ namespace TensileLite
                     HIP_CHECK_EXC(hipEventCreate(&m_stop[d]));
                     HIP_CHECK_EXC(hipEventRecord(m_start[d], m_devices[d]->stream));
                 }
+                m_startTime = clock::now();
             }
         }
 
@@ -495,13 +496,28 @@ namespace TensileLite
                 }
                 for(auto stop : m_stop)
                     HIP_CHECK_EXC(hipEventSynchronize(stop));
+                m_endTime = clock::now();
             }
         }
 
         double BenchmarkTimer::takeBatchTimeMs()
         {
-            if(!m_useGPUTimer)
+            // --split-devices: events of different devices cannot be compared, and the slowest
+            // device's own time leaves out the skew between the devices' launches. Use the full
+            // host-observed span, first launch to last device done, like the wall-clock timer.
+            const bool splitRun = m_split != nullptr && m_split->numSlices() > 1;
+            if(!m_useGPUTimer || splitRun)
+            {
+                if(m_useGPUTimer)
+                    for(size_t d = 0; d < m_devices.size(); d++)
+                    {
+                        HIP_CHECK_EXC(hipEventDestroy(m_start[d]));
+                        HIP_CHECK_EXC(hipEventDestroy(m_stop[d]));
+                    }
+                m_start.clear();
+                m_stop.clear();
                 return double_millis(m_endTime - m_startTime).count();
+            }
 
             float maxMs = 0.0f;
             for(size_t d = 0; d < m_devices.size(); d++)
