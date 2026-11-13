@@ -14,8 +14,8 @@ set(SUPPORTED_ARCHITECTURES "")
 # targets, so a full-ASAN configuration could be built with replay protection
 # off. hipBLASLt's validation does not cover this module's list.
 if(HIPSPARSELT_ENABLE_ASAN OR BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
-    # For address sanitizer builds, base and supported are the same
-    list(APPEND BASE_ARCHITECTURES "gfx942:xnack+" "gfx950:xnack+" "gfx1250" "gfx1250-strict")
+    list(APPEND BASE_ARCHITECTURES
+         "gfx942:xnack+" "gfx950:xnack+" "gfx1250:xnack+" "gfx1250-strict:xnack+")
     set(SUPPORTED_ARCHITECTURES ${BASE_ARCHITECTURES})
 else()
     list(APPEND BASE_ARCHITECTURES "gfx942" "gfx950" "gfx1250" "gfx1250-strict")
@@ -188,3 +188,19 @@ function(hipsparselt_normalize_xnack_archs output_var)
     endforeach()
     set(${output_var} "${_normalized}" PARENT_SCOPE)
 endfunction()
+
+# Settles the ":xnack+" the ASAN lists above were written with, now that there
+# is a function to ask the compiler. A toolchain that does not take the
+# qualifier on an architecture gets the bare name back; one that does keeps it.
+#
+# Deferred to here rather than decided where the lists are built, because the
+# lists are built at include time and this module is read top to bottom -- the
+# probe is not defined yet up there. Both lists go through it: SUPPORTED is what
+# an explicitly requested target is validated against, so it has to agree with
+# what BASE ends up asking for.
+#
+# Only the ASAN arm names the qualifier, so the else arm is left alone.
+if(HIPSPARSELT_ENABLE_ASAN OR BUILD_ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN")
+    hipsparselt_normalize_xnack_archs(BASE_ARCHITECTURES ${BASE_ARCHITECTURES})
+    hipsparselt_normalize_xnack_archs(SUPPORTED_ARCHITECTURES ${SUPPORTED_ARCHITECTURES})
+endif()
