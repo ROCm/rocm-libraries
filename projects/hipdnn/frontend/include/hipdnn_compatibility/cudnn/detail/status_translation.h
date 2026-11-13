@@ -1,29 +1,19 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-/**
- * @file status_translation.h
- * @brief Shim-internal translation between cuDNN and hipDNN status codes.
- *
- * The cuDNN C-API stub entry points in `cudnn.h` use these helpers to translate
- * return codes to / from the hipDNN backend. The mapping is explicit and named,
- * never a numeric cast between the enum families.
- *
- * @note Self-contained: pulls in `cudnn_status.h` and `<hipdnn_backend.h>`
- *       directly rather than `cudnn.h`, to avoid an include cycle. Lives under
- *       `detail/` and is not part of the shim's public surface.
- */
+// Internal: explicit mapping between cuDNN and hipDNN status codes.
 
 #pragma once
 
 #include <hipdnn_backend.h>
 
 #include <hipdnn_compatibility/cudnn/cudnn_status.h>
+#include <hipdnn_frontend/Error.hpp>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend::detail
 {
 
-/// @brief Map a hipDNN backend status to the closest cuDNN status code.
+// Maps a hipDNN backend status to the closest cuDNN status.
 inline cudnnStatus_t toCudnnStatus(hipdnnStatus_t status)
 {
     switch(status)
@@ -44,8 +34,7 @@ inline cudnnStatus_t toCudnnStatus(hipdnnStatus_t status)
     case HIPDNN_STATUS_ALLOC_FAILED:
     case HIPDNN_STATUS_INTERNAL_ERROR_HOST_ALLOCATION_FAILED:
     case HIPDNN_STATUS_INTERNAL_ERROR_DEVICE_ALLOCATION_FAILED:
-        // Allocation failures (generic, host, and device) all map to the cuDNN
-        // allocation-failure code, which fits closer than INTERNAL_ERROR.
+        // ALLOC_FAILED fits closer than INTERNAL_ERROR for host and device failures.
         return CUDNN_STATUS_ALLOC_FAILED;
     case HIPDNN_STATUS_EXECUTION_FAILED:
         return CUDNN_STATUS_EXECUTION_FAILED;
@@ -58,7 +47,22 @@ inline cudnnStatus_t toCudnnStatus(hipdnnStatus_t status)
     }
 }
 
-/// @brief Map a cuDNN status code to the closest hipDNN backend status.
+// The frontend collapses every backend status into HIPDNN_BACKEND_ERROR, so
+// only "no engine accepts the graph" keeps a distinct cuDNN status.
+constexpr cudnnStatus_t toCudnnStatus(hipdnn_frontend::ErrorCode code) noexcept
+{
+    switch(code)
+    {
+    case hipdnn_frontend::ErrorCode::OK:
+        return CUDNN_STATUS_SUCCESS;
+    case hipdnn_frontend::ErrorCode::GRAPH_NOT_SUPPORTED:
+        return CUDNN_STATUS_NOT_SUPPORTED;
+    default:
+        return CUDNN_STATUS_BAD_PARAM;
+    }
+}
+
+// Maps a cuDNN status to the closest hipDNN backend status.
 inline hipdnnStatus_t toHipdnnStatus(cudnnStatus_t status)
 {
     switch(status)

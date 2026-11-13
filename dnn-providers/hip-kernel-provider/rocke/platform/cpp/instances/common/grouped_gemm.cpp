@@ -61,10 +61,11 @@ void rocke_grouped_gemm_spec_finalize(rocke_grouped_gemm_spec_t* spec)
  *  rocke_grouped_gemm_data_spec
  *
  *  GroupedGemmSpec._data_spec():
- *      dt = "fp16" if self.dtype in ("f16", "fp16") else self.dtype
- *      return DataSpec(dtype_a=dt, dtype_b=dt, dtype_c=dt)
- *  The remaining DataSpec fields (dtype_acc, layout) take their universal-GEMM
- *  defaults ("fp32" / "RCR").
+ *      data = mono_data_spec(self.dtype)
+ *      if data.dtype_a == "fp64": return replace(data, dtype_acc="fp64")
+ *      return data
+ *  mono_data_spec: dt = "fp16" for f16/fp16, else dtype; A/B/C = dt, with the
+ *  "fp32" / "RCR" defaults.
  * ===================================================================== */
 rocke_gemm_data_spec_t rocke_grouped_gemm_data_spec(const rocke_grouped_gemm_spec_t* spec)
 {
@@ -87,6 +88,10 @@ rocke_gemm_data_spec_t rocke_grouped_gemm_data_spec(const rocke_grouped_gemm_spe
     d.dtype_a = dt;
     d.dtype_b = dt;
     d.dtype_c = dt;
+    if(strcmp(dt, "fp64") == 0)
+    {
+        d.dtype_acc = "fp64";
+    }
     return d;
 }
 
@@ -338,12 +343,14 @@ rocke_kernel_def_t* rocke_build_grouped_gemm_single_launch_new(
 /* ===================================================================== *
  *  signature helpers
  *
- *  ptr_dt = spec.dtype if spec.dtype in ("f16","fp16","bf16") else "f16".
+ *  ptr_dt = spec.dtype if spec.dtype in ("f16","fp16","bf16","fp64") else "f16".
  * ===================================================================== */
 static const char* grouped_gemm_ptr_dt(const rocke_grouped_gemm_spec_t* spec)
 {
     const char* dt = (spec != NULL) ? spec->dtype : NULL;
-    if(dt != NULL && (strcmp(dt, "f16") == 0 || strcmp(dt, "fp16") == 0 || strcmp(dt, "bf16") == 0))
+    if(dt != NULL
+       && (strcmp(dt, "f16") == 0 || strcmp(dt, "fp16") == 0 || strcmp(dt, "bf16") == 0
+           || strcmp(dt, "fp64") == 0))
     {
         return dt;
     }

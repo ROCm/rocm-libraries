@@ -146,6 +146,14 @@ class GETRS_COMPAT_NPVT_64 : public GETRS_BASE<API_COMPAT, true, int64_t, size_t
 {
 };
 
+class GETRS_BATCHED : public GETRS_BASE<API_NORMAL, false, int, size_t>
+{
+};
+
+class GETRS_NPVT_BATCHED : public GETRS_BASE<API_NORMAL, true, int, size_t>
+{
+};
+
 // non-batch tests
 
 TEST_P(GETRS, __float)
@@ -270,42 +278,42 @@ TEST_P(GETRS_COMPAT_NPVT_64, __double_complex)
 
 // batched tests
 
-TEST_P(GETRS, batched__float)
+TEST_P(GETRS_BATCHED, batched__float)
 {
     run_tests<true, false, float>();
 }
 
-TEST_P(GETRS, batched__double)
+TEST_P(GETRS_BATCHED, batched__double)
 {
     run_tests<true, false, double>();
 }
 
-TEST_P(GETRS, batched__float_complex)
+TEST_P(GETRS_BATCHED, batched__float_complex)
 {
     run_tests<true, false, rocblas_float_complex>();
 }
 
-TEST_P(GETRS, batched__double_complex)
+TEST_P(GETRS_BATCHED, batched__double_complex)
 {
     run_tests<true, false, rocblas_double_complex>();
 }
 
-TEST_P(GETRS_NPVT, batched__float)
+TEST_P(GETRS_NPVT_BATCHED, batched__float)
 {
     run_tests<true, false, float>();
 }
 
-TEST_P(GETRS_NPVT, batched__double)
+TEST_P(GETRS_NPVT_BATCHED, batched__double)
 {
     run_tests<true, false, double>();
 }
 
-TEST_P(GETRS_NPVT, batched__float_complex)
+TEST_P(GETRS_NPVT_BATCHED, batched__float_complex)
 {
     run_tests<true, false, rocblas_float_complex>();
 }
 
-TEST_P(GETRS_NPVT, batched__double_complex)
+TEST_P(GETRS_NPVT_BATCHED, batched__double_complex)
 {
     run_tests<true, false, rocblas_double_complex>();
 }
@@ -362,4 +370,12 @@ INSTANTIATE_TEST_SUITE_P(checkin_lapack,
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          GETRS_COMPAT_NPVT_64,
+                         Combine(ValuesIn(matrix_sizeA_range), ValuesIn(matrix_sizeB_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         GETRS_BATCHED,
+                         Combine(ValuesIn(matrix_sizeA_range), ValuesIn(matrix_sizeB_range)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         GETRS_NPVT_BATCHED,
                          Combine(ValuesIn(matrix_sizeA_range), ValuesIn(matrix_sizeB_range)));

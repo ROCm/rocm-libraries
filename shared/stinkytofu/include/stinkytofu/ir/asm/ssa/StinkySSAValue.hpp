@@ -127,6 +127,20 @@ class StinkySSAValue {
     void setPhysicalBinding(const PhysicalBinding& binding);
     void clearPhysicalBinding();
 
+    /// Reading this value yields whatever its register happened to hold: no
+    /// definition reaches it and nothing outside the function filled it.
+    ///
+    /// Stamped once by markUndefinedLiveIns(), since its consumers cannot each
+    /// derive it -- SSA destruction sees only a function and a colouring.
+    /// Defaults to false, the safe direction: treating a filled register as
+    /// undefined loses what the dispatch wrote.
+    bool isUndefined() const {
+        return undefined_;
+    }
+    void setUndefined(bool undefined) {
+        undefined_ = undefined;
+    }
+
     const std::string& symbol() const {
         return symbol_;
     }
@@ -155,6 +169,7 @@ class StinkySSAValue {
     std::vector<StinkyOpOperand*> uses_;
     PhysicalBinding binding_{};
     bool hasBinding_ = false;
+    bool undefined_ = false;
     std::string symbol_;
 };
 

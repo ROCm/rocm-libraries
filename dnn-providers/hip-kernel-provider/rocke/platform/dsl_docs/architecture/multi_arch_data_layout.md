@@ -58,7 +58,7 @@ instances/                 HYBRID
                            (e.g. transpose-LDS attention, MX fp4 GEMM).
   gfx942/                  gfx942-specific algorithm variants.
   gfx1151/                 RDNA3.5 wave32/WMMA-specific algorithm variants
-                           (e.g. wmma_fmha_fwd adapter).
+                           (e.g. wmma_fmha_fwd_v2 prefill, wmma_fmha_decode).
   common/gemm_policy.py    per-family capability filtering (GemmPipelinePolicy,
                            AttentionPipelinePolicy) — arch-agnostic code that
                            READS ArchTarget facts. Policy modules live under
@@ -283,7 +283,7 @@ That vocabulary is pipeline policy and lives in `instances/` — see
 - supported MMA or WMMA shapes by dtype combination, including mixed-dtype
   variants (`fp8_bf8_fp32`, `bf8_fp8_fp32`) and packed-fp4
   (`pk_fp4_pk_fp4_fp32` on gfx950);
-- waitcnt encoding variant (4-bit vs 6-bit VMCNT);
+- waitcnt encoding variant and VMCNT field width;
 - kernel attribute policy;
 - architecture-specific resource limits (VGPRs, AGPRs, SGPRs, occupancy
   math, max-block-size) usable by any kernel family;
@@ -349,22 +349,15 @@ becomes rare instead of universal.
 
 ### Resolving a target against the MMA catalog
 
-`ArchTarget` is documented above as carrying the supported MMA/WMMA shapes, so
-the arch↔catalog key relationship is this document's design question. Two
-constraints on the fix:
-
-- **Resolve ONCE into a target object that carries its match keys, and query
-  every registry with that object — never with a raw string.** A raw string
-  with exact membership cannot express a target that resolves under a family
-  umbrella.
-- A **match-key set is arch vocabulary, not kernel-family vocabulary**, so it
-  belongs on the carry side and does not violate the "does not carry" list
-  above. (Worth stating, because the rule reads as forbidding it at a glance.)
-
-The *measured* state of that relationship per target — which targets resolve in
-which registry — is a status finding, not a plan, and is audited in
-`gfx_support_audit.md` under Known issues. This document says what the layering
-should be; that one records where it currently is not.
+The arch registry (`arch_specs.json`) and the tiling MMA catalog
+(`helpers/tiling/traits/data/mma_traits.json`) key on the same target ids. The
+catalog lists real target ids only -- generic targets and their members, never a
+family name such as `gfx11` -- and every id it lists is a registry target
+(enforced by `tests/helpers/tiling/traits/test_mma_catalog_integrity.py`). So a
+target resolves in both registries by its own id, with no family matching and no
+per-target match-key set. The catalog's row rule is in
+`helpers/tiling/traits/README.md` (Targets); the per-target status is audited in
+`gfx_support_audit.md` under Known issues.
 
 ROCm version is a separate axis. `_DATALAYOUT` in `lower_llvm.py` is keyed by
 both gfx and ROCm release. The backend interface threads ROCm version
@@ -823,9 +816,9 @@ drives backend selection.
 
 | gfx | async LDS | fp8/bf8 MFMA | bf16 atom | VMCNT bits | LDS KB | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| gfx908 | no | no | classic | 4 | 64 | MI100 |
-| gfx90a | no | no | `.1k` | 4 | 64 | MI200 |
-| gfx942 | yes | yes | `.1k` | 4 | 64 | MI300; f16/bf16 atoms 16x16x16, 32x32x8 only |
+| gfx908 | no | no | classic | 6 | 64 | MI100 |
+| gfx90a | no | no | `.1k` | 6 | 64 | MI200 |
+| gfx942 | yes | yes | `.1k` | 6 | 64 | MI300; f16/bf16 atoms 16x16x16, 32x32x8 only |
 | gfx950 | yes | yes (incl. fp4) | `.1k` | 6 | 160 | MI350; `ds_read_*_tr_*`; adds k=32 f16/bf16 atoms 16x16x32, 32x32x16 |
 | gfx1100 | no | no (WMMA) | WMMA | n/a | 64 | RDNA3, wave32 |
 | gfx1151 | no | no (WMMA) | WMMA | n/a | 64 | RDNA3.5 (Strix Halo), wave32; shipped RDNA target |
@@ -845,10 +838,10 @@ This collapses into the following concrete backend classes:
 
 ```text
 Gfx908Backend         (no async, no fp8, classic bf16)
-Gfx9MfmaBackend       (gfx90a, gfx942: 4-bit VMCNT, .1k bf16)
+Gfx9MfmaBackend       (gfx90a, gfx942: .1k bf16)
                       flag: async_lds = (gfx != gfx90a)
                       flag: fp8       = (gfx in {gfx942})
-Gfx950Backend         (6-bit VMCNT, fp8/bf8/fp4, ds_read transpose, 160 KB LDS)
+Gfx950Backend         (fp8/bf8/fp4, ds_read transpose, 160 KB LDS)
 Gfx11RdnaBackend      (RDNA3, wave32, WMMA)
 Gfx12RdnaBackend      (RDNA4, wave32, WMMA)
 ```

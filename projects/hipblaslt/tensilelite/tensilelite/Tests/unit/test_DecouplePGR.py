@@ -4,20 +4,21 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
-"""Unit tests for Tensile.Components.DecouplePGR."""
+"""Unit tests for tensilelite.Components.DecouplePGR."""
 import copy
 import itertools
 import re
+from contextlib import contextmanager
 import types
 
 import pytest
 
-from Tensile.Common.DataType import DataType
-from Tensile.Common.GlobalParameters import defaultSolution
-from Tensile.Common.ValidParameters import validParameters
-from Tensile.Components import DecouplePGR as DP
-from Tensile.Components import TDMFuse as TF
-from Tensile.Components.DecouplePGR import (
+from tensilelite.Common.DataType import DataType
+from tensilelite.Common.GlobalParameters import defaultSolution
+from tensilelite.Common.ValidParameters import validParameters
+from tensilelite.Components import DecouplePGR as DP
+from tensilelite.Components import TDMFuse as TF
+from tensilelite.Components.DecouplePGR import (
     _asDataType,
     _ldsAlignedBytes,
     _macroTileFromState,
@@ -42,7 +43,8 @@ from Tensile.Components.DecouplePGR import (
     resolvePrefetchGlobalReadSpecialValues,
     tdmWaveIssueOrder,
 )
-from Tensile.Components.TDMFuse import TDM_FUSE_GROUPING, TDM_GROUPS, tdmGrouping, tdmSeparateABDescriptors
+from tensilelite.Components.TDMFuse import TDM_FUSE_GROUPING, TDM_GROUPS, tdmGrouping, tdmSeparateABDescriptors
+from toolchain_test_helpers import shared_isa_info_map_or_skip
 
 pytestmark = pytest.mark.unit
 
@@ -444,7 +446,7 @@ def _realMacB(dt):
 
 def _validGemmAB():
     import ast
-    import Tensile.Common.DataType as dataTypeMod
+    import tensilelite.Common.DataType as dataTypeMod
     from pathlib import Path
     src = Path(dataTypeMod.__file__).resolve().parents[1] / "SolutionStructs" / "Problem.py"
     tree = ast.parse(src.read_text())
@@ -560,32 +562,8 @@ _PRISTINE_DEFAULT_SOLUTION = copy.deepcopy(dict(defaultSolution))
 
 
 @pytest.fixture(scope="module")
-def gfx1250_iim():
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Validators import validateToolchain
-
-    cxx = validateToolchain("amdclang++")
-    isa = gfxToIsa("gfx1250")
-    iim = makeIsaInfoMap([isa], cxx)
-    if not iim[isa].asmCaps["SupportedISA"]:
-        pytest.skip("amdclang++ in this environment does not support gfx1250")
-    return iim
-
-
-@pytest.fixture(scope="module")
-def assembler():
-    from Tensile.Toolchain.Assembly import makeAssemblyToolchain
-    from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
-
-    cxx = validateToolchain("amdclang++")
-    bundler = validateToolchain(ToolchainDefaults.OFFLOAD_BUNDLER)
-    return makeAssemblyToolchain(cxx, bundler, "default").assembler
-
-
-@pytest.fixture(scope="module")
 def _gp_gfx1250(gfx1250_iim):
-    from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters
+    from tensilelite.Common.GlobalParameters import globalParameters, assignGlobalParameters
 
     saved_gp = copy.deepcopy(dict(globalParameters))
     saved_vp = copy.deepcopy(dict(validParameters))
@@ -603,9 +581,9 @@ def _gp_gfx1250(gfx1250_iim):
 
 
 def _derive(gfx1250_iim, assembler, capsys, **overrides):
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.SolutionStructs.Solution import Solution
-    from Tensile.SolutionStructs.Validators.MatrixInstruction import (
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.SolutionStructs.Solution import Solution
+    from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
         matrixInstructionToMIParameters,
     )
 
@@ -686,12 +664,12 @@ def _emitDerived(sol, assembler):
     import shutil
 
     import rocisa
-    from Tensile.Common.Types import DebugConfig
-    from Tensile.KernelWriterAssembly import KernelWriterAssembly
-    from Tensile.SolutionStructs.Naming import getKernelFileBase
-    from Tensile.TensileCreateLibrary.Run import (generateKernelObjectsFromSolutions,
+    from tensilelite.Common.Types import DebugConfig
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    from tensilelite.SolutionStructs.Naming import getKernelFileBase
+    from tensilelite.create_library.run import (generateKernelObjectsFromSolutions,
                                                   processKernelSource)
-    from Tensile.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+    from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
 
     with preserve_rocisa_kernel_state():
         kwa = KernelWriterAssembly(assembler, DebugConfig())
@@ -953,7 +931,7 @@ class _ThickWaitWriter:
 
 
 def _applyThickWait(kernel, asm):
-    from Tensile.KernelWriter import KernelWriter
+    from tensilelite.KernelWriter import KernelWriter
 
     writer = _ThickWaitWriter()
     return KernelWriter._dcpRelaxThickTextGate(writer, kernel, asm)
@@ -964,7 +942,7 @@ DCP_THICK_WAIT_UNCOVERED = 11
 
 def _thickWaitRejects(kernel, asm):
     """The overflowedResources code the pass set, or 0 if it accepted."""
-    from Tensile.KernelWriter import KernelWriter
+    from tensilelite.KernelWriter import KernelWriter
 
     writer = _ThickWaitWriter()
     KernelWriter._dcpRelaxThickTextGate(writer, kernel, asm)
@@ -1131,7 +1109,7 @@ def test_thick_wait_target_follows_the_label_the_fill_emitted(pgrA, pgrB, thick)
 # Thick-first issue order: s_wait_tensorcnt N is age-ordered on one counter.
 # ---------------------------------------------------------------------------
 def _issueOrder(pgrA, pgrB, *args):
-    from Tensile.KernelWriter import KernelWriter
+    from tensilelite.KernelWriter import KernelWriter
 
     writer = _ThickWaitWriter()
     return KernelWriter._dcpThickThinIssueOrder(
@@ -1199,7 +1177,7 @@ def test_four_item_matrix_instruction_still_yields_a_tile():
 
 
 def test_auto_selection_evaluates_every_candidate_on_the_normal_path(monkeypatch):
-    import Tensile.Components.DecouplePGR as dcp
+    import tensilelite.Components.DecouplePGR as dcp
 
     seen = []
     real = dcp.decouplePGRLdsBytesEstimate
@@ -1293,7 +1271,7 @@ def test_one_sided_auto_against_a_pinned_zero_names_the_real_reason(pgrA, pgrB, 
 # ---------------------------------------------------------------------------
 def test_candidates_above_two_blocks_never_enter_the_ranking():
     # Import here so a missing symbol fails this test, not collection.
-    from Tensile.Components.DecouplePGR import autoPairCandidateIsLegal
+    from tensilelite.Components.DecouplePGR import autoPairCandidateIsLegal
 
     legal = [p for p in pgrAutoPairCandidates(4) if autoPairCandidateIsLegal(*p)]
     assert (3, 2) not in legal and (2, 3) not in legal and (4, 3) not in legal
@@ -1324,18 +1302,13 @@ def test_no_candidate_can_strand_a_legal_pair():
 # Fixture vs matrixInstructionToMIParameters.
 # ---------------------------------------------------------------------------
 def test_fixture_matches_the_real_conversion():
-    from Tensile.Common.Architectures import gfxToIsa
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Toolchain.Validators import validateToolchain
-    from Tensile.SolutionStructs.Validators.MatrixInstruction import (
+    from tensilelite.Common.Architectures import gfxToIsa
+    from tensilelite.SolutionStructs.Validators.MatrixInstruction import (
         matrixInstructionToMIParameters,
     )
 
-    cxx = validateToolchain("amdclang++")
+    iim = shared_isa_info_map_or_skip("gfx1250")
     isa = gfxToIsa("gfx1250")
-    iim = makeIsaInfoMap([isa], cxx)
-    if not iim[isa].asmCaps["SupportedISA"]:
-        pytest.skip("amdclang++ in this environment does not support gfx1250")
     problemType = {"DataType": DataType("F8"), "MXBlockA": 32, "MXBlockB": 32}
     produced = matrixInstructionToMIParameters(
         [16, 16, 128, 1, 1, 2, 8, 2, 2], isa, 32, problemType, [32, 4, 1], iim)
@@ -1612,8 +1585,6 @@ def test_reachable_fuse_integers_resolve_to_their_row(fuse, expected):
 DECLINES = (
     ("TDMSplit", {"TDMSplit": True}),
     ("UseSubtileImpl", {"UseSubtileImpl": True}),
-    ("no MX scale on A", {"ProblemType": {"MXBlockA": 0, "MXBlockB": 32}}),
-    ("no MX scale on B", {"ProblemType": {"MXBlockA": 32, "MXBlockB": 0}}),
     ("NumWaves==1", {"NumWaves": 1}),
     ("TDM moves A only", {"TDMInst": 1}),
     ("TDM moves B only", {"TDMInst": 2}),
@@ -1724,7 +1695,7 @@ PER_SITE = (                                       # gfx1250
 )
 
 
-MERGED = (                                         # gfx1250v0
+MERGED = (                                         # gfx1250-strict
     site(CLONE, MATH, ["s_branch label_%s" % TAIL]),
     ["label_LoopBeginL:"] + FILL,
     site(MAIN, MATH),
@@ -1800,7 +1771,7 @@ def test_no_fill_label_at_all_is_refused():
 
 def test_acceptance_does_not_depend_on_how_many_waits_were_retagged():
     """PER_SITE retags two waits, MERGED one; both must be accepted."""
-    from Tensile.KernelWriter import KernelWriter
+    from tensilelite.KernelWriter import KernelWriter
 
     solution = ks()
     gate = decoupledThickGateRelaxation(solution)
@@ -1947,7 +1918,7 @@ def test_solution_auto_does_not_retry_an_unrelated_rejection(
 
 def test_solution_derivation_leaves_no_capacity_marker_behind(
         _gp_gfx1250, gfx1250_iim, assembler, capsys):
-    from Tensile.SolutionStructs.Solution import Solution
+    from tensilelite.SolutionStructs.Solution import Solution
 
     for maxLds in (327680, 40960):
         sol, _ = _derive(gfx1250_iim, assembler, capsys, **_bbsWitness(
@@ -1978,7 +1949,7 @@ def _dcpSolutionModule():
     """The Solution *module*. Importing the class of the same name makes monkeypatch a no-op."""
     import importlib
 
-    return importlib.import_module("Tensile.SolutionStructs.Solution")
+    return importlib.import_module("tensilelite.SolutionStructs.Solution")
 
 
 @pytest.mark.parametrize("tdmFuse", [0, 1])
@@ -2069,3 +2040,112 @@ def test_the_schedule_iter_alg_3_refusal_is_correctness_not_conservatism(
     with pytest.raises(AssertionError,
                        match="fill group to re-slot carries no tensor_load_to_lds"):
         _emitDerived(sol, assembler)
+
+
+# Divergent pairs on TDMFuse 1 with HalfPLR and on TDMFuse 1-3 without MX.
+_LATE_FILL_MX = {"both": (32, 32), "none": (0, 0), "A only": (32, 0), "B only": (0, 32)}
+
+
+@pytest.mark.parametrize("pgrA, pgrB, thin", [(1, 2, "A"), (2, 1, "B")])
+@pytest.mark.parametrize("numWaves", [1, 2, 4])
+@pytest.mark.parametrize("mx", sorted(_LATE_FILL_MX))
+@pytest.mark.parametrize("fuse", sorted(TDM_FUSE_GROUPING))
+def test_late_fill_moves_the_thin_set_where_a_and_b_have_sets_of_their_own(
+        fuse, mx, numWaves, pgrA, pgrB, thin):
+    mxA, mxB = _LATE_FILL_MX[mx]
+    state = ks(fuse, pgrA, pgrB, NumWaves=numWaves,
+               ProblemType={"MXBlockA": mxA, "MXBlockB": mxB})
+    if numWaves == 1:
+        expected = None
+    elif fuse == 1 and mx == "both":
+        expected = ("globalReadIncrement%s" % thin,)
+    elif fuse in (1, 2, 3) and mx == "none":
+        expected = ("globalReadIncrementA", "globalReadIncrementB")
+    else:
+        expected = None
+    assert DP.dcpLateFillIncrements(state, thin) == expected
+
+
+_DCP_HALFPLR_MASK_RE = re.compile(r"^\s*s_cmov_b32\s+s\[sgpr\w*(?:Group0\+0|Incs\w*)\],\s*0(?:\s|$)")
+_DCP_MX_HALFPLR_MI = [16, 16, 128, 1, 1, 2, 4, 2, 2]
+
+
+@contextmanager
+def _stinkyTofuInputs():
+    """The text of every module handed to StinkyTofu inside the block, as TensileLite emitted it."""
+    import rocisa
+    original, texts = rocisa.toStinkyTofuModule, []
+
+    def recorded(body, *args, **kwargs):
+        texts.append(str(body))
+        return original(body, *args, **kwargs)
+
+    rocisa.toStinkyTofuModule = recorded
+    try:
+        yield texts
+    finally:
+        rocisa.toStinkyTofuModule = original
+
+
+def _dcpMasksAfterTheEarlyFill(text):
+    """(main-loop HalfPLR last-iteration masks placed after their iteration's early fill set, mask count).
+
+    The main loop splits into its unrolled iterations at label_LoopBeginL and at each exit branch to
+    label_LoopEndL. A mask that leads the early fill set comes before the iteration's closing
+    DcpEarlyFill label, ahead of the set's own LDS sync and load; one left in the late fill comes after it.
+    """
+    late, count, filled = [], 0, None
+    for i, line in enumerate(text.splitlines()):
+        if line.startswith("label_LoopBeginL:") or re.match(r"\s*s_cbranch_scc[01]\s+label_LoopEndL\b", line):
+            filled = False
+        elif line.startswith("label_LoopEndL:"):
+            filled = None
+        elif filled is not None and "DcpEarlyFill" in line and line.rstrip().endswith(":"):
+            filled = True
+        elif filled is not None and _DCP_HALFPLR_MASK_RE.match(line):
+            count += 1
+            if filled:
+                late.append((i, line.strip()))
+    return late, count
+
+
+def _dcpDivergentAsm(gfx1250_iim, assembler, capsys, tdmFuse, scaleLess, pgrA, pgrB, halfPlr):
+    if scaleLess:
+        overrides = _scaleLessDivergent(pgrA, pgrB)
+    else:
+        overrides = dict(MatrixInstruction=list(_DCP_MX_HALFPLR_MI), LDSTrInst=False,
+                         PrefetchGlobalRead=max(pgrA, pgrB),
+                         PrefetchGlobalReadA=pgrA, PrefetchGlobalReadB=pgrB)
+    overrides.update(TDMFuse=tdmFuse, HalfPLR=halfPlr)
+    sol, out = _derive(gfx1250_iim, assembler, capsys, **overrides)
+    assert sol.get("Valid") is True, out
+    errs, asm = _emitDerived(sol, assembler)
+    assert errs and all(err == 0 for err in errs), errs
+    return asm
+
+
+@pytest.mark.parametrize("tdmFuse, scaleLess, halfPlr", [
+    (1, False, 1), (1, False, 2), (1, False, 3), (1, True, 1), (2, True, 2), (3, True, 3)])
+@pytest.mark.parametrize("pgrA, pgrB", [(1, 2), (2, 1)])
+def test_divergent_halfplr_masks_lead_the_early_fill_set(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, tdmFuse, scaleLess, halfPlr, pgrA, pgrB):
+    """Checked on the module TensileLite hands to StinkyTofu, which reschedules within blocks and
+    copies loop iterations."""
+    with _stinkyTofuInputs() as texts:
+        _dcpDivergentAsm(gfx1250_iim, assembler, capsys, tdmFuse, scaleLess, pgrA, pgrB, halfPlr)
+    assert texts
+    for text in texts:
+        late, count = _dcpMasksAfterTheEarlyFill(text)
+        assert count, "the HalfPLR kernel emitted no last-iteration mask in its main loop"
+        assert not late, late
+
+
+@pytest.mark.parametrize("tdmFuse", [1, 2, 3])
+@pytest.mark.parametrize("pgrA, pgrB", [(1, 2), (2, 1)])
+def test_scale_less_divergent_pair_moves_its_thin_set_instead_of_splitting_by_parity(
+        _gp_gfx1250, gfx1250_iim, assembler, capsys, tdmFuse, pgrA, pgrB):
+    asm = _dcpDivergentAsm(gfx1250_iim, assembler, capsys, tdmFuse, True, pgrA, pgrB, 0)
+    labels = [line.strip() for line in asm.splitlines() if line.rstrip().endswith(":")]
+    assert any("DcpEarlyFill" in label for label in labels), "no early fill set was emitted"
+    assert not any("DcpLateFill" in label for label in labels), \
+        "the fill group was split by wave parity"

@@ -33,6 +33,7 @@
 #include <inttypes.h>
 #include <math.h>
 #include <sstream>
+#include <stdexcept>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string>
@@ -228,45 +229,93 @@ inline const char* hipsparseStatusToString(hipsparseStatus_t status)
 }
 #endif
 
-// CHECK_GENERATE_MATRIX_ERROR
+// Record a failure without throwing, so these are safe in a destructor.
+// Inline so GOOGLE_TEST is taken from the including translation unit.
+inline void log_hip_error(const char* call, hipError_t status)
+{
 #ifdef GOOGLE_TEST
-#define CHECK_GENERATE_MATRIX_ERROR2(ERROR) ASSERT_EQ(ERROR, true)
+    EXPECT_EQ(status, hipSuccess) << call << " failed: " << hipGetErrorString(status);
 #else
-#define CHECK_GENERATE_MATRIX_ERROR2(ERROR)                                                        \
-    do                                                                                             \
-    {                                                                                              \
-        auto error = ERROR;                                                                        \
-        if(error != true)                                                                          \
-        {                                                                                          \
-            fprintf(                                                                               \
-                stderr, "Error encountered generating matrix data (%s:%d)\n", __FILE__, __LINE__); \
-            exit(EXIT_FAILURE);                                                                    \
-        }                                                                                          \
-    } while(0)
+    fprintf(
+        stderr, "%s failed: %s (%d)\n", call, hipGetErrorString(status), static_cast<int>(status));
 #endif
-#define CHECK_GENERATE_MATRIX_ERROR(ERROR) CHECK_GENERATE_MATRIX_ERROR2(ERROR)
+}
 
-// CHECK_HIP_ERROR
+inline void log_hipsparse_error(const char* call, hipsparseStatus_t status)
+{
 #ifdef GOOGLE_TEST
-#define CHECK_HIP_ERROR2(ERROR) ASSERT_EQ(ERROR, hipSuccess)
+    EXPECT_EQ(status, HIPSPARSE_STATUS_SUCCESS)
+        << call << " failed: " << hipsparseStatusToString(status);
 #else
-#define CHECK_HIP_ERROR2(ERROR)                   \
-    do                                            \
-    {                                             \
-        auto error = ERROR;                       \
-        if(error != hipSuccess)                   \
-        {                                         \
-            fprintf(stderr,                       \
-                    "error: '%s'(%d) at %s:%d\n", \
-                    hipGetErrorString(error),     \
-                    error,                        \
-                    __FILE__,                     \
-                    __LINE__);                    \
-            exit(EXIT_FAILURE);                   \
-        }                                         \
-    } while(0)
+    fprintf(stderr, "%s failed: %s\n", call, hipsparseStatusToString(status));
 #endif
-#define CHECK_HIP_ERROR(ERROR) CHECK_HIP_ERROR2(ERROR)
+}
+
+// Throw so a failure in a helper unwinds to the test or benchmark boundary.
+// file and line are optional so existing two-argument callers keep their message.
+[[noreturn]] inline void
+    throw_hip_error(const char* call, hipError_t status, const char* file = nullptr, int line = 0)
+{
+    std::ostringstream message;
+    if(file != nullptr)
+    {
+        message << file << ":" << line << ": ";
+    }
+    message << call << " failed: " << hipGetErrorString(status) << " (" << static_cast<int>(status)
+            << ")";
+    throw std::runtime_error(message.str());
+}
+
+[[noreturn]] inline void throw_hipsparse_error(const char*       call,
+                                               hipsparseStatus_t status,
+                                               const char*       file = nullptr,
+                                               int               line = 0)
+{
+    std::ostringstream message;
+    if(file != nullptr)
+    {
+        message << file << ":" << line << ": ";
+    }
+    message << call << " failed: " << hipsparseStatusToString(status) << " ("
+            << static_cast<int>(status) << ")";
+    throw std::runtime_error(message.str());
+}
+
+// Constructors throw so a failed create cannot be used by the rest of the test.
+// Destructors record a failed destroy without throwing, so teardown stays safe
+// while another exception is unwinding.
+inline void throw_if_hip_error(const char* call,
+                               hipError_t  status,
+                               const char* file = nullptr,
+                               int         line = 0)
+{
+    if(status != hipSuccess)
+    {
+        throw_hip_error(call, status, file, line);
+    }
+}
+
+inline void throw_if_hipsparse_error(const char*       call,
+                                     hipsparseStatus_t status,
+                                     const char*       file = nullptr,
+                                     int               line = 0)
+{
+    if(status != HIPSPARSE_STATUS_SUCCESS)
+    {
+        throw_hipsparse_error(call, status, file, line);
+    }
+}
+
+inline void log_if_hipsparse_error(const char* call, hipsparseStatus_t status)
+{
+    if(status != HIPSPARSE_STATUS_SUCCESS)
+    {
+        log_hipsparse_error(call, status);
+    }
+}
+
+#define CHECK_HIP_ERROR(ERROR) throw_if_hip_error(#ERROR, (ERROR), __FILE__, __LINE__)
+#define CHECK_HIPSPARSE_ERROR(ERROR) throw_if_hipsparse_error(#ERROR, (ERROR), __FILE__, __LINE__)
 
 // EXPECT_HIPSPARSE_STATUS
 #ifdef GOOGLE_TEST
@@ -293,8 +342,42 @@ inline const char* hipsparseStatusToString(hipsparseStatus_t status)
 #endif
 #define EXPECT_HIPSPARSE_STATUS(STATUS, EXPECT) EXPECT_HIPSPARSE_STATUS2(STATUS, EXPECT)
 
-// CHECK_HIPSPARSE_ERROR
-#define CHECK_HIPSPARSE_ERROR(ERROR) EXPECT_HIPSPARSE_STATUS(ERROR, HIPSPARSE_STATUS_SUCCESS)
+inline void
+    throw_on_generate_matrix_error(const char* call, bool generated, const char* file, int line)
+{
+    if(generated)
+    {
+        return;
+    }
+
+    std::ostringstream message;
+    message << file << ":" << line << ": error encountered generating matrix data: " << call;
+    throw std::runtime_error(message.str());
+}
+
+#define CHECK_GENERATE_MATRIX_ERROR(ERROR) \
+    throw_on_generate_matrix_error(#ERROR, (ERROR), __FILE__, __LINE__)
+
+// A pivot position of -1 requires success. Any other position requires zero pivot.
+inline void
+    throw_on_zero_pivot_status(hipsparseStatus_t status, int pivot, const char* file, int line)
+{
+    const hipsparseStatus_t expected
+        = (pivot == -1) ? HIPSPARSE_STATUS_SUCCESS : HIPSPARSE_STATUS_ZERO_PIVOT;
+    if(status == expected)
+    {
+        return;
+    }
+
+    std::ostringstream message;
+    message << file << ":" << line << ": zero pivot status failed: received "
+            << hipsparseStatusToString(status) << ", expected " << hipsparseStatusToString(expected)
+            << ".";
+    throw std::runtime_error(message.str());
+}
+
+#define CHECK_HIPSPARSE_ZERO_PIVOT(STATUS, PIVOT) \
+    throw_on_zero_pivot_status((STATUS), (PIVOT), __FILE__, __LINE__)
 
 #ifdef __HIP_PLATFORM_NVIDIA__
 static inline hipComplex operator-(const hipComplex& op)
@@ -3488,8 +3571,8 @@ inline void host_csrmv(hipsparseOperation_t trans,
         int             dev;
         hipDeviceProp_t prop{};
 
-        std::ignore = hipGetDevice(&dev);
-        std::ignore = hipGetDeviceProperties(&prop, dev);
+        CHECK_HIP_ERROR(hipGetDevice(&dev));
+        CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, dev));
 
         int WF_SIZE;
         J   nnz_per_row = (M == 0) ? 0 : (nnz / M);
@@ -5130,8 +5213,8 @@ static inline void host_lssolve(J                     M,
     int             dev;
     hipDeviceProp_t prop{};
 
-    std::ignore = hipGetDevice(&dev);
-    std::ignore = hipGetDeviceProperties(&prop, dev);
+    CHECK_HIP_ERROR(hipGetDevice(&dev));
+    CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, dev));
 
 #ifdef _OPENMP
 #pragma omp parallel for
@@ -5272,8 +5355,8 @@ static inline void host_ussolve(J                     M,
     int             dev;
     hipDeviceProp_t prop{};
 
-    std::ignore = hipGetDevice(&dev);
-    std::ignore = hipGetDeviceProperties(&prop, dev);
+    CHECK_HIP_ERROR(hipGetDevice(&dev));
+    CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, dev));
 
 #ifdef _OPENMP
 #pragma omp parallel for
@@ -5545,8 +5628,8 @@ void host_csr_lsolve(J                    M,
     int             dev;
     hipDeviceProp_t prop{};
 
-    std::ignore = hipGetDevice(&dev);
-    std::ignore = hipGetDeviceProperties(&prop, dev);
+    CHECK_HIP_ERROR(hipGetDevice(&dev));
+    CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, dev));
 
     std::vector<T> temp(prop.warpSize);
 
@@ -5652,8 +5735,8 @@ void host_csr_usolve(J                    M,
     int             dev;
     hipDeviceProp_t prop{};
 
-    std::ignore = hipGetDevice(&dev);
-    std::ignore = hipGetDeviceProperties(&prop, dev);
+    CHECK_HIP_ERROR(hipGetDevice(&dev));
+    CHECK_HIP_ERROR(hipGetDeviceProperties(&prop, dev));
 
     std::vector<T> temp(prop.warpSize);
 
@@ -7614,11 +7697,13 @@ extern "C" {
 void query_version(char* version);
 
 /* ============================================================================================ */
-/*  device query and print out their ID and name */
-int query_device_property();
+/*  device query and print out their ID and name.
+    Writes the device count and returns the HIP status.
+    A property-query failure is fatal only for device_id. */
+hipError_t query_device_property(int* device_count, int device_id);
 
-/*  set current device to device_id */
-void set_device(int device_id);
+/*  set current device to device_id; returns the HIP status */
+hipError_t set_device(int device_id);
 
 /* ============================================================================================ */
 /*  timing: HIP only provides very limited timers function clock() and not general;

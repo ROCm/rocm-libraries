@@ -6,10 +6,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string>
 
+#include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginException.hpp>
+#include <hipdnn_plugin_sdk/heuristics/RankingMetric.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 namespace hipdnn_plugin_sdk
@@ -55,6 +59,14 @@ public:
      *
      * Typically this is implemented by checking all the engine's plan builders.
      *
+     * Return false to decline a graph; that is the supported way to opt out. A std::exception
+     * thrown from here is skipped with a warning for this engine; any other exception type is not
+     * caught by the SDK and ends this plugin's applicability query. The host skips the plugin in
+     * that case, except for an explicitly pinned engine, where the owning plugin's error is
+     * reported. Accepting a graph means the engine can build a plan for it; an engine that
+     * accepted a graph but fails to build its plan has a bug (the frontend tolerates it by trying
+     * another ranked engine, but that is not a way to decline).
+     *
      * @param handle The engine plugin handle.
      * @param opGraph The operation graph to check.
      * @return true if this engine can handle the graph, false otherwise.
@@ -85,11 +97,59 @@ public:
                             hipdnnPluginConstData_t& detailsOut) const
         = 0;
 
+    /// Optional matched-catalog enumeration into EngineDetails.candidate_page. An empty
+    /// page means no candidates; unsupported engines must throw NOT_APPLICABLE.
+    // NOLINTBEGIN(portability-template-virtual-member-function) - body is valid for any THandle
+    virtual void enumerateCandidates(
+        THandle& /*handle*/,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& /*engineConfig*/,
+        uint64_t /*offset*/,
+        uint64_t /*limit*/,
+        hipdnnPluginConstData_t& /*detailsOut*/) const
+    {
+        throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                                    "Engine does not support matched-catalog enumeration");
+    }
+    // NOLINTEND(portability-template-virtual-member-function)
+
+    /**
+     * @brief Describes or evaluates an optional prediction in
+     * `heuristics::rankingMetric(config)` (RFC 0019 §11.4).
+     *
+     * Every answer carries that metric; with no model for it, report UNAVAILABLE rather
+     * than answer in another. CONFIGURATION estimates must identify the exact plan.
+     *
+     * @throws HipdnnPluginException BAD_PARAM for an unregistered metric.
+     */
+    // NOLINTBEGIN(portability-template-virtual-member-function) - body is valid for any THandle
+    virtual hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
+        getPrediction(THandle& /*handle*/,
+                      const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
+                      const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& config,
+                      hipdnnEnginePredictionKind_t kind,
+                      bool /*evaluate*/) const
+    {
+        using namespace hipdnn_flatbuffers_sdk::data_objects;
+        EnginePredictionT prediction;
+        prediction.engine_id = id();
+        prediction.kind = kind == HIPDNN_ENGINE_PREDICTION_CONFIGURATION
+                              ? PredictionKind::CONFIGURATION
+                              : PredictionKind::ENGINE;
+        prediction.metric = std::string(heuristics::rankingMetric(config).name);
+        prediction.status = PredictionStatus::UNAVAILABLE;
+        prediction.reason = "Engine does not provide predictions";
+        return prediction;
+    }
+    // NOLINTEND(portability-template-virtual-member-function)
+
     /**
      * @brief Returns the maximum workspace size required for the given graph.
      *
      * This is typically a pass-through to the applicable plan builders, taking
-     * the maximum of all workspaces queried.
+     * the maximum of all workspaces queried. For a config with `global.benchmarking` enabled it
+     * SHOULD cover the workspace of the priming plan compiled from that config: the frontend
+     * sizes its autotune workspace estimate from this query.
      *
      * @param handle The engine plugin handle.
      * @param opGraph The operation graph.
@@ -115,8 +175,9 @@ public:
      * @param opGraph The operation graph.
      * @param engineConfig The engine configuration settings.
      * @param executionContext The execution context to initialize with a plan.
-     * @throws HipdnnPluginException if no applicable plan builder is found or
-     *         if plan creation fails.
+     * @throws HipdnnPluginException if no applicable plan builder is found or if plan creation
+     *         fails. Every failure is reported to the host as a plan failure; NOT_APPLICABLE has no
+     *         special meaning here.
      */
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual void initializeExecutionContext(

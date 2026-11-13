@@ -15,6 +15,7 @@ endif()
 add_executable(
     hip_kernel_provider_integration_tests
     main.cpp
+    IntegrationGraphVerificationReference.cpp
 )
 
 target_compile_options(hip_kernel_provider_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
@@ -30,6 +31,7 @@ target_compile_definitions(
 
 target_include_directories(hip_kernel_provider_integration_tests PRIVATE
     ${CMAKE_CURRENT_LIST_DIR}/../../include
+    ${CMAKE_CURRENT_LIST_DIR}/..
 )
 
 target_link_libraries(
@@ -49,6 +51,9 @@ if(ENABLE_ASM_SDPA_ENGINE)
             ${CMAKE_CURRENT_SOURCE_DIR}/../tests/engines/asm_sdpa_engine/AsmSdpaConfigHelpers.cpp
             asm_sdpa_engine/IntegrationGpuSdpaForward.cpp
             asm_sdpa_engine/IntegrationGpuSdpaBackward.cpp
+            # Group mode against the CPU reference (compiles empty without the ingestor,
+            # whose frontend-built lane it uses).
+            asm_sdpa_engine/IntegrationGpuSdpaForwardRagged.cpp
         )
         # Add include path for codegen-generated headers (e.g., asm_fmha_v3_fwd_configs.hpp)
         # and the shared test helpers (AsmSdpaConfigHelpers.hpp)
@@ -77,21 +82,81 @@ if(ENABLE_HIP_FLASH2_ENGINE)
     endif()
 endif()
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    # The knobs suite is compiled whenever the product root carries the bundle, on any
-    # build arch, so a binary from a non-gfx950 build still runs it against another
-    # build's gfx950 content, and it GTEST_SKIPs on other devices. The predicate is
-    # arch-agnostic and lives in HkpPackaging.cmake, which only an ingestor build
-    # includes -- hence this guard.
-    hkp_product_offers_engine(_hkp_knobs_bundle "hipkernel:Gfx950AttentionDense")
-    if(_hkp_knobs_bundle AND NOT HIPDNN_ENABLE_SDPA)
-        message(WARNING
-                "HIPDNN_ENABLE_KERNEL_INGESTOR is ON but hipDNN was built with HIPDNN_ENABLE_SDPA=OFF. "
-                "Skipping gfx950 dense attention knob integration tests. Rebuild hipDNN with -DHIPDNN_ENABLE_SDPA=ON to enable them.")
-    elseif(_hkp_knobs_bundle)
+    # The attention knob suites: each a source and the comma-separated engines it pins. A
+    # suite is compiled whenever the product root carries all of them, on any build arch,
+    # so a binary built for one arch still runs it against another build's content for the
+    # engines' arch, and it GTEST_SKIPs on other devices. The predicate is arch-agnostic and
+    # lives in HkpPackaging.cmake, which only an ingestor build includes -- hence this guard.
+    set(_knob_suites
+        IntegrationGpuGfx950AttentionDenseKnobs.cpp Gfx950AttentionDense
+        IntegrationGpuGfx950AttentionUnifiedKnobs.cpp
+            Gfx950AttentionUnified2D,Gfx950AttentionUnified3D
+        IntegrationGpuGfx942AttentionUnified3dKnobs.cpp Gfx942AttentionUnified3d
+        IntegrationGpuGfx942AttentionDenseKnobs.cpp Gfx942AttentionDense
+    )
+    while(_knob_suites)
+        list(POP_FRONT _knob_suites _source _engines)
+        string(REPLACE "," ";" _engines "${_engines}")
+        set(_offered TRUE)
+        foreach(_engine IN LISTS _engines)
+            hkp_product_offers_engine(_offers "hipkernel:${_engine}")
+            if(NOT _offers)
+                set(_offered FALSE)
+            endif()
+        endforeach()
+        if(_offered AND NOT HIPDNN_ENABLE_SDPA)
+            message(WARNING
+                    "HIPDNN_ENABLE_KERNEL_INGESTOR is ON but hipDNN was built with "
+                    "HIPDNN_ENABLE_SDPA=OFF. Skipping ${_source}. Rebuild hipDNN with "
+                    "-DHIPDNN_ENABLE_SDPA=ON to enable it.")
+        elseif(_offered)
+            target_sources(hip_kernel_provider_integration_tests PRIVATE
+                kernel_ingestor_engine/${_source}
+            )
+        endif()
+    endwhile()
+    # The dgrad AOT-instance engine is a product bundle of its own, gated like the knob
+    # suites; it needs no SDPA.
+    hkp_product_offers_engine(_hkp_conv_dgrad_aot_bundle "hipkernel:Gfx950ConvDgradAot")
+    if(_hkp_conv_dgrad_aot_bundle)
         target_sources(hip_kernel_provider_integration_tests PRIVATE
-            kernel_ingestor_engine/IntegrationGpuGfx950AttentionDenseKnobs.cpp
+            kernel_ingestor_engine/IntegrationGpuGfx950ConvDgrad.cpp
+        )
+        target_compile_definitions(hip_kernel_provider_integration_tests
+            PRIVATE HKP_TEST_GFX950_CONV_DGRAD_AOT=1
         )
     endif()
+    hkp_product_offers_engine(_hkp_gfx1250_conv_dgrad_aot_bundle "hipkernel:Gfx1250ConvDgradAot")
+    if(_hkp_gfx1250_conv_dgrad_aot_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuGfx1250ConvDgrad.cpp
+        )
+        target_compile_definitions(hip_kernel_provider_integration_tests
+            PRIVATE HKP_TEST_GFX1250_CONV_DGRAD_AOT=1
+        )
+    endif()
+    # The FlyDSL SDPA engines end to end through the frontend Graph API (Graph::sdpa needs
+    # HIPDNN_ENABLE_SDPA; the source compiles empty without it).
+    if(HIPKERNELPROVIDER_ENABLE_FLYDSL AND HIPDNN_ENABLE_SDPA)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuFlydslSdpaFrontend.cpp
+            kernel_ingestor_engine/IntegrationGpuFlydslSdpaFrontendFeatures.cpp
+        )
+    endif()
+    # The architectures the FlyDSL SDPA forward engines have objects for: the content list,
+    # not GPU_TARGETS, so the frontend lane skips exactly the architectures FlyDSL ships no
+    # SDPA objects for (FlydslSdpaFrontendGraphs.hpp, flydslSdpaServes). Empty without content.
+    set(_flydsl_sdpa_archs "")
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
+        foreach(_flydsl_op sdpa_rdna sdpa_rdna_decode sdpa_aiw sdpa_cdna sdpa_cdna_decode)
+            list(APPEND _flydsl_sdpa_archs ${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_${_flydsl_op}})
+        endforeach()
+        list(REMOVE_DUPLICATES _flydsl_sdpa_archs)
+    endif()
+    string(REPLACE ";" "," _flydsl_sdpa_archs "${_flydsl_sdpa_archs}")
+    target_compile_definitions(hip_kernel_provider_integration_tests
+        PRIVATE HIPKERNELPROVIDER_FLYDSL_SDPA_ARCHS="${_flydsl_sdpa_archs}"
+    )
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
@@ -110,8 +175,8 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         PRIVATE HIPKERNELPROVIDER_TEST_SET_INTEGRATION_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${HIPKERNELPROVIDER_TEST_SET_INTEGRATION}"
     )
     # The production descriptor tree, loaded beside the integration set so the shipped
-    # engines load in this binary too; the gfx950 dense attention knob suite needs its
-    # engine. A fixed binary-relative offset like the set above, so it holds in the build
+    # engines load in this binary too; the attention knob suites above need their
+    # engines. A fixed binary-relative offset like the set above, so it holds in the build
     # and the install tree alike, and main() uses it only when the directory exists at run
     # time. The definition must not depend on this build's GPU targets: a multi-arch
     # install pairs this binary with another build's device content, so a build that packs
@@ -190,43 +255,64 @@ if(NOT COMMAND add_external_integration_test_target)
     find_package(hipdnn_integration_tests CONFIG QUIET)
 endif()
 
+# One gpu_ref entry per HKP_PINNED_ATTENTION_ENGINES engine (src/CMakeLists.txt), serving
+# the bundles its filter variable names (the unified 3D engines serve only their decode,
+# seqlen_q 1, cases).
+#
 # Gated on the same predicate as the census and the external integration target:
 # ENGINE_NAME pins this target, so a build that does not ship the engine registers one
 # whose engine never appears. The predicate lives in HkpPackaging.cmake, which only an
 # ingestor build includes.
-set(_hkp_gfx950_attention_dense FALSE)
-if(HIPDNN_ENABLE_KERNEL_INGESTOR)
-    hkp_gfx950_attention_dense_available(_hkp_gfx950_attention_dense)
+#
+# Routed into the engine's architecture shard, not the common arch-neutral directory: the
+# handler prunes by the first gfx directory in the path, so the entry goes when the engine
+# does. Left in the common file it survives into a package for another architecture,
+# where the engine ranks nothing, every case declines and the entry reports success
+# having run nothing.
+#
+# hkp_finalize_census_install() folds the accumulator into that shard's CTest file,
+# in both YAML modes: src/ hands it whichever common entrypoint that configuration
+# produced, and the discovery stub goes there, so a sharded entry is reachable
+# whether or not categorization is on.
+#
+# An unset filter variable expands to "", and add_external_integration_test_target() then
+# passes no --gtest_filter: the engine-pinned target runs every bundle.
+if(NOT HKP_PINNED_ATTENTION_ENGINES)
+    message(FATAL_ERROR
+        "HKP_PINNED_ATTENTION_ENGINES must be set in src/CMakeLists.txt before "
+        "add_subdirectory(integration_tests)")
 endif()
-if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
-   AND _hkp_gfx950_attention_dense
-   AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
-    # Routed into the gfx950 shard, not the common arch-neutral directory: the handler
-    # prunes by the first gfx directory in the path, so the entry goes when the engine
-    # does. Left in the common file it survives into a gfx942-only package, where the
-    # engine ranks nothing, every case declines and the entry reports success having run
-    # nothing.
-    #
-    # hkp_finalize_census_install() folds the accumulator into that shard's CTest file,
-    # in both YAML modes: src/ hands it whichever common entrypoint that configuration
-    # produced, and the discovery stub goes there, so a sharded entry is reachable
-    # whether or not categorization is on.
-    hkp_reserve_census_shard(_hkp_gfx950_shard_dest gfx950)
-    set(_gfx950_shard_args
-        INSTALL_DESTINATION "${_hkp_gfx950_shard_dest}"
-        INSTALL_STAGING_KEY hkp_census_gfx950)
+set(_engines ${HKP_PINNED_ATTENTION_ENGINES})
+while(_engines)
+    list(POP_FRONT _engines _arch _snake _local _filter_var _toml _categories_var)
+    if(NOT ${_filter_var})
+        message(FATAL_ERROR
+            "${_filter_var} must be set in src/CMakeLists.txt before "
+            "add_subdirectory(integration_tests)")
+    endif()
 
-    add_external_integration_test_target(
-        TARGET_NAME hip_kernel_provider_gfx950_attention_dense_gpu_ref_integration_tests
-        PLUGIN_TARGET hip_kernel_provider
-        ENGINE_NAME   "hipkernel:Gfx950AttentionDense"
-        INSTALL_SUBDIR hip_kernel_provider
-        ${_gfx950_shard_args}
-        REFERENCE_EXECUTOR gpu
-        GTEST_FILTER "quick_SdpaFwd_Default.*:standard_SdpaFwd_Default.*:comprehensive_SdpaFwd_Default.*:full_SdpaFwd_Default.*"
-        ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
-    )
-endif()
+    set(_available FALSE)
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+        hkp_product_ships_engine_for_arch(_available "hipkernel:${_local}" ${_arch})
+    endif()
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA
+       AND _available
+       AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)
+        hkp_reserve_census_shard(_shard_dest ${_arch})
+
+        add_external_integration_test_target(
+            TARGET_NAME hip_kernel_provider_${_arch}_attention_${_snake}_gpu_ref_integration_tests
+            PLUGIN_TARGET hip_kernel_provider
+            ENGINE_NAME   "hipkernel:${_local}"
+            INSTALL_SUBDIR hip_kernel_provider
+            INSTALL_DESTINATION "${_shard_dest}"
+            INSTALL_STAGING_KEY hkp_census_${_arch}
+            REFERENCE_EXECUTOR gpu
+            GTEST_FILTER "${${_filter_var}}"
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+        )
+    endif()
+endwhile()
 
 if(ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA
    AND TARGET hipdnn_integration_tests AND COMMAND add_external_integration_test_target)

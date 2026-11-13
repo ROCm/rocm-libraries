@@ -1,5 +1,5 @@
 ################################################################################
-# Characterization tests for how Tensile.TensileLibLogicToYaml recovers the
+# Characterization tests for how tensilelite.lib_logic_to_yaml recovers the
 # settings of the run that produced its input: ClientParameters.ini from the
 # benchmark build tree, then the tuning config beside the build directory.
 ################################################################################
@@ -12,9 +12,9 @@ import yaml
 
 pytestmark = pytest.mark.unit
 
-M = importlib.import_module("Tensile.TensileLibLogicToYaml")
-LibraryIO = importlib.import_module("Tensile.LibraryIO")
-ClientWriter = importlib.import_module("Tensile.ClientWriter")
+M = importlib.import_module("tensilelite.lib_logic_to_yaml")
+LibraryIO = importlib.import_module("tensilelite.LibraryIO")
+ClientWriter = importlib.import_module("tensilelite.ClientWriter")
 
 _CHAR_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 #: Source of a realistic solution state for the benchmark data built below.

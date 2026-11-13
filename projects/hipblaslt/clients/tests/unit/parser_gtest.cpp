@@ -1,16 +1,20 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Host-only unit tests for the client string<->enum helpers declared in
-// hipblaslt_datatype2string.hpp. See README.md in this directory for the
+// Host-only unit tests for client string<->enum helpers and compute-input
+// type validation. See README.md in this directory for the
 // dual-target build, the HostUnit/smoke_ naming, and the X-macro tripwire
 // pattern used below.
 
+#include "hipblaslt_arguments.hpp"
 #include "hipblaslt_datatype2string.hpp"
 
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <initializer_list>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -220,9 +224,9 @@ TEST(HostUnitInitParser, smoke_KnownStringsMapToExpectedEnum)
 {
     for(const auto& [name, expected] : known_init_modes())
     {
-        EXPECT_EQ(static_cast<int>(string2hipblaslt_initialization(name)),
-                  static_cast<int>(expected))
-            << "string2hipblaslt_initialization(\"" << name << "\")";
+        const auto parsed = string2hipblaslt_initialization(name);
+        ASSERT_TRUE(parsed.has_value()) << "string2hipblaslt_initialization(\"" << name << "\")";
+        EXPECT_EQ(static_cast<int>(*parsed), static_cast<int>(expected)) << name;
     }
 }
 
@@ -230,8 +234,9 @@ TEST(HostUnitInitParser, smoke_RoundTripsThroughInitialization2String)
 {
     for(const auto& [name, expected] : known_init_modes())
     {
-        EXPECT_STREQ(hipblaslt_initialization2string(string2hipblaslt_initialization(name)),
-                     name.c_str());
+        const auto parsed = string2hipblaslt_initialization(name);
+        ASSERT_TRUE(parsed.has_value()) << name;
+        EXPECT_STREQ(hipblaslt_initialization2string(*parsed), name.c_str());
     }
 }
 
@@ -244,16 +249,14 @@ TEST(HostUnitInitParser, smoke_EveryEnumeratorIsRegistered)
         "known_init_modes");
 }
 
-// Current (develop) behavior: an unrecognized init string silently maps to the
-// integer sentinel 0, which is NOT a valid hipblaslt_initialization enumerator
-// (the enum starts at 111). This is exactly the footgun called out in the PR
-// #6514 review, observation #3. AIHPBLAS-3551 replaces this with a
-// std::optional-returning, noexcept parser, at which point this expectation is
-// meant to flip.
-TEST(HostUnitInitParser, smoke_UnknownStringMapsToZeroSentinel_PreAIHPBLAS3551)
+// An unrecognized init string returns std::nullopt (AIHPBLAS-3551) instead of
+// the old silent integer-0 sentinel, forcing callers to handle the bad-input
+// case. This is the safe contract David asked for in PR #6514 review
+// observation #3.
+TEST(HostUnitInitParser, smoke_UnknownStringReturnsNullopt)
 {
-    EXPECT_EQ(static_cast<int>(string2hipblaslt_initialization("not_a_real_init_mode")), 0);
-    EXPECT_EQ(static_cast<int>(string2hipblaslt_initialization("")), 0);
+    EXPECT_FALSE(string2hipblaslt_initialization("not_a_real_init_mode").has_value());
+    EXPECT_FALSE(string2hipblaslt_initialization("").has_value());
 }
 
 TEST(HostUnitActivationParser, smoke_KnownStringsMapAndRoundTrip)
@@ -306,4 +309,46 @@ TEST(HostUnitBiasSourceParser, smoke_EveryEnumeratorIsRegistered)
 TEST(HostUnitBiasSourceParser, smoke_UnknownStringMapsToZeroSentinel)
 {
     EXPECT_EQ(static_cast<int>(string_to_hipblaslt_bias_source("not_a_bias_source")), 0);
+}
+
+TEST(HostUnitComputeInputType, smoke_AllowsEitherSingleOverride)
+{
+    for(bool overrideA : {true, false})
+    {
+        SCOPED_TRACE(overrideA ? "A-only override" : "B-only override");
+        Arguments arg{};
+        arg.init();
+        arg.compute_type        = HIPBLAS_COMPUTE_32F;
+        arg.compute_input_typeA = overrideA ? HIP_R_16F : HIPBLASLT_DATATYPE_INVALID;
+        arg.compute_input_typeB = overrideA ? HIPBLASLT_DATATYPE_INVALID : HIP_R_16F;
+
+        const auto [typeA, typeB] = derive_unset_compute_input_type(arg);
+        EXPECT_EQ(typeA, overrideA ? HIP_R_16F : HIP_R_32F);
+        EXPECT_EQ(typeB, overrideA ? HIP_R_32F : HIP_R_16F);
+    }
+}
+
+TEST(HostUnitComputeInputType, smoke_RejectsInvalidSingleOverride)
+{
+    for(bool overrideA : {true, false})
+    {
+        SCOPED_TRACE(overrideA ? "A-only override" : "B-only override");
+        Arguments arg{};
+        arg.init();
+        arg.compute_type        = HIPBLAS_COMPUTE_32F;
+        arg.compute_input_typeA = overrideA ? HIP_R_8I : HIPBLASLT_DATATYPE_INVALID;
+        arg.compute_input_typeB = overrideA ? HIPBLASLT_DATATYPE_INVALID : HIP_R_8I;
+
+        try
+        {
+            derive_unset_compute_input_type(arg);
+            FAIL() << "Expected std::invalid_argument";
+        }
+        catch(const std::invalid_argument& error)
+        {
+            EXPECT_STREQ(error.what(),
+                         overrideA ? "Invalid compute_input_typeA i8_r"
+                                   : "Invalid compute_input_typeB i8_r");
+        }
+    }
 }

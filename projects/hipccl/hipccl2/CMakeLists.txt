@@ -69,7 +69,7 @@ include(install_legacy_header_symlink)
 set(CMAKE_INSTALL_INCLUDEDIR "include/hipccl" CACHE PATH
     "Unified hipCCL include install directory" FORCE)
 
-# NOTE(hipccl2): temporary migration aid, default OFF. Pre-hipccl code doing
+# NOTE(hipccl2): temporary migration aid, default ON. Pre-hipccl code doing
 # `#include <rocprim/...>` (etc.) against a plain `-I<prefix>/include` breaks
 # once headers move to include/hipccl/rocprim above. When enabled, installs a
 # relative symlink at <prefix>/include/<component> pointing back into
@@ -109,6 +109,21 @@ if(HIPCCL_BUILD_ALL)
     set(HIPCCL_BUILD_ROCPRIM ON CACHE BOOL "" FORCE)
     set(HIPCCL_BUILD_HIPCUB ON CACHE BOOL "" FORCE)
     set(HIPCCL_BUILD_ROCTHRUST ON CACHE BOOL "" FORCE)
+endif()
+
+option(HIPCCL_ENABLE_COVERAGE "Build rocPRIM, rocThrust, hipCUB with code coverage enabled" OFF)
+
+if(DEFINED BUILD_CODE_COVERAGE)
+    message(DEPRECATION "BUILD_CODE_COVERAGE will be deprecated and will be removed soon; use HIPCCL_ENABLE_COVERAGE instead.")
+    set(HIPCCL_ENABLE_COVERAGE ${BUILD_CODE_COVERAGE} CACHE BOOL "" FORCE)
+    unset(BUILD_CODE_COVERAGE CACHE)
+    unset(BUILD_CODE_COVERAGE)
+endif()
+
+if(HIPCCL_ENABLE_COVERAGE)
+    set(ROCPRIM_ENABLE_COVERAGE ON CACHE BOOL "" FORCE)
+    set(ROCTHRUST_ENABLE_COVERAGE ON CACHE BOOL "" FORCE)
+    set(HIPCUB_ENABLE_COVERAGE ON CACHE BOOL "" FORCE)
 endif()
 
 if(HIPCCL_BUILD_ROCPRIM)

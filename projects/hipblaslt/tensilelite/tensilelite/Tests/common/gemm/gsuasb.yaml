@@ -17,6 +17,7 @@ GlobalParameters:
   CSVMergeSameProblemID: true
   MaxWorkspaceSize: 3355443200
   PrintSolutionRejectionReason: True
+  UniformSummationOrder: 0
 
 BenchmarkProblems:
   ########################################

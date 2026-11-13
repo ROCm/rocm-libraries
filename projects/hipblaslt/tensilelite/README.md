@@ -1,4 +1,4 @@
-# Tensilelite
+# TensileLite
 
 ## Building and Running Tests
 
@@ -16,7 +16,7 @@ cd rocm-libraries/projects/hipblaslt/tensilelite
 tox -e py3 -- tensilelite/Tests -m common
 ```
 
-Subsequently, you can run just the Tensile unit tests via:
+Subsequently, you can run just the TensileLite unit tests via:
 
 ```
 tox -e unit -- tensilelite/Tests/unit
@@ -69,7 +69,7 @@ with `git commit --no-verify`. On a snapshot mismatch the hook prints a
 ### Build client with invoke and Run a Test (Default Path)
 
 This workflow uses `invoke` to build the C++ client into the default `build_tmp` directory.
-Tensile will search for `tensilelite-client` in `tensilelite/build_tmp` if `--prebuilt-client`
+TensileLite will search for `tensilelite-client` in `tensilelite/build_tmp` if `--prebuilt-client`
 is not specified.
 
 ```
@@ -220,13 +220,13 @@ The script will be created in the build folder and will be named in Tensile.bat 
 > Run `tensilelite/bin/Tensile` directly instead.
 
 ```
-Tensile.sh <abs-path>/tensilelite/Tests/gemm/fp16_use_e.yaml tensile-out
+Tensile.sh <abs-path>/tensilelite/Tests/common/gemm/fp16_use_e.yaml tensile-out
 ```
 
 or
 
 ```
-Tensile.bat <abs-path>/tensilelite/Tests/gemm/fp16_use_e.yaml tensile-out
+Tensile.bat <abs-path>/tensilelite/Tests/common/gemm/fp16_use_e.yaml tensile-out
 ```
 
 **You don't need to rerun CMake unless you delete the ``tensile-out`` folder.**

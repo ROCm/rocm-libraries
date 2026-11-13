@@ -1,0 +1,238 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier:  MIT
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+
+#include <filesystem>
+#include <memory>
+#include <string>
+
+#include <gtest/gtest.h>
+
+#include <hip/hip_runtime_api.h>
+
+#include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
+#include <hipdnn_plugin_sdk/ArchMatch.hpp>
+#include <hipdnn_plugin_sdk/ingestor/DeviceProperties.hpp>
+#include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
+#include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+
+#include "PackedKernelSource.hpp"
+#include "TestDescriptorRoot.hpp"
+#include "compilation/KpackArchive.hpp"
+#include "compilation/KpackKernelLoader.hpp"
+#include "compilation/KpackModuleCache.hpp"
+#include "engines/kernel_ingestor_engine/IngestorKernelCode.hpp"
+#include "engines/kernel_ingestor_engine/PackedPlanTestSupport.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvFwdTestGraphs.hpp"
+#include "mocks/MockCompiledProgram.hpp"
+#include "mocks/MockRunnableKernel.hpp"
+#include "utilities/Digest.hpp"
+
+namespace hip_kernel_provider::compilation
+{
+namespace
+{
+
+using hip_kernel_provider::testing::copyPackedArchTree;
+using hip_kernel_provider::testing::PackedKernelSource;
+using hip_kernel_provider::testing::readPackedKernelDefinition;
+using hip_kernel_provider::testing::readPackedKernelSource;
+using hip_kernel_provider::testing::testKpackArchive;
+using hip_kernel_provider::testing::unitKpackRoot;
+using hipdnn_test_sdk::utilities::claimScratchDirectory;
+using hipdnn_test_sdk::utilities::ScopedDirectory;
+
+namespace packs = hip_kernel_provider::kernel_ingestor_engine::testing;
+
+constexpr const char* SCRATCH_LABEL = "kpackcodeobjectread";
+
+// rocm-kpack's own test archive holds gfx1100 and gfx1101 placeholder payloads under this
+// toc key. They are not code objects.
+constexpr const char* TEST_ARCHIVE_ARCH = "gfx1100";
+constexpr const char* TEST_ARCHIVE_TOC_KEY = "lib/libhip.so#0";
+
+constexpr const char* DIGEST = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+TEST(TestKpackCodeObjectRead, ReportsAnAbsentArchive)
+{
+    const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
+    const std::string absent = (scratch.path() / "absent.kpack").string();
+    std::string selected = "unchanged";
+
+    try
+    {
+        static_cast<void>(
+            readVerifiedKpackCodeObject(absent, TEST_ARCHIVE_TOC_KEY, "gfx90a", DIGEST, selected));
+        FAIL() << "expected an absent archive to be refused";
+    }
+    catch(const KpackModuleLoadFailure& failure)
+    {
+        const std::string message = failure.what();
+        EXPECT_EQ(failure.stage(), KpackLoadStage::OPEN_ARCHIVE) << message;
+        EXPECT_NE(message.find("does not exist"), std::string::npos) << message;
+        EXPECT_NE(message.find(absent), std::string::npos) << message;
+    }
+    EXPECT_EQ(selected, "unchanged");
+}
+
+TEST(TestKpackCodeObjectRead, RejectsAPayloadThatIsNotACodeObject)
+{
+    ASSERT_TRUE(std::filesystem::exists(testKpackArchive()))
+        << "the test kpack archive, resolved relative to this binary, is missing: "
+        << testKpackArchive();
+
+    const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
+    const auto archive = scratch.path() / testKpackArchive().filename();
+    std::filesystem::copy_file(testKpackArchive(), archive);
+
+    std::string selected;
+    try
+    {
+        static_cast<void>(readVerifiedKpackCodeObject(
+            archive.string(), TEST_ARCHIVE_TOC_KEY, TEST_ARCHIVE_ARCH, DIGEST, selected));
+        FAIL() << "expected a payload that is not a code object to be refused";
+    }
+    catch(const KpackModuleLoadFailure& failure)
+    {
+        EXPECT_EQ(failure.stage(), KpackLoadStage::DECOMPRESS) << failure.what();
+        EXPECT_NE(std::string(failure.what()).find("KPACK_ERROR_INVALID_METADATA"),
+                  std::string::npos)
+            << failure.what();
+    }
+}
+
+TEST(TestKpackCodeObjectRead, ReturnsVerifiedBytesWithoutLoadingAModule)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
+    hipdnn_plugin_sdk::ingestor::DeviceProperties packedDevice;
+    std::filesystem::path packed;
+    ASSERT_NO_FATAL_FAILURE(
+        packs::copyPackedArchForDevice(unitKpackRoot(), scratch.path(), packedDevice, packed));
+    const std::string& deviceArch = packedDevice.gcnArchName;
+    if(packed.empty())
+    {
+        GTEST_SKIP() << "nothing was packed for this device (" << deviceArch
+                     << "): " << unitKpackRoot() << " has no directory for it.";
+    }
+
+    hipdnn_plugin_sdk::ingestor::KernelDefinition kernel;
+    ASSERT_NO_FATAL_FAILURE(readPackedKernelDefinition(packed, packs::CONV_FWD_DESCRIPTOR, kernel));
+
+    hipdnn_plugin_sdk::ingestor::DeviceProperties deviceProperties;
+    deviceProperties.gcnArchName = deviceArch;
+    const kernel_ingestor_engine::testing::GraphFixture fixture(
+        kernel_ingestor_engine::testing::buildConvFwdGraph(
+            hipdnn_flatbuffers_sdk::data_objects::DataType::HALF),
+        deviceProperties);
+
+    KpackModuleCache cache;
+    const KpackKernelLoader loader(cache);
+    const auto code = kernel_ingestor_engine::buildIngestorKernelCode(
+        loader, fixture.context(), kernel, kernel.source.signature);
+    ASSERT_EQ(cache.size(), 1U);
+
+    // The plan keeps its own module, so the cache can be emptied. A read that loaded a
+    // module through the cache would fill it again.
+    cache.clear();
+
+    const auto codeObject = code.readCodeObject();
+
+    EXPECT_EQ(cache.size(), 0U);
+    EXPECT_EQ(utilities::sha256Hex(codeObject.bytes.data(), codeObject.bytes.size()),
+              kernel.source.sha256);
+    EXPECT_EQ(codeObject.sha256, kernel.source.sha256);
+    EXPECT_EQ(codeObject.symbol, kernel.source.symbol);
+    EXPECT_TRUE(hipdnn_plugin_sdk::archMatches(
+        deviceArch, codeObject.target, hipdnn_plugin_sdk::ArchMatchMode::PREFIX))
+        << codeObject.target << " does not serve " << deviceArch;
+    EXPECT_EQ(codeObject.target, std::string(hipdnn_plugin_sdk::stripArchFeatures(deviceArch)));
+}
+
+// Reads and decompresses only, so this needs no device.
+TEST(TestKpackCodeObjectRead, ACaptureRecordsTheDeviceBaseName)
+{
+    const std::filesystem::path shard = unitKpackRoot() / "gfx942";
+    if(!std::filesystem::is_directory(shard))
+    {
+        GTEST_SKIP() << "this build packs no gfx942 shard: " << shard << " does not exist.";
+    }
+
+    const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
+    const std::filesystem::path packed = copyPackedArchTree(shard, scratch.path());
+
+    PackedKernelSource source;
+    ASSERT_NO_FATAL_FAILURE(readPackedKernelSource(packed, packs::CONV_FWD_DESCRIPTOR, source));
+    hipdnn_plugin_sdk::ingestor::KernelDefinition kernel;
+    ASSERT_NO_FATAL_FAILURE(readPackedKernelDefinition(packed, packs::CONV_FWD_DESCRIPTOR, kernel));
+
+    KpackModuleCache cache;
+    const KpackKernelLoader loader(cache);
+    kernel_ingestor_engine::KpackSource kpackSource;
+    kpackSource.archive = source.archive;
+    kpackSource.tocKey = source.tocKey;
+    kpackSource.symbol = kernel.source.symbol;
+    kpackSource.sha256 = source.sha256;
+    kpackSource.label = "kernel '" + kernel.name + "'";
+    kpackSource.strippedArch = "gfx942";
+    kpackSource.deviceArch = "gfx942:sramecc+:xnack-";
+    const kernel_ingestor_engine::IngestorKernelCode code(loader,
+                                                          kpackSource,
+                                                          0,
+                                                          std::make_unique<MockCompiledProgram>(),
+                                                          std::make_unique<MockRunnableKernel>());
+
+    const auto codeObject = code.readCodeObject();
+
+    EXPECT_EQ(codeObject.target, "gfx942");
+    EXPECT_EQ(utilities::sha256Hex(codeObject.bytes.data(), codeObject.bytes.size()),
+              source.sha256);
+}
+
+TEST(TestKpackCodeObjectRead, RefusesBytesWhoseDigestDisagrees)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const ScopedDirectory scratch = claimScratchDirectory(SCRATCH_LABEL);
+    hipdnn_plugin_sdk::ingestor::DeviceProperties packedDevice;
+    std::filesystem::path packed;
+    ASSERT_NO_FATAL_FAILURE(
+        packs::copyPackedArchForDevice(unitKpackRoot(), scratch.path(), packedDevice, packed));
+    const std::string& deviceArch = packedDevice.gcnArchName;
+    if(packed.empty())
+    {
+        GTEST_SKIP() << "nothing was packed for this device (" << deviceArch
+                     << "): " << unitKpackRoot() << " has no directory for it.";
+    }
+
+    PackedKernelSource source;
+    ASSERT_NO_FATAL_FAILURE(readPackedKernelSource(packed, packs::CONV_FWD_DESCRIPTOR, source));
+
+    // A well-formed digest that differs from the descriptor's in one character.
+    std::string wrongDigest = source.sha256;
+    ASSERT_FALSE(wrongDigest.empty());
+    wrongDigest[0] = wrongDigest[0] == '0' ? '1' : '0';
+
+    std::string selected;
+    try
+    {
+        static_cast<void>(readVerifiedKpackCodeObject(
+            source.archive.string(), source.tocKey, deviceArch, wrongDigest, selected));
+        FAIL() << "expected bytes that do not match the expected digest to be refused";
+    }
+    catch(const KpackModuleLoadFailure& failure)
+    {
+        const std::string message = failure.what();
+        EXPECT_EQ(failure.stage(), KpackLoadStage::DIGEST_MISMATCH) << message;
+        EXPECT_NE(message.find(wrongDigest), std::string::npos) << message;
+    }
+}
+
+} // namespace
+} // namespace hip_kernel_provider::compilation
+
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR

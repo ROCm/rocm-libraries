@@ -4377,6 +4377,18 @@
         "format_version": 1,
         "generator": "capture-bundles",
         "generator_version": "1.0.0",
+        "inputs": {
+          "1": {
+            "hi": 10.0,
+            "kind": "free",
+            "lo": -10.0
+          },
+          "2": {
+            "hi": 10.0,
+            "kind": "free",
+            "lo": -10.0
+          }
+        },
         "notes": "Captured from C++ graph test Smoke/IntegrationGpuConvWrwLargeValues2dFp32.Correctness/0",
         "operation": "Smoke/IntegrationGpuConvWrwLargeValues2dFp32",
         "seed": 1,

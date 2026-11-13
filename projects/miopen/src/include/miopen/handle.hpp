@@ -192,6 +192,8 @@ struct MIOPEN_EXPORT Handle : miopenHandle
     virtual bool CooperativeLaunchSupported() const;
 
     std::string GetDeviceName() const;
+    // HIP device ordinal, or -1 under HIPNOGPU.
+    int GetDeviceId() const;
     virtual const TargetProperties& GetTargetProperties() const;
 
     std::ostream& Print(std::ostream& os) const;

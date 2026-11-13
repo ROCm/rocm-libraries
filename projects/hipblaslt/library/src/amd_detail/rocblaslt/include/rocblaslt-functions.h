@@ -134,6 +134,37 @@ int rocblaslt_matmul_is_tuned(rocblaslt_handle        handle,
 #ifdef __cplusplus
 }
 
+// Grouped GEMM (HIPBLASLT_BATCH_MODE_GROUPED layouts) behind rocblaslt_matmul_algo_get_heuristic
+// and rocblaslt_matmul.
+rocblaslt_status
+    rocblaslt_grouped_matmul_algo_get_heuristic(rocblaslt_handle                  handle,
+                                                rocblaslt_matmul_desc             matmul_desc,
+                                                rocblaslt_matrix_layout           matA,
+                                                rocblaslt_matrix_layout           matB,
+                                                rocblaslt_matrix_layout           matC,
+                                                rocblaslt_matrix_layout           matD,
+                                                rocblaslt_matmul_preference       pref,
+                                                int                               requestedAlgoCount,
+                                                rocblaslt_matmul_heuristic_result heuristicResultsArray[],
+                                                int*                              returnAlgoCount);
+
+rocblaslt_status rocblaslt_grouped_matmul(rocblaslt_handle             handle,
+                                          rocblaslt_matmul_desc        matmul_desc,
+                                          const void*                  alpha,
+                                          const void*                  A,
+                                          rocblaslt_matrix_layout      matA,
+                                          const void*                  B,
+                                          rocblaslt_matrix_layout      matB,
+                                          const void*                  beta,
+                                          const void*                  C,
+                                          rocblaslt_matrix_layout      matC,
+                                          void*                        D,
+                                          rocblaslt_matrix_layout      matD,
+                                          const rocblaslt_matmul_algo* algo,
+                                          void*                        workspace,
+                                          size_t                       workspaceSizeInBytes,
+                                          hipStream_t                  stream);
+
 rocblaslt_status rocblaslt_gemm_create_cpp(rocblaslt_handle                 handle,
                                            int64_t                          m,
                                            int64_t                          n,

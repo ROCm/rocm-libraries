@@ -1,0 +1,11 @@
+[
+  {
+    "engine": "hipkernel:ValidateFixture",
+    "arch": "gfx942",
+    "bindings": {
+      "ws.bytes": {
+        "region": 4096
+      }
+    }
+  }
+]

@@ -14,7 +14,7 @@ swap — and the MacroTile geometry that follows from it.
 
 import pytest
 
-from Tensile.Common import effectiveMatrixInstMN
+from tensilelite.Common import effectiveMatrixInstMN
 
 
 class TestEffectiveMatrixInstMN:
@@ -79,14 +79,13 @@ def _piap_mi32x16(source_swap):
 
     Kept out of the pure tests above: this needs a C++ toolchain + isaInfoMap.
     """
-    from Tensile.Common.Capabilities import makeIsaInfoMap
-    from Tensile.Common.Types import IsaVersion
-    from Tensile.Common.DataType import DataType
-    from Tensile.Toolchain.Validators import validateToolchain
-    from Tensile.SolutionStructs.Solution import Solution
+    from tensilelite.Common.Types import IsaVersion
+    from tensilelite.Common.DataType import DataType
+    from tensilelite.SolutionStructs.Solution import Solution
+    from toolchain_test_helpers import shared_isa_info_map
 
     isa = IsaVersion(12, 5, 0)
-    isaInfoMap = makeIsaInfoMap([isa], validateToolchain("amdclang++"))
+    isaInfoMap = shared_isa_info_map(isa)
     state = {
         "ISA": isa,
         "ScheduleIterAlg": 1,

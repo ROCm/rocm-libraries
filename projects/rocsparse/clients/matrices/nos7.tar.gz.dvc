@@ -1,0 +1,6 @@
+outs:
+- path: nos7.tar.gz
+  remote: sparse-matrices
+  md5: 9a6481268847e6cf0d70671f2ff1ddcd
+  size: 9639
+  hash: md5

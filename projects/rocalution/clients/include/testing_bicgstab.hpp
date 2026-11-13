@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -155,7 +155,6 @@ bool testing_bicgstab(Arguments argus)
 
     ls.Init(1e-8, 0.0, 1e+8, 0, 10000);
     ls.RecordResidualHistory();
-    auto n_iter = ls.GetIterationCount();
     ls.Build();
 
     // Matrix format

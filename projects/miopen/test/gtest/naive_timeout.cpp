@@ -21,6 +21,9 @@
 //
 // Tests cover paths A, B, and D. Path C requires fault injection.
 //
+// CaptureAfterATimedOutNaiveEvaluationSucceeds covers issue #12121: a naive
+// evaluation abandoned by find must not break a later HIP graph capture.
+//
 // Path B uses MIOPEN_DEBUG_FIND_ONLY_SOLVER=ConvDirectNaiveConvFwd to restrict
 // the candidate set to the naive solver only.
 //
@@ -109,6 +112,21 @@ bool IsWinogradOnlyArch(const miopen::Handle& handle)
     return name == "gfx900" || name == "gfx906" || name == "gfx908";
 }
 
+/// Device buffers for a forward convolution, allocated outside any capture.
+struct ConvBuffers
+{
+    void* x  = nullptr;
+    void* w  = nullptr;
+    void* y  = nullptr;
+    void* ws = nullptr;
+
+    ~ConvBuffers()
+    {
+        for(void* p : {x, w, y, ws})
+            (void)hipFree(p);
+    }
+};
+
 } // namespace
 
 // With MIOPEN_NAIVE_TIMEOUT=0 (opt-out), a naive solver must appear somewhere in the
@@ -196,6 +214,101 @@ TEST(GPU_NaiveTimeout_FP32, NaiveSkippedWithTinyBudget)
         all_names += (all_names.empty() ? "" : ", ") + s;
     EXPECT_FALSE(any_naive) << "Naive solver should have been short-circuited with 1% budget"
                             << "; got: [" << all_names << "]";
+}
+
+// Regression for issue #12121. With a 1% budget the naive evaluation is
+// abandoned - the Direct finder runs last, so just before find returns - and
+// the convolution below is the first launch on the handle after that, made
+// inside a capture in each mode. The capture must survive whatever the
+// abandoned evaluation left behind. There is deliberately no uncaptured run in
+// between: one would have reclaimed a finished evaluation before the capture
+// and hidden a regression. Find has already loaded the solution's kernels.
+TEST(GPU_NaiveTimeout_FP32, CaptureAfterATimedOutNaiveEvaluationSucceeds)
+{
+    if(IsWinogradOnlyArch(get_handle()))
+        GTEST_SKIP() << "Direct finder is disabled by use_winograd_only on "
+                     << get_handle().GetDeviceName();
+
+    ScopedFindDb no_cache;
+    ScopedEnvironment<bool> guard_naive(MIOPEN_NAIVE_TIMEOUT, true);
+    ScopedEnvironment<int> guard_factor(MIOPEN_NAIVE_TIMEOUT_FACTOR, 1);
+
+    tensor<float> x{8, 128, 28, 28};
+    tensor<float> w{128, 128, 3, 3};
+    miopen::ConvolutionDescriptor conv{
+        2, miopenConvolution, miopenPaddingDefault, {1, 1}, {1, 1}, {1, 1}};
+    tensor<float> y{conv.GetForwardOutputTensor(x.desc, w.desc)};
+
+    for(const auto mode : {hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal})
+    {
+        SCOPED_TRACE(mode == hipStreamCaptureModeGlobal ? "global capture mode"
+                                                        : "thread-local capture mode");
+
+        // A handle on its own stream: the default handle's null stream cannot be
+        // captured.
+        hipStream_t stream = nullptr;
+        ASSERT_EQ(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking), hipSuccess);
+        miopenHandle_t handle = nullptr;
+        ASSERT_EQ(miopenCreateWithStream(&handle, stream), miopenStatusSuccess);
+
+        miopenProblem_t problem = nullptr;
+        ASSERT_EQ(miopenCreateConvProblem(&problem, &conv, miopenProblemDirectionForward),
+                  miopenStatusSuccess);
+        ASSERT_EQ(miopenSetProblemTensorDescriptor(problem, miopenTensorConvolutionX, &x.desc),
+                  miopenStatusSuccess);
+        ASSERT_EQ(miopenSetProblemTensorDescriptor(problem, miopenTensorConvolutionW, &w.desc),
+                  miopenStatusSuccess);
+        ASSERT_EQ(miopenSetProblemTensorDescriptor(problem, miopenTensorConvolutionY, &y.desc),
+                  miopenStatusSuccess);
+
+        std::vector<miopenSolution_t> solutions(8);
+        size_t found = 0;
+        ASSERT_EQ(miopenFindSolutions(
+                      handle, problem, nullptr, solutions.data(), &found, solutions.size()),
+                  miopenStatusSuccess);
+        solutions.resize(found);
+        ASSERT_FALSE(solutions.empty()) << "miopenFindSolutions returned no results";
+        for(auto sol : solutions)
+        {
+            uint64_t solver_id = 0;
+            ASSERT_EQ(miopenGetSolutionSolverId(sol, &solver_id), miopenStatusSuccess);
+            ASSERT_FALSE(IsNaive(miopen::solver::Id{solver_id}.ToString()))
+                << "the naive evaluation was not cut short, so nothing was abandoned";
+        }
+
+        const auto best = solutions.front();
+        ConvBuffers buffers;
+        size_t ws_size = 0;
+        ASSERT_EQ(miopenGetSolutionWorkspaceSize(best, &ws_size), miopenStatusSuccess);
+        ASSERT_EQ(hipMalloc(&buffers.x, x.desc.GetNumBytes()), hipSuccess);
+        ASSERT_EQ(hipMalloc(&buffers.w, w.desc.GetNumBytes()), hipSuccess);
+        ASSERT_EQ(hipMalloc(&buffers.y, y.desc.GetNumBytes()), hipSuccess);
+        if(ws_size > 0)
+            ASSERT_EQ(hipMalloc(&buffers.ws, ws_size), hipSuccess);
+        const miopenTensorArgument_t args[] = {
+            {miopenTensorConvolutionX, nullptr, buffers.x},
+            {miopenTensorConvolutionW, nullptr, buffers.w},
+            {miopenTensorConvolutionY, nullptr, buffers.y},
+        };
+
+        ASSERT_EQ(hipStreamBeginCapture(stream, mode), hipSuccess);
+        const auto run_status = miopenRunSolution(handle, best, 3, args, buffers.ws, ws_size);
+        hipGraph_t graph      = nullptr;
+        const auto end_status = hipStreamEndCapture(stream, &graph);
+
+        EXPECT_EQ(run_status, miopenStatusSuccess) << "the captured convolution failed";
+        EXPECT_EQ(end_status, hipSuccess) << "the capture was invalidated";
+        EXPECT_NE(graph, nullptr);
+
+        if(graph != nullptr)
+            (void)hipGraphDestroy(graph);
+        for(auto sol : solutions)
+            miopenDestroySolution(sol);
+        miopenDestroyProblem(problem);
+        (void)hipStreamSynchronize(stream); // cleanup; fails after an invalidated capture
+        miopenDestroy(handle);              // waits for the abandoned naive kernel
+        (void)hipStreamDestroy(stream);
+    }
 }
 
 // CPU-only: verify that MIOPEN_NAIVE_TIMEOUT can be set and read back via the debug

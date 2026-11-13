@@ -29,6 +29,7 @@
 #include <iostream>
 
 #include "data_types.hpp"
+#include "logger.hpp"
 
 namespace hiptensor
 {
@@ -195,25 +196,31 @@ namespace hiptensor
     template <typename T>
     T readVal(void const* value, hiptensorComputeDescriptor_t id)
     {
-        if(id == HIPTENSOR_COMPUTE_DESC_16F)
+        switch(id)
         {
+        case HIPTENSOR_COMPUTE_DESC_16F:
             return static_cast<T>(*(_Float16*)value);
-        }
-        else if(id == HIPTENSOR_COMPUTE_DESC_32F)
-        {
+        case HIPTENSOR_COMPUTE_DESC_16BF:
+            return static_cast<T>(static_cast<float>(*(hip_bfloat16*)value));
+        case HIPTENSOR_COMPUTE_DESC_32F:
             return static_cast<T>(*(float*)value);
-        }
-        else if(id == HIPTENSOR_COMPUTE_DESC_64F)
-        {
+        case HIPTENSOR_COMPUTE_DESC_64F:
             return static_cast<T>(*(double*)value);
+        // A scalar read is not defined for these. Listed explicitly so -Wswitch
+        // flags any enumerator added to hiptensorComputeDescriptor_t later.
+        case HIPTENSOR_COMPUTE_DESC_C32F: // served by the ScalarData specialization
+        case HIPTENSOR_COMPUTE_DESC_C64F:
+        case HIPTENSOR_COMPUTE_DESC_8U:
+        case HIPTENSOR_COMPUTE_DESC_8I:
+        case HIPTENSOR_COMPUTE_DESC_32U:
+        case HIPTENSOR_COMPUTE_DESC_32I:
+        case HIPTENSOR_COMPUTE_DESC_NONE:
+            break;
         }
-        else
-        {
-#if !NDEBUG
-            std::cout << "Unhandled hiptensorComputeDescriptor_t: " << id << std::endl;
-#endif // !NDEBUG
-            return 0;
-        }
+        char msg[96];
+        snprintf(msg, sizeof(msg), "Unhandled compute descriptor: %d", static_cast<int>(id));
+        Logger::instance()->logError("readVal", msg);
+        return 0;
     }
 
     // @cond

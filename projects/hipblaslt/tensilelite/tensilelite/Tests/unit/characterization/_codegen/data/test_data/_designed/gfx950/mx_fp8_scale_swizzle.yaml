@@ -4,7 +4,7 @@
 ################################################################################
 # P4 DESIGNED MXFP8 scale-swizzle config for gfx950.
 #
-# Targets uncovered arms in Tensile/KernelWriterAssembly.py that require
+# Targets uncovered arms in tensilelite/KernelWriterAssembly.py that require
 # MXBlockA/MXBlockB (MXFP8 microscaling data types) with gfx950-specific
 # HostPreSwizzle scale layout:
 #

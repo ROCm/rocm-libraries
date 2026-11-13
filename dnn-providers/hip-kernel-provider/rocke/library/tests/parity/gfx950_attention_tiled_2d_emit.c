@@ -914,6 +914,304 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->tile_size = 64;
         break;
 
+    /* FP8 K/V single-batch combo (sync-dequant loader feeding the transposed
+     * 32x32 stack): d128 T64 and d64 T64, nw=4. */
+    case 56:
+        s->head_size = 128;
+        s->block_size = 64;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->kv_storage_dtype = "fp8e4m3";
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_mask_limit = true;
+        s->use_mfma32_skip_legacy_qreg = true;
+        s->use_transposed_half_local_pv = true;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        break;
+    case 57:
+        s->head_size = 64;
+        s->block_size = 64;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->kv_storage_dtype = "fp8e4m3";
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_mask_limit = true;
+        s->use_mfma32_skip_legacy_qreg = true;
+        s->use_transposed_half_local_pv = true;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        break;
+
+    /* head_size=192 MHA prefill selector spec */
+    case 58:
+        s->head_size = 192;
+        s->block_size = 16;
+        s->num_query_heads = 96;
+        s->num_kv_heads = 96;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 2;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->use_register_pv = true;
+        s->has_tile_size = true;
+        s->tile_size = 32;
+        break;
+    /* head_size=192 single-batch combo prefill selector spec (T=64, softmax/MFMA interleave) */
+    case 59:
+        s->head_size = 192;
+        s->block_size = 16;
+        s->num_query_heads = 96;
+        s->num_kv_heads = 96;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_mfma32_skip_legacy_qreg = true;
+        s->use_transposed_mask_limit = true;
+        s->use_softmax_mfma_interleave = true;
+        break;
+    /* d128 single-batch sliding-window + sinks combo selector spec
+     * (T=64, nw=4, transposed 32x32 + scalar state + half-local PV + interleave) */
+    case 60:
+        s->head_size = 128;
+        s->block_size = 64;
+        s->num_query_heads = 128;
+        s->num_kv_heads = 8;
+        s->dtype = "fp16";
+        s->use_sinks = true;
+        s->sliding_window = 128;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_softmax_mfma_interleave = true;
+        break;
+    /* d128 single-batch sinks (no window) full-combo selector spec
+     * (T=2*block_size, K single buffer, softmax/MFMA interleave) */
+    case 61:
+        s->head_size = 128;
+        s->block_size = 64;
+        s->num_query_heads = 128;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = true;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->has_tile_size = true;
+        s->tile_size = 128;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_mfma32_skip_legacy_qreg = true;
+        s->use_transposed_mask_limit = true;
+        s->use_k_single_buffer = true;
+        s->use_softmax_mfma_interleave = true;
+        break;
+    /* d64 single-batch sliding-window + sinks combo selector spec (long: early V; the
+     * short-prefill V double buffer has no C twin yet) */
+    case 62:
+        s->head_size = 64;
+        s->block_size = 64;
+        s->num_query_heads = 64;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = true;
+        s->sliding_window = 128;
+        s->has_softcap = false;
+        s->num_seqs = 1;
+        s->num_warps = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->has_tile_size = true;
+        s->tile_size = 128;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_early_v_schedule = true;
+        break;
+    /* Longest-first query blocks (D256/b16/GQA-8, two sequences): the reversed
+     * grid-y decode reads total_q from cu_q[num_seqs]. */
+    case 63:
+        s->head_size = 256;
+        s->block_size = 16;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 2;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 2;
+        s->use_qblock_reverse = true;
+        break;
+
+    /* --- idx64-67: emit_lse, one per epilogue store site, each an existing
+     *     config plus emit_lse (lockstep with the Python _CONFIGS[64..67]).
+     *     64: transposed32 scalar-state (55); 65: coalesced mfma32 (32);
+     *     66: striped16 GQA-16 (3); 67: striped16 + ALiBi (5 + use_alibi). */
+    case 64:
+        make_spec(55, s);
+        s->emit_lse = true;
+        break;
+    case 65:
+        make_spec(32, s);
+        s->emit_lse = true;
+        break;
+    case 66:
+        make_spec(3, s);
+        s->emit_lse = true;
+        break;
+    case 67:
+        make_spec(5, s);
+        s->use_alibi = true;
+        s->emit_lse = true;
+        break;
+    /* cfg68: bf16 D64/b16 GQA-4 multi-batch: the shipping spec, whose one K/V copy per
+     * tile (32 tokens) spans two pages, so the bf16 loaders keep the paged-KV
+     * descriptor. Every other bf16/fp16 case takes the per-page copy offsets. */
+    case 68:
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 2;
+        s->num_warps = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->has_tile_size = true;
+        s->tile_size = 32;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_scalar_state = true;
+        s->use_transposed_mask_once = true;
+        s->use_transposed_half_local_pv = true;
+        s->use_mfma32_skip_legacy_qreg = true;
+        s->use_transposed_mask_limit = true;
+        break;
+    /* cfg69/70: page copies at the 16-page prefetch bound (page ids carried)
+     * and past it (page ids read in place). */
+    case 69:
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 2;
+        s->has_tile_size = true;
+        s->tile_size = 256;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        break;
+    case 70:
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 8;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 2;
+        s->has_tile_size = true;
+        s->tile_size = 288;
+        s->block_m_per_warp = 32;
+        s->use_mfma_32x32 = true;
+        s->use_transposed_qk_32x32 = true;
+        break;
+    /* cfg71: bf16 D192/b16 one warp, the spec dispatch picks for short D192
+     * prefill. One copy is 512 halves, 2 2/3 rows, so it is not a whole number
+     * of tokens and the bf16 loaders must keep the paged-KV descriptor. */
+    case 71:
+        s->head_size = 192;
+        s->block_size = 16;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 2;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->num_seqs = 4;
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        s->use_register_pv = true;
+        s->has_tile_size = true;
+        s->tile_size = 32;
+        break;
+
+    /* --- idx72-74: lse_layout="head_major" at each store site (64-66 + head-major). */
+    /* idx71 is cfg71 above (bf16 D192 one warp); these three sit after it. */
+    case 72:
+    case 73:
+    case 74:
+        make_spec(idx - 8, s);
+        s->lse_head_major = true;
+        break;
     default:
         return -1;
     }

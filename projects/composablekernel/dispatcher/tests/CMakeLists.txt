@@ -109,6 +109,29 @@ set_tests_properties(dispatcher_test_contraction_multi_abd_gpu_correctness PROPE
 # Python Tests
 # =============================================================================
 
+add_test(
+    NAME dispatcher_test_preshuffle_pipeline_matrix
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_preshuffle_pipeline_matrix.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(dispatcher_test_preshuffle_pipeline_matrix PROPERTIES
+    LABELS "dispatcher;python;bridge;codegen"
+    TIMEOUT 120
+)
+
+# gfx1250 preshuffle pipelines: dispatcher/Tile Engine reject-rule parity,
+# tile rules and codegen output for accepted and rejected configs. CPU-only.
+add_test(
+    NAME dispatcher_test_preshuffle_gfx1250_pipelines
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_preshuffle_gfx1250_pipelines.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(dispatcher_test_preshuffle_gfx1250_pipelines PROPERTIES
+    LABELS "dispatcher;python;bridge;codegen;validation"
+    TIMEOUT 120
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # Auto-correction and validation stress test
 add_test(
     NAME dispatcher_test_autocorrect
@@ -270,6 +293,19 @@ set_tests_properties(dispatcher_test_gemm_utils PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
+# gfx1250 Stream-K configuration, compile flags, and verification regressions.
+add_test(
+    NAME dispatcher_test_streamk_gfx1250
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_streamk_gfx1250.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_streamk_gfx1250 PROPERTIES
+    LABELS "dispatcher;python;streamk;validation"
+    TIMEOUT 60
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
 # tile_engine GEMM sweep driver: --verify reference built from the kernel's
 # quantized inputs (fp8/bf8 included) and a non-zero exit on failed rows. CPU-only.
 add_test(
@@ -308,6 +344,21 @@ add_test(
 )
 
 set_tests_properties(dispatcher_test_gfx1250_gate_equivalence PROPERTIES
+    LABELS "dispatcher;python;codegen;validation"
+    TIMEOUT 120
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# Stream-K on the gfx1250 comp_tdm / comp_tdm_v2 pipelines: the reduction x
+# epilogue x pad x persistent gate, its agreement across codegen, arch_filter
+# and expand_sweep, and the generated kernel header. CPU-only.
+add_test(
+    NAME dispatcher_test_streamk_tdm_gfx1250
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_streamk_tdm_gfx1250.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_streamk_tdm_gfx1250 PROPERTIES
     LABELS "dispatcher;python;codegen;validation"
     TIMEOUT 120
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
@@ -355,6 +406,51 @@ set_tests_properties(dispatcher_test_gemm_driver_fp32 PROPERTIES
     TIMEOUT 60
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
+
+# tile_engine GEMM sweep driver measurement options: --build-timeout reaches every
+# codegen/compile/link step, --failures-csv records failed runs and builds,
+# --repeat-top re-times the fastest kernels. Build and GPU runner are mocked.
+add_test(
+    NAME dispatcher_test_gemm_driver_measurement
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_gemm_driver_measurement.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_gemm_driver_measurement PROPERTIES
+    LABELS "dispatcher;python;gemm;validation"
+    TIMEOUT 120
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# tile_engine GEMM sweep driver --list-pairs / --pairs: the listed pairs are what a
+# full run measures, and --pairs builds and measures only them. Mocked as above.
+add_test(
+    NAME dispatcher_test_gemm_driver_pairs
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_gemm_driver_pairs.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_gemm_driver_pairs PROPERTIES
+    LABELS "dispatcher;python;gemm;validation"
+    TIMEOUT 120
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# Adaptive kernel search (--search-config): the vendored ck_search core, the
+# op-agnostic coordinator, the GEMM adapter and the driver options. CPU only:
+# builds, workers and strategies are faked or run in-process.
+foreach(_search_test ck_search_core adaptive_search_coordinator gemm_search_adapter gemm_search_cli)
+    add_test(
+        NAME dispatcher_test_${_search_test}
+        COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_${_search_test}.py
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    set_tests_properties(dispatcher_test_${_search_test} PROPERTIES
+        LABELS "dispatcher;python;gemm;validation"
+        TIMEOUT 120
+        ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+    )
+endforeach()
 
 # MX bridge host tests and CMake configuration tests. Report missing host build
 # tools as a skipped CMake test rather than an all-skipped pass.

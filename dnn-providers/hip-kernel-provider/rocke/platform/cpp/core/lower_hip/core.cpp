@@ -11,7 +11,7 @@
  *     / rocke_h_push_indent / rocke_h_pop_indent),
  *   - exception-based errors and the NULL guard (rocke_h_fail / rocke_h_live),
  *   - naming / type mapping (rocke_h_name / rocke_h_type_to_hip / rocke_h_hip_scalar /
- *     rocke_h_vec_prefix),
+ *     rocke_h_require_hip_scalar / rocke_h_vec_prefix),
  *   - float literal formatting (rocke_h_f32_literal / rocke_h_f64_literal),
  *   - waitcnt encoders (rocke_h_encode_waitcnt + the two raw encoders),
  *   - arch gates (rocke_h_require_ds_read_tr / rocke_h_require_wmma_arch),
@@ -38,6 +38,7 @@
 #include "rocke/arena.h"
 #include "rocke/error.hpp" /* ckc::Error boundary translation */
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err_msg */
 #include "rocke/lower_hip.h"
 #include "rocke/lower_hip_internal.h"
 #include "rocke/strbuf.h"
@@ -76,7 +77,7 @@ const char* const ROCKE_HIP_PROLOGUE
       "_ROCKE_VEC(bf16, bf16x, 8); _ROCKE_VEC(bf16, bf16x, 16);\n"
       "_ROCKE_VEC(float, f32x, 1); _ROCKE_VEC(float, f32x, 2); _ROCKE_VEC(float, f32x, 4);\n"
       "_ROCKE_VEC(float, f32x, 8); _ROCKE_VEC(float, f32x, 16);\n"
-      "_ROCKE_VEC(double, f64x, 1); _ROCKE_VEC(double, f64x, 2);\n"
+      "_ROCKE_VEC(double, f64x, 1); _ROCKE_VEC(double, f64x, 2); _ROCKE_VEC(double, f64x, 4);\n"
       "_ROCKE_VEC(int, i32x, 1); _ROCKE_VEC(int, i32x, 2); _ROCKE_VEC(int, i32x, 3);\n"
       "_ROCKE_VEC(int, i32x, 4); _ROCKE_VEC(int, i32x, 8); _ROCKE_VEC(int, i32x, 16);\n"
       "_ROCKE_VEC(int16_t, i16x, 1); _ROCKE_VEC(int16_t, i16x, 2);\n"
@@ -106,10 +107,6 @@ const char* const ROCKE_HIP_PROLOGUE
       "__device__ extern \"C\" i16x4_raw _llvm_amdgcn_ds_read_tr16_b64(\n"
       " const __attribute__((address_space(3))) void*)\n"
       " __asm(\"llvm.amdgcn.ds.read.tr16.b64\");\n"
-      "typedef short i16x8_raw __attribute__((ext_vector_type(8)));\n"
-      "__device__ extern \"C\" i16x8_raw _llvm_amdgcn_ds_read_tr16_b128(\n"
-      " const __attribute__((address_space(3))) void*)\n"
-      " __asm(\"llvm.amdgcn.ds.read.tr16.b128\");\n"
       "// ``__builtin_amdgcn_raw_ptr_buffer_load_lds`` restricts the size arg to\n"
       "// {1, 2, 4} bytes; the LLVM intrinsic itself accepts {1, 2, 4, 12, 16},\n"
       "// which is what async-DMA pipelines (compv4 / split-KV attention) need.\n"
@@ -277,8 +274,78 @@ const char* rocke_h_name(rocke_h_lowerer_t* lw, const rocke_value_t* v)
     return n;
 }
 
+/* Python _HIP_UNSIGNED_INT_TYPE, in its order: scalar integer IR name -> the
+ * unsigned HIP type of its width. */
+static const struct
+{
+    const char* ir_name;
+    const char* hip_unsigned;
+} k_hip_unsigned_int_types[] = {
+    {"i1", "bool"},
+    {"i8", "uint8_t"},
+    {"u8", "uint8_t"},
+    {"i16", "uint16_t"},
+    {"i32", "uint32_t"},
+    {"i64", "uint64_t"},
+};
+static const size_t k_hip_unsigned_int_type_count
+    = sizeof(k_hip_unsigned_int_types) / sizeof(k_hip_unsigned_int_types[0]);
+
+static const char* h_unsigned_int_type_of_name(const char* ir_type_name)
+{
+    size_t i;
+    if(!ir_type_name)
+        return NULL;
+    for(i = 0; i < k_hip_unsigned_int_type_count; ++i)
+    {
+        if(strcmp(ir_type_name, k_hip_unsigned_int_types[i].ir_name) == 0)
+            return k_hip_unsigned_int_types[i].hip_unsigned;
+    }
+    return NULL;
+}
+
+const char* rocke_h_unsigned_int_type(const rocke_type_t* t)
+{
+    return h_unsigned_int_type_of_name(t ? t->name : NULL);
+}
+
+const char* rocke_h_require_unsigned_int_type(rocke_h_lowerer_t* lw,
+                                              const char* op_name,
+                                              const char* ir_type_name)
+{
+    const char* spelling = h_unsigned_int_type_of_name(ir_type_name);
+    if(!spelling)
+    {
+        /* Python's repr of tuple(_HIP_UNSIGNED_INT_TYPE): ('i1', 'i8', ...). */
+        char names[128];
+        size_t used = 0;
+        size_t i;
+        used += (size_t)snprintf(names, sizeof names, "(");
+        for(i = 0; i < k_hip_unsigned_int_type_count && used < sizeof names; ++i)
+        {
+            used += (size_t)snprintf(names + used,
+                                     sizeof names - used,
+                                     "%s'%s'",
+                                     i ? ", " : "",
+                                     k_hip_unsigned_int_types[i].ir_name);
+        }
+        if(used < sizeof names)
+            snprintf(names + used, sizeof names - used, ")");
+        rocke_h_fail(lw,
+                     ROCKE_ERR_TYPE,
+                     "HIP lowering of %s failed - element type='%s', expected an integer "
+                     "type, one of %s",
+                     op_name,
+                     ir_type_name ? ir_type_name : "(null)",
+                     names);
+    }
+    return spelling;
+}
+
 /* The raw _HIP_TYPE dict: scalar IR name -> HIP scalar spelling. NULL if
- * unknown (caller decides whether that is an error). */
+ * unknown (caller decides whether that is an error).
+ * No packed-only type has an entry: rocke_i_refuse_packed_only_value keeps
+ * its values out of the IR. */
 const char* rocke_h_hip_scalar(const char* ir_scalar_name)
 {
     if(!ir_scalar_name)
@@ -292,6 +359,10 @@ const char* rocke_h_hip_scalar(const char* ir_scalar_name)
     if(strcmp(ir_scalar_name, "i8") == 0)
     {
         return "int8_t";
+    }
+    if(strcmp(ir_scalar_name, "u8") == 0)
+    {
+        return "uint8_t";
     }
     if(strcmp(ir_scalar_name, "i16") == 0)
     {
@@ -332,6 +403,21 @@ const char* rocke_h_hip_scalar(const char* ir_scalar_name)
     return NULL;
 }
 
+const char* rocke_h_require_hip_scalar(rocke_h_lowerer_t* lw, const char* ir_type_name)
+{
+    const char* spelling = rocke_h_hip_scalar(ir_type_name);
+    if(!spelling)
+    {
+        rocke_h_fail(lw,
+                     ROCKE_ERR_NOTIMPL,
+                     "no HIP mapping for type %s",
+                     ir_type_name ? ir_type_name : "(null)");
+    }
+    return spelling;
+}
+
+/* No packed-only type has an entry: rocke_i_refuse_packed_only_value keeps its
+ * values out of the IR. */
 const char* rocke_h_vec_prefix(const char* ir_scalar_name, bool full_map)
 {
     if(ir_scalar_name)
@@ -430,8 +516,8 @@ void rocke_h_reject_f64(rocke_h_lowerer_t* lw, const rocke_op_t* op, const char*
     }
 }
 
-/* Python _type_to_hip(t). Returns an arena-owned string; throws on an unmappable
- * HIP type (KeyError parity), including logical types without direct HIP lowering. */
+/* Python _type_to_hip(t). Returns an arena-owned string; a type it does not
+ * compose itself is refused by rocke_h_require_hip_scalar. */
 const char* rocke_h_type_to_hip(rocke_h_lowerer_t* lw, const rocke_type_t* t)
 {
     if(!t)
@@ -453,7 +539,7 @@ const char* rocke_h_type_to_hip(rocke_h_lowerer_t* lw, const rocke_type_t* t)
             out = rocke_arena_printf(&lw->b->arena, "%s*", pointee);
             return out ? out : "";
         }
-        /* Other ptr spaces fall through to the scalar map (KeyError in Python). */
+        /* Other ptr spaces fall through to the scalar map, which refuses them. */
     }
 
     if(t->kind == ROCKE_TYPE_VECTOR)
@@ -478,8 +564,9 @@ const char* rocke_h_type_to_hip(rocke_h_lowerer_t* lw, const rocke_type_t* t)
                && strcmp(elem, "i16") != 0 && strcmp(elem, "i8") != 0
                && strcmp(elem, "fp8e4m3") != 0 && strcmp(elem, "bf8e5m2") != 0)
             {
-                rocke_h_fail(lw, ROCKE_ERR_KEY, "type_to_hip: unmappable vector elem '%s'", elem);
-                return "";
+                /* Python falls through to the scalar map, which refuses the
+                 * vector type by its own name. */
+                return rocke_h_require_hip_scalar(lw, t->name);
             }
         }
         out = rocke_arena_printf(&lw->b->arena, "%s%d", pfx, t->count);
@@ -498,19 +585,8 @@ const char* rocke_h_type_to_hip(rocke_h_lowerer_t* lw, const rocke_type_t* t)
         return out ? out : "";
     }
 
-    /* scalar: _HIP_TYPE[t.name] */
-    {
-        const char* s = rocke_h_hip_scalar(t->name);
-        if(!s)
-        {
-            rocke_h_fail(lw,
-                         ROCKE_ERR_KEY,
-                         "type_to_hip: unmappable type '%s'",
-                         t->name ? t->name : "(null)");
-            return "";
-        }
-        return s;
-    }
+    /* scalar: _hip_scalar_type(t.name) */
+    return rocke_h_require_hip_scalar(lw, t->name);
 }
 
 /* ============================== literals ============================= */
@@ -970,8 +1046,9 @@ static void
             = strcmp(t->elem->name, "i1") == 0
                   ? "boolx"
                   : ckc::rocke_h_vec_prefix_checked(lw, t->elem->name, true, "vector type");
-        const char* scalar
-            = strcmp(prefix, "i8x") == 0 ? "int8_t" : ckc::rocke_h_hip_scalar(t->elem->name);
+        const char* scalar = strcmp(prefix, "i8x") == 0
+                                 ? "int8_t"
+                                 : ckc::rocke_h_require_hip_scalar(lw, t->elem->name);
         const char* macro
             = rocke_arena_printf(&lw->b->arena, "_ROCKE_VEC(%s, %s, %d)", scalar, prefix, t->count);
         const char* declaration
@@ -1060,6 +1137,7 @@ rocke_status_t rocke_lower_kernel_to_hip(rocke_ir_builder_t* b,
     rocke_vec_init(&lw.smem_decls);
     lw.indent = 1;
     lw.smem_counter = 0;
+    lw.gpu_check_word = NULL;
     lw.status = ROCKE_OK;
     lw.err[0] = '\0';
 
@@ -1108,6 +1186,10 @@ rocke_status_t rocke_lower_kernel_to_hip(rocke_ir_builder_t* b,
         for(int j = 0; j < kernel->num_params; ++j)
             h_extra_vector_type(&lw, kernel->params[j]->type, out);
         h_extra_vector_region(&lw, kernel->body, out);
+        if(lw.gpu_check_word)
+        {
+            rocke_strbuf_appendf(out, "__device__ int %s;\n", lw.gpu_check_word);
+        }
         /* head */
         rocke_strbuf_appendf(out,
                              "extern \"C\" __global__ __launch_bounds__(%d)\n"
@@ -1137,6 +1219,8 @@ rocke_status_t rocke_lower_kernel_to_hip(rocke_ir_builder_t* b,
     {
         rocke_strbuf_free(&sig);
         h_smem_release(&lw);
+        /* The header promises the reason on the builder's error channel. */
+        rocke_i_set_err_msg(b, e.code(), e.what());
         return e.code();
     }
     catch(const std::bad_alloc&)

@@ -48,6 +48,15 @@ class GemmRequest(OperatorRequest):
 
 GEMM_DIM_VOCABULARY = ("M", "N", "K")
 
+# The RDNA targets the fp16 and bf16 WMMA candidates declare. Listing
+# gfx11-generic covers every gfx11 processor whose arch_specs.json row points at
+# it (listed_arch_for), so no member is listed again. gfx1201 is named on its
+# own rather than through gfx12-generic, so the candidates claim that gfx12
+# processor only and not every processor the generic covers. (The library's
+# attention RDNA_WMMA_ARCHES also names members, because each member there
+# carries its own tuning entry.)
+RDNA_WMMA_GEMM_ARCHES = ("gfx11-generic", "gfx1201")
+
 
 def normalize_dtype(dtype: str) -> str:
     d = dtype.lower()

@@ -82,6 +82,10 @@ nanobind_add_module(
     src/memory_bindings.cpp
     src/hip_bindings.cpp
     src/dlpack_adapter.cpp
+    src/cudnn_compat.cpp
+    src/graph_kwargs_bindings.cpp
+    src/pointwise_bindings.cpp
+    src/pygraph_bindings.cpp
 )
 
 target_link_libraries(

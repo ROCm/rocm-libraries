@@ -18,6 +18,8 @@
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
 
+#include "../../../library/src/amd_detail/rocblaslt/src/include/rocblaslt_adaptive_sm_count.hpp"
+
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -92,7 +94,9 @@ namespace
         hipblasLtMatmulDesc_t       desc    = nullptr;
         hipblasLtMatmulPreference_t pref    = nullptr;
 
-        bool create()
+        // `streamK`: a HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT value,
+        // or none to keep the desc's default.
+        bool create(std::optional<int32_t> streamK = std::nullopt)
         {
             if(hipblasLtMatrixLayoutCreate(&layoutA, HIP_R_16F, kM, kK, kM)
                    != HIPBLAS_STATUS_SUCCESS
@@ -103,6 +107,14 @@ namespace
                || hipblasLtMatmulDescCreate(&desc, HIPBLAS_COMPUTE_32F, HIP_R_32F)
                       != HIPBLAS_STATUS_SUCCESS
                || hipblasLtMatmulPreferenceCreate(&pref) != HIPBLAS_STATUS_SUCCESS)
+                return false;
+
+            if(streamK
+               && hipblasLtMatmulDescSetAttribute(desc,
+                                                  HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
+                                                  &*streamK,
+                                                  sizeof(*streamK))
+                      != HIPBLAS_STATUS_SUCCESS)
                 return false;
 
             const uint64_t maxWs = kWorkspaceBytes;
@@ -1131,6 +1143,32 @@ namespace
         EXPECT_EQ(counters().invalidated, 1u);
     }
 
+    // Distinct stored identities can share an index; count each rejected one
+    // once, including when both heuristic APIs and direct replay meet it again.
+    TEST_F(TuningCache_pre_checkin, DistinctStaleRowsSharingAnIndexAreCountedSeparately)
+    {
+        if(!haveSolutions(2))
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+        const auto index = m_identities[1].index;
+        ASSERT_TRUE(writeTuningFile(m_path,
+                                    m_stamp,
+                                    {{index, std::string("StaleKernelOne")},
+                                     {index, std::string("StaleKernelTwo")},
+                                     {index, std::string("StaleKernelOne")}}));
+        useCache(m_path);
+        for(int call = 0; call < 2; ++call)
+        {
+            SCOPED_TRACE(call);
+            int selected = -1;
+            int launched = -1;
+            ASSERT_TRUE(runGemm(&selected));
+            ASSERT_TRUE(extHeuristicIndex(&selected));
+            ASSERT_TRUE(launchGemm(AlgoFrom::Null, -1, &launched, true));
+            EXPECT_EQ(counters().loaded, 2u);
+            EXPECT_EQ(counters().invalidated, 2u);
+        }
+    }
+
     // A caller that passes an algo gets that algo, whatever the cache holds.
     TEST_F(TuningCache_pre_checkin, ExplicitAlgoLaunchesAsGivenInCacheMode)
     {
@@ -1389,5 +1427,150 @@ namespace
         }
         ASSERT_EQ(selected, m_identities[1].index) << "the override file was not consulted";
         EXPECT_EQ(out.find("tuning-cache:"), std::string::npos) << out;
+    }
+
+    // A direct matmul must explain a missing path even without a heuristic query.
+    TEST_F(TuningCache_pre_checkin, NullAlgoWithoutPathReportsWhyCacheIsInert)
+    {
+        if(!loggingEnvIsClean())
+            GTEST_SKIP() << "external logging environment redirects tuning output";
+        useCache("");
+        std::string output;
+        {
+            CerrCapture capture;
+            int         launched = -1;
+            ASSERT_TRUE(launchGemm(AlgoFrom::Null, -1, &launched, true));
+            output = capture.str();
+        }
+        EXPECT_NE(output.find("load=no-path"), std::string::npos) << output;
+    }
+
+    // The logger reads its environment once, during the test binary's startup,
+    // so the fresh process inherits info logging from this one; it then checks
+    // both replay and empty-cache paths share the event latch.
+    TEST(TuningCacheDiagnostics, pre_checkin_DirectAndEmptyLookupsLogOnceAtInfoLevel)
+    {
+        std::vector<std::pair<std::string, std::optional<std::string>>> savedEnv;
+        for(const char* name : {"HIPBLASLT_LOG_LEVEL", "HIPBLASLT_LOG_MASK", "HIPBLASLT_LOG_FILE"})
+        {
+            const char* value = getenv(name);
+            savedEnv.emplace_back(name, value ? std::optional<std::string>(value) : std::nullopt);
+            unsetenv(name);
+        }
+        setenv("HIPBLASLT_LOG_LEVEL", "4", 1);
+
+        GTEST_FLAG_SET(death_test_style, "threadsafe");
+        EXPECT_EXIT(
+            {
+                unsetenv("HIPBLASLT_TUNING_MODE");
+                unsetenv("HIPBLASLT_TUNING_CACHE_PATH");
+                unsetenv("HIPBLASLT_TUNING_OVERRIDE_FILE");
+                hipblaslt_tuning_reset_for_test();
+                const auto identities = candidateIdentities(8);
+                if(identities.empty())
+                    std::exit(2);
+                const auto path = tempTuningPath("direct_info");
+                if(!writeTuningFile(
+                       path, buildStamp(), {{identities[0].index, identities[0].kernelName}}))
+                    std::exit(3);
+                setenv("HIPBLASLT_TUNING_MODE", "cache", 1);
+                setenv("HIPBLASLT_TUNING_CACHE_PATH", path.c_str(), 1);
+                hipblaslt_tuning_reset_for_test();
+                bool        ok = true;
+                std::string first;
+                std::string later;
+                std::string empty;
+                int         launched = -1;
+                {
+                    CerrCapture capture;
+                    ok = launchGemm(AlgoFrom::Null, -1, &launched, true)
+                         && launched == identities[0].index;
+                    first = capture.str();
+                }
+                {
+                    CerrCapture capture;
+                    ok    = launchGemm(AlgoFrom::Null, -1, &launched) && ok;
+                    later = capture.str();
+                }
+                ok = ok && first.find("tuning-cache: cache-hit index=") != std::string::npos
+                     && later.find("tuning-cache: cache-hit") == std::string::npos;
+                if(!writeRawTuningFile(path, buildStamp(), ""))
+                    std::exit(4);
+                hipblaslt_tuning_reset_for_test();
+                {
+                    CerrCapture capture;
+                    int         selected = -1;
+                    ok                   = runGemm(&selected) && extHeuristicIndex(&selected) && ok;
+                    empty                = capture.str();
+                }
+                const auto miss = empty.find("tuning-cache: cache-miss");
+                ok = ok && miss != std::string::npos
+                     && empty.find("tuning-cache: cache-miss", miss + 1) == std::string::npos;
+                std::remove(path.c_str());
+                std::exit(ok ? 0 : 5);
+            },
+            ::testing::ExitedWithCode(0),
+            "tuning-cache: summary");
+
+        for(const auto& [name, value] : savedEnv)
+        {
+            if(value)
+                setenv(name.c_str(), value->c_str(), 1);
+            else
+                unsetenv(name.c_str());
+        }
+    }
+
+    // The top heuristic result through the C API with StreamK AUTO.
+    bool autoModeHeuristic(hipblasLtMatmulHeuristicResult_t* result)
+    {
+        hipblasLtHandle_t handle = nullptr;
+        if(hipblasLtCreate(&handle) != HIPBLAS_STATUS_SUCCESS)
+            return false;
+        bool ok = false;
+        {
+            Problem problem;
+            int     returned = 0;
+            ok               = problem.create(HIPBLASLT_STREAMK_TILE_SCHEDULING_AUTO)
+                 && hipblasLtMatmulAlgoGetHeuristic(handle,
+                                                    problem.desc,
+                                                    problem.layoutA,
+                                                    problem.layoutB,
+                                                    problem.layoutC,
+                                                    problem.layoutC,
+                                                    problem.pref,
+                                                    1,
+                                                    result,
+                                                    &returned)
+                        == HIPBLAS_STATUS_SUCCESS
+                 && returned > 0;
+        }
+        hipblasLtDestroy(handle);
+        return ok;
+    }
+
+    // In adaptive mode a heuristic result is tagged for launch-time
+    // re-selection, but not one the tuning file supplied: the file's choice
+    // is launched as recorded.
+    TEST_F(TuningCache_pre_checkin, FileEntryIsNotAdaptiveTagged)
+    {
+        if(!rocblaslt::adaptive_sm::Config::fromEnv().enabled)
+            GTEST_SKIP() << "adaptive mode is off";
+        if(!haveSolutions(2))
+            GTEST_SKIP() << "the heuristic offers one solution for this problem";
+
+        uint32_t                         hint = 0;
+        hipblasLtMatmulHeuristicResult_t r{};
+        ASSERT_TRUE(autoModeHeuristic(&r));
+        ASSERT_TRUE(rocblaslt::adaptive_sm::algoTag(r.algo.data, &hint));
+
+        const auto& recorded = m_identities[1];
+        ASSERT_TRUE(writeTuningFile(m_path, m_stamp, {{recorded.index, recorded.kernelName}}));
+        useTuningFile();
+
+        r = {};
+        ASSERT_TRUE(autoModeHeuristic(&r));
+        EXPECT_EQ(hipblaslt_ext::getIndexFromAlgo(r.algo), recorded.index);
+        EXPECT_FALSE(rocblaslt::adaptive_sm::algoTag(r.algo.data, &hint));
     }
 } // namespace

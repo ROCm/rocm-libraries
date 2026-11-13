@@ -400,20 +400,14 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::SetNextValue(const ProblemD
 {
     if(valid_kernels.empty())
     {
-        const auto& loader = CkImplLibLoader::Get(GetCurrentDeviceName());
-        if(!loader.IsLoaded())
-            return false;
-
-        auto data_type = problem.GetInDataType();
-        use_tf32       = (data_type == miopenFloat && problem.UseTF32());
-
-        valid_kernels = loader.FillValidKernelsWithTf32Fallback(
-            CKSolverType::GrpConvWrw, problem, data_type, use_tf32);
-
+        // For generic search we want all available kernels, not heuristic selection.
+        // InitValidKernels seeds the first config to (valid_kernels[0], split_k = 1) -- required,
+        // because GenericSearch's ComputedIterator skips configs whose IsValid() is false, so an
+        // unset kernel_id would silently drop the "valid_kernels[0]+1" candidate and start the
+        // sweep at split_k 2 / valid_kernels[1].
+        InitValidKernels(problem);
         if(valid_kernels.empty())
             return false;
-
-        assert(!valid_kernels.empty());
         return true;
     }
 
@@ -461,7 +455,7 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::IsValidValue() const
 }
 
 bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::IsValid(
-    [[maybe_unused]] const ProblemDescription& problem) const
+    const ProblemDescription& problem) const
 {
     if(!IsDeterministicSplitKValid(kernel_id, problem.GetConv().attribute.deterministic))
         return false;
@@ -470,8 +464,9 @@ bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::IsValid(
     if(!loader.IsLoaded())
         return false;
 
-    return loader.IsArgsSupported(
-        CKSolverType::GrpConvWrw, problem, kernel_id, problem.GetInDataType(), problem.UseTF32());
+    // Recompute TF32 from the problem with an FP32 fallback: passing a bare problem.UseTF32() would
+    // check only the TF32 instance set and drop FP32-only kernel_ids when TF32 is requested.
+    return loader.IsArgsSupportedTf32Aware(CKSolverType::GrpConvWrw, problem, kernel_id);
 }
 
 bool PerformanceConfigHipImplicitGemmGroupWrwXdlops::operator==(
@@ -559,8 +554,7 @@ ConvSolution ConvHipImplicitGemmGroupWrwXdlops::GetSolution(
     if(!loader.IsLoaded())
         return ConvSolution{miopenStatusInternalError};
 
-    return loader.GetSolution(
-        CKSolverType::GrpConvWrw, ctx, problem, config.kernel_id, config.UseTF32());
+    return loader.GetSolutionTf32Aware(CKSolverType::GrpConvWrw, ctx, problem, config.kernel_id);
 }
 
 } // namespace conv

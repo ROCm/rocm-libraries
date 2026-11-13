@@ -26,19 +26,14 @@ include: rocsparse_common.yaml
 
 
 Tests:
-
-- name: dnmat_transpose_bad_arg
-  category: pre_checkin
-  function: dnmat_transpose_bad_arg
-  precision: *single_double_precisions_complex_real
-
+# Quick
 - name: dnmat_transpose
   category: quick
   function: dnmat_transpose
-  precision: *single_double_precisions
+  precision: *single_only_precisions
   M: [3, 4]
   N: [4, 5]
-  alpha: [2, -2]
+  alpha: [-2]
   alphai: [0]
   orderB: *all_rocsparse_order
   orderC: *all_rocsparse_order
@@ -47,11 +42,17 @@ Tests:
   batch_count_A: [-1, 1]
   direction: *all_rocsparse_direction
 
+# Pre_checkin
+- name: dnmat_transpose_bad_arg
+  category: pre_checkin
+  function: dnmat_transpose_bad_arg
+  precision: *single_double_precisions_complex_real
+
 - name: dnmat_transpose
   category: pre_checkin
   function: dnmat_transpose
   precision: *single_double_precisions
-  alpha: [1,2,-4,8]
+  alpha: [1, 2, -4, 8]
   alphai: [0]
   M: [0, 16]
   N: [0, 32]
@@ -61,21 +62,6 @@ Tests:
   batch_count_B: [-1, 1]
   batch_count_A: [-1, 1]
   direction: *all_rocsparse_direction
-
-- name: dnmat_transpose
-  category: nightly
-  function: dnmat_transpose
-  precision: *single_double_precisions
-  M: [128]
-  N: [32, 64]
-  alpha: [-2,4,-8]
-  alphai: [0]
-  orderB: *all_rocsparse_order
-  orderC: *all_rocsparse_order
-  direction: *all_rocsparse_direction
-  batch_count_C: [3, 32]
-  batch_count_B: [-1, 1]
-  batch_count_A: [-1, 1]
 
 - name: dnmat_transpose
   category: pre_checkin
@@ -91,3 +77,19 @@ Tests:
   batch_count_B: [-1, 1]
   batch_count_A: [-1, 1]
   direction: *all_rocsparse_direction
+
+# Nightly
+- name: dnmat_transpose
+  category: nightly
+  function: dnmat_transpose
+  precision: *single_double_precisions
+  M: [128]
+  N: [32, 64]
+  alpha: [-2,4,-8]
+  alphai: [0]
+  orderB: *all_rocsparse_order
+  orderC: *all_rocsparse_order
+  direction: *all_rocsparse_direction
+  batch_count_C: [3, 32]
+  batch_count_B: [-1, 1]
+  batch_count_A: [-1, 1]

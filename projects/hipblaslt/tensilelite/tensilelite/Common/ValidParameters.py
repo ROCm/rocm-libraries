@@ -367,6 +367,19 @@ validParameters = { # we need to make sure this matches develop
     # workgroup cluster it forces GlobalSplitUWorkGroupMappingRoundRobin on so the
     # cluster's peers share a K chunk. May remove these limitations in the future.
     "PrefetchGL2": [0, 1, 2],
+    # Width of the PrefetchGL2 address increment sgpr (GL2PrefetchInc{A,B,...}).
+    # False: 32-bit (1 sgpr). True: 64-bit (2 sgprs), for when the per-iteration
+    # byte increment (unroll stride * DepthU * bpe, times the GSU chunk stride
+    # under GSU) can overflow 32 bits. Forced off when PrefetchGL2 == 0.
+    "PrefetchGL2Inc64Bit": [False, True],
+    # Address form of the PrefetchGL2 global_prefetch_b8.
+    # False: a 64-bit vgpr pair address per load (vaddr, saddr=off).
+    # True: a 64-bit sgpr pair base per tensor (GL2PrefetchBase{A,B,...}) plus a
+    # 32-bit vgpr offset per load. Halves the address vgprs and advances the
+    # address with scalar instead of vector adds, but each lane's byte offset
+    # from the base (within one prefetch tile) must fit in 32 bits.
+    # Forced off when PrefetchGL2 == 0.
+    "PrefetchGL2SAddr": [False, True],
     # MatrixInstruction Only
     # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
     # So we can schedule these localReads to the front of the loop
@@ -419,22 +432,29 @@ validParameters = { # we need to make sure this matches develop
     # Not applied with 1LDSBuffer=1, LocalSplitU>1, subtile, or sparse.
     #
     # Values:
-    #   -1 = auto: enable only where it needs no extra LDS reserved.
-    #    0 = off (default): baseline layout.
-    #    1 = on: enable wherever valid, including cases that reserve more LDS to reach a segment
-    #            boundary (needs PrefetchGlobalRead=2).
+    #    0 = off (default).
+    #    1 = require interleave; allow additional LDS up to MaxLDS.
+    #        Reject the kernel candidate if the layout or buffering is unsupported.
+    #   -1 = auto: enable only when supported and LDS usage does not exceed mode 0;
+    #        otherwise disable interleave.
+    #
     # Recommended: set [0, 1] when tuning to compare baseline vs interleaved.
     "LDSSegmentInterleave": [-1, 0, 1],
+    # LDSSegmentBRotate (gfx1250, needs LDSSegmentInterleave=1 aligned [2,2] layout): split B into
+    # two N-halves in different LDS segments and let SIMD pair 1 (odd waves) read its B vIdx groups
+    # rotated by half (v -> (v + nV/2) mod nV), so the two LDS read ports never read the same
+    # segment at the same time. Pair 1's accumulator halves are swapped back before the epilogue.
+    #   0 = off (default), 1 = on.
+    "LDSSegmentBRotate": [0, 1],
     # Persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
     # generated code keeps that first-PGR data durable and restores borrowed
     # current-tile state before current tail/NLL code resumes.
     "PrefetchAcrossPersistent": [0, 1],
-    # Persistent loop: keep the whole K extent of an operand (and its MX
-    # scales) resident in VGPRs across persistent iterations, so every tile after
-    # the first reuses them instead of re-issuing the global->LDS and LDS->VGPR
-    # traffic. Only valid when every tile a workgroup visits shares that operand,
-    # which the emitted size predicates enforce.
+    # Persistent loop: keep an operand (and its MX scales) resident in VGPRs across persistent tiles,
+    # so tiles that share it skip reloading it. The size predicates cap K at the resident k-tiles;
+    # a K remainder ((AssertSummationElementMultiple % DepthU != 0)) is tail-folded into the main loop, 
+    # so there is no tail loop in RAP kernel.
     #   0 = off (default)
     #   1 = A resident
     #   2 = B resident -- planned, not implemented yet
@@ -695,6 +715,10 @@ validParameters = { # we need to make sure this matches develop
     "AssertStrideBEqual": -1,
     "AssertStrideCEqual": -1,
     "AssertStrideDEqual": -1,
+    # Required alpha. A kernel that has no alpha argument declares 1; the runtime
+    # predicate admits only a problem whose alpha restriction is that value. Unset
+    # admits any alpha.
+    "AssertAlphaValue": [1],
     # Assertions that require arithmetic intensity to be specified value.
     # Arithmetic intensity measures the ratio of computation to memory bandwidth required for a problem.
     # These predicates can be used to adjust solution selection compute-bound or memory-bound problems.
@@ -1012,6 +1036,32 @@ validParameters = { # we need to make sure this matches develop
     # -1 means set vw to largest localReadWidth according to MIWaveTile, LDS padding and LDS capacity
     "VectorWidthA": [-1, 1, 2, 3, 4, 6, 8],
     "VectorWidthB": [-1, 1, 2, 3, 4, 6, 8],
+    # LDSTrStoreShuffle: the epilogue store shuffle (storeShuffleForLDSTrVW in
+    # KernelWriterAssembly). It re-orders the accumulators to bridge the ds_read_tr M order to
+    # the wide store's, and is what makes VectorWidthA > 1 legal under enableLDSTrA. Named for
+    # the read path it compensates for; it needs enableLDSTrA, VectorWidthA > 1 and SourceSwap
+    # together, so none of those alone identifies it.
+    # 0 = off. enableLDSTrA clamps VectorWidthA to 1, exactly as it did before the shuffle
+    #     existed -- including silently overriding an explicit VectorWidthA > 1 in the yaml.
+    #     With no VectorWidthA > 1 there is nothing to bridge, so no shuffle is emitted.
+    # 1 = on. VectorWidthA 2/4/8 is kept and the shuffle re-orders the accumulators. It walks
+    #     numNTiles*numGroups*accPerTile mutually independent passes, each VW*slotBatch
+    #     ds_bpermute followed by a cndmask tree, and drains LDS (s_wait_dscnt 0) before
+    #     consuming each pass -- so the full bpermute latency is exposed once per pass.
+    # 2 = on, software-pipelined. Issues the next pass's ds_bpermute before consuming the
+    #     current one and waits on a staggered dscnt, so each pass's LDS latency hides behind
+    #     the previous pass's cndmask tree. Same instruction multiset as 1; costs a second
+    #     gather buffer (VW*slotBatch extra vgprs).
+    # 0 is NOT a "wrong answers" setting: without the shuffle, VectorWidthA > 1 under
+    # enableLDSTrA reads the wrong M rows, so turning the shuffle off has to turn
+    # VectorWidthA > 1 off with it. That is also why 0 is the default -- it keeps every kernel
+    # that predates this feature bit-identical, including ones that never set VectorWidthA and
+    # would otherwise be auto-promoted into the shuffle path.
+    # 1 vs 2 is a pure scheduling choice and neither wins universally; it depends on the whole
+    # configuration and is not predictable from VectorWidthA, MacroTile or slotBatch alone, so
+    # benchmark both. Forced to 0 when the shuffle cannot run anyway (not enableLDSTrA, or
+    # StoreRemapVectorWidth > 0, which is the alternative bridge).
+    "LDSTrStoreShuffle": [0, 1, 2],
     # If 0, store 1 element per instruction.
     # If 1, store vector-width elements per instruction.
     # if -1, store vector-wide elements per instruction unless PBD would not generate a valid kernel
@@ -1200,6 +1250,10 @@ validParameters = { # we need to make sure this matches develop
     # Need certain conditions to use TailloopInNll optimization
     # - NT transpose or AssertSummationElementMultiple * bpeGR is multiple of 4 (with BufferLoad + ShiftPtr)
     "TailloopInNll": [False, True],
+    # Fuse the D-tile buffer_store into the No-Load-Loop (NLL) so early-completed
+    # accumulator pairs are stored while the final-K-step MFMAs for later pairs run.
+    # Scoped to fp4-input (MXFP4) + UseSubtileImpl on gfx950; auto-disabled otherwise.
+    "PostLoopStoreInNll": [False, True],
     # Schedule global read instructions over barrier sync.
     # Only for DirectToLdsA+B + PGR>=2.
     # -1: auto (enable this for PGR>=3)
@@ -1230,10 +1284,29 @@ validParameters = { # we need to make sure this matches develop
     # wave issues the deferrable one. Handled by the StinkyTofu TDMLoadWaveSyncPass;
     # gfx1250 / ScheduleIterAlg=4 path only, off by default.
     "TDMLoadWaveSync": [False, True],
-    # StinkyTofu module-option overrides, e.g. {DsReadPerCap: 4, WmmaBatchSize: 2}. Tuning-only:
+    # StinkyTofu module-option overrides, e.g. {WmmaBatchSize: 2}. Tuning-only:
     # Solution moves it to the internal _StinkyTofuParameters, which tags the kernel name
     # (only when set) and is dropped from the solution before the logic yaml is written.
     "StinkyTofuParameters": -1,
+    # StinkyTofu register allocation, per kernel: a mode, or a StinkyTofu config
+    # string that starts with one, such as "apply,classes=vs".
+    #   0  off
+    #   1  shadow      colour and report, rewrite nothing
+    #   2  apply       rewrite operands; an over-budget kernel is still rejected
+    #                  before allocation is asked
+    #   3  force       as apply, but an over-budget kernel reaches allocation and
+    #                  its verdict is re-judged against the count that comes out
+    # Only mode 3 changes which kernels are accepted; the rest change only how
+    # the accepted ones are coloured. The string's other settings (classes,
+    # allocator, unbankable, quadrant, ...) are listed in StinkyTofu's
+    # docs/developer/register-allocation.md, "Configuring allocation", and
+    # StinkyTofu parses them, so Tensile accepts exactly what the pipeline runs.
+    # A solution keeps the shortest spelling: "apply" and "2,classes=vs" are both
+    # 2. The kernel name records only the mode: nothing for 0, STRA<mode>
+    # otherwise. The string's other settings stay in the solution and out of
+    # the name, so two configs with one mode are one kernel, built with the
+    # first; Tensile warns about the other.
+    "StinkyTofuRegisterAllocation": -1,
     # TDMFuse -- which tensors share one TDM descriptor set per tensor_load_to_lds.
     # Fused means one rocisa::TensorLoadToLds descriptor programmed per wave,
     # not two heterogeneous regions in one instruction.
@@ -1242,10 +1315,37 @@ validParameters = { # we need to make sure this matches develop
     #      when NumWaves>1). Hidden from the kernel name.
     #   1  {A,MXSA} + {MXSB,B}, each scale on a data tensor's set. NumWaves>1.
     #      Parity crosses the scales: waves 0,2 carry A+MXSB, 1,3 B+MXSA.
-    #   2  {A,MXSA,MXSB} + {B}, 2/1/1 wave split: A on waves 0-1, MXSA on
-    #      wave 2, MXSB on wave 3, B on every wave. NumWaves==4.
-    #   3  {B,MXSA,MXSB} + {A}, the mirror of 2: B on waves 0-1, MXSA on
-    #      wave 2, MXSB on wave 3, A on every wave. NumWaves==4.
+    #   2  {A,MXSA,MXSB} + {B}. With both scales on 4 waves a 2/1/1 split:
+    #      A on waves 0-1, MXSA on wave 2, MXSB on wave 3, B on every wave;
+    #      on 2 waves A on wave 0, MXSA (on A's set) and MXSB (on a set of
+    #      its own) on wave 1, B on both.
+    #   3  {B,MXSA,MXSB} + {A}, the mirror of 2 with A and B exchanged.
+    #   Without MX scales 1-3 reduce to {A} + {B}: A and B each on every wave,
+    #   so every wave issues a slice of both. The three then issue the same
+    #   loads and differ only in the name, so a sweep need carry just one.
+    #   With MX scales on one tensor only, the scale takes every wave of the
+    #   0 scale set; on 1-3 it shares its data tensor's set, splitting that
+    #   set's waves with it, and the other data tensor rides every wave of
+    #   its own set.
+    #   Solution rejects, naming the limit and what to use instead:
+    #   - a value outside this list;
+    #   - 1-3 without the TDM on both tensors (TDMInst=3), on one wave, or
+    #     with UseSubtileImpl;
+    #   - 2 and 3 with both scales on other than 2 or 4 waves, or at a
+    #     divergent decoupled pair;
+    #   - one-sided MX with PrefetchAcrossPersistent on 1-3, where the one
+    #     live scale shares a data tensor's set and PAP refreshes the scale
+    #     descriptors only as a pair;
+    #   - ReuseAcrossPersistent on 1-3 with MX scales, whose null silences
+    #     one tensor by wave parity;
+    #   - one-sided MX off gfx1250 TDM kernels (MXLoadInst=TDM), with
+    #     UseSubtileImpl, with PrefetchAcrossPersistent or
+    #     ReuseAcrossPersistent on a persistent kernel, or at a divergent
+    #     decoupled pair on more than one wave;
+    #   - TDMSplit, which is disabled for every row.
+    #
+    # th/scope/nv are instruction-wide: at 1/2/3 the data tensor's (A or B) hints decide and the
+    # scale tensors' are ignored; at 0 a field is emitted only if the members of a set agree.
     #
     # This list and Components/TDMFuse.TDM_FUSE_GROUPING must name the same integers.
     "TDMFuse": [0, 1, 2, 3],
@@ -1257,13 +1357,17 @@ validParameters = { # we need to make sure this matches develop
     #                      requires MXLoadInst="BufferLoad" and gfx950 host pipeline.
     #   "InMemorySwizzle": scales swizzled in device memory by TDM;
     #                      requires MXLoadInst="TDM".
+    #   "HostPreSwizzle128x4": scales pre-shuffled on the host in 128-row by 4-K-block
+    #                      tiles (HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT);
+    #                      handwritten gfx950 custom kernels only.
     # Internal sentinel (do NOT use in yamls):
     #   "Auto":            triggers conditional defaulting in Solution.assignDerivedParameters.
     #                      The defaultBenchmarkCommonParameters entry is "Auto" so the
     #                      derivation fires; users should write one of the concrete values above.
     # Codegen + rejection logic combine MXScaleFormat with MXLoadInst and
     # archCaps["HasMXScaleSwizzle"].
-    "MXScaleFormat": ["Auto", "NoSwizzle", "HostPreSwizzle", "InMemorySwizzle"],
+    "MXScaleFormat": ["Auto", "NoSwizzle", "HostPreSwizzle", "InMemorySwizzle",
+                      "HostPreSwizzle128x4"],
     # How A/MXSA and B/MXSB are loaded from VRAM to LDS.
     # User-facing values:
     #   "TDM":         tensor_load_to_lds (requires asmCaps["HasTDM"]; today always implies
@@ -1276,7 +1380,14 @@ validParameters = { # we need to make sure this matches develop
     "MXLoadInst": ["Auto", "TDM", "BufferLoad", "GlobalLoad"],
     # Cluster dimension. Clusters have up to 16 work-groups in a cluster, but each work-group in a
     # cluster runs on a separate WGP.
+    # DataParallel and StreamK/StaticGrid derive spatial clustering on either axis.
+    # StreamK supports linear/tree fixup and requires PrefetchAcrossPersistent=0.
     "ClusterDim": validClusterDimensions,
+    # Remap clusters onto the two AIDs (4 XCCs and one GL2 each) so that each GL2 reads
+    # one operand once and only the other operand is duplicated across GL2s.
+    # -2: Read each cluster's XCC from MSG_RTN_GET_SE_AID_ID (requires strict round-robin dispatch)
+    # -1: Disabled
+    "ClusterAIDMapping": list(range(-2, 0)),
     # Enable PLR 0.5 to save vgprs
     # 0: Disabled
     # 1: Use PLR 0.5 for A
@@ -1440,6 +1551,7 @@ def checkSpaceFillAlgoIsValid(name, value):
                 msgBase = "Invalid parameter value: {} = {}\nOrderID out of range"
                 raise Exception(msgBase.format(name, value))
 
+
 def checkSpaceFillAlgoWGMIsValid(name, value):
     if type(value) != list:
         msgBase = "Invalid parameter value: {} = {}\nMust be a nested list of values"
@@ -1456,6 +1568,32 @@ def checkSpaceFillAlgoWGMIsValid(name, value):
                 if dim not in range(0,256):  # pragma: no mutate
                     msgBase = "Invalid parameter value: {} = {}\nGridDim {} out of range [0,256)"
                     raise Exception(msgBase.format(name, value, dim))
+
+
+@lru_cache(maxsize=None, typed=True)
+def parseStinkyTofuRegisterAllocation(value):
+    """``(canonical, mode)`` for a StinkyTofuRegisterAllocation value.
+
+    StinkyTofu does the parsing, so a value is valid exactly when the pipeline
+    can run it. ``canonical`` is the shortest spelling of the same
+    configuration: the int mode when that is all it says, a string otherwise.
+    Raises ValueError, naming what is wrong, when the value does not parse.
+    """
+    if type(value) is int and not 0 <= value <= 3:
+        raise ValueError(f"mode {value} is not one of 0..3")
+    if type(value) not in (int, str):
+        raise ValueError("must be a mode 0..3 or a string such as 'apply,classes=vs'")
+    import rocisa
+    text, mode = rocisa.parseRegisterAllocationConfig(value)
+    return (int(text) if text.isdigit() else text), mode
+
+
+def checkStinkyTofuRegisterAllocationIsValid(name, value):
+    try:
+        parseStinkyTofuRegisterAllocation(value)
+    except (TypeError, ValueError) as error:
+        msgBase = "Invalid parameter value: {} = {!r}\n{}"
+        raise Exception(msgBase.format(name, value, error))
 
 
 def checkParametersAreValid(
@@ -1520,6 +1658,8 @@ def checkParametersAreValid(
             checkSpaceFillAlgoIsValid(name, value)
         elif name == "SFCWGM":
             checkSpaceFillAlgoWGMIsValid(name, value)
+        elif name == "StinkyTofuRegisterAllocation":
+            checkStinkyTofuRegisterAllocationIsValid(name, value)
 
         if runTypeCheck:
             expectedTypes = _expectedParamTypes[name]

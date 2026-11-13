@@ -59,6 +59,17 @@ def create_float_graph():
     return graph
 
 
+class NullHandle:
+    """Stand-in for a Handle whose get() yields a null pointer.
+
+    Calls that reject their input before using the handle need no device with it,
+    and pygraph takes an explicit one instead of creating its own.
+    """
+
+    def get(self):
+        return 0
+
+
 def build_all_plans(graph, handle=None):
     """Validate, build the operation graph, and create/check/build execution plans.
 
@@ -199,3 +210,18 @@ def run_plugin_probe(probe, plugin, reason):
     )
     assert completed.returncode == 0, completed.stderr
     return json.loads(completed.stdout.strip().splitlines()[-1])
+
+
+def canonical_graph_json(graph):
+    """Return graph.to_json() parsed, with its tensors ordered by UID.
+
+    Parity tests compare two graphs built the same way through different APIs.
+    The serialized form is only reproducible when every tensor carries an
+    explicit UID: the frontend assigns missing UIDs in hash-set order.
+    """
+    document = json.loads(graph.to_json())
+    if "tensors" in document:
+        document["tensors"] = sorted(
+            document["tensors"], key=lambda tensor: tensor["uid"]
+        )
+    return document

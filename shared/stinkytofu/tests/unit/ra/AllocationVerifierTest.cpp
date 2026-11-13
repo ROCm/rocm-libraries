@@ -194,8 +194,11 @@ TEST_F(AllocationVerifierTest, CatchesAStaleShape) {
 }
 
 TEST_F(AllocationVerifierTest, CatchesARelocatedFunctionLiveIn) {
+    // v0 is where the dispatch leaves the workitem id, so a live-in there
+    // arrives holding something and is pinned. v21 above it is a live-in too,
+    // but nothing wrote it, so only the first is the verifier's business.
     BasicBlock* entry = block("entry");
-    StinkyInstruction* add = createVAddInBlock(entry, kRaTestArch, 40, 20, 21);
+    StinkyInstruction* add = createVAddInBlock(entry, kRaTestArch, 40, 0, 21);
     ASSERT_TRUE(liftForAllocation(*func));
 
     const StinkySSAValue* liveIn = ssaSourceValue(*add, 0);

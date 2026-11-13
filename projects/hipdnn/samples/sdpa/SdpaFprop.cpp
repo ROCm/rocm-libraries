@@ -181,7 +181,11 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         utilities::Tensor<InputType> oRefTensor(oAttrRef->get_dim(), layout);
 
         hipdnn_test_sdk::utilities::CpuFpReferenceSdpa::forward(
-            qTensor, kTensor, vTensor, oRefTensor, attnScaleVal);
+            qTensor,
+            kTensor,
+            vTensor,
+            oRefTensor,
+            hipdnn_test_sdk::utilities::SdpaFwdOptions<float>{}.setScale(attnScaleVal));
 
         // SDPA involves two matrix multiplies and softmax, requiring more generous
         // tolerances than single-operation validation.

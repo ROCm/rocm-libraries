@@ -14,14 +14,14 @@ from rocisa.enum import RegisterType
 from rocisa.instruction import SAddU32, SCBranchSCC0, SMovB32
 from rocisa.register import RegisterPool
 
-from Tensile.Component import Component
-from Tensile.Components.TileProcessingStrategy import DataParallel
-from Tensile.Components.PersistentLoop import PersistentLoopOn
-from Tensile.Components.PersistentLoop import PersistentKernelState
-from Tensile.Components.WorkAssignment import StaticPartition
-from Tensile.Components.StreamK import StreamKDynamic
-from Tensile.Components.TileProcessingStrategy import TileWork
-from Tensile.Components.WorkAssignment import DynamicWorkQueue, Hybrid, StaticGrid
+from tensilelite.Component import Component
+from tensilelite.Components.TileProcessingStrategy import DataParallel
+from tensilelite.Components.PersistentLoop import PersistentLoopOn
+from tensilelite.Components.PersistentLoop import PersistentKernelState
+from tensilelite.Components.WorkAssignment import StaticPartition
+from tensilelite.Components.StreamK import StreamKDynamic
+from tensilelite.Components.TileProcessingStrategy import TileWork
+from tensilelite.Components.WorkAssignment import DynamicWorkQueue, Hybrid, StaticGrid
 from gpu_test_helpers import (
     GPU_MARKS, assemble_kernel, generate_kernel_asm, generate_load_params,
     init_rocisa, run_on_gpu, run_scalar_kernel,

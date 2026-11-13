@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_handle.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -53,8 +54,7 @@ void testing_bsric02_bad_arg(const Arguments& argus)
     hipsparseDirection_t   dirA      = HIPSPARSE_DIRECTION_COLUMN;
     hipsparseSolvePolicy_t policy    = HIPSPARSE_SOLVE_POLICY_USE_LEVEL;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
@@ -346,8 +346,7 @@ void testing_bsric02(Arguments argus)
     hipsparseSolvePolicy_t policy    = argus.solve_policy;
     std::string            filename  = argus.filename;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     std::unique_ptr<descr_struct> unique_ptr_descr(new descr_struct);
     hipsparseMatDescr_t           descr = unique_ptr_descr->descr;
@@ -509,11 +508,7 @@ void testing_bsric02(Arguments argus)
 
         // Get pivot
         status_analysis_1 = hipsparseXbsric02_zeroPivot(handle, info, &h_analysis_pivot_1);
-        if(h_analysis_pivot_1 != -1)
-        {
-            verify_hipsparse_status_zero_pivot(status_analysis_1,
-                                               "expected HIPSPARSE_STATUS_ZERO_PIVOT");
-        }
+        CHECK_HIPSPARSE_ZERO_PIVOT(status_analysis_1, h_analysis_pivot_1);
 
         // bsric02 analysis - device mode
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
@@ -532,11 +527,9 @@ void testing_bsric02(Arguments argus)
 
         // Get pivot
         status_analysis_2 = hipsparseXbsric02_zeroPivot(handle, info, d_analysis_pivot_2);
-        if(h_analysis_pivot_1 != -1)
-        {
-            verify_hipsparse_status_zero_pivot(status_analysis_2,
-                                               "expected HIPSPARSE_STATUS_ZERO_PIVOT");
-        }
+        CHECK_HIP_ERROR(
+            hipMemcpy(&h_analysis_pivot_2, d_analysis_pivot_2, sizeof(int), hipMemcpyDeviceToHost));
+        CHECK_HIPSPARSE_ZERO_PIVOT(status_analysis_2, h_analysis_pivot_2);
 
         // bsric02 solve - host mode
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
@@ -555,11 +548,7 @@ void testing_bsric02(Arguments argus)
 
         // Get pivot
         status_solve_1 = hipsparseXbsric02_zeroPivot(handle, info, &h_solve_pivot_1);
-        if(h_solve_pivot_1 != -1)
-        {
-            verify_hipsparse_status_zero_pivot(status_solve_1,
-                                               "expected HIPSPARSE_STATUS_ZERO_PIVOT");
-        }
+        CHECK_HIPSPARSE_ZERO_PIVOT(status_solve_1, h_solve_pivot_1);
 
         // bsric02 solve - device mode
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
@@ -578,11 +567,9 @@ void testing_bsric02(Arguments argus)
 
         // Get pivot
         status_solve_2 = hipsparseXbsric02_zeroPivot(handle, info, d_solve_pivot_2);
-        if(h_solve_pivot_1 != -1)
-        {
-            verify_hipsparse_status_zero_pivot(status_solve_2,
-                                               "expected HIPSPARSE_STATUS_ZERO_PIVOT");
-        }
+        CHECK_HIP_ERROR(
+            hipMemcpy(&h_solve_pivot_2, d_solve_pivot_2, sizeof(int), hipMemcpyDeviceToHost));
+        CHECK_HIPSPARSE_ZERO_PIVOT(status_solve_2, h_solve_pivot_2);
 
         // Copy output from device to CPU
         std::vector<T> result_1(block_dim * block_dim * nnzb);
@@ -596,10 +583,6 @@ void testing_bsric02(Arguments argus)
                                   dbsr_val_2,
                                   sizeof(T) * block_dim * block_dim * nnzb,
                                   hipMemcpyDeviceToHost));
-        CHECK_HIP_ERROR(
-            hipMemcpy(&h_analysis_pivot_2, d_analysis_pivot_2, sizeof(int), hipMemcpyDeviceToHost));
-        CHECK_HIP_ERROR(
-            hipMemcpy(&h_solve_pivot_2, d_solve_pivot_2, sizeof(int), hipMemcpyDeviceToHost));
 
         // Host csric02
         int numerical_pivot;
@@ -651,6 +634,20 @@ void testing_bsric02(Arguments argus)
         int number_hot_calls  = argus.iters;
 
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
+
+        // The numeric factorization needs the analysis to have filled `info`.
+        CHECK_HIPSPARSE_ERROR(hipsparseXbsric02_analysis(handle,
+                                                         dir,
+                                                         mb,
+                                                         nnzb,
+                                                         descr,
+                                                         dbsr_val_1,
+                                                         dbsr_row_ptr,
+                                                         dbsr_col_ind,
+                                                         block_dim,
+                                                         info,
+                                                         policy,
+                                                         dbuffer));
 
         // Warm up
         for(int iter = 0; iter < number_cold_calls; ++iter)

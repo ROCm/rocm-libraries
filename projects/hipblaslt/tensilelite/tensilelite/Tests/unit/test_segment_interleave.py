@@ -1,5 +1,5 @@
 import pytest
-from Tensile.SolutionStructs.segment_interleave import evaluate, aligned_budget_ok, SEG
+from tensilelite.SolutionStructs.segment_interleave import evaluate, aligned_budget_ok, SEG
 
 pytestmark = pytest.mark.unit
 
@@ -85,11 +85,10 @@ def test_vwb_halfvw_unaligned_uses_bcontig():
     # fA=33024, fB=28896 -> ldsBaseB=fA, A stride=fA+2fB, B not interleaved.
     assert o["ldsBaseB"] == 33024 and o["writeStrideBytes"] == 33024 + 2 * 28896
     assert o["bBaseline"] is True and r["blockSpan"] == 0
-    assert "BCONTIG" in r["segmentMap"]
 
 def test_bcontig_small_mt_aligned_applies():
     # Small footprint where fA+2fB stays in one segment: bcontig pushes A1 to the next segment
-    # boundary (bcontig-aligned, grows LDS). Needs PGR2 + forced (LDSSI=1); B stays whole/baseline.
+    # boundary (bcontig-aligned, grows LDS). Needs prefetch + forced (LDSSI=1); B stays whole/baseline.
     # DepthU=64 shrinks the footprint; MIWaveTile[1]=7 -> MT1=224, the unreadable odd-B tile.
     r = evaluate(_vw8_state(MIWaveTile=[8, 7], DepthU=64, VectorWidthB=1,
                             PrefetchGlobalRead=2, LDSSegmentInterleave=1))
@@ -98,32 +97,49 @@ def test_bcontig_small_mt_aligned_applies():
     # fA=16512; A stride pushed to the segment boundary; B (fB=14448) stays contiguous/baseline.
     assert o["ldsBaseB"] == 16512 and o["writeStrideBytes"] == SEG and o["bBaseline"] is True
     assert r["blockSpan"] == SEG + 16512               # A1 ends at base+pre+fA
-    assert "BCONTIG-ALIGNED" in r["segmentMap"]
 
 def test_bcontig_small_mt_auto_skips():
     # Auto (-1) refuses the LDS-growing bcontig-aligned branch (like split aligned).
     r = evaluate(_vw8_state(MIWaveTile=[8, 7], DepthU=64, VectorWidthB=1, PrefetchGlobalRead=2))
     assert r["applicable"] is False and "auto: skip aligned" in r["reason"]
 
-def test_bcontig_small_mt_needs_pgr2():
+def test_bcontig_small_mt_allows_pgr1():
     r = evaluate(_vw8_state(MIWaveTile=[8, 7], DepthU=64, VectorWidthB=1,
                             PrefetchGlobalRead=1, LDSSegmentInterleave=1))
-    assert r["applicable"] is False and "PGR" in r["reason"]
+    assert r["applicable"] is True and r["aligned"] is True
+
+
+@pytest.mark.parametrize("whole_b", [False, True])
+@pytest.mark.parametrize("base,depth,aligned,segments", [
+    (SEG, 64, True, (1, 2)),
+    (2 * SEG, 64, True, (2, 3)),
+    (SEG + 48 * 1024, 64, False, (1, 2)),
+    (2 * SEG, 128, False, (2, 3)),
+])
+def test_component_selection_uses_absolute_segments(whole_b, base, depth, aligned, segments):
+    state = _vw8_state(LdsOffsetA=base, DepthU=depth, PrefetchGlobalRead=2,
+                       LDSSegmentInterleave=1, MIWaveTile=[8, 7 if whole_b else 8],
+                       VectorWidthB=1 if whole_b else 4)
+    result = evaluate(state)
+    assert result["applicable"] is True
+    assert result["aligned"] is aligned
+    a1 = base + result["offsets"]["writeStrideBytes"]
+    assert (base // SEG, a1 // SEG) == segments
 
 def test_vwa_smaller_than_half_skips():
     # VWA=2 (numVec=4) is smaller than WaveTileA/2 -> TDMSplit's 2-way split can't place it -> reject.
     r = evaluate(_vw8_state(VectorWidthA=2, TDMSplit=1))
     assert r["applicable"] is False and "WaveTileA/2" in r["reason"]
 
-def test_small_mt_skips_without_pgr2():
-    # Small footprint is the aligned candidate, but it requires PGR2 double-buffer; with no
+def test_small_mt_skips_without_prefetch():
+    # Small footprint is the aligned candidate, but it requires double-buffered prefetch; with no
     # PrefetchGlobalRead set it skips to baseline (buffering gate).
     r = evaluate(_vw8_state(DepthU=64))
     assert r["applicable"] is False and "PGR" in r["reason"]
 
-def test_non_square_small_skips_without_pgr2():
+def test_non_square_small_skips_without_prefetch():
     # Non-square: MIWaveTile[1]=4 -> MT1=128 (< MT0=256), VWB=4 <= WaveTileB=4. Coarse VW ok
-    # (16*8=128 >= 256//2), fA+fB < SEG -> small MT; no PGR2 -> buffering gate skip.
+    # (16*8=128 >= 256//2), fA+fB < SEG -> small MT; no prefetch -> buffering gate skip.
     r = evaluate(_vw8_state(MIWaveTile=[8, 4], VectorWidthB=4))
     assert r["applicable"] is False and "PGR" in r["reason"]
 
@@ -143,7 +159,6 @@ def test_aligned_applies_small_mt():
                             "footprintPacked": True}
     assert r["blockSpan"] == SEG + 16512 + 16512    # base(0) + pre(SEG) + fA + fB
     assert _aligned_tiles_disjoint(r, 16512, 16512)
-    assert "ALIGNED" in r["segmentMap"]
 
 def test_aligned_halfvw_vwb_applies():
     # VWB=WaveTileB/2 is supported on the aligned branch too (per-vIdx component jump + enough
@@ -162,9 +177,9 @@ def test_aligned_unequal_pad_no_overlap():
     assert r["offsets"]["ldsBaseB"] == 16640         # base + fA, no compensation
     assert _aligned_tiles_disjoint(r, 16640, 16512)
 
-def test_aligned_skips_pgr_not_2():
-    r = evaluate(_vw8_state(DepthU=64, PrefetchGlobalRead=1))
-    assert r["applicable"] is False and "PGR" in r["reason"]
+def test_aligned_allows_pgr1():
+    r = evaluate(_vw8_state(DepthU=64, PrefetchGlobalRead=1, LDSSegmentInterleave=1))
+    assert r["applicable"] is True and r["aligned"] is True
 
 def test_skips_1ldsbuffer():
     # 1LDSBuffer breaks the double-buffered layout the offsets assume. The oracle runs before
@@ -264,11 +279,11 @@ def test_asym_componentsplit_tdmsplit():
 
 def test_asym_componentsplit_aligned_labels_compaxis():
     # componentSplit that falls into the aligned branch (small DepthU -> both components fit one
-    # segment) must report compaxis, not portaxis, in reason/segmentMap and in the PGR reject.
+    # segment) must report compaxis, not portaxis, in reason and in the PGR reject.
     r = evaluate(_vw8_state(MIWaveGroup=[4, 1], TDMSplit=1, VectorWidthA=4, DepthU=64,
                             PrefetchGlobalRead=2, LDSSegmentInterleave=1))
     assert r["applicable"] is True and r["aligned"] is True
-    assert r["reason"] == "compaxis-asym-aligned" and "COMPAXIS-ALIGNED" in r["segmentMap"]
+    assert r["reason"] == "compaxis-asym-aligned"
     assert r["offsets"].get("componentSplit") is True
     r = evaluate(_vw8_state(MIWaveGroup=[4, 1], TDMSplit=1, VectorWidthA=4, DepthU=64,
                             PrefetchGlobalRead=1, LDSSegmentInterleave=1))
@@ -516,3 +531,810 @@ def test_mixed_type_per_tensor_bpe():
     assert r["applicable"] is True and r["reason"] == "tight"
     assert r["offsets"]["ldsBaseB"] == fA
     assert r["offsets"]["writeStrideBytes"] == fA + fB
+
+
+def _tdmfuse_state(tdmFuse, **ovr):
+    # TDM on both tensors, MX scales unless overridden: without them TDMFuse 1-3 reduce to {A} + {B}.
+    pt = dict(DataType=_FakeDataType(bf16=False, f8=True, nbytes=1.0), MXBlockA=32, MXBlockB=32)
+    pt.update(ovr.pop("ProblemType", {}))
+    kw = dict(TDMFuse=tdmFuse, TDMInst=3, DepthU=256)
+    kw.update(ovr)
+    return _vw8_state(ProblemType=pt, **kw)
+
+# [2,2] tight, [2,2] with B kept whole, [4,1] with A active and its [1,4] mirror.
+_TDMFUSE_LAYOUTS = {
+    "tight": dict(),
+    "bcontig": dict(MIWaveTile=[8, 7], VectorWidthB=4),
+    "asym_4x1": dict(MIWaveGroup=[4, 1], MIWaveTile=[4, 8], VectorWidthA=4),
+    "asym_1x4": dict(MIWaveGroup=[1, 4], MIWaveTile=[8, 4], VectorWidthB=4),
+    "tight_f8f4": dict(DepthU=512, ProblemType=dict(MacDataTypeA=_FakeDataType(bf16=False, f8=True, nbytes=1.0),
+                                        MacDataTypeB=_FakeDataType(bf16=False, f4=True, nbytes=0.5))),
+}
+
+def _tc_bpe(state, tc):
+    pt = state["ProblemType"]
+    return pt.get("MacDataType%s" % tc, pt["DataType"]).numBytes()
+
+def _tc_mt(state, tc):
+    return state["MacroTile0"] if tc == "A" else state["MacroTile1"]
+
+def _piece_lds_addrs(state, tc):
+    """LDS address of every TDM piece of `tc`, run through the writer's SGPR arithmetic."""
+    from tensilelite.Components.TDMFuse import tdmWavePartition
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+
+    class _Writer:
+        tdmWaveLdsAddr = KernelWriterAssembly.tdmWaveLdsAddr
+
+    numComp = tdmWavePartition(state, tc)[0]
+    bpe = _tc_bpe(state, tc)
+    mod = _Writer().tdmWaveLdsAddr(state, tc, numComp,
+                                   int(_tc_mt(state, tc) // numComp * state["DepthU"] * bpe),
+                                   state.get("LdsOffset%s" % tc, 0),
+                                   state["LdsBlockSizePerPad%s" % tc],
+                                   int(state["LdsPad%s" % tc] * bpe), 1, 2)
+    ops = {"s_and_b32": lambda x, y: x & y, "s_mul_i32": lambda x, y: x * y,
+           "s_lshr_b32": lambda x, y: x >> y, "s_add_u32": lambda x, y: x + y}
+    addrs = []
+    for piece in range(numComp):
+        regs = {"s1": piece}
+        for item in mod.flatitems():
+            op, dst, *srcs = str(item).split("//")[0].replace(",", " ").split()
+            regs[dst] = ops[op](*[regs[s] if s in regs else int(s, 0) for s in srcs])
+        addrs.append(regs["s1"])
+    return addrs
+
+def _read_addr(state, offsets, tc, row):
+    """Where the local reads expect `row` of `tc`: component jump plus the padded offset in it."""
+    bpe = _tc_bpe(state, tc)
+    whole = offsets.get("aBaseline" if tc == "A" else "bBaseline", False)
+    compRows = _tc_mt(state, tc) // (1 if whole else 2)
+    jump = 0 if whole else row // compRows * offsets["writeStrideBytes"]
+    x = int(row % compRows * state["DepthU"] * bpe)
+    pad = x // state["LdsBlockSizePerPad%s" % tc] * int(state["LdsPad%s" % tc] * bpe)
+    return offsets.get("ldsBase%s" % tc, state.get("LdsOffset%s" % tc, 0)) + jump + x + pad
+
+@pytest.mark.parametrize("layout", sorted(_TDMFUSE_LAYOUTS))
+@pytest.mark.parametrize("mode", [-1, 1])
+@pytest.mark.parametrize("tdmFuse", [1, 2, 3])
+def test_tdmfuse_rows_keep_the_two_component_layout(tdmFuse, mode, layout):
+    r = evaluate(_tdmfuse_state(tdmFuse, LDSSegmentInterleave=mode, **_TDMFUSE_LAYOUTS[layout]))
+    assert r["applicable"] is True, r["reason"]
+    assert r == evaluate(_tdmfuse_state(0, LDSSegmentInterleave=mode, **_TDMFUSE_LAYOUTS[layout]))
+
+@pytest.mark.parametrize("layout", sorted(_TDMFUSE_LAYOUTS))
+@pytest.mark.parametrize("tdmFuse", [0, 1, 2, 3])
+def test_tdm_pieces_land_where_the_local_reads_expect_them(tdmFuse, layout):
+    from tensilelite.Components.TDMFuse import tdmWavePartition
+
+    state = _tdmfuse_state(tdmFuse, LDSSegmentInterleave=1, **_TDMFUSE_LAYOUTS[layout])
+    r = evaluate(state)
+    assert r["applicable"] is True, r["reason"]
+    state["LDSSegInterleaveOffsets"] = r["offsets"]
+    for tc in ("A", "B"):
+        numComp = tdmWavePartition(state, tc)[0]
+        rows = _tc_mt(state, tc) // numComp
+        expected = [_read_addr(state, r["offsets"], tc, p * rows) for p in range(numComp)]
+        assert _piece_lds_addrs(state, tc) == expected, (tc, numComp)
+
+
+# ---- LDSSegmentBRotate gate (b_rotate_reason) ----
+from tensilelite.SolutionStructs.segment_interleave import b_rotate_reason, paired_buffer_offsets
+
+def _brot_state(**ovr):
+    # F8 MT128x128x256 [2,2] aligned layout: A0,B0 fit seg0, so the oracle pads comp 1 to 64K.
+    s = _vw8_state(DepthU=256, MatrixInstM=16, MatrixInstN=16, MIWaveTile=[4, 4],
+                   VectorWidthA=4, VectorWidthB=1, LdsBlockSizePerPadA=256, LdsBlockSizePerPadB=256,
+                   LdsPadA=16, LdsPadB=16, PrefetchGlobalRead=2, LDSSegmentInterleave=1, MaxLDS=5*SEG,
+                   ProblemType=dict(DataType=_FakeDataType(bf16=False, f8=True, nbytes=1.0)))
+    r = evaluate(s)
+    assert r["applicable"] and r["aligned"], r["reason"]
+    s.update({"LDSSegInterleaveOffsets": r["offsets"], "NumLdsBlk": 2, "1LDSBuffer": 0,
+              "LdsOffsetA_Blk": 131072, "StoreSwapAddr": False, "ExpandPointerSwap": 0,
+              "LDSSegmentBRotate": 1, "HalfPLR": 0, "LocalSplitU": 1})
+    s.update(ovr)
+    return s
+
+def test_brotate_applies_on_aligned_22():
+    assert b_rotate_reason(_brot_state()) is None
+    assert b_rotate_reason(_brot_state(VectorWidthB=2)) is None
+    # -1 = auto/unresolved tri-state knobs must not block.
+    assert b_rotate_reason(_brot_state(UseCustomMainLoopSchedule=-1)) is None
+
+def test_brotate_needs_even_vidx_count():
+    assert "even" in b_rotate_reason(_brot_state(VectorWidthB=4))
+
+def test_brotate_needs_lsi_aligned_layout():
+    assert "LDSSegmentInterleave" in b_rotate_reason(_brot_state(LDSSegmentInterleave=0))
+    s = _brot_state()
+    s["LDSSegInterleaveOffsets"] = {**s["LDSSegInterleaveOffsets"], "writeStrideBytes": 140000}
+    assert "[64K, 128K)" in b_rotate_reason(s)
+
+def test_brotate_rejects_unsupported():
+    assert "gfx1250" in b_rotate_reason(_brot_state(ISA=(9, 5, 0)))
+    assert "TDMSplit" in b_rotate_reason(_brot_state(TDMSplit=1))
+    assert "persistent" in b_rotate_reason(_brot_state(), persistent=True)
+
+def _brot_tight_state(**ovr):
+    # F8 MT256x256x256 [2,2]: A0+B0 exceed 64K, so the oracle packs tight [A0][B0][A1][B1]
+    # with component stride S = fA+fB (64K < S < 128K); LDS buffers swap through StoreSwapAddr.
+    s = _vw8_state(DepthU=256, MatrixInstM=16, MatrixInstN=16, MIWaveTile=[8, 8],
+                   VectorWidthA=8, VectorWidthB=4, LdsBlockSizePerPadA=256, LdsBlockSizePerPadB=256,
+                   LdsPadA=16, LdsPadB=16, PrefetchGlobalRead=2, LDSSegmentInterleave=1, MaxLDS=5*SEG,
+                   ProblemType=dict(DataType=_FakeDataType(bf16=False, f8=True, nbytes=1.0)))
+    r = evaluate(s)
+    assert r["applicable"] and r["reason"] == "tight", r["reason"]
+    s.update({"LDSSegInterleaveOffsets": r["offsets"], "NumLdsBlk": 2, "1LDSBuffer": 0,
+              "LdsOffsetA_Blk": 2 * r["offsets"]["writeStrideBytes"], "StoreSwapAddr": True,
+              "ExpandPointerSwap": 0, "LDSSegmentBRotate": 1, "HalfPLR": 3, "LocalSplitU": 1})
+    s.update(ovr)
+    return s
+
+def test_brotate_applies_on_tight_22_with_halfplr():
+    s = _brot_tight_state()
+    assert SEG < s["LDSSegInterleaveOffsets"]["writeStrideBytes"] < 2 * SEG
+    assert b_rotate_reason(s) is None
+    for vwb in (1, 2):
+        assert b_rotate_reason(_brot_tight_state(VectorWidthB=vwb)) is None
+
+def _brot_mx_state(**ovr):
+    # MXF8 on the tight MT256 layout: VWB4 on MIWaveTile[1]=8 gives nV=2, so the MXSB TileSpan
+    # layout holds vIdx 0/1 scales in the lower/upper half-wave of one ds_load.
+    s = _brot_tight_state(MXScaleFormat="InMemorySwizzle", WavefrontSize=32)
+    s["ProblemType"] = {**s["ProblemType"], "MXBlockA": 32, "MXBlockB": 32}
+    s.update(ovr)
+    return s
+
+def test_brotate_mx_applies_on_tilespan_single_group():
+    assert b_rotate_reason(_brot_mx_state()) is None
+
+def test_brotate_mx_rejects_unsupported_scale_layouts():
+    assert "MIWaveTile[1]/VectorWidthB == 2" in b_rotate_reason(_brot_mx_state(VectorWidthB=1))
+    assert "MIWaveTile[1]/VectorWidthB == 2" in b_rotate_reason(_brot_mx_state(VectorWidthB=2))
+    assert "DirectToVgprMXSB" in b_rotate_reason(_brot_mx_state(DirectToVgprMXSB=True))
+    assert "InMemorySwizzle" in b_rotate_reason(_brot_mx_state(MXScaleFormat="NoSwizzle"))
+    assert "(12, 5, 0)" in b_rotate_reason(_brot_mx_state(ISA=(12, 5, 1)))
+
+def _brot_rejects(state, text):
+    reason = b_rotate_reason(state)
+    assert reason is not None and text in reason, reason
+
+def test_brotate_rejects_unsupported_lsi_layouts():
+    for key in ("aBaseline", "bBaseline", "portSplitA", "portSplitB", "componentSplit"):
+        s = _brot_state()
+        s["LDSSegInterleaveOffsets"] = {**s["LDSSegInterleaveOffsets"], key: True}
+        _brot_rejects(s, "LSI layout '%s'" % key)
+
+def test_brotate_rejects_b_reach_and_base():
+    s = _brot_state()
+    o = s["LDSSegInterleaveOffsets"]
+    s["LDSSegInterleaveOffsets"] = {**o, "writeStrideBytes": 100000, "ldsBaseB": 0}
+    _brot_rejects(s, "ldsBaseB below")
+    s["LDSSegInterleaveOffsets"] = {**o, "writeStrideBytes": 131000, "ldsBaseB": 131000}
+    _brot_rejects(s, "reach exceeds")
+
+def test_brotate_rejects_buffering_and_schedule_modes():
+    _brot_rejects(_brot_state(NumLdsBlk=1), "2 LDS buffers")
+    _brot_rejects(_brot_state(**{"1LDSBuffer": 1}), "2 LDS buffers")
+    assert b_rotate_reason(_brot_state(PrefetchGlobalRead=1)) is None
+    _brot_rejects(_brot_state(PrefetchGlobalRead=0), "PrefetchGlobalRead=1 or 2")
+    _brot_rejects(_brot_state(ExpandPointerSwap=1), "ExpandPointerSwap=0")
+
+def test_brotate_rejects_wave_config():
+    _brot_rejects(_brot_state(MIWaveGroup=[4, 1]), "[2,2]")
+    _brot_rejects(_brot_state(NumWaves=8), "[2,2]")
+    _brot_rejects(_brot_state(WavefrontSize=64), "wave32")
+    _brot_rejects(_brot_state(VectorWidthB=0), "even")
+
+def test_brotate_rejects_mx_matrix_inst_and_sparse():
+    _brot_rejects(_brot_mx_state(MatrixInstN=32), "MatrixInstN")
+    s = _brot_state()
+    s["ProblemType"] = {**s["ProblemType"], "Sparse": 1}
+    _brot_rejects(s, "sparse")
+
+def test_brotate_rejects_each_unsupported_knob():
+    for key in ("UseSubtileImpl", "DirectToVgprA", "DirectToVgprB", "DirectToLdsB", "enableLDSTrA",
+                "enableLDSTrB", "UseDotInstruction", "UseCustomMainLoopSchedule",
+                "PrefetchAcrossPersistent", "TDMFuse"):
+        _brot_rejects(_brot_state(**{key: 1}), key)
+    _brot_rejects(_brot_state(LocalSplitU=2), "LocalSplitU")
+    _brot_rejects(_brot_state(NumWaveSplitK=2), "NumWaveSplitK")
+def test_brotate_uses_per_component_buffer_masks():
+    # Tight layouts use paired StoreSwapAddr masks; aligned layouts retain
+    # whole-buffer swapping. The BRotate gate accepts either layout.
+    assert b_rotate_reason(_brot_tight_state(StoreSwapAddr=False)) is None
+    assert b_rotate_reason(_brot_state(StoreSwapAddr=False)) is None
+
+
+def test_brotate_paired_buffers_matches_validated_fp8_layout():
+    s = _brot_tight_state()
+    s.update(LdsBlockSizePerPadA=2048, LdsBlockSizePerPadB=1024)
+    s["LDSSegInterleaveOffsets"] = evaluate(s)["offsets"]
+    assert b_rotate_reason(s) is None
+    o = paired_buffer_offsets(s)
+    assert o["writeStrideBytes"] == 132608
+    assert o["readStrideBytesB"] == 66304
+    assert o["ldsBaseB"] == 66048
+    assert o["bufferStrideA"] == 33024
+    assert o["bufferStrideB"] == 33280
+    # Re-resolving a serialized solution must not double the component stride again.
+    s["LDSSegInterleaveOffsets"] = o
+    assert b_rotate_reason(s) is None
+    assert paired_buffer_offsets(s) == o
+
+
+@pytest.mark.parametrize("make_state", [_brot_state, _brot_tight_state])
+def test_brotate_paired_buffers_read_write_and_swap_agree(make_state):
+    s = make_state()
+    original = dict(s["LDSSegInterleaveOffsets"])
+    o = paired_buffer_offsets(s)
+    assert s["LDSSegInterleaveOffsets"] == original
+    # All eight padded footprints are disjoint and fit the allocation. Segment
+    # gaps may be present between component pairs, just as with rotation off.
+    regions = []
+    for tc in ("A", "B"):
+        size = o["bufferStride" + tc]
+        base = s["LdsOffsetA"] if tc == "A" else o["ldsBaseB"]
+        for component in range(2):
+            for buf in range(2):
+                start = base + component * o["writeStrideBytes"] + buf * size
+                regions.append((start, start + size))
+    regions.sort()
+    assert all(a[1] <= b[0] for a, b in zip(regions, regions[1:]))
+    assert regions[-1][1] == o["pairedUsedBytes"]
+    assert regions[-1][1] <= 2 * s["LdsOffsetA_Blk"]
+    # For every byte of a B component, both rotations and both buffer states must
+    # address exactly the data placed there by TDM. Exercise padding and 64K carries.
+    physical = o["writeStrideBytes"]
+    logical = o["readStrideBytesB"]
+    for pair in range(2):
+        root = o["ldsBaseB"] + pair * physical
+        delta = physical - logical % SEG - pair * 2 * physical
+        for within in range(o["bufferStrideB"]):
+            ping = root + within
+            pong = ping + o["bufferStrideB"]
+            mask = ping ^ pong
+            assert pong ^ mask == ping
+            for buf, addr in enumerate((ping, pong)):
+                for half in range(2):
+                    read = addr + half * delta + half * (logical % SEG)
+                    written = (o["ldsBaseB"] + (half ^ pair) * physical
+                               + buf * o["bufferStrideB"] + within)
+                    assert read == written
+
+
+
+@pytest.mark.parametrize("make_state", [_brot_state, _brot_tight_state])
+@pytest.mark.parametrize("depth", [128, 256])
+@pytest.mark.parametrize("padding", [0, 16])
+@pytest.mark.parametrize("mx", [False, True])
+def test_brotate_reuses_common_physical_layout(make_state, depth, padding, mx):
+    from tensilelite.SolutionStructs.segment_interleave import _footprint
+
+    s = make_state(DepthU=depth, LdsPadA=padding, LdsPadB=padding,
+                   VectorWidthB=2 if make_state is _brot_state else 4,
+                   MXScaleFormat="InMemorySwizzle",
+                   LdsNumElementsAlignedMXSA=1024, LdsNumElementsAlignedMXSB=2048)
+    s["ProblemType"] = {**s["ProblemType"], "MXBlockA": 32 if mx else 0, "MXBlockB": 32 if mx else 0}
+    s["LDSSegInterleaveOffsets"] = evaluate(s)["offsets"]
+    assert b_rotate_reason(s) is None
+    ordinary = paired_buffer_offsets({**s, "LDSSegmentBRotate": 0})
+    rotated = paired_buffer_offsets(s)
+    # Only the read-address representation changes. Bases, component/buffer
+    # strides, MX scale placement and allocation extent must be identical.
+    readKeys = {"readStrideBytesB", "readAddressWindowsB"}
+    physical = lambda offsets: {k: v for k, v in offsets.items() if k not in readKeys}
+    assert physical(rotated) == physical(ordinary)
+    assert "readAddressWindowsB" not in rotated
+    # MXSA slots change physical spacing, while rotation retains the A/B half offset.
+    logicalStride = SEG if evaluate(s)["aligned"] else _footprint(s, "A") + _footprint(s, "B")
+    assert rotated["readStrideBytesB"] == logicalStride
+    for tc in ("A", "B"):
+        size = rotated["bufferStride" + tc]
+        for buffer in (0, 1):
+            first = rotated["ldsBase" + tc] + buffer * size
+            second = first + rotated["writeStrideBytes"]
+            firstSegments = set(range(first//SEG, (first+size-1)//SEG+1))
+            secondSegments = set(range(second//SEG, (second+size-1)//SEG+1))
+            assert firstSegments.isdisjoint(secondSegments)
+    s["LDSSegInterleaveOffsets"] = rotated
+    assert paired_buffer_offsets(s) == rotated
+
+
+def test_brotate_aligned_pong_tail_separation_and_budget():
+    s = _brot_state()
+    o = paired_buffer_offsets(s)
+    # The previous 68 KiB stride put B0 pong [51,68) and B1 pong [119,136)
+    # in S1. The common 77 KiB stride puts B1 pong at exactly 128 KiB.
+    assert o["writeStrideBytes"] == 77*1024
+    assert o["ldsBaseB"] + o["writeStrideBytes"] + o["bufferStrideB"] == 2*SEG
+    s["MaxLDS"] = o["pairedUsedBytes"]
+    assert paired_buffer_offsets(s) == o
+    s["MaxLDS"] -= 16
+    assert paired_buffer_offsets(s) is None
+
+
+def test_brotate_paired_buffers_rejects_incompatible_tdm_layouts():
+    assert "both operands" in b_rotate_reason(_brot_tight_state(enableTDMB=False))
+    assert "decoupled" in b_rotate_reason(_brot_tight_state(PrefetchGlobalReadA=2))
+    assert "A component" in b_rotate_reason(_brot_tight_state(LdsPadA=512))
+
+
+@pytest.mark.parametrize("make_state", [_brot_state, _brot_tight_state])
+@pytest.mark.parametrize("direct_a", [False, True])
+def test_brotate_paired_mx_copies_do_not_overlap_data(make_state, direct_a):
+    s = make_state(VectorWidthB=2 if make_state is _brot_state else 4,
+                   MXScaleFormat="InMemorySwizzle", DirectToVgprMXSA=direct_a,
+                   LdsNumElementsAlignedMXSA=2048, LdsNumElementsAlignedMXSB=4096)
+    s["ProblemType"] = {**s["ProblemType"], "MXBlockA": 32, "MXBlockB": 32}
+    original = evaluate(s)
+    s["LDSSegInterleaveOffsets"] = original["offsets"]
+    assert b_rotate_reason(s) is None
+    o = paired_buffer_offsets(s)
+    # Split scales occupy holes between A/B components. Check every allocation
+    # instead of treating the entire A/B address span as one occupied block.
+    regions = []
+    for tc in ("A", "B"):
+        for component in range(2):
+            for buf in range(2):
+                start = (o["ldsBase" + tc] + component * o["writeStrideBytes"]
+                         + buf * o["bufferStride" + tc])
+                regions.append((start, start + o["bufferStride" + tc]))
+    assert bool(o.get("mxsSplitA")) is not direct_a
+    for tc in ("MXSA", "MXSB"):
+        if tc == "MXSA" and direct_a:
+            assert "ldsBaseMXSA" not in o
+            continue
+        split = tc == "MXSA"
+        size = (s["MacroTile0"] * (s["DepthU"] // 32) // 2
+                if split else s["LdsNumElementsAligned" + tc])
+        assert o["bufferStride" + tc] == size
+        for component in range(2 if split else 1):
+            base = o["ldsBase" + tc] + (component * o["mxsaStrideBytes"] if split else 0)
+            for buf in range(2):
+                start = base + buf * size
+                regions.append((start, start + size))
+            # Per-wave TDM and per-lane local-read masks must both round-trip.
+            for within in (0, size // 2, size - 1):
+                ping = base + within
+                mask = ping ^ (ping + size)
+                assert (ping ^ mask) == ping + size
+                assert ((ping + size) ^ mask) == ping
+    regions.sort()
+    assert all(a[1] <= b[0] for a, b in zip(regions, regions[1:]))
+    assert regions[-1][1] == o["pairedUsedBytes"]
+    one_scale_copy = (0 if direct_a else 2048) + 4096
+    assert regions[-1][1] <= 2 * (s["LdsOffsetA_Blk"] + one_scale_copy)
+    s["LDSSegInterleaveOffsets"] = o
+    assert paired_buffer_offsets(s) == o
+
+
+# Paired placement preserves logical groups and validates the complete two-buffer footprint.
+@pytest.mark.parametrize("wg,wt,vwa,vwb,tdm", [
+    ([2,2],[8,8],8,4,0), ([2,2],[8,8],4,4,1),
+    ([2,2],[8,7],8,1,0), ([2,2],[8,7],4,1,1),
+    ([4,1],[4,8],4,8,0), ([1,4],[8,4],8,4,0),
+    ([4,1],[4,8],4,8,1), ([1,4],[8,4],8,4,1),
+    ([4,1],[4,8],2,8,1), ([1,4],[8,4],8,2,1),
+])
+@pytest.mark.parametrize("du", [64,128])
+@pytest.mark.parametrize("isolate", [False,True])
+def test_paired_groups_preserve_membership_and_segment_separation(wg,wt,vwa,vwb,tdm,du,isolate):
+    from copy import deepcopy
+    from tensilelite.SolutionStructs.segment_interleave import paired_buffer_offsets, _footprint, _tensor_footprint
+    s=_vw8_state(MIWaveGroup=wg, MIWaveTile=wt, VectorWidthA=vwa, VectorWidthB=vwb,
+                 TDMSplit=tdm, DepthU=du, PrefetchGlobalRead=2, LDSSegmentInterleave=1,
+                 MaxLDS=5*SEG)
+    original=evaluate(s);assert original["applicable"]
+    s["LDSSegInterleaveOffsets"]=original["offsets"]
+    before=deepcopy(original["offsets"])
+    o=paired_buffer_offsets(s,isolate)
+    assert original["offsets"] == before
+    if o is None:
+        assert isolate and du==128  # complete isolated pairs exceed the five-segment budget
+        return
+    for key in ("aBaseline","bBaseline","portSplitA","portSplitB","componentSplit","activeTC"):
+        assert o.get(key)==before.get(key)
+    ranges=[];groups=[]
+    for tc in ("A","B"):
+        shared=o.get("aBaseline" if tc=="A" else "bBaseline",False)
+        size=_tensor_footprint(s,tc) if shared else _footprint(s,tc)
+        bufferStride=o["bufferStride"+tc]
+        assert bufferStride % 256 == 0
+        assert size <= bufferStride < size + 256
+        segments=[]
+        for c in range(1 if shared else 2):
+            start=o["ldsBase"+tc]+c*o["writeStrideBytes"]
+            assert start % 256 == 0
+            pair_segments=set(range(start//SEG,(start+bufferStride+size-1)//SEG+1))
+            segments.append(pair_segments);groups.append(pair_segments)
+            for b in (0,1):ranges.append((start+b*bufferStride,start+b*bufferStride+size))
+        if not shared:
+            for buffer in (0, 1):
+                start = o["ldsBase"+tc] + buffer*bufferStride
+                end = start + size
+                nextStart = start + o["writeStrideBytes"]
+                occupied = set(range(start//SEG, (end-1)//SEG+1))
+                nextOccupied = set(range(nextStart//SEG, (nextStart+size-1)//SEG+1))
+                assert occupied.isdisjoint(nextOccupied)
+            if isolate:
+                assert segments[0].isdisjoint(segments[1])
+    ranges.sort()
+    assert all(a[1]<=b[0] for a,b in zip(ranges,ranges[1:]))
+    assert ranges[-1][1]==o["pairedUsedBytes"]<=s["MaxLDS"]
+    if isolate:
+        assert all(a.isdisjoint(b) for i,a in enumerate(groups) for b in groups[i+1:])
+
+
+def test_paired_small_tile_retains_separation_and_read_window_gap():
+    from tensilelite.SolutionStructs.segment_interleave import paired_buffer_offsets
+    s=_vw8_state(DepthU=32,VectorWidthB=1,PrefetchGlobalRead=2,LDSSegmentInterleave=1,
+                 MaxLDS=5*SEG,LdsPadA=0,LdsPadB=0)
+    s["LDSSegInterleaveOffsets"]=evaluate(s)["offsets"]
+    o=paired_buffer_offsets(s)
+    assert o["writeStrideBytes"]==SEG  # tight pairing would put all four groups in segment 0
+    assert o["readAddressWindowsB"]==[0,1]
+    isolated=paired_buffer_offsets(s,True)
+    assert isolated["writeStrideBytes"]==2*SEG
+    assert isolated["readAddressWindowsB"]==[0,2]  # no unused window-1 register
+
+
+def test_paired_scales_follow_both_data_buffers_and_budget_includes_them():
+    from tensilelite.SolutionStructs.segment_interleave import paired_buffer_offsets
+    s=_vw8_state(DepthU=64,VectorWidthB=1,PrefetchGlobalRead=2,LDSSegmentInterleave=1,
+                 MaxLDS=5*SEG,ProblemType=dict(MXBlockA=32,MXBlockB=32),
+                 LdsNumElementsAlignedMXSA=1024,LdsNumElementsAlignedMXSB=2048)
+    s["LDSSegInterleaveOffsets"]=evaluate(s)["offsets"]
+    o=paired_buffer_offsets(s)
+    end=o["ldsBaseB"]+o["writeStrideBytes"]+2*o["bufferStrideB"]
+    assert o["ldsBaseMXSA"]==end
+    assert o["ldsBaseMXSB"]==end+2048
+    assert o["pairedUsedBytes"]==end+6144
+    s["MaxLDS"]=o["pairedUsedBytes"]-1
+    assert paired_buffer_offsets(s) is None
+
+
+@pytest.mark.parametrize("dtype", [
+    _FakeDataType(), _FakeDataType(bf16=False, f8=True, nbytes=1),
+    _FakeDataType(bf16=False, f4=True, nbytes=0.5),
+])
+def test_paired_alignment_adds_external_gaps_without_changing_tensor_padding(dtype):
+    from copy import deepcopy
+    from tensilelite.SolutionStructs.segment_interleave import _footprint, paired_buffer_layout_reason
+    s = _vw8_state(DepthU=64, VectorWidthB=1, PrefetchGlobalRead=2,
+                   LDSSegmentInterleave=1, MaxLDS=5*SEG, LdsOffsetA=16,
+                   ProblemType=dict(DataType=dtype))
+    s["LDSSegInterleaveOffsets"] = evaluate(s)["offsets"]
+    before = deepcopy(s)
+    o = paired_buffer_offsets(s)
+    assert paired_buffer_layout_reason(s, o) is None
+    assert o["ldsBaseA"] == 256
+    for tc in ("A", "B"):
+        size = _footprint(s, tc)
+        assert size % 256 != 0
+        assert o["bufferStride"+tc] > size
+        assert s["LdsPad"+tc] == before["LdsPad"+tc]
+        assert s["LdsBlockSizePerPad"+tc] == before["LdsBlockSizePerPad"+tc]
+    assert s["LDSSegInterleaveOffsets"] == before["LDSSegInterleaveOffsets"]
+    s["MaxLDS"] = o["pairedUsedBytes"]
+    assert paired_buffer_offsets(s) == o
+    s["MaxLDS"] -= 1
+    assert paired_buffer_offsets(s) is None
+
+
+def test_paired_mx_alignment_counts_gaps_but_not_unused_final_tail():
+    from tensilelite.SolutionStructs.segment_interleave import _footprint, paired_buffer_layout_reason
+    s = _tdmfuse_state(0, DepthU=128, VectorWidthB=1,
+                       LDSSegmentInterleave=1, PrefetchGlobalRead=2, MaxLDS=5*SEG,
+                       LdsNumElementsAlignedMXSA=1040, LdsNumElementsAlignedMXSB=2064)
+    s["LDSSegInterleaveOffsets"] = evaluate(s)["offsets"]
+    o = paired_buffer_offsets(s)
+    assert paired_buffer_layout_reason(s, o) is None
+    dataEnd = o["ldsBaseB"] + o["writeStrideBytes"] + o["bufferStrideB"] + _footprint(s, "B")
+    assert 0 <= o["ldsBaseMXSA"] - dataEnd < 256
+    assert o["bufferStrideMXSA"] == 1280
+    assert o["bufferStrideMXSB"] == 2304
+    scaleAEnd = o["ldsBaseMXSA"] + 1280 + 1040
+    assert 0 <= o["ldsBaseMXSB"] - scaleAEnd < 256
+    assert o["pairedUsedBytes"] == o["ldsBaseMXSB"] + 2304 + 2064
+    s["MaxLDS"] = o["pairedUsedBytes"] - 1
+    assert paired_buffer_offsets(s) is None
+
+
+@pytest.fixture
+def _gfx1250_read_swap():
+    from rocisa import rocIsa
+    from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+    from tensilelite.Toolchain.Validators import validateToolchain
+
+    with preserve_rocisa_kernel_state():
+        ri = rocIsa.getInstance()
+        ri.init((12, 5, 0), validateToolchain("amdclang++"))
+        ri.setKernel((12, 5, 0), 32)
+        if not ri.getAsmCaps()["SupportedISA"]:
+            pytest.skip("amdclang++ does not support gfx1250")
+        yield
+
+
+def test_paired_emitted_read_swap_preserves_lane_bank_phase(_gfx1250_read_swap):
+    from types import SimpleNamespace
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    s = _vw8_state(DepthU=64, VectorWidthB=1, PrefetchGlobalRead=2,
+                   LDSSegmentInterleave=1, MaxLDS=5*SEG,
+                   StoreSwapAddr=True, LdsOffsetA_Blk=2*SEG)
+    s["LDSSegInterleaveOffsets"] = evaluate(s)["offsets"]
+    o = paired_buffer_offsets(s)
+    s["LDSSegInterleaveOffsets"] = o
+    writer = SimpleNamespace(_dcpDivergent=lambda kernel: False)
+    for tc in ("A", "B"):
+        mod = KernelWriterAssembly.lraSwapAddressesForDTLPad(writer, s, {"tensorChar": tc})
+        for component in (0, 1):
+            base = o["ldsBase"+tc] + component*o["writeStrideBytes"]
+            for laneOffset in range(256):
+                ping = base + laneOffset
+                regs = {"v[vgprLocalReadAddr%s]" % tc: ping}
+                for item in mod.flatitems():
+                    op, dst, *srcs = str(item).split("//")[0].replace(",", " ").split()
+                    assert op in ("v_add_nc_u32", "v_xor_b32"), op
+                    values = [regs[src] if src in regs else int(src, 0)
+                              for src in srcs if src != "vcc_lo"]
+                    regs[dst] = (values[0] + values[1] if op == "v_add_nc_u32"
+                                 else values[0] ^ values[1])
+                mask = regs["v[vgprLocalReadSwapAddr%s]" % tc]
+                pong = ping ^ mask
+                assert pong == ping + o["bufferStride"+tc]
+                assert pong ^ mask == ping
+                assert pong % 256 == ping % 256
+
+
+def test_aligned_brotate_emits_the_original_tdm_buffer_swap(monkeypatch):
+    from types import SimpleNamespace
+    from tensilelite.Components.TensorDataMover import TensorDataMoverLoad
+    from tensilelite.KernelWriterAssembly import KernelWriterAssembly
+    state = _brot_state(StoreSwapAddr=False, LdsOffsetA_Blk=2*SEG)
+    component = SimpleNamespace(getLdsAddrSgprName=lambda name: name)
+    monkeypatch.setattr(TensorDataMoverLoad, "find", lambda writer: component)
+    writer = SimpleNamespace(
+        tdmDescriptorSetOwner=lambda kernel, tc: tc,
+        _dcpDivergent=lambda kernel: False,
+        states=SimpleNamespace(IncLdsBufSwitch=False),
+    )
+    for tc in ("A", "B"):
+        module = KernelWriterAssembly.tdmSwapLdsOffset(writer, state, {"tensorChar": tc})
+        text = str(module)
+        assert "s_xor_b32" in text
+        assert hex(2*SEG) in text
+        assert "PairedTDMSwap" not in text
+
+
+@pytest.mark.parametrize("override", [
+    {"NumLdsBlk":3},{"1LDSBuffer":1},{"PrefetchGlobalRead":0},
+    {"PrefetchGlobalReadA":2},{"TDMSplit":1},{"ExpandPointerSwap":True},
+    {"DirectToLdsB":True},{"NumWaveSplitK":2},{"WavefrontSize":64},
+])
+def test_paired_emit_gate_excludes_unsupported_buffer_paths(override):
+    from tensilelite.SolutionStructs.segment_interleave import paired_buffer_reason
+    s=_vw8_state(LDSSegmentInterleave=1,NumLdsBlk=2,PrefetchGlobalRead=2,**{"1LDSBuffer":0})
+    assert paired_buffer_reason(s) is None
+    s.update(override)
+    assert paired_buffer_reason(s) is not None
+
+
+@pytest.mark.parametrize("tc", ["A", "B"])
+def test_paired_gate_accepts_mixed_fp4_operands(tc):
+    from tensilelite.SolutionStructs.segment_interleave import paired_buffer_reason
+    s=_vw8_state(LDSSegmentInterleave=1,NumLdsBlk=2,PrefetchGlobalRead=2,**{"1LDSBuffer":0})
+    s["ProblemType"]["MacDataType"+tc]=_FakeDataType(bf16=False,f4=True,nbytes=0.5)
+    assert paired_buffer_reason(s) is None
+
+
+def test_paired_split_aligned_allows_only_cross_phase_tail_sharing():
+    from tensilelite.SolutionStructs.segment_interleave import paired_buffer_offsets, paired_buffer_layout_reason
+    s = _vw8_state(MIWaveTile=[4,4], VectorWidthA=4, VectorWidthB=1, DepthU=256,
+                   ProblemType=dict(DataType=_FakeDataType(bf16=False, f8=True, nbytes=1)),
+                   LdsPadA=16, LdsPadB=16, LdsBlockSizePerPadA=1024, LdsBlockSizePerPadB=256,
+                   PrefetchGlobalRead=2, LDSSegmentInterleave=1, MaxLDS=5*SEG)
+    s["LDSSegInterleaveOffsets"] = evaluate(s)["offsets"]
+    o = paired_buffer_offsets(s)
+    assert paired_buffer_layout_reason(s, o) is None
+    # B0 pong and B1 ping may both touch S1. B1 pong must clear B0 pong
+    # completely, so same-phase footprints stay separate without isolating pairs.
+    assert o["bufferStrideA"] == 16640
+    assert o["bufferStrideB"] == 17408
+    assert o["writeStrideBytes"] == 80384
+    assert o["pairedUsedBytes"] == 148480
+    assert o["readAddressWindowsB"] == [0,1]
+    assert (o["ldsBaseB"] + 2*17408 - 1)//SEG == (o["ldsBaseB"] + o["writeStrideBytes"])//SEG == 1
+    assert (o["ldsBaseB"] + o["writeStrideBytes"] + 17408)//SEG == 2
+
+
+@pytest.mark.parametrize("wg,wt,vwa,vwb,active", [
+    ([4,1],[4,4],4,4,"A"), ([1,4],[4,4],4,4,"B"),
+])
+def test_paired_shared_operand_uses_same_range_policy_for_a_and_b(wg,wt,vwa,vwb,active):
+    from tensilelite.SolutionStructs.segment_interleave import paired_buffer_offsets, paired_buffer_layout_reason
+    s = _vw8_state(MIWaveGroup=wg, MIWaveTile=wt, VectorWidthA=vwa, VectorWidthB=vwb,
+                   DepthU=256, LdsPadA=16, LdsPadB=16,
+                   LdsBlockSizePerPadA=1024, LdsBlockSizePerPadB=1024,
+                   ProblemType=dict(DataType=_FakeDataType(bf16=False, f8=True, nbytes=1)),
+                   PrefetchGlobalRead=2, LDSSegmentInterleave=1, MaxLDS=5*SEG)
+    s["LDSSegInterleaveOffsets"] = evaluate(s)["offsets"]
+    o = paired_buffer_offsets(s)
+    assert paired_buffer_layout_reason(s, o) is None
+    assert o["bufferStride"+active] == 33280
+    assert o["writeStrideBytes"] == 99840
+    # Active pair 0 spans S0/S1, pair 1 spans S1/S2. Each matching
+    # ping/pong footprint is disjoint; complete pair ranges may share a segment.
+    assert o["pairedUsedBytes"] == 166400
+    assert o["ldsBase"+active] == 0
+
+
+@pytest.mark.parametrize("wt,vwa,expected_stride", [([10,2],10,80*1024), ([2,10],2,72*1024)])
+def test_paired_checks_footprint_end_and_uses_minimum_gap(wt,vwa,expected_stride):
+    from tensilelite.SolutionStructs.segment_interleave import paired_buffer_offsets, paired_buffer_layout_reason
+    s = _vw8_state(MIWaveTile=wt, VectorWidthA=vwa, VectorWidthB=1, DepthU=64,
+                   LdsOffsetA=48*1024, LdsPadA=0, LdsPadB=0,
+                   PrefetchGlobalRead=2, LDSSegmentInterleave=1, MaxLDS=5*SEG)
+    s["LDSSegInterleaveOffsets"] = evaluate(s)["offsets"]
+    o = paired_buffer_offsets(s)
+    assert paired_buffer_layout_reason(s, o) is None
+    # Natural stride is 48 KiB. A/B ping footprints respectively cross a
+    # segment boundary and require more space; do not round stride gratuitously.
+    assert o["writeStrideBytes"] == expected_stride
+    assert any((o["ldsBase"+tc]+(buffer+1)*o["bufferStride"+tc]-1)//SEG ==
+               (o["ldsBase"+tc]+buffer*o["bufferStride"+tc]+expected_stride-16)//SEG
+               for tc in ("A","B") for buffer in (0,1))
+
+
+
+@pytest.mark.parametrize("padding, expected_stride", [(0, 80*1024), (16, 95*1024 + 512)])
+@pytest.mark.parametrize("mx", [False, True])
+def test_paired_pong_footprint_clears_last_segment_and_checks_budget(padding, expected_stride, mx):
+    from tensilelite.SolutionStructs.segment_interleave import paired_buffer_offsets, paired_buffer_layout_reason
+    s = _vw8_state(MIWaveTile=[8,2], VectorWidthA=8, VectorWidthB=1, DepthU=256,
+                   ProblemType=dict(DataType=_FakeDataType(bf16=False, f8=True, nbytes=1),
+                                    MXBlockA=32 if mx else 0, MXBlockB=32 if mx else 0),
+                   LdsPadA=padding, LdsPadB=padding,
+                   LdsBlockSizePerPadA=1024, LdsBlockSizePerPadB=256,
+                   LdsNumElementsAlignedMXSA=1024, LdsNumElementsAlignedMXSB=2048,
+                   PrefetchGlobalRead=2, LDSSegmentInterleave=1, MaxLDS=5*SEG)
+    s["LDSSegInterleaveOffsets"] = evaluate(s)["offsets"]
+    o = paired_buffer_offsets(s)
+    assert paired_buffer_layout_reason(s, o) is None
+    assert o["writeStrideBytes"] == expected_stride
+    size = o["bufferStrideA"]
+    if padding:
+        # A0 pong occupies [32.5, 65) KiB. Start-only separation used an 82 KiB
+        # stride and put A1 pong at 114.5 KiB in the same segment as A0's tail.
+        assert size == 33280
+        assert (2*size-1)//SEG == (size+82*1024)//SEG == 1
+        assert size + expected_stride == 2*SEG
+    else:
+        # A0 pong ends exactly at 64 KiB; that boundary remains reusable.
+        assert 2*size == SEG
+        assert size + expected_stride < 2*SEG
+    for tc in ("A", "B"):
+        size = o["bufferStride"+tc]
+        for buffer in (0, 1):
+            first = o["ldsBase"+tc] + buffer*size
+            second = first + o["writeStrideBytes"]
+            firstSegments = set(range(first//SEG, (first+size-1)//SEG+1))
+            secondSegments = set(range(second//SEG, (second+size-1)//SEG+1))
+            assert firstSegments.isdisjoint(secondSegments)
+    dataEnd = o["ldsBaseB"] + o["writeStrideBytes"] + 2*o["bufferStrideB"]
+    if mx:
+        assert o["ldsBaseMXSA"] == dataEnd
+        assert o["ldsBaseMXSB"] == dataEnd + 2048
+        assert o["pairedUsedBytes"] == dataEnd + 6144
+    s["MaxLDS"] = o["pairedUsedBytes"]
+    assert paired_buffer_offsets(s) == o
+    s["MaxLDS"] -= 16
+    assert paired_buffer_offsets(s) is None
+
+
+def _paired_validation_state():
+    from tensilelite.SolutionStructs.segment_interleave import paired_buffer_offsets
+    s = _vw8_state(DepthU=64, VectorWidthB=1, PrefetchGlobalRead=2,
+                   LDSSegmentInterleave=1, MaxLDS=5*SEG,
+                   ProblemType=dict(MXBlockA=32,MXBlockB=32),
+                   LdsNumElementsAlignedMXSA=1024,LdsNumElementsAlignedMXSB=2048)
+    s["LDSSegInterleaveOffsets"] = evaluate(s)["offsets"]
+    return s, paired_buffer_offsets(s)
+
+
+@pytest.mark.parametrize("key", ["ldsBaseA", "ldsBaseB", "writeStrideBytes",
+    "bufferStrideA", "bufferStrideB", "ldsBaseMXSA", "ldsBaseMXSB",
+    "bufferStrideMXSA", "bufferStrideMXSB"])
+@pytest.mark.parametrize("delta", [8, 16])
+def test_paired_validator_checks_all_copy_starts_for_256_byte_alignment(key, delta):
+    from tensilelite.SolutionStructs.segment_interleave import paired_buffer_layout_reason
+    s, o = _paired_validation_state()
+    assert paired_buffer_layout_reason(s, o) is None
+    o[key] += delta
+    assert "256-byte-aligned" in paired_buffer_layout_reason(s, o)
+
+
+def test_paired_validator_rejects_overlap_and_budget_overflow():
+    from tensilelite.SolutionStructs.segment_interleave import paired_buffer_layout_reason
+    s, o = _paired_validation_state()
+    for bad in ({**o, "ldsBaseB": o["ldsBaseA"]},
+                {**o, "ldsBaseMXSA": o["ldsBaseB"]},
+                {**o, "bufferStrideA": o["bufferStrideA"]-256}):
+        assert "overlaps" in paired_buffer_layout_reason(s, bad)
+    s["MaxLDS"] = o["pairedUsedBytes"]-1
+    assert "MaxLDS" in paired_buffer_layout_reason(s, o)
+
+
+def test_paired_validator_rejects_a_footprint_beyond_the_declared_allocation():
+    from tensilelite.SolutionStructs.segment_interleave import paired_buffer_layout_reason
+    s, o = _paired_validation_state()
+    o["pairedUsedBytes"] -= 16
+    assert "pairedUsedBytes" in paired_buffer_layout_reason(s, o)
+
+
+def test_brotate_paired_layout_has_the_same_alignment_and_overlap_checks():
+    from tensilelite.SolutionStructs.segment_interleave import paired_buffer_layout_reason
+    s = _brot_state(MaxLDS=5*SEG)
+    o = paired_buffer_offsets(s)
+    assert paired_buffer_layout_reason(s, o) is None
+    o["bufferStrideB"] += 8
+    assert "256-byte-aligned" in paired_buffer_layout_reason(s, o)
+
+
+@pytest.mark.parametrize("layout", sorted(_TDMFUSE_LAYOUTS))
+@pytest.mark.parametrize("base", [0, 16])
+def test_paired_tdm_piece_bases_match_relocated_local_reads(layout, base):
+    from tensilelite.SolutionStructs.segment_interleave import paired_buffer_offsets, paired_buffer_layout_reason
+    from tensilelite.Components.TDMFuse import tdmWavePartition
+    s = _tdmfuse_state(0, LDSSegmentInterleave=1, PrefetchGlobalRead=2,
+                       MaxLDS=5*SEG, LdsOffsetA=base,
+                       LdsNumElementsAlignedMXSA=1024, LdsNumElementsAlignedMXSB=1024,
+                       **_TDMFUSE_LAYOUTS[layout])
+    if layout == "tight_f8f4":
+        s["DepthU"] = 256  # Keep both data copies and scales within MaxLDS.
+    s["LDSSegInterleaveOffsets"] = evaluate(s)["offsets"]
+    o = paired_buffer_offsets(s)
+    assert paired_buffer_layout_reason(s, o) is None
+    s["LDSSegInterleaveOffsets"] = o
+    for tc in ("A", "B"):
+        components = tdmWavePartition(s, tc)[0]
+        rows = _tc_mt(s, tc) // components
+        # Execute actual emitted TDM scalar arithmetic, then compare with the
+        # independent padded logical-row mapping used by the read-side oracle.
+        assert _piece_lds_addrs(s, tc) == [_read_addr(s, o, tc, c*rows) for c in range(components)]
+
+
+def _unscaled_tdmfuse_state(tdmFuse, layout):
+    ovr = dict(_TDMFUSE_LAYOUTS[layout])
+    ovr["ProblemType"] = dict(ovr.get("ProblemType", {}), MXBlockA=0, MXBlockB=0)
+    state = _tdmfuse_state(tdmFuse, LDSSegmentInterleave=1, **ovr)
+    r = evaluate(state)
+    assert r["applicable"] is True, r["reason"]
+    state["LDSSegInterleaveOffsets"] = r["offsets"]
+    return state
+
+
+@pytest.mark.parametrize("layout", sorted(_TDMFUSE_LAYOUTS))
+@pytest.mark.parametrize("tdmFuse", [1, 2, 3])
+def test_rows_without_scales_move_each_data_tensor_in_one_piece_per_wave(tdmFuse, layout):
+    """Without MX scales TDMFuse 1-3 spread A and B over every wave, one piece each."""
+    from tensilelite.Components.TDMFuse import tdmWavePartition
+
+    state = _unscaled_tdmfuse_state(tdmFuse, layout)
+    for tc in ("A", "B"):
+        numComp, waves = tdmWavePartition(state, tc)
+        assert numComp == len(waves) == state["NumWaves"] > 1, (tc, numComp, waves)
+        assert waves == tuple(range(state["NumWaves"])), (tc, waves)
+        rows = _tc_mt(state, tc) // numComp
+        offsets = state["LDSSegInterleaveOffsets"]
+        expected = [_read_addr(state, offsets, tc, p * rows) for p in range(numComp)]
+        assert _piece_lds_addrs(state, tc) == expected, (tc, numComp)
+
+
+@pytest.mark.parametrize("layout", sorted(_TDMFUSE_LAYOUTS))
+@pytest.mark.parametrize("tdmFuse", [2, 3])
+def test_rows_without_scales_place_pieces_like_tdmfuse1(tdmFuse, layout):
+    """Without MX scales TDMFuse 1-3 all keep {A} + {B}, so each piece lands where TDMFuse=1 puts it."""
+    row, paired = _unscaled_tdmfuse_state(tdmFuse, layout), _unscaled_tdmfuse_state(1, layout)
+    for tc in ("A", "B"):
+        assert _piece_lds_addrs(row, tc) == _piece_lds_addrs(paired, tc), tc

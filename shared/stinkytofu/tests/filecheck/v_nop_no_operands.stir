@@ -1,0 +1,14 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyIRVerifierPass --print-output 2>&1
+#
+# v_nop has no operands, so it must pass the AsmVerifierPass. With the VOP1 format
+# (destination plus one source) the verifier reports "missing operand dest[0]" and
+# "missing operand src[0]".
+
+# CHECK-NOT: [StinkyIRVerifier]
+
+# CHECK-LABEL: @v_nop_has_no_operands
+# CHECK: "st.v_nop"()
+st.func @v_nop_has_no_operands() {
+^entry:
+  "st.v_nop"() { issueCycles = 1, latencyCycles = 1 }
+}

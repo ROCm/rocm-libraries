@@ -1,38 +1,49 @@
 ---
 name: add-logical-ir-instruction
 description: >-
-  Guide for adding a new instruction to the stinkytofu logical IR path,
-  covering adaptor, IR definition, arch mapping, and testing.
+  Guide for adding a new instruction to the stinkytofu logical IR path, covering
+  the IR definition, arch mapping, the rocisa->logical bridge, and testing.
 ---
 
 # Adding a New Instruction to the Logical IR Path
 
-This guide explains how to fully integrate a new instruction into the stinkytofu logical IR path (the "left path" in the architecture diagram). Use this when:
+This guide explains how to fully integrate a new instruction into the stinkytofu logical IR path. Use this when:
 
 - A new ISA introduces a hardware instruction that needs logical IR representation
-- An existing rocisa instruction has not yet been bridged by the stinkytofu adaptor
+- An existing rocisa instruction has no matching logical opcode yet, so the rocisa->logical bridge throws `no logical opcode for rocisa::XXX`
 
 ## Architecture Overview
 
+KernelWriter builds **rocisa** instructions (imported through the `tensilelite/ir.py` facade).
+`toStinkyTofuModule` — compiled into `_rocisa` — walks that rocisa tree and converts each
+instruction into a `LogicalInstruction` in C++ (the **rocisa->logical bridge**), then the logical
+module is lowered to asm IR. There is **no Python adaptor**: the former
+`rocisa_stinkytofu_adaptor` shim and the `ROCISA_BACKEND` env switch were removed.
+
 ```mermaid
 flowchart TD
-    KW["Tensile KernelWriter\nrocisa API calls"]
-    AD["rocisa_stinkytofu_adaptor\n instruction.py\n(Step 4)"]
-    PB["stinkytofu Python binding\nPythonBindings_generated.inc\n(auto-generated)"]
+    KW["Tensile KernelWriter\nrocisa API calls\n(imported via tensilelite/ir.py facade)"]
+    TT["toStinkyTofuModule(LowerViaLogicalIR)\nrocisa -> logical -> asm\n(compiled into _rocisa)"]
+    BR["rocisa -> logical bridge\nToStinkyTofuUtils.cpp:\nlogicalOpcodeFor / fillLogicalOperands\n(Step 4)"]
     LI["LogicalInstruction\nopcode enum + factory\n(Step 1 defines, Step 2 generates)"]
     AM["Arch mapping\nGfx125xRocisaMaps.hpp\nGfx1250Instructions.def\n(Step 3)"]
     TA["ToStinkyAsmPass\n(Step 5, optional)"]
     ASM["StinkyInstruction\nhw mnemonic + operands"]
     TEST["Unit test\nLogicalToAsmMultiArchTest\n(Step 6)"]
 
-    KW -->|"ROCISA_BACKEND=stinkytofu"| AD
-    AD -->|"to_stinky_logical()"| PB
-    PB --> LI
+    KW --> TT
+    TT --> BR
+    BR --> LI
     LI --> TA
     AM --> TA
     TA --> ASM
     LI -.-> TEST
 ```
+
+> **Direct logical build (future):** `tensilelite/ir.py` is the import facade through which
+> KernelWriter will eventually build logical instructions directly (via the Step 2 Python
+> binding) instead of rocisa. Until that migration flips for an instruction, the rocisa->logical
+> bridge (Step 4) is the live path.
 
 ## Files at a Glance
 
@@ -43,7 +54,7 @@ flowchart TD
 | 3a | `stinkytofu/hardware/src/gfx/common/Gfx125xRocisaMaps.hpp` | Add logical-to-mnemonic mapping |
 | 3b | `stinkytofu/hardware/src/gfx/Gfx1250/Gfx1250Instructions.def` | Add `.logical` reverse mapping |
 | 3b' | `stinkytofu/hardware/src/gfx/Gfx1250v0/Gfx1250v0Instructions.def` | Same as 3b (if this arch variant also supports it) |
-| 4 | `rocisa_stinkytofu_adaptor/rocisa_stinkytofu_adaptor/instruction.py` | Add Python shim class |
+| 4 | `stinkytofu/src/conversion/rocisa/ToStinkyTofuUtils.cpp` | Bridge rocisa->logical: usually automatic by name; add a `logicalOpcodeFor` case / operand handling only if needed |
 | 5 | `stinkytofu/src/transforms/logical/ToStinkyAsmPass.cpp` | (Optional) Special lowering logic |
 | 6 | `stinkytofu/tests/unit/logical/LogicalToAsmMultiArchTest.cpp` | Add test case |
 
@@ -114,7 +125,7 @@ Add a new `IRInstDef` entry. The nine fields in order are:
 
 ### Important: numSrcs Must Be Correct
 
-`numSrcs` determines how many source operand parameters the tablegen-generated factory function accepts. If set incorrectly, the adaptor will pass the wrong number of arguments and cause a runtime error.
+`numSrcs` determines how many source operand parameters the tablegen-generated factory function accepts, and how many sources the rocisa->logical bridge copies. If set incorrectly, operands are dropped or the factory is called with the wrong number of arguments and fails at runtime.
 
 ---
 
@@ -124,7 +135,7 @@ When building stinkytofu, `tools/tablegen/GenLogicalIR.cpp` reads `LogicalInstru
 
 1. **`LogicalOpcodes_generated.inc`** — enum values (e.g. `VAdd3U32 = 10`)
 2. **`LogicalInstructions_generated.hpp`** — C++ factory functions
-3. **`PythonBindings_generated.inc`** — nanobind Python bindings
+3. **`PythonBindings_generated.inc`** — nanobind Python bindings (used by the direct-build path and tests)
 
 The factory function signature is derived automatically from the `.inc` fields:
 
@@ -194,71 +205,36 @@ At build time, `GenLogicalToAsmMapping.cpp` reads all `.def` files to generate `
 
 ---
 
-## Step 4: Python Adaptor
+## Step 4: Bridge rocisa → Logical IR (C++)
 
-**File**: `rocisa_stinkytofu_adaptor/rocisa_stinkytofu_adaptor/instruction.py`
+**File**: `stinkytofu/src/conversion/rocisa/ToStinkyTofuUtils.cpp`
 
-Create a Python shim class so that KernelWriter's rocisa API calls are converted to logical IR.
+KernelWriter builds rocisa instructions; `toStinkyTofuModule` walks that tree and converts each
+rocisa instruction into a `LogicalInstruction` via `createLogicalFromRocisa`. This bridge is
+entirely in C++ — there is **no Python adaptor** anymore.
 
-### Choosing the Factory Function
+For most instructions, **nothing to do**. `logicalOpcodeFor()` falls through to
+`logical::parseOpcode(className)`, which matches the rocisa class name to the logical opcode of
+the same name. So if your rocisa class is `VAdd3U32` and you defined logical opcode `VAdd3U32` in
+Step 1, it bridges automatically.
 
-Select the appropriate `_make_*_class` factory based on instruction type:
+Add a special case in `logicalOpcodeFor()` **only** when:
+- **Name differs** between rocisa class and logical opcode (e.g. rocisa `SSchedulingFence` -> logical `SchedulingFence`), or
+- **Family dispatch by C++ type** (e.g. `MFMAInstruction` / `SMFMAInstruction` / `MXMFMAInstruction`, or the `SWaitCnt` family).
 
-| Instruction Type | Factory Function | Operand Shape |
-|-----------------|-----------------|---------------|
-| Binary ALU (dst, src0, src1) | `_make_scalar_alu_class` | dst, src0, src1 |
-| Unary ALU (dst, src) | `_make_scalar_unary_class` | dst, src |
-| Ternary ALU (dst, src0, src1, src2) | `_make_ternary_class` | dst, src0, src1, src2 |
-| Zero-source (dst only) | `_make_zero_src_class` | dst |
-| Zero-operand | `_make_no_operand_class` | (none) |
-| Immediate, no dest | `_make_imm_no_dest_class` | imm |
-| Scalar shift | `_make_scalar_shift_class` | dst, value, shift |
-| Vector shift | `_make_vector_shift_class` | dst, shift, value |
-| Scalar compare (no dst) | `_make_scalar_cmp_class` | src0, src1 |
-| Vector compare | `_make_vcmp_class` | dst, src0, src1 |
-| Branch | `_make_branch_class` | labelName |
-| Register jump | `_make_reg_jump_class` | src (or dst, src) |
-| Scale CVT | `_make_cvt_scale_class` | dst, src, scale |
-| SR scale CVT | `_make_cvt_scale_sr_class` | dst, src0, src1, scale |
-| Buffer load | `_make_buffer_load_class` | dst, vaddr, saddr, soffset, mubuf |
-| Buffer store | `_make_buffer_store_class` | src, vaddr, saddr, soffset, mubuf |
-| Flat load | `_make_flat_load_class` | dst, vaddr |
-| Flat store | `_make_flat_store_class` | src, vaddr |
-| Global load | `_make_global_load_class` | dst, vaddr, saddr |
-| Global store | `_make_global_store_class` | src, vaddr, saddr |
-| DS load | `_make_ds_load_class` | dst, addr (+ ds.offset) |
-| DS store | `_make_ds_store_class` | addr, src (+ ds.offset) |
-| DS store2 | `_make_ds_store2_class` | addr, src0, src1 |
-| DS load2 | `_make_ds_load2_class` | dst, src (src passed twice) |
-
-### Example: Adding a Ternary ALU Instruction
-
-```python
-# logicalIR: VAdd3U32
-VAdd3U32 = _make_ternary_class("VAdd3U32", "v_add3_u32", InstType.INST_U32)
+```cpp
+// in logicalOpcodeFor(const rocisa::Instruction& inst, const std::string& className)
+if (dynamic_cast<const rocisa::SSchedulingFence*>(&inst)) {
+    return logical::SchedulingFence;
+}
+// ...
+return logical::parseOpcode(className.c_str());   // default: match by name
 ```
 
-Three arguments:
-- **class_name** — Must exactly match the className in `LogicalInstructionDefs.inc`
-- **mnemonic** — Original ISA mnemonic (used by `setInst()`, still needed for the native rocisa path)
-- **inst_type** — rocisa's `InstType` enum
-
-The factory-generated `to_stinky_logical()` method will:
-1. Convert `self.dst` and `self.srcs[]` to `StinkyRegister` objects
-2. Call `stinkytofu.VAdd3U32(dst, src0, src1, src2, comment=...)`
-3. Propagate VOP3P modifiers (op_sel, op_sel_hi, byte_sel) if present
-
-### Example: Adding a DS Load Instruction
-
-```python
-DSLoadB64 = _make_ds_load_class("DSLoadB64", "ds_load_b64")
-```
-
-The DS factory's `to_stinky_logical()` additionally calls `inst.set_ds(offset=self.ds.offset)`.
-
-### Special Case: MFMA Family
-
-MFMA, SMFMA, and MXMFMA are too complex for factory generation (they require deriving type_str, accType, matrix dimensions, etc.) and are implemented as full hand-written class definitions. If the new instruction is an MFMA variant, refer to the `MFMAInstruction` class's `to_stinky_logical()` implementation.
+Operands and modifiers are copied automatically by `fillLogicalOperands()` (dst / srcs) and
+`applyLogicalPayload()` (VOP3P / SDWA / DPP / True16 / DS / FLAT / MUBUF / SMEM / memtoken,
+dispatched by rocisa type). Add a branch there only if the instruction carries an unusual modifier
+not already handled by its category.
 
 ---
 
@@ -330,20 +306,20 @@ When adding instruction `XXX`, verify each item:
 - [ ] Added `{"XXX", "hw_mnemonic"}` in `Gfx125xRocisaMaps.hpp`
 - [ ] Added `.logical = "XXX"` entry in `Gfx1250Instructions.def`
 - [ ] Same for `Gfx1250v0Instructions.def` (if the variant also supports it)
-- [ ] Created shim class in `instruction.py` using the appropriate factory, with class_name exactly matching `.inc`
+- [ ] rocisa->logical bridge resolves: either the rocisa class name matches `XXX` (automatic via `parseOpcode`), or a `logicalOpcodeFor` case was added in `ToStinkyTofuUtils.cpp`
+- [ ] (If unusual modifiers) handled in `fillLogicalOperands` / `applyLogicalPayload`
 - [ ] (If Step 3 skipped) Added opcode to `SKIP_LOWERING` in `LogicalToAsmMultiArchTest.cpp`
 - [ ] (If needed) Added special lowering logic in `ToStinkyAsmPass.cpp`
 - [ ] Added switch case in `LogicalToAsmMultiArchTest.cpp`
 - [ ] Full build + `ctest --test-dir build -R LogicalToAsm`
-- [ ] End-to-end verification with YAML test (KernelWriter -> adaptor -> logical IR -> asm)
+- [ ] End-to-end verification with a YAML test (KernelWriter -> toStinkyTofuModule(LowerViaLogicalIR) -> logical IR -> asm)
 
 ## Common Errors
 
 | Symptom | Cause |
 |---------|-------|
-| `too few operands for instruction` | `numSrcs` set too low; factory receives insufficient arguments |
-| `unknown logical opcode` | className in `.inc` does not match the adaptor's class_name (spelling/case) |
+| `no logical opcode for rocisa::XXX` | rocisa class name has no matching logical opcode: define it in `.inc` (Step 1) with the same name, or add a `logicalOpcodeFor` case (Step 4) |
+| `too few operands for instruction` | `numSrcs` set too low; factory/bridge receives insufficient arguments |
 | `no mapping for arch` | Missing entry in `Gfx125xRocisaMaps.hpp` or `.def` file |
-| `AttributeError: module 'stinkytofu' has no attribute 'XXX'` | stinkytofu Python binding not reinstalled after build |
-| Adaptor class_name mismatch | First argument of `_make_*_class` differs in case from className in `.inc` |
+| `AttributeError: module 'stinkytofu' has no attribute 'XXX'` | stinkytofu Python binding not reinstalled after build (direct-build / test path) |
 | `AllInstructionsAllArchitectures` aborts (Subprocess aborted) | Opcode has no arch mapping but is not in `SKIP_LOWERING`; lowering hits UNREACHABLE |

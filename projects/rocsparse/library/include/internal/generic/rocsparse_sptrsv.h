@@ -105,7 +105,6 @@ rocsparse_status rocsparse_sptrsv_buffer_size(rocsparse_handle            handle
 *
 *  \par Uniform Precisions:
 *  <table>
-*  <caption id="sptrsv_uniform">Uniform Precisions</caption>
 *  <tr><th>A / X / Y / scalar
 *  <tr><td>rocsparse_datatype_f32_r
 *  <tr><td>rocsparse_datatype_f64_r

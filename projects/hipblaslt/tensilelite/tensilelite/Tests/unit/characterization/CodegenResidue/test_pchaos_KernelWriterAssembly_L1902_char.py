@@ -127,7 +127,7 @@ def test_overflowed_resources_declared_as_int_with_default_zero():
     inspect the dataclass field metadata directly rather than instantiating.
     """
     import dataclasses  # noqa: PLC0415
-    from Tensile.KernelWriter import StateValues  # noqa: PLC0415
+    from tensilelite.KernelWriter import StateValues  # noqa: PLC0415
 
     fields_by_name = {f.name: f for f in dataclasses.fields(StateValues)}
     assert "overflowedResources" in fields_by_name, (

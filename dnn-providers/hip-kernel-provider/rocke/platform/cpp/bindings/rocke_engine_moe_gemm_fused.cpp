@@ -24,6 +24,8 @@
 #include <string>
 #include <vector>
 
+#include "family_glue.hpp"
+
 extern "C" {
 #include "rocke/instance_moe_gemm_fused.h"
 #include "rocke/ir.h"
@@ -132,16 +134,12 @@ rocke_kernel_def_t* build_kind(const py::dict& d,
     return rocke_build_moe_gate_up_silu_gemm_new(b, &s, arch);
 }
 
-const char* arch_or_default(const std::string& arch)
-{
-    return arch.empty() ? "gfx950" : arch.c_str();
-}
-
 std::string lower_llvm(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     std::deque<std::string> store;
     rocke_ir_builder_t b;
-    rocke_kernel_def_t* k = build_kind(d, &b, store, arch_or_default(arch));
+    rocke_kernel_def_t* k = build_kind(d, &b, store, arch.c_str());
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string msg = std::string("rocke_engine.moe_gemm_fused_lower_llvm build failed: ")
@@ -151,15 +149,22 @@ std::string lower_llvm(const py::dict& d, const std::string& arch)
     }
     auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
     char* ll = nullptr;
-    rocke_status_t st
-        = rocke_lower_kernel_to_llvm(k, resolve_python_llvm_flavor(), arch_or_default(arch), &ll);
+    char err[ROCKE_ERR_MSG_CAP];
+    err[0] = '\0';
+    /* The _ex entry, not the err-less one: an arch-domain refusal says which
+     * intrinsic the target cannot lower only in this buffer, and only
+     * throw_if_arch_domain turns it into the error Python expects. */
+    rocke_status_t st = rocke_lower_kernel_to_llvm_ex(
+        k, resolve_python_llvm_flavor(), arch.c_str(), &ll, err, sizeof err);
     guard.reset();
     if(st != ROCKE_OK || !ll)
     {
         if(ll)
             free(ll);
+        throw_if_arch_domain(st, err);
         throw std::runtime_error("rocke_engine.moe_gemm_fused_lower_llvm lower failed (status="
-                                 + std::to_string((int)st) + ")");
+                                 + std::to_string((int)st)
+                                 + "): " + (err[0] ? err : "unknown error"));
     }
     std::string out(ll);
     free(ll);
@@ -168,9 +173,10 @@ std::string lower_llvm(const py::dict& d, const std::string& arch)
 
 std::string serialize_ir(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     std::deque<std::string> store;
     rocke_ir_builder_t b;
-    rocke_kernel_def_t* k = build_kind(d, &b, store, arch_or_default(arch));
+    rocke_kernel_def_t* k = build_kind(d, &b, store, arch.c_str());
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string msg = std::string("rocke_engine.moe_gemm_fused_serialize_ir build failed: ")
@@ -194,9 +200,10 @@ std::string serialize_ir(const py::dict& d, const std::string& arch)
 
 std::vector<std::string> verify(const py::dict& d, const std::string& arch)
 {
+    require_arch(arch);
     std::deque<std::string> store;
     rocke_ir_builder_t b;
-    rocke_kernel_def_t* k = build_kind(d, &b, store, arch_or_default(arch));
+    rocke_kernel_def_t* k = build_kind(d, &b, store, arch.c_str());
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string msg = std::string("rocke_engine.moe_gemm_fused_verify build failed: ")
@@ -227,8 +234,7 @@ std::vector<std::string> verify(const py::dict& d, const std::string& arch)
 
 void register_moe_gemm_fused(py::module_& m)
 {
-    m.def("moe_gemm_fused_lower_llvm", &lower_llvm, py::arg("spec"), py::arg("arch") = "gfx950");
-    m.def(
-        "moe_gemm_fused_serialize_ir", &serialize_ir, py::arg("spec"), py::arg("arch") = "gfx950");
-    m.def("moe_gemm_fused_verify", &verify, py::arg("spec"), py::arg("arch") = "gfx950");
+    m.def("moe_gemm_fused_lower_llvm", &lower_llvm, py::arg("spec"), py::arg("arch"));
+    m.def("moe_gemm_fused_serialize_ir", &serialize_ir, py::arg("spec"), py::arg("arch"));
+    m.def("moe_gemm_fused_verify", &verify, py::arg("spec"), py::arg("arch"));
 }

@@ -138,7 +138,9 @@ class TestGfx1250Multicast(unittest.TestCase):
         self.assertEqual(_lower(kernel), _lower(parsed))
 
     def test_unsupported_arch_rejected(self):
-        with self.assertRaisesRegex(ValueError, "requires gfx1250"):
+        with self.assertRaisesRegex(
+            ValueError, "requires a target with memory.has_multicast_load, got gfx1201"
+        ):
             _lower(_build_all(), arch="gfx1201")
 
     def test_pre_llvm23_rejected(self):
@@ -162,7 +164,10 @@ class TestGfx1250Multicast(unittest.TestCase):
         }
         for name, emit in cases.items():
             with self.subTest(op=name):
-                with self.assertRaisesRegex(ValueError, f"{name} requires gfx1250"):
+                with self.assertRaisesRegex(
+                    ValueError,
+                    f"{name} requires a target with memory.has_multicast_load, got gfx950",
+                ):
                     _lower(one(emit), arch="gfx950", flavor="llvm22")
 
     def test_builder_rejects(self):

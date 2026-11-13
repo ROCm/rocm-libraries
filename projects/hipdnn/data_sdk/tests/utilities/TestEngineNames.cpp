@@ -77,6 +77,53 @@ TEST_F(TestEngineNames, GetEngineNameFromId)
     EXPECT_THROW(getEngineNameFromId(nonExistentId), std::out_of_range);
 }
 
+TEST_F(TestEngineNames, TryGetEngineNameFromIdReturnsTheRegisteredName)
+{
+    const auto name = tryGetEngineNameFromId(HIP_MLOPS_ENGINE_ID);
+    ASSERT_TRUE(name.has_value());
+    EXPECT_EQ(*name, "HIP_MLOPS_ENGINE");
+}
+
+TEST_F(TestEngineNames, TryGetEngineNameFromIdReturnsNoValueForAnUnregisteredId)
+{
+    const int64_t unregisteredId = engineNameToId("TEST_TRY_GET_UNREGISTERED_ENGINE");
+    ASSERT_FALSE(isEngineNameRegistered("TEST_TRY_GET_UNREGISTERED_ENGINE"));
+
+    EXPECT_FALSE(tryGetEngineNameFromId(unregisteredId).has_value());
+}
+
+TEST_F(TestEngineNames, GetEngineNameFromIdReportsTheHexIdInTheThrownMessage)
+{
+    const int64_t unregisteredId = engineNameToId("TEST_THROWN_MESSAGE_UNREGISTERED_ENGINE");
+    ASSERT_FALSE(isEngineNameRegistered("TEST_THROWN_MESSAGE_UNREGISTERED_ENGINE"));
+
+    try
+    {
+        getEngineNameFromId(unregisteredId);
+        FAIL() << "Expected std::out_of_range for an unregistered engine ID";
+    }
+    catch(const std::out_of_range& error)
+    {
+        const std::string message{error.what()};
+        EXPECT_NE(message.find(formatEngineIdHex(unregisteredId)), std::string::npos)
+            << "Message does not contain the hex ID: " << message;
+    }
+}
+
+TEST_F(TestEngineNames, EngineNameOrHexReturnsTheRegisteredName)
+{
+    EXPECT_EQ(engineNameOrHex(MIOPEN_ENGINE_ID), "MIOPEN_ENGINE");
+    EXPECT_EQ(engineNameOrHex(HIP_MLOPS_ENGINE_ID), "HIP_MLOPS_ENGINE");
+}
+
+TEST_F(TestEngineNames, EngineNameOrHexReturnsTheHexIdForAnUnregisteredId)
+{
+    const int64_t unregisteredId = engineNameToId("TEST_NAME_OR_HEX_UNREGISTERED_ENGINE");
+    ASSERT_FALSE(isEngineNameRegistered("TEST_NAME_OR_HEX_UNREGISTERED_ENGINE"));
+
+    EXPECT_EQ(engineNameOrHex(unregisteredId), formatEngineIdHex(unregisteredId));
+}
+
 TEST_F(TestEngineNames, RegisteredRocKEEngineHasStableNameAndId)
 {
     EXPECT_STREQ(ROCKE_ENGINE_NAME, "ROCKE_ENGINE");

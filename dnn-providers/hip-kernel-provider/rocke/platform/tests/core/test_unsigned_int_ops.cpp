@@ -1,0 +1,681 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+/*
+ * test_unsigned_int_ops.cpp -- the C++ engine's unsigned compare (cmp_ult), its
+ * no-unsigned-wrap add (add_nuw), its logical shift right (lshr) and the
+ * arith.assume_range range marker.
+ *
+ * Run with no argument it checks, through the C API: the LLVM and HIP text of
+ * add_nuw and cmp_ult, the HIP text of lshr at every integer width (a shift
+ * through the unsigned type of the operand's own width) and its refusal of a
+ * non-integer operand, the HIP refusal of a pred the verifier refuses, the
+ * builders' operand-type refusals, the verifier's acceptance of the new attrs
+ * and its refusals of bad marker attrs (texts identical to the Python
+ * verifier), and the constant folder (unsigned compare at the operand width;
+ * constants read at their width; a marker on a constant folds to the constant;
+ * signed div / mod rounded toward zero, undefined ones left unfolded), and the
+ * verifier's i32 / i64 rule for the nuw and ult forms.
+ *
+ * Run with --print-llvm it prints the LLVM text of the two-op function built
+ * through rocke_b_add_nuw / rocke_b_cmp_ult, so the Python test can compare it
+ * with the same function built by the Python builder.
+ *
+ * Any other argument list prints the usage to stderr and exits 2.
+ */
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <string>
+
+#include "rocke/error.hpp"
+#include "rocke/ir.h"
+#include "rocke/ir_internal.h"
+#include "rocke/lower_hip.h"
+#include "rocke/lower_llvm.h"
+#include "rocke/passes.h"
+#include "rocke/strbuf.h"
+#include "rocke/verify.h"
+
+namespace
+{
+
+int g_failures = 0;
+
+void fail(const std::string& what, int line)
+{
+    fprintf(stderr, "FAIL (line %d): %s\n", line, what.c_str());
+    ++g_failures;
+}
+
+#define EXPECT(cond, what)          \
+    do                              \
+    {                               \
+        if(!(cond))                 \
+            fail((what), __LINE__); \
+    } while(0)
+
+/* The two-op function the Python test builds too: params a, b of `type`, then
+ * add_nuw(a, b) and cmp_ult(a, b). */
+void build_two_op(rocke_ir_builder_t* b, const rocke_type_t* type)
+{
+    rocke_value_t* a = rocke_b_param(b, "a", type, nullptr);
+    rocke_value_t* c = rocke_b_param(b, "b", type, nullptr);
+    rocke_b_add_nuw(b, a, c);
+    rocke_b_cmp_ult(b, a, c);
+    rocke_b_ret(b);
+}
+
+std::string lower_llvm(rocke_ir_builder_t* b)
+{
+    char* text = nullptr;
+    std::string out;
+    if(rocke_lower_kernel_to_llvm(
+           rocke_ir_builder_kernel(b), ROCKE_LLVM_FLAVOR_LLVM20, "gfx942", &text)
+           == ROCKE_OK
+       && text)
+        out = text;
+    free(text);
+    return out;
+}
+
+/* Lower b's kernel to HIP for gfx942; the text on success, else "" with the
+ * status (and the builder's error message) left for the caller. */
+rocke_status_t lower_hip_status(rocke_ir_builder_t* b, std::string* hip)
+{
+    rocke_strbuf_t out;
+    rocke_strbuf_init(&out, 0);
+    rocke_lower_hip_opts_t opts{};
+    opts.arch = "gfx942";
+    const rocke_status_t status
+        = rocke_lower_kernel_to_hip(b, rocke_ir_builder_kernel(b), &opts, &out);
+    hip->assign(status == ROCKE_OK ? rocke_strbuf_cstr(&out) : "");
+    rocke_strbuf_free(&out);
+    return status;
+}
+
+std::string lower_hip(rocke_ir_builder_t* b)
+{
+    std::string hip;
+    lower_hip_status(b, &hip);
+    return hip;
+}
+
+/* A range marker op built directly (the C API has no builder entry for it):
+ * operands [v] or [v, lt]; attrs set by `set_attrs`. */
+template <typename SetAttrs>
+rocke_value_t*
+    marker(rocke_ir_builder_t* b, rocke_value_t* v, rocke_value_t* lt, SetAttrs set_attrs)
+{
+    rocke_value_t* operands[2] = {v, lt};
+    rocke_attr_map_t attrs = rocke_i_attrs(b);
+    set_attrs(&attrs);
+    return rocke_i_op1(
+        b, ROCKE_OP_ARITH_ASSUME_RANGE, operands, lt ? 2 : 1, v->type, &attrs, "range");
+}
+
+std::string verify_errors(rocke_ir_builder_t* b)
+{
+    rocke_diag_t* diags = nullptr;
+    size_t count = 0;
+    std::string joined;
+    if(rocke_verify(rocke_ir_builder_kernel(b), &diags, &count) != ROCKE_OK)
+        return "verifier failed to run";
+    for(size_t i = 0; i < count; ++i)
+        if(diags[i].severity == ROCKE_DIAG_ERROR)
+            joined += std::string(diags[i].message) + "\n";
+    rocke_diags_free(diags, count);
+    return joined;
+}
+
+void case_llvm_text()
+{
+    for(const rocke_type_t* type : {rocke_i32(), rocke_i64()})
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "unsigned_int_ops");
+        build_two_op(&b, type);
+        const std::string ll = lower_llvm(&b);
+        const std::string ty = type->name;
+        EXPECT(ll.find("= add nuw " + ty + " %a, %b") != std::string::npos, "add nuw line");
+        EXPECT(ll.find("= icmp ult " + ty + " %a, %b") != std::string::npos, "icmp ult line");
+        rocke_ir_builder_free(&b);
+    }
+}
+
+void case_hip_text()
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "unsigned_int_ops_hip");
+    rocke_value_t* a = rocke_b_param(&b, "a", rocke_i32(), nullptr);
+    rocke_value_t* c = rocke_b_param(&b, "b", rocke_i32(), nullptr);
+    rocke_value_t* sum = rocke_b_add_nuw(&b, a, c);
+    rocke_value_t* below = rocke_b_cmp_ult(&b, a, c);
+    rocke_value_t* range = marker(&b, a, nullptr, [&](rocke_attr_map_t* m) {
+        rocke_attr_set_int(&b, m, "multiple_of", 1);
+        rocke_attr_set_int(&b, m, "residue", 0);
+    });
+    const std::string hip = lower_hip(&b);
+    const std::string s = std::string(sum->name + 1);
+    const std::string u = std::string(below->name + 1);
+    const std::string r = std::string(range->name + 1);
+    EXPECT(hip.find("int " + s + " = (int32_t)((uint32_t)a + (uint32_t)b);") != std::string::npos,
+           "HIP add_nuw form");
+    EXPECT(hip.find("bool " + u + " = (uint32_t)a < (uint32_t)b;") != std::string::npos,
+           "HIP cmp_ult form");
+    EXPECT(hip.find("int " + r + " = a;") != std::string::npos, "HIP marker copy");
+    rocke_ir_builder_free(&b);
+}
+
+/* lshr reads its operand through the unsigned type of the operand's own width,
+ * as LLVM's lshr does: a negative i8 or i16 shifts in no sign bits and an i64
+ * keeps its high word. The same text as the Python engine (test_lshr.py). */
+void case_lshr_hip_text()
+{
+    struct LshrCase
+    {
+        const rocke_type_t* type;
+        const char* hip_type;
+        const char* unsigned_type;
+    };
+    const LshrCase cases[] = {
+        {rocke_i8(), "int8_t", "uint8_t"},
+        {rocke_i16(), "int16_t", "uint16_t"},
+        {rocke_i32(), "int", "uint32_t"},
+        {rocke_i64(), "int64_t", "uint64_t"},
+    };
+    for(const LshrCase& c : cases)
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "unsigned_int_ops_lshr");
+        rocke_value_t* a = rocke_b_param(&b, "a", c.type, nullptr);
+        rocke_value_t* s = rocke_b_param(&b, "s", c.type, nullptr);
+        rocke_value_t* shifted = rocke_b_lshr(&b, a, s);
+        rocke_b_ret(&b);
+        const std::string hip = lower_hip(&b);
+        const std::string name = std::string(shifted->name + 1);
+        const std::string want = std::string(c.hip_type) + " " + name + " = (" + c.hip_type + ")(("
+                                 + c.unsigned_type + ")a >> s);";
+        EXPECT(hip.find(want) != std::string::npos,
+               std::string("HIP lshr form for ") + c.type->name + ": want '" + want + "'");
+        rocke_ir_builder_free(&b);
+    }
+
+    /* An f32 shift, scalar or lane by lane, has no unsigned type of its width:
+     * refused with the Python engine's TypeError text, naming the op. */
+    for(const bool vector : {false, true})
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "unsigned_int_ops_lshr_f32");
+        const rocke_type_t* type = vector ? rocke_vector_type(&b, rocke_f32(), 2) : rocke_f32();
+        rocke_value_t* a = rocke_b_param(&b, "a", type, nullptr);
+        if(vector)
+            rocke_b_vector_lshr(&b, a, a);
+        else
+            rocke_b_lshr(&b, a, a);
+        rocke_b_ret(&b);
+        std::string hip;
+        const rocke_status_t status = lower_hip_status(&b, &hip);
+        const char* msg = rocke_ir_builder_error(&b);
+        const std::string want = std::string("HIP lowering of ")
+                                 + (vector ? "vector.lshr" : "arith.lshr")
+                                 + " failed - element type='f32', expected an integer type, "
+                                   "one of ('i1', 'i8', 'u8', 'i16', 'i32', 'i64')";
+        EXPECT(status == ROCKE_ERR_TYPE && msg && want == msg,
+               "want status " + std::to_string((int)ROCKE_ERR_TYPE) + " '" + want + "', got status "
+                   + std::to_string((int)status) + " '" + (msg ? msg : "") + "'");
+        rocke_ir_builder_free(&b);
+    }
+}
+
+void expect_builder_refusal(bool add, const rocke_type_t* ta, const rocke_type_t* tb)
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "unsigned_int_ops_refusal");
+    rocke_value_t* a = rocke_b_param(&b, "a", ta, nullptr);
+    rocke_value_t* c = rocke_b_param(&b, "b", tb, nullptr);
+    const char* op_name = add ? "add_nuw" : "cmp_ult";
+    const std::string want = std::string(op_name) + " expects two i32 or two i64 operands, got "
+                             + ta->name + " / " + tb->name;
+    bool refused = false;
+    try
+    {
+        rocke_value_t* r = add ? rocke_b_add_nuw(&b, a, c) : rocke_b_cmp_ult(&b, a, c);
+        refused = r == nullptr && rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE
+                  && want == rocke_ir_builder_error(&b);
+    }
+    catch(const ckc::Error& error)
+    {
+        refused = error.code() == ROCKE_ERR_VALUE && want == error.what();
+    }
+    EXPECT(refused, want);
+    rocke_ir_builder_free(&b);
+}
+
+void case_builder_refusals()
+{
+    expect_builder_refusal(true, rocke_f32(), rocke_f32());
+    expect_builder_refusal(false, rocke_i32(), rocke_i64());
+    expect_builder_refusal(true, rocke_i1(), rocke_i1());
+}
+
+void case_verifier_accepts()
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "unsigned_int_ops_valid");
+    rocke_value_t* a = rocke_b_param(&b, "a", rocke_i32(), nullptr);
+    rocke_value_t* n = rocke_b_param(&b, "n", rocke_i32(), nullptr);
+    rocke_b_add_nuw(&b, a, n);
+    rocke_b_cmp_ult(&b, a, n);
+    marker(&b, a, n, [&](rocke_attr_map_t* m) {
+        rocke_attr_set_int(&b, m, "multiple_of", 4);
+        rocke_attr_set_int(&b, m, "residue", 3);
+        rocke_attr_set_int(&b, m, "ge", 0);
+        rocke_attr_set_int(&b, m, "lt_plus", 1);
+    });
+    marker(&b, a, nullptr, [&](rocke_attr_map_t* m) {
+        rocke_attr_set_int(&b, m, "multiple_of", 1);
+        rocke_attr_set_int(&b, m, "residue", 0);
+        rocke_attr_set_int(&b, m, "ge", 0);
+        rocke_attr_set_int(&b, m, "lt", 64);
+    });
+    rocke_b_ret(&b);
+    const std::string errors = verify_errors(&b);
+    EXPECT(errors.empty(), "verifier rejected valid attrs: " + errors);
+    rocke_ir_builder_free(&b);
+}
+
+/* One bad marker per case; the verifier must report exactly `want`. */
+template <typename SetAttrs>
+void expect_marker_rejected(bool runtime_end, SetAttrs set_attrs, const char* want)
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "unsigned_int_ops_bad_marker");
+    rocke_value_t* a = rocke_b_param(&b, "a", rocke_i32(), nullptr);
+    rocke_value_t* n = rocke_b_param(&b, "n", rocke_i32(), nullptr);
+    marker(&b, a, runtime_end ? n : nullptr, [&](rocke_attr_map_t* m) { set_attrs(&b, m); });
+    rocke_b_ret(&b);
+    const std::string errors = verify_errors(&b);
+    EXPECT(errors == std::string(want) + "\n",
+           std::string("want '") + want + "', got '" + errors + "'");
+    rocke_ir_builder_free(&b);
+}
+
+void case_verifier_rejects_marker_attrs()
+{
+    expect_marker_rejected(
+        false,
+        [](rocke_ir_builder_t* b, rocke_attr_map_t* m) {
+            rocke_attr_set_int(b, m, "multiple_of", 0);
+            rocke_attr_set_int(b, m, "residue", 0);
+        },
+        "arith.assume_range: multiple_of must be >= 1, got 0");
+    expect_marker_rejected(
+        false,
+        [](rocke_ir_builder_t* b, rocke_attr_map_t* m) {
+            rocke_attr_set_int(b, m, "multiple_of", 4);
+            rocke_attr_set_int(b, m, "residue", 4);
+        },
+        "arith.assume_range: residue must be in [0, 4), got 4");
+    expect_marker_rejected(
+        true,
+        [](rocke_ir_builder_t* b, rocke_attr_map_t* m) {
+            rocke_attr_set_int(b, m, "multiple_of", 1);
+            rocke_attr_set_int(b, m, "residue", 0);
+            rocke_attr_set_int(b, m, "lt", 8);
+            rocke_attr_set_int(b, m, "lt_plus", 0);
+        },
+        "arith.assume_range: lt is given both as an attr and as an operand; "
+        "state one upper end");
+    expect_marker_rejected(
+        false,
+        [](rocke_ir_builder_t* b, rocke_attr_map_t* m) {
+            rocke_attr_set_int(b, m, "multiple_of", 1);
+            rocke_attr_set_int(b, m, "residue", 0);
+            rocke_attr_set_int(b, m, "ge", 8);
+            rocke_attr_set_int(b, m, "lt", 8);
+        },
+        "arith.assume_range: ge (8) must be below lt (8)");
+    /* A value that is not an integer is refused before any value rule reads it. */
+    expect_marker_rejected(
+        false,
+        [](rocke_ir_builder_t* b, rocke_attr_map_t* m) {
+            rocke_attr_set_str(b, m, "multiple_of", "4");
+            rocke_attr_set_int(b, m, "residue", 0);
+        },
+        "arith.assume_range: multiple_of must be an integer");
+    expect_marker_rejected(
+        false,
+        [](rocke_ir_builder_t* b, rocke_attr_map_t* m) {
+            rocke_attr_set_int(b, m, "multiple_of", 1);
+            rocke_attr_set_int(b, m, "residue", 0);
+            rocke_attr_set_bool(b, m, "ge", true);
+        },
+        "arith.assume_range: ge must be an integer");
+    expect_marker_rejected(
+        false,
+        [](rocke_ir_builder_t* b, rocke_attr_map_t* m) {
+            rocke_attr_set_int(b, m, "multiple_of", 1);
+            rocke_attr_set_int(b, m, "residue", 0);
+            rocke_attr_set_float(b, m, "lt", 8.5);
+        },
+        "arith.assume_range: lt must be an integer");
+    expect_marker_rejected(
+        true,
+        [](rocke_ir_builder_t* b, rocke_attr_map_t* m) {
+            rocke_attr_set_int(b, m, "multiple_of", 1);
+            rocke_attr_set_int(b, m, "residue", 0);
+            rocke_attr_set_bool(b, m, "lt_plus", false);
+        },
+        "arith.assume_range: lt_plus must be an integer");
+}
+
+/* nuw and ult take i32 or i64 operands (add_nuw's and cmp_ult's forms); the
+ * verifier refuses raw IR of another type with the Python texts. */
+void case_unsigned_forms_need_i32_or_i64()
+{
+    for(const rocke_type_t* type : {rocke_i1(), rocke_i8()})
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "unsigned_int_ops_narrow");
+        rocke_value_t* a = rocke_b_param(&b, "a", type, nullptr);
+        rocke_value_t* operands[2] = {a, a};
+        rocke_attr_map_t add_attrs = rocke_i_attrs(&b);
+        rocke_attr_set_str(&b, &add_attrs, "wrap", "nuw");
+        rocke_i_op1(&b, ROCKE_OP_ARITH_ADD, operands, 2, type, &add_attrs, "sum");
+        rocke_attr_map_t cmp_attrs = rocke_i_attrs(&b);
+        rocke_attr_set_str(&b, &cmp_attrs, "pred", "ult");
+        rocke_i_op1(&b, ROCKE_OP_ARITH_CMP, operands, 2, rocke_i1(), &cmp_attrs, "below");
+        rocke_b_ret(&b);
+        const std::string name = type->name;
+        const std::string want = "arith.add: wrap 'nuw' needs i32 or i64 operands, got " + name
+                                 + "\narith.cmp: pred 'ult' needs i32 or i64 operands, got " + name
+                                 + "\n";
+        const std::string errors = verify_errors(&b);
+        EXPECT(errors == want, "want '" + want + "', got '" + errors + "'");
+        rocke_ir_builder_free(&b);
+    }
+}
+
+/* The HIP lowering checks an arith.cmp pred against the verifier's rule before
+ * reading it and refuses it with ROCKE_ERR_VALUE in the verifier's words: ult
+ * takes i32 or i64 operands, and an unknown or non-string pred is not read as
+ * lt. The same cases and texts as test_unsigned_int_ops.py. */
+void case_hip_refuses_a_bad_pred()
+{
+    struct PredCase
+    {
+        const char* pred; /* nullptr: the int attr 1 */
+        const rocke_type_t* type;
+        const char* want;
+    };
+    const PredCase cases[] = {
+        {"ult", rocke_f32(), "arith.cmp: pred 'ult' needs i32 or i64 operands, got f32"},
+        {"ult", rocke_i8(), "arith.cmp: pred 'ult' needs i32 or i64 operands, got i8"},
+        {"ugt", rocke_i32(), "arith.cmp: unknown pred 'ugt'"},
+        {nullptr, rocke_i32(), "arith.cmp: pred must be a string"},
+    };
+    for(const PredCase& c : cases)
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "refused_pred");
+        rocke_value_t* a = rocke_b_param(&b, "a", c.type, nullptr);
+        rocke_value_t* operands[2] = {a, a};
+        rocke_attr_map_t attrs = rocke_i_attrs(&b);
+        if(c.pred)
+        {
+            rocke_attr_set_str(&b, &attrs, "pred", c.pred);
+        }
+        else
+        {
+            rocke_attr_set_int(&b, &attrs, "pred", 1);
+        }
+        rocke_i_op1(&b, ROCKE_OP_ARITH_CMP, operands, 2, rocke_i1(), &attrs, "cmp");
+        rocke_b_ret(&b);
+        std::string hip;
+        const rocke_status_t status = lower_hip_status(&b, &hip);
+        const char* msg = rocke_ir_builder_error(&b);
+        EXPECT(status == ROCKE_ERR_VALUE && msg && std::string(c.want) == msg,
+               "want status " + std::to_string((int)ROCKE_ERR_VALUE) + " '" + c.want
+                   + "', got status " + std::to_string((int)status) + " '" + (msg ? msg : "")
+                   + "'");
+        rocke_ir_builder_free(&b);
+    }
+}
+
+/* A wrap or pred of another attr kind is refused, not read as the default
+ * (nsw, lt): by the verifier, and for the wrap by both lowerers (the HIP
+ * lowerer's refusal of such a pred is case_hip_refuses_a_bad_pred). */
+void case_non_string_wrap_and_pred()
+{
+    const char* wrap_error = "arith.add: wrap must be the string 'nsw' or 'nuw'";
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "unsigned_int_ops_non_string");
+    rocke_value_t* a = rocke_b_param(&b, "a", rocke_i32(), nullptr);
+    rocke_value_t* out
+        = rocke_b_param(&b, "out", rocke_ptr_type(&b, rocke_i32(), "global"), nullptr);
+    rocke_value_t* operands[2] = {a, a};
+    rocke_attr_map_t add_attrs = rocke_i_attrs(&b);
+    rocke_attr_set_int(&b, &add_attrs, "wrap", 1);
+    rocke_value_t* sum
+        = rocke_i_op1(&b, ROCKE_OP_ARITH_ADD, operands, 2, rocke_i32(), &add_attrs, "sum");
+    rocke_attr_map_t cmp_attrs = rocke_i_attrs(&b);
+    rocke_attr_set_int(&b, &cmp_attrs, "pred", 1);
+    rocke_i_op1(&b, ROCKE_OP_ARITH_CMP, operands, 2, rocke_i1(), &cmp_attrs, "cmp");
+    rocke_b_global_store(&b, out, rocke_b_const_i32(&b, 0), sum, 1);
+    rocke_b_ret(&b);
+    const std::string errors = verify_errors(&b);
+    const std::string want = std::string(wrap_error) + "\narith.cmp: pred must be a string\n";
+    EXPECT(errors == want, "want '" + want + "', got '" + errors + "'");
+    EXPECT(lower_llvm(&b).empty(), "LLVM lowering accepted a non-string wrap");
+    EXPECT(lower_hip(&b).empty(), "HIP lowering accepted a non-string wrap");
+    rocke_ir_builder_free(&b);
+}
+
+/* The folder's value for the op stored by the kernel's only store. */
+bool folded_store_value(rocke_ir_builder_t* b, int64_t* out)
+{
+    rocke_kernel_def_t* k = rocke_ir_builder_kernel(b);
+    rocke_optimize_kernel(b, k, 0);
+    for(int i = 0; i < k->body->num_ops; ++i)
+    {
+        const rocke_op_t* op = k->body->ops[i];
+        if(op->opcode != ROCKE_OP_MEMREF_GLOBAL_STORE_TYPED)
+            continue;
+        const rocke_op_t* producer = op->operands[2]->op;
+        return producer && producer->opcode == ROCKE_OP_ARITH_CONSTANT
+               && rocke_attr_get_int(&producer->attrs, "value", out);
+    }
+    return false;
+}
+
+void case_constant_folding()
+{
+    const int64_t n = 7;
+    for(bool wide : {false, true})
+        for(int64_t x : {int64_t{-1}, int64_t{0}, n - 1, n})
+        {
+            rocke_ir_builder_t b;
+            rocke_ir_builder_init(&b, "unsigned_int_ops_fold");
+            rocke_value_t* out
+                = rocke_b_param(&b, "out", rocke_ptr_type(&b, rocke_i1(), "global"), nullptr);
+            rocke_value_t* xv = wide ? rocke_b_const_i64(&b, x) : rocke_b_const_i32(&b, x);
+            rocke_value_t* nv = wide ? rocke_b_const_i64(&b, n) : rocke_b_const_i32(&b, n);
+            rocke_b_global_store(&b, out, rocke_b_const_i32(&b, 0), rocke_b_cmp_ult(&b, xv, nv), 1);
+            int64_t got = -2;
+            const int64_t want = (x >= 0 && x < n) ? 1 : 0;
+            EXPECT(folded_store_value(&b, &got) && got == want,
+                   "cmp_ult fold of " + std::to_string(x) + (wide ? " (i64)" : " (i32)"));
+            rocke_ir_builder_free(&b);
+        }
+
+    /* A folded add_nuw holds the value the hardware computes: the i32 register
+     * holds 0x80000000 (-2^31 read as signed), a signed compare sees it below
+     * 0, and widening it as unsigned keeps 2^31. Same values as the Python
+     * test. */
+    enum class NuwUse
+    {
+        sum,
+        signed_compare,
+        zext
+    };
+    for(NuwUse use : {NuwUse::sum, NuwUse::signed_compare, NuwUse::zext})
+    {
+        rocke_ir_builder_t nb;
+        rocke_ir_builder_init(&nb, "unsigned_int_ops_fold_nuw");
+        const rocke_type_t* out_type = use == NuwUse::zext ? rocke_i64() : rocke_i32();
+        rocke_value_t* out
+            = rocke_b_param(&nb, "out", rocke_ptr_type(&nb, out_type, "global"), nullptr);
+        rocke_value_t* sum
+            = rocke_b_add_nuw(&nb, rocke_b_const_i32(&nb, INT32_MAX), rocke_b_const_i32(&nb, 1));
+        rocke_value_t* stored = sum;
+        int64_t want = INT32_MIN;
+        const char* label = "sum";
+        if(use == NuwUse::signed_compare)
+        {
+            stored = rocke_b_select(&nb,
+                                    rocke_b_cmp_lt(&nb, sum, rocke_b_const_i32(&nb, 0)),
+                                    rocke_b_const_i32(&nb, 1),
+                                    rocke_b_const_i32(&nb, 2));
+            want = 1;
+            label = "signed compare";
+        }
+        else if(use == NuwUse::zext)
+        {
+            stored = rocke_b_zext(&nb, sum, rocke_i64());
+            want = int64_t{1} << 31;
+            label = "zext";
+        }
+        rocke_b_global_store(&nb, out, rocke_b_const_i32(&nb, 0), stored, 1);
+        int64_t got = -2;
+        EXPECT(folded_store_value(&nb, &got) && got == want,
+               std::string("folded add_nuw ") + label + " gave " + std::to_string(got) + ", want "
+                   + std::to_string(want));
+        rocke_ir_builder_free(&nb);
+    }
+
+    /* A literal written in unsigned form is the same i32 bits as a folded sum:
+     * 0x80000000 + 0 equals the literal 0x80000000. */
+    {
+        rocke_ir_builder_t lb;
+        rocke_ir_builder_init(&lb, "unsigned_int_ops_fold_literal");
+        rocke_value_t* out
+            = rocke_b_param(&lb, "out", rocke_ptr_type(&lb, rocke_i32(), "global"), nullptr);
+        rocke_value_t* sum
+            = rocke_b_add(&lb, rocke_b_const_i32(&lb, 0x80000000LL), rocke_b_const_i32(&lb, 0));
+        rocke_value_t* same = rocke_b_cmp_eq(&lb, sum, rocke_b_const_i32(&lb, 0x80000000LL));
+        rocke_value_t* stored
+            = rocke_b_select(&lb, same, rocke_b_const_i32(&lb, 1), rocke_b_const_i32(&lb, 2));
+        rocke_b_global_store(&lb, out, rocke_b_const_i32(&lb, 0), stored, 1);
+        int64_t got = -2;
+        EXPECT(folded_store_value(&lb, &got) && got == 1,
+               "folded 0x80000000 + 0 == 0x80000000 gave " + std::to_string(got) + ", want 1");
+        rocke_ir_builder_free(&lb);
+    }
+
+    /* A folded div / mod holds what sdiv / srem compute (quotient rounded
+     * toward zero); a zero divisor or a quotient past the signed range is not
+     * folded. Same cases as the Python test. */
+    struct DivModCase
+    {
+        bool is_mod;
+        bool wide;
+        int64_t a, d;
+        bool folds;
+        int64_t want;
+    };
+    const DivModCase div_mod_cases[] = {
+        {true, false, 3, 0x80000000LL, true, 3},
+        {false, false, 3, 0x80000000LL, true, 0},
+        {true, false, -7, 2, true, -1},
+        {false, false, -7, 2, true, -3},
+        {true, false, 7, -2, true, 1},
+        {false, false, 7, -2, true, -3},
+        {true, false, -7, -2, true, -1},
+        {false, false, INT32_MIN, 3, true, -715827882},
+        {false, true, (int64_t{1} << 62) + 1, 1, true, (int64_t{1} << 62) + 1},
+        {true, true, INT64_MIN, 3, true, -2},
+        {false, false, INT32_MIN, -1, false, 0},
+        {true, false, INT32_MIN, -1, false, 0},
+        {false, true, INT64_MIN, -1, false, 0},
+        {true, true, INT64_MIN, -1, false, 0},
+        {false, false, 5, 0, false, 0},
+        {true, false, 5, 0, false, 0},
+    };
+    for(const DivModCase& c : div_mod_cases)
+    {
+        rocke_ir_builder_t db;
+        rocke_ir_builder_init(&db, "unsigned_int_ops_fold_div_mod");
+        const rocke_type_t* type = c.wide ? rocke_i64() : rocke_i32();
+        rocke_value_t* out
+            = rocke_b_param(&db, "out", rocke_ptr_type(&db, type, "global"), nullptr);
+        rocke_value_t* av = c.wide ? rocke_b_const_i64(&db, c.a) : rocke_b_const_i32(&db, c.a);
+        rocke_value_t* dv = c.wide ? rocke_b_const_i64(&db, c.d) : rocke_b_const_i32(&db, c.d);
+        rocke_value_t* q = c.is_mod ? rocke_b_mod(&db, av, dv) : rocke_b_div(&db, av, dv);
+        rocke_b_global_store(&db, out, rocke_b_const_i32(&db, 0), q, 1);
+        int64_t got = -2;
+        const bool folded = folded_store_value(&db, &got);
+        const std::string label = std::string(c.is_mod ? "mod " : "div ") + std::to_string(c.a)
+                                  + ", " + std::to_string(c.d);
+        EXPECT(folded == c.folds, label + (c.folds ? " did not fold" : " folded"));
+        EXPECT(!c.folds || got == c.want,
+               label + " gave " + std::to_string(got) + ", want " + std::to_string(c.want));
+        rocke_ir_builder_free(&db);
+    }
+
+    /* A marker on a constant folds to the constant, even with a runtime end. */
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "unsigned_int_ops_fold_marker");
+    rocke_value_t* out
+        = rocke_b_param(&b, "out", rocke_ptr_type(&b, rocke_i32(), "global"), nullptr);
+    rocke_value_t* n_param = rocke_b_param(&b, "n", rocke_i32(), nullptr);
+    rocke_value_t* range = marker(&b, rocke_b_const_i32(&b, 5), n_param, [&](rocke_attr_map_t* m) {
+        rocke_attr_set_int(&b, m, "multiple_of", 1);
+        rocke_attr_set_int(&b, m, "residue", 0);
+        rocke_attr_set_int(&b, m, "lt_plus", 0);
+    });
+    rocke_b_global_store(&b, out, rocke_b_const_i32(&b, 0), range, 1);
+    int64_t got = -2;
+    EXPECT(folded_store_value(&b, &got) && got == 5, "marker on a constant folds");
+    rocke_ir_builder_free(&b);
+}
+
+} // namespace
+
+int main(int argc, char** argv)
+{
+    if(argc == 2 && strcmp(argv[1], "--print-llvm") == 0)
+    {
+        rocke_ir_builder_t b;
+        rocke_ir_builder_init(&b, "unsigned_int_ops");
+        build_two_op(&b, rocke_i32());
+        const std::string ll = lower_llvm(&b);
+        rocke_ir_builder_free(&b);
+        if(ll.empty())
+            return 1;
+        fputs(ll.c_str(), stdout);
+        return 0;
+    }
+    if(argc != 1)
+    {
+        /* A mistyped mode must not fall through to the self-test and pass. */
+        fprintf(stderr, "usage: %s [--print-llvm]\n", argv[0]);
+        return 2;
+    }
+    case_llvm_text();
+    case_hip_text();
+    case_lshr_hip_text();
+    case_hip_refuses_a_bad_pred();
+    case_builder_refusals();
+    case_verifier_accepts();
+    case_verifier_rejects_marker_attrs();
+    case_non_string_wrap_and_pred();
+    case_unsigned_forms_need_i32_or_i64();
+    case_constant_folding();
+    if(g_failures)
+    {
+        fprintf(stderr, "%d unsigned integer op check(s) failed\n", g_failures);
+        return 1;
+    }
+    return 0;
+}

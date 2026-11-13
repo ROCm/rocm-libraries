@@ -125,14 +125,9 @@ class wthread {
     ///@}
 
     /// Move construction transfers ownership; source becomes not joinable.
-    __host__ __device__ wthread(wthread &&other) noexcept
-#ifdef __HIP_DEVICE_COMPILE__
-        : worknode_d(other.worknode_d), cached_tdata(::std::move(other.cached_tdata)) {
-        other.worknode_d = nullptr;
-    }
-#else
-        : worknode_d(::std::move(other.worknode_d)), cached_tdata(::std::move(other.cached_tdata)) {}
-#endif
+    // Defined out of line because the host path has to register the new object with the scheduler's live-object
+    // counter. See the definition in thread.cxx.
+    __host__ __device__ wthread(wthread &&other) noexcept;
     ///@{
     __host__ __device__ wthread &operator=(const wthread&) = delete;
     ///@}

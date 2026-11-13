@@ -307,7 +307,17 @@ TEST(RocprimDeviceFindFirstOfTests, LargeIndices)
 
     constexpr bool debug_synchronous = false;
 
-    for(size_t size : test_utils::get_large_sizes(seeds[0]))
+    bool cap_sizes = false;
+#ifdef _WIN32
+    // Cap sizes on Windows APUs to avoid TDR timeouts
+    hipDeviceProp_t device_props;
+    HIP_CHECK(hipGetDeviceProperties(&device_props, device_id));
+    cap_sizes = device_props.integrated != 0;
+#endif
+
+    const std::vector<size_t> sizes = cap_sizes ? test_utils::get_large_sizes<35>(seeds[0])
+                                                : test_utils::get_large_sizes(seeds[0]);
+    for(size_t size : sizes)
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 

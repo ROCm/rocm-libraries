@@ -236,6 +236,7 @@ DefaultSolution:
   WorkGroupReduction: false
 Solutions:
 - SolutionIndex: 0
+  SolutionUID: 0uTnqGg7rdaY
   SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_Bias_BiasSrcD_Grad_HAH_MT128x256x32_MI32x32x8x1_SN_AFC1_AF0EM1_GSU1_MIWT2_4
   1LDSBuffer: 1
   AssignedDerivedParameters: true
@@ -350,6 +351,7 @@ Solutions:
   _staggerStrideShift: 2
   allowLRVWforTLUandMI: false
 - SolutionIndex: 1
+  SolutionUID: 0uTnqGg73AKM
   SolutionNameMin: Cijk_Ailk_Bljk_HHS_BH_Bias_BiasSrcD_Grad_HAH_MT128x256x32_MI32x32x8x1_SN_AFC1_AF0EM8_GSU1_MIWT2_4
   1LDSBuffer: 1
   AssertFree0ElementMultiple: 8

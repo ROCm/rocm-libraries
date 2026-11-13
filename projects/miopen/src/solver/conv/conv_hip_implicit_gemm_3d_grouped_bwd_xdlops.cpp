@@ -210,9 +210,13 @@ bool PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::SetNextValue(
 {
     if(valid_kernels.empty())
     {
-        // For generic search, we want all available kernels, not heuristic selection
+        // For generic search we want all available kernels, not heuristic selection.
+        // InitValidKernels seeds index/kernel_id to element 0 -- required, because
+        // GenericSearch's ComputedIterator skips configs whose IsValid() is false, so an
+        // unset kernel_id would silently start enumeration at valid_kernels[1].
         InitValidKernels(problem);
-        assert(!valid_kernels.empty());
+        if(valid_kernels.empty())
+            return false;
         return true;
     }
     if((index + 1) < valid_kernels.size())
@@ -350,8 +354,7 @@ ConvSolution ConvHipImplicitGemm3DGroupBwdXdlops::GetSolution(
     if(!loader.IsLoaded())
         return ConvSolution{miopenStatusInternalError};
 
-    return loader.GetSolution(
-        CKSolverType::GrpConv3dBwd, ctx, problem, config.kernel_id, config.UseTF32());
+    return loader.GetSolutionTf32Aware(CKSolverType::GrpConv3dBwd, ctx, problem, config.kernel_id);
 }
 
 } // namespace conv

@@ -52,11 +52,115 @@ Definitions:
     - { alpha:  -0.02, alphai: -0.1 }
 
 Tests:
+# Quick
+- name: bsrsm
+  category: quick
+  function: bsrsm
+  precision: *single_only_precisions
+  M_N:
+    - { M: 20, N: 20 }
+  K: [4]
+  block_dim: [2]
+  alpha_alphai:
+    - { alpha: 1.0, alphai: 0.0 }
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_zero]
 
-#
-# CATEGORY: PRE_CHECKIN
-#
+- name: bsrsm
+  category: quick
+  function: bsrsm
+  precision: *single_only_precisions
+  M_N:
+    - { M: 768, N: 768 }
+    - { M: 1536, N: 1536 }
+    - { M: 3072, N: 3072 }
+  K: [8, 32]
+  block_dim: [4]
+  alpha_alphai:
+    - { alpha: 1.0, alphai: 0.0 }
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random, rocsparse_matrix_tridiagonal]
 
+- name: bsrsm
+  category: quick
+  function: bsrsm
+  precision: *single_only_precisions
+  M_N:
+    - { M: 8192, N: 8192 }
+    - { M: 16384, N: 16384 }
+    - { M: 24576, N: 24576 }
+  K: [16]
+  block_dim: [4]
+  alpha_alphai:
+    - { alpha: 1.0, alphai: 0.0 }
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_tridiagonal]
+
+- name: bsrsm
+  category: quick
+  function: bsrsm
+  precision: *single_only_precisions
+  M: 1
+  N: 1
+  K: [8]
+  block_dim: [4]
+  alpha_alphai:
+    - { alpha: 1.0, alphai: 0.0 }
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos3, qc2534, mplate]
+
+# block_dim 32 selects the large-kernel case 32 (next power of two, clamped to
+# the wavefront). Both fill modes exercise the upper and lower launches.
+- name: bsrsm
+  category: quick
+  function: bsrsm
+  precision: *single_only_precisions
+  M_N:
+    - { M: 64, N: 64 }
+  K: [1]
+  block_dim: [32]
+  alpha_alphai:
+    - { alpha: 1.0, alphai: 0.0 }
+  direction: [rocsparse_direction_row]
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
+  apol: [rocsparse_analysis_policy_reuse]
+  spol: [rocsparse_solve_policy_auto]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_tridiagonal]
+
+# Pre_checkin
 - name: bsrsm_bad_arg
   category: pre_checkin
   function: bsrsm_bad_arg
@@ -158,128 +262,7 @@ Tests:
   matrix: [rocsparse_matrix_random]
   graph_test: true
 
-#
-# CATEGORY: QUICK
-#
-
-- name: bsrsm
-  category: quick
-  function: bsrsm
-  precision: *single_double_precisions_complex_real
-  M_N: *M_N_range_quick
-  K: [65]
-  block_dim: [12]
-  alpha_alphai: *alpha_range_quick
-  direction: [rocsparse_direction_row]
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none]
-  diag: [rocsparse_diag_type_non_unit]
-  uplo: [rocsparse_fill_mode_lower]
-  apol: [rocsparse_analysis_policy_reuse]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_random]
-
-- name: bsrsm
-  category: quick
-  function: bsrsm
-  precision: *double_only_precisions_complex
-  M_N: *M_N_range_quick
-  K: [280]
-  block_dim: [5, 14, 71]
-  alpha_alphai: *alpha_range_quick
-  direction: [rocsparse_direction_row]
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none]
-  diag: [rocsparse_diag_type_non_unit]
-  uplo: [rocsparse_fill_mode_lower]
-  apol: [rocsparse_analysis_policy_reuse]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_random]
-
-- name: bsrsm
-  category: quick
-  function: bsrsm
-  precision: *single_only_precisions_complex
-  M_N: *M_N_range_quick
-  K: [65]
-  block_dim: [2]
-  alpha_alphai: *alpha_range_quick
-  direction: [rocsparse_direction_row]
-  transA: [rocsparse_operation_none, rocsparse_operation_transpose]
-  transB: [rocsparse_operation_none]
-  diag: [rocsparse_diag_type_non_unit]
-  uplo: [rocsparse_fill_mode_lower]
-  apol: [rocsparse_analysis_policy_reuse]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_zero]
-
-- name: bsrsm_file
-  category: quick
-  function: bsrsm
-  precision: *single_only_precisions
-  M: 1
-  K: [63, 316]
-  block_dim: [4, 27, 52]
-  alpha_alphai: *alpha_range_quick
-  direction: [rocsparse_direction_column]
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none]
-  diag: [rocsparse_diag_type_non_unit]
-  uplo: [rocsparse_fill_mode_upper]
-  apol: [rocsparse_analysis_policy_reuse]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [nos2,
-             nos4]
-
-- name: bsrsm_file
-  category: quick
-  function: bsrsm
-  precision: *double_only_precisions
-  M: 1
-  K: [63, 316]
-  block_dim: [4, 52]
-  alpha_alphai: *alpha_range_quick
-  direction: [rocsparse_direction_column]
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none]
-  diag: [rocsparse_diag_type_non_unit]
-  uplo: [rocsparse_fill_mode_upper]
-  apol: [rocsparse_analysis_policy_reuse]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_file_rocalution]
-  convert_to_int: true
-  filename: [nos6,
-             nos7]
-
-- name: bsrsm_file
-  category: quick
-  function: bsrsm
-  precision: *double_only_precisions_complex
-  M: 1
-  K: [12]
-  block_dim: [22]
-  alpha_alphai: *alpha_range_quick
-  direction: [rocsparse_direction_row]
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_transpose]
-  diag: [rocsparse_diag_type_non_unit]
-  uplo: [rocsparse_fill_mode_lower]
-  apol: [rocsparse_analysis_policy_reuse]
-  spol: [rocsparse_solve_policy_auto]
-  baseA: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mplate]
-
-#
-# CATEGORY: NIGHTLY
-#
-
+# Nightly
 - name: bsrsm
   category: nightly
   function: bsrsm

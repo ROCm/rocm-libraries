@@ -57,7 +57,9 @@ wave_any(pred)    # i32, 1 iff any lane's pred != 0
 wave_ballot(pred) # i64 bitmask
 ```
 
-LLVM emission uses `llvm.amdgcn.ballot.i64`. `wave_all` / `wave_any` compare the ballot mask to specific values (`-1` for all, `0` for none).
+LLVM emission uses `llvm.amdgcn.ballot.i64`, which sets only the low `wave_size` bits. `wave_all` compares the mask to the full-wave value (`-1` on wave64, `0xffffffff` on wave32); `wave_any` compares it to `0`.
+
+`wave_all` requires full EXEC (every lane of the wave active). Unlike HIP's `__all`, which counts only active lanes, it returns 0 under partial EXEC (a divergent region or a sub-wave workgroup).
 
 Typical use: adaptive online softmax. When `wave_all(max_diff < THRESHOLD)`, the workgroup can skip the rescale path entirely.
 

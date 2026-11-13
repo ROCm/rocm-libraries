@@ -11,8 +11,8 @@
 #
 # Why the oracle is a LINK and not a verify or a codegen
 # -----------------------------------------------------
-# A declare for an intrinsic that does not exist (e.g. the fictional
-# llvm.amdgcn.mfma.f32.16x16x128.fp4 in the decl table) is accepted by
+# A declare for an intrinsic that does not exist (e.g. a fictional fp4 MFMA
+# intrinsic, which an earlier decl table declared) is accepted by
 # `opt -passes=verify`, and is accepted by `clang -S` as well -- the backend
 # quietly treats the unknown llvm.* name as an ordinary external function and
 # emits a GOT-relative call to it. The undefined symbol only surfaces when the
@@ -52,13 +52,15 @@ from __future__ import annotations
 import argparse
 import concurrent.futures as cf
 import os
-import re
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-from _llvm_identity import clang_identity, flavor_of_clang
+from _corpus import load_corpus as _load_corpus
+from _flavor_gate import requires_newer_flavor as _requires_newer_flavor
+from _hostcaps import available_cpus
+from _llvm_identity import flavor_of_clang, tool_identity
 
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parent  # tools -> rocke/platform
@@ -84,19 +86,10 @@ def _bootstrap_sys_path() -> None:
 # library/tests/test_library_layering.py, and carries the same rule: this list
 # only ever SHRINKS. An entry that starts passing is itself a failure (see
 # STALE below) so a fix cannot silently leave dead weight behind.
-KNOWN_BAD: dict[str, str] = {
-    "attention/gfx942/3d_bf16_d128_b64": (
-        "LLVM23 backend fatal: 'Do not know how to expand this operator's "
-        "operand'; attention 3d on gfx942 only"
-    ),
-    "attention/gfx942/3d_fp16_d128_b64": (
-        "LLVM23 backend fatal: 'Do not know how to expand this operator's "
-        "operand'; attention 3d on gfx942 only"
-    ),
-}
+KNOWN_BAD: dict[str, str] = {}
 
 
-def _llvm_tool(name: str) -> str | None:
+def llvm_tool(name: str) -> str | None:
     """Locate an LLVM tool, preferring the ROCm install rocke itself loads.
 
     PATH is checked LAST on purpose. A ROCm install ships opt/clang under
@@ -149,6 +142,21 @@ def _llvm_tool(name: str) -> str | None:
         if raw:
             roots.append(Path(raw))
 
+    # Real ROCm installs, found without going through a loaded comgr. When the
+    # comgr that loaded is one bundled with another package (the ROCm torch
+    # wheel ships its own), no LLVM sits beside it, and stopping here would fall
+    # through to PATH -- typically a distro clang with no AMDGPU linker, the
+    # wrong-vintage toolchain this lookup exists to avoid.
+    try:
+        from rocke.runtime.runtime_coexistence import _rocm_root_libdirs
+
+        install_libdirs = _rocm_root_libdirs()
+    except (ImportError, OSError):  # rocke not importable here, or an unreadable /opt
+        install_libdirs = []
+    for libdir in install_libdirs:
+        libp = Path(libdir).resolve()
+        roots.extend(libp.parents[i] for i in range(min(3, len(libp.parents))))
+
     for root in roots:
         cand = root / "llvm" / "bin" / exe
         if _is_file(cand):
@@ -159,25 +167,41 @@ def _llvm_tool(name: str) -> str | None:
     return shutil.which(name)
 
 
-def _requires_newer_flavor(exc: BaseException) -> bool:
-    """Did the instance decline to lower because this LLVM is too old?
+def _unpaired_opt(
+    opt: str, clang: str, clang_identity: str, clang_flavor: str
+) -> str | None:
+    """Why L0 must be skipped because `opt` is not clang's sibling, or None.
 
-    The corpus is flavor-wide but a host is not. An instance gated on a newer
-    vintage says so and refuses -- `tile.wmma_gfx1250_..._scale_e8m0_e8m0_k32`
-    raises `requires llvm23 (ROCm 7.13+), got llvm22` -- and that refusal is
-    the emitter working correctly, on a case this host was never going to be
-    able to validate.
+    `llvm_tool` resolves the two independently: a discovered prefix shipping
+    clang but not `opt` lets `opt` fall through to PATH, so the L0 verifier and
+    the L1 compiler can be different vintages. An older `opt` that rejects a
+    construct newer than its parser marks the case red as L0-VERIFY, i.e.
+    blames the kernel for IR that is fine.
 
-    It has to be separated from every other lowering error, because those are
-    still a validity failure of exactly the kind this gate exists to catch. So
-    the match is on the gate's own wording rather than on the exception type:
-    a bare `NotImplementedError` from anywhere else in the lowerer stays fatal.
+    Skip the lane rather than fail the run (unlike the generator, which needs
+    both tools and must stop): clang's front end re-reaches L0's findings at
+    L1, so dropping it costs only an earlier diagnostic. The caller already
+    handles `opt is None`.
+
+    Silent when either banner is unparseable, per `flavor_of_clang`: an
+    unreadable version is not evidence of a mismatch.
     """
-    return bool(re.search(r"requires llvm\d+", str(exc)))
+    opt_identity = tool_identity(opt)
+    opt_flavor = flavor_of_clang(opt_identity)
+    if not (opt_flavor and clang_flavor) or opt_flavor == clang_flavor:
+        return None
+    return (
+        f"   L0     : SKIPPED - opt reports {opt_flavor} but clang reports "
+        f"{clang_flavor}; they are different LLVM installs, so an L0 verdict "
+        f"from this opt would not be about the IR this clang compiles. Set "
+        f"ROCKE_LLVM_BIN to one complete LLVM install to restore the lane.\n"
+        f"            opt   : {opt} ({opt_identity})\n"
+        f"            clang : {clang} ({clang_identity})"
+    )
 
 
 def _dump_corpus(
-    out_dir: Path, flavor: str, keep: list
+    out_dir: Path, flavor: str, keep: list, lower_case=None
 ) -> tuple[dict[str, tuple[Path, str]], dict[str, tuple[str, str]]]:
     """Lower every selected case to a .ll on disk.
 
@@ -188,7 +212,10 @@ def _dump_corpus(
     the first such case aborted the whole run with FATAL, which on an llvm22
     host reds the default `run_all.py` gate over one llvm23-gated instance.
     """
-    from rocke_ir_parity_harness import lower_case, safe
+    from rocke_ir_parity_harness import safe
+
+    if lower_case is None:
+        from rocke_ir_parity_harness import lower_case
 
     modules: dict[str, tuple[Path, str]] = {}
     skipped: dict[str, tuple[str, str]] = {}
@@ -196,7 +223,8 @@ def _dump_corpus(
         cid = case["case_id"]
         try:
             _rec, llvm = lower_case(case, flavor)
-        except NotImplementedError as exc:
+        except (NotImplementedError, ValueError) as exc:
+            # The llvm23-gated target ops refuse with a ValueError.
             if not _requires_newer_flavor(exc):
                 raise
             skipped[cid] = ("UNVALIDATED", f"{type(exc).__name__}: {exc}")
@@ -249,7 +277,9 @@ def _compile_argv(clang: str, path: Path, arch: str, out: Path) -> list[str]:
     ]
 
 
-def _compile(clang: str, path: Path, arch: str, out: Path) -> tuple[bool, str]:
+def compile_code_object(
+    clang: str, path: Path, arch: str, out: Path
+) -> tuple[bool, str]:
     """Compile AND LINK to a loadable hsaco. The link is the point -- see the
     module docstring for why stopping at -S would let a nonexistent intrinsic
     through."""
@@ -261,7 +291,7 @@ def _compile(clang: str, path: Path, arch: str, out: Path) -> tuple[bool, str]:
     return proc.returncode == 0, (proc.stderr or proc.stdout).strip()
 
 
-def _target_unsupported(diag: str) -> bool:
+def target_unsupported(diag: str) -> bool:
     """Did this clang refuse the *target*, rather than the module?
 
     The two are not the same finding and must not share a verdict. rocke wires
@@ -280,7 +310,7 @@ def _target_unsupported(diag: str) -> bool:
     return "invalid target id" in diag.lower()
 
 
-def _first_diagnostic(text: str) -> str:
+def first_diagnostic(text: str) -> str:
     """The one line worth printing in the summary table."""
     for line in text.splitlines():
         s = line.strip()
@@ -325,15 +355,22 @@ def main() -> int:
         "--verbose", action="store_true", help="full diagnostic per failure"
     )
     ap.add_argument("--list", action="store_true", help="list the corpus and exit")
+    ap.add_argument(
+        "--cases",
+        default="",
+        help="corpus module file exposing cases()/lower_case() (default: the "
+        "platform representative-IR harness)",
+    )
     args = ap.parse_args()
 
     _bootstrap_sys_path()
-    from rocke_ir_parity_harness import cases, current_flavor
+    from rocke_ir_parity_harness import current_flavor
 
+    corpus = _load_corpus(args.cases)
     native = current_flavor()
     flavor = args.flavor or native
 
-    keep = list(cases())
+    keep = list(corpus.cases())
     if args.only:
         wanted = [s for s in args.only.split(",") if s]
         keep = [c for c in keep if any(w in c["case_id"] for w in wanted)]
@@ -363,8 +400,8 @@ def main() -> int:
         )
         return 1 if args.strict else 0
 
-    clang = _llvm_tool("clang")
-    opt = None if args.no_verify else _llvm_tool("opt")
+    clang = llvm_tool("clang")
+    opt = None if args.no_verify else llvm_tool("opt")
     print(f"   clang  : {clang or '(not found)'}")
     if not args.no_verify:
         print(f"   opt    : {opt or '(not found, L0 skipped)'}")
@@ -382,7 +419,7 @@ def main() -> int:
     # because the path alone does not say which vintage lives there -- and a
     # green recorded against the wrong compiler is not distinguishable after
     # the fact without this line.
-    identity = clang_identity(clang)
+    identity = tool_identity(clang)
     print(f"   version: {identity}")
 
     # The `flavor != native` test above compares two rocke-side values and so
@@ -397,7 +434,7 @@ def main() -> int:
     # mis-attributed run is a permanent false record. This gate writes nothing,
     # so the honest report is that nothing was measured for the flavor asked
     # about -- the same line already drawn for an arch this clang cannot target
-    # (`_target_unsupported`). Failing closed here would also newly red every
+    # (`target_unsupported`). Failing closed here would also newly red every
     # host whose PATH clang disagrees with its comgr, on a gate this change
     # turns on by default, for something the developer did not do wrong.
     # `--strict` is the CI-side opt-in to treating that as a failure.
@@ -413,13 +450,19 @@ def main() -> int:
         )
         return 1 if args.strict else 0
 
+    if opt is not None:
+        unpaired = _unpaired_opt(opt, clang, identity, clang_flavor)
+        if unpaired:
+            print(unpaired)
+            opt = None
+
     tmp = tempfile.TemporaryDirectory(prefix="rocke_ir_validity_")
     ir_dir = Path(args.keep_ir) if args.keep_ir else Path(tmp.name)
     ir_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"\n== lowering {len(keep)} cases ==")
     try:
-        modules, not_lowerable = _dump_corpus(ir_dir, flavor, keep)
+        modules, not_lowerable = _dump_corpus(ir_dir, flavor, keep, corpus.lower_case)
     except Exception as exc:  # a lowering failure is a validity failure too
         print(f"FATAL: lowering raised {type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
@@ -427,7 +470,12 @@ def main() -> int:
     if not_lowerable:
         print(f"   {len(not_lowerable)} case(s) need a newer LLVM than {flavor}")
 
-    jobs = args.jobs or min(32, (os.cpu_count() or 1))
+    # `available_cpus()`, not `os.cpu_count()`: the hosts this runs on are
+    # scheduler-pinned (384 CPUs reported, 2 allowed) or containerised. Sizing
+    # from the machine would run ~32 concurrent clang+link jobs on a 2-CPU
+    # allocation, and the resulting resource-limit failures surface as
+    # L1-COMPILE defects -- bad IR reported for an oversubscribed host.
+    jobs = args.jobs or min(32, available_cpus())
     out_dir = Path(tmp.name) / "out"
     out_dir.mkdir(exist_ok=True)
 
@@ -437,10 +485,12 @@ def main() -> int:
             ok, diag = _verify(opt, path)
             if not ok:
                 return cid, "L0-VERIFY", diag
-        ok, diag = _compile(clang, path, arch, out_dir / (path.stem + f".{arch}.hsaco"))
+        ok, diag = compile_code_object(
+            clang, path, arch, out_dir / (path.stem + f".{arch}.hsaco")
+        )
         if ok:
             return cid, "OK", diag
-        return cid, ("UNVALIDATED" if _target_unsupported(diag) else "L1-COMPILE"), diag
+        return cid, ("UNVALIDATED" if target_unsupported(diag) else "L1-COMPILE"), diag
 
     print(f"\n== compiling (link to hsaco, {jobs} jobs) ==")
     results: dict[str, tuple[str, str]] = {}
@@ -495,7 +545,7 @@ def main() -> int:
             verdict, diag = new_bad[cid]
             arch = _arch_of(cid)
             print(f"\n  {verdict}  {cid}  [{arch}]")
-            print(f"    {_first_diagnostic(diag)}")
+            print(f"    {first_diagnostic(diag)}")
             if args.verbose:
                 for line in diag.splitlines():
                     print(f"      | {line}")

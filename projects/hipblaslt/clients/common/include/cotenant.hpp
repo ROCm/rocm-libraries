@@ -54,13 +54,14 @@ namespace hipblaslt_cotenant
     class Scoped
     {
     public:
-        Scoped(int, int, hipStream_t) {}
+        Scoped(int, int, hipStream_t, bool = false) {}
     };
 }
 
 #else
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdarg>
 #include <cstdio>
@@ -98,6 +99,15 @@ namespace hipblaslt_cotenant
         va_end(args);
     }
 
+    // Stops in this process that the stop kernel did not deliver (its launch failed or
+    // it did not run in time), so the host wrote the flag; tests check that it stays
+    // unchanged.
+    inline std::atomic<int>& host_fallback_stops()
+    {
+        static std::atomic<int> count{0};
+        return count;
+    }
+
     // A cotenant that cannot be stopped keeps its CUs, so later measurements would
     // silently run under contention. Exit without running destructors, which could
     // block on the wedged device.
@@ -128,10 +138,12 @@ namespace hipblaslt_cotenant
                 __builtin_amdgcn_s_sleep(127);
             if constexpr(Stoppable)
             {
-                // Check the device flag once per wave between sleep batches.
+                // Check the flag once per wave between sleep batches. System scope: the
+                // host fallback in Scoped::stop writes it from the CPU, and a device-scope
+                // load may keep reading a stale cached copy.
                 int done = 0;
                 if(threadIdx.x % warpSize == 0)
-                    done = __scoped_atomic_load_n(stop, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+                    done = __scoped_atomic_load_n(stop, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
                 if(__shfl(done, 0))
                     return;
             }
@@ -140,7 +152,7 @@ namespace hipblaslt_cotenant
 
     static __global__ void signal_stop(int* stop)
     {
-        __scoped_atomic_store_n(stop, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+        __scoped_atomic_store_n(stop, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_SYSTEM);
     }
 
     template <bool Stoppable>
@@ -268,11 +280,16 @@ namespace hipblaslt_cotenant
                 // The flag is host-visible, so write it directly if the GEMM stream
                 // cannot deliver the stop.
                 if(!queued && stop_host_)
+                {
+                    if(stop_dev_)
+                        ++host_fallback_stops();
                     __atomic_store_n(stop_host_, 1, __ATOMIC_RELEASE);
+                }
                 stopped = wait_stopped();
                 if(!stopped && queued && stop_host_)
                 {
                     log("cotenant: stop kernel did not run in time; stopping from the host\n");
+                    ++host_fallback_stops();
                     __atomic_store_n(stop_host_, 1, __ATOMIC_RELEASE);
                     stopped = wait_stopped();
                 }
@@ -288,7 +305,14 @@ namespace hipblaslt_cotenant
         }
 
     public:
-        Scoped(int n_cus, int max_occupancy, hipStream_t gemm_stream)
+        // distinct_priority gives the cotenant stream a different priority from the
+        // GEMM stream. HIP shares hardware queues only between streams of the same
+        // priority, and work behind the never-ending cotenant on a shared in-order
+        // queue (the stop kernel, or a GEMM) cannot start until the cotenant stops.
+        Scoped(int         n_cus,
+               int         max_occupancy,
+               hipStream_t gemm_stream,
+               bool        distinct_priority = false)
             : gemm_stream_(gemm_stream)
         {
             if(n_cus == 0)
@@ -296,7 +320,18 @@ namespace hipblaslt_cotenant
             try
             {
                 check(hipStreamSynchronize(gemm_stream));
-                check(hipStreamCreateWithFlags(&stream_, hipStreamNonBlocking));
+                if(distinct_priority)
+                {
+                    int least = 0, greatest = 0, gemm_priority = 0;
+                    check(hipDeviceGetStreamPriorityRange(&least, &greatest));
+                    check(hipStreamGetPriority(gemm_stream, &gemm_priority));
+                    check(
+                        hipStreamCreateWithPriority(&stream_,
+                                                    hipStreamNonBlocking,
+                                                    gemm_priority == greatest ? least : greatest));
+                }
+                else
+                    check(hipStreamCreateWithFlags(&stream_, hipStreamNonBlocking));
                 check(hipHostMalloc(reinterpret_cast<void**>(&control_),
                                     sizeof(int),
                                     hipHostMallocMapped | hipHostMallocCoherent));

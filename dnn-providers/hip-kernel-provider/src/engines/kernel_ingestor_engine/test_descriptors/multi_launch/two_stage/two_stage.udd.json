@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "2545616f-55c7-4ca7-9c53-f0387ede882a",
+  "name": "two_stage dispatch",
+  "dispatch_symbol": "hipkernel.test.multi_launch.dispatch"
+}

@@ -7,6 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from ..arch.wmma_scale import ScaledWmmaOp
+from ..ir import I32, VectorType
 
 
 @dataclass(frozen=True)
@@ -20,15 +21,21 @@ class ScaledWmmaLLVM:
         return f"i{self.contract.scales.word_bits}"
 
     @property
-    def matrix_types(self) -> tuple[str, str]:
+    def matrix_registers(self) -> tuple[VectorType, VectorType]:
+        """The register types of A and B: their 32-bit words."""
         atom = self.contract.atom
-        return tuple(f"<{n} x i32>" for n in (atom.a_frag_len, atom.b_frag_len))
+        return tuple(VectorType(I32, n) for n in (atom.a_frag_len, atom.b_frag_len))
+
+    @property
+    def matrix_types(self) -> tuple[str, str]:
+        """The LLVM spelling of :attr:`matrix_registers`."""
+        return tuple(f"<{t.count} x i32>" for t in self.matrix_registers)
 
     @property
     def intrinsic_suffix(self) -> str:
         atom = self.contract.atom
         return (
-            f"f32.{atom.m}x{atom.n}x{atom.k}.f8f6f4.v{atom.c_frag_len}f32."
+            f"f32.{atom.m}x{atom.n}x{atom.k}.f8f6f4.v{atom.dst.frag_len}f32."
             f"v{atom.a_frag_len}i32.v{atom.b_frag_len}i32"
         )
 

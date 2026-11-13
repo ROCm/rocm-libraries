@@ -30,6 +30,7 @@
 #include <libloaderapi.h>
 #endif
 
+#include "../../../library/src/amd_detail/rocblaslt/src/include/rocblaslt_adaptive_sm_count.hpp"
 #include "d_vector.hpp"
 #include "utility.hpp"
 #include <atomic>
@@ -40,6 +41,7 @@
 #include <new>
 #include <stdexcept>
 #include <stdlib.h>
+#include <string>
 
 #include "client/include/Utility.hpp"
 
@@ -301,6 +303,17 @@ static void portable_setenv(const char* name, const char* value)
 hipblaslt_local_handle::hipblaslt_local_handle(const Arguments& arg)
     : hipblaslt_local_handle()
 {
+    // Both descriptor-taking APIs and C++ setProblem with sizes/strides inherit this request.
+    if(arg.uniform_summation_order >= 0)
+    {
+        const auto status
+            = hipblasLtSetUniformSummationOrder(m_handle, arg.uniform_summation_order);
+        if(status != HIPBLAS_STATUS_SUCCESS)
+            throw std::runtime_error("uniform_summation_order="
+                                     + std::to_string(arg.uniform_summation_order) + ": "
+                                     + hipblas_status_to_string(status));
+    }
+
     if(arg.tensile_solution_selection_method >= 0)
     {
         auto sol_selec_env = getenv("TENSILE_SOLUTION_SELECTION_METHOD");
@@ -475,4 +488,14 @@ void hipblasltDispatchValuesToFile(hipblasOperation_t transA, hipDataType T,
                    << " is Unsupported and could be added to the if-else "
                       "condition to write to file"
                    << std::endl;
+}
+
+bool hipblaslt_timing_allowed_with_adaptive_sm_count()
+{
+    using namespace rocblaslt::adaptive_sm;
+    if(!Config::fromEnv().hintVaries())
+        return true;
+    hipblaslt_cerr << "error: " << kEnvEnable << " changes the timed solution during timing; set "
+                   << kEnvForce << "=<cus> to time a fixed hint" << std::endl;
+    return false;
 }
