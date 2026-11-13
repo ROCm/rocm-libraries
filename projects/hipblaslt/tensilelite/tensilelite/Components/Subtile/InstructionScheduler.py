@@ -5023,7 +5023,6 @@ def relaxWaitGrForOutstandingStores(module):
 
 
 
-BALANCED_CURRENT_CELL_NOTE = "balanced current-cell"
 _BALANCED_READ_LEAD_MFMAS = 4
 
 
@@ -5061,8 +5060,12 @@ def _gapOpenForRead(gap) -> bool:
     return sum(1 for x in work if _isDsRead(x)) <= 1 and len(work) <= 3
 
 
-def deferBalancedCurrentCellWait(module) -> bool:
+def deferBalancedCurrentCellWait(module, balancedReads) -> bool:
     """Spread balanced current-cell reads behind the first MFMA and drain them at their consumer.
+
+    balancedReads are the ds_reads emitted for LRPlacements with balancedCurrentCell set,
+    matched by identity. Only main-loop bodies are deferred: NGLL and NLL keep these reads
+    in partition 0's prefix, behind its drain.
 
     The cell scheduler issues partition 0's current-cell reads ahead of its first MFMA,
     followed by an lgkmcnt(0). The balanced reads (planHalfDisjointBalance) feed a later
@@ -5077,9 +5080,8 @@ def deferBalancedCurrentCellWait(module) -> bool:
     """
     items = list(module.flatitems())
     first = next((k for k, inst in enumerate(items) if _isMfma(inst)), None)
-    reads = [k for k, inst in enumerate(items)
-             if _isDsRead(inst)
-             and BALANCED_CURRENT_CELL_NOTE in (getattr(inst, "comment", "") or "")]
+    balanced = {id(inst) for inst in balancedReads}
+    reads = [k for k, inst in enumerate(items) if _isDsRead(inst) and id(inst) in balanced]
     if first is None or not reads or reads[-1] > first:
         return False
     readInsts = [items[k] for k in reads]

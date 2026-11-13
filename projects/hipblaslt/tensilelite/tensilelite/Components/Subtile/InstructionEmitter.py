@@ -328,7 +328,9 @@ class InstructionEmitter:
                     reads = emitSingleDsRead(
                         ti, tileId, subtileK, subIterK_within, dstTile, swizzled=swizzled,
                         mt=placement.mtIteration, k_index=k)
-                    if getattr(placement, "balancedCurrentCell", False):
+                    # Asm annotation only. The scheduler finds these reads through
+                    # placement.balancedCurrentCell, not through this comment.
+                    if placement.balancedCurrentCell:
                         for inst in reads.flatitems():
                             if isinstance(inst, LocalReadInstruction):
                                 inst.comment = f"{inst.comment}; balanced current-cell"

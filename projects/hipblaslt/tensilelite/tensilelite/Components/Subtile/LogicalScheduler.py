@@ -5493,6 +5493,7 @@ class LogicalScheduler:
             dropDominatedLgkmWaits,
             relaxWaitGrForOutstandingStores,
             spillC0ScaleRefreshes,
+            _isDsRead,
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT,
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250,
         )
@@ -5816,7 +5817,19 @@ class LogicalScheduler:
                 and self.config.dualPeriodScale):
             dropDominatedLgkmWaits(module)
         if self.halfDisjoint and label.startswith("MAINLOOP"):
-            deferBalancedCurrentCellWait(module)
+            balanced_reads = [
+                inst
+                for partition_emitted in emitted_3d
+                for em_list in partition_emitted
+                for em in em_list
+                if em.opType == "lr" and em.source.balancedCurrentCell
+                for inst in em.instructions if _isDsRead(inst)]
+            # planHalfDisjointBalance only pays off once the reads leave the
+            # partition-0 prefix; kept there they are slower than no balance.
+            if balanced_reads and not deferBalancedCurrentCellWait(module, balanced_reads):
+                raise RuntimeError(
+                    f"{label}: the balanced current-cell reads could not leave "
+                    "partition 0's prefix (deferBalancedCurrentCellWait refused)")
             issueSaluFirst(module)
             keepValuBehindLeader(module)
             # C1 still places scale refreshes in C0, so C0 is final only here.

@@ -5341,10 +5341,9 @@ class TestDeferBalancedCurrentCellWait:
     def _body(self, other_prefix_read=False):
         from rocisa.code import Module
         mfma, read, drain, SBarrier, SWaitCnt = self._parts()
+        balanced = [read(108, 2, "A tile 3 low"), read(112, 4, "A tile 3 high")]
         body = [drain("head drain"), SWaitCnt(vlcnt=18, comment="top vmcnt"),
-                SBarrier(comment="top barrier"),
-                read(108, 2, "A tile 3 low; balanced current-cell"),
-                read(112, 4, "A tile 3 high; balanced current-cell")]
+                SBarrier(comment="top barrier")] + balanced
         if other_prefix_read:
             body.append(read(200, 7, "B current"))
         body += [drain("prefix drain"), mfma(20, "M0")]
@@ -5355,17 +5354,17 @@ class TestDeferBalancedCurrentCellWait:
         module = Module("MAINLOOP")
         for inst in body:
             module.add(inst)
-        return module
+        return module, balanced
 
     def test_barrier_returns_behind_m0_and_reads_spread(self):
         from tensilelite.Components.Subtile.InstructionScheduler import (
             deferBalancedCurrentCellWait)
-        module = self._body()
-        assert deferBalancedCurrentCellWait(module)
+        module, balanced = self._body()
+        assert deferBalancedCurrentCellWait(module, balanced)
         assert _labels(module) == [
             "head drain", "M0", "top vmcnt", "top barrier", "M1", "next 2", "M2",
-            "A tile 3 low; balanced current-cell", "next 3", "M3",
-            "A tile 3 high; balanced current-cell", "M4",
+            "A tile 3 low", "next 3", "M3",
+            "A tile 3 high", "M4",
             "M5", "next 6", "M6", "M7", "Wait for balanced current-cell LR", "M8", "M9"]
         wait = [x for x in module.flatitems()
                 if getattr(x, "comment", "") == "Wait for balanced current-cell LR"]
@@ -5374,24 +5373,25 @@ class TestDeferBalancedCurrentCellWait:
     def test_drain_stays_for_other_prefix_reads(self):
         from tensilelite.Components.Subtile.InstructionScheduler import (
             deferBalancedCurrentCellWait)
-        module = self._body(other_prefix_read=True)
-        assert deferBalancedCurrentCellWait(module)
+        module, balanced = self._body(other_prefix_read=True)
+        assert deferBalancedCurrentCellWait(module, balanced)
         labels = _labels(module)
         assert labels[:6] == ["head drain", "top vmcnt", "top barrier", "B current",
                               "prefix drain", "M0"]
         assert labels.index("Wait for balanced current-cell LR") == labels.index("M8") - 1
-        assert labels.index("A tile 3 low; balanced current-cell") > labels.index("M1")
+        assert labels.index("A tile 3 low") > labels.index("M1")
 
-    def test_no_marked_reads_is_a_no_op(self):
+    def test_unlisted_reads_are_a_no_op(self):
         from rocisa.code import Module
         from tensilelite.Components.Subtile.InstructionScheduler import (
             deferBalancedCurrentCellWait)
         mfma, read, drain, SBarrier, SWaitCnt = self._parts()
         module = Module("MAINLOOP")
-        for inst in [SBarrier(comment="b"), read(108, 2, "plain"), drain("d"), mfma(108, "M0")]:
+        for inst in [SBarrier(comment="b"), read(108, 2, "plain; balanced current-cell"),
+                     drain("d"), mfma(108, "M0")]:
             module.add(inst)
         before = _labels(module)
-        assert not deferBalancedCurrentCellWait(module)
+        assert not deferBalancedCurrentCellWait(module, [])
         assert _labels(module) == before
 
     def test_reads_stay_ahead_of_an_address_write(self):
@@ -5400,7 +5400,7 @@ class TestDeferBalancedCurrentCellWait:
         from rocisa.instruction import VXorB32
         from tensilelite.Components.Subtile.InstructionScheduler import (
             deferBalancedCurrentCellWait)
-        module = self._body()
+        module, balanced = self._body()
         items = list(module.flatitems())
         swap = VXorB32(dst=vgpr(2), src0=vgpr(2), src1=vgpr(3), comment="swap A")
         at = _labels(module).index("M1")
@@ -5408,9 +5408,9 @@ class TestDeferBalancedCurrentCellWait:
         rebuilt = Module("MAINLOOP")
         for inst in items:
             rebuilt.add(inst)
-        assert deferBalancedCurrentCellWait(rebuilt)
+        assert deferBalancedCurrentCellWait(rebuilt, balanced)
         labels = _labels(rebuilt)
-        assert labels.index("A tile 3 low; balanced current-cell") < labels.index("swap A")
+        assert labels.index("A tile 3 low") < labels.index("swap A")
 
 
 class TestFirstConsumerRank:
