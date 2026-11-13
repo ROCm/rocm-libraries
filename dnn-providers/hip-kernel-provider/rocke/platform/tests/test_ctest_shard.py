@@ -365,16 +365,22 @@ def test_an_empty_shard_passes(shared_tree):
     assert ran == 1
 
 
-def test_an_empty_selection_fails_on_every_shard(shared_tree):
+def test_an_empty_selection_or_a_missing_path_fails_on_every_shard(shared_tree):
     runs = [_Run(("-k", "nomatch", "test_mod.py"), _gtest(k)) for k in range(4)]
+    runs += [_Run(("test_missing.py",), _gtest(k)) for k in range(4)]
     runs.append(_Run(("test_empty.py",), flag=False))
-    *sharded, unsharded = _pytest_side_by_side(shared_tree, runs)
+    results = _pytest_side_by_side(shared_tree, runs)
+    sharded, missing, unsharded = results[:4], results[4:8], results[8]
     for run in sharded:
         out = run.stdout + run.stderr
         assert run.returncode == pytest.ExitCode.NO_TESTS_COLLECTED, out
         assert EMPTY_SHARE not in out
         line = _split_line(run.stdout)
         assert (line.group(3), line.group(4)) == ("0", "0")
+    for run in missing:
+        out = run.stdout + run.stderr
+        assert run.returncode == pytest.ExitCode.USAGE_ERROR, out
+        assert "test_missing.py" in run.stderr
     assert unsharded.returncode == pytest.ExitCode.NO_TESTS_COLLECTED, unsharded.stdout
 
 
