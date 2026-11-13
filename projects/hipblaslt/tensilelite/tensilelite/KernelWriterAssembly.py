@@ -10128,6 +10128,9 @@ class KernelWriterAssembly(KernelWriter):
           else:
             module.add(self.undefineSgpr(regTag))
 
+    if kernel.get("ScalarLoadB"):
+      module.add(ScalarLoadB.unpark(self, kernel))
+
     if self.db["InitVgpr"] & 0x2:
       module.add(self.vgprPool.initTmps(self.consts.initVgprValue,start=0, stop=100))
     if 0: # FIXME: Can remove?

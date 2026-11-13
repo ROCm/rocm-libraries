@@ -18,7 +18,7 @@ pytestmark = pytest.mark.unit
 _CONFIG = Path(__file__).resolve().parents[1] / "common/sgemm_scalar_load_b_asm.yaml"
 _ARCH = "gfx1151"
 # Problem groups of _CONFIG: (index, number of forked solutions)
-_GROUPS = {"TN": (0, 8), "TN prefetch": (1, 2), "TT": (2, 8), "TT prefetch": (3, 1), "NN": (4, 4), "NT": (5, 4)}
+_GROUPS = {"TN": (0, 12), "TN prefetch": (1, 2), "TT": (2, 12), "TT prefetch": (3, 1), "NN": (4, 4), "NT": (5, 4)}
 
 
 def _emit(group):
@@ -178,12 +178,24 @@ def test_register_budget_keeps_eight_waves_per_simd():
         assert int(re.search(r"\.amdhsa_next_free_sgpr (\d+)", source).group(1)) <= 106, name
 
 
+def test_parked_sgprs_are_undefined_during_the_summation():
+    # The ring reuses the store arguments' registers; a use in between must not assemble.
+    name, source, _ = _emit("TN")[-1]
+    insts = _instructions(source)
+    for sgpr in ("Alpha", "Beta", "AddressD", "StridesD", "StrideD1J"):
+        undef = insts.index(".set sgpr%s, UNDEF" % sgpr)
+        redef = next(i for i in range(undef, len(insts)) if insts[i].startswith(".set sgpr%s, " % sgpr)
+                     and "UNDEF" not in insts[i])
+        assert undef < insts.index("label_LoopBeginL:") < redef, sgpr
+        assert not any("sgpr%s" % sgpr in line for line in insts[undef + 1:redef]), sgpr
+
+
 def _config_with(tmp_path, **forks):
     """One-problem config: the TN group with fork parameters replaced."""
     config = yaml.safe_load(_CONFIG.read_text())
     problem = config["BenchmarkProblems"][0]
     params = problem[1]["ForkParameters"]
-    base = {"ScalarLoadB": [4], "UseDualFMAC": [True], "PrefetchGlobalRead": [1]}
+    base = {"ScalarLoadB": [8], "UseDualFMAC": [True], "PrefetchGlobalRead": [1]}
     for key, value in {**base, **forks}.items():
         for entry in params:
             if key in entry:

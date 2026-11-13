@@ -414,7 +414,7 @@ Solutions:
   PackedC1IndicesX: [1]
   PostLoopStoreInNll: false
   PreloadKernArgs: false
-  ScalarLoadB: 4
+  ScalarLoadB: 8
   ScheduleGROverBarrier: 0
   ScheduleGlobalRead: 0
   ScheduleIterAlg: 1
@@ -633,7 +633,7 @@ Solutions:
   PackedC1IndicesX: [1]
   PostLoopStoreInNll: false
   PreloadKernArgs: false
-  ScalarLoadB: 4
+  ScalarLoadB: 8
   ScheduleGROverBarrier: 0
   ScheduleGlobalRead: 0
   ScheduleIterAlg: 1

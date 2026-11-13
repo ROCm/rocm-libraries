@@ -416,7 +416,7 @@ Solutions:
   PostLoopStoreInNll: false
   PrefetchGlobalRead: 2
   PreloadKernArgs: false
-  ScalarLoadB: 4
+  ScalarLoadB: 8
   ScalarLoadBPrefetch: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 1
@@ -634,7 +634,7 @@ Solutions:
   PostLoopStoreInNll: false
   PrefetchGlobalRead: 2
   PreloadKernArgs: false
-  ScalarLoadB: 4
+  ScalarLoadB: 8
   ScalarLoadBPrefetch: 2
   ScheduleGROverBarrier: 0
   ScheduleIterAlg: 1
