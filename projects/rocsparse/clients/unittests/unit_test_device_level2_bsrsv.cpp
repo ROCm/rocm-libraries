@@ -33,6 +33,9 @@
 // ignores.
 //
 #include "unit_test_device_level2_common.hpp"
+#include "unit_test_grid_clamp.hpp"
+
+#include <memory>
 
 using namespace level2;
 
@@ -187,6 +190,9 @@ namespace
         bool                device      = false;
         float               alpha       = 1.0f;
         bool                diag_blocks = true;
+        // When positive, maxGridSize[0] of the solve. 1 is smaller than every grid
+        // of these sizes, so the host launches the wide kernels.
+        int max_grid_x = 0;
     };
 
     template <typename T>
@@ -195,7 +201,8 @@ namespace
         SCOPED_TRACE(::testing::Message()
                      << "bsrsv bd=" << c.bd << " mb=" << c.mb << " fill=" << c.fill
                      << " diag=" << c.diag << " trans=" << c.trans << " dir=" << c.dir
-                     << " base=" << c.base << " device=" << c.device << " alpha=" << c.alpha);
+                     << " base=" << c.base << " device=" << c.device << " alpha=" << c.alpha
+                     << " max_grid_x=" << c.max_grid_x);
 
         const bsrsv_matrix<T> A = make_bsrsv<T>(c.mb, c.bd, c.fill, c.dir, c.base, c.diag_blocks);
         const int32_t         m = c.mb * c.bd;
@@ -250,23 +257,30 @@ namespace
                                     rocsparse_solve_policy_auto,
                                     dbuf.ptr),
                   rocsparse_status_success);
-        ASSERT_EQ(bsrsv_solve<T>(handle,
-                                 c.dir,
-                                 c.trans,
-                                 c.mb,
-                                 A.nnzb(),
-                                 c.device ? dalpha.ptr : &alpha,
-                                 descr.d,
-                                 dval.ptr,
-                                 dptr.ptr,
-                                 dind.ptr,
-                                 c.bd,
-                                 info.d,
-                                 dx.ptr,
-                                 dy.ptr,
-                                 rocsparse_solve_policy_auto,
-                                 dbuf.ptr),
-                  rocsparse_status_success);
+        {
+            std::unique_ptr<rocsparse_ut::ScopedMaxGridSizeX> clamp;
+            if(c.max_grid_x > 0)
+            {
+                clamp = std::make_unique<rocsparse_ut::ScopedMaxGridSizeX>(handle, c.max_grid_x);
+            }
+            ASSERT_EQ(bsrsv_solve<T>(handle,
+                                     c.dir,
+                                     c.trans,
+                                     c.mb,
+                                     A.nnzb(),
+                                     c.device ? dalpha.ptr : &alpha,
+                                     descr.d,
+                                     dval.ptr,
+                                     dptr.ptr,
+                                     dind.ptr,
+                                     c.bd,
+                                     info.d,
+                                     dx.ptr,
+                                     dy.ptr,
+                                     rocsparse_solve_policy_auto,
+                                     dbuf.ptr),
+                      rocsparse_status_success);
+        }
 
         // The position lives in host or device memory according to the pointer mode.
         rocsparse_int                position = 0;
@@ -301,7 +315,7 @@ namespace
     {
     protected:
         template <typename T>
-        void sweep_dims(const std::vector<int32_t>& dims, int32_t mb)
+        void sweep_dims(const std::vector<int32_t>& dims, int32_t mb, int max_grid_x = 0)
         {
             int n = 0;
             for(const int32_t bd : dims)
@@ -311,16 +325,17 @@ namespace
                             {rocsparse_operation_none, rocsparse_operation_transpose})
                         {
                             solve_case c;
-                            c.bd     = bd;
-                            c.mb     = mb;
-                            c.fill   = fill;
-                            c.diag   = diag;
-                            c.trans  = trans;
-                            c.dir    = ((n / 2) % 2) ? rocsparse_direction_column
-                                                     : rocsparse_direction_row;
-                            c.base   = (n / 3) % 2;
-                            c.device = (n % 3) == 1;
-                            c.alpha  = (n % 4 == 3) ? -2.0f : 1.0f;
+                            c.bd         = bd;
+                            c.mb         = mb;
+                            c.fill       = fill;
+                            c.diag       = diag;
+                            c.trans      = trans;
+                            c.dir        = ((n / 2) % 2) ? rocsparse_direction_column
+                                                         : rocsparse_direction_row;
+                            c.base       = (n / 3) % 2;
+                            c.device     = (n % 3) == 1;
+                            c.alpha      = (n % 4 == 3) ? -2.0f : 1.0f;
+                            c.max_grid_x = max_grid_x;
                             ++n;
                             run_bsrsv<T>(handle, c);
                             if(HasFailure())
@@ -349,6 +364,28 @@ namespace
             c.bd          = bd;
             c.mb          = 8;
             c.diag_blocks = false;
+            run_bsrsv<float>(handle, c);
+        }
+    }
+
+    // A grid of one block is smaller than the narrow launch of 8 block rows on
+    // either wavefront size, so the host picks the wide kernels for every case:
+    // the general ones on wave32, and on wave64 the shared ones with BSRDIM 8,
+    // 16 and 32 and the general one above 32.
+    TEST_F(L2DeviceBsrsv, clamped_grid_wide_kernels)
+    {
+        sweep_dims<float>({2, 8, 9, 16, 17, 32, 33, 40}, 8, 1);
+        sweep_dims<double>({3, 20}, 8, 1);
+        sweep_dims<rocsparse_float_complex>({4, 17}, 8, 1);
+        sweep_dims<rocsparse_double_complex>({2, 33}, 8, 1);
+
+        for(const int32_t bd : {2, 9})
+        {
+            solve_case c;
+            c.bd          = bd;
+            c.mb          = 8;
+            c.diag_blocks = false;
+            c.max_grid_x  = 1;
             run_bsrsv<float>(handle, c);
         }
     }
