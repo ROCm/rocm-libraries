@@ -61,6 +61,7 @@ from kernels.common.attention_bwd import (
     validate_attn_bwd_spec,
 )
 
+from ._attention_bwd_lds_model import lds_hazards, traced_spec
 from ._attention_bwd_test_utils import distinct_configs
 from .test_attention_bwd_ir import (
     ARCHS,
@@ -68,10 +69,8 @@ from .test_attention_bwd_ir import (
     VARIANTS,
     _walk,
     group_loops,
-    lds_hazards,
     q_loops,
     step_bodies,
-    traced_spec,
 )
 from .sdpa.bwd_kernel_cases import config_knobs
 

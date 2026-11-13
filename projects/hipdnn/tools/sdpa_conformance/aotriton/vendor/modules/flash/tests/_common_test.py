@@ -332,17 +332,191 @@ def sdpa_math(query, key, value, attn_mask=None, dropout_p=0.0, dropout_mask=Non
                                                                  dropout_mask=dropout_mask)
 
 
-def windowed_attn_mask(seqlen_q, seqlen_k, window_left, window_right, *, dtype, device):
-    """Additive mask for top-left aligned windowed attention.
+# Mirrors aotriton_flash.WindowValue. Repeated here because this module is
+# importable without the library, which is what lets the mask builder below be
+# checked on a CPU-only box.
+WINDOW_TOP_LEFT_ALIGNED = -2147483647       # 0x80000001
+WINDOW_BOTTOM_RIGHT_ALIGNED = -2147483646   # 0x80000002
 
-    Query i attends key j iff i - window_left <= j <= i + window_right, which is
-    the left_mask/right_mask pair the kernels build from parse_window.
+
+def resolve_window(seqlen_q, seqlen_k, window_left, window_right, principal_diagonal=0):
+    """(L, R) for ONE sequence: query i keeps key j iff i - L <= j <= i + R.
+
+    The host-side twin of parse_window / resolve_window in the kernels.
+    d = seqlen_k - seqlen_q of this sequence, p = principal_diagonal:
+
+      left  sentinel          -> L = seqlen_q (unbounded)
+      right TOP_LEFT_ALIGNED  -> R = 0
+      right BOTTOM_RIGHT      -> R = seqlen_k - seqlen_q
+      numeric w               -> L = w - p*d,  R = w + p*d
+
+    Sentinels are not shifted by p: they already name their diagonal.
     """
+    d = seqlen_k - seqlen_q
+    p = int(principal_diagonal)
+    if window_left in (WINDOW_TOP_LEFT_ALIGNED, WINDOW_BOTTOM_RIGHT_ALIGNED):
+        L = seqlen_q
+    else:
+        L = window_left - p * d
+    if window_right == WINDOW_TOP_LEFT_ALIGNED:
+        R = 0
+    elif window_right == WINDOW_BOTTOM_RIGHT_ALIGNED:
+        R = d
+    else:
+        R = window_right + p * d
+    return L, R
+
+
+def windowed_keep_mask(seqlen_q, seqlen_k, window_left, window_right, principal_diagonal=0, *, device):
+    """Bool (seqlen_q, seqlen_k), True where query i keeps key j."""
+    L, R = resolve_window(seqlen_q, seqlen_k, window_left, window_right, principal_diagonal)
     i = torch.arange(seqlen_q, device=device)[:, None]
     j = torch.arange(seqlen_k, device=device)[None, :]
-    keep = (j >= i - window_left) & (j <= i + window_right)
+    # 0 <= j < seqlen_k holds by construction of the arange.
+    return (j >= i - L) & (j <= i + R)
+
+
+# ---- Shared parameter sets for the principal-diagonal tests ----------------
+#
+# The windows every principal-diagonal test sweeps, as (id, (window_left,
+# window_right)). `-1` is a literal bound here, NOT "unbounded": that is
+# AOTriton's generalized window, and the (-1, 3) case exists to catch a kernel
+# or a harness that reads it flash-attention's way.
+PD_WINDOWS = [
+    ('LeftSentinel_0', (WINDOW_BOTTOM_RIGHT_ALIGNED, 0)),
+    ('8_0', (8, 0)),
+    ('0_8', (0, 8)),
+    ('4_4', (4, 4)),
+    ('m1_3', (-1, 3)),
+]
+PD_WINDOW_VALUES = [w for _, w in PD_WINDOWS]
+PD_WINDOW_IDS = [i for i, _ in PD_WINDOWS]
+
+# (window_left, window_right) as PyTorch's test_varlen_attention.py spells them,
+# i.e. flash-attention's convention, where a negative side is UNBOUNDED. They
+# go through `fa_window_to_aotriton` before they reach the library.
+FA_WINDOWS = [(4, 0), (-1, 4), (0, 0), (1, 0), (0, 1), (0, -1), (4, 4), (8, 2)]
+FA_WINDOW_IDS = ['FA_' + '_'.join(f'm{-v}' if v < 0 else str(v) for v in w) for w in FA_WINDOWS]
+
+# Principal diagonal p. The ids name the choice instead of the integer so that
+# `-k PD1` selects the bottom-right ones.
+PD_CHOICES = [0, 1]
+PD_CHOICE_IDS = ['PD0', 'PD1']
+
+# Dense (seqlen_q, seqlen_k): q < k, q == k, q > k, and a decode (seqlen_q = 1).
+# Off the block grid on purpose, so the diagonal is not tile-aligned.
+PD_DENSE_SEQLENS = [(33, 80), (64, 64), (80, 33), (1, 77)]
+PD_DENSE_SEQLEN_IDS = ['QltK', 'QeqK', 'QgtK', 'Decode']
+
+# A varlen batch that mixes every relation in one call: q < k, q == k, q > k,
+# a decode row and a chunked prefill (16 new queries over a 100-token context).
+PD_VARLEN_SEQLENS_Q = np.array([17, 64, 40, 1, 16, 30])
+PD_VARLEN_SEQLENS_K = np.array([64, 64, 33, 57, 100, 30])
+
+
+def fa_window_to_aotriton(window_left, window_right, max_seqlen_q, causal=False):
+    """flash-attention `(causal, wl, wr)` -> AOTriton `(left, right)` for p = 1.
+
+    The table in "Matching flash-attention" of the gSWA design document. Returns
+    None when FA would not mask at all. A negative FA size means unbounded and
+    must never be passed through: AOTriton reads it as a literal bound.
+    """
+    if causal:
+        window_right = 0
+    if window_left < 0 and window_right < 0:
+        return None
+    if window_left < 0 and window_right == 0:
+        return (WINDOW_BOTTOM_RIGHT_ALIGNED, WINDOW_BOTTOM_RIGHT_ALIGNED)
+    if window_left < 0:
+        return (WINDOW_BOTTOM_RIGHT_ALIGNED, window_right)
+    if window_right < 0:
+        return (window_left, max_seqlen_q)
+    return (window_left, window_right)
+
+
+def fa_keep(seqlen_q, seqlen_k, window_left, window_right, causal=False):
+    """flash-attention's own predicate, spelled straight from its definition.
+
+    Independent of `resolve_window`: bottom-right diagonal j = i + d, up to
+    `window_left` keys left of it and `window_right` right of it, negative =
+    unbounded. Returns a bool numpy array (seqlen_q, seqlen_k).
+    """
+    if causal:
+        window_right = 0
+    d = seqlen_k - seqlen_q
+    keep = np.zeros((seqlen_q, seqlen_k), dtype=bool)
+    for i in range(seqlen_q):
+        for j in range(seqlen_k):
+            ok = True
+            if window_left >= 0 and j < i + d - window_left:
+                ok = False
+            if window_right >= 0 and j > i + d + window_right:
+                ok = False
+            keep[i, j] = ok
+    return keep
+
+
+def pd_causal(window, principal_diagonal):
+    """The `causal` argument that carries a window and p: `(left, right, p)`."""
+    return (window[0], window[1], principal_diagonal)
+
+
+def windowed_attn_mask(seqlen_q, seqlen_k, window_left, window_right, principal_diagonal=0, *, dtype, device):
+    """Additive mask for windowed attention of ONE sequence (or a dense batch).
+
+    Query i attends key j iff i - L <= j <= i + R with (L, R) from
+    `resolve_window`: sentinels as they have always resolved, a numeric bound
+    measured from the top-left diagonal for principal_diagonal = 0 and from the
+    bottom-right one (flash-attention's convention) for 1.
+
+    For varlen call it once per sequence with that sequence's own lengths; d is
+    per sequence there, which is the whole point of the bit.
+
+    A row that keeps no key comes out all -inf. See `windowed_sdpa_math` for
+    the reference that has to cope with it.
+    """
+    keep = windowed_keep_mask(seqlen_q,
+                              seqlen_k,
+                              window_left,
+                              window_right,
+                              principal_diagonal,
+                              device=device)
     mask = torch.zeros((seqlen_q, seqlen_k), dtype=dtype, device=device)
     return mask.masked_fill_(keep.logical_not(), float('-inf'))
+
+
+def windowed_sdpa_math(query, key, value, window, *, dropout_p=0.0, dropout_mask=None,
+                       scale=None, enable_gqa=False):
+    """`sdpa_math` under a window `(left, right[, principal_diagonal])`.
+
+    A query row that sees no key has O = 0 in AOTriton (its LSE is a
+    placeholder and is not part of the contract). softmax over an all -inf row
+    is NaN, and its gradient would poison dK/dV, so such a row is rebuilt as
+    "attend key 0" and its OUTPUT multiplied by 0: finite everywhere, O = 0,
+    and a zero upstream gradient for that row.
+    """
+    window_left, window_right = window[0], window[1]
+    principal_diagonal = window[2] if len(window) > 2 else 0
+    seqlen_q, seqlen_k = query.shape[-2], key.shape[-2]
+    keep = windowed_keep_mask(seqlen_q,
+                              seqlen_k,
+                              window_left,
+                              window_right,
+                              principal_diagonal,
+                              device=query.device)
+    live = keep.any(dim=-1)
+    keep = keep | (~live)[:, None] & (torch.arange(seqlen_k, device=query.device)[None, :] == 0)
+    mask = torch.zeros((seqlen_q, seqlen_k), dtype=query.dtype, device=query.device)
+    mask.masked_fill_(keep.logical_not(), float('-inf'))
+    out, attn = sdpa_math(query,
+                          key,
+                          value,
+                          attn_mask=mask,
+                          dropout_p=dropout_p,
+                          dropout_mask=dropout_mask,
+                          scale=scale,
+                          enable_gqa=enable_gqa)
+    return out * live.to(out.dtype)[:, None], attn
 
 
 def _reference_scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_mask=None, dropout_p=0.0, is_causal=False, scale=None) -> torch.Tensor:
@@ -766,12 +940,18 @@ class SdpaContext(object):
         assert not (p.causal and ref_b is not None), \
             'causal/window with an explicit bias is undefined'
         if isinstance(p.causal, tuple):
-            ref_b = windowed_attn_mask(ref_q.shape[2], ref_k.shape[2], *p.causal,
-                                       dtype=ref_q.dtype, device=ref_q.device)
+            return windowed_sdpa_math(ref_q,
+                                      ref_k,
+                                      ref_v,
+                                      p.causal,
+                                      dropout_p=p.dropout_p,
+                                      dropout_mask=dropout_mask,
+                                      scale=p.sm_scale,
+                                      enable_gqa=enable_gqa)
         # _scaled_dot_product_attention_math seems also working for nested tensor
         ref_out, ref_mask = sdpa_math(ref_q, ref_k, ref_v,
                                       dropout_p=p.dropout_p,
-                                      is_causal=p.causal if not isinstance(p.causal, tuple) else False,
+                                      is_causal=p.causal,
                                       attn_mask=ref_b,
                                       scale=p.sm_scale,
                                       dropout_mask=dropout_mask,
@@ -831,13 +1011,23 @@ class SdpaContext(object):
             return False, max_adiff, None
         # print(f"{adiff=} {test_error=}")
         if adiff is not None:
-            valid = test_error < (adiff * 2.0)
+            # <=, not <: a recorded adiff of exactly 0.0 (an exact tensor) must pass its own 0.0.
+            valid = test_error <= (adiff * 2.0)
         else:
             atol = default_atol[torch.float32]
             threshold = max(atol, ref_error * fudge_factor)
             valid = test_error <= threshold
         # tft = test_error / ref_error if ref_error * fudge_factor > atol else 1.0
-        tft = test_error / ref_error if not valid else 1.0
+        # tft is the fudge factor that would have let this tensor pass. When
+        # the low-precision reference is exact (ref_error == 0, e.g. a single
+        # visible key makes P == 1 and dV == dO), no factor can: report inf
+        # instead of dividing by zero, so the failure names the tensor.
+        if valid:
+            tft = 1.0
+        elif ref_error > 0:
+            tft = test_error / ref_error
+        else:
+            tft = math.inf
         if not valid:
             pass
             # print(f'For {tname}, Consider bump fudge_factor to {tft} = {test_error=} / {ref_error=}. So that {test_error=} < {threshold=} = max({atol=}, {ref_error=} * {tft=})')
@@ -1111,11 +1301,21 @@ class VarlenSdpaContext(SdpaContext):
                 dropout_mask = dropout_mask[:, :seqlen_q, :seqlen_k]  # Trim to actual seqlen
                 print(f'REF CLAMPED {dropout_mask.shape=}')
                 # print(f'REF {dropout_mask=}')
-            ref_out, ref_mask = torch.ops.aten._scaled_dot_product_attention_math(ref_q, ref_k, ref_v,
-                                                                        dropout_p=p.dropout_p,
-                                                                        is_causal=p.causal,
-                                                                        scale=p.sm_scale,
-                                                                        dropout_mask=dropout_mask)
+            if isinstance(p.causal, tuple):
+                # Per sequence, so d = seqlen_k - seqlen_q is this sequence's own.
+                ref_out, ref_mask = windowed_sdpa_math(ref_q,
+                                                       ref_k,
+                                                       ref_v,
+                                                       p.causal,
+                                                       dropout_p=p.dropout_p,
+                                                       dropout_mask=dropout_mask,
+                                                       scale=p.sm_scale)
+            else:
+                ref_out, ref_mask = torch.ops.aten._scaled_dot_product_attention_math(ref_q, ref_k, ref_v,
+                                                                            dropout_p=p.dropout_p,
+                                                                            is_causal=p.causal,
+                                                                            scale=p.sm_scale,
+                                                                            dropout_mask=dropout_mask)
             ref_out_array[0, :, seqlen_q_start:seqlen_q_start+seqlen_q, :] = ref_out
             ref_mask_array.append(ref_mask)
         return ref_out_array, None
@@ -1163,12 +1363,22 @@ class PaddedVarlenSdpaContext(VarlenSdpaContext):
             if dropout_mask is not None:
                 dropout_mask = dropout_mask[:, :seqlen_q, :seqlen_k]  # Trim to actual seqlen
                 # print(f'REF {dropout_mask=}')
-            ref_out, ref_mask = sdpa_math(ref_q, ref_k, ref_v,
-                                          dropout_p=p.dropout_p,
-                                          is_causal=p.causal,
-                                          scale=p.sm_scale,
-                                          dropout_mask=dropout_mask,
-                                          enable_gqa=enable_gqa)
+            if isinstance(p.causal, tuple):
+                ref_out, ref_mask = windowed_sdpa_math(ref_q,
+                                                       ref_k,
+                                                       ref_v,
+                                                       p.causal,
+                                                       dropout_p=p.dropout_p,
+                                                       dropout_mask=dropout_mask,
+                                                       scale=p.sm_scale,
+                                                       enable_gqa=enable_gqa)
+            else:
+                ref_out, ref_mask = sdpa_math(ref_q, ref_k, ref_v,
+                                              dropout_p=p.dropout_p,
+                                              is_causal=p.causal,
+                                              scale=p.sm_scale,
+                                              dropout_mask=dropout_mask,
+                                              enable_gqa=enable_gqa)
             print(f'REF {seqlen_q=} {ref_out.shape=}')
             ref_out_array[i, :, :seqlen_q, :] = ref_out
         return ref_out_array, None

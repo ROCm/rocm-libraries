@@ -6,6 +6,7 @@
 #include "BackendDescriptor.hpp"
 
 #include <HipdnnBackendBehaviorNote.h>
+#include <HipdnnBackendNumericalNote.h>
 #include <atomic>
 #include <flatbuffers/detached_buffer.h>
 #include <mutex>
@@ -33,6 +34,7 @@ private:
     mutable std::shared_ptr<const plugin::EngineDetailsWrapper> _engineDetails;
     mutable std::vector<flatbuffers::DetachedBuffer> _knobSerializedBuffers;
     mutable std::vector<hipdnnBackendBehaviorNote_t> _behaviorNotes;
+    mutable std::vector<hipdnnBackendNumericalNote_t> _numericalNotes;
     mutable std::once_flag _detailsOnce;
     mutable std::atomic<bool> _detailsLoaded{false};
 
@@ -88,6 +90,11 @@ private:
                           int64_t requestedElementCount,
                           int64_t* elementCount,
                           void* arrayOfElements) const;
+
+    void getNumericalNotes(hipdnnBackendAttributeType_t attributeType,
+                           int64_t requestedElementCount,
+                           int64_t* elementCount,
+                           void* arrayOfElements) const;
 
     /// Enumerates the matched catalog once. Engines that cannot enumerate propagate
     /// HIPDNN_STATUS_NOT_SUPPORTED; an empty page is never substituted.

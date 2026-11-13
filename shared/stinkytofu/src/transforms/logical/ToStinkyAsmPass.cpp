@@ -345,8 +345,22 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
         const logical::Opcode op = irInst->getOpcode();
         if (op == logical::VAddCOU32 || op == logical::VSubCoU32 || op == logical::VAddCCOU32) {
             const StinkyRegister vcc = StinkyRegister::getVCCRegister(getWaveFrontSize(arch));
-            asmInst->addDestReg(vcc);  // carry-out (dst1)
-            if (op == logical::VAddCCOU32) {
+            // Add VCC only when the operand list does not already carry it. The factory /
+            // adaptor logical path DROPS VCC, so it must be re-attached here. But the
+            // rocisa->logical converter KEEPS it (CommonInstruction::getDstParams returns
+            // {dst, dst1=VCC} and getSrcParams keeps the _ci carry-in), so re-adding
+            // unconditionally would emit a duplicate "vcc_lo" operand and diverge from
+            // path 1. Guard each side independently so both paths converge.
+            auto contains = [&vcc](const std::vector<StinkyRegister>& regs) {
+                for (const auto& r : regs) {
+                    if (r == vcc) return true;
+                }
+                return false;
+            };
+            if (!contains(asmInst->getDestRegs())) {
+                asmInst->addDestReg(vcc);  // carry-out (dst1)
+            }
+            if (op == logical::VAddCCOU32 && !contains(asmInst->getSrcRegs())) {
                 asmInst->addSrcReg(vcc);  // carry-in (src2)
             }
         }
@@ -403,6 +417,28 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
         // in the CFG and InsertWaitAluModulePass skips it, leaving mandatory
         // s_wait_alu hazard guards uninserted.
         asmInst->addModifier<LabelData>(LabelData{irInst->longBranchLabel.value()});
+    }
+    if (irInst->callTargets.has_value()) {
+        // s_swappc_b64 callee labels. The rocisa->asm path attaches the same
+        // CallTargetData in ToStinkyTofuUtils::legalizeInstruction (SSwapPCB64).
+        // Calls have no label operand to fall back on (getCallTargets reads only
+        // this modifier), so carrying it through logical IR is mandatory for the
+        // asm IR to match path 1 rather than merely the emitted text.
+        asmInst->addModifier<CallTargetData>(CallTargetData{irInst->callTargets.value()});
+    }
+    // Regular (non-long) branches carry their target as a LiteralString src operand
+    // (rocisa getSrcParams()={labelName}); getBranchTargets() resolves it and the
+    // emitter prints it, so the assembly text already matches. Path 1 additionally
+    // attaches LabelData in legalizeInstruction, so attach it here too -- otherwise
+    // the asm IR differs from path 1 by this modifier. Long branches (s_setpc_b64)
+    // already received LabelData from longBranchLabel above (guard skips them), and
+    // register-target returns carry no LiteralString operand (type check skips them).
+    if (isBranch(*asmInst) && asmInst->getModifier<LabelData>() == nullptr &&
+        !asmInst->getSrcRegs().empty()) {
+        const StinkyRegister& target = asmInst->getSrcRegs()[0];
+        if (target.dataType == StinkyRegister::Type::LiteralString) {
+            asmInst->addModifier<LabelData>(LabelData{target.getLiteralString()});
+        }
     }
     if (irInst->swaitcnt.has_value()) {
         // {vlcnt, vscnt, dlcnt, dscnt, kmcnt, maxLgkmcnt, maxVmcnt}. The rocisa
@@ -637,6 +673,23 @@ class ToStinkyAsmPassImpl : public Pass {
                         // spurious opaque barrier. legalizeWaitCnt no-ops when the
                         // SWaitCntData modifier is absent or the arch is not gfx12.5.
                         legalizeWaitCnt(asmInst, irBuilder, arch);
+                    } else if (asmInst->getUnifiedOpcode() == GFX::v_nop &&
+                               !asmInst->getSrcRegs().empty()) {
+                        // v_nop carries its repeat count as the src0 literal (rocisa
+                        // VNop::getSrcParams()={count}). Expand into `count` separate
+                        // v_nop (or erase when count<=1) exactly as the rocisa->asm
+                        // path does in ToStinkyTofuUtils::legalizeInstruction
+                        // (GFX::v_nop -> legalizeVNop), so the asm IR matches path 1.
+                        // Guard on a non-empty src list: the Logical IR `VNop` opcode
+                        // is defined with numOperands=0 (LogicalInstructionDefs.inc), so
+                        // a bare VNop() carries NO src0 count register at all -- unlike
+                        // the rocisa path, which always attaches one. Calling
+                        // legalizeVNop() unconditionally made getSrcReg(0) (srcRegs.at(0))
+                        // throw std::out_of_range on a plain logical VNop, crashing
+                        // LogicalToAsmComprehensive.AllInstructionsAllArchitectures.
+                        // A bare, operand-less v_nop is already a single real nop, so
+                        // skipping legalization here is correct -- nothing to expand.
+                        legalizeVNop(asmInst, irBuilder, arch);
                     }
                     continue;
                 }
