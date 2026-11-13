@@ -686,8 +686,7 @@ rocfft_location_t rocfft_plan_description_t::get_current_location() const
 }
 
 NodeMetaData
-    rocfft_plan_t::get_single_dev_exec_plan_metadata(std::vector<TempBufferLease>& leased_io,
-                                                     const rocfft_location_t& exec_plan_location)
+    rocfft_plan_t::get_single_dev_exec_plan_metadata(const rocfft_location_t& exec_plan_location)
 {
     NodeMetaData root_plan(nullptr);
     root_plan.dimension         = desc.rank();
@@ -779,11 +778,8 @@ NodeMetaData
                           * element_size(precision,
                                          other(io) == io_data_label::INPUT ? desc.inArrayType
                                                                            : desc.outArrayType);
-                    leased_io.emplace_back(tempBuffers,
-                                           desc.get_local_comm_rank(),
-                                           desc.get_current_location(),
-                                           tmp_size);
-                    root_plan_other_io_buffer = BufferPtr::temp(leased_io.back().data());
+                    root_plan_other_io_buffer
+                        = tempBuffers.emplace(desc.get_current_location(), tmp_size);
                 }
             }
         }
@@ -805,13 +801,12 @@ NodeMetaData
                                              desc.output_layout.batch(),
                                              transformType == rocfft_transform_type_real_inverse);
 
-        const auto tmp_size = std::max(root_plan_input_layout->buffer_element_count()
+        const auto tmp_size    = std::max(root_plan_input_layout->buffer_element_count()
                                            * element_size(precision, desc.inArrayType),
                                        root_plan_output_layout->buffer_element_count()
                                            * element_size(precision, desc.outArrayType));
-        leased_io.emplace_back(
-            tempBuffers, desc.get_local_comm_rank(), desc.get_current_location(), tmp_size);
-        root_plan.input_buffer = root_plan.output_buffer = BufferPtr::temp(leased_io.back().data());
+        root_plan.input_buffer = root_plan.output_buffer
+            = tempBuffers.emplace(desc.get_current_location(), tmp_size);
     }
     // I/O should both be fully defined at this point
     for(auto io : {io_data_label::INPUT, io_data_label::OUTPUT})
@@ -1721,13 +1716,10 @@ std::unique_ptr<ExecPlan>
         if(execPlan.workBufSize)
         {
             // note: workBufSize counts in complex elements, not bytes
-            TempBufferLease workMemLease{
-                tempBuffers,
-                local_comm_rank,
+            execPlanMultiItem->workPtr = tempBuffers.emplace(
                 location,
                 execPlan.workBufSize
-                    * element_size(precision, rocfft_array_type_complex_interleaved)};
-            execPlanMultiItem->workPtr = BufferPtr::temp(workMemLease.data());
+                    * element_size(precision, rocfft_array_type_complex_interleaved));
         }
 
         return execPlanMultiItem;
@@ -1826,15 +1818,10 @@ std::vector<size_t>
         // execution plan.
         const data_set_t packed_layout = data_set_t::default_full_range(
             single_dev_input_layout.lengths(), single_dev_input_layout.batch());
-        TempBufferLease packing_temp_buffer(tempBuffers,
-                                            local_comm_rank,
-                                            exec_plan_location,
-                                            packed_layout.logical_count() * input_elem_size);
-        gather_node = std::make_unique<CommGather>(local_comm_rank,
-                                                   precision,
-                                                   desc.inArrayType,
-                                                   exec_plan_location,
-                                                   BufferPtr::temp(packing_temp_buffer.data()));
+        const auto packing_temp_buffer = tempBuffers.emplace(
+            exec_plan_location, packed_layout.logical_count() * input_elem_size);
+        gather_node = std::make_unique<CommGather>(
+            local_comm_rank, precision, desc.inArrayType, exec_plan_location, packing_temp_buffer);
 
         gather_node->description = "Gather contiguously-packed input data chunks for "
                                    + std::to_string(input_bricks.size()) + " bricks";
@@ -1844,8 +1831,7 @@ std::vector<size_t>
         const auto gatherIdx = AddMultiPlanItem(std::move(gather_node), {});
         // Devices may need to pack their data (locally) before having it transferred
         // to packing_temp_buffer
-        std::vector<TempBufferLease> local_packed_chunk;
-        size_t                       packed_offset = 0;
+        size_t packed_offset = 0;
         for(size_t b_idx = 0; b_idx < input_bricks.size(); ++b_idx)
         {
             const auto& ibrick = input_bricks[b_idx];
@@ -1868,10 +1854,8 @@ std::vector<size_t>
                     = "pack brick " + std::to_string(b_idx) + "'s input data on device "
                       + std::to_string(ibrick.location.device) + " (rank "
                       + std::to_string(ibrick.location.comm_rank) + ") before gather";
-                local_packed_chunk.emplace_back(tempBuffers,
-                                                local_comm_rank,
-                                                ibrick.location,
-                                                ibrick.layout.logical_count() * input_elem_size);
+                const auto local_packed_chunk = tempBuffers.emplace(
+                    ibrick.location, ibrick.layout.logical_count() * input_elem_size);
                 const auto packIdx = AddMultiPlanItem(
                     transpose_brick(local_comm_rank,
                                     ibrick.location,
@@ -1881,7 +1865,7 @@ std::vector<size_t>
                                     input_buffers[b_idx],
                                     0 /* : offsetIn */,
                                     ibrick.layout.strides_and_distances(),
-                                    BufferPtr::temp(local_packed_chunk.back().data()),
+                                    local_packed_chunk,
                                     0 /* : offsetOut */,
                                     ibrick.layout.contiguous_strides_and_distances(),
                                     std::move(local_pack_description),
@@ -1889,13 +1873,12 @@ std::vector<size_t>
                     {});
                 AddAntecedent(gatherIdx, packIdx);
 
-                gather_node_raw_ptr->AddOperation(
-                    local_comm_rank,
-                    {ibrick.location,
-                     BufferPtr::temp(local_packed_chunk.back().data()),
-                     0 /* : srcOffset */,
-                     packed_offset,
-                     ibrick.layout.logical_count()});
+                gather_node_raw_ptr->AddOperation(local_comm_rank,
+                                                  {ibrick.location,
+                                                   local_packed_chunk,
+                                                   0 /* : srcOffset */,
+                                                   packed_offset,
+                                                   ibrick.layout.logical_count()});
             }
             std::string description
                 = "unpack brick " + std::to_string(b_idx)
@@ -1906,7 +1889,7 @@ std::vector<size_t>
                                                  ibrick.layout.lengths_and_batches(),
                                                  precision,
                                                  desc.inArrayType,
-                                                 BufferPtr::temp(packing_temp_buffer.data()),
+                                                 packing_temp_buffer,
                                                  packed_offset,
                                                  ibrick.layout.contiguous_strides_and_distances(),
                                                  exec_plan_metadata.input_buffer,
@@ -1984,14 +1967,10 @@ std::vector<size_t> rocfft_plan_t::CreateOutputScatteringItemsIfNeeded(
         // into their respective destinations.
         const data_set_t packed_layout = data_set_t::default_full_range(
             single_dev_output_layout.lengths(), single_dev_output_layout.batch());
-        TempBufferLease packing_temp_buffer(tempBuffers,
-                                            local_comm_rank,
-                                            exec_plan_location,
-                                            packed_layout.logical_count() * output_elem_size);
-        scatter_node              = std::make_unique<CommScatter>(precision,
-                                                     desc.outArrayType,
-                                                     exec_plan_location,
-                                                     BufferPtr::temp(packing_temp_buffer.data()));
+        const auto packing_temp_buffer = tempBuffers.emplace(
+            exec_plan_location, packed_layout.logical_count() * output_elem_size);
+        scatter_node = std::make_unique<CommScatter>(
+            precision, desc.outArrayType, exec_plan_location, packing_temp_buffer);
         scatter_node->description = "Scatter contiguously-packed output data chunks for "
                                     + std::to_string(output_bricks.size()) + " bricks";
         // save the raw pointer as scatter_node will be moved below
@@ -2000,8 +1979,7 @@ std::vector<size_t> rocfft_plan_t::CreateOutputScatteringItemsIfNeeded(
         const auto scatter_idx = AddMultiPlanItem(std::move(scatter_node), {});
         // Devices may need to unpack their data (locally) after having received it from
         // packing_temp_buffer
-        std::vector<TempBufferLease> local_packed_chunk;
-        size_t                       packed_offset = 0;
+        size_t packed_offset = 0;
         for(size_t b_idx = 0; b_idx < output_bricks.size(); b_idx++)
         {
             const auto& obrick = output_bricks[b_idx];
@@ -2019,7 +1997,7 @@ std::vector<size_t> rocfft_plan_t::CreateOutputScatteringItemsIfNeeded(
                                 exec_plan_metadata.output_buffer,
                                 obrick.layout.offset_in(single_dev_output_layout),
                                 single_dev_output_layout.strides_and_distances(),
-                                BufferPtr::temp(packing_temp_buffer.data()),
+                                packing_temp_buffer,
                                 packed_offset,
                                 obrick.layout.contiguous_strides_and_distances(),
                                 std::move(description)),
@@ -2040,19 +2018,16 @@ std::vector<size_t> rocfft_plan_t::CreateOutputScatteringItemsIfNeeded(
             else
             {
                 // allocate memory for packed data chunk local to destination device
-                local_packed_chunk.emplace_back(tempBuffers,
-                                                local_comm_rank,
-                                                obrick.location,
-                                                obrick.layout.logical_count() * output_elem_size);
+                const auto local_packed_chunk = tempBuffers.emplace(
+                    obrick.location, obrick.layout.logical_count() * output_elem_size);
 
                 // send the data
-                scatter_node_raw_ptr->AddOperation(
-                    local_comm_rank,
-                    {obrick.location,
-                     BufferPtr::temp(local_packed_chunk.back().data()),
-                     packed_offset,
-                     0 /* : destOffset */,
-                     obrick.layout.logical_count()});
+                scatter_node_raw_ptr->AddOperation(local_comm_rank,
+                                                   {obrick.location,
+                                                    local_packed_chunk,
+                                                    packed_offset,
+                                                    0 /* : destOffset */,
+                                                    obrick.layout.logical_count()});
 
                 // unpack data after sending
                 description = "unpack brick " + std::to_string(b_idx)
@@ -2063,7 +2038,7 @@ std::vector<size_t> rocfft_plan_t::CreateOutputScatteringItemsIfNeeded(
                                                  obrick.layout.lengths_and_batches(),
                                                  precision,
                                                  desc.outArrayType,
-                                                 BufferPtr::temp(local_packed_chunk.back().data()),
+                                                 local_packed_chunk,
                                                  0 /* : offsetIn */,
                                                  obrick.layout.contiguous_strides_and_distances(),
                                                  output_buffers[b_idx],
@@ -2091,12 +2066,12 @@ void rocfft_plan_t::MakeSingleDevPlanWithGatherScatterIfNeeded()
     // device access is not enabled.
     const auto exec_plan_location = rocfft_location_t::rank0_current_device();
     const bool plan_is_single_dev = desc.has_undistributed_io_on_current_location();
-    std::vector<TempBufferLease> leased_exec_plan_io;
-    auto                         exec_plan_metadata
-        = get_single_dev_exec_plan_metadata(leased_exec_plan_io, exec_plan_location);
-    if(plan_is_single_dev && !leased_exec_plan_io.empty())
+    auto       exec_plan_metadata = get_single_dev_exec_plan_metadata(exec_plan_location);
+    if(plan_is_single_dev
+       && (exec_plan_metadata.input_buffer.ptr_type() == BufferPtr::PTR_TEMP
+           || exec_plan_metadata.output_buffer.ptr_type() == BufferPtr::PTR_TEMP))
     {
-        throw std::logic_error("Leased temporary I/O buffers were unexpectedly created for a "
+        throw std::logic_error("Temporary I/O buffers were unexpectedly created for a "
                                "single-device plan configuration.");
     }
 
@@ -2573,6 +2548,8 @@ std::vector<size_t> rocfft_plan_t::GlobalTranspose(const field_view_t&        in
         // on failure roll back to this size so the fallback path does not
         // run alongside orphaned RCCL items
         const size_t multiPlanRollback = multiPlan.size();
+        // orphaned temp buffers would still be counted in the work size
+        const size_t tempBuffersRollback = tempBuffers.size();
         try
         {
             return GlobalTransposeRCCL(input, output, antecedents);
@@ -2596,6 +2573,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTranspose(const field_view_t&        in
         // discard any partially-built RCCL items before falling back
         multiPlan.resize(multiPlanRollback);
         multiPlanAntecedents.resize(multiPlanRollback);
+        tempBuffers.truncate(tempBuffersRollback);
     }
 #endif
 
@@ -2792,18 +2770,16 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
         //                   (written by pack kernels, read by ncclAllToAll)
         //   a2aRecvBufs[r]: slot[src_rank] at offset src_rank * uniform_count
         //                   (written by ncclAllToAll, read by unpack kernels)
-        const size_t                 nranks = rccl_devs_vec.size();
-        std::vector<TempBufferLease> a2aSendBufs;
-        std::vector<TempBufferLease> a2aRecvBufs;
+        const size_t           nranks = rccl_devs_vec.size();
+        std::vector<BufferPtr> a2aSendBufs;
+        std::vector<BufferPtr> a2aRecvBufs;
         a2aSendBufs.reserve(nranks);
         a2aRecvBufs.reserve(nranks);
         for(size_t r = 0; r < nranks; ++r)
         {
             const rocfft_location_t loc{local_comm_rank, rccl_devs_vec[r]};
-            a2aSendBufs.emplace_back(
-                tempBuffers, local_comm_rank, loc, nranks * uniform_count * elem_size);
-            a2aRecvBufs.emplace_back(
-                tempBuffers, local_comm_rank, loc, nranks * uniform_count * elem_size);
+            a2aSendBufs.emplace_back(tempBuffers.emplace(loc, nranks * uniform_count * elem_size));
+            a2aRecvBufs.emplace_back(tempBuffers.emplace(loc, nranks * uniform_count * elem_size));
         }
 
         std::vector<size_t> packItems;
@@ -2827,7 +2803,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
                                                    input.buffers[info.inBrickIdx],
                                                    info.intersection.offset_in(inBrick.layout),
                                                    inBrick.layout.strides_and_distances(),
-                                                   BufferPtr::temp(a2aSendBufs[src_rank].data()),
+                                                   a2aSendBufs[src_rank],
                                                    dst_rank * uniform_count,
                                                    info.intersection.strides_and_distances(),
                                                    "pack for ncclAllToAll"),
@@ -2841,8 +2817,8 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
         std::vector<CommRCCLAllToAll::agent_t> agents(nranks);
         for(size_t r = 0; r < nranks; ++r)
         {
-            agents[r].sendBuffer = BufferPtr::temp(a2aSendBufs[r].data());
-            agents[r].recvBuffer = BufferPtr::temp(a2aRecvBufs[r].data());
+            agents[r].sendBuffer = a2aSendBufs[r];
+            agents[r].recvBuffer = a2aRecvBufs[r];
         }
 
         auto rcclAllToAll = std::make_unique<CommRCCLAllToAll>(
@@ -2869,7 +2845,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
                                                    info.intersection.lengths_and_batches(),
                                                    precision,
                                                    input.array_type,
-                                                   BufferPtr::temp(a2aRecvBufs[dst_rank].data()),
+                                                   a2aRecvBufs[dst_rank],
                                                    src_rank * uniform_count,
                                                    info.intersection.strides_and_distances(),
                                                    output.buffers[info.outBrickIdx],
@@ -2903,17 +2879,11 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
         rcclGrouped->group = itemGroup;
         rcclGrouped->description = "RCCL grouped send/recv";
 
-        // packBufs keeps the leases alive so the BufferPtr::temp aliases
-        // captured into the plan items remain valid; the leases themselves
-        // aren't needed after this loop because BufferPtr::temp co-owns the
-        // underlying buffers via shared_ptr.
-        std::vector<TempBufferLease> packBufs;
-        std::vector<size_t>          packItems;
+        std::vector<size_t> packItems;
         // unpack items that need to wait for the grouped send/recv to
         // complete, tracked separately so we don't wrongly add the RCCL
         // antecedent to same-device transposes already pushed to ret.
         std::vector<size_t> groupedUnpackItems;
-        packBufs.reserve(2 * cross_device_count);
 
         for(const auto& info : intersections)
         {
@@ -2923,10 +2893,8 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
                 continue;
             const size_t count = info.intersection.logical_count();
 
-            TempBufferLease& pack = packBufs.emplace_back(
-                tempBuffers, local_comm_rank, inBrick.location, count * elem_size);
-            TempBufferLease& recv = packBufs.emplace_back(
-                tempBuffers, local_comm_rank, outBrick.location, count * elem_size);
+            const auto pack = tempBuffers.emplace(inBrick.location, count * elem_size);
+            const auto recv = tempBuffers.emplace(outBrick.location, count * elem_size);
 
             auto packIdx
                 = AddMultiPlanItem(transpose_brick(local_comm_rank,
@@ -2937,7 +2905,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
                                                    input.buffers[info.inBrickIdx],
                                                    info.intersection.offset_in(inBrick.layout),
                                                    inBrick.layout.strides_and_distances(),
-                                                   BufferPtr::temp(pack.data()),
+                                                   pack,
                                                    0,
                                                    info.intersection.strides_and_distances(),
                                                    "pack brick for RCCL transpose"),
@@ -2948,18 +2916,10 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
             // send pack -> peer that owns outBrick; recv into recv buffer
             // from peer that owns inBrick.  brick devices were validated
             // against the RCCL communicator above.
-            rcclGrouped->AddTransfer<rccl_op::send>(outBrick.location,
-                                                    inBrick.location,
-                                                    BufferPtr::temp(pack.data()),
-                                                    0 /* offset */,
-                                                    count,
-                                                    local_comm_rank);
-            rcclGrouped->AddTransfer<rccl_op::recv>(inBrick.location,
-                                                    outBrick.location,
-                                                    BufferPtr::temp(recv.data()),
-                                                    0 /* offset */,
-                                                    count,
-                                                    local_comm_rank);
+            rcclGrouped->AddTransfer<rccl_op::send>(
+                outBrick.location, inBrick.location, pack, 0 /* offset */, count, local_comm_rank);
+            rcclGrouped->AddTransfer<rccl_op::recv>(
+                inBrick.location, outBrick.location, recv, 0 /* offset */, count, local_comm_rank);
 
             auto unpackIdx
                 = AddMultiPlanItem(transpose_brick(local_comm_rank,
@@ -2967,7 +2927,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeRCCL(const field_view_t&      
                                                    info.intersection.lengths_and_batches(),
                                                    precision,
                                                    input.array_type,
-                                                   BufferPtr::temp(recv.data()),
+                                                   recv,
                                                    0,
                                                    info.intersection.strides_and_distances(),
                                                    output.buffers[info.outBrickIdx],
@@ -3027,9 +2987,8 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeP2P(const field_view_t&       
 {
     const auto elem_size = element_size(precision, input.array_type);
 
-    std::vector<TempBufferLease> packBufs;
-    const auto                   local_comm_rank = desc.get_local_comm_rank();
-    const std::string            itemGroup
+    const auto        local_comm_rank = desc.get_local_comm_rank();
+    const std::string itemGroup
         = "p2p_transpose_from_" + input.group_name + "_into_" + output.group_name;
     std::vector<size_t> ret;
 
@@ -3048,15 +3007,10 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeP2P(const field_view_t&       
                 continue;
 
             // pack data for communication
-            packBufs.reserve(packBufs.size() + 2);
-            TempBufferLease&    pack = packBufs.emplace_back(tempBuffers,
-                                                          local_comm_rank,
-                                                          inBrick.location,
-                                                          intersection.logical_count() * elem_size);
-            TempBufferLease&    recv = packBufs.emplace_back(tempBuffers,
-                                                          local_comm_rank,
-                                                          outBrick.location,
-                                                          intersection.logical_count() * elem_size);
+            const auto pack
+                = tempBuffers.emplace(inBrick.location, intersection.logical_count() * elem_size);
+            const auto recv
+                = tempBuffers.emplace(outBrick.location, intersection.logical_count() * elem_size);
             std::vector<size_t> pack_dependencies;
             std::for_each(antecedents.begin(), antecedents.end(), [&](const size_t& item) {
                 if(multiPlan[item]->WritesToBuffer(input.buffers[inBrickIdx]))
@@ -3070,7 +3024,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeP2P(const field_view_t&       
                                                             input.buffers[inBrickIdx],
                                                             intersection.offset_in(inBrick.layout),
                                                             inBrick.layout.strides_and_distances(),
-                                                            BufferPtr::temp(pack.data()),
+                                                            pack,
                                                             0,
                                                             intersection.strides_and_distances(),
                                                             "pack brick for global transpose"),
@@ -3085,10 +3039,10 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeP2P(const field_view_t&       
                                                              input.array_type,
                                                              intersection.logical_count(),
                                                              inBrick.location,
-                                                             BufferPtr::temp(pack.data()),
+                                                             pack,
                                                              0,
                                                              outBrick.location,
-                                                             BufferPtr::temp(recv.data()),
+                                                             recv,
                                                              0);
 
             auto sendIdx              = AddMultiPlanItem(std::move(sendOp), {packIdx});
@@ -3109,7 +3063,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeP2P(const field_view_t&       
                                                    intersection.lengths_and_batches(),
                                                    precision,
                                                    output.array_type,
-                                                   BufferPtr::temp(recv.data()),
+                                                   recv,
                                                    0,
                                                    intersection.strides_and_distances(),
                                                    output.buffers[outBrickIdx],
@@ -3269,14 +3223,10 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeA2A(const field_view_t&       
 
     // now we know how much we'll need to send/recv in total on this
     // rank.  allocate send/receive buffers.
-    TempBufferLease send_buf(tempBuffers,
-                             local_comm_rank,
-                             {local_comm_rank, *local_send_device},
-                             cumulative_send_elems * elem_size);
-    TempBufferLease recv_buf(tempBuffers,
-                             local_comm_rank,
-                             {local_comm_rank, *local_recv_device},
-                             cumulative_recv_elems * elem_size);
+    const auto send_buf = tempBuffers.emplace({local_comm_rank, *local_send_device},
+                                              cumulative_send_elems * elem_size);
+    const auto recv_buf = tempBuffers.emplace({local_comm_rank, *local_recv_device},
+                                              cumulative_recv_elems * elem_size);
 
     // go over all the intersections of in/out bricks again, this
     // time packing/unpacking the data to/from the newly-allocated
@@ -3315,7 +3265,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeA2A(const field_view_t&       
                                                        input.buffers[inBrickIdx],
                                                        intersection.offset_in(inBrick.layout),
                                                        inBrick.layout.strides_and_distances(),
-                                                       BufferPtr::temp(send_buf.data()),
+                                                       send_buf,
                                                        send_offsets[outRank],
                                                        intersection.strides_and_distances(),
                                                        "pack brick for global transpose"),
@@ -3343,7 +3293,7 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeA2A(const field_view_t&       
                                                        intersection.lengths_and_batches(),
                                                        precision,
                                                        output.array_type,
-                                                       BufferPtr::temp(recv_buf.data()),
+                                                       recv_buf,
                                                        recv_offsets[inRank],
                                                        intersection.strides_and_distances(),
                                                        output.buffers[outBrickIdx],
@@ -3396,8 +3346,8 @@ std::vector<size_t> rocfft_plan_t::GlobalTransposeA2A(const field_view_t&       
                                                        send_counts,
                                                        recv_offsets,
                                                        recv_counts,
-                                                       BufferPtr::temp(send_buf.data()),
-                                                       BufferPtr::temp(recv_buf.data()),
+                                                       send_buf,
+                                                       recv_buf,
                                                        std::move(subcomm));
 
     auto alltoall_op                    = AddMultiPlanItem(std::move(alltoall_ptr), pack_ops);
@@ -3621,9 +3571,7 @@ void get_transpose_plan(const std::array<int, 3>&        input_grid,
 template <io_data_label user_field_io_label>
 rocfft_plan_t::embarrassingly_parallel_fft
     rocfft_plan_t::make_embarrassingly_parallel_fft_from_user_field(
-        const std::set<size_t>        fft_len_dims,
-        std::vector<TempBufferLease>& leased_buffers,
-        bool                          prefer_in_place_if_possible)
+        const std::set<size_t> fft_len_dims, bool prefer_in_place_if_possible)
 {
     static_assert(user_field_io_label == io_data_label::INPUT
                   || user_field_io_label == io_data_label::OUTPUT);
@@ -3676,12 +3624,9 @@ rocfft_plan_t::embarrassingly_parallel_fft
         other_buffers.reserve(other_embedded_io_field->num_bricks());
         for(const auto& brick : other_embedded_io_field->get_bricks())
         {
-            leased_buffers.emplace_back(tempBuffers,
-                                        desc.get_local_comm_rank(),
-                                        brick.location,
-                                        brick.layout.buffer_element_count()
-                                            * element_size(precision, other_array_type));
-            other_buffers.emplace_back(BufferPtr::temp(leased_buffers.back().data()));
+            other_buffers.emplace_back(tempBuffers.emplace(
+                brick.location,
+                brick.layout.buffer_element_count() * element_size(precision, other_array_type)));
         }
     }
     std::string group_name = to_str(other(user_field_io_label))
@@ -3901,8 +3846,6 @@ void rocfft_plan_t::discard_failed_multi_device_plan(const std::string& calling_
 bool rocfft_plan_t::BuildOptMultiDevicePlan()
 try
 {
-    const auto local_comm_rank = desc.get_local_comm_rank();
-
     // keep track of how many transposes we've done so we can log
     // distinct messages about each one
     size_t transposeNumber = 0;
@@ -3969,16 +3912,11 @@ try
     std::vector<BufferPtr> inputFFTBufs;
     inputBufs.reserve(desc.inFields.front().num_bricks());
     inputFFTBufs.reserve(desc.inFields.front().num_bricks());
-    std::vector<TempBufferLease> inputTemp;
-    inputTemp.reserve(desc.inFields.front().num_bricks());
     for(size_t inBrickIdx = 0; inBrickIdx < desc.inFields.front().num_bricks(); ++inBrickIdx)
     {
         const auto& inBrick = desc.inFields.front().get_brick(inBrickIdx);
-        inputTemp.emplace_back(tempBuffers,
-                               local_comm_rank,
-                               inBrick.location,
-                               inBrick.layout.logical_count() * elem_size);
-        inputFFTBufs.emplace_back(BufferPtr::temp(inputTemp.back().data()));
+        inputFFTBufs.emplace_back(
+            tempBuffers.emplace(inBrick.location, inBrick.layout.logical_count() * elem_size));
     }
 
     std::vector<BufferPtr> outputBufs
@@ -4041,11 +3979,6 @@ try
     // using MPI sub-communicators for optimized pencil-to-pencil
     if(pencil_to_pencil)
     {
-        // This vector holds leases from an earlier iteration of the
-        // loop below, and is cleared when we are sure the leases can
-        // be reused.
-        std::vector<TempBufferLease> prevTempLeases;
-
         // plan global transposes and local FFTs
         for(size_t i = 0; i < transpose_sequence.size(); ++i)
         {
@@ -4082,19 +4015,15 @@ try
             // need to do this if we're in the middle of the
             // transpose sequence (last one will write to output, not
             // temp)
-            std::vector<TempBufferLease> tempLeases;
-            std::vector<BufferPtr>       tempBufs(nextField.num_bricks());
+            std::vector<BufferPtr> tempBufs(nextField.num_bricks());
 
             if(!writeToUserOutput)
             {
                 for(size_t b = 0; b < nextField.num_bricks(); ++b)
                 {
-                    tempLeases.emplace_back(tempBuffers,
-                                            local_comm_rank,
-                                            nextField.get_brick(b).location,
-                                            nextField.get_brick(b).layout.logical_count()
-                                                * elem_size);
-                    tempBufs[b] = BufferPtr::temp(tempLeases.back().data());
+                    tempBufs[b] = tempBuffers.emplace(nextField.get_brick(b).location,
+                                                      nextField.get_brick(b).layout.logical_count()
+                                                          * elem_size);
                 }
             }
 
@@ -4112,11 +4041,6 @@ try
             currentField       = nextField;
             currentBufs        = tempBufs;
             currentAntecedents = transposeItems;
-
-            // leases allocated in this iteration need to live
-            // through next loop iteration, since they will be passed
-            // as input to the next GlobalTranspose.
-            prevTempLeases.swap(tempLeases);
 
             // once data is transposed, plan intermediate FFT
 
@@ -4140,7 +4064,6 @@ try
         // transpose non-contiguous dims to be contiguous and
         // transform them too
         std::vector<BufferPtr>        transposeInputBufs = inputFFTBufs;
-        std::vector<TempBufferLease>  transposeOutputTemp;
         std::vector<BufferPtr>        transposeOutputBufs;
         auto                          transposeInputAntecedents = inputFFTItems;
         std::vector<size_t>           midFFTItems               = inputFFTItems;
@@ -4155,10 +4078,8 @@ try
             // allocate bricks to store the transposed data
             for(const auto& b : transposedField->get_bricks())
             {
-                transposeOutputTemp.emplace_back(
-                    tempBuffers, local_comm_rank, b.location, b.layout.logical_count() * elem_size);
                 transposeOutputBufs.emplace_back(
-                    BufferPtr::temp(transposeOutputTemp.back().data()));
+                    tempBuffers.emplace(b.location, b.layout.logical_count() * elem_size));
             }
 
             std::vector<size_t> transposeItems;
@@ -4187,8 +4108,6 @@ try
             // work on the output we just produced
             transposeInputAntecedents = midFFTItems;
             transposeInputBufs        = transposeOutputBufs;
-            std::swap(transposeOutputTemp, inputTemp);
-            transposeOutputTemp.clear();
             transposeOutputBufs.clear();
         }
 
@@ -4312,13 +4231,11 @@ try
     // are some partial length axes on input *and* output (e.g., pencil decompositions).
     std::list<embarrassingly_parallel_fft> sequence_of_sub_ffts;
 
-    // Internally-created field views may need temporary buffers
-    std::vector<TempBufferLease> leased_buffers;
     // In-place operations in output views are always acceptable as data is meant to be written
     // therein anyways
     const auto& last_op = sequence_of_sub_ffts.emplace_back(
         make_embarrassingly_parallel_fft_from_user_field<io_data_label::OUTPUT>(
-            axes_computed_on_output, leased_buffers, true /* = prefer_in_place_if_possible*/));
+            axes_computed_on_output, true /* = prefer_in_place_if_possible*/));
     // Prefer in-place operations in input buffers if (both must be true)
     // 1. the plan is itself configured in-place (i.e., user allows us to overwrite input data);
     // 2. the input buffers of the subsequent embarrassingly-parallel FFT are *not* the user's input buffers.
@@ -4331,12 +4248,11 @@ try
                   }));
     sequence_of_sub_ffts.emplace_front(
         make_embarrassingly_parallel_fft_from_user_field<io_data_label::INPUT>(
-            axes_computed_on_input, leased_buffers, prefer_inplace_on_input_field));
+            axes_computed_on_input, prefer_inplace_on_input_field));
     //if(!partial_axes.empty())
     //{
     //    const auto embedded_intermediary_view
     //        = make_intermediary_field_view(
-    //              leased_buffers,
     //              sequence_of_sub_ffts.front().output.get_embedding_view(),
     //              sequence_of_sub_ffts.back().input.get_embedding_view(),
     //              partial_axes)
@@ -4913,16 +4829,128 @@ int rocfft_plan_description_t::get_local_comm_size() const
 #endif
 }
 
+// Give each of this rank's temp buffers an offset in its device's work buffer, letting
+// buffers overlap only if their users never run at the same time, and store each
+// device's resulting work buffer size in tempBufferUserAllocs:
+// 1. find which items are guaranteed to complete before which, on this rank
+// 2. collect this rank's temp buffers and the items using them
+// 3. decide which pairs of buffers can share memory
+// 4. place buffers largest first, each at the lowest offset clear of those it can't share with
 void rocfft_plan_t::DetermineTempBufferUserAllocs()
 {
-    int deviceCount = rocfft_scoped_device::device_count();
-    tempBufferUserAllocs.resize(deviceCount);
+    // ExecPlan::Wait() is a no-op unless mgpuPlan, so nothing can be ordered after such an item
+    if(multiPlan.size() > 1
+       && std::any_of(multiPlan.begin(), multiPlan.end(), [](const auto& item) {
+              auto exec = dynamic_cast<const ExecPlan*>(item.get());
+              return exec && !exec->mgpuPlan;
+          }))
+        throw std::logic_error("single-device ExecPlan mixed with other plan items");
 
-    // sum up the temp allocations per-device, for this rank
+    const auto local_comm_rank = desc.get_local_comm_rank();
+    auto       item_is_local
+        = [&](size_t i) { return multiPlan[i] && multiPlan[i]->ExecutesOnRank(local_comm_rank); };
+
+    // number this rank's items; the steps below only look at those
+    std::vector<size_t> local_items;
+    for(size_t i = 0; i < multiPlan.size(); ++i)
+    {
+        if(item_is_local(i))
+            local_items.push_back(i);
+    }
+
+    const auto num_local = local_items.size();
+    const auto num_words = DivRoundingUp<size_t>(num_local, 64);
+
+    // 1. which items complete before which, on this rank
+    // bit j of ancestors[i] is set if local item j completes before local item i starts on
+    // this rank, knowing that items only wait for their antecedents that run on this rank
+    std::vector<std::vector<uint64_t>> ancestors(num_local, std::vector<uint64_t>(num_words));
+    for(auto item : MultiPlanTopologicalSort())
+    {
+        const auto loc_item = std::lower_bound(local_items.begin(), local_items.end(), item);
+        if(loc_item == local_items.end() || *loc_item != item)
+            continue;
+        const auto loc_i_idx = std::distance(local_items.begin(), loc_item);
+        for(auto antecedent : multiPlanAntecedents[item])
+        {
+            const auto loc_antecedent
+                = std::lower_bound(local_items.begin(), local_items.end(), antecedent);
+            if(loc_antecedent == local_items.end() || *loc_antecedent != antecedent)
+                continue;
+            const auto loc_a_idx = std::distance(local_items.begin(), loc_antecedent);
+            ancestors[loc_i_idx][loc_a_idx / 64] |= uint64_t{1} << (loc_a_idx % 64);
+            for(size_t w = 0; w < num_words; ++w)
+                ancestors[loc_i_idx][w] |= ancestors[loc_a_idx][w];
+        }
+    }
+    auto is_ancestor = [&](size_t a, size_t i) { return (ancestors[i][a / 64] >> (a % 64)) & 1; };
+
+    // 2. this rank's temp buffers and the items using them
+    struct BufferUse
+    {
+        InternalTempBuffer* buf;
+        std::vector<size_t> users;
+    };
+    std::vector<BufferUse> uses;
     for(const auto& buf : tempBuffers)
     {
-        if(buf.first.comm_rank == desc.get_local_comm_rank())
-            tempBufferUserAllocs[buf.first.device] += buf.second->get_size_bytes();
+        if(buf->get_location().comm_rank != local_comm_rank)
+            continue;
+        auto&      use = uses.emplace_back(BufferUse{buf.get(), {}});
+        const auto ptr = BufferPtr::temp(buf);
+        for(size_t i = 0; i < num_local; ++i)
+        {
+            const auto& item = multiPlan[local_items[i]];
+            if(item->ReadsFromBuffer(ptr) || item->WritesToBuffer(ptr))
+                use.users.push_back(i);
+        }
+        // a buffer with no users can share memory with every other buffer
+        assert(!use.users.empty());
+    }
+
+    // 3. buffers can share memory if one's users all complete before the other's start
+    auto can_share = [&](const BufferUse& x, const BufferUse& y) {
+        bool x_first = true;
+        bool y_first = true;
+        for(auto i : x.users)
+        {
+            for(auto j : y.users)
+            {
+                x_first = x_first && is_ancestor(i, j);
+                y_first = y_first && is_ancestor(j, i);
+            }
+        }
+        return x_first || y_first;
+    };
+
+    // 4. largest buffers first, each at the lowest offset clear of the placed buffers on
+    // the same device that it can't share memory with (first fit)
+    std::stable_sort(uses.begin(), uses.end(), [](const BufferUse& x, const BufferUse& y) {
+        return x.buf->get_size_bytes() > y.buf->get_size_bytes();
+    });
+    tempBufferUserAllocs.assign(rocfft_scoped_device::device_count(), 0);
+    for(auto x = uses.begin(); x != uses.end(); ++x)
+    {
+        std::vector<std::pair<size_t, size_t>> blocked_byte_ranges;
+        for(auto y = uses.begin(); y != x; ++y)
+        {
+            if(y->buf->get_location() == x->buf->get_location() && !can_share(*x, *y))
+                blocked_byte_ranges.emplace_back(y->buf->get_offset_bytes(),
+                                                 y->buf->get_offset_bytes()
+                                                     + y->buf->get_size_bytes());
+        }
+        std::sort(blocked_byte_ranges.begin(), blocked_byte_ranges.end());
+        size_t offset = 0;
+        for(const auto& [begin, end] : blocked_byte_ranges)
+        {
+            if(offset + x->buf->get_size_bytes() <= begin)
+                break; // x fits in the gap before this range
+            offset = std::max(offset, end);
+        }
+        x->buf->set_offset_bytes(offset);
+
+        auto& alloc = tempBufferUserAllocs.at(x->buf->get_location().device);
+        alloc       = std::max(alloc, offset + x->buf->get_size_bytes());
     }
 }
 
