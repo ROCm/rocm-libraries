@@ -48,11 +48,6 @@ class KernelWriterReduction(KernelWriterBase):
         if self.state["ProblemType"]["DataType"].isInt8() and self.state["ProblemType"]["ComputeDataType"].isSingle() and self.state["ProblemType"]["HighPrecisionAccumulate"]:
             self.datatype = DataType('int32').toDevice(self.language)
 
-    # Currently dummy
-    def kernelBody(self):
-        kStr = ""
-        return kStr
-
     @staticmethod
     def kernelName(solution, btype):
         state = solution._state if hasattr(solution, "_state") else solution.state
@@ -73,35 +68,46 @@ class KernelWriterReduction(KernelWriterBase):
         return KernelWriterReduction.kernelName(self, self.state["ProblemType"]["BiasDataType"])
 
 
-    def getHeaderFileString(self):
-        fileString = "" # CHeader
-
-        # C dimensions
-        indicesStr = ""
-        for i in range(0, self.state["ProblemType"]["NumIndicesC"]):
-            c = INDEX_CHARS[i].lower()
-            if c == 'k':
-                continue
-            indicesStr += INDEX_CHARS[i].lower()
-
+    def _kernels(self):
+        """(signature, body) of each reduction kernel, one per macro tile and vector width."""
         computeStr  = self.state["ProblemType"]["ComputeDataType"].toDevice(self.language)
         computeChar = self.state["ProblemType"]["ComputeDataType"].toChar()
         MTVW = [[256, 1, 1], [128, 2, 1], [64, 4, 1], [32, 8, 1], [16, 16, 1], [8, 32, 1], [32, 32, 4]]
         dstStr  = self.state["ProblemType"]["BiasDataType"].toDevice(self.language)
         dstChar = self.state["ProblemType"]["BiasDataType"].toChar()
+        kernels = []
         for mtvw in MTVW:
-            fileString += "extern \"C\" __global__ void D%s_%s%s_MT%dx%d_VW%d_Reduction(%s *in, %s* out, int m, int n, int strideJ)\n"%(self.indicesStr, dstChar, computeChar, mtvw[0], mtvw[1], mtvw[2], computeStr, dstStr)
-            fileString += "{\n"
-            fileString += "    reductionKernel_%s<%s, %s, %d, %d, %d>(in, out, m, n, strideJ);\n"%(self.indicesStr, computeStr, dstStr, mtvw[0], mtvw[1], mtvw[2])
-            fileString += "}\n"
+            signature = "extern \"C\" __global__ void D%s_%s%s_MT%dx%d_VW%d_Reduction(%s *in, %s* out, int m, int n, int strideJ)"%(self.indicesStr, dstChar, computeChar, mtvw[0], mtvw[1], mtvw[2], computeStr, dstStr)
+            body = "    reductionKernel_%s<%s, %s, %d, %d, %d>(in, out, m, n, strideJ);\n"%(self.indicesStr, computeStr, dstStr, mtvw[0], mtvw[1], mtvw[2])
+            kernels.append((signature, body))
+        return kernels
+
+
+    def getHeaderFileString(self):
+        fileString = "" # CHeader
+
+        for signature, _ in self._kernels():
+            fileString += signature + ";\n"
 
         fileString += "\n"
 
         return fileString
 
 
+    # The kernels are defined here (Kernels.cpp) and only declared in Kernels.h, like the other
+    # helper kernels: a definition in the header would be compiled into every file including it.
+    # Each definition starts with a line break, as in the other helper sources: writeHelpers
+    # concatenates the sources, and the activation helpers' source is a comment with no newline.
     def getSourceFileString(self):
         fileString = ""
-        fileString += self.kernelBody()
+
+        for signature, body in self._kernels():
+            fileString += "\n"
+            fileString += signature + "\n"
+            fileString += "{\n"
+            fileString += body
+            fileString += "}\n"
+
+        fileString += "\n"
 
         return (0, fileString)

@@ -31,6 +31,9 @@ from .KernelWriterBase import KernelWriterBase
 
 class KernelWriterActivationFunction(KernelWriterBase):
 
+  # The activation device functions, called by the conversion kernels.
+  sharedHeader = True
+
   def __init__(self, state, cxxCompiler: str, supportedISA: List[IsaVersion]):
     super().__init__()
     self.cxxCompiler = cxxCompiler
