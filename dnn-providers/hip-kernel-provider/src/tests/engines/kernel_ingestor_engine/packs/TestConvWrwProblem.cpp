@@ -2354,8 +2354,8 @@ TEST(TestConvWrwLaunch, TheReduceWritesEitherFilterLayoutAndReflectsForConvoluti
     EXPECT_EQ(krsc->reduce.wtap, 24);
     // K C T R S of 2 to 64 taps at most 2 splits reduces by rows (a run of channels' taps,
     // contiguous in dw); more splits, K T R S C, one tap, or more than 64 taps by quads of
-    // channels. 304 units give the base 6 splits; one unit gives it 2.
-    EXPECT_EQ(kcrs->reduce.splits, 6);
+    // channels. 304 units give the base 5 splits (22 steps / 4); one unit gives it 2.
+    EXPECT_EQ(kcrs->reduce.splits, 5);
     EXPECT_EQ(kcrs->reduce.rows, 0);
     EXPECT_EQ(krsc->reduce.rows, 0);
     EXPECT_EQ(krsc->reduceGrid, (9u * 40 * 6 + 63) / 64); // 9 taps x 40 k x 6 quads, 64 a block
