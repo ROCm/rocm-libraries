@@ -66,26 +66,26 @@ struct WorkQueue {
     // Tries to fetch and simultaneously lock the next waiting worknode. If none exists, or it's currently locked, or
     // someone else got to it first, returns nullptr.
     [[nodiscard]] __device__ WorkNode_Header *tryPop(bool shouldIncrementActiveCount) {
-        return tryPop(shouldIncrementActiveCount, atomicAdd(&popCount, 0) % queueSize);
+        return tryPop(shouldIncrementActiveCount, atomicAdd(&popCount, 0));
     }
     // Tries to fetch and simultaneously lock the next waiting worknode. If none exists, or it's currently locked, or
     // someone else got to it first, returns nullptr. Safe to use with a queue which is written to by the CPU using
     // hipMemcpy.
     [[nodiscard]] __device__ WorkNode_Header *tryPop_cpuSafe(bool shouldIncrementActiveCount) {
-        return tryPop_cpuSafe(shouldIncrementActiveCount, atomicAdd(&popCount, 0) % queueSize);
+        return tryPop_cpuSafe(shouldIncrementActiveCount, atomicAdd(&popCount, 0));
     }
     // Fetches and simultaneously lock the next waiting worknode. If the queue is empty, returns nullptr.
     [[nodiscard]] __device__ WorkNode_Header *pop(bool shouldIncrementActiveCount);
 
   private:
     __device__ void waitForSpace(uint32_t myPushCount);
-    // Tries to fetch and simultaneously lock the worknode at index. If none exists, or it's currently locked, or
+    // Tries to fetch and simultaneously lock the worknode at curPopCount. If none exists, or it's currently locked, or
     // someone else got to it first, returns nullptr.
-    [[nodiscard]] __device__ WorkNode_Header *tryPop(bool shouldIncrementActiveCount, uint32_t index);
-    // Tries to fetch and simultaneously lock the worknode at index. If none exists, or it's currently locked, or
+    [[nodiscard]] __device__ WorkNode_Header *tryPop(bool shouldIncrementActiveCount, uint32_t curPopCount);
+    // Tries to fetch and simultaneously lock the worknode at curPopCount. If none exists, or it's currently locked, or
     // someone else got to it first, returns nullptr. Safe to use with a queue which is written to by the CPU using
     // hipMemcpy.
-    [[nodiscard]] __device__ WorkNode_Header *tryPop_cpuSafe(bool shouldIncrementActiveCount, uint32_t index);
+    [[nodiscard]] __device__ WorkNode_Header *tryPop_cpuSafe(bool shouldIncrementActiveCount, uint32_t curPopCount);
 };
 
 // TODO: should these be static members of WorkNode_Header?
@@ -240,10 +240,11 @@ __device__ void WorkQueue<queueSize>::waitForSpace(uint32_t myPushCount) {
     }
 }
 
-// Tries to fetch and simultaneously lock the worknode at index. If none exists, or it's currently locked, or someone
-// else got to it first, returns nullptr.
+// Tries to fetch and simultaneously lock the worknode at curPopCount. If none exists, or it's currently locked, or
+// someone else got to it first, returns nullptr.
 template <size_t queueSize>
-[[nodiscard]] __device__ WorkNode_Header *WorkQueue<queueSize>::tryPop(bool shouldIncrementActiveCount, uint32_t index) {
+[[nodiscard]] __device__ WorkNode_Header *WorkQueue<queueSize>::tryPop(bool shouldIncrementActiveCount, uint32_t curPopCount) {
+    const uint32_t index = curPopCount % queueSize;
     WorkNode_Header *work = WorkNode_Header::tryLockAndFetch(&queue[index]);
     if (work == nullptr) {
         return nullptr;
@@ -252,14 +253,26 @@ template <size_t queueSize>
         atomicAdd(&activeVcoreCount, 1);
     }
     __threadfence();
-    atomicAdd(&popCount, 1);
+    // If popCount has moved on since curPopCount was read, another vcore popped this entry and a pusher refilled it
+    // with a worknode from the next lap. Taking it would skip a position, and the queue would hang on the entry left
+    // empty. Put it back instead: no pusher can reuse the entry meanwhile, since popCount can't pass the worknode we
+    // hold. activeVcoreCount is incremented before popCount, as shouldKeepPollingForWork expects, so undo that too.
+    if (atomicCAS(&popCount, curPopCount, curPopCount + 1) != curPopCount) {
+        if (shouldIncrementActiveCount) {
+            atomicSub(&activeVcoreCount, 1);
+        }
+        atomicExch(reinterpret_cast<uintptr_t*>(&queue[index]), reinterpret_cast<uintptr_t>(work));
+        return nullptr;
+    }
     return work;
 }
 
-// Tries to fetch and simultaneously lock the worknode at index. If none exists, or it's currently locked, or someone
-// else got to it first, returns nullptr. Safe to use with a queue which is written to by the CPU using hipMemcpy.
+// Tries to fetch and simultaneously lock the worknode at curPopCount. If none exists, or it's currently locked, or
+// someone else got to it first, returns nullptr. Safe to use with a queue which is written to by the CPU using
+// hipMemcpy.
 template <size_t queueSize>
-__device__ WorkNode_Header *WorkQueue<queueSize>::tryPop_cpuSafe(bool shouldIncrementActiveCount, uint32_t index) {
+__device__ WorkNode_Header *WorkQueue<queueSize>::tryPop_cpuSafe(bool shouldIncrementActiveCount, uint32_t curPopCount) {
+    const uint32_t index = curPopCount % queueSize;
     // Atomic ops on device memory are only atomic with respect to the actions of other GPU cores, not the
     // asyncEngine/copy engine. In other words, the copy engine can execute a write in the middle of an atomic op. Thus,
     // if we don't have this 'if' guarding the tryPop call, it's possible for the atomicExch in tryPop to load nullptr
@@ -268,7 +281,7 @@ __device__ WorkNode_Header *WorkQueue<queueSize>::tryPop_cpuSafe(bool shouldIncr
     if (atomicAdd(reinterpret_cast<uintptr_t *>(&queue[index]), 0) == 0) {
         return nullptr;
     }
-    return tryPop(shouldIncrementActiveCount, index);
+    return tryPop(shouldIncrementActiveCount, curPopCount);
 
     // TODO: Are we certain that we won't see individual bytes as they get written?
     // If we do see them, then we can use the least significant bit of the pointer as a flag to indicate the write is
@@ -285,7 +298,7 @@ template <size_t queueSize>
 [[nodiscard]] __device__ WorkNode_Header *WorkQueue<queueSize>::pop(bool shouldIncrementActiveCount) {
     for (uint32_t curPopCount = atomicAdd(&popCount, 0); curPopCount < atomicAdd(&pushCount, 0);
                   curPopCount = atomicAdd(&popCount, 0)) {
-        WorkNode_Header *work = tryPop(shouldIncrementActiveCount, curPopCount % queueSize);
+        WorkNode_Header *work = tryPop(shouldIncrementActiveCount, curPopCount);
         if (work != nullptr) {
             return work;
         }
