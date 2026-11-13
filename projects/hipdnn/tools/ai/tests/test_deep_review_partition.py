@@ -518,6 +518,52 @@ def test_packets_impact_lane_takes_ingestor_files_only(part, tmp_path, capsys):
     assert "IMPACT: no changed file in scope, N/A" in capsys.readouterr().out
 
 
+def test_appl_scope_is_providers_engine_headers_and_schemas(part):
+    # catches: a schema or provider change that never reaches APPL, or core code that does
+    inside = (
+        "projects/hipdnn/flatbuffers_sdk/schemas/tensor_attributes.fbs",
+        "dnn-providers/hip-kernel-provider/src/core/GraphSchema.hpp",
+        "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp",
+    )
+    outside = (
+        "projects/hipdnn/backend/src/a.cpp",
+        "projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp",
+    )
+    rows = [(p, 1, "") for p in inside + outside]
+    assert {r[0] for r in part.concern_scope("APPL", rows)} == set(inside)
+
+
+def test_packets_appl_lane_takes_trigger_files_only(part, tmp_path, capsys):
+    # catches: APPL not registered as a concern lane, or scoped to every changed file
+    for sub in ("a", "b"):
+        (tmp_path / sub).mkdir()
+    schema = "projects/hipdnn/flatbuffers_sdk/schemas/tensor_attributes.fbs"
+    other = "projects/hipdnn/backend/a.cpp"
+    rd = make_round(tmp_path / "a", [(3, 1, schema), (2, 0, other)])
+    run(part, "areas", rd)
+    run(part, "plan", rd)
+    run(part, "packets", rd, "--lanes", "APPL")
+    packet = (rd / "packets" / "APPL.md").read_text()
+    assert schema in packet and other not in packet
+    rd = make_round(tmp_path / "b", [(2, 0, other)])
+    run(part, "areas", rd)
+    run(part, "plan", rd)
+    capsys.readouterr()
+    run(part, "packets", rd, "--lanes", "APPL")
+    assert not (rd / "packets" / "APPL.md").exists()
+    assert "APPL: no changed file in scope, N/A" in capsys.readouterr().out
+
+
+def test_appl_lane_id_is_a_provisional_id(part):
+    # catches: APPL dropped from CONCERN_LANES/REPORT_LANES, so APPL findings are
+    # invisible to the ledger and comment-reference checks.
+    assert "APPL" in part.CONCERN_LANES
+    assert part.PROVISIONAL_ID.findall("see APPL1-p2 and CORR1-p2") == [
+        "APPL1-p2",
+        "CORR1-p2",
+    ]
+
+
 def test_orient_gate_accepts_added_files_and_flags_paths_absent_at_base(
     part, tmp_path, capsys
 ):
