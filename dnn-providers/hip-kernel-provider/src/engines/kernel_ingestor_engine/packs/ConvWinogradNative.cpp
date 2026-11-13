@@ -261,6 +261,20 @@ size_t llcBytes(std::string_view gcnArchName)
     return 0;
 }
 
+bool bf16Permitted()
+{
+    const auto raw = hipdnn_data_sdk::utilities::toLower(hipdnn_data_sdk::utilities::trim(
+        hipdnn_data_sdk::utilities::getEnv("HIP_KERNEL_PROVIDER_CONV_WINOGRAD_BF16")));
+    return raw == "1" || raw == "true" || raw == "on" || raw == "yes";
+}
+
+bool f43Permitted()
+{
+    const auto raw = hipdnn_data_sdk::utilities::toLower(hipdnn_data_sdk::utilities::trim(
+        hipdnn_data_sdk::utilities::getEnv("HIP_KERNEL_PROVIDER_CONV_WINOGRAD_F43")));
+    return raw == "1" || raw == "true" || raw == "on" || raw == "yes";
+}
+
 std::optional<WinogradProblem> parseWinogradProblem(const MatchContext& context,
                                                     ConvDirection direction)
 {
@@ -1001,8 +1015,11 @@ std::optional<Plan> planFor(const WinogradProblem& problem,
     plan.args.tiles = static_cast<int>(tiles);
     plan.workspaceBytes = offset;
 
+    // Every grid built here runs 256-thread blocks; one dispatch addresses at most 2^32 - 1
+    // work items along x.
     const auto grid = [](unsigned int(&blocks)[3], long long x, long long y, long long z) {
-        if(x < 1 || x > INT_LIMIT || y > GRID_YZ_LIMIT || z > GRID_YZ_LIMIT)
+        if(x < 1 || x > INT_LIMIT || x * 256 > static_cast<long long>(UINT32_MAX)
+           || y > GRID_YZ_LIMIT || z > GRID_YZ_LIMIT)
         {
             return false;
         }
@@ -1167,7 +1184,11 @@ std::optional<ConvDirection> directionFor(const KernelDefinition& kernel)
 std::optional<BoundTokens> graphMatches(const MatchContext& context, ConvDirection direction)
 {
     const auto problem = conv_winograd::parseWinogradProblem(context, direction);
-    if(!problem.has_value())
+    // bf16 forward and backward data only by permission (the weight-gradient engine has its
+    // own precision rules).
+    if(!problem.has_value()
+       || (problem->base.dataType == data_objects::DataType::BFLOAT16
+           && direction != ConvDirection::BACKWARD_WEIGHTS && !conv_winograd::bf16Permitted()))
     {
         return std::nullopt;
     }
@@ -1213,7 +1234,8 @@ struct Resolved
 
 /// The problem, config and plan of @p kernel on @p context, or nullopt where it does not apply:
 /// its direction and dtype are the graph's, its instructions exist on the device (WMMA
-/// family, wave64 gfx9), F(4,3) only for fp32, WMMA only for fp16 / bf16, the register VALU
+/// family, wave64 gfx9), F(4,3) only for fp32 and only when permitted (f43Permitted), WMMA
+/// only for fp16 / bf16, the register VALU
 /// variant not for bf16, packed-fp16 transform math only for fp16, and it has a plan.
 std::optional<Resolved> resolve(const MatchContext& context, const KernelDefinition& kernel)
 {
@@ -1279,7 +1301,7 @@ std::optional<Resolved> resolve(const MatchContext& context, const KernelDefinit
     const bool noBf16Mfma
         = config->variant == Variant::COOP && config->arch == "gfx9" && bf16
           && hipdnn_plugin_sdk::stripArchFeatures(context.deviceProperties.gcnArchName) == "gfx908";
-    if((config->m == 4 && !fp32) || (wmmaFamily && fp32)
+    if((config->m == 4 && (!fp32 || !conv_winograd::f43Permitted())) || (wmmaFamily && fp32)
        || (config->variant == Variant::SREG && bf16) || !f16MathOk || noBf16Mfma)
     {
         return std::nullopt;

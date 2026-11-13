@@ -58,6 +58,9 @@ struct IgemmProblem
     long long phases = 1;
     /// Bytes one block's rows can span, from its first image: decides the 32-bit buffer loads.
     long long blockSpanBytes = 0;
+    /// One image has more than 2^31 - 1 pixels (input or output): only the large-image configs
+    /// (64-bit positions within an image, K1_LARGE) serve it, and only it.
+    bool largeImage = false;
     /// The graph's filter is packed K T R S C/g and not reflected: backward data can read it
     /// directly (the direct-filter configs) instead of staging the transposed copy.
     bool filterKtrsc = false;
@@ -134,6 +137,23 @@ struct Grid
     unsigned int x = 0, y = 0, z = 0;
 };
 std::optional<Grid> gridFor(const IgemmProblem& problem, int64_t bm, int64_t bn);
+
+/// Row tiles one launch of @p threads-thread blocks takes: all @p rowTiles, or as many as one
+/// dispatch addresses (2^32 - 1 work items along x); the rest run as further launches.
+long long launchTilesFor(long long rowTiles, long long threads);
+
+/// The waves per SIMD the register allocator targets for a config on @p gcnArchName, or 0 for
+/// the compiler's own choice. The swizzled 128x128x64 WMMA tile with 4x2 waves gets 4 on the
+/// gfx11 chips with the 1.5x VGPR file (gfx1100, gfx1101, gfx1151): aiming for 8 there, HIPRTC
+/// spills it (256 VGPRs, 168 B scratch on gfx1101) and it runs 1.6x slower.
+int occupancyTarget(std::string_view atom,
+                    int64_t bm,
+                    int64_t bn,
+                    int64_t bk,
+                    int64_t wm,
+                    int64_t wn,
+                    int64_t swz,
+                    std::string_view gcnArchName);
 
 /// Rows of shift range a halo config stages beyond its row tile (the kernels' K1_HALO_CAP).
 constexpr long long HALO_CAP = 64;

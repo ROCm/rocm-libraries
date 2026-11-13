@@ -107,6 +107,11 @@ std::optional<unsigned int> phaseBlocksWide(const K4Args& a, int th, int tw, int
     return static_cast<unsigned int>(blocks);
 }
 
+bool fitsOneDispatch(long long blocks, long long threads)
+{
+    return blocks * threads <= static_cast<long long>(std::numeric_limits<uint32_t>::max());
+}
+
 std::optional<unsigned int> phaseBlocks(const K4Args& a, int th, int tw, int cb)
 {
     if(th < 1 || tw < 1 || cb < 1 || a.c % (16 * cb) != 0)
@@ -873,13 +878,25 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel, ConvDirection directi
     return tile;
 }
 
+/// A config's threads per workgroup.
+long long blockThreads(const Tile& tile)
+{
+    return tile.fma ? FMA_THREADS : 4LL * tile.info.wave;
+}
+
 /// A launch's workgroups for a config's tile.
 std::optional<unsigned int> blocksFor(const K4Args& args, const Tile& tile)
 {
     const auto th = static_cast<int>(tile.th), tw = static_cast<int>(tile.tw);
-    return tile.nbi != 0 ? conv_group::phaseBlocksWide(
-                               args, th, tw, static_cast<int>(tile.nbi), static_cast<int>(tile.nbo))
-                         : conv_group::phaseBlocks(args, th, tw, static_cast<int>(tile.cb));
+    const auto blocks
+        = tile.nbi != 0 ? conv_group::phaseBlocksWide(
+                              args, th, tw, static_cast<int>(tile.nbi), static_cast<int>(tile.nbo))
+                        : conv_group::phaseBlocks(args, th, tw, static_cast<int>(tile.cb));
+    if(blocks.has_value() && !conv_group::fitsOneDispatch(*blocks, blockThreads(tile)))
+    {
+        return std::nullopt;
+    }
+    return blocks;
 }
 
 /// The problem a config runs: a channels-first config reads and writes the graph's packed
@@ -1044,6 +1061,21 @@ bool kernelMatches(const MatchContext& context,
               > lds)
     {
         return false;
+    }
+    // A staging transpose is one launch of a block per tile.
+    for(const auto* staging : {&problem->igemm.x, &problem->igemm.w, &problem->igemm.y})
+    {
+        if(staging->needed && staging->transpose)
+        {
+            const auto& t = staging->transposeArgs;
+            constexpr long long TILE = CONV_IGEMM_TRANSPOSE_TILE;
+            if(!conv_group::fitsOneDispatch((t.cols + TILE - 1) / TILE
+                                                * ((t.rows + TILE - 1) / TILE) * t.batches,
+                                            COPY_BLOCK))
+            {
+                return false;
+            }
+        }
     }
     return std::all_of(launches->begin(), launches->end(), [&](const auto& launch) {
         return blocksFor(launch.args, *tile).has_value();
@@ -1382,7 +1414,7 @@ public:
                 const auto& t = stagings[i]->transposeArgs;
                 constexpr long long TILE = CONV_IGEMM_TRANSPOSE_TILE;
                 grid = (t.cols + TILE - 1) / TILE * ((t.rows + TILE - 1) / TILE) * t.batches;
-                if(grid > MAX_GRID_BLOCKS)
+                if(grid * COPY_BLOCK > static_cast<long long>(std::numeric_limits<uint32_t>::max()))
                 {
                     throw hipdnn_plugin_sdk::HipdnnPluginException(
                         HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
@@ -1641,7 +1673,6 @@ private:
         return split;
     }
 
-    static constexpr long long MAX_GRID_BLOCKS = std::numeric_limits<int>::max();
     const compilation::IKernelCompiler& _kernelCompiler;
     const compilation::KpackKernelLoader& _kpackLoader;
 };

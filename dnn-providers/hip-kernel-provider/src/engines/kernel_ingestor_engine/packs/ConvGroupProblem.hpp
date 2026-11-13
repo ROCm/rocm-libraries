@@ -85,6 +85,10 @@ std::optional<unsigned int> phaseBlocks(const K4Args& args, int th, int tw, int 
 /// x (nbi / nbo) output-block tiles, or nullopt past the launch limit.
 std::optional<unsigned int> phaseBlocksWide(const K4Args& args, int th, int tw, int nbi, int nbo);
 
+/// Whether @p blocks workgroups of @p threads fit one dispatch (at most 2^32 - 1 work items
+/// along x).
+bool fitsOneDispatch(long long blocks, long long threads);
+
 /// Elements of one phase's expanded filter: block-diagonal per 16-channel block (small groups)
 /// or dense per group, padded to nbi blocks each way (wide groups).
 size_t expandedElements(const GroupProblem& problem);

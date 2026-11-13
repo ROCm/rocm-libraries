@@ -113,6 +113,7 @@ std::vector<AcceptCase> acceptCases()
     cases.push_back({"Filter1x7", filterShape({1, 7}, {0, 3})});
     cases.push_back({"Filter7x1", filterShape({7, 1}, {3, 0})});
     cases.push_back({"Filter3x3x3", filterShape({3, 3, 3}, {1, 1, 1})});
+    cases.push_back({"Filter5x5x5", filterShape({5, 5, 5}, {2, 2, 2})});
     auto ndhwc = filterShape({3, 3, 3}, {0, 1, 2});
     ndhwc.channelsLast = true;
     cases.push_back({"Ndhwc3x3x3", ndhwc});
@@ -288,7 +289,7 @@ std::vector<RefusalCase> refusalCases()
          }},
         {"Filter3x5", [](ConvGraphSpec& s) { reshape(s, filterShape({3, 5}, {1, 2})); }},
         {"Filter1x1", [](ConvGraphSpec& s) { reshape(s, filterShape({1, 1}, {0, 0})); }},
-        {"Filter5x5x5", [](ConvGraphSpec& s) { reshape(s, filterShape({5, 5, 5}, {2, 2, 2})); }},
+        {"Filter7x7x7", [](ConvGraphSpec& s) { reshape(s, filterShape({7, 7, 7}, {3, 3, 3})); }},
         {"Filter3x3x1", [](ConvGraphSpec& s) { reshape(s, filterShape({3, 3, 1}, {1, 1, 0})); }},
     };
 }

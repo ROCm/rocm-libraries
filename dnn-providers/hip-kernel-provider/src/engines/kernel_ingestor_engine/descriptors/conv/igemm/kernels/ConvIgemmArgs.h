@@ -25,7 +25,9 @@ struct K1Args
     /// Split-K: splits > 1 divides the reduction; each split writes fp32 partials (partial +
     /// split * outElems, indexed like the output) for ConvIgemmReduce to add in order.
     int splits;
-    int padding0;
+    /// The first row tile (blockIdx.x 0) of this launch: a grid past the 2^32 work items of
+    /// one dispatch runs as several launches over consecutive row tiles.
+    int tileBase;
     float* partial;
     long long outElems;
     /// Backward data: element strides of the transposed filter per input channel and per tap

@@ -394,6 +394,11 @@ void runCase(const DeviceCase& deviceCase, ConvDirection direction)
     // A few KiB of "last-level cache": the LLC-fit configs slice the batch on every device.
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter llc(
         "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_LLC_BYTES", "4096");
+    // bf16 and F(4,3) run behind their opt-ins (conv_winograd::bf16Permitted, f43Permitted).
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter bf16(
+        "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_BF16", "1");
+    const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter f43(
+        "HIP_KERNEL_PROVIDER_CONV_WINOGRAD_F43", "1");
     auto shape = deviceCase.shape;
     shape.dataType = dataTypeOf<T>();
     auto spec = specFor(shape, direction);

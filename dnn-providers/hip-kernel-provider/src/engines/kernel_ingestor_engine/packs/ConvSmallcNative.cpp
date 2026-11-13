@@ -409,7 +409,10 @@ std::optional<Plan> planFor(const SmallcProblem& problem, const Config& config)
     const long long tilesW = (args.wo + tw - 1) / tw;
     const long long gridX = tilesH * tilesW * args.dout * a.n;
     plan.weightElems = columnBlocks * columns * config.kpl();
-    if(columnBlocks > MAX_GRID_Y || gridX > INT_LIMIT || plan.weightElems > INT_LIMIT)
+    // One dispatch addresses at most 2^32 - 1 work items along x.
+    if(columnBlocks > MAX_GRID_Y || gridX > INT_LIMIT || plan.weightElems > INT_LIMIT
+       || gridX * config.blockThreads()
+              > static_cast<long long>(std::numeric_limits<uint32_t>::max()))
     {
         return std::nullopt;
     }

@@ -1118,6 +1118,25 @@ TEST(TestConvStemBwdAtoms, IdsFollowTheTable)
 // The launch
 // ---------------------------------------------------------------------------
 
+TEST(TestConvStemBwdLaunch, TheGridStaysWithinOneDispatch)
+{
+    // One dispatch addresses at most 2^32 - 1 work items along x: 2^24 - 1 blocks of 256
+    // threads. The base config's tile covers 32 super-columns (64 dx columns) a block; one dy
+    // channel and scalar loads keep dy's image within its 32-bit buffer.
+    auto shape = baseShape();
+    shape.n = 1;
+    shape.k = 1;
+    shape.input = {2, 64 * ((int64_t{1} << 24) - 1)};
+    auto fields = ConfigFields{};
+    fields.vec = 1;
+    const auto widest = launchOf(fields, shape);
+    ASSERT_TRUE(widest.has_value());
+    EXPECT_EQ(widest->block, 256u);
+    EXPECT_EQ(widest->gridX, (1u << 24) - 1);
+    shape.input = {2, int64_t{64} << 24};
+    EXPECT_FALSE(launchOf(fields, shape).has_value());
+}
+
 TEST(TestConvStemBwdLaunch, GridsArgumentsAndTheWorkspace)
 {
     const auto launch = launchOf(ConfigFields{});

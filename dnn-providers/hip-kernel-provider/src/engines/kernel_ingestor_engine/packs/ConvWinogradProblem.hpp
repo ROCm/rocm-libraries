@@ -74,6 +74,29 @@ std::optional<WinogradProblem>
     parseWinogradProblem(const hipdnn_plugin_sdk::ingestor::MatchContext& context,
                          conv_naive::ConvDirection direction);
 
+/**
+ * @brief Whether the forward and backward-data engines admit bf16 graphs: only with
+ *        HIP_KERNEL_PROVIDER_CONV_WINOGRAD_BF16 set to a true value (the weight-gradient engine
+ *        keeps its own rules).
+ *
+ * The matrix-core bf16 operands round the transformed input and filter tiles to bf16, an error
+ * (about a third of bf16's unit roundoff of each tile's sum of |products|) the convolution's own
+ * precision model does not allow, and MIOpen has no bf16 Winograd to match. Declined until a plan
+ * can carry a numerical note; the bf16 instances and code stay and serve with the variable set.
+ */
+bool bf16Permitted();
+
+/**
+ * @brief Whether the F(4,3) configs (fp32 multipass) are admitted: only with
+ *        HIP_KERNEL_PROVIDER_CONV_WINOGRAD_F43 set to a true value.
+ *
+ * F(4,3)'s transforms (points 0, +-1, +-2) carry entries up to 8 and 1/24: about 27 fp32 ulps of
+ * each tile's sum of |products| on a 3x3 c128 layer, against about 1 for F(2,3) and the 5.7
+ * coefficient MIOpen's fp32 Winograd needs. Declined until a plan can carry a numerical note;
+ * the instances stay and serve with the variable set.
+ */
+bool f43Permitted();
+
 enum class Variant
 {
     MULTIPASS,

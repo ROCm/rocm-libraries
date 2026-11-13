@@ -405,6 +405,18 @@ bool served(const ConvShape& shape, ConvDirection direction)
     {
         return conv_igemm::atomRunsOn("mfma16_f32", arch);
     }
+    // 16-bit configs all run on matrix-core atoms: a device without one (gfx906) has none.
+    if(shape.dataType != DataType::FLOAT)
+    {
+        const std::array<const char*, 4> atoms
+            = shape.dataType == DataType::HALF
+                  ? std::array<const char*, 4>{"mfma16_f16", "wmma11_f16", "wmma12_f16", ""}
+                  : std::array<const char*, 4>{
+                        "mfma16_bf16", "mfma16_bf16_908", "wmma11_bf16", "wmma12_bf16"};
+        return std::any_of(atoms.begin(), atoms.end(), [&](const char* atom) {
+            return *atom != '\0' && conv_igemm::atomRunsOn(atom, arch);
+        });
+    }
     return true;
 }
 
@@ -976,6 +988,30 @@ TEST(TestConvGroupProblem, DeclinesEveryUnservedGraph)
     deep.stride = {3, 1, 1};
     EXPECT_TRUE(parsed(deep, ConvDirection::FORWARD).has_value());
     EXPECT_FALSE(parsed(deep, ConvDirection::BACKWARD_DATA).has_value());
+}
+
+TEST(TestConvGroupProblem, LaunchesPastOneDispatchAreDeclined)
+{
+    // One dispatch addresses at most 2^32 - 1 work items along x: 256-thread workgroups fit
+    // 2^24 - 1 of them, 128-thread ones 2^25 - 1.
+    EXPECT_TRUE(conv_group::fitsOneDispatch((int64_t{1} << 24) - 1, 256));
+    EXPECT_FALSE(conv_group::fitsOneDispatch(int64_t{1} << 24, 256));
+    EXPECT_TRUE(conv_group::fitsOneDispatch((int64_t{1} << 25) - 1, 128));
+    EXPECT_FALSE(conv_group::fitsOneDispatch(int64_t{1} << 25, 128));
+    // A grid of more than 2^24 workgroups still counts within the block limit (the launch
+    // check is the dispatch, not INT_MAX): 2^20 images x 16 row tiles x 1 column tile x 2
+    // channel tiles.
+    K4Args args{};
+    args.n = 1 << 20;
+    args.dout = 1;
+    args.ho = 64;
+    args.wo = 16;
+    args.c = 64;
+    args.cg = 16;
+    const auto blocks = conv_group::phaseBlocks(args, 4, 16, 2);
+    ASSERT_TRUE(blocks.has_value());
+    EXPECT_EQ(*blocks, uint32_t{1} << 25);
+    EXPECT_FALSE(conv_group::fitsOneDispatch(*blocks, 256));
 }
 
 TEST(TestConvGroupCatalog, KernelGatesFilterStrideChannelTileAtomAndLds)

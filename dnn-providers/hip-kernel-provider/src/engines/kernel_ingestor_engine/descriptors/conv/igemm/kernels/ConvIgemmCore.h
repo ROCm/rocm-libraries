@@ -152,6 +152,16 @@ struct K1Raw<2>
 #ifndef K1_BUFFER
 #define K1_BUFFER 1
 #endif
+// Positions within one image: 32-bit, or 64-bit in the large-image configs (K1_LARGE 1, admitted
+// only for images past 2^31 - 1 pixels; the generic tier's 64-bit variant).
+#ifndef K1_LARGE
+#define K1_LARGE 0
+#endif
+#if K1_LARGE
+typedef long long K1Pos;
+#else
+typedef int K1Pos;
+#endif
 #if HKP_ARCH_GFX11 || HKP_ARCH_GFX12
 #define K1_RSRC_FLAGS 0x31004000
 #elif defined(__gfx1010__) || defined(__gfx1030__) || defined(__gfx1031__) || defined(__gfx1032__)
@@ -813,13 +823,13 @@ __device__ inline long long
         const int pw = phase % a.sw;
         const int ph = (phase / a.sw) % a.sh;
         const int pd = phase / (a.sw * a.sh);
-        const int spatial = gather.out[0] * gather.out[1] * gather.out[2];
+        const K1Pos spatial = static_cast<K1Pos>(gather.out[0]) * gather.out[1] * gather.out[2];
         const long long img = m / spatial;
-        int rest = static_cast<int>(m - img * spatial);
-        const int jw = rest % gather.out[2];
+        K1Pos rest = static_cast<K1Pos>(m - img * spatial);
+        const int jw = static_cast<int>(rest % gather.out[2]);
         rest /= gather.out[2];
-        const int jh = rest % gather.out[1];
-        const int jd = rest / gather.out[1];
+        const int jh = static_cast<int>(rest % gather.out[1]);
+        const int jd = static_cast<int>(rest / gather.out[1]);
         const int iw = ((pw - a.pw) % a.sw + a.sw) % a.sw + jw * a.sw;
         const int ih = ((ph - a.ph) % a.sh + a.sh) % a.sh + jh * a.sh;
         const int id = ((pd - a.pd) % a.sd + a.sd) % a.sd + jd * a.sd;
@@ -863,12 +873,12 @@ struct K1CfWalk
     // Row m's element (column index @p o0 from k1OutIndexCf) and its axis positions.
     __device__ void start(long long m, long long o0)
     {
-        const int spatial = count[0] * count[1] * count[2];
-        int rest = static_cast<int>(m % spatial);
-        j[2] = rest % count[2];
+        const K1Pos spatial = static_cast<K1Pos>(count[0]) * count[1] * count[2];
+        K1Pos rest = static_cast<K1Pos>(m % spatial);
+        j[2] = static_cast<int>(rest % count[2]);
         rest /= count[2];
-        j[1] = rest % count[1];
-        j[0] = rest / count[1];
+        j[1] = static_cast<int>(rest % count[1]);
+        j[0] = static_cast<int>(rest / count[1]);
         o = o0;
     }
 
@@ -910,13 +920,13 @@ __device__ inline long long
         const int pw = phase % a.sw;
         const int ph = (phase / a.sw) % a.sh;
         const int pd = phase / (a.sw * a.sh);
-        const int spatial = gather.out[0] * gather.out[1] * gather.out[2];
+        const K1Pos spatial = static_cast<K1Pos>(gather.out[0]) * gather.out[1] * gather.out[2];
         const long long img = m / spatial;
-        int rest = static_cast<int>(m - img * spatial);
-        const int jw = rest % gather.out[2];
+        K1Pos rest = static_cast<K1Pos>(m - img * spatial);
+        const int jw = static_cast<int>(rest % gather.out[2]);
         rest /= gather.out[2];
-        const int jh = rest % gather.out[1];
-        const int jd = rest / gather.out[1];
+        const int jh = static_cast<int>(rest % gather.out[1]);
+        const int jd = static_cast<int>(rest / gather.out[1]);
         const int iw = ((pw - a.pw) % a.sw + a.sw) % a.sw + jw * a.sw;
         const int ih = ((ph - a.ph) % a.sh + a.sh) % a.sh + jh * a.sh;
         const int id = ((pd - a.pd) % a.sd + a.sd) % a.sd + jd * a.sd;
@@ -1083,7 +1093,7 @@ struct K1Tiles
         const long long filterTaps = static_cast<long long>(a.ft) * a.fr * a.fs;
         kv = (tid % ROW_THREADS) * VEC;
         row = tid / ROW_THREADS;
-        const int spatial = gather.out[0] * gather.out[1] * gather.out[2];
+        const K1Pos spatial = static_cast<K1Pos>(gather.out[0]) * gather.out[1] * gather.out[2];
 #pragma unroll
         for(int p = 0; p < A_PASSES; ++p)
         {
@@ -1091,11 +1101,11 @@ struct K1Tiles
             if(m < gather.rows && aRow(p))
             {
                 const int img = static_cast<int>(m / spatial);
-                int rest = static_cast<int>(m - static_cast<long long>(img) * spatial);
-                const int ow = rest % gather.out[2];
+                K1Pos rest = static_cast<K1Pos>(m - static_cast<long long>(img) * spatial);
+                const int ow = static_cast<int>(rest % gather.out[2]);
                 rest /= gather.out[2];
-                const int oh = rest % gather.out[1];
-                const int od = rest / gather.out[1];
+                const int oh = static_cast<int>(rest % gather.out[1]);
+                const int od = static_cast<int>(rest / gather.out[1]);
                 aD[p] = od * gather.stride[0] - gather.pad[0];
                 aH[p] = oh * gather.stride[1] - gather.pad[1];
                 aW[p] = ow * gather.stride[2] - gather.pad[2];
@@ -1870,7 +1880,7 @@ __device__ void k1ConvMma(const K1Args& a)
     const int splits = a.splits > 1 ? a.splits : 1;
     const int split = static_cast<int>(bz) % splits;
     k1Setup<DIR>(a, static_cast<int>(bz) / splits, gather, map, g, phase);
-    const long long m0 = static_cast<long long>(bx) * BM;
+    const long long m0 = (static_cast<long long>(bx) + a.tileBase) * BM;
     if(m0 >= gather.rows)
     {
         return;
@@ -2077,17 +2087,17 @@ __device__ void k1ConvMma(const K1Args& a)
             As[(e / BK) * APL + HROWS * LD + e % BK] = S{};
         }
         int od[FM], oh[FM], ow[FM];
-        const int spatial = gather.out[0] * gather.out[1] * gather.out[2];
+        const K1Pos spatial = static_cast<K1Pos>(gather.out[0]) * gather.out[1] * gather.out[2];
 #pragma unroll
         for(int i = 0; i < FM; ++i)
         {
             const long long m = m0 + arow[i];
             const long long img = m / spatial;
-            int rest = static_cast<int>(m - img * spatial);
-            ow[i] = rest % gather.out[2];
+            K1Pos rest = static_cast<K1Pos>(m - img * spatial);
+            ow[i] = static_cast<int>(rest % gather.out[2]);
             rest /= gather.out[2];
-            oh[i] = rest % gather.out[1];
-            od[i] = m < gather.rows ? rest / gather.out[1] : -0x40000000;
+            oh[i] = static_cast<int>(rest % gather.out[1]);
+            od[i] = m < gather.rows ? static_cast<int>(rest / gather.out[1]) : -0x40000000;
         }
         const int nT = tiles.nTaps;
         const int t1 = gather.taps[1], t2 = gather.taps[2];
@@ -2404,7 +2414,7 @@ __device__ void k1ConvFma(const K1Args& a)
     const int splits = a.splits > 1 ? a.splits : 1;
     const int split = static_cast<int>(blockIdx.z) % splits;
     k1Setup<DIR>(a, static_cast<int>(blockIdx.z) / splits, gather, map, g, phase);
-    const long long m0 = static_cast<long long>(blockIdx.x) * BM;
+    const long long m0 = (static_cast<long long>(blockIdx.x) + a.tileBase) * BM;
     if(m0 >= gather.rows)
     {
         return;

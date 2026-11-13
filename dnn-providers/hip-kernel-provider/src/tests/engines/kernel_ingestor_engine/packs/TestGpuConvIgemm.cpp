@@ -689,7 +689,7 @@ TEST(TestConvIgemmCatalog, KnobsTellApartEveryConfigOfAGraph)
 {
     // Candidate enumeration identifies a config by its knob tuple: within one direction and
     // dtype (what one graph can admit) no two configs may share every knob.
-    static constexpr std::array<const char*, 18> KNOBS{"atom",
+    static constexpr std::array<const char*, 19> KNOBS{"atom",
                                                        "math",
                                                        "bm",
                                                        "bn",
@@ -706,7 +706,8 @@ TEST(TestConvIgemmCatalog, KnobsTellApartEveryConfigOfAGraph)
                                                        "cf",
                                                        "swz",
                                                        "dma",
-                                                       "fuse"};
+                                                       "fuse",
+                                                       "large"};
     for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
     {
         std::vector<std::string> tuples;
@@ -1209,7 +1210,7 @@ TEST(TestConvIgemmCatalog, ChannelsFirstOutputConfigsServeOnlyChannelsFirstOutpu
                    || kernel.getStringMetadata("atom") != "mfma32_f16"
                    || kernel.getIntMetadata("xcd") != 0 || kernel.getIntMetadata("halo") != 0
                    || kernel.getIntMetadata("wdirect") != 0 || kernel.getIntMetadata("pack") != 0
-                   || kernel.getIntMetadata("fuse") != 0
+                   || kernel.getIntMetadata("fuse") != 0 || kernel.getIntMetadata("large") != 0
                    || !conv_igemm::blockOrderServes(kernel.getIntMetadata("bm"),
                                                     kernel.getIntMetadata("bn"),
                                                     0,
@@ -1452,6 +1453,89 @@ TEST(TestConvIgemmCatalog, BufferSpanIsWholeImagesFromTheBlocksFirstImage)
         huge.n = 1;
         EXPECT_GE(parsedProblem(huge, direction).blockSpanBytes, int64_t{1} << 31);
     }
+}
+
+TEST(TestConvIgemmCatalog, LargeImageConfigsServeExactlyTheImagesPastTwoToTheThirtyOnePixels)
+{
+    // The kernels index one image's positions in 32 bits, the large-image configs (K1_LARGE) in
+    // 64. #14424 X3 (46341 x 46341, 1x1, one channel: 2^31 + 4633 pixels) takes only those;
+    // 46340 x 46340 (2^31 - 88733) and the same pixels over 16 images only the others.
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        const auto pack = packFor(direction);
+        const auto& kernels = catalog(direction);
+        const auto plain = std::find_if(kernels.begin(), kernels.end(), [](const auto& k) {
+            return k.getStringMetadata("dtype") == "HALF" && k.getStringMetadata("atom") == "fma"
+                   && k.getIntMetadata("vec") == 1 && k.getIntMetadata("large") == 0;
+        });
+        const auto large = std::find_if(kernels.begin(), kernels.end(), [](const auto& k) {
+            return k.getStringMetadata("dtype") == "HALF" && k.getStringMetadata("atom") == "fma"
+                   && k.getIntMetadata("vec") == 1 && k.getIntMetadata("large") == 1;
+        });
+        ASSERT_NE(plain, kernels.end());
+        ASSERT_NE(large, kernels.end());
+        const auto serves = [&](ConvShape shape, const auto& kernel) {
+            shape.dataType = DataType::HALF;
+            const GraphFixture fixture(buildGraph(specFor(shape, direction)),
+                                       deviceOf("gfx942:sramecc+:xnack-", 304));
+            const auto bound = matchesGraph(pack, fixture.context());
+            return bound.has_value() && matchesKernel(pack, fixture.context(), kernel, *bound);
+        };
+        auto x3 = dense(1, 1, {46341, 46341}, {1, 1}, {0, 0}, true);
+        x3.n = 1;
+        EXPECT_TRUE(serves(x3, *large));
+        EXPECT_FALSE(serves(x3, *plain));
+        auto under = x3;
+        under.input = {46340, 46340};
+        EXPECT_FALSE(serves(under, *large));
+        EXPECT_TRUE(serves(under, *plain));
+        auto batched = x3;
+        batched.n = 16;
+        batched.input = {11586, 11586};
+        EXPECT_FALSE(serves(batched, *large));
+        EXPECT_TRUE(serves(batched, *plain));
+        // A large-image knob on any other variant is not a config.
+        auto haloLarge = *large;
+        haloLarge.metadata["large"] = int64_t{2};
+        EXPECT_FALSE(serves(x3, haloLarge));
+    }
+}
+
+TEST(TestConvIgemmLaunch, OnlyTheSwizzledWideWmmaTileGetsAnOccupancyTarget)
+{
+    // 4 waves per SIMD for the swizzled 128x128x64 4x2 WMMA tile on the 1.5x-VGPR gfx11 chips;
+    // every other config and device keeps the compiler's choice (0).
+    for(const char* arch : {"gfx1100", "gfx1101", "gfx1151"})
+    {
+        EXPECT_EQ(conv_igemm::occupancyTarget("wmma11_f16", 128, 128, 64, 4, 2, 1, arch), 4);
+        EXPECT_EQ(conv_igemm::occupancyTarget("wmma11_bf16", 128, 128, 64, 4, 2, 1, arch), 4);
+        EXPECT_EQ(conv_igemm::occupancyTarget("wmma11_f16", 128, 128, 64, 4, 2, 0, arch), 0);
+        EXPECT_EQ(conv_igemm::occupancyTarget("wmma11_f16", 128, 128, 64, 2, 4, 1, arch), 0);
+        EXPECT_EQ(conv_igemm::occupancyTarget("wmma11_f16", 128, 128, 32, 4, 2, 1, arch), 0);
+    }
+    for(const char* arch : {"gfx1102", "gfx1150", "gfx1201", "gfx942"})
+    {
+        EXPECT_EQ(conv_igemm::occupancyTarget("wmma11_f16", 128, 128, 64, 4, 2, 1, arch), 0);
+    }
+    EXPECT_EQ(conv_igemm::occupancyTarget("wmma12_f16", 128, 128, 64, 4, 2, 1, "gfx1201"), 0);
+}
+
+TEST(TestConvIgemmLaunch, RowTilesPastOneDispatchRunAsSeveralLaunches)
+{
+    // #14424 case X3: N = C = K = 1, 46341 x 46341, 1x1 -- 2^31 + 4633 output rows. One
+    // dispatch addresses 2^32 - 1 work items along x, so 128-row tiles of 256-thread blocks
+    // (16777253 tiles, 4294976768 work items) take two launches.
+    const long long rows = 46341LL * 46341LL;
+    const long long tiles = (rows + 127) / 128;
+    const long long first = conv_igemm::launchTilesFor(tiles, 256);
+    EXPECT_EQ(first, (int64_t{1} << 24) - 1);
+    EXPECT_LT(first * 256, int64_t{1} << 32);
+    EXPECT_EQ(tiles - first, 38);
+    // Every grid that fits one dispatch is one launch.
+    EXPECT_EQ(conv_igemm::launchTilesFor(1000, 256), 1000);
+    EXPECT_EQ(conv_igemm::launchTilesFor((int64_t{1} << 24) - 1, 256), (int64_t{1} << 24) - 1);
+    EXPECT_EQ(conv_igemm::launchTilesFor(int64_t{1} << 24, 256), (int64_t{1} << 24) - 1);
+    EXPECT_EQ(conv_igemm::launchTilesFor(int64_t{1} << 30, 64), (int64_t{1} << 26) - 1);
 }
 
 TEST(TestConvIgemmComputeType, ServesCudnnsComputeTypesPerElementType)

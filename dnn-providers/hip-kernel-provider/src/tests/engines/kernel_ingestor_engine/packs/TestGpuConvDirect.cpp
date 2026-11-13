@@ -38,7 +38,7 @@
  * Every config of the installed catalog that the kernel match admits on this device runs on
  * every case, forward and backward data, in fp32, fp16 and bf16 (and, with TF32 permission, the
  * three-bf16 fp32 configs). The cases cover every instantiated filter (3x3, 5x5, 7x7, 1x7, 7x1,
- * 3x3x3), both layouts (channels-first runs through the staging transposes), padding 0 to 3,
+ * 3x3x3, 5x5x5), both layouts (channels-first runs through the staging transposes), padding 0 to 3,
  * asymmetric padding, odd extents, channel counts that are not tile multiples (and 3, which only
  * the scalar configs serve), maps wide and deep enough for several blocks, depth splitting, and
  * true convolution (the filter reflected by the weight pre-pass). The CPU reference is
@@ -304,6 +304,8 @@ std::vector<DeviceCase> deviceCases()
     auto deep = dense(64, 64, {9, 8, 8}, {3, 3, 3}, {1, 1, 1}, true);
     deep.n = 1;
     cases.push_back({"Ndhwc3x3x3Deep", deep});
+    cases.push_back({"Ndhwc5x5x5", dense(64, 16, {6, 9, 10}, {5, 5, 5}, {2, 2, 2}, true)});
+    cases.push_back({"Ncdhw5x5x5Pad0", dense(24, 40, {7, 8, 9}, {5, 5, 5}, {0, 0, 0}, false)});
 
     auto convolution = dense(24, 40, {13, 11}, {3, 3}, {1, 1}, true);
     convolution.mode = ConvMode::CONVOLUTION;
