@@ -3152,8 +3152,8 @@ Tests:
 # heuristic never assumes, so the ext API only. Their logic is registered for chips 0x75a0
 # and 0x75a3: on either a missing solution fails, and other parts decline. The K = 65536
 # entries are pre_checkin. The K = 131584 entries are nightly: their CPU reference is about
-# 2.2e12 multiply-adds over HOSTMEM of host memory. RowUniformityMXFp6_smoke runs every
-# kernel at the quick tier.
+# 2.2e12 multiply-adds, and each test peaks at about 12 GiB of host memory.
+# RowUniformityMXFp6_smoke runs every kernel at the quick tier.
 - name: matmul_mx_fp6_tile128x4
   category: pre_checkin
   function:
