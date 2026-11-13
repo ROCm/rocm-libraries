@@ -784,19 +784,13 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
 
     @param
     def source_swap(self, ctx: SizeContext) -> ForkParameter:
-        """Pinned to False until ClusterDim coupling accounts for SourceSwap.
+        """Both values; _GFX1250SourceSwapCoupling pins non-square MIs to False.
 
-        _GFX1250ClusterDimCoupling ranks ClusterDim shapes on the macro tile of
-        the MatrixInstruction as written. SourceSwap=True on a non-square MI
-        swaps the effective M and N, so the kernel builds a different tile:
-        [32, 16, 128, 1, 1, 8, 4, 2, 2] is 512x128 with SourceSwap=False but
-        256x256 with SourceSwap=True. As a flat fork, SourceSwap=True inherits
-        shapes ranked for the unswapped tile; on 4096x3072 the [4, 4] that
-        256x256 needs is dropped for [2, 8]. Square MIs build the same tile
-        either way. Restore [False, True] once the coupling ranks each
-        SourceSwap tile.
+        SourceSwap=True on a non-square MI (32x16) swaps the effective M and N, so
+        the kernel builds a different macro tile than the ClusterDim coupling ranks
+        shapes for. Square MIs build the same tile either way and keep both values.
         """
-        return self._make_param("SourceSwap", [False])
+        return self._make_param("SourceSwap", [False, True])
 
     @param
     def stagger_u(self, ctx: SizeContext) -> ForkParameter:

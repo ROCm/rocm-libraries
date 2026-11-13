@@ -257,6 +257,56 @@ class _GFX1250TDMFuseOneWave:
         return fork_params, coupled
 
 
+def _mi_is_square(entry: Dict[str, ForkParameter]) -> bool:
+    """True when an MI group entry's MatrixInstruction has M == N.
+
+    Entries whose MatrixInstruction cannot be read count as square, so the
+    SourceSwap coupling never narrows something it cannot parse.
+    """
+    mi = getattr(entry.get("MatrixInstruction"), "values", None)
+    if not isinstance(mi, list) or len(mi) < 2:
+        return True
+    return mi[0] == mi[1]
+
+
+class _GFX1250SourceSwapCoupling:
+    """Pin SourceSwap to False on non-square MI groups (32x16 on gfx1250).
+
+    SourceSwap=True on a non-square MI swaps the effective M and N, so the
+    kernel builds a different macro tile: [32, 16, 128, 1, 1, 8, 4, 2, 2] is
+    512x128 with SourceSwap=False but 256x256 with SourceSwap=True.
+    _GFX1250ClusterDimCoupling ranks ClusterDim shapes on the tile of the
+    MatrixInstruction as written, so SourceSwap=True kernels on these MIs would
+    get shapes ranked for the wrong tile (on 4096x3072 the [4, 4] that 256x256
+    needs is dropped for [2, 8]). Until that coupling ranks each SourceSwap
+    tile, SourceSwap moves into the MI groups: non-square groups keep only
+    False, square groups keep every profile value, one entry per value so each
+    group entry stays single-valued. A profile without SourceSwap=True, or MI
+    groups that are all square, leaves the flat parameter untouched.
+    """
+
+    @mark_post_process
+    def pin_non_square_source_swap(
+        self,
+        fork_params: Dict[str, ForkParameter],
+        mi_groups: GroupDimension,
+        ctx: SizeContext,
+    ) -> Tuple[Dict[str, ForkParameter], GroupDimension]:
+        fp = fork_params.get("SourceSwap")
+        if fp is None or not fp.active or not isinstance(fp.values, list) or True not in fp.values:
+            return fork_params, mi_groups
+        if all(_mi_is_square(e) for e in mi_groups):
+            return fork_params, mi_groups
+        non_square = [v for v in fp.values if v is False] or [False]
+        coupled = []
+        for entry in mi_groups:
+            values = list(fp.values) if _mi_is_square(entry) else non_square
+            for v in values:
+                coupled.append({**entry, "SourceSwap": self._make_param("SourceSwap", [v])})
+        del fork_params["SourceSwap"]
+        return fork_params, coupled
+
+
 class _GFX1250ClusterDimCoupling:
     """Move ClusterDim into the MI groups, with the shapes each MI's grid admits.
 
@@ -299,11 +349,13 @@ class _GFX1250ClusterDimCoupling:
 # surviving MI groups, and narrowing against groups the wave-tile filter is
 # about to drop would be needlessly conservative. Listing the narrowing first
 # here therefore runs it second. _GFX1250ClusterDimCoupling is listed first so
-# it runs last, on the final, de-duplicated MI groups; _GFX1250TDMFuseOneWave
-# runs just before it, so each per-shape copy inherits its group's TDMFuse.
+# it runs last, on the final, de-duplicated MI groups; _GFX1250SourceSwapCoupling
+# runs just before it and _GFX1250TDMFuseOneWave before that, so each per-shape
+# copy inherits its group's SourceSwap and TDMFuse.
 class GFX1250GAPostProcessor(
     GFX1250GAOrigamiPolicy,
     _GFX1250ClusterDimCoupling,
+    _GFX1250SourceSwapCoupling,
     _GFX1250TDMFuseOneWave,
     _GFX1250DropMIGroupGSU,
     _GFX1250GeometryNarrowing,
