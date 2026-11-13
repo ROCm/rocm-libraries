@@ -25,6 +25,7 @@ GlobalParameters:
   KeepBuildTmp: false
   RotatingBufferSize: 0
   UseEffLike: false
+  SyncsPerBenchmark: 0
   DataInitTypeMXSA: 3
   DataInitTypeMXSB: 3
   MXScaleFormat: 1
