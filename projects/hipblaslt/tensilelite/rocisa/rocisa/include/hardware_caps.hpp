@@ -21,6 +21,7 @@
  *
  * ************************************************************************ */
 #pragma once
+#include <algorithm>
 #include <array>
 #include <iostream>
 #include <map>
@@ -697,12 +698,19 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
                                                    std::map<std::string, int>& archCaps)
 {
     std::map<std::string, int> rv;
-    // 1024 vgpr
+    // Max. addressable VGPRs per wave
     rv["MaxVgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 1024 : 256;
     // Highest addressable SGPR index plus one. gfx8/gfx9 stop at s101 (102); every
     // RDNA target (gfx10, gfx11, gfx12) addresses s0-s105 (106).
     rv["MaxSgpr"] = isaVersion[0] >= 10 ? 106 : 102;
-    rv["PhysicalMaxVgpr"] = isaVersion[0] == 12 && isaVersion[1] == 5? 1024 : 512;
+    // gfx11 counts physical VGPRs per SIMD in wave32 units; wave64 uses half as many.
+    if(isaVersion[0] == 12 && isaVersion[1] == 5)
+        rv["PhysicalMaxVgpr"] = 1024;
+    else if(isaVersion[0] == 11)
+        rv["PhysicalMaxVgpr"]
+            = checkInList(isaVersion, {{11, 0, 0}, {11, 0, 1}, {11, 5, 1}}) ? 1536 : 1024;
+    else
+        rv["PhysicalMaxVgpr"] = 512;
     // gfx11 (RDNA) does not have an SGPR-file occupancy limit; use a large value so it never binds.
     // TODO: gfx10/gfx12 are RDNA too and carry the same phantom limit.
     rv["PhysicalMaxSgpr"]   = isaVersion[0] == 11 ? 1696 : 800;
@@ -712,15 +720,7 @@ inline std::map<std::string, int> initRegisterCaps(const IsaVersion&           i
     if(isaVersion[0] == 10)
         rv["PhysicalMaxVgprCU"] = 1024 * 32;
     else if(isaVersion[0] == 11)
-    {
-        // Code path for gfx11XX (RDNA3, two SIMDs per CU, wave32).
-        // gfx1100, gfx1101 and gfx1151 have a 1536-VGPR file per SIMD; every
-        // other gfx11 part (e.g. gfx1102, gfx1103, gfx115X, gfx117X) has 1024.
-        const bool has1536Vgpr = (isaVersion[1] == 0 && (isaVersion[2] == 0 || isaVersion[2] == 1))
-                                 || (isaVersion[1] == 5 && isaVersion[2] == 1);
-        const int vgprPerSimd = has1536Vgpr ? 1536 : 1024;
-        rv["PhysicalMaxVgprCU"] = 2 /*two SIMDs per CU*/ * vgprPerSimd * 32;
-    }
+        rv["PhysicalMaxVgprCU"] = 2 /*two SIMDs per CU*/ * rv["PhysicalMaxVgpr"] * 32;
     else if(isaVersion[0] == 12)
         rv["PhysicalMaxVgprCU"] = isaVersion[1] == 5? 4096 * 32 : 2 * 1536 * 32;
     else if(isaVersion[0] == 9)

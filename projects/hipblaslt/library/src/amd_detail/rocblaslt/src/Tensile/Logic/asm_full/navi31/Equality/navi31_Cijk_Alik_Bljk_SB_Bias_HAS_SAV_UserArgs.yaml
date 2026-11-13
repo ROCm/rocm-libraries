@@ -1364,7 +1364,7 @@ Solutions:
   MacroTileB: 128
   MathClocksUnrolledLoop: 0
   MaxLDS: 65536
-  MaxOccupancy: 40
+  MaxOccupancy: 3
   MbskPrefetchMethod: 0
   MfmaInitCVgprs: false
   MinGRIncPerMfma: 1
