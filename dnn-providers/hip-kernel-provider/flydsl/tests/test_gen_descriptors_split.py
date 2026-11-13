@@ -207,7 +207,9 @@ def test_the_ued_is_slotted_1_1_and_carries_no_engine_wide_selection() -> None:
 
 
 def _install_estimate(content_dir: Path, role: str, arch: str, model_id: str) -> None:
-    ued_id = gd._uuid("ued/sdpa_bwd_split")
+    ued_id = gd.split_ued_id(
+        {op: gd._fields_for_op([r for r in _rows() if r.op == op]) for op in SLOT_OPS}
+    )
     folder = (
         content_dir / "sdpa_bwd_split" / "heuristics" / ued_id / role / arch / "tflops"
     )
@@ -249,6 +251,28 @@ def test_an_engine_wide_ranker_is_refused_on_the_split_engine(tmp_path: Path) ->
     _install_estimate(tmp_path, "sort_kernel_catalog", "gfx950", "ranker-950")
     with pytest.raises(gd.HkpPackError, match="ranks per slot"):
         _split(content_dir=tmp_path)
+
+
+def test_the_engine_id_moves_with_any_slots_fields_and_every_pack_names_it() -> None:
+    # Measurements are filed by engine id, so a field change in any one slot moves it;
+    # each slot's packs name the engine they belong to.
+    folders = _split()
+    ued = _ued(folders)
+    for op in SLOT_OPS:
+        assert _kdp(folders, op)["engine"] == ued["id"]
+    assert _ued(_split())["id"] == ued["id"]
+    for op in SLOT_OPS:
+        # The same rows with one slot's waves_per_eu retyped: that slot's KMD changes.
+        rows = []
+        for row in _rows():
+            if row.op == op:
+                knobs = {**row.record["knobs"]}
+                knobs["waves_per_eu"] = str(knobs["waves_per_eu"])
+                row = row._replace(record={**row.record, "knobs": knobs})
+            rows.append(row)
+        moved = _ued(_split(rows))
+        assert moved["id"] != ued["id"], op
+        assert all(_kdp(_split(rows), o)["engine"] == moved["id"] for o in SLOT_OPS)
 
 
 def test_a_slots_knobs_are_its_own_tuning_fields() -> None:

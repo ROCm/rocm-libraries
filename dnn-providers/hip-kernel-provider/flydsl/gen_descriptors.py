@@ -519,9 +519,10 @@ def estimate_document(uhd_id: str, name: str, symbol: str) -> dict[str, Any]:
 
 # uuid5 from a name, so ids are stable across regenerations and adding a
 # thirteenth instance cannot disturb the twelve already shipped. The namespace
-# is itself derived from a URL rather than being a magic constant. The names are
-# unchanged from when these descriptors were emitted in shipped form, so the ids
-# the runtime sees did not move with the switch to authoring them.
+# is itself derived from a URL rather than being a magic constant. The engine's
+# (UED) id also carries a fingerprint of its kernel fields (`ued_id`,
+# `split_ued_id`), so it moves exactly when they do; every other id is the op's
+# name alone.
 _NAMESPACE = uuid.uuid5(
     uuid.NAMESPACE_URL,
     "https://github.com/ROCm/rocm-libraries/dnn-providers/hip-kernel-provider/flydsl",
@@ -530,6 +531,50 @@ _NAMESPACE = uuid.uuid5(
 
 def _uuid(name: str) -> str:
     return str(uuid.uuid5(_NAMESPACE, name))
+
+
+def kmd_fields(fields: dict[str, str]) -> list[dict[str, Any]]:
+    """The KMD's field records for an op's knobs, in the order its instances declare them."""
+    records = []
+    for name, type_token in fields.items():
+        record: dict[str, Any] = {"name": name, "type": type_token}
+        # Only the tunable field carries a default. The rest are required:
+        # `coerceKernelMetadata` (DescriptorLoader.hpp:1291) drops the whole
+        # pack when a field with no default is missing, which is the loud
+        # failure we want if an instance ever ships without its dtype or N.
+        if name == "block_threads":
+            record["default_value"] = 256
+        records.append(record)
+    return records
+
+
+def _fields_fingerprint(records: Any) -> str:
+    canonical = json.dumps(records, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
+def ued_id(op: str, fields: dict[str, str]) -> str:
+    """The engine's id: its op name and a fingerprint of its KMD's field records.
+
+    Measurements are filed by engine id, and a model is trained against one field list
+    (the UHD pipeline keys each engine's datasets by this id and refuses a collection
+    whose fields differ from the ones its dataset holds). So an engine whose kernel
+    fields change gets a new id, and with it new datasets and a new selector revision,
+    rather than mixing measurements that disagree on what a kernel's fields are.
+    Unchanged fields keep the id, and with it every model trained against the engine.
+    """
+    return _uuid(f"ued/{op}/fields-{_fields_fingerprint(kmd_fields(fields))}")
+
+
+def split_ued_id(slot_fields: dict[str, dict[str, str]]) -> str:
+    """The split engine's id: as `ued_id`, over its slots' KMD field records in launch order.
+
+    The engine's kernels are its slots' (RFC 0021), so a field change in any slot moves it.
+    """
+    records = [
+        [op, kmd_fields(slot_fields[op])] for op in SPLIT_SLOT_OPS if op in slot_fields
+    ]
+    return _uuid(f"ued/{SPLIT_ENGINE}/fields-{_fields_fingerprint(records)}")
 
 
 class KernelEntry(NamedTuple):
@@ -854,6 +899,7 @@ class OpDescriptors:
         op: str,
         fields: dict[str, str],
         installed: dict[str, dict[str, list[tuple[str | None, str]]]] | None = None,
+        engine_id: str | None = None,
     ) -> None:
         self.op = op
         self.slot = slot_of(op)
@@ -861,10 +907,13 @@ class OpDescriptors:
         self.fields = fields
         if self.slot is None:
             self.symbols = f"hipkernel.{self.stem}"
-            engine = op
+            engine_id = ued_id(op, fields)
         else:
-            engine = SPLIT_ENGINE
-            self.symbols = f"hipkernel.flydsl_{engine}.{self.slot}"
+            # A slot op's packs name the split engine, whose id spans every slot
+            # (`build_documents` passes it); alone, the op is that engine with one slot.
+            if engine_id is None:
+                engine_id = split_ued_id({op: fields})
+            self.symbols = f"hipkernel.flydsl_{SPLIT_ENGINE}.{self.slot}"
         self.installed = installed or {}
 
         self.kmd_id = _uuid(f"kmd/{op}")
@@ -872,7 +921,7 @@ class OpDescriptors:
         self.udd_id = _uuid(f"udd/{op}")
         # The dispatches of the op's extra packs (``EXTRA_PACKS``): dispatch suffix -> file stem.
         self.extra_packs = EXTRA_PACKS.get(op, {})
-        self.ued_id = _uuid(f"ued/{engine}")
+        self.ued_id = engine_id
         self.umd_id = _uuid(f"umd/{op}/kernel")
         self.estimate_uhd_id = _uuid(f"uhd/{op}/predict_engine")
 
@@ -897,16 +946,7 @@ class OpDescriptors:
         # ingestor declines any graph whose schema floor is above it.
         if self.op in SDK_VERSION_BY_OP:
             ued["sdk_version"] = SDK_VERSION_BY_OP[self.op]
-        kmd_fields = []
-        for name, type_token in self.fields.items():
-            field: dict[str, Any] = {"name": name, "type": type_token}
-            # Only the tunable field carries a default. The rest are required:
-            # `coerceKernelMetadata` (DescriptorLoader.hpp:1291) drops the whole
-            # pack when a field with no default is missing, which is the loud
-            # failure we want if an instance ever ships without its dtype or N.
-            if name == "block_threads":
-                field["default_value"] = 256
-            kmd_fields.append(field)
+        kmd = kmd_fields(self.fields)
 
         # The dispatches of the extra packs of an op (``EXTRA_PACKS``): shared documents, authored with
         # every arch's pack of the op whether or not that arch has such rows.
@@ -958,7 +998,7 @@ class OpDescriptors:
                 "version": DESCRIPTOR_VERSION,
                 "id": self.kmd_id,
                 "name": f"flydsl {self.op} variant fields",
-                "fields": kmd_fields,
+                "fields": kmd,
             },
             f"{self.stem}.uhd.json": {
                 "version": DESCRIPTOR_VERSION,
@@ -1292,12 +1332,13 @@ class SplitEngine:
     def __init__(
         self,
         slot_ops: dict[str, OpDescriptors],
+        engine_id: str,
         installed: RoleMaps | None = None,
     ) -> None:
         self.slot_ops = slot_ops
         self.stem = f"flydsl_{SPLIT_ENGINE}"
         self.symbols = f"hipkernel.{self.stem}"
-        self.ued_id = _uuid(f"ued/{SPLIT_ENGINE}")
+        self.ued_id = engine_id
         self.estimate_uhd_id = _uuid(f"uhd/{SPLIT_ENGINE}/predict_engine")
         self.installed = installed or {}
         # A slot ranker belongs to one slot (RFC 0021), which the installed layout has no
@@ -1354,11 +1395,19 @@ def build_documents(
         by_op.setdefault(entry.op, []).append(entry)
 
     folders: dict[Path, dict[str, dict[str, Any]]] = {}
+    fields_by_op = {op: _fields_for_op(op_entries) for op, op_entries in by_op.items()}
+    # The split engine's id spans every slot's fields, so it is known before any slot is
+    # built; a partial engine is refused below, once each present slot has been checked.
+    split_id = split_ued_id(
+        {op: fields for op, fields in fields_by_op.items() if slot_of(op) is not None}
+    )
     slot_ops: dict[str, OpDescriptors] = {}
     slot_packs: dict[str, list[dict[str, Any]]] = {}
     for op_name, op_entries in sorted(by_op.items()):
-        installed = installed_models(content_dir / op_name, _uuid(f"ued/{op_name}"))
-        op = OpDescriptors(op_name, _fields_for_op(op_entries), installed)
+        fields = fields_by_op[op_name]
+        engine_id = split_id if slot_of(op_name) else ued_id(op_name, fields)
+        installed = installed_models(content_dir / op_name, engine_id)
+        op = OpDescriptors(op_name, fields, installed, engine_id)
         folders[Path(op_name)] = op.documents()
         folders[Path(op_name) / arch] = pack = _arch_documents(op_entries, op, arch)
         if op.slot is not None:
@@ -1380,7 +1429,8 @@ def build_documents(
         _require_disjoint_ids(slot_packs)
         engine = SplitEngine(
             {op: slot_ops[op] for op in SPLIT_SLOT_OPS},
-            installed_models(content_dir / SPLIT_ENGINE, _uuid(f"ued/{SPLIT_ENGINE}")),
+            split_id,
+            installed_models(content_dir / SPLIT_ENGINE, split_id),
         )
         folders[Path(SPLIT_ENGINE)] = engine.documents()
     return folders
