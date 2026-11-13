@@ -284,8 +284,12 @@ persistence or scheduling knobs, under these assumptions about the executed
 path:
 
 - FP32 addition, multiplication and the reciprocal return one of the two FP32
-  neighbours of their exact result, and each MFMA call accumulates its products
-  by such additions in some order;
+  neighbours of their exact result;
+- each MFMA call returns its accumulator plus its eight products with an error
+  of at most eight FP32 units of the summed magnitudes of those nine terms. It
+  is not assumed to add them one by one: the gfx942 MFMA rounds once, after
+  aligning its terms, and its result need not be an FP32 neighbour of the exact
+  sum;
 - `exp2` is within one FP32 ULP;
 - the probability cast and the output store round to nearest even and keep
   subnormals;
@@ -296,10 +300,18 @@ The last item is checked on the CPU. A contract lowers each quick spec to LLVM
 IR and classifies every floating-point instruction against that path: no mask on
 the scores, a key-tile loop over `seqlen_kv / block_n`, uncast weights in the
 normalizer, one cast into the PV operand, one `alpha` for the normalizer and for
-every accumulator element, one `fdiv 1.0, l`, and no fast-math flag. An
-instruction outside the path fails with "re-derive the bound"; the bound is
-never widened to absorb it. The rounding behaviour of the compiled code object
-(the first three items) is not checked here.
+every accumulator element, one `fdiv 1.0, l`, and no fast-math flag. A second
+contract traces the MFMA operands: the score chains multiply K from its LDS
+region by Q, the value chains start from the rescaled accumulator and multiply V
+from its LDS region by the cast weights, each weight enters every value chain
+once, and the chain lengths are `head_size / 8` and `block_n / 8`. An
+instruction or operand outside the path fails with "re-derive the bound"; the
+bound is never widened to absorb it. The rounding behaviour of the compiled code
+object (the other items) is not checked here.
+
+The MFMA item is a property of the hardware. An architecture whose FP16 MFMA
+reads operands below the smallest normal as zero does not satisfy it, so a new
+architecture needs that property established before its cases are added.
 
 The subject adapter refuses the same specs as for the uniform lane (split-KV,
 sinks, LSE, ragged, bottom-right, paged, varlen) and additionally requires the

@@ -1206,6 +1206,297 @@ def _classify_unmasked_path(ir: str, dtype: str, block_n: int) -> tuple[list, Co
     return violations, counts
 
 
+_INSERT = re.compile(
+    r"insertelement <(\d+) x \w+> (undef|%[-\w.]+), \w+ (%[-\w.]+), i32 (\d+)$"
+)
+_EXTRACT = re.compile(r"extractelement <\d+ x \w+> (%[-\w.]+), i32 (\d+)$")
+_LDS_FILL = re.compile(
+    r"call void @llvm\.amdgcn\.raw\.ptr\.buffer\.load\.lds\("
+    r"ptr addrspace\(8\) (%[-\w.]+), ptr addrspace\(3\) (%[-\w.]+),"
+)
+_LDS_ARRAY = re.compile(
+    r"getelementptr inbounds \[1 x \[(\d+) x \[(\d+) x \w+\]\]\], "
+    r"ptr addrspace\(3\) (@[-\w.]+|%[-\w.]+),"
+)
+_LDS_OFFSET = re.compile(
+    r"getelementptr inbounds i8, ptr addrspace\(3\) @[-\w.]+, i32 (\d+)$"
+)
+_LDS_BASE = re.compile(r"ptrtoint ptr addrspace\(3\) (@[-\w.]+|%[-\w.]+) to i64$")
+_BUFFER = "llvm.amdgcn.make.buffer.rsrc.p1"
+
+
+def _trace_mfma_operands(ir: str, dtype: str) -> tuple[list, Counter]:
+    """Trace every MFMA operand of one lowered unmasked kernel back to the
+    tensor it is loaded from, and measure every chain of MFMA calls.
+
+    The score chains start from a zero vector, multiply K tiles read from the K
+    region of the LDS by Q read from ``q_ptr``, and end in the 16 scores of a
+    lane. The value chains start from the accumulator rescaled by ``alpha``,
+    multiply V read from the V region of the LDS by the cast probabilities,
+    each of which enters every chain once, and end in the accumulator the loop
+    carries. The K region is filled from ``k_ptr`` only and the V region from
+    ``v_ptr`` only. Which token lands in which LDS row is index arithmetic and
+    is not traced; the relation itself tests it on the device."""
+    violations: list[str] = []
+    counts: Counter = Counter()
+    instructions = _parse(ir)
+    uses: dict[str, list[_Instruction]] = {}
+    for instruction in instructions.values():
+        for operand in instruction.operands:
+            uses.setdefault(operand, []).append(instruction)
+
+    def through(name: str) -> str:
+        """Follow every ``bitcast``, type-changing ones included."""
+        while name in instructions and instructions[name].opcode == "bitcast":
+            name = instructions[name].operands[0]
+        return name
+
+    def users(name: str) -> list[_Instruction]:
+        found: list[_Instruction] = []
+        for user in uses.get(name, []):
+            found.extend(users(user.name) if user.opcode == "bitcast" else [user])
+        return found
+
+    def elements(name: str) -> list[str] | None:
+        """The values at positions ``0..n-1`` of an ``insertelement`` chain."""
+        found: dict[int, str] = {}
+        width = None
+        name = through(name)
+        while name != "undef":
+            item = instructions.get(name)
+            match = _INSERT.match(item.text) if item else None
+            if match is None:
+                return None
+            width, index = int(match.group(1)), int(match.group(4))
+            if index in found:
+                return None
+            found[index] = through(match.group(3))
+            name = match.group(2)
+            if name != "undef":
+                name = through(name)
+        if width is None or sorted(found) != list(range(width)):
+            return None
+        return [found[index] for index in range(width)]
+
+    def scalar(name: str) -> str:
+        """Follow ``extractelement`` of an ``insertelement`` chain to the value."""
+        name = through(name)
+        while name in instructions:
+            match = _EXTRACT.match(instructions[name].text)
+            packed = elements(match.group(1)) if match else None
+            if packed is None or int(match.group(2)) >= len(packed):
+                break
+            name = packed[int(match.group(2))]
+        return name
+
+    def lds_offset(base: str) -> int | None:
+        """Byte offset of an LDS base inside the pool: the pool itself, or an
+        ``i8`` offset from it."""
+        if base.startswith("@"):
+            return 0
+        item = instructions.get(base)
+        match = _LDS_OFFSET.match(item.text) if item else None
+        return int(match.group(1)) if match else None
+
+    def loaded_from(name: str) -> tuple[str, object]:
+        """``("lds", (offset, bytes of the array))`` or ``("global", pointer)``
+        for a ``load``; ``("other", text)`` otherwise."""
+        item = instructions.get(through(name))
+        if item is None or item.opcode != "load" or not item.operands:
+            return ("other", name if item is None else item.text)
+        address = instructions.get(item.operands[0])
+        if address is None or address.opcode != "getelementptr":
+            return ("other", item.text)
+        if "ptr addrspace(3)" in item.text:
+            array = _LDS_ARRAY.match(address.text)
+            offset = lds_offset(array.group(3)) if array else None
+            if offset is None:
+                return ("other", address.text)
+            return ("lds", (offset, 2 * int(array.group(1)) * int(array.group(2))))
+        match = re.search(r"ptr addrspace\(1\) (%[-\w.]+),", address.text)
+        return ("global", match.group(1)) if match else ("other", address.text)
+
+    # Chains: an MFMA call continues the chain of its accumulator operand.
+    atom = _MFMA_ATOM[dtype]
+    calls = [item for item in instructions.values() if item.opcode == atom]
+    successor: dict[str, list[str]] = {}
+    starts: list[_Instruction] = []
+    for call in calls:
+        previous = through(call.operands[2])
+        if previous in instructions and instructions[previous].opcode == atom:
+            successor.setdefault(previous, []).append(call.name)
+        else:
+            starts.append(call)
+    chains: list[list[_Instruction]] = []
+    for start in starts:
+        chain = [start]
+        while len(successor.get(chain[-1].name, [])) == 1:
+            chain.append(instructions[successor[chain[-1].name][0]])
+        if successor.get(chain[-1].name):
+            violations.append(f"MFMA result feeds two MFMA calls: {chain[-1].text}")
+        chains.append(chain)
+    if sum(len(chain) for chain in chains) != len(calls):
+        violations.append("an MFMA call is in no chain that starts outside the MFMA")
+
+    probabilities = {
+        item.name
+        for item in instructions.values()
+        if item.opcode == "fptrunc"
+        and through(item.operands[0]) in instructions
+        and instructions[through(item.operands[0])].opcode == _EXP2
+    }
+    alphas = {
+        item.name
+        for item in instructions.values()
+        if item.opcode == _EXP2
+        and {user.opcode for user in users(item.name)} == {"fmul"}
+    }
+    k_region: set[tuple[int, int]] = set()
+    v_region: set[tuple[int, int]] = set()
+    packs_by_step: dict[int, set[tuple[str, ...]]] = {}
+    for chain in chains:
+        start = instructions.get(through(chain[0].operands[2]))
+        if start is not None and start.text.count("zeroinitializer") == 2:
+            # Score chain: K from the LDS times Q from q_ptr, from zero.
+            counts["score_chains"] += 1
+            counts[f"score_chain_length_{len(chain)}"] += 1
+            for call in chain:
+                kind, where = loaded_from(call.operands[0])
+                if kind == "lds":
+                    k_region.add(where)
+                else:
+                    violations.append(
+                        f"score MFMA does not read K from the LDS: {where}"
+                    )
+                if loaded_from(call.operands[1]) != ("global", "%q_ptr"):
+                    violations.append(
+                        f"score MFMA does not read Q from q_ptr: {call.text}"
+                    )
+            ends = users(chain[-1].name)
+            indices = sorted(
+                int(match.group(2))
+                for match in (_EXTRACT.match(user.text) for user in ends)
+                if match
+            )
+            if len(ends) != 16 or indices != list(range(16)):
+                violations.append(
+                    f"score chain does not end in the 16 scores of a lane: {chain[-1].text}"
+                )
+            continue
+
+        # Value chain: the rescaled accumulator, then V times cast probabilities.
+        carried = elements(chain[0].operands[2])
+        state = None
+        if carried is not None and len(carried) == 16:
+            sources = set()
+            for index, name in enumerate(carried):
+                product = instructions.get(name)
+                element = (
+                    _EXTRACT.match(instructions[through(product.operands[0])].text)
+                    if product is not None
+                    and product.opcode == "fmul"
+                    and through(product.operands[0]) in instructions
+                    else None
+                )
+                if (
+                    element is None
+                    or int(element.group(2)) != index
+                    or through(product.operands[1]) not in alphas
+                ):
+                    sources.add(None)
+                else:
+                    sources.add(through(element.group(1)))
+            if len(sources) == 1:
+                state = sources.pop()
+        loop_state = instructions.get(state) if state else None
+        if loop_state is None or not loop_state.text.startswith("phi <16 x float>"):
+            violations.append(
+                f"value chain does not start from the rescaled accumulator: {chain[0].text}"
+            )
+        elif chain[-1].name not in {through(name) for name in loop_state.operands}:
+            violations.append(
+                f"value chain does not end in the accumulator it started from: {chain[-1].text}"
+            )
+        counts["value_chains"] += 1
+        counts[f"value_chain_length_{len(chain)}"] += 1
+        for step, call in enumerate(chain):
+            rows = elements(call.operands[0])
+            if rows is None or len(rows) != 4:
+                violations.append(
+                    f"value MFMA operand is not four V elements: {call.text}"
+                )
+            else:
+                for row in rows:
+                    kind, where = loaded_from(scalar(row))
+                    if kind == "lds":
+                        v_region.add(where)
+                    else:
+                        violations.append(
+                            f"value MFMA does not read V from the LDS: {where}"
+                        )
+            pack = elements(call.operands[1])
+            if pack is None or len(pack) != 4 or not set(pack) <= probabilities:
+                violations.append(
+                    f"value MFMA operand is not four cast probabilities: {call.text}"
+                )
+            else:
+                packs_by_step.setdefault(step, set()).add(tuple(pack))
+
+    # Every cast probability enters every value chain exactly once, at the
+    # same step in each.
+    packed: list[str] = []
+    for step, packs in sorted(packs_by_step.items()):
+        if len(packs) != 1:
+            violations.append(
+                f"value chains disagree on the probabilities of atom {step}"
+            )
+        packed.extend(next(iter(packs)))
+    counts["probability_packs"] = len(packs_by_step)
+    if sorted(packed) != sorted(probabilities):
+        violations.append(
+            f"the value chains use {len(set(packed))} of {len(probabilities)} cast "
+            f"probabilities, {len(packed) - len(set(packed))} of them twice"
+        )
+
+    # The two LDS regions are disjoint: V starts where the K array ends.
+    k_offsets = {offset for offset, _ in k_region}
+    v_offsets = {offset for offset, _ in v_region}
+    k_bytes = {size for _, size in k_region}
+    if k_offsets != {0} or len(k_bytes) != 1 or v_offsets != k_bytes:
+        violations.append(
+            f"K is read at LDS offsets {sorted(k_offsets)} (array bytes "
+            f"{sorted(k_bytes)}) and V at {sorted(v_offsets)}"
+        )
+
+    def fill_offset(pointer: str) -> int | None:
+        """LDS region a fill writes: follow its address arithmetic to the
+        ``ptrtoint`` of the region's base."""
+        item = instructions.get(through(pointer))
+        while item is not None:
+            base = _LDS_BASE.match(item.text)
+            if base:
+                return lds_offset(base.group(1))
+            item = instructions.get(item.operands[0]) if item.operands else None
+        return None
+
+    # LDS fills: the K region from k_ptr only, the V region from v_ptr only.
+    for match in _LDS_FILL.finditer(ir):
+        buffer = instructions.get(match.group(1))
+        source = buffer.operands[0] if buffer and buffer.opcode == _BUFFER else None
+        offset = fill_offset(match.group(2))
+        if source == "%k_ptr" and offset in k_offsets:
+            counts["k_fills"] += 1
+        elif source == "%v_ptr" and offset in v_offsets and offset not in k_offsets:
+            counts["v_fills"] += 1
+        else:
+            violations.append(
+                f"LDS fill from {source} into the region at offset {offset}"
+            )
+    if not counts["k_fills"] or not counts["v_fills"]:
+        violations.append("no LDS fill of the K or of the V region")
+    return violations, counts
+
+
 @cache
 def _lowered_subject(arch: str, case: PermutationCase) -> tuple[str, object]:
     """Lower one case's dispatch-resolved spec to LLVM IR text on the CPU."""
@@ -1322,6 +1613,95 @@ def _substitute_once(pattern: str, replacement: str) -> Callable[[str], str]:
 def test_path_check_rejects_each_unmodeled_change(edit, match: str) -> None:
     ir, spec = _lowered_subject("gfx942", PERMUTATION_SQUARE_FP16)
     violations, _ = _classify_unmasked_path(edit(ir), "fp16", spec.block_n)
+    assert any(match in item for item in violations), violations
+
+
+@pytest.mark.parametrize(
+    "subject_case",
+    PERMUTATION_SUBJECT_CASES,
+    ids=lambda item: f"{item[0]}-{item[1].case_id}",
+)
+def test_lowered_mfma_operands_reach_the_stored_tensors(
+    subject_case: tuple[str, PermutationCase],
+) -> None:
+    """The bound counts ``seqlen_k`` products per output element in chains of
+    eight-product atoms, and takes each product as one cast probability times
+    one value. This pins the chains and where their operands come from."""
+    arch, case = subject_case
+    ir, spec = _lowered_subject(arch, case)
+    violations, counts = _trace_mfma_operands(ir, case.dtype)
+    assert not violations, f"{_REDERIVE}: " + "; ".join(violations)
+    fills = {name: counts.pop(name) for name in ("k_fills", "v_fills")}
+    assert all(fills.values()), fills
+    assert counts == {
+        # Two 32-key halves of a tile; head_size / 8 atoms of eight products.
+        "score_chains": spec.block_n // 32,
+        f"score_chain_length_{spec.head_size // 8}": spec.block_n // 32,
+        # One chain per 32 output columns; block_n / 8 atoms of eight keys.
+        "value_chains": spec.head_size // 32,
+        f"value_chain_length_{spec.block_n // 8}": spec.head_size // 32,
+        "probability_packs": spec.block_n // 8,
+    }
+
+
+@pytest.mark.parametrize(
+    "edit,match",
+    [
+        (
+            # The V region aliases the K region.
+            lambda ir: re.sub(
+                r"(getelementptr inbounds i8, ptr addrspace\(3\) @[-\w.]+, i32 )\d+",
+                r"\g<1>0",
+                ir,
+            ),
+            "K is read at LDS offsets",
+        ),
+        (
+            # The V region is filled from K.
+            _substitute_once(
+                r"(make\.buffer\.rsrc\.p1\(ptr addrspace\(1\) )%v_ptr", r"\1%k_ptr"
+            ),
+            "LDS fill from %k_ptr",
+        ),
+        (
+            # One probability enters an atom twice and its neighbour never.
+            _substitute_once(
+                r"(insertelement <4 x half> undef, half (%cast\d+), i32 0\n"
+                r"\s+%[-\w.]+ = insertelement <4 x half> %[-\w.]+, half )%cast\d+"
+                r"(, i32 1\n)",
+                r"\1\2\3",
+            ),
+            "cast probabilities",
+        ),
+        (
+            # A value chain skips its first atom.
+            _substitute_once(
+                r"(%acc\d+)( = call <16 x float> @llvm\.amdgcn\.mfma[^\n]*"
+                r"<16 x float> (%vp\d+), i32 0, i32 0, i32 0\)\n(?:[^\n]*\n)*?"
+                r"[^\n]*<16 x float> )\1(, i32 0, i32 0, i32 0\))",
+                r"\1\2\3\4",
+            ),
+            "value chain",
+        ),
+        (
+            # A score atom multiplies K by K.
+            _substitute_once(
+                r"(getelementptr inbounds half, ptr addrspace\(1\) )%q_ptr", r"\1%k_ptr"
+            ),
+            "does not read Q from q_ptr",
+        ),
+    ],
+    ids=[
+        "value-region-aliases-keys",
+        "values-filled-from-keys",
+        "probability-used-twice",
+        "value-chain-skips-an-atom",
+        "score-reads-keys-twice",
+    ],
+)
+def test_operand_trace_rejects_each_misrouted_operand(edit, match: str) -> None:
+    ir, _ = _lowered_subject("gfx942", PERMUTATION_SQUARE_FP16)
+    violations, _ = _trace_mfma_operands(edit(ir), "fp16")
     assert any(match in item for item in violations), violations
 
 
