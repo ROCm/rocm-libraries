@@ -88,6 +88,7 @@ served graph change only the property, assert decline, and assert the unchanged 
 | Norms | none | Epsilon and momentum presence and dtype, running-stat completeness, saved mean and inv_variance, phase, activation fusion | Subsets of running stats; drop epsilon |
 | Pointwise modes and clips | none | Mode support; clips, slope and betas map to exactly the served function; operand vs output dtype; scalar operands | `{lower 0, slope 0.01}` on a ReLU-only builder |
 | Matmul and MX dequant | none | `is_negative_scale`, dequantize `block_size`, scale, bias and batch strides, dtype pairs | One row per unread attribute |
+| Knob choices | none | Every value the engine advertises for a knob is served for the graph, on every arch. Plan build declines the others before kernel resolution | One row per knob value per supported arch |
 
 ## Severity
 
