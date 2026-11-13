@@ -94,6 +94,8 @@ detail::GpuPlanRegistrySignatureKey buildSignatureKey(
 
     switch(node.attributes_type())
     {
+    case NodeAttrs::BatchnormBackwardAttributes:
+        return detail::GpuBatchnormBwdSignatureKey(node, tensorMap);
     case NodeAttrs::BatchnormAttributes:
         return detail::GpuBatchnormFwdTrainSignatureKey(node, tensorMap, node.compute_data_type());
     case NodeAttrs::ConvolutionFwdAttributes:
@@ -142,7 +144,6 @@ detail::GpuPlanRegistrySignatureKey buildSignatureKey(
         return detail::GpuSdpaBwdSignatureKey(node, tensorMap);
 
     // Node types with no GPU plan yet - throw descriptive error
-    case NodeAttrs::BatchnormBackwardAttributes:
     case NodeAttrs::BlockScaleDequantizeAttributes:
     case NodeAttrs::BlockScaleQuantizeAttributes:
     {

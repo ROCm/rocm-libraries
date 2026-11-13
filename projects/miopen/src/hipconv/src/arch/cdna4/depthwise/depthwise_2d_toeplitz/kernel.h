@@ -684,6 +684,7 @@ __global__ void conv2d_depthwise_2d_toeplitz_nhwc_cdna4(const ToType<DT>* __rest
 
 template <Config cfg>
 void launch_impl(const LaunchParams& lp,
+                 const Device&,
                  const ConvParams& par,
                  const void* in,
                  const void* wei,
@@ -741,9 +742,9 @@ public:
     //
     // 3x3/7x7 (and 5x5) use the sparse 16x64 MFMA; 5x5 stride 1 may use the dense
     // F(4x4,5x5) MFMA. Each wave loads a uint4-aligned 8-channel slice.
-    bool is_applicable(const ConvParams& par) const override
+    bool is_applicable(const Device& dev, const ConvParams& par) const override
     {
-        if(!DepthwiseConvKernel::is_applicable(par))
+        if(!DepthwiseConvKernel::is_applicable(dev, par))
             return false;
         if(par.input_type != DataType::fp16 && par.input_type != DataType::bf16)
             return false;
@@ -769,7 +770,7 @@ public:
         return true;
     }
 
-    bool is_valid_config(const ConvParams& par) const override
+    bool is_valid_config(const Device& /*dev*/, const ConvParams& par) const override
     {
         if(par.direction != cfg_.direction)
             return false;
@@ -846,7 +847,7 @@ public:
         return true;
     }
 
-    LaunchParams get_launch_params(const ConvParams& par) const override
+    LaunchParams get_launch_params(const Device& /*dev*/, const ConvParams& par) const override
     {
         const int Wo              = par.q;
         const int num_tile_groups = divup(Wo, cfg_.tile_cols());

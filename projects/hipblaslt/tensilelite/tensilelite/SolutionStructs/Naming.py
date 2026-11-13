@@ -236,6 +236,12 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     if state.get("TileProcessingStrategy", "None") == "None":
       requiredParametersTemp.difference_update({"WorkAssignment", "PersistentXCCMapping", "WorkQueueStealing"})
 
+    # LDSTrStoreShuffle 0 emits byte-identical assembly to a kernel generated before the parameter
+    # existed, so encoding AS0 would rename every kernel in the library without changing one
+    # instruction. Omit it at 0 and let 1/2 carry the tag; absence therefore means 0, and the
+    # three values still map to three distinct names.
+    if not state.get("LDSTrStoreShuffle", 0):
+      requiredParametersTemp.discard("LDSTrStoreShuffle")
 
     # PostLoopStoreInNll changes codegen only when it is ON, and
     # assignPostLoopStoreInNll resolves it independently of isMxf4SubtilePath -- an
