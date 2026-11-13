@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Subject adapter of the coordinate-codeword placement probe (P10).
+"""Subject adapter of the coordinate-codeword placement probe.
 
 A case is resolved through the uniform-probability adapter, which already
 asserts the architecture's dense candidate, the requested shape, and a
@@ -24,6 +24,14 @@ from types import SimpleNamespace
 import numpy as np
 
 from ._analytical import UniformCase
+from ._codeword_analytical import (
+    CODEWORD_QUICK_CASES,
+    GuardedOutput,
+    GuardLayout,
+    TileSchedule,
+    guard_layout,
+    require_codeword_scope,
+)
 from ._dense_subject import (
     DENSE_SUBJECTS,
     ResolvedDenseSubject,
@@ -32,27 +40,19 @@ from ._dense_subject import (
     _verify_resolved_spec,
     resolve_dense_subject,
 )
-from ._p10_analytical import (
-    P10_QUICK_CASES,
-    GuardedOutput,
-    GuardLayout,
-    TileSchedule,
-    guard_layout,
-    require_p10_scope,
-)
 
 _ELEMENT_BYTES = 2
 
 # The derivation is for the gfx942 body (32x32x8 MFMA atom, its tile loop and its
 # output epilogue). Another architecture needs its own.
-P10_ARCHES = ("gfx942",)
+CODEWORD_ARCHES = ("gfx942",)
 
-P10_SUBJECT_CASES: tuple[tuple[str, UniformCase], ...] = tuple(
-    (arch, case) for arch in P10_ARCHES for case in P10_QUICK_CASES
+CODEWORD_SUBJECT_CASES: tuple[tuple[str, UniformCase], ...] = tuple(
+    (arch, case) for arch in CODEWORD_ARCHES for case in CODEWORD_QUICK_CASES
 )
 
 
-def _verify_p10_resolved_spec(tuning_spec) -> None:
+def _verify_codeword_resolved_spec(tuning_spec) -> None:
     """Refuse a resolved schedule the placement derivation does not model.
 
     With ``window_wave_skip`` a wave skips the score, softmax and PV step of a
@@ -67,20 +67,20 @@ def _verify_p10_resolved_spec(tuning_spec) -> None:
         )
 
 
-def resolve_p10_subject(arch: str, case: UniformCase) -> ResolvedDenseSubject:
+def resolve_codeword_subject(arch: str, case: UniformCase) -> ResolvedDenseSubject:
     """Resolve one case on one architecture, inside the probe's scope."""
-    if arch not in P10_ARCHES:
+    if arch not in CODEWORD_ARCHES:
         raise ValueError(
             f"no coordinate-codeword subject - arch={arch!r}, "
-            f"expected one of {P10_ARCHES}"
+            f"expected one of {CODEWORD_ARCHES}"
         )
-    require_p10_scope(case)
+    require_codeword_scope(case)
     subject = resolve_dense_subject(arch, case)
-    _verify_p10_resolved_spec(subject.tuning_spec)
+    _verify_codeword_resolved_spec(subject.tuning_spec)
     return subject
 
 
-def p10_kernel_key(arch: str, kernel_spec) -> tuple:
+def codeword_kernel_key(arch: str, kernel_spec) -> tuple:
     """Launcher-cache identity of the kernel a dense spec compiles to.
 
     The dense runner keeps one compiled kernel per key, so two specs with equal
@@ -91,7 +91,7 @@ def p10_kernel_key(arch: str, kernel_spec) -> tuple:
     return attention_dense_cache_key(kernel_spec, arch=arch)
 
 
-def p10_schedule(subject: ResolvedDenseSubject) -> TileSchedule:
+def codeword_schedule(subject: ResolvedDenseSubject) -> TileSchedule:
     """Tile geometry of the kernel that dispatch resolved for a subject.
 
     It is read from the resolved spec and never pinned: a retune changes what the
@@ -138,7 +138,7 @@ def _launch_guarded(
     return raw
 
 
-def run_p10_case(
+def run_codeword_case(
     arch: str,
     case: UniformCase,
     q: np.ndarray,
@@ -155,17 +155,17 @@ def run_p10_case(
     float conversion. The launch goes through the architecture's public dense
     runner, as in the uniform-probability lane; judging the bits is left to the
     analyzer."""
-    resolved = resolve_p10_subject(arch, case) if subject is None else subject
+    resolved = resolve_codeword_subject(arch, case) if subject is None else subject
     if (resolved.arch, resolved.case_id) != (arch, case.case_id):
         raise ValueError(
-            f"run_p10_case failed - subject is {resolved.arch}/{resolved.case_id}, "
-            f"expected {arch}/{case.case_id}"
+            f"run_codeword_case failed - subject is "
+            f"{resolved.arch}/{resolved.case_id}, expected {arch}/{case.case_id}"
         )
-    require_p10_scope(case)
+    require_codeword_scope(case)
     _validate_host_bits(case, q, k, v)
     _verify_resolved_spec(arch, case, resolved.tuning_spec)
-    _verify_p10_resolved_spec(resolved.tuning_spec)
-    layout = guard_layout(case, p10_schedule(resolved))
+    _verify_codeword_resolved_spec(resolved.tuning_spec)
+    layout = guard_layout(case, codeword_schedule(resolved))
     runner = importlib.import_module(DENSE_SUBJECTS[arch].runner_module)
     spec = resolved.tuning_spec.kernel_spec
 

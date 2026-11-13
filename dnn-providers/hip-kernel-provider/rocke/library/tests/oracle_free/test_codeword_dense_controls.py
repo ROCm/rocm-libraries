@@ -24,33 +24,33 @@ import pytest
 from rocke.tests.gpu import current_device_arch_in
 
 from ._analytical import UniformCase, encode_bits
-from ._p10_analytical import GuardedOutput, StoreSafety, codeword_inputs
-from ._p10_controls import (
-    P10_BLIND_CONTROL_CASES,
-    P10_EMITTED_CONTROL_CASES,
-    P10_ROW_BOUND_CASES,
+from ._codeword_analytical import GuardedOutput, StoreSafety, codeword_inputs
+from ._codeword_controls import (
+    CODEWORD_BLIND_CONTROL_CASES,
+    CODEWORD_EMITTED_CONTROL_CASES,
+    CODEWORD_ROW_BOUND_CASES,
     UNDERRUN_ELEMENTS,
     lowered_ir,
     row_bound_bypass_spec,
-    run_p10_control,
+    run_codeword_control,
     run_row_bound_bypass,
 )
-from ._p10_policy import (
-    P10_KILL_MATRIX,
+from ._codeword_policy import (
+    CODEWORD_KILL_MATRIX,
     Channel,
+    CodewordMutation,
     CodewordResult,
-    P10Mutation,
     analyze_codeword,
     format_codeword_result,
     path_exact_admissible,
 )
-from ._p10_subject import (
-    p10_kernel_key,
-    p10_schedule,
-    resolve_p10_subject,
-    run_p10_case,
+from ._codeword_subject import (
+    codeword_kernel_key,
+    codeword_schedule,
+    resolve_codeword_subject,
+    run_codeword_case,
 )
-from .test_p10_dense import _case_label
+from .test_codeword_dense import _case_label
 
 pytestmark = pytest.mark.gpu
 
@@ -65,35 +65,35 @@ def _judge(case: UniformCase, output: GuardedOutput) -> CodewordResult:
 
 
 def _launch_shipped_and_control(
-    arch: str, case: UniformCase, mutation: P10Mutation
+    arch: str, case: UniformCase, mutation: CodewordMutation
 ) -> tuple[str, CodewordResult]:
     """Launch the shipped kernel, which must pass, then the emitted control.
 
     The control's IR is compared before anything runs: a control that lowers to
     the shipped IR would launch the shipped kernel under another name."""
     label = f"{_case_label(arch, case)} control {mutation.value}"
-    subject = resolve_p10_subject(arch, case)
-    assert lowered_ir(arch, case, mutation) != lowered_ir(arch, case, private=False), (
-        f"{label}: the control lowers to the shipped kernel's IR"
-    )
+    subject = resolve_codeword_subject(arch, case)
+    assert lowered_ir(arch, case, mutation) != lowered_ir(
+        arch, case, private=False
+    ), f"{label}: the control lowers to the shipped kernel's IR"
     q, k, v = (encode_bits(values, case.dtype) for values in codeword_inputs(case))
-    shipped = _judge(case, run_p10_case(arch, case, q, k, v, subject=subject))
-    assert not shipped.violations, (
-        f"{label}: the shipped kernel itself fails; {format_codeword_result(shipped)}"
-    )
-    control = _judge(case, run_p10_control(arch, case, mutation, q, k, v))
+    shipped = _judge(case, run_codeword_case(arch, case, q, k, v, subject=subject))
+    assert (
+        not shipped.violations
+    ), f"{label}: the shipped kernel itself fails; {format_codeword_result(shipped)}"
+    control = _judge(case, run_codeword_control(arch, case, mutation, q, k, v))
     print(f"{label}: {format_codeword_result(control)}")
     return label, control
 
 
-@pytest.mark.parametrize("control", P10_EMITTED_CONTROL_CASES, ids=_control_id)
+@pytest.mark.parametrize("control", CODEWORD_EMITTED_CONTROL_CASES, ids=_control_id)
 def test_emitted_defect_is_rejected_through_its_channel(
-    control: tuple[str, UniformCase, P10Mutation],
+    control: tuple[str, UniformCase, CodewordMutation],
 ) -> None:
     arch, case, mutation = control
     current_device_arch_in((arch,), subject=f"the {arch} dense codeword controls")
     label, result = _launch_shipped_and_control(arch, case, mutation)
-    channel = P10_KILL_MATRIX[mutation].channel
+    channel = CODEWORD_KILL_MATRIX[mutation].channel
     assert channel in result.channels, (
         f"{label}: not rejected through the {channel.value} channel; "
         f"{format_codeword_result(result)}"
@@ -101,20 +101,20 @@ def test_emitted_defect_is_rejected_through_its_channel(
 
     # The two store defects change exact element counts, and nothing else.
     rows = case.batch * case.seqlen_q * case.nhead_q
-    if mutation is P10Mutation.DROPPED_STORE:
-        spec = resolve_p10_subject(arch, case).tuning_spec.kernel_spec
+    if mutation is CodewordMutation.DROPPED_STORE:
+        spec = resolve_codeword_subject(arch, case).tuning_spec.kernel_spec
         dropped = 2 * int(spec.o_store_width) * rows
         assert result.safety == StoreSafety(0, 0, dropped, 0), label
         assert result.channels == frozenset({Channel.UNWRITTEN}), label
-    if mutation is P10Mutation.BASE_UNDERRUN:
+    if mutation is CodewordMutation.BASE_UNDERRUN:
         assert result.safety == StoreSafety(
             UNDERRUN_ELEMENTS, 0, UNDERRUN_ELEMENTS, 0
         ), label
 
 
-@pytest.mark.parametrize("control", P10_BLIND_CONTROL_CASES, ids=_control_id)
+@pytest.mark.parametrize("control", CODEWORD_BLIND_CONTROL_CASES, ids=_control_id)
 def test_head_swap_inside_a_kv_group_is_invisible(
-    control: tuple[str, UniformCase, P10Mutation],
+    control: tuple[str, UniformCase, CodewordMutation],
 ) -> None:
     """The probe's stated blind spot, on a real mutant: the query heads of one KV
     group store identical values, so swapping two of them passes the verdict."""
@@ -125,7 +125,7 @@ def test_head_swap_inside_a_kv_group_is_invisible(
     assert result.compared == math.prod(case.output_shape), label
 
 
-@pytest.mark.parametrize("control", P10_ROW_BOUND_CASES, ids=_control_id)
+@pytest.mark.parametrize("control", CODEWORD_ROW_BOUND_CASES, ids=_control_id)
 def test_one_row_past_a_query_tile_overruns_by_the_rest_of_the_tile(
     control: tuple[str, UniformCase],
 ) -> None:
@@ -135,22 +135,22 @@ def test_one_row_past_a_query_tile_overruns_by_the_rest_of_the_tile(
     arch, case = control
     current_device_arch_in((arch,), subject=f"the {arch} dense codeword controls")
     label = f"{_case_label(arch, case)} control row_bound_bypass"
-    subject = resolve_p10_subject(arch, case)
+    subject = resolve_codeword_subject(arch, case)
     q, k, v = (encode_bits(values, case.dtype) for values in codeword_inputs(case))
-    shipped = _judge(case, run_p10_case(arch, case, q, k, v, subject=subject))
-    assert not shipped.violations, (
-        f"{label}: the shipped kernel itself fails; {format_codeword_result(shipped)}"
-    )
+    shipped = _judge(case, run_codeword_case(arch, case, q, k, v, subject=subject))
+    assert (
+        not shipped.violations
+    ), f"{label}: the shipped kernel itself fails; {format_codeword_result(shipped)}"
     # The control then runs that same compiled kernel: its spec has the shipped
     # launcher-cache key.
     spec = row_bound_bypass_spec(arch, case)
-    shipped_key = p10_kernel_key(arch, subject.tuning_spec.kernel_spec)
-    assert p10_kernel_key(arch, spec) == shipped_key, label
+    shipped_key = codeword_kernel_key(arch, subject.tuning_spec.kernel_spec)
+    assert codeword_kernel_key(arch, spec) == shipped_key, label
 
     ragged, output = run_row_bound_bypass(arch, case)
     result = _judge(ragged, output)
     print(f"{label}: {format_codeword_result(result)}")
-    block_m = p10_schedule(subject).block_m
+    block_m = codeword_schedule(subject).block_m
     overrun = (block_m - 1) * case.nhead_q * case.head_dim
     assert result.safety == StoreSafety(0, overrun, 0, 0), (
         f"{label}: expected exactly {overrun} guard elements changed after the "

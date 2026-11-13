@@ -20,7 +20,7 @@
 # negative controls (private builds with one defect each). Only the GPU modules
 # run here; their CPU contracts run in the attention CPU lane.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_oracle_free_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_analytical_dense.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_p10_dense.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_p10_dense_controls.py\" -v -rs)\n")
+       "add_test(rocke_oracle_free_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_analytical_dense.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_codeword_dense.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_codeword_dense_controls.py\" -v -rs)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_oracle_free_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;gpu\\;quick\"\n"
@@ -267,7 +267,7 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_sdpa_free_stride_layouts.py"
     "tests/library/tests/test_bwd_memo_bound.py"
     "tests/library/tests/oracle_free/test_contracts.py"
-    "tests/library/tests/oracle_free/test_p10_contracts.py"
+    "tests/library/tests/oracle_free/test_codeword_contracts.py"
     "tests/library/tests/test_attention_dense_gfx942.py"
     "tests/library/tests/test_attention_combo_sweep_fp8.py"
     "tests/library/tests/test_dense_prefill_emit_shapes.py"

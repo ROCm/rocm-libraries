@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Subject-side negative controls of the coordinate-codeword placement probe (P10).
+"""Subject-side negative controls of the coordinate-codeword placement probe.
 
 A control launches a kernel with one deliberate defect at one seam, on the
 probe's own inputs and into the same guarded allocation. The analyzer must
@@ -32,38 +32,38 @@ from dataclasses import replace
 import numpy as np
 
 from ._analytical import UniformCase, encode_bits
-from ._dense_subject import DENSE_SUBJECTS, ResolvedDenseSubject
-from ._p10_analytical import (
-    P10_QUICK_CASES,
+from ._codeword_analytical import (
+    CODEWORD_QUICK_CASES,
     GuardedOutput,
     codeword_inputs,
     guard_layout,
-    require_p10_scope,
+    require_codeword_scope,
 )
-from ._p10_policy import P10_KILL_MATRIX, P10Mutation, in_scope
-from ._p10_subject import (
-    P10_ARCHES,
+from ._codeword_policy import CODEWORD_KILL_MATRIX, CodewordMutation, in_scope
+from ._codeword_subject import (
+    CODEWORD_ARCHES,
     _hip_backend,
     _launch_guarded,
-    p10_schedule,
-    resolve_p10_subject,
-    run_p10_case,
+    codeword_schedule,
+    resolve_codeword_subject,
+    run_codeword_case,
 )
+from ._dense_subject import DENSE_SUBJECTS, ResolvedDenseSubject
 
 # One control per seam of the kill matrix. Every control but the last is emitted.
-P10_SUBJECT_CONTROLS = (
-    P10Mutation.KV_HEAD_ROTATE,
-    P10Mutation.OUT_HEAD_SWAP,
-    P10Mutation.BATCH_SWAP,
-    P10Mutation.D_HALF_SWAP,
-    P10Mutation.ADJACENT_ROW_SWAP,
-    P10Mutation.V_TOKEN_PLUS_ONE,
-    P10Mutation.DENOMINATOR_PLUS_ONE,
-    P10Mutation.DROPPED_STORE,
-    P10Mutation.BASE_UNDERRUN,
-    P10Mutation.ROW_BOUND_BYPASS,
+CODEWORD_SUBJECT_CONTROLS = (
+    CodewordMutation.KV_HEAD_ROTATE,
+    CodewordMutation.OUT_HEAD_SWAP,
+    CodewordMutation.BATCH_SWAP,
+    CodewordMutation.D_HALF_SWAP,
+    CodewordMutation.ADJACENT_ROW_SWAP,
+    CodewordMutation.V_TOKEN_PLUS_ONE,
+    CodewordMutation.DENOMINATOR_PLUS_ONE,
+    CodewordMutation.DROPPED_STORE,
+    CodewordMutation.BASE_UNDERRUN,
+    CodewordMutation.ROW_BOUND_BYPASS,
 )
-P10_EMITTED_CONTROLS = P10_SUBJECT_CONTROLS[:-1]
+CODEWORD_EMITTED_CONTROLS = CODEWORD_SUBJECT_CONTROLS[:-1]
 
 # Each lane half of the epilogue owns four of every eight output dimensions.
 _LANE_HALF = 4
@@ -72,28 +72,32 @@ UNDERRUN_ELEMENTS = 4
 
 # An emitted control runs on every batch-2 case that can separate its mutation:
 # batch 2 is where batch placement shows, and it covers both head configurations.
-P10_EMITTED_CONTROL_CASES: tuple[tuple[str, UniformCase, P10Mutation], ...] = tuple(
+CODEWORD_EMITTED_CONTROL_CASES: tuple[
+    tuple[str, UniformCase, CodewordMutation], ...
+] = tuple(
     (arch, case, mutation)
-    for arch in P10_ARCHES
-    for case in P10_QUICK_CASES
+    for arch in CODEWORD_ARCHES
+    for case in CODEWORD_QUICK_CASES
     if case.batch == 2
-    for mutation in P10_EMITTED_CONTROLS
-    if in_scope(case, P10_KILL_MATRIX[mutation].scope)
+    for mutation in CODEWORD_EMITTED_CONTROLS
+    if in_scope(case, CODEWORD_KILL_MATRIX[mutation].scope)
 )
 # Swapping two query heads of one KV group stores the same values, so the same
 # emitted defect must pass on a grouped case. It is the probe's stated blind spot.
-P10_BLIND_CONTROL_CASES: tuple[tuple[str, UniformCase, P10Mutation], ...] = tuple(
-    (arch, case, P10Mutation.OUT_HEAD_SWAP)
-    for arch in P10_ARCHES
-    for case in P10_QUICK_CASES
-    if case.batch == 2 and case.nhead_q > case.nhead_k
+CODEWORD_BLIND_CONTROL_CASES: tuple[tuple[str, UniformCase, CodewordMutation], ...] = (
+    tuple(
+        (arch, case, CodewordMutation.OUT_HEAD_SWAP)
+        for arch in CODEWORD_ARCHES
+        for case in CODEWORD_QUICK_CASES
+        if case.batch == 2 and case.nhead_q > case.nhead_k
+    )
 )
 # The row-bound control needs one batch: a second batch would start inside the
 # rows the extra query tile stores.
-P10_ROW_BOUND_CASES: tuple[tuple[str, UniformCase], ...] = tuple(
+CODEWORD_ROW_BOUND_CASES: tuple[tuple[str, UniformCase], ...] = tuple(
     (arch, case)
-    for arch in P10_ARCHES
-    for case in P10_QUICK_CASES
+    for arch in CODEWORD_ARCHES
+    for case in CODEWORD_QUICK_CASES
     if case.batch == 1 and case.nhead_q > case.nhead_k
 )
 
@@ -107,7 +111,7 @@ def _single_bit(name: str, value: int) -> int:
     return value
 
 
-def _mutant_builder(base: type, mutation: P10Mutation | None, case: UniformCase):
+def _mutant_builder(base: type, mutation: CodewordMutation | None, case: UniformCase):
     """A builder that emits the shipped kernel with one defect; none for ``None``.
 
     The output index is ``((batch * Sq + row) * Hq + head) * D + dim`` in elements
@@ -117,19 +121,19 @@ def _mutant_builder(base: type, mutation: P10Mutation | None, case: UniformCase)
     inside its tensor. The two controls that leave it are bounded: a V load past
     the last key is clamped to zero by the buffer resource, and the underrun
     lands in the guard."""
-    if mutation is not None and mutation not in P10_EMITTED_CONTROLS:
+    if mutation is not None and mutation not in CODEWORD_EMITTED_CONTROLS:
         raise ValueError(
             f"emitted control failed - mutation={mutation.value!r}, expected one "
-            f"of {[control.value for control in P10_EMITTED_CONTROLS]}"
+            f"of {[control.value for control in CODEWORD_EMITTED_CONTROLS]}"
         )
     head = _single_bit("head_dim", case.head_dim)
     row = head * _single_bit("nhead_q", case.nhead_q)
     batch = row * _single_bit("seqlen_q", case.seqlen_q)
     output_bit = {
-        P10Mutation.OUT_HEAD_SWAP: head,
-        P10Mutation.ADJACENT_ROW_SWAP: row,
-        P10Mutation.BATCH_SWAP: batch,
-        P10Mutation.D_HALF_SWAP: _LANE_HALF,
+        CodewordMutation.OUT_HEAD_SWAP: head,
+        CodewordMutation.ADJACENT_ROW_SWAP: row,
+        CodewordMutation.BATCH_SWAP: batch,
+        CodewordMutation.D_HALF_SWAP: _LANE_HALF,
     }.get(mutation)
     key_bytes = 2 * head * _single_bit("nhead_k", case.nhead_k)
 
@@ -153,9 +157,9 @@ def _mutant_builder(base: type, mutation: P10Mutation | None, case: UniformCase)
 
         def async_buffer_load_lds_addr(self, rsrc, lds_addr, voffset, *args, **kwargs):
             if rsrc is self._control_v_rsrc:
-                if mutation is P10Mutation.KV_HEAD_ROTATE:
+                if mutation is CodewordMutation.KV_HEAD_ROTATE:
                     voffset = self.xor(voffset, self.const_i32(2 * head))
-                elif mutation is P10Mutation.V_TOKEN_PLUS_ONE:
+                elif mutation is CodewordMutation.V_TOKEN_PLUS_ONE:
                     voffset = self.add(voffset, self.const_i32(key_bytes))
             return super().async_buffer_load_lds_addr(
                 rsrc, lds_addr, voffset, *args, **kwargs
@@ -163,17 +167,20 @@ def _mutant_builder(base: type, mutation: P10Mutation | None, case: UniformCase)
 
         def global_store_vN(self, ptr, idx, *args, **kwargs):
             if ptr is self._control_params.get("o_ptr"):
-                if mutation is P10Mutation.DROPPED_STORE and not self._control_dropped:
+                if (
+                    mutation is CodewordMutation.DROPPED_STORE
+                    and not self._control_dropped
+                ):
                     self._control_dropped = True
                     return None
                 if output_bit is not None:
                     idx = self.xor(idx, self.const_i32(output_bit))
-                elif mutation is P10Mutation.BASE_UNDERRUN:
+                elif mutation is CodewordMutation.BASE_UNDERRUN:
                     idx = self.sub(idx, self.const_i32(UNDERRUN_ELEMENTS))
             return super().global_store_vN(ptr, idx, *args, **kwargs)
 
         def rcp(self, a):
-            if mutation is P10Mutation.DENOMINATOR_PLUS_ONE:
+            if mutation is CodewordMutation.DENOMINATOR_PLUS_ONE:
                 a = self.fadd(a, self.const_f32(1.0))
             return super().rcp(a)
 
@@ -186,7 +193,7 @@ def _runner(arch: str):
 
 @contextmanager
 def private_build(
-    arch: str, case: UniformCase, mutation: P10Mutation | None
+    arch: str, case: UniformCase, mutation: CodewordMutation | None
 ) -> Iterator[None]:
     """Make the architecture's dense runner build and launch one emitted control.
 
@@ -207,7 +214,7 @@ def private_build(
 def lowered_ir(
     arch: str,
     case: UniformCase,
-    mutation: P10Mutation | None = None,
+    mutation: CodewordMutation | None = None,
     *,
     private: bool = True,
 ) -> str:
@@ -219,7 +226,7 @@ def lowered_ir(
     lowering is the dense launcher's own, without running the compiler."""
     from rocke.helpers.compile import lower_kernel_for_comgr
 
-    spec = resolve_p10_subject(arch, case).tuning_spec.kernel_spec
+    spec = resolve_codeword_subject(arch, case).tuning_spec.kernel_spec
 
     def lower() -> str:
         kernel = _runner(arch).build_attention_dense(spec, arch=arch)
@@ -231,10 +238,10 @@ def lowered_ir(
         return lower()
 
 
-def run_p10_control(
+def run_codeword_control(
     arch: str,
     case: UniformCase,
-    mutation: P10Mutation,
+    mutation: CodewordMutation,
     q: np.ndarray,
     k: np.ndarray,
     v: np.ndarray,
@@ -243,7 +250,7 @@ def run_p10_control(
 ) -> GuardedOutput:
     """Launch one emitted control on raw input bits into a guarded allocation."""
     with private_build(arch, case, mutation):
-        return run_p10_case(arch, case, q, k, v, subject=subject)
+        return run_codeword_case(arch, case, q, k, v, subject=subject)
 
 
 def row_bound_bypass_spec(arch: str, case: UniformCase):
@@ -253,7 +260,7 @@ def row_bound_bypass_spec(arch: str, case: UniformCase):
     ragged spec leaves the runtime-shape path and builds another kernel. So the
     query length is overwritten on a copy of the constructed shipped spec: every
     other field, and with them the compiled kernel, stays the shipped one."""
-    spec = resolve_p10_subject(arch, case).tuning_spec.kernel_spec
+    spec = resolve_codeword_subject(arch, case).tuning_spec.kernel_spec
     if spec.persistent or not spec.runtime_shape:
         raise AssertionError(
             "the row-bound control requires the non-persistent runtime-shape "
@@ -281,12 +288,12 @@ def run_row_bound_bypass(
             f"run_row_bound_bypass failed - batch={case.batch}, expected 1 batch"
         )
     runner = _runner(arch)
-    subject = resolve_p10_subject(arch, case)
+    subject = resolve_codeword_subject(arch, case)
     shipped_spec = subject.tuning_spec.kernel_spec
     spec = row_bound_bypass_spec(arch, case)
     ragged = replace(case, seqlen_q=int(spec.seqlen_q))
-    require_p10_scope(ragged)
-    layout = guard_layout(ragged, p10_schedule(subject))
+    require_codeword_scope(ragged)
+    layout = guard_layout(ragged, codeword_schedule(subject))
 
     _, k_values, v_values = codeword_inputs(case)
     tiles = -(-ragged.seqlen_q // int(spec.block_m))

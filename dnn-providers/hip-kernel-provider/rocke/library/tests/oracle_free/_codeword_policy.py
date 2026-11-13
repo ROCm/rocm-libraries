@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Verdict, diagnostics and owned mutations of the coordinate-codeword probe (P10).
+"""Verdict, diagnostics and owned mutations of the coordinate-codeword probe.
 
 The verdict has two parts and no tolerance. Every stored output must be one of
 the bit patterns a correct kernel may store at that coordinate, and the four
@@ -32,12 +32,12 @@ from ._analytical import (
     legal_interval,
     residue_count,
 )
-from ._p10_analytical import (
+from ._codeword_analytical import (
+    CODEWORD_COORDINATE_LANES,
     LANE_BATCH,
     LANE_KEY,
     LANE_KV_HEAD,
     LANE_PARITY,
-    P10_COORDINATE_LANES,
     SENTINEL_BITS,
     GuardedOutput,
     StoreSafety,
@@ -171,7 +171,7 @@ def codeword_decoder(case: UniformCase) -> Mapping[int, DecodedSource]:
                 codeword_target(case, 0, query, 0, lane),
                 DecodedSource(Channel.ROW, query),
             )
-    for dim in range(P10_COORDINATE_LANES, case.head_dim):
+    for dim in range(CODEWORD_COORDINATE_LANES, case.head_dim):
         add(
             codeword_target(case, 0, 0, 0, dim),
             DecodedSource(Channel.DIMENSION, dim),
@@ -304,8 +304,10 @@ def format_codeword_result(result: CodewordResult) -> str:
         )
     parts = [
         "; ".join(result.violations),
-        f"near={result.near} misplaced={result.misplaced} foreign={result.foreign} "
-        f"worst_ulp={result.worst_ulp}",
+        (
+            f"near={result.near} misplaced={result.misplaced} "
+            f"foreign={result.foreign} worst_ulp={result.worst_ulp}"
+        ),
     ]
     for failure in result.failures:
         source = failure.source
@@ -321,7 +323,7 @@ def format_codeword_result(result: CodewordResult) -> str:
     return " | ".join(parts)
 
 
-class P10Mutation(str, Enum):
+class CodewordMutation(str, Enum):
     """Defects the probe owns, each as a transform of a correct guarded output."""
 
     KV_HEAD_ROTATE = "kv_head_rotate"
@@ -369,67 +371,67 @@ class KillRow:
 # lane half contributes to each group of eight.
 _STORE_VECTOR = 4
 
-P10_KILL_MATRIX: Mapping[P10Mutation, KillRow] = MappingProxyType(
+CODEWORD_KILL_MATRIX: Mapping[CodewordMutation, KillRow] = MappingProxyType(
     {
-        P10Mutation.KV_HEAD_ROTATE: KillRow(
+        CodewordMutation.KV_HEAD_ROTATE: KillRow(
             "V-head routing", Channel.KV_HEAD, Scope.EVERY, "KV heads wrap"
         ),
-        P10Mutation.GROUP_MAP_INTERLEAVED: KillRow(
+        CodewordMutation.GROUP_MAP_INTERLEAVED: KillRow(
             "V-head routing", Channel.KV_HEAD, Scope.GROUPED, "none"
         ),
-        P10Mutation.QUERY_HEAD_BROADCAST: KillRow(
+        CodewordMutation.QUERY_HEAD_BROADCAST: KillRow(
             "output-head base", Channel.KV_HEAD, Scope.EVERY, "none"
         ),
-        P10Mutation.OUT_HEAD_SWAP: KillRow(
+        CodewordMutation.OUT_HEAD_SWAP: KillRow(
             "output-head base", Channel.KV_HEAD, Scope.UNGROUPED, "none"
         ),
-        P10Mutation.BATCH_SWAP: KillRow(
+        CodewordMutation.BATCH_SWAP: KillRow(
             "batch base", Channel.BATCH, Scope.BATCH_TWO, "none"
         ),
-        P10Mutation.DIM_ROTATE_IN_VECTOR: KillRow(
+        CodewordMutation.DIM_ROTATE_IN_VECTOR: KillRow(
             "dimension addressing",
             Channel.DIMENSION,
             Scope.EVERY,
             "wraps inside each store vector",
         ),
-        P10Mutation.D_HALF_SWAP: KillRow(
+        CodewordMutation.D_HALF_SWAP: KillRow(
             "dimension addressing", Channel.DIMENSION, Scope.EVERY, "none"
         ),
-        P10Mutation.ROW_SHIFT: KillRow(
+        CodewordMutation.ROW_SHIFT: KillRow(
             "query-row addressing",
             Channel.ROW,
             Scope.EVERY,
             "the last row takes row 0; the write it stands for leaves the tensor "
             "and is the row-bound bypass",
         ),
-        P10Mutation.ADJACENT_ROW_SWAP: KillRow(
+        CodewordMutation.ADJACENT_ROW_SWAP: KillRow(
             "query-row addressing", Channel.ROW, Scope.EVERY, "none"
         ),
-        P10Mutation.V_TOKEN_PLUS_ONE: KillRow(
+        CodewordMutation.V_TOKEN_PLUS_ONE: KillRow(
             "V addressing",
             Channel.ROW,
             Scope.EVERY,
             "the key past the last reads zero, as a bounded buffer load does",
         ),
-        P10Mutation.DENOMINATOR_PLUS_ONE: KillRow(
+        CodewordMutation.DENOMINATOR_PLUS_ONE: KillRow(
             "denominator", Channel.BATCH, Scope.EVERY, "none"
         ),
-        P10Mutation.DENOMINATOR_MINUS_ONE: KillRow(
+        CodewordMutation.DENOMINATOR_MINUS_ONE: KillRow(
             "denominator",
             Channel.BATCH,
             Scope.EVERY,
             "a row with one legal key divides by zero and stores a non-finite value",
         ),
-        P10Mutation.DROPPED_STORE: KillRow(
+        CodewordMutation.DROPPED_STORE: KillRow(
             "output store", Channel.UNWRITTEN, Scope.EVERY, "none"
         ),
-        P10Mutation.BASE_UNDERRUN: KillRow(
+        CodewordMutation.BASE_UNDERRUN: KillRow(
             "output base",
             Channel.PREFIX,
             Scope.EVERY,
             "one store vector lands before the tensor and the last is never written",
         ),
-        P10Mutation.ROW_BOUND_BYPASS: KillRow(
+        CodewordMutation.ROW_BOUND_BYPASS: KillRow(
             "row bound",
             Channel.SUFFIX,
             Scope.EVERY,
@@ -450,11 +452,11 @@ def in_scope(case: UniformCase, scope: Scope) -> bool:
     return True
 
 
-def applicable_mutations(case: UniformCase) -> tuple[P10Mutation, ...]:
+def applicable_mutations(case: UniformCase) -> tuple[CodewordMutation, ...]:
     """The owned mutations one case separates, in kill-matrix order."""
     return tuple(
         mutation
-        for mutation, row in P10_KILL_MATRIX.items()
+        for mutation, row in CODEWORD_KILL_MATRIX.items()
         if in_scope(case, row.scope)
     )
 
@@ -475,7 +477,7 @@ def _mutant_bits(value: Fraction, scale: Fraction | None, dtype: str) -> int:
     return exact_target_bits(value * scale, dtype)
 
 
-def _numeric_mutant_bits(case: UniformCase, mutation: P10Mutation) -> np.ndarray:
+def _numeric_mutant_bits(case: UniformCase, mutation: CodewordMutation) -> np.ndarray:
     """Stored bits of a kernel with one numerical defect, ``[B, Sq, Hq, D]``.
 
     ``V_TOKEN_PLUS_ONE`` reads key ``k + 1`` where it should read ``k``; the key
@@ -486,7 +488,7 @@ def _numeric_mutant_bits(case: UniformCase, mutation: P10Mutation) -> np.ndarray
     for query in range(case.seqlen_q):
         first, last = legal_interval(case, query)
         count = last - first + 1
-        if mutation is P10Mutation.V_TOKEN_PLUS_ONE:
+        if mutation is CodewordMutation.V_TOKEN_PLUS_ONE:
             read_first, read_last = first + 1, min(last + 1, case.seqlen_k - 1)
             read = max(read_last - read_first + 1, 0)
             odd = residue_count(read_first, read_last, 1, 2)
@@ -495,7 +497,7 @@ def _numeric_mutant_bits(case: UniformCase, mutation: P10Mutation) -> np.ndarray
             moment_scale: Fraction | None = Fraction(1)
             constant_scale: Fraction | None = Fraction(read, count)
         else:
-            delta = 1 if mutation is P10Mutation.DENOMINATOR_PLUS_ONE else -1
+            delta = 1 if mutation is CodewordMutation.DENOMINATOR_PLUS_ONE else -1
             key_lane = codeword_target(case, 0, query, 0, LANE_KEY)
             parity = codeword_target(case, 0, query, 0, LANE_PARITY)
             moment_scale = Fraction(count, count + delta) if count + delta else None
@@ -514,7 +516,7 @@ def _numeric_mutant_bits(case: UniformCase, mutation: P10Mutation) -> np.ndarray
             bits[:, query, head, LANE_KV_HEAD] = _mutant_bits(
                 value, constant_scale, dtype
             )
-        for dim in range(P10_COORDINATE_LANES, case.head_dim):
+        for dim in range(CODEWORD_COORDINATE_LANES, case.head_dim):
             value = codeword_value(0, 0, 0, dim)
             bits[:, query, :, dim] = _mutant_bits(value, constant_scale, dtype)
     return bits
@@ -522,44 +524,44 @@ def _numeric_mutant_bits(case: UniformCase, mutation: P10Mutation) -> np.ndarray
 
 _NUMERIC_MUTATIONS = frozenset(
     {
-        P10Mutation.V_TOKEN_PLUS_ONE,
-        P10Mutation.DENOMINATOR_PLUS_ONE,
-        P10Mutation.DENOMINATOR_MINUS_ONE,
+        CodewordMutation.V_TOKEN_PLUS_ONE,
+        CodewordMutation.DENOMINATOR_PLUS_ONE,
+        CodewordMutation.DENOMINATOR_MINUS_ONE,
     }
 )
 
 
 def _placement_mutant_bits(
-    case: UniformCase, mutation: P10Mutation, bits: np.ndarray
+    case: UniformCase, mutation: CodewordMutation, bits: np.ndarray
 ) -> np.ndarray:
     """Move correct outputs to the coordinates a placement defect stores them at."""
     group = case.nhead_q // case.nhead_k
     heads = np.arange(case.nhead_q)
-    if mutation is P10Mutation.KV_HEAD_ROTATE:
+    if mutation is CodewordMutation.KV_HEAD_ROTATE:
         return np.roll(bits, -group, axis=2)
-    if mutation is P10Mutation.GROUP_MAP_INTERLEAVED:
+    if mutation is CodewordMutation.GROUP_MAP_INTERLEAVED:
         return bits[:, :, (heads % case.nhead_k) * group]
-    if mutation is P10Mutation.QUERY_HEAD_BROADCAST:
+    if mutation is CodewordMutation.QUERY_HEAD_BROADCAST:
         return bits[:, :, np.zeros_like(heads)]
-    if mutation is P10Mutation.OUT_HEAD_SWAP:
+    if mutation is CodewordMutation.OUT_HEAD_SWAP:
         heads[[0, 1]] = [1, 0]
         return bits[:, :, heads]
-    if mutation is P10Mutation.BATCH_SWAP:
+    if mutation is CodewordMutation.BATCH_SWAP:
         return bits[::-1]
     if case.head_dim % (2 * _STORE_VECTOR):
         raise ValueError(
             f"_placement_mutant_bits failed - head_dim={case.head_dim}, expected a "
             f"multiple of {2 * _STORE_VECTOR} for the store vectors"
         )
-    if mutation is P10Mutation.DIM_ROTATE_IN_VECTOR:
+    if mutation is CodewordMutation.DIM_ROTATE_IN_VECTOR:
         vectors = bits.reshape(*bits.shape[:-1], -1, _STORE_VECTOR)
         return np.roll(vectors, -1, axis=-1).reshape(bits.shape)
-    if mutation is P10Mutation.D_HALF_SWAP:
+    if mutation is CodewordMutation.D_HALF_SWAP:
         halves = bits.reshape(*bits.shape[:-1], -1, 2, _STORE_VECTOR)
         return halves[..., ::-1, :].reshape(bits.shape)
-    if mutation is P10Mutation.ROW_SHIFT:
+    if mutation is CodewordMutation.ROW_SHIFT:
         return np.roll(bits, -1, axis=1)
-    if mutation is P10Mutation.ADJACENT_ROW_SWAP:
+    if mutation is CodewordMutation.ADJACENT_ROW_SWAP:
         pairs = bits.reshape(bits.shape[0], -1, 2, *bits.shape[2:])
         return pairs[:, :, ::-1].reshape(bits.shape)
     raise ValueError(
@@ -571,7 +573,7 @@ def _placement_mutant_bits(
 def apply_mutation(
     case: UniformCase,
     schedule: TileSchedule,
-    mutation: P10Mutation,
+    mutation: CodewordMutation,
     output: GuardedOutput,
 ) -> GuardedOutput:
     """The guarded output a kernel with one owned defect would leave.
@@ -580,23 +582,23 @@ def apply_mutation(
     to a real kernel's output as well as to a synthetic one. Numerical mutations
     replace the outputs by those of the defective arithmetic. Store mutations
     change which elements of the allocation are written."""
-    if not in_scope(case, P10_KILL_MATRIX[mutation].scope):
+    if not in_scope(case, CODEWORD_KILL_MATRIX[mutation].scope):
         raise ValueError(
             f"apply_mutation failed - mutation={mutation.value!r} on case "
-            f"{case.case_id}, expected {P10_KILL_MATRIX[mutation].scope.value}"
+            f"{case.case_id}, expected {CODEWORD_KILL_MATRIX[mutation].scope.value}"
         )
     layout = output.layout
     start, stop = layout.guard, layout.guard + layout.logical
     raw = output.raw.copy()
     if mutation in _NUMERIC_MUTATIONS:
         raw[start:stop] = _numeric_mutant_bits(case, mutation).ravel()
-    elif mutation is P10Mutation.DROPPED_STORE:
+    elif mutation is CodewordMutation.DROPPED_STORE:
         vector = start + layout.logical // 2 // _STORE_VECTOR * _STORE_VECTOR
         raw[vector : vector + _STORE_VECTOR] = SENTINEL_BITS
-    elif mutation is P10Mutation.BASE_UNDERRUN:
+    elif mutation is CodewordMutation.BASE_UNDERRUN:
         raw[start - _STORE_VECTOR : stop - _STORE_VECTOR] = output.raw[start:stop]
         raw[stop - _STORE_VECTOR : stop] = SENTINEL_BITS
-    elif mutation is P10Mutation.ROW_BOUND_BYPASS:
+    elif mutation is CodewordMutation.ROW_BOUND_BYPASS:
         overrun = (schedule.block_m - 1) * case.nhead_q * case.head_dim
         if overrun > layout.guard:
             raise ValueError(

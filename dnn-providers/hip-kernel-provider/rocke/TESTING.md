@@ -219,6 +219,16 @@ the strategy's biggest holes live (see
   head-0 broadcast, goes unrejected. It needs NumPy and HIP only; its CPU
   contracts run in `rocke_library_attention_cpu_pytest`.
 
+- The [coordinate-codeword check](library/tests/oracle_free/README_codeword.md)
+  (same two CTest entries) launches that kernel on zero Q and a V whose every
+  value encodes its own batch, KV head, key and dimension, into an output
+  allocated between two guards. It requires every stored bit to equal the
+  correctly rounded mean over the legal keys and four store-safety counts to
+  be zero, so a wrong batch, head, row or dimension address, a dropped store or
+  a write outside the tensor fails it. Each owned mutation of the kernel's own
+  output must be rejected, and so must one privately built mutant kernel per
+  seam, including the shipped kernel launched one query row past a whole tile.
+
 - **Nothing else in this document proves the math is right.** Byte-identity
   ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)) and golden IR
   ([§4.2](#42-does-the-platforms-output-stay-stable)) are both blind to a

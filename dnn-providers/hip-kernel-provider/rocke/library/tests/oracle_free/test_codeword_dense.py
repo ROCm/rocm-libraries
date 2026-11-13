@@ -25,22 +25,22 @@ import pytest
 from rocke.tests.gpu import current_device_arch_in
 
 from ._analytical import UniformCase, encode_bits
-from ._p10_analytical import GuardedOutput, TileSchedule, codeword_inputs
-from ._p10_policy import (
-    P10_KILL_MATRIX,
+from ._codeword_analytical import GuardedOutput, TileSchedule, codeword_inputs
+from ._codeword_policy import (
+    CODEWORD_KILL_MATRIX,
+    CodewordMutation,
     CodewordResult,
-    P10Mutation,
     analyze_codeword,
     applicable_mutations,
     apply_mutation,
     format_codeword_result,
     path_exact_admissible,
 )
-from ._p10_subject import (
-    P10_SUBJECT_CASES,
-    p10_schedule,
-    resolve_p10_subject,
-    run_p10_case,
+from ._codeword_subject import (
+    CODEWORD_SUBJECT_CASES,
+    codeword_schedule,
+    resolve_codeword_subject,
+    run_codeword_case,
 )
 
 pytestmark = pytest.mark.gpu
@@ -56,14 +56,17 @@ def _case_label(arch: str, case: UniformCase) -> str:
 
 
 def _not_rejected(
-    label: str, mutation: P10Mutation, mutated: CodewordResult, control: CodewordResult
+    label: str,
+    mutation: CodewordMutation,
+    mutated: CodewordResult,
+    control: CodewordResult,
 ) -> str:
     """Explain a mutation the analyzer did not reject through its channel.
 
     A placement mutation moves the kernel's own outputs. When the real output
     already fails the verdict, a placement bug in the kernel can cancel the
     mutation, so the control's violations are the diagnosis, not the analyzer."""
-    channel = P10_KILL_MATRIX[mutation].channel.value
+    channel = CODEWORD_KILL_MATRIX[mutation].channel.value
     if control.violations:
         return (
             f"{label}: {mutation.value} was not rejected through the {channel} "
@@ -86,9 +89,9 @@ def _judge_output(
     for mutation in applicable_mutations(case):
         mutant = apply_mutation(case, schedule, mutation, output)
         mutated = analyze_codeword(case, mutant, admissible)
-        assert P10_KILL_MATRIX[mutation].channel in mutated.channels, _not_rejected(
-            label, mutation, mutated, control
-        )
+        assert (
+            CODEWORD_KILL_MATRIX[mutation].channel in mutated.channels
+        ), _not_rejected(label, mutation, mutated, control)
 
     assert not control.violations, f"{label}: {format_codeword_result(control)}"
     assert control.compared == math.prod(case.output_shape), (
@@ -103,7 +106,7 @@ def _subject_case_id(item: tuple[str, UniformCase]) -> str:
     return f"{arch}-{case.case_id}"
 
 
-@pytest.mark.parametrize("subject_case", P10_SUBJECT_CASES, ids=_subject_case_id)
+@pytest.mark.parametrize("subject_case", CODEWORD_SUBJECT_CASES, ids=_subject_case_id)
 def test_codeword_placement_and_store_safety(
     subject_case: tuple[str, UniformCase],
 ) -> None:
@@ -112,8 +115,8 @@ def test_codeword_placement_and_store_safety(
     arch, case = subject_case
     current_device_arch_in((arch,), subject=f"the {arch} dense codeword gate")
     label = _case_label(arch, case)
-    subject = resolve_p10_subject(arch, case)
+    subject = resolve_codeword_subject(arch, case)
     q, k, v = (encode_bits(values, case.dtype) for values in codeword_inputs(case))
-    output = run_p10_case(arch, case, q, k, v, subject=subject)
-    control = _judge_output(label, case, p10_schedule(subject), output)
+    output = run_codeword_case(arch, case, q, k, v, subject=subject)
+    control = _judge_output(label, case, codeword_schedule(subject), output)
     print(f"{label}: {format_codeword_result(control)}")

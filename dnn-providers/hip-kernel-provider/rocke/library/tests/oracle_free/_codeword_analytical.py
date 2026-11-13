@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Fixture, scope and exact targets of the coordinate-codeword placement probe (P10).
+"""Fixture, scope and exact targets of the coordinate-codeword placement probe.
 
 The probe launches a dense kernel on zero Q, so the softmax row of query ``q`` is
 uniform over its legal keys, and on a V whose value at ``(batch, KV head, key,
@@ -41,15 +41,15 @@ LANE_BATCH = 0
 LANE_KV_HEAD = 1
 LANE_KEY = 2
 LANE_PARITY = 3
-P10_COORDINATE_LANES = 4
+CODEWORD_COORDINATE_LANES = 4
 
 # Inside these bounds every codeword entry is both an FP16 and a BF16 value, and
 # the lanes take disjoint value ranges. BF16's eight significant bits are what
 # stops the key lane: key 257 would store -128.5.
-P10_MAX_BATCH = 2
-P10_MAX_KV_HEADS = 4
-P10_MAX_SEQLEN_K = 256
-P10_MAX_HEAD_DIM = 64
+CODEWORD_MAX_BATCH = 2
+CODEWORD_MAX_KV_HEADS = 4
+CODEWORD_MAX_SEQLEN_K = 256
+CODEWORD_MAX_HEAD_DIM = 64
 
 _SIGN_BIT = 0x8000
 
@@ -58,21 +58,21 @@ _SIGN_BIT = 0x8000
 # with zero Q the query heads of one KV group store identical values, so they
 # expose KV-head routing and the group map but not which head of a group an
 # output was written to.
-P10_GROUPED_CASES = tuple(
+CODEWORD_GROUPED_CASES = tuple(
     replace(case, batch=batch) for case in UNIFORM_QUICK_CASES for batch in (1, 2)
 )
 # One query head per KV head makes every output head distinct. These cases own
 # output-head placement.
-P10_UNGROUPED_CASES = tuple(
+CODEWORD_UNGROUPED_CASES = tuple(
     replace(
         case,
-        batch=P10_MAX_BATCH,
-        nhead_q=P10_MAX_KV_HEADS,
-        nhead_k=P10_MAX_KV_HEADS,
+        batch=CODEWORD_MAX_BATCH,
+        nhead_q=CODEWORD_MAX_KV_HEADS,
+        nhead_k=CODEWORD_MAX_KV_HEADS,
     )
     for case in UNIFORM_QUICK_CASES
 )
-P10_QUICK_CASES = P10_GROUPED_CASES + P10_UNGROUPED_CASES
+CODEWORD_QUICK_CASES = CODEWORD_GROUPED_CASES + CODEWORD_UNGROUPED_CASES
 
 
 def codeword_value(batch: int, head: int, key: int, dim: int) -> Fraction:
@@ -104,7 +104,7 @@ def _codeword(case: UniformCase) -> np.ndarray:
     # pattern: the one output whose mean is zero admits both zero signs.
     values[..., LANE_KEY] = key * np.float32(-0.5)
     values[..., LANE_PARITY] = 5.0 / 32.0 + (key % 2.0) / 16.0
-    for dim in range(P10_COORDINATE_LANES, case.head_dim):
+    for dim in range(CODEWORD_COORDINATE_LANES, case.head_dim):
         values[..., dim] = (dim + 1.0) / 16.0
     return values
 
@@ -115,7 +115,7 @@ def codeword_inputs(case: UniformCase) -> tuple[np.ndarray, np.ndarray, np.ndarr
     The arrays are FP32 in the runner layout; ``encode_bits`` turns them into the
     subject's raw bits and refuses a value that would round. K must be finite:
     zero Q annihilates it only because ``0 * k`` is zero."""
-    require_p10_scope(case)
+    require_codeword_scope(case)
     q, k, _ = uniform_inputs(case, 0)
     return q, k, _codeword(case)
 
@@ -179,7 +179,7 @@ def codeword_target_bits(case: UniformCase) -> np.ndarray:
         return exact_target_bits(target, case.dtype)
 
     bits = np.empty(case.output_shape, dtype=np.uint16)
-    for dim in range(P10_COORDINATE_LANES, case.head_dim):
+    for dim in range(CODEWORD_COORDINATE_LANES, case.head_dim):
         bits[..., dim] = rounded(0, 0, 0, dim)
     for batch in range(case.batch):
         bits[batch, :, :, LANE_BATCH] = rounded(batch, 0, 0, LANE_BATCH)
@@ -217,7 +217,7 @@ def row_codeword_collisions(case: UniformCase) -> tuple[tuple[int, int], ...]:
     )
 
 
-def require_p10_scope(case: UniformCase) -> None:
+def require_codeword_scope(case: UniformCase) -> None:
     """Refuse a case on which the codeword expectations are not defined.
 
     Three things put a case outside the scope. Past the bounds above a codeword
@@ -228,10 +228,10 @@ def require_p10_scope(case: UniformCase) -> None:
     them would pass.
     """
     upper_bounds = (
-        ("batch", case.batch, P10_MAX_BATCH),
-        ("nhead_k", case.nhead_k, P10_MAX_KV_HEADS),
-        ("seqlen_k", case.seqlen_k, P10_MAX_SEQLEN_K),
-        ("head_dim", case.head_dim, P10_MAX_HEAD_DIM),
+        ("batch", case.batch, CODEWORD_MAX_BATCH),
+        ("nhead_k", case.nhead_k, CODEWORD_MAX_KV_HEADS),
+        ("seqlen_k", case.seqlen_k, CODEWORD_MAX_SEQLEN_K),
+        ("head_dim", case.head_dim, CODEWORD_MAX_HEAD_DIM),
     )
     for name, value, limit in upper_bounds:
         if value > limit:
@@ -239,10 +239,10 @@ def require_p10_scope(case: UniformCase) -> None:
                 f"case {case.case_id} is outside the codeword scope - "
                 f"{name}={value}, expected at most {limit}"
             )
-    if case.head_dim < P10_COORDINATE_LANES:
+    if case.head_dim < CODEWORD_COORDINATE_LANES:
         raise ValueError(
             f"case {case.case_id} is outside the codeword scope - "
-            f"head_dim={case.head_dim}, expected at least {P10_COORDINATE_LANES} "
+            f"head_dim={case.head_dim}, expected at least {CODEWORD_COORDINATE_LANES} "
             "for the coordinate lanes"
         )
     for query in range(case.seqlen_q):
@@ -322,12 +322,11 @@ def masked_leading_tiles(case: UniformCase, schedule: TileSchedule, query: int) 
     On such a tile the running maximum is the mask value, so every key of the
     tile gets weight one; the first legal tile then rescales that state away."""
     first, last = legal_interval(case, query)
-    count = 0
-    for tile in visited_tiles(case, schedule, query // schedule.block_m):
+    tiles = visited_tiles(case, schedule, query // schedule.block_m)
+    for count, tile in enumerate(tiles):
         tile_first = tile * schedule.block_n
         if first <= tile_first + schedule.block_n - 1 and tile_first <= last:
             return count
-        count += 1
     raise ValueError(
         f"masked_leading_tiles failed - query={query} of case {case.case_id} "
         "visits no tile with a legal key"
