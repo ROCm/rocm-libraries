@@ -344,6 +344,11 @@ globalParameters["EnableMarker"] = False  # Enable TensileLite markers
 
 globalParameters["UseUserArgs"] = False
 
+# Run each problem split across N consecutive devices (e.g. the two partitions of an NPS2 card).
+# SplitDim M splits A and keeps B replicated; N splits B, replicates A and writes one shared D.
+globalParameters["SplitDevices"] = 1
+globalParameters["SplitDim"] = "M"
+
 globalParameters["RotatingBufferSize"] = 0  # Size in MB
 globalParameters["RotatingMode"] = (
     0  # Default is 0, allocated in order A0B0C0D0..ANBNCNDN. 1 is in order A0 pad B0 pad .... AN pad BN pad.

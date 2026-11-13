@@ -801,6 +801,9 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param("library-update-comment",   globalParameters["LibraryUpdateComment"])
 
         param("use-user-args",            globalParameters["UseUserArgs"])
+        if globalParameters["SplitDevices"] > 1:
+            param("split-devices",        globalParameters["SplitDevices"])
+            param("split-dim",            globalParameters["SplitDim"])
         param("rotating-buffer-size",     globalParameters["RotatingBufferSize"])
         param("rotating-buffer-mode",     globalParameters["RotatingMode"])
         param("icache-rotate-copies",     globalParameters["IcacheRotateCopies"])
