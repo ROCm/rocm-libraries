@@ -167,8 +167,9 @@ protected:
                 << supportStatus.get_message();
         }
 
-        // This harness does not fill a group-mode graph's offset tables; the group-mode kernels
-        // are checked against the CPU reference in IntegrationGpuSdpaForwardRagged.cpp.
+        // Group-mode cases fill their offset tables from K_GROUP_SEQ_LENS_Q/KV and are checked
+        // against the CPU ragged reference. IntegrationGpuSdpaForwardRagged.cpp adds
+        // frontend-built packed cases, fully masked rows included.
         if(testCase.config.mode == hip_kernel_provider_common::BatchMode::GROUP)
         {
             // The offset tables must fit the dense allocation the graph describes.

@@ -20,11 +20,11 @@
 /**
  * @file IntegrationGpuSdpaForwardRagged.cpp
  * @brief The ASM SDPA forward's group-mode (ragged, packed THD) kernels against hipDNN's CPU
- *        reference graph executor, which serves compact THD. IntegrationGpuSdpaForward only checks
- *        that group-mode graphs are supported: its harness does not fill the offset tables. Here
- *        the frontend-built lane (FlydslSdpaFrontendGraphs.hpp) fills them, pins the ASM engine
- *        and compares O, sequences of unequal query and key lengths included, so a bottom-right
- *        causal mask must sit on each sequence's own diagonal.
+ *        reference graph executor, which serves compact THD. IntegrationGpuSdpaForward checks
+ *        every registry row at fixed per-batch lengths. Here the frontend-built lane
+ *        (FlydslSdpaFrontendGraphs.hpp) pins the ASM engine and compares O, sequences of unequal
+ *        query and key lengths included, so a bottom-right causal mask must sit on each
+ *        sequence's own diagonal.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {

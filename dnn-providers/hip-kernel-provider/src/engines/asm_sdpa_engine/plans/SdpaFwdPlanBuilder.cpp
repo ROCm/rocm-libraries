@@ -218,7 +218,8 @@ static bool hasAiterCompatibleRaggedAddressing(
 // Q*K^T, where the hd128 and hd192x128 kernels keep that factor in fp32, so their error
 // grows with the attention scale. At 1/sqrt(256) they meet the bf16 tolerance (1e-2); at
 // scale 1.0 a group-mode case reaches an error of about 0.016. The limit is in AITER's
-// kernels, which AITER launches at any scale too, so the engine accepts every scale.
+// kernels, which AITER launches at any scale too, so the engine adds no precision bound on
+// the scale for them.
 static bool kernelServesHeadCounts(const std::string& archId,
                                    const std::string& dataTypeId,
                                    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
