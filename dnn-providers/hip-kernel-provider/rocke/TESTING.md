@@ -654,7 +654,7 @@ Each term below has one meaning in this document:
 | **Tier** | The CTest label that a CI run selects: quick, standard, comprehensive or full. An entry with the label of one tier also has the labels of all later tiers (`tier_labels` in `shared/ctest/parse_ctest_categories.py`). | The labels in `ROCKE_ENGINE_test_categories_external.yaml`; TheRock selects the tier for each run |
 | **gtest sharding** | A gtest binary runs only its share of its cases. `GTEST_SHARD_INDEX` (0-based) and `GTEST_TOTAL_SHARDS` select the share. TheRock exports these two variables to every CTest entry. | gtest |
 | **ctest striding** | Each CI shard runs every n-th CTest entry (`ctest -I`). TheRock does not use it for hipkernelprovider. | TheRock |
-| **rocKE item sharding** | A rocKE pytest entry runs only its share of its pytest items. A stable hash of each item's shard key selects the share. In installed CI, the `rocke.tests.ctest_shard` plugin does this. In developer runs, `ROCKE_TEST_SHARD=i/n` does this. | rocKE |
+| **rocKE item sharding** | A rocKE pytest entry runs only its share of its pytest items. A stable hash of each item's shard key selects the share. In installed CI, the `rocke.tests.ctest_shard` plugin does this. In developer runs, `ROCKE_TEST_SHARD=i/n` does this in the library tests and in any run that loads the plugin with `-p rocke.tests.ctest_shard`. | rocKE |
 
 **What is split.** TheRock shards hipkernelprovider with gtest sharding only.
 Thus each CI shard starts every CTest entry of its tier. In each installed rocKE

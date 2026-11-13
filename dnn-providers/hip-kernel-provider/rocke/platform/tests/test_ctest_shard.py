@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import types
 from pathlib import Path
 
 import pytest
@@ -153,6 +154,21 @@ def test_a_shard_key_is_the_module_and_the_parameter_id(request, dtype):
     assert ctest_shard.shard_key(request.node) == f"{module}[{dtype}]"
 
 
+@pytest.mark.parametrize(
+    "nodeid, param_id, key",
+    [
+        ("tests/x.py::test_b[p1]", "p1", "tests/x.py[p1]"),
+        ("tests/x.py::TestA::test_b[p1]", "p1", "tests/x.py[p1]"),
+        ("tests/x.py::TestA::TestB::test_c[p1-2]", "p1-2", "tests/x.py[p1-2]"),
+    ],
+)
+def test_a_shard_key_drops_the_class_and_the_function(nodeid, param_id, key):
+    item = types.SimpleNamespace(
+        nodeid=nodeid, callspec=types.SimpleNamespace(id=param_id)
+    )
+    assert ctest_shard.shard_key(item) == key
+
+
 def test_a_shard_key_without_parameters_is_the_node_id(request):
     assert ctest_shard.shard_key(request.node) == request.node.nodeid
 
@@ -253,7 +269,7 @@ _PLAIN = "".join(f"\n\ndef test_plain{i}():\n    pass\n" for i in range(10))
 _SLOW = "\n\n@pytest.mark.slow\ndef test_slow():\n    pass\n"
 _MANY = _PARAMETRIZED + _PLAIN + _SLOW
 _MANY_COUNT = 91
-# E1 leaves out one test with -m and one with --deselect.
+# These filters leave out one test with -m and one with --deselect.
 _FILTERS = ("-m", "not slow", "--deselect", "test_mod.py::test_plain1")
 _FILTERED_COUNT = _MANY_COUNT - 2
 
@@ -271,12 +287,12 @@ def _assert_partition(shards, every):
 
 def test_gtest_shards_partition_the_selection(tmp_path):
     project = _project(tmp_path, _MANY)
-    plan = [(k, n) for n in (1, 2, 3, 4) for k in range(n)]
+    pairs = [(k, n) for n in (1, 2, 3, 4) for k in range(n)]
     results = _pytest_side_by_side(
-        project, [_Run(("-v", *_FILTERS), _gtest(k, n)) for k, n in plan]
+        project, [_Run(("-v", *_FILTERS), _gtest(k, n)) for k, n in pairs]
     )
     by_total = {}
-    for (k, n), run in zip(plan, results):
+    for (k, n), run in zip(pairs, results):
         assert run.returncode == 0, run.stdout + run.stderr
         assert (
             f"rocke-ctest-shard: {k}/{n} "
