@@ -63,6 +63,9 @@ inline constexpr int64_t O_UID = 4;
 inline constexpr int64_t STATS_UID = 5;
 /// A uid no tensor carries.
 inline constexpr int64_t EXTRA_UID = 99;
+/// What tensor_attributes.fbs gives a tensor that declares no alignment, and what the dense
+/// packs require. Spelled out here so a graph that under-declares is visibly the exception.
+inline constexpr int64_t DEFAULT_ALIGNMENT_BYTES = 16;
 
 /// The default shape: bf16, D128, B2, Hq = Hkv = 4, Sq = Skv = 256.
 inline constexpr int64_t BATCH = 2;
@@ -136,6 +139,10 @@ struct GraphSpec
     std::optional<int64_t> virtualUid;
     // The one operand that names a ragged offset tensor (packed sequences).
     std::optional<int64_t> raggedUid;
+    // The one operand that declares a base alignment of its own, and the value it declares.
+    // Every other operand keeps DEFAULT_ALIGNMENT_BYTES.
+    std::optional<int64_t> alignmentUid;
+    int64_t alignmentBytes = 8;
     std::optional<int64_t> passByValueUid;
 
     /// Tensors the node does not name, after the operands.
@@ -292,7 +299,8 @@ inline flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
             0,
             spec.passByValueUid == uid,
             spec.raggedUid == uid ? ::flatbuffers::Optional<int64_t>(EXTRA_UID)
-                                  : ::flatbuffers::Optional<int64_t>()));
+                                  : ::flatbuffers::Optional<int64_t>(),
+            spec.alignmentUid == uid ? spec.alignmentBytes : DEFAULT_ALIGNMENT_BYTES));
     }
 
     const auto addTensor = [&](const TensorSpec& tensor) {
