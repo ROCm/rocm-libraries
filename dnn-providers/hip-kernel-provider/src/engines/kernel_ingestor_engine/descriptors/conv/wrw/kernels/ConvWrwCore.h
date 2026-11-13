@@ -686,6 +686,18 @@ struct K3Tiles
             *reinterpret_cast<Raw*>(dst) = v;
             return;
         }
+        if constexpr(sizeof(Raw) == 16)
+        {
+            // The run as one 128-bit integer: stored element j is loaded element j + shift, a
+            // whole-run shift (no per-element selects and repacking), then the keep-mask.
+            unsigned __int128 u = __builtin_bit_cast(unsigned __int128, v);
+            const int bits = shift * 8 * static_cast<int>(sizeof(T));
+            u = shift > 0 ? u >> bits : u << -bits;
+            Raw r = __builtin_bit_cast(Raw, u);
+            k3MaskRun<T, VEC>(r, mask);
+            *reinterpret_cast<Raw*>(dst) = r;
+            return;
+        }
         T tmp[VEC];
         const T* e = reinterpret_cast<const T*>(&v);
 #pragma unroll
