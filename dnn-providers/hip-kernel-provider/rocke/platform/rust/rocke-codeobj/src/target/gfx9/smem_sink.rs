@@ -106,7 +106,9 @@ pub fn run(f: &mut MFunc) -> usize {
             }
             let end = chunk_end(&insts, i);
             let reads_loaded = insts[i..end].iter().any(|x| x.uses.iter().filter_map(Opnd::vref).any(|u| loaded[u.reg as usize]));
-            if n_loads > 0 && reads_loaded && !sunk[i] && insts[i..end].iter().all(|x| scalar_alu(x, &f.vregs)) {
+            // A reader of an SCC the block did not set (live in) stays where it is.
+            let live_in = insts[i].op.flags() & (F_USE_SCC | F_DEF_SCC) == F_USE_SCC;
+            if n_loads > 0 && reads_loaded && !sunk[i] && !live_in && insts[i..end].iter().all(|x| scalar_alu(x, &f.vregs)) {
                 // Past whole chunks, as far as nothing stops it.
                 let mut stop = end;
                 while stop < insts.len() && stop - end < REACH {
