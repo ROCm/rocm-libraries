@@ -15,5 +15,6 @@ Tests:
     incx: 1
     incy: 1
     matrix_size: *scan_power_2
-    iters: 20
+    iters: 100
+    cold_iters: 20
 ...
