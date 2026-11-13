@@ -154,6 +154,8 @@ void checkTensorSupported(const TensorAttributes& tensor, const std::string& lab
 // Distinct output elements must not share an address: the kernel writes each one exactly once,
 // so aliased elements race. Neither hipDNN nor MIOpen checks this. Taking the axes of length
 // above 1 by increasing stride, each stride must step past everything the smaller axes reach.
+// That is sufficient, not necessary: packed and padded layouts pass, but some interleaved layouts
+// that do not overlap are declined too, such as dims [3, 2] with strides [2, 3].
 void checkOutputDoesNotOverlap(const TensorAttributes& output)
 {
     const auto* dims = output.dims();

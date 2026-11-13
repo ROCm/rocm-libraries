@@ -100,12 +100,15 @@ The following table lists all operations currently supported in hipDNN:
 > NORM1 and NORM2 through MIOpen's `miopenReduceTensor`, with an FP32 compute type. Input and
 > output share one datatype (FP16 or FP32) and one rank (1-5); each output dimension is either 1
 > (reduced) or equal to the input dimension, and at least one dimension must be reduced. Any set
-> of dimensions may be reduced, including the innermost, and any positive strides are accepted
-> as long as distinct output elements do not overlap in memory. Not supported: MUL_NO_ZEROS
-> (MIOpen has no equivalent), BFP16 (MIOpen's legacy reduce kernels have no bf16 support),
-> deterministic reduction (`is_deterministic`), in-place execution, and tensors whose lengths,
-> strides, element count or memory extent in bytes exceed INT32_MAX. A reduction to a single
-> output element is further limited to 1,073,741,568 (about 2^30) input elements.
+> of dimensions may be reduced, including the innermost. Strides must be positive; on the output,
+> the axes longer than 1, taken by increasing stride, must each have a stride larger than the
+> furthest offset the smaller axes reach (packed and padded layouts qualify). An interleaved
+> output layout that does not overlap but breaks this rule, such as dims [3, 2] with strides
+> [2, 3], is declined. Not supported: MUL_NO_ZEROS (MIOpen has no equivalent), BFP16 (MIOpen's
+> legacy reduce kernels have no bf16 support), deterministic reduction (`is_deterministic`),
+> in-place execution, and tensors whose lengths, strides, element count or memory extent in bytes
+> exceed INT32_MAX. A reduction to a single output element is further limited to 1,073,741,568
+> (about 2^30) input elements.
 
 > [!NOTE]
 > **Sparse Support:** All operations currently work with dense tensors only.

@@ -50,6 +50,11 @@ MiopenReductionPlan::MiopenReductionPlan(
 {
     // miopenReduceTensor throws on an undersized workspace, so report exactly what it asks for.
     // Legacy always asks for at least one descriptor page, even for a single-pass reduction.
+    // Known limitation (ALMIOPEN-3152): without indices MIOpen sizes the workspace with no
+    // alignment slack but still aligns the pointer to 64 bytes, so in the multi-block path (more
+    // than 1024 elements reduced into each output) a workspace that is not 64-byte aligned is
+    // overrun by up to 63 bytes. hipMalloc returns memory aligned to at least 256 bytes; only a
+    // workspace sliced from a larger buffer is affected.
     THROW_ON_MIOPEN_FAILURE(
         miopenGetReductionWorkspaceSize(handle.miopenHandle,
                                         _reduceDescriptor.reduceTensorDescriptor(),
