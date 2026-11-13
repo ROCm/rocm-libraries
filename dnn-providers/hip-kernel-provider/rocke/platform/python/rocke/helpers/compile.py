@@ -125,6 +125,8 @@ _CODE_OBJECT_BACKEND_REQUEST = "_rocke_code_object_backend"
 # - ``DIRECT_LEVERS_ATTR``: a kernel's own direct-compiler levers (a list or a
 #   ``,`` / ``+`` joined string of ``ROCKE_DIRECT_LEVERS`` names), joined to the
 #   environment's for its compile only; not IR (stripped before serialization).
+#   The gfx950 unified-attention builders set it (the 2D kernel ``dmafree,smemsink``,
+#   the split-KV reduce kernel ``widewin``).
 # - ``DIRECT_SCOPES_ATTR`` + the op attribute ``SCOPE_OP_ATTR``: per-op lever
 #   scopes by name (``"<scope>:<lever>+<lever>;..."`` on the kernel, the scope
 #   name on its ops; ``qwen38_mono.persist.knobs.RustScope``). The direct

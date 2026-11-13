@@ -62,6 +62,7 @@ pub mod rules;
 pub mod sched;
 pub mod sched_groups;
 pub mod select;
+pub mod smem_sink;
 pub mod spill;
 pub mod trade;
 pub mod unrolled;
@@ -116,6 +117,9 @@ pub fn prepare(f: &mut MFunc) {
         pack::run(f);
     }
     masks::reuse(f);
+    if f.lever_anywhere("smemsink") {
+        smem_sink::run(f);
+    }
     // rust-compiler-v2 lever `sgb`: `tile.sched_group_barrier` pipelines order the blocks that have them.
     if f.lever_anywhere("sgb") {
         sched_groups::run(f);

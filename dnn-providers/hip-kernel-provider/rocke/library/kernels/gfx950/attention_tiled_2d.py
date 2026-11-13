@@ -1250,6 +1250,11 @@ def build_unified_attention_2d_tiled(
     name = spec.kernel_name()
     b = IRBuilder(name)
     b.kernel.attrs["max_workgroup_size"] = THREADS
+    # Direct code-object compiler levers (``rocke.helpers.compile.DIRECT_LEVERS_ATTR``; not IR, the
+    # LLVM lowering ignores them): the K/V tile loads of the next iteration issue ahead of the QK
+    # MFMAs (``dmafree``) and the block-table lookups' selects wait for their loads together
+    # (``smemsink``), as LLVM schedules this loop.
+    b.kernel.attrs["direct_levers"] = "dmafree,smemsink"
     if spec.waves_per_eu is not None:
         b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
     if spec.use_agpr_alloc_zero:
