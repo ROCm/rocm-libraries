@@ -134,8 +134,11 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
         // Split barrier (Policy::kUseSplitBarrier). The split form has no data cache prefetch: a
         // policy that asks for prefetch keeps the joint form.
         static constexpr bool kSplitBarrier = Policy::kUseSplitBarrier && !UseDataCachePrefetch;
+        static constexpr bool kRefillAfterFirstRow =
+            Policy::kRefillPoint == Policy::RefillPoint::AfterFirstRow;
+        // AfterFirstRow follows AfterArrive everywhere but in where the issuers wait and refill.
         static constexpr bool kRefillAfterArrive =
-            Policy::kRefillPoint == Policy::RefillPoint::AfterArrive;
+            Policy::kRefillPoint == Policy::RefillPoint::AfterArrive || kRefillAfterFirstRow;
         // Split barrier: B resident, A read one warp-GEMM row at a time (see stage_gemm_arrive).
         // Needs BlockGemm's (MIterPerWarp, MWarp) A layout and a non-transposed A read; other
         // configurations read each K sub-tile whole.
@@ -180,6 +183,8 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
         // scales into buffer Buf and moves the windows on by one K tile.
         struct NoScaleState
         {
+            CK_TILE_DEVICE void prologue() {}
+            CK_TILE_DEVICE void advance() {}
             template <index_t Buf>
             CK_TILE_DEVICE void load()
             {
@@ -205,6 +210,9 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
             AScaleTile a_tile[2];
             BScaleTile b_tile[2];
 
+            // prologue: tile 0 into buffer 0. advance: nothing (buffers follow the LDS stage).
+            CK_TILE_DEVICE void prologue() { load<0>(); }
+            CK_TILE_DEVICE void advance() {}
             template <index_t Buf>
             CK_TILE_DEVICE void load()
             {
@@ -217,6 +225,58 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
             CK_TILE_DEVICE ScaleTiles<AScaleTile, BScaleTile> get() const
             {
                 return {a_tile[Buf], b_tile[Buf]};
+            }
+        };
+        // Policy::kMxScalePrefetchDepth == 2: three register buffers used as a queue. Slot 0
+        // holds the scales of the current K tile, slot 1 the next, slot 2 the one after.
+        // prologue() loads tiles 0 and 1 into slots 1 and 2; advance(), at the top of every K
+        // tile, shifts the queue by one (slot 0 <- 1 <- 2); load<>(), at the top of tile t when
+        // tile t + 1 exists, loads tile t + 2 into slot 2. For the second-to-last tile that load
+        // lies past K: the scale views are bounds-checked buffers, so it reads zeros that are
+        // never used.
+        template <typename AWindow,
+                  typename BWindow,
+                  typename AStep,
+                  typename BStep,
+                  typename AScaleTile,
+                  typename BScaleTile>
+        struct MxScaleQueueState
+        {
+            AWindow a_window;
+            BWindow b_window;
+            AStep a_step;
+            BStep b_step;
+            AScaleTile a_tile[3];
+            BScaleTile b_tile[3];
+
+            CK_TILE_DEVICE void load_into(AScaleTile& a, BScaleTile& b)
+            {
+                load_tile(a, a_window);
+                move_tile_window(a_window, a_step);
+                load_tile(b, b_window);
+                move_tile_window(b_window, b_step);
+            }
+            CK_TILE_DEVICE void prologue()
+            {
+                load_into(a_tile[1], b_tile[1]);
+                load_into(a_tile[2], b_tile[2]);
+            }
+            CK_TILE_DEVICE void advance()
+            {
+                a_tile[0] = a_tile[1];
+                b_tile[0] = b_tile[1];
+                a_tile[1] = a_tile[2];
+                b_tile[1] = b_tile[2];
+            }
+            template <index_t Buf>
+            CK_TILE_DEVICE void load()
+            {
+                load_into(a_tile[2], b_tile[2]);
+            }
+            template <index_t Buf>
+            CK_TILE_DEVICE ScaleTiles<AScaleTile, BScaleTile> get() const
+            {
+                return {a_tile[0], b_tile[0]};
             }
         };
         // The ScaleWindows argument of wave_specialized_func: none, or the kernel's A/B scale
@@ -541,13 +601,37 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                     using BScaleTile = decltype(make_static_distributed_tensor<
                                                 typename decltype(b_window)::DataType>(
                         Policy::template MakeScaleBDramTileDistribution<Problem>()));
-                    return MxScaleState<decltype(a_window),
-                                        decltype(b_window),
-                                        AStep,
-                                        BStep,
-                                        AScaleTile,
-                                        BScaleTile>{
-                        a_window, b_window, make_array(0, kScaleK), make_array(0, kScaleK), {}, {}};
+                    static_assert(Policy::kMxScalePrefetchDepth == 1 ||
+                                      (Policy::kMxScalePrefetchDepth == 2 && kSplitBarrier),
+                                  "kMxScalePrefetchDepth: 1, or 2 with the split barrier");
+                    if constexpr(Policy::kMxScalePrefetchDepth == 2)
+                    {
+                        return MxScaleQueueState<decltype(a_window),
+                                                 decltype(b_window),
+                                                 AStep,
+                                                 BStep,
+                                                 AScaleTile,
+                                                 BScaleTile>{a_window,
+                                                             b_window,
+                                                             make_array(0, kScaleK),
+                                                             make_array(0, kScaleK),
+                                                             {},
+                                                             {}};
+                    }
+                    else
+                    {
+                        return MxScaleState<decltype(a_window),
+                                            decltype(b_window),
+                                            AStep,
+                                            BStep,
+                                            AScaleTile,
+                                            BScaleTile>{a_window,
+                                                        b_window,
+                                                        make_array(0, kScaleK),
+                                                        make_array(0, kScaleK),
+                                                        {},
+                                                        {}};
+                    }
                 }
                 else
                 {
@@ -612,7 +696,7 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                     move_tile_window(b_dram_window1, b_dram_tile_window_step);
                 }
                 fill_stage(I0{});
-                scales.template load<0>();
+                scales.prologue();
 
                 auto c_block_tile = block_gemm.MakeCBlockTile();
                 clear_tile(c_block_tile);
@@ -653,11 +737,50 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                 // last row's WMMAs overlap the barrier. Otherwise (transposed A load, packed or
                 // wave-group block GEMM) each sub-tile is read whole, as in the joint form, and
                 // the last sub-tile's WMMAs overlap the barrier.
-                auto stage_gemm_arrive = [&](auto s, auto arrive) {
+                auto stage_gemm_arrive = [&](auto s, auto arrive, auto after_first_row) {
                     const auto stage_scales = scales.template get<decltype(s)::value>();
                     static_for<0, sub_tile_num, 1>{}([&](auto i) {
                         constexpr bool is_last_sub_tile = (i.value == sub_tile_num - 1);
-                        if constexpr(kStreamARows)
+                        if constexpr(kStreamARows && kRefillAfterFirstRow && is_last_sub_tile)
+                        {
+                            // AfterFirstRow, last sub-tile: read B and every A row, arrive, run
+                            // row 0, then after_first_row() (the issuers' wait and refill), then
+                            // the remaining rows.
+                            auto b_window = b_lds_gemm_windows[s];
+                            move_tile_window(b_window,
+                                             is_b_load_tr_v
+                                                 ? multi_index<2>{i.value * kSubTileK, 0}
+                                                 : multi_index<2>{0, i.value * kSubTileK});
+                            if constexpr(is_b_load_tr_v)
+                            {
+                                b_block_tile = load_tile_transpose(b_window);
+                            }
+                            else
+                            {
+                                load_tile(b_block_tile, b_window);
+                            }
+                            auto a_rows = generate_tuple(
+                                [&](auto r) {
+                                    auto a_row_tile = make_static_distributed_tensor<ADataType>(
+                                        MakeARowDistribution());
+                                    auto a_row_window = a_row_windows[s];
+                                    move_tile_window(a_row_window,
+                                                     {r.value * a_row_m, i.value * kSubTileK});
+                                    load_tile(a_row_tile, a_row_window);
+                                    return a_row_tile;
+                                },
+                                number<BlockGemm::MIterPerWarp>{});
+                            arrive();
+                            static_for<0, BlockGemm::MIterPerWarp, 1>{}([&](auto r) {
+                                BlockGemmRows<r.value, 0, 1, i.value>(
+                                    c_block_tile, a_rows[r], b_block_tile, stage_scales);
+                                if constexpr(r.value == 0)
+                                {
+                                    after_first_row();
+                                }
+                            });
+                        }
+                        else if constexpr(kStreamARows)
                         {
                             auto b_window = b_lds_gemm_windows[s];
                             move_tile_window(b_window,
@@ -672,21 +795,61 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                             {
                                 load_tile(b_block_tile, b_window);
                             }
-                            static_for<0, BlockGemm::MIterPerWarp, 1>{}([&](auto r) {
-                                auto a_row_tile = make_static_distributed_tensor<ADataType>(
-                                    MakeARowDistribution());
-                                auto a_row_window = a_row_windows[s];
-                                move_tile_window(a_row_window,
-                                                 {r.value * a_row_m, i.value * kSubTileK});
-                                load_tile(a_row_tile, a_row_window);
-                                if constexpr(is_last_sub_tile &&
-                                             r.value == BlockGemm::MIterPerWarp - 1)
+                            if constexpr(Policy::kStreamARowPrefetch)
+                            {
+                                // Row r + 1's A reads are issued before row r's WMMAs; the
+                                // arrive follows the last read (row R - 1's, issued in step
+                                // R - 2).
+                                constexpr index_t R = BlockGemm::MIterPerWarp;
+                                auto load_a_row     = [&](auto r) {
+                                    auto t = make_static_distributed_tensor<ADataType>(
+                                        MakeARowDistribution());
+                                    auto w = a_row_windows[s];
+                                    move_tile_window(w, {r.value * a_row_m, i.value * kSubTileK});
+                                    load_tile(t, w);
+                                    return t;
+                                };
+                                auto a_cur = load_a_row(number<0>{});
+                                if constexpr(is_last_sub_tile && R == 1)
                                 {
                                     arrive();
                                 }
-                                BlockGemmRows<r.value, 0, 1, i.value>(
-                                    c_block_tile, a_row_tile, b_block_tile, stage_scales);
-                            });
+                                static_for<0, R, 1>{}([&](auto r) {
+                                    decltype(a_cur) a_nxt;
+                                    if constexpr(r.value + 1 < R)
+                                    {
+                                        a_nxt = load_a_row(number<r.value + 1>{});
+                                        if constexpr(is_last_sub_tile && r.value + 2 == R)
+                                        {
+                                            arrive();
+                                        }
+                                    }
+                                    BlockGemmRows<r.value, 0, 1, i.value>(
+                                        c_block_tile, a_cur, b_block_tile, stage_scales);
+                                    if constexpr(r.value + 1 < R)
+                                    {
+                                        a_cur = a_nxt;
+                                    }
+                                });
+                            }
+                            else
+                            {
+                                static_for<0, BlockGemm::MIterPerWarp, 1>{}([&](auto r) {
+                                    auto a_row_tile = make_static_distributed_tensor<ADataType>(
+                                        MakeARowDistribution());
+                                    auto a_row_window = a_row_windows[s];
+                                    move_tile_window(a_row_window,
+                                                     {r.value * a_row_m, i.value * kSubTileK});
+                                    load_tile(a_row_tile, a_row_window);
+                                    if constexpr(is_last_sub_tile &&
+                                                 r.value == BlockGemm::MIterPerWarp - 1)
+                                    {
+                                        arrive();
+                                    }
+                                    BlockGemmRows<r.value, 0, 1, i.value>(
+                                        c_block_tile, a_row_tile, b_block_tile, stage_scales);
+                                });
+                            }
                         }
                         else
                         {
@@ -702,6 +865,7 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                             if constexpr(is_last_sub_tile)
                             {
                                 arrive();
+                                after_first_row();
                             }
                             if constexpr(kMx)
                             {
@@ -739,7 +903,10 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                                   auto early_next,
                                   bool early_next_rt = true) {
                     constexpr index_t si = decltype(s)::value;
-                    // MX: the scales of tile t + 1 go into the other buffer, a K tile ahead
+                    // MX, prefetch depth 2: rotate the scale queue (slot 0 = tile t)
+                    scales.advance();
+                    // MX: the scales of tile t + 1 go into the other buffer, a K tile ahead (depth
+                    // 1), or those of tile t + 2 into the queue's last slot (depth 2)
                     if constexpr(decltype(has_next)::value)
                     {
                         scales.template load<1 - si>();
@@ -759,15 +926,9 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                     {
                         fill_stage(number<1 - si>{});
                     }
-                    stage_gemm_arrive(s, [&]() {
-                        if constexpr(decltype(has_next)::value)
-                        {
-                            arrive_publishing(number<1 - si>{});
-                        }
-                        else
-                        {
-                            workgroup_barrier_arrive();
-                        }
+                    // AfterArrive: the issuers wait and refill right after their arrive.
+                    // AfterFirstRow: after the first row's WMMAs of the last sub-tile instead.
+                    auto early_refill = [&]() {
                         if constexpr(kRefillAfterArrive && decltype(early_next)::value)
                         {
                             if(is_stage_issuer(s) && early_next_rt)
@@ -776,7 +937,29 @@ struct GemmPipelineAgBgCrCompTDMV3 : public GemmPipelineAgBgCrCompTDMV1<Problem,
                                 fill_stage(s);
                             }
                         }
-                    });
+                    };
+                    stage_gemm_arrive(
+                        s,
+                        [&]() {
+                            if constexpr(decltype(has_next)::value)
+                            {
+                                arrive_publishing(number<1 - si>{});
+                            }
+                            else
+                            {
+                                workgroup_barrier_arrive();
+                            }
+                            if constexpr(!kRefillAfterFirstRow)
+                            {
+                                early_refill();
+                            }
+                        },
+                        [&]() {
+                            if constexpr(kRefillAfterFirstRow)
+                            {
+                                early_refill();
+                            }
+                        });
                 };
 
                 arrive_publishing(I0{});

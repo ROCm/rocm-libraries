@@ -1046,6 +1046,16 @@ struct WmmaTraits<gfx125_t, fp8_t, fp8_t, float, 16, 16, 128>
     : WmmaTraitsBase<gfx12_t, fp8_t, fp8_t, float, 128>
 {
     using ArchType = gfx125_t;
+#if defined(CK_TILE_GFX125_FP8_K1PERLANE)
+    // EXPERIMENT: K bytes per contiguous per-lane chunk of the unscaled 16x16x128 fp8 WMMA.
+    // The default (8) makes each lane gather 8-byte pieces (ds_load_2addr_b64). 16 or 64 lets
+    // the LDS reads be 128-bit. Any value is correct for the unscaled instruction as long as A and
+    // B use the same one (the K order inside one WMMA is free).
+    static constexpr index_t kAK1PerLane = CK_TILE_GFX125_FP8_K1PERLANE;
+    static constexpr index_t kAK0PerLane = kK / (kAK1PerLane * kABKLane);
+    static constexpr index_t kBK1PerLane = CK_TILE_GFX125_FP8_K1PERLANE;
+    static constexpr index_t kBK0PerLane = kK / (kBK1PerLane * kABKLane);
+#endif
 
     template <typename... Params>
     CK_TILE_DEVICE static CVecType
@@ -1053,12 +1063,23 @@ struct WmmaTraits<gfx125_t, fp8_t, fp8_t, float, 16, 16, 128>
     {
 #ifdef __gfx125__
         using P = WarpGemmParamsParser<Params...>;
+#if defined(CK_TILE_GFX125_FP8_NO_WMMA_REUSE)
+        // EXPERIMENT: no operand-reuse hints on the gfx1250 fp8 16x16x128 WMMA.
+        ck_tile::ignore = P::reuse_a;
+        return __builtin_amdgcn_wmma_f32_16x16x128_fp8_fp8(bit_cast<int32x16_t>(a_vec),
+                                                           bit_cast<int32x16_t>(b_vec),
+                                                           0,
+                                                           bit_cast<fp32x8_t>(c_vec),
+                                                           false,
+                                                           false);
+#else
         return __builtin_amdgcn_wmma_f32_16x16x128_fp8_fp8(bit_cast<int32x16_t>(a_vec),
                                                            bit_cast<int32x16_t>(b_vec),
                                                            0,
                                                            bit_cast<fp32x8_t>(c_vec),
                                                            P::reuse_a,  // matrix_a_reuse
                                                            P::reuse_b); // matrix_b_reuse
+#endif
 #else
         ck_tile::ignore = a_vec;
         ck_tile::ignore = b_vec;

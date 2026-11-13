@@ -80,6 +80,17 @@ using BLayout        = ColumnMajor;
 using CLayout        = RowMajor;
 constexpr int kScale = 32; // K elements per scale
 
+#if defined(CK_EX55_MX_SCALE_PREFETCH_DEPTH)
+// EXPERIMENT: -DCK_EX55_MX_SCALE_PREFETCH_DEPTH=N sets the pipeline's MX scale prefetch depth.
+struct Ex55Policy : ck_tile::GemmPipelineAgBgCrCompTDMV3Policy
+{
+    [[maybe_unused]] static constexpr ck_tile::index_t kMxScalePrefetchDepth =
+        CK_EX55_MX_SCALE_PREFETCH_DEPTH;
+};
+#else
+using Ex55Policy = ck_tile::GemmPipelineAgBgCrCompTDMV3Policy;
+#endif
+
 constexpr ck_tile::index_t kWarpK = 128;
 
 // EXPERIMENT (B0 8 PF): cluster tile partitioner that gives each XCD one RegM x RegN region of
@@ -186,7 +197,7 @@ struct Instance
                                                            ScaleDataType,
                                                            ScaleDataType,
                                                            kScale>;
-    using Pipeline        = ck_tile::GemmPipelineAgBgCrCompTDMV3<Problem>;
+    using Pipeline        = ck_tile::GemmPipelineAgBgCrCompTDMV3<Problem, Ex55Policy>;
     using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<ADataType,
                                                              BDataType,
                                                              ck_tile::tuple<>,

@@ -38,12 +38,30 @@ struct GemmPipelineAgBgCrCompTDMV3Policy : public GemmPipelineAgBgCrCompTDMDefau
     /// AfterArrive: the issuers of the stage just read wait right after their own arrive, refill
     /// that stage, then run their overlapped WMMAs; every other wave waits at the top of the next
     /// K tile. The fill starts earlier, and the issuers give up their overlap window.
+    /// AfterFirstRow: as AfterArrive, but in the last K sub-tile every A row is read before the
+    /// arrive (not one row at a time), and the issuers wait and refill after the first row's
+    /// WMMAs, so the barrier wait is covered by WMMA work and the refill is followed by the
+    /// remaining rows. Costs the registers of the whole A sub-tile.
     enum class RefillPoint
     {
         TopOfNextTile,
-        AfterArrive
+        AfterArrive,
+        AfterFirstRow
     };
     static constexpr RefillPoint kRefillPoint = RefillPoint::TopOfNextTile;
+
+    /// Split barrier with A read one warp-GEMM row at a time: true issues the LDS reads of row
+    /// r + 1 before the WMMAs of row r (one more A row of registers), so a row's reads overlap the
+    /// previous row's WMMAs instead of being waited on right before its own. The last read of a
+    /// stage then comes one row earlier, and so does the arrive.
+    static constexpr bool kStreamARowPrefetch = false;
+
+    /// MX only, split barrier only: how many K tiles ahead the A/B scales are loaded from global
+    /// memory into registers. 1: the scales of tile t + 1 are loaded at the top of tile t into the
+    /// other of two register buffers. 2: three register buffers, rotated at the top of every K
+    /// tile; the scales of tile t + 2 are loaded at the top of tile t, so the loads have about
+    /// two K tiles to arrive (at the cost of one more scale buffer and its rotation moves).
+    static constexpr index_t kMxScalePrefetchDepth = 1;
 
     /// Workgroups per CU the register budget assumes (the launch's kBlockPerCu).
     static constexpr index_t kBlockPerCu = 1;

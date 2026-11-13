@@ -74,6 +74,42 @@ using ALayout     = ck_tile::tensor_layout::gemm::RowMajor;
 using BLayout     = ck_tile::tensor_layout::gemm::ColumnMajor;
 using CLayout     = ck_tile::tensor_layout::gemm::RowMajor;
 
+#if defined(CK_EX53_TDM_MASK_MODE) || defined(CK_EX53_A_ROW_PREFETCH)
+// EXPERIMENT: -DCK_EX53_A_ROW_PREFETCH=1 sets kStreamARowPrefetch. -DCK_EX53_TDM_MASK_MODE=N
+// overrides the TDM multicast masks of a cluster launch. 1: a mask that names only the issuing
+// workgroup becomes 0 (plain load); 2: every mask is 0 (cluster launch and placement kept, nothing
+// merged). -DCK_EX53_REFILL_AFTER_ARRIVE=1 also selects RefillPoint::AfterArrive.
+struct Ex53Policy : ck_tile::GemmPipelineAgBgCrCompTDMV3Policy
+{
+#if defined(CK_EX53_REFILL_AFTER_ARRIVE)
+    // 1: RefillPoint::AfterArrive; 2: RefillPoint::AfterFirstRow
+    [[maybe_unused]] static constexpr RefillPoint kRefillPoint =
+        CK_EX53_REFILL_AFTER_ARRIVE == 2 ? RefillPoint::AfterFirstRow : RefillPoint::AfterArrive;
+#endif
+#if defined(CK_EX53_A_ROW_PREFETCH)
+    [[maybe_unused]] static constexpr bool kStreamARowPrefetch = CK_EX53_A_ROW_PREFETCH != 0;
+#endif
+    template <ck_tile::MultiCastDirection Direction, typename Problem>
+    CK_TILE_DEVICE static uint16_t GetTDMWorkgroupMask(dim3 block_id_in_cluster)
+    {
+        const uint16_t m =
+            ck_tile::GemmPipelineAgBgCrCompTDMV3Policy::template GetTDMWorkgroupMask<Direction,
+                                                                                     Problem>(
+                block_id_in_cluster);
+#if !defined(CK_EX53_TDM_MASK_MODE)
+        return m;
+#else
+        if constexpr(CK_EX53_TDM_MASK_MODE == 2)
+            return 0;
+        else
+            return (m & (m - 1)) == 0 ? uint16_t{0} : m;
+#endif
+    }
+};
+#else
+using Ex53Policy = ck_tile::GemmPipelineAgBgCrCompTDMV3Policy;
+#endif
+
 // EXPERIMENT (B0 8 PF): cluster tile partitioner that gives each XCD one RegM x RegN region of
 // output tiles. Assumes the hardware places clusters round-robin over NumXcd XCDs by linear
 // cluster id (x fastest) and that the grid splits into exactly NumXcd regions; otherwise it
@@ -160,7 +196,7 @@ struct Instance
                                               TileShape,
                                               Traits,
                                               ck_tile::GemmPipelineScheduler::Intrawave>;
-    using Pipeline        = ck_tile::GemmPipelineAgBgCrCompTDMV3<Problem>;
+    using Pipeline        = ck_tile::GemmPipelineAgBgCrCompTDMV3<Problem, Ex53Policy>;
     using EpilogueProblem = ck_tile::CShuffleEpilogueProblem<ADataType,
                                                              BDataType,
                                                              ck_tile::tuple<>,
@@ -700,34 +736,39 @@ int dispatch_tile(const ck_tile::ArgParser& arg, const std::string& name)
     {
         const std::string wt    = arg.get_str("wt");
         const std::string place = arg.get_str("place");
-        // B-only multicast (ClusterN == 1) and the XCD-region placement: wt 32 only.
-        if(tile == "256x256x256" && wt == "32" && (cluster == "4x1" || cluster == "2x1"))
+        // B-only multicast (ClusterN == 1) and the XCD-region placement: wt 32 or 16.
+        if(tile == "256x256x256" && (wt == "32" || wt == "16") &&
+           (cluster == "4x1" || cluster == "2x1"))
         {
-            if(place == "8x4")
-                return cluster == "4x1"
-                           ? run<Instance<256, 256, 256, 2, 2, 32, 32, 128, TdmEpi, 4, 1, 8, 4>>(
-                                 arg, name)
-                           : run<Instance<256, 256, 256, 2, 2, 32, 32, 128, TdmEpi, 2, 1, 8, 4>>(
-                                 arg, name);
-            if(place == "default")
-                return cluster == "4x1"
-                           ? run<Instance<256, 256, 256, 2, 2, 32, 32, 128, TdmEpi, 4, 1>>(arg,
-                                                                                           name)
-                           : run<Instance<256, 256, 256, 2, 2, 32, 32, 128, TdmEpi, 2, 1>>(arg,
-                                                                                           name);
-            std::printf("-place=%s: default | 8x4\n", place.c_str());
-            return 2;
+            auto go = [&](auto wt_c) -> int {
+                constexpr int W = decltype(wt_c)::value;
+                if(place == "8x4")
+                    return cluster == "4x1"
+                               ? run<Instance<256, 256, 256, 2, 2, W, W, 128, TdmEpi, 4, 1, 8, 4>>(
+                                     arg, name)
+                               : run<Instance<256, 256, 256, 2, 2, W, W, 128, TdmEpi, 2, 1, 8, 4>>(
+                                     arg, name);
+                if(place == "default")
+                    return cluster == "4x1"
+                               ? run<Instance<256, 256, 256, 2, 2, W, W, 128, TdmEpi, 4, 1>>(arg,
+                                                                                             name)
+                               : run<Instance<256, 256, 256, 2, 2, W, W, 128, TdmEpi, 2, 1>>(arg,
+                                                                                             name);
+                std::printf("-place=%s: default | 8x4\n", place.c_str());
+                return 2;
+            };
+            return wt == "32" ? go(ck_tile::number<32>{}) : go(ck_tile::number<16>{});
         }
         if(place != "default")
         {
-            std::printf("-place needs -warps=2x2 -wt=32 -cluster=4x1|2x1\n");
+            std::printf("-place needs -warps=2x2 -wt=32|16 -cluster=4x1|2x1\n");
             return 2;
         }
         if(tile != "256x256x256" || (cluster != "1x1" && cluster != "2x2") ||
            (wt != "32" && wt != "16"))
         {
-            std::printf("-warps=2x2 needs -tile=256x256x256, -cluster=1x1|2x2 (or 4x1|2x1 with "
-                        "-wt=32), -wt=32|16\n");
+            std::printf("-warps=2x2 needs -tile=256x256x256, -cluster=1x1|2x2|4x1|2x1, "
+                        "-wt=32|16\n");
             return 2;
         }
         if(wt == "32")
