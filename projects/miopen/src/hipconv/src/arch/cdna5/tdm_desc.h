@@ -112,7 +112,6 @@ struct TdmDesc
     {
         d0.set_global_addr(static_cast<uintptr_t>(global_addr_bytes));
         d0.lds_addr = lds_offset_bytes;
-        d0.is_store = 1; // the "must be 0" in tdm_group0 is the load direction's constraint
         arch_mi400::tensor_store_from_lds(d0, d1, d2, d3, d4);
     }
 };

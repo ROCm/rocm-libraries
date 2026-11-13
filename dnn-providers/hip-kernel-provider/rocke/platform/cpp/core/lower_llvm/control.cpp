@@ -1559,6 +1559,36 @@ static void _op_tile_trap(rocke_lower_t* L, const rocke_op_t* op)
     rocke_ll_emitf(L, "  call void @llvm.trap()");
 }
 
+/* Python _op_tile_gpu_check_failed: store 1 to the kernel's GPU-check word,
+ * then return from the kernel, which ends the block like cf.return. Not a
+ * trap: a taken trap does not let the process carry on (tile.trap in
+ * dsl_docs/reference/op_vocabulary.md), while a returned lane lets the launch
+ * complete. */
+static void _op_tile_gpu_check_failed(rocke_lower_t* L, const rocke_op_t* op)
+{
+    char err[64];
+    if(!rocke_ll_live(L))
+    {
+        return;
+    }
+    if(const char* error = rocke_i_gpu_check_failed_op_error(op, err, sizeof err))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
+        return;
+    }
+    L->gpu_check_word = rocke_i_gpu_check_word_symbol(&L->arena, L->kernel ? L->kernel->name : "");
+    rocke_ll_emitf(L,
+                   "  store atomic i32 1, ptr addrspace(1) @%s syncscope(\"agent\") monotonic, "
+                   "align 4",
+                   L->gpu_check_word);
+    rocke_ll_emit(L, " ret void");
+    rocke_ll_block_t* cur = rocke_ll_current(L);
+    if(cur)
+    {
+        cur->terminated = true;
+    }
+}
+
 /* ======================================================================== */
 /* scf.* / cf.* control flow                                                */
 /* ======================================================================== */
@@ -2764,6 +2794,7 @@ void rocke_ll_register_vector(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_CLUSTER_BARRIER, _op_tile_cluster_barrier);
     rocke_ll_set_handler(ROCKE_OP_TILE_S_SETPRIO, _op_tile_s_setprio);
     rocke_ll_set_handler(ROCKE_OP_TILE_TRAP, _op_tile_trap);
+    rocke_ll_set_handler(ROCKE_OP_TILE_GPU_CHECK_FAILED, _op_tile_gpu_check_failed);
     rocke_ll_set_handler(ROCKE_OP_TILE_IGLP_OPT, _op_tile_iglp_opt);
     rocke_ll_set_handler(ROCKE_OP_TILE_SCHED_BARRIER, _op_tile_sched_barrier);
     rocke_ll_set_handler(ROCKE_OP_TILE_SCHED_GROUP_BARRIER, _op_tile_sched_group_barrier);

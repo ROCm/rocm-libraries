@@ -25,7 +25,9 @@
  *******************************************************************************/
 
 #include "hipblaslt_arguments.hpp"
+#include "datatype_interface.hpp"
 #include "hipblaslt_bench_options.hpp"
+#include "hipblaslt_datatype2string.hpp"
 #include <cstdlib>
 #include <cstring>
 #include <hipblaslt_benchmark/benchmark_stats.hpp>
@@ -33,10 +35,17 @@
 #include <istream>
 #include <ostream>
 #include <regex>
+#include <set>
+#include <stdexcept>
+#include <string>
+#include <tuple>
 #include <utility>
 
-void hipblaslt_bench_options::apply_strict_verification(Arguments& arg)
+void hipblaslt_bench_options::apply_to(Arguments& arg)
 {
+    if(arg.uniform_summation_order < 0)
+        arg.uniform_summation_order = uniform_summation_order();
+
     if(verify_strict())
     {
         arg.norm_check     = 1;
@@ -266,4 +275,47 @@ void Arguments::validate(std::istream& ifs)
     // Apply check_func to each pair (name, value) of Arguments as a tuple
 #define CHECK_FUNC(NAME) check_func(#NAME, arg.NAME)
     FOR_EACH_ARGUMENT(CHECK_FUNC, ;);
+}
+
+std::tuple<hipDataType, hipDataType> derive_unset_compute_input_type(const Arguments& arg)
+{
+    static const std::set<hipDataType> supported_compute_input_types = {
+        HIP_R_32F,
+        HIP_R_16BF,
+        HIP_R_16F,
+        HIP_R_8F_E4M3,
+        HIP_R_8F_E5M2,
+        HIP_R_8F_E4M3_FNUZ,
+        HIP_R_8F_E5M2_FNUZ,
+        static_cast<hipDataType>(HIP_R_6F_E2M3),
+        static_cast<hipDataType>(HIP_R_6F_E3M2),
+        static_cast<hipDataType>(HIP_R_4F_E2M1),
+    };
+
+    hipDataType real_compute_input_typeA = arg.compute_input_typeA;
+    hipDataType real_compute_input_typeB = arg.compute_input_typeB;
+
+    if(real_compute_input_typeA != HIPBLASLT_DATATYPE_INVALID
+       && !supported_compute_input_types.count(real_compute_input_typeA))
+        throw std::invalid_argument(
+            "Invalid compute_input_typeA "
+            + std::string(hip_datatype_to_string(real_compute_input_typeA)));
+
+    if(real_compute_input_typeB != HIPBLASLT_DATATYPE_INVALID
+       && !supported_compute_input_types.count(real_compute_input_typeB))
+        throw std::invalid_argument(
+            "Invalid compute_input_typeB "
+            + std::string(hip_datatype_to_string(real_compute_input_typeB)));
+
+    if(real_compute_input_typeA == HIPBLASLT_DATATYPE_INVALID)
+    {
+        real_compute_input_typeA = computeTypeToRealDataType(arg.compute_type);
+    }
+
+    if(real_compute_input_typeB == HIPBLASLT_DATATYPE_INVALID)
+    {
+        real_compute_input_typeB = computeTypeToRealDataType(arg.compute_type);
+    }
+
+    return {real_compute_input_typeA, real_compute_input_typeB};
 }

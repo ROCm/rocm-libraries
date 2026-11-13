@@ -28,7 +28,9 @@ import unittest
 from pathlib import Path
 
 from rocke.core.backend import BackendError, _lower_via_cpp_engine
-from rocke.core.ir import F32, I32, IRBuilder, KernelDef, PtrType
+import pytest
+
+from rocke.core.ir import F32, I32, I64, U8, IRBuilder, KernelDef, PtrType, VectorType
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 
@@ -241,7 +243,7 @@ class TestFormats(unittest.TestCase):
         for args, pattern in (
             (("fp8e4m3", "fp4e2m1"), "same format"),
             (("fp8", "fp8"), "unknown a_format"),
-            (("fp6e2m3", "fp6e2m3", 6), "256 bits per lane"),
+            (("fp6e2m3", "fp6e2m3", 6), "256 bits"),
         ):
             with self.subTest(args=args), self.assertRaisesRegex(ValueError, pattern):
                 _lower(_raw_kernel(*args), "llvm23")
@@ -315,7 +317,7 @@ class TestUnscaledOp(unittest.TestCase):
         for args, pattern in (
             (("fp8e4m3", "fp4e2m1"), "same format"),
             (("fp8", "fp8"), "unknown a_format"),
-            (("fp6e2m3", "fp6e2m3", 6), "256 bits per lane"),
+            (("fp6e2m3", "fp6e2m3", 6), "256 bits"),
         ):
             with self.subTest(args=args), self.assertRaisesRegex(ValueError, pattern):
                 _lower(_raw_kernel(*args, op="unscaled"), "llvm23")
@@ -376,7 +378,7 @@ class TestEngineIdentity(unittest.TestCase):
         for args, text in (
             (("fp8e4m3", "fp4e2m1"), "same format"),
             (("fp8", "fp8"), "unknown a_format"),
-            (("fp6e2m3", "fp6e2m3", 6), "256 bits per lane"),
+            (("fp6e2m3", "fp6e2m3", 6), "256 bits"),
         ):
             for op in ("mx", "unscaled"):
                 with (
@@ -613,3 +615,64 @@ class TestGfx950Numerics(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@pytest.mark.parametrize("scaled", [False, True])
+@pytest.mark.parametrize("role", ["A", "B"])
+@pytest.mark.parametrize("count", [8.0, True, "8", None, 0, -8])
+def test_format_wrapper_rejects_malformed_vector_counts(scaled, role, count):
+    b = IRBuilder("malformed_carrier")
+    a = b.param("a", VectorType(I32, count if role == "A" else 8))
+    bb = b.param("b", VectorType(I32, count if role == "B" else 8))
+    acc = b.param("c", VectorType(F32, 4))
+    scales = [b.param("sa", I32), b.param("sb", I32)] if scaled else []
+    method = (
+        b.mfma_scale_f32_16x16x128_f8f6f4 if scaled else b.mfma_f32_16x16x128_fp4fp6fp8
+    )
+    before = len(b.kernel.body.ops)
+    with pytest.raises(ValueError, match=f"the {role} operand.*256 bits per lane"):
+        method(a, bb, acc, *scales)
+    assert len(b.kernel.body.ops) == before
+
+
+@pytest.mark.parametrize("scaled", [False, True])
+@pytest.mark.parametrize(
+    "carrier", [VectorType(I32, 8), VectorType(I64, 4), VectorType(U8, 32)]
+)
+@pytest.mark.parametrize("fmt", _FORMATS)
+def test_format_wrapper_preserves_carriers_and_attributes(scaled, carrier, fmt):
+    b = IRBuilder("format_carrier")
+    a, bb = b.param("a", carrier), b.param("b", carrier)
+    acc = b.param("c", VectorType(F32, 4))
+    scales = [b.param("sa", I32), b.param("sb", I32)] if scaled else []
+    method = (
+        b.mfma_scale_f32_16x16x128_f8f6f4 if scaled else b.mfma_f32_16x16x128_fp4fp6fp8
+    )
+    result = method(a, bb, acc, *scales, a_format=fmt, b_format=fmt)
+    op = b.kernel.body.ops[-1]
+    assert op.operands[:2] == [a, bb]
+    assert result.type == VectorType(F32, 4)
+    if fmt != "fp8e4m3":
+        assert op.attrs["a_format"] == op.attrs["b_format"] == fmt
+    b.ret()
+    (call,) = _call_lines(_lower(b.kernel, "llvm23"))
+    assert f"i32 {_FORMATS[fmt]}, i32 {_FORMATS[fmt]}, i32 0," in call
+
+
+@pytest.mark.parametrize(
+    "attribute_id", ["mfma_f32_16x16x128_fp8", "mfma_f32_16x16x128_fp4fp6fp8"]
+)
+def test_generic_mma_attrs_cannot_replace_selected_instruction(attribute_id):
+    b = IRBuilder("reserved_instruction")
+    a = b.param("a", VectorType(I32, 8))
+    acc = b.param("c", VectorType(F32, 4))
+    before = len(b.kernel.body.ops)
+    with pytest.raises(ValueError, match="reserved op_id"):
+        b.mma(
+            "mfma_f32_16x16x128_fp4fp6fp8",
+            a,
+            a,
+            acc,
+            attrs={"op_id": attribute_id, "a_format": "fp4e2m1", "b_format": "fp4e2m1"},
+        )
+    assert len(b.kernel.body.ops) == before

@@ -146,14 +146,17 @@ static void op_memref_global_load_typed(rocke_lower_t* L, const rocke_op_t* op)
     const rocke_value_t* idx = op->operands[1];
     const char* ptr_ty = ll_global_load_ptr_type(L, "global_load", ptr);
     const char* elem_ty = rocke_ll_llvm_type(L, op->results[0]->type);
+    /* The GEP index takes the operand's own width, as in global_load_vN. */
+    const char* idx_ty = rocke_ll_llvm_type(L, idx->type);
     const char* gep = rocke_ll_fresh(L, "gep");
     int64_t align = ll_attr_int(op, "align", 1);
     rocke_ll_emitf(L,
-                   "  %s = getelementptr inbounds %s, %s %s, i32 %s",
+                   "  %s = getelementptr inbounds %s, %s %s, %s %s",
                    gep,
                    elem_ty,
                    ptr_ty,
                    rocke_ll_operand(L, ptr),
+                   idx_ty,
                    rocke_ll_operand(L, idx));
     rocke_ll_emitf(
         L, "  %s = load %s, %s %s, align %lld", ll_res(op), elem_ty, ptr_ty, gep, (long long)align);
@@ -381,68 +384,68 @@ static void op_memref_global_atomic_add_f32(rocke_lower_t* L, const rocke_op_t* 
                    rocke_ll_operand(L, val));
 }
 
-static void op_memref_global_atomic_add_pk_bf16(rocke_lower_t* L, const rocke_op_t* op)
+/* Mirror of Python _lower_pk_atomic_add: lower a packed (bf16 or fp16)
+ * atomic add via a generic atomicrmw fadd <2 x elem_llvm_type>. Neither
+ * llvm.amdgcn.global.atomic.fadd.v2bf16 (doesn't exist in shipping ROCm
+ * LLVM) nor the legacy v2f16 intrinsic (auto-upgraded to an agent-scope
+ * seq_cst atomicrmw that fences every atomic with an L2 writeback and
+ * invalidate) is used; the AMDGPU backend instead selects the native
+ * global_atomic_pk_add_* HW instruction from a generic atomicrmw under the
+ * fine/remote-memory model metadata, honouring the op's ordering attribute.
+ * GEP uses the idx operand's own width (idx may be i64 after the wide
+ * C-scatter address fix).
+ *
+ * scope is NULL for no syncscope clause (LLVM's default, system scope) or
+ * "agent" to pin the GPU-agent scope the HIP engine's
+ * __builtin_amdgcn_global_atomic_fadd_v2* builtins already compile to, so
+ * both engines agree on ISA. The split-K reduction buffer is device-local
+ * HBM, so agent -- not system -- is the right scope for a single-GPU
+ * kernel; it is pinned explicitly so a future default change can't widen
+ * it again. */
+static void lower_pk_atomic_add(rocke_lower_t* L,
+                                const rocke_op_t* op,
+                                const char* elem_llvm_type,
+                                const char* scope,
+                                const char* op_name)
 {
-    /* Mirror of Python _op_memref_global_atomic_add_pk_bf16: there is NO
-     * llvm.amdgcn.global.atomic.fadd.v2bf16 intrinsic in the shipping ROCm
-     * LLVM, so lower to a generic atomicrmw fadd <2 x bfloat> with the AMDGPU
-     * memory-model metadata (backend selects global_atomic_pk_add_bf16). GEP
-     * uses the idx operand's own width (i64 after the wide C-scatter fix). */
     const rocke_value_t* ptr = op->operands[0];
     const rocke_value_t* idx = op->operands[1];
     const rocke_value_t* val = op->operands[2];
     const char* idx_ty = rocke_ll_llvm_type(L, idx->type);
     const char* gep = rocke_ll_fresh(L, "gep");
     const char* ordering = ll_attr_str(op, "ordering", "monotonic");
-    rocke_ll_require_global_header_ptr(L, "global_atomic_add_pk_bf16", ptr, "ptr");
+    rocke_ll_require_global_header_ptr(L, op_name, ptr, "ptr");
     rocke_ll_emitf(L,
-                   "  %s = getelementptr inbounds bfloat, ptr addrspace(1) %s, %s %s",
+                   "  %s = getelementptr inbounds %s, ptr addrspace(1) %s, %s %s",
                    gep,
+                   elem_llvm_type,
                    rocke_ll_operand(L, ptr),
                    idx_ty,
                    rocke_ll_operand(L, idx));
     L->needs_fp_atomic_md = true;
+    const char* sync
+        = (scope != NULL && strcmp(scope, "agent") == 0) ? " syncscope(\"agent\")" : "";
     rocke_ll_emitf(L,
-                   "  %s = atomicrmw fadd ptr addrspace(1) %s, <2 x bfloat> %s %s"
+                   "  %s = atomicrmw fadd ptr addrspace(1) %s, <2 x %s> %s%s %s"
                    ", !amdgpu.no.fine.grained.memory !1"
                    ", !amdgpu.no.remote.memory !1"
                    ", !amdgpu.ignore.denormal.mode !1",
                    ll_res(op),
                    gep,
+                   elem_llvm_type,
                    rocke_ll_operand(L, val),
+                   sync,
                    ordering);
+}
+
+static void op_memref_global_atomic_add_pk_bf16(rocke_lower_t* L, const rocke_op_t* op)
+{
+    lower_pk_atomic_add(L, op, "bfloat", NULL, "global_atomic_add_pk_bf16");
 }
 
 static void op_memref_global_atomic_add_pk_f16(rocke_lower_t* L, const rocke_op_t* op)
 {
-    /* Mirror of Python _op_memref_global_atomic_add_pk_f16: a generic
-     * atomicrmw fadd <2 x half> (agent scope, monotonic) with the AMDGPU
-     * memory-model metadata, as the packed bf16 add does. The backend selects
-     * the native global_atomic_pk_add_f16. The legacy
-     * llvm.amdgcn.global.atomic.fadd.v2f16 intrinsic it replaces is lowered on
-     * gfx1250 as a fenced atomic (global_wb / global_inv and counter drains
-     * around every add). */
-    const rocke_value_t* ptr = op->operands[0];
-    const rocke_value_t* idx = op->operands[1];
-    const rocke_value_t* val = op->operands[2];
-    const char* gep;
-    rocke_ll_require_global_header_ptr(L, "global_atomic_add_pk_f16", ptr, "ptr");
-    gep = rocke_ll_fresh(L, "gep");
-    rocke_ll_emitf(L,
-                   "  %s = getelementptr inbounds half, ptr addrspace(1) %s, i32 %s",
-                   gep,
-                   rocke_ll_operand(L, ptr),
-                   rocke_ll_operand(L, idx));
-    L->needs_fp_atomic_md = true;
-    rocke_ll_emitf(L,
-                   "  %s = atomicrmw fadd ptr addrspace(1) %s, <2 x half> %s "
-                   "syncscope(\"agent\") monotonic"
-                   ", !amdgpu.no.fine.grained.memory !1"
-                   ", !amdgpu.no.remote.memory !1"
-                   ", !amdgpu.ignore.denormal.mode !1",
-                   ll_res(op),
-                   gep,
-                   rocke_ll_operand(L, val));
+    lower_pk_atomic_add(L, op, "half", "agent", "global_atomic_add_pk_f16");
 }
 
 /* Python STREAMING_ARCHS (rocke/core/ir.py): the targets whose STREAMING
@@ -733,17 +736,18 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
     const char* base = rocke_ll_fresh(L, "smem.base");
     const char* idx_strs = ll_smem_gidx(L, op, 1, op->num_operands);
     const char* elem_ty = rocke_ll_llvm_type(L, op->results[0]->type->elem);
-    /* Python _op_tile_smem_load_vN uses a LOCAL dict that, unlike the other
-     * handlers, does NOT list fp8e4m3 / bf8e5m2 -- so they fall to the default
-     * 2 (not 1). Replicate that exact dict here rather than the shared
-     * ll_elem_bytes (which maps fp8/bf8 -> 1), or the fp8 down-GEMM LDS reads
-     * emit `align 16` instead of the Python `align 32`.
-     *   {"i8":1,"u8":1,"f16":2,"bf16":2,"i32":4,"f32":4,"i64":8,"f64":8}.get(name, 2) */
+    /* Python _op_tile_smem_load_vN reads lower_llvm._SMEM_ELEM_BYTES, which
+     * lists the 8-bit floats at 1 byte. (Its earlier local map omitted
+     * fp8e4m3 / bf8e5m2, so they fell to the default of 2 and a 16-element fp8
+     * read claimed `align 32` for a 16-byte access.) This mirrors that map:
+     *   {"i8":1,"u8":1,"fp8e4m3":1,"bf8e5m2":1,"f16":2,"bf16":2,"i32":4,
+     *    "tf32":4,"f32":4,"i64":8,"f64":8}.get(name, 2) */
     const char* en = op->results[0]->type->elem->name;
     int elem_bytes = 2;
     if(en)
     {
-        if(strcmp(en, "i8") == 0 || strcmp(en, "u8") == 0)
+        if(strcmp(en, "i8") == 0 || strcmp(en, "u8") == 0 || strcmp(en, "fp8e4m3") == 0
+           || strcmp(en, "bf8e5m2") == 0)
         {
             elem_bytes = 1;
         }
@@ -760,8 +764,14 @@ static void op_tile_smem_load_vN(rocke_lower_t* L, const rocke_op_t* op)
             elem_bytes = 8;
         }
     }
-    /* New 96-bit widths guarantee only element alignment, including FP8. */
-    int64_t align = (vec == 3 || vec == 6 || vec == 12) ? 12 / vec : vec * elem_bytes;
+    /* New 96-bit widths guarantee only element alignment, including FP8.
+     * Otherwise bound the claim by what every row start actually guarantees:
+     * an LDS tile advances by its innermost dimension per row, so a pad that
+     * makes it a non-multiple of vec leaves alternate rows off the natural
+     * boundary. Mirrors lower_llvm._smem_vec_align. */
+    int64_t align = (vec == 3 || vec == 6 || vec == 12)
+                        ? 12 / vec
+                        : (int64_t)rocke_i_smem_vec_align_elems(stype, vec) * elem_bytes;
     /* gfx1250: vec==8 loads are marked volatile to block the WMMA-aware backend
      * pass from substituting ds_load_tr16_b128 (transposed) for the plain
      * sequential ds_read_b128. Mirrors Python _op_tile_smem_load_vN lines
@@ -941,6 +951,26 @@ static void op_tile_smem_addr_of(rocke_lower_t* L, const rocke_op_t* op)
     const char* base_ptr = rocke_ll_emit_smem_base_ptr(L, gname, stype);
     rocke_ll_lds_prov_set(L, op->results[0], gname);
     rocke_ll_emitf(L, "  %s = ptrtoint ptr addrspace(3) %s to i64", ll_res(op), base_ptr);
+}
+
+/* Mirrors lower_llvm._op_tile_global_addr_of: a GEP materialised as an i64.
+ * Not `inbounds`: a clipped TDM fill can point past the allocation (early
+ * refill's second prologue fill with K < tile_k), and an inbounds GEP past the
+ * object is poison that the mover's clipping cannot undo. */
+static void op_tile_global_addr_of(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* ptr = op->operands[0];
+    const rocke_value_t* index = op->operands[1];
+    const char* elem_ty = rocke_ll_llvm_type(L, ptr->type->pointee);
+    const char* gep = rocke_ll_fresh(L, "gaddr_gep");
+    rocke_ll_emitf(L,
+                   "  %s = getelementptr %s, ptr addrspace(1) %s, %s %s",
+                   gep,
+                   elem_ty,
+                   rocke_ll_operand(L, ptr),
+                   rocke_ll_llvm_type(L, index->type),
+                   rocke_ll_operand(L, index));
+    rocke_ll_emitf(L, "  %s = ptrtoint ptr addrspace(1) %s to i64", ll_res(op), gep);
 }
 
 static void op_tile_smem_ptr_add(rocke_lower_t* L, const rocke_op_t* op)
@@ -1522,6 +1552,36 @@ static void op_tile_buffer_store_f32(rocke_lower_t* L, const rocke_op_t* op)
                    rocke_ll_operand(L, soffset));
 }
 
+/* Python _op_tile_buffer_atomic_fadd_f32: the pre-add result is unused. The
+ * cachepolicy attr must be an integer in 0..31; a missing, non-integer or
+ * out-of-range value (hand-built or imported IR) is rejected, not coerced. */
+static void op_tile_buffer_atomic_fadd_f32(rocke_lower_t* L, const rocke_op_t* op)
+{
+    const rocke_value_t* rsrc = op->operands[0];
+    const rocke_value_t* voffset = op->operands[1];
+    const rocke_value_t* soffset = op->operands[2];
+    const rocke_value_t* val = op->operands[3];
+    const rocke_attr_value_t* cpv = rocke_attr_get(&op->attrs, "cachepolicy");
+    if(!cpv || cpv->kind != ROCKE_ATTR_INT || cpv->u.i < 0 || cpv->u.i > 0x1F)
+        rocke_ll_fail(L,
+                      ROCKE_ERR_VALUE,
+                      "%s: cachepolicy attr must be an integer in 0..31",
+                      rocke_opcode_name(op->opcode));
+    const int64_t cp = cpv->u.i;
+    const char* r;
+    rocke_ll_need(L, "raw.ptr.buffer.atomic.fadd.f32");
+    r = rocke_ll_fresh(L, "bafadd");
+    rocke_ll_emitf(L,
+                   "  %s = call float @llvm.amdgcn.raw.ptr.buffer.atomic.fadd.f32("
+                   "float %s, ptr addrspace(8) %s, i32 %s, i32 %s, i32 %lld)",
+                   r,
+                   rocke_ll_operand(L, val),
+                   rocke_ll_operand(L, rsrc),
+                   rocke_ll_operand(L, voffset),
+                   rocke_ll_operand(L, soffset),
+                   (long long)cp);
+}
+
 static void op_tile_buffer_store_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* rsrc = op->operands[0];
@@ -1534,8 +1594,9 @@ static void op_tile_buffer_store_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
         const char* scalar;
         const char* bc;
         rocke_ll_need(L, "raw.ptr.buffer.store.i32");
-        scalar = rocke_ll_fresh(L, "bsf32sc");
+        /* bc before scalar: the Python lowerer's fresh-name order. */
         bc = rocke_ll_fresh(L, "bsf32bc");
+        scalar = rocke_ll_fresh(L, "bsf32sc");
         rocke_ll_emitf(
             L, "  %s = extractelement <1 x float> %s, i32 0", scalar, rocke_ll_operand(L, val));
         rocke_ll_emitf(L, "  %s = bitcast float %s to i32", bc, scalar);
@@ -2114,6 +2175,7 @@ void rocke_ll_register_mem(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_SMEM_LOAD_VN_F32, op_tile_smem_load_vN_f32);
     rocke_ll_set_handler(ROCKE_OP_TILE_LDS_ATOMIC_ADD, op_tile_lds_atomic_add);
     rocke_ll_set_handler(ROCKE_OP_TILE_SMEM_ADDR_OF, op_tile_smem_addr_of);
+    rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_ADDR_OF, op_tile_global_addr_of);
     rocke_ll_set_handler(ROCKE_OP_TILE_SMEM_PTR_ADD, op_tile_smem_ptr_add);
     rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_PTR_ADD, op_tile_global_ptr_add);
     rocke_ll_set_handler(ROCKE_OP_TILE_GLOBAL_PTR_TO_I64, op_tile_global_ptr_to_i64);
@@ -2134,6 +2196,7 @@ void rocke_ll_register_mem(void)
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_STORE_F32, op_tile_buffer_store_f32);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_STORE_VN_F32, op_tile_buffer_store_vN_f32);
     rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_STORE_VN, op_tile_buffer_store_vN);
+    rocke_ll_set_handler(ROCKE_OP_TILE_BUFFER_ATOMIC_FADD_F32, op_tile_buffer_atomic_fadd_f32);
 
     rocke_ll_set_handler(ROCKE_OP_TILE_ASYNC_BUFFER_LOAD_LDS, op_tile_async_buffer_load_lds);
     rocke_ll_set_handler(ROCKE_OP_TILE_ASYNC_BUFFER_LOAD_LDS_ADDR,

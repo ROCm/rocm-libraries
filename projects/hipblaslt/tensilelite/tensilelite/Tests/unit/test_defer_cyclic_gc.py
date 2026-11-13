@@ -4,7 +4,7 @@
 import unittest
 from unittest.mock import patch
 
-import tensilelite.TensileCreateLibrary.Run as run_module
+import tensilelite.create_library.run as run_module
 
 
 class RecordingGC:

@@ -457,6 +457,36 @@ def _check_support_predicate(module, builder, spec_obj, arch):
         )
 
 
+def _refuse_unchecked_launch_contract(kernel, builder, arch):
+    """Refuse a kernel whose launch contract a packed code object would drop.
+
+    The ingestor launches a packed code object with its own geometry and
+    reads no GPU-check word, so a kernel whose contract the bytes alone would
+    drop (`ParameterContract.code_object_refusal`: parameter facts, an exact
+    workgroup size, a `gpu_checked_value`) is refused, as rocke's
+    `write_artifact` refuses it, with the same reason. A `KernelModule` is
+    refused when any of its kernels is. Anything else the builder returned is
+    left to the compile step, which reports what it cannot lower.
+    """
+    from rocke.core.ir import LAUNCH_THROUGH_FROM_ARTIFACT, KernelDef
+    from rocke.helpers import KernelModule
+    from rocke.runtime import parameter_contract
+
+    if isinstance(kernel, KernelModule):
+        kernels = kernel.kernels
+    elif isinstance(kernel, KernelDef):
+        kernels = [kernel]
+    else:
+        return
+    for each in kernels:
+        refusal = parameter_contract(each).code_object_refusal()
+        if refusal is not None:
+            raise HkpPackError(
+                f"builder '{builder}' @ {arch} returned kernel '{each.name}': "
+                f"{refusal} -- {LAUNCH_THROUGH_FROM_ARTIFACT} instead of packing it"
+            )
+
+
 def compile_rocke_variant(
     source,
     builder,
@@ -482,6 +512,9 @@ def compile_rocke_variant(
     rocke's comgr `compile_kernel`. Writes the HSACO to <rocke_variant_key>.co and
     returns that path plus the captured launch symbol (`artifact.kernel_name`).
     Every deviation is a hard HkpPackError.
+    A kernel that states parameter facts or an exact workgroup size, or checks a
+    gpu_checked_value, is refused before it is compiled: the packed object
+    would launch without their checks.
 
     A builder may instead return a `rocke.helpers.KernelModule` (a primary kernel
     plus role-keyed companions), lowered via `compile_module` into one code
@@ -541,6 +574,8 @@ def compile_rocke_variant(
         raise HkpPackError(
             f"builder call failed ({type(exc).__name__}): {exc}"
         ) from exc
+
+    _refuse_unchecked_launch_contract(kernel, builder, compile_arch)
 
     compile_kernel, ComgrError = _load_compiler()
     KernelModule, compile_module = _load_module_compiler()

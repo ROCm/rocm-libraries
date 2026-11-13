@@ -69,6 +69,8 @@ engine:
   name: hipkernel:Gfx950AttentionDense
   census_name_symbol: GFX950_ATTENTION_DENSE_ENGINE_NAME
   sdk_version: 1.0.0
+  behavior_notes:
+  - supports_graph_capture
   knobs:
   - block_m
   - block_n

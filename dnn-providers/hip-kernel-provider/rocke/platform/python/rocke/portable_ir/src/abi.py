@@ -52,8 +52,11 @@
 #                uninterpreted, so their meaning belongs to the lowerer, not to
 #                the recipe format. A lowerer that silently ignores an attribute
 #                it does not understand is a real hazard and this version number
-#                cannot catch it. Kernel-attr value TAGS are the exception: the
-#                VM itself drops tags it does not know (KERNEL_ATTR_TAGS).
+#                cannot catch it by itself. Kernel-attr value TAGS are one
+#                exception: the VM itself drops tags it does not know
+#                (KERNEL_ATTR_TAGS). The others are registered by NAME once
+#                the engines learned them: kernel attrs (KERNEL_ATTR_NAMES) and
+#                the integer facts on a param (PARAM_FACTS_LEVEL).
 #
 # So the genuinely dangerous change -- one an old engine ACCEPTS and gets wrong
 # -- is the one a human has to notice and bump for. `stamp` refuses to stamp a
@@ -62,20 +65,23 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any, Dict, List, Optional
+
+from rocke.core.param_facts import FACT_WORDS
 
 #: Wire ABI level of this generator. MUST equal ROCKE_RECIPE_ABI in
 #: cpp/include/rocke/abi.h; a test pins the two together against the built
 #: engine, because a Python generator that believed it was newer than the C
 #: engine would stamp artifacts that engine then refuses.
-RECIPE_ABI = 3
+RECIPE_ABI = 4
 
 #: Binary ABI the ctypes bindings in online.py are written against. MUST equal
 #: ROCKE_ABI_VERSION in cpp/include/rocke/abi.h. Unlike the wire level, this one
 #: is checked at library load: ctypes argtypes are a hand-written mirror of the C
 #: signatures, and calling a mismatched library with them is memory-unsafe rather
 #: than merely wrong.
-BINARY_ABI = 9
+BINARY_ABI = 17
 
 
 class AbiError(RuntimeError):
@@ -132,12 +138,30 @@ KERNEL_ATTR_TAGS: Dict[str, int] = {
     "l": 2,
 }
 
+# Kernel attrs above level 1, by name. A reader passes kernel attrs to its
+# lowerer uninterpreted, and a lowerer older than the attr ignores it without an
+# error, so the kernel it builds is not the one recorded.
+KERNEL_ATTR_NAMES: dict[str, int] = {
+    # Level 4. An older lowerer ignores the exact block size and sizes the kernel
+    # for max_workgroup_size (or its default) instead.
+    "workgroup_size": 4,
+}
+
+# The level at which a param instruction may state integer facts (the attr
+# words in rocke.core.param_facts.FACT_WORDS). A reader older than them drops a param
+# attr it does not know without an error, so it would replay the kernel and
+# plan a launch that checks none of the facts.
+PARAM_FACTS_LEVEL = 4
+
 # Nested instruction lists, by the key that holds them.
 _BODY_KEYS = ("body", "then", "else")
 
 
-def _walk_instrs(program: Any):
-    """Every instruction in a program, including nested compile-time bodies."""
+def walk_instrs(program: Any) -> Iterator[dict[str, Any]]:
+    """Every instruction in a recipe program, in order, including those in
+    nested bodies (``static_for`` / ``scf_for`` bodies and both arms of an
+    if). Anything that is not an instruction object is skipped, so a foreign
+    or malformed program can be inspected without raising."""
     if not isinstance(program, list):
         return
     for instr in program:
@@ -145,7 +169,7 @@ def _walk_instrs(program: Any):
             continue
         yield instr
         for key in _BODY_KEYS:
-            yield from _walk_instrs(instr.get(key))
+            yield from walk_instrs(instr.get(key))
 
 
 def _walk_dicts(node: Any):
@@ -169,7 +193,7 @@ def recipe_min_reader(recipe: Dict[str, Any], *, strict: bool = True) -> int:
     should not be stamping compatibility claims about it. Pass False to inspect
     a foreign or future recipe without tripping over its unknowns."""
     level = 1
-    for instr in _walk_instrs(recipe.get("program")):
+    for instr in walk_instrs(recipe.get("program")):
         op = instr.get("op")
         if op in INSTR_OPS:
             level = max(level, INSTR_OPS[op])
@@ -180,6 +204,10 @@ def recipe_min_reader(recipe: Dict[str, Any], *, strict: bool = True) -> int:
                 f"it. Register it (and bump RECIPE_ABI if an older engine would "
                 f"MISREAD rather than reject it)."
             )
+        attrs = instr.get("attrs")
+        if op == "param" and isinstance(attrs, dict):
+            if any(word in attrs for word in FACT_WORDS):
+                level = max(level, PARAM_FACTS_LEVEL)
     # Every subtree that can hold an intexpr, not just the program. `guard`
     # rules and `launch` geometry are expressions over the same spec axes and
     # are evaluated by the same evaluator, so a construct appearing in one of
@@ -189,7 +217,8 @@ def recipe_min_reader(recipe: Dict[str, Any], *, strict: bool = True) -> int:
             for key in node:
                 if key in INTEXPR_NODES:
                     level = max(level, INTEXPR_NODES[key])
-    for tv in (recipe.get("attrs") or {}).values():
+    for name, tv in (recipe.get("attrs") or {}).items():
+        level = max(level, KERNEL_ATTR_NAMES.get(name, 1))
         if isinstance(tv, dict):
             level = max(level, KERNEL_ATTR_TAGS.get(tv.get("t"), 1))
     return level

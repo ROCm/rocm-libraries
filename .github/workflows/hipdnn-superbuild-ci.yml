@@ -81,25 +81,16 @@ jobs:
       GPU_TARGET: gfx1151
     steps:
       - name: Runner health status
-        shell: pwsh
         run: |
-          Write-Host "=== OS ==="
-          (Get-CimInstance Win32_OperatingSystem).Caption
-          Write-Host "=== CPU ==="
-          $cpu = Get-CimInstance Win32_Processor
-          Write-Host "$($cpu.Name)  ($($cpu.NumberOfLogicalProcessors) logical cores)"
-          Write-Host "=== Memory ==="
-          $os = Get-CimInstance Win32_OperatingSystem
-          $totalGB = [math]::Round($os.TotalVisibleMemorySize / 1MB, 1)
-          $freeGB  = [math]::Round($os.FreePhysicalMemory / 1MB, 1)
-          Write-Host "Total: ${totalGB} GB  Free: ${freeGB} GB"
-          Write-Host "=== Disk ==="
-          Get-PSDrive -PSProvider FileSystem |
-            Select-Object Name,
-              @{N='Used(GB)';E={[math]::Round($_.Used/1GB,1)}},
-              @{N='Free(GB)';E={[math]::Round($_.Free/1GB,1)}},
-              Root |
-            Format-Table -AutoSize | Out-String | Write-Host
+          echo "=== OS ==="
+          cmd //c ver
+          echo "=== CPU ==="
+          grep -m1 'model name' /proc/cpuinfo
+          echo "$(nproc) logical cores"
+          echo "=== Memory ==="
+          grep -E '^(MemTotal|MemFree):' /proc/meminfo
+          echo "=== Disk ==="
+          df -h
 
       - name: Configure git longpaths
         run: git config --global core.longpaths true
@@ -145,70 +136,56 @@ jobs:
           choco install --no-progress -y ninja --version 1.12.1
 
       - name: Install ROCm wheels
-        shell: pwsh
         run: |
-          Write-Host "Creating Python virtual environment at $env:VENV_PATH"
-          python -m venv $env:VENV_PATH
-          & "$env:VENV_PATH\Scripts\Activate.ps1"
+          echo "Creating Python virtual environment at $VENV_PATH"
+          python -m venv "$VENV_PATH"
 
-          Write-Host "Installing ROCm wheels from multi-arch nightlies (device: $env:GPU_TARGET)"
-          pip install --index-url "https://nightly.repo.amd.com/rocm/whl-next/" "rocm[libraries,devel,device-$env:GPU_TARGET]"
-          if ($LASTEXITCODE -ne 0) { throw "Failed to install ROCm wheels" }
+          echo "Installing ROCm wheels from multi-arch nightlies (device: $GPU_TARGET)"
+          "$VENV_PYTHON" -m pip install --index-url "https://nightly.repo.amd.com/rocm/whl-next/" "rocm[libraries,devel,device-$GPU_TARGET]"
 
-          Write-Host "Initializing ROCm SDK"
-          rocm-sdk init
-          if ($LASTEXITCODE -ne 0) { throw "Failed to initialize ROCm SDK" }
+          echo "Initializing ROCm SDK"
+          "$VENV_PATH/Scripts/rocm-sdk.exe" init
 
-          $RocmSdkPath = "$env:VENV_PATH\Lib\site-packages\_rocm_sdk_devel" -replace '\\', '/'
-          Write-Host "ROCM_SDK_PATH=$RocmSdkPath"
-          echo "ROCM_SDK_PATH=$RocmSdkPath" >> $env:GITHUB_ENV
+          ROCM_SDK_PATH="$(cygpath -m "$VENV_PATH/Lib/site-packages/_rocm_sdk_devel")"
+          echo "ROCM_SDK_PATH=$ROCM_SDK_PATH"
+          echo "ROCM_SDK_PATH=$ROCM_SDK_PATH" >> "$GITHUB_ENV"
 
       - name: Check ROCm wheel freshness
-        shell: pwsh
         run: |
-          & $env:VENV_PYTHON .github/scripts/check_wheel_freshness.py --max-age-days 14
-          if ($LASTEXITCODE -ne 0) { throw "ROCm nightly wheels are stale" }
+          "$VENV_PYTHON" .github/scripts/check_wheel_freshness.py --max-age-days 14
 
       - name: Download third-party dependency sources
-        shell: pwsh
         run: |
-          & $env:VENV_PYTHON projects/hipdnn/python/download_third_party_deps.py `
-            --deps-dir $env:THIRD_PARTY_DEPS_DIR
-          if ($LASTEXITCODE -ne 0) { throw "Failed to download third-party dependency sources" }
+          set -euo pipefail
+          "$VENV_PYTHON" projects/hipdnn/python/download_third_party_deps.py \
+            --deps-dir "$THIRD_PARTY_DEPS_DIR"
 
       - name: Install rocm_kpack
-        shell: pwsh
         run: |
-          $python = $env:VENV_PYTHON
+          set -euo pipefail
           # Sparse, blobless, depth-1 checkout of just shared/kpack: the pinned
           # commit lives in the rocm-systems monorepo, so cloning it whole (or
           # letting pip do it via a git+ URL) would pull far more than the packer.
-          $kpackSrc = Join-Path $env:RUNNER_TEMP "rocm-systems-kpack"
-          if (Test-Path $kpackSrc) { Remove-Item -Recurse -Force $kpackSrc }
-          New-Item -ItemType Directory -Path $kpackSrc | Out-Null
-          # pwsh does not stop on a native command's exit code, so check the
-          # setup calls as a group before the guarded fetch.
-          git -C $kpackSrc init -q .
-          git -C $kpackSrc remote add origin https://github.com/ROCm/rocm-systems.git
-          git -C $kpackSrc sparse-checkout init --cone
-          git -C $kpackSrc sparse-checkout set shared/kpack
-          if ($LASTEXITCODE -ne 0) { throw "Failed to prepare the rocm-systems sparse checkout" }
-          git -C $kpackSrc fetch --depth 1 --filter=blob:none origin "${{ steps.ci-env.outputs.kpack-ref }}"
-          if ($LASTEXITCODE -ne 0) { throw "Failed to fetch rocm-systems ${{ steps.ci-env.outputs.kpack-ref }}" }
-          git -C $kpackSrc checkout -q FETCH_HEAD
-          if ($LASTEXITCODE -ne 0) { throw "Failed to check out ${{ steps.ci-env.outputs.kpack-ref }}" }
+          KPACK_SRC="$(cygpath -m "$RUNNER_TEMP")/rocm-systems-kpack"
+          rm -rf "$KPACK_SRC"
+          mkdir -p "$KPACK_SRC"
+          git -C "$KPACK_SRC" init -q .
+          git -C "$KPACK_SRC" remote add origin https://github.com/ROCm/rocm-systems.git
+          git -C "$KPACK_SRC" sparse-checkout init --cone
+          git -C "$KPACK_SRC" sparse-checkout set shared/kpack
+          git -C "$KPACK_SRC" fetch --depth 1 --filter=blob:none origin "${{ steps.ci-env.outputs.kpack-ref }}"
+          git -C "$KPACK_SRC" checkout -q FETCH_HEAD
           # Confirms the fetch landed on the pinned commit.
-          $fetched = (& git -C $kpackSrc rev-parse HEAD).Trim()
-          if ($fetched -ne "${{ steps.ci-env.outputs.kpack-ref }}") { throw "rocm-systems is $fetched, expected ${{ steps.ci-env.outputs.kpack-ref }}" }
+          fetched=$(git -C "$KPACK_SRC" rev-parse HEAD)
+          test "$fetched" = "${{ steps.ci-env.outputs.kpack-ref }}" || { echo "rocm-systems is $fetched, expected ${{ steps.ci-env.outputs.kpack-ref }}" >&2; exit 1; }
           # Installing the directory rebuilds and reinstalls every time, so a
           # warm venv cannot keep an older build of this same 0.1.0 version.
-          & $python -m pip install (Join-Path $kpackSrc "shared\kpack")
-          if ($LASTEXITCODE -ne 0) { throw "Failed to install rocm_kpack" }
-          # From the installed module, which also proves it imports.
-          $sitePackages = (& $python -c "import pathlib, rocm_kpack; print(pathlib.Path(rocm_kpack.__file__).parent.parent.as_posix())")
-          if ($LASTEXITCODE -ne 0) { throw "rocm_kpack is not importable after install" }
-          if ([string]::IsNullOrWhiteSpace($sitePackages)) { throw "empty rocm_kpack python dir" }
-          echo "KPACK_PYTHON_DIR=$sitePackages" >> $env:GITHUB_ENV
+          "$VENV_PYTHON" -m pip install "$KPACK_SRC/shared/kpack"
+          # Derived from the installed module, which also proves it imports.
+          # Windows Python ends its output with CRLF; drop the CR.
+          KPACK_PYTHON_DIR=$("$VENV_PYTHON" -c "import pathlib, rocm_kpack; print(pathlib.Path(rocm_kpack.__file__).parent.parent.as_posix())" | tr -d '\r')
+          test -n "$KPACK_PYTHON_DIR" || { echo "empty rocm_kpack python dir" >&2; exit 1; }
+          echo "KPACK_PYTHON_DIR=$KPACK_PYTHON_DIR" >> "$GITHUB_ENV"
 
       # DVC pinned to an explicit release. The action drops in the self-contained
       # DVC installer, so no Python interpreter on this persistent self-hosted
@@ -252,6 +229,22 @@ jobs:
         run: |
           set -euo pipefail
           dvc pull --recursive dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors
+
+      # The gfx950 dgrad AOT instance lists are DVC-tracked too (same `ingestor`
+      # remote), and hipdnn_ingestor_generator_pytest reads them straight from
+      # the source tree -- without this pull, only the .dvc pointers are present
+      # and every test that loads them fails with FileNotFoundError.
+      - name: Fetch dgrad instance lists
+        run: |
+          set -euo pipefail
+          dvc pull --recursive projects/hipdnn/tools/IngestorGenerator/configs
+          # A pull can exit 0 having fetched nothing, or only one of the two dtype
+          # lists; check both so a partial pull is not mistaken for a full one.
+          bf16_count=$(find projects/hipdnn/tools/IngestorGenerator/configs -name '*_bf16.instances.json' | wc -l)
+          fp16_count=$(find projects/hipdnn/tools/IngestorGenerator/configs -name '*_fp16.instances.json' | wc -l)
+          test "$bf16_count" -gt 0 || { echo "dvc pull produced no bf16 dgrad instance lists" >&2; exit 1; }
+          test "$fp16_count" -gt 0 || { echo "dvc pull produced no fp16 dgrad instance lists" >&2; exit 1; }
+          echo "Fetched $bf16_count bf16 and $fp16_count fp16 dgrad instance list(s)"
 
       # Must precede configure: configuration fails if pytest is not importable
       # by the interpreter descriptor-packaging registers its tests under, and,
@@ -321,9 +314,8 @@ jobs:
           exit $rc
 
       - name: Patch ROCm SDK with superbuild outputs
-        shell: pwsh
         run: |
-          cmake --install build --prefix $env:ROCM_SDK_PATH
+          cmake --install build --prefix "$ROCM_SDK_PATH"
           # On Windows, rocm_sdk.initialize_process() preloads "hipdnn" by base
           # name before the extension module is imported (Windows extension
           # loading ignores PATH), resolving it via the sibling
@@ -331,30 +323,29 @@ jobs:
           # patched above. Without also patching _rocm_sdk_libraries, that
           # preload keeps loading the stale nightly-wheel hipdnn_backend.dll
           # and every superbuild fix here goes untested.
-          $librariesPath = $env:ROCM_SDK_PATH -replace '_rocm_sdk_devel$', '_rocm_sdk_libraries'
-          cmake --install build --prefix $librariesPath
+          cmake --install build --prefix "${ROCM_SDK_PATH%_rocm_sdk_devel}_rocm_sdk_libraries"
 
       - name: Pack frontend wheel
-        shell: pwsh
         run: |
-          & $env:VENV_PYTHON projects/hipdnn/python/frontend_wheel_package/pack_frontend_wheel.py `
-            --build-dir build `
-            --wheel-dir (Join-Path "build" "wheel_package")
+          "$VENV_PYTHON" projects/hipdnn/python/frontend_wheel_package/pack_frontend_wheel.py \
+            --build-dir build \
+            --wheel-dir build/wheel_package
 
       - name: Install frontend wheel
-        shell: pwsh
         run: |
-          $wheel = Get-ChildItem (Join-Path "build" "wheel_package\hipdnn_frontend-*.whl") | Select-Object -First 1
-          if (-not $wheel) { throw "No hipdnn_frontend wheel found" }
-          & $env:VENV_PYTHON -m pip install --force-reinstall $wheel.FullName
+          set -euo pipefail
+          wheel=$(ls build/wheel_package/hipdnn_frontend-*.whl)
+          "$VENV_PYTHON" -m pip install --force-reinstall "$wheel"
 
       - name: Run frontend wheel tests
-        shell: pwsh
         run: |
-          $env:ROCM_PATH = $env:ROCM_SDK_PATH
-          $env:HIP_PATH = $env:ROCM_SDK_PATH
-          $env:PATH = "$env:ROCM_SDK_PATH/bin;$env:ROCM_SDK_PATH/lib;$env:PATH"
-          & $env:VENV_PYTHON -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
+          # ROCM_PATH is what conftest.py resolves test_good_plugin from, and
+          # HIP_PATH is its Windows HIP SDK counterpart; PATH is how Windows
+          # finds the SDK DLLs, hipdnn_backend.dll among them.
+          ROCM_PATH="$ROCM_SDK_PATH" \
+            HIP_PATH="$ROCM_SDK_PATH" \
+            PATH="$(cygpath -u "$ROCM_SDK_PATH/bin"):$(cygpath -u "$ROCM_SDK_PATH/lib"):$PATH" \
+            "$VENV_PYTHON" -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
 
   hipdnn-linux-superbuild:
     name: HipDNN Linux Superbuild
@@ -530,6 +521,21 @@ jobs:
           count=$(find dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors -name '*.kdp.json' -path '*artifacts*' | wc -l)
           test "$count" -gt 0 || { echo "dvc pull produced no rocKE KDPs" >&2; exit 1; }
           echo "Fetched $count rocKE KDP(s)"
+
+      # Same reasoning as the Windows lane: the gfx950 dgrad AOT instance lists
+      # are DVC-tracked (same `ingestor` remote), and hipdnn_ingestor_generator_pytest
+      # reads them straight from the source tree.
+      - name: Fetch dgrad instance lists
+        run: |
+          set -euo pipefail
+          LOGNAME=github-runner dvc pull --recursive projects/hipdnn/tools/IngestorGenerator/configs
+          # A pull can exit 0 having fetched nothing, or only one of the two dtype
+          # lists; check both so a partial pull is not mistaken for a full one.
+          bf16_count=$(find projects/hipdnn/tools/IngestorGenerator/configs -name '*_bf16.instances.json' | wc -l)
+          fp16_count=$(find projects/hipdnn/tools/IngestorGenerator/configs -name '*_fp16.instances.json' | wc -l)
+          test "$bf16_count" -gt 0 || { echo "dvc pull produced no bf16 dgrad instance lists" >&2; exit 1; }
+          test "$fp16_count" -gt 0 || { echo "dvc pull produced no fp16 dgrad instance lists" >&2; exit 1; }
+          echo "Fetched $bf16_count bf16 and $fp16_count fp16 dgrad instance list(s)"
 
       # Must precede configure: configuration fails if pytest is not importable
       # by the interpreter descriptor-packaging registers its tests under, and,

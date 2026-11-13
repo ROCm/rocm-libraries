@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include "rocsparse_numeric_boost.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -42,10 +43,11 @@ namespace rocsparse
                                         rocsparse_csrildlt0_info* p_csrildlt0_info,
                                         void*                     temp_buffer);
 
-    rocsparse_status csrildlt0(rocsparse_handle         handle,
-                               rocsparse_csrildlt0_info csrildlt0_info,
-                               rocsparse_spmat_descr    A,
-                               void*                    diag,
-                               size_t                   buffer_size,
-                               void*                    buffer);
+    rocsparse_status csrildlt0(rocsparse_handle                handle,
+                               rocsparse_csrildlt0_info        csrildlt0_info,
+                               rocsparse_spmat_descr           A,
+                               const rocsparse::numeric_boost* boost,
+                               void*                           diag,
+                               size_t                          buffer_size,
+                               void*                           buffer);
 }

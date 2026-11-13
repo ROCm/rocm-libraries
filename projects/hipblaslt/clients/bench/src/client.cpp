@@ -72,7 +72,7 @@ int run_bench_test(Arguments&         arg,
     // disable unit_check in client benchmark, it is only used in gtest unit test
     arg.unit_check = 0;
 
-    hipblaslt_bench_options::apply_strict_verification(arg);
+    hipblaslt_bench_options::apply_to(arg);
 
     // enable timing check,otherwise no performance data collected
     arg.timing = 1;
@@ -440,11 +440,11 @@ try
 
         ("compute_input_typeA",
          value<std::string>(&compute_input_typeA), "Precision of computation input A. "
-         "Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, The default value indicates that the compute_input_typeA has no effect.")
+         "Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, f6_r, bf6_r, f4_r. The default value indicates that the compute_input_typeA has no effect.")
 
         ("compute_input_typeB",
          value<std::string>(&compute_input_typeB), "Precision of computation input B. "
-         "Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, The default value indicates that the compute_input_typeA has no effect.")
+         "Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, f6_r, bf6_r, f4_r. The default value indicates that the compute_input_typeB has no effect.")
 
         ("scale_type",
          value<std::string>(&scale_type), "Precision of scalar. "
@@ -769,10 +769,11 @@ try
 
         ("uniform_summation_order",
          value<std::string>(&hipblaslt_bench_options::uniform_summation_order_str())->default_value(""),
-         "Set the HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT extension attribute. "
+         "Set the handle-level uniform summation order request for every API method. "
          "Accepts off|0, on|1 (case-insensitive). When on, the matmul returns "
          "HIPBLAS_STATUS_INVALID_VALUE if no configuration honoring the guarantee exists. "
-         "When omitted the bench leaves the attribute unset so the library default (on) applies.")
+         "A YAML case's explicit 0 or 1 overrides the command-line value. "
+         "When neither specifies a value, the library default for the device applies.")
 
         ("help,h", "produces this help message")
 

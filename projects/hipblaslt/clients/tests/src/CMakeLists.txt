@@ -5,13 +5,16 @@ target_sources(hipblaslt-test
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_gtest_main.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt_test.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/client_handle_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/hip_buffer_transfer_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/device_vector_guard_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/caching_library_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/concurrent_handles_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/contraction_problem_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/hip_solution_adapter_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/secure_env_gtest.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/arch_revision_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/mx_scale_format_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/gfx950_mx_scale_layout_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/adaptive_sm_count_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/efficiency_monitor_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/matmul_gtest.cpp
@@ -45,6 +48,7 @@ target_sources(hipblaslt-test
         ${CMAKE_CURRENT_SOURCE_DIR}/arguments_a2a_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/unit_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/algo_errors_gtest.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/row_order_matmul_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/fast_check_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/relaunch_compare_gtest.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/host_memory_gtest.cpp

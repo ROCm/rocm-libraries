@@ -19,12 +19,18 @@
 
 namespace stinkytofu {
 
+// Preserves the existing gfx1250 boundary for the common 56-cycle ds_load and 8-cycle WMMA:
+// eleven windows provide 88 cycles, leaving 32 cycles after the load returns.
+constexpr int kQueueFillSafetyMarginCycles = 32;
+
 ResolvedSchedulingKnobs staticSchedulingKnobDefaults(const std::array<int, 3>&) {
     ResolvedSchedulingKnobs out;
     out.clusterBarrierRule3SignalLeadCycles = kStaticDefaultClusterBarrierRule3SignalLeadCycles;
     out.clusterBarrierRule3SignalLeadCyclesSource = SchedulingKnobSource::StaticDefault;
     out.reduceClusterBarrierPerLoop = kStaticDefaultReduceClusterBarrierPerLoop;
     out.reduceClusterBarrierPerLoopSource = SchedulingKnobSource::StaticDefault;
+    out.queueFillSafetyMarginCycles = kQueueFillSafetyMarginCycles;
+    out.queueFillSafetyMarginCyclesSource = SchedulingKnobSource::StaticDefault;
     return out;
 }
 
@@ -89,6 +95,8 @@ ResolvedSchedulingKnobs HeuristicSchedulingKnobPolicy::propose(const SchedulingF
     out.reduceClusterBarrierPerLoop =
         sumWmmaLatency > 2500 && dsLoads > 0 && sumWmmaLatency / dsLoads >= 5;
     out.reduceClusterBarrierPerLoopSource = SchedulingKnobSource::Policy;
+    out.queueFillSafetyMarginCycles = kQueueFillSafetyMarginCycles;
+    out.queueFillSafetyMarginCyclesSource = SchedulingKnobSource::Policy;
 
     return out;
 }
@@ -128,6 +136,14 @@ ResolvedSchedulingKnobs resolveSchedulingKnobs(const SchedulingFeatures& feature
         out.reduceClusterBarrierPerLoopSource = SchedulingKnobSource::StaticDefault;
     }
 
+    if (!features.stats.degenerate()) {
+        out.queueFillSafetyMarginCycles = proposed.queueFillSafetyMarginCycles;
+        out.queueFillSafetyMarginCyclesSource = SchedulingKnobSource::Policy;
+    } else {
+        out.queueFillSafetyMarginCycles = defaults.queueFillSafetyMarginCycles;
+        out.queueFillSafetyMarginCyclesSource = SchedulingKnobSource::StaticDefault;
+    }
+
     return out;
 }
 
@@ -164,7 +180,9 @@ void logResolvedSchedulingKnobs(std::ostream& os, std::string_view moduleName,
        << " rule3SignalLeadCycles=" << resolved.clusterBarrierRule3SignalLeadCycles << "("
        << schedulingKnobSourceName(resolved.clusterBarrierRule3SignalLeadCyclesSource) << ")"
        << " reduceClusterBarrierPerLoop=" << resolved.reduceClusterBarrierPerLoop << "("
-       << schedulingKnobSourceName(resolved.reduceClusterBarrierPerLoopSource) << ")";
+       << schedulingKnobSourceName(resolved.reduceClusterBarrierPerLoopSource) << ")"
+       << " queueFillSafetyMarginCycles=" << resolved.queueFillSafetyMarginCycles << "("
+       << schedulingKnobSourceName(resolved.queueFillSafetyMarginCyclesSource) << ")";
     os << "\n";
 }
 

@@ -31,6 +31,7 @@
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_local_dnmat.hpp"
 #include "hipsparse_local_handle.hpp"
+#include "hipsparse_local_spmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -412,9 +413,7 @@ void testing_spmm_csr_reuse_descr(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(dval, hcsr_val.data(), sizeof(T) * nnz_A, hipMemcpyHostToDevice));
 
     // Create matrix
-    hipsparseSpMatDescr_t matA;
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateCsr(&matA, m, k, nnz_A, dptr, dcol, dval, typeI, typeJ, idx_base, typeT));
+    hipsparseLocalCsr matA(m, k, nnz_A, dptr, dcol, dval, typeI, typeJ, idx_base, typeT);
 
     const std::vector<hipsparseOperation_t> ops_A
         = {HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE};
@@ -483,9 +482,6 @@ void testing_spmm_csr_reuse_descr(Arguments argus)
                                          number_of_passes,
                                          use_preprocess);
     }
-
-    // Destroy matrix
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matA));
 #endif
 }
 

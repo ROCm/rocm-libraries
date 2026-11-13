@@ -1,0 +1,71 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyIRVerifierPass --print-output 2>&1
+#
+# gfx1250 instructions added to Gfx1250Instructions.def: each one parses, passes the
+# AsmVerifierPass with its descriptor's operand widths and types, and prints back.
+# stinkytofu-opt verifies and prints one function at a time, so each function has its
+# own CHECK-NOT before its label.
+#
+# s_addk_co_i32, s_bitset0_b32 and s_bitset1_b32 read their destination, so it is
+# also passed as the first source.
+
+#--- SOPP, SOP2, SOPK and SOP1 scalar instructions
+# CHECK-NOT: [StinkyIRVerifier]
+# CHECK-LABEL: @scalar
+# CHECK: "st.s_version"(1)
+# CHECK: "st.s_wait_idle"()
+# CHECK: "st.s_code_end"()
+# CHECK: s0 = "st.s_add_co_i32"(s1, s2)
+# CHECK: s0 = "st.s_add_co_u32"(s1, s2)
+# CHECK: s0 = "st.s_add_co_ci_u32"(s1, s2)
+# CHECK: s0 = "st.s_sub_co_i32"(s1, s2)
+# CHECK: s3 = "st.s_addk_co_i32"(s3, 16)
+# CHECK: s4 = "st.s_bitset0_b32"(s4, 3)
+# CHECK: s4 = "st.s_bitset1_b32"(s4, s5)
+st.func @scalar() {
+^entry:
+  "st.s_version"(1) { issueCycles = 1, latencyCycles = 1 }
+  "st.s_wait_idle"() { issueCycles = 1, latencyCycles = 1 }
+  "st.s_code_end"() { issueCycles = 1, latencyCycles = 1 }
+  s0 = "st.s_add_co_i32"(s1, s2) { issueCycles = 1, latencyCycles = 2 }
+  s0 = "st.s_add_co_u32"(s1, s2) { issueCycles = 1, latencyCycles = 2 }
+  s0 = "st.s_add_co_ci_u32"(s1, s2) { issueCycles = 1, latencyCycles = 2 }
+  s0 = "st.s_sub_co_i32"(s1, s2) { issueCycles = 1, latencyCycles = 2 }
+  s3 = "st.s_addk_co_i32"(s3, 16) { issueCycles = 1, latencyCycles = 2 }
+  s4 = "st.s_bitset0_b32"(s4, 3) { issueCycles = 1, latencyCycles = 2 }
+  s4 = "st.s_bitset1_b32"(s4, s5) { issueCycles = 1, latencyCycles = 2 }
+}
+
+#--- VOP2, VOP3 vector instructions
+# CHECK-NOT: [StinkyIRVerifier]
+# CHECK-LABEL: @vector
+# CHECK: v0 = "st.v_max_num_f32"(v1, v2)
+# CHECK: v0 = "st.v_max3_num_f32"(v1, v2, v3)
+# CHECK: v0 = "st.v_sub_nc_i32"(v1, v2)
+# CHECK: v0 = "st.v_subrev_nc_u32"(v1, v2)
+# CHECK: v1 = "st.v_permlanex16_b32"(v0, s0, s1)
+st.func @vector() {
+^entry:
+  v0 = "st.v_max_num_f32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.v_max3_num_f32"(v1, v2, v3) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.v_sub_nc_i32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v0 = "st.v_subrev_nc_u32"(v1, v2) { issueCycles = 1, latencyCycles = 5 }
+  v1 = "st.v_permlanex16_b32"(v0, s0, s1) { issueCycles = 1, latencyCycles = 5 }
+}
+
+#--- tensor_store_from_lds: descriptor groups 0 (4 SGPRs) and 1 (8 SGPRs), plus optional
+#--- groups 2 and 3 (4 SGPRs each)
+# CHECK-NOT: [StinkyIRVerifier]
+# CHECK-LABEL: @tensor_store_two_groups
+# CHECK: "st.tensor_store_from_lds"(s[0:3], s[4:11])
+st.func @tensor_store_two_groups() {
+^entry:
+  "st.tensor_store_from_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1 }
+}
+
+# CHECK-NOT: [StinkyIRVerifier]
+# CHECK-LABEL: @tensor_store_four_groups
+# CHECK: "st.tensor_store_from_lds"(s[0:3], s[4:11], s[12:15], s[16:19])
+st.func @tensor_store_four_groups() {
+^entry:
+  "st.tensor_store_from_lds"(s[0:3], s[4:11], s[12:15], s[16:19]) { issueCycles = 1, latencyCycles = 1 }
+}

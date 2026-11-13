@@ -51,8 +51,14 @@ using hipdnn_plugin_sdk::ingestor::tryGetBoundInt;
 /// cannot quietly stop covering one.
 const std::vector<std::string_view>& allTokens()
 {
-    static const std::vector<std::string_view> s_tokens{
-        Q_TOKEN, K_TOKEN, V_TOKEN, O_TOKEN, MASK_TOKEN, SLIDING_WINDOW_TOKEN, SCALE_BITS_TOKEN};
+    static const std::vector<std::string_view> s_tokens{Q_TOKEN,
+                                                        K_TOKEN,
+                                                        V_TOKEN,
+                                                        O_TOKEN,
+                                                        MASK_TOKEN,
+                                                        SLIDING_WINDOW_TOKEN,
+                                                        SCALE_BITS_TOKEN,
+                                                        STATS_TOKEN};
     return s_tokens;
 }
 
@@ -323,7 +329,7 @@ TEST(TestGfx950AttentionUnified2DDispatch, RefusesToPrepareWhenTheOutputTokenNam
 TEST(TestGfx950AttentionUnified2DDispatch, RefusesToPrepareWhenTheOutputTokenNamesANonBshdTensor)
 {
     GraphSpec spec;
-    spec.oLayout = Layout::BHSD;
+    spec.oLayout = SdpaLayout::BHSD;
     const Graph graph(spec);
     // graph_match refuses this graph, so bind the tokens from the well-formed one and point
     // O at the same tensor in the BHSD graph.

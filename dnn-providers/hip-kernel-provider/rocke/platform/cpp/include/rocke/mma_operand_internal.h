@@ -22,8 +22,8 @@
 #include "rocke/ir.h"
 
 /* MMA operand `role` of `op` (Python mma_operand_value): operand 0 for
- * ROCKE_MMA_ROLE_A, operand 1 for ROCKE_MMA_ROLE_B, operand 2 for the
- * accumulator ROCKE_MMA_ROLE_ACC. Throws ckc::ValueError for any other role, or
+ * ROCKE_MMA_ROLE_SRC0, operand 1 for ROCKE_MMA_ROLE_SRC1, operand 2 for the
+ * accumulator ROCKE_MMA_ROLE_SRC2. Throws ckc::ValueError for any other role, or
  * when `op` lacks that operand. */
 const rocke_value_t* rocke_mma_operand_value(const rocke_op_t* op, rocke_mma_role_t role);
 

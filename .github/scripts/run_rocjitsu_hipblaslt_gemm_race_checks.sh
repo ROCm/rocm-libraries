@@ -30,6 +30,13 @@ RANDOM_GEMM_COUNT="${RANDOM_GEMM_COUNT:-100}"
 RANDOM_GEMM_SEED="${RANDOM_GEMM_SEED:-0}"
 TIMING_FILE="${RACE_REPORT_DIR}/timing.tsv"
 
+# Use the fetched compiler and runtime libraries for the build and benchmark.
+LLVM_RUNTIME_ROOT="${ROCM_PATH}/lib/llvm/lib"
+export ROCM_PATH
+export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/lib/llvm/bin:${PATH}"
+export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/lib/rocm_sysdeps/lib:"\
+"${LLVM_RUNTIME_ROOT}:${LLVM_RUNTIME_ROOT}/$(uname -m)-unknown-linux-gnu${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+
 # rocjitsu emulates one GPU at a time, so the job runs one target and selects
 # that target's emulator profile from the pinned rocjitsu source.
 case "${AMDGPU_TARGETS}" in

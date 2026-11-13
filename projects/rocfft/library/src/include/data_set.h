@@ -29,7 +29,7 @@
 #include <string>
 #include <vector>
 
-// Label distinguishing between input and output data layouts where or
+// Label distinguishing between input and output data sets where or
 // when such distinction may be relevant.
 enum class io_data_label
 {
@@ -136,7 +136,7 @@ struct data_set_t
      * @param[in] lengths spans of the logical index range along all length axes.
      * @param[in] batches spans of the logical index range along all batch axes.
      * @param[in] real_case_with_padding flag setting the in-buffer stride of the
-     * layout's first non-contiguous axis to the value that is required in real
+     * data set's first non-contiguous axis to the value that is required in real
      * domain for real, in-place Discrete Fourier Transforms.
      * 
      * @throw An `std::invalid_argument` is thrown if `lengths` is empty.
@@ -219,18 +219,18 @@ struct data_set_t
 
     /**
      * @return A vector of in-buffer strides that would make the data layout contiguous
-     * in memory. If the current layout is found to be contiguous, this object's in-buffer
+     * in memory. If the current data set is found to be contiguous, this object's in-buffer
      * strides are returned unchanged. Otherwise, the returned values are such that the
-     * innermost layout axis is given a unit in-buffer stride.
+     * innermost axis is given a unit in-buffer stride.
      */
     std::vector<size_t> contiguous_strides_and_distances() const;
 
     /**
      * @param[in] other data set which must be dimensionally consistent with this one
-     * (same number of length and batch axes) and must logically contain this layout's
+     * (same number of length and batch axes) and must logically contain this data set's
      * very first element.
      * 
-     * @return The in-buffer offset for this layout's very first element in a buffer that
+     * @return The in-buffer offset for this data set's very first element in a buffer that
      * observes the `other` data layout.
      * 
      * @throw An `std::invalid_argument` is thrown if `other` is not dimensionally consistent
@@ -242,11 +242,11 @@ struct data_set_t
      * @param[in] other data set which must be dimensionally consistent with this one
      * (same number of length and batch axes).
      * 
-     * @return `true` iff this layout represents a continuous chunk of `other`, i.e., iff
-     * - both layouts have identical strides along all axes that have non-unit logical spans;
-     * - both layouts have identical logical index ranges along all axes except
+     * @return `true` iff this data set represents a continuous chunk of `other`, i.e., iff
+     * - both data sets have identical strides along all axes that have non-unit logical spans;
+     * - both data sets have identical logical index ranges along all axes except
      *   for the `other`'s slowest-varying one;
-     * - this layout's logical range is contained by the `other` along its slowest-varying axis.
+     * - this data set's logical range is contained by the `other` along its slowest-varying axis.
      * 
      * @throw An `std::invalid_argument` is thrown if `other` is not dimensionally consistent
      * with this object.
@@ -284,12 +284,30 @@ struct data_set_t
     /**
      * @param[in] other data set which must be dimensionally consistent with this one
      * (same number of length and batch axes).
-     * @return `true` iff all axes of either layout cover the same logical index range.
+     * @return `true` iff all axes of either data set cover the same logical index range.
      * 
-     * @throw An `std::invalid_argument` is thrown if `other` is not dimensionally consistent
-     * with this object.
+     * @throw An `std::invalid_argument` is thrown if `other` has a different number of
+     * batch axes, or a different number of length axes while having the same batch range.
      */
     bool has_same_logical_range_as(const data_set_t& other) const;
+
+    /**
+     * @param[in] other data set with as many length axes as this one.
+     * @return `true` iff all length axes of either layout cover the same logical index range.
+     *
+     * @throw An `std::invalid_argument` is thrown if `other` has a different number of
+     * length axes.
+     */
+    bool has_same_length_range_as(const data_set_t& other) const;
+
+    /**
+     * @param[in] other data set with as many batch axes as this one.
+     * @return `true` iff all batch axes of either layout cover the same logical index range.
+     *
+     * @throw An `std::invalid_argument` is thrown if `other` has a different number of
+     * batch axes.
+     */
+    bool has_same_batch_range_as(const data_set_t& other) const;
 
     /**
      * @param[in] first a data_set_t object
@@ -326,34 +344,36 @@ struct data_set_t
     /**
      * @brief Verifies whether this object's layout is consistent as input
      * (resp. output) for specific types of in-place Discrete Fourier Transforms
-     * and, if so, returns the corresponding output (resp. input) layout. This
+     * and, if so, returns the corresponding output (resp. input) data set. This
      * object must have full data range representation for all length axes (all
      * lower bounds equal to zero).
      * 
      * @param[in] other_io I/O label for the data set to be returned. Explicitly,
-     * the calling object's layout is considered an input (resp. output) layout
+     * the calling object is considered an input (resp. output) data set
      * if the argument value is `io_data_label::OUTPUT` (resp. `io_data_label::INPUT`)
      * @param[in] fft_type intended type of (in-place) Fourier Transform
      * @param[in] other_innermost_length_is_odd flag indicating whether the
-     * logical span of the innermost length axis in the corresponding layout is
+     * logical span of the innermost length axis in the corresponding data set is
      * odd (if `true`) or not (if `false`). This is ignored (and can be safely
-     * omitted in calls) *unless* the data layout to be returned corresponds to
+     * omitted in calls) *unless* the data set to be returned corresponds to
      * the input of a real forward transform or the output of a real inverse
      * transform.
      * 
      * @return An `std::optional<data_set_t>` object which has a value set
-     * iff a corresponding layout for in-place operation does actually exist.
+     * iff a corresponding data set for in-place operation does actually exist.
      * 
-     * @note This function does not verify if either layout is self-aliasing and
+     * @note This function does not verify if either data set is self-aliasing and
      * ignores offsets as `data_set_t` objects do not capture them.
      * 
-     * @warning Should not be used for distributed layouts, unless length axes are
+     * @warning Should not be used for distributed data sets, unless length axes are
      * all undistributed.
      * 
      * @throw An `std::logic_error` is thrown if the current object is an empty
-     * layout or has any non-zero lower bound for a length axis.
+     * data set or has any non-zero lower bound for a length axis.
      * An `std::invalid_argument` is thrown if `fft_type` is not an expected value
-     * or if `other_io` is not an expected value.
+     * or if `other_io` is not an expected value, or if a real data set is to be returned
+     * for a Hermitian innermost length of 1 with `other_innermost_length_is_odd` set
+     * to `false` (would result in a real innermost length of 0).
      * 
      */
     std::optional<data_set_t> get_other_inplace_data_set_for(io_data_label         other_io,
@@ -431,7 +451,7 @@ private:
         }
         inline bool operator==(const axis_t& other) const
         {
-            // stride is irrelevant when comparing two layout's axes of unit logical range
+            // stride is irrelevant when comparing two data sets' axes of unit logical range
             return has_same_logical_range_as(other)
                    && (logical_span() == 1 || inbuffer_stride == other.inbuffer_stride);
         }
@@ -470,7 +490,7 @@ private:
 
     /**
      * @brief Implementation-simplifying helper accessor for the length and batch
-     * axes of the layout.
+     * axes of the data set.
      * 
      * @param[in] axis_idx flattened axis index in [0, get_full_rank() [
      * @return `len_axes[axis_idx]` if `axis_idx < get_len_rank()`,
@@ -480,18 +500,18 @@ private:
     axis_t&       operator[](size_t axis_idx);
 
     /**
-     * @return Flattened index of the layout's axis of largest in-buffer
+     * @return Flattened index of the data set's axis of largest in-buffer
      * stride (and non-trivial logical range)
      */
     size_t slowest_varying_axis() const;
 
     /**
-     * @brief Empties all layout axes.
+     * @brief Empties all axes of the data set.
      */
     void clear();
 
     /**
-     * @brief Shuffles the length axes of this layout such that, upon
+     * @brief Shuffles the length axes of this data set such that, upon
      * return, `len_axes[dim]` is the former `len_axes[len_axis_order[dim]]`
      * 
      * @param[in] len_axis_order a vector that is a permutation of
@@ -520,7 +540,7 @@ private:
      * If empty, default in-buffer strides deduced from the last length axis are
      * set.
      * @param[in] real_case_with_padding flag setting the in-buffer stride of the
-     * layout's first non-contiguous axis to the value that is required in real
+     * data set's first non-contiguous axis to the value that is required in real
      * domain for real, in-place Discrete Fourier Transforms, if a default value
      * must be set. This flag is this irrelevant if `strides.size() > 1` or if
      * `lengths.size() == 1 && !distances.empty()`.

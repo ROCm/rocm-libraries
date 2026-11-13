@@ -1,13 +1,15 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
+#include <stdio.h>
+#include <string.h>
+
+#include <initializer_list>
+
 #include "rocke/dtypes.h"
 #include "rocke/error_boundary.hpp"
 #include "rocke/helper_rocke.helpers.mma_io.h"
 #include "rocke/instance_gfx950_block_scaled_gemm.h"
 #include "rocke/mfma_scale_internal.h"
-#include <initializer_list>
-#include <stdio.h>
-#include <string.h>
 
 rocke_gfx950_block_scaled_gemm_spec_t rocke_gfx950_block_scaled_gemm_spec_default(void)
 {
@@ -123,7 +125,7 @@ rocke_kernel_def_t* rocke_build_gfx950_block_scaled_gemm_new(
         for(int slot = 0; slot < 16; ++slot)
         {
             rocke_value_t *r, *c;
-            rocke_layout_map_coord(atom->c_layout, b, lane, slot, &r, &c);
+            rocke_layout_map_coord(atom->dst.layout, b, lane, slot, &r, &c);
             auto* rr = rocke_b_add(b, m0, r);
             auto* offset = rocke_b_mul(b, rr, cN);
             auto* cc = rocke_b_add(b, n0, c);

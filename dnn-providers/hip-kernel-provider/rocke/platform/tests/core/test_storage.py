@@ -14,10 +14,17 @@ import subprocess
 import pytest
 from rocke.core.arch.wmma_scale import ScalePacking, scaled_matrix_layout
 from rocke.core.storage import (
+    REGISTER_BITS,
     BitPacking,
     FragmentPacking,
+    element_bytes,
+    elements_to_storage,
+    is_register_packed,
     packed_word_range,
     register_packing,
+    storage_dtype,
+    storage_group,
+    storage_to_elements,
 )
 
 
@@ -133,6 +140,118 @@ def test_byte_or_wider_elements_are_not_packed(dtype):
     assert register_packing(dtype, 8) is None
 
 
+@pytest.mark.parametrize("dtype", [dtype for dtype, _count, _registers in _PACKED])
+def test_sub_byte_dtypes_are_register_packed(dtype):
+    assert is_register_packed(dtype)
+
+
+@pytest.mark.parametrize("dtype", _NOT_PACKED)
+def test_byte_or_wider_dtypes_are_not_register_packed(dtype):
+    assert not is_register_packed(dtype)
+
+
+@pytest.mark.parametrize(
+    ("dtype", "group"),
+    [("fp4e2m1", (8, 1)), ("i4", (8, 1)), ("fp6e2m3", (16, 3)), ("fp6e3m2", (16, 3))],
+)
+def test_a_packed_storage_group_is_the_fewest_elements_filling_whole_registers(
+    dtype, group
+):
+    elements, registers = storage_group(dtype)
+    assert (elements, registers) == group
+    # The group's elements fill exactly its registers, with no bits to spare.
+    packing = register_packing(dtype, elements)
+    assert packing.carrier_count == registers
+    assert packing.carrier_bits == REGISTER_BITS
+    assert packing.padding_bits == 0
+
+
+@pytest.mark.parametrize("dtype", _NOT_PACKED + ["tf32", "e8m0"])
+def test_a_dtype_held_one_to_one_has_a_storage_group_of_one(dtype):
+    assert storage_group(dtype) == (1, 1)
+
+
+@pytest.mark.parametrize(
+    ("dtype", "storage"),
+    [
+        ("fp4e2m1", "i32"),
+        ("fp6e3m2", "i32"),
+        ("i4", "i32"),
+        ("u4", "i32"),
+        ("tf32", "i32"),
+        ("e8m0", "i8"),
+        ("e5m3", "i8"),
+        ("fp8e4m3", "fp8e4m3"),
+        ("i8", "i8"),
+        ("fp16", "fp16"),
+        ("bf16", "bf16"),
+        ("fp32", "fp32"),
+        ("fp64", "fp64"),
+    ],
+)
+def test_storage_dtype_is_the_one_rule_for_registers_and_lds(dtype, storage):
+    assert storage_dtype(dtype) == storage
+
+
+def test_a_predicate_has_no_storage_dtype():
+    with pytest.raises(ValueError, match="^i1 is a predicate, not register data$"):
+        storage_dtype("i1")
+
+
+@pytest.mark.parametrize(
+    ("dtype", "elements", "storage"),
+    [
+        ("fp4e2m1", 512, 64),
+        ("fp6e2m3", 32, 6),
+        ("fp6e2m3", 17, 4),  # a partly filled last word counts
+        ("fp6e2m3", 0, 0),
+        ("tf32", 8, 8),
+        ("fp16", 496, 496),
+    ],
+)
+def test_elements_to_storage_counts_the_storage_elements_that_hold_them(
+    dtype, elements, storage
+):
+    assert elements_to_storage(dtype, elements) == storage
+
+
+@pytest.mark.parametrize(
+    ("dtype", "storage", "elements"),
+    [("fp4e2m1", 4, 32), ("fp6e2m3", 3, 16), ("fp6e2m3", 6, 32), ("i8", 16, 16)],
+)
+def test_storage_to_elements_inverts_whole_groups(dtype, storage, elements):
+    assert storage_to_elements(dtype, storage) == elements
+    assert elements_to_storage(dtype, elements) == storage
+
+
+@pytest.mark.parametrize(
+    ("convert", "message"),
+    [
+        (elements_to_storage, "^element count must be at least 0, got -1$"),
+        (storage_to_elements, "^storage element count must be at least 0, got -1$"),
+    ],
+)
+def test_unit_conversions_refuse_a_negative_count(convert, message):
+    with pytest.raises(ValueError, match=message):
+        convert("fp4e2m1", -1)
+
+
+@pytest.mark.parametrize(
+    ("dtype", "size"), [("fp64", 8), ("fp16", 2), ("fp8e4m3", 1), ("e8m0", 1)]
+)
+def test_element_bytes_is_the_byte_width_of_a_dtype(dtype, size):
+    assert element_bytes(dtype) == size
+
+
+def test_a_sub_byte_dtype_has_no_byte_width():
+    message = (
+        "element_bytes failed - dtype='fp4e2m1' is 4 bits, expected a whole number of "
+        "bytes; a sub-byte dtype is addressed in the 32-bit words of its storage_dtype"
+    )
+    with pytest.raises(ValueError, match=f"^{re.escape(message)}$"):
+        element_bytes("fp4e2m1")
+
+
 def test_register_packing_lays_out_bits_like_a_hand_built_fragment():
     patterns = [(3 * i + 1) % 64 for i in range(16)]
     by_hand = FragmentPacking(BitPacking(6), 16, 32, 3)
@@ -163,6 +282,8 @@ def test_register_packing_needs_a_positive_count(count):
 def test_a_predicate_is_not_register_data():
     with pytest.raises(ValueError, match="^i1 is a predicate, not register data$"):
         register_packing("i1", 32)
+    with pytest.raises(ValueError, match="^i1 is a predicate, not register data$"):
+        is_register_packed("i1")
 
 
 @pytest.mark.parametrize(("dtype", "start", "length", "words"), _WORD_RANGES)

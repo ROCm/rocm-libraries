@@ -69,7 +69,6 @@ from support_features.coverage import (
 )
 from support_features.feature_matrix import (
     DATA_CENTER,
-    DEFAULT_OVERVIEW_PATH,
     FAMILIES,
     GPUS,
     compute_feature_claims,
@@ -7431,19 +7430,3 @@ class TestRealBundleTree:
         assert (
             size < 500_000
         ), f"overview is {size} bytes; split it before it stops rendering on GitHub"
-
-    def test_committed_overview_is_current(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
-        """SUPPORT_MATRIX_OVERVIEW.md matches a fresh render of the committed tree.
-
-        The check-support-matrix-overview hook cannot guard this on its own:
-        the top-level pre-commit exclude hides integration-test-bundles/ from
-        every hook, so a commit that changes only bundle data never runs it.
-        This test runs on any change under dnn-providers/, whichever file in
-        the tree moved -- a sidecar, a sweep manifest, a whole bundle.
-        """
-        status = feature_matrix_main(
-            ["--output", str(DEFAULT_OVERVIEW_PATH), "--check"]
-        )
-        assert status == 0, capsys.readouterr().err

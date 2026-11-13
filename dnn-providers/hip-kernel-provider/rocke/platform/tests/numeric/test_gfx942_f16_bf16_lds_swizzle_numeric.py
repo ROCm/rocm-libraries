@@ -11,6 +11,7 @@ from rocke.instances.common.gemm_universal import (
     is_valid_spec,
 )
 from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
+from rocke.tests.arch_marks import arch_specific
 from rocke.tests.engines import available_engines
 from rocke.tests.gpu import current_device_arch_in
 from rocke.tests.universal_gemm import launch_universal_gemm, lower_universal_gemm
@@ -29,6 +30,10 @@ def _swizzle_spec(tile, warp_tile, pipeline, dtype):
 # The LDS store granule must cover max(a_per_lane, load_vec); when it tracked
 # only a_per_lane a load_vec-wide store landed at a different swizzle column
 # than the per-element ds_reads. These are the tiles that regressed.
+@arch_specific(
+    ("gfx942",),
+    reason="regression for the gfx942 lds_swizzle store granule, run on gfx942 hardware",
+)
 @pytest.mark.parametrize(
     "tile, warp_tile, pipeline, dtype",
     [

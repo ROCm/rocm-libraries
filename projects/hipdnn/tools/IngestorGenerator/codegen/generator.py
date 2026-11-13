@@ -251,7 +251,23 @@ def mint_ids(
     ids["ued"] = take(engine.ued["id"] if engine else None)
     ids["kernel_match"] = take(engine.kernel_match_umd["id"] if engine else None)
     if config.engine.has_heuristic:
-        ids["uhd"] = take(engine.uhd["id"] if engine and engine.uhd else None)
+        # engine.uhd's first entry is always the native fallback this config
+        # regenerates; any trailing entries are promoted-model ids a human
+        # applied from a packet, not newly minted. They are carried through
+        # unchanged (ids[("uhd_promoted", i)]) rather than dropped, since
+        # nothing here can regenerate a trained ranker.
+        ids["uhd"] = take(engine.uhd[0]["id"] if engine and engine.uhd else None)
+        for index, promoted_doc in enumerate(
+            engine.uhd[1:] if engine and engine.uhd else ()
+        ):
+            promoted_id = promoted_doc["id"]
+            if promoted_id in claimed:
+                raise ValueError(
+                    f"promoted UHD id {promoted_id!r} collides with another "
+                    "descriptor's id"
+                )
+            claimed.add(promoted_id)
+            ids[("uhd_promoted", index)] = promoted_id
     if not config.is_slotted:
         ids["udd"] = take(engine.udd["id"] if engine and engine.udd else None)
 
@@ -373,7 +389,8 @@ def mint_ids(
             ids[slot] = take(None)
     for slot in dropped:
         ids[slot] = take(None)
-    assert len(set(ids.values())) == len(ids), "mint_ids assigned an id twice"
+    if len(set(ids.values())) != len(ids):
+        raise ValueError("mint_ids assigned an id twice")
     return ids
 
 
@@ -461,9 +478,19 @@ def build_ued(config: IngestorConfig, ids: dict) -> dict:
     bindings = config.engine.heuristics
     if config.engine.has_heuristic:
         # RFC 0019 §3.1: the loader rejects a bare top-level `heuristic` pointer.
+        # A promoted model's id, carried through from the prior bundle, rides
+        # after the native fallback (prior_ids.py's EngineDocs.uhd ordering);
+        # regenerating must not silently switch the engine back to the fallback.
+        promoted = [
+            ids[k]
+            for k in sorted(
+                k for k in ids if isinstance(k, tuple) and k[0] == "uhd_promoted"
+            )
+        ]
+        default = [ids["uhd"], *promoted] if promoted else ids["uhd"]
         # Arch entries follow `default`, where `uhd_gen promote` inserts them.
         ued["sort_kernel_catalog"] = {
-            "default": ids["uhd"],
+            "default": default,
             **bindings.get("sort_kernel_catalog", {}),
         }
     if config.engine.knobs:
@@ -598,8 +625,9 @@ def _check_metadata_resolved(
     ``kernel_source.spec``.
 
     An absent knob takes the KMD ``default_value`` as its catalog key while the
-    binary was built from the builder dataclass's default. Mandatory fields are
-    left to the config loader.
+    binary was built from the builder dataclass's default, unless the KMD field
+    declares ``builder_default`` (the two defaults are the same value). Mandatory
+    fields are left to the config loader.
     """
     # A prebuilt hsaco object has no spec to pin a knob in; only metadata decides.
     prebuilt = kernel.kernel_source.kind == KERNEL_SOURCE_KIND_HSACO
@@ -619,10 +647,15 @@ def _check_metadata_resolved(
         )
 
     spec = kernel.kernel_source.spec or {}
+    # A `builder_default` field is declared to share its default with the
+    # builder's dataclass, so leaving it out of both layers decides it.
     undeclared = sorted(
         f.name
         for f in config.kmd_fields
-        if not f.is_mandatory and f.name not in metadata and spec.get(f.name) is None
+        if not f.is_mandatory
+        and not f.builder_default
+        and f.name not in metadata
+        and spec.get(f.name) is None
     )
     if undeclared:
         where = (
@@ -1120,12 +1153,12 @@ def _check_sibling_mode(config: IngestorConfig) -> None:
             "is its own pack root, so a satellite's engine, dispatch and matcher "
             "references could not resolve there."
         )
-    if config.is_multi_pack:
+    if config.has_operation_matchers:
         raise prior_ids.NotOverridable(
-            "sibling bundles need a single-pack bundle: a multi-pack engine's "
-            "operation matcher names a symbol only that bundle's own Native.cpp "
-            "registers. Another bundle of this engine, named to the run or found "
-            "beside this one in the provider tree, puts the config in sibling mode."
+            "sibling bundles need a bundle without operation matchers: a matcher "
+            "names a symbol only that bundle's own Native.cpp registers. Another "
+            "bundle of this engine, named to the run or found beside this one in "
+            "the provider tree, puts the config in sibling mode."
         )
 
 
@@ -1394,7 +1427,10 @@ def resolve_ids(
                 build_kernel_match_umd(config, ids),
                 engine.kernel_match_umd,
             ),
-            "uhd": (build_uhd(config, ids), engine.uhd),
+            # The home's "default" may be a list (native fallback + a promoted
+            # model); only the native fallback, always first, is what this
+            # engine's own config regenerates.
+            "uhd": (build_uhd(config, ids), engine.uhd[0] if engine.uhd else None),
         }
         for name, (generated, home_doc) in built.items():
             if generated != home_doc:
@@ -1446,7 +1482,7 @@ def _report(
                 engine.kmd,
                 engine.udd,
                 engine.kernel_match_umd,
-                engine.uhd,
+                *(engine.uhd or ()),
                 *(d for slot in engine.slots.values() for d in (slot.kmd, slot.uhd)),
             )
             if doc

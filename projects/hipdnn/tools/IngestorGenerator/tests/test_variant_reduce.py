@@ -68,6 +68,12 @@ def identity(name):
     return variant_reduce.graph_identity(graph, "fixture")
 
 
+def _attempt_dir(root, kind, number, retry=1):
+    """``(attempt, shard dir)`` of one phase attempt of the sweep under ``root``."""
+    attempt = root / "sweep" / "attempts" / f"{kind}__c__full__r{number}-{retry:04d}"
+    return attempt, attempt / "winners" / "ingestor-winners" / "1.0.0" / "e" / "gfx950"
+
+
 def build(
     tmp_path, edit=None, reduction=True, rounds=(GRAPHS,), checked=None, kernels=KERNELS
 ):
@@ -112,8 +118,7 @@ def build(
     for kind, number, graphs in phases:
         # hipDNN mints a fresh Graph.id per finalization, so every round's id differs.
         graph_id = uuid.uuid4().bytes
-        attempt = tmp_path / "sweep" / "attempts" / f"{kind}__c__full__r{number}-0001"
-        shard = attempt / "winners" / "ingestor-winners" / "1.0.0" / "e" / "gfx950"
+        attempt, shard = _attempt_dir(tmp_path, kind, number)
         shard.mkdir(parents=True)
         phase = {"kind": kind, "corpus": "c", "arm": "full", "round": number}
         ledger = [{"correctness": {"passed": True}}]
@@ -134,8 +139,7 @@ def build(
             lines.append(json.dumps(line))
         (shard / "winners.jsonl").write_text("\n".join(lines) + "\n")
     summary = {"expected_phases": [phase for phase, _ in written]}
-    (tmp_path / "sweep" / "summary.json").parent.mkdir(parents=True, exist_ok=True)
-    (tmp_path / "sweep" / "summary.json").write_text(json.dumps(summary))
+    _summary(tmp_path).write_text(json.dumps(summary))
     files = "selection.yaml installed.kdp.json sweep reduced.yaml report.md".split()
     flags = ("--selection", "--kdp", "--sweep-output", "--out", "--report")
     return [a for flag, f in zip(flags, files) for a in (flag, str(tmp_path / f))]
@@ -373,7 +377,7 @@ def test_another_arms_record_does_not_satisfy_this_arms_phase(tmp_path):
     args = build(tmp_path)
     attempts = tmp_path / "sweep" / "attempts"
     other = attempts / "timing__c__other__r2-0001"
-    shutil.copytree(attempts / "timing__c__full__r1-0001", other)
+    shutil.copytree(_attempt_dir(tmp_path, "timing", 1)[0], other)
     record = json.loads((other / "phase.json").read_text())
     record["phase"].update(arm="other", round=2)
     (other / "phase.json").write_text(json.dumps(record))
@@ -447,9 +451,7 @@ def test_a_zero_time_entry_is_a_ranking(tmp_path):
 )
 def test_correctness_attempt_verdicts(tmp_path, capsys, ledger, gates, verdict):
     args = build(tmp_path, checked=("fp32", 128, 4))
-    phase = (
-        tmp_path / "sweep" / "attempts" / "correctness__c__full__r1-0001" / "phase.json"
-    )
+    phase = _attempt_dir(tmp_path, "correctness", 1)[0] / "phase.json"
     record = json.loads(phase.read_text())
     entries = [
         {"correctness": correctness, "reference": {"usable": usable}}
@@ -469,9 +471,9 @@ def test_correctness_attempt_verdicts(tmp_path, capsys, ledger, gates, verdict):
     assert "; numerics checked |" not in report
 
 
-def _fail_timing_round_two(tmp_path):
-    args = build(tmp_path, rounds=(GRAPHS, GRAPHS))
-    phase = tmp_path / "sweep" / "attempts" / "timing__c__full__r2-0001" / "phase.json"
+def _fail_timing_round_two(tmp_path, args):
+    """Mark round 2's timing phase of the sweep under ``tmp_path`` failed."""
+    phase = _attempt_dir(tmp_path, "timing", 2)[0] / "phase.json"
     record = json.loads(phase.read_text())
     phase.write_text(json.dumps(dict(record, status="failed")))
     return args
@@ -480,7 +482,7 @@ def _fail_timing_round_two(tmp_path):
 def test_a_failed_timing_round_stops_the_reduction(tmp_path, capsys):
     """The noise floor is measured over fewer rounds than were swept, so the
     reduction is not one to adopt: the report is written, `--out` is not."""
-    args = _fail_timing_round_two(tmp_path)
+    args = _fail_timing_round_two(tmp_path, build(tmp_path, rounds=(GRAPHS, GRAPHS)))
     assert variant_reduce.main(args) == 3
     captured = capsys.readouterr()
     assert "timing phases missing for (round, corpus) [(2, 'c')]" in captured.out
@@ -512,12 +514,12 @@ def test_a_sweep_with_no_timing_phase_exits_2(tmp_path, capsys):
 def _retried_round_one(tmp_path, first, second):
     """Round 1's timing phase attempted twice; the later attempt has status `second`."""
     args = build(tmp_path)
-    attempts = tmp_path / "sweep" / "attempts"
     shutil.copytree(
-        attempts / "timing__c__full__r1-0001", attempts / "timing__c__full__r1-0002"
+        _attempt_dir(tmp_path, "timing", 1)[0],
+        _attempt_dir(tmp_path, "timing", 1, retry=2)[0],
     )
-    for suffix, status, started in (("1", first, "01"), ("2", second, "02")):
-        path = attempts / f"timing__c__full__r1-000{suffix}" / "phase.json"
+    for retry, status, started in ((1, first, "01"), (2, second, "02")):
+        path = _attempt_dir(tmp_path, "timing", 1, retry)[0] / "phase.json"
         record = json.loads(path.read_text())
         record.update(status=status, session={"started_at": f"2026-01-{started}"})
         path.write_text(json.dumps(record))
@@ -725,3 +727,564 @@ def test_the_graph_id_slot_is_graph_fbs_field_order():
     assert dict(fields)["id"] == "Uuid"
     uuid_struct = re.search(r"^struct Uuid \{(.*?)^\}", text, re.S | re.M).group(1)
     assert "[ubyte:16]" in uuid_struct and variant_reduce._GRAPH_ID_BYTES == 16
+
+
+# --- slotted engines: one reduction per slot, one selection out ------------------------
+
+SLOTTED = Path(__file__).parent / "fixtures" / "slotted_three_slot.yaml"
+
+
+def _slot_kernel(name, source, block_m, num_warps=None, default=False):
+    metadata = {"block_m": block_m, "dtype": "BFLOAT16"}
+    if num_warps is not None:
+        metadata["num_warps"] = num_warps
+    kernel = {
+        "name": name,
+        "kernel_source": {
+            "kind": "embedded_source",
+            "source_file": f"{source}.cpp",
+            "entry_point": source,
+        },
+        "metadata": metadata,
+    }
+    if default:
+        kernel["default"] = True
+    return kernel
+
+
+# dkdv: the default m64 plus three alternatives; dq has a pack per discriminator.
+DKDV = [
+    ("bwd.dkdv_m64", 64, 4, True),
+    ("bwd.dkdv_m128", 128, 8, False),
+    ("bwd.dkdv_m256", 256, 8, False),
+    ("bwd.dkdv_m32", 32, 4, False),
+]
+SLOT_GRAPHS = {
+    # dkdv: m128 beats the default by 50% on g1; m32 only wins g2 by 1%.
+    "g1": {"dkdv": [("bwd.dkdv_m128", 1.0), ("bwd.dkdv_m64", 1.5)]},
+    "g2": {"dkdv": [("bwd.dkdv_m32", 1.0), ("bwd.dkdv_m64", 1.01)]},
+    "g3": {"prep": [("bwd.prep", 1.0)], "dq": [("bwd.dq_causal_m64", 1.0)]},
+}
+
+
+def _slotted_selection(tmp_path, dkdv_kernels=DKDV, dq_full_default=False, **reduction):
+    raw = yaml.safe_load(SLOTTED.read_text())
+    (dkdv,) = [p for p in raw["packs"] if p["name"] == "dkdv"]
+    dkdv["kernels"] = [_slot_kernel(n, "Dkdv", m, w, d) for n, m, w, d in dkdv_kernels]
+    (dq_full,) = [p for p in raw["packs"] if p["name"] == "dq_full"]
+    dq_full["kernels"][0]["default"] = dq_full_default
+    dq_full["kernels"].append(_slot_kernel("bwd.dq_full_m256", "DqFull", 256))
+    raw["reduction"] = {
+        "fields": {
+            "feature": ["dtype"],
+            "performance": [{"name": "block_m"}, {"name": "num_warps"}],
+        },
+        **reduction,
+    }
+    path = tmp_path / "selection.yaml"
+    path.write_text(yaml.safe_dump(raw, sort_keys=False))
+    return path
+
+
+def _slotted_sweep(
+    tmp_path,
+    generator,
+    graphs=(SLOT_GRAPHS,),
+    v2=False,
+    checked=None,
+    passed=True,
+    extra_lines=(),
+    **selection,
+):
+    """A slotted selection, its rendered KDPs and a `v:3` sweep of ``graphs`` rounds;
+    returns argv. ``graphs`` maps a graph to ``{slot: [(kernel, ms), ...]}``.
+    ``checked`` (same shape) adds a correctness phase that ``passed`` or failed;
+    ``extra_lines`` are raw lines appended to each timing shard."""
+    selection = _slotted_selection(tmp_path, **selection)
+    config = load_config(selection)
+    generator.render(config, tmp_path / "rendered")
+    kdp_paths = sorted(
+        (tmp_path / "rendered" / config.descriptor_dir).glob("*.kdp.json")
+    )
+    ids = {}
+    for path in kdp_paths:
+        kdp = json.loads(path.read_text())
+        for d in kdp["kernelDescriptors"]:
+            ids[d["name"]] = (kdp["id"], kdp["dispatch"], d["id"])
+    program = [{"slot": "prep", "kernel_id": ids["bwd.prep"][2]}]
+    written = []
+    phases = [("timing", n, g) for n, g in enumerate(graphs, 1)]
+    if checked:
+        phases.append(("correctness", 1, checked))
+    for kind, number, round_graphs in phases:
+        graph_id = uuid.uuid4().bytes
+        attempt, shard = _attempt_dir(tmp_path, kind, number)
+        shard.mkdir(parents=True)
+        phase = {"kind": kind, "corpus": "c", "arm": "full", "round": number}
+        record = {"status": "success", "phase": phase, "ledger": []}
+        if kind == "correctness":
+            ok = {"correctness": {"passed": passed}, "reference": {"usable": True}}
+            record.update(status="success" if passed else "failed", ledger=[ok])
+            if not passed:
+                record["gates"] = {"correctness": False}
+        (attempt / "phase.json").write_text(json.dumps(record))
+        written.append(phase)
+        lines = ["1.0.0"]
+        for graph, slots in round_graphs.items():
+            base = {
+                "graph": {"content_base64": graph_content(graph, graph_id)},
+                "device": DEVICE,
+            }
+            for slot, ranked in slots.items():
+                entries = [
+                    {
+                        "kernel_id": ids[k][2],
+                        "pack_id": ids[k][0],
+                        "dispatch_id": ids[k][1],
+                        "time_ms": t,
+                    }
+                    for k, t in ranked
+                ]
+                if v2:
+                    lines.append(json.dumps({"v": 2, **base, "entries": entries}))
+                else:
+                    lines.append(
+                        json.dumps({"v": 3, **base, "slot": slot, "entries": entries})
+                    )
+            lines.append(
+                json.dumps({"v": 3, **base, "program": program, "time_ms": 3.0})
+            )
+        if kind == "timing":
+            lines += [json.dumps({"v": 3, **base, **extra}) for extra in extra_lines]
+        (shard / "winners.jsonl").write_text("\n".join(lines) + "\n")
+    _summary(tmp_path).write_text(json.dumps({"expected_phases": written}))
+    argv = ["--selection", str(selection)]
+    for path in kdp_paths:
+        argv += ["--kdp", str(path)]
+    return argv + [
+        "--sweep-output", str(tmp_path / "sweep"),
+        "--out", str(tmp_path / "reduced.yaml"),
+        "--report", str(tmp_path / "report.md"),
+    ]  # fmt: skip
+
+
+def _kdps(argv):
+    return [argv[i + 1] for i, a in enumerate(argv) if a == "--kdp"]
+
+
+def _analyse_slots(argv, tmp_path, **kw):
+    reductions = variant_reduce.analyse_slots(
+        argv[1], _kdps(argv), tmp_path / "sweep", **kw
+    )
+    return {r.slot: r for r in reductions}
+
+
+def test_a_slotted_sweep_reduces_each_slot_and_the_output_renders_and_verifies(
+    tmp_path, generator, capsys
+):
+    argv = _slotted_sweep(tmp_path, generator, dq_full_default=True)
+    assert variant_reduce.main(argv) == 0
+    selection = load_config(tmp_path / "selection.yaml")
+    reduced = load_config(tmp_path / "reduced.yaml")
+
+    kept = {p.name: [k.name for k in p.kernels] for p in reduced.packs}
+    assert kept == {
+        "prep": ["bwd.prep"],
+        # m128 wins g1 by 50%; m32's 1% win on g2 is under eps; m256 is never ranked.
+        "dkdv": ["bwd.dkdv_m64", "bwd.dkdv_m128"],
+        "dq_causal": ["bwd.dq_causal_m64"],
+        "dq_full": ["bwd.dq_full_m128"],
+    }
+    # Every pack survives with its header, default markers, slots and reduction block.
+    for before, after in zip(selection.packs, reduced.packs):
+        assert (before.name, before.slot, before.arch, before.discriminator) == (
+            after.name,
+            after.slot,
+            after.arch,
+            after.discriminator,
+        )
+        originals = {k.name: k for k in before.kernels}
+        for kernel in after.kernels:
+            assert kernel.default == originals[kernel.name].default
+            assert kernel.metadata == originals[kernel.name].metadata
+    assert reduced.slots == selection.slots
+    assert reduced.reduction == selection.reduction
+
+    report = (tmp_path / "report.md").read_text()
+    assert "## Slot `dkdv`" in report and "## Slot `dq`" in report
+    assert "other slots at their reference picks" in report
+
+    # generate.py consumes the reduced selection unchanged, and the gate accepts it.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
+    import verify_variant_sets as gate_module
+
+    out = tmp_path / "regenerated"
+    generator.render(reduced, out)
+    code = gate_module.main(
+        ["--mode", "structural", "slotted", str(out / reduced.descriptor_dir)]
+    )
+    assert code == 0, capsys.readouterr().out
+
+
+def test_each_slot_ranks_and_sets_its_noise_floor_on_its_own_records(
+    tmp_path, generator
+):
+    """Two rounds: dkdv's kernel times move between them, prep's and dq's do not."""
+    r2 = {
+        "g1": {"dkdv": [("bwd.dkdv_m128", 1.0), ("bwd.dkdv_m64", 1.9)]},
+        "g2": {"dkdv": [("bwd.dkdv_m32", 1.0), ("bwd.dkdv_m64", 1.3)]},
+        "g3": SLOT_GRAPHS["g3"],
+    }
+    argv = _slotted_sweep(tmp_path, generator, graphs=(SLOT_GRAPHS, r2))
+    by_slot = _analyse_slots(argv, tmp_path)
+    assert list(by_slot) == ["prep", "dkdv", "dq"]
+    assert by_slot["dkdv"].noise.drift > 0
+    assert by_slot["prep"].noise.drift == by_slot["dq"].noise.drift == 0
+    assert by_slot["dkdv"].noise.epsilon_min > by_slot["dq"].noise.epsilon_min
+    # A slot's rankings hold only that slot's records, keyed by graph, device and slot.
+    for slot, reduction in by_slot.items():
+        assert {json.loads(r.key)[2] for r in reduction.rankings} == {slot}
+        assert set(reduction.variants) <= {
+            k.name
+            for p in load_config(argv[1]).packs
+            if p.slot == slot
+            for k in p.kernels
+        }
+    # prep and dq never see dkdv's classification: it has no num_warps.
+    assert by_slot["dq"].classification.performance == ("block_m",)
+    assert by_slot["dkdv"].classification.performance == ("block_m", "num_warps")
+
+
+def test_the_budget_bounds_each_pack_not_the_slot(tmp_path, generator, capsys):
+    """dq keeps three kernels over two packs (the pack `dq_full` holds two), so a
+    budget of 2 holds. A budget of 1 refuses dq, whose floor and coverage leave a pack
+    two; dkdv raises its eps to fit and prep has one kernel."""
+    argv = _slotted_sweep(tmp_path, generator)
+    by_slot = _analyse_slots(argv, tmp_path)
+    dq = by_slot["dq"]
+    assert len(dq.keep(dq.epsilon)) == 3
+    assert variant_reduce.instances(dq.variants, dq.keep(dq.epsilon)) == 2
+
+    assert variant_reduce.main(argv + ["--budget", "2"]) == 0
+    assert variant_reduce.main(argv + ["--budget", "1"]) == 1
+    err = capsys.readouterr().err
+    assert "slot dq: floor + coverage exceed budget: 2 instances > 1" in err
+    assert "slot dkdv" not in err and "slot prep" not in err
+    assert "WARNING" not in err
+    assert "- budget 1 instances per pack per arch;" in (
+        (tmp_path / "report.md").read_text()
+    )
+
+
+def test_a_failed_slotted_timing_round_stops_the_reduction(tmp_path, generator, capsys):
+    argv = _slotted_sweep(tmp_path, generator, graphs=(SLOT_GRAPHS, SLOT_GRAPHS))
+    _fail_timing_round_two(tmp_path, argv)
+    assert variant_reduce.main(argv) == 3
+    assert "FAIL:" in capsys.readouterr().err
+    assert not (tmp_path / "reduced.yaml").exists()
+    report = (tmp_path / "report.md").read_text().splitlines()
+    assert "- missing (round, corpus): [(2, 'c')]" in report
+    assert "output: not written" in report[2]
+
+
+def test_a_slot_with_no_winners_in_a_timing_phase_is_an_incomplete_sweep(
+    tmp_path, generator, capsys
+):
+    graphs = {"g3": {"prep": SLOT_GRAPHS["g3"]["prep"]}}
+    argv = _slotted_sweep(tmp_path, generator, graphs=(graphs,))
+    assert variant_reduce.main(argv) == 3
+    assert "slot dkdv has no winners" in capsys.readouterr().err
+    assert not (tmp_path / "reduced.yaml").exists()
+
+
+# Two dkdv rules, each within eps alone, that together drop both kernels g_alpha
+# and g_beta rank best: `block_m` removes m128, `num_warps` removes m64_nw8.
+UNION_DKDV = [
+    ("bwd.dkdv_m64", 64, 4, True),
+    ("bwd.dkdv_m128", 128, 4, False),
+    ("bwd.dkdv_m64_nw8", 64, 8, False),
+]
+UNION_SLOT_GRAPHS = {
+    "g_alpha": {
+        "dkdv": [
+            ("bwd.dkdv_m128", 1.0),
+            ("bwd.dkdv_m64_nw8", 1.01),
+            ("bwd.dkdv_m64", 2.0),
+        ]
+    },
+    "g_beta": {
+        "dkdv": [
+            ("bwd.dkdv_m64_nw8", 1.0),
+            ("bwd.dkdv_m128", 1.01),
+            ("bwd.dkdv_m64", 2.0),
+        ]
+    },
+    "g3": SLOT_GRAPHS["g3"],
+}
+
+
+def _union_slot_rules(tmp_path, generator):
+    argv = _slotted_sweep(
+        tmp_path, generator, graphs=(UNION_SLOT_GRAPHS,), dkdv_kernels=UNION_DKDV
+    )
+    dkdv = _analyse_slots(argv, tmp_path)["dkdv"]
+    rules = {r.text: r for r in dkdv.rules}
+    return argv, dkdv, rules["drop knob block_m"], rules["drop knob num_warps"]
+
+
+def test_applied_rules_losing_more_than_eps_in_a_slot_are_refused(
+    tmp_path, generator, capsys
+):
+    argv, dkdv, block_m, num_warps = _union_slot_rules(tmp_path, generator)
+    assert max(block_m.worst_gain_lost, num_warps.worst_gain_lost) <= dkdv.rules_epsilon
+    chosen = f"{block_m.id},{num_warps.id}"
+    assert variant_reduce.main(argv + ["--apply-rules", chosen]) == 1
+    err = capsys.readouterr().err
+    assert "slot dkdv: " in err
+    assert (
+        "the loss bounds each slot with the other slots at their reference picks" in err
+    )
+    assert not (tmp_path / "reduced.yaml").exists()
+    report = (tmp_path / "report.md").read_text()
+    for graph in ("g_alpha", "g_beta"):
+        assert variant_reduce.graph_label(identity(graph)) in report
+    assert "@gfx950/dkdv" in report
+
+    # One of them alone stays within eps: it is written, and the other slots keep
+    # every kernel (no rule of theirs was chosen).
+    assert variant_reduce.main(argv + ["--apply-rules", block_m.id]) == 0
+    kept = {
+        p.name: [k.name for k in p.kernels]
+        for p in load_config(tmp_path / "reduced.yaml").packs
+    }
+    assert kept["dkdv"] == ["bwd.dkdv_m64", "bwd.dkdv_m64_nw8"]
+    assert kept["dq_full"] == ["bwd.dq_full_m128", "bwd.dq_full_m256"]
+
+
+def test_two_slots_proposing_one_rule_text_get_distinct_ids(tmp_path, generator):
+    """`drop block_m=256` is proposed by dkdv and by dq; applying dq's id leaves dkdv's
+    kernels untouched."""
+    argv = _slotted_sweep(tmp_path, generator, dq_full_default=True)
+    by_slot = _analyse_slots(argv, tmp_path)
+    text = "drop block_m=256"
+    dkdv, dq = (
+        {r.text: r for r in by_slot[slot].rules}[text] for slot in ("dkdv", "dq")
+    )
+    assert dkdv.id != dq.id
+    assert variant_reduce.main(argv + ["--apply-rules", dq.id]) == 0
+    kept = {
+        p.name: [k.name for k in p.kernels]
+        for p in load_config(tmp_path / "reduced.yaml").packs
+    }
+    assert kept["dq_full"] == ["bwd.dq_full_m128"]
+    assert kept["dkdv"] == [name for name, *_ in DKDV]
+    assert kept["dq_causal"] == ["bwd.dq_causal_m64"]
+
+
+def test_a_slotted_selection_needs_one_kdp_per_pack(tmp_path, generator, capsys):
+    argv = _slotted_sweep(tmp_path, generator)
+    first = argv.index("--kdp")
+    short = argv[:first] + argv[first + 2 :]
+    assert variant_reduce.main(short) == 2
+    assert "pack(s) need" in capsys.readouterr().err
+
+
+def test_a_slotted_sweep_of_whole_graph_records_is_refused(tmp_path, generator, capsys):
+    argv = _slotted_sweep(tmp_path, generator, v2=True)
+    assert variant_reduce.main(argv) == 2
+    assert "whole-graph v2 record in the sweep of a slotted engine" in (
+        capsys.readouterr().err
+    )
+
+
+def test_an_unslotted_sweep_of_slot_records_is_refused(tmp_path, capsys):
+    edit = lambda d: d.update(v=3, slot="s")  # noqa: E731
+    assert variant_reduce.main(build(tmp_path, edit)) == 2
+    assert "slot record ('s') in the sweep of an unslotted engine" in (
+        capsys.readouterr().err
+    )
+
+
+def test_a_slot_the_selection_lacks_is_refused(tmp_path, generator, capsys):
+    graphs = {
+        "g1": {**SLOT_GRAPHS["g1"], "extra": [("bwd.dkdv_m64", 1.0)]},
+        "g3": SLOT_GRAPHS["g3"],
+    }
+    argv = _slotted_sweep(tmp_path, generator, graphs=(graphs,))
+    assert variant_reduce.main(argv) == 2
+    assert "slot 'extra' is not a slot of the selection" in capsys.readouterr().err
+
+
+def test_a_ranked_kernel_of_another_slot_is_refused(tmp_path, generator, capsys):
+    graphs = {"g1": {"dkdv": [("bwd.prep", 1.0)]}, "g3": SLOT_GRAPHS["g3"]}
+    argv = _slotted_sweep(tmp_path, generator, graphs=(graphs,))
+    assert variant_reduce.main(argv) == 2
+    assert "is not a kernel of slot dkdv" in capsys.readouterr().err
+
+
+def _shard(tmp_path, *docs):
+    base = {
+        "graph": {"content_base64": graph_content("g", bytes(16))},
+        "device": DEVICE,
+    }
+    entry = [{"kernel_id": "k", "pack_id": "p", "dispatch_id": "d", "time_ms": 1.0}]
+    path = tmp_path / "winners.jsonl"
+    lines = [json.dumps({**base, "entries": entry, **doc}) for doc in docs]
+    path.write_text("1.0.0\n" + "\n".join(lines) + "\n")
+    return path
+
+
+@pytest.mark.parametrize(
+    "doc, message",
+    [
+        ({"v": 2, "slot": "s"}, r"\['slot'\] not in WinnerCacheFile.hpp"),
+        ({"v": 3}, r"missing \['slot'\]"),
+        ({"v": 3, "slot": ""}, "'slot' must be a non-empty string"),
+        (
+            {"v": 3, "slot": "s", "program": []},
+            r"\['slot'\] not in WinnerCacheFile.hpp",
+        ),
+        ({"v": 3, "program": [], "time_ms": 1.0}, "'program' must be a non-empty list"),
+        (
+            {"v": 3, "program": [{"slot": "s"}], "time_ms": 1.0},
+            r"missing \['kernel_id'\]",
+        ),
+        (
+            {"v": 3, "program": [{"slot": "s", "kernel_id": "k"}], "time_ms": -1},
+            "bad time_ms",
+        ),
+        ({"v": 4, "slot": "s"}, r"line format v=4, expected one of \[2, 3\]"),
+        (
+            {"v": 2, "program": [{"slot": "s", "kernel_id": "k"}], "time_ms": 1.0},
+            r"\['program', 'time_ms'\] not in WinnerCacheFile.hpp",
+        ),
+        (
+            {"v": 3, "program": [{"slot": "", "kernel_id": "k"}], "time_ms": 1.0},
+            "slot and kernel_id must be non-empty strings",
+        ),
+        (
+            {"v": 3, "program": [{"slot": "s", "kernel_id": ""}], "time_ms": 1.0},
+            "slot and kernel_id must be non-empty strings",
+        ),
+        (
+            {
+                "v": 3,
+                "slot": "s",
+                "entries": [
+                    {
+                        "kernel_id": "k",
+                        "pack_id": "p",
+                        "dispatch_id": "d",
+                        "time_ms": -1.0,
+                    }
+                ],
+            },
+            "entries.0.: bad time_ms",
+        ),
+    ],
+    ids=[
+        "v2-with-a-slot",
+        "v3-without-a-slot",
+        "empty-slot",
+        "slot-and-program",
+        "empty-program",
+        "pick-without-kernel",
+        "negative-program-time",
+        "unknown-version",
+        "v2-with-a-program",
+        "pick-with-an-empty-slot",
+        "pick-with-an-empty-kernel",
+        "negative-entry-time",
+    ],
+)
+def test_a_malformed_slotted_line_is_refused(tmp_path, doc, message):
+    with pytest.raises(variant_reduce.ReduceError, match=message):
+        variant_reduce.read_shard(_shard(tmp_path, doc))
+
+
+def test_a_program_line_is_read_and_ranks_nothing(tmp_path):
+    program = {
+        "v": 3,
+        "program": [{"slot": "s0", "kernel_id": "k"}],
+        "time_ms": 2.0,
+        "entries": [],
+    }
+    path = _shard(tmp_path, {"v": 3, "slot": "s0"}, program)
+    (slot_line, program_line) = variant_reduce.read_lines(path)
+    assert slot_line.slot == "s0" and slot_line.picks is None
+    assert program_line.picks == (("s0", "k"),) and program_line.time_ms == 2.0
+    (key,) = variant_reduce.read_shard(path)
+    assert json.loads(key)[2] == "s0"
+
+
+def test_a_v2_and_a_slot_record_of_one_graph_are_two_rankings(tmp_path):
+    path = _shard(tmp_path, {"v": 2}, {"v": 3, "slot": "a"}, {"v": 3, "slot": "b"})
+    keys = [json.loads(k) for k in variant_reduce.read_shard(path)]
+    assert [k[2:] for k in keys] == [[], ["a"], ["b"]]
+
+
+def test_an_unranked_pack_without_a_default_keeps_a_kernel(tmp_path, generator):
+    """dq's pack `dq_full` is never ranked and declares no default. With `block_m`
+    dividing, its m256 divides out of the floor beside m128 only within its own pack: a
+    cell shared with `dq_causal` (m64) would floor both away and empty the pack."""
+    fields = {
+        "feature": ["dtype"],
+        "performance": [
+            {"name": "block_m", "divides": "block_m"},
+            {"name": "num_warps"},
+        ],
+    }
+    argv = _slotted_sweep(tmp_path, generator, fields=fields)
+    assert variant_reduce.main(argv) == 0
+    reduced = load_config(tmp_path / "reduced.yaml")
+    kept = {p.name: [k.name for k in p.kernels] for p in reduced.packs}
+    assert kept["dq_full"] == ["bwd.dq_full_m128"]
+    assert kept["dq_causal"] == ["bwd.dq_causal_m64"]
+
+
+CHECKED = {
+    "g1": {"dkdv": [("bwd.dkdv_m128", 1.0)]},
+    "g3": {"prep": [("bwd.prep", 1.0)], "dq": [("bwd.dq_causal_m64", 1.0)]},
+}
+
+
+def test_a_passing_slotted_correctness_phase_tags_the_winners_as_checked(
+    tmp_path, generator
+):
+    argv = _slotted_sweep(tmp_path, generator, checked=CHECKED)
+    assert variant_reduce.main(argv) == 0
+    report = (tmp_path / "report.md").read_text()
+    assert "- c: passed, 3 winners" in report
+    rows = {line.split(" | ")[0][2:]: line for line in report.splitlines()}
+    for name in ("bwd.dkdv_m128", "bwd.prep", "bwd.dq_causal_m64"):
+        assert rows[name].endswith("; numerics checked |")
+    assert rows["bwd.dkdv_m64"].endswith("; numerics unchecked |")
+
+
+def test_a_failing_slotted_correctness_phase_exits_3(tmp_path, generator, capsys):
+    argv = _slotted_sweep(tmp_path, generator, checked=CHECKED, passed=False)
+    assert variant_reduce.main(argv) == 3
+    assert "correctness attempts failed" in capsys.readouterr().err
+    assert not (tmp_path / "reduced.yaml").exists()
+    assert "- c: FAILED; investigate" in (tmp_path / "report.md").read_text()
+
+
+def test_a_program_line_in_an_unslotted_sweep_is_refused(tmp_path, capsys):
+    def program(line):
+        del line["entries"]
+        line.update(v=3, program=[{"slot": "s", "kernel_id": "k"}], time_ms=1.0)
+
+    assert variant_reduce.main(build(tmp_path, program)) == 2
+    assert "a program line in the sweep of an unslotted engine" in (
+        capsys.readouterr().err
+    )
+
+
+def test_a_program_pick_naming_a_slot_the_selection_lacks_is_refused(
+    tmp_path, generator, capsys
+):
+    picks = [{"slot": "prep", "kernel_id": "k"}, {"slot": "nope", "kernel_id": "k"}]
+    pick = {"program": picks, "time_ms": 1.0}
+    argv = _slotted_sweep(tmp_path, generator, extra_lines=[pick])
+    assert variant_reduce.main(argv) == 2
+    assert "a program line names slot 'nope'" in capsys.readouterr().err

@@ -771,6 +771,19 @@ rocke_value_t*
     return rocke_i_op1(b, ROCKE_OP_TILE_SMEM_PTR_ADD, ops, 2, rocke_i64(), NULL, "lds_addr");
 }
 
+rocke_value_t*
+    rocke_b_global_addr_of(rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* index)
+{
+    rocke_value_t* ops[2];
+    if(!rocke_i_live(b))
+        return NULL;
+    if(!ptr || !index)
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "global_addr_of: NULL operand");
+    ops[0] = ptr;
+    ops[1] = index;
+    return rocke_i_op1(b, ROCKE_OP_TILE_GLOBAL_ADDR_OF, ops, 2, rocke_i64(), NULL, "gaddr");
+}
+
 void rocke_b_async_buffer_load_lds_addr(rocke_ir_builder_t* b,
                                         rocke_value_t* rsrc,
                                         rocke_value_t* lds_addr,
@@ -1522,6 +1535,34 @@ void rocke_b_buffer_store_f32(rocke_ir_builder_t* b,
     rocke_i_op0(b, ROCKE_OP_TILE_BUFFER_STORE_F32, ops, 4, NULL);
 }
 
+void rocke_b_buffer_atomic_fadd_f32(rocke_ir_builder_t* b,
+                                    rocke_value_t* rsrc,
+                                    rocke_value_t* voffset,
+                                    rocke_value_t* soffset,
+                                    rocke_value_t* value,
+                                    int cachepolicy)
+{
+    rocke_value_t* ops[4];
+    rocke_attr_map_t attrs;
+    if(!rocke_i_live(b))
+        return;
+    if(cachepolicy < 0 || cachepolicy > 0x1F)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "buffer_atomic_fadd_f32 cachepolicy must be in 0..31, got %d",
+                        cachepolicy);
+        return;
+    }
+    attrs = rocke_i_attrs(b);
+    rocke_attr_set_int(b, &attrs, "cachepolicy", (int64_t)cachepolicy);
+    ops[0] = rsrc;
+    ops[1] = voffset;
+    ops[2] = soffset;
+    ops[3] = value;
+    rocke_i_op0(b, ROCKE_OP_TILE_BUFFER_ATOMIC_FADD_F32, ops, 4, &attrs);
+}
+
 void rocke_b_buffer_store_vN_f32(rocke_ir_builder_t* b,
                                  rocke_value_t* rsrc,
                                  rocke_value_t* voffset,
@@ -2058,6 +2099,78 @@ void rocke_b_cluster_load_async_to_lds(rocke_ir_builder_t* b,
     rocke_i_op0(b, ROCKE_OP_TILE_CLUSTER_LOAD_ASYNC_TO_LDS, ops, 3, &attrs);
 }
 
+int rocke_encode_tdm_padding(int64_t interval_bytes,
+                             int64_t pad_bytes,
+                             int* out_pad_interval,
+                             int* out_pad_amount,
+                             char* reason,
+                             size_t reason_cap)
+{
+    int64_t interval_dwords;
+    int64_t pad_interval = 0;
+    int64_t pad_amount;
+    if(pad_bytes <= 0)
+    {
+        if(reason != NULL && reason_cap > 0)
+            snprintf(reason,
+                     reason_cap,
+                     "encode_tdm_padding needs a positive pad; pass no pad_interval for an "
+                     "unpadded tile");
+        return 0;
+    }
+    if(interval_bytes % 4 || pad_bytes % 4)
+    {
+        if(reason != NULL && reason_cap > 0)
+            snprintf(reason,
+                     reason_cap,
+                     "TDM padding is dword-granular, got interval=%lldB pad=%lldB",
+                     (long long)interval_bytes,
+                     (long long)pad_bytes);
+        return 0;
+    }
+    interval_dwords = interval_bytes / 4;
+    if(interval_dwords < 2 || (interval_dwords & (interval_dwords - 1)))
+    {
+        if(reason != NULL && reason_cap > 0)
+            snprintf(reason,
+                     reason_cap,
+                     "TDM pad interval must be a power-of-two dword count >= 2, got %lld",
+                     (long long)interval_dwords);
+        return 0;
+    }
+    /* Python: interval_dwords.bit_length() - 2 (interval_dwords is a power of 2). */
+    while((interval_dwords >> (pad_interval + 2)) != 0)
+        ++pad_interval;
+    pad_amount = pad_bytes / 4 - 1;
+    if(pad_interval > ROCKE_TDM_PAD_INTERVAL_MAX)
+    {
+        if(reason != NULL && reason_cap > 0)
+            snprintf(reason,
+                     reason_cap,
+                     "TDM pad_interval %lld exceeds %d (interval %lldB too large)",
+                     (long long)pad_interval,
+                     ROCKE_TDM_PAD_INTERVAL_MAX,
+                     (long long)interval_bytes);
+        return 0;
+    }
+    if(pad_amount > ROCKE_TDM_PAD_AMOUNT_MAX)
+    {
+        if(reason != NULL && reason_cap > 0)
+            snprintf(reason,
+                     reason_cap,
+                     "TDM pad_amount %lld exceeds %d (pad %lldB too large)",
+                     (long long)pad_amount,
+                     ROCKE_TDM_PAD_AMOUNT_MAX,
+                     (long long)pad_bytes);
+        return 0;
+    }
+    if(out_pad_interval != NULL)
+        *out_pad_interval = (int)pad_interval;
+    if(out_pad_amount != NULL)
+        *out_pad_amount = (int)pad_amount;
+    return 1;
+}
+
 /* Descriptor words are raw bit patterns; emit them as signed i32 constants. */
 static rocke_value_t* rocke_i_tdm_word(rocke_ir_builder_t* b, uint32_t value)
 {
@@ -2080,15 +2193,22 @@ int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,
 {
     static const char* name = "tdm_descriptor_2d";
     const rocke_type_t* lty = lds_addr ? lds_addr->type : NULL;
-    int lds_is_i32, lds_is_i64, data_size, pad_enable;
+    int lds_is_i32, lds_is_i64, gptr_is_i64, data_size, pad_enable;
     uint32_t flags;
     rocke_value_t *c16, *lds32, *gaddr, *g_hi, *lo, *hi, *group0[4], *group1[8], *zero4;
     int i;
     if(!rocke_i_live(b))
         return 0;
-    if(!rocke_i_is_global_ptr(global_ptr))
+    /* A global pointer, or the i64 address of one (tile.global_addr_of). */
+    gptr_is_i64 = global_ptr != NULL && global_ptr->type != NULL
+                  && global_ptr->type->kind == ROCKE_TYPE_SCALAR
+                  && global_ptr->type->scalar == ROCKE_SCALAR_I64;
+    if(!gptr_is_i64 && !rocke_i_is_global_ptr(global_ptr))
     {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "%s global_ptr must be a global pointer", name);
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "%s global_ptr must be a global pointer or an i64 global address",
+                        name);
         return 0;
     }
     lds_is_i32 = lty && lty->kind == ROCKE_TYPE_SCALAR && lty->scalar == ROCKE_SCALAR_I32;
@@ -2144,18 +2264,23 @@ int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,
     }
     /* pad_interval < 0 means "no LDS padding" (Python: pad_interval=None). */
     pad_enable = pad_interval >= 0;
-    if(pad_enable && pad_interval > 7)
-    {
-        rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "%s pad_interval must be in 0..7 (got %d)", name, pad_interval);
-        return 0;
-    }
-    if(pad_amount < 0 || pad_amount > 0x7F || (pad_amount && !pad_enable))
+    if(pad_enable && pad_interval > ROCKE_TDM_PAD_INTERVAL_MAX)
     {
         rocke_i_set_err(b,
                         ROCKE_ERR_VALUE,
-                        "%s pad_amount must be in 0..127 and needs pad_interval (got %d)",
+                        "%s pad_interval must be in 0..%d (got %d)",
                         name,
+                        ROCKE_TDM_PAD_INTERVAL_MAX,
+                        pad_interval);
+        return 0;
+    }
+    if(pad_amount < 0 || pad_amount > ROCKE_TDM_PAD_AMOUNT_MAX || (pad_amount && !pad_enable))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "%s pad_amount must be in 0..%d and needs pad_interval (got %d)",
+                        name,
+                        ROCKE_TDM_PAD_AMOUNT_MAX,
                         pad_amount);
         return 0;
     }
@@ -2164,7 +2289,7 @@ int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,
     c16 = rocke_b_const_i32(b, 16);
     /* Group 0: count=1 | LDS byte address | global address lo | hi[24:0], type=2. */
     lds32 = lds_is_i32 ? lds_addr : rocke_b_trunc(b, lds_addr, rocke_i32());
-    gaddr = rocke_b_global_ptr_to_i64(b, global_ptr);
+    gaddr = gptr_is_i64 ? global_ptr : rocke_b_global_ptr_to_i64(b, global_ptr);
     g_hi = rocke_b_trunc(b, rocke_b_lshr(b, gaddr, rocke_b_const_i64(b, 32)), rocke_i32());
     group0[0] = rocke_b_const_i32(b, 1);
     group0[1] = lds32;

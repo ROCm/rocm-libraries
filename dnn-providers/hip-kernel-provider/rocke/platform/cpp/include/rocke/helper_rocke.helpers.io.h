@@ -272,6 +272,46 @@ void rocke_b_vector_row_copy(rocke_ir_builder_t* b,
                              const char* dtype,
                              int vec_bytes);
 
+/* C++ port of rocke.helpers.io.concat_tree:
+ *
+ *     def concat_tree(b, parts):
+ *         while len(parts) > 1:
+ *             parts = [b.vec_concat(parts[i], parts[i + 1])
+ *                      for i in range(0, len(parts), 2)]
+ *         return parts[0]
+ *
+ * Joins `count` vector parts in order by pairwise vec_concat, round by round.
+ * `count` must be a power of two (ROCKE_ERR_VALUE otherwise). `parts` is
+ * borrowed and left unchanged. */
+rocke_value_t* rocke_b_concat_tree(rocke_ir_builder_t* b, rocke_value_t* const* parts, int count);
+
+/* C++ port of rocke.helpers.io.smem_load_fragment:
+ *
+ *     def smem_load_fragment(b, smem, row, idx, *, dtype, n, max_elems=4,
+ *                            stride=None):
+ *         if n <= max_elems:
+ *             return b.smem_load_vN(smem, row, idx, dtype=dtype, n=n)
+ *         step = max_elems if stride is None else stride
+ *         parts = [b.smem_load_vN(smem, row,
+ *                                 idx if h == 0 else b.add(idx, b.const_i32(h * step)),
+ *                                 dtype=dtype, n=max_elems)
+ *                  for h in range(n // max_elems)]
+ *         return concat_tree(b, parts)
+ *
+ * LDS read of an n-element `dtype` fragment at [row, idx] in loads of at most
+ * `max_elems` elements, piece h at idx + h * stride, joined in K order. With
+ * f32 and max_elems = 4 every piece is one 16-byte ds_read_b128. `stride` <= 0
+ * is Python's `None` (contiguous pieces, stride = max_elems). n not a multiple
+ * of max_elems records ROCKE_ERR_VALUE. */
+rocke_value_t* rocke_b_smem_load_fragment(rocke_ir_builder_t* b,
+                                          rocke_value_t* smem,
+                                          rocke_value_t* row,
+                                          rocke_value_t* idx,
+                                          const rocke_type_t* dtype,
+                                          int n,
+                                          int max_elems,
+                                          int stride);
+
 #ifdef __cplusplus
 }
 #endif
