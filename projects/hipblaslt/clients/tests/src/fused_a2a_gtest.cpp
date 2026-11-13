@@ -701,6 +701,28 @@ namespace
                       HIPBLAS_STATUS_SUCCESS);
         }
 
+        using Layout = std::unique_ptr<std::remove_pointer_t<hipblasLtMatrixLayout_t>,
+                                       decltype(&hipblasLtMatrixLayoutDestroy)>;
+
+        static Layout groupedLayout(hipDataType type, uint64_t rows, uint64_t cols)
+        {
+            hipblasLtMatrixLayout_t layout = nullptr;
+            EXPECT_EQ(
+                hipblasLtGroupedMatrixLayoutCreate(&layout, type, 1, nullptr, nullptr, nullptr),
+                HIPBLAS_STATUS_SUCCESS);
+            const int64_t ld = int64_t(rows);
+            EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                          layout, HIPBLASLT_MATRIX_LAYOUT_ROWS, &rows, sizeof(rows)),
+                      HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                          layout, HIPBLASLT_MATRIX_LAYOUT_COLS, &cols, sizeof(cols)),
+                      HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                          layout, HIPBLASLT_MATRIX_LAYOUT_LD, &ld, sizeof(ld)),
+                      HIPBLAS_STATUS_SUCCESS);
+            return Layout(layout, &hipblasLtMatrixLayoutDestroy);
+        }
+
         hipblasStatus_t heuristic(hipblasLtMatmulHeuristicResult_t* result   = nullptr,
                                   int*                              returned = nullptr)
         {
@@ -862,6 +884,29 @@ namespace
         EXPECT_EQ(hipblasLtMatmulDescDestroy(plainDesc), HIPBLAS_STATUS_SUCCESS);
     }
 
+    TEST_F(FusedA2ADispatch_pre_checkin, GroupedHeuristicRejectsAFusedDescriptor)
+    {
+        constexpr int64_t m = 256, n = 256, k = 256;
+        Layout layA = groupedLayout(HIP_R_16BF, m, k), layB = groupedLayout(HIP_R_16BF, k, n),
+               layD = groupedLayout(HIP_R_16BF, m, n);
+        registerOneRank();
+        completeAndAttach(m);
+
+        hipblasLtMatmulHeuristicResult_t result   = {};
+        int                              returned = 0;
+        EXPECT_EQ(hipblasLtMatmulAlgoGetHeuristic(handle,
+                                                  matmulDesc,
+                                                  layA.get(),
+                                                  layB.get(),
+                                                  layD.get(),
+                                                  layD.get(),
+                                                  pref,
+                                                  1,
+                                                  &result,
+                                                  &returned),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
     TEST_F(FusedA2ADispatch_pre_checkin, GroupedMatmulRejectsAFusedDescriptorAfterAPlainLaunch)
     {
         constexpr int64_t m = 256, n = 256, k = 256, scaleBlock = 32;
@@ -889,47 +934,26 @@ namespace
             ASSERT_EQ(hipblasLtMatmulDescSetAttribute(matmulDesc, attr, &slot, sizeof(slot)),
                       HIPBLAS_STATUS_SUCCESS);
 
-        using Layout = std::unique_ptr<std::remove_pointer_t<hipblasLtMatrixLayout_t>,
-                                       decltype(&hipblasLtMatrixLayoutDestroy)>;
-        auto grouped = [](hipDataType type, uint64_t rows, uint64_t cols) {
-            hipblasLtMatrixLayout_t layout = nullptr;
-            EXPECT_EQ(
-                hipblasLtGroupedMatrixLayoutCreate(&layout, type, 1, nullptr, nullptr, nullptr),
-                HIPBLAS_STATUS_SUCCESS);
-            const int64_t ld = int64_t(rows);
-            EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
-                          layout, HIPBLASLT_MATRIX_LAYOUT_ROWS, &rows, sizeof(rows)),
-                      HIPBLAS_STATUS_SUCCESS);
-            EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
-                          layout, HIPBLASLT_MATRIX_LAYOUT_COLS, &cols, sizeof(cols)),
-                      HIPBLAS_STATUS_SUCCESS);
-            EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
-                          layout, HIPBLASLT_MATRIX_LAYOUT_LD, &ld, sizeof(ld)),
-                      HIPBLAS_STATUS_SUCCESS);
-            return Layout(layout, &hipblasLtMatrixLayoutDestroy);
-        };
-        Layout layA = grouped(HIP_R_8F_E4M3, k, m), layB = grouped(HIP_R_8F_E4M3, k, n),
-               layD = grouped(HIP_R_16BF, m, n);
+        Layout layA = groupedLayout(HIP_R_8F_E4M3, k, m), layB = groupedLayout(HIP_R_8F_E4M3, k, n),
+               layD = groupedLayout(HIP_R_16BF, m, n);
 
         const uint64_t wsLimit = workspaceSize;
         ASSERT_EQ(hipblasLtMatmulPreferenceSetAttribute(
                       pref, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &wsLimit, sizeof(wsLimit)),
                   HIPBLAS_STATUS_SUCCESS);
-        auto heuristicGrouped = [&](hipblasLtMatmulHeuristicResult_t* result, int* returned) {
-            return hipblasLtMatmulAlgoGetHeuristic(handle,
-                                                   matmulDesc,
-                                                   layA.get(),
-                                                   layB.get(),
-                                                   layD.get(),
-                                                   layD.get(),
-                                                   pref,
-                                                   1,
-                                                   result,
-                                                   returned);
-        };
         hipblasLtMatmulHeuristicResult_t result   = {};
         int                              returned = 0;
-        ASSERT_EQ(heuristicGrouped(&result, &returned), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtMatmulAlgoGetHeuristic(handle,
+                                                  matmulDesc,
+                                                  layA.get(),
+                                                  layB.get(),
+                                                  layD.get(),
+                                                  layD.get(),
+                                                  pref,
+                                                  1,
+                                                  &result,
+                                                  &returned),
+                  HIPBLAS_STATUS_SUCCESS);
         if(returned == 0)
             GTEST_SKIP() << "no grouped MXFP8 solution in the loaded library";
 
@@ -958,7 +982,6 @@ namespace
         registerOneRank();
         completeAndAttach(m);
         EXPECT_EQ(matmul(), HIPBLAS_STATUS_INVALID_VALUE);
-        EXPECT_EQ(heuristicGrouped(&result, &returned), HIPBLAS_STATUS_INVALID_VALUE);
     }
 
     TEST_F(FusedA2ADispatch_pre_checkin, IsAlgoSupportedRejectsChannelOutsideTheCommunicator)
