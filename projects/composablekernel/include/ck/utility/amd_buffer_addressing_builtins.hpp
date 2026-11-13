@@ -4,6 +4,7 @@
 #pragma once
 #include "data_type.hpp"
 #include "ck/utility/amd_buffer_coherence.hpp"
+#include "ck/utility/synchronization.hpp"
 #if defined(__gfx125__)
 #include "ck/utility/amd_address_space.hpp"
 #endif
@@ -943,7 +944,7 @@ __device__ void amd_direct_load_global_to_lds(const T* global_base_ptr,
 #endif
     __builtin_amdgcn_raw_ptr_buffer_load_async_lds(
         src_resource, lds_ptr, bytes_per_thread, global_offset_bytes, 0, 0, 0);
-    __builtin_amdgcn_asyncmark();
+    asyncmark();
 #elif CK_USE_AMD_LDS_DIRECT_LOAD_INLINE_ASM
     T* lds_ptr = lds_base_ptr + lds_offset;
 #ifndef CK_CODE_GEN_RTC
@@ -1270,7 +1271,7 @@ __device__ void amd_async_load_global_to_lds(const T* global_base_ptr,
         *lds_ptr = {};
     }
 #if CK_HAS_ASYNCMARK
-    __builtin_amdgcn_asyncmark();
+    asyncmark();
 #endif
 }
 
