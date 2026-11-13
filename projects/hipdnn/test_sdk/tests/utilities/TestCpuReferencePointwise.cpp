@@ -787,6 +787,42 @@ protected:
         EXPECT_TRUE(validator->allClose(expected, output));
     }
 
+    // Operands in different layouts, each addressed through its own strides.
+    void testBinaryAddMixedLayouts()
+    {
+        const std::vector<int64_t> dims = {2, 3, 4, 5};
+        Tensor<Input1Type> input1(dims, TensorLayout::NHWC);
+        Tensor<Input2Type> input2(dims, TensorLayout::NCHW);
+        Tensor<OutputType> output(dims, TensorLayout::NHWC);
+        Tensor<OutputType> expected(dims, TensorLayout::NHWC);
+
+        // Small integers, so every type holds them and their sums exactly.
+        for(int64_t n = 0; n < dims[0]; ++n)
+        {
+            for(int64_t c = 0; c < dims[1]; ++c)
+            {
+                for(int64_t h = 0; h < dims[2]; ++h)
+                {
+                    for(int64_t w = 0; w < dims[3]; ++w)
+                    {
+                        const auto a = static_cast<float>((n + (2 * c) + (3 * h) + w) % 7);
+                        const auto b = static_cast<float>(((5 * n) + c + h + (2 * w)) % 5);
+                        input1.setHostValue(safeTestTypeCast<Input1Type>(a), n, c, h, w);
+                        input2.setHostValue(safeTestTypeCast<Input2Type>(b), n, c, h, w);
+                        expected.setHostValue(safeTestTypeCast<OutputType>(a + b), n, c, h, w);
+                    }
+                }
+            }
+        }
+
+        CpuReferencePointwiseImpl<OutputType, Input1Type, Input2Type>::pointwiseCompute(
+            PointwiseMode::ADD, output, input1, input2);
+
+        auto tolerance = getDynamicTolerance(PointwiseMode::ADD, 12.0f);
+        auto validator = createAllCloseValidator<OutputType>(tolerance, tolerance);
+        EXPECT_TRUE(validator->allClose(expected, output));
+    }
+
     // ======================= UNARY OPERATIONS =======================
 
     void testReluForwardOperation()
@@ -1785,6 +1821,11 @@ TYPED_TEST(CpuReferencePointwiseFixture, BinaryBroadcast2Dx1DMin)
 TYPED_TEST(CpuReferencePointwiseFixture, BinaryBroadcast5D)
 {
     this->testBroadcast5D();
+}
+
+TYPED_TEST(CpuReferencePointwiseFixture, BinaryAddMixedLayouts)
+{
+    this->testBinaryAddMixedLayouts();
 }
 
 // Unary operation tests

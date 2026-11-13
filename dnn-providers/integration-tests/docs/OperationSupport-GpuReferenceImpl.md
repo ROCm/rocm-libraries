@@ -78,7 +78,7 @@ The following table lists the operations currently executable through the GPU gr
 |-----------|-------------------|-------------------|
 | BlockScale Quantize / Dequantize | `ReferenceCapabilityError` | None |
 | MoE Grouped Matmul (forward and backward) | "Unsupported node type" error | None |
-| Pointwise ternary (`BINARY_SELECT`), `MAX`, `MIN`, `CMP_GT` | Not applicable (plan builders reject the mode) | Not implemented |
+| Pointwise ternary (`BINARY_SELECT`), `MAX_OP`, `MIN_OP`, `CMP_GT` | Not applicable (plan builders reject the mode) | Not implemented |
 | Custom operations | `ReferenceCapabilityError` | None |
 
 Operations with a `gpu-ref` library entry but no executor plan can be called directly from C++ code
@@ -160,11 +160,73 @@ The GPU executor accepts a subset of the pointwise modes the CPU reference imple
 | Group | GPU modes | Modes the CPU reference has that GPU lacks |
 |-------|-----------|---------------------------------------------|
 | Unary | IDENTITY, ABS, NEG, RELU_FWD, SIGMOID_FWD, TANH_FWD, GELU_FWD, GELU_APPROX_TANH_FWD, SWISH_FWD | - (GPU additionally supports IDENTITY) |
-| Binary | ADD, SUB, MUL, RELU_BWD, SIGMOID_BWD, TANH_BWD | MAX, MIN, CMP_GT |
+| Binary | ADD, SUB, MUL, RELU_BWD, SIGMOID_BWD, TANH_BWD | MAX_OP, MIN_OP, CMP_GT |
 | Ternary | - | BINARY_SELECT |
 
-Pointwise nodes use `FP32` compute and no `BOOLEAN` tensors. A pointwise node with a runtime
-pass-by-value operand is rejected, as are Convolution Forward, Backward Data and Backward Weights nodes with such an operand.
+The names are the `PointwiseMode` values of the serialized graph. The frontend spells `MAX_OP` and `MIN_OP` as
+`PointwiseMode::MAX` and `PointwiseMode::MIN`.
+
+**Datatype tuples.** The signature key holds the datatypes of both inputs, the output and the compute type, and
+no mode: the plan builders switch on it, so every mode of a group accepts every tuple of the group's table. The
+compute type is FP32 in every tuple.
+
+Unary modes:
+
+| Input | Output |
+|-------|--------|
+| FP32 | FP32 |
+| FP16 | FP16 |
+| BFP16 | BFP16 |
+| FP16 | FP32 |
+| BFP16 | FP32 |
+| FP32 | FP16 |
+| FP32 | BFP16 |
+| FP16 | BFP16 |
+| BFP16 | FP16 |
+
+Binary modes:
+
+| First input | Second input | Output |
+|-------------|--------------|--------|
+| FP32 | FP32 | FP32 |
+| FP16 | FP16 | FP16 |
+| BFP16 | BFP16 | BFP16 |
+| FP16 | FP16 | FP32 |
+| BFP16 | BFP16 | FP32 |
+| BFP16 | FP16 | FP32 |
+| FP16 | BFP16 | FP32 |
+| BFP16 | FP16 | FP16 |
+| FP16 | BFP16 | BFP16 |
+| BFP16 | FP16 | BFP16 |
+| FP16 | BFP16 | FP16 |
+
+There are no `BOOLEAN` tensors (so no comparisons or selects), no tuple with a compute type other than FP32,
+and no tuple with an FP32 operand beside a 16-bit one. The CPU reference registers those.
+
+**Mixed-datatype tuples.** The GPU reference registers the mixes the CPU reference does not: unary conversions
+that widen a 16-bit input to FP32 or go between FP16 and BFP16, and binary nodes that mix FP16 with BFP16. See the
+[CPU document](../../../projects/hipdnn/docs/OperationSupport-ReferenceImpl.md#pointwise-restrictions) for the
+other direction.
+
+**Compute datatype.** The kernels compute in the node's compute type, which has to be FP32 to match a tuple. The
+CPU reference evaluates in `double` whatever the node says.
+
+**Parameters.** `relu_lower_clip`, `relu_upper_clip` and `relu_lower_clip_slope` apply to `RELU_FWD` and
+`RELU_BWD`, `swish_beta` to `SWISH_FWD`. A parameter on any other mode is ignored, where the CPU reference
+throws. `elu_alpha` and `softplus_beta` are ignored: no GPU mode uses them.
+
+**Shapes and layouts.** Every tensor is addressed through its own strides, and every input broadcasts to the
+output. The kernels address at most 5 dimensions (`GpuReferencePointwise::MAX_DIMS`). A node whose output is
+deeper is declined in `isApplicable`, which is a capability miss: the default `auto` verification chain moves
+on to the CPU reference, and `--verification-mode gpu` fails the bundle, as it does for any op the GPU cannot
+run. The node never reaches the kernel launch, which would throw.
+
+A pointwise node with a runtime pass-by-value operand is rejected, as are Convolution Forward, Backward Data and
+Backward Weights nodes with such an operand.
+
+`TestPointwiseReferenceParity` (`tests/TestGpuPointwiseSignatureKey.cpp`) asks both executors about every mode
+and datatype tuple either registry can express, and fails when the two differ in a way `knownGaps()` does not list
+or when a listed difference no longer exists. Update these two documents together with `knownGaps()`.
 
 ### Reduction Modes
 
@@ -246,7 +308,7 @@ host validator.
 | SDPA Backward | Yes | Yes (dense; ragged through the dense rewrite) |
 | BlockScale Quantize / Dequantize | Yes | No |
 | Pointwise Unary | Yes (no IDENTITY) | Yes (incl. IDENTITY) |
-| Pointwise Binary | Yes (incl. MAX, MIN, CMP_GT) | Yes (ADD, SUB, MUL and the three backward modes) |
+| Pointwise Binary | Yes (incl. MAX_OP, MIN_OP, CMP_GT) | Yes (ADD, SUB, MUL and the three backward modes) |
 | Pointwise Ternary | Yes (BINARY_SELECT) | No |
 
 ## Operations Required of the GPU Reference in Bundle Verification
@@ -255,8 +317,13 @@ Support above is what the executor *can* run. The bundle harness additionally ke
 reference (`gpuSupportedOps()` in `src/harness/reference-validation/ReferenceOpCoverage.cpp`). A bundle
 is verified against the GPU reference only when every node type in its graph is in that set;
 otherwise the GPU lane reports `OUTSIDE_OP_SET` for it. The set is currently **Convolution Forward** and
-**SDPA Forward**, so it is narrower than the table above. The CPU reference set is documented in
+**SDPA** (forward and backward), so it is narrower than the table above. The CPU reference set is documented in
 [CPU Reference Implementation - Operation Support](../../../projects/hipdnn/docs/OperationSupport-ReferenceImpl.md#use-in-the-integration-tests).
+
+Pointwise is not in the set because the GPU reference still lacks pointwise graphs the CPU reference takes (see
+[Pointwise Modes](#pointwise-modes)), which is why a Convolution Forward + Pointwise bundle reports
+`OUTSIDE_OP_SET` for the GPU lane. `TestPointwiseReferenceParity` requires adding `PointwiseAttributes` to the
+set as soon as the last of those gaps closes, and fails if it is added before.
 
 ## Legend
 

@@ -19,9 +19,6 @@ namespace hipdnn_gpu_ref
 namespace
 {
 
-// Shared argument and stride structs — single definition used by both host and device (HipRTC).
-#include <GpuRefPointwiseArgs.h> // NOLINT(misc-include-cleaner)
-
 // For each input tensor, compute broadcast-aware strides to enable each thread in the HIP kernel
 // execution grid can to load the correct input element.
 // Broadcasting rules:
@@ -63,31 +60,31 @@ void GpuReferencePointwise::launchUnary(
     switch(operation)
     {
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY:
-        opCode = POINTWISE_UNARY_OP_IDENTITY;
+        opCode = detail::POINTWISE_UNARY_OP_IDENTITY;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ABS:
-        opCode = POINTWISE_UNARY_OP_ABS;
+        opCode = detail::POINTWISE_UNARY_OP_ABS;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::NEG:
-        opCode = POINTWISE_UNARY_OP_NEG;
+        opCode = detail::POINTWISE_UNARY_OP_NEG;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD:
-        opCode = POINTWISE_UNARY_OP_RELU_FWD;
+        opCode = detail::POINTWISE_UNARY_OP_RELU_FWD;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SIGMOID_FWD:
-        opCode = POINTWISE_UNARY_OP_SIGMOID_FWD;
+        opCode = detail::POINTWISE_UNARY_OP_SIGMOID_FWD;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::TANH_FWD:
-        opCode = POINTWISE_UNARY_OP_TANH_FWD;
+        opCode = detail::POINTWISE_UNARY_OP_TANH_FWD;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_FWD:
-        opCode = POINTWISE_UNARY_OP_GELU_FWD;
+        opCode = detail::POINTWISE_UNARY_OP_GELU_FWD;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::GELU_APPROX_TANH_FWD:
-        opCode = POINTWISE_UNARY_OP_GELU_APPROX_TANH_FWD;
+        opCode = detail::POINTWISE_UNARY_OP_GELU_APPROX_TANH_FWD;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SWISH_FWD:
-        opCode = POINTWISE_UNARY_OP_SWISH_FWD;
+        opCode = detail::POINTWISE_UNARY_OP_SWISH_FWD;
         break;
     default:
         throw std::invalid_argument("Unsupported unary pointwise operation: "
@@ -108,7 +105,7 @@ void GpuReferencePointwise::launchUnary(
     // Calculate the strides to access input elements at
     auto broadCastStrides = makeBroadcastStrides(inputDims, inputStrides, outputDims);
 
-    PointwiseUnaryArgs args{};
+    detail::PointwiseUnaryArgs args{};
     args.input = inputPtr;
     args.output = outputPtr;
     args.size = numElements;
@@ -145,22 +142,22 @@ void GpuReferencePointwise::launchBinary(
     switch(operation)
     {
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ADD:
-        opCode = POINTWISE_BINARY_OP_ADD;
+        opCode = detail::POINTWISE_BINARY_OP_ADD;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SUB:
-        opCode = POINTWISE_BINARY_OP_SUB;
+        opCode = detail::POINTWISE_BINARY_OP_SUB;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MUL:
-        opCode = POINTWISE_BINARY_OP_MUL;
+        opCode = detail::POINTWISE_BINARY_OP_MUL;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SIGMOID_BWD:
-        opCode = POINTWISE_BINARY_OP_SIGMOID_BWD;
+        opCode = detail::POINTWISE_BINARY_OP_SIGMOID_BWD;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::TANH_BWD:
-        opCode = POINTWISE_BINARY_OP_TANH_BWD;
+        opCode = detail::POINTWISE_BINARY_OP_TANH_BWD;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_BWD:
-        opCode = POINTWISE_BINARY_OP_RELU_BWD;
+        opCode = detail::POINTWISE_BINARY_OP_RELU_BWD;
         break;
     default:
         throw std::invalid_argument("Unsupported binary pointwise operation: "
@@ -181,7 +178,7 @@ void GpuReferencePointwise::launchBinary(
     auto broadCast0Strides = makeBroadcastStrides(input0Dims, input0Strides, outputDims);
     auto broadCast1Strides = makeBroadcastStrides(input1Dims, input1Strides, outputDims);
 
-    PointwiseBinaryArgs args{};
+    detail::PointwiseBinaryArgs args{};
     args.input0 = input0Ptr;
     args.input1 = input1Ptr;
     args.output = outputPtr;

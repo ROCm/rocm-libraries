@@ -510,6 +510,7 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
     };
 
     // The engines that serve this graph on gfx90a, gfx942 and gfx950, and no others.
+    // NOLINTNEXTLINE(misc-const-correctness)
     size_t expected = 0;
 #ifdef HIPDNN_ENGINE_ASM_SDPA
     // The assembly kernels are built for gfx942 and gfx950 only.
