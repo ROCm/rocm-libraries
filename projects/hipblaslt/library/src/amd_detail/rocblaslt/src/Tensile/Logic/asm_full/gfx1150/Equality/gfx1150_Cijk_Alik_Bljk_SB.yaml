@@ -278,6 +278,7 @@ DefaultSolution:
   WorkGroupMapping: 8
   WorkGroupMappingXCC: 1
   WorkGroupMappingXCCGroup: -1
+  WorkGroupProcessorMode: -1
   WorkGroupReduction: false
   WorkQueueStealing: 0
 Solutions:

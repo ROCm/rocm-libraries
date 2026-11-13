@@ -278,6 +278,7 @@ DefaultSolution:
   WorkGroupMapping: 8
   WorkGroupMappingXCC: 1
   WorkGroupMappingXCCGroup: -1
+  WorkGroupProcessorMode: -1
   WorkGroupReduction: false
   WorkQueueStealing: 0
 Solutions:
@@ -408,6 +409,7 @@ Solutions:
   NumWaveSplitK: 1
   NumWaves: 16
   OptNoLoadLoop: 0
+  PGR2DoubleG2L: false
   PackedC0IdxChars: [I]
   PackedC0IndicesX: [0]
   PackedC1IdxChars: [J]
@@ -455,6 +457,7 @@ Solutions:
   WavefrontSize: 32
   WorkGroup: [32, 16, 1]
   WorkGroupMapping: 16
+  WorkGroupProcessorMode: 0
   WorkspaceCheck: [4, 0, 1]
   _DepthU: 8
   _DepthUA: 8
@@ -627,6 +630,7 @@ Solutions:
   NumWaveSplitK: 1
   NumWaves: 16
   OptNoLoadLoop: 0
+  PGR2DoubleG2L: false
   PackedC0IdxChars: [I]
   PackedC0IndicesX: [0]
   PackedC1IdxChars: [J]
@@ -674,6 +678,7 @@ Solutions:
   WavefrontSize: 32
   WorkGroup: [32, 16, 1]
   WorkGroupMapping: 16
+  WorkGroupProcessorMode: 0
   WorkspaceCheck: [4, 0, 1]
   _DepthU: 8
   _DepthUA: 8
