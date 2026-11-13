@@ -41,6 +41,13 @@ from math import ceil
 
 MIN_K_FOR_GSU = 32
 
+def _isCheckedInRocRollerCapture(state):
+    """A rocRoller MX kernel checked in as a custom kernel (not one generated here)."""
+    customKernel = state.get('CustomKernel') if hasattr(state, 'get') else None
+    return bool(customKernel and not customKernel.get('generated', False)
+                and isRocRollerMXCapture(customKernel.get('name')))
+
+
 def _operandIsPerInputMxType(dtype):
     """True for FP8, BF8 (including fnuz), FP6, BF6, and FP4."""
     return dtype.isAnyFloat8() or dtype.isAnyBFloat8() or dtype.is6bitFloat() or dtype.isFloat4()
@@ -764,8 +771,7 @@ class ProblemPredicate(Properties.Predicate):
         # (getRocRollerSelectedSolutions) guards all three; that is stricter than
         # correctness requires.
         customKernel = state.get('CustomKernel') if hasattr(state, 'get') else None
-        if (customKernel and not customKernel.get('generated', False)
-                and isRocRollerMXCapture(customKernel.get('name'))):
+        if _isCheckedInRocRollerCapture(state):
             # [MacroTile0, MacroTile1, DepthU], computed in CustomKernels.py from
             # the kernel's own MatrixInstruction/WaveTile/WorkGroup. Scoped to
             # the rocRoller MX captures (Source.Origin rocroller with MX scales),
@@ -1215,7 +1221,8 @@ class Solution:
             d['CUCount'] = None
 
         rv.hardwarePredicate = Hardware.HardwarePredicate.FromHardware(
-            d['ISA'], d['CUCount'], d.get('DeviceNames', None), logicFile=srcName
+            d['ISA'], d['CUCount'], d.get('DeviceNames', None), logicFile=srcName,
+            rocRollerCapture=_isCheckedInRocRollerCapture(d)
         )
         rv.originalSolution = OriginalSolution(
                                   d,

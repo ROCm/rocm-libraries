@@ -9,6 +9,7 @@
 #include "../../../library/src/amd_detail/rocblaslt/src/include/rocroller_kernel_select.hpp"
 
 #include <Tensile/AMDGPU.hpp>
+#include <Tensile/AMDGPUPredicates.hpp>
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
 
@@ -273,6 +274,61 @@ TEST(HostUnitRocRollerKernelSelect, smoke_StreamKIsRefusedFromTwoTilesPerWorkgro
         EXPECT_FALSE(rocRollerKernelLaunchHasDataParallelTiles(plain, problem, device))
             << "a kernel that is not Stream-K is never refused; grid " << c.grid;
     }
+}
+
+// A checked-in rocRoller kernel carries RocRollerCaptures in its hardware
+// predicate. Only the build without rocRoller marks its hardware, so the same
+// kernel is a candidate there and refused by a rocRoller build's Tensile paths;
+// a kernel without the term is accepted by both.
+TEST(HostUnitRocRollerKernelSelect, smoke_OnlyTheRocRollerOffBuildAcceptsCaptures)
+{
+    using AMDGPUPredicate
+        = std::shared_ptr<TensileLite::Predicates::Predicate<TensileLite::AMDGPU>>;
+    auto onGfx950 = [](std::vector<AMDGPUPredicate> terms) {
+        terms.insert(terms.begin(),
+                     std::make_shared<TensileLite::Predicates::GPU::ProcessorEqual>(
+                         TensileLite::AMDGPU::Processor::gfx950));
+        return std::make_shared<
+            TensileLite::Predicates::IsSubclass<TensileLite::Hardware, TensileLite::AMDGPU>>(
+            std::make_shared<TensileLite::Predicates::And<TensileLite::AMDGPU>>(terms));
+    };
+    TensileLite::ContractionSolution capture;
+    capture.hardwarePredicate
+        = onGfx950({std::make_shared<TensileLite::Predicates::GPU::RocRollerCaptures>()});
+    TensileLite::ContractionSolution other;
+    other.hardwarePredicate = onGfx950({});
+
+    const auto problem = TensileLite::ContractionProblemGemm::GEMM(
+        true, false, 256, 256, 256, 256, 256, 256, 1.0, false, 1);
+    TensileLite::AMDGPU device(TensileLite::AMDGPU::Processor::gfx950, 256, "gfx950");
+    EXPECT_FALSE(device.rocRollerCaptures);
+    EXPECT_FALSE(rocRollerKernelAccepts(capture, problem, device));
+    EXPECT_TRUE(rocRollerKernelAccepts(other, problem, device));
+
+    const TensileLite::AMDGPU unmarked = device;
+    allowRocRollerCaptures(device);
+#ifdef HIPBLASLT_USE_ROCROLLER
+    EXPECT_FALSE(device.rocRollerCaptures);
+    EXPECT_FALSE(rocRollerKernelAccepts(capture, problem, device));
+    EXPECT_TRUE(unmarked == device);
+#else
+    EXPECT_TRUE(device.rocRollerCaptures);
+    EXPECT_TRUE(rocRollerKernelAccepts(capture, problem, device));
+    // Selection caches key on the AMDGPU, so marked and unmarked never share an entry.
+    EXPECT_FALSE(unmarked == device);
+#endif
+    EXPECT_TRUE(rocRollerKernelAccepts(other, problem, device));
+
+    // An index lookup treats a capture as absent only where the term alone
+    // refuses it. A kernel for another processor is not a capture refusal.
+    EXPECT_TRUE(refusedOnlyForRocRollerCaptures(capture, unmarked));
+    EXPECT_FALSE(refusedOnlyForRocRollerCaptures(other, unmarked));
+    TensileLite::AMDGPU gfx942(TensileLite::AMDGPU::Processor::gfx942, 304, "gfx942");
+    EXPECT_FALSE(refusedOnlyForRocRollerCaptures(capture, gfx942));
+    EXPECT_FALSE(refusedOnlyForRocRollerCaptures(other, gfx942));
+#ifndef HIPBLASLT_USE_ROCROLLER
+    EXPECT_FALSE(refusedOnlyForRocRollerCaptures(capture, device));
+#endif
 }
 
 TEST(HostUnitRocRollerKernelSelect, smoke_NoTilesNoKernels)

@@ -26,6 +26,7 @@
 
 #include <gtest/gtest.h>
 
+#include <Tensile/AMDGPUPredicates.hpp>
 #include <Tensile/ContractionProblemPredicates.hpp>
 
 TEST(Predicates, ArithmeticIntensity)
@@ -573,4 +574,29 @@ TEST(Predicates, BufferAddressingLimitCheck_SingleBatchIgnoresBatchStride)
 
     auto pred = std::make_shared<Predicates::Contraction::BufferAddressingLimitCheck>();
     EXPECT_TRUE((*pred)(f8ToF32(1024, 1024, 256, 1024, /*dStride=*/1ull << 30)));
+}
+
+// The checked-in rocRoller kernels are selectable only on hardware that a
+// hipBLASLt build without rocRoller marks; an unmarked AMDGPU refuses them.
+TEST(Predicates, RocRollerCaptures_OnlyMarkedHardware)
+{
+    using namespace TensileLite;
+    AMDGPU                             gpu(AMDGPU::Processor::gfx950, 256, "gfx950");
+    Predicates::GPU::RocRollerCaptures pred;
+    EXPECT_EQ(pred.type(), "RocRollerCaptures");
+    EXPECT_FALSE(pred(gpu));
+
+    const AMDGPU unmarked = gpu;
+    gpu.rocRollerCaptures = true;
+    EXPECT_TRUE(pred(gpu));
+    EXPECT_FALSE(unmarked == gpu);
+
+    std::shared_ptr<Predicates::Predicate<Hardware>> onGfx950
+        = std::make_shared<Predicates::IsSubclass<Hardware, AMDGPU>>(
+            std::make_shared<Predicates::And<AMDGPU>>(
+                std::initializer_list<std::shared_ptr<Predicates::Predicate<AMDGPU>>>{
+                    std::make_shared<Predicates::GPU::ProcessorEqual>(AMDGPU::Processor::gfx950),
+                    std::make_shared<Predicates::GPU::RocRollerCaptures>()}));
+    EXPECT_TRUE((*onGfx950)(gpu));
+    EXPECT_FALSE((*onGfx950)(unmarked));
 }
