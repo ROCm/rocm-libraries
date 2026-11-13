@@ -1,0 +1,31 @@
+{
+  "version": "1.0",
+  "id": "ec27a0ce-e4f7-4349-9992-3a26fba8c522",
+  "name": "hip_conv_dgrad_dw_rdna variant fields",
+  "fields": [
+    {
+      "name": "kernel_family",
+      "type": "string"
+    },
+    {
+      "name": "variant",
+      "type": "string"
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "layout",
+      "type": "string"
+    },
+    {
+      "name": "filter_w",
+      "type": "int"
+    },
+    {
+      "name": "stride",
+      "type": "int"
+    }
+  ]
+}

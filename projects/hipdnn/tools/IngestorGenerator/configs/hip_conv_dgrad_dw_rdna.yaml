@@ -1,0 +1,216 @@
+# Source of truth for the shipped hipkernel:hip_conv_dgrad_dw_rdna catalog: the backward data
+# of a depthwise convolution (groups == C, K a multiple of C), which is also the forward of a
+# depthwise transposed convolution, for the gfx11 (RDNA3/3.5) and gfx12 (RDNA4) targets,
+# compiled from HIP source.
+#
+# The specialized kernel (kernels/ConvDgradDepthwise.cpp, ConvDgradDepthwise1d) takes 1-D NCL
+# with K == C and dilation 1 and compiles the filter width and stride in. It is built for
+# k = 12 at stride 2 (BigVGAN-style 2x upsampling), k = 29 / 43 at stride 2 / 3 (Hann
+# resamplers) and k = 7 at stride 1, with one output phase per lane in fp32 and two in fp16 /
+# bf16. Every other problem runs on the generic kernel of the same file (ConvDgradDepthwise).
+# The native matcher (HipConvDgradDwRdnaNative.cpp, geometryOf) picks one variant per graph;
+# the shapes here must match it.
+
+dialect: packaged
+authored_subpath: hip/conv_dgrad_dw_rdna
+engine:
+  name: hipkernel:hip_conv_dgrad_dw_rdna
+  sdk_version: "1.0.0"
+  knobs: []
+  heuristic: native
+
+kmd_fields:
+- name: kernel_family
+  type: string
+- name: variant
+  type: string
+- name: dtype
+  type: string
+- name: layout
+  type: string
+- name: filter_w
+  type: int
+- name: stride
+  type: int
+
+graph_match:
+  shape: shared_shape
+  discriminator: none
+
+kernel_source_kind: hip
+workspace_policy: none
+
+packs:
+- name: hip_conv_dgrad_dw_rdna
+  arch: [gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201]
+  kernels:
+  - name: hip_conv_dgrad_dw_rdna.f32_ncl_k12_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradDepthwise.cpp
+      entry: ConvDgradDepthwise1d
+      build:
+        defines: {DW_DTYPE: 0, DW_K: 12, DW_S: 2, DW_TW: 1}
+    metadata: {kernel_family: dgrad_dw_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_w: 12, stride: 2}
+    priority: 0
+  - name: hip_conv_dgrad_dw_rdna.f32_ncl_k29_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradDepthwise.cpp
+      entry: ConvDgradDepthwise1d
+      build:
+        defines: {DW_DTYPE: 0, DW_K: 29, DW_S: 2, DW_TW: 1}
+    metadata: {kernel_family: dgrad_dw_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_w: 29, stride: 2}
+    priority: 0
+  - name: hip_conv_dgrad_dw_rdna.f32_ncl_k43_s3
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradDepthwise.cpp
+      entry: ConvDgradDepthwise1d
+      build:
+        defines: {DW_DTYPE: 0, DW_K: 43, DW_S: 3, DW_TW: 1}
+    metadata: {kernel_family: dgrad_dw_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_w: 43, stride: 3}
+    priority: 0
+  - name: hip_conv_dgrad_dw_rdna.f32_ncl_k7_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradDepthwise.cpp
+      entry: ConvDgradDepthwise1d
+      build:
+        defines: {DW_DTYPE: 0, DW_K: 7, DW_S: 1, DW_TW: 1}
+    metadata: {kernel_family: dgrad_dw_direct, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_w: 7, stride: 1}
+    priority: 0
+  - name: hip_conv_dgrad_dw_rdna.f32_ncx_generic
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradDepthwise.cpp
+      entry: ConvDgradDepthwise
+      build:
+        defines: {DW_GENERIC: 1, DW_DTYPE: 0, DW_CHANNELS_LAST: 0}
+    metadata: {kernel_family: dgrad_dw_direct, variant: generic, dtype: FLOAT, layout: CHANNELS_FIRST, filter_w: 0, stride: 0}
+    priority: 0
+  - name: hip_conv_dgrad_dw_rdna.f32_nxc_generic
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradDepthwise.cpp
+      entry: ConvDgradDepthwise
+      build:
+        defines: {DW_GENERIC: 1, DW_DTYPE: 0, DW_CHANNELS_LAST: 1}
+    metadata: {kernel_family: dgrad_dw_direct, variant: generic, dtype: FLOAT, layout: CHANNELS_LAST, filter_w: 0, stride: 0}
+    priority: 0
+  - name: hip_conv_dgrad_dw_rdna.f16_ncl_k12_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradDepthwise.cpp
+      entry: ConvDgradDepthwise1d
+      build:
+        defines: {DW_DTYPE: 1, DW_K: 12, DW_S: 2, DW_TW: 2}
+    metadata: {kernel_family: dgrad_dw_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_w: 12, stride: 2}
+    priority: 0
+  - name: hip_conv_dgrad_dw_rdna.f16_ncl_k29_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradDepthwise.cpp
+      entry: ConvDgradDepthwise1d
+      build:
+        defines: {DW_DTYPE: 1, DW_K: 29, DW_S: 2, DW_TW: 2}
+    metadata: {kernel_family: dgrad_dw_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_w: 29, stride: 2}
+    priority: 0
+  - name: hip_conv_dgrad_dw_rdna.f16_ncl_k43_s3
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradDepthwise.cpp
+      entry: ConvDgradDepthwise1d
+      build:
+        defines: {DW_DTYPE: 1, DW_K: 43, DW_S: 3, DW_TW: 2}
+    metadata: {kernel_family: dgrad_dw_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_w: 43, stride: 3}
+    priority: 0
+  - name: hip_conv_dgrad_dw_rdna.f16_ncl_k7_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradDepthwise.cpp
+      entry: ConvDgradDepthwise1d
+      build:
+        defines: {DW_DTYPE: 1, DW_K: 7, DW_S: 1, DW_TW: 2}
+    metadata: {kernel_family: dgrad_dw_direct, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_w: 7, stride: 1}
+    priority: 0
+  - name: hip_conv_dgrad_dw_rdna.f16_ncx_generic
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradDepthwise.cpp
+      entry: ConvDgradDepthwise
+      build:
+        defines: {DW_GENERIC: 1, DW_DTYPE: 1, DW_CHANNELS_LAST: 0}
+    metadata: {kernel_family: dgrad_dw_direct, variant: generic, dtype: HALF, layout: CHANNELS_FIRST, filter_w: 0, stride: 0}
+    priority: 0
+  - name: hip_conv_dgrad_dw_rdna.f16_nxc_generic
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradDepthwise.cpp
+      entry: ConvDgradDepthwise
+      build:
+        defines: {DW_GENERIC: 1, DW_DTYPE: 1, DW_CHANNELS_LAST: 1}
+    metadata: {kernel_family: dgrad_dw_direct, variant: generic, dtype: HALF, layout: CHANNELS_LAST, filter_w: 0, stride: 0}
+    priority: 0
+  - name: hip_conv_dgrad_dw_rdna.bf16_ncl_k12_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradDepthwise.cpp
+      entry: ConvDgradDepthwise1d
+      build:
+        defines: {DW_DTYPE: 2, DW_K: 12, DW_S: 2, DW_TW: 2}
+    metadata: {kernel_family: dgrad_dw_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_w: 12, stride: 2}
+    priority: 0
+  - name: hip_conv_dgrad_dw_rdna.bf16_ncl_k29_s2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradDepthwise.cpp
+      entry: ConvDgradDepthwise1d
+      build:
+        defines: {DW_DTYPE: 2, DW_K: 29, DW_S: 2, DW_TW: 2}
+    metadata: {kernel_family: dgrad_dw_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_w: 29, stride: 2}
+    priority: 0
+  - name: hip_conv_dgrad_dw_rdna.bf16_ncl_k43_s3
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradDepthwise.cpp
+      entry: ConvDgradDepthwise1d
+      build:
+        defines: {DW_DTYPE: 2, DW_K: 43, DW_S: 3, DW_TW: 2}
+    metadata: {kernel_family: dgrad_dw_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_w: 43, stride: 3}
+    priority: 0
+  - name: hip_conv_dgrad_dw_rdna.bf16_ncl_k7_s1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradDepthwise.cpp
+      entry: ConvDgradDepthwise1d
+      build:
+        defines: {DW_DTYPE: 2, DW_K: 7, DW_S: 1, DW_TW: 2}
+    metadata: {kernel_family: dgrad_dw_direct, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_w: 7, stride: 1}
+    priority: 0
+  - name: hip_conv_dgrad_dw_rdna.bf16_ncx_generic
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradDepthwise.cpp
+      entry: ConvDgradDepthwise
+      build:
+        defines: {DW_GENERIC: 1, DW_DTYPE: 2, DW_CHANNELS_LAST: 0}
+    metadata: {kernel_family: dgrad_dw_direct, variant: generic, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_w: 0, stride: 0}
+    priority: 0
+  - name: hip_conv_dgrad_dw_rdna.bf16_nxc_generic
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradDepthwise.cpp
+      entry: ConvDgradDepthwise
+      build:
+        defines: {DW_GENERIC: 1, DW_DTYPE: 2, DW_CHANNELS_LAST: 1}
+    metadata: {kernel_family: dgrad_dw_direct, variant: generic, dtype: BFLOAT16, layout: CHANNELS_LAST, filter_w: 0, stride: 0}
+    priority: 0
+
+# hip kernels are compiled from source by hkp_pack and hydrate no builder object, so every
+# field is matcher-only.
+specialization:
+  metadata_fields: []
+  matcher_only_fields: [kernel_family, variant, dtype, layout, filter_w, stride]
+  bindings: {}
+  vocabulary: {}
