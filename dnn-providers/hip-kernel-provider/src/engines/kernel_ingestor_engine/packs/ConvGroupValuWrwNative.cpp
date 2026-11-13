@@ -227,6 +227,7 @@ public:
         options.add("GVW_VBX", plan.vbx);
         options.add("GVW_VBY", plan.vby);
         options.add("GVW_RAGGED", plan.ragged ? 1 : 0);
+        options.add("GVW_COLMASK", plan.colmask ? 1 : 0);
         options.add("GVW_DOT2", config.dot2);
         options.add("GVW_RING", config.ring);
 

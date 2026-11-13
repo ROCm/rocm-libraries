@@ -365,6 +365,7 @@ std::optional<Plan>
     // load element by element (a wider load could straddle the tensor's end) and zero the
     // elements past the row. NHWC loads are per column, each checked.
     plan.ragged = nchw && (problem.wi % own != 0 || problem.wo % config.p != 0);
+    plan.colmask = problem.wo % config.p != 0;
     if(nchw)
     {
         plan.vbx

@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -320,7 +321,10 @@ std::vector<DeviceCase> deviceCases()
 }
 
 template <typename T>
-void runCase(ConvShape shape)
+/// @p infAtRowEnd: x holds +inf at the last column of one row of one image and channel. With a
+/// width that is no multiple of a lane's columns, that column is also under output columns past
+/// the row; the reference never multiplies it by them, so the taps it does not reach stay finite.
+void runCase(ConvShape shape, bool infAtRowEnd = false)
 {
     shape.dataType = dataTypeOf<T>();
     const auto spec = specFor(shape, ConvDirection::BACKWARD_WEIGHTS);
@@ -335,6 +339,14 @@ void runCase(ConvShape shape)
     constexpr unsigned int SEED = 9876;
     x.fillTensorWithRandomValues(-1.0f, 1.0f, SEED);
     y.fillTensorWithRandomValues(-1.0f, 1.0f, SEED + 1);
+    if(infAtRowEnd)
+    {
+        const auto& d = spec.x.dims;
+        const std::vector<int64_t> at{d[0] - 1, d[1] - 1, d[2] / 2, d[3] - 1};
+        static_cast<T*>(x.rawHostData())[offsetOf(at, x.strides())]
+            = static_cast<T>(std::numeric_limits<float>::infinity());
+        x.markHostModified();
+    }
     Tensor<T> reference(w.dims(), w.strides());
     Tensor<T> magnitude(w.dims(), w.strides());
     Tensor<T> ax(x.dims(), x.strides());
@@ -404,10 +416,22 @@ void runCase(ConvShape shape)
         w.markDeviceModified();
         const auto* actual = static_cast<const T*>(w.rawHostData());
         int64_t mismatches = 0;
+        int64_t nonFinite = 0;
         forEachIndex(w.dims(), [&](const std::vector<int64_t>& index) {
             const float got = static_cast<float>(actual[offsetOf(index, w.strides())]);
             const float want = static_cast<float>(expected[offsetOf(index, reference.strides())]);
             const float mag = static_cast<float>(bounds[offsetOf(index, magnitude.strides())]);
+            if(!std::isfinite(want))
+            {
+                // A tap the inf reaches: it must not come back finite.
+                ++nonFinite;
+                if(std::isfinite(got) && ++mismatches <= 5)
+                {
+                    ADD_FAILURE() << "at linear index " << offsetOf(index, w.strides()) << ": got "
+                                  << got << ", want " << want;
+                }
+                return;
+            }
             const float tolerance
                 = 8.0f * 1.2e-7f * mag + 2.0f * storageEpsilon<T>() * std::fabs(want) + 1e-6f;
             if(!(std::fabs(got - want) <= tolerance) && ++mismatches <= 5)
@@ -417,6 +441,10 @@ void runCase(ConvShape shape)
             }
         });
         EXPECT_EQ(mismatches, 0);
+        if(infAtRowEnd)
+        {
+            EXPECT_GT(nonFinite, 0) << "the inf reached no tap: the case does not test it";
+        }
     }
     EXPECT_GE(ran, 1) << "no catalog config serves this case";
 }
@@ -447,6 +475,36 @@ INSTANTIATE_TEST_SUITE_P(,
                          TestGpuConvGroupValuWrw,
                          ::testing::ValuesIn(deviceCases()),
                          [](const auto& info) { return info.param.name; });
+
+/// An inf in x at the last column of a row 13 wide: every tile's lanes own 2, 4 or 8 columns, so
+/// the last lane of a row also holds output columns past the row, whose window reaches that
+/// column. Only the taps the reference reaches it with may be non-finite.
+class TestGpuConvGroupValuWrwInf : public ::testing::TestWithParam<bool>
+{
+};
+
+TEST_P(TestGpuConvGroupValuWrwInf, Float)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<float>(conv(2, 8, 8, 2, {7, 13}, {3, 3}, {1, 1}, {1, 1}, GetParam()), true);
+}
+
+TEST_P(TestGpuConvGroupValuWrwInf, Half)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<Half>(conv(2, 8, 8, 2, {7, 13}, {3, 3}, {1, 1}, {1, 1}, GetParam()), true);
+}
+
+TEST_P(TestGpuConvGroupValuWrwInf, BFloat16)
+{
+    SKIP_IF_NO_DEVICES();
+    runCase<BFloat16>(conv(2, 8, 8, 2, {7, 13}, {3, 3}, {1, 1}, {1, 1}, GetParam()), true);
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestGpuConvGroupValuWrwInf,
+                         ::testing::Values(false, true),
+                         [](const auto& info) { return info.param ? "Nhwc" : "Nchw"; });
 
 /// x past 2 GiB of small images (4100 of 16 x 128 x 128 halves, 3x3 stride 2): every pass's
 /// 64-bit image base, 32-bit offsets within it. The reference is sampled: a few dw elements

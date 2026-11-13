@@ -31,6 +31,9 @@
 //   GVW_VBX     bytes a load of x (16, 8, 4 or the element size);  GVW_VBY  the same for dy
 //   GVW_RAGGED  1 when a lane's window can reach past the end of a row (the width not a multiple
 //               of the lane's columns): its elements past the row read zero
+//   GVW_COLMASK 1 when a lane's output columns can reach past the output row (wo not a multiple of
+//               P): the products of those columns are dropped (their x operand selected to 0), so
+//               an inf / NaN in x never meets an output column the convolution does not have
 //   GVW_RING    channels-first, unit height stride and dilation: a lane group walks consecutive
 //               output rows of one image with the filter's input rows in a register ring, so
 //               each input row is read once (not once a filter row), and the next row's loads
@@ -88,6 +91,9 @@
 #ifndef GVW_RING
 #define GVW_RING 0
 #endif
+#ifndef GVW_COLMASK
+#define GVW_COLMASK 0
+#endif
 
 namespace
 {
@@ -105,6 +111,7 @@ constexpr int WAVE = GVW_WAVE;
 constexpr bool RAGGED = GVW_RAGGED != 0;
 constexpr bool DOT2 = GVW_DOT2 != 0;
 constexpr bool RING = GVW_RING != 0;
+constexpr bool COLMASK = GVW_COLMASK != 0;
 constexpr bool NCHW = GVW_LAYOUT == 1;
 
 #if GVW_DT == 0
@@ -141,6 +148,7 @@ constexpr int LW = (PW + O) / 2;
 constexpr int RW = (RH + 1) / 2;
 constexpr int NWD = LW + OWNW + RW;
 static_assert(!RING || NCHW, "row-ring configs: channels-first");
+static_assert(!(DOT2 && COLMASK), "dot2 configs: whole output columns");
 static_assert(!DOT2
                   || (GVW_DT == 1 && NCHW && SW == 1 && P % 2 == 0 && !RAGGED && VBX >= 4
                       && VBY >= 4),
@@ -656,7 +664,11 @@ __device__ inline void ringRow(
 #pragma unroll
                 for(int j = 0; j < P; ++j)
                 {
-                    const float xv = toFloat(ring[(U + r) % FR][c][j * SW + s * DWD]);
+                    float xv = toFloat(ring[(U + r) % FR][c][j * SW + s * DWD]);
+                    if constexpr(COLMASK)
+                    {
+                        xv = ox0 + j < wo ? xv : 0.0f;
+                    }
 #pragma unroll
                     for(int k = 0; k < KB; ++k)
                     {
@@ -1103,7 +1115,13 @@ extern "C" __global__ void __launch_bounds__(GVW_NW* GVW_WAVE)
                                 {
                                     // Output column ox0 + j reads input column (ox0 + j) SW - PW + s DW,
                                     // window element j SW + s DW.
-                                    const float xv = toFloat(xw[r][c][j * SW + s * DWD]);
+                                    float xv = toFloat(xw[r][c][j * SW + s * DWD]);
+                                    if constexpr(COLMASK)
+                                    {
+                                        // A column past the output row: no product (its dy
+                                        // is 0, but x there can be inf).
+                                        xv = ox0 + j < a.wo ? xv : 0.0f;
+                                    }
 #pragma unroll
                                     for(int k = 0; k < KB; ++k)
                                     {

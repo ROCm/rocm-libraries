@@ -106,6 +106,7 @@ struct Plan
     int vbx = 0; ///< bytes a load of x
     int vby = 0; ///< bytes a load of dy
     bool ragged = false;
+    bool colmask = false; ///< output columns past the row: their products are dropped
     int accumulators = 0; ///< filter elements a tile (cb kb fr fs)
     size_t workspaceBytes = 0;
     long long foldGrid = 0; ///< blocks of the fold launch (0: one split, no fold)
