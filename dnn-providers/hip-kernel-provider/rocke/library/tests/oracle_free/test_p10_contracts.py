@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import itertools
 from dataclasses import replace
 from fractions import Fraction
@@ -25,6 +26,7 @@ from ._analytical import (
 )
 from ._dense_subject import DENSE_SUBJECTS
 from ._p10_analytical import (
+    CANARY_BITS,
     LANE_BATCH,
     LANE_KEY,
     LANE_KV_HEAD,
@@ -34,7 +36,11 @@ from ._p10_analytical import (
     P10_GROUPED_CASES,
     P10_QUICK_CASES,
     P10_UNGROUPED_CASES,
+    SENTINEL_BITS,
+    GuardedOutput,
+    GuardLayout,
     RowMoments,
+    StoreSafety,
     TileSchedule,
     _codeword,
     codeword_inputs,
@@ -43,6 +49,7 @@ from ._p10_analytical import (
     codeword_value,
     emulate_path_exact,
     exact_target_bits,
+    guard_layout,
     masked_leading_tiles,
     require_p10_scope,
     row_codeword_collisions,
@@ -52,6 +59,7 @@ from ._p10_analytical import (
 from ._p10_subject import (
     P10_ARCHES,
     P10_SUBJECT_CASES,
+    _launch_guarded,
     _verify_p10_resolved_spec,
     p10_kernel_key,
     p10_schedule,
@@ -790,3 +798,255 @@ def test_every_target_keeps_its_rounding_cell_under_the_path_exact_error(
         quantum = Fraction(2) ** (_binade(value) - fraction_bits)
         assert odd % 2 == 1 and (odd * value / quantum).denominator == 1
         assert _cell_margin(value, case.dtype) >= quantum / (4 * odd)
+
+
+def test_guard_patterns_are_a_finite_canary_and_a_nan_sentinel() -> None:
+    for dtype in ("fp16", "bf16"):
+        assert np.isfinite(decode_bits(np.uint16(CANARY_BITS), dtype))
+        assert np.isnan(decode_bits(np.uint16(SENTINEL_BITS), dtype))
+    canary_fp16 = float(decode_bits(np.uint16(CANARY_BITS), "fp16"))
+    canary_bf16 = float(decode_bits(np.uint16(CANARY_BITS), "bf16"))
+    assert canary_fp16 == pytest.approx(-0.02205, rel=1e-3)
+    assert canary_bf16 == pytest.approx(-2.86e-16, rel=1e-2)
+
+
+@pytest.mark.parametrize("case", P10_QUICK_CASES, ids=lambda case: case.case_id)
+def test_no_input_or_admissible_output_has_a_guard_pattern(case: UniformCase) -> None:
+    """A changed canary is then always a stray write, and a sentinel is never a
+    value a correct kernel stores. Admissible outputs are taken generously: each
+    target and both of its neighbours, and both zero signs where the target is
+    zero."""
+    patterns = [CANARY_BITS, SENTINEL_BITS]
+    for values in codeword_inputs(case):
+        assert not np.isin(encode_bits(values, case.dtype), patterns).any()
+    targets = codeword_target_bits(case).astype(np.int64)
+    nonzero = targets[(targets & 0x7FFF) != 0]
+    admissible = np.concatenate([nonzero - 1, nonzero, nonzero + 1, [0x0000, 0x8000]])
+    assert not np.isin(admissible, patterns).any()
+
+
+@pytest.mark.parametrize("case", P10_QUICK_CASES, ids=lambda case: case.case_id)
+def test_guard_holds_one_query_tile_on_each_side(case: UniformCase) -> None:
+    layout = guard_layout(case, _DERIVED_SCHEDULE)
+    assert layout.guard == 128 * case.nhead_q * case.head_dim
+    assert layout.guard == (65536 if case.nhead_q == 8 else 32768)
+    assert layout.logical == case.batch * 256 * case.nhead_q * 64
+    assert layout.total == layout.logical + 2 * layout.guard
+    buffer = layout.new_buffer()
+    assert buffer.dtype == np.uint16 and buffer.shape == (layout.total,)
+    assert (buffer[: layout.guard] == CANARY_BITS).all()
+    assert (buffer[layout.guard : -layout.guard] == SENTINEL_BITS).all()
+    assert (buffer[-layout.guard :] == CANARY_BITS).all()
+    # A retune to a larger query tile grows the guard with it.
+    assert guard_layout(case, TileSchedule(256, 64)).guard == 2 * layout.guard
+
+
+def test_guard_is_rounded_up_to_the_pointer_alignment() -> None:
+    tiny = UniformCase(1, 4, 4, 1, 1, 5, "fp16", "causal")
+    layout = guard_layout(tiny, TileSchedule(1, 1))
+    assert (layout.guard, layout.logical) == (8, 20)
+
+
+@pytest.mark.parametrize(
+    "guard, logical, message",
+    [
+        (0, 16, r"guard=0, expected a positive multiple of 8 elements"),
+        (12, 16, r"guard=12, expected a positive multiple of 8 elements"),
+        (8, 0, r"logical=0, expected a positive element count"),
+    ],
+)
+def test_guard_layout_rejects_bad_element_counts(
+    guard: int, logical: int, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        GuardLayout(guard=guard, logical=logical)
+
+
+def test_guarded_output_rejects_a_buffer_that_is_not_the_allocation() -> None:
+    layout = GuardLayout(guard=8, logical=16)
+    GuardedOutput(layout, layout.new_buffer())
+    with pytest.raises(ValueError, match=r"expected uint16 and \(32,\)"):
+        GuardedOutput(layout, layout.new_buffer()[:-1])
+    with pytest.raises(ValueError, match=r"raw has dtype int32"):
+        GuardedOutput(layout, layout.new_buffer().astype(np.int32))
+    output = GuardedOutput(layout, layout.new_buffer())
+    with pytest.raises(ValueError, match=r"has 131072 elements, expected 16"):
+        output.bits(P10_QUICK_CASES[0])
+
+
+class _FakeDevice:
+    """A flat address space standing in for device memory, so the guarded launch
+    is exercised on the CPU. An access outside every allocation fails."""
+
+    def __init__(self) -> None:
+        self.allocations: dict[int, bytearray] = {}
+        self._next = 0x10000
+
+    def allocate(self, nbytes: int) -> int:
+        base = self._next
+        self.allocations[base] = bytearray(nbytes)
+        self._next = base + (nbytes // 16 + 16) * 16
+        return base
+
+    def view(self, address: int, nbytes: int) -> memoryview:
+        for base, data in self.allocations.items():
+            if base <= address and address + nbytes <= base + len(data):
+                offset = address - base
+                return memoryview(data)[offset : offset + nbytes]
+        raise AssertionError(f"access outside every allocation at {address:#x}")
+
+    def store(self, address: int, bits: np.ndarray) -> None:
+        data = np.ascontiguousarray(bits, dtype=np.uint16).tobytes()
+        self.view(address, len(data))[:] = data
+
+    def backend(self) -> SimpleNamespace:
+        device = self
+
+        class Memory:
+            def __init__(self, nbytes: int) -> None:
+                self._nbytes = int(nbytes)
+                self._ptr = device.allocate(self._nbytes)
+
+            def ptr(self) -> int:
+                return self._ptr
+
+            def nbytes(self) -> int:
+                return self._nbytes
+
+        class Runtime:
+            def memcpy_h2d(self, dst: int, src_buf, nbytes: int) -> None:
+                device.view(dst, nbytes)[:] = bytes(src_buf)[:nbytes]
+
+            def memcpy_d2h(self, dst_buf, src: int, nbytes: int) -> None:
+                ctypes.memmove(dst_buf, bytes(device.view(src, nbytes)), nbytes)
+
+            def sync(self) -> None:
+                pass
+
+        def as_u8_buffer(array: np.ndarray):
+            return (ctypes.c_uint8 * int(array.nbytes)).from_buffer(array)
+
+        return SimpleNamespace(
+            DeviceMem=Memory, Runtime=Runtime, as_u8_buffer=as_u8_buffer
+        )
+
+
+def _fake_launch(case: UniformCase, kernel) -> tuple[GuardedOutput, _FakeDevice, dict]:
+    """Run ``kernel(device, out_address)`` through the guarded launch on a fake
+    device, with the case's real inputs and guard layout."""
+    device = _FakeDevice()
+    layout = guard_layout(case, _DERIVED_SCHEDULE)
+    q, k, v = (encode_bits(values, case.dtype) for values in codeword_inputs(case))
+    host = {"q": q, "k": k, "v": v, "out": layout.new_buffer()}
+    seen: dict = {}
+
+    def launch(*, q, k, v, out) -> None:
+        seen.update(q=q, k=k, v=v, out=out)
+        kernel(device, out)
+
+    raw = _launch_guarded(launch, device.backend(), host, layout)
+    return GuardedOutput(layout, raw), device, seen
+
+
+def test_guarded_launch_hands_the_kernel_the_interior_of_the_allocation() -> None:
+    case = P10_UNGROUPED_CASES[0]
+    targets = codeword_target_bits(case)
+    output, device, seen = _fake_launch(
+        case, lambda device, out: device.store(out, targets)
+    )
+    layout = output.layout
+
+    # The kernel was given the address of the logical tensor: one guard past the
+    # start of the output allocation, in bytes, and still 16-byte aligned.
+    (out_base,) = (
+        base
+        for base, data in device.allocations.items()
+        if len(data) == 2 * layout.total
+    )
+    assert seen["out"] == out_base + 2 * layout.guard
+    assert seen["out"] % 16 == 0
+    # The inputs it was given hold exactly the encoded host bits.
+    for name, values in zip("qkv", codeword_inputs(case)):
+        expected = encode_bits(values, case.dtype).tobytes()
+        assert bytes(device.view(seen[name].ptr(), len(expected))) == expected
+
+    assert np.array_equal(output.bits(case), targets)
+    assert output.safety(case.dtype) == StoreSafety(0, 0, 0, 0)
+    assert output.safety(case.dtype).violations == ()
+
+
+def test_store_safety_counts_a_write_before_the_tensor() -> None:
+    case = P10_UNGROUPED_CASES[0]
+    targets = codeword_target_bits(case)
+
+    def kernel(device: _FakeDevice, out: int) -> None:
+        device.store(out - 2 * 3, targets.ravel()[:3])
+        device.store(out, targets)
+
+    output, _, _ = _fake_launch(case, kernel)
+    safety = output.safety(case.dtype)
+    assert safety == StoreSafety(prefix=3, suffix=0, unwritten=0, nonfinite=0)
+    assert safety.violations == ("guard elements changed before the tensor: 3",)
+    assert np.array_equal(output.bits(case), targets)
+
+
+@pytest.mark.parametrize("case", P10_GROUPED_CASES, ids=lambda case: case.case_id)
+def test_store_safety_counts_one_extra_query_tile_after_the_tensor(
+    case: UniformCase,
+) -> None:
+    """What a missing row bound looks like when the last query tile holds one
+    logical row: every logical row is stored, and the other ``block_m - 1`` rows
+    of the tile land after the tensor. The guard holds all of them."""
+    targets = codeword_target_bits(case)
+    row = case.nhead_q * case.head_dim
+    overrun = (_DERIVED_SCHEDULE.block_m - 1) * row
+    assert overrun == 65024
+
+    def kernel(device: _FakeDevice, out: int) -> None:
+        device.store(out, targets)
+        device.store(out + 2 * targets.size, targets.ravel()[:overrun])
+
+    output, _, _ = _fake_launch(case, kernel)
+    assert output.layout.guard >= overrun
+    assert output.safety(case.dtype) == StoreSafety(
+        prefix=0, suffix=overrun, unwritten=0, nonfinite=0
+    )
+
+
+def test_store_safety_separates_missing_stores_from_non_finite_values() -> None:
+    case = P10_UNGROUPED_CASES[0]
+    assert case.dtype == "fp16"
+    targets = codeword_target_bits(case)
+    flat = targets.ravel().copy()
+    dropped = slice(1024, 1028)  # one four-element store vector, never written
+    flat[2000] = 0x7C00  # +inf
+    flat[2001] = 0xFE00  # a NaN that is not the sentinel
+    flat[2002] = SENTINEL_BITS  # a store of the sentinel bits looks like no store
+
+    def kernel(device: _FakeDevice, out: int) -> None:
+        device.store(out, flat[: dropped.start])
+        device.store(out + 2 * dropped.stop, flat[dropped.stop :])
+
+    output, _, _ = _fake_launch(case, kernel)
+    safety = output.safety(case.dtype)
+    assert safety == StoreSafety(prefix=0, suffix=0, unwritten=5, nonfinite=2)
+    assert safety.violations == (
+        "sentinel pattern, presumed missing store: 5",
+        "computed non-finite values: 2",
+    )
+    stored = output.bits(case).ravel()
+    assert (stored[dropped] == SENTINEL_BITS).all()
+
+
+def test_a_write_past_the_guard_is_not_contained() -> None:
+    """The guard bounds what the counts can show, not where a kernel can write:
+    the fake device faults on a store beyond the allocation, a real one may not."""
+    case = P10_UNGROUPED_CASES[0]
+    targets = codeword_target_bits(case)
+
+    def kernel(device: _FakeDevice, out: int) -> None:
+        guard_bytes = 2 * guard_layout(case, _DERIVED_SCHEDULE).guard
+        device.store(out + 2 * targets.size + guard_bytes, targets.ravel()[:1])
+
+    with pytest.raises(AssertionError, match=r"access outside every allocation"):
+        _fake_launch(case, kernel)
