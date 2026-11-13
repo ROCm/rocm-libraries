@@ -23,6 +23,8 @@ Auxiliary functions
 .. doxygenfunction:: rocblas_get_batch_alpha_stride
 .. doxygenfunction:: rocblas_set_batch_beta_stride
 .. doxygenfunction:: rocblas_get_batch_beta_stride
+.. doxygenfunction:: rocblas_set_emulation_strategy
+.. doxygenfunction:: rocblas_get_emulation_strategy
 .. doxygenfunction:: rocblas_pointer_to_mode
 .. doxygenfunction:: rocblas_initialize
 .. doxygenfunction:: rocblas_status_to_string

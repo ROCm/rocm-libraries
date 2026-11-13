@@ -21,6 +21,7 @@
  *
  * ************************************************************************ */
 #include "handle.hpp"
+#include "hipblaslt_emulation.hpp"
 #include "logging.hpp"
 #include "rocblas-auxiliary.h"
 #include <cctype>
@@ -220,6 +221,60 @@ try
     if(handle->layer_mode & rocblas_layer_mode_log_trace)
         logger.log_trace(handle, "rocblas_get_math_mode", *mode);
     return rocblas_status_success;
+}
+catch(...)
+{
+    return exception_to_rocblas_status();
+}
+
+/*******************************************************************************
+ * ! \brief get floating-point emulation strategy
+ ******************************************************************************/
+extern "C" rocblas_status rocblas_get_emulation_strategy(rocblas_handle              handle,
+                                                         rocblas_emulation_strategy* strategy)
+try
+{
+    if(!handle)
+        return rocblas_status_invalid_handle;
+    if(!strategy)
+        return rocblas_status_invalid_pointer;
+    *strategy = handle->emulation_strategy;
+    if(handle->layer_mode & rocblas_layer_mode_log_trace)
+    {
+        rocblas_internal_logger logger;
+        logger.log_trace(handle, "rocblas_get_emulation_strategy", int(*strategy));
+    }
+    return rocblas_status_success;
+}
+catch(...)
+{
+    return exception_to_rocblas_status();
+}
+
+/*******************************************************************************
+ * ! \brief set floating-point emulation strategy
+ ******************************************************************************/
+extern "C" rocblas_status rocblas_set_emulation_strategy(rocblas_handle             handle,
+                                                         rocblas_emulation_strategy strategy)
+try
+{
+    if(!handle)
+        return rocblas_status_invalid_handle;
+    if(handle->layer_mode & rocblas_layer_mode_log_trace)
+    {
+        rocblas_internal_logger logger;
+        logger.log_trace(handle, "rocblas_set_emulation_strategy", int(strategy));
+    }
+    switch(strategy)
+    {
+    case rocblas_emulation_strategy_default:
+    case rocblas_emulation_strategy_performant:
+    case rocblas_emulation_strategy_eager:
+        handle->emulation_strategy = strategy;
+        return rocblas_status_success;
+    default:
+        return rocblas_status_invalid_value;
+    }
 }
 catch(...)
 {
@@ -986,6 +1041,76 @@ std::string rocblas_internal_get_arch_name()
     int deviceId;
     PRINT_IF_HIP_ERROR(hipGetDevice(&deviceId));
     return rocblas_internal_get_arch_name(deviceId);
+}
+
+// exported for testing
+bool rocblas_internal_fp_emulation_supported()
+{
+    return ROCBLAS_HIPBLASLT_HAS_FP_EMULATION;
+}
+
+// exported for testing
+rocblas_status rocblas_internal_fp_emulation_workspace_size(rocblas_handle             handle,
+                                                            rocblas_datatype           type,
+                                                            int64_t                    m,
+                                                            int64_t                    n,
+                                                            int64_t                    k,
+                                                            rocblas_emulation_strategy strategy,
+                                                            size_t*                    size)
+try
+{
+    if(!handle)
+        return rocblas_status_invalid_handle;
+    if(!size)
+        return rocblas_status_invalid_pointer;
+    *size = 0;
+    if((type != rocblas_datatype_f64_r && type != rocblas_datatype_f32_r) || m < 0 || n < 0 || k < 0
+       || strategy < rocblas_emulation_strategy_default
+       || strategy > rocblas_emulation_strategy_eager)
+        return rocblas_status_invalid_value;
+
+#if ROCBLAS_HIPBLASLT_HAS_FP_EMULATION
+    if(!handle->isHipBLASLtEnabled() || !handle->getHipblasLtHandle())
+        return rocblas_status_success;
+    auto saved_device_id = handle->push_device_id();
+
+    const bool               f64      = type == rocblas_datatype_f64_r;
+    const hipDataType        hip_type = f64 ? HIP_R_64F : HIP_R_32F;
+    hipblasLtMatmulDesc_t    desc{};
+    hipblasLtEmulationDesc_t emulation_desc{};
+    hipblasStatus_t          status = hipblasLtMatmulDescCreate(
+        &desc,
+        f64 ? HIPBLAS_COMPUTE_64F_EMULATED_FIXEDPOINT : HIPBLAS_COMPUTE_32F_EMULATED_FIXEDPOINT,
+        hip_type);
+    if(status == HIPBLAS_STATUS_SUCCESS && strategy != rocblas_emulation_strategy_default)
+    {
+        // rocblas_emulation_strategy values match hipblasEmulationStrategy_t
+        const int32_t value = static_cast<int32_t>(strategy);
+        status              = hipblasLtEmulationDescCreate(&emulation_desc);
+        if(status == HIPBLAS_STATUS_SUCCESS)
+            status = hipblasLtEmulationDescSetAttribute(
+                emulation_desc, HIPBLASLT_EMULATION_DESC_STRATEGY, &value, sizeof(value));
+        if(status == HIPBLAS_STATUS_SUCCESS)
+            status = hipblasLtMatmulDescSetAttribute(desc,
+                                                     HIPBLASLT_MATMUL_DESC_EMULATION_DESCRIPTOR,
+                                                     &emulation_desc,
+                                                     sizeof(emulation_desc));
+    }
+    if(status == HIPBLAS_STATUS_SUCCESS)
+        *size = hipblasLtEmulationWorkspaceSize(
+            *handle->getHipblasLtHandle(), desc, hip_type, m, n, k, 1);
+    if(emulation_desc)
+        hipblasLtEmulationDescDestroy(emulation_desc);
+    if(desc)
+        hipblasLtMatmulDescDestroy(desc);
+    if(status != HIPBLAS_STATUS_SUCCESS)
+        return rocblas_status_internal_error;
+#endif
+    return rocblas_status_success;
+}
+catch(...)
+{
+    return exception_to_rocblas_status();
 }
 
 // exported. Get xnack mode

@@ -1,0 +1,37 @@
+---
+include: rocblas_common.yaml
+include: known_bugs.yaml
+
+Tests:
+- name: set_get_emulation_strategy
+  category: quick
+  function: set_get_emulation_strategy
+  precision: *single_precision
+
+- name: emulation_env_per_handle
+  category: quick
+  function: emulation_env_per_handle
+  precision: *single_precision
+
+# 4096^3 f64_r gemm_ex: with emulation (emulation: 1, eager strategy emulation_strategy: 2) the
+# pool grows to the emulation workspace and is freed with the handle; without requesting it
+# (emulation: 0) the pool keeps its size.
+- name: emulation_workspace_growth
+  category: pre_checkin
+  function: emulation_workspace_growth
+  precision: *double_precision
+  emulation: [ 0, 1 ]
+  emulation_strategy: 2
+  gpu_arch: '950'
+
+# 4096^3 f64_r gemm_ex with eager emulation and a user workspace (rocblas_set_workspace) whose size
+# is not a multiple of 64 bytes and is below what emulation asks for: the GEMM must still run on
+# hipBLASLt, not fall back to another backend.
+- name: emulation_unaligned_user_workspace
+  category: pre_checkin
+  function: emulation_unaligned_user_workspace
+  precision: *double_precision
+  emulation: 1
+  emulation_strategy: 2
+  gpu_arch: '950'
+...

@@ -29,8 +29,10 @@
 #include "client_utility.hpp"
 #include "d_vector.hpp"
 #include "gtest_helpers.hpp"
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <mutex>
 #include <new>
 #include <stdexcept>
 #include <stdlib.h>
@@ -174,8 +176,12 @@ void print_rocblas_client_commit_hashes()
                  << TOSTR(HIPBLASLT_VERSION_MINOR) << "." << TOSTR(HIPBLASLT_VERSION_PATCH)
                  << " commit-hash: " << TOSTR(HIPBLASLT_VERSION_TWEAK) << std::endl;
 #else
-    rocblas_cout << "hipBLASLt: N/A, as rocBLAS was built without hipBLASLt" << std::endl;
+    rocblas_cout << "hipBLASLt version: N/A, as this client was built without hipBLASLt"
+                 << std::endl;
 #endif
+    rocblas_cout << "hipBLASLt FP emulation: "
+                 << (rocblas_internal_fp_emulation_supported() ? "compiled in" : "compiled out")
+                 << " (library)" << std::endl;
 
     std::string hash;
     if(query_rocblas_string(
@@ -463,9 +469,34 @@ thread_local std::unique_ptr<std::function<void(rocblas_handle)>> t_set_stream_c
  * local handles *
  *****************/
 
+// Serialises handle creation in rocblas_local_handle with the environment changes made for its
+// Arguments, so no handle reads ROCBLAS_EMULATE_* while another thread sets them. A test ended by
+// a caught fatal signal while holding the lock (ROCBLAS_TEST_CONTINUE_ON_FATAL_SIGNAL, or on
+// Windows) leaves it locked: the first later handle creation then fails after 60 s, and every one
+// after that fails at once. Any 60 s wait, also behind a slow live holder, has the same effect.
+static std::timed_mutex  emulate_env_mutex;
+static std::atomic<bool> emulate_env_mutex_stuck{false};
+
+static std::unique_lock<std::timed_mutex> lock_emulate_env()
+{
+    std::unique_lock<std::timed_mutex> lock(emulate_env_mutex, std::defer_lock);
+    if(emulate_env_mutex_stuck || !lock.try_lock_for(std::chrono::seconds(60)))
+    {
+        emulate_env_mutex_stuck = true;
+        throw std::runtime_error(
+            "timed out (60 s) waiting for the rocblas_local_handle creation lock; it is not "
+            "retried for the rest of the process");
+    }
+    return lock;
+}
+
 rocblas_local_handle::rocblas_local_handle()
 {
-    auto status = rocblas_create_handle(&m_handle);
+    rocblas_status status;
+    {
+        auto lock = lock_emulate_env();
+        status    = rocblas_create_handle(&m_handle);
+    }
     if(status != rocblas_status_success)
         throw std::runtime_error(rocblas_status_to_string(status));
 
@@ -480,6 +511,16 @@ rocblas_local_handle::rocblas_local_handle()
 
 rocblas_local_handle::rocblas_local_handle(const Arguments& arg)
 {
+    // Check before anything is set up, so a bad value cannot leak the handle or the env changes.
+    if(arg.emulation < 0 || arg.emulation > 1)
+        throw std::invalid_argument("emulation must be 0 or 1");
+    if(arg.emulation_strategy < rocblas_emulation_strategy_default
+       || arg.emulation_strategy > rocblas_emulation_strategy_eager)
+        throw std::invalid_argument("emulation_strategy must be 0, 1 or 2");
+
+    // Taken before any environment variable is set, so a timeout leaves none of them set
+    auto env_lock = lock_emulate_env();
+
     if(arg.use_hipblaslt >= 0)
     {
         auto hipblaslt_env = getenv("ROCBLAS_USE_HIPBLASLT");
@@ -504,7 +545,54 @@ rocblas_local_handle::rocblas_local_handle(const Arguments& arg)
         setenv("ROCBLAS_STREAM_ORDER_ALLOC", "1", true);
     }
 
-    auto status = rocblas_create_handle(&m_handle);
+    // rocBLAS reads ROCBLAS_EMULATE_* when the handle is created, so set them only around
+    // rocblas_create_handle. The guard restores them when it goes out of scope, also if an
+    // exception is thrown, so a failing test cannot leave them set for later tests.
+    struct emulate_env_guard
+    {
+        const char* const names[2]
+            = {"ROCBLAS_EMULATE_DOUBLE_PRECISION", "ROCBLAS_EMULATE_SINGLE_PRECISION"};
+        std::string saved[2];
+        bool        existed[2] = {false, false};
+        bool        set[2]     = {false, false};
+
+        explicit emulate_env_guard(int emulation)
+        {
+            if(emulation != 1)
+                return;
+            for(int i = 0; i < 2; i++)
+            {
+                if(const char* env = getenv(names[i]))
+                {
+                    saved[i]   = env;
+                    existed[i] = true;
+                }
+                set[i] = true;
+                setenv(names[i], "1", true);
+            }
+        }
+
+        ~emulate_env_guard()
+        {
+            for(int i = 0; i < 2; i++)
+            {
+                if(!set[i])
+                    continue;
+                if(existed[i])
+                    setenv(names[i], saved[i].c_str(), true);
+                else
+                    unsetenv(names[i]);
+            }
+        }
+    };
+
+    rocblas_status status;
+    {
+        emulate_env_guard emulate_env(arg.emulation);
+        status = rocblas_create_handle(&m_handle);
+    }
+    env_lock.unlock();
+
     if(status != rocblas_status_success)
         throw std::runtime_error(rocblas_status_to_string(status));
 
@@ -515,6 +603,14 @@ rocblas_local_handle::rocblas_local_handle(const Arguments& arg)
         t_set_stream_callback.reset();
     }
 #endif
+
+    if(arg.emulation_strategy != rocblas_emulation_strategy_default)
+    {
+        status = rocblas_set_emulation_strategy(
+            m_handle, static_cast<rocblas_emulation_strategy>(arg.emulation_strategy));
+        if(status != rocblas_status_success)
+            throw std::runtime_error(rocblas_status_to_string(status));
+    }
 
     // Set the atomics mode
     status = rocblas_set_atomics_mode(m_handle, arg.atomics_mode);
