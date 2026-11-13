@@ -31,6 +31,9 @@ objects, `FlydslSdpaRngDump.hpp`; and
 [`FlydslSdpaHeadPadNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaHeadPadNative.cpp),
 the head-dim padding copy's engine, which serves no graph either; the SDPA engines launch its
 object to copy a head dim that is not a multiple of 8 into a padded buffer, `FlydslSdpaHeadPad.hpp`),
+[`FlydslSdpaBwdMergedNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaBwdMergedNative.cpp)
+and
+[`FlydslSdpaBwdSplitNative.cpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaBwdSplitNative.cpp),
 with what the SDPA engines share in `FlydslSdpaRdnaCommon.hpp` and `FlydslSdpaCdnaCommon.hpp`,
 and the rules RDNA and CDNA apply alike (the mask's bounds, the sink, the scale tensor,
 output aliasing) in `FlydslSdpaShared.hpp`.
@@ -92,8 +95,8 @@ kernel objects on gfx11-generic and 461 on gfx12-generic (gfx11's prefill engine
 the 16-bit dropout objects and the pair tiers' bias objects; gfx12 serves those graphs on the
 aiw objects) -- plus, on gfx12-generic only, AOTriton's gfx1201 attention kernel as a fifth
 (256 more), and on both two helper ops, the RNG dump's keep-mask writer and the head-dim padding
-copy (one object each; 583 and 719 in all), built once for each of two LLVM generic targets
-and shipped to every part each covers:
+copy (one object each; 583 and 719 in all; SDPA backward adds 501 to gfx11-generic, below: 1,084),
+built once for each of two LLVM generic targets and shipped to every part each covers:
 
 - **`gfx11-generic`** -- RDNA3 / RDNA3.5: gfx1100, gfx1101, gfx1102, gfx1103,
   gfx1150, gfx1151, gfx1152 and gfx1153. Verified on gfx1151.
@@ -202,6 +205,22 @@ these kernels through the whole path -- generation, packing, selection and
 launch -- and is verified on all three arches; the order in which it widens is in
 [COVERAGE.md §7](COVERAGE.md). The RDNA SDPA kernels stay RDNA-only.
 
+**SDPA backward** (**gfx950**: split and merged, 2,707 object files; **gfx11-generic**: split
+only, 509 object files): two engines over one graph
+matcher (`FlydslSdpaBwdCommon.hpp`). `hipkernel:flydsl_sdpa_bwd_merged` is a single launch
+computing dK, dV, dQ and, on a bias graph, dBias; its plans are not serializable (no plan
+saving in its dispatch handler). `hipkernel:flydsl_sdpa_bwd_split` is
+slotted, three launches in order -- prep, dK/dV, dQ -- and so is not plan-serializable either. The
+split engine's slot ops are `sdpa_bwd_prep`, `sdpa_bwd_dkdv` and `sdpa_bwd_dq`;
+`sdpa_bwd_split` is descriptor-only (no objects). The dBias and dSink reduce kernels have no
+op of their own: on gfx950 they ride inside the objects that launch them, on gfx11-generic
+the three dBias reduce objects are companions of the dQ op. A graph with `padding_mask` also launches a
+tail-zero object (`sdpa_bwd_tailzero`, one per arch family and dtype) after the gradient launches: it
+zeroes the rows past `seq_len` of every dense gradient output, which the backward kernels leave unwritten.
+It is a companion of the dQ rows, shared with the merged rows (REGEN.md, *Companions*). bf16, f16 and f32 data;
+what a graph must be, and the declines, are in [COVERAGE.md §9](COVERAGE.md). The split engine also serves an f32 bias, an unaligned
+16-bit bias pitch and `Hk != Hv` (the merged engine declines them; §9.2); split outranks merged by default.
+
 ## How it reaches hipDNN
 
 The objects and their descriptors are a **bundle of the provider's production
@@ -300,21 +319,22 @@ provider tree; everything else is relative to this directory.
 | Path | |
 |---|---|
 | `<content>/<op>/*.json` | descriptors shared by every target of an op: KMD (metadata schema), UED (engine), UHD (heuristic), UDD (dispatch), UMD (matcher) |
-| `<content>/<op>/flydsl_<op>_engine_estimate.uhd.json` | the engine estimate's (`predict_engine`, L1) `default` slot: a native UHD no scorer registers, so the loader disables it and keeps the engine until a trained model is installed for an arch |
+| `<content>/<op>/flydsl_<op>_engine_estimate.uhd.json` | (every op that owns its engine; the split engine's descriptor-only folder has none, and none is planned) the engine estimate's (`predict_engine`, L1) `default` slot: a native UHD no scorer registers, so the loader disables it and keeps the engine until a trained model is installed for an arch |
 | `<content>/<op>/heuristics/<ued-id>/<role>/<arch>/[<metric>/]` | a trained UHD as `uhd_gen promote` installs it (a metric-less one directly under `<arch>/`): `heuristic.uhd.json` and the `model.bin` it names (in DVC). `gen_descriptors.py` binds each under its role and arch key in the op's UED, with the value promote writes: a list per key for every role (one UHD per metric; `predict_applicable_kernels` holds the candidate generators for future JIT spaces). Promote appends a new arch key where the generator sorts them, so regenerate after promoting; the bindings are unchanged by it. The IngestorGenerator binds the same values from its `engine.heuristics` config |
 | `<content>/<op>/<target>.SOURCE.md` | the target's readable summary: toolchain, input digest, one row per object |
 | `<content>/<op>/<target>/*.hsaco` | the committed code objects |
 | `<content>/<op>/<target>/*.kdp.json` | the target's pack, with one inline `hsaco` UKD per object |
 | `<content>/<op>/<target>/manifest.json` | per-object SHA256 + knobs + argument layout + the toolchain and input digest that built them |
-| `kernels_src/kernels/**` | vendored kernel sources, each with its upstream's SPDX and copyright lines. A modified file carries a header naming its upstream (FlyDSL or AITER), commit, path and modifications; the `attention_rdna4/` modules inherit their package's (AOTriton), and a file written for this provider says so in its own. The FlyDSL and AITER commits are pinned in `generators/_flydsl_env.py` and recorded in each `<target>.SOURCE.md` |
+| `kernels_src/kernels/**` | vendored kernel sources, each with its upstream's SPDX and copyright lines. A modified file carries a header naming its upstream (FlyDSL or AITER), commit, path and modifications; the `attention_rdna4/` modules inherit their package's (AOTriton), the `fmha_*_gfx1201.py` modules of `attention_bwd_cdna/` and `attention_bwd_rdna/` (three copies) are copies of AOTriton's files (their headers say so), and a file written for this provider says so in its own. The FlyDSL and AITER commits are pinned in `generators/_flydsl_env.py` and recorded in each `<target>.SOURCE.md` |
 | `generators/_instances.py` | **the instance table** — one row per shipped object, every op |
 | `generators/_flydsl_env.py` | the pins: wheel version, upstream commits, ROCm recording |
 | `generators/_codeobject.py` | reads and verifies a compiled object (target, ELF generic machine), shared by every generator |
 | `generators/arch_families.json`, `_arch_families.py` | the generic targets and their member arches; read by the generators and `CMakeLists.txt` |
 | `generators/_generic_targets.py` | the FlyDSL 0.3.4 shim that lets MLIR lower for a generic target |
-| `generators/gen_<op>.py` | compile one op's (one engine's) rows into objects + manifest + `<target>.SOURCE.md`: `gen_rmsnorm`, `gen_rmsnorm_bwd`, `gen_sdpa_rdna`, `gen_sdpa_rdna_decode`, `gen_sdpa_aiw`, `gen_sdpa_cdna`, `gen_sdpa_cdna_dualwave`, `gen_sdpa_cdna_decode` |
+| `generators/gen_<op>.py` | compile one op's (one engine's) rows into objects + manifest + `<target>.SOURCE.md`: `gen_rmsnorm`, `gen_rmsnorm_bwd`, `gen_sdpa_rdna`, `gen_sdpa_rdna_decode`, `gen_sdpa_aiw`, `gen_sdpa_cdna`, `gen_sdpa_cdna_dualwave`, `gen_sdpa_cdna_decode`, `gen_sdpa_bwd_prep`, `gen_sdpa_bwd_dkdv`, `gen_sdpa_bwd_dq`, `gen_sdpa_bwd_merged`, `gen_sdpa_bwd_dbias_reduce`, `gen_sdpa_bwd_dsink_reduce`, `gen_sdpa_bwd_tailzero` |
 | `generators/_parallel.py` | compiles a generator's objects in a pool of worker processes (`FLYDSL_GEN_JOBS`) |
-| `generators/_sdpa_rdna_build.py`, `_sdpa_cdna_build.py` | what each architecture's SDPA generators share |
+| `generators/_sdpa_rdna_build.py`, `_sdpa_cdna_build.py`, `_sdpa_bwd_cdna_build.py`, `_sdpa_bwd_rdna_build.py` | what each architecture's SDPA generators share |
+| `generators/_sdpa_bwd_nondet.py`, `tests/data/sdpa_bwd_nondeterministic.csv` | the list of SDPA backward rows whose build is nondeterministic, its loader and its merge command; the policy is in the `_sdpa_bwd_cdna_build.py` docstring (REGEN.md) |
 | `gen_descriptors.py` | derives descriptors from the objects and binds the trained models installed under `heuristics/`; `--check` re-verifies |
 | `tools/diff_upstream.py` | vendored sources vs. their upstream checkouts, black-normalized |
 | `tools/check_shards.py` | after the pack: every member's shard ships exactly the checked-in objects |
@@ -383,7 +403,8 @@ Each link is checkable by a command, and [REGEN.md](REGEN.md) gives each command
 upstream FlyDSL @ 89ad52fbbb9e, AITER @ 8253efc40595
    │  tools/diff_upstream.py          — vendored copy == upstream, but for recorded modifications
 kernels_src/
-   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 583/583 gfx11-generic, 719/719 gfx12-generic, 453/453 gfx950, 457/457 gfx942, 465/465 gfx90a
+   │  gen_<op>.py (flydsl 0.3.4)      — byte-reproducible: 1,084/1,084 gfx11-generic, 719/719 gfx12-generic, 3,155/3,155 gfx950,
+   │                                    457/457 gfx942, 465/465 gfx90a (SDPA backward rows that ship a pin: REGEN.md)
 <content>/<op>/<arch>/*.hsaco + manifest.json
    │  gen_descriptors.py --check      — objects match manifest SHA256 and target; descriptors agree
 <content>/<op>/**/*.json (KDPs of inline hsaco UKDs)

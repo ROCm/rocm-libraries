@@ -420,6 +420,133 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 EveryKernelDeclaresTheFiftySlotSignature
         )
     endif()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_merged)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_merged}
+            SUITES TestFlydslSdpaBwdPacks
+            EXPECTED_CASES
+                IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
+                ShipsEveryMergedRowOnce
+                EveryKernelDeclaresTheMergedSignature
+                DeclaresASchemaAtLeastTheRaggedOffsetMultiplierFloor
+                ServesStampedRaggedGraphsAndDeclinesTheFieldsTheMatcherRejects
+                RefusesPlanSerialization
+        )
+    endif()
+    # The split engine's slots are ops of their own (prep, dkdv, dq); its descriptor-only
+    # engine folder has none. The census reads a shard only for an arch where all three slots
+    # ship, and the suite keys its inventory on the arch the entry names: gfx950 content for
+    # gfx950, gfx11-generic content for every gfx11 member. The merged engine's census above
+    # is registered only where merged content ships (gfx950).
+    set(_hkp_split_arches)
+    foreach(_arch IN LISTS HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_dq)
+        if(_arch IN_LIST HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_prep
+           AND _arch IN_LIST HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_dkdv)
+            list(APPEND _hkp_split_arches ${_arch})
+        endif()
+    endforeach()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND _hkp_split_arches)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${_hkp_split_arches}
+            SUITES TestFlydslSdpaBwdSplitPacks
+            EXPECTED_CASES
+                IsOneSlottedEngineWithANativeGraphMatchAndAKernelMatcherPerSlot
+                ShipsEverySplitRowOnceAndNoKernelInTwoSlots
+                EveryKernelDeclaresItsSlotsSignature
+                EveryVerdictRowIsServedOrDeclinedAsTheTableSays
+                EveryServedRowsSlotCatalogsHaveUniqueEnrolledKnobTuples
+                DeclaresASchemaAtLeastTheRaggedOffsetMultiplierFloor
+                ServesStampedRaggedGraphsAndDeclinesTheFieldsTheMatcherRejects
+                RefusesPlanSerialization
+                TheChunkContractKeepsAnAlignedBiasOffDirectRowsWithAStagedAlternative
+                EveryProbeGraphIsServedByTheRowsTheModelNames
+                TheCoverageConstantsAreTheHeadDimsTheShippedParityRowsServe
+        )
+    endif()
+    # The host half of the split engine's parity cases checks the gfx11 shard against the
+    # matcher contract. The suite is compiled into the census binary whatever GPU_TARGETS
+    # holds: TheRock installs one copy of that binary for every family's test job, so a
+    # copy built without gfx11 targets must still contain the suite a gfx11 entry runs. The
+    # suite skips, which a census entry reports as a failure, when the shard it is handed
+    # holds no gfx11 pack. Only the registration is per arch: an entry for each gfx11 arch
+    # the three slot ops ship for, and none in a configuration without one.
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
+        target_sources(hip_kernel_provider_census_tests PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestFlydslSdpaBwdParityGraphs.cpp
+        )
+    endif()
+    set(_hkp_gfx11_split_arches)
+    foreach(_arch IN LISTS _hkp_split_arches)
+        if(_arch MATCHES "^gfx11")
+            list(APPEND _hkp_gfx11_split_arches ${_arch})
+        endif()
+    endforeach()
+    if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND _hkp_gfx11_split_arches)
+        # The pin names the parameterised cases of FlydslSdpaBwdParityCases.hpp, one per
+        # case of the shared list the device half also launches.
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${_hkp_gfx11_split_arches}
+            SUITES TestFlydslSdpaBwdParityGraphs
+            EXPECTED_CASES
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesBottomRightCausalCrossAttentionWithFewerQueriesThanKeys
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesBottomRightCausalCrossAttentionWithMoreQueriesThanKeys
+                IsServedOrDeclinedAsTheMatcherContractStates/AppliesASlidingWindowNarrowerThanATile
+                IsServedOrDeclinedAsTheMatcherContractStates/AppliesALeftOnlyWindow
+                IsServedOrDeclinedAsTheMatcherContractStates/AppliesABandToTheRightOfTheDiagonal
+                IsServedOrDeclinedAsTheMatcherContractStates/AppliesAWideBandWithMoreQueriesThanKeys
+                IsServedOrDeclinedAsTheMatcherContractStates/ServesAValueHeadDimNarrowerThanTheQueryOne
+                IsServedOrDeclinedAsTheMatcherContractStates/ServesANarrowerValueHeadDimOverGroupedCrossAttention
+                IsServedOrDeclinedAsTheMatcherContractStates/ServesAValueHeadDimWiderThanTheQueryOne
+                IsServedOrDeclinedAsTheMatcherContractStates/ServesAWiderValueHeadDimWithABias
+                IsServedOrDeclinedAsTheMatcherContractStates/ZeroesRowsNoKeyReaches
+                IsServedOrDeclinedAsTheMatcherContractStates/ZeroesRowsATopLeftCausalWindowStartsPastTheKeys
+                IsServedOrDeclinedAsTheMatcherContractStates/ZeroesRowsALeftOnlyWindowStartsPastTheKeys
+                IsServedOrDeclinedAsTheMatcherContractStates/AddsABiasThatMasksWholeRowsAtTheLowestFiniteValueInBf16
+                IsServedOrDeclinedAsTheMatcherContractStates/AddsABiasThatMasksWholeRowsAtTheLowestFiniteValueInF16
+                IsServedOrDeclinedAsTheMatcherContractStates/AddsABiasThatMasksWholeRowsAtTheLowestFiniteValueInFp32
+                IsServedOrDeclinedAsTheMatcherContractStates/AddsABiasThatMasksWholeRowsWithMinusInfinityInBf16
+                IsServedOrDeclinedAsTheMatcherContractStates/AddsABiasThatMasksWholeRowsWithMinusInfinityInF16
+                IsServedOrDeclinedAsTheMatcherContractStates/AddsABiasThatMasksWholeRowsWithMinusInfinityInFp32
+                IsServedOrDeclinedAsTheMatcherContractStates/AddsABiasThatMasksLeadingKeysWithMinusInfinityInBf16
+                IsServedOrDeclinedAsTheMatcherContractStates/AddsABiasThatMasksLeadingKeysWithMinusInfinityInFp32
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesHeadDim256CausalGroupedQueryAttention
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesHeadDim256NonCausal
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesAGenericHeadDim40
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesAGenericHeadDim80
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesAGenericHeadDim152
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesAGenericHeadDim192
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesAGenericHeadDim240
+                IsServedOrDeclinedAsTheMatcherContractStates/AddsAPerHeadBiasAtHeadDim128
+                IsServedOrDeclinedAsTheMatcherContractStates/AddsABiasInTheQueryDtype
+                IsServedOrDeclinedAsTheMatcherContractStates/AddsAnFp32BiasToAnFp32Query
+                IsServedOrDeclinedAsTheMatcherContractStates/ServesAnFp32BiasBesideAHalfQuery
+                IsServedOrDeclinedAsTheMatcherContractStates/ServesAnFp32BiasBesideABf16Query
+                IsServedOrDeclinedAsTheMatcherContractStates/ServesAnFp32BiasAndDbiasBesideAHalfQuery
+                IsServedOrDeclinedAsTheMatcherContractStates/DeclinesADbiasWhoseRowsAreNotAWholeVectorApart
+                IsServedOrDeclinedAsTheMatcherContractStates/DeclinesABiasPitchThatLeavesTheDbiasUnaligned
+                IsServedOrDeclinedAsTheMatcherContractStates/ReadsKAndVThroughTheirHeadGroups
+                IsServedOrDeclinedAsTheMatcherContractStates/ReadsKAndVThroughOneHeadForAMultiQueryGroup
+                IsServedOrDeclinedAsTheMatcherContractStates/ServesAVWithHeadsOfItsOwn
+                IsServedOrDeclinedAsTheMatcherContractStates/ServesAVWithMoreHeadsThanKUnderGroupedQueries
+                IsServedOrDeclinedAsTheMatcherContractStates/ServesAVWithFewerHeadsThanKUnderCausalGroupedQueries
+                IsServedOrDeclinedAsTheMatcherContractStates/DeclinesVHeadsOfItsOwnWithABias
+                IsServedOrDeclinedAsTheMatcherContractStates/DeclinesVHeadsOfItsOwnUnderFp32
+                IsServedOrDeclinedAsTheMatcherContractStates/DeclinesVHeadsOfItsOwnWithRaggedKeys
+                IsServedOrDeclinedAsTheMatcherContractStates/DeclinesQueryHeadsThatAreNotAMultipleOfTheValueHeads
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesHeadMajorStrides
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesSequenceMajorStrides
+                IsServedOrDeclinedAsTheMatcherContractStates/ComputesPackedQkvViews
+                IsServedOrDeclinedAsTheMatcherContractStates/ReadsVAndDoAndTheLseThroughTheirOwnLayouts
+                IsServedOrDeclinedAsTheMatcherContractStates/ReadsARuntimeScaleAtExecute
+                IsServedOrDeclinedAsTheMatcherContractStates/AppliesTheDefaultScaleWhenTheGraphGivesNone
+        )
+    endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_rdna_decode)
         hkp_register_census_tests(
             TARGET hip_kernel_provider_census_tests
@@ -658,6 +785,23 @@ clang_tidy_check(hip_kernel_provider_tests)
 # install-time file is written from this same list, where a build-tree path would name a
 # directory that does not exist on the machine running the installed suite.
 add_unit_test_target(hip_kernel_provider_tests ${CMAKE_CURRENT_BINARY_DIR})
+
+# The FlyDSL backward suites that build graphs and match rows in-process, with no device
+# (the device cases are the TestGpuFlydslSdpaBwd* suites, which the host label excludes).
+# The tier suites above run them too, but only the host label reaches a runner without a
+# GPU, so they get an entry of their own. Registered beside the drift-guard entry
+# (flydsl/CMakeLists.txt), with the same labels and the same YAML tier entry.
+if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
+    add_test(NAME hip-kernel-provider-flydsl-sdpa-bwd-host
+             COMMAND hip_kernel_provider_tests "--gtest_filter=TestFlydslSdpaBwd*")
+    set_tests_properties(hip-kernel-provider-flydsl-sdpa-bwd-host PROPERTIES
+        LABELS "unit_test;hip-kernel-provider;host"
+        ENVIRONMENT "${TEST_ENVIRONMENT}"
+        TIMEOUT 600)
+    if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED AND COMMAND apply_ctest_category_labels)
+        apply_ctest_category_labels("${HKP_PACK_CTEST_CATEGORIES_YAML}")
+    endif()
+endif()
 
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     clang_tidy_check(hip_kernel_provider_census_tests)

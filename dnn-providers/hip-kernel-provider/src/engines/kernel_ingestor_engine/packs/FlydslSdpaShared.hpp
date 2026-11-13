@@ -54,7 +54,7 @@ inline constexpr uint32_t HEAD_AXIS = 1;
 inline constexpr uint32_t SEQ_AXIS = 2;
 inline constexpr uint32_t HEAD_DIM_AXIS = 3;
 
-inline constexpr int64_t INT32_LIMIT = 2147483647LL;
+using sdpa_graph::INT32_LIMIT;
 inline constexpr int64_t BYTES_PER_ELEMENT = 2; // bf16 and f16 only
 
 /// A bound the graph leaves open (hipDNN's sentinel for left_bound / right_bound).
@@ -69,12 +69,7 @@ inline constexpr int64_t NO_SINK = -1;
 // Matching
 // ---------------------------------------------------------------------------
 
-inline const data_objects::TensorAttributes* findTensor(const MatchContext& context, int64_t uid)
-{
-    const auto& tensors = context.graph.getTensorMap();
-    auto it = tensors.find(uid);
-    return it == tensors.end() ? nullptr : it->second;
-}
+using sdpa_graph::findTensor;
 
 /// The node the SDPA matchers read, or nullptr if the graph isn't a single SDPA-forward node.
 inline const data_objects::SdpaAttributes* sdpaNode(const MatchContext& context)
@@ -129,11 +124,7 @@ inline bool usesUnreadSchemaFields(const MatchContext& context)
     return false;
 }
 
-/// The largest softmax scale magnitude every FlyDSL SDPA kernel serves. Real graphs use
-/// 1/sqrt(d) or a temperature near 1; far above this each family overflows f32 at a different
-/// point (the CDNA causal objects' running-max floor times scale * log2(e) passes FLT_MAX near
-/// 2.4e8), so one bound here makes all of them decline alike rather than diverge.
-inline constexpr double MAX_SOFTMAX_SCALE = 1048576.0; // 2^20
+using sdpa_graph::MAX_SOFTMAX_SCALE;
 
 /// Whether @p value is a softmax scale the engines take: finite and at most MAX_SOFTMAX_SCALE
 /// in magnitude, zero and negative included (NaN and infinity fail), as PyTorch and AOTriton
@@ -296,59 +287,8 @@ inline bool runsOnAZeroBias(const MatchContext& context,
     return needsScaledScores(static_cast<double>(attributes.attn_scale_value().value_or(1.0F)));
 }
 
-/// The product of @p factors, or nullopt when it does not fit in int64_t. Every product of
-/// graph-controlled extents goes through this: an unchecked one is signed overflow, and a
-/// wrapped value can pass a bound it should fail.
-inline std::optional<int64_t> checkedProduct(std::initializer_list<int64_t> factors)
-{
-    int64_t product = 1;
-    for(const int64_t factor : factors)
-    {
-        if(__builtin_mul_overflow(product, factor, &product))
-        {
-            return std::nullopt;
-        }
-    }
-    return product;
-}
-
-/// Whether no two elements of @p tensor share an address, which an output needs: concurrent
-/// workgroups writing one location race. Its axes of more than one element, ordered by
-/// stride, must each step past everything the axes inside it span. Conservative: a layout
-/// interleaving two axes inside one another's gaps declines too.
-inline bool elementsDoNotOverlap(const data_objects::TensorAttributes& tensor)
-{
-    const auto* dims = tensor.dims();
-    const auto* strides = tensor.strides();
-    if(dims == nullptr || strides == nullptr || dims->size() != strides->size())
-    {
-        return false;
-    }
-    std::vector<std::pair<int64_t, int64_t>> axes; // (stride, extent)
-    for(flatbuffers::uoffset_t axis = 0; axis < dims->size(); ++axis)
-    {
-        if(dims->Get(axis) > 1)
-        {
-            axes.emplace_back(strides->Get(axis), dims->Get(axis));
-        }
-    }
-    std::sort(axes.begin(), axes.end());
-    int64_t span = 1; // elements the inner axes reach, from the first
-    for(const auto& [stride, extent] : axes)
-    {
-        if(stride < span)
-        {
-            return false;
-        }
-        const auto reach = checkedProduct({extent - 1, stride});
-        if(!reach.has_value() || *reach > std::numeric_limits<int64_t>::max() - span)
-        {
-            return false;
-        }
-        span += *reach;
-    }
-    return true;
-}
+using sdpa_graph::checkedProduct;
+using sdpa_graph::elementsDoNotOverlap;
 
 /// The kernel metadata spelling of a graph dtype.
 inline std::optional<std::string> kernelDataTypeName(data_objects::DataType dataType)

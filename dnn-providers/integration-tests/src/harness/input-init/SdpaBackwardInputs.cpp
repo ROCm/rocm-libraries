@@ -57,9 +57,13 @@ std::optional<std::string> unmodeledForwardTerm(const fb::SdpaBackwardAttributes
     {
         return "padding or variable sequence lengths";
     }
-    // A zero probability is no dropout, as the engines read it.
-    if((a.dropout_probability().has_value() && a.dropout_probability().value() != 0.f)
-       || a.seed_tensor_uid().has_value() || a.offset_tensor_uid().has_value()
+    // A zero probability is no dropout, as the plans read it: a seed or offset it names is not
+    // read.
+    const bool zeroProbability
+        = a.dropout_probability().has_value() && a.dropout_probability().value() == 0.f;
+    if((a.dropout_probability().has_value() && !zeroProbability)
+       || (!zeroProbability
+           && (a.seed_tensor_uid().has_value() || a.offset_tensor_uid().has_value()))
        || a.dropout_mask_tensor_uid().has_value() || a.dropout_scale_tensor_uid().has_value()
        || a.dropout_scale_inv_tensor_uid().has_value())
     {

@@ -4,7 +4,7 @@
 > follows [RFC 0022](../../../../projects/hipdnn/docs/rfcs/0022_PerOpTestPlans.md) (#13937, merged 2026-10-30). The RFC's methodology guide and
 > test-plans index do not exist yet, so this plan links the RFC's sections directly. The generator
 > is the source of truth for counts and budgets: `generate_sdpa_bwd_bundles.py --dry-run --report`
-> declares 580 cases, 503 written (quick 56, PR 152, nightly 220, full 75) and 77 gated. The engine defects DEF-01 to DEF-08
+> declares 581 cases, 505 written (quick 57, PR 153, nightly 220, full 75) and 76 gated. The engine defects DEF-01 to DEF-08
 > (§4.2) are tracked under ALMIOPEN-3035: DEF-01 is ALMIOPEN-3036, DEF-02 ALMIOPEN-3037,
 > DEF-03 ALMIOPEN-3046, DEF-04 ALMIOPEN-3039, DEF-05 and DEF-08 ALMIOPEN-3038, DEF-06
 > ALMIOPEN-3043 and DEF-07 ALMIOPEN-3044.
@@ -196,8 +196,7 @@ hipDNN's contract is cuDNN's semantics. In order of authority: `Attention.md:360
 
 Open points: dQ, dK and dV at padded positions are expected to be 0 until a SEM entry decides (the
 references write 0); rank-3 Stats is an extension probe (T6); `dropout_probability = 0` is a probe
-until a SEM entry defines it (A10): the references treated it as no dropout until #14358, which
-declines it, so PRB-R01 is gated (p0) until ALMIOPEN-3149 or ALMIOPEN-3150 settles its meaning.
+(A10): both references model it as no dropout (SEM-015), so PRB-R01 is checked against them.
 
 ---
 
@@ -246,7 +245,7 @@ rejection probe.
 | A6, A7, AW7 | `causal_mask`, `causal_mask_bottom_right` | each alone; `causal_mask` with W, with R 5, with BR (composition per SEM-002); both together is U (IVP6) | ready | Q |
 | A8 | `alibi_mask` | TL causal only; any other band is U (IVP10) | I6 (the references model it) | PR (rejection probes); gated → PR |
 | A9, AW6 | `padding_mask` | true with both seq_len tensors; false with both is padding (SEM-008 extension, cuDNN rejects); true without seq_len is illegal (R10) | I6 + HG4 | gated → PR |
-| A10 | `dropout_probability` | unset; 0 (probe until a SEM entry defines it); 0 < p < 1 with seed and offset (Philox); p without RNG state, p ≥ 1, p < 0, NaN, or p with a mask is U (IVP7) | 0: gated (p0: ALMIOPEN-3149 or ALMIOPEN-3150); Philox: none | Q (gated) |
+| A10 | `dropout_probability` | unset; 0 (probe; no dropout, SEM-015); 0 < p < 1 with seed and offset (Philox); p without RNG state, p ≥ 1, p < 0, NaN, or p with a mask is U (IVP7) | 0: ready (both references model it as no dropout, SEM-015); Philox: none | Q (gated) |
 | A11 | Node `compute_data_type` | FLOAT; HALF, BFLOAT16, DOUBLE (listed: each needs its own tolerance class); unset on node and graph is illegal | ready (FLOAT) | Q (FLOAT) |
 | A12, A13 | Node name; cuDNN-parity setters with no schema field | no semantic effect, not swept; rejected by R0 | — | unit tests |
 
@@ -405,7 +404,7 @@ ceilings are wall times and FLOP follows from them.
 
 | Level | RFC start | Wall per case | FLOP (implied) | MiB (fp32-eq.) | Cumulative budget | Sets |
 |---|---|---|---|---|---|---|
-| quick | ≤ 20 MFLOP, ≤ 1 MB | ≤ 1.5 s | ≤ 100 M | ≤ 4 | 20 s | S; H for regressions and two cheap probes |
+| quick | ≤ 20 MFLOP, ≤ 1 MB | ≤ 1.5 s | ≤ 100 M | ≤ 4 | 20 s | S; H for regressions and three cheap probes |
 | PR | ≤ 200 MFLOP, ≤ 16 MB | ≤ 5 s | ≤ 350 M | ≤ 16 | 120 s | S, H, six M |
 | nightly | ≤ 8 GFLOP, ≤ 64 MB | ≤ 75 s | ≤ 5.5 G | ≤ 64 | 480 s | S, L, M, H |
 | full | none | ≤ 5 min | ≤ 22 G | none; X states host memory | 1800 s | all, with X |
@@ -572,7 +571,7 @@ Limits, placed in full; each shape states what its oracle needs.
 
 `sdpa_bwd_plan.py` holds one record per case (geometry, per-tensor dims, strides and dtypes, bounds,
 scale, attributes, value domains, level, topology, purpose, plan items, class, oracle, gate, cost):
-580 cases: 503 written on the baseline and 77 gated (§4.1). **Core axes:** dtype
+581 cases: 505 written on the baseline and 76 gated (§4.1). **Core axes:** dtype
 {BF16, FP16} × Sq:Skv {<, =, >} × mask {none, causal, window} × alignment {TL, BR} where it changes
 the mask: 13 cells per dtype. The mask and the Sq:Skv relation choose the kernel's code path (dead
 rows, unattended keys, the window anchor, the masked-tile skip); the dtype selects the kernel and the
@@ -682,7 +681,7 @@ Each level answers one question (RFC 0022 §8.2); a case sits in the lowest leve
 | Head dims | S17.q | TP-E, S15, S16.c, S21, S23, H33–H39, H43–H45 | TP-A, S16–S20, S22, H40–H42, H99 | TP-D, S24 |
 | Layouts and strides | S40.q, S42.q | S42, S43, H58, H61 (entry), PRB-L01, TP-Bs05, TP-Bs11; DEF-01, -02, -05 (entry) | S40, S41, S44, H60, TP-B | TP-D |
 | Scale | REG-04, CLM-S1, H90 | CLM-S2, CLM-S3, H83, H84; DEF-06 (entry) | S37, S38 | — |
-| Bias | REG-07a–c | H75, H76; dBias PRB-B11–B14, PRB-B16 | PRB-B01–B07, H77, H78, H101, H102 | — |
+| Bias | REG-07a–c | H75, H76; dBias PRB-B11–B14, PRB-B16, PRB-B17 | PRB-B01–B07, H77, H78, H101, H102 | — |
 | Sequence hazards | H08, H11, PRB-G01 | S13, S57, H02–H04, H07, H09, H10, H12, H17–H22, H28, H31, H97 | S14, H05, H06, H23 | H94, H95 |
 | Values and accumulation | REG-18c | H86, H88, H89, H92, PRB-E04t, PRB-E05t, DEF-03 (entry) | H29, H30, PRB-E06a | X06, X07 |
 | Model | — | M01, M20, M41, M44, M45 (`.pr`) | 24 variants, M07.pr included | M01.fc, M15.fc, M41.fc, M26.f and seven `.n` |
@@ -693,28 +692,27 @@ Each level answers one question (RFC 0022 §8.2); a case sits in the lowest leve
 Quick holds the core cells; four core-base S variants; every hipDNN escaped-bug reproducer that has
 an oracle; the cheapest claim case of each claimed feature the core cells miss (H08, H11, H90,
 REG-18c, PRB-A01, CLM-S1, GL-01); and two probes chosen by cost and hazard: PRB-M01 (a rejection
-probe) and PRB-G01 (Sq = Skv = 1). A third, PRB-R01 (p = 0), targets
-quick but is gated (p0): since #14358 neither reference models p = 0, so an engine that accepts it
-cannot be checked and the case fails as Unverifiable.
+probe) and PRB-G01 (Sq = Skv = 1). A third, PRB-R01 (p = 0), also
+runs at quick: both references model p = 0 as no dropout (SEM-015), so an accepting engine is
+checked against them.
 
 Cases generated (own level / cumulative):
 
 | Level | `Default` | Other topologies | Own | Cumulative | Claim | Probe | Regression | Distinct geometries |
 |---|---|---|---|---|---|---|---|---|
-| quick | 53 | 3 | **56** | 56 | 38 | 2 | 16 | 21 |
-| PR | 134 | 18 | **152** | 208 | 69 | 80 | 3 | 81 |
-| nightly | 173 | 47 | **220** | 428 | 109 | 111 | 0 | 102 |
-| full | 75 | 0 | **75** | 503 | 45 | 30 | 0 | 28 |
+| quick | 54 | 3 | **57** | 57 | 38 | 3 | 16 | 21 |
+| PR | 134 | 19 | **153** | 210 | 69 | 81 | 3 | 82 |
+| nightly | 173 | 47 | **220** | 430 | 109 | 111 | 0 | 102 |
+| full | 75 | 0 | **75** | 505 | 45 | 30 | 0 | 28 |
 
-Probes include the rejection probes (1, 16, 3, 1). By size class: quick S 31, H 25; PR S 38, M 5,
-H 109; nightly S 125, L 36, M 26, H 33; full S 54, M 11, H 4, X 6. 204 distinct geometries in all.
+Probes include the rejection probes (1, 16, 3, 1). By size class: quick S 31, H 26; PR S 38, M 5,
+H 110; nightly S 125, L 36, M 26, H 33; full S 54, M 11, H 4, X 6. 205 distinct geometries in all.
 `--report` prints these counts; the measured run (§4.5) fixes them.
 
 **Gated cases** have level `notrun`, a target level and a gate, and are written when it opens.
 
 | Target | Cases | Gate | s, CPU / GPU era |
 |---|---|---|---|
-| quick | PRB-R01 | p0: a SEM entry for p = 0 and a reference that models it (ALMIOPEN-3149 or ALMIOPEN-3150) | 0.25 / 0.09 |
 | PR | REG-08 | I6 for rank-3 Stats | 0.42 / 0.10 |
 | PR | REG-14; PRB-M04 | I4; I6 | 0.68 / 0.20 |
 | PR | GL-15, GL-16a, M40.pr, PRB-P01–P04, PRB-R04 | I6 + HG4 | 7.44 / 1.56 |
@@ -853,7 +851,7 @@ Each product left out is a decision. Rejection probes are never here and are nev
 
 Every case is costed as accepted, with the binding model of §3 (a repeated case costs repeat × its
 time; golden cases at the live CPU reference). The reserve holds every gated case whose gate is a harness
-item, on the CPU reference: PRB-R01 (quick, 0.2 s), S46, S47, H87, H91, H93 (PR, 3.2 s) and H96
+item, on the CPU reference: S46, S47, H87, H91, H93 (PR, 3.2 s) and H96
 (nightly, 0.4 s).
 The build fails when a level crosses 95 % of its budget with the reserve.
 
@@ -1007,7 +1005,7 @@ shipped bf16 1e-2 is vacuous for 50 of 111 bf16 cases. rtol is 2 ulps at the bot
 
 | Class | Rule | bf16 atol / rtol | fp16 atol / rtol | Evidence (pilot, bf16 / fp16) |
 |---|---|---|---|---|
-| F32 | fp32 IO | 1e-5 / 1e-5 (harness default) | — | uncalibrated; guard holds on S01, L32 |
+| F32 | fp32 IO | 1e-5 / 1e-5 (harness default) | — | guard holds on S01, L32; reported on ROCm/dnn-benchmarking#127: its SDPA backward corpus (81 gfx950 fp32 graphs) passes split at rtol 1e-5, atol 1e-6 against a PyTorch fp32 reference |
 | K1 | Skv (or every live seq_len_kv) ≤ 2 | 3e-4 / 1.6e-2 | 3e-4 / 4e-3 | bf16 bit-exact at Skv 1; fp16 is DEF-03 |
 | U | logit spread λ ≥ 2 | 2.5e-2 / 1.6e-2 | 3e-3 / 4e-3 | n = 5 / 4 |
 | S | Sq ≤ 17 | 3e-4 / 1.6e-2 | 2e-4 / 4e-3 | n = 12 / 8; margin 3.3 / 5.4 |
@@ -1026,8 +1024,9 @@ shipped bf16 1e-2 is vacuous for 50 of 111 bf16 cases. rtol is 2 ulps at the bot
   without a claim; fp16 cases at Skv ≤ 2 are probes until DEF-03 is fixed.
 - **Rows.** The generator owns 12 anchored `[[tolerance_overrides]]` rows,
   `*_SdpaBackward_*.*_<dtype>_*_<token>`, in each claiming engine TOML: each id matches one row,
-  forward halves none, and `_fp16_` never matches `_bfp16_` (lint HG10). They replace the two
-  dtype-only SdpaBackward rows of today's engine TOML. The measured run confirms the classes with
+  forward halves none, and `_fp16_` never matches `_bfp16_` (lint HG10). The engine
+  TOML (one file shared by the merged and split engines) holds two narrowed flat SdpaBackward rows
+  before the generated class block and the hand class-U bf16 row after it. The measured run confirms the classes with
   device fill (HG14). Long term, a per-tensor validator `|out − ref| ≤ c·max|ref|`
   (c = 2.5e-2 bf16, 6e-3 fp16) replaces tokens and rows (HG6).
 
@@ -1072,7 +1071,7 @@ The generator emits these features' cases as gated or listed items; they run whe
 | the #14312 derivation declines ALiBi, padding, dropout, ragged and rank-3 Stats (I6); its CPU forward is too slow for M and X | those cases stay gated | extend it; derive with the GPU forward | ALMIOPEN-2855 (GPU forward); extension to file |
 | #14312 called the forward overload that #14358 deleted | closed: the derivation uses `SdpaFwdOptions` | — | — |
 | `left_bound` keeps L + 1 keys (SEM-001) | window cases pass while wrong against cuDNN | fixed by #14483 | ALMIOPEN-3024 |
-| non-FLOAT Stats read as float; the references throw for a device-memory scale and decline p = 0 | false FAIL; silent mis-model; PRB-R01 lost its oracle (Unverifiable in PR CI, 2026-11-02), so it is gated (p0) | references decline; rule IVP2; a SEM entry for p = 0 | to file; PR review; ALMIOPEN-3149 or ALMIOPEN-3150 (p = 0) |
+| non-FLOAT Stats read as float; the references throw for a device-memory scale | false FAIL; silent mis-model | references decline; rule IVP2 | to file; PR review |
 | CPU reference cost: single-threaded, dP for every key | 90 % of lane time | parallelise over (b, KV head); skip masked keys | to file |
 | E5: bundles load without `Graph::validate()` | frontend rules never apply to a bundle | the generator enforces legality; validate after load | to file |
 | HG1, HG2: no bundle generator; no `purpose` | plan and bundles drift; probes counted as claims | this plan's generator; harness and `feature_matrix.py` skip probes | ALMIOPEN-2948 (design); to file |
