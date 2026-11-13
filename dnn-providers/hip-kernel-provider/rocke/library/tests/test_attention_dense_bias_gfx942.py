@@ -1417,6 +1417,68 @@ def test_the_ingestor_grid_serves_a_bias_and_the_aot_grids_refuse_it():
         assert not ok and "cannot serve features ['attn_bias']" in why, spec_id
 
 
+def test_the_ingestor_grid_stays_pinned_with_a_bias():
+    """The qb_minor grid serves a bias and still launches the grid the ingestor sizes at
+    run time: persistence, the block order and the KV split are no axes of its space,
+    and the order is not a recorded knob (the tuned candidate's bias geometry picks an
+    order per problem and keeps it as an axis; the variant that pins the order must not
+    inherit that), so its ids and every spec it offers are the ones a plain request
+    gets."""
+    from itertools import islice
+
+    from dispatch.attention import (
+        attention_candidates,
+        attention_tuning_spec,
+        iter_registered_attention_combos,
+    )
+
+    grid_knobs = {"persistent", "nonpersist_decode", "kv_segments"}
+    (qbminor,) = [
+        c for c in attention_candidates() if c.spec_id == "gfx942_dense_qbminor"
+    ]
+    for kw in (
+        {},
+        {"mask_type": 0},
+        {"hdim_q": 64, "hdim_v": 64, "dtype": "fp16"},
+        {"hdim_q": 64, "hdim_v": 64, "dtype": "bf16", "mask_type": 0},
+    ):
+        biased = _request(use_attn_bias=True, **kw)
+        plain = _request(use_attn_bias=False, **kw)
+        for knobs in (None, {"pv_priority": 1}):
+            spec = attention_tuning_spec(biased, qbminor.spec_id, knobs=knobs)
+            assert grid_knobs.isdisjoint(dict(spec.knobs)), (kw, knobs)
+            assert spec.kernel_spec.use_additive_bias
+            # The knob names a bias request records are the plain request's.
+            twin = attention_tuning_spec(plain, qbminor.spec_id, knobs=knobs)
+            assert dict(spec.knobs).keys() == dict(twin.knobs).keys(), (kw, knobs)
+        req = replace(biased, algorithm=qbminor.algorithm, spec_id=qbminor.spec_id)
+        for level in ("production", "full"):
+            swept = list(
+                islice(
+                    iter_registered_attention_combos(
+                        req,
+                        candidate_prefix=qbminor.name,
+                        sweep_level=level,
+                    ),
+                    400,
+                )
+            )
+            assert swept, (kw, level)
+            assert {
+                (
+                    s.kernel_spec.persistent,
+                    s.kernel_spec.nonpersist_decode,
+                    s.kernel_spec.kv_segments,
+                )
+                for _, s in swept
+            } == {(False, "qb_minor", 1)}, (kw, level)
+            assert all(s.kernel_spec.use_additive_bias for _, s in swept)
+            assert all(grid_knobs.isdisjoint(dict(s.knobs)) for _, s in swept), (
+                kw,
+                level,
+            )
+
+
 def test_a_bias_request_sweeps_bias_specs_the_kernel_serves():
     from dispatch.attention import attention_candidates
     from rocke.dispatch.tuning import walk
