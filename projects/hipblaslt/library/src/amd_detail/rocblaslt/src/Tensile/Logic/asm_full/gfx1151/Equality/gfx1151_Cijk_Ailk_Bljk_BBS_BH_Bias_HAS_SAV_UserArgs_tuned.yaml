@@ -331,9 +331,77 @@
     reorderGRInstForDTVB: false
     tailLoopOptA: false
     tailLoopOptB: false
+  - 1LDSBuffer: 1
+    ClusterLocalRead: 0
+    DepthU: 64
+    EnableMatrixInstruction: true
+    ISA: [11, 5, 1]
+    LdsPadA: 8
+    LdsPadB: 8
+    LdsPadMetadata: 0
+    LocalReadVectorWidth: 16
+    MFMA_BF16_1K: 0
+    MIBlock: [16, 16, 16, 1, 1, 1]
+    MIInputPerThread: 16
+    MIWaveGroup: [4, 1]
+    MIWaveTile: [2, 4]
+    MatrixInstB: 1
+    MatrixInstBM: 1
+    MatrixInstK: 16
+    MatrixInstM: 16
+    MatrixInstN: 16
+    MatrixInstruction: [16, 16, 16, 1]
+    MaxOccupancy: 40
+    PrefetchGlobalRead: 2
+    PrefetchLocalRead: 0
+    SolutionIndex: 1
+    SolutionUID: 0uVjkrh2nVNd
+    SourceSwap: true
+    StoreVectorWidth: 1
+    ThreadTile: [1, 1]
+    Valid: true
+    VectorWidthB: 1
+    WavefrontSize: 32
+    WorkGroup: [64, 2, 1]
+  - 1LDSBuffer: 1
+    ClusterLocalRead: 0
+    DepthU: 64
+    EnableMatrixInstruction: true
+    ISA: [11, 5, 1]
+    LdsPadA: 8
+    LdsPadB: 8
+    LdsPadMetadata: 0
+    LocalReadVectorWidth: 16
+    MFMA_BF16_1K: 0
+    MIBlock: [16, 16, 16, 1, 1, 1]
+    MIInputPerThread: 16
+    MIWaveGroup: [4, 1]
+    MIWaveTile: [2, 3]
+    MatrixInstB: 1
+    MatrixInstBM: 1
+    MatrixInstK: 16
+    MatrixInstM: 16
+    MatrixInstN: 16
+    MatrixInstruction: [16, 16, 16, 1]
+    MaxOccupancy: 40
+    PrefetchGlobalRead: 2
+    PrefetchLocalRead: 0
+    SolutionIndex: 2
+    SolutionUID: 0uVjkrhwpFaJ
+    SourceSwap: true
+    StaggerU: 0
+    StoreVectorWidth: 1
+    ThreadTile: [1, 1]
+    Valid: true
+    WavefrontSize: 32
+    WorkGroup: [64, 2, 1]
 - [2, 3, 0, 1]
 - - - [32768, 968, 1, 2048]
     - [0, 65.5]
+  - - [12288, 317, 1, 2048]
+    - [1, 75.2]
+  - - [4608, 513, 1, 1536]
+    - [2, 70.0]
 - null
 - null
 - DeviceEfficiency
