@@ -23,13 +23,13 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 ### Known issues
 
 * TODO: Retune and investigate the gfx950 configs for the following algorithms. Their autotuned configs regressed against the previous configs on MI355X, so they are kept at the previous configs for now:
-  * `adjacent_difference` (`device_adjacent_difference.hpp`): up to 78% slower for `half`, `i16`, `i8`, `u8`, and `f32` values.
-  * `adjacent_difference_inplace` (`device_adjacent_difference_inplace.hpp`): same small-type regressions as `adjacent_difference`.
-  * `merge_sort` block merge (`device_merge_sort_block_merge.hpp`): 14% slower overall and up to 59% slower for `half`, `i16`, `i8`, `f64`, and `i64` keys. The `odd_even_*` and `partition_*` parameters appear to be untuned.
-  * `find_first_of` (`device_find_first_of.hpp`): up to 38% slower for 8- and 16-byte values with large key sets (1,000 to 10,000 keys).
-  * `binary_search` (`device_binary_search.hpp`): up to 30% slower for `i16` and `i8` outputs.
-  * `lower_bound` (`device_lower_bound.hpp`): same regressions as `binary_search`.
-  * `upper_bound` (`device_upper_bound.hpp`): same regressions as `binary_search`.
+  * `adjacent_difference` (`device_adjacent_difference.hpp`).
+  * `adjacent_difference_inplace` (`device_adjacent_difference_inplace.hpp`).
+  * `merge_sort` block merge (`device_merge_sort_block_merge.hpp`).
+  * `find_first_of` (`device_find_first_of.hpp`).
+  * `binary_search` (`device_binary_search.hpp`).
+  * `lower_bound` (`device_lower_bound.hpp`).
+  * `upper_bound` (`device_upper_bound.hpp`).
 
 ### Resolved Issues
 * Fixed incorrect output in `device_segmented_topk_air.hpp:choose_pivot_bin` when `radix_bits` does not divide the `key` width.
