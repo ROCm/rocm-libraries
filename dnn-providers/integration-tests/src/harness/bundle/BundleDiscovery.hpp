@@ -245,21 +245,6 @@ inline std::filesystem::path relativeToRoot(const std::filesystem::path& path,
     return path.lexically_normal().lexically_relative(root.lexically_normal());
 }
 
-// Generic recursive file scanner. It carries no bundle knowledge.
-inline std::vector<std::filesystem::path>
-    scanFilesByExtension(const std::filesystem::path& directory, const std::string& extension)
-{
-    std::vector<std::filesystem::path> paths;
-    forEachBundleTreeEntry(directory, [&](const std::filesystem::directory_entry& entry) {
-        if(entry.is_regular_file() && entry.path().extension() == extension)
-        {
-            paths.push_back(entry.path());
-        }
-    });
-    std::sort(paths.begin(), paths.end());
-    return paths;
-}
-
 // Companion file kinds that mark a .json as metadata for a graph instead of a
 // graph test. Add future companion suffixes here so discovery has one exclusion
 // list.
@@ -522,16 +507,16 @@ inline std::vector<std::filesystem::path>
     return findEmptyLeafFolders(listBundleTree(bundleDir), sweepDirs);
 }
 
-} // namespace detail
-
-inline void warnOnEmptyLeafFolders(const detail::BundleTreeListing& listing,
+inline void warnOnEmptyLeafFolders(const BundleTreeListing& listing,
                                    const std::vector<std::filesystem::path>& sweepDirs)
 {
-    for(const auto& leaf : detail::findEmptyLeafFolders(listing, sweepDirs))
+    for(const auto& leaf : findEmptyLeafFolders(listing, sweepDirs))
     {
         HIPDNN_PLUGIN_LOG_WARN("Skipping empty bundle leaf folder (no graph .json): " << leaf);
     }
 }
+
+} // namespace detail
 
 // Reads and validates the registration-time shape of sweep.json. Full case
 // validation happens during loading, but discovery needs cases[] ids to be
@@ -828,7 +813,7 @@ inline BundleDiscoveryResult
 
     const auto listing = detail::listBundleTree(bundleDir);
     const auto sweepDirs = detail::sweepRootsIn(listing);
-    warnOnEmptyLeafFolders(listing, sweepDirs);
+    detail::warnOnEmptyLeafFolders(listing, sweepDirs);
 
     auto registerBundle = [&](DiscoveredBundle bundle) {
         const auto fullName = bundle.fullName();

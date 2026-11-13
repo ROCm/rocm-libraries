@@ -573,6 +573,54 @@ TEST_F(TestBundleDiscoveryFixture, DataRootWithATrailingSeparatorIsNotALeaf)
     EXPECT_TRUE(detail::findEmptyLeafFolders(root, findSweepDirectories(root)).empty());
 }
 
+TEST_F(TestBundleDiscoveryFixture, SweepRootAtADataRootWithATrailingSeparatorIsFound)
+{
+    createTemplateSweep(_tempDir,
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}}});
+    const auto root = _tempDir / "";
+
+    const auto sweepDirs = findSweepDirectories(root);
+    EXPECT_EQ(sweepDirs, std::vector<std::filesystem::path>{root});
+    EXPECT_TRUE(detail::findEmptyLeafFolders(root, sweepDirs).empty());
+}
+
+// The listing decides sweep roots from the walked entries. It must agree with
+// isSweepBundleRoot() on every directory, the data root included.
+TEST_F(TestBundleDiscoveryFixture, ListingSweepRootTestAgreesWithIsSweepBundleRoot)
+{
+    createMixedTierTree(_tempDir);
+    const auto templateOnly = _tempDir / "quick" / "Odd" / "TemplateOnly";
+    std::filesystem::create_directories(templateOnly);
+    std::ofstream(templateOnly / "graph.template.json") << "{}";
+    const auto manifestOnly = _tempDir / "quick" / "Odd" / "ManifestOnly";
+    std::filesystem::create_directories(manifestOnly);
+    std::ofstream(manifestOnly / "sweep.json") << "{}";
+    const auto directoryManifest = _tempDir / "quick" / "Odd" / "DirectoryManifest";
+    std::filesystem::create_directories(directoryManifest / "sweep.json");
+    std::ofstream(directoryManifest / "graph.template.json") << "{}";
+
+    for(const auto& root : {_tempDir, _tempDir / ""})
+    {
+        const auto listing = detail::listBundleTree(root);
+        size_t sweepRoots = 0;
+        for(const auto& directory : listing.directories)
+        {
+            EXPECT_EQ(listing.isSweepRoot(directory), isSweepBundleRoot(directory)) << directory;
+            sweepRoots += listing.isSweepRoot(directory) ? 1 : 0;
+        }
+        EXPECT_EQ(sweepRoots, 8u);
+    }
+
+    createTemplateSweep(_tempDir,
+                        {SweepCaseSpec{"case0", "float", {2, 3}, {3, 1}, {2, 3}, {3, 1}}});
+    for(const auto& root : {_tempDir, _tempDir / ""})
+    {
+        const auto listing = detail::listBundleTree(root);
+        EXPECT_TRUE(listing.isSweepRoot(root));
+        EXPECT_TRUE(isSweepBundleRoot(root));
+    }
+}
+
 TEST_F(TestBundleDiscoveryFixture, EmptyLeafFoldersBesideAndInsideASweepAreReported)
 {
     const auto sweepDir = _tempDir / "quick" / "Op" / "Sweep";
@@ -734,15 +782,16 @@ TEST_F(TestBundleDiscoveryFixture, SweepSupportJsonIsNotDiscoveredAsGraph)
     }
 }
 
-TEST_F(TestBundleDiscoveryFixture, ScanFilesByExtensionIsGenericAndSorted)
+TEST_F(TestBundleDiscoveryFixture, BundleTreeListingHoldsRegularJsonFilesSorted)
 {
     std::filesystem::create_directories(_tempDir / "b");
     std::filesystem::create_directories(_tempDir / "a");
     std::ofstream(_tempDir / "b" / "z.json") << "{}";
     std::ofstream(_tempDir / "a" / "m.json") << "{}";
     std::ofstream(_tempDir / "a" / "ignore.txt") << "x";
+    std::filesystem::create_directories(_tempDir / "a" / "dir.json");
 
-    auto files = scanFilesByExtension(_tempDir, ".json");
+    const auto files = detail::listBundleTree(_tempDir).jsonFiles;
     ASSERT_EQ(files.size(), 2u);
     EXPECT_EQ(files[0].filename(), "m.json");
     EXPECT_EQ(files[1].filename(), "z.json");
