@@ -1123,7 +1123,7 @@ class TestInstances(unittest.TestCase):
             epilogue="cshuffle",
             async_dma=True,
         )
-        kernel = build_implicit_gemm_conv(spec)
+        kernel = build_implicit_gemm_conv(spec, arch="gfx942")
         ll = lower_kernel_to_llvm(kernel, arch="gfx942")
         # 1) The async DMA intrinsic itself is emitted.
         self.assertIn("@llvm.amdgcn.raw.ptr.buffer.load.lds", ll)
@@ -3617,7 +3617,9 @@ class TestCdnaPrimitives(unittest.TestCase):
             epilogue="cshuffle",
             async_dma=True,
         )
-        ll = lower_kernel_to_llvm(build_implicit_gemm_conv(spec), arch="gfx942")
+        ll = lower_kernel_to_llvm(
+            build_implicit_gemm_conv(spec, arch="gfx942"), arch="gfx942"
+        )
         # readfirstlane for wave-uniform LDS offset.
         self.assertIn("@llvm.amdgcn.readfirstlane.i32", ll)
         # SGPR-pin asm constraint.
@@ -8843,7 +8845,7 @@ class TestEveryKernelUsesMfma(unittest.TestCase):
     def _llvm_for(self, build_fn, spec):
         # The specs below use atoms that exist on gfx942 and gfx950. The IR is the
         # same on both, so one arch is enough; gfx942 is the one with fewer atoms.
-        return lower_kernel_to_llvm(build_fn(spec), arch="gfx942")
+        return lower_kernel_to_llvm(build_fn(spec, arch="gfx942"), arch="gfx942")
 
     def test_mfma_gemm_uses_mfma(self):
         from rocke.instances import MfmaGemmSpec, build_mfma_gemm
