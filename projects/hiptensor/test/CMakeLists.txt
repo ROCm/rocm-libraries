@@ -63,7 +63,7 @@ else()
     endif()
 endif()
 
-get_target_property(composable_kernel_INCLUDES composable_kernel::device_other_operations INTERFACE_INCLUDE_DIRECTORIES)
+get_target_property(composable_kernel_INCLUDES ${HIPTENSOR_CK_INCLUDE_TARGET} INTERFACE_INCLUDE_DIRECTORIES)
 
 # ABI export-surface guard. Host-only (no GPU): runs scripts/check_exported_symbols.py over the
 # built libhiptensor.so and fails if any symbol outside the public allowlist is exported. The
