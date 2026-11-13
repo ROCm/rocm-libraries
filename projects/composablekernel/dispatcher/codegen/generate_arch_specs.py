@@ -159,7 +159,7 @@ def generate_python_module(specs: Dict[str, Any], output_path: Path):
     lds_budgets_str = "{\n"
     for arch, per_pipeline in lds_budgets.items():
         capacity_kb = archs[arch]["lds_capacity_kb"]
-        lds_budgets_str += f'    # {arch}: {capacity_kb} KB of LDS\n'
+        lds_budgets_str += f"    # {arch}: {capacity_kb} KB of LDS\n"
         lds_budgets_str += f'    "{arch}": {{\n'
         for pipeline, budget in per_pipeline.items():
             lds_budgets_str += f'        "{pipeline}": {budget},\n'
@@ -429,6 +429,7 @@ def generate_cpp_header(specs: Dict[str, Any], output_path: Path):
         "comp_tdm": "CompTDMV1",
         "comp_tdm_v2": "CompTDMV2",
         "comp_tdm_pc": "CompTDMPC",
+        "comp_tdm_ra": "CompTDMRA",
         "preshuffle_tdm": "PreShuffleTDM",
     }
     lds_budget_aliases = resolve_pipeline_lds_budget_aliases(specs)
@@ -464,7 +465,9 @@ def generate_cpp_header(specs: Dict[str, Any], output_path: Path):
     smallest_arch = min(lds_budgets, key=lambda a: lds_budgets[a]["default"])
     lds_budget_cases.append("    case GpuArch::UNKNOWN:")
     lds_budget_cases.append("    default:")
-    lds_budget_cases.extend(_lds_pipeline_switch(lds_budgets[smallest_arch], "        "))
+    lds_budget_cases.extend(
+        _lds_pipeline_switch(lds_budgets[smallest_arch], "        ")
+    )
 
     # Total physical LDS per architecture, used to halve the budget for
     # pipelines that stage two buffers by configuration.
@@ -561,7 +564,7 @@ inline std::vector<WarpConfig> get_supported_warp_configs(GpuArch arch) {{
 // pipeline. The budget depends on the target: a tile that overflows one
 // architecture's LDS may fit comfortably in another's. The gfx1250 TDM
 // pipelines (CompTDMV1/V2) share the double-buffered comp_async budget;
-// CompTDMPC has its own four-slot budget.
+// CompTDMPC and CompTDMRA have their own four-slot budget.
 inline std::size_t get_lds_capacity(GpuArch arch, Pipeline pipeline) {{
     switch(arch)
     {{
@@ -587,7 +590,8 @@ inline bool is_trait_unsupported(Pipeline pipeline, [[maybe_unused]] Epilogue ep
     if (scheduler == Scheduler::Interwave) {{
         if (pipeline == Pipeline::CompV3 || pipeline == Pipeline::CompV4 ||
             pipeline == Pipeline::CompAsync || pipeline == Pipeline::CompTDMV1 ||
-            pipeline == Pipeline::CompTDMV2 || pipeline == Pipeline::CompTDMPC) {{
+            pipeline == Pipeline::CompTDMV2 || pipeline == Pipeline::CompTDMPC ||
+            pipeline == Pipeline::CompTDMRA) {{
             return true;
         }}
     }}

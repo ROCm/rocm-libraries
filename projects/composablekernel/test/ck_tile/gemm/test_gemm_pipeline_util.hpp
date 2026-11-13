@@ -34,7 +34,8 @@ enum struct GemmPipelineType
     CompTDMProducerConsumer,
     // GemmPipelineAgBgCrCompTDMProducerConsumer with a CShuffleEpilogue instead of TdmEpilogue,
     // which is what lets it accumulate split-K partial tiles.
-    CompTDMProducerConsumerCShuffle
+    CompTDMProducerConsumerCShuffle,
+    CompTDMRunAhead
 };
 
 // Both GemmPipelineType values that instantiate GemmPipelineAgBgCrCompTDMProducerConsumer.
@@ -48,7 +49,7 @@ constexpr bool is_tdm_producer_consumer(GemmPipelineType pt)
 constexpr bool is_tdm_pipeline(GemmPipelineType pt)
 {
     return pt == GemmPipelineType::CompTDMV1 || pt == GemmPipelineType::CompTDMV2 ||
-           is_tdm_producer_consumer(pt);
+           is_tdm_producer_consumer(pt) || pt == GemmPipelineType::CompTDMRunAhead;
 }
 
 // TDM pipelines that store C through TdmEpilogue, which cannot do split-K.
@@ -155,8 +156,23 @@ auto calculate_rtol_atol(const ck_tile::index_t K,
     return ck_tile::make_tuple(std::max(rtol, rtol_split_k), std::max(atol, atol_split_k));
 }
 
-template <GemmPipelineType PT, typename Problem>
+// Policy: the pipeline policy carried by the PipelineType tag (tuple element 13), or void for the
+// pipeline's default. The existing two-argument specializations are <PT, Problem, void>.
+template <GemmPipelineType PT, typename Problem, typename Policy = void>
 struct GemmPipelineTypeSelector;
+
+template <typename Tag, typename = void>
+struct pipeline_tag_policy
+{
+    using type = void;
+};
+template <typename Tag>
+struct pipeline_tag_policy<Tag, std::void_t<typename Tag::Policy>>
+{
+    using type = typename Tag::Policy;
+};
+template <typename Tag>
+using pipeline_tag_policy_t = typename pipeline_tag_policy<Tag>::type;
 
 template <typename Problem>
 struct GemmPipelineTypeSelector<GemmPipelineType::Mem, Problem>
@@ -255,6 +271,18 @@ template <typename Problem>
 struct GemmPipelineTypeSelector<GemmPipelineType::CompTDMProducerConsumerCShuffle, Problem>
     : GemmPipelineTypeSelector<GemmPipelineType::CompTDMProducerConsumer, Problem>
 {
+};
+
+template <typename Problem, typename Policy>
+struct GemmPipelineTypeSelector<GemmPipelineType::CompTDMRunAhead, Problem, Policy>
+{
+    using policy        = std::conditional_t<std::is_void_v<Policy>,
+                                             ck_tile::GemmPipelineAgBgCrCompTDMRunAheadPolicy<>,
+                                             Policy>;
+    using base_pipeline = ck_tile::BaseGemmPipelineAgBgCrCompTDM<Problem>;
+    using pipeline      = ck_tile::GemmPipelineAgBgCrCompTDMRunAhead<Problem, policy>;
+
+    static constexpr auto GetName() { return "GemmPipelineAgBgCrCompTDMRunAhead"; }
 };
 
 template <GemmPipelineType PT, typename Problem, typename Enable = void>
@@ -408,7 +436,9 @@ class TestCkTileGemmPipeline : public ::testing::Test
              PipelineType == GemmPipelineType::CompAsync ||
              PipelineType == GemmPipelineType::CompAsyncV2 ||
              PipelineType == GemmPipelineType::CompTDMV1 ||
-             PipelineType == GemmPipelineType::CompTDMV2 || is_tdm_producer_consumer(PipelineType));
+             PipelineType == GemmPipelineType::CompTDMV2 ||
+             is_tdm_producer_consumer(PipelineType) ||
+             PipelineType == GemmPipelineType::CompTDMRunAhead);
 
 #if defined(CK_USE_GFX1250)
         static constexpr bool TransposeC =
@@ -472,8 +502,10 @@ class TestCkTileGemmPipeline : public ::testing::Test
                                                   AComputeDataType,
                                                   BComputeDataType>;
 
-        using GemmPipeline =
-            typename GemmPipelineTypeSelector<PipelineType, UniversalGemmProblem>::pipeline;
+        using GemmPipeline = typename GemmPipelineTypeSelector<
+            PipelineType,
+            UniversalGemmProblem,
+            pipeline_tag_policy_t<std::tuple_element_t<13, Tuple>>>::pipeline;
 
         using GemmEpilogue = typename GemmEpilogueTypeSelector<
             PipelineType,

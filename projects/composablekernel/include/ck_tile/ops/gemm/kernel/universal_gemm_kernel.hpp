@@ -500,11 +500,11 @@ struct UniversalGemmKernel
         }();
     };
 
-    /// True for the gfx125 TDM pipelines (CompTDM V1, V2 and V3 through inheritance, and the
-    /// producer/consumer pipeline): they expose skipCheckValidLaunchParams and consume tuples of
-    /// A/B windows. UniversalGemmKernel also pairs them with a non-TDM epilogue (e.g.
-    /// CShuffleEpilogue for split-K), subject to the whole-tile checks in IsSupportedArgument
-    /// unless the pipeline declares kSupportsTdmSplitK (comp_tdm_v3).
+    /// True for the gfx125 TDM pipelines (CompTDM V1, V2 and V3 through inheritance, the
+    /// producer/consumer pipeline and the run-ahead pipeline): they expose
+    /// skipCheckValidLaunchParams and consume tuples of A/B windows. UniversalGemmKernel also pairs
+    /// them with a non-TDM epilogue (e.g. CShuffleEpilogue for split-K), subject to the whole-tile
+    /// checks in IsSupportedArgument unless the pipeline declares kSupportsTdmSplitK (comp_tdm_v3).
     /// Kernels that host them take a dedicated TDM path.
     static constexpr bool kIsTdmPipeline = has_skip_check_valid_launch_params::value;
 
@@ -703,14 +703,15 @@ struct UniversalGemmKernel
 
     CK_TILE_HOST static bool IsSupportedArgument(const KernelArgs& kargs)
     {
-        if constexpr(!std::is_void_v<barrier_pipeline>)
+        // Named-barrier pipelines and TDM pipelines alike compile only an inert fallback on
+        // other targets, so a non-gfx125 device must be rejected here, not left to return zeros.
+        if constexpr(!std::is_void_v<barrier_pipeline> || kIsTdmPipeline)
         {
-            // Other targets compile only the pipeline's inert fallback.
             if(!is_gfx125_supported())
             {
                 if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                 {
-                    CK_TILE_ERROR("Hardware named barriers require gfx1250!");
+                    CK_TILE_ERROR("TDM / named-barrier pipelines require gfx1250!");
                 }
                 return false;
             }

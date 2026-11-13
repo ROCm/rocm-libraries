@@ -679,7 +679,8 @@ struct KernelKeyBuilder
         key.algorithm.double_buffer =
             (pipeline == Pipeline::CompV4 || pipeline == Pipeline::PreShuffleV2 ||
              pipeline == Pipeline::PreShuffleTDM || pipeline == Pipeline::CompTDMV1 ||
-             pipeline == Pipeline::CompTDMV2 || pipeline == Pipeline::CompAsync);
+             pipeline == Pipeline::CompTDMV2 || pipeline == Pipeline::CompAsync ||
+             pipeline == Pipeline::CompTDMPC || pipeline == Pipeline::CompTDMRA);
         key.algorithm.persistent      = false;
         key.algorithm.preshuffle      = preshuffle;
         key.algorithm.transpose_c     = false;
