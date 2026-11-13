@@ -1848,6 +1848,16 @@ namespace TensileLite
             ContractionInputs const&      inputs,
             size_t                        elementsToValidate)
         {
+            // Int8 MACs use a 32-bit integer reduction even with a float epilogue.
+            // Unsigned storage gives defined wraparound; interpret the completed
+            // sum as signed Int32 before converting to the epilogue type.
+            constexpr bool isInt8Float = std::is_same_v<typename Inputs::AType, int8_t>
+                                         && std::is_same_v<typename Inputs::BType, int8_t>
+                                         && std::is_floating_point_v<Accumulator>;
+            using MacT       = std::conditional_t<isInt8Float, uint32_t, Accumulator>;
+            using MacMathOpT = std::conditional_t<isInt8Float, uint32_t, MathOpAccum>;
+            using SignedMacT = std::conditional_t<isInt8Float, int32_t, MacT>;
+
             Accumulator* ws                   = nullptr;
             size_t       validationStrideGemm = 1;
             if(problem.useGradient() && problem.useBias()
@@ -2004,7 +2014,7 @@ namespace TensileLite
                     }
                 }
 
-                Accumulator value(0);
+                MacT sum(0);
 
                 // Check short-circuit for the selected inline or device alpha.
                 if(effectiveAlpha != static_cast<Accumulator>(0))
@@ -2070,7 +2080,7 @@ namespace TensileLite
                             // the previous behaviour read past the end of A/B.
                             // See ReferenceMXBlock128Demo.BlockAlignedKMakesTheSegmentClampANoOp.
                             size_t      segment = std::min(innerMXLoop, boundSize[0] - i);
-                            Accumulator val(0);
+                            MacT val(0);
                             for(size_t j = 0; j < segment; j++)
                             {
                                 size_t idx = i + j;
@@ -2082,8 +2092,8 @@ namespace TensileLite
                                 size_t aIdx = aIndex + (aI * aStride);
                                 size_t bIdx = bIndex + (bI * bStride);
                                 val += multiply<Inputs,
-                                                Accumulator,
-                                                MathOpAccum,
+                                                MacT,
+                                                MacMathOpT,
                                                 typename Inputs::AType,
                                                 typename Inputs::BType,
                                                 typename Inputs::ComputeInputTypeA,
@@ -2119,10 +2129,12 @@ namespace TensileLite
                                     mxScale,
                                     mxScaleElementAsFloat(problem.mxTypeB(), mxsbBase, mxsbIdx));
                             }
-                            value += multiply<Accumulator>(val, mxScale);
+                            sum += multiply<MacT>(val, mxScale);
                         }
                     }
                 }
+
+                Accumulator value = static_cast<Accumulator>(static_cast<SignedMacT>(sum));
 
                 auto cIndex = c.index(cCoord);
                 auto dIndex = d.index(dCoord);
