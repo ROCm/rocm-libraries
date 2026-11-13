@@ -44,7 +44,7 @@ from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
 from rocisa.functions import scalarUInt32DivideAndRemainder, vectorStaticMultiply
 
 from ..Common import DataDirection, SemanticVersion, isSubtileMultiDU, \
-    isMxf4SubtilePath
+    isMxf4SubtilePath, plsinStoreScope
 from ..Common.DataType import DataType
 from ..Component import GlobalWriteComponents
 from ..Component import Component
@@ -81,8 +81,10 @@ def plsinStorePermlane16Active(kernel, weaveGroups) -> bool:
     paired-store emitter.
     """
     # gfx950 + MI16 is not specific enough on its own: MX-fp8 subtile kernels
-    # match it too and would be taken off develop's ds_bpermute path.
-    if not isMxf4SubtilePath(kernel):
+    # match it too, and the ones without a fused store must stay on develop's
+    # ds_bpermute path. plsinStoreScope admits fp8 only once PLSIN is on, where
+    # the pair gaps hold last-K MFMAs and the WAR fence argument above applies.
+    if not plsinStoreScope(kernel):
         return False
     if tuple(kernel.get("ISA", ())) != (9, 5, 0):
         return False
@@ -2014,7 +2016,7 @@ class GlobalWriteBatchWriter:
         # hard-fails with no valid solution. tmpS01 is already a 2-aligned pair
         # on this wave64-only path and is dead here -- it is written per-element
         # later in the store loop -- so a one-shot mask costs nothing.
-        _borrowTmpS01 = isMxf4SubtilePath(self.kernel)
+        _borrowTmpS01 = plsinStoreScope(self.kernel)
         stmp = self.tmpS01 if _borrowTmpS01 \
           else self.parentWriter.sgprPool.checkOutAligned(2, 2, tag="_emitNonatomicAdd_stmp")
         module.add(SMovB32(dst=sgpr(stmp), src="0x0000ffff", comment="select lanes 0-15, 32-47"))

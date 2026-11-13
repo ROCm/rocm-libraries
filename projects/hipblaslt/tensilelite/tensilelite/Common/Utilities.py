@@ -101,6 +101,59 @@ def isMxf4SubtilePath(kernel) -> bool:
         return False
 
 
+def plsinStoreDataTypes(kernel) -> bool:
+    """MX fp4 or fp8 in, bf16 out -- what the PLSIN fused store can be built for.
+
+    Wider than plsinDataTypes by exactly fp8. The register argument that keeps
+    plsinDataTypes at fp4 is about a *bf16-input* kernel, and it does not reach
+    fp8: on gfx950 v_mfma_*_f8f6f4 covers K=128 whatever the operand width, so
+    an fp8 kernel runs the same MI shape at the same MIWaveTile as fp4 and
+    carries an identical accumulator count. Only the operand fragment grows,
+    8 VGPRs against 4, and the fused store still fits -- measured at MT256x256
+    and MT128x128, no spills, SGPR high-water lower than without it.
+
+    bf16 input stays out: there the accumulators do crowd the pack ring.
+
+    Answerable at any point, including on a half-built solution dict.
+    """
+    pt = kernel["ProblemType"]
+
+    def _mxIn(dt):
+        return dt.isFloat4() or dt.isFloat8()
+
+    return _mxIn(pt["DataTypeA"]) and _mxIn(pt["DataTypeB"]) \
+        and pt["DestDataType"].isBFloat16()
+
+
+def isPlsinSubtilePath(kernel) -> bool:
+    """Scope gate for the PLSIN fused store on its own.
+
+    Deliberately distinct from isMxf4SubtilePath, which stays fp4-only. That
+    gate carries a whole bundle of MXF4 subtile work -- swizzled global read,
+    deferred LRA, the StreamK paths, the staged store, and via
+    plsinBlockSchedTile the block schedule -- across some thirty call sites.
+    Widening it to reach fp8 would move all of them at once. This gate moves
+    only the fused store, so MXFP8 gets PLSIN and nothing else.
+
+    Block scheduling in particular stays fp4: plsinBlockSchedTile is built on
+    isMxf4SubtilePath, so it answers False for fp8 without needing a type test
+    of its own. That is load-bearing -- the block-scheduled tail does not model
+    dual-period scale reuse, and an MXFP8 MT256x256 DepthU-128 kernel fails to
+    schedule with it on (a scale global read at n+2 finds no local read to
+    collide with, because the scale is loaded once per two unroll iterations).
+
+    Same tolerance of partial state as isMxf4SubtilePath, and for the same
+    reason: it is asked during derivation.
+    """
+    try:
+        pt = kernel["ProblemType"]
+        tn = bool(pt["TransposeA"]) and not bool(pt["TransposeB"])
+        return bool(kernel.get("UseSubtileImpl")) and tn \
+            and plsinStoreDataTypes(kernel)
+    except (KeyError, TypeError, AttributeError):
+        return False
+
+
 def isSubtileSwizzledTensor(kernel) -> bool:
     """Scope gate for the subtile global read of a host-swizzled A or B.
 
@@ -118,6 +171,28 @@ def isSubtileSwizzledTensor(kernel) -> bool:
     genuinely MXF4-and-bf16 specific and stays on isMxf4SubtilePath.
     """
     return isMxf4SubtilePath(kernel)
+
+
+def plsinStoreScope(kernel) -> bool:
+    """Where the PLSIN store emitters may act.
+
+    Two disjuncts, deliberately asymmetric:
+
+    MXF4 keeps its existing unconditional scope, PLSIN on or off, so not one
+    fp4 kernel changes shape. Several of these emitters are shared with the
+    plain subtile store and fp4 has always taken them.
+
+    MXFP8 joins only where PLSIN is actually built for that kernel. A non-PLSIN
+    fp8 kernel keeps develop's store path untouched, which matters because the
+    same emitters are reached by every 16-bit subtile store: scoping on the
+    type alone would move fp8 kernels that never asked for a fused store.
+
+    Reads PostLoopStoreInNll, so unlike isPlsinSubtilePath this is only
+    answerable after assignPostLoopStoreInNll has run. Emit-time only.
+    """
+    if isMxf4SubtilePath(kernel):
+        return True
+    return isPlsinSubtilePath(kernel) and bool(kernel.get("PostLoopStoreInNll"))
 
 
 def plsinBlockSchedTile(kernel) -> bool:

@@ -95,7 +95,7 @@ from .Utilities import TDM_PAD_INTERVAL_LIMIT, isSubtileIterateMode, reject, rou
 from .Validators.MXScaleFormat import validateHostPreSwizzle128x4, validateMXScaleFormatCombination
 from .Validators.Subtile import (subtileStackForTLU1, subtileTLU1StackReason,
                                  validateSubtileGRKPartition)
-from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor, plsinDataTypes, swizzleTensorMaxDepthU
+from ..Common.Utilities import isMxf4SubtilePath, isSubtileSwizzledTensor, plsinDataTypes, plsinStoreDataTypes, swizzleTensorMaxDepthU
 
 
 def _oneSidedMX(state):
@@ -2367,8 +2367,10 @@ class Solution(collections.abc.Mapping):
     isa = tuple(state["ISA"])
 
     if state["PostLoopStoreInNll"]:
-      isFloat4 = state["ProblemType"]["DataTypeA"].isFloat4() or \
-                 state["ProblemType"]["DataTypeB"].isFloat4()
+      # fp8 joins fp4 here: the fused store is built for both (see
+      # plsinStoreDataTypes). Block scheduling does not follow -- it hangs off
+      # isMxf4SubtilePath, which stays fp4-only.
+      isMxIn = plsinStoreDataTypes(state)
       isgfx950 = isa[:2] == (9, 5)
       # _emit16bitSubtilePairedStore needs HPA on wave64 and cannot run on the
       # StreamK workspace accumulation paths. The dest type goes through
@@ -2378,7 +2380,7 @@ class Solution(collections.abc.Mapping):
       # would allocate sgprPostLoopFusedStore -- renumbering every later SGPR --
       # for a store that is then never built.
       pairedStoreAvailable = (
-        plsinDataTypes(state) and
+        plsinStoreDataTypes(state) and
         state["ProblemType"]["HighPrecisionAccumulate"] and
         state["WavefrontSize"] != 32 and
         state["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer")
@@ -2414,7 +2416,7 @@ class Solution(collections.abc.Mapping):
       mxBlockScaleSgprFits = not (mxBlockScaled and bool(miwt) and len(miwt) == 2 and
                                   min(miwt[0], miwt[1]) <= 2 and max(miwt[0], miwt[1]) >= 16)
       # Hard structural: the fused store literally cannot be emitted. ALWAYS enforced.
-      structuralFail = ((not isFloat4)
+      structuralFail = ((not isMxIn)
                         or (not state["UseSubtileImpl"])
                         or (not isgfx950)
                         or (not state["EnableMatrixInstruction"])
