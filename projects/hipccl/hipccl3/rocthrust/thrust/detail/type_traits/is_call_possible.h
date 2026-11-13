@@ -29,19 +29,14 @@
 #include <thrust/detail/type_traits.h>
 #include <thrust/detail/type_traits/has_member_function.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
+#include _THRUST_STD_INCLUDE(__type_traits/add_lvalue_reference.h)
 
 // inspired by Roman Perepelitsa's presentation from comp.lang.c++.moderated
 // based on the implementation here: http://www.rsdn.ru/forum/cpp/2759773.1.aspx
 
 THRUST_NAMESPACE_BEGIN
-namespace detail
+namespace detail::is_call_possible_detail
 {
-namespace is_call_possible_detail
-{
-
 template <typename T>
 class void_exp_result
 {};
@@ -63,9 +58,7 @@ struct clone_constness<const src_type, dest_type>
 {
   using type = const dest_type;
 };
-
-} // namespace is_call_possible_detail
-} // namespace detail
+} // namespace detail::is_call_possible_detail
 THRUST_NAMESPACE_END
 
 #define __THRUST_DEFINE_IS_CALL_POSSIBLE(trait_name, member_function_name)                                             \

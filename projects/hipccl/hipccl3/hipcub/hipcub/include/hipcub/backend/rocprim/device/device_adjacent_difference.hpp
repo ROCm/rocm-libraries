@@ -34,7 +34,7 @@
 
 #include <rocprim/device/device_adjacent_difference.hpp> // IWYU pragma: export
 
-#include _HIPCUB_STD_INCLUDE(functional)
+#include _HIPCUB_STD_INCLUDE(__functional/operations.h)
 
 BEGIN_HIPCUB_NAMESPACE
 

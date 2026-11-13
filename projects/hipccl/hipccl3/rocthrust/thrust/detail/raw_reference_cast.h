@@ -31,8 +31,12 @@
 #include <thrust/detail/type_traits/has_nested_type.h>
 #include <thrust/tuple.h>
 
-#include _THRUST_STD_INCLUDE(type_traits)
-#include _THRUST_STD_INCLUDE(utility)
+#include _THRUST_STD_INCLUDE(__tuple_dir/apply.h)
+#include _THRUST_STD_INCLUDE(__type_traits/add_lvalue_reference.h)
+#include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
+#include _THRUST_STD_INCLUDE(__type_traits/remove_cv.h)
+#include _THRUST_STD_INCLUDE(__type_traits/type_identity.h)
+#include _THRUST_STD_INCLUDE(__utility/forward.h)
 
 // the order of declarations and definitions in this file is totally goofy
 // this header defines raw_reference_cast, which has a few overloads towards the bottom of the file
@@ -43,7 +47,6 @@
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
-
 template <typename... Ts>
 class tuple_of_iterator_references;
 
@@ -66,7 +69,6 @@ inline constexpr bool can_unwrap<tuple_of_iterator_references<Ts...>> = (can_unw
 
 namespace raw_reference_detail
 {
-
 template <typename T, typename SFINAE = void>
 struct raw_reference_impl : _THRUST_STD::add_lvalue_reference<T>
 {};
@@ -81,16 +83,17 @@ struct raw_reference_impl<T, _THRUST_STD::enable_if_t<is_proxy_reference_v<_THRU
 {
   using type = T;
 };
-
 } // namespace raw_reference_detail
 
 template <typename T>
 struct raw_reference : raw_reference_detail::raw_reference_impl<T>
 {};
 
+template <typename T>
+using raw_reference_t = typename raw_reference<T>::type;
+
 namespace raw_reference_detail
 {
-
 // unlike raw_reference,
 // raw_reference_tuple_helper needs to return a value
 // when it encounters one, rather than a reference
@@ -121,7 +124,6 @@ struct raw_reference_tuple_helper<tuple_of_iterator_references<Ts...>>
 {
   using type = tuple_of_iterator_references<typename raw_reference_tuple_helper<Ts>::type...>;
 };
-
 } // namespace raw_reference_detail
 
 // a couple of specializations of raw_reference for tuples follow
@@ -146,7 +148,6 @@ struct raw_reference<tuple_of_iterator_references<Ts...>>
 {
   using type = typename raw_reference_detail::raw_reference_tuple_helper<tuple_of_iterator_references<Ts...>>::type;
 };
-
 } // namespace detail
 
 // provide declarations of raw_reference_cast's overloads for raw_reference_caster below
@@ -175,11 +176,7 @@ THRUST_HOST_DEVICE auto raw_reference_cast(detail::tuple_of_iterator_references<
   if constexpr (detail::can_unwrap<detail::tuple_of_iterator_references<Ts...>>)
   {
     using ResultTuple = tuple<typename detail::raw_reference_detail::raw_reference_tuple_helper<Ts>::type...>;
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
     return _THRUST_STD::apply(
-#else
-    return THRUST_NS_QUALIFIER::apply(
-#endif
       [](auto&&... refs) {
         return ResultTuple{raw_reference_cast(_THRUST_STD::forward<decltype(refs)>(refs))...};
       },

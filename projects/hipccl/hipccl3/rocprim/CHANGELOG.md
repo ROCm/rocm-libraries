@@ -10,6 +10,11 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added fixed-size-segments variant for `rocprim::device_segmented_reduce`.
 * Added support for large number of segments to `rocprim::device_segmented_reduce`.
 * Added support for large sizes to `rocprim::device_run_length_encode` and `rocprim::device_run_length_encode_non_trivial_runs`.
+* Added virtual shared memory as a fallback option in `rocprim::device_reduce_by_key` when it exceeds shared memory capacity.
+* Added support for partial `rocprim::warp_scan::inclusive_scan`, `rocprim::warp_scan::exclusive_scan` and `rocprim::warp_scan::scan`.
+* Added `rocprim::warp_scan::scan` variant without initial value.
+* Added support for predicated `rocprim::device_transform`.
+* Added support for nullary transform `rocprim::device_generate`.
 
 ### Changed
 

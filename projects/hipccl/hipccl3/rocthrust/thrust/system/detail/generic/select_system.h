@@ -1,4 +1,3 @@
-
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
  *
@@ -33,7 +32,10 @@
 #include <thrust/iterator/detail/device_system_tag.h>
 #include <thrust/iterator/detail/minimum_system.h>
 
-#include _THRUST_STD_INCLUDE(type_traits)
+#include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_same.h)
+#include _THRUST_STD_INCLUDE(__type_traits/void_t.h)
+#include _THRUST_STD_INCLUDE(__utility/declval.h)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -99,6 +101,5 @@ inline THRUST_HOST_DEVICE thrust::device_system_tag select_system(thrust::any_sy
 {
   return thrust::device_system_tag();
 }
-
 } // namespace system::detail::generic
 THRUST_NAMESPACE_END

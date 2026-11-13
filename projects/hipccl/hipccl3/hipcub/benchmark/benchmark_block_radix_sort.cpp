@@ -248,7 +248,7 @@ class block_radix_sort_benchmark : public primbench::benchmark_interface
                         <<<dim3(items / items_per_block), dim3(BlockSize), 0, stream>>>(d_input,
                                                                                         d_output);
                 }
-                else if(BenchmarkKind == benchmark_kinds::sort_pairs)
+                else if constexpr(BenchmarkKind == benchmark_kinds::sort_pairs)
                 {
                     sort_pairs_kernel<Helper, T, BlockSize, ItemsPerThread>
                         <<<dim3(items / items_per_block), dim3(BlockSize), 0, stream>>>(d_input,

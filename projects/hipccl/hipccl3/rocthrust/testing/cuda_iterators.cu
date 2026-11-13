@@ -17,8 +17,7 @@
 
 #include <thrust/device_vector.h>
 #include <thrust/host_vector.h>
-
-#include <cuda/iterator>
+#include <thrust/iterator/permutation_iterator.h>
 
 #include <vector>
 
@@ -48,17 +47,23 @@ void TestCUDAConstantIterator()
 {
   { // device system
     thrust::device_vector<int> vec{1, 2, 3, 4};
+    thrust::device_vector<int> expected{42, 42, 42, 42};
     thrust::copy(cuda::constant_iterator{42, 0}, cuda::constant_iterator{42, 4}, vec.begin());
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
   }
 
   { // host system
     thrust::host_vector<int> vec{1, 2, 3, 4};
+    thrust::host_vector<int> expected{42, 42, 42, 42};
     thrust::copy(cuda::constant_iterator{42, 0}, cuda::constant_iterator{42, 4}, vec.begin());
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
   }
 
   { // plain std::vector
     std::vector<int> vec{1, 2, 3, 4};
+    std::vector<int> expected{42, 42, 42, 42};
     thrust::copy(cuda::constant_iterator{42, 0}, cuda::constant_iterator{42, 4}, vec.begin());
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
   }
 }
 DECLARE_UNITTEST(TestCUDAConstantIterator);
@@ -66,18 +71,24 @@ DECLARE_UNITTEST(TestCUDAConstantIterator);
 void TestCUDACountingIterator()
 {
   { // device system
-    thrust::device_vector<int> vec{1, 2, 3, 4};
+    thrust::device_vector<int> vec{-1, -1, -1, -1};
+    thrust::device_vector<int> expected{0, 1, 2, 3};
     thrust::copy(cuda::counting_iterator{0}, cuda::counting_iterator{4}, vec.begin());
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
   }
 
   { // host system
-    thrust::host_vector<int> vec{1, 2, 3, 4};
+    thrust::host_vector<int> vec{-1, -1, -1, -1};
+    thrust::host_vector<int> expected{0, 1, 2, 3};
     thrust::copy(cuda::counting_iterator{0}, cuda::counting_iterator{4}, vec.begin());
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
   }
 
   { // plain std::vector
-    std::vector<int> vec{1, 2, 3, 4};
+    std::vector<int> vec{-1, -1, -1, -1};
+    std::vector<int> expected{0, 1, 2, 3};
     thrust::copy(cuda::counting_iterator{0}, cuda::counting_iterator{4}, vec.begin());
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
   }
 }
 DECLARE_UNITTEST(TestCUDACountingIterator);
@@ -88,8 +99,8 @@ void TestCUDAPermutationIterator()
     thrust::device_vector<int> vec{1, 2, 3, 4, 5, 6, 7, 8, 9};
     thrust::device_vector<int> off{5, 2, 7, 0};
     thrust::device_vector<int> res{-1, -1, -1, -1, -1};
-    thrust::copy(cuda::permutation_iterator{vec.begin(), off.begin()},
-                 cuda::permutation_iterator{vec.begin(), off.end()},
+    thrust::copy(thrust::permutation_iterator{vec.begin(), off.begin()},
+                 thrust::permutation_iterator{vec.begin(), off.end()},
                  res.begin());
     ASSERT_EQUAL(res, (thrust::device_vector<int>{6, 3, 8, 1, -1}));
   }
@@ -97,8 +108,8 @@ void TestCUDAPermutationIterator()
     thrust::host_vector<int> vec{1, 2, 3, 4, 5, 6, 7, 8, 9};
     thrust::host_vector<int> off{5, 2, 7, 0};
     thrust::host_vector<int> res{-1, -1, -1, -1, -1};
-    thrust::copy(cuda::permutation_iterator{vec.begin(), off.begin()},
-                 cuda::permutation_iterator{vec.begin(), off.end()},
+    thrust::copy(thrust::permutation_iterator{vec.begin(), off.begin()},
+                 thrust::permutation_iterator{vec.begin(), off.end()},
                  res.begin());
     ASSERT_EQUAL(res, (thrust::host_vector<int>{6, 3, 8, 1, -1}));
   }
@@ -107,30 +118,85 @@ void TestCUDAPermutationIterator()
     std::vector<int> vec{1, 2, 3, 4, 5, 6, 7, 8, 9};
     std::vector<int> off{5, 2, 7, 0};
     std::vector<int> res{-1, -1, -1, -1, -1};
-    thrust::copy(cuda::permutation_iterator{vec.begin(), off.begin()},
-                 cuda::permutation_iterator{vec.begin(), off.end()},
+    thrust::copy(thrust::permutation_iterator{vec.begin(), off.begin()},
+                 thrust::permutation_iterator{vec.begin(), off.end()},
                  res.begin());
     ASSERT_EQUAL(res, (std::vector<int>{6, 3, 8, 1, -1}));
   }
 }
 DECLARE_UNITTEST(TestCUDAPermutationIterator);
 
-void TestCUDAStridedIterator()
+struct fake_bijection
 {
-  auto discard = cuda::discard_iterator{};
+  using index_type = ::cuda::std::uint32_t;
+
+  constexpr fake_bijection() = default;
+
+  [[nodiscard]] _CCCL_HOST_DEVICE constexpr index_type size() const noexcept
+  {
+    return 5;
+  }
+
+  [[nodiscard]] _CCCL_HOST_DEVICE constexpr index_type operator()(index_type n) const noexcept
+  {
+    return __random_indices[n];
+  }
+
+  ::cuda::std::uint32_t __random_indices[5] = {4, 1, 2, 0, 3};
+};
+
+void TestCUDAShuffleIterator()
+{
   { // device system
-    thrust::device_vector<int> vec{1, 2, 3, 4, 5, 6};
-    thrust::copy(cuda::strided_iterator{vec.begin(), 2}, cuda::strided_iterator{vec.end(), 2}, discard);
+    thrust::device_vector<int> vec{1, 2, 3, 4};
+    thrust::device_vector<int> expected{4, 1, 2, 0};
+    thrust::copy(cuda::shuffle_iterator{fake_bijection{}, 0}, cuda::shuffle_iterator{fake_bijection{}, 4}, vec.begin());
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
   }
 
   { // host system
-    thrust::host_vector<int> vec{1, 2, 3, 4, 5, 6};
-    thrust::copy(cuda::strided_iterator{vec.begin(), 2}, cuda::strided_iterator{vec.end(), 2}, discard);
+    thrust::host_vector<int> vec{1, 2, 3, 4};
+    thrust::host_vector<int> expected{4, 1, 2, 0};
+    thrust::copy(cuda::shuffle_iterator{fake_bijection{}, 0}, cuda::shuffle_iterator{fake_bijection{}, 4}, vec.begin());
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
   }
 
   { // plain std::vector
-    std::vector<int> vec{1, 2, 3, 4, 5, 6};
-    thrust::copy(cuda::strided_iterator{vec.begin(), 2}, cuda::strided_iterator{vec.end(), 2}, discard);
+    std::vector<int> vec{1, 2, 3, 4};
+    std::vector<int> expected{4, 1, 2, 0};
+    thrust::copy(cuda::shuffle_iterator{fake_bijection{}, 0}, cuda::shuffle_iterator{fake_bijection{}, 4}, vec.begin());
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
+  }
+}
+DECLARE_UNITTEST(TestCUDAShuffleIterator);
+
+void TestCUDAStridedIterator()
+{
+  { // device system
+    thrust::device_vector<int> vec{-1, -1, -1, -1};
+    thrust::device_vector<int> expected{0, 2, 4, 6};
+    thrust::copy(cuda::strided_iterator{cuda::counting_iterator{0}, 2},
+                 cuda::strided_iterator{cuda::counting_iterator{8}, 2},
+                 vec.begin());
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
+  }
+
+  { // host system
+    thrust::host_vector<int> vec{-1, -1, -1, -1};
+    thrust::host_vector<int> expected{0, 2, 4, 6};
+    thrust::copy(cuda::strided_iterator{cuda::counting_iterator{0}, 2},
+                 cuda::strided_iterator{cuda::counting_iterator{8}, 2},
+                 vec.begin());
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
+  }
+
+  { // plain std::vector
+    std::vector<int> vec{-1, -1, -1, -1};
+    std::vector<int> expected{0, 2, 4, 6};
+    thrust::copy(cuda::strided_iterator{cuda::counting_iterator{0}, 2},
+                 cuda::strided_iterator{cuda::counting_iterator{8}, 2},
+                 vec.begin());
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
   }
 }
 DECLARE_UNITTEST(TestCUDAStridedIterator);
@@ -171,32 +237,75 @@ struct plus_one
   }
 };
 
+void TestCUDATransformInputOutputIterator()
+{
+  { // device system
+    thrust::device_vector<int> vec{-1, -1, -1, -1, -1};
+    auto iter = cuda::transform_input_output_iterator(vec.begin(), plus_one{}, plus_one{});
+    thrust::copy(cuda::counting_iterator{3}, cuda::counting_iterator{8}, iter);
+
+    // Ensure we did write the right output, sequence starts at 3 + 1 == 4
+    thrust::device_vector<int> expected{4, 5, 6, 7, 8};
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
+
+    // Ensure we did read the right input, output starts 4 + 1 == 5
+    thrust::copy(iter, iter + 5, cuda::make_tabulate_output_iterator(is_equal_index{}, 5));
+  }
+
+  { // host system
+    thrust::host_vector<int> vec{-1, -1, -1, -1, -1};
+    auto iter = cuda::transform_input_output_iterator(vec.begin(), plus_one{}, plus_one{});
+    thrust::copy(cuda::counting_iterator{3}, cuda::counting_iterator{8}, iter);
+
+    // Ensure we did write the right output, sequence starts at 3 + 1 == 4
+    thrust::host_vector<int> expected{4, 5, 6, 7, 8};
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
+
+    // Ensure we did read the right input, output starts 4 + 1 == 5
+    thrust::copy(iter, iter + 5, cuda::make_tabulate_output_iterator(is_equal_index{}, 5));
+  }
+
+  { // plain std::vector
+    std::vector<int> vec{-1, -1, -1, -1, -1};
+    auto iter = cuda::transform_input_output_iterator(vec.begin(), plus_one{}, plus_one{});
+    thrust::copy(cuda::counting_iterator{3}, cuda::counting_iterator{8}, iter);
+
+    // Ensure we did write the right output, sequence starts at 3 + 1 == 4
+    std::vector<int> expected{4, 5, 6, 7, 8};
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
+
+    // Ensure we did read the right input, output starts 4 + 1 == 5
+    thrust::copy(iter, iter + 5, cuda::make_tabulate_output_iterator(is_equal_index{}, 5));
+  }
+}
+DECLARE_UNITTEST(TestCUDATransformInputOutputIterator);
+
 void TestCUDATransformOutputIterator()
 {
   { // device system
     thrust::device_vector<int> vec{-1, -1, -1, -1, -1};
+    thrust::device_vector<int> expected{1, 2, 3, 4, 5};
     thrust::copy(cuda::counting_iterator{0},
                  cuda::counting_iterator{5},
                  cuda::make_transform_output_iterator(vec.begin(), plus_one{}));
-    thrust::device_vector<int> expected{1, 2, 3, 4, 5};
     ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
   }
 
   { // host system
     thrust::host_vector<int> vec{-1, -1, -1, -1, -1};
+    thrust::host_vector<int> expected{1, 2, 3, 4, 5};
     thrust::copy(cuda::counting_iterator{0},
                  cuda::counting_iterator{5},
                  cuda::make_transform_output_iterator(vec.begin(), plus_one{}));
-    thrust::host_vector<int> expected{1, 2, 3, 4, 5};
     ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
   }
 
   { // plain std::vector
     std::vector<int> vec{-1, -1, -1, -1, -1};
+    std::vector<int> expected{1, 2, 3, 4, 5};
     thrust::copy(cuda::counting_iterator{0},
                  cuda::counting_iterator{5},
                  cuda::make_transform_output_iterator(vec.begin(), plus_one{}));
-    std::vector<int> expected{1, 2, 3, 4, 5};
     ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
   }
 }
@@ -204,26 +313,113 @@ DECLARE_UNITTEST(TestCUDATransformOutputIterator);
 
 void TestCUDATransformIterator()
 {
-  auto discard = cuda::discard_iterator{};
   { // device system
-    thrust::device_vector<int> vec{1, 2, 3, 4};
-    thrust::copy(cuda::make_transform_iterator(vec.begin(), plus_one{}),
-                 cuda::make_transform_iterator(vec.end(), plus_one{}),
-                 discard);
+    thrust::device_vector<int> vec{-1, -1, -1, -1};
+    thrust::device_vector<int> expected{1, 2, 3, 4};
+    thrust::copy(cuda::transform_iterator(cuda::counting_iterator{0}, plus_one{}),
+                 cuda::transform_iterator(cuda::counting_iterator{4}, plus_one{}),
+                 vec.begin());
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
   }
 
   { // host system
-    thrust::host_vector<int> vec{1, 2, 3, 4};
-    thrust::copy(cuda::make_transform_iterator(vec.begin(), plus_one{}),
-                 cuda::make_transform_iterator(vec.end(), plus_one{}),
-                 discard);
+    thrust::host_vector<int> vec{-1, -1, -1, -1};
+    thrust::host_vector<int> expected{1, 2, 3, 4};
+    thrust::copy(cuda::transform_iterator(cuda::counting_iterator{0}, plus_one{}),
+                 cuda::transform_iterator(cuda::counting_iterator{4}, plus_one{}),
+                 vec.begin());
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
   }
 
   { // plain std::vector
-    std::vector<int> vec{1, 2, 3, 4};
-    thrust::copy(cuda::make_transform_iterator(vec.begin(), plus_one{}),
-                 cuda::make_transform_iterator(vec.end(), plus_one{}),
-                 discard);
+    std::vector<int> vec{-1, -1, -1, -1};
+    std::vector<int> expected{1, 2, 3, 4};
+    thrust::copy(cuda::transform_iterator(cuda::counting_iterator{0}, plus_one{}),
+                 cuda::transform_iterator(cuda::counting_iterator{4}, plus_one{}),
+                 vec.begin());
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
   }
 }
 DECLARE_UNITTEST(TestCUDATransformIterator);
+
+void TestCUDAZipIterator()
+{
+  cuda::zip_function<cuda::std::plus<void>> fun{};
+  { // device system
+    thrust::device_vector<int> vec{-1, -1, -1, -1};
+    auto iter = cuda::make_transform_iterator(cuda::make_zip_iterator(vec.begin(), cuda::counting_iterator{4}), fun);
+    thrust::copy(iter, iter + 4, vec.begin());
+    thrust::device_vector<int> expected{3, 4, 5, 6};
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
+  }
+
+  { // host system
+    thrust::host_vector<int> vec{-1, -1, -1, -1};
+    auto iter = cuda::make_transform_iterator(cuda::make_zip_iterator(vec.begin(), cuda::counting_iterator{4}), fun);
+    thrust::copy(iter, iter + 4, vec.begin());
+    thrust::host_vector<int> expected{3, 4, 5, 6};
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
+  }
+
+  { // plain std::vector
+    std::vector<int> vec{-1, -1, -1, -1};
+    auto iter = cuda::make_transform_iterator(cuda::make_zip_iterator(vec.begin(), cuda::counting_iterator{4}), fun);
+    thrust::copy(iter, iter + 4, vec.begin());
+    std::vector<int> expected{3, 4, 5, 6};
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
+  }
+}
+DECLARE_UNITTEST(TestCUDAZipIterator);
+
+void TestCUDAZipTransformIterator()
+{
+  { // device system
+    thrust::device_vector<int> vec{-1, -1, -1, -1};
+    auto iter = cuda::make_zip_transform_iterator(cuda::std::plus<void>{}, vec.begin(), cuda::counting_iterator{4});
+    thrust::copy(iter, iter + 4, vec.begin());
+    thrust::device_vector<int> expected{3, 4, 5, 6};
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
+  }
+
+  { // host system
+    thrust::host_vector<int> vec{-1, -1, -1, -1};
+    auto iter = cuda::make_zip_transform_iterator(cuda::std::plus<void>{}, vec.begin(), cuda::counting_iterator{4});
+    thrust::copy(iter, iter + 4, vec.begin());
+    thrust::host_vector<int> expected{3, 4, 5, 6};
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
+  }
+
+  { // plain std::vector
+    std::vector<int> vec{-1, -1, -1, -1};
+    auto iter = cuda::make_zip_transform_iterator(cuda::std::plus<void>{}, vec.begin(), cuda::counting_iterator{4});
+    thrust::copy(iter, iter + 4, vec.begin());
+    std::vector<int> expected{3, 4, 5, 6};
+    ASSERT_EQUAL(true, thrust::equal(vec.begin(), vec.end(), expected.begin()));
+  }
+}
+DECLARE_UNITTEST(TestCUDAZipTransformIterator);
+
+void TestCUDAReverseIterator()
+{
+  { // device system
+    thrust::device_vector<int> vec{1, 2, 3, 4, 5, 6, 7, 8, 9};
+    thrust::device_vector<int> expected{9, 8, 7, 6, 5, 4, 3, 2, 1};
+    ASSERT_EQUAL(true, thrust::equal(
+      cuda::std::reverse_iterator{vec.end()}, cuda::std::reverse_iterator{vec.begin()}, expected.begin()));
+  }
+
+  { // host system
+    thrust::host_vector<int> vec{1, 2, 3, 4, 5, 6, 7, 8, 9};
+    thrust::host_vector<int> expected{9, 8, 7, 6, 5, 4, 3, 2, 1};
+    ASSERT_EQUAL(true, thrust::equal(
+      cuda::std::reverse_iterator{vec.end()}, cuda::std::reverse_iterator{vec.begin()}, expected.begin()));
+  }
+
+  { // plain std::vector
+    std::vector<int> vec{1, 2, 3, 4, 5, 6, 7, 8, 9};
+    std::vector<int> expected{9, 8, 7, 6, 5, 4, 3, 2, 1};
+    ASSERT_EQUAL(true, thrust::equal(
+      cuda::std::reverse_iterator{vec.end()}, cuda::std::reverse_iterator{vec.begin()}, expected.begin()));
+  }
+}
+DECLARE_UNITTEST(TestCUDAReverseIterator);

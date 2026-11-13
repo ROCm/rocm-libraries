@@ -98,9 +98,40 @@ ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(ROCPRIM_DEFAULT_MAX_BLOCK_SIZE) void
     init_lookback_scan_state(lookback_scan_state, number_of_blocks, ordered_bid, flat_thread_id);
 }
 
+template<class Config,
+         class Selector,
+         lookback_scan_determinism Determinism,
+         class Key,
+         class Accumulator,
+         class BlockIdWrapper>
+inline size_t get_reduce_by_key_vsmem_size_per_block(detail::target t)
+{
+    using targets = typename Selector::targets;
+
+    size_t vsmem_per_block = 0;
+
+    targets::for_each(
+        [&](auto candidate)
+        {
+            if(target{candidate} == most_common_config<targets>(t))
+            {
+                using TargetConfig = target_config<Config, Selector, decltype(candidate)>;
+                using reduce_by_key_kernel_impl_t = reduce_by_key::
+                    kernel_impl_<TargetConfig, Determinism, Key, Accumulator, BlockIdWrapper>;
+                using reduce_by_key_vsmem_helper_t
+                    = detail::vsmem_helper_impl<reduce_by_key_kernel_impl_t>;
+
+                vsmem_per_block = reduce_by_key_vsmem_helper_t::vsmem_per_block;
+            }
+        });
+
+    return vsmem_per_block;
+}
+
 template<lookback_scan_determinism Determinism,
          typename Config,
          typename Selector,
+         typename AccumulatorType,
          typename KeysInputIterator,
          typename ValuesInputIterator,
          typename UniqueOutputIterator,
@@ -121,8 +152,6 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
                                              const hipStream_t         stream,
                                              const bool                debug_synchronous)
 {
-    using accumulator_type = reduce_by_key::accumulator_type_t<ValuesInputIterator, BinaryFunction>;
-
     bool use_atomic_block_id;
     ROCPRIM_RETURN_ON_ERROR(check_if_using_atomic_block_id(stream, use_atomic_block_id));
     const auto use_atomic_block_id_variant
@@ -141,8 +170,9 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
 
             const auto params = get_config<Selector>(Config{}, current_target);
 
+            using ordered_bid_type = block_id_wrapper<unsigned int, use_atomic_block_id>;
             using scan_state_type
-                = reduce_by_key::lookback_scan_state_t<accumulator_type, use_sleepy_scan>;
+                = reduce_by_key::lookback_scan_state_t<AccumulatorType, use_sleepy_scan>;
             const unsigned int block_size      = params.kernel_config.block_size;
             const unsigned int items_per_block = block_size * params.kernel_config.items_per_thread;
 
@@ -157,18 +187,28 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
             // Number of blocks in a single launch (or the only launch if it fits)
             const std::size_t number_of_blocks = detail::ceiling_div(limited_size, items_per_block);
 
+            // vsmem size
+            void*  vsmem = nullptr;
+            size_t virtual_shared_memory_size
+                = get_reduce_by_key_vsmem_size_per_block<Config,
+                                                         Selector,
+                                                         Determinism,
+                                                         key_type,
+                                                         AccumulatorType,
+                                                         ordered_bid_type>(current_target)
+                  * number_of_blocks;
+
             // Calculate required temporary storage
             void* scan_state_storage;
             // The number of segment heads in previous launches.
             std::size_t* d_global_head_count = nullptr;
             // The running accumulation across the launch boundary.
-            accumulator_type* d_previous_accumulated = nullptr;
+            AccumulatorType* d_previous_accumulated = nullptr;
 
             detail::temp_storage::layout layout{};
             ROCPRIM_RETURN_ON_ERROR(
                 scan_state_type::get_temp_storage_layout(number_of_blocks, stream, layout));
 
-            using ordered_bid_type = block_id_wrapper<unsigned int, use_atomic_block_id>;
             typename ordered_bid_type::id_type* ordered_bid_storage;
 
             auto result = detail::temp_storage::partition(
@@ -183,7 +223,10 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
                                                             use_limited_size ? 1 : 0),
                     detail::temp_storage::make_partition(
                         &ordered_bid_storage,
-                        ordered_bid_type::get_temp_storage_layout())));
+                        ordered_bid_type::get_temp_storage_layout()),
+                    detail::temp_storage::make_partition(&vsmem,
+                                                         virtual_shared_memory_size,
+                                                         cache_line_size)));
             if(result != hipSuccess || temporary_storage == nullptr)
             {
                 return result;
@@ -252,9 +295,23 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
                 ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("reduce_by_key_init_kernel",
                                                             number_of_blocks_launch,
                                                             start);
-                auto kernel = [=](auto target_config)
+                auto kernel = [=, vsm = detail::vsmem_t{vsmem}](auto target_config) mutable
                 {
-                    reduce_by_key::kernel_impl<decltype(target_config), Determinism>(
+                    using reduce_by_key_kernel_impl_t
+                        = reduce_by_key::kernel_impl_<decltype(target_config),
+                                                      Determinism,
+                                                      key_type,
+                                                      AccumulatorType,
+                                                      ordered_bid_type>;
+
+                    using VSmemHelperT = detail::vsmem_helper_impl<reduce_by_key_kernel_impl_t>;
+                    ROCPRIM_SHARED_MEMORY
+                    typename VSmemHelperT::static_temp_storage_t static_temp_storage;
+                    // Get temporary storage
+                    typename reduce_by_key_kernel_impl_t::storage_type& storage
+                        = VSmemHelperT::get_temp_storage(static_temp_storage, vsm);
+
+                    reduce_by_key_kernel_impl_t().reduce_by_key(
                         keys_input + offset,
                         values_input + offset,
                         unique_output,
@@ -268,7 +325,8 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
                         size,
                         i > 0 ? d_global_head_count : nullptr,
                         i > 0 ? d_previous_accumulated : nullptr,
-                        ordered_bid);
+                        ordered_bid,
+                        storage);
                 };
                 ROCPRIM_RETURN_ON_ERROR(
                     execute_launch_plan<Config, Selector>(current_target,
@@ -291,6 +349,7 @@ hipError_t reduce_by_key_impl_wrapped_config(void*                     temporary
 
 template<lookback_scan_determinism Determinism,
          typename Config,
+         typename AccumulatorType,
          typename KeysInputIterator,
          typename ValuesInputIterator,
          typename UniqueOutputIterator,
@@ -311,23 +370,23 @@ hipError_t reduce_by_key_impl(void*                     temporary_storage,
                               const hipStream_t         stream,
                               const bool                debug_synchronous)
 {
-    using key_type         = ::rocprim::detail::value_type_t<KeysInputIterator>;
-    using accumulator_type = reduce_by_key::accumulator_type_t<ValuesInputIterator, BinaryFunction>;
-    using Selector = reduce_by_key_config_selector<key_type, accumulator_type, BinaryFunction>;
+    using key_type = ::rocprim::detail::value_type_t<KeysInputIterator>;
+    using Selector = reduce_by_key_config_selector<key_type, AccumulatorType, BinaryFunction>;
 
-    return detail::reduce_by_key_impl_wrapped_config<Determinism, Config, Selector>(
-        temporary_storage,
-        storage_size,
-        keys_input,
-        values_input,
-        size,
-        unique_output,
-        aggregates_output,
-        unique_count_output,
-        reduce_op,
-        key_compare_op,
-        stream,
-        debug_synchronous);
+    return detail::
+        reduce_by_key_impl_wrapped_config<Determinism, Config, Selector, AccumulatorType>(
+            temporary_storage,
+            storage_size,
+            keys_input,
+            values_input,
+            size,
+            unique_output,
+            aggregates_output,
+            unique_count_output,
+            reduce_op,
+            key_compare_op,
+            stream,
+            debug_synchronous);
 }
 
 } // namespace detail
@@ -466,19 +525,22 @@ inline hipError_t reduce_by_key(void*                     temporary_storage,
                                 hipStream_t               stream            = 0,
                                 bool                      debug_synchronous = false)
 {
-    return detail::reduce_by_key_impl<detail::lookback_scan_determinism::default_determinism,
-                                      Config>(temporary_storage,
-                                              storage_size,
-                                              keys_input,
-                                              values_input,
-                                              size,
-                                              unique_output,
-                                              aggregates_output,
-                                              unique_count_output,
-                                              reduce_op,
-                                              key_compare_op,
-                                              stream,
-                                              debug_synchronous);
+    return detail::reduce_by_key_impl<
+        detail::lookback_scan_determinism::default_determinism,
+        Config,
+        detail::reduce_by_key::accumulator_type_t<ValuesInputIterator, BinaryFunction>>(
+        temporary_storage,
+        storage_size,
+        keys_input,
+        values_input,
+        size,
+        unique_output,
+        aggregates_output,
+        unique_count_output,
+        reduce_op,
+        key_compare_op,
+        stream,
+        debug_synchronous);
 }
 
 /// \brief Bitwise-reproducible parallel reduce-by-key primitive for device level.
@@ -512,7 +574,10 @@ inline hipError_t deterministic_reduce_by_key(void*                     temporar
                                               hipStream_t stream            = 0,
                                               bool        debug_synchronous = false)
 {
-    return detail::reduce_by_key_impl<detail::lookback_scan_determinism::deterministic, Config>(
+    return detail::reduce_by_key_impl<
+        detail::lookback_scan_determinism::deterministic,
+        Config,
+        detail::reduce_by_key::accumulator_type_t<ValuesInputIterator, BinaryFunction>>(
         temporary_storage,
         storage_size,
         keys_input,

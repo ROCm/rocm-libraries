@@ -1475,7 +1475,8 @@ private:
              unsigned int RadixBits,
              unsigned int CandidateBufferCoefficient,
              unsigned int ThreadCounterLimit,
-             class ActualSizeIn>
+             class ActualSizeIn,
+             class ActualSizeOut>
     using simplified_type = device_topk_air_impl<BlockSize,
                                                  ItemsPerThread,
                                                  RadixBits,
@@ -1488,12 +1489,13 @@ private:
                                                  ValuesInputIterator,
                                                  ValuesOutputIterator,
                                                  ActualSizeIn,
-                                                 SizeOut,
+                                                 ActualSizeOut,
                                                  Decomposer>;
 
     // If `DecaySizeIn` is true, launch topk with a decayed SizeIn according
     // to the actual runtime input size. Otherwise, launch topk with the original
     // SizeIn type.
+    // At this point, k is guaranteed to be <= size, so we also decay k if applicable.
     template<unsigned int BlockSize,
              unsigned int ItemsPerThread,
              unsigned int RadixBits,
@@ -1512,6 +1514,7 @@ private:
                                                   RadixBits,
                                                   CandidateBufferCoefficient,
                                                   ThreadCounterLimit,
+                                                  std::uint32_t,
                                                   std::uint32_t>{},
                                   args);
             }
@@ -1522,6 +1525,7 @@ private:
                                                   RadixBits,
                                                   CandidateBufferCoefficient,
                                                   ThreadCounterLimit,
+                                                  std::uint64_t,
                                                   std::uint64_t>{},
                                   args);
             }
@@ -1533,7 +1537,8 @@ private:
                                               RadixBits,
                                               CandidateBufferCoefficient,
                                               ThreadCounterLimit,
-                                              SizeIn>{},
+                                              SizeIn,
+                                              SizeOut>{},
                               args);
         }
     }

@@ -41,13 +41,14 @@
 
 #  include <thrust/system/hip/config.h>
 
-#  include <thrust/detail/integer_math.h>
 #  include <thrust/detail/temporary_array.h>
 #  include <thrust/detail/type_traits.h>
 #  include <thrust/distance.h>
 #  include <thrust/iterator/iterator_traits.h>
 #  include <thrust/system/hip/detail/dispatch.h>
 
+#  include _THRUST_STD_INCLUDE(__functional/operations.h)
+#  include _THRUST_STD_INCLUDE(__iterator/distance.h)
 #  include _THRUST_STD_INCLUDE(cstdint)
 
 // rocprim include

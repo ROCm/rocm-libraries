@@ -32,24 +32,14 @@
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/reduce.h>
 #include <thrust/tuple.h>
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <thrust/detail/algorithm_wrapper.h>
-#endif
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(__algorithm/min.h)
-#endif
+#include _THRUST_STD_INCLUDE(__algorithm/min.h)
 
 // Contributed by Erich Elsen
 
 THRUST_NAMESPACE_BEGIN
-namespace system
+namespace system::detail::generic
 {
-namespace detail
-{
-namespace generic
-{
-
 template <typename DerivedPolicy, typename InputIterator, typename T>
 THRUST_HOST_DEVICE InputIterator
 find(thrust::execution_policy<DerivedPolicy>& exec, InputIterator first, InputIterator last, const T& value)
@@ -141,8 +131,5 @@ find_if_not(thrust::execution_policy<DerivedPolicy>& exec, InputIterator first, 
 {
   return thrust::find_if(exec, first, last, _THRUST_STD::not_fn(pred));
 } // end find()
-
-} // end namespace generic
-} // end namespace detail
-} // end namespace system
+} // namespace system::detail::generic
 THRUST_NAMESPACE_END

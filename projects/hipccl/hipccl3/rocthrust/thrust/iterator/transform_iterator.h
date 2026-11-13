@@ -42,21 +42,18 @@
 #endif // no system header
 
 #include <thrust/detail/functional/actor.h>
-#include <thrust/detail/libcxx_wrapper/std/__memory/construct_at.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/iterator/iterator_traits.h>
 
-#include _THRUST_STD_INCLUDE(type_traits)
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(functional)
-#endif
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <iterator>
-#  include <utility>
-#endif
+#include _THRUST_STD_INCLUDE(__functional/identity.h)
+#include _THRUST_STD_INCLUDE(__functional/invoke.h)
+#include _THRUST_STD_INCLUDE(__memory/construct_at.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_copy_assignable.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_copy_constructible.h)
+#include _THRUST_STD_INCLUDE(__type_traits/remove_cvref.h)
+#include _THRUST_STD_INCLUDE(__type_traits/remove_reference.h)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -65,12 +62,11 @@ class transform_iterator;
 
 namespace detail
 {
-
 template <class UnaryFunc, class Iterator>
 struct transform_iterator_reference
 {
   // by default, dereferencing the iterator yields the same as the function.
-  using type = decltype(_THRUST_STD::declval<UnaryFunc>()(_THRUST_STD::declval<it_value_t<Iterator>>()));
+  using type = _THRUST_STD::invoke_result_t<UnaryFunc&, it_value_t<Iterator>>;
 };
 
 // for certain function objects, we need to tweak the reference type. Notably, identity functions must decay to values.
@@ -83,8 +79,8 @@ struct transform_iterator_reference<_THRUST_STD::identity, Iterator>
 template <typename Eval, class Iterator>
 struct transform_iterator_reference<functional::actor<Eval>, Iterator>
 {
-  using type = _THRUST_STD::remove_reference_t<decltype(_THRUST_STD::declval<functional::actor<Eval>>()(
-    _THRUST_STD::declval<it_value_t<Iterator>>()))>;
+  using type =
+    _THRUST_STD::remove_reference_t<_THRUST_STD::invoke_result_t<functional::actor<Eval>&, it_value_t<Iterator>>>;
 };
 
 // Type function to compute the iterator_adaptor instantiation to be used for transform_iterator
@@ -93,18 +89,17 @@ struct make_transform_iterator_base
 {
 private:
   using reference  = replace_if_use_default<Reference, transform_iterator_reference<UnaryFunc, Iterator>>;
-  using value_type = replace_if_use_default<Value, ::internal::remove_cvref<reference>>;
+  using value_type = replace_if_use_default<Value, _THRUST_STD::remove_cvref<reference>>;
 
 public:
   using type =
     iterator_adaptor<transform_iterator<UnaryFunc, Iterator, Reference, Value>,
                      Iterator,
                      value_type,
-                     use_default,
-                     typename _THRUST_STD::iterator_traits<Iterator>::iterator_category,
+                     use_default, // pick system from Iterator
+                     use_default, // pick traversal from Iterator
                      reference>;
 };
-
 } // namespace detail
 
 //! \addtogroup iterators
@@ -281,8 +276,8 @@ public:
     }
     else if constexpr (_THRUST_STD::is_copy_constructible_v<AdaptableUnaryFunction>)
     {
-      ::internal::__destroy_at(&m_f);
-      ::internal::__construct_at(&m_f, other.m_f);
+      _THRUST_STD::__destroy_at(&m_f);
+      _THRUST_STD::__construct_at(&m_f, other.m_f);
     }
     else
     {
