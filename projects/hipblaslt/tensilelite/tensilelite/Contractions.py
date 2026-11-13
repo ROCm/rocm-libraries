@@ -517,6 +517,21 @@ ASSERT_DIM_MAP_PREDICATES = {
     "AssertStrideDEqual": "StrideDEqual",
 }
 
+# Integer ids of the MXScaleFormat values, as the C++ ProblemType and the
+# MXScaleFormatEquals predicate read them. Append only.
+MX_SCALE_FORMAT_IDS = {
+    "NoSwizzle": 0,
+    "HostPreSwizzle": 1,
+    "InMemorySwizzle": 2,
+    "HostPreSwizzle128x4": 3,
+}
+
+def mxScaleFormatId(state):
+    return MX_SCALE_FORMAT_IDS.get(state.get("MXScaleFormat", "NoSwizzle"), 0)
+
+# Serialized names of the C++ ScalarValue enum, keyed by AssertAlphaValue values.
+ASSERT_ALPHA_VALUE_NAMES = {1: "1"}
+
 def extractDimPredicate(cls, value, predicateName):
     """
     Extract predicates for dict-valued Assert* maps (AssertSizeEqual, ...).
@@ -572,6 +587,12 @@ class ProblemPredicate(Properties.Predicate):
                     "{} must be a dict of {{index: value}}, got {!r}".format(key, value)
                 )
             return extractDimPredicate(cls, value, ASSERT_DIM_MAP_PREDICATES[key])
+        if key == "AssertAlphaValue":
+            if value not in ASSERT_ALPHA_VALUE_NAMES:
+                raise RuntimeError(
+                    "AssertAlphaValue must be one of {}, got {!r}".format(
+                        sorted(ASSERT_ALPHA_VALUE_NAMES), value))
+            return cls("AlphaValue", value=ASSERT_ALPHA_VALUE_NAMES[value])
 
         if key.endswith('Multiple'):
             if value == 1:
@@ -717,6 +738,11 @@ class ProblemPredicate(Properties.Predicate):
 
         if state['ProblemType']['SwizzleTensorB']:
             rv += [cls('SwizzleTensorB', value=state['ProblemType']['SwizzleTensorB'])]
+
+        # The host scale modes do not tell NoSwizzle, HostPreSwizzle and InMemorySwizzle
+        # apart, so the predicate matches those loosely and only pins the later formats.
+        if problemType.mxBlockA or problemType.mxBlockB:
+            rv += [cls('MXScaleFormatEquals', value=mxScaleFormatId(state))]
 
         if state['ProblemType']['FusedGemmA2A']:
             rv += [cls('GemmA2AShape', value=state['MacroTile0'])]
@@ -1090,9 +1116,7 @@ class Solution:
         # the host (DataInitialization) needs to know to pick an upload layout.
         # Plumb it onto problemType so the host can read it post-solution-pick.
         # The values are TensileLite::MXScaleFormat (include/Tensile/MXScaleFormat.hpp).
-        rv.problemType.mxScaleFormat = {"NoSwizzle": 0,
-                                        "HostPreSwizzle": 1,
-                                        "InMemorySwizzle": 2}.get(d.get("MXScaleFormat", "NoSwizzle"), 0)
+        rv.problemType.mxScaleFormat = mxScaleFormatId(d)
 
         rv.problemPredicate = ProblemPredicate.FromOriginalState(d, rv.problemType)
         rv.taskPredicate = TaskPredicate.FromOriginalState(d, rv.problemType)

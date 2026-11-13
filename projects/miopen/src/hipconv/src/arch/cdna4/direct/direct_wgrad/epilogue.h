@@ -1,14 +1,17 @@
 #pragma once
 
-// Epilogue: reduce the register accumulators into the fp32 dW through global atomicAdd.
+// This epilogue writes dW for configs whose grid does not split the spatial axis.
 //
-// dW is K x Kh x Kw x C, so C is its contiguous axis while the accumulators hold K across the
-// lanes of a wave. A direct write would put every lane on its own cache line, so the reduction
-// transposes through LDS, one filter position at a time to keep the staging to one tile per wave.
+// It stores fp32, or the operand type when the operands are 16-bit. Configs that split the spatial
+// axis store partial gradients instead; see partials.h.
 //
-// The waves_q waves sharing a channel tile hold partial gradients for the same dW elements, so
-// they sum through the staging and split the drain between them, leaving one atomic per element
-// per workgroup. That is the only cross-wave step here and the reason for the barriers.
+// dW is K × Kh × Kw × C with C contiguous, but the accumulators hold K across a wave's lanes, so a
+// direct store would put every lane on its own cache line. The epilogue therefore transposes
+// through LDS, one filter position at a time, with one staging tile per wave.
+//
+// The waves_q waves that share one K × C tile hold partial gradients of the same dW elements. Each
+// stages its own, and the drain adds the waves_q staging tiles and divides the rows among those
+// waves, so each element is stored once.
 
 #include "bunnies.hpp"
 #include "bunnies_cdna4.hpp"
@@ -22,26 +25,24 @@
 namespace hipconv::cdna4::direct_wgrad
 {
 
-// The dW tensor as the epilogue sees it, K x Kh x Kw x C.
+// A wave stores only the filters below filter_end and the channels below chans.
 //
-// filter_end stops at the end of the wave's own group, not of the tensor. RowLoader guards
-// nothing on the channel axis, so a K block wider than its group reads the next group's filters
-// and the MFMA multiplies them against this group's input channels; bounding on the tensor adds
-// one group's gradient into the next group's filters. The wave's own group rather than the
-// tile's, because a tile covering waves_g groups holds a wave of each.
+// filter_end is the end of the wave's own group. RowLoader does not guard the channel axis, so a
+// K block wider than a group reads the next group's filters, and a bound at the tensor's end
+// would store those products over that group's dW. A tile covering waves_g groups holds waves of
+// each, so the bound is per wave.
 struct WgradTensorPars
 {
     int filter_end;
     int chans; // one group's channel count, dW's contiguous extent and the tile's channel bound
 };
 
-// One wave's staging tile: its own filter position's C x K, in dW's k-major order.
+// One wave's staging tile holds a filter position's K × C block, channels contiguous as in dW.
 //
-// Rotating each k row by 4 channels makes both accesses conflict-free with no padding. The write
-// is b128 and its 8-lane phase carries eight consecutive k at one channel, which the rotation
-// puts on 8 disjoint groups of 4 banks; the read is b32 and takes 32 channels of one k per half
-// wave, whose two k rows would otherwise land on the same 32 banks. The rotation is an XOR by a
-// multiple of 4, so every lane's 16-byte write stays 16-byte aligned.
+// Each row XORs its 16-byte chunk index with the index of its 32-dword ds_write_b128 bank period,
+// modulo the row's chunk count. The direct kernel's Swizzle<TileSizeC> applies the same rule to
+// 16-bit rows. The swizzle keeps both the b128 staging write and the b128 drain read free of bank
+// conflicts, and keeps a 4-channel run contiguous and aligned.
 template <Config cfg>
 struct StagingLayout
 {
@@ -49,91 +50,96 @@ struct StagingLayout
     static constexpr int rows        = cfg.wave_k();
     static constexpr int size_floats = rows * cols;
 
-    // Distinct rotations, one per 4-channel group in a row.
-    static constexpr int rotations = cols / 4;
+    static constexpr int chunks          = cols / 4;
+    static constexpr int rows_per_period = cols >= 32 ? 1 : 32 / cols;
 
     static_assert(cols % 4 == 0, "a lane stages 4 consecutive channels");
-    static_assert((cols & (cols - 1)) == 0, "the rotation is an XOR, so cols must be a power of 2");
+    static_assert((cols & (cols - 1)) == 0, "the swizzle is an XOR, so cols must be a power of 2");
 
-    __device__ static int offset(int k, int c) { return k * cols + (c ^ (4 * (k % rotations))); }
+    __device__ static int offset(int k, int c)
+    {
+        return k * cols + (c ^ (4 * (k / rows_per_period % chunks)));
+    }
 };
 
-// The ordering point on the staging tile: a rendezvous where the partitions share one, fences
-// where a wave owns it alone.
+// partition_barrier orders staging writes before other lanes' reads, and those reads before reuse.
 //
-// Either form stops the compiler handing the lanes that skip the drain a path straight to the next
-// filter position's stores, which would overwrite words the draining lanes still need.
-// phase_barrier is convergent, so that path cannot be formed across it; the fences are scoped to
-// LDS, so unlike __syncthreads they carry no vmcnt(0) over the atomics the drain is issuing. See
-// docs/algorithms/direct/direct-wgrad-epilogue-lds-ordering.md.
+// At waves_q > 1 the partitions read each other's tiles and need a workgroup barrier; at
+// waves_q == 1 a wave reads only its own. See
+// docs/algorithms/details/direct/direct-wgrad-epilogue-lds-ordering.md.
 template <Config cfg>
 __device__ inline void partition_barrier()
 {
     if constexpr(cfg.waves_q > 1)
-    {
-        phase_barrier();
-    }
+        __syncthreads();
     else
-    {
-        __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
-        __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
-    }
+        __syncwarp();
 }
 
-// Add this workgroup's partial gradient into dW.
+// Store this workgroup's gradient tile to dW.
 //
-// c_local is the wave's channel origin within its own group and k_base its filter origin within
-// the workgroup's block; c_origin and k_origin are the block's origin within the tensor, c_origin
-// inside its group and k_origin across all of them. item is the wave's spatial partition, which
-// decides both the staging tile it writes and the share of the drain it takes.
+// The grid leaves the spatial axis unsplit and the launch does not zero dW, so the stores have to
+// reach every element; the tiles and the drain cover the tensor, and the guards below drop only
+// padding.
 //
-// The bounds test carries the whole channel guard. RowLoader does not guard the channel axis, so
-// a lane whose eight-channel group runs past the real C or K reads the next pixel's leading
-// channels, and those products land in accumulator rows and columns that only this test drops.
+// c_local is the wave's channel offset from c_origin and k_base its filter offset from k_origin;
+// c_origin is the block's channel origin within its group, and k_origin its filter origin across
+// all groups. item is the wave's spatial partition: the wave stages into tile item and drains
+// rounds item, item + waves_q, and so on, where a round is rows_per_round rows of the tile.
 //
-// acc is read-only here; the reference is non-const because bunnies::store_tile takes its tile
-// by mutable reference, even though it only reads it.
-template <Config cfg>
+// The drain's chan_ok and filter_end test is the only channel guard. RowLoader does not guard the
+// channel axis, so a lane whose eight-channel group runs past the real C or K reads the next
+// pixel's leading channels, and those products land in accumulator rows and columns that only
+// this test drops.
+//
+// acc is read-only here; the reference is non-const because bunnies::store_tile takes its tile by
+// mutable reference.
+//
+// dw_t is float or, for 16-bit operands, the operand type, which the store rounds to once.
+template <Config cfg, typename dw_t>
 __device__ void run_epilogue(int wave,
                              int item,
                              int lane,
                              int c_local,
                              int k_base,
-                             float* __restrict__ wgrad,
+                             dw_t* __restrict__ wgrad,
                              const WgradTensorPars& pars,
                              int c_origin,
                              int k_origin,
                              Accumulators<cfg>& acc)
 {
+    // A store is correct only where each dW element has one writer.
+    static_assert(cfg.no_splits);
+
     using Layout = StagingLayout<cfg>;
 
-    // k rows one wave drains per round: 64 lanes over a row of wave_c channels.
-    constexpr int rows_per_round = WAVE_SIZE / Layout::cols;
-    static_assert(WAVE_SIZE % Layout::cols == 0);
+    // A lane drains 4 consecutive channels, so a row of wave_c channels spans wave_c / 4 lanes.
+    constexpr int lanes_per_row  = Layout::cols / 4;
+    constexpr int rows_per_round = WAVE_SIZE / lanes_per_row;
+    static_assert(WAVE_SIZE % lanes_per_row == 0 && Layout::rows % rows_per_round == 0);
 
-    // The waves sharing this channel tile are a contiguous run of staging tiles, because the
-    // wave decode puts the item fastest, so the group starts at wave - item.
+    // The staging tiles of the waves_q waves sharing a K × C tile start at tile wave - item.
+    // wave_slot makes item the fastest-varying index, so those tiles are contiguous.
     __shared__ alignas(16) float staging[cfg.waves() * Layout::size_floats];
-    float* const group = staging + (wave - item) * Layout::size_floats;
-    float* const tile  = group + item * Layout::size_floats;
+    float* const partition_tiles = staging + (wave - item) * Layout::size_floats;
+    float* const tile            = partition_tiles + item * Layout::size_floats;
 
-    // The main loop exits with its trailing prefetch still moving; retired here so that a later
-    // cell can reuse the row buffers.
+    // Wait for the main loop's trailing prefetch, so that the next cell can reuse the row buffers.
     arch::s_wait_vmcnt<0>();
 
-    // Filter position (r, s) occupies dW row r * kw + s of every filter.
     const int krs_stride = cfg.kh * cfg.kw * pars.chans;
 
-    // Where this lane reads on the drain, and the dW element it lands on.
-    const int drain_c  = lane % Layout::cols;
-    const int drain_k  = lane / Layout::cols;
+    const int drain_c  = 4 * (lane % lanes_per_row);
+    const int drain_k  = lane / lanes_per_row;
     const int chan     = c_origin + c_local + drain_c;
     const bool chan_ok = chan < pars.chans;
 
+    // A channel count that is not a multiple of 4 misaligns the vector store.
+    // is_applicable requires an even count for 16-bit operands and allows any count for tf32.
+    const bool whole_runs = pars.chans % 4 == 0;
+
     bunnies::static_unroll<cfg.kh>([&](auto r) {
         bunnies::static_unroll<cfg.kw>([&](auto s) {
-            // One b128 store per block covers the lane's whole 4-channel run from item 0's
-            // offset, because the staging layout's XOR is an add on a 4-aligned base.
             bunnies::store_tile<arch::ds_store_b128>(
                 acc.tile[r][s], tile, [&](int mb, int nb, int m, int n) {
                 const int c = mb * MFMA_M + m;
@@ -141,15 +147,11 @@ __device__ void run_epilogue(int wave,
                 return Layout::offset(k, c);
             });
 
-            // LDS ops retire out of order, so the wait makes the reads below see the writes, and
-            // the barrier makes the other partitions' tiles visible.
-            arch::s_wait_lgkmcnt<0>();
             partition_barrier<cfg>();
 
-            float* dst = wgrad + (r * cfg.kw + s) * pars.chans + chan;
+            dw_t* dst = wgrad + (r * cfg.kw + s) * pars.chans + chan;
 
-            // Each partition drains every waves_q'th round, so the group covers the tile
-            // once between them and dW sees one atomic per element.
+            // The partitions together store each dW element of the tile once.
             for(int k0 = item * rows_per_round; k0 < Layout::rows;
                 k0 += cfg.waves_q * rows_per_round)
             {
@@ -158,20 +160,35 @@ __device__ void run_epilogue(int wave,
                 if(!chan_ok || filter >= pars.filter_end)
                     continue;
 
-                // waves_q reads over waves_q times fewer rounds, so summing the partitions costs
-                // the LDS traffic of a single-partition drain.
+                // A lane sums waves_q tiles per round over 1 / waves_q of the rounds.
+                // The sum therefore costs the LDS reads of a single-partition drain.
                 const int offset = Layout::offset(k_local, drain_c);
-                float sum        = group[offset];
+                fp32x4_t sum;
+                arch::ds_load_b128::load(partition_tiles + offset, &sum);
                 for(int q = 1; q < cfg.waves_q; ++q)
-                    sum += group[q * Layout::size_floats + offset];
+                {
+                    fp32x4_t part;
+                    arch::ds_load_b128::load(partition_tiles + q * Layout::size_floats + offset,
+                                             &part);
+                    sum += part;
+                }
 
-                // 32 consecutive channels of one filter: a 128-byte run, one cache line.
-                atomicAdd(dst + static_cast<size_t>(filter) * krs_stride, sum);
+                // A row's lanes store wave_c consecutive channels of one filter.
+                // At wave_c 32 that is a whole 128-byte line of fp32, half a line of fp16/bf16.
+                dw_t* const out = dst + static_cast<size_t>(filter) * krs_stride;
+                if(whole_runs)
+                {
+                    auto run = packed_convert<dw_t>(sum);
+                    arch::global_store<4 * sizeof(dw_t)>::store(out, &run);
+                }
+                else
+                {
+                    for(int i = 0; i < 4 && chan + i < pars.chans; ++i)
+                        out[i] = static_cast<dw_t>(sum[i]);
+                }
             }
 
-            // The next filter position writes these same addresses, so the group has to be
-            // done reading them first.
-            arch::s_wait_lgkmcnt<0>();
+            // The next filter position reuses this staging, so all lanes finish their reads first.
             partition_barrier<cfg>();
         });
     });
