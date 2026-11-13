@@ -69,6 +69,7 @@ pub mod smem_sink;
 pub mod spill;
 pub mod trade;
 pub mod trunc_mix;
+pub mod unpack;
 pub mod unrolled;
 pub mod vectorize;
 pub mod waitcnt;
@@ -136,7 +137,8 @@ pub fn prepare(f: &mut MFunc) {
 /// and conversions (the shared expansion: a gfx9 copy is the same moves),
 /// MFMAs read the zeros moved into their C as the constant
 /// (`zero_acc::after_allocation`; copied from zeros of an earlier block,
-/// `zero_wide`), the 64-bit shift fix, `s_waitcnt`, the peepholes the
+/// `zero_wide`), the packed f32 instructions an MFMA reads right after become
+/// scalar ones (`unpack`), the 64-bit shift fix, `s_waitcnt`, the peepholes the
 /// kernel asks for (`peep`, `m0_cse`), its early M0 writes (`m0_early`, `m0_fill`),
 /// then the hazard `s_nop`s. gfx950 has no `s_delay_alu`, clauses, VOPD or
 /// VGPR release message, so none of the gfx11 passes that place them run.
@@ -151,6 +153,7 @@ pub fn finish_lapped(func: &mut MFunc, num_vgprs: u32, lap: &mut dyn FnMut(&'sta
     drop_holds(func);
     zero_acc::after_allocation(func);
     zero_wide::after_allocation(func);
+    unpack::run(func);
     hazards::fix_shift64(func, num_vgprs)?;
     if func.lever_anywhere("fmac") {
         func.fill_scopes();
