@@ -256,7 +256,7 @@ fixed rules:
   before the loop's first one (a 64-bit sum made for its low half alone, the
   LDS-DMA address of every row of a tile, counts: its dead carry chain is
   dropped first). The retried compile is kept if it spills less or, spilling no
-  more, runs more waves for at most 10% more instructions or, with both alike,
+  more, runs more waves for at most 3% more instructions or, with both alike,
   issues at least 3% fewer (blocks weighted by 8 to the power of their loop
   depth). The first compile notes how many VGPRs of pressure the pass would
   save, and the retry runs only when that could cross a waves threshold of the
