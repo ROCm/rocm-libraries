@@ -1979,8 +1979,9 @@ TEST(TestGpuReferenceGraphExecutorFp32, ReductionExecutes)
 {
     SKIP_IF_NO_DEVICES();
 
-    runReductionExecutorVsCpu<float>(
-        {4, 16, 28, 28}, {4, 16, 1, 1}, hipdnn_flatbuffers_sdk::data_objects::ReductionMode::MAX);
+    runReductionExecutorVsCpu<float>({4, 16, 28, 28},
+                                     {4, 16, 1, 1},
+                                     hipdnn_flatbuffers_sdk::data_objects::ReductionMode::MAX_OP);
 }
 
 TEST(TestGpuReferenceGraphExecutorFp16, ReductionExecutes)
