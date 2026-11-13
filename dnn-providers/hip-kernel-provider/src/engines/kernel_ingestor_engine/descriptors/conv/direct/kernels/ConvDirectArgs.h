@@ -46,6 +46,10 @@ struct K2FormatArgs
     int flip;
 };
 
+/// Tiles of 16 fn x ka formatted elements one block of the rows weight pre-pass formats per step
+/// (k2rFormatWeights); the host sizes that pass's grid by it.
+constexpr int K2R_FORMAT_TILES = 4;
+
 /// Three-bf16 input pre-pass: channels-last fp32 x (pixels x c) to bf16 (pixels x 3c), [hi | hi | lo].
 struct K2SplitArgs
 {

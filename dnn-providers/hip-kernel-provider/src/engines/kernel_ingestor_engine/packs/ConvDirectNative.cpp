@@ -1077,12 +1077,21 @@ public:
 
         auto format = build(FORMAT_ENTRY_POINT, signatureOf<K2FormatArgs>());
         format.setBlockSize(AUX_BLOCK, 1, 1);
-        // The halo-tile format (k2FormatWeights) takes a run of ka elements per thread; the rows
-        // and three-bf16 formats one element per thread.
-        format.setGridSize(
-            auxBlocks(config.rows || config.math ? plan.weightElems : plan.weightElems / config.ka),
-            1,
-            1);
+        // The halo-tile format (k2FormatWeights) takes a run of ka elements per thread; the
+        // three-bf16 formats one element per thread; the rows format one block per
+        // K2R_FORMAT_TILES tiles of 16 fn x ka elements (k2rFormatWeights).
+        long long formatThreads = plan.weightElems / config.ka;
+        if(config.math)
+        {
+            formatThreads = plan.weightElems;
+        }
+        else if(config.rows)
+        {
+            const long long tileElems = 16LL * config.fn * config.ka;
+            const long long tiles = (plan.weightElems + tileElems - 1) / tileElems;
+            formatThreads = (tiles + K2R_FORMAT_TILES - 1) / K2R_FORMAT_TILES * AUX_BLOCK;
+        }
+        format.setGridSize(auxBlocks(formatThreads), 1, 1);
 
         std::optional<IngestorKernelCode> splitInput;
         if(config.math)

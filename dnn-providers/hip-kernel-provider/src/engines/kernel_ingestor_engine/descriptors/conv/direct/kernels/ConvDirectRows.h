@@ -199,8 +199,12 @@ __device__ void k2rFormatWeights(const K2FormatArgs& f)
             k2rFormatWeightsElementwise<T, KPL, FN, MATH>(f);
             return;
         }
-        // Rows padded by one KPL run: the store phase reads whole KPL runs (aligned vectors).
-        __shared__ __attribute__((aligned(16))) T tile[TN][KA + KPL];
+        // A block step formats TB consecutive tiles (one contiguous run of the output): every
+        // thread issues all its gathers before its LDS writes, so a 256-thread block keeps
+        // TB x TILE elements in flight instead of one tile per two barriers. Rows padded by one
+        // KPL run: the store phase reads whole KPL runs (aligned vectors).
+        constexpr int TB = K2R_FORMAT_TILES;
+        __shared__ __attribute__((aligned(16))) T tile[TB][TN][KA + KPL];
         typedef typename K1Raw<KPL * sizeof(T)>::type Run;
         T* wf = static_cast<T*>(f.wf);
         const T* w = static_cast<const T*>(f.w);
@@ -223,7 +227,8 @@ __device__ void k2rFormatWeights(const K2FormatArgs& f)
         const long long fastStride = nFast ? strideN : strideC;
         const int tid = static_cast<int>(threadIdx.x);
         const int threads = static_cast<int>(blockDim.x);
-        for(int t = static_cast<int>(blockIdx.x); t < tiles; t += static_cast<int>(gridDim.x))
+        // Tile t's run of the output: (g, kc, s, r) with r fastest; its gather origin.
+        auto origin = [&](int t, long long& tapOff, int& n0, int& c0) __attribute__((always_inline))
         {
             int rest = t;
             const int r = rest % rk;
@@ -240,47 +245,81 @@ __device__ void k2rFormatWeights(const K2FormatArgs& f)
                 rr = f.r - 1 - rr;
                 ss = f.s - 1 - ss;
             }
-            const long long tapOff = tt * f.wStrides[2] + rr * f.wStrides[3] + ss * f.wStrides[4];
-            const int n0 = g * TN, c0 = kc * KA;
-            static_assert(TN % VL == 0 && KA % VL == 0, "rows pre-pass vectors");
-            for(int u = tid; u < TILE / VL; u += threads)
+            tapOff = tt * f.wStrides[2] + rr * f.wStrides[3] + ss * f.wStrides[4];
+            n0 = g * TN;
+            c0 = kc * KA;
+        };
+        static_assert(TN % VL == 0 && KA % VL == 0, "rows pre-pass vectors");
+        constexpr int UPT = TILE / VL; // gathers per tile
+        for(int t0 = static_cast<int>(blockIdx.x) * TB; t0 < tiles;
+            t0 += static_cast<int>(gridDim.x) * TB)
+        {
+            const int nt = tiles - t0 < TB ? tiles - t0 : TB;
+            // All of a thread's gathers (PT per pass at the 256-thread block size) go out before
+            // its LDS writes.
+            constexpr int PT = (TB * UPT + 255) / 256;
+            for(int base = 0; base < nt * UPT; base += PT * threads)
             {
-                // VL consecutive elements along the fast channel from (nl, cl).
-                const int nl = nFast ? (u % (TN / VL)) * VL : u / (KA / VL);
-                const int cl = nFast ? u / (TN / VL) : (u % (KA / VL)) * VL;
-                const int n = n0 + nl, c = c0 + cl;
-                const long long off = n * strideN + c * strideC + tapOff;
-                T v[VL];
-                const bool whole
-                    = fastStride == 1 && off % VL == 0
-                      && (nFast ? n + VL <= limN && c < limC : c + VL <= limC && n < limN);
-                if(whole)
-                {
-                    *reinterpret_cast<Vec*>(v) = *reinterpret_cast<const Vec*>(w + off);
-                }
-                else
-                {
+                T v[PT][VL];
 #pragma unroll
-                    for(int e = 0; e < VL; ++e)
+                for(int k = 0; k < PT; ++k)
+                {
+                    const int u = base + k * threads + tid;
+                    if(u >= nt * UPT)
+                        continue;
+                    const int ti = u / UPT, uu = u - ti * UPT;
+                    long long tapOff;
+                    int n0, c0;
+                    origin(t0 + ti, tapOff, n0, c0);
+                    // VL consecutive elements along the fast channel from (nl, cl).
+                    const int nl = nFast ? (uu % (TN / VL)) * VL : uu / (KA / VL);
+                    const int cl = nFast ? uu / (TN / VL) : (uu % (KA / VL)) * VL;
+                    const int n = n0 + nl, c = c0 + cl;
+                    const long long off = n * strideN + c * strideC + tapOff;
+                    const bool whole
+                        = fastStride == 1 && off % VL == 0
+                          && (nFast ? n + VL <= limN && c < limC : c + VL <= limC && n < limN);
+                    if(whole)
                     {
-                        const int ne = nFast ? n + e : n, ce = nFast ? c : c + e;
-                        v[e] = ne < limN && ce < limC ? w[ne * strideN + ce * strideC + tapOff]
-                                                      : K1Elem<T>::store(0.0f);
+                        *reinterpret_cast<Vec*>(v[k]) = *reinterpret_cast<const Vec*>(w + off);
+                    }
+                    else
+                    {
+#pragma unroll
+                        for(int e = 0; e < VL; ++e)
+                        {
+                            const int ne = nFast ? n + e : n, ce = nFast ? c : c + e;
+                            v[k][e] = ne < limN && ce < limC
+                                          ? w[ne * strideN + ce * strideC + tapOff]
+                                          : K1Elem<T>::store(0.0f);
+                        }
                     }
                 }
 #pragma unroll
-                for(int e = 0; e < VL; ++e)
-                    tile[nFast ? nl + e : nl][nFast ? cl : cl + e] = v[e];
+                for(int k = 0; k < PT; ++k)
+                {
+                    const int u = base + k * threads + tid;
+                    if(u >= nt * UPT)
+                        continue;
+                    const int ti = u / UPT, uu = u - ti * UPT;
+                    const int nl = nFast ? (uu % (TN / VL)) * VL : uu / (KA / VL);
+                    const int cl = nFast ? uu / (TN / VL) : (uu % (KA / VL)) * VL;
+#pragma unroll
+                    for(int e = 0; e < VL; ++e)
+                        tile[ti][nFast ? nl + e : nl][nFast ? cl : cl + e] = v[k][e];
+                }
             }
             __syncthreads();
             // The run: index (j 64 + l) KPL + e holds column j 16 + l % 16, channel (l / 16) KPL + e;
-            // each (j, l) is KPL consecutive channels of one LDS row, stored as one vector.
-            Run* dst = reinterpret_cast<Run*>(wf + static_cast<long long>(t) * TILE);
-            for(int u = tid; u < TILE / KPL; u += threads)
+            // each (j, l) is KPL consecutive channels of one LDS row, stored as one vector. The TB
+            // tiles' runs are consecutive.
+            Run* dst = reinterpret_cast<Run*>(wf + static_cast<long long>(t0) * TILE);
+            for(int u = tid; u < nt * (TILE / KPL); u += threads)
             {
-                const int l = u % 64;
-                const int j = u / 64;
-                dst[u] = *reinterpret_cast<const Run*>(&tile[j * 16 + l % 16][(l / 16) * KPL]);
+                const int ti = u / (TILE / KPL), uu = u - ti * (TILE / KPL);
+                const int l = uu % 64;
+                const int j = uu / 64;
+                dst[u] = *reinterpret_cast<const Run*>(&tile[ti][j * 16 + l % 16][(l / 16) * KPL]);
             }
             __syncthreads();
         }
