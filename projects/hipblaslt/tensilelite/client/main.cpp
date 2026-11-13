@@ -40,6 +40,7 @@
 #include "DeviceContext.hpp"
 #include "FusedA2ARunner.hpp"
 #include "HardwareMonitorListener.hpp"
+#include "MappedOutput.hpp"
 #include "MetaRunListener.hpp"
 #include "ProgressListener.hpp"
 #include "ReferenceValidator.hpp"
@@ -232,7 +233,8 @@ namespace TensileLite
                 ("swizzle-tensor-a",         po::value<bool>()->default_value(false), "Swizzle input tensor A.")
                 ("swizzle-tensor-b",         po::value<bool>()->default_value(false), "Swizzle input tensor B.")
                 ("fused-gemm-a2a",           po::value<bool>()->default_value(false), "Fuse an all-to-all PUSH into the GEMM epilogue.")
-                ("split-m-devices",          po::value<int>()->default_value(1), "Split M of each problem across N consecutive devices (device-idx .. device-idx+N-1), one stream each, and run the slices concurrently. Devices 0..N-2 get M/N rows, the last device gets the rest. Each device allocates and validates its own slice (strides that were tight for the full M become tight for the slice). Reported time is the slowest device; reported GFlops are for the full problem. Needs the all-solutions run (no --best-solution). For partitioned GPUs (e.g. NPS2: N=2). 1 = off.")
+                ("split-devices",          po::value<int>()->default_value(1), "Split each problem across N consecutive devices (device-idx .. device-idx+N-1), one stream each, and run the slices concurrently. Devices 0..N-2 get size/N, the last device gets the rest. --split-dim M: A is split, B replicated, each device keeps its own output slice. --split-dim N: B is split, A replicated, and D is one tensor whose pages are split between the devices, so no copy is needed; each slice is validated in place. Reported time is the slowest device; reported GFlops are for the full problem. Needs the all-solutions run (no --best-solution). For partitioned GPUs (e.g. NPS2: N=2). 1 = off.")
+                ("split-dim",              po::value<std::string>()->default_value("M"), "Dimension --split-devices splits: M or N.")
                 ("mx-scale-format",          po::value<int>()->default_value(0), "MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
                 ("activation-compute-type",  po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Activation compute type.")
                 ("high-precision-accumulate", po::value<bool>()->default_value(false), "Use high-precision accumulate.")
@@ -810,18 +812,21 @@ int main(int argc, const char* argv[])
     {
         ScopedTimer timer("hip_initialization");
         hardware         = GetHardware(args);
-        int    splitM    = args["split-m-devices"].as<int>();
+        int    splitM    = args["split-devices"].as<int>();
         if(splitM < 1)
-            throw std::runtime_error("--split-m-devices must be >= 1");
+            throw std::runtime_error("--split-devices must be >= 1");
+        if(splitM > 1 && args["split-dim"].as<std::string>() != "M"
+           && args["split-dim"].as<std::string>() != "N")
+            throw std::runtime_error("--split-dim must be M or N");
         if(splitM > 1 && fusedA2A)
-            throw std::runtime_error("--split-m-devices cannot be combined with --fused-gemm-a2a");
+            throw std::runtime_error("--split-devices cannot be combined with --fused-gemm-a2a");
         if(splitM > 1 && args["use-user-args"].as<bool>())
-            throw std::runtime_error("--split-m-devices does not support --use-user-args");
+            throw std::runtime_error("--split-devices does not support --use-user-args");
         if(splitM > 1 && args["grouped-gemm"].as<bool>())
-            throw std::runtime_error("--split-m-devices does not support --grouped-gemm");
+            throw std::runtime_error("--split-devices does not support --grouped-gemm");
         if(splitM > 1 && args["best-solution"].as<bool>())
             throw std::runtime_error(
-                "--split-m-devices needs the all-solutions run (not --best-solution): a "
+                "--split-devices needs the all-solutions run (not --best-solution): a "
                 "library-selected solution is not checked against each slice");
         int    world     = fusedA2A ? FusedA2ARunner::worldSize(args) : splitM;
         size_t flagBytes = fusedA2A ? FusedA2ARunner::kFlagAllocBytes : 0;
@@ -831,7 +836,7 @@ int main(int argc, const char* argv[])
             int deviceCount = 0;
             HIP_CHECK_EXC(hipGetDeviceCount(&deviceCount));
             if(args["device-idx"].as<int>() + splitM > deviceCount)
-                throw std::runtime_error(concatenate("--split-m-devices=",
+                throw std::runtime_error(concatenate("--split-devices=",
                                                      splitM,
                                                      " needs devices ",
                                                      args["device-idx"].as<int>(),
@@ -1028,6 +1033,35 @@ int main(int argc, const char* argv[])
 
     reporters->report(ResultKey::ProblemCount, problemFactory.problems().size());
 
+    // --split-dim N: D is one tensor shared by all devices, one allocation per rotating slot.
+    // Each device's kernels write their slice of it through the page mapping.
+    std::vector<std::unique_ptr<MappedOutput>> mappedOutputs;
+    auto attachMappedOutput = [&](ContractionProblem* problem, size_t firstSlot, size_t endSlot) {
+        if(!problemFactory.splitsN())
+            return;
+        auto const* full = dynamic_cast<ContractionProblemGemm const*>(problem);
+        if(full == nullptr)
+            throw std::runtime_error("--split-dim N needs a plain GEMM problem");
+        std::vector<int> deviceIds;
+        for(auto const& ctx : devices)
+            deviceIds.push_back(ctx->deviceId);
+        const size_t bytes = static_cast<size_t>(full->d().totalAllocatedElements()
+                                                 * full->d().elementBytes());
+        while(mappedOutputs.size() < endSlot)
+            mappedOutputs.push_back(std::make_unique<MappedOutput>(deviceIds, bytes));
+        for(size_t r = firstSlot; r < endSlot; r++)
+            for(size_t d = 0; d < devices.size(); d++)
+            {
+                auto& inputs = dynamic_cast<ContractionInputs&>(*devices[d]->inputArr[r]);
+                void* slice  = static_cast<char*>(mappedOutputs[r]->data())
+                              + static_cast<size_t>(problemFactory.sliceOffsetInD(problem, d)
+                                                    * full->d().elementBytes());
+                if(inputs.c == inputs.d)
+                    inputs.c = slice;
+                inputs.d = slice;
+            }
+    };
+
     bool  useUserArgs = args["use-user-args"].as<bool>();
     void* dUA         = nullptr;
     void* dUAHost     = nullptr;
@@ -1086,6 +1120,13 @@ int main(int argc, const char* argv[])
                 size_t maxRotatingBufferNum = std::max(warmupInvocations, syncs * enq);
 
                 {
+                    // Nothing may still be writing into the previous problem's shared outputs.
+                    forEachDevice(devices,
+                                  [](DeviceContext&) { static_cast<void>(hipDeviceSynchronize()); });
+                    mappedOutputs.clear();
+                }
+
+                {
                     ScopedTimer timer("rotating_buffer_preparation");
                     forEachDeviceIndexed(devices, [&](DeviceContext& ctx, size_t d) {
                         ctx.inputArr = ctx.dataInit->prepareRotatingGPUOutput(
@@ -1095,6 +1136,7 @@ int main(int argc, const char* argv[])
                             ctx.stream);
                         static_cast<void>(hipDeviceSynchronize());
                     });
+                    attachMappedOutput(problem, 0, device0->inputArr.size());
                 }
 
                 // I-cache rotation auto-load: when --icache-rotate-copies=-1,
@@ -1226,6 +1268,7 @@ int main(int argc, const char* argv[])
                                             ctx.inputArr[0] = ctx.dataInit->prepareGPUInputs(
                                                 problemFactory.sliceProblem(problem, d));
                                         });
+                                    attachMappedOutput(problem, 0, 1);
                                 }
                                 resetInput = true;
 
@@ -1240,7 +1283,7 @@ int main(int argc, const char* argv[])
                                     {
                                         for(size_t r = 0; r < device0->inputArr.size(); r++)
                                         {
-                                            // One launch per device (split-m-devices > 1),
+                                            // One launch per device (split-devices > 1),
                                             // each on its own inputs and stream.
                                             std::vector<std::vector<KernelInvocation>> perDevice;
                                             for(size_t d = 0; d < devices.size(); d++)

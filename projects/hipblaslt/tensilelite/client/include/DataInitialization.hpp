@@ -898,7 +898,7 @@ namespace TensileLite
             }
             virtual void preBenchmarkRun() override {}
             virtual void postBenchmarkRun() override {}
-            // --split-m-devices: this instance serves one device, which runs its slice of the
+            // --split-devices: this instance serves one device, which runs its slice of the
             // problem the listeners are given.
             void setSlice(ClientProblemFactory const* fullFactory, size_t device)
             {

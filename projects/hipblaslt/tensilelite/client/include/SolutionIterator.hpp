@@ -51,7 +51,7 @@ namespace TensileLite
         class SolutionIterator : public RunListener
         {
         public:
-            // --split-m-devices: a solution must be valid for every device's slice.
+            // --split-devices: a solution must be valid for every device's slice.
             void setSplit(ClientProblemFactory const* split)
             {
                 m_split = split;

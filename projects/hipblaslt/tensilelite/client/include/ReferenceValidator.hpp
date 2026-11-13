@@ -136,7 +136,7 @@ namespace TensileLite
         private:
             void allocateResultBuffer(size_t bytes);
 
-            // The problem device `card` runs: its slice under --split-m-devices, else m_problem.
+            // The problem device `card` runs: its slice under --split-devices, else m_problem.
             ContractionProblem* deviceProblem(size_t card) const;
 
             bool shouldSkipNullTensor(const std::string& tensorName,

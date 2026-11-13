@@ -169,14 +169,19 @@ namespace TensileLite
                 std::runtime_error("Currently only accepts identifier as input.");
             }
 
-            // Slice factory of --split-m-devices N: M becomes this device's share. The first
-            // N-1 devices take M/N rows; the last takes the remainder.
+            // Slice factory of --split-devices N. --split-dim M: M becomes this device's share
+            // (A split, B replicated). --split-dim N: N becomes its share (B split, A replicated,
+            // D keeps the full strides because every device writes into one shared output).
+            // The first N-1 devices take size/N; the last takes the remainder.
             if(m_sliceCount > 1)
             {
-                auto mFree = std::find_if(
-                    m_freeIndices.begin(), m_freeIndices.end(), [](auto const& f) { return f.isA; });
+                m_splitN   = args["split-dim"].as<std::string>() == "N";
+                auto mFree = std::find_if(m_freeIndices.begin(),
+                                          m_freeIndices.end(),
+                                          [&](auto const& f) { return f.isA != m_splitN; });
                 if(mFree == m_freeIndices.end())
-                    throw std::runtime_error("--split-m-devices: problem has no free index in A");
+                    throw std::runtime_error(concatenate("--split-devices: problem has no free index in ",
+                                                         m_splitN ? "B" : "A"));
                 m_splitFree        = *mFree;
                 m_fullProblemSizes = m_problemSizes;
                 for(auto& sizes : m_problemSizes)
@@ -184,8 +189,11 @@ namespace TensileLite
                     size_t& m     = sizes.at(mFree->d);
                     size_t  share = m / m_sliceCount;
                     if(share == 0)
-                        throw std::runtime_error(concatenate(
-                            "--split-m-devices=", m_sliceCount, " is larger than M=", m));
+                        throw std::runtime_error(concatenate("--split-devices=",
+                                                             m_sliceCount,
+                                                             " is larger than ",
+                                                             m_splitN ? "N=" : "M=",
+                                                             m));
                     m = m_sliceIdx + 1 < m_sliceCount ? share : m - share * (m_sliceCount - 1);
                 }
             }
@@ -353,12 +361,12 @@ namespace TensileLite
                 }
             }
 
-            // --split-m-devices N: also build, per device, the problems for its slice of M.
-            int splitM = args.count("split-m-devices") ? args["split-m-devices"].as<int>() : 1;
+            // --split-devices N: also build, per device, the problems for its slice of M.
+            int splitM = args.count("split-devices") ? args["split-devices"].as<int>() : 1;
             if(m_sliceCount == 1 && splitM > 1)
             {
                 if(m_groupedGemm)
-                    throw std::runtime_error("--split-m-devices does not support --grouped-gemm");
+                    throw std::runtime_error("--split-devices does not support --grouped-gemm");
                 for(int d = 0; d < splitM; d++)
                     m_slices.push_back(std::make_unique<ClientProblemFactory>(args, d, splitM));
             }
@@ -378,6 +386,22 @@ namespace TensileLite
                 if(m_problems[i].get() == full)
                     return m_slices.at(device)->m_problems.at(i).get();
             throw std::runtime_error("[ClientProblemFactory] problem is not from this factory");
+        }
+
+        bool ClientProblemFactory::splitsN() const
+        {
+            return !m_slices.empty() && m_slices[0]->m_splitN;
+        }
+
+        size_t ClientProblemFactory::sliceOffsetInD(ContractionProblem const* full,
+                                                    size_t                    device) const
+        {
+            auto const* gemm = dynamic_cast<ContractionProblemGemm const*>(full);
+            if(!splitsN() || gemm == nullptr)
+                return 0;
+            auto const& free  = m_slices[0]->m_splitFree;
+            size_t      share = gemm->d().sizes().at(free.d) / m_slices.size();
+            return device * share * gemm->d().strides().at(free.d);
         }
 
         ClientProblemFactory const& ClientProblemFactory::sliceFactory(size_t device) const
@@ -475,6 +499,7 @@ namespace TensileLite
                                                     ? m_factorDimArgs[l]
                                                     : 0;
                                 auto make = [&](std::vector<size_t> const& aS,
+                                                std::vector<size_t> const& bS,
                                                 std::vector<size_t> const& cS,
                                                 std::vector<size_t> const& dS) {
                                     return ContractionProblemGemm::FromIndexSizes(
@@ -486,7 +511,7 @@ namespace TensileLite
                                     aS,
                                     m_aOps,
                                     m_tensorTypes[ContractionProblemGemm::TENSOR::B],
-                                    bStrides,
+                                    bS,
                                     m_bOps,
                                     m_tensorTypes[ContractionProblemGemm::TENSOR::C],
                                     cS,
@@ -496,36 +521,63 @@ namespace TensileLite
                                     m_dOps,
                                     m_constantValues[ContractionProblemGemm::CONST::BETA]);
                                 };
-                                rv.push_back(make(aStrides, cStrides, dStrides));
+                                // Per-problem copies: the strides above may be shared by all problems.
+                                auto aS = aStrides, bS = bStrides, cS = cStrides, dS = dStrides;
                                 if(m_sliceCount > 1)
                                 {
-                                    // Strides that were tight for the full M are tight for this
+                                    // Strides that were tight for the full size are tight for this
                                     // slice too. Padded strides stay as given.
-                                    bool changed   = false;
-                                    auto retighten = [&](ContractionProblemGemm::TENSOR t,
-                                                         size_t                         mDim,
-                                                         std::vector<size_t>&           strides) {
-                                        if(strides.empty())
-                                            return;
-                                        auto const& desc  = rv.back().tensors()[t];
+                                    auto probe       = make(aS, bS, cS, dS);
+                                    bool changed     = false;
+                                    auto fullStrides = [&](ContractionProblemGemm::TENSOR t, size_t dim) {
+                                        auto const& desc  = probe.tensors()[t];
                                         auto        sizes = desc.sizes();
-                                        sizes.at(mDim)    = m_fullProblemSizes[i].at(m_splitFree.d);
+                                        sizes.at(dim)     = m_fullProblemSizes[i].at(m_splitFree.d);
                                         TensorDescriptor fullDesc(
                                             "", desc.dataType(), sizes.begin(), sizes.end());
-                                        if(fullDesc.strides() == strides)
+                                        return fullDesc.strides();
+                                    };
+                                    auto retighten = [&](ContractionProblemGemm::TENSOR t,
+                                                         size_t                         dim,
+                                                         std::vector<size_t>&           strides) {
+                                        if(!strides.empty() && fullStrides(t, dim) == strides)
                                         {
                                             strides.clear();
                                             changed = true;
                                         }
                                     };
-                                    retighten(ContractionProblemGemm::TENSOR::A, m_splitFree.i, aStrides);
-                                    retighten(ContractionProblemGemm::TENSOR::C, m_splitFree.c, cStrides);
-                                    retighten(ContractionProblemGemm::TENSOR::D, m_splitFree.d, dStrides);
+                                    if(!m_splitN)
+                                    {
+                                        retighten(ContractionProblemGemm::TENSOR::A, m_splitFree.i, aS);
+                                        retighten(ContractionProblemGemm::TENSOR::C, m_splitFree.c, cS);
+                                        retighten(ContractionProblemGemm::TENSOR::D, m_splitFree.d, dS);
+                                    }
+                                    else
+                                    {
+                                        retighten(ContractionProblemGemm::TENSOR::B, m_splitFree.i, bS);
+                                        retighten(ContractionProblemGemm::TENSOR::C, m_splitFree.c, cS);
+                                        // D is one shared tensor: its slice keeps the full strides.
+                                        if(dS.empty())
+                                        {
+                                            dS      = fullStrides(ContractionProblemGemm::TENSOR::D,
+                                                             m_splitFree.d);
+                                            changed = true;
+                                        }
+                                        if(m_cEqualsD)
+                                        {
+                                            cS      = dS;
+                                            changed = true;
+                                        }
+                                    }
                                     if(changed)
-                                        rv.back() = make(aStrides, cStrides, dStrides);
+                                        rv.push_back(make(aS, bS, cS, dS));
+                                    else
+                                        rv.push_back(std::move(probe));
                                 }
-
-
+                                else
+                                {
+                                    rv.push_back(make(aS, bS, cS, dS));
+                                }
 
                                 rv.back().setComputeInputTypeA(m_computeInputTypeA);
                                 rv.back().setComputeInputTypeB(m_computeInputTypeB);

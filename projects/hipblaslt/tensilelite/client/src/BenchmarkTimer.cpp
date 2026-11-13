@@ -270,7 +270,7 @@ namespace TensileLite
                 }
                 else if(auto problem = dynamic_cast<ContractionProblemGemm*>(m_problem))
                 {
-                    // m_problem is the full problem under --split-m-devices; the slice
+                    // m_problem is the full problem under --split-devices; the slice
                     // gives the per-device projection.
                     pp = m_solution->projectedPerformance(
                         *dynamic_cast<ContractionProblemGemm*>(deviceProblem()), m_hardware);
@@ -282,7 +282,7 @@ namespace TensileLite
                         "[BenchmarkTimer] Failed to cast problem to any ContractionProblem.");
                 }
 
-                // split-m-devices: the slices ran concurrently, so the time is the slowest
+                // split-devices: the slices ran concurrently, so the time is the slowest
                 // device and the work is the full problem.
                 gflops      = !sol_is_skipped ? flopCount / (timePerEnqueue_us) / 1000.0 : 0;
                 int    tiles       = pp.granularities.tilesPerCu * perf.CUs;

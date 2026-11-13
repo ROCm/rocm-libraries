@@ -97,7 +97,7 @@ namespace TensileLite
                 m_flushTimeUs = timeUs;
             }
 
-            // --split-m-devices: m_problem is the full problem; each device runs a slice.
+            // --split-devices: m_problem is the full problem; each device runs a slice.
             void setSplit(ClientProblemFactory const* split)
             {
                 m_split = split;
