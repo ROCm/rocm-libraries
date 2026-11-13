@@ -31,6 +31,57 @@ HipKernelEngine
 - **Kernels** (`kernels/`): Device-side kernel source code embedded at build time
 - **Plugin SDK Integration**: Implements `IPlan`, `IPlanBuilder`, `IEngine` interfaces
 
+### Pointwise support by engine
+
+| Engine | Graphs | Availability |
+| --- | --- | --- |
+| `HIP_MLOPS_ENGINE` | Legacy Batchnorm/RMSNorm activation fusion, described below. Not standalone pointwise. | `ENABLE_HIP_MLOPS_ENGINE=ON` (default). |
+| `hipkernel:StandalonePointwise` (`4178892485795623278`, `0x39fe68933a65b16e`) | Exactly one pointwise node: 25 unary, binary and select modes, including parameterized/leaky ReLU and scalar operands. Not normalization fusion. | `HIPDNN_ENABLE_KERNEL_INGESTOR=ON` (off by default), with the production standalone pack shipped for the target architecture. |
+
+The [standalone pack contract](src/engines/kernel_ingestor_engine/descriptors/hip/standalone_pointwise/README.md)
+lists exact modes, parameter defaults and accepted dtype signatures. It supports
+rank 1-5, right-aligned input broadcasting and positive padded/permuted strides,
+with FLOAT computation and supported FLOAT/HALF/BFLOAT16 storage combinations.
+Comparison outputs and select masks use BOOLEAN; GEN_INDEX can output INT32.
+Operands can be device buffers, baked scalars or runtime pass-by-value host
+scalars. Runtime pass-by-value plans cannot be saved.
+
+Support claims use the standalone engine's ID, **not** `HIP_MLOPS_ENGINE`.
+On `gfx90a/linux`, the existing `Pointwise/{Default,Activation,Binary}` bundles
+and 83 `quick/StandalonePointwise` cases are CPU-reference verified and claimed.
+The legacy Batchnorm+pointwise cases with runtime epsilon and momentum are
+also CPU-reference verified and claimed separately for `HIP_MLOPS_ENGINE`.
+Other architectures/platforms require their own verification before adding
+claims. See [running integration tests](../integration-tests/docs/running-tests.md)
+and [rendering the current support matrix](../integration-tests/docs/support-matrix.md);
+the committed overview is refreshed separately after claim changes merge.
+
+Standalone rank, storage and activation support does not extend the legacy
+fusion contract. Legacy 3D normalization fusion, mixed-precision intermediates,
+additional activations and residual-add fusion remain outside these claims.
+The bundle set does not establish completion of the separate ALMIOPEN-2900
+per-operation test plan.
+
+### Legacy HIP MLops normalization fusion
+
+The legacy HIP MLops batch normalization and RMS normalization plans support
+ReLU, clipped ReLU, and clamp with
+`RELU_FWD` for forward plans or `RELU_BWD` for backward plans. Batch normalization
+forward plans, including training, also accept a fused `IDENTITY` node.
+RMS normalization accepts unary `IDENTITY` in either direction; backward
+passthrough does not require ReLU's second input. Existing tensor/layout and
+graph connectivity requirements still apply.
+
+Leaky ReLU is **unsupported** in these legacy normalization fusions: any supplied
+`relu_lower_clip_slope` on a ReLU node (including an explicit zero) is rejected.
+Although the common activation enum names `LEAKY_RELU`, the shared scalar kernels
+do not implement its forward function or gradient, so accepting the slope would
+silently produce incorrect results.
+
+Legacy layer normalization supports only a single normalization node, not fused
+pointwise graphs (including `IDENTITY`, ReLU, and leaky ReLU). These restrictions
+describe the legacy HIP MLops engine, not kernel-ingestor descriptor support.
+
 ## Building
 
 This plugin is built as a standalone project outside of the main hipDNN build. It depends on the hipDNN SDK packages (`hipdnn_data_sdk` and `hipdnn_plugin_sdk`), which must be available on the system before building.

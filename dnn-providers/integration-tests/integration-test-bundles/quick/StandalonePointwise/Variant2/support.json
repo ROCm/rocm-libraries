@@ -1,0 +1,54 @@
+{
+  "claims": {
+    "hipkernel:StandalonePointwise": [
+      {
+        "cases": [
+          "2_2_2_2_3_fp32_ncdhw_axis_tensor_uid0_noelu_alpha_operationgen_index_b84176",
+          "2_2_2_2_3_fp32_ncdhw_axis_tensor_uid0_noelu_alpha_operationgen_index_c77a51",
+          "2_2_2_2_3_fp32_ncdhw_axis_tensor_uid1_noelu_alpha_operationgen_index_09574a",
+          "2_2_2_2_3_fp32_ncdhw_axis_tensor_uid1_noelu_alpha_operationgen_index_95d123",
+          "2_2_2_2_3_fp32_ncdhw_axis_tensor_uid2_noelu_alpha_operationgen_index_33cd86",
+          "2_2_2_2_3_fp32_ncdhw_axis_tensor_uid2_noelu_alpha_operationgen_index_624247",
+          "2_2_2_2_3_fp32_ncdhw_axis_tensor_uid3_noelu_alpha_operationgen_index_581010",
+          "2_2_2_2_3_fp32_ncdhw_axis_tensor_uid3_noelu_alpha_operationgen_index_df3f55",
+          "2_2_2_2_3_fp32_ncdhw_axis_tensor_uid4_noelu_alpha_operationgen_index_9d8eca",
+          "2_2_2_2_3_fp32_ncdhw_axis_tensor_uid4_noelu_alpha_operationgen_index_a39505",
+          "2_2_2_2_3_fp32_ncdhw_noaxis_tensor_uid_noelu_alpha_operationidentity",
+          "2_2_2_2_3_fp32_ncdhw_noaxis_tensor_uid_noelu_alpha_operationrelu_fwd",
+          "2_2_2_3_fp32_nchw_axis_tensor_uid3_noelu_alpha_operationgen_index_601ef1",
+          "2_2_2_3_fp32_nchw_axis_tensor_uid3_noelu_alpha_operationgen_index_b3471b",
+          "2_2_2_3_fp32_nchw_noaxis_tensor_uid_noelu_alpha_operationrelu_fwd",
+          "2_2_2_3_fp32_nchw_noaxis_tensor_uid_noelu_alpha_operationsoftplus_fwd",
+          "2_2_3_bfp16_ncl_noaxis_tensor_uid_elu_alpha1p75_operationelu_fwd",
+          "2_2_3_fp32_ncl_axis_tensor_uid2_noelu_alpha_operationgen_index_3aff6c",
+          "2_2_3_fp32_ncl_axis_tensor_uid2_noelu_alpha_operationgen_index_423ee6",
+          "2_2_3_fp32_ncl_noaxis_tensor_uid_noelu_alpha_operationrelu_fwd",
+          "2_3_fp16_noaxis_tensor_uid_noelu_alpha_operationswish_fwd",
+          "2_3_fp32_axis_tensor_uid1_noelu_alpha_operationgen_index_838259",
+          "2_3_fp32_axis_tensor_uid1_noelu_alpha_operationgen_index_e223fe",
+          "2_3_fp32_noaxis_tensor_uid_noelu_alpha_operationrelu_fwd",
+          "3_fp32_axis_tensor_uid0_noelu_alpha_operationgen_index_269ab8",
+          "3_fp32_axis_tensor_uid0_noelu_alpha_operationgen_index_5a1d92",
+          "3_fp32_noaxis_tensor_uid_elu_alpha1p75_operationelu_fwd",
+          "3_fp32_noaxis_tensor_uid_noelu_alpha_operationabs",
+          "3_fp32_noaxis_tensor_uid_noelu_alpha_operationgelu_approx_tanh_fwd",
+          "3_fp32_noaxis_tensor_uid_noelu_alpha_operationgelu_fwd",
+          "3_fp32_noaxis_tensor_uid_noelu_alpha_operationidentity",
+          "3_fp32_noaxis_tensor_uid_noelu_alpha_operationneg",
+          "3_fp32_noaxis_tensor_uid_noelu_alpha_operationrelu_fwd_443b8f",
+          "3_fp32_noaxis_tensor_uid_noelu_alpha_operationrelu_fwd_443b8f_2",
+          "3_fp32_noaxis_tensor_uid_noelu_alpha_operationsigmoid_fwd",
+          "3_fp32_noaxis_tensor_uid_noelu_alpha_operationsoftplus_fwd",
+          "3_fp32_noaxis_tensor_uid_noelu_alpha_operationswish_fwd",
+          "3_fp32_noaxis_tensor_uid_noelu_alpha_operationtanh_fwd"
+        ],
+        "support": {
+          "gfx90a": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

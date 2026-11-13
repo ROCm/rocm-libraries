@@ -1,0 +1,40 @@
+{
+  "claims": {
+    "hipkernel:StandalonePointwise": [
+      {
+        "cases": [
+          "2_4_8_8_fp16_nchw_clamp",
+          "2_4_8_8_fp16_nchw_leaky",
+          "2_4_8_8_fp16_nchw_relu",
+          "2_4_8_8_fp16_nchw_relu6",
+          "2_4_8_8_fp16_nchw_sigmoid",
+          "2_4_8_8_fp16_nchw_tanh",
+          "2_4_8_8_fp16_nhwc_clamp",
+          "2_4_8_8_fp16_nhwc_leaky",
+          "2_4_8_8_fp16_nhwc_relu",
+          "2_4_8_8_fp16_nhwc_relu6",
+          "2_4_8_8_fp16_nhwc_sigmoid",
+          "2_4_8_8_fp16_nhwc_tanh",
+          "2_4_8_8_fp32_nchw_clamp",
+          "2_4_8_8_fp32_nchw_leaky",
+          "2_4_8_8_fp32_nchw_relu",
+          "2_4_8_8_fp32_nchw_relu6",
+          "2_4_8_8_fp32_nchw_sigmoid",
+          "2_4_8_8_fp32_nchw_tanh",
+          "2_4_8_8_fp32_nhwc_clamp",
+          "2_4_8_8_fp32_nhwc_leaky",
+          "2_4_8_8_fp32_nhwc_relu",
+          "2_4_8_8_fp32_nhwc_relu6",
+          "2_4_8_8_fp32_nhwc_sigmoid",
+          "2_4_8_8_fp32_nhwc_tanh"
+        ],
+        "support": {
+          "gfx90a": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

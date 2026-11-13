@@ -1,0 +1,36 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+test_categories:
+  quick:
+    description: "Standalone unary/binary pointwise reference bundles"
+    test_patterns:
+      - "quick_StandalonePointwise*"
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
+  standard:
+    description: "Standalone pointwise quick and standard reference bundles"
+    test_patterns:
+      - "quick_StandalonePointwise*"
+      - "standard_StandalonePointwise*"
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+  comprehensive:
+    description: "Standalone pointwise through comprehensive reference bundles"
+    test_patterns:
+      - "quick_StandalonePointwise*"
+      - "standard_StandalonePointwise*"
+      - "comprehensive_StandalonePointwise*"
+    labels:
+      - "comprehensive"
+      - "nightly"
+  full:
+    description: "All standalone pointwise reference bundles"
+    test_patterns:
+      - "*_StandalonePointwise*"
+    labels:
+      - "full"

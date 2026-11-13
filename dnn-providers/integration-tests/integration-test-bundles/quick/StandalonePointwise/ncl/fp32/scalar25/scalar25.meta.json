@@ -1,0 +1,20 @@
+{
+  "format_version": 1,
+  "generator": "temporary C++ frontend capture driver",
+  "inputs": {
+    "0": {
+      "hi": 1.0,
+      "kind": "free",
+      "lo": -1.0
+    },
+    "1": {
+      "kind": "fixed",
+      "value": 1.25
+    }
+  },
+  "no_gpu_reference": true,
+  "notes": "Scalar25",
+  "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.Scalar25",
+  "seed": 42,
+  "standalone_reason": "round-trip verify failed"
+}

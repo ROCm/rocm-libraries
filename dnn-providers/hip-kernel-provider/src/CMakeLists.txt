@@ -401,6 +401,34 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         message(STATUS "hipdnn_integration_tests not found - skipping external-integration-check")
     endif()
 
+    set(_pointwise_available FALSE)
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+        hkp_product_offers_engine(_pointwise_available "hipkernel:StandalonePointwise")
+    endif()
+    if(_pointwise_available AND TARGET hipdnn_integration_tests)
+        set(_pointwise_external_category_args "")
+        if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
+            list(APPEND _pointwise_external_category_args
+                TEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../hipkernel_StandalonePointwise_test_categories_integration.yaml"
+                INSTALL_TEST_FILE "${HIPKERNELPROVIDER_CTEST_INSTALL_FILE}"
+                TEST_NAME_PREFIX ${PROJECT_NAME}-standalone-pointwise-external-integration
+                ENVIRONMENT ${TEST_ENVIRONMENT}
+                ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+            )
+        endif()
+        add_external_integration_test_target(
+            TARGET_NAME ${PROJECT_NAME}-standalone-pointwise-external-integration-check
+            PLUGIN_TARGET hip_kernel_provider
+            ENGINE_NAME "hipkernel:StandalonePointwise"
+            INSTALL_SUBDIR hip_kernel_provider
+            TEST_CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_StandalonePointwise.toml
+            ${_pointwise_external_category_args}
+        )
+    elseif(HIPDNN_ENABLE_KERNEL_INGESTOR AND NOT _pointwise_available)
+        message(STATUS
+            "hipkernel:StandalonePointwise is not shipped by this descriptor configuration - skipping standalone-pointwise-external-integration-check")
+    endif()
+
     set(_asm_sdpa_external_category_args "")
     if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED AND ENABLE_ASM_SDPA_ENGINE AND HIPDNN_ENABLE_SDPA)
         list(APPEND _asm_sdpa_external_category_args

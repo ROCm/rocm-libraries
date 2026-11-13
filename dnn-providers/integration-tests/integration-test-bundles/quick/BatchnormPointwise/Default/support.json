@@ -48,6 +48,16 @@
             "linux"
           ]
         }
+      },
+      {
+        "cases": [
+          "runtime_epsilon"
+        ],
+        "support": {
+          "gfx90a": [
+            "linux"
+          ]
+        }
       }
     ],
     "MIOPEN_ENGINE": [

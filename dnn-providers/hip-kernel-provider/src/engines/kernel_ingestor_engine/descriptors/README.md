@@ -7,6 +7,7 @@ under `HIPKERNELPROVIDER_ENABLE_TESTS`. It holds the rocKE bundles below, plus
 
 | Bundle | Engine | Native pack |
 |---|---|---|
+| [`hip/standalone_pointwise/`](hip/standalone_pointwise/README.md) | `hipkernel:StandalonePointwise` | `packs/StandalonePointwiseV2Native.cpp` (v1 retained for saved plans) |
 | `rocKE/gfx950_attention_dense/` | `hipkernel:Gfx950AttentionDense` | `packs/Gfx950AttentionDenseNative.cpp` |
 | `rocKE/gfx950_attention_unified_2d/` | `hipkernel:Gfx950AttentionUnified2D` | `packs/Gfx950AttentionUnified2DNative.cpp` |
 | `rocKE/gfx950_attention_unified_3d/` | `hipkernel:Gfx950AttentionUnified3D` | `packs/Gfx950AttentionUnified3DNative.cpp` |
@@ -43,8 +44,9 @@ packs for a build whose GPU targets include one of its arches and that has FlyDS
 enabled (`HIPKERNELPROVIDER_ENABLE_FLYDSL`, OFF by default; TheRock turns it on). The objects and descriptors are
 generated, not hand-written: see `flydsl/REGEN.md` in the provider tree.
 
-For any other build the root has nothing to pack and production packaging is dormant,
-unless the cache variable below is pointed elsewhere.
+The standalone pointwise HIP pack emits one shape-dynamic code object per configured
+architecture, so production packaging remains active without rocKE or FlyDSL unless
+the cache variable below points at a different source root.
 
 ## Authoring a bundle
 

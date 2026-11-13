@@ -1,0 +1,2269 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "3_fp32_noaxis_tensor_uid_noelu_alpha_operationabs",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": null,
+          "elu_alpha": null,
+          "operation": "abs",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "Abs",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.Abs",
+        "seed": 42
+      }
+    },
+    {
+      "id": "3_fp32_noaxis_tensor_uid_noelu_alpha_operationgelu_fwd",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": null,
+          "elu_alpha": null,
+          "operation": "gelu_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "Gelu",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.Gelu",
+        "seed": 42
+      }
+    },
+    {
+      "id": "3_fp32_noaxis_tensor_uid_noelu_alpha_operationgelu_approx_tanh_fwd",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": null,
+          "elu_alpha": null,
+          "operation": "gelu_approx_tanh_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "GeluTanh",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.GeluTanh",
+        "seed": 42
+      }
+    },
+    {
+      "id": "3_fp32_noaxis_tensor_uid_noelu_alpha_operationidentity",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": null,
+          "elu_alpha": null,
+          "operation": "identity",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "Identity",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.Identity",
+        "seed": 42
+      }
+    },
+    {
+      "id": "3_fp32_noaxis_tensor_uid_noelu_alpha_operationneg",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": null,
+          "elu_alpha": null,
+          "operation": "neg",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "Neg",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.Neg",
+        "seed": 42
+      }
+    },
+    {
+      "id": "3_fp32_noaxis_tensor_uid_noelu_alpha_operationsigmoid_fwd",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": null,
+          "elu_alpha": null,
+          "operation": "sigmoid_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "Sigmoid",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.Sigmoid",
+        "seed": 42
+      }
+    },
+    {
+      "id": "3_fp32_noaxis_tensor_uid_noelu_alpha_operationtanh_fwd",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": null,
+          "elu_alpha": null,
+          "operation": "tanh_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "Tanh",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.Tanh",
+        "seed": 42
+      }
+    },
+    {
+      "id": "2_2_2_2_3_fp32_ncdhw_noaxis_tensor_uid_noelu_alpha_operationidentity",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              216,
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              216,
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": null,
+          "elu_alpha": null,
+          "operation": "identity",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "UnaryFloatBfloat",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.UnaryFloatBfloat",
+        "seed": 42
+      }
+    },
+    {
+      "id": "3_fp32_noaxis_tensor_uid_elu_alpha1p75_operationelu_fwd",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": null,
+          "elu_alpha": 1.75,
+          "operation": "elu_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "Elu",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.Elu",
+        "seed": 42
+      }
+    },
+    {
+      "id": "2_2_2_2_3_fp32_ncdhw_axis_tensor_uid0_noelu_alpha_operationgen_index_b84176",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              216,
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              216,
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": 0,
+          "elu_alpha": null,
+          "operation": "gen_index",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "GenAxis0",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.GenAxis0",
+        "seed": 42
+      }
+    },
+    {
+      "id": "2_2_2_2_3_fp32_ncdhw_axis_tensor_uid1_noelu_alpha_operationgen_index_09574a",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              216,
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              216,
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": 1,
+          "elu_alpha": null,
+          "operation": "gen_index",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "GenAxis1",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.GenAxis1",
+        "seed": 42
+      }
+    },
+    {
+      "id": "2_2_2_2_3_fp32_ncdhw_axis_tensor_uid2_noelu_alpha_operationgen_index_33cd86",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              216,
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              216,
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": 2,
+          "elu_alpha": null,
+          "operation": "gen_index",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "GenAxis2",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.GenAxis2",
+        "seed": 42
+      }
+    },
+    {
+      "id": "2_2_2_2_3_fp32_ncdhw_axis_tensor_uid3_noelu_alpha_operationgen_index_df3f55",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              216,
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              216,
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": 3,
+          "elu_alpha": null,
+          "operation": "gen_index",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "GenAxis3",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.GenAxis3",
+        "seed": 42
+      }
+    },
+    {
+      "id": "3_fp32_axis_tensor_uid0_noelu_alpha_operationgen_index_269ab8",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": 0,
+          "elu_alpha": null,
+          "operation": "gen_index",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "GenIndex1",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.GenIndex1",
+        "seed": 42
+      }
+    },
+    {
+      "id": "2_3_fp32_axis_tensor_uid1_noelu_alpha_operationgen_index_e223fe",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3
+            ],
+            "strides": [
+              8,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3
+            ],
+            "strides": [
+              8,
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": 1,
+          "elu_alpha": null,
+          "operation": "gen_index",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "GenIndex2",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.GenIndex2",
+        "seed": 42
+      }
+    },
+    {
+      "id": "2_2_3_fp32_ncl_axis_tensor_uid2_noelu_alpha_operationgen_index_3aff6c",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": 2,
+          "elu_alpha": null,
+          "operation": "gen_index",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "GenIndex3",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.GenIndex3",
+        "seed": 42
+      }
+    },
+    {
+      "id": "2_2_2_3_fp32_nchw_axis_tensor_uid3_noelu_alpha_operationgen_index_b3471b",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": 3,
+          "elu_alpha": null,
+          "operation": "gen_index",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "GenIndex4",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.GenIndex4",
+        "seed": 42
+      }
+    },
+    {
+      "id": "2_2_2_2_3_fp32_ncdhw_axis_tensor_uid4_noelu_alpha_operationgen_index_a39505",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              216,
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              216,
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": 4,
+          "elu_alpha": null,
+          "operation": "gen_index",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "GenIndex5",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.GenIndex5",
+        "seed": 42
+      }
+    },
+    {
+      "id": "3_fp32_axis_tensor_uid0_noelu_alpha_operationgen_index_5a1d92",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "int32"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": 0,
+          "elu_alpha": null,
+          "operation": "gen_index",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "GenIndexInt1",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.GenIndexInt1",
+        "seed": 42
+      }
+    },
+    {
+      "id": "2_3_fp32_axis_tensor_uid1_noelu_alpha_operationgen_index_838259",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3
+            ],
+            "strides": [
+              8,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3
+            ],
+            "strides": [
+              8,
+              2
+            ],
+            "data_type": "int32"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": 1,
+          "elu_alpha": null,
+          "operation": "gen_index",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "GenIndexInt2",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.GenIndexInt2",
+        "seed": 42
+      }
+    },
+    {
+      "id": "2_2_3_fp32_ncl_axis_tensor_uid2_noelu_alpha_operationgen_index_423ee6",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              24,
+              8,
+              2
+            ],
+            "data_type": "int32"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": 2,
+          "elu_alpha": null,
+          "operation": "gen_index",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "GenIndexInt3",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.GenIndexInt3",
+        "seed": 42
+      }
+    },
+    {
+      "id": "2_2_2_3_fp32_nchw_axis_tensor_uid3_noelu_alpha_operationgen_index_601ef1",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "int32"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": 3,
+          "elu_alpha": null,
+          "operation": "gen_index",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "GenIndexInt4",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.GenIndexInt4",
+        "seed": 42
+      }
+    },
+    {
+      "id": "2_2_2_2_3_fp32_ncdhw_axis_tensor_uid4_noelu_alpha_operationgen_index_9d8eca",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              216,
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              216,
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "int32"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": 4,
+          "elu_alpha": null,
+          "operation": "gen_index",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "GenIndexInt5",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.GenIndexInt5",
+        "seed": 42
+      }
+    },
+    {
+      "id": "2_2_2_2_3_fp32_ncdhw_axis_tensor_uid0_noelu_alpha_operationgen_index_c77a51",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              216,
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              216,
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "int32"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": 0,
+          "elu_alpha": null,
+          "operation": "gen_index",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "GenIntAxis0",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.GenIntAxis0",
+        "seed": 42
+      }
+    },
+    {
+      "id": "2_2_2_2_3_fp32_ncdhw_axis_tensor_uid1_noelu_alpha_operationgen_index_95d123",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              216,
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              216,
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "int32"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": 1,
+          "elu_alpha": null,
+          "operation": "gen_index",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "GenIntAxis1",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.GenIntAxis1",
+        "seed": 42
+      }
+    },
+    {
+      "id": "2_2_2_2_3_fp32_ncdhw_axis_tensor_uid2_noelu_alpha_operationgen_index_624247",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              216,
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              216,
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "int32"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": 2,
+          "elu_alpha": null,
+          "operation": "gen_index",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "GenIntAxis2",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.GenIntAxis2",
+        "seed": 42
+      }
+    },
+    {
+      "id": "2_2_2_2_3_fp32_ncdhw_axis_tensor_uid3_noelu_alpha_operationgen_index_581010",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              216,
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              216,
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "int32"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": 3,
+          "elu_alpha": null,
+          "operation": "gen_index",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "GenIntAxis3",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.GenIntAxis3",
+        "seed": 42
+      }
+    },
+    {
+      "id": "3_fp32_noaxis_tensor_uid_noelu_alpha_operationrelu_fwd_443b8f",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": null,
+          "elu_alpha": null,
+          "operation": "relu_fwd",
+          "relu_lower_clip": -0.25,
+          "relu_lower_clip_slope": 0.30000001192092896,
+          "relu_upper_clip": 0.5,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "Rank1",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.Rank1",
+        "seed": 42
+      }
+    },
+    {
+      "id": "2_3_fp32_noaxis_tensor_uid_noelu_alpha_operationrelu_fwd",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3
+            ],
+            "strides": [
+              8,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3
+            ],
+            "strides": [
+              8,
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": null,
+          "elu_alpha": null,
+          "operation": "relu_fwd",
+          "relu_lower_clip": -0.25,
+          "relu_lower_clip_slope": 0.30000001192092896,
+          "relu_upper_clip": 0.5,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "Rank2",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.Rank2",
+        "seed": 42
+      }
+    },
+    {
+      "id": "2_2_3_fp32_ncl_noaxis_tensor_uid_noelu_alpha_operationrelu_fwd",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": null,
+          "elu_alpha": null,
+          "operation": "relu_fwd",
+          "relu_lower_clip": -0.25,
+          "relu_lower_clip_slope": 0.30000001192092896,
+          "relu_upper_clip": 0.5,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "Rank3",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.Rank3",
+        "seed": 42
+      }
+    },
+    {
+      "id": "2_2_2_3_fp32_nchw_noaxis_tensor_uid_noelu_alpha_operationrelu_fwd",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": null,
+          "elu_alpha": null,
+          "operation": "relu_fwd",
+          "relu_lower_clip": -0.25,
+          "relu_lower_clip_slope": 0.30000001192092896,
+          "relu_upper_clip": 0.5,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "Rank4",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.Rank4",
+        "seed": 42
+      }
+    },
+    {
+      "id": "2_2_2_2_3_fp32_ncdhw_noaxis_tensor_uid_noelu_alpha_operationrelu_fwd",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              216,
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              216,
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": null,
+          "elu_alpha": null,
+          "operation": "relu_fwd",
+          "relu_lower_clip": -0.25,
+          "relu_lower_clip_slope": 0.30000001192092896,
+          "relu_upper_clip": 0.5,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "Rank5",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.Rank5",
+        "seed": 42
+      }
+    },
+    {
+      "id": "3_fp32_noaxis_tensor_uid_noelu_alpha_operationrelu_fwd_443b8f_2",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": null,
+          "elu_alpha": null,
+          "operation": "relu_fwd",
+          "relu_lower_clip": -0.25,
+          "relu_lower_clip_slope": 0.30000001192092896,
+          "relu_upper_clip": 0.5,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "Relu",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.Relu",
+        "seed": 42
+      }
+    },
+    {
+      "id": "3_fp32_noaxis_tensor_uid_noelu_alpha_operationsoftplus_fwd",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": null,
+          "elu_alpha": null,
+          "operation": "softplus_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": 1.5,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "Softplus",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.Softplus",
+        "seed": 42
+      }
+    },
+    {
+      "id": "3_fp32_noaxis_tensor_uid_noelu_alpha_operationswish_fwd",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              3
+            ],
+            "strides": [
+              2
+            ],
+            "data_type": "float"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": null,
+          "elu_alpha": null,
+          "operation": "swish_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": 2.25
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "Swish",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.Swish",
+        "seed": 42
+      }
+    },
+    {
+      "id": "2_2_3_bfp16_ncl_noaxis_tensor_uid_elu_alpha1p75_operationelu_fwd",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              24,
+              8,
+              2
+            ],
+            "data_type": "bfloat16"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              24,
+              8,
+              2
+            ],
+            "data_type": "bfloat16"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": null,
+          "elu_alpha": 1.75,
+          "operation": "elu_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "UnaryBfloat",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.UnaryBfloat",
+        "seed": 42
+      }
+    },
+    {
+      "id": "2_2_2_3_fp32_nchw_noaxis_tensor_uid_noelu_alpha_operationsoftplus_fwd",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "float"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              2,
+              2,
+              3
+            ],
+            "strides": [
+              72,
+              24,
+              8,
+              2
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": null,
+          "elu_alpha": null,
+          "operation": "softplus_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": 1.5,
+          "swish_beta": null
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "UnaryFloatHalf",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.UnaryFloatHalf",
+        "seed": 42
+      }
+    },
+    {
+      "id": "2_3_fp16_noaxis_tensor_uid_noelu_alpha_operationswish_fwd",
+      "values": {
+        "tensors": [
+          {
+            "uid": 0,
+            "dims": [
+              2,
+              3
+            ],
+            "strides": [
+              8,
+              2
+            ],
+            "data_type": "half"
+          },
+          {
+            "uid": 1,
+            "dims": [
+              2,
+              3
+            ],
+            "strides": [
+              8,
+              2
+            ],
+            "data_type": "half"
+          }
+        ],
+        "attributes": {
+          "axis_tensor_uid": null,
+          "elu_alpha": null,
+          "operation": "swish_fwd",
+          "relu_lower_clip": null,
+          "relu_lower_clip_slope": null,
+          "relu_upper_clip": null,
+          "softplus_beta": null,
+          "swish_beta": 2.25
+        }
+      },
+      "metadata": {
+        "format_version": 1,
+        "generator": "temporary C++ frontend capture driver",
+        "inputs": {
+          "0": {
+            "hi": 1.0,
+            "kind": "free",
+            "lo": -1.0
+          }
+        },
+        "no_gpu_reference": true,
+        "notes": "UnaryHalf",
+        "reference_source": "c++ integration suite: Smoke/StandalonePointwiseFrontendCapture.UnaryHalf",
+        "seed": 42
+      }
+    }
+  ]
+}

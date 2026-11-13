@@ -47,6 +47,28 @@ TEST(TestRMSnormBwdParams, ConstructsFromDoubleNodeGraph)
     EXPECT_NO_THROW(const RMSnormBwdParams params(attrBwd, attrActivation, graph.getTensorMap()));
 }
 
+TEST(TestRMSnormBwdParams, ConstructsFromUnaryIdentityGraph)
+{
+    auto original = hipdnn_test_sdk::utilities::createValidRMSNormBwdActivationGraph();
+    auto nativeGraph
+        = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(original.GetBufferPointer());
+    auto* activation = nativeGraph->nodes[0]->attributes.AsPointwiseAttributes();
+    activation->operation = hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::IDENTITY;
+    activation->in_1_tensor_uid = flatbuffers::nullopt;
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(builder, nativeGraph.get()));
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+    const RMSnormBwdParams params(*graph.getNode(1).attributes_as_RMSNormBackwardAttributes(),
+                                  *graph.getNode(0).attributes_as_PointwiseAttributes(),
+                                  graph.getTensorMap());
+
+    EXPECT_TRUE(params.optActivation().has_value());
+    EXPECT_EQ(params.y(), params.x());
+    EXPECT_EQ(params.dy()->uid(),
+              graph.getNode(0).attributes_as_PointwiseAttributes()->in_0_tensor_uid());
+}
+
 TEST(TestRMSnormBwdParams, HasCorrectTensorPointersWithOptionalAttributesForSingleNodeGraph)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidRMSNormBwdGraph(

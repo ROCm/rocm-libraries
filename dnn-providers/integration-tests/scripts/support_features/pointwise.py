@@ -183,6 +183,8 @@ def extract(node: dict, tensors_by_uid: dict) -> set[str]:
         raise FeatureError(f"in_0 dtype {ins[0].get('data_type')!r} is not catalogued")
     port_dtypes = {dtype_label(t.get("data_type")) for t in ins[1:] + [out]}
     stray = port_dtypes - set(_PORT_DTYPES)
+    if mode == "gen_index" and dtype_label(out.get("data_type")) == "int32":
+        stray.discard("int32")
     if stray:
         raise FeatureError(f"port dtype(s) {sorted(stray)} are not catalogued")
 
