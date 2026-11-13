@@ -481,7 +481,7 @@ else()
          "add_test(rocke_library_gdn_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_GDN_TESTS} -v -rs --timeout=60)\n")
   string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
          "set_tests_properties(rocke_library_gdn_pytest PROPERTIES\n"
-         "  LABELS \"ckc\\;python\\;gdn\\;host\\;quick\"\n"
+         "  LABELS \"ckc\\;python\\;gdn\\;host\\;standard\"\n"
          "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
          "  TIMEOUT 600)\n")
 endif()
