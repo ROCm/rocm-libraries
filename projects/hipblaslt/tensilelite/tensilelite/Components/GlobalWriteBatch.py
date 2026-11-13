@@ -1218,9 +1218,10 @@ class GlobalWriteBatchWriter:
     else:
       module.addComment2(commentStr)
 
-    if self.tdmStoreLoadC and self.batchIdx == 0:
+    if self.tdmStoreLdsBase is not None and self.batchIdx == 0:
       module.add(emitTDMStoreSetup(self))
-      module.add(emitTDMStoreLoadC(self))
+      if self.tdmStoreLoadC:
+        module.add(emitTDMStoreLoadC(self))
     module.addComment1("calc coords, apply mask, and issue loads (if necessary)")
 
     if self.kernel["BufferStore"] and (self.edge or (self.kernel["NumWaveSplitK"] > 1)):
@@ -2084,8 +2085,6 @@ class GlobalWriteBatchWriter:
     waitCnter = [vlcntTotalIssued, dscntTotalIssued]
     tdmStore = self.tdmStoreLdsBase is not None
     tdmStagedElements = []
-    if tdmStore and self.batchIdx == 0 and not self.tdmStoreLoadC:
-      module.add(emitTDMStoreSetup(self))
     for elementIdx in range(0, len(self.batchElements)):
       element = self.batchElements[elementIdx]
       self._emitPlsinStageBoundary(module, element)
