@@ -667,7 +667,8 @@ Error timeActivePlan(const Session& session, BenchGraph& graph, json& record)
     HIPDNN_CHECK_ERROR(graph.get_workspace_size(workspaceSize));
     record["workspace_bytes"] = workspaceSize;
     HIPDNN_CHECK_ERROR(allocateWorkspace(memory, workspaceSize));
-    const auto& variantPack = memory.variantPack;
+    // execute() takes the pack by non-const reference.
+    auto& variantPack = memory.variantPack;
     void* workspace = memory.workspace;
     const hipStream_t stream = session.stream;
     const hipdnnHandle_t handle = session.handle;
