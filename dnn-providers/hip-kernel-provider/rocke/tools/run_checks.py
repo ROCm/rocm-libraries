@@ -77,8 +77,20 @@ def _library_ir_corpora() -> tuple[Path, ...]:
         "_rocke_library_run_all", LIBRARY_RUN_ALL
     )
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return tuple(module.IR_CORPORA)
+    # Dataclasses and other annotation consumers resolve the defining module
+    # through sys.modules while the file executes. importlib callers own this
+    # registration step; a bare exec_module works only until the loaded runner
+    # defines one of those classes.
+    previous = sys.modules.get(spec.name)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+        return tuple(module.IR_CORPORA)
+    finally:
+        if previous is None:
+            sys.modules.pop(spec.name, None)
+        else:
+            sys.modules[spec.name] = previous
 
 
 STAGES = (

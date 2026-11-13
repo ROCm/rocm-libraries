@@ -101,6 +101,7 @@ from kernels.common.attention_bwd import (
     validate_attn_bwd_spec,
 )
 
+from ._attention_bwd_lds_model import lds_hazards, traced_spec
 from ._attention_bwd_test_utils import distinct_configs, kernel_signature
 from .sdpa.bwd_kernel_cases import config_knobs
 
@@ -873,16 +874,6 @@ def test_ragged_offsets_read_once_and_decoded_in_64_bits(arch):
 # ---------------------------------------------------------------------------
 
 
-_LDS_PREFIXES = ("tile.smem_", "tile.ds_read")
-# CTA-wide barriers that drain LDS: the full one and the LDS-only one (no VMEM
-# drain); both order LDS accesses across waves, which is all this model checks.
-_BARRIERS = ("tile.sync", "tile.sync_lds_only")
-
-
-def _is_lds(op) -> bool:
-    return op.name.startswith(_LDS_PREFIXES) and op.name != "tile.smem_alloc"
-
-
 @cache
 def traced_kernel(arch, cfg, d, dt, var="none"):
     """Build the kernel and tag every LDS access with its view's span.
@@ -893,119 +884,6 @@ def traced_kernel(arch, cfg, d, dt, var="none"):
     reads exactly the cells it wrote: no cross-wave hazard by construction).
     """
     return traced_spec(spec_of(arch, cfg, d, dt, var), arch)
-
-
-def traced_spec(spec, arch, *, structural: bool = False):
-    """:func:`traced_kernel` of any spec. Every LDS op a view method emits is
-    tagged (a vector split at a padded row pitch emits several).
-
-    ``structural``: build without the main kernel's recorded resource
-    refusals (``main_kernel_refusals=False``), for a test of the emission
-    structure of a spec the production compiler refuses on resources; every
-    static rule still applies."""
-    from kernels.common import _attention_bwd_body as body
-    from kernels.common.attention_bwd import _emit_main
-    from kernels.common._attention_bwd_frag import LdsView
-
-    tags, state = {}, {"private": False}
-    orig = {n: getattr(LdsView, n) for n in ("load", "store", "tr16_load")}
-    orig_acc = {n: getattr(body.BwdTileStep, n) for n in ("_load_lds_acc", "_store_lds_acc")}  # fmt: skip
-
-    def tagged(name):
-        def f(self, b, *args, **kw):
-            ops = b._region_stack[-1].ops
-            n0 = len(ops)
-            out = orig[name](self, b, *args, **kw)
-            new = [op for op in ops[n0:] if _is_lds(op)]
-            assert new, [op.name for op in ops[n0:]]
-            hi = self.base + self.rows * self.pitch * self.scale
-            for op in new:
-                tags[id(op)] = (self.base, hi, name == "store", state["private"])
-            return out
-
-        return f
-
-    def private(name):
-        def f(self, *args, **kw):
-            state["private"] = True
-            try:
-                return orig_acc[name](self, *args, **kw)
-            finally:
-                state["private"] = False
-
-        return f
-
-    try:
-        for n in orig:
-            setattr(LdsView, n, tagged(n))
-        for n in orig_acc:
-            setattr(body.BwdTileStep, n, private(n))
-        if structural:
-            kernel = _emit_main(spec, arch, main_kernel_refusals=False)
-        else:
-            kernel = build_attn_bwd_main(spec, arch=arch)
-    finally:
-        for n, f in orig.items():
-            setattr(LdsView, n, f)
-        for n, f in orig_acc.items():
-            setattr(body.BwdTileStep, n, f)
-    return kernel, tags
-
-
-def _events(ops, tags, *, trips, in_branch=False):
-    """Program-order events: ``("sync", None)`` or ``("lds", op)``.
-
-    Every loop body is laid out ``trips`` times (0: the zero-trip path, 2:
-    the wrap from one iteration into the next). Branch bodies are always
-    included; a barrier inside a branch is not counted (not every wave
-    reaches it).
-    """
-    out = []
-    for op in ops:
-        if op.name in _BARRIERS:
-            if not in_branch:
-                out.append(("sync", op))
-        elif _is_lds(op):
-            assert id(op) in tags, "an LDS access outside the LdsView methods"
-            out.append(("lds", op))
-        elif op.name == "scf.for":
-            for _ in range(trips):
-                out += _events(
-                    op.regions[0].ops, tags, trips=trips, in_branch=in_branch
-                )
-        else:
-            for r in op.regions:
-                out += _events(r.ops, tags, trips=trips, in_branch=True)
-    return out
-
-
-def lds_hazards(kernel, tags):
-    """Pairs of LDS accesses that can race across waves.
-
-    Two accesses race when they overlap, no CTA-wide barrier lies between
-    them on some path (zero-trip, or two iterations of each loop), they are
-    not both the lane-private accumulator update, and they are a read and a
-    write, or writes through two different (aliasing) views. Writes through
-    one view are not a race: each thread owns the same cells of a view at
-    every write site (copy chunks by ``tid``, C tiles by lane).
-    """
-    found = []
-    for trips in (0, 2):
-        ev = _events(kernel.body.ops, tags, trips=trips)
-        open_ = []  # accesses since the last barrier
-        for kind, op in ev:
-            if kind == "sync":
-                open_ = []
-                continue
-            lo, hi, st, priv = tags[id(op)]
-            for prev in open_:
-                plo, phi, pst, ppriv = tags[id(prev)]
-                if not (lo < phi and plo < hi) or (priv and ppriv):
-                    continue
-                if (st != pst) or (st and (lo, hi) != (plo, phi)):
-                    found.append((prev.name, plo, op.name, lo, trips))
-            open_.append(op)
-    return found
 
 
 @pytest.mark.parametrize("row", INSTANCES + KNOB_INSTANCES + WIDE_INSTANCES, ids=_ids)
