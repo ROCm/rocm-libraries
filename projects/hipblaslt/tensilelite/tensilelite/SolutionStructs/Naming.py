@@ -350,6 +350,10 @@ def _getName(state, requiredParameters: frozenset, splitGSU: bool, ignoreInterna
     if not state.get("ScalarLoadB", 0):
       requiredParametersTemp.difference_update({"ScalarLoadB", "ScalarLoadBPrefetch"})
 
+    # WorkGroupProcessorMode=-1 (assembler default) is the default; naming it would rename every kernel.
+    if state.get("WorkGroupProcessorMode", -1) == -1:
+      requiredParametersTemp.discard("WorkGroupProcessorMode")
+
     for key in sorted(requiredParametersTemp):
       if key not in state or key == "CustomKernel":
         continue

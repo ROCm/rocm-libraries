@@ -908,6 +908,13 @@ validParameters = { # we need to make sure this matches develop
     # loop (2x FMA issue rate). Source (non-MFMA) f32 kernels on gfx11/gfx12 only; auto-
     # disabled elsewhere (see SolutionStructs.Solution.assignProblemIndependentDerivedParameters).
     "UseDualFMAC": [False, True],
+    # WorkGroupProcessorMode: where the waves of a workgroup may run on RDNA (gfx10+).
+    #   -1: assembler default (workgroup-processor mode)
+    #    0: CU mode: the workgroup stays on one compute unit (two SIMDs)
+    #    1: workgroup-processor mode: the workgroup spreads over the two compute units (four SIMDs)
+    #       of a workgroup processor
+    # Reset to -1 on architectures without workgroup processors.
+    "WorkGroupProcessorMode": [-1, 0, 1],
     # ScalarLoadB: feed the B operand of f32 source/MAC kernels from SGPRs instead of LDS/VGPRs.
     # Each wave loads its (wave-uniform) B elements with s_load into a ring of SGPRs that holds
     # ScalarLoadB summation iterations, and the MACs take B as a scalar operand, so B needs no

@@ -1552,6 +1552,7 @@
     'WorkGroupMapping',
     'WorkGroupMappingXCC',
     'WorkGroupMappingXCCGroup',
+    'WorkGroupProcessorMode',
     'WorkGroupReduction',
     'WorkQueueStealing',
   ])
@@ -3211,6 +3212,15 @@
         1,
       ]),
       'len': 1025,
+      'type': 'list',
+    }),
+    'WorkGroupProcessorMode': dict({
+      'head': list([
+        -1,
+        0,
+        1,
+      ]),
+      'len': 3,
       'type': 'list',
     }),
     'WorkGroupReduction': dict({

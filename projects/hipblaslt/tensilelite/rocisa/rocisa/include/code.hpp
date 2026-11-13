@@ -1351,6 +1351,8 @@ namespace rocisa
         std::array<int, 3> sgprWorkGroup;
         int                vgprWorkItem;
         int                numSgprPreload;
+        // -1: assembler default; 0: CU mode; 1: workgroup-processor mode (RDNA)
+        int                workgroupProcessorMode = -1;
 
         SignatureKernelDescriptor(const std::string&        name,
                                   int                       groupSegSize,
@@ -1456,6 +1458,11 @@ namespace rocisa
                     + "\n";
             kStr += kdIndent + ".amdhsa_float_denorm_mode_32 3\n";
             kStr += kdIndent + ".amdhsa_float_denorm_mode_16_64 3\n";
+            if(workgroupProcessorMode >= 0)
+            {
+                kStr += kdIndent + ".amdhsa_workgroup_processor_mode "
+                        + std::to_string(workgroupProcessorMode) + "\n";
+            }
             if(numSgprPreload)
             {
                 // kernArg ptr(2 sgprs) is preloaded in user sgpr, but not counted in preload_length
@@ -1629,6 +1636,11 @@ namespace rocisa
                     const std::optional<std::string>& addrSpaceQual = std::nullopt)
         {
             codeMeta.addArg(name, kind, type, addrSpaceQual);
+        }
+
+        void setWorkgroupProcessorMode(int mode)
+        {
+            kernelDescriptor.workgroupProcessorMode = mode;
         }
 
         void addDescriptionTopic(const std::string& text)

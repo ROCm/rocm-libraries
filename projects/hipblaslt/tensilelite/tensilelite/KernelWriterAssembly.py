@@ -2726,7 +2726,7 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["_ScheduleIterAlg"] == 2 and kernel["CUOccupancy"] < 2:
       verdict = 6
 
-    if self.states.asmCaps["HasWMMA"]:
+    if self.states.asmCaps["HasWMMA"] and kernel.get("WorkGroupProcessorMode", -1) != 0:
       # RDNA: workgroup executes on a WGP (2 CUs, 4 SIMDs)
       physicalMaxVgprPerWGP = self.states.regCaps["PhysicalMaxVgprCU"] * 2
       vgprBudgetPerThread = physicalMaxVgprPerWGP // kernel["NumThreads"]

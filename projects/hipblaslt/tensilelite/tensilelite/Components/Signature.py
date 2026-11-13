@@ -230,6 +230,9 @@ class SignatureDefault(Signature):
                                     vgprWorkItem=0,
                                     flatWorkGroupSize=(kernel["NumThreads"]),
                                     numSgprPreload=writer.states.numSgprPreload)
+        wgpMode = kernel.get("WorkGroupProcessorMode", -1)
+        if wgpMode >= 0:
+            signature.setWorkgroupProcessorMode(wgpMode)
 
        # General Argument info
         signature.addArg(   "Gemm info", SVK.SIG_VALUE, "u32")

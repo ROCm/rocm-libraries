@@ -642,6 +642,7 @@ defaultBenchmarkCommonParameters = [
     {"StoreRemapVectorWidth": [0]},
     {"SourceSwap": [False]},
     {"UseDualFMAC": [False]},
+    {"WorkGroupProcessorMode": [-1]},
     {"ScalarLoadB": [0]},
     {"ScalarLoadBPrefetch": [0]},
     {"StorePriorityOpt": [False]},

@@ -1545,6 +1545,11 @@ class Solution(collections.abc.Mapping):
         or not isaInfoMap[state["ISA"]].asmCaps.get("v_dual_fmac_f32", False)):
       state["UseDualFMAC"] = False
 
+    # Only RDNA (gfx10+) has workgroup processors.
+    if state.get("WorkGroupProcessorMode", -1) != -1 and \
+       (state["KernelLanguage"] != "Assembly" or state["ISA"][0] < 10):
+      state["WorkGroupProcessorMode"] = -1
+
     # Enable UseSubtileImpl on gfx950 and gfx1250; ignore user request on other ISAs.
     isa = tuple(state["ISA"])
     isgfx950 = isa[:2] == (9, 5)

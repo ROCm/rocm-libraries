@@ -129,6 +129,7 @@ def getRequiredParametersMin() -> set:
         'ScheduleGROverBarrier',
         'SourceSwap',
         'UseDualFMAC',
+        'WorkGroupProcessorMode',
         'ScalarLoadB',
         'ScalarLoadBPrefetch',
         'SpaceFillingAlgo',

@@ -417,6 +417,7 @@ void init_code(nb::module_ m)
              nb::arg("kind"),
              nb::arg("type"),
              nb::arg("addrSpaceQual") = std::nullopt)
+        .def("setWorkgroupProcessorMode", &rocisa::SignatureBase::setWorkgroupProcessorMode, nb::arg("mode"))
         .def("addDescriptionTopic", &rocisa::SignatureBase::addDescriptionTopic)
         .def("addDescriptionBlock", &rocisa::SignatureBase::addDescriptionBlock)
         .def("addDescription", &rocisa::SignatureBase::addDescription)
