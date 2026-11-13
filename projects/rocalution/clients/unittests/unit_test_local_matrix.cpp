@@ -617,11 +617,37 @@ TYPED_TEST(local_matrix, allocate_sets_the_format_and_the_sizes)
 
     auto B = empty_local_matrix<T>(this->backend());
     B->AllocateBCSR("B", 3, 2, 3, 3);
-    KNOWN_BUG("AllocateBCSR of a matrix not in BCSR uses block dimension 2");
     EXPECT_EQ(B->GetBlockDimension(), 3);
     EXPECT_EQ(B->GetM(), 6);
     EXPECT_EQ(B->GetN(), 9);
     EXPECT_EQ(B->GetNnz(), 27);
+
+    // A BCSR matrix takes the new block dimension, also without entries
+    B->AllocateBCSR("B", 3, 3, 2, 2);
+    EXPECT_EQ(B->GetBlockDimension(), 2);
+    EXPECT_EQ(B->GetM(), 6);
+    EXPECT_EQ(B->GetN(), 4);
+    EXPECT_EQ(B->GetNnz(), 12);
+    B->AllocateBCSR("B", 0, 2, 2, 3);
+    EXPECT_EQ(B->GetBlockDimension(), 3);
+    EXPECT_EQ(B->GetNnz(), 0);
+    B->ConvertTo(BCSR);
+    EXPECT_EQ(B->GetBlockDimension(), 3);
+
+    // Without entries too, sizes that are not a multiple of the block dimension stay
+    // CSR instead of being padded
+    auto E = empty_local_matrix<T>(this->backend());
+    E->AllocateCSR("E", 0, 4, 4);
+    E->ConvertToBCSR(3);
+    EXPECT_EQ(E->GetFormat(), CSR);
+    EXPECT_EQ(E->GetM(), 4);
+    EXPECT_EQ(E->GetN(), 4);
+    E->ConvertToBCSR(2);
+    EXPECT_EQ(E->GetFormat(), BCSR);
+    EXPECT_EQ(E->GetBlockDimension(), 2);
+    EXPECT_EQ(E->GetM(), 4);
+    EXPECT_EQ(E->GetN(), 4);
+    EXPECT_EQ(backend_of(*E), backend_name(this->backend()));
 }
 
 // Only a GlobalMatrix has a ghost part. As an Operator, a LocalMatrix is all local.
@@ -680,7 +706,9 @@ TEST_P(local_matrix_data_ptr, leave_and_set_data_ptr_hand_over_the_arrays)
             break;
         case BCSR:
         {
-            int blockdim = format().blockdim;
+            // For a BCSR matrix the block dimension is only an output, so another valid
+            // one must not convert it
+            int blockdim = format().blockdim + 1;
             A->LeaveDataPtrBCSR(&row, &col, &val, blockdim);
             EXPECT_EQ(blockdim, format().blockdim);
             B->SetDataPtrBCSR(&row,
@@ -972,11 +1000,14 @@ TEST_P(local_matrix_formats, converts_between_formats_on_its_backend)
         B->ConvertToHYB();
         B->ConvertToBCSR(3);
         expect_matrix(*B, ref, Format{BCSR, 3}, backend());
+
+        // With a block dimension of 1 or less, a BCSR matrix keeps its own
+        B->ConvertTo(BCSR);
+        B->ConvertTo(BCSR, 0);
+        B->ConvertToBCSR(1);
+        expect_matrix(*B, ref, Format{BCSR, 3}, backend());
+
         B->ConvertTo(format().id, format().blockdim);
-        if(is(BCSR))
-        {
-            KNOWN_BUG("ConvertTo keeps the block dimension of a BCSR matrix");
-        }
         expect_kept(*B, ref);
     });
 }
@@ -1474,11 +1505,6 @@ TEST_P(local_matrix_formats, lu_factorizations_solve_a_banded_system)
             {
                 killed.push_back(
                     {"the SymbolicPower structure loses its zero entries in DIA and DENSE", k});
-            }
-            else if(name == "ILUpFactorize(1) without levels" && is(BCSR))
-            {
-                killed.push_back(
-                    {"the MatrixAdd fallback converts back to BCSR with block dimension 1", k});
             }
             else
             {
@@ -2082,27 +2108,8 @@ TEST_P(local_matrix_formats, matrix_mult_takes_the_format_of_the_factors)
 
         // The second product goes into a matrix of the same size, which MatrixMult
         // clears first
-        auto multiply_twice = [&] {
-            auto C = empty<T>();
-            multiply_into(*C);
-            multiply_into(*C);
-        };
-
-        if(backend() == Backend::Accelerator && is(MCSR))
-        {
-            KNOWN_BUG("HIP MCSR CopyToHost copies the row offsets of an empty matrix from NULL");
-            expect_in_child(multiply_twice);
-            return;
-        }
-
         auto C = empty<T>();
         multiply_into(*C);
-        if(backend() == Backend::Accelerator && is(BCSR))
-        {
-            KNOWN_BUG("BCSR Clear keeps the block counts, so the cleared matrix copies them");
-            expect_in_child(multiply_twice);
-            return;
-        }
         multiply_into(*C);
     });
 }
@@ -2136,21 +2143,16 @@ TEST_P(local_matrix_formats, matrix_add_scales_and_adds)
         // The pattern of the summand is part of the pattern of the matrix
         const Csr<T> part = lower(a, true);
 
-        // A known bug ends the process in every BCSR MatrixAdd
-        if(is(BCSR))
-        {
-            KNOWN_BUG("the MatrixAdd fallback converts back to BCSR with block dimension 1");
-            expect_in_child([&] {
-                add_to(a, 2, b, -1, false);
-                add_to(a, 0.5, c, 3, true);
-            });
-            KNOWN_BUG("MatrixAdd does not scale the entries outside the summand's pattern");
-            expect_in_child([&] { add_to(a, 2, part, 1, false); });
-            return;
-        }
-
         add_to(a, 2, b, -1, false);
         add_to(a, 0.5, c, 3, true);
+
+        // The result keeps the block dimension of the matrix, not the summand's
+        if(is(BCSR))
+        {
+            auto B = make(a);
+            B->MatrixAdd(*make_local_matrix(backend(), b, Format{BCSR, 3}), 2, -1, false);
+            expect_kept(*B, add(a, 2, b, -1), scaled_tol<T>(1e-14));
+        }
 
         auto A = make(a);
         A->MatrixAdd(*make(part), 2.0, 1.0, false);
@@ -2533,45 +2535,23 @@ TEST_P(local_matrix_formats, writes_and_reads_matrix_market_and_csr_files)
 
         const Csr<T> ref = banded<T>();
 
-        auto read_mtx = [&] {
-            const std::string mtx = temp_file("mtx");
-            make(ref)->WriteFileMTX(mtx);
-            auto B = empty<T>();
-            B->ReadFileMTX(mtx);
-            expect_kept(*B, ref);
-            std::remove(mtx.c_str());
-        };
+        const std::string mtx = temp_file("mtx");
+        make(ref)->WriteFileMTX(mtx);
+        auto B = empty<T>();
+        B->ReadFileMTX(mtx);
+        expect_kept(*B, ref);
+        std::remove(mtx.c_str());
 
         // Deprecated, but still part of the interface. The read clears the matrix first.
-        auto read_csr = [&] {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-            const std::string csr = temp_file("csr");
-            make(ref)->WriteFileCSR(csr);
-            auto C = make(spd<T>(4));
-            C->ReadFileCSR(csr);
+        const std::string csr = temp_file("csr");
+        make(ref)->WriteFileCSR(csr);
+        auto C = make(spd<T>(4));
+        C->ReadFileCSR(csr);
 #pragma GCC diagnostic pop
-            expect_kept(*C, ref);
-            std::remove(csr.c_str());
-        };
-
-        // Both reads clear the matrix and then move it to the host, to read it there
-        if(backend() == Backend::Accelerator && is(MCSR))
-        {
-            KNOWN_BUG("HIP MCSR CopyToHost copies the row offsets of an empty matrix from NULL");
-            expect_in_child(read_mtx);
-            expect_in_child(read_csr);
-            return;
-        }
-
-        read_mtx();
-        if(backend() == Backend::Accelerator && is(BCSR))
-        {
-            KNOWN_BUG("BCSR Clear keeps the block counts, so the cleared matrix copies them");
-            expect_in_child(read_csr);
-            return;
-        }
-        read_csr();
+        expect_kept(*C, ref);
+        std::remove(csr.c_str());
     });
 }
 
@@ -2699,6 +2679,35 @@ TEST_P(local_matrix_formats, amg_setup_runs_on_a_csr_copy)
             expect_warning(log, "RSPMISCoarsening");
             EXPECT_EQ(values_of(cf_other), values_of(cf));
             EXPECT_EQ(values_of(S_other), values_of(S));
+        }
+        {
+            SCOPED_TRACE("RSCoarsening");
+            LocalVector<int>  cf_ref, cf_other;
+            LocalVector<bool> S_ref, S_other;
+            like(*RC, cf_ref);
+            like(*RC, S_ref);
+            like(*R, cf_other);
+            like(*R, S_other);
+            RC->RSCoarsening(0.25f, &cf_ref, &S_ref);
+            std::string log = logged([&] { R->RSCoarsening(0.25f, &cf_other, &S_other); });
+            expect_warning(log, "RSCoarsening");
+            EXPECT_EQ(values_of(cf_other), values_of(cf_ref));
+            EXPECT_EQ(values_of(S_other), values_of(S_ref));
+        }
+        {
+            SCOPED_TRACE("AMGPMISAggregate(connections, aggregates)");
+            LocalVector<int> conn, agg_ref, agg_other;
+            like(*C, conn);
+            like(*C, agg_ref);
+            like(*A, agg_other);
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+            C->AMGConnect(T(0.08), &conn);
+            C->AMGPMISAggregate(conn, &agg_ref);
+            std::string log = logged([&] { A->AMGPMISAggregate(conn, &agg_other); });
+#pragma GCC diagnostic pop
+            expect_warning(log, "AMGPMISAggregate");
+            EXPECT_EQ(values_of(agg_other), values_of(agg_ref));
         }
 
         using Interpolation = std::function<void(const LocalMatrix<T>&, LocalMatrix<T>*)>;
@@ -3119,6 +3128,8 @@ TEST(local_matrix_preconditions, violations_end_the_program)
                         "GetFormat");
     EXPECT_ASSERT_DEATH(A->MatrixAdd(*make_local_matrix(Backend::Host, ref, Format{COO, 1})),
                         "GetFormat");
+    EXPECT_ASSERT_DEATH(A->ConvertTo(BCSR), "matrix_format != BCSR");
+    EXPECT_ASSERT_DEATH(E.ConvertTo(BCSR, 0), "matrix_format != BCSR");
     EXPECT_ASSERT_DEATH(A->ILUpFactorize(-1), "p >= 0");
     EXPECT_ASSERT_DEATH(A->FSAI(0, nullptr), "power > 0");
     EXPECT_ASSERT_DEATH(A->ItLSolve(0, 0, false, *y, y.get()), "max_iter > 0");
