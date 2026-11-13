@@ -56,6 +56,16 @@ struct OnlineTunerTestAccess
         return true;
     }
 
+    // Resolves a registered problem as if its candidates had measured samples.
+    static void resolveWith(Tuner& tuner, const Key& key, std::vector<std::vector<float>> samples)
+    {
+        std::unique_lock<std::shared_timed_mutex> lock(tuner.m_mutex);
+
+        auto& state     = tuner.m_problems.at(key);
+        state.m_samples = std::move(samples);
+        tuner.resolve(key, state);
+    }
+
     // Pairs created on a device and not yet retired, pooled or outstanding.
     static int livePairs(const Tuner& tuner, int device)
     {
@@ -72,6 +82,9 @@ namespace
 
     // Small, so a case reaches the cap with a handful of shapes.
     constexpr int kLivePairCap = 16;
+
+    // 0 unless a case sets it before reloadForTest(); the fixture puts it back.
+    int minImprovementPct = 0;
 
     // Host-only cases record no event, so exploration can only end at the visit
     // budget. Bounded well above it, so a tuner that never gives up fails instead of
@@ -163,12 +176,14 @@ namespace
     protected:
         void SetUp() override
         {
+            minImprovementPct = 0;
             tuner().reloadForTest();
             capReports().clear();
         }
 
         void TearDown() override
         {
+            minImprovementPct = 0;
             tuner().reloadForTest();
         }
     };
@@ -231,6 +246,38 @@ namespace
 
         tuner().harvestPending(key);
         EXPECT_EQ(winnerOf(key), -1);
+    }
+
+    // A candidate replaces candidate 0, the heuristic's pick, only if it measured at
+    // least the minimum improvement faster. By default the fastest wins.
+    TEST_F(OnlineTuner, AChallengerMustBeatCandidateZeroByTheMinimumImprovement)
+    {
+        const std::vector<int> ranked{301, 302, 303};
+
+        // Candidate 1 is 2% faster than candidate 0, candidate 2 1% faster.
+        const std::vector<std::vector<float>> close{{100.0f, 104.0f}, {98.0f, 99.0f}, {99.0f}};
+        // Candidate 2 is 5% faster.
+        const std::vector<std::vector<float>> clear{{100.0f}, {98.0f}, {95.0f}};
+
+        const auto winnerFor = [&](const Key& key, const std::vector<std::vector<float>>& samples) {
+            EXPECT_EQ(visit(key, identityOf(key), ranked), 0);
+            OnlineTunerTestAccess::resolveWith(tuner(), key, samples);
+            return winnerOf(key);
+        };
+
+        EXPECT_EQ(winnerFor(keyOf(0x9001), close), 302) << "the fastest did not win by default";
+
+        minImprovementPct = 3;
+        tuner().reloadForTest();
+
+        EXPECT_EQ(winnerFor(keyOf(0x9002), close), 301)
+            << "a candidate less than 3% faster replaced candidate 0";
+        EXPECT_EQ(winnerFor(keyOf(0x9003), clear), 303)
+            << "a candidate 5% faster did not replace candidate 0";
+
+        float us = 0.0f;
+        ASSERT_TRUE(resolved(keyOf(0x9002), nullptr, &us));
+        EXPECT_EQ(us, 100.0f) << "the kept candidate 0 is recorded with another's time";
     }
 
     // Another problem under the key, here beta 1 where the owner runs beta 0, neither
@@ -1127,6 +1174,7 @@ rocblaslt::OnlineTunerConfig rocblaslt::onlineTunerConfig()
     config.repeats     = kRepeats;
     config.livePairCap = kLivePairCap;
 
+    config.minImprovementPct  = minImprovementPct;
     config.livePairCapReached = recordCapReached;
     return config;
 }
