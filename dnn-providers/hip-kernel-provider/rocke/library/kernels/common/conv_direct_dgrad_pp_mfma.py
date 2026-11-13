@@ -199,7 +199,9 @@ def dgrad_pp_mfma_reason(spec: DgradPpMfmaSpec, arch: str = "gfx950") -> "str | 
     if p.dtype not in ("fp16", "bf16"):
         return "fp16/bf16 only"
     ab = "bf16" if p.dtype == "bf16" else "f16"
-    if not target.mma.has_shape(a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32):
+    if not target.mma.has_shape(
+        a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=32
+    ):
         return f"missing mfma_f32_16x16x32_{ab} on {arch}"
     why = problem_dims_reason(p)
     if why is not None:
