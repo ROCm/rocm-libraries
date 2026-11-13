@@ -56,22 +56,18 @@ import collections
 import json
 import multiprocessing
 import os
-import re
 import sys
-import uuid
 from pathlib import Path
 
 import conv_aot_common as _common
 
-#: Namespace for kernel UUIDs derived from an instance_id (uuid5).
-INSTANCE_UUID_NAMESPACE = uuid.UUID("6b0d3b8e-6a58-5d0f-9f43-3c6f5f2a9c11")
+INSTANCE_UUID_NAMESPACE = _common.INSTANCE_UUID_NAMESPACE
 
 #: The shipped engine. Its native symbols are the ones every bundle this tool emits
 #: names; another engine name (a test-only subset of the catalog) borrows them.
 PRODUCT_ENGINE = "hipkernel:Gfx950ConvFwdAot"
 
-#: A UUID as ``str(uuid.UUID)`` spells it: the form of every generated kernel id.
-_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+_UUID = _common._UUID
 
 #: Identity fields the packaged forward launch takes from the identity
 #: (``AOT_IMPLICIT_GEMM_CARRIED`` of the rocKE adapter). Every other field must hold
@@ -286,11 +282,7 @@ SPLIT_C_LAUNCHES = {
 }
 
 
-def _bind_rocke(rocke_root: Path) -> None:
-    for sub in ("platform/python", "library"):
-        path = str((rocke_root / sub).resolve())
-        if path not in sys.path:
-            sys.path.insert(0, path)
+_bind_rocke = _common.bind_rocke
 
 
 def spec_order(spec) -> tuple:
@@ -335,27 +327,8 @@ def instance_specs(identities: list, jobs: int = 1) -> list:
         return pool.map(instance_spec, identities, chunksize=chunk)
 
 
-def _variant(name: str, order: tuple, specs: list) -> dict:
-    shapes = []
-    for spec in specs:
-        shape = {field: getattr(spec, field) for field in order}
-        shape["knobs"] = "instance"
-        shapes.append(shape)
-    return {
-        "name": name,
-        "metadata": list(order),
-        "spec_order": list(order),
-        "spec_defaults": {},
-        "knob_sets": {"instance": [{}]},
-        "shapes": shapes,
-    }
-
-
-def engine_slug(engine_name: str) -> str:
-    """The generator's slug for ``engine_name`` (``hipkernel:Gfx950ConvFwdAot`` ->
-    ``gfx950_conv_fwd_aot``)."""
-    local_name = engine_name.split(":", 1)[1]
-    return re.sub(r"(?<!^)(?=[A-Z])", "_", local_name).lower()
+_variant = _common.variant
+engine_slug = _common.engine_slug
 
 
 #: The shipped engine's dotted native-symbol namespace (``hipkernel.gfx950_conv_fwd_aot``):
@@ -518,67 +491,17 @@ dump_config = _common.dump_config
 def stabilize_ids(
     kdp_path: Path, engine_name: str = PRODUCT_ENGINE, product: str = PRODUCT_ENGINE
 ) -> int:
-    """Re-derive every kernel UUID of one KDP from its instance_id; returns the count.
-
-    A kernel id found anywhere else in the file is referenced, and is refused.
-    Every UUID in the text is counted in one pass and all kernel ids are then
-    substituted in another, so the cost stays linear in the size of the file.
-    ``product`` is :data:`PRODUCT_ENGINE` for this tool's own catalog; another
-    tool sharing this helper (:mod:`make_conv_dgrad_aot_config`) passes its own
-    shipped engine name, so ``engine_name == product`` there, not here.
-    """
-    text = kdp_path.read_text()
-    kernels = list(_kernels(json.loads(text)))
-    counts = collections.Counter(_UUID.findall(text))
-    new_ids = {}
-    for kernel in kernels:
-        old_id = kernel["id"]
-        if not _UUID.fullmatch(old_id):
-            raise SystemExit(f"kernel id {old_id!r} in {kdp_path} is not a UUID")
-        if counts[old_id] != 1:
-            raise SystemExit(
-                f"kernel id {old_id} appears {counts[old_id]} times in "
-                f"{kdp_path}; refusing to rewrite a referenced id"
-            )
-        new_ids[old_id] = kernel_uuid(
-            kernel["metadata"]["instance_id"], engine_name, product
-        )
-    kdp_path.write_text(
-        _UUID.sub(lambda match: new_ids.get(match.group(0), match.group(0)), text)
-    )
-    return len(kernels)
+    """:func:`conv_aot_common.stabilize_ids` with :data:`PRODUCT_ENGINE` as the
+    default for both arguments."""
+    return _common.stabilize_ids(kdp_path, engine_name, product)
 
 
 def kernel_uuid(
     instance_id: str, engine_name: str = PRODUCT_ENGINE, product: str = PRODUCT_ENGINE
 ) -> str:
-    """The kernel UUID an instance is shipped under by ``engine_name``.
-
-    The shipped engine's ids are uuid5 of the instance_id. Any other engine derives
-    them under a namespace of its own name, so an instance it shares with the shipped
-    catalog never carries the same kernel id into one process twice. ``product`` is
-    the shipped engine to compare ``engine_name`` against: :data:`PRODUCT_ENGINE` for
-    this tool's own catalog, or another tool's own product when it shares this
-    helper.
-    """
-    namespace = INSTANCE_UUID_NAMESPACE
-    if engine_name != product:
-        namespace = uuid.uuid5(INSTANCE_UUID_NAMESPACE, engine_name)
-    return str(uuid.uuid5(namespace, instance_id))
-
-
-def _kernels(node):
-    if isinstance(node, dict):
-        # A multi-launch (split-C) kernel carries ``sources`` instead.
-        source = node.get("kernel_source", node.get("sources"))
-        if isinstance(source, dict) and "metadata" in node:
-            yield node
-            return
-        for value in node.values():
-            yield from _kernels(value)
-    elif isinstance(node, list):
-        for value in node:
-            yield from _kernels(value)
+    """:func:`conv_aot_common.kernel_uuid` with :data:`PRODUCT_ENGINE` as the
+    default for both arguments."""
+    return _common.kernel_uuid(instance_id, engine_name, product)
 
 
 def main(argv=None) -> int:

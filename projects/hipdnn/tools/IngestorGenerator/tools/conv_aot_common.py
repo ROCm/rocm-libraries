@@ -272,7 +272,9 @@ def stabilize_ids(kdp_path: Path, engine_name: str, product_engine: str) -> int:
 
 def _kernels(node):
     if isinstance(node, dict):
-        if isinstance(node.get("kernel_source"), dict) and "metadata" in node:
+        # A multi-launch (split-C) kernel carries ``sources`` instead.
+        source = node.get("kernel_source", node.get("sources"))
+        if isinstance(source, dict) and "metadata" in node:
             yield node
             return
         for value in node.values():
