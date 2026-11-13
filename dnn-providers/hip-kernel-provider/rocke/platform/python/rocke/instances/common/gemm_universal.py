@@ -354,6 +354,10 @@ class TraitSpec:
     # coordinates, select bounded buffer loads once per workgroup (auto),
     # and retain full-width input/output addressing for larger spans.
     global_addressing: Literal["legacy", "auto", "global64"] = "legacy"
+    # direct_a only: the kernel takes the row strides of A and B, in elements,
+    # as two more arguments (``lda``, ``ldb``) after K. Off, both operands are
+    # packed (row stride K) and the signature is unchanged.
+    row_strides: bool = False
 
 
 @dataclass(frozen=True)
@@ -448,6 +452,7 @@ class UniversalGemmSpec(WarpTileBlockSizeMixin):
                 f"c{self.data.dtype_c}": self.data.dtype_c != self.data.dtype_a,
                 "db1wg": tr.lds_db_allow_1wg,
                 f"addr_{tr.global_addressing}": tr.global_addressing != "legacy",
+                "ld": tr.row_strides,
             },
         )
 
@@ -718,6 +723,8 @@ def is_valid_spec(spec: UniversalGemmSpec, arch: str = "gfx950") -> Tuple[bool, 
         from .gemm_direct_a import is_valid_direct_a_spec
 
         return is_valid_direct_a_spec(spec, arch)
+    if spec.trait.row_strides:
+        return False, "row_strides needs the direct_a pipeline"
 
     t = spec.tile
     if spec.trait.global_addressing not in ("legacy", "auto", "global64"):
@@ -1187,6 +1194,22 @@ def _emit_zero_acc(b: IRBuilder, spec: UniversalGemmSpec) -> Value:
     return b.zero_vec_f32(c_per)
 
 
+def wmma_lds_swizzle_row_shift(row_bytes: int) -> int:
+    """Row shift of the LDS XOR swizzle key for 16-byte accesses on gfx1201.
+
+    A 16-byte LDS access is served eight lanes at a time, and two of those
+    lanes conflict when their addresses agree modulo 128 bytes (the gfx1201
+    profile of ``rocke.analysis.lds``). The eight lanes read eight consecutive
+    rows at one column. Rows inside one 128-byte window already differ, so
+    they share a key and consecutive windows take consecutive keys:
+    ``row >> log2(128 / row_bytes)``. A row of 128 bytes or more, or one that
+    does not divide 128, keys on the row itself.
+    """
+    if row_bytes <= 0 or row_bytes >= 128 or 128 % row_bytes:
+        return 0
+    return (128 // row_bytes).bit_length() - 1
+
+
 def _atom_frag_lengths(op) -> Tuple[int, int, int]:
     """Return the per-lane ``(src0, src1, dst)`` fragment lengths of the
     resolved :class:`~rocke.core.arch.MmaOp`.
@@ -1581,6 +1604,17 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
     _auto_w = _ilog2(_swz_slots)
     if _auto_l is not None and _auto_w is not None:
         _def_r, _def_w, _def_l = 0, _auto_w, _auto_l
+        if (
+            _SWZ
+            and arch == "gfx1201"
+            and _swz_elem == 8
+            and spec.data.dtype_a in ("fp16", "f16", "bf16")
+        ):
+            # 16-byte chunks on gfx1201: key on the 128-byte window, not the row.
+            _row_elems = block_k + (
+                0 if spec.trait.direct_to_lds else spec.trait.lds_k_pad
+            )
+            _def_r = wmma_lds_swizzle_row_shift(2 * _row_elems)
     else:
         _def_r, _def_w, _def_l = 3, 1, 4
     _swz_r = int(_os.environ.get("CK_SWZ_R", str(_def_r)))

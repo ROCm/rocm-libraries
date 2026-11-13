@@ -134,7 +134,11 @@ def _cluster_fields(artifact: KernelArtifact) -> Dict[str, List[int]]:
 
 
 def gemm_args_signature(
-    *, with_bytes: bool = False, dtype: str = "fp16", c_dtype: Optional[str] = None
+    *,
+    with_bytes: bool = False,
+    dtype: str = "fp16",
+    c_dtype: Optional[str] = None,
+    row_strides: bool = False,
 ) -> List[Dict[str, Any]]:
     """Standard GEMM kernel args signature: A, B, C ptrs + M, N, K i32s.
 
@@ -147,6 +151,9 @@ def gemm_args_signature(
     `dtype`. They differ for the 8-bit GEMMs, whose operands are fp8/bf8
     but whose output is bf16 — an fp8 C would quantize the result to ~2
     decimal digits for no bandwidth win worth having.
+
+    `row_strides=True` appends the A and B row strides in elements (`lda`,
+    `ldb`), the signature of a GEMM built with `TraitSpec.row_strides`.
     """
     _dtype_map = {
         "fp16": "f16",
@@ -181,6 +188,11 @@ def gemm_args_signature(
             {"name": "M", "type": "i32", "size_bytes": 4},
             {"name": "N", "type": "i32", "size_bytes": 4},
             {"name": "K", "type": "i32", "size_bytes": 4},
+        ]
+    if row_strides:
+        sig += [
+            {"name": "lda", "type": "i32", "size_bytes": 4},
+            {"name": "ldb", "type": "i32", "size_bytes": 4},
         ]
     return sig
 

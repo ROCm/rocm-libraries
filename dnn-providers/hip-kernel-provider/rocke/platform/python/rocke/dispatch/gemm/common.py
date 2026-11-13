@@ -33,6 +33,18 @@ class GemmRequest(OperatorRequest):
     trans_b: bool = True
     algorithm: str = "auto"
     spec_id: str = "auto"
+    # Row strides of A and B in elements. 0 is packed (the stride is K); any
+    # other value needs a candidate whose kernel takes row strides.
+    lda: int = 0
+    ldb: int = 0
+
+    def row_strides(self) -> tuple[int, int]:
+        """The A and B row strides in elements, with 0 resolved to K."""
+        return int(self.lda) or int(self.K), int(self.ldb) or int(self.K)
+
+    def packed(self) -> bool:
+        """Whether A and B are both packed (row stride K)."""
+        return self.row_strides() == (int(self.K), int(self.K))
 
     def normalized(self) -> dict:
         d = asdict(self)
@@ -40,6 +52,10 @@ class GemmRequest(OperatorRequest):
         d["layout"] = self.layout.upper()
         d["algorithm"] = normalize_selector(self.algorithm)
         d["spec_id"] = normalize_selector(self.spec_id)
+        # A packed request is the same request however its stride is spelled,
+        # and keeps the identity it had before requests carried strides.
+        if self.packed():
+            del d["lda"], d["ldb"]
         return d
 
     def dims(self) -> dict[str, int]:
@@ -80,6 +96,9 @@ def basic_gemm_request_errors(req: OperatorRequest) -> list[str]:
     for field in ("M", "N", "K"):
         if int(getattr(req, field)) <= 0:
             errors.append(f"{field} must be positive")
+    for field, stride in zip(("lda", "ldb"), req.row_strides()):
+        if stride < int(req.K):
+            errors.append(f"{field} must be 0 (packed) or at least K")
     try:
         ArchTarget.from_gfx(req.arch)
     except KeyError as e:

@@ -973,15 +973,16 @@ typedef struct rocke_direct_a_ctx
     rocke_ir_builder_t* b;
     const rocke_gemm_universal_spec_t* spec;
     const rocke_mmaop_t* op;
-    int mm, nn, nk, slots;
+    int mm, nn, nk, slots, swizzle_shift;
     bool local_prefetch;
     bool c_f32;
+    bool one_b_col;
     const rocke_type_t* ab_type;
     const rocke_type_t* c_type;
-    rocke_value_t *zero, *two, *c_bytes, *M, *N, *K;
+    rocke_value_t *zero, *two, *c_bytes, *far, *M, *N, *K, *lda, *ldb;
     rocke_value_t *a_rsrc, *b_rsrc, *c_rsrc, *b_smem;
-    rocke_value_t *b_k, *b_col, *stagger, *oob;
-    std::vector<rocke_value_t*> a_base, b_base, b_dest_row, b_dest_col;
+    rocke_value_t *b_k, *b_col, *stagger, *k_wrap, *oob;
+    std::vector<rocke_value_t*> a_base, b_base, b_cols, b_dest_row, b_dest_col;
 } rocke_direct_a_ctx_t;
 
 static rocke_value_t*
@@ -992,8 +993,14 @@ static rocke_value_t*
     {
         return col;
     }
+    rocke_value_t* key = row;
+    if(c->swizzle_shift != 0)
+    {
+        rocke_value_t* c_shift = rocke_b_const_i32(b, c->swizzle_shift);
+        key = rocke_b_lshr(b, row, c_shift);
+    }
     rocke_value_t* c_slots = rocke_b_const_i32(b, c->slots);
-    rocke_value_t* slot = rocke_b_mod(b, row, c_slots);
+    rocke_value_t* slot = rocke_b_mod(b, key, c_slots);
     rocke_value_t* c3 = rocke_b_const_i32(b, 3);
     rocke_value_t* shifted = rocke_b_shl(b, slot, c3);
     return rocke_b_xor(b, col, shifted);
@@ -1007,22 +1014,60 @@ static rocke_value_t* rocke_direct_a_k_tile(rocke_direct_a_ctx_t* c, rocke_value
         return k;
     }
     rocke_value_t* shifted = rocke_b_add(b, k, c->stagger);
-    rocke_value_t* wraps = rocke_b_cmp_ge(b, shifted, c->K);
-    rocke_value_t* wrapped = rocke_b_sub(b, shifted, c->K);
+    rocke_value_t* wraps = rocke_b_cmp_ge(b, shifted, c->k_wrap);
+    rocke_value_t* wrapped = rocke_b_sub(b, shifted, c->k_wrap);
     return rocke_b_select(b, wraps, wrapped, shifted);
 }
 
-static std::vector<rocke_value_t*> rocke_direct_a_load(rocke_direct_a_ctx_t* c,
-                                                       rocke_value_t* rsrc,
-                                                       const std::vector<rocke_value_t*>& bases,
-                                                       rocke_value_t* k)
+/* load_a(k, partial): `partial` gives every K atom after the first its own
+ * scalar offset, out of range past K. */
+static std::vector<rocke_value_t*>
+    rocke_direct_a_load_a(rocke_direct_a_ctx_t* c, rocke_value_t* k, bool partial)
+{
+    rocke_ir_builder_t* b = c->b;
+    rocke_value_t* k_bytes = rocke_b_mul(b, k, c->two);
+    std::vector<rocke_value_t*> offsets((size_t)c->nk, k_bytes);
+    if(partial)
+    {
+        for(int kk = 1; kk < c->nk; ++kk)
+        {
+            rocke_value_t* c_kk = rocke_b_const_i32(b, kk * c->spec->tile.warp_tile_k);
+            rocke_value_t* atom_k = rocke_b_add(b, k, c_kk);
+            rocke_value_t* inside = rocke_b_cmp_lt(b, atom_k, c->K);
+            offsets[(size_t)kk] = rocke_b_select(b, inside, k_bytes, c->far);
+        }
+    }
+    std::vector<rocke_value_t*> out;
+    for(size_t i = 0; i < c->a_base.size(); ++i)
+    {
+        out.push_back(rocke_b_buffer_load_vN(
+            b, c->a_rsrc, c->a_base[i], offsets[i / (size_t)c->mm], c->ab_type, 8));
+    }
+    return out;
+}
+
+/* load_b(k, partial): `partial` sends the vectors at or past K out of range. */
+static std::vector<rocke_value_t*>
+    rocke_direct_a_load_b(rocke_direct_a_ctx_t* c, rocke_value_t* k, bool partial)
 {
     rocke_ir_builder_t* b = c->b;
     std::vector<rocke_value_t*> out;
     rocke_value_t* k_bytes = rocke_b_mul(b, k, c->two);
-    for(rocke_value_t* base : bases)
+    if(!partial)
     {
-        out.push_back(rocke_b_buffer_load_vN(b, rsrc, base, k_bytes, c->ab_type, 8));
+        for(rocke_value_t* base : c->b_base)
+        {
+            out.push_back(rocke_b_buffer_load_vN(b, c->b_rsrc, base, k_bytes, c->ab_type, 8));
+        }
+        return out;
+    }
+    rocke_value_t* left = rocke_b_sub(b, c->K, k);
+    rocke_value_t* inside = c->one_b_col ? rocke_b_cmp_lt(b, c->b_cols[0], left) : NULL;
+    for(size_t i = 0; i < c->b_base.size(); ++i)
+    {
+        rocke_value_t* keep = c->one_b_col ? inside : rocke_b_cmp_lt(b, c->b_cols[i], left);
+        rocke_value_t* offset = rocke_b_select(b, keep, c->b_base[i], c->far);
+        out.push_back(rocke_b_buffer_load_vN(b, c->b_rsrc, offset, k_bytes, c->ab_type, 8));
     }
     return out;
 }
@@ -1160,26 +1205,75 @@ static void rocke_direct_a_scatter(rocke_direct_a_ctx_t* c,
     }
 }
 
-/* step(progress, a_current, accs): one K tile -- fetch the next tile, then
- * compute the current one. */
+/* step(progress, a_current, accs, partial): one K tile -- fetch the next
+ * tile, then compute the current one. */
 static void rocke_direct_a_step(rocke_direct_a_ctx_t* c,
                                 rocke_value_t* bk,
                                 rocke_value_t* progress,
                                 rocke_value_t* const* a_current,
                                 rocke_value_t* const* accs,
+                                bool partial,
                                 std::vector<rocke_value_t*>* next_a,
                                 std::vector<rocke_value_t*>* updated)
 {
     rocke_ir_builder_t* b = c->b;
-    rocke_value_t* next_progress = rocke_b_add(b, progress, bk);
-    rocke_value_t* next_k = rocke_direct_a_k_tile(c, next_progress);
+    rocke_value_t* following = rocke_b_add(b, progress, bk);
+    rocke_value_t* next_k = partial ? following : rocke_direct_a_k_tile(c, following);
     /* Publish this tile's B before any wave reads it. */
     rocke_b_sync_fence(b, "compiler");
-    *next_a = rocke_direct_a_load(c, c->a_rsrc, c->a_base, next_k);
-    std::vector<rocke_value_t*> pending = rocke_direct_a_load(c, c->b_rsrc, c->b_base, next_k);
+    *next_a = rocke_direct_a_load_a(c, next_k, partial);
+    std::vector<rocke_value_t*> pending = rocke_direct_a_load_b(c, next_k, partial);
     rocke_b_sched_barrier(b, 0);
     *updated = rocke_direct_a_compute(c, a_current, accs, &pending);
     rocke_b_sched_barrier(b, 0);
+}
+
+/* one_tile_loop(start, stop, carried_in, tag, partial): a loop of single K
+ * tiles. `names` keeps the argument and induction-variable names alive. */
+static bool rocke_direct_a_one_tile_loop(rocke_direct_a_ctx_t* c,
+                                         rocke_value_t* bk,
+                                         rocke_value_t* start,
+                                         rocke_value_t* stop,
+                                         rocke_value_t* const* carried_in,
+                                         int a_count,
+                                         int acc_count,
+                                         const char* tag,
+                                         bool partial,
+                                         std::vector<std::string>* names,
+                                         rocke_for_t* loop)
+{
+    rocke_ir_builder_t* b = c->b;
+    std::vector<rocke_iter_arg_t> args((size_t)(a_count + acc_count));
+    for(int i = 0; i < a_count; ++i)
+    {
+        names->push_back(std::string("a_") + tag + "_" + std::to_string(i));
+        args[(size_t)i].name = names->back().c_str();
+        args[(size_t)i].init = carried_in[i];
+    }
+    for(int i = 0; i < acc_count; ++i)
+    {
+        names->push_back(std::string("acc_") + tag + "_" + std::to_string(i));
+        args[(size_t)(a_count + i)].name = names->back().c_str();
+        args[(size_t)(a_count + i)].init = carried_in[a_count + i];
+    }
+    names->push_back(std::string("k_") + tag);
+    *loop = rocke_b_scf_for_iter(
+        b, start, stop, bk, args.data(), (int)args.size(), names->back().c_str(), false, false);
+    if(!rocke_ir_builder_ok(b))
+    {
+        return false;
+    }
+    rocke_b_region_enter(b, loop->body);
+    {
+        std::vector<rocke_value_t*> a_1, acc_1;
+        rocke_direct_a_step(
+            c, bk, loop->iv, loop->iter_vars, loop->iter_vars + a_count, partial, &a_1, &acc_1);
+        std::vector<rocke_value_t*> yielded(a_1);
+        yielded.insert(yielded.end(), acc_1.begin(), acc_1.end());
+        rocke_b_scf_yield(b, yielded.data(), (int)yielded.size());
+    }
+    rocke_b_region_leave(b);
+    return rocke_ir_builder_ok(b);
 }
 
 rocke_kernel_def_t* rocke_build_direct_a_gemm(rocke_ir_builder_t* b,
@@ -1262,12 +1356,16 @@ rocke_kernel_def_t* rocke_build_direct_a_gemm(rocke_ir_builder_t* b,
         c.M = rocke_b_param(b, "M", rocke_i32(), NULL);
         c.N = rocke_b_param(b, "N", rocke_i32(), NULL);
         c.K = rocke_b_param(b, "K", rocke_i32(), NULL);
+        /* Row strides of A and B in elements; K when both are packed. */
+        c.lda = tr->row_strides ? rocke_b_param(b, "lda", rocke_i32(), NULL) : c.K;
+        c.ldb = tr->row_strides ? rocke_b_param(b, "ldb", rocke_i32(), NULL) : c.K;
     }
 
     c.zero = rocke_b_const_i32(b, 0);
     c.two = rocke_b_const_i32(b, 2);
     c.c_bytes = rocke_b_const_i32(b, c.c_f32 ? 4 : 2);
     rocke_value_t* bk = rocke_b_const_i32(b, t->tile_k);
+    c.far = rocke_b_const_i32(b, 0x7FFFFFF0);
     rocke_value_t* tid = rocke_b_thread_id_x(b);
     rocke_value_t* c_wave = rocke_b_const_i32(b, spec->wave_size);
     rocke_value_t* wave = rocke_b_div(b, tid, c_wave);
@@ -1309,12 +1407,36 @@ rocke_kernel_def_t* rocke_build_direct_a_gemm(rocke_ir_builder_t* b,
     rocke_value_t* block_n_raw = rocke_b_mul(b, pid_n, c_tile_n);
     rocke_value_t* block_n = rocke_b_to_sgpr_u32(b, block_n_raw);
 
-    /* Bounded resources. The launch contract keeps every byte count in i32. */
-    rocke_value_t* a_elems = rocke_b_mul(b, c.M, c.K);
-    rocke_value_t* a_bytes = rocke_b_mul(b, a_elems, c.two);
+    /* Bounded resources. The launch contract keeps every byte count in i32.
+     * A strided operand ends with its last row's K elements. */
+    rocke_value_t *a_bytes, *b_bytes;
+    if(tr->row_strides)
+    {
+        rocke_value_t* c1_a = rocke_b_const_i32(b, 1);
+        rocke_value_t* a_rows = rocke_b_sub(b, c.M, c1_a);
+        rocke_value_t* a_last = rocke_b_mul(b, a_rows, c.lda);
+        rocke_value_t* a_elems = rocke_b_add(b, a_last, c.K);
+        a_bytes = rocke_b_mul(b, a_elems, c.two);
+    }
+    else
+    {
+        rocke_value_t* a_elems = rocke_b_mul(b, c.M, c.K);
+        a_bytes = rocke_b_mul(b, a_elems, c.two);
+    }
     c.a_rsrc = rocke_b_buffer_rsrc(b, A, a_bytes);
-    rocke_value_t* b_elems = rocke_b_mul(b, c.N, c.K);
-    rocke_value_t* b_bytes = rocke_b_mul(b, b_elems, c.two);
+    if(tr->row_strides)
+    {
+        rocke_value_t* c1_b = rocke_b_const_i32(b, 1);
+        rocke_value_t* b_rows = rocke_b_sub(b, c.N, c1_b);
+        rocke_value_t* b_last = rocke_b_mul(b, b_rows, c.ldb);
+        rocke_value_t* b_elems = rocke_b_add(b, b_last, c.K);
+        b_bytes = rocke_b_mul(b, b_elems, c.two);
+    }
+    else
+    {
+        rocke_value_t* b_elems = rocke_b_mul(b, c.N, c.K);
+        b_bytes = rocke_b_mul(b, b_elems, c.two);
+    }
     c.b_rsrc = rocke_b_buffer_rsrc(b, Bp, b_bytes);
     rocke_value_t* c_elems = rocke_b_mul(b, c.M, c.N);
     rocke_value_t* c_span = rocke_b_mul(b, c_elems, c.c_bytes);
@@ -1335,7 +1457,7 @@ rocke_kernel_def_t* rocke_build_direct_a_gemm(rocke_ir_builder_t* b,
             rocke_value_t* row = rocke_b_add(b, atom_row, a_row);
             rocke_value_t* c_kk = rocke_b_const_i32(b, kk * t->warp_tile_k);
             rocke_value_t* col = rocke_b_add(b, a_k, c_kk);
-            rocke_value_t* row_off = rocke_b_mul(b, row, c.K);
+            rocke_value_t* row_off = rocke_b_mul(b, row, c.lda);
             rocke_value_t* elem = rocke_b_add(b, row_off, col);
             c.a_base.push_back(rocke_b_mul(b, elem, c.two));
         }
@@ -1347,6 +1469,10 @@ rocke_kernel_def_t* rocke_build_direct_a_gemm(rocke_ir_builder_t* b,
         int shape[2] = {t->tile_n, t->tile_k};
         c.b_smem = rocke_b_smem_alloc(b, c.ab_type, shape, 2, "B_smem");
     }
+    c.swizzle_shift = rocke_gemm_wmma_lds_swizzle_row_shift(2 * t->tile_k);
+    /* When the block holds whole rows of vectors, a thread's vectors all sit
+     * at one K column, so one comparison per tile masks all of them. */
+    c.one_b_col = spec->block_size % c.slots == 0;
     const int b_vectors = t->tile_n * t->tile_k / (8 * spec->block_size);
     for(int e = 0; e < b_vectors; ++e)
     {
@@ -1359,12 +1485,25 @@ rocke_kernel_def_t* rocke_build_direct_a_gemm(rocke_ir_builder_t* b,
         rocke_value_t* c8 = rocke_b_const_i32(b, 8);
         rocke_value_t* col = rocke_b_mul(b, slot, c8);
         rocke_value_t* global_row = rocke_b_add(b, block_n, row);
-        rocke_value_t* row_off = rocke_b_mul(b, global_row, c.K);
+        rocke_value_t* row_off = rocke_b_mul(b, global_row, c.ldb);
         rocke_value_t* elem = rocke_b_add(b, row_off, col);
         c.b_base.push_back(rocke_b_mul(b, elem, c.two));
+        c.b_cols.push_back(col);
         c.b_dest_row.push_back(row);
         c.b_dest_col.push_back(rocke_direct_a_swizzle(&c, col, row));
     }
+
+    /* K as whole tiles. The whole tiles run first, in the stagger's order,
+     * and a partial last tile after them. k_wrap is the whole-tile range the
+     * stagger walks, one tile when K has none. */
+    rocke_value_t* c_tk1 = rocke_b_const_i32(b, t->tile_k - 1);
+    rocke_value_t* k_up = rocke_b_add(b, c.K, c_tk1);
+    rocke_value_t* k_up_tiles = rocke_b_div(b, k_up, bk);
+    rocke_value_t* k_ceil = rocke_b_mul(b, k_up_tiles, bk);
+    rocke_value_t* k_tiles = rocke_b_div(b, c.K, bk);
+    rocke_value_t* k_floor = rocke_b_mul(b, k_tiles, bk);
+    rocke_value_t* no_tile = rocke_b_cmp_lt(b, k_floor, bk);
+    c.k_wrap = rocke_b_select(b, no_tile, bk, k_floor);
 
     if(tr->k_stagger != 0)
     {
@@ -1372,14 +1511,15 @@ rocke_kernel_def_t* rocke_build_direct_a_gemm(rocke_ir_builder_t* b,
         rocke_value_t* phase = rocke_b_mod(b, flat_wg, c_kst);
         rocke_value_t* c_step = rocke_b_const_i32(b, tr->k_stagger_step * t->tile_k);
         rocke_value_t* shift = rocke_b_mul(b, phase, c_step);
-        rocke_value_t* wrapped = rocke_b_mod(b, shift, c.K);
+        rocke_value_t* wrapped = rocke_b_mod(b, shift, c.k_wrap);
         c.stagger = rocke_b_to_sgpr_u32(b, wrapped);
     }
 
+    /* The first tile is the partial one when K is shorter than a tile. */
     rocke_value_t* first_k = rocke_direct_a_k_tile(&c, c.zero);
-    std::vector<rocke_value_t*> first_a = rocke_direct_a_load(&c, c.a_rsrc, c.a_base, first_k);
+    std::vector<rocke_value_t*> first_a = rocke_direct_a_load_a(&c, first_k, true);
     {
-        std::vector<rocke_value_t*> first_b = rocke_direct_a_load(&c, c.b_rsrc, c.b_base, first_k);
+        std::vector<rocke_value_t*> first_b = rocke_direct_a_load_b(&c, first_k, true);
         rocke_direct_a_store_b(&c, first_b);
     }
     rocke_value_t* acc_init = rocke_gemm_emit_zero_acc_op(b, c.op);
@@ -1387,7 +1527,7 @@ rocke_kernel_def_t* rocke_build_direct_a_gemm(rocke_ir_builder_t* b,
     const int acc_count = c.mm * c.nn;
     std::vector<std::string> names;
     std::vector<rocke_iter_arg_t> args((size_t)(a_count + acc_count));
-    names.reserve(2 * args.size());
+    names.reserve(3 * args.size() + 2);
     for(int i = 0; i < a_count; ++i)
     {
         names.push_back("a_" + std::to_string(i));
@@ -1402,9 +1542,10 @@ rocke_kernel_def_t* rocke_build_direct_a_gemm(rocke_ir_builder_t* b,
     }
 
     /* Two K tiles per iteration, so the back edge needs no register copies;
-     * a one-tile loop covers an odd remainder. */
+     * a one-tile loop covers an odd remainder and another fetches a partial
+     * last tile (at most one trip each). */
     rocke_value_t* two_bk = rocke_b_const_i32(b, 2 * t->tile_k);
-    rocke_value_t* span = rocke_b_sub(b, c.K, bk);
+    rocke_value_t* span = rocke_b_sub(b, c.k_wrap, bk);
     rocke_value_t* pairs = rocke_b_div(b, span, two_bk);
     rocke_value_t* paired = rocke_b_mul(b, pairs, two_bk);
     rocke_for_t loop = rocke_b_scf_for_iter(
@@ -1417,9 +1558,9 @@ rocke_kernel_def_t* rocke_build_direct_a_gemm(rocke_ir_builder_t* b,
     {
         std::vector<rocke_value_t*> a_1, acc_1, a_2, acc_2;
         rocke_direct_a_step(
-            &c, bk, loop.iv, loop.iter_vars, loop.iter_vars + a_count, &a_1, &acc_1);
+            &c, bk, loop.iv, loop.iter_vars, loop.iter_vars + a_count, false, &a_1, &acc_1);
         rocke_value_t* second = rocke_b_add(b, loop.iv, bk);
-        rocke_direct_a_step(&c, bk, second, a_1.data(), acc_1.data(), &a_2, &acc_2);
+        rocke_direct_a_step(&c, bk, second, a_1.data(), acc_1.data(), false, &a_2, &acc_2);
         std::vector<rocke_value_t*> yielded(a_2);
         yielded.insert(yielded.end(), acc_2.begin(), acc_2.end());
         rocke_b_scf_yield(b, yielded.data(), (int)yielded.size());
@@ -1429,36 +1570,24 @@ rocke_kernel_def_t* rocke_build_direct_a_gemm(rocke_ir_builder_t* b,
     {
         return NULL;
     }
-    std::vector<rocke_iter_arg_t> tail_args(args.size());
-    for(int i = 0; i < a_count; ++i)
-    {
-        names.push_back("a_tail_" + std::to_string(i));
-        tail_args[(size_t)i].name = names.back().c_str();
-        tail_args[(size_t)i].init = loop.op->results[i];
-    }
-    for(int i = 0; i < acc_count; ++i)
-    {
-        names.push_back("acc_tail_" + std::to_string(i));
-        tail_args[(size_t)(a_count + i)].name = names.back().c_str();
-        tail_args[(size_t)(a_count + i)].init = loop.op->results[a_count + i];
-    }
-    loop = rocke_b_scf_for_iter(
-        b, paired, span, bk, tail_args.data(), (int)tail_args.size(), "k_tail", false, false);
-    if(!rocke_ir_builder_ok(b))
+    rocke_for_t odd;
+    if(!rocke_direct_a_one_tile_loop(
+           &c, bk, paired, span, loop.op->results, a_count, acc_count, "odd", false, &names, &odd))
     {
         return NULL;
     }
-    rocke_b_region_enter(b, loop.body);
-    {
-        std::vector<rocke_value_t*> a_1, acc_1;
-        rocke_direct_a_step(
-            &c, bk, loop.iv, loop.iter_vars, loop.iter_vars + a_count, &a_1, &acc_1);
-        std::vector<rocke_value_t*> yielded(a_1);
-        yielded.insert(yielded.end(), acc_1.begin(), acc_1.end());
-        rocke_b_scf_yield(b, yielded.data(), (int)yielded.size());
-    }
-    rocke_b_region_leave(b);
-    if(!rocke_ir_builder_ok(b))
+    rocke_value_t* tail_stop = rocke_b_sub(b, k_ceil, bk);
+    if(!rocke_direct_a_one_tile_loop(&c,
+                                     bk,
+                                     span,
+                                     tail_stop,
+                                     odd.op->results,
+                                     a_count,
+                                     acc_count,
+                                     "tail",
+                                     true,
+                                     &names,
+                                     &loop))
     {
         return NULL;
     }
@@ -1748,6 +1877,17 @@ rocke_kernel_def_t* rocke_build_universal_gemm(rocke_ir_builder_t* b,
             def_r = 0;
             def_w = auto_w;
             def_l = auto_l;
+            const char* dtype_a = spec->data.dtype_a;
+            if(ctx.swz && ctx.arch != NULL && strcmp(ctx.arch, "gfx1201") == 0 && swz_elem == 8
+               && dtype_a != NULL
+               && (strcmp(dtype_a, "fp16") == 0 || strcmp(dtype_a, "f16") == 0
+                   || strcmp(dtype_a, "bf16") == 0))
+            {
+                /* 16-byte chunks on gfx1201: key on the 128-byte window, not the row. */
+                const int row_elems
+                    = ctx.block_k + (spec->trait.direct_to_lds ? 0 : spec->trait.lds_k_pad);
+                def_r = rocke_gemm_wmma_lds_swizzle_row_shift(2 * row_elems);
+            }
         }
         else
         {

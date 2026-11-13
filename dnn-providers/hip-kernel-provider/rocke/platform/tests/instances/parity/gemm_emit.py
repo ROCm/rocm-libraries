@@ -899,9 +899,19 @@ def _spec(idx: int) -> UniversalGemmSpec:
     if idx in _GFX1201_DIRECT_A_CONFIGS:
         # direct_a: A fragments straight from global memory, B through one LDS
         # buffer, bounded buffer loads and stores with partial M/N tiles.
-        tm, tn, tk, wm, swizzle, group_m, k_stagger, k_stagger_step, ab, c = (
-            _GFX1201_DIRECT_A_CONFIGS[idx]
-        )
+        (
+            tm,
+            tn,
+            tk,
+            wm,
+            swizzle,
+            group_m,
+            k_stagger,
+            k_stagger_step,
+            ab,
+            c,
+            row_strides,
+        ) = _GFX1201_DIRECT_A_CONFIGS[idx]
         return (
             UniversalGemmSpec(
                 name=f"test_gfx1201_direct_a_{tm}x{tn}x{tk}",
@@ -914,6 +924,7 @@ def _spec(idx: int) -> UniversalGemmSpec:
                     group_m=group_m,
                     k_stagger=k_stagger,
                     k_stagger_step=k_stagger_step,
+                    row_strides=row_strides,
                 ),
                 data=DataSpec(dtype_a=ab, dtype_b=ab, dtype_c=c),
                 wave_size=32,
@@ -982,15 +993,20 @@ _GFX1201_PREPARED_READ_CONFIGS = {
 }
 
 # idx -> (tile_m, tile_n, tile_k, warp_m, lds_swizzle, group_m, k_stagger,
-#         k_stagger_step, A/B dtype, C dtype).
+#         k_stagger_step, A/B dtype, C dtype, row_strides).
 _GFX1201_DIRECT_A_CONFIGS = {
-    45: (128, 64, 64, 4, True, 4, 8, 4, "fp16", "fp16"),
-    46: (128, 96, 64, 4, True, 4, 8, 4, "fp16", "fp16"),
-    47: (64, 64, 64, 4, True, 8, 0, 1, "fp16", "fp16"),
-    48: (64, 32, 32, 2, False, 0, 4, 1, "fp16", "fp16"),
-    49: (128, 64, 64, 4, True, 4, 8, 4, "bf16", "bf16"),
-    50: (128, 64, 64, 4, True, 4, 8, 4, "fp16", "fp32"),
-    51: (128, 96, 64, 4, True, 4, 8, 4, "bf16", "fp32"),
+    45: (128, 64, 64, 4, True, 4, 8, 4, "fp16", "fp16", False),
+    46: (128, 96, 64, 4, True, 4, 8, 4, "fp16", "fp16", False),
+    47: (64, 64, 64, 4, True, 8, 0, 1, "fp16", "fp16", False),
+    48: (64, 32, 32, 2, False, 0, 4, 1, "fp16", "fp16", False),
+    49: (128, 64, 64, 4, True, 4, 8, 4, "bf16", "bf16", False),
+    50: (128, 64, 64, 4, True, 4, 8, 4, "fp16", "fp32", False),
+    51: (128, 96, 64, 4, True, 4, 8, 4, "bf16", "fp32", False),
+    # Row strides as arguments, and the one- and two-wave K-128 tiles.
+    52: (128, 64, 64, 4, True, 4, 8, 1, "fp16", "fp16", True),
+    53: (16, 16, 128, 1, True, 4, 8, 1, "fp16", "fp16", False),
+    54: (32, 32, 128, 2, True, 4, 8, 1, "bf16", "bf16", True),
+    55: (128, 96, 64, 4, True, 4, 8, 1, "fp16", "fp32", True),
 }
 
 
@@ -998,7 +1014,7 @@ def main() -> int:
     return run_emit(
         _spec,
         build_universal_gemm,
-        usage="usage: gemm_emit.py <config_index 0..51>\n",
+        usage="usage: gemm_emit.py <config_index 0..55>\n",
     )
 
 

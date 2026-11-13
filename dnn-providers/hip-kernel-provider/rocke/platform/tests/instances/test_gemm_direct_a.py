@@ -21,6 +21,7 @@ from rocke.instances.common.gemm_universal import (
     UniversalGemmSpec,
     build_universal_gemm,
     is_valid_spec,
+    wmma_lds_swizzle_row_shift,
 )
 
 ARCH = "gfx1201"
@@ -54,7 +55,13 @@ def _ops(region, names):
 
 class TestDirectASpecGate(unittest.TestCase):
     def test_measured_tiles_are_valid(self):
-        for tile in ((128, 64, 64, 4, 1), (128, 96, 64, 4, 1), (64, 64, 64, 4, 1)):
+        for tile in (
+            (128, 64, 64, 4, 1),
+            (128, 96, 64, 4, 1),
+            (64, 64, 64, 4, 1),
+            (32, 32, 128, 2, 1),
+            (16, 16, 128, 1, 1),
+        ):
             with self.subTest(tile=tile):
                 self.assertEqual(is_valid_spec(_spec(tile), ARCH), (True, "ok"))
 
@@ -97,10 +104,34 @@ class TestDirectASpecGate(unittest.TestCase):
             with self.subTest(trait=trait):
                 self.assertFalse(is_valid_spec(_spec(**trait), ARCH)[0])
 
-    def test_rejects_a_tile_that_does_not_fit_the_register_file(self):
-        ok, why = is_valid_spec(_spec((128, 128, 64, 4, 1)), ARCH)
+    def test_rejects_tiles_that_do_not_fit_the_register_file(self):
+        # The last three built and spilled in the K loop on gfx1201.
+        for tile in (
+            (128, 128, 64, 4, 1),
+            (16, 64, 128, 1, 1),
+            (32, 32, 256, 2, 1),
+            (16, 16, 256, 1, 1),
+        ):
+            with self.subTest(tile=tile):
+                ok, why = is_valid_spec(_spec(tile), ARCH)
+                self.assertFalse(ok)
+                self.assertIn("VGPR", why)
+
+    def test_row_strides_are_a_direct_a_trait_with_two_more_arguments(self):
+        packed = build_universal_gemm(_spec(), arch=ARCH)
+        strided = build_universal_gemm(_spec(row_strides=True), arch=ARCH)
+        self.assertEqual(
+            [p.name for p in strided.params],
+            [p.name for p in packed.params] + ["lda", "ldb"],
+        )
+        self.assertNotEqual(packed.name, strided.name)
+        other = replace(
+            _spec((128, 128, 32, 2, 2)),
+            trait=TraitSpec(pipeline="compv4", row_strides=True),
+        )
+        ok, why = is_valid_spec(other, ARCH)
         self.assertFalse(ok)
-        self.assertIn("VGPR", why)
+        self.assertIn("direct_a", why)
 
     def test_build_refuses_what_the_gate_refuses(self):
         with self.assertRaisesRegex(ValueError, "warp_n=1"):
@@ -108,11 +139,30 @@ class TestDirectASpecGate(unittest.TestCase):
 
 
 class TestDirectALaunchContract(unittest.TestCase):
-    def test_partial_m_and_n_tiles_launch_but_partial_k_does_not(self):
+    def test_partial_m_n_and_k_tiles_launch_but_partial_k_atoms_do_not(self):
         spec = _spec()
         self.assertEqual(direct_a_launch_supported(spec, 1000, 37, 128), (True, "ok"))
-        self.assertFalse(direct_a_launch_supported(spec, 1024, 1024, 96)[0])
+        self.assertEqual(direct_a_launch_supported(spec, 1024, 1024, 96), (True, "ok"))
+        self.assertEqual(direct_a_launch_supported(spec, 64, 64, 16), (True, "ok"))
+        self.assertFalse(direct_a_launch_supported(spec, 1024, 1024, 100)[0])
         self.assertFalse(direct_a_launch_supported(spec, 0, 64, 64)[0])
+
+    def test_row_strides_need_the_trait_and_cover_k(self):
+        packed, strided = _spec(), _spec(row_strides=True)
+        self.assertFalse(direct_a_launch_supported(packed, 512, 512, 256, 288, 256)[0])
+        self.assertTrue(direct_a_launch_supported(packed, 512, 512, 256, 256, 256)[0])
+        self.assertTrue(direct_a_launch_supported(strided, 512, 512, 256, 288, 320)[0])
+        self.assertTrue(direct_a_launch_supported(strided, 512, 512, 256)[0])
+        self.assertFalse(direct_a_launch_supported(strided, 512, 512, 256, 240, 256)[0])
+        self.assertFalse(direct_a_launch_supported(strided, 512, 512, 256, 256, 255)[0])
+
+    def test_span_limit_counts_the_row_strides(self):
+        strided = _spec(row_strides=True)
+        k = 1 << 19
+        # 2 * 1024 * lda bytes: K fits, twice K as the A stride is 2 GiB.
+        self.assertTrue(direct_a_launch_supported(strided, 1024, 64, k, k, k)[0])
+        self.assertFalse(direct_a_launch_supported(strided, 1024, 64, k, 2 * k, k)[0])
+        self.assertFalse(direct_a_launch_supported(strided, 64, 1024, k, k, 2 * k)[0])
 
     def test_span_limit_counts_whole_tiles(self):
         spec = _spec()
@@ -172,6 +222,13 @@ class TestDirectALoop(unittest.TestCase):
             replace(base, trait=replace(base.trait, k_stagger=8, k_stagger_step=4)),
         ]
         self.assertEqual(len({s.kernel_name() for s in variants}), 3)
+
+    def test_lds_swizzle_keys_on_the_128_byte_window(self):
+        # Rows that share a 128-byte window share a key; a row that fills or
+        # does not divide the window is its own key.
+        for row_bytes, shift in ((128, 0), (256, 0), (64, 1), (32, 2), (96, 0)):
+            with self.subTest(row_bytes=row_bytes):
+                self.assertEqual(wmma_lds_swizzle_row_shift(row_bytes), shift)
 
 
 if __name__ == "__main__":

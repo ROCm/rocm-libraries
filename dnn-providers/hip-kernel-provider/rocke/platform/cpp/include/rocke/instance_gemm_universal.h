@@ -171,6 +171,9 @@ typedef struct rocke_gemm_trait_spec
      * bounded buffer reads or full-width global reads once per workgroup;
      * global64 forces the full-width path. Python TraitSpec.global_addressing. */
     const char* global_addressing; /* default "legacy" */
+    /* direct_a only: the kernel takes the A and B row strides, in elements,
+     * as two more arguments (lda, ldb) after K. Python TraitSpec.row_strides. */
+    bool row_strides; /* default false */
 } rocke_gemm_trait_spec_t;
 
 /* ------------------------------------------------------------------ DataSpec */

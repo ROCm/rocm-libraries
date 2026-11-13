@@ -788,27 +788,42 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
     case 49: /* direct_a 128x64x64, BF16 A/B/C */
     case 50: /* direct_a 128x64x64, FP16 A/B, FP32 C */
     case 51: /* direct_a 128x96x64, BF16 A/B, FP32 C */
+    case 52: /* direct_a 128x64x64, row strides, stagger step 1 */
+    case 53: /* direct_a 16x16x128, one wave */
+    case 54: /* direct_a 32x32x128, two waves, BF16, row strides */
+    case 55: /* direct_a 128x96x64, FP32 C, row strides */
     {
         /* mirrors _GFX1201_DIRECT_A_CONFIGS in gemm_emit.py */
         static const struct
         {
-            const char* name;
             int tm, tn, tk, wm;
             bool swizzle;
             int group_m, k_stagger, k_stagger_step;
             const char* ab;
             const char* c;
+            bool row_strides;
         } cfgs[] = {
-            {"test_gfx1201_direct_a_128x64x64", 128, 64, 64, 4, true, 4, 8, 4, "fp16", "fp16"},
-            {"test_gfx1201_direct_a_128x96x64", 128, 96, 64, 4, true, 4, 8, 4, "fp16", "fp16"},
-            {"test_gfx1201_direct_a_64x64x64", 64, 64, 64, 4, true, 8, 0, 1, "fp16", "fp16"},
-            {"test_gfx1201_direct_a_64x32x32", 64, 32, 32, 2, false, 0, 4, 1, "fp16", "fp16"},
-            {"test_gfx1201_direct_a_128x64x64", 128, 64, 64, 4, true, 4, 8, 4, "bf16", "bf16"},
-            {"test_gfx1201_direct_a_128x64x64", 128, 64, 64, 4, true, 4, 8, 4, "fp16", "fp32"},
-            {"test_gfx1201_direct_a_128x96x64", 128, 96, 64, 4, true, 4, 8, 4, "bf16", "fp32"},
+            {128, 64, 64, 4, true, 4, 8, 4, "fp16", "fp16", false},
+            {128, 96, 64, 4, true, 4, 8, 4, "fp16", "fp16", false},
+            {64, 64, 64, 4, true, 8, 0, 1, "fp16", "fp16", false},
+            {64, 32, 32, 2, false, 0, 4, 1, "fp16", "fp16", false},
+            {128, 64, 64, 4, true, 4, 8, 4, "bf16", "bf16", false},
+            {128, 64, 64, 4, true, 4, 8, 4, "fp16", "fp32", false},
+            {128, 96, 64, 4, true, 4, 8, 4, "bf16", "fp32", false},
+            {128, 64, 64, 4, true, 4, 8, 1, "fp16", "fp16", true},
+            {16, 16, 128, 1, true, 4, 8, 1, "fp16", "fp16", false},
+            {32, 32, 128, 2, true, 4, 8, 1, "bf16", "bf16", true},
+            {128, 96, 64, 4, true, 4, 8, 1, "fp16", "fp32", true},
         };
+        static char name[64];
         const int i = idx - 45;
-        spec->name = cfgs[i].name;
+        snprintf(name,
+                 sizeof(name),
+                 "test_gfx1201_direct_a_%dx%dx%d",
+                 cfgs[i].tm,
+                 cfgs[i].tn,
+                 cfgs[i].tk);
+        spec->name = name;
         spec->tile = (rocke_gemm_tile_spec_t){.tile_m = cfgs[i].tm,
                                               .tile_n = cfgs[i].tn,
                                               .tile_k = cfgs[i].tk,
@@ -825,6 +840,7 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
         spec->trait.group_m = cfgs[i].group_m;
         spec->trait.k_stagger = cfgs[i].k_stagger;
         spec->trait.k_stagger_step = cfgs[i].k_stagger_step;
+        spec->trait.row_strides = cfgs[i].row_strides;
         spec->data.dtype_a = cfgs[i].ab;
         spec->data.dtype_b = cfgs[i].ab;
         spec->data.dtype_c = cfgs[i].c;
@@ -840,7 +856,7 @@ static int make_spec(int idx, rocke_gemm_universal_spec_t* spec)
     return 0;
 }
 
-/* Configs 9, 11 and 12 exercise gfx942; configs 13-30 and 32 gfx1250; 33-51
+/* Configs 9, 11 and 12 exercise gfx942; configs 13-30 and 32 gfx1250; 33-55
  * gfx1201; the rest use the gfx950 baseline. */
 static const char* arch_for(int idx)
 {
@@ -852,7 +868,7 @@ static const char* arch_for(int idx)
     {
         return "gfx1250";
     }
-    if(idx >= 33 && idx <= 51)
+    if(idx >= 33 && idx <= 55)
     {
         return "gfx1201";
     }
@@ -863,7 +879,7 @@ int main(int argc, char** argv)
 {
     if(argc < 2)
     {
-        fprintf(stderr, "usage: %s <config_index 0..51>\n", argv[0]);
+        fprintf(stderr, "usage: %s <config_index 0..55>\n", argv[0]);
         return 2;
     }
     int idx = atoi(argv[1]);

@@ -322,6 +322,7 @@ void fill_universal_spec(rocke_gemm_universal_spec_t* spec,
             = dict_bool(tr, "lds_db_allow_1wg", spec->trait.lds_db_allow_1wg);
         if(dict_str(tr, "global_addressing", s))
             spec->trait.global_addressing = keep(s);
+        spec->trait.row_strides = dict_bool(tr, "row_strides", spec->trait.row_strides);
         spec->trait.split_k = dict_int(tr, "split_k", spec->trait.split_k);
         /* Optional[bool]: absent or None leaves the hints arch-resolved. */
         if(tr.contains("emit_sched_hints") && !tr["emit_sched_hints"].is_none())
