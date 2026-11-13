@@ -601,8 +601,8 @@ class TestPurposeHierarchy:
         "solve_cpu_fast": [140.0],
         "pre_solution": [200.0],
         "pre_solution_listener.ReferenceValidator": [120.0],
-        "cpu_reference_gemm_per_solution": [110.0],
-        "solve_cpu_fast_per_solution": [105.0],
+        "cpu_reference_gemm_per_solution_inputs_changed": [110.0],
+        "solve_cpu_fast_per_solution_inputs_changed": [105.0],
         "pre_solution_listener.DataInitialization": [60.0],
         "validate_warmups": [180.0],
         "validate_warmups_listener.SynchronizerValidator": [100.0],
@@ -626,7 +626,7 @@ class TestPurposeHierarchy:
 
         # The reference GEMM is one group even though it is called from two different places.
         assert {"cpu_reference_gemm", "solve_cpu_fast", "pre_solution_listener.ReferenceValidator",
-                "cpu_reference_gemm_per_solution"} <= self._names(groups[G_REFERENCE])
+                "cpu_reference_gemm_per_solution_inputs_changed"} <= self._names(groups[G_REFERENCE])
         assert "cpu_data_init" in self._names(groups[G_INPUT])
         assert "pre_solution_listener.DataInitialization" in self._names(groups[G_INPUT])
         assert "validate_warmups_listener.SynchronizerValidator" in self._names(groups[G_VALIDATION])

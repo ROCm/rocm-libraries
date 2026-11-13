@@ -38,6 +38,7 @@
 #include <mxDataGen.hpp>
 
 #include <cstddef>
+#include <stdexcept>
 #include <map>
 #include <random>
 
@@ -191,6 +192,33 @@ namespace TensileLite
                                                     ContractionSolution const*    solution) const
             {
                 return needsSolutionDependentMXPreswizzle(problem, solution);
+            }
+
+            // Version of the host-side inputs (A, B, MX scales, ...) that the CPU reference
+            // reads. It is incremented at every point where those buffers are actually rewritten,
+            // so it is the single source of truth for "have the reference inputs changed?".
+            // Consumers (ReferenceValidator) remember the epoch they computed with and only
+            // recompute when it moved; they must not re-derive the answer from their own
+            // conditions (arch, solution format, ...), which is how the two checks used to drift.
+            using InputEpoch = size_t;
+
+            // Problem-level epoch, for use right after prepareCPUInputs().
+            InputEpoch inputEpoch() const
+            {
+                return m_inputEpoch;
+            }
+
+            // Per-solution epoch. Only valid once preSolution() has run for `solution`, because
+            // that is where the inputs are refreshed. Throws otherwise so a listener-ordering
+            // mistake is a loud error instead of a stale reference.
+            InputEpoch inputEpoch(ContractionSolution const* solution) const
+            {
+                if(solution == nullptr || solution != m_currentSolution)
+                    throw std::logic_error(
+                        "DataInitialization::inputEpoch(solution) called before "
+                        "DataInitialization::preSolution() ran for that solution; "
+                        "DataInitialization must be registered before its consumers.");
+                return m_inputEpoch;
             }
 
             /**
@@ -984,16 +1012,25 @@ namespace TensileLite
                     ScopedDevice device(m_deviceId);
                     m_mxPreswizzleMiK
                         = static_cast<int>(m_currentSolution->sizeMapping.matrixInstruction[2]);
+                    // The steps below run for every solution that passes the gate above. Report
+                    // them separately depending on whether initializeMXData really regenerated
+                    // the MX data this time (it skips that when its cache is valid).
+                    InputEpoch const epochBefore = m_inputEpoch;
                     {
                         ScopedTimer timer("pre_solution_mx_init_data");
                         initializeMXData(*m_currentGemmProblem);
                     }
+                    bool const regenerated = m_inputEpoch != epochBefore;
                     {
-                        ScopedTimer timer("pre_solution_mx_copy_valid_to_gpu");
+                        ScopedTimer timer(regenerated
+                                              ? "pre_solution_mx_copy_valid_to_gpu_after_regen"
+                                              : "pre_solution_mx_copy_valid_to_gpu_no_regen");
                         copyValidToGPUBuffer(*m_currentGemmProblem);
                     }
                     {
-                        ScopedTimer timer("pre_solution_mx_copy_inputs_d2d");
+                        ScopedTimer timer(regenerated
+                                              ? "pre_solution_mx_copy_inputs_d2d_after_regen"
+                                              : "pre_solution_mx_copy_inputs_d2d_no_regen");
                         copyInputs(m_gpuPtrs,
                                    m_gpuBatchPtrs,
                                    m_maxElements,
@@ -1002,7 +1039,8 @@ namespace TensileLite
                                    hipMemcpyDeviceToDevice);
                     }
                     // Sync CPU current buffers so the reference matches GPU data.
-                    ScopedTimer cpuSyncTimer("pre_solution_mx_cpu_sync");
+                    ScopedTimer cpuSyncTimer(regenerated ? "pre_solution_mx_cpu_sync_after_regen"
+                                                         : "pre_solution_mx_cpu_sync_no_regen");
                     for(int ti : {ContractionProblemGemm::TENSOR::A,
                                   ContractionProblemGemm::TENSOR::B,
                                   ContractionProblemGemm::TENSOR::MXSA,
@@ -1284,6 +1322,7 @@ namespace TensileLite
             // Scale descriptor most recently swizzled into gpuInput.valid, per
             // tensor index. The MX equivalent of g_swizzleCache.
             std::map<size_t, TensorDescriptor> m_mxSwizzledDescriptor;
+            InputEpoch                         m_inputEpoch = 0;
         };
 
         template <>

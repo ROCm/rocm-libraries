@@ -147,6 +147,10 @@ namespace
             auto validator = std::make_unique<ReferenceValidator>(args);
             validator->setDevices(&devices);
             validator->setReporter(reporter);
+            // DataInitialization is registered before the validator, as in main: the
+            // validator reads the input epoch of a solution DataInitialization has seen.
+            dataInit->preProblem(problem);
+            dataInit->preSolution(&solution);
             validator->preProblem(problem);
             validator->preSolution(&solution);
             gpu = std::dynamic_pointer_cast<ContractionInputs>(dataInit->prepareGPUInputs(problem));
@@ -244,9 +248,13 @@ TEST(ReferenceValidatorFusedA2A, RotatedReceiveBufferUsesItsOwnAllocationSize)
     ReferenceValidator                          validator(args);
     validator.setDevices(&devices);
     validator.setReporter(reporter);
-    validator.preProblem(problem);
     ContractionSolution solution;
     solution.problemType.fusedGemmA2A = true;
+    // DataInitialization is registered before the validator, as in main: the validator reads the
+    // input epoch of a solution DataInitialization has seen.
+    dataInit->preProblem(problem);
+    dataInit->preSolution(&solution);
+    validator.preProblem(problem);
     validator.preSolution(&solution);
 
     auto inputs      = dataInit->prepareGPUInputs(problem);
@@ -268,6 +276,7 @@ TEST(ReferenceValidatorFusedA2A, RotatedReceiveBufferUsesItsOwnAllocationSize)
     EXPECT_EQ(reporter->strings.at(ResultKey::Validation), "PASSED");
     EXPECT_EQ(validator.error(), 0);
 
+    dataInit->preSolution(&solution);
     validator.preSolution(&solution);
     float bad = static_cast<float const*>(reference.d)[recv.totalLogicalElements() - 1] + 100.0f;
     HIP_CHECK_EXC(hipMemcpy(static_cast<float*>(rotated.a2aBuf) + recv.totalLogicalElements() - 1,
