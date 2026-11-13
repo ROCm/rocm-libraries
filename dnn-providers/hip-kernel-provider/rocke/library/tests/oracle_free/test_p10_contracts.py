@@ -613,6 +613,47 @@ def test_bf16_window_fixture_loses_47_adjacent_row_pairs() -> None:
     assert row_codeword_collisions(replace(case, dtype="fp16")) == ()
 
 
+def test_reflected_key_lane_separates_the_colliding_bf16_window_rows() -> None:
+    """The inequality a second codeword would rest on; no such codeword exists here.
+
+    A lane holding ``-(S_k - 1 - k) / 2`` has the row mean
+    ``-(S_k - 1 - T_q / N_q) / 2``. On the rows whose key lane rounds together it
+    stays below magnitude 64, where BF16 spacing is at most 1/4: adjacent exact
+    values are 1/2 apart and rounding moves each by at most 1/8, so the stored
+    values stay at least 1/4 apart."""
+    case = _BF16_WINDOW_FIXTURE
+
+    def reflected(query: int) -> Fraction:
+        moments = row_moments(case, query)
+        return -(case.seqlen_k - 1 - Fraction(moments.key_sum, moments.count)) / 2
+
+    def stored(value: Fraction) -> Fraction:
+        return _bits_value(exact_target_bits(value, case.dtype), case.dtype)
+
+    exact = [reflected(query) for query in range(160, case.seqlen_q)]
+    magnitudes = [abs(value) for value in exact]
+    assert (min(magnitudes), max(magnitudes)) == (Fraction(63, 4), Fraction(253, 4))
+    assert all(
+        after - before == Fraction(1, 2) for before, after in zip(exact, exact[1:])
+    )
+    rounded = [stored(value) for value in exact]
+    assert all(abs(new - old) <= Fraction(1, 8) for old, new in zip(exact, rounded))
+    assert all(
+        after - before >= Fraction(1, 4) for before, after in zip(rounded, rounded[1:])
+    )
+
+    # The key lane separates the rows below 160, so the two lanes together give
+    # every row of the fixture its own pair.
+    pairs = {
+        (
+            exact_target_bits(codeword_target(case, 0, query, 0, LANE_KEY), case.dtype),
+            exact_target_bits(reflected(query), case.dtype),
+        )
+        for query in range(case.seqlen_q)
+    }
+    assert len(pairs) == case.seqlen_q
+
+
 # The tile geometry the derivation's tables are written for, and geometries a
 # retune could select instead.
 _DERIVED_SCHEDULE = TileSchedule(128, 64)
@@ -774,13 +815,36 @@ def _binade(value: Fraction) -> int:
     return exponent if Fraction(2) ** exponent <= magnitude else exponent - 1
 
 
-def _cell_margin(value: Fraction, dtype: str) -> Fraction:
-    """Distance from a nonzero value to the nearer edge of its rounding cell."""
+def _is_power_of_two(value: Fraction) -> bool:
+    return abs(value) == Fraction(2) ** _binade(value)
+
+
+def _cell_edges(value: Fraction, dtype: str) -> tuple[Fraction, Fraction]:
+    """Magnitudes of the two rounding boundaries that enclose a nonzero value.
+
+    A rounding boundary is the midpoint of two adjacent values of the dtype, not
+    a value of the dtype. A value rounds to its target, with no tie to resolve,
+    exactly when it lies strictly between the two boundaries around the target."""
     bits = exact_target_bits(value, dtype)
     center = abs(_bits_value(bits, dtype))
     below = abs(_bits_value(bits - 1, dtype))
     above = abs(_bits_value(bits + 1, dtype))
-    return min(abs(value) - (below + center) / 2, (center + above) / 2 - abs(value))
+    return (below + center) / 2, (center + above) / 2
+
+
+def _cell_margin(value: Fraction, dtype: str) -> Fraction:
+    """Exact distance from a nonzero value to the nearest rounding boundary."""
+    lower, upper = _cell_edges(value, dtype)
+    return min(abs(value) - lower, upper - abs(value))
+
+
+def _constant_lane_values() -> list[Fraction]:
+    """Every value a batch, KV-head or dimension lane takes inside the scope."""
+    return [
+        *(codeword_value(batch, 0, 0, LANE_BATCH) for batch in range(2)),
+        *(codeword_value(0, head, 0, LANE_KV_HEAD) for head in range(4)),
+        *(codeword_value(0, 0, 0, dim) for dim in range(P10_COORDINATE_LANES, 64)),
+    ]
 
 
 @pytest.mark.parametrize("case", _PAIRING_CASES, ids=lambda case: case.case_id)
@@ -789,46 +853,96 @@ def test_every_target_keeps_its_rounding_cell_under_the_path_exact_error(
 ) -> None:
     """Why the emulation stores the targets. With an exact numerator and
     denominator only ``1 / N`` and ``o * (1 / N)`` round, so the value cast to the
-    dtype is within ``(2u + u**2) |y|`` of the exact target ``y``. That is inside
-    the target's rounding cell for a representable target, and for the other
-    targets by a margin that follows from the odd denominator ``q + 1``."""
+    dtype is within ``(2u + u**2) |y|`` of the exact target ``y``. That is strictly
+    inside the target's rounding cell: by a relative margin of ``2**-(p + 2)`` for
+    a representable target, and for the other targets by a margin that follows
+    from the odd denominator ``q + 1``."""
     fraction_bits = _FORMAT[case.dtype][0]
     error = 2 * _UNIT_ROUNDOFF + _UNIT_ROUNDOFF**2
     rows = range(case.seqlen_q)
     key_lane = [codeword_target(case, 0, query, 0, LANE_KEY) for query in rows[1:]]
     parity = [codeword_target(case, 0, query, 0, LANE_PARITY) for query in rows]
-    constant = [
-        *(codeword_value(batch, 0, 0, LANE_BATCH) for batch in range(2)),
-        *(codeword_value(0, head, 0, LANE_KV_HEAD) for head in range(4)),
-        *(codeword_value(0, 0, 0, dim) for dim in range(P10_COORDINATE_LANES, 64)),
-    ]
-    for value in (*key_lane, *parity, *constant):
-        margin = _cell_margin(value, case.dtype)
-        assert margin > error * abs(value)
-        if _representable(value, case.dtype):
-            assert margin >= abs(value) / (1 << (fraction_bits + 2))
+    margins = {
+        value: _cell_margin(value, case.dtype)
+        for value in (*key_lane, *parity, *_constant_lane_values())
+    }
+    assert all(margin > error * abs(value) for value, margin in margins.items())
 
+    # Representable targets. The relative margin 2**-(p + 2) is a sufficient
+    # bound, not the size of every cell: it is attained only at a power of two,
+    # whose lower boundary belongs to the finer binade below.
+    cell = Fraction(1, 1 << (fraction_bits + 2))
+    representable = {
+        value: margin / abs(value)
+        for value, margin in margins.items()
+        if _representable(value, case.dtype)
+    }
+    assert min(representable.values()) == cell
+    assert {value for value, margin in representable.items() if margin == cell} == {
+        value for value in representable if _is_power_of_two(value)
+    }
+
+    # The other targets are (6q + 5)/(32(q + 1)) on even rows. They lie in the
+    # binade of 1/8, whose spacing is 2**-13 in FP16 and 2**-10 in BF16, and
+    # q + 1 times a target is a multiple of that spacing.
     unrepresentable = [
         query for query in rows if not _representable(parity[query], case.dtype)
     ]
-    assert unrepresentable
+    assert max(unrepresentable) + 1 == {"fp16": 63, "bf16": 255}[case.dtype]
+    quantum = Fraction(1, 1 << (3 + fraction_bits))
+    assert quantum == Fraction(1, {"fp16": 1 << 13, "bf16": 1 << 10}[case.dtype])
     for query in unrepresentable:
         value, odd = parity[query], query + 1
-        quantum = Fraction(2) ** (_binade(value) - fraction_bits)
-        assert odd % 2 == 1 and (odd * value / quantum).denominator == 1
-        assert _cell_margin(value, case.dtype) >= quantum / (4 * odd)
+        assert _binade(value) == -3
+        assert odd % 2 == 1 and odd * value == Fraction(6 * query + 5, 32)
+        assert (odd * value / quantum).denominator == 1
+        # Both boundaries around the target are inside its binade, so the margin
+        # is the full quantum / (2 (q + 1)). Half of that is what holds against a
+        # boundary of the binade below as well.
+        lower, upper = _cell_edges(value, case.dtype)
+        assert Fraction(1, 8) < lower and upper < Fraction(1, 4)
+        assert margins[value] >= quantum / (2 * odd)
 
     # The thinnest margin of the pairing, relative to the target, and its row.
-    # It is still dozens of times the error.
+    # It attains the bound above, and it is still dozens of times the error.
     relative = {
-        query: _cell_margin(parity[query], case.dtype) / parity[query]
-        for query in unrepresentable
+        query: margins[parity[query]] / parity[query] for query in unrepresentable
     }
     thinnest = min(relative, key=relative.get)
     row, margin = {"fp16": (56, 5.728e-6), "bf16": (64, 4.017e-5)}[case.dtype]
     assert thinnest == row
+    assert margins[parity[thinnest]] == quantum / (2 * (thinnest + 1))
     assert float(relative[thinnest]) == pytest.approx(margin, rel=1e-3)
     assert relative[thinnest] > 48 * error
+
+
+def test_masked_leading_tile_rows_keep_their_cell_under_the_residue_bound() -> None:
+    """A fully masked leading tile leaves a subnormal residue in the numerator. An
+    accumulation that only rounds faithfully need not absorb it: the 64 legal
+    additions then move the sum by at most ``gamma_64(2**-23)`` relatively, plus
+    the residue. Such a row has a full window of 64 keys, so the division is
+    exact, and every target on it is a value of the dtype, about 32 times further
+    from its rounding boundaries than that bound. This holds on every tile
+    geometry, and the causal case has no such row."""
+    window, causal = _PAIRING_CASES
+    relative, residue = Fraction(1, (1 << 17) - 1), Fraction(1, 1 << 141)
+
+    def keeps_cell(value: Fraction) -> bool:
+        bound = relative * abs(value) + residue
+        margin = _cell_margin(value, window.dtype)
+        return _representable(value, window.dtype) and margin > 31 * bound
+
+    assert all(keeps_cell(value) for value in _constant_lane_values())
+    assert keeps_cell(Fraction(3, 16))
+    rows = range(window.seqlen_q)
+    for schedule in (_DERIVED_SCHEDULE, *_OTHER_SCHEDULES):
+        assert not any(masked_leading_tiles(causal, schedule, row) for row in rows)
+        masked = [row for row in rows if masked_leading_tiles(window, schedule, row)]
+        assert masked
+        for row in masked:
+            assert row_moments(window, row).count == window.window == 64
+            assert codeword_target(window, 0, row, 0, LANE_PARITY) == Fraction(3, 16)
+            assert keeps_cell(codeword_target(window, 0, row, 0, LANE_KEY))
 
 
 def test_guard_patterns_are_a_finite_canary_and_a_nan_sentinel() -> None:
