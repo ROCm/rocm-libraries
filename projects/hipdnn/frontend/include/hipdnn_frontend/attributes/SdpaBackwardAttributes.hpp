@@ -427,9 +427,10 @@ public:
     {
         return setInput(InputNames::Dropout_scale_inv, std::move(value));
     }
-    /// @brief Set the attention-sink input tensor, [1, H_q, 1, 1], FLOAT or Q's data type (the
-    ///        graph I/O data type when Q's is unset). The Stats input must be sink-inclusive.
-    ///        See docs/KNOWN_DIVERGENCES.md for the hipDNN differences.
+    /// @brief Set the attention-sink input tensor, [1, H_q, 1, 1], FLOAT, or Q's data type set on
+    ///        the sink itself (an untyped sink takes the graph I/O type and must then be FLOAT).
+    ///        The Stats input must be sink-inclusive. See docs/KNOWN_DIVERGENCES.md for the
+    ///        hipDNN differences.
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaBackwardAttributes& set_sink_token(const std::shared_ptr<TensorAttributes>& value)
     {

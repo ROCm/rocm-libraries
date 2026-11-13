@@ -1072,7 +1072,7 @@ TEST(TestSdpaBwdNode, PreValidateFailsSeedOffsetEmptyDims)
 }
 
 //==============================================================================
-// Sink / dSink: [1, H_q, 1, 1], FLOAT or Q's data type
+// Sink / dSink: [1, H_q, 1, 1], FLOAT, or Q's data type set on the tensor itself
 //==============================================================================
 
 TEST(TestSdpaBwdNode, PreValidateSucceedsSinkAndDsinkFloat)
@@ -1093,14 +1093,50 @@ TEST(TestSdpaBwdNode, PreValidateSucceedsSinkAndDsinkIoDtype)
               error_code_t::OK);
 }
 
-TEST(TestSdpaBwdNode, PreValidateSucceedsSinkUnsetDtypeResolvesToIoType)
+TEST(TestSdpaBwdNode, PreValidateFailsUntypedSinkInA16BitGraph)
 {
     EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
                   a.set_sink_token(makeTyped({1, 8, 1, 1}, DataType::NOT_SET));
                   a.set_dsink_token(makeTyped({1, 8, 1, 1}, DataType::HALF));
               }),
+              error_code_t::INVALID_VALUE)
+        << "an untyped sink takes the io type, which must be FLOAT";
+    EXPECT_EQ(validateBwd([](SdpaBackwardAttributes& a) {
+                  a.set_sink_token(makeTyped({1, 8, 1, 1}, DataType::HALF));
+                  a.set_dsink_token(makeTyped({1, 8, 1, 1}, DataType::NOT_SET));
+              }),
+              error_code_t::INVALID_VALUE)
+        << "an untyped dSink takes the io type, which must be FLOAT";
+    EXPECT_EQ(validateBwd(
+                  [](SdpaBackwardAttributes& a) {
+                      a.set_sink_token(makeTyped({1, 8, 1, 1}, DataType::NOT_SET));
+                      a.set_dsink_token(makeTyped({1, 8, 1, 1}, DataType::NOT_SET));
+                  },
+                  DataType::FLOAT),
               error_code_t::OK)
-        << "an unset sink dtype is the io type, equal to the dSink dtype";
+        << "untyped in a FLOAT graph: both are FLOAT";
+}
+
+// A sink or dSink type supplied by fill_from_context counts as untyped.
+TEST(TestSdpaBwdNode, PreValidateSinkTypeFilledFromTheGraphIsUntyped)
+{
+    GraphAttributes graphAttrs;
+    graphAttrs.set_io_data_type(DataType::HALF);
+    auto filled = makeTyped({1, 8, 1, 1}, DataType::NOT_SET);
+    filled->fill_from_context(graphAttrs);
+    ASSERT_EQ(filled->get_data_type(), DataType::HALF);
+    EXPECT_EQ(validateBwd([&](SdpaBackwardAttributes& a) {
+                  a.set_sink_token(filled);
+                  a.set_dsink_token(makeTyped({1, 8, 1, 1}, DataType::HALF));
+              }),
+              error_code_t::INVALID_VALUE)
+        << "sink HALF came from the graph";
+    EXPECT_EQ(validateBwd([&](SdpaBackwardAttributes& a) {
+                  a.set_sink_token(makeTyped({1, 8, 1, 1}, DataType::HALF));
+                  a.set_dsink_token(filled);
+              }),
+              error_code_t::INVALID_VALUE)
+        << "dSink HALF came from the graph";
 }
 
 TEST(TestSdpaBwdNode, PreValidateFailsSinkAndDsinkWhenNoDataTypeResolves)

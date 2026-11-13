@@ -504,9 +504,11 @@ inline DataType effectiveTensorDataType(const std::shared_ptr<graph::TensorAttri
 }
 
 // Validates an SDPA attention-sink tensor (forward sink_token, backward sink_token and
-// dsink_token) when present: dims exactly [1, H_q, 1, 1] and an effective data type of FLOAT
-// (cuDNN) or Q's effective data type (hipDNN extension; Q's own type, or the graph I/O type when
-// Q's is unset). A sink whose effective type and Q's are both unset is rejected.
+// dsink_token) when present: dims exactly [1, H_q, 1, 1], and a data type of FLOAT (cuDNN) or,
+// set on the tensor itself, Q's effective data type (hipDNN extension; Q's own type, or the graph
+// I/O type when Q's is unset). A type the tensor does not set itself (unset, or supplied by
+// fill_from_context) counts only when it is FLOAT, so a FLOAT buffer left untyped is never read
+// in the graph's 16-bit I/O type.
 inline Error validateSdpaSinkTensor(const std::shared_ptr<graph::TensorAttributes>& tensor,
                                     const std::string& nodeName,
                                     const std::string& role,
@@ -525,11 +527,13 @@ inline Error validateSdpaSinkTensor(const std::shared_ptr<graph::TensorAttribute
                           nodeName + ": " + role + " must have dims [1, H_q, 1, 1] with H_q="
                               + std::to_string(numHeadsQ));
     const auto effective = effectiveTensorDataType(tensor, ioDataType);
+    const bool typedOnTensor = tensor->get_data_type() != DataType::NOT_SET
+                               && !TensorAttributesAccess::isDataTypeFromContext(*tensor);
+    // A type set on the tensor is never NOT_SET, so an unset Q type never matches it.
     HIPDNN_RETURN_IF_TRUE(
-        effective != DataType::FLOAT
-            && (qEffectiveDataType == DataType::NOT_SET || effective != qEffectiveDataType),
+        effective != DataType::FLOAT && (!typedOnTensor || effective != qEffectiveDataType),
         ErrorCode::INVALID_VALUE,
-        nodeName + ": " + role + " must have FLOAT or Q's data type");
+        nodeName + ": " + role + " must have FLOAT data type, or Q's data type set on the tensor");
     return {};
 }
 

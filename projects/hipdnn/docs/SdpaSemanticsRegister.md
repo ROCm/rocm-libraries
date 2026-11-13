@@ -340,20 +340,25 @@ batch when `seq_len_q/kv` are set).
   (`scaled_dot_product_flash_attention.h:1532-1551`) shows no visible negation in the frontend. hipDNN pins `-`
   by derivation, finite differences and an FP64 autograd golden.
 - **Dtype:** cuDNN's frontend checks neither sink nor dSink; its tests allocate FLOAT `(1, H_q, 1, 1)`. hipDNN
-  accepts FLOAT or Q's data type (the graph I/O data type when Q's is unset), dims exactly `[1, H_q, 1, 1]`, in
-  the forward and the backward, and dSink must have the sink's data type. The wider range lets an engine whose
-  kernel reads the sink in the I/O data type serve a graph without a cast (`KNOWN_DIVERGENCES.md`; vLLM's
-  model-dtype sinks need no adapter conversion). Behavior change in the forward: the forward sink, previously
-  FLOAT only, now also accepts Q's data type (`TestSdpaFwdNode.PreValidateSinkShapeAndType`). A dSink without a
-  sink fails with `ATTRIBUTE_NOT_SET`; a sink without a dSink is accepted, as in cuDNN. Ragged Q/K/V/O with a
-  sink is accepted. The references read and write either data type, accumulate in fp32 and round once.
+  accepts FLOAT, or Q's data type (the graph I/O data type when Q's is unset) set on the sink itself, dims
+  exactly `[1, H_q, 1, 1]`, in the forward and the backward, and dSink must have the sink's data type. An untyped
+  sink or dSink, including one whose type `fill_from_context` supplied from the graph, must be FLOAT, so a FLOAT
+  buffer left untyped is never read as the graph's 16-bit type. The wider range is a supported superset: every
+  graph cuDNN accepts is accepted unchanged, and a model-dtype sink (vLLM, HF) needs no conversion. The FlyDSL
+  forward sink objects already read a 16-bit sink (hip-kernel-provider `flydsl/COVERAGE.md`). Behavior change in
+  the forward: the forward sink, previously FLOAT only, now also accepts Q's data type set on the sink
+  (`TestSdpaFwdNode.PreValidateSinkShapeAndType`, `GraphValidateAcceptsASinkTypedInQsDataType`); an untyped sink
+  in a 16-bit graph still fails (`GraphValidateRejectsUntypedSinkInAHalfGraph`). A dSink without a sink fails
+  with `ATTRIBUTE_NOT_SET`; a sink without a dSink is accepted, as in cuDNN. Ragged Q/K/V/O with a sink is
+  accepted. The references read and write either data type, accumulate in fp32 and round once.
 - **hipDNN today:** both references implement the forward sink and the backward dSink. Pinned by
   `SinkWithUniformScores`, `SinkOnFullyMaskedRow`, `SinkEqualsExtraZeroValueKey`, CPU/GPU parity and the paged sink
   golden bundles; backward by `SinkEqualsExtraZeroValueKeyBackward`, `SinkBackwardUniformScores`,
   `TestCpuFpReferenceSdpaGradCheck.SinkDSink` and `SinkDSinkWithExplicitMaskDropout` (mutation: scaling D by
   `dropout_scale_inv` fails).
 - **vLLM:** sinks are in the model dtype and kernels upcast them.
-- **Future:** BFLOAT16 / HALF sinks in the model dtype (vLLM, HF) as an extension, in a follow-up.
+- **Future:** the FlyDSL forward matchers serve the FLOAT sink only; accepting the 16-bit sink their objects
+  already read is a follow-up.
 - **Note:** AITER's test uses an LSE without the sink for dSink; do not follow it.
 
 ### SEM-023: Max and Sum_exp row statistics

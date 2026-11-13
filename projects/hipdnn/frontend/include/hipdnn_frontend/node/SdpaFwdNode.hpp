@@ -259,7 +259,7 @@ public:
     }
 
 private:
-    // sink_token, when present: [1, H_q, 1, 1], FLOAT (cuDNN) or Q's data type.
+    // sink_token, when present: [1, H_q, 1, 1], FLOAT (cuDNN), or Q's data type set on the sink.
     Error validateSinkToken(int64_t numHeadsQ, const std::shared_ptr<TensorAttributes>& q) const
     {
         const auto ioDataType = graph_attributes.get_io_data_type();

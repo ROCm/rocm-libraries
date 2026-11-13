@@ -368,8 +368,8 @@ public:
         HIPDNN_CHECK_ERROR(detail::validateSdpaPhiloxOperand(
             attributes.get_offset(), "SdpaBwdNode", "offset", ioDataType));
 
-        // Rule 12: attention sink and its gradient: [1, H_q, 1, 1], FLOAT or Q's data type; the
-        // gradient has the sink's data type and needs the sink (cuDNN).
+        // Rule 12: attention sink and its gradient: [1, H_q, 1, 1], FLOAT, or Q's data type set on
+        // the tensor itself; the gradient has the sink's data type and needs the sink (cuDNN).
         const auto sink = attributes.get_sink_token();
         const auto dSink = attributes.get_dsink_token();
         const auto qDataType = detail::effectiveTensorDataType(q, ioDataType);

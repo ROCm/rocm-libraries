@@ -24,6 +24,11 @@
 #include <variant>
 #include <vector>
 
+namespace hipdnn_frontend::detail
+{
+struct TensorAttributesAccess;
+} // namespace hipdnn_frontend::detail
+
 namespace hipdnn_frontend::graph
 {
 using hipdnn_data_sdk::types::bfloat16;
@@ -81,6 +86,8 @@ enum class ScalarType
  */
 class TensorAttributes
 {
+    friend struct hipdnn_frontend::detail::TensorAttributesAccess;
+
 public:
     /// Variant type for storing pass-by-value scalar values
     using ValueVariant = std::
@@ -240,6 +247,7 @@ public:
         _value = v;
         _isRuntimePassByValue = false;
         _dataType = getDataTypeEnumFromType<T>();
+        _dataTypeFromContext = false;
         _dim = _stride = {1};
         return *this;
     }
@@ -424,6 +432,7 @@ public:
     TensorAttributes& set_data_type(DataType dataType) // NOLINT(readability-identifier-naming)
     {
         _dataType = dataType;
+        _dataTypeFromContext = false;
         return *this;
     }
 
@@ -595,6 +604,7 @@ public:
             {
                 _dataType = graphAttributes.get_io_data_type();
             }
+            _dataTypeFromContext = _dataType != DataType::NOT_SET;
         }
 
         return *this;
@@ -727,6 +737,7 @@ private:
     bool _uidSet = false;
     std::string _name;
     DataType _dataType = DataType::NOT_SET;
+    bool _dataTypeFromContext = false; ///< true when fill_from_context supplied _dataType
     std::vector<int64_t> _stride;
     std::vector<int64_t> _dim;
     bool _isVirtual = false;
@@ -740,3 +751,17 @@ private:
 };
 typedef TensorAttributes Tensor_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph
+
+namespace hipdnn_frontend::detail
+{
+// Internal reads of TensorAttributes state that is not part of the public API.
+struct TensorAttributesAccess
+{
+    // True when the tensor's data type was supplied by fill_from_context (the graph's io or
+    // intermediate type) rather than set on the tensor itself.
+    static bool isDataTypeFromContext(const graph::TensorAttributes& tensor)
+    {
+        return tensor._dataTypeFromContext;
+    }
+};
+} // namespace hipdnn_frontend::detail
