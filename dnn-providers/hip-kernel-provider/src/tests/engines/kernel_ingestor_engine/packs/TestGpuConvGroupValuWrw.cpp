@@ -40,8 +40,8 @@
  *
  * Every config of the catalog shipped for this device's architecture that serves a case runs on
  * it, in fp32, fp16 and bf16: grouped layers of 4 channels a group (odd batch), both layouts,
- * dense layers with ragged rows (widths no multiple of a lane's columns), width stride 2, 5x5,
- * true convolution, height stride / dilation / padding, several splits folded in order, and a
+ * dense layers with ragged rows (widths no multiple of a lane's columns), width stride 2, 1x1
+ * (2-D and 1-D), 5x5, true convolution, height stride / dilation / padding, several splits folded in order, and a
  * tensor past 2 GiB of small images (sampled).
  *
  * Tolerance: the sum is fp32 over the images and positions, so each element is off by at most a
@@ -301,7 +301,10 @@ std::vector<DeviceCase> deviceCases()
     // Width stride 2 (odd input width), groups of 4.
     cases.push_back({"Stride2Nchw", conv(2, 8, 8, 2, {15, 17}, {3, 3}, {1, 1}, {2, 2}, false)});
     cases.push_back({"Stride2Nhwc", conv(2, 8, 8, 2, {15, 16}, {3, 3}, {1, 1}, {2, 2}, true)});
-    // 5x5.
+    // 1x1 (2-D and 1-D) and 5x5.
+    cases.push_back({"PointwiseNchw", conv(3, 16, 16, 1, {9, 10}, {1, 1}, {0, 0}, {1, 1}, false)});
+    cases.push_back({"PointwiseNhwc", conv(3, 16, 16, 1, {9, 10}, {1, 1}, {0, 0}, {1, 1}, true)});
+    cases.push_back({"OneDPointwise", conv(5, 16, 16, 1, {37}, {1}, {0}, {1}, false)});
     cases.push_back({"FiveByFiveNchw", conv(2, 8, 8, 1, {12, 16}, {5, 5}, {2, 2}, {1, 1}, false)});
     // True convolution, grouped.
     auto convolution = conv(2, 16, 16, 4, {10, 12}, {3, 3}, {1, 1}, {1, 1}, false);

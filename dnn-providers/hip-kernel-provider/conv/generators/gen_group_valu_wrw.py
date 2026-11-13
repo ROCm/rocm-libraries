@@ -27,14 +27,16 @@ KNOBS = ["cb", "kb", "p", "nw", "dot2", "ring"]
 # Filter classes: (rows, columns, width stride, width dilation, width pre-padding).
 F3 = (3, 3, 1, 1, 1)
 F3S2 = (3, 3, 2, 1, 1)
+F1 = (1, 1, 1, 1, 0)
 F5 = (5, 5, 1, 1, 2)
 
 # Tiles per filter class and form: (cb, kb, p, nw). "pass": a wave's lanes take a pass of rows
 # side by side, each reading its filter rows' inputs (any height stride and dilation, either
 # layout); "ring": a lane group walks consecutive rows of one image with the input rows in a
-# register ring (channels-first, unit height stride and dilation). No 1x1 class: a pointwise
-# backward weights is a GEMM whose operands every tile re-reads from memory here (3.5 TFLOP/s on
-# gfx906 against MIOpen's 6), the BLAS and K3 engines' work. The tiles are the ones that
+# register ring (channels-first, unit height stride and dilation). The 1x1 tiles serve narrow
+# pointwise layers (16 to 32 channels, or few rows): a large pointwise backward weights is a GEMM
+# whose operands every tile re-reads from memory here, the BLAS and K3 engines' work. The tiles
+# are the ones that
 # won somewhere in the gfx906 sweeps of ResNeXt / RegNet / HRNet / Real-ESRGAN / RetinaNet layers
 # (~/old-asic-hipdnn/oldcdna/REPORT.md).
 TILES = {
@@ -60,6 +62,7 @@ TILES = {
         ],
     },
     F3S2: {"pass": [(4, 4, 4, 2), (2, 4, 4, 2), (1, 4, 4, 2), (1, 4, 2, 2)]},
+    F1: {"pass": [(4, 4, 8, 2), (8, 8, 8, 2), (8, 8, 4, 2), (8, 16, 4, 2)]},
     F5: {"pass": [(2, 4, 4, 2), (1, 4, 4, 2), (2, 2, 8, 2)], "ring": [(2, 2, 4, 2)]},
 }
 
