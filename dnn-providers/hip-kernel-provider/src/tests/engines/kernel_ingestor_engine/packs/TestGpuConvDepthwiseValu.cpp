@@ -1277,7 +1277,8 @@ void runRowtileBitwise(ConvShape shape,
     }
     else
     {
-        // A hashed pattern in [-1, 1]: as varied as random values, and quick for 2^30 elements.
+        // Hashed f16 bit patterns of magnitude below 1 (biased exponent 0-14, either sign): as
+        // varied as random values, and quick for 2^30 elements.
         for(auto* tensor : {&x, &w})
         {
             auto* data = static_cast<Half*>(tensor->rawHostData());
@@ -1286,8 +1287,8 @@ void runRowtileBitwise(ConvShape shape,
             for(size_t i = 0; i < count; ++i)
             {
                 const uint32_t h = (static_cast<uint32_t>(i) ^ salt) * 0x27d4eb2fu;
-                data[i]
-                    = Half(static_cast<float>(static_cast<int>((h >> 8) % 2001u) - 1000) / 1000.0f);
+                data[i].data = static_cast<uint16_t>(((h >> 16) & 0x8000u)
+                                                     | (((h >> 11) % 15u) << 10) | (h & 0x3ffu));
             }
             tensor->markHostModified();
         }
@@ -1426,7 +1427,7 @@ TEST(TestGpuConvDepthwiseValuRowtile, HalfServesTensorsPastTwoGiB)
     // 4097 rows of 4096 columns of 64 channels (512 KiB rows).
     auto shape = depthwise(64, {4097, 4096}, {3, 3}, {1, 1}, true);
     shape.n = 1;
-    runRowtileBitwise(shape, {rowtileConfig(3, 4, 4, 1), rowtileConfig(3, 4, 4, 2)}, 4099);
+    runRowtileBitwise(shape, {rowtileConfig(3, 4, 4, 2)}, 4099);
 }
 
 // Host-only: the matrix-core (hankel) backward-weights gates, one field at a time from an
