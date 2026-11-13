@@ -167,6 +167,16 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             PRIVATE HKP_TEST_HIP_CONV_FWD_FMA_IGEMM_RDNA=1
         )
     endif()
+    # The RDNA depthwise conv backward-data engine ships from descriptors/hip/conv_dgrad_dw_rdna/.
+    hkp_product_offers_engine(_hkp_hip_conv_dgrad_dw_rdna_bundle "hipkernel:hip_conv_dgrad_dw_rdna")
+    if(_hkp_hip_conv_dgrad_dw_rdna_bundle)
+        target_sources(hip_kernel_provider_integration_tests PRIVATE
+            kernel_ingestor_engine/IntegrationGpuHipConvDgradDwRdna.cpp
+        )
+        target_compile_definitions(hip_kernel_provider_integration_tests
+            PRIVATE HKP_TEST_HIP_CONV_DGRAD_DW_RDNA=1
+        )
+    endif()
     target_sources(hip_kernel_provider_integration_tests PRIVATE
         kernel_ingestor_engine/IntegrationGpuKernelIngestor.cpp
         kernel_ingestor_engine/IntegrationGpuKernelIngestorKpack.cpp
