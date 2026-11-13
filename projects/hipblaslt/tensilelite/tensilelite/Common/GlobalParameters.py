@@ -117,7 +117,7 @@ globalParameters["SolutionSelectionAlg"] = (
 )
 globalParameters["GenerateSourcesAndExit"] = False  # Exit after kernel source generation.
 globalParameters["ExitOnFails"] = (
-    1  # 1: Exit after benchmark run if failures detected.  2: Exit during benchmark run.
+    1  # 1: Exit after benchmark run (or a failed LibraryClient run) if failures detected.  2: Exit during benchmark run.
 )
 globalParameters["CpuThreads"] = (
     -1
@@ -535,6 +535,7 @@ defaultBenchmarkCommonParameters = [
     {"MaxLDS": [-1]},
     {"VectorWidthA": [-1]},
     {"VectorWidthB": [-1]},
+    {"LDSTrStoreShuffle": [0]},
     {"VectorStore": [-1]},
     {"StoreVectorWidth": [-1]},
     {"GlobalReadVectorWidthA": [-1]},

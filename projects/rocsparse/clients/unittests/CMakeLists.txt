@@ -615,23 +615,30 @@ set_tests_properties(
 endif()
 
 # ---------------------------------------------------------------------------
-# Code coverage: instrument the unit-test binaries so the library sources that
-# are compiled directly into them (primitives, level-1 device kernels,
-# indextype/datatype utils) emit LLVM profile data. Without this the binaries
-# run under `make coverage` but produce no .profraw and contribute nothing.
-# Matches the flags applied to the rocsparse library target.
+# Code coverage: instrument the unit-test binaries so host code in the library
+# sources compiled directly into them (primitives, the host side of the level-1
+# translation units, indextype/datatype utils) emits LLVM profile data.
+# -Xarch_host leaves the device kernels uninstrumented. Without this the
+# binaries run under `make coverage` but produce no .profraw and contribute
+# nothing. Matches the flags applied to the rocsparse library target.
 # ---------------------------------------------------------------------------
 if(BUILD_CODE_COVERAGE)
   foreach(_cov_tgt rocsparse-unit-test rocsparse-unit-test-device)
     if(TARGET ${_cov_tgt})
-      target_compile_options(${_cov_tgt} PRIVATE -fprofile-instr-generate -fcoverage-mapping)
-      # Host-only instrumentation, as for the library target: device-side
-      # coverage crashes the HIP runtime at profile dump (AISPARSE-778).
+      # Host-only instrumentation, as for the library target. -Xarch_host keeps
+      # it off the device image (AISPARSE-778). ccache < 4.12.1 drops -Xarch_*
+      # arguments (ccache/ccache#1632). A dropped -Xarch_host then leaves the
+      # profiles empty instead of aborting at profile dump. The launcher is
+      # cleared on these targets so the flags reach clang. That clear does
+      # nothing when ccache is the compiler itself
+      # (CXX=/usr/lib/ccache/amdclang++).
       target_compile_options(${_cov_tgt} PRIVATE
-        "SHELL:-Xarch_device -fno-profile-instr-generate"
-        "SHELL:-Xarch_device -fno-coverage-mapping")
+        "SHELL:-Xarch_host -fprofile-instr-generate"
+        "SHELL:-Xarch_host -fcoverage-mapping")
       target_link_options(${_cov_tgt} PRIVATE -u__llvm_profile_runtime)
       target_link_libraries(${_cov_tgt} PRIVATE ${ROCSPARSE_PROFILE_RUNTIME})
+      set_property(TARGET ${_cov_tgt} PROPERTY C_COMPILER_LAUNCHER "")
+      set_property(TARGET ${_cov_tgt} PROPERTY CXX_COMPILER_LAUNCHER "")
     endif()
   endforeach()
 endif()
