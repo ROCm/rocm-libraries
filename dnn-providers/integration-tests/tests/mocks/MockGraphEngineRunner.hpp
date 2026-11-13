@@ -45,6 +45,14 @@ public:
                  const BenchmarkSettings& settings),
                 (override));
 
+    MOCK_METHOD(CaptureResult,
+                captureReplay,
+                (GraphSession & session,
+                 VariantPack& variantPack,
+                 const CaptureSettings& settings,
+                 const ReplayHooks& hooks),
+                (override));
+
     MOCK_METHOD(hipdnn_frontend::Error,
                 candidatePage,
                 (GraphSession & session,

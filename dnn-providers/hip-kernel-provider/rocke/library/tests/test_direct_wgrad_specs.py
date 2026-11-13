@@ -254,3 +254,27 @@ def test_degenerate_knobs_are_rejected(spec, valid):
 )
 def test_missing_dtype_is_rejected(spec, valid):
     assert not valid(spec)[0]
+
+
+@pytest.mark.parametrize(
+    "spec,valid",
+    [
+        (DwWgradColsSpec(problem=_dw(3, W=64, dil_h=2)), is_valid_dw_wgrad_cols_spec),
+        (DwWgradLdsSpec(problem=_dw(64, dil_h=2)), is_valid_dw_wgrad_lds_spec),
+        (
+            WgradGatherSpec(problem=_p(cpg=3, kpg=24, stride=2, dil_h=2)),
+            is_valid_wgrad_gather_spec,
+        ),
+        (DirectWgradTiledSpec(problem=_p(dil_h=2)), is_valid_wgrad_tiled_spec),
+        (DwWgradMfmaSpec(problem=_dw(64, dil_h=2)), is_valid_dw_wgrad_mfma_spec),
+        (
+            GroupedWgradMfmaSpec(problem=_p(groups=16, cpg=4, kpg=4, dil_h=2)),
+            is_valid_grouped_wgrad_mfma_spec,
+        ),
+    ],
+)
+def test_dilated_problem_is_refused_with_the_shared_text(spec, valid):
+    """Every direct wgrad validator refuses a dilated problem with
+    ``dilation_reason``'s text; the host ctest ``conv_direct_dw_dgrad_host``
+    pins the C++ validators to the same literal."""
+    assert valid(spec) == (False, "this direct conv kernel has no dilation (got 2x1)")

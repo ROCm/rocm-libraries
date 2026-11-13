@@ -61,7 +61,7 @@ helper Z".
 | §6.3 LDS bank-conflict avoidance | `ImplicitGemmConvSpec.lds_k_pad` (default `+8` sync, `0` async) plus manual consumer-side read swizzle when async requires packed LDS |
 | §6.4a XOR swizzle without padding (async copies) | permute each lane's DMA source chunk so the async copies land XOR-swizzled in LDS, and read with the same permutation (`use_kv_lds_swizzle` in the tiled 3D attention specs) |
 | §6.4 LDS double-buffer | `pipeline="compv4"` in `UniversalGemmSpec`; second `smem_alloc` for the ping-pong slot |
-| §6.6 Caches: cache policy of async DRAM→LDS copies | `coherency=cache_policy_from_name(name)` on `async_buffer_load_lds_addr` (`rocke.core.ir`, names in `CACHE_POLICY_NAMES`); `"stream"` (non-temporal) for read-once streams such as decode K/V (`kv_cache_policy` in the tiled 2D/3D attention specs) |
+| §6.6 Caches: cache policy of async DRAM→LDS copies | `coherency=cache_policy_from_name(name)` on `async_buffer_load_lds_addr` (`rocke.core.ir`, names in `CACHE_POLICY_NAMES`); `"stream"` (non-temporal) for read-once streams larger than the last-level cache, such as the K/V of a decode whose K/V exceeds it (`kv_cache_policy` in the tiled 2D/3D attention specs; the 3D dispatcher (`_kv_cache_policy_3d`) picks `"stream"` only for all-decode fp16/bf16 batches above 256 MiB of K/V per call, and a smaller K/V keeps `"all"` so the next call can hit in the cache; the spec field itself defaults to `"all"`) |
 
 ## §7 Matrix-instruction selection
 

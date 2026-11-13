@@ -14,6 +14,8 @@
 #include <hipdnn_test_sdk/utilities/NonFiniteMask.hpp>
 #include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 
+#include "harness/bundle/LiveRows.hpp"
+
 namespace hipdnn_integration_tests::bundle
 {
 
@@ -48,9 +50,8 @@ std::string validatorNotApplicable(const std::string& label,
 /// site the comparison runs on. Distinct from validatorNotApplicable because the data
 /// type is fine here and naming it would send the reader to the wrong config field.
 ///
-/// Falling back to the host validator would read device memory through host pointers,
-/// and silently grading to a validator the config did not ask for is the miscompare
-/// this whole mechanism exists to prevent.
+/// makeValidator() has no device implementation of the kind, so it returns this report
+/// for a device-site request.
 std::string validatorNotApplicableAtSite(const std::string& label,
                                          hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
                                          const char* validatorName)
@@ -71,17 +72,80 @@ std::string validatorNotApplicableAtSite(const std::string& label,
 }
 
 /// The report for a ragged output whose comparison resolved to the device. No device
-/// validator understands ragged layouts, and falling back to the host validator would
-/// read device memory through host pointers.
+/// validator understands ragged layouts.
 std::string raggedNotSupportedOnDevice(const std::string& label)
 {
     std::ostringstream error;
     error << "\nRagged output NOT COMPARABLE ON DEVICE\n"
           << "  Tensor: " << label << "\n"
-          << "  Ragged outputs are compared on the host only, and this comparison runs on\n"
-             "  the device, where the reference left its output.\n"
-             "  Rerun with --validator cpu to compare it on the host.\n";
+          << "  Ragged outputs are compared on the host only, and this run asks for the\n"
+             "  comparison on the device.\n"
+             "  Rerun with --validator cpu or --validator auto to compare it on the host.\n";
     return error.str();
+}
+
+// The report for an output with live rows whose comparison was asked to run on the
+// device. The live-row view reads host memory, and no device validator skips rows.
+std::string liveRowsNotSupportedOnDevice(const std::string& label)
+{
+    std::ostringstream error;
+    error << "\nOutput with live rows NOT COMPARABLE ON DEVICE\n"
+          << "  Tensor: " << label << "\n"
+          << "  The metadata live_rows of this output are applied on the host only, and this\n"
+             "  run asks for the comparison on the device.\n"
+             "  Rerun with --validator cpu or --validator auto to compare it on the host.\n";
+    return error.str();
+}
+
+// The floating-point data types, whose host allclose validator can match infinities.
+bool isFloatingPoint(hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    switch(dataType)
+    {
+    case DataType::FLOAT:
+    case DataType::HALF:
+    case DataType::BFLOAT16:
+    case DataType::DOUBLE:
+    case DataType::FP8_E4M3:
+    case DataType::FP8_E5M2:
+    case DataType::FP8_E4M3_FNUZ:
+    case DataType::FP8_E5M2_FNUZ:
+        return true;
+    default:
+        return false;
+    }
+}
+
+// The floating-point data types that have a device allclose validator.
+bool hasDeviceAllClose(hipdnn_flatbuffers_sdk::data_objects::DataType dataType)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    return dataType == DataType::FLOAT || dataType == DataType::HALF
+           || dataType == DataType::BFLOAT16 || dataType == DataType::DOUBLE;
+}
+
+// Grades a floating-point allclose tensor at the device site so that same-signed
+// infinities match, as on the host. The device validator fails every infinity, so a
+// tensor that fails on the device is graded again on the host.
+bool deviceAllCloseMatchingInfinities(hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
+                                      const std::string& label,
+                                      hipdnn_data_sdk::utilities::ITensor& expected,
+                                      hipdnn_data_sdk::utilities::ITensor& actual,
+                                      ComparisonTolerance tolerance)
+{
+    tolerance.kind = ValidatorKind::ALLCLOSE;
+    if(makeValidator(dataType, label, tolerance, ValidationSite::DEVICE)
+           .validator->allClose(expected, actual))
+    {
+        return true;
+    }
+
+    expected.rawHostData();
+    actual.rawHostData();
+    tolerance.kind = ValidatorKind::ALLCLOSE_MATCHING_INFINITIES;
+    return makeValidator(dataType, label, tolerance, ValidationSite::HOST)
+        .validator->allClose(expected, actual);
 }
 
 } // namespace
@@ -303,6 +367,33 @@ std::optional<TensorMismatch>
         return TensorMismatch{uid, label, raggedNotSupportedOnDevice(label)};
     }
 
+    if(site == ValidationSite::HOST)
+    {
+        // Copy device-resident data to the host here, on one thread. The host validator
+        // reads the elements from many threads.
+        expected.rawHostData();
+        actual.rawHostData();
+        if(tolerance.kind == ValidatorKind::ALLCLOSE && isFloatingPoint(dataType))
+        {
+            tolerance.kind = ValidatorKind::ALLCLOSE_MATCHING_INFINITIES;
+        }
+    }
+    // match_nonfinite has no device validator: such a request falls through to makeValidator(),
+    // which refuses it instead of grading it as plain allclose.
+    else if(hasDeviceAllClose(dataType) && !tolerance.matchNonFinite
+            && (tolerance.kind == ValidatorKind::ALLCLOSE
+                || tolerance.kind == ValidatorKind::ALLCLOSE_MATCHING_INFINITIES))
+    {
+        if(deviceAllCloseMatchingInfinities(dataType, label, expected, actual, tolerance))
+        {
+            return std::nullopt;
+        }
+        return TensorMismatch{
+            uid,
+            label,
+            formatMismatchReport(uid, label, dataType, expected, actual, tolerance, contextLine)};
+    }
+
     auto selection = makeValidator(dataType, label, tolerance, site);
     if(selection.validator == nullptr)
     {
@@ -326,7 +417,9 @@ std::vector<TensorMismatch>
                    const ExpectedTensorLookup& expectedFor,
                    const ToleranceLookup& toleranceFor,
                    ValidationSite site,
-                   const std::string& contextLine)
+                   const std::string& contextLine,
+                   const LiveRowMap& liveRows,
+                   std::optional<ValidationSite> hostOnlySite)
 {
     const auto& tensorAttrMap = wrapper.getTensorMap();
 
@@ -334,13 +427,36 @@ std::vector<TensorMismatch>
     for(const int64_t uid : outputUids)
     {
         const auto* attrs = tensorAttrMap.at(uid);
-        auto mismatch = compareTensor(uid,
-                                      *attrs,
-                                      expectedFor(uid),
-                                      *actual.at(uid),
-                                      toleranceFor(tensorLabel(uid, *attrs), attrs->data_type()),
-                                      site,
-                                      contextLine);
+        const auto tolerance = toleranceFor(tensorLabel(uid, *attrs), attrs->data_type());
+        std::optional<TensorMismatch> mismatch;
+        const auto live = liveRows.find(uid);
+        if(live == liveRows.end())
+        {
+            const auto tensorSite = attrs->ragged_offset_tensor_uid().has_value()
+                                        ? hostOnlySite.value_or(site)
+                                        : site;
+            mismatch = compareTensor(
+                uid, *attrs, expectedFor(uid), *actual.at(uid), tolerance, tensorSite, contextLine);
+        }
+        else if(hostOnlySite.value_or(site) == ValidationSite::DEVICE)
+        {
+            const auto label = tensorLabel(uid, *attrs);
+            mismatch = TensorMismatch{uid, label, liveRowsNotSupportedOnDevice(label)};
+        }
+        else
+        {
+            const auto expectedView
+                = detail::makeLiveRowView(expectedFor(uid), attrs->data_type(), live->second);
+            const auto actualView
+                = detail::makeLiveRowView(*actual.at(uid), attrs->data_type(), live->second);
+            mismatch = compareTensor(uid,
+                                     *attrs,
+                                     *expectedView,
+                                     *actualView,
+                                     tolerance,
+                                     ValidationSite::HOST,
+                                     contextLine);
+        }
         if(mismatch.has_value())
         {
             mismatches.push_back(*std::move(mismatch));

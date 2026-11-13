@@ -9,10 +9,16 @@
 #include "plans/SdpaPlanUtils.hpp"
 
 #include <cmath>
+#include <exception>
+#include <optional>
+#include <string>
+#include <utility>
 
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
+#include <hipdnn_data_sdk/utilities/RaggedTensor.hpp>
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/ApplicabilityUtils.hpp>
@@ -25,6 +31,9 @@ namespace asm_sdpa_engine
 {
 
 using namespace hip_kernel_provider_common;
+
+constexpr auto SDPA_SEQ_AXIS
+    = static_cast<flatbuffers::uoffset_t>(hipdnn_data_sdk::utilities::SDPA_SEQ_AXIS);
 
 static RoundingMode
     getRoundingMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& /*attrs*/)
@@ -45,13 +54,6 @@ static RoundingMode
         return RoundingMode::RTNA;
     }
     return getRoundingMode(attrs);
-}
-
-static BatchMode getBatchMode(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
-{
-    return (attrs.seq_len_q_tensor_uid().has_value() || attrs.seq_len_kv_tensor_uid().has_value())
-               ? BatchMode::GROUP
-               : BatchMode::BATCH;
 }
 
 static std::string getKernelNameKey(const std::string& archId,
@@ -134,6 +136,80 @@ static bool isScalarTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAtt
         elementCount *= dims->Get(i);
     }
     return elementCount == 1;
+}
+
+// AITER group mode reads INT32 [B+1] token seqstarts.
+static bool isTokenSeqstartTensor(
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
+    int64_t uid,
+    int64_t batch)
+{
+    const auto it = tensorMap.find(uid);
+    if(it == tensorMap.end())
+    {
+        return false;
+    }
+    const auto* tensor = it->second;
+    if(tensor->virtual_() || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(tensor)
+       || tensor->data_type() != hipdnn_flatbuffers_sdk::data_objects::DataType::INT32)
+    {
+        return false;
+    }
+    const auto* dims = tensor->dims();
+    const auto* strides = tensor->strides();
+    // Only the batch-axis stride is checked: dims 1-3 are size 1, so their index is always 0
+    // and their strides never contribute to an element address. stride[0] == 1 makes the
+    // B+1 INT32 entries contiguous, which is how AITER reads seqstart[b].
+    return dims != nullptr && strides != nullptr && dims->size() == 4 && strides->size() == 4
+           && dims->Get(0) == batch + 1 && dims->Get(1) == 1 && dims->Get(2) == 1
+           && dims->Get(3) == 1 && strides->Get(0) == 1;
+}
+
+// hipDNN addresses a ragged element at offset[b] * multiplier + strides . (h, s, d), while
+// AITER uses seqstart[b] * seq_stride + strides . (h, s, d) with one seqstart for Q/O and one
+// for K/V. The two agree for any stride permutation under the conditions below.
+static bool hasAiterCompatibleRaggedAddressing(
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& qTensor,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& kTensor,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& vTensor,
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& oTensor)
+{
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
+
+    const int64_t qoOffsetUid = qTensor.ragged_offset_tensor_uid().value();
+    const int64_t kvOffsetUid = kTensor.ragged_offset_tensor_uid().value();
+    HIP_KERNEL_RETURN_FALSE_IF(oTensor.ragged_offset_tensor_uid().value() != qoOffsetUid,
+                               "Q and O must share a ragged offset tensor");
+    HIP_KERNEL_RETURN_FALSE_IF(vTensor.ragged_offset_tensor_uid().value() != kvOffsetUid,
+                               "K and V must share a ragged offset tensor");
+
+    for(const auto& [label, tensor] : {std::pair{"q", &qTensor},
+                                       std::pair{"k", &kTensor},
+                                       std::pair{"v", &vTensor},
+                                       std::pair{"o", &oTensor}})
+    {
+        HIP_KERNEL_RETURN_FALSE_IF(tensor->strides() == nullptr || tensor->strides()->size() != 4,
+                                   std::string(label) + " tensor must have rank 4 strides");
+        HIP_KERNEL_RETURN_FALSE_IF(
+            tensor->ragged_offset_multiplier() != tensor->strides()->Get(SDPA_SEQ_AXIS),
+            std::string(label) + " tensor ragged_offset_multiplier must equal its sequence "
+                + "stride (Actual multiplier: " + std::to_string(tensor->ragged_offset_multiplier())
+                + ", sequence stride: " + std::to_string(tensor->strides()->Get(SDPA_SEQ_AXIS))
+                + ")");
+    }
+
+    const int64_t batch = qTensor.dims()->Get(0);
+    HIP_KERNEL_RETURN_FALSE_IF(
+        !isTokenSeqstartTensor(tensorMap, qoOffsetUid, batch)
+            || !isTokenSeqstartTensor(tensorMap, kvOffsetUid, batch),
+        "Ragged offset tensors must be non-virtual INT32 [B+1, 1, 1, 1] device tensors");
+    return true;
 }
 
 static bool isMi308Device(hipStream_t stream)
@@ -271,10 +347,59 @@ static std::string getKernelTocKey(std::string coName, const std::string& archId
     return asm_kernels::getAsmKernelTocKey(coName);
 }
 
+namespace
+{
+
+// The forward graph's Q, K, V, O and (optional, else nullptr) stats tensors.
+struct ForwardOperands
+{
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* q = nullptr;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* k = nullptr;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* v = nullptr;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* o = nullptr;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* stats = nullptr;
+};
+
+// The kernels issue wide row loads on Q/K/V and row stores on O (and read/write the fp8
+// descales and the LSE output at fixed widths), and the backend rejects any pointer that
+// violates the declared alignment, so a tensor declaring less than the kernel needs is
+// declined. fp8 K/V rows are half as wide per vector as bf16. See SdpaPlanUtils.hpp for the
+// per-tensor needs. Logs the decline and returns false when a tensor is under-aligned.
+template <typename TensorMap>
+bool isDeclaredAlignmentApplicable(
+    const ForwardOperands& t,
+    const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs,
+    const TensorMap& tensorMap,
+    bool fp8,
+    const char* HIP_KERNEL_LOG_PREFIX) // NOLINT(readability-identifier-naming)
+{
+    const auto descale
+        = [&](const auto& uid) -> const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* {
+        return fp8 ? tensorMap.at(uid.value()) : nullptr;
+    };
+    const int64_t kvNeed
+        = fp8 ? plan_utils::K_FP8_KV_ROW_ALIGNMENT_BYTES : plan_utils::K_ROW_ALIGNMENT_BYTES;
+    const auto underAligned = plan_utils::findUnderAlignedTensor({
+        {"q", t.q, plan_utils::K_ROW_ALIGNMENT_BYTES},
+        {"k", t.k, kvNeed},
+        {"v", t.v, kvNeed},
+        {"o", t.o, plan_utils::K_ROW_ALIGNMENT_BYTES},
+        {"stats", t.stats, plan_utils::K_STATS_ALIGNMENT_BYTES},
+        {"descale_q", descale(attrs.descale_q_tensor_uid()), plan_utils::K_DESCALE_ALIGNMENT_BYTES},
+        {"descale_k", descale(attrs.descale_k_tensor_uid()), plan_utils::K_DESCALE_ALIGNMENT_BYTES},
+        {"descale_v", descale(attrs.descale_v_tensor_uid()), plan_utils::K_DESCALE_ALIGNMENT_BYTES},
+    });
+    HIP_KERNEL_RETURN_FALSE_IF(underAligned.has_value(), *underAligned);
+    return true;
+}
+
+} // namespace
+
 bool SdpaFwdPlanBuilder::isApplicable(
     const Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
+    using namespace hipdnn_flatbuffers_sdk::utilities;
     // NOLINTNEXTLINE(readability-identifier-naming)
     static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
 
@@ -283,13 +408,9 @@ bool SdpaFwdPlanBuilder::isApplicable(
     // rather than risk a mismatch (RFC 0008 §4.6).
     HIP_KERNEL_RETURN_FALSE_IF(opGraph.getGraph().is_override_shape_enabled(),
                                "Graph has override shapes enabled");
-
-    // Ragged tensors address each batch through a device offset table; the kernels read
-    // dense strides, and GROUP mode (seq_len tensors) does not consume hipDNN ragged
-    // offsets, so a ragged graph must decline rather than be read as dense.
     HIP_KERNEL_RETURN_FALSE_IF(
-        !hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds(opGraph.getTensorMap()),
-        "Graph has ragged tensors");
+        !hip_kernel_provider::core::utils::hasOnly16ByteAlignedTensors(opGraph.getTensorMap()),
+        "All tensors must be aligned to a multiple of 16 bytes");
 
     auto& nodeWrappers = opGraph.nodeWrappers();
 
@@ -346,6 +467,11 @@ bool SdpaFwdPlanBuilder::isApplicable(
             "scale tensor must be pass-by-value (compile-time constant or runtime)");
     }
 
+    if(!plan_utils::isAttnScaleApplicable(attrs, opGraph.getTensorMap(), HIP_KERNEL_LOG_PREFIX))
+    {
+        return false;
+    }
+
     const auto& tensorMap = opGraph.getTensorMap();
 
     const int64_t qUid = attrs.q_tensor_uid();
@@ -357,6 +483,31 @@ bool SdpaFwdPlanBuilder::isApplicable(
     auto* kTensor = tensorMap.at(kUid);
     auto* vTensor = tensorMap.at(vUid);
     auto* oTensor = tensorMap.at(oUid);
+
+    BatchMode batchMode;
+    {
+        const auto unsupportedRaggedTensorIds
+            = listUnsupportedRaggedTensorIds(tensorMap, {qUid, kUid, vUid, oUid});
+        HIP_KERNEL_RETURN_FALSE_IF(
+            !unsupportedRaggedTensorIds.empty(),
+            "Only the Q, K, V and O tensors can be ragged. The following tensor uids are ragged "
+            "and not supported: "
+                + hipdnn_data_sdk::utilities::vecToString(unsupportedRaggedTensorIds));
+
+        const int numberRagged
+            = static_cast<int>(qTensor->ragged_offset_tensor_uid().has_value())
+              + static_cast<int>(kTensor->ragged_offset_tensor_uid().has_value())
+              + static_cast<int>(vTensor->ragged_offset_tensor_uid().has_value())
+              + static_cast<int>(oTensor->ragged_offset_tensor_uid().has_value());
+
+        HIP_KERNEL_RETURN_FALSE_IF(attrs.seq_len_kv_tensor_uid().has_value()
+                                       || attrs.seq_len_q_tensor_uid().has_value(),
+                                   "SEQ_LENS_Q and SEQ_LENS_KV not supported");
+
+        HIP_KERNEL_RETURN_FALSE_IF(numberRagged != 0 && numberRagged != 4,
+                                   "Either all or none of Q, K, V or O must be ragged");
+        batchMode = (numberRagged == 4) ? BatchMode::GROUP : BatchMode::BATCH;
+    }
 
     // Validate Q/K/V/O ranks before accessing their dims by index.
     HIP_KERNEL_RETURN_FALSE_IF(
@@ -379,9 +530,18 @@ bool SdpaFwdPlanBuilder::isApplicable(
         !wouldFwdDimsFitKernargFields(*qTensor, *kTensor, *vTensor),
         "Tensor dimensions overflow the 32-bit kernarg fields that carry them");
 
+    if(batchMode == BatchMode::GROUP
+       && !hasAiterCompatibleRaggedAddressing(tensorMap, *qTensor, *kTensor, *vTensor, *oTensor))
+    {
+        return false;
+    }
+
     // Validate optional stats (LSE) output tensor.
     // Gate purely on generate_stats; the UID is required when the flag is set.
     const bool hasStats = hasStatsOutput(attrs);
+    // Varlen LSE is [H, total_q] indexed by seqstart, not the dense [B, H, Sq] stats layout.
+    HIP_KERNEL_RETURN_FALSE_IF(hasStats && batchMode == BatchMode::GROUP,
+                               "stats (LSE) output is not supported for ragged tensors");
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* statsTensor = nullptr;
     if(hasStats)
     {
@@ -498,34 +658,6 @@ bool SdpaFwdPlanBuilder::isApplicable(
             "supported");
     }
 
-    // The kernels issue wide row loads on Q/K/V and row stores on O (and read/write the fp8
-    // descales and the LSE output at fixed widths), and the backend rejects any pointer that
-    // violates the declared alignment, so decline when a tensor declares less than the kernel
-    // needs. fp8 K/V rows are half as wide per vector as bf16. See SdpaPlanUtils.hpp for the
-    // per-tensor needs.
-    {
-        const bool fp8 = dataTypeId == "fp8bf16";
-        const int64_t kvNeed
-            = fp8 ? plan_utils::K_FP8_KV_ROW_ALIGNMENT_BYTES : plan_utils::K_ROW_ALIGNMENT_BYTES;
-        const auto underAligned = plan_utils::findUnderAlignedTensor({
-            {"q", qTensor, plan_utils::K_ROW_ALIGNMENT_BYTES},
-            {"k", kTensor, kvNeed},
-            {"v", vTensor, kvNeed},
-            {"o", oTensor, plan_utils::K_ROW_ALIGNMENT_BYTES},
-            {"stats", statsTensor, plan_utils::K_STATS_ALIGNMENT_BYTES},
-            {"descale_q",
-             fp8 ? tensorMap.at(attrs.descale_q_tensor_uid().value()) : nullptr,
-             plan_utils::K_DESCALE_ALIGNMENT_BYTES},
-            {"descale_k",
-             fp8 ? tensorMap.at(attrs.descale_k_tensor_uid().value()) : nullptr,
-             plan_utils::K_DESCALE_ALIGNMENT_BYTES},
-            {"descale_v",
-             fp8 ? tensorMap.at(attrs.descale_v_tensor_uid().value()) : nullptr,
-             plan_utils::K_DESCALE_ALIGNMENT_BYTES},
-        });
-        HIP_KERNEL_RETURN_FALSE_IF(underAligned.has_value(), *underAligned);
-    }
-
     // Softmax/output (de)quantization is not implemented by the v3 forward kernel
     // (its argument struct exposes only q/k/v descales).
     HIP_KERNEL_RETURN_FALSE_IF(attrs.descale_s_tensor_uid().has_value(),
@@ -569,11 +701,17 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                 static_cast<int>(vTensor->dims()->Get(3)),
                                 maskType,
                                 getBf16ConvertMode(attrs, dataTypeId),
-                                getBatchMode(attrs),
+                                batchMode,
                                 &cfg_fmha_fwd);
 
-    HIP_KERNEL_RETURN_FALSE_IF(key.empty(),
-                               "Could not find matching kernel for parameter combination");
+    HIP_KERNEL_RETURN_FALSE_IF(
+        key.empty(),
+        "Could not find matching kernel for parameter combination. dataType = " + dataTypeId
+            + " qDim = " + std::to_string(qTensor->dims()->Get(3))
+            + " vDim = " + std::to_string(vTensor->dims()->Get(3))
+            + " mask = " + std::to_string(static_cast<int>(maskType)) + " rounding = "
+            + std::to_string(static_cast<int>(getBf16ConvertMode(attrs, dataTypeId)))
+            + " batch = " + std::to_string(static_cast<int>(batchMode)));
 
     // Q/K/V byte strides and the Ts product are scaled by the resolved input
     // size, which the datatype checks above have narrowed to bf16 or fp8bf16.
@@ -595,7 +733,12 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                        inputBytes * cfg_fmha_fwd.at(key).ts_qo),
         "Forward Ts product overflows the uint32_t s_Ts kernarg field");
 
-    return true;
+    return isDeclaredAlignmentApplicable(
+        ForwardOperands{qTensor, kTensor, vTensor, oTensor, statsTensor},
+        attrs,
+        tensorMap,
+        dataTypeId == "fp8bf16",
+        HIP_KERNEL_LOG_PREFIX);
 }
 
 size_t SdpaFwdPlanBuilder::getMaxWorkspaceSize(
@@ -653,46 +796,49 @@ void SdpaFwdPlanBuilder::buildPlan(
     auto* vTensor = tensorMap.at(vUid);
     auto* oTensor = tensorMap.at(oUid);
 
-    // Extract dimensions from Q tensor: [B, H_q, S_q, D_qk]
+    const unsigned int headAxis = 1U;
+    const unsigned int seqAxis = SDPA_SEQ_AXIS;
+
+    // Extract dimensions from Q tensor
     auto* qDims = qTensor->dims();
     auto batchSize = static_cast<unsigned int>(qDims->Get(0));
-    auto numHeadsQ = static_cast<unsigned int>(qDims->Get(1));
-    auto seqLenQ = static_cast<unsigned int>(qDims->Get(2));
+    auto numHeadsQ = static_cast<unsigned int>(qDims->Get(headAxis));
+    auto seqLenQ = static_cast<unsigned int>(qDims->Get(seqAxis));
     auto headDimQk = static_cast<unsigned int>(qDims->Get(3));
 
-    // Extract dimensions from K tensor: [B, H_kv, S_kv, D_qk]
+    // Extract dimensions from K tensor
     auto* kDims = kTensor->dims();
-    auto numHeadsKv = static_cast<unsigned int>(kDims->Get(1));
-    auto seqLenKv = static_cast<unsigned int>(kDims->Get(2));
+    auto numHeadsKv = static_cast<unsigned int>(kDims->Get(headAxis));
+    auto seqLenKv = static_cast<unsigned int>(kDims->Get(seqAxis));
 
     // Extract dimensions from V tensor: [B, H_kv, S_kv, D_v]
     auto* vDims = vTensor->dims();
     auto headDimV = static_cast<unsigned int>(vDims->Get(3));
 
-    // Extract strides (in elements) - Q: [B, H_q, S_q, D_qk]
+    // Extract strides (in elements) - Q
     auto* qStrides = qTensor->strides();
     auto qStrideBatch = static_cast<unsigned int>(qStrides->Get(0));
-    auto qStrideHead = static_cast<unsigned int>(qStrides->Get(1));
-    auto qStrideSeq = static_cast<unsigned int>(qStrides->Get(2));
+    auto qStrideHead = static_cast<unsigned int>(qStrides->Get(headAxis));
+    auto qStrideSeq = static_cast<unsigned int>(qStrides->Get(seqAxis));
     auto qStrideRow = qStrideSeq; // Same as sequence stride
 
-    // Extract strides - K: [B, H_kv, S_kv, D_qk]
+    // Extract strides - K
     auto* kStrides = kTensor->strides();
     auto kStrideBatch = static_cast<unsigned int>(kStrides->Get(0));
-    auto kStrideHead = static_cast<unsigned int>(kStrides->Get(1));
-    auto kStrideSeq = static_cast<unsigned int>(kStrides->Get(2));
+    auto kStrideHead = static_cast<unsigned int>(kStrides->Get(headAxis));
+    auto kStrideSeq = static_cast<unsigned int>(kStrides->Get(seqAxis));
 
-    // Extract strides - V: [B, H_kv, S_kv, D_v]
+    // Extract strides - V
     auto* vStrides = vTensor->strides();
     auto vStrideBatch = static_cast<unsigned int>(vStrides->Get(0));
-    auto vStrideHead = static_cast<unsigned int>(vStrides->Get(1));
-    auto vStrideSeq = static_cast<unsigned int>(vStrides->Get(2));
+    auto vStrideHead = static_cast<unsigned int>(vStrides->Get(headAxis));
+    auto vStrideSeq = static_cast<unsigned int>(vStrides->Get(seqAxis));
 
-    // Extract strides - O: [B, H_q, S_q, D_v]
+    // Extract strides - O
     auto* oStrides = oTensor->strides();
     auto oStrideBatch = static_cast<unsigned int>(oStrides->Get(0));
-    auto oStrideHead = static_cast<unsigned int>(oStrides->Get(1));
-    auto oStrideSeq = static_cast<unsigned int>(oStrides->Get(2));
+    auto oStrideHead = static_cast<unsigned int>(oStrides->Get(headAxis));
+    auto oStrideSeq = static_cast<unsigned int>(oStrides->Get(seqAxis));
 
     hipdnn_plugin_sdk::ScalarOperand attnScale{};
     if(sdpaAttrs.scale_tensor_uid().has_value())
@@ -711,7 +857,7 @@ void SdpaFwdPlanBuilder::buildPlan(
     }
 
     // Extract optional LSE output metadata
-    int64_t lseUid = -1;
+    std::optional<int64_t> lseUid;
     unsigned int lseStrideHead = 0;
     const bool hasStats = hasStatsOutput(sdpaAttrs);
     if(hasStats)
@@ -723,8 +869,8 @@ void SdpaFwdPlanBuilder::buildPlan(
                 "SdpaFwdPlanBuilder::buildPlan: generate_stats is set but stats_tensor_uid "
                 "is missing");
         }
-        lseUid = sdpaAttrs.stats_tensor_uid().value();
-        const auto lseIt = tensorMap.find(lseUid);
+        lseUid = sdpaAttrs.stats_tensor_uid();
+        const auto lseIt = tensorMap.find(lseUid.value());
         if(lseIt == tensorMap.end())
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -786,6 +932,17 @@ void SdpaFwdPlanBuilder::buildPlan(
                                                         sdpaAttrs.descale_v_tensor_uid().value()};
     }
 
+    // isApplicable ensures all of q, k, v and o tensors are ragged if any are, and that O and V
+    // share the Q and K offset tensors respectively
+    const auto batchMode
+        = qTensor->ragged_offset_tensor_uid().has_value() ? BatchMode::GROUP : BatchMode::BATCH;
+
+    if(batchMode == BatchMode::GROUP)
+    {
+        params.group = SdpaFwdGroupModeParams{qTensor->ragged_offset_tensor_uid().value(),
+                                              kTensor->ragged_offset_tensor_uid().value()};
+    }
+
     // Find matching kernel to graph
     fmha_v3_fwdConfig config;
     auto kernelKey = getKernelNameKey(deviceString,
@@ -794,7 +951,7 @@ void SdpaFwdPlanBuilder::buildPlan(
                                       static_cast<int>(headDimV),
                                       params.maskType,
                                       getBf16ConvertMode(sdpaAttrs, dataTypeId),
-                                      getBatchMode(sdpaAttrs),
+                                      batchMode,
                                       &cfg_fmha_fwd);
 
     if(kernelKey.empty())

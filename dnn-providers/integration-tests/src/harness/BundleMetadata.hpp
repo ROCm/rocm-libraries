@@ -5,6 +5,7 @@
 
 #ifndef HIPDNN_FLATBUFFERS_SDK_SKIP_JSON_LIB
 
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -16,6 +17,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <vector>
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_test_sdk/utilities/ArchMatch.hpp>
@@ -24,9 +26,45 @@
 
 #include "harness/bundle/EngineVariant.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
+#include "harness/input-init/TensorAliases.hpp"
 
 namespace hipdnn_integration_tests
 {
+
+// A tensor whose data starts `startOffset` bytes past an aligned address in the
+// engine's variant pack.
+struct TensorStartOffset
+{
+    int64_t uid = 0;
+    int64_t startOffset = 0;
+
+    bool operator==(const TensorStartOffset& other) const
+    {
+        return uid == other.uid && startOffset == other.startOffset;
+    }
+};
+
+// A dense output whose positions past a live length per batch hold no defined value.
+// A position is past the live length when its index on the axis is at least the length
+// of its batch (index 0). Either `lengthsUid` and `axis` are set, or `likeUid` is set:
+// a ragged tensor whose live lengths and sequence axis apply.
+struct OutputLiveRows
+{
+    int64_t uid = 0;
+    std::optional<int64_t> axis;
+    std::optional<int64_t> lengthsUid;
+    std::optional<int64_t> likeUid;
+
+    bool operator==(const OutputLiveRows& other) const
+    {
+        return uid == other.uid && axis == other.axis && lengthsUid == other.lengthsUid
+               && likeUid == other.likeUid;
+    }
+};
+
+// The alignment of the address that a start offset counts from. A start offset is
+// greater than 0 and less than this value.
+inline constexpr int64_t K_START_OFFSET_BASE_ALIGNMENT = 256;
 
 /// How far up RFC 0015's enforcement ladder a bundle/case is checked.
 enum class EnforcementLevel
@@ -137,15 +175,47 @@ struct BundleMetadata
     /// The one catalog candidate the engine must build for this case (a catalog sweep). Absent:
     /// the engine's heuristic pick, as every other case.
     std::optional<bundle::EngineVariantSpec> engineVariant;
+    /// Inputs that read the memory of another input and have no allocation of their own.
+    std::vector<TensorAlias> aliases;
+    /// Tensors whose data starts past an aligned address in the engine's variant pack.
+    std::vector<TensorStartOffset> startOffsets;
+    /// Dense outputs whose positions past a live length are not compared.
+    std::vector<OutputLiveRows> liveRows;
     EnforcementLevel enforcementLevel = EnforcementLevel::FULL;
+
+    /// The bundle opts out of the CPU / GPU reference executor as an oracle. A
+    /// disabled reference is never created or probed. Disabling both requires
+    /// golden data to be declared: nothing else could ever verify the bundle.
+    bool noCpuReference = false;
+    bool noGpuReference = false;
+
+    /// The bundle is invalid on purpose: the engine under test must reject it, at
+    /// ranked-list or plan-build time. Never executed, never compared, and carries
+    /// no support claim (see excludedFromSupportClaims()).
+    bool expectedRejection = false;
 };
+
+/// An expected-rejection bundle is deliberately kept out of support claims, the
+/// support matrix and coverage: no engine may claim a graph that every engine must
+/// reject. The one definition, read by the harness's claim observation, by
+/// registration's claim counters, and by the authoring run (--write-support-claims),
+/// so the three cannot drift.
+inline bool excludedFromSupportClaims(const BundleMetadata& metadata)
+{
+    return metadata.expectedRejection;
+}
 
 /// Thrown when a metadata object exists but is malformed: not a JSON object,
 /// missing/invalid/unsupported `format_version`, an invalid `enforcement_level`, `purpose`,
 /// `validator` or `placement`, a `placement` of "under" without `placement_uid`, a malformed
-/// `engine_variant`, a non-numeric `inputs` key, or (for a .meta.json file) unreadable or not
-/// valid JSON. An authoring error,
-/// never a "metadata not recorded" case, so it must not degrade to defaults.
+/// `engine_variant`, a non-boolean `no_cpu_reference` / `no_gpu_reference` / `expected_rejection`,
+/// a non-numeric `inputs` key, an `inputs` entry that is not a valid fill spec, an
+/// `aliases` value that parseTensorAliases() rejects, a view whose `inputs` entry sets a
+/// fill kind, a malformed `start_offsets` or `live_rows` value, a feature that needs a
+/// higher `format_version`, a flag combination that contradicts the bundle's golden data, or
+/// (for a .meta.json file) unreadable or not valid JSON.
+/// An authoring error, never a "metadata not recorded" case, so it must not degrade
+/// to defaults.
 class BundleMetadataError : public std::runtime_error
 {
 public:
@@ -241,13 +311,174 @@ inline bundle::EngineVariantSpec parseEngineVariant(const nlohmann::json& json,
     return variant;
 }
 
+namespace bundle_metadata_detail
+{
+
+// A metadata feature that only format_version 2 metadata may use.
+struct FormatVersion2Feature
+{
+    const char* name;
+    bool (*isUsedBy)(const nlohmann::json& metadata);
+};
+
+inline bool usesValuesFillKind(const nlohmann::json& metadata)
+{
+    if(!metadata.contains("inputs") || !metadata["inputs"].is_object())
+    {
+        return false;
+    }
+    for(const auto& item : metadata["inputs"].items())
+    {
+        const auto& spec = item.value();
+        if(spec.is_object() && spec.contains("kind") && spec["kind"] == "values")
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+inline bool usesAliases(const nlohmann::json& metadata)
+{
+    return metadata.contains("aliases");
+}
+
+inline bool usesStartOffsets(const nlohmann::json& metadata)
+{
+    return metadata.contains("start_offsets");
+}
+
+inline bool usesLiveRows(const nlohmann::json& metadata)
+{
+    return metadata.contains("live_rows");
+}
+
+inline constexpr std::array<FormatVersion2Feature, 4> K_FORMAT_VERSION_2_FEATURES = {{
+    {"kind values", &usesValuesFillKind},
+    {"aliases", &usesAliases},
+    {"start_offsets", &usesStartOffsets},
+    {"live_rows", &usesLiveRows},
+}};
+
+inline std::string describeStartOffset(int64_t uid)
+{
+    return "start offset of tensor " + std::to_string(uid);
+}
+
+inline TensorStartOffset parseStartOffsetEntry(const nlohmann::json& entry,
+                                               const std::string& baseWhere)
+{
+    std::string where = baseWhere;
+    const auto uid
+        = entry.contains("uid") ? tensor_alias_detail::integerValue(entry.at("uid")) : std::nullopt;
+    if(uid.has_value())
+    {
+        where += " (tensor " + std::to_string(*uid) + ")";
+    }
+
+    tensor_alias_detail::rejectUnknownKeys(entry, where, {"uid", "start_offset"});
+
+    TensorStartOffset parsed;
+    parsed.uid = tensor_alias_detail::readRequiredInteger(entry, "uid", where);
+    parsed.startOffset = tensor_alias_detail::readRequiredInteger(entry, "start_offset", where);
+    if(parsed.startOffset <= 0 || parsed.startOffset >= K_START_OFFSET_BASE_ALIGNMENT)
+    {
+        throw std::invalid_argument(
+            describeStartOffset(parsed.uid) + ": start_offset " + std::to_string(parsed.startOffset)
+            + " is not in the range 1 to " + std::to_string(K_START_OFFSET_BASE_ALIGNMENT - 1));
+    }
+    return parsed;
+}
+
+// Parses metadata `start_offsets`. Throws std::invalid_argument when the value is not a
+// non-empty array of {"uid", "start_offset"} objects with integer values, when a
+// start_offset is not in the range 1 to K_START_OFFSET_BASE_ALIGNMENT - 1, or when a uid
+// appears twice.
+inline std::vector<TensorStartOffset> parseStartOffsets(const nlohmann::json& json)
+{
+    return tensor_alias_detail::parseUidKeyedArray<TensorStartOffset>(
+        json,
+        "start_offsets",
+        &parseStartOffsetEntry,
+        [](const TensorStartOffset& parsed) { return parsed.uid; },
+        [](const TensorStartOffset& parsed) {
+            return describeStartOffset(parsed.uid) + ": the tensor appears in more than one entry";
+        });
+}
+
+inline std::string describeLiveRows(int64_t uid)
+{
+    return "live rows of output " + std::to_string(uid);
+}
+
+inline OutputLiveRows parseLiveRowsEntry(const nlohmann::json& entry, const std::string& baseWhere)
+{
+    std::string where = baseWhere;
+    const auto uid
+        = entry.contains("uid") ? tensor_alias_detail::integerValue(entry.at("uid")) : std::nullopt;
+    if(uid.has_value())
+    {
+        where += " (output " + std::to_string(*uid) + ")";
+    }
+
+    tensor_alias_detail::rejectUnknownKeys(entry, where, {"uid", "axis", "lengths", "like"});
+
+    const auto parsedUid = tensor_alias_detail::readOptionalInteger(entry, "uid", where);
+    if(!parsedUid.has_value())
+    {
+        throw std::invalid_argument(where + R"( lacks "uid")");
+    }
+    OutputLiveRows parsed;
+    parsed.uid = *parsedUid;
+    parsed.axis = tensor_alias_detail::readOptionalInteger(entry, "axis", where);
+    parsed.lengthsUid = tensor_alias_detail::readOptionalInteger(entry, "lengths", where);
+    parsed.likeUid = tensor_alias_detail::readOptionalInteger(entry, "like", where);
+
+    if(parsed.lengthsUid.has_value() == parsed.likeUid.has_value())
+    {
+        throw std::invalid_argument(where + R"( needs exactly one of "lengths" and "like")");
+    }
+    if(parsed.lengthsUid.has_value() && !parsed.axis.has_value())
+    {
+        throw std::invalid_argument(where + R"( has "lengths" and lacks "axis")");
+    }
+    if(parsed.likeUid.has_value() && parsed.axis.has_value())
+    {
+        throw std::invalid_argument(
+            where + R"( has "like" and "axis"; the axis comes from the ragged tensor)");
+    }
+    return parsed;
+}
+
+// Parses metadata `live_rows`. Throws std::invalid_argument when the value is not a
+// non-empty array of objects with an integer "uid" and either integer "axis" and
+// "lengths" or an integer "like", when an entry has another key, or when a uid appears
+// twice.
+inline std::vector<OutputLiveRows> parseLiveRows(const nlohmann::json& json)
+{
+    return tensor_alias_detail::parseUidKeyedArray<OutputLiveRows>(
+        json,
+        "live_rows",
+        &parseLiveRowsEntry,
+        [](const OutputLiveRows& parsed) { return parsed.uid; },
+        [](const OutputLiveRows& parsed) {
+            return describeLiveRows(parsed.uid) + ": the output appears in more than one entry";
+        });
+}
+
+} // namespace bundle_metadata_detail
+
 // ---------------------------------------------------------------------------
 /// Parse metadata from a JSON object.
 ///
 /// Throws BundleMetadataError when the object is not a JSON object, is missing
-/// `format_version`, carries an unsupported format version, has an invalid
+/// `format_version`, carries a format version other than 1 or 2, has an invalid
 /// `enforcement_level`, `purpose`, `validator` or `placement`, an "under" placement without
-/// placement_uid, or has an `inputs` key that is not a tensor UID.
+/// placement_uid, has a reference/rejection flag that is not a boolean, has an
+/// `inputs` key that is not a tensor UID or an `inputs` entry that is not a valid fill
+/// spec, has an `aliases` value that parseTensorAliases() rejects or a view whose
+/// `inputs` entry sets a fill kind, has a malformed `start_offsets` or `live_rows` value,
+/// or uses a version-2 feature in version 1 metadata.
 /// `source` names the origin (file path or sweep case) in
 /// the error message.
 inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
@@ -268,13 +499,13 @@ inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
     // Compare the JSON value, not a narrowed copy: get<int>() would truncate
     // 4294967297 (2^32 + 1) to 1 and accept it.
     const auto& version = json["format_version"];
-    if(version != 1)
+    if(version != 1 && version != 2)
     {
         throw BundleMetadataError(where + " has unsupported format_version " + version.dump());
     }
 
     BundleMetadata meta;
-    meta.formatVersion = 1;
+    meta.formatVersion = version.get<int>();
 
     auto readString = [&](const char* key) -> std::optional<std::string> {
         if(json.contains(key) && json[key].is_string())
@@ -305,6 +536,24 @@ inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
     meta.notes = readString("notes");
     meta.seed = readInt64("seed");
     meta.minimumVramMb = readInt64("minimum_vram_mb");
+
+    // The three flags are strict booleans. Absent means false; a string, a number
+    // or a null is an authoring error, because "yes" quietly reading as false would
+    // leave the bundle verified by the reference it meant to switch off.
+    auto readFlag = [&](const char* key) -> bool {
+        if(!json.contains(key))
+        {
+            return false;
+        }
+        if(!json[key].is_boolean())
+        {
+            throw BundleMetadataError(where + " has invalid " + key + " (not a boolean)");
+        }
+        return json[key].get<bool>();
+    };
+    meta.noCpuReference = readFlag("no_cpu_reference");
+    meta.noGpuReference = readFlag("no_gpu_reference");
+    meta.expectedRejection = readFlag("expected_rejection");
 
     // enforcement_level: absent leaves the default Full (set above). Present
     // but not one of the three valid tokens throws (like an invalid
@@ -457,18 +706,88 @@ inline BundleMetadata parseBundleMetadataJson(const nlohmann::json& json,
             }
             inputMap[uid] = val;
         }
-        // The same strict parse the harness applies, run here so a recipe that cannot load is a
-        // BundleMetadataError (a failed load of this one case) and not a throw inside the test
-        // factory.
+        // The strict parse the harness applies (parseInputFillSpec per entry, so kind values and
+        // the rest too), run here so a recipe that cannot load is a BundleMetadataError (a failed
+        // load of this one case) and not a throw inside the test factory. FillRecipeError is an
+        // std::invalid_argument.
         try
         {
             InputFillRecipes{}.loadFromJson(inputMap, where);
         }
-        catch(const FillRecipeError& e)
+        catch(const std::invalid_argument& e)
         {
             throw BundleMetadataError(e.what());
         }
         meta.inputs = std::move(inputMap);
+    }
+
+    // Version-1 metadata with `aliases` fails the version check below, whatever the value.
+    if(json.contains("aliases") && meta.formatVersion >= 2)
+    {
+        try
+        {
+            meta.aliases = parseTensorAliases(json.at("aliases"));
+        }
+        catch(const std::invalid_argument& e)
+        {
+            throw BundleMetadataError(where + ": " + e.what());
+        }
+    }
+
+    // Version-1 metadata with `start_offsets` fails the version check below, whatever the
+    // value.
+    if(json.contains("start_offsets") && meta.formatVersion >= 2)
+    {
+        try
+        {
+            meta.startOffsets = bundle_metadata_detail::parseStartOffsets(json.at("start_offsets"));
+        }
+        catch(const std::invalid_argument& e)
+        {
+            throw BundleMetadataError(where + ": " + e.what());
+        }
+    }
+
+    // Version-1 metadata with `live_rows` fails the version check below, whatever the value.
+    if(json.contains("live_rows") && meta.formatVersion >= 2)
+    {
+        try
+        {
+            meta.liveRows = bundle_metadata_detail::parseLiveRows(json.at("live_rows"));
+        }
+        catch(const std::invalid_argument& e)
+        {
+            throw BundleMetadataError(where + ": " + e.what());
+        }
+    }
+
+    // A seed-only entry for a view is allowed and has no effect.
+    for(const auto& alias : meta.aliases)
+    {
+        if(!meta.inputs.has_value())
+        {
+            break;
+        }
+        const auto entry = meta.inputs->find(alias.uid);
+        if(entry != meta.inputs->end() && entry->second.contains("kind"))
+        {
+            std::string message = where;
+            message.append(": ")
+                .append(tensor_alias_detail::describe(alias))
+                .append(": the view's inputs entry sets a fill kind, and a view is never filled");
+            throw BundleMetadataError(message);
+        }
+    }
+
+    if(meta.formatVersion < 2)
+    {
+        for(const auto& feature : bundle_metadata_detail::K_FORMAT_VERSION_2_FEATURES)
+        {
+            if(feature.isUsedBy(json))
+            {
+                throw BundleMetadataError(where + ": " + feature.name + " needs format_version 2");
+            }
+        }
     }
 
     return meta;

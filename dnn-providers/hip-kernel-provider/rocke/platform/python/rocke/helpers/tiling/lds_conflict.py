@@ -145,6 +145,8 @@ import os
 from collections import defaultdict
 from dataclasses import dataclass
 
+from ...core.storage import is_register_packed
+
 
 # ==================================================================================================
 # Arch model
@@ -495,14 +497,11 @@ def access_width(tile_desc, tensor, lds_swizzle):
     the verbs' own contiguous-run rule over the LDS ``tensor`` descriptor, capped by a swizzle's
     granularity exactly as :func:`~rocke.helpers.tiling.emit.load_fragment` and
     :func:`~rocke.helpers.tiling.emit.store_fragment` cap it."""
-    from rocke.helpers.tiling.descriptors import make_window
-    from rocke.helpers.tiling.emit import _align_of, _contiguous_run, _swizzle_vw
+    from .descriptors import make_window
+    from .emit import lds_access_units
 
     window = make_window(tensor, (0,) * tensor.rank)
-    vw = _contiguous_run(tile_desc, window, tensor.dtype, is_lds=True)
-    if lds_swizzle:
-        vw = _swizzle_vw(lds_swizzle, vw, _align_of(tensor.dtype))
-    return vw
+    return lds_access_units(tile_desc, window, lds_swizzle, verb="access_width")
 
 
 def addr_map(tile_desc, tensor, *, origin, n_lanes, lds_swizzle):
@@ -519,8 +518,8 @@ def addr_map(tile_desc, tensor, *, origin, n_lanes, lds_swizzle):
     The positions are carried rather than decoded from the index, which is only possible for one
     stride order.
     """
-    from rocke.helpers.tiling.descriptors import make_window
-    from rocke.helpers.tiling.emit import (
+    from .descriptors import make_window
+    from .emit import (
         _check_builtin_swizzle,
         _lane_base_index,
         _lds_index,
@@ -528,6 +527,12 @@ def addr_map(tile_desc, tensor, *, origin, n_lanes, lds_swizzle):
         _swizzle_lds_positions,
     )
 
+    if is_register_packed(tensor.dtype.name):
+        raise NotImplementedError(
+            f"addr_map: the LDS bank model addresses whole elements of a byte or more, and "
+            f"{tensor.dtype.name} elements are packed into 32-bit words -- TODO: not "
+            "implemented yet"
+        )
     if lds_swizzle is True:
         _check_builtin_swizzle(tensor)
     window = make_window(tensor, tuple(origin))
@@ -555,6 +560,7 @@ def addr_map(tile_desc, tensor, *, origin, n_lanes, lds_swizzle):
                 reg0,
                 lds_swizzle,
                 None if lds_swizzle else base_index,
+                tensor.dtype,
             )
             accesses.append(
                 {
@@ -692,7 +698,7 @@ def build_probe(
     """
     from rocke.core.ir import I32, IRBuilder, PtrType
     from rocke.helpers.tiling import (
-        lds_element_span,
+        lds_allocation,
         load_fragment,
         make_fragment,
         make_tensor_desc,
@@ -740,9 +746,8 @@ def build_probe(
     lds_td = make_tensor_desc((tile_k, tile_free), (stride, 1), dt)
     # The LDS buffer is flat and sized from its descriptor (and the swizzle's reach): the descriptor
     # is the layout.
-    lds = b.smem_alloc(
-        lds_td.dtype, [lds_element_span(lds_td, swz)], name_hint="lds_probe"
-    )
+    element, count = lds_allocation(lds_td, swz)
+    lds = b.smem_alloc(element, [count], name_hint="lds_probe")
 
     def _load_band():
         return load_fragment(

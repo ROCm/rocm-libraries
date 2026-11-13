@@ -94,9 +94,10 @@ from rocke.core.arch import ArchTarget
 from rocke.core.codegen_policy import (
     CodegenPolicy,
     apply_codegen_policy,
-    normalize_scheduler_strategy,
+    scheduler_strategy_reason,
 )
 from rocke.core.ir import I32, IRBuilder, KernelDef, Value
+from rocke.helpers.spec import align_up, ceil_div
 
 from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
@@ -104,15 +105,9 @@ from kernels.common.conv_direct_grouped import (
     emit_direct_params,
     one_padding_reason,
 )
+from kernels.common.conv_fwd_wmma_gate import CH_PAD, I32_MAX, WMMA_K, wmma_fwd_op
 
-WMMA_K = 32  # K of the 16x16x32 atom
-CH_PAD = 8  # channels of row skew past each LDS row (16 bytes)
 DGRAD_WMMA_VGPR_BUDGET = 448
-_I32_MAX = (1 << 31) - 1
-
-
-def _ceil_div(a: int, b: int) -> int:
-    return -(-a // b)
 
 
 def _axis_plan(K: int, PAD: int, dil: int, S: int):
@@ -297,26 +292,29 @@ class DirectDgradWmmaSpec:
     def grid(self) -> tuple[int, int, int]:
         p = self.problem
         S = p.stride
-        n_ct = _ceil_div(self.cpg_eff, self.block_c)
-        n_ht = _ceil_div(_ceil_div(p.H, S), self.tile_h)
-        n_wt = _ceil_div(_ceil_div(p.W, S), self.tile_w)
+        n_ct = ceil_div(self.cpg_eff, self.block_c)
+        n_ht = ceil_div(ceil_div(p.H, S), self.tile_h)
+        n_wt = ceil_div(ceil_div(p.W, S), self.tile_w)
         return (
-            _ceil_div(p.N, self.tile_n) * self.groups_eff * n_ht * n_wt * n_ct,
+            ceil_div(p.N, self.tile_n) * self.groups_eff * n_ht * n_wt * n_ct,
             1,
             1,
         )
+
+    def launch_geometry(self) -> tuple[tuple[int, int, int], tuple[int, int, int]]:
+        return self.grid(), (self.threads_per_block, 1, 1)
 
 
 def dgrad_wmma_tile_efficiency(spec: DirectDgradWmmaSpec) -> float:
     """Share of ``spec``'s padded tile grid that is real work on its problem."""
     p = spec.problem
     S = p.stride
-    hq, wq = _ceil_div(p.H, S), _ceil_div(p.W, S)
+    hq, wq = ceil_div(p.H, S), ceil_div(p.W, S)
     tiles = (
-        _ceil_div(p.N, spec.tile_n) * spec.tile_n,
-        _ceil_div(hq, spec.tile_h) * spec.tile_h,
-        _ceil_div(wq, spec.tile_w) * spec.tile_w,
-        _ceil_div(spec.cpg_eff, spec.block_c) * spec.block_c,
+        align_up(p.N, spec.tile_n),
+        align_up(hq, spec.tile_h),
+        align_up(wq, spec.tile_w),
+        align_up(spec.cpg_eff, spec.block_c),
     )
     return (p.N * hq * wq * spec.cpg_eff) / (tiles[0] * tiles[1] * tiles[2] * tiles[3])
 
@@ -405,19 +403,18 @@ def dgrad_wmma_reason(spec: DirectDgradWmmaSpec, arch: str = "gfx1250") -> str |
     ) * (2 if spec.prefetch else 1)
     if vgprs > DGRAD_WMMA_VGPR_BUDGET:
         return f"~{vgprs} VGPRs of accumulators and fragments"
-    try:
-        normalize_scheduler_strategy(spec.sched)
-    except ValueError as e:
-        return str(e)
+    why = scheduler_strategy_reason(spec.sched)
+    if why is not None:
+        return why
     # Global offsets are i32 bytes and the tile index is a flat block id.
     tensor_bytes = (
         2 * p.N * p.Ho * p.Wo * p.total_k,
         2 * p.total_k * p.KH * p.KW * p.cpg,
         2 * p.N * p.H * p.W * p.total_c,
     )
-    if max(tensor_bytes) > _I32_MAX:
+    if max(tensor_bytes) > I32_MAX:
         return f"tensors of {max(tensor_bytes)} B exceed the i32 byte offsets"
-    if spec.grid()[0] > _I32_MAX:
+    if spec.grid()[0] > I32_MAX:
         return f"{spec.grid()[0]} workgroups exceed the i32 block id"
     return None
 
@@ -493,10 +490,7 @@ def build_direct_dgrad_wmma(
     taps_h, _, PADD_H = spec.plan_h  # PADD: padding of the equivalent forward pass
     taps_w, _, PADD_W = spec.plan_w
     io_type = _io_type(p.dtype)
-    ab = "bf16" if p.dtype == "bf16" else "f16"
-    wmma_op = ArchTarget.from_gfx(arch).mma.op_for_shape(
-        family="wmma", a_dtype=ab, b_dtype=ab, c_dtype="fp32", m=16, n=16, k=WMMA_K
-    )
+    wmma_op = wmma_fwd_op(p.dtype, arch)
 
     WAVE = spec.wave_size
     WC, WP = spec.waves_c, spec.waves_p
@@ -608,7 +602,7 @@ def build_direct_dgrad_wmma(
     if max_z:
         zero_v = b.zero_vec(io_type, 8)
         z_vecs = b.div(z_elems, b.const_i32(8))
-        for j in range(0, _ceil_div(max_z, 8), THREADS):
+        for j in range(0, ceil_div(max_z, 8), THREADS):
             v = b.add(tid, b.const_i32(j))
             with b.scf_if(b.cmp_lt(v, z_vecs)):
                 flat = b.mul(v, b.const_i32(8))

@@ -1,0 +1,30 @@
+{
+  "version": "1.0",
+  "id": "a74a5afb-30c0-41c2-8006-501d2961f808",
+  "name": "hipkernel:Gfx942AttentionDense",
+  "sdk_version": "1.0.0",
+  "graph_match": {
+    "native": "hipkernel.gfx942_attention_dense.graph_match"
+  },
+  "metadata": "daac46c8-97fb-4012-b00c-500f0bf3b955",
+  "sort_kernel_catalog": {
+    "default": "964ee17d-c2cf-4420-a0c3-f2bc92e8a5c8"
+  },
+  "knobs": [
+    "block_m",
+    "block_n",
+    "lds_row_pad",
+    "pv_priority",
+    "persistent",
+    "persist_decode",
+    "nonpersist_decode",
+    "lds_num_buffers",
+    "v_reg_prefetch",
+    "causal_diag_split",
+    "o_store_width",
+    "pv_loop_order",
+    "use_cfvst",
+    "use_exp2_fast",
+    "lds_k_group_pad"
+  ]
+}

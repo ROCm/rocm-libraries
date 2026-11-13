@@ -3275,6 +3275,598 @@
       }
     },
     {
+      "name": "convnext_depthwise_7x7",
+      "note": "the 7x7 same-padded depthwise of ConvNeXt-style blocks, from narrow to ConvNeXt widths; groups == C == K",
+      "values": {
+        "N": [
+          1,
+          2,
+          4,
+          8,
+          16,
+          32,
+          64,
+          128
+        ],
+        "C": [
+          8,
+          16,
+          32,
+          48,
+          64,
+          96,
+          128,
+          192,
+          256,
+          384,
+          512,
+          768
+        ],
+        "K": [
+          "$q.C"
+        ],
+        "groups": [
+          "$q.C"
+        ],
+        "H": [
+          56,
+          28,
+          14,
+          7
+        ],
+        "W": [
+          "$q.H"
+        ],
+        "R": [
+          7
+        ],
+        "S": [
+          "$q.R"
+        ],
+        "pad_h": [
+          3
+        ],
+        "pad_w": [
+          "$q.pad_h"
+        ],
+        "stride_h": [
+          1
+        ],
+        "stride_w": [
+          "$q.stride_h"
+        ],
+        "dilation_h": [
+          1
+        ],
+        "dilation_w": [
+          "$q.dilation_h"
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "narrow_depthwise_3x3",
+      "note": "narrow 3x3 depthwise, as the early blocks of mobile networks use; complements mobilenet_depthwise_3x3",
+      "values": {
+        "N": [
+          1,
+          2,
+          4,
+          8,
+          16,
+          32,
+          64,
+          128
+        ],
+        "C": [
+          8,
+          16,
+          24,
+          32,
+          40,
+          48,
+          64
+        ],
+        "K": [
+          "$q.C"
+        ],
+        "groups": [
+          "$q.C"
+        ],
+        "H": [
+          112,
+          56,
+          28,
+          14
+        ],
+        "W": [
+          "$q.H"
+        ],
+        "R": [
+          3
+        ],
+        "S": [
+          "$q.R"
+        ],
+        "pad_h": [
+          1
+        ],
+        "pad_w": [
+          "$q.pad_h"
+        ],
+        "stride_h": [
+          1,
+          2
+        ],
+        "stride_w": [
+          "$q.stride_h"
+        ],
+        "dilation_h": [
+          1
+        ],
+        "dilation_w": [
+          "$q.dilation_h"
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "grouped_3x3_cpg4",
+      "note": "4 channels per group in and out: ResNeXt 32x4d's first stage",
+      "values": {
+        "N": [
+          1,
+          2,
+          4,
+          8,
+          16,
+          32,
+          64,
+          128
+        ],
+        "C": [
+          128
+        ],
+        "K": [
+          "$q.C"
+        ],
+        "groups": [
+          32
+        ],
+        "H": [
+          56,
+          28
+        ],
+        "W": [
+          "$q.H"
+        ],
+        "R": [
+          3
+        ],
+        "S": [
+          "$q.R"
+        ],
+        "pad_h": [
+          1
+        ],
+        "pad_w": [
+          "$q.pad_h"
+        ],
+        "stride_h": [
+          1
+        ],
+        "stride_w": [
+          "$q.stride_h"
+        ],
+        "dilation_h": [
+          1
+        ],
+        "dilation_w": [
+          "$q.dilation_h"
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "grouped_3x3_cpg8",
+      "note": "8 channels per group in and out: ResNeXt 32x4d's second stage",
+      "values": {
+        "N": [
+          1,
+          2,
+          4,
+          8,
+          16,
+          32,
+          64,
+          128
+        ],
+        "C": [
+          256
+        ],
+        "K": [
+          "$q.C"
+        ],
+        "groups": [
+          32
+        ],
+        "H": [
+          56,
+          28
+        ],
+        "W": [
+          "$q.H"
+        ],
+        "R": [
+          3
+        ],
+        "S": [
+          "$q.R"
+        ],
+        "pad_h": [
+          1
+        ],
+        "pad_w": [
+          "$q.pad_h"
+        ],
+        "stride_h": [
+          1
+        ],
+        "stride_w": [
+          "$q.stride_h"
+        ],
+        "dilation_h": [
+          1
+        ],
+        "dilation_w": [
+          "$q.dilation_h"
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "grouped_3x3_cpg16",
+      "note": "16 channels per group in and out: ResNeXt 32x4d's third stage",
+      "values": {
+        "N": [
+          1,
+          2,
+          4,
+          8,
+          16,
+          32,
+          64,
+          128
+        ],
+        "C": [
+          512
+        ],
+        "K": [
+          "$q.C"
+        ],
+        "groups": [
+          32
+        ],
+        "H": [
+          28,
+          14
+        ],
+        "W": [
+          "$q.H"
+        ],
+        "R": [
+          3
+        ],
+        "S": [
+          "$q.R"
+        ],
+        "pad_h": [
+          1
+        ],
+        "pad_w": [
+          "$q.pad_h"
+        ],
+        "stride_h": [
+          1
+        ],
+        "stride_w": [
+          "$q.stride_h"
+        ],
+        "dilation_h": [
+          1
+        ],
+        "dilation_w": [
+          "$q.dilation_h"
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "grouped_3x3_cpg24",
+      "note": "24 channels per group in and out: a RegNet-style group width",
+      "values": {
+        "N": [
+          1,
+          2,
+          4,
+          8,
+          16,
+          32,
+          64,
+          128
+        ],
+        "C": [
+          240
+        ],
+        "K": [
+          "$q.C"
+        ],
+        "groups": [
+          10
+        ],
+        "H": [
+          28,
+          14
+        ],
+        "W": [
+          "$q.H"
+        ],
+        "R": [
+          3
+        ],
+        "S": [
+          "$q.R"
+        ],
+        "pad_h": [
+          1
+        ],
+        "pad_w": [
+          "$q.pad_h"
+        ],
+        "stride_h": [
+          1
+        ],
+        "stride_w": [
+          "$q.stride_h"
+        ],
+        "dilation_h": [
+          1
+        ],
+        "dilation_w": [
+          "$q.dilation_h"
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "dense_3x3_c48_k192",
+      "note": "a dense 3x3 expansion from 48 channels to 192, the exact channel pair a direct MFMA kernel serves (those kernels refuse groups > 1)",
+      "values": {
+        "N": [
+          1,
+          2,
+          4,
+          8,
+          16,
+          32,
+          64,
+          128
+        ],
+        "C": [
+          48
+        ],
+        "K": [
+          192
+        ],
+        "groups": [
+          1
+        ],
+        "H": [
+          56,
+          28,
+          14
+        ],
+        "W": [
+          "$q.H"
+        ],
+        "R": [
+          3
+        ],
+        "S": [
+          "$q.R"
+        ],
+        "pad_h": [
+          1
+        ],
+        "pad_w": [
+          "$q.pad_h"
+        ],
+        "stride_h": [
+          1
+        ],
+        "stride_w": [
+          "$q.stride_h"
+        ],
+        "dilation_h": [
+          1
+        ],
+        "dilation_w": [
+          "$q.dilation_h"
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
+        ]
+      }
+    },
+    {
+      "name": "dense_3x3_c4_k320",
+      "note": "a dense 3x3 expansion from a thin 4-channel input to 320, the exact channel pair a direct MFMA kernel serves (those kernels refuse groups > 1)",
+      "values": {
+        "N": [
+          1,
+          2,
+          4,
+          8,
+          16,
+          32,
+          64,
+          128
+        ],
+        "C": [
+          4
+        ],
+        "K": [
+          320
+        ],
+        "groups": [
+          1
+        ],
+        "H": [
+          56,
+          28,
+          14
+        ],
+        "W": [
+          "$q.H"
+        ],
+        "R": [
+          3
+        ],
+        "S": [
+          "$q.R"
+        ],
+        "pad_h": [
+          1
+        ],
+        "pad_w": [
+          "$q.pad_h"
+        ],
+        "stride_h": [
+          1
+        ],
+        "stride_w": [
+          "$q.stride_h"
+        ],
+        "dilation_h": [
+          1
+        ],
+        "dilation_w": [
+          "$q.dilation_h"
+        ],
+        "D": [
+          1
+        ],
+        "T": [
+          1
+        ],
+        "pad_d": [
+          0
+        ],
+        "stride_d": [
+          1
+        ],
+        "dilation_d": [
+          1
+        ]
+      }
+    },
+    {
       "name": "video_3x3x3",
       "note": "a 3-D (video) convolution stage: 3x3x3 filter, same padding, short clip depth",
       "values": {

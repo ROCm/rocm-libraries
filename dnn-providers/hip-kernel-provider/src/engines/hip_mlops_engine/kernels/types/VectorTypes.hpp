@@ -105,7 +105,7 @@ namespace detail
 {
 
 template <typename OutType, typename InType>
-__forceinline__ __device__ __host__ OutType scalarcast(InType in)
+constexpr __forceinline__ __device__ __host__ OutType scalarcast(InType in)
 {
     if constexpr(std::is_same<OutType, InType>::value)
     {
@@ -118,7 +118,7 @@ __forceinline__ __device__ __host__ OutType scalarcast(InType in)
 }
 
 template <typename MappedVectorType, typename T>
-__forceinline__ __device__ __host__ MappedVectorType broadcast(const T val)
+constexpr __forceinline__ __device__ __host__ MappedVectorType broadcast(const T val)
 {
     using VectorInfo = mapped_vector_info<MappedVectorType>;
     MappedVectorType retval;
@@ -133,7 +133,7 @@ __forceinline__ __device__ __host__ MappedVectorType broadcast(const T val)
 } // namespace detail
 
 template <typename OutType, typename InType>
-__forceinline__ __device__ __host__ OutType cast(InType input)
+constexpr __forceinline__ __device__ __host__ OutType cast(InType input)
 {
     using InTypeInfo = mapped_vector_info<InType>;
     using OutTypeInfo = mapped_vector_info<OutType>;

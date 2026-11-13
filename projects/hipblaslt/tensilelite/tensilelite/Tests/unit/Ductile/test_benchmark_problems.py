@@ -363,6 +363,7 @@ def _make_fake_step():
     class _Step:
         problemSizes = types.SimpleNamespace(totalProblemSizes=1)
         factorDimArgs = types.SimpleNamespace(totalProblemSizes=1)
+        deviceScalarAlphaModes = None
         biasTypeArgs = types.SimpleNamespace(totalProblemSizes=1)
         activationArgs = types.SimpleNamespace(totalProblemSizes=1)
         icacheFlushArgs = []
@@ -382,9 +383,16 @@ def _make_fake_step():
     return _Step()
 
 
-def test_benchmark_problem_type_passes_backend_config_and_runner(monkeypatch, tmp_path):
+@pytest.mark.parametrize("alpha_modes", [None, [True, False]])
+def test_benchmark_problem_type_passes_backend_config_and_runner(monkeypatch, tmp_path, alpha_modes):
     fake_backend = _FakeBackendForBenchmark()
     fake_step = _make_fake_step()
+    fake_step.deviceScalarAlphaModes = alpha_modes
+    client_modes = []
+
+    def run_client(*_args, **kwargs):
+        client_modes.append(kwargs["deviceScalarAlphaModes"])
+        return 0
 
     class _FakeBP:
         def __init__(self, *_args, **_kwargs):
@@ -405,7 +413,7 @@ def test_benchmark_problem_type_passes_backend_config_and_runner(monkeypatch, tm
     monkeypatch.setattr(BP.BackendFactory, "create", lambda _name: fake_backend)
     monkeypatch.setattr(BP, "_computeCacheKey", lambda *_a: "abc123")
     monkeypatch.setattr(BP, "_resetCacheDir", lambda _d: None)
-    monkeypatch.setattr(BP, "runClient", lambda *_a, **_kw: 0)
+    monkeypatch.setattr(BP, "runClient", run_client)
     monkeypatch.setattr(BP, "writeBenchmarkFiles", lambda *_a, **_kw: (["k.co"], "lib.yaml"))
     monkeypatch.setattr(BP.LibraryIO, "writeYAML", lambda *_a, **_kw: None)
     monkeypatch.setattr(BP.LibraryIO, "writeSolutions", lambda *_a, **_kw: None)
@@ -441,6 +449,7 @@ def test_benchmark_problem_type_passes_backend_config_and_runner(monkeypatch, tm
     )
 
     assert fails == 0
+    assert client_modes == [alpha_modes]
     assert result_base is not None
     assert len(fake_backend.calls) == 1
     seen_backend_cfg, seen_bench_cfg, seen_cache, seen_build_only = fake_backend.calls[0]

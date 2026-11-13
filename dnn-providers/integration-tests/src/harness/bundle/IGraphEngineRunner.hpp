@@ -16,6 +16,7 @@
 #include <hipdnn_frontend/autotune/AutotuneTypes.hpp>
 
 #include "harness/Benchmark.hpp"
+#include "harness/Capture.hpp"
 #include "harness/VariantPack.hpp"
 #include "harness/bundle/GraphSession.hpp"
 #include "harness/bundle/LoadedEngine.hpp"
@@ -176,6 +177,17 @@ public:
     virtual hipdnn_frontend::AutotuneResult benchmark(GraphSession& session,
                                                       VariantPack& variantPack,
                                                       const BenchmarkSettings& settings)
+        = 0;
+
+    /// Captures the plan execute() built into a HIP graph on the handle's stream and
+    /// replays it, running `hooks` around every replay. Called only after the
+    /// outputs of execute() were verified. A decline means the engine does not
+    /// report SUPPORTS_GRAPH_CAPTURE; a failure names the step that broke. Neither
+    /// leaves the stream capturing.
+    virtual CaptureResult captureReplay(GraphSession& session,
+                                        VariantPack& variantPack,
+                                        const CaptureSettings& settings,
+                                        const ReplayHooks& hooks)
         = 0;
 
     /// One page of the catalog candidates `engine` can build for the graph of `session`

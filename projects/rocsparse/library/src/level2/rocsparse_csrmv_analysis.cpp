@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -40,7 +40,8 @@ namespace rocsparse
                                                  const void*,
                                                  const void*,
                                                  const void*,
-                                                 rocsparse_csrmv_info*);
+                                                 rocsparse_csrmv_info*,
+                                                 bool);
 
     using csrmv_analysis_tuple
         = std::tuple<rocsparse_indextype, rocsparse_indextype, rocsparse_datatype>;
@@ -164,13 +165,24 @@ rocsparse_status rocsparse::csrmv_analysis(rocsparse_handle          handle,
                                            const void*               csr_row_ptr,
                                            rocsparse_indextype       csr_col_ind_indextype,
                                            const void*               csr_col_ind,
-                                           rocsparse_csrmv_info*     p_csrmv_info)
+                                           rocsparse_csrmv_info*     p_csrmv_info,
+                                           bool                      use_starting_block_ids)
 {
     ROCSPARSE_ROUTINE_TRACE;
     rocsparse::csrmv_analysis_t f;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_analysis_find(
         &f, csr_row_ptr_indextype, csr_col_ind_indextype, csr_val_datatype));
-    RETURN_IF_ROCSPARSE_ERROR(
-        f(handle, trans, alg, m, n, nnz, descr, csr_val, csr_row_ptr, csr_col_ind, p_csrmv_info));
+    RETURN_IF_ROCSPARSE_ERROR(f(handle,
+                                trans,
+                                alg,
+                                m,
+                                n,
+                                nnz,
+                                descr,
+                                csr_val,
+                                csr_row_ptr,
+                                csr_col_ind,
+                                p_csrmv_info,
+                                use_starting_block_ids));
     return rocsparse_status_success;
 }

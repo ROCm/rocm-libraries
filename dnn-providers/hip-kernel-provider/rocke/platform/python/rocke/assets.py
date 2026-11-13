@@ -8,10 +8,10 @@ library packages (``kernels`` / ``builders`` / ``dispatch``) are editable-instal
 into the build/dev environment, so no script touches ``sys.path`` to find them
 (see rocke/BUILDING.md).
 
-Some assets -- notably ``dsl_docs/`` and the loose ``_ua_shape_utils`` benchmark
-helper -- live under the platform *source* root, outside the importable ``rocke``
-package, so they cannot be reached with ``importlib.resources`` and need an
-explicit locator.  Each locator honours an environment override so the trees can
+Some assets -- notably ``dsl_docs/``, the ``tools/`` scripts and the loose
+``_ua_shape_utils`` benchmark helper -- live under the platform *source* root,
+outside the importable ``rocke`` package, so they cannot be reached with
+``importlib.resources`` and need an explicit locator.  Each locator honours an environment override so the trees can
 be relocated (e.g. consumed out of the source checkout).
 """
 
@@ -50,6 +50,18 @@ def dsl_docs_dir() -> Path:
     """
     override = os.environ.get("ROCKE_DSL_DOCS")
     return Path(override) if override else platform_root() / "dsl_docs"
+
+
+def platform_tools_dir() -> Path:
+    """The platform ``tools`` tree (the IR-validity and byte-identity scripts).
+
+    Override with ``ROCKE_PLATFORM_TOOLS_DIR``. The installed test payload has
+    no ``tools/`` tree; it stages a partial copy, only the scripts its tests
+    run, under ``tests/arch_domain``, and its ``conftest.py`` points the
+    override there.
+    """
+    override = os.environ.get("ROCKE_PLATFORM_TOOLS_DIR")
+    return Path(override) if override else platform_root() / "tools"
 
 
 def shape_utils_dir() -> Path:

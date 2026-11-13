@@ -15,6 +15,7 @@
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferDatatypeMapping.hpp>
+#include <hipdnn_test_sdk/utilities/RaggedLengthUids.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/TensorFileUtils.hpp>
 #include <type_traits>
@@ -36,13 +37,38 @@ inline std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> tensorFromFileAndAtt
 inline std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> raggedTensorFromFileAndAttributes(
     const std::filesystem::path& filepath,
     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& attributes,
-    std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> offset)
+    std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> offset,
+    const std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>& lengths = nullptr)
 {
     auto tensor = hipdnn_test_sdk::detail::createRaggedTensorFromAttributeAndOffset(
-        attributes, std::move(offset));
+        attributes, std::move(offset), lengths);
     hipdnn_test_sdk::detail::fillTensorFromFile(*tensor, filepath);
 
     return tensor;
+}
+
+/// The length tensor of ragged tensor `uid` (raggedLengthUids), or null when the tensor's node has
+/// no seq_len. Length tensors are not ragged, so the map already holds them when ragged tensors
+/// are built.
+inline std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> findRaggedLengths(
+    const std::unordered_map<int64_t, int64_t>& lengthUids,
+    const std::unordered_map<int64_t, std::shared_ptr<hipdnn_data_sdk::utilities::ITensor>>&
+        tensorMap,
+    int64_t uid)
+{
+    const auto lengthUidIt = lengthUids.find(uid);
+    if(lengthUidIt == lengthUids.end())
+    {
+        return nullptr;
+    }
+    const auto lengthIt = tensorMap.find(lengthUidIt->second);
+    if(lengthIt == tensorMap.end())
+    {
+        throw std::runtime_error("Error in findRaggedLengths(): ragged tensor "
+                                 + std::to_string(uid) + " references missing seq_len tensor "
+                                 + std::to_string(lengthUidIt->second));
+    }
+    return lengthIt->second;
 }
 
 struct GraphAndTensorMap
@@ -81,6 +107,7 @@ struct GraphAndTensorMap
             outputTensorMap;
 
         auto tensorAttributeMap = createGraphWrapper().getTensorMap();
+        const auto lengthUids = raggedLengthUids(graph());
         for(const int64_t uid : outputTensorUids)
         {
             const auto* attributes = tensorAttributeMap[uid];
@@ -90,7 +117,9 @@ struct GraphAndTensorMap
             {
                 std::shared_ptr<hipdnn_data_sdk::utilities::ITensor> zeroedTensorPtr
                     = hipdnn_test_sdk::detail::createRaggedTensorFromAttributeAndOffset(
-                        *attributes, tensorMap.at(offsetUid.value()));
+                        *attributes,
+                        tensorMap.at(offsetUid.value()),
+                        findRaggedLengths(lengthUids, tensorMap, uid));
                 zeroedTensorPtr->fillTensorWithValue(0.f);
                 std::swap(zeroedTensorPtr, outputTensorPtr);
                 outputTensorMap[uid] = std::move(zeroedTensorPtr);
@@ -240,6 +269,8 @@ inline GraphAndTensorMap loadGraphAndTensors(const std::filesystem::path& path)
         tensorMap[attributes->uid()] = tensorFromFileAndAttributes(tensorPath, *attributes);
     }
 
+    const auto lengthUids = raggedLengthUids(*graph);
+
     for(auto attributes : raggedTensors)
     {
         auto raggedOffsetId = attributes->ragged_offset_tensor_uid().value();
@@ -252,8 +283,11 @@ inline GraphAndTensorMap loadGraphAndTensors(const std::filesystem::path& path)
         }
         auto tensorPath
             = basePath.string() + ".tensor" + std::to_string(attributes->uid()) + ".bin";
-        tensorMap[attributes->uid()]
-            = raggedTensorFromFileAndAttributes(tensorPath, *attributes, offsetIt->second);
+        tensorMap[attributes->uid()] = raggedTensorFromFileAndAttributes(
+            tensorPath,
+            *attributes,
+            offsetIt->second,
+            findRaggedLengths(lengthUids, tensorMap, attributes->uid()));
     }
 
     return {graphBuilder.Release(), std::move(tensorMap), outputTensorUids};

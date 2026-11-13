@@ -27,6 +27,8 @@ add_executable(
     utilities/TestCpuFpReferenceSdpa.cpp
     utilities/TestCpuFpReferenceSdpaOracles.cpp
     utilities/TestCpuFpReferenceSdpaRagged.cpp
+    utilities/TestRaggedLengthUids.cpp
+    utilities/TestRaggedTokenBoundaries.cpp
     utilities/TestCpuFpReferenceConvolution.cpp
     utilities/TestCpuFpReferenceLayernorm.cpp
     utilities/TestCpuFpReferenceLayernormBackward.cpp
@@ -51,12 +53,14 @@ add_executable(
     utilities/TestDynamicTolerancesSdpa.cpp
     utilities/TestGraphTestHelpers.cpp
     utilities/TestFlatbufferDatatypeMapping.cpp
+    utilities/TestFlatbufferGraphMutators.cpp
     utilities/TestFlatbufferTensorAttributesUtils.cpp
     utilities/TestLoadGraphAndTensors.cpp
     utilities/TestLoggingUtils.cpp
     utilities/TestLogRecorder.cpp
     utilities/TestScopedDirectory.cpp
     utilities/TestScopedEnvironmentVariableSetter.cpp
+    utilities/TestSdpaGraphMutators.cpp
     utilities/TestScratchDirectory.cpp
     utilities/TestSeeds.cpp
     utilities/TestTensorDiff.cpp
@@ -107,6 +111,9 @@ add_executable(
     utilities/cpu_graph_executor/TestRMSNormBwdPlan.cpp
     utilities/cpu_graph_executor/TestRMSNormBwdSignatureKey.cpp
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaFwdPlan.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaFwdPlanZeroDropout.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaFwdPlanVllmForm.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaFwdPlanSeqLenKvOnly.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaFwdSignatureKey.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestSdpaBwdPlan.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_SDPA}>:utilities/cpu_graph_executor/TestRaggedSdpaDensify.cpp>

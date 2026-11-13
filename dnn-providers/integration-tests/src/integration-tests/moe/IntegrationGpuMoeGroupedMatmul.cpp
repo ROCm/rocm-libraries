@@ -5,6 +5,7 @@
 
 #include <optional>
 #include <ostream>
+#include <stdexcept>
 
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>

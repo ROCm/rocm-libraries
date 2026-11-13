@@ -1,14 +1,16 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Native Python/C parity for the dtype-generic ``buffer_store_vN`` builder op.
+"""Native Python/C parity for the ``buffer_store_vN`` and ``buffer_store_vN_f32`` ops.
 
-Config index = case * len(ARCHES) + arch_index, with CASES (dtype, n) below.
+Config index = case * len(ARCHES) + arch_index, with CASES (dtype, n) below
+followed by F32_CASES (n).
 Each lane splats one loaded element to an ``n``-element vector and stores it.
 Cases 0..15 are accepted: every element width (1, 2, 4 and 8 bytes) at every
 access width it can make (1, 2, 4, 8 and 16 bytes). Cases 16..19 must be
 rejected by both engines: vectors of 6, 12, 24 or 32 bytes. A rejected case
 emits nothing and exits non-zero on both sides, which the differential harness
-records as BOTH_REJECTED.
+records as BOTH_REJECTED. Cases 20..22 store through ``buffer_store_vN_f32``
+with 1, 2 and 4 dwords; n = 1 is its single-dword path.
 """
 
 from rocke.core.ir import (
@@ -62,6 +64,7 @@ CASES = (
     ("f64", 3),
     ("f32", 8),
 )
+F32_CASES = (1, 2, 4)
 
 
 def build_buffer_store_vN(b: IRBuilder, dtype_name: str, n: int) -> None:
@@ -78,17 +81,38 @@ def build_buffer_store_vN(b: IRBuilder, dtype_name: str, n: int) -> None:
     b.ret()
 
 
+def build_buffer_store_vN_f32(b: IRBuilder, n: int) -> None:
+    x = b.param("X", PtrType(F32, "global"))
+    y = b.param("Y", PtrType(F32, "global"))
+    n_bytes = b.param("N_bytes", I32)
+    rsrc = b.buffer_rsrc(y, n_bytes)
+    tid = b.thread_id_x()
+    value = b.vector_splat(b.global_load(x, tid, F32), n)
+    voffset = b.mul(tid, b.const_i32(16))
+    soffset = b.const_i32(0)
+    b.buffer_store_vN_f32(rsrc, voffset, soffset, value, n)
+    b.ret()
+
+
 def _spec(idx):
-    if not 0 <= idx < len(CASES) * len(ARCHES):
+    if not 0 <= idx < (len(CASES) + len(F32_CASES)) * len(ARCHES):
         raise SystemExit(f"unknown config index {idx}")
-    return CASES[idx // len(ARCHES)], ARCHES[idx % len(ARCHES)]
+    case = idx // len(ARCHES)
+    if case < len(CASES):
+        spec = CASES[case]
+    else:
+        spec = ("vN_f32", F32_CASES[case - len(CASES)])
+    return spec, ARCHES[idx % len(ARCHES)]
 
 
 def _build(spec, *, arch):
     dtype_name, n = spec
     b = IRBuilder("buffer_store_vN")
     b.kernel.attrs["max_workgroup_size"] = 64
-    build_buffer_store_vN(b, dtype_name, n)
+    if dtype_name == "vN_f32":
+        build_buffer_store_vN_f32(b, n)
+    else:
+        build_buffer_store_vN(b, dtype_name, n)
     return b.kernel
 
 

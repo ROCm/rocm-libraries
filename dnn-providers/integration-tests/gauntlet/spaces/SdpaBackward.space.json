@@ -53,17 +53,23 @@
     "values": {
       "io_data_type": "${dtype}",
       "tensors": [
-        {"uid": 0, "dims": "${dims_kv}", "strides": "${stride_kv}", "data_type": "${dtype}"},
-        {"uid": 1, "dims": "${dims_q}", "strides": "${stride_q}", "data_type": "${dtype}"},
-        {"uid": 2, "dims": "${dims_q}", "strides": "${stride_q}", "data_type": "${dtype}"},
-        {"uid": 3, "dims": "${dims_kv}", "strides": "${stride_kv}", "data_type": "${dtype}"},
-        {"uid": 4, "dims": "${dims_q}", "strides": "${stride_q}", "data_type": "${dtype}"},
-        {"uid": 5, "dims": "${dims_kv}", "strides": "${stride_kv}", "data_type": "${dtype}"},
-        {"uid": 6, "dims": "${dims_kv}", "strides": "${stride_kv}", "data_type": "${dtype}"},
-        {"uid": 7, "dims": "${dims_q}", "strides": "${stride_q}", "data_type": "${dtype}"},
-        {"uid": 8, "dims": "${dims_lse}", "strides": "${stride_lse}", "data_type": "float"}
+        {"uid": 0, "dims": "${dims_kv}", "strides": "${stride_kv}", "data_type": "${dtype}", "alignment": 16},
+        {"uid": 1, "dims": "${dims_q}", "strides": "${stride_q}", "data_type": "${dtype}", "alignment": 16},
+        {"uid": 2, "dims": "${dims_q}", "strides": "${stride_q}", "data_type": "${dtype}", "alignment": 16},
+        {"uid": 3, "dims": "${dims_kv}", "strides": "${stride_kv}", "data_type": "${dtype}", "alignment": 16},
+        {"uid": 4, "dims": "${dims_q}", "strides": "${stride_q}", "data_type": "${dtype}", "alignment": 16},
+        {"uid": 5, "dims": "${dims_kv}", "strides": "${stride_kv}", "data_type": "${dtype}", "alignment": 16},
+        {"uid": 6, "dims": "${dims_kv}", "strides": "${stride_kv}", "data_type": "${dtype}", "alignment": 16},
+        {"uid": 7, "dims": "${dims_q}", "strides": "${stride_q}", "data_type": "${dtype}", "alignment": 16},
+        {"uid": 8, "dims": "${dims_lse}", "strides": "${stride_lse}", "data_type": "float", "alignment": 16}
       ],
       "attributes": {
+        "compute_data_type": "float",
+        "parameters__alibi_mask": false,
+        "parameters__attn_scale_value": 0.08838834764831843,
+        "parameters__causal_mask": false,
+        "parameters__causal_mask_bottom_right": false,
+        "parameters__dropout_probability": null,
         "parameters__diagonal_alignment": "${align}",
         "parameters__left_bound": "${left}",
         "parameters__right_bound": "${right}"

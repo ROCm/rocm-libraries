@@ -6,6 +6,7 @@
 #include <memory>
 
 #include "harness/IReferenceExecutors.hpp"
+#include "harness/ReferenceBenchmarkSync.hpp"
 #include "harness/bundle/HarnessPolicy.hpp"
 #include "harness/bundle/IGraphEngineRunner.hpp"
 #include "harness/bundle/ISupportClaimObserver.hpp"
@@ -40,6 +41,10 @@ struct HarnessDependencies
     /// outcome records carry no kernels.
     std::shared_ptr<IKernelLogControl> kernelLog;
     HarnessPolicy policy;
+    /// Times each reference phase under --benchmark-reference. Defaults to the real
+    /// device synchronize, so no caller can time a GPU reference without it; deviceless
+    /// tests install a timer that never synchronizes.
+    ReferenceBenchmarkTimer referenceTimer = productionReferenceTimer();
 };
 
 /// The real collaborators, with the process-wide reference-executor pool.

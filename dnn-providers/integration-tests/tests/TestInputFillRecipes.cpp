@@ -5,11 +5,13 @@
 
 #include <cstdint>
 #include <initializer_list>
+#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "harness/input-init/InputFillRecipes.hpp"
@@ -61,6 +63,24 @@ std::string loadError(const std::string& spec, const std::string& where = "case 
 bool contains(const std::string& text, const std::string& part)
 {
     return text.find(part) != std::string::npos;
+}
+
+// Writes `original` as metadata text and reads it back, as capture and load do.
+InputFillRecipes roundTrip(const InputFillRecipes& original)
+{
+    InputFillRecipes loaded;
+    loaded.loadFromJson(toInputMap(nlohmann::json::parse(original.toJson().dump())));
+    return loaded;
+}
+
+FillRecipe parseRecipe(const char* specText)
+{
+    auto spec = parseInputFillSpec(nlohmann::json::parse(specText));
+    if(!spec.recipe.has_value())
+    {
+        throw std::logic_error("spec has no recipe");
+    }
+    return std::move(*spec.recipe);
 }
 
 } // namespace
@@ -453,7 +473,7 @@ TEST(TestInputFillRecipes, StrictErrorsAreFillRecipeErrors)
     InputFillRecipes recipes;
 
     EXPECT_THROW(recipes.loadFromJson(inputs), FillRecipeError);
-    EXPECT_THROW(recipes.loadFromJson(inputs), std::runtime_error);
+    EXPECT_THROW(recipes.loadFromJson(inputs), std::invalid_argument);
 }
 
 // A wrong-typed field the kind reads was silently dropped, leaving the default in its place;
@@ -636,14 +656,11 @@ TEST(TestInputFillRecipes, EntryWithNeitherKindNorSeedIsAnError)
 }
 
 // Either key alone is a valid entry: a seed-only entry (what toJson writes for a seeded tensor
-// without a recipe) and a kind-only one; unknown keys beside a kind or a seed stay ignored.
+// without a recipe) and a kind-only one.
 TEST(TestInputFillRecipes, SeedOnlyAndKindOnlyEntriesStillLoad)
 {
     EXPECT_EQ(loadError(R"({"seed":5})"), "");
     EXPECT_EQ(loadError(R"({"kind":"zeros"})"), "");
-    EXPECT_EQ(loadError(R"({"seed":5,"note":"x"})"), "");
-    EXPECT_EQ(loadOne(R"({"kind":"nonzero","lo":-1,"hi":2,"note":"x","comment":[1]})"),
-              FillRecipe::nonzero(-1.0f, 2.0f));
 
     InputMap inputs;
     inputs[7] = nlohmann::json::parse(R"({"seed":5})");
@@ -651,4 +668,237 @@ TEST(TestInputFillRecipes, SeedOnlyAndKindOnlyEntriesStillLoad)
     recipes.loadFromJson(inputs);
     EXPECT_EQ(recipes.resolveSeed(7), 5u);
     EXPECT_EQ(recipes.fills().count(7), 0u);
+}
+
+// A key outside the schema is an error, whatever the kind: a misspelled field would otherwise
+// load as the default and the case would pass without the feature it asked for. The known leaf
+// keys a kind does not read stay ignored (FieldsTheKindDoesNotReadAreIgnored).
+TEST(TestInputFillRecipes, UnknownKeysAreErrorsForEveryKind)
+{
+    for(const char* spec : {R"({"seed":5,"note":"x"})",
+                            R"({"kind":"free","note":"x"})",
+                            R"({"kind":"fixed","value":1,"mistake":true})",
+                            R"({"kind":"nonzero","lo":-1,"hi":2,"comment":[1]})",
+                            R"({"kind":"zeros","sed":3})",
+                            R"({"kind":"special","special":"nan","fraction":0.5,"frac":1})"})
+    {
+        SCOPED_TRACE(spec);
+        const auto message = loadError(spec);
+        EXPECT_TRUE(contains(message, "uid 7")) << message;
+        EXPECT_TRUE(contains(message, "unknown key")) << message;
+    }
+}
+
+// ── parseInputFillSpec ──────────────────────────────────────────────────────
+
+TEST(TestInputFillRecipes, LoadFromJsonThrowsOnUnknownKind)
+{
+    InputFillRecipes recipes;
+    const std::unordered_map<int64_t, nlohmann::json> inputs
+        = {{7, nlohmann::json::parse(R"({"kind": "vaules", "values": [1]})")}};
+
+    try
+    {
+        recipes.loadFromJson(inputs);
+        FAIL() << "expected std::invalid_argument";
+    }
+    catch(const std::invalid_argument& e)
+    {
+        EXPECT_NE(std::string(e.what()).find("vaules"), std::string::npos) << e.what();
+    }
+    EXPECT_TRUE(recipes.fills().empty());
+}
+
+TEST(TestInputFillRecipes, ParseInputFillSpecReadsFreeAndFixed)
+{
+    EXPECT_EQ(parseRecipe(R"({"kind": "free", "lo": -2, "hi": 3.5})"),
+              FillRecipe::free(-2.0f, 3.5f));
+    EXPECT_EQ(parseRecipe(R"({"kind": "fixed", "value": 0.25})"), FillRecipe::fixed(0.25f));
+}
+
+TEST(TestInputFillRecipes, ParseInputFillSpecWithoutKindSetsOnlyASeed)
+{
+    const auto spec = parseInputFillSpec(nlohmann::json::parse(R"({"seed": 9})"));
+    EXPECT_FALSE(spec.recipe.has_value());
+    EXPECT_EQ(spec.seed, 9u);
+}
+
+TEST(TestInputFillRecipes, ParseInputFillSpecRejectsAMalformedSpec)
+{
+    for(const auto* text : {R"("free")",
+                            R"([1, 2])",
+                            R"({"kind": 1})",
+                            R"({"kind": null})",
+                            R"({"kind": "FREE"})",
+                            R"({"kind": ""})",
+                            R"({"sedd": 9})",
+                            R"({"kind": "fixed", "value": 1, "mistake": true})"})
+    {
+        EXPECT_THROW(parseInputFillSpec(nlohmann::json::parse(text)), std::invalid_argument)
+            << text;
+    }
+}
+
+// ── VALUES kind ─────────────────────────────────────────────────────────────
+
+TEST(TestInputFillRecipes, ValuesOfIntegersAreStoredAsInt64)
+{
+    const auto recipe = parseRecipe(R"({"kind": "values", "values": [64, -32, 0]})");
+
+    EXPECT_EQ(recipe.kind, FillRecipe::Kind::VALUES);
+    EXPECT_TRUE(recipe.repeat);
+    ASSERT_NE(recipe.list, nullptr);
+    EXPECT_EQ(std::get<std::vector<int64_t>>(*recipe.list), (std::vector<int64_t>{64, -32, 0}));
+}
+
+TEST(TestInputFillRecipes, ValuesWithAnyNonIntegerAreStoredAsDouble)
+{
+    const auto recipe
+        = parseRecipe(R"({"kind": "values", "values": [1, 2.5, -3], "repeat": false})");
+
+    EXPECT_FALSE(recipe.repeat);
+    ASSERT_NE(recipe.list, nullptr);
+    EXPECT_EQ(std::get<std::vector<double>>(*recipe.list), (std::vector<double>{1.0, 2.5, -3.0}));
+}
+
+TEST(TestInputFillRecipes, ValuesAcceptASeed)
+{
+    const auto spec = parseInputFillSpec(
+        nlohmann::json::parse(R"({"kind": "values", "values": [1], "seed": 4})"));
+    ASSERT_TRUE(spec.recipe.has_value());
+    EXPECT_EQ(*spec.recipe, FillRecipe::values(std::vector<int64_t>{1}));
+    EXPECT_EQ(spec.seed, 4u);
+}
+
+TEST(TestInputFillRecipes, ValuesRejectAMalformedSpec)
+{
+    for(const auto* text : {
+            R"({"kind": "values"})",
+            R"({"kind": "values", "values": []})",
+            R"({"kind": "values", "values": 3})",
+            R"({"kind": "values", "values": ["64"]})",
+            R"({"kind": "values", "values": [true]})",
+            R"({"kind": "values", "values": [null]})",
+            R"({"kind": "values", "values": [[1, 2]]})",
+            R"({"kind": "values", "values": [{"v": 1}]})",
+            R"({"kind": "values", "values": [1], "repeat": "true"})",
+            R"({"kind": "values", "values": [1], "repeat": 1})",
+            R"({"kind": "values", "values": [1], "lo": 0})",
+            R"({"kind": "values", "values": [1], "repet": false})",
+            R"({"kind": "values", "values": [9223372036854775808]})",
+            R"({"kind": "values", "values": [18446744073709551615]})",
+        })
+    {
+        EXPECT_THROW(parseInputFillSpec(nlohmann::json::parse(text)), std::invalid_argument)
+            << text;
+    }
+}
+
+TEST(TestInputFillRecipes, ValuesKeepTheExtremesOfInt64)
+{
+    const auto recipe = parseRecipe(
+        R"({"kind": "values", "values": [9223372036854775807, -9223372036854775808]})");
+    ASSERT_NE(recipe.list, nullptr);
+    EXPECT_EQ(std::get<std::vector<int64_t>>(*recipe.list),
+              (std::vector<int64_t>{std::numeric_limits<int64_t>::max(),
+                                    std::numeric_limits<int64_t>::min()}));
+}
+
+TEST(TestInputFillRecipes, ValuesRoundTripThroughJson)
+{
+    constexpr int64_t K_TWO_TO_53_PLUS_ONE = (int64_t{1} << 53) + 1;
+
+    InputFillRecipes original;
+    original.set(1, FillRecipe::values(std::vector<int64_t>{64, 32}));
+    original.set(2, FillRecipe::values(std::vector<int64_t>{K_TWO_TO_53_PLUS_ONE, -7}, false));
+    original.set(3, FillRecipe::values(std::vector<double>{1.0, 2.5}, false));
+    original.setSeed(1, 11);
+
+    const auto json = original.toJson();
+    EXPECT_EQ(json.at("1").at("kind").get<std::string>(), "values");
+    EXPECT_TRUE(json.at("1").at("values").at(0).is_number_integer());
+    EXPECT_TRUE(json.at("3").at("values").at(0).is_number_float());
+
+    const auto loaded = roundTrip(original);
+    EXPECT_EQ(loaded.fill(1), original.fill(1));
+    EXPECT_EQ(loaded.fill(2), original.fill(2));
+    EXPECT_EQ(loaded.fill(3), original.fill(3));
+    EXPECT_EQ(loaded.resolveSeed(1), 11u);
+    EXPECT_EQ(std::get<std::vector<int64_t>>(*loaded.fill(2).list).front(), K_TWO_TO_53_PLUS_ONE);
+}
+
+TEST(TestInputFillRecipes, RequiredFormatVersionIsTwoOnlyWithValues)
+{
+    InputFillRecipes recipes;
+    EXPECT_EQ(requiredFormatVersion(recipes), 1);
+
+    recipes.set(1, FillRecipe::free(-2.0f, 2.0f));
+    recipes.set(2, FillRecipe::fixed(1.0f));
+    recipes.setSeed(3, 5);
+    EXPECT_EQ(requiredFormatVersion(recipes), 1);
+
+    recipes.setTypeDefault(4, FillRecipe::values(std::vector<int64_t>{1}));
+    EXPECT_EQ(requiredFormatVersion(recipes), 2);
+}
+
+// ── FillRecipe value semantics with a VALUES list ───────────────────────────
+
+TEST(TestInputFillRecipes, ValuesRejectsAnEmptyList)
+{
+    EXPECT_THROW(FillRecipe::values(std::vector<int64_t>{}, /*repeat=*/true),
+                 std::invalid_argument);
+    EXPECT_THROW(FillRecipe::values(std::vector<double>{}, /*repeat=*/true), std::invalid_argument);
+}
+
+TEST(TestInputFillRecipes, ValuesRecipesCompareByContent)
+{
+    const auto a = FillRecipe::values(std::vector<int64_t>{1, 2});
+    const auto b = FillRecipe::values(std::vector<int64_t>{1, 2});
+    ASSERT_NE(a.list, b.list);
+    EXPECT_EQ(a, b);
+
+    EXPECT_NE(a, FillRecipe::values(std::vector<int64_t>{1, 3}));
+    EXPECT_NE(a, FillRecipe::values(std::vector<int64_t>{1, 2}, false));
+    EXPECT_NE(a, FillRecipe::values(std::vector<double>{1.0, 2.0}));
+    EXPECT_NE(a, FillRecipe{});
+
+    FillRecipe noList = a;
+    noList.list = nullptr;
+    FillRecipe otherNoList = b;
+    otherNoList.list = nullptr;
+    EXPECT_EQ(noList, otherNoList);
+    EXPECT_NE(noList, a);
+}
+
+TEST(TestInputFillRecipes, ValuesRecipesCopyAndMove)
+{
+    const auto original = FillRecipe::values(std::vector<int64_t>{5, 6, 7}, false);
+
+    FillRecipe copied(original);
+    EXPECT_EQ(copied, original);
+    copied.repeat = true;
+    EXPECT_NE(copied, original);
+    EXPECT_FALSE(original.repeat);
+
+    FillRecipe copyAssigned;
+    copyAssigned = original;
+    EXPECT_EQ(copyAssigned, original);
+
+    FillRecipe source = original;
+    const FillRecipe moved(std::move(source));
+    EXPECT_EQ(moved, original);
+    source = FillRecipe::fixed(1.0f);
+    EXPECT_EQ(source, FillRecipe::fixed(1.0f));
+
+    FillRecipe moveSource = original;
+    FillRecipe moveAssigned;
+    moveAssigned = std::move(moveSource);
+    EXPECT_EQ(moveAssigned, original);
+    moveSource = original;
+    EXPECT_EQ(moveSource, original);
+
+    InputFillRecipes recipes;
+    recipes.set(1, original);
+    const auto fromRecipes = recipes.fill(1);
+    EXPECT_EQ(fromRecipes, original);
 }

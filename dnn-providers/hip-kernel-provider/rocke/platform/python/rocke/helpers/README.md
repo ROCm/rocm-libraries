@@ -55,6 +55,8 @@ rocke/helpers/
 │ # the (Y, P) decomposition is non-trivial.
 ├── io.py # io_ir_type, load_vec, load_vec_as_f32, pack_f32_to,
 │ # store_vec_from_f32; dtype-string-tolerant I/O dispatch.
+│ # smem_load_fragment: an LDS fragment read in <= 16-byte
+│ # pieces joined in K order by concat_tree (fp32 / TF32 conv).
 ├── reduction.py # block_lds_reduce (sum/max/min/prod) -- canonical
 │ # LDS tree reduction shared by norm/reduce/pool
 │ # kernels. Min and prod are also supported.

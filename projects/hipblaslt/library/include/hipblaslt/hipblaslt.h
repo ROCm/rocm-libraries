@@ -252,6 +252,14 @@ typedef enum {
 
   /** Memory order of the data. See ``hipblasLtOrder_t``.
    *
+   * ``hipblasLtMatmul``, ``hipblasLtMatmulAlgoGetHeuristic``, and the ``hipblaslt_ext`` ``Gemm`` and
+   * ``GroupedGemm`` APIs return ``HIPBLAS_STATUS_NOT_SUPPORTED`` when any of A, B, C, or D uses
+   * ``HIPBLASLT_ORDER_ROW``. Only ``hipblasLtMatrixTransform`` accepts ``HIPBLASLT_ORDER_ROW``.
+   * Swizzled orders apply to A and B only: the same APIs return ``HIPBLAS_STATUS_NOT_SUPPORTED``
+   * when C or D uses any order other than ``HIPBLASLT_ORDER_COL``.
+   * Grouped layouts (``HIPBLASLT_BATCH_MODE_GROUPED``) accept only ``HIPBLASLT_ORDER_COL`` and return
+   * ``HIPBLAS_STATUS_INVALID_VALUE`` for any other order.
+   *
    * ``int32_t``, default: ``HIPBLASLT_ORDER_COL``.
    */
   HIPBLASLT_MATRIX_LAYOUT_ORDER = 3,
@@ -353,6 +361,7 @@ typedef enum {
     HIPBLASLT_POINTER_MODE_HOST = 0,                          /**<Targets host memory. */
     HIPBLASLT_POINTER_MODE_DEVICE = 1,                        /**<Targets device memory. */
     HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_HOST = 4, /**<Alpha pointer targets a device memory vector of length equal to the number of rows of matrix D. Beta is a single value in host memory. */
+    HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_SCALAR_BETA_HOST_EXT = 1000, /**<Alpha pointer targets a single FP32 value in device memory. Requires scaleType HIP_R_32F. Beta is a single value in host memory. */
 } hipblasLtPointerMode_t;
 
 /*! \ingroup types_module
@@ -382,6 +391,7 @@ typedef enum {
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_ZP_EXT = 1015, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_ZP_EXT`` with ``HIP_R_16F`` scales. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16F_ZP_EXT = 1016, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_ZP_EXT`` with a block size of 64. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16F_ZP_EXT = 1017, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_ZP_EXT`` with a block size of 128. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT = 1018, /**<Scaling factors are 8-bit ``R_8F_UE8M0`` values, one for each 32-element block in the K dimension, shuffled in tiles of 128 rows by 4 blocks. For an operand with ``R`` rows (M for A, N for B), the scale of row ``r`` and K block ``kb`` is at byte ``((s*(R/128) + r/128)*64 + 16*g + r%16)*8 + (r%128)/16``, where ``s = kb/4`` and ``g = kb%4``. ``R`` must be a multiple of 128 and the number of K blocks a multiple of 4. Supported for ``HIP_R_6F_E2M3`` and ``HIP_R_6F_E3M2`` A and B only, on both A and B together, with ``HIPBLASLT_ORDER_COL256_R128_EXT`` on A and on B or ``HIPBLASLT_ORDER_COL`` with ``ldb = K`` on B, ``HIPBLAS_OP_T`` for A and ``HIPBLAS_OP_N`` for B. Solutions are specific to an architecture and to exact problem sizes, and need beta = 0, which hipblasLtMatmulAlgoGetHeuristic() does not assume: query them with the extension API's heuristic. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_END
 } hipblasLtMatmulMatrixScale_t;
 
@@ -421,8 +431,8 @@ typedef enum {
   HIPBLASLT_MATMUL_DESC_EPILOGUE = 2,                   /**<Epilogue function. See ``hipblasLtEpilogue_t``. Default value is ``HIPBLASLT_EPILOGUE_DEFAULT``. Data type: ``uint32_t``. */
   HIPBLASLT_MATMUL_DESC_BIAS_POINTER = 3,               /**<Bias or bias gradient vector pointer in the device memory. Data type: ``void*`` / ``const void*``. */
   HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE = 4,             /**<Type of the bias vector in the device memory. Can be set the same as the D matrix type or Scale type. Bias case: see ``HIPBLASLT_EPILOGUE_BIAS``. Data type: ``int32_t`` based on ``hipDataType``. */
-  HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER = 5,            /**<Device pointer to the scale factor value that converts data in matrix A to the compute data type range. The scaling factor must have the same type as the compute type. If not specified, or set to NULL, the scaling factor is assumed to be ``1``. If set for an unsupported matrix data, scale, and compute type combination, calling hipblasLtMatmul() will return ``HIPBLAS_INVALID_VALUE``. Default value: NULL. Data type: ``void*`` ``/const void*``. */
-  HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER = 6,            /**<Equivalent to ``HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER`` for matrix B. Default value: NULL. Data type: ``void*`` / ``const void*``. */
+  HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER = 5,            /**<Device pointer to the scale factor value that converts data in matrix A to the compute data type range. The scaling factor must have the same type as the compute type. If not specified, or set to NULL, the scaling factor is assumed to be ``1``. If set for an unsupported matrix data, scale, and compute type combination, calling hipblasLtMatmul() will return ``HIPBLAS_INVALID_VALUE``. In grouped GEMM, scaling is supported only with the same MX block scale mode on both A and B (``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0``, ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT``, ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3``, ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE8M0_EXT``, ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE4M3_EXT``, ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE5M3_EXT``, or ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE5M3_EXT``), and this is a device array of ``groupCount`` pointers to each group's scale tensor. Each group's K must then be a multiple of the mode's block size, 16 or 32. Default value: NULL. Data type: ``void*`` ``/const void*``. */
+  HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER = 6,            /**<Equivalent to ``HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER`` for matrix B, including the per-group pointer array in grouped GEMM. Default value: NULL. Data type: ``void*`` / ``const void*``. */
   HIPBLASLT_MATMUL_DESC_C_SCALE_POINTER = 7,            /**<Equivalent to ``HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER`` for matrix C. Default value: NULL. Data type: ``void*`` / ``const void*``. */
   HIPBLASLT_MATMUL_DESC_D_SCALE_POINTER = 8,            /**<Equivalent to ``HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER`` for matrix D. Default value: NULL. Data type: ``void*`` / ``const void*``. */
   HIPBLASLT_MATMUL_DESC_EPILOGUE_AUX_SCALE_POINTER = 9, /**<Not supported: no kernel applies a scale to the AUX output. Setting a non-NULL pointer returns ``HIPBLAS_STATUS_NOT_SUPPORTED``; setting NULL succeeds. Default value: NULL. Data type: ``void*`` / ``const void*``. */
@@ -480,6 +490,14 @@ typedef enum {
   /** Row-major.
    *
    * Leading dimension is the stride (in elements) to the beginning of the next row in memory.
+   *
+   * Supported by ``hipblasLtMatrixTransform`` only. Matmul does not support this order and returns
+   * ``HIPBLAS_STATUS_NOT_SUPPORTED``. To multiply row-major data, keep ``HIPBLASLT_ORDER_COL`` and
+   * use the identity ``(A * B)^T = B^T * A^T``: swap A and B, swap ``m`` and ``n``, and describe each
+   * matrix as its column-major transpose. The column-major result is ``(A * B)^T``, which is
+   * ``A * B`` in row-major order, so the output needs no transpose. Anything applied per row of D,
+   * such as a bias or an alpha vector, then applies per column of ``A * B``, and the scale for A
+   * becomes the scale for the second operand.
    */
   HIPBLASLT_ORDER_ROW = 1,
   
@@ -508,7 +526,20 @@ typedef enum {
    */
   HIPBLASLT_ORDER_COL16_4R8 = 101,
   HIPBLASLT_ORDER_COL16_4R4 = 102,
-  HIPBLASLT_ORDER_COL16_4R2 = 103
+  HIPBLASLT_ORDER_COL16_4R2 = 103,
+  /**
+   * 6-bit data (``HIP_R_6F_E2M3``, ``HIP_R_6F_E3M2``) ordered in tiles of 256 columns and 128 rows,
+   * column tiles outermost. Column ``c`` stores its rows as a 6-bit bitstream, least significant bit
+   * first. A tile holds two planes: the first 16 bytes of each 32-row group of each column, then the
+   * last 8. With ``rows`` the number of rows, ``ct = c/256``, ``rt = row/128``, ``kg = (row%128)/32``
+   * and ``o = 64*((c%256)/16) + 16*kg + c%16``, the tile starts at byte
+   * ``(ct*(rows/128) + rt)*24576``; byte ``j`` of the group's 24 is at ``16*o + j`` for ``j < 16`` and
+   * at ``16384 + 8*o + (j - 16)`` otherwise. The number of columns (rows) has to be a multiple of
+   * 256 (128), and the leading dimension has to equal the number of rows. Requires
+   * ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT``. Set on A, with B in this order or in
+   * ``HIPBLASLT_ORDER_COL``.
+   */
+  HIPBLASLT_ORDER_COL256_R128_EXT = 104
 } hipblasLtOrder_t;
 
 /** Matrix transform descriptor attributes to define details of the operation.
@@ -578,6 +609,7 @@ typedef hipblasLtMatrixTransformDescOpaque_t* hipblasLtMatrixTransformDesc_t;
  *
  *  A hipBLASLt handle is not safe for concurrent use across multiple HIP streams. Applications must ensure any previously submitted work associated with a handle has completed
  *  before reusing that handle on a different stream. For multi-stream execution, create one handle per stream.  
+ *
  *  Use the following functions to manipulate this library context:  
  *
  *  \ref hipblasLtCreate():
@@ -585,6 +617,9 @@ typedef hipblasLtMatrixTransformDescOpaque_t* hipblasLtMatrixTransformDesc_t;
  *  
  *  \ref hipblasLtDestroy():
  *  To destroy a previously created hipBLASLt library context descriptor and release the resources.
+ *
+ *  Distinct handles may be used at the same time from different threads, for example one handle per stream.
+ *  Handles in one process share the loaded solution libraries, code-object adapters, and heuristic caches.
  */
 typedef void* hipblasLtHandle_t;
 /*! \ingroup types_module

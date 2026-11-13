@@ -75,25 +75,26 @@ struct WeightsSwizzleDgrad
 };
 
 template <Config cfg>
-__device__ void conv2d_direct_cdna4_nhwc_impl(const ToType<cfg.type>* __restrict__ in,
-                                              const ToType<cfg.type>* __restrict__ wei,
-                                              double alpha,
-                                              double beta,
-                                              ToType<cfg.type>* __restrict__ out,
-                                              int N,
-                                              int groups,
-                                              int c_per_group,
-                                              int k_per_group,
-                                              int hi,
-                                              int wi,
-                                              int ho,
-                                              int wo,
-                                              int sy,
-                                              int sx,
-                                              int dy,
-                                              int dx,
-                                              int py,
-                                              int px)
+__device__ __forceinline__ void
+conv2d_direct_cdna4_nhwc_impl(const ToType<cfg.type>* __restrict__ in,
+                              const ToType<cfg.type>* __restrict__ wei,
+                              double alpha,
+                              double beta,
+                              ToType<cfg.type>* __restrict__ out,
+                              int N,
+                              int groups,
+                              int c_per_group,
+                              int k_per_group,
+                              int hi,
+                              int wi,
+                              int ho,
+                              int wo,
+                              int sy,
+                              int sx,
+                              int dy,
+                              int dx,
+                              int py,
+                              int px)
 {
     using conv_dtype    = ToType<cfg.type>;
     namespace bn        = bunnies;
@@ -111,8 +112,7 @@ __device__ void conv2d_direct_cdna4_nhwc_impl(const ToType<cfg.type>* __restrict
     constexpr int tile_size_w_pad  = cfg.tile_size_w + (cfg.kw - 1);
     constexpr int tile_size_k_pad  = cfg.tile_size_k + cfg.k_pad * 4 / sizeof(conv_dtype);
     constexpr int tile_size_k_part = cfg.tile_size_k / cfg.k_parts;
-    constexpr auto half_fmt =
-        cfg.type == hipconv::DataType::bf16 ? bn::fpfmt::e8m7 : bn::fpfmt::e5m10;
+    constexpr auto half_fmt        = bn::fpfmt_of<cfg.type>;
     using mat_a = arch::matrix<half_fmt, cfg.wmma_size_k, cfg.wmma_size_c, bn::use::A>;
     using mat_b = arch::matrix<half_fmt, cfg.wmma_size_c, cfg.wmma_size_j, bn::use::B>;
     using mat_c_acc =
@@ -355,7 +355,8 @@ __device__ void conv2d_direct_cdna4_nhwc_impl(const ToType<cfg.type>* __restrict
     int buf_in      = 0;
     int buf_weights = 0;
 
-    auto const prologue = [&]<int WaveRank>() {
+    auto const prologue = [&]<int WaveRank>() __attribute__((always_inline))
+    {
         if(WaveRank == 0)
         {
 #pragma unroll
@@ -378,10 +379,28 @@ __device__ void conv2d_direct_cdna4_nhwc_impl(const ToType<cfg.type>* __restrict
         arch::s_wait_vmcnt<0>();
         __builtin_amdgcn_s_barrier();
     };
-    auto const inner_conv = [&]<int WaveRank, bool ZeroAcc = false>(int c) {
-#pragma unroll
-        for(int r = 0; r < cfg.kh; ++r)
-        {
+    auto const inner_conv = [&]<int WaveRank, bool ZeroAcc = false>(int c)
+        __attribute__((always_inline))
+    {
+        constexpr auto in_loads_in_flight_for_next_buf = [](auto the_wave_id, auto r) {
+            int in_flight = 0;
+            for(int s = 0; s < cfg.kw; ++s)
+            {
+                for(int part_c = 0; part_c < c_parts; ++part_c)
+                {
+                    const auto in_part0 =
+                        in_num_parts_per_it * (c_parts * cfg.kw * r + c_parts * s + part_c);
+                    bn::wave_distribute<in_num_parts_per_it, wave_group_size>(the_wave_id,
+                                                                              [&](int round) {
+                        const auto idx = in_part0 + round;
+                        if(idx < in_load_per_buf)
+                            ++in_flight;
+                    });
+                }
+            }
+            return in_flight;
+        };
+        bn::static_unroll<cfg.kh>([&](auto r) {
 #pragma unroll
             for(int s = 0; s < cfg.kw; ++s)
             {
@@ -454,11 +473,29 @@ __device__ void conv2d_direct_cdna4_nhwc_impl(const ToType<cfg.type>* __restrict
                             }
                             else
                             {
-                                arch::s_wait_vmcnt<divup(in_num_parts_per_it, wave_group_size) *
-                                                   cfg.kw * c_parts>();
+                                switch(wave_group)
+                                {
+                                case 0:
+                                    arch::s_wait_vmcnt<in_loads_in_flight_for_next_buf(0, r)>();
+                                    break;
+                                case 1:
+                                    arch::s_wait_vmcnt<in_loads_in_flight_for_next_buf(1, r)>();
+                                    break;
+                                case 2:
+                                    arch::s_wait_vmcnt<in_loads_in_flight_for_next_buf(2, r)>();
+                                    break;
+                                case 3:
+                                    arch::s_wait_vmcnt<in_loads_in_flight_for_next_buf(3, r)>();
+                                    break;
+                                default:
+                                    arch::s_wait_vmcnt<0>();
+                                    break;
+                                }
                             }
                         }
                     }
+                    if(WaveRank == 1 && part_c == c_parts - 1)
+                        arch::s_wait_lgkmcnt<0>();
                     __builtin_amdgcn_s_barrier();
                     __builtin_amdgcn_sched_barrier(0);
 
@@ -487,10 +524,11 @@ __device__ void conv2d_direct_cdna4_nhwc_impl(const ToType<cfg.type>* __restrict
 
                 buf_weights ^= 1;
             }
-        }
+        });
         buf_in ^= 1;
     };
-    auto const main_loop = [&]<int WaveRank>() {
+    auto const main_loop = [&]<int WaveRank>() __attribute__((always_inline))
+    {
         prologue.template operator()<WaveRank>();
         if(WaveRank == 1)
         {
@@ -624,6 +662,7 @@ __launch_bounds__(cfg.tiles() * arch::wave_size, 2) __global__
 
 template <Config cfg>
 void launch_impl(const LaunchParams& lp,
+                 const hipconv::Device&,
                  const hipconv::ConvParams& par,
                  const void* in,
                  const void* wei,
@@ -691,17 +730,18 @@ public:
 
     KVDescriptor config_descriptor() const override { return ConfigMatcher(cfg_); }
 
-    bool is_applicable(const hipconv::ConvParams& par) const override
+    bool is_applicable(const hipconv::Device& dev, const hipconv::ConvParams& par) const override
     {
         // Exclude kernel if we are not 16 byte aligned
         if(par.channels_per_group() * sizeof_data_type(par.input_type) % 16 != 0)
             return false;
         if(par.filters_per_group() * sizeof_data_type(par.input_type) % 16 != 0)
             return false;
-        return DirectConvKernel::is_applicable(par);
+        return DirectConvKernel::is_applicable(dev, par);
     }
 
-    bool is_valid_config(const hipconv::ConvParams& par) const override
+    bool is_valid_config(const hipconv::Device& /*dev*/,
+                         const hipconv::ConvParams& par) const override
     {
         const auto [p, q, h, w, gk, gc] = problem_shape(par);
 
@@ -710,7 +750,7 @@ public:
         const int64_t out_size_per_batch =
             sizeof_data_type(par.output_type) * p * q * par.groups * gk;
         const int64_t weights_size_per_group =
-            gk * par.kh * par.kw * gc * sizeof_data_type(par.weight_type);
+            static_cast<int64_t>(gk) * par.kh * par.kw * gc * sizeof_data_type(par.weight_type);
         // We have ">=" in the following because num_records = all 1's disables OOB check
         constexpr int64_t record_limit = (int64_t{1} << 32) - 1;
         if(in_size_per_batch * cfg_.tile_size_n >= record_limit)
@@ -731,7 +771,8 @@ public:
         return true;
     }
 
-    auto get_weighted_throughput_index(const hipconv::ConvParams& par) const -> float override
+    auto get_weighted_throughput_index(const hipconv::Device& /*dev*/,
+                                       const hipconv::ConvParams& par) const -> float override
     {
         const auto [p, q, h, w, gk, gc] = problem_shape(par);
 
@@ -742,7 +783,8 @@ public:
                throughput_factor(q, cfg_.tile_size_w) * throughput_factor(gk, cfg_.tile_size_k);
     }
 
-    LaunchParams get_launch_params(const hipconv::ConvParams& par) const override
+    LaunchParams get_launch_params(const hipconv::Device& /*dev*/,
+                                   const hipconv::ConvParams& par) const override
     {
         auto [gk, p, q] = [](const hipconv::ConvParams& par) -> std::array<int, 3> {
             if(par.direction == hipconv::Direction::Dgrad)

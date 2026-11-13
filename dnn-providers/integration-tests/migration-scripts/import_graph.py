@@ -36,10 +36,26 @@ prefix via ``TIER_MAP`` (``Full/...`` -> ``full/``), as in ``place_bundles.py``;
 with no sidecar, or one with no ``operation``, it defaults to ``quick``. A
 ``--tier`` that contradicts the sidecar warns like any other override.
 
+Grouped import (opt-in): ``--template-attributes``, ``--template-alignment``
+and ``--skeleton-value-form`` let one sweep hold generated cases with different
+node attributes, alignments or baked values. ``--op-dir``, ``--topology``,
+``--only-op-dir``, ``--require-marked-sweep`` and ``--case-id`` control where a
+case goes and its id. Each of these flags writes an ``import_mode`` object into
+a new ``sweep.json``, and the new template takes ``is_override_shape_enabled``
+and ``min_required_engine_api_version`` from the case values. Default mode
+never appends into a sweep with this object.
+Default mode still reports an exact duplicate of a case in such a sweep.
+``--sweep-format`` sets the file layout of a new grouped sweep (default
+``compact``) and records it in the object. An append keeps the layout of the sweep.
+See README.md.
+
 Usage::
 
     import_graph.py --graph case.json --bundle-dir integration-test-bundles/ \\
         [--tier TIER] [--meta reference_source="..."] [--dry-run] [--strict] [--force]
+        [--op-dir NAME] [--topology NAME] [--template-attributes]
+        [--template-alignment] [--skeleton-value-form] [--only-op-dir]
+        [--require-marked-sweep] [--case-id ID] [--sweep-format {pretty,compact}]
 """
 
 import argparse
@@ -52,10 +68,23 @@ import sys
 from pathlib import Path
 
 from bundle_utils import (
+    ABSENT_TENSORS_FORMAT_VERSION,
+    ABSENT_TENSORS_KEY,
+    ABSENT_TENSORS_SWEEP_VERSION,
+    GROUPED_TOP_LEVEL,
+    TENSOR_PATCHES_KEY,
     TENSOR_ALWAYS,
+    TENSOR_RAGGED,
     TENSOR_IF_VARIES,
+    IMPORT_MODE_KEY,
     TOP_LEVEL_IF_VARIES,
+    SWEEP_FORMATS,
     _case_hash,
+    absent_case_problems,
+    absent_tensor_problems,
+    dump_sweep,
+    import_mode_grouping,
+    import_mode_marker,
     assign_case_ids,
     canon,
     canonical_uid_map_by_name,
@@ -63,16 +92,27 @@ from bundle_utils import (
     capture_suite_case,
     derive_operation,
     expand,
+    expand_case,
     infer_layout,
     inputs_error,
+    metadata_uid_names,
     next_free_topology_dir,
+    prune_absent_tensors,
     read_capture_sidecar,
     remap_graph,
     remap_meta_inputs,
     sanitize,
     skeleton_hash,
+    sweep_format,
+    sweep_import_mode,
+    template_node_attributes,
+    template_tensor_alignment,
+    template_tensor_values,
+    template_top_level_fields,
+    per_case_tensor_fields,
     tensors_by_uid,
     tier_for_suite,
+    uid_map_onto,
 )
 
 # The sweep-case patch rules (add_tensors, node_patches, tensor_patches) live with the
@@ -80,7 +120,6 @@ from bundle_utils import (
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 from support_matrix_units import (  # noqa: E402
     NODE_PATCH_SECTIONS,
-    SweepCaseError,
     apply_case_patches,
 )
 
@@ -90,29 +129,211 @@ from support_matrix_units import (  # noqa: E402
 # --------------------------------------------------------------------------
 
 
-def _index_existing(bundle_dir: Path) -> dict:
-    """Build {skeleton_hash: [(template, sweep, sweep_path)]} from the tree."""
-    index = {}
-    if not bundle_dir.is_dir():
-        return index
-    for sweep_path in sorted(bundle_dir.rglob("sweep.json")):
-        template_path = sweep_path.parent / "graph.template.json"
-        if not template_path.exists():
-            continue
+class ImportCache:
+    """Parsed sweeps and expanded cases, shared by a series of :func:`main` calls.
+
+    Use one cache for imports into one bundle tree that no other writer changes
+    while the cache is in use. An append changes the sweep in memory and marks it
+    dirty. :meth:`flush` writes each dirty sweep.json. The cache reads a sweep
+    that is not dirty again when its files change on disk.
+    """
+
+    def __init__(self):
+        self._entries = {}
+        self._dirty = set()
+
+    @staticmethod
+    def _stamp(sweep_path: Path, template_path: Path) -> tuple:
+        out = ()
+        for path in (sweep_path, template_path):
+            st = path.stat()
+            out += (st.st_ino, st.st_size, st.st_mtime_ns)
+        return out
+
+    def load(self, sweep_path: Path, template_path: Path):
+        """(template, sweep) of a sweep folder, or None when it cannot read a file."""
+        entry = self._entries.get(sweep_path)
+        if sweep_path in self._dirty:
+            return entry["template"], entry["sweep"]
         try:
+            stamp = self._stamp(sweep_path, template_path)
+            if entry is not None and entry["stamp"] == stamp:
+                return entry["template"], entry["sweep"]
             with open(template_path) as f:
                 template = json.load(f)
             with open(sweep_path) as f:
                 sweep = json.load(f)
         except (json.JSONDecodeError, OSError):
+            self._entries.pop(sweep_path, None)
+            return None
+        self._entries[sweep_path] = {
+            "template": template,
+            "sweep": sweep,
+            "stamp": stamp,
+            "canons": [],
+        }
+        return template, sweep
+
+    def case_canons(self, sweep_path: Path, template: dict, sweep: dict):
+        """Yield :func:`_graph_canon` of the graph of each case (:func:`_case_graph`).
+
+        Yield None for a case that does not expand.
+        """
+        entry = self._entries.get(sweep_path)
+        known = entry["canons"] if entry is not None and entry["sweep"] is sweep else []
+        for i, case in enumerate(sweep.get("cases", [])):
+            if i < len(known) and known[i][0] is case:
+                yield known[i][1]
+                continue
+            del known[i:]
+            text = _case_canon(template, case)
+            known.append((case, text))
+            yield text
+
+    def memo(self, sweep_path: Path, template: dict):
+        """A function (key, compute) -> value that keeps compute() per key.
+
+        Use it only for values that depend on nothing but this template and the
+        objects that the key names.
+        """
+        entry = self._entries.get(sweep_path)
+        if entry is None or entry["template"] is not template:
+            return lambda key, compute: compute()
+        values = entry.setdefault("memo", {})
+
+        def lookup(key, compute):
+            if key not in values:
+                values[key] = compute()
+            return values[key]
+
+        return lookup
+
+    def mark_dirty(self, sweep_path: Path):
+        self._dirty.add(sweep_path)
+
+    def flush(self):
+        """Write each dirty sweep.json."""
+        for sweep_path in sorted(self._dirty):
+            sweep = self._entries[sweep_path]["sweep"]
+            with open(sweep_path, "w", newline="\n") as f:
+                f.write(dump_sweep(sweep, sweep_format(sweep)))
+            self._dirty.discard(sweep_path)
+            self._entries[sweep_path]["stamp"] = self._stamp(
+                sweep_path, sweep_path.parent / "graph.template.json"
+            )
+
+
+def _existing_sweeps(bundle_dir: Path, cache: ImportCache = None) -> list:
+    """[(template, sweep, sweep_path)] for each readable sweep with a template and a case."""
+    sweeps = []
+    if not bundle_dir.is_dir():
+        return sweeps
+    for sweep_path in sorted(bundle_dir.rglob("sweep.json")):
+        template_path = sweep_path.parent / "graph.template.json"
+        if not template_path.exists():
             continue
-        cases = sweep.get("cases", [])
-        if not cases:
+        if cache is not None:
+            loaded = cache.load(sweep_path, template_path)
+            if loaded is None:
+                continue
+            template, sweep = loaded
+        else:
+            try:
+                with open(template_path) as f:
+                    template = json.load(f)
+                with open(sweep_path) as f:
+                    sweep = json.load(f)
+            except (json.JSONDecodeError, OSError):
+                continue
+        if not sweep.get("cases", []):
             continue
-        expanded_rep = expand(template, cases[0].get("values", {}))
-        h = skeleton_hash(expanded_rep)
+        sweeps.append((template, sweep, sweep_path))
+    return sweeps
+
+
+def _index_existing(
+    bundle_dir: Path, value_form: bool = False, sweeps=None, cache: ImportCache = None
+) -> dict:
+    """Build {skeleton_hash: [(template, sweep, sweep_path)]} from the tree.
+
+    A sweep is hashed by the skeleton of its whole template: the graph of its
+    first case without absent tensors, built as the C++ loader builds it
+    (:func:`expand_case`), or, when every case has absent tensors, the template
+    expanded with the first case's values and nothing pruned. A sweep whose case
+    does not build is left out.
+    """
+    index = {}
+    if sweeps is None:
+        sweeps = _existing_sweeps(bundle_dir)
+    for template, sweep, sweep_path in sweeps:
+        cases = sweep["cases"]
+        rep = next((c for c in cases if not c.get(ABSENT_TENSORS_KEY)), None)
+
+        def rep_hash():
+            try:
+                if rep is not None:
+                    expanded_rep = expand_case(template, rep)
+                else:
+                    expanded_rep = expand(template, cases[0].get("values", {}))
+            except ValueError:
+                return None
+            return skeleton_hash(expanded_rep, value_form=value_form)
+
+        if cache is not None:
+            obj = rep if rep is not None else cases[0]
+            key = ("index", value_form, rep is None, id(obj))
+            held, h = cache.memo(sweep_path, template)(key, lambda: (obj, rep_hash()))
+            if held is not obj:
+                h = rep_hash()
+        else:
+            h = rep_hash()
+        if h is None:
+            continue
         index.setdefault(h, []).append((template, sweep, sweep_path))
     return index
+
+
+def _superset_join(template: dict, graph: dict, value_form: bool, memo=None):
+    """(uid map onto the template, absent template uids) when the graph is the template
+    without some of its tensors; else None.
+
+    Tensors match by name. The absent uids must satisfy the C++ loader's template
+    rules (:func:`absent_tensor_problems`), and the template without them must have
+    the graph's skeleton. ``memo``, from :meth:`ImportCache.memo`, keeps the
+    template-side result per set of absent uids.
+    """
+    uid_map = uid_map_onto(graph, template)
+    if uid_map is None:
+        return None
+    present = set(uid_map.values())
+    absent = sorted(
+        t["uid"]
+        for t in template.get("tensors", [])
+        if "uid" in t and t["uid"] not in present
+    )
+    if not absent:
+        return None
+
+    def pruned_hash():
+        if absent_tensor_problems(template, absent):
+            return None
+        return skeleton_hash(
+            prune_absent_tensors(template, absent), value_form=value_form
+        )
+
+    if memo is not None:
+        want = memo(("superset", value_form, tuple(absent)), pruned_hash)
+    else:
+        want = pruned_hash()
+    if want is None or want != skeleton_hash(
+        remap_graph(graph, uid_map), value_form=value_form
+    ):
+        return None
+    return uid_map, absent
+
+
+def _tensor_names(template: dict) -> list:
+    return sorted(t.get("name", "") for t in template.get("tensors", []) if "uid" in t)
 
 
 # --------------------------------------------------------------------------
@@ -237,10 +458,56 @@ def _report_roundtrip_failure(where, expanded, graph, selected=None):
     print(f"    actual:    {_brief(actual)}  (template + values)", file=sys.stderr)
 
 
+def _remove_patches(graph: dict, template: dict) -> list:
+    """``tensor_patches`` entries that remove the fields a graph's tensor lacks.
+
+    One entry per template tensor that has a field the graph's tensor of the same
+    uid lacks. A field that holds a ``${case.*}`` placeholder is never removed:
+    the C++ loader resolves placeholders before it applies patches.
+    """
+    tgraph = tensors_by_uid(graph)
+    patches = []
+    for tt in template.get("tensors", []):
+        src = tgraph.get(tt.get("uid"))
+        if src is None:
+            continue
+        missing = sorted(
+            fld
+            for fld, tval in tt.items()
+            if fld not in src and next(_extract_placeholders(tval), None) is None
+        )
+        if missing:
+            patches.append({"uid": tt["uid"], "remove": missing})
+    return patches
+
+
+ADD_TENSORS_KEY = "add_tensors"
+NODE_PATCHES_KEY = "node_patches"
+
+
+def _sweep_case(
+    case_id, values, patches, meta, absent=None, added=None, node_patches=None
+) -> dict:
+    """A sweep case: id, absent tensors (if any), values, tensor patches (if any), added
+    tensors (if any), node patches (if any), metadata."""
+    case = {"id": case_id}
+    if absent:
+        case[ABSENT_TENSORS_KEY] = absent
+    case["values"] = values
+    if patches:
+        case[TENSOR_PATCHES_KEY] = patches
+    if added:
+        case[ADD_TENSORS_KEY] = added
+    if node_patches:
+        case[NODE_PATCHES_KEY] = node_patches
+    case["metadata"] = meta
+    return case
+
+
 def _extract_values(graph: dict, template: dict) -> dict:
     """Extract per-case values from a concrete graph given its template."""
     values = {}
-    for fld in TOP_LEVEL_IF_VARIES:
+    for fld in TOP_LEVEL_IF_VARIES + GROUPED_TOP_LEVEL:
         if isinstance(template.get(fld), str) and template[fld].startswith("${case."):
             values[fld] = graph.get(fld)
 
@@ -250,12 +517,26 @@ def _extract_values(graph: dict, template: dict) -> dict:
         uid = tt.get("uid")
         src = tgraph.get(uid, {})
         entry = {"uid": uid}
-        for fld in TENSOR_ALWAYS + TENSOR_IF_VARIES:
+        for fld in TENSOR_ALWAYS + TENSOR_IF_VARIES + TENSOR_RAGGED:
             if isinstance(tt.get(fld), str) and tt[fld].startswith("${case."):
                 if fld in src:
                     entry[fld] = src[fld]
         tv.append(entry)
     values["tensors"] = tv
+
+    # Whole-field tensor placeholders that resolve from the top-level values,
+    # such as ${case.alignment.<uid>}.
+    for tt in template.get("tensors", []):
+        src = tgraph.get(tt.get("uid"), {})
+        for fld, tval in tt.items():
+            if (
+                fld in TENSOR_ALWAYS + TENSOR_IF_VARIES + TENSOR_RAGGED
+                or fld not in src
+            ):
+                continue
+            for loc, case_path in _extract_placeholders(tval):
+                if loc == "":
+                    _deep_set(values, case_path, src[fld])
 
     for t_node, g_node in zip(template.get("nodes", []), graph.get("nodes", [])):
         for loc, case_path in _extract_placeholders(t_node):
@@ -268,16 +549,32 @@ def _extract_values(graph: dict, template: dict) -> dict:
     return values
 
 
-def _case_graph(template: dict, case: dict):
-    """The graph a sweep case runs: its template expansion with its ``add_tensors``,
-    ``node_patches`` and ``tensor_patches`` applied, as the harness builds it. None for a
-    case the harness would refuse to load (hand-written cases carry other shapes)."""
-    graph = expand(template, case.get("values", {}))
-    try:
-        apply_case_patches(graph, case)
-    except SweepCaseError:
-        return None
+def _expanded_case(template: dict, case: dict) -> dict:
+    """The graph a sweep case runs, built in the harness's order: the absent tensors
+    leave a copy of the template first, then the placeholders expand, then the case's
+    ``add_tensors``, ``node_patches`` and ``tensor_patches`` apply.
+
+    Raises ``ValueError`` for a case the harness would refuse to load."""
+    absent = case.get(ABSENT_TENSORS_KEY)
+    base = prune_absent_tensors(template, absent) if absent else template
+    graph = expand(base, case.get("values", {}))
+    apply_case_patches(graph, case)
     return graph
+
+
+def _case_graph(template: dict, case: dict):
+    """:func:`_expanded_case`, or None for a case that does not expand (hand-written
+    cases carry other shapes)."""
+    try:
+        return _expanded_case(template, case)
+    except ValueError:
+        return None
+
+
+def _case_canon(template: dict, case: dict):
+    """:func:`_graph_canon` of the graph of ``case``; None if it does not expand."""
+    graph = _case_graph(template, case)
+    return None if graph is None else _graph_canon(graph)
 
 
 def _graph_canon(graph: dict) -> str:
@@ -363,11 +660,22 @@ def _case_patches(graph: dict, expanded: dict) -> dict:
     return {key: value for key, value in fields.items() if value}
 
 
+def _case_patch_fields(graph: dict, template: dict, values: dict) -> dict:
+    """The patch fields of a case of ``template`` with ``values`` that runs ``graph``:
+    :func:`_case_patches`, plus the ``tensor_patches`` that remove the fields the graph's
+    tensors lack (:func:`_remove_patches`). A field with nothing to say is absent."""
+    fields = _case_patches(graph, expand(template, values))
+    removals = _remove_patches(graph, template)
+    if removals:
+        fields[TENSOR_PATCHES_KEY] = removals + fields.get(TENSOR_PATCHES_KEY, [])
+    return fields
+
+
 def _fits_template(template: dict, graph: dict) -> bool:
-    """Whether a case of ``template`` (its values, then :func:`_case_patches`) expands to
-    ``graph``: the check that makes a freeze lossless."""
+    """Whether a case of ``template`` (its values, then :func:`_case_patch_fields`)
+    expands to ``graph``: the check that makes a freeze lossless."""
     values = _extract_values(graph, template)
-    case = {"values": values, **_case_patches(graph, expand(template, values))}
+    case = {"values": values, **_case_patch_fields(graph, template, values)}
     rebuilt = _case_graph(template, case)
     return rebuilt is not None and _graph_canon(rebuilt) == _graph_canon(graph)
 
@@ -427,20 +735,35 @@ def _align_to_template(graph: dict, rep: dict):
     return remap_graph(graph, uid_map), uid_map
 
 
-def _superset_matches(graph: dict, index: dict) -> list:
-    """The indexed sweeps whose template can express ``graph`` with ``add_tensors``: same
-    nodes, every tensor of the template's expansion, and the case patches that close the
-    rest. Each is ``(template, sweep, sweep_path, aligned_graph, uid_map)``."""
+def _added_tensor_matches(graph: dict, sweeps: list) -> list:
+    """The sweeps whose template can express ``graph`` with ``add_tensors``: same nodes,
+    every tensor of the template's expansion, and the case patches that close the rest.
+    Each is ``(template, sweep, sweep_path, aligned_graph, uid_map)``. A sweep whose
+    cases all drop template tensors, or add tensors of their own, has no plain
+    expansion of the template to match against and is left out."""
     found = []
-    for matches in index.values():
-        for template, sweep, sweep_path in matches:
-            cases = sweep.get("cases", [])
-            if not cases:
-                continue
-            rep = expand(template, cases[0].get("values", {}))
-            aligned = _align_to_template(graph, rep)
-            if aligned is not None and _fits_template(template, aligned[0]):
-                found.append((template, sweep, sweep_path, *aligned))
+    for template, sweep, sweep_path in sweeps:
+        rep = next(
+            (
+                case
+                for case in sweep.get("cases", [])
+                if not (
+                    case.get(ABSENT_TENSORS_KEY)
+                    or case.get(ADD_TENSORS_KEY)
+                    or case.get(NODE_PATCHES_KEY)
+                )
+            ),
+            None,
+        )
+        if rep is None:
+            continue
+        try:
+            expanded_rep = expand(template, rep.get("values", {}))
+        except ValueError:
+            continue
+        aligned = _align_to_template(graph, expanded_rep)
+        if aligned is not None and _fits_template(template, aligned[0]):
+            found.append((template, sweep, sweep_path, *aligned))
     return found
 
 
@@ -535,9 +858,292 @@ def _gtest_name(sweep_dir: Path, bundle_dir: Path, case_id: str) -> str:
     return f"{suite}.{_sanitize_gtest(case_id)}"
 
 
-def main() -> int:
+# Opt-in flags that change how a new sweep is templated or matched. Each one
+# that is in effect is recorded in the sweep's import_mode object.
+_GROUPING_FLAGS = (
+    "template_attributes",
+    "template_alignment",
+    "skeleton_value_form",
+    "superset_templates",
+)
+
+
+def _is_folder_name(name: str) -> bool:
+    """True if ``name`` is one plain directory name (no separator, not . or ..)."""
+    return bool(name) and name not in (".", "..") and Path(name).name == name
+
+
+def _grouping_options(args):
+    """The grouping options in effect, as their command-line spellings."""
+    return [f.replace("_", "-") for f in _GROUPING_FLAGS if getattr(args, f)]
+
+
+def _is_grouped(args) -> bool:
+    """True if any opt-in grouped-import flag is given."""
+    return bool(
+        _grouping_options(args)
+        or args.op_dir is not None
+        or args.topology is not None
+        or args.only_op_dir
+        or args.require_marked_sweep
+        or args.case_id is not None
+    )
+
+
+def _expanded_canons(template, sweep, sweep_path, cache):
+    """Yield the :func:`_graph_canon` of each case's graph; None if it does not expand."""
+    if cache is not None:
+        yield from cache.case_canons(sweep_path, template, sweep)
+        return
+    for case in sweep.get("cases", []):
+        yield _case_canon(template, case)
+
+
+def _report_duplicate(args, candidates, graph_json: str, meta: dict, cache=None):
+    """The exit code when a case of ``candidates`` duplicates the graph; else None.
+
+    ``candidates`` holds (template, sweep, sweep_path, ...) entries whose uids
+    match those of ``graph_json``.
+    """
+    for template, sweep, sweep_path, *_ in candidates:
+        texts = _expanded_canons(template, sweep, sweep_path, cache)
+        for case, text in zip(sweep.get("cases", []), texts):
+            if text != graph_json:
+                continue
+            existing_meta = case.get("metadata", {})
+            # An unknown seed is not a wildcard: the case would run with the
+            # default seed, which differs from an existing case's explicit
+            # one. Two absent seeds do match (both fall back to the default).
+            seed_match = existing_meta.get("seed") == meta.get("seed")
+            inputs_match = canon(meta.get("inputs", {})) == canon(
+                existing_meta.get("inputs", {})
+            )
+            if seed_match and inputs_match:
+                print(f"  DUPLICATE of {sweep_path}:{case['id']}", file=sys.stderr)
+                if args.strict:
+                    return 1
+                if not args.force:
+                    print("  skipped (use --force to append)", file=sys.stderr)
+                    return 0
+    return None
+
+
+def _append_case(
+    args, template, sweep, sweep_path, new_case, graph, selected, cache=None
+) -> int:
+    """Give ``new_case`` an id, check that it re-expands to ``graph``, and write the sweep.
+
+    With ``cache``, the sweep changes in memory and the cache marks it dirty.
+    """
+    existing_cases = sweep.get("cases", [])
+    saved_ids = [c["id"] for c in existing_cases]
+    taken = set(saved_ids)
+    if args.case_id is not None:
+        if args.case_id in taken:
+            print(
+                f"  ERROR: --case-id {args.case_id} already exists in {sweep_path}",
+                file=sys.stderr,
+            )
+            return 1
+        new_case["id"] = args.case_id
+    else:
+        all_cases = existing_cases + [new_case]
+        assign_case_ids(all_cases)
+        for c, orig_id in zip(existing_cases, saved_ids):
+            c["id"] = orig_id
+        if new_case["id"] in taken:
+            new_case["id"] = f"{new_case['id']}_{_case_hash(new_case)}"
+
+    try:
+        expanded = _expanded_case(template, new_case)
+    except ValueError as error:
+        print(f"  ERROR: the new case does not expand: {error}", file=sys.stderr)
+        return 1
+    if _graph_canon(expanded) != _graph_canon(graph):
+        _report_roundtrip_failure(
+            "after extraction", expanded, graph, selected=selected
+        )
+        return 1
+    if new_case.get(ABSENT_TENSORS_KEY):
+        problems = absent_case_problems(
+            {**sweep, "version": ABSENT_TENSORS_SWEEP_VERSION}, template, new_case
+        )
+        if problems:
+            print(
+                f"  ERROR: the C++ loader would refuse the case: {problems[0]}",
+                file=sys.stderr,
+            )
+            return 1
+
+    fmt = sweep_format(sweep)
+    if fmt not in SWEEP_FORMATS:
+        print(
+            f"  ERROR: {sweep_path}: unknown sweep.json format {fmt!r}",
+            file=sys.stderr,
+        )
+        return 1
+    support_created = _ensure_support_json(sweep_path.parent, args.dry_run)
+    if not args.dry_run:
+        # Only the cases and, for a case with absent tensors, the sweep version change.
+        sweep["cases"] = existing_cases + [new_case]
+        if new_case.get(ABSENT_TENSORS_KEY):
+            sweep["version"] = ABSENT_TENSORS_SWEEP_VERSION
+        if cache is not None:
+            cache.mark_dirty(sweep_path)
+        else:
+            with open(sweep_path, "w", newline="\n") as f:
+                f.write(dump_sweep(sweep, fmt))
+    print(f"  appended case '{new_case['id']}' to {sweep_path}", file=sys.stderr)
+    print(
+        "  gtest name: "
+        f"{_gtest_name(sweep_path.parent, args.bundle_dir, new_case['id'])}",
+        file=sys.stderr,
+    )
+    if support_created:
+        print(
+            f"  created empty support.json in {sweep_path.parent}",
+            file=sys.stderr,
+        )
+    return 0
+
+
+def _named_tensors(named: dict) -> set:
+    """The tensor names in a :func:`metadata_uid_names` result."""
+    out = set()
+    for entries in named.values():
+        for entry in entries:
+            out.update(entry.values() if isinstance(entry, dict) else [entry])
+    return out
+
+
+def _append_superset_case(args, join, n_joins, graph, meta, cache=None) -> int:
+    """Append ``graph`` to the sweep of ``join`` as a case with absent tensors.
+
+    The graph and the metadata ``inputs`` take the template's uids, matched by
+    tensor name. The metadata gets format_version 2.
+    """
+    template, sweep, sweep_path, uid_map, absent = join
+    graph_t = remap_graph(graph, uid_map)
+    meta_t = remap_meta_inputs(meta, uid_map)
+    named = metadata_uid_names(meta, graph)
+    if metadata_uid_names(meta_t, graph_t) != named:
+        print(
+            "  ERROR: the uid remap onto the template moves a metadata uid to"
+            f" another tensor: {named} became {metadata_uid_names(meta_t, graph_t)}",
+            file=sys.stderr,
+        )
+        return 1
+    absent_names = {
+        t.get("name", "") for t in template.get("tensors", []) if t.get("uid") in absent
+    }
+    named_absent = sorted(
+        _named_tensors(metadata_uid_names(meta_t, template)) & absent_names
+    )
+    if named_absent:
+        print(
+            f"  ERROR: the metadata names absent tensors {named_absent}",
+            file=sys.stderr,
+        )
+        return 1
+    fv = meta_t.get("format_version")
+    if (
+        isinstance(fv, bool)
+        or not isinstance(fv, int)
+        or fv < ABSENT_TENSORS_FORMAT_VERSION
+    ):
+        meta_t["format_version"] = ABSENT_TENSORS_FORMAT_VERSION
+
+    dup = _report_duplicate(args, [join], _graph_canon(graph_t), meta_t, cache)
+    if dup is not None:
+        return dup
+
+    pruned = prune_absent_tensors(template, absent)
+    values = _extract_values(graph_t, pruned)
+    new_case = _sweep_case(
+        None, values, _remove_patches(graph_t, pruned), meta_t, absent=absent
+    )
+    print(
+        f"  absent tensors: {absent} "
+        f"({', '.join(sorted(absent_names))}) of the template in {sweep_path.parent}",
+        file=sys.stderr,
+    )
+    return _append_case(
+        args,
+        template,
+        sweep,
+        sweep_path,
+        new_case,
+        graph_t,
+        f"{sweep_path} (of {n_joins} superset template(s))",
+        cache,
+    )
+
+
+def _append_added_tensors_case(args, join, n_joins, graph, meta, cache=None) -> int:
+    """Append ``graph`` to the sweep of ``join`` as a case that adds tensors.
+
+    The graph is the template plus tensors (a stats output switched on, say). The
+    graph and the metadata take the template's uids, matched by tensor name, so the
+    case values address them; the tensors the template lacks come from the case's
+    ``add_tensors``, and other differences from its ``node_patches``.
+    """
+    template, sweep, sweep_path, graph_t, uid_map = join
+    meta_t = remap_meta_inputs(meta, uid_map)
+    named = metadata_uid_names(meta, graph)
+    if metadata_uid_names(meta_t, graph_t) != named:
+        print(
+            "  ERROR: the uid remap onto the template moves a metadata uid to"
+            f" another tensor: {named} became {metadata_uid_names(meta_t, graph_t)}",
+            file=sys.stderr,
+        )
+        return 1
+
+    dup = _report_duplicate(
+        args, [(template, sweep, sweep_path)], _graph_canon(graph_t), meta_t, cache
+    )
+    if dup is not None:
+        return dup
+
+    values = _extract_values(graph_t, template)
+    fields = _case_patch_fields(graph_t, template, values)
+    new_case = _sweep_case(
+        None,
+        values,
+        fields.get(TENSOR_PATCHES_KEY),
+        meta_t,
+        added=fields.get(ADD_TENSORS_KEY),
+        node_patches=fields.get(NODE_PATCHES_KEY),
+    )
+    return _append_case(
+        args,
+        template,
+        sweep,
+        sweep_path,
+        new_case,
+        graph_t,
+        f"{sweep_path} (of {n_joins} template(s) that the graph adds tensors to)",
+        cache,
+    )
+
+
+def _missed_merges(sweeps, graph: dict, value_form: bool) -> list:
+    """Paths of the sweeps whose template is ``graph`` without some of its tensors."""
+    return [
+        sweep_path
+        for template, _, sweep_path in sweeps
+        if _superset_join(graph, template, value_form) is not None
+    ]
+
+
+def main(argv=None, cache: ImportCache = None) -> int:
+    """Run one import with the command-line arguments ``argv`` (default: sys.argv).
+
+    With ``cache``, appends stay in memory until ``cache.flush()``.
+    """
     ap = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+        prog=Path(__file__).name,
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     ap.add_argument(
         "--graph", type=Path, required=True, help="path to the graph JSON to import"
@@ -576,7 +1182,102 @@ def main() -> int:
         action="store_true",
         help="exit non-zero on exact dup or sidecar override (CI mode)",
     )
-    args = ap.parse_args()
+    grouped = ap.add_argument_group(
+        "grouped import (opt-in)",
+        "Any of these flags writes an import_mode object into a new sweep.json.",
+    )
+    grouped.add_argument(
+        "--op-dir",
+        default=None,
+        metavar="NAME",
+        help="operation folder for a new sweep (default: from the node types)",
+    )
+    grouped.add_argument(
+        "--topology",
+        default=None,
+        metavar="NAME",
+        help="sweep folder for a new sweep. An append must go to the sweep in"
+        " this folder, else the import fails. A folder that holds a different"
+        " sweep is never written",
+    )
+    grouped.add_argument(
+        "--template-attributes",
+        action="store_true",
+        help="a new template replaces every non-object node attribute value"
+        " with ${case.attributes.<key>}",
+    )
+    grouped.add_argument(
+        "--template-alignment",
+        action="store_true",
+        help="a new template replaces each tensor alignment with"
+        " ${case.alignment.<uid>}",
+    )
+    grouped.add_argument(
+        "--skeleton-value-form",
+        action="store_true",
+        help="the skeleton hash records each tensor's value form (baked value,"
+        " value_type, is_runtime_pass_by_value), and a new template replaces"
+        " each baked value with ${case.value}",
+    )
+    grouped.add_argument(
+        "--superset-templates",
+        action="store_true",
+        help="a graph that is the template of a sweep without some of its"
+        " tensors joins that sweep: the case lists the missing template uids in"
+        " absent_tensors, its metadata gets format_version 2 and the sweep gets"
+        " version 2. The smallest such template wins; with --topology, only the"
+        " sweep in that folder. Without --topology, a new template that holds the"
+        " template of another sweep leaves that sweep unchanged, with a note",
+    )
+    grouped.add_argument(
+        "--only-op-dir",
+        action="store_true",
+        help="match only sweeps under <bundle-dir>/<tier>/<op-dir>/",
+    )
+    grouped.add_argument(
+        "--require-marked-sweep",
+        action="store_true",
+        help="match only sweeps whose import_mode equals the import_mode of this"
+        " run. The format key of import_mode is not compared",
+    )
+    grouped.add_argument(
+        "--case-id",
+        default=None,
+        metavar="ID",
+        help="case id to use (lowercase_snake_case). The import fails if the"
+        " sweep already has this id",
+    )
+    grouped.add_argument(
+        "--sweep-format",
+        choices=SWEEP_FORMATS,
+        default=None,
+        help="file layout of a new sweep.json (default: compact). Needs another"
+        " grouped-import flag. An append keeps the layout of the sweep",
+    )
+    args = ap.parse_args(argv)
+
+    for flag, name in (("--op-dir", args.op_dir), ("--topology", args.topology)):
+        if name is not None and not _is_folder_name(name):
+            print(f"import_graph: {flag}: not a folder name: {name!r}", file=sys.stderr)
+            return 1
+    if args.case_id is not None and not re.fullmatch(r"[a-z0-9_]+", args.case_id):
+        print(
+            f"import_graph: --case-id: not lowercase_snake_case: {args.case_id!r}",
+            file=sys.stderr,
+        )
+        return 1
+    grouped_mode = _is_grouped(args)
+    if args.sweep_format is not None and not grouped_mode:
+        print(
+            "import_graph: --sweep-format needs a grouped-import flag",
+            file=sys.stderr,
+        )
+        return 1
+    marker = (
+        import_mode_marker(_grouping_options(args), args.sweep_format or "compact")
+        if grouped_mode
+        else None
+    )
 
     try:
         with open(args.graph) as f:
@@ -659,103 +1360,154 @@ def main() -> int:
     # UIDs non-deterministically, so the graph and its inputs fill-spec map must
     # be remapped in lockstep before hashing/matching (canonical_uid_map_by_name).
     uid_map = canonical_uid_map_by_name(graph)
-    graph = remap_graph(graph, uid_map)
+    named_meta = metadata_uid_names(meta, graph)
+    try:
+        graph = remap_graph(graph, uid_map)
+    except ValueError as e:
+        print(
+            f"  ERROR: the graph refers to a uid it does not declare: {e}",
+            file=sys.stderr,
+        )
+        return 1
     meta = remap_meta_inputs(meta, uid_map)
+    if metadata_uid_names(meta, graph) != named_meta:
+        print(
+            "  ERROR: the uid remap moves a metadata uid to another tensor:"
+            f" {named_meta} became {metadata_uid_names(meta, graph)}",
+            file=sys.stderr,
+        )
+        return 1
 
-    h = skeleton_hash(graph)
-    op = derive_operation(graph)
+    h = skeleton_hash(graph, value_form=args.skeleton_value_form)
+    op = args.op_dir if args.op_dir is not None else derive_operation(graph)
+    graph_json = _graph_canon(graph)
 
     print(f"  skeleton hash: {h}", file=sys.stderr)
     print(f"  operation:     {op}", file=sys.stderr)
 
-    index = _index_existing(args.bundle_dir)
-    # (template, sweep, sweep_path, graph, meta): the graph and metadata as that sweep sees
-    # them. A skeleton match takes them as they are.
-    matches = [(t, s, p, graph, meta) for t, s, p in index.get(h, [])]
-    if not matches:
-        # No sweep has this skeleton. A graph that only adds tensors to one (a stats output
-        # switched on, say) is still a case of that sweep, through add_tensors, once its uids
-        # are in the sweep's uid space, which the case values address; the metadata follows.
-        matches = [
-            (t, s, p, g, remap_meta_inputs(meta, m))
-            for t, s, p, g, m in _superset_matches(graph, index)
+    sweeps = _existing_sweeps(args.bundle_dir, cache)
+    if args.only_op_dir:
+        op_prefix = str(args.bundle_dir / args.tier / op) + os.sep
+        sweeps = [m for m in sweeps if str(m[2]).startswith(op_prefix)]
+    if args.require_marked_sweep:
+        grouping = import_mode_grouping(marker)
+        sweeps = [
+            m
+            for m in sweeps
+            if import_mode_grouping(sweep_import_mode(m[1])) == grouping
         ]
+    index = _index_existing(
+        args.bundle_dir, value_form=args.skeleton_value_form, sweeps=sweeps, cache=cache
+    )
+    matches = index.get(h, [])
 
     # --- Check for exact duplicates ---
-    for template, sweep, sweep_path, match_graph, match_meta in matches:
-        match_json = _graph_canon(match_graph)
-        for case in sweep.get("cases", []):
-            rebuilt = _case_graph(template, case)
-            if rebuilt is not None and _graph_canon(rebuilt) == match_json:
-                existing_meta = case.get("metadata", {})
-                # An unknown seed is not a wildcard: the case would run with the
-                # default seed, which differs from an existing case's explicit
-                # one. Two absent seeds do match (both fall back to the default).
-                seed_match = existing_meta.get("seed") == match_meta.get("seed")
-                inputs_match = canon(match_meta.get("inputs", {})) == canon(
-                    existing_meta.get("inputs", {})
-                )
-                if seed_match and inputs_match:
-                    print(f"  DUPLICATE of {sweep_path}:{case['id']}", file=sys.stderr)
-                    if args.strict:
-                        return 1
-                    if not args.force:
-                        print("  skipped (use --force to append)", file=sys.stderr)
-                        return 0
+    dup = _report_duplicate(args, matches, graph_json, meta, cache)
+    if dup is not None:
+        return dup
+
+    # Default mode never appends into a sweep that grouped mode wrote. It
+    # still reports an exact duplicate of a case there (checked above).
+    if not grouped_mode:
+        matches = [m for m in matches if sweep_import_mode(m[1]) is None]
+
+    topology_dir = (
+        args.bundle_dir / args.tier / op / args.topology
+        if args.topology is not None
+        else None
+    )
+    matched_elsewhere = []
+    if topology_dir is not None and matches:
+        in_topology = [m for m in matches if m[2].parent == topology_dir]
+        if not in_topology:
+            matched_elsewhere = matches
+        matches = in_topology
 
     # --- Structural match: append to existing sweep ---
     if matches:
         # Prefer a sweep in the requested tier so Smoke cases land in quick/.
         tier_prefix = str(args.bundle_dir / args.tier) + os.sep
         tier_matches = [m for m in matches if str(m[2]).startswith(tier_prefix)]
-        template, sweep, sweep_path, graph, meta = (tier_matches or matches)[0]
+        template, sweep, sweep_path = (tier_matches or matches)[0]
         values = _extract_values(graph, template)
-        patches = _case_patches(graph, expand(template, values))
-        new_case = {"id": None, "values": values, "metadata": meta, **patches}
-        existing_cases = sweep.get("cases", [])
-        saved_ids = [c["id"] for c in existing_cases]
-        all_cases = existing_cases + [new_case]
-        assign_case_ids(all_cases)
-        for c, orig_id in zip(existing_cases, saved_ids):
-            c["id"] = orig_id
-        taken = set(saved_ids)
-        if new_case["id"] in taken:
-            new_case["id"] = f"{new_case['id']}_{_case_hash(new_case)}"
+        fields = _case_patch_fields(graph, template, values)
+        new_case = _sweep_case(
+            None,
+            values,
+            fields.get(TENSOR_PATCHES_KEY),
+            meta,
+            added=fields.get(ADD_TENSORS_KEY),
+            node_patches=fields.get(NODE_PATCHES_KEY),
+        )
+        return _append_case(
+            args,
+            template,
+            sweep,
+            sweep_path,
+            new_case,
+            graph,
+            f"{sweep_path}"
+            f" (of {len(matches)} structural match(es),"
+            f" {len(tier_matches)} in tier '{args.tier}')",
+            cache,
+        )
 
-        expanded = _case_graph(template, new_case) or expand(template, values)
-        if _graph_canon(expanded) != _graph_canon(graph):
-            _report_roundtrip_failure(
-                "after extraction",
-                expanded,
-                graph,
-                selected=f"{sweep_path}"
-                f" (of {len(matches)} structural match(es),"
-                f" {len(tier_matches)} in tier '{args.tier}')",
+    # --- Superset match: append with absent tensors ---
+    if args.superset_templates:
+        joins = []
+        for template, sweep, sweep_path in sweeps:
+            memo = cache.memo(sweep_path, template) if cache is not None else None
+            found = _superset_join(template, graph, args.skeleton_value_form, memo)
+            if found is not None:
+                joins.append((template, sweep, sweep_path) + found)
+        if topology_dir is not None:
+            others = [j for j in joins if j[2].parent != topology_dir]
+            joins = [j for j in joins if j[2].parent == topology_dir]
+            if others and not joins:
+                print(
+                    f"  NOTE: the graph also fits the templates of"
+                    f" {', '.join(str(j[2].parent) for j in others)};"
+                    f" --topology {args.topology} keeps it out of them",
+                    file=sys.stderr,
+                )
+        if joins:
+            tier_prefix = str(args.bundle_dir / args.tier) + os.sep
+            joins.sort(
+                key=lambda j: (
+                    not str(j[2]).startswith(tier_prefix),
+                    len(_tensor_names(j[0])),
+                    _tensor_names(j[0]),
+                    str(j[2]),
+                )
             )
-            return 1
+            return _append_superset_case(args, joins[0], len(joins), graph, meta, cache)
 
-        # existing_cases keep every original key (e.g. golden, tensor_patches);
-        # only their id is (re)assigned above, and any other top-level sweep
-        # key already survives untouched since only sweep["cases"] is
-        # replaced below.
-        sweep["cases"] = existing_cases + [new_case]
-        support_created = _ensure_support_json(sweep_path.parent, args.dry_run)
-        if not args.dry_run:
-            with open(sweep_path, "w", newline="\n") as f:
-                json.dump(sweep, f, indent=2)
-                f.write("\n")
-        print(f"  appended case '{new_case['id']}' to {sweep_path}", file=sys.stderr)
+    # --- Added-tensor match: append, the case adds tensors to the template ---
+    # Default mode only: a grouped import takes a graph with more tensors than a
+    # template as a new template (--superset-templates notes the missed merge).
+    if not matched_elsewhere and not grouped_mode:
+        candidates = [
+            s
+            for s in sweeps
+            if sweep_import_mode(s[1]) is None
+            and (topology_dir is None or s[2].parent == topology_dir)
+        ]
+        added = _added_tensor_matches(graph, candidates)
+        if added:
+            tier_prefix = str(args.bundle_dir / args.tier) + os.sep
+            added.sort(key=lambda j: (not str(j[2]).startswith(tier_prefix), str(j[2])))
+            return _append_added_tensors_case(
+                args, added[0], len(added), graph, meta, cache
+            )
+
+    if matched_elsewhere:
         print(
-            "  gtest name: "
-            f"{_gtest_name(sweep_path.parent, args.bundle_dir, new_case['id'])}",
+            f"  ERROR: --topology {args.topology}: the graph matches"
+            f" {', '.join(str(m[2].parent) for m in matched_elsewhere)},"
+            f" not {topology_dir}",
             file=sys.stderr,
         )
-        if support_created:
-            print(
-                f"  created empty support.json in {sweep_path.parent}",
-                file=sys.stderr,
-            )
-        return 0
+        return 1
 
     # --- No structural match: create new template+sweep ---
     template = copy.deepcopy(graph)
@@ -763,9 +1515,17 @@ def main() -> int:
         if fld in template:
             template[fld] = f"${{case.{fld}}}"
     for t in template.get("tensors", []):
-        for fld in TENSOR_ALWAYS:
+        for fld in per_case_tensor_fields(t):
             if fld in t:
                 t[fld] = f"${{case.{fld}}}"
+    if args.template_attributes:
+        template_node_attributes(template)
+    if args.template_alignment:
+        template_tensor_alignment(template)
+    if args.skeleton_value_form:
+        template_tensor_values(template)
+    if grouped_mode:
+        template_top_level_fields(template)
 
     values = _extract_values(graph, template)
 
@@ -774,18 +1534,41 @@ def main() -> int:
         _report_roundtrip_failure("for new template", expanded, graph)
         return 1
 
+    if args.superset_templates and topology_dir is None:
+        for sweep_path in _missed_merges(sweeps, graph, args.skeleton_value_form):
+            print(
+                f"  NOTE: missed merge: the new template holds the template of"
+                f" {sweep_path}, which stays unchanged",
+                file=sys.stderr,
+            )
+
     tmap = tensors_by_uid(graph)
     first = tmap[min(tmap)] if tmap else {}
     layout = infer_layout(first.get("dims"), first.get("strides")) or "Default"
     preferred_topo_name = sanitize(layout).replace(" ", "_").title() or "Default"
 
     op_dir = args.bundle_dir / args.tier / op
-    topo_name = next_free_topology_dir(op_dir, preferred_topo_name)
+    if topology_dir is not None:
+        if next_free_topology_dir(op_dir, args.topology) != args.topology:
+            print(
+                f"  ERROR: --topology {args.topology}: {topology_dir} holds"
+                " another sweep",
+                file=sys.stderr,
+            )
+            return 1
+        topo_name = args.topology
+    else:
+        topo_name = next_free_topology_dir(op_dir, preferred_topo_name)
     out_dir = op_dir / topo_name
 
     case_entry = {"id": None, "values": values, "metadata": meta}
-    assign_case_ids([case_entry])
+    if args.case_id is not None:
+        case_entry["id"] = args.case_id
+    else:
+        assign_case_ids([case_entry])
     sweep_out = {"version": 1, "cases": [case_entry]}
+    if marker is not None:
+        sweep_out = {"version": 1, IMPORT_MODE_KEY: marker, "cases": [case_entry]}
 
     if not args.dry_run:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -795,8 +1578,7 @@ def main() -> int:
             json.dump(template, f, indent=2)
             f.write("\n")
         with open(out_dir / "sweep.json", "w", newline="\n") as f:
-            json.dump(sweep_out, f, indent=2)
-            f.write("\n")
+            f.write(dump_sweep(sweep_out, sweep_format(sweep_out)))
     print(
         f"  created new bundle: {out_dir} (case '{case_entry['id']}')",
         file=sys.stderr,

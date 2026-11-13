@@ -48,7 +48,6 @@ from rocke.helpers.tiling.tensor_transforms.runs import (
     checks_monotone_over_run,
     validity_uniform_over_run,
 )
-from rocke.tests.gpu import current_device_arch
 
 from ._harness import (
     WAVE,
@@ -258,8 +257,8 @@ def test_the_conv_k_vector_is_accepted_at_a_multiple_of_its_width_and_refused_on
         "vector along input 1 ('k') of width 8 is not contiguous at coordinate 'k' (it may "
         "start at 1 mod 8, so the unmerge into ('y', 'x', 'c') can split the vector) -- use a "
         "narrower vector, or start it at a multiple of 8 (the walk reads that fact from how the "
-        "coordinate was computed; a runtime value the IR cannot show it for is stated with "
-        "runtime_value(..., multiple_of=...))",
+        "coordinate was computed; for a value the IR cannot show it for, state multiple_of on "
+        "its b.param declaration or check it with b.gpu_checked_value(v, multiple_of=...))",
     ):
         emit_accesses(
             b, graph, tensor, [(conv.m, shifted)], vector_axis=1, vector_width=WIDTH
@@ -290,12 +289,13 @@ def test_an_odd_f16_tail_takes_its_span_from_the_coordinate_table_without_reemit
 
 
 @pytest.mark.parametrize("lane_extra", [0, -3])
-def test_gpu_a_vector_straddling_a_runtime_length_has_an_exact_valid_span(lane_extra):
+def test_gpu_a_vector_straddling_a_runtime_length_has_an_exact_valid_span(
+    lane_extra, any_gpu: str
+):
     """8-wide f16 vectors at ``8 * lane + lane_extra`` against a runtime length, odd lengths
     included (the tail ends mid-dword): a vector wholly inside is valid with the full span, a
     straddling one is invalid with exactly its valid elements as its span, and one wholly
     outside has an empty span."""
-    current_device_arch()
 
     def build(b):
         length = runtime_length(b, "L", at_most=4096)
@@ -307,7 +307,7 @@ def test_gpu_a_vector_straddling_a_runtime_length_has_an_exact_valid_span(lane_e
         return [access.valid, first, end]
 
     for length in (1, 7, 8, 101, 260, 4096):
-        stored = run_lanes(build, scalars={"L": length})[0]
+        stored = run_lanes(any_gpu, build, scalars={"L": length})[0]
         for t in range(WAVE):
             start = WIDTH * t + lane_extra
             valid = [0 <= start + e < length for e in range(WIDTH)]
@@ -320,11 +320,10 @@ def test_gpu_a_vector_straddling_a_runtime_length_has_an_exact_valid_span(lane_e
                 assert end <= first, (length, t)
 
 
-def test_gpu_the_conv_k_vector_span_is_exact_against_the_k_tail():
+def test_gpu_the_conv_k_vector_span_is_exact_against_the_k_tail(any_gpu: str):
     """An 8-wide vector along the conv K axis (C = 64, a multiple of the width): only the K tail
     and the halo decide it, and every element agrees with the graph evaluated in Python.
     """
-    current_device_arch()
     graph, tensor = _conv(1, 3, 3, 64, y=1, x=1, pad=0)
     m_length, k_length = graph.inputs["m"], graph.inputs["k"]
 
@@ -337,7 +336,7 @@ def test_gpu_the_conv_k_vector_span_is_exact_against_the_k_tail():
         assert access.valid_span is None
         return [access.valid]
 
-    stored = run_lanes(build, n_blocks=1)
+    stored = run_lanes(any_gpu, build, n_blocks=1)
     for t in range(WAVE):
         m, k = t // 4, (t % 4) * 8 + 32
         expected = m < m_length and k + WIDTH <= k_length

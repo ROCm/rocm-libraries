@@ -31,7 +31,7 @@ public:
                 (override));
     MOCK_METHOD(void,
                 recordVerifier,
-                (const std::string& bundlePath, Verifier verifier),
+                (const std::string& bundlePath, Verifier verifier, const std::string& detail),
                 (override));
     MOCK_METHOD(void, recordCaseStarted, (const CaseIdentity& identity), (override));
     MOCK_METHOD(void, recordCaseOutcome, (const CaseOutcomeRecord& record), (override));

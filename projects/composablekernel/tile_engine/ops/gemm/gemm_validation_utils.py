@@ -107,6 +107,25 @@ def gfx1250_tdm_v3_reject_reason(
 # arch the TDM path compiles to a no-op and produces an all-zero C.
 GFX1250_ONLY_PIPELINE_ARCH = "gfx1250"
 
+# TDM pipelines that may also store C through the cshuffle epilogue, and the
+# ops that may emit that pairing. TdmEpilogue always overwrites C; cshuffle can
+# atomic_add, which is what split-K (k_batch > 1) needs.
+GEMM_TDM_CSHUFFLE_PIPELINES = ("comp_tdm_pc",)
+GEMM_TDM_CSHUFFLE_OPS = ("gemm_universal",)
+
+
+def tdm_epilogue_allowed(pipeline, epilogue, kernel_name_prefix):
+    """Whether a TDM pipeline may be paired with this epilogue on this op: its own
+    epilogue (tdm_pipeline_epilogue), or cshuffle for the split-K capable pipelines."""
+    if epilogue == tdm_pipeline_epilogue(pipeline):
+        return True
+    return (
+        epilogue == "cshuffle"
+        and pipeline in GEMM_TDM_CSHUFFLE_PIPELINES
+        and kernel_name_prefix in GEMM_TDM_CSHUFFLE_OPS
+    )
+
+
 TDM_PAD_REJECT_REASON = (
     "TDM clips every box to the pre-pad extent (tdm_real_lengths), so kPad is a "
     "no-op and a padded TDM kernel would duplicate the unpadded one, which already "
@@ -759,11 +778,12 @@ def is_trait_combination_valid(
     else:
         if kernel_name_prefix != "mx_gemm":
             if pipeline in GEMM_TDM_PIPELINES:
-                # TDM: intrawave only, TdmEpilogue only (CShuffle only for
-                # comp_tdm_v3, see tdm_pipeline_epilogue), no persistent kernel
-                # (TdmEpilogue has no split-K / persistent write path), and no
-                # padding, which would only duplicate the unpadded kernel (see
-                # TDM_PAD_REJECT_REASON).
+                # TDM: intrawave only, the pipeline's own epilogue (TdmEpilogue;
+                # CShuffle for comp_tdm_v3, see tdm_pipeline_epilogue) or cshuffle
+                # for GEMM_TDM_CSHUFFLE_PIPELINES (see tdm_epilogue_allowed), no
+                # persistent kernel (TdmEpilogue has no split-K / persistent write
+                # path), and no padding, which would only duplicate the unpadded
+                # kernel (see TDM_PAD_REJECT_REASON).
                 if tdm_pad_reject_reason(pipeline, epilogue, pad_m, pad_n, pad_k):
                     logging.debug(f"{pipeline}: {TDM_PAD_REJECT_REASON}")
                     return False
@@ -775,7 +795,7 @@ def is_trait_combination_valid(
                     return False
                 return (
                     scheduler == "intrawave"
-                    and epilogue == tdm_pipeline_epilogue(pipeline)
+                    and tdm_epilogue_allowed(pipeline, epilogue, kernel_name_prefix)
                     and persistent_or_preshuffle_quant not in (True, "true")
                 )
             if epilogue == "tdm":
@@ -959,6 +979,50 @@ DEFAULT_SMEM_SLOTS = 1
 GFX1250_WAVE_SIZE = 32
 MAX_ACC_VGPRS_PER_LANE = 256
 
+# gfx1250 LDS geometry the C++ LDS descriptors are built from, and the
+# supports_transpose_load dtypes (fp32 has no transpose load). Same values and
+# accounting as dispatcher/codegen/codegen_common.py gfx1250_lds_operand_bytes,
+# which cannot be imported from here.
+GFX1250_LDS_BANKS = 64
+GFX1250_TR_LOAD_DTYPES = ("fp16", "bf16", "fp8", "bf8", "int8")
+
+
+def _gfx1250_lds_operand_bytes(mn, tile_k, datatype, transposed):
+    """GetSmemSizeA/B of the gfx1250 TDM / comp_async LDS descriptors for one
+    operand of an mn x tile_k block.
+
+    Mirrors MakeA/BLdsBlockDescriptor (K-contiguous rows, 16 bytes of padding
+    after every group of rows spanning 256 bytes) and
+    MakeA/BLdsBlockDescriptorForTrLoad (MN-contiguous rows padded as
+    GetLdsPaddingConfig proposes), rounded up to 16 bytes. The TDM policy may
+    drop that padding but never adds any, so this never under-counts.
+    """
+    elem_bytes = element_size(datatype)
+    if not transposed:
+        layer = max(1, 256 // (tile_k * elem_bytes))
+        size = mn * tile_k * elem_bytes + max(0, mn // layer - 1) * 16
+        return -(-size // 16) * 16
+    banks_per_mn = mn * elem_bytes // 4
+    if banks_per_mn * 8 <= GFX1250_LDS_BANKS:
+        elems = tile_k * mn
+    else:
+        pad_elems = 16  # (pad_amount + 1) dwords of padding, in elements
+        interval = (
+            GFX1250_LDS_BANKS.bit_length() - 2
+            if banks_per_mn < GFX1250_LDS_BANKS
+            else banks_per_mn.bit_length() - 2
+        )
+        stride = (1 << (interval + 1)) * 4 // elem_bytes
+        if stride > mn:
+            k_layer = max(1, GFX1250_LDS_BANKS * 4 // mn // elem_bytes)
+            row = mn * k_layer
+            elems = (tile_k // k_layer - 1) * (row + pad_elems) + row
+        else:
+            m_layer = mn // stride
+            row = mn // m_layer
+            elems = (tile_k * m_layer - 1) * (row + pad_elems) + row
+    return -(-(elems * elem_bytes) // 16) * 16
+
 
 def validate_lds_capacity(
     tile_m: int,
@@ -969,11 +1033,14 @@ def validate_lds_capacity(
     pipeline: str,
     gpu_target: str = "",
     gfx1250_gemm_pipeline: bool = False,
+    layout: str = "rcr",
 ) -> Tuple[bool, str]:
     """Validate LDS capacity requirements.
 
     gfx1250_gemm_pipeline marks a non-MX comp_async / comp_tdm* op (see
     _uses_gfx1250_gemm_pipeline); MX comp_async keeps its own descriptor rule.
+    layout is the A/B/C layout code; on gfx1250 it selects the transpose-load
+    LDS descriptors (column-major A, row-major B).
     """
     matrix_a_size = (tile_m * tile_k) * element_size(a_datatype)
     matrix_b_size = (tile_n * tile_k) * element_size(b_datatype)
@@ -984,16 +1051,20 @@ def validate_lds_capacity(
         pipeline in GEMM_TDM_PIPELINES
         or (pipeline == "comp_async" and gfx1250_gemm_pipeline)
     ) and _base_gfx_arch(gpu_target) == "gfx1250":
-        # TDM and non-MX comp_async use the gfx1250 non-transposed base LDS
-        # descriptors. Each group of rows spanning at least 256 bytes is
-        # separated by 16 padding bytes.
-        # GetSmemSizeA/B round to 16 bytes; valid K tiles are already aligned.
-        # Exact for RowMajor A; a slight under-estimate for the other layout
-        # combinations, which the per-slot budget above absorbs.
-        a_lds_layer = max(1, 256 // (tile_k * element_size(a_datatype)))
-        b_lds_layer = max(1, 256 // (tile_k * element_size(b_datatype)))
-        matrix_a_size += max(0, tile_m // a_lds_layer - 1) * 16
-        matrix_b_size += max(0, tile_n // b_lds_layer - 1) * 16
+        # TDM and non-MX comp_async use the gfx1250 base LDS descriptors, whose
+        # padding depends on whether the operand is transpose-loaded.
+        matrix_a_size = _gfx1250_lds_operand_bytes(
+            tile_m,
+            tile_k,
+            a_datatype,
+            a_datatype in GFX1250_TR_LOAD_DTYPES and layout[:1] == "c",
+        )
+        matrix_b_size = _gfx1250_lds_operand_bytes(
+            tile_n,
+            tile_k,
+            b_datatype,
+            b_datatype in GFX1250_TR_LOAD_DTYPES and layout[1:2] == "r",
+        )
     elif pipeline == "comp_async":
         # The 16x16x128 FP8 XOR-swizzled descriptor has two outer groups
         # separated by 16 bytes. Packed FP4 has one group and no padding.
@@ -1245,6 +1316,14 @@ def validate_gemm_gfx1250_pipeline(
             f"comp_tdm_v2 requires exactly 4 waves, got {warp_m}x{warp_n}x{warp_k}",
         )
     if pipeline == "comp_tdm_pc":
+        # BlockGemm and the epilogue spread the C tile over warp_m x warp_n
+        # waves only, with no K-wave reduction (static_assert in the pipeline).
+        if warp_k != 1:
+            return (
+                False,
+                f"comp_tdm_pc requires warp_k=1: the consumer waves have no "
+                f"K-wave reduction, got {warp_m}x{warp_n}x{warp_k}",
+            )
         # The producer/consumer split maps the C tile onto the consumer waves
         # only (BlockGemmShape::NumWarps); the two producer waves hold no
         # accumulator. Unlike comp_tdm_v2 this pipeline is not wave-count
@@ -1359,6 +1438,7 @@ def is_tile_config_valid(
         pipeline,
         gpu_target,
         _uses_gfx1250_gemm_pipeline(pipeline, kernel_name_prefix),
+        layout,
     )
     if not lds_valid:
         logging.debug(f"LDS validation failed: {lds_error}")

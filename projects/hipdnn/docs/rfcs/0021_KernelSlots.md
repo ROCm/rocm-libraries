@@ -106,8 +106,8 @@ what reads the graph. Four rules define the model:
 Kernels whose choices depend on each other belong in **one** slot, launched together by that slot's
 dispatch handler: either one multi-launch UKD (RFC 0017 § 15.1), or one UKD whose code object holds
 the dependent kernels, which the slot's native handler launches by symbol names its KMD records.
-The second form needs no `sources`, so it also serves code objects authored as `hsaco`, which a
-producer does not pack into `sources`. Examples are a backward kernel with an optional reduction or
+The second form needs no `sources` and no per-launch signatures, so it also serves a code object
+whose handler launches kernels outside the launch-name contract. Examples are a backward kernel with an optional reduction or
 output-conversion kernel, or a split-KV kernel with the reduction that consumes its splits.
 
 ## 4. Descriptor Format
@@ -339,7 +339,7 @@ headers.
 | `hipdnn_bench` sweep CSV | A slotted sweep adds the columns `kernel` (the composite candidate id) and `slot_reference` (as in `--json`) between the `kernel.<knob>` columns and `engine`. | Consumers of the sweep CSV. | Read columns by header name, not position. |
 | Candidate ids | A candidate id that contains `=` is a slotted composite (`prep=<id>\|dkdv=<id>\|dq=<id>`, § 5); a malformed composite is an error. | Code that parses candidate ids. | Split on `\|`, then `=`. A bare kernel id (a UUID) contains no `=`. |
 | Descriptor formats | UED and KDP gain `slots`, `shared_workspace` and `slot`; a UHD's `trained_against` gains `slot` beside `kmd`, or `kmds` in place of `kmd`. All require version 1.1 (`uhd.schema.json` admits `"1.1"` and states the rule), and a slot member under a 1.0 label is refused by the loader, the validator and the packer. | Descriptor producers and consumers. | Label slotted documents 1.1; unslotted documents stay as they are. |
-| `makeStateManager`, `makeKernelHeuristic`, `UhdKernelHeuristic::makeResolver`, `UhdKernelHeuristic::create` | `makeStateManager` gains trailing defaulted `slotKnobs` and `sharedWorkspaceToken` parameters; the other three gain a trailing `bool reserveWorkspaceTokens = false`. | None: existing calls compile unchanged. | Pass the new arguments only to build a slotted engine. |
+| `makeStateManager`, `makeKernelHeuristic`, `UhdKernelHeuristic::makeResolver`, `UhdKernelHeuristic::create` | `makeStateManager`'s signature is unchanged: it reads the slot knobs and the shared-workspace token from `set.engine`, which a slotted set must keep intact. The other three gain a trailing `bool reserveWorkspaceTokens = false`. | None: existing calls compile unchanged. | Pass the new arguments only to build a slotted engine. |
 | `winners.jsonl` | Slotted engines write format v3: per-slot lines carry `slot`, and `program` lines record the selected slot combination. Unslotted lines stay v2. | Readers of the winner cache. | Decode v2 and v3, and tell per-slot records from program records. |
 | `uhd_gen --slot` | `dataset export`, `generate` and `knobs` select one slot's reference rows and rename its `kernel.<slot>.<field>` columns to `kernel.<field>`; `generate --slot` writes a version 1.1 UHD. `--slot` refuses a sweep that is not slotted, and `generate --slot` needs `--dataset`. | Training pipelines. | Sweep with `hipdnn_bench`, then run `generate --dataset ... --slot <name>` once per slot. |
 | `uhd_gen promote` | Installs a slot ranker under `heuristics/<ued-id>/<slot>/sort_kernel_catalog/<arch>/`, reading the slot from the model's `trained_against.slot`. It refuses a `sort_kernel_catalog` model with no slot, an unknown slot, a slot ranker that declares `score.metric`, and any `predict_applicable_kernels` model on a slotted engine. `generate` without `--dataset` refuses a slotted engine. | Training and install pipelines. | Train each slot with `generate --slot`, then `promote` each model. |

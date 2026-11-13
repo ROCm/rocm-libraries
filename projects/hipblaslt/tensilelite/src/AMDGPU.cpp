@@ -75,11 +75,12 @@ namespace TensileLite
     TENSILELITEHOST_EXPORT bool AMDGPU::isStandardCU() const
     {
         // return the result if we already tested it.
-        if(isStandardCUs != -1)
-            return (isStandardCUs == 1);
+        int cached = isStandardCUs.value.load();
+        if(cached != -1)
+            return (cached == 1);
 
-        // assume current device is a standard cu device.
-        isStandardCUs = 1;
+        // The answer is computed in a local and stored once.
+        int result = 1;
 
         auto mapIter = StandardCUMap().find(processor);
         // NB: For any other devices not included in the map, we always see them as true (they have no XCC predicate issue.)
@@ -87,10 +88,11 @@ namespace TensileLite
         {
             // check if current device is a standard cu devcie.
             if(computeUnitCount != mapIter->second)
-                isStandardCUs = 0;
+                result = 0;
         }
 
-        return (isStandardCUs == 1);
+        isStandardCUs.value.store(result);
+        return (result == 1);
     }
 
     TENSILELITEHOST_EXPORT bool AMDGPU::runsKernelTargeting(AMDGPU::Processor other) const

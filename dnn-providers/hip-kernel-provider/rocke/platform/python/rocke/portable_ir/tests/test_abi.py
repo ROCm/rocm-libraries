@@ -22,6 +22,7 @@
 import ctypes
 import os
 import unittest
+from unittest.mock import patch
 
 from rocke.portable_ir.examples import recipe_toy
 from rocke.portable_ir.src import abi
@@ -107,6 +108,26 @@ class TestBinaryAbiRefusal(unittest.TestCase):
             self._adopt(abi.BINARY_ABI - 1)
         self.assertIn(f"binary ABI v{abi.BINARY_ABI - 1}", str(cm.exception))
 
+    def test_previous_native_layout_is_refused_before_binding(self):
+        """ABI11 tags cover incompatible layouts, not the combined native ABI."""
+        from rocke.portable_ir.src import online
+
+        for reports in (8, 9, 10, 11):
+            with (
+                self.subTest(reports=reports),
+                patch.object(online, "_check_source_freshness"),
+                patch.object(online, "_bind") as bind,
+            ):
+                with self.assertRaisesRegex(RuntimeError, f"binary ABI v{reports}"):
+                    online._adopt(_StubLibrary(reports), "/stub/librocke.so")
+                bind.assert_not_called()
+
+    def test_pre_indexed_mma_library_is_refused(self):
+        """ABI 5 lacks the indexed MMA layout even with buffer-capable views."""
+        with self.assertRaises(RuntimeError) as cm:
+            self._adopt(5)
+        self.assertIn("binary ABI v5", str(cm.exception))
+
     def test_a_library_with_no_version_export_is_refused(self):
         """Predating the contract is itself the mismatch, not a reason to skip it."""
         with self.assertRaises(RuntimeError) as cm:
@@ -167,6 +188,49 @@ class TestMinReaderDerivation(unittest.TestCase):
             uniform_wg={"t": "b", "v": True},
         )
         self.assertEqual(abi.recipe_min_reader(r), 1)
+
+    def test_exact_workgroup_size_needs_level_four(self):
+        """A lowerer older than workgroup_size ignores it and sizes the kernel
+        for max_workgroup_size, so a recorded kernel stating it must not reach
+        that engine. Recorded from a real kernel, as a generator would."""
+        from rocke.core.ir import F32, IRBuilder, PtrType
+        from rocke.portable_ir.src.kerneldef_to_recipe import kerneldef_to_recipe
+
+        b = IRBuilder("exact_block")
+        b.kernel.attrs["workgroup_size"] = 64
+        x = b.param("X", PtrType(F32, "global"))
+        b.global_store(x, b.thread_id_x(), b.const_f32(0.0), align=4)
+        b.ret()
+        r = kerneldef_to_recipe(b.kernel)
+        self.assertEqual(abi.recipe_min_reader(r), 4)
+        self.assertEqual(abi.stamp(r, engine="test")["abi"]["min_reader"], 4)
+        # The upper-bound attr every older lowerer knows stays at the floor.
+        del b.kernel.attrs["workgroup_size"]
+        b.kernel.attrs["max_workgroup_size"] = 64
+        self.assertEqual(abi.recipe_min_reader(kerneldef_to_recipe(b.kernel)), 1)
+
+    def test_parameter_facts_need_level_four(self):
+        """A reader older than parameter facts drops the param attrs it does
+        not know, so it would plan a launch that checks none of them. One fact
+        on one parameter is enough; pointer attributes alone stay at the floor.
+        Recorded from a real kernel, as a generator would."""
+        from rocke.core.ir import F32, I32, IRBuilder, PtrType
+        from rocke.portable_ir.src.kerneldef_to_recipe import kerneldef_to_recipe
+
+        def recorded(**facts):
+            b = IRBuilder("stated_facts")
+            x = b.param("X", PtrType(F32, "global"), noalias=True, align=16)
+            b.param("M", I32, **facts)
+            b.global_store(x, b.thread_id_x(), b.const_f32(0.0), align=4)
+            b.ret()
+            return kerneldef_to_recipe(b.kernel)
+
+        self.assertEqual(abi.recipe_min_reader(recorded()), 1)
+        for facts in ({"ge": 1}, {"multiple_of": 64}, {"eq": 128}):
+            with self.subTest(facts=facts):
+                r = recorded(**facts)
+                self.assertEqual(abi.recipe_min_reader(r), 4)
+                self.assertEqual(abi.stamp(r, engine="test")["abi"]["min_reader"], 4)
 
     def test_finds_constructs_nested_in_compile_time_bodies(self):
         """static_for bodies are where most of a rolled recipe lives, so a walk

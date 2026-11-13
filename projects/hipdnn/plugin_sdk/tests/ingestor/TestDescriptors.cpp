@@ -220,7 +220,10 @@ TEST(TestIngestorDescriptors, HeuristicDescriptorDefaultsToStaticOrder)
         [[maybe_unused]] const auto& [f0, f1] = DescriptorDependency{};
     }
     {
-        [[maybe_unused]] const auto& [f0, f1, f2] = HeuristicProvenance{};
+        [[maybe_unused]] const auto& [f0, f1] = SlotDependency{};
+    }
+    {
+        [[maybe_unused]] const auto& [f0, f1, f2, f3, f4] = HeuristicProvenance{};
     }
     {
         [[maybe_unused]] const auto& [f0,
@@ -247,7 +250,24 @@ TEST(TestIngestorDescriptors, HeuristicDescriptorDefaultsToStaticOrder)
             = HeuristicDescriptor{};
     }
     {
-        [[maybe_unused]] const auto& [f0, f1, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12]
+        [[maybe_unused]] const auto& [f0, f1, f2, f3] = SlotDescriptor{};
+    }
+    {
+        [[maybe_unused]] const auto& [f0,
+                                      f1,
+                                      f2,
+                                      f3,
+                                      f4,
+                                      f5,
+                                      f6,
+                                      f7,
+                                      f8,
+                                      f9,
+                                      f10,
+                                      f11,
+                                      f12,
+                                      f13,
+                                      f14]
             = EngineDescriptor{};
     }
     {
@@ -266,7 +286,7 @@ TEST(TestIngestorDescriptors, HeuristicDescriptorDefaultsToStaticOrder)
         [[maybe_unused]] const auto& [f0, f1, f2, f3, f4, f5, f6, f7, f8] = KernelDescriptor{};
     }
     {
-        [[maybe_unused]] const auto& [f0, f1, f2, f3, f4, f5, f6, f7] = KernelDescriptorPack{};
+        [[maybe_unused]] const auto& [f0, f1, f2, f3, f4, f5, f6, f7, f8] = KernelDescriptorPack{};
     }
 }
 
@@ -318,7 +338,21 @@ MetadataField populatedMetadataField()
 
 HeuristicProvenance populatedProvenance()
 {
-    return {populatedDependency(0x21), populatedDependency(0x22), {populatedDependency(0x23)}};
+    return {populatedDependency(0x21),
+            populatedDependency(0x22),
+            "dkdv",
+            {SlotDependency{"dq", populatedDependency(0x24)}},
+            {populatedDependency(0x23)}};
+}
+
+SlotDescriptor populatedSlot()
+{
+    SlotDescriptor slot{};
+    slot.name = "dkdv";
+    slot.metadataSchemaId = testId(0x26);
+    slot.sortKernelCatalog = {{"gfx942", {testId(0x27)}}};
+    slot.knobs = {"block"};
+    return slot;
 }
 
 KernelArgument populatedArgument()
@@ -390,14 +424,22 @@ EngineDescriptor populatedEngine()
     engine.heuristicId = testId(0x52);
     engine.sortKernelCatalog = {{"gfx942", {testId(0x53)}}};
     engine.predictEngine = {{"gfx942", {testId(0x54)}}};
-    engine.predictApplicableKernels = {{"gfx942", testId(0x55)}};
+    engine.predictApplicableKernels = {{"gfx942", {testId(0x55)}}};
     engine.metadataSchemaId = testId(0x56);
     engine.knobs = {"tile"};
     engine.behaviorNotes = {3};
     engine.sdkVersion = POPULATED_VERSION;
-    engine.numericalNotes = {"fast-math"};
+    engine.numericalNotes = std::vector<int32_t>{4};
     engine.graphMatchNativeSymbol = "graph.match";
     engine.revision = POPULATED_VERSION;
+    engine.slots = {populatedSlot()};
+    engine.sharedWorkspaceToken = "ws.bytes";
+    return engine;
+}
+
+EngineDescriptor withoutNumericalNotes(EngineDescriptor engine)
+{
+    engine.numericalNotes.reset();
     return engine;
 }
 
@@ -453,13 +495,42 @@ std::vector<EqualityCase> allEqualityCases()
                 })});
     }
     {
+        const SlotDependency baseline{"dq", populatedDependency(0x14)};
+        const std::string type = "SlotDependency";
+        append({fieldRow(type, "Slot", true, baseline, [](auto& v) { v.slot += "!"; }),
+                fieldRow(type, "Kmd", true, baseline, [](auto& v) { v.kmd.id = testId(0x15); })});
+    }
+    {
         const auto baseline = populatedProvenance();
         const std::string type = "HeuristicProvenance";
         append({fieldRow(type, "Ued", true, baseline, [](auto& v) { v.ued.id = testId(0x2A); }),
                 fieldRow(type, "Kmd", true, baseline, [](auto& v) { v.kmd.id = testId(0x2B); }),
+                fieldRow(type, "Slot", true, baseline, [](auto& v) { v.slot += "!"; }),
+                fieldRow(type,
+                         "Kmds",
+                         true,
+                         baseline,
+                         [](auto& v) { v.kmds.front().kmd.id = testId(0x2D); }),
                 fieldRow(type, "Umd", true, baseline, [](auto& v) {
                     v.umd.push_back(populatedDependency(0x2C));
                 })});
+    }
+    {
+        const auto baseline = populatedSlot();
+        const std::string type = "SlotDescriptor";
+        append(
+            {fieldRow(type, "Name", true, baseline, [](auto& v) { v.name += "!"; }),
+             fieldRow(type,
+                      "MetadataSchemaId",
+                      true,
+                      baseline,
+                      [](auto& v) { v.metadataSchemaId = testId(0x28); }),
+             fieldRow(type,
+                      "SortKernelCatalog",
+                      true,
+                      baseline,
+                      [](auto& v) { v.sortKernelCatalog["gfx950"] = {testId(0x29)}; }),
+             fieldRow(type, "Knobs", true, baseline, [](auto& v) { v.knobs.push_back("extra"); })});
     }
     {
         const auto baseline = populatedHeuristic();
@@ -546,7 +617,7 @@ std::vector<EqualityCase> allEqualityCases()
                      "PredictApplicableKernels",
                      true,
                      baseline,
-                     [](auto& v) { v.predictApplicableKernels["gfx950"] = testId(0x5E); }),
+                     [](auto& v) { v.predictApplicableKernels["gfx950"] = {testId(0x5E)}; }),
             fieldRow(type,
                      "MetadataSchemaId",
                      true,
@@ -564,13 +635,30 @@ std::vector<EqualityCase> allEqualityCases()
                      "NumericalNotes",
                      true,
                      baseline,
-                     [](auto& v) { v.numericalNotes.push_back("extra"); }),
+                     [](auto& v) { v.numericalNotes = std::vector<int32_t>{}; }),
+            // Absent (a descriptor that makes no claim) is distinct from an empty claim.
+            fieldRow(type,
+                     "NumericalNotesAbsentVsEmpty",
+                     true,
+                     withoutNumericalNotes(baseline),
+                     [](auto& v) { v.numericalNotes = std::vector<int32_t>{}; }),
+            fieldRow(type,
+                     "NumericalNotesAbsentVsPopulated",
+                     true,
+                     withoutNumericalNotes(baseline),
+                     [](auto& v) { v.numericalNotes = std::vector<int32_t>{4}; }),
             fieldRow(type,
                      "GraphMatchNativeSymbol",
                      true,
                      baseline,
                      [](auto& v) { v.graphMatchNativeSymbol += "!"; }),
             fieldRow(type, "Revision", true, baseline, [](auto& v) { v.revision = OTHER_VERSION; }),
+            fieldRow(type, "Slots", true, baseline, [](auto& v) { v.slots.front().name += "!"; }),
+            fieldRow(type,
+                     "SharedWorkspaceToken",
+                     true,
+                     baseline,
+                     [](auto& v) { v.sharedWorkspaceToken += "!"; }),
         });
     }
     {
@@ -661,6 +749,7 @@ std::vector<EqualityCase> allEqualityCases()
         baseline.arch = {"gfx942"};
         baseline.kernels = {populatedKernel()};
         baseline.kernelIds = {testId(0x85)};
+        baseline.slot = "dq";
         const std::string type = "KernelDescriptorPack";
         append({
             fieldRow(type, "Id", true, baseline, [](auto& v) { v.id = testId(0x8A); }),
@@ -681,6 +770,7 @@ std::vector<EqualityCase> allEqualityCases()
                      true,
                      baseline,
                      [](auto& v) { v.kernelIds.push_back(testId(0x8E)); }),
+            fieldRow(type, "Slot", true, baseline, [](auto& v) { v.slot += "!"; }),
         });
     }
     return rows;

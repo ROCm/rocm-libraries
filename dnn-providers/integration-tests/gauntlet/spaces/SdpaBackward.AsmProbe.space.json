@@ -169,17 +169,17 @@
     "values": {
       "io_data_type": "${dtype}",
       "tensors": [
-        {"uid": 0, "dims": "${dims_k}", "strides": "${stride_k}", "data_type": "${dt_k}"},
-        {"uid": 1, "dims": "${dims_o}", "strides": "${stride_o}", "data_type": "${dt_o}"},
-        {"uid": 2, "dims": "${dims_q}", "strides": "${stride_q}", "data_type": "${dt_q}"},
-        {"uid": 3, "dims": "${dims_k}", "strides": "${stride_dk}", "data_type": "${dt_dk}"},
-        {"uid": 4, "dims": "${dims_q}", "strides": "${stride_dq}", "data_type": "${dt_dq}"},
-        {"uid": 5, "dims": "${dims_v}", "strides": "${stride_dv}", "data_type": "${dt_dv}"},
-        {"uid": 6, "dims": "${dims_v}", "strides": "${stride_v}", "data_type": "${dt_v}"},
-        {"uid": 7, "dims": "${dims_o}", "strides": "${stride_do}", "data_type": "${dt_do}"},
-        {"uid": 8, "dims": "${dims_stats}", "strides": "${stride_stats}", "data_type": "${dt_stats}"}
+        {"uid": 0, "dims": "${dims_k}", "strides": "${stride_k}", "data_type": "${dt_k}", "alignment": 16},
+        {"uid": 1, "dims": "${dims_o}", "strides": "${stride_o}", "data_type": "${dt_o}", "alignment": 16},
+        {"uid": 2, "dims": "${dims_q}", "strides": "${stride_q}", "data_type": "${dt_q}", "alignment": 16},
+        {"uid": 3, "dims": "${dims_k}", "strides": "${stride_dk}", "data_type": "${dt_dk}", "alignment": 16},
+        {"uid": 4, "dims": "${dims_q}", "strides": "${stride_dq}", "data_type": "${dt_dq}", "alignment": 16},
+        {"uid": 5, "dims": "${dims_v}", "strides": "${stride_dv}", "data_type": "${dt_dv}", "alignment": 16},
+        {"uid": 6, "dims": "${dims_v}", "strides": "${stride_v}", "data_type": "${dt_v}", "alignment": 16},
+        {"uid": 7, "dims": "${dims_o}", "strides": "${stride_do}", "data_type": "${dt_do}", "alignment": 16},
+        {"uid": 8, "dims": "${dims_stats}", "strides": "${stride_stats}", "data_type": "${dt_stats}", "alignment": 16}
       ],
-      "attributes": {"parameters__diagonal_alignment": "${align}", "parameters__left_bound": "${left}", "parameters__right_bound": "${right}"}
+      "attributes": {"compute_data_type": "float", "parameters__alibi_mask": false, "parameters__attn_scale_value": 0.08838834764831843, "parameters__causal_mask": false, "parameters__causal_mask_bottom_right": false, "parameters__dropout_probability": null, "parameters__diagonal_alignment": "${align}", "parameters__left_bound": "${left}", "parameters__right_bound": "${right}"}
     },
     "metadata": {
       "purpose": "probe",

@@ -12,6 +12,7 @@
 
 #include "harness/EngineNotApplicableError.hpp"
 #include "harness/GraphBenchmark.hpp"
+#include "harness/GraphCapture.hpp"
 #include "harness/PlanWorkspace.hpp"
 #include "harness/SharedHandle.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
@@ -167,6 +168,18 @@ hipdnn_frontend::AutotuneResult FrontendGraphEngineRunner::benchmark(
         return failed;
     }
     return benchmarkGraph(*session.graph, getSharedHandle(), variantPack, settings);
+}
+
+CaptureResult FrontendGraphEngineRunner::captureReplay(GraphSession& session,
+                                                       VariantPack& variantPack,
+                                                       const CaptureSettings& settings,
+                                                       const ReplayHooks& hooks)
+{
+    if(session.graph == nullptr)
+    {
+        return CaptureResult::failed("openGraph() produced no graph to capture");
+    }
+    return captureGraph(*session.graph, getSharedHandle(), variantPack, settings, hooks);
 }
 
 namespace

@@ -1,0 +1,16 @@
+{
+  "version": "1.0",
+  "id": "d5a00000-0000-4000-8000-000000000004",
+  "name": "dq variant fields",
+  "fields": [
+    {
+      "name": "block_n",
+      "type": "int",
+      "default_value": 64
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    }
+  ]
+}

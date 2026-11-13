@@ -10,6 +10,7 @@ import unittest
 import kernels.gfx942.attention_tiled_2d as gfx942_2d
 import kernels.gfx942.attention_tiled_3d as gfx942_3d
 import kernels.gfx950.attention_tiled_2d as gfx950_2d
+import kernels.gfx950.attention_tiled_2d_fastkv_regp as fastkv
 import kernels.gfx950.attention_tiled_3d as gfx950_3d
 
 _PROBLEM = dict(
@@ -88,6 +89,65 @@ class TiledSpecWrappers(unittest.TestCase):
                 accepted, reason = wrapper(bad)
                 self.assertFalse(accepted)
                 self.assertIn("head_size", reason)
+
+    def test_every_wrapper_refuses_bad_head_counts_first(self):
+        """The name carries the GQA ratio, so a zero or non-dividing head pair is
+        refused by the wrapper (not a ZeroDivisionError) and by kernel_name()."""
+        seg = {"num_segments": 16}
+        cases = (
+            (gfx942_2d, "2d", {}),
+            (gfx950_2d, "2d", {}),
+            (gfx942_3d, "3d", seg),
+            (gfx950_3d, "3d", seg),
+        )
+        heads = (
+            ((8, 0), "must be > 0"),
+            ((0, 1), "must be > 0"),
+            ((8, 3), "divisible"),
+        )
+        for module, dim, extra in cases:
+            spec_cls = getattr(module, f"UnifiedAttention{dim.upper()}TiledSpec")
+            wrapper = getattr(module, f"supports_tiled_{dim}_spec")
+            for (hq, hkv), reason in heads:
+                with self.subTest(module=module.__name__, hq=hq, hkv=hkv):
+                    problem = {**_PROBLEM, "num_query_heads": hq, "num_kv_heads": hkv}
+                    spec = spec_cls(head_size=128, **problem, **extra)
+                    accepted, why = wrapper(spec)
+                    self.assertFalse(accepted)
+                    self.assertIn(reason, why)
+                    with self.assertRaisesRegex(ValueError, reason):
+                        spec.kernel_name()
+
+    def test_fastkv_register_p_refuses_bad_head_counts(self):
+        spec = gfx950_2d.UnifiedAttention2DTiledSpec(
+            head_size=64, **{**_PROBLEM, "num_query_heads": 64, "num_kv_heads": 0}
+        )
+        accepted, why = fastkv.supports_fastkv_register_p_2d_spec(spec)
+        self.assertFalse(accepted)
+        self.assertIn("must be > 0", why)
+
+    def test_fastkv_register_p_kwargs_predicate_refuses_gfx942(self):
+        """supports_tiled_2d admits gfx942, but the fastKV register-P body is
+        gfx950-only; the kwargs predicate must agree with the spec wrapper."""
+        kwargs = {
+            "head_size": 64,
+            "block_size": 32,
+            "dtype": "bf16",
+            "num_queries_per_kv": 8,
+            "use_alibi": False,
+            "use_qq_bias": False,
+            "use_fp8": False,
+            "q_dtype": "bf16",
+            "num_query_heads": 64,
+            "num_kv_heads": 8,
+        }
+        self.assertEqual(
+            fastkv.supports_fastkv_register_p_2d(**kwargs, arch="gfx950"),
+            (True, "supported"),
+        )
+        accepted, why = fastkv.supports_fastkv_register_p_2d(**kwargs, arch="gfx942")
+        self.assertFalse(accepted)
+        self.assertIn("gfx950 kernel", why)
 
 
 if __name__ == "__main__":

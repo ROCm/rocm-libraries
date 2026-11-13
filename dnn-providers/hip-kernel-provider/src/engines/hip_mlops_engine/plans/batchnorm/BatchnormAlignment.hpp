@@ -100,9 +100,9 @@ inline size_t
  * alignments, 0 when they cannot run at all.
  *
  * x and the output are loaded and stored as vectors in both layouts
- * (kernels/batchnorm/BatchNormFwdInferSpatial.cpp:58-59,87-94). The per-channel tensors (scale,
- * bias, mean, variance) are loaded as vectors in NHWC (:141-148,230-237) and one element at a time
- * in NCHW (:152-155,241-244), where they only need to cover that one element.
+ * (kernels/batchnorm/BatchNormFwdInferSpatial.cpp:56-57,84-91). The per-channel tensors (scale,
+ * bias, mean, variance) are loaded as vectors in NHWC (:139-146,228-235) and one element at a time
+ * in NCHW (:149-153,238-242), where they only need to cover that one element.
  */
 inline size_t maxInferenceVectorSize(
     bool isLayoutNHWC,

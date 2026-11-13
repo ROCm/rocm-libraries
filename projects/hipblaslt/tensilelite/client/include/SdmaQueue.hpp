@@ -212,7 +212,7 @@ namespace TensileLite
         // One SDMA queue: owns a 256KB Uncached ring and the KFD queue resource.
         // Non-copyable (owns HW resources). The two software cursors are not
         // here: they are a u64 pair in the client's counter buffer
-        // (FusedA2ARunner.cpp).
+        // (DeviceContext.cpp).
         //
         // localNode / engineId are KFD topology ids; use sdmaNodeIdForDevice()
         // and sdmaSelectEngine() above to derive them from a HIP device id.

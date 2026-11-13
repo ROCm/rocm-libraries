@@ -602,6 +602,83 @@ INSTANTIATE_TEST_SUITE_P(
     });
 
 // ---------------------------------------------------------------------------
+// The dynamic work queues need a home workgroup for every non-empty queue
+// (8 on gfx950). A fixed grid below that is raised to min(totalItems, 8), and
+// the arg packers reject a grid that still leaves a queue unserved.
+// ---------------------------------------------------------------------------
+struct DynamicGridCase
+{
+    const char* name;
+    int         mode; // 4 = DynamicWorkQueue, 5 = Hybrid (dynamic sub-mode)
+    int         skTiles;
+    int         skSplit;
+    size_t      expectedGrid;
+};
+
+class StreamKDynamicGridCoversQueuesTest : public ::testing::TestWithParam<DynamicGridCase>
+{
+};
+
+TEST_P(StreamKDynamicGridCoversQueuesTest, FixedGridIsRaisedToCoverEveryQueue)
+{
+    auto const&         test = GetParam();
+    AnalyticalEnv       env;
+    ContractionSolution solution;
+    initStreamKSolution(solution, test.mode);
+    solution.kernelName                           = "generated_streamk_dynamic_grid";
+    solution.customKernel.name                    = solution.kernelName;
+    solution.customKernel.generated               = true;
+    solution.sizeMapping.globalSplitU             = 0;
+    solution.sizeMapping.globalAccumulation       = 0;
+    solution.sizeMapping.workGroupMapping         = 1;
+    solution.sizeMapping.workGroupMappingXCC      = 1;
+    solution.internalArgsSupport.useUniversalArgs = true;
+
+    // 4 tiles of 64 K iterations each.
+    auto problem = makeGemmProblem(256, 256, 4096);
+    problem.setAlphaType(rocisa::DataType::Float);
+    problem.setBetaType(rocisa::DataType::Float);
+    problem.setWorkspaceSize(std::numeric_limits<size_t>::max());
+    problem.setParams().setStreamKTileSchedulingMode(1);
+    env.device.persistentFixedGrid   = 2;
+    env.device.persistentDynamicGrid = 0;
+    env.device.skTiles               = test.skTiles;
+    env.device.skSplit               = test.skSplit;
+
+    auto launch = solution.resolvePersistentSettings(problem, env.device);
+    ASSERT_EQ(launch.effectiveWorkAssignment, WorkAssignment::DynamicWorkQueue);
+    EXPECT_EQ(launch.grid, test.expectedGrid);
+
+    std::array<uint32_t, 4> workspace{}, flags{};
+    ContractionInputs       inputs;
+    inputs.alpha        = 1.0f;
+    inputs.beta         = 0.0f;
+    inputs.ws           = workspace.data();
+    inputs.Synchronizer = flags.data();
+    EXPECT_NO_THROW(
+        solution.generateSingleCall<true>(problem, inputs, env.device, launch, GSUSettings{}));
+
+    // A grid that bypasses selection and leaves a queue unserved is rejected.
+    launch.grid = 2;
+    EXPECT_THROW(
+        solution.generateSingleCall<true>(problem, inputs, env.device, launch, GSUSettings{}),
+        std::runtime_error);
+}
+
+INSTANTIATE_TEST_SUITE_P(StreamKDynamicGrid,
+                         StreamKDynamicGridCoversQueuesTest,
+                         ::testing::Values(
+                             // 4 tiles split 4 ways: 16 items, so all 8 queues are non-empty.
+                             DynamicGridCase{"DynamicWorkQueueSplit", 4, 4, 4, 8},
+                             DynamicGridCase{"HybridDynamicSplit", 5, 4, 4, 8},
+                             // 3 whole tiles plus 1 tile split 2 ways: 5 items in 5 queues.
+                             DynamicGridCase{"DynamicWorkQueueFewItems", 4, 1, 2, 5},
+                             DynamicGridCase{"HybridDynamicFewItems", 5, 1, 2, 5}),
+                         [](::testing::TestParamInfo<DynamicGridCase> const& info) {
+                             return info.param.name;
+                         });
+
+// ---------------------------------------------------------------------------
 // Force-DP-only (SK3): every tile stays data-parallel. skTiles==0, no partials,
 // workspace==0, dpOnly reported and sourced from the compile-time PARAM.
 // ---------------------------------------------------------------------------

@@ -27,8 +27,12 @@
 
 #include "utility.hpp"
 
+#include <fstream>
 #include <gtest/gtest.h>
+#include <memory>
 #include <rocalution/rocalution.hpp>
+#include <set>
+#include <sstream>
 
 using namespace rocalution;
 
@@ -1108,6 +1112,355 @@ void testing_local_move_to_host_async()
     EXPECT_NO_THROW(matrix.Sync());
     EXPECT_EQ(matrix.GetM(), 2);
     EXPECT_EQ(matrix.GetN(), 2);
+}
+
+// LocalMatrix that reports which backend object it currently points to. It does not show whether
+// the other backend object was freed, because matrix_host_ and matrix_accel_ are private. If both
+// is_host_() and is_accel_() are true, the matrix has lost both backend objects and any further
+// access (including its destructor) dereferences NULL.
+template <typename T>
+class local_matrix_location : public LocalMatrix<T>
+{
+public:
+    bool on_host() const
+    {
+        return this->is_host_() && !this->is_accel_();
+    }
+
+    bool on_accel() const
+    {
+        return this->is_accel_() && !this->is_host_();
+    }
+};
+
+template <typename T>
+bool local_matrix_reaches_accelerator()
+{
+    local_matrix_location<T> mat;
+    mat.MoveToAccelerator();
+    return mat.on_accel();
+}
+
+template <typename T>
+void testing_local_move_to_host_async_sync()
+{
+    if(!local_matrix_reaches_accelerator<T>())
+    {
+        GTEST_SKIP() << "No accelerator available";
+    }
+
+    PtrType                           row_offsets[3] = {0, 2, 4};
+    int                               col_indices[4] = {0, 1, 0, 1};
+    T                                 values[4]      = {1.0, 2.0, 3.0, 4.0};
+    const std::vector<std::vector<T>> dense_ref      = {{1.0, 2.0}, {3.0, 4.0}};
+
+    for(unsigned int format = DENSE; format <= HYB; ++format)
+    {
+        SCOPED_TRACE(_matrix_format_names[format]);
+
+        // Heap allocated so that a matrix without backend objects can be leaked instead of
+        // crashing the test binary in its destructor
+        std::unique_ptr<local_matrix_location<T>> mat(new local_matrix_location<T>);
+        mat->AllocateCSR("TestMatrix", 4, 2, 2);
+        mat->CopyFromCSR(row_offsets, col_indices, values);
+        mat->ConvertTo(format, (format == BCSR) ? 2 : 1);
+        ASSERT_EQ(mat->GetFormat(), format);
+        int64_t nnz = mat->GetNnz();
+
+        mat->MoveToAccelerator();
+        ASSERT_TRUE(mat->on_accel());
+
+        mat->MoveToHostAsync();
+
+        // The matrix switches to the host only once Sync() is called
+        EXPECT_TRUE(mat->on_accel());
+
+        mat->Sync();
+
+        if(!mat->on_host())
+        {
+            mat.release();
+            ADD_FAILURE() << "LocalMatrix is not on the host after MoveToHostAsync() and Sync()";
+            continue;
+        }
+
+        EXPECT_EQ(mat->GetFormat(), format);
+        EXPECT_EQ(mat->GetM(), 2);
+        EXPECT_EQ(mat->GetN(), 2);
+        EXPECT_EQ(mat->GetNnz(), nnz);
+        EXPECT_TRUE(mat->Check());
+
+        mat->ConvertToCSR();
+        EXPECT_EQ(extract_dense_matrix(*mat), dense_ref);
+    }
+}
+
+// Counts the backend objects (HostMatrixCSR, HIPAcceleratorMatrixELL, ...) that are constructed
+// and not yet destructed while the counter exists. It reads the library debug trace (the one
+// written for ROCALUTION_LAYER=1), which logs every backend constructor and destructor with the
+// object address, so the count does not depend on device allocator pooling or free memory.
+// It depends on the internal _get_backend_descriptor() and on the trace suffixes below, so the
+// tests always expect a positive count too, which drops to 0 if these change.
+// Construct it after init_rocalution() and destroy it before stop_rocalution().
+class backend_object_counter
+{
+public:
+    backend_object_counter()
+        : saved_log_(_get_backend_descriptor()->log_file)
+    {
+        // The descriptor holds an std::ofstream*, so point that stream at an in-memory buffer
+        static_cast<std::ostream&>(this->log_).rdbuf(&this->buffer_);
+        _get_backend_descriptor()->log_file = &this->log_;
+    }
+
+    ~backend_object_counter()
+    {
+        _get_backend_descriptor()->log_file = this->saved_log_;
+    }
+
+    // Number of live objects whose class name starts with prefix, e.g. "HIPAcceleratorMatrix"
+    int live(const std::string& prefix) const
+    {
+        const std::string addr_tag = "Obj addr: ";
+        const std::string fct_tag  = "; fct: " + prefix;
+        const std::string ctor_tag = ", constructor with local_backend";
+        const std::string dtor_tag = ", destructor";
+
+        std::set<std::string> objects;
+        std::istringstream    trace(this->buffer_.str());
+        std::string           line;
+
+        while(std::getline(trace, line))
+        {
+            size_t addr = line.find(addr_tag);
+            size_t fct  = line.find(fct_tag);
+
+            if(addr == std::string::npos || fct == std::string::npos || fct < addr)
+            {
+                continue;
+            }
+
+            std::string obj = line.substr(addr + addr_tag.size(), fct - addr - addr_tag.size());
+
+            if(ends_with(line, ctor_tag))
+            {
+                objects.insert(obj);
+            }
+            else if(ends_with(line, dtor_tag))
+            {
+                objects.erase(obj);
+            }
+        }
+
+        return static_cast<int>(objects.size());
+    }
+
+private:
+    static bool ends_with(const std::string& str, const std::string& suffix)
+    {
+        return str.size() >= suffix.size()
+               && str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0;
+    }
+
+    std::ofstream* saved_log_;
+    std::stringbuf buffer_;
+    std::ofstream  log_;
+};
+
+template <typename T>
+void testing_local_move_to_accelerator_async_repeated()
+{
+    if(!_rocalution_available_accelerator())
+    {
+        GTEST_SKIP();
+    }
+
+    Arguments argus;
+    argus.size        = 10;
+    argus.matrix_type = "Laplacian2D";
+
+    unsigned int formats[] = {CSR, MCSR, BCSR, COO, DIA, ELL, HYB, DENSE};
+
+    for(unsigned int format : formats)
+    {
+        SCOPED_TRACE(_matrix_format_names[format]);
+
+        backend_object_counter objects;
+        {
+            LocalMatrix<T> matrix;
+            getTestMatrix<T>(argus, matrix);
+
+            auto reference = extract_dense_matrix(matrix);
+
+            matrix.ConvertTo(format, format == BCSR ? 2 : 1);
+            EXPECT_EQ(objects.live("HostMatrix"), 1);
+
+            // Calling MoveToAcceleratorAsync() again before Sync() must not add another copy
+            matrix.MoveToAcceleratorAsync();
+            matrix.MoveToAcceleratorAsync();
+            matrix.MoveToAcceleratorAsync();
+            matrix.Sync();
+
+            // The matrix owns exactly one object, and it is the accelerator copy
+            EXPECT_EQ(objects.live("HIPAcceleratorMatrix"), 1);
+            EXPECT_EQ(objects.live("HostMatrix"), 0);
+            EXPECT_EQ(matrix.GetFormat(), format);
+            EXPECT_TRUE(matrix.Check());
+
+            matrix.ConvertToCSR();
+            EXPECT_EQ(extract_dense_matrix(matrix), reference);
+        }
+
+        // Nothing survives the destructor
+        EXPECT_EQ(objects.live("HIPAcceleratorMatrix"), 0);
+        EXPECT_EQ(objects.live("HostMatrix"), 0);
+    }
+}
+
+template <typename T>
+void testing_local_move_to_accelerator_async_sync()
+{
+    if(!local_matrix_reaches_accelerator<T>())
+    {
+        GTEST_SKIP() << "No accelerator available";
+    }
+
+    PtrType                           row_offsets[3] = {0, 2, 4};
+    int                               col_indices[4] = {0, 1, 0, 1};
+    T                                 values[4]      = {1.0, 2.0, 3.0, 4.0};
+    const std::vector<std::vector<T>> dense_ref      = {{1.0, 2.0}, {3.0, 4.0}};
+
+    for(unsigned int format = DENSE; format <= HYB; ++format)
+    {
+        SCOPED_TRACE(_matrix_format_names[format]);
+
+        // Heap allocated so that a matrix without backend objects can be leaked instead of
+        // crashing the test binary in its destructor
+        std::unique_ptr<local_matrix_location<T>> mat(new local_matrix_location<T>);
+        mat->AllocateCSR("TestMatrix", 4, 2, 2);
+        mat->CopyFromCSR(row_offsets, col_indices, values);
+        mat->ConvertTo(format, (format == BCSR) ? 2 : 1);
+        ASSERT_EQ(mat->GetFormat(), format);
+        int64_t nnz = mat->GetNnz();
+
+        mat->MoveToAcceleratorAsync();
+
+        // The matrix switches to the accelerator only once Sync() is called
+        EXPECT_TRUE(mat->on_host());
+
+        mat->Sync();
+
+        if(!mat->on_accel())
+        {
+            mat.release();
+            ADD_FAILURE() << "LocalMatrix is not on the accelerator after MoveToAcceleratorAsync() "
+                             "and Sync()";
+            continue;
+        }
+
+        EXPECT_EQ(mat->GetFormat(), format);
+        EXPECT_EQ(mat->GetM(), 2);
+        EXPECT_EQ(mat->GetN(), 2);
+        EXPECT_EQ(mat->GetNnz(), nnz);
+        EXPECT_TRUE(mat->Check());
+
+        mat->MoveToHost();
+        ASSERT_TRUE(mat->on_host());
+        mat->ConvertToCSR();
+        EXPECT_EQ(extract_dense_matrix(*mat), dense_ref);
+    }
+}
+
+template <typename T>
+void testing_local_copy_from_async_move_to_accelerator_async()
+{
+    if(!_rocalution_available_accelerator())
+    {
+        GTEST_SKIP();
+    }
+
+    Arguments argus;
+    argus.size        = 10;
+    argus.matrix_type = "Laplacian2D";
+
+    LocalMatrix<T> source;
+    getTestMatrix<T>(argus, source);
+
+    auto reference = extract_dense_matrix(source);
+
+    backend_object_counter objects;
+    {
+        LocalMatrix<T> matrix;
+
+        // A pending CopyFromAsync() must not turn the move into a no-op
+        matrix.CopyFromAsync(source);
+        EXPECT_EQ(objects.live("HostMatrix"), 1);
+
+        matrix.MoveToAcceleratorAsync();
+        matrix.Sync();
+
+        // The matrix owns exactly one object, and it is the accelerator copy
+        EXPECT_EQ(objects.live("HIPAcceleratorMatrix"), 1);
+        EXPECT_EQ(objects.live("HostMatrix"), 0);
+        EXPECT_TRUE(matrix.Check());
+        EXPECT_EQ(extract_dense_matrix(matrix), reference);
+    }
+
+    // Nothing survives the destructor
+    EXPECT_EQ(objects.live("HIPAcceleratorMatrix"), 0);
+    EXPECT_EQ(objects.live("HostMatrix"), 0);
+}
+
+template <typename T>
+void testing_local_move_to_host_async_repeated()
+{
+    if(!_rocalution_available_accelerator())
+    {
+        GTEST_SKIP();
+    }
+
+    Arguments argus;
+    argus.size        = 10;
+    argus.matrix_type = "Laplacian2D";
+
+    unsigned int formats[] = {CSR, MCSR, BCSR, COO, DIA, ELL, HYB, DENSE};
+
+    for(unsigned int format : formats)
+    {
+        SCOPED_TRACE(_matrix_format_names[format]);
+
+        backend_object_counter objects;
+        {
+            LocalMatrix<T> matrix;
+            getTestMatrix<T>(argus, matrix);
+
+            auto reference = extract_dense_matrix(matrix);
+
+            matrix.ConvertTo(format, format == BCSR ? 2 : 1);
+            matrix.MoveToAccelerator();
+            EXPECT_EQ(objects.live("HIPAcceleratorMatrix"), 1);
+            EXPECT_EQ(objects.live("HostMatrix"), 0);
+
+            // Calling MoveToHostAsync() again before Sync() must not add another copy
+            matrix.MoveToHostAsync();
+            matrix.MoveToHostAsync();
+            matrix.MoveToHostAsync();
+            matrix.Sync();
+
+            // The matrix owns exactly one object, and it is the host copy
+            EXPECT_EQ(objects.live("HostMatrix"), 1);
+            EXPECT_EQ(objects.live("HIPAcceleratorMatrix"), 0);
+            EXPECT_EQ(matrix.GetFormat(), format);
+            EXPECT_TRUE(matrix.Check());
+
+            matrix.ConvertToCSR();
+            EXPECT_EQ(extract_dense_matrix(matrix), reference);
+        }
+
+        // Nothing survives the destructor
+        EXPECT_EQ(objects.live("HIPAcceleratorMatrix"), 0);
+        EXPECT_EQ(objects.live("HostMatrix"), 0);
+    }
 }
 
 template <typename T>

@@ -316,8 +316,9 @@ inline void printRaggedLayoutMismatch(std::ostream& os,
             return std::string("dense");
         }
         std::ostringstream description;
-        description << "ragged row offsets " << StreamVec(layout->rowOffsets) << " seq axis "
-                    << layout->seqAxis << " seq stride " << layout->seqStride;
+        description << "ragged origins " << StreamVec(layout->origins) << " lengths "
+                    << StreamVec(layout->lengths) << " seq axis " << layout->seqAxis
+                    << " seq stride " << layout->seqStride;
         return description.str();
     };
 

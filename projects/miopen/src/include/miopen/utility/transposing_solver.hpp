@@ -166,7 +166,8 @@ struct UniversalTransposeSolver : TransposePseudoSolver
         auto create_kernel = [&](const std::string& index_type) {
             const auto tensor_space = problem.input.GetElementSize();
             const auto cus          = ctx.GetStream().GetMaxComputeUnits();
-            auto build_params       = GetDataTypeKBP(problem.input.GetType());
+            auto build_params =
+                GetDataTypeKBP(problem.input.GetType(), ctx.GetStream().GetDeviceName());
 
             constexpr std::size_t max_block_size = 256;
             const auto local_size                = max_block_size;
@@ -268,9 +269,10 @@ struct TiledTransposeSolver : TransposePseudoSolver
         auto sln = ConvSolution{};
 
         auto create_kernel = [&](const std::string& index_type) {
-            const auto& lens  = problem.input.GetLengths();
-            const auto cus    = ctx.GetStream().GetMaxComputeUnits();
-            auto build_params = GetDataTypeKBP(problem.input.GetType());
+            const auto& lens = problem.input.GetLengths();
+            const auto cus   = ctx.GetStream().GetMaxComputeUnits();
+            auto build_params =
+                GetDataTypeKBP(problem.input.GetType(), ctx.GetStream().GetDeviceName());
 
             const auto n = lens.size() >= 1 ? lens[0] : 1;
             const auto c = lens.size() >= 2 ? lens[1] : 1;
@@ -387,7 +389,8 @@ struct VectorizedTransposeSolver : TransposePseudoSolver
         auto create_kernel = [&](const std::string& index_type) {
             const auto tensor_space = problem.input.GetElementSize();
             const auto cus          = ctx.GetStream().GetMaxComputeUnits();
-            auto build_params       = GetDataTypeKBP(problem.input.GetType());
+            auto build_params =
+                GetDataTypeKBP(problem.input.GetType(), ctx.GetStream().GetDeviceName());
 
             const auto num_blocks =
                 std::max(std::size_t{1}, (tensor_space + BlockSize - 1) / BlockSize);

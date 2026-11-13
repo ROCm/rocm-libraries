@@ -432,12 +432,37 @@ class SdpaInputs:
     bias: Optional[np.ndarray]  # source-shape float64
 
 
-def _view(buf, desc):
+def strided_view(
+    name: str,
+    buffer: np.ndarray,
+    base: int,
+    shape: tuple,
+    strides: tuple,
+    writeable: bool = False,
+) -> np.ndarray:
+    """Read ``shape`` from a flat buffer at element offset ``base`` with element strides."""
+    if any(s < 0 for s in strides):
+        raise ValueError(f"{name}: negative strides {strides} are not supported")
+    if 0 in shape:
+        return np.zeros(shape, dtype=buffer.dtype)
+    last = base + sum((n - 1) * s for n, s in zip(shape, strides))
+    if base < 0 or last >= buffer.size:
+        raise ValueError(
+            f"{name}: dims {shape} with strides {strides} at offset {base} need "
+            f"{last + 1} elements, buffer has {buffer.size}"
+        )
+    item = buffer.itemsize
     return as_strided(
-        buf[desc.offset :],
-        shape=desc.dims,
-        strides=tuple(s * buf.itemsize for s in desc.strides),
-        writeable=True,
+        buffer[base:],
+        shape=shape,
+        strides=tuple(s * item for s in strides),
+        writeable=writeable,
+    )
+
+
+def _view(buf, desc):
+    return strided_view(
+        "operand", buf, desc.offset, tuple(desc.dims), tuple(desc.strides), True
     )
 
 

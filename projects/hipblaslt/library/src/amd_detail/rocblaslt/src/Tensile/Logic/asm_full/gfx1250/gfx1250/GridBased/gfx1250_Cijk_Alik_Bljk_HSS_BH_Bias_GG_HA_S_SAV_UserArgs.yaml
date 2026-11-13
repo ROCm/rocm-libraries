@@ -85,7 +85,7 @@
   UseInitialStridesAB: false
   UseInitialStridesCD: false
   UseScaleAB: ''
-  UseScaleAlphaVec: 1
+  UseScaleAlphaVec: 5
   UseScaleCD: false
   isMixMode: false
 - - 1LDSBuffer: 0

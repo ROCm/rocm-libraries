@@ -8,16 +8,19 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <gmock/gmock.h>
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceNotApplicableError.hpp>
 
@@ -229,10 +232,12 @@ TEST_F(TestErrorPaths, RefCrashFails)
     EXPECT_THAT(refErrors.front(), ::testing::HasSubstr("stub: ref crashed on supported op"));
 }
 
-TEST_F(TestErrorPaths, AdapterTranslatesNotApplicableToCapabilityError)
+// Pins the exception type relationships the harness routing relies on: the CPU
+// executor's CpuReferenceNotApplicableError is a plain std::runtime_error, NOT a
+// ReferenceCapabilityError, so only the adapter's translation turns it into a skip.
+// This test does not call the adapter; see CpuAdapterTranslatesNotApplicableToCapabilityError.
+TEST_F(TestErrorPaths, NotApplicableAndCapabilityErrorTypeRelationships)
 {
-    const CpuReferenceGraphExecutorAdapter adapter;
-
     hipdnn_test_sdk::utilities::CpuReferenceNotApplicableError notApplicable("stub");
     EXPECT_TRUE(dynamic_cast<const std::runtime_error*>(&notApplicable) != nullptr)
         << "CpuReferenceNotApplicableError must derive from std::runtime_error";
@@ -252,6 +257,29 @@ TEST_F(TestErrorPaths, AdapterTranslatesNotApplicableToCapabilityError)
     catch(const hipdnn_test_sdk::utilities::CpuReferenceNotApplicableError&)
     {
         SUCCEED();
+    }
+}
+
+// A CustomOp node has no CPU signature key, so the test_sdk executor throws
+// CpuReferenceNotApplicableError from execute(); the adapter must surface that as a
+// ReferenceCapabilityError so the harness skips instead of failing.
+TEST_F(TestErrorPaths, CpuAdapterTranslatesNotApplicableToCapabilityError)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidCustomOpGraph();
+    const std::unordered_map<int64_t, void*> variantPack;
+    CpuReferenceGraphExecutorAdapter adapter;
+
+    EXPECT_FALSE(adapter.isApplicable(builder.GetBufferPointer(), builder.GetSize()));
+
+    try
+    {
+        adapter.execute(builder.GetBufferPointer(), builder.GetSize(), variantPack);
+        FAIL() << "execute() must throw for a graph the CPU executor cannot run";
+    }
+    catch(const ReferenceCapabilityError& e)
+    {
+        EXPECT_THAT(std::string(e.what()),
+                    ::testing::StartsWith("CPU reference executor could not run"));
     }
 }
 

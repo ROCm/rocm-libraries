@@ -19,6 +19,7 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/utilities/ScopedResource.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginVersionConstants.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
@@ -35,15 +36,18 @@
 
 /**
  * @file TestStagedApplicability.cpp
- * @brief Tests for StagedApplicability.hpp as GenericEngine implements it: begin plus
- *        finish decides exactly what isApplicable() decides, leaves the same cache and
- *        logs, shares one key build per scope, and finishes safely on other threads.
+ * @brief Tests for StagedApplicability.hpp as GenericEngine implements it, for engines without
+ *        slots and for a two-slot engine: begin plus finish decides exactly what isApplicable()
+ *        decides, leaves the same cache and logs (verdict and per-slot catalogs), predicts the
+ *        variants of every slot, shares one key build per scope, and finishes safely on other
+ *        threads.
  */
 namespace
 {
 
 using namespace hipdnn_plugin_sdk::ingestor;
 using namespace hipdnn_plugin_sdk::ingestor::testing;
+using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph;
 using hipdnn_flatbuffers_sdk::flatbuffer_utilities::INodeWrapper;
@@ -66,6 +70,7 @@ constexpr const char* GRAPH_SYMBOL = "test.graph";
 constexpr const char* KERNEL_SYMBOL = "test.kernel";
 /// testDeviceProperties() reports gfx000, so a pack or kernel narrowed to this never runs.
 constexpr const char* UNAVAILABLE_ARCH = "gfx942";
+constexpr const char* WS_BYTES = "ws.bytes";
 
 const hipdnn_data_sdk::utilities::Version NEWER_THAN_BASELINE{
     hipdnn_plugin_sdk::K_PASS_BY_VALUE_MIN_API_VERSION};
@@ -873,6 +878,432 @@ TEST(TestIngestorStagedApplicability, PrewarmBuildsNodeWrappersEvenWhenTheTensor
     EXPECT_EQ(graph.nodeWrapperReads(), 1);
 }
 
+using Manager = KernelIngestorStateManager<StubHandle>;
+
+BoundTokens workspaceTokens(int64_t scratchOffset)
+{
+    return {{WS_BYTES, int64_t{1000}}, {"ws.scratch_offset", scratchOffset}};
+}
+
+std::optional<BoundTokens> acceptSlottedGraph(const MatchContext& /*context*/)
+{
+    ++counters().graphMatchCalls;
+    return workspaceTokens(1024);
+}
+
+/// Publishes a scratch offset that is not the shared size rounded up to its alignment.
+std::optional<BoundTokens> badTokenGraph(const MatchContext& /*context*/)
+{
+    ++counters().graphMatchCalls;
+    return workspaceTokens(1000);
+}
+
+/// One slot's pack: the three kernels of makePack(), with ids of their own so no id repeats
+/// across slots. @p arch narrows the pack; @p excludeSecondKernel narrows one kernel.
+KernelDescriptorPack slotPack(uint8_t seed,
+                              const std::string& slot,
+                              const std::vector<std::string>& arch = {},
+                              bool excludeSecondKernel = false)
+{
+    auto pack = makePack({KERNEL_MATCHER_ID}, arch);
+    pack.id = testId(seed);
+    pack.name = slot + " pack";
+    pack.slot = slot;
+    pack.kernels
+        = {makeKernel(testId(static_cast<uint8_t>(seed + 1)), slot + "_64_float", 64, "FLOAT"),
+           makeKernel(testId(static_cast<uint8_t>(seed + 2)), slot + "_256_float", 256, "FLOAT"),
+           makeKernel(testId(static_cast<uint8_t>(seed + 3)), slot + "_64_half", 64, "HALF")};
+    if(excludeSecondKernel)
+    {
+        pack.kernels[1].arch = {UNAVAILABLE_ARCH};
+    }
+    return pack;
+}
+
+struct Packs
+{
+    std::vector<KernelDescriptorPack> first;
+    std::vector<KernelDescriptorPack> second;
+};
+
+Packs defaultPacks()
+{
+    return {{slotPack(0x50, "first")}, {slotPack(0x60, "second")}};
+}
+
+/// A two-slot engine over @p packs, matching kernels through @p kernelSymbol. Twins built by two
+/// calls with the same arguments decide every graph identically. @p manager, when given,
+/// receives the engine's state manager.
+std::unique_ptr<StagedEngine> makeSlottedEngine(const IDeviceResolver<StubHandle>& resolver,
+                                                Packs packs,
+                                                const std::string& kernelSymbol = KERNEL_SYMBOL,
+                                                const Manager** manager = nullptr)
+{
+    std::vector<MatchDescriptor> matchers{
+        {KERNEL_MATCHER_ID, "kernel scoped", MatchScope::KERNEL, kernelSymbol}};
+    std::vector<KernelSlotInput> slots;
+    slots.push_back({"first",
+                     makeSchema(),
+                     std::move(packs.first),
+                     std::make_shared<UnrankedKernelHeuristic>()});
+    slots.push_back({"second",
+                     makeSchema(),
+                     std::move(packs.second),
+                     std::make_shared<UnrankedKernelHeuristic>()});
+
+    auto engine = makeEngineWithKnobs({});
+    engine.graphMatchNativeSymbol = GRAPH_SYMBOL;
+    engine.sharedWorkspaceToken = WS_BYTES;
+    for(const char* name : {"first", "second"})
+    {
+        SlotDescriptor described;
+        described.name = name;
+        described.metadataSchemaId = SCHEMA_ID;
+        described.knobs = {BLOCK_SIZE};
+        engine.slots.push_back(std::move(described));
+    }
+
+    auto owned = std::make_unique<Manager>(std::move(slots),
+                                           std::move(matchers),
+                                           makeStubDispatches(),
+                                           GRAPH_SYMBOL,
+                                           WS_BYTES,
+                                           "engine 'slotted staged fixture'");
+    if(manager != nullptr)
+    {
+        *manager = owned.get();
+    }
+    return std::make_unique<StagedEngine>(std::move(engine), std::move(owned), resolver);
+}
+
+std::unique_ptr<StagedEngine> makeSlottedEngine(const IDeviceResolver<StubHandle>& resolver)
+{
+    return makeSlottedEngine(resolver, defaultPacks());
+}
+
+struct SlottedEquivalenceCase
+{
+    std::string name;
+    GraphMatchFn graphMatch;
+    KernelMatcherFn kernelMatch;
+    std::vector<std::string> firstArch;
+    std::vector<std::string> secondArch;
+    GraphKind graph;
+    /// Answer once through isApplicable() first, so the staged call is a cache hit.
+    bool warm;
+    bool expectedVerdict;
+    bool decidedInBegin;
+    /// graph_match calls a second isApplicable() makes: 0 when the first call left the
+    /// verdict cached (or never reaches graph_match), 1 when it must rematch.
+    int secondCallGraphMatches;
+};
+
+class TestSlottedStagedApplicabilityEquivalence
+    : public ::testing::TestWithParam<SlottedEquivalenceCase>
+{
+};
+
+/// As TestIngestorStagedApplicabilityEquivalence, for an engine with slots.
+TEST_P(TestSlottedStagedApplicabilityEquivalence, MatchesIsApplicable)
+{
+    const auto& param = GetParam();
+    const ScopedSymbols symbols(GRAPH_SYMBOL, param.graphMatch, KERNEL_SYMBOL, param.kernelMatch);
+    const StubDeviceResolver resolver;
+    const auto packsOf = [&param] {
+        return Packs{{slotPack(0x50, "first", param.firstArch)},
+                     {slotPack(0x60, "second", param.secondArch)}};
+    };
+    const auto staged = makeSlottedEngine(resolver, packsOf());
+    const auto twin = makeSlottedEngine(resolver, packsOf());
+    const auto graph = makeGraph(param.graph);
+    StubHandle handle;
+
+    if(param.warm)
+    {
+        ASSERT_EQ(staged->isApplicable(handle, *graph), param.expectedVerdict);
+        ASSERT_EQ(twin->isApplicable(handle, *graph), param.expectedVerdict);
+    }
+
+    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_INFO);
+
+    const auto expected = record(recorder, [&] { return twin->isApplicable(handle, *graph); });
+    ApplicabilityScope scope;
+    StagedOutcome outcome;
+    const auto actual = record(recorder, [&] {
+        outcome = stage(*staged, handle, *graph, scope);
+        return outcome.verdict;
+    });
+
+    EXPECT_EQ(expected.verdict, param.expectedVerdict);
+    EXPECT_EQ(actual.verdict, expected.verdict);
+    EXPECT_EQ(outcome.decidedInBegin, param.decidedInBegin);
+    EXPECT_EQ(actual.graphMatchCalls, expected.graphMatchCalls);
+    EXPECT_EQ(actual.kernelCalls, expected.kernelCalls);
+    EXPECT_EQ(actual.logs, expected.logs);
+
+    const auto twinAgain = record(recorder, [&] { return twin->isApplicable(handle, *graph); });
+    const auto stagedAgain = record(recorder, [&] { return staged->isApplicable(handle, *graph); });
+
+    EXPECT_EQ(twinAgain.graphMatchCalls, param.secondCallGraphMatches);
+    EXPECT_EQ(stagedAgain.verdict, twinAgain.verdict);
+    EXPECT_EQ(stagedAgain.graphMatchCalls, twinAgain.graphMatchCalls)
+        << "the staged call left a different cache entry than isApplicable() does";
+    EXPECT_EQ(stagedAgain.kernelCalls, twinAgain.kernelCalls);
+    EXPECT_EQ(stagedAgain.logs, twinAgain.logs);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Cases,
+    TestSlottedStagedApplicabilityEquivalence,
+    ::testing::Values(
+        SlottedEquivalenceCase{"CacheHit",
+                               acceptSlottedGraph,
+                               countingFloatKernels,
+                               {},
+                               {},
+                               GraphKind::KEYED,
+                               /*warm=*/true,
+                               /*expectedVerdict=*/true,
+                               /*decidedInBegin=*/true,
+                               /*secondCallGraphMatches=*/0},
+        SlottedEquivalenceCase{"MissThatApplies",
+                               acceptSlottedGraph,
+                               countingFloatKernels,
+                               {},
+                               {},
+                               GraphKind::KEYED,
+                               false,
+                               true,
+                               false,
+                               0},
+        // Passes graph_match, so it pays the full variant loop to decline; the decline must
+        // still be cached.
+        SlottedEquivalenceCase{"MissWhereNoKernelMatches",
+                               acceptSlottedGraph,
+                               rejectEveryKernel,
+                               {},
+                               {},
+                               GraphKind::KEYED,
+                               false,
+                               false,
+                               false,
+                               0},
+        // An invalid `shared_workspace` token is settled by the graph-level stage alone.
+        SlottedEquivalenceCase{"BadSharedWorkspaceToken",
+                               badTokenGraph,
+                               countingFloatKernels,
+                               {},
+                               {},
+                               GraphKind::KEYED,
+                               false,
+                               false,
+                               true,
+                               0},
+        SlottedEquivalenceCase{"SchemaFloorDecline",
+                               acceptSlottedGraph,
+                               countingFloatKernels,
+                               {},
+                               {},
+                               GraphKind::NEWER_SCHEMA,
+                               false,
+                               false,
+                               true,
+                               0},
+        // No content key: matched in full on the caller and never memoized.
+        SlottedEquivalenceCase{"UnkeyableGraph",
+                               acceptSlottedGraph,
+                               countingFloatKernels,
+                               {},
+                               {},
+                               GraphKind::UNKEYABLE,
+                               false,
+                               true,
+                               true,
+                               1},
+        // One slot has no pack for the device: graph_match still runs and the other slot's
+        // catalog is built, so the decline is settled only by the finish.
+        SlottedEquivalenceCase{"ASlotWithNoPackForTheDevice",
+                               acceptSlottedGraph,
+                               countingFloatKernels,
+                               {},
+                               {UNAVAILABLE_ARCH},
+                               GraphKind::KEYED,
+                               false,
+                               false,
+                               false,
+                               0},
+        SlottedEquivalenceCase{"EverySlotWithoutAPackForTheDevice",
+                               acceptSlottedGraph,
+                               countingFloatKernels,
+                               {UNAVAILABLE_ARCH},
+                               {UNAVAILABLE_ARCH},
+                               GraphKind::KEYED,
+                               false,
+                               false,
+                               true,
+                               0},
+        // An error caches nothing, so the next call rematches.
+        SlottedEquivalenceCase{"GraphMatchThrows",
+                               throwingGraphMatch,
+                               countingFloatKernels,
+                               {},
+                               {},
+                               GraphKind::KEYED,
+                               false,
+                               false,
+                               true,
+                               1},
+        // Thrown in finish: declined and logged there, never propagated.
+        SlottedEquivalenceCase{"KernelMatcherThrows",
+                               acceptSlottedGraph,
+                               throwingKernelMatch,
+                               {},
+                               {},
+                               GraphKind::KEYED,
+                               false,
+                               false,
+                               false,
+                               1}),
+    [](const ::testing::TestParamInfo<SlottedEquivalenceCase>& info) { return info.param.name; });
+
+struct SlottedPredictionCase
+{
+    std::string name;
+    /// A factory, not a value: descriptor ids are dynamically initialised inline variables, so
+    /// packs are built when the case runs, not at static init.
+    Packs (*makePacks)();
+    size_t expectedVariants;
+    /// A slot without a pack for the device leaves the engine declining, though the other slot's
+    /// variants are still examined.
+    bool expectedVerdict = true;
+};
+
+class TestSlottedStagedApplicabilityPrediction
+    : public ::testing::TestWithParam<SlottedPredictionCase>
+{
+};
+
+/// As TestIngestorStagedApplicabilityPrediction, summed over every slot.
+TEST_P(TestSlottedStagedApplicabilityPrediction, SumsArchEligibleVariantsOverEverySlot)
+{
+    const auto& param = GetParam();
+    const ScopedSymbols symbols(
+        GRAPH_SYMBOL, acceptSlottedGraph, KERNEL_SYMBOL, countingFloatKernels);
+    const StubDeviceResolver resolver;
+    const auto engine = makeSlottedEngine(resolver, param.makePacks());
+    const TestGraph graph(makeGraphId(0xB3));
+    StubHandle handle;
+    ApplicabilityScope scope;
+
+    auto staged = engine->beginApplicability(handle, graph, scope);
+
+    ASSERT_FALSE(staged.decided);
+    ASSERT_TRUE(staged.pending.valid());
+    EXPECT_EQ(staged.pending.predictedVariants(), param.expectedVariants);
+    EXPECT_EQ(engine->finishApplicability(std::move(staged.pending)), param.expectedVerdict);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Cases,
+    TestSlottedStagedApplicabilityPrediction,
+    ::testing::Values(
+        SlottedPredictionCase{"EveryKernelOfEverySlotEligible", [] { return defaultPacks(); }, 6},
+        SlottedPredictionCase{"OneKernelArchExcludedInOneSlot",
+                              [] {
+                                  return Packs{
+                                      {slotPack(0x50, "first")},
+                                      {slotPack(0x60, "second", {}, /*excludeSecondKernel=*/true)}};
+                              },
+                              5},
+        SlottedPredictionCase{"ArchExcludedPackOfOneSlotAddsNothing",
+                              [] {
+                                  return Packs{{slotPack(0x50, "first", {UNAVAILABLE_ARCH}),
+                                                slotPack(0x70, "first")},
+                                               {slotPack(0x60, "second")}};
+                              },
+                              6},
+        SlottedPredictionCase{"ASlotWithNoPackForTheDeviceAddsNothing",
+                              [] {
+                                  return Packs{{slotPack(0x50, "first")},
+                                               {slotPack(0x60, "second", {UNAVAILABLE_ARCH})}};
+                              },
+                              3,
+                              /*expectedVerdict=*/false}),
+    [](const ::testing::TestParamInfo<SlottedPredictionCase>& info) { return info.param.name; });
+
+/// A program record is valid only if the manager has seen every slot's catalog for the graph.
+/// A staged-only warm-up, with no plain isApplicable or catalog access, must leave them.
+TEST(TestSlottedStagedApplicability, AStagedOnlyWarmUpLeavesEverySlotCatalogForProgramRecords)
+{
+    const ScopedSymbols symbols(
+        GRAPH_SYMBOL, acceptSlottedGraph, KERNEL_SYMBOL, countingFloatKernels);
+    const StubDeviceResolver resolver;
+    const Manager* manager = nullptr;
+    const auto engine = makeSlottedEngine(resolver, defaultPacks(), KERNEL_SYMBOL, &manager);
+    const ContentCarryingTestGraph graph;
+    const auto properties = testDeviceProperties();
+    StubHandle handle;
+
+    const WinnerKey base{GraphContentKey{graph}, DeviceKey{properties}};
+    // FLOAT kernels only: the HALF one is rejected by the matcher.
+    const std::vector<std::pair<std::string, WinnerRecord>> slotRecords{
+        {"first", makeRanking(testId(0x50), DISPATCH_ID, {0x51, 0x52})},
+        {"second", makeRanking(testId(0x60), DISPATCH_ID, {0x61, 0x62})}};
+    const ProgramRecord program{{{"first", testId(0x51)}, {"second", testId(0x61)}}, 3.0};
+    manager->recordSlotted(
+        base, slotRecords, program, WinnerWriteCause::FRESH_MISS, WinnerWriteCause::FRESH_MISS);
+    EXPECT_FALSE(manager->programFor(base).has_value()) << "no catalog has been seen yet";
+
+    ApplicabilityScope scope;
+    const auto outcome = stage(*engine, handle, graph, scope);
+    ASSERT_TRUE(outcome.verdict);
+
+    EXPECT_TRUE(manager->programFor(base).has_value())
+        << "a staged finish must remember each slot's catalog";
+}
+
+TEST(TestSlottedStagedApplicability, AStagedFinishCachesEverySlotCatalog)
+{
+    const ScopedSymbols symbols(
+        GRAPH_SYMBOL, acceptSlottedGraph, KERNEL_SYMBOL, countingFloatKernels);
+    const StubDeviceResolver resolver;
+    const Manager* manager = nullptr;
+    const auto engine = makeSlottedEngine(resolver, defaultPacks(), KERNEL_SYMBOL, &manager);
+    const TestGraph graph(makeGraphId(0xB8));
+    const auto properties = testDeviceProperties();
+    StubHandle handle;
+    ApplicabilityScope scope;
+    ASSERT_TRUE(stage(*engine, handle, graph, scope).verdict);
+
+    counters().reset();
+    const MatchContext context{graph, 0, properties};
+    for(size_t slot = 0; slot < manager->slotCount(); ++slot)
+    {
+        EXPECT_EQ(manager->unsortedCatalog(slot, context).entries.size(), 2U) << "slot " << slot;
+    }
+    EXPECT_EQ(counters().graphMatchCalls, 0);
+    EXPECT_EQ(counters().kernelCalls, 0);
+}
+
+TEST(TestSlottedStagedApplicability, FinishDeclinesAPendingBegunByAnotherEngine)
+{
+    const ScopedSymbols symbols(
+        GRAPH_SYMBOL, acceptSlottedGraph, KERNEL_SYMBOL, countingFloatKernels);
+    const StubDeviceResolver resolver;
+    const auto owner = makeSlottedEngine(resolver);
+    const auto stranger = makeSlottedEngine(resolver);
+    const TestGraph graph(makeGraphId(0xB4));
+    StubHandle handle;
+    ApplicabilityScope scope;
+
+    auto staged = owner->beginApplicability(handle, graph, scope);
+    ASSERT_FALSE(staged.decided);
+
+    auto recorder = SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    EXPECT_FALSE(stranger->finishApplicability(std::move(staged.pending)));
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 1U);
+}
+
 // ---------------------------------------------------------------------------
 // Concurrency: finishes on worker threads (TSAN target)
 // ---------------------------------------------------------------------------
@@ -928,14 +1359,35 @@ hipdnn_data_sdk::utilities::ScopedResource<const char*> scopedKernelMatcher(cons
             [](const char* registered) { KernelMatcherRegistry::unregisterSymbol(registered); }};
 }
 
+/// An engine matching its kernels through a given symbol, and the graph_match that counts
+/// calls across threads: the dispatcher's finish shape for an unslotted and a slotted engine.
+struct ThreadedCase
+{
+    std::string name;
+    std::unique_ptr<StagedEngine> (*makeEngineFor)(const IDeviceResolver<StubHandle>& resolver,
+                                                   const std::string& kernelSymbol);
+    GraphMatchFn graphMatch;
+};
+
+std::optional<BoundTokens> atomicCountingSlottedGraph(const MatchContext& /*context*/)
+{
+    graphMatchesAcrossThreads().fetch_add(1, std::memory_order_relaxed);
+    return workspaceTokens(1024);
+}
+
+class TestIngestorStagedApplicabilityThreaded : public ::testing::TestWithParam<ThreadedCase>
+{
+};
+
 /// The dispatcher's shape: every begin on the caller, prewarm, then each engine's finish
 /// on its own thread, all released together. Even engines admit their FLOAT kernels and
 /// odd ones admit none, so a verdict landing on the wrong engine shows.
-TEST(TestIngestorStagedApplicabilityConcurrency, ThreadedFinishesMatchSequentialVerdicts)
+TEST_P(TestIngestorStagedApplicabilityThreaded, ThreadedFinishesMatchSequentialVerdicts)
 {
+    const auto& param = GetParam();
     graphMatchesAcrossThreads().store(0);
     const ScopedSymbols symbols(
-        GRAPH_SYMBOL, atomicCountingAcceptGraph, KERNEL_SYMBOL, viewReadingFloatKernels);
+        GRAPH_SYMBOL, param.graphMatch, KERNEL_SYMBOL, viewReadingFloatKernels);
     const auto rejectMatcher = scopedKernelMatcher(REJECT_KERNEL_SYMBOL, viewReadingRejectKernels);
     const StubDeviceResolver resolver;
 
@@ -944,8 +1396,8 @@ TEST(TestIngestorStagedApplicabilityConcurrency, ThreadedFinishesMatchSequential
     for(int i = 0; i < ENGINE_COUNT; ++i)
     {
         const std::string symbol = i % 2 == 0 ? KERNEL_SYMBOL : REJECT_KERNEL_SYMBOL;
-        engines.push_back(makeEngine(resolver, {makePack({KERNEL_MATCHER_ID})}, symbol));
-        twins.push_back(makeEngine(resolver, {makePack({KERNEL_MATCHER_ID})}, symbol));
+        engines.push_back(param.makeEngineFor(resolver, symbol));
+        twins.push_back(param.makeEngineFor(resolver, symbol));
     }
 
     // Two wrappers over one buffer: the sequential reference must not warm the views
@@ -996,14 +1448,15 @@ TEST(TestIngestorStagedApplicabilityConcurrency, ThreadedFinishesMatchSequential
 }
 
 /// Concurrent calls on one engine: several callers' pendings for the same key finish at
-/// once and race to store the same catalog.
-TEST(TestIngestorStagedApplicabilityConcurrency, ConcurrentFinishesOnOneEngineAgree)
+/// once and race to store the same catalog (every slot's, for a slotted engine).
+TEST_P(TestIngestorStagedApplicabilityThreaded, ConcurrentFinishesOnOneEngineAgree)
 {
+    const auto& param = GetParam();
     graphMatchesAcrossThreads().store(0);
     const ScopedSymbols symbols(
-        GRAPH_SYMBOL, atomicCountingAcceptGraph, KERNEL_SYMBOL, viewReadingFloatKernels);
+        GRAPH_SYMBOL, param.graphMatch, KERNEL_SYMBOL, viewReadingFloatKernels);
     const StubDeviceResolver resolver;
-    const auto engine = makeEngine(resolver);
+    const auto engine = param.makeEngineFor(resolver, KERNEL_SYMBOL);
 
     const ContentCarryingTestGraph source;
     const auto blob = source.bytes();
@@ -1038,6 +1491,22 @@ TEST(TestIngestorStagedApplicabilityConcurrency, ConcurrentFinishesOnOneEngineAg
     EXPECT_TRUE(engine->isApplicable(handle, graph));
     EXPECT_EQ(graphMatchesAcrossThreads().load(), matchesBefore);
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    Engines,
+    TestIngestorStagedApplicabilityThreaded,
+    ::testing::Values(
+        ThreadedCase{"Unslotted",
+                     [](const IDeviceResolver<StubHandle>& resolver, const std::string& symbol) {
+                         return makeEngine(resolver, {makePack({KERNEL_MATCHER_ID})}, symbol);
+                     },
+                     atomicCountingAcceptGraph},
+        ThreadedCase{"Slotted",
+                     [](const IDeviceResolver<StubHandle>& resolver, const std::string& symbol) {
+                         return makeSlottedEngine(resolver, defaultPacks(), symbol);
+                     },
+                     atomicCountingSlottedGraph}),
+    [](const ::testing::TestParamInfo<ThreadedCase>& info) { return info.param.name; });
 
 } // namespace
 

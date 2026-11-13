@@ -39,6 +39,15 @@ How a move is applied:
     placeholder gets that literal as an explicit ``attributes`` value, so its
     expanded graph does not change.
   * Two cases with the same id may not land in one sweep.
+  * A sweep keeps its top-level keys, such as ``import_mode``. Cases from
+    sweeps with different ``import_mode`` objects may not land in one sweep.
+    The ``format`` key of ``import_mode`` sets the file layout of the written
+    ``sweep.json``. Cases from sweeps with different layouts may not land in
+    one sweep either.
+  * Likewise for the sweep-level ``version``: cases from sweeps with
+    different versions may not land in one sweep, unless one of the merged
+    cases has ``absent_tensors``, which needs sweep version 2 and gets it
+    regardless of what the source sweeps declared.
 
 Usage::
 
@@ -58,7 +67,17 @@ import shutil
 import sys
 from pathlib import Path
 
-from bundle_utils import canon, expand
+from bundle_utils import (
+    ABSENT_TENSORS_KEY,
+    ABSENT_TENSORS_SWEEP_VERSION,
+    SWEEP_FORMATS,
+    canon,
+    dump_sweep,
+    expand,
+    import_mode_grouping,
+    sweep_format,
+    sweep_import_mode,
+)
 
 # The sidecar renderer lives with the tools that verify and rewrite sidecars.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
@@ -80,6 +99,12 @@ def _write_json(path: Path, obj):
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", newline="\n") as f:
         f.write(json.dumps(obj, indent=2) + "\n")
+
+
+def _write_sweep(path: Path, sweep: dict):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="\n") as f:
+        f.write(dump_sweep(sweep, sweep_format(sweep)))
 
 
 # --------------------------------------------------------------------------
@@ -314,18 +339,56 @@ def build_plan(root: Path, assignments: dict):
         # support_sidecar.py whatever order the cases arrived in.
         support_text = render(Path("support.json"), claims) if claims else None
         existing = sweeps.get((new_tier, op, topology))
+        modes = {
+            canon(import_mode_grouping(sweep_import_mode(sw.sweep)))
+            for sw, _, _ in items
+        }
+        if existing is not None:
+            modes.add(canon(import_mode_grouping(sweep_import_mode(existing.sweep))))
+        if len(modes) > 1:
+            raise SystemExit(
+                f"error: cases from sweeps with different import_mode objects"
+                f" would land in {new_tier}/{op}/{topology}"
+            )
         unchanged = (
             existing is not None
             and canon(existing.template) == canon(template)
             and canon(existing.sweep["cases"]) == canon(cases)
         )
+        formats = {sweep_format(sw.sweep) for sw, _, _ in items}
+        if existing is not None:
+            formats.add(sweep_format(existing.sweep))
+        if len(formats) > 1:
+            raise SystemExit(
+                f"error: cases from sweeps with different sweep.json formats"
+                f" ({', '.join(sorted(formats))}) would land in"
+                f" {new_tier}/{op}/{topology}"
+            )
         first_sweep = items[0][0].sweep
+        if sweep_format(first_sweep) not in SWEEP_FORMATS:
+            raise SystemExit(
+                f"error: {items[0][0].dir / 'sweep.json'}: unknown sweep.json"
+                f" format {sweep_format(first_sweep)!r}"
+            )
+        versions = {sw.sweep.get("version", 1) for sw, _, _ in items}
+        if existing is not None:
+            versions.add(existing.sweep.get("version", 1))
+        needs_v2 = any(case.get(ABSENT_TENSORS_KEY) for case in cases)
+        if not needs_v2 and len(versions) > 1:
+            raise SystemExit(
+                f"error: cases from sweeps with different sweep versions"
+                f" ({', '.join(str(v) for v in sorted(versions))}) would land in"
+                f" {new_tier}/{op}/{topology}"
+            )
+        sweep_out = {
+            **{k: v for k, v in first_sweep.items() if k != "cases"},
+            "cases": cases,
+        }
+        if needs_v2:
+            sweep_out["version"] = ABSENT_TENSORS_SWEEP_VERSION
         out[(new_tier, op, topology)] = {
             "template": template,
-            "sweep": {
-                **{k: v for k, v in first_sweep.items() if k != "cases"},
-                "cases": cases,
-            },
+            "sweep": sweep_out,
             "support": support_text,
             "goldens": goldens,
             "unchanged": unchanged,
@@ -378,7 +441,7 @@ def apply_plan(root: Path, sweeps: dict, out: dict, single_moves: list):
                 continue
             d = root / tier / op / topology
             _write_json(d / "graph.template.json", plan["template"])
-            _write_json(d / "sweep.json", plan["sweep"])
+            _write_sweep(d / "sweep.json", plan["sweep"])
             if plan["support"]:
                 (d / "support.json").write_bytes(plan["support"].encode("utf-8"))
             for (g_tier, g_op, g_topology, case_id), src in staged_golden.items():

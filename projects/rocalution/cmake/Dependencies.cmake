@@ -27,6 +27,9 @@
 find_package(OpenMP)
 if (NOT OPENMP_FOUND)
   message("-- OpenMP not found. Compiling WITHOUT OpenMP support.")
+  # Leave this defined. A clients build that only sees an OpenMP toolchain must
+  # not treat "unset" as "the library was built with OpenMP".
+  set(SUPPORT_OMP OFF)
 else()
   option(SUPPORT_OMP "Compile WITH OpenMP support." ON)
   if(NOT TARGET OpenMP::OpenMP_CXX)

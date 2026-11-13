@@ -8,7 +8,7 @@ kernels must be built for. That matters for gfx1250, which ships as two
 steppings sharing ISA (12,5,0) but built as separate targets: code objects for
 gfx1250 are rejected on gfx1250-strict and vice versa.
 
-Deliberately rocisa-free (no Tensile.Common import) so the invoke build path
+Deliberately rocisa-free (no tensilelite.Common import) so the invoke build path
 never pulls in rocisa just to probe the arch, and it lives inside the packaged
 Tensile tree so ROCm test artifacts can exercise it directly; tensilelite's
 tasks.py only wraps it in an invoke @task entry point.

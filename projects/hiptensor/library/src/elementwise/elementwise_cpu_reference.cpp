@@ -42,7 +42,7 @@ hiptensorStatus_t hiptensorElementwisePermuteReference(const void*              
     const int32_t dim       = descA->mLengths.size();
     auto&         instances = hiptensor::ElementwiseCpuReferenceInstances::instance();
 
-    double alphaD;
+    double alphaD{};
     if(alpha != nullptr)
     {
         alphaD = hiptensor::readVal<double>(alpha, hiptensor::convertToComputeType(typeScalar));
@@ -98,19 +98,19 @@ hiptensorStatus_t hiptensorElementwiseBinaryOpReference(const void*             
     const int32_t dim       = descA->mLengths.size();
     auto&         instances = hiptensor::ElementwiseCpuReferenceInstances::instance();
 
-    float alphaF;
+    double alphaD{};
     if(alpha != nullptr)
     {
-        alphaF = hiptensor::readVal<float>(alpha, hiptensor::convertToComputeType(typeScalar));
+        alphaD = hiptensor::readVal<double>(alpha, hiptensor::convertToComputeType(typeScalar));
     }
-    float gammaF;
+    double gammaD{};
     if(gamma != nullptr)
     {
-        gammaF = hiptensor::readVal<float>(gamma, hiptensor::convertToComputeType(typeScalar));
+        gammaD = hiptensor::readVal<double>(gamma, hiptensor::convertToComputeType(typeScalar));
     }
 
     auto refCandidates = instances->query(
-        {alphaF, gammaF},
+        {alphaD, gammaD},
         descA->mLengths,
         {descA->mType, descC->mType},
         {descD->mType},
@@ -121,7 +121,7 @@ hiptensorStatus_t hiptensorElementwiseBinaryOpReference(const void*             
 
     for(auto refCandidate : refCandidates)
     {
-        if(refCandidate->initArgs({alphaF, gammaF},
+        if(refCandidate->initArgs({alphaD, gammaD},
                                   {descA->mLengths, descC->mLengths},
                                   {descA->mStrides, descC->mStrides},
                                   {std::vector<int32_t>(modeA, modeA + descA->mLengths.size()),
@@ -167,23 +167,23 @@ hiptensorStatus_t hiptensorElementwiseTrinaryOpReference(const void*            
     const int32_t dim       = descA->mLengths.size();
     auto&         instances = hiptensor::ElementwiseCpuReferenceInstances::instance();
 
-    float alphaF;
+    double alphaD{};
     if(alpha != nullptr)
     {
-        alphaF = hiptensor::readVal<float>(alpha, hiptensor::convertToComputeType(typeScalar));
+        alphaD = hiptensor::readVal<double>(alpha, hiptensor::convertToComputeType(typeScalar));
     }
-    float betaF;
+    double betaD{};
     if(beta != nullptr)
     {
-        betaF = hiptensor::readVal<float>(beta, hiptensor::convertToComputeType(typeScalar));
+        betaD = hiptensor::readVal<double>(beta, hiptensor::convertToComputeType(typeScalar));
     }
-    float gammaF;
+    double gammaD{};
     if(gamma != nullptr)
     {
-        gammaF = hiptensor::readVal<float>(gamma, hiptensor::convertToComputeType(typeScalar));
+        gammaD = hiptensor::readVal<double>(gamma, hiptensor::convertToComputeType(typeScalar));
     }
 
-    auto refCandidates = instances->query({alphaF, betaF, gammaF},
+    auto refCandidates = instances->query({alphaD, betaD, gammaD},
                                           descA->mLengths,
                                           {descA->mType, descB->mType, descC->mType},
                                           {descD->mType},
@@ -196,7 +196,7 @@ hiptensorStatus_t hiptensorElementwiseTrinaryOpReference(const void*            
 
     for(auto refCandidate : refCandidates)
     {
-        if(refCandidate->initArgs({alphaF, betaF, gammaF},
+        if(refCandidate->initArgs({alphaD, betaD, gammaD},
                                   {descA->mLengths, descB->mLengths, descC->mLengths},
                                   {descA->mStrides, descB->mStrides, descC->mStrides},
                                   {std::vector<int32_t>(modeA, modeA + descA->mLengths.size()),

@@ -1291,9 +1291,15 @@ def test_sdpa_backward_space_draws_every_feature_and_renders_it():
     # space cannot draw, and a cost ceiling that a sample exceeds
     sp = space_by_id("SdpaBackward/Default")
     template = json.loads(sp.template_path.read_text())
-    node = template["nodes"][0]
     uid = {t["name"]: t["uid"] for t in template["tensors"]}
-    literal_scale = node["parameters"]["attn_scale_value"]
+    # the template takes the scale from the case; the space's literal default is what the patch
+    # must replace
+    declared = json.loads(
+        (space_lib.DEFAULT_SPACES_DIR / "SdpaBackward.space.json").read_text()
+    )
+    literal_scale = declared["case"]["values"]["attributes"][
+        "parameters__attn_scale_value"
+    ]
     bands = {
         "none": ("TOP_LEFT", None, None),
         "causal_top_left": ("TOP_LEFT", None, 0),
@@ -3350,7 +3356,7 @@ def _toml_tolerance(config, test_name):
     return result
 
 
-def test_the_asm_sdpa_backward_tolerances_reach_fuzz_and_quick_cases(run):
+def test_the_asm_sdpa_backward_tolerances_reach_fuzz_cases(run):
     # bug caught (A4): the filters read `*_SdpaBackward_*.*_fp16_*`, which needs the dtype token
     # in the case id. The fuzz cases are named s<seed> and carry it in the suite, so every fuzz
     # backward sample was graded at the tight forward tolerance instead of the calibrated one
@@ -3371,20 +3377,8 @@ def test_the_asm_sdpa_backward_tolerances_reach_fuzz_and_quick_cases(run):
         seen[dtype] = seen.get(dtype, 0) + 1
     assert set(seen) == set(expected)  # fp16 and bfp16 each drawn, and never crossed
 
-    # the quick bundle cases resolve as before: the dtype token is in the case id
-    quick_dir = sp.template_path.parent
-    suite = "_".join(quick_dir.relative_to(BUNDLES).parts)
-    assert suite == "quick_SdpaBackward_Default"
-    quick = json.loads((quick_dir / "sweep.json").read_text())["cases"]
-    tokens = set()
-    for case in quick:
-        io = case["values"]["io_data_type"]
-        name = f"{suite}.{re.sub(r'[^A-Za-z0-9_]', '_', case['id'])}"
-        assert _toml_tolerance(config, name) == expected[io], name
-        tokens.add(TAG_OF_DTYPE[io])
-    assert tokens == {"fp16", "bfp16"}
-
-    # no other operation, fuzz or quick, picks up the backward tolerances
+    # no other operation, fuzz or quick, picks up the gauntlet backward tolerances (the quick
+    # backward cases have their own per-class rows in the TOML)
     for other in (
         "gauntlet_SdpaFwd_Default_fp16_cases.s7",
         "gauntlet_SdpaFwd_Default_bfp16_cases.s7",
@@ -4552,14 +4546,19 @@ def test_fault_folder_imports_for_real_and_expands_back_identically(
         for t in failing_graph["tensors"]
         if t["uid"] in patched
     } == patched
-    # a patch exactly where the graph differs from what the template says (some templates
-    # carry no alignment at all)
+    # a patch exactly where the graph differs from a literal alignment in the template (some
+    # templates carry no alignment at all); a template that takes the alignment from the case
+    # (`${case.alignment}`) gets it from the case's values instead
     base = {t["uid"]: t.get("alignment") for t in template["tensors"]}
+    from_case = {uid for uid, a in base.items() if isinstance(a, str)}
     assert new.get("tensor_patches", []) == [
         {"uid": uid, "set": {"alignment": a}}
         for uid, a in sorted(patched.items())
-        if base[uid] != a
+        if uid not in from_case and base[uid] != a
     ]
+    assert {
+        t["uid"]: t["alignment"] for t in expanded["tensors"] if t["uid"] in patched
+    } == patched
     assert new["metadata"]["purpose"] == "regression"
     assert (
         space_id in new["metadata"]["reference_source"]

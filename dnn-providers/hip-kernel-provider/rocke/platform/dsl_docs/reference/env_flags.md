@@ -32,7 +32,7 @@ For setup and the most common flags in context, see
 
 | Variable | Values (default) | Purpose |
 |---|---|---|
-| `ROCKE_CONV_SPLIT_K` | `auto` \| `off` \| `<n>` (**auto**) | Read by `library/benchmarks/common/benchmark_implicit_gemm_conv.py` only: forces the split-K degree of implicit-GEMM conv wgrad/dgrad combos that ask for auto (`--split-k -1`, and the resolver's degree in a sweep). The benchmark passes it to `kernels.common.conv_split_k.resolve_conv_split_k` as the explicit `override` argument; the resolver, dispatch and the kernel builders read no environment. `auto` uses the split-K cost model (`rocke.helpers.split_k_planner`) on arches that have one and the CK-formula heuristic elsewhere. `off` (or `0`/`1`) forces no split. `<n>` (>= 2) forces that degree, held to what the kernel can build (gridDim.z budget, reduction availability, and at most 128 for the packed bf16/fp16 atomic -- wgrad moves above that to the f32 workspace when it can); any other value is an error. An explicit `--split-k` degree is never overridden. Forward conv has no split-K path. |
+| `ROCKE_CONV_SPLIT_K` | `auto` \| `off` \| `<n>` (**auto**) | Read by `library/benchmarks/common/benchmark_implicit_gemm_conv.py` only: forces the split-K degree of implicit-GEMM conv wgrad/dgrad combos that ask for auto (`--split-k -1`, and the resolver's degree in a sweep). The benchmark passes it to `kernels.common.conv_split_k.resolve_conv_split_k` as the explicit `override` argument; the resolver, dispatch and the kernel builders read no environment. `auto` uses the split-K cost model (`library/kernels/conv/split_k_planner.py`) on arches that have one and the CK-formula heuristic (`select_split_k_wgrad`, same module as the resolver) elsewhere. `off` (or `0`/`1`) forces no split. `<n>` (>= 2) forces that degree, held to what the kernel can build (gridDim.z budget, reduction availability, and at most 128 for the packed bf16/fp16 atomic -- wgrad moves above that to the f32 workspace when it can); any other value is an error. An explicit `--split-k` degree is never overridden. Forward conv has no split-K path. |
 
 ## hipDNN provider
 
@@ -53,6 +53,10 @@ For setup and the most common flags in context, see
 | `ROCKE_PARITY_BUILD` / `ROCKE_PARITY_EMIT` | The binding-parity harness's `.so` dir and prebuilt-emitter dir — **must be the same fresh build** (mixing reports false mismatches). |
 | `ROCKE_PARITY_ALLOW_STALE` | Allow the parity harness to run with a build-id mismatch (debug only). |
 | `ROCKE_CI_RUN_DIR` | Out-of-tree directory for local/cluster CI runs (keeps build products off the source tree). |
+| `ROCKE_EXPLICIT_GATE_RUN` / `ROCKE_EXPLICIT_GATE_PARTIAL` | Internal explicit-gate launcher contract. The source runner and installed CTest entries set these to attest that a non-discovered gate was selected intentionally and whether it is a focused diagnostic rather than a complete verdict. Do not set them to make an ordinary pytest invocation report complete coverage. |
+| `ROCKE_EXPLICIT_GATE_PREFLIGHT` / `ROCKE_EXPLICIT_GATE_SENTINEL` | Internal explicit-gate process contract. Preflight uses the first only in its isolated probe; the launcher supplies the second as a temporary pytest-session attestation path. They are not user-facing gate selectors. |
+| `ROCKE_COUNTED_ISA_OPTIONAL` | Internal counted-compiler gate policy: `1` lets a developer run report `INCOMPLETE` when the qualified reference toolchain is unavailable; installed required coverage sets `0`. |
+| `ROCKE_ISA_INSPECT_PROBE` | Explicit path to the staged ISA inspection helper used by installed counted-compiler tests. CTest supplies it so relocated tests do not reach back into the source tree. |
 | `ROCKE_ROOT` | Override the detected repository root. |
 | `ROCKE_REMOTE_HOST` / `ROCKE_REMOTE_USER` / `ROCKE_REMOTE_KEY` / `ROCKE_REMOTE_STAGE` | Multi-arch remote-test orchestrator: SSH host/user/key and the staging dir. |
 | `ROCKE_SLURM_EXTRA` | Extra SLURM flags appended by the multi-arch submitter. |
@@ -108,7 +112,7 @@ are diagnostics that intentionally change emission. None affect the default buil
 | Warp-specialized pipeline | `CK_WSP3_ASYNC`, `CK_WSP3_DEPTH`, `CK_WSP3_DRAIN`, `CK_WSP3_SCHED` | producer/consumer GEMM pipeline params |
 | Swizzle study | `CK_SWZ_L`, `CK_SWZ_R`, `CK_SWZ_W` | LDS swizzle levels (left/right/write) |
 | Attention | `ROCKE_ATTENTION_COMPILE_BACKEND`, `ROCKE_ATTENTION_AGPR_ALLOC_ZERO` | attention compile backend / AGPR alloc |
-| gfx942 attention tuning | `HIPDNN_GFX942_NUM_WARPS`, `HIPDNN_GFX942_WAVES_PER_EU`, `HIPDNN_GFX942_IGLP`, `HIPDNN_GFX942_Q_DIRECT`, `HIPDNN_GFX942_Q_MAJOR_GRID`, `HIPDNN_GFX942_K_LDSSEQ`, `HIPDNN_GFX942_K_SLICED_RING`, `HIPDNN_GFX942_KV_CACHE_POLICY`, `HIPDNN_GFX942_GLOBAL_LOAD_LDS_K`, `HIPDNN_GFX942_SWIZZLE_VLDS`, `HIPDNN_GFX942_FLASH_WIDE` | experimental gfx942 FMHA levers |
+| gfx942 attention tuning | `HIPDNN_GFX942_NUM_WARPS`, `HIPDNN_GFX942_WAVES_PER_EU`, `HIPDNN_GFX942_IGLP`, `HIPDNN_GFX942_Q_DIRECT`, `HIPDNN_GFX942_Q_MAJOR_GRID`, `HIPDNN_GFX942_K_LDSSEQ`, `HIPDNN_GFX942_K_SLICED_RING`, `HIPDNN_GFX942_KV_CACHE_POLICY`, `HIPDNN_GFX942_GLOBAL_LOAD_LDS_K`, `HIPDNN_GFX942_SWIZZLE_VLDS`, `HIPDNN_GFX942_FLASH_WIDE`, `HIPDNN_GFX942_3D_WKV` | experimental gfx942 FMHA levers; `HIPDNN_GFX942_3D_WKV` is the exception, an off switch for a default-on lever: `=0` turns off the gfx942 3D wide K/V feed (on by default for fp16/bf16 K/V up to head size 128, decode or not) and with it the default K/V LDS swizzle and wave page-id window at head size 64 and 128 |
 | gfx942 V-transpose-store diagnostics | `HIPDNN_GFX942_CFV`, `HIPDNN_GFX942_CFV_CK_VLDS`, `HIPDNN_GFX942_CFV_SCALAR_READ`, `HIPDNN_GFX942_CFV_STORE`, `HIPDNN_GFX942_CFV_STORE_PREZERO`, `HIPDNN_GFX942_CFV_STORE_SCALAR_LOAD`, `HIPDNN_GFX942_CFV_STORE_SCATTER`, `HIPDNN_GFX942_CFV_STORE_SEPOFF`, `HIPDNN_GFX942_CFV_STORE_SPLIT` | gfx942 cfv-store debug toggles (some intentionally change emission) |
 
 For an unlisted variable, check its reader and documentation before assuming its
@@ -174,3 +178,12 @@ an emission profile. LLVM24 retains LLVM23's datalayout and target-op surface bu
 has a distinct named-barrier declaration and call ABI. That does not prove every
 build of either major has an identical DataLayout or intrinsic catalog;
 toolchain-specific compilation and drift tests remain necessary.
+
+The detected LLVM version also decides which `-mllvm` backend options a compile
+may pass. LLVM's option parser exits the whole process on an option it does not
+know, so every one is checked against a measured table before COMGR is called,
+and a kernel that needs an option the loaded compiler lacks raises
+`CompilerOptionNotAccepted` (a `ValueError`, exported from `rocke.runtime`). The
+contract and the table are in `rocke.runtime.compiler_options`;
+`tools/gen_compiler_options.py` measures it, and the CTest
+`rocke_compiler_options_reproducibility` re-measures the loaded compiler's column.

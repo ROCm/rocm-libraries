@@ -43,6 +43,9 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+sys.path.insert(
+    1, str(pathlib.Path(__file__).resolve().parent.parent / "migration-scripts")
+)
 
 from bundle_discovery import (  # noqa: E402
     SWEEP_MANIFEST_NAME,
@@ -54,6 +57,14 @@ from bundle_discovery import (  # noqa: E402
     load_json,
     read_sweep_cases,
     sidecar_for_graph,
+    single_graph_expected_rejection,
+    sweep_case_expected_rejection,
+)
+from bundle_utils import (  # noqa: E402
+    ABSENT_TENSORS_KEY,
+    absent_case_problems,
+    apply_tensor_patches as _apply_shared_tensor_patches,
+    prune_absent_tensors,
 )
 from support_claim_schema import (  # noqa: E402
     validate_single_graph_schema,
@@ -205,6 +216,20 @@ def load_sweep_cases(sweep_path: pathlib.Path, errors: list[str] | None):
     if error is not None:
         report_error(errors, f"{sweep_path}: {error}")
     return cases
+
+
+def sweep_version_problem(sweep: dict) -> str | None:
+    """Mirror checkSweepVersion(): why the sweep ``version`` fails, or None.
+
+    An absent ``version`` is 1; only the integer 1 or 2 is accepted. Any other
+    value fails every case of the sweep at load.
+    """
+    if "version" not in sweep:
+        return None
+    version = sweep["version"]
+    if _is_uid(version) and version in (1, 2):
+        return None
+    return f"sweep version {json.dumps(version)} is not 1 or 2"
 
 
 # --------------------------------------------------------------------------
@@ -537,39 +562,18 @@ def apply_node_patches(graph: dict, case: dict) -> None:
                 del keys[key]
 
 
-def _apply_tensor_patches(graph: dict, case: dict) -> None:
+def apply_tensor_patches(graph: dict, case: dict) -> None:
     """Mirror applyTensorPatches(): ``tensor_patches`` upsert and erase tensor keys.
 
     This is how a case makes a scalar runtime pass-by-value, so without it the
-    graph read here is not the graph the harness runs. Raises where the
-    harness throws: a patch without an integer uid, or one whose uid no tensor
-    holds.
+    graph read here is not the graph the harness runs. Raises ``SweepPatchError``
+    where the harness throws: a patch without an integer uid, or one whose uid no
+    tensor holds. Delegates to the shared ``bundle_utils`` implementation, asking
+    it for this module's own exception, which names the case.
     """
-    patches = case.get("tensor_patches")
-    tensors = graph.get("tensors")
-    if not isinstance(patches, list) or not isinstance(tensors, list):
-        return
-    for patch in patches:
-        if not isinstance(patch, dict) or not _is_uid(patch.get("uid")):
-            raise _patch_error(case, "tensor_patch entry is missing an integer uid")
-        target = next(
-            (
-                tensor
-                for tensor in tensors
-                if isinstance(tensor, dict) and tensor.get("uid") == patch["uid"]
-            ),
-            None,
-        )
-        if target is None:
-            raise _patch_error(
-                case, f"tensor_patch uid {patch['uid']} not found in expanded graph"
-            )
-        if isinstance(patch.get("set"), dict):
-            target.update(copy.deepcopy(patch["set"]))
-        if isinstance(patch.get("remove"), list):
-            for key in patch["remove"]:
-                if isinstance(key, str):
-                    target.pop(key, None)
+    _apply_shared_tensor_patches(
+        graph, case, error_cls=lambda cause: _patch_error(case, cause)
+    )
 
 
 def apply_case_patches(graph: dict, case: dict) -> None:
@@ -582,7 +586,7 @@ def apply_case_patches(graph: dict, case: dict) -> None:
     """
     apply_add_tensors(graph, case)
     apply_node_patches(graph, case)
-    _apply_tensor_patches(graph, case)
+    apply_tensor_patches(graph, case)
 
 
 # --------------------------------------------------------------------------
@@ -954,9 +958,20 @@ def collect_sweep_units(
     support_path = sweep_dir / SWEEP_SUPPORT_NAME
     claims = load_sidecar(support_path, validate_sweep_schema, errors)
 
+    sweep_path = sweep_dir / SWEEP_MANIFEST_NAME
     template = read_json_object(sweep_dir / SWEEP_TEMPLATE_NAME, errors)
-    cases = load_sweep_cases(sweep_dir / SWEEP_MANIFEST_NAME, errors)
+    cases = load_sweep_cases(sweep_path, errors)
     if template is None or cases is None:
+        return []
+    # read_sweep_cases() accepted the manifest, so it is a JSON object.
+    sweep, _ = load_json(sweep_path)
+    version_problem = sweep_version_problem(sweep)
+    if version_problem is not None:
+        report_error(
+            errors,
+            f"{sweep_path}: {version_problem}; the harness fails every case of "
+            "the sweep at load",
+        )
         return []
 
     place = place_of(sweep_dir.relative_to(root), sweep_dir, errors)
@@ -986,10 +1001,25 @@ def collect_sweep_units(
     units = []
     for case in cases:
         case_id = case["id"]
+        # See collect_single_graph_unit: an expected-rejection case is not a
+        # supported graph, so it is no unit even if a claim names it.
+        if sweep_case_expected_rejection(case):
+            continue
         # The order of loadIntegrationTestBundle(), so the first defect
         # reported is the one the harness trips on.
+        case_template = template
+        if ABSENT_TENSORS_KEY in case:
+            problems = absent_case_problems(sweep, template, case)
+            if problems:
+                report_error(
+                    errors,
+                    f"{sweep_path}: case '{case_id}': {problems[0]}; "
+                    "the harness fails it at load",
+                )
+                continue
+            case_template = prune_absent_tensors(template, case[ABSENT_TENSORS_KEY])
         try:
-            graph = expand_template_graph(template, case)
+            graph = expand_template_graph(case_template, case)
             check_sweep_golden(case)
             apply_case_patches(graph, case)
         except SweepCaseError as error:
@@ -1001,9 +1031,14 @@ def collect_sweep_units(
             )
             report_error(
                 errors,
-                f"{sweep_dir / SWEEP_MANIFEST_NAME}: {named}; "
-                "the harness skips it, so it never runs",
+                f"{sweep_path}: {named}; " "the harness skips it, so it never runs",
             )
+            continue
+        # A probe (RFC 0022 §9) exercises a value no engine claims, or an undefined
+        # graph a correct engine rejects: it is in neither the numerator nor the
+        # denominator, and support matrices exclude it. Checked after the defect
+        # checks above, so a broken probe is still reported.
+        if (case.get("metadata") or {}).get("purpose") == "probe":
             continue
 
         layout = layout_from_name(case_id) or layout_from_strides(graph) or NO_LAYOUT
@@ -1038,6 +1073,13 @@ def collect_single_graph_unit(
     """
     support_path = sidecar_for_graph(graph_path)
     claims = load_sidecar(support_path, validate_single_graph_schema, errors)
+
+    # An expected-rejection bundle is an invalid graph the engine must reject:
+    # it is not a graph the tree supports, so it joins no denominator. Checked
+    # before anything reads the graph, so a claim wrongly naming it (which
+    # verify_support_claims reports) cannot make it a unit.
+    if single_graph_expected_rejection(graph_path):
+        return None
 
     graph = read_json_object(graph_path, errors)
     if graph is None:

@@ -100,3 +100,14 @@ each scale buffer independently.
 ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.scale_formats_gemm --case all
 ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.scale_formats_gemm --dtype-a fp6 --dtype-b fp4 --scale-dtype-a e8m0 --scale-dtype-b e5m3 --matrix-path wmma_scale16
 ```
+
+## NVFP4 tensor scaling
+
+`nvfp4_gemm` consumes packed E2M1 with K=16 E4M3 block scales and runtime
+FP32 tensor factors. It preserves FP32 rounding before BF16/FP16 conversion.
+See [NVFP4.md](NVFP4.md) for the input and launch contracts.
+
+```sh
+ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.nvfp4_gemm
+ROCKE_LLVM_FLAVOR=llvm23 python -m rocke.examples.gfx1250.gemm.nvfp4_gemm --dtype-c fp16 --compile-route hip
+```

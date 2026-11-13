@@ -1,0 +1,11 @@
+{
+  "version": "1.0",
+  "id": "d5a00000-0000-4000-8000-000000000002",
+  "name": "prep variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    }
+  ]
+}

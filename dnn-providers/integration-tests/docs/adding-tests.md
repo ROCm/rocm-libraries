@@ -43,7 +43,9 @@ A bundle of any kind is complete only when it has all three required parts
 3. **A support-claim sidecar** — `{Name}.support.json`, or the sweep's
    `support.json` — even if it claims nothing yet.
 
-Golden data is the only optional part.
+Golden data is the only optional part. An expected-rejection bundle is the
+exception: it has no support claim and no golden data
+([details](#add-an-expected-rejection-bundle)).
 
 ## End to end: a bundle for a new op
 
@@ -122,7 +124,7 @@ compiled.
 
 ```bash
 build/bin/hipdnn_integration_tests --capture-bundles /tmp/captured \
-    --gtest_filter='Smoke/IntegrationGpuResampleBackwardFp16.Correctness/*'
+    --gtest_filter='Smoke/IntegrationGpuMoeGroupedMatmulFp16.Correctness/*'
 
 find /tmp/captured -name '*.json' ! -name '*.meta.json' | while read -r graph; do
     python3 dnn-providers/integration-tests/migration-scripts/import_graph.py \
@@ -282,6 +284,94 @@ Then:
 2. Run the driver's tests (`python -m pytest -q -p no:cacheprovider dnn-providers/integration-tests/gauntlet/test_gauntlet.py`; they need no GPU), then a short fuzz run with
    `--filter '^<Op>/<Name>$' --samples 16`, and read the
    [placement probe results](running-tests.md#reading-an-alignment-or-placement-probe).
+
+### Disable a reference for a bundle
+
+Set `no_cpu_reference` or `no_gpu_reference` to `true` in the metadata of the
+bundle (`{Name}.meta.json`, or `cases[].metadata` of a sweep case) when that
+reference executor is known to be wrong for the bundle, or too slow to run on
+it. The harness never uses a disabled reference as an oracle
+([format](file-formats.md#disabling-a-reference-oracle--no_cpu_reference-and-no_gpu_reference)).
+
+```json
+{ "format_version": 1, "generator": "…", "reference_source": "…", "no_cpu_reference": true }
+```
+
+- **Disabling both requires golden data.** Add it first
+  ([Golden data with DVC](#golden-data-with-dvc)). A bundle with both flags and
+  no declared golden data fails to load. `verify_golden_bundles.py` reports it
+  as an error.
+- **A known gap is a different tool.** `knownReferenceGaps()`
+  (`ReferenceOpCoverage.cpp`) records an op that a reference executor cannot
+  handle. If a bundle has the flag for a lane and a gap entry for the same
+  lane, `hipdnn_golden_data_tests` fails that lane's test and names both. Delete
+  the gap entry.
+- **What a run prints.** In `auto` mode, a disabled reference appears in the
+  failure message as `(disabled by bundle metadata)`. With
+  `--verification-mode=cpu|gpu` for a disabled reference, the test skips. With
+  both references disabled and the golden data not pulled, the test skips with
+  `golden data not pulled; bundle disables both references`. In
+  `hipdnn_golden_data_tests`, the disabled lane registers a skip test that names
+  the flag. See [Bundle-disabled references](running-tests.md#bundle-disabled-references).
+
+### Add an expected-rejection bundle
+
+Use this to prove that an engine **rejects** a graph that is invalid on purpose.
+The test is never executed or compared
+([format](file-formats.md#expected-rejection-bundles)).
+
+1. **Choose one engine-visible invalid property.** The graph must load and
+   deserialize, and the engine must see the problem. Example: hipBLASLt
+   refuses a Matmul whose batch dimensions are neither equal, nor 1 on one
+   side, nor broadcast-compatible (they are invalid per the Matmul contract too),
+   so change the batch dimension of one input. A property that the JSON or the graph schema cannot even load is not
+   engine-visible: it is a red `Failed to load expected_rejection bundle …` test.
+2. **Derive it from a claimed valid case.** Copy the graph of a case that an
+   engine claims (here a hipBLASLt-claimed `quick/Matmul/Default` case) and
+   change only that property. The valid twin is the **positive control**: it
+   passes in the same lane, so the rejection comes from your change.
+3. **Place it** at
+   `integration-test-bundles/<tier>/<Op>/<Layout>/<DataType>/<Name>/<Name>.json`:
+   six path segments under the bundle root, as `verify_golden_bundles.py`
+   expects. Example:
+   `integration-test-bundles/quick/Matmul/ncl/fp32/ExpectedRejectionMatmulBatchMismatch/ExpectedRejectionMatmulBatchMismatch.json`.
+4. **Write `<Name>.meta.json`** with `format_version`, `generator` and
+   `reference_source` (the verifier requires both as non-empty strings) and
+   `expected_rejection: true`:
+
+   ```json
+   { "format_version": 1, "generator": "hand-authored", "reference_source": "none: expected_rejection bundle (never executed)", "expected_rejection": true }
+   ```
+
+5. **Add no sidecar and no golden data.** Do not hand-add a claim for the
+   bundle. A claim that names it fails the C++ test and
+   `verify_support_claims.py`. A `--write-support-claims` run skips it and writes
+   no claim. Golden data next to it is a load error.
+6. **Re-run CMake, then run the lane pinned to the engine** (an unpinned run
+   skips with `expected_rejection requires --test-engine`):
+
+   ```bash
+   build/bin/hipdnn_integration_tests --test-article <plugin> --test-engine HIPBLASLT_ENGINE \
+       --test-config dnn-providers/hipblaslt-provider/config/HIPBLASLT_ENGINE.toml \
+       --gtest_filter='quick_Matmul_ncl_fp32_ExpectedRejectionMatmulBatchMismatch.*'
+   ```
+
+   The test prints `[ VERIFIER ] rejected(<stage>): <path>`. For this example
+   hipBLASLt drops the graph from its ranked list (`ranked_list`). Lanes whose
+   engine has no Matmul support, such as MIOpen and hip-kernel, reject vacuously at
+   `ranked_list`.
+7. **Run the verifiers** on the bundle directory
+   ([Check the data itself](#check-the-data-itself)), and
+   `python dnn-providers/integration-tests/scripts/verify_support_claims.py`.
+
+What a failure means:
+
+| Failure | Meaning |
+|---|---|
+| `Engine X accepted expected-rejection bundle …` | X ranked the graph and built its plans. The chosen property is not one that X rejects, or X now accepts it. |
+| `expected-rejection bundle never reached an engine` | The graph failed `from_binary`. The invalidity is schema-level. Choose an engine-visible property. |
+| `Failed to load expected_rejection bundle …` | The JSON or graph does not load, or the metadata is malformed (a non-boolean `expected_rejection`, golden data declared next to it). |
+| A claim error | A sidecar claims the bundle. Remove the claim. |
 
 ### Finding existing cases
 
@@ -564,10 +654,10 @@ python3 scripts/harvest_support_claims.py --run <id> --arch gfx942 --platform li
   to its own bytes. If any sidecar or log is refused, it writes nothing.
 - `claim_failures` and `failed_in_use` are listed for you to read. They are never
   written as claims.
-- **`--write` also re-renders `SUPPORT_MATRIX_OVERVIEW.md`** (with
-  `support_features/feature_matrix.py`), so commit it with
-  the sidecars. If that render fails, the sidecars stay written, the script
-  exits 1 and prints the command that regenerates the overview.
+- **`--write` does not touch `SUPPORT_MATRIX_OVERVIEW.md`**, and neither should
+  you: the overview is refreshed on its own, so that open claim PRs do not all
+  conflict on it. After your harvest PR merges, refresh it in a PR of its own
+  (see [Support Matrix](support-matrix.md)).
 
 Then continue with [Confirm, review, commit](#confirm-review-commit).
 
@@ -619,9 +709,14 @@ Edit the engine's `config/<ENGINE_NAME>.toml`
   with `validator = "rms"` for those tensors only.
 - **An output is correctly infinite on both sides** (a fully masked SDPA row's
   log-sum-exp) → `[[validator_overrides]]` with
-  `validator = "allclose_matching_infinities"` for those tensors only. It runs
-  on the host only. The comparison must run on the host (`--validator cpu` or
-  `HIPDNN_TEST_VALIDATOR=cpu`). If it does not, the tensor fails.
+  `validator = "allclose_matching_infinities"` for those tensors only. In a C++
+  graph test it runs on the host only. The comparison must run on the host
+  (`--validator cpu` or `HIPDNN_TEST_VALIDATOR=cpu`). If it does not, the tensor
+  fails. A bundle test grades it on the host; on the device this applies only
+  to `FLOAT`, `HALF`, `BFLOAT16` and `DOUBLE` (an FP8 output is graded
+  host-only, same as a C++ graph test), and a `DOUBLE` output that fails the
+  device check only on double-precision drift is re-graded by the host's
+  float arithmetic.
 
 Do not use a skip to hide a regression on a claimed cell, unless you also
 retract the claim. The claim makes that regression visible.
@@ -658,16 +753,50 @@ This code creates the check target. From the YAML, it also creates one CTest
 suite for each tier. Each suite runs
 `hipdnn_integration_tests --test-article <plugin> --test-engine <ENGINE> --test-config <toml> --gtest_filter=<tier patterns>`.
 Every lane names `--test-engine`, so every lane enforces support claims. The
-function also accepts `REFERENCE_EXECUTOR`, `GTEST_FILTER`, `ENVIRONMENT`,
+function also accepts `REFERENCE_EXECUTOR`, `GTEST_FILTER`, `EXTRA_ARGS`, `ENVIRONMENT`,
 `ENVIRONMENT_MODIFICATION`, `FIXTURES_REQUIRED`, `INSTALL_TEST_FILE` and
 `INSTALL_ENVIRONMENT`. `GTEST_FILTER` applies to the check target and to a lane
-without a tier YAML. It does not apply to the tier suites. If you omit
+without a tier YAML. It does not apply to the tier suites. `EXTRA_ARGS` passes
+further arguments, such as `--graph-capture`, to the check target, the CTest
+test and every tier suite, in the build tree and the install tree. If you omit
 `TEST_CATEGORIES_YAML`, the lane is one CTest test with no tier labels. If the
 package is not available, the lane is skipped at configure time.
 
 A new lane also needs its engine TOML and tier YAML
 ([formats](file-formats.md#per-engine-test-config--configengine_nametoml)).
 Copy the files of an existing provider and keep the same tier shape.
+
+A single-arch hip-kernel-provider rocKE attention engine pinned against the
+`SdpaFwd` bundles does not call the function itself. Add a row to
+`HKP_PINNED_ATTENTION_ENGINES` in
+`dnn-providers/hip-kernel-provider/src/CMakeLists.txt`; the row registers the
+lane, its GPU-reference target and its census for the one arch it names. A
+hand-written companion census suite (`Test<Engine>CatalogTiles` or
+`Test<Engine>ModelBinding`) also needs its `_hkp_<stem>_cases_<arch>_<snake slug>`
+entry in `dnn-providers/hip-kernel-provider/src/tests/CMakeLists.txt`, `<stem>` as
+`_hkp_companion_suites` there pairs it with the suite. `ASM_SDPA_ENGINE`
+and the FlyDSL SDPA engines still call the function directly.
+
+### Add a graph-capture lane
+
+An engine that reports `SUPPORTS_GRAPH_CAPTURE` also needs a graph-capture
+lane: a second lane pinned to the same engine, with `EXTRA_ARGS --graph-capture`
+and a tier YAML that names a few quick bundle suites the engine serves. Its
+`standard`, `comprehensive` and `full` tiers run the same short list, and it has
+no `quick` or `ffm-quick` tier. Without the lane, nothing in CI
+captures the engine's `execute()`, so a change that makes it unsafe to capture
+fails no test.
+
+- In hip-kernel-provider, call `_hkp_add_graph_capture_lane()` in
+  `src/CMakeLists.txt` next to the engine's own lane, with the same engine,
+  TOML and install routing. For an `HKP_PINNED_ATTENTION_ENGINES` engine, add
+  its local name to `_graph_capture_attention_engines` instead. Every FlyDSL
+  engine already has one. The suites are
+  `GRAPH_CAPTURE_test_categories_integration.yaml`. If the engine serves none
+  of them, add a suite it serves to that file and to
+  `HKP_GRAPH_CAPTURE_GTEST_FILTER`.
+- In hipblaslt-provider, the lane is next to the engine's own lane in
+  `CMakeLists.txt`, and its suites are `test_categories_graph_capture.yaml`.
 
 ## C++ tests: the CMake rule
 
@@ -723,12 +852,19 @@ existing files use `Quick` instead of `Smoke` for the first tier. Match the file
 that you extend. The other files directly under `tests/` are the unit tests of
 the harness (`hipdnn_integration_tests_unit_tests`).
 
+Before you add a case, check that it reaches code that no existing case
+reaches. Medium and larger shapes are fp32-only, reduced-precision and
+mixed-type cases run in standard on small shapes, and channel-last and
+padding-mode variants are limited. The rules and the measured cost of each case
+are in [GPU reference test coverage rules](gpu-ref-test-coverage.md).
+
 ## Before you open the PR
 
 - [ ] New graph coverage is a bundle, not a C++ test.
 - [ ] Every new bundle has its graph, its metadata (with `generator` and
       `reference_source`) and a support sidecar, even an empty one. No tool
-      checks for a missing sidecar, so check by hand.
+      checks for a missing sidecar, so check by hand. An expected-rejection
+      bundle is the exception: it has no sidecar and no golden data.
 - [ ] `verify_golden_bundles.py` reports no errors for the bundle directories you
       added or changed ([Check the data itself](#check-the-data-itself)).
 - [ ] You re-ran CMake after you changed bundles or sidecars or pulled data.
@@ -742,5 +878,4 @@ the harness (`hipdnn_integration_tests_unit_tests`).
 - [ ] `python dnn-providers/integration-tests/scripts/verify_support_claims.py`
       passes when you run it by hand.
 - [ ] If you regenerated or renamed sweep cases, no sidecar names a case that no
-      longer exists. The `ffm-quick` ids of miopen-provider still exist
-      (`ctest --test-dir build/dnn-providers/miopen-provider -L ffm-quick -N`).
+      longer exists.
