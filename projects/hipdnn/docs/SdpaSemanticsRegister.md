@@ -236,6 +236,8 @@ batch when `seq_len_q/kv` are set).
 - **hipDNN today:** the CPU backward computes dBias in the bias tensor's shape and dtype, summing over broadcast
   dims. Band-masked positions and dead rows give 0. Pinned by finite differences
   (`TestCpuFpReferenceSdpaGradCheckDBias`, mutation-checked against using the scaled dS).
+  `SdpaBwdNode` rejects a dBias with no bias, or whose dims differ from the bias's, and fills empty dBias dims
+  from the bias.
 - **Contract:** cuDNN. A dBias whose shape or dtype differs from the bias is declined.
 
 ### SEM-015: Dropout
