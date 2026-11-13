@@ -171,6 +171,12 @@ class Runner:
         env = dict(os.environ)
         env["HIPDNN_DISABLE_EXACT_ENGINE_CACHE"] = "1"
         env["HIPDNN_CACHE_DIR"] = cache_dir
+        # MIOpen's find results (user db) would carry one process's autotune into the next
+        # process's immediate picks, so each process gets an empty one. Its compiled-kernel
+        # cache only saves compile time: shared when the caller sets MIOPEN_CUSTOM_CACHE_DIR.
+        # Both default under ~/.cache or /tmp/.cache, which may belong to another user.
+        env["MIOPEN_USER_DB_PATH"] = os.path.join(cache_dir, "miopen-udb")
+        env.setdefault("MIOPEN_CUSTOM_CACHE_DIR", os.path.join(cache_dir, "miopen-kcache"))
         # The harness forces the policy order per query; an inherited value must not leak in.
         env.pop("HIPDNN_HEUR_POLICY_ORDER", None)
         if self.args.ranking_metric is None:
