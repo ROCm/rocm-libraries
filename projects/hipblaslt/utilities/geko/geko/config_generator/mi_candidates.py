@@ -19,6 +19,8 @@ Two sources, both independent of the problem size:
 
 from __future__ import annotations
 
+import datetime
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -42,6 +44,15 @@ from geko.config_generator.constants import (
 MI = Tuple[int, int, int, int, int, int, int, int, int]
 
 MI_LISTS_DIR = Path(__file__).parent / "mi_lists"
+
+# MI Designer warns when a list it uses was generated more than this many days from today
+BUILDABLE_LIST_MAX_AGE_DAYS = 7
+
+
+def utc_today() -> datetime.date:
+    """Today's date in UTC: the date a list's Source line records and the one its age is measured against, so
+    both mean the same day on every machine."""
+    return datetime.datetime.now(datetime.timezone.utc).date()
 
 
 def allowable_mfmas(
@@ -135,12 +146,13 @@ def buildable_list_path(arch: str, gemm_name: str) -> Path:
 
 @dataclass
 class BuildableList:
-    """A buildable-MI list: the buildable MIs in list order, the DepthUs each builds at (when recorded), and the
-    DepthUs the search tried."""
+    """A buildable-MI list: the buildable MIs in list order, the DepthUs each builds at (when recorded), the
+    DepthUs the search tried, and the date it was generated."""
 
     mis: List[MI]
     depthu: Dict[MI, List[int]] = field(default_factory=dict)
     searched_depthu: List[int] = field(default_factory=list)
+    generated: Optional[datetime.date] = None
 
     def allowed_depthu(self, mi: Sequence[int], offered: Sequence[Any]) -> List[Any]:
         """The offered DepthUs ``mi`` may build at: those the list records for it, and any the search did not
@@ -152,8 +164,9 @@ class BuildableList:
 
 
 def load_buildable_list(path: Path) -> BuildableList:
-    """Read a buildable-MI list: ``DepthU`` (the DepthUs searched) and ``MatrixInstructions``, each entry
-    ``{MatrixInstruction: <9 ints>, DepthU: <DepthUs it builds at>}``."""
+    """Read a buildable-MI list: ``DepthU`` (the DepthUs searched), ``MatrixInstructions``, each entry
+    ``{MatrixInstruction: <9 ints>, DepthU: <DepthUs it builds at>}``, and the date in ``Source``
+    (``rocm-libraries <commit>, YYYY-MM-DD``)."""
     with open(path) as f:
         data = yaml.safe_load(f)
     entries = data.get("MatrixInstructions") if isinstance(data, dict) else None
@@ -164,8 +177,10 @@ def load_buildable_list(path: Path) -> BuildableList:
         raise ValueError(f"{path}: not a buildable-MI list (MatrixInstructions entries need a 9-element "
                          "MatrixInstruction; regenerate lists written in the older format)")
     mis = [tuple(e["MatrixInstruction"]) for e in entries]
+    date = re.search(r"\b(\d{4}-\d{2}-\d{2})\b", str(data.get("Source", "")))
     return BuildableList(
         mis,
         {tuple(e["MatrixInstruction"]): list(e["DepthU"]) for e in entries if "DepthU" in e},
         list(data.get("DepthU") or []),
+        datetime.date.fromisoformat(date.group(1)) if date else None,
     )

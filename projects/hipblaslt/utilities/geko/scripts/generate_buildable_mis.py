@@ -16,7 +16,6 @@ Usage:
 """
 
 import argparse
-import datetime
 import logging
 import math
 import os
@@ -25,7 +24,7 @@ import sys
 import time
 from pathlib import Path
 
-from geko.config_generator.mi_candidates import MI_LISTS_DIR, buildable_list_path
+from geko.config_generator.mi_candidates import MI_LISTS_DIR, buildable_list_path, utc_today
 from geko.paths import resolve_hipblaslt_path
 from geko.utils import ensure_tensile_importable
 
@@ -73,7 +72,7 @@ def _source(hipblaslt: Path) -> str:
         ).stdout.strip()
         or "unknown"
     )
-    return f"rocm-libraries {commit}, {datetime.date.today().isoformat()}"
+    return f"rocm-libraries {commit}, {utc_today().isoformat()}"  # MI Designer measures list age in UTC
 
 
 def main() -> None:

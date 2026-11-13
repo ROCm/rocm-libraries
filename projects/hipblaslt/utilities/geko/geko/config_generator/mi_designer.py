@@ -24,11 +24,13 @@ from geko.config_generator.constants import *
 from geko.config_generator.constants import library_logic_architecture
 from geko.config_generator.shared_utils import ForkParameter, GroupDimension
 from geko.config_generator.mi_candidates import (
+    BUILDABLE_LIST_MAX_AGE_DAYS,
     allowable_mfmas,
     buildable_list_path,
     enumerate_candidate_mis,
     load_buildable_list,
     smallest_mfma_dims,
+    utc_today,
 )
 
 
@@ -184,16 +186,15 @@ class MIDesign:
           gemm_name = self.config["GemmProblem"].name
           gt = self.config["GemmProblem"].gemm_type
           path = buildable_list_path(arch, gemm_name)
+          layout = "".join("T" if str(t).upper() in ("T", "TRUE") else "N" for t in (gt.transA, gt.transB))
+          generate = (f"python3 scripts/generate_buildable_mis.py --arch {library_logic_architecture(arch)} "
+                      f"--types {gt.data_type}:{gt.dest_data_type}:{gt.compute_data_type} --layouts {layout}")
           if gemm_name != gt.gemm_name:
               logger.warning(" Buildable-MI lists do not cover MX formats (%s on %s): using every candidate MI.",
                              gemm_name, arch)
           elif not path.exists():
-              layout = "".join("T" if str(t).upper() in ("T", "TRUE") else "N" for t in (gt.transA, gt.transB))
               logger.warning(" No buildable-MI list for %s on %s: using every candidate MI, including ones "
-                             "TensileLite cannot build. Generate it (CPU only) with: python3 "
-                             "scripts/generate_buildable_mis.py --arch %s --types %s:%s:%s --layouts %s",
-                             gemm_name, arch, library_logic_architecture(arch), gt.data_type,
-                             gt.dest_data_type, gt.compute_data_type, layout)
+                             "TensileLite cannot build. Generate it (CPU only) with: %s", gemm_name, arch, generate)
           elif override is not None and list(override) not in allowable_mfmas(arch, data_type):
               logger.info(" MFMA override %s is outside the ARCH allowlist, so %s does not cover it: "
                           "using every candidate MI.", override, path.name)
@@ -205,6 +206,13 @@ class MIDesign:
                   mis = [mi for mi in buildable.mis if list(mi[:4]) in allowable]
                   self._buildable = buildable
                   logger.info(" Buildable MatrixInstructions from %s: %s", path, len(mis))
+                  if buildable.generated is None:
+                      logger.warning(" Buildable-MI list %s records no generation date (Source line), so it may be "
+                                     "stale. Regenerate it (CPU only) with: %s", path, generate)
+                  elif abs((utc_today() - buildable.generated).days) > BUILDABLE_LIST_MAX_AGE_DAYS:
+                      logger.warning(" Buildable-MI list %s was generated on %s, more than %d days from today: "
+                                     "TensileLite or geko may have changed since. Regenerate it (CPU only) with: %s",
+                                     path, buildable.generated, BUILDABLE_LIST_MAX_AGE_DAYS, generate)
       if mis is None:
           mis = enumerate_candidate_mis(arch, data_type, search_space, override)
 

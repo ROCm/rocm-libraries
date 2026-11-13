@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import datetime
 from pathlib import Path
 
 from geko.config_generator import mi_candidates
@@ -41,14 +42,15 @@ def test_calculate_granularities_and_mfma_parameters() -> None:
     assert params.MT0 > 0 and params.MT1 > 0
 
 
-def _write_list(cfg: dict, mis: list, depthu: dict = None) -> None:
+def _write_list(cfg: dict, mis: list, depthu: dict = None, generated: datetime.date = None) -> None:
     """A buildable-MI list for cfg's GEMM type; ``depthu`` maps an MI to the DepthUs it builds at."""
     depthu = depthu or {}
     path = mi_candidates.buildable_list_path(cfg["ARCH"], cfg["GemmProblem"].name)
     path.parent.mkdir(parents=True, exist_ok=True)
     rows = "".join(f"  - {{MatrixInstruction: {list(m)}" + (f", DepthU: {depthu[m]}" if m in depthu else "") + "}\n"
                    for m in mis)
-    path.write_text(f"DepthU: [32, 64, 128, 256, 512]\nMatrixInstructions:\n{rows}")
+    source = f"Source: rocm-libraries 0123456789, {generated.isoformat()}\n" if generated else ""
+    path.write_text(f"{source}DepthU: [32, 64, 128, 256, 512]\nMatrixInstructions:\n{rows}")
 
 
 def _mi9(m: mid.MFMA) -> tuple:
@@ -108,10 +110,12 @@ def test_generated_lists_read_back_even_when_no_mi_builds(tmp_path: Path) -> Non
     rejected = B.Verdict((16, 16, 4, 1, 1, 1, 2, 4, 1), False, "", 9, overflow=0.1, reason="too many vgprs")
     for verdicts, listed in (([built, rejected], [mi]), ([rejected], [])):
         path = tmp_path / "SSS_NN.yaml"
-        B.write_buildable_list(path, verdicts, arch="gfx950", gemm_name="SSS_NN", source="test", depthu=[32, 64, 128])
+        B.write_buildable_list(path, verdicts, arch="gfx950", gemm_name="SSS_NN",
+                               source="rocm-libraries 0123456789, 2026-11-02", depthu=[32, 64, 128])
         bl = mi_candidates.load_buildable_list(path)
         assert bl.mis == listed and bl.searched_depthu == [32, 64, 128]
         assert bl.depthu == ({mi: [64, 128]} if listed else {})
+        assert bl.generated == datetime.date(2026, 11, 2)
 
 
 def test_sort_and_remove_gsu_duplicates_and_log_path(tmp_path: Path) -> None:
