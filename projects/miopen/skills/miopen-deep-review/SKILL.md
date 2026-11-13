@@ -1,6 +1,6 @@
 ---
 name: miopen-deep-review
-description: "Multi-agent deep review of a MIOpen PR, branch or commit range. Scouts map each affected area, focused reviewer lanes run in parallel, every finding is verified by source proof, reproduction or mutation, and a ledger carries findings across rounds until no blocking or important one stays open. For a PR body or a quick single-pass review, use a one-shot PR review."
+description: "Multi-agent deep review of a MIOpen PR, branch or commit range. Scouts map each affected area, focused reviewer lanes run in parallel, every finding is verified by source proof, reproduction or mutation, and a ledger carries findings across rounds until no blocking or important one stays open. For a lighter single-pass review, use miopen-review."
 argument-hint: "[<PR URL or number> | branch:<name> | <base>..<head>] evidence:<dir> scratch:<dir> [clone:<dir>] [intent:<file>] [terms:<file>] [knowledge:<dir>] [round:<N>] [prior:<dir>]"
 allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task
 ---

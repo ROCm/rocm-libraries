@@ -1,7 +1,7 @@
 # Runbook: deep review
 
 Each stage ends in a **Gate:**; do not start the next stage until it holds. This runbook
-needs subagents; without them, stop and tell the user to run `rocm-pr-quality`. Variables:
+needs subagents; without them, stop and tell the user to run `miopen-review` (its `level:low` needs no subagents). Variables:
 [lanes/common.md](lanes/common.md). Your formats: [report.md](report.md).
 
 ## Pin and intake
