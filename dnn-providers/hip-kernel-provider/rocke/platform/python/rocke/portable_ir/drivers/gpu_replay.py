@@ -442,7 +442,7 @@ def _resolve_flavor(requested: str) -> str:
     from rocke.core.lower_llvm import _flavor_for_llvm, _resolve_llvm_flavor
     from rocke.runtime.code_object import loaded_compiler_info
 
-    info = loaded_compiler_info()
+    info = loaded_compiler_info("comgr")
     if info is not None and info.llvm_version is not None:
         return _flavor_for_llvm(info.llvm_version[0])
     # Preserve this driver's compiler-first, environment-second precedence.

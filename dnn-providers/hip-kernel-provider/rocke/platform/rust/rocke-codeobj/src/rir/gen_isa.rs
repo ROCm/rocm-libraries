@@ -14,7 +14,7 @@
 use super::mir::{Fmt, Opc};
 
 /// FNV-1a 64 of the description (line endings as LF) this file was generated from.
-pub const DESCRIPTION_DIGEST: u64 = 0x907feabe25b7fe30;
+pub const DESCRIPTION_DIGEST: u64 = 0xaabfd8e5656c5485;
 
 // ----- operand codes -----
 
