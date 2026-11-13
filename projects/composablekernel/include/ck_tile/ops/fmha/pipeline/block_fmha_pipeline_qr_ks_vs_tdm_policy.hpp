@@ -170,7 +170,9 @@ CK_TILE_HOST_DEVICE constexpr auto make_qr_tdm_row_major_lds_descriptor()
         constexpr index_t PadElements         = PadBytes / ElementBytes;
         constexpr index_t NumIntervals        = LogicalBytes / IntervalBytes;
 
-        if constexpr(ElementsPerInterval == Cols)
+        // fp16/bf16 keep develop's general descriptor below.
+        constexpr bool kIsFp8 = is_any_of<DataType, fp8_t, bf8_t>::value;
+        if constexpr(kIsFp8 && ElementsPerInterval == Cols)
         {
             // One row per interval, so the round trip below is just a padded row stride:
             // (r * Cols + c) / Cols == r and % Cols == c for c < Cols. Stating it affinely
