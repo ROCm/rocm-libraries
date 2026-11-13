@@ -16,8 +16,8 @@ def runCI =
     def prj = new rocProject('rocALUTION', 'Debug')
     // customize for project
     prj.paths.build_command = buildCommand
-    prj.compiler.compiler_name = 'c++'
-    prj.compiler.compiler_path = 'c++'
+    prj.compiler.compiler_name = 'amdclang++'
+    prj.compiler.compiler_path = '/opt/rocm/bin/amdclang++'
     prj.libraryDependencies = ['rocPRIM', 'hipBLAS-common', 'hipBLASLt', 'rocBLAS', 'rocSPARSE', 'rocRAND']
 
     // Define test architectures, optional rocm version argument is available
@@ -87,9 +87,10 @@ ci: {
     def mpiJobNameList = ["compute-rocm-dkms-no-npi":([ubuntu18:['any']]),
                           "rocm-docker":([ubuntu18:['any']])]
 
-    String defaultBuildCommand = './install.sh -c'
-    String hostBuildCommand = './install.sh -c --host'
-    String mpiBuildCommand = './install.sh -c --host --mpi=on --no-openmp'
+    // The FindHIP shim of ROCm 7.18 compiles HIP sources with CXX (ROCM-34140)
+    String defaultBuildCommand = './install.sh -c --compiler=/opt/rocm/bin/amdclang++'
+    String hostBuildCommand = './install.sh -c --host --compiler=/opt/rocm/bin/amdclang++'
+    String mpiBuildCommand = './install.sh -c --host --mpi=on --no-openmp --compiler=/opt/rocm/bin/amdclang++'
 
     setupCI(urlJobName, defaultJobNameList, defaultBuildCommand, runCI, '')
     setupCI(urlJobName, hostJobNameList, hostBuildCommand, runCI, 'Host')

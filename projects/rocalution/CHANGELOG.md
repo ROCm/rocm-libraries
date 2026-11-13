@@ -13,6 +13,8 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * ROCmCMakeBuildTools 0.11.0 or later is now required. By default, CMake configuration fails when it isn't found instead of downloading rocm-cmake from GitHub. Configure with `-DALLOW_FETCH_DEPS=ON` to download rocm-cmake 0.14.0 from ROCm 7.2.4 instead. The deprecated `ROCM` package fallback was removed.
 * GoogleTest must be installed before building the tests. Alternatively, set `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to a googletest source tree, or configure with `-DALLOW_FETCH_DEPS=ON` to download GoogleTest 1.15.2. Both build GoogleTest statically and don't install it.
 * CMake 3.19 or later is now required to build rocALUTION (previously 3.5).
+* If the upper eigenvalue bound is positive, `Chebyshev::Set()` now replaces a real lower bound that is not positive, such as the lower bound of `LocalMatrix::Gershgorin()`, which is at most 0, by the upper bound divided by 30 and prints a warning. Likewise, a real upper bound of 0 with a negative lower bound is replaced by the lower bound divided by 30. With such bounds, the Chebyshev iteration does not converge. The bounds are replaced also if they are given in reverse order. If a bound has a nonzero imaginary part, neither bound is replaced.
+* `Chebyshev::Set()` now terminates the program if a bound is not finite or if the segment between the bounds still contains 0, such as for the bounds `0` and `0`. Previously, the solver wrote Inf or NaN into the solution or did not converge.
 
 ### Removed
 * Removed the GoogleTest superbuild in `deps` and its `BUILD_GTEST` option, which `install.sh -d` invoked without enabling it.
@@ -28,6 +30,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 * Fixed `LocalMatrix::DiagonalMatrixMultL()` rejecting a vector with one entry per row on non-square CSR matrices, and reading out of bounds on CSR matrices with more rows than columns.
 * Fixed `init_rocalution()` reporting an accelerator after `stop_rocalution()` when the accelerator was disabled with `disable_accelerator_rocalution()`.
 * Fixed a HIP stream leak in `init_rocalution()` in multi-node builds when creating the HIP streams fails.
+* Fixed the `Chebyshev` solver using a recurrence that is not the Chebyshev iteration and depends on the scale of the operator. It converged more slowly than the Chebyshev iteration and, depending on the scale of the operator, could diverge even with exact eigenvalue bounds, for example with FSAI preconditioning.
 * Fixed the format warning of `GlobalMatrix::AMGUnsmoothedAggregation()` naming `AMGSmoothedAggregation()`.
 * Fixed `LocalVector::Sync()` and `LocalMatrix::Sync()` deleting both the host and the accelerator copy of an object after `MoveToHostAsync()`, which lost its data and crashed on the next access.
 * Fixed `LocalMatrix::MoveToAcceleratorAsync()` and `LocalMatrix::MoveToHostAsync()` leaking a full copy of the matrix for each additional call before `Sync()`. Additional calls before `Sync()` now do nothing, so changes made to the matrix between the first call and `Sync()` are not transferred.
