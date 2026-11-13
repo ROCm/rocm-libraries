@@ -173,12 +173,12 @@ def test_a_value_map_must_cover_exactly_the_declared_cell_values(
 
 
 def test_a_value_map_covers_the_cell_values_of_every_section():
-    """The map is checked against the union of the sections' cells: Unified2D's
-    use_alibi=true row is in one section only, so its key is not dead, and dropping
-    it is still caught, by the enumerator and by `ground_truth` alike."""
+    """The map is checked against the union of the sections' cells: gfx942 dense
+    lists use_alibi=true in its also sections only, so the key is not dead, and
+    dropping it is still caught, by the enumerator and by `ground_truth` alike."""
     if not _ROCKE.is_dir():
         pytest.skip(f"rocKE library not in this checkout: {_ROCKE}")
-    path = _ROOT / "configs" / "gfx950_attention_unified_2d.engine.yaml"
+    path = _ROOT / "configs" / "gfx942_attention_dense.engine.yaml"
     manifest = yaml.safe_load(path.read_text())
     re_.Registry(manifest)
     gt.ground_truth_block(manifest, path)

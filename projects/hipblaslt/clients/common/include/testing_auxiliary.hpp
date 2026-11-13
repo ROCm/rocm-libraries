@@ -378,6 +378,7 @@ void testing_aux_mat_set_get_attr(const Arguments& arg)
     // that only some APIs accept.
     for(int32_t order : {int32_t(HIPBLASLT_ORDER_ROW),
                          int32_t(HIPBLASLT_ORDER_COL16_4R8),
+                         int32_t(HIPBLASLT_ORDER_COL256_R128_EXT),
                          int32_t(HIPBLASLT_ORDER_COL)})
     {
         EXPECT_HIPBLAS_STATUS(hipblasLtMatrixLayoutSetAttribute(
@@ -879,6 +880,20 @@ void testing_aux_matmul_set_get_attr(const Arguments& arg)
                                                               &sizeWritten),
                               HIPBLAS_STATUS_SUCCESS);
         ASSERT_TRUE(modeGot == modeSet);
+    }
+
+    for(auto attr : {HIPBLASLT_MATMUL_DESC_A_SCALE_MODE, HIPBLASLT_MATMUL_DESC_B_SCALE_MODE})
+    {
+        uint32_t modeSet = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
+        uint32_t modeGot = 0xFFFFFFFFu;
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulDescSetAttribute(matmul, attr, &modeSet, sizeof(uint32_t)),
+            HIPBLAS_STATUS_SUCCESS);
+        EXPECT_HIPBLAS_STATUS(
+            hipblasLtMatmulDescGetAttribute(
+                matmul, attr, &modeGot, sizeof(uint32_t), &sizeWritten),
+            HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(modeGot, modeSet);
     }
 
     hipStream_t stream;

@@ -1158,11 +1158,16 @@ _CONFIGS[64] = {**_CONFIGS[55], "emit_lse": True}
 _CONFIGS[65] = {**_CONFIGS[32], "emit_lse": True}
 _CONFIGS[66] = {**_CONFIGS[3], "emit_lse": True}
 _CONFIGS[67] = {**_CONFIGS[5], "use_alibi": True, "emit_lse": True}
+# --- idx72-74: lse_layout="head_major" at each store site (idx64-66 + head-major).
+# idx71 is cfg71 above (bf16 D192 one warp); these three sit after it.
+_CONFIGS[72] = {**_CONFIGS[64], "lse_layout": "head_major"}
+_CONFIGS[73] = {**_CONFIGS[65], "lse_layout": "head_major"}
+_CONFIGS[74] = {**_CONFIGS[66], "lse_layout": "head_major"}
 
-# --- idx72-75: ALiBi at the slope sites idx16/17 miss: per-row hoist (72, GQA with 24 heads so the slope formula's
-#     tail heads appear), and the transposed 32x32 per-iter (73, mask-once),
-#     hoisted (74) and inline (75) per-lane slopes.
-_CONFIGS[72] = dict(
+# --- idx75-78: ALiBi at the slope sites idx16/17 miss: per-row hoist (75, GQA with 24 heads so the slope formula's
+#     tail heads appear), and the transposed 32x32 per-iter (76, mask-once),
+#     hoisted (77) and inline (78) per-lane slopes.
+_CONFIGS[75] = dict(
     head_size=64,
     block_size=32,
     num_query_heads=24,
@@ -1188,9 +1193,9 @@ _TRANSPOSED_ALIBI = dict(
     block_m_per_warp=32,
     tile_size=64,
 )
-_CONFIGS[73] = {**_TRANSPOSED_ALIBI, "use_transposed_mask_once": True}
-_CONFIGS[74] = {**_TRANSPOSED_ALIBI, "use_transposed_invariant_hoist": True}
-_CONFIGS[75] = dict(_TRANSPOSED_ALIBI)
+_CONFIGS[76] = {**_TRANSPOSED_ALIBI, "use_transposed_mask_once": True}
+_CONFIGS[77] = {**_TRANSPOSED_ALIBI, "use_transposed_invariant_hoist": True}
+_CONFIGS[78] = dict(_TRANSPOSED_ALIBI)
 
 
 def _spec(idx: int) -> UnifiedAttention2DTiledSpec:

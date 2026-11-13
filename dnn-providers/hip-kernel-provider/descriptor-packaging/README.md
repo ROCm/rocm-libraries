@@ -557,7 +557,7 @@ Two `CACHE` variables, resolved once in `_hkp_resolve_rocke_args()` under
 | Variable | Forwarded as | Reaches | Effect |
 |---|---|---|---|
 | `HIPKERNELPROVIDER_ROCKE_COMGR_LIB` | `ROCKE_COMGR_LIB` | the pack step and the ctest entries | Explicit `libamd_comgr` for the rocKE producer to load. Empty by default (derived from the `amd_comgr` package); set it to override, e.g. on Windows where a System32 `amd_comgr.dll` can shadow the ROCm one. |
-| `HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR` | `ROCKE_LLVM_FLAVOR` | the pack step only | LLVM IR flavor rocKE lowers to (`llvm20`, `llvm22`, `llvm23`, `llvm24`). Empty by default (derived from the loaded COMGR's LLVM); set it to lower exactly as a catalog was swept -- the gfx950 conv AOT catalogs were measured as `llvm22`. An unrecognized value is only rejected when the pack step runs, not at configure. |
+| `HIPKERNELPROVIDER_ROCKE_LLVM_FLAVOR` | `ROCKE_LLVM_FLAVOR` | the pack step only | LLVM IR flavor rocKE lowers to (`llvm20`, `llvm22`, `llvm23`, `llvm24`). Empty by default (derived from the loaded COMGR's LLVM); set it to lower exactly as a catalog was swept -- the gfx950 conv AOT catalogs were measured as `llvm22`, the gfx1250 dgrad catalog as `llvm24`. The value applies to every catalog the pack step builds, and a catalog refuses an older flavor than its own, so a build that packs both architectures pins `llvm24` (or leaves it derived from an LLVM 24 COMGR). An unrecognized value is only rejected when the pack step runs, not at configure. |
 
 Changing either repacks every rocKE-sourced catalog with a different lowering, so a silent
 loss of the forwarding would repack with whatever rocke derives instead, unnoticed.

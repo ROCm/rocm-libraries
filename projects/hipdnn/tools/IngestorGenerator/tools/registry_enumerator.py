@@ -43,7 +43,10 @@ further sections, each with its own ``pin``, ``fixed``, ``cells``, ``free_fields
 space are inherited from ``enumerate``, and a section may set its own ``space``). Kernels
 are emitted primary section first, then each ``also`` section in order; a cell listed by
 more than one section keeps the first section's default as its one ``default: true``
-floor. A ``space: full``
+floor. A section may also set ``spec_overrides``, spec fields replaced on every spec it
+yields (e.g. an output the registry never selects, such as ``emit_lse``), and its own
+``kernel_name_template``, so its kernels are new names beside the other sections'; its
+default is the ``default: true`` floor of its own (cell, overrides) group. A ``space: full``
 section projects its own varying performance knobs; the catalog's projected knobs are the
 union over sections, in ``reduction.fields.performance`` order.
 
@@ -205,11 +208,21 @@ def _validate_manifest(path: str, manifest: dict) -> None:
             overrides is None
             or (
                 isinstance(overrides, dict)
-                and all(isinstance(k, str) for k in overrides)
+                and overrides
+                and _is_names(list(overrides))
+                and all(
+                    isinstance(v, (bool, int, float, str)) for v in overrides.values()
+                )
             ),
             path,
             f"{where}.spec_overrides",
-            "a mapping of spec field names to values",
+            "a non-empty mapping of spec field names to scalar values",
+        )
+        _require(
+            isinstance(section.get("kernel_name_template", ""), str),
+            path,
+            f"{where}.kernel_name_template",
+            "a string",
         )
         limit = section.get("max_kernels")
         _require(
@@ -532,7 +545,7 @@ class Registry:
             if key not in decl:
                 raise EnumerationError(f"the manifest's {where} lacks '{key}'.")
         self.decl = decl
-        #: ``(cell_key, kernel spec)`` -> ``(pin, tuning_id)`` of the pin that supplied
+        #: ``(cell_key, kernel spec with spec_overrides)`` -> ``(pin, tuning_id)`` of the pin that supplied
         #: it, filled by `space`. ``tuning_id`` is None for a spec the registry hands
         #: back unwrapped.
         self.origins: dict = {}
@@ -604,6 +617,7 @@ class Registry:
                 f"enumerate.cells fields {self.cell_fields}."
             )
         self.neutral_fields = list(decl.get("neutral_fields") or [])
+        #: Spec fields replaced on every spec this section yields.
         self.spec_overrides = _mapping(decl, "spec_overrides")
         self.cell_keyed_by = list(decl.get("cell_keyed_by") or [])
         for name in itertools.chain(*pins, self.fixed, self.cell_fields):
@@ -642,6 +656,10 @@ class Registry:
         self.pairs_reduce = False
         #: The ``enumerate.also`` sections, each a `Registry` of its own.
         self.also: list = []
+        #: The ``spec_overrides`` fields another section does not pin to the same
+        #: value: across the engine they take more than one value, so they may be a
+        #: ``reduction.fields.feature`` axis. Filled by the primary section.
+        self.axis_overrides: frozenset = frozenset()
         if primary and decl.get("also"):
             for index, extra in enumerate(decl["also"]):
                 merged = {
@@ -664,6 +682,17 @@ class Registry:
                             f"to inherit it)."
                         )
                 self.also.append(section)
+            sections = self.sections()
+            for section in sections:
+                section.axis_overrides = frozenset(
+                    name
+                    for name, value in section.spec_overrides.items()
+                    if any(
+                        other.spec_overrides.get(name, _Missing) != value
+                        for other in sections
+                        if other is not section
+                    )
+                )
 
     def sections(self) -> list:
         """This section, then each ``enumerate.also`` section."""
@@ -747,7 +776,9 @@ class Registry:
         key = self.cell_key(cell)
         base, specs, ids = self._candidate_space(cell, self.pin, self.candidate)
         for spec in (base, *specs):
-            self.origins.setdefault((key, spec), (self.pin, ids.get(spec)))
+            self.origins.setdefault(
+                (key, self.overridden(spec, cell)), (self.pin, ids.get(spec))
+            )
         for pin, candidate in self.extra_pins:
             request = self.request(cell, pin)
             try:
@@ -761,7 +792,9 @@ class Registry:
                 _, more, ids = self._candidate_space(cell, pin, candidate)
                 added = [s for s in more if s not in specs]
                 for spec in added:
-                    self.origins.setdefault((key, spec), (pin, ids.get(spec)))
+                    self.origins.setdefault(
+                        (key, self.overridden(spec, cell)), (pin, ids.get(spec))
+                    )
                 specs += added
         return base, specs
 
@@ -830,6 +863,24 @@ class Registry:
             if tuning_id:
                 ids.setdefault(_unwrap(item), str(tuning_id))
         return base, specs, ids
+
+    def overridden(self, spec, cell: dict):
+        """``spec`` with this section's ``spec_overrides`` applied (``spec`` itself
+        when there are none). The spec class validates the result."""
+        if spec is None or not self.spec_overrides:
+            return spec
+        unknown = sorted(set(self.spec_overrides) - set(_spec_fields(spec)))
+        if unknown:
+            raise EnumerationError(
+                f"enumerate.spec_overrides names {unknown}, which the registry spec "
+                f"{type(spec).__name__} does not have."
+            )
+        return _overridden(spec, self.spec_overrides, cell)
+
+    def overrides_key(self) -> tuple:
+        """What, beside the cell, groups this section's kernels for the
+        ``default: true`` floor."""
+        return tuple(sorted(self.spec_overrides.items()))
 
     def provenance(self, cell: dict, spec) -> dict:
         """The supplying pin's ``spec_id`` and, when the registry names the kernel,
@@ -1248,7 +1299,14 @@ def cell_spaces(registry: Registry, classification: Classification) -> CellSpace
                     f"only steer the selector or leave the IR unchanged."
                 )
     for kind in ("feature", "performance"):
-        clash = [n for n in overrides if n in getattr(classification, kind)]
+        # A field another `also` section pins differently is an axis across the
+        # engine (e.g. `emit_lse`), so it may still be a feature field.
+        allowed = registry.axis_overrides if kind == "feature" else frozenset()
+        clash = [
+            n
+            for n in overrides
+            if n in getattr(classification, kind) and n not in allowed
+        ]
         if clash:
             raise EnumerationError(
                 f"enumerate.spec_overrides names {clash}, which reduction.fields.{kind} "
@@ -1394,12 +1452,15 @@ def enumerate_space(manifest: dict, registry: Registry | None = None) -> Enumera
         extra, section_projected, section_held = _section_rows(section, classification)
         # One floor per cell: a later section listing a cell an earlier one already
         # has keeps its kernels, but not a second `default: true`. A merged cell is
-        # keyed by all its items, the keyed attributes `cell_spaces` adds included.
+        # keyed by all its items, the keyed attributes `cell_spaces` adds included;
+        # a section's own `spec_overrides` group keeps its floor apart from another
+        # section's, since their kernels differ.
+        group = section.overrides_key()
         extra = [
-            (cell, ks, is_default and tuple(cell.items()) not in floors)
+            (cell, ks, is_default and (tuple(cell.items()), group) not in floors)
             for cell, ks, is_default in extra
         ]
-        floors.update(tuple(cell.items()) for cell, _, d in extra if d)
+        floors.update((tuple(cell.items()), group) for cell, _, d in extra if d)
         rows.extend(extra)
         sections.extend([section] * len(extra))
         varied.update(section_projected)
@@ -1478,20 +1539,29 @@ def build_config(
                 bindings[n] = (
                     {"method": accessors[n]} if n in accessors else {"field": n}
                 )
-    features = registry.features
-    slots = _template_slots(template)
-    named = [n for n in projected if n not in slots]
-    split = None
-    if named or features:
-        last = None
-        for last in _LAST_SLOT.finditer(template):
-            pass
-        split = last.end() if last else len(template)
+
+    def name_layout(template: str, features) -> tuple:
+        """``(named, split)``: the projected knobs ``template`` has no slot for,
+        and where their ``_<knob><value>`` suffix and the section's feature name
+        tokens go (after the last slot)."""
+        slots = _template_slots(template)
+        named = [n for n in projected if n not in slots]
+        split = None
+        if named or features:
+            last = None
+            for last in _LAST_SLOT.finditer(template):
+                pass
+            split = last.end() if last else len(template)
+        return named, split
 
     kernels = []
     for (cell, ks, is_default), section in zip(enumeration.rows, enumeration.sections):
+        section_template = section.decl.get("kernel_name_template") or template
+        named, split = name_layout(section_template, section.features)
         names = list(section.decl.get("spec_fields") or _spec_fields(ks))
         names += [n for n in projected if n not in names]
+        # An override is what sets the section's kernels apart: always ship it.
+        names += [n for n in section.spec_overrides if n not in names]
         missing = [n for n in names if not hasattr(ks, n)]
         if missing:
             raise EnumerationError(
@@ -1513,7 +1583,7 @@ def build_config(
         }
         try:
             if split is None:
-                name = template.format(**fields)
+                name = section_template.format(**fields)
             else:
                 suffix = "".join(
                     (
@@ -1526,13 +1596,13 @@ def build_config(
                     section.features[n]["name_token"] for n in section.features_on(ks)
                 )
                 name = (
-                    template[:split].format(**fields)
+                    section_template[:split].format(**fields)
                     + suffix
-                    + template[split:].format(**fields)
+                    + section_template[split:].format(**fields)
                 )
         except (KeyError, IndexError, ValueError) as exc:
             raise EnumerationError(
-                f"kernel_name_template {template!r} cannot be rendered: {exc!r}. "
+                f"kernel_name_template {section_template!r} cannot be rendered: {exc!r}. "
                 f"Available: {sorted(fields)}."
             ) from exc
         kernel = {
@@ -1607,6 +1677,17 @@ def build_config(
     return config
 
 
+def _held_at_dataclass_default(ks, name: str) -> bool:
+    """Whether registry spec ``ks`` has field ``name`` at its dataclass default, which
+    a kernel spec that omits the field also builds with."""
+    if not dataclasses.is_dataclass(ks):
+        return False
+    field = next((f for f in dataclasses.fields(ks) if f.name == name), None)
+    if field is None or field.default is dataclasses.MISSING:
+        return False
+    return getattr(ks, name) == field.default
+
+
 def _metadata(spec: dict, ks, request: dict, accessors: dict, specialization) -> dict:
     vocabulary = specialization.get("vocabulary") or {}
     metadata = {}
@@ -1617,6 +1698,9 @@ def _metadata(spec: dict, ks, request: dict, accessors: dict, specialization) ->
             value = _resolved(ks, name, accessors[name])
         elif name in request:
             value = request[name]
+        elif _held_at_dataclass_default(ks, name):
+            # The spec omits it, so the builder builds this default: metadata agrees.
+            value = getattr(ks, name)
         else:
             raise EnumerationError(
                 f"metadata field '{name}' is neither a field of the projected spec "

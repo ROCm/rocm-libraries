@@ -196,7 +196,7 @@ def executeStepsInConfig(
         else:
             libraryClientConfig = {}
         with timing_context("python_client_writer"):
-            ClientWriter.main(
+            libraryClientReturncode = ClientWriter.main(
                 libraryClientConfig,
                 asmToolchain.assembler,
                 cCompiler,
@@ -208,6 +208,10 @@ def executeStepsInConfig(
             )
         flush_timing_buffer()
         print1("")
+        # Same rule as the benchmark step: a failed client run (e.g. a problem with no selected
+        # solution, see --require-selected-solution in ClientWriter) fails Tensile.
+        if globalParameters["ExitOnFails"] and libraryClientReturncode:
+            printExit("LibraryClient exited with code {}".format(libraryClientReturncode))
 
 
 def addCommonArguments(argParser):

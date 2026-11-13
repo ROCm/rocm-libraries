@@ -58,6 +58,7 @@ const std::vector<std::string_view>& allTokens()
                                                         MASK_TOKEN,
                                                         SLIDING_WINDOW_TOKEN,
                                                         SCALE_BITS_TOKEN,
+                                                        STATS_TOKEN,
                                                         ALIBI_TOKEN};
     return s_tokens;
 }

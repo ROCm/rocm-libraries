@@ -64,6 +64,7 @@ inline constexpr std::string_view SLIDING_WINDOW_TOKEN
     = "gfx950_attention_unified_2d.sliding_window";
 inline constexpr std::string_view SCALE_BITS_TOKEN = "gfx950_attention_unified_2d.scale_bits";
 inline constexpr std::string_view ALIBI_TOKEN = "gfx950_attention_unified_2d.alibi";
+inline constexpr std::string_view STATS_TOKEN = "gfx950_attention_unified_2d.stats.uid";
 
 using namespace unified_attention;
 
@@ -106,6 +107,8 @@ struct KernelSpec
     int64_t useMfma32x32 = 0;
     int64_t useTransposedQk32x32 = 0;
     int64_t useAlibi = 0;
+    /// 1 for an LSE-on kernel, which serves only graphs that ask for stats.
+    int64_t emitLse = 0;
     /// The descriptor id's final byte. Only the ranking cases vary it.
     unsigned idByte = 0xa1;
 };
@@ -128,6 +131,7 @@ inline hipdnn_plugin_sdk::ingestor::MetadataValues metadataOf(const KernelSpec& 
         {std::string("use_mfma_32x32"), spec.useMfma32x32},
         {std::string("use_transposed_qk_32x32"), spec.useTransposedQk32x32},
         {std::string("use_alibi"), spec.useAlibi},
+        {std::string("emit_lse"), spec.emitLse},
     };
 }
 

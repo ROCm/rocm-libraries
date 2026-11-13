@@ -11,7 +11,7 @@ real TensileLite assembly emitter end-to-end **without a GPU**:
                 ->  generateKernelObjectsFromSolutions  ->  kernel dict(s)
                 ->  KernelWriterAssembly.getSourceFileString  ->  assembly text
 
-When this process imported stinkytofu, non-gfx1250 kernels are emitted by a native-rocisa worker via ``_mapKernelsByBackend``; gfx1250 stays here.
+Every kernel is emitted in-process with native rocisa.
 
 Only the *emit* is exercised here; assembling to a code object (amdclang++) and
 running on hardware are deliberately out of scope. The emitted text is
@@ -176,15 +176,6 @@ def _prepare_kernel(kernel, splitGSU=False):
 _GFX1250 = (12, 5)
 
 
-def _needs_native_rocisa_worker(kernel):
-    """True when a stinkytofu process must emit this non-gfx1250 kernel in a native-rocisa worker."""
-    import rocisa
-
-    if getattr(rocisa, "_BACKEND", "") != "stinkytofu":
-        return False
-    return tuple(kernel["ISA"])[:2] != _GFX1250
-
-
 def _result_tuple(base, res, canonical):
     src = res.src
     if canonical:
@@ -203,45 +194,9 @@ def _emit_in_process(kwa, kernel, splitGSU, canonical):
     return _result_tuple(base, res, canonical)
 
 
-def _emit_native_batch(kwa, kernels, splitGSU, canonical):
-    """Emit these non-gfx1250 kernels on one native-rocisa worker pool."""
-    import functools
-
-    from tensilelite.create_library.run import (
-        _mapKernelsByBackend,
-        processKernelSourceNativeInit,
-    )
-
-    bases = [_prepare_kernel(kernel, splitGSU) for kernel in kernels]
-    asmpath = shutil.which("amdclang++") or "/usr/bin/amdclang++"
-    native_fn = functools.partial(
-        processKernelSourceNativeInit,
-        kwa,
-        asmpath,
-        False,
-        splitGSU,
-        compress=False,
-    )
-    # Adapter is active and every kernel is non-gfx1250, so only native_fn runs.
-    results = _mapKernelsByBackend(native_fn, native_fn, kernels)
-    return [_result_tuple(base, res, canonical) for base, res in zip(bases, results)]
-
-
 def emit_prepared_kernels(kwa, kernels, splitGSU=False, canonical=True):
-    """Return ``[(basename, source, err), ...]``, keeping gfx1250 here and sending other ISAs through ``_mapKernelsByBackend``."""
-    native = []
-    native_at = []
-    out = [None] * len(kernels)
-    for i, kernel in enumerate(kernels):
-        if _needs_native_rocisa_worker(kernel):
-            native.append(kernel)
-            native_at.append(i)
-        else:
-            out[i] = _emit_in_process(kwa, kernel, splitGSU, canonical)
-    if native:
-        for i, item in zip(native_at, _emit_native_batch(kwa, native, splitGSU, canonical)):
-            out[i] = item
-    return out
+    """Return ``[(basename, source, err), ...]`` by emitting each kernel in-process."""
+    return [_emit_in_process(kwa, kernel, splitGSU, canonical) for kernel in kernels]
 
 
 def emit_one_kernel(kwa, kernel, splitGSU=False, canonical=True):
@@ -250,27 +205,8 @@ def emit_one_kernel(kwa, kernel, splitGSU=False, canonical=True):
 
 
 def run_where_backend_matches_isa(isa, fn, *args):
-    """Run ``fn(*args)`` here for gfx1250, or in a native-rocisa worker when the live KernelWriter must stay with the emit."""
-    import rocisa
-
-    if getattr(rocisa, "_BACKEND", "") != "stinkytofu" or tuple(isa)[:2] == _GFX1250:
-        return fn(*args)
-
-    from tensilelite.Common.Parallel import ParallelMap2
-    from tensilelite.create_library.run import _native_rocisa_workers
-
-    def _invoke(_unused):
-        return fn(*args)
-
-    with _native_rocisa_workers():
-        return ParallelMap2(
-            _invoke,
-            [None],
-            "native rocisa",
-            multiArg=False,
-            return_as="list",
-            spawn_worker=True,
-        )[0]
+    """Run ``fn(*args)`` in-process; native rocisa handles every ISA."""
+    return fn(*args)
 
 
 def emit_kernels_from_logic(logic_path, splitGSU=False, canonical=True, limit=None):

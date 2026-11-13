@@ -23,18 +23,23 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+#include "hipblaslt/hipblaslt-ext.hpp"
+#include "hipblaslt_arguments.hpp"
 #include "hipblaslt_data.hpp"
 #include "hipblaslt_datatype2string.hpp"
+#include "hipblaslt_scaling_format.hpp"
 #include "hipblaslt_test.hpp"
 #include "scoped_env.hpp"
 #include "testing_matmul.hpp"
 #include "testing_matmul_batch_offset.hpp"
+#include "utility.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -943,6 +948,70 @@ namespace
             return std::move(name);
         }
     };
+
+    TEST(ClientUniformSummationOrderGrouped, smoke_GroupedSizesAndStridesAdmitCustomKernel)
+    {
+        if(hipblaslt_get_arch() != 942)
+            GTEST_SKIP() << "The mixed FP8/FP16 custom kernel is specific to gfx942";
+
+        Arguments arg{};
+        arg.init();
+        arg.grouped_gemm = 2;
+        for(int i = 0; i < arg.grouped_gemm; ++i)
+        {
+            arg.M[i]   = 256;
+            arg.N[i]   = 144;
+            arg.K[i]   = 32;
+            arg.lda[i] = arg.ldc[i] = arg.ldd[i] = arg.M[i];
+            arg.ldb[i]                           = arg.K[i];
+            arg.stride_a[i]                      = arg.M[i] * arg.K[i];
+            arg.stride_b[i]                      = arg.K[i] * arg.N[i];
+            arg.stride_c[i] = arg.stride_d[i] = arg.M[i] * arg.N[i];
+        }
+        arg.transA = arg.transB = 'N';
+        arg.a_type              = HIP_R_8F_E4M3_FNUZ;
+        arg.compute_type        = HIPBLAS_COMPUTE_32F_FAST_16F;
+        arg.compute_input_typeA = arg.compute_input_typeB = HIP_R_16F;
+        arg.alpha                                         = 2;
+        arg.beta                                          = 1;
+        arg.bias_vector                                   = true;
+        arg.bias_type                                     = HIP_R_32F;
+        arg.scaleA = arg.scaleB = hipblaslt_scaling_format::Scalar;
+        arg.initialization      = hipblaslt_initialization::rand_int;
+        arg.use_ext = arg.use_ext_setproblem = true;
+        arg.algo_method                      = 2;
+        arg.uniform_summation_order          = 0;
+        arg.unit_check                       = 1;
+        arg.iters = arg.cold_iters = 0;
+
+        // A handwritten kernel is refused when uniform order is on. Resolve its
+        // index by name because library regeneration can renumber the solutions.
+        hipblaslt_local_handle                        lookup;
+        std::vector<hipblasLtMatmulHeuristicResult_t> candidates;
+        ASSERT_EQ(hipblaslt_ext::getAllAlgos(lookup,
+                                             hipblaslt_ext::GemmType::HIPBLASLT_GROUPED_GEMM,
+                                             HIPBLAS_OP_N,
+                                             HIPBLAS_OP_N,
+                                             arg.a_type,
+                                             arg.b_type,
+                                             arg.c_type,
+                                             arg.d_type,
+                                             arg.compute_type,
+                                             candidates),
+                  HIPBLAS_STATUS_SUCCESS);
+        const std::string kernel
+            = "Custom_Cijk_Ailk_Bljk_F8NH_HHS_BH_Bias_GG_AS_SAB_SAV_UserArgs_shortname0_gfx942";
+        for(auto& candidate : candidates)
+        {
+            if(hipblaslt_ext::getSolutionNameFromAlgo(lookup, candidate.algo) == kernel)
+            {
+                arg.solution_index = hipblaslt_ext::getIndexFromAlgo(candidate.algo);
+                break;
+            }
+        }
+        ASSERT_GE(arg.solution_index, 0) << "Required custom kernel is missing: " << kernel;
+        testing_matmul(arg);
+    }
 
     TEST_P(matmul_test, matmul)
     {

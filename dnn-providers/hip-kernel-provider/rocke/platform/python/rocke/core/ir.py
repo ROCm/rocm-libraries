@@ -2500,8 +2500,10 @@ class IRBuilder:
         captured into a graph (``GpuCheckCaptureRefused``): nothing reads the
         word after a replay.
 
-        The check does not trap (:meth:`trap`): on Windows the trap handler
-        parks a trapped wave and the launch never returns.
+        The check does not trap (:meth:`trap`): a taken trap does not let the
+        process carry on (``tile.trap`` in
+        ``dsl_docs/reference/op_vocabulary.md``), while a returned lane lets
+        the launch complete.
 
         So the check is a last line of defence for a value the host cannot
         see, not a way to reject input; make bad input impossible upstream.
@@ -6441,19 +6443,16 @@ class IRBuilder:
 
     def trap(self) -> None:
         """Abort the kernel: ``call void @llvm.trap()`` (HIP
-        ``__builtin_trap()``). The AMDGPU backend emits ``s_trap 2``; on gfx11
-        it emits its simulated trap instead: ``s_trap 2``, then ``s_sendmsg``,
-        then an ``s_sethalt`` loop.
+        ``__builtin_trap()``), which the AMDGPU backend emits as ``s_trap 2``
+        or, on some processors, as its simulated trap. Which processors, and
+        what a taken trap does on each host, is stated in the ``tile.trap``
+        section of ``dsl_docs/reference/op_vocabulary.md``.
 
-        What a taken trap does depends on the host. On Linux (ROCr) the queue
-        reports an error and the runtime aborts the process. On Windows the
-        HIP runtime never turns the trap into an error: the launch never
-        returns. Under a debugger the wave stops at the trap. None of these
-        lets the process carry on, so a trap is the last resort, for a
-        condition the host checks before the launch and that must still never
-        reach a memory access on the device. Put it under a branch on that
-        condition (``scf_if``). A check the process must survive belongs on
-        the host, before the launch, not in a trap.
+        A taken trap does not let the process carry on, so a trap is the last
+        resort, for a condition the host checks before the launch and that
+        must still never reach a memory access on the device. Put it under a
+        branch on that condition (``scf_if``). A check the process must
+        survive belongs on the host, before the launch, not in a trap.
         """
         self._op("tile.trap")
 

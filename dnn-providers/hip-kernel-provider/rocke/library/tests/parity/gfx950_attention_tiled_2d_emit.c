@@ -1204,10 +1204,19 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->tile_size = 32;
         break;
 
-    /* --- idx72-75: ALiBi at the slope sites idx16/17 miss (lockstep with the
-     *     Python _CONFIGS[72..75]): 72 per-row hoist (GQA, 24 heads); 73-75 the
-     *     transposed 32x32 per-iter (mask-once), hoisted and inline slopes. */
+    /* --- idx72-74: lse_layout="head_major" at each store site (64-66 + head-major). */
+    /* idx71 is cfg71 above (bf16 D192 one warp); these three sit after it. */
     case 72:
+    case 73:
+    case 74:
+        make_spec(idx - 8, s);
+        s->lse_head_major = true;
+        break;
+
+    /* --- idx75-78: ALiBi at the slope sites idx16/17 miss (lockstep with the
+     *     Python _CONFIGS[75..78]): 75 per-row hoist (GQA, 24 heads); 76-78 the
+     *     transposed 32x32 per-iter (mask-once), hoisted and inline slopes. */
+    case 75:
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 24;
@@ -1218,9 +1227,9 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->has_softcap = false;
         s->use_alibi = true;
         break;
-    case 73:
-    case 74:
-    case 75:
+    case 76:
+    case 77:
+    case 78:
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 32;
@@ -1235,10 +1244,9 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->block_m_per_warp = 32;
         s->has_tile_size = true;
         s->tile_size = 64;
-        s->use_transposed_mask_once = (idx == 73);
-        s->use_transposed_invariant_hoist = (idx == 74);
+        s->use_transposed_mask_once = (idx == 76);
+        s->use_transposed_invariant_hoist = (idx == 77);
         break;
-
     default:
         return -1;
     }
