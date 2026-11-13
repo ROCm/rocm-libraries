@@ -12,7 +12,10 @@
     "g",
     "nwg",
     "bpc",
-    "mult"
+    "mult",
+    "s",
+    "cv",
+    "strip"
   ],
   "behavior_notes": [
     "runtime_compilation"

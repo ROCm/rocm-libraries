@@ -53,8 +53,9 @@ std::optional<WrwProblem> parseWrwProblem(const hipdnn_plugin_sdk::ingestor::Mat
 /// A kernel config, from its metadata. Variants: "floor" (any problem), "tile" (VALU register
 /// tile of a compile-time kd x kh x kw filter), "hankel" (matrix core, 4x4x4 MFMA: q output
 /// columns a tile, g input rows a step, nwg 16-channel groups a wave, bpc blocks per dispatch
-/// unit the partitions aim for, s the stride of both axes, 1 or 2). The hankel fields are 0 for
-/// the VALU variants.
+/// unit the partitions aim for, s the stride of both axes, 1 or 2), "vtile" (VALU, channels-last:
+/// cv channels a thread, read as one vector, strips of `strip` output columns, compile-time
+/// kh x kw). The hankel and vtile fields are 0 for the other variants.
 struct WrwConfig
 {
     std::string variant;
@@ -68,6 +69,9 @@ struct WrwConfig
     /// The depth multiplier the kernel is compiled for (CONV_DW_MULT); 1 for hankel.
     int64_t mult = 1;
     int64_t s = 0;
+    /// The vector tile's ("vtile") channels a thread and output columns a strip; 0 otherwise.
+    int64_t cv = 0;
+    int64_t strip = 0;
 };
 
 /// The LDS a hankel config's partial kernel declares (ConvDepthwiseHankelWrw.h's arithmetic).
@@ -82,6 +86,14 @@ int64_t hankelLdsBytes(const WrwConfig& config);
  *        or 4, bpc 1, 2, 4 or 8; the LDS within the device's (160 KiB on gfx950, else 64 KiB).
  */
 bool hankelAdmits(const WrwProblem& problem, const WrwConfig& config, std::string_view gcnArchName);
+
+/**
+ * @brief Whether the vector-tile config @p config serves @p problem: channels-last, 1-D or 2-D,
+ *        multiplier 1; the config's kh x kw filter; unit width stride and dilation; cv 1, 2, 4 or
+ *        8 dividing the channels; strip 2, 4 or 8; x and dy pointers aligned (@p xAlign,
+ *        @p dyAlign bytes) to a vector of cv elements.
+ */
+bool vtileAdmits(const WrwProblem& problem, const WrwConfig& config, int xAlign, int dyAlign);
 
 /// Splits @p problem's reduction rows into partitions enough to fill @p computeUnits, counted in
 /// dispatch units (device_units: CUs on gfx9, WGPs on gfx10+), at @p config's blocks per unit

@@ -50,6 +50,14 @@
     {
       "name": "s",
       "type": "int"
+    },
+    {
+      "name": "cv",
+      "type": "int"
+    },
+    {
+      "name": "strip",
+      "type": "int"
     }
   ]
 }

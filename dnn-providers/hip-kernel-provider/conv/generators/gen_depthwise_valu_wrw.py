@@ -26,11 +26,13 @@ FIELDS = [
     "bpc",
     "mult",
     "s",
+    "cv",
+    "strip",
 ]
 STRINGS = {"dtype", "layout", "variant"}
 # The matrix-core fields (q output columns a tile, g input rows a step, nwg 16-channel groups a
 # wave, bpc blocks per dispatch unit, s the stride of both axes) are 0 for the VALU variants.
-NO_MMA = dict(q=0, g=0, nwg=0, bpc=0, s=0)
+NO_MMA = dict(q=0, g=0, nwg=0, bpc=0, s=0, cv=0, strip=0)
 CONFIGS = [dict(variant="floor", kd=0, kh=0, kw=0, **NO_MMA, mult=1)] + [
     dict(variant="tile", kd=kd, kh=kh, kw=kw, **NO_MMA, mult=1)
     for kd, kh, kw in (
@@ -66,10 +68,50 @@ HANKEL_SCHEDULES = (
 # Stride 2 (both axes; EfficientNet / MobileNet downsampling layers) stages each x row as its
 # even and odd columns: the same schedules.
 HANKEL = [
-    dict(variant="hankel", kd=1, kh=k, kw=k, q=q, g=g, nwg=nwg, bpc=bpc, mult=1, s=s)
+    dict(
+        variant="hankel",
+        kd=1,
+        kh=k,
+        kw=k,
+        q=q,
+        g=g,
+        nwg=nwg,
+        bpc=bpc,
+        mult=1,
+        s=s,
+        cv=0,
+        strip=0,
+    )
     for s in (1, 2)
     for k in (3, 5, 7)
     for q, g, nwg, bpc in HANKEL_SCHEDULES
+]
+
+# Vector tiles (VALU, channels-last, unit width stride, every type and architecture): cv
+# channels a thread read as one vector, strips of `strip` output columns; (cv, strip) per filter
+# within the register budget.
+VTILE_SHAPES = {
+    3: ((4, 8), (8, 4), (2, 8)),
+    5: ((4, 4), (2, 8)),
+    7: ((2, 8), (2, 4), (1, 8)),
+}
+VTILE = [
+    dict(
+        variant="vtile",
+        kd=1,
+        kh=k,
+        kw=k,
+        q=0,
+        g=0,
+        nwg=0,
+        bpc=0,
+        mult=1,
+        s=0,
+        cv=cv,
+        strip=strip,
+    )
+    for k, shapes in VTILE_SHAPES.items()
+    for cv, strip in shapes
 ]
 
 kmd, umd, udd, ued = U("kmd"), U("umd"), U("udd"), U("ued")
@@ -111,7 +153,7 @@ w(
         "name": "hipkernel:CONV_DEPTHWISE_VALU_WRW",
         "graph_match": {"native": "hipkernel.conv_depthwise_valu_wrw.graph_match"},
         "metadata": kmd,
-        "knobs": ["variant", "q", "g", "nwg", "bpc", "mult"],
+        "knobs": ["variant", "q", "g", "nwg", "bpc", "mult", "s", "cv", "strip"],
         "behavior_notes": ["runtime_compilation"],
     },
 )
@@ -146,6 +188,23 @@ for c in HANKEL:
         tag = f"hankel_k{c['kh']}x{c['kw']}.q{c['q']}g{c['g']}w{c['nwg']}b{c['bpc']}"
         tag += f".s{c['s']}" if c["s"] != 1 else ""
         name = f"conv_depthwise_valu_wrw.{dt}.nhwc.{tag}"
+        kernels.append(
+            {
+                "version": "1.0",
+                "id": U(name),
+                "name": name,
+                "kernel_source": {
+                    "kind": "embedded_source",
+                    "source_file": "kernels/ConvDepthwiseValuWrw.cpp",
+                    "entry_point": "ConvDepthwiseValuWrwPartial",
+                },
+                "metadata": {"dtype": dtype, "layout": "NHWC", **c},
+                "priority": 0,
+            }
+        )
+for c in VTILE:
+    for dtype, dt in (("FLOAT", "f32"), ("HALF", "f16"), ("BFLOAT16", "bf16")):
+        name = f"conv_depthwise_valu_wrw.{dt}.nhwc.vtile_k{c['kh']}x{c['kw']}.v{c['cv']}s{c['strip']}"
         kernels.append(
             {
                 "version": "1.0",

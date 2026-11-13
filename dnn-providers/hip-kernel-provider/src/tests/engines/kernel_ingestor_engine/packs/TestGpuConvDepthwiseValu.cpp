@@ -653,13 +653,16 @@ struct WrwConfig
     int64_t mult = 1;
     /// The hankel configs' stride (both axes); 0 for the VALU variants.
     int64_t s = 0;
+    /// The vector tiles' channels a thread and output columns a strip; 0 otherwise.
+    int64_t cv = 0;
+    int64_t strip = 0;
 
     std::string tag() const
     {
         return layout + "_" + variant + "_k" + std::to_string(kd) + "x" + std::to_string(kh) + "x"
                + std::to_string(kw) + "_q" + std::to_string(q) + "g" + std::to_string(g) + "w"
                + std::to_string(nwg) + "b" + std::to_string(bpc) + "m" + std::to_string(mult) + "s"
-               + std::to_string(s);
+               + std::to_string(s) + "v" + std::to_string(cv) + "x" + std::to_string(strip);
     }
 };
 
@@ -698,6 +701,21 @@ const std::vector<WrwConfig>& wrwCatalog()
             {
                 configs.push_back({layout, "tile", 1, k, k, 0, 0, 0, 0, 2});
             }
+        }
+        // Vector tiles: (filter, cv, strip).
+        for(const auto& [k, cv, strip] : std::vector<std::array<int64_t, 3>>{{3, 4, 8},
+                                                                             {3, 8, 4},
+                                                                             {3, 2, 8},
+                                                                             {5, 4, 4},
+                                                                             {5, 2, 8},
+                                                                             {7, 2, 8},
+                                                                             {7, 2, 4},
+                                                                             {7, 1, 8}})
+        {
+            WrwConfig config{"NHWC", "vtile", 1, k, k};
+            config.cv = cv;
+            config.strip = strip;
+            configs.push_back(config);
         }
         for(const int64_t stride : {1, 2})
         {
@@ -747,7 +765,9 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition wrwKernelFor(const WrwConfig& conf
            {"nwg", config.nwg},
            {"bpc", config.bpc},
            {"mult", config.mult},
-           {"s", config.s}};
+           {"s", config.s},
+           {"cv", config.cv},
+           {"strip", config.strip}};
     return kernel;
 }
 
@@ -1644,6 +1664,121 @@ TEST(TestConvDepthwiseValuWrwHankel, RefusesOneFieldAtATime)
         c.mutate(shape, config, arch);
         const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::BACKWARD_WEIGHTS)),
                                    countedDevice(64, arch));
+        const auto bound = matchesGraph(pack, fixture.context());
+        ASSERT_TRUE(bound.has_value());
+        EXPECT_EQ(
+            matchesKernel(pack, fixture.context(), wrwKernelFor(config, shape.dataType), *bound),
+            c.admitted);
+    }
+}
+
+// Host-only: the vector-tile backward-weights gates, one field at a time from an admitted base
+// (fp16 channels-last 3x3, 40 channels, 4 channels a thread, strips of 8; 16-byte pointers).
+TEST(TestConvDepthwiseValuWrwVtile, RefusesOneFieldAtATime)
+{
+    struct Align
+    {
+        int64_t x = 16;
+        int64_t y = 16;
+    };
+    struct Case
+    {
+        std::string name;
+        std::function<void(ConvShape&, WrwConfig&, Align&)> mutate;
+        bool admitted;
+    };
+    const auto base = [] { return depthwise(40, {13, 21}, {3, 3}, {1, 1}, true); };
+    const std::vector<Case> cases{
+        {"Base", [](ConvShape&, WrwConfig&, Align&) {}, true},
+        {"Float", [](ConvShape& s, WrwConfig&, Align&) { s.dataType = DataType::FLOAT; }, true},
+        {"Bf16", [](ConvShape& s, WrwConfig&, Align&) { s.dataType = DataType::BFLOAT16; }, true},
+        {"ChannelsFirst",
+         [](ConvShape& s, WrwConfig& c, Align&) {
+             s.channelsLast = false;
+             c.layout = "NCHW";
+         },
+         false},
+        {"HeightStride2", [](ConvShape& s, WrwConfig&, Align&) { s.stride = {2, 1}; }, true},
+        {"WidthStride2", [](ConvShape& s, WrwConfig&, Align&) { s.stride = {1, 2}; }, false},
+        {"HeightDilation2",
+         [](ConvShape& s, WrwConfig&, Align&) {
+             s.dilation = {2, 1};
+             s.prePadding = s.postPadding = {2, 1};
+         },
+         true},
+        {"WidthDilation2",
+         [](ConvShape& s, WrwConfig&, Align&) {
+             s.dilation = {1, 2};
+             s.prePadding = s.postPadding = {1, 2};
+         },
+         false},
+        {"ChannelsNotVectors",
+         [](ConvShape& s, WrwConfig&, Align&) { s.c = s.k = s.groups = 42; },
+         false},
+        {"ChannelsOfTwoVectors",
+         [](ConvShape& s, WrwConfig& c, Align&) {
+             s.c = s.k = s.groups = 42;
+             c.cv = 2;
+         },
+         true},
+        {"FilterNotTheConfigs",
+         [](ConvShape& s, WrwConfig&, Align&) {
+             s.filter = {5, 5};
+             s.prePadding = s.postPadding = {2, 2};
+         },
+         false},
+        {"FilterWidthNotTheConfigs",
+         [](ConvShape& s, WrwConfig&, Align&) {
+             s.filter = {3, 5};
+             s.prePadding = s.postPadding = {1, 2};
+         },
+         false},
+        {"ConfigDepthNotOne", [](ConvShape&, WrwConfig& c, Align&) { c.kd = 3; }, false},
+        {"ThreeD",
+         [](ConvShape& s, WrwConfig&, Align&) {
+             s = depthwise(40, {4, 13, 21}, {1, 3, 3}, {0, 1, 1}, true);
+         },
+         false},
+        {"Multiplier",
+         [](ConvShape& s, WrwConfig& c, Align&) {
+             s.k = 80;
+             c.mult = 2;
+         },
+         false},
+        {"CvThree", [](ConvShape&, WrwConfig& c, Align&) { c.cv = 3; }, false},
+        {"CvZero", [](ConvShape&, WrwConfig& c, Align&) { c.cv = 0; }, false},
+        {"CvSixteen", [](ConvShape&, WrwConfig& c, Align&) { c.cv = 16; }, false},
+        {"StripThree", [](ConvShape&, WrwConfig& c, Align&) { c.strip = 3; }, false},
+        {"StripZero", [](ConvShape&, WrwConfig& c, Align&) { c.strip = 0; }, false},
+        {"XAlignedToFourBytes", [](ConvShape&, WrwConfig&, Align& a) { a.x = 4; }, false},
+        {"DyAlignedToFourBytes", [](ConvShape&, WrwConfig&, Align& a) { a.y = 4; }, false},
+        {"FourBytesFitTwoHalves",
+         [](ConvShape&, WrwConfig& c, Align& a) {
+             a.x = a.y = 4;
+             c.cv = 2;
+         },
+         true},
+        {"WithMatrixFields", [](ConvShape&, WrwConfig& c, Align&) { c.q = 32; }, false},
+        {"WithAStride", [](ConvShape&, WrwConfig& c, Align&) { c.s = 1; }, false},
+        {"TileWithVectorFields",
+         [](ConvShape&, WrwConfig& c, Align&) { c.variant = "tile"; },
+         false},
+    };
+    const auto pack = wrwPack();
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(c.name);
+        auto shape = base();
+        shape.dataType = DataType::HALF;
+        WrwConfig config{"NHWC", "vtile", 1, 3, 3};
+        config.cv = 4;
+        config.strip = 8;
+        Align align;
+        c.mutate(shape, config, align);
+        auto spec = specFor(shape, ConvDirection::BACKWARD_WEIGHTS);
+        spec.x.alignment = align.x;
+        spec.y.alignment = align.y;
+        const GraphFixture fixture(buildGraph(spec), countedDevice(64, "gfx942"));
         const auto bound = matchesGraph(pack, fixture.context());
         ASSERT_TRUE(bound.has_value());
         EXPECT_EQ(
