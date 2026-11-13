@@ -58,6 +58,10 @@ namespace hipdnn_frontend::graph
  * - Dropout keep-mask dump (RNG_DUMP output)
  * - Deterministic-algorithm request and max_total_seq_len_q/kv workspace hints
  *
+ * The sink, dSink and RNG-dump inputs and outputs, their getters, and the
+ * is_deterministic_algorithm and max_total_seq_len_q/kv members were introduced in
+ * hipdnn_frontend 0.5.0; before it, their setters recorded the graph as unsupported.
+ *
  * @code{.cpp}
  * SdpaBackwardAttributes attr;
  * attr.set_attn_scale(1.0f / std::sqrt(static_cast<float>(d_k)))

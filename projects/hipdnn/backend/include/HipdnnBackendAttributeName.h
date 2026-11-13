@@ -1254,6 +1254,8 @@ typedef enum
     /** @brief Compute data type for SDPA backward */
     HIPDNN_ATTR_SDPA_BWD_COMP_TYPE_EXT = 3128,
 
+    /** @brief Introduced in hipdnn_backend 0.5.0: the six SDPA backward attributes below
+     *  (3129-3134). */
     /** @brief Attention sink token tensor for SDPA backward (optional) */
     HIPDNN_ATTR_OPERATION_SDPA_BWD_SINK_TOKEN_EXT = 3129,
 
