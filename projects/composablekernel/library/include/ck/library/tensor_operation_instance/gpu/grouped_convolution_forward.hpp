@@ -104,6 +104,16 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                 add_device_grouped_conv2d_fwd_dl_gnhwc_gkyxc_gnhwk_f16_instances(op_ptrs);
             }
 #endif
+#ifdef CK_ENABLE_BF16
+            if constexpr(is_same_v<InDataType, ck::bhalf_t> &&
+                         is_same_v<WeiDataType, ck::bhalf_t> &&
+                         is_same_v<OutDataType, ck::bhalf_t> &&
+                         is_same_v<AComputeType, ck::bhalf_t> &&
+                         is_same_v<BComputeType, ck::bhalf_t>)
+            {
+                add_device_grouped_conv2d_fwd_dl_gnhwc_gkyxc_gnhwk_bf16_instances(op_ptrs);
+            }
+#endif
         }
         if constexpr(NumDimSpatial == 2 && is_same_v<InLayout, NHWGC> &&
                      is_same_v<WeiLayout, GKYXC> && is_same_v<OutLayout, NHWGK>)
@@ -123,6 +133,16 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                          is_same_v<BComputeType, half_t>)
             {
                 add_device_grouped_conv2d_fwd_dl_nhwgc_gkyxc_nhwgk_f16_instances(op_ptrs);
+            }
+#endif
+#ifdef CK_ENABLE_BF16
+            if constexpr(is_same_v<InDataType, ck::bhalf_t> &&
+                         is_same_v<WeiDataType, ck::bhalf_t> &&
+                         is_same_v<OutDataType, ck::bhalf_t> &&
+                         is_same_v<AComputeType, ck::bhalf_t> &&
+                         is_same_v<BComputeType, ck::bhalf_t>)
+            {
+                add_device_grouped_conv2d_fwd_dl_nhwgc_gkyxc_nhwgk_bf16_instances(op_ptrs);
             }
 #endif
         }

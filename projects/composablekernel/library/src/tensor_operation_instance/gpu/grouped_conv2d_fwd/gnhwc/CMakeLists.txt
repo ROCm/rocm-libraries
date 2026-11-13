@@ -4,6 +4,7 @@
 # GNHWC layout instances for grouped_conv2d_fwd
 set(GROUPED_CONV2D_FWD_GNHWC
    # dl
+   dl/device_grouped_conv2d_fwd_dl_gnhwc_gkyxc_gnhwk_bf16_instance.cpp
    dl/device_grouped_conv2d_fwd_dl_gnhwc_gkyxc_gnhwk_f16_instance.cpp
    dl/device_grouped_conv2d_fwd_dl_gnhwc_gkyxc_gnhwk_f32_instance.cpp
    # wmma
