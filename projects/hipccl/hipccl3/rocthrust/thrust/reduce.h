@@ -31,7 +31,8 @@
 #endif // no system header
 #include <thrust/detail/execution_policy.h>
 #include <thrust/iterator/iterator_traits.h>
-#include <thrust/pair.h>
+
+#include _THRUST_STD_INCLUDE(__utility/pair.h)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -639,6 +640,7 @@ THRUST_HOST_DEVICE void reduce_into(
  *
  *  \param first The beginning of the input sequence.
  *  \param last The end of the input sequence.
+ *  \param output An output iterator to write the result to.
  *  \param init The initial value.
  *  \param binary_op The binary function used to 'sum' values.
  *  \return The result of the reduction.
@@ -720,7 +722,7 @@ void reduce_into(InputIterator first, InputIterator last, OutputIterator output,
  *  int C[N];                         // output keys
  *  int D[N];                         // output values
  *
- *  thrust::pair<int*,int*> new_end;
+ *  _THRUST_STD::pair<int*,int*> new_end;
  *  new_end = thrust::reduce_by_key(thrust::host, A, A + N, B, C, D);
  *
  *  // The first four keys in C are now {1, 3, 2, 1} and new_end.first - C is 4.
@@ -737,7 +739,7 @@ template <typename DerivedPolicy,
           typename InputIterator2,
           typename OutputIterator1,
           typename OutputIterator2>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
   InputIterator1 keys_first,
   InputIterator1 keys_last,
@@ -784,7 +786,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
  *  int C[N];                         // output keys
  *  int D[N];                         // output values
  *
- *  thrust::pair<int*,int*> new_end;
+ *  _THRUST_STD::pair<int*,int*> new_end;
  *  new_end = thrust::reduce_by_key(A, A + N, B, C, D);
  *
  *  // The first four keys in C are now {1, 3, 2, 1} and new_end.first - C is 4.
@@ -797,7 +799,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
  *  \see unique_by_key_copy
  */
 template <typename InputIterator1, typename InputIterator2, typename OutputIterator1, typename OutputIterator2>
-thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   InputIterator1 keys_first,
   InputIterator1 keys_last,
   InputIterator2 values_first,
@@ -851,7 +853,7 @@ thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
  *  int C[N];                         // output keys
  *  int D[N];                         // output values
  *
- *  thrust::pair<int*,int*> new_end;
+ *  _THRUST_STD::pair<int*,int*> new_end;
  *  _THRUST_STD::equal_to<int> binary_pred;
  *  new_end = thrust::reduce_by_key(thrust::host, A, A + N, B, C, D, binary_pred);
  *
@@ -870,7 +872,7 @@ template <typename DerivedPolicy,
           typename OutputIterator1,
           typename OutputIterator2,
           typename BinaryPredicate>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
   InputIterator1 keys_first,
   InputIterator1 keys_last,
@@ -920,7 +922,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
  *  int C[N];                         // output keys
  *  int D[N];                         // output values
  *
- *  thrust::pair<int*,int*> new_end;
+ *  _THRUST_STD::pair<int*,int*> new_end;
  *  _THRUST_STD::equal_to<int> binary_pred;
  *  new_end = thrust::reduce_by_key(A, A + N, B, C, D, binary_pred);
  *
@@ -938,7 +940,7 @@ template <typename InputIterator1,
           typename OutputIterator1,
           typename OutputIterator2,
           typename BinaryPredicate>
-thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   InputIterator1 keys_first,
   InputIterator1 keys_last,
   InputIterator2 values_first,
@@ -998,7 +1000,7 @@ thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
  *  int C[N];                         // output keys
  *  int D[N];                         // output values
  *
- *  thrust::pair<int*,int*> new_end;
+ *  _THRUST_STD::pair<int*,int*> new_end;
  *  _THRUST_STD::equal_to<int> binary_pred;
  *  _THRUST_STD::plus<int> binary_op;
  *  new_end = thrust::reduce_by_key(thrust::host, A, A + N, B, C, D, binary_pred, binary_op);
@@ -1019,7 +1021,7 @@ template <typename DerivedPolicy,
           typename OutputIterator2,
           typename BinaryPredicate,
           typename BinaryFunction>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
   InputIterator1 keys_first,
   InputIterator1 keys_last,
@@ -1075,7 +1077,7 @@ THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
  *  int C[N];                         // output keys
  *  int D[N];                         // output values
  *
- *  thrust::pair<int*,int*> new_end;
+ *  _THRUST_STD::pair<int*,int*> new_end;
  *  _THRUST_STD::equal_to<int> binary_pred;
  *  _THRUST_STD::plus<int> binary_op;
  *  new_end = thrust::reduce_by_key(A, A + N, B, C, D, binary_pred, binary_op);
@@ -1095,7 +1097,7 @@ template <typename InputIterator1,
           typename OutputIterator2,
           typename BinaryPredicate,
           typename BinaryFunction>
-thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   InputIterator1 keys_first,
   InputIterator1 keys_last,
   InputIterator2 values_first,

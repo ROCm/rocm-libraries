@@ -82,20 +82,11 @@ struct arbitrary_functor2
 
 int main()
 {
-  // allocate storage
-  thrust::device_vector<float> A(5);
-  thrust::device_vector<float> B(5);
-  thrust::device_vector<float> C(5);
+  // allocate and initialize
+  thrust::device_vector<float> A{3, 4, 0, 8, 2};
+  thrust::device_vector<float> B{6, 7, 2, 1, 8};
+  thrust::device_vector<float> C{2, 5, 7, 4, 3};
   thrust::device_vector<float> D1(5);
-
-  // clang-format off
-  // initialize input vectors
-  A[0] = 3;  B[0] = 6;  C[0] = 2;
-  A[1] = 4;  B[1] = 7;  C[1] = 5;
-  A[2] = 0;  B[2] = 2;  C[2] = 7;
-  A[3] = 8;  B[3] = 1;  C[3] = 4;
-  A[4] = 2;  B[4] = 8;  C[4] = 3;
-  // clang-format on
 
   // apply the transformation
   thrust::for_each(thrust::make_zip_iterator(thrust::make_tuple(A.begin(), B.begin(), C.begin(), D1.begin())),
@@ -104,7 +95,7 @@ int main()
 
   // print the output
   std::cout << "Tuple functor" << std::endl;
-  for (int i = 0; i < 5; i++)
+  for (size_t i = 0; i < A.size(); i++)
   {
     std::cout << A[i] << " + " << B[i] << " * " << C[i] << " = " << D1[i] << std::endl;
   }
@@ -117,7 +108,7 @@ int main()
 
   // print the output
   std::cout << "N-ary functor" << std::endl;
-  for (int i = 0; i < 5; i++)
+  for (size_t i = 0; i < A.size(); i++)
   {
     std::cout << A[i] << " + " << B[i] << " * " << C[i] << " = " << D2[i] << std::endl;
   }

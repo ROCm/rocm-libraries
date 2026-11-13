@@ -29,18 +29,18 @@
 #elif defined(_CCCL_IMPLICIT_SYSTEM_HEADER_MSVC)
 #  pragma system_header
 #endif // no system header
-#include <thrust/iterator/iterator_traits.h>
 
-#include _THRUST_STD_INCLUDE(iterator)
+#include _THRUST_STD_INCLUDE(__iterator/distance.h)
+#include _THRUST_STD_INCLUDE(__iterator/iterator_traits.h)
 
 THRUST_NAMESPACE_BEGIN
 
 //! deprecated [since 10.1]
 
 template <class InputIter>
-CCCL_DEPRECATED_BECAUSE("Use cuda::std::distance instead")
-[[nodiscard]] _CCCL_API constexpr typename _THRUST_STD::iterator_traits<InputIter>::difference_type
-  distance(InputIter first, InputIter last)
+[[nodiscard]] CCCL_DEPRECATED_BECAUSE("Use cuda::std::distance instead")
+_CCCL_API constexpr typename _THRUST_STD::iterator_traits<InputIter>::difference_type
+distance(InputIter first, InputIter last)
 {
   return _THRUST_STD::distance(first, last);
 }

@@ -26,7 +26,6 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/internal_functional.h>
-#include <thrust/distance.h>
 #include <thrust/find.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/iterator_traits.h>
@@ -34,14 +33,13 @@
 #include <thrust/system/detail/generic/sort.h>
 #include <thrust/tuple.h>
 
-THRUST_NAMESPACE_BEGIN
-namespace system
-{
-namespace detail
-{
-namespace generic
-{
+#include _THRUST_STD_INCLUDE(__functional/operations.h)
+#include _THRUST_STD_INCLUDE(__iterator/advance.h)
+#include _THRUST_STD_INCLUDE(__iterator/distance.h)
 
+THRUST_NAMESPACE_BEGIN
+namespace system::detail::generic
+{
 template <typename DerivedPolicy, typename RandomAccessIterator>
 THRUST_HOST_DEVICE void
 sort(thrust::execution_policy<DerivedPolicy>& exec, RandomAccessIterator first, RandomAccessIterator last)
@@ -174,8 +172,5 @@ THRUST_HOST_DEVICE void stable_sort_by_key(
   static_assert(thrust::detail::depend_on_instantiation<RandomAccessIterator1, false>::value,
                 "unimplemented for this system");
 } // end stable_sort_by_key()
-
-} // namespace generic
-} // namespace detail
-} // namespace system
+} // namespace system::detail::generic
 THRUST_NAMESPACE_END

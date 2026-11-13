@@ -28,11 +28,31 @@
 
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/reduce.h>
-#include <thrust/system/detail/adl/reduce.h>
-#include <thrust/system/detail/adl/reduce_by_key.h>
+#include <thrust/system/detail/generic/select_system.h>
+
+// Include all active backend system implementations (generic, sequential, host and device)
 #include <thrust/system/detail/generic/reduce.h>
 #include <thrust/system/detail/generic/reduce_by_key.h>
-#include <thrust/system/detail/generic/select_system.h>
+#include <thrust/system/detail/sequential/reduce.h>
+#include <thrust/system/detail/sequential/reduce_by_key.h>
+#include __THRUST_HOST_SYSTEM_ALGORITH_DETAIL_HEADER_INCLUDE(reduce.h)
+#include __THRUST_DEVICE_SYSTEM_ALGORITH_DETAIL_HEADER_INCLUDE(reduce.h)
+#include __THRUST_HOST_SYSTEM_ALGORITH_DETAIL_HEADER_INCLUDE(reduce_by_key.h)
+#include __THRUST_DEVICE_SYSTEM_ALGORITH_DETAIL_HEADER_INCLUDE(reduce_by_key.h)
+
+// Some build systems need a hint to know which files we could include
+#if 0
+#  include <thrust/system/cpp/detail/reduce.h>
+#  include <thrust/system/cpp/detail/reduce_by_key.h>
+#  include <thrust/system/cuda/detail/reduce.h>
+#  include <thrust/system/hip/detail/reduce.h>
+#  include <thrust/system/cuda/detail/reduce_by_key.h>
+#  include <thrust/system/hip/detail/reduce_by_key.h>
+#  include <thrust/system/omp/detail/reduce.h>
+#  include <thrust/system/omp/detail/reduce_by_key.h>
+#  include <thrust/system/tbb/detail/reduce.h>
+#  include <thrust/system/tbb/detail/reduce_by_key.h>
+#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -112,7 +132,7 @@ template <typename DerivedPolicy,
           typename InputIterator2,
           typename OutputIterator1,
           typename OutputIterator2>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
   InputIterator1 keys_first,
   InputIterator1 keys_last,
@@ -137,7 +157,7 @@ template <typename DerivedPolicy,
           typename OutputIterator1,
           typename OutputIterator2,
           typename BinaryPredicate>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
   InputIterator1 keys_first,
   InputIterator1 keys_last,
@@ -165,7 +185,7 @@ template <typename DerivedPolicy,
           typename OutputIterator2,
           typename BinaryPredicate,
           typename BinaryFunction>
-THRUST_HOST_DEVICE thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
+THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
   InputIterator1 keys_first,
   InputIterator1 keys_last,
@@ -266,7 +286,7 @@ void reduce_into(InputIterator first, InputIterator last, OutputIterator output,
 }
 
 template <typename InputIterator1, typename InputIterator2, typename OutputIterator1, typename OutputIterator2>
-thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   InputIterator1 keys_first,
   InputIterator1 keys_last,
   InputIterator2 values_first,
@@ -294,7 +314,7 @@ template <typename InputIterator1,
           typename OutputIterator1,
           typename OutputIterator2,
           typename BinaryPredicate>
-thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   InputIterator1 keys_first,
   InputIterator1 keys_last,
   InputIterator2 values_first,
@@ -330,7 +350,7 @@ template <typename InputIterator1,
           typename OutputIterator2,
           typename BinaryPredicate,
           typename BinaryFunction>
-thrust::pair<OutputIterator1, OutputIterator2> reduce_by_key(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by_key(
   InputIterator1 keys_first,
   InputIterator1 keys_last,
   InputIterator2 values_first,

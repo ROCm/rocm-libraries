@@ -19,20 +19,13 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/allocator/allocator_traits.h>
-#include <thrust/detail/memory_wrapper.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/iterator_traits.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(__memory/addressof.h)
-#endif
-
-#include <utility>
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
-
-#include <new>
+#include _THRUST_STD_INCLUDE(__host_stdlib/memory)
+#include _THRUST_STD_INCLUDE(__memory/addressof.h)
+#include _THRUST_STD_INCLUDE(__new/device_new.h)
+#include _THRUST_STD_INCLUDE(__type_traits/remove_cvref.h)
 
 #include <nv/target>
 

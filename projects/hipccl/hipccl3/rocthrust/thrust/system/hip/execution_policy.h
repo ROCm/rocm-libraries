@@ -37,4 +37,3 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/system/hip/detail/execution_policy.h>
-#include <thrust/system/hip/detail/par.h>

@@ -29,11 +29,10 @@
 
 #include <thrust/detail/type_traits/pointer_traits.h>
 #include <thrust/system/detail/bad_alloc.h>
-#include <thrust/system/hip/detail/par.h>
+#include <thrust/system/hip/detail/execution_policy.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <cstddef>
-#endif
+#include _THRUST_STD_INCLUDE(__utility/pair.h)
+#include _THRUST_STD_INCLUDE(cstddef)
 
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
@@ -43,7 +42,7 @@ namespace hip_rocprim
 // overloads should be selected.
 
 template <typename T>
-THRUST_HOST pair<T*, _THRUST_STD::ptrdiff_t> get_temporary_buffer(par_nosync_t&, _THRUST_STD::ptrdiff_t n)
+THRUST_HOST _THRUST_STD::pair<T*, _THRUST_STD::ptrdiff_t> get_temporary_buffer(par_nosync_t&, _THRUST_STD::ptrdiff_t n)
 {
   void* ptr;
   hipError_t status = hipMallocAsync(&ptr, sizeof(T) * n, nullptr);
@@ -62,7 +61,7 @@ THRUST_HOST pair<T*, _THRUST_STD::ptrdiff_t> get_temporary_buffer(par_nosync_t&,
     }
   }
 
-  return make_pair(reinterpret_pointer_cast<T*>(ptr), n);
+  return _THRUST_STD::make_pair(reinterpret_pointer_cast<T*>(ptr), n);
 }
 
 template <typename Pointer>
@@ -88,7 +87,7 @@ THRUST_HOST void return_temporary_buffer(par_nosync_t&, Pointer ptr, _THRUST_STD
 }
 
 template <typename T>
-THRUST_HOST pair<T*, _THRUST_STD::ptrdiff_t>
+THRUST_HOST _THRUST_STD::pair<T*, _THRUST_STD::ptrdiff_t>
 get_temporary_buffer(execute_on_stream_nosync& system, _THRUST_STD::ptrdiff_t n)
 {
   void* ptr;
@@ -108,7 +107,7 @@ get_temporary_buffer(execute_on_stream_nosync& system, _THRUST_STD::ptrdiff_t n)
     }
   }
 
-  return make_pair(reinterpret_pointer_cast<T*>(ptr), n);
+  return _THRUST_STD::make_pair(reinterpret_pointer_cast<T*>(ptr), n);
 }
 
 template <typename Pointer>

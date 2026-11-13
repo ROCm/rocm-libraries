@@ -36,7 +36,6 @@
 THRUST_NAMESPACE_BEGIN
 namespace mr
 {
-
 /*! \addtogroup memory_resources Memory Resources
  *  \ingroup memory_management
  *  \{
@@ -117,6 +116,5 @@ private:
 
 /*! \} // memory_resources
  */
-
 } // namespace mr
 THRUST_NAMESPACE_END

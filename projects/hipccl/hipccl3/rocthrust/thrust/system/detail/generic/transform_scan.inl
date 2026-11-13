@@ -30,18 +30,11 @@
 #include <thrust/scan.h>
 #include <thrust/system/detail/generic/transform_scan.h>
 
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_STD_INCLUDE(type_traits)
-#endif
+#include _THRUST_STD_INCLUDE(__type_traits/remove_cvref.h)
 
 THRUST_NAMESPACE_BEGIN
-namespace system
+namespace system::detail::generic
 {
-namespace detail
-{
-namespace generic
-{
-
 template <typename ExecutionPolicy,
           typename InputIterator,
           typename OutputIterator,
@@ -58,7 +51,7 @@ THRUST_HOST_DEVICE OutputIterator transform_inclusive_scan(
   // Use the input iterator's value type per https://wg21.link/P0571
   using InputType  = thrust::detail::it_value_t<InputIterator>;
   using ResultType = thrust::detail::invoke_result_t<UnaryFunction, InputType>;
-  using ValueType  = ::internal::remove_cvref_t<ResultType>;
+  using ValueType  = _THRUST_STD::remove_cvref_t<ResultType>;
 
   thrust::transform_iterator<UnaryFunction, InputIterator, ValueType> _first(first, unary_op);
   thrust::transform_iterator<UnaryFunction, InputIterator, ValueType> _last(last, unary_op);
@@ -83,7 +76,7 @@ THRUST_HOST_DEVICE OutputIterator transform_inclusive_scan(
 {
   using InputType  = thrust::detail::it_value_t<InputIterator>;
   using ResultType = thrust::detail::invoke_result_t<UnaryFunction, InputType>;
-  using ValueType  = ::internal::remove_cvref_t<ResultType>;
+  using ValueType  = _THRUST_STD::remove_cvref_t<ResultType>;
 
   thrust::transform_iterator<UnaryFunction, InputIterator, ValueType> _first(first, unary_op);
   thrust::transform_iterator<UnaryFunction, InputIterator, ValueType> _last(last, unary_op);
@@ -107,15 +100,12 @@ THRUST_HOST_DEVICE OutputIterator transform_exclusive_scan(
   AssociativeOperator binary_op)
 {
   // Use the initial value type per https://wg21.link/P0571
-  using ValueType = ::internal::remove_cvref_t<InitialValueType>;
+  using ValueType = _THRUST_STD::remove_cvref_t<InitialValueType>;
 
   thrust::transform_iterator<UnaryFunction, InputIterator, ValueType> _first(first, unary_op);
   thrust::transform_iterator<UnaryFunction, InputIterator, ValueType> _last(last, unary_op);
 
   return thrust::exclusive_scan(exec, _first, _last, result, init, binary_op);
 } // end transform_exclusive_scan()
-
-} // end namespace generic
-} // end namespace detail
-} // end namespace system
+} // namespace system::detail::generic
 THRUST_NAMESPACE_END
