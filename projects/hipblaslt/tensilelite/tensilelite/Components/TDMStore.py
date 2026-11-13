@@ -104,7 +104,8 @@ def tdmStoreRejectReason(state):
   buffer_store. A static GlobalSplitU > 1 shares its kernel with GlobalSplitU=-1 and a split-K setting overrides
   it, so the copy is picked at run time for it as well.
   StoreRemapVectorWidth applies to the blocks that keep buffer_store; a TDM block stages D itself and
-  skips the remap.
+  skips the remap. In a block whose stores run in the CompactLoopStore loop, the block sets up the staged tile and loads C
+  before the loop, steps the staged tile's base by each iteration's rows and stores the tile after the loop.
   """
   if not state["TDMStoreInst"]:
     return None
@@ -124,8 +125,6 @@ def tdmStoreRejectReason(state):
     return "TDMStoreInst requires GlobalSplitU=1 or -1, or MultipleBufferSingleKernel"
   if state["UseSubtileImpl"]:
     return "TDMStoreInst does not support UseSubtileImpl"
-  if state["CompactLoopStore"]:
-    return "TDMStoreInst does not support CompactLoopStore"
   if pt["FusedGemmA2A"]:
     return "TDMStoreInst does not support FusedGemmA2A"
   return None

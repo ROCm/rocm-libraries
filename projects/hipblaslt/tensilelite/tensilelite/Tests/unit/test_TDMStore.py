@@ -169,7 +169,6 @@ _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
   ({"DestDataType": DataType("c")}, _OUTPUT),
   ({"GlobalSplitU": 2}, "TDMStoreInst requires GlobalSplitU=1 or -1, or MultipleBufferSingleKernel"),
   ({"UseSubtileImpl": True}, "TDMStoreInst does not support UseSubtileImpl"),
-  ({"CompactLoopStore": True}, "TDMStoreInst does not support CompactLoopStore"),
   ({"FusedGemmA2A": True}, "TDMStoreInst does not support FusedGemmA2A"),
 ])
 def test_rejects_unsupported(overrides, reason):
@@ -823,6 +822,36 @@ def test_e_kernel_tdm_blocks_keep_the_masked_side_effects(gp_gfx1250, gfx1250_ii
     if k.endswith("_Then"):
       assert pick(v, "C", "buffer_load") == pick(ref[k], "C", "buffer_load"), k
       assert sum("stage D element" in l for l in v) == len(pick(ref[k], "D", "buffer_store")), k
+
+
+@pytest.mark.parametrize("level", [1, 2, 3])
+def test_compact_loop_store_tdm_block_outside_the_loop(gp_gfx1250, gfx1250_iim, assembler, capsys, level):
+  """Develop's CompactLoopStore E kernel: each TDM block runs its stores in the CompactLoopStore loop. It sets up the
+  staged tile (and loads C) before the loop label, stages every element inside the loop, steps the staged tile's base
+  once an iteration when the loop runs more than once, and stores the tile once, after the loop exits; no D
+  buffer_store is left in any TDM block."""
+  sol, asm = _emit_asm(gfx1250_iim, assembler, TDMStoreInst=level, ProblemType=_AUX_E,
+                       **dict(_AUX_E_SOLUTION, CompactLoopStore=True))
+  assert sol.get("Valid"), capsys.readouterr().out
+  blocks = _storeBlocks(asm)
+  tdm = {k: v for k, v in blocks.items() if any(l.startswith("tensor_store_from_lds ") for l in v)}
+  assert tdm
+  iterated = []
+  for k, v in tdm.items():
+    assert not [l for l in v if l.startswith("buffer_store") and "s[sgprSrdD:" in l], k
+    label = [n for n, l in enumerate(v) if re.match(r"label_CLS_?\d*:$", l)]
+    assert len(label) == 1, k
+    name = v[label[0]][:-1]
+    count = [int(m.group(1), 0) for l in v for m in [re.match(r"s_mov_b32 s\[sgprCLSLoopCounter\], (\w+)", l)] if m]
+    setup = min(n for n, l in enumerate(v) if "tile column = coord1 - wg1*MT1" in l)
+    branch = max(n for n, l in enumerate(v) if name in l)
+    stage = [n for n, l in enumerate(v) if "stage D element" in l]
+    step = [n for n, l in enumerate(v) if "next iteration's rows of the staged tile" in l]
+    store = [n for n, l in enumerate(v) if l.startswith("tensor_store_from_lds ")]
+    assert len(count) == 1 and setup < label[0] < min(stage) and max(stage) < branch < min(store), k
+    assert len(step) == int(count[0] > 1) and all(max(stage) < n < branch for n in step), k
+    iterated.append(count[0] > 1)
+  assert any(iterated), "no TDM block loops more than once"
 
 
 def test_automatic_store_remap_vector_width(gp_gfx1250, gfx1250_iim, assembler, capsys):
