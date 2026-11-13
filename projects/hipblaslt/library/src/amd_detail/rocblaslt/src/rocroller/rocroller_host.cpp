@@ -20,6 +20,8 @@
 
 #include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
 
+#include <optional>
+
 using namespace rocRoller;
 
 std::string rocRollerShortKernelNameFromEncodedSolutionIndex(int encodedSolutionIndex)
@@ -36,6 +38,10 @@ std::string rocRollerShortKernelNameFromEncodedSolutionIndex(int encodedSolution
 struct RocRollerHandle
 {
     SolutionCache cache;
+
+    // Looked up on the first block-scaled problem, so other workloads never load the
+    // rocRoller architecture library for it.
+    std::optional<bool> hasBlockScaling;
 };
 
 /**
@@ -347,10 +353,25 @@ static bool supportsBlockScaling(rocblaslt_handle handle, const KernelType& kern
        && !isBlockScaling(kernelType.scaleTypeB.format))
         return true;
 
-    auto target = GPUArchitectureTarget::fromString(handle->properties.gcnArchName,
-                                                    handle->properties.asicRevision);
-    return GPUArchitectureLibrary::getInstance()->HasCapability(target,
-                                                                GPUCapability::HasBlockScaling32);
+    auto& hasBlockScaling
+        = static_cast<RocRollerHandle*>(handle->rocroller_handle)->hasBlockScaling;
+    if(!hasBlockScaling)
+    {
+        hasBlockScaling = false;
+        try
+        {
+            auto target     = GPUArchitectureTarget::fromString(handle->properties.gcnArchName,
+                                                            handle->properties.asicRevision);
+            hasBlockScaling = GPUArchitectureLibrary::getInstance()->HasCapability(
+                target, GPUCapability::HasBlockScaling32);
+        }
+        catch(const std::exception& e)
+        {
+            // fromString throws on an architecture rocRoller does not know, such as gfx1100.
+            log_info(__func__, e.what());
+        }
+    }
+    return *hasBlockScaling;
 }
 
 /**
