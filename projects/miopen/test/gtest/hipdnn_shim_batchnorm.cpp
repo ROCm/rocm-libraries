@@ -221,7 +221,7 @@ TrainActivationV2(miopen::Handle& handle, TrainData& d, miopenActivationDescript
 }
 
 template <typename Data>
-miopenStatus_t InferV1(miopen::Handle& handle, Data& d, bool with_estimates)
+miopenStatus_t InferV1(miopen::Handle& handle, Data& d, bool with_mean, bool with_variance)
 {
     return miopenBatchNormalizationForwardInference(&handle,
                                                     d.bn_mode,
@@ -234,10 +234,16 @@ miopenStatus_t InferV1(miopen::Handle& handle, Data& d, bool with_estimates)
                                                     &d.scale.desc,
                                                     d.scale_dev.get(),
                                                     d.shift_dev.get(),
-                                                    with_estimates ? d.estMean_dev.get() : nullptr,
-                                                    with_estimates ? d.estVariance_dev.get()
-                                                                   : nullptr,
+                                                    with_mean ? d.estMean_dev.get() : nullptr,
+                                                    with_variance ? d.estVariance_dev.get()
+                                                                  : nullptr,
                                                     d.epsilon);
+}
+
+template <typename Data>
+miopenStatus_t InferV1(miopen::Handle& handle, Data& d, bool with_estimates)
+{
+    return InferV1(handle, d, with_estimates, with_estimates);
 }
 
 miopenStatus_t
@@ -1192,20 +1198,32 @@ TEST(GPU_HipdnnShimBNClippedActivation_FP32, MatchesCpuReference)
 }
 
 // The training it runs must keep the caller's epsilon. The default one is 1e-5,
-// so a second case uses an epsilon large next to the variance.
+// so a second case uses an epsilon large next to the variance. MIOpen runs
+// inference only when both estimates are given, so one missing estimate is
+// enough to run training.
 TEST(GPU_HipdnnShimBNInferWithoutEstimates_FP32, RunsTraining)
 {
     auto&& handle = get_handle();
 
-    for(const auto& [name, epsilon] : {std::pair<std::string, double>{"infer_no_estimates", 1e-5},
-                                       {"infer_no_estimates_large_epsilon", 0.5}})
+    struct NoEstimatesCase
     {
-        SCOPED_TRACE(name);
+        std::string name;
+        double epsilon;
+        bool with_mean;
+        bool with_variance;
+    };
+    for(const auto& c : {NoEstimatesCase{"infer_no_estimates", 1e-5, false, false},
+                         NoEstimatesCase{"infer_no_estimates_large_epsilon", 0.5, false, false},
+                         NoEstimatesCase{"infer_no_estimated_mean", 0.5, false, true},
+                         NoEstimatesCase{"infer_no_estimated_variance", 0.5, true, false}})
+    {
+        SCOPED_TRACE(c.name);
         InferData d;
         SetUpInfer(d);
-        d.epsilon         = epsilon;
-        const auto result = hs::CaptureCall([&] { return InferV1(handle, d, false); });
-        if(ExpectServed(name, result))
+        d.epsilon = c.epsilon;
+        const auto result =
+            hs::CaptureCall([&] { return InferV1(handle, d, c.with_mean, c.with_variance); });
+        if(ExpectServed(c.name, result))
             CheckInferWithoutEstimates(handle, d);
     }
 }
