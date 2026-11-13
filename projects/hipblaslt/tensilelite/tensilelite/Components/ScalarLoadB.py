@@ -16,7 +16,7 @@ slice after it, i.e. right after its last use.
 
 from math import log2
 
-from rocisa.code import Module, Label, ValueSet
+from rocisa.code import Module, Label, RegSet, ValueSet
 from rocisa.register import RegisterPool
 from rocisa.container import sgpr, vgpr, VCC
 from rocisa.instruction import FlatLoadB32, SAddU32, SAddCU32, SCBranchSCC1, SCmpLeU32, SLoadB32, \
@@ -256,6 +256,10 @@ def prefetch(writer, kernel) -> Module:
     return module
 
 
+# SGPRs that are only read again by the store code. Their values wait in VGPRs during the
+# summation so that the ring can use their registers. Any use in between fails to assemble
+# (the symbol is undefined), so a missed case cannot silently read a B value.
+_PARKED = ("Alpha", "Beta", "AddressD", "AddressC", "StridesD", "StridesC")
 # Not read after the tile setup; released for the ring.
 _DEAD_AFTER_SETUP = ("SrdB", "ShadowLimitB", "GlobalReadIncsB", "AddressA", "AddressB", "StridesA",
                      "StridesB", "WGM", "OrigLoopCounter", "StaggerU")
@@ -282,6 +286,49 @@ def _release(writer, name: str) -> Module:
     module = Module("release %s" % name)
     module.add(_undefAliases(writer, name))
     module.add(writer.undefineSgpr(name))
+    return module
+
+
+def numParkVgprs(kernel) -> int:
+    pt = kernel["ProblemType"]
+    scalar = pt["ComputeDataType"].numRegisters()
+    return 2 * scalar + 2 * 2 + 2 * (pt["NumIndicesC"] - 1)
+
+
+def park(writer, kernel) -> Module:
+    """Move the store-only SGPRs to VGPRs. Emit on a path every wave takes."""
+    module = Module("ScalarLoadB park")
+    module.addComment0("ScalarLoadB: keep store arguments in VGPRs during the summation")
+    v = writer.states.startVgprScalarLoadBPark
+    parked = []
+    for name in _PARKED:
+        size = _inUse(writer, name)
+        if not size:
+            continue
+        for i in range(size):
+            module.add(VMovB32(dst=vgpr(v), src=sgpr("%s+%u" % (name, i)), comment="park %s" % name))
+            v += 1
+        parked.append((name, size))
+        module.add(_undefAliases(writer, name))
+        module.add(writer.setSgprToFreeState(name))
+    assert v - writer.states.startVgprScalarLoadBPark <= numParkVgprs(kernel)
+    writer.states.scalarLoadBParked = parked
+    return module
+
+
+def unpark(writer, kernel) -> Module:
+    """Bring the parked SGPRs back once the ring is released."""
+    module = Module("ScalarLoadB unpark")
+    v = writer.states.startVgprScalarLoadBPark
+    for name, size in writer.states.scalarLoadBParked:
+        # the same registers as before: aliases such as StrideD1J were resolved against them
+        module.add(writer.setSgprToInUseState(name))
+        for alias, offset in writer.states.sgprAliases.get(name, []):
+            module.add(RegSet("s", "sgpr" + alias, "sgpr" + name, offset))
+        for i in range(size):
+            module.add(VReadfirstlaneB32(dst=sgpr("%s+%u" % (name, i)), src=vgpr(v), comment="unpark %s" % name))
+            v += 1
+    writer.states.scalarLoadBParked = []
     return module
 
 
