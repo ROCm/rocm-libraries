@@ -326,6 +326,14 @@ std::vector<DeviceCase> deviceCases()
     auto manyTiles = dense(136, 8, {160, 160}, {3, 3}, {1, 1}, true);
     manyTiles.n = 6;
     cases.push_back({"Nhwc3x3ManyTiles", manyTiles});
+    // Batch-unfold rows tiles (two images per MFMA column group): an odd batch leaves the last
+    // group one image short; 24 columns fill 8-column halves exactly, 21 do not.
+    auto oddBatch = dense(64, 136, {11, 24}, {3, 3}, {1, 1}, true);
+    oddBatch.n = 3;
+    cases.push_back({"Nhwc3x3OddBatch", oddBatch});
+    auto oddBatchRagged = dense(72, 40, {9, 21}, {3, 3}, {2, 2}, true);
+    oddBatchRagged.n = 5;
+    cases.push_back({"Nhwc3x3OddBatchRagged", oddBatchRagged});
     return cases;
 }
 
