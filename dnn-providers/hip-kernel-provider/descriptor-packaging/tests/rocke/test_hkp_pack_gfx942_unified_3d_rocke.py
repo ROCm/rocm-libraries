@@ -93,8 +93,15 @@ def _root(tmp_path, spec):
     return root
 
 
-def _pack(root, tmp_path, hip_compiler, rocm_kpack_dir, hip_path=None,
-          device_lib_path=None, export=None):
+def _pack(
+    root,
+    tmp_path,
+    hip_compiler,
+    rocm_kpack_dir,
+    hip_path=None,
+    device_lib_path=None,
+    export=None,
+):
     override = os.environ.get("HKP_PACK_OUTPUT_DIR")
     out = Path(override) / export if override and export else tmp_path / "out"
     if out.exists():
@@ -190,8 +197,14 @@ def test_a_module_the_predicate_refuses_is_refused_at_pack_time(
     assert not ok and "LDS" in reason
 
     with pytest.raises(HkpPackError) as excinfo:
-        _pack(_root(tmp_path, spec), tmp_path, hip_compiler, rocm_kpack_dir,
-              hip_path=hip_path, device_lib_path=device_lib_path)
+        _pack(
+            _root(tmp_path, spec),
+            tmp_path,
+            hip_compiler,
+            rocm_kpack_dir,
+            hip_path=hip_path,
+            device_lib_path=device_lib_path,
+        )
     assert re.search(
         rf"spec rejected by {PREDICATE} for builder '{BUILDER}' @ {ARCH}: "
         + re.escape(reason),
