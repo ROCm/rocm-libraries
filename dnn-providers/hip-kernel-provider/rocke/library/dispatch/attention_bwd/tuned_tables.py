@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 """Checks of the per-arch tuned tables of the attention backward.
 
-The per-arch modules (:mod:`.gfx942_tuning`, :mod:`.gfx950_tuning`) hold the
-tuned tables; this module is the gate an entry passes before it is shipped.
+The per-arch modules (:mod:`.gfx942_tuning`, :mod:`.gfx950_tuning`,
+:mod:`.gfx1151_tuning`, :mod:`.gfx1201_tuning`) hold the tuned tables; this module is the gate an entry passes before it is shipped.
 An entry is checked by planning it, the way the routing consumes it, on
 representative requests of its key:
 

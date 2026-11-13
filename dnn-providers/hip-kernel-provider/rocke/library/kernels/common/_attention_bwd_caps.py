@@ -51,7 +51,8 @@ __all__ = [
     "wide_k_atom_available",
 ]
 
-# Arches the backward knows about (gfx1201 is compile-only for the families).
+# Arches the backward knows about (each one declared on its hardware run:
+# attention_bwd_plan.DECLARED_ARCHS).
 BWD_ARCHES = ("gfx942", "gfx950", "gfx1151", "gfx1201")
 
 # Fence of every barrier of the backward kernels (``IRBuilder.sync``, set as

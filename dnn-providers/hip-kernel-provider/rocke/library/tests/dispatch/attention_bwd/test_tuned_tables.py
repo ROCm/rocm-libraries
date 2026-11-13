@@ -276,9 +276,18 @@ def test_a_tuned_shape_without_num_cus_keeps_the_defaults():
         assert got.specs == attn_bwd_plan(bare, arch, policy=_GATE).specs
 
 
-def test_rdna_targets_have_no_tables():
-    assert set(routing.ARCH_TUNING) == {"gfx942", "gfx950"}
+def test_rdna_tables_are_general_only():
+    """An RDNA module holds general entries only: no dense key (the dense
+    family is not built on RDNA), no status entry (RDNA classes read
+    ``degraded``), and the routed policy carries exactly its own keys."""
+    assert set(routing.ARCH_TUNING) == {"gfx942", "gfx950", "gfx1151", "gfx1201"}
     pol = _routed()
     for arch in ("gfx1151", "gfx1201"):
-        assert not any(k[0] == arch for k in pol.tuned_table)
+        mod = routing.ARCH_TUNING[arch]
+        assert mod.ARCH == arch
+        assert not mod.DENSE_TUNED
+        assert not mod.GENERAL_PERF_STATUS and not mod.DENSE_PERF_STATUS
+        assert all(k[:2] == (arch, "general") for k in mod.GENERAL_TUNED_TABLE)
+        mine = {k for k in pol.tuned_table if k[0] == arch}
+        assert mine == set(mod.GENERAL_TUNED_TABLE)
         assert not any(k[0] == arch for k in pol.dense_pack)

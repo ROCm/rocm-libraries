@@ -283,6 +283,12 @@ DECLARATION_NOTES = (
     "gfx1201: declared on the hardware run of the backward suite; the "
     "forward-to-backward chain tests are skipped there (the forward probe "
     "shell has no gfx12 body); the frozen-fixture chain test runs",
+    "gfx1151, gfx1201: the declared matrix is served in full (no RDNA-only "
+    "decline): every cell the predicate accepts runs on device, the full "
+    "backward suite passing on both; what RDNA does not build is routed "
+    "around, not declined (the dense family, split dQ, LDS DMA and ring "
+    "depths above 1), and the deterministic backward is declined on every "
+    "target under the shipped policy",
 )
 
 # Ordered reason codes (first failure wins). Row 3 of the order is the group of

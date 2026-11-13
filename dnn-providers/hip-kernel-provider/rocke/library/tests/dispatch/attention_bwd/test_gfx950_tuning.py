@@ -17,7 +17,7 @@ import json
 
 import pytest
 
-from dispatch.attention_bwd import gfx942_tuning
+from dispatch.attention_bwd import gfx942_tuning, gfx1151_tuning, gfx1201_tuning
 from dispatch.attention_bwd import gfx950_tuning as g
 from dispatch.attention_bwd import routing
 from dispatch.attention_bwd.dense_tuning import DENSE_BWD_TUNED
@@ -30,7 +30,12 @@ from kernels.common.attention_bwd_plan import (
 
 def test_tables_are_registered_and_joined():
     assert g.ARCH == "gfx950"
-    assert routing.ARCH_TUNING == {"gfx942": gfx942_tuning, "gfx950": g}
+    assert routing.ARCH_TUNING == {
+        "gfx942": gfx942_tuning,
+        "gfx950": g,
+        "gfx1151": gfx1151_tuning,
+        "gfx1201": gfx1201_tuning,
+    }
     assert g.GENERAL_TUNED_TABLE and g.DENSE_TUNED
     assert all(k[:2] == ("gfx950", "general") for k in g.GENERAL_PERF_STATUS)
     assert all(k[:2] == ("gfx950", "dense") for k in g.DENSE_PERF_STATUS)

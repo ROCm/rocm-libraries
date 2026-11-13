@@ -298,6 +298,8 @@ def test_ranker_general_and_unified_tables():
     """A request of a tuned general key ranks the general family as tuned;
     a unified request of a tuned page tile ranks the unified family."""
     for arch, mod in sorted(routing.ARCH_TUNING.items()):
+        if not mod.GENERAL_TUNED_TABLE:
+            continue
         key = next(iter(mod.GENERAL_TUNED_TABLE))
         prob = next(
             r
