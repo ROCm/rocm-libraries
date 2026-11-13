@@ -398,6 +398,9 @@ def evaluate(state):
     # read stashes segWaveByteOff (lraTileAssignmentSwizzledTDM). Only the tight MIWaveGroup=[2,2] symmetric
     # case where B spans its whole LDS component (pure-REPLACE branch) is validated; gate the rest below.
     _swzB = bool(pt.get("SwizzleTensorB"))
+    _dtB = pt.get("DataTypeB")
+    if _swzB and hasattr(_dtB, "numBytes") and _dtB.numBytes() < 1:
+        return _no("swizzle-B LSI: F4 not validated")
     if tuple(state.get("ISA", ()))[:2] != (12, 5):             return _no("not gfx1250")
     if not (state.get("enableTDMA") and state.get("enableTDMB") and state["NumWaves"] > 1):
         return _no("not wave-separated TDM")

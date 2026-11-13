@@ -11498,7 +11498,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       # Compact swizzle block along K, matching the host pre-swizzle (gfx1250 F8: BK=32 elements).
       # inner = one ds_load_b128 = 16 bytes of elements; kMid = wave32 / 16-lane N-group = 2.
       tP["swizzlePackK"] = 1
-      innerKElems = 16 // int(kernel["ProblemType"]["DataType%s"%cM].numBytes())
+      innerKElems = int(16 / kernel["ProblemType"]["DataType%s"%cM].numBytes())
       miMorN = kernel["MatrixInstM"] if cM == "A" else kernel["MatrixInstN"]  # tile free-dim MI extent
       kMid = kernel["WavefrontSize"] // miMorN
       tP["swizzleK"] = innerKElems * kMid

@@ -820,7 +820,7 @@ class LocalReadMFMA(LocalRead):
         maxLDSConstOffset = writer.states.regCaps["maxLDSConstOffset"]
         depthU      = kernel["_DepthU%s" % tc]
         miN         = kernel["MatrixInstM"] if tile01 == 0 else kernel["MatrixInstN"]  # tile free-dim MI (M for A, N for B)
-        innerK      = 16 // int(kernel["ProblemType"]["DataType%s" % tc].numBytes())  # elems per ds_load_b128
+        innerK      = int(16 / kernel["ProblemType"]["DataType%s" % tc].numBytes())  # elems per ds_load_b128
         kMcount     = kernel["WavefrontSize"] // miN     # K-halves interleaved across lane-groups
         blockOff    = miN * innerK                       # inner [nI,kI] block
         kOStride    = kMcount * blockOff                 # read-block (kO) stride
