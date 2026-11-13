@@ -107,6 +107,10 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  data types when the value arrays of both \p source and \p target are set, so they also convert
 *  a matrix with zero nonzeros and no value arrays for any pair of data types.
 *
+*  Conversions to a single-precision type round each value (each real and imaginary part) to
+*  nearest. Values that overflow single precision become infinity of the same sign, NaN is
+*  preserved, and \ref rocsparse_status_success is returned.
+*
 *  \note
 *  This routine does not support batched computation.
 *
