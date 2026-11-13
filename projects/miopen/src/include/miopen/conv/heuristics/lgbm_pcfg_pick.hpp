@@ -16,6 +16,7 @@ namespace miopen {
 struct Handle;
 namespace conv {
 struct ProblemDescription;
+enum class Direction;
 } // namespace conv
 
 namespace ai {
@@ -50,6 +51,13 @@ ScorePickForTest(const std::string& solver_name,
                  const std::vector<double>& prob_feature_prefix,
                  const std::vector<std::string>& cand_descs,
                  const std::vector<std::vector<double>>& cand_args);
+
+// True when the picker must not use `solver_name`'s model for (gfx_id, direction), whether or not
+// lgbm_pcfg.bin has buckets for it. PickConfig then abstains and the solver runs its default
+// config.
+MIOPEN_INTERNALS_EXPORT bool HeldOutOfPicker(const std::string& solver_name,
+                                             const std::string& gfx_id,
+                                             conv::Direction direction);
 
 } // namespace pcfg
 } // namespace lgbm
