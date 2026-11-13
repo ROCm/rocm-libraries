@@ -46,29 +46,25 @@ using namespace hip_kernel_provider::test_utilities;
  * Each expected kernel id is resolved at run time from the production descriptors by
  * expectedKernelId().
  *
- * A forced case earns its keep when its tile differs from the shape's no-knob winner: a
- * knob that failed to reach the plugin would then select that winner and fail the id
- * check. That holds for 49 of the 56 forced cases. The other seven force the tile their
- * shape would have chosen anyway, so they still check numerics and that the class exists,
- * but they cannot catch a knob that never arrived.
+ * A cold case expects whatever ranks the catalog in the shipped configuration. Since the
+ * trained gfx950 rankers were promoted that is a trained model, not preferredTile, and the
+ * two disagree on a few shapes (see Cold_MmaBfloat16). Promoting or retraining a model can
+ * therefore move a cold expectation; a forced one it cannot touch.
  *
- * That split is a consequence of the tile heuristic, not of how the cases were authored.
- * The cases were written when the cold winner was 256/64 for every shape that could take
- * it; selection now reads the shape (see preferredTile in Gfx950AttentionDenseNative.cpp),
- * so the winners moved and some coincide with their forced tile. Three cases were given a
- * longer query length to restore the property, which changes no (head size, dtype, causal,
- * tile) class because selection does not read sequence length into the class.
+ * A forced case is guarded by the candidate count, not by which tile wins. Every forced
+ * case asserts the selection logged "at rank 0 from 1 candidate(s)": the knob filter is
+ * what leaves one candidate, so a knob that never reached the plugin leaves the shape's
+ * several matching tiles and fails that line whatever it then ranks first. The tile id is
+ * checked too, but it is not what catches a lost knob.
  *
- * The remaining seven cannot be repaired that way:
- *  - Two force 256/128 at D128 non-causal, which is what preferredTile wants for that
- *    cohort at every length, so no shape makes the cold winner differ.
- *  - One forces 256/32 at Skv 480, a length no wider block_n divides. That is the point
- *    of the case, so widening Skv to separate the winners would delete its coverage.
- *  - Four are causal, where the kernel needs seqlen_q == seqlen_kv, so crossing the
- *    block_m threshold means growing both lengths to 4096 or 8192. The per-case CPU
- *    reference is quadratic in those, which is not worth paying for an id check.
- * TestGfx950AttentionDenseScore.PinsTheForcedKnobCasesThatCannotDiscriminate pins that
- * set on the host, so it cannot grow here without a test saying so.
+ * What this would MISS is a shape only one catalog tile divides, where the count is 1 with
+ * or without the knob. No case here is one: the narrowest, D128_Bm256Bn32 at Skv 480,
+ * still has two tiles because both block_m values divide its query length.
+ *
+ * Three cases were given a longer query length so their forced tile also differs from the
+ * tile the shape wins cold, which makes the id check independently meaningful. That
+ * changes no (head size, dtype, causal, tile) class, because selection does not read
+ * sequence length into the class.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::integration
 {
@@ -234,10 +230,15 @@ std::vector<KnobCase> knobCases()
          makeShape(BF16, 64, 16, 2, Mask::BOUNDS_TOP_LEFT, FP16, 2, 256, 512),
          COLD,
          Tile{128, 128}},
+        // The trained gfx950 ranker takes this one and Cold_D128Hq8Kv8_Bf16NoMask below
+        // somewhere the native rule does not (it wants 128/128 here). Both shapes are
+        // D128 non-causal, the cohort §6 of the case study calls the weak one, and
+        // neither was in the sweep, so which tile is faster is unmeasured. What is
+        // checked is that the pick is correct: the CPU reference compare runs either way.
         {"Cold_MmaBfloat16",
          makeShape(BF16, 128, 8, 1, Mask::NO_MASK, BF16, 3, 384, 256),
          COLD,
-         Tile{128, 128}},
+         Tile{128, 64}},
         {"Cold_CausalBottomRightFlag",
          makeShape(FP16, 64, 8, 8, Mask::CAUSAL_MASK_BOTTOM_RIGHT_FLAG, MMA_UNSET, 2, 512, 512),
          COLD,
@@ -420,8 +421,10 @@ std::vector<KnobCase> knobCases()
          makeShape(FP16, 128, 32, 8, Mask::BOUNDS_BOTTOM_RIGHT, MMA_UNSET, 1, 256, 256),
          FORCED,
          Tile{256, 64}},
-        // The same three graphs as cold cases, which now assert where preferredTile() sends
-        // a non-causal shape at Sq=Skv=256 rather than standing in for the classes above.
+        // The same three graphs as cold cases, which now assert where the shipped ranker
+        // sends a non-causal shape at Sq=Skv=256 rather than standing in for the classes
+        // above. On gfx950 that ranker is a trained model, so the third case below differs
+        // from what preferredTile alone would pick.
         {"Cold_D64Hq8Kv8_Bf16NoMask",
          makeShape(BF16, 64, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
          COLD,
@@ -430,10 +433,11 @@ std::vector<KnobCase> knobCases()
          makeShape(FP16, 64, 16, 16, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
          COLD,
          Tile{128, 128}},
+        // Trained ranker again, where the native rule wants 256/128. See Cold_MmaBfloat16.
         {"Cold_D128Hq8Kv8_Bf16NoMask",
          makeShape(BF16, 128, 8, 8, Mask::NO_MASK, MMA_UNSET, 1, 256, 256),
          COLD,
-         Tile{256, 128}},
+         Tile{128, 128}},
         // An fp16 graph with each explicit mma_core_mode.
         {"Cold_Fp16MmaHalf",
          makeShape(FP16, 128, 16, 16, Mask::BOUNDS_TOP_LEFT, FP16, 2, 256, 512),
@@ -522,8 +526,9 @@ using IntegrationGpuGfx950AttentionDenseKnobCoverage
     = IntegrationGpuGfx950AttentionDenseBase<KnobCase>;
 
 /// knobCases() is a static table because its cases register before main() names the
-/// descriptor root. This keeps it honest: the (head_size, Hq, Hkv) configurations it covers
-/// must be exactly those the shipped catalog carries.
+/// descriptor root. What this check keeps honest is the (head size, dtype, mask, tile)
+/// classes the table covers, which must be exactly those the shipped catalog carries.
+/// Head configurations are not among them, which is the point below.
 /// The catalog no longer enumerates head configurations: the kernel reads
 /// num_query_heads / num_kv_heads as kernargs, so one entry per (dtype, head size, mask,
 /// tile) serves every one of them. Both halves below matter. A served kernel carrying a

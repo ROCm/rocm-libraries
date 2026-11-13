@@ -213,8 +213,10 @@ double tilePreference(const attention_dense::AttentionDenseTile& tile,
  *
  * A graph this scorer cannot read the shape from scores every tile as a zero-length
  * problem rather than refusing: applicability is kernelMatches' job and anything reaching
- * here already passed it. That makes 128/128 preferred -- the small tile, which is the
- * safe choice for an unknown shape -- and ranks the rest ascending behind it.
+ * here already passed it. That makes 128/128 preferred, the small tile being the safe
+ * choice for an unknown shape. The rest fall in by how much of that tile they match, not
+ * by size: the other block_m 128 tiles on the block_m bonus, then 256/128 on the block_n
+ * bonus alone, then the remaining block_m 256 tiles, each group ordered by the remainder.
  */
 double scoreKernel(const MatchContext& context,
                    const BoundTokens& /*bound*/,

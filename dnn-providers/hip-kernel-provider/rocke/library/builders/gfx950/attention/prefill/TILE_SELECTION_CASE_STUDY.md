@@ -77,12 +77,14 @@ By cohort on the combined set: D64 causal 1.0041, D128 causal 1.0109, D64 non-ca
 
 ### What the change actually selects differently
 
-Tile selection is a pure function of head size, mask and the two sequence lengths, so
-it can be evaluated over its whole domain without a device.
-`tile_selection_diff.py` does that for three selectors: what `develop` shipped
-(256/64 wherever it serves, ascending otherwise), what this change ships, and rocKE's
-own `library/dispatch/attention/gfx950_dense.py::_base_spec`, which it calls rather
-than restates. Over the 180 servable shapes in a 9-length walk:
+Tile selection is a pure function of head size, mask and the two sequence lengths, so it
+was evaluated over its whole domain on the host, once, for three selectors: what
+`develop` shipped (256/64 wherever it serves, ascending otherwise), the rule of §2, and
+rocKE's own `library/dispatch/attention/gfx950_dense.py::_base_spec`. The counts below
+are that run, over the 180 servable shapes in a 9-length walk of 128 to 16384. They are
+a record of what the change did, not a gate: the rule's one home is
+`preferredTile`/`tilePreference` in `Gfx950AttentionDenseNative.cpp`, and
+`TestGfx950AttentionDenseScore` is what holds it to its order.
 
 | cohort | shapes | selection changed | dispatcher differs |
 | --- | --- | --- | --- |
@@ -101,10 +103,6 @@ The dispatcher column is the consistency gap in §9, measured rather than assert
 returns 256/64 for every shape, because the shape-aware branches in `_base_spec` are
 all gated on a persistent body, a sliding window or a segment axis, and the catalog
 ships none of those. It is not a second opinion that disagrees, it is the old constant.
-
-`tile_selection_diff.py --check` re-reads the four thresholds out of
-`Gfx950AttentionDenseNative.cpp` and fails if the mirror has drifted, so the table
-above cannot quietly describe a rule the engine no longer implements.
 
 ## 4. Tried and rejected
 
@@ -239,8 +237,8 @@ median sits on the winning side, which is the difference between the two.
 
 **Why the tier mattered.** The two differ only in how many graphs were measured, so the
 smoke model was not a worse idea, it was the same idea fitted on too little. Running the
-cheap tier first is what exposed that, and it cost about half an hour of device time to
-learn it rather than shipping a tie.
+cheap tier first is what exposed that, at a fraction of the standard tier's device time,
+rather than shipping a tie.
 
 **What the corpus could not reach.** The shape pool caps out near 800 from the LLM suite
 and the search together, so a denser aligned grid was generated to give the standard tier
@@ -256,10 +254,6 @@ export PYTHONPATH=$PWD/platform/python:$PWD/library
 # Host-only: build and compile every (shape, tile) the sweep will time.
 # The servable pairs must resolve to exactly the 52 shipped kernels.
 python library/builders/gfx950/attention/prefill/tile_sweep_validate.py
-
-# Host-only: the §3 differential of develop, this change and the rocKE dispatcher.
-# --check alone verifies the mirrored thresholds still match the engine.
-python library/builders/gfx950/attention/prefill/tile_selection_diff.py
 
 # On gfx950. --dry-run prints the plan; --limit and --offset make it resumable.
 python library/builders/gfx950/attention/prefill/tile_sweep.py \
@@ -279,22 +273,24 @@ the finding.
 - The rocKE dispatcher's `_base_spec` does not yet mirror this rule: it picks 256/64 on
   177 of the 180 shapes §3's differential walks, agreeing only where the new rule also
   wants 256/64. That path is not load-bearing for production, so it is a consistency fix
-  rather than a perf change, and `tile_selection_diff.py` is the check that closes it.
+  rather than a perf change.
 - No C++ twin of the rocKE dispatcher exists. That work is tracked separately and is
   not part of this change.
-- The trained rankers of §7 are validated but not installed. What remains is the shipped
-  layout: the house installs under `sort_kernel_catalog/<arch>/<metric>/`, which needs
-  the generator change that binds a per-arch key. On `develop` today the generator still
-  emits `default` for every descriptor engine, so promoting now would ship a path the
-  house has moved off. Stage V ran under `--arch-key default`, which decides where a
-  model installs rather than whether it works, so its verdict holds under `gfx950` too.
-  The manifest gains an `engine.trained_rankers.<arch>` block naming the per-metric UHD
-  ids and a `trained_catalog_sha256`, which is also the retrain trigger: the fingerprint
-  is of the KDP the rankers were trained on, so any catalog add, remove or rename
-  invalidates it. `tools/catalog_fingerprint.py` prints the value.
-- Promotion is additive rather than a replacement. The native UHD carries no
-  `score.metric`, so a trained model installs under its own metric and the native
-  scorer remains the metric-less fallback. Both ids then appear in the role map.
+- The trained rankers of §7 are installed. They ship under
+  `heuristics/<ued-id>/sort_kernel_catalog/gfx950/<metric>/`, one per metric, bound in
+  the config's `engine.heuristics` beside `trained_catalog_sha256`, which is also the
+  retrain trigger: the fingerprint is of the KDP the rankers were trained on, so any
+  catalog add, remove or rename invalidates it and the generator's gate fails.
+  `tools/catalog_fingerprint.py` prints the value. Stage V ran under
+  `--arch-key default`, which decides where a model installs rather than whether it
+  works, so its verdict carries to `gfx950`.
+- Promotion is additive in the role map but not in behaviour. All three ids appear, the
+  native one still under `default`, but on gfx950 the trained models are what rank the
+  catalog: the device suite caught two cold cases where a model picks a different tile
+  from `preferredTile`, both D128 non-causal and neither in the sweep, so which is
+  faster there is unmeasured. Both picks are correct, and the native scorer still ranks
+  every other arch. The rule of §2 therefore describes what ships off gfx950, and the
+  floor under gfx950 when no model is bound.
 - 26 of the 12,870 corpus rows carry no decided correctness verdict, which RFC 0019
   Open Question 19 leaves open per operation. Their timings trained the model without
   having been shown correct.
@@ -305,8 +301,8 @@ the finding.
   correctness result at the hipDNN level, which §3 cannot give because it compares tiles
   at the rocKE level. Three tooling defects stop the comparison itself:
   - `tools/sweep.py` reads `doc["metadata"]`, which dnn-benchmarking dropped at
-    `schema_version: 2`. Current HEAD fails silently: the benchmark times all 282 graphs
-    and the driver reports every one `missing`. Only `73fff8a` (2026-09-30) works.
+    `schema_version: 2`. Against a `schema_version: 2` document it fails silently: the
+    benchmark times all 282 graphs and the driver reports every one `missing`.
   - `configs/templates/attention_sdpa_fwd.graph.json` emits no `attn_scale_value`.
     hipDNN binds an absent scale to 1.0 and torch applies `1/sqrt(d)`, so the two
     compute different functions and every graph fails correctness. Patching the graphs

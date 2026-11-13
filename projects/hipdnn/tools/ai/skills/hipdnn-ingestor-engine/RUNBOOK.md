@@ -1083,11 +1083,20 @@ For a set with trained models, choose one of these and record the choice in the 
 
 A fourth outcome is that the inventory comes back empty, which is a no-op rather than a
 choice. Record it anyway, with the evidence, so a reviewer can tell it apart from an
-inventory nobody took. `hipkernel:Gfx950AttentionDense` is the worked example: its UHD
-declares `"adapter": "native"`, its UED binds `sort_kernel_catalog` as `default` alone
-with no per-arch lists and no `predict_engine`, and no `heuristics/<ued-id>/` subtree is
-installed. Its ranking is native and tile-only, so regenerating the whole KDP for the
-head-count collapse left nothing to retain, retrain or drop.
+inventory nobody took. `hipkernel:Gfx950AttentionDense` is the worked example, and it
+also shows why the record is dated rather than permanent. When its KDP was regenerated
+for the head-count collapse its UHD declared `"adapter": "native"`, its UED bound
+`sort_kernel_catalog` as `default` alone with no per-arch lists and no `predict_engine`,
+and no `heuristics/<ued-id>/` subtree was installed, so that regeneration had nothing to
+retain, retrain or drop.
+
+Trained `tflops` and `time` models were promoted for `gfx950` later in the same change,
+so the engine now binds a per-arch list beside `default` and carries an installed
+`heuristics/<ued-id>/` subtree. The next regeneration therefore faces a real choice, and
+`engine.trained_catalog_sha256` is what forces it: the fingerprint is of the catalog
+those models were measured against, so a regeneration that changes the catalog fails the
+generator's gate until the choice is made. An empty inventory is a fact about one moment,
+not a property of the engine.
 
 Never splice a scratch UED over a live one carrying role maps, and never edit
 `trained_against` to match: it records what the model was measured against, and

@@ -36,14 +36,22 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx950AttentionDense`.
 - The native symbols (`hipkernel.gfx950_attention_dense.*`) are registered in
   `packs/Gfx950AttentionDenseNative.cpp`.
 - Changing the KDP changes its md5. Update the `.dvc` pointer in the same commit.
-- **No trained heuristic.** The UED binds `sort_kernel_catalog: {default: <native UHD>}`
-  only -- no per-arch lists, no `predict_engine`, and no installed `heuristics/<ued-id>/`
-  subtree -- so ranking is the native `score` symbol. That symbol reads the problem:
-  `preferredTile()` picks a tile from head size, mask and `seqlen_q`, and candidates are
-  ranked by closeness to it, with the historical ascending `(block_m, block_n)` order as
-  the tie-break. It is no longer a fixed 256/64-first order. See
+- **Two rankers, and which one decides depends on the arch.** The UED binds
+  `sort_kernel_catalog` as `default` (the native UHD) plus a `gfx950` list holding the
+  trained `tflops` and `time` models, installed under
+  `heuristics/4b3a0123-578f-4e9c-a965-b010a18ff107/sort_kernel_catalog/gfx950/<metric>/`.
+  This pack ships for gfx950 alone, so the trained models are what rank it in a complete
+  build. The native `score` symbol is the fallback, reached when no model loads, which in
+  practice means a build whose `model.bin` was never pulled. The two do not always agree,
+  and the knob suite's cold cases pin where they differ.
+- **The native symbol reads the problem.** `preferredTile()` picks a tile from head size,
+  mask and `seqlen_q`, and candidates are ranked by closeness to it, with the historical
+  ascending `(block_m, block_n)` order as the tie-break. It is no longer a fixed
+  256/64-first order. See
   `rocke/library/builders/gfx950/attention/prefill/TILE_SELECTION_CASE_STUDY.md`.
-  The UHD retain/retrain/drop choice a regeneration forces (see the
-  `hipdnn-ingestor-engine` RUNBOOK, "Trained heuristics survive regeneration only by
-  intent") is therefore a no-op here: there is no model to invalidate. Record that again
-  if a model is ever promoted for this engine.
+- **Regenerating the KDP now has a UHD consequence.** `engine.trained_catalog_sha256`
+  fingerprints the catalog the trained models were measured against, so any kernel added,
+  removed or renamed invalidates it and the generator's gate fails until the models are
+  retrained and the fingerprint updated. Make the retain/retrain/drop choice explicitly
+  (see the `hipdnn-ingestor-engine` RUNBOOK, "Trained heuristics survive regeneration
+  only by intent") rather than regenerating past it.

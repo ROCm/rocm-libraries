@@ -23,6 +23,16 @@ engine:
   - block_m
   - block_n
   heuristic: native
+  # Trained sort_kernel_catalog models (tflops, time) for gfx950, beside the native
+  # default, and the catalog they were trained on; retrain when it changes
+  # (tests/test_trained_rankers.py, README "Shipping a trained model").
+  heuristics:
+    sort_kernel_catalog:
+      gfx950:
+      - df4ca2de-53c4-44d4-b92c-ead86e287fa5
+      - 6f606e00-09cf-4e43-968b-77eb71de64db
+  trained_catalog_sha256:
+    gfx950: 85faef422144bc770fb095b624b26732de9361b2ebce25d29d32cc08a3bfe513
 kmd_fields:
 - name: dtype
   type: string
