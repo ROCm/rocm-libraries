@@ -8,6 +8,7 @@
 #include <bit>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <numeric>
 #include <roc/hostnumerics/reshape_permutation.hpp>
 #include <span>
@@ -68,6 +69,19 @@ TEST(ReshapePermutationTest, RejectsInconsistentShapesAndOrder) {
     EXPECT_THROW((ReshapePermutation({2, 3}, {2, 4}, {2, 3}, Permutation{0, 1})),
                  std::runtime_error);
     EXPECT_THROW((ReshapePermutation({2, 3}, {2, 3}, {6}, Permutation{0, 1})), std::runtime_error);
+}
+
+TEST(ReshapePermutationTest, RejectsExtentAndStrideOverflow) {
+    constexpr size_t maximum = static_cast<size_t>(std::numeric_limits<ptrdiff_t>::max());
+    // Shape accepts these extents; contiguous layout metadata must also fit ptrdiff_t.
+    const Shape productOverflow{maximum, 2};
+    EXPECT_THROW(
+        (ReshapePermutation(productOverflow, productOverflow, productOverflow, Permutation{0, 1})),
+        std::runtime_error);
+    const Shape emptyWithOversizedExtent{0, maximum + 1};
+    EXPECT_THROW((ReshapePermutation(emptyWithOversizedExtent, emptyWithOversizedExtent,
+                                     emptyWithOversizedExtent, Permutation{0, 1})),
+                 std::runtime_error);
 }
 
 TEST(ReshapePermutationTest, SelfMovePreservesPermutation) {
