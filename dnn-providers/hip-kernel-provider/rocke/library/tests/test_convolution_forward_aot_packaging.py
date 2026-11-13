@@ -77,12 +77,14 @@ def _unmerged(identity: KernelIdentity) -> bool:
     default): the packaged contract does not carry those fields, so
     :func:`gfx950_conv_fwd_aot_spec_for_identity` refuses them with their own
     reason, and a sample built for ``supports_gfx950_conv_fwd_aot`` must not pick
-    one as a knob class's representative."""
+    one as a knob class's representative. Checked directly on the identity's own
+    fields rather than through the adapter under test, so a sample built from this
+    filter can still exercise and fail that adapter's checks."""
     if not (_packaged(identity) and identity.group_merge == 1):
         return False
     if identity.is_direct:
         return True
-    return gfx950_conv_fwd_aot_spec_for_identity(identity)[0] is not None
+    return identity.split_k == 1 and identity.split_k_cluster == 0
 
 
 def _spec(identity: KernelIdentity) -> Gfx950ConvFwdAotSpec:
