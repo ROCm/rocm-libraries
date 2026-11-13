@@ -41,6 +41,7 @@
 #include <new>
 #include <stdexcept>
 #include <stdlib.h>
+#include <string>
 
 #include "client/include/Utility.hpp"
 
@@ -302,6 +303,17 @@ static void portable_setenv(const char* name, const char* value)
 hipblaslt_local_handle::hipblaslt_local_handle(const Arguments& arg)
     : hipblaslt_local_handle()
 {
+    // Both descriptor-taking APIs and C++ setProblem with sizes/strides inherit this request.
+    if(arg.uniform_summation_order >= 0)
+    {
+        const auto status
+            = hipblasLtSetUniformSummationOrder(m_handle, arg.uniform_summation_order);
+        if(status != HIPBLAS_STATUS_SUCCESS)
+            throw std::runtime_error("uniform_summation_order="
+                                     + std::to_string(arg.uniform_summation_order) + ": "
+                                     + hipblas_status_to_string(status));
+    }
+
     if(arg.tensile_solution_selection_method >= 0)
     {
         auto sol_selec_env = getenv("TENSILE_SOLUTION_SELECTION_METHOD");

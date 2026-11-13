@@ -360,6 +360,10 @@ namespace TensileLite
                 ("solution-start-idx",       po::value<int>()->default_value(-1), "First solution to run")
                 ("num-solutions",            po::value<int>()->default_value(-1), "Number of solutions to run")
                 ("best-solution",            po::value<bool>()->default_value(false), "Best solution benchmark mode")
+                ("require-selected-solution", po::value<bool>()->default_value(false), "Requires --best-solution: a problem for which "
+                                                                                       "the library selects no solution is an error "
+                                                                                       "(non-zero exit) and is skipped, instead of "
+                                                                                       "running library solution 0.")
 
                 ("results-file",             po::value<std::string>()->default_value("results.csv"), "File name to write results.")
                 ("log-file",                 po::value<std::string>(),                               "File name for output log.")
@@ -645,6 +649,11 @@ namespace TensileLite
                 throw std::runtime_error("rocprof-counter is provided but client is not built with -DTENSILELITE_CLIENT_ENABLE_ROCPROFSDK.");
             }
 #endif
+            // Only TopSolutionIterator, which --best-solution selects, reads the option; without
+            // it the check would silently not run.
+            if(args["require-selected-solution"].as<bool>() && !args["best-solution"].as<bool>())
+                throw std::runtime_error(
+                    "--require-selected-solution applies only with --best-solution");
             fix_data_types(args);
 
             parse_arg_ints(args, "problem-size");

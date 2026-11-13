@@ -79,11 +79,14 @@ class TestDeclaredCoverage(unittest.TestCase):
             }
             for arch in sorted(undeclared):
                 with self.subTest(candidate=candidate.name, arch=arch):
-                    for req in _requests(arch):
-                        self.assertFalse(
-                            candidate.admits(req)[0],
-                            f"{candidate.name} wrongly admits {arch}",
-                        )
+                    # Capability.check rejects the architecture before reading
+                    # any other request axis. Check that public verdict directly
+                    # instead of walking the same 1,152-request product for every
+                    # candidate/arch pair.
+                    req = next(_requests(arch))
+                    ok, why = candidate.admits(req)
+                    self.assertFalse(ok, f"{candidate.name} wrongly admits {arch}")
+                    self.assertTrue(why.startswith("capability: arch "), why)
 
     def test_specialized_candidates_span_a_single_wave_size(self):
         for candidate in attention_candidates():

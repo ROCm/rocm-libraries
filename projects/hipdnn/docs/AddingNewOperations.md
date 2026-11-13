@@ -78,7 +78,7 @@ After the agent finishes, go through the output before opening a PR:
 **Optional (if applicable):**
 
 - **End-user sample** under `samples/<op>/` — add if an engine is available for the op. Wrap `graph->build(handle)` with `HIPDNN_FE_CHECK_SKIPPABLE` so the test is gracefully skipped when no engine supports the configuration. See `samples/convolution/ConvFprop.cpp` as a template.
-- **Python bindings** — the one piece the agent does not generate automatically. Add a `.def(...)` line in `python/frontend_bindings/src/graph_bindings.cpp` and register the attributes class in `python/frontend_bindings/src/attributes_bindings.cpp` (check that file for the current curated set). You can also explicitly ask the agent to do this before it finishes.
+- **Python bindings** — the one piece the agent does not generate automatically. Add a `.def(...)` line in `python/frontend_bindings/src/graph_bindings.cpp` and register the attributes class in `python/frontend_bindings/src/attributes_bindings.cpp` (check that file for the current curated set). When cuDNN's Python frontend has the op, also add its cuDNN keyword overload in `python/frontend_bindings/src/graph_kwargs_bindings.cpp`; a new pointwise mode gets its cuDNN-named method in `python/frontend_bindings/src/pointwise_bindings.cpp`. You can also explicitly ask the agent to do this before it finishes.
 
 ## PR Checklist
 
@@ -93,7 +93,7 @@ Copy-paste this into your PR description.
 - [ ] `_EXT` suffix correct: present on hipDNN-specific names, absent where the name matches cuDNN exactly (numeric value parity is NOT required)
 - [ ] `infer_properties_node()` and `pre_validate_node()` reviewed against the cudnn-frontend node class; stubs filled in, validation rules aligned, and optional tensors/fields have appropriate presence guards
 - [ ] Integration tests cover the op's meaningful variants; no important edge cases missing
-- [ ] (Optional) Python bindings updated if op is on the Python surface
+- [ ] (Optional) Python bindings updated if op is on the Python surface, including the cuDNN keyword overload when cuDNN has the op
 
 ### Implementation
 - [ ] FBS schema added in `flatbuffers_sdk/schemas/` (NOT `data_sdk/`)
@@ -317,7 +317,7 @@ The complete surface area for a single op, using **Matmul** as the canonical exa
 | Frontend Graph API | `frontend/include/hipdnn_frontend/Graph.hpp` (`Graph::matmul(...)`) |
 | JSON utility | `flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/utilities/json/MatmulAttributes.hpp` |
 | Work model (FLOPs) | `plugin_sdk/include/hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp` (`nodeFlops` overload + `logicalFlops` case, or a `NO_COUNTING_CONVENTION` entry — see [Work Model (FLOPs)](#work-model-flops)) |
-| Python bindings (optional) | `python/frontend_bindings/src/graph_bindings.cpp`, `python/frontend_bindings/src/attributes_bindings.cpp` |
+| Python bindings (optional) | `python/frontend_bindings/src/graph_bindings.cpp`, `python/frontend_bindings/src/attributes_bindings.cpp`; cuDNN keyword overload in `python/frontend_bindings/src/graph_kwargs_bindings.cpp`; named pointwise methods in `python/frontend_bindings/src/pointwise_bindings.cpp` |
 | Backend descriptor unit test | `backend/tests/descriptors/TestMatmulOperationDescriptor.cpp` |
 | Backend fromNode test | `backend/tests/descriptors/TestMatmulOperationFromNode.cpp` |
 | Backend graph descriptor test | `backend/tests/descriptors/TestGraphDescriptorMatmul.cpp` |

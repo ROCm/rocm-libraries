@@ -107,6 +107,23 @@ if(HIPCONV_LINE_TABLES)
     string(APPEND CMAKE_HIP_FLAGS " -gline-tables-only")
 endif()
 
+# Optimize device code in every build type, and give it no debug info beyond line tables.
+#
+# Below -O2, values that pin_sgpr constrains to SGPRs are reloaded from scratch memory, which makes
+# them divergent, and the backend fails with "illegal VGPR to SGPR copy". Device debug info takes
+# libhipconv past the 2 GiB reach of an x86-64 PC-relative relocation. Host code keeps the build
+# type's optimization and debug info.
+set(HIPCONV_DEVICE_CODEGEN_OPTIONS "SHELL:-Xarch_device -O3")
+if(HIPCONV_LINE_TABLES)
+    list(APPEND HIPCONV_DEVICE_CODEGEN_OPTIONS "SHELL:-Xarch_device -gline-tables-only")
+else()
+    list(APPEND HIPCONV_DEVICE_CODEGEN_OPTIONS "SHELL:-Xarch_device -g0")
+endif()
+get_directory_property(_hipconv_parent_dir PARENT_DIRECTORY)
+if(_hipconv_parent_dir)
+    set(HIPCONV_DEVICE_CODEGEN_OPTIONS "${HIPCONV_DEVICE_CODEGEN_OPTIONS}" PARENT_SCOPE)
+endif()
+
 # Device LTO costs up to 8x on the kernels this library exists to provide.
 #
 # Some ROCm clangs default the AMDGCN LTO mode to full, and under that pipeline the
@@ -117,21 +134,48 @@ endif()
 # Carried on the targets rather than in CMAKE_HIP_FLAGS because a consumer may compile
 # these sources as CXX -- MIOpen does -- and then the HIP flags never reach them.
 option(HIPCONV_OFFLOAD_LTO "Leave the compiler's device LTO default alone" OFF)
+set(HIPCONV_DEVICE_COMPILE_OPTIONS ${HIPCONV_DEVICE_CODEGEN_OPTIONS})
 if(NOT HIPCONV_OFFLOAD_LTO)
-    set(HIPCONV_DEVICE_COMPILE_OPTIONS -fno-offload-lto)
+    list(APPEND HIPCONV_DEVICE_COMPILE_OPTIONS -fno-offload-lto)
 endif()
 
-# ASAN's stack instrumentation and the resulting image-layout growth on hipconv's many
-# explicit template instantiations can grow a R_X86_64_PC32 relocation past its +/-2GB
-# range, failing libMIOpen.so's link. hipconv contributes object files/a static archive
-# to that one link, not a link of its own, so only the compile step needs this override.
-# hipconv v0.5.0 (see HIPCONV_VERSION) defines this option natively; this is a stopgap
-# until that sync lands, matching its name/semantics so the sync is a no-op here.
-option(HIPCONV_DISABLE_ASAN
-    "Disable ASAN instrumentation for hipconv only, while the rest of MIOpen keeps full ASAN/TSAN coverage" OFF)
+# Compile hipconv without ASAN instrumentation, for a consumer built with -fsanitize=address.
+#
+# ASAN stack instrumentation of hipconv's many template instantiations can push an R_X86_64_PC32
+# relocation out of range when the consumer links hipconv's static archive into its shared library.
+option(HIPCONV_DISABLE_ASAN "Compile hipconv without ASAN instrumentation" OFF)
 set(HIPCONV_SANITIZER_COMPILE_OPTIONS "")
 if(HIPCONV_DISABLE_ASAN)
     set(HIPCONV_SANITIZER_COMPILE_OPTIONS -fno-sanitize=address)
+endif()
+
+# A consumer that installs only its own shared library, such as MIOpen, sets HIPCONV_FORCE_STATIC.
+option(HIPCONV_FORCE_STATIC "Build libhipconv as a static library whatever BUILD_SHARED_LIBS says"
+    OFF)
+if(BUILD_SHARED_LIBS AND NOT HIPCONV_FORCE_STATIC)
+    set(_hipconv_lib_type SHARED)
+else()
+    set(_hipconv_lib_type STATIC)
+endif()
+# A DLL needs __declspec(dllexport) on HIPCONV_INTERNAL_API, which export.hpp does not define.
+#
+# The amdgcn device compilation also warns on __declspec in every translation unit that includes
+# the public headers.
+if(_hipconv_lib_type STREQUAL "SHARED" AND WIN32)
+    message(FATAL_ERROR "hipconv cannot build as a DLL; set HIPCONV_FORCE_STATIC=ON")
+endif()
+
+# hipconv_headers carries the public headers and the generated export.hpp to targets that compile
+# hipconv sources or include its headers without linking libhipconv.
+#
+# In a static build, HIPCONV_STATIC_DEFINE defines HIPCONV_API as empty in these targets, so on
+# Windows it does not become __declspec(dllimport).
+set(HIPCONV_GENERATED_INCLUDE_DIR "${CMAKE_CURRENT_BINARY_DIR}/include")
+add_library(hipconv_headers INTERFACE)
+target_include_directories(hipconv_headers INTERFACE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include" "${HIPCONV_GENERATED_INCLUDE_DIR}")
+if(_hipconv_lib_type STREQUAL "STATIC")
+    target_compile_definitions(hipconv_headers INTERFACE HIPCONV_STATIC_DEFINE)
 endif()
 
 # Every arch in the tree is built, whatever this build targets: the set of arch
@@ -194,27 +238,30 @@ add_custom_target(hipconv_version
     VERBATIM)
 list(APPEND _hipconv_srcs "${_version_cpp}")
 
-add_library(hipconv STATIC ${_hipconv_srcs} "${_reg_gen}")
+add_library(hipconv ${_hipconv_lib_type} ${_hipconv_srcs} "${_reg_gen}")
 set_source_files_properties(${_hipconv_srcs} "${_reg_gen}" PROPERTIES LANGUAGE HIP)
 set_source_files_properties("${_version_cpp}" PROPERTIES GENERATED TRUE)
 add_dependencies(hipconv hipconv_version)
 foreach(_target IN LISTS _arch_targets)
     target_sources(hipconv PRIVATE $<TARGET_OBJECTS:${_target}>)
-    if(HIPCONV_SANITIZER_COMPILE_OPTIONS)
-        target_compile_options(${_target} PRIVATE ${HIPCONV_SANITIZER_COMPILE_OPTIONS})
-    endif()
+    target_compile_options(${_target} PRIVATE ${HIPCONV_SANITIZER_COMPILE_OPTIONS})
 endforeach()
 
-target_include_directories(hipconv
-    PUBLIC  include
-    PRIVATE src
-)
+target_include_directories(hipconv PRIVATE src)
+target_link_libraries(hipconv PUBLIC hipconv_headers)
+include(GenerateExportHeader)
+generate_export_header(hipconv
+    EXPORT_MACRO_NAME HIPCONV_API
+    EXPORT_FILE_NAME "${HIPCONV_GENERATED_INCLUDE_DIR}/hipconv/export.hpp")
 # Position-independent so the static lib can link into libMIOpen.so
 set_target_properties(hipconv PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(hipconv PUBLIC hip::device)
 target_compile_options(hipconv PRIVATE -fvisibility=hidden -fvisibility-inlines-hidden
                                        ${HIPCONV_DEVICE_COMPILE_OPTIONS}
                                        ${HIPCONV_SANITIZER_COMPILE_OPTIONS})
+if(_hipconv_lib_type STREQUAL "SHARED")
+    target_compile_definitions(hipconv PRIVATE HIPCONV_EXPORT_INTERNALS)
+endif()
 if(HIPCONV_ENABLE_EXPLICIT_GEMM)
     target_link_libraries(hipconv PUBLIC roc::hipblaslt)
     target_compile_definitions(hipconv PUBLIC HIPCONV_ENABLE_EXPLICIT_GEMM)
