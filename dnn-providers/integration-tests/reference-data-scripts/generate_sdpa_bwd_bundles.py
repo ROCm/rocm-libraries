@@ -41,7 +41,7 @@ The generator is deterministic: the same plan gives the same bytes. See
 
 Usage:
     generate_sdpa_bwd_bundles.py --bundle-dir <integration-test-bundles> [--report] [--dry-run]
-        [--toml <ENGINE>.toml] [--spec <cases.json>] [--calibrate]
+        [--toml <ENGINE>.toml] [--spec <cases.json>] [--calibrate [--jobs N]]
 """
 
 from __future__ import annotations
@@ -344,6 +344,11 @@ def notes(c):
             parts.append("probe: " + "; ".join(P.probe_reasons(c, c["dtype"])))
     if c.get("regression_of"):
         parts.append("regression of " + c["regression_of"])
+    if c.get("hf"):
+        h = c["hf"]
+        parts.append(
+            f"HF census {h['census_id']}: {h['n_models']} models, e.g. {', '.join(h['models'])}"
+        )
     if c.get("expected"):
         parts.append("expected: " + c["expected"])
     if c.get("repeat"):
@@ -720,8 +725,8 @@ PLACE = {
                "H38 H39 H43 H44 H45 H46 H49 H58 H61 H66 H68 H69 H72 H73 H74 H75 H76 H83 H84 H86 H88 H89 H92",
     "nightly": "S05 S11 S14 S16 S17 S18 S19 S20 S22 S37 S38 S40 S41 S44 "
                "H05 H06 H23 H26 H29 H30 H32 H40 H41 H42 H47 H60 H67 H71 H77 H78 H85",
-    "full":    "S03 S24 H94 H95 X05 X06 X07 X08 X09 X11 X13",
-    "notrun":  "S46 S47 H62 H87 H91 H93 X01 X02 X03 X04 X10 X12 X14",
+    "full":    "S03 S24 H94 H95 X05 X06 X07 X08 X09 X10 X11 X13",
+    "notrun":  "S46 S47 H62 H87 H91 H93 X01 X02 X03 X04 X12 X14",
 }
 PLACE_DTYPES = {"S13": "fp16", "S25": "bf16", "S26": "fp16", "S27": "bf16", "S28": "fp16"}  # one dtype of two
 OUT_OF_LEVEL = "X01 X02 X03 X04 X12".split()  # a timing run with the GPU reference re-sizes them
@@ -768,7 +773,7 @@ M_EDIT = {
 # Not-run items: the level each enters when its gate opens (default: pr; M
 # and X: full)
 TARGET_LEVEL = {
-    "pr": "PRB-M04 PRB-P01 PRB-P02 PRB-P03 PRB-P04 PRB-R04 REG-08 REG-14 S46 S47 H93 H91 M40.pr",
+    "pr": "PRB-P01 PRB-P02 PRB-P03 PRB-P04 PRB-R04 REG-14 S46 S47 H93 H91 M40.pr",
     "nightly": "PRB-P06 M40.n",
     "none": "PRB-R03 H62 PRB-M02 PRB-M02f",
     "out-of-level": "X03",
@@ -801,7 +806,7 @@ def model_items():
         mid, sfx = r["id"].split(".")
         if r["id"] in M_DROP:
             continue
-        geo = {k: r[k] for k in P.GEOMETRY + ("W", "R", "align", "scale")}
+        geo = {k: r[k] for k in P.SHAPE_KEYS}
         level = {"pr": "pr", "n": "nightly", "fc": "full", "f": "full"}[sfx]
         it = P.new(
             id=r["id"],
@@ -820,7 +825,7 @@ def model_items():
                 "padding_mask": True,
             }
             it["topology"] = "Padding"
-            it["oracle"] = "14358+derivation+HG4"
+            it["oracle"] = "14358+HG4"
         if mid in P.M_CORPUS_ENCODED and it["align"] == "TL" and it["R"] == 0:
             it["attrs"] = dict(CAUSAL_FLAG)
             it["R"] = None
@@ -833,6 +838,44 @@ def model_items():
             it["out_of_level"] = True
         if r["oracle"] == "14358" or it.get("padding"):
             it["level"] = P.NOTRUN
+        out.append(it)
+    return out
+
+
+def hf_items():
+    """The Hugging Face census cases (§3.6), one dtype each. Their level is set
+    by place_hf(); `hf` holds the placement keys and the provenance."""
+    census = P.hf_census()
+    geos = census["geometries"]
+    out = []
+    for r in census["cases"]:
+        g = geos[r["geo"]]
+        it = P.new(
+            id=r["id"],
+            set="M",
+            level="full",
+            dtypes=[r["dtype"]],
+            **{k: r[k] for k in P.SHAPE_KEYS + ("layout",)},
+            inputs=r.get("inputs"),
+            seed=r.get("seed", 0),
+        )
+        if r.get("bias"):
+            it["bias"] = P.bias_spec(r["bias"]["dims"], r["bias"]["dtype"])
+            it["topology"] = "AdditiveMask"
+            if r.get("dbias"):
+                it["dbias"] = True
+                it["topology"] = "AdditiveMaskDBias"
+        if r.get("alibi"):
+            it["attrs"] = {"alibi_mask": True}
+        it["items"] = derived_features(it) + ["HF"]
+        it["hf"] = {
+            "geo": r["geo"],
+            "variant": r["variant"],
+            "pop": g["pop"],
+            "census_id": r["census_id"],
+            "models": g["examples"][:3],
+            "n_models": g["n_models"],
+        }
         out.append(it)
     return out
 
@@ -895,8 +938,7 @@ def regression_and_defect_items():
              expected="bias applied in its declared dtype", **bias),
         item("REG-07b", "quick", "regression", "DT4 AW13", (1, 2, 2, 2, 64, 96), bias=P.bias_spec("1h", "fp16"),
              expected="HALF bias read as HALF with BF16 IO", **bias),
-        item("REG-08", "notrun", "probe", "T6 S56", (1, 1, 1, 1, 128, 128), stats="rank3",
-             oracle="14358+derivation-rank3",
+        item("REG-08", "pr", "probe", "T6 S56", (1, 1, 1, 1, 128, 128), stats="rank3",
              regression_of="#12933", expected="plan decision (rank-3 Stats in or out of the well-formed set)"),
         item("REG-13a", "quick", "regression", "A4 H64", (1, 1, 1, 1, 64, 128), W=2, R=0, regression_of="SEM-001",
              expected="exactly 2 keys per row"),
@@ -952,7 +994,7 @@ def probe_items():
     (SD), hazard additions and the 32-head model layer."""
     rj = dict(rejection=True, expected=E_REJ)
     nb = (1, 1, 1, 1, 64, 96)  # the rejection probes' base
-    pad = dict(topology="Padding", oracle="14358+derivation+HG4")
+    pad = dict(topology="Padding", oracle="14358+HG4")
     bias = dict(topology="AdditiveMask", inputs=P.domain("bias_neg"))
     scale = dict(set="H", topology="ScaleTensor", expected="scale 0.5 applied")
     m41 = dict(set="M", layout="bshd", attrs=CAUSAL_FLAG, expected="correct accept")
@@ -1025,9 +1067,8 @@ def probe_items():
              verdict="FAIL (no oracle) on a wrong accept, if the harness fills FP8; otherwise SKIP", **rj),
         item("PRB-U13", "pr", "probe", "T7 IVP13", nb, tensor_layout={"dQ": "overlap_rows"},
              verdict=FOV + " (gfx942, 2026-10-28: ASM_SDPA_ENGINE accepts it and the aliased dQ fails the comparison)", **rj),
-        # oracle not ready on the baseline (declared, not written)
-        item("PRB-M04", "notrun", "probe", "A8 S51", (1, 4, 4, 4, 64, 64), R=0, attrs={"alibi_mask": True},
-             oracle="14358+derivation", expected=E_OR),
+        item("PRB-M04", "pr", "probe", "A8 S51", (1, 4, 4, 4, 64, 64), R=0, attrs={"alibi_mask": True},
+             expected=E_OR),
         *[item(f"PRB-{k}", "pr", "probe", "T11 G11 " + extra, (*bb, 64, 96), bias=P.bias_spec(dims), dbias=True,
                inputs=P.domain("bias_neg"), topology="AdditiveMaskDBias", expected="dBias correct, or typed rejection")
           for k, dims, bb, extra in (("B11", "11", (1, 2, 2, 2), "H80"), ("B12", "1h", (1, 2, 2, 2), "S50"),
@@ -1043,7 +1084,7 @@ def probe_items():
              expected="typed rejection; an accept is unverifiable"),
         item("PRB-R04", "notrun", "probe", "T15 T16 G12 S53 DT6", (1, 2, 2, 2, 64, 96),
              dropout={"p": 0.2, "scale": 1.25, "scale_inv": 0.8, "mask_dims": "1h"}, inputs=P.domain("u01"),
-             topology="DropoutMask", oracle="14358+derivation+HG4", expected=E_OR),
+             topology="DropoutMask", oracle="14358+HG4", expected=E_OR),
         item("PRB-P01", "notrun", "probe", "A9 T13 G13 DT6", (2, 2, 2, 2, 64, 96),
              padding={"seq_len_q": [64, 64], "seq_len_kv": [96, 40], "padding_mask": True}, expected=E_OR, **pad),
         item("PRB-P02", "notrun", "probe", "A9 T13 G13 S52", (3, 2, 2, 2, 64, 96),
@@ -1056,7 +1097,7 @@ def probe_items():
              padding={"seq_len_q": [64, 64], "seq_len_kv": [96, 40], "padding_mask": False},
              expected="padding semantics, or typed rejection", **pad),
         item("PRB-P06", "notrun", "probe", "T17 G14 S55", (2, 2, 2, 2, 64, 96), ragged={"q": [64, 40], "kv": [96, 50]},
-             topology="Ragged", oracle="14358+derivation+HG20", expected=E_OR),
+             topology="Ragged", oracle="14358+HG20", expected=E_OR),
         # graph options and layouts
         item("PRB-X01", "nightly", "probe", "GO2", (1, 2, 2, 2, 256, 256), topology="FwdBwdChained", oracle="ready [I]",
              expected=E_OR),
@@ -1232,6 +1273,7 @@ def plan_items():
         + probe_items()
         + golden_items()
         + targeted_items()
+        + hf_items()
     )
     dup = [k for k, v in Counter(it["id"] for it in items).items() if v > 1]
     if dup:
@@ -1329,32 +1371,87 @@ def allpairs_generate(seeds, seed):
 # --------------------------------------------------------------------------
 
 
+def _estimate_job(job):
+    key, fp, params = job
+    return key, dict(fp=fp, **P.estimate(params))
+
+
+def _runnable(c):
+    """The case runs: its oracle is ready and its level is one of LEVELS."""
+    return P.oracle_of(c) in P.READY and c["level"] in P.LEVELS
+
+
+def estimate_request(c):
+    """(key, fingerprint, params) of the magnitude estimate behind a case's
+    class, or None when the class rests on no estimate (golden cases,
+    rejection probes, cases that are not estimable)."""
+    if c.get("golden") or c.get("rejection") or not P.estimable(c):
+        return None
+    dt = c["dtype"]
+    params = P.estimate_params(c, dt, P.kernel_model(c, dt, _runnable(c)))
+    return f"{c['id']}/{dt}", P.fingerprint(params), params
+
+
 class Calibration:
     """The recorded magnitude estimates (sdpa_bwd_calibration.json). With
-    `compute`, a missing or stale estimate is computed (NumPy)."""
+    `compute`, a missing or stale estimate is computed (NumPy), on `jobs`
+    processes when prefetch() sees the cases first."""
 
-    def __init__(self, path, compute=False):
+    def __init__(self, path, compute=False, jobs=1):
         self.path = path
         self.entries = P.load_calibration(path)
         self.compute = compute
+        self.jobs = jobs
         self.used = set()
         self.computed = 0
 
-    def get(self, c, dt, km):
-        key = f"{c['id']}/{dt}"
-        params = P.estimate_params(c, dt, km)
-        fp = P.fingerprint(params)
-        self.used.add(key)
+    def stale(self, key, fp):
+        """The recorded estimate is missing or was computed for other inputs."""
         e = self.entries.get(key)
-        if e is None or e["fp"] != fp:
+        return e is None or e["fp"] != fp
+
+    def prefetch(self, cases):
+        """Compute, in parallel, the missing or stale estimates that finalize()
+        will ask for. Cases are fresh expansions (dO not scaled yet)."""
+        if not self.compute:
+            return
+        jobs = {}
+        for c in cases:
+            req = estimate_request(c)
+            if req and req[0] not in jobs and self.stale(req[0], req[1]):
+                jobs[req[0]] = req
+        if not jobs:
+            return
+        work = sorted(jobs.values(), key=lambda j: -P.estimate_scores(j[2]))
+        if self.jobs > 1:
+            import multiprocessing
+
+            with multiprocessing.get_context("fork").Pool(self.jobs) as pool:
+                done = pool.imap_unordered(_estimate_job, work)
+                for i, (key, e) in enumerate(done, 1):
+                    self.entries[key] = e
+                    if i % 200 == 0 or i == len(work):
+                        print(
+                            f"calibrate: {i}/{len(work)}", file=sys.stderr, flush=True
+                        )
+        else:
+            for job in work:
+                key, e = _estimate_job(job)
+                self.entries[key] = e
+        self.computed += len(work)
+
+    def get(self, req):
+        """The estimate of an estimate_request()."""
+        key, fp, params = req
+        self.used.add(key)
+        if self.stale(key, fp):
             if not self.compute:
                 raise SystemExit(
                     f"{key}: magnitude estimate missing or stale; rerun with --calibrate (needs numpy)"
                 )
-            e = dict(fp=fp, **P.estimate(params))
-            self.entries[key] = e
+            self.entries[key] = dict(fp=fp, **P.estimate(params))
             self.computed += 1
-        return e
+        return self.entries[key]
 
     def save(self):
         P.save_calibration(
@@ -1368,7 +1465,7 @@ def finalize(c, calib):
     dt = c["dtype"]
     c["topology"] = P.topology_of(c)
     c["oracle_status"] = P.oracle_of(c)
-    c["runnable_now"] = c["oracle_status"] in P.READY and c["level"] in P.LEVELS
+    c["runnable_now"] = _runnable(c)
     if not c["runnable_now"] and c["level"] in P.LEVELS:
         c["target_level"], c["level"] = (
             c["level"],
@@ -1376,15 +1473,14 @@ def finalize(c, calib):
         )  # a gated case has no level
     cost = P.case_cost(c)
     c["n_pairs"], c["n_live"], c["flop"] = cost["n_pairs"], cost["n_live"], cost["flop"]
-    c["est_s"], c["est_s_alt"], c["est_s_gpuref"] = P.seconds(c, dt)
-    c["purpose_final"] = P.purpose(c, dt)
+    _timed(c, dt)
+    req = estimate_request(c)
     if c.get("golden"):
         cls, info = c["tol_class"], {"source": "golden set"}
     elif c.get("rejection"):
         cls, info = P.provisional_class(dt), {"rule": "rejection probe: never compared"}
-    elif P.estimable(c):
-        km = P.kernel_model(c, dt, c["runnable_now"])
-        cls, info, f = P.assign_class(c, dt, calib.get(c, dt, km))
+    elif req:
+        cls, info, f = P.assign_class(c, dt, calib.get(req))
         if f != 1.0:  # scale dO by 2^k: the gradients are linear in dO
             c["inputs"] = dict(c.get("inputs") or {}, do=_scaled(c.get("inputs"), f))
         if info.get("unassigned"):
@@ -1426,16 +1522,94 @@ def expand(it, ap=False):
     return out
 
 
-def build(calib):
-    """Every case, runnable and not run, all-pairs cases included."""
-    cases = [c for it in plan_items() for c in expand(it)]
+def budget_limits(cases):
+    """Cumulative seconds each level may hold: its budget less the 5 % reserve
+    and the reserved gates (not-run cases whose gate is a harness item, §4.4);
+    unlimited for a level without a budget."""
+    lim, gates = {}, 0.0
+    for lv in P.LEVELS:
+        gates += sum(
+            c["est_s_gpu"]
+            for c in cases
+            if c["level"] == P.NOTRUN
+            and c.get("target_level") == lv
+            and "14358" not in c["oracle_status"]
+        )
+        cap = P.CUM_S[lv]
+        lim[lv] = float("inf") if cap is None else cap * (1 - P.RESERVE) - gates
+    return lim
+
+
+def cumulative_seconds(cases):
+    """Cumulative binding seconds of the runnable cases up to each level."""
+    out, total = {}, 0.0
+    for lv in P.LEVELS:
+        total += sum(
+            c["est_s_gpu"] for c in cases if c["runnable_now"] and c["level"] == lv
+        )
+        out[lv] = total
+    return out
+
+
+def hf_priority(cases):
+    """HF cases in placement order: the n-th case of every geometry before the
+    (n+1)-th (HF_VARIANT_ORDER within a geometry), popular geometries first."""
+    by_geo = {}
     for c in cases:
-        finalize(c, calib)
-    n_ap = 0
+        by_geo.setdefault(c["hf"]["geo"], []).append(c)
+    rank = {}
+    for cs in by_geo.values():
+        cs.sort(key=lambda c: (P.HF_VARIANT_ORDER.index(c["hf"]["variant"]), c["id"]))
+        rank.update({c["id"]: i for i, c in enumerate(cs)})
+    return sorted(cases, key=lambda c: (rank[c["id"]], -c["hf"]["pop"], c["id"]))
+
+
+def place_hf(base, hf):
+    """Level of each HF case: the lowest of HF_LEVELS whose per-case ceilings
+    hold and whose cumulative budget, and every one above it up to nightly,
+    keeps room for it; else full. `hf` holds the cases finalized at full."""
+    lim = budget_limits(base + hf)
+    cum = cumulative_seconds(base)
+    upper = P.LEVELS[P.LEVELS.index(P.HF_LEVELS[0]) :]
+    levels = {}
+    for c in hf_priority([c for c in hf if c["runnable_now"]]):
+        t, nbytes = c["est_s_gpu"], c["record"]["bytes"]
+        for lv in P.HF_LEVELS:
+            span = P.LEVELS[P.LEVELS.index(lv) : P.LEVELS.index(P.HF_LEVELS[-1]) + 1]
+            if P.within_ceilings(lv, t, nbytes) and all(
+                cum[L] + t <= lim[L] for L in span
+            ):
+                levels[c["id"]] = lv
+                for L in upper[upper.index(lv) :]:
+                    cum[L] += t
+                break
+    return levels
+
+
+def _timed(c, dt):
+    """Seconds and purpose, which placement reads."""
+    c["est_s"], c["est_s_alt"], c["est_s_gpu"] = P.seconds(c, dt)
+    c["purpose_final"] = P.purpose(c, dt)
+
+
+def _sized(c):
+    """What placement needs of an all-pairs case without its tolerance class:
+    level, cost, purpose and axis values (no estimate, no id)."""
+    dt = c["dtype"]
+    c["runnable_now"] = True
+    c["oracle_status"] = P.oracle_of(c)
+    _timed(c, dt)
+    c["axis_values"] = P.axis_projection(c, dt)
+
+
+def allpairs_cases(cases, calib=None):
+    """The all-pairs cases (§4) the runnable cases up to nightly leave to cover;
+    without `calib`, sized only (_sized), for placement."""
+    out, n_ap = [], 0
     for rnd in range(AP_ROUNDS):
         seeds = [
             (c["axis_values"], c["purpose_final"])
-            for c in cases
+            for c in cases + out
             if c["level"] != "full" and c["axis_values"]
         ]
         ap = allpairs_generate(seeds, AP_SEED + rnd)
@@ -1444,8 +1618,72 @@ def build(calib):
         for av in ap:
             n_ap += 1
             for c in expand(ap_item(n_ap, av), ap=True):
-                finalize(c, calib)
-                cases.append(c)
+                if calib is None:
+                    _sized(c)
+                else:
+                    finalize(c, calib)
+                out.append(c)
+    return out
+
+
+def build(calib):
+    """Every case, runnable and not run, all-pairs cases included. The HF
+    census cases are placed last: in priority order into PR and nightly while
+    the budgets, all-pairs cases included, hold (§3.6); the rest stay in full.
+    The all-pairs cases depend on the placement, so placement repeats until
+    they settle."""
+    items = plan_items()
+    calib.prefetch([c for it in items for c in expand(it)])
+    base = [c for it in items if "hf" not in it for c in expand(it)]
+    for c in base:
+        finalize(c, calib)
+    hf_items_ = {it["id"]: it for it in items if "hf" in it}
+    hf = {}
+    for i, it in hf_items_.items():
+        (hf[i],) = expand(it)
+        finalize(hf[i], calib)
+    at_full = list(hf.values())
+    order = [c["id"] for c in hf_priority(at_full)]
+    applied = dict.fromkeys(hf, "full")
+
+    def apply(levels):
+        for i in hf:
+            lv = levels.get(i, "full")
+            if applied[i] != lv:
+                (hf[i],) = expand(dict(hf_items_[i], level=lv))
+                finalize(hf[i], calib)
+                applied[i] = lv
+        return base + list(hf.values())
+
+    # Placement sizes the all-pairs cases without estimates (their axis values,
+    # purpose and cost do not depend on the class), then writes them once.
+    def key(ap):
+        return [json.dumps(c["axis_values"], sort_keys=True) for c in ap]
+
+    ap = allpairs_cases(base + at_full)
+    for _ in range(8):
+        levels = place_hf(base + ap, at_full)
+        cases = apply(levels)
+        settled = allpairs_cases(cases)
+        same = key(settled) == key(ap)
+        ap = settled
+        if same:
+            break
+    while True:
+        cum, lim = cumulative_seconds(cases + ap), budget_limits(cases + ap)
+        over = [lv for lv in P.HF_LEVELS if cum[lv] > lim[lv]]
+        if not over:
+            break
+        # the all-pairs cases still took the room: the last-placed HF case of
+        # the lowest overflowing level moves up one level
+        lv = over[0]
+        last = next((i for i in reversed(order) if levels.get(i) == lv), None)
+        if last is None:
+            raise SystemExit(f"{lv}: over its budget with no HF case to move")
+        levels[last] = P.LEVELS[P.LEVELS.index(lv) + 1]
+        cases = apply(levels)
+        ap = allpairs_cases(cases)
+    cases += allpairs_cases(cases, calib)
     dup = [k for k, v in Counter(c["case_id"] for c in cases).items() if v > 1]
     if dup:
         raise SystemExit(f"duplicate case ids: {dup[:10]}")
@@ -1579,7 +1817,7 @@ def record(c):
     d.update(
         {
             k: c[k]
-            for k in ("est_s", "est_s_alt", "est_s_gpuref", "flop", "n_pairs", "n_live")
+            for k in ("est_s", "est_s_alt", "est_s_gpu", "flop", "n_pairs", "n_live")
         }
     )
     d["bytes"] = P.fp32_bytes(tensors)
@@ -1629,7 +1867,7 @@ def sweeps(cases):
     return OrderedDict(
         (
             Path(P.LEVEL_DIR[lv]) / OP / topo,
-            (topo, sorted(out[(lv, topo)], key=lambda c: -c["est_s"])),
+            (topo, sorted(out[(lv, topo)], key=lambda c: -c["est_s_gpu"])),
         )
         for lv, topo in keys
     )
@@ -1779,51 +2017,45 @@ def report(cases):
         cs = [c for c in run if c["level"] == lv]
         pur = dict(sorted(Counter(c["purpose_final"] for c in cs).items()))
         rej = sum(1 for c in cs if c.get("rejection"))
+        hf = sum(1 for c in cs if c.get("hf"))
         print(
-            f"  {lv:<8} {pur}  rejection probes {rej}  {dict(sorted(Counter(c['set'] for c in cs).items()))}"
+            f"  {lv:<8} {pur}  rejection probes {rej}  HF {hf}  {dict(sorted(Counter(c['set'] for c in cs).items()))}"
         )
 
-    def rule(c):
-        return P.budget_seconds(c["est_s"], c["est_s_alt"])
-
-    print("\nPer-case ceilings (rule: max(pilot, alt), alt x 1.1 for fp16)")
+    print("\nPer-case ceilings (the binding GPU-era model)")
     over = [
-        (c["case_id"], c["level"], rule(c))
+        (c["case_id"], c["level"], c["est_s_gpu"])
         for c in run
-        if rule(c) > P.CEIL_S[c["level"]]
-        or c["record"]["bytes"] > (P.CEIL_BYTES[c["level"]] or float("inf"))
+        if not P.within_ceilings(c["level"], c["est_s_gpu"], c["record"]["bytes"])
     ]
     print(f"  cases over their level ceiling: {len(over)} {over[:5]}")
     print(
-        "\nCumulative budgets, s, every written case accepted, CPU reference. pilot: the binding"
+        "\nCumulative budgets, s, every written case accepted. gpu: the binding GPU-era model;"
     )
     print(
-        "model; rule: the per-case rule above; +gates: rule plus the not-run cases whose gate is"
+        "+gates: gpu plus the not-run cases whose gate is a harness item, at their target level;"
     )
     print(
-        "a harness item (no GPU reference), at their target level. The 5 % reserve applies to rule."
+        "limit: the budget less the 5 % reserve and the gates; pilot: the CPU-reference model."
     )
     print(
-        f"  {'level':<8}{'pilot':>9}{'rule':>9}{'+gates':>9}{'budget':>9}{'reserve':>10}"
+        f"  {'level':<8}{'gpu':>9}{'+gates':>9}{'budget':>9}{'limit':>9}{'pilot':>10}"
     )
-    cum = cum_r = cum_g = 0.0
+    cum, lim = cumulative_seconds(cases), budget_limits(cases)
+    pilot = 0.0
     for lv in P.LEVELS:
-        cs = [c for c in run if c["level"] == lv]
-        gated = [
-            x for x in cases if not x["runnable_now"] and x.get("target_level") == lv
-        ]
-        gated = [x for x in gated if "14358" not in x["oracle_status"]]
-        cum += sum(c["est_s"] for c in cs)
-        cum_r += sum(rule(c) for c in cs)
-        cum_g += sum(rule(c) for c in cs + gated)
-        lim = P.CUM_S[lv] * (1 - P.RESERVE)
+        pilot += sum(c["est_s"] for c in run if c["level"] == lv)
+        if P.CUM_S[lv] is None:
+            print(f"  {lv:<8}{cum[lv]:9.1f}{'':>9}{'none':>9}{'':>9}{pilot:10.1f}")
+            continue
+        gates = P.CUM_S[lv] * (1 - P.RESERVE) - lim[lv]
         verdict = (
             "OK"
-            if cum_r <= lim
-            else ("over the reserve" if cum_r <= P.CUM_S[lv] else "OVER")
+            if cum[lv] <= lim[lv]
+            else ("over the reserve" if cum[lv] <= P.CUM_S[lv] else "OVER")
         )
         print(
-            f"  {lv:<8}{cum:9.1f}{cum_r:9.1f}{cum_g:9.1f}{P.CUM_S[lv]:9.0f}{lim:10.1f}  {verdict}"
+            f"  {lv:<8}{cum[lv]:9.1f}{cum[lv] + gates:9.1f}{P.CUM_S[lv]:9.0f}{lim[lv]:9.1f}{pilot:10.1f}  {verdict}"
         )
 
     print("\nAll-pairs proof (quick..nightly, runnable cases with axis values)")
@@ -1916,9 +2148,15 @@ def main():
         action="store_true",
         help="compute missing or stale magnitude estimates (numpy)",
     )
+    ap.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help="processes for --calibrate",
+    )
     ap.add_argument("--calibration", type=Path, default=P.CALIBRATION_FILE)
     args = ap.parse_args()
-    calib = Calibration(args.calibration, compute=args.calibrate)
+    calib = Calibration(args.calibration, compute=args.calibrate, jobs=args.jobs)
     cases = build(calib)
     if args.calibrate and not args.dry_run:
         calib.save()

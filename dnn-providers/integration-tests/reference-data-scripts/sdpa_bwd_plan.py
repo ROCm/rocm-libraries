@@ -127,6 +127,8 @@ TOPOLOGIES = OrderedDict([
 ISQ = "inv_sqrt"  # attn_scale_value = 1 / sqrt(Dqk)
 
 GEOMETRY = ("B", "Hq", "Hk", "Hv", "Sq", "Skv", "Dqk", "Dv")
+# A case's shape: its geometry, band (W, R, align) and scale.
+SHAPE_KEYS = GEOMETRY + ("W", "R", "align", "scale")
 # The default shape (§3): g = 1 and Dqk = Dv (deviation DV-1).
 DEFAULT = dict(B=2, Hq=3, Hk=3, Hv=3, Sq=72, Skv=120, Dqk=128, Dv=128)
 
@@ -273,6 +275,7 @@ STRIDE_KINDS = {
     "fa_transpose":  lambda B, H, S, D: [2 * H * D, D, 2 * B * H * D, 1],
     "qkv3":          lambda B, H, S, D: [S * 3 * H * D, D, 3 * H * D, 1],
     "bs3hd":         lambda B, H, S, D: [S * 3 * H * D, D, 3 * H * D, 1],
+    "vneox":         lambda B, H, S, D: [S * 3 * H * D, 3 * D, 3 * H * D, 1],
     "perm_bsh":      lambda B, H, S, D: [S * H * D, D, H * D, 1],
     "perm_hbs":      lambda B, H, S, D: [S * D, B * S * D, D, 1],
     "perm_hsb":      lambda B, H, S, D: [D, S * B * D, B * D, 1],
@@ -295,6 +298,13 @@ LAYOUTS = {
     "perm6": dict(zip(IO, ("perm_bsh", "perm_hbs", "perm_hsb", "perm_sbh", "perm_shb", "bhsd",
                            "perm_bsh", "perm_hbs"))),
     "gaps": {t: "gaps" for t in IO},
+    # Hugging Face census layouts (§3.6): Q, K, V and their gradients with the strides of
+    # one fused-projection buffer [B, S, Hq + Hk + Hv, D], each in its own allocation
+    # (stride kind "qkvpk", resolved in tensor_table because the row pitch needs every
+    # head count), and V with the strides of a GPT-NeoX/BLOOM interleaved buffer (head
+    # stride 3D, row stride 3HD).
+    "qkvpk": dict({t: "bshd" for t in IO}, **{t: "qkvpk" for t in ("Q", "K", "V", "dQ", "dK", "dV")}),
+    "bshd_vneox": dict({t: "bshd" for t in IO}, V="vneox"),
 }
 
 # Stats layouts: (dims, strides) from B, Hq, Sq
@@ -387,13 +397,13 @@ def tensor_table(c, dt):
     over = c.get("dtype_over") or {}
     out = OrderedDict()
     for t in IO:
-        out[t] = _tensor(
-            t,
-            dims[t],
-            strides_for(kinds[t], *dims[t]),
-            kinds[t],
-            DTYPE_NAME.get(over.get(t), io),
-        )
+        d = dims[t]
+        if kinds[t] == "qkvpk":  # one row of the fused buffer holds every head
+            pitch = (Hq + Hk + Hv) * d[3]
+            st = [d[2] * pitch, d[3], pitch, 1]
+        else:
+            st = strides_for(kinds[t], *d)
+        out[t] = _tensor(t, d, st, kinds[t], DTYPE_NAME.get(over.get(t), io))
     st = c.get("stats", "packed")
     sd, ss = STATS[st](B, Hq, Sq)
     out["Stats"] = _tensor(
@@ -465,31 +475,53 @@ def scale_value(c):
 
 # --------------------------------------------------------------------------
 # Cost model (§3, §4.4; RFC 0022 §7): one model for the case list and the golden
-# set. Wall time of one case with the CPU reference as the oracle:
-#   pilot (binding): t = 4.6e-8 * Dv * T + 8.7e-8 * (3*Dqk + Dv)/4 * U + 0.14 s
-#   alt:  t = 27.9e-9 * f * (U*(3*Dqk + Dv) + T*Dv) + 1e-8 * (Dqk + Dv)/2 * T + 0.08 s,
-#         f = 1.10 for fp16
-#   GPU-reference era (lower bound): 1e-8 * (Dqk + Dv)/2 * T + 0.08 s
-# T = N_pairs = B*Hq*Sq*Skv; U = N_live = B*Hq*kept pairs. A repeated case
-# costs repeat x t. The ceilings and budgets use max(pilot, alt).
+# set. T = N_pairs = B*Hq*Sq*Skv; U = N_live = B*Hq*kept pairs. A repeated case
+# costs repeat x t.
+#
+# Binding: the measured GPU-era model (§4.5, RFC 0022 I9). With the device fill
+# the lane derives O and Stats with the GPU reference's forward and checks with
+# the GPU reference's backward, whose threads each recompute their scores:
+#   t = GPU_FWD_K * T*(Dqk + Dv) + GPU_REF_K * U*(2*Dqk*(Dqk + Dv) + Dqk*Dv) + GPU_C
+# fitted to the 616 cases ASM_SDPA_ENGINE executed in the gfx942 (MI300X) timing
+# run of §4.5 (median error 13 %); the first case of each HipRTC-compiled type
+# combination in a process also pays ~3.5 s once, outside the model. The
+# ceilings and the budgets use it.
+#
+# CPU reference as the oracle (lanes that force --verification-mode=cpu; also the
+# size targets of the M reductions, §3.3):
+#   pilot: t = 4.6e-8 * Dv * T + 8.7e-8 * (3*Dqk + Dv)/4 * U + 0.14 s
+#   alt:   t = 27.9e-9 * f * (U*(3*Dqk + Dv) + T*Dv) + 1e-8 * (Dqk + Dv)/2 * T + 0.08 s,
+#          f = 1.10 for fp16
 # --------------------------------------------------------------------------
 
 PILOT_T, PILOT_U, PILOT_C = 4.6e-8, 8.7e-8, 0.14
 ALT_K, ALT_ENG, ALT_C = 27.9e-9, 1.0e-8, 0.08
 FP16_REF_FACTOR = 1.10
 GPU_FWD_NS_PER_MAC, FWD_EFF_THREADS = 30e-9, 20
+GPU_FWD_K, GPU_REF_K, GPU_C = 3.92e-13, 4.82e-13, 0.0127
 
 MIB = 1 << 20
 # Per-case ceilings (seconds, fp32-equivalent bytes) and cumulative budgets
 # (seconds, every case of the level and the levels below accepted).
 CEIL_S = {"quick": 1.5, "pr": 5.0, "nightly": 75.0, "full": 300.0}
 CEIL_BYTES = {"quick": 4 * MIB, "pr": 16 * MIB, "nightly": 64 * MIB, "full": None}
-CUM_S = {"quick": 20.0, "pr": 120.0, "nightly": 480.0, "full": 1800.0}
+# Full has no cumulative budget (RFC 0022 §8.2): the HF census cases that do not fit
+# PR or nightly land there (§3.6).
+CUM_S = {"quick": 20.0, "pr": 120.0, "nightly": 480.0, "full": None}
 RESERVE = 0.05  # each cumulative budget keeps 5 % for model error
 
 
 def pilot_seconds(T, U, Dqk, Dv):
     return PILOT_T * Dv * T + PILOT_U * (3 * Dqk + Dv) / 4.0 * U + PILOT_C
+
+
+def gpu_seconds(T, U, Dqk, Dv):
+    """The binding cost: the measured GPU-era model."""
+    return (
+        GPU_FWD_K * T * (Dqk + Dv)
+        + GPU_REF_K * U * (2 * Dqk * (Dqk + Dv) + Dqk * Dv)
+        + GPU_C
+    )
 
 
 def alt_seconds(T, U, Dqk, Dv, fp16=False):
@@ -512,7 +544,7 @@ def shape_cost(B, Hq, Hk, Hv, Sq, Skv, Dqk, Dv, W=None, R=None, align="TL", U=No
         "s": pilot_seconds(T, U, Dqk, Dv),
         "s_alt": alt_seconds(T, U, Dqk, Dv),
         "s_alt_fp16": alt_seconds(T, U, Dqk, Dv, fp16=True),
-        "s_gpuref": 1.0e-8 * (Dqk + Dv) / 2 * T + 0.08,
+        "s_gpu": gpu_seconds(T, U, Dqk, Dv),
         "fwd_derivation_s": T * (Dqk + Dv) * GPU_FWD_NS_PER_MAC / FWD_EFF_THREADS,
     }
 
@@ -539,24 +571,24 @@ def case_cost(c):
 
 
 def seconds(c, dt):
-    """(pilot, alt, GPU-reference era) seconds, repeat included; the alt
-    model uses its fp16 factor for fp16."""
+    """(pilot, alt, GPU-era) seconds, repeat included; the alt model uses its
+    fp16 factor for fp16. The GPU-era model binds (§4.4)."""
     cc = case_cost(c)
     rpt = c.get("repeat") or 1
     alt = cc["s_alt_fp16"] if dt == "fp16" else cc["s_alt"]
-    return round(cc["s"] * rpt, 3), round(alt * rpt, 3), round(cc["s_gpuref"] * rpt, 3)
+    return round(cc["s"] * rpt, 3), round(alt * rpt, 3), round(cc["s_gpu"] * rpt, 3)
 
 
-def budget_seconds(pilot, alt):
-    """The per-case and cumulative budget rule (§3, §4.4)."""
-    return max(pilot, alt)
+def within_ceilings(level, seconds, nbytes):
+    """The per-case time and byte ceilings of a level hold (§4.4)."""
+    cb = CEIL_BYTES[level]
+    return seconds <= CEIL_S[level] and (cb is None or nbytes <= cb)
 
 
 def fits_level(cost):
     """Lowest level whose per-case time and byte ceilings hold (pilot)."""
     for lv in LEVELS:
-        cb = CEIL_BYTES[lv]
-        if cost["s"] <= CEIL_S[lv] and (cb is None or cost["bytes"] <= cb):
+        if within_ceilings(lv, cost["s"], cost["bytes"]):
             return lv
     return None
 
@@ -878,15 +910,14 @@ UNASSIGNED_GATE = "no non-vacuous class (needs the per-tensor validator HG6)"
 # reference budget.
 # fmt: off
 GATES = {
-    "14358+derivation": ("the #14312 derivation extension (ALiBi)", "to file"),
-    "14358+derivation+HG4": ("the #14312 derivation extension and HG4 (per-batch lists, Bernoulli masks)",
-                             "ALMIOPEN-2861, ALMIOPEN-2862 (partial); derivation: to file"),
-    "14358+derivation+HG20": ("the derivation extension and HG20 (ragged fill)", "to file"),
+    # The derivation runs the forward graph through the reference executors (ALMIOPEN-3157):
+    # ALiBi and rank-3 Stats are derived; padding, explicit dropout and ragged cases wait
+    # only for their fills.
+    "14358+HG4": ("HG4 (per-batch length lists, Bernoulli dropout masks)", "ALMIOPEN-2861, ALMIOPEN-2862"),
+    "14358+HG20": ("HG20 (ragged offset fill)", "ALMIOPEN-2125"),
     "14358+I4": ("I4 (structured -inf injection)", "ALMIOPEN-2948 (design only); to file"),
     "14358+gpufwd": ("a GPU forward derivation (X-size shapes)", "ALMIOPEN-2855 (partial)"),
     "14358+timing": ("a timing run that re-sizes the shape", "to file"),
-    "14358+derivation-rank3": ("the #14312 derivation extension for rank-3 Stats (the CPU forward that derives "
-                               "O and Stats needs [B, Hq, Sq, 1])", "to file"),
     "I3": ("I3: base pointers placed at exactly the declared alignment", "ALMIOPEN-2948 (design only); to file"),
     "I4": ("I4: structured value injection", "ALMIOPEN-2948 (design only); to file"),
     "HG9": ("HG9: exact-zero check", "to file"),
@@ -1029,10 +1060,10 @@ ASSIGNMENT_ORDER = ("F32", "K1", "U", "S", "P", "DL", "D")
 TOKEN = {k: v[0] for k, v in CLASSES.items()}
 GUARD = 0.1  # atol <= GUARD x min over non-zero gradients of max|ref|
 MARGIN = 2.5  # same-precision kernel model vs the FP32-accumulating reference
-KERNEL_MODEL_CAP = (
-    2.5e9  # N_pairs x max(Dqk, Dv) above which the kernel model is not run
-)
-ESTIMATE_CAP = 2e7  # min(B, 2) x Hq x Sq x Skv above which the class is provisional
+# Estimator sizes, in scores of the estimate (min(B, 2) x Hq x Sq x Skv):
+ESTIMATE_BLOCK = 2e7  # scores per block of query rows
+ESTIMATE_LIMIT = 6e8  # above it the class is provisional
+KERNEL_MODEL_CAP = 4e10  # scores x max(Dqk, Dv) above which the kernel model is not run
 
 
 def tolerance(cls, dt):
@@ -1135,18 +1166,21 @@ def modellable(c):
     )
 
 
+def estimate_scores(c):
+    """Scores the estimate computes: min(B, 2) x Hq x Sq x Skv (every head)."""
+    return min(c["B"], 2) * c["Hq"] * c["Sq"] * c["Skv"]
+
+
 def estimable(c):
-    """The class rests on an estimate: the case is modellable and small
-    enough; otherwise its class is provisional."""
-    return (
-        modellable(c) and min(c["B"], 2) * c["Hq"] * c["Sq"] * c["Skv"] <= ESTIMATE_CAP
-    )
+    """The class rests on an estimate: the case is modellable and its estimate
+    within ESTIMATE_LIMIT scores; otherwise its class is provisional."""
+    return modellable(c) and estimate_scores(c) <= ESTIMATE_LIMIT
 
 
 def kernel_model(c, dt, runnable):
     """The estimate runs the same-precision kernel model (the margin check)."""
-    T = c["B"] * c["Hq"] * c["Sq"] * c["Skv"]
-    return T * max(c["Dqk"], c["Dv"]) <= KERNEL_MODEL_CAP and dt != "fp32" and runnable
+    work = estimate_scores(c) * max(c["Dqk"], c["Dv"])
+    return work <= KERNEL_MODEL_CAP and dt != "fp32" and runnable
 
 
 def provisional_class(dt):
@@ -1262,81 +1296,110 @@ def estimate(params, seed=1234):
     hk = np.arange(Hq) // (Hq // Hk)
     hv = np.arange(Hq) // (Hq // Hv)
     Kx, Vx = K[:, hk], V[:, hv]
-    S = sc * (Q @ np.swapaxes(Kx, -1, -2))
-    if bias is not None:
-        S = S + bias
-    Sm = np.where(keep, S, -np.inf)
-    mx = Sm.max(-1, keepdims=True)
-    alive = np.isfinite(mx)
-    mx = np.where(alive, mx, 0.0)
-    E = np.where(keep, np.exp(Sm - mx), 0.0)
-    den = E.sum(-1, keepdims=True)
-    P = np.where(alive, E / np.where(den > 0, den, 1.0), 0.0)
-    lse = np.where(alive, mx + np.log(np.where(den > 0, den, 1.0)), -np.inf)
-    O = rnd(P @ Vx, dt)
-    lse32 = lse.astype(np.float32).astype(np.float64)
-    Pb = np.where(
-        keep & alive, np.exp(np.where(keep, S, 0.0) - np.where(alive, lse32, 0.0)), 0.0
-    )
-    dP = dO @ np.swapaxes(Vx, -1, -2)
-    Dt = (dO * O).sum(-1, keepdims=True)
-    dS = np.where(keep, Pb * (dP - Dt), 0.0)
+    rt = {"bf16": 1.6e-2, "fp16": 4e-3}.get(dt)
+    km = bool(p.get("kernel_model") and rt)
+    f = np.float32
+    if km:
+        Q32, Kx32, Vx32, dO32 = (x.astype(f) for x in (Q, Kx, Vx, dO))
 
-    def reduce_heads(kx, vx, f=np.float64):
-        k = np.zeros((B, Hk, Skv, Dqk), dtype=f)
-        v = np.zeros((B, Hv, Skv, Dv), dtype=f)
+    def reduce_heads(kx, vx, dtype=np.float64):
+        k = np.zeros((B, Hk, Skv, Dqk), dtype=dtype)
+        v = np.zeros((B, Hv, Skv, Dv), dtype=dtype)
         for h in range(Hq):
             k[:, hk[h]] += kx[:, h]
             v[:, hv[h]] += vx[:, h]
         return k, v
 
-    dK, dV = reduce_heads(
-        sc * (np.swapaxes(dS, -1, -2) @ Q), np.swapaxes(Pb, -1, -2) @ dO
-    )
-    ref = {"dQ": rnd(sc * (dS @ Kx), dt), "dK": rnd(dK, dt), "dV": rnd(dV, dt)}
-    out = {
-        "lambda": float(sc * np.sqrt(Dqk) * sigma(ins.get("q")) * sigma(ins.get("k"))),
-        "max_ref": {k: float(np.abs(v).max()) for k, v in ref.items()},
-        "atol_needed": None,
-    }
-    rt = {"bf16": 1.6e-2, "fp16": 4e-3}.get(dt)
-    if p.get("kernel_model") and rt:
-        f = np.float32
-        Q32, Kx32, Vx32, dO32, O32 = (x.astype(f) for x in (Q, Kx, Vx, dO, O))
-        S32 = (Q32 @ np.swapaxes(Kx32, -1, -2)) * f(sc)
+    # Query rows are independent: a block of rows holds at most ESTIMATE_BLOCK
+    # scores, dQ is final per block and dK, dV sum over the blocks. A case
+    # within one block computes exactly what the unblocked estimator did.
+    rows = max(1, int(ESTIMATE_BLOCK // (B * Hq * Skv)))
+    dK, dV = np.zeros((B, Hk, Skv, Dqk)), np.zeros((B, Hv, Skv, Dv))
+    max_dq = 0.0
+    if km:
+        k32 = {n: np.zeros((B, Hk, Skv, Dqk), dtype=f) for n in ("r32", "model")}
+        v32 = {n: np.zeros((B, Hv, Skv, Dv), dtype=f) for n in ("r32", "model")}
+        need = 0.0
+    for r0 in range(0, Sq, rows):
+        sl = slice(r0, min(Sq, r0 + rows))
+        Qb, dOb, kb = Q[:, :, sl], dO[:, :, sl], keep[sl]
+        S = sc * (Qb @ np.swapaxes(Kx, -1, -2))
         if bias is not None:
-            S32 = S32 + bias.astype(f)
+            S = S + bias[:, :, sl]
+        Sm = np.where(kb, S, -np.inf)
+        mx = Sm.max(-1, keepdims=True)
+        alive = np.isfinite(mx)
+        mx = np.where(alive, mx, 0.0)
+        E = np.where(kb, np.exp(Sm - mx), 0.0)
+        den = E.sum(-1, keepdims=True)
+        Pf = np.where(alive, E / np.where(den > 0, den, 1.0), 0.0)
+        lse = np.where(alive, mx + np.log(np.where(den > 0, den, 1.0)), -np.inf)
+        O = rnd(Pf @ Vx, dt)
+        lse32 = lse.astype(np.float32).astype(np.float64)
+        Pb = np.where(
+            kb & alive, np.exp(np.where(kb, S, 0.0) - np.where(alive, lse32, 0.0)), 0.0
+        )
+        dP = dOb @ np.swapaxes(Vx, -1, -2)
+        Dt = (dOb * O).sum(-1, keepdims=True)
+        dS = np.where(kb, Pb * (dP - Dt), 0.0)
+        kx, vx = reduce_heads(
+            sc * (np.swapaxes(dS, -1, -2) @ Qb), np.swapaxes(Pb, -1, -2) @ dOb
+        )
+        dK += kx
+        dV += vx
+        dq = rnd(sc * (dS @ Kx), dt)
+        if dq.size:
+            max_dq = max(max_dq, float(np.abs(dq).max()))
+        if not km:
+            continue
+        Qb32, dOb32, O32 = Q32[:, :, sl], dO32[:, :, sl], O.astype(f)
+        S32 = (Qb32 @ np.swapaxes(Kx32, -1, -2)) * f(sc)
+        if bias is not None:
+            S32 = S32 + bias[:, :, sl].astype(f)
         with np.errstate(invalid="ignore", over="ignore"):
             lse_f = np.where(alive, lse32, 0.0).astype(f)
             P32 = np.where(
-                keep & alive, np.exp(np.where(keep, S32, f(0)) - lse_f), f(0)
+                kb & alive, np.exp(np.where(kb, S32, f(0)) - lse_f), f(0)
             ).astype(f)
-        dP32 = dO32 @ np.swapaxes(Vx32, -1, -2)
-        D32 = (dO32 * O32).sum(-1, keepdims=True, dtype=f)
-        dS32 = np.where(keep, (P32 * (dP32 - D32)).astype(f), f(0))
-
-        def grads(Pm, dSm):
-            k, v = reduce_heads(
-                (np.swapaxes(dSm, -1, -2) @ Q32) * f(sc),
-                np.swapaxes(Pm, -1, -2) @ dO32,
+        dP32 = dOb32 @ np.swapaxes(Vx32, -1, -2)
+        D32 = (dOb32 * O32).sum(-1, keepdims=True, dtype=f)
+        dS32 = np.where(kb, (P32 * (dP32 - D32)).astype(f), f(0))
+        for n, (Pm, dSm) in (
+            ("r32", (P32, dS32)),
+            ("model", (rnd(P32, dt).astype(f), rnd(dS32, dt).astype(f))),
+        ):
+            kx, vx = reduce_heads(
+                (np.swapaxes(dSm, -1, -2) @ Qb32) * f(sc),
+                np.swapaxes(Pm, -1, -2) @ dOb32,
                 f,
             )
-            return {
-                "dQ": rnd((dSm @ Kx32) * f(sc), dt),
-                "dK": rnd(k, dt),
-                "dV": rnd(v, dt),
-            }
-
-        r32 = grads(P32, dS32)
-        model = grads(rnd(P32, dt).astype(f), rnd(dS32, dt).astype(f))
-        need = 0.0
-        for g in ("dQ", "dK", "dV"):
-            if r32[g].size:
+            k32[n] += kx
+            v32[n] += vx
+            if n == "r32":
+                dq_r32 = rnd((dSm @ Kx32) * f(sc), dt)
+            else:
+                dq_model = rnd((dSm @ Kx32) * f(sc), dt)
+        if dq_r32.size:
+            need = max(
+                need,
+                float((MARGIN * np.abs(dq_model - dq_r32) - rt * np.abs(dq_r32)).max()),
+            )
+    ref = {"dK": rnd(dK, dt), "dV": rnd(dV, dt)}
+    out = {
+        "lambda": float(sc * np.sqrt(Dqk) * sigma(ins.get("q")) * sigma(ins.get("k"))),
+        "max_ref": {
+            "dQ": max_dq,
+            **{k: float(np.abs(v).max()) for k, v in ref.items()},
+        },
+        "atol_needed": None,
+    }
+    if km:
+        for g, acc in (("dK", k32), ("dV", v32)):
+            r32, model = rnd(acc["r32"], dt), rnd(acc["model"], dt)
+            if r32.size:
                 need = max(
                     need,
-                    float(
-                        (MARGIN * np.abs(model[g] - r32[g]) - rt * np.abs(r32[g])).max()
-                    ),
+                    float((MARGIN * np.abs(model - r32) - rt * np.abs(r32)).max()),
                 )
         out["atol_needed"] = max(need, 0.0)
     return out
@@ -1802,7 +1865,7 @@ X_SHAPES = {
     "X07": dict(**_H1, Sq=65536, Skv=1, f=("V6", "AW9"), dt=("fp16", "bf16"), defect="DEF-03"),
     "X08": dict(B=65537, Hq=1, Hk=1, Hv=1, Sq=16, Skv=16, Dqk=64, Dv=64, f=("G1",)),
     "X09": dict(**_H2, Sq=16, Skv=65537, f=("G6",)),
-    "X10": dict(**_H2, Sq=16, Skv=65537, R=0, attrs={"alibi_mask": True}, f=("A8", "G6"), oracle="14358+derivation"),
+    "X10": dict(**_H2, Sq=16, Skv=65537, R=0, attrs={"alibi_mask": True}, f=("A8", "G6")),
     "X11": dict(**_H1, Sq=4096, Skv=4096, R=0, f=("V6",)),
     "X12": dict(**_H1, Sq=16384, Skv=16384, R=0, f=("V6",), oracle="14358+timing"),
     "X13": dict(B=78, Hq=16, Hk=16, Hv=16, Sq=64, Skv=64, Dqk=80, Dv=80, f=("G1",)),
@@ -1971,8 +2034,7 @@ def reduce_model(m, target_s, s_floor, level, keep_window=False):
 
 
 def _m_key(v):
-    keys = GEOMETRY + ("W", "R", "align", "scale")
-    return tuple(v.get(k) for k in keys) + (tuple(v.get("seqlens") or ()),)
+    return tuple(v.get(k) for k in SHAPE_KEYS) + (tuple(v.get("seqlens") or ()),)
 
 
 def _m_record(mid, suffix, v):
@@ -2050,6 +2112,25 @@ def model_variants():
                 _m_record(mid, {"pr": "pr", "nightly": "n", "fullcpu": "fc"}[lvl], v)
             )
     return out
+
+
+# HF: the Hugging Face model census (§3.6). sdpa_bwd_hf_census.json holds the
+# real attention geometries of the most-liked, most-downloaded and trending Hub
+# models and one record per case. The generator places each case in the lowest
+# level, PR or above, whose ceilings and budgets it fits, in HF_VARIANT_ORDER
+# within a geometry and by popularity across geometries; the rest go to full.
+HF_CENSUS_FILE = Path(__file__).with_name("sdpa_bwd_hf_census.json")
+HF_VARIANT_ORDER = "RFTPVHDMBXU"
+HF_LEVELS = ("pr", "nightly")  # quick holds S shapes only (RFC 0022 §7)
+_HF_CENSUS = None
+
+
+def hf_census():
+    """The census: {"note", "geometries": [...], "cases": [...]}, loaded once."""
+    global _HF_CENSUS
+    if _HF_CENSUS is None:
+        _HF_CENSUS = json.loads(HF_CENSUS_FILE.read_text(encoding="utf-8"))
+    return _HF_CENSUS
 
 
 # L: one feature each at medium size. Base: the default at 4x length
@@ -2133,8 +2214,10 @@ _GL64 = dict(B=2, Hq=4, Hk=2, Hv=2, Sq=64, Skv=96, Dqk=64, Dv=64)
 _CM = {"causal_mask": True, "causal_mask_bottom_right": False}
 _DROP = {"p": 0.2, "scale": 1.25, "scale_inv": 0.8, "mask_dims": "full"}
 _PADKV = {"seq_len_q": [64, 64, 64], "seq_len_kv": [96, 71, 64], "padding_mask": False}
-_GT1_DROPOUT = "GT1, the #14312 derivation extension for dropout and HG4 (the live counterpart's gate)"
-_GT1_PADDING = "GT1, the #14312 derivation extension for padding and HG4 (the live counterpart's gate)"
+_GT1_DROPOUT = (
+    "GT1 and HG4, the Bernoulli dropout-mask fill (the live counterpart's gate)"
+)
+_GT1_PADDING = "GT1 and HG4, the per-batch length fill (the live counterpart's gate)"
 # fmt: off
 GOLDEN = OrderedDict([
     # id: (level, purpose, criteria, class, fields)
@@ -2156,10 +2239,10 @@ GOLDEN = OrderedDict([
                                               dbias=True,
                                               topology="AdditiveMaskDBias", gate="GT1"))),
     ("GL-15", ("pr", "probe", "G-B", "P", dict(_GL64, align="BR", R=0, inputs=DOMAIN["u01"], dropout=_DROP,
-                                              topology="DropoutMask", oracle="14358+derivation+HG4",
+                                              topology="DropoutMask", oracle="14358+HG4",
                                               gate=_GT1_DROPOUT))),
     ("GL-16a", ("pr", "probe", "G-B", "P", dict(_GL64, B=3, Hq=2, align="BR", R=0, padding=_PADKV,
-                                               topology="Padding", oracle="14358+derivation+HG4", gate=_GT1_PADDING))),
+                                               topology="Padding", oracle="14358+HG4", gate=_GT1_PADDING))),
     ("GL-17", ("pr", "claim", "G-D", "U", dict(_GL, inputs=DOMAIN["peaked"]))),
     ("GL-18", ("pr", "claim", "G-D G-A", "D", dict(_GL, dt="fp16", layout="bshd", inputs=DOMAIN["v01"]))),
     ("GL-19", ("nightly", "claim", "G-D", "P", dict(_H1, Sq=896, Skv=64, dt="fp16", set="H"))),

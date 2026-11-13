@@ -4,20 +4,23 @@
 #include "harness/input-init/SdpaBackwardInputs.hpp"
 
 #include <algorithm>
-#include <array>
-#include <cstddef>
+#include <cstdint>
+#include <exception>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
-#include <hipdnn_data_sdk/types.hpp>
-#include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
+#include <flatbuffers/flatbuffers.h>
+#include <hip/hip_runtime_api.h>
+
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
-#include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
-#include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
+#include <hipdnn_test_sdk/utilities/VariantPackUtils.hpp>
+
+#include "harness/ReferenceCapabilityError.hpp"
 
 namespace hipdnn_integration_tests
 {
@@ -25,8 +28,6 @@ namespace
 {
 
 namespace fb = hipdnn_flatbuffers_sdk::data_objects;
-using hipdnn_data_sdk::utilities::ITensor;
-using hipdnn_data_sdk::utilities::ShallowTensor;
 
 const fb::TensorAttributes* findTensor(const fb::Graph& graph, int64_t uid)
 {
@@ -44,126 +45,105 @@ const fb::TensorAttributes* findTensor(const fb::Graph& graph, int64_t uid)
     return nullptr;
 }
 
-// Names the first term the forward applies besides the scale, the diagonal band and
-// the additive mask, none of which the derivation reproduces.
-std::optional<std::string> unmodeledForwardTerm(const fb::SdpaBackwardAttributes& a)
+// Whether the process sees a HIP device. A DeviceInputFiller is built without one, so a
+// fill with a filler can still have no device to run the GPU forward on.
+bool deviceVisible()
 {
-    if(a.alibi_mask())
-    {
-        return "ALiBi";
-    }
-    if(a.padding_mask() || a.seq_len_q_tensor_uid().has_value()
-       || a.seq_len_kv_tensor_uid().has_value())
-    {
-        return "padding or variable sequence lengths";
-    }
-    // A zero probability is no dropout, as the engines read it.
-    if((a.dropout_probability().has_value() && a.dropout_probability().value() != 0.f)
-       || a.seed_tensor_uid().has_value() || a.offset_tensor_uid().has_value()
-       || a.dropout_mask_tensor_uid().has_value() || a.dropout_scale_tensor_uid().has_value()
-       || a.dropout_scale_inv_tensor_uid().has_value())
-    {
-        return "dropout";
-    }
-    return std::nullopt;
+    int count = 0;
+    return hipGetDeviceCount(&count) == hipSuccess && count > 0;
 }
 
-// The Q, K, V, O and mask types the CPU forward is instantiated for; the CPU backward
-// registers the same ones.
-bool isReferenceType(fb::DataType type)
+// The SDPA forward graph whose outputs are the backward node's O and stats: one forward
+// node over the backward node's Q, K, V and forward attributes (scale, band and causal
+// flags, additive mask, ALiBi, padding with its sequence lengths, the explicit dropout
+// mask and scale), and every tensor it reads, ragged offsets included. Rank-3 stats are
+// declared [B, H, Sq, 1] over the same memory, the shape both forward references take.
+struct ForwardGraph
 {
-    return type == fb::DataType::FLOAT || type == fb::DataType::HALF
-           || type == fb::DataType::BFLOAT16;
-}
+    std::vector<uint8_t> buffer;
+    std::vector<int64_t> uids; // every tensor of the graph that has a buffer
+};
 
-// The CPU forward reads the mask right-aligned to the [B, H, Sq, Skv] scores, with
-// size-1 dims broadcast, and does not check its shape, so it is checked here.
-bool maskBroadcastsToScores(const ITensor& mask, const ITensor& q, const ITensor& k)
+ForwardGraph buildForwardGraph(const fb::Graph& graph,
+                               const fb::SdpaBackwardAttributes& b,
+                               const std::vector<int64_t>& tensorUids)
 {
-    const auto& maskDims = mask.dims();
-    if(maskDims.empty() || maskDims.size() > 4)
+    fb::GraphT fwd;
+    fwd.name = "sdpa_backward_forward_derivation";
+    fwd.compute_data_type = graph.compute_data_type();
+    fwd.intermediate_data_type = graph.intermediate_data_type();
+    fwd.io_data_type = graph.io_data_type();
+
+    ForwardGraph out;
+    for(const int64_t uid : tensorUids)
     {
-        return false;
-    }
-    if(q.dims().size() != 4 || k.dims().size() != 4)
-    {
-        // The forward rejects these shapes before it reads the mask.
-        return true;
-    }
-    const std::array<int64_t, 4> scoreDims = {q.dims()[0], q.dims()[1], q.dims()[2], k.dims()[2]};
-    const std::size_t offset = scoreDims.size() - maskDims.size();
-    for(std::size_t i = 0; i < maskDims.size(); ++i)
-    {
-        if(maskDims[i] != 1 && maskDims[i] != scoreDims[offset + i])
+        std::unique_ptr<fb::TensorAttributesT> tensor(findTensor(graph, uid)->UnPack());
+        if(uid == b.stats_tensor_uid() && tensor->dims.size() == 3)
         {
-            return false;
+            tensor->dims.push_back(1);
+            tensor->strides.push_back(1);
         }
+        // A pass-by-value scale that is not a runtime value lives in the graph itself.
+        const bool baked
+            = hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(findTensor(graph, uid))
+              && !tensor->is_runtime_pass_by_value;
+        if(!baked)
+        {
+            out.uids.push_back(uid);
+        }
+        fwd.tensors.push_back(std::move(tensor));
     }
-    return true;
+
+    fb::SdpaAttributesT a;
+    a.q_tensor_uid = b.q_tensor_uid();
+    a.k_tensor_uid = b.k_tensor_uid();
+    a.v_tensor_uid = b.v_tensor_uid();
+    a.o_tensor_uid = b.o_tensor_uid();
+    a.stats_tensor_uid = b.stats_tensor_uid();
+    a.generate_stats = true;
+    a.attn_mask_tensor_uid = b.attn_mask_tensor_uid();
+    a.scale_tensor_uid = b.scale_tensor_uid();
+    a.seq_len_q_tensor_uid = b.seq_len_q_tensor_uid();
+    a.seq_len_kv_tensor_uid = b.seq_len_kv_tensor_uid();
+    a.dropout_mask_tensor_uid = b.dropout_mask_tensor_uid();
+    a.dropout_scale_tensor_uid = b.dropout_scale_tensor_uid();
+    a.alibi_mask = b.alibi_mask();
+    a.padding_mask = b.padding_mask();
+    a.causal_mask = b.causal_mask();
+    a.causal_mask_bottom_right = b.causal_mask_bottom_right();
+    a.attn_scale_value = b.attn_scale_value();
+    a.left_bound = b.left_bound();
+    a.right_bound = b.right_bound();
+    a.diagonal_alignment = b.diagonal_alignment();
+    // dropout_probability stays unset: an explicit mask carries the dropout, and the
+    // caller refuses a nonzero probability without one (Philox).
+
+    auto node = std::make_unique<fb::NodeT>();
+    node->name = "sdpa_forward";
+    node->compute_data_type = graph.compute_data_type();
+    node->attributes.Set(a);
+    fwd.nodes.push_back(std::move(node));
+
+    flatbuffers::FlatBufferBuilder builder;
+    builder.Finish(fb::Graph::Pack(builder, &fwd));
+    out.buffer.assign(builder.GetBufferPointer(), builder.GetBufferPointer() + builder.GetSize());
+    return out;
 }
 
-template <typename T, typename Mask>
-void forwardInto(ITensor& q,
-                 ITensor& k,
-                 ITensor& v,
-                 ITensor& o,
-                 ITensor& stats,
-                 ITensor* mask,
-                 std::optional<float> scale,
-                 const DiagonalBandParams& band)
+std::unordered_map<int64_t, void*> variantPack(const fb::Graph& graph,
+                                               const std::vector<int64_t>& uids,
+                                               InputTensorMap& inputs,
+                                               bool useDevice)
 {
-    const ShallowTensor<T> qView(q.rawHostData(), q.dims(), q.strides());
-    const ShallowTensor<T> kView(k.rawHostData(), k.dims(), k.strides());
-    const ShallowTensor<T> vView(v.rawHostData(), v.dims(), v.strides());
-    ShallowTensor<T> oView(o.rawHostData(), o.dims(), o.strides());
-    ShallowTensor<float> lseView(stats.rawHostData(), stats.dims(), stats.strides());
-    std::optional<ShallowTensor<Mask>> maskView;
-    if(mask != nullptr)
+    std::unordered_map<int64_t, void*> pack;
+    for(const int64_t uid : uids)
     {
-        maskView.emplace(mask->rawHostData(), mask->dims(), mask->strides());
+        pack.emplace(
+            uid,
+            hipdnn_test_sdk::utilities::selectVariantPackPointer(
+                *inputs.at(uid), useDevice, findTensor(graph, uid)->is_runtime_pass_by_value()));
     }
-
-    hipdnn_test_sdk::utilities::CpuFpReferenceSdpa::forward<T, T, T, T, float, Mask>(
-        qView,
-        kView,
-        vView,
-        oView,
-        hipdnn_test_sdk::utilities::SdpaFwdOptions<Mask>{}
-            .setScale(scale)
-            .setMask(maskView.has_value() ? &*maskView : nullptr)
-            .setBand(band.leftBound, band.rightBound, band.topLeftAlignment)
-            .setLse(&lseView));
-
-    // The views write the host copies; a device-resident tensor uploads them only
-    // once told the host copy is the current one.
-    o.markHostModified();
-    stats.markHostModified();
-}
-
-// The caller has checked maskType with isReferenceType(); without a mask it is FLOAT.
-template <typename T>
-void forwardWithMaskType(ITensor& q,
-                         ITensor& k,
-                         ITensor& v,
-                         ITensor& o,
-                         ITensor& stats,
-                         ITensor* mask,
-                         fb::DataType maskType,
-                         std::optional<float> scale,
-                         const DiagonalBandParams& band)
-{
-    switch(maskType)
-    {
-    case fb::DataType::HALF:
-        forwardInto<T, hipdnn_data_sdk::types::half>(q, k, v, o, stats, mask, scale, band);
-        break;
-    case fb::DataType::BFLOAT16:
-        forwardInto<T, hipdnn_data_sdk::types::bfloat16>(q, k, v, o, stats, mask, scale, band);
-        break;
-    default:
-        forwardInto<T, float>(q, k, v, o, stats, mask, scale, band);
-        break;
-    }
+    return pack;
 }
 
 } // anonymous namespace
@@ -172,7 +152,9 @@ std::optional<std::string>
     deriveSdpaBackwardForwardOutputs(const fb::Graph& graph,
                                      const fb::SdpaBackwardAttributes& attributes,
                                      InputTensorMap& inputs,
-                                     const std::vector<int64_t>& ownedUids)
+                                     const std::vector<int64_t>& ownedUids,
+                                     IReferenceExecutors& referenceExecutors,
+                                     bool onDevice)
 {
     const auto isOwned = [&ownedUids](int64_t uid) {
         return std::find(ownedUids.begin(), ownedUids.end(), uid) != ownedUids.end();
@@ -190,133 +172,153 @@ std::optional<std::string>
         return "only one of O and stats is a graph input";
     }
 
-    if(const auto term = unmodeledForwardTerm(attributes))
+    // Philox dropout draws its mask from an engine's random stream, which no reference
+    // reproduces, and a backward graph has no RNG dump. A zero probability is no
+    // dropout, as the engines read it; an explicit mask carries its own dropout.
+    const bool philox = (!attributes.dropout_mask_tensor_uid().has_value()
+                         && attributes.dropout_probability().has_value()
+                         && attributes.dropout_probability().value() != 0.f)
+                        || attributes.seed_tensor_uid().has_value()
+                        || attributes.offset_tensor_uid().has_value();
+    if(philox)
     {
-        return "the derivation does not model " + *term;
+        return "Philox dropout: no reference reproduces an engine's random stream";
     }
 
-    std::vector<std::pair<std::string, int64_t>> operands
-        = {{"Q", attributes.q_tensor_uid()},
-           {"K", attributes.k_tensor_uid()},
-           {"V", attributes.v_tensor_uid()},
-           {"O", attributes.o_tensor_uid()},
-           {"stats", attributes.stats_tensor_uid()}};
-    const auto maskUid = attributes.attn_mask_tensor_uid();
-    if(maskUid.has_value())
-    {
-        operands.emplace_back("the attention mask", *maskUid);
-    }
-    for(const auto& [name, uid] : operands)
-    {
-        const auto* tensor = findTensor(graph, uid);
-        if(tensor == nullptr)
+    // Every tensor the forward reads must be a graph input: its values are only known
+    // once the fill wrote them.
+    std::vector<std::pair<std::string, int64_t>> operands = {{"Q", attributes.q_tensor_uid()},
+                                                             {"K", attributes.k_tensor_uid()},
+                                                             {"V", attributes.v_tensor_uid()}};
+    const auto addOptional = [&operands](const char* name, std::optional<int64_t> uid) {
+        if(uid.has_value())
         {
-            return name + " (uid " + std::to_string(uid) + ") is not in the graph";
+            operands.emplace_back(name, *uid);
         }
-        if(!isOwned(uid))
-        {
-            return name
-                   + " is computed by the graph, so its values are not known when the "
-                     "inputs are filled";
-        }
-        if(tensor->ragged_offset_tensor_uid().has_value())
-        {
-            return name + " is ragged";
-        }
-    }
+    };
+    addOptional("the attention mask", attributes.attn_mask_tensor_uid());
+    addOptional("seq_len_q", attributes.seq_len_q_tensor_uid());
+    addOptional("seq_len_kv", attributes.seq_len_kv_tensor_uid());
+    addOptional("the dropout mask", attributes.dropout_mask_tensor_uid());
+    addOptional("the dropout scale", attributes.dropout_scale_tensor_uid());
+    std::vector<std::pair<std::string, int64_t>> outputs
+        = {{"O", attributes.o_tensor_uid()}, {"stats", attributes.stats_tensor_uid()}};
 
-    const auto ioType = findTensor(graph, attributes.q_tensor_uid())->data_type();
-    for(const int64_t uid :
-        {attributes.k_tensor_uid(), attributes.v_tensor_uid(), attributes.o_tensor_uid()})
+    std::vector<int64_t> tensorUids;
+    for(const auto* list : {&operands, &outputs})
     {
-        if(findTensor(graph, uid)->data_type() != ioType)
+        for(const auto& [name, uid] : *list)
         {
-            return "Q, K, V and O do not share one data type";
+            const auto* tensor = findTensor(graph, uid);
+            if(tensor == nullptr)
+            {
+                return name + " (uid " + std::to_string(uid) + ") is not in the graph";
+            }
+            if(!isOwned(uid))
+            {
+                return name
+                       + " is computed by the graph, so its values are not known when the "
+                         "inputs are filled";
+            }
+            tensorUids.push_back(uid);
         }
     }
-    if(!isReferenceType(ioType))
+    // Ragged offsets of the operands and outputs (each listed once).
+    for(std::size_t i = 0, n = tensorUids.size(); i < n; ++i)
     {
-        return std::string("the CPU forward does not take ") + fb::EnumNameDataType(ioType);
-    }
-    if(findTensor(graph, attributes.stats_tensor_uid())->data_type() != fb::DataType::FLOAT)
-    {
-        return "stats is not FLOAT";
-    }
-    auto maskType = fb::DataType::FLOAT;
-    if(maskUid.has_value())
-    {
-        maskType = findTensor(graph, *maskUid)->data_type();
-        if(!isReferenceType(maskType))
+        const auto offsets = findTensor(graph, tensorUids[i])->ragged_offset_tensor_uid();
+        if(!offsets.has_value()
+           || std::find(tensorUids.begin(), tensorUids.end(), *offsets) != tensorUids.end())
         {
-            return std::string("the CPU forward does not take a ") + fb::EnumNameDataType(maskType)
-                   + " attention mask";
+            continue;
         }
+        if(findTensor(graph, *offsets) == nullptr || !isOwned(*offsets))
+        {
+            return "the ragged offsets (uid " + std::to_string(*offsets)
+                   + ") are not a graph input";
+        }
+        tensorUids.push_back(*offsets);
     }
-
-    // A scale tensor takes precedence over attn_scale_value, as in the CPU reference's
-    // plan; neither means no scaling. The reference reads a scale tensor only as a
-    // pass-by-value scalar.
-    std::optional<float> scale = attributes.attn_scale_value();
     if(attributes.scale_tensor_uid().has_value())
     {
         const int64_t scaleUid = *attributes.scale_tensor_uid();
-        const auto* scaleTensor = findTensor(graph, scaleUid);
-        if(!hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(scaleTensor))
+        const auto* scale = findTensor(graph, scaleUid);
+        if(scale == nullptr)
         {
-            return "the scale tensor is not a pass-by-value scalar";
+            return "the scale tensor (uid " + std::to_string(scaleUid) + ") is not in the graph";
         }
-        if(scaleTensor->is_runtime_pass_by_value() && !isOwned(scaleUid))
+        const bool baked = hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(scale)
+                           && !scale->is_runtime_pass_by_value();
+        if(!baked && !isOwned(scaleUid))
         {
-            return "the runtime scale is computed by the graph";
+            return "the scale is computed by the graph";
         }
-        std::unordered_map<int64_t, void*> variantPack;
-        if(isOwned(scaleUid))
-        {
-            variantPack.emplace(scaleUid, inputs.at(scaleUid)->rawHostData());
-        }
-        scale = hipdnn_flatbuffers_sdk::utilities::resolveScalarFromVariantPack<float>(
-            hipdnn_test_sdk::detail::unpackTensorAttributes(*scaleTensor),
-            variantPack,
-            "SDPA backward scale");
+        tensorUids.push_back(scaleUid);
     }
 
-    auto& q = *inputs.at(attributes.q_tensor_uid());
-    auto& k = *inputs.at(attributes.k_tensor_uid());
-    auto& v = *inputs.at(attributes.v_tensor_uid());
+    auto fwd = buildForwardGraph(graph, attributes, tensorUids);
     auto& o = *inputs.at(attributes.o_tensor_uid());
     auto& stats = *inputs.at(attributes.stats_tensor_uid());
-    ITensor* mask = maskUid.has_value() ? inputs.at(*maskUid).get() : nullptr;
-    if(mask != nullptr && !maskBroadcastsToScores(*mask, q, k))
-    {
-        return "the attention mask does not broadcast to [B, H, Sq, Skv]";
-    }
 
-    // The reference's own checks decide which shapes and band parameters can be derived,
-    // including the [B, H, Sq, 1] stats layout it requires. It validates before writing
-    // anything, so a rejected graph keeps its filled O and stats for the backward
-    // reference to fail.
-    try
+    // On the device the GPU reference executor runs the forward where the device fill
+    // wrote Q, K and V. A graph it declines, or rejects before it launches, goes to the
+    // CPU reference executor.
+    std::string gpuReason;
+    if(onDevice && deviceVisible())
     {
-        const auto band = extractDiagonalBandParams(attributes, "SDPA backward input fill");
-        switch(ioType)
+        auto& gpu = referenceExecutors.get(ReferenceExecutorType::GPU);
+        if(gpu.isApplicable(fwd.buffer.data(), fwd.buffer.size()))
         {
-        case fb::DataType::HALF:
-            forwardWithMaskType<hipdnn_data_sdk::types::half>(
-                q, k, v, o, stats, mask, maskType, scale, band);
-            break;
-        case fb::DataType::BFLOAT16:
-            forwardWithMaskType<hipdnn_data_sdk::types::bfloat16>(
-                q, k, v, o, stats, mask, maskType, scale, band);
-            break;
-        default: // FLOAT, the only other type isReferenceType() lets through
-            forwardWithMaskType<float>(q, k, v, o, stats, mask, maskType, scale, band);
-            break;
+            try
+            {
+                gpu.execute(fwd.buffer.data(),
+                            fwd.buffer.size(),
+                            variantPack(graph, fwd.uids, inputs, /*useDevice=*/true));
+                // Download O and stats as well, so they leave the fill current on the
+                // host as after the CPU forward: a const host read of a tensor whose
+                // device copy is newer throws. Both copies stay valid.
+                o.markDeviceModified();
+                stats.markDeviceModified();
+                o.rawHostData();
+                stats.rawHostData();
+                return std::nullopt;
+            }
+            catch(const ReferenceCapabilityError& e)
+            {
+                gpuReason = e.what();
+            }
+            catch(const std::invalid_argument& e)
+            {
+                gpuReason = e.what();
+            }
+            catch(const std::exception& e)
+            {
+                // The device failed after accepting the graph, which is no fault in the
+                // graph: as for the device fill, a failure rather than a fallback.
+                throw DeviceInputError(std::string("deriving O and stats on the device failed: ")
+                                       + e.what());
+            }
         }
     }
-    catch(const std::invalid_argument&)
+
+    auto& cpu = referenceExecutors.get(ReferenceExecutorType::CPU);
+    if(!cpu.isApplicable(fwd.buffer.data(), fwd.buffer.size()))
     {
-        return std::nullopt;
+        return "no reference executor models its forward graph"
+               + (gpuReason.empty() ? std::string() : " (GPU: " + gpuReason + ")");
     }
+    try
+    {
+        cpu.execute(fwd.buffer.data(),
+                    fwd.buffer.size(),
+                    variantPack(graph, fwd.uids, inputs, /*useDevice=*/false));
+    }
+    catch(const std::exception& e)
+    {
+        return std::string("the forward reference rejected its forward graph: ") + e.what();
+    }
+    o.markHostModified();
+    stats.markHostModified();
     return std::nullopt;
 }
 

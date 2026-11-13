@@ -353,8 +353,9 @@ Writes the SdpaBackward sweeps from the SDPA backward test plan
 | File | Holds |
 |---|---|
 | `sdpa_bwd_plan.py` | levels, axes, legality layers, shape catalog (S, L, M, H, X), ceilings, cost model, tolerance classes and their rule, value domains, purpose rule, window semantics switch |
-| `generate_sdpa_bwd_bundles.py` | level rules, graph templates, sweep writer, TOML rows writer, report |
+| `generate_sdpa_bwd_bundles.py` | level rules, graph templates, sweep writer, HF placement, TOML rows writer, report |
 | `sdpa_bwd_calibration.json` | the NumPy magnitude estimates behind the tolerance classes |
+| `sdpa_bwd_hf_census.json` | the Hugging Face model census (plan §3.6): 361 geometries and 4,500 case records |
 
 From the `rocm-libraries/` repo root:
 
@@ -378,7 +379,10 @@ python dnn-providers/integration-tests/reference-data-scripts/generate_sdpa_bwd_
   TOML. Each case id ends with its tolerance class token.
 - A run fails if a case's magnitude estimate is missing or stale. Rerun with
   `--calibrate` (needs NumPy) after a plan change that moves a case's shape,
-  band, scale or value domain.
+  band, scale or value domain; `--jobs N` computes the estimates on N
+  processes (set `OPENBLAS_NUM_THREADS=1`).
+- The HF census cases are placed last: into PR and nightly in priority order
+  while the cumulative budgets hold, the rest into full (plan §3.6).
 - `--dry-run --report` prints the counts, budgets, all-pairs proof, legality
   and gates without writing.
 

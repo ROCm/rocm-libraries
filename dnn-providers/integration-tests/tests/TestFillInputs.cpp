@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -22,6 +23,7 @@
 
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/types/Half.hpp>
+#include <hipdnn_data_sdk/utilities/ShallowTensor.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
@@ -29,11 +31,17 @@
 
 #include "BundleFixtureFiles.hpp"
 #include "SdpaFwdGraphTestUtils.hpp"
+#include "harness/CpuReferenceGraphExecutorAdapter.hpp"
+#include "harness/IReferenceExecutors.hpp"
 #include "harness/bundle/IntegrationTestBundle.hpp"
+#include "harness/gpu-graph-executor/GpuReferenceGraphExecutor.hpp"
 #include "harness/input-init/FillInputs.hpp"
+#include "mocks/MockReferenceExecutors.hpp"
+#include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/ScratchDirectory.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/PlanUtils.hpp>
 #include <hipdnn_test_sdk/utilities/detail/FlatbufferTensorAttributesUtils.hpp>
 
 // NOLINTBEGIN(readability-identifier-naming)
@@ -77,6 +85,49 @@ InputTensorMap makeTensors(const std::vector<int64_t>& uids)
         map[uid]->fillTensorWithValue(0.f);
     }
     return map;
+}
+
+// The reference executors a fill derives inputs with: a real CPU one, and the GPU one a
+// test that fills on the device names. Asking for a GPU one the test did not name throws.
+class FillReferenceExecutors : public IReferenceExecutors
+{
+public:
+    explicit FillReferenceExecutors(IReferenceGraphExecutor* gpu = nullptr)
+        : _gpu(gpu)
+    {
+    }
+
+    IReferenceGraphExecutor& get(ReferenceExecutorType type) override
+    {
+        if(type == ReferenceExecutorType::CPU)
+        {
+            return _cpu;
+        }
+        if(_gpu == nullptr)
+        {
+            throw std::runtime_error("this test has no GPU reference executor");
+        }
+        return *_gpu;
+    }
+
+private:
+    CpuReferenceGraphExecutorAdapter _cpu;
+    IReferenceGraphExecutor* _gpu;
+};
+
+// For a fill on the host, or of a graph that derives no input from a forward.
+IReferenceExecutors& hostReferences()
+{
+    static FillReferenceExecutors s_executors;
+    return s_executors;
+}
+
+// The real GPU executor beside the CPU one. Call after SKIP_IF_NO_DEVICES().
+IReferenceExecutors& deviceReferences()
+{
+    static gpu_graph_executor::GpuReferenceGraphExecutor s_gpu;
+    static FillReferenceExecutors s_executors(&s_gpu);
+    return s_executors;
 }
 
 struct GraphResult
@@ -334,7 +385,8 @@ GraphResult buildSdpaFwdWithSeqLenQGraph()
 }
 
 // ── SDPA backward standalone ────────────────────────────────────────────────
-// O and stats are leaf inputs (not virtual) — filled as free(0, 1)
+// O and stats are leaf inputs (not virtual); every tensor has the generic test shape,
+// which no SDPA forward takes.
 
 GraphResult buildSdpaBwdStandaloneGraph()
 {
@@ -581,7 +633,7 @@ InputFillRecipes fillBlockScaleDequantizeMatmul(DataType xType, InputFillRecipes
     const auto leafUids = gr.leafInputUids({4});
     auto inputs = makeTensorsFromGraph(gr, leafUids);
 
-    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr);
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, hostReferences(), nullptr);
     EXPECT_TRUE(result.filled) << result.reason;
     return recipes;
 }
@@ -599,7 +651,8 @@ std::set<float> filledMagnitudes(DataType aType)
     auto inputs = makeTensorsFromGraph(gr, ownedUids);
     InputFillRecipes recipes;
 
-    const auto result = fillInputs(*gr.graph, inputs, ownedUids, recipes, nullptr);
+    const auto result
+        = fillInputs(*gr.graph, inputs, ownedUids, recipes, hostReferences(), nullptr);
     EXPECT_TRUE(result.filled) << result.reason;
 
     auto& tensor = *inputs.at(1);
@@ -617,7 +670,7 @@ FillResult runFill(const GraphResult& gr, const std::set<int64_t>& outputUids)
     const auto leafUids = gr.leafInputUids(outputUids);
     auto inputs = makeTensors(leafUids);
     InputFillRecipes recipes;
-    return fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr);
+    return fillInputs(*gr.graph, inputs, leafUids, recipes, hostReferences(), nullptr);
 }
 
 // uids: x=1 (float), w=2 (half), bias=4 (float). x and w are sized from the device
@@ -680,7 +733,9 @@ hipdnn_data_sdk::utilities::TensorBase<T>& typedTensor(InputTensorMap& inputs, i
 
 // ── SDPA backward at attention shapes ───────────────────────────────────────
 // Q, O, dO, dQ [1, 2, 4, 8]; K, V, dK, dV [1, 2, 6, 8]. uids: q=1, k=2, v=3, o=4,
-// do=5, stats=6, dq=7, dk=8, dv=9, runtime scale=10, additive mask=11.
+// do=5, stats=6, dq=7, dk=8, dv=9, runtime scale=10, additive mask=11, seq_len_q=12,
+// seq_len_kv=13, dropout mask=14, dropout scale=15, ragged offsets of Q and O=16, of K
+// and V=17.
 
 constexpr int64_t kSdpaHeads = 2;
 constexpr int64_t kSdpaSeqQ = 4;
@@ -696,6 +751,12 @@ struct SdpaBwdOptions
     bool causal = false;
     bool attnMask = false;
     std::optional<float> dropoutProbability;
+    bool alibi = false;
+    bool padding = false; // padding_mask with seq_len_q and seq_len_kv
+    bool dropoutMask = false; // explicit dropout mask and scale
+    // Q, K, V and O ragged (RFC-0014), each laid out as the dense tensor: one batch,
+    // head-major, whose offsets the test fills.
+    bool ragged = false;
 };
 
 GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
@@ -718,10 +779,28 @@ GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
     const auto io = opts.ioType;
 
     std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
-    tensors.push_back(CreateTensorAttributesDirect(b, 1, "q", io, &qStrides, &qDims));
-    tensors.push_back(CreateTensorAttributesDirect(b, 2, "k", io, &kvStrides, &kvDims));
-    tensors.push_back(CreateTensorAttributesDirect(b, 3, "v", io, &kvStrides, &kvDims));
-    tensors.push_back(CreateTensorAttributesDirect(b, 4, "o", io, &qStrides, &qDims));
+    const auto primary = [&](int64_t uid,
+                             const char* name,
+                             const std::vector<int64_t>* strides,
+                             const std::vector<int64_t>* dims,
+                             int64_t offsetsUid) {
+        return CreateTensorAttributesDirect(b,
+                                            uid,
+                                            name,
+                                            io,
+                                            strides,
+                                            dims,
+                                            /*virtual_=*/false,
+                                            TensorValue::NONE,
+                                            /*value=*/0,
+                                            /*is_runtime_pass_by_value=*/false,
+                                            opts.ragged ? flatbuffers::Optional<int64_t>(offsetsUid)
+                                                        : flatbuffers::nullopt);
+    };
+    tensors.push_back(primary(1, "q", &qStrides, &qDims, 16));
+    tensors.push_back(primary(2, "k", &kvStrides, &kvDims, 17));
+    tensors.push_back(primary(3, "v", &kvStrides, &kvDims, 17));
+    tensors.push_back(primary(4, "o", &qStrides, &qDims, 16));
     tensors.push_back(CreateTensorAttributesDirect(b, 5, "do", io, &qStrides, &qDims));
     tensors.push_back(
         CreateTensorAttributesDirect(b, 6, "stats", DataType::FLOAT, &statsStrides, &statsDims));
@@ -745,6 +824,32 @@ GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
     {
         tensors.push_back(
             CreateTensorAttributesDirect(b, 11, "mask", DataType::FLOAT, &maskStrides, &maskDims));
+    }
+    const std::vector<int64_t> lenDims = {1, 1, 1, 1};
+    if(opts.padding)
+    {
+        tensors.push_back(
+            CreateTensorAttributesDirect(b, 12, "seq_len_q", DataType::INT32, &lenDims, &lenDims));
+        tensors.push_back(
+            CreateTensorAttributesDirect(b, 13, "seq_len_kv", DataType::INT32, &lenDims, &lenDims));
+    }
+    const std::vector<int64_t> dropDims = {1, kSdpaHeads, kSdpaSeqQ, kSdpaSeqKv};
+    const auto dropStrides = generateStrides(dropDims);
+    if(opts.dropoutMask)
+    {
+        tensors.push_back(CreateTensorAttributesDirect(
+            b, 14, "dropout_mask", DataType::FLOAT, &dropStrides, &dropDims));
+        tensors.push_back(CreateTensorAttributesDirect(
+            b, 15, "dropout_scale", DataType::FLOAT, &scalarDims, &scalarDims));
+    }
+    const std::vector<int64_t> offsetDims = {2, 1, 1, 1};
+    const auto offsetStrides = generateStrides(offsetDims);
+    if(opts.ragged)
+    {
+        tensors.push_back(CreateTensorAttributesDirect(
+            b, 16, "ragged_offset_q", DataType::INT32, &offsetStrides, &offsetDims));
+        tensors.push_back(CreateTensorAttributesDirect(
+            b, 17, "ragged_offset_kv", DataType::INT32, &offsetStrides, &offsetDims));
     }
 
     SdpaBackwardAttributesBuilder attrs(b);
@@ -777,6 +882,21 @@ GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
     {
         attrs.add_dropout_probability(*opts.dropoutProbability);
     }
+    if(opts.alibi)
+    {
+        attrs.add_alibi_mask(true);
+    }
+    if(opts.padding)
+    {
+        attrs.add_padding_mask(true);
+        attrs.add_seq_len_q_tensor_uid(12);
+        attrs.add_seq_len_kv_tensor_uid(13);
+    }
+    if(opts.dropoutMask)
+    {
+        attrs.add_dropout_mask_tensor_uid(14);
+        attrs.add_dropout_scale_tensor_uid(15);
+    }
     auto bwd = attrs.Finish();
 
     std::vector<flatbuffers::Offset<Node>> nodes;
@@ -793,21 +913,28 @@ GraphResult buildSdpaBwdGraph(const SdpaBwdOptions& opts)
 
 // Fills the graph with O and stats forced to 0.5, which no forward of these
 // shapes produces everywhere, so a derived value is told apart from a filled one.
+// `references` derives them; a fill with a `device` filler needs its GPU executor.
 FillResult fillSdpaBwd(const GraphResult& gr,
                        InputTensorMap& inputs,
                        const std::vector<int64_t>& ownedUids,
-                       InputFillRecipes recipes = {})
+                       InputFillRecipes recipes = {},
+                       DeviceInputFiller* device = nullptr,
+                       IReferenceExecutors& references = hostReferences())
 {
     recipes.set(4, FillRecipe::fixed(0.5f));
     recipes.set(6, FillRecipe::fixed(0.5f));
-    return fillInputs(*gr.graph, inputs, ownedUids, recipes, nullptr);
+    return fillInputs(*gr.graph, inputs, ownedUids, recipes, references, device);
 }
 
-InputTensorMap fillSdpaBwdWithFixedOAndStats(const GraphResult& gr, InputFillRecipes recipes = {})
+// With a `device` filler, as the harness fills, the forward runs on the device.
+InputTensorMap fillSdpaBwdWithFixedOAndStats(const GraphResult& gr,
+                                             InputFillRecipes recipes = {},
+                                             DeviceInputFiller* device = nullptr,
+                                             IReferenceExecutors& references = hostReferences())
 {
     const auto leafUids = gr.leafInputUids({7, 8, 9});
     auto inputs = makeTensorsFromGraph(gr, leafUids);
-    const auto result = fillSdpaBwd(gr, inputs, leafUids, std::move(recipes));
+    const auto result = fillSdpaBwd(gr, inputs, leafUids, std::move(recipes), device, references);
     EXPECT_TRUE(result.filled) << result.reason;
     return inputs;
 }
@@ -867,12 +994,68 @@ void expectOAndStatsAreForwardOfQkv(
     }
 }
 
-void expectAllEqual(hipdnn_data_sdk::utilities::ITensor& tensor, float value)
+// Runs the CPU forward reference directly on the filled float Q, K and V under the
+// node's attributes (scale, band, ALiBi, sequence lengths, explicit dropout) and
+// expects the derived O and stats to match it.
+void expectMatchesDirectForward(const GraphResult& gr, InputTensorMap& inputs, float tolerance)
 {
-    const auto* data = static_cast<const float*>(tensor.rawHostData());
-    for(size_t i = 0; i < tensor.elementCount(); ++i)
+    using hipdnn_data_sdk::utilities::generateStrides;
+    using hipdnn_data_sdk::utilities::ShallowTensor;
+    const auto& a = *gr.node(0).attributes_as_SdpaBackwardAttributes();
+    const auto view = [&inputs](int64_t uid) {
+        auto& t = *inputs.at(uid);
+        return ShallowTensor<float>(t.rawHostData(), t.dims(), t.strides());
+    };
+    const auto q = view(1);
+    const auto k = view(2);
+    const auto v = view(3);
+    const std::vector<int64_t> oDims = {1, kSdpaHeads, kSdpaSeqQ, kSdpaHeadDim};
+    const std::vector<int64_t> lseDims = {1, kSdpaHeads, kSdpaSeqQ, 1};
+    std::vector<float> oRef(static_cast<size_t>(kSdpaHeads * kSdpaSeqQ * kSdpaHeadDim));
+    std::vector<float> lseRef(static_cast<size_t>(kSdpaHeads * kSdpaSeqQ));
+    ShallowTensor<float> oView(oRef.data(), oDims, generateStrides(oDims));
+    ShallowTensor<float> lseView(lseRef.data(), lseDims, generateStrides(lseDims));
+
+    const auto band = extractDiagonalBandParams(a, "test");
+    hipdnn_test_sdk::utilities::SdpaFwdOptions<float> opts;
+    opts.setScale(a.attn_scale_value())
+        .setBand(band.leftBound, band.rightBound, band.topLeftAlignment)
+        .setAlibi(a.alibi_mask())
+        .setLse(&lseView);
+    std::optional<ShallowTensor<int32_t>> seqQ;
+    std::optional<ShallowTensor<int32_t>> seqKv;
+    if(a.seq_len_q_tensor_uid().has_value())
     {
-        ASSERT_EQ(data[i], value) << "element " << i;
+        auto& sq = *inputs.at(12);
+        auto& skv = *inputs.at(13);
+        seqQ.emplace(sq.rawHostData(), sq.dims(), sq.strides());
+        seqKv.emplace(skv.rawHostData(), skv.dims(), skv.strides());
+        opts.setSeqLens(&*seqQ, &*seqKv);
+    }
+    std::optional<ShallowTensor<float>> dropMask;
+    if(a.dropout_mask_tensor_uid().has_value())
+    {
+        dropMask.emplace(view(14));
+        opts.setDropout(&*dropMask, scalarValue(inputs, 15));
+    }
+    hipdnn_test_sdk::utilities::CpuFpReferenceSdpa::forward<float, float, float, float>(
+        q, k, v, oView, opts);
+
+    const auto* o = static_cast<const float*>(inputs.at(4)->rawHostData());
+    const auto* lse = static_cast<const float*>(inputs.at(6)->rawHostData());
+    for(size_t i = 0; i < oRef.size(); ++i)
+    {
+        ASSERT_NEAR(o[i], oRef[i], tolerance) << "O element " << i;
+    }
+    for(size_t i = 0; i < lseRef.size(); ++i)
+    {
+        // A padded row's LSE is -inf in both.
+        if(std::isinf(lseRef[i]))
+        {
+            ASSERT_EQ(lse[i], lseRef[i]) << "stats element " << i;
+            continue;
+        }
+        ASSERT_NEAR(lse[i], lseRef[i], tolerance) << "stats element " << i;
     }
 }
 
@@ -890,6 +1073,38 @@ void expectCausalScaledOAndStatsAreDerived(DataType ioType, float oTolerance)
     auto inputs = fillSdpaBwdWithFixedOAndStats(gr);
 
     expectOAndStatsAreForwardOfQkv<T>(inputs, 0.35f, /*causal=*/true, oTolerance);
+}
+
+// Fills `gr` with a device filler whose forward goes to `gpu`, a fake. Q, K and V are
+// too small for the device fill, so they are filled on the host and only the forward is
+// offered to the device.
+FillResult fillSdpaBwdWithGpuForward(const GraphResult& gr,
+                                     InputTensorMap& inputs,
+                                     IReferenceGraphExecutor& gpu)
+{
+    const auto leafUids = gr.leafInputUids({7, 8, 9});
+    inputs = makeTensorsFromGraph(gr, leafUids);
+    FillReferenceExecutors references(&gpu);
+    DeviceInputFiller device;
+    return fillSdpaBwd(gr, inputs, leafUids, {}, &device, references);
+}
+
+GraphResult buildCausalScaledSdpaBwdGraph()
+{
+    SdpaBwdOptions opts;
+    opts.attnScale = 0.35f;
+    opts.causal = true;
+    return buildSdpaBwdGraph(opts);
+}
+
+// O and stats are the CPU forward's, current on the host only: a GPU executor that gave
+// the graph up may have uploaded them, and a device read must upload the derived values.
+void expectDerivedOnTheCpu(const GraphResult& gr, InputTensorMap& inputs)
+{
+    using hipdnn_data_sdk::utilities::MemoryLocation;
+    EXPECT_EQ(typedTensor<float>(inputs, 4).memory().location(), MemoryLocation::HOST);
+    EXPECT_EQ(typedTensor<float>(inputs, 6).memory().location(), MemoryLocation::HOST);
+    expectMatchesDirectForward(gr, inputs, 1e-6f);
 }
 
 } // namespace
@@ -929,7 +1144,8 @@ TEST(TestFillInputs, RuntimePbvScalarsUseFixedAndDeterministicRandomFills)
 
     auto firstInputs = makeTensorsFromGraph(graph, leafUids);
     InputFillRecipes firstRecipes;
-    const auto firstResult = fillInputs(*graph.graph, firstInputs, leafUids, firstRecipes, nullptr);
+    const auto firstResult
+        = fillInputs(*graph.graph, firstInputs, leafUids, firstRecipes, hostReferences(), nullptr);
     ASSERT_TRUE(firstResult.filled) << firstResult.reason;
 
     EXPECT_FLOAT_EQ(scalarValue(firstInputs, 5), 1e-5f);
@@ -939,8 +1155,8 @@ TEST(TestFillInputs, RuntimePbvScalarsUseFixedAndDeterministicRandomFills)
 
     auto secondInputs = makeTensorsFromGraph(graph, leafUids);
     InputFillRecipes secondRecipes;
-    const auto secondResult
-        = fillInputs(*graph.graph, secondInputs, leafUids, secondRecipes, nullptr);
+    const auto secondResult = fillInputs(
+        *graph.graph, secondInputs, leafUids, secondRecipes, hostReferences(), nullptr);
     ASSERT_TRUE(secondResult.filled) << secondResult.reason;
     EXPECT_FLOAT_EQ(scalarValue(secondInputs, 10), firstMomentum);
 }
@@ -961,12 +1177,15 @@ TEST(TestFillInputs, SdpaFwdWithSeqLenQFills)
     EXPECT_TRUE(result.filled) << result.reason;
 }
 
-TEST(TestFillInputs, SdpaBwdStandaloneFills)
+// O and stats whose forward the references reject are refused with the reason, not
+// left as filled: a fill no forward produced would make the backward meaningless.
+TEST(TestFillInputs, SdpaBwdWhoseForwardIsRejectedIsRefused)
 {
     const auto gr = buildSdpaBwdStandaloneGraph();
     const auto result = runFill(gr, {7, 8, 9});
 
-    EXPECT_TRUE(result.filled) << result.reason;
+    EXPECT_FALSE(result.filled);
+    EXPECT_NE(result.reason.find("cannot derive O and stats"), std::string::npos) << result.reason;
 }
 
 TEST(TestFillInputs, SdpaFwdBwdFusedSucceeds)
@@ -1058,18 +1277,230 @@ TEST(TestFillInputs, SdpaBwdWithComputedQIsRefused)
     EXPECT_NE(result.reason.find("Q is computed by the graph"), std::string::npos) << result.reason;
 }
 
-// The CPU reference takes the LSE only as [B, H, Sq, 1]. Rank-3 stats are left as
-// filled rather than refused: the backward reference rejects the graph with the
-// same check and fails it, which a skip at fill time would hide.
-TEST(TestFillInputs, SdpaBwdWithRank3StatsKeepsFilledOAndStats)
+// Rank-3 stats are derived through their [B, H, Sq, 1] view, the shape the forward
+// references write, over the same memory.
+TEST(TestFillInputs, SdpaBwdWithRank3StatsIsDerived)
 {
     SdpaBwdOptions opts;
     opts.rank3Stats = true;
     const auto gr = buildSdpaBwdGraph(opts);
     auto inputs = fillSdpaBwdWithFixedOAndStats(gr);
 
-    expectAllEqual(*inputs.at(4), 0.5f);
-    expectAllEqual(*inputs.at(6), 0.5f);
+    expectOAndStatsAreForwardOfQkv<float>(inputs, 1.0f, /*causal=*/false, /*oTolerance=*/1e-5f);
+}
+
+// ALiBi (with top-left causal, the band the references take it with) enters the
+// forward graph and so the derived O and stats.
+TEST(TestFillInputs, SdpaBwdDerivationAddsAlibi)
+{
+    SdpaBwdOptions opts;
+    opts.alibi = true;
+    opts.causal = true;
+    opts.attnScale = 0.35f;
+    const auto gr = buildSdpaBwdGraph(opts);
+    auto inputs = fillSdpaBwdWithFixedOAndStats(gr);
+
+    expectMatchesDirectForward(gr, inputs, 1e-6f);
+}
+
+// Padding: the rows past seq_len_q and the keys past seq_len_kv leave the forward.
+TEST(TestFillInputs, SdpaBwdDerivationAppliesThePadding)
+{
+    SdpaBwdOptions opts;
+    opts.padding = true;
+    const auto gr = buildSdpaBwdGraph(opts);
+    InputFillRecipes recipes;
+    recipes.set(12, FillRecipe::values(std::vector<int64_t>{kSdpaSeqQ - 1}, /*repeat=*/false));
+    recipes.set(13, FillRecipe::values(std::vector<int64_t>{kSdpaSeqKv - 1}, /*repeat=*/false));
+    auto inputs = fillSdpaBwdWithFixedOAndStats(gr, recipes);
+
+    expectMatchesDirectForward(gr, inputs, 1e-6f);
+}
+
+// An explicit dropout mask and scale enter the forward; a dropout probability next to
+// the mask is the mask's, not a Philox draw.
+TEST(TestFillInputs, SdpaBwdDerivationAppliesTheExplicitDropoutMask)
+{
+    SdpaBwdOptions opts;
+    opts.dropoutMask = true;
+    opts.dropoutProbability = 0.5f;
+    const auto gr = buildSdpaBwdGraph(opts);
+    InputFillRecipes recipes;
+    recipes.set(14, FillRecipe::values(std::vector<int64_t>{1, 0, 1, 1, 0}));
+    recipes.set(15, FillRecipe::fixed(2.0f));
+    auto inputs = fillSdpaBwdWithFixedOAndStats(gr, recipes);
+
+    expectMatchesDirectForward(gr, inputs, 1e-6f);
+}
+
+// Ragged Q, K, V and O take their offsets into the forward graph. One batch laid out
+// head-major, as the dense tensors are, holds the same elements, so the derived O and
+// stats are the dense CPU forward of the packed Q, K and V.
+TEST(TestFillInputs, SdpaBwdDerivationTakesTheRaggedOffsets)
+{
+    SdpaBwdOptions opts;
+    opts.ragged = true;
+    opts.attnScale = 0.35f;
+    opts.causal = true;
+    const auto gr = buildSdpaBwdGraph(opts);
+    // Element offsets of the batch's origin and end: its tokens at a sequence stride of D.
+    InputFillRecipes recipes;
+    recipes.set(16,
+                FillRecipe::values(std::vector<int64_t>{0, kSdpaSeqQ * kSdpaHeadDim},
+                                   /*repeat=*/false));
+    recipes.set(17,
+                FillRecipe::values(std::vector<int64_t>{0, kSdpaSeqKv * kSdpaHeadDim},
+                                   /*repeat=*/false));
+    auto inputs = fillSdpaBwdWithFixedOAndStats(gr, recipes);
+
+    expectMatchesDirectForward(gr, inputs, 1e-6f);
+}
+
+// Offsets the graph computes are not known when the inputs are filled.
+TEST(TestFillInputs, SdpaBwdWithComputedRaggedOffsetsIsRefused)
+{
+    SdpaBwdOptions opts;
+    opts.ragged = true;
+    const auto gr = buildSdpaBwdGraph(opts);
+    auto ownedUids = gr.leafInputUids({7, 8, 9});
+    ownedUids.erase(std::remove(ownedUids.begin(), ownedUids.end(), 16), ownedUids.end());
+    auto inputs = makeTensorsFromGraph(gr, ownedUids);
+
+    const auto result = fillSdpaBwd(gr, inputs, ownedUids);
+
+    EXPECT_FALSE(result.filled);
+    EXPECT_NE(result.reason.find("the ragged offsets (uid 16) are not a graph input"),
+              std::string::npos)
+        << result.reason;
+}
+
+// With a device filler the forward runs on the device: O and stats come back current
+// on both sides (the CPU forward leaves them on the host only) and are still the forward
+// of Q, K and V.
+TEST(TestGpuFillInputs, SdpaBwdOAndStatsAreTheForwardOfQkvOnTheDevice)
+{
+    SKIP_IF_NO_DEVICES();
+    SdpaBwdOptions opts;
+    opts.ioType = DataType::BFLOAT16;
+    opts.attnScale = 0.35f;
+    opts.causal = true;
+    const auto gr = buildSdpaBwdGraph(opts);
+    DeviceInputFiller device;
+    auto inputs = fillSdpaBwdWithFixedOAndStats(gr, {}, &device, deviceReferences());
+
+    using hipdnn_data_sdk::types::bfloat16;
+    using hipdnn_data_sdk::utilities::MemoryLocation;
+    EXPECT_EQ(typedTensor<bfloat16>(inputs, 4).memory().location(), MemoryLocation::BOTH);
+    EXPECT_EQ(typedTensor<float>(inputs, 6).memory().location(), MemoryLocation::BOTH);
+    expectOAndStatsAreForwardOfQkv<bfloat16>(inputs, 0.35f, /*causal=*/true, 1e-2f);
+}
+
+TEST(TestGpuFillInputs, SdpaBwdDerivationOnTheDeviceAddsTheAttnMaskAndRuntimeScale)
+{
+    SKIP_IF_NO_DEVICES();
+    SdpaBwdOptions opts;
+    opts.attnMask = true;
+    opts.runtimeScale = true;
+    const auto gr = buildSdpaBwdGraph(opts);
+    InputFillRecipes recipes;
+    recipes.set(10, FillRecipe::fixed(0.25f));
+    DeviceInputFiller device;
+    auto inputs = fillSdpaBwdWithFixedOAndStats(gr, recipes, &device, deviceReferences());
+
+    using hipdnn_data_sdk::utilities::MemoryLocation;
+    EXPECT_EQ(typedTensor<float>(inputs, 4).memory().location(), MemoryLocation::BOTH);
+    expectOAndStatsAreForwardOfQkv<float>(inputs,
+                                          0.25f,
+                                          /*causal=*/false,
+                                          /*oTolerance=*/1e-5f,
+                                          static_cast<const float*>(inputs.at(11)->rawHostData()));
+}
+
+TEST(TestGpuFillInputs, SdpaBwdWithRank3StatsIsDerivedOnTheDevice)
+{
+    SKIP_IF_NO_DEVICES();
+    SdpaBwdOptions opts;
+    opts.rank3Stats = true;
+    const auto gr = buildSdpaBwdGraph(opts);
+    DeviceInputFiller device;
+    auto inputs = fillSdpaBwdWithFixedOAndStats(gr, {}, &device, deviceReferences());
+
+    using hipdnn_data_sdk::utilities::MemoryLocation;
+    EXPECT_EQ(typedTensor<float>(inputs, 6).memory().location(), MemoryLocation::BOTH);
+    expectOAndStatsAreForwardOfQkv<float>(inputs, 1.0f, /*causal=*/false, /*oTolerance=*/1e-5f);
+}
+
+TEST(TestGpuFillInputs, SdpaBwdDerivationOnTheDeviceAddsAlibi)
+{
+    SKIP_IF_NO_DEVICES();
+    SdpaBwdOptions opts;
+    opts.alibi = true;
+    opts.causal = true;
+    opts.attnScale = 0.35f;
+    const auto gr = buildSdpaBwdGraph(opts);
+    DeviceInputFiller device;
+    auto inputs = fillSdpaBwdWithFixedOAndStats(gr, {}, &device, deviceReferences());
+
+    using hipdnn_data_sdk::utilities::MemoryLocation;
+    EXPECT_EQ(typedTensor<float>(inputs, 4).memory().location(), MemoryLocation::BOTH);
+    expectMatchesDirectForward(gr, inputs, 1e-5f);
+}
+
+// A forward graph the GPU executor declines goes to the CPU executor.
+TEST(TestGpuFillInputs, SdpaBwdForwardDeclinedOnTheDeviceRunsOnTheCpu)
+{
+    SKIP_IF_NO_DEVICES();
+    using ::testing::_;
+    using ::testing::Return;
+    MockReferenceGraphExecutor gpu;
+    EXPECT_CALL(gpu, isApplicable(_, _)).WillOnce(Return(false));
+    EXPECT_CALL(gpu, execute(_, _, _)).Times(0);
+    const auto gr = buildCausalScaledSdpaBwdGraph();
+    InputTensorMap inputs;
+
+    const auto result = fillSdpaBwdWithGpuForward(gr, inputs, gpu);
+
+    ASSERT_TRUE(result.filled) << result.reason;
+    expectDerivedOnTheCpu(gr, inputs);
+}
+
+// A forward graph the GPU executor rejects before it launches (std::invalid_argument)
+// goes to the CPU executor, after the GPU attempt uploaded O and stats.
+TEST(TestGpuFillInputs, SdpaBwdForwardRejectedOnTheDeviceRunsOnTheCpu)
+{
+    SKIP_IF_NO_DEVICES();
+    using ::testing::_;
+    using ::testing::Return;
+    using ::testing::Throw;
+    MockReferenceGraphExecutor gpu;
+    EXPECT_CALL(gpu, isApplicable(_, _)).WillOnce(Return(true));
+    EXPECT_CALL(gpu, execute(_, _, _))
+        .WillOnce(Throw(std::invalid_argument("fake GPU forward: rejects the graph")));
+    const auto gr = buildCausalScaledSdpaBwdGraph();
+    InputTensorMap inputs;
+
+    const auto result = fillSdpaBwdWithGpuForward(gr, inputs, gpu);
+
+    ASSERT_TRUE(result.filled) << result.reason;
+    expectDerivedOnTheCpu(gr, inputs);
+}
+
+// A device failure after the GPU executor accepted the graph is no fault in the graph:
+// it fails the fill rather than falling back.
+TEST(TestGpuFillInputs, SdpaBwdForwardFailingOnTheDeviceIsADeviceInputError)
+{
+    SKIP_IF_NO_DEVICES();
+    using ::testing::_;
+    using ::testing::Return;
+    using ::testing::Throw;
+    MockReferenceGraphExecutor gpu;
+    EXPECT_CALL(gpu, isApplicable(_, _)).WillOnce(Return(true));
+    EXPECT_CALL(gpu, execute(_, _, _))
+        .WillOnce(Throw(std::runtime_error("fake GPU forward: the launch failed")));
+    const auto gr = buildCausalScaledSdpaBwdGraph();
+    InputTensorMap inputs;
+
+    EXPECT_THROW(fillSdpaBwdWithGpuForward(gr, inputs, gpu), DeviceInputError);
 }
 
 // An op missing from applyDefaultFills() makes fillInputs() refuse the whole
@@ -1083,7 +1514,7 @@ TEST(TestFillInputs, MoeGroupedMatmulFillsAllInputs)
     auto inputs = makeTensors(leafUids);
     InputFillRecipes recipes;
 
-    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr);
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, hostReferences(), nullptr);
 
     EXPECT_TRUE(result.filled) << result.reason;
 }
@@ -1101,7 +1532,7 @@ TEST(TestFillInputs, MoeGroupedMatmulBwdFillsAllInputs)
     auto inputs = makeTensors(leafUids);
     InputFillRecipes recipes;
 
-    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr);
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, hostReferences(), nullptr);
 
     EXPECT_TRUE(result.filled) << result.reason;
 }
@@ -1117,15 +1548,16 @@ TEST(TestFillInputs, DeviceFillerLeavesSmallTensorsOnTheHostPath)
 
     auto hostInputs = makeTensorsFromGraph(graph, leafUids);
     InputFillRecipes hostRecipes;
-    const auto hostResult = fillInputs(*graph.graph, hostInputs, leafUids, hostRecipes, nullptr);
+    const auto hostResult
+        = fillInputs(*graph.graph, hostInputs, leafUids, hostRecipes, hostReferences(), nullptr);
     ASSERT_TRUE(hostResult.filled);
     EXPECT_EQ(hostResult.deviceFilled, 0u);
 
     auto deviceInputs = makeTensorsFromGraph(graph, leafUids);
     InputFillRecipes deviceRecipes;
     DeviceInputFiller device;
-    const auto deviceResult
-        = fillInputs(*graph.graph, deviceInputs, leafUids, deviceRecipes, &device);
+    const auto deviceResult = fillInputs(
+        *graph.graph, deviceInputs, leafUids, deviceRecipes, hostReferences(), &device);
     ASSERT_TRUE(deviceResult.filled);
     EXPECT_EQ(deviceResult.deviceFilled, 0u);
 
@@ -1159,7 +1591,8 @@ TEST(TestFillInputs, DeviceFillerFillsLargeTensorsOnTheDeviceWithinRange)
     auto inputs = makeTensorsFromGraph(graph, leafUids);
     InputFillRecipes recipes;
     DeviceInputFiller device;
-    const auto result = fillInputs(*graph.graph, inputs, leafUids, recipes, &device);
+    const auto result
+        = fillInputs(*graph.graph, inputs, leafUids, recipes, hostReferences(), &device);
     ASSERT_TRUE(result.filled) << result.reason;
     EXPECT_EQ(result.deviceFilled, 2u);
 
@@ -1270,7 +1703,7 @@ TEST(TestFillInputs, NarrowDtypeOnGenericOpGetsDtypeDefault)
     auto inputs = makeTensorsFromGraph(gr, leafUids);
     InputFillRecipes recipes;
 
-    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr);
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, hostReferences(), nullptr);
 
     ASSERT_TRUE(result.filled) << result.reason;
     EXPECT_EQ(recipes.fill(1), FillRecipe::free(-6.0f, 6.0f));
@@ -1286,7 +1719,7 @@ TEST(TestFillInputs, FloatGraphRecordsNoDtypeDefaults)
     auto inputs = makeTensors(leafUids);
     InputFillRecipes recipes;
 
-    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr);
+    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, hostReferences(), nullptr);
 
     ASSERT_TRUE(result.filled) << result.reason;
     EXPECT_TRUE(recipes.fills().empty());
@@ -1398,7 +1831,7 @@ ValuesFill fillX(const GraphResult& gr, const FillRecipe& recipe)
     ValuesFill out{FillResult{}, makeTensorsFromGraph(gr, leafUids)};
     InputFillRecipes recipes;
     recipes.set(1, recipe);
-    out.result = fillInputs(*gr.graph, out.inputs, leafUids, recipes, nullptr);
+    out.result = fillInputs(*gr.graph, out.inputs, leafUids, recipes, hostReferences(), nullptr);
     return out;
 }
 
@@ -1655,12 +2088,15 @@ TEST(TestFillInputs, ValuesFillLeavesOtherTensorsRandomContentsUnchanged)
 
     auto plainInputs = makeTensors(leafUids);
     InputFillRecipes plainRecipes;
-    ASSERT_TRUE(fillInputs(*gr.graph, plainInputs, leafUids, plainRecipes, nullptr).filled);
+    ASSERT_TRUE(
+        fillInputs(*gr.graph, plainInputs, leafUids, plainRecipes, hostReferences(), nullptr)
+            .filled);
 
     auto valuesInputs = makeTensors(leafUids);
     InputFillRecipes valuesRecipes;
     valuesRecipes.set(2, doubles({7.0}));
-    const auto result = fillInputs(*gr.graph, valuesInputs, leafUids, valuesRecipes, nullptr);
+    const auto result
+        = fillInputs(*gr.graph, valuesInputs, leafUids, valuesRecipes, hostReferences(), nullptr);
     ASSERT_TRUE(result.filled) << result.reason;
 
     EXPECT_EQ(logicalElements<float>(valuesInputs, 2),
@@ -1745,7 +2181,8 @@ TEST(TestFillInputs, AliasViewIsNotFilledAndNeedsNoTensor)
     auto inputs = makeTensors({1, 4});
     InputFillRecipes recipes;
 
-    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr, kWViewOfX);
+    const auto result
+        = fillInputs(*gr.graph, inputs, leafUids, recipes, hostReferences(), nullptr, kWViewOfX);
     ASSERT_TRUE(result.filled) << result.reason;
     EXPECT_EQ(inputs.count(2), 0u);
     EXPECT_EQ(inputs.size(), 2u);
@@ -1761,12 +2198,14 @@ TEST(TestFillInputs, AliasLeavesEveryOtherTensorsContentsUnchanged)
 
     auto plainInputs = makeTensors(leafUids);
     InputFillRecipes plainRecipes;
-    ASSERT_TRUE(fillInputs(*gr.graph, plainInputs, leafUids, plainRecipes, nullptr).filled);
+    ASSERT_TRUE(
+        fillInputs(*gr.graph, plainInputs, leafUids, plainRecipes, hostReferences(), nullptr)
+            .filled);
 
     auto aliasedInputs = makeTensors({1, 4});
     InputFillRecipes aliasedRecipes;
-    const auto result
-        = fillInputs(*gr.graph, aliasedInputs, leafUids, aliasedRecipes, nullptr, kWViewOfX);
+    const auto result = fillInputs(
+        *gr.graph, aliasedInputs, leafUids, aliasedRecipes, hostReferences(), nullptr, kWViewOfX);
     ASSERT_TRUE(result.filled) << result.reason;
 
     for(const int64_t uid : {1, 4})
@@ -1784,7 +2223,9 @@ TEST(TestFillInputs, AliasOwnerWithTwoViewsIsFilledOnce)
 
     auto plainInputs = makeTensors(leafUids);
     InputFillRecipes plainRecipes;
-    ASSERT_TRUE(fillInputs(*gr.graph, plainInputs, leafUids, plainRecipes, nullptr).filled);
+    ASSERT_TRUE(
+        fillInputs(*gr.graph, plainInputs, leafUids, plainRecipes, hostReferences(), nullptr)
+            .filled);
 
     for(const auto& aliases : {std::vector<TensorAlias>{{2, 1, 0}, {4, 1, 0}},
                                std::vector<TensorAlias>{{4, 1, 0}, {2, 1, 0}}})
@@ -1792,7 +2233,8 @@ TEST(TestFillInputs, AliasOwnerWithTwoViewsIsFilledOnce)
         SCOPED_TRACE("first view " + std::to_string(aliases.front().uid));
         auto inputs = makeTensors({1});
         InputFillRecipes recipes;
-        const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr, aliases);
+        const auto result
+            = fillInputs(*gr.graph, inputs, leafUids, recipes, hostReferences(), nullptr, aliases);
         ASSERT_TRUE(result.filled) << result.reason;
         EXPECT_EQ(inputs.size(), 1u);
         EXPECT_TRUE(sameHostBytes(*plainInputs.at(1), *inputs.at(1)));
@@ -1808,13 +2250,20 @@ TEST(TestFillInputs, AliasViewWithASeedOnlyEntryChangesNothing)
 
     auto expectedInputs = makeTensors({1, 4});
     InputFillRecipes expectedRecipes;
-    ASSERT_TRUE(fillInputs(*gr.graph, expectedInputs, leafUids, expectedRecipes, nullptr, kWViewOfX)
+    ASSERT_TRUE(fillInputs(*gr.graph,
+                           expectedInputs,
+                           leafUids,
+                           expectedRecipes,
+                           hostReferences(),
+                           nullptr,
+                           kWViewOfX)
                     .filled);
 
     auto inputs = makeTensors({1, 4});
     InputFillRecipes recipes;
     recipes.loadFromJson({{2, nlohmann::json{{"seed", 7u}}}});
-    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr, kWViewOfX);
+    const auto result
+        = fillInputs(*gr.graph, inputs, leafUids, recipes, hostReferences(), nullptr, kWViewOfX);
     ASSERT_TRUE(result.filled) << result.reason;
     for(const int64_t uid : {1, 4})
     {
@@ -1836,7 +2285,8 @@ TEST(TestFillInputs, AliasOwnerGapsHoldZeros)
     std::memset(owner.rawHostData(), 0xFF, owner.elementSpace() * owner.elementSize());
 
     InputFillRecipes recipes;
-    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr, kWViewOfX);
+    const auto result
+        = fillInputs(*gr.graph, inputs, leafUids, recipes, hostReferences(), nullptr, kWViewOfX);
     ASSERT_TRUE(result.filled) << result.reason;
 
     const auto* data = static_cast<const float*>(owner.rawHostData());
@@ -1865,13 +2315,20 @@ TEST(TestFillInputs, AliasOwnerIsFilledOnTheHostWithADeviceFiller)
     auto hostInputs = makeTensorsFromGraph(graph, {1, 2});
     InputFillRecipes hostRecipes;
     ASSERT_TRUE(
-        fillInputs(*graph.graph, hostInputs, leafUids, hostRecipes, nullptr, biasViewOfX).filled);
+        fillInputs(
+            *graph.graph, hostInputs, leafUids, hostRecipes, hostReferences(), nullptr, biasViewOfX)
+            .filled);
 
     auto deviceInputs = makeTensorsFromGraph(graph, {1, 2});
     InputFillRecipes deviceRecipes;
     DeviceInputFiller device;
-    const auto result
-        = fillInputs(*graph.graph, deviceInputs, leafUids, deviceRecipes, &device, biasViewOfX);
+    const auto result = fillInputs(*graph.graph,
+                                   deviceInputs,
+                                   leafUids,
+                                   deviceRecipes,
+                                   hostReferences(),
+                                   &device,
+                                   biasViewOfX);
     ASSERT_TRUE(result.filled) << result.reason;
     EXPECT_EQ(result.deviceFilled, 1u);
 
@@ -1888,7 +2345,8 @@ TEST(TestFillInputs, AliasViewWithASetRecipeIsInvalid)
     InputFillRecipes recipes;
     recipes.set(2, FillRecipe::fixed(1.0f));
 
-    const auto result = fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr, kWViewOfX);
+    const auto result
+        = fillInputs(*gr.graph, inputs, leafUids, recipes, hostReferences(), nullptr, kWViewOfX);
     EXPECT_FALSE(result.filled);
     EXPECT_EQ(result.status, FillResult::Status::INVALID);
     EXPECT_NE(result.reason.find("uid 2"), std::string::npos) << result.reason;
@@ -1902,8 +2360,10 @@ TEST(TestFillInputs, AliasOwnerWithoutATensorThrows)
     InputFillRecipes recipes;
     const std::vector<TensorAlias> ownerIsAnOutput = {{2, 5, 0}};
 
-    EXPECT_THROW(fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr, ownerIsAnOutput),
-                 std::invalid_argument);
+    EXPECT_THROW(
+        fillInputs(
+            *gr.graph, inputs, leafUids, recipes, hostReferences(), nullptr, ownerIsAnOutput),
+        std::invalid_argument);
 }
 
 TEST(TestFillInputs, FillDerivesInputsOnlyForAGraphWhoseFillReplacesInputs)
@@ -1918,8 +2378,10 @@ TEST(TestFillInputs, FillDerivesInputsOnlyForAGraphWhoseFillReplacesInputs)
 
     InputTensorMap inputs;
     InputFillRecipes recipes;
-    EXPECT_THROW(fillInputs(sdpaBackward, inputs, {1, 2, 3}, recipes, nullptr, {{3, 2, 0}}),
-                 std::invalid_argument);
+    EXPECT_THROW(
+        fillInputs(
+            sdpaBackward, inputs, {1, 2, 3}, recipes, hostReferences(), nullptr, {{3, 2, 0}}),
+        std::invalid_argument);
 }
 
 // ── Absent tensors ──────────────────────────────────────────────────────────
@@ -1981,7 +2443,8 @@ InputTensorMap fillLoadedInputs(const bundle::IntegrationTestBundle& loaded)
     {
         recipes.loadFromJson(*loaded.metadata.inputs);
     }
-    const auto result = fillInputs(wrapper.getGraph(), inputs, leafUids, recipes, nullptr);
+    const auto result
+        = fillInputs(wrapper.getGraph(), inputs, leafUids, recipes, hostReferences(), nullptr);
     EXPECT_TRUE(result.filled) << result.reason;
     return inputs;
 }
@@ -2138,7 +2601,7 @@ FillResult fillResampleBwd(const GraphResult& gr,
     recipes.setGlobalSeed(42);
     recipes.setSeed(2, kResampleIndexSeed);
     recipes.set(2, FillRecipe::fixed(7.0f));
-    return fillInputs(*gr.graph, inputs, ownedUids, recipes, nullptr);
+    return fillInputs(*gr.graph, inputs, ownedUids, recipes, hostReferences(), nullptr);
 }
 
 InputTensorMap fillResampleBwdInputs(const GraphResult& gr)
@@ -2344,7 +2807,8 @@ TEST(TestFillInputs, ResampleBwdIndexIsDeterministicAcrossFills)
         auto inputs = makeTensorsFromGraph(gr, leafUids);
         InputFillRecipes recipes;
         recipes.setGlobalSeed(42);
-        EXPECT_TRUE(fillInputs(*gr.graph, inputs, leafUids, recipes, nullptr).filled);
+        EXPECT_TRUE(
+            fillInputs(*gr.graph, inputs, leafUids, recipes, hostReferences(), nullptr).filled);
         return inputs;
     };
     auto first = fillOnce();
