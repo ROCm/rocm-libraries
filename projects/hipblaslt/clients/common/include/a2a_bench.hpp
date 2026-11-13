@@ -127,15 +127,22 @@ namespace hipblaslt_bench
         }                                                                         \
     } while(0)
 
-    // Sets this thread's memory policy to MPOL_PREFERRED on `device`'s NUMA node, if it
-    // has one; warns if the kernel refuses.
+    // Sets the calling thread's memory policy to MPOL_PREFERRED on `device`'s NUMA
+    // node, if it has one; threads created earlier, such as the HIP runtime's, keep
+    // theirs. Warns if the node cannot be read or the kernel refuses.
     inline bool prefer_device_numa_node(int device)
     {
         char busId[64] = {};
         CHECK_HIP_RC(hipDeviceGetPCIBusId(busId, sizeof(busId), device));
         std::ifstream numaNode(std::string("/sys/bus/pci/devices/") + busId + "/numa_node");
         int           node = -1;
-        if(!(numaNode >> node) || node < 0)
+        if(!(numaNode >> node))
+        {
+            hipblaslt_cerr << "warning: cannot read " << busId
+                           << "'s NUMA node; memory is not bound\n";
+            return true;
+        }
+        if(node < 0)
             return true;
 
         std::vector<unsigned long> mask(node / 64 + 1);
@@ -280,11 +287,12 @@ namespace hipblaslt_bench
             size_t         remote  = 0;
             for(uint32_t j = 0; j < arg.a2a_world; ++j)
             {
-                const uint32_t dstNode = TensileLite::Client::sdmaNodeIdForDevice(j);
+                const uint32_t dstNode
+                    = j == env.rank ? srcNode : TensileLite::Client::sdmaNodeIdForDevice(j);
                 res.ownedQueues.push_back(std::make_unique<TensileLite::Client::SdmaQueue>(
                     srcNode,
                     TensileLite::Client::sdmaQueueEngine(
-                        srcNode, dstNode, j == env.rank ? 0 : remote++, sdmaRotate)));
+                        srcNode, dstNode, srcNode == dstNode ? 0 : remote++, sdmaRotate)));
                 const HsaQueueResource& q = res.ownedQueues.back()->queueResource();
                 res.queues[j] = {res.ownedQueues.back()->ringBase(),
                                  (void*)q.Queue_read_ptr_aql,
