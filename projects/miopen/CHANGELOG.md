@@ -6,6 +6,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
+* [Numerics] Fixed statistics-mode argument handling, global launch dimensions, and minimum/maximum reductions for positive-only, negative-only, zero, infinity, and BF16 subnormal inputs.
 * [Conv] Fixed deterministic convolutions that reused the find-db record and the cached invokers
   of a non-deterministic call with the same problem. The deterministic call could return a stale
   time and, in one handle, run a non-deterministic split-K kernel. The find-db key now contains
@@ -73,6 +74,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   [`src/hipconv/CHANGELOG.md`](src/hipconv/CHANGELOG.md) for the full list.
 
 ### Changed
+* [Conv][Numerics] Migrated the legacy HIP BF16 types in `ConvDepthwiseFwd3D` and CheckNumerics to `__hip_bfloat16` with header-independent HIPRTC compilation and support for older HIP BF16 disk headers.
 * [Conv] Enabled the 2D and 3D grouped forward CK xdlops solvers in deterministic mode. Forward
   never uses split-K, so these solvers are deterministic; previously, deterministic forward
   convolutions could only use the GEMM and naive solvers.
