@@ -12,15 +12,15 @@ clients/tests/src/experimental/contract_<feature>_gtest.cpp. A change to a featu
 breaking if it
 
 * removes a declaration from the feature's header (functions, types, enumerators, macros),
-* changes a type or macro declaration, or
+* changes a macro, or
 * changes or deletes one of the feature's contract tests. Contract tests define the
   feature's promised behavior, so editing one means the behavior changed.
 
 Additions are never breaking. A breaking change must bump that feature's revision in the
 same change. Some changes are never allowed, with or without a bump:
 
-* changing a function's signature under its existing name (give it a new name, such as
-  ..._v2, and remove the old one),
+* changing a function's signature, or a struct, union or typedef, under its existing name
+  (give it a new name, such as ..._v2, and remove the old one),
 * changing an enumerator's value, or giving a new enumerator a value at or below
   HIPBLASLT_EXPERIMENTAL_ENUM_HIGH_WATER (experimental enum values are never reused),
 * changing or removing anything declared in hipblaslt-experimental.h itself, such as
@@ -332,6 +332,13 @@ def compare(base: Optional[Surface], head: Surface) -> Report:
                 "  A breaking change to a function gives it a new name (for example ..._v2) and"
                 " removes the old one, so a stale binary fails to load instead of calling it"
                 " with the wrong arguments."
+            )
+        elif key.startswith("type "):
+            report.errors.append(
+                f"changed {key} in place: '{text}' -> '{new}'.\n"
+                "  A breaking change to a struct, union or typedef gives it a new name (for"
+                " example ..._v2) and removes the old one, along with the functions that use it,"
+                " so a stale binary never reads the old layout as the new one."
             )
         elif key.startswith("enumerator "):
             report.errors.append(

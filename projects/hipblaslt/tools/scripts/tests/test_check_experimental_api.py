@@ -250,6 +250,52 @@ def test_never_allowed_even_with_bump(trees, edit):
     assert any(message in e for e in report.errors), report.errors
 
 
+_DEMO_STRUCT = (
+    "typedef struct hipblasLtExperimentalDemoParams_t\n{\n    size_t alignment;\n"
+    "} hipblasLtExperimentalDemoParams_t;\n"
+    "typedef int (*hipblasLtExperimentalDemoCallback_t)(size_t);\n"
+)
+
+
+def _add_demo_types(*roots: Path) -> None:
+    for root in roots:
+        _edit(root, _DEMO_HEADER, "#ifdef __cplusplus\n}", f"{_DEMO_STRUCT}\n#ifdef __cplusplus\n}}")
+
+
+TYPE_EDITS = {
+    "add_struct_member": ("    size_t alignment;\n", "    size_t alignment;\n    int flags;\n"),
+    "change_struct_member": ("    size_t alignment;\n", "    uint32_t alignment;\n"),
+    "change_typedef": ("int (*hipblasLtExperimentalDemoCallback_t)(size_t)",
+                       "int (*hipblasLtExperimentalDemoCallback_t)(size_t, void*)"),
+}
+
+
+@pytest.mark.parametrize("edit", sorted(TYPE_EDITS))
+def test_changing_a_type_in_place_fails_even_with_bump(trees, edit):
+    base, head = trees
+    _add_demo_types(base, head)
+    _edit(head, _DEMO_HEADER, *TYPE_EDITS[edit])
+    _bump(head)
+    report = _check(base, head)
+    assert not report.ok
+    assert any("in place" in e and e.startswith("changed type ") for e in report.errors), report.errors
+
+
+def test_replacing_a_type_with_a_renamed_one_passes_with_bump(trees):
+    base, head = trees
+    _add_demo_types(base, head)
+    _edit(head, _DEMO_HEADER, "    size_t alignment;\n} hipblasLtExperimentalDemoParams_t;",
+          "    size_t alignment;\n    int flags;\n} hipblasLtExperimentalDemoParams_v2_t;")
+    _edit(head, _DEMO_HEADER, "typedef struct hipblasLtExperimentalDemoParams_t",
+          "typedef struct hipblasLtExperimentalDemoParams_v2_t")
+    report = _check(base, head)
+    assert any("without bumping HIPBLASLT_EXPERIMENTAL_DEMO" in e for e in report.errors)
+    _bump(head)
+    report = _check(base, head)
+    assert report.ok, report.errors
+    assert "removed  type hipblasLtExperimentalDemoParams_t" in report.breaking["DEMO"]
+
+
 def test_reusing_a_retired_enum_value_fails(trees):
     base, head = trees
     _edit(head, *BREAKING_EDITS["retire_enumerator"])
