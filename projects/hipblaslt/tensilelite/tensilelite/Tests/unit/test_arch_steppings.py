@@ -2659,7 +2659,7 @@ def test_entry_point_forwards_arguments_into_group_builds(monkeypatch, tmp_path,
     Run.main(explicit)
 
     assert spawned == [
-        [sys.executable, "-m", "tensilelite", "create-library", "--disable-asm-comments",
+        [sys.executable, "-m", "tensilelite.create_library", "--disable-asm-comments",
          str(tmp_path / "logic"), str(tmp_path / "out"), "HIP",
          f"--architecture={arch}", "--jobs=4"]
         for arch in (GFX1250, GFX1250_STRICT)
