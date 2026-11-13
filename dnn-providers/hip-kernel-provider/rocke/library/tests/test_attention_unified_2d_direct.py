@@ -42,11 +42,31 @@ _SPECS = [
 def test_attention_builders_request_their_direct_levers() -> None:
     """``attrs["direct_levers"]`` (not IR) names the direct-compiler levers each gfx950 unified-attention
     kernel wants: the 2D kernel's K/V tile loads ahead of its QK MFMAs and its block-table selects together,
-    the reduce kernel's wider scheduling window."""
+    the reduce kernel's wider scheduling window; the dense kernels' (plain and persistent) causal-mask,
+    spill and row-sum levers."""
     from kernels import (
+        AttentionDenseSpec,
         UnifiedAttentionReduceTiledSpec,
+        build_attention_dense,
         build_unified_attention_reduce_tiled,
     )
+
+    for persistent in (False, True):
+        dense = AttentionDenseSpec(
+            batch=1,
+            seqlen_q=2048,
+            seqlen_kv=2048,
+            num_query_heads=32,
+            num_kv_heads=8,
+            head_size=128,
+            causal=True,
+            dtype="bf16",
+            persistent=persistent,
+        )
+        assert (
+            build_attention_dense(dense, arch="gfx950").attrs["direct_levers"]
+            == "cmpreassoc,rematv,valcoal,packtuple"
+        )
 
     spec2d = UnifiedAttention2DTiledSpec(
         use_sinks=False,

@@ -125,8 +125,8 @@ _CODE_OBJECT_BACKEND_REQUEST = "_rocke_code_object_backend"
 # - ``DIRECT_LEVERS_ATTR``: a kernel's own direct-compiler levers (a list or a
 #   ``,`` / ``+`` joined string of ``ROCKE_DIRECT_LEVERS`` names), joined to the
 #   environment's for its compile only; not IR (stripped before serialization).
-#   The gfx950 unified-attention builders set it (the 2D kernel ``dmafree,smemsink``,
-#   the split-KV reduce kernel ``widewin``).
+#   The gfx950 attention builders set it (the dense kernels ``cmpreassoc,rematv,valcoal,packtuple``,
+#   the unified 2D kernel ``dmafree,smemsink``, the split-KV reduce kernel ``widewin``).
 # - ``DIRECT_SCOPES_ATTR`` + the op attribute ``SCOPE_OP_ATTR``: per-op lever
 #   scopes by name (``"<scope>:<lever>+<lever>;..."`` on the kernel, the scope
 #   name on its ops; ``qwen38_mono.persist.knobs.RustScope``). The direct
@@ -139,17 +139,12 @@ _CODE_OBJECT_BACKEND_REQUEST = "_rocke_code_object_backend"
 #   (a ``v_max_f32`` / ``v_min_f32`` chain becomes ``v_max3_f32`` /
 #   ``v_min3_f32``, as LLVM combines ``fmaxnum`` chains: the attention softmax
 #   row maxima).
-#   ``ROCKE_DIRECT_DEFAULT_LEVERS`` replaces the set (``""``: none, the plain
-#   direct object).
+#   ``ROCKE_DIRECT_DEFAULT_LEVERS`` replaces the set (``""``: none; a kernel's
+#   own levers still apply).
 DIRECT_LEVERS_ATTR = "direct_levers"
 DIRECT_SCOPES_ATTR = "direct_scopes"
 SCOPE_OP_ATTR = "rocke.scope"
 DIRECT_DEFAULT_LEVERS = ("acqfence", "bufoffany", "fmax3")
-# Levers the direct backend adds for attention kernels (names starting ``rocke_attention_dense``) on top of the defaults:
-# ``cmpreassoc`` (a causal mask's per-element constants stay immediates of one base), ``rematv`` (spilling
-# recomputes hoisted address offsets), ``valcoal`` / ``packtuple`` (the row-sum tuples take no copies and pack
-# into ``v_pk_add_f32``). ``packfar`` (pairing far-apart f32 ops) is not here: it did not pay.
-DIRECT_ATTENTION_LEVERS = ("cmpreassoc", "rematv", "valcoal", "packtuple")
 _DIRECT_DEFAULTS_ENV = "ROCKE_DIRECT_DEFAULT_LEVERS"
 
 
@@ -435,15 +430,6 @@ def direct_default_levers() -> List[str]:
     return _lever_names(env) if env is not None else list(DIRECT_DEFAULT_LEVERS)
 
 
-def _attention_levers(kernel: KernelDef) -> List[str]:
-    """``DIRECT_ATTENTION_LEVERS`` for a dense attention kernel, unless ``ROCKE_DIRECT_DEFAULT_LEVERS`` is set (it
-    replaces every default, ``""`` leaving the plain direct object)."""
-    if os.environ.get(_DIRECT_DEFAULTS_ENV) is not None:
-        return []
-    is_attention = str(getattr(kernel, "name", "")).startswith("rocke_attention_dense")
-    return list(DIRECT_ATTENTION_LEVERS) if is_attention else []
-
-
 def parse_direct_scopes(text: str) -> Dict[str, List[str]]:
     """``attrs["direct_scopes"]`` (``"<scope>:<lever>+<lever>;..."``) as
     scope name -> lever names (``-name`` turns a kernel lever off)."""
@@ -520,10 +506,8 @@ def _compile_kernel_direct(
     # The backend's defaults and the kernel's own levers (``attrs["direct_levers"]``)
     # join the environment's for this compile; named op scopes become ``dlevers``
     # before the lifting (a lifted asm statement keeps its scope).
-    levers = (
-        direct_default_levers()
-        + _attention_levers(kernel)
-        + _lever_names(kernel.attrs.get(DIRECT_LEVERS_ATTR))
+    levers = direct_default_levers() + _lever_names(
+        kernel.attrs.get(DIRECT_LEVERS_ATTR)
     )
     source = direct_source(kernel)
     # Inline-asm idioms the direct compiler lowers as IR ops, on a copy

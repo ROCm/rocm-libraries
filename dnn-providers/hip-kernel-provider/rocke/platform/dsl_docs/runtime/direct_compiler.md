@@ -414,7 +414,7 @@ on the same inputs in these ways:
 
 `ROCKE_DIRECT_LEVERS` (comma-separated) turns on code-generation choices that are off by default; the complete list is `rir::LEVERS` in
 [`rust/rocke-codeobj/src/rir/mod.rs`](../../rust/rocke-codeobj/src/rir/mod.rs), and the Python backend's default set is
-`DIRECT_DEFAULT_LEVERS` in `rocke/helpers/compile.py`. Levers for gfx950 attention loops:
+`DIRECT_DEFAULT_LEVERS` in `rocke/helpers/compile.py`. Levers for gfx950 attention loops (the dense attention builders request these four through the kernel attribute `direct_levers`):
 
 | Lever | Effect | Code |
 |---|---|---|

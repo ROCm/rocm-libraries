@@ -282,24 +282,6 @@ def test_a_kernels_direct_levers_apply_to_its_compile_only(monkeypatch) -> None:
     assert os.environ["ROCKE_DIRECT_LEVERS"] == "litreuse,litshare"
 
 
-def test_attention_kernels_get_the_attention_levers(monkeypatch) -> None:
-    """Names starting ``rocke_attention_dense`` add ``DIRECT_ATTENTION_LEVERS``; ``ROCKE_DIRECT_DEFAULT_LEVERS`` replaces them."""
-    from rocke.helpers import compile as compile_mod
-
-    class _K:
-        def __init__(self, name):
-            self.name = name
-
-    monkeypatch.delenv("ROCKE_DIRECT_DEFAULT_LEVERS", raising=False)
-    assert compile_mod._attention_levers(_K("rocke_attention_dense_d64")) == list(
-        compile_mod.DIRECT_ATTENTION_LEVERS
-    )
-    assert compile_mod._attention_levers(_K("conv_fprop")) == []
-    assert compile_mod._attention_levers(_K("rocke_attention_u3d_splitkv")) == []
-    monkeypatch.setenv("ROCKE_DIRECT_DEFAULT_LEVERS", "")
-    assert compile_mod._attention_levers(_K("rocke_attention_dense_d64")) == []
-
-
 def test_strict_mode_turns_a_refusal_into_an_error(monkeypatch) -> None:
     """``ROCKE_DIRECT_STRICT=1``: a kernel the direct compiler refuses raises instead of falling back."""
     _require_direct_library()
