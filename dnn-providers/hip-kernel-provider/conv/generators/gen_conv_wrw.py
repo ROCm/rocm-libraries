@@ -703,6 +703,54 @@ FAMILIES = [
 ]
 LOOP2_NS = 2
 
+# Catalog breadth: geometries the families' tiles and the planner's default blocks per unit
+# (with_bpu) miss, each the measured best on a corpus layer (fp16 and bf16, n128 unless noted;
+# the lang-compare geometry sweep around the top configs, compiled from this source and planned
+# by wrwLaunchFor). (atoms, filter tag) -> [(layout, tile (bk, bc, wk, wc, bq), bpus)]: the config
+# at exactly these bpus, added to the family's (a tile the family has gets the bpus too). Not
+# three-bf16 sources (build_x3): measured on 16-bit graphs only.
+GFX950_16 = ("mfma32x16_f16", "mfma32x16_bf16")
+CDNA32_16 = ("mfma32_f16", "mfma32_bf16")
+WMMA11_16 = ("wmma11_f16", "wmma11_bf16")
+WMMA12_16 = ("wmma12_f16", "wmma12_bf16")
+RDNA_16 = WMMA11_16 + WMMA12_16
+BREADTH = {
+    # gfx950: resnet50 c512 7^2 144 against 164 us, c512 14^2 s2 170 against 199, c256 k1024
+    # 14^2 1x1 107 against 286 (4 blocks a unit), inception 35^2 5x5 102 against 193, c288 k384
+    # 35^2 s2 390 against 431.
+    (GFX950_16, "3x3pk"): [(CF, (128, 128, 4, 2, 64), (2,))],
+    (GFX950_16, "3x3s2pk"): [(CF, (256, 64, 4, 2, 32), (2,))],
+    (GFX950_16, "1x1"): [(CF, (64, 128, 2, 2, 32), (4,))],
+    (GFX950_16, "5x5r1"): [(CF, (64, 64, 2, 2, 64), (2,))],
+    (GFX950_16, "3x3s2ph"): [(CF, (128, 64, 4, 2, 32), (2,))],
+    # gfx942 (MI325X): resnet50 c256 k1024 14^2 1x1 158 against 318 us, inception c288 k384
+    # 35^2 s2 597 against 1183.
+    (CDNA32_16, "1x1"): [(CF, (128, 64, 2, 2, 32), (2,))],
+    (CDNA32_16, "3x3s2ph"): [(CF, (128, 64, 2, 2, 32), (1,))],
+    # gfx1201: the same layers 638 against 764 us, 743 against 963, 492 against 795, 569 against
+    # 886, 1870 against 2972; inception c80 73^2 2974 against 3816 and c32 147^2 (3x3r1) 2070
+    # against 3149; channels-last sd unet c320 128^2 n8 2369 against 2532, flux vae c512 96^2 n8
+    # 3185 against 3273 (256^2 n1 alike), efficientnet c48 k192 120^2 3803 against 4060. Most
+    # gain from 4 blocks a unit.
+    (WMMA12_16, "3x3pk"): [(CF, (128, 32, 4, 2, 64), (2,))],
+    (WMMA12_16, "3x3s2pk"): [(CF, (128, 32, 4, 2, 32), (2,))],
+    (RDNA_16, "1x1"): [(CF, (128, 64, 4, 2, 32), (4,))],
+    (RDNA_16, "3x3"): [
+        (CF, (64, 32, 4, 2, 32), (4,)),
+        (CL, (64, 64, 2, 4, 32), (4,)),
+        (CL, (128, 32, 8, 1, 32), (4,)),
+        (CL, (64, 64, 4, 2, 32), (4,)),
+    ],
+    (RDNA_16, "3x3r1"): [(CF, (64, 32, 4, 2, 64), (4,))],
+    (RDNA_16, "5x5r1"): [(CF, (64, 64, 4, 2, 64), (4,))],
+    (RDNA_16, "3x3s2ph"): [(CF, (128, 32, 4, 2, 32), (4,))],
+    # gfx11 trial (measure on gfx1101): the packed rows too.
+    (WMMA11_16, "3x3pk"): [(CF, (128, 32, 4, 2, 64), (2,))],
+    (WMMA11_16, "3x3s2pk"): [(CF, (128, 32, 4, 2, 32), (2,))],
+}
+# INTS keys of the BREADTH configs (build_x3 leaves them out).
+BREADTH_KEYS = set()
+
 CATALOG = {"FLOAT": [], "HALF": [], "BFLOAT16": []}
 
 
@@ -1249,6 +1297,24 @@ def build():
                         CATALOG[dtype].extend(with_bpu(c))
                     else:
                         dropped += 1
+                for (atoms_of, btag), extra in BREADTH.items():
+                    if atom not in atoms_of or btag != tag:
+                        continue
+                    for lay, t, bpus in extra:
+                        if lay not in layouts or (lays is not None and lay not in lays):
+                            continue
+                        c = C(atom, loop, lay, t, s, sw, dw, fr, vec, xcd, 0, 0)
+                        assert valid(
+                            c, dtype
+                        ), f"breadth config {atom} {tag} {t} invalid"
+                        have = {tuple(x[f] for f in INTS) for x in CATALOG[dtype]}
+                        for b in bpus:
+                            key = tuple(dict(c, bpu=b)[f] for f in INTS)
+                            assert (
+                                key not in have
+                            ), f"breadth config {atom} {tag} {t} b{b} ships"
+                            CATALOG[dtype].append(dict(c, bpu=b))
+                            BREADTH_KEYS.add(key)
     # The generic tier last: the specialized configs keep their priorities.
     dropped += build_generic()
     # Two rows can give one config (the FMA output rows ignore the filter height: 1x3 and 3x3r1
@@ -1288,6 +1354,8 @@ def build_x3():
     for c in CATALOG["BFLOAT16"]:
         # Not the block-buffer forms (pb): the 3N problem keeps the 32-bit buffer range.
         if c["atom"] not in X3_ATOMS or c["loop"] not in X3_LOOPS or c["pb"]:
+            continue
+        if tuple(c[f] for f in INTS) in BREADTH_KEYS:
             continue
         g = (
             c["atom"],
