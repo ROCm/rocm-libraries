@@ -712,6 +712,16 @@ rocsparse_dnmat_set_strided_batch
 
 .. doxygenfunction:: rocsparse_dnmat_set_strided_batch
 
+rocsparse_dnmat_copy_data
+-------------------------
+
+.. doxygenfunction:: rocsparse_dnmat_copy_data
+
+rocsparse_dnmat_transpose
+-------------------------
+
+.. doxygenfunction:: rocsparse_dnmat_transpose
+
 rocsparse_create_const_spvec_descr
 ----------------------------------
 .. doxygenfunction:: rocsparse_create_const_spvec_descr

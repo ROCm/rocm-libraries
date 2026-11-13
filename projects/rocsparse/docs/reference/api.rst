@@ -360,6 +360,10 @@ Auxiliary functions
 +-----------------------------------------------------+
 |:cpp:func:`rocsparse_dnmat_set_strided_batch`        |
 +-----------------------------------------------------+
+|:cpp:func:`rocsparse_dnmat_copy_data`                |
++-----------------------------------------------------+
+|:cpp:func:`rocsparse_dnmat_transpose`                |
++-----------------------------------------------------+
 
 Sparse level 1 functions
 ------------------------
