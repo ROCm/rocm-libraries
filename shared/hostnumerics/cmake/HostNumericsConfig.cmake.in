@@ -3,5 +3,9 @@
 
 @PACKAGE_INIT@
 
+# The installed static libraries link the OpenMP runtime.
+include(CMakeFindDependencyMacro)
+find_dependency(OpenMP COMPONENTS CXX)
+
 include("${CMAKE_CURRENT_LIST_DIR}/HostNumericsTargets.cmake")
 check_required_components(HostNumerics)

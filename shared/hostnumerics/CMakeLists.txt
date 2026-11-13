@@ -13,6 +13,9 @@ option(HOSTNUMERICS_BUILD_TESTING "Build HostNumerics tests." ${PROJECT_IS_TOP_L
 option(HOSTNUMERICS_BUILD_PYTHON "Build the HostNumerics Python module."
        ${PROJECT_IS_TOP_LEVEL})
 
+# HostNumerics parallelizes CPU work with OpenMP and has no serial-only build.
+find_package(OpenMP REQUIRED COMPONENTS CXX)
+
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/version.hpp.in"
     "${CMAKE_CURRENT_BINARY_DIR}/include/roc/hostnumerics/version.hpp"
@@ -48,6 +51,33 @@ add_library(hostnumerics INTERFACE)
 add_library(roc::hostnumerics ALIAS hostnumerics)
 target_link_libraries(hostnumerics INTERFACE roc::hostnumerics-core)
 
+# CPU conversions to the physical storage layouts that AMD GPU kernels read.
+# They do not depend on the other HostNumerics targets.
+add_library(hostnumerics-amd-gpu-layout STATIC
+    src/amd_gpu_layout/mx.cpp
+    src/amd_gpu_layout/operand.cpp
+)
+add_library(roc::hostnumerics-amd-gpu-layout ALIAS hostnumerics-amd-gpu-layout)
+target_compile_features(hostnumerics-amd-gpu-layout PUBLIC cxx_std_20)
+target_include_directories(hostnumerics-amd-gpu-layout
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
+)
+target_link_libraries(hostnumerics-amd-gpu-layout PRIVATE OpenMP::OpenMP_CXX)
+target_sources(hostnumerics-amd-gpu-layout
+    PUBLIC
+        FILE_SET HEADERS
+        BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        FILES
+            include/roc/hostnumerics/amd_gpu_layout/mx.hpp
+            include/roc/hostnumerics/amd_gpu_layout/operand.hpp
+)
+set_target_properties(hostnumerics-amd-gpu-layout
+    PROPERTIES
+        CXX_VISIBILITY_PRESET hidden
+        POSITION_INDEPENDENT_CODE ON
+        VISIBILITY_INLINES_HIDDEN ON
+)
+
 if(HOSTNUMERICS_BUILD_TESTING)
     list(APPEND CMAKE_MODULE_PATH "${HostNumerics_SOURCE_DIR}/cmake")
     enable_testing()
@@ -57,7 +87,7 @@ if(HOSTNUMERICS_BUILD_PYTHON)
     add_subdirectory(python)
 endif()
 
-install(TARGETS hostnumerics-core hostnumerics
+install(TARGETS hostnumerics-core hostnumerics hostnumerics-amd-gpu-layout
     EXPORT hostnumerics-targets
     FILE_SET HEADERS DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
 )
@@ -76,7 +106,6 @@ write_basic_package_version_file(
     "${CMAKE_CURRENT_BINARY_DIR}/HostNumericsConfigVersion.cmake"
     VERSION "${PROJECT_VERSION}"
     COMPATIBILITY SameMajorVersion
-    ARCH_INDEPENDENT
 )
 install(FILES
     "${CMAKE_CURRENT_BINARY_DIR}/HostNumericsConfig.cmake"
