@@ -215,7 +215,7 @@ class StreamKMemoryOrdering(Component):
 
     - gfx1250: flag reads use VMEM because SMEM is not coherent with the
       VMEM flag store. When MTypeNC is True (e.g. gfx1250-strict), release
-      needs DEV writeback and acquire needs DEV invalidation. Ordinary
+      needs DEV writeback and acquire needs DEV invalidation. Non-strict
       gfx1250 excludes NC mappings: hardware keeps L2 coherent, so release
       retains only completion waits and acquire uses SE invalidation.
       XNACK-replay can still reorder volatile/atomic VMEM past in-flight

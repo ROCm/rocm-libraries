@@ -339,7 +339,7 @@ std::map<std::string, int> initArchCaps(const IsaVersion& v, GfxArchID archID) {
         checkInList(v, {{9, 5, 0}}) || checkInList(v, {{9, 0, 10}}) || (v[0] == 9 && v[1] == 4);
     rv["HasMXScaleSwizzle"] = checkInList(v, {{9, 5, 0}, {12, 5, 0}});
     rv["HasInvWbDevFences"] = checkInList(v, {{12, 5, 0}});
-    // The target may use non-coherent (MTYPE NC) mappings. Ordinary gfx1250
+    // The target may use non-coherent (MTYPE NC) mappings. Non-strict gfx1250
     // excludes NC; consult concrete identity so a gfx1250v0/strict-only build
     // stays conservative despite sharing the ISA tuple.
     // Tuple queries normally select gfx1250; TensileLite layers named overrides.

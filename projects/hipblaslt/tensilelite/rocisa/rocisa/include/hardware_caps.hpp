@@ -656,10 +656,10 @@ inline std::map<std::string, int> initArchCaps(const IsaVersion& isaVersion)
     // MTypeNC determines whether L2 writeback/device-scope invalidation is needed.
     rv["HasInvWbDevFences"]            = checkInList(isaVersion, {{12, 5, 0}});
 
-    // The target may use non-coherent (MTYPE NC) memory mappings. Ordinary
-    // gfx1250 excludes NC; its RW mappings have hardware-coherent L2s.
-    // gfx1250-strict shares this ISA tuple, so concrete-target overrides must
-    // retain True because NC mappings remain possible.
+    // Non-strict gfx1250 excludes NC mappings; its RW mappings have
+    // hardware-coherent L2s. This ISA-only default cannot distinguish strict.
+    // TensileLite overrides MTypeNC to True for gfx1250-strict, which shares
+    // the ISA tuple but permits NC mappings.
     rv["MTypeNC"]                     = !checkInList(isaVersion, {{12, 5, 0}});
 
     // gfx950 splits L2 across 8 XCDs. StreamK partial-tile fixup needs
