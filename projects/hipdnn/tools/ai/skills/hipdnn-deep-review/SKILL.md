@@ -1,7 +1,7 @@
 ---
 name: hipdnn-deep-review
 description: "Multi-agent deep review of a hipDNN or dnn-providers PR, branch or commit range. Scouts map each affected area, focused reviewer lanes run in parallel, every finding is verified by source proof, reproduction or mutation, and a ledger carries findings across rounds until no blocking or important one stays open. Its IMPACT lane reports kernel ingestor changes that break at run time while the build stays green (kernel ABI, dispatch, descriptors) with the scripts of hipdnn-ingestor-impact, which answers that question without a review. For a PR body or a quick single-pass review, use hipdnn-pr-quality."
-argument-hint: "[<PR URL or number> | branch:<name> | <base>..<head>] evidence:<dir> scratch:<dir> [clone:<dir>] [intent:<file>] [terms:<file>] [knowledge:<dir>] [round:<N>] [prior:<dir>]"
+argument-hint: "[<PR URL or number> | branch:<name> | <base>..<head>] evidence:<dir> scratch:<dir> [clone:<dir>] [intent:<file>] [terms:<file>] [knowledge:<dir>] [round:<N>] [prior:<dir>] [posted:<file>]"
 allowed-tools: Bash, Read, Write, Edit, Grep, Glob, Task
 ---
 
@@ -16,7 +16,7 @@ what each agent reads, and `lanes/` holds the briefs. `RUN` builds with
 [hipdnn-superbuild-test](../hipdnn-superbuild-test/SKILL.md); `IMPACT` runs the scripts of
 [hipdnn-ingestor-impact](../hipdnn-ingestor-impact/SKILL.md). Install those skills alongside this one.
 
-Prerequisites: network access, an authenticated `gh` with read access, `git` 2.38 or later (`pin.py` uses `git merge-tree --write-tree`), and Python 3 (it runs the scripts under
+Prerequisites: network access, an authenticated `gh` with read access (including the GraphQL `reviewThreads` of a PR), `git` 2.38 or later (`pin.py` uses `git merge-tree --write-tree`), and Python 3 (it runs the scripts under
 `$SKILL/scripts/`); `pre-commit` and `pytest` for the lanes that run validators. The `IMPACT` lane needs
 Python 3.10 or newer and PyYAML; its emitter also needs Jinja2 ([hipdnn-ingestor-impact](../hipdnn-ingestor-impact/SKILL.md) *Prerequisites*). `RUN` and verifiers also need
 a ROCm install (Linux: `/opt/rocm` or `ROCM_PATH`; Windows: the wheel SDK that [hipdnn-superbuild](../hipdnn-superbuild/SKILL.md) provisions), CMake, Ninja and about 25 GB free in `$SCRATCH`; without them `defect` and
@@ -41,10 +41,11 @@ Ask for what is missing; record it in `PIN.md`:
 | `terms:<file>`, `knowledge:<dir>` | Optional private terms, one fixed string per line, outside the repository; optional `$KNOWLEDGE` store |
 | `round:<N>` | Default: one more than the highest `$EVIDENCE/r<k>/`; 1 when none |
 | `prior:<dir>` | Optional published record of earlier rounds that `$EVIDENCE` lacks (`LEDGER.md` and `r<k>/`); [RUNBOOK.md](RUNBOOK.md) *Iterate* seeds `$EVIDENCE` from it |
+| `posted:<file>` | Optional `posted.tsv` ([report.md](report.md) *posted.tsv*) tying posted PR comments to final IDs; default: every `$EVIDENCE/r*/comments/*/posted.tsv`. [RUNBOOK.md](RUNBOOK.md) links them to findings before it reads the PR's review threads |
 | Agent limits | Ask the user or the host for `Agents:` (maximum concurrent agents), `Cores:` (CPU cores for builds and tests) and `Mutation:` (a host recipe for mutating a built tree, or none); the skill assumes no values. They go into `dispatch-context.md` ([RUNBOOK.md](RUNBOOK.md) *Fan out*) |
 | Scope notes | Ask the user for scope notes the change's description does not state, such as areas being deprecated, or `none`. Free text; it goes into `dispatch-context.md` as `Scope:` and is informational unless it says "do not file findings in <area>" ([lanes/common.md](lanes/common.md) *Rules*) |
 
-Local builds and host-only tests are allowed. GPU, remote or shared compute, and every write
+Local builds and host-only tests (including loading a HIP/ROCm library to inspect its mapped libraries) are allowed. GPU, remote or shared compute, and every write
 to GitHub, Jira or a remote branch need the user's approval for that exact action. The
 review is advisory: the user posts the draft comments. Write only `$EVIDENCE`, `$KNOWLEDGE`
 and `$SCRATCH`, never the product tree.

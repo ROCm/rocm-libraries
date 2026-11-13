@@ -4,6 +4,7 @@
 
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -23,6 +24,17 @@ needs_posix_bash = pytest.mark.skipif(
     sys.platform == "win32",
     reason="a bare `bash` on Windows is WSL's, which cannot read C:\\ paths; env.sh is POSIX-shell only",
 )
+
+
+def _load_threads_tests():
+    path = Path(__file__).with_name("test_deep_review_threads.py")
+    spec = importlib.util.spec_from_file_location("deep_review_threads_tests", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+threads_stub = _load_threads_tests()
 
 
 @pytest.fixture
@@ -219,12 +231,17 @@ def test_cleanup_removes_worktrees_and_refs(pin, origin):
 class FakeGh:
     """Stub for pin.gh serving a PR whose file list and head are configurable."""
 
-    def __init__(self, head, files, head_oid=None, base="develop"):
+    def __init__(self, head, files, head_oid=None, base="develop", threads=()):
         self.head, self.files = head, files
         self.head_oid = head_oid or head
         self.base = base
+        self.graphql = threads_stub.FakeGh(threads)
 
     def __call__(self, *args):
+        if args[:2] == ("api", "user"):
+            return "reviewer\n"
+        if args[:2] == ("api", "graphql"):
+            return self.graphql(*args)
         if "baseRefName" in args and "--jq" in args:
             return self.base + "\n"
         if args[:2] == ("pr", "view"):
@@ -261,6 +278,11 @@ def test_pr_saves_artifacts(pin, origin, monkeypatch):
     ] == PR_FILES
     assert (r1 / "pr/checks.tsv").read_text() == "ci\tsuccess\thttp://x\n"
     assert "Files: 4 (GitHub 4)\n" in (r1 / "PIN.md").read_text()
+    pin_md = (r1 / "PIN.md").read_text()
+    assert "Reviewer: reviewer\n" in pin_md and re.search(
+        r"^Pinned: \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$", pin_md, re.M
+    )
+    assert json.loads((r1 / "pr/threads.json").read_text())["threads"] == []
 
 
 def test_pr_head_moved(pin, origin, monkeypatch):
@@ -455,3 +477,67 @@ def test_drift_range_review_skips_merge_tree(pin, origin, monkeypatch):
     monkeypatch.setattr(pin.rl, "git", no_merge_tree)
     pin.main(init_args(origin, "--range", "develop..feat/one"))
     assert drift_lines(origin)[1]["Trigger"] == "no (range review)"
+
+
+def reopened_ledger(origin):
+    """Evidence holding round 1 (pinned 2026-02-01) and a ledger whose findings link threads
+    1 to 3."""
+    ev = origin["tmp"] / "ev"
+    (ev / "r1").mkdir(parents=True)
+    (ev / "r1" / "PIN.md").write_text("Pinned: 2026-02-01T00:00:00Z\n")
+    rl, ledger = threads_stub._load("reviewlib"), threads_stub._load("ledger")
+    threads_stub.make_ledger(ev, rl, ledger)
+    posted = ev / "posted.tsv"
+    posted.write_text(
+        "".join(
+            f"{threads_stub.URL.format(n)}\t{fid}\n"
+            for n, fid in ((1, "CORR-1"), (2, "CORR-2"), (3, "DOCS-1"))
+        )
+    )
+    assert ledger.main(["link", str(ev), "1", "--from", str(posted)]) == 0
+    return ev
+
+
+def round_two_threads():
+    t = threads_stub.thread
+    return [
+        t(1, replies=[("reviewer", "2026-02-02T00:00:00Z")]),
+        t(2, replies=[("other", "2026-01-31T23:00:00Z")]),
+        t(3, replies=[("author", "2026-02-03T00:00:00Z")]),
+    ]
+
+
+def test_round_two_init_lists_findings_with_replies_since_the_previous_pinned(
+    pin, origin, monkeypatch
+):
+    ev = reopened_ledger(origin)
+    monkeypatch.setattr(
+        pin, "gh", FakeGh(origin["head"], PR_FILES, threads=round_two_threads())
+    )
+    pin.main(init_args(origin, "--pr", "7", "--reviewer", "author", n=2))
+    r2 = ev / "r2"
+    # Replies by the given reviewer ("author") never count; the stub's `gh api user`
+    # login ("reviewer") is not used when --reviewer is given.
+    assert (r2 / "reply-affected.txt").read_text() == "CORR-1\n"
+    assert "Reviewer: author\n" in (r2 / "PIN.md").read_text()
+    assert json.loads((r2 / "pr/threads.json").read_text())["reviewer"] == "author"
+
+
+def test_round_two_init_since_overrides_the_previous_pinned(pin, origin, monkeypatch):
+    ev = reopened_ledger(origin)
+    monkeypatch.setattr(
+        pin, "gh", FakeGh(origin["head"], PR_FILES, threads=round_two_threads())
+    )
+    pin.main(
+        init_args(
+            origin,
+            "--pr",
+            "7",
+            "--reviewer",
+            "author",
+            "--since",
+            "2026-01-31T00:00:00Z",
+            n=2,
+        )
+    )
+    assert (ev / "r2" / "reply-affected.txt").read_text() == "CORR-1\nCORR-2\n"

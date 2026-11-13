@@ -23,6 +23,7 @@ VERIFIER_LABELS = (
     "Proof",
     "Class",
     "Not established",
+    "Needs human decision",
 )
 VERDICTS = ("CONFIRMED", "PARTIAL", "DOWNGRADED", "UPGRADED", "REFUTED", "UNVERIFIED")
 SECTIONS = (
@@ -34,6 +35,30 @@ SECTIONS = (
     "Needs human decision",
 )
 READ_DEPTHS = ("full", "diff-only", "sampled")
+NOT_CLOSED = ("OPEN", "UNVERIFIED")
+
+
+def is_closed(status):
+    """True for a finding status that report.md calls closed: every status except OPEN and
+    UNVERIFIED (so FIXED@<sha>, ACCEPTED-RISK, REFUTED and SUPERSEDED-BY:<ID>); False for
+    an empty status."""
+    return bool(status) and status not in NOT_CLOSED
+
+
+def login_of(comment):
+    """The login of a GraphQL review-thread comment's author; "" for a deleted account."""
+    return (comment.get("author") or {}).get("login") or ""
+
+
+def thread_line(thread):
+    """The original line of a review thread, else its original start line, else 0."""
+    return thread.get("originalLine") or thread.get("originalStartLine") or 0
+
+
+def new_by_other(comment, reviewer, cutoff, parse):
+    """True when `comment` was written by someone other than `reviewer` after `cutoff`;
+    `parse` turns its createdAt into a datetime comparable with `cutoff`."""
+    return login_of(comment) != reviewer and parse(comment["createdAt"]) > cutoff
 
 
 class Fail(Exception):

@@ -8,7 +8,7 @@ holding files.txt and numstat.txt, and exits non-zero with a one-line reason on 
 
   areas    files.txt -> areas.tsv (`path<TAB>slug`) by the RUNBOOK Orient table
   plan     areas.tsv + numstat.txt -> owners.tsv (`owner<TAB>path`) and a Lanes summary
-  packets  owners.tsv + numstat.txt + areas.tsv -> packets/<LANE>.md
+  packets  owners.tsv + numstat.txt + areas.tsv (+ pr/threads.json) -> packets/<LANE>.md
   gate     numstat.txt vs owners.tsv: owned once, in numstat, owned lines sum to the total
   orient-gate  paths cited in CONTEXT.md and orient/*.md exist at BASE or are added files
 
@@ -18,6 +18,7 @@ the files the lane reads.
 """
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -74,6 +75,7 @@ CONCERN_LANES = {
     "API",
     "ROCK",
     "LEAK",
+    "DESIGN",
     "DUP",
     "DOCS",
     "RUN",
@@ -357,6 +359,8 @@ def concern_scope(lane: str, rows):
         ]
     if lane == "IMPACT":
         return [r for r in rows if r[0].startswith(IMPACT_PREFIXES)]
+    if lane == "DESIGN":
+        return [r for r in rows if not is_docs(r[0])]
     return rows
 
 
@@ -369,6 +373,23 @@ def drift_trigger(rd: Path) -> str:
         if line.startswith("Trigger:"):
             return line.partition(":")[2].strip()
     fail("drift.txt has no Trigger line")
+
+
+def open_threads(rd: Path) -> list[str]:
+    """`path:line URL first-line` per unresolved thread of pr/threads.json whose root comment
+    the reviewer did not write (`line` is the original line); [] without the file."""
+    path = rd / "pr" / "threads.json"
+    if not path.is_file():
+        return []
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    out = []
+    for t in doc["threads"]:
+        root = t["comments"]["nodes"][0]
+        if t["isResolved"] or rl.login_of(root) == doc["reviewer"]:
+            continue
+        first = next((x.strip() for x in root["body"].splitlines() if x.strip()), "")
+        out.append(f"{t['path']}:{rl.thread_line(t)} {root['url']} {first[:200]}")
+    return out
 
 
 def write_packet(rd: Path, lane: str, kind: str, rows, areas, sampled, parent) -> None:
@@ -397,6 +418,10 @@ def write_packet(rd: Path, lane: str, kind: str, rows, areas, sampled, parent) -
         if not sample:
             fail(f"{lane} owns sampled files but --sampled marks no sample file for it")
         out += ["", f"Sampled: {', '.join(gens)}; sample {', '.join(sample)}"]
+    threads = open_threads(rd)
+    if threads:
+        out += ["", "## Open review threads", ""]
+        out += [f"- {t}" for t in threads]
     if (rd / "range-diff.txt").is_file():
         out += [
             "",
@@ -414,7 +439,7 @@ def write_packet(rd: Path, lane: str, kind: str, rows, areas, sampled, parent) -
 def cmd_packets(args) -> None:
     """Write packets/<LANE>.md for each lane of owners.tsv (files with numstat rows, areas,
     Orient paths, `Sampled:`) and each concern lane named by --lanes (changed files in
-    scope). BUILD, DEPS and IMPACT scope to their trigger files, other concern lanes take
+    scope). BUILD, DEPS and IMPACT scope to their trigger files, DESIGN to the non-documentation files, other concern lanes take
     every changed file; DRIFT also lists drift.txt and is N/A when its Trigger is `no`. The
     diff is not read."""
     rd = Path(args.round_dir)

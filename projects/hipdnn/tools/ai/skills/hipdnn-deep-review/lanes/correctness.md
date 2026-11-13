@@ -31,6 +31,8 @@ Read every changed line of your owned files, and the outside code each change de
   signatures.
 - Dead code, unused parameters, commented-out code, unexplained magic numbers.
 - Complexity that a simpler construct in the same codebase already solves.
+- A name or placement is a finding only under the usefulness rule in [../findings.md](../findings.md): it names the mistake a
+  caller or maintainer could reasonably make and what in the change leads to it. File it with a Kind from [../findings.md](../findings.md) (`defect`, `test-gap`, `source-claim` or `process`), never `design`.
 
 Missing or weak tests are not findings here: hand them off to `TESTQ` (weak tests) or `TESTB` (missing coverage). Test registration in
 `test_categories.yaml` is owned by `BUILD`: hand it off, do not file it. Record anything else for another lane under **Handoffs**; do not file it.
