@@ -25,6 +25,29 @@
 #include "rocke/lower_llvm.h"
 #include "rocke/verify.h"
 
+/* A runtime_layout spec on the catalog geometry (Python _rtl, lockstep with
+ * runtime_layout_catalog_spec). */
+static void rtl_spec(rocke_attention_tiled_2d_spec_t* s,
+                     int head_size,
+                     int block_size,
+                     int num_query_heads,
+                     int num_kv_heads,
+                     const char* dtype,
+                     bool use_sinks,
+                     int num_warps)
+{
+    s->head_size = head_size;
+    s->block_size = block_size;
+    s->num_query_heads = num_query_heads;
+    s->num_kv_heads = num_kv_heads;
+    s->dtype = dtype;
+    s->use_sinks = use_sinks;
+    s->sliding_window = 0;
+    s->has_softcap = false;
+    s->num_warps = num_warps;
+    s->runtime_layout = true;
+}
+
 /* Fill `s` for config index `idx`. Returns 0 on success, -1 on unknown idx. */
 static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
 {
@@ -1211,6 +1234,67 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
     case 74:
         make_spec(idx - 8, s);
         s->lse_head_major = true;
+        break;
+    /* --- idx75-93: runtime_layout, every catalog (head_size, block_size) cell
+     *     with its catalog num_warps, GQA 1-16, one num_kv_heads > 1 spec, then
+     *     the sink variants (lockstep with the Python _rtl rows). */
+    case 75:
+        rtl_spec(s, 64, 16, 1, 1, "fp16", false, 2);
+        break;
+    case 76:
+        rtl_spec(s, 64, 32, 4, 1, "bf16", false, 4);
+        break;
+    case 77:
+        rtl_spec(s, 64, 64, 6, 1, "fp16", false, 4);
+        break;
+    case 78:
+        rtl_spec(s, 128, 16, 8, 1, "bf16", false, 4);
+        break;
+    case 79:
+        rtl_spec(s, 128, 32, 1, 1, "fp16", false, 4);
+        break;
+    case 80:
+        rtl_spec(s, 128, 64, 4, 1, "bf16", false, 4);
+        break;
+    case 81:
+        rtl_spec(s, 256, 16, 6, 1, "fp16", false, 4);
+        break;
+    case 82:
+        rtl_spec(s, 256, 32, 8, 1, "bf16", false, 4);
+        break;
+    case 83:
+        rtl_spec(s, 256, 64, 1, 1, "fp16", false, 4);
+        break;
+    case 84:
+        rtl_spec(s, 128, 32, 16, 4, "bf16", false, 4);
+        break;
+    /* idx85-93: the sink variants. */
+    case 85:
+        rtl_spec(s, 64, 16, 2, 1, "bf16", true, 2);
+        break;
+    case 86:
+        rtl_spec(s, 64, 32, 5, 1, "fp16", true, 4);
+        break;
+    case 87:
+        rtl_spec(s, 64, 64, 7, 1, "bf16", true, 4);
+        break;
+    case 88:
+        rtl_spec(s, 128, 16, 16, 1, "fp16", true, 4);
+        break;
+    case 89:
+        rtl_spec(s, 128, 32, 2, 1, "bf16", true, 4);
+        break;
+    case 90:
+        rtl_spec(s, 128, 64, 5, 1, "fp16", true, 4);
+        break;
+    case 91:
+        rtl_spec(s, 256, 16, 7, 1, "bf16", true, 4);
+        break;
+    case 92:
+        rtl_spec(s, 256, 32, 16, 1, "fp16", true, 4);
+        break;
+    case 93:
+        rtl_spec(s, 256, 64, 2, 1, "bf16", true, 4);
         break;
     default:
         return -1;

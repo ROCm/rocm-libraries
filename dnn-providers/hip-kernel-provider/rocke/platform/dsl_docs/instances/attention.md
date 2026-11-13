@@ -421,6 +421,37 @@ Detailed flow:
 
 Tiled 2D is useful for chunked prefill, sliding-window rows, and moderate contexts. It can under-occupy for long single-token decode compared with split-KV 3D.
 
+### Runtime layout (`runtime_layout=True`, gfx942 and gfx950)
+
+A tiled 2D spec with `runtime_layout=True` builds one object that serves any
+dense or ragged Q over a paged K/V cache. The layout is read from kernargs
+appended after the fixed ones (`RUNTIME_LAYOUT_EXTRA_ARGS` in each arch's
+`attention_tiled_2d.py`): the Q/O/KV element strides, a separate V block table,
+`seq_lens_q`, the dense row count `q_uniform_len` (0 for a ragged Q), the
+q-block grid size, and `sink_is_f32`, which says whether `sink_ptr` holds fp32 or
+Q-dtype sink logits. Head counts and the sliding window are runtime kernargs as
+in the fixed-layout kernel. hip-kernel-provider's `hipkernel:AttentionPagedUnified`
+engine is the consumer.
+
+- fp16/bf16, head size 64/128/256, paged block 16/32/64, 1-16 query heads per
+  KV head.
+- Only the default 16x16 pipeline: softcap, ALiBi, QQ bias, fp8 KV, LSE output
+  and the 32x32/transposed/fast-KV variants are refused at spec construction
+  (`_runtime_layout_reject_reason`, mirrored in C++).
+- gfx942 may split a block into 16-row multiples (`tile_size`); gfx950 uses one
+  block per KV tile. `runtime_layout_catalog_spec` picks the geometry.
+- A ragged Q needs non-decreasing offsets with
+  `off[b+1] - off[b] >= seq_lens_q[b]`, and `off[B]` the end of the last block.
+- On gfx942, `supports_tiled_2d_spec` and both builders charge
+  `runtime_layout_lds_bytes` against `ArchTarget.lds_capacity_bytes`; on gfx950
+  the shared tiled 2D LDS gate applies.
+
+Byte identity is checked by the parity emitters
+(`library/tests/parity/gfx94{2,50}_attention_tiled_2d_emit.*`), and
+representative objects are pinned in
+`platform/tests/golden/rocke_representative_ir_sha256/attention.json`
+(`attention/gfx9{42,50}/2d_rtl_*`).
+
 ## Tiled 3D Split-KV Kernel
 
 Files:

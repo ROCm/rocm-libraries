@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "cb28d2d1-dbfc-43cf-92bf-b2c1b6fc0f90",
+  "name": "graph operation is gfx942",
+  "scope": "graph",
+  "match_symbol": "hipkernel.attention_paged_unified.gfx942_match"
+}

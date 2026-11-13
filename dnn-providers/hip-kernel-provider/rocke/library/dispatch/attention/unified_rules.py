@@ -395,11 +395,15 @@ class UnifiedSpace(WavesPerEuSpace):
             # The LSE output fields are outputs the caller selects, not defaults
             # that knobs are a delta against: keeping them out of the kernel and
             # the split-KV reduce defaults leaves every config_key, and so every
-            # stored pin, as before the fields existed.
+            # stored pin, as before the fields existed. The 2D ``runtime_layout`` flag
+            # (hipDNN's paged engine; never a knob) is kept out of the kernel defaults
+            # for the same reason.
             "kernel": {
                 name: value
                 for name, value in _declared_defaults(type(kernel.kernel_spec))
-                if name not in recorded and name not in _LSE_OUTPUT_FIELDS
+                if name not in recorded
+                and name not in _LSE_OUTPUT_FIELDS
+                and name != "runtime_layout"
             },
             "reduce": (
                 None

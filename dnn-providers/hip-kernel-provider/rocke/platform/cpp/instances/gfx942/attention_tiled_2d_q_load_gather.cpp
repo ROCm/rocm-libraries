@@ -169,19 +169,37 @@ void rocke_gfx942_attn2d_emit_q_load(rocke_gfx942_attn2d_build_ctx_t* ctx)
         qh_safe = rocke_b_select(b, qmask_t, qh_t, rocke_b_const_i32(b, 0));
 
         /* q_off_base, _ = q_desc.offset(b, token=cu_q_start+q_pos_safe,
-         *                               head=qh_safe, dim=0) */
+         *                               head=qh_safe, dim=0)
+         * runtime_layout: rtl_q_desc.offset(token=q_pos_safe, head=qh_safe,
+         * dim=0) from the per-sequence base rtl_q_src. */
         {
             static const char* const in_names[3] = {"token", "head", "dim"};
             rocke_value_t* in_values[3];
-            in_values[0] = rocke_b_add(b, ctx->cu_q_start, q_pos_safe);
-            in_values[1] = qh_safe;
-            in_values[2] = rocke_b_const_i32(b, 0);
-            rocke_transforms_descriptor_offset(
-                b, ctx->q_desc, in_names, in_values, 3, &q_off_base, NULL);
+            if(ctx->RTL)
+            {
+                in_values[0] = q_pos_safe;
+                in_values[1] = qh_safe;
+                in_values[2] = rocke_b_const_i32(b, 0);
+                rocke_dynamic_tensor_descriptor_offset(
+                    b, ctx->rtl_q_desc, in_names, in_values, 3, &q_off_base, NULL);
+            }
+            else
+            {
+                in_values[0] = rocke_b_add(b, ctx->cu_q_start, q_pos_safe);
+                in_values[1] = qh_safe;
+                in_values[2] = rocke_b_const_i32(b, 0);
+                rocke_transforms_descriptor_offset(
+                    b, ctx->q_desc, in_names, in_values, 3, &q_off_base, NULL);
+            }
         }
 
-        /* v8 = b.global_load_vN(query, q_off_base + Q_col, dtype, 8, align=16) */
-        v8 = rocke_b_global_load_vN(b, ctx->query, rocke_b_add(b, q_off_base, Q_col), dtype, 8, 16);
+        /* v8 = b.global_load_vN(_q_src, q_off_base + Q_col, dtype, 8, align=16) */
+        v8 = rocke_b_global_load_vN(b,
+                                    ctx->RTL ? ctx->rtl_q_src : ctx->query,
+                                    rocke_b_add(b, q_off_base, Q_col),
+                                    dtype,
+                                    8,
+                                    16);
 
         /* Q store index: K_lds-aliased (buf,row_in_buf,col) or plain (row,col). */
         if(ctx->Q_ALIAS_K)

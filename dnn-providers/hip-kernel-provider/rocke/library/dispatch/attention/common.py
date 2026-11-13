@@ -1006,12 +1006,15 @@ class AttentionTuningSpec:
                 raise TypeError(f"tuning kernel spec must be a dataclass, got {spec!r}")
             # LSE fields at their defaults are left out (emit_lse off, lse_layout
             # token-major), so those keys and the spec_hash taken over them are the
-            # ones stored before the fields existed.
+            # ones stored before the fields existed. The 2D ``runtime_layout`` flag
+            # (hipDNN's paged engine; dispatch never sets it) is left out the same
+            # way while it is off.
             return tuple(
                 (f.name, repr(getattr(spec, f.name)))
                 for f in fields(spec)
                 if not (f.name == "emit_lse" and not spec.emit_lse)
                 and not (f.name == "lse_layout" and spec.lse_layout == "token_major")
+                and not (f.name == "runtime_layout" and not spec.runtime_layout)
             )
 
         return (
