@@ -109,13 +109,15 @@ repos:
           ^dnn-providers/hip-kernel-provider/\.clang-format$|
           ^dnn-providers/integration-tests/\.clang-format$
       - id: check-added-large-files
-        # The opted-out projects above, plus the UHD pipeline's trained model binaries
-        # under a descriptor set's heuristics/. Each is regenerated, never edited by hand.
+        # The opted-out projects above, plus the UHD pipeline's trained model binaries:
+        # under a descriptor set's heuristics/, and the descriptors/ of the engines that
+        # bind their models by declared id. Each is regenerated, never edited by hand.
         exclude: |
           (?x)
           projects/hipblaslt/.*|
           shared/tensile/.*|
-          ^dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/.*/heuristics/.*/model\.bin$
+          ^dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/.*/heuristics/.*/model\.bin$|
+          ^dnn-providers/hip-kernel-provider/src/engines/(asm_sdpa|hip_mlops)_engine/descriptors/.*\.bin$
 
   - repo: https://github.com/psf/black
     rev: 25.12.0
