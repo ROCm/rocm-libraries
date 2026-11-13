@@ -24,7 +24,8 @@
 
 //
 // Generic spmm with a blocked ELL matrix that has no stored blocks (the
-// product is zero, so C = beta * C), with a blocked ELL matrix built by
+// product is zero, so C = beta * C), with a transposed or batched blocked ELL
+// product that spmm rejects, with a blocked ELL matrix built by
 // dense_to_sparse, and with formats spmm does not support.
 //
 #include "unit_test_extra_common.hpp"
@@ -48,49 +49,106 @@ namespace
         bool                device = false;
     };
 
-    void run_empty_bell(rocsparse_handle handle, const BellRun& r)
+    // A blocked ELL A of mb x kb blocks with ell_cols = cols, so cols / bd
+    // stored blocks per block row, and the B and C of op(A) * B. B and C hold
+    // `slabs` copies of ld x n so that a strided batch stays in bounds.
+    struct BellProblem
     {
-        SCOPED_TRACE("opA=" + std::to_string(static_cast<int>(r.opA))
-                     + " mb=" + std::to_string(r.mb) + " kb=" + std::to_string(r.kb)
-                     + " n=" + std::to_string(r.n) + " cols=" + std::to_string(r.cols));
+        int64_t            Mc = 0, Kc = 0, ldb = 0, ldc = 0;
+        Dense              Bl, C0;
+        std::vector<float> hC;
+        DevBuf<float>      dB, dC;
+        DevBuf<int32_t>    ind;
+        DevBuf<float>      val;
+        SpmatH             sp;
+        DnmatH             mB, mC;
+    };
+
+    void make_bell_problem(const BellRun& r, BellProblem& p, int64_t slabs = 1)
+    {
         const int64_t m = r.mb * r.bd, k = r.kb * r.bd;
-        const int64_t Mc = (r.opA == rocsparse_operation_none) ? m : k;
-        const int64_t Kc = (r.opA == rocsparse_operation_none) ? k : m;
+        p.Mc  = (r.opA == rocsparse_operation_none) ? m : k;
+        p.Kc  = (r.opA == rocsparse_operation_none) ? k : m;
+        p.ldb = p.Kc + 1;
+        p.ldc = p.Mc + 2;
 
-        Rng           rng(17);
-        const Dense   Bl  = random_dense<float>(Kc, r.n, rng);
-        const Dense   C0  = random_dense<float>(Mc, r.n, rng);
-        const int64_t ldb = Kc + 1, ldc = Mc + 2;
+        Rng rng(17);
+        p.Bl                  = random_dense<float>(p.Kc, r.n, rng);
+        p.C0                  = random_dense<float>(p.Mc, r.n, rng);
+        std::vector<float> hB = store_dense<float>(p.Bl, rocsparse_order_column, p.ldb);
+        p.hC                  = store_dense<float>(p.C0, rocsparse_order_column, p.ldc);
+        hB.resize(slabs * hB.size(), -77.0f);
+        p.hC.resize(slabs * p.hC.size(), -77.0f);
+        p.dB = up_raw<float>(hB);
+        p.dC = up_raw<float>(p.hC);
+        // The block values are never read by these tests, only the count matters.
+        const int64_t nblocks = r.mb * (r.cols / r.bd);
+        p.ind                 = up_idx<int32_t>(std::vector<int64_t>(nblocks, 0));
+        p.val                 = up_raw<float>(std::vector<float>(nblocks * r.bd * r.bd, 0.0f));
+        ASSERT_TRUE(p.dB.ptr && p.dC.ptr && p.ind.ptr && p.val.ptr);
 
-        DevBuf<float> dB = up_raw<float>(store_dense<float>(Bl, rocsparse_order_column, ldb));
-        DevBuf<float> dC = up_raw<float>(store_dense<float>(C0, rocsparse_order_column, ldc));
-        // The arrays are never read, they only have to be valid pointers.
-        DevBuf<int32_t> ind = up_idx<int32_t>(std::vector<int64_t>(4, 0));
-        DevBuf<float>   val = up_raw<float>(std::vector<float>(4, 0.0f));
-        ASSERT_TRUE(dB.ptr && dC.ptr && ind.ptr && val.ptr);
-
-        SpmatH sp;
-        ASSERT_EQ(rocsparse_create_bell_descr(&sp.p,
+        ASSERT_EQ(rocsparse_create_bell_descr(&p.sp.p,
                                               m,
                                               k,
                                               rocsparse_direction_row,
                                               r.bd,
                                               r.cols,
-                                              ind.ptr,
-                                              val.ptr,
+                                              p.ind.ptr,
+                                              p.val.ptr,
                                               rocsparse_indextype_i32,
                                               rocsparse_index_base_zero,
                                               rocsparse_datatype_f32_r),
                   rocsparse_status_success);
-        DnmatH mB, mC;
-        ASSERT_EQ(
-            rocsparse_create_dnmat_descr(
-                &mB.p, Kc, r.n, ldb, dB.ptr, rocsparse_datatype_f32_r, rocsparse_order_column),
-            rocsparse_status_success);
-        ASSERT_EQ(
-            rocsparse_create_dnmat_descr(
-                &mC.p, Mc, r.n, ldc, dC.ptr, rocsparse_datatype_f32_r, rocsparse_order_column),
-            rocsparse_status_success);
+        ASSERT_EQ(rocsparse_create_dnmat_descr(&p.mB.p,
+                                               p.Kc,
+                                               r.n,
+                                               p.ldb,
+                                               p.dB.ptr,
+                                               rocsparse_datatype_f32_r,
+                                               rocsparse_order_column),
+                  rocsparse_status_success);
+        ASSERT_EQ(rocsparse_create_dnmat_descr(&p.mC.p,
+                                               p.Mc,
+                                               r.n,
+                                               p.ldc,
+                                               p.dC.ptr,
+                                               rocsparse_datatype_f32_r,
+                                               rocsparse_order_column),
+                  rocsparse_status_success);
+    }
+
+    rocsparse_status bell_spmm(rocsparse_handle     handle,
+                               rocsparse_operation  opA,
+                               const void*          alpha,
+                               BellProblem&         p,
+                               const void*          beta,
+                               rocsparse_spmm_stage stage,
+                               size_t*              bsz,
+                               void*                buffer)
+    {
+        return rocsparse_spmm(handle,
+                              opA,
+                              rocsparse_operation_none,
+                              alpha,
+                              p.sp.p,
+                              p.mB.p,
+                              beta,
+                              p.mC.p,
+                              rocsparse_datatype_f32_r,
+                              rocsparse_spmm_alg_bell,
+                              stage,
+                              bsz,
+                              buffer);
+    }
+
+    // trans_A == none with no stored blocks: C = beta * C on every stage.
+    void run_empty_bell(rocsparse_handle handle, const BellRun& r)
+    {
+        SCOPED_TRACE("mb=" + std::to_string(r.mb) + " kb=" + std::to_string(r.kb)
+                     + " n=" + std::to_string(r.n) + " cols=" + std::to_string(r.cols));
+        ASSERT_EQ(r.opA, rocsparse_operation_none);
+        BellProblem p;
+        ASSERT_NO_FATAL_FAILURE(make_bell_problem(r, p));
 
         Scalar<float>    alpha(cplx(2.0, 0.0), r.device);
         Scalar<float>    beta(cplx(-0.5, 0.0), r.device);
@@ -98,19 +156,7 @@ namespace
 
         size_t bsz  = 0;
         auto   spmm = [&](rocsparse_spmm_stage stage, void* buffer) {
-            return rocsparse_spmm(handle,
-                                  r.opA,
-                                  rocsparse_operation_none,
-                                  alpha.get(),
-                                  sp.p,
-                                  mB.p,
-                                  beta.get(),
-                                  mC.p,
-                                  rocsparse_datatype_f32_r,
-                                  rocsparse_spmm_alg_bell,
-                                  stage,
-                                  &bsz,
-                                  buffer);
+            return bell_spmm(handle, r.opA, alpha.get(), p, beta.get(), stage, &bsz, buffer);
         };
         ASSERT_EQ(spmm(rocsparse_spmm_stage_buffer_size, nullptr), rocsparse_status_success);
         DevBuf<char> buffer(bsz > 0 ? bsz : 1);
@@ -120,28 +166,126 @@ namespace
             ASSERT_EQ(spmm(stage, buffer.ptr), rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
-        const Dense want = axpby(0.0, Dense(Mc, r.n), -0.5, C0);
-        expect_dense_equal<float>(dC.host(), want, rocsparse_order_column, ldc, "C");
-        expect_dense_equal<float>(dB.host(), Bl, rocsparse_order_column, ldb, "B");
+        const Dense want = axpby(0.0, Dense(p.Mc, r.n), -0.5, p.C0);
+        expect_dense_equal<float>(p.dC.host(), want, rocsparse_order_column, p.ldc, "C");
+        expect_dense_equal<float>(p.dB.host(), p.Bl, rocsparse_order_column, p.ldb, "B");
     }
 }
 
 TEST_F(ExtraBell, no_stored_blocks_scales_C)
 {
-    for(rocsparse_operation opA : {rocsparse_operation_none, rocsparse_operation_transpose})
-        for(bool device : {false, true})
+    // trans_A == none: an empty blocked ELL product is C = beta * C.
+    // Host and device pointer modes both take that path. Transposed A is
+    // covered by transpose_is_not_implemented_on_every_stage.
+    for(bool device : {false, true})
+    {
+        BellRun r;
+        r.device = device;
+        run_empty_bell(handle, r);
+        if(HasFatalFailure())
+            return;
+    }
+}
+
+TEST_F(ExtraBell, transpose_is_not_implemented_on_every_stage)
+{
+    // The unsupported-transpose check has to run before the empty-product
+    // quick return, or a matrix with no stored blocks would succeed while
+    // the same call with stored blocks returns not_implemented.
+    const rocsparse_operation ops[]
+        = {rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose};
+    for(rocsparse_operation opA : ops)
+    {
+        BellRun r;
+        r.opA = opA;
+        r.kb  = 5;
+        // ell_cols counts scalar columns, so cols == bd stores one block per block row.
+        for(int64_t cols : {int64_t{0}, r.bd})
         {
-            BellRun r;
-            r.opA    = opA;
-            r.device = device;
-            // The transposed quick return scales a k x n block, so only
-            // a square block grid keeps it inside C (AISPARSE-924).
-            if(opA == rocsparse_operation_transpose)
-                r.kb = r.mb;
-            run_empty_bell(handle, r);
-            if(HasFatalFailure())
-                return;
+            r.cols = cols;
+            SCOPED_TRACE("opA=" + std::to_string(static_cast<int>(opA))
+                         + " ell_cols=" + std::to_string(cols));
+            BellProblem p;
+            ASSERT_NO_FATAL_FAILURE(make_bell_problem(r, p));
+
+            const float alpha = 2.0f, beta = -0.5f;
+            size_t      bsz = 0;
+            // Blocked ELL needs no buffer, so a stage that wrongly succeeds
+            // does not keep the later stages from running.
+            for(rocsparse_spmm_stage stage : {rocsparse_spmm_stage_buffer_size,
+                                              rocsparse_spmm_stage_preprocess,
+                                              rocsparse_spmm_stage_compute})
+            {
+                SCOPED_TRACE("stage=" + std::to_string(static_cast<int>(stage)));
+                EXPECT_EQ(bell_spmm(handle, opA, &alpha, p, &beta, stage, &bsz, nullptr),
+                          rocsparse_status_not_implemented);
+            }
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            expect_dense_equal<float>(p.dC.host(), p.C0, rocsparse_order_column, p.ldc, "C");
         }
+    }
+}
+
+TEST_F(ExtraBell, no_stored_blocks_batched_operands_are_rejected)
+{
+    // Blocked ELL spmm is not batched. An empty product with a batch count
+    // other than 1 on A, B or C returns invalid_value from compute and leaves
+    // C unchanged, as a product with stored blocks does. Buffer size and
+    // preprocess do not see the batch counts and succeed for both.
+    enum class Batched
+    {
+        A,
+        B,
+        C_stride0,
+        C_strided
+    };
+    const std::pair<Batched, const char*> cases[] = {{Batched::A, "A"},
+                                                     {Batched::B, "B"},
+                                                     {Batched::C_stride0, "C, stride 0"},
+                                                     {Batched::C_strided, "C, stride ldc * n"}};
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(std::string("batched ") + c.second);
+        BellRun     r;
+        BellProblem p;
+        ASSERT_NO_FATAL_FAILURE(make_bell_problem(r, p, 2));
+        // A scaled C would hold -2 with beta = -0.5. With a zero stride both
+        // batches scale the same C.
+        std::fill(p.hC.begin(), p.hC.end(), 4.0f);
+        ASSERT_EQ(
+            hipMemcpy(p.dC.ptr, p.hC.data(), p.hC.size() * sizeof(float), hipMemcpyHostToDevice),
+            hipSuccess);
+        switch(c.first)
+        {
+        case Batched::A:
+            ASSERT_EQ(rocsparse_spmat_set_strided_batch(p.sp.p, 2), rocsparse_status_success);
+            break;
+        case Batched::B:
+            ASSERT_EQ(rocsparse_dnmat_set_strided_batch(p.mB.p, 2, p.ldb * r.n),
+                      rocsparse_status_success);
+            break;
+        case Batched::C_stride0:
+            ASSERT_EQ(rocsparse_dnmat_set_strided_batch(p.mC.p, 2, 0), rocsparse_status_success);
+            break;
+        case Batched::C_strided:
+            ASSERT_EQ(rocsparse_dnmat_set_strided_batch(p.mC.p, 2, p.ldc * r.n),
+                      rocsparse_status_success);
+            break;
+        }
+
+        const float alpha = 2.0f, beta = -0.5f;
+        size_t      bsz  = 0;
+        auto        spmm = [&](rocsparse_spmm_stage stage, void* buffer) {
+            return bell_spmm(handle, r.opA, &alpha, p, &beta, stage, &bsz, buffer);
+        };
+        ASSERT_EQ(spmm(rocsparse_spmm_stage_buffer_size, nullptr), rocsparse_status_success);
+        DevBuf<char> buffer(bsz > 0 ? bsz : 1);
+        ASSERT_TRUE(buffer.ptr);
+        EXPECT_EQ(spmm(rocsparse_spmm_stage_preprocess, buffer.ptr), rocsparse_status_success);
+        EXPECT_EQ(spmm(rocsparse_spmm_stage_compute, buffer.ptr), rocsparse_status_invalid_value);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        EXPECT_EQ(p.dC.host(), p.hC) << "C was written";
+    }
 }
 
 namespace
