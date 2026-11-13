@@ -81,9 +81,12 @@ option(HIPBLASLT_ENABLE_LOCAL_KERNELS "Build experimental runtime local kernel r
 if(HIPBLASLT_ENABLE_LOCAL_KERNELS AND NOT HIPBLASLT_ENABLE_HOST)
     message(FATAL_ERROR "HIPBLASLT_ENABLE_LOCAL_KERNELS requires HIPBLASLT_ENABLE_HOST=ON")
 endif()
-# Testing only: HIPBLASLT_LOCAL_KERNEL_TEST_SCOPE then gives one device its own
-# local kernel journal, for tests on machines whose devices are all alike.
-option(HIPBLASLT_ENABLE_LOCAL_KERNEL_TEST "Testing only: honor HIPBLASLT_LOCAL_KERNEL_TEST_SCOPE." OFF)
+# Testing only: the library then honors HIPBLASLT_LOCAL_KERNEL_TEST_SCOPE and
+# HIPBLASLT_LOCAL_KERNEL_TEST_CU, which give one device its own local kernel
+# journal or compute unit count for tests on machines whose devices are all
+# alike, and HIPBLASLT_LOCAL_KERNEL_TEST_PAUSE_MS, which pauses between saving a
+# mapping and reading it back.
+option(HIPBLASLT_ENABLE_LOCAL_KERNEL_TEST "Testing only: honor the HIPBLASLT_LOCAL_KERNEL_TEST_* hooks." OFF)
 if(HIPBLASLT_ENABLE_LOCAL_KERNEL_TEST AND NOT HIPBLASLT_ENABLE_LOCAL_KERNELS)
     message(FATAL_ERROR "HIPBLASLT_ENABLE_LOCAL_KERNEL_TEST requires HIPBLASLT_ENABLE_LOCAL_KERNELS=ON")
 endif()
