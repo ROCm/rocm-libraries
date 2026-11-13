@@ -1472,6 +1472,7 @@ namespace TensileLite
             bool perTileExtraIters  = false;
             // Kernel takes the ProbeAddr/ProbeEpoch/ProbeGrid tail args (CU-occupancy probe).
             bool occupancyProbe     = false;
+            bool adaptiveGemmGSUA   = false;
             bool useUniversalArgs   = true;
             bool useSFC             = false;
         };

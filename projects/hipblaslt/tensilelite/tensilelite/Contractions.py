@@ -1034,6 +1034,7 @@ class InternalArgsSupport:
                    staggerU = isp['SupportCustomStaggerU'],
                    perTileExtraIters = isp.get('SupportStreamKPerTileExtraIters', False),
                    occupancyProbe = isp.get('SupportOccupancyProbe', False),
+                   adaptiveGemmGSUA = isp.get('SupportAdaptiveGSUA', False),
                    useUniversalArgs = isp['UseUniversalArgs'],
                    useSFC = useSFC)
 
@@ -1042,6 +1043,8 @@ class InternalArgsSupport:
         # Emitted only when set so libraries built without the probe are unchanged.
         if getattr(self, 'occupancyProbe', False):
             rv['occupancyProbe'] = True
+        if getattr(self, 'adaptiveGemmGSUA', False):
+            rv['adaptiveGemmGSUA'] = True
         return rv
 
     def __init__(self, **kwargs):

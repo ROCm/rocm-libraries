@@ -26,9 +26,9 @@ def test_validate_internal_support_params_unknown_key_reports_roster():
 
     assert str(excinfo.value) == (
         "InternalSupportParams.NoSuchKey: unknown key. "
-        "Valid keys are ['KernArgsVersion', 'PersistentLoopArgsVersion', 'SupportCustomStaggerU', "
-        "'SupportCustomWGM', 'SupportOccupancyProbe', 'SupportStreamKPerTileExtraIters', "
-        "'SupportUserGSU', 'UseSFC', 'UseUniversalArgs']."
+        "Valid keys are ['KernArgsVersion', 'PersistentLoopArgsVersion', 'SupportAdaptiveGSUA', "
+        "'SupportCustomStaggerU', 'SupportCustomWGM', 'SupportOccupancyProbe', "
+        "'SupportStreamKPerTileExtraIters', 'SupportUserGSU', 'UseSFC', 'UseUniversalArgs']."
     )
 
 

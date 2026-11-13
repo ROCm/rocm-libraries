@@ -64,6 +64,13 @@ def test_internal_args_support_state_emits_probe_only_when_set(support):
     assert state.get("occupancyProbe") is (True if support else None)
 
 
+@pytest.mark.parametrize("support", [False, True])
+def test_internal_args_support_state_emits_adaptive_only_when_set(support):
+    isp = dict(defaultInternalSupportParams, SupportAdaptiveGSUA=support)
+    state = InternalArgsSupport.FromOriginalState({"InternalSupportParams": isp}).state()
+    assert state.get("adaptiveGemmGSUA") is (True if support else None)
+
+
 def _probe_writer(offset):
     kwa = KernelWriterAssembly.__new__(KernelWriterAssembly)
     kwa.sgprPool = RegisterPool(0, RegisterType.Sgpr, defaultPreventOverflow=False, printRP=False)

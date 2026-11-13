@@ -76,6 +76,16 @@ def test_assign_custom_kernel_params_basic_derivation():
     assert state["_GlobalAccumulation"] is None  # GlobalSplitUAlgorithm == ""
 
 
+@pytest.mark.parametrize("over, expected",
+                         [({}, False),
+                          ({"AdaptiveGemmGSUA": 0}, False),
+                          ({"AdaptiveGemmGSUA": 1}, True)])
+def test_assign_custom_kernel_params_publishes_adaptive_gsu_capability(over, expected):
+    state = _ck_state(**over)
+    Solution._assignCustomKernelParameters(state)
+
+    assert state["InternalSupportParams"]["SupportAdaptiveGSUA"] is expected
+
 def test_assign_custom_kernel_params_unset_macrotile_falls_back_to_logic_file():
     # Any handwritten kernel without MI fields and without an MTxxx name token
     # reaches here with macrotile [0, 0, 0]. Taking that zero over the logic-file tile put

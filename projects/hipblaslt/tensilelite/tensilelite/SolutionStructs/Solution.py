@@ -2293,6 +2293,10 @@ class Solution(collections.abc.Mapping):
       state["_GlobalAccumulation"] = 'MultipleBuffer'
     elif state.get("GlobalSplitUAlgorithm", "") == 'MultipleBufferSingleKernel':
       state["_GlobalAccumulation"] = 'MultipleBufferSingleKernel'
+
+    state.setdefault("InternalSupportParams", {})["SupportAdaptiveGSUA"] = \
+        bool(state.get("AdaptiveGemmGSUA", 0))
+
     state["CUOccupancy"]            = -1
     state["MathClocksUnrolledLoop"] = 0
     state["PackedC0IndicesX"] = []
@@ -2909,6 +2913,8 @@ class Solution(collections.abc.Mapping):
       state["PrefetchAcrossPersistent"] = 0
       state["ReuseAcrossPersistent"] = 0
       state["DebugPersistentKernelLoopForever"] = False
+
+    state["InternalSupportParams"]["SupportAdaptiveGSUA"] = bool(state["AdaptiveGemmGSUA"])
 
     if not state["BufferStore"]:
       if state["GlobalSplitU"] != 0:

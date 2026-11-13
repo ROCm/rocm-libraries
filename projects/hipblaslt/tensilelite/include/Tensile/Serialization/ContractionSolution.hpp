@@ -269,6 +269,7 @@ namespace TensileLite
                 // as false (no per-tile extra-iters capability).
                 iot::mapOptional(io, "perTileExtraIters", s.perTileExtraIters);
                 iot::mapOptional(io, "occupancyProbe", s.occupancyProbe);
+                iot::mapOptional(io, "adaptiveGemmGSUA", s.adaptiveGemmGSUA);
                 iot::mapRequired(io, "useUniversalArgs", s.useUniversalArgs);
                 iot::mapRequired(io, "useSFC", s.useSFC);
             }

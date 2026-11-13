@@ -3142,8 +3142,14 @@ namespace TensileLite
         uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
         // Runtime-effective accumulation mode; AdaptiveGemmGSUA can downgrade this from
         // the solution's compiled sizeMapping.globalAccumulation (e.g. MBSK -> MultipleBuffer
-        // for small/low-tile problems).
-        size_t adaptiveGlobalAccumulation = problem.getAccumulation(hardware, sizeMapping, gsu);
+        // for small/low-tile problems). The capability flag lives on InternalArgsSupport.
+        size_t adaptiveGlobalAccumulation = problem.getAccumulation(hardware,
+                                                                    gsu,
+                                                                    sizeMapping.globalAccumulation,
+                                                                    internalArgsSupport.adaptiveGemmGSUA,
+                                                                    customKernel.macrotile.x,
+                                                                    customKernel.macrotile.y,
+                                                                    customKernel.macrotile.z);
 
         const uint32_t itersPerTile = launch.grid > 0
             ? static_cast<uint32_t>(max(size_t(1), problem.getItersPerTile(sizeMapping))) : 0;
@@ -3352,7 +3358,7 @@ namespace TensileLite
         // in singleCallArgs on develop).  Outside those modes the regular
         // tensor strides apply.
         bool gsuWSStride
-            = gsu > 1 && sizeMapping.globalAccumulation != 3 && !sizeMapping.isStreamK();
+            = gsu > 1 && adaptiveGlobalAccumulation != 3 && !sizeMapping.isStreamK();
         bool skWSStride
             = sizeMapping.isStreamK() && launch.reduction == origami::reduction_t::parallel;
         bool useWSStride = gsuWSStride || skWSStride;
@@ -3703,11 +3709,11 @@ namespace TensileLite
                     bool useWsC = false;
                     if(gsu > 1 && !sizeMapping.isStreamK())
                     {
-                        bool singleWSD = (sizeMapping.globalAccumulation == 1
+                        bool singleWSD = (adaptiveGlobalAccumulation == 1
                             && (problemType.computeType != problemType.dType
                                 || problemType.activationType != ActivationType::None));
-                        if((singleWSD || sizeMapping.globalAccumulation == 2)
-                            && sizeMapping.globalAccumulation != 3)
+                        if((singleWSD || adaptiveGlobalAccumulation == 2)
+                            && adaptiveGlobalAccumulation != 3)
                             useWsC = true;
                     }
                     if(sizeMapping.isStreamK()
@@ -3727,11 +3733,11 @@ namespace TensileLite
                     bool useWsD = false;
                     if(gsu > 1 && !sizeMapping.isStreamK())
                     {
-                        bool singleWSD = (sizeMapping.globalAccumulation == 1
+                        bool singleWSD = (adaptiveGlobalAccumulation == 1
                             && (problemType.computeType != problemType.dType
                                 || problemType.activationType != ActivationType::None));
-                        if(singleWSD || sizeMapping.globalAccumulation == 2
-                           || sizeMapping.globalAccumulation == 3)
+                        if(singleWSD || adaptiveGlobalAccumulation == 2
+                           || adaptiveGlobalAccumulation == 3)
                             useWsD = true;
                     }
                     if(sizeMapping.isStreamK()

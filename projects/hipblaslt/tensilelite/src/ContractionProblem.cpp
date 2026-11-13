@@ -839,12 +839,29 @@ namespace TensileLite
 
     size_t ContractionProblemGemm::getAccumulation(Hardware const& hardware, SizeMapping const& sizeMapping, size_t gsu) const
     {
+        return getAccumulation(hardware,
+                               gsu,
+                               sizeMapping.globalAccumulation,
+                               sizeMapping.adaptiveGemmGSUA,
+                               sizeMapping.macroTile.x,
+                               sizeMapping.macroTile.y,
+                               sizeMapping.depthU);
+    }
+
+    size_t ContractionProblemGemm::getAccumulation(Hardware const& hardware,
+                                                   size_t          gsu,
+                                                   size_t          compiledAccumulation,
+                                                   int             adaptiveGemmGSUA,
+                                                   size_t          macroTileX,
+                                                   size_t          macroTileY,
+                                                   size_t          depthU) const
+    {
         size_t accumulation = 0;
 
         // If adaptiveGemmGSUA is 0, use the original accumulation
-        if(sizeMapping.adaptiveGemmGSUA == 0)
+        if(adaptiveGemmGSUA == 0)
         {
-            accumulation = sizeMapping.globalAccumulation;
+            accumulation = compiledAccumulation;
         }
         // If adaptiveGemmGSUA is not 0, use the adaptive accumulation
         else
@@ -867,11 +884,11 @@ namespace TensileLite
             for(size_t i = 0; i < m_batchSizes.size(); ++i)
                 batch *= m_batchSizes[i];
 
-            size_t m_tiles = CeilDivide(x, sizeMapping.macroTile.x);
-            size_t n_tiles = CeilDivide(y, sizeMapping.macroTile.y);
+            size_t m_tiles = CeilDivide(x, macroTileX);
+            size_t n_tiles = CeilDivide(y, macroTileY);
             size_t numTiles = m_tiles * n_tiles * batch;
             size_t numCUs   = pAMDGPU->computeUnitCount;
-            size_t itersPerTile = std::max(size_t(1), CeilDivide(z, sizeMapping.depthU));
+            size_t itersPerTile = std::max(size_t(1), CeilDivide(z, depthU));
 
             // TODO: benchmark more on the thresholds
             constexpr int MinItersForMB = 64; // DepthU-related: ceil(K/DepthU) >= this uses MB
@@ -889,13 +906,13 @@ namespace TensileLite
             }
             else
             {
-                accumulation = sizeMapping.globalAccumulation; // Default
+                accumulation = compiledAccumulation; // Default
             }
 
             static const char* envStr = std::getenv("TENSILE_ADAPTIVE_GEMM_LOG");
             if(envStr != NULL)
                 std::cout << "[AdaptiveGemmGSUA] accumulation is calculated: " << accumulation
-                          << " from original " << sizeMapping.globalAccumulation << std::endl;
+                          << " from original " << compiledAccumulation << std::endl;
         }
 
         return accumulation;

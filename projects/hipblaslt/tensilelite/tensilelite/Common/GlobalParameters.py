@@ -510,6 +510,7 @@ defaultInternalSupportParams = {
     # runs on; WGs launched past ProbeGrid then end.
     # Derived in Solution.py from EmitOccupancyProbe.
     "SupportOccupancyProbe": False,
+    "SupportAdaptiveGSUA": False,
     # Use GG as G's backend
     "UseUniversalArgs": True,
     "UseSFC": False,
