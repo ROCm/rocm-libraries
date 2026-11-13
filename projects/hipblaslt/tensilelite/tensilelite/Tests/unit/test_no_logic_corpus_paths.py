@@ -87,7 +87,7 @@ def test_no_test_builds_a_path_into_the_logic_corpus():
     offenders = {rel: lines for rel, lines in _offenders().items() if rel not in _ALLOWLIST}
     assert not offenders, (
         "These tests build their own path into the production logic corpus. Use a "
-        "fixture, a ValidCorpusConsistency check, or logic_corpus.require_logic_file:\n"
+        "fixture, a valid_corpus_consistency check, or logic_corpus.require_logic_file:\n"
         + "\n".join(f"  {rel}: lines {lines}" for rel, lines in sorted(offenders.items()))
     )
 

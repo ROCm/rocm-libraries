@@ -22,10 +22,10 @@
 #
 ################################################################################
 
-"""Characterization tests for Tensile.py L526 (if) and L529 (elif) config-file guards.
+"""Characterization tests for tensilelite/run.py L526 (if) and L529 (elif) config-file guards.
 
 Branch ID: 01e8ac7f371264a85285039d91ea87c8514acc62
-Source:    tensilelite/Tensile.py:529 (elif)
+Source:    tensilelite/run.py:529 (elif)
 Predicate: not altFormat and len(configPaths) != 1
 
 Inputs:
@@ -34,7 +34,7 @@ Inputs:
 
 Run-1 canonical contract (two test groups):
   (1) TestAltFormatRejectedHelper — pure extracted predicates, no argparse/filesystem.
-  (2) TestTensileArgparseGuards   — real Tensile(userArgs) entry calls; asserts that
+  (2) TestTensileArgparseGuards   — real main(userArgs) entry calls; asserts that
       L526/L529 printExit (sys.exit(-1)) fires or does NOT fire for each witness.
 
 CPU-only.  Deterministic.  Add-only.
@@ -119,11 +119,11 @@ class TestAltFormatRejectedHelper:
 
 
 # ---------------------------------------------------------------------------
-# (2) Real-entry pin tests — call tensilelite.Tensile(userArgs) and pin actual behavior
+# (2) Real-entry pin tests — call tensilelite.run.main(userArgs) and pin actual behavior
 # ---------------------------------------------------------------------------
 
 class TestTensileArgparseGuards:
-    """Real Tensile() entry-point tests — assert L526/L529 guards fire or do not fire.
+    """Real main() entry-point tests — assert L526/L529 guards fire or do not fire.
 
     Execution stops at the guard (printExit → sys.exit(-1)) for TRUE witnesses,
     or proceeds past the guard into deeper (file-based) parsing for FALSE witnesses.
@@ -132,7 +132,7 @@ class TestTensileArgparseGuards:
 
     @staticmethod
     def _userArgs(config_files: list, output_path: str, alternate_format: bool = False) -> list:
-        """Build a userArgs list accepted by argparse.parse_args() inside Tensile()."""
+        """Build a userArgs list accepted by argparse.parse_args() inside main()."""
         args = list(config_files) + [output_path]
         if alternate_format:
             args.append("--alternate-format")
@@ -142,20 +142,20 @@ class TestTensileArgparseGuards:
 
     def test_l529_default_format_two_configs_exits(self, tmp_path):
         """L529 TRUE (False,2): altFormat=False, n=2 → SystemExit(-1) from printExit."""
-        import tensilelite.Tensile as TM
+        import tensilelite.run as TM
 
         cfg1 = str(tmp_path / "c1.yaml")
         cfg2 = str(tmp_path / "c2.yaml")
         userArgs = self._userArgs([cfg1, cfg2], str(tmp_path / "out"))
 
         with pytest.raises(SystemExit) as exc_info:
-            TM.Tensile(userArgs)
+            TM.main(userArgs)
 
         assert exc_info.value.code == -1
 
     def test_l529_default_format_three_configs_exits(self, tmp_path):
         """L529 TRUE (False,3): altFormat=False, n=3 → SystemExit(-1) from printExit."""
-        import tensilelite.Tensile as TM
+        import tensilelite.run as TM
 
         cfg1 = str(tmp_path / "c1.yaml")
         cfg2 = str(tmp_path / "c2.yaml")
@@ -163,13 +163,13 @@ class TestTensileArgparseGuards:
         userArgs = self._userArgs([cfg1, cfg2, cfg3], str(tmp_path / "out"))
 
         with pytest.raises(SystemExit) as exc_info:
-            TM.Tensile(userArgs)
+            TM.main(userArgs)
 
         assert exc_info.value.code == -1
 
     def test_l526_alt_format_three_configs_exits(self, tmp_path):
         """L526 TRUE (True,3): altFormat=True, n=3 → SystemExit(-1) from printExit (sibling if)."""
-        import tensilelite.Tensile as TM
+        import tensilelite.run as TM
 
         cfg1 = str(tmp_path / "c1.yaml")
         cfg2 = str(tmp_path / "c2.yaml")
@@ -178,7 +178,7 @@ class TestTensileArgparseGuards:
                                   alternate_format=True)
 
         with pytest.raises(SystemExit) as exc_info:
-            TM.Tensile(userArgs)
+            TM.main(userArgs)
 
         assert exc_info.value.code == -1
 
@@ -191,7 +191,7 @@ class TestTensileArgparseGuards:
         (e.g. FileNotFoundError on the config YAML).  We assert exit code is
         NOT -1 (the guard exit code).
         """
-        import tensilelite.Tensile as TM
+        import tensilelite.run as TM
 
         cfg1 = str(tmp_path / "c1.yaml")
         cfg2 = str(tmp_path / "c2.yaml")
@@ -199,7 +199,7 @@ class TestTensileArgparseGuards:
                                   alternate_format=True)
 
         try:
-            TM.Tensile(userArgs)
+            TM.main(userArgs)
             # If we somehow return cleanly, guard definitely did not fire.
         except SystemExit as e:
             assert e.code != -1, (
@@ -216,13 +216,13 @@ class TestTensileArgparseGuards:
         Execution proceeds past L526/L529 and hits a deeper parsing error.
         We assert exit code is NOT -1.
         """
-        import tensilelite.Tensile as TM
+        import tensilelite.run as TM
 
         cfg1 = str(tmp_path / "c1.yaml")
         userArgs = self._userArgs([cfg1], str(tmp_path / "out"))
 
         try:
-            TM.Tensile(userArgs)
+            TM.main(userArgs)
         except SystemExit as e:
             assert e.code != -1, (
                 "L529 guard fired for (altFormat=False, n=1) but should not: "

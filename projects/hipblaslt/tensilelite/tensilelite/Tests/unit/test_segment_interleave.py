@@ -85,7 +85,6 @@ def test_vwb_halfvw_unaligned_uses_bcontig():
     # fA=33024, fB=28896 -> ldsBaseB=fA, A stride=fA+2fB, B not interleaved.
     assert o["ldsBaseB"] == 33024 and o["writeStrideBytes"] == 33024 + 2 * 28896
     assert o["bBaseline"] is True and r["blockSpan"] == 0
-    assert "BCONTIG" in r["segmentMap"]
 
 def test_bcontig_small_mt_aligned_applies():
     # Small footprint where fA+2fB stays in one segment: bcontig pushes A1 to the next segment
@@ -98,7 +97,6 @@ def test_bcontig_small_mt_aligned_applies():
     # fA=16512; A stride pushed to the segment boundary; B (fB=14448) stays contiguous/baseline.
     assert o["ldsBaseB"] == 16512 and o["writeStrideBytes"] == SEG and o["bBaseline"] is True
     assert r["blockSpan"] == SEG + 16512               # A1 ends at base+pre+fA
-    assert "BCONTIG-ALIGNED" in r["segmentMap"]
 
 def test_bcontig_small_mt_auto_skips():
     # Auto (-1) refuses the LDS-growing bcontig-aligned branch (like split aligned).
@@ -109,6 +107,24 @@ def test_bcontig_small_mt_allows_pgr1():
     r = evaluate(_vw8_state(MIWaveTile=[8, 7], DepthU=64, VectorWidthB=1,
                             PrefetchGlobalRead=1, LDSSegmentInterleave=1))
     assert r["applicable"] is True and r["aligned"] is True
+
+
+@pytest.mark.parametrize("whole_b", [False, True])
+@pytest.mark.parametrize("base,depth,aligned,segments", [
+    (SEG, 64, True, (1, 2)),
+    (2 * SEG, 64, True, (2, 3)),
+    (SEG + 48 * 1024, 64, False, (1, 2)),
+    (2 * SEG, 128, False, (2, 3)),
+])
+def test_component_selection_uses_absolute_segments(whole_b, base, depth, aligned, segments):
+    state = _vw8_state(LdsOffsetA=base, DepthU=depth, PrefetchGlobalRead=2,
+                       LDSSegmentInterleave=1, MIWaveTile=[8, 7 if whole_b else 8],
+                       VectorWidthB=1 if whole_b else 4)
+    result = evaluate(state)
+    assert result["applicable"] is True
+    assert result["aligned"] is aligned
+    a1 = base + result["offsets"]["writeStrideBytes"]
+    assert (base // SEG, a1 // SEG) == segments
 
 def test_vwa_smaller_than_half_skips():
     # VWA=2 (numVec=4) is smaller than WaveTileA/2 -> TDMSplit's 2-way split can't place it -> reject.
@@ -143,7 +159,6 @@ def test_aligned_applies_small_mt():
                             "footprintPacked": True}
     assert r["blockSpan"] == SEG + 16512 + 16512    # base(0) + pre(SEG) + fA + fB
     assert _aligned_tiles_disjoint(r, 16512, 16512)
-    assert "ALIGNED" in r["segmentMap"]
 
 def test_aligned_halfvw_vwb_applies():
     # VWB=WaveTileB/2 is supported on the aligned branch too (per-vIdx component jump + enough
@@ -264,11 +279,11 @@ def test_asym_componentsplit_tdmsplit():
 
 def test_asym_componentsplit_aligned_labels_compaxis():
     # componentSplit that falls into the aligned branch (small DepthU -> both components fit one
-    # segment) must report compaxis, not portaxis, in reason/segmentMap and in the PGR reject.
+    # segment) must report compaxis, not portaxis, in reason and in the PGR reject.
     r = evaluate(_vw8_state(MIWaveGroup=[4, 1], TDMSplit=1, VectorWidthA=4, DepthU=64,
                             PrefetchGlobalRead=2, LDSSegmentInterleave=1))
     assert r["applicable"] is True and r["aligned"] is True
-    assert r["reason"] == "compaxis-asym-aligned" and "COMPAXIS-ALIGNED" in r["segmentMap"]
+    assert r["reason"] == "compaxis-asym-aligned"
     assert r["offsets"].get("componentSplit") is True
     r = evaluate(_vw8_state(MIWaveGroup=[4, 1], TDMSplit=1, VectorWidthA=4, DepthU=64,
                             PrefetchGlobalRead=1, LDSSegmentInterleave=1))
@@ -794,6 +809,8 @@ def test_brotate_paired_buffers_read_write_and_swap_agree(make_state):
 @pytest.mark.parametrize("padding", [0, 16])
 @pytest.mark.parametrize("mx", [False, True])
 def test_brotate_reuses_common_physical_layout(make_state, depth, padding, mx):
+    from tensilelite.SolutionStructs.segment_interleave import _footprint
+
     s = make_state(DepthU=depth, LdsPadA=padding, LdsPadB=padding,
                    VectorWidthB=2 if make_state is _brot_state else 4,
                    MXScaleFormat="InMemorySwizzle",
@@ -809,7 +826,9 @@ def test_brotate_reuses_common_physical_layout(make_state, depth, padding, mx):
     physical = lambda offsets: {k: v for k, v in offsets.items() if k not in readKeys}
     assert physical(rotated) == physical(ordinary)
     assert "readAddressWindowsB" not in rotated
-    assert rotated["readStrideBytesB"] == s["LDSSegInterleaveOffsets"]["writeStrideBytes"]
+    # MXSA slots change physical spacing, while rotation retains the A/B half offset.
+    logicalStride = SEG if evaluate(s)["aligned"] else _footprint(s, "A") + _footprint(s, "B")
+    assert rotated["readStrideBytesB"] == logicalStride
     for tc in ("A", "B"):
         size = rotated["bufferStride" + tc]
         for buffer in (0, 1):
@@ -852,25 +871,38 @@ def test_brotate_paired_mx_copies_do_not_overlap_data(make_state, direct_a):
     s["LDSSegInterleaveOffsets"] = original["offsets"]
     assert b_rotate_reason(s) is None
     o = paired_buffer_offsets(s)
-    data_end = o["ldsBaseB"] + o["writeStrideBytes"] + 2 * o["bufferStrideB"]
-    regions = [(s["LdsOffsetA"], data_end)]
+    # Split scales occupy holes between A/B components. Check every allocation
+    # instead of treating the entire A/B address span as one occupied block.
+    regions = []
+    for tc in ("A", "B"):
+        for component in range(2):
+            for buf in range(2):
+                start = (o["ldsBase" + tc] + component * o["writeStrideBytes"]
+                         + buf * o["bufferStride" + tc])
+                regions.append((start, start + o["bufferStride" + tc]))
+    assert bool(o.get("mxsSplitA")) is not direct_a
     for tc in ("MXSA", "MXSB"):
         if tc == "MXSA" and direct_a:
             assert "ldsBaseMXSA" not in o
             continue
-        size = s["LdsNumElementsAligned" + tc]
+        split = tc == "MXSA"
+        size = (s["MacroTile0"] * (s["DepthU"] // 32) // 2
+                if split else s["LdsNumElementsAligned" + tc])
         assert o["bufferStride" + tc] == size
-        for buf in range(2):
-            start = o["ldsBase" + tc] + buf * size
-            regions.append((start, start + size))
+        for component in range(2 if split else 1):
+            base = o["ldsBase" + tc] + (component * o["mxsaStrideBytes"] if split else 0)
+            for buf in range(2):
+                start = base + buf * size
+                regions.append((start, start + size))
             # Per-wave TDM and per-lane local-read masks must both round-trip.
             for within in (0, size // 2, size - 1):
-                ping = o["ldsBase" + tc] + within
+                ping = base + within
                 mask = ping ^ (ping + size)
                 assert (ping ^ mask) == ping + size
                 assert ((ping + size) ^ mask) == ping
     regions.sort()
-    assert all(a[1] == b[0] for a, b in zip(regions, regions[1:]))
+    assert all(a[1] <= b[0] for a, b in zip(regions, regions[1:]))
+    assert regions[-1][1] == o["pairedUsedBytes"]
     one_scale_copy = (0 if direct_a else 2048) + 4096
     assert regions[-1][1] <= 2 * (s["LdsOffsetA_Blk"] + one_scale_copy)
     s["LDSSegInterleaveOffsets"] = o

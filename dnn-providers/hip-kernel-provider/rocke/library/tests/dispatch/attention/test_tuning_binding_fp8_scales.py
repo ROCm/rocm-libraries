@@ -10,7 +10,7 @@ import pytest
 
 import kernels.common.attention_unified as au
 from dispatch.attention import AttentionRequest, bindings, dispatch_attention
-from dispatch.attention.common import _problem
+from dispatch.attention.common import attention_problem
 
 
 @pytest.mark.parametrize(
@@ -48,7 +48,7 @@ def test_tuning_binding_forwards_fp8_kv_scales(arch, spec_id, monkeypatch):
         name: object()
         for name in ("q", "k", "v", "out", "cu_seqlens_q", "seqused_k", "block_table")
     }
-    tensors["problem"] = _problem(req)
+    tensors["problem"] = attention_problem(req)
     calls = []
     monkeypatch.setattr(
         au, "run_unified_attention_torch", lambda **kw: calls.append(kw)

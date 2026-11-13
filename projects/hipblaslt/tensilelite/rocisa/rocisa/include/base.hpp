@@ -220,8 +220,8 @@ namespace rocisa
         }
 
         // gfx1250 low-precision WMMA scaled-form workaround toggle. Set per build
-        // from the concrete arch name (true only for gfx1250-strict / gfx1250v0,
-        // whose V0 silicon needs v_wmma_scale_* with scale=0). Deliberately NOT
+        // from the concrete arch name (true only for gfx1250-strict, whose V0
+        // silicon needs v_wmma_scale_* with scale=0). Deliberately NOT
         // reset by setKernel: forceScaledWMMA() is evaluated at toString() time,
         // and intervening setKernel calls (e.g. activation codegen) must not clear
         // it. Defaults false, so base gfx1250 emits plain v_wmma_*.

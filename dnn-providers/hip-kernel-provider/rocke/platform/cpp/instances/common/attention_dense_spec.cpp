@@ -915,16 +915,38 @@ bool rocke_attention_dense_spec_preflight(const rocke_attention_dense_spec_t* s,
                         num,
                         ROCKE_ATTENTION_DENSE_INT32_LIMIT);
     }
-    const ExactProduct qo_elems({s->batch, s->seqlen_q, s->num_query_heads, s->head_size});
-    if(qo_elems.at_least((uint64_t)ROCKE_ATTENTION_DENSE_INT32_LIMIT))
+    /* A ragged Q goes through a buffer resource whose num_records AND voffset are both
+     * i32 BYTES, so the ceiling is half the element count the element-offset paths get.
+     * O stays element-addressed even here. */
+    if(s->ragged)
     {
-        char num[64];
-        qo_elems.str(num, sizeof(num));
-        ROCKE_SPEC_FAIL(reason,
-                        cap,
-                        "Q/O extent is %s elements, at or past the 32-bit addressing limit (%lld)",
-                        num,
-                        ROCKE_ATTENTION_DENSE_INT32_LIMIT);
+        const ExactProduct qo_bytes({s->batch, s->seqlen_q, s->num_query_heads, s->head_size, 2});
+        if(qo_bytes.at_least((uint64_t)ROCKE_ATTENTION_DENSE_INT32_LIMIT))
+        {
+            char num[64];
+            qo_bytes.str(num, sizeof(num));
+            ROCKE_SPEC_FAIL(
+                reason,
+                cap,
+                "Q/O extent is %s B, at or past the 32-bit buffer-resource limit (%lld B)",
+                num,
+                ROCKE_ATTENTION_DENSE_INT32_LIMIT);
+        }
+    }
+    else
+    {
+        const ExactProduct qo_elems({s->batch, s->seqlen_q, s->num_query_heads, s->head_size});
+        if(qo_elems.at_least((uint64_t)ROCKE_ATTENTION_DENSE_INT32_LIMIT))
+        {
+            char num[64];
+            qo_elems.str(num, sizeof(num));
+            ROCKE_SPEC_FAIL(
+                reason,
+                cap,
+                "Q/O extent is %s elements, at or past the 32-bit addressing limit (%lld)",
+                num,
+                ROCKE_ATTENTION_DENSE_INT32_LIMIT);
+        }
     }
     if(reason != NULL && cap > 0)
         reason[0] = '\0';
