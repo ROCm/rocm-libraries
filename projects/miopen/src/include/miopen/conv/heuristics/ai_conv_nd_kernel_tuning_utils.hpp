@@ -358,7 +358,12 @@ bool RunAIHeuristics(const SolverHeuristicConfig& solver_cfg,
             auto lazy_check   = [&](const std::string& base, int split_k, bool fp32_pass) -> bool {
                 if(is_deterministic && solver_cfg.uses_split_k && split_k != 1)
                     return false;
-                if(!solver_cfg.IsValidSplitK(split_k))
+                // Only gate on split_k for solvers that use it. Non-split-k solvers carry a bare
+                // kernel id (parse_kernel_id yields split_k 1), and IsValidSplitK accepts only 0 for
+                // them -- applying it here rejected every candidate and silently disabled the AI
+                // pick for 2D-Fwd, 3D-Fwd and 3D-Bwd. The pick below already forces split_k 0 for
+                // non-split-k solvers.
+                if(solver_cfg.uses_split_k && !solver_cfg.IsValidSplitK(split_k))
                     return false;
                 return ck_validator(base, split_k, fp32_pass);
             };
